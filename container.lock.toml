@@ -1,4 +1,4 @@
-schema = "fplinux.toolchains/v1"
+schema = "fplinux.container/v1"
 
 [oci]
 image = "localhost/fplinux-build:2026.05.1-r1"

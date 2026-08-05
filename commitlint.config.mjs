@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// The pinned toolchain installs the Node quality tools outside the source
+// The pinned container image installs the Node quality tools outside the source
 // tree, so resolve the shared preset from there when the local lookup fails.
-const TOOLCHAIN = "/opt/quality/node-tools/node_modules";
+const NODE_TOOLS = "/opt/quality/node-tools/node_modules";
 
 let conventional;
 try {
@@ -11,9 +11,9 @@ try {
     throw error;
   }
   const preset = (
-    await import(`${TOOLCHAIN}/@commitlint/config-conventional/lib/index.js`)
+    await import(`${NODE_TOOLS}/@commitlint/config-conventional/lib/index.js`)
   ).default;
-  const parserPath = `${TOOLCHAIN}/conventional-changelog-conventionalcommits/src/index.js`;
+  const parserPath = `${NODE_TOOLS}/conventional-changelog-conventionalcommits/src/index.js`;
   const parserFactory = (await import(parserPath)).default;
   conventional = {
     ...preset,

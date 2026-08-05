@@ -132,7 +132,7 @@ available.
 ```text
 fplinux             repository CLI entry point
 scripts/fplinux_cli shared validation, build and package orchestration
-toolchains/         the one pinned OCI build environment
+Containerfile       the one pinned OCI build environment
 buildroot-external/ shared Buildroot integration and packages
 bootstrap/          reusable freestanding pre-Linux UI primitives
 common/             shared post-kernel userspace and the shared RAM runner

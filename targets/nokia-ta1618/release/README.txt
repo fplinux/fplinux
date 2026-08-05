@@ -31,6 +31,6 @@ and then reinsert it. The next normal power-on uses the unchanged vendor
 firmware. Linux reboot, poweroff and PMIC-controlled shutdown are not qualified
 exit paths.
 
-BUILD-MANIFEST.json records the content-addressed workspace and toolchain
+BUILD-MANIFEST.json records the content-addressed workspace and container
 receipts together with bundled-file hashes. Exact pinned inputs are defined by
 the corresponding source snapshot and its lock files.

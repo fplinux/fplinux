@@ -118,7 +118,7 @@ RUN set -eux; \
     prettier --version; \
     markdownlint-cli2 --version
 
-COPY toolchains/quality/requirements.lock /opt/quality/requirements.lock
+COPY requirements.lock /opt/quality/requirements.lock
 RUN set -eux; \
     python3 -m venv /opt/quality/venv; \
     /opt/quality/venv/bin/pip install \
