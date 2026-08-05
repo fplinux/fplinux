@@ -1,0 +1,8 @@
+config BR2_PACKAGE_FPLINUX_CPUCLOCK
+	bool "fplinux-cpuclock"
+	help
+	  Measure the CPU clock on the phone by timing a chain of
+	  dependent integer additions, which retire at one per cycle
+	  on this core. It reads no register and trusts neither the
+	  device tree nor the vendor firmware, so it can be used to
+	  check a clock frequency that was only ever asserted.
