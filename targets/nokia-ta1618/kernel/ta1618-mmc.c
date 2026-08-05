@@ -172,8 +172,6 @@
 #define UMS9117_CMD_INDEX 0x10U
 #define UMS9117_CMD_DATA 0x20U
 
-#define UMS9117_COMMAND_OFFSET 2U
-
 #define UMS9117_HOST_CTRL1_DMA_SEL_MASK GENMASK(4, 3)
 #define UMS9117_HOST_CTRL1_WIDTH_MASK (BIT(5) | BIT(1))
 #define UMS9117_HOST_CTRL1_OWNED_MASK \
@@ -212,6 +210,15 @@
 #define UMS9117_POLL_DELAY_US 10U
 #define UMS9117_REQUEST_TIMEOUT_MS 1000U
 #define UMS9117_WRITE_REQUEST_TIMEOUT_MS 5000U
+/*
+ * Added per block on top of the fixed budget above. This watchdog only has to
+ * notice a controller that will never raise an interrupt again; the card's own
+ * timeout is enforced by the controller's data timeout counter. The figures are
+ * therefore far above what a transfer really costs at this bus width and clock
+ * and far below the worst case the card specification permits.
+ */
+#define UMS9117_READ_BLOCK_BUDGET_MS 10U
+#define UMS9117_WRITE_BLOCK_BUDGET_MS 50U
 #define UMS9117_INITIAL_CLOCKS_DELAY_MS 10U
 
 #define TA1618_SDIO0_SPI 57U
@@ -919,9 +926,18 @@ static int ums9117_set_card_clock(struct ta1618_sd_mmc *host, bool enable)
 	}
 
 	target = value;
-	target &= ~(UMS9117_CLOCK_DIVIDER_MASK | UMS9117_CLOCK_PROG_MODE |
-		    UMS9117_CLOCK_PLL_EN | UMS9117_CLOCK_CARD_EN |
-		    UMS9117_CLOCK_INT_STABLE | UMS9117_CLOCK_INT_EN);
+	/*
+	 * The data timeout field has to be cleared here as well. The width and
+	 * clock transition demands that it reads zero before it starts, but
+	 * programs a non-zero value itself, and nothing else on the way back
+	 * to the identification state ever clears it. Leaving it set would
+	 * make the transition fail for good after the core power-cycles the
+	 * slot, which is exactly the recovery a failed transfer relies on.
+	 */
+	target &= ~(UMS9117_CLOCK_DIVIDER_MASK | UMS9117_CLOCK_TIMEOUT_MASK |
+		    UMS9117_CLOCK_PROG_MODE | UMS9117_CLOCK_PLL_EN |
+		    UMS9117_CLOCK_CARD_EN | UMS9117_CLOCK_INT_STABLE |
+		    UMS9117_CLOCK_INT_EN);
 	target |= UMS9117_DIVIDER_ENCODED | UMS9117_CLOCK_INT_EN;
 	ta1618_writel(host, RES_CLOCK_RESET, target);
 	deadline = ktime_add_ms(ktime_get(), UMS9117_CLOCK_DEADLINE_MS);
@@ -1637,6 +1653,19 @@ static int ums9117_response_error(const struct mmc_command *cmd, u32 response)
 	return -EIO;
 }
 
+static unsigned int ums9117_request_deadline_ms(const struct mmc_command *cmd,
+						bool write)
+{
+	unsigned int base = write ? UMS9117_WRITE_REQUEST_TIMEOUT_MS :
+				    UMS9117_REQUEST_TIMEOUT_MS;
+	unsigned int per_block = write ? UMS9117_WRITE_BLOCK_BUDGET_MS :
+					 UMS9117_READ_BLOCK_BUDGET_MS;
+
+	if (!cmd->data)
+		return base;
+	return base + cmd->data->blocks * per_block;
+}
+
 static bool ums9117_is_write_data(const struct mmc_command *cmd)
 {
 	return cmd &&
@@ -1895,8 +1924,6 @@ static void ums9117_timeout_work(struct work_struct *work)
 		host->finish_mrq = mrq;
 		host->finish_width_acmd6 = host->active_width_acmd6;
 		host->active_width_acmd6 = false;
-		if (write_related)
-			WRITE_ONCE(host->fatal_error, true);
 	}
 	spin_unlock_irqrestore(&host->lock, flags);
 	if (!mrq)
@@ -1905,8 +1932,8 @@ static void ums9117_timeout_work(struct work_struct *work)
 		"software request watchdog fired: count=%u opcode=%u arg=0x%08x lba_valid=%u lba=%u cmd17_ordinal=%u deadline_ms=%u\n",
 		watchdog_count, last_opcode, last_argument,
 		last_lba_valid ? 1U : 0U, last_lba, last_cmd17_ordinal,
-		write_timed_out ? UMS9117_WRITE_REQUEST_TIMEOUT_MS :
-				  UMS9117_REQUEST_TIMEOUT_MS);
+		mrq ? ums9117_request_deadline_ms(mrq->cmd, write_related) :
+		      0U);
 	synchronize_irq(host->irq);
 
 	if (width_acmd6_timed_out) {
@@ -1925,17 +1952,27 @@ static void ums9117_timeout_work(struct work_struct *work)
 	}
 
 	if (write_related) {
-		if (!ums9117_wait_quiescent(
-			    host, UMS9117_WRITE_QUIESCE_DEADLINE_MS, &present))
+		/*
+		 * Only a bus that never settles justifies refusing all later
+		 * I/O. When the lines are quiet the card and the controller
+		 * are in a known state and the core recovers on its own, so
+		 * one late write must not close the slot: that would also
+		 * block the status and stop commands the recovery needs.
+		 */
+		if (!ums9117_wait_quiescent(host,
+					    UMS9117_WRITE_QUIESCE_DEADLINE_MS,
+					    &present)) {
+			WRITE_ONCE(host->fatal_error, true);
 			dev_err(host->dev,
-				"write-related timeout without confirmed quiescence: present_state=0x%08x; completing with an error anyway\n",
+				"write-related timeout without confirmed quiescence: present_state=0x%08x; blocking controller I/O until the slot is power-cycled\n",
 				present);
-		if (write_timed_out)
+		} else if (write_timed_out) {
 			dev_err(host->dev,
-				"CMD25 request timed out after admission; quiescence confirmed, completing with error and blocking controller I/O until physical power-cycle\n");
-		else
+				"write request timed out after admission; data lines quiescent, completing with an error and leaving the slot usable\n");
+		} else {
 			dev_err(host->dev,
-				"post-write CMD13 timed out; data lines quiescent, completing with error and blocking controller I/O until physical power-cycle\n");
+				"post-write status command timed out; data lines quiescent, completing with an error and leaving the slot usable\n");
+		}
 		if (host->data_mapped)
 			ums9117_unmap_data(host);
 		ums9117_set_request_error(mrq, -ETIMEDOUT);
@@ -2320,18 +2357,20 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	host->active_width_acmd6 = width_acmd6;
 	ums9117_audit_command_locked(host, cmd, width_acmd6);
 	ta1618_writel(host, RES_ARGUMENT, cmd->arg);
-	schedule_delayed_work(
-		&host->timeout_work,
-		msecs_to_jiffies(write_request ?
-					 UMS9117_WRITE_REQUEST_TIMEOUT_MS :
-					 UMS9117_REQUEST_TIMEOUT_MS));
+	schedule_delayed_work(&host->timeout_work,
+			      msecs_to_jiffies(ums9117_request_deadline_ms(
+				      cmd, write_request)));
 	ta1618_writel(host, RES_INTERRUPT_SIGNAL_ENABLE, signal);
-	if (data)
-		ta1618_writel(host, RES_TRANSFER_COMMAND,
-			      ((u32)command << 16) | transfer);
-	else
-		writew(command, host->regs[RES_TRANSFER_COMMAND] +
-					UMS9117_COMMAND_OFFSET);
+	/*
+	 * A command without data is issued by writing the whole word with a
+	 * zero transfer half, not by writing the command half on its own. That
+	 * half is sticky, and after a multi-block transfer it still selects an
+	 * automatic stop command and multiple blocks. Leaving it behind would
+	 * offer that to the very next command, which after a write is always
+	 * the status poll.
+	 */
+	ta1618_writel(host, RES_TRANSFER_COMMAND,
+		      ((u32)command << 16) | (data ? transfer : 0U));
 	spin_unlock_irqrestore(&host->lock, flags);
 	return;
 
@@ -2424,11 +2463,18 @@ static void ums9117_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 			 * reason the latches existed; clearing them here is
 			 * what lets the core recover a slot by power-cycling
 			 * it instead of needing the battery pulled.
+			 *
+			 * The outstanding post-write status obligation goes
+			 * with them. A card that lost its rails is no longer
+			 * programming anything, and carrying the obligation
+			 * across would reject the very first command of the
+			 * next identification and deadlock the slot.
 			 */
 			spin_lock_irqsave(&host->lock, flags);
 			host->fatal_error = false;
 			host->width_switch_fatal = false;
 			host->terminal_cleanup_hold = false;
+			host->write_status_pending = false;
 			spin_unlock_irqrestore(&host->lock, flags);
 		}
 		break;

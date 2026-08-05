@@ -34,18 +34,19 @@ byte, so the driver programs the gate, reset, clock selector, pin and analog
 rail recipe that was proven on this board.
 
 What works: a card that is already inserted when Linux starts is identified,
-switched to a 4-bit bus at 13 MHz, and read and written one 512-byte block at
-a time. A FAT32 partition mounts read-write, and files survive an unmount and
-a remount byte for byte.
+switched to a 4-bit bus at 13 MHz, and read and written in transfers of up to
+256 blocks, with the controller issuing the stop command itself. A FAT32
+partition mounts read-write, and files survive an unmount and a remount byte
+for byte.
 
 What is deliberately absent:
 
 - **Hot-swap.** The board does have a card-detect pin, but this driver never
   reads it. The card must be inserted before Linux starts, and removing it
   while mounted is not supported.
-- **Speed.** Every transfer is a single block, so the card runs far below what
-  the hardware can do. Multi-block transfers and a faster bus are proven on
-  this board but are not part of this driver yet.
+- **Bus speed.** The card runs at 13 MHz. A faster bus is proven on this board
+  but is not part of this driver yet, so the card still reaches roughly half of
+  what the wire could carry.
 - **Erase and discard.** Erase, discard, lock and write-protect commands are
   still refused before they can reach the controller.
 
@@ -56,9 +57,10 @@ tree that would reach it. The host driver only ever writes the set and clear
 aliases of the peripheral gate and reset banks, so it cannot disturb a
 neighbouring controller even transiently.
 
-One detail is still unconfirmed on hardware: the interrupt number follows the
-same numbering the system timer and the USB controller already use on this
-board, but this controller's own interrupt has not yet been observed live.
+The controller raises its own interrupt on the line the device tree names, and
+that line has been counted live in `/proc/interrupts` on the phone, so the
+numbering this board uses for the system timer and the USB controller holds
+here too.
 
 ## Hardware support
 
@@ -78,7 +80,7 @@ that the stated limitation or current qualification gap still applies.
 | Physical keypad                   | Supported     | Polled matrix plus separate physical 8 key through analog EIC9/ADI |
 | USB device mode                   | Supported     | MUSB peripheral mode with `g_serial` at USB ID `0525:a4a6`         |
 | USB host mode                     | Not supported | The phone target enables peripheral mode only                      |
-| microSD card                      | Supported     | 4-bit 13 MHz single-block reads and writes; no hot-swap            |
+| microSD card                      | Supported     | 4-bit 13 MHz multi-block reads and writes; no hot-swap             |
 | Internal flash access             | Not supported | Linux does not expose phone storage                                |
 | Audio                             | Not supported | No speaker, headphone or microphone driver is implemented          |
 | Modem, calls, SMS and mobile data | Not supported | Baseband interfaces are not implemented                            |
