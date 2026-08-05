@@ -50,6 +50,41 @@
 			      <0x70b00000 0x00001000>;
 		};
 
+		mmc@20e00000 {
+			compatible = "fplinux,ta1618-mmc";
+			reg = <0x20e00000 0x4>, <0x20e01000 0x4>, <0x20e02000 0x4>,
+			      <0x20e00004 0x4>, <0x20e01004 0x4>, <0x20e02004 0x4>,
+			      <0x2150006c 0x4>,
+			      <0x20300000 0x4>, <0x20300004 0x4>, <0x20300024 0x4>,
+			      <0x20300028 0x4>, <0x2030002c 0x4>, <0x20300008 0x4>,
+			      <0x2030000c 0x4>, <0x20300010 0x4>, <0x20300014 0x4>,
+			      <0x20300018 0x4>, <0x2030001c 0x4>, <0x20300030 0x4>,
+			      <0x20300034 0x4>, <0x20300038 0x4>, <0x20300054 0x4>,
+			      <0x20300058 0x4>, <0x2030005c 0x4>, <0x203000fc 0x4>,
+			      <0x402a0000 0x4>,
+			      <0x402a0128 0x4>, <0x402a0528 0x4>, <0x402a012c 0x4>,
+			      <0x402a052c 0x4>, <0x402a0134 0x4>, <0x402a0534 0x4>,
+			      <0x402a0120 0x4>, <0x402a0520 0x4>, <0x402a0124 0x4>,
+			      <0x402a0524 0x4>, <0x402a0130 0x4>, <0x402a0530 0x4>,
+			      /* Shared with the keypad through the hardware ADI user lock. */
+			      <0x40600000 0x400>, <0x40608000 0x1000>;
+			reg-names = "gate-state", "gate-set", "gate-clear",
+				    "ap-reset-state", "ap-reset-set", "ap-reset-clear",
+				    "ap-clock-selector", "block-count", "block-size",
+				    "present-state", "host-control1",
+				    "clock-timeout-reset", "argument",
+				    "transfer-command", "response0", "response1",
+				    "response2", "response3", "interrupt-status",
+				    "interrupt-status-enable", "interrupt-signal-enable",
+				    "adma-error", "adma2-address-low",
+				    "adma2-address-high", "host-version-slot-int",
+				    "pwr-pad-ctl", "cmd-mux", "cmd-pad", "d0-mux",
+				    "d0-pad", "clk-mux", "clk-pad", "d3-mux", "d3-pad",
+				    "d2-mux", "d2-pad", "d1-mux", "d1-pad",
+				    "adi-controller", "analog-slave";
+			interrupts = <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
+		};
+
 		keypad@40250000 {
 			compatible = "fplinux,ta1618-keypad";
 			reg = <0x40250000 0x00000100>,
