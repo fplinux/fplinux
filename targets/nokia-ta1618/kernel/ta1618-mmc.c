@@ -135,16 +135,28 @@
 #define UMS9117_INT_DATA_TIMEOUT 0x00100000U
 #define UMS9117_INT_DATA_CRC 0x00200000U
 #define UMS9117_INT_DATA_END_BIT 0x00400000U
+/*
+ * A failed automatic CMD12 is reported only here. Without this bit a stop
+ * command that the controller issues on its own could fail unnoticed, so the
+ * bit is owned and acknowledged even while multi-block transfers are refused.
+ */
+#define UMS9117_INT_AUTO_CMD12_ERROR 0x01000000U
+/*
+ * Host version 4 enabled, CMD23 not enabled, and every automatic command
+ * error bit clear. This is what the board leaves behind after a reset.
+ */
+#define UMS9117_HOST_CTRL2_EXPECTED 0x10000000U
 #define UMS9117_INT_ADMA_ERROR 0x02000000U
 #define UMS9117_INT_RESPONSE_ERROR 0x08000000U
 #define UMS9117_INT_AXI_RESPONSE_ERROR 0x10000000U
-#define UMS9117_STATUS_ENABLE_MASK 0x1a7f0003U
+#define UMS9117_STATUS_ENABLE_MASK 0x1b7f0003U
 #define UMS9117_OWNED_STATUS_MASK UMS9117_STATUS_ENABLE_MASK
 #define UMS9117_DETAIL_ERROR_MASK                                              \
 	(UMS9117_INT_TIMEOUT | UMS9117_INT_CRC | UMS9117_INT_END_BIT |         \
 	 UMS9117_INT_INDEX | UMS9117_INT_DATA_TIMEOUT | UMS9117_INT_DATA_CRC | \
-	 UMS9117_INT_DATA_END_BIT | UMS9117_INT_ADMA_ERROR |                   \
-	 UMS9117_INT_RESPONSE_ERROR | UMS9117_INT_AXI_RESPONSE_ERROR)
+	 UMS9117_INT_DATA_END_BIT | UMS9117_INT_AUTO_CMD12_ERROR |             \
+	 UMS9117_INT_ADMA_ERROR | UMS9117_INT_RESPONSE_ERROR |                 \
+	 UMS9117_INT_AXI_RESPONSE_ERROR)
 #define UMS9117_SIGNAL_COMMAND \
 	(UMS9117_INT_RESPONSE | UMS9117_DETAIL_ERROR_MASK)
 #define UMS9117_SIGNAL_DATA (UMS9117_INT_TRANSFER | UMS9117_DETAIL_ERROR_MASK)
@@ -157,6 +169,7 @@
 #define UMS9117_CMD_CRC 0x08U
 #define UMS9117_CMD_INDEX 0x10U
 #define UMS9117_CMD_DATA 0x20U
+
 #define UMS9117_COMMAND_OFFSET 2U
 
 #define UMS9117_HOST_CTRL1_DMA_SEL_MASK GENMASK(4, 3)
@@ -168,8 +181,16 @@
 #define UMS9117_HOST_CTRL1_4BIT_ADMA2 0x00000012U
 #define UMS9117_TRANSFER_READ_ADMA2 0x0013U
 #define UMS9117_TRANSFER_WRITE_ADMA2 0x0003U
-#define UMS9117_ADMA2_ATTR 0x0023U
+/*
+ * Every descriptor but the last carries valid data and continues the chain;
+ * the last one additionally ends the transfer.
+ */
+#define UMS9117_ADMA2_ATTR_TRANSFER 0x0021U
+#define UMS9117_ADMA2_ATTR_TRANSFER_END 0x0023U
 #define UMS9117_ADMA2_DESC_SIZE 8U
+#define UMS9117_ADMA2_DESC_COUNT 32U
+#define UMS9117_ADMA2_TABLE_SIZE \
+	(UMS9117_ADMA2_DESC_COUNT * UMS9117_ADMA2_DESC_SIZE)
 
 #define UMS9117_RESET_POLLS 64U
 #define UMS9117_CLOCK_DEADLINE_MS 10U
@@ -197,7 +218,9 @@ static_assert(((((u32)MMC_WRITE_BLOCK << 8) | UMS9117_RESP_SHORT |
 		UMS9117_CMD_CRC | UMS9117_CMD_INDEX | UMS9117_CMD_DATA)
 		       << 16 |
 	       UMS9117_TRANSFER_WRITE_ADMA2) == 0x183a0003U);
-static_assert(UMS9117_ADMA2_ATTR == 0x0023U);
+static_assert(UMS9117_ADMA2_ATTR_TRANSFER == 0x0021U);
+static_assert(UMS9117_ADMA2_ATTR_TRANSFER_END == 0x0023U);
+static_assert(UMS9117_ADMA2_TABLE_SIZE == 256U);
 static_assert(UMS9117_HOST_CTRL1_WIDTH_MASK == 0x00000022U);
 static_assert(UMS9117_HOST_CTRL1_4BIT_ADMA2 == 0x00000012U);
 static_assert(UMS9117_13MHZ_DIVIDER_ENCODED == 0x00000100U);
@@ -252,6 +275,7 @@ enum ta1618_resource_index {
 	RES_D1_PAD,
 	RES_ADI,
 	RES_ANALOG,
+	RES_HOST_CONTROL2,
 	RES_COUNT,
 };
 
@@ -302,6 +326,7 @@ static const struct ta1618_resource_definition ta1618_resources[RES_COUNT] = {
 	{ "d1-pad", 0x402a0530U, TA1618_REG_SIZE },
 	{ "adi-controller", 0x40600000U, TA1618_ADI_SIZE },
 	{ "analog-slave", 0x40608000U, TA1618_ANALOG_SIZE },
+	{ "host-control2", 0x2030003cU, TA1618_REG_SIZE },
 };
 
 struct ta1618_pin_definition {
@@ -372,6 +397,7 @@ struct ta1618_mmc_audit {
 	u32 cmd18_count;
 	u32 cmd25_count;
 	u32 max_data_blocks;
+	u32 max_descriptors;
 	u32 irq_count;
 	u32 irq_error_count;
 	u32 irq_crc_count;
@@ -379,6 +405,8 @@ struct ta1618_mmc_audit {
 	u32 irq_timeout_count;
 	u32 irq_command_timeout_count;
 	u32 irq_data_timeout_count;
+	u32 irq_auto_cmd12_count;
+	u32 host_control2_after_reset;
 	u32 irq_adma_error_count;
 	u32 watchdog_timeout_count;
 	u32 last_irq_raw_status;
@@ -432,10 +460,11 @@ struct ta1618_sd_mmc {
 	bool active_width_acmd6;
 	bool finish_width_acmd6;
 
-	struct ums9117_adma2_desc *descriptor;
-	dma_addr_t descriptor_dma;
+	struct ums9117_adma2_desc *descriptors;
+	dma_addr_t descriptors_dma;
 	bool data_mapped;
 	enum dma_data_direction dma_direction;
+	unsigned int mapped_nents;
 	unsigned int mapped_sg_len;
 	size_t data_length;
 
@@ -526,9 +555,12 @@ static void ums9117_audit_command_locked(struct ta1618_sd_mmc *host,
 	host->audit.last_argument = cmd->arg;
 	host->audit.last_lba_valid = false;
 	host->audit.last_lba = 0;
-	if (cmd->data)
+	if (cmd->data) {
 		host->audit.max_data_blocks =
 			max(host->audit.max_data_blocks, cmd->data->blocks);
+		host->audit.max_descriptors =
+			max(host->audit.max_descriptors, host->mapped_nents);
+	}
 	switch (cmd->opcode) {
 	case MMC_APP_CMD:
 		host->audit.cmd55_attempt_count++;
@@ -579,6 +611,8 @@ static void ums9117_audit_irq_locked(struct ta1618_sd_mmc *host, u32 status,
 		host->audit.irq_command_timeout_count++;
 	if (status & UMS9117_INT_DATA_TIMEOUT)
 		host->audit.irq_data_timeout_count++;
+	if (status & UMS9117_INT_AUTO_CMD12_ERROR)
+		host->audit.irq_auto_cmd12_count++;
 	if (status & UMS9117_INT_ADMA_ERROR)
 		host->audit.irq_adma_error_count++;
 }
@@ -982,6 +1016,21 @@ static int ta1618_activate_platform(struct ta1618_sd_mmc *host)
 	ret = ums9117_reset_controller(host);
 	if (ret)
 		return ret;
+	/*
+	 * Read only after the reset, so the value describes the state the
+	 * driver actually starts from rather than whatever the boot loader
+	 * left behind. Nothing here is programmed: an automatic CMD12 needs
+	 * host version 4 mode, which this driver inherits and never sets, so
+	 * an unexpected value is recorded and warned about rather than
+	 * treated as a probe failure.
+	 */
+	host->audit.host_control2_after_reset =
+		ta1618_readl(host, RES_HOST_CONTROL2);
+	if (host->audit.host_control2_after_reset !=
+	    UMS9117_HOST_CTRL2_EXPECTED)
+		dev_warn(host->dev,
+			 "unexpected host control 2 after reset: 0x%08x\n",
+			 host->audit.host_control2_after_reset);
 	ret = ta1618_configure_pins(host);
 	if (ret)
 		return ret;
@@ -1168,6 +1217,7 @@ static void ums9117_unmap_data(struct ta1618_sd_mmc *host)
 		dma_unmap_sg(host->dev, data->sg, host->mapped_sg_len,
 			     host->dma_direction);
 	host->data_mapped = false;
+	host->mapped_nents = 0;
 	host->mapped_sg_len = 0;
 	host->data_length = 0;
 }
@@ -1179,8 +1229,11 @@ static int ums9117_prepare_data(struct ta1618_sd_mmc *host,
 	struct scatterlist *sg;
 	enum dma_data_direction direction;
 	dma_addr_t address;
+	size_t total_expected;
 	size_t length;
+	size_t total;
 	int mapped;
+	int i;
 
 	if (data->flags == MMC_DATA_WRITE) {
 		if (cmd->opcode != MMC_WRITE_BLOCK || data->blocks != 1 ||
@@ -1195,29 +1248,48 @@ static int ums9117_prepare_data(struct ta1618_sd_mmc *host,
 			return -EOPNOTSUPP;
 		direction = DMA_FROM_DEVICE;
 	}
-	length = data->blksz;
+	total_expected = (size_t)data->blocks * data->blksz;
 	mapped = dma_map_sg(host->dev, data->sg, data->sg_len, direction);
-	if (mapped != 1) {
-		if (mapped > 0)
-			dma_unmap_sg(host->dev, data->sg, data->sg_len,
-				     direction);
+	if (mapped <= 0)
 		return mapped < 0 ? mapped : -EIO;
-	}
-	sg = data->sg;
-	address = sg_dma_address(sg);
-	if (sg_dma_len(sg) < length ||
-	    !ta1618_dma_address_valid(address, length)) {
+	if (mapped > (int)UMS9117_ADMA2_DESC_COUNT) {
 		dma_unmap_sg(host->dev, data->sg, data->sg_len, direction);
-		return -ERANGE;
+		return -EOPNOTSUPP;
 	}
 
-	host->descriptor->attr = cpu_to_le16(UMS9117_ADMA2_ATTR);
-	host->descriptor->length = cpu_to_le16(length);
-	host->descriptor->address = cpu_to_le32((u32)address);
+	memset(host->descriptors, 0, UMS9117_ADMA2_TABLE_SIZE);
+	total = 0;
+	for_each_sg(data->sg, sg, mapped, i) {
+		address = sg_dma_address(sg);
+		length = sg_dma_len(sg);
+		if (!length || length > host->mmc->max_seg_size ||
+		    !ta1618_dma_address_valid(address, length)) {
+			dma_unmap_sg(host->dev, data->sg, data->sg_len,
+				     direction);
+			return -ERANGE;
+		}
+		host->descriptors[i].attr = cpu_to_le16(
+			i == mapped - 1 ? UMS9117_ADMA2_ATTR_TRANSFER_END :
+					  UMS9117_ADMA2_ATTR_TRANSFER);
+		host->descriptors[i].length = cpu_to_le16(length);
+		host->descriptors[i].address = cpu_to_le32((u32)address);
+		total += length;
+	}
+	/*
+	 * The controller stops after block count times block size, so a
+	 * scatterlist that does not add up to exactly that would silently
+	 * transfer the wrong bytes rather than fail.
+	 */
+	if (total != total_expected) {
+		dma_unmap_sg(host->dev, data->sg, data->sg_len, direction);
+		return -EIO;
+	}
+
 	host->data_mapped = true;
 	host->dma_direction = direction;
+	host->mapped_nents = mapped;
 	host->mapped_sg_len = data->sg_len;
-	host->data_length = length;
+	host->data_length = total;
 	return 0;
 }
 
@@ -1641,16 +1713,14 @@ static void ums9117_finish_work(struct work_struct *work)
 
 	if (host->data_mapped)
 		ums9117_unmap_data(host);
-	if (error && ((cmd->opcode == MMC_WRITE_BLOCK && cmd->data &&
-		       cmd->data->flags == MMC_DATA_WRITE) ||
+	if (error && (ums9117_is_cmd24_write(cmd) ||
 		      (READ_ONCE(host->write_status_pending) &&
 		       cmd->opcode == MMC_SEND_STATUS))) {
 		WRITE_ONCE(host->fatal_error, true);
 		dev_err(host->dev,
 			"write completion failed; blocking further controller I/O: %d\n",
 			error);
-	} else if (!error && cmd->opcode == MMC_WRITE_BLOCK && cmd->data &&
-		   cmd->data->flags == MMC_DATA_WRITE) {
+	} else if (!error && ums9117_is_cmd24_write(cmd)) {
 		WRITE_ONCE(host->write_status_pending, true);
 	} else if (!error && READ_ONCE(host->write_status_pending) &&
 		   cmd->opcode == MMC_SEND_STATUS &&
@@ -1661,7 +1731,8 @@ static void ums9117_finish_work(struct work_struct *work)
 		ums9117_set_request_error(mrq, error);
 	else if (cmd->data) {
 		cmd->data->error = 0;
-		cmd->data->bytes_xfered = cmd->data->blksz;
+		cmd->data->bytes_xfered =
+			(unsigned int)cmd->data->blksz * cmd->data->blocks;
 	}
 	cmd->error = error;
 
@@ -1773,10 +1844,10 @@ static void ums9117_timeout_work(struct work_struct *work)
 				present);
 		if (write_timed_out)
 			dev_err(host->dev,
-				"CMD24 request timed out after admission; quiescence confirmed, completing with error and blocking controller I/O until physical power-cycle\n");
+				"CMD25 request timed out after admission; quiescence confirmed, completing with error and blocking controller I/O until physical power-cycle\n");
 		else
 			dev_err(host->dev,
-				"post-CMD24 CMD13 timed out; data lines quiescent, completing with error and blocking controller I/O until physical power-cycle\n");
+				"post-write CMD13 timed out; data lines quiescent, completing with error and blocking controller I/O until physical power-cycle\n");
 		if (host->data_mapped)
 			ums9117_unmap_data(host);
 		ums9117_set_request_error(mrq, -ETIMEDOUT);
@@ -1803,9 +1874,15 @@ static void ums9117_timeout_work(struct work_struct *work)
 				host, "timed-out transfer never quiesced",
 				-ETIMEDOUT);
 		} else {
-			WRITE_ONCE(host->fatal_error, true);
+			/*
+			 * Quiet lines mean the card and the controller are in
+			 * a known state. The core recovers a stalled transfer
+			 * on its own with CMD13, then CMD12, and finally a
+			 * power cycle of the slot, so one late transfer is no
+			 * reason to refuse every later request as well.
+			 */
 			dev_err(host->dev,
-				"request timed out after accepted ACMD6; controller I/O is blocked until the slot is power-cycled\n");
+				"request timed out after accepted ACMD6; data lines quiescent, completing with an error and leaving the slot usable\n");
 		}
 	} else {
 		mutex_lock(&host->state_mutex);
@@ -2096,13 +2173,13 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 		control &= ~UMS9117_HOST_CTRL1_DMA_SEL_MASK;
 		control |= UMS9117_HOST_CTRL1_ADMA2;
 		ta1618_writel(host, RES_HOST_CONTROL1, control);
-		ta1618_writel(host, RES_BLOCK_COUNT, 1);
+		ta1618_writel(host, RES_BLOCK_COUNT, data->blocks);
 		ta1618_writel(host, RES_BLOCK_SIZE, data->blksz);
 		dma_wmb();
 		/* UMS9117 qualification requires high then low ADMA address writes. */
 		ta1618_writel(host, RES_ADMA_ADDRESS_HIGH, 0);
 		ta1618_writel(host, RES_ADMA_ADDRESS_LOW,
-			      (u32)host->descriptor_dma);
+			      (u32)host->descriptors_dma);
 		command_flags |= UMS9117_CMD_DATA;
 		signal = UMS9117_SIGNAL_DATA;
 	} else {
@@ -2375,7 +2452,7 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 
 	len += sysfs_emit_at(
 		buf, len,
-		"schema=fplinux.ta1618-sd-perf-4bit-13mhz-audit/v2\n");
+		"schema=fplinux.ta1618-sd-perf-4bit-13mhz-audit/v3\n");
 	len += sysfs_emit_at(
 		buf, len,
 		"profile=sd-perf-4bit-13mhz-lab identification_width=1 read_only=0 caps_4bit=1 caps_highspeed=0 caps_uhs=0 caps_cmd23=0 caps_8bit=0 voltage_switch=0 tuning=0\n");
@@ -2430,6 +2507,11 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		"commands=cmd17:%u,cmd24:%u,cmd18:%u,cmd25:%u,max_blocks:%u\n",
 		audit.cmd17_count, audit.cmd24_count, audit.cmd18_count,
 		audit.cmd25_count, audit.max_data_blocks);
+	len += sysfs_emit_at(buf, len,
+			     "descriptors=table:%u,capacity:%u,max_used:%u\n",
+			     (u32)UMS9117_ADMA2_TABLE_SIZE,
+			     (u32)UMS9117_ADMA2_DESC_COUNT,
+			     audit.max_descriptors);
 	len += sysfs_emit_at(
 		buf, len,
 		"last_command=valid:%u,opcode:%u,arg:0x%08x,lba_valid:%u,lba:%u,cmd17_ordinal:%u\n",
@@ -2438,10 +2520,13 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		audit.last_lba, audit.last_cmd17_ordinal);
 	len += sysfs_emit_at(
 		buf, len,
-		"irq=count:%u,error:%u,crc:%u,end_bit:%u,timeout:%u,adma:%u\n",
+		"irq=count:%u,error:%u,crc:%u,end_bit:%u,timeout:%u,adma:%u,auto_cmd12:%u\n",
 		audit.irq_count, audit.irq_error_count, audit.irq_crc_count,
 		audit.irq_end_bit_count, audit.irq_timeout_count,
-		audit.irq_adma_error_count);
+		audit.irq_adma_error_count, audit.irq_auto_cmd12_count);
+	len += sysfs_emit_at(
+		buf, len, "host_control2=after_reset:0x%08x,expected:0x%08x\n",
+		audit.host_control2_after_reset, UMS9117_HOST_CTRL2_EXPECTED);
 	len += sysfs_emit_at(
 		buf, len,
 		"timeouts=command_irq:%u,command_mask:0x%08x,data_irq:%u,data_mask:0x%08x,software_watchdog:%u\n",
@@ -2566,15 +2651,15 @@ static int ums9117_ta1618_mmc_probe(struct platform_device *pdev)
 	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
 	if (ret)
 		goto out_free_host;
-	host->descriptor =
-		dma_alloc_coherent(&pdev->dev, UMS9117_ADMA2_DESC_SIZE,
-				   &host->descriptor_dma, GFP_KERNEL);
-	if (!host->descriptor) {
+	host->descriptors =
+		dma_alloc_coherent(&pdev->dev, UMS9117_ADMA2_TABLE_SIZE,
+				   &host->descriptors_dma, GFP_KERNEL);
+	if (!host->descriptors) {
 		ret = -ENOMEM;
 		goto out_free_host;
 	}
-	if (!ta1618_dma_address_valid(host->descriptor_dma,
-				      UMS9117_ADMA2_DESC_SIZE)) {
+	if (!ta1618_dma_address_valid(host->descriptors_dma,
+				      UMS9117_ADMA2_TABLE_SIZE)) {
 		ret = -ERANGE;
 		goto out_free_descriptor;
 	}
@@ -2611,8 +2696,8 @@ static int ums9117_ta1618_mmc_probe(struct platform_device *pdev)
 	host->audit_file_created = true;
 	dev_notice(
 		&pdev->dev,
-		"registered single-block 4-bit 13MHz UMS9117 SDIO0 MMC host on SPI57; identification 1-bit at %u Hz, 13MHz deferred until clean CMD55/ACMD6 and width4, one 32-bit ADMA2 segment, physical block I/O 512 bytes\n",
-		UMS9117_CLOCK_HZ);
+		"registered single-block 4-bit 13MHz UMS9117 SDIO0 MMC host on SPI57; identification 1-bit at %u Hz, 13MHz deferred until clean CMD55/ACMD6 and width4, up to %u 32-bit ADMA2 segments, physical block I/O 512 bytes\n",
+		UMS9117_CLOCK_HZ, UMS9117_ADMA2_DESC_COUNT);
 	return 0;
 
 out_remove_host:
@@ -2621,8 +2706,8 @@ out_free_irq:
 	free_irq(irq, host);
 	host->irq_requested = false;
 out_free_descriptor:
-	dma_free_coherent(&pdev->dev, UMS9117_ADMA2_DESC_SIZE, host->descriptor,
-			  host->descriptor_dma);
+	dma_free_coherent(&pdev->dev, UMS9117_ADMA2_TABLE_SIZE,
+			  host->descriptors, host->descriptors_dma);
 out_free_host:
 	mmc_free_host(mmc);
 	return ret;
@@ -2650,8 +2735,8 @@ static void ums9117_ta1618_mmc_remove(struct platform_device *pdev)
 	mutex_lock(&host->state_mutex);
 	ta1618_restore_platform(host);
 	mutex_unlock(&host->state_mutex);
-	dma_free_coherent(host->dev, UMS9117_ADMA2_DESC_SIZE, host->descriptor,
-			  host->descriptor_dma);
+	dma_free_coherent(host->dev, UMS9117_ADMA2_TABLE_SIZE,
+			  host->descriptors, host->descriptors_dma);
 	mmc_free_host(host->mmc);
 }
 
