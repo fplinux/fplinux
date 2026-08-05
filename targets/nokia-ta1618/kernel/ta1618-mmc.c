@@ -189,6 +189,8 @@
  * why the automatic CMD12 error bit has to be owned.
  */
 #define UMS9117_TRANSFER_CMD18_AUTO_CMD12_ADMA2 0x0037U
+/* The same, minus the read-direction bit. */
+#define UMS9117_TRANSFER_CMD25_AUTO_CMD12_ADMA2 0x0027U
 /*
  * Every descriptor but the last carries valid data and continues the chain;
  * the last one additionally ends the transfer.
@@ -232,6 +234,10 @@ static_assert(((((u32)MMC_READ_MULTIPLE_BLOCK << 8) | UMS9117_RESP_SHORT |
 		UMS9117_CMD_CRC | UMS9117_CMD_INDEX | UMS9117_CMD_DATA)
 		       << 16 |
 	       UMS9117_TRANSFER_CMD18_AUTO_CMD12_ADMA2) == 0x123a0037U);
+static_assert(((((u32)MMC_WRITE_MULTIPLE_BLOCK << 8) | UMS9117_RESP_SHORT |
+		UMS9117_CMD_CRC | UMS9117_CMD_INDEX | UMS9117_CMD_DATA)
+		       << 16 |
+	       UMS9117_TRANSFER_CMD25_AUTO_CMD12_ADMA2) == 0x193a0027U);
 static_assert(UMS9117_ADMA2_ATTR_TRANSFER == 0x0021U);
 static_assert(UMS9117_ADMA2_ATTR_TRANSFER_END == 0x0023U);
 static_assert(UMS9117_ADMA2_TABLE_SIZE == 256U);
@@ -1168,7 +1174,6 @@ static bool ums9117_destructive_command(const struct mmc_command *cmd)
 	switch (cmd->opcode) {
 	case MMC_WRITE_DAT_UNTIL_STOP:
 	case MMC_SET_BLOCK_COUNT:
-	case MMC_WRITE_MULTIPLE_BLOCK:
 	case MMC_PROGRAM_CID:
 	case MMC_PROGRAM_CSD:
 	case MMC_SET_WRITE_PROT:
@@ -1188,26 +1193,32 @@ static bool ums9117_destructive_command(const struct mmc_command *cmd)
 }
 
 /*
- * The core builds exactly one shape for a multi-block read: CMD18 carrying the
- * data, a bare CMD12 attached as the stop command, and no set-block-count
- * because this host never claims to support one. Every field is checked rather
- * than assumed, so an unexpected shape is refused before any register is
- * touched instead of being transferred wrongly.
+ * The core builds exactly one shape for a multi-block transfer: CMD18 or CMD25
+ * carrying the data, a bare CMD12 attached as the stop command, and no
+ * set-block-count because this host never claims to support one. The stop
+ * command waits for busy after a write and does not after a read, which is the
+ * only difference between the two. Every field is checked rather than assumed,
+ * so an unexpected shape is refused before any register is touched instead of
+ * being transferred wrongly.
  */
-static bool ums9117_is_multi_read(const struct mmc_request *mrq,
-				  const struct mmc_host *mmc)
+static bool ums9117_is_multi_block(const struct mmc_request *mrq,
+				   const struct mmc_host *mmc, bool write)
 {
 	const struct mmc_command *cmd = mrq->cmd;
 	const struct mmc_command *stop = mrq->stop;
 	const struct mmc_data *data = cmd->data;
+	unsigned int opcode = write ? MMC_WRITE_MULTIPLE_BLOCK :
+				      MMC_READ_MULTIPLE_BLOCK;
+	unsigned int data_flag = write ? MMC_DATA_WRITE : MMC_DATA_READ;
+	unsigned int stop_response = write ? MMC_RSP_R1B : MMC_RSP_R1;
 
-	return cmd->opcode == MMC_READ_MULTIPLE_BLOCK && data &&
-	       data->flags == MMC_DATA_READ && data->blksz == 512 &&
-	       data->blocks >= 2 && data->blocks <= mmc->max_blk_count &&
-	       data->sg && data->sg_len >= 1 && data->sg_len <= mmc->max_segs &&
+	return cmd->opcode == opcode && data && data->flags == data_flag &&
+	       data->blksz == 512 && data->blocks >= 2 &&
+	       data->blocks <= mmc->max_blk_count && data->sg &&
+	       data->sg_len >= 1 && data->sg_len <= mmc->max_segs &&
 	       !mrq->sbc && stop && stop->opcode == MMC_STOP_TRANSMISSION &&
-	       !stop->arg && !stop->data && mmc_resp_type(stop) == MMC_RSP_R1 &&
-	       !mrq->cap_cmd_during_tfr;
+	       !stop->arg && !stop->data &&
+	       mmc_resp_type(stop) == stop_response && !mrq->cap_cmd_during_tfr;
 }
 
 static int ums9117_response_flags(const struct mmc_command *cmd, u16 *flags)
@@ -1273,8 +1284,14 @@ static int ums9117_prepare_data(struct ta1618_sd_mmc *host,
 	int i;
 
 	if (data->flags == MMC_DATA_WRITE) {
-		if (cmd->opcode != MMC_WRITE_BLOCK || data->blocks != 1 ||
-		    data->blksz != 512 || data->sg_len != 1)
+		/*
+		 * A multi-block write had every field checked before the
+		 * request was admitted; only the single-block shape is
+		 * constrained again here.
+		 */
+		if (cmd->opcode != MMC_WRITE_MULTIPLE_BLOCK &&
+		    (cmd->opcode != MMC_WRITE_BLOCK || data->blocks != 1 ||
+		     data->blksz != 512 || data->sg_len != 1))
 			return -EOPNOTSUPP;
 		direction = DMA_TO_DEVICE;
 	} else if (cmd->opcode == MMC_READ_MULTIPLE_BLOCK) {
@@ -1620,10 +1637,12 @@ static int ums9117_response_error(const struct mmc_command *cmd, u32 response)
 	return -EIO;
 }
 
-static bool ums9117_is_cmd24_write(const struct mmc_command *cmd)
+static bool ums9117_is_write_data(const struct mmc_command *cmd)
 {
-	return cmd && cmd->opcode == MMC_WRITE_BLOCK && cmd->data &&
-	       cmd->data->flags == MMC_DATA_WRITE;
+	return cmd &&
+	       (cmd->opcode == MMC_WRITE_BLOCK ||
+		cmd->opcode == MMC_WRITE_MULTIPLE_BLOCK) &&
+	       cmd->data && cmd->data->flags == MMC_DATA_WRITE;
 }
 
 static bool ums9117_wait_quiescent(struct ta1618_sd_mmc *host,
@@ -1682,7 +1701,7 @@ static void ums9117_finish_work(struct work_struct *work)
 	if (!mrq)
 		return;
 	cmd = mrq->cmd;
-	write_request = ums9117_is_cmd24_write(cmd);
+	write_request = ums9117_is_write_data(cmd);
 	quiesce_deadline_ms = write_request ?
 				      UMS9117_WRITE_QUIESCE_DEADLINE_MS :
 				      UMS9117_READ_QUIESCE_DEADLINE_MS;
@@ -1773,14 +1792,16 @@ static void ums9117_finish_work(struct work_struct *work)
 
 	if (host->data_mapped)
 		ums9117_unmap_data(host);
-	if (error && (ums9117_is_cmd24_write(cmd) ||
+	if (error && (ums9117_is_write_data(cmd) ||
 		      (READ_ONCE(host->write_status_pending) &&
 		       cmd->opcode == MMC_SEND_STATUS))) {
-		WRITE_ONCE(host->fatal_error, true);
-		dev_err(host->dev,
-			"write completion failed; blocking further controller I/O: %d\n",
-			error);
-	} else if (!error && ums9117_is_cmd24_write(cmd)) {
+		/*
+		 * One failed write is not a reason to refuse every later
+		 * request: the core retries a write on its own, and the
+		 * status command below still has to run to clear the card.
+		 */
+		dev_err(host->dev, "write completion failed: %d\n", error);
+	} else if (!error && ums9117_is_write_data(cmd)) {
 		WRITE_ONCE(host->write_status_pending, true);
 	} else if (!error && READ_ONCE(host->write_status_pending) &&
 		   cmd->opcode == MMC_SEND_STATUS &&
@@ -1855,7 +1876,7 @@ static void ums9117_timeout_work(struct work_struct *work)
 	spin_lock_irqsave(&host->lock, flags);
 	mrq = host->active_mrq;
 	width_acmd6_timed_out = mrq && host->active_width_acmd6;
-	write_timed_out = mrq && ums9117_is_cmd24_write(mrq->cmd);
+	write_timed_out = mrq && ums9117_is_write_data(mrq->cmd);
 	post_write_status_timed_out = mrq &&
 				      READ_ONCE(host->write_status_pending) &&
 				      mrq->cmd->opcode == MMC_SEND_STATUS;
@@ -2082,6 +2103,8 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	bool app_context = false;
 	bool cmd24_write;
 	bool multi_read;
+	bool multi_write;
+	bool write_request;
 	bool post_write_status;
 	bool width_acmd6;
 	int ret;
@@ -2127,10 +2150,13 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	cmd24_write = cmd->opcode == MMC_WRITE_BLOCK && data &&
 		      data->flags == MMC_DATA_WRITE && data->blocks == 1 &&
 		      data->blksz == 512 && data->sg_len == 1;
-	multi_read = ums9117_is_multi_read(mrq, mmc);
+	multi_read = ums9117_is_multi_block(mrq, mmc, false);
+	multi_write = ums9117_is_multi_block(mrq, mmc, true);
+	write_request = cmd24_write || multi_write;
 	if ((cmd->opcode == MMC_READ_SINGLE_BLOCK ||
 	     cmd->opcode == MMC_READ_MULTIPLE_BLOCK ||
-	     cmd->opcode == MMC_WRITE_BLOCK) &&
+	     cmd->opcode == MMC_WRITE_BLOCK ||
+	     cmd->opcode == MMC_WRITE_MULTIPLE_BLOCK) &&
 	    (!READ_ONCE(host->physical_width4) ||
 	     !READ_ONCE(host->clock_13mhz_applied) ||
 	     READ_ONCE(host->actual_clock_hz) != UMS9117_MAX_CLOCK_HZ)) {
@@ -2142,13 +2168,15 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	if (ums9117_destructive_command(cmd) ||
 	    (cmd->opcode == MMC_WRITE_BLOCK && !cmd24_write) ||
 	    (cmd->opcode == MMC_READ_MULTIPLE_BLOCK && !multi_read) ||
-	    (data && (data->flags & MMC_DATA_WRITE) && !cmd24_write)) {
+	    (cmd->opcode == MMC_WRITE_MULTIPLE_BLOCK && !multi_write) ||
+	    (data && (data->flags & MMC_DATA_WRITE) && !write_request)) {
 		ums9117_reject_request(
 			host, mrq, -EOPNOTSUPP,
 			"forbidden data or destructive opcode rejected before MMIO");
 		return;
 	}
-	if (mrq->sbc || (mrq->stop && !multi_read) || cmd->opcode > 63U) {
+	if (mrq->sbc || (mrq->stop && !multi_read && !multi_write) ||
+	    cmd->opcode > 63U) {
 		ums9117_reject_request(
 			host, mrq, -EOPNOTSUPP,
 			"SBC, STOP, or invalid opcode rejected before MMIO");
@@ -2171,6 +2199,8 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 		}
 		if (multi_read)
 			transfer = UMS9117_TRANSFER_CMD18_AUTO_CMD12_ADMA2;
+		else if (multi_write)
+			transfer = UMS9117_TRANSFER_CMD25_AUTO_CMD12_ADMA2;
 		else
 			transfer = data->flags == MMC_DATA_WRITE ?
 					   UMS9117_TRANSFER_WRITE_ADMA2 :
@@ -2220,7 +2250,8 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	}
 	if (cmd->opcode == MMC_READ_SINGLE_BLOCK ||
 	    cmd->opcode == MMC_READ_MULTIPLE_BLOCK ||
-	    cmd->opcode == MMC_WRITE_BLOCK) {
+	    cmd->opcode == MMC_WRITE_BLOCK ||
+	    cmd->opcode == MMC_WRITE_MULTIPLE_BLOCK) {
 		selector = ta1618_readl(host, RES_CLOCK_SELECTOR);
 		clock = ta1618_readl(host, RES_CLOCK_RESET);
 		control = ta1618_readl(host, RES_HOST_CONTROL1);
@@ -2247,8 +2278,9 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	 * it is confirmed immediately before every multi-block transfer rather
 	 * than trusted from probe time.
 	 */
-	if (multi_read && ta1618_readl(host, RES_HOST_CONTROL2) !=
-				  UMS9117_HOST_CTRL2_EXPECTED) {
+	if ((multi_read || multi_write) &&
+	    ta1618_readl(host, RES_HOST_CONTROL2) !=
+		    UMS9117_HOST_CTRL2_EXPECTED) {
 		spin_unlock_irqrestore(&host->lock, flags);
 		ret = -EPROTO;
 		goto out_error;
@@ -2290,7 +2322,7 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	ta1618_writel(host, RES_ARGUMENT, cmd->arg);
 	schedule_delayed_work(
 		&host->timeout_work,
-		msecs_to_jiffies(cmd24_write ?
+		msecs_to_jiffies(write_request ?
 					 UMS9117_WRITE_REQUEST_TIMEOUT_MS :
 					 UMS9117_REQUEST_TIMEOUT_MS));
 	ta1618_writel(host, RES_INTERRUPT_SIGNAL_ENABLE, signal);
@@ -2506,12 +2538,11 @@ static int ums9117_multi_io_quirk(struct mmc_card *card, unsigned int direction,
 {
 	/*
 	 * The core takes this answer as the block count for the request, so
-	 * returning one is what confines every transfer to a single block.
-	 * Reads are released up to the host limit; writes still are not.
+	 * returning one is what would confine every transfer to a single
+	 * block. Both directions run multi-block, bounded by the host limit.
 	 */
-	if (direction == MMC_DATA_READ)
-		return min_t(int, blk_size, card->host->max_blk_count);
-	return 1;
+	(void)direction;
+	return min_t(int, blk_size, card->host->max_blk_count);
 }
 
 static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
