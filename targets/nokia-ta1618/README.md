@@ -8,7 +8,7 @@
 | Model             | Nokia 3210 4G                                              |
 | Hardware variant  | TA-1618                                                    |
 | Platform          | [Unisoc UMS9117 / T117](../../platforms/ums9117/README.md) |
-| CPU used by Linux | ARM Cortex-A7, CPU0, 768 MHz                               |
+| CPU used by Linux | ARM Cortex-A7, CPU0, 1 GHz                                 |
 | FPLinux profile   | `console`                                                  |
 | Boot method       | Volatile RAM through the Unisoc BootROM and FDL1           |
 | Linux version     | 6.18.40                                                    |
@@ -70,7 +70,7 @@ that the stated limitation or current qualification gap still applies.
 | --------------------------------- | ------------- | ------------------------------------------------------------------ |
 | BootROM RAM loading               | Supported     | Fixed RAM-only sequence; no flash, erase, partition or NV command  |
 | Linux kernel and initramfs        | Supported     | Linux 6.18.40 with a musl/BusyBox root filesystem                  |
-| CPU                               | Supported     | One Cortex-A7 CPU is active; SMP is not enabled                    |
+| CPU                               | Supported     | The SoC has a single Cortex-A7 core, so SMP does not apply         |
 | Interrupt controller              | Supported     | ARM GIC with working timer and USB interrupts                      |
 | System timers                     | Supported     | UMS9117 system counter and Pike2 timer                             |
 | Display                           | Partial       | 240×320 RGB565 portrait; exact current closure awaits phone gate   |

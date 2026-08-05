@@ -42,23 +42,23 @@ These statuses describe shared hardware validation. They do not qualify a
 complete phone runtime closure for release; that state belongs in the target
 document and `releases.lock.toml`.
 
-| Block                 | Status        | Implementation                            | Notes                                                         |
-| --------------------- | ------------- | ----------------------------------------- | ------------------------------------------------------------- |
-| CPU                   | Supported     | `dts/ums9117.dtsi`                        | CPU0 is described as Cortex-A7 at 768 MHz                     |
-| SMP                   | Not supported | —                                         | Secondary cores are not described or started                  |
-| Interrupt controller  | Supported     | ARM GIC binding in `dts/ums9117.dtsi`     | SoC SPI numbers are shared; board drivers remain target-owned |
-| System counter        | Supported     | `kernel/ums9117-timer.c`                  | 1 kHz UMS9117 counter                                         |
-| Pike2 timer           | Supported     | Linux Spreadtrum timer driver integration | Uses the shared 32.768 kHz clock                              |
-| Clock controller      | Partial       | Fixed clock nodes                         | No general UMS9117 clock-controller driver                    |
-| USB device controller | Partial       | `kernel/ums9117-musb.c`                   | MUSB PIO gadget mode using state inherited from the bootstrap |
-| USB host controller   | Not supported | —                                         | No host-mode initialization path                              |
-| GPIO / pin control    | Not supported | —                                         | Board drivers currently use known MMIO state directly         |
-| UART                  | Not supported | —                                         | No platform UART driver or DTS node                           |
-| MMC / SD controller   | Not supported | —                                         | No MMC / SD controller implementation                         |
-| DMA                   | Not supported | —                                         | USB is deliberately PIO-only                                  |
-| Audio                 | Not supported | —                                         | No shared audio controller implementation                     |
-| SPI / I2C             | Not supported | —                                         | No generic bus-controller nodes or drivers                    |
-| Watchdog / reset      | Not supported | —                                         | Reboot and power-off support are not implemented              |
+| Block                 | Status         | Implementation                            | Notes                                                         |
+| --------------------- | -------------- | ----------------------------------------- | ------------------------------------------------------------- |
+| CPU                   | Supported      | `dts/ums9117.dtsi`                        | CPU0 is a Cortex-A7 at 1 GHz                                  |
+| SMP                   | Not applicable | —                                         | The SoC has a single Cortex-A7 core                           |
+| Interrupt controller  | Supported      | ARM GIC binding in `dts/ums9117.dtsi`     | SoC SPI numbers are shared; board drivers remain target-owned |
+| System counter        | Supported      | `kernel/ums9117-timer.c`                  | 1 kHz UMS9117 counter                                         |
+| Pike2 timer           | Supported      | Linux Spreadtrum timer driver integration | Uses the shared 32.768 kHz clock                              |
+| Clock controller      | Partial        | Fixed clock nodes                         | No general UMS9117 clock-controller driver                    |
+| USB device controller | Partial        | `kernel/ums9117-musb.c`                   | MUSB PIO gadget mode using state inherited from the bootstrap |
+| USB host controller   | Not supported  | —                                         | No host-mode initialization path                              |
+| GPIO / pin control    | Not supported  | —                                         | Board drivers currently use known MMIO state directly         |
+| UART                  | Not supported  | —                                         | No platform UART driver or DTS node                           |
+| MMC / SD controller   | Not supported  | —                                         | No MMC / SD controller implementation                         |
+| DMA                   | Not supported  | —                                         | USB is deliberately PIO-only                                  |
+| Audio                 | Not supported  | —                                         | No shared audio controller implementation                     |
+| SPI / I2C             | Not supported  | —                                         | No generic bus-controller nodes or drivers                    |
+| Watchdog / reset      | Not supported  | —                                         | Reboot and power-off support are not implemented              |
 
 ## DTS contract for targets
 
