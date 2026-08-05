@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: GPL-2.0-only
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/display/fplinux,ta1618-fb.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Nokia TA-1618 bootstrap handoff framebuffer
+
+maintainers:
+  - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+
+description:
+  Board-specific fbdev device that adopts the LCDC/SPI display state
+  initialized by the TA-1618 RAM bootstrap. The first region is
+  reserved no-map RAM holding two RGB565 frames, the visible frame and
+  the private staging copy that the LCDC streams into the SPI panel.
+
+properties:
+  compatible:
+    const: fplinux,ta1618-fb
+
+  reg:
+    items:
+      - description: reserved RGB565 display memory holding two frames
+      - description: LCDC register block
+      - description: SPI1 register block
+
+required:
+  - compatible
+  - reg
+
+additionalProperties: false
+
+examples:
+  - |
+    display@83f00000 {
+        compatible = "fplinux,ta1618-fb";
+        reg = <0x83f00000 0x100000>,
+              <0x20800000 0x1000>,
+              <0x70b00000 0x1000>;
+    };

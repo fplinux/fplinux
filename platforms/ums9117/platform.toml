@@ -1,0 +1,157 @@
+# SPDX-License-Identifier: GPL-2.0-only
+schema = "fplinux.platform/v1"
+name = "ums9117"
+
+[buildroot]
+external = "buildroot-external"
+shared_paths = ["common/rootfs"]
+clean_targets = ["fplinux-console-dirclean"]
+
+[linux]
+source_lock = "linux"
+arch = "arm"
+cross_compile = "arm-buildroot-linux-musleabihf-"
+analysis_cross_compile = "arm-none-eabi-"
+config_script = "scripts/config"
+image_output = "arch/arm/boot/zImage"
+dtb_output_directory = "arch/arm/boot/dts"
+targets = ["zImage", "dtbs"]
+patches = [
+  "platforms/ums9117/kernel/0001-ums9117-platform.patch",
+  "platforms/ums9117/kernel/0002-ums9117-dt-bindings.patch",
+]
+appends = []
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/Kconfig"
+destination = "arch/arm/mach-ums9117/Kconfig"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/Makefile"
+destination = "arch/arm/mach-ums9117/Makefile"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-machine.c"
+destination = "arch/arm/mach-ums9117/ums9117.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-timer.c"
+destination = "arch/arm/mach-ums9117/ums9117-timer.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-musb.c"
+destination = "drivers/usb/musb/ums9117.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/dts/ums9117.dtsi"
+destination = "arch/arm/boot/dts/unisoc/ums9117.dtsi"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/fplinux,ums9117-syscounter.yaml"
+destination = "Documentation/devicetree/bindings/timer/fplinux,ums9117-syscounter.yaml"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/fplinux,ums9117-musb-inherited.yaml"
+destination = "Documentation/devicetree/bindings/usb/fplinux,ums9117-musb-inherited.yaml"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/fplinux,ums9117-aon-apb.yaml"
+destination = "Documentation/devicetree/bindings/mfd/fplinux,ums9117-aon-apb.yaml"
+
+[bootstrap]
+vendor_source_lock = "fpdoom_bootstrap"
+vendor_cache_name = "fpdoom-bootstrap.tar.gz"
+archive_prefix = "fpdoom-{commit}/"
+source_destination = "bootstrap"
+vendor_destination = "vendor/fpdoom"
+output_destination = "out"
+pack_reloc = "pack_reloc"
+safety_target = "fplinux-safety-check"
+build_targets = ["clean", "all", "map"]
+files = [
+  "build_t117.make",
+  "fpdoom/cmd_def.h",
+  "fpdoom/common.c",
+  "fpdoom/common.h",
+  "fpdoom/include/signal.h",
+  "fpdoom/include/stdio.h",
+  "fpdoom/include/stdlib.h",
+  "fpdoom/libc.c",
+  "fpdoom/libc/malloc.h",
+  "fpdoom/libc/printf.h",
+  "fpdoom/syscode.h",
+  "fpdoom/usbio.h",
+  "pack_reloc/Makefile",
+  "pack_reloc/pack_reloc.c",
+  "ums9117/asmcode.s",
+  "ums9117/entry.c",
+  "ums9117/lcd_config.h",
+  "ums9117/lcd_spi.h",
+  "ums9117/start.s",
+  "ums9117/syscode.c",
+  "ums9117/syscomm.c",
+  "ums9117/usbio.c",
+]
+
+[[bootstrap.shared_copies]]
+source = "bootstrap/fplinux-boot-screen"
+destination = "fplinux-boot-screen"
+
+[host]
+capability = "fplinux.host.ums9117-ram/v1"
+
+[host.runtime_tools]
+loader = "spd_dump"
+bridge = "libc_server"
+console = "fplinux-usb-console"
+
+[[host.tools]]
+type = "make-archive/v1"
+name = "spd_dump"
+source_lock = "spreadtrum_flash"
+cache_name = "spreadtrum_flash.tar.gz"
+archive_prefix = "spreadtrum_flash-{commit}/"
+source_directory = "spd_dump"
+binary = "spd_dump"
+
+[[host.tools.members]]
+path = "Makefile"
+digest_key = "makefile_sha256"
+
+[[host.tools.members]]
+path = "spd_dump.c"
+digest_key = "spd_dump_c_sha256"
+
+[[host.tools.members]]
+path = "spd_cmd.h"
+digest_key = "spd_cmd_h_sha256"
+
+[[host.tools]]
+type = "make-archive/v1"
+name = "libc_server"
+source_lock = "fpdoom_host"
+cache_name = "fpdoom-host.tar.gz"
+archive_prefix = "fpdoom-{commit}/libc_server/"
+source_directory = "libc_server"
+binary = "libc_server"
+
+[[host.tools.members]]
+path = "Makefile"
+digest_key = "makefile_sha256"
+
+[[host.tools.members]]
+path = "libc_server.c"
+digest_key = "libc_server_c_sha256"
+
+[[host.tools.members]]
+path = "cmd_def.h"
+digest_key = "cmd_def_h_sha256"
+
+[[host.tools]]
+type = "cc-libusb/v1"
+name = "fplinux-usb-console"
+source = "common/host/fplinux-usb-console.c"
+self_test = true
+
+[runner]
+api = "fplinux.host-adapter/v1"

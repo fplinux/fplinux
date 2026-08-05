@@ -1,0 +1,7 @@
+config BR2_PACKAGE_FPLINUX_CONSOLE
+	bool "fplinux-console"
+	help
+	  Build the reusable FPLinux local terminal. The target
+	  provides a Linux framebuffer console and an evdev keypad
+	  with normalized Linux key codes; this package provides the
+	  PTY shell and multi-tap input layer.

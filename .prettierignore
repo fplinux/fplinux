@@ -1,0 +1,6 @@
+.git/
+.cache/
+out/
+node_modules/
+
+*.patch

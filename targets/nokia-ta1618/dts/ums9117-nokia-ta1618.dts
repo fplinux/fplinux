@@ -1,0 +1,68 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/dts-v1/;
+
+#include "ums9117.dtsi"
+
+/ {
+	model = "Nokia 3210 4G TA-1618 Linux RAM boot";
+	compatible = "nokia,ta-1618", "sprd,ums9117";
+
+	chosen {
+		bootargs = "console=tty0 loglevel=8 ignore_loglevel initcall_debug init=/init panic=-1 rdinit=/init vt.global_cursor_default=1 g_serial.use_acm=0";
+	};
+
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x80000000 0x03e00000>;
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		dtb@83e00000 {
+			reg = <0x83e00000 0x00010000>;
+			no-map;
+		};
+
+		bootdiag@83ef0000 {
+			reg = <0x83ef0000 0x00010000>;
+			no-map;
+		};
+
+		framebuffer@83f00000 {
+			reg = <0x83f00000 0x00100000>;
+			no-map;
+		};
+	};
+
+	soc {
+		aon_apb: syscon@402e0000 {
+			compatible = "fplinux,ums9117-aon-apb", "syscon";
+			reg = <0x402e0000 0x00003000>;
+		};
+
+		display@83f00000 {
+			compatible = "fplinux,ta1618-fb";
+			reg = <0x83f00000 0x00100000>,
+			      <0x20800000 0x00001000>,
+			      <0x70b00000 0x00001000>;
+		};
+
+		keypad@40250000 {
+			compatible = "fplinux,ta1618-keypad";
+			reg = <0x40250000 0x00000100>,
+			      <0x40600000 0x00001000>;
+			reg-names = "keypad", "adi";
+			/* ADI read target, never directly mapped by Linux. */
+			sprd,eic-data-address = <0x40608280>;
+			sprd,aon-apb = <&aon_apb>;
+		};
+	};
+};
+
+&usb {
+	dr_mode = "peripheral";
+	status = "okay";
+};

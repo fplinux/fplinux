@@ -1,0 +1,10 @@
+* text=auto eol=lf
+
+*.bin binary
+*.jpg binary
+*.png binary
+*.zip binary
+*.patch -whitespace
+
+.cache export-ignore
+out export-ignore

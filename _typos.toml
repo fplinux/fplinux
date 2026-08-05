@@ -1,0 +1,26 @@
+[files]
+extend-exclude = [
+  ".git/",
+  ".cache/",
+  "out/",
+  "node_modules/",
+  "THIRD_PARTY_LICENSES/",
+  "*.bin",
+  "*.jpg",
+  "*.png",
+  "*.zip",
+]
+
+[default]
+extend-ignore-re = ["\\b[0-9a-f]{7,}\\b"]
+
+[default.extend-identifiers]
+FPLinux = "FPLinux"
+MMIO = "MMIO"
+UMS9117 = "UMS9117"
+
+[default.extend-words]
+fbcon = "fbcon"
+initramfs = "initramfs"
+microSD = "microSD"
+musl = "musl"

@@ -1,0 +1,30 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.py]
+indent_style = space
+indent_size = 4
+
+[fplinux]
+indent_style = space
+indent_size = 4
+
+[*.{c,h,dts,dtsi,S,s,sh,mk}]
+indent_style = tab
+indent_size = 8
+
+[{Makefile,Config.in}]
+indent_style = tab
+indent_size = 8
+
+[*.{json,md,toml,yaml,yml}]
+indent_style = space
+indent_size = 2
+
+[*.md]
+indent_size = 4

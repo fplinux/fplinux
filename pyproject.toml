@@ -1,0 +1,33 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 99
+extend-exclude = [".cache", "node_modules", "out"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+  "C901",
+  "COM812",
+  "CPY001",
+  "D103",
+  "D203",
+  "D213",
+  "EM102",
+  "PLR0912",
+  "PLR0915",
+  "PLR2004",
+  "S603",
+  "S606",
+  "S607",
+  "T201",
+  "TRY003",
+]
+
+[tool.ruff.format]
+line-ending = "lf"
+
+[tool.mypy]
+cache_dir = "/tmp/mypy"
+mypy_path = "scripts"
+python_version = "3.11"
+strict = true

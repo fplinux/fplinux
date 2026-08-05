@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: GPL-2.0-only
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/usb/fplinux,ums9117-musb-inherited.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Unisoc UMS9117 inherited-state MUSB controller
+
+maintainers:
+  - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+
+description:
+  MUSB HDRC-compatible dual-role core left powered and configured by the
+  UMS9117 BootROM/FDL RAM-loading path. Linux adopts the inherited
+  register window in gadget-only PIO mode and performs no cold-start
+  clock, reset or PHY programming.
+
+properties:
+  compatible:
+    const: fplinux,ums9117-musb-inherited
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+  dr_mode:
+    const: peripheral
+
+required:
+  - compatible
+  - reg
+  - interrupts
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+    usb@20200000 {
+        compatible = "fplinux,ums9117-musb-inherited";
+        reg = <0x20200000 0x2000>;
+        interrupts = <GIC_SPI 55 IRQ_TYPE_LEVEL_HIGH>;
+        dr_mode = "peripheral";
+    };
