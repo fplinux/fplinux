@@ -1,0 +1,52 @@
+version = 1
+SPDX-PackageName = "FPLinux"
+SPDX-PackageSupplier = "FPLinux contributors"
+
+[[annotations]]
+path = [
+  ".cache/.fplinux-workspace",
+  ".clang-format",
+  ".containerignore",
+  ".editorconfig",
+  ".gitattributes",
+  ".gitignore",
+  ".markdownlint-cli2.jsonc",
+  ".prettierignore",
+  ".prettierrc.json",
+  ".vale.ini",
+  "LICENSE",
+  "README.md",
+  "REUSE.toml",
+  "THIRD_PARTY_NOTICES.md",
+  "_typos.toml",
+  "bootstrap/**",
+  "buildroot-external/**",
+  "commitlint.config.mjs",
+  "common/**",
+  "docs/**",
+  "fplinux",
+  "package-lock.json",
+  "package.json",
+  "platforms/**",
+  "pyproject.toml",
+  "releases.lock.toml",
+  "scripts/**",
+  "sources.lock.toml",
+  "targets/**",
+  "toolchains/**",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 FPLinux contributors"
+SPDX-License-Identifier = "GPL-2.0-only"
+
+[[annotations]]
+path = "THIRD_PARTY_LICENSES/musl/COPYRIGHT"
+precedence = "override"
+SPDX-FileCopyrightText = "2005-2020 Rich Felker, et al."
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = "targets/nokia-ta1618/bootstrap/ums9117-linux.ld"
+precedence = "override"
+SPDX-FileCopyrightText = "fpdoom contributors"
+SPDX-License-Identifier = "Unlicense"

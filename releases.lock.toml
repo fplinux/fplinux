@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Add a runtime closure only after the exact candidate passes the phone gate.
+[verified]

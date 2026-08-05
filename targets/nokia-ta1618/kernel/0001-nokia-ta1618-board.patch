@@ -1,0 +1,59 @@
+diff --git a/drivers/input/keyboard/Kconfig b/drivers/input/keyboard/Kconfig
+--- a/drivers/input/keyboard/Kconfig
++++ b/drivers/input/keyboard/Kconfig
+@@ -715,6 +715,17 @@ config KEYBOARD_TWL4030
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called twl4030_keypad.
+
++config KEYBOARD_TA1618
++	bool "Nokia TA-1618 polled keypad"
++	depends on MACH_NOKIA_TA1618
++	help
++	  Poll the matrix keypad inherited from the TA-1618 bootstrap and
++	  the separate physical 8 key through inherited analog EIC9 state
++	  over ADI. The controller interrupt is not hardware-qualified on
++	  this board, so the proven configuration polls the packed
++	  key-status register. The EIC path is read-only, and the driver
++	  keeps working as a matrix-only keypad if the ADI read fails.
++
+ config KEYBOARD_XTKBD
+ 	tristate "XT keyboard"
+ 	select SERIO
+diff --git a/drivers/input/keyboard/Makefile b/drivers/input/keyboard/Makefile
+--- a/drivers/input/keyboard/Makefile
++++ b/drivers/input/keyboard/Makefile
+@@ -74,2 +74,3 @@ obj-$(CONFIG_KEYBOARD_TM2_TOUCHKEY)	+= tm2-touchkey.o
+ obj-$(CONFIG_KEYBOARD_TWL4030)		+= twl4030_keypad.o
+ obj-$(CONFIG_KEYBOARD_XTKBD)		+= xtkbd.o
++obj-$(CONFIG_KEYBOARD_TA1618)		+= ta1618-keypad.o
+diff --git a/drivers/video/fbdev/Kconfig b/drivers/video/fbdev/Kconfig
+--- a/drivers/video/fbdev/Kconfig
++++ b/drivers/video/fbdev/Kconfig
+@@ -1781,6 +1781,18 @@ config FB_HYPERV
+ 	  This driver is deprecated, please use the Hyper-V DRM driver at
+ 	  drivers/gpu/drm/hyperv (CONFIG_DRM_HYPERV) instead.
+
++config FB_TA1618
++	bool "Nokia TA-1618 bootstrap framebuffer"
++	depends on FB && MACH_NOKIA_TA1618
++	select FB_IOMEM_HELPERS
++	help
++	  Reuse the LCDC/SPI display state initialized by the TA-1618 RAM
++	  bootstrap. This is a board-specific handoff framebuffer, not a
++	  generic UMS9117 panel driver: it performs no cold panel, clock,
++	  pin or reset initialization. Refresh is a periodic polled
++	  full-frame copy through a private staging buffer that the LCDC
++	  streams into the SPI panel, so no display interrupt is required.
++
+ config FB_SIMPLE
+ 	tristate "Simple framebuffer support"
+ 	depends on FB
+diff --git a/arch/arm/boot/dts/unisoc/Makefile b/arch/arm/boot/dts/unisoc/Makefile
+--- a/arch/arm/boot/dts/unisoc/Makefile
++++ b/arch/arm/boot/dts/unisoc/Makefile
+@@ -2,3 +2,5 @@
+ dtb-$(CONFIG_ARCH_RDA) += \
+ 	rda8810pl-orangepi-2g-iot.dtb \
+ 	rda8810pl-orangepi-i96.dtb
++
++dtb-$(CONFIG_MACH_NOKIA_TA1618) += ums9117-nokia-ta1618.dtb

@@ -1,0 +1,36 @@
+[linux]
+version = "6.18.40"
+url = "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.40.tar.xz"
+sha256 = "3712fc1ec839e4daac981176c8518912e8f452650aaedfe4381da4419613a431"
+license = "GPL-2.0-only"
+
+[fpdoom_bootstrap]
+repository = "https://github.com/ilyakurdyukov/fpdoom"
+commit = "c1e1746cf8b3465e1a533c8012f1a2254e8d1320"
+archive_url = "https://github.com/ilyakurdyukov/fpdoom/archive/c1e1746cf8b3465e1a533c8012f1a2254e8d1320.tar.gz"
+archive_sha256 = "13210b79156135f309eeb9cc3ee3ca871d61ab78d425b88403559c69e50d5e2e"
+license = "Unlicense"
+
+[fpdoom_host]
+repository = "https://github.com/ilyakurdyukov/fpdoom"
+commit = "3241bfb10c18567251c5745f2959d45e35525aa8"
+archive_url = "https://github.com/ilyakurdyukov/fpdoom/archive/3241bfb10c18567251c5745f2959d45e35525aa8.tar.gz"
+archive_sha256 = "aa67343c2458d9dd177700e257f2ec249ea960eb98c514dde4963fcc988a0ce2"
+license = "Unlicense"
+
+[fpdoom_host.files]
+makefile_sha256 = "451a96e66bfb3ccfd9808cb1385c0844cff00c2470c8ab2a170857f7f095bf5a"
+libc_server_c_sha256 = "4a0dc26108689b108701e3300835212c1933a1a710a5b1a6e6d24bd636c1b74b"
+cmd_def_h_sha256 = "9ccf3115cfb7a92e53165baa0d8ad350c616b74b5d6d8e718cd66e583ec80592"
+
+[spreadtrum_flash]
+repository = "https://github.com/ilyakurdyukov/spreadtrum_flash"
+commit = "08679125e29b9c339ce1d7ea3f20ce1ffa24b904"
+archive_url = "https://github.com/ilyakurdyukov/spreadtrum_flash/archive/08679125e29b9c339ce1d7ea3f20ce1ffa24b904.tar.gz"
+archive_sha256 = "d3012698aa785a5df3ef9cb9b53e889f264b7dc80d4f92b25fe35a99840226d5"
+license = "Unlicense"
+
+[spreadtrum_flash.files]
+makefile_sha256 = "8f1c677247a27f119c90c67748f9106a5b3f38be5c1f18e50ade075d59ac215f"
+spd_dump_c_sha256 = "120ebb3d2d35bdf1fbd3cef3ca96fece12abc8f421ceaa57f8751aa3454cab88"
+spd_cmd_h_sha256 = "3784fee2ce9e4016bfd939049d0e8d8da9d9890c4dcc3f00300561eb120f1b1f"

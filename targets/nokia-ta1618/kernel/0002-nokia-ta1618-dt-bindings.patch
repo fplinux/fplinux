@@ -1,0 +1,15 @@
+diff --git a/Documentation/devicetree/bindings/arm/sprd/sprd.yaml b/Documentation/devicetree/bindings/arm/sprd/sprd.yaml
+--- a/Documentation/devicetree/bindings/arm/sprd/sprd.yaml
++++ b/Documentation/devicetree/bindings/arm/sprd/sprd.yaml
+@@ -37,6 +37,11 @@
+
+       - items:
+           - enum:
++              - nokia,ta-1618
++          - const: sprd,ums9117
++
++      - items:
++          - enum:
+               - sprd,ums9620-2h10
+           - const: sprd,ums9620
+

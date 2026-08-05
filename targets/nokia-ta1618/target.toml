@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: GPL-2.0-only
+schema = "fplinux.target/v1"
+name = "nokia-ta1618"
+display_name = "Nokia 3210 4G (TA-1618)"
+release_slug = "FPLinux-Nokia-3210-4G-TA1618"
+platform = "ums9117"
+profile = "console"
+release_manifest = "release/manifest.toml"
+assets_lock = "loader/assets.lock.toml"
+
+[buildroot]
+defconfig = "rootfs/defconfig"
+
+[linux]
+defconfig = "kernel/defconfig"
+dtb = "unisoc/ums9117-nokia-ta1618.dtb"
+debug_dtb = "ums9117-nokia-ta1618.dtb"
+patches = [
+  "kernel/0001-nokia-ta1618-board.patch",
+  "kernel/0002-nokia-ta1618-dt-bindings.patch",
+]
+forbidden_config = ["CONFIG_BLOCK=y", "CONFIG_MMC=y"]
+
+[[linux.copies]]
+source = "kernel/ta1618-hwdiag.c"
+destination = "arch/arm/mach-ums9117/ta1618-hwdiag.c"
+
+[[linux.copies]]
+source = "bootstrap/ta1618-hwdiag.h"
+destination = "arch/arm/mach-ums9117/ta1618-hwdiag.h"
+
+[[linux.copies]]
+source = "kernel/ta1618-keypad.c"
+destination = "drivers/input/keyboard/ta1618-keypad.c"
+
+[[linux.copies]]
+source = "kernel/ta1618-fb.c"
+destination = "drivers/video/fbdev/ta1618-fb.c"
+
+[[linux.copies]]
+source = "dts/ums9117-nokia-ta1618.dts"
+destination = "arch/arm/boot/dts/unisoc/ums9117-nokia-ta1618.dts"
+
+[[linux.copies]]
+source = "bindings/fplinux,ta1618-keypad.yaml"
+destination = "Documentation/devicetree/bindings/input/fplinux,ta1618-keypad.yaml"
+
+[[linux.copies]]
+source = "bindings/fplinux,ta1618-fb.yaml"
+destination = "Documentation/devicetree/bindings/display/fplinux,ta1618-fb.yaml"
+
+[[linux.appends]]
+source = "kernel/Kconfig"
+destination = "arch/arm/mach-ums9117/Kconfig"
+
+[[linux.appends]]
+source = "kernel/Makefile"
+destination = "arch/arm/mach-ums9117/Makefile"
+
+[[linux.appends]]
+source = "kernel/fbdev.Makefile"
+destination = "drivers/video/fbdev/Makefile"
+
+[bootstrap]
+source = "bootstrap"
+image = "ta1618_linux_bootstrap.bin"
+map = "obj/ta1618_linux_bootstrap_map.txt"
+kernel_destination = "zImage"
+dtb_destination = "ta1618.dtb"
+load_address = 0x80100000
+payload_limit = 0x82000000
+toolchain = "arm-none-eabi"
+lto = 0
+
+[runtime]
+fdl1_load_address = 0x00006200
+
+[runtime.assets]
+fdl1 = "assets/t117_fdl1.bin"
+pinmap = "assets/pinmap.bin"
+keymap = "assets/keymap.bin"
+
+[runtime.adapter]
+brightness = 50
+rotation = 0
+spi_mode = 1
+lcd_id = 0x8888b6
+backlight_rgbw = 0x14
+session_name = "ta1618-linux"
+handoff_marker = "TA1618_LINUX_BOOTSTRAP stage=5 message=PREPARE LINUX"
+handoff_wait_seconds = 60
+release_wait_seconds = 10
+boot_instructions = "Power the phone off, hold *, then connect USB while keeping * pressed."
+
+[runtime.usb.bootrom]
+vendor_id = 0x1782
+product_id = 0x4d00
+wait_seconds = 300
+
+[runtime.usb.linux_console]
+vendor_id = 0x0525
+product_id = 0xa4a6
+wait_seconds = 60

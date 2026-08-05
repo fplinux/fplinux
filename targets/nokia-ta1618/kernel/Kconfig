@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-2.0-only
+if ARCH_UMS9117
+
+config MACH_NOKIA_TA1618
+	bool "Nokia 3210 4G TA-1618"
+	select FB_IOMEM_HELPERS if FB
+	select MFD_SYSCON
+	help
+	  Board support for the Nokia 3210 4G (TA-1618), a UMS9117/T117
+	  feature phone with 64 MiB of DRAM, a 240x320 panel and a matrix
+	  keypad. The target is RAM-only: kernel, DTB and initramfs are
+	  staged over the BootROM/FDL USB download path and nothing is
+	  written to flash. The top 2 MiB of DRAM stay reserved for the
+	  DTB, the bootstrap handoff record and the display buffer, and a
+	  read-only diagnostics reader republishes the handoff record.
+
+endif

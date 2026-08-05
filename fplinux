@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
+
+set -euo pipefail
+
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+PYTHONPATH="$ROOT/scripts${PYTHONPATH:+:$PYTHONPATH}"
+PYTHONDONTWRITEBYTECODE=1
+export PYTHONPATH PYTHONDONTWRITEBYTECODE
+
+exec python3 -m fplinux_cli "$@"

@@ -1,0 +1,6 @@
+NAME="FPLinux"
+PRETTY_NAME="FPLinux TA-1618 RAM system"
+ID=fplinux
+VERSION_ID="1"
+VARIANT="Nokia 3210 4G TA-1618 console"
+VARIANT_ID=nokia-ta1618-console

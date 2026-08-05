@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menuconfig ARCH_UMS9117
+	bool "Unisoc UMS9117/T117"
+	depends on ARCH_MULTI_V7
+	select ARM_GIC
+	select CLKSRC_MMIO
+	select SPRD_TIMER
+	help
+	  Minimal Device Tree support for RAM-booted UMS9117/T117 systems:
+	  a single Cortex-A7 with a GIC-400 behind ARCH_MULTI_V7. The port
+	  inherits the clock, PHY and regulator state left by the BootROM/FDL
+	  download path and performs no cold-start power sequencing. The 1 ms
+	  AP system counter provides the clocksource, the 32 kHz AON timer
+	  the clockevent, and the ARM architected timer stays disabled
+	  because it reads zero on this SoC.

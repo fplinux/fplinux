@@ -1,0 +1,43 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+export HOME=/root
+export TERM=linux
+
+mkdir -p /dev /dev/pts /proc /sys /tmp /root
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+mkdir -p /dev/pts
+mount -t devpts devpts /dev/pts
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t tmpfs tmpfs /tmp
+
+system_name=FPLinux
+if [ -r /etc/os-release ]; then
+	. /etc/os-release
+	system_name=${PRETTY_NAME:-${NAME:-FPLinux}}
+fi
+
+clear
+printf '%s reached initramfs.\n' "$system_name"
+printf '%s\n' "Kernel boot log follows:"
+dmesg
+printf '\n'
+
+boot_diagnostics=/usr/libexec/fplinux/boot-diagnostics
+if [ -x "$boot_diagnostics" ]; then
+	"$boot_diagnostics"
+fi
+
+usb_getty=/usr/libexec/fplinux/usb-getty
+usb_getty_pidfile=/tmp/fplinux-usb-getty.pid
+/sbin/start-stop-daemon -S -m -p "$usb_getty_pidfile" -x /bin/sh -- \
+	"$usb_getty" </dev/null >/dev/null 2>/dev/kmsg &
+
+printf '%s\n' "Starting physical-keypad shell..."
+
+/bin/fplinux-console
+status=$?
+printf '%s\n' "fplinux-console exited with status $status; starting fallback shell."
+exec /bin/sh
