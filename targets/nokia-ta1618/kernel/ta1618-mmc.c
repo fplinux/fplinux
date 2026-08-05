@@ -112,6 +112,14 @@
 #define UMS9117_13MHZ_DIVIDER_ENCODED 0x00000100U
 #define UMS9117_13MHZ_OPERATIONAL_CLOCK_EXPECTED 0x08080107U
 #define UMS9117_MAX_CLOCK_HZ 13000000U
+/*
+ * The two switch-function arguments the core ever sends: the query that asks
+ * what the card supports, and the one that moves it into high speed. Both are
+ * built as mode << 31 | 0x00ffffff with the access-mode group set, so they can
+ * be recognised exactly rather than by a bit test.
+ */
+#define UMS9117_CMD6_CHECK_ARG 0x00fffff0U
+#define UMS9117_CMD6_SWITCH_ARG 0x80fffff1U
 #define UMS9117_HOST_VERSION_MASK 0xfffffffeU
 #define UMS9117_HOST_VERSION_EXPECTED 0x00040000U
 
@@ -425,6 +433,8 @@ struct ta1618_mmc_audit {
 	u32 cmd25_count;
 	u32 max_data_blocks;
 	u32 max_descriptors;
+	u32 cmd6_check_count;
+	u32 cmd6_switch_count;
 	u32 irq_count;
 	u32 irq_error_count;
 	u32 irq_crc_count;
@@ -511,6 +521,7 @@ struct ta1618_sd_mmc {
 	bool rails_on;
 	bool card_clock_on;
 	bool write_status_pending;
+	bool hs_timing_seen;
 	bool app_cmd_armed;
 	u32 app_cmd_arg;
 	bool width_acmd6_clean;
@@ -592,6 +603,12 @@ static void ums9117_audit_command_locked(struct ta1618_sd_mmc *host,
 	switch (cmd->opcode) {
 	case MMC_APP_CMD:
 		host->audit.cmd55_attempt_count++;
+		break;
+	case SD_SWITCH:
+		if (cmd->data && cmd->arg == UMS9117_CMD6_CHECK_ARG)
+			host->audit.cmd6_check_count++;
+		else if (cmd->data && cmd->arg == UMS9117_CMD6_SWITCH_ARG)
+			host->audit.cmd6_switch_count++;
 		break;
 	case MMC_READ_SINGLE_BLOCK:
 		host->audit.cmd17_count++;
@@ -1202,7 +1219,15 @@ static bool ums9117_destructive_command(const struct mmc_command *cmd)
 	case MMC_LOCK_UNLOCK:
 		return true;
 	case SD_SWITCH:
-		return !!(cmd->arg & BIT(31));
+		/*
+		 * Opcode 6 is shared: without data it is the bus-width
+		 * application command, which must keep passing. With data it
+		 * is switch-function, where only the query and the high-speed
+		 * switch are recognised; anything else could write a card
+		 * function group.
+		 */
+		return cmd->data && cmd->arg != UMS9117_CMD6_CHECK_ARG &&
+		       cmd->arg != UMS9117_CMD6_SWITCH_ARG;
 	default:
 		return false;
 	}
@@ -2435,9 +2460,17 @@ static void ums9117_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 			"set_ios refused after the 4-bit fail-closed; only a power cycle clears it\n");
 		goto out_trace;
 	}
+	/*
+	 * The core only asks for this timing after the card answered the
+	 * switch cleanly, so seeing it is the confirmation that the card is
+	 * in high speed. The driver never parses the switch payload itself.
+	 */
+	if (ios->timing == MMC_TIMING_SD_HS)
+		host->hs_timing_seen = true;
 	if ((ios->bus_width != MMC_BUS_WIDTH_1 &&
 	     ios->bus_width != MMC_BUS_WIDTH_4) ||
-	    ios->timing != MMC_TIMING_LEGACY ||
+	    (ios->timing != MMC_TIMING_LEGACY &&
+	     ios->timing != MMC_TIMING_SD_HS) ||
 	    (ios->clock && ios->clock != UMS9117_MAX_CLOCK_HZ &&
 	     (ios->clock < UMS9117_CLOCK_HZ ||
 	      ios->clock > UMS9117_IDENT_REQUEST_MAX_HZ))) {
@@ -2474,6 +2507,7 @@ static void ums9117_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 			host->fatal_error = false;
 			host->width_switch_fatal = false;
 			host->terminal_cleanup_hold = false;
+			host->hs_timing_seen = false;
 			host->write_status_pending = false;
 			spin_unlock_irqrestore(&host->lock, flags);
 		}
@@ -2607,6 +2641,7 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 	bool terminal_cleanup_hold;
 	bool width_acmd6_clean;
 	bool width_switch_fatal;
+	bool hs_timing_seen;
 	u32 actual_clock_hz;
 	unsigned int i;
 	ssize_t len = 0;
@@ -2624,6 +2659,7 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 	actual_clock_hz = host->actual_clock_hz;
 	fatal = host->fatal_error;
 	width_switch_fatal = host->width_switch_fatal;
+	hs_timing_seen = host->hs_timing_seen;
 	terminal_cleanup_hold = host->terminal_cleanup_hold;
 	spin_unlock_irqrestore(&host->lock, flags);
 
@@ -2684,6 +2720,11 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		"commands=cmd17:%u,cmd24:%u,cmd18:%u,cmd25:%u,max_blocks:%u\n",
 		audit.cmd17_count, audit.cmd24_count, audit.cmd18_count,
 		audit.cmd25_count, audit.max_data_blocks);
+	len += sysfs_emit_at(
+		buf, len,
+		"highspeed=caps:%u,timing_seen:%u,cmd6_check:%u,cmd6_switch:%u,max_hs_hz:%u\n",
+		1U, hs_timing_seen ? 1U : 0U, audit.cmd6_check_count,
+		audit.cmd6_switch_count, UMS9117_MAX_CLOCK_HZ);
 	len += sysfs_emit_at(buf, len,
 			     "descriptors=table:%u,capacity:%u,max_used:%u\n",
 			     (u32)UMS9117_ADMA2_TABLE_SIZE,
@@ -2859,7 +2900,13 @@ static int ums9117_ta1618_mmc_probe(struct platform_device *pdev)
 	mmc->f_max = UMS9117_MAX_CLOCK_HZ;
 	mmc->f_init = UMS9117_CLOCK_HZ;
 	mmc->ocr_avail = MMC_VDD_29_30 | MMC_VDD_30_31;
-	mmc->caps = MMC_CAP_4_BIT_DATA;
+	mmc->caps = MMC_CAP_4_BIT_DATA | MMC_CAP_SD_HIGHSPEED;
+	/*
+	 * High speed is claimed but the clock is not raised yet: the core
+	 * takes this as the ceiling for a high-speed card, so it keeps asking
+	 * for the frequency this board is already qualified at.
+	 */
+	mmc->max_sd_hs_hz = UMS9117_MAX_CLOCK_HZ;
 	mmc->caps2 = MMC_CAP2_NO_SDIO | MMC_CAP2_NO_MMC;
 	/*
 	 * These four numbers are the real limit on request shape: the block
