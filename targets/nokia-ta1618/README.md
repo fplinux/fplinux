@@ -34,19 +34,20 @@ byte, so the driver programs the gate, reset, clock selector, pin and analog
 rail recipe that was proven on this board.
 
 What works: a card that is already inserted when Linux starts is identified,
-switched to a 4-bit bus at 13 MHz and read one 512-byte block at a time. A
-FAT32 partition can be mounted read-only.
+switched to a 4-bit bus at 13 MHz, and read and written one 512-byte block at
+a time. A FAT32 partition mounts read-write, and files survive an unmount and
+a remount byte for byte.
 
 What is deliberately absent:
 
-- **Writing.** Every write, erase, lock and write-protect command is refused
-  before it can reach the controller, so the phone cannot modify a card.
 - **Hot-swap.** The board does have a card-detect pin, but this driver never
   reads it. The card must be inserted before Linux starts, and removing it
   while mounted is not supported.
-- **Speed.** Reads are single-block, which is far below what the hardware can
-  do. Multi-block reads and a faster bus are proven on this board but are not
-  part of this driver.
+- **Speed.** Every transfer is a single block, so the card runs far below what
+  the hardware can do. Multi-block transfers and a faster bus are proven on
+  this board but are not part of this driver yet.
+- **Erase and discard.** Erase, discard, lock and write-protect commands are
+  still refused before they can reach the controller.
 
 The phone's internal storage is SPI NAND on a separate controller with its own
 gate, reset and interrupt. It is not described in the device tree, no NAND or
@@ -77,7 +78,7 @@ that the stated limitation or current qualification gap still applies.
 | Physical keypad                   | Supported     | Polled matrix plus separate physical 8 key through analog EIC9/ADI |
 | USB device mode                   | Supported     | MUSB peripheral mode with `g_serial` at USB ID `0525:a4a6`         |
 | USB host mode                     | Not supported | The phone target enables peripheral mode only                      |
-| microSD card                      | Read-only     | 4-bit 13 MHz single-block reads; writes refused; no hot-swap       |
+| microSD card                      | Supported     | 4-bit 13 MHz single-block reads and writes; no hot-swap            |
 | Internal flash access             | Not supported | Linux does not expose phone storage                                |
 | Audio                             | Not supported | No speaker, headphone or microphone driver is implemented          |
 | Modem, calls, SMS and mobile data | Not supported | Baseband interfaces are not implemented                            |

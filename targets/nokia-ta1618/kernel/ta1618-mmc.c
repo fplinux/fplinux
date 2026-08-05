@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Read-only 4-bit 13 MHz Linux MMC host for the UMS9117 SDIO0 instance in
+ * Single-block 4-bit 13 MHz Linux MMC host for the UMS9117 SDIO0 instance in
  * Nokia TA-1618, driving the removable microSD slot.
  *
  * This is deliberately not an SDHCI driver.  UMS9117 has a related command,
@@ -16,7 +16,7 @@
  * permit one atomic custom transition to 4-bit HOST_CONTROL1 0x12 and the
  * selector-1/divider-0x0100 13 MHz clock.  No high-speed, UHS, 1.8 V, tuning or
  * CMD23 capability exists.  Data I/O remains one ADMA2 segment and one 512-byte
- * CMD17.  CMD18, CMD24, CMD25, erase, discard, lock and all write commands are
+ * CMD17 or one 512-byte CMD24.  CMD18, CMD25, erase, discard and lock are
  * rejected before controller MMIO.
  */
 #include <linux/bitfield.h>
@@ -463,7 +463,6 @@ struct ta1618_sd_mmc {
 	u32 actual_clock_hz;
 	bool width_switch_fatal;
 	bool terminal_cleanup_hold;
-	bool terminal_write_hold;
 	bool fatal_error;
 	bool stopping;
 	bool adi_locked;
@@ -1067,13 +1066,6 @@ static void ta1618_restore_platform(struct ta1618_sd_mmc *host)
 	u32 value;
 	int ret;
 
-	if (READ_ONCE(host->terminal_write_hold) ||
-	    READ_ONCE(host->width_switch_fatal)) {
-		dev_crit(
-			host->dev,
-			"platform restore suppressed during terminal hold or 4-bit fail-closed state; controller/clock/rails untouched; physical power-cycle required\n");
-		return;
-	}
 	if (!host->platform_active)
 		return;
 	if (host->controller_snapshot_valid) {
@@ -1111,7 +1103,6 @@ static bool ums9117_destructive_command(const struct mmc_command *cmd)
 {
 	switch (cmd->opcode) {
 	case MMC_READ_MULTIPLE_BLOCK:
-	case MMC_WRITE_BLOCK:
 	case MMC_WRITE_DAT_UNTIL_STOP:
 	case MMC_SET_BLOCK_COUNT:
 	case MMC_WRITE_MULTIPLE_BLOCK:
@@ -1286,9 +1277,16 @@ static void ums9117_reject_request(struct ta1618_sd_mmc *host,
 				   struct mmc_request *mrq, int error,
 				   const char *reason)
 {
-	if (READ_ONCE(host->width_acmd6_clean) &&
-	    !READ_ONCE(host->width_switch_fatal))
-		ums9117_width_fail_closed(host, reason, error);
+	/*
+	 * Every caller runs before the first controller write, so neither the
+	 * bus nor the card has moved and there is nothing to fail closed on.
+	 * The core legitimately issues commands this host refuses, and each
+	 * one used to cost the whole slot.
+	 */
+	dev_warn_ratelimited(
+		host->dev,
+		"request rejected before MMIO: %s; opcode=%u error=%d\n",
+		reason, mrq->cmd->opcode, error);
 	ums9117_set_request_error(mrq, error);
 	mmc_request_done(host->mmc, mrq);
 }
@@ -1536,31 +1534,6 @@ static bool ums9117_wait_quiescent(struct ta1618_sd_mmc *host,
 	}
 }
 
-static void ums9117_enter_terminal_write_hold(struct ta1618_sd_mmc *host,
-					      struct mmc_request *mrq,
-					      const char *reason, u32 status,
-					      u32 present)
-{
-	unsigned long flags;
-
-	/* Mask only the IRQ source; the controller and DMA must keep their state. */
-	ta1618_writel(host, RES_INTERRUPT_SIGNAL_ENABLE, 0);
-	synchronize_irq(host->irq);
-	spin_lock_irqsave(&host->lock, flags);
-	host->active_mrq = NULL;
-	if (!host->finish_mrq)
-		host->finish_mrq = mrq;
-	WRITE_ONCE(host->fatal_error, true);
-	WRITE_ONCE(host->terminal_write_hold, true);
-	spin_unlock_irqrestore(&host->lock, flags);
-
-	dev_crit(
-		host->dev,
-		"terminal write-fatal hold: %s; opcode=%u irq_status=0x%08x present_state=0x%08x; request retained, DMA mapping retained=%u, controller/clock/rails untouched; physical power-cycle required\n",
-		reason, mrq->cmd->opcode, status, present,
-		host->data_mapped ? 1U : 0U);
-}
-
 static void ums9117_finish_work(struct work_struct *work)
 {
 	struct ta1618_sd_mmc *host =
@@ -1616,26 +1589,22 @@ static void ums9117_finish_work(struct work_struct *work)
 	if (needs_quiesce) {
 		quiescent = ums9117_wait_quiescent(host, quiesce_deadline_ms,
 						   &present);
-		if (!quiescent && write_request) {
-			ums9117_enter_terminal_write_hold(
-				host, mrq, "CMD24 quiescence not confirmed",
-				status, present);
-			return;
+		if (!quiescent) {
+			/*
+			 * The transfer interrupt already arrived, so the
+			 * controller is done with the buffer even though the
+			 * data lines have not settled. Report the error and
+			 * let the request complete: the MMC core has no way
+			 * to abandon a request, so returning here would hang
+			 * the block layer instead of protecting anything.
+			 */
+			dev_err(host->dev,
+				"transfer quiescence not confirmed: opcode=%u irq_status=0x%08x present_state=0x%08x deadline_ms=%u\n",
+				cmd->opcode, status, present,
+				quiesce_deadline_ms);
+			if (!error)
+				error = -ETIMEDOUT;
 		}
-		if (!quiescent && READ_ONCE(host->width_acmd6_clean)) {
-			spin_lock_irqsave(&host->lock, flags);
-			host->terminal_cleanup_hold = true;
-			spin_unlock_irqrestore(&host->lock, flags);
-			ums9117_width_fail_closed(
-				host, "4-bit transfer quiescence not confirmed",
-				-ETIMEDOUT);
-			dev_crit(
-				host->dev,
-				"4-bit request and DMA mapping retained because transfer quiescence is unproven; physical power-cycle required\n");
-			return;
-		}
-		if (!quiescent && !error)
-			error = -ETIMEDOUT;
 	}
 
 	if (cmd->opcode == MMC_APP_CMD) {
@@ -1668,10 +1637,6 @@ static void ums9117_finish_work(struct work_struct *work)
 			host->audit.acmd6_clean_count++;
 			spin_unlock_irqrestore(&host->lock, flags);
 		}
-	} else if (error && READ_ONCE(host->width_acmd6_clean) &&
-		   !READ_ONCE(host->width_switch_fatal)) {
-		ums9117_width_fail_closed(
-			host, "request failed after accepted ACMD6", error);
 	}
 
 	if (host->data_mapped)
@@ -1801,17 +1766,11 @@ static void ums9117_timeout_work(struct work_struct *work)
 	}
 
 	if (write_related) {
-		if (!ums9117_wait_quiescent(host,
-					    UMS9117_WRITE_QUIESCE_DEADLINE_MS,
-					    &present)) {
-			ums9117_enter_terminal_write_hold(
-				host, mrq,
-				write_timed_out ?
-					"CMD24 request timed out and quiescence not confirmed" :
-					"post-CMD24 CMD13 timed out with non-quiescent data lines",
-				0, present);
-			return;
-		}
+		if (!ums9117_wait_quiescent(
+			    host, UMS9117_WRITE_QUIESCE_DEADLINE_MS, &present))
+			dev_err(host->dev,
+				"write-related timeout without confirmed quiescence: present_state=0x%08x; completing with an error anyway\n",
+				present);
 		if (write_timed_out)
 			dev_err(host->dev,
 				"CMD24 request timed out after admission; quiescence confirmed, completing with error and blocking controller I/O until physical power-cycle\n");
@@ -1830,24 +1789,24 @@ static void ums9117_timeout_work(struct work_struct *work)
 	}
 
 	if (READ_ONCE(host->width_acmd6_clean)) {
+		/*
+		 * Only a bus that never settles justifies gating the card
+		 * clock for good. If the lines are quiet the card and the
+		 * controller are in a known state, so refusing further I/O
+		 * until the core power-cycles the slot is enough.
+		 */
 		if (mrq->cmd->data &&
-		    !ums9117_wait_quiescent(
-			    host, UMS9117_READ_QUIESCE_DEADLINE_MS, &present)) {
-			spin_lock_irqsave(&host->lock, flags);
-			host->terminal_cleanup_hold = true;
-			spin_unlock_irqrestore(&host->lock, flags);
+		    !ums9117_wait_quiescent(host,
+					    UMS9117_WRITE_QUIESCE_DEADLINE_MS,
+					    &present)) {
 			ums9117_width_fail_closed(
-				host,
-				"4-bit request timed out with active transfer",
+				host, "timed-out transfer never quiesced",
 				-ETIMEDOUT);
-			dev_crit(
-				host->dev,
-				"timed-out 4-bit request and DMA mapping retained because transfer quiescence is unproven; physical power-cycle required\n");
-			return;
+		} else {
+			WRITE_ONCE(host->fatal_error, true);
+			dev_err(host->dev,
+				"request timed out after accepted ACMD6; controller I/O is blocked until the slot is power-cycled\n");
 		}
-		ums9117_width_fail_closed(
-			host, "request timed out after accepted ACMD6",
-			-ETIMEDOUT);
 	} else {
 		mutex_lock(&host->state_mutex);
 		ret = ums9117_recover(host);
@@ -1957,7 +1916,7 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 {
 	struct ta1618_sd_mmc *host = mmc_priv(mmc);
 	struct mmc_command *cmd = mrq->cmd;
-	struct mmc_data *data = cmd ? cmd->data : NULL;
+	struct mmc_data *data = cmd->data;
 	unsigned long flags;
 	u32 stale;
 	u32 clock;
@@ -1974,15 +1933,6 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	bool width_acmd6;
 	int ret;
 
-	if (!cmd)
-		return;
-	if (READ_ONCE(host->terminal_write_hold)) {
-		dev_crit(
-			host->dev,
-			"terminal write-fatal hold already active; opcode %u receives no controller access or completion; physical power-cycle required\n",
-			cmd->opcode);
-		return;
-	}
 	if (READ_ONCE(host->width_switch_fatal)) {
 		ums9117_set_request_error(mrq, -EIO);
 		mmc_request_done(mmc, mrq);
@@ -2181,11 +2131,6 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	return;
 
 out_error:
-	if (READ_ONCE(host->width_acmd6_clean) &&
-	    !READ_ONCE(host->width_switch_fatal))
-		ums9117_width_fail_closed(
-			host, "request admission failed after accepted ACMD6",
-			ret);
 	if (host->data_mapped) {
 		host->active_mrq = mrq;
 		ums9117_unmap_data(host);
@@ -2239,18 +2184,11 @@ static void ums9117_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 	spin_unlock_irqrestore(&host->lock, flags);
 	if (host->stopping)
 		goto out_trace;
-	if (READ_ONCE(host->terminal_write_hold)) {
+	if (READ_ONCE(host->width_switch_fatal) &&
+	    ios->power_mode != MMC_POWER_OFF) {
 		ret = -ESHUTDOWN;
-		dev_crit(
-			host->dev,
-			"set_ios suppressed during terminal write-fatal hold; controller/clock/rails untouched; physical power-cycle required\n");
-		goto out_trace;
-	}
-	if (READ_ONCE(host->width_switch_fatal)) {
-		ret = -ESHUTDOWN;
-		dev_crit(
-			host->dev,
-			"set_ios suppressed after 4-bit/13MHz fail-closed; controller/clock/rails untouched; physical power-cycle required\n");
+		dev_err(host->dev,
+			"set_ios refused after the 4-bit fail-closed; only a power cycle clears it\n");
 		goto out_trace;
 	}
 	if ((ios->bus_width != MMC_BUS_WIDTH_1 &&
@@ -2272,6 +2210,21 @@ static void ums9117_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 				ret = ta1618_set_rails(host, false);
 			if (!ret)
 				ret = ums9117_set_host_1bit_powered_off(host);
+		}
+		if (!ret) {
+			/*
+			 * The rails are down and the host is back in 1-bit
+			 * ADMA2, so the card and the controller can no longer
+			 * disagree about the bus width. That is the whole
+			 * reason the latches existed; clearing them here is
+			 * what lets the core recover a slot by power-cycling
+			 * it instead of needing the battery pulled.
+			 */
+			spin_lock_irqsave(&host->lock, flags);
+			host->fatal_error = false;
+			host->width_switch_fatal = false;
+			host->terminal_cleanup_hold = false;
+			spin_unlock_irqrestore(&host->lock, flags);
 		}
 		break;
 	case MMC_POWER_UP:
@@ -2352,15 +2305,27 @@ out_trace:
 
 static int ums9117_get_cd(struct mmc_host *mmc)
 {
-	struct ta1618_sd_mmc *host = mmc_priv(mmc);
-
-	return READ_ONCE(host->fatal_error) ? 0 : 1;
+	/*
+	 * This reports card presence, which the board can detect but this
+	 * host never samples, so a card is assumed. Reporting absence to
+	 * signal a driver problem would be worse than useless: the core
+	 * answers it by powering the slot off and giving up, which is
+	 * exactly the recovery that a failed slot needs. A card that is
+	 * really gone still surfaces through the periodic status command.
+	 */
+	(void)mmc;
+	return 1;
 }
 
 static int ums9117_get_ro(struct mmc_host *mmc)
 {
+	/*
+	 * The slot has no write-protect input to read. A card that is
+	 * physically locked still stays read-only, because the core also
+	 * requires the block-write command class from the card itself.
+	 */
 	(void)mmc;
-	return 1;
+	return 0;
 }
 
 static int ums9117_multi_io_quirk(struct mmc_card *card, unsigned int direction,
@@ -2386,7 +2351,6 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 	bool clock_13mhz_deferred;
 	bool physical_width4;
 	bool terminal_cleanup_hold;
-	bool terminal_write_hold;
 	bool width_acmd6_clean;
 	bool width_switch_fatal;
 	u32 actual_clock_hz;
@@ -2407,7 +2371,6 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 	fatal = host->fatal_error;
 	width_switch_fatal = host->width_switch_fatal;
 	terminal_cleanup_hold = host->terminal_cleanup_hold;
-	terminal_write_hold = host->terminal_write_hold;
 	spin_unlock_irqrestore(&host->lock, flags);
 
 	len += sysfs_emit_at(
@@ -2415,7 +2378,7 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		"schema=fplinux.ta1618-sd-perf-4bit-13mhz-audit/v2\n");
 	len += sysfs_emit_at(
 		buf, len,
-		"profile=sd-perf-4bit-13mhz-lab identification_width=1 read_only=1 caps_4bit=1 caps_highspeed=0 caps_uhs=0 caps_cmd23=0 caps_8bit=0 voltage_switch=0 tuning=0\n");
+		"profile=sd-perf-4bit-13mhz-lab identification_width=1 read_only=0 caps_4bit=1 caps_highspeed=0 caps_uhs=0 caps_cmd23=0 caps_8bit=0 voltage_switch=0 tuning=0\n");
 	len += sysfs_emit_at(
 		buf, len,
 		"clock_ident=selector:0x%08x,divider:0x%08x,actual_hz:%u,clock_reset:0x%08x\n",
@@ -2492,10 +2455,9 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		audit.last_irq_w1c_readback);
 	len += sysfs_emit_at(
 		buf, len,
-		"state=active:%u,finish:%u,fatal:%u,width_fail_closed:%u,terminal_cleanup_hold:%u,terminal_write_hold:%u\n",
+		"state=active:%u,finish:%u,fatal:%u,width_fail_closed:%u,terminal_cleanup_hold:%u\n",
 		active ? 1U : 0U, finish ? 1U : 0U, fatal ? 1U : 0U,
-		width_switch_fatal ? 1U : 0U, terminal_cleanup_hold ? 1U : 0U,
-		terminal_write_hold ? 1U : 0U);
+		width_switch_fatal ? 1U : 0U, terminal_cleanup_hold ? 1U : 0U);
 	len += sysfs_emit_at(buf, len, "ios_trace=count:%u,total:%u\n",
 			     audit.ios_trace_count, audit.ios_calls);
 	for (i = 0; i < TA1618_IOS_TRACE_DEPTH && len < PAGE_SIZE; i++) {
@@ -2649,7 +2611,7 @@ static int ums9117_ta1618_mmc_probe(struct platform_device *pdev)
 	host->audit_file_created = true;
 	dev_notice(
 		&pdev->dev,
-		"registered staged read-only 4-bit 13MHz UMS9117 SDIO0 MMC host on SPI57; identification 1-bit at %u Hz, 13MHz deferred until clean CMD55/ACMD6 and width4, one 32-bit ADMA2 segment, physical block I/O 512 bytes\n",
+		"registered single-block 4-bit 13MHz UMS9117 SDIO0 MMC host on SPI57; identification 1-bit at %u Hz, 13MHz deferred until clean CMD55/ACMD6 and width4, one 32-bit ADMA2 segment, physical block I/O 512 bytes\n",
 		UMS9117_CLOCK_HZ);
 	return 0;
 
@@ -2670,15 +2632,6 @@ static void ums9117_ta1618_mmc_remove(struct platform_device *pdev)
 {
 	struct ta1618_sd_mmc *host = platform_get_drvdata(pdev);
 
-	if (READ_ONCE(host->terminal_write_hold) ||
-	    READ_ONCE(host->width_switch_fatal)) {
-		dev_crit(
-			host->dev,
-			"driver removal suppressed during terminal hold or 4-bit fail-closed state; request retained=%u, DMA mapping retained=%u; physical power-cycle required\n",
-			host->finish_mrq ? 1U : 0U,
-			host->data_mapped ? 1U : 0U);
-		return;
-	}
 	if (host->audit_file_created) {
 		device_remove_file(&pdev->dev, &dev_attr_audit);
 		host->audit_file_created = false;
@@ -2719,5 +2672,5 @@ static struct platform_driver ta1618_mmc_driver = {
 };
 module_platform_driver(ta1618_mmc_driver);
 
-MODULE_DESCRIPTION("Read-only UMS9117 SDIO0 microSD host for Nokia TA-1618");
+MODULE_DESCRIPTION("UMS9117 SDIO0 microSD host for Nokia TA-1618");
 MODULE_LICENSE("GPL");

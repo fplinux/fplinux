@@ -54,7 +54,7 @@ document and `releases.lock.toml`.
 | USB host controller   | Not supported  | —                                         | No host-mode initialization path                              |
 | GPIO / pin control    | Not supported  | —                                         | Board drivers currently use known MMIO state directly         |
 | UART                  | Not supported  | —                                         | No platform UART driver or DTS node                           |
-| MMC / SD controller   | Not supported  | —                                         | No MMC / SD controller implementation                         |
+| MMC / SD controller   | Not supported  | —                                         | The SDIO0 host lives in the board target, not here            |
 | DMA                   | Not supported  | —                                         | USB is deliberately PIO-only                                  |
 | Audio                 | Not supported  | —                                         | No shared audio controller implementation                     |
 | SPI / I2C             | Not supported  | —                                         | No generic bus-controller nodes or drivers                    |
