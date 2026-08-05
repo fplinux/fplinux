@@ -146,6 +146,8 @@
  * error bit clear. This is what the board leaves behind after a reset.
  */
 #define UMS9117_HOST_CTRL2_EXPECTED 0x10000000U
+/* Automatic command error bits: not executed, timeout, CRC, end bit, index. */
+#define UMS9117_AUTO_CMD_ERROR_MASK 0x0000009fU
 #define UMS9117_INT_ADMA_ERROR 0x02000000U
 #define UMS9117_INT_RESPONSE_ERROR 0x08000000U
 #define UMS9117_INT_AXI_RESPONSE_ERROR 0x10000000U
@@ -182,6 +184,12 @@
 #define UMS9117_TRANSFER_READ_ADMA2 0x0013U
 #define UMS9117_TRANSFER_WRITE_ADMA2 0x0003U
 /*
+ * Multi-block read: DMA, block count enable, automatic CMD12, read direction
+ * and multiple blocks. The controller issues the stop command itself, which is
+ * why the automatic CMD12 error bit has to be owned.
+ */
+#define UMS9117_TRANSFER_CMD18_AUTO_CMD12_ADMA2 0x0037U
+/*
  * Every descriptor but the last carries valid data and continues the chain;
  * the last one additionally ends the transfer.
  */
@@ -191,6 +199,8 @@
 #define UMS9117_ADMA2_DESC_COUNT 32U
 #define UMS9117_ADMA2_TABLE_SIZE \
 	(UMS9117_ADMA2_DESC_COUNT * UMS9117_ADMA2_DESC_SIZE)
+/* 128 KiB: the full descriptor table at one page per segment. */
+#define UMS9117_MAX_REQUEST_BYTES 131072U
 
 #define UMS9117_RESET_POLLS 64U
 #define UMS9117_CLOCK_DEADLINE_MS 10U
@@ -218,6 +228,10 @@ static_assert(((((u32)MMC_WRITE_BLOCK << 8) | UMS9117_RESP_SHORT |
 		UMS9117_CMD_CRC | UMS9117_CMD_INDEX | UMS9117_CMD_DATA)
 		       << 16 |
 	       UMS9117_TRANSFER_WRITE_ADMA2) == 0x183a0003U);
+static_assert(((((u32)MMC_READ_MULTIPLE_BLOCK << 8) | UMS9117_RESP_SHORT |
+		UMS9117_CMD_CRC | UMS9117_CMD_INDEX | UMS9117_CMD_DATA)
+		       << 16 |
+	       UMS9117_TRANSFER_CMD18_AUTO_CMD12_ADMA2) == 0x123a0037U);
 static_assert(UMS9117_ADMA2_ATTR_TRANSFER == 0x0021U);
 static_assert(UMS9117_ADMA2_ATTR_TRANSFER_END == 0x0023U);
 static_assert(UMS9117_ADMA2_TABLE_SIZE == 256U);
@@ -454,6 +468,7 @@ struct ta1618_sd_mmc {
 	struct delayed_work timeout_work;
 	struct work_struct finish_work;
 	u32 finish_status;
+	u32 finish_auto_cmd;
 	u32 finish_response[4];
 	bool finish_ack_failed;
 	bool finish_needs_quiesce;
@@ -1151,7 +1166,6 @@ static void ta1618_restore_platform(struct ta1618_sd_mmc *host)
 static bool ums9117_destructive_command(const struct mmc_command *cmd)
 {
 	switch (cmd->opcode) {
-	case MMC_READ_MULTIPLE_BLOCK:
 	case MMC_WRITE_DAT_UNTIL_STOP:
 	case MMC_SET_BLOCK_COUNT:
 	case MMC_WRITE_MULTIPLE_BLOCK:
@@ -1171,6 +1185,29 @@ static bool ums9117_destructive_command(const struct mmc_command *cmd)
 	default:
 		return false;
 	}
+}
+
+/*
+ * The core builds exactly one shape for a multi-block read: CMD18 carrying the
+ * data, a bare CMD12 attached as the stop command, and no set-block-count
+ * because this host never claims to support one. Every field is checked rather
+ * than assumed, so an unexpected shape is refused before any register is
+ * touched instead of being transferred wrongly.
+ */
+static bool ums9117_is_multi_read(const struct mmc_request *mrq,
+				  const struct mmc_host *mmc)
+{
+	const struct mmc_command *cmd = mrq->cmd;
+	const struct mmc_command *stop = mrq->stop;
+	const struct mmc_data *data = cmd->data;
+
+	return cmd->opcode == MMC_READ_MULTIPLE_BLOCK && data &&
+	       data->flags == MMC_DATA_READ && data->blksz == 512 &&
+	       data->blocks >= 2 && data->blocks <= mmc->max_blk_count &&
+	       data->sg && data->sg_len >= 1 && data->sg_len <= mmc->max_segs &&
+	       !mrq->sbc && stop && stop->opcode == MMC_STOP_TRANSMISSION &&
+	       !stop->arg && !stop->data && mmc_resp_type(stop) == MMC_RSP_R1 &&
+	       !mrq->cap_cmd_during_tfr;
 }
 
 static int ums9117_response_flags(const struct mmc_command *cmd, u16 *flags)
@@ -1240,6 +1277,13 @@ static int ums9117_prepare_data(struct ta1618_sd_mmc *host,
 		    data->blksz != 512 || data->sg_len != 1)
 			return -EOPNOTSUPP;
 		direction = DMA_TO_DEVICE;
+	} else if (cmd->opcode == MMC_READ_MULTIPLE_BLOCK) {
+		/*
+		 * Every field of a multi-block read was already checked before
+		 * the request was admitted, so repeating the single-block
+		 * shape guard here would only reject valid work.
+		 */
+		direction = DMA_FROM_DEVICE;
 	} else {
 		if (data->flags != MMC_DATA_READ || data->blocks != 1 ||
 		    !data->blksz || data->blksz > 512 || data->sg_len != 1 ||
@@ -1620,6 +1664,7 @@ static void ums9117_finish_work(struct work_struct *work)
 	bool width_acmd6;
 	bool write_request;
 	bool quiescent = true;
+	u32 auto_cmd;
 	u32 present = 0;
 	unsigned int quiesce_deadline_ms;
 	int error;
@@ -1629,6 +1674,7 @@ static void ums9117_finish_work(struct work_struct *work)
 	mrq = host->finish_mrq;
 	status = host->finish_status;
 	memcpy(response, host->finish_response, sizeof(response));
+	auto_cmd = host->finish_auto_cmd;
 	ack_failed = host->finish_ack_failed;
 	needs_quiesce = host->finish_needs_quiesce;
 	width_acmd6 = host->finish_width_acmd6;
@@ -1657,6 +1703,20 @@ static void ums9117_finish_work(struct work_struct *work)
 		error = -EIO;
 	if (!error)
 		error = ums9117_response_error(cmd, response[0]);
+	/*
+	 * The controller issued the stop command on its own, so its outcome is
+	 * reported only through the status bit and the automatic command error
+	 * field. Both are consulted: a stop that failed leaves the card in the
+	 * data state, and the core has to be told so it can recover.
+	 */
+	if (mrq->stop && ((status & UMS9117_INT_AUTO_CMD12_ERROR) ||
+			  (auto_cmd & UMS9117_AUTO_CMD_ERROR_MASK))) {
+		dev_err(host->dev,
+			"automatic CMD12 failed: irq_status=0x%08x host_control2=0x%08x opcode=%u\n",
+			status, auto_cmd, cmd->opcode);
+		if (!error)
+			error = -EIO;
+	}
 	memcpy(cmd->resp, response, sizeof(cmd->resp));
 	if (needs_quiesce) {
 		quiescent = ums9117_wait_quiescent(host, quiesce_deadline_ms,
@@ -1734,6 +1794,13 @@ static void ums9117_finish_work(struct work_struct *work)
 		cmd->data->bytes_xfered =
 			(unsigned int)cmd->data->blksz * cmd->data->blocks;
 	}
+	/*
+	 * The stop command was never issued by this driver, so its response is
+	 * left zero. The core only inspects it when the error is set, and a
+	 * zero response trips none of its checks.
+	 */
+	if (mrq->stop)
+		mrq->stop->error = error;
 	cmd->error = error;
 
 	spin_lock_irqsave(&host->lock, flags);
@@ -1914,6 +1981,7 @@ static irqreturn_t ums9117_irq(int irq, void *data)
 	u32 status;
 	u32 owned;
 	u32 readback;
+	u32 auto_cmd;
 	u32 raw[4];
 	bool terminal;
 
@@ -1926,6 +1994,12 @@ static irqreturn_t ums9117_irq(int irq, void *data)
 
 	/* SPI57 is level-high: mask the controller before ACKing owned W1C bits. */
 	ta1618_writel(host, RES_INTERRUPT_SIGNAL_ENABLE, 0);
+	/*
+	 * The automatic command error bits are cleared together with the
+	 * interrupt status bit that reports them, so this has to be sampled
+	 * before the acknowledge below or it would always read back clean.
+	 */
+	auto_cmd = ta1618_readl(host, RES_HOST_CONTROL2);
 	ta1618_writel(host, RES_INTERRUPT_STATUS, owned);
 	readback = ta1618_readl(host, RES_INTERRUPT_STATUS);
 
@@ -1976,6 +2050,7 @@ static irqreturn_t ums9117_irq(int irq, void *data)
 		host->finish_response[3] = 0;
 	}
 	host->finish_status = status;
+	host->finish_auto_cmd = auto_cmd;
 	host->finish_ack_failed = !!(readback & owned);
 	host->finish_needs_quiesce = cmd->data || (cmd->flags & MMC_RSP_BUSY);
 	host->finish_width_acmd6 = host->active_width_acmd6;
@@ -2006,6 +2081,7 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	u32 app_cmd_arg = 0;
 	bool app_context = false;
 	bool cmd24_write;
+	bool multi_read;
 	bool post_write_status;
 	bool width_acmd6;
 	int ret;
@@ -2051,7 +2127,9 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	cmd24_write = cmd->opcode == MMC_WRITE_BLOCK && data &&
 		      data->flags == MMC_DATA_WRITE && data->blocks == 1 &&
 		      data->blksz == 512 && data->sg_len == 1;
+	multi_read = ums9117_is_multi_read(mrq, mmc);
 	if ((cmd->opcode == MMC_READ_SINGLE_BLOCK ||
+	     cmd->opcode == MMC_READ_MULTIPLE_BLOCK ||
 	     cmd->opcode == MMC_WRITE_BLOCK) &&
 	    (!READ_ONCE(host->physical_width4) ||
 	     !READ_ONCE(host->clock_13mhz_applied) ||
@@ -2063,13 +2141,14 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	}
 	if (ums9117_destructive_command(cmd) ||
 	    (cmd->opcode == MMC_WRITE_BLOCK && !cmd24_write) ||
+	    (cmd->opcode == MMC_READ_MULTIPLE_BLOCK && !multi_read) ||
 	    (data && (data->flags & MMC_DATA_WRITE) && !cmd24_write)) {
 		ums9117_reject_request(
 			host, mrq, -EOPNOTSUPP,
 			"forbidden data or destructive opcode rejected before MMIO");
 		return;
 	}
-	if (mrq->sbc || mrq->stop || cmd->opcode > 63U) {
+	if (mrq->sbc || (mrq->stop && !multi_read) || cmd->opcode > 63U) {
 		ums9117_reject_request(
 			host, mrq, -EOPNOTSUPP,
 			"SBC, STOP, or invalid opcode rejected before MMIO");
@@ -2090,9 +2169,12 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 				"data mapping or shape rejected before MMIO");
 			return;
 		}
-		transfer = data->flags == MMC_DATA_WRITE ?
-				   UMS9117_TRANSFER_WRITE_ADMA2 :
-				   UMS9117_TRANSFER_READ_ADMA2;
+		if (multi_read)
+			transfer = UMS9117_TRANSFER_CMD18_AUTO_CMD12_ADMA2;
+		else
+			transfer = data->flags == MMC_DATA_WRITE ?
+					   UMS9117_TRANSFER_WRITE_ADMA2 :
+					   UMS9117_TRANSFER_READ_ADMA2;
 	}
 	if (READ_ONCE(host->fatal_error) || READ_ONCE(host->stopping) ||
 	    !READ_ONCE(host->rails_on) || !READ_ONCE(host->card_clock_on)) {
@@ -2137,6 +2219,7 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 		}
 	}
 	if (cmd->opcode == MMC_READ_SINGLE_BLOCK ||
+	    cmd->opcode == MMC_READ_MULTIPLE_BLOCK ||
 	    cmd->opcode == MMC_WRITE_BLOCK) {
 		selector = ta1618_readl(host, RES_CLOCK_SELECTOR);
 		clock = ta1618_readl(host, RES_CLOCK_RESET);
@@ -2156,6 +2239,19 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 			ret = -EPROTO;
 			goto out_error;
 		}
+	}
+	/*
+	 * The block count register is only 32 bits wide in host version 4
+	 * mode, and the controller only issues an automatic CMD12 there. The
+	 * mode is inherited from the boot loader and never programmed here, so
+	 * it is confirmed immediately before every multi-block transfer rather
+	 * than trusted from probe time.
+	 */
+	if (multi_read && ta1618_readl(host, RES_HOST_CONTROL2) !=
+				  UMS9117_HOST_CTRL2_EXPECTED) {
+		spin_unlock_irqrestore(&host->lock, flags);
+		ret = -EPROTO;
+		goto out_error;
 	}
 	stale = ta1618_readl(host, RES_INTERRUPT_STATUS) &
 		UMS9117_OWNED_STATUS_MASK;
@@ -2408,9 +2504,13 @@ static int ums9117_get_ro(struct mmc_host *mmc)
 static int ums9117_multi_io_quirk(struct mmc_card *card, unsigned int direction,
 				  int blk_size)
 {
-	(void)card;
-	(void)direction;
-	(void)blk_size;
+	/*
+	 * The core takes this answer as the block count for the request, so
+	 * returning one is what confines every transfer to a single block.
+	 * Reads are released up to the host limit; writes still are not.
+	 */
+	if (direction == MMC_DATA_READ)
+		return min_t(int, blk_size, card->host->max_blk_count);
 	return 1;
 }
 
@@ -2651,6 +2751,11 @@ static int ums9117_ta1618_mmc_probe(struct platform_device *pdev)
 	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
 	if (ret)
 		goto out_free_host;
+	/*
+	 * A descriptor carries a 16-bit length, so a segment must never be
+	 * allowed to grow past one page and overflow it.
+	 */
+	dma_set_max_seg_size(&pdev->dev, PAGE_SIZE);
 	host->descriptors =
 		dma_alloc_coherent(&pdev->dev, UMS9117_ADMA2_TABLE_SIZE,
 				   &host->descriptors_dma, GFP_KERNEL);
@@ -2679,11 +2784,17 @@ static int ums9117_ta1618_mmc_probe(struct platform_device *pdev)
 	mmc->ocr_avail = MMC_VDD_29_30 | MMC_VDD_30_31;
 	mmc->caps = MMC_CAP_4_BIT_DATA;
 	mmc->caps2 = MMC_CAP2_NO_SDIO | MMC_CAP2_NO_MMC;
-	mmc->max_segs = 1;
+	/*
+	 * These four numbers are the real limit on request shape: the block
+	 * layer derives its own from them, and the core refuses anything that
+	 * exceeds them before the driver is ever called. The segment count
+	 * must not outgrow the descriptor table.
+	 */
+	mmc->max_segs = UMS9117_ADMA2_DESC_COUNT;
 	mmc->max_seg_size = PAGE_SIZE;
-	mmc->max_req_size = PAGE_SIZE;
+	mmc->max_req_size = UMS9117_MAX_REQUEST_BYTES;
 	mmc->max_blk_size = 512;
-	mmc->max_blk_count = PAGE_SIZE / 512;
+	mmc->max_blk_count = UMS9117_MAX_REQUEST_BYTES / 512;
 	mmc->max_busy_timeout = UMS9117_REQUEST_TIMEOUT_MS;
 	platform_set_drvdata(pdev, host);
 
@@ -2696,8 +2807,9 @@ static int ums9117_ta1618_mmc_probe(struct platform_device *pdev)
 	host->audit_file_created = true;
 	dev_notice(
 		&pdev->dev,
-		"registered single-block 4-bit 13MHz UMS9117 SDIO0 MMC host on SPI57; identification 1-bit at %u Hz, 13MHz deferred until clean CMD55/ACMD6 and width4, up to %u 32-bit ADMA2 segments, physical block I/O 512 bytes\n",
-		UMS9117_CLOCK_HZ, UMS9117_ADMA2_DESC_COUNT);
+		"registered 4-bit 13MHz UMS9117 SDIO0 MMC host on SPI57; identification 1-bit at %u Hz, 13MHz deferred until clean CMD55/ACMD6 and width4, up to %u 32-bit ADMA2 segments and %u bytes per request, multi-block reads and writes with automatic CMD12\n",
+		UMS9117_CLOCK_HZ, UMS9117_ADMA2_DESC_COUNT,
+		UMS9117_MAX_REQUEST_BYTES);
 	return 0;
 
 out_remove_host:
