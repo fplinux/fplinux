@@ -20,11 +20,11 @@ from .common import (
     sha256_file,
 )
 from .config import (
+    container_recipe_digest,
+    load_container_lock,
     load_platform,
     load_release,
     load_target,
-    load_toolchain,
-    toolchain_recipe_digest,
     verified_runtime_digest,
 )
 from .container import image_ready, require_podman, setup
@@ -46,7 +46,7 @@ def build(target: str, jobs: int) -> None:
     if jobs < 1:
         fail("--jobs must be positive")
     podman = require_podman()
-    lock = load_toolchain()["oci"]
+    lock = load_container_lock()["oci"]
     if not image_ready(podman, lock["image"]):
         setup()
     cache = ROOT / ".cache"
@@ -73,7 +73,7 @@ def build(target: str, jobs: int) -> None:
             "--env",
             "PYTHONPATH=/workspace/scripts",
             "--env",
-            f"FPLINUX_TOOLCHAIN_RECIPE={toolchain_recipe_digest()}",
+            f"FPLINUX_CONTAINER_RECIPE={container_recipe_digest()}",
             lock["image"],
             "python3",
             "-m",
@@ -159,14 +159,14 @@ def package_target(target: str, *, candidate: bool = False) -> None:
             "target",
             "profile",
             "workspace_recipe",
-            "toolchain_recipe",
+            "container_recipe",
             "files",
         }
         or manifest.get("format") != 1
         or manifest.get("target") != target
         or manifest.get("profile") != profile
         or manifest.get("workspace_recipe") != workspace.name
-        or manifest.get("toolchain_recipe") != toolchain_recipe_digest()
+        or manifest.get("container_recipe") != container_recipe_digest()
         or not isinstance(files_table, dict)
         or set(files_table) != set(release["bundle_files"])
         or any(

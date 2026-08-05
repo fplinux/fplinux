@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 
 from .common import ROOT, fail, run
-from .config import load_toolchain, toolchain_recipe_digest
+from .config import container_recipe_digest, load_container_lock
 from .workspace import stage_quality_workspace
 
 
@@ -64,12 +64,12 @@ def image_ready(podman: str, image: str) -> bool:
         text=True,
         check=False,
     )
-    return result.returncode == 0 and result.stdout.strip() == toolchain_recipe_digest()
+    return result.returncode == 0 and result.stdout.strip() == container_recipe_digest()
 
 
 def setup(*, force: bool = False) -> None:
     podman = require_podman()
-    lock = load_toolchain()
+    lock = load_container_lock()
     oci = lock["oci"]
     buildroot = lock["buildroot"]
     if image_ready(podman, oci["image"]) and not force:
@@ -85,7 +85,7 @@ def setup(*, force: bool = False) -> None:
             "--tag",
             oci["image"],
             "--file",
-            str(ROOT / "toolchains/Containerfile"),
+            str(ROOT / "Containerfile"),
             "--build-arg",
             f"BASE_IMAGE={oci['base']}",
             "--build-arg",
@@ -97,7 +97,7 @@ def setup(*, force: bool = False) -> None:
             "--build-arg",
             f"BUILDROOT_SHA256={buildroot['sha256']}",
             "--label",
-            f"org.fplinux.build.recipe={toolchain_recipe_digest()}",
+            f"org.fplinux.build.recipe={container_recipe_digest()}",
             str(ROOT),
         ]
     )
@@ -151,7 +151,7 @@ def doctor() -> None:
             problems.append("rootless Podman is not active")
         else:
             print("rootless:   yes")
-        image = load_toolchain()["oci"]["image"]
+        image = load_container_lock()["oci"]["image"]
         state = "ready" if image_ready(podman, image) else "not built or stale"
         print(f"image:      {state} ({image})")
     if problems:
@@ -235,7 +235,7 @@ def check_commit_messages(podman: str, lock: dict[str, str], workspace: Path) ->
 def check() -> None:
     check_git_diff()
     podman = require_podman()
-    lock = load_toolchain()["oci"]
+    lock = load_container_lock()["oci"]
     if not image_ready(podman, lock["image"]):
         setup()
 
@@ -250,7 +250,7 @@ def check() -> None:
 
     workspace = stage_quality_workspace()
     check_commit_messages(podman, lock, workspace)
-    scan_recipe = f"{toolchain_recipe_digest()}-{workspace.name}"
+    scan_recipe = f"{container_recipe_digest()}-{workspace.name}"
     run(
         [
             podman,

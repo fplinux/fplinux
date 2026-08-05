@@ -14,6 +14,7 @@ path = [
   ".prettierignore",
   ".prettierrc.json",
   ".vale.ini",
+  "Containerfile",
   "LICENSE",
   "README.md",
   "REUSE.toml",
@@ -23,6 +24,7 @@ path = [
   "buildroot-external/**",
   "commitlint.config.mjs",
   "common/**",
+  "container.lock.toml",
   "docs/**",
   "fplinux",
   "package-lock.json",
@@ -30,10 +32,10 @@ path = [
   "platforms/**",
   "pyproject.toml",
   "releases.lock.toml",
+  "requirements.lock",
   "scripts/**",
   "sources.lock.toml",
   "targets/**",
-  "toolchains/**",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 FPLinux contributors"

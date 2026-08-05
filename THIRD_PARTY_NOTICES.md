@@ -1,8 +1,8 @@
 # Third-party notices
 
 The corresponding source snapshot records exact versions, URLs, commits and
-hashes in `sources.lock.toml`, `toolchains/lock.toml`,
-`toolchains/Containerfile`, `package-lock.json`, and
+hashes in `sources.lock.toml`, `container.lock.toml`,
+`Containerfile`, `package-lock.json`, and
 `targets/nokia-ta1618/loader/assets.lock.toml`. Binary archives carry the target
 asset lock as `assets.lock.toml`, plus content receipts and `SHA256SUMS`.
 

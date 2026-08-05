@@ -25,11 +25,11 @@ from .builder import (
 )
 from .common import ROOT, sha256_file
 from .config import (
+    container_recipe_digest,
     discover_targets,
     load_platform,
     load_target,
     relative_value,
-    toolchain_recipe_digest,
 )
 
 
@@ -146,7 +146,7 @@ def sparse_recipe_digest(
     """Hash every input that can change the generated sparse Kbuild context."""
     manifest = {
         "schema": "fplinux.sparse/v1",
-        "toolchain_recipe": toolchain_recipe_digest(),
+        "container_recipe": container_recipe_digest(),
         "checker_sha256": sha256_file(Path(__file__)),
         "builder_sha256": sha256_file(Path(__file__).with_name("builder.py")),
         "linux_recipe": linux_recipe,

@@ -990,15 +990,15 @@ def publish_bundle(
     if not workspace_marker.is_file() or workspace_marker.is_symlink():
         fail("staged workspace recipe marker is missing")
     workspace_recipe = workspace_marker.read_text().strip()
-    toolchain_recipe = os.environ.get("FPLINUX_TOOLCHAIN_RECIPE", "")
+    container_recipe = os.environ.get("FPLINUX_CONTAINER_RECIPE", "")
     require_sha256(workspace_recipe, "workspace recipe")
-    require_sha256(toolchain_recipe, "toolchain recipe")
+    require_sha256(container_recipe, "container recipe")
     manifest = {
         "format": 1,
         "target": target,
         "profile": target_config["profile"],
         "workspace_recipe": workspace_recipe,
-        "toolchain_recipe": toolchain_recipe,
+        "container_recipe": container_recipe,
         "files": {
             relative: sha256_file(require_file(release / relative))
             for relative in release_manifest["bundle_files"]

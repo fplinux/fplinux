@@ -85,7 +85,7 @@ def check_container_policy(files: list[Path]) -> None:
     ]
     from_instructions = [line for line in instructions if line.upper().startswith("FROM ")]
     if from_instructions != ["FROM ${BASE_IMAGE}"] or instructions[0] != "ARG BASE_IMAGE":
-        fail("the toolchain Containerfile must use one lock-provided FROM ${BASE_IMAGE}")
+        fail("the Containerfile must use one lock-provided FROM ${BASE_IMAGE}")
 
 
 def check_release_lock() -> None:
@@ -282,7 +282,7 @@ def main() -> None:
     )
     # Podman's OCI output has no SHELL support, so pipefail cannot be enabled
     # (DL4006); every pipe feeds printf output into a checked sha256sum.
-    run(["hadolint", "--ignore", "DL4006", "toolchains/Containerfile"])
+    run(["hadolint", "--ignore", "DL4006", "Containerfile"])
     # The quality venv python cannot import check-package's flake8 and magic
     # dependencies; they are provided for the system interpreter.
     run(

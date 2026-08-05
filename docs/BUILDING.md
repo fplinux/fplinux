@@ -18,7 +18,7 @@ Check the build host:
 ```
 
 `doctor` checks the host architecture, Podman rootless mode and whether the one
-pinned OCI build image matches the current toolchain recipe. It does not check
+pinned OCI build image matches the current container recipe. It does not check
 phone runtime libraries or USB access.
 
 The source-quality gate is optional for ordinary build and run use:
@@ -32,7 +32,7 @@ environment as the build. It runs Prettier and markdownlint-cli2 for Markdown,
 Prettier for JSON, Taplo for TOML, Vale and typos for prose, gitleaks for
 secrets, REUSE for licensing
 metadata, Ruff and mypy for Python, shell checks, Buildroot `check-package` for
-`buildroot-external` files, hadolint for the toolchain Containerfile,
+`buildroot-external` files, hadolint for the Containerfile,
 clang-format for userspace and bootstrap C style, Clang `scan-build` for
 userspace C, and the pinned kernel tree's own tooling for kernel sources: its
 clang-format style, `checkpatch.pl`, the canonical `savedefconfig` form, device
@@ -186,7 +186,7 @@ keys and ranges before it performs any host or USB operation.
 ## Build receipts and hardware qualification
 
 A successful build writes deterministic inspection outputs under `debug/` and a
-`build-manifest.json` receipt for the selected source workspace, toolchain recipe
+`build-manifest.json` receipt for the selected source workspace, container recipe
 and generated bundle hashes. This proves which source closure created the bundle;
 it does not prove that the bundle works on a phone.
 
@@ -216,12 +216,14 @@ archives are written under `.cache/out/releases/`. See
 
 ## Reproducibility
 
-The toolchain recipe, Linux, Buildroot, downloaded source archives and phone
+The container recipe, Linux, Buildroot, downloaded source archives and phone
 assets are version- and SHA-256-pinned. The source tree contains one
 Containerfile and creates one tagged FPLinux OCI environment; the digest-pinned
-Debian parent is pulled, not built by this project. The local toolchain tag is
-accepted only when its embedded recipe digest matches every file under
-`toolchains/`. Build timestamps and Kbuild identity are fixed.
+Debian parent is pulled, not built by this project. The local image tag is
+accepted only when its embedded recipe digest matches every recipe input:
+`Containerfile`, `container.lock.toml`, the three package lock files and the
+build driver modules. Build timestamps and Kbuild
+identity are fixed.
 Packaging verifies the successful-build manifest, sorts entries, normalizes
 timestamps and stores only the allowlisted runtime closure.
 

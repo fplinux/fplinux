@@ -458,8 +458,8 @@ def validate_source_policy() -> None:
                 fail(f"unexpected additional container recipe: {relative}")
             containerfiles.append(relative)
     containerfiles.sort()
-    if containerfiles != [Path("toolchains/Containerfile")]:
-        fail("source must contain exactly toolchains/Containerfile")
+    if containerfiles != [Path("Containerfile")]:
+        fail("source must contain exactly one root Containerfile")
     instructions = [
         line.strip()
         for line in (ROOT / containerfiles[0]).read_text().splitlines()
@@ -467,19 +467,19 @@ def validate_source_policy() -> None:
     ]
     from_instructions = [line for line in instructions if line.upper().startswith("FROM ")]
     if from_instructions != ["FROM ${BASE_IMAGE}"] or instructions[0] != "ARG BASE_IMAGE":
-        fail("toolchains/Containerfile must use one lock-provided FROM ${BASE_IMAGE}")
+        fail("Containerfile must use one lock-provided FROM ${BASE_IMAGE}")
 
 
-def load_toolchain() -> dict[str, Any]:
+def load_container_lock() -> dict[str, Any]:
     """Load the one pinned OCI/Buildroot environment lock."""
     validate_source_policy()
-    path = ROOT / "toolchains/lock.toml"
+    path = ROOT / "container.lock.toml"
     with path.open("rb") as stream:
         lock = tomllib.load(stream)
     if set(lock) != {"schema", "oci", "buildroot"} or lock.get("schema") != (
-        "fplinux.toolchains/v1"
+        "fplinux.container/v1"
     ):
-        fail(f"invalid toolchain lock schema: {path}")
+        fail(f"invalid container lock schema: {path}")
     oci = lock.get("oci")
     if not isinstance(oci, dict) or set(oci) != {
         "image",
@@ -488,15 +488,15 @@ def load_toolchain() -> dict[str, Any]:
         "base_created",
         "debian_snapshot",
     }:
-        fail(f"toolchain lock must define exactly one OCI image: {path}")
+        fail(f"container lock must define exactly one OCI image: {path}")
     image = oci.get("image")
     base = oci.get("base")
     if not isinstance(image, str) or not image.startswith("localhost/"):
-        fail(f"toolchain image must be one local tag: {path}")
+        fail(f"container image must be one local tag: {path}")
     if not isinstance(base, str) or re.fullmatch(r"[^@\s]+@sha256:[0-9a-f]{64}", base) is None:
-        fail(f"toolchain base image must be digest-pinned: {path}")
+        fail(f"container base image must be digest-pinned: {path}")
     if oci.get("platform") != "linux/amd64":
-        fail(f"unsupported toolchain platform: {path}")
+        fail(f"unsupported container platform: {path}")
     buildroot = lock.get("buildroot")
     if not isinstance(buildroot, dict) or set(buildroot) != {
         "version",
@@ -509,24 +509,26 @@ def load_toolchain() -> dict[str, Any]:
     return lock
 
 
-def toolchain_recipe_digest() -> str:
+def container_recipe_digest() -> str:
     """Hash every source input of the single OCI recipe."""
     fixed = [
         ROOT / ".containerignore",
+        ROOT / "Containerfile",
+        ROOT / "container.lock.toml",
         ROOT / "package.json",
         ROOT / "package-lock.json",
+        ROOT / "requirements.lock",
         ROOT / "scripts/fplinux_cli/common.py",
         ROOT / "scripts/fplinux_cli/config.py",
         ROOT / "scripts/fplinux_cli/container.py",
     ]
     for path in fixed:
         if path.is_symlink() or not path.is_file():
-            fail(f"toolchain recipe input is missing or invalid: {path}")
+            fail(f"container recipe input is missing or invalid: {path}")
     value = hashlib.sha256()
-    paths = [*fixed, *sorted((ROOT / "toolchains").rglob("*"))]
-    for path in paths:
+    for path in fixed:
         if path.is_symlink():
-            fail(f"toolchain recipe must not contain symlinks: {path}")
+            fail(f"container recipe must not contain symlinks: {path}")
         if not path.is_file():
             continue
         relative = path.relative_to(ROOT).as_posix()
