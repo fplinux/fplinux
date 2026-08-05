@@ -1,5 +1,6 @@
 menu "FPLinux"
 
 source "$BR2_EXTERNAL_FPLINUX_PATH/package/fplinux-console/Config.in"
+source "$BR2_EXTERNAL_FPLINUX_PATH/package/fplinux-cpuclock/Config.in"
 
 endmenu
