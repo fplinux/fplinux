@@ -7,19 +7,20 @@ diff --git a/drivers/mmc/host/Kconfig b/drivers/mmc/host/Kconfig
  	  If unsure, say N.
 +
 +config MMC_TA1618
-+	bool "Nokia TA-1618 removable microSD host"
++	tristate "Nokia TA-1618 removable microSD host"
 +	depends on MACH_NOKIA_TA1618
 +	depends on HAS_DMA
 +	help
-+	  Read-only host for the removable microSD slot of the Nokia 3210 4G,
-+	  driving the UMS9117 SDIO0 instance with the board's proven gate,
-+	  clock, pin and analog rail recipe. This is not an SDHCI driver.
++	  Host for the removable microSD slot of the Nokia 3210 4G, driving
++	  the UMS9117 SDIO0 instance with the board's proven gate, clock,
++	  pin and analog rail recipe. This is not an SDHCI driver.
 +
-+	  Cards are read at 13 MHz over a 4-bit bus one 512-byte block at a
-+	  time. Every write, erase and lock command is refused before it can
-+	  reach the controller, so a card cannot be modified by the phone.
-+	  Card presence is not detected: the card must already be inserted
-+	  when Linux starts, and removing it while mounted is not supported.
++	  Cards are read and written over a 4-bit bus in transfers of up to
++	  256 blocks, at 26 MHz once the card has agreed to high speed and
++	  at 13 MHz otherwise. Erase, lock and write-protect commands are
++	  refused before they can reach the controller. Card presence is not
++	  detected: the card must already be inserted when Linux starts, and
++	  removing it while mounted is not supported.
 +	  The phone's internal storage is raw NAND on a different controller
 +	  that this driver cannot reach.
 diff --git a/drivers/mmc/host/Makefile b/drivers/mmc/host/Makefile
