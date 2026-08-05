@@ -49,6 +49,7 @@ copies = [
 ]
 appends = []
 forbidden_config = ["CONFIG_<UNSAFE_STORAGE_PATH>=y"]
+forbidden_dtb_markers = ["<marker>", ...]
 
 [bootstrap]
 source = "bootstrap"

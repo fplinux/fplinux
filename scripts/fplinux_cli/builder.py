@@ -447,6 +447,7 @@ def verify_images(
     map_file: Path,
     load_address: int,
     payload_limit: int,
+    forbidden_markers: list[str],
 ) -> None:
     """Enforce the generic RAM-only bootstrap image contract."""
     image = ramboot.read_bytes()
@@ -464,9 +465,9 @@ def verify_images(
     if tree[:4] != b"\xd0\x0d\xfe\xed":
         fail("target DTB has invalid FDT magic")
     lowered = tree.lower()
-    for forbidden in (b"mmc", b"sdhci", b"sdio"):
-        if forbidden in lowered:
-            fail(f"target DTB contains forbidden storage marker {forbidden.decode()}")
+    for marker in forbidden_markers:
+        if marker.lower().encode() in lowered:
+            fail(f"target DTB contains forbidden storage marker {marker}")
 
     symbols: dict[str, int] = {}
     for line in map_file.read_text().splitlines():
@@ -594,6 +595,7 @@ def build_bootstrap(
         ramboot_map,
         target_bootstrap["load_address"],
         target_bootstrap["payload_limit"],
+        target_config["linux"]["forbidden_dtb_markers"],
     )
     return ramboot, ramboot_map
 

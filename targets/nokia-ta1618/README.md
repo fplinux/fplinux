@@ -25,6 +25,40 @@ terminal closure has not completed its exact phone-side release gate.
 prebuilt archive is currently available. A successful source build or a local
 candidate package does not change that status.
 
+## microSD card
+
+The removable microSD slot is driven by a board-specific host on the UMS9117
+SDIO0 instance. It is deliberately not an SDHCI driver: the register at offset
+0x28 is a 32-bit custom host control word and there is no SDHCI power control
+byte, so the driver programs the gate, reset, clock selector, pin and analog
+rail recipe that was proven on this board.
+
+What works: a card that is already inserted when Linux starts is identified,
+switched to a 4-bit bus at 13 MHz and read one 512-byte block at a time. A
+FAT32 partition can be mounted read-only.
+
+What is deliberately absent:
+
+- **Writing.** Every write, erase, lock and write-protect command is refused
+  before it can reach the controller, so the phone cannot modify a card.
+- **Hot-swap.** The board does have a card-detect pin, but this driver never
+  reads it. The card must be inserted before Linux starts, and removing it
+  while mounted is not supported.
+- **Speed.** Reads are single-block, which is far below what the hardware can
+  do. Multi-block reads and a faster bus are proven on this board but are not
+  part of this driver.
+
+The phone's internal storage is SPI NAND on a separate controller with its own
+gate, reset and interrupt. It is not described in the device tree, no NAND or
+MTD support is built, and the build refuses any kernel configuration or device
+tree that would reach it. The host driver only ever writes the set and clear
+aliases of the peripheral gate and reset banks, so it cannot disturb a
+neighbouring controller even transiently.
+
+One detail is still unconfirmed on hardware: the interrupt number follows the
+same numbering the system timer and the USB controller already use on this
+board, but this controller's own interrupt has not yet been observed live.
+
 ## Hardware support
 
 **Supported** means the feature has been exercised on physical TA-1618 hardware
@@ -43,7 +77,7 @@ that the stated limitation or current qualification gap still applies.
 | Physical keypad                   | Supported     | Polled matrix plus separate physical 8 key through analog EIC9/ADI |
 | USB device mode                   | Supported     | MUSB peripheral mode with `g_serial` at USB ID `0525:a4a6`         |
 | USB host mode                     | Not supported | The phone target enables peripheral mode only                      |
-| microSD / MMC                     | Not supported | No MMC / SD controller implementation; block and MMC are disabled  |
+| microSD card                      | Read-only     | 4-bit 13 MHz single-block reads; writes refused; no hot-swap       |
 | Internal flash access             | Not supported | Linux does not expose phone storage                                |
 | Audio                             | Not supported | No speaker, headphone or microphone driver is implemented          |
 | Modem, calls, SMS and mobile data | Not supported | Baseband interfaces are not implemented                            |

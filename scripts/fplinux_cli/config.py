@@ -170,6 +170,7 @@ def load_target(target: str) -> dict[str, Any]:
             "copies",
             "appends",
             "forbidden_config",
+            "forbidden_dtb_markers",
         },
         "target linux",
     )
@@ -180,6 +181,7 @@ def load_target(target: str) -> dict[str, Any]:
     path_steps(linux.get("copies"), "target linux copies")
     path_steps(linux.get("appends"), "target linux appends")
     string_array(linux.get("forbidden_config"), "target linux forbidden_config")
+    string_array(linux.get("forbidden_dtb_markers"), "target linux forbidden_dtb_markers")
 
     bootstrap = exact_table(
         config.get("bootstrap"),
