@@ -35,6 +35,8 @@
 #define MAX_UPLOAD_BYTES (8u * 1024u * 1024u)
 #define UPLOAD_WINDOW_LINES 16u
 #define MAX_EXEC_OUTPUT_BYTES (1u * 1024u * 1024u)
+#define PULL_BLOCK_BYTES (32u * 1024u)
+#define PULL_BLOCK_ATTEMPTS 3u
 #define LOCAL_ESCAPE 0x1du
 
 #define USB_DT_CS_INTERFACE 0x24u
@@ -61,6 +63,8 @@ struct options {
 	const char *upload_local;
 	const char *upload_remote;
 	const char *exec_command;
+	const char *pull_remote;
+	const char *pull_local;
 };
 
 struct capture {
@@ -129,6 +133,12 @@ static void usage(FILE *stream)
 	    "  --exec COMMAND     run COMMAND on the phone, copy its stdout "
 	    "to\n"
 	    "                     this stdout and exit with its exit status\n"
+	    "  --pull REMOTE LOCAL\n"
+	    "                     copy REMOTE off the phone to LOCAL in "
+	    "verified\n"
+	    "                     blocks; LOCAL appears only once the whole "
+	    "file\n"
+	    "                     matches the digest the phone reported\n"
 	    "  -h, --help         show this help and exit\n"
 	    "\n"
 	    "Interactive mode uses Ctrl-] as the local escape. Ctrl-C is sent\n"
@@ -328,6 +338,7 @@ static int parse_options(int argc, char **argv, struct options *options)
 		OPT_LIST,
 		OPT_UPLOAD,
 		OPT_EXEC,
+		OPT_PULL,
 		OPT_SELF_TEST,
 	};
 	static const struct option long_options[] = {
@@ -343,6 +354,7 @@ static int parse_options(int argc, char **argv, struct options *options)
 	    {"list", no_argument, NULL, OPT_LIST},
 	    {"upload", required_argument, NULL, OPT_UPLOAD},
 	    {"exec", required_argument, NULL, OPT_EXEC},
+	    {"pull", required_argument, NULL, OPT_PULL},
 	    {"self-test", no_argument, NULL, OPT_SELF_TEST},
 	    {"help", no_argument, NULL, 'h'},
 	    {NULL, 0, NULL, 0},
@@ -458,6 +470,9 @@ static int parse_options(int argc, char **argv, struct options *options)
 		case OPT_EXEC:
 			options->exec_command = optarg;
 			break;
+		case OPT_PULL:
+			options->pull_remote = optarg;
+			break;
 		case OPT_SELF_TEST:
 			options->self_test = true;
 			break;
@@ -477,15 +492,27 @@ static int parse_options(int argc, char **argv, struct options *options)
 				"and REMOTE\n");
 		return -1;
 	}
-	if (options->upload_local != NULL && options->exec_command != NULL) {
-		fprintf(stderr, "fplinux-usb-console: --upload and --exec are "
-				"mutually exclusive\n");
+	if (options->pull_remote != NULL && optind + 1 == argc) {
+		options->pull_local = argv[optind++];
+	}
+	if (options->pull_remote != NULL && options->pull_local == NULL) {
+		fprintf(stderr, "fplinux-usb-console: --pull requires REMOTE "
+				"and LOCAL\n");
 		return -1;
 	}
-	if (options->exec_command != NULL &&
+	if ((options->upload_local != NULL) + (options->exec_command != NULL) +
+		(options->pull_remote != NULL) >
+	    1) {
+		fprintf(stderr,
+			"fplinux-usb-console: --upload, --exec and --pull are "
+			"mutually exclusive\n");
+		return -1;
+	}
+	if ((options->exec_command != NULL || options->pull_remote != NULL) &&
 	    (options->list_devices || options->self_test)) {
-		fprintf(stderr, "fplinux-usb-console: --exec cannot be combined "
-				"with --list or --self-test\n");
+		fprintf(stderr,
+			"fplinux-usb-console: --exec and --pull cannot be "
+			"combined with --list or --self-test\n");
 		return -1;
 	}
 	if (options->exec_command != NULL &&
@@ -1541,6 +1568,121 @@ static int send_line(libusb_device_handle *handle,
 			  timeout_ms);
 }
 
+static int base64_value(unsigned char symbol)
+{
+	if (symbol >= 'A' && symbol <= 'Z') {
+		return symbol - 'A';
+	}
+	if (symbol >= 'a' && symbol <= 'z') {
+		return symbol - 'a' + 26;
+	}
+	if (symbol >= '0' && symbol <= '9') {
+		return symbol - '0' + 52;
+	}
+	if (symbol == '+') {
+		return 62;
+	}
+	if (symbol == '/') {
+		return 63;
+	}
+	return -1;
+}
+
+static int decode_base64(const char *text, size_t size, unsigned char *output,
+			 size_t capacity, size_t *decoded)
+{
+	uint32_t accumulator = 0;
+	unsigned int bits = 0;
+	size_t written = 0;
+	size_t index;
+
+	for (index = 0; index < size; ++index) {
+		unsigned char symbol = (unsigned char)text[index];
+		int value;
+
+		if (symbol == '\n' || symbol == '\r' || symbol == ' ' ||
+		    symbol == '\t') {
+			continue;
+		}
+		if (symbol == '=') {
+			break;
+		}
+		value = base64_value(symbol);
+		if (value < 0) {
+			return -1;
+		}
+		accumulator = (accumulator << 6) | (uint32_t)value;
+		bits += 6;
+		if (bits >= 8) {
+			bits -= 8;
+			if (written == capacity) {
+				return -1;
+			}
+			output[written++] =
+			    (unsigned char)((accumulator >> bits) & 0xffu);
+		}
+	}
+	*decoded = written;
+	return 0;
+}
+
+static void digest_to_hex(const unsigned char digest[32], char hex[65])
+{
+	static const char digits[] = "0123456789abcdef";
+	size_t index;
+
+	for (index = 0; index < 32u; ++index) {
+		hex[index * 2] = digits[digest[index] >> 4];
+		hex[index * 2 + 1] = digits[digest[index] & 0x0fu];
+	}
+	hex[64] = '\0';
+}
+
+static void hash_bytes(const unsigned char *data, size_t size, char hex[65])
+{
+	struct sha256_state state;
+	unsigned char digest[32];
+
+	sha256_init(&state);
+	sha256_update(&state, data, size);
+	sha256_finish(&state, digest);
+	digest_to_hex(digest, hex);
+}
+
+/*
+ * Naming the characters a path may contain is what makes the single quotes
+ * around it in a shell line sufficient.
+ */
+static bool safe_remote_source(const char *path)
+{
+	size_t index;
+	bool separator = true;
+
+	if (path == NULL || path[0] != '/') {
+		return false;
+	}
+	for (index = 1; path[index] != '\0'; ++index) {
+		char symbol = path[index];
+
+		if (symbol == '/') {
+			if (separator) {
+				return false;
+			}
+			separator = true;
+			continue;
+		}
+		if (!isalnum((unsigned char)symbol) && symbol != '.' &&
+		    symbol != '_' && symbol != '-') {
+			return false;
+		}
+		if (symbol == '.' && separator && path[index + 1] == '.') {
+			return false;
+		}
+		separator = false;
+	}
+	return !separator;
+}
+
 static void make_nonce(char nonce[33])
 {
 	snprintf(nonce, 33, "%016llx%08lx",
@@ -1672,6 +1814,276 @@ cleanup:
 	return result;
 }
 
+/*
+ * Blocks rather than one stream: a damaged block is asked for again instead
+ * of sinking a transfer whose source may be unrepeatable.  The phone digests
+ * every block, and the whole file before the first one moves.
+ */
+static int pull_block(libusb_device_handle *handle,
+		      const struct endpoint_pair *pair,
+		      const struct options *options, const char *nonce,
+		      uint64_t index, unsigned char *block, size_t *block_size)
+{
+	struct capture capture;
+	char command[512];
+	char begin[80];
+	char end[80];
+	char expected[65];
+	char actual[65];
+	char *begin_at;
+	char *end_at;
+	char *data;
+	int result;
+
+	snprintf(begin, sizeof(begin), "FPLINUX_PULL_B:%s:%llu:", nonce,
+		 (unsigned long long)index);
+	snprintf(end, sizeof(end), "FPLINUX_PULL_E:%s:%llu", nonce,
+		 (unsigned long long)index);
+	snprintf(command, sizeof(command),
+		 "dd if='%s' bs=%u skip=%llu count=1 of=\"$fplinux_blk\" "
+		 "2>/dev/null; fplinux_d=$(sha256sum \"$fplinux_blk\"); "
+		 "printf '\\nFPLINUX_PULL_%%s:%%s:%llu:%%s\\n' B '%s' "
+		 "\"${fplinux_d%%%% *}\"; base64 \"$fplinux_blk\"; "
+		 "printf 'FPLINUX_PULL_%%s:%%s:%llu\\n' E '%s'\n",
+		 options->pull_remote, PULL_BLOCK_BYTES,
+		 (unsigned long long)index, (unsigned long long)index, nonce,
+		 (unsigned long long)index, nonce);
+	capture_init(&capture, PULL_BLOCK_BYTES * 2u + 8192u);
+	result = send_line(handle, pair, command, options->timeout_ms);
+	if (result != LIBUSB_SUCCESS) {
+		goto cleanup;
+	}
+	result = collect_until(handle, pair->endpoint_in, options->timeout_ms,
+			       120000u, end, &capture);
+	if (result != LIBUSB_SUCCESS) {
+		goto cleanup;
+	}
+	begin_at = capture_find(&capture, begin);
+	end_at = capture_find(&capture, end);
+	if (begin_at == NULL || end_at == NULL || end_at < begin_at) {
+		result = LIBUSB_ERROR_IO;
+		goto cleanup;
+	}
+	data = begin_at + strlen(begin);
+	if ((size_t)(end_at - data) < 65u) {
+		result = LIBUSB_ERROR_IO;
+		goto cleanup;
+	}
+	memcpy(expected, data, 64);
+	expected[64] = '\0';
+	data += 64;
+	if (decode_base64(data, (size_t)(end_at - data), block,
+			  PULL_BLOCK_BYTES, block_size) != 0) {
+		result = LIBUSB_ERROR_IO;
+		goto cleanup;
+	}
+	hash_bytes(block, *block_size, actual);
+	result =
+	    strcmp(expected, actual) == 0 ? LIBUSB_SUCCESS : LIBUSB_ERROR_IO;
+
+cleanup:
+	capture_free(&capture);
+	return result;
+}
+
+static int pull_file(libusb_device_handle *handle,
+		     const struct endpoint_pair *pair,
+		     const struct options *options)
+{
+	struct capture capture;
+	struct sha256_state state;
+	unsigned char digest[32];
+	unsigned char *block = NULL;
+	char partial[4104] = "";
+	char nonce[33];
+	char command[768];
+	char marker[80];
+	char remote_hash[65];
+	char local_hash[65];
+	char *field;
+	FILE *output = NULL;
+	uint64_t remote_size = 0;
+	uint64_t taken = 0;
+	uint64_t index = 0;
+	bool echo_disabled = false;
+	int result;
+
+	capture_init(&capture, 65536u);
+	if (!safe_remote_source(options->pull_remote)) {
+		fprintf(stderr,
+			"fplinux-usb-console: pull source must be an absolute "
+			"path of letters, digits, '.', '_' and '-': %s\n",
+			options->pull_remote);
+		return LIBUSB_ERROR_INVALID_PARAM;
+	}
+	if (snprintf(partial, sizeof(partial), "%s.part",
+		     options->pull_local) >= (int)sizeof(partial)) {
+		fprintf(stderr, "fplinux-usb-console: pull destination path is "
+				"too long\n");
+		return LIBUSB_ERROR_INVALID_PARAM;
+	}
+	block = malloc(PULL_BLOCK_BYTES);
+	if (block == NULL) {
+		result = LIBUSB_ERROR_NO_MEM;
+		goto cleanup;
+	}
+	make_nonce(nonce);
+	snprintf(marker, sizeof(marker), "FPLINUX_PULL_META:%s:", nonce);
+	snprintf(command, sizeof(command),
+		 "stty -echo; fplinux_blk=$(mktemp /tmp/.fplinux-pull.XXXXXX); "
+		 "if [ -f '%s' ] && [ -r '%s' ]; then "
+		 "fplinux_h=$(sha256sum '%s'); "
+		 "printf '\\nFPLINUX_PULL_%%s:%%s:%%s:%%s\\n' META '%s' "
+		 "\"$(wc -c < '%s')\" \"${fplinux_h%%%% *}\"; "
+		 "else printf '\\nFPLINUX_PULL_%%s:%%s:-1:-\\n' META '%s'; "
+		 "fi\n",
+		 options->pull_remote, options->pull_remote,
+		 options->pull_remote, nonce, options->pull_remote, nonce);
+	result = send_line(handle, pair, command, options->timeout_ms);
+	if (result != LIBUSB_SUCCESS) {
+		goto cleanup;
+	}
+	echo_disabled = true;
+	result = collect_until(handle, pair->endpoint_in, options->timeout_ms,
+			       180000u, marker, &capture);
+	if (result != LIBUSB_SUCCESS) {
+		fprintf(stderr, "fplinux-usb-console: the phone did not report "
+				"the size of the file\n");
+		goto cleanup;
+	}
+	field = capture_find(&capture, marker);
+	if (field == NULL) {
+		result = LIBUSB_ERROR_IO;
+		goto cleanup;
+	}
+	field += strlen(marker);
+	if (*field == '-') {
+		fprintf(stderr,
+			"fplinux-usb-console: the phone cannot read %s\n",
+			options->pull_remote);
+		result = LIBUSB_ERROR_NOT_FOUND;
+		goto cleanup;
+	}
+	remote_size = strtoull(field, &field, 10);
+	if (*field != ':' || strlen(field + 1) < 64u) {
+		result = LIBUSB_ERROR_IO;
+		goto cleanup;
+	}
+	memcpy(remote_hash, field + 1, 64);
+	remote_hash[64] = '\0';
+	if (remote_size > MAX_UPLOAD_BYTES) {
+		fprintf(stderr,
+			"fplinux-usb-console: %s exceeds the 8 MiB transfer "
+			"limit\n",
+			options->pull_remote);
+		result = LIBUSB_ERROR_INVALID_PARAM;
+		goto cleanup;
+	}
+	fprintf(
+	    stderr, "fplinux-usb-console: pulling %s (%llu bytes, sha256=%s)\n",
+	    options->pull_remote, (unsigned long long)remote_size, remote_hash);
+	output = fopen(partial, "wb");
+	if (output == NULL) {
+		fprintf(stderr, "fplinux-usb-console: cannot open %s: %s\n",
+			partial, strerror(errno));
+		result = LIBUSB_ERROR_IO;
+		goto cleanup;
+	}
+	sha256_init(&state);
+	while (taken < remote_size && !signal_requested) {
+		size_t block_size = 0;
+		unsigned int attempt;
+
+		for (attempt = 0; attempt < PULL_BLOCK_ATTEMPTS; ++attempt) {
+			result = pull_block(handle, pair, options, nonce, index,
+					    block, &block_size);
+			if (result == LIBUSB_SUCCESS) {
+				break;
+			}
+			if (result != LIBUSB_ERROR_IO) {
+				goto cleanup;
+			}
+			fprintf(stderr,
+				"fplinux-usb-console: block %llu did not "
+				"verify, asking again\n",
+				(unsigned long long)index);
+		}
+		if (result != LIBUSB_SUCCESS) {
+			fprintf(stderr,
+				"fplinux-usb-console: block %llu failed %u "
+				"times, giving up\n",
+				(unsigned long long)index, PULL_BLOCK_ATTEMPTS);
+			goto cleanup;
+		}
+		if (block_size == 0) {
+			fprintf(stderr,
+				"fplinux-usb-console: the phone stopped "
+				"short of the size it reported\n");
+			result = LIBUSB_ERROR_IO;
+			goto cleanup;
+		}
+		if (fwrite(block, 1, block_size, output) != block_size) {
+			fprintf(stderr,
+				"fplinux-usb-console: cannot write %s: %s\n",
+				partial, strerror(errno));
+			result = LIBUSB_ERROR_IO;
+			goto cleanup;
+		}
+		sha256_update(&state, block, block_size);
+		taken += block_size;
+		++index;
+		fprintf(stderr, "\rfplinux-usb-console: %llu of %llu bytes",
+			(unsigned long long)taken,
+			(unsigned long long)remote_size);
+	}
+	fputc('\n', stderr);
+	if (signal_requested) {
+		result = LIBUSB_ERROR_INTERRUPTED;
+		goto cleanup;
+	}
+	if (fclose(output) != 0) {
+		output = NULL;
+		result = LIBUSB_ERROR_IO;
+		goto cleanup;
+	}
+	output = NULL;
+	sha256_finish(&state, digest);
+	digest_to_hex(digest, local_hash);
+	if (strcmp(local_hash, remote_hash) != 0) {
+		fprintf(stderr,
+			"fplinux-usb-console: what arrived does not match what "
+			"the phone reported: %s\n",
+			local_hash);
+		result = LIBUSB_ERROR_IO;
+		goto cleanup;
+	}
+	if (rename(partial, options->pull_local) != 0) {
+		fprintf(stderr, "fplinux-usb-console: cannot install %s: %s\n",
+			options->pull_local, strerror(errno));
+		result = LIBUSB_ERROR_IO;
+		goto cleanup;
+	}
+	fprintf(stderr, "fplinux-usb-console: pull verified: %s\n",
+		options->pull_local);
+	result = LIBUSB_SUCCESS;
+
+cleanup:
+	if (output != NULL) {
+		fclose(output);
+	}
+	if (result != LIBUSB_SUCCESS && partial[0] != '\0') {
+		(void)remove(partial);
+	}
+	if (echo_disabled) {
+		(void)send_line(handle, pair,
+				"\003\nrm -f \"$fplinux_blk\"; stty echo\n",
+				options->timeout_ms);
+	}
+	capture_free(&capture);
+	free(block);
+	return result;
+}
+
 static int self_test(void)
 {
 	static const char empty_hash[] = "e3b0c44298fc1c149afbf4c8996fb924"
@@ -1686,6 +2098,7 @@ static int self_test(void)
 	struct sha256_state state;
 	unsigned char digest[32];
 	unsigned char base64[77];
+	unsigned char decoded[16];
 	char hash[65];
 	unsigned int index;
 	size_t size;
@@ -1747,6 +2160,37 @@ static int self_test(void)
 	    safe_tmp_path("/tmp/../nv.bin") || safe_tmp_path("/data/nv.bin") ||
 	    safe_tmp_path("/tmp/double//slash")) {
 		fprintf(stderr, "fplinux-usb-console: self-test failed: upload "
+				"path policy\n");
+		return 1;
+	}
+	if (decode_base64("Zm9vYmFy\n", 9, decoded, sizeof(decoded), &size) !=
+		0 ||
+	    size != 6u || memcmp(decoded, "foobar", 6) != 0) {
+		fprintf(stderr, "fplinux-usb-console: self-test failed: base64 "
+				"decode\n");
+		return 1;
+	}
+	if (decode_base64("AA==", 4, decoded, sizeof(decoded), &size) != 0 ||
+	    size != 1u || decoded[0] != 0u ||
+	    decode_base64("AAA=", 4, decoded, sizeof(decoded), &size) != 0 ||
+	    size != 2u) {
+		fprintf(stderr, "fplinux-usb-console: self-test failed: base64 "
+				"decode padding\n");
+		return 1;
+	}
+	if (decode_base64("Zm9v", 4, decoded, 1u, &size) == 0 ||
+	    decode_base64("Zm9!", 4, decoded, sizeof(decoded), &size) == 0) {
+		fprintf(stderr, "fplinux-usb-console: self-test failed: base64 "
+				"decode refuses bad input\n");
+		return 1;
+	}
+	if (!safe_remote_source("/tmp/take.bin") ||
+	    !safe_remote_source("/proc/meminfo") ||
+	    safe_remote_source("/tmp/../etc/shadow") ||
+	    safe_remote_source("relative/path") ||
+	    safe_remote_source("/tmp/double//slash") ||
+	    safe_remote_source("/tmp/semi;colon") || safe_remote_source("/")) {
+		fprintf(stderr, "fplinux-usb-console: self-test failed: pull "
 				"path policy\n");
 		return 1;
 	}
@@ -2038,6 +2482,14 @@ int main(int argc, char **argv)
 			goto cleanup;
 		}
 		exit_status = remote_status;
+		goto cleanup;
+	}
+	if (options.pull_remote != NULL) {
+		result = pull_file(handle, &pair, &options);
+		if (result != LIBUSB_SUCCESS) {
+			goto cleanup;
+		}
+		exit_status = 0;
 		goto cleanup;
 	}
 	if (options.upload_local != NULL) {
