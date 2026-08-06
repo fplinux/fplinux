@@ -1195,6 +1195,8 @@ static int upload_file(libusb_device_handle *handle,
 	char failure_marker[128];
 	unsigned char input[57];
 	unsigned char encoded[77];
+	unsigned char batch[77 * UPLOAD_WINDOW_LINES];
+	size_t batched = 0;
 	uint64_t byte_count;
 	uint64_t sent_bytes = 0;
 	unsigned int window_lines = 0;
@@ -1345,13 +1347,16 @@ static int upload_file(libusb_device_handle *handle,
 			goto cleanup;
 		}
 		sent_bytes += size;
-		result = send_bytes(handle, pair->endpoint_out, encoded,
-				    encoded_size, options->timeout_ms);
-		if (result != LIBUSB_SUCCESS) {
-			goto cleanup;
-		}
+		memcpy(batch + batched, encoded, encoded_size);
+		batched += encoded_size;
 		++window_lines;
 		if (window_lines == UPLOAD_WINDOW_LINES) {
+			result = send_bytes(handle, pair->endpoint_out, batch,
+					    batched, options->timeout_ms);
+			batched = 0;
+			if (result != LIBUSB_SUCCESS) {
+				goto cleanup;
+			}
 			result = wait_for_upload_prompts(
 			    handle, pair->endpoint_in, options->timeout_ms, ".",
 			    window_lines);
@@ -1377,6 +1382,11 @@ static int upload_file(libusb_device_handle *handle,
 		goto cleanup;
 	}
 	if (window_lines > 0) {
+		result = send_bytes(handle, pair->endpoint_out, batch, batched,
+				    options->timeout_ms);
+		if (result != LIBUSB_SUCCESS) {
+			goto cleanup;
+		}
 		result = wait_for_upload_prompts(handle, pair->endpoint_in,
 						 options->timeout_ms, ".",
 						 window_lines);
