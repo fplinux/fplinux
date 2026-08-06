@@ -107,6 +107,11 @@ the BootROM loader again:
 .cache/out/nokia-ta1618/console/host/fplinux-usb-console
 ```
 
+The same client also runs one command on the phone and reports its exit status,
+sends a file to it, and takes a file off it, all without opening a terminal. See
+[Moving files between the host and the phone](docs/TRANSFER.md) for the modes,
+what each of them verifies and the rates they reach.
+
 To leave the RAM session, detach with `Ctrl-]`, disconnect USB, remove the
 TA-1618 battery, then reinsert it. The next power-on uses the unchanged vendor
 firmware because the FPLinux payload was held only in volatile RAM. Linux
