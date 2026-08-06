@@ -8,6 +8,7 @@
 
 #define _DEFAULT_SOURCE
 
+#include <ctype.h>
 #include <errno.h>
 #include <getopt.h>
 #include <libusb.h>
@@ -33,6 +34,7 @@
 #define TRANSFER_BUFFER_SIZE 16384u
 #define MAX_UPLOAD_BYTES (8u * 1024u * 1024u)
 #define UPLOAD_WINDOW_LINES 16u
+#define MAX_EXEC_OUTPUT_BYTES (1u * 1024u * 1024u)
 #define LOCAL_ESCAPE 0x1du
 
 #define USB_DT_CS_INTERFACE 0x24u
@@ -58,6 +60,14 @@ struct options {
 	bool self_test;
 	const char *upload_local;
 	const char *upload_remote;
+	const char *exec_command;
+};
+
+struct capture {
+	char *data;
+	size_t size;
+	size_t capacity;
+	size_t limit;
 };
 
 struct endpoint_pair {
@@ -116,6 +126,9 @@ static void usage(FILE *stream)
 	    "                     and is installed only after device-side "
 	    "SHA-256\n"
 	    "                     verification\n"
+	    "  --exec COMMAND     run COMMAND on the phone, copy its stdout "
+	    "to\n"
+	    "                     this stdout and exit with its exit status\n"
 	    "  -h, --help         show this help and exit\n"
 	    "\n"
 	    "Interactive mode uses Ctrl-] as the local escape. Ctrl-C is sent\n"
@@ -314,6 +327,7 @@ static int parse_options(int argc, char **argv, struct options *options)
 		OPT_NO_DETACH,
 		OPT_LIST,
 		OPT_UPLOAD,
+		OPT_EXEC,
 		OPT_SELF_TEST,
 	};
 	static const struct option long_options[] = {
@@ -328,6 +342,7 @@ static int parse_options(int argc, char **argv, struct options *options)
 	    {"no-detach", no_argument, NULL, OPT_NO_DETACH},
 	    {"list", no_argument, NULL, OPT_LIST},
 	    {"upload", required_argument, NULL, OPT_UPLOAD},
+	    {"exec", required_argument, NULL, OPT_EXEC},
 	    {"self-test", no_argument, NULL, OPT_SELF_TEST},
 	    {"help", no_argument, NULL, 'h'},
 	    {NULL, 0, NULL, 0},
@@ -440,6 +455,9 @@ static int parse_options(int argc, char **argv, struct options *options)
 		case OPT_UPLOAD:
 			options->upload_local = optarg;
 			break;
+		case OPT_EXEC:
+			options->exec_command = optarg;
+			break;
 		case OPT_SELF_TEST:
 			options->self_test = true;
 			break;
@@ -457,6 +475,23 @@ static int parse_options(int argc, char **argv, struct options *options)
 	if (options->upload_local != NULL && options->upload_remote == NULL) {
 		fprintf(stderr, "fplinux-usb-console: --upload requires LOCAL "
 				"and REMOTE\n");
+		return -1;
+	}
+	if (options->upload_local != NULL && options->exec_command != NULL) {
+		fprintf(stderr, "fplinux-usb-console: --upload and --exec are "
+				"mutually exclusive\n");
+		return -1;
+	}
+	if (options->exec_command != NULL &&
+	    (options->list_devices || options->self_test)) {
+		fprintf(stderr, "fplinux-usb-console: --exec cannot be combined "
+				"with --list or --self-test\n");
+		return -1;
+	}
+	if (options->exec_command != NULL &&
+	    strchr(options->exec_command, '\n') != NULL) {
+		fprintf(stderr, "fplinux-usb-console: --exec command must be a "
+				"single line\n");
 		return -1;
 	}
 	if (optind != argc) {
@@ -1400,6 +1435,243 @@ cleanup:
 	return result;
 }
 
+static void capture_init(struct capture *capture, size_t limit)
+{
+	capture->data = NULL;
+	capture->size = 0;
+	capture->capacity = 0;
+	capture->limit = limit;
+}
+
+static void capture_free(struct capture *capture)
+{
+	free(capture->data);
+	capture_init(capture, capture->limit);
+}
+
+static int capture_append(struct capture *capture, const unsigned char *data,
+			  size_t size)
+{
+	if (size > capture->limit - capture->size) {
+		return -1;
+	}
+	if (capture->size + size + 1 > capture->capacity) {
+		size_t wanted =
+		    capture->capacity == 0 ? 8192 : capture->capacity * 2;
+		char *grown;
+
+		while (wanted < capture->size + size + 1) {
+			wanted *= 2;
+		}
+		grown = realloc(capture->data, wanted);
+		if (grown == NULL) {
+			return -1;
+		}
+		capture->data = grown;
+		capture->capacity = wanted;
+	}
+	memcpy(capture->data + capture->size, data, size);
+	capture->size += size;
+	capture->data[capture->size] = '\0';
+	return 0;
+}
+
+static char *capture_find(const struct capture *capture, const char *needle)
+{
+	size_t needle_size = strlen(needle);
+	size_t index;
+
+	if (capture->data == NULL || needle_size == 0 ||
+	    needle_size > capture->size) {
+		return NULL;
+	}
+	for (index = 0; index + needle_size <= capture->size; ++index) {
+		if (memcmp(capture->data + index, needle, needle_size) == 0) {
+			return capture->data + index;
+		}
+	}
+	return NULL;
+}
+
+/*
+ * A reply shares the line with the phone's own log, so it is found by
+ * scanning rather than by position, and a marker can straddle any number of
+ * bulk transfers.
+ */
+static int collect_until(libusb_device_handle *handle, uint8_t endpoint,
+			 unsigned int transfer_timeout_ms,
+			 unsigned int overall_timeout_ms, const char *marker,
+			 struct capture *capture)
+{
+	unsigned char input[TRANSFER_BUFFER_SIZE];
+	uint64_t deadline = monotonic_milliseconds() + overall_timeout_ms;
+
+	while (!signal_requested && monotonic_milliseconds() < deadline) {
+		int transferred = 0;
+		int result =
+		    libusb_bulk_transfer(handle, endpoint, input, sizeof(input),
+					 &transferred, transfer_timeout_ms);
+
+		if (transferred > 0) {
+			if (capture_append(capture, input,
+					   (size_t)transferred) != 0) {
+				return LIBUSB_ERROR_NO_MEM;
+			}
+			if (capture_find(capture, marker) != NULL) {
+				return LIBUSB_SUCCESS;
+			}
+		}
+		if (result == LIBUSB_SUCCESS ||
+		    result == LIBUSB_ERROR_TIMEOUT ||
+		    result == LIBUSB_ERROR_INTERRUPTED) {
+			continue;
+		}
+		return result;
+	}
+	return signal_requested ? LIBUSB_ERROR_INTERRUPTED
+				: LIBUSB_ERROR_TIMEOUT;
+}
+
+static int send_line(libusb_device_handle *handle,
+		     const struct endpoint_pair *pair, const char *line,
+		     unsigned int timeout_ms)
+{
+	return send_bytes(handle, pair->endpoint_out,
+			  (const unsigned char *)line, strlen(line),
+			  timeout_ms);
+}
+
+static void make_nonce(char nonce[33])
+{
+	snprintf(nonce, 33, "%016llx%08lx",
+		 (unsigned long long)monotonic_milliseconds(),
+		 (unsigned long)getpid());
+}
+
+/* A framing failure is otherwise indistinguishable from a dead link. */
+static void report_unframed(const struct capture *capture)
+{
+	size_t show = capture->size > 512u ? 512u : capture->size;
+	const char *from = capture->data + capture->size - show;
+	size_t index;
+
+	fprintf(stderr, "fplinux-usb-console: last %zu bytes were: ", show);
+	for (index = 0; index < show; ++index) {
+		unsigned char symbol = (unsigned char)from[index];
+
+		if (symbol == '\n') {
+			fputs("\\n", stderr);
+		} else if (symbol >= 0x20u && symbol < 0x7fu) {
+			fputc((int)symbol, stderr);
+		} else {
+			fprintf(stderr, "\\x%02x", symbol);
+		}
+	}
+	fputc('\n', stderr);
+}
+
+/*
+ * The command runs in a subshell so that one which exits reports a status
+ * instead of closing the login shell, and the markers are printed through
+ * arguments so that the words never appear in the echo of the command itself.
+ */
+static int exec_remote(libusb_device_handle *handle,
+		       const struct endpoint_pair *pair,
+		       const struct options *options, int *remote_status)
+{
+	struct capture capture;
+	char nonce[33];
+	char begin[64];
+	char end[64];
+	char *command = NULL;
+	char *begin_at;
+	char *end_at;
+	char *payload;
+	size_t payload_size;
+	size_t command_size;
+	int result;
+
+	*remote_status = -1;
+	make_nonce(nonce);
+	snprintf(begin, sizeof(begin), "FPLINUX_EXEC_BEGIN:%s", nonce);
+	snprintf(end, sizeof(end), "FPLINUX_EXEC_END:%s:", nonce);
+	command_size = strlen(options->exec_command) + 512;
+	command = malloc(command_size);
+	if (command == NULL) {
+		return LIBUSB_ERROR_NO_MEM;
+	}
+	snprintf(command, command_size,
+		 "stty -echo; printf '\\nFPLINUX_EXEC_%%s:%%s\\n' BEGIN '%s'; "
+		 "( %s ); fplinux_rc=$?; stty echo; "
+		 "printf 'FPLINUX_EXEC_%%s:%%s:%%s\\n' END '%s' "
+		 "\"$fplinux_rc\"\n",
+		 nonce, options->exec_command, nonce);
+	capture_init(&capture, MAX_EXEC_OUTPUT_BYTES);
+	result = send_line(handle, pair, command, options->timeout_ms);
+	if (result != LIBUSB_SUCCESS) {
+		goto cleanup;
+	}
+	result = collect_until(handle, pair->endpoint_in, options->timeout_ms,
+			       120000u, end, &capture);
+	if (result != LIBUSB_SUCCESS) {
+		fprintf(stderr,
+			"fplinux-usb-console: the phone did not finish the "
+			"command\n");
+		goto cleanup;
+	}
+	begin_at = capture_find(&capture, begin);
+	end_at = capture_find(&capture, end);
+	if (begin_at == NULL || end_at == NULL || end_at < begin_at) {
+		fprintf(stderr, "fplinux-usb-console: the reply of the phone "
+				"was not framed\n");
+		report_unframed(&capture);
+		result = LIBUSB_ERROR_IO;
+		goto cleanup;
+	}
+	payload = begin_at + strlen(begin);
+	while (payload < end_at && *payload != '\n') {
+		++payload;
+	}
+	if (payload < end_at) {
+		++payload;
+	}
+	payload_size = (size_t)(end_at - payload);
+	/* The line discipline adds a carriage return to every newline. */
+	{
+		size_t read_at = 0;
+		size_t write_at = 0;
+
+		while (read_at < payload_size) {
+			if (payload[read_at] == '\r' &&
+			    read_at + 1 < payload_size &&
+			    payload[read_at + 1] == '\n') {
+				++read_at;
+				continue;
+			}
+			payload[write_at++] = payload[read_at++];
+		}
+		payload_size = write_at;
+	}
+	while (payload_size > 0 && payload[payload_size - 1] == '\n') {
+		--payload_size;
+	}
+	*remote_status = atoi(end_at + strlen(end));
+	if (payload_size > 0) {
+		if (write_all(STDOUT_FILENO, (const unsigned char *)payload,
+			      payload_size) != 0 ||
+		    write_all(STDOUT_FILENO, (const unsigned char *)"\n", 1) !=
+			0) {
+			result = LIBUSB_ERROR_IO;
+			goto cleanup;
+		}
+	}
+
+cleanup:
+	free(command);
+	capture_free(&capture);
+	return result;
+}
+
 static int self_test(void)
 {
 	static const char empty_hash[] = "e3b0c44298fc1c149afbf4c8996fb924"
@@ -1758,6 +2030,16 @@ int main(int argc, char **argv)
 	signal(SIGHUP, signal_handler);
 	signal(SIGPIPE, SIG_IGN);
 
+	if (options.exec_command != NULL) {
+		int remote_status = -1;
+
+		result = exec_remote(handle, &pair, &options, &remote_status);
+		if (result != LIBUSB_SUCCESS) {
+			goto cleanup;
+		}
+		exit_status = remote_status;
+		goto cleanup;
+	}
 	if (options.upload_local != NULL) {
 		result = upload_file(handle, &pair, &options);
 		if (result != LIBUSB_SUCCESS) {
