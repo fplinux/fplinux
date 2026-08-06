@@ -978,6 +978,12 @@ static int ums9117_set_card_clock(struct ta1618_sd_mmc *host, bool enable)
 	 * to the identification state ever clears it. Leaving it set would
 	 * make the transition fail for good after the core power-cycles the
 	 * slot, which is exactly the recovery a failed transfer relies on.
+	 *
+	 * Observed: making the post-write status command fail once drives the
+	 * core through exactly this power cycle. Without the clearing here the
+	 * transition then refuses with -EPROTONOSUPPORT, the clock register
+	 * reads back with the timeout field still set, and the slot closes for
+	 * good. With it the card is re-identified and runs again.
 	 */
 	target &= ~(UMS9117_CLOCK_DIVIDER_MASK | UMS9117_CLOCK_TIMEOUT_MASK |
 		    UMS9117_CLOCK_PROG_MODE | UMS9117_CLOCK_PLL_EN |
@@ -2096,6 +2102,11 @@ static void ums9117_timeout_work(struct work_struct *work)
 			 * on its own with CMD13, then CMD12, and finally a
 			 * power cycle of the slot, so one late transfer is no
 			 * reason to refuse every later request as well.
+			 *
+			 * Forcing every write to time out shows the core
+			 * recovers with or without this, so its value is
+			 * consistency with the read path rather than a
+			 * fault that was ever observed.
 			 */
 			dev_err(host->dev,
 				"request timed out after accepted ACMD6; data lines quiescent, completing with an error and leaving the slot usable\n");
@@ -2568,6 +2579,12 @@ static void ums9117_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 			 * programming anything, and carrying the obligation
 			 * across would reject the very first command of the
 			 * next identification and deadlock the slot.
+			 *
+			 * Observed: making the post-write status command
+			 * fail once, with this line removed, leaves CMD0,
+			 * CMD8 and CMD55 refused and the card never
+			 * returns. With it, the card is re-identified and
+			 * I/O resumes.
 			 */
 			spin_lock_irqsave(&host->lock, flags);
 			host->fatal_error = false;
