@@ -16,8 +16,8 @@ diff --git a/drivers/mmc/host/Kconfig b/drivers/mmc/host/Kconfig
 +	  pin and analog rail recipe. This is not an SDHCI driver.
 +
 +	  Cards are read and written over a 4-bit bus in transfers of up to
-+	  256 blocks, at 26 MHz once the card has agreed to high speed and
-+	  at 13 MHz otherwise. Erase, lock and write-protect commands are
++	  256 blocks, at 48.75 MHz once the card has agreed to high speed
++	  and at 24.375 MHz otherwise. Erase, lock and write-protect are
 +	  refused before they can reach the controller. Card presence is not
 +	  detected: the card must already be inserted when Linux starts, and
 +	  removing it while mounted is not supported.

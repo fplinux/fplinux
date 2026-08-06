@@ -34,19 +34,36 @@ byte, so the driver programs the gate, reset, clock selector, pin and analog
 rail recipe that was proven on this board.
 
 What works: a card that is already inserted when Linux starts is identified,
-switched to a 4-bit bus at 13 MHz, and read and written in transfers of up to
-256 blocks, with the controller issuing the stop command itself. A FAT32
-partition mounts read-write, and files survive an unmount and a remount byte
-for byte.
+switched to a 4-bit bus, and read and written in transfers of up to 256 blocks,
+with the controller issuing the stop command itself. A card that agrees to SD
+high speed runs at 48.75 MHz and one that does not runs at 24.375 MHz, both
+below what the card specification permits for the mode. A FAT32 partition
+mounts read-write, and files survive an unmount and a remount byte for byte.
+
+Measured on two cards with `fio`, verifying a checksum on every block as it is
+read back:
+
+| Workload           | SanDisk SD16G | 32 GB card |
+| ------------------ | ------------- | ---------- |
+| Sequential read    | 19.6 MiB/s    | 5.98 MiB/s |
+| Sequential write   | 8.73 MiB/s    | 8.19 MiB/s |
+| Random 4 KiB read  | 434 IOPS      | 150 IOPS   |
+| Random 4 KiB write | 267 IOPS      | 93 IOPS    |
+
+Five minutes of mixed random traffic per card moved 3.6 GiB in total across
+87000 commands without a single checksum, end-bit, timeout or descriptor error.
+Swap on a file on the card works: pages are evicted under memory pressure and
+read back unchanged.
 
 What is deliberately absent:
 
 - **Hot-swap.** The board does have a card-detect pin, but this driver never
   reads it. The card must be inserted before Linux starts, and removing it
   while mounted is not supported.
-- **Bus speed.** The card runs at 13 MHz. A faster bus is proven on this board
-  but is not part of this driver yet, so the card still reaches roughly half of
-  what the wire could carry.
+- **Faster signalling.** The controller reports that it can do the modes that
+  need 1.8 V signalling, which would be several times faster again. Reaching
+  them means switching the signalling rail through the analog companion, and
+  this driver never writes to it.
 - **Erase and discard.** Erase, discard, lock and write-protect commands are
   still refused before they can reach the controller.
 
@@ -80,7 +97,7 @@ that the stated limitation or current qualification gap still applies.
 | Physical keypad                   | Supported     | Polled matrix plus separate physical 8 key through analog EIC9/ADI |
 | USB device mode                   | Supported     | MUSB peripheral mode with `g_serial` at USB ID `0525:a4a6`         |
 | USB host mode                     | Not supported | The phone target enables peripheral mode only                      |
-| microSD card                      | Supported     | 4-bit 13 MHz multi-block reads and writes; no hot-swap             |
+| microSD card                      | Supported     | 4-bit multi-block reads and writes up to 48.75 MHz; no hot-swap    |
 | Internal flash access             | Not supported | Linux does not expose phone storage                                |
 | Audio                             | Not supported | No speaker, headphone or microphone driver is implemented          |
 | Modem, calls, SMS and mobile data | Not supported | Baseband interfaces are not implemented                            |

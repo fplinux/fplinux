@@ -52,7 +52,14 @@
 #define TA1618_GATE_MASK BIT(7)
 #define TA1618_AP_RESET_MASK BIT(11)
 #define TA1618_SELECTOR_MASK GENMASK(2, 0)
-#define TA1618_SELECTOR_26MHZ 0x00000001U
+/*
+ * Which of the eight clock sources the controller is fed from. The mux output
+ * is halved in hardware before it reaches the controller, which is why the
+ * clock is named after twice its useful rate elsewhere, so this source of
+ * 390 MHz gives a 195 MHz base.
+ */
+#define TA1618_SELECTOR_SOURCE 0x00000004U
+#define UMS9117_BASE_CLOCK_HZ 195000000U
 
 #define TA1618_PIN_COUNT 12U
 #define TA1618_PIN_FUNC_MASK GENMASK(5, 4)
@@ -106,11 +113,11 @@
 #define UMS9117_CLOCK_INT_EN 0x00000001U
 #define UMS9117_CLOCK_VOLATILE_MASK \
 	(UMS9117_HOST_RESET | UMS9117_CLOCK_INT_STABLE)
-#define UMS9117_DIVIDER_ENCODED 0x00002100U
-#define UMS9117_CLOCK_HZ 393939U
+#define UMS9117_IDENT_DIVIDER_ENCODED 0x0000f400U
+#define UMS9117_IDENT_CLOCK_HZ 399590U
 #define UMS9117_IDENT_REQUEST_MAX_HZ 400000U
-#define UMS9117_13MHZ_DIVIDER_ENCODED 0x00000100U
-#define UMS9117_13MHZ_OPERATIONAL_CLOCK_EXPECTED 0x08080107U
+#define UMS9117_LEGACY_DIVIDER_ENCODED 0x00000400U
+#define UMS9117_LEGACY_CLOCK_EXPECTED 0x08080407U
 /*
  * The high-speed profile is the same recipe with the divider removed, so the
  * card clock runs at the full source rate instead of half of it. It is only
@@ -118,10 +125,10 @@
  * the core has asked for the high-speed timing; the frequency alone never
  * selects it, because a card without high speed asks for a similar number.
  */
-#define UMS9117_HS_CLOCK_HZ 26000000U
-#define UMS9117_HS_DIVIDER_ENCODED 0x00000000U
-#define UMS9117_HS_OPERATIONAL_CLOCK_EXPECTED 0x08080007U
-#define UMS9117_MAX_CLOCK_HZ 13000000U
+#define UMS9117_HS_CLOCK_HZ 48750000U
+#define UMS9117_HS_DIVIDER_ENCODED 0x00000200U
+#define UMS9117_HS_CLOCK_EXPECTED 0x08080207U
+#define UMS9117_LEGACY_CLOCK_HZ 24375000U
 /*
  * The two switch-function arguments the core ever sends: the query that asks
  * what the card supports, and the one that moves it into high speed. Both are
@@ -268,19 +275,20 @@ static_assert(UMS9117_ADMA2_ATTR_TRANSFER_END == 0x0023U);
 static_assert(UMS9117_ADMA2_TABLE_SIZE == 256U);
 static_assert(UMS9117_HOST_CTRL1_WIDTH_MASK == 0x00000022U);
 static_assert(UMS9117_HOST_CTRL1_4BIT_ADMA2 == 0x00000012U);
-static_assert(UMS9117_13MHZ_DIVIDER_ENCODED == 0x00000100U);
+static_assert(UMS9117_LEGACY_DIVIDER_ENCODED == 0x00000400U);
 static_assert(UMS9117_CLOCK_TIMEOUT_FPDOOM_ENCODED == 0x00080000U);
 static_assert((0x08000000U | UMS9117_CLOCK_TIMEOUT_FPDOOM_ENCODED |
-	       UMS9117_13MHZ_DIVIDER_ENCODED | UMS9117_CLOCK_CARD_EN |
+	       UMS9117_LEGACY_DIVIDER_ENCODED | UMS9117_CLOCK_CARD_EN |
 	       UMS9117_CLOCK_INT_STABLE | UMS9117_CLOCK_INT_EN) ==
-	      UMS9117_13MHZ_OPERATIONAL_CLOCK_EXPECTED);
-static_assert(UMS9117_MAX_CLOCK_HZ == 13000000U);
-static_assert(UMS9117_HS_CLOCK_HZ == 26000000U);
-static_assert(UMS9117_HS_DIVIDER_ENCODED == 0x00000000U);
+	      UMS9117_LEGACY_CLOCK_EXPECTED);
+static_assert(UMS9117_LEGACY_CLOCK_HZ == 24375000U);
+static_assert(UMS9117_HS_CLOCK_HZ == 48750000U);
+static_assert(UMS9117_BASE_CLOCK_HZ == 195000000U);
+static_assert(UMS9117_HS_DIVIDER_ENCODED == 0x00000200U);
 static_assert((0x08000000U | UMS9117_CLOCK_TIMEOUT_FPDOOM_ENCODED |
 	       UMS9117_HS_DIVIDER_ENCODED | UMS9117_CLOCK_CARD_EN |
 	       UMS9117_CLOCK_INT_STABLE | UMS9117_CLOCK_INT_EN) ==
-	      UMS9117_HS_OPERATIONAL_CLOCK_EXPECTED);
+	      UMS9117_HS_CLOCK_EXPECTED);
 static_assert((MMC_VDD_29_30 | MMC_VDD_30_31) == 0x00060000U);
 static_assert(TA1618_SDIO0_INTID == 89U);
 static_assert(TA1618_ADI_USER_LOCK + sizeof(u32) <= TA1618_ADI_SIZE);
@@ -546,8 +554,8 @@ struct ta1618_sd_mmc {
 	u32 app_cmd_arg;
 	bool width_acmd6_clean;
 	bool physical_width4;
-	bool clock_13mhz_deferred;
-	bool clock_13mhz_applied;
+	bool operational_clock_deferred;
+	bool operational_clock_applied;
 	u32 actual_clock_hz;
 	bool width_switch_fatal;
 	bool terminal_cleanup_hold;
@@ -975,7 +983,7 @@ static int ums9117_set_card_clock(struct ta1618_sd_mmc *host, bool enable)
 		    UMS9117_CLOCK_PROG_MODE | UMS9117_CLOCK_PLL_EN |
 		    UMS9117_CLOCK_CARD_EN | UMS9117_CLOCK_INT_STABLE |
 		    UMS9117_CLOCK_INT_EN);
-	target |= UMS9117_DIVIDER_ENCODED | UMS9117_CLOCK_INT_EN;
+	target |= UMS9117_IDENT_DIVIDER_ENCODED | UMS9117_CLOCK_INT_EN;
 	ta1618_writel(host, RES_CLOCK_RESET, target);
 	deadline = ktime_add_ms(ktime_get(), UMS9117_CLOCK_DEADLINE_MS);
 	for (;;) {
@@ -995,12 +1003,12 @@ static int ums9117_set_card_clock(struct ta1618_sd_mmc *host, bool enable)
 	if (ta1618_readl(host, RES_CLOCK_RESET) != target)
 		return -EIO;
 	host->card_clock_on = true;
-	host->actual_clock_hz = UMS9117_CLOCK_HZ;
+	host->actual_clock_hz = UMS9117_IDENT_CLOCK_HZ;
 	spin_lock_irqsave(&host->lock, flags);
 	host->audit.selector_after_activate =
 		ta1618_readl(host, RES_CLOCK_SELECTOR);
 	host->audit.clock_reset_after_activate = target;
-	host->audit.applied_clock_hz = UMS9117_CLOCK_HZ;
+	host->audit.applied_clock_hz = UMS9117_IDENT_CLOCK_HZ;
 	host->audit.applied_clock_count++;
 	spin_unlock_irqrestore(&host->lock, flags);
 	msleep(UMS9117_INITIAL_CLOCKS_DELAY_MS);
@@ -1067,7 +1075,7 @@ static int ta1618_activate_platform(struct ta1618_sd_mmc *host)
 	ta1618_writel(host, RES_CLOCK_SELECTOR, value);
 	if (ta1618_readl(host, RES_CLOCK_SELECTOR) != value)
 		return -EIO;
-	value |= TA1618_SELECTOR_26MHZ;
+	value |= TA1618_SELECTOR_SOURCE;
 	ta1618_writel(host, RES_CLOCK_SELECTOR, value);
 	if (ta1618_readl(host, RES_CLOCK_SELECTOR) != value)
 		return -EIO;
@@ -1128,8 +1136,8 @@ static int ta1618_activate_platform(struct ta1618_sd_mmc *host)
 	ta1618_writel(host, RES_INTERRUPT_SIGNAL_ENABLE, 0);
 	host->physical_width4 = false;
 	host->width_acmd6_clean = false;
-	host->clock_13mhz_deferred = false;
-	host->clock_13mhz_applied = false;
+	host->operational_clock_deferred = false;
+	host->operational_clock_applied = false;
 	host->actual_clock_hz = 0;
 	host->terminal_cleanup_hold = false;
 	host->app_cmd_armed = false;
@@ -1462,7 +1470,7 @@ static void ums9117_width_fail_closed(struct ta1618_sd_mmc *host,
 	spin_unlock_irqrestore(&host->lock, flags);
 	dev_crit(
 		host->dev,
-		"4-bit/13MHz fail-closed: %s error=%d signal=0x%08x clock_before=0x%08x clock_after=0x%08x cleanup_confirmed=%u; IRQ masked, card clock off when confirmed, no reset/rail cycle/ACMD6 rollback/reclock; physical power-cycle required\n",
+		"4-bit operational fail-closed: %s error=%d signal=0x%08x clock_before=0x%08x clock_after=0x%08x cleanup_confirmed=%u; IRQ masked, card clock off when confirmed, no reset/rail cycle/ACMD6 rollback/reclock; physical power-cycle required\n",
 		reason, error, signal_after, clock_before, clock_after,
 		cleanup_confirmed ? 1U : 0U);
 }
@@ -1493,7 +1501,7 @@ static void ums9117_reject_request(struct ta1618_sd_mmc *host,
  */
 static bool ums9117_is_operational_clock(u32 hz)
 {
-	return hz >= UMS9117_MAX_CLOCK_HZ && hz <= UMS9117_HS_CLOCK_HZ;
+	return hz >= UMS9117_LEGACY_CLOCK_HZ && hz <= UMS9117_HS_CLOCK_HZ;
 }
 
 static bool ums9117_select_clock_profile(struct ta1618_sd_mmc *host,
@@ -1503,8 +1511,7 @@ static bool ums9117_select_clock_profile(struct ta1618_sd_mmc *host,
 	    ios->clock >= UMS9117_HS_CLOCK_HZ) {
 		host->target_clock_hz = UMS9117_HS_CLOCK_HZ;
 		host->target_divider = UMS9117_HS_DIVIDER_ENCODED;
-		host->target_operational =
-			UMS9117_HS_OPERATIONAL_CLOCK_EXPECTED;
+		host->target_operational = UMS9117_HS_CLOCK_EXPECTED;
 		return true;
 	}
 	/*
@@ -1514,17 +1521,16 @@ static bool ums9117_select_clock_profile(struct ta1618_sd_mmc *host,
 	 * asked for, so that request is answered with the proven slow profile
 	 * rather than refused.
 	 */
-	if (ios->clock >= UMS9117_MAX_CLOCK_HZ) {
-		host->target_clock_hz = UMS9117_MAX_CLOCK_HZ;
-		host->target_divider = UMS9117_13MHZ_DIVIDER_ENCODED;
-		host->target_operational =
-			UMS9117_13MHZ_OPERATIONAL_CLOCK_EXPECTED;
+	if (ios->clock >= UMS9117_LEGACY_CLOCK_HZ) {
+		host->target_clock_hz = UMS9117_LEGACY_CLOCK_HZ;
+		host->target_divider = UMS9117_LEGACY_DIVIDER_ENCODED;
+		host->target_operational = UMS9117_LEGACY_CLOCK_EXPECTED;
 		return true;
 	}
 	return false;
 }
 
-static int ums9117_transition_width4_13mhz(struct ta1618_sd_mmc *host)
+static int ums9117_transition_width4(struct ta1618_sd_mmc *host)
 {
 	unsigned long flags;
 	ktime_t deadline;
@@ -1541,7 +1547,7 @@ static int ums9117_transition_width4_13mhz(struct ta1618_sd_mmc *host)
 
 	if (!READ_ONCE(host->width_acmd6_clean) ||
 	    READ_ONCE(host->physical_width4) ||
-	    !READ_ONCE(host->clock_13mhz_deferred))
+	    !READ_ONCE(host->operational_clock_deferred))
 		return -EPERM;
 	ret = ums9117_wait_inhibit(host, true);
 	if (ret)
@@ -1576,9 +1582,10 @@ static int ums9117_transition_width4_13mhz(struct ta1618_sd_mmc *host)
 	host->audit.timeout_register_candidate = 0;
 	host->audit.timeout_field_readback = 0;
 	host->audit.timeout_register_readback = 0;
-	if ((selector_before & TA1618_SELECTOR_MASK) != TA1618_SELECTOR_26MHZ ||
+	if ((selector_before & TA1618_SELECTOR_MASK) !=
+		    TA1618_SELECTOR_SOURCE ||
 	    (clock_before & UMS9117_CLOCK_DIVIDER_MASK) !=
-		    UMS9117_DIVIDER_ENCODED ||
+		    UMS9117_IDENT_DIVIDER_ENCODED ||
 	    (clock_before & UMS9117_CLOCK_TIMEOUT_MASK) ||
 	    !(clock_before & UMS9117_CLOCK_INT_EN) ||
 	    !(clock_before & UMS9117_CLOCK_INT_STABLE) ||
@@ -1586,7 +1593,7 @@ static int ums9117_transition_width4_13mhz(struct ta1618_sd_mmc *host)
 	    (clock_before & (UMS9117_CLOCK_PROG_MODE | UMS9117_CLOCK_PLL_EN |
 			     UMS9117_HOST_RESET)) ||
 	    (control_before != UMS9117_HOST_CTRL1_1BIT_ADMA2) ||
-	    host->actual_clock_hz != UMS9117_CLOCK_HZ) {
+	    host->actual_clock_hz != UMS9117_IDENT_CLOCK_HZ) {
 		ret = -EPROTONOSUPPORT;
 		goto cache_and_unlock;
 	}
@@ -1693,8 +1700,8 @@ cache_and_unlock:
 	host->audit.clock_width_after = clock_after;
 	if (!ret) {
 		host->physical_width4 = true;
-		host->clock_13mhz_deferred = false;
-		host->clock_13mhz_applied = true;
+		host->operational_clock_deferred = false;
+		host->operational_clock_applied = true;
 		host->card_clock_on = true;
 		host->actual_clock_hz = host->target_clock_hz;
 		host->audit.applied_clock_hz = host->target_clock_hz;
@@ -2251,8 +2258,8 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	    (width_acmd6 &&
 	     (READ_ONCE(host->physical_width4) ||
 	      READ_ONCE(host->width_acmd6_clean) ||
-	      !READ_ONCE(host->clock_13mhz_deferred) ||
-	      READ_ONCE(host->actual_clock_hz) != UMS9117_CLOCK_HZ ||
+	      !READ_ONCE(host->operational_clock_deferred) ||
+	      READ_ONCE(host->actual_clock_hz) != UMS9117_IDENT_CLOCK_HZ ||
 	      !READ_ONCE(host->card_clock_on)))) {
 		ums9117_reject_request(
 			host, mrq, -EPROTO,
@@ -2279,7 +2286,7 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	     cmd->opcode == MMC_WRITE_BLOCK ||
 	     cmd->opcode == MMC_WRITE_MULTIPLE_BLOCK) &&
 	    (!READ_ONCE(host->physical_width4) ||
-	     !READ_ONCE(host->clock_13mhz_applied) ||
+	     !READ_ONCE(host->operational_clock_applied) ||
 	     !ums9117_is_operational_clock(READ_ONCE(host->actual_clock_hz)))) {
 		ums9117_reject_request(
 			host, mrq, -EPROTO,
@@ -2354,16 +2361,16 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 		clock = ta1618_readl(host, RES_CLOCK_RESET);
 		control = ta1618_readl(host, RES_HOST_CONTROL1);
 		if ((selector & TA1618_SELECTOR_MASK) !=
-			    TA1618_SELECTOR_26MHZ ||
+			    TA1618_SELECTOR_SOURCE ||
 		    (clock & UMS9117_CLOCK_DIVIDER_MASK) !=
-			    UMS9117_DIVIDER_ENCODED ||
+			    UMS9117_IDENT_DIVIDER_ENCODED ||
 		    !(clock & UMS9117_CLOCK_INT_EN) ||
 		    !(clock & UMS9117_CLOCK_INT_STABLE) ||
 		    !(clock & UMS9117_CLOCK_CARD_EN) ||
 		    (clock & (UMS9117_CLOCK_PROG_MODE | UMS9117_CLOCK_PLL_EN |
 			      UMS9117_HOST_RESET)) ||
 		    control != UMS9117_HOST_CTRL1_1BIT_ADMA2 ||
-		    host->actual_clock_hz != UMS9117_CLOCK_HZ) {
+		    host->actual_clock_hz != UMS9117_IDENT_CLOCK_HZ) {
 			spin_unlock_irqrestore(&host->lock, flags);
 			ret = -EPROTO;
 			goto out_error;
@@ -2377,7 +2384,7 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 		clock = ta1618_readl(host, RES_CLOCK_RESET);
 		control = ta1618_readl(host, RES_HOST_CONTROL1);
 		if ((selector & TA1618_SELECTOR_MASK) !=
-			    TA1618_SELECTOR_26MHZ ||
+			    TA1618_SELECTOR_SOURCE ||
 		    (clock & UMS9117_CLOCK_DIVIDER_MASK) !=
 			    host->target_divider ||
 		    !(clock & UMS9117_CLOCK_INT_EN) ||
@@ -2490,8 +2497,8 @@ static int ums9117_set_host_1bit_powered_off(struct ta1618_sd_mmc *host)
 	}
 	host->physical_width4 = false;
 	host->width_acmd6_clean = false;
-	host->clock_13mhz_deferred = false;
-	host->clock_13mhz_applied = false;
+	host->operational_clock_deferred = false;
+	host->operational_clock_applied = false;
 	host->actual_clock_hz = 0;
 	host->app_cmd_armed = false;
 	host->app_cmd_arg = 0;
@@ -2531,7 +2538,7 @@ static void ums9117_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 	    (ios->timing != MMC_TIMING_LEGACY &&
 	     ios->timing != MMC_TIMING_SD_HS) ||
 	    (ios->clock && !ums9117_is_operational_clock(ios->clock) &&
-	     (ios->clock < UMS9117_CLOCK_HZ ||
+	     (ios->clock < UMS9117_IDENT_CLOCK_HZ ||
 	      ios->clock > UMS9117_IDENT_REQUEST_MAX_HZ))) {
 		ret = -EOPNOTSUPP;
 		goto out_fail;
@@ -2585,7 +2592,7 @@ static void ums9117_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 		}
 		if (ios->bus_width == MMC_BUS_WIDTH_1) {
 			if (host->width_acmd6_clean || host->physical_width4 ||
-			    host->clock_13mhz_applied) {
+			    host->operational_clock_applied) {
 				ret = -EPROTO;
 				break;
 			}
@@ -2596,18 +2603,18 @@ static void ums9117_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 			if (ret)
 				break;
 			if (ios->clock &&
-			    host->actual_clock_hz != UMS9117_CLOCK_HZ) {
+			    host->actual_clock_hz != UMS9117_IDENT_CLOCK_HZ) {
 				ret = -EPROTO;
 				break;
 			}
 			if (ums9117_is_operational_clock(ios->clock)) {
-				host->clock_13mhz_deferred = true;
+				host->operational_clock_deferred = true;
 				spin_lock_irqsave(&host->lock, flags);
 				host->audit.deferred_clock_hz = ios->clock;
 				host->audit.deferred_clock_count++;
 				spin_unlock_irqrestore(&host->lock, flags);
 			} else {
-				host->clock_13mhz_deferred = false;
+				host->operational_clock_deferred = false;
 			}
 		} else {
 			if (!host->width_acmd6_clean || !host->card_clock_on ||
@@ -2616,8 +2623,8 @@ static void ums9117_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 				break;
 			}
 			if (!host->physical_width4)
-				ret = ums9117_transition_width4_13mhz(host);
-			else if (!host->clock_13mhz_applied ||
+				ret = ums9117_transition_width4(host);
+			else if (!host->operational_clock_applied ||
 				 host->actual_clock_hz != host->target_clock_hz)
 				ret = -EPROTO;
 		}
@@ -2693,8 +2700,8 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 	bool app_cmd_armed;
 	bool fatal;
 	bool finish;
-	bool clock_13mhz_applied;
-	bool clock_13mhz_deferred;
+	bool operational_clock_applied;
+	bool operational_clock_deferred;
 	bool physical_width4;
 	bool terminal_cleanup_hold;
 	bool width_acmd6_clean;
@@ -2714,8 +2721,8 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 	app_cmd_armed = host->app_cmd_armed;
 	width_acmd6_clean = host->width_acmd6_clean;
 	physical_width4 = host->physical_width4;
-	clock_13mhz_deferred = host->clock_13mhz_deferred;
-	clock_13mhz_applied = host->clock_13mhz_applied;
+	operational_clock_deferred = host->operational_clock_deferred;
+	operational_clock_applied = host->operational_clock_applied;
 	actual_clock_hz = host->actual_clock_hz;
 	fatal = host->fatal_error;
 	width_switch_fatal = host->width_switch_fatal;
@@ -2733,17 +2740,17 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 	len += sysfs_emit_at(
 		buf, len,
 		"clock_ident=selector:0x%08x,divider:0x%08x,actual_hz:%u,clock_reset:0x%08x\n",
-		audit.selector_after_activate, UMS9117_DIVIDER_ENCODED,
-		UMS9117_CLOCK_HZ, audit.clock_reset_after_activate);
+		audit.selector_after_activate, UMS9117_IDENT_DIVIDER_ENCODED,
+		UMS9117_IDENT_CLOCK_HZ, audit.clock_reset_after_activate);
 	len += sysfs_emit_at(
 		buf, len,
 		"clock_state=requested_hz:%u,deferred_hz:%u,deferred_count:%u,applied_hz:%u,applied_count:%u,actual_hz:%u,deferred:%u,applied:%u,legacy_hz:%u,highspeed_hz:%u,target_divider:0x%08x,target_word:0x%08x\n",
 		audit.requested_clock_hz, audit.deferred_clock_hz,
 		audit.deferred_clock_count, audit.applied_clock_hz,
 		audit.applied_clock_count, actual_clock_hz,
-		clock_13mhz_deferred ? 1U : 0U, clock_13mhz_applied ? 1U : 0U,
-		UMS9117_MAX_CLOCK_HZ, UMS9117_HS_CLOCK_HZ, target_divider,
-		target_operational);
+		operational_clock_deferred ? 1U : 0U,
+		operational_clock_applied ? 1U : 0U, UMS9117_LEGACY_CLOCK_HZ,
+		UMS9117_HS_CLOCK_HZ, target_divider, target_operational);
 	len += sysfs_emit_at(
 		buf, len,
 		"cmd55=attempts:%u,clean:%u,app_cmd:%u,last_arg:0x%08x,last_response:0x%08x,armed:%u\n",
@@ -2957,9 +2964,9 @@ static int ums9117_ta1618_mmc_probe(struct platform_device *pdev)
 	host->irq_requested = true;
 
 	mmc->ops = &ums9117_mmc_ops;
-	mmc->f_min = UMS9117_CLOCK_HZ;
+	mmc->f_min = UMS9117_IDENT_CLOCK_HZ;
 	mmc->f_max = UMS9117_HS_CLOCK_HZ;
-	mmc->f_init = UMS9117_CLOCK_HZ;
+	mmc->f_init = UMS9117_IDENT_CLOCK_HZ;
 	mmc->ocr_avail = MMC_VDD_29_30 | MMC_VDD_30_31;
 	mmc->caps = MMC_CAP_4_BIT_DATA | MMC_CAP_SD_HIGHSPEED;
 	/*
@@ -2992,8 +2999,8 @@ static int ums9117_ta1618_mmc_probe(struct platform_device *pdev)
 	host->audit_file_created = true;
 	dev_notice(
 		&pdev->dev,
-		"registered 4-bit 13MHz UMS9117 SDIO0 MMC host on SPI57; identification 1-bit at %u Hz, 13MHz deferred until clean CMD55/ACMD6 and width4, up to %u 32-bit ADMA2 segments and %u bytes per request, multi-block reads and writes with automatic CMD12\n",
-		UMS9117_CLOCK_HZ, UMS9117_ADMA2_DESC_COUNT,
+		"registered 4-bit UMS9117 SDIO0 MMC host on SPI57; identification 1-bit at %u Hz, the operational clock deferred until clean CMD55/ACMD6 and width4, up to %u 32-bit ADMA2 segments and %u bytes per request, multi-block reads and writes with automatic CMD12\n",
+		UMS9117_IDENT_CLOCK_HZ, UMS9117_ADMA2_DESC_COUNT,
 		UMS9117_MAX_REQUEST_BYTES);
 	return 0;
 
