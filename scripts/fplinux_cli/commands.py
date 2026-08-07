@@ -74,6 +74,8 @@ def build(target: str, jobs: int) -> None:
             "PYTHONPATH=/workspace/scripts",
             "--env",
             f"FPLINUX_CONTAINER_RECIPE={container_recipe_digest()}",
+            "--env",
+            f"FPLINUX_WORKSPACE_DIGEST={workspace.name}",
             lock["image"],
             "python3",
             "-m",
