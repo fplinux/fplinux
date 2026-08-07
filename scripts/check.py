@@ -16,7 +16,7 @@ from typing import NoReturn
 from fplinux_cli.config import discover_targets, load_platform, load_target
 
 ROOT = Path(__file__).resolve().parents[1]
-EXCLUDED_PARTS = {".cache", ".git", "out", "__pycache__"}
+EXCLUDED_PARTS = {".cache", ".git", "__pycache__"}
 BINARY_SUFFIXES = {".bin", ".jpg", ".png", ".pyc", ".zip"}
 
 

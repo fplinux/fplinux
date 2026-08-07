@@ -92,7 +92,7 @@ def quality_files() -> list[tuple[str, Path]]:
     """Return the complete source closure used by quality checks."""
     files: list[tuple[str, Path]] = []
     for top in sorted(ROOT.iterdir()):
-        if top.name in {".cache", ".git", "out"} or is_python_cache(top):
+        if top.name in {".cache", ".git"} or is_python_cache(top):
             continue
         if top.is_symlink():
             fail(f"quality input must not be a symlink: {top}")
