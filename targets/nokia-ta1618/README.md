@@ -93,7 +93,7 @@ that the stated limitation or current qualification gap still applies.
 | CPU                               | Supported     | The SoC has a single Cortex-A7 core, so SMP does not apply         |
 | Interrupt controller              | Supported     | ARM GIC with working timer and USB interrupts                      |
 | System timers                     | Supported     | UMS9117 system counter and Pike2 timer                             |
-| Display                           | Partial       | 240×320 RGB565 portrait; exact current closure awaits phone gate   |
+| Display                           | Supported     | 240×320 RGB565 portrait at 46.7 frames a second, free of tearing   |
 | Physical keypad                   | Supported     | Polled matrix plus separate physical 8 key through analog EIC9/ADI |
 | USB device mode                   | Supported     | MUSB peripheral mode with `g_serial` at USB ID `0525:a4a6`         |
 | USB host mode                     | Not supported | The phone target enables peripheral mode only                      |
@@ -214,7 +214,12 @@ libusb 1.0, libudev, GNU `stdbuf` and USB permissions for `1782:4d00` and
 - The bootstrap configures the ST7789P3 panel for `240×320` portrait output and
   prepares the display state inherited by Linux. The framebuffer driver does not
   perform complete cold initialization of every display clock, reset and
-  regulator.
+  regulator. It does set two panel registers of its own: the tearing signal that
+  paces the frames, and the line period that keeps the panel scan slower than a
+  frame takes to send.
+- Each frame starts on the panel's tearing signal and takes 10.5 ms of link time
+  at 88 MHz. The panel is held at 46.7 Hz so that one frame lands inside one pass
+  of its scan, which is what removes tearing rather than merely hiding it.
 - Linux uses RAM at `0x80000000..0x83dfffff`. The DTB, handoff diagnostics and
   framebuffer occupy reserved regions above it.
 - The payload is loaded at `0x80100000`; `0x82000000` is the zImage staging
