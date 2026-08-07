@@ -2,7 +2,6 @@
 extend-exclude = [
   ".git/",
   ".cache/",
-  "out/",
   "node_modules/",
   "THIRD_PARTY_LICENSES/",
   "*.bin",

@@ -446,7 +446,7 @@ def verified_runtime_digest(target: str) -> str | None:
 
 def validate_source_policy() -> None:
     """Enforce the single-image source policy."""
-    ignored = {".cache", ".git", "out"}
+    ignored = {".cache", ".git"}
     containerfiles: list[Path] = []
     # Prune the generated trees before descending: they hold millions of
     # cached build paths that a plain rglob would stat one by one.
