@@ -3,7 +3,7 @@
  * Bootstrap-handoff framebuffer for Nokia 3210 4G TA-1618.
  *
  * fpdoom initializes the ST7789P3 panel, SPI1 and LCDC before Linux starts.
- * This driver registers the reserved RGB565 buffer as fb0 and periodically
+ * This driver registers the reserved RGB565 buffer as fb0 and repeatedly
  * triggers the same LCDC -> SPI1 transfer sequence.  The polling transfer path
  * does not require a display IRQ.
  */
@@ -37,8 +37,15 @@
 #define LCDC_CAP_BASE 0x0e4
 #define LCDC_IRQ_EN 0x110
 #define LCDC_IRQ_CLR 0x114
+#define LCDC_IRQ_RAW 0x11c
+#define LCDC_DONE BIT(0)
+#define LCDC_RUN BIT(3)
+#define LCDC_FMARK_OFF BIT(1)
+#define LCDC_FMARK_POL BIT(2)
+#define LCDC_RGB_MODE (7u << 5)
 
 #define SPI_TXD 0x000
+#define SPI_CLKD 0x004
 #define SPI_CTL0 0x008
 #define SPI_INT_CLR 0x024
 #define SPI_INT_RAW 0x028
@@ -47,6 +54,22 @@
 #define SPI_CTL8 0x054
 #define SPI_CTL9 0x058
 #define SPI_CTL12 0x064
+#define SPI_MODE (7u << 3)
+#define SPI_MODE_3WIRE_9BIT (1u << 3)
+#define SPI_LANE2 BIT(15)
+#define SPI_LANE2_PIN BIT(13)
+
+#define SPI_DIVIDER 0u
+#define PIXEL_BITS 17u
+
+#define PANEL_TE_ON 0x35
+#define PANEL_FRAME_RATE 0xc6
+#define PANEL_WRITE_RAM 0x2c
+
+/* Stretches the line period so the scan cannot overtake the write. */
+#define PANEL_LINE_PERIOD 0x18
+
+#define TRANSFER_TIMEOUT_US 250000
 
 struct ta1618_fb {
 	struct fb_info *info;
@@ -59,6 +82,8 @@ struct ta1618_fb {
 	phys_addr_t transfer_phys;
 	struct delayed_work refresh_work;
 	u32 pseudo_palette[16];
+	unsigned int shown;
+	bool armed;
 };
 
 static void spi_channel_length(void __iomem *spi, unsigned int bits)
@@ -81,15 +106,18 @@ static void spi_tx_length(void __iomem *spi, unsigned int words)
 	writel(ctl9, spi + SPI_CTL9);
 }
 
+/* Sleeping here would cost a whole 10 ms tick for a wait of microseconds. */
 static int spi_wait_idle(void __iomem *spi)
 {
 	u32 v;
 	int ret;
 
-	ret = readl_poll_timeout(spi + SPI_STS2, v, v & BIT(7), 10, 250000);
+	ret = readl_poll_timeout_atomic(spi + SPI_STS2, v, v & BIT(7), 1,
+					TRANSFER_TIMEOUT_US);
 	if (ret)
 		return ret;
-	return readl_poll_timeout(spi + SPI_STS2, v, !(v & BIT(8)), 10, 250000);
+	return readl_poll_timeout_atomic(spi + SPI_STS2, v, !(v & BIT(8)), 1,
+					 TRANSFER_TIMEOUT_US);
 }
 
 static int spi_send_command(void __iomem *spi, u8 command)
@@ -108,7 +136,8 @@ static int spi_send_command(void __iomem *spi, u8 command)
 	writel(readl(spi + SPI_CTL12) | BIT(1), spi + SPI_CTL12);
 	writel(command, spi + SPI_TXD);
 
-	ret = readl_poll_timeout(spi + SPI_INT_RAW, v, v & BIT(8), 10, 250000);
+	ret = readl_poll_timeout_atomic(spi + SPI_INT_RAW, v, v & BIT(8), 1,
+					TRANSFER_TIMEOUT_US);
 	if (ret)
 		return ret;
 	writel(BIT(8), spi + SPI_INT_CLR);
@@ -118,37 +147,76 @@ static int spi_send_command(void __iomem *spi, u8 command)
 
 	writel(readl(spi + SPI_CTL8) | BIT(15), spi + SPI_CTL8);
 	writel(readl(spi + SPI_CTL7) | BIT(14), spi + SPI_CTL7);
-	spi_channel_length(spi, 17);
+	spi_channel_length(spi, PIXEL_BITS);
 	return 0;
 }
 
-static int ta1618_refresh(struct ta1618_fb *tfb)
+/* The command byte carries a clear data bit; a parameter carries a set one. */
+static int spi_send_param(void __iomem *spi, u8 value)
 {
 	u32 v;
 	int ret;
 
-	ret = spi_send_command(tfb->spi, 0x2c);
+	ret = spi_wait_idle(spi);
+	if (ret)
+		return ret;
+	writel(readl(spi + SPI_CTL7) & ~BIT(14), spi + SPI_CTL7);
+	spi_channel_length(spi, 8);
+	spi_tx_length(spi, 1);
+	writel(readl(spi + SPI_CTL12) | BIT(1), spi + SPI_CTL12);
+	writel(value, spi + SPI_TXD);
+	ret = readl_poll_timeout_atomic(spi + SPI_INT_RAW, v, v & BIT(8), 1,
+					TRANSFER_TIMEOUT_US);
+	if (ret)
+		return ret;
+	writel(BIT(8), spi + SPI_INT_CLR);
+	writel(readl(spi + SPI_CTL7) | BIT(14), spi + SPI_CTL7);
+	spi_channel_length(spi, PIXEL_BITS);
+	return 0;
+}
+
+static int ta1618_send_panel(void __iomem *spi, u8 command, u8 param)
+{
+	int ret = spi_send_command(spi, command);
+
+	if (ret)
+		return ret;
+	return spi_send_param(spi, param);
+}
+
+static int ta1618_refresh(struct ta1618_fb *tfb)
+{
+	u32 done;
+	u32 v;
+	int ret;
+
+	/*
+	 * The link reads idle while a frame is armed and waiting on the panel,
+	 * so the controller's own done bit is the only honest end of one.  There
+	 * is nothing to wait for until a frame has been armed, and a wait that
+	 * expires leaves nothing armed either.
+	 */
+	if (tfb->armed) {
+		ret = readl_poll_timeout_atomic(tfb->lcdc + LCDC_IRQ_RAW, done,
+						done & LCDC_DONE, 10,
+						TRANSFER_TIMEOUT_US);
+		tfb->armed = false;
+		if (ret)
+			return ret;
+		writel(LCDC_DONE, tfb->lcdc + LCDC_IRQ_CLR);
+	}
+
+	ret = spi_send_command(tfb->spi, PANEL_WRITE_RAM);
 	if (ret)
 		return ret;
 
-	/*
-	 * fbcon updates screen while the panel transfer is in flight. DMA from
-	 * that live buffer produces visibly split/overwritten rows. SPI is idle
-	 * here, so copy the current frame into the second half of reserved memory
-	 * and let LCDC read only that buffer. Unsynchronized fbdev writers can
-	 * still change screen during the copy, but cannot change the DMA source.
-	 */
-	memcpy_fromio(tfb->snapshot, tfb->screen, FB_SIZE);
+	/* Staged so a drawing program cannot change what the controller fetches. */
+	memcpy_fromio(tfb->snapshot, tfb->screen + tfb->shown * FB_STRIDE,
+		      FB_SIZE);
 	memcpy_toio(tfb->transfer, tfb->snapshot, FB_SIZE);
-	/*
-	 * The staging copy went through a write-combining mapping. Drain
-	 * the CPU write-combining buffers before the transfer is armed, so
-	 * LCDC, an independent bus master fetching from DRAM, reads a
-	 * fully written frame instead of torn rows.
-	 */
+	/* Drain write combining: the controller fetches from DRAM on its own. */
 	wmb();
 
-	/* One RGB565 word per pixel, software-triggered SPI transfer. */
 	spi_tx_length(tfb->spi, FB_WIDTH * FB_HEIGHT);
 	writel(readl(tfb->spi + SPI_CTL12) | BIT(1), tfb->spi + SPI_CTL12);
 
@@ -176,18 +244,19 @@ static int ta1618_refresh(struct ta1618_fb *tfb)
 	writel(v, tfb->lcdc + LCDC_CAP_CTRL);
 	writel((0x70b00000u + SPI_TXD) >> 2, tfb->lcdc + LCDC_CAP_BASE);
 
-	/*
-	 * Configuration/start boundary of the vendor refresh sequence: the
-	 * image-layer and capture programming above must be latched before
-	 * the interrupt ack and the frame-start bit below. Defensive
-	 * ordering point: writel() is already ordered, and no reordering
-	 * has been observed at this boundary.
-	 */
+	/* Latch the layer and capture setup before the start bit below. */
 	wmb();
-	writel(BIT(0), tfb->lcdc + LCDC_IRQ_CLR);
-	writel(readl(tfb->lcdc + LCDC_IRQ_EN) | BIT(0),
+	writel(LCDC_DONE, tfb->lcdc + LCDC_IRQ_CLR);
+	writel(readl(tfb->lcdc + LCDC_IRQ_EN) | LCDC_DONE,
 	       tfb->lcdc + LCDC_IRQ_EN);
-	writel(readl(tfb->lcdc + LCDC_CTRL) | BIT(3), tfb->lcdc + LCDC_CTRL);
+
+	v = readl(tfb->lcdc + LCDC_CTRL);
+	v &= ~LCDC_RGB_MODE;
+	/* Clear waits for the panel; the polarity picks the edge inside blanking. */
+	v &= ~LCDC_FMARK_OFF;
+	v |= LCDC_FMARK_POL;
+	writel(v | LCDC_RUN, tfb->lcdc + LCDC_CTRL);
+	tfb->armed = true;
 	return 0;
 }
 
@@ -199,7 +268,7 @@ static void ta1618_refresh_work(struct work_struct *work)
 	if (ta1618_refresh(tfb))
 		dev_warn_ratelimited(tfb->info->device,
 				     "display refresh timed out\n");
-	schedule_delayed_work(&tfb->refresh_work, msecs_to_jiffies(100));
+	schedule_delayed_work(&tfb->refresh_work, 0);
 }
 
 static int ta1618_setcolreg(unsigned int regno, unsigned int red,
@@ -215,11 +284,55 @@ static int ta1618_setcolreg(unsigned int regno, unsigned int red,
 	return 0;
 }
 
+/* Twice the height is optional: a program unaware of it still runs. */
+static int ta1618_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
+{
+	if (var->xres != FB_WIDTH || var->yres != FB_HEIGHT ||
+	    var->bits_per_pixel != 16)
+		return -EINVAL;
+	if (var->xres_virtual != FB_WIDTH)
+		return -EINVAL;
+	if (var->yres_virtual != FB_HEIGHT &&
+	    var->yres_virtual != 2 * FB_HEIGHT)
+		return -EINVAL;
+	if (var->yoffset + FB_HEIGHT > var->yres_virtual)
+		return -EINVAL;
+	return 0;
+}
+
+static int ta1618_pan_display(struct fb_var_screeninfo *var,
+			      struct fb_info *info)
+{
+	struct ta1618_fb *tfb = info->par;
+
+	if (var->yoffset != 0 && var->yoffset != FB_HEIGHT)
+		return -EINVAL;
+	tfb->shown = var->yoffset;
+	return 0;
+}
+
 static const struct fb_ops ta1618_fb_ops = {
 	.owner = THIS_MODULE,
 	FB_DEFAULT_IOMEM_OPS,
 	.fb_setcolreg = ta1618_setcolreg,
+	.fb_check_var = ta1618_check_var,
+	.fb_pan_display = ta1618_pan_display,
 };
+
+static void ta1618_start_panel(struct ta1618_fb *tfb)
+{
+	u32 ctl7 = readl(tfb->spi + SPI_CTL7);
+
+	writel(SPI_DIVIDER, tfb->spi + SPI_CLKD);
+	/* The link keeps its shifting mode across a module reload. */
+	ctl7 = (ctl7 & ~(SPI_MODE | SPI_LANE2)) | SPI_MODE_3WIRE_9BIT;
+	writel(ctl7, tfb->spi + SPI_CTL7);
+	writel(readl(tfb->spi + SPI_CTL8) & ~SPI_LANE2_PIN,
+	       tfb->spi + SPI_CTL8);
+
+	ta1618_send_panel(tfb->spi, PANEL_TE_ON, 0x00);
+	ta1618_send_panel(tfb->spi, PANEL_FRAME_RATE, PANEL_LINE_PERIOD);
+}
 
 static int ta1618_fb_probe(struct platform_device *pdev)
 {
@@ -245,7 +358,7 @@ static int ta1618_fb_probe(struct platform_device *pdev)
 		ret = -ENODEV;
 		goto release;
 	}
-	if (resource_size(fbres) < 2 * FB_SIZE) {
+	if (resource_size(fbres) < 3 * FB_SIZE) {
 		ret = -EINVAL;
 		goto release;
 	}
@@ -255,8 +368,8 @@ static int ta1618_fb_probe(struct platform_device *pdev)
 		ret = -ENOMEM;
 		goto release;
 	}
-	tfb->transfer_phys = tfb->screen_phys + FB_SIZE;
-	tfb->transfer = tfb->screen + FB_SIZE;
+	tfb->transfer_phys = tfb->screen_phys + 2 * FB_SIZE;
+	tfb->transfer = tfb->screen + 2 * FB_SIZE;
 	tfb->lcdc = devm_platform_ioremap_resource(pdev, 1);
 	if (IS_ERR(tfb->lcdc)) {
 		ret = PTR_ERR(tfb->lcdc);
@@ -272,8 +385,9 @@ static int ta1618_fb_probe(struct platform_device *pdev)
 	info->fix.type = FB_TYPE_PACKED_PIXELS;
 	info->fix.visual = FB_VISUAL_TRUECOLOR;
 	info->fix.accel = FB_ACCEL_NONE;
+	info->fix.ypanstep = 1;
 	info->fix.smem_start = tfb->screen_phys;
-	info->fix.smem_len = FB_SIZE;
+	info->fix.smem_len = 2 * FB_SIZE;
 	info->fix.line_length = FB_STRIDE;
 
 	info->var.xres = FB_WIDTH;
@@ -291,7 +405,7 @@ static int ta1618_fb_probe(struct platform_device *pdev)
 	info->var.vmode = FB_VMODE_NONINTERLACED;
 	info->fbops = &ta1618_fb_ops;
 	info->screen_base = tfb->screen;
-	info->screen_size = FB_SIZE;
+	info->screen_size = 2 * FB_SIZE;
 	info->pseudo_palette = tfb->pseudo_palette;
 
 	ret = fb_alloc_cmap(&info->cmap, 16, 0);
@@ -302,6 +416,7 @@ static int ta1618_fb_probe(struct platform_device *pdev)
 		goto cmap;
 
 	platform_set_drvdata(pdev, tfb);
+	ta1618_start_panel(tfb);
 	INIT_DELAYED_WORK(&tfb->refresh_work, ta1618_refresh_work);
 	schedule_delayed_work(&tfb->refresh_work, 0);
 	dev_info(dev, "TA-1618 RGB565 framebuffer registered as fb%d\n",
@@ -321,6 +436,20 @@ static void ta1618_fb_remove(struct platform_device *pdev)
 	struct ta1618_fb *tfb = platform_get_drvdata(pdev);
 
 	cancel_delayed_work_sync(&tfb->refresh_work);
+	/*
+	 * Every frame arms the next one before it returns, so the loop always
+	 * stops with a frame waiting on the panel.  Left that way the controller
+	 * stays a second owner of the link after this driver is gone.
+	 */
+	if (tfb->armed) {
+		u32 done;
+
+		readl_poll_timeout(tfb->lcdc + LCDC_IRQ_RAW, done,
+				   done & LCDC_DONE, 100, TRANSFER_TIMEOUT_US);
+		writel(LCDC_DONE, tfb->lcdc + LCDC_IRQ_CLR);
+	}
+	writel(readl(tfb->lcdc + LCDC_CTRL) & ~(BIT(0) | LCDC_RUN),
+	       tfb->lcdc + LCDC_CTRL);
 	unregister_framebuffer(tfb->info);
 	fb_dealloc_cmap(&tfb->info->cmap);
 	kvfree(tfb->snapshot);
