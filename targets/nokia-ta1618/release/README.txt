@@ -24,7 +24,16 @@ The runner verifies the bundled board assets and host-tool dependencies before
 asking for the phone. It then checks BootROM USB access before attempting the
 fixed FDL1, RAM-payload and Linux USB-console sequence. Ctrl-] detaches the host
 console; it does not reboot or power off the phone. To reconnect while Linux is
-still running, use ./host/fplinux-usb-console instead of the full runner.
+still running, use ./host/fplinux-usb-console --interface 0 instead of the full
+runner.
+
+The common init starts the phone-side fplinux-input receiver automatically.
+Forward a host keyboard on interface 1 with:
+  sudo ./host/fplinux-usb-console --interface 1 --keyboard /dev/input/eventN
+The client uses EVIOCGRAB, so the selected keyboard stops reaching the host
+desktop while the process is running. Interface 0 remains available for a shell
+or transfer client. Stop the forwarder with SIGINT or SIGTERM from another input
+device or session; Ctrl-C from the grabbed keyboard cannot stop the host process.
 
 To end the RAM session, detach with Ctrl-], disconnect USB, remove the battery
 and then reinsert it. The next normal power-on uses the unchanged vendor

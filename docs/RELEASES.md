@@ -137,12 +137,25 @@ When prompted, hold `*` and connect USB while keeping `*` pressed. After BootROM
 USB appears, the adapter verifies read/write access to its actual device node
 before executing the RAM loader. All loader transfers target volatile RAM.
 
+`sha256sum -c` verifies the extracted archive, not the running phone. After
+loading, detach interface 0 and read the image's build stamp with:
+
+```sh
+./host/fplinux-usb-console --interface 0 --exec 'cat /etc/fplinux-build'
+```
+
+A source checkout additionally provides `./fplinux verify <target>`, which
+compares both recipe digests in that stamp with its local
+`build-manifest.json`. Neither check replaces the phone-side hardware
+qualification gate.
+
 ## USB access
 
 Both loader stages use libusb device nodes rather than `/dev/ttyUSB*`:
 
 - `1782:4d00` is the Unisoc BootROM;
-- `0525:a4a6` is the running Linux USB console.
+- `0525:a4a6` is the running Linux gadget: interface 0 is the shell and transfer
+  channel, and interface 1 carries host keyboard events.
 
 On a desktop system managed by logind, create a local udev rules file such as
 `/etc/udev/rules.d/70-fplinux.rules`:
@@ -172,11 +185,21 @@ The host USB client uses these controls:
 - `Ctrl-C` is forwarded to the shell on the phone.
 - `exit` ends the current phone shell; `usb-getty` starts a replacement shell.
 
+Interface 1 can forward a host keyboard while interface 0 remains attached:
+
+```sh
+sudo ./host/fplinux-usb-console \
+  --interface 1 --keyboard /dev/input/eventN
+```
+
+The forwarder uses `EVIOCGRAB`, so that keyboard stops reaching the host desktop
+until the process exits.
+
 Detach with `Ctrl-]` before unplugging USB. If Linux is still running, reconnect
 from the extracted archive with:
 
 ```sh
-./host/fplinux-usb-console
+./host/fplinux-usb-console --interface 0
 ```
 
 Do not start `runner/run.py` merely to reconnect: the full runner waits for a
@@ -197,7 +220,7 @@ remain unqualified and are not prescribed as exit methods.
 Power the phone off, disconnect USB and start the runner first. Hold `*`, connect
 USB only when prompted and keep `*` pressed until the BootROM device is found.
 If `0525:a4a6` is already present, Linux is still running; use
-`./host/fplinux-usb-console` instead.
+`./host/fplinux-usb-console --interface 0` instead.
 
 ### A USB device is visible but access is denied
 
@@ -220,8 +243,8 @@ Do not treat it as qualified and do not package it as a release.
 ### The attached console disconnects
 
 If the phone still enumerates as `0525:a4a6`, run
-`./host/fplinux-usb-console` again. Starting the complete runner is appropriate
-only for a new power-off BootROM load.
+`./host/fplinux-usb-console --interface 0` again. Starting the complete runner
+is appropriate only for a new power-off BootROM load.
 
 ## Release rule
 

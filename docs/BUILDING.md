@@ -232,22 +232,20 @@ qualified release additionally requires the exact closure digest in
 
 ## Verify a running phone
 
-After the current bundle has been loaded and USB interface 0 is free, compare
-its build stamp with the local build receipt:
+After the current bundle has been loaded and interface 0 is free, compare its
+build stamp with the local build receipt:
 
 ```sh
 ./fplinux verify nokia-ta1618
 ```
 
-The command reads `/etc/fplinux-build` through USB interface 0 and compares its
-workspace and container recipe digests with `build-manifest.json`. It rejects a
-phone booted from another workspace or build container. It does not inspect the
-other bundle files or qualify the hardware.
+The command reads `/etc/fplinux-build` from the phone through USB interface 0
+and compares its workspace and container recipe digests with
+`build-manifest.json`. It catches a phone booted from another workspace or build
+container. It does not verify the other bundle files and is not a hardware
+qualification gate.
 
-## Access a running phone
-
-The repository entrypoint owns direct shell and transfer access to an already
-running target:
+The same repository entrypoint owns direct access to an already running target:
 
 ```sh
 ./fplinux console nokia-ta1618
@@ -256,8 +254,8 @@ running target:
 ./fplinux console nokia-ta1618 --pull /tmp/file.bin ./file.bin
 ```
 
-`--keyboard EVDEV` selects USB interface 1. The shell, command and transfer modes
-select interface 0, which one host process may claim at a time.
+`--keyboard EVDEV` selects the target's input channel; the other modes select
+the shell and transfer channel.
 
 ## Package a build
 

@@ -105,23 +105,35 @@ erase, partition or NV operation.
 
 In the attached console, `Ctrl-]` detaches the host client without stopping the
 phone shell, rebooting Linux or powering the phone off. `Ctrl-C` is sent to the
-phone shell. With interface 0 free, compare the phone's build stamp with the
-current bundle receipt:
+phone shell. After detaching, verify that the phone runs the image produced by
+the current checkout:
 
 ```sh
 ./fplinux verify nokia-ta1618
 ```
 
-From the repository root, connect to the running phone with:
+This compares the workspace and container recipe digests in
+`/etc/fplinux-build` with the current bundle's `build-manifest.json`. It does not
+qualify the hardware or verify every bundle file. From the repository root,
+reconnect to the shell with interface 0:
 
 ```sh
 ./fplinux console nokia-ta1618
 ```
 
-The same entrypoint runs one command on the phone, reports its exit status,
-sends a file to it and takes a file off it without opening a terminal. See
-[Moving files between the host and the phone](docs/TRANSFER.md) for the current
-commands, integrity checks, limits and measured rates.
+To forward a host keyboard, find its `/dev/input/eventN` node and run the same
+client on interface 1. `EVIOCGRAB` keeps those keys away from the host desktop
+until the client exits:
+
+```sh
+sudo ./fplinux console nokia-ta1618 --keyboard /dev/input/eventN
+```
+
+Interface 0 remains available while the keyboard forwarder owns interface 1.
+The client also runs one command on the phone, reports its exit status, sends a
+file to it and takes a file off it without opening a terminal. See [Moving
+files between the host and the phone](docs/TRANSFER.md) for the modes, their
+checks and their current measured rates.
 
 To leave the RAM session, detach with `Ctrl-]`, disconnect USB, remove the
 TA-1618 battery, then reinsert it. The next power-on uses the unchanged vendor
