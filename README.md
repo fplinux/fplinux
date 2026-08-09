@@ -100,17 +100,16 @@ erase, partition or NV operation.
 
 In the attached console, `Ctrl-]` detaches the host client without stopping the
 phone shell, rebooting Linux or powering the phone off. `Ctrl-C` is sent to the
-phone shell. If Linux is already running, reconnect directly instead of starting
-the BootROM loader again:
+phone shell. From the repository root, connect to an already running phone with:
 
 ```sh
-.cache/out/nokia-ta1618/console/host/fplinux-usb-console
+./fplinux console nokia-ta1618
 ```
 
-The same client also runs one command on the phone and reports its exit status,
-sends a file to it, and takes a file off it, all without opening a terminal. See
-[Moving files between the host and the phone](docs/TRANSFER.md) for the modes,
-what each of them verifies and the rates they reach.
+The same entrypoint runs one command on the phone, reports its exit status,
+sends a file to it and takes a file off it without opening a terminal. See
+[Moving files between the host and the phone](docs/TRANSFER.md) for the current
+commands, integrity checks, limits and measured rates.
 
 To leave the RAM session, detach with `Ctrl-]`, disconnect USB, remove the
 TA-1618 battery, then reinsert it. The next power-on uses the unchanged vendor
