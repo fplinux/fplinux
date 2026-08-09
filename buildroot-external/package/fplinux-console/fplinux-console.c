@@ -34,6 +34,7 @@
 #include <unistd.h>
 
 #define MULTITAP_MS 700
+#define STAR_HOLD_MS 400
 #define VISUAL_BELL_MS 250
 #define KEYPAD_REOPEN_MS 1000
 #define INPUT_DIRECTORY_ENTRY_LIMIT 1024
@@ -41,6 +42,7 @@
 #define KEYPAD_EVENT_MAX_BYTES 5
 #define TERMINAL_INPUT_BYTES 64
 #define TERMINAL_REPLY_BYTES 32
+#define TERMINAL_REPLY_HOLD_MS 40
 #define COMPOSED_CHARACTER_MAX_BYTES 2
 /* A 64-byte read can complete a 31-byte buffered terminal reply. */
 #define TERMINAL_REPLY_MAX_ENQUEUE_BYTES                                       \
@@ -67,6 +69,7 @@
 #define BIT_WORD(bit) ((bit) / BITS_PER_LONG)
 #define BIT_MASK(bit) (1UL << ((bit) % BITS_PER_LONG))
 #define BIT_ARRAY_SIZE(max_bit) (BIT_WORD(max_bit) + 1)
+#define KEY_STATE_BYTES ((KEY_CNT + 7u) / 8u)
 
 _Static_assert(PTY_TX_CAPACITY >= TERMINAL_INPUT_FIFO_RESERVE,
 	       "PTY FIFO must hold one terminal-reply batch and Alt commit");
@@ -76,6 +79,7 @@ _Static_assert(PTY_TX_CAPACITY >= KEYPAD_INPUT_FIFO_RESERVE,
 struct terminal_reply {
 	char bytes[TERMINAL_REPLY_BYTES];
 	size_t length;
+	struct timespec deadline;
 };
 
 struct byte_fifo {
@@ -84,20 +88,29 @@ struct byte_fifo {
 	size_t length;
 };
 
+#define EXTRA_KEYPADS 3
+#define REPEAT_DELAY_MS 400u
+#define REPEAT_PERIOD_MS 40u
+
 struct runtime_state {
 	int keypad;
+	int extra_keypads[EXTRA_KEYPADS];
+	bool keypad_dropping[1 + EXTRA_KEYPADS];
 	int pty;
 	int signal_fd;
 	int tty0;
+	int console_lock;
 	int primary_vcsa;
 	int history_tty;
 	int history_vcsa;
 	unsigned primary_vt;
 	unsigned history_vt;
+	int primary_keyboard_mode;
 	pid_t child;
 	int child_status;
 	int shutdown_signal;
 	bool child_reaped;
+	bool primary_keyboard_saved;
 	bool history_active;
 	bool pty_final_drain;
 	bool cleanup_done;
@@ -155,21 +168,33 @@ struct transcript {
 };
 
 struct interface_state {
+	unsigned status_row;
+	bool raw_input;
+	bool raw_toggled;
+	bool star_down;
+	bool held_star_byte;
+	unsigned star_slot;
+	uint16_t raw_switch_code;
+	unsigned raw_switch_slot;
 	struct composition composition;
 	struct vcsa_overlay overlay;
 	struct transcript transcript;
 	struct timespec visual_bell_deadline;
+	struct timespec star_hold_deadline;
 	size_t history_distance;
 	bool visual_bell;
 	bool suppress_backspace_until_release;
+	unsigned backspace_slot;
 	unsigned char history_cells[MAX_VT_CELLS * 2];
 };
 
 static struct runtime_state runtime = {
     .keypad = -1,
+    .extra_keypads = {-1, -1, -1},
     .pty = -1,
     .signal_fd = -1,
     .tty0 = -1,
+    .console_lock = -1,
     .primary_vcsa = -1,
     .history_tty = -1,
     .history_vcsa = -1,
@@ -183,6 +208,7 @@ static void die(const char *message);
 static void die_errno(const char *message);
 static void refresh_overlay(void);
 static void render_history(void);
+static void sync_new_keypad(int slot);
 
 static bool write_all(int fd, const void *buffer, size_t length)
 {
@@ -255,6 +281,19 @@ static int ioctl_value(int fd, unsigned long request, unsigned value)
 	return ioctl(fd, request, (void *)(uintptr_t)value);
 }
 
+/*
+ * Raw mode reads K_XLATE bytes from the VT. K_OFF prevents those bytes from
+ * duplicating the evdev input composed in multi-tap mode.
+ */
+static void apply_keyboard_mode(void)
+{
+	if (!runtime.primary_keyboard_saved)
+		return;
+	if (ioctl_value(STDIN_FILENO, KDSKBMODE,
+			interface.raw_input ? K_XLATE : K_OFF) < 0)
+		die_errno("cannot set primary VT keyboard mode");
+}
+
 static bool remove_overlay(void)
 {
 	struct vcsa_cell current;
@@ -320,11 +359,27 @@ static bool reap_child_nonblocking(void)
 static void cleanup_virtual_terminals(void)
 {
 	remove_overlay();
+	if (runtime.primary_keyboard_saved) {
+		ioctl_value(STDIN_FILENO, KDSKBMODE,
+			    (unsigned)runtime.primary_keyboard_mode);
+		runtime.primary_keyboard_saved = false;
+	}
 	if (runtime.history_active && runtime.tty0 >= 0 && runtime.primary_vt) {
 		ioctl_value(runtime.tty0, VT_ACTIVATE, runtime.primary_vt);
 		ioctl_value(runtime.tty0, VT_WAITACTIVE, runtime.primary_vt);
 	}
 	runtime.history_active = false;
+	if (interface.status_row) {
+		char sequence[32];
+		int length;
+
+		length =
+		    snprintf(sequence, sizeof(sequence),
+			     "\033[r\033[%u;1H\033[2K", interface.status_row);
+		if (length > 0 && (size_t)length < sizeof(sequence))
+			write_all(STDOUT_FILENO, sequence, (size_t)length);
+		interface.status_row = 0;
+	}
 	if (runtime.history_vcsa >= 0) {
 		close(runtime.history_vcsa);
 		runtime.history_vcsa = -1;
@@ -363,6 +418,12 @@ static void cleanup_runtime(void)
 		close(runtime.keypad);
 		runtime.keypad = -1;
 	}
+	for (i = 0; i < EXTRA_KEYPADS; ++i) {
+		if (runtime.extra_keypads[i] < 0)
+			continue;
+		close(runtime.extra_keypads[i]);
+		runtime.extra_keypads[i] = -1;
+	}
 	if (runtime.child > 0 && !runtime.child_reaped)
 		signal_child_group(
 		    runtime.shutdown_signal ? runtime.shutdown_signal : SIGHUP);
@@ -398,20 +459,26 @@ static void cleanup_runtime(void)
 				break;
 		} while (!runtime.child_reaped);
 	}
+	if (runtime.console_lock >= 0) {
+		close(runtime.console_lock);
+		runtime.console_lock = -1;
+	}
 }
 
-static void report_error(const char *message, int error_number)
+static void report_labelled(const char *label, const char *message,
+			    int error_number)
 {
 	char buffer[256];
 	int length;
 
 	if (error_number)
 		length = snprintf(buffer, sizeof(buffer),
-				  "\r\nFPLINUX-CONSOLE ERROR: %s: %s\r\n",
+				  "\r\nFPLINUX-CONSOLE %s: %s: %s\r\n", label,
 				  message, strerror(error_number));
 	else
-		length = snprintf(buffer, sizeof(buffer),
-				  "\r\nFPLINUX-CONSOLE ERROR: %s\r\n", message);
+		length =
+		    snprintf(buffer, sizeof(buffer),
+			     "\r\nFPLINUX-CONSOLE %s: %s\r\n", label, message);
 	if (length > 0) {
 		size_t output_length = (size_t)length;
 
@@ -419,6 +486,16 @@ static void report_error(const char *message, int error_number)
 			output_length = sizeof(buffer) - 1;
 		write_all(STDERR_FILENO, buffer, output_length);
 	}
+}
+
+static void report_error(const char *message, int error_number)
+{
+	report_labelled("ERROR", message, error_number);
+}
+
+static void report_warning(const char *message, int error_number)
+{
+	report_labelled("WARNING", message, error_number);
 }
 
 static void die(const char *message)
@@ -481,6 +558,13 @@ static bool bit_is_set(const unsigned long *bits, unsigned bit)
 	return (bits[BIT_WORD(bit)] & BIT_MASK(bit)) != 0;
 }
 
+static void set_repeat_rate(int fd)
+{
+	unsigned int settings[2] = {REPEAT_DELAY_MS, REPEAT_PERIOD_MS};
+
+	ioctl(fd, EVIOCSREP, settings);
+}
+
 static bool is_console_keypad(int fd)
 {
 	static const unsigned short required_keys[] = {
@@ -520,6 +604,128 @@ static bool is_event_device_name(const char *name)
 	return !*digit && digits <= 10;
 }
 
+static void reset_keypad_gesture(int slot)
+{
+	unsigned token = (unsigned)slot + 1;
+
+	if (interface.backspace_slot == token) {
+		interface.suppress_backspace_until_release = false;
+		interface.backspace_slot = 0;
+	}
+	if (interface.star_slot == token) {
+		interface.raw_toggled = false;
+		interface.star_down = false;
+		interface.held_star_byte = false;
+		interface.star_slot = 0;
+	}
+	if (interface.raw_switch_slot == token) {
+		interface.raw_switch_code = 0;
+		interface.raw_switch_slot = 0;
+	}
+}
+
+static void drop_keypad_gesture(int slot)
+{
+	unsigned token = (unsigned)slot + 1;
+
+	if (interface.star_slot == token)
+		interface.star_down = false;
+	if (interface.raw_switch_slot == token) {
+		interface.raw_switch_code = 0;
+		interface.raw_switch_slot = 0;
+	}
+}
+
+static void close_extra_keypad(size_t slot)
+{
+	if (slot >= EXTRA_KEYPADS || runtime.extra_keypads[slot] < 0)
+		return;
+	close(runtime.extra_keypads[slot]);
+	runtime.extra_keypads[slot] = -1;
+	runtime.keypad_dropping[slot + 1] = false;
+	reset_keypad_gesture((int)slot + 1);
+}
+
+static void open_extra_keypads(int primary, int *extra)
+{
+	struct dirent *entry;
+	DIR *directory;
+	struct stat first;
+	size_t entries = 0;
+	size_t taken = 0;
+	size_t slot;
+	int directory_fd;
+
+	if (primary < 0 || fstat(primary, &first) != 0)
+		return;
+	for (slot = 0; slot < EXTRA_KEYPADS; ++slot) {
+		struct stat status;
+
+		if (extra[slot] < 0)
+			continue;
+		if (fstat(extra[slot], &status) != 0 ||
+		    status.st_rdev == first.st_rdev) {
+			close_extra_keypad(slot);
+			continue;
+		}
+		++taken;
+	}
+	directory_fd =
+	    open("/dev/input", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	if (directory_fd < 0)
+		return;
+	directory = fdopendir(directory_fd);
+	if (!directory) {
+		close(directory_fd);
+		return;
+	}
+	while (taken < EXTRA_KEYPADS && entries < INPUT_DIRECTORY_ENTRY_LIMIT &&
+	       (entry = readdir(directory)) != NULL) {
+		struct stat status;
+		bool duplicate;
+		int fd;
+
+		++entries;
+		if (!is_event_device_name(entry->d_name))
+			continue;
+		fd = openat(directory_fd, entry->d_name,
+			    O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+		if (fd < 0)
+			continue;
+		if (fstat(fd, &status) != 0 || !S_ISCHR(status.st_mode) ||
+		    !is_console_keypad(fd)) {
+			close(fd);
+			continue;
+		}
+		duplicate = status.st_rdev == first.st_rdev;
+		for (slot = 0; !duplicate && slot < EXTRA_KEYPADS; ++slot) {
+			struct stat existing;
+
+			if (extra[slot] >= 0 &&
+			    fstat(extra[slot], &existing) == 0 &&
+			    existing.st_rdev == status.st_rdev)
+				duplicate = true;
+		}
+		if (duplicate) {
+			close(fd);
+			continue;
+		}
+		for (slot = 0; slot < EXTRA_KEYPADS; ++slot)
+			if (extra[slot] < 0)
+				break;
+		if (slot == EXTRA_KEYPADS) {
+			close(fd);
+			break;
+		}
+		set_repeat_rate(fd);
+		extra[slot] = fd;
+		runtime.keypad_dropping[slot + 1] = false;
+		sync_new_keypad((int)slot + 1);
+		++taken;
+	}
+	closedir(directory);
+}
+
 static int open_keypad(void)
 {
 	struct dirent *entry;
@@ -551,6 +757,7 @@ static int open_keypad(void)
 			continue;
 		if (fstat(fd, &status) == 0 && S_ISCHR(status.st_mode) &&
 		    is_console_keypad(fd)) {
+			set_repeat_rate(fd);
 			closedir(directory);
 			return fd;
 		}
@@ -630,6 +837,52 @@ static void validate_vcsa(int fd, unsigned vt, const struct winsize *geometry,
 		die_errno("VCSA device is not writable");
 }
 
+/* A failed check must not make the phone lose its only local console. */
+static void claim_console(unsigned vt)
+{
+	struct flock claim = {
+	    .l_type = F_WRLCK,
+	    .l_whence = SEEK_SET,
+	};
+	char message[192];
+	char path[64];
+	int error_number;
+
+	snprintf(path, sizeof(path), "/tmp/fplinux-console.tty%u.lock", vt);
+	runtime.console_lock = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+	if (runtime.console_lock < 0) {
+		report_warning(
+		    "cannot open the local console lock; starting anyway",
+		    errno);
+		return;
+	}
+	if (fcntl(runtime.console_lock, F_SETLK, &claim) == 0)
+		return;
+	error_number = errno;
+	if (error_number == EACCES || error_number == EAGAIN) {
+		struct flock holder = claim;
+
+		if (fcntl(runtime.console_lock, F_GETLK, &holder) == 0 &&
+		    holder.l_type != F_UNLCK && holder.l_pid > 0)
+			snprintf(
+			    message, sizeof(message),
+			    "another FPLinux console already holds /dev/tty%u "
+			    "(pid %ld); stop it, then start this one again",
+			    vt, (long)holder.l_pid);
+		else
+			snprintf(
+			    message, sizeof(message),
+			    "another FPLinux console already holds /dev/tty%u; "
+			    "stop it, then start this one again",
+			    vt);
+		die(message);
+	}
+	report_warning("cannot lock the local console; starting anyway",
+		       error_number);
+	close(runtime.console_lock);
+	runtime.console_lock = -1;
+}
+
 static void setup_virtual_terminals(const struct winsize *geometry)
 {
 	struct vt_stat state;
@@ -685,6 +938,18 @@ static void setup_virtual_terminals(const struct winsize *geometry)
 	    !terminal_fd_matches_device(STDOUT_FILENO, &active_stat))
 		die("stdin or stdout does not resolve to the active Linux VT");
 
+	/* Claim before changing the VT so refusal leaves it untouched. */
+	claim_console(runtime.primary_vt);
+
+	/*
+	 * Terminal query replies are inserted by the VT core, not the keyboard,
+	 * so they arrive on stdin whichever mode the keyboard layer is in.
+	 */
+	if (ioctl(STDIN_FILENO, KDGKBMODE, &runtime.primary_keyboard_mode) < 0)
+		die_errno("cannot read primary VT keyboard mode");
+	runtime.primary_keyboard_saved = true;
+	apply_keyboard_mode();
+
 	snprintf(path, sizeof(path), "/dev/vcsa%u", runtime.primary_vt);
 	runtime.primary_vcsa =
 	    open(path, O_RDWR | O_NOCTTY | O_NOFOLLOW | O_CLOEXEC);
@@ -723,9 +988,20 @@ static void setup_virtual_terminals(const struct winsize *geometry)
 static int create_shell_pty(const sigset_t *child_signal_mask,
 			    const struct winsize *geometry)
 {
+	char columns[32];
+	char lines[32];
 	char *slave_path;
 	pid_t child;
 	int master;
+
+	/*
+	 * BusyBox line editing prefers COLUMNS to TIOCGWINSZ and silently
+	 * falls back to a width of 80 whenever the value it settles on is
+	 * below two, so the geometry is stated in both places.
+	 */
+	snprintf(columns, sizeof(columns), "COLUMNS=%u",
+		 (unsigned)geometry->ws_col);
+	snprintf(lines, sizeof(lines), "LINES=%u", (unsigned)geometry->ws_row);
 
 	master = posix_openpt(O_RDWR | O_NOCTTY | O_NONBLOCK | O_CLOEXEC);
 	if (master < 0)
@@ -740,7 +1016,7 @@ static int create_shell_pty(const sigset_t *child_signal_mask,
 	if (child < 0)
 		die_errno("fork failed");
 	if (child == 0) {
-		static char *const environment[] = {
+		char *environment[] = {
 		    "HOME=/root",
 		    "USER=root",
 		    "LOGNAME=root",
@@ -748,6 +1024,8 @@ static int create_shell_pty(const sigset_t *child_signal_mask,
 		    "PATH=/bin:/sbin:/usr/bin:/usr/sbin",
 		    "TERM=linux",
 		    "PS1=fplinux# ",
+		    columns,
+		    lines,
 		    NULL,
 		};
 		int slave;
@@ -880,23 +1158,44 @@ static bool flush_pty_fifo(struct byte_fifo *fifo)
 	return true;
 }
 
+static void push_console_bytes(struct byte_fifo *fifo, const void *bytes,
+			       size_t length)
+{
+	if (length && !fifo_push(fifo, bytes, length))
+		die("PTY input FIFO capacity invariant violated");
+}
+
 /*
- * Linux VT replies to terminal status queries through the console input queue.
- * Only forward those replies to the shell PTY. Ordinary console keyboard bytes
- * are discarded because physical keys are translated through evdev below.
+ * Linux VT answers terminal status queries through the console input queue,
+ * and in raw mode the keyboard layer feeds every key it has translated into
+ * the same queue.  A reply belongs to the shell exactly once; everything else
+ * is typing and only raw mode passes it on.  A sequence that has started but
+ * not yet proved to be a reply is held back until it does, or until
+ * release_terminal_hold decides that no reply can still complete it.
  */
 static void forward_terminal_replies(struct byte_fifo *fifo,
 				     struct terminal_reply *reply,
 				     const char *bytes, size_t length)
 {
+	bool typing = interface.raw_input;
 	size_t i;
 
 	for (i = 0; i < length; ++i) {
 		unsigned char c = (unsigned char)bytes[i];
 
 		if (!reply->length) {
-			if (c == '\033')
-				reply->bytes[reply->length++] = (char)c;
+			if (c != '\033') {
+				if (typing && c == '*' && interface.star_down) {
+					interface.held_star_byte = true;
+					continue;
+				}
+				if (typing)
+					push_console_bytes(fifo, &c, 1);
+				continue;
+			}
+			reply->bytes[reply->length++] = (char)c;
+			reply->deadline = deadline_after_ms(
+			    monotonic_now(), TERMINAL_REPLY_HOLD_MS);
 			continue;
 		}
 		if (reply->length == 1) {
@@ -904,26 +1203,49 @@ static void forward_terminal_replies(struct byte_fifo *fifo,
 				reply->bytes[reply->length++] = (char)c;
 				continue;
 			}
-			reply->length = c == '\033' ? 1 : 0;
+			if (typing)
+				push_console_bytes(fifo, reply->bytes, 1);
+			if (c == '\033') {
+				reply->deadline = deadline_after_ms(
+				    monotonic_now(), TERMINAL_REPLY_HOLD_MS);
+				continue;
+			}
+			reply->length = 0;
+			if (typing)
+				push_console_bytes(fifo, &c, 1);
 			continue;
 		}
 		if ((c >= '0' && c <= '9') || c == ';' || c == '?' ||
 		    c == '>') {
-			if (reply->length + 1 < sizeof(reply->bytes))
+			if (reply->length + 1 < sizeof(reply->bytes)) {
 				reply->bytes[reply->length++] = (char)c;
-			else
-				reply->length = 0;
+				continue;
+			}
+		} else if ((c == 'R' || c == 'n' || c == 'c') &&
+			   reply->length + 1 <= sizeof(reply->bytes)) {
+			reply->bytes[reply->length++] = (char)c;
+			push_console_bytes(fifo, reply->bytes, reply->length);
+			reply->length = 0;
 			continue;
 		}
-		if ((c == 'R' || c == 'n' || c == 'c') &&
-		    reply->length + 1 <= sizeof(reply->bytes)) {
-			reply->bytes[reply->length++] = (char)c;
-			if (!fifo_push(fifo, reply->bytes, reply->length))
-				die("PTY input FIFO capacity invariant "
-				    "violated");
+		if (typing) {
+			push_console_bytes(fifo, reply->bytes, reply->length);
+			push_console_bytes(fifo, &c, 1);
 		}
 		reply->length = 0;
 	}
+}
+
+/* A timed-out ESC is keyboard input rather than a terminal reply. */
+static void release_terminal_hold(struct byte_fifo *fifo,
+				  struct terminal_reply *reply,
+				  struct timespec now)
+{
+	if (!interface.raw_input || !reply->length ||
+	    !deadline_reached(now, reply->deadline))
+		return;
+	push_console_bytes(fifo, reply->bytes, reply->length);
+	reply->length = 0;
 }
 
 static struct transcript_line *current_transcript_line(void)
@@ -1184,16 +1506,59 @@ static void draw_overlay(unsigned char character)
 	interface.overlay.drawn = true;
 }
 
-static void refresh_overlay(void)
+/*
+ * Written straight into screen memory rather than through the terminal:
+ * even a saved and restored cursor motion cancels a pending margin wrap.
+ */
+static void draw_status_bar(void)
 {
-	unsigned char character;
+	struct vcsa_cell row[MAX_VT_COLS];
+	unsigned char header[4];
+	char text[64];
+	const char *mode = interface.raw_input ? "QWERTY" : "T9";
+	const char *modifier = "";
+	off_t offset;
+	size_t columns;
+	size_t i;
+	int written;
 
-	if (!remove_overlay())
-		die_errno("cannot remove primary VCSA overlay");
-	character = overlay_character();
-	if (character)
-		draw_overlay(character);
+	if (!interface.status_row || runtime.history_active)
+		return;
+	switch (interface.composition.modifier) {
+	case MODIFIER_CTRL:
+		modifier = " CTRL";
+		break;
+	case MODIFIER_ALT:
+		modifier = " ALT";
+		break;
+	case MODIFIER_SHIFT:
+		modifier = " SHIFT";
+		break;
+	default:
+		break;
+	}
+	written = snprintf(text, sizeof(text), " %s%s", mode, modifier);
+	if (written < 0)
+		die("cannot format status bar text");
+	if (!read_all_at(runtime.primary_vcsa, header, sizeof(header), 0))
+		die_errno("cannot read primary VCSA geometry");
+	if (!header[0] || !header[1] || header[0] > MAX_VT_ROWS ||
+	    header[1] > MAX_VT_COLS)
+		die("primary VCSA reported invalid geometry");
+	columns = header[1];
+	for (i = 0; i < columns; ++i) {
+		row[i].character = ' ';
+		row[i].attribute = 0x70;
+	}
+	for (i = 0; i < columns && i < (size_t)written; ++i)
+		row[i].character = (unsigned char)text[i];
+	offset = 4 + (off_t)2 * (off_t)(header[0] - 1) * (off_t)columns;
+	if (!write_all_at(runtime.primary_vcsa, row, columns * sizeof(row[0]),
+			  offset))
+		die_errno("cannot draw status bar");
 }
+
+static void refresh_overlay(void) { draw_status_bar(); }
 
 static void cancel_composition(void)
 {
@@ -1442,7 +1807,7 @@ static void change_history_distance(bool older, size_t amount)
 	render_history();
 }
 
-static void handle_history_key(uint16_t code)
+static void handle_history_key(uint16_t code, unsigned keypad_token)
 {
 	size_t page;
 
@@ -1452,6 +1817,7 @@ static void handle_history_key(uint16_t code)
 		break;
 	case KEY_BACKSPACE:
 		interface.suppress_backspace_until_release = true;
+		interface.backspace_slot = keypad_token;
 		leave_history();
 		break;
 	case KEY_ENTER:
@@ -1501,6 +1867,47 @@ static bool handle_tab(struct byte_fifo *fifo, struct timespec now)
 	}
 	start_visual_bell(now);
 	return true;
+}
+
+/*
+ * A key of the typewriter block that is not one of its modifiers: something
+ * the console keymap would type, and which the phone's own keypad does not
+ * have at all.
+ */
+static bool keyboard_key(uint16_t code)
+{
+	switch (code) {
+	case KEY_LEFTCTRL:
+	case KEY_LEFTSHIFT:
+	case KEY_RIGHTSHIFT:
+	case KEY_LEFTALT:
+		return false;
+	default:
+		return code >= KEY_ESC && code <= KEY_SPACE;
+	}
+}
+
+/*
+ * Multi-tap can only express the keys a phone keypad has.  A code it has no
+ * meaning for is therefore evidence that something else is being typed on, and
+ * the terminal stops interpreting rather than dropping the key.
+ */
+static bool multitap_handles(uint16_t code)
+{
+	switch (code) {
+	case KEY_BACKSPACE:
+	case KEY_KPASTERISK:
+	case KEY_KPDOT:
+	case KEY_TAB:
+	case KEY_ENTER:
+	case KEY_UP:
+	case KEY_DOWN:
+	case KEY_LEFT:
+	case KEY_RIGHT:
+		return true;
+	default:
+		return characters_for(code) != NULL;
+	}
 }
 
 static bool handle_primary_key(struct byte_fifo *fifo, uint16_t code,
@@ -1576,10 +1983,11 @@ static void disconnect_keypad(struct timespec *reopen_deadline,
 	if (runtime.keypad >= 0)
 		close(runtime.keypad);
 	runtime.keypad = -1;
+	runtime.keypad_dropping[0] = false;
 	cancel_composition();
 	interface.composition.modifier = MODIFIER_NONE;
 	interface.visual_bell = false;
-	interface.suppress_backspace_until_release = false;
+	reset_keypad_gesture(0);
 	refresh_overlay();
 	*reopen_deadline = deadline_after_ms(now, KEYPAD_REOPEN_MS);
 }
@@ -1710,46 +2118,197 @@ static void commit_expired_composition(struct byte_fifo *pty_tx,
 		die("PTY input FIFO capacity invariant violated");
 }
 
-static void process_keypad_events(struct byte_fifo *pty_tx,
+static void process_keypad_event(struct byte_fifo *pty_tx, int slot,
+				 uint16_t code, int32_t value)
+{
+	struct timespec now;
+	unsigned token = (unsigned)slot + 1;
+
+	if (code == KEY_BACKSPACE && value == 0) {
+		if (interface.backspace_slot == token) {
+			interface.suppress_backspace_until_release = false;
+			interface.backspace_slot = 0;
+			return;
+		}
+	}
+	if (code == KEY_BACKSPACE &&
+	    interface.suppress_backspace_until_release &&
+	    interface.backspace_slot == token)
+		return;
+	/*
+	 * This key means one thing tapped and another held, so its tap can
+	 * only be known once it is let go without having been held.  The
+	 * hold is timed here because the keypad driver need not generate
+	 * the auto-repeat events the kernel would time.
+	 */
+	if (code == KEY_KPASTERISK) {
+		bool tapped = value == 0 && !interface.raw_toggled;
+
+		if (value == 1) {
+			if (interface.star_slot && interface.star_slot != token)
+				return;
+			now = monotonic_now();
+			interface.star_slot = token;
+			interface.star_down = true;
+			interface.held_star_byte = false;
+			interface.star_hold_deadline =
+			    deadline_after_ms(now, STAR_HOLD_MS);
+			return;
+		}
+		if (value == 0) {
+			bool held_star_byte = interface.held_star_byte;
+
+			if (interface.star_slot != token)
+				return;
+			interface.star_down = false;
+			interface.raw_toggled = false;
+			interface.held_star_byte = false;
+			interface.star_slot = 0;
+			if (tapped && interface.raw_input &&
+			    !runtime.history_active && held_star_byte) {
+				unsigned char star = '*';
+
+				push_console_bytes(pty_tx, &star, 1);
+				return;
+			}
+		}
+		if (!tapped)
+			return;
+		value = 1;
+	}
+	/*
+	 * Raw mode is the kernel's to translate: evdev is still watched, but
+	 * only so the star hold above can leave it again.  History is the one
+	 * exception, because there the foreground VT is the history one, whose
+	 * keyboard is off and which nothing else would drive.
+	 */
+	if (interface.raw_input && !runtime.history_active)
+		return;
+	/*
+	 * The driver announces KEY_STATUS presses and releases of its own
+	 * accord: only a press and release of a code that a keyboard has
+	 * proves a keyboard and may end multi-tap here.
+	 */
+	if (!interface.raw_input && !runtime.history_active &&
+	    !multitap_handles(code)) {
+		if (!keyboard_key(code))
+			return;
+		if (value == 1) {
+			interface.raw_switch_code = code;
+			interface.raw_switch_slot = token;
+		}
+		if (value == 0 && code == interface.raw_switch_code &&
+		    interface.raw_switch_slot == token) {
+			interface.raw_switch_code = 0;
+			interface.raw_switch_slot = 0;
+			interface.raw_input = true;
+			apply_keyboard_mode();
+			cancel_composition();
+			refresh_overlay();
+		}
+		return;
+	}
+	if (value != 1 && !(value == 2 && is_repeatable_key(code)))
+		return;
+	now = monotonic_now();
+	commit_expired_composition(pty_tx, now);
+	if (runtime.history_active)
+		handle_history_key(code, token);
+	else if (!handle_primary_key(pty_tx, code, now))
+		die("PTY input FIFO capacity invariant violated");
+}
+
+static int keypad_slot_fd(int slot)
+{
+	if (slot == 0)
+		return runtime.keypad;
+	if (slot > 0 && slot <= EXTRA_KEYPADS)
+		return runtime.extra_keypads[slot - 1];
+	return -1;
+}
+
+static void resync_keypad(int slot)
+{
+	unsigned char keys[KEY_STATE_BYTES] = {0};
+	int fd = keypad_slot_fd(slot);
+	unsigned token = (unsigned)slot + 1;
+	bool star_pressed;
+	bool backspace_pressed;
+
+	if (fd < 0 || ioctl(fd, EVIOCGKEY(sizeof(keys)), keys) < 0) {
+		reset_keypad_gesture(slot);
+		return;
+	}
+	star_pressed = keys[KEY_KPASTERISK / 8u] &
+		       (unsigned char)(1u << (KEY_KPASTERISK % 8u));
+	backspace_pressed = keys[KEY_BACKSPACE / 8u] &
+			    (unsigned char)(1u << (KEY_BACKSPACE % 8u));
+	if (interface.star_slot == token) {
+		if (star_pressed)
+			interface.star_down = true;
+		else
+			reset_keypad_gesture(slot);
+	} else if (!interface.star_slot && star_pressed) {
+		struct timespec now = monotonic_now();
+
+		interface.star_slot = token;
+		interface.star_down = true;
+		interface.star_hold_deadline =
+		    deadline_after_ms(now, STAR_HOLD_MS);
+	}
+	if (interface.backspace_slot == token && !backspace_pressed) {
+		interface.suppress_backspace_until_release = false;
+		interface.backspace_slot = 0;
+	} else if (!interface.backspace_slot && backspace_pressed) {
+		interface.suppress_backspace_until_release = true;
+		interface.backspace_slot = token;
+	}
+}
+
+static void sync_new_keypad(int slot)
+{
+	unsigned token = (unsigned)slot + 1;
+
+	resync_keypad(slot);
+	if (interface.star_slot == token && interface.star_down)
+		interface.raw_toggled = true;
+}
+
+static void process_keypad_events(struct byte_fifo *pty_tx, int slot,
 				  const struct input_event *events,
 				  size_t count)
 {
 	size_t i;
 
 	for (i = 0; i < count; ++i) {
-		struct timespec now;
-		uint16_t code;
-		int32_t value;
-
-		if (events[i].type != EV_KEY)
-			continue;
-		code = events[i].code;
-		value = events[i].value;
-		if (code == KEY_BACKSPACE && value == 0) {
-			interface.suppress_backspace_until_release = false;
+		if (events[i].type == EV_SYN && events[i].code == SYN_DROPPED) {
+			runtime.keypad_dropping[slot] = true;
+			drop_keypad_gesture(slot);
 			continue;
 		}
-		if (code == KEY_BACKSPACE &&
-		    interface.suppress_backspace_until_release)
+		if (runtime.keypad_dropping[slot]) {
+			if (events[i].type == EV_SYN &&
+			    events[i].code == SYN_REPORT) {
+				runtime.keypad_dropping[slot] = false;
+				resync_keypad(slot);
+			}
 			continue;
-		if (value != 1 && !(value == 2 && is_repeatable_key(code)))
+		}
+		if (events[i].type != EV_KEY)
 			continue;
-		now = monotonic_now();
-		commit_expired_composition(pty_tx, now);
-		if (runtime.history_active)
-			handle_history_key(code);
-		else if (!handle_primary_key(pty_tx, code, now))
-			die("PTY input FIFO capacity invariant violated");
+		process_keypad_event(pty_tx, slot, events[i].code,
+				     events[i].value);
 	}
 }
 
 int main(void)
 {
-	struct terminal_reply terminal_reply = {{0}, 0};
+	struct terminal_reply terminal_reply = {{0}, 0, {0, 0}};
 	struct byte_fifo pty_tx = {{0}, 0, 0};
 	struct input_event events[KEYPAD_EVENT_COUNT];
-	struct pollfd descriptors[4];
+	struct pollfd descriptors[4 + EXTRA_KEYPADS];
 	struct timespec keypad_reopen_deadline = {0};
+	struct timespec extra_rescan_deadline = {0};
 	struct winsize geometry;
 	sigset_t child_signal_mask;
 
@@ -1757,13 +2316,26 @@ int main(void)
 		die("cannot register terminal cleanup");
 	configure_signals(&child_signal_mask);
 	runtime.keypad = open_keypad();
+	open_extra_keypads(runtime.keypad, runtime.extra_keypads);
+	sync_new_keypad(0);
 	geometry = console_geometry();
 	setup_virtual_terminals(&geometry);
+	/* Keep the bottom row outside the shell's scrolling region. */
+	interface.status_row = geometry.ws_row;
+	if (interface.status_row && geometry.ws_row > 1)
+		geometry.ws_row -= 1;
 	prepare_console_terminal();
 	interface.transcript.count = 1;
-	runtime.pty = create_shell_pty(&child_signal_mask, &geometry);
 
 	putstr(STDOUT_FILENO, "\033[2J\033[H");
+	if (interface.status_row > 1) {
+		char region[32];
+
+		snprintf(region, sizeof(region), "\033[1;%ur\033[H",
+			 interface.status_row - 1);
+		putstr(STDOUT_FILENO, region);
+	}
+	draw_status_bar();
 	putstr(STDOUT_FILENO, "FPLinux local console\r\n");
 	if (runtime.keypad >= 0)
 		putstr(STDOUT_FILENO,
@@ -1771,26 +2343,55 @@ int main(void)
 	else
 		putstr(STDOUT_FILENO, "Waiting for a compatible physical "
 				      "keypad event device.\r\n");
-	putstr(STDOUT_FILENO, "0-9 multi-tap, * modifier, # history, "
-			      "soft-right backspace.\r\n\r\n");
+	putstr(STDOUT_FILENO,
+	       "0-9 T9 multi-tap, tap * modifier, "
+	       "hold * T9/QWERTY, # history, soft-right backspace.\r\n\r\n");
+	/* Start the shell after the banner so its first prompt has a stable
+	 * cell. */
+	runtime.pty = create_shell_pty(&child_signal_mask, &geometry);
 
 	for (;;) {
 		struct timespec now = monotonic_now();
 		int timeout = -1;
+		int poll_errno;
 		int ready;
 
 		commit_expired_composition(&pty_tx, now);
+		release_terminal_hold(&pty_tx, &terminal_reply, now);
 		if (interface.visual_bell &&
 		    deadline_reached(now, interface.visual_bell_deadline)) {
 			interface.visual_bell = false;
 			refresh_overlay();
 		}
+		if (interface.star_down && !interface.raw_toggled &&
+		    deadline_reached(now, interface.star_hold_deadline)) {
+			interface.raw_toggled = true;
+			interface.held_star_byte = false;
+			interface.raw_input = !interface.raw_input;
+			apply_keyboard_mode();
+			cancel_composition();
+			refresh_overlay();
+		}
 		if (runtime.keypad < 0 &&
 		    deadline_reached(now, keypad_reopen_deadline)) {
 			runtime.keypad = open_keypad();
-			if (runtime.keypad < 0)
+			if (runtime.keypad < 0) {
 				keypad_reopen_deadline =
 				    deadline_after_ms(now, KEYPAD_REOPEN_MS);
+			} else {
+				runtime.keypad_dropping[0] = false;
+				open_extra_keypads(runtime.keypad,
+						   runtime.extra_keypads);
+				sync_new_keypad(0);
+				extra_rescan_deadline = deadline_after_ms(
+				    now, KEYPAD_REOPEN_MS * 4);
+			}
+		}
+		if (deadline_reached(now, extra_rescan_deadline)) {
+			open_extra_keypads(runtime.keypad,
+					   runtime.extra_keypads);
+			extra_rescan_deadline =
+			    deadline_after_ms(now, KEYPAD_REOPEN_MS * 4);
 		}
 
 		descriptors[0].fd = runtime.keypad;
@@ -1826,6 +2427,14 @@ int main(void)
 			timeout = earlier_timeout(
 			    timeout, milliseconds_until(
 					 now, interface.visual_bell_deadline));
+		if (interface.star_down && !interface.raw_toggled)
+			timeout = earlier_timeout(
+			    timeout, milliseconds_until(
+					 now, interface.star_hold_deadline));
+		if (interface.raw_input && terminal_reply.length)
+			timeout = earlier_timeout(
+			    timeout,
+			    milliseconds_until(now, terminal_reply.deadline));
 		if (runtime.keypad < 0)
 			timeout = earlier_timeout(
 			    timeout,
@@ -1833,8 +2442,28 @@ int main(void)
 		if (runtime.pty_final_drain)
 			timeout = 0;
 
-		ready = poll(descriptors, 4, timeout);
-		if (ready < 0 && errno == EINTR)
+		for (size_t slot = 0; slot < EXTRA_KEYPADS; ++slot) {
+			descriptors[4 + slot].fd = runtime.extra_keypads[slot];
+			descriptors[4 + slot].events =
+			    runtime.pty >= 0 && !runtime.pty_final_drain &&
+				    fifo_free(&pty_tx) >=
+					KEYPAD_INPUT_FIFO_RESERVE
+				? POLLIN
+				: 0;
+			descriptors[4 + slot].revents = 0;
+		}
+		timeout = earlier_timeout(
+		    timeout, milliseconds_until(now, extra_rescan_deadline));
+
+		/* The candidate exists only while this process is blocked in
+		 * poll. */
+		draw_overlay(overlay_character());
+		ready = poll(descriptors, 4 + EXTRA_KEYPADS, timeout);
+		poll_errno = errno;
+		if (!remove_overlay())
+			die_errno("cannot remove primary VCSA overlay");
+		errno = poll_errno;
+		if (ready < 0 && poll_errno == EINTR)
 			continue;
 		if (ready < 0)
 			die_errno("console poll failed");
@@ -1871,29 +2500,6 @@ int main(void)
 			if (!flush_pty_fifo(&pty_tx))
 				close_shell_pty(&pty_tx);
 
-		if (runtime.pty >= 0 && !runtime.pty_final_drain &&
-		    descriptors[2].revents & POLLIN &&
-		    fifo_free(&pty_tx) >= TERMINAL_INPUT_FIFO_RESERVE) {
-			char terminal_input[TERMINAL_INPUT_BYTES];
-			ssize_t length;
-
-			do {
-				length = read(STDIN_FILENO, terminal_input,
-					      sizeof(terminal_input));
-			} while (length < 0 && errno == EINTR);
-			if (length > 0)
-				forward_terminal_replies(
-				    &pty_tx, &terminal_reply, terminal_input,
-				    (size_t)length);
-			else if (!length)
-				die("console input closed");
-			else if (errno != EAGAIN && errno != EWOULDBLOCK)
-				die_errno("cannot read console input");
-		}
-		if (runtime.pty >= 0 && !runtime.pty_final_drain &&
-		    descriptors[2].revents & (POLLHUP | POLLERR | POLLNVAL))
-			die("console input poll failure");
-
 		if (runtime.keypad >= 0 &&
 		    descriptors[0].revents & (POLLHUP | POLLERR | POLLNVAL)) {
 			now = monotonic_now();
@@ -1915,11 +2521,62 @@ int main(void)
 				now = monotonic_now();
 				disconnect_keypad(&keypad_reopen_deadline, now);
 			} else if (length > 0) {
-				process_keypad_events(&pty_tx, events,
+				process_keypad_events(&pty_tx, 0, events,
 						      (size_t)length /
 							  sizeof(events[0]));
 			}
 		}
+
+		for (size_t slot = 0; slot < EXTRA_KEYPADS; ++slot) {
+			ssize_t length;
+
+			if (runtime.extra_keypads[slot] < 0)
+				continue;
+			if (descriptors[4 + slot].revents &
+			    (POLLHUP | POLLERR | POLLNVAL)) {
+				close_extra_keypad(slot);
+				continue;
+			}
+			if (!(descriptors[4 + slot].revents & POLLIN) ||
+			    runtime.pty_final_drain ||
+			    fifo_free(&pty_tx) < KEYPAD_INPUT_FIFO_RESERVE)
+				continue;
+			do {
+				length = read(runtime.extra_keypads[slot],
+					      events, sizeof(events));
+			} while (length < 0 && errno == EINTR);
+			if (length > 0) {
+				process_keypad_events(
+				    &pty_tx, (int)slot + 1, events,
+				    (size_t)length / sizeof(events[0]));
+			} else if (!length ||
+				   (errno != EAGAIN && errno != EWOULDBLOCK)) {
+				close_extra_keypad(slot);
+			}
+		}
+
+		if (runtime.pty >= 0 && !runtime.pty_final_drain &&
+		    descriptors[2].revents & POLLIN &&
+		    fifo_free(&pty_tx) >= TERMINAL_INPUT_FIFO_RESERVE) {
+			char terminal_input[TERMINAL_INPUT_BYTES];
+			ssize_t length;
+
+			do {
+				length = read(STDIN_FILENO, terminal_input,
+					      sizeof(terminal_input));
+			} while (length < 0 && errno == EINTR);
+			if (length > 0) {
+				forward_terminal_replies(
+				    &pty_tx, &terminal_reply, terminal_input,
+				    (size_t)length);
+			} else if (!length)
+				die("console input closed");
+			else if (errno != EAGAIN && errno != EWOULDBLOCK)
+				die_errno("cannot read console input");
+		}
+		if (runtime.pty >= 0 && !runtime.pty_final_drain &&
+		    descriptors[2].revents & (POLLHUP | POLLERR | POLLNVAL))
+			die("console input poll failure");
 
 		if (runtime.child_reaped && runtime.pty < 0)
 			return child_exit_code();

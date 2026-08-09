@@ -12,7 +12,9 @@ It requires ordinary Linux interfaces only:
   `fbcon`;
 - `/dev/tty0`, matching writable `/dev/vcsaN` character devices (Linux major
   `7`, minor `128 + N`), and a spare VT returned by `VT_OPENQRY` are available;
-- one evdev device reports the normalized keypad keys listed below;
+- `/dev/input` may expose one primary and up to three additional evdev devices
+  with the normalized keypad capabilities listed below; missing input devices
+  are nonfatal;
 - `/dev/ptmx` and `devpts` are available for the interactive shell;
 - `TIOCGWINSZ` reports non-zero, bounded rows and columns matching the active
   VCSA device.
@@ -23,31 +25,32 @@ them to match the device node for the active VT reported by `VT_GETSTATE`.
 Missing VT, VCSA, spare-VT, geometry, or write capabilities are fatal at
 startup; stdout escape overlays are not a fallback porting API.
 
-The shell PTY receives the complete physical VT geometry, uses `TERM=linux`, and
-keeps a bounded input FIFO. Shell PTY output is forwarded to the primary VT
-byte-for-byte in bounded read batches so a continuously writing child cannot
-starve signals, keypad discovery, input, or monotonic deadlines. Before a batch
-is forwarded, the terminal conditionally removes its VCSA overlay only when the
-cell still contains the terminal's exact marker; after the original bytes are
-written unchanged, it reads the new cursor and re-anchors any active overlay.
-The ownership check and restore are separate VCSA reads and writes, not an
-atomic compare-and-restore operation. Asynchronous external VT writers can race
-either operation, so overlay ownership is best-effort. There is no stdout
-escape-overlay fallback, custom output transformation, or persistent status row
-in this path.
+The bottom physical row is an inverse-video status bar. The shell PTY receives
+one row less than the physical VT, and a Linux scrolling region keeps shell
+output above the bar. It displays `T9` or `QWERTY` plus the active one-shot
+`CTRL`, `ALT` or `SHIFT` modifier. The bar is written through VCSA because even
+a saved and restored cursor move cancels a pending right-margin wrap.
+
+The terminal uses `TERM=linux` and a bounded input FIFO. Shell PTY output is
+forwarded to the primary VT byte-for-byte in bounded read batches so a
+continuously writing child cannot starve signals, input discovery or monotonic
+deadlines. A multi-tap candidate exists in the VCSA cursor cell only while the
+terminal is blocked in `poll`; it is removed before any shell output is written.
+There is no output transformation or stdout-overlay fallback.
 
 ### Normalized keypad UX
 
 The required evdev capability set is `KEY_0` through `KEY_9`, `KEY_TAB`,
 `KEY_BACKSPACE`, `KEY_ENTER`, `KEY_KPASTERISK`, `KEY_KPDOT`, and all four arrow
 keys. Discovery safely enumerates bounded `/dev/input/event*` entries and
-selects by capabilities, not by event number or phone identity. A missing keypad
-at startup is nonfatal: the PTY and shell remain live while discovery retries on
-a timed monotonic schedule. The same continuous discovery resumes if the
-selected evdev device is removed later.
+selects by capabilities, not event number or hardware identity. It opens one
+primary and up to three additional matching devices, setting their repeat delay
+to 400 ms and period to 40 ms. A missing device is nonfatal, and the continuous
+discovery loop also replaces removed devices.
 
-Digits compose entirely in userspace; no provisional candidate bytes enter the
-shell PTY:
+The default `T9` label names multi-tap composition; there is no dictionary or
+prediction. Digits compose entirely in userspace, and no provisional candidate
+bytes enter the shell PTY:
 
 - `2` through `9`: `abc2`, `def3`, `ghi4`, `jkl5`, `mno6`, `pqrs7`, `tuv8`,
   and `wxyz9`;
@@ -61,15 +64,21 @@ cancels an active candidate without sending Delete, and otherwise sends DEL.
 Enter commits and appends CR in one FIFO operation. An arrow commits and appends
 the corresponding unmodified Linux-console arrow sequence in one FIFO operation.
 
-`*` first commits a candidate, then cycles the one-shot selector
-`Ctrl -> Alt -> Shift -> none`. The selector is a temporary inline VCSA marker,
-not a permanent indicator. At character commit, Shift uppercases lowercase
+A short `*` first commits a candidate, then cycles the one-shot selector
+`Ctrl -> Alt -> Shift -> none`. The active selector appears in the status bar
+and as a temporary inline VCSA marker while the terminal is blocked in `poll`. At character commit, Shift uppercases lowercase
 ASCII, Alt prefixes ESC, and Ctrl maps ASCII letters or `@` through `_` with
 `c & 0x1f`; Ctrl-`?` emits DEL. Unsupported Ctrl characters are cancelled with a
 temporary visual marker and enqueue no bytes. A modifier resets after one
 successfully committed composed character. Shift plus left-soft emits ESC then
 Tab and consumes Shift. Ctrl/Alt plus left-soft are rejected with the same
 visual marker. Modifiers never invent arrow-key sequences outside `TERM=linux`.
+
+Holding `*` for 400 ms switches between `T9` and `QWERTY`. QWERTY enables the
+Linux console keymap with `K_XLATE`, and the terminal forwards the translated
+bytes from VT stdin without interpreting them. Holding `*` again returns to
+T9. Releasing an ordinary typewriter key while T9 is active also selects
+QWERTY; that switching key itself does not reach the shell.
 
 Evdev autorepeat (`value == 2`) is accepted for arrows and soft-right Backspace,
 and ignored for digits, `*`, `#`, Enter, and left-soft Tab.
@@ -91,11 +100,18 @@ the spare VT, leaving evdev as its only input path and preventing line-disciplin
 echo from overwriting the VCSA-rendered history. Shutdown returns to the primary
 VT when necessary and disallocates the spare VT.
 
-The common init reads branding from `/etc/os-release`, starts the external
-`usb-getty` worker and then runs `/bin/fplinux-console`. When `/dev/ttyGS0`
-exists, the worker runs BusyBox `getty`, which creates the USB shell session and
-makes the gadget tty its controlling terminal. A target may install this
-executable hook:
+The common init reads branding from `/etc/os-release`, starts `usb-getty` and
+`fplinux-input`, then runs `/bin/fplinux-console`. `usb-getty` gives
+`/dev/ttyGS0` to BusyBox `getty` as the USB shell's controlling terminal.
+`fplinux-input` reads `type code value` lines from `/dev/ttyGS1`, creates the
+`FPLinux host keyboard` uinput device and keeps that device alive across host
+disconnections.
+
+The console takes a record lock under `/tmp` before changing its VT. A second
+copy on the same VT is refused, and the kernel releases the lock when its owner
+dies. Failure to create or take the lock for any other reason is reported but
+does not remove the phone's local console. A target may install this executable
+hook:
 
 ```text
 /usr/libexec/fplinux/boot-diagnostics
@@ -110,7 +126,8 @@ A phone target still owns:
 
 - the framebuffer or DRM driver and the mode exposed to `fbcon`;
 - keypad scan, wiring and conversion to the normalized Linux input key codes;
-- DTS nodes and kernel configuration;
+- DTS nodes and kernel configuration, including evdev, uinput, file locking and
+  two generic-serial gadget ports when the host keyboard bridge is enabled;
 - pre-Linux screen composition, framebuffer/panel adapter and boot sequencing;
 - bootstrap, memory map, board assets and validated platform-adapter values;
 - `/etc/os-release` and an optional boot diagnostics hook.
