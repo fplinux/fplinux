@@ -16,14 +16,19 @@
 ## Current status
 
 The current source builds a volatile-RAM Linux image with a `240×320` portrait
-framebuffer, physical-keypad local shell and separate Linux USB shell. Boot,
-initramfs, timers, interrupts, display, keypad and bidirectional USB console
-operation are validated on physical TA-1618 hardware. Display updates are
-damage-driven and complete through the LCDC interrupt: a settled framebuffer
+framebuffer, physical-keypad shell and two Linux USB serial interfaces. Interface
+0 carries the USB shell and file-transfer modes. Interface 1 carries host
+keyboard events into a persistent uinput device. The local terminal accepts up
+to four compatible evdev devices, starts in T9 multi-tap mode, supports translated
+QWERTY input and reserves the bottom row for mode and modifier status.
+
+Boot, initramfs, timers, interrupts, display, keypad, both USB interfaces and the
+host keyboard bridge are validated on physical TA-1618 hardware. Display updates
+are damage-driven and complete through the LCDC interrupt: a settled framebuffer
 causes no transfers, while active full-screen drawing reaches 46.7 frames per
-second without visible tearing. Measured 4 MiB transfer rates with a static
-display are 753 KiB/s for upload and 1.40 MiB/s for pull. The current portrait
-terminal closure has not completed its exact phone-side release gate.
+second without visible tearing. Measured 4 MiB transfer rates with a static display
+are 753 KiB/s for upload and 1.40 MiB/s for pull. The current portrait terminal
+closure has not completed its exact phone-side release gate.
 
 `releases.lock.toml` contains no qualified `nokia-ta1618` runtime closure, so no
 prebuilt archive is currently available. A successful source build or a local
@@ -99,7 +104,8 @@ that the stated limitation or current qualification gap still applies.
 | System timers                     | Supported     | UMS9117 system counter and Pike2 timer                             |
 | Display                           | Supported     | Damage-driven RGB565; up to 46.7 frames/s without visible tearing  |
 | Physical keypad                   | Supported     | Polled matrix plus separate physical 8 key through analog EIC9/ADI |
-| USB device mode                   | Supported     | MUSB peripheral mode with `g_serial` at USB ID `0525:a4a6`         |
+| USB device mode                   | Supported     | Two `g_serial` ports at `0525:a4a6`: shell/transfer and input      |
+| Host keyboard bridge              | Supported     | Host evdev to `/dev/ttyGS1` to uinput; `EVIOCGRAB` on the host     |
 | USB host mode                     | Not supported | The phone target enables peripheral mode only                      |
 | microSD card                      | Supported     | 4-bit multi-block reads and writes up to 48.75 MHz; no hot-swap    |
 | Internal flash access             | Not supported | Linux does not expose phone storage                                |
@@ -118,28 +124,31 @@ All drivers required by the console profile are built into the kernel image:
 ```text
 CONFIG_ARCH_UMS9117=y
 CONFIG_MACH_NOKIA_TA1618=y
-CONFIG_MFD_SYSCON=y
+CONFIG_INPUT_EVDEV=y
+CONFIG_INPUT_MISC=y
+CONFIG_INPUT_UINPUT=y
 CONFIG_KEYBOARD_TA1618=y
 CONFIG_FB=y
 CONFIG_FB_TA1618=y
 CONFIG_FRAMEBUFFER_CONSOLE=y
+CONFIG_USB_MUSB_HDRC=y
 CONFIG_USB_MUSB_UMS9117=y
+CONFIG_MUSB_PIO_ONLY=y
+CONFIG_USB_GADGET=y
 CONFIG_USB_G_SERIAL=y
-```
+CONFIG_MMC=y
+CONFIG_MMC_TA1618=y
+CONFIG_FILE_LOCKING=y
 
-The target-side input bridge uses these image selections:
-
-```text
-CONFIG_INPUT_EVDEV=y
-CONFIG_INPUT_MISC=y
-CONFIG_INPUT_UINPUT=y
+BR2_PACKAGE_FPLINUX_CONSOLE=y
 BR2_PACKAGE_FPLINUX_INPUT=y
 ```
 
-At boot, `/usr/libexec/fplinux/init` starts `/bin/fplinux-input`. The process
-keeps one `FPLinux host keyboard` uinput device alive, reads event lines from
-`/dev/ttyGS1` and releases pressed keys when the host disconnects or stops
-sending events.
+The kernel command line selects two non-ACM generic-serial ports with
+`g_serial.use_acm=0 g_serial.n_ports=2`. At boot, the common
+`/usr/libexec/fplinux/init` starts `/bin/fplinux-input`. The bridge creates the
+`FPLinux host keyboard` uinput device, reads event lines from `/dev/ttyGS1` and
+keeps the device alive across host disconnections.
 
 The runtime does not depend on `/lib/modules`, `modprobe` or a persistent root
 filesystem. The display and keypad drivers expose standard `fbcon` and evdev
@@ -211,18 +220,18 @@ verifies BootROM USB access, loads FDL1 and the FPLinux payload into RAM, then
 attaches to the Linux USB shell. Addresses, USB identifiers, wait times,
 board-asset roles and adapter values come from validated target data.
 
-`Ctrl-]` detaches the host console without stopping the phone shell. With
-interface 0 free, compare the phone's build stamp with the local bundle receipt:
+`Ctrl-]` detaches the host console without stopping the phone shell. Before
+measuring, compare the phone's build stamp with the local bundle receipt:
 
 ```sh
 ./fplinux verify nokia-ta1618
 ```
 
 This compares the workspace and container recipe digests in
-`/etc/fplinux-build` with the local `build-manifest.json`. It does not inspect the
+`/etc/fplinux-build` with the local `build-manifest.json`. It does not verify the
 other bundle files or qualify the hardware.
 
-From the repository root, reconnect to interface 0 with:
+From the repository root, reconnect to the shell:
 
 ```sh
 ./fplinux console nokia-ta1618
@@ -293,7 +302,9 @@ libusb 1.0, libudev, GNU `stdbuf` and USB permissions for `1782:4d00` and
   framebuffer occupy reserved regions above it.
 - The payload is loaded at `0x80100000`; `0x82000000` is the zImage staging
   boundary.
-- MUSB runs in PIO peripheral mode. USB DMA and host mode are not implemented.
+- MUSB runs in PIO peripheral mode. EP1 backs USB interface 0 for shell and
+  transfers; EP2 backs interface 1 for input events. USB DMA and host mode are
+  not implemented.
 - The physical `8` key is not part of the keypad matrix. Linux polls the
   inherited analog EIC9 level through the ADI hardware lock and reports it as
   `KEY_8`; the driver does not reconfigure EIC polarity or enable state.

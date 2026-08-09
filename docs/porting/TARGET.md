@@ -175,8 +175,17 @@ List any target-specific host requirement.
 ```
 
 Document whether the operation is RAM-only or persistent, the expected USB
-IDs, required physical actions and how to reach a console. Never hide a storage
-write inside a generic “run” instruction.
+IDs, required physical actions and how to reach a console. If the target exposes
+multiple USB data interfaces, assign and document each interface number. When
+the target supports the build stamp check, include:
+
+```sh
+./fplinux verify <target>
+```
+
+State that this compares the running image with the local build receipt rather
+than qualifying hardware. Never hide a storage write inside a generic “run”
+instruction.
 
 ## Target-specific nuances
 
@@ -200,7 +209,9 @@ archive contents and release requirements.
 
 Drivers required for the phone profile use built-in kernel configuration (`=y`).
 Document any intentionally optional module and include it in the package contract
-when the profile depends on it.
+when the profile depends on it. A target that exposes the host keyboard bridge
+also documents `CONFIG_INPUT_MISC=y`, `CONFIG_INPUT_UINPUT=y`, the gadget serial
+port assigned to input and the init path that starts its receiver.
 
 ## Implementation map
 
