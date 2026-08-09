@@ -56,14 +56,18 @@ line, and it is enforced on the host before the phone is asked anything.
 
 ## Measured rates
 
-Taken on a TA-1618 over the USB console:
+Taken on a TA-1618 with the hardware-validated damage-driven display driver and
+a static framebuffer:
 
 | Direction  | Payload | Time    | Rate       |
 | ---------- | ------- | ------- | ---------- |
-| `--upload` | 27 KiB  | 75 ms   | 356 KiB/s  |
-| `--upload` | 4 MiB   | 5867 ms | 698 KiB/s  |
-| `--pull`   | 1 MiB   | 731 ms  | 1.43 MiB/s |
-| `--pull`   | 4 MiB   | 2846 ms | 1.41 MiB/s |
+| `--upload` | 4 MiB   | 5441 ms | 753 KiB/s  |
+| `--pull`   | 4 MiB   | 2866 ms | 1.40 MiB/s |
+
+With a settled framebuffer, the LCDC stops and produces no display interrupts; a
+static-screen hardware sample measured 99.97% CPU idle. Framebuffer changes
+schedule a full frame and complete through the LCDC interrupt, while updates
+arriving during a transfer are coalesced into the next frame.
 
 The setup cost of a transfer is fixed, so the sending rate depends on how much
 there is to send. Reading is already at its ceiling by one mebibyte.

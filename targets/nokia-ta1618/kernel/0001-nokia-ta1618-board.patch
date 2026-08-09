@@ -67,16 +67,16 @@ diff --git a/drivers/video/fbdev/Kconfig b/drivers/video/fbdev/Kconfig
  	  drivers/gpu/drm/hyperv (CONFIG_DRM_HYPERV) instead.
 
 +config FB_TA1618
-+	bool "Nokia TA-1618 bootstrap framebuffer"
++	bool "Nokia TA-1618 LCDC framebuffer"
 +	depends on FB && MACH_NOKIA_TA1618
 +	select FB_IOMEM_HELPERS
 +	help
-+	  Reuse the LCDC/SPI display state initialized by the TA-1618 RAM
-+	  bootstrap. This is a board-specific handoff framebuffer, not a
-+	  generic UMS9117 panel driver: it performs no cold panel, clock,
-+	  pin or reset initialization. Refresh is a periodic polled
-+	  full-frame copy through a private staging buffer that the LCDC
-+	  streams into the SPI panel, so no display interrupt is required.
++	  Cold-initialize and drive the TA-1618 ST7789P3 panel through SPI1
++	  and the LCDC. Damage submits full RGB565 frames through a private
++	  staging buffer, and LCDC_DONE completes each transfer. Blanking
++	  quiesces the pipeline, turns off WLED and enters panel sleep;
++	  unblank exits sleep, sends a full frame and restores WLED after
++	  the matching completion interrupt.
 +
  config FB_SIMPLE
  	tristate "Simple framebuffer support"
