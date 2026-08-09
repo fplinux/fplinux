@@ -7,12 +7,13 @@ import platform
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 from .common import ROOT, fail, run
 from .config import container_recipe_digest, load_container_lock
 from .workspace import stage_quality_workspace
+
+GIT_HOOKS_PATH = ".githooks"
 
 
 def require_podman() -> str:
@@ -67,12 +68,50 @@ def image_ready(podman: str, image: str) -> bool:
     return result.returncode == 0 and result.stdout.strip() == container_recipe_digest()
 
 
+def install_git_hooks() -> None:
+    """Select the repository-owned hooks for this Git checkout."""
+    git = shutil.which("git")
+    if git is None:
+        return
+    checkout = subprocess.run(
+        [git, "rev-parse", "--show-toplevel"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if checkout.returncode:
+        return
+    if Path(checkout.stdout.strip()).resolve() != ROOT:
+        fail("Git reports a different repository root")
+    configured = subprocess.run(
+        [git, "config", "--local", "--get", "core.hooksPath"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if configured.returncode not in {0, 1}:
+        fail("could not read the local Git hooks path")
+    hooks_path = configured.stdout.strip()
+    if hooks_path and hooks_path != GIT_HOOKS_PATH:
+        fail(f"core.hooksPath is already set to {hooks_path}")
+    if not hooks_path:
+        subprocess.run(
+            [git, "config", "--local", "core.hooksPath", GIT_HOOKS_PATH],
+            cwd=ROOT,
+            check=True,
+        )
+    print(f"Git hooks are ready: {GIT_HOOKS_PATH}")
+
+
 def setup(*, force: bool = False) -> None:
     podman = require_podman()
     lock = load_container_lock()
     oci = lock["oci"]
     buildroot = lock["buildroot"]
     if image_ready(podman, oci["image"]) and not force:
+        install_git_hooks()
         print(f"Build image is ready: {oci['image']}")
         return
     previous_image = image_identifier(podman, oci["image"])
@@ -118,6 +157,7 @@ def setup(*, force: bool = False) -> None:
             print(f"warning: replaced build image was retained: {detail}", file=sys.stderr)
         else:
             print(f"Removed replaced build image: {previous_image}")
+    install_git_hooks()
 
 
 def doctor() -> None:
@@ -174,62 +214,48 @@ def check_git_diff() -> None:
         subprocess.run(["git", "diff", "--check", "HEAD", "--"], cwd=ROOT, check=True)
 
 
-def check_commit_messages(podman: str, lock: dict[str, str], workspace: Path) -> None:
-    """Validate every commit message against the conventional convention."""
-    head = subprocess.run(
-        ["git", "rev-parse", "--verify", "HEAD"],
+def check_commit_message(message_file: str) -> None:
+    """Validate one Git commit message in the pinned environment."""
+    message = Path(message_file)
+    if message.is_symlink() or not message.is_file():
+        fail(f"commit message file is missing or invalid: {message}")
+    config = ROOT / "commitlint.config.mjs"
+    if config.is_symlink() or not config.is_file():
+        fail("commitlint configuration is missing or invalid")
+    podman = require_podman()
+    lock = load_container_lock()["oci"]
+    if not image_ready(podman, lock["image"]):
+        fail("commit hook requires the current build image; run ./fplinux setup")
+    result = subprocess.run(
+        [
+            podman,
+            "run",
+            "--rm",
+            "--platform",
+            lock["platform"],
+            "--userns=keep-id",
+            "--network=none",
+            "--read-only",
+            "--tmpfs",
+            "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs.
+            "--volume",
+            f"{config}:/workspace/commitlint.config.mjs:ro,Z",
+            "--volume",
+            f"{message.resolve()}:/message:ro,Z",
+            "--env",
+            "HOME=/tmp",
+            "--workdir",
+            "/workspace",
+            lock["image"],
+            "sh",
+            "-c",
+            "commitlint < /message",
+        ],
         cwd=ROOT,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
         check=False,
     )
-    if head.returncode:
-        print("commitlint: no commits to check")
-        return
-    revisions = subprocess.run(
-        ["git", "log", "--format=%H"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.split()
-    with tempfile.TemporaryDirectory(prefix="fplinux-commitlint-") as messages:
-        for index, revision in enumerate(revisions):
-            message = subprocess.run(
-                ["git", "log", "-1", "--format=%B", revision],
-                cwd=ROOT,
-                capture_output=True,
-                text=True,
-                check=True,
-            ).stdout
-            (Path(messages) / f"{index:05d}.message").write_text(message)
-        run(
-            [
-                podman,
-                "run",
-                "--rm",
-                "--platform",
-                lock["platform"],
-                "--userns=keep-id",
-                "--network=none",
-                "--read-only",
-                "--tmpfs",
-                "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs, not a host path.
-                "--volume",
-                f"{workspace}:/workspace:ro,Z",
-                "--volume",
-                f"{messages}:/messages:ro,Z",
-                "--env",
-                "HOME=/tmp",
-                "--workdir",
-                "/workspace",
-                lock["image"],
-                "sh",
-                "-c",
-                'for message in /messages/*.message; do commitlint < "${message}" || exit 1; done',
-            ]
-        )
-    print(f"commitlint: OK ({len(revisions)} commit messages)")
+    if result.returncode:
+        raise SystemExit(result.returncode)
 
 
 def check() -> None:
@@ -249,7 +275,6 @@ def check() -> None:
         analyzer_cache[name] = source
 
     workspace = stage_quality_workspace()
-    check_commit_messages(podman, lock, workspace)
     scan_recipe = f"{container_recipe_digest()}-{workspace.name}"
     run(
         [
