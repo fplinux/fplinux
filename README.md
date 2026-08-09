@@ -100,7 +100,14 @@ erase, partition or NV operation.
 
 In the attached console, `Ctrl-]` detaches the host client without stopping the
 phone shell, rebooting Linux or powering the phone off. `Ctrl-C` is sent to the
-phone shell. From the repository root, connect to an already running phone with:
+phone shell. With interface 0 free, compare the phone's build stamp with the
+current bundle receipt:
+
+```sh
+./fplinux verify nokia-ta1618
+```
+
+From the repository root, connect to the running phone with:
 
 ```sh
 ./fplinux console nokia-ta1618

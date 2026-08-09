@@ -211,8 +211,18 @@ verifies BootROM USB access, loads FDL1 and the FPLinux payload into RAM, then
 attaches to the Linux USB shell. Addresses, USB identifiers, wait times,
 board-asset roles and adapter values come from validated target data.
 
-`Ctrl-]` detaches the host console without stopping the phone shell. From the
-repository root, reconnect to interface 0 with:
+`Ctrl-]` detaches the host console without stopping the phone shell. With
+interface 0 free, compare the phone's build stamp with the local bundle receipt:
+
+```sh
+./fplinux verify nokia-ta1618
+```
+
+This compares the workspace and container recipe digests in
+`/etc/fplinux-build` with the local `build-manifest.json`. It does not inspect the
+other bundle files or qualify the hardware.
+
+From the repository root, reconnect to interface 0 with:
 
 ```sh
 ./fplinux console nokia-ta1618

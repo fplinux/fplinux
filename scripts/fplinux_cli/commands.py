@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -89,6 +90,53 @@ def console_target(
     elif pull is not None:
         arguments.extend(["--pull", *pull])
     os.execv(client, arguments)
+
+
+def verify_booted(target: str) -> None:
+    """Compare the stamp inside the running phone with the current bundle."""
+    config = load_target(target)
+    bundle = ROOT / ".cache/out" / target / config["profile"]
+    manifest_path = bundle / "build-manifest.json"
+    if not manifest_path.is_file():
+        fail(f"build the target first: ./fplinux build {target}")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    workspace_recipe = manifest.get("workspace_recipe")
+    container_recipe = manifest.get("container_recipe")
+    if (
+        workspace_recipe != stage_workspace(target).name
+        or container_recipe != container_recipe_digest()
+    ):
+        fail(f"build output is stale; rebuild it: ./fplinux build {target}")
+    expected = f"workspace={workspace_recipe} container={container_recipe}"
+    client = _console_client(target, config)
+    result = subprocess.run(
+        [
+            str(client),
+            *_console_connection(config),
+            "--interface",
+            "0",
+            "--exec",
+            "cat /etc/fplinux-build",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    actual = result.stdout.strip()
+    if not actual:
+        detail = result.stderr.strip().splitlines()
+        raise SystemExit(
+            "verify: no build stamp came back from the phone\n  "
+            + (detail[-1] if detail else "the console client said nothing")
+        )
+    if actual != expected:
+        raise SystemExit(
+            "verify: the phone is running a different build\n"
+            f"  phone:  {actual}\n"
+            f"  bundle: {expected}\n"
+            "Load the current image before trusting anything you measure."
+        )
+    print(f"verify: the phone runs the current build ({workspace_recipe[:16]})")
 
 
 def build(target: str, jobs: int) -> None:
