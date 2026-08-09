@@ -11,7 +11,7 @@ unless an individual file carries a different SPDX identifier.
 
 | Component                       | Role                                           | Declared license / provenance                                               |
 | ------------------------------- | ---------------------------------------------- | --------------------------------------------------------------------------- |
-| Linux 6.18.40                   | Target kernel                                  | GPL-2.0-only; official kernel.org archive                                   |
+| Linux 6.18.42                   | Target kernel                                  | GPL-2.0-only; official kernel.org archive                                   |
 | Buildroot 2026.05.1             | Toolchain and root filesystem build            | GPL-2.0-or-later with documented exceptions; official buildroot.org archive |
 | BusyBox                         | Init and shell applets                         | GPL-2.0-only; selected and built by Buildroot                               |
 | musl                            | Target C library                               | MIT; full notice packaged at `licenses/musl/COPYRIGHT`                      |
