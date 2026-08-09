@@ -35,6 +35,13 @@ usb_getty_pidfile=/tmp/fplinux-usb-getty.pid
 /sbin/start-stop-daemon -S -m -p "$usb_getty_pidfile" -x /bin/sh -- \
 	"$usb_getty" </dev/null >/dev/null 2>/dev/kmsg &
 
+input_bridge=/bin/fplinux-input
+if [ -x "$input_bridge" ]; then
+	input_bridge_pidfile=/tmp/fplinux-input.pid
+	/sbin/start-stop-daemon -S -m -p "$input_bridge_pidfile" \
+		-x "$input_bridge" -- </dev/null >/dev/null 2>/dev/kmsg &
+fi
+
 printf '%s\n' "Starting physical-keypad shell..."
 
 /bin/fplinux-console
