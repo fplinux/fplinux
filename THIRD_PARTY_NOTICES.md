@@ -1,8 +1,8 @@
 # Third-party notices
 
 The corresponding source snapshot records exact versions, URLs, commits and
-hashes in `sources.lock.toml`, `container.lock.toml`,
-`Containerfile`, `package-lock.json`, and
+hashes in `sources.lock.toml`, `container.lock.toml`, `Containerfile`,
+`package-lock.json`, Buildroot package recipes and hashes, and
 `targets/nokia-ta1618/loader/assets.lock.toml`. Binary archives carry the target
 asset lock as `assets.lock.toml`, plus content receipts and `SHA256SUMS`.
 
@@ -13,6 +13,7 @@ unless an individual file carries a different SPDX identifier.
 | ------------------------------- | ---------------------------------------------- | --------------------------------------------------------------------------- |
 | Linux 6.18.42                   | Target kernel                                  | GPL-2.0-only; official kernel.org archive                                   |
 | Buildroot 2026.05.1             | Toolchain and root filesystem build            | GPL-2.0-or-later with documented exceptions; official buildroot.org archive |
+| TyrQuake 0.71                   | Quake engine for the TA-1618                   | GPL-2.0-or-later; bundled decoders use MIT-0, CC0-1.0 and MIT               |
 | BusyBox                         | Init and shell applets                         | GPL-2.0-only; selected and built by Buildroot                               |
 | musl                            | Target C library                               | MIT; full notice packaged at `licenses/musl/COPYRIGHT`                      |
 | fpdoom bootstrap closure        | T117 bootstrap, relocation tool and USB helper | The Unlicense; pinned fpdoom source                                         |
@@ -20,6 +21,13 @@ unless an individual file carries a different SPDX identifier.
 | `spreadtrum_flash` / `spd_dump` | Spreadtrum loader transport                    | The Unlicense; pinned upstream source                                       |
 | fpdoom `t117_maps.7z`           | Firmware-derived TA-1618 register-map data     | Pinned fpdoom release mirror (`NOASSERTION`)                                |
 | `t117_fdl1.bin`                 | T117 first-stage RAM loader                    | The Unlicense; pinned spreadtrum_flash release asset                        |
+
+The TyrQuake package verifies the upstream 0.71 source archive and every
+license-bearing file through `fplinux-tyrquake.hash`. Its FLAC, MP3 and WAV
+decoders use MIT-0; the minimp3 portions of the MP3 decoder use CC0-1.0; and
+stb_vorbis uses MIT. Quake PAK files are separate game data. They are not part
+of the source tree, root filesystem, RAM image, source companion or release
+archive.
 
 The Git tree does not contain `spreadtrum_flash` source, `spd_dump`, the board
 map archive, extracted map files, or `t117_fdl1.bin`. The local build downloads

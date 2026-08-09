@@ -35,6 +35,22 @@ desktop while the process is running. Interface 0 remains available for a shell
 or transfer client. Stop the forwarder with SIGINT or SIGTERM from another input
 device or session; Ctrl-C from the grabbed keyboard cannot stop the host process.
 
+The RAM image includes the TyrQuake 0.71 engine, but no Quake game data. Insert
+the microSD card before boot and provide a legally obtained file at:
+  /mnt/card/fplinux/quake/id1/pak0.pak
+Start exactly one input mode from the phone shell:
+  quake --input phone
+  quake --input keyboard
+Phone mode assumes that the phone is held counter-clockwise, with the screen on
+the left and keypad on the right; D-pad and alternate digit directions are
+rotated into that landscape view.
+The launcher uses a 32 MiB heap, null audio, and volatile configuration and
+saves. It links the user-supplied PAK into its volatile runtime tree without
+copying it. When the launcher mounts the card itself, it uses read-only mount
+flags; an existing /mnt/card mount keeps its current flags. It restores the text
+console and framebuffer when the engine exits normally or receives INT, TERM,
+HUP or QUIT. Do not use SIGKILL as a normal way to stop the game.
+
 To end the RAM session, detach with Ctrl-], disconnect USB, remove the battery
 and then reinsert it. The next normal power-on uses the unchanged vendor
 firmware. Linux reboot, poweroff and PMIC-controlled shutdown are not qualified

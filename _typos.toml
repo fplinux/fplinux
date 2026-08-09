@@ -16,6 +16,7 @@ extend-ignore-re = ["\\b[0-9a-f]{7,}\\b"]
 [default.extend-identifiers]
 FPLinux = "FPLinux"
 MMIO = "MMIO"
+parm = "parm"
 UMS9117 = "UMS9117"
 
 [default.extend-words]

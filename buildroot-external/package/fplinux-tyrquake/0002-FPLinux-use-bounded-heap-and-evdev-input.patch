@@ -1,0 +1,77 @@
+From 4a58b644664c6088f3521707adb176771ca67a61 Mon Sep 17 00:00:00 2001
+From: FPLinux maintainers <fplinux@example.invalid>
+Date: Mon, 27 Jul 2026 00:00:00 +0000
+Subject: [PATCH] FPLinux: use a bounded heap and native evdev input
+
+The upstream 256 MiB default cannot succeed in the TA-1618 Linux memory
+window. Let the FPLinux package select a bounded default while retaining the
+upstream value for every other build.
+
+The target reads its selected input device through evdev. Disable the separate
+stdin console so TyrQuake never changes the USB shell's shared stdin flags,
+including during shutdown and error cleanup.
+
+Signed-off-by: FPLinux maintainers <fplinux@example.invalid>
+---
+ common/sys_unix.c | 8 ++++++++
+ common/zone.c     | 7 ++++++-
+ 2 files changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/common/sys_unix.c b/common/sys_unix.c
+index 34c9320..aa7aa0d 100644
+--- a/common/sys_unix.c
++++ b/common/sys_unix.c
+@@ -63,7 +63,11 @@ static cvar_t sys_extrasleep = { "sys_extrasleep", "0" };
+ static qboolean stdin_ready;
+ static int do_stdin = 1;
+ #else
++#ifdef FPLINUX_NO_STDIN
++static qboolean noconinput = true;
++#else
+ static qboolean noconinput = false;
++#endif
+ static qboolean nostdout = false;
+ #endif
+
+@@ -112,7 +116,9 @@ Sys_Quit(void)
+ #ifndef SERVERONLY
+     Host_Shutdown();
++#ifndef FPLINUX_NO_STDIN
+     fcntl(STDIN_FILENO, F_SETFL,
+ 	  fcntl(STDIN_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
++#endif
+     fflush(stdout);
+ #endif
+     exit(0);
+@@ -142,9 +148,11 @@ Sys_Error(const char *error, ...)
+     char string[MAX_PRINTMSG];
+
+ #ifndef SERVERONLY
++#ifndef FPLINUX_NO_STDIN
+     /* remove non-blocking flag from standard input */
+     int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+     fcntl(STDIN_FILENO, F_SETFL, flags & ~O_NONBLOCK);
++#endif
+ #endif
+
+     va_start(argptr, error);
+diff --git a/common/zone.c b/common/zone.c
+index 7b21f66..73e79a1 100644
+--- a/common/zone.c
++++ b/common/zone.c
+@@ -1278,8 +1278,13 @@ Memory_GetSize(void)
+     if (parm && com_argc > parm + 1)
+ 	return (size_t)atoi(com_argv[parm + 1]) << 10;
+
++#ifdef FPLINUX_DEFAULT_HEAP_MB
++    /* The target RAM budget is verified against this package setting. */
++    return (size_t)FPLINUX_DEFAULT_HEAP_MB << 20;
++#else
+     /* Default memory is now 256MB */
+     return (size_t)256 << 20;
++#endif
+ }
+
+ void
+--
+2.50.1

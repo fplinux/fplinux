@@ -1,0 +1,619 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FPLinux maintainers <fplinux@example.invalid>
+Date: Mon, 10 Aug 2026 00:00:00 +0000
+Subject: [PATCH] FPLinux: add rotated two-page fbdev video
+
+Add the TA-1618 native video backend. Render the 320x240 indexed
+software framebuffer clockwise into two 240x320 RGB565 pages and publish each
+full page through FBIOPAN_DISPLAY.
+
+Save both pages, the active page, framebuffer geometry, VT mode and signal
+handlers. Restore them on every normal shutdown path.
+
+Signed-off-by: FPLinux maintainers <fplinux@example.invalid>
+---
+ common/vid_fplinux.c | 594 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 594 insertions(+)
+ create mode 100644 common/vid_fplinux.c
+
+diff --git a/common/vid_fplinux.c b/common/vid_fplinux.c
+new file mode 100644
+--- /dev/null
++++ b/common/vid_fplinux.c
+@@ -0,0 +1,594 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/* Native fbdev video backend for the FPLinux Nokia TA-1618 target. */
++
++#include <errno.h>
++#include <fcntl.h>
++#include <linux/fb.h>
++#include <linux/kd.h>
++#include <signal.h>
++#include <stdint.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/ioctl.h>
++#include <sys/mman.h>
++#include <unistd.h>
++
++#undef K_SCROLLLOCK
++#undef K_NUMLOCK
++#undef K_CAPSLOCK
++
++#include "common.h"
++#include "console.h"
++#include "d_local.h"
++#include "input.h"
++#include "quakedef.h"
++#include "screen.h"
++#include "sys.h"
++#include "vid.h"
++
++#ifdef NQ_HACK
++#include "host.h"
++#endif
++#ifdef QW_HACK
++#include "client.h"
++#endif
++
++#define FPLINUX_FB_DEVICE "/dev/fb0"
++#define FPLINUX_TTY_DEVICE "/dev/tty0"
++#define FPLINUX_FB_ID "ta1618-rgb565"
++#define FPLINUX_WIDTH 320
++#define FPLINUX_HEIGHT 240
++#define FPLINUX_FB_WIDTH 240
++#define FPLINUX_FB_HEIGHT 320
++#define FPLINUX_FB_PAGES 2
++#define FPLINUX_BPP 16
++#define FPLINUX_FB_STRIDE (FPLINUX_FB_WIDTH * 2)
++#define FPLINUX_PIXELS (FPLINUX_WIDTH * FPLINUX_HEIGHT)
++#define FPLINUX_PAGE_BYTES (FPLINUX_FB_STRIDE * FPLINUX_FB_HEIGHT)
++#define FPLINUX_FB_BYTES (FPLINUX_PAGE_BYTES * FPLINUX_FB_PAGES)
++#define CACHE_GUARD_BYTES 16
++
++viddef_t vid;
++unsigned short d_8to16table[256];
++unsigned d_8to24table[256];
++
++static int fb_fd = -1;
++static int tty_fd = -1;
++static int tty_saved_mode;
++static qboolean tty_mode_changed;
++static uint8_t *framebuffer;
++static uint8_t *framebuffer_backup;
++static size_t framebuffer_size;
++static unsigned int original_page;
++static unsigned int shown_page;
++static unsigned int next_page;
++static struct fb_var_screeninfo framebuffer_var;
++static struct fb_var_screeninfo saved_framebuffer_var;
++static qboolean framebuffer_mode_changed;
++static int video_hunk_mark = -1;
++static volatile sig_atomic_t exit_signal;
++static struct sigaction previous_sigint;
++static struct sigaction previous_sigterm;
++static struct sigaction previous_sighup;
++static struct sigaction previous_sigquit;
++static qboolean signal_handlers_installed;
++
++static qvidmode_t fixed_mode = {
++    .width = FPLINUX_WIDTH,
++    .height = FPLINUX_HEIGHT,
++    .bpp = FPLINUX_BPP,
++    .refresh = 47,
++    .min_scale = 1,
++    .resolution = {
++        .scale = 1,
++        .width = FPLINUX_WIDTH,
++        .height = FPLINUX_HEIGHT,
++    },
++};
++
++static void
++request_clean_exit(int signal_number)
++{
++    exit_signal = signal_number;
++}
++
++static void
++install_signal_handlers(void)
++{
++    struct sigaction action;
++
++    memset(&action, 0, sizeof(action));
++    action.sa_handler = request_clean_exit;
++    sigemptyset(&action.sa_mask);
++
++    if (sigaction(SIGINT, &action, &previous_sigint) < 0)
++        Sys_Error("FPLinux video: sigaction(SIGINT): %s", strerror(errno));
++    if (sigaction(SIGTERM, &action, &previous_sigterm) < 0) {
++        int saved_errno = errno;
++
++        sigaction(SIGINT, &previous_sigint, NULL);
++        Sys_Error("FPLinux video: sigaction(SIGTERM): %s",
++                  strerror(saved_errno));
++    }
++    if (sigaction(SIGHUP, &action, &previous_sighup) < 0) {
++        int saved_errno = errno;
++
++        sigaction(SIGTERM, &previous_sigterm, NULL);
++        sigaction(SIGINT, &previous_sigint, NULL);
++        Sys_Error("FPLinux video: sigaction(SIGHUP): %s",
++                  strerror(saved_errno));
++    }
++    if (sigaction(SIGQUIT, &action, &previous_sigquit) < 0) {
++        int saved_errno = errno;
++
++        sigaction(SIGHUP, &previous_sighup, NULL);
++        sigaction(SIGTERM, &previous_sigterm, NULL);
++        sigaction(SIGINT, &previous_sigint, NULL);
++        Sys_Error("FPLinux video: sigaction(SIGQUIT): %s",
++                  strerror(saved_errno));
++    }
++    signal_handlers_installed = true;
++}
++
++static void
++restore_signal_handlers(void)
++{
++    if (!signal_handlers_installed)
++        return;
++
++    sigaction(SIGQUIT, &previous_sigquit, NULL);
++    sigaction(SIGHUP, &previous_sighup, NULL);
++    sigaction(SIGTERM, &previous_sigterm, NULL);
++    sigaction(SIGINT, &previous_sigint, NULL);
++    signal_handlers_installed = false;
++    exit_signal = 0;
++}
++
++static void
++validate_framebuffer(const struct fb_fix_screeninfo *fix,
++                     const struct fb_var_screeninfo *var)
++{
++    if (strncmp(fix->id, FPLINUX_FB_ID, sizeof(fix->id)) != 0)
++        Sys_Error("FPLinux video: fb0 id is %.16s, expected %s",
++                  fix->id, FPLINUX_FB_ID);
++    if (fix->type != FB_TYPE_PACKED_PIXELS ||
++        fix->visual != FB_VISUAL_TRUECOLOR)
++        Sys_Error("FPLinux video: unsupported fb type=%u visual=%u",
++                  fix->type, fix->visual);
++    if (var->xres != FPLINUX_FB_WIDTH ||
++        var->yres != FPLINUX_FB_HEIGHT ||
++        var->xres_virtual != FPLINUX_FB_WIDTH ||
++        var->yres_virtual != FPLINUX_FB_HEIGHT * FPLINUX_FB_PAGES ||
++        var->xoffset != 0 ||
++        (var->yoffset != 0 && var->yoffset != FPLINUX_FB_HEIGHT))
++        Sys_Error("FPLinux video: expected 240x320 virtual=240x640 at page "
++                  "offset, got %ux%u virtual=%ux%u offset=%ux%u",
++                  var->xres, var->yres, var->xres_virtual,
++                  var->yres_virtual, var->xoffset, var->yoffset);
++    if (var->bits_per_pixel != FPLINUX_BPP ||
++        var->red.offset != 11 || var->red.length != 5 ||
++        var->red.msb_right != 0 ||
++        var->green.offset != 5 || var->green.length != 6 ||
++        var->green.msb_right != 0 ||
++        var->blue.offset != 0 || var->blue.length != 5 ||
++        var->blue.msb_right != 0)
++        Sys_Error("FPLinux video: expected RGB565, got bpp=%u "
++                  "rgb=%u:%u:%u/%u:%u:%u/%u:%u:%u",
++                  var->bits_per_pixel,
++                  var->red.offset, var->red.length, var->red.msb_right,
++                  var->green.offset, var->green.length,
++                  var->green.msb_right,
++                  var->blue.offset, var->blue.length, var->blue.msb_right);
++    if (fix->line_length != FPLINUX_FB_STRIDE)
++        Sys_Error("FPLinux video: expected stride %u, got %u",
++                  FPLINUX_FB_STRIDE, fix->line_length);
++    if (fix->smem_len != FPLINUX_FB_BYTES ||
++        fix->ypanstep != FPLINUX_FB_HEIGHT)
++        Sys_Error("FPLinux video: expected %u bytes and ypanstep=%u, got "
++                  "%u and %u",
++                  FPLINUX_FB_BYTES, FPLINUX_FB_HEIGHT,
++                  fix->smem_len, fix->ypanstep);
++}
++
++static uint16_t *
++framebuffer_page(unsigned int page)
++{
++    return (uint16_t *)(framebuffer + page * FPLINUX_PAGE_BYTES);
++}
++
++static int
++pan_to_page(unsigned int page)
++{
++    struct fb_var_screeninfo pan = framebuffer_var;
++
++    pan.xoffset = 0;
++    pan.yoffset = page * FPLINUX_FB_HEIGHT;
++    pan.activate = FB_ACTIVATE_NOW;
++    if (ioctl(fb_fd, FBIOPAN_DISPLAY, &pan) < 0)
++        return -1;
++    shown_page = page;
++    next_page = 1U - page;
++    return 0;
++}
++
++static void
++open_framebuffer(void)
++{
++    struct fb_fix_screeninfo fix;
++
++    fb_fd = open(FPLINUX_FB_DEVICE, O_RDWR | O_CLOEXEC);
++    if (fb_fd < 0)
++        Sys_Error("FPLinux video: open(%s): %s",
++                  FPLINUX_FB_DEVICE, strerror(errno));
++    if (ioctl(fb_fd, FBIOGET_FSCREENINFO, &fix) < 0 ||
++        ioctl(fb_fd, FBIOGET_VSCREENINFO, &framebuffer_var) < 0)
++        Sys_Error("FPLinux video: framebuffer ioctl: %s", strerror(errno));
++
++    saved_framebuffer_var = framebuffer_var;
++    if (framebuffer_var.yres_virtual == FPLINUX_FB_HEIGHT) {
++        framebuffer_var.yres_virtual =
++            FPLINUX_FB_HEIGHT * FPLINUX_FB_PAGES;
++        framebuffer_var.yoffset = 0;
++        framebuffer_var.activate = FB_ACTIVATE_NOW;
++        if (ioctl(fb_fd, FBIOPUT_VSCREENINFO, &framebuffer_var) < 0)
++            Sys_Error("FPLinux video: enable double buffering: %s",
++                      strerror(errno));
++        framebuffer_mode_changed = true;
++        if (ioctl(fb_fd, FBIOGET_VSCREENINFO, &framebuffer_var) < 0)
++            Sys_Error("FPLinux video: read double-buffered mode: %s",
++                      strerror(errno));
++    }
++
++    validate_framebuffer(&fix, &framebuffer_var);
++    framebuffer_size = fix.smem_len;
++    framebuffer = mmap(NULL, framebuffer_size, PROT_READ | PROT_WRITE,
++                       MAP_SHARED, fb_fd, 0);
++    if (framebuffer == MAP_FAILED) {
++        framebuffer = NULL;
++        Sys_Error("FPLinux video: mmap: %s", strerror(errno));
++    }
++
++    framebuffer_backup = malloc(framebuffer_size);
++    if (!framebuffer_backup)
++        Sys_Error("FPLinux video: cannot allocate framebuffer backup");
++    memcpy(framebuffer_backup, framebuffer, framebuffer_size);
++
++    original_page = framebuffer_var.yoffset / FPLINUX_FB_HEIGHT;
++    shown_page = original_page;
++    next_page = 1U - shown_page;
++
++    tty_fd = open(FPLINUX_TTY_DEVICE, O_RDWR | O_CLOEXEC);
++    if (tty_fd < 0)
++        Sys_Error("FPLinux video: open(%s): %s",
++                  FPLINUX_TTY_DEVICE, strerror(errno));
++    if (ioctl(tty_fd, KDGETMODE, &tty_saved_mode) < 0)
++        Sys_Error("FPLinux video: KDGETMODE: %s", strerror(errno));
++    if (ioctl(tty_fd, KDSETMODE, KD_GRAPHICS) < 0)
++        Sys_Error("FPLinux video: KDSETMODE(KD_GRAPHICS): %s",
++                  strerror(errno));
++    tty_mode_changed = true;
++}
++
++static void
++allocate_renderer_buffers(void)
++{
++    size_t cache_size = D_SurfaceCacheForRes(FPLINUX_WIDTH,
++                                             FPLINUX_HEIGHT);
++    size_t zbuffer_size = FPLINUX_PIXELS * sizeof(*d_pzbuffer);
++    size_t total = zbuffer_size + cache_size + CACHE_GUARD_BYTES +
++                   FPLINUX_PIXELS + FPLINUX_PIXELS;
++    byte *block;
++    byte *surface_cache;
++
++    video_hunk_mark = Hunk_HighMark();
++    block = Hunk_HighAllocName(total, "fplinux-video");
++    if (!block)
++        Sys_Error("FPLinux video: not enough renderer memory");
++
++    d_pzbuffer = (short *)block;
++    surface_cache = block + zbuffer_size;
++    r_warpbuffer = surface_cache + cache_size + CACHE_GUARD_BYTES;
++    vid.buffer = r_warpbuffer + FPLINUX_PIXELS;
++    vid.conbuffer = vid.direct = vid.buffer;
++
++    D_InitCaches(surface_cache, cache_size);
++    R_AllocSurfEdges(false);
++}
++
++static void
++rotate_frame(uint16_t *destination)
++{
++    int x;
++    int y;
++
++    for (x = 0; x < FPLINUX_WIDTH; ++x) {
++        uint16_t *destination_row = destination + x * FPLINUX_FB_WIDTH;
++
++        for (y = 0; y < FPLINUX_HEIGHT; ++y)
++            destination_row[FPLINUX_FB_WIDTH - 1 - y] =
++                d_8to16table[vid.buffer[y * vid.rowbytes + x]];
++    }
++}
++
++static void
++rotate_overlay(uint16_t *destination, int x, int y, const byte *source,
++               int width, int height)
++{
++    int source_x = 0;
++    int source_y = 0;
++    int source_stride = width;
++    int row;
++    int column;
++
++    if (!source || width <= 0 || height <= 0)
++        return;
++    if (x < 0) {
++        source_x = -x;
++        width += x;
++        x = 0;
++    }
++    if (y < 0) {
++        source_y = -y;
++        height += y;
++        y = 0;
++    }
++    if (x >= FPLINUX_WIDTH || y >= FPLINUX_HEIGHT)
++        return;
++    if (x + width > FPLINUX_WIDTH)
++        width = FPLINUX_WIDTH - x;
++    if (y + height > FPLINUX_HEIGHT)
++        height = FPLINUX_HEIGHT - y;
++    if (width <= 0 || height <= 0)
++        return;
++
++    source += source_y * source_stride + source_x;
++    for (row = 0; row < height; ++row)
++        for (column = 0; column < width; ++column) {
++            int logical_x = x + column;
++            int logical_y = y + row;
++
++            destination[logical_x * FPLINUX_FB_WIDTH +
++                        FPLINUX_FB_WIDTH - 1 - logical_y] =
++                d_8to16table[source[row * source_stride + column]];
++        }
++}
++
++static void
++publish_frame(int x, int y, const byte *overlay, int width, int height)
++{
++    uint16_t *destination;
++    unsigned int page;
++
++    if (!framebuffer || !vid.buffer)
++        return;
++
++    page = next_page;
++    destination = framebuffer_page(page);
++    rotate_frame(destination);
++    rotate_overlay(destination, x, y, overlay, width, height);
++    __sync_synchronize();
++    if (pan_to_page(page) < 0)
++        Sys_Error("FPLinux video: FBIOPAN_DISPLAY: %s", strerror(errno));
++}
++
++void
++VID_GetDesktopRect(vrect_t *rect)
++{
++    rect->x = 0;
++    rect->y = 0;
++    rect->width = FPLINUX_WIDTH;
++    rect->height = FPLINUX_HEIGHT;
++}
++
++void
++VID_SetPalette(const byte *palette)
++{
++    unsigned int i;
++
++    for (i = 0; i < 256; ++i) {
++        unsigned int red = palette[i * 3];
++        unsigned int green = palette[i * 3 + 1];
++        unsigned int blue = palette[i * 3 + 2];
++
++        d_8to16table[i] = (unsigned short)(((red & 0xf8) << 8) |
++                                          ((green & 0xfc) << 3) |
++                                          (blue >> 3));
++        d_8to24table[i] = red | (green << 8) | (blue << 16);
++    }
++}
++
++void
++VID_ShiftPalette(const byte *palette)
++{
++    VID_SetPalette(palette);
++}
++
++void
++VID_InitColormap(const byte *palette)
++{
++    (void)palette;
++    vid.colormap = host_colormap;
++    vid.fullbright = 256 - LittleLong(*((int *)vid.colormap + 2048));
++}
++
++void
++VID_Init(const byte *palette)
++{
++    install_signal_handlers();
++    open_framebuffer();
++
++    vid_modelist = &fixed_mode;
++    vid_nummodes = 1;
++    vid_windowed_mode = fixed_mode;
++    vid_currentmode = &fixed_mode;
++
++    VID_Mode_SetupViddef(&fixed_mode, &vid);
++    vid.rowbytes = vid.conrowbytes = FPLINUX_WIDTH;
++    vid.aspect = 1.0;
++    vid.numpages = 1;
++    vid.recalc_refdef = 1;
++
++    allocate_renderer_buffers();
++    VID_InitColormap(palette);
++    VID_SetPalette(palette);
++
++    vid_menudrawfn = VID_MenuDraw;
++    vid_menukeyfn = VID_MenuKey;
++    vsync_available = false;
++    adaptive_vsync_available = false;
++
++    Cvar_SetValue("vid_fullscreen", 1);
++    Cvar_SetValue("vid_width", FPLINUX_WIDTH);
++    Cvar_SetValue("vid_height", FPLINUX_HEIGHT);
++    Cvar_SetValue("vid_bpp", FPLINUX_BPP);
++    Cvar_SetValue("vid_refreshrate", fixed_mode.refresh);
++
++    Con_Printf("FPLinux video: logical 320x240 -> fb 240x320 RGB565 "
++               "clockwise, two-page pan\n");
++}
++
++void
++VID_Shutdown(void)
++{
++    restore_signal_handlers();
++    if (framebuffer && framebuffer_backup) {
++        unsigned int old_shown = shown_page;
++        unsigned int hidden = 1U - old_shown;
++
++        memcpy(framebuffer_page(hidden),
++               framebuffer_backup + hidden * FPLINUX_PAGE_BYTES,
++               FPLINUX_PAGE_BYTES);
++        __sync_synchronize();
++        if (pan_to_page(hidden) == 0) {
++            memcpy(framebuffer_page(old_shown),
++                   framebuffer_backup + old_shown * FPLINUX_PAGE_BYTES,
++                   FPLINUX_PAGE_BYTES);
++            __sync_synchronize();
++            if (shown_page != original_page)
++                pan_to_page(original_page);
++        }
++    }
++    if (tty_mode_changed)
++        ioctl(tty_fd, KDSETMODE, tty_saved_mode);
++    tty_mode_changed = false;
++    if (framebuffer_mode_changed && fb_fd >= 0 &&
++        ioctl(fb_fd, FBIOPUT_VSCREENINFO, &saved_framebuffer_var) < 0)
++        Con_Printf("FPLinux video: restore framebuffer mode: %s\n",
++                   strerror(errno));
++    framebuffer_mode_changed = false;
++    if (tty_fd >= 0)
++        close(tty_fd);
++    tty_fd = -1;
++
++    free(framebuffer_backup);
++    framebuffer_backup = NULL;
++    if (framebuffer)
++        munmap(framebuffer, framebuffer_size);
++    framebuffer = NULL;
++    framebuffer_size = 0;
++    if (fb_fd >= 0)
++        close(fb_fd);
++    fb_fd = -1;
++
++    if (video_hunk_mark >= 0) {
++        Hunk_FreeToHighMark(video_hunk_mark);
++        video_hunk_mark = -1;
++        d_pzbuffer = NULL;
++        r_warpbuffer = NULL;
++        vid.buffer = vid.conbuffer = vid.direct = NULL;
++    }
++}
++
++void
++VID_Update(vrect_t *rects)
++{
++    (void)rects;
++    publish_frame(0, 0, NULL, 0, 0);
++}
++
++void
++D_BeginDirectRect(int x, int y, const byte *pbitmap, int width, int height)
++{
++    if (x < 0)
++        x = FPLINUX_WIDTH + x;
++    publish_frame(x, y, pbitmap, width, height);
++}
++
++void
++D_EndDirectRect(int x, int y, int width, int height)
++{
++    (void)x;
++    (void)y;
++    (void)width;
++    (void)height;
++    publish_frame(0, 0, NULL, 0, 0);
++}
++
++qboolean
++VID_CheckAdequateMem(int width, int height)
++{
++    return width == FPLINUX_WIDTH && height == FPLINUX_HEIGHT;
++}
++
++qboolean
++VID_SetMode(const qvidmode_t *mode, const byte *palette)
++{
++    if (mode->width != FPLINUX_WIDTH || mode->height != FPLINUX_HEIGHT ||
++        mode->bpp != FPLINUX_BPP)
++        return false;
++
++    vid_currentmode = mode;
++    VID_SetPalette(palette);
++    return true;
++}
++
++void
++VID_SetDefaultMode(void)
++{
++}
++
++void
++VID_ProcessEvents(void)
++{
++    if (exit_signal) {
++        int signal_number = exit_signal;
++
++        exit_signal = 0;
++        Con_Printf("FPLinux video: signal %d requested clean exit\n",
++                   signal_number);
++        Sys_Quit();
++    }
++    IN_Commands();
++}
++
++void
++Sys_SendKeyEvents(void)
++{
++    VID_ProcessEvents();
++}
++
++void
++VID_LockBuffer(void)
++{
++}
++
++void
++VID_UnlockBuffer(void)
++{
++}
++
++void
++VID_AddCommands(void)
++{
++}
++
++void
++VID_RegisterVariables(void)
++{
++}
++
++qboolean
++window_visible(void)
++{
++    return true;
++}
+--
+2.50.1
