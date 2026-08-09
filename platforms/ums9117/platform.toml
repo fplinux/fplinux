@@ -5,7 +5,7 @@ name = "ums9117"
 [buildroot]
 external = "buildroot-external"
 shared_paths = ["common/rootfs"]
-clean_targets = ["fplinux-console-dirclean"]
+clean_targets = ["fplinux-console-dirclean", "fplinux-input-dirclean"]
 
 [linux]
 source_lock = "linux"

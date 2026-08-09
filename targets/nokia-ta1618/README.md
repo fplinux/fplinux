@@ -127,6 +127,20 @@ CONFIG_USB_MUSB_UMS9117=y
 CONFIG_USB_G_SERIAL=y
 ```
 
+The target-side input bridge uses these image selections:
+
+```text
+CONFIG_INPUT_EVDEV=y
+CONFIG_INPUT_MISC=y
+CONFIG_INPUT_UINPUT=y
+BR2_PACKAGE_FPLINUX_INPUT=y
+```
+
+At boot, `/usr/libexec/fplinux/init` starts `/bin/fplinux-input`. The process
+keeps one `FPLinux host keyboard` uinput device alive, reads event lines from
+`/dev/ttyGS1` and releases pressed keys when the host disconnects or stops
+sending events.
+
 The runtime does not depend on `/lib/modules`, `modprobe` or a persistent root
 filesystem. The display and keypad drivers expose standard `fbcon` and evdev
 interfaces to the [shared FPLinux terminal](../../docs/porting/CONSOLE.md); the

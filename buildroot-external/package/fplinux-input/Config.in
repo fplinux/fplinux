@@ -1,0 +1,7 @@
+config BR2_PACKAGE_FPLINUX_INPUT
+	bool "fplinux-input"
+	help
+	  Build the FPLinux host input bridge. It reads key events from
+	  a serial channel and injects them through uinput, so a
+	  keyboard attached to the build host appears on the phone as an
+	  ordinary Linux input device.
