@@ -271,5 +271,7 @@ def run(bundle: Path, runtime: dict[str, Any]) -> None:
             f"{linux_usb['product_id']:04x}",
             "--wait",
             str(linux_usb["wait_seconds"]),
+            "--interface",
+            "0",
         ],
     )

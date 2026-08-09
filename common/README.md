@@ -11,14 +11,19 @@ a phone memory map, register layout or bootstrap protocol.
   point.
 - `rootfs/overlay/init` enters the shared init implementation.
 - `rootfs/overlay/usr/libexec/fplinux/init` mounts the early filesystems, runs an
-  optional target diagnostics hook, starts the external `usb-getty` worker with
-  BusyBox `start-stop-daemon` and launches the local terminal. The worker uses
-  BusyBox `getty` to give `/dev/ttyGS0` to each USB shell as its controlling
-  terminal and writes lifecycle messages to `/dev/kmsg`.
+  optional target diagnostics hook, starts the external `usb-getty` and
+  `fplinux-input` workers with BusyBox `start-stop-daemon`, then launches the
+  local terminal. `usb-getty` gives `/dev/ttyGS0` to each USB shell as its
+  controlling terminal. `fplinux-input` turns event lines from `/dev/ttyGS1`
+  into a persistent uinput keyboard.
 - `../buildroot-external/package/fplinux-console/` builds the shared musl terminal
-  against Linux VT/fbcon, PTY and normalized evdev interfaces.
+  against Linux VT/fbcon, PTY and normalized evdev interfaces. It accepts one
+  primary and up to three additional matching input devices.
+- `../buildroot-external/package/fplinux-input/` builds the gadget-serial to
+  uinput bridge.
 - `host/fplinux-usb-console.c` is the descriptor-driven host USB terminal used
-  by phone runners with explicit USB IDs.
+  by phone runners. It uses interface 0 for shell and transfer modes, and
+  interface 1 for `--keyboard`.
 
 Phone framebuffer and keypad drivers, pre-Linux screen composition, DTS wiring
 and target runtime values stay under `targets/<phone>/`. SoC-specific host

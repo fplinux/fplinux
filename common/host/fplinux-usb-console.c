@@ -10,8 +10,10 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <getopt.h>
 #include <libusb.h>
+#include <linux/input.h>
 #include <poll.h>
 #include <pthread.h>
 #include <signal.h>
@@ -21,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <termios.h>
 #include <time.h>
@@ -30,6 +33,9 @@
 #define DEFAULT_PID 0xa4a6u
 #define DEFAULT_TIMEOUT_MS 250u
 #define DEFAULT_WAIT_SECONDS 30u
+#define KEYBOARD_BUFFER_BYTES 512u
+#define KEYBOARD_KEY_STATE_BYTES ((KEY_CNT + 7u) / 8u)
+#define KEYBOARD_POLL_MS 200
 #define DEFAULT_LINGER_MS 500u
 #define TRANSFER_BUFFER_SIZE 16384u
 #define MAX_UPLOAD_BYTES (8u * 1024u * 1024u)
@@ -65,6 +71,7 @@ struct options {
 	const char *exec_command;
 	const char *pull_remote;
 	const char *pull_local;
+	const char *keyboard_device;
 };
 
 struct capture {
@@ -114,8 +121,8 @@ static void usage(FILE *stream)
 	    "Options:\n"
 	    "  --vid HEX          USB vendor ID (default: 0525)\n"
 	    "  --pid HEX          USB product ID (default: a4a6)\n"
-	    "  --interface N      data interface number (default: "
-	    "auto-detect)\n"
+	    "  --interface N      data interface (default: 0, or 1 with "
+	    "--keyboard)\n"
 	    "  --bus N            select one USB bus\n"
 	    "  --address N        select one USB device address\n"
 	    "  --timeout-ms N     bulk-transfer timeout (default: 250)\n"
@@ -133,6 +140,8 @@ static void usage(FILE *stream)
 	    "  --exec COMMAND     run COMMAND on the phone, copy its stdout "
 	    "to\n"
 	    "                     this stdout and exit with its exit status\n"
+	    "  --keyboard EVDEV   forward a host keyboard to the phone on "
+	    "interface 1\n"
 	    "  --pull REMOTE LOCAL\n"
 	    "                     copy REMOTE off the phone to LOCAL in "
 	    "verified\n"
@@ -340,6 +349,7 @@ static int parse_options(int argc, char **argv, struct options *options)
 		OPT_EXEC,
 		OPT_PULL,
 		OPT_SELF_TEST,
+		OPT_KEYBOARD,
 	};
 	static const struct option long_options[] = {
 	    {"vid", required_argument, NULL, OPT_VID},
@@ -355,6 +365,7 @@ static int parse_options(int argc, char **argv, struct options *options)
 	    {"upload", required_argument, NULL, OPT_UPLOAD},
 	    {"exec", required_argument, NULL, OPT_EXEC},
 	    {"pull", required_argument, NULL, OPT_PULL},
+	    {"keyboard", required_argument, NULL, OPT_KEYBOARD},
 	    {"self-test", no_argument, NULL, OPT_SELF_TEST},
 	    {"help", no_argument, NULL, 'h'},
 	    {NULL, 0, NULL, 0},
@@ -396,6 +407,9 @@ static int parse_options(int argc, char **argv, struct options *options)
 				return -1;
 			}
 			options->pid = (uint16_t)value;
+			break;
+		case OPT_KEYBOARD:
+			options->keyboard_device = optarg;
 			break;
 		case OPT_INTERFACE:
 			if (!parse_unsigned(optarg, 0, 255, &value)) {
@@ -501,18 +515,22 @@ static int parse_options(int argc, char **argv, struct options *options)
 		return -1;
 	}
 	if ((options->upload_local != NULL) + (options->exec_command != NULL) +
-		(options->pull_remote != NULL) >
+		(options->pull_remote != NULL) +
+		(options->keyboard_device != NULL) >
 	    1) {
 		fprintf(stderr,
-			"fplinux-usb-console: --upload, --exec and --pull are "
-			"mutually exclusive\n");
+			"fplinux-usb-console: --upload, --exec, --pull and "
+			"--keyboard are mutually exclusive\n");
 		return -1;
 	}
-	if ((options->exec_command != NULL || options->pull_remote != NULL) &&
+	if ((options->upload_local != NULL || options->exec_command != NULL ||
+	     options->pull_remote != NULL ||
+	     options->keyboard_device != NULL) &&
 	    (options->list_devices || options->self_test)) {
-		fprintf(stderr,
-			"fplinux-usb-console: --exec and --pull cannot be "
-			"combined with --list or --self-test\n");
+		fprintf(
+		    stderr,
+		    "fplinux-usb-console: action modes cannot be combined with "
+		    "--list or --self-test\n");
 		return -1;
 	}
 	if (options->exec_command != NULL &&
@@ -529,13 +547,6 @@ static int parse_options(int argc, char **argv, struct options *options)
 		usage(stderr);
 		return -1;
 	}
-	if (options->upload_local != NULL &&
-	    (options->list_devices || options->self_test)) {
-		fprintf(stderr,
-			"fplinux-usb-console: --upload cannot be combined with "
-			"--list or --self-test\n");
-		return -1;
-	}
 	if (options->list_devices && options->self_test) {
 		fprintf(
 		    stderr,
@@ -548,6 +559,9 @@ static int parse_options(int argc, char **argv, struct options *options)
 				"be used together\n");
 		return -1;
 	}
+	if (options->interface_number < 0)
+		options->interface_number =
+		    options->keyboard_device != NULL ? 1 : 0;
 	return 0;
 }
 
@@ -1722,10 +1736,345 @@ static void report_unframed(const struct capture *capture)
 	fputc('\n', stderr);
 }
 
+struct keyboard_forward_state {
+	char buffer[KEYBOARD_BUFFER_BYTES];
+	size_t filled;
+	bool pressed[KEY_CNT];
+	bool pending[KEY_CNT];
+	bool dropping;
+};
+
+static bool keyboard_state_bit(const unsigned char *state, unsigned int code)
+{
+	return (state[code / 8u] & (1u << (code % 8u))) != 0;
+}
+
+static bool keyboard_modifier(unsigned int code)
+{
+	switch (code) {
+	case KEY_LEFTSHIFT:
+	case KEY_RIGHTSHIFT:
+	case KEY_LEFTCTRL:
+	case KEY_RIGHTCTRL:
+	case KEY_LEFTALT:
+	case KEY_RIGHTALT:
+	case KEY_LEFTMETA:
+	case KEY_RIGHTMETA:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static int flush_keyboard_events(libusb_device_handle *handle,
+				 const struct endpoint_pair *pair,
+				 const struct options *options,
+				 struct keyboard_forward_state *state)
+{
+	int result;
+
+	if (!state->filled)
+		return LIBUSB_SUCCESS;
+	result = send_bytes(handle, pair->endpoint_out,
+			    (const unsigned char *)state->buffer, state->filled,
+			    options->timeout_ms);
+	if (result == LIBUSB_SUCCESS)
+		memcpy(state->pressed, state->pending, sizeof(state->pressed));
+	state->filled = 0;
+	return result;
+}
+
+static int queue_keyboard_event(libusb_device_handle *handle,
+				const struct endpoint_pair *pair,
+				const struct options *options,
+				struct keyboard_forward_state *state,
+				unsigned int type, unsigned int code, int value)
+{
+	char line[64];
+	int written =
+	    snprintf(line, sizeof(line), "%u %u %d\n", type, code, value);
+	int result;
+
+	if (written <= 0 || (size_t)written >= sizeof(line))
+		return LIBUSB_ERROR_OTHER;
+	if ((size_t)written > sizeof(state->buffer) - state->filled) {
+		result = flush_keyboard_events(handle, pair, options, state);
+		if (result != LIBUSB_SUCCESS)
+			return result;
+	}
+	memcpy(state->buffer + state->filled, line, (size_t)written);
+	state->filled += (size_t)written;
+	if (type == EV_KEY && code < KEY_CNT && (value == 0 || value == 1))
+		state->pending[code] = value == 1;
+	return LIBUSB_SUCCESS;
+}
+
+static int queue_keyboard_state_changes(libusb_device_handle *handle,
+					const struct endpoint_pair *pair,
+					const struct options *options,
+					struct keyboard_forward_state *state,
+					const unsigned char *physical,
+					bool down, bool modifiers)
+{
+	unsigned int code;
+
+	for (code = 0; code < KEY_CNT; ++code) {
+		int result;
+
+		if (keyboard_state_bit(physical, code) != down ||
+		    state->pending[code] == down ||
+		    keyboard_modifier(code) != modifiers)
+			continue;
+		result = queue_keyboard_event(handle, pair, options, state,
+					      EV_KEY, code, down ? 1 : 0);
+		if (result != LIBUSB_SUCCESS)
+			return result;
+	}
+	return LIBUSB_SUCCESS;
+}
+
+static int resync_keyboard(libusb_device_handle *handle,
+			   const struct endpoint_pair *pair,
+			   const struct options *options, int keyboard,
+			   struct keyboard_forward_state *state,
+			   bool *transport_alive)
+{
+	static const struct {
+		bool down;
+		bool modifiers;
+	} phases[] = {
+	    {false, false},
+	    {false, true},
+	    {true, true},
+	    {true, false},
+	};
+	unsigned char physical[KEYBOARD_KEY_STATE_BYTES] = {0};
+	size_t phase;
+	int result;
+
+	if (ioctl(keyboard, EVIOCGKEY(sizeof(physical)), physical) < 0)
+		return LIBUSB_ERROR_IO;
+	for (phase = 0; phase < sizeof(phases) / sizeof(phases[0]); ++phase) {
+		result = queue_keyboard_state_changes(
+		    handle, pair, options, state, physical, phases[phase].down,
+		    phases[phase].modifiers);
+		if (result != LIBUSB_SUCCESS) {
+			*transport_alive = false;
+			return result;
+		}
+	}
+	result = queue_keyboard_event(handle, pair, options, state, EV_SYN,
+				      SYN_REPORT, 0);
+	if (result != LIBUSB_SUCCESS) {
+		*transport_alive = false;
+		return result;
+	}
+	result = flush_keyboard_events(handle, pair, options, state);
+	if (result != LIBUSB_SUCCESS)
+		*transport_alive = false;
+	return result;
+}
+
+static int release_keyboard(libusb_device_handle *handle,
+			    const struct endpoint_pair *pair,
+			    const struct options *options,
+			    struct keyboard_forward_state *state)
+{
+	unsigned char released[KEYBOARD_KEY_STATE_BYTES] = {0};
+	unsigned int code;
+	bool any = false;
+	int result;
+
+	state->filled = 0;
+	memcpy(state->pending, state->pressed, sizeof(state->pending));
+	for (code = 0; code < KEY_CNT; ++code)
+		if (state->pressed[code]) {
+			any = true;
+			break;
+		}
+	if (!any)
+		return LIBUSB_SUCCESS;
+	result = queue_keyboard_state_changes(handle, pair, options, state,
+					      released, false, false);
+	if (result == LIBUSB_SUCCESS)
+		result = queue_keyboard_state_changes(
+		    handle, pair, options, state, released, false, true);
+	if (result != LIBUSB_SUCCESS)
+		return result;
+	result = queue_keyboard_event(handle, pair, options, state, EV_SYN,
+				      SYN_REPORT, 0);
+	if (result != LIBUSB_SUCCESS)
+		return result;
+	return flush_keyboard_events(handle, pair, options, state);
+}
+
+static int forward_keyboard(libusb_device_handle *handle,
+			    const struct endpoint_pair *pair,
+			    const struct options *options)
+{
+	static const unsigned char reset[] = "reset\n";
+	struct keyboard_forward_state state = {0};
+	bool transport_alive = true;
+	int keyboard;
+	int result = LIBUSB_SUCCESS;
+
+	keyboard = open(options->keyboard_device, O_RDONLY | O_CLOEXEC);
+	if (keyboard < 0) {
+		fprintf(stderr, "fplinux-usb-console: cannot open %s: %s\n",
+			options->keyboard_device, strerror(errno));
+		return LIBUSB_ERROR_OTHER;
+	}
+	if (ioctl(keyboard, EVIOCGRAB, 1) != 0) {
+		fprintf(stderr,
+			"fplinux-usb-console: cannot take %s from this "
+			"desktop: %s\n",
+			options->keyboard_device, strerror(errno));
+		close(keyboard);
+		return LIBUSB_ERROR_OTHER;
+	}
+	result = send_bytes(handle, pair->endpoint_out, reset,
+			    sizeof(reset) - 1, options->timeout_ms);
+	if (result != LIBUSB_SUCCESS) {
+		fprintf(
+		    stderr,
+		    "fplinux-usb-console: cannot reset keyboard channel: %s\n",
+		    libusb_strerror(result));
+		ioctl(keyboard, EVIOCGRAB, 0);
+		close(keyboard);
+		return result;
+	}
+	result = resync_keyboard(handle, pair, options, keyboard, &state,
+				 &transport_alive);
+	if (result != LIBUSB_SUCCESS) {
+		fprintf(
+		    stderr,
+		    "fplinux-usb-console: cannot read initial keyboard state: "
+		    "%s\n",
+		    transport_alive ? strerror(errno)
+				    : libusb_strerror(result));
+		ioctl(keyboard, EVIOCGRAB, 0);
+		close(keyboard);
+		return result;
+	}
+	fprintf(stderr,
+		"fplinux-usb-console: forwarding %s to the phone; the keys no "
+		"longer reach this desktop\n",
+		options->keyboard_device);
+
+	while (signal_requested == 0) {
+		struct pollfd waiting = {
+		    .fd = keyboard,
+		    .events = POLLIN,
+		};
+		struct input_event event;
+		ssize_t got;
+		int ready;
+
+		ready = poll(&waiting, 1, KEYBOARD_POLL_MS);
+		if (ready < 0) {
+			if (errno == EINTR)
+				continue;
+			fprintf(stderr, "fplinux-usb-console: %s: %s\n",
+				options->keyboard_device, strerror(errno));
+			result = LIBUSB_ERROR_IO;
+			break;
+		}
+		if (!ready) {
+			result = send_bytes(handle, pair->endpoint_out,
+					    (const unsigned char *)"\n", 1,
+					    options->timeout_ms);
+			if (result == LIBUSB_SUCCESS)
+				continue;
+			transport_alive = false;
+			fprintf(stderr,
+				"fplinux-usb-console: keyboard channel "
+				"disconnected: "
+				"%s\n",
+				libusb_strerror(result));
+			break;
+		}
+		if (waiting.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+			fprintf(stderr, "fplinux-usb-console: keyboard input "
+					"disconnected\n");
+			result = LIBUSB_ERROR_IO;
+			break;
+		}
+		if (!(waiting.revents & POLLIN))
+			continue;
+		got = read(keyboard, &event, sizeof(event));
+		if (got < 0) {
+			if (errno == EINTR)
+				continue;
+			fprintf(stderr, "fplinux-usb-console: %s: %s\n",
+				options->keyboard_device, strerror(errno));
+			result = LIBUSB_ERROR_IO;
+			break;
+		}
+		if (got != (ssize_t)sizeof(event)) {
+			fprintf(stderr, "fplinux-usb-console: keyboard input "
+					"disconnected\n");
+			result = LIBUSB_ERROR_IO;
+			break;
+		}
+		if (state.dropping) {
+			if (event.type != EV_SYN || event.code != SYN_REPORT)
+				continue;
+			state.dropping = false;
+			result =
+			    resync_keyboard(handle, pair, options, keyboard,
+					    &state, &transport_alive);
+			if (result == LIBUSB_SUCCESS)
+				continue;
+			fprintf(stderr,
+				"fplinux-usb-console: cannot resynchronize "
+				"keyboard: "
+				"%s\n",
+				transport_alive ? strerror(errno)
+						: libusb_strerror(result));
+			break;
+		}
+		if (event.type == EV_SYN && event.code == SYN_DROPPED) {
+			state.filled = 0;
+			memcpy(state.pending, state.pressed,
+			       sizeof(state.pending));
+			state.dropping = true;
+			continue;
+		}
+		if (event.type != EV_KEY && event.type != EV_SYN)
+			continue;
+		if (event.type == EV_KEY && event.value == 2)
+			continue;
+		result =
+		    queue_keyboard_event(handle, pair, options, &state,
+					 event.type, event.code, event.value);
+		if (result == LIBUSB_SUCCESS && event.type == EV_SYN)
+			result = flush_keyboard_events(handle, pair, options,
+						       &state);
+		if (result == LIBUSB_SUCCESS)
+			continue;
+		transport_alive = false;
+		fprintf(stderr,
+			"fplinux-usb-console: cannot send key events: %s\n",
+			libusb_strerror(result));
+		break;
+	}
+
+	{
+		int release_result =
+		    release_keyboard(handle, pair, options, &state);
+
+		if (result == LIBUSB_SUCCESS &&
+		    release_result != LIBUSB_SUCCESS)
+			result = release_result;
+	}
+	ioctl(keyboard, EVIOCGRAB, 0);
+	close(keyboard);
+	return result;
+}
+
 /*
- * The command runs in a subshell so that one which exits reports a status
- * instead of closing the login shell, and the markers are printed through
- * arguments so that the words never appear in the echo of the command itself.
+ * A subshell preserves the login shell, and printf arguments keep framing
+ * markers out of the command echo.
  */
 static int exec_remote(libusb_device_handle *handle,
 		       const struct endpoint_pair *pair,
@@ -2484,6 +2833,14 @@ int main(int argc, char **argv)
 	signal(SIGHUP, signal_handler);
 	signal(SIGPIPE, SIG_IGN);
 
+	if (options.keyboard_device != NULL) {
+		result = forward_keyboard(handle, &pair, &options);
+		if (result != LIBUSB_SUCCESS) {
+			goto cleanup;
+		}
+		exit_status = 0;
+		goto cleanup;
+	}
 	if (options.exec_command != NULL) {
 		int remote_status = -1;
 

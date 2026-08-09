@@ -211,14 +211,31 @@ verifies BootROM USB access, loads FDL1 and the FPLinux payload into RAM, then
 attaches to the Linux USB shell. Addresses, USB identifiers, wait times,
 board-asset roles and adapter values come from validated target data.
 
-`Ctrl-]` detaches the host console without stopping the phone shell. If Linux is
-still running, reconnect directly with:
+`Ctrl-]` detaches the host console without stopping the phone shell. From the
+repository root, reconnect to interface 0 with:
 
 ```sh
-.cache/out/nokia-ta1618/console/host/fplinux-usb-console
+./fplinux console nokia-ta1618
 ```
 
-Do not start the full runner merely to reconnect. To end the RAM session, detach
+Forward a host keyboard on interface 1. The client grabs the selected evdev
+node, so its keys do not reach the host desktop until the process exits:
+
+```sh
+sudo ./fplinux console nokia-ta1618 --keyboard /dev/input/eventN
+```
+
+Limit a forwarding session to 60 seconds with GNU `timeout`:
+
+```sh
+sudo timeout 60s ./fplinux console nokia-ta1618 --keyboard /dev/input/eventN
+```
+
+After 60 seconds, `timeout` sends `SIGTERM`; the client releases the evdev grab
+before it exits.
+
+The keyboard forwarder and one interface 0 client can run at the same time. Do
+not start the full runner merely to reconnect. To end the RAM session, detach
 with `Ctrl-]`, disconnect USB, remove the battery and then reinsert it. The next
 normal power-on uses the unchanged vendor firmware. Linux `reboot`, `poweroff`
 and PMIC-controlled shutdown are not qualified exit paths. See
