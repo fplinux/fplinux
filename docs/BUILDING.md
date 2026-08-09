@@ -243,9 +243,10 @@ Create a package for physical qualification:
 ```
 
 Packaging requires an existing successful build with a matching
-`build-manifest.json`. It rejects stale, mixed or modified runtime files, writes
+`build-manifest.json`. It rejects stale, mixed or modified bundle files, writes
 a deterministic ZIP under `.cache/out/candidates/` and uses the data-only
-`fplinux.release/v1` allowlist. It does not rebuild the target.
+`fplinux.release/v2` allowlist. Only its `runtime_files` subset enters the
+hardware-qualified runtime digest. Packaging does not rebuild the target.
 
 The source tree has no qualified runtime closure or prebuilt archive. After an
 exact candidate passes the phone gate, maintainers record its printed runtime
@@ -264,7 +265,8 @@ accepted only when its embedded recipe digest matches every recipe input:
 build driver modules. Build timestamps and Kbuild
 identity are fixed.
 Packaging verifies the successful-build manifest, sorts entries, normalizes
-timestamps and stores only the allowlisted runtime closure.
+timestamps and includes the allowlisted bundle files, build receipt, target
+and fixed legal documents, checksums and candidate notice when applicable.
 
 A matching build proves that the source assembles into the same bytes. A feature
 is marked supported only after the resulting image is run on the corresponding

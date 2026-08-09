@@ -306,15 +306,15 @@ libusb 1.0, libudev, GNU `stdbuf` and USB permissions for `1782:4d00` and
 
 ## Source layout
 
-| Path          | Responsibility                                                 |
-| ------------- | -------------------------------------------------------------- |
-| `target.toml` | Data-only board inputs, identity and runtime adapter values    |
-| `dts/`        | Phone memory map and enabled board devices                     |
-| `kernel/`     | Display, keypad and hardware handoff support                   |
-| `bootstrap/`  | Target RAM payload source and Linux handoff                    |
-| `rootfs/`     | Target identity and boot diagnostics layered over common init  |
-| `loader/`     | Generic `fplinux.assets/v1` lock and asset provenance          |
-| `release/`    | Data-only `fplinux.release/v1` allowlist and archive documents |
+| Path          | Responsibility                                                |
+| ------------- | ------------------------------------------------------------- |
+| `target.toml` | Data-only board inputs, identity and runtime adapter values   |
+| `dts/`        | Phone memory map and enabled board devices                    |
+| `kernel/`     | Display, keypad and hardware handoff support                  |
+| `bootstrap/`  | Target RAM payload source and Linux handoff                   |
+| `rootfs/`     | Target identity and boot diagnostics layered over common init |
+| `loader/`     | Generic `fplinux.assets/v1` lock and asset provenance         |
+| `release/`    | Data-only `fplinux.release/v2` runtime and archive allowlists |
 
 Build behavior is shared in `scripts/fplinux_cli/builder.py`; execution uses
 `common/run.py` and the fixed `platforms/ums9117/host/adapter.py`.

@@ -99,12 +99,15 @@ source states its kind, pinned URL and SHA-256; each output assigns a runtime
 role, bundle path and expected SHA-256. Keep extraction or download behavior in
 the shared builder rather than target scripts.
 
-The declared release manifest uses `fplinux.release/v1` and contains exactly
-`schema`, `image`, `bundle_files` and `documents`. `bundle_files` is the
-generated bundle allowlist; `documents` names target files below `release/` that
-packaging adds to the archive. Executable roles come from the selected
-platform's typed host recipes and shared runner, not from target-controlled flags
-or launchers.
+The declared release manifest uses `fplinux.release/v2` and contains exactly
+`schema`, `image`, `bundle_files`, `runtime_files` and `documents`. `bundle_files`
+is the complete generated bundle allowlist. `runtime_files` is its
+hardware-qualified subset and must contain the image, every runtime asset, the
+shared runner, host tools, platform adapter and `runtime-manifest.json`; exclude
+build receipts, provenance and documentation. `documents` names target files
+below `release/` that packaging adds to the archive. Executable roles come from
+the selected platform's typed host recipes and shared runner, not from
+target-controlled flags or launchers.
 
 ## Hardware support
 
