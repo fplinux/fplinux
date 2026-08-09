@@ -11,7 +11,7 @@
 | CPU used by Linux | ARM Cortex-A7, CPU0, 1 GHz                                 |
 | FPLinux profile   | `console`                                                  |
 | Boot method       | Volatile RAM through the Unisoc BootROM and FDL1           |
-| Linux version     | 6.18.40                                                    |
+| Linux version     | 6.18.42                                                    |
 
 ## Current status
 
@@ -93,7 +93,7 @@ that the stated limitation or current qualification gap still applies.
 | Area                              | Status        | Notes                                                              |
 | --------------------------------- | ------------- | ------------------------------------------------------------------ |
 | BootROM RAM loading               | Supported     | Fixed RAM-only sequence; no flash, erase, partition or NV command  |
-| Linux kernel and initramfs        | Supported     | Linux 6.18.40 with a musl/BusyBox root filesystem                  |
+| Linux kernel and initramfs        | Supported     | Linux 6.18.42 with a musl/BusyBox root filesystem                  |
 | CPU                               | Supported     | The SoC has a single Cortex-A7 core, so SMP does not apply         |
 | Interrupt controller              | Supported     | ARM GIC with working timer and USB interrupts                      |
 | System timers                     | Supported     | UMS9117 system counter and Pike2 timer                             |
