@@ -205,6 +205,20 @@ closure. Feature-level hardware status is recorded in the target README. A
 qualified release additionally requires the exact closure digest in
 `releases.lock.toml`.
 
+## Verify a running phone
+
+After the current bundle has been loaded and USB interface 0 is free, compare
+its build stamp with the local build receipt:
+
+```sh
+./fplinux verify nokia-ta1618
+```
+
+The command reads `/etc/fplinux-build` through USB interface 0 and compares its
+workspace and container recipe digests with `build-manifest.json`. It rejects a
+phone booted from another workspace or build container. It does not inspect the
+other bundle files or qualify the hardware.
+
 ## Access a running phone
 
 The repository entrypoint owns direct shell and transfer access to an already

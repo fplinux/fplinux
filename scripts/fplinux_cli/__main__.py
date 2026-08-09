@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import os
 
-from .commands import build, console_target, package_target, run_target
+from .commands import build, console_target, package_target, run_target, verify_booted
 from .config import discover_targets
 from .container import check, check_commit_message, doctor, setup
 
@@ -44,6 +44,10 @@ def main() -> None:
     console_actions.add_argument("--exec", dest="exec_command", metavar="COMMAND")
     console_actions.add_argument("--upload", nargs=2, metavar=("LOCAL", "REMOTE"))
     console_actions.add_argument("--pull", nargs=2, metavar=("REMOTE", "LOCAL"))
+    verify_parser = commands.add_parser(
+        "verify", help="check that the booted phone runs the current build"
+    )
+    verify_parser.add_argument("target", choices=targets)
     args = parser.parse_args()
 
     if args.command == "doctor":
@@ -68,6 +72,8 @@ def main() -> None:
             upload=args.upload,
             pull=args.pull,
         )
+    elif args.command == "verify":
+        verify_booted(args.target)
 
 
 if __name__ == "__main__":
