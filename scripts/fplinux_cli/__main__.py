@@ -53,15 +53,15 @@ def main() -> None:
     )
     run_parser = commands.add_parser("run", help="run a target's volatile-RAM loader")
     run_parser.add_argument("target", choices=targets)
-    console_parser = commands.add_parser(
-        "console", help="connect to a running target over USB"
-    )
+
+    console_parser = commands.add_parser("console", help="connect to a running target over USB")
     console_parser.add_argument("target", choices=targets)
     console_actions = console_parser.add_mutually_exclusive_group()
     console_actions.add_argument("--keyboard", metavar="EVDEV")
     console_actions.add_argument("--exec", dest="exec_command", metavar="COMMAND")
     console_actions.add_argument("--upload", nargs=2, metavar=("LOCAL", "REMOTE"))
     console_actions.add_argument("--pull", nargs=2, metavar=("REMOTE", "LOCAL"))
+
     verify_parser = commands.add_parser(
         "verify", help="check that the booted phone runs the current build"
     )

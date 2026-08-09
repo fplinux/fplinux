@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Build, package and run commands dispatched through target metadata."""
+"""Target commands dispatched through repository metadata."""
 
 from __future__ import annotations
 

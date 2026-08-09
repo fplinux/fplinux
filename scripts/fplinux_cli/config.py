@@ -117,7 +117,7 @@ def discover_targets() -> tuple[str, ...]:
 
 
 def load_target(target: str) -> dict[str, Any]:
-    """Load the exact declarative target v2 schema."""
+    """Load the exact declarative target v1 schema."""
     if TARGET_NAME.fullmatch(target) is None:
         fail(f"invalid target name: {target}")
     path = ROOT / "targets" / target / "target.toml"
