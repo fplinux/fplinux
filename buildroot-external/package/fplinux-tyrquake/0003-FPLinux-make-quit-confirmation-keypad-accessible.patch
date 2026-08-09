@@ -1,0 +1,38 @@
+From b5d4d9523a0706095263d545877d71d96f566c98 Mon Sep 17 00:00:00 2001
+From: FPLinux maintainers <fplinux@example.invalid>
+Date: Mon, 27 Jul 2026 00:00:00 +0000
+Subject: [PATCH] FPLinux: make quit confirmation keypad-accessible
+
+The TA-1618 keypad has no letter keys, so upstream's Y-only confirmation
+cannot complete a normal in-menu exit.  Accept Enter as the positive choice
+and show the physical-keypad choices below the original quit message.
+
+Escape keeps its upstream cancel behavior.
+
+Signed-off-by: FPLinux maintainers <fplinux@example.invalid>
+---
+ common/menu.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/common/menu.c b/common/menu.c
+index a6162bc..2448ba8 100644
+--- a/common/menu.c
++++ b/common/menu.c
+@@ -914,6 +914,7 @@ M_Quit_Key(knum_t keynum)
+ 	m_state = m_quit_prevstate;
+ 	break;
+
++    case K_ENTER:
+     case K_y:
+ 	key_dest = key_console;
+ #ifdef NQ_HACK
+@@ -943,6 +944,7 @@ M_Quit_Draw(void)
+     M_Print(64, 92, m_quit_message[1]);
+     M_Print(64, 100, m_quit_message[2]);
+     M_Print(64, 108, m_quit_message[3]);
++    M_PrintWhite(72, 124, "ENTER=quit  ESC=back");
+ }
+
+ //=============================================================================
+--
+2.50.1

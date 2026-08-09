@@ -10,6 +10,13 @@
 set -eu
 
 target="$1"
+pak=$(find "$target" -type f -iname '*.pak' -print -quit)
+if [ -n "$pak" ]; then
+	printf 'fplinux: Quake game data must not enter the root filesystem: %s\n' \
+		"$pak" >&2
+	exit 1
+fi
+
 rm -f "$target/etc/fplinux-build"
 printf 'workspace=%s container=%s\n' \
 	"${FPLINUX_WORKSPACE_DIGEST:-unknown}" \

@@ -49,6 +49,21 @@ class SourceInventoryTests(unittest.TestCase):
                 with self.assertRaisesRegex(SystemExit, "quality input must not be a symlink"):
                     workspace_module.quality_files(enforce_source_policy=True)
 
+    def test_source_inventory_rejects_quake_game_data(self) -> None:
+        """Keep PAK data outside source and generated images."""
+        for name in ("pak0.pak", "pak0.part.00"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                (root / name).write_text("game data\n")
+                with (
+                    mock.patch.object(source_check, "ROOT", root),
+                    self.assertRaisesRegex(
+                        SystemExit,
+                        "Quake game data is not allowed",
+                    ),
+                ):
+                    source_check.source_files(enforce_policy=True)
+
     def test_source_inventory_rejects_binary_artifacts(self) -> None:
         """Keep binary rejection in the explicit source scope."""
         with tempfile.TemporaryDirectory() as temporary:

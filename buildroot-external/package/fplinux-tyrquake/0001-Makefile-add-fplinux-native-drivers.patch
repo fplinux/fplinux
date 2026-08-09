@@ -1,0 +1,35 @@
+From 8b31e07d04e7cd8f242945b45bbdb30f58931701 Mon Sep 17 00:00:00 2001
+From: FPLinux maintainers <fplinux@example.invalid>
+Date: Mon, 27 Jul 2026 00:00:00 +0000
+Subject: [PATCH] Makefile: add fplinux native drivers
+
+Allow the FPLinux package to select its fbdev video and evdev input
+implementations without pulling in SDL or X11.
+
+Signed-off-by: FPLinux maintainers <fplinux@example.invalid>
+---
+ Makefile | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/Makefile b/Makefile
+index d7af1d0..48f7a91 100644
+--- a/Makefile
++++ b/Makefile
+@@ -957,5 +957,7 @@ CL_LFLAGS += $(SDL_LFLAGS)
+ endif
+-ifeq ($(VID_TARGET),null)
++ifeq ($(VID_TARGET),fplinux)
++SW_OBJS += vid_fplinux.o
++else ifeq ($(VID_TARGET),null)
+ SW_OBJS += vid_null.o
+ GL_OBJS += vid_null.o
+ endif
+@@ -980,5 +982,7 @@ ifeq ($(IN_TARGET),sdl)
+ CL_OBJS += in_sdl.o sdl_common.o
+ endif
+-ifeq ($(IN_TARGET),null)
++ifeq ($(IN_TARGET),fplinux)
++CL_OBJS += in_fplinux.o
++else ifeq ($(IN_TARGET),null)
+ CL_OBJS += in_null.o
+ endif

@@ -44,6 +44,12 @@ SPDX-FileCopyrightText = "2026 FPLinux contributors"
 SPDX-License-Identifier = "GPL-2.0-only"
 
 [[annotations]]
+path = "buildroot-external/package/fplinux-tyrquake/*.patch"
+precedence = "override"
+SPDX-FileCopyrightText = "2026 FPLinux contributors"
+SPDX-License-Identifier = "GPL-2.0-or-later"
+
+[[annotations]]
 path = "THIRD_PARTY_LICENSES/musl/COPYRIGHT"
 precedence = "override"
 SPDX-FileCopyrightText = "2005-2020 Rich Felker, et al."

@@ -34,6 +34,63 @@ closure has not completed its exact phone-side release gate.
 prebuilt archive is currently available. A successful source build or a local
 candidate package does not change that status.
 
+## TyrQuake
+
+The target root filesystem includes the TyrQuake 0.71 engine without Quake game
+data. Put a legally obtained PAK on a microSD card inserted before boot:
+
+```text
+/mnt/card/fplinux/quake/id1/pak0.pak
+```
+
+The launcher mounts the card read-only when `/mnt/card` is not already mounted.
+Configuration and save files stay below `/tmp`; the game never writes through
+the PAK links to the card. Start one of the two fixed input modes from the phone
+shell:
+
+```sh
+quake --input phone
+quake --input keyboard
+```
+
+Phone mode requires exactly one `TA-1618 keypad`. Keyboard mode requires exactly
+one `FPLinux host keyboard`, created by the host-keyboard bridge on USB interface
+number 1. The choice stays fixed until the game exits. TyrQuake rejects duplicate
+phone or host-keyboard devices before selecting a source. It grabs every present
+recognized source, sends only the selected source to the game and discards the
+other one. A missing selected device is an error; there is no fallback or hot
+switching between modes.
+
+Phone controls assume that the phone is held counter-clockwise with the screen on
+the left and keypad on the right. The directional layout is rotated into the
+landscape game view:
+
+| Key                 | Menu                 | Game                        |
+| ------------------- | -------------------- | --------------------------- |
+| D-pad `UP` / `DOWN` | Left / right         | Turn left / right           |
+| D-pad `LEFT`        | Down                 | Walk backward               |
+| D-pad `RIGHT`       | Up                   | Walk forward                |
+| Centre or dial      | Select               | Fire                        |
+| Right soft          | Back                 | Menu                        |
+| Left soft or `*`    | -                    | Jump                        |
+| `0`                 | -                    | Fire                        |
+| `1` / `3`           | -                    | Strafe left / right         |
+| `2` / `5`           | -                    | Turn left / right           |
+| `4` / `6`           | -                    | Walk backward / forward     |
+| `7` / `9`           | -                    | Previous / next weapon      |
+| `8`                 | -                    | Run while held              |
+| `#`                 | Available for a bind | Available for a custom bind |
+
+Centre and dial both arrive from the kernel as `KEY_ENTER`, so the game cannot
+distinguish them. Keyboard mode uses normal Quake keyboard controls and does not
+apply T9 or terminal QWERTY translation.
+
+The engine runs with a fixed 32 MiB heap, null sound and CD backends, and LAN
+disabled. A supervising launcher owns the game session, forwards termination
+signals and restores both framebuffer pages, the original framebuffer geometry,
+the active VT and text mode after the engine exits. `SIGKILL` or power loss can
+still bypass process cleanup.
+
 ## microSD card
 
 The removable microSD slot is driven by a board-specific host on the UMS9117
@@ -41,6 +98,40 @@ SDIO0 instance. It is deliberately not an SDHCI driver: the register at offset
 0x28 is a 32-bit custom host control word and there is no SDHCI power control
 byte, so the driver programs the gate, reset, clock selector, pin and analog
 rail recipe that was proven on this board.
+
+### Mounting a card
+
+Insert the card before Linux starts. Use the first partition when the card has a
+partition table, or the whole-card device otherwise:
+
+```sh
+card=/dev/mmcblk0p1
+[ -b "$card" ] || card=/dev/mmcblk0
+mkdir -p /mnt/card
+```
+
+Mount it read-write for ordinary file access:
+
+```sh
+mount -t vfat -o rw "$card" /mnt/card
+```
+
+Use a read-only mount for game data and application archives:
+
+```sh
+mount -t vfat -o ro,nodev,nosuid,noexec,utf8=1 "$card" /mnt/card
+```
+
+The Quake launcher uses the read-only form when `/mnt/card` is not mounted. It
+uses an existing mount with its current flags. Before ending the RAM session or
+removing the card, flush pending writes and unmount it:
+
+```sh
+sync
+umount /mnt/card
+```
+
+Do not remove the card while it is mounted; hot-swap is not supported.
 
 What works: a card that is already inserted when Linux starts is identified,
 switched to a 4-bit bus, and read and written in transfers of up to 256 blocks,
@@ -142,6 +233,7 @@ CONFIG_FILE_LOCKING=y
 
 BR2_PACKAGE_FPLINUX_CONSOLE=y
 BR2_PACKAGE_FPLINUX_INPUT=y
+BR2_PACKAGE_FPLINUX_TYRQUAKE=y
 ```
 
 The kernel command line selects two non-ACM generic-serial ports with

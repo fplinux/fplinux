@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 ROOT = Path(__file__).resolve().parents[1]
 EXCLUDED_PARTS = {".cache", ".git", "__pycache__"}
 BINARY_SUFFIXES = {".bin", ".jpg", ".png", ".pyc", ".zip"}
+QUAKE_DATA_NAME = re.compile(r"pak[0-9]+\.part\.[0-9]+", re.IGNORECASE)
 SOURCE_SCOPES = (
     "source",
     "container",
@@ -75,6 +76,10 @@ def source_files(*, enforce_policy: bool) -> list[Path]:
                 fail(f"source symlink is not allowed: {relative}")
             continue
         if not path.is_file():
+            continue
+        if path.suffix.lower() == ".pak" or QUAKE_DATA_NAME.fullmatch(path.name):
+            if enforce_policy:
+                fail(f"Quake game data is not allowed in source: {relative}")
             continue
         if path.suffix in BINARY_SUFFIXES:
             if enforce_policy:

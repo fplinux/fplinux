@@ -1,0 +1,40 @@
+From 7f429381e1e11f7ce6149cf87d8b458d141a6ac5 Mon Sep 17 00:00:00 2001
+From: FPLinux maintainers <fplinux@example.invalid>
+Date: Tue, 28 Jul 2026 00:00:00 +0000
+Subject: [PATCH] sound: stop initialization when the backend is unavailable
+
+The null sound backend leaves sound_started false.  Do not continue into
+scale-table and sound-buffer initialization in that state, and tolerate the
+matching cleanup call before the sound-effect list has been allocated.
+
+Signed-off-by: FPLinux maintainers <fplinux@example.invalid>
+---
+ common/snd_dma.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/common/snd_dma.c b/common/snd_dma.c
+index 01c3aa7..e4869cb 100644
+--- a/common/snd_dma.c
++++ b/common/snd_dma.c
+@@ -261,6 +261,9 @@ S_Init(void)
+     snd_initialized = true;
+
+     S_Startup();
++    if (!sound_started)
++	return;
++
+     SND_InitScaletable();
+     S_AllocBuffers();
+
+@@ -279,6 +282,9 @@ S_Init(void)
+ void
+ S_ClearOverflow()
+ {
++    if (!known_sfx)
++	return;
++
+     S_StopAllSounds(true);
+     struct known_sfx *known = known_sfx->overflow;
+
+--
+2.50.1
