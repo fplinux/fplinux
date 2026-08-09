@@ -1,18 +1,20 @@
 # Moving files between the host and the phone
 
-The phone reaches the host through one channel and nothing else: a single bulk
-endpoint pair carrying a shell. There is no network in the kernel, not even
-local sockets, and the USB controller declares one pair of endpoints, so every
-transfer described here rides the same console the operator types into.
+The TA-1618 exposes two non-ACM serial interfaces under USB ID `0525:a4a6`.
+Interface 0 maps to `/dev/ttyGS0` and carries the login shell, interactive
+console, `--exec`, `--upload` and `--pull`. Interface 1 maps to `/dev/ttyGS1`
+and carries host keyboard events for `fplinux-input`.
 
-`fplinux-usb-console` therefore carries three non-interactive modes besides the
-terminal it opens by default. All three take the same device selection options
-as interactive use.
+`fplinux-usb-console` selects interface 0 automatically for its shell and
+transfer modes. `--keyboard` selects interface 1 unless `--interface` overrides
+it. A host keyboard forwarder can therefore stay connected while interface 0
+is used independently. Commands below run from the repository root through the
+single `./fplinux` entrypoint.
 
 ## Running a command
 
 ```sh
-fplinux-usb-console --exec 'uname -r'
+./fplinux console nokia-ta1618 --exec 'uname -r'
 ```
 
 The command runs in a subshell on the phone. Its standard output becomes this
@@ -27,7 +29,8 @@ only what falls between them is passed on.
 ## Sending a file
 
 ```sh
-fplinux-usb-console --upload ./module.ko /tmp/module.ko
+./fplinux console nokia-ta1618 \
+  --upload ./module.ko /tmp/module.ko
 ```
 
 The destination must be one direct `/tmp/FILE` path. The file is installed only
@@ -39,7 +42,8 @@ memory-safety limit rather than a protocol one.
 ## Taking a file
 
 ```sh
-fplinux-usb-console --pull /tmp/capture.raw ./capture.raw
+./fplinux console nokia-ta1618 \
+  --pull /tmp/capture.raw ./capture.raw
 ```
 
 The phone reports the size and the digest of the whole file before the first
@@ -69,25 +73,17 @@ static-screen hardware sample measured 99.97% CPU idle. Framebuffer changes
 schedule a full frame and complete through the LCDC interrupt, while updates
 arriving during a transfer are coalesced into the next frame.
 
-The setup cost of a transfer is fixed, so the sending rate depends on how much
-there is to send. Reading is already at its ceiling by one mebibyte.
-
-Sending is the slower direction because it waits: a window of sixteen base64
-lines, 912 bytes of payload, is acknowledged before the next window goes out,
-where reading asks for 32 KiB at a time. The window is not free to grow. At
-twenty-four lines the phone still keeps up and the transfer gains five percent;
-at thirty-two it stops consuming and the transfer fails. Sixteen is what the
-line discipline tolerates with margin, and the window travels as one USB
-transfer rather than sixteen.
-
-For scale, the whole of the phone's RAM is 62 MiB, and the 8 MiB a transfer is
-allowed to move crosses in six seconds one way and twelve the other.
+Upload waits for an acknowledgement after each window of sixteen base64
+lines, while pull requests 32 KiB at a time. The window travels as one USB
+transfer. At thirty-two lines the phone stops consuming input, so it remains at
+sixteen.
 
 ## What the channel imposes
 
-Only one host process can hold the phone, because the client claims the usbfs
-interface and the runner ends by replacing itself with that client. An
-interactive session must be closed before a transfer mode can run.
+One process can claim each USB interface. A shell or transfer client on
+interface 0 can run alongside the keyboard forwarder on interface 1, but two
+processes cannot claim the same interface. Close an interactive interface 0
+session before running `--exec`, `--upload` or `--pull`.
 
 BusyBox `getty` puts the line into canonical mode with echo and with software
 flow control. Both transfer directions work in text mode for that reason: the
@@ -102,28 +98,20 @@ over this path on every rebuild.
 
 ## What is deliberately not here
 
-- **Compression.** The phone has one ARMv7 core, and it compresses with `gzip`
-  at 1.0 MiB/s while decompressing at 7.5 MiB/s, at a ratio of 1.85 on a real
-  binary. Compressing is therefore slower than the pull channel carries the
-  bytes uncompressed, and a 1.75 MiB file that arrives in 1.28 s takes 2.52 s
-  if the phone squeezes it first. The other direction does gain, because the
-  host compresses and the phone only decompresses, but the payload that travels
-  that way is a kernel module of a few tens of kilobytes and the saving is
-  around twenty milliseconds against a rebuild that takes minutes.
+- **Compression.** Transfer modes preserve the file bytes and do not transform
+  payloads. Compression has not been qualified as part of the text-mode protocol.
 - **A raw block mode.** Turning off the line discipline would remove the base64
   overhead, but it needs a proven 8-bit transparent path first, and every raw
   excursion has to restore the terminal on each exit path including a crash.
 - **Resume.** A pull that is interrupted starts again. The blocks are already
   ranged, so resuming is a matter of sending the digest of the accepted prefix
   and continuing from that offset.
-- **A device-side helper.** A framed binary protocol would separate command
-  output from the kernel log structurally instead of by marker scanning, and
-  would lift the ceiling to what the endpoint can carry. It costs a new runtime
-  component and a rebuild to reach a phone.
-- **A second USB gadget function.** The highest ceiling and the highest cost:
-  the FIFO table declares one bulk pair, `CONFIG_USB_CONFIGFS` is unset, the USB
-  identity is fixed in the target manifest and in the udev rule, and the
-  ethernet variant would need the whole network stack in a 62 MiB system.
+- **A file-transfer helper.** A framed binary protocol would separate command
+  output from the kernel log structurally instead of by marker scanning and
+  would lift the ceiling to what the endpoint can carry. The installed
+  `fplinux-input` helper handles keyboard events only.
+- **USB networking.** The second serial interface is reserved for input events.
+  The kernel carries no network stack or USB ethernet function.
 
 ## The microSD card
 
@@ -136,9 +124,10 @@ writes into `/tmp`, the shell moves it onto the mount point, and reading takes
 any absolute path, so the whole way there and back is:
 
 ```sh
-fplinux-usb-console --upload ./file.bin /tmp/file.bin
-fplinux-usb-console --exec 'mv /tmp/file.bin /mnt/card/file.bin && sync'
-fplinux-usb-console --pull /mnt/card/file.bin ./file.bin
+./fplinux console nokia-ta1618 --upload ./file.bin /tmp/file.bin
+./fplinux console nokia-ta1618 \
+  --exec 'mv /tmp/file.bin /mnt/card/file.bin && sync'
+./fplinux console nokia-ta1618 --pull /mnt/card/file.bin ./file.bin
 ```
 
 Four mebibytes survive that round trip byte for byte, including an unmount and

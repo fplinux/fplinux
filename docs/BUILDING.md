@@ -205,6 +205,21 @@ closure. Feature-level hardware status is recorded in the target README. A
 qualified release additionally requires the exact closure digest in
 `releases.lock.toml`.
 
+## Access a running phone
+
+The repository entrypoint owns direct shell and transfer access to an already
+running target:
+
+```sh
+./fplinux console nokia-ta1618
+./fplinux console nokia-ta1618 --exec 'uname -r'
+./fplinux console nokia-ta1618 --upload ./file.bin /tmp/file.bin
+./fplinux console nokia-ta1618 --pull /tmp/file.bin ./file.bin
+```
+
+`--keyboard EVDEV` selects USB interface 1. The shell, command and transfer modes
+select interface 0, which one host process may claim at a time.
+
 ## Package a build
 
 Create a package for physical qualification:

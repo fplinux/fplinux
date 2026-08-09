@@ -63,7 +63,14 @@ def _console_connection(config: dict[str, Any]) -> list[str]:
     ]
 
 
-def console_target(target: str, *, keyboard: str | None) -> None:
+def console_target(
+    target: str,
+    *,
+    keyboard: str | None,
+    exec_command: str | None,
+    upload: list[str] | None,
+    pull: list[str] | None,
+) -> None:
     """Run the built target's USB console client."""
     config = load_target(target)
     client = _console_client(target, config)
@@ -75,6 +82,12 @@ def console_target(target: str, *, keyboard: str | None) -> None:
     ]
     if keyboard is not None:
         arguments.extend(["--keyboard", keyboard])
+    elif exec_command is not None:
+        arguments.extend(["--exec", exec_command])
+    elif upload is not None:
+        arguments.extend(["--upload", *upload])
+    elif pull is not None:
+        arguments.extend(["--pull", *pull])
     os.execv(client, arguments)
 
 

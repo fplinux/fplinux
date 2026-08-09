@@ -39,7 +39,11 @@ def main() -> None:
         "console", help="connect to a running target over USB"
     )
     console_parser.add_argument("target", choices=targets)
-    console_parser.add_argument("--keyboard", metavar="EVDEV")
+    console_actions = console_parser.add_mutually_exclusive_group()
+    console_actions.add_argument("--keyboard", metavar="EVDEV")
+    console_actions.add_argument("--exec", dest="exec_command", metavar="COMMAND")
+    console_actions.add_argument("--upload", nargs=2, metavar=("LOCAL", "REMOTE"))
+    console_actions.add_argument("--pull", nargs=2, metavar=("REMOTE", "LOCAL"))
     args = parser.parse_args()
 
     if args.command == "doctor":
@@ -57,7 +61,13 @@ def main() -> None:
     elif args.command == "run":
         run_target(args.target)
     elif args.command == "console":
-        console_target(args.target, keyboard=args.keyboard)
+        console_target(
+            args.target,
+            keyboard=args.keyboard,
+            exec_command=args.exec_command,
+            upload=args.upload,
+            pull=args.pull,
+        )
 
 
 if __name__ == "__main__":
