@@ -54,6 +54,7 @@ def target_build_source_files(target: str) -> list[tuple[str, Path]]:
         "scripts/fplinux_cli/builder.py",
         "scripts/fplinux_cli/common.py",
         "scripts/fplinux_cli/config.py",
+        "scripts/fplinux_cli/output.py",
     ):
         add_source_path(files, ROOT / relative)
     add_source_path(files, target_root / "target.toml")
@@ -88,14 +89,16 @@ def target_build_source_files(target: str) -> list[tuple[str, Path]]:
     return sorted(files.items())
 
 
-def quality_files() -> list[tuple[str, Path]]:
+def quality_files(*, enforce_source_policy: bool) -> list[tuple[str, Path]]:
     """Return the complete source closure used by quality checks."""
     files: list[tuple[str, Path]] = []
     for top in sorted(ROOT.iterdir()):
         if top.name in {".cache", ".git"} or is_python_cache(top):
             continue
         if top.is_symlink():
-            fail(f"quality input must not be a symlink: {top}")
+            if enforce_source_policy:
+                fail(f"quality input must not be a symlink: {top}")
+            continue
         if top.is_file():
             files.append((top.name, top))
             continue
@@ -105,7 +108,9 @@ def quality_files() -> list[tuple[str, Path]]:
             if is_python_cache(child):
                 continue
             if child.is_symlink():
-                fail(f"quality input must not be a symlink: {child}")
+                if enforce_source_policy:
+                    fail(f"quality input must not be a symlink: {child}")
+                continue
             if child.is_file():
                 files.append((child.relative_to(ROOT).as_posix(), child))
     return files
@@ -176,9 +181,9 @@ def stage_workspace(target: str) -> Path:
     return workspace
 
 
-def stage_quality_workspace() -> Path:
+def stage_quality_workspace(*, enforce_source_policy: bool) -> Path:
     """Stage the complete source tree for hermetic quality tools."""
-    files = quality_files()
+    files = quality_files(enforce_source_policy=enforce_source_policy)
     recipe = workspace_recipe(files)
     workspaces = ROOT / ".cache/quality-workspaces"
     workspace = workspaces / recipe

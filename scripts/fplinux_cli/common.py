@@ -15,7 +15,11 @@ ZIP_TIMESTAMP = (2026, 7, 24, 19, 0, 0)
 
 def display_text(value: object) -> str:
     """Hide the host checkout location in user-facing output."""
-    return str(value).replace(str(ROOT), "<source-root>")
+    text = str(value)
+    root = str(ROOT)
+    if text == root:
+        return "<source-root>"
+    return text.replace(f"{root}/", "<source-root>/")
 
 
 def fail(message: str) -> NoReturn:

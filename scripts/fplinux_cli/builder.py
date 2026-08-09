@@ -17,11 +17,16 @@ import tarfile
 import tempfile
 import tomllib
 import urllib.request
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from .common import ROOT, sha256_file
 from .config import exact_table, load_platform, load_release, load_target, relative_value
+from .output import RunReporter, current_stage, run_entrypoint
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 CACHE = Path("/cache")
 OUTPUT = Path("/out")
@@ -98,8 +103,31 @@ def build_environment() -> dict[str, str]:
 
 def run(command: list[str], *, cwd: Path | None = None) -> None:
     """Run one typed build step with deterministic environment variables."""
+    stage = current_stage()
+    if stage is not None:
+        stage.run(command, cwd=cwd, env=build_environment())
+        return
     print("+", " ".join(shlex.quote(part) for part in command), flush=True)
     subprocess.run(command, cwd=cwd, env=build_environment(), check=True)
+
+
+@contextmanager
+def report_stage(reporter: RunReporter | None, name: str) -> Iterator[None]:
+    """Group typed build commands into one persistent stage log."""
+    if reporter is None:
+        yield
+        return
+    with reporter.stage(name):
+        yield
+
+
+def log_message(message: str) -> None:
+    """Keep routine build details in the active stage log."""
+    stage = current_stage()
+    if stage is None:
+        print(message)
+        return
+    stage.write((message + "\n").encode())
 
 
 def fetch(url: object, expected: object, cache: Path, name: object) -> Path:
@@ -721,7 +749,7 @@ def build_assets(lock_path: Path, output: Path) -> dict[str, tuple[str, str]]:
             destination = output / item["path"]
             write_checked(data, destination, expected)
             result[item["role"]] = (item["path"], expected)
-            print(f"{expected}  {destination}")
+            log_message(f"{expected}  {destination}")
     return result
 
 
@@ -1019,72 +1047,80 @@ def main() -> None:
     if args.jobs < 1:
         fail("jobs must be positive")
 
-    target_config = load_target(args.target)
-    platform = load_platform(target_config["platform"])
-    with (ROOT / "sources.lock.toml").open("rb") as stream:
-        sources = tomllib.load(stream)
-    target_directory = ROOT / "targets" / args.target
-    asset_lock_path = require_file(target_directory / target_config["assets_lock"])
-    release_manifest = load_release(args.target, target_config)
+    reporter = RunReporter.from_environment(f"build {args.target}", "build")
+    with report_stage(reporter, "configuration"):
+        target_config = load_target(args.target)
+        platform = load_platform(target_config["platform"])
+        with (ROOT / "sources.lock.toml").open("rb") as stream:
+            sources = tomllib.load(stream)
+        target_directory = ROOT / "targets" / args.target
+        asset_lock_path = require_file(target_directory / target_config["assets_lock"])
+        release_manifest = load_release(args.target, target_config)
 
-    work = OUTPUT / args.target / "work"
-    work.mkdir(parents=True, exist_ok=True)
-    CACHE.mkdir(parents=True, exist_ok=True)
-    linux_source, linux_recipe = prepare_linux(
-        sources,
-        args.target,
-        target_config,
-        platform,
-    )
+        work = OUTPUT / args.target / "work"
+        work.mkdir(parents=True, exist_ok=True)
+        CACHE.mkdir(parents=True, exist_ok=True)
 
-    rootfs, cross = build_rootfs(
-        args.target,
-        target_config,
-        platform,
-        work / "buildroot",
-        args.jobs,
-    )
+    with report_stage(reporter, "prepare-linux"):
+        linux_source, linux_recipe = prepare_linux(
+            sources,
+            args.target,
+            target_config,
+            platform,
+        )
+
+    with report_stage(reporter, "buildroot"):
+        rootfs, cross = build_rootfs(
+            args.target,
+            target_config,
+            platform,
+            work / "buildroot",
+            args.jobs,
+        )
     kernel_output = work / f"kernel-{linux_recipe[:16]}"
-    zimage, dtb = build_kernel(
-        args.target,
-        target_config,
-        platform,
-        linux_source,
-        kernel_output,
-        cross,
-        rootfs,
-        args.jobs,
-    )
-    ramboot, ramboot_map = build_bootstrap(
-        sources,
-        args.target,
-        target_config,
-        platform,
-        work,
-        zimage,
-        dtb,
-    )
-    asset_outputs = build_assets(asset_lock_path, work / "assets")
-    host_tools = build_host_tools(sources, platform, work)
-    release = publish_bundle(
-        args.target,
-        target_config,
-        platform,
-        release_manifest,
-        work,
-        rootfs,
-        kernel_output,
-        zimage,
-        dtb,
-        ramboot,
-        ramboot_map,
-        asset_lock_path,
-        asset_outputs,
-        host_tools,
-    )
-    print(f"FPLinux build complete: {release}")
-    print(f"ramboot.bin SHA256: {sha256_file(release / release_manifest['image'])}")
+    with report_stage(reporter, "kernel"):
+        zimage, dtb = build_kernel(
+            args.target,
+            target_config,
+            platform,
+            linux_source,
+            kernel_output,
+            cross,
+            rootfs,
+            args.jobs,
+        )
+    with report_stage(reporter, "bootstrap"):
+        ramboot, ramboot_map = build_bootstrap(
+            sources,
+            args.target,
+            target_config,
+            platform,
+            work,
+            zimage,
+            dtb,
+        )
+    with report_stage(reporter, "assets"):
+        asset_outputs = build_assets(asset_lock_path, work / "assets")
+    with report_stage(reporter, "host-tools"):
+        host_tools = build_host_tools(sources, platform, work)
+    with report_stage(reporter, "publish"):
+        publish_bundle(
+            args.target,
+            target_config,
+            platform,
+            release_manifest,
+            work,
+            rootfs,
+            kernel_output,
+            zimage,
+            dtb,
+            ramboot,
+            ramboot_map,
+            asset_lock_path,
+            asset_outputs,
+            host_tools,
+        )
 
 
 if __name__ == "__main__":
-    main()
+    run_entrypoint(main)
