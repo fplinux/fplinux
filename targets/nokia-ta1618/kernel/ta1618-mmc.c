@@ -2749,8 +2749,6 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 	terminal_cleanup_hold = host->terminal_cleanup_hold;
 	spin_unlock_irqrestore(&host->lock, flags);
 
-	len += sysfs_emit_at(buf, len,
-			     "schema=fplinux.ta1618-sd-perf-4bit-audit/v4\n");
 	len += sysfs_emit_at(
 		buf, len,
 		"profile=sd-perf-4bit identification_width=1 read_only=0 caps_4bit=1 caps_highspeed=1 caps_uhs=0 caps_cmd23=0 caps_8bit=0 voltage_switch=0 tuning=0\n");
