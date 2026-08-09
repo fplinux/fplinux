@@ -25,4 +25,26 @@ try {
   };
 }
 
-export default conventional;
+const SCOPES = [
+  "bootstrap",
+  "build",
+  "cli",
+  "console",
+  "deps",
+  "input",
+  "nokia-ta1618",
+  "quality",
+  "release",
+  "repo",
+  "rootfs",
+  "ums9117",
+];
+
+export default {
+  ...conventional,
+  rules: {
+    ...conventional.rules,
+    "scope-empty": [2, "never"],
+    "scope-enum": [2, "always", SCOPES],
+  },
+};

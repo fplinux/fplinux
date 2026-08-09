@@ -8,7 +8,7 @@ import os
 
 from .commands import build, package_target, run_target
 from .config import discover_targets
-from .container import check, doctor, setup
+from .container import check, check_commit_message, doctor, setup
 
 
 def main() -> None:
@@ -19,6 +19,8 @@ def main() -> None:
     commands.add_parser("check", help="run the source quality gate")
     setup_parser = commands.add_parser("setup", help="build the pinned OCI environment")
     setup_parser.add_argument("--force", action="store_true")
+    commit_message_parser = commands.add_parser("_commit-msg", help=argparse.SUPPRESS)
+    commit_message_parser.add_argument("message_file")
     build_parser = commands.add_parser("build", help="build a target in .cache/out")
     build_parser.add_argument("target", choices=targets)
     build_parser.add_argument("--jobs", type=int, default=max(1, os.cpu_count() or 1))
@@ -41,6 +43,8 @@ def main() -> None:
         check()
     elif args.command == "setup":
         setup(force=args.force)
+    elif args.command == "_commit-msg":
+        check_commit_message(args.message_file)
     elif args.command == "build":
         build(args.target, args.jobs)
     elif args.command == "package":
