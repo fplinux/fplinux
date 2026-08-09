@@ -47,7 +47,26 @@
 			compatible = "fplinux,ta1618-fb";
 			reg = <0x83f00000 0x00100000>,
 			      <0x20800000 0x00001000>,
-			      <0x70b00000 0x00001000>;
+			      <0x70b00000 0x00001000>,
+			      <0x40600000 0x00000400>,
+			      <0x40608000 0x00001000>,
+			      <0x20a00000 0x00001000>,
+			      <0x21500054 0x00000004>,
+			      <0x71301004 0x00000004>,
+			      <0x71302004 0x00000004>,
+			      <0x20e01000 0x00000004>,
+			      <0x20e01004 0x00000004>,
+			      <0x20e02004 0x00000004>,
+			      <0x402a00b0 0x0000001c>,
+			      <0x402a04b0 0x0000001c>;
+			reg-names = "framebuffer", "lcdc", "spi", "adi-controller",
+				    "analog-slave", "lcm", "spi-clock-selector",
+				    "spi-reset-set", "spi-reset-clear", "ap-ahb-gate-set",
+				    "ap-ahb-reset-set", "ap-ahb-reset-clear", "pinmux",
+				    "pinconf";
+			interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "lcdc-done";
+			sprd,aon-apb = <&aon_apb>;
 		};
 
 		mmc@20e00000 {

@@ -18,7 +18,11 @@
 The current source builds a volatile-RAM Linux image with a `240×320` portrait
 framebuffer, physical-keypad local shell and separate Linux USB shell. Boot,
 initramfs, timers, interrupts, display, keypad and bidirectional USB console
-operation are validated on physical TA-1618 hardware. The current portrait
+operation are validated on physical TA-1618 hardware. Display updates are
+damage-driven and complete through the LCDC interrupt: a settled framebuffer
+causes no transfers, while active full-screen drawing reaches 46.7 frames per
+second without visible tearing. Measured 4 MiB transfer rates with a static
+display are 753 KiB/s for upload and 1.40 MiB/s for pull. The current portrait
 terminal closure has not completed its exact phone-side release gate.
 
 `releases.lock.toml` contains no qualified `nokia-ta1618` runtime closure, so no
@@ -93,7 +97,7 @@ that the stated limitation or current qualification gap still applies.
 | CPU                               | Supported     | The SoC has a single Cortex-A7 core, so SMP does not apply         |
 | Interrupt controller              | Supported     | ARM GIC with working timer and USB interrupts                      |
 | System timers                     | Supported     | UMS9117 system counter and Pike2 timer                             |
-| Display                           | Supported     | 240×320 RGB565 portrait at 46.7 frames a second, free of tearing   |
+| Display                           | Supported     | Damage-driven RGB565; up to 46.7 frames/s without visible tearing  |
 | Physical keypad                   | Supported     | Polled matrix plus separate physical 8 key through analog EIC9/ADI |
 | USB device mode                   | Supported     | MUSB peripheral mode with `g_serial` at USB ID `0525:a4a6`         |
 | USB host mode                     | Not supported | The phone target enables peripheral mode only                      |
@@ -105,7 +109,7 @@ that the stated limitation or current qualification gap still applies.
 | Battery and charging              | Not supported | Power-supply hardware is not described                             |
 | Suspend and power management      | Not supported | Kernel suspend support is disabled                                 |
 | Camera                            | Not supported | No camera pipeline or sensor driver is included                    |
-| LEDs and vibration motor          | Not supported | Not described by the current target                                |
+| Indicator LEDs and vibrator       | Not supported | WLED backlight works; no indicator LED or vibrator driver exists   |
 
 ## Drivers
 
@@ -116,7 +120,9 @@ CONFIG_ARCH_UMS9117=y
 CONFIG_MACH_NOKIA_TA1618=y
 CONFIG_MFD_SYSCON=y
 CONFIG_KEYBOARD_TA1618=y
+CONFIG_FB=y
 CONFIG_FB_TA1618=y
+CONFIG_FRAMEBUFFER_CONSOLE=y
 CONFIG_USB_MUSB_UMS9117=y
 CONFIG_USB_G_SERIAL=y
 ```
@@ -128,6 +134,28 @@ terminal contains no TA-1618 register or scan-code logic. The target bootstrap
 uses the shared freestanding
 [boot-screen renderer](../../bootstrap/fplinux-boot-screen/) while retaining its
 panel adapter, hardware stages and handoff diagnostics locally.
+
+## Framebuffer update contract
+
+The framebuffer exposes two contiguous `240×320` RGB565 pages. Each row is 480
+bytes, each page is 153600 bytes, and the complete mapping is 307200 bytes. The
+front page starts at byte 0 and the back page at byte 153600; select them with
+`yoffset` 0 and 320 respectively. The page boundary is not aligned to the
+kernel's 4096-byte pages, so map the complete region and address the back page as
+`mapping + 153600` rather than trying to map it at that file offset.
+
+Framebuffer writes and drawing operations used by fbcon report damage directly.
+An application that writes through `mmap()` must publish each completed batch
+itself: stop changing the submitted bytes, execute an architecture-appropriate
+full memory barrier, then issue `FBIOPAN_DISPLAY`. The ioctl is required even
+when `yoffset` remains unchanged. A direct mapped write without that notification
+is intentionally silent and does not wake the display pipeline.
+
+`FBIOPAN_DISPLAY` reports selection and damage; it is not a completion fence.
+Updates may be coalesced, and the driver does not promise that every intermediate
+image reaches the panel. Applications that require stable animation frames must
+keep a submitted buffer unchanged while it can still be snapshotted and use two
+fully populated pages. The second page starts with unspecified contents.
 
 ## Build from source
 
@@ -211,12 +239,12 @@ libusb 1.0, libudev, GNU `stdbuf` and USB permissions for `1782:4d00` and
 
 ## Phone-specific nuances
 
-- The bootstrap configures the ST7789P3 panel for `240×320` portrait output and
-  prepares the display state inherited by Linux. The framebuffer driver does not
-  perform complete cold initialization of every display clock, reset and
-  regulator. It does set two panel registers of its own: the tearing signal that
-  paces the frames, and the line period that keeps the panel scan slower than a
-  frame takes to send.
+- The Linux framebuffer driver configures the display pins, SPI1 and LCDC clocks
+  and resets, resets the ST7789P3, sends the complete panel initialization
+  sequence and brings up WLED. Linux initializes the display independently of
+  the bootstrap. Blank and unblank quiesce the LCDC pipeline, use DCS Display
+  Off/On and Sleep In/Out, and restore WLED only after a full wake frame reaches
+  `LCDC_DONE`.
 - Each frame starts on the panel's tearing signal and takes 10.5 ms of link time
   at 88 MHz. The panel is held at 46.7 Hz so that one frame lands inside one pass
   of its scan, which is what removes tearing rather than merely hiding it.
