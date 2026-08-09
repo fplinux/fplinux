@@ -33,8 +33,8 @@ from .workspace import stage_workspace
 
 CANDIDATE_NOTICE = b"""HARDWARE QUALIFICATION CANDIDATE - DO NOT PUBLISH
 
-This archive is for physical device qualification only.
-Its runtime closure is not recorded as a release.
+This archive is for physical device qualification and testing only.
+Candidate packaging does not assert release qualification.
 """
 
 PACKAGE_DOCUMENTS = {
@@ -204,6 +204,7 @@ def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]
     manifest = load_release(target, config)
     image = manifest["image"]
     bundle_files = manifest["bundle_files"]
+    runtime_files = manifest["runtime_files"]
     documents = manifest["documents"]
     archive_names = set(bundle_files)
     for relative in documents:
@@ -211,19 +212,25 @@ def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]
         if archive_name in archive_names:
             fail(f"duplicate release archive path: {archive_name}")
         archive_names.add(archive_name)
-    if image not in bundle_files:
-        fail("release manifest image must be a bundle file")
 
     platform = load_platform(config["platform"])
     executables = {
         "runner/run.py",
         *(f"host/{tool['name']}" for tool in platform["host"]["tools"]),
     }
-    if not executables.issubset(bundle_files):
-        fail("fixed platform executables must be release bundle files")
+    required_runtime = {
+        image,
+        "runtime-manifest.json",
+        "runner/platform_adapter.py",
+        *config["runtime"]["assets"].values(),
+        *executables,
+    }
+    if not required_runtime.issubset(runtime_files):
+        fail("release runtime files omit required runtime inputs")
     return {
         "image": image,
         "bundle_files": bundle_files,
+        "runtime_files": runtime_files,
         "documents": documents,
         "executables": executables,
     }
@@ -286,9 +293,10 @@ def package_target(target: str, *, candidate: bool = False) -> None:
         if manifest["files"].get(relative) != sha256_bytes(data):
             fail(f"release input differs from its successful build manifest: {source}")
         files[relative] = data
-    files["BUILD-MANIFEST.json"] = manifest_path.read_bytes()
 
-    runtime_digest = payload_digest(files, release["executables"])
+    runtime_payload = {relative: files[relative] for relative in release["runtime_files"]}
+    runtime_digest = payload_digest(runtime_payload, release["executables"])
+    files["BUILD-MANIFEST.json"] = manifest_path.read_bytes()
     verified_digest = verified_runtime_digest(target)
     if not candidate and verified_digest != runtime_digest:
         fail(

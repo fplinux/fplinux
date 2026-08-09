@@ -27,13 +27,14 @@ The candidate is written to:
 ```
 
 Every candidate contains a generated `CANDIDATE-NOTICE.txt` whose first line is
-`HARDWARE QUALIFICATION CANDIDATE - DO NOT PUBLISH`. The notice is included in
-`SHA256SUMS` and in the complete package-content digest. The package command
-verifies that every runtime file matches the successful build manifest and that
-the manifest belongs to the current source workspace.
+`HARDWARE QUALIFICATION CANDIDATE - DO NOT PUBLISH`. The candidate notice is
+included in `SHA256SUMS` and in the complete package-content digest. The package
+command verifies that every generated bundle input matches the successful build
+manifest and that the manifest belongs to the current source workspace and
+container recipe.
 
-After that exact candidate completes the phone gate, add the printed **runtime
-closure** SHA-256 to `releases.lock.toml` and run:
+After the candidate's exact **runtime closure** completes the phone gate, add its
+printed SHA-256 to `releases.lock.toml` and run:
 
 ```sh
 ./fplinux package nokia-ta1618
@@ -85,11 +86,15 @@ Candidate archives additionally contain the generated
 `CANDIDATE-NOTICE.txt`. It is package metadata, not part of the runtime closure;
 release archives omit it.
 
-The target's `fplinux.release/v1` manifest is data-only. `bundle_files` names
-generated bundle inputs and `documents` names target release documents. The
-executable roles are not target-defined: packaging derives the shared runner
-and typed host tools from the selected platform and applies their fixed modes.
-The platform adapter remains data-verified code at its fixed bundle path.
+The target's `fplinux.release/v2` manifest is data-only. `bundle_files` names all
+generated inputs that packaging verifies and includes. `runtime_files` selects the
+subset whose bytes and executable modes form the hardware-qualified runtime
+digest. `documents` names target release documents. `BUILD-MANIFEST.json`, asset
+provenance, target documentation and fixed legal notices are archive inputs
+outside the qualified runtime subset. Hardware qualification is the digest of
+`runtime_files` only. Executable roles are not target-defined: packaging derives
+the shared runner and typed host tools from the selected platform and requires
+every executable, runtime asset, adapter and runtime manifest in `runtime_files`.
 Project-level license documents are added by the fixed packager.
 
 Only the files selected by the fixed packager and the target's data-only
@@ -222,9 +227,11 @@ only for a new power-off BootROM load.
 
 A release archive must use a runtime closure listed in `releases.lock.toml` and
 completed on that exact phone variant. The closure digest covers the image, host
-binaries, shared runner, fixed platform adapter, assets and successful-build
-manifest. That manifest binds the package to the immutable selected-target
-workspace receipt. Distribute the corresponding source with the binary ZIP.
+binaries, shared runner, fixed platform adapter, assets and runtime manifest. The
+image's build stamp binds the runtime to the selected-target workspace and
+container recipe. Packaging separately checks every generated bundle file against
+the successful-build manifest. Distribute the corresponding source with the
+binary ZIP.
 
 The archive must also include the notices declared by the fixed packager,
 including the complete musl copyright and permission notice.

@@ -16,7 +16,7 @@ TARGET_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
 VALUE_NAME = re.compile(r"[A-Za-z0-9._-]+")
 TARGET_SCHEMA = "fplinux.target/v1"
 PLATFORM_SCHEMA = "fplinux.platform/v1"
-RELEASE_SCHEMA = "fplinux.release/v1"
+RELEASE_SCHEMA = "fplinux.release/v2"
 
 
 def exact_table(value: object, keys: set[str], name: str) -> dict[str, Any]:
@@ -250,20 +250,24 @@ def load_release(target: str, config: dict[str, Any]) -> dict[str, Any]:
         raw = tomllib.load(stream)
     manifest = exact_table(
         raw,
-        {"schema", "image", "bundle_files", "documents"},
+        {"schema", "image", "bundle_files", "runtime_files", "documents"},
         f"target {target} release manifest",
     )
     if manifest.get("schema") != RELEASE_SCHEMA:
         fail(f"release manifest schema must be {RELEASE_SCHEMA}: {path}")
     image = relative_value(manifest.get("image"), "release manifest image")
     bundle_files = path_array(manifest.get("bundle_files"), "release bundle_files")
+    runtime_files = path_array(manifest.get("runtime_files"), "release runtime_files")
     documents = path_array(manifest.get("documents"), "release documents")
-    if image not in bundle_files:
-        fail("release manifest image must be a bundle file")
+    if image not in runtime_files:
+        fail("release manifest image must be a runtime file")
+    if not set(runtime_files).issubset(bundle_files):
+        fail("release runtime files must be bundle files")
     return {
         "schema": RELEASE_SCHEMA,
         "image": image,
         "bundle_files": bundle_files,
+        "runtime_files": runtime_files,
         "documents": documents,
     }
 

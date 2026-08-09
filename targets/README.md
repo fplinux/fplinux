@@ -36,8 +36,8 @@ shared `scripts/fplinux_cli/builder.py`, and RAM execution starts in
 3. Add only the board-specific DTS, drivers, bootstrap and rootfs pieces required
    by that phone. Keep SoC-wide code in `platforms/<soc>/`.
 4. Describe downloaded assets with a generic `fplinux.assets/v1` lock. Describe
-   package `bundle_files` and `documents` with a data-only
-   `fplinux.release/v1` manifest.
+   package `bundle_files`, hardware-qualified `runtime_files` and `documents` with
+   a data-only `fplinux.release/v2` manifest.
 5. Do not copy another target's `build.py`, runner or launcher. The root
    dispatcher auto-discovers normalized target directories containing
    `target.toml` and invokes the shared builder and runner contracts.
