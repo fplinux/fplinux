@@ -152,7 +152,6 @@ out:
 
 static int ta1618_hwdiag_show(struct seq_file *m, void *unused)
 {
-	seq_puts(m, "schema=fplinux.ta1618-hwdiag/v1\n");
 	seq_printf(m, "boot.valid=%u\n", boot_diag_valid);
 	if (!boot_diag_valid)
 		return 0;
