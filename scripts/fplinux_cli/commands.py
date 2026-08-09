@@ -42,6 +42,42 @@ PACKAGE_DOCUMENTS = {
 }
 
 
+def _console_client(target: str, config: dict[str, Any] | None = None) -> Path:
+    if config is None:
+        config = load_target(target)
+    client: Path = ROOT / ".cache/out" / target / config["profile"] / "host/fplinux-usb-console"
+    if client.is_symlink() or not client.is_file():
+        fail(f"build the target first: ./fplinux build {target}")
+    return client
+
+
+def _console_connection(config: dict[str, Any]) -> list[str]:
+    console = config["runtime"]["usb"]["linux_console"]
+    return [
+        "--vid",
+        f"{console['vendor_id']:04x}",
+        "--pid",
+        f"{console['product_id']:04x}",
+        "--wait",
+        str(console["wait_seconds"]),
+    ]
+
+
+def console_target(target: str, *, keyboard: str | None) -> None:
+    """Run the built target's USB console client."""
+    config = load_target(target)
+    client = _console_client(target, config)
+    arguments = [
+        str(client),
+        *_console_connection(config),
+        "--interface",
+        "1" if keyboard is not None else "0",
+    ]
+    if keyboard is not None:
+        arguments.extend(["--keyboard", keyboard])
+    os.execv(client, arguments)
+
+
 def build(target: str, jobs: int) -> None:
     if jobs < 1:
         fail("--jobs must be positive")

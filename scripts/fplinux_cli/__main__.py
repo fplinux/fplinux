@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import os
 
-from .commands import build, package_target, run_target
+from .commands import build, console_target, package_target, run_target
 from .config import discover_targets
 from .container import check, check_commit_message, doctor, setup
 
@@ -35,6 +35,11 @@ def main() -> None:
     )
     run_parser = commands.add_parser("run", help="run a target's volatile-RAM loader")
     run_parser.add_argument("target", choices=targets)
+    console_parser = commands.add_parser(
+        "console", help="connect to a running target over USB"
+    )
+    console_parser.add_argument("target", choices=targets)
+    console_parser.add_argument("--keyboard", metavar="EVDEV")
     args = parser.parse_args()
 
     if args.command == "doctor":
@@ -51,6 +56,8 @@ def main() -> None:
         package_target(args.target, candidate=args.candidate)
     elif args.command == "run":
         run_target(args.target)
+    elif args.command == "console":
+        console_target(args.target, keyboard=args.keyboard)
 
 
 if __name__ == "__main__":
