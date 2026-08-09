@@ -57,6 +57,11 @@ Build the current phone target:
 ./fplinux check
 ```
 
+The no-argument command runs the full gate. Use `./fplinux check --list` to see
+named scopes, or select several such as `./fplinux check docs spelling`. Check
+and build commands print compact stage status by default, retain full output
+under `.cache/logs/`, and accept `--verbose` when live tool output is needed.
+
 It checks Markdown, JSON, TOML, documentation, licensing metadata, Python,
 shell, Buildroot, container recipe and C sources in the pinned environment. The C passes use Clang `scan-build` for
 userspace and `sparse` with the target's real Linux tree, Kconfig and generated

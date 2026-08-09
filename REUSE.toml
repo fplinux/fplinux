@@ -9,6 +9,7 @@ path = [
   ".containerignore",
   ".editorconfig",
   ".gitattributes",
+  ".githooks/**",
   ".gitignore",
   ".markdownlint-cli2.jsonc",
   ".prettierignore",
@@ -36,6 +37,7 @@ path = [
   "scripts/**",
   "sources.lock.toml",
   "targets/**",
+  "tests/**",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 FPLinux contributors"

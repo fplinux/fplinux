@@ -27,6 +27,20 @@ The source-quality gate is optional for ordinary build and run use:
 ./fplinux check
 ```
 
+With no positional arguments, `check` runs the complete gate. List the available
+scopes or run a subset while working on one area:
+
+```sh
+./fplinux check --list
+./fplinux check python
+./fplinux check docs spelling
+```
+
+Multiple scopes form one deduplicated selection and always run in canonical
+order. The available scopes are `repository`, `source`, `container`, `metadata`,
+`docs`, `spelling`, `secrets`, `licenses`, `python`, `shell`, `buildroot`, `c`
+and `kernel`.
+
 Commit messages use `type(scope): subject`. The scope is mandatory and must be
 one of `bootstrap`, `build`, `cli`, `console`, `deps`, `input`, `nokia-ta1618`,
 `quality`, `release`, `repo`, `rootfs` or `ums9117`. Use the narrowest component
@@ -37,7 +51,7 @@ Git checkout. The hook validates each message in the pinned OCI environment
 before Git creates the commit. Source archives have no local Git configuration
 and skip hook setup.
 
-Run it when changing or reviewing source. `check` uses the same pinned OCI
+Run `check` when changing or reviewing source. It uses the same pinned OCI
 environment as the build. It runs Prettier and markdownlint-cli2 for Markdown,
 Prettier for JSON, Taplo for TOML, Vale and typos for prose, gitleaks for
 secrets, REUSE for licensing
@@ -53,6 +67,11 @@ under `.cache/`. After its pinned inputs are downloaded, the analysis runs
 without network access. If the OCI environment is missing or stale, `check`
 rebuilds the same image tag and removes the replaced image ID unless an existing
 container still references it.
+
+`check` prints one status per stage and keeps complete subprocess output below
+`.cache/logs/check/<run-id>/`. On failure it prints a bounded diagnostic tail and
+the exact log path. Add `--verbose` to stream the complete output while retaining
+the same logs.
 
 The first build creates the pinned OCI environment automatically. It can also be
 prepared explicitly:
@@ -84,6 +103,10 @@ Use `--jobs` to control parallel compilation:
 ./fplinux build nokia-ta1618 --jobs 8
 ```
 
+Build output follows the same compact stage format as `check`. Complete logs are
+stored below `.cache/logs/build/<target>/<run-id>/`; `--verbose` streams them to
+the terminal as well.
+
 The dispatcher auto-discovers `targets/<target>/target.toml`, validates the
 `fplinux.target/v1` data against the selected `platform.toml` and runs
 `scripts/fplinux_cli/builder.py` inside the one pinned OCI image. Targets do not
@@ -112,6 +135,8 @@ The shared builder performs four stages:
 ├── analysis/sparse/<target>/<recipe-config>/  sparse Kbuild output
 ├── downloads/                                pinned upstream downloads
 ├── linux/sources/<target>/                   current Linux integration tree
+├── logs/check/<run-id>/                      source-quality stage logs
+├── logs/build/<target>/<run-id>/             target build stage logs
 ├── quality-workspaces/<recipe>/              read-only source-quality input
 ├── workspaces/<recipe>/                      immutable target build input
 └── out/<target>/

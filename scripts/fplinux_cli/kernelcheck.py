@@ -11,6 +11,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ from typing import Any
 from .builder import (
     CACHE,
     prepare_linux,
+    report_stage,
     require_file,
     root_source,
     run,
@@ -31,6 +33,7 @@ from .config import (
     load_target,
     relative_value,
 )
+from .output import RunReporter, current_stage, exit_status, run_entrypoint
 
 
 def load_sources() -> dict[str, Any]:
@@ -129,15 +132,51 @@ def projected_sources(
     return result
 
 
+def record_text(text: str) -> None:
+    """Append captured diagnostics to the active stage or the terminal."""
+    stage = current_stage()
+    if stage is None:
+        print(text, end="")
+        return
+    stage.write(text.encode())
+
+
+def capture_text(command: list[str]) -> subprocess.CompletedProcess[str]:
+    """Capture a command for policy inspection while retaining reporter output."""
+    stage = current_stage()
+    if stage is None:
+        print("+", shlex.join(command), flush=True)
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        print(result.stdout, end="")
+        print(result.stderr, end="", file=sys.stderr)
+        return result
+    captured = stage.capture(command)
+    return subprocess.CompletedProcess(
+        captured.args,
+        captured.returncode,
+        captured.stdout.decode(errors="replace"),
+        captured.stderr.decode(errors="replace"),
+    )
+
+
 def run_checkpatch(command: list[str]) -> None:
     """Run one checkpatch pass and fail on any reported finding."""
-    print("+", shlex.join(command), flush=True)
-    report = subprocess.run(command, capture_output=True, text=True, check=False)
-    print(report.stdout, end="")
-    print(report.stderr, end="")
-    if report.returncode or "WARNING:" in report.stdout or "ERROR:" in report.stdout:
+    report = capture_text(command)
+    if report.returncode:
+        record_text(f"checkpatch exited {report.returncode}\n")
+        raise SystemExit(exit_status(report.returncode))
+    if "WARNING:" in report.stdout or "ERROR:" in report.stdout:
         message = "sparse failed: checkpatch reported findings"
         raise SystemExit(message)
+
+
+def run_dtbs_check(command: list[str], target: str) -> str:
+    """Run dtbs_check and return its combined diagnostic output."""
+    report = capture_text(command)
+    if report.returncode:
+        record_text(f"dtbs_check exited {report.returncode}: {target}\n")
+        raise SystemExit(exit_status(report.returncode))
+    return report.stdout + report.stderr
 
 
 def sparse_recipe_digest(
@@ -170,97 +209,101 @@ def target_context(
     return target_config, platform, source, recipe
 
 
-def prepare_contexts() -> None:
+def prepare_contexts(reporter: RunReporter | None) -> None:
     """Populate each target's current recipe-validated Linux source context."""
     sources = load_sources()
     for target in discover_targets():
-        _config, _platform, _source, recipe = target_context(sources, target)
-        print(f"sparse context: ready ({target}, {recipe[:16]})")
+        with report_stage(reporter, f"prepare-{target}"):
+            _config, _platform, _source, recipe = target_context(sources, target)
+            record_text(f"sparse context: ready ({target}, {recipe[:16]})\n")
 
 
-def check_contexts() -> None:
+def check_contexts(reporter: RunReporter | None) -> None:
     """Run sparse through Kbuild with target Kconfig and generated headers."""
     sources = load_sources()
     checked = 0
     for target in discover_targets():
-        target_config, platform, source, recipe = target_context(sources, target)
-        projected = projected_sources(target, target_config, platform)
-        style_files = [str(path) for path in projected if path.suffix in {".c", ".h"}]
-        run(
-            [
-                "clang-format",
-                f"--style=file:{require_file(source / '.clang-format')}",
-                "--dry-run",
-                "--Werror",
-                *style_files,
+        with report_stage(reporter, f"context-{target}"):
+            target_config, platform, source, recipe = target_context(sources, target)
+            projected = projected_sources(target, target_config, platform)
+            style_files = [str(path) for path in projected if path.suffix in {".c", ".h"}]
+            checkpatch = [
+                str(require_file(source / "scripts/checkpatch.pl")),
+                f"--root={source}",
+                "--terse",
             ]
-        )
-        # --root lets checkpatch resolve the fplinux compatibles against the
-        # projected DT bindings and vendor prefix in the prepared tree.
-        checkpatch = [
-            str(require_file(source / "scripts/checkpatch.pl")),
-            f"--root={source}",
-            "--terse",
-        ]
-        kconfig_files = [str(path) for path in projected if path.name == "Kconfig"]
-        run_checkpatch([*checkpatch, "-f", *style_files, *kconfig_files])
-        patch_files = [str(root_source(relative)) for relative in platform["linux"]["patches"]] + [
-            str(target_source(target, relative)) for relative in target_config["linux"]["patches"]
-        ]
-        if patch_files:
-            run_checkpatch([*checkpatch, *patch_files])
-        defconfig = require_file(target_source(target, target_config["linux"]["defconfig"]))
-        objects = sparse_targets(target, target_config, platform)
-        analysis_recipe = sparse_recipe_digest(platform, recipe, defconfig, objects)
-        output = CACHE / "analysis/sparse" / target / analysis_recipe
-        if output.is_symlink() or (output.exists() and not output.is_dir()):
-            raise SystemExit(f"sparse failed: invalid output path: {output}")
-        output.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(defconfig, output / ".config")
+            kconfig_files = [str(path) for path in projected if path.name == "Kconfig"]
+            patch_files = [
+                str(root_source(relative)) for relative in platform["linux"]["patches"]
+            ] + [
+                str(target_source(target, relative))
+                for relative in target_config["linux"]["patches"]
+            ]
+            defconfig = require_file(target_source(target, target_config["linux"]["defconfig"]))
+            objects = sparse_targets(target, target_config, platform)
+            analysis_recipe = sparse_recipe_digest(platform, recipe, defconfig, objects)
+            output = CACHE / "analysis/sparse" / target / analysis_recipe
+            if output.is_symlink() or (output.exists() and not output.is_dir()):
+                raise SystemExit(f"sparse failed: invalid output path: {output}")
+            output.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(defconfig, output / ".config")
+            kbuild = [
+                "make",
+                "-C",
+                str(source),
+                f"O={output}",
+                f"ARCH={platform['linux']['arch']}",
+                f"CROSS_COMPILE={platform['linux']['analysis_cross_compile']}",
+            ]
 
-        kbuild = [
-            "make",
-            "-C",
-            str(source),
-            f"O={output}",
-            f"ARCH={platform['linux']['arch']}",
-            f"CROSS_COMPILE={platform['linux']['analysis_cross_compile']}",
-        ]
-        run([*kbuild, "olddefconfig", "prepare"])
-        run([*kbuild, "savedefconfig"])
-        current = defconfig.read_text()
-        canonical = require_file(output / "defconfig").read_text()
-        if canonical != current:
-            print(
-                "".join(
-                    difflib.unified_diff(
-                        current.splitlines(keepends=True),
-                        canonical.splitlines(keepends=True),
-                        fromfile=str(defconfig),
-                        tofile="savedefconfig",
-                    )
-                ),
-                end="",
-            )
-            raise SystemExit(f"sparse failed: defconfig is not canonical: {defconfig}")
-        dtbs_command = [*kbuild, "W=1", "dtbs_check"]
-        print("+", shlex.join(dtbs_command), flush=True)
-        dtbs = subprocess.run(dtbs_command, capture_output=True, text=True, check=True)
-        print(dtbs.stdout, end="")
-        print(dtbs.stderr, end="")
-        combined = dtbs.stdout + dtbs.stderr
-        if "Warning" in combined or re.search(r"\.dtb: ", combined):
-            raise SystemExit(f"sparse failed: device tree findings: {target}")
-        for object_path in objects:
+        with report_stage(reporter, f"format-{target}"):
             run(
                 [
-                    *kbuild,
-                    "C=2",
-                    "CHECK=sparse",
-                    "CF=-D__CHECK_ENDIAN__ -Wsparse-error",
-                    object_path,
+                    "clang-format",
+                    f"--style=file:{require_file(source / '.clang-format')}",
+                    "--dry-run",
+                    "--Werror",
+                    *style_files,
                 ]
             )
+        with report_stage(reporter, f"checkpatch-{target}"):
+            # --root resolves the fplinux compatibles against projected bindings.
+            run_checkpatch([*checkpatch, "-f", *style_files, *kconfig_files])
+            if patch_files:
+                run_checkpatch([*checkpatch, *patch_files])
+        with report_stage(reporter, f"kconfig-{target}"):
+            run([*kbuild, "olddefconfig", "prepare"])
+            run([*kbuild, "savedefconfig"])
+            current = defconfig.read_text()
+            canonical = require_file(output / "defconfig").read_text()
+            if canonical != current:
+                record_text(
+                    "".join(
+                        difflib.unified_diff(
+                            current.splitlines(keepends=True),
+                            canonical.splitlines(keepends=True),
+                            fromfile=str(defconfig),
+                            tofile="savedefconfig",
+                        )
+                    )
+                )
+                raise SystemExit(f"sparse failed: defconfig is not canonical: {defconfig}")
+        with report_stage(reporter, f"device-tree-{target}"):
+            dtbs_command = [*kbuild, "W=1", "dtbs_check"]
+            combined = run_dtbs_check(dtbs_command, target)
+            if "Warning" in combined or re.search(r"\.dtb: ", combined):
+                raise SystemExit(f"sparse failed: device tree findings: {target}")
+        with report_stage(reporter, f"sparse-{target}"):
+            for object_path in objects:
+                run(
+                    [
+                        *kbuild,
+                        "C=2",
+                        "CHECK=sparse",
+                        "CF=-D__CHECK_ENDIAN__ -Wsparse-error",
+                        object_path,
+                    ]
+                )
         checked += len(objects)
         print(f"sparse: OK ({target}, {len(objects)} kernel C objects)")
     print(f"sparse: OK ({checked} kernel C objects total)")
@@ -271,11 +314,12 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("phase", choices=("prepare", "check"))
     args = parser.parse_args()
+    reporter = RunReporter.from_environment("check", f"kernel-{args.phase}")
     if args.phase == "prepare":
-        prepare_contexts()
+        prepare_contexts(reporter)
     else:
-        check_contexts()
+        check_contexts(reporter)
 
 
 if __name__ == "__main__":
-    main()
+    run_entrypoint(main)

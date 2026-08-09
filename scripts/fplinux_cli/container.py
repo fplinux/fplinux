@@ -11,8 +11,25 @@ from pathlib import Path
 
 from .common import ROOT, fail, run
 from .config import container_recipe_digest, load_container_lock
+from .output import RunReporter
 from .workspace import stage_quality_workspace
 
+CHECK_SCOPES = (
+    "repository",
+    "source",
+    "container",
+    "metadata",
+    "docs",
+    "spelling",
+    "secrets",
+    "licenses",
+    "python",
+    "shell",
+    "buildroot",
+    "c",
+    "kernel",
+)
+SOURCE_CHECK_SCOPES = CHECK_SCOPES[1:-1]
 GIT_HOOKS_PATH = ".githooks"
 
 
@@ -105,7 +122,7 @@ def install_git_hooks() -> None:
     print(f"Git hooks are ready: {GIT_HOOKS_PATH}")
 
 
-def setup(*, force: bool = False) -> None:
+def setup(*, force: bool = False, reporter: RunReporter | None = None) -> None:
     podman = require_podman()
     lock = load_container_lock()
     oci = lock["oci"]
@@ -115,31 +132,34 @@ def setup(*, force: bool = False) -> None:
         print(f"Build image is ready: {oci['image']}")
         return
     previous_image = image_identifier(podman, oci["image"])
-    run(
-        [
-            podman,
-            "build",
-            "--platform",
-            oci["platform"],
-            "--tag",
-            oci["image"],
-            "--file",
-            str(ROOT / "Containerfile"),
-            "--build-arg",
-            f"BASE_IMAGE={oci['base']}",
-            "--build-arg",
-            f"DEBIAN_SNAPSHOT={oci['debian_snapshot']}",
-            "--build-arg",
-            f"BUILDROOT_VERSION={buildroot['version']}",
-            "--build-arg",
-            f"BUILDROOT_URL={buildroot['url']}",
-            "--build-arg",
-            f"BUILDROOT_SHA256={buildroot['sha256']}",
-            "--label",
-            f"org.fplinux.build.recipe={container_recipe_digest()}",
-            str(ROOT),
-        ]
-    )
+    command = [
+        podman,
+        "build",
+        "--platform",
+        oci["platform"],
+        "--tag",
+        oci["image"],
+        "--file",
+        str(ROOT / "Containerfile"),
+        "--build-arg",
+        f"BASE_IMAGE={oci['base']}",
+        "--build-arg",
+        f"DEBIAN_SNAPSHOT={oci['debian_snapshot']}",
+        "--build-arg",
+        f"BUILDROOT_VERSION={buildroot['version']}",
+        "--build-arg",
+        f"BUILDROOT_URL={buildroot['url']}",
+        "--build-arg",
+        f"BUILDROOT_SHA256={buildroot['sha256']}",
+        "--label",
+        f"org.fplinux.build.recipe={container_recipe_digest()}",
+        str(ROOT),
+    ]
+    if reporter is None:
+        run(command)
+    else:
+        with reporter.stage("container-setup") as stage:
+            stage.run(command)
     current_image = image_identifier(podman, oci["image"])
     if (
         previous_image is not None
@@ -201,7 +221,7 @@ def doctor() -> None:
     print("doctor: OK")
 
 
-def check_git_diff() -> None:
+def check_git_diff(reporter: RunReporter) -> None:
     head = subprocess.run(
         ["git", "rev-parse", "--verify", "HEAD"],
         cwd=ROOT,
@@ -210,8 +230,8 @@ def check_git_diff() -> None:
         check=False,
     )
     if head.returncode == 0:
-        print("+ git diff --check HEAD --", flush=True)
-        subprocess.run(["git", "diff", "--check", "HEAD", "--"], cwd=ROOT, check=True)
+        with reporter.stage("git-diff") as stage:
+            stage.run(["git", "diff", "--check", "HEAD", "--"], cwd=ROOT)
 
 
 def check_commit_message(message_file: str) -> None:
@@ -258,100 +278,165 @@ def check_commit_message(message_file: str) -> None:
         raise SystemExit(result.returncode)
 
 
-def check() -> None:
-    check_git_diff()
+def resolve_check_scopes(scopes: list[str]) -> tuple[str, ...]:
+    """Validate, deduplicate and canonicalize a check selection."""
+    requested = set(scopes)
+    unknown = requested.difference(CHECK_SCOPES)
+    if unknown:
+        fail(f"unknown check scope: {', '.join(sorted(unknown))}")
+    return tuple(scope for scope in CHECK_SCOPES if not scopes or scope in requested)
+
+
+def analyzer_cache_names(scopes: tuple[str, ...]) -> tuple[str, ...]:
+    """Return analyzer caches required by the selected scopes."""
+    required: set[str] = set()
+    if "c" in scopes:
+        required.add("analysis")
+    if "kernel" in scopes:
+        required.update(("analysis", "downloads", "linux"))
+    return tuple(name for name in ("analysis", "downloads", "linux") if name in required)
+
+
+def check(scopes: list[str], *, verbose: bool = False) -> None:
+    selected = resolve_check_scopes(scopes)
+
+    reporter = RunReporter.create("check", target=None, verbose=verbose)
+    if "repository" in selected:
+        check_git_diff(reporter)
+
     podman = require_podman()
     lock = load_container_lock()["oci"]
     if not image_ready(podman, lock["image"]):
-        setup()
+        setup(reporter=reporter)
 
     cache = ROOT / ".cache"
-    analyzer_cache = {}
-    for name in ("analysis", "downloads", "linux"):
+    analyzer_cache: dict[str, Path] = {}
+    for name in analyzer_cache_names(selected):
         source = cache / name
         if source.is_symlink() or (source.exists() and not source.is_dir()):
             fail(f"invalid analyzer cache path: {source}")
         source.mkdir(parents=True, exist_ok=True)
         analyzer_cache[name] = source
 
-    workspace = stage_quality_workspace()
-    scan_recipe = f"{container_recipe_digest()}-{workspace.name}"
-    run(
-        [
+    with reporter.stage("workspace"):
+        workspace = stage_quality_workspace(enforce_source_policy="source" in selected)
+
+    log_environment = reporter.container_environment("/logs")
+    log_arguments = [
+        argument
+        for key, value in log_environment.items()
+        for argument in ("--env", f"{key}={value}")
+    ]
+    log_mount = ["--volume", f"{reporter.root}:/logs:rw,Z"]
+    source_scopes = [scope for scope in selected if scope in SOURCE_CHECK_SCOPES]
+    if source_scopes:
+        analysis_arguments: list[str] = []
+        if "c" in source_scopes:
+            scan_recipe = f"{container_recipe_digest()}-{workspace.name}"
+            analysis_arguments = [
+                "--volume",
+                f"{analyzer_cache['analysis']}:/cache/analysis:rw,Z",
+                "--env",
+                f"FPLINUX_SCAN_BUILD_DIR=/cache/analysis/scan-build/{scan_recipe}",
+            ]
+        with reporter.stage(
+            "source-quality",
+            passthrough=True,
+            show_tail=False,
+        ) as stage:
+            stage.run(
+                [
+                    podman,
+                    "run",
+                    "--rm",
+                    "--platform",
+                    lock["platform"],
+                    "--userns=keep-id",
+                    "--network=none",
+                    "--read-only",
+                    "--tmpfs",
+                    "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs.
+                    "--volume",
+                    f"{workspace}:/workspace:ro,Z",
+                    *analysis_arguments,
+                    *log_mount,
+                    *log_arguments,
+                    "--env",
+                    "HOME=/tmp",
+                    "--env",
+                    "PYTHONPATH=/workspace/scripts",
+                    "--env",
+                    "RUFF_CACHE_DIR=/tmp/ruff",
+                    "--env",
+                    "PYTHONDONTWRITEBYTECODE=1",
+                    lock["image"],
+                    "python3",
+                    "/workspace/scripts/check.py",
+                    *source_scopes,
+                ]
+            )
+
+    if "kernel" in selected:
+        analyzer_runtime = [
             podman,
             "run",
             "--rm",
             "--platform",
             lock["platform"],
             "--userns=keep-id",
-            "--network=none",
+        ]
+        analyzer_program = [
             "--read-only",
             "--tmpfs",
-            "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs, not a host path.
+            "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs.
             "--volume",
             f"{workspace}:/workspace:ro,Z",
-            "--volume",
-            f"{analyzer_cache['analysis']}:/cache/analysis:rw,Z",
-            "--env",
-            f"FPLINUX_SCAN_BUILD_DIR=/cache/analysis/scan-build/{scan_recipe}",
+            *log_mount,
+            *log_arguments,
             "--env",
             "HOME=/tmp",
             "--env",
-            "RUFF_CACHE_DIR=/tmp/ruff",
+            "PYTHONPATH=/workspace/scripts",
             "--env",
             "PYTHONDONTWRITEBYTECODE=1",
             lock["image"],
             "python3",
-            "/workspace/scripts/check.py",
+            "-m",
+            "fplinux_cli.kernelcheck",
         ]
-    )
+        with reporter.stage(
+            "kernel-prepare",
+            passthrough=True,
+            show_tail=False,
+        ) as stage:
+            stage.run(
+                [
+                    *analyzer_runtime,
+                    "--volume",
+                    f"{analyzer_cache['downloads']}:/cache/downloads:rw,Z",
+                    "--volume",
+                    f"{analyzer_cache['linux']}:/cache/linux:rw,Z",
+                    *analyzer_program,
+                    "prepare",
+                ]
+            )
+        with reporter.stage(
+            "kernel-analysis",
+            passthrough=True,
+            show_tail=False,
+        ) as stage:
+            stage.run(
+                [
+                    *analyzer_runtime,
+                    "--network=none",
+                    "--volume",
+                    f"{analyzer_cache['analysis']}:/cache/analysis:rw,Z",
+                    "--volume",
+                    f"{analyzer_cache['linux']}:/cache/linux:ro,Z",
+                    *analyzer_program,
+                    "check",
+                ]
+            )
 
-    analyzer_runtime = [
-        podman,
-        "run",
-        "--rm",
-        "--platform",
-        lock["platform"],
-        "--userns=keep-id",
-    ]
-    analyzer_program = [
-        "--read-only",
-        "--tmpfs",
-        "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs, not a host path.
-        "--volume",
-        f"{workspace}:/workspace:ro,Z",
-        "--env",
-        "HOME=/tmp",
-        "--env",
-        "PYTHONPATH=/workspace/scripts",
-        "--env",
-        "PYTHONDONTWRITEBYTECODE=1",
-        lock["image"],
-        "python3",
-        "-m",
-        "fplinux_cli.kernelcheck",
-    ]
-    run(
-        [
-            *analyzer_runtime,
-            "--volume",
-            f"{analyzer_cache['downloads']}:/cache/downloads:rw,Z",
-            "--volume",
-            f"{analyzer_cache['linux']}:/cache/linux:rw,Z",
-            *analyzer_program,
-            "prepare",
-        ]
-    )
-    run(
-        [
-            *analyzer_runtime,
-            "--network=none",
-            "--volume",
-            f"{analyzer_cache['analysis']}:/cache/analysis:rw,Z",
-            "--volume",
-            f"{analyzer_cache['linux']}:/cache/linux:ro,Z",
-            *analyzer_program,
-            "check",
-        ]
-    )
     print("check: OK")
+    reporter.finish()

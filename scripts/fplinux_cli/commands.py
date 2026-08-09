@@ -16,7 +16,6 @@ from .common import (
     ZIP_TIMESTAMP,
     fail,
     payload_digest,
-    run,
     sha256_bytes,
     sha256_file,
 )
@@ -29,6 +28,7 @@ from .config import (
     verified_runtime_digest,
 )
 from .container import image_ready, require_podman, setup
+from .output import RunReporter
 from .workspace import stage_workspace
 
 CANDIDATE_NOTICE = b"""HARDWARE QUALIFICATION CANDIDATE - DO NOT PUBLISH
@@ -139,50 +139,69 @@ def verify_booted(target: str) -> None:
     print(f"verify: the phone runs the current build ({workspace_recipe[:16]})")
 
 
-def build(target: str, jobs: int) -> None:
+def build(target: str, jobs: int, *, verbose: bool = False) -> None:
     if jobs < 1:
         fail("--jobs must be positive")
+    target_config = load_target(target)
+    release = load_release(target, target_config)
+    reporter = RunReporter.create("build", target=target, verbose=verbose)
     podman = require_podman()
     lock = load_container_lock()["oci"]
     if not image_ready(podman, lock["image"]):
-        setup()
+        setup(reporter=reporter)
     cache = ROOT / ".cache"
     output = cache / "out"
     cache.mkdir(exist_ok=True)
     output.mkdir(exist_ok=True)
-    workspace = stage_workspace(target)
-    run(
-        [
-            podman,
-            "run",
-            "--rm",
-            "--platform",
-            lock["platform"],
-            "--userns=keep-id",
-            "--volume",
-            f"{cache}:/cache:rw,Z",
-            "--volume",
-            f"{output}:/out:rw,Z",
-            "--volume",
-            f"{workspace}:/workspace:ro,Z",
-            "--env",
-            "HOME=/tmp/fplinux-home",
-            "--env",
-            "PYTHONPATH=/workspace/scripts",
-            "--env",
-            f"FPLINUX_CONTAINER_RECIPE={container_recipe_digest()}",
-            "--env",
-            f"FPLINUX_WORKSPACE_DIGEST={workspace.name}",
-            lock["image"],
-            "python3",
-            "-m",
-            "fplinux_cli.builder",
-            "--target",
-            target,
-            "--jobs",
-            str(jobs),
-        ]
-    )
+    with reporter.stage("workspace"):
+        workspace = stage_workspace(target)
+
+    container_log_root = "/cache/" + reporter.root.relative_to(cache).as_posix()
+    log_environment = reporter.container_environment(container_log_root)
+    log_arguments = [
+        argument
+        for key, value in log_environment.items()
+        for argument in ("--env", f"{key}={value}")
+    ]
+    with reporter.stage("container", passthrough=True, show_tail=False) as stage:
+        stage.run(
+            [
+                podman,
+                "run",
+                "--rm",
+                "--platform",
+                lock["platform"],
+                "--userns=keep-id",
+                "--volume",
+                f"{cache}:/cache:rw,Z",
+                "--volume",
+                f"{output}:/out:rw,Z",
+                "--volume",
+                f"{workspace}:/workspace:ro,Z",
+                *log_arguments,
+                "--env",
+                "HOME=/tmp/fplinux-home",
+                "--env",
+                "PYTHONPATH=/workspace/scripts",
+                "--env",
+                f"FPLINUX_CONTAINER_RECIPE={container_recipe_digest()}",
+                "--env",
+                f"FPLINUX_WORKSPACE_DIGEST={workspace.name}",
+                lock["image"],
+                "python3",
+                "-m",
+                "fplinux_cli.builder",
+                "--target",
+                target,
+                "--jobs",
+                str(jobs),
+            ]
+        )
+    bundle = output / target / target_config["profile"]
+    print(f"build {target}: OK", flush=True)
+    print(f"output: {bundle.relative_to(ROOT)}", flush=True)
+    print(f"ramboot.bin SHA256: {sha256_file(bundle / release['image'])}", flush=True)
+    reporter.finish()
 
 
 def target_archive_file(target: str, relative: str) -> tuple[str, Path]:

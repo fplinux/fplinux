@@ -1,6 +1,7 @@
 [tool.ruff]
 target-version = "py311"
 line-length = 99
+cache-dir = ".cache/ruff"
 extend-exclude = [".cache", "node_modules"]
 
 [tool.ruff.lint]
@@ -22,6 +23,9 @@ ignore = [
   "T201",
   "TRY003",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PT009", "PT027"]
 
 [tool.ruff.format]
 line-ending = "lf"

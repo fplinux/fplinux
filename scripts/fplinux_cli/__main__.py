@@ -8,7 +8,8 @@ import os
 
 from .commands import build, console_target, package_target, run_target, verify_booted
 from .config import discover_targets
-from .container import check, check_commit_message, doctor, setup
+from .container import CHECK_SCOPES, check, check_commit_message, doctor, setup
+from .output import run_entrypoint
 
 
 def main() -> None:
@@ -16,7 +17,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="fplinux")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("doctor", help="check the rootless build host")
-    commands.add_parser("check", help="run the source quality gate")
+    check_parser = commands.add_parser("check", help="run the source quality gate")
+    check_parser.add_argument("scopes", nargs="*", choices=CHECK_SCOPES)
+    check_parser.add_argument(
+        "--list",
+        dest="list_scopes",
+        action="store_true",
+        help="list available check scopes without running checks",
+    )
+    check_parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="stream complete stage output while retaining logs",
+    )
     setup_parser = commands.add_parser("setup", help="build the pinned OCI environment")
     setup_parser.add_argument("--force", action="store_true")
     commit_message_parser = commands.add_parser("_commit-msg", help=argparse.SUPPRESS)
@@ -24,6 +37,11 @@ def main() -> None:
     build_parser = commands.add_parser("build", help="build a target in .cache/out")
     build_parser.add_argument("target", choices=targets)
     build_parser.add_argument("--jobs", type=int, default=max(1, os.cpu_count() or 1))
+    build_parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="stream complete stage output while retaining logs",
+    )
     package_parser = commands.add_parser(
         "package", help="package an existing build for Linux x86-64"
     )
@@ -53,13 +71,19 @@ def main() -> None:
     if args.command == "doctor":
         doctor()
     elif args.command == "check":
-        check()
+        if args.list_scopes:
+            if args.scopes:
+                check_parser.error("--list cannot be combined with scopes")
+            for scope in CHECK_SCOPES:
+                print(scope)
+        else:
+            check(args.scopes, verbose=args.verbose)
     elif args.command == "setup":
         setup(force=args.force)
     elif args.command == "_commit-msg":
         check_commit_message(args.message_file)
     elif args.command == "build":
-        build(args.target, args.jobs)
+        build(args.target, args.jobs, verbose=args.verbose)
     elif args.command == "package":
         package_target(args.target, candidate=args.candidate)
     elif args.command == "run":
@@ -77,4 +101,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    run_entrypoint(main)

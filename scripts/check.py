@@ -4,20 +4,39 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import shlex
 import subprocess
 import tempfile
 import tomllib
+from contextlib import contextmanager
 from pathlib import Path
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn
 
 from fplinux_cli.config import discover_targets, load_platform, load_target
+from fplinux_cli.output import RunReporter, current_stage, run_entrypoint
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 ROOT = Path(__file__).resolve().parents[1]
 EXCLUDED_PARTS = {".cache", ".git", "__pycache__"}
 BINARY_SUFFIXES = {".bin", ".jpg", ".png", ".pyc", ".zip"}
+SOURCE_SCOPES = (
+    "source",
+    "container",
+    "metadata",
+    "docs",
+    "spelling",
+    "secrets",
+    "licenses",
+    "python",
+    "shell",
+    "buildroot",
+    "c",
+)
 
 
 def fail(message: str) -> NoReturn:
@@ -25,11 +44,25 @@ def fail(message: str) -> NoReturn:
 
 
 def run(command: list[str]) -> None:
+    stage = current_stage()
+    if stage is not None:
+        stage.run(command, cwd=ROOT)
+        return
     print("+", shlex.join(command), flush=True)
     subprocess.run(command, cwd=ROOT, check=True)
 
 
-def source_files() -> list[Path]:
+@contextmanager
+def report_stage(reporter: RunReporter | None, name: str) -> Iterator[None]:
+    """Use a persistent stage log when the host supplied one."""
+    if reporter is None:
+        yield
+        return
+    with reporter.stage(name):
+        yield
+
+
+def source_files(*, enforce_policy: bool) -> list[Path]:
     files: list[Path] = []
     for path in sorted(ROOT.rglob("*")):
         relative = path.relative_to(ROOT)
@@ -38,11 +71,15 @@ def source_files() -> list[Path]:
         if path.name == ".fplinux-workspace":
             continue
         if path.is_symlink():
-            fail(f"source symlink is not allowed: {relative}")
+            if enforce_policy:
+                fail(f"source symlink is not allowed: {relative}")
+            continue
         if not path.is_file():
             continue
         if path.suffix in BINARY_SUFFIXES:
-            fail(f"binary artifact is not allowed in source: {relative}")
+            if enforce_policy:
+                fail(f"binary artifact is not allowed in source: {relative}")
+            continue
         files.append(path)
     return files
 
@@ -116,8 +153,12 @@ def quality_sources(
     for path in files:
         if path.suffix not in {"", ".sh"}:
             continue
-        with path.open(errors="strict") as stream:
-            first_line = stream.readline().strip()
+        with path.open("rb") as stream:
+            raw_first_line = stream.readline()
+        try:
+            first_line = raw_first_line.decode().strip()
+        except UnicodeDecodeError:
+            continue
         relative = str(path.relative_to(ROOT))
         if first_line == "#!/usr/bin/env bash":
             bash_files.append(relative)
@@ -234,79 +275,124 @@ def check_userspace_c(sources: list[tuple[str, bool]]) -> None:
 
 
 def main() -> None:
-    files = source_files()
-    check_text(files)
-    check_container_policy(files)
-    check_release_lock()
-    python_files, markdown_files, posix_shell_files, bash_files = quality_sources(files)
-    toml_files = [str(path.relative_to(ROOT)) for path in files if path.suffix == ".toml"]
-    json_files = [
-        str(path.relative_to(ROOT))
-        for path in files
-        if path.suffix in {".json", ".jsonc"} and path.name != "package-lock.json"
-    ]
-    bootstrap_c = [
-        str(path.relative_to(ROOT))
-        for path in files
-        if path.suffix in {".c", ".h"} and "bootstrap" in path.relative_to(ROOT).parts
-    ]
-    c_sources = userspace_c_sources(files)
-    buildroot_files = buildroot_sources(files)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("scopes", nargs="*", choices=SOURCE_SCOPES)
+    args = parser.parse_args()
+    selected = tuple(dict.fromkeys(args.scopes)) if args.scopes else SOURCE_SCOPES
+    reporter = RunReporter.from_environment("check", "quality")
 
-    run(["taplo", "check", *toml_files])
-    run(["taplo", "fmt", "--check", *toml_files])
-    run(["prettier", "--check", "--ignore-unknown", *markdown_files, *json_files])
-    run(["markdownlint-cli2"])
-    text_files = [
-        str(path.relative_to(ROOT))
-        for path in files
-        if path.suffix == ".txt" and path.relative_to(ROOT).parts[0] != "LICENSES"
-    ]
-    run(["vale", "--config", ".vale.ini", *markdown_files, *text_files])
-    run(["typos", "."])
-    run(["gitleaks", "dir", "--no-banner", "--redact", "--exit-code", "1", "."])
-    run(["reuse", "lint"])
-    run(["ruff", "check", *python_files])
-    run(["ruff", "format", "--check", *python_files])
-    run(["mypy", *python_files])
-    run(["shfmt", "-d", "-ln", "posix", *posix_shell_files])
-    run(["shfmt", "-d", "-ln", "bash", *bash_files])
-    run(
-        [
-            "shellcheck",
-            "--enable=all",
-            "--severity=warning",
-            *posix_shell_files,
-            *bash_files,
+    with report_stage(reporter, "source-inventory"):
+        files = source_files(enforce_policy="source" in selected)
+        python_files, markdown_files, posix_shell_files, bash_files = quality_sources(files)
+        toml_files = [str(path.relative_to(ROOT)) for path in files if path.suffix == ".toml"]
+        json_files = [
+            str(path.relative_to(ROOT))
+            for path in files
+            if path.suffix in {".json", ".jsonc"} and path.name != "package-lock.json"
         ]
-    )
-    # Podman's OCI output has no SHELL support, so pipefail cannot be enabled
-    # (DL4006); every pipe feeds printf output into a checked sha256sum.
-    run(["hadolint", "--ignore", "DL4006", "Containerfile"])
-    # The quality venv python cannot import check-package's flake8 and magic
-    # dependencies; they are provided for the system interpreter.
-    run(
-        [
-            "/usr/bin/python3",
-            "/opt/buildroot/utils/check-package",
-            "--br2-external",
-            *buildroot_files,
-        ]
-    )
-    run(
-        [
-            "clang-format",
-            "--style=file",
-            "--dry-run",
-            "--Werror",
-            *(source for source, _requires_libusb in c_sources),
-            *bootstrap_c,
-        ]
-    )
-    check_userspace_c(c_sources)
 
-    print(f"source checks: OK ({len(files)} UTF-8 source files)")
+    if "source" in selected:
+        with report_stage(reporter, "source-text"):
+            check_text(files)
+    if "container" in selected:
+        with report_stage(reporter, "container-policy"):
+            check_container_policy(files)
+    if "metadata" in selected:
+        with report_stage(reporter, "metadata"):
+            check_release_lock()
+            run(["taplo", "check", *toml_files])
+            run(["taplo", "fmt", "--check", *toml_files])
+    if "metadata" in selected or "docs" in selected:
+        prettier_files = [
+            *(markdown_files if "docs" in selected else []),
+            *(json_files if "metadata" in selected else []),
+        ]
+        with report_stage(reporter, "prettier"):
+            run(["prettier", "--check", "--ignore-unknown", *prettier_files])
+    if "docs" in selected:
+        text_files = [
+            str(path.relative_to(ROOT))
+            for path in files
+            if path.suffix == ".txt" and path.relative_to(ROOT).parts[0] != "LICENSES"
+        ]
+        with report_stage(reporter, "documentation"):
+            run(["markdownlint-cli2"])
+            run(["vale", "--config", ".vale.ini", *markdown_files, *text_files])
+    if "spelling" in selected:
+        with report_stage(reporter, "spelling"):
+            run(["typos", "."])
+    if "secrets" in selected:
+        with report_stage(reporter, "secrets"):
+            run(["gitleaks", "dir", "--no-banner", "--redact", "--exit-code", "1", "."])
+    if "licenses" in selected:
+        with report_stage(reporter, "licenses"):
+            run(["reuse", "lint"])
+    if "python" in selected:
+        with report_stage(reporter, "python"):
+            run(["ruff", "check", *python_files])
+            run(["ruff", "format", "--check", *python_files])
+            run(["mypy", *python_files])
+            if (ROOT / "tests").is_dir():
+                run(["python3", "-m", "unittest", "discover", "-s", "tests"])
+    if "shell" in selected:
+        with report_stage(reporter, "shell"):
+            run(["shfmt", "-d", "-ln", "posix", *posix_shell_files])
+            run(["shfmt", "-d", "-ln", "bash", *bash_files])
+            run(
+                [
+                    "shellcheck",
+                    "--enable=all",
+                    "--severity=warning",
+                    *posix_shell_files,
+                    *bash_files,
+                ]
+            )
+    if "container" in selected:
+        with report_stage(reporter, "container-lint"):
+            # Podman's OCI output has no SHELL support, so pipefail cannot be enabled
+            # (DL4006); every pipe feeds printf output into a checked sha256sum.
+            run(["hadolint", "--ignore", "DL4006", "Containerfile"])
+    if "buildroot" in selected:
+        buildroot_files = buildroot_sources(files)
+        with report_stage(reporter, "buildroot"):
+            # The quality venv python cannot import check-package's flake8 and magic
+            # dependencies; they are provided for the system interpreter.
+            run(
+                [
+                    "/usr/bin/python3",
+                    "/opt/buildroot/utils/check-package",
+                    "--br2-external",
+                    *buildroot_files,
+                ]
+            )
+    if "c" in selected:
+        c_sources = userspace_c_sources(files)
+        bootstrap_c = [
+            str(path.relative_to(ROOT))
+            for path in files
+            if path.suffix in {".c", ".h"} and "bootstrap" in path.relative_to(ROOT).parts
+        ]
+        with report_stage(reporter, "c-format"):
+            run(
+                [
+                    "clang-format",
+                    "--style=file",
+                    "--dry-run",
+                    "--Werror",
+                    *(source for source, _requires_libusb in c_sources),
+                    *bootstrap_c,
+                ]
+            )
+        with report_stage(reporter, "c-analysis"):
+            check_userspace_c(c_sources)
+
+    inventory = (
+        f"{len(files)} UTF-8 source files"
+        if "source" in selected
+        else f"{len(files)} source files inventoried"
+    )
+    print(f"source checks: OK ({inventory}; scopes: {','.join(selected)})")
 
 
 if __name__ == "__main__":
-    main()
+    run_entrypoint(main)
