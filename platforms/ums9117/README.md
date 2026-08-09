@@ -50,7 +50,7 @@ document and `releases.lock.toml`.
 | System counter        | Supported      | `kernel/ums9117-timer.c`                  | 1 kHz UMS9117 counter                                         |
 | Pike2 timer           | Supported      | Linux Spreadtrum timer driver integration | Uses the shared 32.768 kHz clock                              |
 | Clock controller      | Partial        | Fixed clock nodes                         | No general UMS9117 clock-controller driver                    |
-| USB device controller | Partial        | `kernel/ums9117-musb.c`                   | MUSB PIO gadget mode using state inherited from the bootstrap |
+| USB device controller | Partial        | `kernel/ums9117-musb.c`                   | PIO gadget with 512-byte TX/RX FIFOs on EP1 and EP2           |
 | USB host controller   | Not supported  | —                                         | No host-mode initialization path                              |
 | GPIO / pin control    | Not supported  | —                                         | Board drivers currently use known MMIO state directly         |
 | UART                  | Not supported  | —                                         | No platform UART driver or DTS node                           |
@@ -94,7 +94,9 @@ not duplicate SoC-wide timer, GIC or USB addresses.
 - The current platform describes one CPU and does not bring up secondary cores.
 - MUSB support assumes that the target bootstrap has already prepared the
   controller and PHY. It does not perform a complete cold initialization.
-- USB runs in PIO gadget mode; DMA and host mode are not implemented.
+- USB runs in PIO gadget mode; DMA and host mode are not implemented. The FIFO
+  table provides EP1 and EP2 bulk pairs, and the fixed host adapter attaches the
+  shell on data interface 0 after Linux takes over USB.
 - Clock, reset, pin-control and power-domain frameworks are not implemented;
   controller support that depends on them is unavailable.
 

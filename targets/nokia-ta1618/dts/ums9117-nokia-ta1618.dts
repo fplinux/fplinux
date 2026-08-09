@@ -8,7 +8,7 @@
 	compatible = "nokia,ta-1618", "sprd,ums9117";
 
 	chosen {
-		bootargs = "console=tty0 loglevel=8 ignore_loglevel initcall_debug init=/init panic=-1 rdinit=/init vt.global_cursor_default=1 g_serial.use_acm=0";
+		bootargs = "console=tty0 loglevel=8 ignore_loglevel initcall_debug init=/init panic=-1 rdinit=/init vt.global_cursor_default=1 g_serial.use_acm=0 g_serial.n_ports=2";
 	};
 
 	memory@80000000 {
