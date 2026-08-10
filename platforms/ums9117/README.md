@@ -13,12 +13,12 @@
 
 ## Scope
 
-This platform supplies the reusable CPU, interrupt-controller, timer and USB
-controller support needed by UMS9117 feature phones. It also declares the Linux
-integration, bootstrap vendor projection, typed host-tool recipes and fixed
-RAM-only host adapter used by the shared builder and runner. Phone memory maps,
-panel configuration, keypad wiring, bootstrap source and adapter values stay in
-individual targets.
+This platform supplies the reusable CPU, interrupt-controller, timer, USB and
+analog-die interface support needed by UMS9117 feature phones. It also declares
+the Linux integration, bootstrap vendor projection, typed host-tool recipes and
+fixed RAM-only host adapter used by the shared builder and runner. Phone memory
+maps, panel configuration, keypad wiring, bootstrap source and adapter values
+stay in individual targets.
 
 ## Platform contract
 
@@ -51,6 +51,7 @@ document and `releases.lock.toml`.
 | Pike2 timer           | Supported      | Linux Spreadtrum timer driver integration | Uses the shared 32.768 kHz clock                              |
 | Clock controller      | Partial        | Fixed clock nodes                         | No general UMS9117 clock-controller driver                    |
 | USB device controller | Partial        | `kernel/ums9117-musb.c`                   | PIO gadget with 512-byte TX/RX FIFOs on EP1 and EP2           |
+| Analog-die interface  | Supported      | `kernel/ums9117-adi.c`                    | Fixed inherited transport shared by target-owned clients      |
 | USB host controller   | Not supported  | —                                         | No host-mode initialization path                              |
 | GPIO / pin control    | Not supported  | —                                         | Board drivers currently use known MMIO state directly         |
 | UART                  | Not supported  | —                                         | No platform UART driver or DTS node                           |
@@ -58,7 +59,7 @@ document and `releases.lock.toml`.
 | DMA                   | Not supported  | —                                         | USB is deliberately PIO-only                                  |
 | Audio                 | Not supported  | —                                         | No shared audio controller implementation                     |
 | SPI / I2C             | Not supported  | —                                         | No generic bus-controller nodes or drivers                    |
-| Watchdog / reset      | Not supported  | —                                         | Reboot and power-off support are not implemented              |
+| Watchdog / reset      | Not supported  | —                                         | No generic reset; TA-1618 owns target-specific power-off      |
 
 ## DTS contract for targets
 
@@ -83,10 +84,12 @@ not duplicate SoC-wide timer, GIC or USB addresses.
 | ------------------------------------ | ---------------------------------------------------------- |
 | `kernel/0001-ums9117-platform.patch` | Registers the ARM machine, timers and MUSB glue with Linux |
 | `kernel/Kconfig`                     | Defines `CONFIG_ARCH_UMS9117`                              |
-| `kernel/Makefile`                    | Builds shared machine and timer objects                    |
+| `kernel/Makefile`                    | Builds shared machine, timer and ADI objects               |
 | `kernel/ums9117-machine.c`           | ARM DT machine declaration                                 |
 | `kernel/ums9117-timer.c`             | UMS9117 system counter                                     |
 | `kernel/ums9117-musb.c`              | Inherited-state MUSB gadget glue                           |
+| `kernel/ums9117-adi.c`               | Serialized inherited analog-die transport                  |
+| `kernel/ums9117-adi.h`               | Transaction API for target-owned analog clients            |
 | `dts/ums9117.dtsi`                   | Shared CPU, GIC, clocks, timers and USB nodes              |
 
 ## Known constraints
@@ -94,6 +97,10 @@ not duplicate SoC-wide timer, GIC or USB addresses.
 - The current platform describes one CPU and does not bring up secondary cores.
 - MUSB support assumes that the target bootstrap has already prepared the
   controller and PHY. It does not perform a complete cold initialization.
+- The ADI provider accepts the fixed inherited controller only when its version
+  is `0x400` and master control is zero. It does not reinitialize the controller;
+  transactions are serialized under a Linux raw spinlock and the hardware user
+  lock.
 - USB runs in PIO gadget mode; DMA and host mode are not implemented. The FIFO
   table provides EP1 and EP2 bulk pairs, and the fixed host adapter attaches the
   shell on data interface 0 after Linux takes over USB.
@@ -102,9 +109,9 @@ not duplicate SoC-wide timer, GIC or USB addresses.
 
 ## Targets using this platform
 
-| Target                                                 | Phone                   | Enabled shared blocks             |
-| ------------------------------------------------------ | ----------------------- | --------------------------------- |
-| [`nokia-ta1618`](../../targets/nokia-ta1618/README.md) | Nokia 3210 4G (TA-1618) | CPU0, GIC, timers and MUSB gadget |
+| Target                                                 | Phone                   | Enabled shared blocks                  |
+| ------------------------------------------------------ | ----------------------- | -------------------------------------- |
+| [`nokia-ta1618`](../../targets/nokia-ta1618/README.md) | Nokia 3210 4G (TA-1618) | CPU0, GIC, timers, MUSB gadget and ADI |
 
 A shared block is marked **Supported** when a listed phone target has validated
 it on physical hardware and the implementation is present. See the TA-1618

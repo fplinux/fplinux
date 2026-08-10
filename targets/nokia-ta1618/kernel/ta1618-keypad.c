@@ -16,6 +16,7 @@
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
+#include <linux/soc/sprd/ums9117-adi.h>
 #include <linux/workqueue.h>
 
 #define KPD_CTRL 0x00
@@ -31,12 +32,10 @@
 #define APB_RST_SET 0x1008
 #define APB_RST_CLR 0x2008
 
-#define ADI_RD_CMD 0x0028
-#define ADI_RD_DATA 0x002c
-#define ADI_USER_LOCK 0x0224
-#define ADI_RD_BUSY BIT(31)
-#define ADI_USER_LOCK_RELEASE 0x5348554c
-#define ADI_POLL_US 3000
+#define UMS9117_ADI_PHYS 0x40600000u
+#define UMS9117_ADI_SLAVE_PHYS 0x40608000u
+#define UMS9117_ADI_SLAVE_SIZE 0x1000u
+#define ADI_CONTROLLER_MIN_SIZE 0x228u
 
 #define EIC_DATA_BIT 9
 #define EIC_POLL_MS 5
@@ -44,7 +43,6 @@
 struct ta1618_keypad {
 	struct device *dev;
 	void __iomem *kpd;
-	void __iomem *adi;
 	u32 eic_data_phys;
 	struct regmap *aon_apb;
 	struct input_dev *input;
@@ -56,6 +54,7 @@ struct ta1618_keypad {
 	bool eic_down;
 	bool eic_error_reported;
 	bool eic_first_event_reported;
+	bool stopping;
 };
 
 /*
@@ -114,47 +113,24 @@ static void ta1618_keypad_poll(struct work_struct *work)
 	if (sync)
 		input_sync(tk->input);
 out:
-	schedule_delayed_work(&tk->poll_work, msecs_to_jiffies(5));
+	if (!READ_ONCE(tk->stopping))
+		schedule_delayed_work(&tk->poll_work, msecs_to_jiffies(5));
 }
 
 static int ta1618_keypad_adi_read(struct ta1618_keypad *tk, u16 *value)
 {
-	u32 data;
-	unsigned int waited;
-	bool locked = false;
-	int ret = -ETIMEDOUT;
+	struct ums9117_adi_transaction transaction = {};
+	u32 offset = tk->eic_data_phys - UMS9117_ADI_SLAVE_PHYS;
+	int end_ret;
+	int ret;
 
-	for (waited = 0; waited < ADI_POLL_US; waited++) {
-		/*
-		 * USER_LOCK is an acquire-on-read hardware semaphore shared
-		 * with other ADI users.
-		 */
-		if (!readl(tk->adi + ADI_USER_LOCK)) {
-			locked = true;
-			break;
-		}
-		udelay(1);
-	}
-	if (!locked)
-		return -EBUSY;
-
-	/*
-	 * These are transport writes only.  In particular, this driver never
-	 * writes EIC enable, mask, polarity or data registers: EIC9 remains an
-	 * inherited fpdoom-bootstrap configuration.
-	 */
-	writel(tk->eic_data_phys, tk->adi + ADI_RD_CMD);
-	for (waited = 0; waited < ADI_POLL_US; waited++) {
-		data = readl(tk->adi + ADI_RD_DATA);
-		if (!(data & ADI_RD_BUSY)) {
-			*value = data & 0xffff;
-			ret = 0;
-			break;
-		}
-		udelay(1);
-	}
-
-	writel(ADI_USER_LOCK_RELEASE, tk->adi + ADI_USER_LOCK);
+	ret = ums9117_adi_begin(&transaction);
+	if (ret)
+		return ret;
+	ret = ums9117_adi_read(&transaction, offset, value);
+	end_ret = ums9117_adi_end(&transaction);
+	if (!ret)
+		ret = end_ret;
 	return ret;
 }
 
@@ -204,8 +180,9 @@ static void ta1618_keypad_eic_poll(struct work_struct *work)
 	}
 
 out:
-	schedule_delayed_work(&tk->eic_poll_work,
-			      msecs_to_jiffies(EIC_POLL_MS));
+	if (!READ_ONCE(tk->stopping))
+		schedule_delayed_work(&tk->eic_poll_work,
+				      msecs_to_jiffies(EIC_POLL_MS));
 }
 
 static void ta1618_keypad_setup_eic(struct platform_device *pdev,
@@ -224,22 +201,15 @@ static void ta1618_keypad_setup_eic(struct platform_device *pdev,
 			"EIC9 resources unavailable; matrix keypad remains active\n");
 		return;
 	}
-	if (resource_size(adi_res) < ADI_USER_LOCK + sizeof(u32)) {
+	if (adi_res->start != UMS9117_ADI_PHYS ||
+	    resource_size(adi_res) < ADI_CONTROLLER_MIN_SIZE ||
+	    !IS_ALIGNED(tk->eic_data_phys, sizeof(u32)) ||
+	    tk->eic_data_phys < UMS9117_ADI_SLAVE_PHYS ||
+	    tk->eic_data_phys > UMS9117_ADI_SLAVE_PHYS +
+					UMS9117_ADI_SLAVE_SIZE - sizeof(u32)) {
 		dev_warn(
 			dev,
 			"EIC9 resources invalid; matrix keypad remains active\n");
-		return;
-	}
-
-	/*
-	 * Do not reserve this shared controller window: USER_LOCK serializes
-	 * this client with other ADI users.
-	 */
-	tk->adi = devm_ioremap(dev, adi_res->start, resource_size(adi_res));
-	if (!tk->adi) {
-		dev_warn(
-			dev,
-			"could not map shared ADI transport; matrix keypad remains active\n");
 		return;
 	}
 
@@ -340,13 +310,22 @@ static int ta1618_keypad_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static void ta1618_keypad_remove(struct platform_device *pdev)
+static void ta1618_keypad_stop(struct ta1618_keypad *tk)
 {
-	struct ta1618_keypad *tk = platform_get_drvdata(pdev);
-
+	WRITE_ONCE(tk->stopping, true);
 	cancel_delayed_work_sync(&tk->poll_work);
 	if (tk->eic_available)
 		cancel_delayed_work_sync(&tk->eic_poll_work);
+}
+
+static void ta1618_keypad_remove(struct platform_device *pdev)
+{
+	ta1618_keypad_stop(platform_get_drvdata(pdev));
+}
+
+static void ta1618_keypad_shutdown(struct platform_device *pdev)
+{
+	ta1618_keypad_stop(platform_get_drvdata(pdev));
 }
 
 static const struct of_device_id ta1618_keypad_of_match[] = {
@@ -358,6 +337,7 @@ MODULE_DEVICE_TABLE(of, ta1618_keypad_of_match);
 static struct platform_driver ta1618_keypad_driver = {
 	.probe = ta1618_keypad_probe,
 	.remove = ta1618_keypad_remove,
+	.shutdown = ta1618_keypad_shutdown,
 	.driver = {
 		.name = "ta1618-keypad",
 		.of_match_table = ta1618_keypad_of_match,

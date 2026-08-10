@@ -205,13 +205,25 @@ from the extracted archive with:
 Do not start `runner/run.py` merely to reconnect: the full runner waits for a
 BootROM device and starts a new RAM-load sequence.
 
-To end the Nokia TA-1618 RAM session, detach with `Ctrl-]`, disconnect USB,
-remove the battery and then reinsert it. This exit has been used repeatedly on
-the TA-1618. The next normal power-on follows the unchanged vendor boot path
-because the FPLinux image was held only in volatile RAM.
+The Nokia TA-1618 power-off handler is qualified for battery-only shutdown.
+From the phone shell, sync the filesystems and start a delayed forced power-off:
 
-Linux `reboot`, `poweroff`, PMIC-controlled shutdown and power-button behavior
-remain unqualified and are not prescribed as exit methods.
+```sh
+sync
+(trap '' HUP; sleep 20; poweroff -f) </dev/null >/dev/null 2>&1 &
+```
+
+Detach with `Ctrl-]` and disconnect USB before the delay expires. At final
+shutdown the target handler verifies the exact SC2720 identity, refuses to
+continue while the charger input is active, and requests the PMIC hardware
+power-down sequence. It performs no PMIC read after that final write.
+
+A failed guard stops the shutdown path instead of attempting another PMIC
+operation. If USB was not disconnected in time or the phone remains powered,
+remove and reinsert the battery before booting again. A successful shutdown
+discards the volatile FPLinux session; the next manual power-on follows the
+unchanged vendor boot path. Linux reboot and power-button shutdown remain
+unqualified.
 
 ## Troubleshooting
 

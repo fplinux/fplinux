@@ -42,6 +42,7 @@
 #include <linux/platform_device.h>
 #include <linux/scatterlist.h>
 #include <linux/spinlock.h>
+#include <linux/soc/sprd/ums9117-adi.h>
 #include <linux/sysfs.h>
 #include <linux/workqueue.h>
 
@@ -71,24 +72,6 @@
 #define TA1618_D3_PAD_TARGET TA1618_DATA_PAD_TARGET
 #define TA1618_CLK_PAD_TARGET 0x00302001U
 #define TA1618_IOS_TRACE_DEPTH 16U
-
-/* Shared with the keypad through the hardware ADI_USER_LOCK semaphore. */
-#define TA1618_ADI_VERSION 0x0000U
-#define TA1618_ADI_MST_CTL 0x0004U
-#define TA1618_ADI_INT_RAW 0x0014U
-#define TA1618_ADI_RD_CMD 0x0028U
-#define TA1618_ADI_RD_DATA 0x002cU
-#define TA1618_ADI_FIFO_STS 0x0030U
-#define TA1618_ADI_USER_LOCK 0x0224U
-#define TA1618_ADI_EXPECTED_VERSION 0x00000400U
-#define TA1618_ADI_EXPECTED_MST_CTL 0x00000000U
-#define TA1618_ADI_RD_BUSY BIT(31)
-#define TA1618_ADI_RD_RETURNED_ADDRESS GENMASK(30, 16)
-#define TA1618_ADI_FIFO_FULL BIT(11)
-#define TA1618_ADI_FIFO_EMPTY BIT(10)
-#define TA1618_ADI_ARM_FIFO_OVERFLOW_RAW BIT(3)
-#define TA1618_ADI_USER_LOCK_RELEASE 0x5348554cU
-#define TA1618_ADI_POLL_BUDGET_US 3000U
 
 #define TA1618_PD_MASK BIT(0)
 #define TA1618_VDDSDCORE_PD_OFFSET 0x0d00U
@@ -244,6 +227,11 @@
  */
 #define UMS9117_READ_BLOCK_BUDGET_MS 10U
 #define UMS9117_WRITE_BLOCK_BUDGET_MS 50U
+#define UMS9117_SHUTDOWN_DEADLINE_MS                                          \
+	(UMS9117_WRITE_REQUEST_TIMEOUT_MS +                                   \
+	 (UMS9117_MAX_REQUEST_BYTES / 512U) * UMS9117_WRITE_BLOCK_BUDGET_MS + \
+	 UMS9117_WRITE_QUIESCE_DEADLINE_MS)
+#define UMS9117_SHUTDOWN_POLL_MS 1U
 #define UMS9117_INITIAL_CLOCKS_DELAY_MS 10U
 
 #define TA1618_SDIO0_SPI 57U
@@ -291,7 +279,6 @@ static_assert((0x08000000U | UMS9117_CLOCK_TIMEOUT_FPDOOM_ENCODED |
 	      UMS9117_HS_CLOCK_EXPECTED);
 static_assert((MMC_VDD_29_30 | MMC_VDD_30_31) == 0x00060000U);
 static_assert(TA1618_SDIO0_INTID == 89U);
-static_assert(TA1618_ADI_USER_LOCK + sizeof(u32) <= TA1618_ADI_SIZE);
 
 enum ta1618_resource_index {
 	RES_GATE_STATE,
@@ -411,7 +398,6 @@ static const struct ta1618_pin_definition ta1618_pins[TA1618_PIN_COUNT] = {
 
 struct ta1618_analog_definition {
 	u32 offset;
-	u32 command_word;
 	bool power_down;
 };
 
@@ -424,10 +410,10 @@ enum ta1618_analog_index {
 };
 
 static const struct ta1618_analog_definition ta1618_analog[ANA_COUNT] = {
-	{ TA1618_VDDSDCORE_PD_OFFSET, 0x0340U, true },
-	{ TA1618_VDDSDCORE_VOLT_OFFSET, 0x0341U, false },
-	{ TA1618_VDDSDIO_PD_OFFSET, 0x0343U, true },
-	{ TA1618_VDDSDIO_VOLT_OFFSET, 0x0344U, false },
+	{ TA1618_VDDSDCORE_PD_OFFSET, true },
+	{ TA1618_VDDSDCORE_VOLT_OFFSET, false },
+	{ TA1618_VDDSDIO_PD_OFFSET, true },
+	{ TA1618_VDDSDIO_VOLT_OFFSET, false },
 };
 
 struct ta1618_ios_trace_entry {
@@ -504,7 +490,6 @@ struct ta1618_sd_mmc {
 	struct device *dev;
 	struct mmc_host *mmc;
 	void __iomem *regs[RES_COUNT];
-	struct resource *resources[RES_COUNT];
 	int irq;
 	bool irq_requested;
 
@@ -561,7 +546,7 @@ struct ta1618_sd_mmc {
 	bool terminal_cleanup_hold;
 	bool fatal_error;
 	bool stopping;
-	bool adi_locked;
+	struct ums9117_adi_transaction adi_transaction;
 	bool audit_file_created;
 	struct ta1618_mmc_audit audit;
 };
@@ -576,20 +561,6 @@ static inline void ta1618_writel(struct ta1618_sd_mmc *host,
 				 enum ta1618_resource_index resource, u32 value)
 {
 	writel(value, host->regs[resource]);
-}
-
-static inline u32 ta1618_readl_at(struct ta1618_sd_mmc *host,
-				  enum ta1618_resource_index resource,
-				  u32 offset)
-{
-	return readl(host->regs[resource] + offset);
-}
-
-static inline void ta1618_writel_at(struct ta1618_sd_mmc *host,
-				    enum ta1618_resource_index resource,
-				    u32 offset, u32 value)
-{
-	writel(value, host->regs[resource] + offset);
 }
 
 static void ums9117_record_ios(struct ta1618_sd_mmc *host,
@@ -698,127 +669,38 @@ static bool ta1618_dma_address_valid(dma_addr_t address, size_t length)
 	       length && length - 1 <= U32_MAX - start;
 }
 
-static int ta1618_adi_validate(struct ta1618_sd_mmc *host)
-{
-	if (ta1618_readl_at(host, RES_ADI, TA1618_ADI_VERSION) !=
-		    TA1618_ADI_EXPECTED_VERSION ||
-	    ta1618_readl_at(host, RES_ADI, TA1618_ADI_MST_CTL) !=
-		    TA1618_ADI_EXPECTED_MST_CTL)
-		return -EPROTONOSUPPORT;
-	return 0;
-}
-
-static int ta1618_adi_wait_empty_locked(struct ta1618_sd_mmc *host)
-{
-	unsigned int waited;
-	u32 raw;
-	u32 status;
-
-	if (!host->adi_locked)
-		return -EPERM;
-	for (waited = 0; waited < TA1618_ADI_POLL_BUDGET_US; waited++) {
-		raw = ta1618_readl_at(host, RES_ADI, TA1618_ADI_INT_RAW);
-		status = ta1618_readl_at(host, RES_ADI, TA1618_ADI_FIFO_STS);
-		if (raw & TA1618_ADI_ARM_FIFO_OVERFLOW_RAW)
-			return -EOVERFLOW;
-		if (status & TA1618_ADI_FIFO_EMPTY)
-			return 0;
-		udelay(1);
-	}
-	return -ETIMEDOUT;
-}
-
 static int ta1618_adi_lock(struct ta1618_sd_mmc *host)
 {
-	unsigned int waited;
-
-	if (host->adi_locked)
-		return -EDEADLK;
-	for (waited = 0; waited < TA1618_ADI_POLL_BUDGET_US; waited++) {
-		/* USER_LOCK is an acquire-on-read semaphore; zero grants it. */
-		if (!ta1618_readl_at(host, RES_ADI, TA1618_ADI_USER_LOCK)) {
-			host->adi_locked = true;
-			return 0;
-		}
-		udelay(1);
-	}
-	return -EBUSY;
+	return ums9117_adi_begin(&host->adi_transaction);
 }
 
 static int ta1618_adi_unlock(struct ta1618_sd_mmc *host)
 {
-	int ret;
-
-	if (!host->adi_locked)
-		return 0;
-	ret = ta1618_adi_wait_empty_locked(host);
-	ta1618_writel_at(host, RES_ADI, TA1618_ADI_USER_LOCK,
-			 TA1618_ADI_USER_LOCK_RELEASE);
-	host->adi_locked = false;
-	return ret;
+	return ums9117_adi_end(&host->adi_transaction);
 }
 
 static int ta1618_adi_read_locked(struct ta1618_sd_mmc *host,
 				  enum ta1618_analog_index index, u16 *value)
 {
 	const struct ta1618_analog_definition *definition;
-	unsigned int waited;
-	u32 data;
-	u32 returned;
-	int ret;
 
-	if (!host->adi_locked || index >= ANA_COUNT || !value)
+	if (index >= ANA_COUNT || !value)
 		return -EINVAL;
 	definition = &ta1618_analog[index];
 	if (!IS_ALIGNED(definition->offset, sizeof(u32)) ||
-	    definition->offset > TA1618_ANALOG_SIZE - sizeof(u32) ||
-	    definition->command_word != definition->offset >> 2)
+	    definition->offset > TA1618_ANALOG_SIZE - sizeof(u32))
 		return -ERANGE;
-	ret = ta1618_adi_validate(host);
-	if (ret)
-		return ret;
-
-	ta1618_writel_at(host, RES_ADI, TA1618_ADI_RD_CMD, definition->offset);
-	for (waited = 0; waited < TA1618_ADI_POLL_BUDGET_US; waited++) {
-		data = ta1618_readl_at(host, RES_ADI, TA1618_ADI_RD_DATA);
-		if (!(data & TA1618_ADI_RD_BUSY))
-			break;
-		udelay(1);
-	}
-	if (waited == TA1618_ADI_POLL_BUDGET_US)
-		return -ETIMEDOUT;
-	returned = FIELD_GET(TA1618_ADI_RD_RETURNED_ADDRESS, data);
-	if (returned != definition->command_word)
-		return -EIO;
-	*value = data & 0xffffU;
-	return 0;
+	return ums9117_adi_read(&host->adi_transaction, definition->offset,
+				value);
 }
 
 static int ta1618_adi_write_pd_locked(struct ta1618_sd_mmc *host,
 				      enum ta1618_analog_index index, u16 value)
 {
-	u16 readback;
-	int ret;
-
 	if (index >= ANA_COUNT || !ta1618_analog[index].power_down)
 		return -EPERM;
-	ret = ta1618_adi_wait_empty_locked(host);
-	if (ret)
-		return ret;
-	if (ta1618_readl_at(host, RES_ADI, TA1618_ADI_FIFO_STS) &
-	    TA1618_ADI_FIFO_FULL)
-		return -EBUSY;
-	ret = ta1618_adi_validate(host);
-	if (ret)
-		return ret;
-	ta1618_writel_at(host, RES_ANALOG, ta1618_analog[index].offset, value);
-	ret = ta1618_adi_wait_empty_locked(host);
-	if (ret)
-		return ret;
-	ret = ta1618_adi_read_locked(host, index, &readback);
-	if (ret)
-		return ret;
-	return readback == value ? 0 : -EIO;
+	return ums9117_adi_write(&host->adi_transaction,
+				 ta1618_analog[index].offset, value);
 }
 
 static int ta1618_snapshot_platform(struct ta1618_sd_mmc *host)
@@ -848,9 +730,6 @@ static int ta1618_snapshot_platform(struct ta1618_sd_mmc *host)
 			return -ERANGE;
 	}
 
-	ret = ta1618_adi_validate(host);
-	if (ret)
-		return ret;
 	ret = ta1618_adi_lock(host);
 	if (ret)
 		return ret;
@@ -2355,9 +2234,9 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 		goto out_error;
 
 	spin_lock_irqsave(&host->lock, flags);
-	if (host->active_mrq || host->finish_mrq) {
+	if (host->stopping || host->active_mrq || host->finish_mrq) {
+		ret = host->stopping ? -ESHUTDOWN : -EBUSY;
 		spin_unlock_irqrestore(&host->lock, flags);
-		ret = -EBUSY;
 		goto out_error;
 	}
 	ta1618_writel(host, RES_INTERRUPT_SIGNAL_ENABLE, 0);
@@ -2941,7 +2820,8 @@ static int ums9117_ta1618_mmc_probe(struct platform_device *pdev)
 	INIT_DELAYED_WORK(&host->timeout_work, ums9117_timeout_work);
 	INIT_WORK(&host->finish_work, ums9117_finish_work);
 	for (i = 0; i < RES_COUNT; i++) {
-		host->resources[i] = resources[i];
+		if (i == RES_ADI || i == RES_ANALOG)
+			continue;
 		host->regs[i] = devm_ioremap_resource(&pdev->dev, resources[i]);
 		if (IS_ERR(host->regs[i])) {
 			ret = PTR_ERR(host->regs[i]);
@@ -3032,6 +2912,61 @@ out_free_host:
 	return ret;
 }
 
+static bool ums9117_ta1618_mmc_idle(struct ta1618_sd_mmc *host)
+{
+	unsigned long flags;
+	bool idle;
+
+	spin_lock_irqsave(&host->lock, flags);
+	idle = !host->active_mrq && !host->finish_mrq;
+	spin_unlock_irqrestore(&host->lock, flags);
+	return idle;
+}
+
+static void ums9117_ta1618_mmc_shutdown(struct platform_device *pdev)
+{
+	struct ta1618_sd_mmc *host = platform_get_drvdata(pdev);
+	unsigned long flags;
+	ktime_t deadline;
+	u32 present = 0;
+	int ret;
+
+	spin_lock_irqsave(&host->lock, flags);
+	host->stopping = true;
+	spin_unlock_irqrestore(&host->lock, flags);
+
+	deadline = ktime_add_ms(ktime_get(), UMS9117_SHUTDOWN_DEADLINE_MS);
+	while (!ums9117_ta1618_mmc_idle(host) &&
+	       ktime_compare(ktime_get(), deadline) < 0)
+		msleep(UMS9117_SHUTDOWN_POLL_MS);
+	if (!ums9117_ta1618_mmc_idle(host))
+		dev_err(host->dev,
+			"request did not stop before shutdown deadline\n");
+
+	if (host->platform_active)
+		ta1618_writel(host, RES_INTERRUPT_SIGNAL_ENABLE, 0);
+	cancel_delayed_work_sync(&host->timeout_work);
+	cancel_work_sync(&host->finish_work);
+	if (host->irq_requested)
+		synchronize_irq(host->irq);
+
+	mutex_lock(&host->state_mutex);
+	if (host->platform_active &&
+	    !ums9117_wait_quiescent(host, UMS9117_WRITE_QUIESCE_DEADLINE_MS,
+				    &present)) {
+		dev_err(host->dev,
+			"controller did not quiesce for shutdown: present_state=0x%08x\n",
+			present);
+	} else if (host->platform_active && host->card_clock_on) {
+		ret = ums9117_set_card_clock(host, false);
+		if (ret)
+			dev_err(host->dev,
+				"failed to stop card clock for shutdown: %d\n",
+				ret);
+	}
+	mutex_unlock(&host->state_mutex);
+}
+
 static void ums9117_ta1618_mmc_remove(struct platform_device *pdev)
 {
 	struct ta1618_sd_mmc *host = platform_get_drvdata(pdev);
@@ -3068,6 +3003,7 @@ MODULE_DEVICE_TABLE(of, ta1618_mmc_of_match);
 static struct platform_driver ta1618_mmc_driver = {
 	.probe = ums9117_ta1618_mmc_probe,
 	.remove = ums9117_ta1618_mmc_remove,
+	.shutdown = ums9117_ta1618_mmc_shutdown,
 	.driver = {
 		.name = "ta1618-mmc",
 		.of_match_table = ta1618_mmc_of_match,
