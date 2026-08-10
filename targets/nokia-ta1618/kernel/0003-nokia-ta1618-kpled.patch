@@ -1,0 +1,48 @@
+From: FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+Date: Mon, 10 Aug 2026 12:00:00 +0500
+Subject: [PATCH] leds: add Nokia TA-1618 keypad backlight
+
+Add the board-specific SC2720 KPLED client used by the Nokia TA-1618.
+The driver source and binding are supplied by the target manifest.
+
+Signed-off-by: FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+---
+ drivers/leds/Kconfig  | 10 ++++++++++
+ drivers/leds/Makefile |  1 +
+ 2 files changed, 11 insertions(+)
+
+diff --git a/drivers/leds/Kconfig b/drivers/leds/Kconfig
+index 4537dea6d1e1..e61e129cdd74 100644
+--- a/drivers/leds/Kconfig
++++ b/drivers/leds/Kconfig
+@@ -1020,6 +1020,16 @@ config LEDS_ACER_A500
+ 	  This option enables support for the Power Button LED of
+ 	  Acer Iconia Tab A500.
+
++config LEDS_TA1618_KPLED
++	bool "Nokia TA-1618 keypad backlight"
++	depends on MACH_NOKIA_TA1618
++	depends on LEDS_CLASS && OF
++	help
++	  Say Y here to enable the keypad backlight on the Nokia TA-1618.
++	  The driver accesses the SC2720 KPLED output through the shared
++	  UMS9117 analog-die interface provider. It exposes a binary LED class
++	  device and automatically turns the output off after about five seconds.
++
+ source "drivers/leds/blink/Kconfig"
+
+ comment "Flash and Torch LED drivers"
+diff --git a/drivers/leds/Makefile b/drivers/leds/Makefile
+index 0782a5c9894f..907973d1dc87 100644
+--- a/drivers/leds/Makefile
++++ b/drivers/leds/Makefile
+@@ -89,6 +89,7 @@ obj-$(CONFIG_LEDS_ST1202)		+= leds-st1202.o
+ obj-$(CONFIG_LEDS_SUN50I_A100)		+= leds-sun50i-a100.o
+ obj-$(CONFIG_LEDS_SUNFIRE)		+= leds-sunfire.o
+ obj-$(CONFIG_LEDS_SYSCON)		+= leds-syscon.o
++obj-$(CONFIG_LEDS_TA1618_KPLED)		+= leds-ta1618-kpled.o
+ obj-$(CONFIG_LEDS_TCA6507)		+= leds-tca6507.o
+ obj-$(CONFIG_LEDS_TI_LMU_COMMON)	+= leds-ti-lmu-common.o
+ obj-$(CONFIG_LEDS_TLC591XX)		+= leds-tlc591xx.o
+--
+2.53.0

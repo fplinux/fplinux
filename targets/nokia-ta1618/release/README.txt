@@ -51,6 +51,13 @@ flags; an existing /mnt/card mount keeps its current flags. It restores the text
 console and framebuffer when the engine exits normally or receives INT, TERM,
 HUP or QUIT. Do not use SIGKILL as a normal way to stop the game.
 
+The physical keypad backlight is available through the binary Linux LED class
+interface. Turn it on or off from the phone shell with:
+  echo 1 > /sys/class/leds/:kbd_backlight/brightness
+  echo 0 > /sys/class/leds/:kbd_backlight/brightness
+The maximum brightness value is 1. An in-kernel cutoff turns the output off after
+about five seconds even if userspace does not write 0.
+
 To end the RAM session through the qualified battery-only power-off path,
 detach with Ctrl-], disconnect USB and hold the red handset key continuously
 for five seconds. Releasing it sooner cancels the request; a short press remains
