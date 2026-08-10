@@ -22,9 +22,10 @@ keyboard events into a persistent uinput device. The local terminal accepts up
 to four compatible evdev devices, starts in T9 multi-tap mode, supports translated
 QWERTY input and reserves the bottom row for mode and modifier status.
 
-Boot, initramfs, timers, interrupts, display, keypad, both USB interfaces and the
-host keyboard bridge are validated on physical TA-1618 hardware. Display updates
-are damage-driven and complete through the LCDC interrupt: a settled framebuffer
+Boot, initramfs, timers, interrupts, display, keypad, keypad backlight, both USB
+interfaces and the host keyboard bridge are validated on physical TA-1618
+hardware. Display updates are damage-driven and complete through the LCDC
+interrupt: a settled framebuffer
 causes no transfers, while active full-screen drawing reaches 46.7 frames per
 second without visible tearing. Measured 4 MiB transfer rates with a static display
 are 753 KiB/s for upload and 1.40 MiB/s for pull. The current portrait terminal
@@ -195,6 +196,7 @@ that the stated limitation or current qualification gap still applies.
 | System timers                     | Supported     | UMS9117 system counter and Pike2 timer                             |
 | Display                           | Supported     | Damage-driven RGB565; up to 46.7 frames/s without visible tearing  |
 | Physical keypad                   | Supported     | Matrix plus active-low SC2720 EIC1 power and EIC9 physical 8       |
+| Keypad backlight                  | Supported     | Binary LED class output with an automatic five-second cutoff       |
 | USB device mode                   | Supported     | Two `g_serial` ports at `0525:a4a6`: shell/transfer and input      |
 | Host keyboard bridge              | Supported     | Host evdev to `/dev/ttyGS1` to uinput; `EVIOCGRAB` on the host     |
 | USB host mode                     | Not supported | The phone target enables peripheral mode only                      |
@@ -207,7 +209,7 @@ that the stated limitation or current qualification gap still applies.
 | Battery and charging              | Not supported | Power-supply hardware is not described                             |
 | Suspend and power management      | Not supported | Kernel suspend support is disabled                                 |
 | Camera                            | Not supported | No camera pipeline or sensor driver is included                    |
-| Indicator LEDs and vibrator       | Not supported | WLED backlight works; no indicator LED or vibrator driver exists   |
+| Indicator LEDs and vibrator       | Not supported | No indicator LED or vibrator driver is implemented                 |
 
 ## Drivers
 
@@ -232,6 +234,9 @@ CONFIG_USB_GADGET=y
 CONFIG_USB_G_SERIAL=y
 CONFIG_MMC=y
 CONFIG_MMC_TA1618=y
+CONFIG_NEW_LEDS=y
+CONFIG_LEDS_CLASS=y
+CONFIG_LEDS_TA1618_KPLED=y
 CONFIG_FILE_LOCKING=y
 
 BR2_PACKAGE_FPLINUX_CONSOLE=y
@@ -245,17 +250,31 @@ The kernel command line selects two non-ACM generic-serial ports with
 `FPLinux host keyboard` uinput device, reads event lines from `/dev/ttyGS1` and
 keeps the device alive across host disconnections.
 
-The display, keypad, MMC and power-off drivers are built into the kernel. Module
-loading and unloading are enabled for RAM-only driver work, but the runtime has
-no `/lib/modules`, module dependency database or persistent root filesystem. A
-test module must be transferred into `/tmp`, loaded explicitly with `insmod` and
-removed with `rmmod` before the RAM session ends. The display and keypad expose
-standard `fbcon` and evdev interfaces to the [shared FPLinux
-terminal](../../docs/porting/CONSOLE.md), while MMC exposes its block device.
-The terminal contains no TA-1618 register or scan-code logic. The target
-bootstrap uses the shared freestanding
+The display, keypad, keypad-backlight, MMC and power-off drivers are built into the
+kernel. Module loading and unloading are enabled for RAM-only driver work, but the
+runtime has no `/lib/modules`, module dependency database or persistent root
+filesystem. A test module must be transferred into `/tmp`, loaded explicitly with
+`insmod` and removed with `rmmod` before the RAM session ends. The display, keypad
+and keypad backlight expose standard `fbcon`, evdev and LED class interfaces to the
+[shared FPLinux terminal](../../docs/porting/CONSOLE.md), while MMC exposes its
+block device. The terminal contains no TA-1618 register or scan-code logic. The
+target bootstrap uses the shared freestanding
 [boot-screen renderer](../../bootstrap/fplinux-boot-screen/) while retaining its
 panel adapter, hardware stages and handoff diagnostics locally.
+
+## Keypad backlight
+
+The physical keypad backlight is a binary Linux LED class device:
+
+```sh
+echo 1 > /sys/class/leds/:kbd_backlight/brightness
+echo 0 > /sys/class/leds/:kbd_backlight/brightness
+```
+
+`max_brightness` is `1`. Writing `1` selects the board-qualified SC2720 current
+code `1` and starts an in-kernel cutoff that returns the output to `0` after about
+five seconds. Writing `0` turns it off immediately. The driver restores only its
+owned fields in `KPLED_CTRL0`; it does not write `KPLED_CTRL1`.
 
 ## Framebuffer update contract
 
@@ -419,8 +438,8 @@ libusb 1.0, libudev, GNU `stdbuf` and USB permissions for `1782:4d00` and
   does not reconfigure EIC polarity or enable state.
 - The shared ADI provider owns the fixed controller and analog-slave mappings.
   It validates the inherited controller state and serializes framebuffer WLED,
-  keypad EIC9, MMC rail and SC2720 power-off transactions under the hardware
-  user lock.
+  keypad EIC, keypad-backlight, MMC rail and SC2720 power-off transactions under
+  the hardware user lock.
 - Board maps and FDL1 are downloaded and SHA-256 checked during source builds;
   see [`loader/PROVENANCE.md`](loader/PROVENANCE.md).
 - Runtime state is volatile. Holding the red handset key for five seconds
@@ -430,15 +449,15 @@ libusb 1.0, libudev, GNU `stdbuf` and USB permissions for `1782:4d00` and
 
 ## Source layout
 
-| Path          | Responsibility                                                |
-| ------------- | ------------------------------------------------------------- |
-| `target.toml` | Data-only board inputs, identity and runtime adapter values   |
-| `dts/`        | Phone memory map and enabled board devices                    |
-| `kernel/`     | Display, keypad and hardware handoff support                  |
-| `bootstrap/`  | Target RAM payload source and Linux handoff                   |
-| `rootfs/`     | Target identity and boot diagnostics layered over common init |
-| `loader/`     | Generic `fplinux.assets/v1` lock and asset provenance         |
-| `release/`    | Data-only `fplinux.release/v2` runtime and archive allowlists |
+| Path          | Responsibility                                                 |
+| ------------- | -------------------------------------------------------------- |
+| `target.toml` | Data-only board inputs, identity and runtime adapter values    |
+| `dts/`        | Phone memory map and enabled board devices                     |
+| `kernel/`     | Display, keypad, keypad-backlight and hardware handoff support |
+| `bootstrap/`  | Target RAM payload source and Linux handoff                    |
+| `rootfs/`     | Target identity and boot diagnostics layered over common init  |
+| `loader/`     | Generic `fplinux.assets/v1` lock and asset provenance          |
+| `release/`    | Data-only `fplinux.release/v2` runtime and archive allowlists  |
 
 Build behavior is shared in `scripts/fplinux_cli/builder.py`; execution uses
 `common/run.py` and the fixed `platforms/ums9117/host/adapter.py`.

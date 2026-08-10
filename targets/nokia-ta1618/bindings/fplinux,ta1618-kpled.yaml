@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: GPL-2.0-only
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/leds/fplinux,ta1618-kpled.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Nokia TA-1618 keypad backlight
+
+maintainers:
+  - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+
+description:
+  Board-specific LED class device for the keypad backlight output in the SC2720
+  analog die. The driver accesses the register through the shared UMS9117 ADI
+  provider and owns only the current and power-down fields in KPLED_CTRL0.
+
+allOf:
+  - $ref: /schemas/leds/common.yaml#
+
+properties:
+  compatible:
+    const: fplinux,ta1618-kpled
+
+  reg:
+    maxItems: 1
+
+  function:
+    const: kbd_backlight
+
+  fplinux,current-code:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    minimum: 1
+    maximum: 15
+    description: Board-qualified SC2720 KPLED current code
+
+required:
+  - compatible
+  - reg
+  - function
+  - fplinux,current-code
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/leds/common.h>
+
+    keypad-backlight@40608df8 {
+        compatible = "fplinux,ta1618-kpled";
+        reg = <0x40608df8 0x4>;
+        function = LED_FUNCTION_KBD_BACKLIGHT;
+        fplinux,current-code = <1>;
+    };

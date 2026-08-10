@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /dts-v1/;
 
+#include <dt-bindings/leds/common.h>
 #include "ums9117.dtsi"
 
 / {
@@ -114,6 +115,13 @@
 			/* Shared EIC1 power and EIC9 key data, read through ADI. */
 			sprd,eic-data-address = <0x40608280>;
 			sprd,aon-apb = <&aon_apb>;
+		};
+
+		keypad-backlight@40608df8 {
+			compatible = "fplinux,ta1618-kpled";
+			reg = <0x40608df8 0x00000004>;
+			function = LED_FUNCTION_KBD_BACKLIGHT;
+			fplinux,current-code = <1>;
 		};
 	};
 };
