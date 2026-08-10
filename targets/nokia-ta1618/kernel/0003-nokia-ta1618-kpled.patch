@@ -26,8 +26,8 @@ index 4537dea6d1e1..e61e129cdd74 100644
 +	help
 +	  Say Y here to enable the keypad backlight on the Nokia TA-1618.
 +	  The driver accesses the SC2720 KPLED output through the shared
-+	  UMS9117 analog-die interface provider. It exposes a binary LED class
-+	  device and automatically turns the output off after about five seconds.
++	  UMS9117 analog-die interface provider. Physical keypad presses light
++	  the binary LED class device for about five seconds.
 +
  source "drivers/leds/blink/Kconfig"
 
