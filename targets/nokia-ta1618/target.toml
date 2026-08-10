@@ -41,6 +41,10 @@ source = "bootstrap/ta1618-hwdiag.h"
 destination = "arch/arm/mach-ums9117/ta1618-hwdiag.h"
 
 [[linux.copies]]
+source = "kernel/ta1618-poweroff.c"
+destination = "arch/arm/mach-ums9117/ta1618-poweroff.c"
+
+[[linux.copies]]
 source = "kernel/ta1618-mmc.c"
 destination = "drivers/mmc/host/ta1618-mmc.c"
 

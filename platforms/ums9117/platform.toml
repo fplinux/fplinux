@@ -43,6 +43,14 @@ source = "platforms/ums9117/kernel/ums9117-timer.c"
 destination = "arch/arm/mach-ums9117/ums9117-timer.c"
 
 [[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-adi.c"
+destination = "arch/arm/mach-ums9117/ums9117-adi.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-adi.h"
+destination = "include/linux/soc/sprd/ums9117-adi.h"
+
+[[linux.copies]]
 source = "platforms/ums9117/kernel/ums9117-musb.c"
 destination = "drivers/usb/musb/ums9117.c"
 

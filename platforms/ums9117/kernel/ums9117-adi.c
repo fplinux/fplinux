@@ -1,0 +1,296 @@
+// SPDX-License-Identifier: GPL-2.0-only
+#include <linux/bitfield.h>
+#include <linux/bitops.h>
+#include <linux/delay.h>
+#include <linux/init.h>
+#include <linux/io.h>
+#include <linux/module.h>
+#include <linux/spinlock.h>
+
+#include <linux/soc/sprd/ums9117-adi.h>
+
+#define UMS9117_ADI_PHYS 0x40600000u
+#define UMS9117_ANALOG_PHYS 0x40608000u
+#define UMS9117_ADI_SIZE 0x1000u
+#define UMS9117_ANALOG_SIZE 0x1000u
+
+#define ADI_VERSION 0x000
+#define ADI_MST_CTL 0x004
+#define ADI_INT_RAW 0x014
+#define ADI_INT_CLR 0x01c
+#define ADI_RD_CMD 0x028
+#define ADI_RD_DATA 0x02c
+#define ADI_FIFO_STS 0x030
+#define ADI_USER_LOCK 0x224
+#define ADI_EXPECTED_VERSION 0x00000400u
+#define ADI_EXPECTED_MST_CTL 0x00000000u
+#define ADI_RD_BUSY BIT(31)
+#define ADI_RD_RETURNED_ADDRESS GENMASK(30, 16)
+#define ADI_FIFO_EMPTY BIT(10)
+#define ADI_FIFO_FULL BIT(11)
+#define ADI_ARM_FIFO_OVERFLOW BIT(3)
+#define ADI_USER_LOCK_RELEASE 0x5348554cu
+#define ADI_POLL_BUDGET_US 3000u
+
+static void __iomem *adi_controller;
+static void __iomem *analog_slave;
+static DEFINE_RAW_SPINLOCK(adi_lock);
+static bool adi_ready;
+static bool adi_poisoned;
+
+static int ums9117_adi_validate(void)
+{
+	if (readl(adi_controller + ADI_VERSION) != ADI_EXPECTED_VERSION ||
+	    readl(adi_controller + ADI_MST_CTL) != ADI_EXPECTED_MST_CTL)
+		return -EPROTONOSUPPORT;
+	return 0;
+}
+
+static int ums9117_adi_clear_overflow_locked(void)
+{
+	writel(ADI_ARM_FIFO_OVERFLOW, adi_controller + ADI_INT_CLR);
+	return readl(adi_controller + ADI_INT_RAW) & ADI_ARM_FIFO_OVERFLOW ?
+		       -EIO :
+		       -EOVERFLOW;
+}
+
+static int ums9117_adi_wait_empty_locked(void)
+{
+	unsigned int waited;
+	bool overflow = false;
+	u32 raw;
+	u32 status;
+
+	for (waited = 0; waited < ADI_POLL_BUDGET_US; waited++) {
+		raw = readl(adi_controller + ADI_INT_RAW);
+		status = readl(adi_controller + ADI_FIFO_STS);
+		overflow |= !!(raw & ADI_ARM_FIFO_OVERFLOW);
+		if (status & ADI_FIFO_EMPTY)
+			return overflow ? ums9117_adi_clear_overflow_locked() :
+					  0;
+		udelay(1);
+	}
+	return -ETIMEDOUT;
+}
+
+static int ums9117_adi_wait_quiescent_locked(void)
+{
+	unsigned int waited;
+	bool overflow = false;
+	u32 data;
+	u32 raw;
+	u32 status;
+
+	for (waited = 0; waited < ADI_POLL_BUDGET_US; waited++) {
+		raw = readl(adi_controller + ADI_INT_RAW);
+		status = readl(adi_controller + ADI_FIFO_STS);
+		data = readl(adi_controller + ADI_RD_DATA);
+		overflow |= !!(raw & ADI_ARM_FIFO_OVERFLOW);
+		if ((status & ADI_FIFO_EMPTY) && !(data & ADI_RD_BUSY))
+			return overflow ? ums9117_adi_clear_overflow_locked() :
+					  0;
+		udelay(1);
+	}
+	return -ETIMEDOUT;
+}
+
+static bool
+ums9117_adi_transaction_valid(struct ums9117_adi_transaction *transaction)
+{
+	return transaction && transaction->active;
+}
+
+int ums9117_adi_begin(struct ums9117_adi_transaction *transaction)
+{
+	unsigned int waited;
+	int ret;
+
+	if (!transaction || transaction->active)
+		return -EINVAL;
+	raw_spin_lock_irqsave(&adi_lock, transaction->irq_flags);
+	if (!adi_ready) {
+		ret = -ENODEV;
+		goto unlock;
+	}
+	if (adi_poisoned) {
+		ret = -EIO;
+		goto unlock;
+	}
+
+	for (waited = 0; waited < ADI_POLL_BUDGET_US; waited++) {
+		if (!readl(adi_controller + ADI_USER_LOCK)) {
+			ret = ums9117_adi_wait_quiescent_locked();
+			if (!ret) {
+				transaction->active = true;
+				/* Ownership is transferred to ums9117_adi_end(). */
+				__release(&adi_lock);
+				return 0;
+			}
+			if (ret == -EOVERFLOW)
+				writel(ADI_USER_LOCK_RELEASE,
+				       adi_controller + ADI_USER_LOCK);
+			else
+				adi_poisoned = true;
+			goto unlock;
+		}
+		udelay(1);
+	}
+	ret = -EBUSY;
+
+unlock:
+	raw_spin_unlock_irqrestore(&adi_lock, transaction->irq_flags);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(ums9117_adi_begin);
+
+int ums9117_adi_end(struct ums9117_adi_transaction *transaction)
+{
+	int ret;
+
+	if (!ums9117_adi_transaction_valid(transaction))
+		return -EINVAL;
+	/* Ownership was transferred by ums9117_adi_begin(). */
+	__acquire(&adi_lock);
+	ret = ums9117_adi_wait_quiescent_locked();
+	if (!ret || ret == -EOVERFLOW)
+		writel(ADI_USER_LOCK_RELEASE, adi_controller + ADI_USER_LOCK);
+	else
+		adi_poisoned = true;
+	transaction->active = false;
+	raw_spin_unlock_irqrestore(&adi_lock, transaction->irq_flags);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(ums9117_adi_end);
+
+int ums9117_adi_read(struct ums9117_adi_transaction *transaction, u32 offset,
+		     u16 *value)
+{
+	unsigned int waited;
+	u32 data;
+	u32 returned;
+	int ret;
+
+	if (!ums9117_adi_transaction_valid(transaction) || !value ||
+	    !IS_ALIGNED(offset, sizeof(u32)) ||
+	    offset > UMS9117_ANALOG_SIZE - sizeof(u32))
+		return -EINVAL;
+	ret = ums9117_adi_validate();
+	if (ret)
+		return ret;
+
+	writel(offset, adi_controller + ADI_RD_CMD);
+	for (waited = 0; waited < ADI_POLL_BUDGET_US; waited++) {
+		data = readl(adi_controller + ADI_RD_DATA);
+		if (!(data & ADI_RD_BUSY))
+			break;
+		udelay(1);
+	}
+	if (waited == ADI_POLL_BUDGET_US)
+		return -ETIMEDOUT;
+	returned = FIELD_GET(ADI_RD_RETURNED_ADDRESS, data);
+	if (returned != offset >> 2)
+		return -EIO;
+	*value = data & 0xffffu;
+	return 0;
+}
+EXPORT_SYMBOL_GPL(ums9117_adi_read);
+
+static int ums9117_adi_write_locked(struct ums9117_adi_transaction *transaction,
+				    u32 offset, u16 value)
+{
+	int ret;
+
+	if (!ums9117_adi_transaction_valid(transaction) ||
+	    !IS_ALIGNED(offset, sizeof(u32)) ||
+	    offset > UMS9117_ANALOG_SIZE - sizeof(u32))
+		return -EINVAL;
+	ret = ums9117_adi_wait_empty_locked();
+	if (ret)
+		return ret;
+	if (readl(adi_controller + ADI_FIFO_STS) & ADI_FIFO_FULL)
+		return -EBUSY;
+	ret = ums9117_adi_validate();
+	if (ret)
+		return ret;
+
+	writel(value, analog_slave + offset);
+	/* Submit the analog write before polling its FIFO completion. */
+	wmb();
+	return ums9117_adi_wait_empty_locked();
+}
+
+int ums9117_adi_write(struct ums9117_adi_transaction *transaction, u32 offset,
+		      u16 value)
+{
+	u16 readback;
+	int ret;
+
+	ret = ums9117_adi_write_locked(transaction, offset, value);
+	if (ret)
+		return ret;
+	ret = ums9117_adi_read(transaction, offset, &readback);
+	if (ret)
+		return ret;
+	return readback == value ? 0 : -EIO;
+}
+EXPORT_SYMBOL_GPL(ums9117_adi_write);
+
+int ums9117_adi_update_bits(struct ums9117_adi_transaction *transaction,
+			    u32 offset, u16 mask, u16 value)
+{
+	u16 old_value;
+	int ret;
+
+	ret = ums9117_adi_read(transaction, offset, &old_value);
+	if (ret)
+		return ret;
+	return ums9117_adi_write(transaction, offset,
+				 (old_value & ~mask) | (value & mask));
+}
+EXPORT_SYMBOL_GPL(ums9117_adi_update_bits);
+
+int ums9117_adi_write_final(struct ums9117_adi_transaction *transaction,
+			    u32 offset, u16 value)
+{
+	return ums9117_adi_write_locked(transaction, offset, value);
+}
+EXPORT_SYMBOL_GPL(ums9117_adi_write_final);
+
+bool ums9117_adi_is_poisoned(void)
+{
+	return READ_ONCE(adi_poisoned);
+}
+EXPORT_SYMBOL_GPL(ums9117_adi_is_poisoned);
+
+static int __init ums9117_adi_init(void)
+{
+	int ret;
+
+	adi_controller = ioremap(UMS9117_ADI_PHYS, UMS9117_ADI_SIZE);
+	analog_slave = ioremap(UMS9117_ANALOG_PHYS, UMS9117_ANALOG_SIZE);
+	if (!adi_controller || !analog_slave) {
+		ret = -ENOMEM;
+		goto unmap;
+	}
+	ret = ums9117_adi_validate();
+	if (ret)
+		goto unmap;
+	WRITE_ONCE(adi_ready, true);
+	pr_info("UMS9117 inherited ADI transport ready\n");
+	return 0;
+
+unmap:
+	if (analog_slave) {
+		iounmap(analog_slave);
+		analog_slave = NULL;
+	}
+	if (adi_controller) {
+		iounmap(adi_controller);
+		adi_controller = NULL;
+	}
+	return ret;
+}
+arch_initcall(ums9117_adi_init);
+
+MODULE_DESCRIPTION("UMS9117 inherited analog-die interface transport");
+MODULE_LICENSE("GPL");

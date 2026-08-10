@@ -39,6 +39,18 @@ computed before sending, and the install is a rename over a temporary file, so
 a failed transfer leaves nothing behind. The ceiling is 8 MiB, which is a
 memory-safety limit rather than a protocol one.
 
+A loadable driver must be built against the exact running kernel. The runtime
+has module loading and unloading enabled but no dependency database, so load and
+remove a transferred module explicitly:
+
+```sh
+./fplinux console nokia-ta1618 --exec 'insmod /tmp/module.ko'
+./fplinux console nokia-ta1618 --exec 'rmmod module_name'
+```
+
+The module and every state change it makes remain part of the volatile RAM
+session.
+
 ## Taking a file
 
 ```sh
@@ -135,7 +147,7 @@ a remount in the middle, and reading off the card runs at the same rate as
 reading out of RAM. The card is not the limit in this path; the console is.
 
 Carrying the card between machines is the only way past that, and it is a
-manual step. The card host also claims the ADI controller and analog slave
-windows for itself rather than sharing them under the hardware lock the way the
-keypad does, so no second driver needing that transport can be bound while the
-card host is.
+manual step. The card host reaches its PMIC rails through the shared UMS9117 ADI
+provider. The provider owns the controller and analog-slave mappings and
+serializes MMC, framebuffer, keypad and power-off transactions under the ADI
+hardware user lock.

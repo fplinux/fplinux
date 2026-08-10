@@ -25,6 +25,7 @@
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
+#include <linux/soc/sprd/ums9117-adi.h>
 #include <linux/spinlock.h>
 #include <linux/workqueue.h>
 
@@ -87,23 +88,9 @@
 #define PANEL_INIT_DIVIDER 3u
 #define PIXEL_BITS 17u
 
-#define ADI_VERSION 0x000
-#define ADI_MST_CTL 0x004
-#define ADI_INT_RAW 0x014
-#define ADI_INT_CLR 0x01c
-#define ADI_RD_CMD 0x028
-#define ADI_RD_DATA 0x02c
-#define ADI_FIFO_STS 0x030
-#define ADI_USER_LOCK 0x224
-#define ADI_EXPECTED_VERSION 0x00000400u
-#define ADI_EXPECTED_MST_CTL 0x00000000u
-#define ADI_RD_BUSY BIT(31)
-#define ADI_RD_RETURNED_ADDRESS GENMASK(30, 16)
-#define ADI_FIFO_EMPTY BIT(10)
-#define ADI_FIFO_FULL BIT(11)
-#define ADI_ARM_FIFO_OVERFLOW BIT(3)
-#define ADI_USER_LOCK_RELEASE 0x5348554cu
-#define ADI_POLL_BUDGET_US 3000u
+#define UMS9117_ADI_PHYS 0x40600000u
+#define UMS9117_ANALOG_PHYS 0x40608000u
+#define ADI_CONTROLLER_MIN_SIZE 0x228u
 
 #define BLTC_CTRL 0x180
 #define BLTC_CURRENT0 0x1b8
@@ -249,8 +236,7 @@ struct ta1618_fb {
 	void __iomem *ap_ahb_reset_clear;
 	void __iomem *pinmux;
 	void __iomem *pinconf;
-	void __iomem *adi;
-	void __iomem *analog;
+	struct ums9117_adi_transaction adi_transaction;
 	struct regmap *aon_apb;
 	phys_addr_t screen_phys;
 	phys_addr_t transfer_phys;
@@ -284,7 +270,6 @@ struct ta1618_fb {
 	u8 last_dcs_command;
 	bool stopping;
 	bool in_flight;
-	bool adi_poisoned;
 	bool spi_faulted;
 	bool wled_known;
 	bool wled_on;
@@ -640,166 +625,24 @@ static const u32 ta1618_bltc_current_reg[BLTC_CURRENT_COUNT] = {
 	BLTC_CURRENT3,
 };
 
-static int ta1618_adi_validate(struct ta1618_fb *tfb)
-{
-	if (readl(tfb->adi + ADI_VERSION) != ADI_EXPECTED_VERSION ||
-	    readl(tfb->adi + ADI_MST_CTL) != ADI_EXPECTED_MST_CTL)
-		return -EPROTONOSUPPORT;
-	return 0;
-}
-
-static int ta1618_adi_clear_overflow_locked(struct ta1618_fb *tfb)
-{
-	writel(ADI_ARM_FIFO_OVERFLOW, tfb->adi + ADI_INT_CLR);
-	return readl(tfb->adi + ADI_INT_RAW) & ADI_ARM_FIFO_OVERFLOW ?
-		       -EIO :
-		       -EOVERFLOW;
-}
-
-static int ta1618_adi_wait_empty_locked(struct ta1618_fb *tfb)
-{
-	unsigned int waited;
-	bool overflow = false;
-	u32 raw;
-	u32 status;
-
-	for (waited = 0; waited < ADI_POLL_BUDGET_US; waited++) {
-		raw = readl(tfb->adi + ADI_INT_RAW);
-		status = readl(tfb->adi + ADI_FIFO_STS);
-		overflow |= !!(raw & ADI_ARM_FIFO_OVERFLOW);
-		if (status & ADI_FIFO_EMPTY)
-			return overflow ?
-				       ta1618_adi_clear_overflow_locked(tfb) :
-				       0;
-		udelay(1);
-	}
-	return -ETIMEDOUT;
-}
-
-static int ta1618_adi_wait_quiescent_locked(struct ta1618_fb *tfb)
-{
-	unsigned int waited;
-	bool overflow = false;
-	u32 data;
-	u32 raw;
-	u32 status;
-
-	for (waited = 0; waited < ADI_POLL_BUDGET_US; waited++) {
-		raw = readl(tfb->adi + ADI_INT_RAW);
-		status = readl(tfb->adi + ADI_FIFO_STS);
-		data = readl(tfb->adi + ADI_RD_DATA);
-		overflow |= !!(raw & ADI_ARM_FIFO_OVERFLOW);
-		if ((status & ADI_FIFO_EMPTY) && !(data & ADI_RD_BUSY))
-			return overflow ?
-				       ta1618_adi_clear_overflow_locked(tfb) :
-				       0;
-		udelay(1);
-	}
-	return -ETIMEDOUT;
-}
-
-static void ta1618_adi_poison(struct ta1618_fb *tfb)
-{
-	unsigned long flags;
-
-	spin_lock_irqsave(&tfb->lock, flags);
-	tfb->adi_poisoned = true;
-	spin_unlock_irqrestore(&tfb->lock, flags);
-}
-
 static int ta1618_adi_lock(struct ta1618_fb *tfb)
 {
-	unsigned int waited;
-	int ret;
-
-	if (READ_ONCE(tfb->adi_poisoned))
-		return -EIO;
-	for (waited = 0; waited < ADI_POLL_BUDGET_US; waited++) {
-		if (!readl(tfb->adi + ADI_USER_LOCK)) {
-			ret = ta1618_adi_wait_quiescent_locked(tfb);
-			if (!ret)
-				return 0;
-			if (ret == -EOVERFLOW) {
-				writel(ADI_USER_LOCK_RELEASE,
-				       tfb->adi + ADI_USER_LOCK);
-				return ret;
-			}
-			/* Fence an unfinished transaction from every ADI client. */
-			ta1618_adi_poison(tfb);
-			return ret;
-		}
-		udelay(1);
-	}
-	return -EBUSY;
+	return ums9117_adi_begin(&tfb->adi_transaction);
 }
 
 static int ta1618_adi_unlock(struct ta1618_fb *tfb)
 {
-	int ret;
-
-	ret = ta1618_adi_wait_quiescent_locked(tfb);
-	if (!ret || ret == -EOVERFLOW) {
-		writel(ADI_USER_LOCK_RELEASE, tfb->adi + ADI_USER_LOCK);
-		return ret;
-	}
-	/* Releasing a busy controller would let another client overlap it. */
-	ta1618_adi_poison(tfb);
-	return ret;
+	return ums9117_adi_end(&tfb->adi_transaction);
 }
 
 static int ta1618_adi_read_locked(struct ta1618_fb *tfb, u32 offset, u16 *value)
 {
-	unsigned int waited;
-	u32 data;
-	u32 returned;
-	int ret;
-
-	if (!value || !IS_ALIGNED(offset, sizeof(u32)) ||
-	    offset > 0x1000u - sizeof(u32))
-		return -EINVAL;
-	ret = ta1618_adi_validate(tfb);
-	if (ret)
-		return ret;
-
-	writel(offset, tfb->adi + ADI_RD_CMD);
-	for (waited = 0; waited < ADI_POLL_BUDGET_US; waited++) {
-		data = readl(tfb->adi + ADI_RD_DATA);
-		if (!(data & ADI_RD_BUSY))
-			break;
-		udelay(1);
-	}
-	if (waited == ADI_POLL_BUDGET_US)
-		return -ETIMEDOUT;
-	returned = FIELD_GET(ADI_RD_RETURNED_ADDRESS, data);
-	if (returned != offset >> 2)
-		return -EIO;
-	*value = data & 0xffffu;
-	return 0;
+	return ums9117_adi_read(&tfb->adi_transaction, offset, value);
 }
 
 static int ta1618_adi_write_locked(struct ta1618_fb *tfb, u32 offset, u16 value)
 {
-	u16 readback;
-	int ret;
-
-	if (!IS_ALIGNED(offset, sizeof(u32)) || offset > 0x1000u - sizeof(u32))
-		return -EINVAL;
-	ret = ta1618_adi_wait_empty_locked(tfb);
-	if (ret)
-		return ret;
-	if (readl(tfb->adi + ADI_FIFO_STS) & ADI_FIFO_FULL)
-		return -EBUSY;
-	ret = ta1618_adi_validate(tfb);
-	if (ret)
-		return ret;
-	writel(value, tfb->analog + offset);
-	ret = ta1618_adi_wait_empty_locked(tfb);
-	if (ret)
-		return ret;
-	ret = ta1618_adi_read_locked(tfb, offset, &readback);
-	if (ret)
-		return ret;
-	return readback == value ? 0 : -EIO;
+	return ums9117_adi_write(&tfb->adi_transaction, offset, value);
 }
 
 static int ta1618_adi_update_bits_locked(struct ta1618_fb *tfb, u32 offset,
@@ -2084,7 +1927,7 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 	last_dcs_command = tfb->last_dcs_command;
 	in_flight = tfb->in_flight;
 	damage_pending = ta1618_damage_pending(tfb);
-	adi_poisoned = tfb->adi_poisoned;
+	adi_poisoned = ums9117_adi_is_poisoned();
 	spi_faulted = tfb->spi_faulted;
 	wled_known = tfb->wled_known;
 	wled_on = tfb->wled_on;
@@ -2296,17 +2139,11 @@ static int ta1618_fb_probe(struct platform_device *pdev)
 					      "adi-controller");
 	analogres = platform_get_resource_byname(pdev, IORESOURCE_MEM,
 						 "analog-slave");
-	if (!adires || !analogres ||
-	    resource_size(adires) < ADI_USER_LOCK + sizeof(u32) ||
+	if (!adires || !analogres || adires->start != UMS9117_ADI_PHYS ||
+	    analogres->start != UMS9117_ANALOG_PHYS ||
+	    resource_size(adires) < ADI_CONTROLLER_MIN_SIZE ||
 	    resource_size(analogres) < ANA_LDO_PD_CTRL + sizeof(u32)) {
 		ret = -EINVAL;
-		goto release;
-	}
-	tfb->adi = devm_ioremap(dev, adires->start, resource_size(adires));
-	tfb->analog =
-		devm_ioremap(dev, analogres->start, resource_size(analogres));
-	if (!tfb->adi || !tfb->analog) {
-		ret = -ENOMEM;
 		goto release;
 	}
 	tfb->irq = platform_get_irq_optional(pdev, 0);
@@ -2454,6 +2291,38 @@ release:
 	return ret;
 }
 
+static void ta1618_fb_shutdown(struct platform_device *pdev)
+{
+	struct ta1618_fb *tfb = platform_get_drvdata(pdev);
+	unsigned long flags;
+	int cleanup_ret = 0;
+	int quiesce_ret;
+
+	mutex_lock(&tfb->transition_lock);
+	spin_lock_irqsave(&tfb->lock, flags);
+	tfb->stopping = true;
+	spin_unlock_irqrestore(&tfb->lock, flags);
+	mutex_unlock(&tfb->transition_lock);
+
+	cancel_work_sync(&tfb->wake_work);
+	mutex_lock(&tfb->transition_lock);
+	quiesce_ret = ta1618_quiesce_pipeline(tfb);
+	if (!quiesce_ret) {
+		mutex_lock(&tfb->panel_lock);
+		cleanup_ret = ta1618_fail_dark_locked(tfb);
+		mutex_unlock(&tfb->panel_lock);
+	}
+	mutex_unlock(&tfb->transition_lock);
+	if (quiesce_ret)
+		dev_err(&pdev->dev,
+			"could not quiesce display during shutdown: %d\n",
+			quiesce_ret);
+	else if (cleanup_ret)
+		dev_err(&pdev->dev,
+			"could not fail display dark during shutdown: %d\n",
+			cleanup_ret);
+}
+
 static void ta1618_fb_remove(struct platform_device *pdev)
 {
 	struct ta1618_fb *tfb = platform_get_drvdata(pdev);
@@ -2501,6 +2370,7 @@ MODULE_DEVICE_TABLE(of, ta1618_fb_of_match);
 static struct platform_driver ta1618_fb_driver = {
 	.probe = ta1618_fb_probe,
 	.remove = ta1618_fb_remove,
+	.shutdown = ta1618_fb_shutdown,
 	.driver = {
 		.name = "ta1618-fb",
 		.of_match_table = ta1618_fb_of_match,

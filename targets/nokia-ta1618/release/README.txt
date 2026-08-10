@@ -51,10 +51,16 @@ flags; an existing /mnt/card mount keeps its current flags. It restores the text
 console and framebuffer when the engine exits normally or receives INT, TERM,
 HUP or QUIT. Do not use SIGKILL as a normal way to stop the game.
 
-To end the RAM session, detach with Ctrl-], disconnect USB, remove the battery
-and then reinsert it. The next normal power-on uses the unchanged vendor
-firmware. Linux reboot, poweroff and PMIC-controlled shutdown are not qualified
-exit paths.
+To end the RAM session through the qualified battery-only power-off path, run
+these commands in the phone shell:
+  sync
+  (trap '' HUP; sleep 20; poweroff -f) </dev/null >/dev/null 2>&1 &
+Detach with Ctrl-] and disconnect USB before the delay expires. The SC2720
+handler refuses its final PMIC write while charger input is active. If USB was
+not disconnected in time or the phone remains powered, remove and reinsert the
+battery before booting again. A successful shutdown discards the volatile
+FPLinux session; the next manual power-on uses the unchanged vendor firmware.
+Linux reboot and power-button shutdown are not qualified.
 
 BUILD-MANIFEST.json records the content-addressed workspace and container
 receipts together with bundled-file hashes. Exact pinned inputs are defined by

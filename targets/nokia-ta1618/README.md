@@ -199,6 +199,7 @@ that the stated limitation or current qualification gap still applies.
 | Host keyboard bridge              | Supported     | Host evdev to `/dev/ttyGS1` to uinput; `EVIOCGRAB` on the host     |
 | USB host mode                     | Not supported | The phone target enables peripheral mode only                      |
 | microSD card                      | Supported     | 4-bit multi-block reads and writes up to 48.75 MHz; no hot-swap    |
+| System power-off                  | Supported     | Guarded battery-only SC2720 shutdown; USB must be disconnected     |
 | Internal flash access             | Not supported | Linux does not expose phone storage                                |
 | Audio                             | Not supported | No speaker, headphone or microphone driver is implemented          |
 | Modem, calls, SMS and mobile data | Not supported | Baseband interfaces are not implemented                            |
@@ -215,6 +216,8 @@ All drivers required by the console profile are built into the kernel image:
 ```text
 CONFIG_ARCH_UMS9117=y
 CONFIG_MACH_NOKIA_TA1618=y
+CONFIG_MODULES=y
+CONFIG_MODULE_UNLOAD=y
 CONFIG_INPUT_EVDEV=y
 CONFIG_INPUT_MISC=y
 CONFIG_INPUT_UINPUT=y
@@ -242,11 +245,15 @@ The kernel command line selects two non-ACM generic-serial ports with
 `FPLinux host keyboard` uinput device, reads event lines from `/dev/ttyGS1` and
 keeps the device alive across host disconnections.
 
-The runtime does not depend on `/lib/modules`, `modprobe` or a persistent root
-filesystem. The display and keypad drivers expose standard `fbcon` and evdev
-interfaces to the [shared FPLinux terminal](../../docs/porting/CONSOLE.md); the
-terminal contains no TA-1618 register or scan-code logic. The target bootstrap
-uses the shared freestanding
+The display, keypad, MMC and power-off drivers are built into the kernel. Module
+loading and unloading are enabled for RAM-only driver work, but the runtime has
+no `/lib/modules`, module dependency database or persistent root filesystem. A
+test module must be transferred into `/tmp`, loaded explicitly with `insmod` and
+removed with `rmmod` before the RAM session ends. The display and keypad expose
+standard `fbcon` and evdev interfaces to the [shared FPLinux
+terminal](../../docs/porting/CONSOLE.md), while MMC exposes its block device.
+The terminal contains no TA-1618 register or scan-code logic. The target
+bootstrap uses the shared freestanding
 [boot-screen renderer](../../bootstrap/fplinux-boot-screen/) while retaining its
 panel adapter, hardware stages and handoff diagnostics locally.
 
@@ -346,12 +353,24 @@ After 60 seconds, `timeout` sends `SIGTERM`; the client releases the evdev grab
 before it exits.
 
 The keyboard forwarder and one interface 0 client can run at the same time. Do
-not start the full runner merely to reconnect. To end the RAM session, detach
-with `Ctrl-]`, disconnect USB, remove the battery and then reinsert it. The next
-normal power-on uses the unchanged vendor firmware. Linux `reboot`, `poweroff`
-and PMIC-controlled shutdown are not qualified exit paths. See
-[Console lifecycle](../../docs/RELEASES.md#console-lifecycle) for key behavior and
-troubleshooting.
+not start the full runner merely to reconnect.
+
+To end the RAM session through the qualified SC2720 path, run this in the phone
+shell:
+
+```sh
+sync
+(trap '' HUP; sleep 20; poweroff -f) </dev/null >/dev/null 2>&1 &
+```
+
+Detach with `Ctrl-]` and disconnect USB before the delay expires. The target
+handler permits the final PMIC write only after the charger status reports that
+USB power is absent. If a guard fails or the phone remains powered, remove and
+reinsert the battery before booting again. A successful power-off discards the
+volatile FPLinux session, and the next manual power-on uses the unchanged vendor
+firmware. Linux reboot and power-button shutdown remain unsupported. See
+[Console lifecycle](../../docs/RELEASES.md#console-lifecycle) for the complete
+failure boundary.
 
 ## Release archive
 
@@ -398,14 +417,19 @@ libusb 1.0, libudev, GNU `stdbuf` and USB permissions for `1782:4d00` and
   transfers; EP2 backs interface 1 for input events. USB DMA and host mode are
   not implemented.
 - The physical `8` key is not part of the keypad matrix. Linux polls the
-  inherited analog EIC9 level through the ADI hardware lock and reports it as
-  `KEY_8`; the driver does not reconfigure EIC polarity or enable state.
+  inherited analog EIC9 level through the shared UMS9117 ADI provider and
+  reports it as `KEY_8`; the driver does not reconfigure EIC polarity or enable
+  state.
+- The shared ADI provider owns the fixed controller and analog-slave mappings.
+  It validates the inherited controller state and serializes framebuffer WLED,
+  keypad EIC9, MMC rail and SC2720 power-off transactions under the hardware
+  user lock.
 - Board maps and FDL1 are downloaded and SHA-256 checked during source builds;
   see [`loader/PROVENANCE.md`](loader/PROVENANCE.md).
-- Runtime state is volatile. The tested TA-1618 exit is to detach the host
-  client, disconnect USB, remove the battery and then reinsert it. The next
-  normal power-on uses the unchanged vendor firmware. Linux reboot, power-off,
-  PMIC shutdown and power-button behavior are not qualified.
+- Runtime state is volatile. The qualified power-off path requires battery-only
+  operation and an inactive charger input. The next manual power-on uses the
+  unchanged vendor firmware. Linux reboot and power-button behavior are not
+  qualified.
 
 ## Source layout
 

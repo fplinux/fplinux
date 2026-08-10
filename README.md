@@ -135,11 +135,21 @@ file to it and takes a file off it without opening a terminal. See [Moving
 files between the host and the phone](docs/TRANSFER.md) for the modes, their
 checks and their current measured rates.
 
-To leave the RAM session, detach with `Ctrl-]`, disconnect USB, remove the
-TA-1618 battery, then reinsert it. The next power-on uses the unchanged vendor
-firmware because the FPLinux payload was held only in volatile RAM. Linux
-`reboot`, `poweroff` and PMIC-controlled shutdown are not qualified exit paths.
-See [Console lifecycle](docs/RELEASES.md#console-lifecycle) for the full boundary.
+The TA-1618 has a guarded battery-only power-off path. From the phone shell,
+sync the filesystems and schedule the forced kernel power-off far enough ahead
+to detach the console and unplug USB:
+
+```sh
+sync
+(trap '' HUP; sleep 20; poweroff -f) </dev/null >/dev/null 2>&1 &
+```
+
+Detach with `Ctrl-]` and disconnect USB before the delay expires. The SC2720
+handler refuses the final PMIC write while the charger input is active. A
+successful shutdown discards the RAM-loaded payload, and the next manual
+power-on follows the unchanged vendor boot path. Linux reboot and power-button
+shutdown remain unsupported. See [Console lifecycle](docs/RELEASES.md#console-lifecycle)
+for the complete procedure and failure behavior.
 
 ## Release archives
 
