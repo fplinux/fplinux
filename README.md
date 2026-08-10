@@ -135,21 +135,17 @@ file to it and takes a file off it without opening a terminal. See [Moving
 files between the host and the phone](docs/TRANSFER.md) for the modes, their
 checks and their current measured rates.
 
-The TA-1618 has a guarded battery-only power-off path. From the phone shell,
-sync the filesystems and schedule the forced kernel power-off far enough ahead
-to detach the console and unplug USB:
+The TA-1618 has a guarded battery-only power-off path. Detach the console with
+`Ctrl-]`, disconnect USB and hold the red handset key for five seconds. The
+keypad reports the active-low SC2720 EIC1 line as `KEY_POWER`; the built-in
+power-off handler checks the exact PMIC identity, refuses shutdown while charger
+input is active and syncs the filesystems before entering system shutdown.
 
-```sh
-sync
-(trap '' HUP; sleep 20; poweroff -f) </dev/null >/dev/null 2>&1 &
-```
-
-Detach with `Ctrl-]` and disconnect USB before the delay expires. The SC2720
-handler refuses the final PMIC write while the charger input is active. A
-successful shutdown discards the RAM-loaded payload, and the next manual
-power-on follows the unchanged vendor boot path. Linux reboot and power-button
-shutdown remain unsupported. See [Console lifecycle](docs/RELEASES.md#console-lifecycle)
-for the complete procedure and failure behavior.
+A successful shutdown discards the RAM-loaded payload, and the next manual
+power-on follows the unchanged vendor boot path. Short power-key presses remain
+ordinary input events. Linux reboot remains unsupported. See [Console
+lifecycle](docs/RELEASES.md#console-lifecycle) for the complete procedure and
+failure behavior.
 
 ## Release archives
 

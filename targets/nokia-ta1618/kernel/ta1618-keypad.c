@@ -4,8 +4,8 @@
  *
  * The register layout and scan-code decoding are taken from the working
  * UMS9117 fpdoom port.  The driver polls because the keypad interrupt route is
- * not validated.  The separate physical 8 key is sampled through the inherited
- * over ADI.
+ * not validated.  The separate physical 8 key and red power key are sampled
+ * from the inherited analog EIC through the shared ADI provider.
  */
 #include <linux/bitops.h>
 #include <linux/delay.h>
@@ -37,7 +37,8 @@
 #define UMS9117_ADI_SLAVE_SIZE 0x1000u
 #define ADI_CONTROLLER_MIN_SIZE 0x228u
 
-#define EIC_DATA_BIT 9
+#define POWER_KEY_BIT 1
+#define EIC9_KEY_BIT 9
 #define EIC_POLL_MS 5
 
 struct ta1618_keypad {
@@ -52,6 +53,7 @@ struct ta1618_keypad {
 	bool eic_baseline_valid;
 	bool eic_baseline;
 	bool eic_down;
+	bool power_down;
 	bool eic_error_reported;
 	bool eic_first_event_reported;
 	bool stopping;
@@ -138,8 +140,10 @@ static void ta1618_keypad_eic_poll(struct work_struct *work)
 {
 	struct ta1618_keypad *tk = container_of(
 		to_delayed_work(work), struct ta1618_keypad, eic_poll_work);
+	bool power_down;
 	bool down;
 	bool level;
+	bool sync = false;
 	u16 data;
 	int ret;
 
@@ -148,36 +152,42 @@ static void ta1618_keypad_eic_poll(struct work_struct *work)
 		if (!tk->eic_error_reported) {
 			dev_warn(
 				tk->dev,
-				"EIC9 read unavailable (%d); matrix keypad remains active\n",
+				"analog EIC read unavailable (%d); matrix keypad remains active\n",
 				ret);
 			tk->eic_error_reported = true;
 		}
 		goto out;
 	}
 
-	level = !!(data & BIT(EIC_DATA_BIT));
-	if (!tk->eic_baseline_valid) {
-		/*
-		 * Preserve the inherited polarity: the first readable idle
-		 * level becomes the release baseline and emits no input event.
-		 */
-		tk->eic_baseline = level;
-		tk->eic_baseline_valid = true;
-		goto out;
+	power_down = !(data & BIT(POWER_KEY_BIT));
+	if (power_down != tk->power_down) {
+		tk->power_down = power_down;
+		input_report_key(tk->input, KEY_POWER, power_down);
+		sync = true;
 	}
 
-	down = level != tk->eic_baseline;
-	if (down != tk->eic_down) {
-		tk->eic_down = down;
-		input_report_key(tk->input, KEY_8, down);
-		input_sync(tk->input);
-		if (!tk->eic_first_event_reported) {
-			tk->eic_first_event_reported = true;
-			dev_info(tk->dev,
-				 "first EIC9 key event: down=%u data=0x%04x\n",
-				 down, data);
+	level = !!(data & BIT(EIC9_KEY_BIT));
+	if (!tk->eic_baseline_valid) {
+		/* Preserve the inherited EIC9 polarity and suppress boot noise. */
+		tk->eic_baseline = level;
+		tk->eic_baseline_valid = true;
+	} else {
+		down = level != tk->eic_baseline;
+		if (down != tk->eic_down) {
+			tk->eic_down = down;
+			input_report_key(tk->input, KEY_8, down);
+			sync = true;
+			if (!tk->eic_first_event_reported) {
+				tk->eic_first_event_reported = true;
+				dev_info(
+					tk->dev,
+					"first EIC9 key event: down=%u data=0x%04x\n",
+					down, data);
+			}
 		}
 	}
+	if (sync)
+		input_sync(tk->input);
 
 out:
 	if (!READ_ONCE(tk->stopping))
@@ -198,7 +208,7 @@ static void ta1618_keypad_setup_eic(struct platform_device *pdev,
 	if (!adi_res || ret) {
 		dev_warn(
 			dev,
-			"EIC9 resources unavailable; matrix keypad remains active\n");
+			"analog EIC resources unavailable; matrix keypad remains active\n");
 		return;
 	}
 	if (adi_res->start != UMS9117_ADI_PHYS ||
@@ -209,7 +219,7 @@ static void ta1618_keypad_setup_eic(struct platform_device *pdev,
 					UMS9117_ADI_SLAVE_SIZE - sizeof(u32)) {
 		dev_warn(
 			dev,
-			"EIC9 resources invalid; matrix keypad remains active\n");
+			"analog EIC resources invalid; matrix keypad remains active\n");
 		return;
 	}
 
@@ -286,8 +296,10 @@ static int ta1618_keypad_probe(struct platform_device *pdev)
 	for (i = 0; i < ARRAY_SIZE(ta1618_keycodes); ++i)
 		if (ta1618_keycodes[i])
 			input_set_capability(input, EV_KEY, ta1618_keycodes[i]);
-	if (tk->eic_available)
+	if (tk->eic_available) {
+		input_set_capability(input, EV_KEY, KEY_POWER);
 		input_set_capability(input, EV_KEY, KEY_8);
+	}
 
 	ret = ta1618_keypad_hw_init(tk);
 	if (ret)
@@ -305,8 +317,9 @@ static int ta1618_keypad_probe(struct platform_device *pdev)
 		schedule_delayed_work(&tk->eic_poll_work,
 				      msecs_to_jiffies(EIC_POLL_MS));
 
-	dev_info(dev, "polled TA-1618 keypad registered (EIC9 %s)\n",
-		 tk->eic_available ? "5 ms poll" : "unavailable");
+	dev_info(dev, "polled TA-1618 keypad registered (analog EIC %s)\n",
+		 tk->eic_available ? "EIC1 power and EIC9 key at 5 ms" :
+				     "unavailable");
 	return 0;
 }
 
@@ -345,5 +358,5 @@ static struct platform_driver ta1618_keypad_driver = {
 };
 module_platform_driver(ta1618_keypad_driver);
 
-MODULE_DESCRIPTION("Nokia TA-1618 polled matrix and EIC9 keypad");
+MODULE_DESCRIPTION("Nokia TA-1618 matrix, power and EIC9 keypad");
 MODULE_LICENSE("GPL");

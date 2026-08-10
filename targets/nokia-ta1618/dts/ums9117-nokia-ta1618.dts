@@ -111,7 +111,7 @@
 			reg = <0x40250000 0x00000100>,
 			      <0x40600000 0x00001000>;
 			reg-names = "keypad", "adi";
-			/* ADI read target, never directly mapped by Linux. */
+			/* Shared EIC1 power and EIC9 key data, read through ADI. */
 			sprd,eic-data-address = <0x40608280>;
 			sprd,aon-apb = <&aon_apb>;
 		};
