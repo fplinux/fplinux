@@ -196,7 +196,7 @@ that the stated limitation or current qualification gap still applies.
 | System timers                     | Supported     | UMS9117 system counter and Pike2 timer                             |
 | Display                           | Supported     | Damage-driven RGB565; up to 46.7 frames/s without visible tearing  |
 | Physical keypad                   | Supported     | Matrix plus active-low SC2720 EIC1 power and EIC9 physical 8       |
-| Keypad backlight                  | Supported     | Binary LED class output with an automatic five-second cutoff       |
+| Keypad backlight                  | Supported     | Any new key press starts or extends the five-second illumination   |
 | USB device mode                   | Supported     | Two `g_serial` ports at `0525:a4a6`: shell/transfer and input      |
 | Host keyboard bridge              | Supported     | Host evdev to `/dev/ttyGS1` to uinput; `EVIOCGRAB` on the host     |
 | USB host mode                     | Not supported | The phone target enables peripheral mode only                      |
@@ -271,10 +271,12 @@ echo 1 > /sys/class/leds/:kbd_backlight/brightness
 echo 0 > /sys/class/leds/:kbd_backlight/brightness
 ```
 
-`max_brightness` is `1`. Writing `1` selects the board-qualified SC2720 current
-code `1` and starts an in-kernel cutoff that returns the output to `0` after about
-five seconds. Writing `0` turns it off immediately. The driver restores only its
-owned fields in `KPLED_CTRL0`; it does not write `KPLED_CTRL1`.
+`max_brightness` is `1`. Each new press from the exact `TA-1618 keypad` input
+device turns the backlight on and restarts its cutoff; key releases and autorepeat
+events do not extend it. Writing `1` manually selects the board-qualified SC2720
+current code `1` and starts the same in-kernel cutoff, which returns the output to
+`0` after about five seconds. Writing `0` turns it off immediately. The driver
+restores only its owned fields in `KPLED_CTRL0`; it does not write `KPLED_CTRL1`.
 
 ## Framebuffer update contract
 

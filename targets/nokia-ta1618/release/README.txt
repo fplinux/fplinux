@@ -55,8 +55,10 @@ The physical keypad backlight is available through the binary Linux LED class
 interface. Turn it on or off from the phone shell with:
   echo 1 > /sys/class/leds/:kbd_backlight/brightness
   echo 0 > /sys/class/leds/:kbd_backlight/brightness
-The maximum brightness value is 1. An in-kernel cutoff turns the output off after
-about five seconds even if userspace does not write 0.
+The maximum brightness value is 1. Each new press on the physical TA-1618 keypad
+turns the backlight on and restarts its cutoff; releases and autorepeat do not
+extend it. The in-kernel cutoff turns the output off after about five seconds
+even if userspace does not write 0.
 
 To end the RAM session through the qualified battery-only power-off path,
 detach with Ctrl-], disconnect USB and hold the red handset key continuously
