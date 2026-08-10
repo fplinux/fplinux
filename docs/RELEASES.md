@@ -206,24 +206,22 @@ Do not start `runner/run.py` merely to reconnect: the full runner waits for a
 BootROM device and starts a new RAM-load sequence.
 
 The Nokia TA-1618 power-off handler is qualified for battery-only shutdown.
-From the phone shell, sync the filesystems and start a delayed forced power-off:
+Detach with `Ctrl-]`, disconnect USB and hold the red handset key continuously
+for five seconds. Releasing it before the deadline cancels the request, and a
+short press remains an ordinary `KEY_POWER` input event.
 
-```sh
-sync
-(trap '' HUP; sleep 20; poweroff -f) </dev/null >/dev/null 2>&1 &
-```
+Before starting system shutdown, the button handler verifies the exact SC2720
+identity, checks that charger input is inactive and syncs the filesystems. The
+final sys-off handler repeats the identity and charger guards, then requests
+the PMIC hardware power-down sequence without reading the PMIC after its final
+write. A connected charger refuses the long-press request while Linux remains
+running.
 
-Detach with `Ctrl-]` and disconnect USB before the delay expires. At final
-shutdown the target handler verifies the exact SC2720 identity, refuses to
-continue while the charger input is active, and requests the PMIC hardware
-power-down sequence. It performs no PMIC read after that final write.
-
-A failed guard stops the shutdown path instead of attempting another PMIC
-operation. If USB was not disconnected in time or the phone remains powered,
-remove and reinsert the battery before booting again. A successful shutdown
-discards the volatile FPLinux session; the next manual power-on follows the
-unchanged vendor boot path. Linux reboot and power-button shutdown remain
-unqualified.
+A failed final guard stops the shutdown path instead of attempting another PMIC
+operation. If the phone remains powered after shutdown has started, remove and
+reinsert the battery before booting again. A successful shutdown discards the
+volatile FPLinux session; the next manual power-on follows the unchanged vendor
+boot path. Linux reboot remains unqualified.
 
 ## Troubleshooting
 

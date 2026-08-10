@@ -194,12 +194,12 @@ that the stated limitation or current qualification gap still applies.
 | Interrupt controller              | Supported     | ARM GIC with working timer and USB interrupts                      |
 | System timers                     | Supported     | UMS9117 system counter and Pike2 timer                             |
 | Display                           | Supported     | Damage-driven RGB565; up to 46.7 frames/s without visible tearing  |
-| Physical keypad                   | Supported     | Polled matrix plus separate physical 8 key through analog EIC9/ADI |
+| Physical keypad                   | Supported     | Matrix plus active-low SC2720 EIC1 power and EIC9 physical 8       |
 | USB device mode                   | Supported     | Two `g_serial` ports at `0525:a4a6`: shell/transfer and input      |
 | Host keyboard bridge              | Supported     | Host evdev to `/dev/ttyGS1` to uinput; `EVIOCGRAB` on the host     |
 | USB host mode                     | Not supported | The phone target enables peripheral mode only                      |
 | microSD card                      | Supported     | 4-bit multi-block reads and writes up to 48.75 MHz; no hot-swap    |
-| System power-off                  | Supported     | Guarded battery-only SC2720 shutdown; USB must be disconnected     |
+| System power-off                  | Supported     | Hold red handset 5 s on battery; charger preflight blocks shutdown |
 | Internal flash access             | Not supported | Linux does not expose phone storage                                |
 | Audio                             | Not supported | No speaker, headphone or microphone driver is implemented          |
 | Modem, calls, SMS and mobile data | Not supported | Baseband interfaces are not implemented                            |
@@ -355,22 +355,19 @@ before it exits.
 The keyboard forwarder and one interface 0 client can run at the same time. Do
 not start the full runner merely to reconnect.
 
-To end the RAM session through the qualified SC2720 path, run this in the phone
-shell:
+To end the RAM session through the qualified SC2720 path, detach with `Ctrl-]`,
+disconnect USB and hold the red handset key continuously for five seconds.
+Releasing it before the deadline cancels the request; a short press remains an
+ordinary `KEY_POWER` event.
 
-```sh
-sync
-(trap '' HUP; sleep 20; poweroff -f) </dev/null >/dev/null 2>&1 &
-```
-
-Detach with `Ctrl-]` and disconnect USB before the delay expires. The target
-handler permits the final PMIC write only after the charger status reports that
-USB power is absent. If a guard fails or the phone remains powered, remove and
-reinsert the battery before booting again. A successful power-off discards the
-volatile FPLinux session, and the next manual power-on uses the unchanged vendor
-firmware. Linux reboot and power-button shutdown remain unsupported. See
-[Console lifecycle](../../docs/RELEASES.md#console-lifecycle) for the complete
-failure boundary.
+The target handler permits shutdown only after the exact PMIC identity and
+charger-status preflight pass, then syncs the filesystems. The final sys-off
+handler repeats both guards before its single final PMIC write. If shutdown has
+started but the phone remains powered, remove and reinsert the battery before booting
+again. A successful power-off discards the volatile FPLinux session, and the
+next manual power-on uses the unchanged vendor firmware. Linux reboot remains
+unsupported. See [Console lifecycle](../../docs/RELEASES.md#console-lifecycle)
+for the complete failure boundary.
 
 ## Release archive
 
@@ -416,20 +413,20 @@ libusb 1.0, libudev, GNU `stdbuf` and USB permissions for `1782:4d00` and
 - MUSB runs in PIO peripheral mode. EP1 backs USB interface 0 for shell and
   transfers; EP2 backs interface 1 for input events. USB DMA and host mode are
   not implemented.
-- The physical `8` key is not part of the keypad matrix. Linux polls the
-  inherited analog EIC9 level through the shared UMS9117 ADI provider and
-  reports it as `KEY_8`; the driver does not reconfigure EIC polarity or enable
-  state.
+- The red handset key and physical `8` key are outside the keypad matrix. Linux
+  samples their inherited SC2720 analog EIC1 and EIC9 levels through the shared
+  UMS9117 ADI provider and reports them as `KEY_POWER` and `KEY_8`. The driver
+  does not reconfigure EIC polarity or enable state.
 - The shared ADI provider owns the fixed controller and analog-slave mappings.
   It validates the inherited controller state and serializes framebuffer WLED,
   keypad EIC9, MMC rail and SC2720 power-off transactions under the hardware
   user lock.
 - Board maps and FDL1 are downloaded and SHA-256 checked during source builds;
   see [`loader/PROVENANCE.md`](loader/PROVENANCE.md).
-- Runtime state is volatile. The qualified power-off path requires battery-only
-  operation and an inactive charger input. The next manual power-on uses the
-  unchanged vendor firmware. Linux reboot and power-button behavior are not
-  qualified.
+- Runtime state is volatile. Holding the red handset key for five seconds
+  requests the qualified battery-only power-off path; releasing it sooner
+  cancels the request. The next manual power-on uses the unchanged vendor
+  firmware. Linux reboot is not qualified.
 
 ## Source layout
 
