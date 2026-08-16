@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import signal
 import subprocess
@@ -15,6 +16,7 @@ import time
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 from unittest import mock
 
 from fplinux_cli import output as output_module
@@ -38,6 +40,149 @@ class RunReporterTests(unittest.TestCase):
                 second = RunReporter.create("check", target=None, verbose=False)
             self.assertNotEqual(first.root, second.root)
             self.assertEqual(second.root.name, f"{first.root.name}-1")
+
+    def test_run_metadata_tracks_stages_and_success(self) -> None:
+        """Publish invocation-derived state at creation, stage boundaries, and finish."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "run"
+            reporter = RunReporter("check", root, ".cache/logs/test", verbose=False)
+            initial = json.loads(reporter.metadata_path.read_text())
+            self.assertEqual(initial["label"], "check")
+            self.assertEqual(initial["pid"], os.getpid())
+            self.assertEqual(initial["status"], "running")
+            self.assertIsNone(initial["finished_at"])
+            self.assertEqual(initial["stages"], [])
+            self.assertEqual(initial["display_root"], ".cache/logs/test")
+            self.assertIsNone(initial["parent"])
+            self.assertEqual(reporter.lock_metadata(), {"log": ".cache/logs/test/run.json"})
+
+            with reporter.stage("prepare"):
+                entered = json.loads(reporter.metadata_path.read_text())
+                self.assertEqual(entered["status"], "running")
+                self.assertEqual(
+                    entered["stages"],
+                    [
+                        {
+                            "exit": None,
+                            "log": "01-prepare.log",
+                            "name": "prepare",
+                            "status": "running",
+                        }
+                    ],
+                )
+
+            before_finish = json.loads(reporter.metadata_path.read_text())
+            self.assertEqual(before_finish["status"], "running")
+            self.assertIsNone(before_finish["finished_at"])
+            self.assertEqual(before_finish["stages"][0]["status"], "success")
+            reporter.finish()
+            completed = json.loads(reporter.metadata_path.read_text())
+            self.assertEqual(completed["status"], "success")
+            self.assertIsNotNone(completed["finished_at"])
+            self.assertEqual(completed["stages"][0]["status"], "success")
+            self.assertEqual(completed["stages"][0]["exit"], 0)
+
+    def test_run_metadata_marks_stage_failure_without_later_false_success(self) -> None:
+        """Keep a caught failed stage failed even if a caller later invokes finish."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "run"
+            reporter = RunReporter("check", root, ".cache/logs/test", verbose=False)
+            with self.assertRaises(SystemExit), reporter.stage("failure"):
+                raise SystemExit(7)
+            reporter.finish()
+
+            metadata = json.loads(reporter.metadata_path.read_text())
+            self.assertEqual(metadata["status"], "failed")
+            self.assertIsNotNone(metadata["finished_at"])
+            self.assertEqual(
+                metadata["stages"],
+                [
+                    {
+                        "exit": 7,
+                        "log": "01-failure.log",
+                        "name": "failure",
+                        "status": "failed",
+                    }
+                ],
+            )
+
+    def test_run_metadata_atomic_replace_leaves_no_temporary_file(self) -> None:
+        """Use replace-based publication and remove every writer temporary on success."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "run"
+            reporter = RunReporter("check", root, ".cache/logs/test", verbose=False)
+            before = json.loads(reporter.metadata_path.read_text())
+            real_replace = os.replace
+            observed_old_metadata: list[dict[str, object]] = []
+
+            def replace(
+                source: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+                destination: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+            ) -> None:
+                observed_old_metadata.append(json.loads(reporter.metadata_path.read_text()))
+                real_replace(source, destination)
+
+            with (
+                mock.patch(
+                    "fplinux_cli.output.os.replace",
+                    side_effect=replace,
+                ) as replace_mock,
+                reporter.stage("atomic"),
+            ):
+                pass
+
+            self.assertEqual(replace_mock.call_count, 2)
+            self.assertEqual(observed_old_metadata[0], before)
+            old_stages = cast("list[dict[str, object]]", observed_old_metadata[1]["stages"])
+            self.assertEqual(old_stages[0]["status"], "running")
+            self.assertEqual(
+                [path.name for path in root.iterdir() if path.name.startswith(".run.json.")],
+                [],
+            )
+            self.assertEqual(
+                json.loads(reporter.metadata_path.read_text())["stages"][0]["status"],
+                "success",
+            )
+
+    def test_nested_reporter_writes_only_its_own_metadata(self) -> None:
+        """Keep container subreports out of the host run's metadata writer domain."""
+        with tempfile.TemporaryDirectory() as temporary:
+            host_root = Path(temporary) / "host"
+            host = RunReporter("check", host_root, ".cache/logs/check/run", verbose=False)
+            environment = host.container_environment(str(host_root))
+            with mock.patch.dict(os.environ, environment, clear=False):
+                nested = RunReporter.from_environment("check", "quality")
+            self.assertIsNotNone(nested)
+            if nested is None:
+                return
+            with nested.stage("source-inventory"):
+                pass
+            nested.finish()
+
+            host_metadata = json.loads(host.metadata_path.read_text())
+            nested_metadata = json.loads(nested.metadata_path.read_text())
+            self.assertEqual(host_metadata["status"], "running")
+            self.assertEqual(host_metadata["stages"], [])
+            self.assertEqual(nested.root, host_root / "quality")
+            self.assertEqual(nested_metadata["display_root"], ".cache/logs/check/run/quality")
+            self.assertEqual(nested_metadata["parent"], ".cache/logs/check/run")
+            self.assertEqual(nested_metadata["status"], "success")
+
+    def test_entrypoint_marks_an_internal_reporter_successful(self) -> None:
+        """Finish an unannounced container reporter only after its entrypoint returns."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "run"
+
+            def entrypoint() -> None:
+                reporter = RunReporter("check", root, ".cache/logs/test", verbose=False)
+                with reporter.stage("container-work"):
+                    pass
+
+            run_entrypoint(entrypoint)
+            metadata = json.loads((root / "run.json").read_text())
+            self.assertEqual(metadata["status"], "success")
+            self.assertIsNotNone(metadata["finished_at"])
+            self.assertEqual(metadata["stages"][0]["status"], "success")
 
     def test_exit_status_converts_signal_return_codes(self) -> None:
         """Expose shell-style statuses for normal and signalled children."""
@@ -297,6 +442,10 @@ class RunReporterTests(unittest.TestCase):
                 timer.join()
             self.assertEqual(raised.exception.code, 128 + signal.SIGTERM)
             self.assertIn("FAILED (exit 143)", terminal.getvalue())
+            metadata = json.loads(reporter.metadata_path.read_text())
+            self.assertEqual(metadata["status"], "interrupted")
+            self.assertEqual(metadata["stages"][0]["status"], "interrupted")
+            self.assertEqual(metadata["stages"][0]["exit"], 128 + signal.SIGTERM)
 
     def test_hangup_is_forwarded_to_the_child_process_group(self) -> None:
         """Do not orphan a child when the wrapper receives SIGHUP."""

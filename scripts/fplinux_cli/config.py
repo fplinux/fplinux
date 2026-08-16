@@ -8,7 +8,7 @@ import os
 import re
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from .common import ROOT, fail, relative_name
 
@@ -340,15 +340,18 @@ def load_platform(platform: str) -> dict[str, Any]:
 
     buildroot = exact_table(
         config.get("buildroot"),
-        {"external", "shared_paths", "clean_targets"},
+        {"external", "shared_paths", "toolchain_defconfig", "toolchain_external_defconfig"},
         "platform buildroot",
     )
     relative_value(buildroot.get("external"), "platform buildroot external")
     path_array(buildroot.get("shared_paths"), "platform buildroot shared_paths", allow_empty=True)
-    string_array(
-        buildroot.get("clean_targets"),
-        "platform buildroot clean_targets",
-        allow_empty=True,
+    relative_value(
+        buildroot.get("toolchain_defconfig"),
+        "platform buildroot toolchain_defconfig",
+    )
+    relative_value(
+        buildroot.get("toolchain_external_defconfig"),
+        "platform buildroot toolchain_external_defconfig",
     )
 
     linux = exact_table(
@@ -515,32 +518,99 @@ def load_container_lock() -> dict[str, Any]:
     return lock
 
 
-def container_recipe_digest() -> str:
-    """Hash every source input of the single OCI recipe."""
+class _Hash(Protocol):
+    """Describe the incremental hash operation used by recipe encoders."""
+
+    def update(self, data: bytes) -> None:
+        """Add bytes to the digest state."""
+
+
+def _length_prefixed(value: _Hash, data: bytes) -> None:
+    """Add one unambiguous byte field to an incremental recipe digest."""
+    value.update(len(data).to_bytes(8, "big"))
+    value.update(data)
+
+
+def _stable_regular_file(path: Path) -> tuple[bytes, int]:
+    """Read one regular causal recipe input."""
+    if path.is_symlink() or not path.is_file():
+        fail(f"recipe input is missing or invalid: {path}")
+    try:
+        return path.read_bytes(), path.stat().st_mode & 0o777
+    except OSError as error:
+        fail(f"recipe input cannot be read: {path}: {error}")
+
+
+def _exact_file_recipe(paths: list[Path], *, prefix: bytes = b"") -> str:
+    """Hash exact logical paths, bytes and modes for one causal file closure."""
+    value = hashlib.sha256()
+    _length_prefixed(value, prefix)
+    for path in paths:
+        contents, mode = _stable_regular_file(path)
+        relative = path.relative_to(ROOT).as_posix()
+        _length_prefixed(value, relative.encode())
+        _length_prefixed(value, contents)
+        _length_prefixed(value, mode.to_bytes(2, "big"))
+    return value.hexdigest()
+
+
+def container_image_build_arguments(lock: dict[str, Any] | None = None) -> tuple[str, ...]:
+    """Return exact causal Podman build arguments, excluding tag and recipe label."""
+    if lock is None:
+        lock = load_container_lock()
+    oci = lock["oci"]
+    buildroot = lock["buildroot"]
+    return (
+        "--platform",
+        oci["platform"],
+        "--file",
+        "Containerfile",
+        "--build-arg",
+        f"BASE_IMAGE={oci['base']}",
+        "--build-arg",
+        f"DEBIAN_SNAPSHOT={oci['debian_snapshot']}",
+        "--build-arg",
+        f"BUILDROOT_VERSION={buildroot['version']}",
+        "--build-arg",
+        f"BUILDROOT_URL={buildroot['url']}",
+        "--build-arg",
+        f"BUILDROOT_SHA256={buildroot['sha256']}",
+    )
+
+
+def container_image_recipe_digest(lock: dict[str, Any] | None = None) -> str:
+    """Hash only exact context bytes, modes, paths and build arguments."""
+    arguments = (*container_image_build_arguments(lock), ".")
+    encoded_arguments = b"".join(
+        len(argument.encode()).to_bytes(8, "big") + argument.encode() for argument in arguments
+    )
+    return _exact_file_recipe(
+        [
+            ROOT / ".containerignore",
+            ROOT / "Containerfile",
+            ROOT / "package.json",
+            ROOT / "package-lock.json",
+            ROOT / "requirements.lock",
+        ],
+        prefix=encoded_arguments,
+    )
+
+
+def check_orchestration_recipe_digest(image_recipe: str | None = None) -> str:
+    """Hash only the implementation that can change cached check results."""
     fixed = [
-        ROOT / ".containerignore",
-        ROOT / "Containerfile",
-        ROOT / "container.lock.toml",
-        ROOT / "package.json",
-        ROOT / "package-lock.json",
-        ROOT / "requirements.lock",
+        ROOT / "scripts/fplinux_cli/checkreceipts.py",
         ROOT / "scripts/fplinux_cli/common.py",
         ROOT / "scripts/fplinux_cli/config.py",
         ROOT / "scripts/fplinux_cli/container.py",
+        ROOT / "scripts/fplinux_cli/image_state.py",
+        ROOT / "scripts/fplinux_cli/output.py",
+        ROOT / "scripts/fplinux_cli/workspace.py",
     ]
-    for path in fixed:
-        if path.is_symlink() or not path.is_file():
-            fail(f"container recipe input is missing or invalid: {path}")
-    value = hashlib.sha256()
-    for path in fixed:
-        if path.is_symlink():
-            fail(f"container recipe must not contain symlinks: {path}")
-        if not path.is_file():
-            continue
-        relative = path.relative_to(ROOT).as_posix()
-        value.update(relative.encode())
-        value.update(b"\0")
-        value.update(path.read_bytes())
-        value.update((path.stat().st_mode & 0o777).to_bytes(2, "big"))
-        value.update(b"\0")
-    return value.hexdigest()
+    if image_recipe is None:
+        image_recipe = container_image_recipe_digest()
+    if len(image_recipe) != 64 or any(
+        character not in "0123456789abcdef" for character in image_recipe
+    ):
+        fail("container image recipe must be a lowercase SHA-256")
+    return _exact_file_recipe(fixed, prefix=bytes.fromhex(image_recipe))
