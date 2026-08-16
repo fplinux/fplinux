@@ -45,12 +45,12 @@
 #define TERMINAL_REPLY_HOLD_MS 40
 #define COMPOSED_CHARACTER_MAX_BYTES 2
 /* A 64-byte read can complete a 31-byte buffered terminal reply. */
-#define TERMINAL_REPLY_MAX_ENQUEUE_BYTES                                       \
+#define TERMINAL_REPLY_MAX_ENQUEUE_BYTES \
 	(TERMINAL_INPUT_BYTES + TERMINAL_REPLY_BYTES - 1)
-#define TERMINAL_INPUT_FIFO_RESERVE                                            \
+#define TERMINAL_INPUT_FIFO_RESERVE \
 	(TERMINAL_REPLY_MAX_ENQUEUE_BYTES + COMPOSED_CHARACTER_MAX_BYTES)
-#define KEYPAD_INPUT_FIFO_RESERVE                                              \
-	(KEYPAD_EVENT_COUNT * KEYPAD_EVENT_MAX_BYTES +                         \
+#define KEYPAD_INPUT_FIFO_RESERVE                      \
+	(KEYPAD_EVENT_COUNT * KEYPAD_EVENT_MAX_BYTES + \
 	 COMPOSED_CHARACTER_MAX_BYTES)
 #define PTY_TX_CAPACITY 4096
 #define PTY_DRAIN_CHUNK_BYTES 512
@@ -189,16 +189,16 @@ struct interface_state {
 };
 
 static struct runtime_state runtime = {
-    .keypad = -1,
-    .extra_keypads = {-1, -1, -1},
-    .pty = -1,
-    .signal_fd = -1,
-    .tty0 = -1,
-    .console_lock = -1,
-    .primary_vcsa = -1,
-    .history_tty = -1,
-    .history_vcsa = -1,
-    .child = -1,
+	.keypad = -1,
+	.extra_keypads = { -1, -1, -1 },
+	.pty = -1,
+	.signal_fd = -1,
+	.tty0 = -1,
+	.console_lock = -1,
+	.primary_vcsa = -1,
+	.history_tty = -1,
+	.history_vcsa = -1,
+	.child = -1,
 };
 static struct interface_state interface;
 static struct termios saved_console_termios;
@@ -373,9 +373,9 @@ static void cleanup_virtual_terminals(void)
 		char sequence[32];
 		int length;
 
-		length =
-		    snprintf(sequence, sizeof(sequence),
-			     "\033[r\033[%u;1H\033[2K", interface.status_row);
+		length = snprintf(sequence, sizeof(sequence),
+				  "\033[r\033[%u;1H\033[2K",
+				  interface.status_row);
 		if (length > 0 && (size_t)length < sizeof(sequence))
 			write_all(STDOUT_FILENO, sequence, (size_t)length);
 		interface.status_row = 0;
@@ -404,8 +404,8 @@ static void cleanup_virtual_terminals(void)
 static void cleanup_runtime(void)
 {
 	struct timespec pause = {
-	    .tv_sec = 0,
-	    .tv_nsec = CHILD_EXIT_POLL_MS * 1000000L,
+		.tv_sec = 0,
+		.tv_nsec = CHILD_EXIT_POLL_MS * 1000000L,
 	};
 	unsigned attempts = CHILD_EXIT_GRACE_MS / CHILD_EXIT_POLL_MS;
 	unsigned i;
@@ -425,8 +425,9 @@ static void cleanup_runtime(void)
 		runtime.extra_keypads[i] = -1;
 	}
 	if (runtime.child > 0 && !runtime.child_reaped)
-		signal_child_group(
-		    runtime.shutdown_signal ? runtime.shutdown_signal : SIGHUP);
+		signal_child_group(runtime.shutdown_signal ?
+					   runtime.shutdown_signal :
+					   SIGHUP);
 	if (runtime.pty >= 0) {
 		close(runtime.pty);
 		runtime.pty = -1;
@@ -447,8 +448,8 @@ static void cleanup_runtime(void)
 	if (!reap_child_nonblocking()) {
 		signal_child_group(SIGKILL);
 		do {
-			pid_t result =
-			    waitpid(runtime.child, &runtime.child_status, 0);
+			pid_t result = waitpid(runtime.child,
+					       &runtime.child_status, 0);
 
 			if (result == runtime.child ||
 			    (result < 0 && errno == ECHILD)) {
@@ -476,9 +477,9 @@ static void report_labelled(const char *label, const char *message,
 				  "\r\nFPLINUX-CONSOLE %s: %s: %s\r\n", label,
 				  message, strerror(error_number));
 	else
-		length =
-		    snprintf(buffer, sizeof(buffer),
-			     "\r\nFPLINUX-CONSOLE %s: %s\r\n", label, message);
+		length = snprintf(buffer, sizeof(buffer),
+				  "\r\nFPLINUX-CONSOLE %s: %s\r\n", label,
+				  message);
 	if (length > 0) {
 		size_t output_length = (size_t)length;
 
@@ -532,8 +533,8 @@ static void prepare_console_terminal(void)
 static void configure_signals(sigset_t *child_signal_mask)
 {
 	struct sigaction child_action = {
-	    .sa_handler = SIG_DFL,
-	    .sa_flags = SA_NOCLDSTOP,
+		.sa_handler = SIG_DFL,
+		.sa_flags = SA_NOCLDSTOP,
 	};
 	sigset_t blocked;
 
@@ -560,7 +561,7 @@ static bool bit_is_set(const unsigned long *bits, unsigned bit)
 
 static void set_repeat_rate(int fd)
 {
-	unsigned int settings[2] = {REPEAT_DELAY_MS, REPEAT_PERIOD_MS};
+	unsigned int settings[2] = { REPEAT_DELAY_MS, REPEAT_PERIOD_MS };
 
 	ioctl(fd, EVIOCSREP, settings);
 }
@@ -568,13 +569,13 @@ static void set_repeat_rate(int fd)
 static bool is_console_keypad(int fd)
 {
 	static const unsigned short required_keys[] = {
-	    KEY_0,   KEY_1,	    KEY_2,     KEY_3,	       KEY_4,
-	    KEY_5,   KEY_6,	    KEY_7,     KEY_8,	       KEY_9,
-	    KEY_TAB, KEY_BACKSPACE, KEY_ENTER, KEY_KPASTERISK, KEY_KPDOT,
-	    KEY_UP,  KEY_LEFT,	    KEY_RIGHT, KEY_DOWN,
+		KEY_0,	 KEY_1,		KEY_2,	   KEY_3,	   KEY_4,
+		KEY_5,	 KEY_6,		KEY_7,	   KEY_8,	   KEY_9,
+		KEY_TAB, KEY_BACKSPACE, KEY_ENTER, KEY_KPASTERISK, KEY_KPDOT,
+		KEY_UP,	 KEY_LEFT,	KEY_RIGHT, KEY_DOWN,
 	};
-	unsigned long event_bits[BIT_ARRAY_SIZE(EV_MAX)] = {0};
-	unsigned long key_bits[BIT_ARRAY_SIZE(KEY_MAX)] = {0};
+	unsigned long event_bits[BIT_ARRAY_SIZE(EV_MAX)] = { 0 };
+	unsigned long key_bits[BIT_ARRAY_SIZE(KEY_MAX)] = { 0 };
 	size_t i;
 
 	if (ioctl(fd, EVIOCGBIT(0, sizeof(event_bits)), event_bits) < 0 ||
@@ -670,8 +671,8 @@ static void open_extra_keypads(int primary, int *extra)
 		}
 		++taken;
 	}
-	directory_fd =
-	    open("/dev/input", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	directory_fd = open("/dev/input",
+			    O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
 	if (directory_fd < 0)
 		return;
 	directory = fdopendir(directory_fd);
@@ -733,8 +734,8 @@ static int open_keypad(void)
 	size_t entries = 0;
 	int directory_fd;
 
-	directory_fd =
-	    open("/dev/input", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+	directory_fd = open("/dev/input",
+			    O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
 	if (directory_fd < 0)
 		return -1;
 	directory = fdopendir(directory_fd);
@@ -769,7 +770,7 @@ static int open_keypad(void)
 
 static struct winsize console_geometry(void)
 {
-	struct winsize geometry = {0};
+	struct winsize geometry = { 0 };
 
 	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &geometry) < 0)
 		die_errno("cannot read console geometry with TIOCGWINSZ");
@@ -807,8 +808,8 @@ static bool terminal_fd_matches_device(int fd, const struct stat *expected)
 	if (ioctl(fd, TIOCGDEV, &encoded) < 0)
 		die_errno("cannot resolve Linux VT device with TIOCGDEV");
 	device_major = (encoded & 0x000fff00U) >> 8;
-	device_minor =
-	    (encoded & 0x000000ffU) | ((encoded >> 12) & 0x000fff00U);
+	device_minor = (encoded & 0x000000ffU) |
+		       ((encoded >> 12) & 0x000fff00U);
 	return device_major == major(expected->st_rdev) &&
 	       device_minor == minor(expected->st_rdev);
 }
@@ -841,8 +842,8 @@ static void validate_vcsa(int fd, unsigned vt, const struct winsize *geometry,
 static void claim_console(unsigned vt)
 {
 	struct flock claim = {
-	    .l_type = F_WRLCK,
-	    .l_whence = SEEK_SET,
+		.l_type = F_WRLCK,
+		.l_whence = SEEK_SET,
 	};
 	char message[192];
 	char path[64];
@@ -852,8 +853,8 @@ static void claim_console(unsigned vt)
 	runtime.console_lock = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0600);
 	if (runtime.console_lock < 0) {
 		report_warning(
-		    "cannot open the local console lock; starting anyway",
-		    errno);
+			"cannot open the local console lock; starting anyway",
+			errno);
 		return;
 	}
 	if (fcntl(runtime.console_lock, F_SETLK, &claim) == 0)
@@ -865,16 +866,16 @@ static void claim_console(unsigned vt)
 		if (fcntl(runtime.console_lock, F_GETLK, &holder) == 0 &&
 		    holder.l_type != F_UNLCK && holder.l_pid > 0)
 			snprintf(
-			    message, sizeof(message),
-			    "another FPLinux console already holds /dev/tty%u "
-			    "(pid %ld); stop it, then start this one again",
-			    vt, (long)holder.l_pid);
+				message, sizeof(message),
+				"another FPLinux console already holds /dev/tty%u "
+				"(pid %ld); stop it, then start this one again",
+				vt, (long)holder.l_pid);
 		else
 			snprintf(
-			    message, sizeof(message),
-			    "another FPLinux console already holds /dev/tty%u; "
-			    "stop it, then start this one again",
-			    vt);
+				message, sizeof(message),
+				"another FPLinux console already holds /dev/tty%u; "
+				"stop it, then start this one again",
+				vt);
 		die(message);
 	}
 	report_warning("cannot lock the local console; starting anyway",
@@ -889,8 +890,8 @@ static void setup_virtual_terminals(const struct winsize *geometry)
 	struct stat active_stat;
 	struct stat input_stat;
 	struct stat output_stat;
-	char input_name[64] = {0};
-	char output_name[64] = {0};
+	char input_name[64] = { 0 };
+	char output_name[64] = { 0 };
 	char path[32];
 	unsigned input_vt;
 	unsigned output_vt;
@@ -952,7 +953,7 @@ static void setup_virtual_terminals(const struct winsize *geometry)
 
 	snprintf(path, sizeof(path), "/dev/vcsa%u", runtime.primary_vt);
 	runtime.primary_vcsa =
-	    open(path, O_RDWR | O_NOCTTY | O_NOFOLLOW | O_CLOEXEC);
+		open(path, O_RDWR | O_NOCTTY | O_NOFOLLOW | O_CLOEXEC);
 	if (runtime.primary_vcsa < 0)
 		die_errno("cannot open primary VCSA device");
 	validate_vcsa(runtime.primary_vcsa, runtime.primary_vt, geometry,
@@ -978,7 +979,7 @@ static void setup_virtual_terminals(const struct winsize *geometry)
 		die_errno("cannot disable spare history VT keyboard input");
 	snprintf(path, sizeof(path), "/dev/vcsa%u", runtime.history_vt);
 	runtime.history_vcsa =
-	    open(path, O_RDWR | O_NOCTTY | O_NOFOLLOW | O_CLOEXEC);
+		open(path, O_RDWR | O_NOCTTY | O_NOFOLLOW | O_CLOEXEC);
 	if (runtime.history_vcsa < 0)
 		die_errno("cannot open history VCSA device");
 	validate_vcsa(runtime.history_vcsa, runtime.history_vt, geometry,
@@ -1017,16 +1018,16 @@ static int create_shell_pty(const sigset_t *child_signal_mask,
 		die_errno("fork failed");
 	if (child == 0) {
 		char *environment[] = {
-		    "HOME=/root",
-		    "USER=root",
-		    "LOGNAME=root",
-		    "SHELL=/bin/sh",
-		    "PATH=/bin:/sbin:/usr/bin:/usr/sbin",
-		    "TERM=linux",
-		    "PS1=fplinux# ",
-		    columns,
-		    lines,
-		    NULL,
+			"HOME=/root",
+			"USER=root",
+			"LOGNAME=root",
+			"SHELL=/bin/sh",
+			"PATH=/bin:/sbin:/usr/bin:/usr/sbin",
+			"TERM=linux",
+			"PS1=fplinux# ",
+			columns,
+			lines,
+			NULL,
 		};
 		int slave;
 
@@ -1095,7 +1096,7 @@ static int milliseconds_until(struct timespec now, struct timespec deadline)
 		nanoseconds += 1000000000L;
 	}
 	milliseconds =
-	    (long long)seconds * 1000 + (nanoseconds + 999999L) / 1000000L;
+		(long long)seconds * 1000 + (nanoseconds + 999999L) / 1000000L;
 	return milliseconds > INT_MAX ? INT_MAX : (int)milliseconds;
 }
 
@@ -1137,8 +1138,8 @@ static bool flush_pty_fifo(struct byte_fifo *fifo)
 
 		if (contiguous > fifo->length)
 			contiguous = fifo->length;
-		written =
-		    write(runtime.pty, fifo->bytes + fifo->head, contiguous);
+		written = write(runtime.pty, fifo->bytes + fifo->head,
+				contiguous);
 		if (written > 0) {
 			fifo->head = (fifo->head + (size_t)written) %
 				     sizeof(fifo->bytes);
@@ -1195,7 +1196,7 @@ static void forward_terminal_replies(struct byte_fifo *fifo,
 			}
 			reply->bytes[reply->length++] = (char)c;
 			reply->deadline = deadline_after_ms(
-			    monotonic_now(), TERMINAL_REPLY_HOLD_MS);
+				monotonic_now(), TERMINAL_REPLY_HOLD_MS);
 			continue;
 		}
 		if (reply->length == 1) {
@@ -1207,7 +1208,8 @@ static void forward_terminal_replies(struct byte_fifo *fifo,
 				push_console_bytes(fifo, reply->bytes, 1);
 			if (c == '\033') {
 				reply->deadline = deadline_after_ms(
-				    monotonic_now(), TERMINAL_REPLY_HOLD_MS);
+					monotonic_now(),
+					TERMINAL_REPLY_HOLD_MS);
 				continue;
 			}
 			reply->length = 0;
@@ -1251,8 +1253,8 @@ static void release_terminal_hold(struct byte_fifo *fifo,
 static struct transcript_line *current_transcript_line(void)
 {
 	size_t index =
-	    (interface.transcript.first + interface.transcript.count - 1) %
-	    TRANSCRIPT_LINES;
+		(interface.transcript.first + interface.transcript.count - 1) %
+		TRANSCRIPT_LINES;
 
 	return &interface.transcript.lines[index];
 }
@@ -1263,8 +1265,8 @@ static void start_transcript_line(void)
 	size_t index;
 
 	if (transcript->count < TRANSCRIPT_LINES) {
-		index =
-		    (transcript->first + transcript->count) % TRANSCRIPT_LINES;
+		index = (transcript->first + transcript->count) %
+			TRANSCRIPT_LINES;
 		++transcript->count;
 	} else {
 		transcript->first = (transcript->first + 1) % TRANSCRIPT_LINES;
@@ -1558,7 +1560,10 @@ static void draw_status_bar(void)
 		die_errno("cannot draw status bar");
 }
 
-static void refresh_overlay(void) { draw_status_bar(); }
+static void refresh_overlay(void)
+{
+	draw_status_bar();
+}
 
 static void cancel_composition(void)
 {
@@ -1591,9 +1596,9 @@ enum enqueue_result {
 static bool compose_character(unsigned char *bytes, size_t *length)
 {
 	const char *characters =
-	    characters_for(interface.composition.last_code);
+		characters_for(interface.composition.last_code);
 	unsigned char character =
-	    (unsigned char)characters[interface.composition.index];
+		(unsigned char)characters[interface.composition.index];
 
 	switch (interface.composition.modifier) {
 	case MODIFIER_NONE:
@@ -1657,15 +1662,15 @@ static bool start_or_cycle_composition(struct byte_fifo *fifo, uint16_t code,
 	if (interface.composition.pending &&
 	    interface.composition.last_code == code) {
 		interface.composition.index =
-		    (interface.composition.index + 1) % strlen(characters);
+			(interface.composition.index + 1) % strlen(characters);
 		interface.composition.deadline =
-		    deadline_after_ms(now, MULTITAP_MS);
+			deadline_after_ms(now, MULTITAP_MS);
 		refresh_overlay();
 		return true;
 	}
 	if (interface.composition.pending) {
 		enum enqueue_result result =
-		    enqueue_composition_and(fifo, "", 0, now);
+			enqueue_composition_and(fifo, "", 0, now);
 
 		if (result == ENQUEUE_FULL)
 			return false;
@@ -1683,7 +1688,7 @@ static bool start_or_cycle_composition(struct byte_fifo *fifo, uint16_t code,
 static void cycle_modifier(void)
 {
 	interface.composition.modifier =
-	    (enum modifier)((interface.composition.modifier + 1) % 4);
+		(enum modifier)((interface.composition.modifier + 1) % 4);
 	refresh_overlay();
 }
 
@@ -1739,8 +1744,8 @@ static void render_history(void)
 		interface.history_distance = max_distance;
 	top = max_distance - interface.history_distance;
 	title_length = snprintf(
-	    title, sizeof(title),
-	    "History  Up/Down line  Left/Right page  #/Back exit  OK newest");
+		title, sizeof(title),
+		"History  Up/Down line  Left/Right page  #/Back exit  OK newest");
 	if (title_length < 0)
 		die("cannot format history title");
 	for (i = 0; i < columns && i < (size_t)title_length; ++i) {
@@ -1749,10 +1754,10 @@ static void render_history(void)
 	}
 	for (row = 0; row < visible && top + row < interface.transcript.count;
 	     ++row) {
-		size_t index =
-		    (interface.transcript.first + top + row) % TRANSCRIPT_LINES;
+		size_t index = (interface.transcript.first + top + row) %
+			       TRANSCRIPT_LINES;
 		const struct transcript_line *line =
-		    &interface.transcript.lines[index];
+			&interface.transcript.lines[index];
 		size_t length = line->length < columns ? line->length : columns;
 		size_t column;
 
@@ -2064,8 +2069,8 @@ static int process_signal_events(void)
 {
 	for (;;) {
 		struct signalfd_siginfo signal_info;
-		ssize_t length =
-		    read(runtime.signal_fd, &signal_info, sizeof(signal_info));
+		ssize_t length = read(runtime.signal_fd, &signal_info,
+				      sizeof(signal_info));
 
 		if (length == (ssize_t)sizeof(signal_info)) {
 			switch (signal_info.ssi_signo) {
@@ -2077,7 +2082,7 @@ static int process_signal_events(void)
 			case SIGQUIT:
 			case SIGTERM:
 				runtime.shutdown_signal =
-				    (int)signal_info.ssi_signo;
+					(int)signal_info.ssi_signo;
 				return runtime.shutdown_signal;
 			default:
 				break;
@@ -2152,7 +2157,7 @@ static void process_keypad_event(struct byte_fifo *pty_tx, int slot,
 			interface.star_down = true;
 			interface.held_star_byte = false;
 			interface.star_hold_deadline =
-			    deadline_after_ms(now, STAR_HOLD_MS);
+				deadline_after_ms(now, STAR_HOLD_MS);
 			return;
 		}
 		if (value == 0) {
@@ -2229,7 +2234,7 @@ static int keypad_slot_fd(int slot)
 
 static void resync_keypad(int slot)
 {
-	unsigned char keys[KEY_STATE_BYTES] = {0};
+	unsigned char keys[KEY_STATE_BYTES] = { 0 };
 	int fd = keypad_slot_fd(slot);
 	unsigned token = (unsigned)slot + 1;
 	bool star_pressed;
@@ -2254,7 +2259,7 @@ static void resync_keypad(int slot)
 		interface.star_slot = token;
 		interface.star_down = true;
 		interface.star_hold_deadline =
-		    deadline_after_ms(now, STAR_HOLD_MS);
+			deadline_after_ms(now, STAR_HOLD_MS);
 	}
 	if (interface.backspace_slot == token && !backspace_pressed) {
 		interface.suppress_backspace_until_release = false;
@@ -2303,12 +2308,12 @@ static void process_keypad_events(struct byte_fifo *pty_tx, int slot,
 
 int main(void)
 {
-	struct terminal_reply terminal_reply = {{0}, 0, {0, 0}};
-	struct byte_fifo pty_tx = {{0}, 0, 0};
+	struct terminal_reply terminal_reply = { { 0 }, 0, { 0, 0 } };
+	struct byte_fifo pty_tx = { { 0 }, 0, 0 };
 	struct input_event events[KEYPAD_EVENT_COUNT];
 	struct pollfd descriptors[4 + EXTRA_KEYPADS];
-	struct timespec keypad_reopen_deadline = {0};
-	struct timespec extra_rescan_deadline = {0};
+	struct timespec keypad_reopen_deadline = { 0 };
+	struct timespec extra_rescan_deadline = { 0 };
 	struct winsize geometry;
 	sigset_t child_signal_mask;
 
@@ -2376,44 +2381,47 @@ int main(void)
 		    deadline_reached(now, keypad_reopen_deadline)) {
 			runtime.keypad = open_keypad();
 			if (runtime.keypad < 0) {
-				keypad_reopen_deadline =
-				    deadline_after_ms(now, KEYPAD_REOPEN_MS);
+				keypad_reopen_deadline = deadline_after_ms(
+					now, KEYPAD_REOPEN_MS);
 			} else {
 				runtime.keypad_dropping[0] = false;
 				open_extra_keypads(runtime.keypad,
 						   runtime.extra_keypads);
 				sync_new_keypad(0);
 				extra_rescan_deadline = deadline_after_ms(
-				    now, KEYPAD_REOPEN_MS * 4);
+					now, KEYPAD_REOPEN_MS * 4);
 			}
 		}
 		if (deadline_reached(now, extra_rescan_deadline)) {
 			open_extra_keypads(runtime.keypad,
 					   runtime.extra_keypads);
 			extra_rescan_deadline =
-			    deadline_after_ms(now, KEYPAD_REOPEN_MS * 4);
+				deadline_after_ms(now, KEYPAD_REOPEN_MS * 4);
 		}
 
 		descriptors[0].fd = runtime.keypad;
 		descriptors[0].events =
-		    runtime.pty >= 0 && !runtime.pty_final_drain &&
-			    fifo_free(&pty_tx) >= KEYPAD_INPUT_FIFO_RESERVE
-			? POLLIN
-			: 0;
+			runtime.pty >= 0 && !runtime.pty_final_drain &&
+					fifo_free(&pty_tx) >=
+						KEYPAD_INPUT_FIFO_RESERVE ?
+				POLLIN :
+				0;
 		descriptors[0].revents = 0;
 		descriptors[1].fd = runtime.pty;
 		descriptors[1].events = runtime.pty >= 0 ? POLLIN : 0;
 		if (runtime.pty >= 0 && pty_tx.length)
 			descriptors[1].events |= POLLOUT;
 		descriptors[1].revents = 0;
-		descriptors[2].fd = runtime.pty >= 0 && !runtime.pty_final_drain
-					? STDIN_FILENO
-					: -1;
+		descriptors[2].fd = runtime.pty >= 0 &&
+						    !runtime.pty_final_drain ?
+					    STDIN_FILENO :
+					    -1;
 		descriptors[2].events =
-		    runtime.pty >= 0 && !runtime.pty_final_drain &&
-			    fifo_free(&pty_tx) >= TERMINAL_INPUT_FIFO_RESERVE
-			? POLLIN
-			: 0;
+			runtime.pty >= 0 && !runtime.pty_final_drain &&
+					fifo_free(&pty_tx) >=
+						TERMINAL_INPUT_FIFO_RESERVE ?
+				POLLIN :
+				0;
 		descriptors[2].revents = 0;
 		descriptors[3].fd = runtime.signal_fd;
 		descriptors[3].events = POLLIN;
@@ -2421,39 +2429,43 @@ int main(void)
 
 		if (interface.composition.pending)
 			timeout = earlier_timeout(
-			    timeout, milliseconds_until(
-					 now, interface.composition.deadline));
+				timeout,
+				milliseconds_until(
+					now, interface.composition.deadline));
 		if (interface.visual_bell)
 			timeout = earlier_timeout(
-			    timeout, milliseconds_until(
-					 now, interface.visual_bell_deadline));
+				timeout,
+				milliseconds_until(
+					now, interface.visual_bell_deadline));
 		if (interface.star_down && !interface.raw_toggled)
 			timeout = earlier_timeout(
-			    timeout, milliseconds_until(
-					 now, interface.star_hold_deadline));
+				timeout,
+				milliseconds_until(
+					now, interface.star_hold_deadline));
 		if (interface.raw_input && terminal_reply.length)
 			timeout = earlier_timeout(
-			    timeout,
-			    milliseconds_until(now, terminal_reply.deadline));
+				timeout, milliseconds_until(
+						 now, terminal_reply.deadline));
 		if (runtime.keypad < 0)
 			timeout = earlier_timeout(
-			    timeout,
-			    milliseconds_until(now, keypad_reopen_deadline));
+				timeout, milliseconds_until(
+						 now, keypad_reopen_deadline));
 		if (runtime.pty_final_drain)
 			timeout = 0;
 
 		for (size_t slot = 0; slot < EXTRA_KEYPADS; ++slot) {
 			descriptors[4 + slot].fd = runtime.extra_keypads[slot];
 			descriptors[4 + slot].events =
-			    runtime.pty >= 0 && !runtime.pty_final_drain &&
-				    fifo_free(&pty_tx) >=
-					KEYPAD_INPUT_FIFO_RESERVE
-				? POLLIN
-				: 0;
+				runtime.pty >= 0 && !runtime.pty_final_drain &&
+						fifo_free(&pty_tx) >=
+							KEYPAD_INPUT_FIFO_RESERVE ?
+					POLLIN :
+					0;
 			descriptors[4 + slot].revents = 0;
 		}
 		timeout = earlier_timeout(
-		    timeout, milliseconds_until(now, extra_rescan_deadline));
+			timeout,
+			milliseconds_until(now, extra_rescan_deadline));
 
 		/* The candidate exists only while this process is blocked in
 		 * poll. */
@@ -2521,9 +2533,9 @@ int main(void)
 				now = monotonic_now();
 				disconnect_keypad(&keypad_reopen_deadline, now);
 			} else if (length > 0) {
-				process_keypad_events(&pty_tx, 0, events,
-						      (size_t)length /
-							  sizeof(events[0]));
+				process_keypad_events(
+					&pty_tx, 0, events,
+					(size_t)length / sizeof(events[0]));
 			}
 		}
 
@@ -2547,8 +2559,8 @@ int main(void)
 			} while (length < 0 && errno == EINTR);
 			if (length > 0) {
 				process_keypad_events(
-				    &pty_tx, (int)slot + 1, events,
-				    (size_t)length / sizeof(events[0]));
+					&pty_tx, (int)slot + 1, events,
+					(size_t)length / sizeof(events[0]));
 			} else if (!length ||
 				   (errno != EAGAIN && errno != EWOULDBLOCK)) {
 				close_extra_keypad(slot);
@@ -2566,9 +2578,10 @@ int main(void)
 					      sizeof(terminal_input));
 			} while (length < 0 && errno == EINTR);
 			if (length > 0) {
-				forward_terminal_replies(
-				    &pty_tx, &terminal_reply, terminal_input,
-				    (size_t)length);
+				forward_terminal_replies(&pty_tx,
+							 &terminal_reply,
+							 terminal_input,
+							 (size_t)length);
 			} else if (!length)
 				die("console input closed");
 			else if (errno != EAGAIN && errno != EWOULDBLOCK)

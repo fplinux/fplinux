@@ -58,13 +58,16 @@ static void die_errno(const char *message)
 	exit(EXIT_FAILURE);
 }
 
-static void catch_signal(int signal_number) { pending_signal = signal_number; }
+static void catch_signal(int signal_number)
+{
+	pending_signal = signal_number;
+}
 
 static void install_signal_handlers(void)
 {
-	static const int signals[] = {SIGHUP, SIGINT, SIGQUIT, SIGTERM};
+	static const int signals[] = { SIGHUP, SIGINT, SIGQUIT, SIGTERM };
 	struct sigaction action = {
-	    .sa_handler = catch_signal,
+		.sa_handler = catch_signal,
 	};
 	size_t i;
 
@@ -76,9 +79,9 @@ static void install_signal_handlers(void)
 
 static void reset_signal_handlers(void)
 {
-	static const int signals[] = {SIGHUP, SIGINT, SIGQUIT, SIGTERM};
+	static const int signals[] = { SIGHUP, SIGINT, SIGQUIT, SIGTERM };
 	struct sigaction action = {
-	    .sa_handler = SIG_DFL,
+		.sa_handler = SIG_DFL,
 	};
 	size_t i;
 
@@ -91,8 +94,8 @@ static void reset_signal_handlers(void)
 static int acquire_lock(void)
 {
 	struct flock claim = {
-	    .l_type = F_WRLCK,
-	    .l_whence = SEEK_SET,
+		.l_type = F_WRLCK,
+		.l_whence = SEEK_SET,
 	};
 	int descriptor = open(LOCK_PATH, O_RDWR | O_CREAT | O_CLOEXEC, 0600);
 
@@ -243,7 +246,7 @@ static void prepare_runtime(char *runtime, size_t runtime_size,
 			die("Quake PAK is not a readable regular file");
 		if (symlink(source, destination) < 0)
 			die_errno(
-			    "cannot link game data into volatile directory");
+				"cannot link game data into volatile directory");
 		if (index == 0)
 			found_pak0 = true;
 	}
@@ -321,7 +324,7 @@ static void save_display(struct display_state *state)
 		die_errno("cannot open " FRAMEBUFFER);
 	if (ioctl(state->framebuffer, FBIOGET_FSCREENINFO, &fixed) < 0 ||
 	    ioctl(state->framebuffer, FBIOGET_VSCREENINFO, &state->variable) <
-		0)
+		    0)
 		die_errno("cannot read framebuffer state");
 	validate_framebuffer(&fixed, &state->variable);
 	state->size = fixed.smem_len;
@@ -354,7 +357,7 @@ static bool restore_display(struct display_state *state)
 		current.yoffset = state->variable.yoffset;
 		current.activate = FB_ACTIVATE_NOW;
 		if (current.yoffset + FRAMEBUFFER_HEIGHT <=
-			current.yres_virtual &&
+			    current.yres_virtual &&
 		    ioctl(state->framebuffer, FBIOPAN_DISPLAY, &current) < 0) {
 			fprintf(stderr,
 				"quake: cannot restore framebuffer page: %s\n",
@@ -398,9 +401,9 @@ static void close_display(struct display_state *state)
 static pid_t start_engine(const char *runtime, const char *input_mode)
 {
 	char *const arguments[] = {
-	    (char *)ENGINE, "-nolan", "-basedir", (char *)runtime,
-	    "-heapsize",    "32768",  "-input",	  (char *)input_mode,
-	    "+mlook",	    NULL,
+		(char *)ENGINE, "-nolan", "-basedir", (char *)runtime,
+		"-heapsize",	"32768",  "-input",   (char *)input_mode,
+		"+mlook",	NULL,
 	};
 	pid_t child = fork();
 
