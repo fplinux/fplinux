@@ -16,7 +16,7 @@ override OBJDIR := obj
 override SYS_EXTRA :=
 override SYS_SRCS := asmcode usbio common libc syscomm syscode
 override SYS_SRCS2 := start entry $(SYS_SRCS)
-override APP_SRCS := main fplinux-boot-screen/boot-screen ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff payload
+override APP_SRCS := main fplinux-boot-screen/boot-screen ums9117-bootstrap/boot-main ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff payload
 override APP_OBJS1 := $(APP_SRCS:%=$(OBJDIR)/app/%.o)
 override APP_OBJS2 :=
 override OBJS := $(SYS_SRCS2:%=$(OBJDIR)/sys/%.o) $(APP_OBJS1)
@@ -37,7 +37,7 @@ override FPLINUX_VENDOR_LFLAGS := $(LFLAGS)
 override FPLINUX_STORAGE_OFF := -ULIBC_SDIO -DLIBC_SDIO=0 -UFAT_WRITE -DFAT_WRITE=0 -DFPLINUX_BOOTSTRAP_STORAGE_DISABLED=1
 override FPLINUX_STORAGE_LDFLAG := -Wl,--defsym=FPLINUX_BOOTSTRAP_STORAGE_DISABLED=1
 override CFLAGS := $(FPLINUX_VENDOR_CFLAGS) $(FPLINUX_STORAGE_OFF)
-override APP_CFLAGS := $(FPLINUX_VENDOR_APP_CFLAGS) -std=c99 -pedantic -I$(SYSDIR) $(FPLINUX_STORAGE_OFF)
+override APP_CFLAGS := $(FPLINUX_VENDOR_APP_CFLAGS) -std=c99 -pedantic -I$(CURDIR) -I$(SYSDIR) $(FPLINUX_STORAGE_OFF)
 override SYS_CFLAGS := $(FPLINUX_VENDOR_SYS_CFLAGS) $(FPLINUX_STORAGE_OFF)
 override LFLAGS := $(FPLINUX_VENDOR_LFLAGS) $(FPLINUX_STORAGE_LDFLAG)
 
@@ -47,7 +47,7 @@ endif
 ifneq ($(strip $(SYS_SRCS)),asmcode usbio common libc syscomm syscode)
 $(error FPLinux bootstrap source closure changed: $(SYS_SRCS))
 endif
-ifneq ($(strip $(APP_SRCS)),main fplinux-boot-screen/boot-screen ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff payload)
+ifneq ($(strip $(APP_SRCS)),main fplinux-boot-screen/boot-screen ums9117-bootstrap/boot-main ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff payload)
 $(error FPLinux bootstrap application closure changed: $(APP_SRCS))
 endif
 override FPLINUX_FORBIDDEN_OBJS := $(OBJDIR)/sys/sdio.o $(OBJDIR)/sys/microfat.o

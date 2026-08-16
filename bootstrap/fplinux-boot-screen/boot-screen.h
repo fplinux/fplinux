@@ -52,6 +52,7 @@ struct fplinux_boot_screen {
 			 [FPLINUX_BOOT_SCREEN_STAGE_LABEL_BYTES];
 	char status_text[FPLINUX_BOOT_SCREEN_STATUS_BYTES];
 	char error_detail[FPLINUX_BOOT_SCREEN_STATUS_BYTES];
+	char note[FPLINUX_BOOT_SCREEN_STATUS_BYTES];
 	enum fplinux_boot_screen_status
 		stage_status[FPLINUX_BOOT_SCREEN_MAX_STAGES];
 	enum fplinux_boot_screen_status status_state;
@@ -78,6 +79,9 @@ int fplinux_boot_screen_set_checkpoint(struct fplinux_boot_screen *screen,
 
 void fplinux_boot_screen_fail(struct fplinux_boot_screen *screen,
 			      uint32_t error_code, const char *detail);
+
+int fplinux_boot_screen_set_note(struct fplinux_boot_screen *screen,
+				 const char *text);
 
 void fplinux_boot_screen_render(struct fplinux_boot_screen *screen);
 
