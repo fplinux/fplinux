@@ -6,9 +6,9 @@ license = "GPL-2.0-only"
 
 [fpdoom_bootstrap]
 repository = "https://github.com/ilyakurdyukov/fpdoom"
-commit = "c1e1746cf8b3465e1a533c8012f1a2254e8d1320"
-archive_url = "https://github.com/ilyakurdyukov/fpdoom/archive/c1e1746cf8b3465e1a533c8012f1a2254e8d1320.tar.gz"
-archive_sha256 = "13210b79156135f309eeb9cc3ee3ca871d61ab78d425b88403559c69e50d5e2e"
+commit = "9695f3739639565dc1adb1797c14d8b381438c01"
+archive_url = "https://github.com/ilyakurdyukov/fpdoom/archive/9695f3739639565dc1adb1797c14d8b381438c01.tar.gz"
+archive_sha256 = "65fd6dc3eecc0c9746ee1137d2c7f4872a05ad6d075a8be522579df3a134daac"
 license = "Unlicense"
 
 [fpdoom_host]

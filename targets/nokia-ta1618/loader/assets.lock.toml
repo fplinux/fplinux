@@ -5,8 +5,8 @@ schema = "fplinux.assets/v1"
 id = "maps"
 kind = "7z"
 url = "https://github.com/ilyakurdyukov/fpdoom/releases/download/1.20251101/t117_maps.7z"
-sha256 = "5e4c527b2b7c2a1807473115dc6c6e8058a3db28d754335fc08508d417417ef9"
-cache_name = "t117_maps.7z"
+sha256 = "9295f209f33ab688711ae4496a90d319ae2aef79420a2fd823d1beabd7f2ede1"
+cache_name = "t117_maps-20260814.7z"
 license = "NOASSERTION"
 
 [[source.output]]
