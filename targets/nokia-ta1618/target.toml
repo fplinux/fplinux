@@ -34,14 +34,6 @@ forbidden_config = [
 ]
 
 [[linux.copies]]
-source = "kernel/ta1618-hwdiag.c"
-destination = "arch/arm/mach-ums9117/ta1618-hwdiag.c"
-
-[[linux.copies]]
-source = "bootstrap/ta1618-hwdiag.h"
-destination = "arch/arm/mach-ums9117/ta1618-hwdiag.h"
-
-[[linux.copies]]
 source = "kernel/ta1618-poweroff.c"
 destination = "arch/arm/mach-ums9117/ta1618-poweroff.c"
 

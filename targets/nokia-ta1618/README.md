@@ -257,10 +257,10 @@ filesystem. A test module must be transferred into `/tmp`, loaded explicitly wit
 `insmod` and removed with `rmmod` before the RAM session ends. The display, keypad
 and keypad backlight expose standard `fbcon`, evdev and LED class interfaces to the
 [shared FPLinux terminal](../../docs/porting/CONSOLE.md), while MMC exposes its
-block device. The terminal contains no TA-1618 register or scan-code logic. The
-target bootstrap uses the shared freestanding
-[boot-screen renderer](../../bootstrap/fplinux-boot-screen/) while retaining its
-panel adapter, hardware stages and handoff diagnostics locally.
+block device. The terminal contains no TA-1618 register or scan-code logic.
+The target bootstrap supplies a board descriptor and payload assembly to the
+shared UMS9117 boot flow. The platform flow owns the boot-screen renderer,
+framebuffer adapter, timer probe, image staging, USB quiesce and Linux handoff.
 
 ## Keypad backlight
 
@@ -435,8 +435,8 @@ libusb 1.0, libudev, GNU `stdbuf` and USB permissions for `1782:4d00` and
 - Each frame starts on the panel's tearing signal and takes 10.5 ms of link time
   at 88 MHz. The panel is held at 46.7 Hz so that one frame lands inside one pass
   of its scan, which is what removes tearing rather than merely hiding it.
-- Linux uses RAM at `0x80000000..0x83dfffff`. The DTB, handoff diagnostics and
-  framebuffer occupy reserved regions above it.
+- Linux uses RAM at `0x80000000..0x83dfffff`. DTB staging starts at
+  `0x83e00000`, and the framebuffer occupies `0x83f00000..0x83ffffff`.
 - The payload is loaded at `0x80100000`; `0x82000000` is the zImage staging
   boundary.
 - MUSB runs in PIO peripheral mode. EP1 backs USB interface 0 for shell and
@@ -459,15 +459,15 @@ libusb 1.0, libudev, GNU `stdbuf` and USB permissions for `1782:4d00` and
 
 ## Source layout
 
-| Path          | Responsibility                                                 |
-| ------------- | -------------------------------------------------------------- |
-| `target.toml` | Data-only board inputs, identity and runtime adapter values    |
-| `dts/`        | Phone memory map and enabled board devices                     |
-| `kernel/`     | Display, keypad, keypad-backlight and hardware handoff support |
-| `bootstrap/`  | Target RAM payload source and Linux handoff                    |
-| `rootfs/`     | Target identity and boot diagnostics layered over common init  |
-| `loader/`     | Generic `fplinux.assets/v1` lock and asset provenance          |
-| `release/`    | Data-only `fplinux.release/v2` runtime and archive allowlists  |
+| Path          | Responsibility                                                |
+| ------------- | ------------------------------------------------------------- |
+| `target.toml` | Data-only board inputs, identity and runtime adapter values   |
+| `dts/`        | Phone memory map and enabled board devices                    |
+| `kernel/`     | Display, keypad, keypad-backlight, MMC and power-off support  |
+| `bootstrap/`  | Board descriptor and target payload assembly                  |
+| `rootfs/`     | Target rootfs configuration layered over the common overlay   |
+| `loader/`     | Generic `fplinux.assets/v1` lock and asset provenance         |
+| `release/`    | Data-only `fplinux.release/v2` runtime and archive allowlists |
 
 Build behavior is shared in `scripts/fplinux_cli/builder.py`; execution uses
 `common/run.py` and the fixed `platforms/ums9117/host/adapter.py`.

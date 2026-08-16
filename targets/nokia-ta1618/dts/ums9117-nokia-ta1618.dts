@@ -28,11 +28,6 @@
 			no-map;
 		};
 
-		bootdiag@83ef0000 {
-			reg = <0x83ef0000 0x00010000>;
-			no-map;
-		};
-
 		framebuffer@83f00000 {
 			reg = <0x83f00000 0x00100000>;
 			no-map;
