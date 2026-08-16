@@ -145,9 +145,9 @@ loading, detach interface 0 and read the image's build stamp with:
 ```
 
 A source checkout additionally provides `./fplinux verify <target>`, which
-compares both recipe digests in that stamp with its local
-`build-manifest.json`. Neither check replaces the phone-side hardware
-qualification gate.
+first checks its local bundle inputs, then compares the stamp's Buildroot recipe
+and the running kernel suffix with `build-manifest.json`. Neither check replaces
+the phone-side hardware qualification gate.
 
 ## USB access
 
@@ -261,10 +261,10 @@ is appropriate only for a new power-off BootROM load.
 A release archive must use a runtime closure listed in `releases.lock.toml` and
 completed on that exact phone variant. The closure digest covers the image, host
 binaries, shared runner, fixed platform adapter, assets and runtime manifest. The
-image's build stamp binds the runtime to the selected-target workspace and
-container recipe. Packaging separately checks every generated bundle file against
-the successful-build manifest. Distribute the corresponding source with the
-binary ZIP.
+image's build stamp records its Buildroot recipe; its kernel suffix identifies
+the prepared Linux, rootfs, kernel configuration, DTB and bootstrap recipe.
+Packaging separately checks every generated bundle file against the successful-
+build manifest. Distribute the corresponding source with the binary ZIP.
 
 The archive must also include the notices declared by the fixed packager,
 including the complete musl copyright and permission notice.

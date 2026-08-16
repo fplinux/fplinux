@@ -34,12 +34,16 @@ scopes or run a subset while working on one area:
 ./fplinux check --list
 ./fplinux check python
 ./fplinux check docs spelling
+./fplinux check --no-cache
 ```
 
 Multiple scopes form one deduplicated selection and always run in canonical
 order. The available scopes are `repository`, `source`, `container`, `metadata`,
 `docs`, `spelling`, `secrets`, `licenses`, `python`, `shell`, `buildroot`, `c`
-and `kernel`.
+and `kernel`. Each cacheable scope stores a successful result. It is reused only
+when the source closure, checker commands, orchestration recipe and OCI image
+identity match. Any mismatch runs the scope again. `--no-cache` runs every
+selected cacheable scope even when its recorded inputs match.
 
 Commit messages use `type(scope): subject`. The scope is mandatory and must be
 one of `bootstrap`, `build`, `cli`, `console`, `deps`, `input`, `nokia-ta1618`,
@@ -57,21 +61,31 @@ Prettier for JSON, Taplo for TOML, Vale and typos for prose, gitleaks for
 secrets, REUSE for licensing
 metadata, Ruff and mypy for Python, shell checks, Buildroot `check-package` for
 `buildroot-external` files, hadolint for the Containerfile,
-clang-format for userspace and bootstrap C style, Clang `scan-build` for
-userspace C, and the pinned kernel tree's own tooling for kernel sources: its
-clang-format style, `checkpatch.pl`, the canonical `savedefconfig` form, device
+clang-format with the pinned kernel tree's style for userspace and bootstrap C,
+Clang `scan-build` for userspace C, and the pinned kernel tree's own tooling for
+kernel sources: its clang-format style, `checkpatch.pl`, the canonical `savedefconfig` form, device
 tree schema validation through `dtbs_check`, and `sparse`. The sparse phase prepares the target's pinned Linux integration tree, Kconfig
 and generated headers instead of checking drivers against substitute headers.
-Source snapshots are mounted read-only and quality and analysis output stays
-under `.cache/`. After its pinned inputs are downloaded, the analysis runs
-without network access. If the OCI environment is missing or stale, `check`
+Source snapshots are mounted read-only, while quality and analysis output stays
+outside those snapshots under `.cache/`. Userspace analysis is invocation-local;
+only the fixed Sparse state is retained. After its pinned inputs are
+downloaded, the analysis runs without network access. If the OCI environment is missing or stale, `check`
 rebuilds the same image tag and removes the replaced image ID unless an existing
 container still references it.
 
 `check` prints one status per stage and keeps complete subprocess output below
-`.cache/logs/check/<run-id>/`. On failure it prints a bounded diagnostic tail and
-the exact log path. Add `--verbose` to stream the complete output while retaining
-the same logs.
+`.cache/logs/check/<run-id>/`. Its unified invocation record is
+`.cache/logs/check/<run-id>/run.json`. On failure the command prints a bounded
+diagnostic tail and the exact log path. Add `--verbose` to stream complete output
+while retaining the same logs.
+
+## Cache coordination
+
+Commands coordinate mutable cache state with a project-wide lock. `build`,
+`check` and `setup` take it exclusively; `package`, `run`, `console` and
+`verify` take a shared lock while resolving their current bundle. `prune --apply`
+also takes the exclusive lock. A conflicting invocation waits until the lock is
+available. `check --list` and a prune dry run do not take this lock.
 
 The first build creates the pinned OCI environment automatically. It can also be
 prepared explicitly:
@@ -88,8 +102,8 @@ installed and running rootless.
 
 For disk-space troubleshooting, the current Nokia TA-1618 build occupied about
 6.84 GB on one build host. This observation is not a minimum requirement; use
-the [cache recovery](#cache-cleanup-and-recovery) steps if generated data fills
-the filesystem.
+the [cache inventory](#cache-inventory) steps if generated
+data fills the filesystem.
 
 ## Build a phone target
 
@@ -104,8 +118,14 @@ Use `--jobs` to control parallel compilation:
 ```
 
 Build output follows the same compact stage format as `check`. Complete logs are
-stored below `.cache/logs/build/<target>/<run-id>/`; `--verbose` streams them to
-the terminal as well.
+stored below `.cache/logs/build/<target>/<run-id>/`; the unified invocation
+record is `.cache/logs/build/<target>/<run-id>/run.json`. `--verbose` streams
+them to the terminal as well.
+
+Before preparing a build, the command looks for a current bundle whose recorded
+workspace and OCI image inputs match. On a match it reports a cached result and
+skips Podman and workspace staging. `--jobs` controls scheduling and does not
+change artifact identity. A mismatch proceeds through the normal build stages.
 
 The dispatcher auto-discovers `targets/<target>/target.toml`, validates the
 `fplinux.target/v1` data against the selected `platform.toml` and runs
@@ -114,16 +134,25 @@ supply executable build hooks. After selecting a target, read its documentation
 for hardware status and phone-specific constraints; for example,
 [Nokia TA-1618](../targets/nokia-ta1618/README.md).
 
-The shared builder performs four stages:
+The shared builder performs five stages:
 
-1. Buildroot creates the musl/BusyBox root filesystem from the platform's shared
-   paths and the target defconfig.
-2. Kbuild projects the platform and target Linux patches, copies and appends,
+1. The toolchain stage builds or reuses the shared musl cross toolchain in
+   `.cache/toolchains/<digest>`, keyed by the platform's
+   `toolchain_defconfig`, the pinned Buildroot identity and the Buildroot patch
+   tree. Every target of a platform, and every rebuild, reuses the same tree.
+2. Buildroot creates the BusyBox root filesystem against that external
+   toolchain from the platform's shared paths, its
+   `toolchain_external_defconfig` fragment and the target defconfig. A causal
+   receipt splits the shared base from per-package payloads: a local package
+   source change rebuilds only that package in place, while configuration
+   changes rebuild the tree with `make clean`. Compilations flow through a
+   shared ccache under `.cache/ccache`.
+3. Kbuild projects the platform and target Linux patches, copies and appends,
    then builds Linux with the initramfs and target DTB.
-3. The bootstrap stage projects the platform-declared pinned vendor files,
+4. The bootstrap stage projects the platform-declared pinned vendor files,
    combines the zImage and DTB into `ramboot.bin` and checks the generic
    RAM-only image contract.
-4. Typed platform recipes build the host tools, the generic
+5. Typed platform recipes build the host tools, the generic
    `fplinux.assets/v1` lock resolves target assets, and the builder publishes the
    shared runner, fixed platform adapter and deterministic target bundle.
 
@@ -131,68 +160,65 @@ The shared builder performs four stages:
 
 ```text
 .cache/
-├── analysis/scan-build/<recipe>/              userspace analyzer reports
-├── analysis/sparse/<target>/<recipe-config>/  sparse Kbuild output
+├── analysis/sparse/<target>/                  Sparse Kbuild state
+├── check-results/<scope>/                     check success results
 ├── downloads/                                pinned upstream downloads
 ├── linux/sources/<target>/                   current Linux integration tree
-├── logs/check/<run-id>/                      source-quality stage logs
-├── logs/build/<target>/<run-id>/             target build stage logs
-├── quality-workspaces/<recipe>/              read-only source-quality input
-├── workspaces/<recipe>/                      immutable target build input
+├── logs/check/<run-id>/                      source-quality logs and run.json
+├── logs/build/<target>/<run-id>/             target-build logs and run.json
+├── quality-workspaces/<recipe>/              source-quality input
+├── workspaces/<recipe>/                      target build input
 └── out/<target>/
     ├── work/
-    │   ├── assets/                 verified extracted board assets
+    │   ├── assets/                 extracted board assets
     │   ├── buildroot/              Buildroot O= directory
-    │   ├── kernel-<recipe>/        Kbuild O= directory
+    │   ├── kernel/                 Kbuild O= directory
     │   ├── bootstrap/              bootstrap projection and objects
     │   ├── host-build/             host-tool source and objects
     │   └── host/                   built host tools
-    └── <profile>/                  runnable target bundle
+    ├── bundles/<profile>/<generation>/  runnable bundle generations
+    └── <profile>.current.json            selected current generation
 ```
 
 The workspace recipe hashes only the selected target closure: the shared
 builder and validators, the selected target and release/asset manifests, target
 sources, the selected platform declaration and sources, and referenced common
-inputs. The immutable workspace carries that recipe in `.fplinux-workspace`;
-the successful `build-manifest.json` records the same receipt and the generated
-bundle hashes. Linux objects never enter the prepared Linux source tree. The
-cache keeps one recipe-validated Linux tree per target: a changed recipe is
-prepared completely before it replaces that target's previous tree. Failed
-preparation removes its staging directory. The container receives only cache
-and generated-output mounts as writable; the workspace is read-only.
+inputs. The workspace and `build-manifest.json` record build inputs and bundle
+file information. `run`, `package` and `verify` use the selected current bundle.
+`package` and `verify` compare its recorded inputs with the local checkout; if
+they report a missing or stale bundle, rebuild the target.
 
-## Cache cleanup and recovery
+## Cache inventory
 
-Stop any active `build`, `check` or `package` command before removing cache
-paths. Everything under `.cache/` is generated or downloaded; deleting it does
-not modify source files.
-
-To discard one target's build products while retaining downloaded inputs and the
-prepared Linux tree:
+To inspect cache workspace candidates, use the read-only inventory:
 
 ```sh
-rm -rf -- .cache/out/nokia-ta1618
+./fplinux prune
+./fplinux prune --json
 ```
 
-This removes the runnable bundle and build receipt. `run` and `package` will
-reject the missing output until `./fplinux build nokia-ta1618` succeeds again.
-
-To reclaim all project cache space and force a complete local rebuild:
+The default reports candidates and logical/allocated byte counts. `--json` emits
+the same inventory as JSON. To apply a freshly calculated inventory:
 
 ```sh
-rm -rf -- .cache
+./fplinux prune --apply
+./fplinux prune --apply --json
 ```
 
-The next build recreates the cache, downloads missing pinned inputs and rebuilds
-the target. The tagged Podman image is stored outside `.cache/`, so deleting the
-cache does not remove it. `setup`, `build` and `check` reuse that image when its
-recipe still matches; otherwise setup replaces it. Preparation errors clean their
-staging directory without replacing the target's current Linux source tree.
+`prune --apply` takes the exclusive cache lock and removes disposable staged
+snapshots from the newly calculated plan in `workspaces/` and
+`quality-workspaces/`.
 
-For Nokia TA-1618 the runnable output is:
+For Nokia TA-1618, `console.current.json` selects the current runnable bundle:
 
 ```text
-.cache/out/nokia-ta1618/console/
+.cache/out/nokia-ta1618/console.current.json
+```
+
+The selected generation is below:
+
+```text
+.cache/out/nokia-ta1618/bundles/console/<generation>/
 ```
 
 ## Important outputs
@@ -239,11 +265,12 @@ build stamp with the local build receipt:
 ./fplinux verify nokia-ta1618
 ```
 
-The command reads `/etc/fplinux-build` from the phone through USB interface 0
-and compares its workspace and container recipe digests with
-`build-manifest.json`. It catches a phone booted from another workspace or build
-container. It does not verify the other bundle files and is not a hardware
-qualification gate.
+The command first refuses a local bundle whose workspace or OCI recipe no
+longer matches the checkout. It then reads `/etc/fplinux-build` and `uname -r`
+through USB interface 0, comparing the Buildroot recipe and the device-kernel
+suffix with `build-manifest.json`. The suffix covers the prepared Linux, rootfs,
+kernel configuration, DTB and bootstrap recipe. It does not verify the other
+bundle files and is not a hardware qualification gate.
 
 The same repository entrypoint owns direct access to an already running target:
 
@@ -265,11 +292,11 @@ Create a package for physical qualification:
 ./fplinux package nokia-ta1618 --candidate
 ```
 
-Packaging requires an existing successful build with a matching
-`build-manifest.json`. It rejects stale, mixed or modified bundle files, writes
-a deterministic ZIP under `.cache/out/candidates/` and uses the data-only
-`fplinux.release/v2` allowlist. Only its `runtime_files` subset enters the
-hardware-qualified runtime digest. Packaging does not rebuild the target.
+Packaging requires an existing build whose recorded inputs match the current
+source and container recipes. It writes a ZIP under `.cache/out/candidates/` and
+uses the data-only `fplinux.release/v2` allowlist. Only its `runtime_files`
+subset enters the hardware-qualified runtime digest. Packaging does not rebuild
+the target.
 
 The source tree has no qualified runtime closure or prebuilt archive. After an
 exact candidate passes the phone gate, maintainers record its printed runtime
@@ -291,6 +318,6 @@ Packaging verifies the successful-build manifest, sorts entries, normalizes
 timestamps and includes the allowlisted bundle files, build receipt, target
 and fixed legal documents, checksums and candidate notice when applicable.
 
-A matching build proves that the source assembles into the same bytes. A feature
-is marked supported only after the resulting image is run on the corresponding
+A successful build records its selected source and build inputs. A feature is
+marked supported only after the resulting image is run on the corresponding
 phone variant.
