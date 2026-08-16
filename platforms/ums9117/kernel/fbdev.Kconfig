@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config FB_UMS9117
+	bool
+	depends on FB && ARCH_UMS9117
+	select FB_IOMEM_HELPERS
+	help
+	  Shared RGB565 framebuffer, LCDC completion lifecycle, WLED handling
+	  and damage-coalesced refresh pipeline for source-validated UMS9117
+	  panel profiles. Board wrappers select either SPI1 three-wire or LCM/DBI
+	  transport; this core does not probe or auto-detect a panel.
+

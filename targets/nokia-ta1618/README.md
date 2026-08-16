@@ -223,7 +223,7 @@ CONFIG_MODULE_UNLOAD=y
 CONFIG_INPUT_EVDEV=y
 CONFIG_INPUT_MISC=y
 CONFIG_INPUT_UINPUT=y
-CONFIG_KEYBOARD_TA1618=y
+CONFIG_KEYBOARD_UMS9117=y
 CONFIG_FB=y
 CONFIG_FB_TA1618=y
 CONFIG_FRAMEBUFFER_CONSOLE=y
@@ -311,13 +311,19 @@ From the repository root:
 
 The target is auto-discovered from its data-only `fplinux.target/v1` manifest.
 The root command combines it with `platforms/ums9117/platform.toml` and invokes
-the shared stages 1–4 builder. The runnable output is written to:
+the shared stages 1–4 builder. The current runnable bundle is selected through:
 
 ```text
-.cache/out/nokia-ta1618/console/
+.cache/out/nokia-ta1618/console.current.json
 ```
 
-See [Building FPLinux](../../docs/BUILDING.md) for host setup, cache recovery,
+The selected bundle is below
+`.cache/out/nokia-ta1618/bundles/console/<generation>/`. When the recorded build
+inputs match, `build` reports a cached result; otherwise it runs the normal build
+stages. Build logs and their `run.json` record are under
+`.cache/logs/build/nokia-ta1618/<run-id>/`.
+
+See [Building FPLinux](../../docs/BUILDING.md) for host setup, cache inventory,
 output layout and reproducibility details.
 
 ## Run from the source checkout
@@ -347,9 +353,11 @@ measuring, compare the phone's build stamp with the local bundle receipt:
 ./fplinux verify nokia-ta1618
 ```
 
-This compares the workspace and container recipe digests in
-`/etc/fplinux-build` with the local `build-manifest.json`. It does not verify the
-other bundle files or qualify the hardware.
+`verify` first refuses a stale local bundle, then compares the Buildroot recipe
+in `/etc/fplinux-build` and the kernel suffix with the local
+`build-manifest.json`. The suffix covers the prepared Linux, rootfs, kernel
+configuration, DTB and bootstrap recipe. It does not verify the other bundle
+files or qualify the hardware.
 
 From the repository root, reconnect to the shell:
 

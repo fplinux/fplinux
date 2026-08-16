@@ -54,10 +54,6 @@ source = "bindings/fplinux,ta1618-mmc.yaml"
 destination = "Documentation/devicetree/bindings/mmc/fplinux,ta1618-mmc.yaml"
 
 [[linux.copies]]
-source = "kernel/ta1618-keypad.c"
-destination = "drivers/input/keyboard/ta1618-keypad.c"
-
-[[linux.copies]]
 source = "kernel/ta1618-fb.c"
 destination = "drivers/video/fbdev/ta1618-fb.c"
 
@@ -72,14 +68,6 @@ destination = "Documentation/devicetree/bindings/leds/fplinux,ta1618-kpled.yaml"
 [[linux.copies]]
 source = "dts/ums9117-nokia-ta1618.dts"
 destination = "arch/arm/boot/dts/unisoc/ums9117-nokia-ta1618.dts"
-
-[[linux.copies]]
-source = "bindings/fplinux,ta1618-keypad.yaml"
-destination = "Documentation/devicetree/bindings/input/fplinux,ta1618-keypad.yaml"
-
-[[linux.copies]]
-source = "bindings/fplinux,ta1618-fb.yaml"
-destination = "Documentation/devicetree/bindings/display/fplinux,ta1618-fb.yaml"
 
 [[linux.appends]]
 source = "kernel/Kconfig"
@@ -117,7 +105,9 @@ brightness = 50
 rotation = 0
 spi_mode = 1
 lcd_id = 0x8888b6
-backlight_rgbw = 0x14
+exec_distance = 0x314d
+backlight_channels = "rgbw"
+backlight_level = 0x14
 session_name = "ta1618-linux"
 handoff_marker = "TA1618_LINUX_BOOTSTRAP stage=5 message=PREPARE LINUX"
 handoff_wait_seconds = 60

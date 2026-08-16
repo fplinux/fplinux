@@ -9,12 +9,12 @@
 	 *   r2 = physical DTB address
 	 *   SVC mode, IRQ/FIQ masked, MMU and D-cache off
 	 */
-	.section .text.ta1618_linux_handoff, "ax", %progbits
+	.section .text.ums9117_linux_handoff, "ax", %progbits
 	.p2align 2
 	.arm
-	.type ta1618_linux_handoff, %function
-	.global ta1618_linux_handoff
-ta1618_linux_handoff:
+	.type ums9117_linux_handoff, %function
+	.global ums9117_linux_handoff
+ums9117_linux_handoff:
 	mov	r4, r0			@ zImage physical address
 	mov	r5, r1			@ DTB physical address
 
@@ -43,4 +43,4 @@ ta1618_linux_handoff:
 	mov	r2, r5
 	bx	r4
 
-	.size ta1618_linux_handoff, . - ta1618_linux_handoff
+	.size ums9117_linux_handoff, . - ums9117_linux_handoff

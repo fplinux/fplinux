@@ -51,6 +51,35 @@ diff --git a/drivers/usb/musb/Makefile b/drivers/usb/musb/Makefile
  obj-$(CONFIG_USB_MUSB_JZ4740)			+= jz4740.o
  obj-$(CONFIG_USB_MUSB_SUNXI)			+= sunxi.o
  obj-$(CONFIG_USB_MUSB_MEDIATEK)      		+= mediatek.o
+diff --git a/drivers/input/keyboard/Kconfig b/drivers/input/keyboard/Kconfig
+--- a/drivers/input/keyboard/Kconfig
++++ b/drivers/input/keyboard/Kconfig
+@@ -715,6 +715,17 @@ config KEYBOARD_TWL4030
+
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called twl4030_keypad.
++
++config KEYBOARD_UMS9117
++	bool "Unisoc UMS9117 polled keypad"
++	depends on ARCH_UMS9117
++	select INPUT_MATRIXKMAP
++	help
++	  Poll the UMS9117 matrix keypad and inherited analog EIC state.
++	  The keypad controller interrupt route is not hardware-qualified, so
++	  this driver uses the controller's packed event state and the EIC
++	  data register through polling only. It does not configure the EIC
++	  controller or attempt cold power initialization.
+
+ config KEYBOARD_XTKBD
+ 	tristate "XT keyboard"
+diff --git a/drivers/input/keyboard/Makefile b/drivers/input/keyboard/Makefile
+--- a/drivers/input/keyboard/Makefile
++++ b/drivers/input/keyboard/Makefile
+@@ -70,3 +70,4 @@ obj-$(CONFIG_KEYBOARD_TEGRA)		+= tegra-kbc.o
+ obj-$(CONFIG_KEYBOARD_TM2_TOUCHKEY)	+= tm2-touchkey.o
+ obj-$(CONFIG_KEYBOARD_TWL4030)		+= twl4030_keypad.o
++obj-$(CONFIG_KEYBOARD_UMS9117)		+= ums9117-keypad.o
+ obj-$(CONFIG_KEYBOARD_XTKBD)		+= xtkbd.o
 diff --git a/drivers/clocksource/Kconfig b/drivers/clocksource/Kconfig
 --- a/drivers/clocksource/Kconfig
 +++ b/drivers/clocksource/Kconfig

@@ -1,0 +1,143 @@
+# SPDX-License-Identifier: GPL-2.0-only
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/display/fplinux,ums9117-fb.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: UMS9117 LCDC framebuffer with fixed board panel profile
+
+maintainers:
+  - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+
+description: |
+  The UMS9117 LCDC sends RGB565 frames through either the Nokia TA-1618's
+  SPI1 three-wire panel transport or the INOI 244 Modern 4G's LCM/DBI CS0
+  transport. A target wrapper supplies the immutable, source-validated panel
+  command sequence. This node supplies only board-owned resources and wiring.
+
+properties:
+  compatible:
+    enum:
+      - fplinux,ums9117-st7789p3-spi-fb
+      - fplinux,ums9117-nv3030-lcm-fb
+
+  reg:
+    minItems: 12
+    maxItems: 14
+
+  reg-names:
+    oneOf:
+      - items:
+          - const: framebuffer
+          - const: lcdc
+          - const: adi-controller
+          - const: analog-slave
+          - const: lcm
+          - const: spi
+          - const: spi-clock-selector
+          - const: spi-reset-set
+          - const: spi-reset-clear
+          - const: ap-ahb-gate-set
+          - const: ap-ahb-reset-set
+          - const: ap-ahb-reset-clear
+          - const: pinmux
+          - const: pinconf
+      - items:
+          - const: framebuffer
+          - const: lcdc
+          - const: adi-controller
+          - const: analog-slave
+          - const: lcm
+          - const: lcm-command
+          - const: lcm-data
+          - const: ap-ahb-gate-set
+          - const: ap-ahb-reset-set
+          - const: ap-ahb-reset-clear
+          - const: pinmux
+          - const: pinconf
+
+  interrupts:
+    maxItems: 1
+
+  interrupt-names:
+    const: lcdc-done
+
+  sprd,aon-apb:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: Always-on APB syscon used for reset and inherited SPI gates.
+
+  sprd,pinmux-values:
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    minItems: 1
+    maxItems: 17
+    description: Values written at the paired pinmux offsets.
+
+  sprd,pinmux-offsets:
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    minItems: 1
+    maxItems: 17
+    description: Byte offsets in the pinmux resource, paired with pinmux-values.
+
+  sprd,pinconf-values:
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    minItems: 1
+    maxItems: 17
+    description: Values written at the paired pinconf offsets.
+
+  sprd,pinconf-offsets:
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    minItems: 1
+    maxItems: 17
+    description: Byte offsets in the pinconf resource, paired with pinconf-values.
+
+  sprd,wled-current-levels:
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    minItems: 4
+    maxItems: 4
+    description: Four BLTC current codes, one per WLED channel, each 0 through 63.
+
+  sprd,dbi-timing-ns:
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    minItems: 6
+    maxItems: 6
+    description: |
+      LCM/DBI timing tuple in nanoseconds: read CS setup, read low pulse,
+      read high pulse, write CS setup, write low pulse, write high pulse.
+      The driver derives CS0_TIMING at the fixed 128 MHz AHB rate.
+
+required:
+  - compatible
+  - reg
+  - reg-names
+  - sprd,aon-apb
+  - sprd,pinmux-values
+  - sprd,pinmux-offsets
+  - sprd,pinconf-values
+  - sprd,pinconf-offsets
+  - sprd,wled-current-levels
+
+allOf:
+  - if:
+      properties:
+        compatible:
+          const: fplinux,ums9117-st7789p3-spi-fb
+    then:
+      required:
+        - interrupts
+        - interrupt-names
+    else:
+      properties:
+        interrupts: false
+        interrupt-names: false
+  - if:
+      properties:
+        compatible:
+          const: fplinux,ums9117-nv3030-lcm-fb
+    then:
+      required:
+        - sprd,dbi-timing-ns
+    else:
+      properties:
+        sprd,dbi-timing-ns: false
+
+additionalProperties: false
