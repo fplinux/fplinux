@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from types import FrameType
 
 CAPABILITY = "fplinux.host.ums9117-ram/v1"
-EXEC_DISTANCE = "0x314d"
+BACKLIGHT_CHANNELS = "rgbw"
 
 
 def fail(message: str) -> NoReturn:
@@ -48,13 +48,24 @@ def text(table: dict[str, Any], key: str) -> str:
     return value
 
 
+def backlight_channels(table: dict[str, Any], key: str) -> str:
+    """Return a non-empty, canonically ordered subset of RGBW channels."""
+    value = text(table, key)
+    canonical = "".join(channel for channel in BACKLIGHT_CHANNELS if channel in value)
+    if value != canonical:
+        fail(f"adapter {key} must be a canonical non-empty subset of {BACKLIGHT_CHANNELS}")
+    return value
+
+
 def adapter_config(value: object) -> dict[str, Any]:
     keys = {
         "brightness",
         "rotation",
         "spi_mode",
         "lcd_id",
-        "backlight_rgbw",
+        "exec_distance",
+        "backlight_channels",
+        "backlight_level",
         "session_name",
         "handoff_marker",
         "handoff_wait_seconds",
@@ -73,7 +84,9 @@ def adapter_config(value: object) -> dict[str, Any]:
         ),
         "spi_mode": integer(value, "spi_mode", bounds=(0, 3)),
         "lcd_id": integer(value, "lcd_id", bounds=(0, 0xFFFFFFFF)),
-        "backlight_rgbw": integer(value, "backlight_rgbw", bounds=(0, 0xFF)),
+        "exec_distance": integer(value, "exec_distance", bounds=(0, 0xFFFF)),
+        "backlight_channels": backlight_channels(value, "backlight_channels"),
+        "backlight_level": integer(value, "backlight_level", bounds=(0, 0x3F)),
         "session_name": text(value, "session_name"),
         "handoff_marker": text(value, "handoff_marker"),
         "handoff_wait_seconds": integer(
@@ -88,6 +101,35 @@ def adapter_config(value: object) -> dict[str, Any]:
         ),
         "boot_instructions": text(value, "boot_instructions"),
     }
+
+
+def loader_arguments(
+    loader: Path,
+    fdl1: Path,
+    image: Path,
+    addresses: dict[str, int],
+    exec_distance: int,
+) -> list[str]:
+    """Build the RAM-only loader command for one target."""
+    arguments = [str(loader)]
+    if exec_distance:
+        arguments.extend(["t117_exec_dist", f"0x{exec_distance:x}"])
+    arguments.extend(
+        [
+            "fdl",
+            str(fdl1),
+            f"0x{addresses['fdl1']:x}",
+            "fdl",
+            str(image),
+            f"0x{addresses['payload']:x}",
+        ]
+    )
+    return arguments
+
+
+def backlight_argument(config: dict[str, Any]) -> str:
+    """Return the validated libc_server backlight setting."""
+    return f"{config['backlight_channels']}=0x{config['backlight_level']:x}"
 
 
 def usb_device_path(vendor: int, product: int) -> Path | None:
@@ -159,20 +201,19 @@ def run(bundle: Path, runtime: dict[str, Any]) -> None:
     bootrom_usb = runtime["usb"]["bootrom"]
     linux_usb = runtime["usb"]["linux_console"]
 
-    loader_argv = [
-        str(loader),
-        "t117_exec_dist",
-        EXEC_DISTANCE,
-        "fdl",
-        str(fdl1),
-        f"0x{addresses['fdl1']:x}",
-        "fdl",
-        str(image),
-        f"0x{addresses['payload']:x}",
-    ]
+    loader_argv = loader_arguments(
+        loader,
+        fdl1,
+        image,
+        addresses,
+        config["exec_distance"],
+    )
     bootrom_id = f"{bootrom_usb['vendor_id']:04x}:{bootrom_usb['product_id']:04x}"
     print(f"{runtime['display_name']} console RAM boot")
-    print("Operations: exec-distance setup, RAM FDL1 load, RAM payload load.")
+    operations = ["RAM FDL1 load", "RAM payload load"]
+    if config["exec_distance"]:
+        operations.insert(0, "exec-distance setup")
+    print(f"Operations: {', '.join(operations)}.")
     print("There are no flash, erase, partition, or NV commands.")
     print()
     print(config["boot_instructions"])
@@ -213,7 +254,7 @@ def run(bundle: Path, runtime: dict[str, Any]) -> None:
         "--lcd",
         f"0x{config['lcd_id']:x}",
         "--bl_extra",
-        f"rgbw=0x{config['backlight_rgbw']:x}",
+        backlight_argument(config),
         config["session_name"],
     ]
     bridge_process: subprocess.Popen[str] | None = None
