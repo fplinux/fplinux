@@ -88,8 +88,7 @@ int main(int argc, char **argv)
 	       "so the\n");
 	printf("fplinux-cpuclock: instruction rate is the clock; loop overhead "
 	       "is excluded\n");
-	printf(
-	    "fplinux-cpuclock: and makes every figure below a lower bound.\n");
+	printf("fplinux-cpuclock: and makes every figure below a lower bound.\n");
 
 	/* Warm the pipeline and page in the code before the first measurement.
 	 */

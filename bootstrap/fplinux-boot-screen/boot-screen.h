@@ -53,7 +53,7 @@ struct fplinux_boot_screen {
 	char status_text[FPLINUX_BOOT_SCREEN_STATUS_BYTES];
 	char error_detail[FPLINUX_BOOT_SCREEN_STATUS_BYTES];
 	enum fplinux_boot_screen_status
-	    stage_status[FPLINUX_BOOT_SCREEN_MAX_STAGES];
+		stage_status[FPLINUX_BOOT_SCREEN_MAX_STAGES];
 	enum fplinux_boot_screen_status status_state;
 	size_t stage_count;
 	size_t current_stage;
@@ -62,11 +62,11 @@ struct fplinux_boot_screen {
 	uint8_t has_error;
 };
 
-int fplinux_boot_screen_init(
-    struct fplinux_boot_screen *screen,
-    const struct fplinux_boot_screen_canvas *canvas,
-    const struct fplinux_boot_screen_identity *identity,
-    const char *const *stage_labels, size_t stage_count);
+int fplinux_boot_screen_init(struct fplinux_boot_screen *screen,
+			     const struct fplinux_boot_screen_canvas *canvas,
+			     const struct fplinux_boot_screen_identity *identity,
+			     const char *const *stage_labels,
+			     size_t stage_count);
 
 int fplinux_boot_screen_set_stage(struct fplinux_boot_screen *screen,
 				  size_t stage_index,

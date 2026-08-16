@@ -112,7 +112,7 @@ static void release_keys(int device, bool pressed[KEY_CNT])
 int main(int argc, char **argv)
 {
 	const char *path = argc > 1 ? argv[1] : DEFAULT_CHANNEL;
-	bool pressed[KEY_CNT] = {false};
+	bool pressed[KEY_CNT] = { false };
 	char line[LINE_BYTES];
 	size_t filled = 0;
 	int channel;
@@ -134,8 +134,8 @@ int main(int argc, char **argv)
 		filled = 0;
 		for (;;) {
 			struct pollfd waiting = {
-			    .fd = channel,
-			    .events = POLLIN,
+				.fd = channel,
+				.events = POLLIN,
 			};
 			char byte;
 			ssize_t got;
