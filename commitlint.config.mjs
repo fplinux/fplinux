@@ -31,6 +31,7 @@ const SCOPES = [
   "cli",
   "console",
   "deps",
+  "inoi-240-modern-4g",
   "inoi-244-modern-4g",
   "input",
   "nokia-ta1618",
