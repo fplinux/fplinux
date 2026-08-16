@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /dts-v1/;
 
+#include <dt-bindings/input/input.h>
 #include <dt-bindings/leds/common.h>
 #include "ums9117.dtsi"
 
@@ -39,19 +40,14 @@
 	};
 
 	soc {
-		aon_apb: syscon@402e0000 {
-			compatible = "fplinux,ums9117-aon-apb", "syscon";
-			reg = <0x402e0000 0x00003000>;
-		};
-
 		display@83f00000 {
-			compatible = "fplinux,ta1618-fb";
+			compatible = "fplinux,ums9117-st7789p3-spi-fb";
 			reg = <0x83f00000 0x00100000>,
 			      <0x20800000 0x00001000>,
-			      <0x70b00000 0x00001000>,
 			      <0x40600000 0x00000400>,
 			      <0x40608000 0x00001000>,
 			      <0x20a00000 0x00001000>,
+			      <0x70b00000 0x00001000>,
 			      <0x21500054 0x00000004>,
 			      <0x71301004 0x00000004>,
 			      <0x71302004 0x00000004>,
@@ -60,14 +56,22 @@
 			      <0x20e02004 0x00000004>,
 			      <0x402a00b0 0x0000001c>,
 			      <0x402a04b0 0x0000001c>;
-			reg-names = "framebuffer", "lcdc", "spi", "adi-controller",
-				    "analog-slave", "lcm", "spi-clock-selector",
+			reg-names = "framebuffer", "lcdc", "adi-controller",
+				    "analog-slave", "lcm", "spi", "spi-clock-selector",
 				    "spi-reset-set", "spi-reset-clear", "ap-ahb-gate-set",
 				    "ap-ahb-reset-set", "ap-ahb-reset-clear", "pinmux",
 				    "pinconf";
 			interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL_HIGH>;
 			interrupt-names = "lcdc-done";
 			sprd,aon-apb = <&aon_apb>;
+			sprd,pinmux-offsets = <0 4 8 12 16 20 24>;
+			sprd,pinmux-values = <0 0 0 0 0 0 0>;
+			sprd,pinconf-offsets = <0 4 8 12 16 20 24>;
+			sprd,pinconf-values = <
+				0x00182001 0x00082046 0x00082001 0x00102004
+				0x00082004 0x00102004 0x00082004
+			>;
+			sprd,wled-current-levels = <10 10 10 10>;
 		};
 
 		mmc@20e00000 {
@@ -107,16 +111,6 @@
 			interrupts = <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
 		};
 
-		keypad@40250000 {
-			compatible = "fplinux,ta1618-keypad";
-			reg = <0x40250000 0x00000100>,
-			      <0x40600000 0x00001000>;
-			reg-names = "keypad", "adi";
-			/* Shared EIC1 power and EIC9 key data, read through ADI. */
-			sprd,eic-data-address = <0x40608280>;
-			sprd,aon-apb = <&aon_apb>;
-		};
-
 		keypad-backlight@40608df8 {
 			compatible = "fplinux,ta1618-kpled";
 			reg = <0x40608df8 0x00000004>;
@@ -124,6 +118,38 @@
 			fplinux,current-code = <1>;
 		};
 	};
+};
+
+&keypad {
+	compatible = "fplinux,ums9117-keypad";
+	status = "okay";
+	label = "TA-1618 keypad";
+	fplinux,input-phys = "ta1618/keypad0";
+	keypad,num-rows = <5>;
+	keypad,num-columns = <4>;
+	/* Exact TA-1618 scan map derived from the proven fpdoom keymap.bin. */
+	linux,keymap = <
+		MATRIX_KEY(0, 0, KEY_KPASTERISK) /* * */
+		MATRIX_KEY(0, 1, KEY_0)
+		MATRIX_KEY(0, 2, KEY_TAB) /* left soft */
+		MATRIX_KEY(0, 3, KEY_KPDOT) /* # */
+		MATRIX_KEY(1, 0, KEY_7)
+		MATRIX_KEY(1, 1, KEY_3)
+		MATRIX_KEY(1, 2, KEY_LEFT)
+		MATRIX_KEY(1, 3, KEY_9)
+		MATRIX_KEY(2, 0, KEY_1)
+		MATRIX_KEY(2, 1, KEY_2)
+		MATRIX_KEY(2, 3, KEY_6)
+		MATRIX_KEY(3, 0, KEY_ENTER) /* dial */
+		MATRIX_KEY(3, 1, KEY_DOWN)
+		MATRIX_KEY(3, 2, KEY_ENTER) /* centre */
+		MATRIX_KEY(3, 3, KEY_RIGHT)
+		MATRIX_KEY(4, 0, KEY_4)
+		MATRIX_KEY(4, 1, KEY_5)
+		MATRIX_KEY(4, 2, KEY_UP)
+		MATRIX_KEY(4, 3, KEY_BACKSPACE) /* right soft */
+	>;
+	sprd,eic9-keycode = <KEY_8>;
 };
 
 &usb {

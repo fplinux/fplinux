@@ -10,13 +10,13 @@ override VENDOR := ../vendor/fpdoom
 override SYSDIR := $(VENDOR)/fpdoom
 override SYSDIR_T117 := $(VENDOR)/ums9117
 override PACK_RELOC := $(VENDOR)/pack_reloc/pack_reloc
-override LDSCRIPT := $(CURDIR)/ums9117-linux.ld
+override LDSCRIPT := $(CURDIR)/ums9117-bootstrap/ums9117-linux.ld
 override OBJDIR := obj
 
 override SYS_EXTRA :=
 override SYS_SRCS := asmcode usbio common libc syscomm syscode
 override SYS_SRCS2 := start entry $(SYS_SRCS)
-override APP_SRCS := main fplinux-boot-screen/boot-screen handoff payload
+override APP_SRCS := main fplinux-boot-screen/boot-screen ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff payload
 override APP_OBJS1 := $(APP_SRCS:%=$(OBJDIR)/app/%.o)
 override APP_OBJS2 :=
 override OBJS := $(SYS_SRCS2:%=$(OBJDIR)/sys/%.o) $(APP_OBJS1)
@@ -47,7 +47,7 @@ endif
 ifneq ($(strip $(SYS_SRCS)),asmcode usbio common libc syscomm syscode)
 $(error FPLinux bootstrap source closure changed: $(SYS_SRCS))
 endif
-ifneq ($(strip $(APP_SRCS)),main fplinux-boot-screen/boot-screen handoff payload)
+ifneq ($(strip $(APP_SRCS)),main fplinux-boot-screen/boot-screen ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff payload)
 $(error FPLinux bootstrap application closure changed: $(APP_SRCS))
 endif
 override FPLINUX_FORBIDDEN_OBJS := $(OBJDIR)/sys/sdio.o $(OBJDIR)/sys/microfat.o

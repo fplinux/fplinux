@@ -7,6 +7,7 @@
 #include "fplinux-boot-screen/boot-screen.h"
 #include "syscode.h"
 #include "ta1618-hwdiag.h"
+#include "ums9117-bootstrap/bootstrap.h"
 
 #define RAM_BASE 0x80000000u
 #define RAM_REQUIRED 0x04000000u
@@ -100,17 +101,10 @@
 #define MUSB_TXCSR_DMA_BITS (BIT(15) | BIT(12) | BIT(10))
 #define MUSB_RXCSR_DMA_BITS (BIT(15) | BIT(13) | BIT(11))
 
-extern const unsigned char linux_zimage_start[];
-extern const unsigned char linux_zimage_end[];
-extern const unsigned char linux_dtb_start[];
-extern const unsigned char linux_dtb_end[];
-
-__attribute__((noreturn)) void ta1618_linux_handoff(uint32_t zimage,
-						    uint32_t dtb);
 void invalidate_tlb(void);
 
 static volatile struct ta1618_boot_diag *const diag =
-    (volatile struct ta1618_boot_diag *)(uintptr_t)DIAG_BASE;
+	(volatile struct ta1618_boot_diag *)(uintptr_t)DIAG_BASE;
 static uint16_t *const fb = (uint16_t *)(uintptr_t)FRAMEBUFFER;
 static struct fplinux_boot_screen boot_screen;
 
@@ -133,11 +127,11 @@ enum ta1618_boot_stage {
 };
 
 static const char *const boot_stage_labels[BOOT_STAGE_COUNT] = {
-    "DISPLAY", "TIMER", "KERNEL", "DEVICE TREE", "PREPARE LINUX",
+	"DISPLAY", "TIMER", "KERNEL", "DEVICE TREE", "PREPARE LINUX",
 };
 
 typedef char ta1618_diag_fits_reserved_area
-    [sizeof(struct ta1618_boot_diag) <= TA1618_DIAG_BYTES ? 1 : -1];
+	[sizeof(struct ta1618_boot_diag) <= TA1618_DIAG_BYTES ? 1 : -1];
 
 static int boot_canvas_safe(const struct ta1618_boot_canvas *canvas)
 {
@@ -204,26 +198,6 @@ static void update_checkpoint(const char *message,
 	(void)fplinux_boot_screen_set_checkpoint(&boot_screen, message, status);
 }
 
-void lcd_appinit(void)
-{
-	struct sys_display *d = &sys_data.display;
-
-	d->w2 = d->w1;
-	d->h2 = d->h1;
-}
-
-void keytrn_init(void)
-{
-	uint8_t map[64];
-	int i;
-
-	(void)sys_getkeymap(map);
-	for (i = 0; i < 64; ++i) {
-		sys_data.keytrn[0][i] = map[i];
-		sys_data.keytrn[1][i] = map[i] | 0x8000;
-	}
-}
-
 static void diag_message(const char *message)
 {
 	unsigned i;
@@ -270,21 +244,6 @@ static void reg_write(uint32_t address, uint32_t value)
 	*(volatile uint32_t *)(uintptr_t)address = value;
 }
 
-static void reg_write16(uint32_t address, uint16_t value)
-{
-	*(volatile uint16_t *)(uintptr_t)address = value;
-}
-
-static void reg_write8(uint32_t address, uint8_t value)
-{
-	*(volatile uint8_t *)(uintptr_t)address = value;
-}
-
-static void reg_or(uint32_t address, uint32_t bits)
-{
-	reg_write(address, reg_read(address) | bits);
-}
-
 /*
  * fpdoom's UMS9117 entry code identity-maps devices from 0x20000000 upward,
  * but leaves 0x00000000..0x1fffffff faulting.  The GIC lives at 0x12000000,
@@ -293,7 +252,7 @@ static void reg_or(uint32_t address, uint32_t bits)
 static void map_gic_device_section(void)
 {
 	volatile uint32_t *table =
-	    (volatile uint32_t *)(uintptr_t)MMU_L1_TABLE_BASE;
+		(volatile uint32_t *)(uintptr_t)MMU_L1_TABLE_BASE;
 	unsigned index = GICD_BASE >> 20;
 	uint32_t descriptor = (GICD_BASE & MMU_SECTION_BASE_MASK) |
 			      MMU_SECTION_AP_RW | MMU_SECTION_DESCRIPTOR;
@@ -322,13 +281,13 @@ static void snapshot_gic(volatile struct ta1618_gic_snapshot *snapshot)
 	for (i = 0; i < TA1618_GIC_WORDS; ++i) {
 		if (i < words) {
 			snapshot->group[i] =
-			    reg_read(GICD_BASE + GICD_IGROUPR + i * 4u);
+				reg_read(GICD_BASE + GICD_IGROUPR + i * 4u);
 			snapshot->enabled[i] =
-			    reg_read(GICD_BASE + GICD_ISENABLER + i * 4u);
+				reg_read(GICD_BASE + GICD_ISENABLER + i * 4u);
 			snapshot->pending[i] =
-			    reg_read(GICD_BASE + GICD_ISPENDR + i * 4u);
+				reg_read(GICD_BASE + GICD_ISPENDR + i * 4u);
 			snapshot->active[i] =
-			    reg_read(GICD_BASE + GICD_ISACTIVER + i * 4u);
+				reg_read(GICD_BASE + GICD_ISACTIVER + i * 4u);
 		} else {
 			snapshot->group[i] = 0;
 			snapshot->enabled[i] = 0;
@@ -392,49 +351,8 @@ static void snapshot_musb(volatile struct ta1618_musb_snapshot *snapshot)
 	snapshot_dma_channel(21, snapshot->dma_channel21);
 }
 
-static uint32_t quiesce_dma_channel(unsigned channel)
-{
-	uint32_t base = MUSB_BASE + MUSB_DMA_CHANNEL(channel);
-	uint32_t cfg;
-	uint32_t intr;
-	uint32_t pause;
-	unsigned long polls;
-
-	cfg = reg_read(base + MUSB_DMA_CFG);
-	if (!(cfg & MUSB_DMA_CHN_EN)) {
-		reg_write(base + MUSB_DMA_LLIST_PTR, 0);
-		reg_write(base + MUSB_DMA_PAUSE, 0);
-		__asm__ volatile("dsb sy" : : : "memory");
-		return BIT(0) | BIT(1);
-	}
-
-	pause = reg_read(base + MUSB_DMA_PAUSE);
-	intr = reg_read(base + MUSB_DMA_INTR);
-	reg_write(base + MUSB_DMA_INTR, intr | MUSB_DMA_CLEAR_INT_EN);
-	reg_write(base + MUSB_DMA_PAUSE, pause | MUSB_DMA_CHN_CLR);
-	__asm__ volatile("dsb sy" : : : "memory");
-
-	for (polls = 0; polls < 1000000ul; ++polls) {
-		intr = reg_read(base + MUSB_DMA_INTR);
-		if (intr & MUSB_DMA_CLR_STATUS)
-			break;
-	}
-
-	reg_write(base + MUSB_DMA_INTR, intr | MUSB_DMA_INTR_CLEAR);
-	reg_write(base + MUSB_DMA_CFG,
-		  reg_read(base + MUSB_DMA_CFG) & ~MUSB_DMA_CHN_EN);
-	reg_write(base + MUSB_DMA_LLIST_PTR, 0);
-	reg_write(base + MUSB_DMA_PAUSE, 0);
-	__asm__ volatile("dsb sy" : : : "memory");
-
-	return (intr & MUSB_DMA_CLR_STATUS ? BIT(0) : 0) |
-	       (reg_read(base + MUSB_DMA_CFG) & MUSB_DMA_CHN_EN ? 0 : BIT(1));
-}
-
 static void probe_and_quiesce_usb(void)
 {
-	uint16_t csr;
-
 	update_checkpoint("GIC MAP", FPLINUX_BOOT_SCREEN_ACTIVE);
 	map_gic_device_section();
 	update_checkpoint("GIC MAP", FPLINUX_BOOT_SCREEN_DONE);
@@ -443,7 +361,7 @@ static void probe_and_quiesce_usb(void)
 	snapshot_musb(&diag->musb_before_usb_tx);
 	update_checkpoint("IRQ SNAPSHOT", FPLINUX_BOOT_SCREEN_DONE);
 	diag->usb_pending_before =
-	    snapshot_usb_pending(&diag->gic_before_clear);
+		snapshot_usb_pending(&diag->gic_before_clear);
 
 	/*
 	 * IRQ and FIQ have remained masked since fpdoom entry.  Clear only the
@@ -456,7 +374,7 @@ static void probe_and_quiesce_usb(void)
 	__asm__ volatile("dsb sy\n\tisb" : : : "memory");
 	snapshot_gic(&diag->gic_after_clear);
 	diag->usb_pending_after_clear =
-	    snapshot_usb_pending(&diag->gic_after_clear);
+		snapshot_usb_pending(&diag->gic_after_clear);
 
 	fprintf(stderr,
 		"TA1618_USB_IRQ_PROBE spi=%lu intid=%lu phase=known-tx\n",
@@ -464,7 +382,7 @@ static void probe_and_quiesce_usb(void)
 	snapshot_gic(&diag->gic_after_usb_tx);
 	snapshot_musb(&diag->musb_after_usb_tx);
 	diag->usb_pending_after_tx =
-	    snapshot_usb_pending(&diag->gic_after_usb_tx);
+		snapshot_usb_pending(&diag->gic_after_usb_tx);
 	diag->flags |= TA1618_DIAG_F_GIC_SNAPSHOTS | TA1618_DIAG_F_USB_TX_PROBE;
 	update_checkpoint("USB IRQ PROBE", FPLINUX_BOOT_SCREEN_DONE);
 
@@ -475,18 +393,20 @@ static void probe_and_quiesce_usb(void)
 	 * PIO-only MUSB driver can subsequently enumerate from a clean state.
 	 */
 	update_checkpoint("DMA 5 QUIESCE", FPLINUX_BOOT_SCREEN_ACTIVE);
-	diag->dma5_quiesce_status = quiesce_dma_channel(5);
-	if ((diag->dma5_quiesce_status & (BIT(0) | BIT(1))) ==
-	    (BIT(0) | BIT(1))) {
+	diag->dma5_quiesce_status =
+		ums9117_bootstrap_quiesce_usb_dma_channel(5);
+	if ((diag->dma5_quiesce_status & UMS9117_BOOTSTRAP_DMA_OK) ==
+	    UMS9117_BOOTSTRAP_DMA_OK) {
 		diag->flags |= TA1618_DIAG_F_DMA5_QUIESCED;
 		update_checkpoint("DMA 5 QUIESCE", FPLINUX_BOOT_SCREEN_DONE);
 	} else {
 		update_checkpoint("DMA 5 QUIESCE", FPLINUX_BOOT_SCREEN_FAILED);
 	}
 	update_checkpoint("DMA 21 QUIESCE", FPLINUX_BOOT_SCREEN_ACTIVE);
-	diag->dma21_quiesce_status = quiesce_dma_channel(21);
-	if ((diag->dma21_quiesce_status & (BIT(0) | BIT(1))) ==
-	    (BIT(0) | BIT(1))) {
+	diag->dma21_quiesce_status =
+		ums9117_bootstrap_quiesce_usb_dma_channel(21);
+	if ((diag->dma21_quiesce_status & UMS9117_BOOTSTRAP_DMA_OK) ==
+	    UMS9117_BOOTSTRAP_DMA_OK) {
 		diag->flags |= TA1618_DIAG_F_DMA21_QUIESCED;
 		update_checkpoint("DMA 21 QUIESCE", FPLINUX_BOOT_SCREEN_DONE);
 	} else {
@@ -497,16 +417,7 @@ static void probe_and_quiesce_usb(void)
 	if (!(diag->flags & TA1618_DIAG_F_DMA21_QUIESCED))
 		fail(7, "USB DMA21 QUIESCE FAIL");
 
-	csr = reg_read16(MUSB_BASE + 0x152u);
-	csr &= ~(BIT(15) | BIT(12));
-	reg_write16(MUSB_BASE + 0x152u, csr);
-	csr &= ~BIT(10);
-	reg_write16(MUSB_BASE + 0x152u, csr);
-	csr = reg_read16(MUSB_BASE + 0x166u);
-	reg_write16(MUSB_BASE + 0x166u, csr & ~MUSB_RXCSR_DMA_BITS);
-	reg_write8(MUSB_BASE + MUSB_POWER,
-		   reg_read8(MUSB_BASE + MUSB_POWER) & ~MUSB_POWER_SOFTCONN);
-	__asm__ volatile("dsb sy\n\tisb" : : : "memory");
+	ums9117_bootstrap_cleanup_usb_dma_and_disconnect();
 	diag->flags |= TA1618_DIAG_F_SOFT_DISCONNECT;
 	snapshot_musb(&diag->musb_after_quiesce);
 	update_checkpoint("JUMP TO LINUX", FPLINUX_BOOT_SCREEN_ACTIVE);
@@ -514,75 +425,32 @@ static void probe_and_quiesce_usb(void)
 
 static int enable_and_probe_sprd_timer(void)
 {
-	uint32_t eb0_before = reg_read(AON_APB_EB0);
-	uint32_t rtc_before = reg_read(AON_APB_RTC_EB);
-	uint32_t clk_before = reg_read(AON_APB_CLK_EB0);
-	uint32_t ctl_before;
-	uint32_t ctl;
-	uint32_t syscnt_before;
-	uint32_t syscnt_after;
-	uint32_t int_status;
-	uint32_t value;
-	uint32_t shadow;
-	unsigned long polls = 0;
+	struct ums9117_bootstrap_timer_gates gates;
+	struct ums9117_bootstrap_timer_result timer;
+	int timer_ok;
 
-	/*
-	 * Pike2 vendor Linux uses the 32 kHz AON timer at 0x40050000 as its
-	 * clockevent and SPI 28 as the interrupt.  The free-running 1 ms AP
-	 * system counter at 0x4023000c is already used by fpdoom and becomes
-	 * Linux's clocksource.
-	 */
-	reg_or(AON_APB_EB0, TIMER_EB0_BITS);
-	reg_or(AON_APB_RTC_EB, TIMER_RTC_BITS);
-	reg_or(AON_APB_CLK_EB0, TIMER_CLK_BITS);
-	__asm__ volatile("dsb sy\n\tisb" : : : "memory");
+	ums9117_bootstrap_enable_timer_gates(&gates);
 
 	fprintf(stderr,
 		"TA1618_TIMER_GATES eb0=0x%08lx->0x%08lx "
 		"rtc=0x%08lx->0x%08lx clk=0x%08lx->0x%08lx\n",
-		(unsigned long)eb0_before, (unsigned long)reg_read(AON_APB_EB0),
-		(unsigned long)rtc_before,
-		(unsigned long)reg_read(AON_APB_RTC_EB),
-		(unsigned long)clk_before,
-		(unsigned long)reg_read(AON_APB_CLK_EB0));
+		(unsigned long)gates.eb0_before, (unsigned long)gates.eb0_after,
+		(unsigned long)gates.rtc_before, (unsigned long)gates.rtc_after,
+		(unsigned long)gates.clk_before,
+		(unsigned long)gates.clk_after);
 
-	ctl_before = reg_read(AON_TIMER_BASE + TIMER_CTL);
-	reg_write(AON_TIMER_BASE + TIMER_CTL, ctl_before & ~TIMER_CTL_ENABLE);
-	reg_write(AON_TIMER_BASE + TIMER_INT,
-		  reg_read(AON_TIMER_BASE + TIMER_INT) | TIMER_INT_CLR);
-	reg_write(AON_TIMER_BASE + TIMER_LOAD_HI, 0);
-	reg_write(AON_TIMER_BASE + TIMER_LOAD_LO, 256);
-	reg_write(AON_TIMER_BASE + TIMER_INT, TIMER_INT_EN);
-	ctl = (ctl_before & ~(TIMER_CTL_PERIOD | TIMER_CTL_64BIT)) |
-	      TIMER_CTL_ENABLE;
-
-	syscnt_before = reg_read(AP_SYSCNT);
-	reg_write(AON_TIMER_BASE + TIMER_CTL, ctl);
-	do {
-		int_status = reg_read(AON_TIMER_BASE + TIMER_INT);
-		syscnt_after = reg_read(AP_SYSCNT);
-	} while (!(int_status & (TIMER_INT_RAW | TIMER_INT_MASK)) &&
-		 (uint32_t)(syscnt_after - syscnt_before) < 50 &&
-		 ++polls < 5000000ul);
-
-	value = reg_read(AON_TIMER_BASE + TIMER_VALUE_LO);
-	shadow = reg_read(AON_TIMER_BASE + TIMER_SHDW_LO);
-	reg_write(AON_TIMER_BASE + TIMER_CTL,
-		  reg_read(AON_TIMER_BASE + TIMER_CTL) & ~TIMER_CTL_ENABLE);
-	reg_write(AON_TIMER_BASE + TIMER_INT, int_status | TIMER_INT_CLR);
-	reg_write(AON_TIMER_BASE + TIMER_INT, 0);
-	__asm__ volatile("dsb sy" : : : "memory");
+	timer_ok = ums9117_bootstrap_probe_timer(&timer);
 
 	fprintf(stderr,
 		"TA1618_SPRD_TIMER syscnt=%lu->%lu polls=%lu "
 		"ctl=0x%08lx->0x%08lx value=%lu shadow=%lu int=0x%08lx\n",
-		(unsigned long)syscnt_before, (unsigned long)syscnt_after,
-		polls, (unsigned long)ctl_before, (unsigned long)ctl,
-		(unsigned long)value, (unsigned long)shadow,
-		(unsigned long)int_status);
+		(unsigned long)timer.syscnt_before,
+		(unsigned long)timer.syscnt_after, timer.polls,
+		(unsigned long)timer.ctl_before, (unsigned long)timer.ctl,
+		(unsigned long)timer.value, (unsigned long)timer.shadow,
+		(unsigned long)timer.int_status);
 
-	return syscnt_after != syscnt_before &&
-	       (int_status & (TIMER_INT_RAW | TIMER_INT_MASK));
+	return timer_ok;
 }
 
 int main(int argc, char **argv)
@@ -590,14 +458,14 @@ int main(int argc, char **argv)
 	uint32_t ram_bytes = *(volatile uint32_t *)(uintptr_t)0x80100000u;
 	uint32_t display_width = sys_data.display.w1;
 	uint32_t display_height = sys_data.display.h1;
-	size_t zimage_bytes = (size_t)(linux_zimage_end - linux_zimage_start);
-	size_t dtb_bytes = (size_t)(linux_dtb_end - linux_dtb_start);
+	size_t zimage_bytes = ums9117_bootstrap_zimage_size();
+	size_t dtb_bytes = ums9117_bootstrap_dtb_size();
 	struct fplinux_boot_screen_canvas canvas;
 	const struct fplinux_boot_screen_identity identity = {
-	    .brand = "FPLinux",
-	    .variant = "TA-1618",
-	    .model = "NOKIA 3210 4G",
-	    .mode = "VOLATILE RAM BOOT",
+		.brand = "FPLinux",
+		.variant = "TA-1618",
+		.model = "NOKIA 3210 4G",
+		.mode = "VOLATILE RAM BOOT",
 	};
 
 	(void)argc;
@@ -661,40 +529,38 @@ int main(int argc, char **argv)
 	if (!zimage_bytes || zimage_bytes > 0x01200000u)
 		fail(3, "BAD KERNEL SIZE");
 	record_stage(3, "COPY KERNEL");
-	memmove((void *)(uintptr_t)ZIMAGE_STAGE, linux_zimage_start,
-		zimage_bytes);
-	clean_dcache_range((void *)(uintptr_t)ZIMAGE_STAGE,
-			   (void *)(uintptr_t)(ZIMAGE_STAGE + zimage_bytes));
+	ums9117_bootstrap_copy_zimage(ZIMAGE_STAGE, zimage_bytes);
 	(void)fplinux_boot_screen_set_stage(&boot_screen, BOOT_STAGE_KERNEL,
 					    FPLINUX_BOOT_SCREEN_DONE);
 
-	(void)fplinux_boot_screen_set_stage(
-	    &boot_screen, BOOT_STAGE_DEVICE_TREE, FPLINUX_BOOT_SCREEN_ACTIVE);
+	(void)fplinux_boot_screen_set_stage(&boot_screen,
+					    BOOT_STAGE_DEVICE_TREE,
+					    FPLINUX_BOOT_SCREEN_ACTIVE);
 	if (!dtb_bytes || dtb_bytes > 0x00010000u)
 		fail(4, "BAD DTB SIZE");
 	record_stage(4, "COPY DTB");
-	memcpy((void *)(uintptr_t)DTB_STAGE, linux_dtb_start, dtb_bytes);
-	clean_dcache_range((void *)(uintptr_t)DTB_STAGE,
-			   (void *)(uintptr_t)(DTB_STAGE + dtb_bytes));
+	ums9117_bootstrap_copy_dtb(DTB_STAGE, dtb_bytes);
 	clean_dcache_range((void *)(uintptr_t)DIAG_BASE,
 			   (void *)(uintptr_t)(DIAG_BASE + sizeof(*diag)));
 	clean_dcache_range((void *)(uintptr_t)FRAMEBUFFER,
 			   (void *)(uintptr_t)(FRAMEBUFFER + FB_BYTES));
 	(void)fplinux_boot_screen_set_stage(
-	    &boot_screen, BOOT_STAGE_DEVICE_TREE, FPLINUX_BOOT_SCREEN_DONE);
+		&boot_screen, BOOT_STAGE_DEVICE_TREE, FPLINUX_BOOT_SCREEN_DONE);
 
-	(void)fplinux_boot_screen_set_stage(
-	    &boot_screen, BOOT_STAGE_PREPARE_LINUX, FPLINUX_BOOT_SCREEN_ACTIVE);
+	(void)fplinux_boot_screen_set_stage(&boot_screen,
+					    BOOT_STAGE_PREPARE_LINUX,
+					    FPLINUX_BOOT_SCREEN_ACTIVE);
 	record_stage(5, "PREPARE LINUX");
 	diag->stage = 6;
 	diag_message("JUMP ZIMAGE");
 	probe_and_quiesce_usb();
-	(void)fplinux_boot_screen_set_stage(
-	    &boot_screen, BOOT_STAGE_PREPARE_LINUX, FPLINUX_BOOT_SCREEN_DONE);
+	(void)fplinux_boot_screen_set_stage(&boot_screen,
+					    BOOT_STAGE_PREPARE_LINUX,
+					    FPLINUX_BOOT_SCREEN_DONE);
 	clean_dcache_range((void *)(uintptr_t)DIAG_BASE,
 			   (void *)(uintptr_t)(DIAG_BASE + sizeof(*diag)));
 	clean_invalidate_dcache();
 	invalidate_icache();
 
-	ta1618_linux_handoff(ZIMAGE_STAGE, DTB_STAGE);
+	ums9117_linux_handoff(ZIMAGE_STAGE, DTB_STAGE);
 }
