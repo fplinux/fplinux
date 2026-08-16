@@ -1,0 +1,5 @@
+NAME="FPLinux"
+PRETTY_NAME="FPLinux INOI 244 RAM system"
+ID=fplinux
+VARIANT="INOI 244 Modern 4G USB console"
+VARIANT_ID=inoi-244-modern-4g-console

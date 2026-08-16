@@ -1,0 +1,116 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/dts-v1/;
+
+#include <dt-bindings/input/input.h>
+#include "ums9117.dtsi"
+
+/ {
+	model = "INOI 244 Modern 4G Linux RAM boot";
+	compatible = "inoi,244-modern-4g", "sprd,ums9117";
+
+	chosen {
+		bootargs = "console=tty0 loglevel=8 ignore_loglevel init=/init panic=-1 rdinit=/init g_serial.use_acm=0 g_serial.n_ports=1";
+	};
+
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x80000000 0x02f00000>;
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		framebuffer@82f00000 {
+			reg = <0x82f00000 0x00100000>;
+			no-map;
+		};
+	};
+
+	soc {
+		display@82f00000 {
+			compatible = "fplinux,ums9117-nv3030-lcm-fb";
+			reg = <0x82f00000 0x00100000>,
+			      <0x20800000 0x00001000>,
+			      <0x40600000 0x00000400>,
+			      <0x40608000 0x00001000>,
+			      <0x20a00000 0x00001000>,
+			      <0x60000000 0x00000002>,
+			      <0x60020000 0x00000002>,
+			      <0x20e01000 0x00000004>,
+			      <0x20e01004 0x00000004>,
+			      <0x20e02004 0x00000004>,
+			      <0x402a00b0 0x00000170>,
+			      <0x402a04b0 0x00000170>;
+			reg-names = "framebuffer", "lcdc", "adi-controller",
+				    "analog-slave", "lcm", "lcm-command", "lcm-data",
+				    "ap-ahb-gate-set", "ap-ahb-reset-set",
+				    "ap-ahb-reset-clear", "pinmux", "pinconf";
+			sprd,aon-apb = <&aon_apb>;
+			/* fpdoom cmd3001_inoi MCU timing at the 128 MHz AHB clock. */
+			sprd,dbi-timing-ns = <5 150 150 30 80 120>;
+			/* LCM control pins followed by the ten DBI data pins. */
+			sprd,pinmux-offsets = <
+				0x000 0x004 0x008 0x00c 0x010 0x014 0x018
+				0x148 0x14c 0x150 0x154 0x158
+				0x15c 0x160 0x164 0x168 0x16c
+			>;
+			sprd,pinmux-values = <
+				0 0 0x10 0x10 0x10 0x10 0x10
+				0x10 0x10 0x10 0x10 0x10
+				0x10 0x10 0x10 0x10 0x10
+			>;
+			sprd,pinconf-offsets = <
+				0x000 0x004 0x008 0x00c 0x010 0x014 0x018
+				0x148 0x14c 0x150 0x154 0x158
+				0x15c 0x160 0x164 0x168 0x16c
+			>;
+			sprd,pinconf-values = <
+				0x00182001 0x00182046 0x00182001
+				0x00182004 0x00182004 0x00182004 0x00182004
+				0x00182004 0x00182004 0x00182004 0x00182004
+				0x00182004 0x00182004 0x00182004 0x00182004
+				0x00182004 0x00182004
+			>;
+			/* INOI uses RGB WLED channels only; the W channel stays dark. */
+			sprd,wled-current-levels = <31 31 31 0>;
+		};
+	};
+};
+
+&keypad {
+	compatible = "fplinux,ums9117-keypad";
+	status = "okay";
+	label = "INOI 244 Modern 4G keypad";
+	fplinux,input-phys = "inoi244/keypad0";
+	keypad,num-rows = <5>;
+	keypad,num-columns = <4>;
+	linux,keymap = <
+		MATRIX_KEY(0, 0, KEY_KPASTERISK) /* * */
+		MATRIX_KEY(0, 1, KEY_0)
+		MATRIX_KEY(0, 2, KEY_KPDOT) /* # */
+		MATRIX_KEY(0, 3, KEY_ENTER) /* centre */
+		MATRIX_KEY(1, 0, KEY_7)
+		MATRIX_KEY(1, 1, KEY_8)
+		MATRIX_KEY(1, 2, KEY_9)
+		MATRIX_KEY(1, 3, KEY_LEFT)
+		MATRIX_KEY(2, 0, KEY_4)
+		MATRIX_KEY(2, 1, KEY_5)
+		MATRIX_KEY(2, 2, KEY_6)
+		MATRIX_KEY(2, 3, KEY_RIGHT)
+		MATRIX_KEY(3, 0, KEY_1)
+		MATRIX_KEY(3, 1, KEY_2)
+		MATRIX_KEY(3, 2, KEY_3)
+		MATRIX_KEY(3, 3, KEY_DOWN)
+		MATRIX_KEY(4, 0, KEY_TAB) /* left soft */
+		MATRIX_KEY(4, 1, KEY_ENTER) /* dial */
+		MATRIX_KEY(4, 2, KEY_BACKSPACE) /* right soft */
+		MATRIX_KEY(4, 3, KEY_UP)
+	>;
+};
+
+&usb {
+	dr_mode = "peripheral";
+	status = "okay";
+};

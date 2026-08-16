@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: GPL-2.0-only
+schema = "fplinux.target/v1"
+name = "inoi-244-modern-4g"
+display_name = "INOI 244 Modern 4G"
+release_slug = "FPLinux-INOI-244-Modern-4G"
+platform = "ums9117"
+profile = "console"
+release_manifest = "release/manifest.toml"
+assets_lock = "loader/assets.lock.toml"
+
+[buildroot]
+defconfig = "rootfs/defconfig"
+
+[linux]
+defconfig = "kernel/defconfig"
+dtb = "unisoc/ums9117-inoi-244-modern-4g.dtb"
+debug_dtb = "ums9117-inoi-244-modern-4g.dtb"
+patches = [
+  "kernel/0001-inoi-244-modern-4g-dtb.patch",
+  "kernel/0002-inoi-244-modern-4g-dt-binding.patch",
+]
+forbidden_dtb_markers = ["sdhci", "mmc", "nand", "mtd", "ubi", "emmc"]
+forbidden_config = [
+  "CONFIG_MTD=y",
+  "CONFIG_UBI=y",
+  "CONFIG_SCSI=y",
+  "CONFIG_ATA=y",
+  "CONFIG_NVME_CORE=y",
+  "CONFIG_DEVMEM=y",
+  "CONFIG_MMC=y",
+]
+
+[[linux.copies]]
+source = "dts/ums9117-inoi-244-modern-4g.dts"
+destination = "arch/arm/boot/dts/unisoc/ums9117-inoi-244-modern-4g.dts"
+
+[[linux.copies]]
+source = "kernel/inoi244-fb.c"
+destination = "drivers/video/fbdev/inoi244-fb.c"
+
+[[linux.appends]]
+source = "kernel/Kconfig"
+destination = "arch/arm/mach-ums9117/Kconfig"
+
+[[linux.appends]]
+source = "kernel/fbdev.Kconfig"
+destination = "drivers/video/fbdev/Kconfig"
+
+[[linux.appends]]
+source = "kernel/fbdev.Makefile"
+destination = "drivers/video/fbdev/Makefile"
+
+[bootstrap]
+source = "bootstrap"
+image = "inoi244_linux_bootstrap.bin"
+map = "obj/inoi244_linux_bootstrap_map.txt"
+kernel_destination = "zImage"
+dtb_destination = "inoi244.dtb"
+load_address = 0x80100000
+payload_limit = 0x82000000
+toolchain = "arm-none-eabi"
+lto = 0
+
+[runtime]
+fdl1_load_address = 0x00006200
+
+[runtime.assets]
+fdl1 = "assets/t117_fdl1.bin"
+pinmap = "assets/pinmap.bin"
+keymap = "assets/keymap.bin"
+
+[runtime.adapter]
+brightness = 0
+rotation = 0
+spi_mode = 3
+lcd_id = 0x303001
+exec_distance = 0
+backlight_channels = "rgb"
+backlight_level = 0x1f
+session_name = "inoi244-linux"
+handoff_marker = "INOI244_LINUX_BOOTSTRAP stage=5 message=PREPARE LINUX"
+handoff_wait_seconds = 60
+release_wait_seconds = 10
+boot_instructions = "Power the phone off, hold *, then connect USB while keeping * pressed."
+
+[runtime.usb.bootrom]
+vendor_id = 0x1782
+product_id = 0x4d00
+wait_seconds = 300
+
+[runtime.usb.linux_console]
+vendor_id = 0x0525
+product_id = 0xa4a6
+wait_seconds = 60

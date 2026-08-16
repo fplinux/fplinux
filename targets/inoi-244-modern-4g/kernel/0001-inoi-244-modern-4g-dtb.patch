@@ -1,0 +1,9 @@
+diff --git a/arch/arm/boot/dts/unisoc/Makefile b/arch/arm/boot/dts/unisoc/Makefile
+--- a/arch/arm/boot/dts/unisoc/Makefile
++++ b/arch/arm/boot/dts/unisoc/Makefile
+@@ -2,3 +2,5 @@
+ dtb-$(CONFIG_ARCH_RDA) += \
+ 	rda8810pl-orangepi-2g-iot.dtb \
+ 	rda8810pl-orangepi-i96.dtb
++
++dtb-$(CONFIG_MACH_INOI_244_MODERN_4G) += ums9117-inoi-244-modern-4g.dtb
