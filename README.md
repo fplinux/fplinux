@@ -17,9 +17,10 @@ Photographs are not included in this source snapshot.
 
 ## Phone targets
 
-| Target         | Device                  | Platform                                 | Profile   | Documentation                                          |
-| -------------- | ----------------------- | ---------------------------------------- | --------- | ------------------------------------------------------ |
-| `nokia-ta1618` | Nokia 3210 4G (TA-1618) | [`ums9117`](platforms/ums9117/README.md) | `console` | [Target documentation](targets/nokia-ta1618/README.md) |
+| Target               | Device                  | Platform                                 | Profile   | Documentation                                                |
+| -------------------- | ----------------------- | ---------------------------------------- | --------- | ------------------------------------------------------------ |
+| `inoi-244-modern-4g` | INOI 244 Modern 4G      | [`ums9117`](platforms/ums9117/README.md) | `console` | [Target documentation](targets/inoi-244-modern-4g/README.md) |
+| `nokia-ta1618`       | Nokia 3210 4G (TA-1618) | [`ums9117`](platforms/ums9117/README.md) | `console` | [Target documentation](targets/nokia-ta1618/README.md)       |
 
 Hardware support status, qualification state and phone-specific limitations are
 recorded only in the target documentation.
@@ -61,26 +62,43 @@ The no-argument command runs the full gate. Use `./fplinux check --list` to see
 named scopes, or select several such as `./fplinux check docs spelling`. Check
 and build commands print compact stage status by default, retain full output
 under `.cache/logs/`, and accept `--verbose` when live tool output is needed.
+Each check or build also writes a `run.json` alongside its stage logs:
+`.cache/logs/check/<run-id>/run.json` for checks and
+`.cache/logs/build/<target>/<run-id>/run.json` for builds.
+
+Successful checks reuse an exact per-scope result. If the recorded inputs do not
+match, the scope runs again. Use `--no-cache` to run every selected cacheable
+scope again:
+
+```sh
+./fplinux check --no-cache
+```
 
 It checks Markdown, JSON, TOML, documentation, licensing metadata, Python,
 shell, Buildroot, container recipe and C sources in the pinned environment. The C passes use Clang `scan-build` for
 userspace and `sparse` with the target's real Linux tree, Kconfig and generated
-headers for kernel code. Source snapshots are mounted read-only, analyzer work
+headers for kernel code. Source snapshots are mounted read-only, userspace
+analysis uses an invocation-local temporary directory, the fixed Sparse state
 stays under `.cache/`, and analysis runs without network access after its pinned
 inputs have been downloaded.
 
 The complete build stays under `.cache/`; it does not write generated files
-into the source tree. The runnable bundle is produced at:
+into the source tree. The current runnable bundle is selected through:
 
 ```text
-.cache/out/nokia-ta1618/console/
+.cache/out/nokia-ta1618/console.current.json
 ```
+
+The selected bundle is below
+`.cache/out/nokia-ta1618/bundles/console/<generation>/`. When the recorded build
+inputs match, `build` reports a cached result; otherwise it runs the normal build
+stages.
 
 Targets are discovered from `targets/*/target.toml`. The data-only
 `fplinux.target/v1` manifest selects a platform and board inputs; the command
 dispatches stages 1–4 to the shared `scripts/fplinux_cli/builder.py`.
 
-See [Building FPLinux](docs/BUILDING.md) for the cache layout, recovery steps and
+See [Building FPLinux](docs/BUILDING.md) for the cache layout, inventory and
 pinned inputs.
 
 ## Run from the source checkout
@@ -112,8 +130,10 @@ the current checkout:
 ./fplinux verify nokia-ta1618
 ```
 
-This compares the workspace and container recipe digests in
-`/etc/fplinux-build` with the current bundle's `build-manifest.json`. It does not
+`verify` first refuses a local bundle whose workspace or OCI recipe is stale.
+It then compares the phone's Buildroot recipe in `/etc/fplinux-build` and its
+kernel suffix with the current bundle. That suffix identifies the prepared
+Linux, rootfs, kernel configuration, DTB and bootstrap recipe. It does not
 qualify the hardware or verify every bundle file. From the repository root,
 reconnect to the shell with interface 0:
 
