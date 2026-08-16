@@ -1,11 +1,9 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0-only
 #
-# Stamp the image with the source and container recipe digests. Without them
-# nothing inside a running phone says which build it is: the kernel version is
-# fixed, the build timestamp is pinned for reproducibility, and the module
-# vermagic is identical across rebuilds, so a module from a foreign tree loads
-# without a word.
+# Stamp the root filesystem with its exact Buildroot recipe.  The kernel carries
+# an independent content-derived device identity in CONFIG_LOCALVERSION, so a
+# kernel-only change does not force an otherwise identical rootfs rebuild.
 
 set -eu
 
@@ -17,8 +15,7 @@ if [ -n "$pak" ]; then
 	exit 1
 fi
 
+: "${FPLINUX_BUILDROOT_RECIPE:?missing Buildroot causal recipe}"
 rm -f "$target/etc/fplinux-build"
-printf 'workspace=%s container=%s\n' \
-	"${FPLINUX_WORKSPACE_DIGEST:-unknown}" \
-	"${FPLINUX_CONTAINER_RECIPE:-unknown}" >"$target/etc/fplinux-build"
+printf 'buildroot=%s\n' "$FPLINUX_BUILDROOT_RECIPE" >"$target/etc/fplinux-build"
 chmod 0444 "$target/etc/fplinux-build"

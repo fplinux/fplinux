@@ -5,11 +5,8 @@ name = "ums9117"
 [buildroot]
 external = "buildroot-external"
 shared_paths = ["common/rootfs"]
-clean_targets = [
-  "fplinux-console-dirclean",
-  "fplinux-input-dirclean",
-  "fplinux-tyrquake-dirclean",
-]
+toolchain_defconfig = "platforms/ums9117/buildroot/toolchain.defconfig"
+toolchain_external_defconfig = "platforms/ums9117/buildroot/toolchain-external.defconfig"
 
 [linux]
 source_lock = "linux"
@@ -24,7 +21,6 @@ patches = [
   "platforms/ums9117/kernel/0001-ums9117-platform.patch",
   "platforms/ums9117/kernel/0002-ums9117-dt-bindings.patch",
 ]
-appends = []
 
 [[linux.copies]]
 source = "platforms/ums9117/kernel/Kconfig"
@@ -55,6 +51,30 @@ source = "platforms/ums9117/kernel/ums9117-musb.c"
 destination = "drivers/usb/musb/ums9117.c"
 
 [[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-keypad.c"
+destination = "drivers/input/keyboard/ums9117-keypad.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-fb.h"
+destination = "drivers/video/fbdev/ums9117-fb.h"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-fb-internal.h"
+destination = "drivers/video/fbdev/ums9117-fb-internal.h"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-fb-core.c"
+destination = "drivers/video/fbdev/ums9117-fb-core.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-fb-spi.c"
+destination = "drivers/video/fbdev/ums9117-fb-spi.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-fb-lcm.c"
+destination = "drivers/video/fbdev/ums9117-fb-lcm.c"
+
+[[linux.copies]]
 source = "platforms/ums9117/dts/ums9117.dtsi"
 destination = "arch/arm/boot/dts/unisoc/ums9117.dtsi"
 
@@ -69,6 +89,22 @@ destination = "Documentation/devicetree/bindings/usb/fplinux,ums9117-musb-inheri
 [[linux.copies]]
 source = "platforms/ums9117/bindings/fplinux,ums9117-aon-apb.yaml"
 destination = "Documentation/devicetree/bindings/mfd/fplinux,ums9117-aon-apb.yaml"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/fplinux,ums9117-keypad.yaml"
+destination = "Documentation/devicetree/bindings/input/fplinux,ums9117-keypad.yaml"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/fplinux,ums9117-fb.yaml"
+destination = "Documentation/devicetree/bindings/display/fplinux,ums9117-fb.yaml"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/fbdev.Kconfig"
+destination = "drivers/video/fbdev/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/fbdev.Makefile"
+destination = "drivers/video/fbdev/Makefile"
 
 [bootstrap]
 vendor_source_lock = "fpdoom_bootstrap"
@@ -108,6 +144,10 @@ files = [
 [[bootstrap.shared_copies]]
 source = "bootstrap/fplinux-boot-screen"
 destination = "fplinux-boot-screen"
+
+[[bootstrap.shared_copies]]
+source = "platforms/ums9117/bootstrap"
+destination = "ums9117-bootstrap"
 
 [host]
 capability = "fplinux.host.ums9117-ram/v1"

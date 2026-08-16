@@ -3,13 +3,22 @@
 
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
+from typing import Literal, Self
+from unittest import mock
 
+from fplinux_cli import container
+from fplinux_cli.checkreceipts import publish_success_receipt, receipt_matches
 from fplinux_cli.container import (
     CHECK_SCOPES,
     analyzer_cache_names,
+    check_scope_closure_digest,
+    check_scope_receipt_recipe,
     resolve_check_scopes,
 )
+from fplinux_cli.workspace import WorkspaceFile, WorkspaceSnapshot
 
 
 class CheckScopeTests(unittest.TestCase):
@@ -29,7 +38,7 @@ class CheckScopeTests(unittest.TestCase):
     def test_analyzer_caches_follow_selected_scopes(self) -> None:
         """Avoid validating analyzer caches irrelevant to a scoped run."""
         self.assertEqual(analyzer_cache_names(("docs",)), ())
-        self.assertEqual(analyzer_cache_names(("c",)), ("analysis",))
+        self.assertEqual(analyzer_cache_names(("c",)), ())
         self.assertEqual(
             analyzer_cache_names(("kernel",)),
             ("analysis", "downloads", "linux"),
@@ -39,6 +48,714 @@ class CheckScopeTests(unittest.TestCase):
         """Reject names outside the public scope registry."""
         with self.assertRaisesRegex(SystemExit, "unknown check scope: imaginary"):
             resolve_check_scopes(["imaginary"])
+
+    def test_scope_receipt_recipe_binds_closure_and_oci_identity(self) -> None:
+        """Require every cacheable scope receipt to carry all causal identities."""
+        closure = "a" * 64
+        orchestration_recipe = "b" * 64
+        image = "sha256:" + "c" * 64
+        with mock.patch.object(
+            container,
+            "check_orchestration_recipe_digest",
+            return_value=orchestration_recipe,
+        ):
+            recipe = check_scope_receipt_recipe("python", closure, image_identity=image)
+        self.assertEqual(recipe.scope, "python")
+        self.assertEqual(recipe.closure_digest, closure)
+        self.assertEqual(recipe.orchestration_recipe, orchestration_recipe)
+        self.assertEqual(recipe.image_identity, image)
+        self.assertEqual(
+            recipe.commands,
+            (("python3", "/workspace/scripts/check.py", "python"),),
+        )
+
+    def test_readme_does_not_invalidate_c_or_kernel_scope(self) -> None:
+        """Keep unrelated documentation outside the two expensive closures."""
+        common = (
+            WorkspaceFile("README.md", b"first", 0o644),
+            WorkspaceFile("buildroot-external/package/app/app.c", b"int app;\n", 0o644),
+            WorkspaceFile("targets/phone/kernel/board.c", b"int board;\n", 0o644),
+            WorkspaceFile("scripts/fplinux_cli/kernelcheck.py", b"checker\n", 0o644),
+            WorkspaceFile(
+                "targets/phone/target.toml",
+                b'platform = "phone"\n'
+                b"[linux]\n"
+                b'copies = [{ source = "kernel/board.c", destination = "board.c" }]\n',
+                0o644,
+            ),
+            WorkspaceFile(
+                "platforms/phone/platform.toml",
+                b"[linux]\npatches = []\ncopies = []\nappends = []\n",
+                0o644,
+            ),
+        )
+        changed = (WorkspaceFile("README.md", b"second", 0o644), *common[1:])
+        first = WorkspaceSnapshot(common, "a" * 64)
+        second = WorkspaceSnapshot(changed, "b" * 64)
+        self.assertEqual(
+            check_scope_closure_digest("c", first),
+            check_scope_closure_digest("c", second),
+        )
+        self.assertEqual(
+            check_scope_closure_digest("kernel", first),
+            check_scope_closure_digest("kernel", second),
+        )
+        self.assertNotEqual(
+            check_scope_closure_digest("source", first),
+            check_scope_closure_digest("source", second),
+        )
+
+        kernel_changed = WorkspaceSnapshot(
+            (
+                common[0],
+                common[1],
+                WorkspaceFile("targets/phone/kernel/board.c", b"int changed;\n", 0o644),
+                common[3],
+                common[4],
+                common[5],
+            ),
+            "c" * 64,
+        )
+        self.assertEqual(
+            check_scope_closure_digest("c", first),
+            check_scope_closure_digest("c", kernel_changed),
+        )
+        self.assertNotEqual(
+            check_scope_closure_digest("kernel", first),
+            check_scope_closure_digest("kernel", kernel_changed),
+        )
+
+    def test_linux_state_change_causes_a_kernel_receipt_miss(self) -> None:
+        """Include the prepared-Linux receipt implementation in the kernel closure."""
+        first = WorkspaceSnapshot(
+            (WorkspaceFile("scripts/fplinux_cli/linux_state.py", b"first\n", 0o644),),
+            "a" * 64,
+        )
+        second = WorkspaceSnapshot(
+            (WorkspaceFile("scripts/fplinux_cli/linux_state.py", b"second\n", 0o644),),
+            "b" * 64,
+        )
+        image_identity = "sha256:" + "c" * 64
+        first_recipe = check_scope_receipt_recipe(
+            "kernel",
+            check_scope_closure_digest("kernel", first),
+            image_identity=image_identity,
+            orchestration_recipe="d" * 64,
+        )
+        second_recipe = check_scope_receipt_recipe(
+            "kernel",
+            check_scope_closure_digest("kernel", second),
+            image_identity=image_identity,
+            orchestration_recipe="d" * 64,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary)
+            publish_success_receipt(cache, first_recipe)
+            self.assertTrue(receipt_matches(cache, first_recipe))
+            self.assertFalse(receipt_matches(cache, second_recipe))
+
+    def test_kernel_scope_tracks_manifest_sources_without_whole_bootstrap(self) -> None:
+        """Track every projected Linux input but ignore bootstrap-only sources."""
+        target_manifest = (
+            b'platform = "demo"\n'
+            b"[linux]\n"
+            b'defconfig = "kernel/defconfig"\n'
+            b'patches = ["kernel/target.patch"]\n'
+            b"copies = [\n"
+            b'  { source = "kernel/target-copy.c", destination = "target-copy.c" },\n'
+            b'  { source = "bootstrap/referenced.h", destination = "referenced.h" },\n'
+            b"]\n"
+            b"appends = [\n"
+            b'  { source = "kernel/target-append", destination = "Makefile" },\n'
+            b"]\n"
+        )
+        platform_manifest = (
+            b"[linux]\n"
+            b'patches = ["platforms/demo/kernel/platform.patch"]\n'
+            b"copies = [\n"
+            b'  { source = "platforms/demo/kernel/platform-copy.c", '
+            b'destination = "platform-copy.c" },\n'
+            b"]\n"
+            b"appends = [\n"
+            b'  { source = "platforms/demo/kernel/platform-append", destination = "Makefile" },\n'
+            b"]\n"
+        )
+        files = (
+            WorkspaceFile("scripts/fplinux_cli/kernelcheck.py", b"checker\n", 0o644),
+            WorkspaceFile("targets/demo/target.toml", target_manifest, 0o644),
+            WorkspaceFile("platforms/demo/platform.toml", platform_manifest, 0o644),
+            WorkspaceFile("targets/demo/kernel/defconfig", b"CONFIG_DEMO=y\n", 0o644),
+            WorkspaceFile("targets/demo/kernel/target.patch", b"target patch\n", 0o644),
+            WorkspaceFile("targets/demo/kernel/target-copy.c", b"int target;\n", 0o644),
+            WorkspaceFile("targets/demo/bootstrap/referenced.h", b"#define DEMO 1\n", 0o644),
+            WorkspaceFile("targets/demo/kernel/target-append", b"obj-y += demo.o\n", 0o644),
+            WorkspaceFile("platforms/demo/kernel/platform.patch", b"platform patch\n", 0o644),
+            WorkspaceFile("platforms/demo/kernel/platform-copy.c", b"int platform;\n", 0o644),
+            WorkspaceFile(
+                "platforms/demo/kernel/platform-append", b"obj-y += platform.o\n", 0o644
+            ),
+            WorkspaceFile("targets/demo/bootstrap/main.c", b"int main;\n", 0o644),
+        )
+        first = WorkspaceSnapshot(files, "a" * 64)
+        header_changed = WorkspaceSnapshot(
+            (
+                *files[:6],
+                WorkspaceFile(files[6].path, b"#define DEMO 2\n", 0o644),
+                *files[7:],
+            ),
+            "b" * 64,
+        )
+        bootstrap_changed = WorkspaceSnapshot(
+            (
+                *files[:-1],
+                WorkspaceFile(files[-1].path, b"int changed;\n", 0o644),
+            ),
+            "c" * 64,
+        )
+        first_digest = check_scope_closure_digest("kernel", first)
+        header_digest = check_scope_closure_digest("kernel", header_changed)
+        self.assertNotEqual(first_digest, header_digest)
+        self.assertEqual(
+            first_digest,
+            check_scope_closure_digest("kernel", bootstrap_changed),
+        )
+        first_recipe = check_scope_receipt_recipe(
+            "kernel",
+            first_digest,
+            image_identity="sha256:" + "c" * 64,
+            orchestration_recipe="d" * 64,
+        )
+        header_recipe = check_scope_receipt_recipe(
+            "kernel",
+            header_digest,
+            image_identity="sha256:" + "c" * 64,
+            orchestration_recipe="d" * 64,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary)
+            publish_success_receipt(cache, first_recipe)
+            self.assertFalse(receipt_matches(cache, header_recipe))
+
+    def test_editorconfig_invalidates_metadata_scope(self) -> None:
+        """Track Prettier's repository EditorConfig as metadata input."""
+        first = WorkspaceSnapshot(
+            (
+                WorkspaceFile("scripts/check.py", b"checker\n", 0o755),
+                WorkspaceFile(".editorconfig", b"indent_size = 4\n", 0o644),
+            ),
+            "a" * 64,
+        )
+        second = WorkspaceSnapshot(
+            (
+                first.files[0],
+                WorkspaceFile(".editorconfig", b"indent_size = 2\n", 0o644),
+            ),
+            "b" * 64,
+        )
+        self.assertNotEqual(
+            check_scope_closure_digest("metadata", first),
+            check_scope_closure_digest("metadata", second),
+        )
+
+    def test_external_tool_configuration_invalidates_its_scope(self) -> None:
+        """Bind each cached scope to configuration files read implicitly by its tool."""
+        cases = (
+            ("metadata", ".gitignore"),
+            ("metadata", "package.yaml"),
+            ("buildroot", "buildroot-external/external.desc"),
+            ("c", "_clang-format"),
+            ("c", ".clang-format-ignore"),
+        )
+        for scope, path in cases:
+            with self.subTest(scope=scope, path=path):
+                first = WorkspaceSnapshot(
+                    (
+                        WorkspaceFile("scripts/check.py", b"checker\n", 0o755),
+                        WorkspaceFile(path, b"first\n", 0o644),
+                    ),
+                    "a" * 64,
+                )
+                second = WorkspaceSnapshot(
+                    (
+                        first.files[0],
+                        WorkspaceFile(path, b"second\n", 0o644),
+                    ),
+                    "b" * 64,
+                )
+                self.assertNotEqual(
+                    check_scope_closure_digest(scope, first),
+                    check_scope_closure_digest(scope, second),
+                )
+
+    def test_executable_prettier_config_broadens_metadata_closure(self) -> None:
+        """Imported local helpers must invalidate an executable Prettier config."""
+        common = (
+            WorkspaceFile("scripts/check.py", b"checker\n", 0o755),
+            WorkspaceFile("prettier.config.mjs", b'import "./helper.mjs";\n', 0o644),
+        )
+        first = WorkspaceSnapshot(
+            (*common, WorkspaceFile("helper.mjs", b"first\n", 0o644)),
+            "a" * 64,
+        )
+        second = WorkspaceSnapshot(
+            (*common, WorkspaceFile("helper.mjs", b"second\n", 0o644)),
+            "b" * 64,
+        )
+        self.assertNotEqual(
+            check_scope_closure_digest("metadata", first),
+            check_scope_closure_digest("metadata", second),
+        )
+
+    def test_c_scope_tracks_manifest_source_bootstrap_and_quoted_header(self) -> None:
+        """Mirror dynamic userspace C discovery without including orphan kernel C."""
+        manifest = (
+            b"[host]\n"
+            b'capability = "demo"\n'
+            b'runtime_tools = { console = "tool" }\n'
+            b"[[host.tools]]\n"
+            b'type = "cc-libusb/v1"\n'
+            b'name = "tool"\n'
+            b'source = "platforms/demo/kernel/tool.c"\n'
+            b"self_test = false\n"
+        )
+        common = (
+            WorkspaceFile("scripts/check.py", b"checker\n", 0o755),
+            WorkspaceFile("platforms/demo/platform.toml", manifest, 0o644),
+            WorkspaceFile(
+                "platforms/demo/kernel/tool.c",
+                b'#include "tool.h"\nint tool;\n',
+                0o644,
+            ),
+            WorkspaceFile("platforms/demo/kernel/tool.h", b"#define TOOL 1\n", 0o644),
+            WorkspaceFile("targets/demo/kernel/orphan.c", b"int orphan;\n", 0o644),
+            WorkspaceFile("targets/demo/kernel/bootstrap/start.c", b"int start;\n", 0o644),
+        )
+        first = WorkspaceSnapshot(common, "a" * 64)
+        header_changed = WorkspaceSnapshot(
+            (*common[:3], WorkspaceFile(common[3].path, b"#define TOOL 2\n", 0o644), *common[4:]),
+            "b" * 64,
+        )
+        orphan_changed = WorkspaceSnapshot(
+            (*common[:4], WorkspaceFile(common[4].path, b"int changed;\n", 0o644), common[5]),
+            "c" * 64,
+        )
+        bootstrap_changed = WorkspaceSnapshot(
+            (*common[:5], WorkspaceFile(common[5].path, b"int changed;\n", 0o644)),
+            "d" * 64,
+        )
+        self.assertNotEqual(
+            check_scope_closure_digest("c", first),
+            check_scope_closure_digest("c", header_changed),
+        )
+        self.assertEqual(
+            check_scope_closure_digest("c", first),
+            check_scope_closure_digest("c", orphan_changed),
+        )
+        self.assertNotEqual(
+            check_scope_closure_digest("c", first),
+            check_scope_closure_digest("c", bootstrap_changed),
+        )
+
+    def test_shell_scope_matches_checker_shebang_and_external_sources(self) -> None:
+        """Use the checker's stripped shebang and broaden when ShellCheck reads sources."""
+        base = WorkspaceSnapshot(
+            (
+                WorkspaceFile("scripts/check.py", b"checker\n", 0o755),
+                WorkspaceFile("tool", b"  #!/bin/sh  \necho ok\n", 0o755),
+                WorkspaceFile("helper.inc", b"first\n", 0o644),
+            ),
+            "a" * 64,
+        )
+        changed_tool = WorkspaceSnapshot(
+            (
+                base.files[0],
+                WorkspaceFile("tool", b"  #!/bin/sh  \necho changed\n", 0o755),
+                base.files[2],
+            ),
+            "b" * 64,
+        )
+        self.assertNotEqual(
+            check_scope_closure_digest("shell", base),
+            check_scope_closure_digest("shell", changed_tool),
+        )
+        external = WorkspaceSnapshot(
+            (*base.files, WorkspaceFile(".shellcheckrc", b"external-sources=true\n", 0o644)),
+            "c" * 64,
+        )
+        external_changed = WorkspaceSnapshot(
+            (
+                external.files[0],
+                external.files[1],
+                WorkspaceFile("helper.inc", b"second\n", 0o644),
+                external.files[3],
+            ),
+            "d" * 64,
+        )
+        self.assertNotEqual(
+            check_scope_closure_digest("shell", external),
+            check_scope_closure_digest("shell", external_changed),
+        )
+
+    def test_repository_scope_has_no_container_receipt(self) -> None:
+        """Keep the host-only repository check independent from OCI identity."""
+        with self.assertRaisesRegex(SystemExit, "does not support receipts"):
+            check_scope_receipt_recipe("repository", "a" * 64, image_identity="sha256:test")
+
+
+class RepositoryFastPathTests(unittest.TestCase):
+    """Keep the repository-only check completely on the host."""
+
+    def test_repository_check_returns_before_podman_or_workspace(self) -> None:
+        """Return after the host check without requiring a container or snapshot."""
+        reporter = mock.Mock()
+        with (
+            mock.patch("fplinux_cli.output.RunReporter.create", return_value=reporter),
+            mock.patch.object(container, "check_git_diff") as git_diff,
+            mock.patch.object(
+                container,
+                "require_podman",
+                side_effect=AssertionError("repository check must not require Podman"),
+            ),
+            mock.patch.object(
+                container,
+                "quality_workspace_snapshot",
+                side_effect=AssertionError("repository check must not snapshot a workspace"),
+            ),
+        ):
+            container.check(["repository"])
+        git_diff.assert_called_once_with(reporter)
+        reporter.finish.assert_called_once_with()
+
+
+class _RecordingStage:
+    """Collect fake container argv without starting a subprocess."""
+
+    def __init__(self, commands: list[list[str]]) -> None:
+        self.commands = commands
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_args: object) -> Literal[False]:
+        return False
+
+    def run(self, command: list[str], **_kwargs: object) -> None:
+        self.commands.append(command)
+
+
+class _FailingStage(_RecordingStage):
+    """Fail the first attempted checker command."""
+
+    def run(self, command: list[str], **_kwargs: object) -> None:
+        self.commands.append(command)
+        message = "scope failed"
+        raise RuntimeError(message)
+
+
+class _RecordingReporter:
+    """Supply deterministic log plumbing to fake check stages."""
+
+    def __init__(self, root: Path, commands: list[list[str]]) -> None:
+        self.root = root
+        self.commands = commands
+
+    def stage(self, *_args: object, **_kwargs: object) -> _RecordingStage:
+        return _RecordingStage(self.commands)
+
+    def container_environment(self, mounted_root: str) -> dict[str, str]:
+        return {
+            "FPLINUX_LOG_ROOT": mounted_root,
+            "FPLINUX_LOG_DISPLAY_ROOT": ".cache/logs/test",
+        }
+
+    def finish(self) -> None:
+        return None
+
+
+class _FailingReporter(_RecordingReporter):
+    def stage(self, *_args: object, **_kwargs: object) -> _RecordingStage:
+        return _FailingStage(self.commands)
+
+
+class CheckReceiptIntegrationTests(unittest.TestCase):
+    """Exercise scope hits and misses around the real receipt store."""
+
+    @staticmethod
+    def _snapshot(*, c_source: bytes = b"int app;\n") -> WorkspaceSnapshot:
+        files = (
+            WorkspaceFile("README.md", b"documentation\n", 0o644),
+            WorkspaceFile("scripts/check.py", b"checker\n", 0o755),
+            WorkspaceFile(
+                "buildroot-external/package/app/app.c",
+                c_source,
+                0o644,
+            ),
+        )
+        return WorkspaceSnapshot(files, "a" * 64)
+
+    @staticmethod
+    def _kernel_snapshot() -> WorkspaceSnapshot:
+        return WorkspaceSnapshot(
+            (
+                WorkspaceFile(
+                    "scripts/fplinux_cli/kernelcheck.py",
+                    b"kernel checker\n",
+                    0o644,
+                ),
+                WorkspaceFile(
+                    "scripts/fplinux_cli/linux_state.py",
+                    b"prepared Linux state\n",
+                    0o644,
+                ),
+            ),
+            "b" * 64,
+        )
+
+    def _run(  # noqa: PLR0913
+        self,
+        root: Path,
+        workspace: Path,
+        snapshot: WorkspaceSnapshot,
+        scopes: list[str],
+        commands: list[list[str]],
+        *,
+        no_cache: bool = False,
+        reporter_type: type[_RecordingReporter] = _RecordingReporter,
+        exact_hit_guard: bool = False,
+    ) -> mock.Mock:
+        logs = root / f"logs-{len(commands)}"
+        logs.mkdir(exist_ok=True)
+        reporter = reporter_type(logs, commands)
+        stage_workspace = mock.Mock(return_value=workspace)
+        with (
+            mock.patch.object(container, "ROOT", root),
+            mock.patch("fplinux_cli.output.RunReporter.create", return_value=reporter),
+            mock.patch.object(
+                container,
+                "require_podman",
+                side_effect=(
+                    AssertionError("exact check hit must not require Podman")
+                    if exact_hit_guard
+                    else None
+                ),
+                return_value=None if exact_hit_guard else "podman",
+            ),
+            mock.patch.object(
+                container,
+                "load_container_lock",
+                return_value={
+                    "oci": {
+                        "image": "localhost/fplinux:locked",
+                        "platform": "linux/amd64",
+                    }
+                },
+            ),
+            mock.patch.object(
+                container,
+                "image_ready",
+                side_effect=(
+                    AssertionError("exact check hit must not inspect an image")
+                    if exact_hit_guard
+                    else None
+                ),
+                return_value=None if exact_hit_guard else True,
+            ),
+            mock.patch.object(
+                container,
+                "image_identifier",
+                side_effect=(
+                    AssertionError("exact check hit must not inspect an image ID")
+                    if exact_hit_guard
+                    else None
+                ),
+                return_value=(None if exact_hit_guard else "sha256:" + "c" * 64),
+            ),
+            mock.patch.object(
+                container,
+                "container_image_recipe_digest",
+                return_value="b" * 64,
+            ),
+            mock.patch.object(
+                container,
+                "check_orchestration_recipe_digest",
+                return_value="d" * 64,
+            ),
+            mock.patch.object(
+                container,
+                "quality_workspace_snapshot",
+                return_value=snapshot,
+            ),
+            mock.patch.object(
+                container,
+                "stage_quality_workspace_snapshot",
+                new=(
+                    mock.Mock(
+                        side_effect=AssertionError("exact check hit must not stage a workspace")
+                    )
+                    if exact_hit_guard
+                    else stage_workspace
+                ),
+            ),
+            mock.patch.object(
+                container,
+                "setup",
+                side_effect=(
+                    AssertionError("exact check hit must not set up an image")
+                    if exact_hit_guard
+                    else None
+                ),
+                return_value=None,
+            ),
+        ):
+            container.check(scopes, no_cache=no_cache)
+        return stage_workspace
+
+    def test_exact_success_hit_skips_workspace_and_checker(self) -> None:
+        """Return a verified scope hit before workspace materialization."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / ".cache").mkdir()
+            workspace = root / "workspace"
+            workspace.mkdir()
+            commands: list[list[str]] = []
+            snapshot = self._snapshot()
+
+            self._run(root, workspace, snapshot, ["c"], commands)
+            self.assertEqual(len(commands), 1)
+            self.assertIn("sha256:" + "c" * 64, commands[0])
+            self.assertNotIn("localhost/fplinux:locked", commands[0])
+            self.assertEqual(
+                commands[0][:2],
+                ["podman", "run"],
+            )
+            self.assertEqual(
+                commands[0][-3:],
+                ["python3", "/workspace/scripts/check.py", "c"],
+            )
+
+            stage_workspace = self._run(
+                root,
+                workspace,
+                snapshot,
+                ["c"],
+                commands,
+                exact_hit_guard=True,
+            )
+            stage_workspace.assert_not_called()
+            self.assertEqual(len(commands), 1)
+
+    def test_no_cache_bypasses_an_exact_outer_receipt(self) -> None:
+        """Execute the checker when the caller explicitly ignores receipts."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / ".cache").mkdir()
+            workspace = root / "workspace"
+            workspace.mkdir()
+            commands: list[list[str]] = []
+            snapshot = self._snapshot()
+            self._run(root, workspace, snapshot, ["c"], commands)
+            self._run(root, workspace, snapshot, ["c"], commands, no_cache=True)
+            self.assertEqual(len(commands), 2)
+
+    def test_outer_force_reruns_kernel_analysis(self) -> None:
+        """Keep the public forced run at the outer per-scope receipt layer."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / ".cache").mkdir()
+            workspace = root / "workspace"
+            workspace.mkdir()
+            commands: list[list[str]] = []
+            snapshot = self._kernel_snapshot()
+
+            self._run(root, workspace, snapshot, ["kernel"], commands)
+            self.assertEqual(len(commands), 2)
+            self._run(root, workspace, snapshot, ["kernel"], commands, no_cache=True)
+
+            self.assertEqual(len(commands), 4)
+            self.assertEqual(commands[-1][-1], "check")
+
+    def test_only_missing_scope_runs_in_a_mixed_selection(self) -> None:
+        """Avoid rerunning a hit when another selected scope is missing."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / ".cache").mkdir()
+            workspace = root / "workspace"
+            workspace.mkdir()
+            commands: list[list[str]] = []
+            snapshot = self._snapshot()
+            self._run(root, workspace, snapshot, ["c"], commands)
+            self._run(root, workspace, snapshot, ["c", "docs"], commands)
+            self.assertEqual(len(commands), 2)
+            self.assertEqual(commands[-1][-1], "docs")
+
+    def test_changed_c_bytes_are_a_cold_miss(self) -> None:
+        """Invalidate the C result when one checked source byte changes."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / ".cache").mkdir()
+            workspace = root / "workspace"
+            workspace.mkdir()
+            commands: list[list[str]] = []
+            self._run(root, workspace, self._snapshot(), ["c"], commands)
+            self._run(
+                root,
+                workspace,
+                self._snapshot(c_source=b"int changed;\n"),
+                ["c"],
+                commands,
+            )
+            self.assertEqual(len(commands), 2)
+
+    def test_failed_forced_rerun_keeps_last_good_success(self) -> None:
+        """A failed forced rerun leaves the previous exact success usable."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / ".cache").mkdir()
+            workspace = root / "workspace"
+            workspace.mkdir()
+            commands: list[list[str]] = []
+            snapshot = self._snapshot()
+            self._run(root, workspace, snapshot, ["c"], commands)
+            success = root / ".cache/check-results/c/success.json"
+            original = success.read_bytes()
+            with self.assertRaisesRegex(RuntimeError, "scope failed"):
+                self._run(
+                    root,
+                    workspace,
+                    snapshot,
+                    ["c"],
+                    commands,
+                    no_cache=True,
+                    reporter_type=_FailingReporter,
+                )
+            scope_root = root / ".cache/check-results/c"
+            self.assertEqual(success.read_bytes(), original)
+            self.assertEqual(sorted(path.name for path in scope_root.iterdir()), ["success.json"])
+            self._run(
+                root,
+                workspace,
+                snapshot,
+                ["c"],
+                commands,
+                exact_hit_guard=True,
+            )
+            self.assertEqual(len(commands), 2)
+
+    def test_c_analysis_ignores_unknown_old_persistent_work(self) -> None:
+        """Use ephemeral analyzer output without adopting an old scan directory."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            unknown = root / ".cache/analysis/scan-build/c/work"
+            unknown.mkdir(parents=True)
+            marker = unknown / "foreign"
+            marker.write_text("keep")
+            workspace = root / "workspace"
+            workspace.mkdir()
+            commands: list[list[str]] = []
+            self._run(root, workspace, self._snapshot(), ["c"], commands)
+            self.assertNotIn("FPLINUX_SCAN_BUILD_DIR", "\0".join(commands[0]))
+            self.assertNotIn("/cache/analysis", "\0".join(commands[0]))
+            self.assertEqual(marker.read_text(), "keep")
 
 
 if __name__ == "__main__":

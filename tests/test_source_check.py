@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -41,7 +42,19 @@ class SourceInventoryTests(unittest.TestCase):
             regular = root / "document.md"
             regular.write_text("# Document\n")
             (root / "linked.md").symlink_to(regular)
-            with mock.patch.object(workspace_module, "ROOT", root):
+            inventory = subprocess.CompletedProcess(
+                ["git", "ls-files"],
+                0,
+                b"document.md\0linked.md\0",
+                b"",
+            )
+            with (
+                mock.patch.object(workspace_module, "ROOT", root),
+                mock.patch(
+                    "fplinux_cli.workspace.subprocess.run",
+                    return_value=inventory,
+                ),
+            ):
                 self.assertEqual(
                     workspace_module.quality_files(enforce_source_policy=False),
                     [("document.md", regular)],

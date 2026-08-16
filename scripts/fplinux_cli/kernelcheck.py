@@ -5,8 +5,6 @@ from __future__ import annotations
 
 import argparse
 import difflib
-import hashlib
-import json
 import re
 import shlex
 import shutil
@@ -14,8 +12,9 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from . import linux_state
 from .builder import (
     CACHE,
     prepare_linux,
@@ -25,15 +24,17 @@ from .builder import (
     run,
     target_source,
 )
-from .common import ROOT, sha256_file
+from .common import ROOT
 from .config import (
-    container_recipe_digest,
     discover_targets,
     load_platform,
     load_target,
     relative_value,
 )
 from .output import RunReporter, current_stage, exit_status, run_entrypoint
+
+if TYPE_CHECKING:
+    from .linux_state import PreparedLinuxState
 
 
 def load_sources() -> dict[str, Any]:
@@ -179,34 +180,32 @@ def run_dtbs_check(command: list[str], target: str) -> str:
     return report.stdout + report.stderr
 
 
-def sparse_recipe_digest(
-    platform: dict[str, Any], linux_recipe: str, defconfig: Path, objects: list[str]
-) -> str:
-    """Hash every input that can change the generated sparse Kbuild context."""
-    manifest = {
-        "schema": "fplinux.sparse/v1",
-        "container_recipe": container_recipe_digest(),
-        "checker_sha256": sha256_file(Path(__file__)),
-        "builder_sha256": sha256_file(Path(__file__).with_name("builder.py")),
-        "linux_recipe": linux_recipe,
-        "defconfig_sha256": sha256_file(defconfig),
-        "arch": platform["linux"]["arch"],
-        "cross_compile": platform["linux"]["analysis_cross_compile"],
-        "objects": objects,
-        "make_flags": ["C=2", "CHECK=sparse", "-D__CHECK_ENDIAN__", "-Wsparse-error"],
-    }
-    encoded = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(encoded).hexdigest()
+def sparse_cache_directory(target: str) -> Path:
+    """Return the fixed Sparse output directory for one target."""
+    return CACHE / "analysis" / "sparse" / target
+
+
+def sparse_output(target: str) -> Path:
+    """Return the one fixed Kbuild output path for one target."""
+    return sparse_cache_directory(target) / "work"
+
+
+def reset_sparse_output(target: str) -> Path:
+    """Cold-reset the one generated Kbuild output before each analysis."""
+    output = sparse_output(target)
+    shutil.rmtree(output, ignore_errors=True)
+    output.mkdir(parents=True, exist_ok=True)
+    return output
 
 
 def target_context(
     sources: dict[str, Any], target: str
-) -> tuple[dict[str, Any], dict[str, Any], Path, str]:
+) -> tuple[dict[str, Any], dict[str, Any], Path, PreparedLinuxState]:
     """Load one target and prepare its exact pinned Linux integration tree."""
     target_config = load_target(target)
     platform = load_platform(target_config["platform"])
-    source, recipe = prepare_linux(sources, target, target_config, platform)
-    return target_config, platform, source, recipe
+    source, prepared_linux = prepare_linux(sources, target, target_config, platform)
+    return target_config, platform, source, prepared_linux
 
 
 def prepare_contexts(reporter: RunReporter | None) -> None:
@@ -214,8 +213,8 @@ def prepare_contexts(reporter: RunReporter | None) -> None:
     sources = load_sources()
     for target in discover_targets():
         with report_stage(reporter, f"prepare-{target}"):
-            _config, _platform, _source, recipe = target_context(sources, target)
-            record_text(f"sparse context: ready ({target}, {recipe[:16]})\n")
+            _config, _platform, _source, prepared_linux = target_context(sources, target)
+            record_text(f"sparse context: ready ({target}, {prepared_linux.linux_recipe[:16]})\n")
 
 
 def check_contexts(reporter: RunReporter | None) -> None:
@@ -224,7 +223,7 @@ def check_contexts(reporter: RunReporter | None) -> None:
     checked = 0
     for target in discover_targets():
         with report_stage(reporter, f"context-{target}"):
-            target_config, platform, source, recipe = target_context(sources, target)
+            target_config, platform, source, prepared_linux = target_context(sources, target)
             projected = projected_sources(target, target_config, platform)
             style_files = [str(path) for path in projected if path.suffix in {".c", ".h"}]
             checkpatch = [
@@ -241,12 +240,7 @@ def check_contexts(reporter: RunReporter | None) -> None:
             ]
             defconfig = require_file(target_source(target, target_config["linux"]["defconfig"]))
             objects = sparse_targets(target, target_config, platform)
-            analysis_recipe = sparse_recipe_digest(platform, recipe, defconfig, objects)
-            output = CACHE / "analysis/sparse" / target / analysis_recipe
-            if output.is_symlink() or (output.exists() and not output.is_dir()):
-                raise SystemExit(f"sparse failed: invalid output path: {output}")
-            output.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(defconfig, output / ".config")
+            output = sparse_output(target)
             kbuild = [
                 "make",
                 "-C",
@@ -255,25 +249,40 @@ def check_contexts(reporter: RunReporter | None) -> None:
                 f"ARCH={platform['linux']['arch']}",
                 f"CROSS_COMPILE={platform['linux']['analysis_cross_compile']}",
             ]
+            format_command = [
+                "clang-format",
+                f"--style=file:{require_file(source / '.clang-format')}",
+                "--dry-run",
+                "--Werror",
+                *style_files,
+            ]
+            checkpatch_sources = [*checkpatch, "-f", *style_files, *kconfig_files]
+            checkpatch_patches = [*checkpatch, *patch_files] if patch_files else None
+            kconfig_command = [*kbuild, "olddefconfig", "prepare"]
+            save_defconfig_command = [*kbuild, "savedefconfig"]
+            dtbs_command = [*kbuild, "W=1", "dtbs_check"]
+            sparse_command = [
+                *kbuild,
+                "-j1",
+                "C=2",
+                "CHECK=sparse",
+                "CF=-D__CHECK_ENDIAN__ -Wsparse-error",
+                *objects,
+            ]
+            linux_state.require_prepared_linux(source, prepared_linux)
 
+        output = reset_sparse_output(target)
         with report_stage(reporter, f"format-{target}"):
-            run(
-                [
-                    "clang-format",
-                    f"--style=file:{require_file(source / '.clang-format')}",
-                    "--dry-run",
-                    "--Werror",
-                    *style_files,
-                ]
-            )
+            run(format_command)
         with report_stage(reporter, f"checkpatch-{target}"):
             # --root resolves the fplinux compatibles against projected bindings.
-            run_checkpatch([*checkpatch, "-f", *style_files, *kconfig_files])
-            if patch_files:
-                run_checkpatch([*checkpatch, *patch_files])
+            run_checkpatch(checkpatch_sources)
+            if checkpatch_patches is not None:
+                run_checkpatch(checkpatch_patches)
         with report_stage(reporter, f"kconfig-{target}"):
-            run([*kbuild, "olddefconfig", "prepare"])
-            run([*kbuild, "savedefconfig"])
+            shutil.copyfile(defconfig, output / ".config")
+            run(kconfig_command)
+            run(save_defconfig_command)
             current = defconfig.read_text()
             canonical = require_file(output / "defconfig").read_text()
             if canonical != current:
@@ -289,21 +298,11 @@ def check_contexts(reporter: RunReporter | None) -> None:
                 )
                 raise SystemExit(f"sparse failed: defconfig is not canonical: {defconfig}")
         with report_stage(reporter, f"device-tree-{target}"):
-            dtbs_command = [*kbuild, "W=1", "dtbs_check"]
             combined = run_dtbs_check(dtbs_command, target)
             if "Warning" in combined or re.search(r"\.dtb: ", combined):
                 raise SystemExit(f"sparse failed: device tree findings: {target}")
         with report_stage(reporter, f"sparse-{target}"):
-            for object_path in objects:
-                run(
-                    [
-                        *kbuild,
-                        "C=2",
-                        "CHECK=sparse",
-                        "CF=-D__CHECK_ENDIAN__ -Wsparse-error",
-                        object_path,
-                    ]
-                )
+            run(sparse_command)
         checked += len(objects)
         print(f"sparse: OK ({target}, {len(objects)} kernel C objects)")
     print(f"sparse: OK ({checked} kernel C objects total)")

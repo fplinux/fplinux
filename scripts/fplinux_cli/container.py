@@ -4,15 +4,35 @@
 from __future__ import annotations
 
 import platform
+import re
 import shutil
 import subprocess
 import sys
-from pathlib import Path
+import tomllib
+from pathlib import Path, PurePath
+from typing import Any
 
-from .common import ROOT, fail, run
-from .config import container_recipe_digest, load_container_lock
+from .checkreceipts import (
+    CheckReceiptRecipe,
+    check_closure_entries_digest,
+    publish_success_receipt,
+    receipt_matches,
+)
+from .common import ROOT, fail
+from .config import (
+    check_orchestration_recipe_digest,
+    container_image_build_arguments,
+    container_image_recipe_digest,
+    load_container_lock,
+)
+from .image_state import ImageState, ImageStateError, load_image_state, publish_image_state
 from .output import RunReporter
-from .workspace import stage_quality_workspace
+from .workspace import (
+    WorkspaceFile,
+    WorkspaceSnapshot,
+    quality_workspace_snapshot,
+    stage_quality_workspace_snapshot,
+)
 
 CHECK_SCOPES = (
     "repository",
@@ -31,6 +51,67 @@ CHECK_SCOPES = (
 )
 SOURCE_CHECK_SCOPES = CHECK_SCOPES[1:-1]
 GIT_HOOKS_PATH = ".githooks"
+_CONTAINER_FILE = re.compile(r"(?:docker-)?compose(?:\.[^.]+)?\.ya?ml")
+_QUOTED_C_INCLUDE = re.compile(rb'^\s*#\s*include\s*"([^"\n]+)"', re.MULTILINE)
+_BARE_IMAGE_ID = re.compile(r"[0-9a-f]{64}\Z")
+_PREFIXED_IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_PRETTIER_CONFIGURATION_NAMES = frozenset(
+    {
+        ".prettierrc",
+        ".prettierrc.cjs",
+        ".prettierrc.cts",
+        ".prettierrc.js",
+        ".prettierrc.json",
+        ".prettierrc.json5",
+        ".prettierrc.mjs",
+        ".prettierrc.mts",
+        ".prettierrc.toml",
+        ".prettierrc.ts",
+        ".prettierrc.yaml",
+        ".prettierrc.yml",
+        "prettier.config.cjs",
+        "prettier.config.cts",
+        "prettier.config.js",
+        "prettier.config.mjs",
+        "prettier.config.mts",
+        "prettier.config.ts",
+    }
+)
+_EXECUTABLE_PRETTIER_CONFIGURATION_NAMES = frozenset(
+    name
+    for name in _PRETTIER_CONFIGURATION_NAMES
+    if Path(name).suffix in {".cjs", ".cts", ".js", ".mjs", ".mts", ".ts"}
+)
+_SOURCE_CHECK_COMMAND = ("python3", "/workspace/scripts/check.py")
+_KERNEL_CHECK_COMMANDS = (
+    ("python3", "-m", "fplinux_cli.kernelcheck", "prepare"),
+    ("python3", "-m", "fplinux_cli.kernelcheck", "check"),
+)
+_CHECK_IMPLEMENTATION = frozenset(
+    {
+        "scripts/check.py",
+        "scripts/fplinux_cli/__init__.py",
+        "scripts/fplinux_cli/common.py",
+        "scripts/fplinux_cli/config.py",
+        "scripts/fplinux_cli/output.py",
+    }
+)
+_KERNEL_IMPLEMENTATION = frozenset(
+    {
+        "scripts/fplinux_cli/__init__.py",
+        "scripts/fplinux_cli/builder.py",
+        "scripts/fplinux_cli/buildroot_state.py",
+        "scripts/fplinux_cli/bundle_state.py",
+        "scripts/fplinux_cli/common.py",
+        "scripts/fplinux_cli/config.py",
+        "scripts/fplinux_cli/device_state.py",
+        "scripts/fplinux_cli/kbuild_state.py",
+        "scripts/fplinux_cli/kernelcheck.py",
+        "scripts/fplinux_cli/linux_state.py",
+        "scripts/fplinux_cli/output.py",
+        "scripts/fplinux_cli/toolchain_state.py",
+    }
+)
 
 
 def require_podman() -> str:
@@ -53,7 +134,7 @@ def image_exists(podman: str, image: str) -> bool:
 
 
 def image_identifier(podman: str, image: str) -> str | None:
-    """Return the immutable ID currently assigned to an image tag."""
+    """Return the canonical immutable ID currently assigned to an image tag."""
     if not image_exists(podman, image):
         return None
     result = subprocess.run(
@@ -63,10 +144,21 @@ def image_identifier(podman: str, image: str) -> str | None:
         check=False,
     )
     identifier = result.stdout.strip()
-    return identifier if result.returncode == 0 and identifier else None
+    if result.returncode != 0:
+        return None
+    if _BARE_IMAGE_ID.fullmatch(identifier) is not None:
+        return f"sha256:{identifier}"
+    if _PREFIXED_IMAGE_ID.fullmatch(identifier) is not None:
+        return identifier
+    return None
 
 
-def image_ready(podman: str, image: str) -> bool:
+def image_ready(
+    podman: str,
+    image: str,
+    *,
+    image_recipe: str | None = None,
+) -> bool:
     if not image_exists(podman, image):
         return False
     result = subprocess.run(
@@ -75,14 +167,36 @@ def image_ready(podman: str, image: str) -> bool:
             "image",
             "inspect",
             "--format",
-            '{{ index .Labels "org.fplinux.build.recipe" }}',
+            '{{ index .Labels "org.fplinux.container.image-recipe" }}',
             image,
         ],
         capture_output=True,
         text=True,
         check=False,
     )
-    return result.returncode == 0 and result.stdout.strip() == container_recipe_digest()
+    if image_recipe is None:
+        image_recipe = container_image_recipe_digest()
+    return result.returncode == 0 and result.stdout.strip() == image_recipe
+
+
+def _publish_current_image_state(
+    podman: str,
+    image: str,
+    image_recipe: str,
+) -> ImageState:
+    """Persist the immutable ID of one image already checked against its recipe."""
+    image_identity = image_identifier(podman, image)
+    if image_identity is None:
+        fail("current build image has no immutable identity")
+    try:
+        state = ImageState(
+            container_image_recipe=image_recipe,
+            image_identity=image_identity,
+        )
+        publish_image_state(ROOT / ".cache", state)
+    except ImageStateError as error:
+        fail(f"could not publish host image state: {error}")
+    return state
 
 
 def install_git_hooks() -> None:
@@ -111,8 +225,12 @@ def install_git_hooks() -> None:
     if configured.returncode not in {0, 1}:
         fail("could not read the local Git hooks path")
     hooks_path = configured.stdout.strip()
-    if hooks_path and hooks_path != GIT_HOOKS_PATH:
-        fail(f"core.hooksPath is already set to {hooks_path}")
+    if hooks_path:
+        configured_path = Path(hooks_path)
+        if not configured_path.is_absolute():
+            configured_path = ROOT / configured_path
+        if configured_path.resolve() != (ROOT / GIT_HOOKS_PATH).resolve():
+            fail(f"core.hooksPath is already set to {hooks_path}")
     if not hooks_path:
         subprocess.run(
             [git, "config", "--local", "core.hooksPath", GIT_HOOKS_PATH],
@@ -122,45 +240,50 @@ def install_git_hooks() -> None:
     print(f"Git hooks are ready: {GIT_HOOKS_PATH}")
 
 
-def setup(*, force: bool = False, reporter: RunReporter | None = None) -> None:
+def setup(
+    *,
+    force: bool = False,
+    reporter: RunReporter | None = None,
+    lock: dict[str, Any] | None = None,
+    image_recipe: str | None = None,
+) -> ImageState:
+    own_reporter = reporter is None
+    if reporter is None:
+        reporter = RunReporter.create("setup", target=None, verbose=False)
     podman = require_podman()
-    lock = load_container_lock()
+    if lock is None:
+        lock = load_container_lock()
+    current_recipe = container_image_recipe_digest(lock)
+    if image_recipe is not None and image_recipe != current_recipe:
+        fail("container image inputs changed before setup")
+    image_recipe = current_recipe
     oci = lock["oci"]
-    buildroot = lock["buildroot"]
-    if image_ready(podman, oci["image"]) and not force:
+    if image_ready(podman, oci["image"], image_recipe=image_recipe) and not force:
+        state = _publish_current_image_state(podman, oci["image"], image_recipe)
         install_git_hooks()
         print(f"Build image is ready: {oci['image']}")
-        return
+        if own_reporter:
+            reporter.finish()
+        return state
     previous_image = image_identifier(podman, oci["image"])
     command = [
         podman,
         "build",
-        "--platform",
-        oci["platform"],
+        *container_image_build_arguments(lock),
         "--tag",
         oci["image"],
-        "--file",
-        str(ROOT / "Containerfile"),
-        "--build-arg",
-        f"BASE_IMAGE={oci['base']}",
-        "--build-arg",
-        f"DEBIAN_SNAPSHOT={oci['debian_snapshot']}",
-        "--build-arg",
-        f"BUILDROOT_VERSION={buildroot['version']}",
-        "--build-arg",
-        f"BUILDROOT_URL={buildroot['url']}",
-        "--build-arg",
-        f"BUILDROOT_SHA256={buildroot['sha256']}",
         "--label",
-        f"org.fplinux.build.recipe={container_recipe_digest()}",
-        str(ROOT),
+        f"org.fplinux.container.image-recipe={image_recipe}",
+        ".",
     ]
-    if reporter is None:
-        run(command)
-    else:
-        with reporter.stage("container-setup") as stage:
-            stage.run(command)
-    current_image = image_identifier(podman, oci["image"])
+    with reporter.stage("container-setup") as stage:
+        stage.run(command, cwd=ROOT)
+    if container_image_recipe_digest(lock) != image_recipe:
+        fail("container image inputs changed while setup was running")
+    if not image_ready(podman, oci["image"], image_recipe=image_recipe):
+        fail("container setup completed without publishing the exact requested image")
+    state = _publish_current_image_state(podman, oci["image"], image_recipe)
+    current_image = state.image_identity
     if (
         previous_image is not None
         and current_image is not None
@@ -178,6 +301,9 @@ def setup(*, force: bool = False, reporter: RunReporter | None = None) -> None:
         else:
             print(f"Removed replaced build image: {previous_image}")
     install_git_hooks()
+    if own_reporter:
+        reporter.finish()
+    return state
 
 
 def doctor() -> None:
@@ -290,28 +416,351 @@ def resolve_check_scopes(scopes: list[str]) -> tuple[str, ...]:
 def analyzer_cache_names(scopes: tuple[str, ...]) -> tuple[str, ...]:
     """Return analyzer caches required by the selected scopes."""
     required: set[str] = set()
-    if "c" in scopes:
-        required.add("analysis")
     if "kernel" in scopes:
         required.update(("analysis", "downloads", "linux"))
     return tuple(name for name in ("analysis", "downloads", "linux") if name in required)
 
 
-def check(scopes: list[str], *, verbose: bool = False) -> None:
+def _is_shell_source(file: WorkspaceFile) -> bool:
+    if Path(file.path).suffix not in {"", ".sh"}:
+        return False
+    first_line = file.contents.splitlines()[:1]
+    if not first_line:
+        return False
+    try:
+        shebang = first_line[0].decode().strip()
+    except UnicodeDecodeError:
+        return False
+    return shebang in {"#!/bin/sh", "#!/usr/bin/env sh", "#!/usr/bin/env bash"}
+
+
+def _is_prettier_configuration(path: str) -> bool:
+    name = Path(path).name
+    return (
+        name in {".gitignore", ".prettierignore", "package.yaml"}
+        or name in _PRETTIER_CONFIGURATION_NAMES
+    )
+
+
+def _source_scope_uses_file(  # noqa: PLR0911
+    scope: str, file: WorkspaceFile
+) -> bool:
+    """Return whether one captured file can affect the selected source scope."""
+    path = PurePath(file.path)
+    name = path.name
+    suffix = path.suffix.lower()
+    parts = path.parts
+    if file.path in _CHECK_IMPLEMENTATION:
+        return True
+    if scope in {
+        "source",
+        "docs",
+        "spelling",
+        "secrets",
+        "licenses",
+        "python",
+    }:
+        return True
+    if scope == "container":
+        return (
+            name in {"Containerfile", "Dockerfile"}
+            or _CONTAINER_FILE.fullmatch(name) is not None
+            or name.startswith(".hadolint")
+        )
+    if scope == "metadata":
+        return (
+            suffix == ".toml"
+            or (suffix in {".json", ".jsonc"} and name != "package-lock.json")
+            or name == ".editorconfig"
+            or _is_prettier_configuration(file.path)
+        )
+    if scope == "shell":
+        return _is_shell_source(file) or name in {".editorconfig", ".shellcheckrc"}
+    if scope == "buildroot":
+        return (
+            bool(parts)
+            and parts[0] == "buildroot-external"
+            and (path.suffix in {".hash", ".mk"} or name in {"Config.in", "external.desc"})
+        )
+    if scope == "c":
+        return (
+            name in {".clang-format", ".clang-format-ignore", "_clang-format"}
+            or (len(parts) == 3 and parts[0] == "targets" and name == "target.toml")
+            or (len(parts) == 3 and parts[0] == "platforms" and name == "platform.toml")
+        )
+    fail(f"check scope does not support a source closure: {scope}")
+    return False
+
+
+def _c_scope_paths(snapshot: WorkspaceSnapshot) -> set[str]:
+    """Resolve the same userspace/bootstrap C inputs and their quoted headers."""
+    by_path = {file.path: file for file in snapshot.files}
+    selected = {file.path for file in snapshot.files if _source_scope_uses_file("c", file)}
+    for file in snapshot.files:
+        path = PurePath(file.path)
+        if path.suffix == ".c" and path.parts[:2] == (
+            "buildroot-external",
+            "package",
+        ):
+            selected.add(file.path)
+        if path.suffix in {".c", ".h"} and "bootstrap" in path.parts:
+            selected.add(file.path)
+
+    for file in snapshot.files:
+        path = PurePath(file.path)
+        if len(path.parts) != 3 or path.parts[0] != "platforms" or path.name != "platform.toml":
+            continue
+        try:
+            manifest = tomllib.loads(file.contents.decode("utf-8"))
+        except (UnicodeDecodeError, tomllib.TOMLDecodeError):
+            continue
+        tools = manifest.get("host", {}).get("tools", [])
+        if not isinstance(tools, list):
+            continue
+        for recipe in tools:
+            if isinstance(recipe, dict) and recipe.get("type") == "cc-libusb/v1":
+                source = recipe.get("source")
+                if isinstance(source, str) and source in by_path:
+                    selected.add(source)
+
+    pending = list(selected)
+    while pending:
+        relative = pending.pop()
+        source = by_path.get(relative)
+        if source is None or PurePath(relative).suffix not in {".c", ".h"}:
+            continue
+        for raw_include in _QUOTED_C_INCLUDE.findall(source.contents):
+            try:
+                include = raw_include.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+            candidates = (
+                (PurePath(relative).parent / include).as_posix(),
+                PurePath(include).as_posix(),
+            )
+            for candidate in candidates:
+                if candidate in by_path and candidate not in selected:
+                    selected.add(candidate)
+                    pending.append(candidate)
+                    break
+    return selected
+
+
+def _linux_manifest_sources(linux: object, *, base: PurePath) -> set[str]:
+    """Return the captured Linux inputs explicitly named by one manifest."""
+    if not isinstance(linux, dict):
+        return set()
+    selected: set[str] = set()
+    defconfig = linux.get("defconfig")
+    if isinstance(defconfig, str):
+        selected.add((base / defconfig).as_posix())
+    patches = linux.get("patches")
+    if isinstance(patches, list):
+        selected.update((base / patch).as_posix() for patch in patches if isinstance(patch, str))
+    for key in ("copies", "appends"):
+        steps = linux.get(key)
+        if isinstance(steps, list):
+            selected.update(
+                (base / source).as_posix()
+                for step in steps
+                if isinstance(step, dict) and isinstance((source := step.get("source")), str)
+            )
+    return selected
+
+
+def _kernel_scope_paths(snapshot: WorkspaceSnapshot) -> set[str]:
+    """Resolve exact Linux inputs named by the captured target manifests."""
+    by_path = {file.path: file for file in snapshot.files}
+    selected = {
+        file.path
+        for file in snapshot.files
+        if file.path in _KERNEL_IMPLEMENTATION or file.path == "sources.lock.toml"
+    }
+    target_manifests = (
+        file
+        for file in snapshot.files
+        if (path := PurePath(file.path)).parts[:1] == ("targets",)
+        and len(path.parts) == 3
+        and path.name == "target.toml"
+    )
+    for target_manifest in target_manifests:
+        target_path = PurePath(target_manifest.path)
+        selected.add(target_manifest.path)
+        try:
+            target = tomllib.loads(target_manifest.contents.decode("utf-8"))
+        except (UnicodeDecodeError, tomllib.TOMLDecodeError):
+            continue
+        if not isinstance(target, dict):
+            continue
+        selected.update(_linux_manifest_sources(target.get("linux"), base=target_path.parent))
+        platform = target.get("platform")
+        if not isinstance(platform, str):
+            continue
+        platform_path = PurePath("platforms") / platform / "platform.toml"
+        platform_manifest = by_path.get(platform_path.as_posix())
+        if platform_manifest is None:
+            continue
+        selected.add(platform_manifest.path)
+        try:
+            platform_data = tomllib.loads(platform_manifest.contents.decode("utf-8"))
+        except (UnicodeDecodeError, tomllib.TOMLDecodeError):
+            continue
+        if isinstance(platform_data, dict):
+            selected.update(_linux_manifest_sources(platform_data.get("linux"), base=PurePath()))
+    return selected
+
+
+def check_scope_closure_digest(scope: str, snapshot: WorkspaceSnapshot) -> str:
+    """Hash only captured files that can affect one exact check scope."""
+    if scope == "kernel":
+        paths = _kernel_scope_paths(snapshot)
+        selected = [file for file in snapshot.files if file.path in paths]
+    elif scope == "c":
+        paths = _c_scope_paths(snapshot)
+        selected = [file for file in snapshot.files if file.path in paths]
+    elif scope in SOURCE_CHECK_SCOPES:
+        broaden = (
+            scope == "metadata"
+            and any(
+                Path(file.path).name in _EXECUTABLE_PRETTIER_CONFIGURATION_NAMES
+                for file in snapshot.files
+            )
+        ) or (
+            scope == "shell"
+            and any(
+                file.path == ".shellcheckrc" and b"external-sources=true" in file.contents
+                for file in snapshot.files
+            )
+        )
+        selected = [
+            file for file in snapshot.files if broaden or _source_scope_uses_file(scope, file)
+        ]
+    else:
+        fail(f"check scope does not support receipts: {scope}")
+    if not selected:
+        fail(f"check scope has an empty causal closure: {scope}")
+    return check_closure_entries_digest(
+        [(file.path, file.contents, file.mode) for file in selected]
+    )
+
+
+def check_scope_commands(scope: str) -> tuple[tuple[str, ...], ...]:
+    """Return the canonical checker argv whose result a receipt certifies."""
+    if scope in SOURCE_CHECK_SCOPES:
+        return ((*_SOURCE_CHECK_COMMAND, scope),)
+    if scope == "kernel":
+        return _KERNEL_CHECK_COMMANDS
+    fail(f"check scope does not support receipts: {scope}")
+    return ()
+
+
+def check_scope_receipt_recipe(
+    scope: str,
+    closure_digest: str,
+    *,
+    image_identity: str,
+    commands: tuple[tuple[str, ...], ...] | None = None,
+    orchestration_recipe: str | None = None,
+) -> CheckReceiptRecipe:
+    """Bind one cacheable source scope to its exact closure and OCI identities."""
+    if scope not in (*SOURCE_CHECK_SCOPES, "kernel"):
+        fail(f"check scope does not support receipts: {scope}")
+    if commands is None:
+        commands = check_scope_commands(scope)
+    if orchestration_recipe is None:
+        orchestration_recipe = check_orchestration_recipe_digest()
+    return CheckReceiptRecipe(
+        scope=scope,
+        closure_digest=closure_digest,
+        orchestration_recipe=orchestration_recipe,
+        image_identity=image_identity,
+        commands=commands,
+    )
+
+
+def check(
+    scopes: list[str],
+    *,
+    verbose: bool = False,
+    no_cache: bool = False,
+) -> None:
     selected = resolve_check_scopes(scopes)
 
     reporter = RunReporter.create("check", target=None, verbose=verbose)
     if "repository" in selected:
         check_git_diff(reporter)
+    if selected == ("repository",):
+        print("check: OK")
+        reporter.finish()
+        return
 
-    podman = require_podman()
-    lock = load_container_lock()["oci"]
-    if not image_ready(podman, lock["image"]):
-        setup(reporter=reporter)
+    with reporter.stage("workspace-snapshot"):
+        snapshot = quality_workspace_snapshot(enforce_source_policy="source" in selected)
 
     cache = ROOT / ".cache"
+    cacheable_scopes = tuple(scope for scope in selected if scope != "repository")
+    container_lock = load_container_lock()
+    image_recipe = container_image_recipe_digest(container_lock)
+    orchestration_recipe = check_orchestration_recipe_digest(image_recipe)
+
+    def receipt_recipes(image_identity: str) -> dict[str, CheckReceiptRecipe]:
+        return {
+            scope: check_scope_receipt_recipe(
+                scope,
+                check_scope_closure_digest(scope, snapshot),
+                image_identity=image_identity,
+                orchestration_recipe=orchestration_recipe,
+            )
+            for scope in cacheable_scopes
+        }
+
+    cached_image = load_image_state(cache, image_recipe)
+    if cached_image is not None:
+        recipes = receipt_recipes(cached_image.image_identity)
+        missing = tuple(
+            scope
+            for scope in cacheable_scopes
+            if no_cache or not receipt_matches(cache, recipes[scope])
+        )
+        if not missing:
+            for scope in cacheable_scopes:
+                print(f"check cache: hit ({scope})")
+            print("check: OK")
+            reporter.finish()
+            return
+
+    podman = require_podman()
+    lock = container_lock["oci"]
+    if image_ready(podman, lock["image"], image_recipe=image_recipe):
+        current_image = _publish_current_image_state(
+            podman,
+            lock["image"],
+            image_recipe,
+        )
+    else:
+        current_image = setup(
+            reporter=reporter,
+            lock=container_lock,
+            image_recipe=image_recipe,
+        )
+
+    image_identity = current_image.image_identity
+    recipes = receipt_recipes(current_image.image_identity)
+    missing = tuple(
+        scope
+        for scope in cacheable_scopes
+        if no_cache or not receipt_matches(cache, recipes[scope])
+    )
+    for scope in cacheable_scopes:
+        if scope not in missing:
+            print(f"check cache: hit ({scope})")
+    if not missing:
+        print("check: OK")
+        reporter.finish()
+        return
+
     analyzer_cache: dict[str, Path] = {}
-    for name in analyzer_cache_names(selected):
+    for name in analyzer_cache_names(missing):
         source = cache / name
         if source.is_symlink() or (source.exists() and not source.is_dir()):
             fail(f"invalid analyzer cache path: {source}")
@@ -319,28 +768,22 @@ def check(scopes: list[str], *, verbose: bool = False) -> None:
         analyzer_cache[name] = source
 
     with reporter.stage("workspace"):
-        workspace = stage_quality_workspace(enforce_source_policy="source" in selected)
+        workspace = stage_quality_workspace_snapshot(snapshot)
 
-    log_environment = reporter.container_environment("/logs")
-    log_arguments = [
-        argument
-        for key, value in log_environment.items()
-        for argument in ("--env", f"{key}={value}")
-    ]
     log_mount = ["--volume", f"{reporter.root}:/logs:rw,Z"]
-    source_scopes = [scope for scope in selected if scope in SOURCE_CHECK_SCOPES]
+    source_scopes = [scope for scope in missing if scope in SOURCE_CHECK_SCOPES]
     if source_scopes:
-        analysis_arguments: list[str] = []
-        if "c" in source_scopes:
-            scan_recipe = f"{container_recipe_digest()}-{workspace.name}"
-            analysis_arguments = [
-                "--volume",
-                f"{analyzer_cache['analysis']}:/cache/analysis:rw,Z",
-                "--env",
-                f"FPLINUX_SCAN_BUILD_DIR=/cache/analysis/scan-build/{scan_recipe}",
-            ]
+        log_environment = reporter.container_environment("/logs/source")
+        log_environment["FPLINUX_LOG_DISPLAY_ROOT"] = (
+            f"{log_environment['FPLINUX_LOG_DISPLAY_ROOT']}/source"
+        )
+        log_arguments = [
+            argument
+            for key, value in log_environment.items()
+            for argument in ("--env", f"{key}={value}")
+        ]
         with reporter.stage(
-            "source-quality",
+            "source",
             passthrough=True,
             show_tail=False,
         ) as stage:
@@ -358,7 +801,6 @@ def check(scopes: list[str], *, verbose: bool = False) -> None:
                     "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs.
                     "--volume",
                     f"{workspace}:/workspace:ro,Z",
-                    *analysis_arguments,
                     *log_mount,
                     *log_arguments,
                     "--env",
@@ -369,14 +811,25 @@ def check(scopes: list[str], *, verbose: bool = False) -> None:
                     "RUFF_CACHE_DIR=/tmp/ruff",
                     "--env",
                     "PYTHONDONTWRITEBYTECODE=1",
-                    lock["image"],
+                    image_identity,
                     "python3",
                     "/workspace/scripts/check.py",
                     *source_scopes,
                 ]
             )
+        for scope in source_scopes:
+            publish_success_receipt(cache, recipes[scope])
 
-    if "kernel" in selected:
+    if "kernel" in missing:
+        log_environment = reporter.container_environment("/logs/kernel")
+        log_environment["FPLINUX_LOG_DISPLAY_ROOT"] = (
+            f"{log_environment['FPLINUX_LOG_DISPLAY_ROOT']}/kernel"
+        )
+        log_arguments = [
+            argument
+            for key, value in log_environment.items()
+            for argument in ("--env", f"{key}={value}")
+        ]
         analyzer_runtime = [
             podman,
             "run",
@@ -399,7 +852,7 @@ def check(scopes: list[str], *, verbose: bool = False) -> None:
             "PYTHONPATH=/workspace/scripts",
             "--env",
             "PYTHONDONTWRITEBYTECODE=1",
-            lock["image"],
+            image_identity,
             "python3",
             "-m",
             "fplinux_cli.kernelcheck",
@@ -435,8 +888,9 @@ def check(scopes: list[str], *, verbose: bool = False) -> None:
                     f"{analyzer_cache['linux']}:/cache/linux:ro,Z",
                     *analyzer_program,
                     "check",
-                ]
+                ],
             )
+        publish_success_receipt(cache, recipes["kernel"])
 
     print("check: OK")
     reporter.finish()
