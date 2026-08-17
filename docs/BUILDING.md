@@ -46,10 +46,12 @@ identity match. Any mismatch runs the scope again. `--no-cache` runs every
 selected cacheable scope even when its recorded inputs match.
 
 Commit messages use `type(scope): subject`. The scope is mandatory and must be
-one of `bootstrap`, `build`, `cli`, `console`, `deps`, `input`, `nokia-ta1618`,
-`quality`, `release`, `repo`, `rootfs` or `ums9117`. Use the narrowest component
-that owns the change, such as `feat(nokia-ta1618): ...` for phone-specific
-hardware support and `build(quality): ...` for the source-quality gate.
+one of `bootstrap`, `build`, `cli`, `console`, `deps`, `host`,
+`inoi-240-modern-4g`, `inoi-244-modern-4g`, `input`, `nokia-ta1618`, `quality`,
+`release`, `repo`, `rootfs` or `ums9117`. Use the narrowest component that owns
+the change, such as `feat(nokia-ta1618): ...` for phone-specific hardware
+support, `feat(host): ...` for host-side tooling and `build(quality): ...` for
+the source-quality gate.
 `./fplinux setup` selects the tracked `.githooks/commit-msg` hook for the current
 Git checkout. The hook validates each message in the pinned OCI environment
 before Git creates the commit. Source archives have no local Git configuration
