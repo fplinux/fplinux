@@ -1,0 +1,148 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FPLinux maintainers <fplinux@example.invalid>
+Date: Mon, 17 Aug 2026 00:00:00 +0000
+Subject: [PATCH] FPLinux: add the native runtime hooks
+
+Add the FPLinux fbdev and evdev targets without SDL or X11, keep the heap
+bounded for phone RAM, make quit confirmation keypad-accessible, disable stdin
+ownership, and stop sound initialization cleanly when the null backend is used.
+The distribution supplies the native backend sources before compilation.
+
+Signed-off-by: FPLinux maintainers <fplinux@example.invalid>
+---
+ Makefile          |  8 ++++++--
+ common/menu.c     |  2 ++
+ common/snd_dma.c  |  6 ++++++
+ common/sys_unix.c | 10 ++++++++++
+ common/zone.c     |  5 +++++
+ 5 files changed, 29 insertions(+), 2 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 5709a79f88ff1002e496301e0fe0def2b0cee001..f337a9196d4fb4a71606b41de81eb077284a63b9 100644
+--- a/Makefile
++++ b/Makefile
+@@ -955,7 +955,9 @@ GL_OBJS += vid_sgl.o sdl_common.o
+ CL_CPPFLAGS += $(SDL_CFLAGS)
+ CL_LFLAGS += $(SDL_LFLAGS)
+ endif
+-ifeq ($(VID_TARGET),null)
++ifeq ($(VID_TARGET),fplinux)
++SW_OBJS += vid_fplinux.o
++else ifeq ($(VID_TARGET),null)
+ SW_OBJS += vid_null.o
+ GL_OBJS += vid_null.o
+ endif
+@@ -979,7 +981,9 @@ endif
+ ifeq ($(IN_TARGET),sdl)
+ CL_OBJS += in_sdl.o sdl_common.o
+ endif
+-ifeq ($(IN_TARGET),null)
++ifeq ($(IN_TARGET),fplinux)
++CL_OBJS += in_fplinux.o
++else ifeq ($(IN_TARGET),null)
+ CL_OBJS += in_null.o
+ endif
+
+diff --git a/common/menu.c b/common/menu.c
+index 9922d03ff13113bef19bd1d6390944b167d8b1b4..1d1fbd8037a9c6d3bcbe2422c600469a85c2fe93 100644
+--- a/common/menu.c
++++ b/common/menu.c
+@@ -912,6 +912,7 @@ M_Quit_Key(knum_t keynum)
+ 	m_state = m_quit_prevstate;
+ 	break;
+
++    case K_ENTER:
+     case K_y:
+ 	key_dest = key_console;
+ #ifdef NQ_HACK
+@@ -943,6 +944,7 @@ M_Quit_Draw(void)
+     M_Print(64, 92, m_quit_message[1]);
+     M_Print(64, 100, m_quit_message[2]);
+     M_Print(64, 108, m_quit_message[3]);
++    M_PrintWhite(72, 124, "ENTER=quit  ESC=back");
+ }
+
+ //=============================================================================
+diff --git a/common/snd_dma.c b/common/snd_dma.c
+index 8e4852bd3f6c624972ada47669c04a11e7af1213..a168a837adacd745c66789cd8032a4c337220f10 100644
+--- a/common/snd_dma.c
++++ b/common/snd_dma.c
+@@ -257,6 +257,9 @@ S_Init(void)
+     snd_initialized = true;
+
+     S_Startup();
++    if (!sound_started)
++	return;
++
+     SND_InitScaletable();
+     S_AllocBuffers();
+
+@@ -279,6 +282,9 @@ S_Init(void)
+ void
+ S_ClearOverflow()
+ {
++    if (!known_sfx)
++	return;
++
+     S_StopAllSounds(true);
+     struct known_sfx *known = known_sfx->overflow;
+
+diff --git a/common/sys_unix.c b/common/sys_unix.c
+index 36a6889511dbd9e9fa3e7b654a6fbf0f5c746ad4..55c8844e9af1833ffcd29eb32c02966e7c541e4b 100644
+--- a/common/sys_unix.c
++++ b/common/sys_unix.c
+@@ -63,7 +63,11 @@ static cvar_t sys_extrasleep = { "sys_extrasleep", "0" };
+ static qboolean stdin_ready;
+ static int do_stdin = 1;
+ #else
++#ifdef FPLINUX_NO_STDIN
++static qboolean noconinput = true;
++#else
+ static qboolean noconinput = false;
++#endif
+ static qboolean nostdout = false;
+ #endif
+
+@@ -111,8 +115,10 @@ Sys_Quit(void)
+ {
+ #ifndef SERVERONLY
+     Host_Shutdown();
++#ifndef FPLINUX_NO_STDIN
+     fcntl(STDIN_FILENO, F_SETFL,
+ 	  fcntl(STDIN_FILENO, F_GETFL, 0) & ~O_NONBLOCK);
++#endif
+     fflush(stdout);
+ #endif
+     exit(0);
+@@ -142,9 +148,11 @@ Sys_Error(const char *error, ...)
+     char string[MAX_PRINTMSG];
+
+ #ifndef SERVERONLY
++#ifndef FPLINUX_NO_STDIN
+     /* remove non-blocking flag from standard input */
+     int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+     fcntl(STDIN_FILENO, F_SETFL, flags & ~O_NONBLOCK);
++#endif
+ #endif
+
+     va_start(argptr, error);
+diff --git a/common/zone.c b/common/zone.c
+index d79bfd6fbdd4d8d3f23d97e9ac005192222a44f8..21dbac7fd37cff39494ee8b03c9329ef8948e1f9 100644
+--- a/common/zone.c
++++ b/common/zone.c
+@@ -1276,8 +1276,13 @@ Memory_GetSize(void)
+     if (parm && com_argc > parm + 1)
+ 	return (size_t)atoi(com_argv[parm + 1]) << 10;
+
++#ifdef FPLINUX_DEFAULT_HEAP_MB
++    /* The target RAM budget is verified against this package setting. */
++    return (size_t)FPLINUX_DEFAULT_HEAP_MB << 20;
++#else
+     /* Default memory is now 256MB */
+     return (size_t)256 << 20;
++#endif
+ }
+
+ void
+--
+2.50.1

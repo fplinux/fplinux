@@ -12,5 +12,6 @@ BR2_ROOTFS_OVERLAY="/workspace/common/rootfs/overlay /workspace/targets/inoi-244
 BR2_ROOTFS_POST_BUILD_SCRIPT="/workspace/buildroot-external/post-build.sh"
 BR2_PACKAGE_BUSYBOX=y
 BR2_PACKAGE_FPLINUX_CONSOLE=y
+BR2_PACKAGE_FPLINUX_TYRQUAKE=y
 BR2_TARGET_ROOTFS_CPIO=y
 # BR2_TARGET_ROOTFS_TAR is not set

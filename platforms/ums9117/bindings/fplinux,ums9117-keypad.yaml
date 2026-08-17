@@ -29,10 +29,6 @@ properties:
     $ref: /schemas/types.yaml#/definitions/string
     description: Stable input device name.
 
-  fplinux,input-phys:
-    $ref: /schemas/types.yaml#/definitions/string
-    description: Stable input device physical path.
-
   sprd,aon-apb:
     $ref: /schemas/types.yaml#/definitions/phandle
     description: AON APB syscon that gates and resets the keypad controller.
@@ -50,7 +46,6 @@ required:
   - compatible
   - reg
   - label
-  - fplinux,input-phys
   - keypad,num-rows
   - keypad,num-columns
   - linux,keymap
@@ -67,7 +62,6 @@ examples:
         compatible = "fplinux,ums9117-keypad";
         reg = <0x40250000 0x100>;
         label = "UMS9117 keypad";
-        fplinux,input-phys = "ums9117/keypad0";
         keypad,num-rows = <5>;
         keypad,num-columns = <4>;
         linux,keymap = <
