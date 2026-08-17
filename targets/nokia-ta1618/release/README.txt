@@ -41,7 +41,8 @@ the microSD card before boot and provide a legally obtained file at:
 Start exactly one input mode from the phone shell:
   quake --input phone
   quake --input keyboard
-Phone mode assumes that the phone is held counter-clockwise, with the screen on
+Both input modes are supported on physical TA-1618 hardware. Phone mode assumes
+that the phone is held counter-clockwise, with the screen on
 the left and keypad on the right; D-pad and alternate digit directions are
 rotated into that landscape view.
 The launcher uses a 32 MiB heap, null audio, and volatile configuration and
