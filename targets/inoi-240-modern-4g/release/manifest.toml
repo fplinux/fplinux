@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: GPL-2.0-only
+schema = "fplinux.release/v2"
+image = "image/ramboot.bin"
+
+bundle_files = [
+  "image/ramboot.bin",
+  "assets/pinmap.bin",
+  "assets/keymap.bin",
+  "assets/t117_fdl1.bin",
+  "host/spd_dump",
+  "host/libc_server",
+  "host/fplinux-usb-console",
+  "runner/run.py",
+  "runner/platform_adapter.py",
+  "runtime-manifest.json",
+  "assets.lock.toml",
+  "THIRD_PARTY_NOTICES.md",
+]
+
+runtime_files = [
+  "image/ramboot.bin",
+  "assets/pinmap.bin",
+  "assets/keymap.bin",
+  "assets/t117_fdl1.bin",
+  "host/spd_dump",
+  "host/libc_server",
+  "host/fplinux-usb-console",
+  "runner/run.py",
+  "runner/platform_adapter.py",
+  "runtime-manifest.json",
+]
+
+documents = ["release/README.txt"]

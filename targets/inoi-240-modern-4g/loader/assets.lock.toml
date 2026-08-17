@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: GPL-2.0-only
+schema = "fplinux.assets/v1"
+
+[[source]]
+id = "maps"
+kind = "7z"
+url = "https://github.com/ilyakurdyukov/fpdoom/releases/download/1.20251101/t117_maps.7z"
+sha256 = "9295f209f33ab688711ae4496a90d319ae2aef79420a2fd823d1beabd7f2ede1"
+cache_name = "t117_maps-20260814.7z"
+license = "NOASSERTION"
+
+[[source.output]]
+role = "pinmap"
+path = "pinmap.bin"
+member = "inoi_240/pinmap.bin"
+sha256 = "7ad7a79d8613526e7b20f7b7d90e9a99651386f5018dce820c59ef2cf59f12b3"
+
+[[source.output]]
+role = "keymap"
+path = "keymap.bin"
+member = "inoi_240/keymap.bin"
+sha256 = "d7414fcc64cdc1aa1d61d6e63327a78db2d54d80b8134bf5e64b5316ff06073c"
+
+[[source]]
+id = "fdl1"
+kind = "file"
+url = "https://github.com/ilyakurdyukov/spreadtrum_flash/releases/download/1.20260403/t117_fdl1.bin"
+sha256 = "062d5e1a298c0e378eeefcc67dddba6fd4d6be10a683511c849ec59c17fb7414"
+cache_name = "t117_fdl1.bin"
+license = "Unlicense"
+
+[[source.output]]
+role = "fdl1"
+path = "t117_fdl1.bin"
+sha256 = "062d5e1a298c0e378eeefcc67dddba6fd4d6be10a683511c849ec59c17fb7414"

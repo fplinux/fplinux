@@ -128,8 +128,8 @@ A phone target still owns:
 - keypad scan, wiring and conversion to the normalized Linux input key codes;
 - DTS nodes and kernel configuration, including evdev, uinput, file locking and
   two generic-serial gadget ports when the host keyboard bridge is enabled;
-- pre-Linux screen composition, framebuffer/panel adapter and boot sequencing;
-- bootstrap, memory map, board assets and validated platform-adapter values;
+- the bootstrap board descriptor and target payload assembly;
+- the memory map, board assets and validated platform-adapter values;
 - `/etc/os-release` and an optional boot diagnostics hook.
 
 The selected platform's fixed adapter owns the host loader sequence. A target
@@ -137,11 +137,13 @@ supplies board data to that sequence but cannot select commands or executable
 paths.
 
 A pre-Linux screen that accesses a fixed framebuffer or inherited panel state is
-not part of the shared userspace API. Keep the screen instance, hardware adapter
-and bootstrap sequencing under `targets/<phone>/bootstrap/`. Targets may compile
-the platform-neutral font, rasterizer and layout from
-[`bootstrap/fplinux-boot-screen/`](../../bootstrap/fplinux-boot-screen/) into
-their pinned bootstrap closure.
+not part of the shared userspace API. Phones on one SoC may share their screen
+instance, hardware adapter and boot sequencing under `platforms/<soc>/bootstrap/`.
+Each target then supplies only its board descriptor and payload assembly under
+`targets/<phone>/bootstrap/`. The platform flow may compile the platform-neutral
+font, rasterizer and layout from
+[`bootstrap/fplinux-boot-screen/`](../../bootstrap/fplinux-boot-screen/) into the
+pinned bootstrap closure.
 
 ## Root filesystem overlays
 
