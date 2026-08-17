@@ -316,7 +316,6 @@ static int ums9117_keypad_probe(struct platform_device *pdev)
 	struct ums9117_keypad *keypad;
 	struct input_dev *input;
 	const char *name;
-	const char *phys;
 	int ret;
 
 	keypad = devm_kzalloc(dev, sizeof(*keypad), GFP_KERNEL);
@@ -355,11 +354,8 @@ static int ums9117_keypad_probe(struct platform_device *pdev)
 	ret = device_property_read_string(dev, "label", &name);
 	if (ret)
 		return dev_err_probe(dev, ret, "missing input label\n");
-	ret = device_property_read_string(dev, "fplinux,input-phys", &phys);
-	if (ret)
-		return dev_err_probe(dev, ret, "missing input phys\n");
 	input->name = name;
-	input->phys = phys;
+	input->phys = "fplinux/keypad0";
 
 	ret = matrix_keypad_build_keymap(NULL, NULL, keypad->rows, keypad->cols,
 					 NULL, input);

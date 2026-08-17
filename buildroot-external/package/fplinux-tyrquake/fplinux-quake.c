@@ -25,11 +25,6 @@
 #define GAME_DATA CARD_MOUNT "/fplinux/quake/id1"
 #define ENGINE "/usr/bin/tyr-quake"
 #define FRAMEBUFFER "/dev/fb0"
-#define FRAMEBUFFER_ID "ta1618-rgb565"
-#define FRAMEBUFFER_BYTES 307200U
-#define FRAMEBUFFER_HEIGHT 320U
-#define FRAMEBUFFER_STRIDE 480U
-#define FRAMEBUFFER_WIDTH 240U
 #define LOCK_PATH "/tmp/fplinux-quake.lock"
 #define TTY "/dev/tty0"
 
@@ -284,22 +279,29 @@ static void remove_runtime(const char *runtime, const char *input_mode)
 static void validate_framebuffer(const struct fb_fix_screeninfo *fixed,
 				 const struct fb_var_screeninfo *variable)
 {
-	if (strncmp(fixed->id, FRAMEBUFFER_ID, sizeof(fixed->id)) != 0 ||
-	    fixed->type != FB_TYPE_PACKED_PIXELS ||
-	    fixed->visual != FB_VISUAL_TRUECOLOR ||
-	    fixed->line_length != FRAMEBUFFER_STRIDE ||
-	    fixed->smem_len != FRAMEBUFFER_BYTES ||
-	    fixed->ypanstep != FRAMEBUFFER_HEIGHT ||
-	    variable->xres != FRAMEBUFFER_WIDTH ||
-	    variable->yres != FRAMEBUFFER_HEIGHT ||
-	    variable->xres_virtual != FRAMEBUFFER_WIDTH ||
-	    (variable->yres_virtual != FRAMEBUFFER_HEIGHT &&
-	     variable->yres_virtual != FRAMEBUFFER_HEIGHT * 2) ||
+	size_t page_bytes;
+
+	if (fixed->type != FB_TYPE_PACKED_PIXELS ||
+	    fixed->visual != FB_VISUAL_TRUECOLOR || variable->xres == 0 ||
+	    variable->yres == 0 || variable->xres_virtual != variable->xres ||
+	    (variable->yres_virtual != variable->yres &&
+	     variable->yres_virtual != variable->yres * 2) ||
 	    variable->xoffset != 0 ||
-	    (variable->yoffset != 0 &&
-	     variable->yoffset != FRAMEBUFFER_HEIGHT) ||
-	    variable->bits_per_pixel != 16)
+	    (variable->yoffset != 0 && variable->yoffset != variable->yres) ||
+	    variable->bits_per_pixel != 16 || variable->red.offset != 11 ||
+	    variable->red.length != 5 || variable->red.msb_right != 0 ||
+	    variable->green.offset != 5 || variable->green.length != 6 ||
+	    variable->green.msb_right != 0 || variable->blue.offset != 0 ||
+	    variable->blue.length != 5 || variable->blue.msb_right != 0 ||
+	    variable->transp.length != 0 ||
+	    fixed->line_length < variable->xres * sizeof(uint16_t))
 		die("unexpected framebuffer ABI");
+
+	page_bytes = (size_t)fixed->line_length * variable->yres;
+	if (fixed->smem_len < page_bytes ||
+	    (variable->yres_virtual == variable->yres * 2 &&
+	     (fixed->ypanstep == 0 || fixed->smem_len < page_bytes * 2)))
+		die("unexpected framebuffer memory layout");
 }
 
 static void save_display(struct display_state *state)
@@ -356,7 +358,7 @@ static bool restore_display(struct display_state *state)
 		current.xoffset = 0;
 		current.yoffset = state->variable.yoffset;
 		current.activate = FB_ACTIVATE_NOW;
-		if (current.yoffset + FRAMEBUFFER_HEIGHT <=
+		if (current.yoffset + state->variable.yres <=
 			    current.yres_virtual &&
 		    ioctl(state->framebuffer, FBIOPAN_DISPLAY, &current) < 0) {
 			fprintf(stderr,

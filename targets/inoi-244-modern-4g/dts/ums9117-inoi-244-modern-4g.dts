@@ -83,7 +83,6 @@
 	compatible = "fplinux,ums9117-keypad";
 	status = "okay";
 	label = "INOI 244 Modern 4G keypad";
-	fplinux,input-phys = "inoi244/keypad0";
 	keypad,num-rows = <5>;
 	keypad,num-columns = <4>;
 	linux,keymap = <

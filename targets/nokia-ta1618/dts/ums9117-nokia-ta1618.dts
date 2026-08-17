@@ -119,7 +119,6 @@
 	compatible = "fplinux,ums9117-keypad";
 	status = "okay";
 	label = "TA-1618 keypad";
-	fplinux,input-phys = "ta1618/keypad0";
 	keypad,num-rows = <5>;
 	keypad,num-columns = <4>;
 	/* Exact TA-1618 scan map derived from the proven fpdoom keymap.bin. */

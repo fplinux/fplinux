@@ -54,13 +54,14 @@ quake --input phone
 quake --input keyboard
 ```
 
-Phone mode requires exactly one `TA-1618 keypad`. Keyboard mode requires exactly
-one `FPLinux host keyboard`, created by the host-keyboard bridge on USB interface
-number 1. The choice stays fixed until the game exits. TyrQuake rejects duplicate
-phone or host-keyboard devices before selecting a source. It grabs every present
-recognized source, sends only the selected source to the game and discards the
-other one. A missing selected device is an error; there is no fallback or hot
-switching between modes.
+The `--input` flag is the only source selector. Phone mode requires exactly one
+physical keypad exposing the stable `fplinux/keypad0` evdev physical identity;
+keyboard mode requires exactly one FPLinux host-keyboard uinput device created by
+USB interface 1. Capabilities validate the selected class but never choose it.
+The choice stays fixed until the game exits. TyrQuake grabs both recognized
+sources when present, sends only the selected source to the game and discards the
+other one. A missing or duplicate selected device is an error; there is no
+fallback or hot switching between modes.
 
 Phone controls assume that the phone is held counter-clockwise with the screen on
 the left and keypad on the right. The directional layout is rotated into the

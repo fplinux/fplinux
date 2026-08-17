@@ -91,6 +91,33 @@ class SourceInventoryTests(unittest.TestCase):
             ):
                 source_check.source_files(enforce_policy=True)
 
+    def test_embedded_package_c_is_formatted_but_not_standalone_analyzed(self) -> None:
+        """Compile package-embedded C only in the upstream package context."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = root / "buildroot-external/package/app"
+            package.mkdir(parents=True)
+            standalone = package / "app.c"
+            embedded = package / "backend.c"
+            standalone.write_text("int app;\n")
+            embedded.write_text("/* fplinux-check: package-embedded */\nint backend;\n")
+            files = [standalone, embedded]
+            with (
+                mock.patch.object(source_check, "ROOT", root),
+                mock.patch.object(source_check, "discover_targets", return_value=()),
+            ):
+                self.assertEqual(
+                    source_check.userspace_c_sources(files),
+                    [("buildroot-external/package/app/app.c", False)],
+                )
+                self.assertEqual(
+                    source_check.userspace_c_sources(files, include_embedded=True),
+                    [
+                        ("buildroot-external/package/app/app.c", False),
+                        ("buildroot-external/package/app/backend.c", False),
+                    ],
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

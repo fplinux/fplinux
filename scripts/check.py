@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 EXCLUDED_PARTS = {".cache", ".git", "__pycache__"}
 BINARY_SUFFIXES = {".bin", ".jpg", ".png", ".pyc", ".zip"}
 QUAKE_DATA_NAME = re.compile(r"pak[0-9]+\.part\.[0-9]+", re.IGNORECASE)
+PACKAGE_EMBEDDED_C_MARKER = "fplinux-check: package-embedded"
 SOURCE_SCOPES = (
     "source",
     "container",
@@ -185,14 +186,23 @@ def buildroot_sources(files: list[Path]) -> list[str]:
     return result
 
 
-def userspace_c_sources(files: list[Path]) -> list[tuple[str, bool]]:
-    """Discover in-tree userspace C and whether each source needs libusb."""
+def package_c_is_embedded(path: Path) -> bool:
+    """Return whether a package C file is compiled only inside an upstream tree."""
+    with path.open(encoding="utf-8") as stream:
+        return any(PACKAGE_EMBEDDED_C_MARKER in stream.readline() for _ in range(4))
+
+
+def userspace_c_sources(
+    files: list[Path], *, include_embedded: bool = False
+) -> list[tuple[str, bool]]:
+    """Discover userspace C and whether each source needs libusb."""
     result: dict[str, bool] = {}
     for path in files:
         relative = path.relative_to(ROOT)
-        if relative.suffix == ".c" and relative.parts[:2] == (
-            "buildroot-external",
-            "package",
+        if (
+            relative.suffix == ".c"
+            and relative.parts[:2] == ("buildroot-external", "package")
+            and (include_embedded or not package_c_is_embedded(path))
         ):
             result[relative.as_posix()] = False
 
@@ -372,6 +382,7 @@ def main() -> None:
             )
     if "c" in selected:
         c_sources = userspace_c_sources(files)
+        c_format_sources = userspace_c_sources(files, include_embedded=True)
         bootstrap_c = [
             str(path.relative_to(ROOT))
             for path in files
@@ -384,7 +395,7 @@ def main() -> None:
                     "--style=file",
                     "--dry-run",
                     "--Werror",
-                    *(source for source, _requires_libusb in c_sources),
+                    *(source for source, _requires_libusb in c_format_sources),
                     *bootstrap_c,
                 ]
             )
