@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import json
 import os
 import subprocess
@@ -91,6 +93,24 @@ class CommandLifecycleTests(unittest.TestCase):
             cached=True,
         )
         reporter.finish.assert_called_once_with()
+
+    def test_build_result_ignores_closed_stdout_pipe(self) -> None:
+        """A closed output consumer must not turn a valid build result into failure."""
+
+        class BrokenPipeStream(io.StringIO):
+            def flush(self) -> None:
+                raise BrokenPipeError
+
+        with (
+            mock.patch.object(commands, "ROOT", self.root),
+            contextlib.redirect_stdout(BrokenPipeStream()),
+        ):
+            commands._print_build_result(  # noqa: SLF001
+                "phone",
+                self.bundle,
+                {"image": "image/ramboot.bin"},
+                cached=False,
+            )
 
     def test_jobs_do_not_change_an_exact_bundle_hit(self) -> None:
         """Treat ``--jobs`` as scheduling rather than artifact identity."""

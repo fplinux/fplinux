@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import contextvars
+import io
 import json
 import os
 import re
@@ -50,14 +51,36 @@ _REPORTED_EXCEPTION: contextvars.ContextVar[BaseException | None] = contextvars.
 )
 
 
-def _write_terminal(stream: IO[str], data: bytes) -> None:
-    buffer = getattr(stream, "buffer", None)
-    if buffer is None:
-        stream.write(data.decode(errors="replace"))
-        stream.flush()
+def silence_broken_pipe(stream: IO[str]) -> None:
+    """Keep interpreter shutdown from failing after a consumer closes a pipe."""
+    try:
+        descriptor = stream.fileno()
+    except (AttributeError, OSError, ValueError, io.UnsupportedOperation):
         return
-    buffer.write(data)
-    buffer.flush()
+
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+    except OSError:
+        return
+    try:
+        os.dup2(devnull, descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(devnull)
+
+
+def _write_terminal(stream: IO[str], data: bytes) -> None:
+    try:
+        buffer = getattr(stream, "buffer", None)
+        if buffer is None:
+            stream.write(data.decode(errors="replace"))
+            stream.flush()
+            return
+        buffer.write(data)
+        buffer.flush()
+    except BrokenPipeError:
+        silence_broken_pipe(stream)
 
 
 def exit_status(returncode: int) -> int:

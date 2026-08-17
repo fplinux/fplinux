@@ -250,6 +250,38 @@ class RunReporterTests(unittest.TestCase):
             self.assertIn("stderr marker", stderr.getvalue())
             self.assertIn("build target: verbose OK", stderr.getvalue())
 
+    def test_passthrough_ignores_closed_terminal_pipe(self) -> None:
+        """Keep the child running when a passthrough consumer closes stdout."""
+
+        class BrokenPipeBuffer:
+            def write(self, data: bytes) -> int:
+                return len(data)
+
+            def flush(self) -> None:
+                raise BrokenPipeError
+
+        class BrokenPipeStream:
+            buffer = BrokenPipeBuffer()
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "run"
+            reporter = RunReporter("build target", root, ".cache/logs/test", verbose=True)
+            terminal = io.StringIO()
+            with (
+                mock.patch.object(sys, "stdout", BrokenPipeStream()),
+                contextlib.redirect_stderr(terminal),
+                reporter.stage("passthrough", passthrough=True) as stage,
+            ):
+                stage.run(
+                    [
+                        sys.executable,
+                        "-c",
+                        "print('stdout marker')",
+                    ]
+                )
+            self.assertIn(b"stdout marker", (root / "01-passthrough.log").read_bytes())
+            self.assertIn("build target: passthrough OK", terminal.getvalue())
+
     def test_capture_retains_separate_streams_and_status(self) -> None:
         """Capture policy input without hiding it from verbose output or logs."""
         with tempfile.TemporaryDirectory() as temporary:
