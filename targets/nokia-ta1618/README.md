@@ -54,7 +54,8 @@ quake --input phone
 quake --input keyboard
 ```
 
-The `--input` flag is the only source selector. Phone mode requires exactly one
+Both TyrQuake input modes work on physical TA-1618 hardware. The `--input` flag
+is the only source selector. Phone mode requires exactly one
 physical keypad exposing the stable `fplinux/keypad0` evdev physical identity;
 keyboard mode requires exactly one FPLinux host-keyboard uinput device created by
 USB interface 1. Capabilities validate the selected class but never choose it.
