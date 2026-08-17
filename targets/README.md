@@ -24,6 +24,7 @@ shared `scripts/fplinux_cli/builder.py`, and RAM execution starts in
 
 | Target               | Phone                   | Platform  | Profile   | Documentation                                        |
 | -------------------- | ----------------------- | --------- | --------- | ---------------------------------------------------- |
+| `inoi-240-modern-4g` | INOI 240 Modern 4G      | `ums9117` | `console` | [Target documentation](inoi-240-modern-4g/README.md) |
 | `inoi-244-modern-4g` | INOI 244 Modern 4G      | `ums9117` | `console` | [Target documentation](inoi-244-modern-4g/README.md) |
 | `nokia-ta1618`       | Nokia 3210 4G (TA-1618) | `ums9117` | `console` | [Target documentation](nokia-ta1618/README.md)       |
 

@@ -1,9 +1,9 @@
-FPLinux for INOI 244 Modern 4G
+FPLinux for INOI 240 Modern 4G
 
 This archive contains an experimental volatile-RAM Linux payload and its fixed
 host runner. It does not flash, erase or access the phone's internal storage.
 
-The console profile provides a local 240x320 framebuffer console, the physical
+The console profile provides a local 128x160 framebuffer console, the physical
 keypad and two Linux USB serial interfaces. Interface 0 carries the BusyBox shell
 and file-transfer modes; interface 1 carries forwarded host-keyboard events into
 a persistent uinput keyboard. Audio, modem, Bluetooth, camera, microSD and phone
@@ -12,11 +12,12 @@ To leave the RAM-only session, disconnect USB, remove and reinsert the battery,
 then boot the phone normally.
 
 The RAM image includes the TyrQuake 0.71 engine but no Quake game data. The
-shared backend derives the mode from fbdev; on this panel its 320x240 software
-image is rotated into the 240x320 display. TyrQuake works on physical INOI 244
-hardware with both the phone keypad and forwarded host keyboard. Hardware
-support does not by itself qualify any archive or runtime closure as a release.
-A RAM-only game session uses an already mounted /mnt/card, for example:
+shared backend derives the mode from fbdev: on this panel it renders 320x256,
+downsamples by two to 160x128 and rotates into the 128x160 display. TyrQuake
+works on physical INOI 240 hardware with both the phone keypad and forwarded host
+keyboard. Hardware support does not by itself qualify any archive or runtime
+closure as a release. A RAM-only game session uses an already mounted /mnt/card,
+for example:
 
   ./host/fplinux-usb-console --interface 0 --exec \
     'mkdir -p /mnt/card && mount -t tmpfs none /mnt/card && mkdir -p /mnt/card/fplinux/quake/id1'

@@ -18,16 +18,16 @@ analog-die interface, LCDC framebuffer and matrix-keypad support needed by
 UMS9117 feature phones. It also declares
 the Linux integration, bootstrap vendor projection, typed host-tool recipes and
 fixed RAM-only host adapter used by the shared builder and runner. Phone memory
-maps, panel configuration, keypad wiring, bootstrap source and adapter values
-stay in individual targets.
+maps, panel configuration, keypad wiring, bootstrap board descriptors, payload
+assembly and adapter values stay in individual targets.
 
 ## Platform contract
 
 [`platform.toml`](platform.toml) is the declarative UMS9117 contract. Its Linux
 section projects the platform Kconfig/Kbuild integration, drivers and DTSI. Its
-bootstrap section selects the pinned fpdoom vendor subset and shared boot-screen
-source. Typed host recipes build `spd_dump`, `libc_server` and the shared USB
-console.
+bootstrap section selects the pinned fpdoom vendor subset, the shared boot-screen
+source and the UMS9117 boot flow under `bootstrap/`. Typed host recipes build
+`spd_dump`, `libc_server` and the shared USB console.
 
 The runner contract bundles [`common/run.py`](../../common/run.py) with the fixed
 [`host/adapter.py`](host/adapter.py). The shared runner verifies the generic
@@ -124,6 +124,7 @@ not duplicate SoC-wide timer, GIC or USB addresses.
 
 | Target                                                             | Phone                   | Enabled shared blocks                                                 |
 | ------------------------------------------------------------------ | ----------------------- | --------------------------------------------------------------------- |
+| [`inoi-240-modern-4g`](../../targets/inoi-240-modern-4g/README.md) | INOI 240 Modern 4G      | CPU0, GIC, timers, MUSB gadget, ADI, framebuffer (LCM/DBI) and keypad |
 | [`inoi-244-modern-4g`](../../targets/inoi-244-modern-4g/README.md) | INOI 244 Modern 4G      | CPU0, GIC, timers, MUSB gadget, ADI, framebuffer (LCM/DBI) and keypad |
 | [`nokia-ta1618`](../../targets/nokia-ta1618/README.md)             | Nokia 3210 4G (TA-1618) | CPU0, GIC, timers, MUSB gadget, ADI, framebuffer (SPI) and keypad     |
 

@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config FB_INOI240
+	bool "INOI 240 Modern 4G LCDC framebuffer"
+	depends on FB && MACH_INOI_240_MODERN_4G
+	select FB_UMS9117
+	help
+	  Drive the INOI 240 Modern 4G NV3023 panel through the UMS9117
+	  parallel LCM/DBI interface and common LCDC framebuffer lifecycle.

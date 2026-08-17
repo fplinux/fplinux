@@ -5,8 +5,8 @@
 #include "ums9117.dtsi"
 
 / {
-	model = "INOI 244 Modern 4G Linux RAM boot";
-	compatible = "inoi,244-modern-4g", "sprd,ums9117";
+	model = "INOI 240 Modern 4G Linux RAM boot";
+	compatible = "inoi,240-modern-4g", "sprd,ums9117";
 
 	chosen {
 		bootargs = "console=tty0 loglevel=8 ignore_loglevel init=/init panic=-1 rdinit=/init g_serial.use_acm=0 g_serial.n_ports=2";
@@ -30,7 +30,7 @@
 
 	soc {
 		display@83f00000 {
-			compatible = "fplinux,ums9117-nv3030-lcm-fb";
+			compatible = "fplinux,ums9117-nv3023-lcm-fb";
 			reg = <0x83f00000 0x00100000>,
 			      <0x20800000 0x00001000>,
 			      <0x40600000 0x00000400>,
@@ -48,8 +48,8 @@
 				    "ap-ahb-gate-set", "ap-ahb-reset-set",
 				    "ap-ahb-reset-clear", "pinmux", "pinconf";
 			sprd,aon-apb = <&aon_apb>;
-			/* fpdoom cmd3001_inoi MCU timing at the 128 MHz AHB clock. */
-			sprd,dbi-timing-ns = <5 150 150 30 80 120>;
+			/* fpdoom cmd3025_inoi MCU timing at the 128 MHz AHB clock. */
+			sprd,dbi-timing-ns = <50 55 110 20 70 35>;
 			/* LCM control pins followed by the ten DBI data pins. */
 			sprd,pinmux-offsets = <
 				0x000 0x004 0x008 0x00c 0x010 0x014 0x018
@@ -82,7 +82,7 @@
 &keypad {
 	compatible = "fplinux,ums9117-keypad";
 	status = "okay";
-	label = "INOI 244 Modern 4G keypad";
+	label = "INOI 240 Modern 4G keypad";
 	keypad,num-rows = <5>;
 	keypad,num-columns = <4>;
 	linux,keymap = <

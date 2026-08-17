@@ -51,6 +51,10 @@ source = "platforms/ums9117/kernel/ums9117-musb.c"
 destination = "drivers/usb/musb/ums9117.c"
 
 [[linux.copies]]
+source = "platforms/ums9117/kernel/font-fplinux.c"
+destination = "lib/fonts/font_6x8.c"
+
+[[linux.copies]]
 source = "platforms/ums9117/kernel/ums9117-keypad.c"
 destination = "drivers/input/keyboard/ums9117-keypad.c"
 

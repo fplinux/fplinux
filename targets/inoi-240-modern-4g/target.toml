@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0-only
 schema = "fplinux.target/v1"
-name = "inoi-244-modern-4g"
-display_name = "INOI 244 Modern 4G"
-release_slug = "FPLinux-INOI-244-Modern-4G"
+name = "inoi-240-modern-4g"
+display_name = "INOI 240 Modern 4G"
+release_slug = "FPLinux-INOI-240-Modern-4G"
 platform = "ums9117"
 profile = "console"
 release_manifest = "release/manifest.toml"
@@ -13,11 +13,11 @@ defconfig = "rootfs/defconfig"
 
 [linux]
 defconfig = "kernel/defconfig"
-dtb = "unisoc/ums9117-inoi-244-modern-4g.dtb"
-debug_dtb = "ums9117-inoi-244-modern-4g.dtb"
+dtb = "unisoc/ums9117-inoi-240-modern-4g.dtb"
+debug_dtb = "ums9117-inoi-240-modern-4g.dtb"
 patches = [
-  "kernel/0001-inoi-244-modern-4g-dtb.patch",
-  "kernel/0002-inoi-244-modern-4g-dt-binding.patch",
+  "kernel/0001-inoi-240-modern-4g-dtb.patch",
+  "kernel/0002-inoi-240-modern-4g-dt-binding.patch",
 ]
 forbidden_dtb_markers = ["sdhci", "mmc", "nand", "mtd", "ubi", "emmc"]
 forbidden_config = [
@@ -31,12 +31,12 @@ forbidden_config = [
 ]
 
 [[linux.copies]]
-source = "dts/ums9117-inoi-244-modern-4g.dts"
-destination = "arch/arm/boot/dts/unisoc/ums9117-inoi-244-modern-4g.dts"
+source = "dts/ums9117-inoi-240-modern-4g.dts"
+destination = "arch/arm/boot/dts/unisoc/ums9117-inoi-240-modern-4g.dts"
 
 [[linux.copies]]
-source = "kernel/inoi244-fb.c"
-destination = "drivers/video/fbdev/inoi244-fb.c"
+source = "kernel/inoi240-fb.c"
+destination = "drivers/video/fbdev/inoi240-fb.c"
 
 [[linux.appends]]
 source = "kernel/Kconfig"
@@ -52,10 +52,10 @@ destination = "drivers/video/fbdev/Makefile"
 
 [bootstrap]
 source = "bootstrap"
-image = "inoi244_linux_bootstrap.bin"
-map = "obj/inoi244_linux_bootstrap_map.txt"
+image = "inoi240_linux_bootstrap.bin"
+map = "obj/inoi240_linux_bootstrap_map.txt"
 kernel_destination = "zImage"
-dtb_destination = "inoi244.dtb"
+dtb_destination = "inoi240.dtb"
 load_address = 0x80100000
 payload_limit = 0x82000000
 toolchain = "arm-none-eabi"
@@ -73,12 +73,12 @@ keymap = "assets/keymap.bin"
 brightness = 50
 rotation = 0
 spi_mode = 3
-lcd_id = 0x303001
+lcd_id = 0x333025
 exec_distance = 0
 backlight_channels = "rgb"
 backlight_level = 0x1f
-session_name = "inoi244-linux"
-handoff_marker = "INOI244_LINUX_BOOTSTRAP stage=5 message=PREPARE LINUX"
+session_name = "inoi240-linux"
+handoff_marker = "INOI240_LINUX_BOOTSTRAP stage=5 message=PREPARE LINUX"
 handoff_wait_seconds = 60
 release_wait_seconds = 10
 boot_instructions = "Power the phone off, hold *, then connect USB while keeping * pressed."

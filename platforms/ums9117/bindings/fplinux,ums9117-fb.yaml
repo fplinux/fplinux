@@ -20,6 +20,7 @@ properties:
     enum:
       - fplinux,ums9117-st7789p3-spi-fb
       - fplinux,ums9117-nv3030-lcm-fb
+      - fplinux,ums9117-nv3023-lcm-fb
 
   reg:
     minItems: 12
@@ -132,7 +133,9 @@ allOf:
   - if:
       properties:
         compatible:
-          const: fplinux,ums9117-nv3030-lcm-fb
+          enum:
+            - fplinux,ums9117-nv3030-lcm-fb
+            - fplinux,ums9117-nv3023-lcm-fb
     then:
       required:
         - sprd,dbi-timing-ns

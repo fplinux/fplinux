@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-2.0-only
+if ARCH_UMS9117
+
+config MACH_INOI_240_MODERN_4G
+	bool "INOI 240 Modern 4G"
+	select MFD_SYSCON
+	help
+	  Board support for the INOI 240 Modern 4G, a UMS9117/T117 feature
+	  phone with a 128x160 NV3023 panel and matrix keypad. The current
+	  target is RAM-only and relies on the fpdoom bootstrap for the board
+	  pin state; Linux does not write the phone's flash storage.
+
+endif
