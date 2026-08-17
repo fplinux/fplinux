@@ -38,7 +38,6 @@
 #define KEYBOARD_POLL_MS 200
 #define DEFAULT_LINGER_MS 500u
 #define TRANSFER_BUFFER_SIZE 16384u
-#define MAX_UPLOAD_BYTES (8u * 1024u * 1024u)
 #define UPLOAD_WINDOW_LINES 16u
 #define MAX_EXEC_OUTPUT_BYTES (1u * 1024u * 1024u)
 #define PULL_BLOCK_BYTES (32u * 1024u)
@@ -132,7 +131,8 @@ static void usage(FILE *stream)
 		"  --list             list visible USB devices and exit\n"
 		"  --self-test        run host-only codec and path-safety tests\n"
 		"  --upload LOCAL REMOTE\n"
-		"                     upload LOCAL (up to 8 MiB) to /tmp/FILE\n"
+		"                     upload LOCAL to an absolute device path;\n"
+		"                     the device checks the free space first\n"
 		"                     and is installed only after device-side "
 		"SHA-256\n"
 		"                     verification\n"
@@ -963,28 +963,36 @@ static int send_bytes(libusb_device_handle *handle, uint8_t endpoint,
 	return LIBUSB_SUCCESS;
 }
 
-static bool safe_tmp_path(const char *path)
+static bool safe_remote_path(const char *path)
 {
-	const char *name;
+	size_t component = 0;
+	size_t dots = 0;
 
-	if (path == NULL || strncmp(path, "/tmp/", 5) != 0 || path[5] == '\0' ||
-	    strlen(path) > 128) {
+	if (path == NULL || path[0] != '/' || strlen(path) > 200 ||
+	    path[strlen(path) - 1] == '/') {
 		return false;
 	}
-	name = path + 5;
-	if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
-		return false;
-	}
-	while (*name != '\0') {
-		unsigned char character = (unsigned char)*name++;
+	while (*++path != '\0') {
+		unsigned char character = (unsigned char)*path;
+
+		if (character == '/') {
+			if (component == 0 || component == dots)
+				return false;
+			component = 0;
+			dots = 0;
+			continue;
+		}
 		if (!(character >= 'a' && character <= 'z') &&
 		    !(character >= 'A' && character <= 'Z') &&
 		    !(character >= '0' && character <= '9') &&
 		    character != '.' && character != '_' && character != '-') {
 			return false;
 		}
+		++component;
+		if (character == '.')
+			++dots;
 	}
-	return true;
+	return component != 0 && component != dots;
 }
 
 static int hash_file(FILE *file, char hex[65], uint64_t *byte_count,
@@ -1196,6 +1204,8 @@ static int upload_file(libusb_device_handle *handle,
 	char nonce[40];
 	char delimiter[96];
 	char command[1800];
+	char directory[256];
+	char *slash;
 	char ready_marker[96];
 	char success_marker[160];
 	char failure_marker[128];
@@ -1213,12 +1223,11 @@ static int upload_file(libusb_device_handle *handle,
 	bool device_echo_disabled = false;
 	bool remote_failure = false;
 
-	if (!safe_tmp_path(options->upload_remote)) {
+	if (!safe_remote_path(options->upload_remote)) {
 		fprintf(stderr,
-			"fplinux-usb-console: upload destination must be one "
-			"direct "
-			"/tmp/FILE path using only letters, digits, '.', '_', "
-			"'-': %s\n",
+			"fplinux-usb-console: upload destination must be an "
+			"absolute file path using only letters, digits, '.', "
+			"'_', '-': %s\n",
 			options->upload_remote);
 		return LIBUSB_ERROR_INVALID_PARAM;
 	}
@@ -1236,23 +1245,7 @@ static int upload_file(libusb_device_handle *handle,
 			options->upload_local);
 		goto cleanup;
 	}
-	if ((uint64_t)status.st_size > MAX_UPLOAD_BYTES) {
-		fprintf(stderr,
-			"fplinux-usb-console: upload exceeds the 8 MiB RAM-safety "
-			"limit: %s\n",
-			options->upload_local);
-		result = LIBUSB_ERROR_INVALID_PARAM;
-		goto cleanup;
-	}
-	hash_result = hash_file(file, hash, &byte_count, MAX_UPLOAD_BYTES);
-	if (hash_result > 0) {
-		fprintf(stderr,
-			"fplinux-usb-console: upload exceeds the 8 MiB RAM-safety "
-			"limit while reading: %s\n",
-			options->upload_local);
-		result = LIBUSB_ERROR_INVALID_PARAM;
-		goto cleanup;
-	}
+	hash_result = hash_file(file, hash, &byte_count, UINT64_MAX);
 	if (hash_result < 0) {
 		fprintf(stderr,
 			"fplinux-usb-console: cannot hash upload source %s: %s\n",
@@ -1273,10 +1266,23 @@ static int upload_file(libusb_device_handle *handle,
 		 nonce);
 	snprintf(failure_marker, sizeof(failure_marker),
 		 "FPLINUX_UPLOAD_SETUP_FAILED:%s", nonce);
+	if (snprintf(directory, sizeof(directory), "%s",
+		     options->upload_remote) >= (int)sizeof(directory)) {
+		result = LIBUSB_ERROR_INVALID_PARAM;
+		goto cleanup;
+	}
+	slash = strrchr(directory, '/');
+	if (slash == directory)
+		slash[1] = '\0';
+	else
+		*slash = '\0';
 	command_size = snprintf(
 		command, sizeof(command),
-		"if stty -echo && "
-		"fplinux_tmp=$(mktemp /tmp/.fplinux-upload.XXXXXX); then "
+		"if stty -echo && [ -d '%s' ] && "
+		"fplinux_free=$(df -kP '%s' | "
+		"awk 'NR==2{print $4}') && "
+		"[ \"$fplinux_free\" -ge %llu ] && "
+		"fplinux_tmp=$(mktemp '%s/.fplinux-upload.XXXXXX'); then "
 		"fplinux_old_ps2=$PS2; PS2='.'; "
 		"read fplinux_ready; "
 		"printf '\\nFPLINUX_UPLOAD_%%s:%%s\\n' "
@@ -1284,6 +1290,8 @@ static int upload_file(libusb_device_handle *handle,
 		"else printf '\\nFPLINUX_UPLOAD_%%s:%%s\\n' "
 		"SETUP_FAILED '%s'; PS2=$fplinux_old_ps2; stty echo; fi\n"
 		"%s\n",
+		directory, directory,
+		(unsigned long long)(byte_count / 1024u + 64u), directory,
 		nonce, nonce);
 	if (command_size < 0 || command_size >= (int)sizeof(command)) {
 		result = LIBUSB_ERROR_INVALID_PARAM;
@@ -1309,8 +1317,8 @@ static int upload_file(libusb_device_handle *handle,
 			device_echo_disabled = false;
 		}
 		fprintf(stderr,
-			"\nfplinux-usb-console: device shell did not acknowledge "
-			"upload setup\n");
+			"\nfplinux-usb-console: device refused the upload "
+			"(missing directory or not enough free space)\n");
 		goto cleanup;
 	}
 	command_size = snprintf(
@@ -1338,11 +1346,10 @@ static int upload_file(libusb_device_handle *handle,
 	       (size = fread(input, 1, sizeof(input), file)) > 0) {
 		size_t encoded_size = encode_base64_line(input, size, encoded);
 
-		if ((uint64_t)size > MAX_UPLOAD_BYTES - sent_bytes) {
+		if ((uint64_t)size > byte_count - sent_bytes) {
 			fprintf(stderr,
-				"fplinux-usb-console: upload source grew "
-				"beyond the "
-				"8 MiB RAM-safety limit while sending: %s\n",
+				"fplinux-usb-console: upload source changed "
+				"while sending: %s\n",
 				options->upload_local);
 			result = LIBUSB_ERROR_INVALID_PARAM;
 			goto cleanup;
@@ -2313,14 +2320,6 @@ static int pull_file(libusb_device_handle *handle,
 	}
 	memcpy(remote_hash, field + 1, 64);
 	remote_hash[64] = '\0';
-	if (remote_size > MAX_UPLOAD_BYTES) {
-		fprintf(stderr,
-			"fplinux-usb-console: %s exceeds the 8 MiB transfer "
-			"limit\n",
-			options->pull_remote);
-		result = LIBUSB_ERROR_INVALID_PARAM;
-		goto cleanup;
-	}
 	fprintf(stderr,
 		"fplinux-usb-console: pulling %s (%llu bytes, sha256=%s)\n",
 		options->pull_remote, (unsigned long long)remote_size,
@@ -2493,10 +2492,12 @@ static int self_test(void)
 			"padding\n");
 		return 1;
 	}
-	if (!safe_tmp_path("/tmp/test.bin") ||
-	    safe_tmp_path("/tmp/fplinux/test.bin") ||
-	    safe_tmp_path("/tmp/../nv.bin") || safe_tmp_path("/data/nv.bin") ||
-	    safe_tmp_path("/tmp/double//slash")) {
+	if (!safe_remote_path("/tmp/test.bin") ||
+	    !safe_remote_path("/mnt/card/fplinux/quake/id1/pak0.pak") ||
+	    safe_remote_path("tmp/test.bin") ||
+	    safe_remote_path("/tmp/../nv.bin") ||
+	    safe_remote_path("/tmp/dir/") ||
+	    safe_remote_path("/tmp/double//slash")) {
 		fprintf(stderr, "fplinux-usb-console: self-test failed: upload "
 				"path policy\n");
 		return 1;
@@ -2690,12 +2691,11 @@ int main(int argc, char **argv)
 		return self_test();
 	}
 	if (options.upload_local != NULL &&
-	    !safe_tmp_path(options.upload_remote)) {
+	    !safe_remote_path(options.upload_remote)) {
 		fprintf(stderr,
-			"fplinux-usb-console: upload destination must be one "
-			"direct "
-			"/tmp/FILE path using only letters, digits, '.', '_', "
-			"'-': %s\n",
+			"fplinux-usb-console: upload destination must be an "
+			"absolute file path using only letters, digits, '.', "
+			"'_', '-': %s\n",
 			options.upload_remote);
 		return 2;
 	}

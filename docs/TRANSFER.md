@@ -1,9 +1,9 @@
 # Moving files between the host and the phone
 
-The TA-1618 exposes two non-ACM serial interfaces under USB ID `0525:a4a6`.
-Interface 0 maps to `/dev/ttyGS0` and carries the login shell, interactive
-console, `--exec`, `--upload` and `--pull`. Interface 1 maps to `/dev/ttyGS1`
-and carries host keyboard events for `fplinux-input`.
+Current FPLinux console targets expose two non-ACM serial interfaces under USB
+ID `0525:a4a6`. Interface 0 maps to `/dev/ttyGS0` and carries the login shell,
+interactive console, `--exec`, `--upload` and `--pull`. Interface 1 maps to
+`/dev/ttyGS1` and carries host keyboard events for `fplinux-input`.
 
 `fplinux-usb-console` selects interface 0 automatically for its shell and
 transfer modes. `--keyboard` selects interface 1 unless `--interface` overrides
@@ -33,11 +33,17 @@ only what falls between them is passed on.
   --upload ./module.ko /tmp/module.ko
 ```
 
-The destination must be one direct `/tmp/FILE` path. The file is installed only
-after the phone has computed its SHA-256 and found it equal to the one the host
-computed before sending, and the install is a rename over a temporary file, so
-a failed transfer leaves nothing behind. The ceiling is 8 MiB, which is a
-memory-safety limit rather than a protocol one.
+The destination is a safe absolute file path. Each path component may contain
+letters, digits, `.`, `_` and `-`; empty components, `.` and `..` components,
+a trailing slash and paths longer than 200 characters are rejected. The target
+directory must already exist. Before accepting data, the phone checks that its
+filesystem reports enough free space for the file plus 64 KiB.
+
+The phone creates the temporary file in the destination directory, computes its
+SHA-256 after receiving the complete payload and compares it with the digest the
+host computed before sending. A matching file is installed with an atomic rename.
+There is no fixed host-side size ceiling; the destination filesystem provides the
+capacity limit. A failed transfer removes its temporary file.
 
 A loadable driver must be built against the exact running kernel. The runtime
 has module loading and unloading enabled but no dependency database, so load and
@@ -66,9 +72,10 @@ writes to `LOCAL.part` and renames only when the assembled file matches the
 digest the phone reported at the start. A failed or interrupted pull leaves no
 partial file.
 
-The source must be an absolute path made of letters, digits, `.`, `_` and `-`.
-That restriction is what makes single quotes around it sufficient in the shell
-line, and it is enforced on the host before the phone is asked anything.
+The source must follow the same safe absolute-path policy as an upload
+destination. That restriction makes single quotes around it sufficient in the
+shell line, and it is enforced on the host before the phone is asked anything.
+There is no fixed host-side pull limit.
 
 ## Measured rates
 
@@ -104,9 +111,11 @@ otherwise eat control bytes. This costs a third of the bandwidth and buys
 transfers that need no device-side component and work against any image already
 running.
 
-The phone has 62 MiB of RAM with `/tmp` on tmpfs, so the 8 MiB ceiling is not
-arbitrary. There is no `/lib/modules`, which is why a driver under test is sent
-over this path on every rebuild.
+On the TA-1618, Linux has about 62 MiB of RAM and `/tmp` is backed by tmpfs. An
+upload to `/tmp` therefore consumes RAM, while an upload to an already mounted
+filesystem consumes that filesystem's free space. There is no `/lib/modules`,
+so a loadable driver under test is transferred to `/tmp` for the active RAM
+session.
 
 ## What is deliberately not here
 
@@ -120,34 +129,35 @@ over this path on every rebuild.
   and continuing from that offset.
 - **A file-transfer helper.** A framed binary protocol would separate command
   output from the kernel log structurally instead of by marker scanning and
-  would lift the ceiling to what the endpoint can carry. The installed
-  `fplinux-input` helper handles keyboard events only.
+  remove the base64 overhead. The installed `fplinux-input` helper handles
+  keyboard events only.
 - **USB networking.** The second serial interface is reserved for input events.
   The kernel carries no network stack or USB ethernet function.
 
-## The microSD card
+## TA-1618 microSD card
 
-For volumes this channel is wrong for, the card is the way past it: the host
-reads at 19.6 MiB/s and writes at 8.73 MiB/s on the card those figures were
-measured with, an order of magnitude beyond what the console carries.
+The INOI targets do not expose microSD storage. On the TA-1618, large files are
+better moved through the removable card when possible: the tested card reads at
+19.6 MiB/s and writes at 8.73 MiB/s on the host, an order of magnitude beyond
+what the console carries.
 
-A file reaches the card through the console rather than around it. Sending
-writes into `/tmp`, the shell moves it onto the mount point, and reading takes
-any absolute path, so the whole way there and back is:
+A file reaches an already mounted card directly through the console. The upload
+temporary and final file stay on the same filesystem:
 
 ```sh
-./fplinux console nokia-ta1618 --upload ./file.bin /tmp/file.bin
 ./fplinux console nokia-ta1618 \
-  --exec 'mv /tmp/file.bin /mnt/card/file.bin && sync'
-./fplinux console nokia-ta1618 --pull /mnt/card/file.bin ./file.bin
+  --exec 'mkdir -p /mnt/card/fplinux/data'
+./fplinux console nokia-ta1618 \
+  --upload ./file.bin /mnt/card/fplinux/data/file.bin
+./fplinux console nokia-ta1618 \
+  --exec 'sync'
+./fplinux console nokia-ta1618 \
+  --pull /mnt/card/fplinux/data/file.bin ./file.bin
 ```
 
-Four mebibytes survive that round trip byte for byte, including an unmount and
-a remount in the middle, and reading off the card runs at the same rate as
-reading out of RAM. The card is not the limit in this path; the console is.
+The card is not the throughput limit in this path; the text console is.
 
-Carrying the card between machines is the only way past that, and it is a
-manual step. The card host reaches its PMIC rails through the shared UMS9117 ADI
-provider. The provider owns the controller and analog-slave mappings and
-serializes MMC, framebuffer, keypad and power-off transactions under the ADI
-hardware user lock.
+Carrying the card between machines remains the fastest manual path. The card host
+reaches its PMIC rails through the shared UMS9117 ADI provider. The provider owns
+the controller and analog-slave mappings and serializes MMC, framebuffer, keypad
+and power-off transactions under the ADI hardware user lock.
