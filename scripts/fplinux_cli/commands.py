@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -29,7 +30,7 @@ from .config import (
     verified_runtime_digest,
 )
 from .container import image_ready, require_podman, setup
-from .output import RunReporter
+from .output import RunReporter, silence_broken_pipe
 from .workspace import (
     WorkspaceSnapshot,
     stage_workspace_snapshot,
@@ -307,9 +308,12 @@ def _print_build_result(
     if image.is_symlink() or not image.is_file():
         fail(f"current bundle image is missing or invalid: {image}")
     suffix = " (cached)" if cached else ""
-    print(f"build {target}: OK{suffix}", flush=True)
-    print(f"output: {bundle.path.relative_to(ROOT)}", flush=True)
-    print(f"ramboot.bin SHA256: {sha256_file(image)}", flush=True)
+    try:
+        print(f"build {target}: OK{suffix}", flush=True)
+        print(f"output: {bundle.path.relative_to(ROOT)}", flush=True)
+        print(f"ramboot.bin SHA256: {sha256_file(image)}", flush=True)
+    except BrokenPipeError:
+        silence_broken_pipe(sys.stdout)
 
 
 def build(target: str, jobs: int, *, verbose: bool = False) -> None:
