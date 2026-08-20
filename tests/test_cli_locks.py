@@ -111,6 +111,21 @@ class CliCacheLockTests(unittest.TestCase):
             cli.main()
         self.assertEqual(events, ["lock", "unlock"])
 
+    def test_build_forwards_offline_to_the_dispatcher(self) -> None:
+        """The public build switch reaches build without changing its cache lock."""
+        events, build = self._run(["build", "target", "--offline"], "build")
+
+        self.assertEqual(
+            events,
+            [
+                ("lock", self.root / ".cache", True, "build", "target"),
+                "command",
+                "unlock",
+            ],
+        )
+        self.assertTrue(build.call_args.kwargs["offline"])
+        self.assertFalse(build.call_args.kwargs["verbose"])
+
     def test_check_list_and_dry_prune_do_not_touch_cache(self) -> None:
         """The two no-work paths neither lock nor create a cache directory."""
         cases = (

@@ -89,7 +89,13 @@ def _command_action(
     elif args.command == "_commit-msg":
         action = partial(check_commit_message, args.message_file)
     elif args.command == "build":
-        action = partial(build, args.target, args.jobs, verbose=args.verbose)
+        action = partial(
+            build,
+            args.target,
+            args.jobs,
+            verbose=args.verbose,
+            offline=args.offline,
+        )
     elif args.command == "package":
         action = partial(package_target, args.target, candidate=args.candidate)
     elif args.command == "prune":
@@ -146,6 +152,11 @@ def main() -> None:
         "--verbose",
         action="store_true",
         help="stream complete stage output while retaining logs",
+    )
+    build_parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="on a build miss, run the prepared build image without network access",
     )
     package_parser = commands.add_parser(
         "package", help="package an existing build for Linux x86-64"

@@ -86,7 +86,7 @@ class CommandLifecycleTests(unittest.TestCase):
                 side_effect=AssertionError("cache hit must not stage a workspace"),
             ),
         ):
-            commands.build("phone", 8, verbose=True)
+            commands.build("phone", 8, verbose=True, offline=True)
 
         print_result.assert_called_once_with(
             "phone",
@@ -201,6 +201,53 @@ class CommandLifecycleTests(unittest.TestCase):
         container_stage.run.assert_called_once()
         self.assertEqual(container_stage.run.call_args.kwargs, {})
         reporter.finish.assert_not_called()
+
+    def test_offline_build_miss_requires_the_current_image_without_setup(self) -> None:
+        """Do not silently rebuild the OCI environment when offline was requested."""
+        reporter = mock.Mock()
+        lock = {
+            "oci": {
+                "image": "localhost/fplinux:locked",
+                "platform": "linux/amd64",
+            }
+        }
+        with (
+            mock.patch.object(commands, "ROOT", self.root),
+            mock.patch.object(commands, "load_target", return_value={"profile": "default"}),
+            mock.patch.object(
+                commands,
+                "load_release",
+                return_value={"image": "image/ramboot.bin"},
+            ),
+            mock.patch.object(
+                commands,
+                "target_workspace_snapshot",
+                return_value=self.snapshot,
+            ),
+            mock.patch.object(commands, "load_container_lock", return_value=lock),
+            mock.patch.object(
+                commands,
+                "container_image_recipe_digest",
+                return_value="e" * 64,
+            ),
+            mock.patch.object(commands, "_matching_target_bundle", return_value=None),
+            mock.patch("fplinux_cli.commands.RunReporter.create", return_value=reporter),
+            mock.patch.object(commands, "require_podman", return_value="podman"),
+            mock.patch.object(commands, "image_ready", return_value=False),
+            mock.patch.object(commands, "setup") as setup,
+            mock.patch.object(
+                commands,
+                "stage_workspace_snapshot",
+                side_effect=AssertionError("offline image failure must not stage a workspace"),
+            ),
+            self.assertRaisesRegex(
+                SystemExit,
+                "offline build requires the current pinned OCI image",
+            ),
+        ):
+            commands.build("phone", 4, offline=True)
+
+        setup.assert_not_called()
 
     def test_run_executes_a_runner_from_the_resolved_generation(self) -> None:
         """Resolve current once and preserve that immutable generation path."""
@@ -340,6 +387,7 @@ class CommandLifecycleTests(unittest.TestCase):
                 jobs=6,
                 platform="linux/amd64",
                 image="localhost/fplinux-build:locked",
+                offline=False,
                 snapshot=self.snapshot,
                 **roots,
                 log_environment={"FPLINUX_LOG_ROOT": "/logs"},
@@ -380,6 +428,35 @@ class CommandLifecycleTests(unittest.TestCase):
             command[:2],
             ["/usr/bin/podman", "run"],
         )
+        self.assertNotIn("--network=none", command)
+
+    def test_offline_build_argv_disables_container_network(self) -> None:
+        """Offline mode is an execution policy, not a separate build identity."""
+        roots = {
+            "workspace": self.root / "workspace",
+            "downloads": self.root / "cache/downloads",
+            "apk_signing": self.root / "cache/apk-signing",
+            "apks": self.root / "cache/apks",
+            "rootfs": self.root / "cache/rootfs",
+            "linux": self.root / "cache/linux",
+            "output": self.root / "cache/out",
+            "logs": self.root / "cache/logs/build/run",
+        }
+        command = commands._build_container_command(  # noqa: SLF001
+            "/usr/bin/podman",
+            target="phone",
+            jobs=6,
+            platform="linux/amd64",
+            image="localhost/fplinux-build:locked",
+            offline=True,
+            snapshot=self.snapshot,
+            **roots,
+            log_environment={"FPLINUX_LOG_ROOT": "/logs"},
+            image_recipe="e" * 64,
+        )
+
+        self.assertIn("--network=none", command)
+        self.assertLess(command.index("--network=none"), command.index("--platform"))
 
 
 class ContainerRecipeTests(unittest.TestCase):
