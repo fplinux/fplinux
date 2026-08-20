@@ -113,6 +113,13 @@ data fills the filesystem.
 ./fplinux build nokia-ta1618
 ```
 
+After one online build has prepared the pinned OCI image and downloaded its
+inputs, use `./fplinux build nokia-ta1618 --offline` to run a build miss with
+the target container network disabled. A selected bundle remains an immediate
+cache hit and does not need Podman. An offline miss never runs setup: if the
+current pinned image is missing or stale, it tells you to run `./fplinux setup`
+online first.
+
 Use `--jobs` to control parallel compilation:
 
 ```sh

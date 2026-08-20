@@ -53,6 +53,12 @@ Build the current phone target:
 ./fplinux build nokia-ta1618
 ```
 
+After an online build has prepared the pinned image and downloaded its inputs,
+`./fplinux build nokia-ta1618 --offline` runs a build miss with the container
+network disabled. A selected bundle still returns immediately without starting
+Podman; an offline miss with a missing or stale image tells you to run setup
+online first.
+
 `check` is not a build prerequisite. Run it when changing or reviewing source:
 
 ```sh

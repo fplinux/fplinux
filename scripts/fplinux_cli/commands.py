@@ -261,6 +261,7 @@ def _build_container_command(  # noqa: PLR0913
     jobs: int,
     platform: str,
     image: str,
+    offline: bool,
     snapshot: WorkspaceSnapshot,
     workspace: Path,
     downloads: Path,
@@ -283,6 +284,7 @@ def _build_container_command(  # noqa: PLR0913
         podman,
         "run",
         "--rm",
+        *(["--network=none"] if offline else []),
         "--platform",
         platform,
         "--userns=keep-id:uid=0,gid=0",
@@ -344,7 +346,7 @@ def _print_build_result(
         silence_broken_pipe(sys.stdout)
 
 
-def build(target: str, jobs: int, *, verbose: bool = False) -> None:
+def build(target: str, jobs: int, *, verbose: bool = False, offline: bool = False) -> None:
     if jobs < 1:
         fail("--jobs must be positive")
     target_config = load_target(target)
@@ -371,6 +373,11 @@ def build(target: str, jobs: int, *, verbose: bool = False) -> None:
     podman = require_podman()
     lock = container_lock["oci"]
     if not image_ready(podman, lock["image"], image_recipe=image_recipe):
+        if offline:
+            fail(
+                "offline build requires the current pinned OCI image; "
+                "run ./fplinux setup online first"
+            )
         setup(reporter=reporter, lock=container_lock, image_recipe=image_recipe)
     apk_signing = _ensure_build_directory(cache / "apk-signing")
     downloads = _ensure_build_directory(cache / "downloads")
@@ -390,6 +397,7 @@ def build(target: str, jobs: int, *, verbose: bool = False) -> None:
                 jobs=jobs,
                 platform=lock["platform"],
                 image=lock["image"],
+                offline=offline,
                 snapshot=snapshot,
                 workspace=workspace,
                 downloads=downloads,
