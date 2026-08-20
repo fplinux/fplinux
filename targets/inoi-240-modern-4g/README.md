@@ -3,7 +3,7 @@
 This is an experimental, volatile-RAM-only target for the INOI 240 Modern 4G
 with the Unisoc UMS9117/T117 SoC (marketed as T107 for this phone).
 
-## Current scope
+## Scope
 
 The target builds a minimal Linux initramfs with a framebuffer console on the
 NV3023 panel, the matrix keypad as a Linux input device and two non-ACM USB

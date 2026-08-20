@@ -28,7 +28,7 @@ for example:
 
 Forward a host keyboard on interface 1 with:
   sudo ./host/fplinux-usb-console --interface 1 --keyboard /dev/input/eventN
-Interface 0 remains available for the shell and file transfers while the keyboard
+Interface 0 is available for the shell and file transfers while the keyboard
 forwarder owns interface 1.
 
 Host requirements:
@@ -49,5 +49,5 @@ Start:
   6. Hold * and connect USB while keeping * pressed when prompted.
 
 Ctrl-] detaches the host console without rebooting the phone. Reconnect while
-Linux is still running with ./host/fplinux-usb-console --interface 0. To return
+Linux is running with ./host/fplinux-usb-console --interface 0. To return
 to the stock firmware, disconnect USB and remove and reinsert the battery.
