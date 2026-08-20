@@ -27,14 +27,14 @@ The runner verifies the runtime manifest, bundled hashes and Python version
 before asking for the phone. It then checks BootROM USB access before attempting
 the fixed FDL1, RAM-payload and Linux USB-console sequence. Ctrl-] detaches the host
 console; it does not reboot or power off the phone. To reconnect while Linux is
-still running, use ./host/fplinux-usb-console --interface 0 instead of the full
+running, use ./host/fplinux-usb-console --interface 0 instead of the full
 runner.
 
 OpenRC supervises the phone-side fplinux-input receiver automatically.
 Forward a host keyboard on interface 1 with:
   sudo ./host/fplinux-usb-console --interface 1 --keyboard /dev/input/eventN
 The client uses EVIOCGRAB, so the selected keyboard stops reaching the host
-desktop while the process is running. Interface 0 remains available for a shell
+desktop while the process is running. Interface 0 is available for a shell
 or transfer client. Stop the forwarder with SIGINT or SIGTERM from another input
 device or session; Ctrl-C from the grabbed keyboard cannot stop the host process.
 
@@ -51,7 +51,7 @@ rotated into that landscape view.
 The launcher uses a 32 MiB heap, null audio, and volatile configuration and
 saves. It links the user-supplied PAK into its volatile runtime tree without
 copying it. When the launcher mounts the card itself, it uses read-only mount
-flags; an existing /mnt/card mount keeps its current flags. It restores the text
+flags; an existing /mnt/card mount keeps its flags. It restores the text
 console and framebuffer when the engine exits normally or receives INT, TERM,
 HUP or QUIT. Do not use SIGKILL as a normal way to stop the game.
 
@@ -59,20 +59,19 @@ The physical keypad backlight is available through the binary Linux LED class
 interface. Turn it on or off from the phone shell with:
   echo 1 > /sys/class/leds/:kbd_backlight/brightness
   echo 0 > /sys/class/leds/:kbd_backlight/brightness
-The maximum brightness value is 1. Each new press on the physical TA-1618 keypad
+The maximum brightness value is 1. Each press on the physical TA-1618 keypad
 turns the backlight on and restarts its cutoff; releases and autorepeat do not
 extend it. The in-kernel cutoff turns the output off after about five seconds
 even if userspace does not write 0.
 
 To end the RAM session through the qualified battery-only power-off path,
 detach with Ctrl-], disconnect USB and hold the red handset key continuously
-for five seconds. Releasing it sooner cancels the request; a short press remains
-an ordinary input event. The built-in handler verifies the exact SC2720 identity
+for five seconds. Releasing it sooner cancels the request; a short press is an
+ordinary input event. The built-in handler verifies the exact SC2720 identity
 and inactive charger status, then syncs the filesystems before starting shutdown.
-If the phone remains powered after shutdown has started, remove and reinsert the
-battery before booting again. A successful shutdown discards the volatile
-FPLinux session; the next manual power-on uses the unchanged vendor firmware.
-Linux reboot is not qualified.
+If the phone is powered after shutdown starts, remove and reinsert the battery
+before booting again. A successful shutdown discards the volatile FPLinux
+session. Manual power-on uses the vendor firmware. Linux reboot is not qualified.
 
 BUILD-MANIFEST.json records the content-addressed workspace and container
 receipts together with bundled-file hashes. Exact pinned inputs are defined by

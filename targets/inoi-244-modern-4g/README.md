@@ -3,7 +3,7 @@
 This is an experimental, volatile-RAM-only target for the INOI 244 Modern 4G
 (`F2444G`) with the Unisoc UMS9117/T117 SoC.
 
-## Current scope
+## Scope
 
 The target builds a minimal Linux initramfs with a framebuffer console on the
 NV3030 panel, the matrix keypad as a Linux input device and two non-ACM USB

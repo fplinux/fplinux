@@ -13,9 +13,9 @@
 | Boot method       | Volatile RAM through the Unisoc BootROM and FDL1           |
 | Linux version     | 6.18.42                                                    |
 
-## Current status
+## Status
 
-The current source builds a volatile-RAM Linux image with a `240×320` portrait
+The source builds a volatile-RAM Linux image with a `240×320` portrait
 framebuffer, physical-keypad shell and two Linux USB serial interfaces. Interface
 0 carries the USB shell and file-transfer modes. Interface 1 carries host
 keyboard events into a persistent uinput device. The local terminal accepts up
@@ -28,12 +28,12 @@ hardware. Display updates are damage-driven and complete through the LCDC
 interrupt: a settled framebuffer
 causes no transfers, while active full-screen drawing reaches 46.7 frames per
 second without visible tearing. Measured 4 MiB transfer rates with a static display
-are 753 KiB/s for upload and 1.40 MiB/s for pull. The current portrait terminal
-closure has not completed its exact phone-side release gate.
+are 753 KiB/s for upload and 1.40 MiB/s for pull. The portrait terminal runtime
+closure is not release-qualified.
 
-`releases.lock.toml` contains no qualified `nokia-ta1618` runtime closure, so no
-prebuilt archive is currently available. A successful source build or a local
-candidate package does not change that status.
+`releases.lock.toml` contains no qualified `nokia-ta1618` runtime closure, and the
+repository does not provide a prebuilt archive. A source build or candidate
+package is not a qualified release.
 
 ## TyrQuake
 
@@ -100,7 +100,7 @@ The removable microSD slot is driven by a board-specific host on the UMS9117
 SDIO0 instance. It is deliberately not an SDHCI driver: the register at offset
 0x28 is a 32-bit custom host control word and there is no SDHCI power control
 byte, so the driver programs the gate, reset, clock selector, pin and analog
-rail recipe that was proven on this board.
+board-qualified rail recipe.
 
 ### Mounting a card
 
@@ -126,7 +126,7 @@ mount -t vfat -o ro,nodev,nosuid,noexec,utf8=1 "$card" /mnt/card
 ```
 
 The Quake launcher uses the read-only form when `/mnt/card` is not mounted. It
-uses an existing mount with its current flags. Before ending the RAM session or
+uses an existing mount with its existing flags. Before ending the RAM session or
 removing the card, flush pending writes and unmount it:
 
 ```sh
@@ -163,18 +163,17 @@ What is deliberately absent:
 - **Hot-swap.** The board does have a card-detect pin, but this driver never
   reads it. The card must be inserted before Linux starts, and removing it
   while mounted is not supported.
-- **Faster signalling.** The controller reports that it can do the modes that
-  need 1.8 V signalling, which would be several times faster again. Reaching
-  them means switching the signalling rail through the analog companion, and
-  this driver never writes to it.
+- **1.8 V signalling.** The controller advertises modes that use 1.8 V
+  signalling. The driver does not switch the signalling rail through the analog
+  companion and does not use those modes.
 - **Erase and discard.** Erase, discard, lock and write-protect commands are
-  still refused before they can reach the controller.
+  refused before they can reach the controller.
 
 The phone's internal storage is SPI NAND on a separate controller with its own
 gate, reset and interrupt. It is not described in the device tree, no NAND or
-MTD support is built, and the build refuses any kernel configuration or device
-tree that would reach it. The host driver only ever writes the set and clear
-aliases of the peripheral gate and reset banks, so it cannot disturb a
+MTD support is built, and the build rejects kernel configurations or device
+trees that expose it. The host driver writes only the set and clear aliases of
+the peripheral gate and reset banks, so it cannot disturb a
 neighbouring controller even transiently.
 
 The controller raises its own interrupt on the line the device tree names, and
@@ -185,9 +184,9 @@ here too.
 ## Hardware support
 
 **Supported** means the feature has been exercised on physical TA-1618 hardware
-and its implementation is present in the current target. It does not mean the
-current aggregate runtime closure is qualified as a release. **Partial** means
-that the stated limitation or current qualification gap still applies.
+and its implementation is present in the target. It does not mean the aggregate
+runtime closure is qualified as a release. **Partial** means that the stated
+limitation or qualification gap applies.
 
 | Area                              | Status        | Notes                                                              |
 | --------------------------------- | ------------- | ------------------------------------------------------------------ |
@@ -198,7 +197,7 @@ that the stated limitation or current qualification gap still applies.
 | System timers                     | Supported     | UMS9117 system counter and Pike2 timer                             |
 | Display                           | Supported     | Damage-driven RGB565; up to 46.7 frames/s without visible tearing  |
 | Physical keypad                   | Supported     | Matrix plus active-low SC2720 EIC1 power and EIC9 physical 8       |
-| Keypad backlight                  | Supported     | Any new key press starts or extends the five-second illumination   |
+| Keypad backlight                  | Supported     | Any key press starts or extends the five-second illumination       |
 | USB device mode                   | Supported     | Two `g_serial` ports at `0525:a4a6`: shell/transfer and input      |
 | Host keyboard bridge              | Supported     | Host evdev to `/dev/ttyGS1` to uinput; `EVIOCGRAB` on the host     |
 | USB host mode                     | Not supported | The phone target enables peripheral mode only                      |
@@ -275,10 +274,10 @@ echo 1 > /sys/class/leds/:kbd_backlight/brightness
 echo 0 > /sys/class/leds/:kbd_backlight/brightness
 ```
 
-`max_brightness` is `1`. Each new press from the exact `TA-1618 keypad` input
+`max_brightness` is `1`. Each press from the exact `TA-1618 keypad` input
 device turns the backlight on and restarts its cutoff; key releases and autorepeat
 events do not extend it. Writing `1` manually selects the board-qualified SC2720
-current code `1` and starts the same in-kernel cutoff, which returns the output to
+drive-current code `1` and starts the same in-kernel cutoff, which returns the output to
 `0` after about five seconds. Writing `0` turns it off immediately. The driver
 restores only its owned fields in `KPLED_CTRL0`; it does not write `KPLED_CTRL1`.
 
@@ -295,13 +294,13 @@ Framebuffer writes and drawing operations used by fbcon report damage directly.
 An application that writes through `mmap()` must publish each completed batch
 itself: stop changing the submitted bytes, execute an architecture-appropriate
 full memory barrier, then issue `FBIOPAN_DISPLAY`. The ioctl is required even
-when `yoffset` remains unchanged. A direct mapped write without that notification
+when `yoffset` is unchanged. A direct mapped write without that notification
 is intentionally silent and does not wake the display pipeline.
 
 `FBIOPAN_DISPLAY` reports selection and damage; it is not a completion fence.
 Updates may be coalesced, and the driver does not promise that every intermediate
 image reaches the panel. Applications that require stable animation frames must
-keep a submitted buffer unchanged while it can still be snapshotted and use two
+keep a submitted buffer unchanged while it can be snapshotted and use two
 fully populated pages. The second page starts with unspecified contents.
 
 ## Build from source
@@ -315,7 +314,7 @@ From the repository root:
 
 The target is auto-discovered from its data-only `fplinux.target/v1` manifest.
 The root command combines it with `platforms/ums9117/platform.toml` and invokes
-the shared stages 1–4 builder. The current runnable bundle is selected through:
+the shared stages 1–4 builder. The runnable bundle is selected through:
 
 ```text
 .cache/out/nokia-ta1618/console.current.json
@@ -390,30 +389,30 @@ not start the full runner merely to reconnect.
 
 To end the RAM session through the qualified SC2720 path, detach with `Ctrl-]`,
 disconnect USB and hold the red handset key continuously for five seconds.
-Releasing it before the deadline cancels the request; a short press remains an
+Releasing it before the deadline cancels the request; a short press is an
 ordinary `KEY_POWER` event.
 
 The target handler permits shutdown only after the exact PMIC identity and
 charger-status preflight pass, then syncs the filesystems. The final sys-off
-handler repeats both guards before its single final PMIC write. If shutdown has
-started but the phone remains powered, remove and reinsert the battery before booting
-again. A successful power-off discards the volatile FPLinux session, and the
-next manual power-on uses the unchanged vendor firmware. Linux reboot remains
-unsupported. See [Console lifecycle](../../docs/RELEASES.md#console-lifecycle)
+handler repeats both guards before its single final PMIC write. If the phone is
+powered after shutdown starts, remove and reinsert the battery before booting
+again. A successful power-off discards the volatile FPLinux session. Manual
+power-on uses the vendor firmware. Linux reboot is unsupported. See [Console
+lifecycle](../../docs/RELEASES.md#console-lifecycle)
 for the complete failure boundary.
 
 ## Release archive
 
-No prebuilt archive is currently available. Maintainers can create a local
-hardware-qualification candidate after a successful build:
+The repository does not provide a prebuilt archive. A successful build can be
+packaged as a local hardware-qualification candidate:
 
 ```sh
 ./fplinux package nokia-ta1618 --candidate
 ```
 
 The Linux x86-64 candidate appears under `.cache/out/candidates/`. The package
-command without `--candidate` is reserved for a runtime closure whose exact
-SHA-256 has completed the phone gate and is recorded in `releases.lock.toml`.
+command without `--candidate` accepts only a runtime closure whose exact SHA-256
+is recorded in `releases.lock.toml` as qualified by the phone gate.
 The generic [release contract](../../docs/RELEASES.md) defines package contents,
 host requirements and release rules.
 
@@ -458,8 +457,8 @@ tools are static executables.
   see [`loader/PROVENANCE.md`](loader/PROVENANCE.md).
 - Runtime state is volatile. Holding the red handset key for five seconds
   requests the qualified battery-only power-off path; releasing it sooner
-  cancels the request. The next manual power-on uses the unchanged vendor
-  firmware. Linux reboot is not qualified.
+  cancels the request. Manual power-on uses the vendor firmware. Linux reboot is
+  not qualified.
 
 ## Source layout
 
