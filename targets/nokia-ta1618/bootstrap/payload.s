@@ -1,7 +1,7 @@
 	@ SPDX-License-Identifier: GPL-2.0-only
 	.syntax unified
 
-	.section .rodata.ta1618_payload, "a", %progbits
+	.section .fplinux_payload, "a", %progbits
 	.balign 64
 	.global linux_zimage_start
 	.global linux_zimage_end

@@ -19,6 +19,8 @@ SECTIONS {
 		*(.rodata .rodata.* .gnu.linkonce.r.*)
 		*(.data .data.* .gnu.linkonce.d.*)
 		. = ALIGN(64);
+		*(.fplinux_payload)
+		. = ALIGN(64);
 		__image_end = .;
 	}
 	.bss : {
