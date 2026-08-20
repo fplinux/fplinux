@@ -4,8 +4,8 @@ FPLinux ports Linux to feature phones. The project contains complete source port
 reproducible build environments and phone-specific RAM loaders. Shared SoC
 support is separate from each phone's board support.
 
-FPLinux boots alongside the original phone software: the current boot paths
-load into volatile RAM and do not replace the vendor firmware.
+FPLinux boots alongside the original phone software: its boot paths load into
+volatile RAM and do not replace the vendor firmware.
 
 ## Photos
 
@@ -46,7 +46,7 @@ and [rootless-mode requirements](https://docs.podman.io/en/latest/markdown/podma
 for your distribution. `./fplinux doctor` reports whether Podman is installed
 and running rootless.
 
-Build the current phone target:
+Build a phone target:
 
 ```sh
 ./fplinux doctor
@@ -91,7 +91,7 @@ stays under `.cache/`, and analysis runs without network access after its pinned
 inputs have been downloaded.
 
 The complete build stays under `.cache/`; it does not write generated files
-into the source tree. The current runnable bundle is selected through:
+into the source tree. The runnable bundle is selected through:
 
 ```text
 .cache/out/nokia-ta1618/console.current.json
@@ -132,8 +132,7 @@ erase, partition or NV operation.
 
 In the attached console, `Ctrl-]` detaches the host client without stopping the
 phone shell, rebooting Linux or powering the phone off. `Ctrl-C` is sent to the
-phone shell. After detaching, verify that the phone runs the image produced by
-the current checkout:
+phone shell. After detaching, verify that the phone runs the image produced by the checkout:
 
 ```sh
 ./fplinux verify nokia-ta1618
@@ -158,11 +157,11 @@ until the client exits:
 sudo ./fplinux console nokia-ta1618 --keyboard /dev/input/eventN
 ```
 
-Interface 0 remains available while the keyboard forwarder owns interface 1.
+Interface 0 is available while the keyboard forwarder owns interface 1.
 The client also runs one command on the phone, reports its exit status, sends a
 file to it and takes a file off it without opening a terminal. See [Moving
 files between the host and the phone](docs/TRANSFER.md) for the modes, their
-checks and their current measured rates.
+checks and their measured rates.
 
 The TA-1618 has a guarded battery-only power-off path. Detach the console with
 `Ctrl-]`, disconnect USB and hold the red handset key for five seconds. The
@@ -170,23 +169,23 @@ keypad reports the active-low SC2720 EIC1 line as `KEY_POWER`; the built-in
 power-off handler checks the exact PMIC identity, refuses shutdown while charger
 input is active and syncs the filesystems before entering system shutdown.
 
-A successful shutdown discards the RAM-loaded payload, and the next manual
-power-on follows the unchanged vendor boot path. Short power-key presses remain
-ordinary input events. Linux reboot remains unsupported. See [Console
+A successful shutdown discards the RAM-loaded payload. Manual power-on uses the
+vendor boot path. Short power-key presses are ordinary input events. Linux reboot
+is unsupported. See [Console
 lifecycle](docs/RELEASES.md#console-lifecycle) for the complete procedure and
 failure behavior.
 
 ## Release archives
 
-No prebuilt archive is currently available. A successful local build can be
-packaged as a clearly named candidate:
+The repository does not provide a prebuilt archive. A successful local build can
+be packaged as a clearly named candidate:
 
 ```sh
 ./fplinux package nokia-ta1618 --candidate
 ```
 
 The ZIP is written under `.cache/out/candidates/`. See
-[Release archives](docs/RELEASES.md) for the package contents, current Linux host
+[Release archives](docs/RELEASES.md) for the package contents, Linux host
 requirements and the phone-validation boundary. Windows archives are not
 available.
 
@@ -221,24 +220,21 @@ Platform and phone indexes:
 
 Porting templates live under [`docs/porting/`](docs/porting/README.md).
 
-## How this port was derived
+## Hardware provenance
 
-FPLinux is an independent reverse-engineering project. The hardware behaviour it
-depends on was derived from the device itself: firmware dumps, register probing
-and instrumented boot runs on real hardware, together with the published source
-of the [fpdoom](https://github.com/ilyakurdyukov/fpdoom) bare-metal port for the
-same SoC family.
+FPLinux is an independent reverse-engineering project. Hardware behavior is
+recorded from firmware dumps, register probing and instrumented boot runs on real
+hardware, together with the published source of the
+[fpdoom](https://github.com/ilyakurdyukov/fpdoom) bare-metal port for the same
+SoC family.
 
-This repository contains no vendor source code, no firmware binary and no
-manufacturer document. It carries no binary artifacts at all; the source quality
-gate rejects them. The vendor download-mode loader and the board maps the build
-needs are fetched at build time from their upstream public releases and are
-never redistributed here.
+This repository contains no vendor source code, firmware binary or manufacturer
+document. The source quality gate rejects binary artifacts. The vendor
+download-mode loader and board maps required by the build are fetched from their
+upstream public releases and are not redistributed in the Git tree.
 
-Recorded facts are the observed ones. Where behaviour could not be confirmed on
-hardware, the documentation says so instead of guessing, and the affected
-feature stays marked as unqualified. The per-target documents carry those
-status tables.
+Documentation states only observed or validated behavior. Unconfirmed hardware
+behavior is marked unqualified in the per-target status tables.
 
 ## License
 

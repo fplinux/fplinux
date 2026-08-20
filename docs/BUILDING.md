@@ -1,7 +1,7 @@
 # Building FPLinux
 
 FPLinux builds the complete phone image from source and pinned upstream inputs.
-Generated files remain outside the source tree.
+Generated files are kept outside the source tree.
 
 ## Requirements
 
@@ -18,7 +18,7 @@ Check the build host:
 ```
 
 `doctor` checks the host architecture, Podman rootless mode and whether the one
-pinned OCI build image matches the current container recipe. It does not check
+pinned OCI build image matches the repository container recipe. It does not check
 phone runtime libraries or USB access.
 
 The source-quality gate is optional for ordinary build and run use:
@@ -52,8 +52,8 @@ one of `bootstrap`, `build`, `cli`, `console`, `deps`, `host`,
 the change, such as `feat(nokia-ta1618): ...` for phone-specific hardware
 support, `feat(host): ...` for host-side tooling and `build(quality): ...` for
 the source-quality gate.
-`./fplinux setup` selects the tracked `.githooks/commit-msg` hook for the current
-Git checkout. The hook validates each message in the pinned OCI environment
+`./fplinux setup` selects the tracked `.githooks/commit-msg` hook for the Git
+checkout. The hook validates each message in the pinned OCI environment
 before Git creates the commit. Source archives have no local Git configuration
 and skip hook setup.
 
@@ -70,10 +70,10 @@ tree schema validation through `dtbs_check`, and `sparse`. The sparse phase prep
 and generated headers instead of checking drivers against substitute headers.
 Source snapshots are mounted read-only, while quality and analysis output stays
 outside those snapshots under `.cache/`. Userspace analysis is invocation-local;
-only the fixed Sparse state is retained. After its pinned inputs are
-downloaded, the analysis runs without network access. If the OCI environment is missing or stale, `check`
-rebuilds the same image tag and removes the replaced image ID unless an existing
-container still references it.
+only the fixed Sparse state is retained. With its pinned inputs cached, the
+analysis runs without network access. If the OCI environment is missing or stale,
+`check` rebuilds the same image tag and removes an obsolete image ID when no
+container references it.
 
 `check` prints one status per stage and keeps complete subprocess output below
 `.cache/logs/check/<run-id>/`. Its unified invocation record is
@@ -85,7 +85,7 @@ while retaining the same logs.
 
 Commands coordinate mutable cache state with a project-wide lock. `build`,
 `check` and `setup` take it exclusively; `package`, `run`, `console` and
-`verify` take a shared lock while resolving their current bundle. `prune --apply`
+`verify` take a shared lock while resolving their selected bundle. `prune --apply`
 also takes the exclusive lock. A conflicting invocation waits until the lock is
 available. `check --list` and a prune dry run do not take this lock.
 
@@ -102,9 +102,9 @@ and [rootless-mode requirements](https://docs.podman.io/en/latest/markdown/podma
 for distribution-specific setup. `./fplinux doctor` checks that Podman is
 installed and running rootless.
 
-For disk-space troubleshooting, the current Nokia TA-1618 build occupied about
-6.84 GB on one build host. This observation is not a minimum requirement; use
-the [cache inventory](#cache-inventory) steps if generated
+For disk-space troubleshooting, one Nokia TA-1618 build uses about 6.84 GB on
+the measured build host. This observation is not a minimum requirement; use the
+[cache inventory](#cache-inventory) steps if generated
 data fills the filesystem.
 
 ## Build a phone target
@@ -131,16 +131,16 @@ stored below `.cache/logs/build/<target>/<run-id>/`; the unified invocation
 record is `.cache/logs/build/<target>/<run-id>/run.json`. `--verbose` streams
 them to the terminal as well.
 
-Before preparing a build, the command looks for a current bundle whose recorded
-workspace and OCI image inputs match. On a match it reports a cached result and
+The command first looks for a selected bundle whose recorded workspace and OCI
+image inputs match. On a match it reports a cached result and
 skips Podman and workspace staging. `--jobs` controls scheduling and does not
 change artifact identity. A mismatch proceeds through the normal build stages.
 
 The dispatcher auto-discovers `targets/<target>/target.toml`, validates the
 `fplinux.target/v1` data against the selected `platform.toml` and runs
 `scripts/fplinux_cli/builder.py` inside the one pinned OCI image. Targets do not
-supply executable build hooks. After selecting a target, read its documentation
-for hardware status and phone-specific constraints; for example,
+supply executable build hooks. The target documentation records hardware status
+and phone-specific constraints; for example,
 [Nokia TA-1618](../targets/nokia-ta1618/README.md).
 
 The rootfs selection is the exact union of the fixed common packages
@@ -165,7 +165,8 @@ build stages:
    `arm-none-eabi` compiler from the Alpine build image.
 3. The bootstrap stage projects the platform-declared pinned vendor files,
    combines the zImage and DTB into `ramboot.bin` and checks the generic
-   RAM-only image contract.
+   RAM-only image contract. The large Linux payload is placed after relocatable
+   bootstrap code/data so its size does not consume the relocation-format range.
 4. Typed platform recipes build the host tools, the generic
    `fplinux.assets/v1` lock resolves target assets, and the builder publishes the
    shared runner, fixed platform adapter and deterministic target bundle.
@@ -180,8 +181,9 @@ build stages:
 ├── apk-signing/                              persistent local abuild keypair
 ├── apks/<package>/                          fixed exact local APK cache slot
 ├── rootfs/<recipe>/                          shared Alpine rootfs + receipt
-├── linux/sources/<target>/                   current Linux integration tree
+├── linux/sources/<target>/                   selected Linux integration tree
 ├── logs/check/<run-id>/                      source-quality logs and run.json
+├── logs/setup/<run-id>/                      standalone OCI setup logs and run.json
 ├── logs/build/<target>/<run-id>/             target-build logs and run.json
 ├── quality-workspaces/<recipe>/              source-quality input
 ├── workspaces/<recipe>/                      target build input
@@ -193,15 +195,15 @@ build stages:
     │   ├── bootstrap/              bootstrap projection and objects
     │   ├── host-build/             host-tool source and objects
     │   └── host/                   built host tools
-    ├── bundles/<profile>/<generation>/  runnable bundle generations
-    └── <profile>.current.json            selected current generation
+    ├── bundles/<profile>/<generation>/  selected runnable bundle generation
+    └── <profile>.current.json            selected generation
 ```
 
 The workspace recipe hashes only the selected target closure: the shared
 builder and validators, the selected target and release/asset manifests, target
 sources, the selected platform declaration and sources, and referenced common
 inputs. The workspace and `build-manifest.json` record build inputs and bundle
-file information. `run`, `package` and `verify` use the selected current bundle.
+file information. `run`, `package` and `verify` use the selected bundle.
 `package` and `verify` compare its recorded inputs with the local checkout; if
 they report a missing or stale bundle, rebuild the target.
 After a successful host-side validation, `build` removes superseded generations
@@ -235,7 +237,7 @@ protected rootfs is selected using both source inputs and the public identity
 of `.cache/apk-signing/`; the signing keypair itself is persistent build state
 and is never pruned automatically.
 
-For Nokia TA-1618, `console.current.json` selects the current runnable bundle:
+For Nokia TA-1618, `console.current.json` selects the runnable bundle:
 
 ```text
 .cache/out/nokia-ta1618/console.current.json
@@ -318,16 +320,16 @@ Create a package for physical qualification:
 ./fplinux package nokia-ta1618 --candidate
 ```
 
-Packaging requires an existing build whose recorded inputs match the current
+Packaging requires an existing build whose recorded inputs match the repository
 source and container recipes. It writes a ZIP under `.cache/out/candidates/` and
 uses the data-only `fplinux.release/v2` allowlist. Only its `runtime_files`
 subset enters the hardware-qualified runtime digest. Packaging does not rebuild
 the target.
 
-The source tree has no qualified runtime closure or prebuilt archive. After an
-exact candidate passes the phone gate, maintainers record its printed runtime
-SHA-256 in `releases.lock.toml` and package without `--candidate`. Release
-archives are written under `.cache/out/releases/`. See
+The source tree has no qualified runtime closure or prebuilt archive. A runtime
+closure is eligible for `releases.lock.toml` only when the exact candidate passes
+the phone gate. Packaging without `--candidate` accepts only such a recorded
+closure and writes the archive under `.cache/out/releases/`. See
 [Release archives](RELEASES.md) for the qualification and archive contract.
 
 ## Reproducibility
@@ -347,6 +349,6 @@ Packaging verifies the successful-build manifest, sorts entries, normalizes
 timestamps and includes the allowlisted bundle files, build receipt, target
 and fixed legal documents, checksums and candidate notice when applicable.
 
-A successful build records its selected source and build inputs. A feature is
-marked supported only after the resulting image is run on the corresponding
+A successful build records its selected source and build inputs. **Supported**
+status requires the resulting image to run successfully on the corresponding
 phone variant.

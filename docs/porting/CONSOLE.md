@@ -57,7 +57,7 @@ bytes enter the shell PTY:
 - `1`: punctuation and symbols, followed by digit `1`;
 - `0`: space, then digit `0`.
 
-The first press displays a temporary reverse/blinking candidate in the current
+The first press displays a temporary reverse/blinking candidate in the active
 VCSA cursor cell. Repeated presses of the same digit cycle that cell. Timeout
 commits it; another digit commits it and starts a new candidate. Soft-right
 cancels an active candidate without sending Delete, and otherwise sends DEL.
@@ -86,7 +86,7 @@ and ignored for digits, `*`, `#`, Enter, and left-soft Tab.
 ### History VT
 
 `#` commits an active candidate and switches to the spare Linux VT while the
-primary VT, shell PTY, and byte-exact forwarding remain live. History is a
+primary VT, shell PTY, and byte-exact forwarding stay live. History is a
 bounded, sanitized, line-oriented transcript of shell PTY output managed by
 `fplinux-console`. It starts with output forwarded after the console-managed
 shell begins, not earlier boot `dmesg`, and it is not a reconstruction of
