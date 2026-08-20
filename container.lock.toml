@@ -1,15 +1,7 @@
 schema = "fplinux.container/v1"
 
 [oci]
-image = "localhost/fplinux-build:2026.05.1-r1"
+image = "localhost/fplinux-build:3.24.1-r1"
 platform = "linux/amd64"
-base = "docker.io/library/debian:13-slim@sha256:9bb8a3626890e084ab54e888fdd7c4b6d2f119071cd4c5dc5fecb4d73062aa5f"
-base_created = "2026-07-13T00:00:00Z"
-debian_snapshot = "20260713T000000Z"
-
-[buildroot]
-version = "2026.05.1"
-url = "https://buildroot.org/downloads/buildroot-2026.05.1.tar.xz"
-sha256 = "ae7f706f087b9ae9083a10a587368dfbf53103c28bf81c2d690198dc4090cb58"
-bytes = 6117332
-released = "2026-07-15T21:32:39Z"
+base = "docker.io/library/alpine@sha256:79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f"
+base_created = "2026-06-16T00:01:29Z"

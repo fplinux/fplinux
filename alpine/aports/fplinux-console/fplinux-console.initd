@@ -1,0 +1,18 @@
+#!/sbin/openrc-run
+# SPDX-License-Identifier: GPL-2.0-only
+# shellcheck shell=sh disable=SC2034
+
+description="FPLinux physical keypad console"
+supervisor=supervise-daemon
+command=/usr/bin/fplinux-console
+input_file=/dev/tty1
+output_log=/dev/tty1
+error_log=/dev/tty1
+respawn_delay=1
+respawn_max=0
+retry="TERM/2/KILL/2"
+
+depend() {
+	need devfs
+	after fplinux-input
+}

@@ -1,0 +1,63 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-tyrquake
+pkgver=0.71
+pkgrel=0
+pkgdesc="TyrQuake native fbdev/evdev port for FPLinux"
+url="https://disenchant.net/tyrquake/"
+arch="armv7"
+license="GPL-2.0-or-later AND MIT-0 AND CC0-1.0 AND MIT"
+makedepends_build="clang22 lld22 make patch"
+makedepends_host="musl-dev linux-headers gcc"
+options="!check"
+source="
+	tyrquake-$pkgver.tar.gz::https://disenchant.net/files/engine/tyrquake-$pkgver.tar.gz
+	0001-FPLinux-add-native-runtime-support.patch
+	fplinux-device.h
+	fplinux-quake.c
+	in_fplinux.c
+	vid_fplinux.c
+"
+builddir="$srcdir/tyrquake-$pkgver"
+
+prepare() {
+	default_prepare
+	install -Dm644 "$srcdir/fplinux-device.h" common/fplinux-device.h
+	install -Dm644 "$srcdir/in_fplinux.c" common/in_fplinux.c
+	install -Dm644 "$srcdir/vid_fplinux.c" common/vid_fplinux.c
+}
+
+build() {
+	make -j"${JOBS:-1}" \
+		CC="$CC" \
+		STRIP="$CHOST-strip" \
+		CFLAGS="$CFLAGS -std=gnu99 -Wall -Wno-trigraphs -Wwrite-strings -DFPLINUX_DEFAULT_HEAP_MB=32 -DFPLINUX_NO_STDIN=1" \
+		COMMON_LFLAGS="$LDFLAGS" \
+		TARGET_OS=UNIX \
+		TARGET_UNIX=linux \
+		LOCALBASE= \
+		USE_X86_ASM=N \
+		VID_TARGET=fplinux \
+		IN_TARGET=fplinux \
+		SND_TARGET=null \
+		CD_TARGET=null \
+		QBASEDIR=/tmp/fplinux-quake \
+		TYR_VERSION=v$pkgver \
+		TYR_VERSION_TIME="$SOURCE_DATE_EPOCH" \
+		bin/tyr-quake
+	"$CC" $CPPFLAGS $CFLAGS -std=gnu11 -Wall -Wextra -Werror \
+		"$srcdir/fplinux-quake.c" $LDFLAGS -o bin/fplinux-quake
+}
+
+package() {
+	install -Dm755 bin/tyr-quake "$pkgdir/usr/bin/tyr-quake"
+	install -Dm755 bin/fplinux-quake "$pkgdir/usr/bin/quake"
+}
+
+sha512sums="
+ecceeecb43866c10c0669b4362ce2eda7a790c502764b3d644566e7637ffbde0548676c9dcea07963db0d91d83c248e3497603c0a3a2e1a12a1418a82c07179a  tyrquake-0.71.tar.gz
+e95b2ce15ce983c096484852997b42ee082ee818da68a0541b2fd7cde0dcd41ee51ac0ad5b2b711c930159821e44017710d7fbf9dcf9f36d3102bcffecced771  0001-FPLinux-add-native-runtime-support.patch
+1fa9975f809390aece5d8403413ce419753f048738e114841d67050da7d12731353a239b7a1ce29795a94686f2fb1ee3e9e9de1be961a1e1474c3d14e5bcf3d3  fplinux-device.h
+f1d07a8b88a12d7de6b600ac0608916f55b83b9e0ba744bc6d0c56a27ffe3dd8542af44800f168f9c5037ca1e2f3322bf342f85cd00932103efb2bea099d4248  fplinux-quake.c
+2143fbf7c14f23f371e87e6ed1d87486f91f6e4fb42329f1da17e4e8939776d95835ea1f0b056f350cd5cf994928e266bbf7d731a29606d24ae7d090bd6b36bc  in_fplinux.c
+ca7cec21b0101751e766b53fd238915f9dbd1a7e728b35db464c34594f817f1e0bc5662c270219211ea8babc9fbb764478d4ce8041d0f36ac5fac7da1aee8c14  vid_fplinux.c
+"

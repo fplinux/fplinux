@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+from . import alpine_state
 from .common import ROOT, fail, relative_name
 from .config import load_platform, load_target
 
@@ -23,10 +24,12 @@ STAGED_BUILD_SOURCES = (
     "Containerfile",
     "THIRD_PARTY_NOTICES.md",
     "container.lock.toml",
+    "alpine.lock.toml",
     "sources.lock.toml",
-    "buildroot-external",
+    "alpine/abuild.conf",
     "scripts/fplinux_cli/__init__.py",
-    "scripts/fplinux_cli/buildroot_state.py",
+    "scripts/fplinux_cli/alpine_builder.py",
+    "scripts/fplinux_cli/alpine_state.py",
     "scripts/fplinux_cli/builder.py",
     "scripts/fplinux_cli/bundle_state.py",
     "scripts/fplinux_cli/common.py",
@@ -35,7 +38,6 @@ STAGED_BUILD_SOURCES = (
     "scripts/fplinux_cli/kbuild_state.py",
     "scripts/fplinux_cli/linux_state.py",
     "scripts/fplinux_cli/output.py",
-    "scripts/fplinux_cli/toolchain_state.py",
 )
 
 
@@ -94,11 +96,11 @@ def target_build_source_files(target: str) -> list[tuple[str, Path]]:
 
     for relative in STAGED_BUILD_SOURCES:
         add_source_path(files, ROOT / relative)
+    for package in alpine_state.selected_packages(platform, target_config, root=ROOT):
+        add_source_path(files, ROOT / "alpine/aports" / package)
     add_source_path(files, target_root / "target.toml")
     add_source_path(files, target_root / target_config["release_manifest"])
     add_source_path(files, target_root / target_config["assets_lock"])
-    add_source_path(files, target_root / target_config["buildroot"]["defconfig"])
-    add_source_path(files, (target_root / target_config["buildroot"]["defconfig"]).parent)
     add_source_path(files, target_root / target_config["linux"]["defconfig"])
     add_source_path(files, target_root / target_config["bootstrap"]["source"])
     for relative in target_config["linux"]["patches"]:
@@ -109,10 +111,6 @@ def target_build_source_files(target: str) -> list[tuple[str, Path]]:
 
     platform_root = ROOT / "platforms" / target_config["platform"]
     add_source_path(files, platform_root / "platform.toml")
-    add_source_path(files, ROOT / platform["buildroot"]["toolchain_defconfig"])
-    add_source_path(files, ROOT / platform["buildroot"]["toolchain_external_defconfig"])
-    for relative in platform["buildroot"]["shared_paths"]:
-        add_source_path(files, ROOT / relative)
     for relative in platform["linux"]["patches"]:
         add_source_path(files, ROOT / relative)
     for key in ("copies", "appends"):

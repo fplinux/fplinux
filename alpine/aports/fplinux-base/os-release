@@ -1,0 +1,7 @@
+NAME="FPLinux"
+PRETTY_NAME="FPLinux Alpine RAM system"
+ID=fplinux
+ID_LIKE=alpine
+VERSION_ID="3.24.1"
+VARIANT="FPLinux console"
+VARIANT_ID=fplinux-console

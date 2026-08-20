@@ -45,7 +45,7 @@ CHECK_SCOPES = (
     "licenses",
     "python",
     "shell",
-    "buildroot",
+    "alpine",
     "c",
     "kernel",
 )
@@ -96,11 +96,13 @@ _CHECK_IMPLEMENTATION = frozenset(
         "scripts/fplinux_cli/output.py",
     }
 )
+_ALPINE_CHECK_IMPLEMENTATION = "scripts/fplinux_cli/alpine_state.py"
 _KERNEL_IMPLEMENTATION = frozenset(
     {
         "scripts/fplinux_cli/__init__.py",
+        "scripts/fplinux_cli/alpine_builder.py",
+        "scripts/fplinux_cli/alpine_state.py",
         "scripts/fplinux_cli/builder.py",
-        "scripts/fplinux_cli/buildroot_state.py",
         "scripts/fplinux_cli/bundle_state.py",
         "scripts/fplinux_cli/common.py",
         "scripts/fplinux_cli/config.py",
@@ -109,7 +111,6 @@ _KERNEL_IMPLEMENTATION = frozenset(
         "scripts/fplinux_cli/kernelcheck.py",
         "scripts/fplinux_cli/linux_state.py",
         "scripts/fplinux_cli/output.py",
-        "scripts/fplinux_cli/toolchain_state.py",
     }
 )
 
@@ -431,7 +432,12 @@ def _is_shell_source(file: WorkspaceFile) -> bool:
         shebang = first_line[0].decode().strip()
     except UnicodeDecodeError:
         return False
-    return shebang in {"#!/bin/sh", "#!/usr/bin/env sh", "#!/usr/bin/env bash"}
+    return shebang in {
+        "#!/bin/sh",
+        "#!/usr/bin/env sh",
+        "#!/usr/bin/env bash",
+        "#!/sbin/openrc-run",
+    }
 
 
 def _is_prettier_configuration(path: str) -> bool:
@@ -450,7 +456,9 @@ def _source_scope_uses_file(  # noqa: PLR0911
     name = path.name
     suffix = path.suffix.lower()
     parts = path.parts
-    if file.path in _CHECK_IMPLEMENTATION:
+    if file.path in _CHECK_IMPLEMENTATION or (
+        scope == "alpine" and file.path == _ALPINE_CHECK_IMPLEMENTATION
+    ):
         return True
     if scope in {
         "source",
@@ -476,11 +484,12 @@ def _source_scope_uses_file(  # noqa: PLR0911
         )
     if scope == "shell":
         return _is_shell_source(file) or name in {".editorconfig", ".shellcheckrc"}
-    if scope == "buildroot":
+    if scope == "alpine":
         return (
-            bool(parts)
-            and parts[0] == "buildroot-external"
-            and (path.suffix in {".hash", ".mk"} or name in {"Config.in", "external.desc"})
+            file.path in {"alpine.lock.toml", "alpine/abuild.conf"}
+            or (len(parts) == 3 and parts[0] == "targets" and name == "target.toml")
+            or (len(parts) == 3 and parts[0] == "platforms" and name == "platform.toml")
+            or (len(parts) == 4 and parts[:2] == ("alpine", "aports") and name == "APKBUILD")
         )
     if scope == "c":
         return (
@@ -498,10 +507,7 @@ def _c_scope_paths(snapshot: WorkspaceSnapshot) -> set[str]:
     selected = {file.path for file in snapshot.files if _source_scope_uses_file("c", file)}
     for file in snapshot.files:
         path = PurePath(file.path)
-        if path.suffix == ".c" and path.parts[:2] == (
-            "buildroot-external",
-            "package",
-        ):
+        if path.suffix in {".c", ".h"} and path.parts[:2] == ("alpine", "aports"):
             selected.add(file.path)
         if path.suffix in {".c", ".h"} and "bootstrap" in path.parts:
             selected.add(file.path)

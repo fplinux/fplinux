@@ -32,10 +32,13 @@ Interface 0 remains available for the shell and file transfers while the keyboar
 forwarder owns interface 1.
 
 Host requirements:
-  - Linux x86-64 with glibc 2.38 or newer
+  - Linux x86-64
   - Python 3.11 or newer
-  - libusb 1.0, libudev and GNU coreutils (stdbuf)
+  - GNU coreutils (stdbuf)
   - USB permissions for devices 1782:4d00 and 0525:a4a6
+
+The bundled native host tools are static executables and do not require host
+libusb, libudev or a particular libc implementation.
 
 Start:
   1. Extract the complete top-level directory.

@@ -7,9 +7,12 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
+from fplinux_cli import alpine_state
 from fplinux_cli import workspace as workspace_module
+from fplinux_cli.common import ROOT
 
 
 class WorkspaceSnapshotTests(unittest.TestCase):
@@ -42,6 +45,45 @@ class WorkspaceSnapshotTests(unittest.TestCase):
             )
             self.assertEqual(len(snapshot.recipe), 64)
             self.assertFalse((root / ".cache").exists())
+
+    def test_target_build_closure_stages_only_selected_aports(self) -> None:
+        """The workspace delegates the exact selected package set to the shared resolver."""
+        target: dict[str, Any] = {
+            "platform": "demo",
+            "release_manifest": "release/manifest.toml",
+            "assets_lock": "loader/assets.lock.toml",
+            "linux": {
+                "defconfig": "kernel/defconfig",
+                "patches": [],
+                "copies": [],
+                "appends": [],
+            },
+            "bootstrap": {"source": "bootstrap"},
+        }
+        platform: dict[str, Any] = {
+            "linux": {"patches": [], "copies": [], "appends": []},
+            "bootstrap": {"shared_copies": []},
+            "host": {"tools": []},
+        }
+        with (
+            mock.patch.object(workspace_module, "load_target", return_value=target),
+            mock.patch.object(workspace_module, "load_platform", return_value=platform),
+            mock.patch.object(
+                alpine_state,
+                "selected_packages",
+                return_value=("fplinux-base", "fplinux-input"),
+            ) as selected_packages,
+            mock.patch.object(workspace_module, "add_source_path") as add_source,
+        ):
+            workspace_module.target_build_source_files("phone")
+
+        staged = {call.args[1] for call in add_source.call_args_list}
+        selected_packages.assert_called_once_with(platform, target, root=ROOT)
+        self.assertNotIn(ROOT / "alpine", staged)
+        self.assertIn(ROOT / "alpine/abuild.conf", staged)
+        for package in ("fplinux-base", "fplinux-input"):
+            self.assertIn(ROOT / "alpine/aports" / package, staged)
+        self.assertNotIn(ROOT / "alpine/aports/fplinux-cpuclock", staged)
 
     def test_snapshot_recipe_includes_file_mode(self) -> None:
         """Changing only execute permissions changes the causal recipe."""

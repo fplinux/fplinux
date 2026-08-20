@@ -39,9 +39,10 @@ class BundleStateTests(unittest.TestCase):
             "profile": "default",
             "workspace_digest": "a" * 64,
             "container_image_recipe": "b" * 64,
+            "apk_signing_key": "9" * 64,
             "linux_recipe": "c" * 64,
             "device_identity": "d" * 64,
-            "buildroot_receipt": {"recipe": "e" * 64, "sha256": "f" * 64},
+            "rootfs_receipt": {"recipe": "e" * 64, "sha256": "f" * 64},
             "kbuild_receipt": {"recipe": "0" * 64, "sha256": "1" * 64},
             "files": published_file_records(staging),
         }

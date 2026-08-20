@@ -7,10 +7,13 @@ it is a hardware-qualification candidate or a qualified release. If
 CANDIDATE-NOTICE.txt is present, the archive is not a release.
 
 Host requirements:
-  - Linux x86-64 with glibc 2.38 or newer
+  - Linux x86-64
   - Python 3.11 or newer
-  - libusb 1.0, libudev and GNU coreutils (stdbuf)
+  - GNU coreutils (stdbuf)
   - USB permissions for devices 1782:4d00 and 0525:a4a6
+
+The bundled native host tools are static executables and do not require host
+libusb, libudev or a particular libc implementation.
 
 Start:
   1. Extract the complete top-level directory.
@@ -20,14 +23,14 @@ Start:
   5. Run: ./runner/run.py
   6. Hold * and connect USB while keeping * pressed when prompted.
 
-The runner verifies the bundled board assets and host-tool dependencies before
-asking for the phone. It then checks BootROM USB access before attempting the
-fixed FDL1, RAM-payload and Linux USB-console sequence. Ctrl-] detaches the host
+The runner verifies the runtime manifest, bundled hashes and Python version
+before asking for the phone. It then checks BootROM USB access before attempting
+the fixed FDL1, RAM-payload and Linux USB-console sequence. Ctrl-] detaches the host
 console; it does not reboot or power off the phone. To reconnect while Linux is
 still running, use ./host/fplinux-usb-console --interface 0 instead of the full
 runner.
 
-The common init starts the phone-side fplinux-input receiver automatically.
+OpenRC supervises the phone-side fplinux-input receiver automatically.
 Forward a host keyboard on interface 1 with:
   sudo ./host/fplinux-usb-console --interface 1 --keyboard /dev/input/eventN
 The client uses EVIOCGRAB, so the selected keyboard stops reaching the host

@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
+from fplinux_cli import alpine_state
 from fplinux_cli.config import discover_targets, load_platform, load_target
 from fplinux_cli.output import RunReporter, current_stage, run_entrypoint
 
@@ -26,6 +27,9 @@ EXCLUDED_PARTS = {".cache", ".git", "__pycache__"}
 BINARY_SUFFIXES = {".bin", ".jpg", ".png", ".pyc", ".zip"}
 QUAKE_DATA_NAME = re.compile(r"pak[0-9]+\.part\.[0-9]+", re.IGNORECASE)
 PACKAGE_EMBEDDED_C_MARKER = "fplinux-check: package-embedded"
+APORT_ROOT = ("alpine", "aports")
+APORT_C_SUFFIXES = frozenset({".c"})
+APORT_C_FORMAT_SUFFIXES = frozenset({".c", ".h"})
 SOURCE_SCOPES = (
     "source",
     "container",
@@ -36,7 +40,7 @@ SOURCE_SCOPES = (
     "licenses",
     "python",
     "shell",
-    "buildroot",
+    "alpine",
     "c",
 )
 
@@ -157,7 +161,7 @@ def quality_sources(
     posix_shell_files: list[str] = []
     bash_files: list[str] = []
     for path in files:
-        if path.suffix not in {"", ".sh"}:
+        if path.suffix not in {"", ".initd", ".sh"}:
             continue
         with path.open("rb") as stream:
             raw_first_line = stream.readline()
@@ -168,22 +172,31 @@ def quality_sources(
         relative = str(path.relative_to(ROOT))
         if first_line == "#!/usr/bin/env bash":
             bash_files.append(relative)
-        elif first_line in {"#!/bin/sh", "#!/usr/bin/env sh"}:
+        elif first_line in {"#!/bin/sh", "#!/usr/bin/env sh", "#!/sbin/openrc-run"}:
             posix_shell_files.append(relative)
     return python_files, markdown_files, posix_shell_files, bash_files
 
 
-def buildroot_sources(files: list[Path]) -> list[str]:
-    """Select buildroot-external files understood by Buildroot check-package."""
+def alpine_apkbuilds(files: list[Path]) -> list[str]:
+    """Discover every regular first-party Alpine aport recipe."""
     result = [
-        str(path.relative_to(ROOT))
+        path.relative_to(ROOT).as_posix()
         for path in files
-        if path.relative_to(ROOT).parts[0] == "buildroot-external"
-        and (path.suffix in {".hash", ".mk"} or path.name == "Config.in")
+        if (relative := path.relative_to(ROOT)).parts[:2] == APORT_ROOT
+        and len(relative.parts) == 4
+        and relative.name == "APKBUILD"
     ]
     if not result:
-        fail("no buildroot-external sources were discovered")
+        fail("no Alpine APKBUILD files were discovered")
     return result
+
+
+def validate_package_selections() -> None:
+    """Require every target's declared package set to resolve to current aports."""
+    for target in discover_targets():
+        target_config = load_target(target)
+        platform = load_platform(target_config["platform"])
+        alpine_state.selected_packages(platform, target_config, root=ROOT)
 
 
 def package_c_is_embedded(path: Path) -> bool:
@@ -192,19 +205,22 @@ def package_c_is_embedded(path: Path) -> bool:
         return any(PACKAGE_EMBEDDED_C_MARKER in stream.readline() for _ in range(4))
 
 
+def is_aport_source(path: Path, suffixes: frozenset[str]) -> bool:
+    """Return whether a source belongs to any first-party Alpine aport."""
+    relative = path.relative_to(ROOT)
+    return relative.parts[:2] == APORT_ROOT and relative.suffix in suffixes
+
+
 def userspace_c_sources(
     files: list[Path], *, include_embedded: bool = False
 ) -> list[tuple[str, bool]]:
     """Discover userspace C and whether each source needs libusb."""
     result: dict[str, bool] = {}
     for path in files:
-        relative = path.relative_to(ROOT)
-        if (
-            relative.suffix == ".c"
-            and relative.parts[:2] == ("buildroot-external", "package")
-            and (include_embedded or not package_c_is_embedded(path))
+        if is_aport_source(path, APORT_C_SUFFIXES) and (
+            include_embedded or not package_c_is_embedded(path)
         ):
-            result[relative.as_posix()] = False
+            result[path.relative_to(ROOT).as_posix()] = False
 
     platform_names = {load_target(target)["platform"] for target in discover_targets()}
     for platform_name in sorted(platform_names):
@@ -221,6 +237,19 @@ def userspace_c_sources(
     if not result:
         fail("no userspace C sources were discovered")
     return sorted(result.items())
+
+
+def userspace_c_format_sources(files: list[Path]) -> list[str]:
+    """Discover every C header and source under a first-party Alpine aport."""
+    sources = {
+        path.relative_to(ROOT).as_posix()
+        for path in files
+        if is_aport_source(path, APORT_C_FORMAT_SUFFIXES)
+    }
+    sources.update(
+        source for source, _requires_libusb in userspace_c_sources(files, include_embedded=True)
+    )
+    return sorted(sources)
 
 
 def run_userspace_analysis(output: Path, sources: list[tuple[str, bool]]) -> None:
@@ -338,7 +367,19 @@ def main() -> None:
             run(["typos", "."])
     if "secrets" in selected:
         with report_stage(reporter, "secrets"):
-            run(["gitleaks", "dir", "--no-banner", "--redact", "--exit-code", "1", "."])
+            run(
+                [
+                    "gitleaks",
+                    "detect",
+                    "--no-banner",
+                    "--no-git",
+                    "--source",
+                    ".",
+                    "--redact",
+                    "--exit-code",
+                    "1",
+                ]
+            )
     if "licenses" in selected:
         with report_stage(reporter, "licenses"):
             run(["reuse", "lint"])
@@ -367,22 +408,17 @@ def main() -> None:
             # Podman's OCI output has no SHELL support, so pipefail cannot be enabled
             # (DL4006); every pipe feeds printf output into a checked sha256sum.
             run(["hadolint", "--ignore", "DL4006", "Containerfile"])
-    if "buildroot" in selected:
-        buildroot_files = buildroot_sources(files)
-        with report_stage(reporter, "buildroot"):
-            # The quality venv python cannot import check-package's flake8 and magic
-            # dependencies; they are provided for the system interpreter.
-            run(
-                [
-                    "/usr/bin/python3",
-                    "/opt/buildroot/utils/check-package",
-                    "--br2-external",
-                    *buildroot_files,
-                ]
-            )
+    if "alpine" in selected:
+        apkbuilds = alpine_apkbuilds(files)
+        with report_stage(reporter, "alpine"):
+            alpine_state.load_alpine_lock()
+            validate_package_selections()
+            run(["sh", "-n", "alpine/abuild.conf"])
+            for apkbuild in apkbuilds:
+                run(["apkbuild-lint", apkbuild])
     if "c" in selected:
         c_sources = userspace_c_sources(files)
-        c_format_sources = userspace_c_sources(files, include_embedded=True)
+        c_format_sources = userspace_c_format_sources(files)
         bootstrap_c = [
             str(path.relative_to(ROOT))
             for path in files
@@ -395,7 +431,7 @@ def main() -> None:
                     "--style=file",
                     "--dry-run",
                     "--Werror",
-                    *(source for source, _requires_libusb in c_format_sources),
+                    *c_format_sources,
                     *bootstrap_c,
                 ]
             )

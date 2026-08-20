@@ -1,0 +1,26 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-cpuclock
+pkgver=1
+pkgrel=0
+pkgdesc="CPU clock diagnostic helper for FPLinux"
+url="https://github.com/fplinux/fplinux"
+arch="armv7"
+license="GPL-2.0-only"
+makedepends_build="clang22 lld22"
+makedepends_host="musl-dev linux-headers gcc"
+options="!check"
+source="fplinux-cpuclock.c"
+builddir="$srcdir"
+
+build() {
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		"$srcdir/fplinux-cpuclock.c" $LDFLAGS -o fplinux-cpuclock
+}
+
+package() {
+	install -Dm755 "$builddir/fplinux-cpuclock" "$pkgdir/usr/bin/fplinux-cpuclock"
+}
+
+sha512sums="
+48eeba417e27c6f17d7f29ee44865cff34e7d004e81e32862c1ac72d5578ed538b14616c937dd50659eab72a6aac27d10cfb4275512b8cf6942db07172e4ab1f  fplinux-cpuclock.c
+"

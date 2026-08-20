@@ -29,9 +29,15 @@ bootstrap section selects the pinned fpdoom vendor subset, the shared boot-scree
 source and the UMS9117 boot flow under `bootstrap/`. Typed host recipes build
 `spd_dump`, `libc_server` and the shared USB console.
 
+The required `[rootfs].packages` array owns the UMS9117 CPU-clock diagnostic
+package, `fplinux-cpuclock`. The complete rootfs selection is the exact union of
+the fixed common packages, this platform array and the selected target's required
+array. A target name does not select packages; targets with the same final set
+share a rootfs.
+
 The runner contract bundles [`common/run.py`](../../common/run.py) with the fixed
 [`host/adapter.py`](host/adapter.py). The shared runner verifies the generic
-runtime manifest, hashes and host-tool shared-library dependencies. The adapter
+runtime manifest and bundled hashes. The adapter
 accepts the `fplinux.host.ums9117-ram/v1` capability, checks `stdbuf` and BootROM
 usbfs access, then performs only the fixed BootROM, FDL1, RAM payload, bootstrap
 handoff and Linux USB-console sequence. Targets supply validated values and

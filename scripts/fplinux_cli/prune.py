@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""List and remove stale immutable FPLinux source workspaces."""
+"""List and remove bounded disposable FPLinux cache state."""
 
 from __future__ import annotations
 
@@ -8,15 +8,20 @@ import shutil
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from . import alpine_state
 from .common import ROOT
-from .config import container_image_recipe_digest, load_container_lock, load_platform
-from .toolchain_state import toolchain_recipe
+from .config import (
+    container_image_recipe_digest,
+    discover_targets,
+    load_platform,
+    load_target,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 _WORKSPACE_NAMESPACES = frozenset({"quality-workspaces", "workspaces"})
-_MANAGED_NAMESPACES = _WORKSPACE_NAMESPACES | {"toolchains"}
+_MANAGED_NAMESPACES = _WORKSPACE_NAMESPACES | {"rootfs"}
 
 
 @dataclass(frozen=True)
@@ -141,33 +146,53 @@ def prune(
     print(result.as_json() if json_output else result.as_text(), end="")
 
 
-def _current_toolchain_recipes() -> frozenset[str]:
-    """Return the toolchain digests every declared platform references now."""
-    lock = load_container_lock()
-    image_recipe = container_image_recipe_digest(lock)
-    recipes: set[str] = set()
-    for manifest in sorted((ROOT / "platforms").glob("*/platform.toml")):
-        platform = load_platform(manifest.parent.name)
-        if platform["buildroot"].get("toolchain_defconfig"):
-            recipes.add(toolchain_recipe(ROOT, platform, lock, image_recipe))
+def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
+    """Return every currently valid rootfs recipe, or ``None`` if that is unknown."""
+    try:
+        signing_key = alpine_state.signing_key_identity(cache)
+        image_recipe = container_image_recipe_digest()
+        recipes = {
+            alpine_state.alpine_rootfs_recipe(
+                image_recipe,
+                signing_key,
+                alpine_state.selected_packages(
+                    load_platform(target_config["platform"]), target_config
+                ),
+            )
+            for target in discover_targets()
+            for target_config in (load_target(target),)
+        }
+    except (OSError, ValueError, SystemExit):
+        return None
     return frozenset(recipes)
 
 
-def _toolchain_entries(cache: Path) -> list[InventoryEntry]:
-    toolchains = cache / "toolchains"
-    if not toolchains.is_dir():
+def _rootfs_entries(cache: Path) -> list[InventoryEntry]:
+    """Classify immutable Alpine rootfs generations by all current target recipes."""
+    rootfs = cache / "rootfs"
+    if not rootfs.is_dir():
         return []
-    current = _current_toolchain_recipes()
+    current = _current_rootfs_recipes(cache)
     entries: list[InventoryEntry] = []
-    for path in sorted(toolchains.iterdir(), key=lambda item: item.name):
-        identity = f"toolchains/{path.name}"
+    for path in sorted(rootfs.iterdir(), key=lambda item: item.name):
+        identity = f"rootfs/{path.name}"
         if not path.is_dir() or path.is_symlink():
             entries.append(
-                InventoryEntry(identity, "protected", "not a toolchain directory", None, None)
+                InventoryEntry(identity, "protected", "not a rootfs directory", None, None)
+            )
+        elif current is None:
+            entries.append(
+                InventoryEntry(
+                    identity,
+                    "protected",
+                    "current rootfs recipes are unavailable",
+                    None,
+                    None,
+                )
             )
         elif path.name in current:
             entries.append(
-                InventoryEntry(identity, "protected", "current shared toolchain", None, None)
+                InventoryEntry(identity, "protected", "current Alpine rootfs", None, None)
             )
         else:
             logical, allocated = _tree_size(path)
@@ -175,7 +200,7 @@ def _toolchain_entries(cache: Path) -> list[InventoryEntry]:
                 InventoryEntry(
                     identity,
                     "candidate",
-                    "superseded shared toolchain",
+                    "superseded Alpine rootfs",
                     logical,
                     allocated,
                 )
@@ -183,27 +208,10 @@ def _toolchain_entries(cache: Path) -> list[InventoryEntry]:
     return entries
 
 
-def _ccache_entry(cache: Path) -> list[InventoryEntry]:
-    ccache = cache / "ccache"
-    if not ccache.is_dir():
-        return []
-    logical, allocated = _tree_size(ccache)
-    return [
-        InventoryEntry(
-            "ccache",
-            "protected",
-            "compiler accelerator; delete manually to reclaim space",
-            logical,
-            allocated,
-        )
-    ]
-
-
 def plan_prune(cache: Path) -> PrunePlan:
     """List disposable snapshots in every managed cache namespace."""
     entries: list[InventoryEntry] = []
-    entries.extend(_toolchain_entries(cache))
-    entries.extend(_ccache_entry(cache))
+    entries.extend(_rootfs_entries(cache))
     for namespace in sorted(_WORKSPACE_NAMESPACES):
         root = cache / namespace
         if not root.is_dir():

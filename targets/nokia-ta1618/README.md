@@ -240,17 +240,19 @@ CONFIG_NEW_LEDS=y
 CONFIG_LEDS_CLASS=y
 CONFIG_LEDS_TA1618_KPLED=y
 CONFIG_FILE_LOCKING=y
-
-BR2_PACKAGE_FPLINUX_CONSOLE=y
-BR2_PACKAGE_FPLINUX_INPUT=y
-BR2_PACKAGE_FPLINUX_TYRQUAKE=y
 ```
 
+Userspace is the Alpine rootfs selected from the fixed common packages
+`fplinux-base`, `fplinux-console`, `fplinux-input` and `fplinux-tyrquake`, the
+UMS9117 platform package `fplinux-cpuclock`, and this target's empty required
+`[rootfs].packages` array. The target name does not select packages. A target
+with the same final set and composition inputs shares the same rootfs.
+
 The kernel command line selects two non-ACM generic-serial ports with
-`g_serial.use_acm=0 g_serial.n_ports=2`. At boot, the common
-`/usr/libexec/fplinux/init` starts `/bin/fplinux-input`. The bridge creates the
-`FPLinux host keyboard` uinput device, reads event lines from `/dev/ttyGS1` and
-keeps the device alive across host disconnections.
+`g_serial.use_acm=0 g_serial.n_ports=2`. OpenRC supervises the host-keyboard
+bridge on `/dev/ttyGS1`, the USB getty on `/dev/ttyGS0` and the physical console
+on `/dev/tty1`. The bridge creates the `FPLinux host keyboard` uinput device and
+keeps it alive across host disconnections.
 
 The display, keypad, keypad-backlight, MMC and power-off drivers are built into the
 kernel. Module loading and unloading are enabled for RAM-only driver work, but the
@@ -330,8 +332,9 @@ output layout and reproducibility details.
 
 ## Run from the source checkout
 
-The generated Linux x86-64 host tools require Python 3.11 or newer, glibc 2.38
-or newer, libusb 1.0, libudev and GNU `stdbuf` from coreutils. Install the
+The generated Linux x86-64 host tools are static executables. The shared runner
+requires Python 3.11 or newer and the UMS9117 adapter requires GNU `stdbuf` from
+coreutils. Install the
 [documented udev rule](../../docs/RELEASES.md#usb-access) for USB IDs
 `1782:4d00` and `0525:a4a6` before connecting the phone.
 
@@ -342,24 +345,23 @@ Power the phone off and disconnect USB, then start the runner:
 ```
 
 Before asking for the phone, the shared runner validates the generated
-`runtime-manifest.json`, bundle hashes and host-tool dependencies. When prompted,
+`runtime-manifest.json` and bundle hashes. When prompted,
 hold `*` and connect USB while keeping `*` pressed. The fixed UMS9117 adapter
 verifies BootROM USB access, loads FDL1 and the FPLinux payload into RAM, then
 attaches to the Linux USB shell. Addresses, USB identifiers, wait times,
 board-asset roles and adapter values come from validated target data.
 
 `Ctrl-]` detaches the host console without stopping the phone shell. Before
-measuring, compare the phone's build stamp with the local bundle receipt:
+measuring, compare the phone's kernel identity with the local bundle receipt:
 
 ```sh
 ./fplinux verify nokia-ta1618
 ```
 
-`verify` first refuses a stale local bundle, then compares the Buildroot recipe
-in `/etc/fplinux-build` and the kernel suffix with the local
-`build-manifest.json`. The suffix covers the prepared Linux, rootfs, kernel
-configuration, DTB and bootstrap recipe. It does not verify the other bundle
-files or qualify the hardware.
+`verify` first refuses a stale local bundle, then compares the running kernel
+suffix with the local `build-manifest.json`. The suffix covers the prepared
+Linux, Alpine rootfs receipt, kernel configuration, DTB and bootstrap recipe. It
+does not verify the other bundle files or qualify the hardware.
 
 From the repository root, reconnect to the shell:
 
@@ -422,9 +424,9 @@ cd FPLinux-Nokia-3210-4G-TA1618-console-release-linux-x86_64-<content16>
 ./runner/run.py
 ```
 
-The current host loader requires glibc 2.38 or newer, Python 3.11 or newer,
-libusb 1.0, libudev, GNU `stdbuf` and USB permissions for `1782:4d00` and
-`0525:a4a6`.
+The host loader requires Linux x86-64, Python 3.11 or newer, GNU
+`stdbuf` and USB permissions for `1782:4d00` and `0525:a4a6`. Its bundled native
+tools are static executables.
 
 ## Phone-specific nuances
 
@@ -461,15 +463,14 @@ libusb 1.0, libudev, GNU `stdbuf` and USB permissions for `1782:4d00` and
 
 ## Source layout
 
-| Path          | Responsibility                                                |
-| ------------- | ------------------------------------------------------------- |
-| `target.toml` | Data-only board inputs, identity and runtime adapter values   |
-| `dts/`        | Phone memory map and enabled board devices                    |
-| `kernel/`     | Display, keypad, keypad-backlight, MMC and power-off support  |
-| `bootstrap/`  | Board descriptor and target payload assembly                  |
-| `rootfs/`     | Target rootfs configuration layered over the common overlay   |
-| `loader/`     | Generic `fplinux.assets/v1` lock and asset provenance         |
-| `release/`    | Data-only `fplinux.release/v2` runtime and archive allowlists |
+| Path          | Responsibility                                                                |
+| ------------- | ----------------------------------------------------------------------------- |
+| `target.toml` | Data-only board inputs, identity, rootfs additions and runtime adapter values |
+| `dts/`        | Phone memory map and enabled board devices                                    |
+| `kernel/`     | Display, keypad, keypad-backlight, MMC and power-off support                  |
+| `bootstrap/`  | Board descriptor and target payload assembly                                  |
+| `loader/`     | Generic `fplinux.assets/v1` lock and asset provenance                         |
+| `release/`    | Data-only `fplinux.release/v2` runtime and archive allowlists                 |
 
 Build behavior is shared in `scripts/fplinux_cli/builder.py`; execution uses
 `common/run.py` and the fixed `platforms/ums9117/host/adapter.py`.

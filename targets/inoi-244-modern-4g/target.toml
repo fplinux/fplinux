@@ -8,8 +8,8 @@ profile = "console"
 release_manifest = "release/manifest.toml"
 assets_lock = "loader/assets.lock.toml"
 
-[buildroot]
-defconfig = "rootfs/defconfig"
+[rootfs]
+packages = []
 
 [linux]
 defconfig = "kernel/defconfig"

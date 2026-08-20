@@ -25,7 +25,7 @@ class DeviceStateTests(unittest.TestCase):
         self.linux_recipe = "2" * 64
         self.bootstrap_recipe = "3" * 64
         self.rootfs: dict[str, object] = {"sha256": "1" * 64, "size": 1234}
-        self.buildroot_receipt: dict[str, object] = {
+        self.rootfs_receipt: dict[str, object] = {
             "recipe": "7" * 64,
             "sha256": "8" * 64,
         }
@@ -38,7 +38,7 @@ class DeviceStateTests(unittest.TestCase):
             linux_recipe=self.linux_recipe,
             bootstrap_recipe=self.bootstrap_recipe,
             rootfs=self.rootfs,
-            buildroot_receipt=self.buildroot_receipt,
+            rootfs_receipt=self.rootfs_receipt,
             arch=self.arch,
             defconfig=self.defconfig,
             dtb=self.dtb,
@@ -91,9 +91,9 @@ class DeviceStateTests(unittest.TestCase):
         self.assertNotEqual(before, self._identity())
         self.rootfs = {"sha256": "1" * 64, "size": 1234}
 
-        self.buildroot_receipt = {"recipe": "9" * 64, "sha256": "8" * 64}
+        self.rootfs_receipt = {"recipe": "9" * 64, "sha256": "8" * 64}
         self.assertNotEqual(before, self._identity())
-        self.buildroot_receipt = {"recipe": "7" * 64, "sha256": "8" * 64}
+        self.rootfs_receipt = {"recipe": "7" * 64, "sha256": "8" * 64}
 
         self.arch = "arm64"
         self.assertNotEqual(before, self._identity())
@@ -118,7 +118,7 @@ class DeviceStateTests(unittest.TestCase):
                 linux_recipe=self.linux_recipe,
                 bootstrap_recipe=self.bootstrap_recipe,
                 rootfs={"sha256": "1" * 64},
-                buildroot_receipt=self.buildroot_receipt,
+                rootfs_receipt=self.rootfs_receipt,
                 arch=self.arch,
                 defconfig=self.defconfig,
                 dtb=self.dtb,
@@ -129,7 +129,7 @@ class DeviceStateTests(unittest.TestCase):
                 linux_recipe=self.linux_recipe,
                 bootstrap_recipe=self.bootstrap_recipe,
                 rootfs=self.rootfs,
-                buildroot_receipt=self.buildroot_receipt,
+                rootfs_receipt=self.rootfs_receipt,
                 arch=self.arch,
                 defconfig=self.defconfig,
                 dtb="../unsafe.dtb",

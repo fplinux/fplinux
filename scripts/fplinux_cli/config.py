@@ -55,6 +55,16 @@ def path_array(value: object, name: str, *, allow_empty: bool = False) -> list[s
     return [relative_value(item, name) for item in result]
 
 
+def package_array(value: object, name: str) -> list[str]:
+    """Require an array of unique, path-safe package identifiers."""
+    result = string_array(value, name, allow_empty=True)
+    for package in result:
+        relative_value(package, name)
+        if VALUE_NAME.fullmatch(package) is None:
+            fail(f"{name} must contain only value-name package identifiers")
+    return result
+
+
 def integer_value(
     value: object,
     name: str,
@@ -136,7 +146,7 @@ def load_target(target: str) -> dict[str, Any]:
             "profile",
             "release_manifest",
             "assets_lock",
-            "buildroot",
+            "rootfs",
             "linux",
             "bootstrap",
             "runtime",
@@ -157,8 +167,8 @@ def load_target(target: str) -> dict[str, Any]:
     for key in ("release_manifest", "assets_lock"):
         relative_value(config.get(key), f"target {target} {key}")
 
-    buildroot = exact_table(config.get("buildroot"), {"defconfig"}, "target buildroot")
-    relative_value(buildroot.get("defconfig"), "target buildroot defconfig")
+    rootfs = exact_table(config.get("rootfs"), {"packages"}, "target rootfs")
+    package_array(rootfs.get("packages"), "target rootfs packages")
 
     linux = exact_table(
         config.get("linux"),
@@ -289,12 +299,15 @@ def validate_host_tool(value: object, index: int) -> dict[str, Any]:
                 "archive_prefix",
                 "source_directory",
                 "binary",
+                "link",
                 "members",
             },
             name,
         )
         for key in ("name", "source_lock", "cache_name", "archive_prefix", "binary"):
             nonempty_string(recipe.get(key), f"{name} {key}")
+        if recipe.get("link") != "static-libusb":
+            fail(f"{name} link must be static-libusb")
         relative_value(recipe.get("source_directory"), f"{name} source_directory")
         members = recipe.get("members")
         if not isinstance(members, list) or not members:
@@ -330,7 +343,7 @@ def load_platform(platform: str) -> dict[str, Any]:
         raw = tomllib.load(stream)
     config = exact_table(
         raw,
-        {"schema", "name", "buildroot", "linux", "bootstrap", "host", "runner"},
+        {"schema", "name", "rootfs", "linux", "bootstrap", "host", "runner"},
         f"platform {platform}",
     )
     if config.get("schema") != PLATFORM_SCHEMA:
@@ -338,21 +351,8 @@ def load_platform(platform: str) -> dict[str, Any]:
     if config.get("name") != platform:
         fail(f"platform name does not match its directory: {path}")
 
-    buildroot = exact_table(
-        config.get("buildroot"),
-        {"external", "shared_paths", "toolchain_defconfig", "toolchain_external_defconfig"},
-        "platform buildroot",
-    )
-    relative_value(buildroot.get("external"), "platform buildroot external")
-    path_array(buildroot.get("shared_paths"), "platform buildroot shared_paths", allow_empty=True)
-    relative_value(
-        buildroot.get("toolchain_defconfig"),
-        "platform buildroot toolchain_defconfig",
-    )
-    relative_value(
-        buildroot.get("toolchain_external_defconfig"),
-        "platform buildroot toolchain_external_defconfig",
-    )
+    rootfs = exact_table(config.get("rootfs"), {"packages"}, "platform rootfs")
+    package_array(rootfs.get("packages"), "platform rootfs packages")
 
     linux = exact_table(
         config.get("linux"),
@@ -480,14 +480,12 @@ def validate_source_policy() -> None:
 
 
 def load_container_lock() -> dict[str, Any]:
-    """Load the one pinned OCI/Buildroot environment lock."""
+    """Load the one pinned OCI build-environment lock."""
     validate_source_policy()
     path = ROOT / "container.lock.toml"
     with path.open("rb") as stream:
         lock = tomllib.load(stream)
-    if set(lock) != {"schema", "oci", "buildroot"} or lock.get("schema") != (
-        "fplinux.container/v1"
-    ):
+    if set(lock) != {"schema", "oci"} or lock.get("schema") != "fplinux.container/v1":
         fail(f"invalid container lock schema: {path}")
     oci = lock.get("oci")
     if not isinstance(oci, dict) or set(oci) != {
@@ -495,7 +493,6 @@ def load_container_lock() -> dict[str, Any]:
         "platform",
         "base",
         "base_created",
-        "debian_snapshot",
     }:
         fail(f"container lock must define exactly one OCI image: {path}")
     image = oci.get("image")
@@ -506,15 +503,6 @@ def load_container_lock() -> dict[str, Any]:
         fail(f"container base image must be digest-pinned: {path}")
     if oci.get("platform") != "linux/amd64":
         fail(f"unsupported container platform: {path}")
-    buildroot = lock.get("buildroot")
-    if not isinstance(buildroot, dict) or set(buildroot) != {
-        "version",
-        "url",
-        "sha256",
-        "bytes",
-        "released",
-    }:
-        fail(f"invalid Buildroot lock entry: {path}")
     return lock
 
 
@@ -559,7 +547,6 @@ def container_image_build_arguments(lock: dict[str, Any] | None = None) -> tuple
     if lock is None:
         lock = load_container_lock()
     oci = lock["oci"]
-    buildroot = lock["buildroot"]
     return (
         "--platform",
         oci["platform"],
@@ -567,14 +554,6 @@ def container_image_build_arguments(lock: dict[str, Any] | None = None) -> tuple
         "Containerfile",
         "--build-arg",
         f"BASE_IMAGE={oci['base']}",
-        "--build-arg",
-        f"DEBIAN_SNAPSHOT={oci['debian_snapshot']}",
-        "--build-arg",
-        f"BUILDROOT_VERSION={buildroot['version']}",
-        "--build-arg",
-        f"BUILDROOT_URL={buildroot['url']}",
-        "--build-arg",
-        f"BUILDROOT_SHA256={buildroot['sha256']}",
     )
 
 
@@ -590,7 +569,6 @@ def container_image_recipe_digest(lock: dict[str, Any] | None = None) -> str:
             ROOT / "Containerfile",
             ROOT / "package.json",
             ROOT / "package-lock.json",
-            ROOT / "requirements.lock",
         ],
         prefix=encoded_arguments,
     )

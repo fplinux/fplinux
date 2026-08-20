@@ -1,0 +1,43 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-base
+pkgver=1
+pkgrel=0
+pkgdesc="Base userspace policy for FPLinux phones"
+url="https://github.com/fplinux/fplinux"
+arch="noarch"
+license="GPL-2.0-only"
+depends="openrc fplinux-console fplinux-input fplinux-tyrquake"
+replaces="alpine-baselayout-data alpine-release"
+replaces_priority=100
+options="!check"
+source="fstab inittab hostname issue os-release"
+
+package() {
+	install -Dm644 "$srcdir/fstab" "$pkgdir/etc/fstab"
+	install -Dm644 "$srcdir/inittab" "$pkgdir/etc/inittab"
+	install -Dm644 "$srcdir/hostname" "$pkgdir/etc/hostname"
+	install -Dm644 "$srcdir/issue" "$pkgdir/etc/issue"
+	install -Dm644 "$srcdir/os-release" "$pkgdir/etc/os-release"
+
+	mkdir -p "$pkgdir/etc/runlevels/sysinit" "$pkgdir/etc/runlevels/boot" \
+		"$pkgdir/etc/runlevels/default"
+	for service in devfs dmesg procfs sysfs; do
+		ln -s "/etc/init.d/$service" "$pkgdir/etc/runlevels/sysinit/$service"
+	done
+	for service in bootmisc hostname; do
+		ln -s "/etc/init.d/$service" "$pkgdir/etc/runlevels/boot/$service"
+	done
+	for service in fplinux-input fplinux-usb-getty fplinux-console; do
+		ln -s "/etc/init.d/$service" "$pkgdir/etc/runlevels/default/$service"
+	done
+
+	ln -s /sbin/init "$pkgdir/init"
+}
+
+sha512sums="
+5db7adf8b739973dcfc024c5df0230b57a71ee780aa931f8ebf95c5a3f27b6d394e1a9f5ba008be0f24bfd1b6a098a9344fb5eec280130df510f91d02e88b0c2  fstab
+d0814f22cabb82c9dce842e5d20e56a2b8d035129eed55042fb0a6564b093cee123059bc6d95c9a4a78c93ece13c95cdfcc9fa02429725e3d5ce9d8608dc4142  inittab
+0d3253622d9bb758ab32dd1695f29afe97863b219b987652b74763818bcb576dccb5db1e08308f728893495c6abd002b79254fd2c38773ae38079f19e166ab70  hostname
+4419441e47842b25a005a78cd7e69c201f4e21668284d1fa51afaecea9f7dd431a59eb2c9e6aa83d6a7234fbe7431b2df8beb2f1d77af242150ec283de4d4718  issue
+6b8c45ae5dfeb4a432d6152b6fcc3d0ea1f37953e5fa7cb9fde81c2e041a8fe3ac7b6879a1b4d52fc8c53f68a9bb42e220cc91f85a38421e7ecbe2cd05a68107  os-release
+"

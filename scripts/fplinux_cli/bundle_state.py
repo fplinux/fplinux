@@ -14,8 +14,9 @@ from pathlib import Path
 BUILD_MANIFEST_NAME = "build-manifest.json"
 BUILD_MANIFEST_FIELDS = frozenset(
     {
-        "buildroot_receipt",
+        "rootfs_receipt",
         "container_image_recipe",
+        "apk_signing_key",
         "device_identity",
         "files",
         "generation",

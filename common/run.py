@@ -8,8 +8,6 @@ import hashlib
 import importlib.util
 import json
 import os
-import shutil
-import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, NoReturn
@@ -194,34 +192,11 @@ def require_file(path: Path, *, executable: bool = False) -> None:
 
 
 def host_preflight(bundle: Path, runtime: dict[str, Any]) -> None:
-    """Reject missing host runtime dependencies before any phone operation."""
+    """Reject an unsupported host runtime before any phone operation."""
+    del bundle, runtime
     if sys.version_info < MINIMUM_PYTHON:
         version = f"{sys.version_info.major}.{sys.version_info.minor}"
         fail(f"Python 3.11 or newer is required (found {version})")
-
-    ldd = shutil.which("ldd")
-    if ldd is None:
-        fail("glibc ldd is required to validate the bundled host tools")
-    for role, relative in runtime["host_tools"].items():
-        result = subprocess.run(
-            [ldd, str(bundle / relative)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        lines = [
-            line.strip()
-            for line in (result.stdout + "\n" + result.stderr).splitlines()
-            if line.strip()
-        ]
-        missing = sorted(
-            line.split("=>", 1)[0].strip() for line in lines if "=> not found" in line
-        )
-        if missing:
-            fail(f"host tool {role} is missing shared libraries: {', '.join(missing)}")
-        if result.returncode:
-            detail = "; ".join(lines) or f"ldd exited with status {result.returncode}"
-            fail(f"host tool {role} cannot run on this host: {detail}")
 
 
 def load_adapter(path: Path) -> ModuleType:

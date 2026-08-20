@@ -5,8 +5,8 @@ phone-specific hardware support.
 
 ## Shared userspace
 
-The shared local terminal is built by the `fplinux-console` Buildroot package.
-It requires ordinary Linux interfaces only:
+The shared local terminal is built by the `fplinux-console` APK. It requires
+ordinary Linux interfaces only:
 
 - stdin and stdout refer to the same active Linux VT in text mode, backed by
   `fbcon`;
@@ -100,37 +100,30 @@ the spare VT, leaving evdev as its only input path and preventing line-disciplin
 echo from overwriting the VCSA-rendered history. Shutdown returns to the primary
 VT when necessary and disallocates the spare VT.
 
-The common init reads branding from `/etc/os-release`, starts `usb-getty` and
-`fplinux-input`, then runs `/bin/fplinux-console`. `usb-getty` gives
-`/dev/ttyGS0` to BusyBox `getty` as the USB shell's controlling terminal.
-`fplinux-input` reads `type code value` lines from `/dev/ttyGS1`, creates the
-`FPLinux host keyboard` uinput device and keeps that device alive across host
-disconnections.
+OpenRC owns the shared runtime services. `fplinux-console-openrc` attaches the
+local console directly to `/dev/tty1` and supervises a BusyBox `getty` on
+`/dev/ttyGS0`. `fplinux-input-openrc` supervises the bridge that reads
+`type code value` lines from `/dev/ttyGS1`, creates the `FPLinux host keyboard`
+uinput device and keeps that device alive across host disconnections. Service
+restart policy belongs to `supervise-daemon`; targets do not provide init or
+worker loops.
 
 The console takes a record lock under `/tmp` before changing its VT. A second
 copy on the same VT is refused, and the kernel releases the lock when its owner
 dies. Failure to create or take the lock for any other reason is reported but
-does not remove the phone's local console. A target may install this executable
-hook:
-
-```text
-/usr/libexec/fplinux/boot-diagnostics
-```
-
-The hook may print a bounded phone-specific boot summary. Background USB
-readiness messages go to `/dev/kmsg`, so they cannot corrupt the local VT.
+does not remove the phone's local console. Background service diagnostics go to
+`/dev/kmsg`, so they cannot corrupt the local VT.
 
 ## Target responsibilities
 
-A phone target still owns:
+A phone target owns:
 
 - the framebuffer or DRM driver and the mode exposed to `fbcon`;
 - keypad scan, wiring and conversion to the normalized Linux input key codes;
 - DTS nodes and kernel configuration, including evdev, uinput, file locking and
   two generic-serial gadget ports when the host keyboard bridge is enabled;
 - the bootstrap board descriptor and target payload assembly;
-- the memory map, board assets and validated platform-adapter values;
-- `/etc/os-release` and an optional boot diagnostics hook.
+- the memory map, board assets and validated platform-adapter values.
 
 The selected platform's fixed adapter owns the host loader sequence. A target
 supplies board data to that sequence but cannot select commands or executable
@@ -145,14 +138,10 @@ font, rasterizer and layout from
 [`bootstrap/fplinux-boot-screen/`](../../bootstrap/fplinux-boot-screen/) into the
 pinned bootstrap closure.
 
-## Root filesystem overlays
+## Root filesystem ownership
 
-Apply the common overlay first and the target overlay second:
-
-```text
-BR2_ROOTFS_OVERLAY="/workspace/common/rootfs/overlay /workspace/targets/<phone>/rootfs/overlay"
-```
-
-The target overlay may add identity and diagnostics files. It must not fork the
-shared terminal implementation to change keypad scan codes; normalize those in
-the target input driver instead.
+Do not add common or target rootfs overlays. Files installed into the phone
+userspace must have an APK owner under `alpine/aports/`. Shared service policy
+belongs to `fplinux-base` or the component's `-openrc` subpackage. Normalize
+phone-specific keypad scan codes in the target kernel driver rather than
+forking the userspace package.

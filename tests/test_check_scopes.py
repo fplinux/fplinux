@@ -73,7 +73,7 @@ class CheckScopeTests(unittest.TestCase):
         """Keep unrelated documentation outside the two expensive closures."""
         common = (
             WorkspaceFile("README.md", b"first", 0o644),
-            WorkspaceFile("buildroot-external/package/app/app.c", b"int app;\n", 0o644),
+            WorkspaceFile("alpine/aports/fplinux-console/app.c", b"int app;\n", 0o644),
             WorkspaceFile("targets/phone/kernel/board.c", b"int board;\n", 0o644),
             WorkspaceFile("scripts/fplinux_cli/kernelcheck.py", b"checker\n", 0o644),
             WorkspaceFile(
@@ -262,7 +262,7 @@ class CheckScopeTests(unittest.TestCase):
         cases = (
             ("metadata", ".gitignore"),
             ("metadata", "package.yaml"),
-            ("buildroot", "buildroot-external/external.desc"),
+            ("alpine", "alpine/abuild.conf"),
             ("c", "_clang-format"),
             ("c", ".clang-format-ignore"),
         )
@@ -355,6 +355,83 @@ class CheckScopeTests(unittest.TestCase):
             check_scope_closure_digest("c", first),
             check_scope_closure_digest("c", bootstrap_changed),
         )
+
+    def test_aport_c_and_header_invalidate_c_scope_without_runtime_selection(self) -> None:
+        """Track every C/H input from an aport that may not be in the rootfs."""
+        first = WorkspaceSnapshot(
+            (
+                WorkspaceFile("scripts/check.py", b"checker\n", 0o755),
+                WorkspaceFile(
+                    "alpine/aports/local-only/local-only.c", b"int local_only;\n", 0o644
+                ),
+                WorkspaceFile(
+                    "alpine/aports/local-only/local-only.h", b"#define LOCAL_ONLY 1\n", 0o644
+                ),
+            ),
+            "a" * 64,
+        )
+        source_changed = WorkspaceSnapshot(
+            (
+                first.files[0],
+                WorkspaceFile("alpine/aports/local-only/local-only.c", b"int changed;\n", 0o644),
+                first.files[2],
+            ),
+            "b" * 64,
+        )
+        header_changed = WorkspaceSnapshot(
+            (
+                first.files[0],
+                first.files[1],
+                WorkspaceFile(
+                    "alpine/aports/local-only/local-only.h", b"#define LOCAL_ONLY 2\n", 0o644
+                ),
+            ),
+            "c" * 64,
+        )
+        self.assertNotEqual(
+            check_scope_closure_digest("c", first),
+            check_scope_closure_digest("c", source_changed),
+        )
+        self.assertNotEqual(
+            check_scope_closure_digest("c", first),
+            check_scope_closure_digest("c", header_changed),
+        )
+
+    def test_alpine_scope_tracks_each_present_apkbuild(self) -> None:
+        """Track every aport and both package-selection manifest layers."""
+        first = WorkspaceSnapshot(
+            (
+                WorkspaceFile("scripts/check.py", b"checker\n", 0o755),
+                WorkspaceFile("alpine.lock.toml", b"lock\n", 0o644),
+                WorkspaceFile("alpine/abuild.conf", b"abuild\n", 0o644),
+                WorkspaceFile("alpine/aports/local-only/APKBUILD", b"first\n", 0o644),
+                WorkspaceFile("platforms/demo/platform.toml", b"platform packages\n", 0o644),
+                WorkspaceFile("targets/demo/target.toml", b"target packages\n", 0o644),
+            ),
+            "a" * 64,
+        )
+        changed = WorkspaceSnapshot(
+            (
+                *first.files[:3],
+                WorkspaceFile(first.files[3].path, b"second\n", 0o644),
+                *first.files[4:],
+            ),
+            "b" * 64,
+        )
+        self.assertNotEqual(
+            check_scope_closure_digest("alpine", first),
+            check_scope_closure_digest("alpine", changed),
+        )
+        for index in (4, 5):
+            files = list(first.files)
+            files[index] = WorkspaceFile(files[index].path, b"changed packages\n", 0o644)
+            with self.subTest(path=files[index].path):
+                self.assertNotEqual(
+                    check_scope_closure_digest("alpine", first),
+                    check_scope_closure_digest(
+                        "alpine", WorkspaceSnapshot(tuple(files), "c" * 64)
+                    ),
+                )
 
     def test_shell_scope_matches_checker_shebang_and_external_sources(self) -> None:
         """Use the checker's stripped shebang and broaden when ShellCheck reads sources."""
@@ -486,7 +563,7 @@ class CheckReceiptIntegrationTests(unittest.TestCase):
             WorkspaceFile("README.md", b"documentation\n", 0o644),
             WorkspaceFile("scripts/check.py", b"checker\n", 0o755),
             WorkspaceFile(
-                "buildroot-external/package/app/app.c",
+                "alpine/aports/fplinux-console/app.c",
                 c_source,
                 0o644,
             ),
