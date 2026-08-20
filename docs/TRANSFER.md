@@ -92,10 +92,11 @@ static-screen hardware sample measured 99.97% CPU idle. Framebuffer changes
 schedule a full frame and complete through the LCDC interrupt, while updates
 arriving during a transfer are coalesced into the next frame.
 
-Upload waits for an acknowledgement after each window of sixteen base64
-lines, while pull requests 32 KiB at a time. The window travels as one USB
-transfer. At thirty-two lines the phone stops consuming input, so it remains at
-sixteen.
+Upload is split into bounded chunks of at most 256 KiB. The phone decodes and
+acknowledges each chunk before the host sends the next one. Within a chunk the
+host waits after every sixteen base64 lines so it cannot overrun the gadget TTY.
+The shell therefore never retains the complete encoded payload in memory. Pull
+requests 32 KiB at a time.
 
 ## What the channel imposes
 
@@ -104,12 +105,11 @@ interface 0 can run alongside the keyboard forwarder on interface 1, but two
 processes cannot claim the same interface. Close an interactive interface 0
 session before running `--exec`, `--upload` or `--pull`.
 
-BusyBox `getty` puts the line into canonical mode with echo and with software
-flow control. Both transfer directions work in text mode for that reason: the
-payload travels as base64 lines, which survive a line discipline that would
-otherwise eat control bytes. This costs a third of the bandwidth and buys
-transfers that need no device-side component and work against any image already
-running.
+BusyBox `getty` puts the line into canonical mode with echo and software flow
+control. Both transfer directions use text mode: payload travels as base64 lines,
+which avoid line-discipline interpretation of control bytes. Base64 adds one
+third of payload overhead. The transfer protocol uses only the shell and standard
+utilities already present in the image.
 
 On the TA-1618, Linux has about 62 MiB of RAM and `/tmp` is backed by tmpfs. An
 upload to `/tmp` therefore consumes RAM, while an upload to an already mounted
@@ -117,22 +117,18 @@ filesystem consumes that filesystem's free space. There is no `/lib/modules`,
 so a loadable driver under test is transferred to `/tmp` for the active RAM
 session.
 
-## What is deliberately not here
+## Unsupported transfer features
 
-- **Compression.** Transfer modes preserve the file bytes and do not transform
-  payloads. Compression has not been qualified as part of the text-mode protocol.
-- **A raw block mode.** Turning off the line discipline would remove the base64
-  overhead, but it needs a proven 8-bit transparent path first, and every raw
-  excursion has to restore the terminal on each exit path including a crash.
-- **Resume.** A pull that is interrupted starts again. The blocks are already
-  ranged, so resuming is a matter of sending the digest of the accepted prefix
-  and continuing from that offset.
-- **A file-transfer helper.** A framed binary protocol would separate command
-  output from the kernel log structurally instead of by marker scanning and
-  remove the base64 overhead. The installed `fplinux-input` helper handles
+- **Compression:** transfer modes preserve file bytes and do not transform
+  payloads.
+- **Raw block transfer:** interface 0 uses the canonical text-mode shell channel
+  and base64 payload lines.
+- **Resume:** an interrupted pull starts from the beginning.
+- **Dedicated transfer daemon:** no file-transfer helper is installed; framing
+  and integrity checks run through the shell protocol. `fplinux-input` handles
   keyboard events only.
-- **USB networking.** The second serial interface is reserved for input events.
-  The kernel carries no network stack or USB ethernet function.
+- **USB networking:** interface 1 is reserved for input events, and the kernel
+  has no network stack or USB Ethernet function.
 
 ## TA-1618 microSD card
 
