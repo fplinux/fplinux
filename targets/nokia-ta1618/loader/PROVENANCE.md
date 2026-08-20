@@ -13,9 +13,9 @@ verifies each archive and extracted member, and writes generated data only below
 
 The fpdoom map archive itself is pinned as
 `9295f209f33ab688711ae4496a90d319ae2aef79420a2fd823d1beabd7f2ede1`.
-The upstream release asset was refreshed on 2026-08-14 to add INOI 244 maps;
-the Nokia member hashes listed above are unchanged in the refreshed archive.
-`pinmap.bin` and `keymap.bin` are model-specific register initialization data
+The pinned fpdoom archive contains the Nokia and INOI board-map members. The
+Nokia member hashes are the values listed above. `pinmap.bin` and `keymap.bin`
+are model-specific register initialization data
 originating from phone firmware and mirrored by the pinned fpdoom release.
 FPLinux assigns no license to these `NOASSERTION` inputs.
 
