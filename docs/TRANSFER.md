@@ -1,6 +1,6 @@
 # Moving files between the host and the phone
 
-Current FPLinux console targets expose two non-ACM serial interfaces under USB
+FPLinux console targets expose two non-ACM serial interfaces under USB
 ID `0525:a4a6`. Interface 0 maps to `/dev/ttyGS0` and carries the login shell,
 interactive console, `--exec`, `--upload` and `--pull`. Interface 1 maps to
 `/dev/ttyGS1` and carries host keyboard events for `fplinux-input`.
@@ -54,7 +54,7 @@ remove a transferred module explicitly:
 ./fplinux console nokia-ta1618 --exec 'rmmod module_name'
 ```
 
-The module and every state change it makes remain part of the volatile RAM
+The module and every state change it makes are part of the volatile RAM
 session.
 
 ## Taking a file
@@ -153,7 +153,7 @@ temporary and final file stay on the same filesystem:
 
 The card is not the throughput limit in this path; the text console is.
 
-Carrying the card between machines remains the fastest manual path. The card host
+Carrying the card between machines is the fastest manual path. The card host
 reaches its PMIC rails through the shared UMS9117 ADI provider. The provider owns
 the controller and analog-slave mappings and serializes MMC, framebuffer, keypad
 and power-off transactions under the ADI hardware user lock.

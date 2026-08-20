@@ -3,15 +3,15 @@
 FPLinux packages are phone- and host-specific. They are generated from the same
 build outputs available through `./fplinux build`.
 
-## Current availability
+## Availability
 
-No prebuilt archive is currently available. `releases.lock.toml` contains no
-qualified runtime closure for `nokia-ta1618`, and `.cache/out/releases/` is not a
-source or release record.
+The repository does not provide a prebuilt archive. `releases.lock.toml` contains
+no qualified runtime closure for `nokia-ta1618`, and `.cache/out/releases/` is
+not a source or release record.
 
-The current package target is Linux x86-64. Windows archives are not available.
+The package target is Linux x86-64. Windows archives are not available.
 
-## Maintainer qualification workflow
+## Qualification contract
 
 Build the target, then create a candidate for the physical phone gate:
 
@@ -30,11 +30,11 @@ Every candidate contains a generated `CANDIDATE-NOTICE.txt` whose first line is
 `HARDWARE QUALIFICATION CANDIDATE - DO NOT PUBLISH`. The candidate notice is
 included in `SHA256SUMS` and in the complete package-content digest. The package
 command verifies that every generated bundle input matches the successful build
-manifest and that the manifest belongs to the current source workspace and
+manifest and that the manifest belongs to the selected source workspace and
 container recipe.
 
-After the candidate's exact **runtime closure** completes the phone gate, add its
-printed SHA-256 to `releases.lock.toml` and run:
+A runtime closure is eligible for `releases.lock.toml` only when its exact
+candidate completes the phone gate. Packaging a recorded closure uses:
 
 ```sh
 ./fplinux package nokia-ta1618
@@ -180,7 +180,7 @@ The host USB client uses these controls:
 - `exit` ends the active phone shell; the OpenRC-supervised USB getty starts a
   replacement shell.
 
-Interface 1 can forward a host keyboard while interface 0 remains attached:
+Interface 1 can forward a host keyboard while interface 0 stays attached:
 
 ```sh
 sudo ./host/fplinux-usb-console \
@@ -190,7 +190,7 @@ sudo ./host/fplinux-usb-console \
 The forwarder uses `EVIOCGRAB`, so that keyboard stops reaching the host desktop
 until the process exits.
 
-Detach with `Ctrl-]` before unplugging USB. If Linux is still running, reconnect
+Detach with `Ctrl-]` before unplugging USB. If Linux is running, reconnect
 from the extracted archive with:
 
 ```sh
@@ -198,25 +198,25 @@ from the extracted archive with:
 ```
 
 Do not start `runner/run.py` merely to reconnect: the full runner waits for a
-BootROM device and starts a new RAM-load sequence.
+BootROM device and starts a RAM-load sequence.
 
 The Nokia TA-1618 power-off handler is qualified for battery-only shutdown.
 Detach with `Ctrl-]`, disconnect USB and hold the red handset key continuously
 for five seconds. Releasing it before the deadline cancels the request, and a
-short press remains an ordinary `KEY_POWER` input event.
+short press is an ordinary `KEY_POWER` input event.
 
 Before starting system shutdown, the button handler verifies the exact SC2720
 identity, checks that charger input is inactive and syncs the filesystems. The
 final sys-off handler repeats the identity and charger guards, then requests
 the PMIC hardware power-down sequence without reading the PMIC after its final
-write. A connected charger refuses the long-press request while Linux remains
+write. A connected charger refuses the long-press request while Linux is
 running.
 
 A failed final guard stops the shutdown path instead of attempting another PMIC
-operation. If the phone remains powered after shutdown has started, remove and
-reinsert the battery before booting again. A successful shutdown discards the
-volatile FPLinux session; the next manual power-on follows the unchanged vendor
-boot path. Linux reboot remains unqualified.
+operation. If the phone is powered after shutdown starts, remove and reinsert
+the battery before booting again. A successful shutdown discards the volatile
+FPLinux session. Manual power-on uses the vendor boot path. Linux reboot is
+unqualified.
 
 ## Troubleshooting
 
@@ -224,7 +224,7 @@ boot path. Linux reboot remains unqualified.
 
 Power the phone off, disconnect USB and start the runner first. Hold `*`, connect
 USB only when prompted and keep `*` pressed until the BootROM device is found.
-If `0525:a4a6` is already present, Linux is still running; use
+If `0525:a4a6` is already present, Linux is running; use
 `./host/fplinux-usb-console --interface 0` instead.
 
 ### A USB device is visible but access is denied
@@ -247,9 +247,9 @@ Do not treat it as qualified and do not package it as a release.
 
 ### The attached console disconnects
 
-If the phone still enumerates as `0525:a4a6`, run
+If the phone enumerates as `0525:a4a6`, run
 `./host/fplinux-usb-console --interface 0` again. Starting the complete runner
-is appropriate only for a new power-off BootROM load.
+is appropriate only for a power-off BootROM load.
 
 ## Release rule
 
