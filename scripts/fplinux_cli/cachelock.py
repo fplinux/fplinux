@@ -69,6 +69,10 @@ def cache_lock(
             waited = True
 
         _write_owner(descriptor, _owner_text(command, target))
+        if not exclusive:
+            # ``run`` and ``console`` replace this process with the runner.
+            # Keep their shared flock alive until that process exits.
+            os.set_inheritable(descriptor, True)  # noqa: FBT003 -- positional-only API.
         if waited:
             print("fplinux: cache released; continuing.", file=sys.stderr, flush=True)
         yield

@@ -4,15 +4,20 @@
 from __future__ import annotations
 
 import contextlib
+import errno
+import fcntl
 import io
 import multiprocessing
+import os
+import sys
 import tempfile
+import time
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from fplinux_cli.cachelock import cache_lock
+from fplinux_cli.cachelock import _LOCK_FILENAME, cache_lock
 
 if TYPE_CHECKING:
     from multiprocessing.context import SpawnProcess
@@ -22,6 +27,7 @@ if TYPE_CHECKING:
 
 _CHILD_LOCK_TIMEOUT = "parent did not release child cache lock"
 _CHILD_WAIT_TIMEOUT = "parent did not release waiting child"
+_EXEC_LOCK_TIMEOUT = "parent did not release exec'd shared cache lock"
 
 
 @dataclass(frozen=True)
@@ -74,6 +80,40 @@ def _wait_for_lock(
     output.put(stderr.getvalue())
 
 
+def _exec_with_shared_lock(cache_root: str, acquired_path: str, release_path: str) -> None:
+    """Replace a shared-lock holder with an ordinary process that keeps it open."""
+    with cache_lock(
+        Path(cache_root),
+        exclusive=False,
+        command="run",
+        target="nokia-ta1618",
+    ):
+        program = (
+            "from pathlib import Path\n"
+            "import sys\n"
+            "import time\n"
+            "acquired = Path(sys.argv[1])\n"
+            "release = Path(sys.argv[2])\n"
+            "acquired.touch()\n"
+            "deadline = time.monotonic() + 10\n"
+            "while not release.exists():\n"
+            "    if time.monotonic() >= deadline:\n"
+            "        raise RuntimeError(sys.argv[3])\n"
+            "    time.sleep(0.01)\n"
+        )
+        os.execv(
+            sys.executable,
+            [
+                sys.executable,
+                "-c",
+                program,
+                acquired_path,
+                release_path,
+                _EXEC_LOCK_TIMEOUT,
+            ],
+        )
+
+
 class CacheLockTests(unittest.TestCase):
     """Check the cache flock only through separate operating-system processes."""
 
@@ -116,6 +156,26 @@ class CacheLockTests(unittest.TestCase):
         process.join(10)
         self.assertFalse(process.is_alive(), "child did not exit")
         self.assertEqual(process.exitcode, 0)
+
+    def _exclusive_lock_available(self) -> bool:
+        """Return whether a separate descriptor can immediately take EX."""
+        self.cache_root.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(
+            self.cache_root / _LOCK_FILENAME,
+            os.O_RDWR | os.O_CREAT | os.O_CLOEXEC,
+            0o600,
+        )
+        try:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as error:
+                if error.errno not in {errno.EACCES, errno.EAGAIN}:
+                    raise
+                return False
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            return True
+        finally:
+            os.close(descriptor)
 
     def test_shared_invocations_run_together(self) -> None:
         """The public shared modes do not block one another."""
@@ -194,6 +254,34 @@ class CacheLockTests(unittest.TestCase):
                         raise exception_type()
                 process, _acquired, child_release = self._start_holder(exclusive=True)
                 self._stop(process, child_release)
+
+    def test_shared_lock_survives_exec_until_runner_exits(self) -> None:
+        """A runner reached through exec keeps build from taking EX too early."""
+        acquired_path = self.cache_root / "exec-acquired"
+        release_path = self.cache_root / "exec-release"
+        process = self.context.Process(
+            target=_exec_with_shared_lock,
+            args=(str(self.cache_root), str(acquired_path), str(release_path)),
+        )
+        process.start()
+        try:
+            deadline = time.monotonic() + 5
+            while not acquired_path.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(acquired_path.exists(), "child did not reach exec")
+            self.assertFalse(
+                self._exclusive_lock_available(),
+                "exec'd process lost its shared cache lock",
+            )
+        finally:
+            release_path.touch()
+            process.join(10)
+        self.assertFalse(process.is_alive(), "exec'd child did not exit")
+        self.assertEqual(process.exitcode, 0)
+        self.assertTrue(
+            self._exclusive_lock_available(),
+            "shared cache lock remained after runner exit",
+        )
 
 
 if __name__ == "__main__":
