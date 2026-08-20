@@ -11,7 +11,7 @@ portrait-aware layout, progress states, handoff status and bounded error view.
 It uses fixed-size state, performs no allocation and draws only through canvas
 callbacks supplied by the caller.
 
-A target remains responsible for:
+A target is responsible for:
 
 - initializing its panel and framebuffer;
 - implementing bounded rectangle and presentation callbacks;
