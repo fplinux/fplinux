@@ -15,7 +15,7 @@
 
 ## Scope
 
-Describe what this platform supplies to phone targets and what remains
+Describe what this platform supplies to phone targets and what is
 board-specific.
 
 ## Platform layout
@@ -82,7 +82,7 @@ meaning as [`TARGET.md`](TARGET.md).
 | USB controller           | `<status>` | `<path>`                | `<host/device and inherited state>` |
 | MMC / SD controller      | `<status>` | `<path>`                | `<instances and DMA constraints>`   |
 | DMA                      | `<status>` | `<path>`                | `<addressing constraints>`          |
-| Audio controller         | `<status>` | `<path>`                | `<codec remains target-specific>`   |
+| Audio controller         | `<status>` | `<path>`                | `<codec is target-specific>`        |
 | SPI / I2C                | `<status>` | `<path>`                | `<available buses>`                 |
 | Watchdog / reset         | `<status>` | `<path>`                | `<reboot/power behavior>`           |
 
@@ -125,5 +125,5 @@ here.
 A shared block becomes **Supported** when at least one listed phone target has
 exercised it on physical hardware and the implementation is present in the
 platform. This is feature-level hardware validation, not qualification of every
-target's complete runtime closure. Link to each phone's current support document and
+target's complete runtime closure. Link to each phone's support document and
 release state.

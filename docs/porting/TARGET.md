@@ -15,12 +15,12 @@
 | Boot method       | `<RAM / storage / other>`                  |
 | Linux version     | `<version>`                                |
 
-## Current status
+## Status
 
-In one paragraph, describe what the current source implements and how a user
-interacts with it. State current limitations and whether an exact runtime closure
-is recorded for this target in `releases.lock.toml`. Keep this section limited to
-the current source and runtime state.
+In one paragraph, describe what the source implements and how a user interacts
+with it. State limitations and whether an exact runtime closure is recorded for
+this target in `releases.lock.toml`. Keep this section limited to source and
+runtime facts.
 
 ## Target definition
 
@@ -121,7 +121,7 @@ target-controlled flags or launchers.
 Use these feature-level status values consistently:
 
 - **Supported:** exercised on the named physical hardware variant, with the
-  implementation present in the current target.
+  implementation present in the target.
 - **Partial:** exercised with the stated limitation or qualification gap.
 - **Not supported:** not implemented or deliberately disabled.
 - **Unknown:** hardware exists, but its state has not been established.
@@ -156,9 +156,9 @@ the complete exact runtime closure to pass the phone gate and have its digest in
 | LEDs / vibration                 | `<status>` | `<available controls>`                 |
 | RTC                              | `<status>` | `<time retention>`                     |
 
-Keep rows for hardware that is present, even when its current state is **Unknown**
-or **Not supported**. Delete only rows for categories that do not apply after the
-target document already makes the absence clear.
+Keep rows for hardware that is present, even when its state is **Unknown** or
+**Not supported**. Delete rows only for categories that do not apply to the
+target document.
 
 ## Build
 
@@ -204,8 +204,8 @@ instruction.
 
 ## Release qualification
 
-State whether a prebuilt archive is currently available and whether this target
-has a matching entry in `releases.lock.toml`. If it does, identify the exact
+State whether the target provides a prebuilt archive and whether it has a
+matching entry in `releases.lock.toml`. If it does, identify the exact
 runtime closure digest and hardware variant. Do not list a candidate as a
 release.
 

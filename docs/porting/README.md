@@ -38,11 +38,11 @@ Start with:
 2. Create a `--candidate` package.
 3. Run that exact runtime closure on the intended hardware variant.
 4. Verify every feature marked **Supported**.
-5. Add the printed runtime SHA-256 to `releases.lock.toml` only after the complete
-   phone gate passes.
+5. Record the printed runtime SHA-256 in `releases.lock.toml` only for a runtime
+   closure that passes the complete phone gate.
 6. Create the release package without `--candidate`.
 
-A target support table records feature-level hardware validation and current
+A target support table records feature-level hardware validation and
 limitations. Release qualification is stricter: it applies to the complete exact
 runtime closure and exists only when the matching digest is present in
 `releases.lock.toml`.

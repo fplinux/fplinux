@@ -53,7 +53,7 @@ document and `releases.lock.toml`.
 | --------------------- | -------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | CPU                   | Supported      | `dts/ums9117.dtsi`                        | CPU0 is a Cortex-A7 at 1 GHz                                                                            |
 | SMP                   | Not applicable | —                                         | The SoC has a single Cortex-A7 core                                                                     |
-| Interrupt controller  | Supported      | ARM GIC binding in `dts/ums9117.dtsi`     | SoC SPI numbers are shared; board drivers remain target-owned                                           |
+| Interrupt controller  | Supported      | ARM GIC binding in `dts/ums9117.dtsi`     | SoC SPI numbers are shared; board drivers are target-owned                                              |
 | System counter        | Supported      | `kernel/ums9117-timer.c`                  | 1 kHz UMS9117 counter                                                                                   |
 | Pike2 timer           | Supported      | Linux Spreadtrum timer driver integration | Uses the shared 32.768 kHz clock                                                                        |
 | Clock controller      | Partial        | Fixed clock nodes                         | No general UMS9117 clock-controller driver                                                              |
@@ -62,7 +62,7 @@ document and `releases.lock.toml`.
 | LCDC framebuffer      | Supported      | `kernel/ums9117-fb-core.c`                | Damage-driven RGB565 core with SPI1 three-wire and LCM/DBI transports; panel profiles stay target-owned |
 | Matrix keypad         | Supported      | `kernel/ums9117-keypad.c`                 | Matrix scan with inherited analog EIC keys; keymaps stay target-owned                                   |
 | USB host controller   | Not supported  | —                                         | No host-mode initialization path                                                                        |
-| GPIO / pin control    | Not supported  | —                                         | Board drivers currently use known MMIO state directly                                                   |
+| GPIO / pin control    | Not supported  | —                                         | Board drivers use known MMIO state directly                                                             |
 | UART                  | Not supported  | —                                         | No platform UART driver or DTS node                                                                     |
 | MMC / SD controller   | Not supported  | —                                         | The SDIO0 host lives in the board target, not here                                                      |
 | DMA                   | Not supported  | —                                         | USB is deliberately PIO-only                                                                            |
@@ -113,7 +113,7 @@ not duplicate SoC-wide timer, GIC or USB addresses.
 
 ## Known constraints
 
-- The current platform describes one CPU and does not bring up secondary cores.
+- The platform describes one CPU and does not bring up secondary cores.
 - MUSB support assumes that the target bootstrap has already prepared the
   controller and PHY. It does not perform a complete cold initialization.
 - The ADI provider accepts the fixed inherited controller only when its version
@@ -136,4 +136,4 @@ not duplicate SoC-wide timer, GIC or USB addresses.
 
 A shared block is marked **Supported** when a listed phone target has validated
 it on physical hardware and the implementation is present. Each target document
-records its own current limitations and release-qualification state.
+records its own limitations and release-qualification state.
