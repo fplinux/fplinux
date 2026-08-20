@@ -39,6 +39,8 @@
 #define DEFAULT_LINGER_MS 500u
 #define TRANSFER_BUFFER_SIZE 16384u
 #define UPLOAD_WINDOW_LINES 16u
+#define UPLOAD_CHUNK_LINES 4599u
+#define UPLOAD_COMMAND_BYTES 1800u
 #define MAX_EXEC_OUTPUT_BYTES (1u * 1024u * 1024u)
 #define PULL_BLOCK_BYTES (32u * 1024u)
 #define PULL_BLOCK_ATTEMPTS 3u
@@ -1194,6 +1196,72 @@ static int wait_for_upload_prompts(libusb_device_handle *handle,
 				  LIBUSB_ERROR_TIMEOUT;
 }
 
+static int format_upload_verify_command(char *command, size_t command_size,
+					const char *hash, const char *remote,
+					const char *nonce)
+{
+	return snprintf(command, command_size,
+			"fplinux_got=$(sha256sum \"$fplinux_tmp\"); "
+			"fplinux_got=${fplinux_got%%%% *}; "
+			"fplinux_size=$(wc -c < \"$fplinux_tmp\"); "
+			"if [ \"$fplinux_got\" = '%s' ] && "
+			"[ ! -d '%s' ] && [ ! -L '%s' ] && "
+			"mv -f \"$fplinux_tmp\" '%s'; then "
+			"PS2=$fplinux_old_ps2; "
+			"if stty echo; then "
+			"printf '\\nFPLINUX_UPLOAD_%%s:%%s:%%s\\n' "
+			"OK '%s' '%s'; "
+			"else printf '\\nFPLINUX_UPLOAD_%%s:%%s\\n' "
+			"FAIL '%s'; fi; "
+			"else rm -f \"$fplinux_tmp\"; "
+			"PS2=$fplinux_old_ps2; stty echo; "
+			"printf '\\nFPLINUX_UPLOAD_%%s:%%s:%%s:%%s\\n' "
+			"FAIL '%s' \"$fplinux_got\" \"$fplinux_size\"; fi\n",
+			hash, remote, remote, remote, nonce, hash, nonce,
+			nonce);
+}
+
+static int format_upload_chunk_start_command(char *command, size_t command_size,
+					     const char *delimiter)
+{
+	return snprintf(command, command_size,
+			"base64 -d >> \"$fplinux_tmp\" <<'%s'\n", delimiter);
+}
+
+static int finish_upload_chunk(libusb_device_handle *handle,
+			       const struct endpoint_pair *pair,
+			       unsigned int timeout_ms, const char *delimiter,
+			       const char *success_marker,
+			       const char *failure_marker, bool *chunk_open,
+			       bool *remote_failure)
+{
+	char command[UPLOAD_COMMAND_BYTES];
+	int command_size =
+		snprintf(command, sizeof(command),
+			 "%s\n"
+			 "fplinux_decode_status=$?; "
+			 "if [ \"$fplinux_decode_status\" -eq 0 ]; then "
+			 "printf '\\n%s\\n'; "
+			 "else rm -f \"$fplinux_tmp\"; PS2=$fplinux_old_ps2; "
+			 "stty echo; printf '\\n%s:DECODE\\n'; fi\n",
+			 delimiter, success_marker, failure_marker);
+	int result;
+
+	if (command_size < 0 || command_size >= (int)sizeof(command)) {
+		return LIBUSB_ERROR_INVALID_PARAM;
+	}
+	result = send_bytes(handle, pair->endpoint_out,
+			    (const unsigned char *)command,
+			    (size_t)command_size, timeout_ms);
+	if (result != LIBUSB_SUCCESS) {
+		return result;
+	}
+	*chunk_open = false;
+	return wait_for_upload_result(handle, pair->endpoint_in, timeout_ms,
+				      success_marker, failure_marker,
+				      remote_failure);
+}
+
 static int upload_file(libusb_device_handle *handle,
 		       const struct endpoint_pair *pair,
 		       const struct options *options)
@@ -1203,10 +1271,12 @@ static int upload_file(libusb_device_handle *handle,
 	char hash[65];
 	char nonce[40];
 	char delimiter[96];
-	char command[1800];
+	char command[UPLOAD_COMMAND_BYTES];
 	char directory[256];
 	char *slash;
 	char ready_marker[96];
+	char stream_ready_marker[112];
+	char chunk_marker[112];
 	char success_marker[160];
 	char failure_marker[128];
 	unsigned char input[57];
@@ -1216,12 +1286,14 @@ static int upload_file(libusb_device_handle *handle,
 	uint64_t byte_count;
 	uint64_t sent_bytes = 0;
 	unsigned int window_lines = 0;
+	unsigned int chunk_lines = 0;
 	int result = LIBUSB_ERROR_OTHER;
 	int hash_result;
 	int command_size;
 	size_t size;
 	bool device_echo_disabled = false;
 	bool remote_failure = false;
+	bool chunk_open = false;
 
 	if (!safe_remote_path(options->upload_remote)) {
 		fprintf(stderr,
@@ -1255,8 +1327,8 @@ static int upload_file(libusb_device_handle *handle,
 	if (snprintf(nonce, sizeof(nonce), "%016llx%08lx%.8s",
 		     (unsigned long long)monotonic_milliseconds(),
 		     (unsigned long)getpid(), hash) >= (int)sizeof(nonce) ||
-	    snprintf(delimiter, sizeof(delimiter), "FPLINUX_DATA_%.32s",
-		     hash) >= (int)sizeof(delimiter)) {
+	    snprintf(delimiter, sizeof(delimiter), "FPLINUX_CHUNK_%s", nonce) >=
+		    (int)sizeof(delimiter)) {
 		fprintf(stderr, "fplinux-usb-console: upload destination path "
 				"is too long\n");
 		result = LIBUSB_ERROR_INVALID_PARAM;
@@ -1321,9 +1393,14 @@ static int upload_file(libusb_device_handle *handle,
 			"(missing directory or not enough free space)\n");
 		goto cleanup;
 	}
-	command_size = snprintf(
-		command, sizeof(command),
-		"umask 077; base64 -d > \"$fplinux_tmp\" <<'%s'\n", delimiter);
+	snprintf(stream_ready_marker, sizeof(stream_ready_marker),
+		 "FPLINUX_UPLOAD_STREAM_READY:%s", nonce);
+	snprintf(chunk_marker, sizeof(chunk_marker),
+		 "FPLINUX_UPLOAD_CHUNK_OK:%s", nonce);
+	snprintf(failure_marker, sizeof(failure_marker),
+		 "FPLINUX_UPLOAD_FAIL:%s", nonce);
+	command_size = snprintf(command, sizeof(command), "printf '\\n%s\\n'\n",
+				stream_ready_marker);
 	if (command_size < 0 || command_size >= (int)sizeof(command)) {
 		result = LIBUSB_ERROR_INVALID_PARAM;
 		goto cleanup;
@@ -1334,17 +1411,51 @@ static int upload_file(libusb_device_handle *handle,
 	if (result != LIBUSB_SUCCESS) {
 		goto cleanup;
 	}
-	result = wait_for_upload_prompts(handle, pair->endpoint_in,
-					 options->timeout_ms, ".", 1);
+	result = wait_for_upload_result(handle, pair->endpoint_in,
+					options->timeout_ms,
+					stream_ready_marker, failure_marker,
+					&remote_failure);
 	if (result != LIBUSB_SUCCESS) {
+		if (remote_failure) {
+			device_echo_disabled = false;
+		}
 		fprintf(stderr,
 			"\nfplinux-usb-console: device shell did not enter "
-			"upload data mode\n");
+			"streaming upload mode\n");
 		goto cleanup;
 	}
 	while (!signal_requested &&
 	       (size = fread(input, 1, sizeof(input), file)) > 0) {
 		size_t encoded_size = encode_base64_line(input, size, encoded);
+
+		if (chunk_lines == 0) {
+			command_size = format_upload_chunk_start_command(
+				command, sizeof(command), delimiter);
+			if (command_size < 0 ||
+			    command_size >= (int)sizeof(command)) {
+				result = LIBUSB_ERROR_INVALID_PARAM;
+				goto cleanup;
+			}
+			result = send_bytes(handle, pair->endpoint_out,
+					    (const unsigned char *)command,
+					    (size_t)command_size,
+					    options->timeout_ms);
+			if (result != LIBUSB_SUCCESS) {
+				goto cleanup;
+			}
+			chunk_open = true;
+			result = wait_for_upload_prompts(handle,
+							 pair->endpoint_in,
+							 options->timeout_ms,
+							 ".", 1);
+			if (result != LIBUSB_SUCCESS) {
+				fprintf(stderr,
+					"\nfplinux-usb-console: device shell "
+					"did not enter an upload "
+					"chunk\n");
+				goto cleanup;
+			}
+		}
 
 		if ((uint64_t)size > byte_count - sent_bytes) {
 			fprintf(stderr,
@@ -1358,6 +1469,7 @@ static int upload_file(libusb_device_handle *handle,
 		memcpy(batch + batched, encoded, encoded_size);
 		batched += encoded_size;
 		++window_lines;
+		++chunk_lines;
 		if (window_lines == UPLOAD_WINDOW_LINES) {
 			result = send_bytes(handle, pair->endpoint_out, batch,
 					    batched, options->timeout_ms);
@@ -1370,12 +1482,49 @@ static int upload_file(libusb_device_handle *handle,
 							 options->timeout_ms,
 							 ".", window_lines);
 			if (result != LIBUSB_SUCCESS) {
-				fprintf(stderr, "\nfplinux-usb-console: device "
-						"shell stopped "
-						"consuming upload data\n");
+				fprintf(stderr,
+					"\nfplinux-usb-console: device shell "
+					"stopped consuming upload "
+					"data\n");
 				goto cleanup;
 			}
 			window_lines = 0;
+		}
+		if (chunk_lines == UPLOAD_CHUNK_LINES) {
+			if (window_lines > 0) {
+				result = send_bytes(handle, pair->endpoint_out,
+						    batch, batched,
+						    options->timeout_ms);
+				if (result != LIBUSB_SUCCESS) {
+					goto cleanup;
+				}
+				result = wait_for_upload_prompts(
+					handle, pair->endpoint_in,
+					options->timeout_ms, ".", window_lines);
+				if (result != LIBUSB_SUCCESS) {
+					fprintf(stderr,
+						"\nfplinux-usb-console: device "
+						"shell stopped consuming upload "
+						"data\n");
+					goto cleanup;
+				}
+				batched = 0;
+				window_lines = 0;
+			}
+			result = finish_upload_chunk(
+				handle, pair, options->timeout_ms, delimiter,
+				chunk_marker, failure_marker, &chunk_open,
+				&remote_failure);
+			if (result != LIBUSB_SUCCESS) {
+				if (remote_failure) {
+					device_echo_disabled = false;
+				}
+				fprintf(stderr, "\nfplinux-usb-console: device "
+						"failed to decode an upload "
+						"chunk\n");
+				goto cleanup;
+			}
+			chunk_lines = 0;
 		}
 	}
 	if (signal_requested) {
@@ -1399,30 +1548,36 @@ static int upload_file(libusb_device_handle *handle,
 						 options->timeout_ms, ".",
 						 window_lines);
 		if (result != LIBUSB_SUCCESS) {
-			fprintf(stderr,
-				"\nfplinux-usb-console: device shell stopped "
-				"consuming upload data\n");
+			fprintf(stderr, "\nfplinux-usb-console: device shell "
+					"stopped consuming upload data\n");
 			goto cleanup;
 		}
 	}
-	command_size = snprintf(
-		command, sizeof(command),
-		"%s\n"
-		"fplinux_got=$(sha256sum \"$fplinux_tmp\"); "
-		"fplinux_got=${fplinux_got%%%% *}; "
-		"fplinux_size=$(wc -c < \"$fplinux_tmp\"); "
-		"if [ \"$fplinux_got\" = '%s' ] && "
-		"[ ! -d '%s' ] && [ ! -L '%s' ] && "
-		"mv -f \"$fplinux_tmp\" '%s'; then "
-		"PS2=$fplinux_old_ps2; "
-		"if stty echo; then "
-		"printf '\\nFPLINUX_UPLOAD_%%s:%%s:%%s\\n' OK '%s' '%s'; "
-		"else printf '\\nFPLINUX_UPLOAD_%%s:%%s\\n' FAIL '%s'; fi; "
-		"else rm -f \"$fplinux_tmp\"; PS2=$fplinux_old_ps2; stty echo; "
-		"printf '\\nFPLINUX_UPLOAD_%%s:%%s:%%s:%%s\\n' "
-		"FAIL '%s' \"$fplinux_got\" \"$fplinux_size\"; fi\n",
-		delimiter, hash, options->upload_remote, options->upload_remote,
-		options->upload_remote, nonce, hash, nonce, nonce);
+	if (chunk_open) {
+		result = finish_upload_chunk(handle, pair, options->timeout_ms,
+					     delimiter, chunk_marker,
+					     failure_marker, &chunk_open,
+					     &remote_failure);
+		if (result != LIBUSB_SUCCESS) {
+			if (remote_failure) {
+				device_echo_disabled = false;
+			}
+			fprintf(stderr,
+				"\nfplinux-usb-console: device failed to "
+				"decode an upload chunk\n");
+			goto cleanup;
+		}
+	}
+	if (sent_bytes != byte_count) {
+		fprintf(stderr,
+			"fplinux-usb-console: upload source changed while "
+			"sending: %s\n",
+			options->upload_local);
+		result = LIBUSB_ERROR_INVALID_PARAM;
+		goto cleanup;
+	}
+	command_size = format_upload_verify_command(
+		command, sizeof(command), hash, options->upload_remote, nonce);
 	if (command_size < 0 || command_size >= (int)sizeof(command)) {
 		result = LIBUSB_ERROR_INVALID_PARAM;
 		goto cleanup;
@@ -1435,8 +1590,6 @@ static int upload_file(libusb_device_handle *handle,
 	}
 	snprintf(success_marker, sizeof(success_marker),
 		 "FPLINUX_UPLOAD_OK:%s:%s", nonce, hash);
-	snprintf(failure_marker, sizeof(failure_marker),
-		 "FPLINUX_UPLOAD_FAIL:%s", nonce);
 	result = wait_for_upload_result(handle, pair->endpoint_in,
 					options->timeout_ms, success_marker,
 					failure_marker, &remote_failure);
@@ -1460,10 +1613,20 @@ static int upload_file(libusb_device_handle *handle,
 
 cleanup:
 	if (device_echo_disabled) {
-		int cleanup_size = snprintf(command, sizeof(command),
-					    "\003\n%s\nrm -f \"$fplinux_tmp\"; "
-					    "PS2=$fplinux_old_ps2; stty echo\n",
-					    delimiter);
+		int cleanup_size;
+
+		if (chunk_open) {
+			cleanup_size =
+				snprintf(command, sizeof(command),
+					 "%s\nrm -f \"$fplinux_tmp\"; "
+					 "PS2=$fplinux_old_ps2; stty echo\n",
+					 delimiter);
+		} else {
+			cleanup_size =
+				snprintf(command, sizeof(command),
+					 "rm -f \"$fplinux_tmp\"; "
+					 "PS2=$fplinux_old_ps2; stty echo\n");
+		}
 		if (cleanup_size > 0 && cleanup_size < (int)sizeof(command)) {
 			(void)send_bytes(handle, pair->endpoint_out,
 					 (const unsigned char *)command,
@@ -2441,7 +2604,9 @@ static int self_test(void)
 	unsigned char digest[32];
 	unsigned char base64[77];
 	unsigned char decoded[16];
+	char upload_command[UPLOAD_COMMAND_BYTES];
 	char hash[65];
+	int command_size;
 	unsigned int index;
 	size_t size;
 
@@ -2500,6 +2665,18 @@ static int self_test(void)
 	    safe_remote_path("/tmp/double//slash")) {
 		fprintf(stderr, "fplinux-usb-console: self-test failed: upload "
 				"path policy\n");
+		return 1;
+	}
+	command_size = format_upload_chunk_start_command(
+		upload_command, sizeof(upload_command), "FPLINUX_CHUNK_test");
+	if (command_size <= 0 || command_size >= (int)sizeof(upload_command) ||
+	    UPLOAD_CHUNK_LINES == 0 ||
+	    (uint64_t)UPLOAD_CHUNK_LINES * 57u > 256u * 1024u ||
+	    strstr(upload_command, "base64 -d >>") == NULL ||
+	    strstr(upload_command, "mkfifo") != NULL ||
+	    strstr(upload_command, "<<'FPLINUX_CHUNK_test'") == NULL) {
+		fprintf(stderr, "fplinux-usb-console: self-test failed: upload "
+				"must use bounded decode chunks\n");
 		return 1;
 	}
 	if (decode_base64("Zm9vYmFy\n", 9, decoded, sizeof(decoded), &size) !=
