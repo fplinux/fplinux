@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
@@ -22,6 +23,8 @@ if TYPE_CHECKING:
 
 _WORKSPACE_NAMESPACES = frozenset({"quality-workspaces", "workspaces"})
 _MANAGED_NAMESPACES = _WORKSPACE_NAMESPACES | {"rootfs"}
+_LOG_RUN_LIMIT = 10
+_RUN_ID = re.compile(r"^\d{8}T\d{6}Z-p\d+(?:-\d+)?$")
 
 
 @dataclass(frozen=True)
@@ -208,10 +211,84 @@ def _rootfs_entries(cache: Path) -> list[InventoryEntry]:
     return entries
 
 
+def _log_run_matches(path: Path, *, label: str, identity: str) -> bool:
+    """Return whether one directory is a current host-created command log."""
+    if not path.is_dir() or path.is_symlink() or _RUN_ID.fullmatch(path.name) is None:
+        return False
+    metadata = path / "run.json"
+    if not metadata.is_file() or metadata.is_symlink():
+        return False
+    try:
+        decoded = json.loads(metadata.read_text())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return (
+        isinstance(decoded, dict)
+        and decoded.get("display_root") == f".cache/{identity}"
+        and decoded.get("label") == label
+        and decoded.get("parent") is None
+    )
+
+
+def _log_entries(root: Path, *, label: str, identity: str) -> list[InventoryEntry]:
+    """Retain the newest bounded set of one CLI command's log runs."""
+    if not root.is_dir() or root.is_symlink():
+        return []
+    runs = [
+        path
+        for path in root.iterdir()
+        if _log_run_matches(path, label=label, identity=f"{identity}/{path.name}")
+    ]
+    entries: list[InventoryEntry] = []
+    for index, path in enumerate(sorted(runs, key=lambda item: item.name, reverse=True)):
+        entry_identity = f"{identity}/{path.name}"
+        if index < _LOG_RUN_LIMIT:
+            entries.append(
+                InventoryEntry(
+                    entry_identity,
+                    "protected",
+                    f"within {_LOG_RUN_LIMIT}-run log retention",
+                    None,
+                    None,
+                )
+            )
+            continue
+        logical, allocated = _tree_size(path)
+        entries.append(
+            InventoryEntry(
+                entry_identity,
+                "candidate",
+                f"older than {_LOG_RUN_LIMIT}-run log retention",
+                logical,
+                allocated,
+            )
+        )
+    return entries
+
+
+def _log_retention_entries(cache: Path) -> list[InventoryEntry]:
+    """Classify only the generated check, setup, and per-target build logs."""
+    logs = cache / "logs"
+    entries = [
+        *_log_entries(logs / "check", label="check", identity="logs/check"),
+        *_log_entries(logs / "setup", label="setup", identity="logs/setup"),
+    ]
+    builds = logs / "build"
+    if not builds.is_dir() or builds.is_symlink():
+        return entries
+    for target in sorted(builds.iterdir(), key=lambda item: item.name):
+        if not target.is_dir() or target.is_symlink():
+            continue
+        identity = f"logs/build/{target.name}"
+        entries.extend(_log_entries(target, label=f"build {target.name}", identity=identity))
+    return entries
+
+
 def plan_prune(cache: Path) -> PrunePlan:
-    """List disposable snapshots in every managed cache namespace."""
+    """List disposable snapshots and bounded CLI logs in managed cache namespaces."""
     entries: list[InventoryEntry] = []
     entries.extend(_rootfs_entries(cache))
+    entries.extend(_log_retention_entries(cache))
     for namespace in sorted(_WORKSPACE_NAMESPACES):
         root = cache / namespace
         if not root.is_dir():
@@ -241,6 +318,18 @@ def plan_prune(cache: Path) -> PrunePlan:
     return PrunePlan(tuple(sorted(entries, key=lambda entry: entry.path)))
 
 
+def _candidate_destination(cache: Path, identity: str) -> Path:
+    """Return the exact managed cache directory addressed by one candidate identity."""
+    parts = identity.split("/")
+    if len(parts) == 2 and parts[0] in _MANAGED_NAMESPACES and parts[1]:
+        return cache / parts[0] / parts[1]
+    if len(parts) == 3 and parts[:2] in (["logs", "check"], ["logs", "setup"]):
+        return cache.joinpath(*parts)
+    if len(parts) == 4 and parts[:2] == ["logs", "build"] and parts[2] and parts[3]:
+        return cache.joinpath(*parts)
+    raise PruneSafetyError(f"invalid managed candidate: {identity}")
+
+
 def apply_prune(cache: Path) -> PruneApplyResult:
     """Delete only candidates from a fresh plan while the CLI holds its global lock."""
     plan = plan_prune(cache)
@@ -248,10 +337,7 @@ def apply_prune(cache: Path) -> PruneApplyResult:
     logical = 0
     allocated = 0
     for entry in plan.candidates:
-        namespace, name = entry.path.split("/", 1)
-        if namespace not in _MANAGED_NAMESPACES or "/" in name or not name:
-            raise PruneSafetyError(f"invalid managed candidate: {entry.path}")
-        destination = cache / namespace / name
+        destination = _candidate_destination(cache, entry.path)
         if destination.is_dir():
             shutil.rmtree(destination)
         removed.append(entry.path)

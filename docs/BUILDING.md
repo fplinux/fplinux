@@ -217,9 +217,13 @@ the same inventory as JSON. To apply a freshly calculated inventory:
 
 `prune --apply` takes the exclusive cache lock and removes disposable staged
 snapshots from `workspaces/` and `quality-workspaces/`, plus superseded shared
-Alpine rootfs generations. The protected rootfs is selected using both source
-inputs and the public identity of `.cache/apk-signing/`; the signing keypair
-itself is persistent build state and is never pruned automatically.
+Alpine rootfs generations. It also retains the newest ten CLI-generated
+`check` runs, the newest ten standalone `setup` runs, and the newest ten
+`build` runs for each target; older matching run directories are candidates.
+`logs/manual/` and every unknown log namespace are outside this policy. The
+protected rootfs is selected using both source inputs and the public identity
+of `.cache/apk-signing/`; the signing keypair itself is persistent build state
+and is never pruned automatically.
 
 For Nokia TA-1618, `console.current.json` selects the current runnable bundle:
 

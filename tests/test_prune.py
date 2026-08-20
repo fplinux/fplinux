@@ -28,6 +28,29 @@ def _workspace(root: Path, name: str, *, quality: bool = False) -> Path:
     return path
 
 
+def _cli_log(cache: Path, command: str, sequence: int, *, target: str | None = None) -> Path:
+    run_id = f"20260820T0508{sequence:02d}Z-p{sequence + 100}"
+    relative = Path("logs") / command
+    label = command
+    if target is not None:
+        relative /= target
+        label = f"{command} {target}"
+    relative /= run_id
+    path = cache / relative
+    path.mkdir(parents=True)
+    (path / "run.json").write_text(
+        json.dumps(
+            {
+                "display_root": f".cache/{relative.as_posix()}",
+                "label": label,
+                "parent": None,
+            }
+        )
+    )
+    (path / "stage.log").write_text("log\n")
+    return path
+
+
 class PruneTests(unittest.TestCase):
     """Exercise the public dry-run and apply policy."""
 
@@ -202,6 +225,71 @@ class PruneTests(unittest.TestCase):
             result = apply_prune(cache)
             self.assertEqual(result.removed, ("workspaces/old-format",))
             self.assertFalse(old.exists())
+
+    def test_cli_log_retention_keeps_the_newest_runs_per_command_and_target(self) -> None:
+        """Keep ten generated check/setup logs and ten builds for every target."""
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary) / ".cache"
+            check_runs = [_cli_log(cache, "check", sequence) for sequence in range(12)]
+            setup_runs = [_cli_log(cache, "setup", sequence) for sequence in range(12)]
+            inoi_runs = [
+                _cli_log(cache, "build", sequence, target="inoi-244-modern-4g")
+                for sequence in range(11)
+            ]
+            nokia_runs = [
+                _cli_log(cache, "build", sequence, target="nokia-ta1618") for sequence in range(11)
+            ]
+
+            plan = plan_prune(cache)
+
+            self.assertEqual(
+                {entry.path for entry in plan.candidates},
+                {
+                    *(f"logs/check/{run.name}" for run in check_runs[:2]),
+                    *(f"logs/setup/{run.name}" for run in setup_runs[:2]),
+                    f"logs/build/inoi-244-modern-4g/{inoi_runs[0].name}",
+                    f"logs/build/nokia-ta1618/{nokia_runs[0].name}",
+                },
+            )
+            protected = {entry.path for entry in plan.entries if entry.action == "protected"}
+            self.assertEqual(len(protected), 40)
+            self.assertIn(f"logs/check/{check_runs[-1].name}", protected)
+            self.assertIn(f"logs/setup/{setup_runs[-1].name}", protected)
+            self.assertIn(f"logs/build/inoi-244-modern-4g/{inoi_runs[-1].name}", protected)
+            self.assertIn(f"logs/build/nokia-ta1618/{nokia_runs[-1].name}", protected)
+
+    def test_log_apply_removes_only_old_generated_nested_paths(self) -> None:
+        """Ignore manual, unknown, and mismatched log directories during apply."""
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary) / ".cache"
+            check_runs = [_cli_log(cache, "check", sequence) for sequence in range(11)]
+            build_runs = [
+                _cli_log(cache, "build", sequence, target="inoi-244-modern-4g")
+                for sequence in range(11)
+            ]
+            manual = cache / "logs/manual/keep-this"
+            unknown_namespace = cache / "logs/imported/keep-this"
+            mismatched = cache / "logs/check/20260820T060000Z-p999"
+            for path in (manual, unknown_namespace, mismatched):
+                path.mkdir(parents=True)
+                (path / "note").write_text("keep\n")
+
+            result = apply_prune(cache)
+
+            self.assertEqual(
+                result.removed,
+                (
+                    f"logs/build/inoi-244-modern-4g/{build_runs[0].name}",
+                    f"logs/check/{check_runs[0].name}",
+                ),
+            )
+            self.assertFalse(check_runs[0].exists())
+            self.assertFalse(build_runs[0].exists())
+            self.assertTrue(check_runs[-1].exists())
+            self.assertTrue(build_runs[-1].exists())
+            self.assertTrue(manual.exists())
+            self.assertTrue(unknown_namespace.exists())
+            self.assertTrue(mismatched.exists())
 
     def test_unrelated_cache_paths_are_not_inventoried(self) -> None:
         """The workspace pruner ignores every unrelated cache namespace."""
