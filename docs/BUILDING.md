@@ -204,6 +204,9 @@ inputs. The workspace and `build-manifest.json` record build inputs and bundle
 file information. `run`, `package` and `verify` use the selected current bundle.
 `package` and `verify` compare its recorded inputs with the local checkout; if
 they report a missing or stale bundle, rebuild the target.
+After a successful host-side validation, `build` removes superseded generations
+written in the current manifest format. Unknown or older cache entries are
+ignored rather than migrated.
 
 ## Cache inventory
 

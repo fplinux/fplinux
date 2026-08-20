@@ -162,6 +162,43 @@ def publish_current_bundle(
     return CurrentBundle(generation_path, generation_path.name, manifest_sha256, manifest_bytes)
 
 
+def discard_superseded_bundle_generations(
+    output: Path,
+    target: str,
+    profile: str,
+    current: CurrentBundle,
+) -> None:
+    """Discard complete immutable siblings after selecting ``current``."""
+    generations = bundle_generations(output, target, profile)
+    selected = generations / current.generation
+    if current.path != selected or not _is_sha256(current.generation):
+        message = "selected bundle generation is outside its generation directory"
+        raise BundleStateError(message)
+    if not generations.is_dir():
+        return
+    for sibling in generations.iterdir():
+        if (
+            sibling == selected
+            or sibling.is_symlink()
+            or not sibling.is_dir()
+            or not _is_sha256(sibling.name)
+        ):
+            continue
+        try:
+            manifest = json.loads((sibling / BUILD_MANIFEST_NAME).read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, ValueError):
+            continue
+        if (
+            not isinstance(manifest, dict)
+            or set(manifest) != BUILD_MANIFEST_FIELDS
+            or manifest.get("generation") != sibling.name
+            or manifest.get("target") != target
+            or manifest.get("profile") != profile
+        ):
+            continue
+        shutil.rmtree(sibling)
+
+
 def resolve_current_bundle(output: Path, target: str, profile: str) -> CurrentBundle:
     """Resolve one pointer once; any mismatch is a cache miss to the caller."""
     pointer = bundle_pointer(output, target, profile)

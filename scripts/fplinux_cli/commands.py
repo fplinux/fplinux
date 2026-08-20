@@ -17,6 +17,7 @@ from . import alpine_state
 from .bundle_state import (
     BundleStateError,
     CurrentBundle,
+    discard_superseded_bundle_generations,
     resolve_current_bundle,
 )
 from .common import (
@@ -364,6 +365,12 @@ def build(target: str, jobs: int, *, verbose: bool = False, offline: bool = Fals
     )
     if current is not None:
         bundle, _manifest = current
+        discard_superseded_bundle_generations(
+            cache / "out",
+            target,
+            target_config["profile"],
+            bundle,
+        )
         reporter = RunReporter.create("build", target=target, verbose=verbose)
         _print_build_result(target, bundle, release, cached=True)
         reporter.finish()
@@ -421,6 +428,12 @@ def build(target: str, jobs: int, *, verbose: bool = False, offline: bool = Fals
     if current is None:
         fail("build completed without publishing an exact valid current bundle")
     bundle, _manifest = current
+    discard_superseded_bundle_generations(
+        output,
+        target,
+        target_config["profile"],
+        bundle,
+    )
     _print_build_result(target, bundle, release, cached=False)
     reporter.finish()
 

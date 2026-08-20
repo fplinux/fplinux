@@ -15,6 +15,7 @@ from fplinux_cli.bundle_state import (
     canonical_json_bytes,
     create_bundle_staging,
     discard_bundle_staging,
+    discard_superseded_bundle_generations,
     publish_bundle_generation,
     publish_current_bundle,
     published_file_records,
@@ -106,6 +107,64 @@ class BundleStateTests(unittest.TestCase):
             self.output, "demo", "default", second, second_generation
         )
         self.assertEqual(first_path, second_path)
+
+    def test_selected_generation_discards_only_complete_superseded_siblings(self) -> None:
+        """Keep generations until a new pointer is selected, then retain it alone."""
+        first, first_generation = self._staging("first")
+        first_path = publish_bundle_generation(
+            self.output, "demo", "default", first, first_generation
+        )
+        first_current = publish_current_bundle(self.output, "demo", "default", first_path)
+        second, second_generation = self._staging("second")
+        second_path = publish_bundle_generation(
+            self.output, "demo", "default", second, second_generation
+        )
+        generations = second_path.parent
+        incomplete = generations / ("f" * 64)
+        incomplete.mkdir()
+        unrelated_directory = generations / "unrelated"
+        unrelated_directory.mkdir()
+        unrelated_file = generations / "notes.txt"
+        unrelated_file.write_text("keep")
+        old_format = generations / ("e" * 64)
+        old_format.mkdir()
+        (old_format / BUILD_MANIFEST_NAME).write_text(
+            json.dumps({"generation": old_format.name, "schema": "old"})
+        )
+
+        self.assertEqual(first_current.path, first_path)
+        self.assertEqual(
+            {path.name for path in generations.iterdir() if path.is_dir()},
+            {
+                first_generation,
+                second_generation,
+                incomplete.name,
+                old_format.name,
+                unrelated_directory.name,
+            },
+        )
+        self.assertEqual(
+            resolve_current_bundle(self.output, "demo", "default").generation,
+            first_generation,
+        )
+
+        current = publish_current_bundle(self.output, "demo", "default", second_path)
+        discard_superseded_bundle_generations(self.output, "demo", "default", current)
+
+        self.assertEqual(
+            {path.name for path in generations.iterdir() if path.is_dir()},
+            {
+                second_generation,
+                incomplete.name,
+                old_format.name,
+                unrelated_directory.name,
+            },
+        )
+        self.assertTrue(unrelated_file.is_file())
+        self.assertEqual(
+            resolve_current_bundle(self.output, "demo", "default").generation,
+            second_generation,
+        )
 
     def test_invalid_pointer_is_a_miss(self) -> None:
         """Reject a malformed current-generation pointer."""
