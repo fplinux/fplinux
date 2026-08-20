@@ -59,6 +59,7 @@ class CommandLifecycleTests(unittest.TestCase):
         """A valid exact generation records the invocation but starts no build work."""
         current = (self.bundle, json.loads(self.bundle.manifest_bytes))
         reporter = mock.Mock()
+        discard_superseded = mock.Mock()
         with (
             mock.patch.object(commands, "ROOT", self.root),
             mock.patch.object(commands, "load_target", return_value={"profile": "default"}),
@@ -73,6 +74,11 @@ class CommandLifecycleTests(unittest.TestCase):
                 return_value=self.snapshot,
             ),
             mock.patch.object(commands, "_matching_target_bundle", return_value=current),
+            mock.patch.object(
+                commands,
+                "discard_superseded_bundle_generations",
+                discard_superseded,
+            ),
             mock.patch.object(commands, "_print_build_result") as print_result,
             mock.patch("fplinux_cli.commands.RunReporter.create", return_value=reporter),
             mock.patch.object(
@@ -93,6 +99,12 @@ class CommandLifecycleTests(unittest.TestCase):
             self.bundle,
             {"image": "image/ramboot.bin"},
             cached=True,
+        )
+        discard_superseded.assert_called_once_with(
+            self.root / ".cache/out",
+            "phone",
+            "default",
+            self.bundle,
         )
         reporter.finish.assert_called_once_with()
 
@@ -162,6 +174,7 @@ class CommandLifecycleTests(unittest.TestCase):
             }
         }
         matcher = mock.Mock(side_effect=(None, None))
+        discard_superseded = mock.Mock()
         with (
             mock.patch.object(commands, "ROOT", self.root),
             mock.patch.object(commands, "load_target", return_value={"profile": "default"}),
@@ -182,6 +195,11 @@ class CommandLifecycleTests(unittest.TestCase):
                 return_value="e" * 64,
             ),
             mock.patch.object(commands, "_matching_target_bundle", matcher),
+            mock.patch.object(
+                commands,
+                "discard_superseded_bundle_generations",
+                discard_superseded,
+            ),
             mock.patch("fplinux_cli.commands.RunReporter.create", return_value=reporter),
             mock.patch.object(commands, "require_podman", return_value="podman"),
             mock.patch.object(commands, "image_ready", return_value=True),
@@ -200,7 +218,84 @@ class CommandLifecycleTests(unittest.TestCase):
         self.assertEqual(matcher.call_count, 2)
         container_stage.run.assert_called_once()
         self.assertEqual(container_stage.run.call_args.kwargs, {})
+        discard_superseded.assert_not_called()
         reporter.finish.assert_not_called()
+
+    def test_successful_build_discards_superseded_after_host_validation(self) -> None:
+        """Retain old generations until the container result validates on the host."""
+        workspace = self.root / ".cache/workspaces/current"
+        workspace.mkdir(parents=True)
+        logs = self.root / ".cache/logs/build/run"
+        logs.mkdir(parents=True)
+        workspace_context = mock.MagicMock()
+        workspace_context.__enter__.return_value = mock.Mock()
+        container_stage = mock.Mock()
+        container_context = mock.MagicMock()
+        container_context.__enter__.return_value = container_stage
+        reporter = mock.Mock(root=logs)
+        reporter.stage.side_effect = [workspace_context, container_context]
+        reporter.container_environment.return_value = {"FPLINUX_LOG_ROOT": "/logs"}
+        lock = {
+            "oci": {
+                "image": "localhost/fplinux:locked",
+                "platform": "linux/amd64",
+            }
+        }
+        current = (self.bundle, json.loads(self.bundle.manifest_bytes))
+        matcher = mock.Mock(side_effect=(None, current))
+        discard_superseded = mock.Mock()
+        with (
+            mock.patch.object(commands, "ROOT", self.root),
+            mock.patch.object(commands, "load_target", return_value={"profile": "default"}),
+            mock.patch.object(
+                commands,
+                "load_release",
+                return_value={"image": "image/ramboot.bin"},
+            ),
+            mock.patch.object(
+                commands,
+                "target_workspace_snapshot",
+                return_value=self.snapshot,
+            ),
+            mock.patch.object(commands, "load_container_lock", return_value=lock),
+            mock.patch.object(
+                commands,
+                "container_image_recipe_digest",
+                return_value="e" * 64,
+            ),
+            mock.patch.object(commands, "_matching_target_bundle", matcher),
+            mock.patch.object(
+                commands,
+                "discard_superseded_bundle_generations",
+                discard_superseded,
+            ),
+            mock.patch.object(commands, "_print_build_result") as print_result,
+            mock.patch("fplinux_cli.commands.RunReporter.create", return_value=reporter),
+            mock.patch.object(commands, "require_podman", return_value="podman"),
+            mock.patch.object(commands, "image_ready", return_value=True),
+            mock.patch.object(
+                commands,
+                "stage_workspace_snapshot",
+                return_value=workspace,
+            ),
+        ):
+            commands.build("phone", 4)
+
+        self.assertEqual(matcher.call_count, 2)
+        container_stage.run.assert_called_once()
+        discard_superseded.assert_called_once_with(
+            self.root / ".cache/out",
+            "phone",
+            "default",
+            self.bundle,
+        )
+        print_result.assert_called_once_with(
+            "phone",
+            self.bundle,
+            {"image": "image/ramboot.bin"},
+            cached=False,
+        )
+        reporter.finish.assert_called_once_with()
 
     def test_offline_build_miss_requires_the_current_image_without_setup(self) -> None:
         """Do not silently rebuild the OCI environment when offline was requested."""
