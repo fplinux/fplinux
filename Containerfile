@@ -3,131 +3,151 @@ ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 
 ARG BASE_IMAGE
-ARG DEBIAN_SNAPSHOT=20260713T000000Z
-ARG BUILDROOT_VERSION=2026.05.1
-ARG BUILDROOT_URL=https://buildroot.org/downloads/buildroot-2026.05.1.tar.xz
-ARG BUILDROOT_SHA256=ae7f706f087b9ae9083a10a587368dfbf53103c28bf81c2d690198dc4090cb58
-ARG NODE_VERSION=24.17.0
-ARG NODE_SHA256=ab343a1b747c7cbf3630dfd7dbf818c5423fab2eb4f5ad1afc896f6bd121a917
+ARG RUFF_VERSION=0.16.0
+ARG RUFF_SHA256=2138b7bc58ff877f5bba09aea4cc984ad5699433b6a3f811003527b8cff8e9ad
+ARG SPARSE_COMMIT=37156835e3d725b6d750f000be33ba3814bb2310
+ARG SPARSE_SHA256=feca4eb2f0cb61416f4946e0a537d20da8e5eb0d8064fb3f1323a19cb5738ffc
 ARG TYPOS_VERSION=1.48.0
 ARG TYPOS_SHA256=72a930c9a94fc3914aa56835c5b859c892a797d40c1c42638b98d93f16ff519c
-ARG VALE_VERSION=3.16.0
-ARG VALE_SHA256=1049f4a585ccd1af96dcf4bdc16800cb3ce426b432da2b27893def42dcfe0ccb
 ARG VALE_GOOGLE_VERSION=0.7.0
 ARG VALE_GOOGLE_SHA256=a4d6458fef518d51e5e7e84445a066ce73075ca5b8bb71f0feabb344258a4059
 
-ENV DEBIAN_FRONTEND=noninteractive \
-    LANG=C.UTF-8 \
+ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     TZ=UTC \
-    BR2_DL_DIR=/cache/buildroot/downloads \
     NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_FUND=false \
     NPM_CONFIG_UPDATE_NOTIFIER=false \
-    PATH=/opt/node/bin:/opt/quality/bin:/opt/quality/venv/bin:/opt/quality/node-tools/node_modules/.bin:${PATH}
+    PATH=/opt/quality/bin:/opt/quality/node-tools/node_modules/.bin:${PATH}
 
-# Package versions are pinned by the dated snapshot.debian.org source.
-# hadolint ignore=DL3008
 RUN set -eux; \
-    rm -f /etc/apt/sources.list.d/debian.sources; \
     printf '%s\n' \
-        "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}/ trixie main" \
-        > /etc/apt/sources.list; \
-    apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=5 \
-        -o Acquire::http::Timeout=60 update; \
-    apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=60 \
-        install -y --no-install-recommends \
-        7zip \
-        autoconf \
-        automake \
-        bc \
-        binutils-arm-none-eabi \
-        bison \
-        build-essential \
-        bzip2 \
-        ca-certificates \
-        ccache \
-        clang-format \
-        cpio \
-        curl \
-        device-tree-compiler \
-        diffutils \
-        file \
-        flex \
-        gawk \
-        gcc-arm-none-eabi \
-        git \
-        gzip \
-        libelf-dev \
-        libncurses-dev \
-        libnewlib-arm-none-eabi \
-        libssl-dev \
-        libtool \
-        libudev-dev \
-        libusb-1.0-0-dev \
-        make \
-        patch \
-        perl \
-        pkg-config \
-        python3 \
-        python3-dev \
-        python3-flake8 \
-        python3-magic \
-        python3-pyelftools \
-        python3-venv \
-        rsync \
-        sed \
-        shellcheck \
-        shfmt \
-        swig \
-        tar \
-        unzip \
-        wget \
-        which \
-        xz-utils \
-        zip \
-        zstd; \
-    rm -rf /var/lib/apt/lists/*
-
-# hadolint ignore=DL3008
-RUN set -eux; \
-    apt-get -o Acquire::Check-Valid-Until=false -o Acquire::Retries=5 \
-        -o Acquire::http::Timeout=60 update; \
-    apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=60 \
-        install -y --no-install-recommends \
-        clang \
-        clang-tools \
-        sparse; \
-    rm -rf /var/lib/apt/lists/*
+        'https://dl-cdn.alpinelinux.org/alpine/v3.24/main' \
+        'https://dl-cdn.alpinelinux.org/alpine/v3.24/community' \
+        > /etc/apk/repositories; \
+    apk add --no-cache \
+        7zip=26.01-r0 \
+        bash=5.3.9-r1 \
+        bzip2=1.0.8-r6 \
+        ca-certificates=20260611-r0 \
+        cpio=2.15-r0 \
+        curl=8.21.0-r0 \
+        diffutils=3.12-r0 \
+        file=5.47-r2 \
+        gawk=5.3.2-r2 \
+        git=2.54.0-r0 \
+        gzip=1.14-r2 \
+        libtool=2.6.0-r1 \
+        make=4.4.1-r4 \
+        patch=2.8-r0 \
+        perl=5.42.2-r0 \
+        pkgconf=2.5.1-r0 \
+        rsync=3.4.3-r1 \
+        sed=4.9-r2 \
+        tar=1.35-r5 \
+        unzip=6.0-r16 \
+        wget=1.25.0-r3 \
+        which=2.23-r0 \
+        xz=5.8.3-r0 \
+        zip=3.0-r13 \
+        zstd=1.5.7-r2
 
 RUN set -eux; \
-    archive=/tmp/node.tar.xz; \
+    apk add --no-cache \
+        binutils-arm-none-eabi=2.45.1-r0 \
+        gcc-arm-none-eabi=16.1.0-r0
+
+RUN set -eux; \
+    apk add --no-cache \
+        newlib-arm-none-eabi=4.6.0.20260123-r0
+
+RUN set -eux; \
+    apk add --no-cache \
+        abuild=3.17.0-r0 \
+        atools-go=0.6.1-r4 \
+        build-base=0.5-r4 \
+        clang22=22.1.3-r2 \
+        linux-headers=7.0.0-r1 \
+        lld22=22.1.3-r0; \
+    adduser -D -u 1000 builder; \
+    addgroup builder abuild
+
+RUN set -eux; \
+    apk add --no-cache \
+        autoconf=2.73-r0 \
+        automake=1.18.1-r1 \
+        bc=1.08.2-r1 \
+        bison=3.8.2-r3 \
+        clang22-analyzer=22.1.3-r2 \
+        clang22-extra-tools=22.1.3-r2 \
+        dtc=1.7.2-r1 \
+        elfutils-dev=0.195-r0 \
+        eudev-dev=3.2.14-r6 \
+        flex=2.6.4-r8 \
+        libusb-dev=1.0.30-r0 \
+        ncurses-dev=6.6_p20260516-r0 \
+        openssl-dev=3.5.7-r0 \
+        swig=4.4.1-r1
+
+RUN set -eux; \
+    apk add --no-cache \
+        nodejs=24.18.1-r0 \
+        npm=11.12.1-r0 \
+        py3-dt-schema=2025.12-r1 \
+        py3-elftools=0.32-r1 \
+        py3-flake8=7.3.0-r2 \
+        py3-magic=0.4.27-r4 \
+        py3-mypy=1.19.1-r2 \
+        python3=3.14.7-r1 \
+        python3-dev=3.14.7-r1 \
+        reuse=6.2.0-r0 \
+        shellcheck=0.11.0-r1 \
+        shfmt=3.13.1-r1 \
+        taplo=0.10.0-r0 \
+        vale=3.13.0-r6
+
+RUN set -eux; \
+    mkdir -p /opt/quality/bin /tmp/quality; \
+    archive=/tmp/quality/sparse.tar.gz; \
     curl -fsSL --retry 3 \
         --output "${archive}" \
-        "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz"; \
-    printf '%s  %s\n' "${NODE_SHA256}" "${archive}" | sha256sum -c -; \
-    mkdir -p /opt/node; \
-    tar -xJf "${archive}" -C /opt/node --strip-components=1; \
-    rm -f "${archive}"
+        "https://git.kernel.org/pub/scm/devel/sparse/sparse.git/snapshot/sparse-${SPARSE_COMMIT}.tar.gz"; \
+    printf '%s  %s\n' "${SPARSE_SHA256}" "${archive}" | sha256sum -c -; \
+    tar -xzf "${archive}" -C /tmp/quality; \
+    make -C "/tmp/quality/sparse-${SPARSE_COMMIT}" -j2 sparse; \
+    install -m 0755 "/tmp/quality/sparse-${SPARSE_COMMIT}/sparse" /opt/quality/bin/sparse; \
+    rm -rf /tmp/quality; \
+    sparse --version
+
+RUN set -eux; \
+    mkdir -p /usr/local/bin; \
+    ln -s /usr/bin/clang /usr/local/bin/armv7-alpine-linux-musleabihf-cc; \
+    ln -s /usr/bin/clang++ /usr/local/bin/armv7-alpine-linux-musleabihf-c++; \
+    ln -s /usr/bin/ld.lld /usr/local/bin/armv7-alpine-linux-musleabihf-ld; \
+    for tool in ar nm objcopy objdump ranlib readelf size strings strip; do \
+        ln -s "/usr/bin/arm-none-eabi-${tool}" "/usr/local/bin/armv7-alpine-linux-musleabihf-${tool}"; \
+    done; \
+    armv7-alpine-linux-musleabihf-cc -dumpmachine | grep -qx armv7-alpine-linux-musleabihf; \
+    arm-none-eabi-gcc --version | head -n 1
+
+RUN set -eux; \
+    mkdir -p /opt/quality/bin /tmp/quality; \
+    archive=/tmp/quality/ruff.tar.gz; \
+    curl -fsSL --retry 3 \
+        --output "${archive}" \
+        "https://github.com/astral-sh/ruff/releases/download/${RUFF_VERSION}/ruff-x86_64-unknown-linux-musl.tar.gz"; \
+    printf '%s  %s\n' "${RUFF_SHA256}" "${archive}" | sha256sum -c -; \
+    tar -xzf "${archive}" -C /tmp/quality; \
+    install -m 0755 "/tmp/quality/ruff-x86_64-unknown-linux-musl/ruff" /opt/quality/bin/ruff; \
+    rm -rf /tmp/quality; \
+    ruff --version; \
+    reuse --version
 
 COPY package.json package-lock.json /opt/quality/node-tools/
 RUN set -eux; \
-    npm ci \
-        --ignore-scripts \
-        --prefix /opt/quality/node-tools; \
+    npm ci --ignore-scripts --prefix /opt/quality/node-tools; \
     prettier --version; \
     markdownlint-cli2 --version
-
-COPY requirements.lock /opt/quality/requirements.lock
-RUN set -eux; \
-    python3 -m venv /opt/quality/venv; \
-    /opt/quality/venv/bin/pip install \
-        --disable-pip-version-check \
-        --no-cache-dir \
-        --require-hashes \
-        --requirement /opt/quality/requirements.lock; \
-    reuse --version; \
-    ruff --version
 
 RUN set -eux; \
     mkdir -p /opt/quality/bin /opt/quality/vale-styles/Google /tmp/quality; \
@@ -137,12 +157,6 @@ RUN set -eux; \
         "https://github.com/crate-ci/typos/releases/download/v${TYPOS_VERSION}/typos-v${TYPOS_VERSION}-x86_64-unknown-linux-musl.tar.gz"; \
     printf '%s  %s\n' "${TYPOS_SHA256}" "${archive}" | sha256sum -c -; \
     tar -xzf "${archive}" -C /opt/quality/bin ./typos; \
-    archive=/tmp/quality/vale.tar.gz; \
-    curl -fsSL --retry 3 \
-        --output "${archive}" \
-        "https://github.com/errata-ai/vale/releases/download/v${VALE_VERSION}/vale_${VALE_VERSION}_Linux_64-bit.tar.gz"; \
-    printf '%s  %s\n' "${VALE_SHA256}" "${archive}" | sha256sum -c -; \
-    tar -xzf "${archive}" -C /opt/quality/bin vale; \
     archive=/tmp/quality/vale-google.tar.gz; \
     curl -fsSL --retry 3 \
         --output "${archive}" \
@@ -156,18 +170,8 @@ RUN set -eux; \
     typos --version; \
     vale --version
 
-RUN set -eux; \
-    archive=/tmp/buildroot.tar.xz; \
-    curl -fsSL --retry 3 --output "${archive}" "${BUILDROOT_URL}"; \
-    printf '%s  %s\n' "${BUILDROOT_SHA256}" "${archive}" | sha256sum -c -; \
-    mkdir -p /opt; \
-    tar -xJf "${archive}" -C /opt; \
-    mv "/opt/buildroot-${BUILDROOT_VERSION}" /opt/buildroot; \
-    rm -f "${archive}"; \
-    test "$(cat /opt/buildroot/.config 2>/dev/null || true)" = ""
-
-ARG GITLEAKS_VERSION=8.30.1
-ARG GITLEAKS_SHA256=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+ARG GITLEAKS_VERSION=8.18.4
+ARG GITLEAKS_SHA256=ba6dbb656933921c775ee5a2d1c13a91046e7952e9d919f9bac4cec61d628e7d
 RUN set -eux; \
     mkdir -p /tmp/scanners; \
     archive=/tmp/scanners/gitleaks.tar.gz; \
@@ -178,6 +182,12 @@ RUN set -eux; \
     tar -xzf "${archive}" -C /tmp/scanners gitleaks; \
     install -m 0755 /tmp/scanners/gitleaks /opt/quality/bin/gitleaks; \
     rm -rf /tmp/scanners; \
+    mkdir -p /tmp/gitleaks-selftest; \
+    printf 'token = "ghp_%s%s"\n' 'aBcDeFgHiJkLmNoPqRsTuVwXyZ' '0123456789' \
+        > /tmp/gitleaks-selftest/secret.txt; \
+    if gitleaks detect --no-banner --no-git --source /tmp/gitleaks-selftest --exit-code 1; then exit 1; \
+    else test "$?" -eq 1; fi; \
+    rm -rf /tmp/gitleaks-selftest; \
     gitleaks version
 
 ARG HADOLINT_VERSION=2.15.1
@@ -192,28 +202,15 @@ RUN set -eux; \
     rm -f "${binary}"; \
     hadolint --version
 
-ARG TAPLO_VERSION=0.10.0
-ARG TAPLO_SHA256=8fe196b894ccf9072f98d4e1013a180306e17d244830b03986ee5e8eabeb6156
-RUN set -eux; \
-    archive=/tmp/taplo.gz; \
-    curl -fsSL --retry 3 \
-        --output "${archive}" \
-        "https://github.com/tamasfe/taplo/releases/download/${TAPLO_VERSION}/taplo-linux-x86_64.gz"; \
-    printf '%s  %s\n' "${TAPLO_SHA256}" "${archive}" | sha256sum -c -; \
-    gzip -dc "${archive}" > /opt/quality/bin/taplo; \
-    chmod 0755 /opt/quality/bin/taplo; \
-    rm -f "${archive}"; \
-    taplo --version
-
-RUN mkdir -p /cache/analysis /cache/buildroot/downloads /cache/downloads /cache/linux \
+RUN mkdir -p /cache/analysis /cache/downloads /cache/linux /cache/rootfs \
     /tmp/fplinux-home /workspace /work \
     && chmod 1777 /cache /tmp/fplinux-home /work
 
 LABEL org.opencontainers.image.title="FPLinux build environment" \
-      org.opencontainers.image.description="Reproducible Linux/amd64 environment for Buildroot and feature-phone RAM boot payloads" \
+      org.opencontainers.image.description="Reproducible Alpine Linux/amd64 environment for FPLinux kernel, APK and RAM-image builds" \
       org.opencontainers.image.base.name="${BASE_IMAGE}" \
       org.opencontainers.image.licenses="GPL-2.0-only" \
-      org.opencontainers.image.version="2026.05.1-r1"
+      org.opencontainers.image.version="3.24.1-r1"
 
 WORKDIR /workspace
 CMD ["/bin/bash"]

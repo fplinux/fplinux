@@ -1,0 +1,37 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-console
+pkgver=1
+pkgrel=0
+pkgdesc="Physical keypad and framebuffer console for FPLinux"
+url="https://github.com/fplinux/fplinux"
+arch="armv7"
+license="GPL-2.0-only"
+makedepends_build="clang22 lld22"
+makedepends_host="musl-dev linux-headers gcc"
+subpackages="$pkgname-openrc"
+options="!check"
+source="fplinux-console.c fplinux-console.initd fplinux-usb-getty.initd"
+builddir="$srcdir"
+
+build() {
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		"$srcdir/fplinux-console.c" $LDFLAGS -o fplinux-console
+}
+
+package() {
+	install -Dm755 "$builddir/fplinux-console" "$pkgdir/usr/bin/fplinux-console"
+	install -Dm755 "$srcdir/fplinux-console.initd" \
+		"$pkgdir/etc/init.d/fplinux-console"
+	install -Dm755 "$srcdir/fplinux-usb-getty.initd" \
+		"$pkgdir/etc/init.d/fplinux-usb-getty"
+}
+
+openrc() {
+	default_openrc
+}
+
+sha512sums="
+c5c06775d1f708759ed4f27ea2294d6ebd0945ed638612045c4056713b3ed9cd398782840571c6c2d935b25cc82b5387c02cdb333906790c79c98a6e196ed66a  fplinux-console.c
+6c36784d17d9acabefc960c6295f420effc733e8531d8e98285b0c4bab8f38a1b5717600568f93721c8c628b421c4e40e8f5d18eb4a58748321874eb443e14b6  fplinux-console.initd
+5f96bf43237b56dc8a2f3b9f82bf42769eee96713fef0c69ad5ef92400700401f07187ea2663f837ce48252554a94de0b8ee6277d6c3ead981f7061d21bee572  fplinux-usb-getty.initd
+"

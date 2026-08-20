@@ -1,7 +1,0 @@
-# Verified against the pinned archive from the upstream TyrQuake site.
-sha256  ccdfed38e6258af4778b9f03f6a9e9d323b00548927aba7e7afb0959d8f263d3  tyrquake-0.71.tar.gz
-sha256  83ac06a23c7e4517cba0c2c2495233fa18cc41a1380adccd3a8afeba2470108d  gnu.txt
-sha256  21cf9f4cb7646e4d52316e593783ca4efd61916e380c2cabedf258b637b52fec  external/dr_flac.h
-sha256  5932be3093b5ad3a9aa08bf9399d9f1961ec361d184ed738343f61e5ecc3fd96  external/dr_mp3.h
-sha256  dfff81bc9f8c2b35756ae472028aa2864c5b525fe7c55b24c4aeb7d6994ff781  external/dr_wav.h
-sha256  4f4fcc760b4fe6961ea528f2a8ba9d91a888ab0e44dc1bdb779dae8efae0ebcd  external/stb_vorbis.c

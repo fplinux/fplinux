@@ -45,13 +45,17 @@ Linux projections in `target.toml`.
 
 `platform.toml` describes the reusable mechanics consumed by the shared builder:
 
-- `[buildroot]` selects the external tree, common rootfs paths and clean targets;
+- `[rootfs]` is required and declares the platform-owned package additions. Its
+  `packages` array may be empty. The rootfs set is the exact union of the fixed
+  common packages, this array and the selected target's required
+  `[rootfs].packages` array;
 - `[linux]` declares the source lock, architecture, build and analysis compiler
   prefixes, Kbuild targets, integration patches and source projections;
 - `[bootstrap]` declares the pinned vendor projection, shared copies, safety
   target and build targets;
 - `[host]` declares a capability, fixed runtime-tool roles and typed recipes such
-  as `make-archive/v1` and `cc-libusb/v1`;
+  as `make-archive/v1` and `cc-libusb/v1`; shipped native tools must use the
+  builder's static Linux/x86-64 link contract rather than host shared libraries;
 - `[runner]` declares the platform-adapter API version. The shared builder always
   packages `common/run.py` and the conventionally located fixed adapter at
   `platforms/<platform>/host/adapter.py`; the manifest cannot select executable

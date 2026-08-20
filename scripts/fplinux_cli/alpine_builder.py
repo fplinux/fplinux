@@ -1,0 +1,643 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# ruff: noqa: PLR0913, PLR0917
+"""Build the selected locked Alpine rootfs and its local APKs."""
+
+from __future__ import annotations
+
+import fcntl
+import os
+import pwd
+import shlex
+import shutil
+import subprocess
+import tarfile
+import tempfile
+import urllib.request
+from pathlib import Path, PurePosixPath
+from typing import Any, NoReturn
+
+from . import alpine_state
+from .common import ROOT, sha256_file
+from .config import relative_value
+from .output import current_stage
+
+CACHE = Path("/cache")
+SOURCE_DATE_EPOCH = "1784919600"
+
+
+def fail(message: str) -> NoReturn:
+    """Stop an Alpine rootfs build without publishing a receipt."""
+    raise SystemExit(f"build failed: {message}")
+
+
+def require_file(path: Path) -> Path:
+    """Require one regular, non-symlink file."""
+    if path.is_symlink() or not path.is_file():
+        fail(f"expected file is missing or invalid: {path}")
+    return path
+
+
+def _require_sha256(value: object, name: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        fail(f"{name} must be a lowercase SHA-256 digest")
+    return value
+
+
+def _build_environment() -> dict[str, str]:
+    return {
+        **os.environ,
+        "LC_ALL": "C",
+        "SOURCE_DATE_EPOCH": SOURCE_DATE_EPOCH,
+        "KBUILD_BUILD_TIMESTAMP": "2026-07-24 19:00:00 +0000",
+        "KBUILD_BUILD_USER": "fplinux",
+        "KBUILD_BUILD_HOST": "builder",
+        "KBUILD_BUILD_VERSION": "1",
+        "KCONFIG_NOTIMESTAMP": "1",
+    }
+
+
+def _run(
+    command: list[str],
+    *,
+    cwd: Path | None = None,
+    environment: dict[str, str] | None = None,
+) -> None:
+    effective_environment = _build_environment()
+    if environment is not None:
+        effective_environment.update(environment)
+    stage = current_stage()
+    if stage is not None:
+        stage.run(command, cwd=cwd, env=effective_environment)
+        return
+    print("+", " ".join(shlex.quote(part) for part in command), flush=True)
+    subprocess.run(command, cwd=cwd, env=effective_environment, check=True)
+
+
+def _log_message(message: str) -> None:
+    stage = current_stage()
+    if stage is None:
+        print(message)
+        return
+    stage.write((message + "\n").encode())
+
+
+def _fetch(url: object, expected: object, cache: Path, name: object) -> Path:
+    """Fetch one exact HTTPS Alpine artifact into the shared download cache."""
+    if not isinstance(url, str) or not url.startswith("https://"):
+        fail("source URL must be a non-empty HTTPS URL")
+    digest = _require_sha256(expected, f"{name} source")
+    relative = relative_value(name, "download cache name")
+    cache.mkdir(parents=True, exist_ok=True)
+    destination = cache / relative
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists() or destination.is_symlink():
+        if destination.is_symlink() or not destination.is_file():
+            fail(f"download cache destination is invalid: {destination}")
+        if sha256_file(destination) == digest:
+            return destination
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            delete=False,
+        ) as output:
+            temporary = Path(output.name)
+            request = urllib.request.Request(  # noqa: S310 -- HTTPS is required above.
+                url,
+                headers={"User-Agent": "FPLinux/1"},
+            )
+            with urllib.request.urlopen(  # noqa: S310 -- HTTPS is required above.
+                request,
+                timeout=60,
+            ) as response:
+                shutil.copyfileobj(response, output)
+        actual = sha256_file(temporary)
+        if actual != digest:
+            fail(f"{name} SHA256 mismatch: expected {digest}, received {actual}")
+        temporary.replace(destination)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return destination
+
+
+def _locked_alpine_artifact(
+    lock: dict[str, Any], records: dict[str, dict[str, object]], filename: str
+) -> Path:
+    record = records.get(filename)
+    if record is None:
+        fail(f"locked Alpine package is missing: {filename}")
+    package = _fetch(
+        f"{lock['repository']}/{filename}",
+        record.get("sha256"),
+        CACHE / "downloads/alpine/packages",
+        filename,
+    )
+    expected_size = record.get("bytes")
+    if package.stat().st_size != expected_size:
+        fail(
+            f"Alpine package size mismatch for {filename}: "
+            f"expected {expected_size}, received {package.stat().st_size}"
+        )
+    return package
+
+
+def _alpine_group_packages(
+    lock: dict[str, Any], records: dict[str, dict[str, object]], group: str
+) -> list[Path]:
+    return [
+        _locked_alpine_artifact(lock, records, filename) for filename in lock[group]["packages"]
+    ]
+
+
+def _chown_tree(path: Path, user: str) -> None:
+    account = pwd.getpwnam(user)
+    paths = [path, *sorted(path.rglob("*"))]
+    for candidate in paths:
+        os.chown(candidate, account.pw_uid, account.pw_gid, follow_symlinks=False)
+
+
+def _builder_command(command: list[str], environment: dict[str, str]) -> list[str]:
+    assignments = [f"{key}={value}" for key, value in sorted(environment.items())]
+    shell_command = "exec env " + " ".join(shlex.quote(part) for part in [*assignments, *command])
+    return ["su", "builder", "-s", "/bin/sh", "-c", shell_command]
+
+
+def _run_as_builder(command: list[str], *, cwd: Path, environment: dict[str, str]) -> None:
+    _run(_builder_command(command, environment), cwd=cwd)
+
+
+def _alpine_source_cache() -> Path:
+    cache = CACHE / "downloads/alpine/sources"
+    cache.mkdir(parents=True, exist_ok=True)
+    _chown_tree(cache, "builder")
+    return cache
+
+
+def _cached_package_files(repository: Path, names: set[str]) -> list[Path] | None:
+    packages: list[Path] = []
+    for name in sorted(names):
+        matches = [path for path in repository.rglob(name) if path.is_file()]
+        if len(matches) != 1:
+            return None
+        packages.append(matches[0])
+    return packages
+
+
+def _builder_output(command: list[str], *, cwd: Path, environment: dict[str, str]) -> str:
+    result = subprocess.run(
+        _builder_command(command, environment),
+        cwd=cwd,
+        env=_build_environment(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "no diagnostic"
+        fail(f"Alpine package metadata command failed: {detail}")
+    return result.stdout
+
+
+def _ensure_apk_signing_key() -> tuple[Path, Path, str]:
+    directory = CACHE / alpine_state.SIGNING_KEY_DIRECTORY
+    private_key = directory / alpine_state.SIGNING_PRIVATE_KEY
+    public_key = directory / alpine_state.SIGNING_PUBLIC_KEY
+    existing = (private_key.exists(), public_key.exists())
+    if existing == (True, True):
+        if private_key.is_symlink() or not private_key.is_file():
+            fail(f"APK signing private key is invalid: {private_key}")
+        if public_key.is_symlink() or not public_key.is_file():
+            fail(f"APK signing public key is invalid: {public_key}")
+        return private_key, public_key, sha256_file(public_key)
+    if existing != (False, False):
+        fail("APK signing keypair is incomplete; remove /cache/apk-signing and rebuild")
+
+    account = pwd.getpwnam("builder")
+    directory.mkdir(mode=0o755, parents=True, exist_ok=True)
+    if directory.is_symlink() or not directory.is_dir():
+        fail(f"APK signing state directory is invalid: {directory}")
+    temporary_home = Path(tempfile.mkdtemp(dir=directory, prefix=".keygen-"))
+    os.chown(temporary_home, account.pw_uid, account.pw_gid)
+    try:
+        _run_as_builder(
+            ["abuild-keygen", "-n"],
+            cwd=temporary_home,
+            environment={"HOME": str(temporary_home)},
+        )
+        generated_private = sorted((temporary_home / ".abuild").glob("*.rsa"))
+        generated_public = sorted((temporary_home / ".abuild").glob("*.rsa.pub"))
+        if len(generated_private) != 1 or len(generated_public) != 1:
+            fail("abuild-keygen did not create exactly one package keypair")
+        shutil.copyfile(generated_private[0], private_key)
+        shutil.copyfile(generated_public[0], public_key)
+        private_key.chmod(0o600)
+        public_key.chmod(0o644)
+        os.chown(private_key, account.pw_uid, account.pw_gid)
+        os.chown(public_key, account.pw_uid, account.pw_gid)
+    finally:
+        shutil.rmtree(temporary_home)
+    return private_key, public_key, sha256_file(public_key)
+
+
+def _prepare_alpine_sysroot(
+    lock: dict[str, Any], packages: list[Path], sysroot: Path, keys: Path
+) -> None:
+    _run(
+        [
+            "apk",
+            "--root",
+            str(sysroot),
+            "--arch",
+            lock["arch"],
+            "--initdb",
+            "--no-network",
+            "--no-scripts",
+            "--no-logfile",
+            "--keys-dir",
+            str(keys),
+            "add",
+            *(str(package) for package in packages),
+        ]
+    )
+
+
+def _build_fplinux_apks(
+    lock: dict[str, Any],
+    sysroot: Path,
+    work: Path,
+    jobs: int,
+    private_key: Path,
+    public_key: Path,
+    selected_packages: tuple[str, ...],
+) -> tuple[list[Path], Path, Path]:
+    if os.geteuid() != 0:
+        fail("Alpine package builds require container root; rebuild the current build image")
+    aports = work / "aports"
+    home = work / "home"
+    aports.mkdir()
+    for name in selected_packages:
+        shutil.copytree(ROOT / "alpine/aports" / name, aports / name)
+    home.mkdir()
+    _chown_tree(aports, "builder")
+    _chown_tree(home, "builder")
+    sources = _alpine_source_cache()
+
+    key_directory = home / ".abuild"
+    key_directory.mkdir()
+    local_private_key = key_directory / private_key.name
+    local_public_key = key_directory / public_key.name
+    shutil.copyfile(require_file(private_key), local_private_key)
+    shutil.copyfile(require_file(public_key), local_public_key)
+    local_private_key.chmod(0o600)
+    local_public_key.chmod(0o644)
+    project_config = (ROOT / "alpine/abuild.conf").read_text(encoding="utf-8")
+    generated_config = key_directory / "abuild.conf"
+    generated_config.write_text(
+        f'PACKAGER_PRIVKEY="{local_private_key}"\n' + project_config,
+        encoding="utf-8",
+    )
+    _chown_tree(key_directory, "builder")
+
+    environment = {
+        "HOME": str(home),
+        "APK": f"apk --keys-dir {home / '.abuild'}",
+        "CBUILD": "x86_64-alpine-linux-musl",
+        "CHOST": lock["triplet"],
+        "CTARGET": lock["triplet"],
+        "CBUILDROOT": str(sysroot),
+        "BOOTSTRAP": "no",
+        "SRCDEST": str(sources),
+        "SOURCE_DATE_EPOCH": SOURCE_DATE_EPOCH,
+        "JOBS": str(jobs),
+        "MAKEFLAGS": f"-j{jobs}",
+    }
+    expected_packages: set[str] = set()
+    package_files: list[Path] = []
+    image_recipe = os.environ.get("FPLINUX_CONTAINER_IMAGE_RECIPE", "")
+    signing_key_identity = sha256_file(public_key)
+    for name in selected_packages:
+        directory = aports / name
+        recipe = alpine_state.alpine_package_recipe(name, image_recipe, signing_key_identity)
+        repository = CACHE / alpine_state.PACKAGE_CACHE_DIRECTORY / name
+        package_environment = {**environment, "REPODEST": str(repository)}
+        require_file(directory / "APKBUILD")
+        _run_as_builder(
+            ["apkbuild-lint", "APKBUILD"], cwd=directory, environment=package_environment
+        )
+        listed = {
+            line.strip()
+            for line in _builder_output(
+                ["abuild", "listpkg"], cwd=directory, environment=package_environment
+            ).splitlines()
+            if line.strip()
+        }
+        if not listed or any(
+            Path(package).name != package or not package.endswith(".apk") for package in listed
+        ):
+            fail(f"abuild listpkg returned invalid package names for {name}")
+        duplicate = expected_packages & listed
+        if duplicate:
+            fail(f"abuild package names are duplicated: {', '.join(sorted(duplicate))}")
+        expected_packages.update(listed)
+        marker = repository / alpine_state.PACKAGE_RECIPE_NAME
+        cached = None
+        try:
+            if marker.read_text(encoding="utf-8").strip() == recipe:
+                cached = _cached_package_files(repository, listed)
+        except OSError:
+            pass
+        if cached is not None:
+            _log_message(f"Alpine package cache hit: {name} {recipe[:16]}")
+            package_files.extend(cached)
+            continue
+
+        build_repository = work / "packages" / name
+        build_repository.mkdir(parents=True)
+        _chown_tree(build_repository, "builder")
+        build_environment = {**environment, "REPODEST": str(build_repository)}
+        _run_as_builder(["abuild", "-d", "-r"], cwd=directory, environment=build_environment)
+        built = _cached_package_files(build_repository, listed)
+        if built is None:
+            fail(f"abuild repository output differs from listpkg for {name}")
+        if repository.exists():
+            shutil.rmtree(repository)
+        shutil.copytree(build_repository, repository)
+        marker.write_text(recipe + "\n", encoding="utf-8")
+        cached = _cached_package_files(repository, listed)
+        if cached is None:
+            fail(f"cached abuild output differs from listpkg for {name}")
+        package_files.extend(cached)
+
+    return sorted(package_files), local_private_key, local_public_key
+
+
+def _build_alpine_composition_repository(
+    lock: dict[str, Any],
+    root: Path,
+    runtime_packages: list[Path],
+    local_packages: list[Path],
+    private_key: Path,
+    public_key: Path,
+    work: Path,
+) -> tuple[Path, Path]:
+    repository = work / "composition-repository"
+    package_directory = repository / lock["arch"]
+    trust = work / "composition-keys"
+    package_directory.mkdir(parents=True)
+    trust.mkdir()
+
+    for key in sorted((root / "etc/apk/keys").glob("*.rsa.pub")):
+        shutil.copyfile(key, trust / key.name)
+    if not any(trust.iterdir()):
+        fail("Alpine minirootfs contains no trusted package keys")
+    shutil.copyfile(public_key, trust / public_key.name)
+
+    copied: list[Path] = []
+    for package in [*runtime_packages, *local_packages]:
+        destination = package_directory / package.name
+        if destination.exists():
+            fail(f"composition repository package is duplicated: {package.name}")
+        shutil.copyfile(require_file(package), destination)
+        copied.append(destination)
+
+    index = package_directory / "APKINDEX.tar.gz"
+    _run(
+        [
+            "apk",
+            "index",
+            "--keys-dir",
+            str(trust),
+            "--no-warnings",
+            "--rewrite-arch",
+            lock["arch"],
+            "--description",
+            "FPLinux locked runtime repository",
+            "--output",
+            str(index),
+            *(str(package) for package in copied),
+        ]
+    )
+    _run(["abuild-sign", "-k", str(private_key), "-p", public_key.name, str(index)])
+    return repository, trust
+
+
+def _alpine_tar_filter(member: tarfile.TarInfo, destination: str) -> tarfile.TarInfo | None:
+    if member.issym() or member.islnk():
+        target = PurePosixPath(member.linkname)
+        if target.is_absolute():
+            if ".." in target.parts:
+                fail(f"Alpine minirootfs link escapes the root: {member.name}")
+            relative_target = target.as_posix().lstrip("/")
+            filtered = tarfile.data_filter(member.replace(linkname=relative_target), destination)
+            if filtered is None:
+                return None
+            return filtered.replace(linkname=member.linkname)
+    return tarfile.data_filter(member, destination)
+
+
+def _require_apk_owner(root: Path, path: str, package: str) -> None:
+    result = subprocess.run(
+        ["apk", "--root", str(root), "--no-network", "info", "-W", path],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_build_environment(),
+    )
+    expected = f"{path} is owned by {package}-"
+    if result.returncode != 0 or not result.stdout.strip().startswith(expected):
+        detail = result.stderr.strip() or result.stdout.strip() or "no APK owner reported"
+        fail(f"unexpected Alpine package owner for {path}: {detail}")
+
+
+def _verify_alpine_rootfs(root: Path, packages: tuple[str, ...]) -> None:
+    init = root / "init"
+    if not init.is_symlink() or init.readlink() != Path("/sbin/init"):
+        fail("Alpine rootfs /init must point to /sbin/init")
+
+    owners = {
+        "/etc/fstab": "fplinux-base",
+        "/etc/inittab": "fplinux-base",
+        "/etc/os-release": "fplinux-base",
+        "/etc/init.d/fplinux-console": "fplinux-console-openrc",
+        "/etc/init.d/fplinux-usb-getty": "fplinux-console-openrc",
+        "/etc/init.d/fplinux-input": "fplinux-input-openrc",
+        "/usr/bin/fplinux-console": "fplinux-console",
+        "/usr/bin/fplinux-input": "fplinux-input",
+        "/usr/bin/quake": "fplinux-tyrquake",
+        "/usr/bin/tyr-quake": "fplinux-tyrquake",
+    }
+    if "fplinux-cpuclock" in packages:
+        owners["/usr/bin/fplinux-cpuclock"] = "fplinux-cpuclock"
+    for path, package in owners.items():
+        require_file(root / path.removeprefix("/"))
+        _require_apk_owner(root, path, package)
+
+    for service in ("fplinux-input", "fplinux-usb-getty", "fplinux-console"):
+        link = root / "etc/runlevels/default" / service
+        if not link.is_symlink() or link.readlink() != Path(f"/etc/init.d/{service}"):
+            fail(f"Alpine rootfs default runlevel is missing {service}")
+
+    fstab = require_file(root / "etc/fstab").read_text(encoding="utf-8")
+    if "tmpfs\t/tmp\ttmpfs\trw,nosuid,nodev,mode=1777\t0 0" not in fstab:
+        fail("Alpine fstab must mount /tmp as tmpfs")
+
+    world = require_file(root / "etc/apk/world").read_text(encoding="utf-8").splitlines()
+    if any("><Q" in entry for entry in world):
+        fail("Alpine world must not contain checksum-pinned non-repository packages")
+    selected_world = {entry for entry in world if entry.startswith("fplinux-")}
+    if selected_world != set(packages):
+        fail("Alpine world does not contain the exact selected FPLinux package set")
+
+    inittab = require_file(root / "etc/inittab").read_text(encoding="utf-8")
+    if "ttyGS" in inittab or "getty" in inittab:
+        fail("Alpine inittab must leave all interactive consoles to OpenRC services")
+    for obsolete in (
+        "etc/fplinux-build",
+        "usr/libexec/fplinux/init",
+        "usr/libexec/fplinux/usb-getty",
+    ):
+        if (root / obsolete).exists() or (root / obsolete).is_symlink():
+            fail(f"obsolete pre-Alpine runtime path is present: /{obsolete}")
+
+
+def _normalize_rootfs(root: Path) -> None:
+    timestamp = int(SOURCE_DATE_EPOCH)
+    for path in [*sorted(root.rglob("*"), reverse=True), root]:
+        os.utime(path, (timestamp, timestamp), follow_symlinks=False)
+
+
+def _write_rootfs_cpio(root: Path, destination: Path) -> None:
+    command = (
+        "find . -xdev -print0 | LC_ALL=C sort -z | "
+        "cpio --null --quiet --create --format=newc --reproducible --owner=0:0 "
+        f"> {shlex.quote(str(destination))}"
+    )
+    _run(["/bin/sh", "-c", command], cwd=root)
+    require_file(destination)
+
+
+def _rootfs_install_command(
+    lock: dict[str, Any],
+    root: Path,
+    keys: Path,
+    repository: Path,
+    packages: tuple[str, ...],
+) -> list[str]:
+    """Return the exact offline apk composition command for one selected set."""
+    return [
+        "apk",
+        "--root",
+        str(root),
+        "--arch",
+        lock["arch"],
+        "--no-network",
+        "--no-scripts",
+        "--no-logfile",
+        "--keys-dir",
+        str(keys),
+        "--repositories-file",
+        "/dev/null",
+        "--repository",
+        str(repository),
+        "add",
+        *packages,
+    ]
+
+
+def build_rootfs(jobs: int, packages: tuple[str, ...]) -> tuple[Path, Path, str]:
+    """Build or exactly reuse one selected content-addressed Alpine rootfs."""
+    image_recipe = os.environ.get("FPLINUX_CONTAINER_IMAGE_RECIPE", "")
+    signing_private_key, signing_public_key, signing_key_identity = _ensure_apk_signing_key()
+    recipe = alpine_state.alpine_rootfs_recipe(image_recipe, signing_key_identity, packages)
+    output = alpine_state.rootfs_output(CACHE, recipe)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = output.parent / f".{recipe}.lock"
+
+    with lock_path.open("a+b") as lock_stream:
+        fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
+        if alpine_state.receipt_matches(output, recipe):
+            _log_message(f"Alpine rootfs causal receipt hit: {recipe[:16]}")
+            return require_file(output / alpine_state.ROOTFS_NAME), output, recipe
+
+        lock = alpine_state.load_alpine_lock()
+        records = alpine_state.package_records(lock)
+        minirootfs_record = lock["minirootfs"]
+        minirootfs = _fetch(
+            minirootfs_record.get("url"),
+            minirootfs_record.get("sha256"),
+            CACHE / "downloads/alpine",
+            f"alpine-minirootfs-{lock['release']}-{lock['arch']}.tar.gz",
+        )
+        if minirootfs.stat().st_size != minirootfs_record.get("bytes"):
+            fail("locked Alpine minirootfs size does not match its downloaded bytes")
+        runtime_packages = _alpine_group_packages(lock, records, "runtime")
+        sysroot_packages = _alpine_group_packages(lock, records, "sysroot")
+
+        staging = Path(tempfile.mkdtemp(dir=output.parent, prefix=f".{recipe[:16]}-"))
+        staging.chmod(0o755)
+        try:
+            root = staging / "root"
+            sysroot = staging / "sysroot"
+            package_work = staging / "package-work"
+            root.mkdir()
+            sysroot.mkdir()
+            package_work.mkdir()
+            with tarfile.open(minirootfs, "r:gz") as archive:
+                archive.extractall(  # noqa: S202 -- every member passes _alpine_tar_filter.
+                    root,
+                    filter=_alpine_tar_filter,
+                )
+
+            _prepare_alpine_sysroot(lock, sysroot_packages, sysroot, root / "etc/apk/keys")
+            local_packages, private_key, public_key = _build_fplinux_apks(
+                lock,
+                sysroot,
+                package_work,
+                jobs,
+                signing_private_key,
+                signing_public_key,
+                packages,
+            )
+            composition_repository, composition_keys = _build_alpine_composition_repository(
+                lock,
+                root,
+                runtime_packages,
+                local_packages,
+                private_key,
+                public_key,
+                package_work,
+            )
+            _run(
+                _rootfs_install_command(
+                    lock,
+                    root,
+                    composition_keys,
+                    composition_repository,
+                    packages,
+                )
+            )
+
+            _verify_alpine_rootfs(root, packages)
+            _normalize_rootfs(root)
+            _write_rootfs_cpio(root, staging / alpine_state.ROOTFS_NAME)
+            shutil.rmtree(sysroot)
+            shutil.rmtree(package_work)
+            shutil.rmtree(root)
+            alpine_state.write_receipt(staging, recipe)
+
+            if output.exists():
+                shutil.rmtree(output)
+            staging.replace(output)
+            staging = Path()
+        finally:
+            if staging != Path() and staging.exists():
+                shutil.rmtree(staging)
+
+        return require_file(output / alpine_state.ROOTFS_NAME), output, recipe

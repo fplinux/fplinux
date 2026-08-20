@@ -39,7 +39,7 @@ scopes or run a subset while working on one area:
 
 Multiple scopes form one deduplicated selection and always run in canonical
 order. The available scopes are `repository`, `source`, `container`, `metadata`,
-`docs`, `spelling`, `secrets`, `licenses`, `python`, `shell`, `buildroot`, `c`
+`docs`, `spelling`, `secrets`, `licenses`, `python`, `shell`, `alpine`, `c`
 and `kernel`. Each cacheable scope stores a successful result. It is reused only
 when the source closure, checker commands, orchestration recipe and OCI image
 identity match. Any mismatch runs the scope again. `--no-cache` runs every
@@ -61,8 +61,8 @@ Run `check` when changing or reviewing source. It uses the same pinned OCI
 environment as the build. It runs Prettier and markdownlint-cli2 for Markdown,
 Prettier for JSON, Taplo for TOML, Vale and typos for prose, gitleaks for
 secrets, REUSE for licensing
-metadata, Ruff and mypy for Python, shell checks, Buildroot `check-package` for
-`buildroot-external` files, hadolint for the Containerfile,
+metadata, Ruff and mypy for Python, shell checks, `apkbuild-lint` for every
+FPLinux aport, hadolint for the Containerfile,
 clang-format with the pinned kernel tree's style for userspace and bootstrap C,
 Clang `scan-build` for userspace C, and the pinned kernel tree's own tooling for
 kernel sources: its clang-format style, `checkpatch.pl`, the canonical `savedefconfig` form, device
@@ -136,25 +136,30 @@ supply executable build hooks. After selecting a target, read its documentation
 for hardware status and phone-specific constraints; for example,
 [Nokia TA-1618](../targets/nokia-ta1618/README.md).
 
-The shared builder performs five stages:
+The rootfs selection is the exact union of the fixed common packages
+`fplinux-base`, `fplinux-console`, `fplinux-input` and `fplinux-tyrquake`, the
+required `[rootfs].packages` array in the selected platform manifest, and the
+required array in the selected target manifest. Either manifest array may be
+empty. The target name does not select packages; targets with the same resulting
+set and composition inputs reuse one rootfs.
 
-1. The toolchain stage builds or reuses the shared musl cross toolchain in
-   `.cache/toolchains/<digest>`, keyed by the platform's
-   `toolchain_defconfig`, the pinned Buildroot identity and the Buildroot patch
-   tree. Every target of a platform, and every rebuild, reuses the same tree.
-2. Buildroot creates the BusyBox root filesystem against that external
-   toolchain from the platform's shared paths, its
-   `toolchain_external_defconfig` fragment and the target defconfig. A causal
-   receipt splits the shared base from per-package payloads: a local package
-   source change rebuilds only that package in place, while configuration
-   changes rebuild the tree with `make clean`. Compilations flow through a
-   shared ccache under `.cache/ccache`.
-3. Kbuild projects the platform and target Linux patches, copies and appends,
-   then builds Linux with the initramfs and target DTB.
-4. The bootstrap stage projects the platform-declared pinned vendor files,
+The shared builder performs one package/rootfs flow followed by the hardware
+build stages:
+
+1. The Alpine rootfs stage resolves `alpine.lock.toml`, reuses or builds the one
+   content-addressed armv7 userspace, and builds the selected FPLinux packages
+   with standard `abuild`. A temporary signed repository combines those packages
+   with the exact locked Alpine runtime APKs, and `apk` installs the exact
+   resolved set by package name. Targets with the same final set receive the
+   same `rootfs.cpio` bytes. APK ownership, the package world and OpenRC
+   runlevels are verified before the rootfs receipt is published.
+2. Kbuild projects the platform and target Linux patches, copies and appends,
+   then builds Linux with that initramfs and the target DTB using the pinned
+   `arm-none-eabi` compiler from the Alpine build image.
+3. The bootstrap stage projects the platform-declared pinned vendor files,
    combines the zImage and DTB into `ramboot.bin` and checks the generic
    RAM-only image contract.
-5. Typed platform recipes build the host tools, the generic
+4. Typed platform recipes build the host tools, the generic
    `fplinux.assets/v1` lock resolves target assets, and the builder publishes the
    shared runner, fixed platform adapter and deterministic target bundle.
 
@@ -165,6 +170,9 @@ The shared builder performs five stages:
 ├── analysis/sparse/<target>/                  Sparse Kbuild state
 ├── check-results/<scope>/                     check success results
 ├── downloads/                                pinned upstream downloads
+├── apk-signing/                              persistent local abuild keypair
+├── apks/<package>/                          fixed exact local APK cache slot
+├── rootfs/<recipe>/                          shared Alpine rootfs + receipt
 ├── linux/sources/<target>/                   current Linux integration tree
 ├── logs/check/<run-id>/                      source-quality logs and run.json
 ├── logs/build/<target>/<run-id>/             target-build logs and run.json
@@ -173,7 +181,7 @@ The shared builder performs five stages:
 └── out/<target>/
     ├── work/
     │   ├── assets/                 extracted board assets
-    │   ├── buildroot/              Buildroot O= directory
+    │   ├── rootfs.cpio             fixed Kbuild input copy
     │   ├── kernel/                 Kbuild O= directory
     │   ├── bootstrap/              bootstrap projection and objects
     │   ├── host-build/             host-tool source and objects
@@ -208,8 +216,10 @@ the same inventory as JSON. To apply a freshly calculated inventory:
 ```
 
 `prune --apply` takes the exclusive cache lock and removes disposable staged
-snapshots from the newly calculated plan in `workspaces/` and
-`quality-workspaces/`.
+snapshots from `workspaces/` and `quality-workspaces/`, plus superseded shared
+Alpine rootfs generations. The protected rootfs is selected using both source
+inputs and the public identity of `.cache/apk-signing/`; the signing keypair
+itself is persistent build state and is never pruned automatically.
 
 For Nokia TA-1618, `console.current.json` selects the current runnable bundle:
 
@@ -260,17 +270,17 @@ qualified release additionally requires the exact closure digest in
 
 ## Verify a running phone
 
-After the current bundle has been loaded and interface 0 is free, compare its
-build stamp with the local build receipt:
+With the selected bundle loaded and interface 0 free, compare its kernel identity
+with the local build receipt:
 
 ```sh
 ./fplinux verify nokia-ta1618
 ```
 
 The command first refuses a local bundle whose workspace or OCI recipe no
-longer matches the checkout. It then reads `/etc/fplinux-build` and `uname -r`
-through USB interface 0, comparing the Buildroot recipe and the device-kernel
-suffix with `build-manifest.json`. The suffix covers the prepared Linux, rootfs,
+longer matches the checkout. It then reads `uname -r` through USB interface 0
+and compares the content-derived device-kernel suffix with
+`build-manifest.json`. The suffix covers the prepared Linux, rootfs receipt,
 kernel configuration, DTB and bootstrap recipe. It does not verify the other
 bundle files and is not a hardware qualification gate.
 
@@ -308,14 +318,17 @@ archives are written under `.cache/out/releases/`. See
 
 ## Reproducibility
 
-The container recipe, Linux, Buildroot, downloaded source archives and phone
-assets are version- and SHA-256-pinned. The source tree contains one
-Containerfile and creates one tagged FPLinux OCI environment; the digest-pinned
-Debian parent is pulled, not built by this project. The local image tag is
-accepted only when its embedded recipe digest matches every recipe input:
-`Containerfile`, `container.lock.toml`, the three package lock files and the
-build driver modules. Build timestamps and Kbuild
-identity are fixed.
+The container recipe, Alpine minirootfs/APKs, Linux, downloaded source archives
+and phone assets are version- and SHA-256-pinned. The source tree contains one
+Containerfile and creates one tagged Alpine-based FPLinux OCI environment from
+a digest-pinned parent. The local image tag is accepted only when its embedded
+recipe digest matches the exact container inputs. `alpine.lock.toml` separately
+pins every official armv7 artifact consumed by rootfs composition and the target
+sysroot. Locally built APKs use a persistent `.cache/apk-signing/` key; its
+public-key SHA-256 is recorded as a causal rootfs and bundle input, while the
+private key is never published. With the same source, pinned inputs, container
+recipe and signing key, rootfs composition is byte-reproducible. Build timestamps
+and Kbuild identity are fixed.
 Packaging verifies the successful-build manifest, sorts entries, normalizes
 timestamps and includes the allowlisted bundle files, build receipt, target
 and fixed legal documents, checksums and candidate notice when applicable.

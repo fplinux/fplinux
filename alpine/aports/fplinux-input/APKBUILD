@@ -1,0 +1,34 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-input
+pkgver=1
+pkgrel=0
+pkgdesc="USB host-keyboard input bridge for FPLinux"
+url="https://github.com/fplinux/fplinux"
+arch="armv7"
+license="GPL-2.0-only"
+makedepends_build="clang22 lld22"
+makedepends_host="musl-dev linux-headers gcc"
+subpackages="$pkgname-openrc"
+options="!check"
+source="fplinux-input.c fplinux-input.initd"
+builddir="$srcdir"
+
+build() {
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		"$srcdir/fplinux-input.c" $LDFLAGS -o fplinux-input
+}
+
+package() {
+	install -Dm755 "$builddir/fplinux-input" "$pkgdir/usr/bin/fplinux-input"
+	install -Dm755 "$srcdir/fplinux-input.initd" \
+		"$pkgdir/etc/init.d/fplinux-input"
+}
+
+openrc() {
+	default_openrc
+}
+
+sha512sums="
+1d4554ae0f21c4691cf67e0f22ef71931e29ce458f1b115db3ddfb7b05114bb1769f042564636d60218d806b32e6b4272a60099a3b0f0732ca41f0a4794c1cbf  fplinux-input.c
+26e6f35394d14a9789bc703f720c9047dddfebda2ce7a640f3961e01a5baa50c4bbc3065dd1cb0c4ff5bca317385b04b95780b090069bd926640abc1d25d0749  fplinux-input.initd
+"

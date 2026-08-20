@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from fplinux_cli import builder, buildroot_state
+from fplinux_cli import alpine_state, builder
 from fplinux_cli.bundle_state import (
     BUILD_MANIFEST_NAME,
     bundle_generations,
@@ -48,16 +48,9 @@ class BuilderPublicationTests(unittest.TestCase):
         self.write(".config", b"CONFIG_TEST=y\n", root=self.kernel)
         self.ramboot = self.write("ramboot.bin", b"ramboot\n", root=self.work)
         self.ramboot_map = self.write("ramboot.map", b"map\n", root=self.work)
-        self.buildroot = self.work / "buildroot"
-        self.buildroot_recipe_inputs = buildroot_state.BuildrootRecipe(base="d" * 64, packages={})
-        self.buildroot_recipe = self.buildroot_recipe_inputs.combined
-        self.rootfs = self.write("images/rootfs.cpio", b"rootfs\n", root=self.buildroot)
-        self.write("host/bin/arm-gcc", b"compiler\n", root=self.buildroot)
-        buildroot_state.write_receipt(
-            self.buildroot,
-            self.buildroot_recipe_inputs,
-            ("images/rootfs.cpio", "host/bin/arm-gcc"),
-        )
+        self.rootfs_output = self.work / "rootfs"
+        self.rootfs_recipe = "d" * 64
+        self.rootfs = self.write("rootfs.cpio", b"rootfs\n", root=self.rootfs_output)
         self.target_config = {
             "profile": "default",
             "display_name": "Demo",
@@ -99,6 +92,20 @@ class BuilderPublicationTests(unittest.TestCase):
         self.output_patch = mock.patch.object(builder, "OUTPUT", self.output)
         self.root_patch.start()
         self.output_patch.start()
+        self.receipt_patch = mock.patch.object(
+            alpine_state,
+            "trusted_receipt_identity",
+            return_value={"recipe": self.rootfs_recipe, "sha256": "8" * 64},
+        )
+        self.signing_patch = mock.patch.object(
+            alpine_state,
+            "signing_key_identity",
+            return_value="7" * 64,
+        )
+        self.receipt_patch.start()
+        self.signing_patch.start()
+        self.addCleanup(self.signing_patch.stop)
+        self.addCleanup(self.receipt_patch.stop)
         self.addCleanup(self.output_patch.stop)
         self.addCleanup(self.root_patch.stop)
 
@@ -131,8 +138,8 @@ class BuilderPublicationTests(unittest.TestCase):
                 {"console": self.host_tool},
                 "c" * 64,
                 "9" * 64,
-                self.buildroot,
-                self.buildroot_recipe,
+                self.rootfs_output,
+                self.rootfs_recipe,
                 {"recipe": "e" * 64, "sha256": "f" * 64},
             )
 
@@ -166,8 +173,9 @@ class BuilderPublicationTests(unittest.TestCase):
         self.assertEqual(
             set(manifest),
             {
-                "buildroot_receipt",
+                "rootfs_receipt",
                 "container_image_recipe",
+                "apk_signing_key",
                 "device_identity",
                 "files",
                 "generation",
@@ -179,7 +187,8 @@ class BuilderPublicationTests(unittest.TestCase):
             },
         )
         self.assertEqual(manifest["generation"], published.name)
-        self.assertEqual(manifest["buildroot_receipt"]["recipe"], self.buildroot_recipe)
+        self.assertEqual(manifest["apk_signing_key"], "7" * 64)
+        self.assertEqual(manifest["rootfs_receipt"]["recipe"], self.rootfs_recipe)
         self.assertEqual(manifest["kbuild_receipt"]["recipe"], "e" * 64)
         self.assertEqual(manifest["device_identity"], "9" * 64)
         self.assertIn("debug/rootfs.cpio", manifest["files"])

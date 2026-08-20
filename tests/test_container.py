@@ -22,14 +22,6 @@ def _container_lock() -> dict[str, object]:
             "platform": "linux/amd64",
             "base": f"example.invalid/base@sha256:{'a' * 64}",
             "base_created": "2026-01-01T00:00:00Z",
-            "debian_snapshot": "20260101T000000Z",
-        },
-        "buildroot": {
-            "version": "2025.02",
-            "url": "https://example.invalid/buildroot.tar.xz",
-            "sha256": "b" * 64,
-            "bytes": 1,
-            "released": "2026-01-01",
         },
     }
 
@@ -41,7 +33,6 @@ def _write_image_recipe_inputs(root: Path) -> None:
         "Containerfile": b"ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\n",
         "package.json": b"{}\n",
         "package-lock.json": b"{}\n",
-        "requirements.lock": b"\n",
     }.items():
         (root / relative).write_bytes(contents)
     for relative in (

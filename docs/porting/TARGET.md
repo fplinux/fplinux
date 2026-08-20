@@ -36,8 +36,8 @@ profile = "<profile>"
 release_manifest = "release/manifest.toml"
 assets_lock = "loader/assets.lock.toml"
 
-[buildroot]
-defconfig = "rootfs/defconfig"
+[rootfs]
+packages = []
 
 [linux]
 defconfig = "kernel/defconfig"
@@ -92,12 +92,19 @@ not add a registry entry or copy a target `build.py`, runner or launcher. The
 root command combines this manifest with `platforms/<platform>/platform.toml`
 and invokes the shared `scripts/fplinux_cli/builder.py`.
 
-## Asset and package data
+## Asset and rootfs package data
 
 Use a generic `fplinux.assets/v1` lock at the declared `assets_lock` path. Each
 source states its kind, pinned URL and SHA-256; each output assigns a runtime
 role, bundle path and expected SHA-256. Keep extraction or download behavior in
 the shared builder rather than target scripts.
+
+`[rootfs]` is required even when its `packages` array is empty. It declares only
+target-owned package additions. The rootfs set is the exact union of the fixed
+common packages (`fplinux-base`, `fplinux-console`, `fplinux-input` and
+`fplinux-tyrquake`), the selected platform's `[rootfs].packages`, and this
+array. The target name never selects packages; targets with the same final set
+and other composition inputs share a rootfs.
 
 The declared release manifest uses `fplinux.release/v2` and contains exactly
 `schema`, `image`, `bundle_files`, `runtime_files` and `documents`. `bundle_files`
@@ -215,15 +222,14 @@ port assigned to input and the init path that starts its receiver.
 
 ## Implementation map
 
-| Path          | Responsibility                                                    |
-| ------------- | ----------------------------------------------------------------- |
-| `target.toml` | Data-only board inputs, identity and runtime values               |
-| `dts/`        | Board DTS and phone wiring                                        |
-| `kernel/`     | Phone-specific Linux support and integration fragments            |
-| `bootstrap/`  | Target payload source and Linux handoff                           |
-| `rootfs/`     | Target identity and files layered over the common root filesystem |
-| `loader/`     | Generic asset lock and asset provenance                           |
-| `release/`    | Data-only package allowlist and archive documents                 |
+| Path          | Responsibility                                         |
+| ------------- | ------------------------------------------------------ |
+| `target.toml` | Data-only board inputs, identity and runtime values    |
+| `dts/`        | Board DTS and phone wiring                             |
+| `kernel/`     | Phone-specific Linux support and integration fragments |
+| `bootstrap/`  | Target payload source and Linux handoff                |
+| `loader/`     | Generic asset lock and asset provenance                |
+| `release/`    | Data-only package allowlist and archive documents      |
 
 Delete rows for directories the target does not need. Link back to the shared
 platform document at the end. Build, package and run behavior stays in the

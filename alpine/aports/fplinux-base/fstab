@@ -1,0 +1,2 @@
+# SPDX-License-Identifier: GPL-2.0-only
+tmpfs	/tmp	tmpfs	rw,nosuid,nodev,mode=1777	0 0

@@ -76,7 +76,8 @@ scope again:
 ```
 
 It checks Markdown, JSON, TOML, documentation, licensing metadata, Python,
-shell, Buildroot, container recipe and C sources in the pinned environment. The C passes use Clang `scan-build` for
+shell, Alpine APKBUILDs, the container recipe and C sources in the pinned
+environment. The C passes use Clang `scan-build` for
 userspace and `sparse` with the target's real Linux tree, Kconfig and generated
 headers for kernel code. Source snapshots are mounted read-only, userspace
 analysis uses an invocation-local temporary directory, the fixed Sparse state
@@ -104,9 +105,10 @@ pinned inputs.
 
 ## Run from the source checkout
 
-The generated host tools run on Linux x86-64 and require Python 3.11 or newer,
-glibc 2.38 or newer, libusb 1.0, libudev and GNU `stdbuf` from coreutils. USB
-access must allow the current user to read and write the Nokia TA-1618 BootROM
+The generated host tools run on Linux x86-64 as static executables. The shared
+runner requires Python 3.11 or newer and the UMS9117 adapter requires GNU
+`stdbuf` from coreutils. USB access must allow the invoking user to read and write
+the Nokia TA-1618 BootROM
 and Linux console devices; install the [documented udev rule](docs/RELEASES.md#usb-access)
 before connecting the phone.
 
@@ -132,10 +134,10 @@ the current checkout:
 ```
 
 `verify` first refuses a local bundle whose workspace or OCI recipe is stale.
-It then compares the phone's Buildroot recipe in `/etc/fplinux-build` and its
-kernel suffix with the current bundle. That suffix identifies the prepared
-Linux, rootfs, kernel configuration, DTB and bootstrap recipe. It does not
-qualify the hardware or verify every bundle file. From the repository root,
+It then compares the phone's content-derived kernel suffix with the selected
+bundle. That suffix identifies the prepared Linux, Alpine rootfs receipt,
+kernel configuration, DTB and bootstrap recipe. It does not qualify the
+hardware or verify every bundle file. From the repository root,
 reconnect to the shell with interface 0:
 
 ```sh
@@ -187,10 +189,10 @@ available.
 ```text
 fplinux             repository CLI entry point
 scripts/fplinux_cli shared validation, build and package orchestration
-Containerfile       the one pinned OCI build environment
-buildroot-external/ shared Buildroot integration and packages
+Containerfile       the one pinned Alpine OCI build environment
+alpine/             shared APK packages, OpenRC policy and package build config
 bootstrap/          reusable freestanding pre-Linux UI primitives
-common/             shared post-kernel userspace and the shared RAM runner
+common/             shared host tooling and the shared RAM runner
 platforms/<soc>/    platform.toml, reusable SoC support and fixed host adapter
 targets/<phone>/    data-only target, board sources, assets and release inputs
 ```

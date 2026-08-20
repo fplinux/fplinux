@@ -58,11 +58,11 @@ def _require_rootfs(value: Mapping[str, object]) -> dict[str, int | str]:
 
 def _require_receipt(value: Mapping[str, object]) -> dict[str, str]:
     if set(value) != {"recipe", "sha256"}:
-        message = "Buildroot receipt must contain exactly recipe and sha256"
+        message = "rootfs receipt must contain exactly recipe and sha256"
         raise DeviceStateError(message)
     return {
-        "recipe": _require_digest(value.get("recipe"), "Buildroot recipe"),
-        "sha256": _require_digest(value.get("sha256"), "Buildroot receipt SHA-256"),
+        "recipe": _require_digest(value.get("recipe"), "rootfs recipe"),
+        "sha256": _require_digest(value.get("sha256"), "rootfs receipt SHA-256"),
     }
 
 
@@ -81,7 +81,7 @@ def device_kernel_identity(  # noqa: PLR0913
     linux_recipe: str,
     bootstrap_recipe: str,
     rootfs: Mapping[str, object],
-    buildroot_receipt: Mapping[str, object],
+    rootfs_receipt: Mapping[str, object],
     arch: str,
     defconfig: Path,
     dtb: str,
@@ -92,7 +92,7 @@ def device_kernel_identity(  # noqa: PLR0913
         "linux_recipe": _require_digest(linux_recipe, "prepared Linux recipe"),
         "bootstrap_recipe": _require_digest(bootstrap_recipe, "bootstrap recipe"),
         "rootfs": _require_rootfs(rootfs),
-        "buildroot_receipt": _require_receipt(buildroot_receipt),
+        "rootfs_receipt": _require_receipt(rootfs_receipt),
         "kernel": {
             "arch": _require_target(arch),
             "defconfig": _defconfig_identity(Path(defconfig)),

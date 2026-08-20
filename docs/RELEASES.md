@@ -109,12 +109,12 @@ normalized; an existing package name is never overwritten with different bytes.
 
 A Linux x86-64 release archive requires:
 
-- glibc 2.38 or newer;
 - Python 3.11 or newer;
-- libusb 1.0;
-- libudev;
 - GNU `stdbuf` from coreutils;
 - USB permissions for `1782:4d00` and `0525:a4a6`.
+
+The bundled native host tools are static Linux/x86-64 executables; host glibc,
+libusb and libudev packages are not runtime dependencies.
 
 Extract the complete top-level directory, enter it and verify its contents:
 
@@ -129,25 +129,19 @@ Power the phone off and disconnect USB, then start the runner:
 ./runner/run.py
 ```
 
-Before asking for the phone, the runner checks its Python version and uses `ldd`
-on every bundled host tool. Missing shared libraries and incompatible host
-binaries stop the run before the platform adapter or loader starts. The UMS9117
-adapter also checks for `stdbuf` before printing the connection instructions.
+Before asking for the phone, the runner checks its Python version and verifies
+the hashes of the bundled static host tools. The UMS9117 adapter also checks for
+`stdbuf` before printing the connection instructions.
 When prompted, hold `*` and connect USB while keeping `*` pressed. After BootROM
 USB appears, the adapter verifies read/write access to its actual device node
 before executing the RAM loader. All loader transfers target volatile RAM.
 
-`sha256sum -c` verifies the extracted archive, not the running phone. After
-loading, detach interface 0 and read the image's build stamp with:
-
-```sh
-./host/fplinux-usb-console --interface 0 --exec 'cat /etc/fplinux-build'
-```
-
-A source checkout additionally provides `./fplinux verify <target>`, which
-first checks its local bundle inputs, then compares the stamp's Buildroot recipe
-and the running kernel suffix with `build-manifest.json`. Neither check replaces
-the phone-side hardware qualification gate.
+`sha256sum -c` verifies the extracted archive, not the running phone. A source
+checkout additionally provides `./fplinux verify <target>`, which first checks
+its local bundle inputs, then compares the running kernel's content-derived
+FPLinux suffix with `build-manifest.json`. This identifies the prepared Linux,
+Alpine rootfs receipt, kernel configuration, DTB and bootstrap recipe. It does
+not replace the phone-side hardware qualification gate.
 
 ## USB access
 
@@ -183,7 +177,8 @@ The host USB client uses these controls:
 - `Ctrl-]` detaches the host client only. It does not exit the phone shell,
   reboot Linux or power the phone off.
 - `Ctrl-C` is forwarded to the shell on the phone.
-- `exit` ends the current phone shell; `usb-getty` starts a replacement shell.
+- `exit` ends the active phone shell; the OpenRC-supervised USB getty starts a
+  replacement shell.
 
 Interface 1 can forward a host keyboard while interface 0 remains attached:
 
@@ -261,10 +256,10 @@ is appropriate only for a new power-off BootROM load.
 A release archive must use a runtime closure listed in `releases.lock.toml` and
 completed on that exact phone variant. The closure digest covers the image, host
 binaries, shared runner, fixed platform adapter, assets and runtime manifest. The
-image's build stamp records its Buildroot recipe; its kernel suffix identifies
-the prepared Linux, rootfs, kernel configuration, DTB and bootstrap recipe.
-Packaging separately checks every generated bundle file against the successful-
-build manifest. Distribute the corresponding source with the binary ZIP.
+kernel suffix identifies the prepared Linux, Alpine rootfs receipt, kernel
+configuration, DTB and bootstrap recipe. Packaging separately checks every
+generated bundle file against the successful-build manifest. Distribute the
+corresponding source with the binary ZIP.
 
 The archive must also include the notices declared by the fixed packager,
 including the complete musl copyright and permission notice.

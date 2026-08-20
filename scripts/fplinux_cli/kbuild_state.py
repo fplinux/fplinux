@@ -117,9 +117,9 @@ def create_plan(  # noqa: PLR0913 -- exact causal inputs remain separate.
     defconfig_path: str,
     rootfs: dict[str, int | str],
     rootfs_input: Path,
-    buildroot_receipt: dict[str, str],
+    rootfs_receipt: dict[str, str],
     arch: str,
-    cross_compile: Path,
+    cross_compile: str,
     commands: list[list[str]],
     outputs: tuple[str, ...],
     implementation: list[tuple[str, Path]],
@@ -133,11 +133,11 @@ def create_plan(  # noqa: PLR0913 -- exact causal inputs remain separate.
     """
     prepared_linux_recipe = _require_digest(linux_recipe, "prepared Linux recipe")
     rootfs_record = _rootfs_record(rootfs)
-    if not isinstance(buildroot_receipt, dict) or set(buildroot_receipt) != {"recipe", "sha256"}:
-        _error("Buildroot receipt identity is invalid")
-    buildroot_identity = {
-        "recipe": _require_digest(buildroot_receipt.get("recipe"), "Buildroot recipe"),
-        "sha256": _require_digest(buildroot_receipt.get("sha256"), "Buildroot receipt SHA-256"),
+    if not isinstance(rootfs_receipt, dict) or set(rootfs_receipt) != {"recipe", "sha256"}:
+        _error("rootfs receipt identity is invalid")
+    rootfs_receipt_identity = {
+        "recipe": _require_digest(rootfs_receipt.get("recipe"), "rootfs recipe"),
+        "sha256": _require_digest(rootfs_receipt.get("sha256"), "rootfs receipt SHA-256"),
     }
     if not isinstance(arch, str) or not arch:
         _error("Kbuild ARCH must be a non-empty string")
@@ -158,7 +158,7 @@ def create_plan(  # noqa: PLR0913 -- exact causal inputs remain separate.
         "defconfig": _source_file(_relative(defconfig_path, "Kbuild defconfig"), defconfig),
         "rootfs": rootfs_record,
         "rootfs_input": str(rootfs_input),
-        "buildroot_receipt": buildroot_identity,
+        "rootfs_receipt": rootfs_receipt_identity,
         "arch": arch,
         "cross_compile": str(cross_compile),
         "commands": normalized_commands,
@@ -250,7 +250,7 @@ def materialize_rootfs_input(work: Path, source: Path, plan: KbuildPlan) -> Path
     if _file_record_or_none(destination) == plan.rootfs:
         return destination
     if rootfs_identity(source) != plan.rootfs:
-        _error("Buildroot rootfs changed while preparing Kbuild input")
+        _error("rootfs changed while preparing Kbuild input")
     descriptor, temporary_name = tempfile.mkstemp(
         dir=work,
         prefix=f".{destination.name}.",

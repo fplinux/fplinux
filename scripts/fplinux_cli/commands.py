@@ -9,10 +9,16 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from .bundle_state import BundleStateError, CurrentBundle, resolve_current_bundle
+from . import alpine_state
+from .bundle_state import (
+    BundleStateError,
+    CurrentBundle,
+    resolve_current_bundle,
+)
 from .common import (
     ROOT,
     ZIP_TIMESTAMP,
@@ -42,6 +48,16 @@ CANDIDATE_NOTICE = b"""HARDWARE QUALIFICATION CANDIDATE - DO NOT PUBLISH
 This archive is for physical device qualification and testing only.
 Candidate packaging does not assert release qualification.
 """
+
+
+@dataclass(frozen=True)
+class BuildIdentity:
+    """Exact host-visible inputs that authorize bundle reuse."""
+
+    workspace_digest: str
+    container_image_recipe: str
+    apk_signing_key: str
+
 
 PACKAGE_DOCUMENTS = {
     "LICENSE": ROOT / "LICENSE",
@@ -76,11 +92,22 @@ def _resolve_target_bundle(
         )
 
 
+def _manifest_matches_identity(manifest: dict[str, Any], identity: BuildIdentity | None) -> bool:
+    """Return whether a manifest matches one exact host-visible build identity."""
+    return identity is not None and all(
+        manifest.get(field) == value
+        for field, value in (
+            ("workspace_digest", identity.workspace_digest),
+            ("container_image_recipe", identity.container_image_recipe),
+            ("apk_signing_key", identity.apk_signing_key),
+        )
+    )
+
+
 def _matching_target_bundle(
     target: str,
     config: dict[str, Any],
-    snapshot: WorkspaceSnapshot,
-    image_recipe: str,
+    identity: BuildIdentity | None,
     image_relative: str,
 ) -> tuple[CurrentBundle, dict[str, Any]] | None:
     """Return only a fully valid current generation for the exact causal inputs."""
@@ -93,10 +120,7 @@ def _matching_target_bundle(
         manifest = _bundle_manifest(bundle)
     except (BundleStateError, OSError, UnicodeDecodeError, ValueError):
         return None
-    if (
-        manifest.get("workspace_digest") != snapshot.recipe
-        or manifest.get("container_image_recipe") != image_recipe
-    ):
+    if not _manifest_matches_identity(manifest, identity):
         return None
     files = manifest.get("files")
     record = files.get(image_relative) if isinstance(files, dict) else None
@@ -156,27 +180,21 @@ def console_target(
 
 
 def verify_booted(target: str) -> None:
-    """Compare the stamp inside the running phone with the current bundle."""
+    """Compare the running kernel identity with the current bundle."""
     config = load_target(target)
     bundle, manifest = _resolve_target_bundle(target, config)
     snapshot = target_workspace_snapshot(target)
-    workspace_digest = manifest.get("workspace_digest")
     image_recipe = container_image_recipe_digest()
-    if (
-        workspace_digest != snapshot.recipe
-        or manifest.get("container_image_recipe") != image_recipe
-    ):
+    identity = _build_identity(snapshot, image_recipe, ROOT / ".cache")
+    if not _manifest_matches_identity(manifest, identity):
         fail(f"build output is stale; rebuild it: ./fplinux build {target}")
-    buildroot_receipt = manifest.get("buildroot_receipt")
     device_identity = manifest.get("device_identity")
     if (
-        not isinstance(buildroot_receipt, dict)
-        or not isinstance(device_identity, str)
+        not isinstance(device_identity, str)
         or len(device_identity) != 64
         or any(character not in "0123456789abcdef" for character in device_identity)
     ):
         fail(f"build output is stale; rebuild it: ./fplinux build {target}")
-    expected_buildroot = f"buildroot={buildroot_receipt.get('recipe')}"
     expected_kernel_suffix = f"-fplinux-{device_identity[:16]}"
     client = _console_client(bundle)
     result = subprocess.run(
@@ -186,7 +204,7 @@ def verify_booted(target: str) -> None:
             "--interface",
             "0",
             "--exec",
-            "cat /etc/fplinux-build; uname -r",
+            "uname -r",
         ],
         capture_output=True,
         text=True,
@@ -202,21 +220,28 @@ def verify_booted(target: str) -> None:
     if not actual:
         detail = result.stderr.strip().splitlines()
         raise SystemExit(
-            "verify: no build stamp came back from the phone\n  "
+            "verify: no kernel identity came back from the phone\n  "
             + (detail[-1] if detail else "the console client said nothing")
         )
-    if (
-        len(actual) != 2
-        or actual[0] != expected_buildroot
-        or not actual[1].endswith(expected_kernel_suffix)
-    ):
+    if len(actual) != 1 or not actual[0].endswith(expected_kernel_suffix):
         raise SystemExit(
             "verify: the phone is running a different build\n"
             f"  phone:  {result.stdout.strip()}\n"
-            f"  bundle: {expected_buildroot}; kernel *{expected_kernel_suffix}\n"
+            f"  bundle: kernel *{expected_kernel_suffix}\n"
             "Load the current image before trusting anything you measure."
         )
     print(f"verify: the phone runs the current build ({device_identity[:16]})")
+
+
+def _build_identity(
+    snapshot: WorkspaceSnapshot, image_recipe: str, cache: Path
+) -> BuildIdentity | None:
+    """Read the exact host-visible inputs without creating signing state."""
+    try:
+        signing_key = alpine_state.signing_key_identity(cache)
+    except SystemExit:
+        return None
+    return BuildIdentity(snapshot.recipe, image_recipe, signing_key)
 
 
 def _ensure_build_directory(path: Path) -> Path:
@@ -239,8 +264,9 @@ def _build_container_command(  # noqa: PLR0913
     snapshot: WorkspaceSnapshot,
     workspace: Path,
     downloads: Path,
-    ccache: Path,
-    toolchains: Path,
+    apk_signing: Path,
+    apks: Path,
+    rootfs: Path,
     linux: Path,
     output: Path,
     logs: Path,
@@ -259,16 +285,18 @@ def _build_container_command(  # noqa: PLR0913
         "--rm",
         "--platform",
         platform,
-        "--userns=keep-id",
+        "--userns=keep-id:uid=0,gid=0",
         "--read-only",
         "--tmpfs",
         "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs.
         "--volume",
         f"{downloads}:/cache/downloads:rw,Z",
         "--volume",
-        f"{ccache}:/cache/ccache:rw,Z",
+        f"{apk_signing}:/cache/apk-signing:rw,Z",
         "--volume",
-        f"{toolchains}:/cache/toolchains:rw,Z",
+        f"{apks}:/cache/apks:rw,Z",
+        "--volume",
+        f"{rootfs}:/cache/rootfs:rw,Z",
         "--volume",
         f"{linux}:/cache/linux:rw,Z",
         "--volume",
@@ -324,11 +352,12 @@ def build(target: str, jobs: int, *, verbose: bool = False) -> None:
     snapshot = target_workspace_snapshot(target)
     container_lock = load_container_lock()
     image_recipe = container_image_recipe_digest(container_lock)
+    cache = ROOT / ".cache"
+    identity = _build_identity(snapshot, image_recipe, cache)
     current = _matching_target_bundle(
         target,
         target_config,
-        snapshot,
-        image_recipe,
+        identity,
         release["image"],
     )
     if current is not None:
@@ -343,10 +372,10 @@ def build(target: str, jobs: int, *, verbose: bool = False) -> None:
     lock = container_lock["oci"]
     if not image_ready(podman, lock["image"], image_recipe=image_recipe):
         setup(reporter=reporter, lock=container_lock, image_recipe=image_recipe)
-    cache = ROOT / ".cache"
+    apk_signing = _ensure_build_directory(cache / "apk-signing")
     downloads = _ensure_build_directory(cache / "downloads")
-    ccache = _ensure_build_directory(cache / "ccache")
-    toolchains = _ensure_build_directory(cache / "toolchains")
+    apks = _ensure_build_directory(cache / "apks")
+    rootfs = _ensure_build_directory(cache / "rootfs")
     linux = _ensure_build_directory(cache / "linux")
     output = _ensure_build_directory(cache / "out")
     with reporter.stage("workspace"):
@@ -364,8 +393,9 @@ def build(target: str, jobs: int, *, verbose: bool = False) -> None:
                 snapshot=snapshot,
                 workspace=workspace,
                 downloads=downloads,
-                ccache=ccache,
-                toolchains=toolchains,
+                apk_signing=apk_signing,
+                apks=apks,
+                rootfs=rootfs,
                 linux=linux,
                 output=output,
                 logs=reporter.root,
@@ -373,11 +403,11 @@ def build(target: str, jobs: int, *, verbose: bool = False) -> None:
                 image_recipe=image_recipe,
             )
         )
+    identity = _build_identity(snapshot, image_recipe, cache)
     current = _matching_target_bundle(
         target,
         target_config,
-        snapshot,
-        image_recipe,
+        identity,
         release["image"],
     )
     if current is None:
@@ -451,10 +481,10 @@ def package_target(target: str, *, candidate: bool = False) -> None:
     bundle, manifest = _resolve_target_bundle(target, config)
     snapshot = target_workspace_snapshot(target)
     image_recipe = container_image_recipe_digest()
+    identity = _build_identity(snapshot, image_recipe, ROOT / ".cache")
     files_table = manifest.get("files")
     if (
-        manifest.get("workspace_digest") != snapshot.recipe
-        or manifest.get("container_image_recipe") != image_recipe
+        not _manifest_matches_identity(manifest, identity)
         or not isinstance(files_table, dict)
         or not set(release["bundle_files"]).issubset(files_table)
     ):

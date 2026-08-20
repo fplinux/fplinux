@@ -2,16 +2,13 @@
 schema = "fplinux.platform/v1"
 name = "ums9117"
 
-[buildroot]
-external = "buildroot-external"
-shared_paths = ["common/rootfs"]
-toolchain_defconfig = "platforms/ums9117/buildroot/toolchain.defconfig"
-toolchain_external_defconfig = "platforms/ums9117/buildroot/toolchain-external.defconfig"
+[rootfs]
+packages = ["fplinux-cpuclock"]
 
 [linux]
 source_lock = "linux"
 arch = "arm"
-cross_compile = "arm-buildroot-linux-musleabihf-"
+cross_compile = "arm-none-eabi-"
 analysis_cross_compile = "arm-none-eabi-"
 config_script = "scripts/config"
 image_output = "arch/arm/boot/zImage"
@@ -169,6 +166,7 @@ cache_name = "spreadtrum_flash.tar.gz"
 archive_prefix = "spreadtrum_flash-{commit}/"
 source_directory = "spd_dump"
 binary = "spd_dump"
+link = "static-libusb"
 
 [[host.tools.members]]
 path = "Makefile"
@@ -190,6 +188,7 @@ cache_name = "fpdoom-host.tar.gz"
 archive_prefix = "fpdoom-{commit}/libc_server/"
 source_directory = "libc_server"
 binary = "libc_server"
+link = "static-libusb"
 
 [[host.tools.members]]
 path = "Makefile"

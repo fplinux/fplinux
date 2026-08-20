@@ -1,0 +1,17 @@
+#!/sbin/openrc-run
+# SPDX-License-Identifier: GPL-2.0-only
+# shellcheck shell=sh disable=SC2034
+
+description="FPLinux host keyboard bridge"
+supervisor=supervise-daemon
+command=/usr/bin/fplinux-input
+input_file=/dev/null
+output_log=/dev/kmsg
+error_log=/dev/kmsg
+respawn_delay=1
+respawn_max=0
+retry="TERM/2/KILL/2"
+
+depend() {
+	need devfs
+}

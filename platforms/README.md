@@ -10,6 +10,7 @@ the contracts that targets consume:
 - common buses and controller drivers;
 - SoC-level DTSI nodes;
 - Kconfig and Kbuild integration shared by every phone using the platform;
+- platform-owned rootfs package additions;
 - bootstrap vendor projection and shared bootstrap inputs;
 - typed host-tool build recipes and fixed runtime-tool roles;
 - one fixed host adapter used by the shared `common/run.py`.
@@ -28,9 +29,9 @@ memory reservation or phone-specific loader asset. Those belong under
 
 1. Copy the [platform template](../docs/porting/PLATFORM.md) to
    `<platform>/README.md` and fill it in.
-2. Add `<platform>/platform.toml` with Buildroot sharing, Linux/Kbuild
-   integration, bootstrap vendor projection, typed host recipes and the runner
-   contract.
+2. Add `<platform>/platform.toml` with required `[rootfs].packages`,
+   Linux/Kbuild integration, bootstrap vendor projection, typed host recipes and
+   the runner contract.
 3. Put reusable controller drivers and the SoC DTSI in the platform directory.
    Expose disabled-by-default DTS nodes; each target decides which devices are
    wired and enabled.
@@ -40,6 +41,13 @@ memory reservation or phone-specific loader asset. Those belong under
 5. Declare shared files and patches in `platform.toml`; targets declare only
    board-specific additions in their data-only `target.toml` files.
 6. Add the platform to this index.
+
+The fixed common rootfs packages are `fplinux-base`, `fplinux-console`,
+`fplinux-input` and `fplinux-tyrquake`. A platform's required
+`[rootfs].packages` array owns hardware-family additions; each target has its
+own required array for board additions. The final set is their exact union and
+does not depend on the target name. Targets with the same final set share a
+rootfs.
 
 Do not require targets to copy a build script, runner or launcher. Move code into
 a platform only when its addresses, interrupts and behavior are SoC-wide.

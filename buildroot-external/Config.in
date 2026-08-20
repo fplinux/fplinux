@@ -1,8 +1,0 @@
-menu "FPLinux"
-
-source "$BR2_EXTERNAL_FPLINUX_PATH/package/fplinux-console/Config.in"
-source "$BR2_EXTERNAL_FPLINUX_PATH/package/fplinux-input/Config.in"
-source "$BR2_EXTERNAL_FPLINUX_PATH/package/fplinux-cpuclock/Config.in"
-source "$BR2_EXTERNAL_FPLINUX_PATH/package/fplinux-tyrquake/Config.in"
-
-endmenu

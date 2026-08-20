@@ -40,8 +40,9 @@ class CommandLifecycleTests(unittest.TestCase):
                 {
                     "workspace_digest": "c" * 64,
                     "container_image_recipe": "e" * 64,
+                    "apk_signing_key": "7" * 64,
                     "device_identity": "9" * 64,
-                    "buildroot_receipt": {"recipe": "f" * 64, "sha256": "0" * 64},
+                    "rootfs_receipt": {"recipe": "f" * 64, "sha256": "0" * 64},
                     "files": {
                         "image/ramboot.bin": {
                             "mode": 420,
@@ -59,6 +60,7 @@ class CommandLifecycleTests(unittest.TestCase):
         current = (self.bundle, json.loads(self.bundle.manifest_bytes))
         reporter = mock.Mock()
         with (
+            mock.patch.object(commands, "ROOT", self.root),
             mock.patch.object(commands, "load_target", return_value={"profile": "default"}),
             mock.patch.object(
                 commands,
@@ -114,13 +116,13 @@ class CommandLifecycleTests(unittest.TestCase):
 
     def test_jobs_do_not_change_an_exact_bundle_hit(self) -> None:
         """Treat ``--jobs`` as scheduling rather than artifact identity."""
+        identity = commands.BuildIdentity(self.snapshot.recipe, "e" * 64, "7" * 64)
         with mock.patch.object(commands, "resolve_current_bundle", return_value=self.bundle):
             self.assertIsNotNone(
                 commands._matching_target_bundle(  # noqa: SLF001
                     "phone",
                     {"profile": "default"},
-                    self.snapshot,
-                    "e" * 64,
+                    identity,
                     "image/ramboot.bin",
                 )
             )
@@ -128,13 +130,13 @@ class CommandLifecycleTests(unittest.TestCase):
     def test_corrupted_bundle_image_is_not_an_exact_hit(self) -> None:
         """A bundle whose image bytes drifted from the manifest is rebuilt."""
         (self.bundle_path / "image/ramboot.bin").write_bytes(b"corrupt\n")
+        identity = commands.BuildIdentity(self.snapshot.recipe, "e" * 64, "7" * 64)
         with mock.patch.object(commands, "resolve_current_bundle", return_value=self.bundle):
             self.assertIsNone(
                 commands._matching_target_bundle(  # noqa: SLF001
                     "phone",
                     {"profile": "default"},
-                    self.snapshot,
-                    "e" * 64,
+                    identity,
                     "image/ramboot.bin",
                 )
             )
@@ -239,7 +241,7 @@ class CommandLifecycleTests(unittest.TestCase):
         result = subprocess.CompletedProcess(
             [],
             7,
-            stdout=f"buildroot={'f' * 64}\n6.12-fplinux-{'9' * 16}\n",
+            stdout=f"6.12-fplinux-{'9' * 16}\n",
             stderr="transport failed\n",
         )
         resolver = mock.Mock(return_value=(self.bundle, manifest))
@@ -255,6 +257,11 @@ class CommandLifecycleTests(unittest.TestCase):
                 commands,
                 "container_image_recipe_digest",
                 return_value="e" * 64,
+            ),
+            mock.patch.object(
+                commands,
+                "_build_identity",
+                return_value=commands.BuildIdentity(self.snapshot.recipe, "e" * 64, "7" * 64),
             ),
             mock.patch("fplinux_cli.commands.subprocess.run", return_value=result),
             self.assertRaisesRegex(SystemExit, "console client failed with exit status 7"),
@@ -284,7 +291,7 @@ class CommandLifecycleTests(unittest.TestCase):
         result = subprocess.CompletedProcess(
             [],
             0,
-            stdout=f"buildroot={'f' * 64}\n6.12-fplinux-{'9' * 16}\n",
+            stdout=f"6.12-fplinux-{'9' * 16}\n",
             stderr="",
         )
         with (
@@ -300,6 +307,11 @@ class CommandLifecycleTests(unittest.TestCase):
                 return_value=self.snapshot,
             ),
             mock.patch.object(commands, "container_image_recipe_digest", return_value="e" * 64),
+            mock.patch.object(
+                commands,
+                "_build_identity",
+                return_value=commands.BuildIdentity(self.snapshot.recipe, "e" * 64, "7" * 64),
+            ),
             mock.patch("fplinux_cli.commands.subprocess.run", return_value=result),
             mock.patch("builtins.print") as output,
         ):
@@ -314,8 +326,9 @@ class CommandLifecycleTests(unittest.TestCase):
         roots = {
             "workspace": self.root / "workspace",
             "downloads": self.root / "cache/downloads",
-            "ccache": self.root / "cache/ccache",
-            "toolchains": self.root / "cache/toolchains",
+            "apk_signing": self.root / "cache/apk-signing",
+            "apks": self.root / "cache/apks",
+            "rootfs": self.root / "cache/rootfs",
             "linux": self.root / "cache/linux",
             "output": self.root / "cache/out",
             "logs": self.root / "cache/logs/build/run",
@@ -338,8 +351,9 @@ class CommandLifecycleTests(unittest.TestCase):
             mounts,
             [
                 f"{roots['downloads']}:/cache/downloads:rw,Z",
-                f"{roots['ccache']}:/cache/ccache:rw,Z",
-                f"{roots['toolchains']}:/cache/toolchains:rw,Z",
+                f"{roots['apk_signing']}:/cache/apk-signing:rw,Z",
+                f"{roots['apks']}:/cache/apks:rw,Z",
+                f"{roots['rootfs']}:/cache/rootfs:rw,Z",
                 f"{roots['linux']}:/cache/linux:rw,Z",
                 f"{roots['output']}:/out:rw,Z",
                 f"{roots['logs']}:/logs:rw,Z",
@@ -377,7 +391,6 @@ class ContainerRecipeTests(unittest.TestCase):
         "container.lock.toml",
         "package.json",
         "package-lock.json",
-        "requirements.lock",
     )
     CHECK_INPUTS = (
         "scripts/fplinux_cli/checkreceipts.py",
@@ -403,12 +416,6 @@ class ContainerRecipeTests(unittest.TestCase):
             "oci": {
                 "platform": "linux/amd64",
                 "base": "example.invalid/base@sha256:" + "a" * 64,
-                "debian_snapshot": "20260815T000000Z",
-            },
-            "buildroot": {
-                "version": "2026.05.1",
-                "url": "https://example.invalid/buildroot.tar.xz",
-                "sha256": "b" * 64,
             },
         }
 

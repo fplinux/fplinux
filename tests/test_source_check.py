@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 import check as source_check
+from fplinux_cli import alpine_state
 from fplinux_cli import workspace as workspace_module
 
 
@@ -33,6 +34,17 @@ class SourceInventoryTests(unittest.TestCase):
             self.assertEqual(files, [markdown, root / "tool"])
             self.assertEqual(discovered_markdown, ["document.md"])
             self.assertEqual(posix_shell, [])
+            self.assertEqual(bash, [])
+
+    def test_openrc_scripts_are_checked_as_posix_shell(self) -> None:
+        """Include OpenRC init scripts in the public shell-check scope."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            initd = root / "service.initd"
+            initd.write_text("#!/sbin/openrc-run\ncommand=/bin/true\n")
+            with mock.patch.object(source_check, "ROOT", root):
+                _python, _markdown, posix_shell, bash = source_check.quality_sources([initd])
+            self.assertEqual(posix_shell, ["service.initd"])
             self.assertEqual(bash, [])
 
     def test_quality_workspace_skips_symlinks_outside_source_scope(self) -> None:
@@ -95,7 +107,7 @@ class SourceInventoryTests(unittest.TestCase):
         """Compile package-embedded C only in the upstream package context."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            package = root / "buildroot-external/package/app"
+            package = root / "alpine/aports/fplinux-console"
             package.mkdir(parents=True)
             standalone = package / "app.c"
             embedded = package / "backend.c"
@@ -108,15 +120,77 @@ class SourceInventoryTests(unittest.TestCase):
             ):
                 self.assertEqual(
                     source_check.userspace_c_sources(files),
-                    [("buildroot-external/package/app/app.c", False)],
+                    [("alpine/aports/fplinux-console/app.c", False)],
                 )
                 self.assertEqual(
                     source_check.userspace_c_sources(files, include_embedded=True),
                     [
-                        ("buildroot-external/package/app/app.c", False),
-                        ("buildroot-external/package/app/backend.c", False),
+                        ("alpine/aports/fplinux-console/app.c", False),
+                        ("alpine/aports/fplinux-console/backend.c", False),
                     ],
                 )
+
+    def test_alpine_inventory_includes_unselected_aports_and_headers(self) -> None:
+        """Check all present aport recipes and C/H files, not the runtime payload."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            selected = root / "alpine/aports/fplinux-console"
+            unselected = root / "alpine/aports/local-only"
+            selected.mkdir(parents=True)
+            unselected.mkdir()
+            (selected / "APKBUILD").write_text("pkgname=fplinux-console\n")
+            (unselected / "APKBUILD").write_text("pkgname=local-only\n")
+            (unselected / "local-only.c").write_text("int local_only;\n")
+            (unselected / "local-only.h").write_text("#define LOCAL_ONLY 1\n")
+            (unselected / "notes.txt").write_text("not C\n")
+            with (
+                mock.patch.object(source_check, "ROOT", root),
+                mock.patch.object(source_check, "discover_targets", return_value=()),
+            ):
+                files = source_check.source_files(enforce_policy=False)
+                self.assertEqual(
+                    source_check.alpine_apkbuilds(files),
+                    [
+                        "alpine/aports/fplinux-console/APKBUILD",
+                        "alpine/aports/local-only/APKBUILD",
+                    ],
+                )
+                self.assertEqual(
+                    source_check.userspace_c_sources(files),
+                    [("alpine/aports/local-only/local-only.c", False)],
+                )
+                self.assertEqual(
+                    source_check.userspace_c_format_sources(files),
+                    [
+                        "alpine/aports/local-only/local-only.c",
+                        "alpine/aports/local-only/local-only.h",
+                    ],
+                )
+
+    def test_package_selection_validation_resolves_every_target(self) -> None:
+        """Reject a manifest package typo before the public build path."""
+        targets = {
+            "phone-a": {"platform": "soc", "rootfs": {"packages": []}},
+            "phone-b": {"platform": "soc", "rootfs": {"packages": ["board-app"]}},
+        }
+        platform = {"rootfs": {"packages": ["platform-app"]}}
+        with (
+            mock.patch.object(source_check, "discover_targets", return_value=tuple(targets)),
+            mock.patch.object(source_check, "load_target", side_effect=targets.__getitem__),
+            mock.patch.object(source_check, "load_platform", return_value=platform),
+            mock.patch.object(
+                alpine_state,
+                "selected_packages",
+                side_effect=(
+                    ("fplinux-base", "platform-app"),
+                    SystemExit("selected aport is missing: board-app"),
+                ),
+            ) as selected,
+            self.assertRaisesRegex(SystemExit, "selected aport is missing"),
+        ):
+            source_check.validate_package_selections()
+
+        self.assertEqual(selected.call_count, 2)
 
 
 if __name__ == "__main__":

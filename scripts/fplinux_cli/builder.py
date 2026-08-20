@@ -21,17 +21,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
-from . import kbuild_state, linux_state, toolchain_state
-from .buildroot_state import (
-    RECEIPT_NAME,
-    buildroot_output_paths,
-    buildroot_recipe,
-    discard_success_receipt,
-    receipt_digest_matches,
-    receipt_matches,
-    stale_packages,
-    write_receipt,
-)
+from . import alpine_builder, alpine_state, kbuild_state, linux_state
 from .bundle_state import (
     canonical_json_bytes,
     create_bundle_staging,
@@ -43,7 +33,6 @@ from .bundle_state import (
 from .common import ROOT, sha256_bytes, sha256_file
 from .config import (
     exact_table,
-    load_container_lock,
     load_platform,
     load_release,
     load_target,
@@ -473,129 +462,6 @@ def prepare_linux(
     return source, state
 
 
-def build_toolchain(
-    platform: dict[str, Any],
-    container_lock: dict[str, Any],
-    jobs: int,
-) -> Path:
-    """Build or exactly reuse the content-addressed shared cross toolchain."""
-    image_recipe = os.environ.get("FPLINUX_CONTAINER_IMAGE_RECIPE", "")
-    recipe = toolchain_state.toolchain_recipe(ROOT, platform, container_lock, image_recipe)
-    outputs = toolchain_state.toolchain_outputs(platform)
-    toolchain = CACHE / "toolchains" / recipe
-    if toolchain_state.receipt_matches(toolchain, recipe, outputs):
-        log_message(f"Toolchain causal receipt hit: {recipe[:16]}")
-        return toolchain
-    toolchain_state.discard_success_receipt(toolchain)
-    toolchain.mkdir(parents=True, exist_ok=True)
-    defconfig = toolchain_state.toolchain_defconfig(ROOT, platform)
-    make_base = [
-        "make",
-        "-C",
-        "/opt/buildroot",
-        f"O={toolchain}",
-        f"BR2_EXTERNAL={root_source(platform['buildroot']['external'])}",
-        f"BR2_DL_DIR={CACHE / 'downloads'}",
-    ]
-    environment = {"FPLINUX_TOOLCHAIN_RECIPE": recipe}
-    run([*make_base, f"BR2_DEFCONFIG={defconfig}", "defconfig"], environment=environment)
-    run([*make_base, f"-j{jobs}", "toolchain"], environment=environment)
-    toolchain_state.write_receipt(toolchain, recipe, outputs)
-    return toolchain
-
-
-def build_rootfs(
-    target: str,
-    target_config: dict[str, Any],
-    platform: dict[str, Any],
-    container_lock: dict[str, Any],
-    output: Path,
-    jobs: int,
-    toolchain: Path,
-) -> tuple[Path, Path]:
-    """Build the deterministic Buildroot rootfs against the shared toolchain."""
-    buildroot = platform["buildroot"]
-    image_recipe = os.environ.get("FPLINUX_CONTAINER_IMAGE_RECIPE", "")
-    toolchain_digest = toolchain_state.toolchain_recipe(
-        ROOT, platform, container_lock, image_recipe
-    )
-    recipe = buildroot_recipe(
-        ROOT,
-        target,
-        target_config,
-        platform,
-        container_lock,
-        image_recipe,
-        toolchain_digest,
-    )
-    expected_outputs = buildroot_output_paths(platform)
-    rootfs = output / expected_outputs[0]
-    cross = output / "host/bin" / platform["linux"]["cross_compile"]
-    compiler = Path(str(cross) + "gcc")
-    if receipt_matches(output, recipe, expected_outputs):
-        log_message(f"Buildroot causal receipt hit: {recipe.combined[:16]}")
-        require_file(rootfs)
-        if not compiler.is_file():
-            fail(f"cross compiler is missing: {compiler}")
-        return rootfs, cross
-
-    stale = stale_packages(output, recipe, expected_outputs)
-    discard_success_receipt(output)
-    make_base = [
-        "make",
-        "-C",
-        "/opt/buildroot",
-        f"O={output}",
-        f"BR2_EXTERNAL={root_source(buildroot['external'])}",
-        f"BR2_DL_DIR={CACHE / 'downloads'}",
-    ]
-    environment = {"FPLINUX_BUILDROOT_RECIPE": recipe.combined}
-    if stale:
-        log_message("Buildroot package rebuild: " + ", ".join(stale))
-        for package in stale:
-            run([*make_base, f"{package}-dirclean"], environment=environment)
-        run([*make_base, f"-j{jobs}"], environment=environment)
-    else:
-        target_defconfig = require_file(
-            target_source(target, target_config["buildroot"]["defconfig"])
-        )
-        external_fragment = toolchain_state.toolchain_external_defconfig(ROOT, platform)
-        merged = output.parent / ".fplinux-rootfs-defconfig"
-        merged.parent.mkdir(parents=True, exist_ok=True)
-        merged.write_text(
-            external_fragment.read_text(encoding="utf-8")
-            + f'BR2_TOOLCHAIN_EXTERNAL_PATH="{toolchain / "host"}"\n'
-            + target_defconfig.read_text(encoding="utf-8"),
-            encoding="utf-8",
-        )
-        if output.exists():
-            run([*make_base, "clean"], environment=environment)
-        run(
-            [*make_base, f"BR2_DEFCONFIG={merged}", "defconfig"],
-            environment=environment,
-        )
-        run([*make_base, f"-j{jobs}"], environment=environment)
-    rootfs = require_file(rootfs)
-    if not compiler.is_file():
-        fail(f"cross compiler is missing: {compiler}")
-    write_receipt(output, recipe, expected_outputs)
-    return rootfs, cross
-
-
-def trusted_buildroot_receipt_identity(
-    output: Path,
-    recipe: str,
-    platform: dict[str, Any],
-) -> dict[str, str]:
-    """Return the identity of a receipt that still verifies every rootfs input."""
-    expected_outputs = buildroot_output_paths(platform)
-    require_sha256(recipe, "Buildroot recipe")
-    if not receipt_digest_matches(output, recipe, expected_outputs):
-        fail("Buildroot causal receipt is missing, stale or invalid")
-    receipt = require_file(output / RECEIPT_NAME)
-    return {"recipe": recipe, "sha256": sha256_file(receipt)}
-
-
 def kernel_build_commands(
     kbuild: list[str],
     config_command: list[str],
@@ -622,10 +488,10 @@ def build_kernel(
     prepared_linux: PreparedLinuxState,
     linux_base: str,
     output: Path,
-    cross: Path,
+    cross: str,
     rootfs: Path,
-    buildroot_output: Path,
-    buildroot_recipe_digest: str,
+    rootfs_output: Path,
+    rootfs_recipe: str,
     jobs: int,
 ) -> tuple[Path, Path, dict[str, str], str]:
     """Build or exactly reuse zImage and the declared target DTB in ``work/kernel``."""
@@ -635,11 +501,7 @@ def build_kernel(
         defconfig = require_file(target_source(target, defconfig_relative))
         rootfs_record = kbuild_state.rootfs_identity(rootfs)
         rootfs_input = kbuild_state.rootfs_input_path(work, rootfs_record)
-        buildroot_receipt = trusted_buildroot_receipt_identity(
-            buildroot_output,
-            buildroot_recipe_digest,
-            platform,
-        )
+        rootfs_receipt = alpine_state.trusted_receipt_identity(rootfs_output, rootfs_recipe)
         kbuild = [
             "make",
             "-C",
@@ -655,7 +517,7 @@ def build_kernel(
             linux_recipe=current_linux.linux_recipe,
             bootstrap_recipe=bootstrap_recipe,
             rootfs=rootfs_record,
-            buildroot_receipt=buildroot_receipt,
+            rootfs_receipt=rootfs_receipt,
             arch=platform["linux"]["arch"],
             defconfig=defconfig,
             dtb=target_config["linux"]["dtb"],
@@ -691,7 +553,7 @@ def build_kernel(
             defconfig_path=f"targets/{target}/{defconfig_relative}",
             rootfs=rootfs_record,
             rootfs_input=rootfs_input,
-            buildroot_receipt=buildroot_receipt,
+            rootfs_receipt=rootfs_receipt,
             arch=platform["linux"]["arch"],
             cross_compile=cross,
             commands=commands,
@@ -1074,7 +936,8 @@ def build_make_host_tool(
     prefix = recipe["archive_prefix"].replace("{commit}", commit)
     source = work / recipe["source_directory"]
     extract_host_members(archive, prefix, recipe["members"], hashes, source)
-    run(["make", "-C", str(source), "clean", "all"])
+    make_arguments = ["LIBS=-static -lusb-1.0"] if recipe["link"] == "static-libusb" else []
+    run(["make", "-C", str(source), "clean", "all", *make_arguments])
     built = require_file(source / recipe["binary"])
     destination: Path = output / recipe["name"]
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -1083,10 +946,44 @@ def build_make_host_tool(
     return destination
 
 
+def _verify_static_host_binary(path: Path) -> None:
+    """Require a portable static Linux/x86-64 ELF with no shared dependencies."""
+    data = require_file(path).read_bytes()
+    if (
+        len(data) < 64
+        or data[:4] != b"\x7fELF"
+        or data[4] != 2
+        or data[5] != 1
+        or struct.unpack_from("<H", data, 18)[0] != 62
+    ):
+        fail(f"host tool is not a little-endian Linux/x86-64 ELF: {path}")
+    program_offset = struct.unpack_from("<Q", data, 32)[0]
+    program_size = struct.unpack_from("<H", data, 54)[0]
+    program_count = struct.unpack_from("<H", data, 56)[0]
+    if program_size < 4 or program_offset + program_size * program_count > len(data):
+        fail(f"host tool has an invalid ELF program-header table: {path}")
+    for index in range(program_count):
+        offset = program_offset + index * program_size
+        if struct.unpack_from("<I", data, offset)[0] == 3:
+            fail(f"host tool must not require a dynamic ELF interpreter: {path}")
+
+    dynamic = subprocess.run(
+        ["readelf", "-dW", str(path)],
+        capture_output=True,
+        text=True,
+        env=build_environment(),
+        check=False,
+    )
+    if dynamic.returncode != 0:
+        fail(dynamic.stderr.strip() or f"cannot inspect host ELF dependencies: {path}")
+    if "(NEEDED)" in dynamic.stdout:
+        fail(f"host tool must not have DT_NEEDED dependencies: {path}")
+
+
 def build_cc_libusb_tool(recipe: dict[str, Any], output: Path) -> Path:
-    """Build one common C/libusb host capability recipe."""
+    """Build one portable static C/libusb host capability recipe."""
     pkg = subprocess.run(
-        ["pkg-config", "--cflags", "--libs", "libusb-1.0"],
+        ["pkg-config", "--cflags", "--static", "--libs", "libusb-1.0"],
         capture_output=True,
         text=True,
         env=build_environment(),
@@ -1105,6 +1002,7 @@ def build_cc_libusb_tool(recipe: dict[str, Any], output: Path) -> Path:
             "-Wextra",
             "-Werror",
             "-fno-ident",
+            "-static",
             "-o",
             str(destination),
             str(require_file(root_source(recipe["source"]))),
@@ -1134,6 +1032,7 @@ def build_host_tools(
             built = build_cc_libusb_tool(recipe, output)
         else:
             fail(f"unsupported host recipe type: {recipe['type']}")
+        _verify_static_host_binary(built)
         result[recipe["name"]] = built
     return result
 
@@ -1247,8 +1146,8 @@ def _publish_staged_bundle(
     host_tools: dict[str, Path],
     linux_recipe: str,
     device_identity: str,
-    buildroot_output: Path,
-    buildroot_recipe_digest: str,
+    rootfs_output: Path,
+    rootfs_recipe: str,
     kbuild_receipt: dict[str, str],
 ) -> Path:
     """Complete one already-private immutable bundle staging directory."""
@@ -1298,11 +1197,10 @@ def _publish_staged_bundle(
     require_sha256(container_image_recipe, "container image recipe")
     require_sha256(linux_recipe, "Linux recipe")
     require_sha256(device_identity, "device identity")
-    buildroot_receipt = trusted_buildroot_receipt_identity(
-        buildroot_output,
-        buildroot_recipe_digest,
-        platform,
+    apk_signing_key = require_sha256(
+        alpine_state.signing_key_identity(CACHE), "APK signing public key"
     )
+    rootfs_receipt = alpine_state.trusted_receipt_identity(rootfs_output, rootfs_recipe)
     if not isinstance(kbuild_receipt, dict) or set(kbuild_receipt) != {"recipe", "sha256"}:
         fail("Kbuild receipt identity is invalid")
     kbuild_receipt = {
@@ -1314,9 +1212,10 @@ def _publish_staged_bundle(
         "profile": profile,
         "workspace_digest": workspace_digest,
         "container_image_recipe": container_image_recipe,
+        "apk_signing_key": apk_signing_key,
         "linux_recipe": linux_recipe,
         "device_identity": device_identity,
-        "buildroot_receipt": buildroot_receipt,
+        "rootfs_receipt": rootfs_receipt,
         "kbuild_receipt": kbuild_receipt,
         "files": published_file_records(release),
     }
@@ -1351,8 +1250,8 @@ def publish_bundle(
     host_tools: dict[str, Path],
     linux_recipe: str,
     device_identity: str,
-    buildroot_output: Path,
-    buildroot_recipe_digest: str,
+    rootfs_output: Path,
+    rootfs_recipe: str,
     kbuild_receipt: dict[str, str],
 ) -> Path:
     """Publish a complete immutable bundle without changing an older generation."""
@@ -1377,8 +1276,8 @@ def publish_bundle(
             host_tools,
             linux_recipe,
             device_identity,
-            buildroot_output,
-            buildroot_recipe_digest,
+            rootfs_output,
+            rootfs_recipe,
             kbuild_receipt,
         )
     finally:
@@ -1398,7 +1297,7 @@ def main() -> None:
     with report_stage(reporter, "configuration"):
         target_config = load_target(args.target)
         platform = load_platform(target_config["platform"])
-        container_lock = load_container_lock()
+        packages = alpine_state.selected_packages(platform, target_config)
         with (ROOT / "sources.lock.toml").open("rb") as stream:
             sources = tomllib.load(stream)
         linux_base = require_sha256(
@@ -1412,20 +1311,6 @@ def main() -> None:
         work = OUTPUT / args.target / "work"
         work.mkdir(parents=True, exist_ok=True)
         CACHE.mkdir(parents=True, exist_ok=True)
-        buildroot_recipe_digest = buildroot_recipe(
-            ROOT,
-            args.target,
-            target_config,
-            platform,
-            container_lock,
-            os.environ.get("FPLINUX_CONTAINER_IMAGE_RECIPE", ""),
-            toolchain_state.toolchain_recipe(
-                ROOT,
-                platform,
-                container_lock,
-                os.environ.get("FPLINUX_CONTAINER_IMAGE_RECIPE", ""),
-            ),
-        ).combined
 
     with report_stage(reporter, "prepare-linux"):
         linux_source, prepared_linux = prepare_linux(
@@ -1435,18 +1320,9 @@ def main() -> None:
             platform,
         )
 
-    with report_stage(reporter, "toolchain"):
-        toolchain = build_toolchain(platform, container_lock, args.jobs)
-    with report_stage(reporter, "buildroot"):
-        rootfs, cross = build_rootfs(
-            args.target,
-            target_config,
-            platform,
-            container_lock,
-            work / "buildroot",
-            args.jobs,
-            toolchain,
-        )
+    with report_stage(reporter, "rootfs"):
+        rootfs, rootfs_output, rootfs_recipe = alpine_builder.build_rootfs(args.jobs, packages)
+    cross = platform["linux"]["cross_compile"]
     kernel_output = work / "kernel"
     with report_stage(reporter, "kernel"):
         bootstrap_recipe = bootstrap_recipe_digest(
@@ -1466,8 +1342,8 @@ def main() -> None:
             kernel_output,
             cross,
             rootfs,
-            work / "buildroot",
-            buildroot_recipe_digest,
+            rootfs_output,
+            rootfs_recipe,
             args.jobs,
         )
     with report_stage(reporter, "bootstrap"):
@@ -1502,8 +1378,8 @@ def main() -> None:
             host_tools,
             prepared_linux.linux_recipe,
             device_identity,
-            work / "buildroot",
-            buildroot_recipe_digest,
+            rootfs_output,
+            rootfs_recipe,
             kbuild_receipt,
         )
 

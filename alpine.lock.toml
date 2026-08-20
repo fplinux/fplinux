@@ -1,0 +1,151 @@
+schema = "fplinux.alpine/v1"
+release = "3.24.1"
+branch = "v3.24"
+arch = "armv7"
+triplet = "armv7-alpine-linux-musleabihf"
+repository = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/armv7"
+
+[minirootfs]
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/armv7/alpine-minirootfs-3.24.1-armv7.tar.gz"
+sha256 = "50942d567e6ee422c16cb46d5c282ed9d8adc9007c2a483faf4148a18c64ce32"
+bytes = 3176829
+
+[runtime]
+packages = [
+  "bridge-1.5-r5.apk",
+  "ifupdown-ng-0.13.0-r0.apk",
+  "libcap2-2.78-r0.apk",
+  "openrc-0.63.2-r0.apk",
+  "openrc-user-0.63.2-r0.apk",
+]
+
+[sysroot]
+packages = [
+  "binutils-2.45.1-r1.apk",
+  "gcc-15.2.0-r5.apk",
+  "gmp-6.3.0-r4.apk",
+  "isl26-0.26-r2.apk",
+  "jansson-2.15.0-r0.apk",
+  "libatomic-15.2.0-r5.apk",
+  "libgcc-15.2.0-r5.apk",
+  "libgcc-static-15.2.0-r5.apk",
+  "libgomp-15.2.0-r5.apk",
+  "libstdc++-15.2.0-r5.apk",
+  "linux-headers-7.0.0-r1.apk",
+  "mpc1-1.3.1-r1.apk",
+  "mpfr4-4.2.2-r0.apk",
+  "musl-1.2.6-r2.apk",
+  "musl-dev-1.2.6-r2.apk",
+  "zlib-1.3.2-r0.apk",
+  "zstd-libs-1.5.7-r2.apk",
+]
+
+[[package]]
+file = "bridge-1.5-r5.apk"
+sha256 = "fe1081588fc302357cbda1a4bbe87d417a18f785ee9c9fdf81bbba8b18301490"
+bytes = 2851
+
+[[package]]
+file = "ifupdown-ng-0.13.0-r0.apk"
+sha256 = "38e9b98b3ec3e6f65f929fd3e00719fb730f1de7999eb99d444b6ad6797d8c64"
+bytes = 62731
+
+[[package]]
+file = "libcap2-2.78-r0.apk"
+sha256 = "f92c87875498f527d2b4bb3c43af63d9301b0d54ef08a95d6f50b82c3d772e02"
+bytes = 18471
+
+[[package]]
+file = "openrc-0.63.2-r0.apk"
+sha256 = "f9a960bf5281250ee7fcff1ef6fbb78bb72aeadfad80b0bc2465b5088b314cd9"
+bytes = 199343
+
+[[package]]
+file = "openrc-user-0.63.2-r0.apk"
+sha256 = "21d77b1c088b199a77b766d028ba061e0af43cb18d2b4f588da6db29c1c31971"
+bytes = 5817
+
+[[package]]
+file = "binutils-2.45.1-r1.apk"
+sha256 = "a26ba698213c0509afb7444beaeae1f8d69dbe0d6bd336c1b8c180ae322fb284"
+bytes = 2805659
+
+[[package]]
+file = "gcc-15.2.0-r5.apk"
+sha256 = "5a09f1654ff4e4b724dae867fcf92a9fc2055691af368bc5c90205d5540c84c9"
+bytes = 41651034
+
+[[package]]
+file = "gmp-6.3.0-r4.apk"
+sha256 = "b280bd56f442aa12abc377f40000e683974fe9ca430d7a1a09cb8a2e8229f7fe"
+bytes = 181711
+
+[[package]]
+file = "isl26-0.26-r2.apk"
+sha256 = "4fe3ef352ca81467948a718c41fcc2b501bcad1c37914bc0fe91519a77229c76"
+bytes = 687865
+
+[[package]]
+file = "jansson-2.15.0-r0.apk"
+sha256 = "448a028a84226bb710d5101e8ead9f652ef0e6e5e2abde7b13378e25a2c87d42"
+bytes = 44984
+
+[[package]]
+file = "libatomic-15.2.0-r5.apk"
+sha256 = "f4e32956cf9d353f6b6f1c1e570a896eb7934047c635c89f6a12ec599befbeeb"
+bytes = 7897
+
+[[package]]
+file = "libgcc-15.2.0-r5.apk"
+sha256 = "70aa586717f20bf57f80c06d454712095964261c02c92f8d3a120a0aecd05934"
+bytes = 20013
+
+[[package]]
+file = "libgcc-static-15.2.0-r5.apk"
+sha256 = "9a8f82b607183621c03c5e0caaf65695f5d3c66643133649e0d030dc3416fcf3"
+bytes = 23819
+
+[[package]]
+file = "libgomp-15.2.0-r5.apk"
+sha256 = "a12f05478d71db2d416081c17b1de3cfe23dd603b328d7642f276e8a844c6413"
+bytes = 129457
+
+[[package]]
+file = "libstdc++-15.2.0-r5.apk"
+sha256 = "c57f103f92812e2c6c8fb81ffa61df3dcb08a49917a2284aff64bddeade6f310"
+bytes = 842112
+
+[[package]]
+file = "linux-headers-7.0.0-r1.apk"
+sha256 = "88acd70556ed1aa85fe617c9ad02012f8cc36eaf7d06da09e701c47fc8a98222"
+bytes = 1945405
+
+[[package]]
+file = "mpc1-1.3.1-r1.apk"
+sha256 = "60617a1afaefe06fbcc1dcc85adadf4c4395ee32a08e94b82bc906ee16133bde"
+bytes = 43320
+
+[[package]]
+file = "mpfr4-4.2.2-r0.apk"
+sha256 = "310fbc9ee2264b70b9fc8e3287fce481293f1cf726b7d99eb3344091646a1f64"
+bytes = 182575
+
+[[package]]
+file = "musl-1.2.6-r2.apk"
+sha256 = "84a62250f10aa1c5b7687f21f3a0f19ec17b561176d67c4c797123ed8f98555c"
+bytes = 390064
+
+[[package]]
+file = "musl-dev-1.2.6-r2.apk"
+sha256 = "11eef6d1aa6129c8403d826b58cbaf40e13a67e330f8108db6f0db0e61277cd1"
+bytes = 2296118
+
+[[package]]
+file = "zlib-1.3.2-r0.apk"
+sha256 = "9ceb0ce727602c3acd7c8bf6ca02d7b019afc2b5ad81095684ecf18c2c48d8f2"
+bytes = 43949
+
+[[package]]
+file = "zstd-libs-1.5.7-r2.apk"
+sha256 = "15a00d79b69cb9b3ce7252dc35a370406623ebc96e8631e04f6d48c7421a55d4"
+bytes = 337879

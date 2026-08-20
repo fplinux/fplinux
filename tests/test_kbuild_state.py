@@ -24,7 +24,7 @@ class KbuildStateTests(unittest.TestCase):
         self.linux = self.root / "linux"
         self.defconfig = self._write("defconfig", b"CONFIG_TEST=y\n")
         self.rootfs = self._write("rootfs.cpio", b"rootfs-a\n")
-        self.cross = self.root / "buildroot" / "host" / "bin" / "arm-"
+        self.cross = "arm-none-eabi-"
 
     def _write(self, relative: str, contents: bytes, *, root: Path | None = None) -> Path:
         path = (self.root if root is None else root) / relative
@@ -50,7 +50,7 @@ class KbuildStateTests(unittest.TestCase):
             defconfig_path="targets/demo/kernel/defconfig",
             rootfs=rootfs,
             rootfs_input=rootfs_input,
-            buildroot_receipt={"recipe": "d" * 64, "sha256": "e" * 64},
+            rootfs_receipt={"recipe": "d" * 64, "sha256": "e" * 64},
             arch="arm",
             cross_compile=self.cross,
             commands=builder.kernel_build_commands(

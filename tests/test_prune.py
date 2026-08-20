@@ -7,8 +7,11 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from fplinux_cli import alpine_state
 from fplinux_cli import prune as prune_module
+from fplinux_cli.config import container_image_recipe_digest
 from fplinux_cli.prune import apply_prune, plan_prune, prune
 
 
@@ -28,40 +31,138 @@ def _workspace(root: Path, name: str, *, quality: bool = False) -> Path:
 class PruneTests(unittest.TestCase):
     """Exercise the public dry-run and apply policy."""
 
-    def test_superseded_toolchain_is_a_candidate_and_current_is_protected(self) -> None:
-        """Only toolchains no current platform references may be removed."""
-        current = sorted(prune_module._current_toolchain_recipes())  # noqa: SLF001
-        self.assertTrue(current)
+    def test_superseded_rootfs_is_a_candidate_and_all_current_are_protected(self) -> None:
+        """Every current target package selection protects its rootfs recipe."""
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / ".cache"
-            (cache / "toolchains" / ("0" * 64)).mkdir(parents=True)
-            (cache / "toolchains" / ("0" * 64) / "payload").write_bytes(b"stale")
-            (cache / "toolchains" / current[0]).mkdir(parents=True)
+            public_key = alpine_state.signing_public_key(cache)
+            public_key.parent.mkdir(parents=True)
+            public_key.write_bytes(b"public-key\n")
+            signing_key = alpine_state.signing_key_identity(cache)
+            image_recipe = container_image_recipe_digest()
+            first_packages = ("fplinux-base",)
+            second_packages = ("fplinux-base", "fplinux-cpuclock")
+            current = {
+                alpine_state.alpine_rootfs_recipe(image_recipe, signing_key, first_packages),
+                alpine_state.alpine_rootfs_recipe(image_recipe, signing_key, second_packages),
+            }
+            self.assertEqual(len(current), 2)
+            stale = cache / "rootfs" / ("0" * 64)
+            stale.mkdir(parents=True)
+            (stale / "rootfs.cpio").write_bytes(b"stale")
+            for recipe in current:
+                (cache / "rootfs" / recipe).mkdir(parents=True)
 
-            plan = plan_prune(cache)
+            target_configs = {
+                "first": {"platform": "platform-a"},
+                "second": {"platform": "platform-b"},
+            }
+            platform_configs: dict[str, dict[str, object]] = {
+                "platform-a": {},
+                "platform-b": {},
+            }
+            with (
+                mock.patch.object(
+                    prune_module,
+                    "discover_targets",
+                    return_value=("first", "second"),
+                ),
+                mock.patch.object(
+                    prune_module,
+                    "load_target",
+                    side_effect=lambda target: target_configs[target],
+                ),
+                mock.patch.object(
+                    prune_module,
+                    "load_platform",
+                    side_effect=lambda platform: platform_configs[platform],
+                ),
+                mock.patch.object(
+                    alpine_state,
+                    "selected_packages",
+                    side_effect=(first_packages, second_packages),
+                ) as selected_packages,
+            ):
+                plan = plan_prune(cache)
             decisions = {entry.path: entry.action for entry in plan.entries}
 
-            self.assertEqual(decisions[f"toolchains/{'0' * 64}"], "candidate")
-            self.assertEqual(decisions[f"toolchains/{current[0]}"], "protected")
+            self.assertEqual(decisions[f"rootfs/{'0' * 64}"], "candidate")
+            self.assertEqual(
+                {path for path, action in decisions.items() if action == "protected"},
+                {f"rootfs/{recipe}" for recipe in current},
+            )
+            self.assertEqual(
+                selected_packages.call_args_list,
+                [
+                    mock.call(platform_configs["platform-a"], target_configs["first"]),
+                    mock.call(platform_configs["platform-b"], target_configs["second"]),
+                ],
+            )
 
-            apply_prune(cache)
-            self.assertFalse((cache / "toolchains" / ("0" * 64)).exists())
-            self.assertTrue((cache / "toolchains" / current[0]).exists())
+            with (
+                mock.patch.object(
+                    prune_module,
+                    "discover_targets",
+                    return_value=("first", "second"),
+                ),
+                mock.patch.object(
+                    prune_module,
+                    "load_target",
+                    side_effect=lambda target: target_configs[target],
+                ),
+                mock.patch.object(
+                    prune_module,
+                    "load_platform",
+                    side_effect=lambda platform: platform_configs[platform],
+                ),
+                mock.patch.object(
+                    alpine_state,
+                    "selected_packages",
+                    side_effect=(first_packages, second_packages),
+                ),
+            ):
+                apply_prune(cache)
+            self.assertFalse(stale.exists())
+            self.assertTrue(all((cache / "rootfs" / recipe).exists() for recipe in current))
 
-    def test_ccache_is_inventoried_but_never_auto_removed(self) -> None:
-        """The compiler accelerator is reported with its size, not deleted."""
+    def test_missing_signing_key_protects_existing_rootfs(self) -> None:
+        """Never prune rootfs generations when their package-signing input is unknown."""
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary) / ".cache"
+            existing = cache / "rootfs" / ("1" * 64)
+            existing.mkdir(parents=True)
+            plan = plan_prune(cache)
+            self.assertEqual(len(plan.entries), 1)
+            self.assertEqual(plan.entries[0].action, "protected")
+            self.assertIn("rootfs recipes", plan.entries[0].reason)
+
+    def test_config_or_selection_failure_protects_existing_rootfs(self) -> None:
+        """An incomplete target inventory never makes an existing rootfs disposable."""
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary) / ".cache"
+            public_key = alpine_state.signing_public_key(cache)
+            public_key.parent.mkdir(parents=True)
+            public_key.write_bytes(b"public-key\n")
+            existing = cache / "rootfs" / ("2" * 64)
+            existing.mkdir(parents=True)
+
+            with mock.patch.object(
+                prune_module, "discover_targets", side_effect=SystemExit("bad target manifest")
+            ):
+                plan = plan_prune(cache)
+
+            self.assertEqual(len(plan.entries), 1)
+            self.assertEqual(plan.entries[0].action, "protected")
+            self.assertIn("rootfs recipes", plan.entries[0].reason)
+
+    def test_legacy_cache_namespaces_are_not_adopted(self) -> None:
+        """Obsolete compiler caches are no longer managed automatically."""
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / ".cache"
             (cache / "ccache").mkdir(parents=True)
-            (cache / "ccache" / "blob").write_bytes(b"cached object")
+            (cache / "toolchains/legacy").mkdir(parents=True)
 
-            plan = plan_prune(cache)
-            entry = next(item for item in plan.entries if item.path == "ccache")
-
-            self.assertEqual(entry.action, "protected")
-            self.assertGreater(entry.logical_bytes or 0, 0)
-            apply_prune(cache)
-            self.assertTrue((cache / "ccache" / "blob").exists())
+            self.assertEqual(plan_prune(cache).entries, ())
 
     def test_dry_run_reports_disposable_workspaces(self) -> None:
         """Every completed target workspace is disposable after its command."""
