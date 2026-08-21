@@ -34,11 +34,11 @@
 #include "client.h"
 #endif
 
-#define FPLINUX_FB_DEVICE "/dev/fb0"
-#define FPLINUX_TTY_DEVICE "/dev/tty0"
-#define FPLINUX_BPP 16
-#define FPLINUX_MAX_PAGES 2
-#define CACHE_GUARD_BYTES 16
+#define FPLINUX_QUAKE_VIDEO_FRAMEBUFFER_DEVICE "/dev/fb0"
+#define FPLINUX_QUAKE_VIDEO_TTY_DEVICE "/dev/tty0"
+#define FPLINUX_QUAKE_VIDEO_BITS_PER_PIXEL 16
+#define FPLINUX_QUAKE_VIDEO_MAX_PAGES 2
+#define FPLINUX_QUAKE_VIDEO_CACHE_GUARD_BYTES 16
 
 viddef_t vid;
 unsigned short d_8to16table[256];
@@ -135,12 +135,12 @@ static void restore_signal_handlers(void)
 
 static void validate_rgb565(const struct fb_var_screeninfo *var)
 {
-	if (var->bits_per_pixel != FPLINUX_BPP || var->red.offset != 11 ||
-	    var->red.length != 5 || var->red.msb_right != 0 ||
-	    var->green.offset != 5 || var->green.length != 6 ||
-	    var->green.msb_right != 0 || var->blue.offset != 0 ||
-	    var->blue.length != 5 || var->blue.msb_right != 0 ||
-	    var->transp.length != 0)
+	if (var->bits_per_pixel != FPLINUX_QUAKE_VIDEO_BITS_PER_PIXEL ||
+	    var->red.offset != 11 || var->red.length != 5 ||
+	    var->red.msb_right != 0 || var->green.offset != 5 ||
+	    var->green.length != 6 || var->green.msb_right != 0 ||
+	    var->blue.offset != 0 || var->blue.length != 5 ||
+	    var->blue.msb_right != 0 || var->transp.length != 0)
 		Sys_Error("FPLinux video: expected RGB565, got bpp=%u "
 			  "rgb=%u:%u:%u/%u:%u:%u/%u:%u:%u alpha=%u",
 			  var->bits_per_pixel, var->red.offset, var->red.length,
@@ -167,12 +167,12 @@ static void validate_framebuffer(const struct fb_fix_screeninfo *fix,
 			var->xres, var->yres, var->xres_virtual,
 			var->yres_virtual, var->xoffset, var->yoffset);
 	if (var->yres_virtual != var->yres &&
-	    var->yres_virtual != var->yres * FPLINUX_MAX_PAGES)
+	    var->yres_virtual != var->yres * FPLINUX_QUAKE_VIDEO_MAX_PAGES)
 		Sys_Error(
 			"FPLinux video: unsupported virtual height %u for %u rows",
 			var->yres_virtual, var->yres);
 	if (var->yoffset != 0 &&
-	    (var->yres_virtual != var->yres * FPLINUX_MAX_PAGES ||
+	    (var->yres_virtual != var->yres * FPLINUX_QUAKE_VIDEO_MAX_PAGES ||
 	     var->yoffset != var->yres))
 		Sys_Error("FPLinux video: unsupported yoffset %u",
 			  var->yoffset);
@@ -187,7 +187,7 @@ static void validate_framebuffer(const struct fb_fix_screeninfo *fix,
 			"FPLinux video: framebuffer memory %u is shorter than "
 			"%zu-byte page",
 			fix->smem_len, page_bytes);
-	if (var->yres_virtual == var->yres * FPLINUX_MAX_PAGES &&
+	if (var->yres_virtual == var->yres * FPLINUX_QUAKE_VIDEO_MAX_PAGES &&
 	    (fix->ypanstep == 0 || fix->smem_len < page_bytes * 2))
 		Sys_Error(
 			"FPLinux video: virtual double buffer is not pannable");
@@ -246,9 +246,11 @@ static void open_framebuffer(void)
 {
 	struct fb_fix_screeninfo fix;
 
-	fb_fd = open(FPLINUX_FB_DEVICE, O_RDWR | O_CLOEXEC);
+	fb_fd = open(FPLINUX_QUAKE_VIDEO_FRAMEBUFFER_DEVICE,
+		     O_RDWR | O_CLOEXEC);
 	if (fb_fd < 0)
-		Sys_Error("FPLinux video: open(%s): %s", FPLINUX_FB_DEVICE,
+		Sys_Error("FPLinux video: open(%s): %s",
+			  FPLINUX_QUAKE_VIDEO_FRAMEBUFFER_DEVICE,
 			  strerror(errno));
 	if (ioctl(fb_fd, FBIOGET_FSCREENINFO, &fix) < 0 ||
 	    ioctl(fb_fd, FBIOGET_VSCREENINFO, &framebuffer_var) < 0)
@@ -265,10 +267,12 @@ static void open_framebuffer(void)
 
 	if (framebuffer_var.yres_virtual == framebuffer_height &&
 	    fix.ypanstep != 0 &&
-	    fix.smem_len >= framebuffer_page_bytes * FPLINUX_MAX_PAGES) {
+	    fix.smem_len >=
+		    framebuffer_page_bytes * FPLINUX_QUAKE_VIDEO_MAX_PAGES) {
 		struct fb_var_screeninfo requested = framebuffer_var;
 
-		requested.yres_virtual = framebuffer_height * FPLINUX_MAX_PAGES;
+		requested.yres_virtual =
+			framebuffer_height * FPLINUX_QUAKE_VIDEO_MAX_PAGES;
 		requested.yoffset = 0;
 		requested.activate = FB_ACTIVATE_NOW;
 		if (ioctl(fb_fd, FBIOPUT_VSCREENINFO, &requested) == 0) {
@@ -310,10 +314,10 @@ static void open_framebuffer(void)
 	next_page = framebuffer_pages == 2 ? 1U - shown_page : shown_page;
 	choose_render_geometry();
 
-	tty_fd = open(FPLINUX_TTY_DEVICE, O_RDWR | O_CLOEXEC);
+	tty_fd = open(FPLINUX_QUAKE_VIDEO_TTY_DEVICE, O_RDWR | O_CLOEXEC);
 	if (tty_fd < 0)
-		Sys_Error("FPLinux video: open(%s): %s", FPLINUX_TTY_DEVICE,
-			  strerror(errno));
+		Sys_Error("FPLinux video: open(%s): %s",
+			  FPLINUX_QUAKE_VIDEO_TTY_DEVICE, strerror(errno));
 	if (ioctl(tty_fd, KDGETMODE, &tty_saved_mode) < 0)
 		Sys_Error("FPLinux video: KDGETMODE: %s", strerror(errno));
 	if (ioctl(tty_fd, KDSETMODE, KD_GRAPHICS) < 0)
@@ -327,8 +331,8 @@ static void allocate_renderer_buffers(void)
 	size_t pixels = (size_t)render_width * render_height;
 	size_t cache_size = D_SurfaceCacheForRes(render_width, render_height);
 	size_t zbuffer_size = pixels * sizeof(*d_pzbuffer);
-	size_t total =
-		zbuffer_size + cache_size + CACHE_GUARD_BYTES + pixels + pixels;
+	size_t total = zbuffer_size + cache_size +
+		       FPLINUX_QUAKE_VIDEO_CACHE_GUARD_BYTES + pixels + pixels;
 	byte *block;
 	byte *surface_cache;
 
@@ -339,7 +343,8 @@ static void allocate_renderer_buffers(void)
 
 	d_pzbuffer = (short *)block;
 	surface_cache = block + zbuffer_size;
-	r_warpbuffer = surface_cache + cache_size + CACHE_GUARD_BYTES;
+	r_warpbuffer = surface_cache + cache_size +
+		       FPLINUX_QUAKE_VIDEO_CACHE_GUARD_BYTES;
 	vid.buffer = r_warpbuffer + pixels;
 	vid.conbuffer = vid.direct = vid.buffer;
 
@@ -475,7 +480,7 @@ void VID_Init(const byte *palette)
 
 	fixed_mode.width = render_width;
 	fixed_mode.height = render_height;
-	fixed_mode.bpp = FPLINUX_BPP;
+	fixed_mode.bpp = FPLINUX_QUAKE_VIDEO_BITS_PER_PIXEL;
 	fixed_mode.refresh = 0;
 	fixed_mode.min_scale = 1;
 	fixed_mode.resolution.scale = 1;
@@ -505,7 +510,7 @@ void VID_Init(const byte *palette)
 	Cvar_SetValue("vid_fullscreen", 1);
 	Cvar_SetValue("vid_width", render_width);
 	Cvar_SetValue("vid_height", render_height);
-	Cvar_SetValue("vid_bpp", FPLINUX_BPP);
+	Cvar_SetValue("vid_bpp", FPLINUX_QUAKE_VIDEO_BITS_PER_PIXEL);
 	Cvar_SetValue("vid_refreshrate", fixed_mode.refresh);
 
 	Con_Printf("FPLinux video: render %ux%u -> fb %ux%u RGB565, %s, "
@@ -607,7 +612,8 @@ qboolean VID_CheckAdequateMem(int width, int height)
 qboolean VID_SetMode(const qvidmode_t *mode, const byte *palette)
 {
 	if (mode->width != (int)render_width ||
-	    mode->height != (int)render_height || mode->bpp != FPLINUX_BPP)
+	    mode->height != (int)render_height ||
+	    mode->bpp != FPLINUX_QUAKE_VIDEO_BITS_PER_PIXEL)
 		return false;
 
 	vid_currentmode = mode;

@@ -46,61 +46,62 @@
 #include <linux/sysfs.h>
 #include <linux/workqueue.h>
 
-#define TA1618_REG_SIZE 4U
-#define TA1618_ADI_SIZE 0x0400U
-#define TA1618_ANALOG_SIZE 0x1000U
+#define TA1618_MMC_REG_BYTES 4U
+#define TA1618_MMC_ADI_MMIO_BYTES 0x0400U
+#define TA1618_MMC_ANALOG_MMIO_BYTES 0x1000U
 
-#define TA1618_GATE_MASK BIT(7)
-#define TA1618_AP_RESET_MASK BIT(11)
-#define TA1618_SELECTOR_MASK GENMASK(2, 0)
+#define TA1618_MMC_GATE_MASK BIT(7)
+#define TA1618_MMC_AP_RESET_MASK BIT(11)
+#define TA1618_MMC_SELECTOR_MASK GENMASK(2, 0)
 /*
  * Which of the eight clock sources the controller is fed from. The mux output
  * is halved in hardware before it reaches the controller, which is why the
  * clock is named after twice its useful rate elsewhere, so this source of
  * 390 MHz gives a 195 MHz base.
  */
-#define TA1618_SELECTOR_SOURCE 0x00000004U
-#define UMS9117_BASE_CLOCK_HZ 195000000U
+#define TA1618_MMC_SELECTOR_SOURCE 0x00000004U
+#define UMS9117_MMC_BASE_CLOCK_HZ 195000000U
 
-#define TA1618_PIN_COUNT 12U
-#define TA1618_PIN_FUNC_MASK GENMASK(5, 4)
-#define TA1618_DATA_PAD_TARGET 0x00182084U
-#define TA1618_CMD_PAD_TARGET TA1618_DATA_PAD_TARGET
-#define TA1618_D0_PAD_TARGET TA1618_DATA_PAD_TARGET
-#define TA1618_D1_PAD_TARGET TA1618_DATA_PAD_TARGET
-#define TA1618_D2_PAD_TARGET TA1618_DATA_PAD_TARGET
-#define TA1618_D3_PAD_TARGET TA1618_DATA_PAD_TARGET
-#define TA1618_CLK_PAD_TARGET 0x00302001U
-#define TA1618_IOS_TRACE_DEPTH 16U
+#define TA1618_MMC_PIN_COUNT 12U
+#define TA1618_MMC_PIN_FUNC_MASK GENMASK(5, 4)
+#define TA1618_MMC_DATA_PAD_TARGET 0x00182084U
+#define TA1618_MMC_CMD_PAD_TARGET TA1618_MMC_DATA_PAD_TARGET
+#define TA1618_MMC_D0_PAD_TARGET TA1618_MMC_DATA_PAD_TARGET
+#define TA1618_MMC_D1_PAD_TARGET TA1618_MMC_DATA_PAD_TARGET
+#define TA1618_MMC_D2_PAD_TARGET TA1618_MMC_DATA_PAD_TARGET
+#define TA1618_MMC_D3_PAD_TARGET TA1618_MMC_DATA_PAD_TARGET
+#define TA1618_MMC_CLK_PAD_TARGET 0x00302001U
+#define TA1618_MMC_IOS_TRACE_DEPTH 16U
 
-#define TA1618_PD_MASK BIT(0)
-#define TA1618_VDDSDCORE_PD_OFFSET 0x0d00U
-#define TA1618_VDDSDCORE_VOLT_OFFSET 0x0d04U
-#define TA1618_VDDSDIO_PD_OFFSET 0x0d0cU
-#define TA1618_VDDSDIO_VOLT_OFFSET 0x0d10U
-#define TA1618_VDDSDCORE_VOLT_EXPECTED 0x0050U
-#define TA1618_VDDSDIO_VOLT_EXPECTED 0x006fU
-#define TA1618_RAIL_DELAY_MS 300U
+#define TA1618_MMC_PD_MASK BIT(0)
+#define TA1618_MMC_VDDSDCORE_PD_OFFSET 0x0d00U
+#define TA1618_MMC_VDDSDCORE_VOLT_OFFSET 0x0d04U
+#define TA1618_MMC_VDDSDIO_PD_OFFSET 0x0d0cU
+#define TA1618_MMC_VDDSDIO_VOLT_OFFSET 0x0d10U
+#define TA1618_MMC_VDDSDCORE_VOLT_EXPECTED 0x0050U
+#define TA1618_MMC_VDDSDIO_VOLT_EXPECTED 0x006fU
+#define TA1618_MMC_RAIL_DELAY_MS 300U
 
-#define UMS9117_HOST_RESET BIT(24)
-#define UMS9117_CLOCK_DIVIDER_MASK 0x0000ffc0U
-#define UMS9117_CLOCK_TIMEOUT_MASK GENMASK(19, 16)
-#define UMS9117_CLOCK_TIMEOUT_SHIFT 16U
-#define UMS9117_CLOCK_TIMEOUT_FPDOOM_VALUE 8U
-#define UMS9117_CLOCK_TIMEOUT_FPDOOM_ENCODED \
-	(UMS9117_CLOCK_TIMEOUT_FPDOOM_VALUE << UMS9117_CLOCK_TIMEOUT_SHIFT)
-#define UMS9117_CLOCK_PROG_MODE 0x00000020U
-#define UMS9117_CLOCK_PLL_EN 0x00000008U
-#define UMS9117_CLOCK_CARD_EN 0x00000004U
-#define UMS9117_CLOCK_INT_STABLE 0x00000002U
-#define UMS9117_CLOCK_INT_EN 0x00000001U
-#define UMS9117_CLOCK_VOLATILE_MASK \
-	(UMS9117_HOST_RESET | UMS9117_CLOCK_INT_STABLE)
-#define UMS9117_IDENT_DIVIDER_ENCODED 0x0000f400U
-#define UMS9117_IDENT_CLOCK_HZ 399590U
-#define UMS9117_IDENT_REQUEST_MAX_HZ 400000U
-#define UMS9117_LEGACY_DIVIDER_ENCODED 0x00000400U
-#define UMS9117_LEGACY_CLOCK_EXPECTED 0x08080407U
+#define UMS9117_MMC_HOST_RESET BIT(24)
+#define UMS9117_MMC_CLOCK_DIVIDER_MASK 0x0000ffc0U
+#define UMS9117_MMC_CLOCK_TIMEOUT_MASK GENMASK(19, 16)
+#define UMS9117_MMC_CLOCK_TIMEOUT_SHIFT 16U
+#define UMS9117_MMC_CLOCK_TIMEOUT_FPDOOM_VALUE 8U
+#define UMS9117_MMC_CLOCK_TIMEOUT_FPDOOM_ENCODED \
+	(UMS9117_MMC_CLOCK_TIMEOUT_FPDOOM_VALUE  \
+	 << UMS9117_MMC_CLOCK_TIMEOUT_SHIFT)
+#define UMS9117_MMC_CLOCK_PROG_MODE 0x00000020U
+#define UMS9117_MMC_CLOCK_PLL_EN 0x00000008U
+#define UMS9117_MMC_CLOCK_CARD_EN 0x00000004U
+#define UMS9117_MMC_CLOCK_INT_STABLE 0x00000002U
+#define UMS9117_MMC_CLOCK_INT_EN 0x00000001U
+#define UMS9117_MMC_CLOCK_VOLATILE_MASK \
+	(UMS9117_MMC_HOST_RESET | UMS9117_MMC_CLOCK_INT_STABLE)
+#define UMS9117_MMC_IDENT_DIVIDER_ENCODED 0x0000f400U
+#define UMS9117_MMC_IDENT_CLOCK_HZ 399590U
+#define UMS9117_MMC_IDENT_REQUEST_MAX_HZ 400000U
+#define UMS9117_MMC_LEGACY_DIVIDER_ENCODED 0x00000400U
+#define UMS9117_MMC_LEGACY_CLOCK_EXPECTED 0x08080407U
 /*
  * The high-speed profile is the same recipe with the divider removed, so the
  * card clock runs at the full source rate instead of half of it. It is only
@@ -108,116 +109,120 @@
  * the core has asked for the high-speed timing; the frequency alone never
  * selects it, because a card without high speed asks for a similar number.
  */
-#define UMS9117_HS_CLOCK_HZ 48750000U
-#define UMS9117_HS_DIVIDER_ENCODED 0x00000200U
-#define UMS9117_HS_CLOCK_EXPECTED 0x08080207U
-#define UMS9117_LEGACY_CLOCK_HZ 24375000U
+#define UMS9117_MMC_HS_CLOCK_HZ 48750000U
+#define UMS9117_MMC_HS_DIVIDER_ENCODED 0x00000200U
+#define UMS9117_MMC_HS_CLOCK_EXPECTED 0x08080207U
+#define UMS9117_MMC_LEGACY_CLOCK_HZ 24375000U
 /*
  * The two switch-function arguments the core ever sends: the query that asks
  * what the card supports, and the one that moves it into high speed. Both are
  * built as mode << 31 | 0x00ffffff with the access-mode group set, so they can
  * be recognised exactly rather than by a bit test.
  */
-#define UMS9117_CMD6_CHECK_ARG 0x00fffff0U
-#define UMS9117_CMD6_SWITCH_ARG 0x80fffff1U
-#define UMS9117_HOST_VERSION_MASK 0xfffffffeU
-#define UMS9117_HOST_VERSION_EXPECTED 0x00040000U
+#define UMS9117_MMC_CMD6_CHECK_ARG 0x00fffff0U
+#define UMS9117_MMC_CMD6_SWITCH_ARG 0x80fffff1U
+#define UMS9117_MMC_HOST_VERSION_MASK 0xfffffffeU
+#define UMS9117_MMC_HOST_VERSION_EXPECTED 0x00040000U
 
-#define UMS9117_CMD_INHIBIT BIT(0)
-#define UMS9117_DAT_INHIBIT BIT(1)
-#define UMS9117_DAT0_LEVEL BIT(20)
-#define UMS9117_DAT_LINE_ACTIVE BIT(2)
-#define UMS9117_WRITE_ACTIVE BIT(8)
-#define UMS9117_READ_ACTIVE BIT(9)
-#define UMS9117_DATA_ACTIVE_MASK                                               \
-	(UMS9117_CMD_INHIBIT | UMS9117_DAT_INHIBIT | UMS9117_DAT_LINE_ACTIVE | \
-	 UMS9117_WRITE_ACTIVE | UMS9117_READ_ACTIVE)
+#define UMS9117_MMC_CMD_INHIBIT BIT(0)
+#define UMS9117_MMC_DAT_INHIBIT BIT(1)
+#define UMS9117_MMC_DAT0_LEVEL BIT(20)
+#define UMS9117_MMC_DAT_LINE_ACTIVE BIT(2)
+#define UMS9117_MMC_WRITE_ACTIVE BIT(8)
+#define UMS9117_MMC_READ_ACTIVE BIT(9)
+#define UMS9117_MMC_DATA_ACTIVE_MASK                              \
+	(UMS9117_MMC_CMD_INHIBIT | UMS9117_MMC_DAT_INHIBIT |      \
+	 UMS9117_MMC_DAT_LINE_ACTIVE | UMS9117_MMC_WRITE_ACTIVE | \
+	 UMS9117_MMC_READ_ACTIVE)
 
-#define UMS9117_INT_RESPONSE 0x00000001U
-#define UMS9117_INT_TRANSFER 0x00000002U
-#define UMS9117_INT_ERROR 0x00008000U
-#define UMS9117_INT_TIMEOUT 0x00010000U
-#define UMS9117_INT_CRC 0x00020000U
-#define UMS9117_INT_END_BIT 0x00040000U
-#define UMS9117_INT_INDEX 0x00080000U
-#define UMS9117_INT_DATA_TIMEOUT 0x00100000U
-#define UMS9117_INT_DATA_CRC 0x00200000U
-#define UMS9117_INT_DATA_END_BIT 0x00400000U
+#define UMS9117_MMC_INT_RESPONSE 0x00000001U
+#define UMS9117_MMC_INT_TRANSFER 0x00000002U
+#define UMS9117_MMC_INT_ERROR 0x00008000U
+#define UMS9117_MMC_INT_TIMEOUT 0x00010000U
+#define UMS9117_MMC_INT_CRC 0x00020000U
+#define UMS9117_MMC_INT_END_BIT 0x00040000U
+#define UMS9117_MMC_INT_INDEX 0x00080000U
+#define UMS9117_MMC_INT_DATA_TIMEOUT 0x00100000U
+#define UMS9117_MMC_INT_DATA_CRC 0x00200000U
+#define UMS9117_MMC_INT_DATA_END_BIT 0x00400000U
 /*
  * A failed automatic CMD12 is reported only here. Without this bit a stop
  * command that the controller issues on its own could fail unnoticed, so the
  * bit is owned and acknowledged even while multi-block transfers are refused.
  */
-#define UMS9117_INT_AUTO_CMD12_ERROR 0x01000000U
+#define UMS9117_MMC_INT_AUTO_CMD12_ERROR 0x01000000U
 /*
  * Host version 4 enabled, CMD23 not enabled, and every automatic command
  * error bit clear. This is what the board leaves behind after a reset.
  */
-#define UMS9117_HOST_CTRL2_EXPECTED 0x10000000U
+#define UMS9117_MMC_HOST_CTRL2_EXPECTED 0x10000000U
 /* Automatic command error bits: not executed, timeout, CRC, end bit, index. */
-#define UMS9117_AUTO_CMD_ERROR_MASK 0x0000009fU
-#define UMS9117_INT_ADMA_ERROR 0x02000000U
-#define UMS9117_INT_RESPONSE_ERROR 0x08000000U
-#define UMS9117_INT_AXI_RESPONSE_ERROR 0x10000000U
-#define UMS9117_STATUS_ENABLE_MASK 0x1b7f0003U
-#define UMS9117_OWNED_STATUS_MASK UMS9117_STATUS_ENABLE_MASK
-#define UMS9117_DETAIL_ERROR_MASK                                              \
-	(UMS9117_INT_TIMEOUT | UMS9117_INT_CRC | UMS9117_INT_END_BIT |         \
-	 UMS9117_INT_INDEX | UMS9117_INT_DATA_TIMEOUT | UMS9117_INT_DATA_CRC | \
-	 UMS9117_INT_DATA_END_BIT | UMS9117_INT_AUTO_CMD12_ERROR |             \
-	 UMS9117_INT_ADMA_ERROR | UMS9117_INT_RESPONSE_ERROR |                 \
-	 UMS9117_INT_AXI_RESPONSE_ERROR)
-#define UMS9117_SIGNAL_COMMAND \
-	(UMS9117_INT_RESPONSE | UMS9117_DETAIL_ERROR_MASK)
-#define UMS9117_SIGNAL_DATA (UMS9117_INT_TRANSFER | UMS9117_DETAIL_ERROR_MASK)
+#define UMS9117_MMC_AUTO_CMD_ERROR_MASK 0x0000009fU
+#define UMS9117_MMC_INT_ADMA_ERROR 0x02000000U
+#define UMS9117_MMC_INT_RESPONSE_ERROR 0x08000000U
+#define UMS9117_MMC_INT_AXI_RESPONSE_ERROR 0x10000000U
+#define UMS9117_MMC_STATUS_ENABLE_MASK 0x1b7f0003U
+#define UMS9117_MMC_OWNED_STATUS_MASK UMS9117_MMC_STATUS_ENABLE_MASK
+#define UMS9117_MMC_DETAIL_ERROR_MASK                                      \
+	(UMS9117_MMC_INT_TIMEOUT | UMS9117_MMC_INT_CRC |                   \
+	 UMS9117_MMC_INT_END_BIT | UMS9117_MMC_INT_INDEX |                 \
+	 UMS9117_MMC_INT_DATA_TIMEOUT | UMS9117_MMC_INT_DATA_CRC |         \
+	 UMS9117_MMC_INT_DATA_END_BIT | UMS9117_MMC_INT_AUTO_CMD12_ERROR | \
+	 UMS9117_MMC_INT_ADMA_ERROR | UMS9117_MMC_INT_RESPONSE_ERROR |     \
+	 UMS9117_MMC_INT_AXI_RESPONSE_ERROR)
+#define UMS9117_MMC_SIGNAL_COMMAND \
+	(UMS9117_MMC_INT_RESPONSE | UMS9117_MMC_DETAIL_ERROR_MASK)
+#define UMS9117_MMC_SIGNAL_DATA \
+	(UMS9117_MMC_INT_TRANSFER | UMS9117_MMC_DETAIL_ERROR_MASK)
 
-#define UMS9117_RESP_NONE 0x00U
-#define UMS9117_RESP_LONG 0x01U
-#define UMS9117_RESP_SHORT 0x02U
-#define UMS9117_RESP_SHORT_BUSY 0x03U
-#define UMS9117_SUB_CMD_FLAG 0x04U
-#define UMS9117_CMD_CRC 0x08U
-#define UMS9117_CMD_INDEX 0x10U
-#define UMS9117_CMD_DATA 0x20U
+#define UMS9117_MMC_RESP_NONE 0x00U
+#define UMS9117_MMC_RESP_LONG 0x01U
+#define UMS9117_MMC_RESP_SHORT 0x02U
+#define UMS9117_MMC_RESP_SHORT_BUSY 0x03U
+#define UMS9117_MMC_SUB_CMD_FLAG 0x04U
+#define UMS9117_MMC_CMD_CRC 0x08U
+#define UMS9117_MMC_CMD_INDEX 0x10U
+#define UMS9117_MMC_CMD_DATA 0x20U
 
-#define UMS9117_HOST_CTRL1_DMA_SEL_MASK GENMASK(4, 3)
-#define UMS9117_HOST_CTRL1_WIDTH_MASK (BIT(5) | BIT(1))
-#define UMS9117_HOST_CTRL1_OWNED_MASK \
-	(UMS9117_HOST_CTRL1_DMA_SEL_MASK | UMS9117_HOST_CTRL1_WIDTH_MASK)
-#define UMS9117_HOST_CTRL1_ADMA2 0x00000010U
-#define UMS9117_HOST_CTRL1_1BIT_ADMA2 0x00000010U
-#define UMS9117_HOST_CTRL1_4BIT_ADMA2 0x00000012U
-#define UMS9117_TRANSFER_READ_ADMA2 0x0013U
-#define UMS9117_TRANSFER_WRITE_ADMA2 0x0003U
+#define UMS9117_MMC_HOST_CTRL1_DMA_SEL_MASK GENMASK(4, 3)
+#define UMS9117_MMC_HOST_CTRL1_WIDTH_MASK (BIT(5) | BIT(1))
+#define UMS9117_MMC_HOST_CTRL1_OWNED_MASK      \
+	(UMS9117_MMC_HOST_CTRL1_DMA_SEL_MASK | \
+	 UMS9117_MMC_HOST_CTRL1_WIDTH_MASK)
+#define UMS9117_MMC_HOST_CTRL1_ADMA2 0x00000010U
+#define UMS9117_MMC_HOST_CTRL1_1BIT_ADMA2 0x00000010U
+#define UMS9117_MMC_HOST_CTRL1_4BIT_ADMA2 0x00000012U
+#define UMS9117_MMC_TRANSFER_READ_ADMA2 0x0013U
+#define UMS9117_MMC_TRANSFER_WRITE_ADMA2 0x0003U
 /*
  * Multi-block read: DMA, block count enable, automatic CMD12, read direction
  * and multiple blocks. The controller issues the stop command itself, which is
  * why the automatic CMD12 error bit has to be owned.
  */
-#define UMS9117_TRANSFER_CMD18_AUTO_CMD12_ADMA2 0x0037U
+#define UMS9117_MMC_TRANSFER_CMD18_AUTO_CMD12_ADMA2 0x0037U
 /* The same, minus the read-direction bit. */
-#define UMS9117_TRANSFER_CMD25_AUTO_CMD12_ADMA2 0x0027U
+#define UMS9117_MMC_TRANSFER_CMD25_AUTO_CMD12_ADMA2 0x0027U
 /*
  * Every descriptor but the last carries valid data and continues the chain;
  * the last one additionally ends the transfer.
  */
-#define UMS9117_ADMA2_ATTR_TRANSFER 0x0021U
-#define UMS9117_ADMA2_ATTR_TRANSFER_END 0x0023U
-#define UMS9117_ADMA2_DESC_SIZE 8U
-#define UMS9117_ADMA2_DESC_COUNT 32U
-#define UMS9117_ADMA2_TABLE_SIZE \
-	(UMS9117_ADMA2_DESC_COUNT * UMS9117_ADMA2_DESC_SIZE)
+#define UMS9117_MMC_ADMA2_ATTR_TRANSFER 0x0021U
+#define UMS9117_MMC_ADMA2_ATTR_TRANSFER_END 0x0023U
+#define UMS9117_MMC_ADMA2_DESC_BYTES 8U
+#define UMS9117_MMC_ADMA2_DESC_COUNT 32U
+#define UMS9117_MMC_ADMA2_TABLE_BYTES \
+	(UMS9117_MMC_ADMA2_DESC_COUNT * UMS9117_MMC_ADMA2_DESC_BYTES)
 /* 128 KiB: the full descriptor table at one page per segment. */
-#define UMS9117_MAX_REQUEST_BYTES 131072U
+#define UMS9117_MMC_MAX_REQUEST_BYTES 131072U
 
-#define UMS9117_RESET_POLLS 64U
-#define UMS9117_CLOCK_DEADLINE_MS 10U
-#define UMS9117_INHIBIT_POLLS 100U
-#define UMS9117_READ_QUIESCE_DEADLINE_MS 100U
-#define UMS9117_WRITE_QUIESCE_DEADLINE_MS 5000U
-#define UMS9117_POLL_DELAY_US 10U
-#define UMS9117_REQUEST_TIMEOUT_MS 1000U
-#define UMS9117_WRITE_REQUEST_TIMEOUT_MS 5000U
+#define UMS9117_MMC_RESET_POLLS 64U
+#define UMS9117_MMC_CLOCK_DEADLINE_MS 10U
+#define UMS9117_MMC_INHIBIT_POLLS 100U
+#define UMS9117_MMC_READ_QUIESCE_DEADLINE_MS 100U
+#define UMS9117_MMC_WRITE_QUIESCE_DEADLINE_MS 5000U
+#define UMS9117_MMC_POLL_DELAY_US 10U
+#define UMS9117_MMC_REQUEST_TIMEOUT_MS 1000U
+#define UMS9117_MMC_WRITE_REQUEST_TIMEOUT_MS 5000U
 /*
  * Added per block on top of the fixed budget above. This watchdog only has to
  * notice a controller that will never raise an interrupt again; the card's own
@@ -225,198 +230,208 @@
  * therefore far above what a transfer really costs at this bus width and clock
  * and far below the worst case the card specification permits.
  */
-#define UMS9117_READ_BLOCK_BUDGET_MS 10U
-#define UMS9117_WRITE_BLOCK_BUDGET_MS 50U
-#define UMS9117_SHUTDOWN_DEADLINE_MS                                          \
-	(UMS9117_WRITE_REQUEST_TIMEOUT_MS +                                   \
-	 (UMS9117_MAX_REQUEST_BYTES / 512U) * UMS9117_WRITE_BLOCK_BUDGET_MS + \
-	 UMS9117_WRITE_QUIESCE_DEADLINE_MS)
-#define UMS9117_SHUTDOWN_POLL_MS 1U
-#define UMS9117_INITIAL_CLOCKS_DELAY_MS 10U
+#define UMS9117_MMC_READ_BLOCK_BUDGET_MS 10U
+#define UMS9117_MMC_WRITE_BLOCK_BUDGET_MS 50U
+#define UMS9117_MMC_SHUTDOWN_DEADLINE_MS             \
+	(UMS9117_MMC_WRITE_REQUEST_TIMEOUT_MS +      \
+	 (UMS9117_MMC_MAX_REQUEST_BYTES / 512U) *    \
+		 UMS9117_MMC_WRITE_BLOCK_BUDGET_MS + \
+	 UMS9117_MMC_WRITE_QUIESCE_DEADLINE_MS)
+#define UMS9117_MMC_SHUTDOWN_POLL_MS 1U
+#define UMS9117_MMC_INITIAL_CLOCKS_DELAY_MS 10U
 
-#define TA1618_SDIO0_SPI 57U
-#define TA1618_SDIO0_INTID (TA1618_SDIO0_SPI + 32U)
+#define TA1618_MMC_SDIO0_SPI 57U
+#define TA1618_MMC_SDIO0_INTID (TA1618_MMC_SDIO0_SPI + 32U)
 
-struct ums9117_adma2_desc {
+struct ums9117_mmc_adma2_desc {
 	__le16 attr;
 	__le16 length;
 	__le32 address;
 } __packed;
 
-static_assert(sizeof(struct ums9117_adma2_desc) == UMS9117_ADMA2_DESC_SIZE);
-static_assert(UMS9117_TRANSFER_READ_ADMA2 == 0x0013U);
-static_assert(UMS9117_TRANSFER_WRITE_ADMA2 == 0x0003U);
-static_assert(((((u32)MMC_WRITE_BLOCK << 8) | UMS9117_RESP_SHORT |
-		UMS9117_CMD_CRC | UMS9117_CMD_INDEX | UMS9117_CMD_DATA)
+static_assert(sizeof(struct ums9117_mmc_adma2_desc) ==
+	      UMS9117_MMC_ADMA2_DESC_BYTES);
+static_assert(UMS9117_MMC_TRANSFER_READ_ADMA2 == 0x0013U);
+static_assert(UMS9117_MMC_TRANSFER_WRITE_ADMA2 == 0x0003U);
+static_assert(((((u32)MMC_WRITE_BLOCK << 8) | UMS9117_MMC_RESP_SHORT |
+		UMS9117_MMC_CMD_CRC | UMS9117_MMC_CMD_INDEX |
+		UMS9117_MMC_CMD_DATA)
 		       << 16 |
-	       UMS9117_TRANSFER_WRITE_ADMA2) == 0x183a0003U);
-static_assert(((((u32)MMC_READ_MULTIPLE_BLOCK << 8) | UMS9117_RESP_SHORT |
-		UMS9117_CMD_CRC | UMS9117_CMD_INDEX | UMS9117_CMD_DATA)
+	       UMS9117_MMC_TRANSFER_WRITE_ADMA2) == 0x183a0003U);
+static_assert(((((u32)MMC_READ_MULTIPLE_BLOCK << 8) | UMS9117_MMC_RESP_SHORT |
+		UMS9117_MMC_CMD_CRC | UMS9117_MMC_CMD_INDEX |
+		UMS9117_MMC_CMD_DATA)
 		       << 16 |
-	       UMS9117_TRANSFER_CMD18_AUTO_CMD12_ADMA2) == 0x123a0037U);
-static_assert(((((u32)MMC_WRITE_MULTIPLE_BLOCK << 8) | UMS9117_RESP_SHORT |
-		UMS9117_CMD_CRC | UMS9117_CMD_INDEX | UMS9117_CMD_DATA)
+	       UMS9117_MMC_TRANSFER_CMD18_AUTO_CMD12_ADMA2) == 0x123a0037U);
+static_assert(((((u32)MMC_WRITE_MULTIPLE_BLOCK << 8) | UMS9117_MMC_RESP_SHORT |
+		UMS9117_MMC_CMD_CRC | UMS9117_MMC_CMD_INDEX |
+		UMS9117_MMC_CMD_DATA)
 		       << 16 |
-	       UMS9117_TRANSFER_CMD25_AUTO_CMD12_ADMA2) == 0x193a0027U);
-static_assert(UMS9117_ADMA2_ATTR_TRANSFER == 0x0021U);
-static_assert(UMS9117_ADMA2_ATTR_TRANSFER_END == 0x0023U);
-static_assert(UMS9117_ADMA2_TABLE_SIZE == 256U);
-static_assert(UMS9117_HOST_CTRL1_WIDTH_MASK == 0x00000022U);
-static_assert(UMS9117_HOST_CTRL1_4BIT_ADMA2 == 0x00000012U);
-static_assert(UMS9117_LEGACY_DIVIDER_ENCODED == 0x00000400U);
-static_assert(UMS9117_CLOCK_TIMEOUT_FPDOOM_ENCODED == 0x00080000U);
-static_assert((0x08000000U | UMS9117_CLOCK_TIMEOUT_FPDOOM_ENCODED |
-	       UMS9117_LEGACY_DIVIDER_ENCODED | UMS9117_CLOCK_CARD_EN |
-	       UMS9117_CLOCK_INT_STABLE | UMS9117_CLOCK_INT_EN) ==
-	      UMS9117_LEGACY_CLOCK_EXPECTED);
-static_assert(UMS9117_LEGACY_CLOCK_HZ == 24375000U);
-static_assert(UMS9117_HS_CLOCK_HZ == 48750000U);
-static_assert(UMS9117_BASE_CLOCK_HZ == 195000000U);
-static_assert(UMS9117_HS_DIVIDER_ENCODED == 0x00000200U);
-static_assert((0x08000000U | UMS9117_CLOCK_TIMEOUT_FPDOOM_ENCODED |
-	       UMS9117_HS_DIVIDER_ENCODED | UMS9117_CLOCK_CARD_EN |
-	       UMS9117_CLOCK_INT_STABLE | UMS9117_CLOCK_INT_EN) ==
-	      UMS9117_HS_CLOCK_EXPECTED);
+	       UMS9117_MMC_TRANSFER_CMD25_AUTO_CMD12_ADMA2) == 0x193a0027U);
+static_assert(UMS9117_MMC_ADMA2_ATTR_TRANSFER == 0x0021U);
+static_assert(UMS9117_MMC_ADMA2_ATTR_TRANSFER_END == 0x0023U);
+static_assert(UMS9117_MMC_ADMA2_TABLE_BYTES == 256U);
+static_assert(UMS9117_MMC_HOST_CTRL1_WIDTH_MASK == 0x00000022U);
+static_assert(UMS9117_MMC_HOST_CTRL1_4BIT_ADMA2 == 0x00000012U);
+static_assert(UMS9117_MMC_LEGACY_DIVIDER_ENCODED == 0x00000400U);
+static_assert(UMS9117_MMC_CLOCK_TIMEOUT_FPDOOM_ENCODED == 0x00080000U);
+static_assert((0x08000000U | UMS9117_MMC_CLOCK_TIMEOUT_FPDOOM_ENCODED |
+	       UMS9117_MMC_LEGACY_DIVIDER_ENCODED | UMS9117_MMC_CLOCK_CARD_EN |
+	       UMS9117_MMC_CLOCK_INT_STABLE | UMS9117_MMC_CLOCK_INT_EN) ==
+	      UMS9117_MMC_LEGACY_CLOCK_EXPECTED);
+static_assert(UMS9117_MMC_LEGACY_CLOCK_HZ == 24375000U);
+static_assert(UMS9117_MMC_HS_CLOCK_HZ == 48750000U);
+static_assert(UMS9117_MMC_BASE_CLOCK_HZ == 195000000U);
+static_assert(UMS9117_MMC_HS_DIVIDER_ENCODED == 0x00000200U);
+static_assert((0x08000000U | UMS9117_MMC_CLOCK_TIMEOUT_FPDOOM_ENCODED |
+	       UMS9117_MMC_HS_DIVIDER_ENCODED | UMS9117_MMC_CLOCK_CARD_EN |
+	       UMS9117_MMC_CLOCK_INT_STABLE | UMS9117_MMC_CLOCK_INT_EN) ==
+	      UMS9117_MMC_HS_CLOCK_EXPECTED);
 static_assert((MMC_VDD_29_30 | MMC_VDD_30_31) == 0x00060000U);
-static_assert(TA1618_SDIO0_INTID == 89U);
+static_assert(TA1618_MMC_SDIO0_INTID == 89U);
 
-enum ta1618_resource_index {
-	RES_GATE_STATE,
-	RES_GATE_SET,
-	RES_GATE_CLEAR,
-	RES_AP_RESET_STATE,
-	RES_AP_RESET_SET,
-	RES_AP_RESET_CLEAR,
-	RES_CLOCK_SELECTOR,
-	RES_BLOCK_COUNT,
-	RES_BLOCK_SIZE,
-	RES_PRESENT_STATE,
-	RES_HOST_CONTROL1,
-	RES_CLOCK_RESET,
-	RES_ARGUMENT,
-	RES_TRANSFER_COMMAND,
-	RES_RESPONSE0,
-	RES_RESPONSE1,
-	RES_RESPONSE2,
-	RES_RESPONSE3,
-	RES_INTERRUPT_STATUS,
-	RES_INTERRUPT_STATUS_ENABLE,
-	RES_INTERRUPT_SIGNAL_ENABLE,
-	RES_ADMA_ERROR,
-	RES_ADMA_ADDRESS_LOW,
-	RES_ADMA_ADDRESS_HIGH,
-	RES_HOST_VERSION,
-	RES_PWR_PAD_CTL,
-	RES_CMD_MUX,
-	RES_CMD_PAD,
-	RES_D0_MUX,
-	RES_D0_PAD,
-	RES_CLK_MUX,
-	RES_CLK_PAD,
-	RES_D3_MUX,
-	RES_D3_PAD,
-	RES_D2_MUX,
-	RES_D2_PAD,
-	RES_D1_MUX,
-	RES_D1_PAD,
-	RES_ADI,
-	RES_ANALOG,
-	RES_HOST_CONTROL2,
-	RES_COUNT,
+enum ta1618_mmc_resource_index {
+	TA1618_MMC_RES_GATE_STATE,
+	TA1618_MMC_RES_GATE_SET,
+	TA1618_MMC_RES_GATE_CLEAR,
+	TA1618_MMC_RES_AP_RESET_STATE,
+	TA1618_MMC_RES_AP_RESET_SET,
+	TA1618_MMC_RES_AP_RESET_CLEAR,
+	TA1618_MMC_RES_CLOCK_SELECTOR,
+	TA1618_MMC_RES_BLOCK_COUNT,
+	TA1618_MMC_RES_BLOCK_SIZE,
+	TA1618_MMC_RES_PRESENT_STATE,
+	TA1618_MMC_RES_HOST_CONTROL1,
+	TA1618_MMC_RES_CLOCK_RESET,
+	TA1618_MMC_RES_ARGUMENT,
+	TA1618_MMC_RES_TRANSFER_COMMAND,
+	TA1618_MMC_RES_RESPONSE0,
+	TA1618_MMC_RES_RESPONSE1,
+	TA1618_MMC_RES_RESPONSE2,
+	TA1618_MMC_RES_RESPONSE3,
+	TA1618_MMC_RES_INTERRUPT_STATUS,
+	TA1618_MMC_RES_INTERRUPT_STATUS_ENABLE,
+	TA1618_MMC_RES_INTERRUPT_SIGNAL_ENABLE,
+	TA1618_MMC_RES_ADMA_ERROR,
+	TA1618_MMC_RES_ADMA_ADDRESS_LOW,
+	TA1618_MMC_RES_ADMA_ADDRESS_HIGH,
+	TA1618_MMC_RES_HOST_VERSION,
+	TA1618_MMC_RES_PWR_PAD_CTL,
+	TA1618_MMC_RES_CMD_MUX,
+	TA1618_MMC_RES_CMD_PAD,
+	TA1618_MMC_RES_D0_MUX,
+	TA1618_MMC_RES_D0_PAD,
+	TA1618_MMC_RES_CLK_MUX,
+	TA1618_MMC_RES_CLK_PAD,
+	TA1618_MMC_RES_D3_MUX,
+	TA1618_MMC_RES_D3_PAD,
+	TA1618_MMC_RES_D2_MUX,
+	TA1618_MMC_RES_D2_PAD,
+	TA1618_MMC_RES_D1_MUX,
+	TA1618_MMC_RES_D1_PAD,
+	TA1618_MMC_RES_ADI,
+	TA1618_MMC_RES_ANALOG,
+	TA1618_MMC_RES_HOST_CONTROL2,
+	TA1618_MMC_RES_COUNT,
 };
 
-struct ta1618_resource_definition {
+struct ta1618_mmc_resource_definition {
 	const char *name;
-	resource_size_t address;
-	resource_size_t size;
+	resource_size_t address_phys;
+	resource_size_t mmio_bytes;
 };
 
-static const struct ta1618_resource_definition ta1618_resources[RES_COUNT] = {
-	{ "gate-state", 0x20e00000U, TA1618_REG_SIZE },
-	{ "gate-set", 0x20e01000U, TA1618_REG_SIZE },
-	{ "gate-clear", 0x20e02000U, TA1618_REG_SIZE },
-	{ "ap-reset-state", 0x20e00004U, TA1618_REG_SIZE },
-	{ "ap-reset-set", 0x20e01004U, TA1618_REG_SIZE },
-	{ "ap-reset-clear", 0x20e02004U, TA1618_REG_SIZE },
-	{ "ap-clock-selector", 0x2150006cU, TA1618_REG_SIZE },
-	{ "block-count", 0x20300000U, TA1618_REG_SIZE },
-	{ "block-size", 0x20300004U, TA1618_REG_SIZE },
-	{ "present-state", 0x20300024U, TA1618_REG_SIZE },
-	{ "host-control1", 0x20300028U, TA1618_REG_SIZE },
-	{ "clock-timeout-reset", 0x2030002cU, TA1618_REG_SIZE },
-	{ "argument", 0x20300008U, TA1618_REG_SIZE },
-	{ "transfer-command", 0x2030000cU, TA1618_REG_SIZE },
-	{ "response0", 0x20300010U, TA1618_REG_SIZE },
-	{ "response1", 0x20300014U, TA1618_REG_SIZE },
-	{ "response2", 0x20300018U, TA1618_REG_SIZE },
-	{ "response3", 0x2030001cU, TA1618_REG_SIZE },
-	{ "interrupt-status", 0x20300030U, TA1618_REG_SIZE },
-	{ "interrupt-status-enable", 0x20300034U, TA1618_REG_SIZE },
-	{ "interrupt-signal-enable", 0x20300038U, TA1618_REG_SIZE },
-	{ "adma-error", 0x20300054U, TA1618_REG_SIZE },
-	{ "adma2-address-low", 0x20300058U, TA1618_REG_SIZE },
-	{ "adma2-address-high", 0x2030005cU, TA1618_REG_SIZE },
-	{ "host-version-slot-int", 0x203000fcU, TA1618_REG_SIZE },
-	{ "pwr-pad-ctl", 0x402a0000U, TA1618_REG_SIZE },
-	{ "cmd-mux", 0x402a0128U, TA1618_REG_SIZE },
-	{ "cmd-pad", 0x402a0528U, TA1618_REG_SIZE },
-	{ "d0-mux", 0x402a012cU, TA1618_REG_SIZE },
-	{ "d0-pad", 0x402a052cU, TA1618_REG_SIZE },
-	{ "clk-mux", 0x402a0134U, TA1618_REG_SIZE },
-	{ "clk-pad", 0x402a0534U, TA1618_REG_SIZE },
-	{ "d3-mux", 0x402a0120U, TA1618_REG_SIZE },
-	{ "d3-pad", 0x402a0520U, TA1618_REG_SIZE },
-	{ "d2-mux", 0x402a0124U, TA1618_REG_SIZE },
-	{ "d2-pad", 0x402a0524U, TA1618_REG_SIZE },
-	{ "d1-mux", 0x402a0130U, TA1618_REG_SIZE },
-	{ "d1-pad", 0x402a0530U, TA1618_REG_SIZE },
-	{ "adi-controller", 0x40600000U, TA1618_ADI_SIZE },
-	{ "analog-slave", 0x40608000U, TA1618_ANALOG_SIZE },
-	{ "host-control2", 0x2030003cU, TA1618_REG_SIZE },
-};
+static const struct ta1618_mmc_resource_definition
+	ta1618_mmc_resources[TA1618_MMC_RES_COUNT] = {
+		{ "gate-state", 0x20e00000U, TA1618_MMC_REG_BYTES },
+		{ "gate-set", 0x20e01000U, TA1618_MMC_REG_BYTES },
+		{ "gate-clear", 0x20e02000U, TA1618_MMC_REG_BYTES },
+		{ "ap-reset-state", 0x20e00004U, TA1618_MMC_REG_BYTES },
+		{ "ap-reset-set", 0x20e01004U, TA1618_MMC_REG_BYTES },
+		{ "ap-reset-clear", 0x20e02004U, TA1618_MMC_REG_BYTES },
+		{ "ap-clock-selector", 0x2150006cU, TA1618_MMC_REG_BYTES },
+		{ "block-count", 0x20300000U, TA1618_MMC_REG_BYTES },
+		{ "block-size", 0x20300004U, TA1618_MMC_REG_BYTES },
+		{ "present-state", 0x20300024U, TA1618_MMC_REG_BYTES },
+		{ "host-control1", 0x20300028U, TA1618_MMC_REG_BYTES },
+		{ "clock-timeout-reset", 0x2030002cU, TA1618_MMC_REG_BYTES },
+		{ "argument", 0x20300008U, TA1618_MMC_REG_BYTES },
+		{ "transfer-command", 0x2030000cU, TA1618_MMC_REG_BYTES },
+		{ "response0", 0x20300010U, TA1618_MMC_REG_BYTES },
+		{ "response1", 0x20300014U, TA1618_MMC_REG_BYTES },
+		{ "response2", 0x20300018U, TA1618_MMC_REG_BYTES },
+		{ "response3", 0x2030001cU, TA1618_MMC_REG_BYTES },
+		{ "interrupt-status", 0x20300030U, TA1618_MMC_REG_BYTES },
+		{ "interrupt-status-enable", 0x20300034U,
+		  TA1618_MMC_REG_BYTES },
+		{ "interrupt-signal-enable", 0x20300038U,
+		  TA1618_MMC_REG_BYTES },
+		{ "adma-error", 0x20300054U, TA1618_MMC_REG_BYTES },
+		{ "adma2-address-low", 0x20300058U, TA1618_MMC_REG_BYTES },
+		{ "adma2-address-high", 0x2030005cU, TA1618_MMC_REG_BYTES },
+		{ "host-version-slot-int", 0x203000fcU, TA1618_MMC_REG_BYTES },
+		{ "pwr-pad-ctl", 0x402a0000U, TA1618_MMC_REG_BYTES },
+		{ "cmd-mux", 0x402a0128U, TA1618_MMC_REG_BYTES },
+		{ "cmd-pad", 0x402a0528U, TA1618_MMC_REG_BYTES },
+		{ "d0-mux", 0x402a012cU, TA1618_MMC_REG_BYTES },
+		{ "d0-pad", 0x402a052cU, TA1618_MMC_REG_BYTES },
+		{ "clk-mux", 0x402a0134U, TA1618_MMC_REG_BYTES },
+		{ "clk-pad", 0x402a0534U, TA1618_MMC_REG_BYTES },
+		{ "d3-mux", 0x402a0120U, TA1618_MMC_REG_BYTES },
+		{ "d3-pad", 0x402a0520U, TA1618_MMC_REG_BYTES },
+		{ "d2-mux", 0x402a0124U, TA1618_MMC_REG_BYTES },
+		{ "d2-pad", 0x402a0524U, TA1618_MMC_REG_BYTES },
+		{ "d1-mux", 0x402a0130U, TA1618_MMC_REG_BYTES },
+		{ "d1-pad", 0x402a0530U, TA1618_MMC_REG_BYTES },
+		{ "adi-controller", 0x40600000U, TA1618_MMC_ADI_MMIO_BYTES },
+		{ "analog-slave", 0x40608000U, TA1618_MMC_ANALOG_MMIO_BYTES },
+		{ "host-control2", 0x2030003cU, TA1618_MMC_REG_BYTES },
+	};
 
-struct ta1618_pin_definition {
-	enum ta1618_resource_index resource;
+struct ta1618_mmc_pin_definition {
+	enum ta1618_mmc_resource_index resource;
 	u32 target;
 	bool mux;
 };
 
-static const struct ta1618_pin_definition ta1618_pins[TA1618_PIN_COUNT] = {
-	{ RES_CMD_MUX, 0x00000000U, true },
-	{ RES_CMD_PAD, TA1618_CMD_PAD_TARGET, false },
-	{ RES_D0_MUX, 0x00000000U, true },
-	{ RES_D0_PAD, TA1618_D0_PAD_TARGET, false },
-	{ RES_CLK_MUX, 0x00000000U, true },
-	{ RES_CLK_PAD, TA1618_CLK_PAD_TARGET, false },
-	{ RES_D3_MUX, 0x00000000U, true },
-	{ RES_D3_PAD, TA1618_D3_PAD_TARGET, false },
-	{ RES_D2_MUX, 0x00000000U, true },
-	{ RES_D2_PAD, TA1618_D2_PAD_TARGET, false },
-	{ RES_D1_MUX, 0x00000000U, true },
-	{ RES_D1_PAD, TA1618_D1_PAD_TARGET, false },
-};
+static const struct ta1618_mmc_pin_definition
+	ta1618_mmc_pins[TA1618_MMC_PIN_COUNT] = {
+		{ TA1618_MMC_RES_CMD_MUX, 0x00000000U, true },
+		{ TA1618_MMC_RES_CMD_PAD, TA1618_MMC_CMD_PAD_TARGET, false },
+		{ TA1618_MMC_RES_D0_MUX, 0x00000000U, true },
+		{ TA1618_MMC_RES_D0_PAD, TA1618_MMC_D0_PAD_TARGET, false },
+		{ TA1618_MMC_RES_CLK_MUX, 0x00000000U, true },
+		{ TA1618_MMC_RES_CLK_PAD, TA1618_MMC_CLK_PAD_TARGET, false },
+		{ TA1618_MMC_RES_D3_MUX, 0x00000000U, true },
+		{ TA1618_MMC_RES_D3_PAD, TA1618_MMC_D3_PAD_TARGET, false },
+		{ TA1618_MMC_RES_D2_MUX, 0x00000000U, true },
+		{ TA1618_MMC_RES_D2_PAD, TA1618_MMC_D2_PAD_TARGET, false },
+		{ TA1618_MMC_RES_D1_MUX, 0x00000000U, true },
+		{ TA1618_MMC_RES_D1_PAD, TA1618_MMC_D1_PAD_TARGET, false },
+	};
 
-struct ta1618_analog_definition {
+struct ta1618_mmc_analog_definition {
 	u32 offset;
 	bool power_down;
 };
 
-enum ta1618_analog_index {
-	ANA_CORE_PD,
-	ANA_CORE_VOLT,
-	ANA_IO_PD,
-	ANA_IO_VOLT,
-	ANA_COUNT,
+enum ta1618_mmc_analog_index {
+	TA1618_MMC_ANA_CORE_PD,
+	TA1618_MMC_ANA_CORE_VOLT,
+	TA1618_MMC_ANA_IO_PD,
+	TA1618_MMC_ANA_IO_VOLT,
+	TA1618_MMC_ANA_COUNT,
 };
 
-static const struct ta1618_analog_definition ta1618_analog[ANA_COUNT] = {
-	{ TA1618_VDDSDCORE_PD_OFFSET, true },
-	{ TA1618_VDDSDCORE_VOLT_OFFSET, false },
-	{ TA1618_VDDSDIO_PD_OFFSET, true },
-	{ TA1618_VDDSDIO_VOLT_OFFSET, false },
-};
+static const struct ta1618_mmc_analog_definition
+	ta1618_mmc_analog[TA1618_MMC_ANA_COUNT] = {
+		{ TA1618_MMC_VDDSDCORE_PD_OFFSET, true },
+		{ TA1618_MMC_VDDSDCORE_VOLT_OFFSET, false },
+		{ TA1618_MMC_VDDSDIO_PD_OFFSET, true },
+		{ TA1618_MMC_VDDSDIO_VOLT_OFFSET, false },
+	};
 
-struct ta1618_ios_trace_entry {
+struct ta1618_mmc_ios_trace_entry {
 	u32 sequence;
 	u32 clock;
 	u32 power_mode;
@@ -426,7 +441,7 @@ struct ta1618_ios_trace_entry {
 };
 
 struct ta1618_mmc_audit {
-	struct ta1618_ios_trace_entry ios[TA1618_IOS_TRACE_DEPTH];
+	struct ta1618_mmc_ios_trace_entry ios[TA1618_MMC_IOS_TRACE_DEPTH];
 	u32 ios_calls;
 	u32 ios_trace_count;
 	u32 cmd55_attempt_count;
@@ -486,10 +501,10 @@ struct ta1618_mmc_audit {
 	u32 applied_clock_count;
 };
 
-struct ta1618_sd_mmc {
+struct ta1618_mmc_host {
 	struct device *dev;
 	struct mmc_host *mmc;
-	void __iomem *regs[RES_COUNT];
+	void __iomem *regs[TA1618_MMC_RES_COUNT];
 	int irq;
 	bool irq_requested;
 
@@ -507,7 +522,7 @@ struct ta1618_sd_mmc {
 	bool active_width_acmd6;
 	bool finish_width_acmd6;
 
-	struct ums9117_adma2_desc *descriptors;
+	struct ums9117_mmc_adma2_desc *descriptors;
 	dma_addr_t descriptors_dma;
 	bool data_mapped;
 	enum dma_data_direction dma_direction;
@@ -522,8 +537,8 @@ struct ta1618_sd_mmc {
 	u32 host_control1_snapshot;
 	u32 status_enable_snapshot;
 	u32 signal_enable_snapshot;
-	u32 pin_snapshot[TA1618_PIN_COUNT];
-	u16 analog_snapshot[ANA_COUNT];
+	u32 pin_snapshot[TA1618_MMC_PIN_COUNT];
+	u16 analog_snapshot[TA1618_MMC_ANA_COUNT];
 	bool snapshots_valid;
 	bool controller_snapshot_valid;
 	bool platform_active;
@@ -551,42 +566,43 @@ struct ta1618_sd_mmc {
 	struct ta1618_mmc_audit audit;
 };
 
-static inline u32 ta1618_readl(struct ta1618_sd_mmc *host,
-			       enum ta1618_resource_index resource)
+static inline u32 ta1618_mmc_readl(struct ta1618_mmc_host *host,
+				   enum ta1618_mmc_resource_index resource)
 {
 	return readl(host->regs[resource]);
 }
 
-static inline void ta1618_writel(struct ta1618_sd_mmc *host,
-				 enum ta1618_resource_index resource, u32 value)
+static inline void ta1618_mmc_writel(struct ta1618_mmc_host *host,
+				     enum ta1618_mmc_resource_index resource,
+				     u32 value)
 {
 	writel(value, host->regs[resource]);
 }
 
-static void ums9117_record_ios(struct ta1618_sd_mmc *host,
-			       const struct mmc_ios *ios, int result)
+static void ums9117_mmc_record_ios(struct ta1618_mmc_host *host,
+				   const struct mmc_ios *ios, int result)
 {
-	struct ta1618_ios_trace_entry *entry;
+	struct ta1618_mmc_ios_trace_entry *entry;
 	unsigned long flags;
 	u32 sequence;
 
 	spin_lock_irqsave(&host->lock, flags);
 	sequence = ++host->audit.ios_calls;
-	entry = &host->audit.ios[(sequence - 1U) % TA1618_IOS_TRACE_DEPTH];
+	entry = &host->audit.ios[(sequence - 1U) % TA1618_MMC_IOS_TRACE_DEPTH];
 	entry->sequence = sequence;
 	entry->clock = ios->clock;
 	entry->power_mode = ios->power_mode;
 	entry->bus_width = ios->bus_width;
 	entry->timing = ios->timing;
 	entry->result = result;
-	if (host->audit.ios_trace_count < TA1618_IOS_TRACE_DEPTH)
+	if (host->audit.ios_trace_count < TA1618_MMC_IOS_TRACE_DEPTH)
 		host->audit.ios_trace_count++;
 	spin_unlock_irqrestore(&host->lock, flags);
 }
 
-static void ums9117_audit_command_locked(struct ta1618_sd_mmc *host,
-					 const struct mmc_command *cmd,
-					 bool width_acmd6)
+static void ums9117_mmc_audit_command_locked(struct ta1618_mmc_host *host,
+					     const struct mmc_command *cmd,
+					     bool width_acmd6)
 {
 	host->audit.last_command_valid = true;
 	host->audit.last_opcode = cmd->opcode;
@@ -604,9 +620,9 @@ static void ums9117_audit_command_locked(struct ta1618_sd_mmc *host,
 		host->audit.cmd55_attempt_count++;
 		break;
 	case SD_SWITCH:
-		if (cmd->data && cmd->arg == UMS9117_CMD6_CHECK_ARG)
+		if (cmd->data && cmd->arg == UMS9117_MMC_CMD6_CHECK_ARG)
 			host->audit.cmd6_check_count++;
-		else if (cmd->data && cmd->arg == UMS9117_CMD6_SWITCH_ARG)
+		else if (cmd->data && cmd->arg == UMS9117_MMC_CMD6_SWITCH_ARG)
 			host->audit.cmd6_switch_count++;
 		break;
 	case MMC_READ_SINGLE_BLOCK:
@@ -636,32 +652,33 @@ static void ums9117_audit_command_locked(struct ta1618_sd_mmc *host,
 		host->audit.acmd6_attempt_count++;
 }
 
-static void ums9117_audit_irq_locked(struct ta1618_sd_mmc *host, u32 status,
-				     u32 owned, u32 w1c_readback)
+static void ums9117_mmc_audit_irq_locked(struct ta1618_mmc_host *host,
+					 u32 status, u32 owned,
+					 u32 w1c_readback)
 {
 	host->audit.irq_count++;
 	host->audit.last_irq_raw_status = status;
 	host->audit.last_irq_owned_status = owned;
 	host->audit.last_irq_w1c_readback = w1c_readback;
-	if (status & UMS9117_INT_ERROR)
+	if (status & UMS9117_MMC_INT_ERROR)
 		host->audit.irq_error_count++;
-	if (status & (UMS9117_INT_CRC | UMS9117_INT_DATA_CRC))
+	if (status & (UMS9117_MMC_INT_CRC | UMS9117_MMC_INT_DATA_CRC))
 		host->audit.irq_crc_count++;
-	if (status & (UMS9117_INT_END_BIT | UMS9117_INT_DATA_END_BIT))
+	if (status & (UMS9117_MMC_INT_END_BIT | UMS9117_MMC_INT_DATA_END_BIT))
 		host->audit.irq_end_bit_count++;
-	if (status & (UMS9117_INT_TIMEOUT | UMS9117_INT_DATA_TIMEOUT))
+	if (status & (UMS9117_MMC_INT_TIMEOUT | UMS9117_MMC_INT_DATA_TIMEOUT))
 		host->audit.irq_timeout_count++;
-	if (status & UMS9117_INT_TIMEOUT)
+	if (status & UMS9117_MMC_INT_TIMEOUT)
 		host->audit.irq_command_timeout_count++;
-	if (status & UMS9117_INT_DATA_TIMEOUT)
+	if (status & UMS9117_MMC_INT_DATA_TIMEOUT)
 		host->audit.irq_data_timeout_count++;
-	if (status & UMS9117_INT_AUTO_CMD12_ERROR)
+	if (status & UMS9117_MMC_INT_AUTO_CMD12_ERROR)
 		host->audit.irq_auto_cmd12_count++;
-	if (status & UMS9117_INT_ADMA_ERROR)
+	if (status & UMS9117_MMC_INT_ADMA_ERROR)
 		host->audit.irq_adma_error_count++;
 }
 
-static bool ta1618_dma_address_valid(dma_addr_t address, size_t length)
+static bool ta1618_mmc_dma_address_valid(dma_addr_t address, size_t length)
 {
 	u64 start = (u64)address;
 
@@ -669,41 +686,44 @@ static bool ta1618_dma_address_valid(dma_addr_t address, size_t length)
 	       length && length - 1 <= U32_MAX - start;
 }
 
-static int ta1618_adi_lock(struct ta1618_sd_mmc *host)
+static int ta1618_mmc_adi_lock(struct ta1618_mmc_host *host)
 {
 	return ums9117_adi_begin(&host->adi_transaction);
 }
 
-static int ta1618_adi_unlock(struct ta1618_sd_mmc *host)
+static int ta1618_mmc_adi_unlock(struct ta1618_mmc_host *host)
 {
 	return ums9117_adi_end(&host->adi_transaction);
 }
 
-static int ta1618_adi_read_locked(struct ta1618_sd_mmc *host,
-				  enum ta1618_analog_index index, u16 *value)
+static int ta1618_mmc_adi_read_locked(struct ta1618_mmc_host *host,
+				      enum ta1618_mmc_analog_index index,
+				      u16 *value)
 {
-	const struct ta1618_analog_definition *definition;
+	const struct ta1618_mmc_analog_definition *definition;
 
-	if (index >= ANA_COUNT || !value)
+	if (index >= TA1618_MMC_ANA_COUNT || !value)
 		return -EINVAL;
-	definition = &ta1618_analog[index];
+	definition = &ta1618_mmc_analog[index];
 	if (!IS_ALIGNED(definition->offset, sizeof(u32)) ||
-	    definition->offset > TA1618_ANALOG_SIZE - sizeof(u32))
+	    definition->offset > TA1618_MMC_ANALOG_MMIO_BYTES - sizeof(u32))
 		return -ERANGE;
 	return ums9117_adi_read(&host->adi_transaction, definition->offset,
 				value);
 }
 
-static int ta1618_adi_write_pd_locked(struct ta1618_sd_mmc *host,
-				      enum ta1618_analog_index index, u16 value)
+static int ta1618_mmc_adi_write_pd_locked(struct ta1618_mmc_host *host,
+					  enum ta1618_mmc_analog_index index,
+					  u16 value)
 {
-	if (index >= ANA_COUNT || !ta1618_analog[index].power_down)
+	if (index >= TA1618_MMC_ANA_COUNT ||
+	    !ta1618_mmc_analog[index].power_down)
 		return -EPERM;
 	return ums9117_adi_write(&host->adi_transaction,
-				 ta1618_analog[index].offset, value);
+				 ta1618_mmc_analog[index].offset, value);
 }
 
-static int ta1618_snapshot_platform(struct ta1618_sd_mmc *host)
+static int ta1618_mmc_snapshot_platform(struct ta1618_mmc_host *host)
 {
 	unsigned int pass;
 	unsigned int i;
@@ -712,30 +732,34 @@ static int ta1618_snapshot_platform(struct ta1618_sd_mmc *host)
 	int ret;
 	int unlock_ret;
 
-	host->gate_snapshot = ta1618_readl(host, RES_GATE_STATE);
-	if (host->gate_snapshot & TA1618_GATE_MASK)
+	host->gate_snapshot = ta1618_mmc_readl(host, TA1618_MMC_RES_GATE_STATE);
+	if (host->gate_snapshot & TA1618_MMC_GATE_MASK)
 		return -EBUSY;
-	host->reset_snapshot = ta1618_readl(host, RES_AP_RESET_STATE);
-	if (host->reset_snapshot & TA1618_AP_RESET_MASK)
+	host->reset_snapshot =
+		ta1618_mmc_readl(host, TA1618_MMC_RES_AP_RESET_STATE);
+	if (host->reset_snapshot & TA1618_MMC_AP_RESET_MASK)
 		return -EBUSY;
-	host->selector_snapshot = ta1618_readl(host, RES_CLOCK_SELECTOR);
-	(void)ta1618_readl(host, RES_PWR_PAD_CTL);
+	host->selector_snapshot =
+		ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_SELECTOR);
+	(void)ta1618_mmc_readl(host, TA1618_MMC_RES_PWR_PAD_CTL);
 
-	for (i = 0; i < TA1618_PIN_COUNT; i++) {
-		first = ta1618_readl(host, ta1618_pins[i].resource);
+	for (i = 0; i < TA1618_MMC_PIN_COUNT; i++) {
+		first = ta1618_mmc_readl(host, ta1618_mmc_pins[i].resource);
 		host->pin_snapshot[i] = first;
-		if (ta1618_readl(host, ta1618_pins[i].resource) != first)
+		if (ta1618_mmc_readl(host, ta1618_mmc_pins[i].resource) !=
+		    first)
 			return -EAGAIN;
-		if (ta1618_pins[i].mux && (first & ~TA1618_PIN_FUNC_MASK))
+		if (ta1618_mmc_pins[i].mux &&
+		    (first & ~TA1618_MMC_PIN_FUNC_MASK))
 			return -ERANGE;
 	}
 
-	ret = ta1618_adi_lock(host);
+	ret = ta1618_mmc_adi_lock(host);
 	if (ret)
 		return ret;
 	for (pass = 0; pass < 2; pass++) {
-		for (i = 0; i < ANA_COUNT; i++) {
-			ret = ta1618_adi_read_locked(host, i, &analog);
+		for (i = 0; i < TA1618_MMC_ANA_COUNT; i++) {
+			ret = ta1618_mmc_adi_read_locked(host, i, &analog);
 			if (ret)
 				goto out_unlock;
 			if (!pass)
@@ -746,13 +770,14 @@ static int ta1618_snapshot_platform(struct ta1618_sd_mmc *host)
 			}
 		}
 	}
-	if (host->analog_snapshot[ANA_CORE_VOLT] !=
-		    TA1618_VDDSDCORE_VOLT_EXPECTED ||
-	    host->analog_snapshot[ANA_IO_VOLT] != TA1618_VDDSDIO_VOLT_EXPECTED)
+	if (host->analog_snapshot[TA1618_MMC_ANA_CORE_VOLT] !=
+		    TA1618_MMC_VDDSDCORE_VOLT_EXPECTED ||
+	    host->analog_snapshot[TA1618_MMC_ANA_IO_VOLT] !=
+		    TA1618_MMC_VDDSDIO_VOLT_EXPECTED)
 		ret = -ERANGE;
 
 out_unlock:
-	unlock_ret = ta1618_adi_unlock(host);
+	unlock_ret = ta1618_mmc_adi_unlock(host);
 	if (!ret && unlock_ret)
 		ret = unlock_ret;
 	if (!ret)
@@ -760,17 +785,17 @@ out_unlock:
 	return ret;
 }
 
-static int ta1618_set_rails(struct ta1618_sd_mmc *host, bool enable)
+static int ta1618_mmc_set_rails(struct ta1618_mmc_host *host, bool enable)
 {
-	static const enum ta1618_analog_index enable_order[] = {
-		ANA_CORE_PD,
-		ANA_IO_PD,
+	static const enum ta1618_mmc_analog_index enable_order[] = {
+		TA1618_MMC_ANA_CORE_PD,
+		TA1618_MMC_ANA_IO_PD,
 	};
-	static const enum ta1618_analog_index disable_order[] = {
-		ANA_CORE_PD,
-		ANA_IO_PD,
+	static const enum ta1618_mmc_analog_index disable_order[] = {
+		TA1618_MMC_ANA_CORE_PD,
+		TA1618_MMC_ANA_IO_PD,
 	};
-	const enum ta1618_analog_index *order;
+	const enum ta1618_mmc_analog_index *order;
 	unsigned int i;
 	u16 current_pd;
 	u16 target;
@@ -779,69 +804,70 @@ static int ta1618_set_rails(struct ta1618_sd_mmc *host, bool enable)
 	bool changed = false;
 
 	order = enable ? enable_order : disable_order;
-	ret = ta1618_adi_lock(host);
+	ret = ta1618_mmc_adi_lock(host);
 	if (ret)
 		return ret;
 	for (i = 0; i < ARRAY_SIZE(enable_order); i++) {
-		ret = ta1618_adi_read_locked(host, order[i], &current_pd);
+		ret = ta1618_mmc_adi_read_locked(host, order[i], &current_pd);
 		if (ret)
 			goto out_unlock;
-		target = enable ? current_pd & ~TA1618_PD_MASK :
-				  current_pd | TA1618_PD_MASK;
+		target = enable ? current_pd & ~TA1618_MMC_PD_MASK :
+				  current_pd | TA1618_MMC_PD_MASK;
 		if (target == current_pd)
 			continue;
-		ret = ta1618_adi_write_pd_locked(host, order[i], target);
+		ret = ta1618_mmc_adi_write_pd_locked(host, order[i], target);
 		if (ret)
 			goto out_unlock;
 		changed = true;
 	}
 
 out_unlock:
-	unlock_ret = ta1618_adi_unlock(host);
+	unlock_ret = ta1618_mmc_adi_unlock(host);
 	if (!ret && unlock_ret)
 		ret = unlock_ret;
 	if (!ret) {
 		host->rails_on = enable;
 		if (changed)
-			msleep(TA1618_RAIL_DELAY_MS);
+			msleep(TA1618_MMC_RAIL_DELAY_MS);
 	}
 	return ret;
 }
 
-static int ums9117_reset_controller(struct ta1618_sd_mmc *host)
+static int ums9117_mmc_reset_controller(struct ta1618_mmc_host *host)
 {
 	unsigned int i;
 	u32 before;
 	u32 value;
 
-	before = ta1618_readl(host, RES_CLOCK_RESET);
-	if (before & UMS9117_HOST_RESET)
+	before = ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_RESET);
+	if (before & UMS9117_MMC_HOST_RESET)
 		return -EBUSY;
-	ta1618_writel(host, RES_CLOCK_RESET, before | UMS9117_HOST_RESET);
-	for (i = 0; i < UMS9117_RESET_POLLS; i++) {
-		value = ta1618_readl(host, RES_CLOCK_RESET);
-		if ((value & ~UMS9117_HOST_RESET) !=
-		    (before & ~UMS9117_HOST_RESET))
+	ta1618_mmc_writel(host, TA1618_MMC_RES_CLOCK_RESET,
+			  before | UMS9117_MMC_HOST_RESET);
+	for (i = 0; i < UMS9117_MMC_RESET_POLLS; i++) {
+		value = ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_RESET);
+		if ((value & ~UMS9117_MMC_HOST_RESET) !=
+		    (before & ~UMS9117_MMC_HOST_RESET))
 			return -EIO;
-		if (!(value & UMS9117_HOST_RESET))
+		if (!(value & UMS9117_MMC_HOST_RESET))
 			return 0;
 		udelay(1);
 	}
 	return -ETIMEDOUT;
 }
 
-static int ums9117_set_card_clock(struct ta1618_sd_mmc *host, bool enable)
+static int ums9117_mmc_set_card_clock(struct ta1618_mmc_host *host, bool enable)
 {
 	unsigned long flags;
 	ktime_t deadline;
 	u32 target;
 	u32 value;
 
-	value = ta1618_readl(host, RES_CLOCK_RESET);
+	value = ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_RESET);
 	if (!enable) {
-		target = value & ~UMS9117_CLOCK_CARD_EN;
-		ta1618_writel(host, RES_CLOCK_RESET, target);
-		value = ta1618_readl(host, RES_CLOCK_RESET);
+		target = value & ~UMS9117_MMC_CLOCK_CARD_EN;
+		ta1618_mmc_writel(host, TA1618_MMC_RES_CLOCK_RESET, target);
+		value = ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_RESET);
 		if (value != target)
 			return -EIO;
 		host->card_clock_on = false;
@@ -864,72 +890,73 @@ static int ums9117_set_card_clock(struct ta1618_sd_mmc *host, bool enable)
 	 * reads back with the timeout field still set, and the slot closes for
 	 * good. With it the card is re-identified and runs again.
 	 */
-	target &= ~(UMS9117_CLOCK_DIVIDER_MASK | UMS9117_CLOCK_TIMEOUT_MASK |
-		    UMS9117_CLOCK_PROG_MODE | UMS9117_CLOCK_PLL_EN |
-		    UMS9117_CLOCK_CARD_EN | UMS9117_CLOCK_INT_STABLE |
-		    UMS9117_CLOCK_INT_EN);
-	target |= UMS9117_IDENT_DIVIDER_ENCODED | UMS9117_CLOCK_INT_EN;
-	ta1618_writel(host, RES_CLOCK_RESET, target);
-	deadline = ktime_add_ms(ktime_get(), UMS9117_CLOCK_DEADLINE_MS);
+	target &=
+		~(UMS9117_MMC_CLOCK_DIVIDER_MASK |
+		  UMS9117_MMC_CLOCK_TIMEOUT_MASK | UMS9117_MMC_CLOCK_PROG_MODE |
+		  UMS9117_MMC_CLOCK_PLL_EN | UMS9117_MMC_CLOCK_CARD_EN |
+		  UMS9117_MMC_CLOCK_INT_STABLE | UMS9117_MMC_CLOCK_INT_EN);
+	target |= UMS9117_MMC_IDENT_DIVIDER_ENCODED | UMS9117_MMC_CLOCK_INT_EN;
+	ta1618_mmc_writel(host, TA1618_MMC_RES_CLOCK_RESET, target);
+	deadline = ktime_add_ms(ktime_get(), UMS9117_MMC_CLOCK_DEADLINE_MS);
 	for (;;) {
-		value = ta1618_readl(host, RES_CLOCK_RESET);
-		if (!(value & UMS9117_CLOCK_INT_EN) ||
-		    (value & ~UMS9117_CLOCK_INT_STABLE) !=
-			    (target & ~UMS9117_CLOCK_INT_STABLE))
+		value = ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_RESET);
+		if (!(value & UMS9117_MMC_CLOCK_INT_EN) ||
+		    (value & ~UMS9117_MMC_CLOCK_INT_STABLE) !=
+			    (target & ~UMS9117_MMC_CLOCK_INT_STABLE))
 			return -EIO;
-		if (value & UMS9117_CLOCK_INT_STABLE)
+		if (value & UMS9117_MMC_CLOCK_INT_STABLE)
 			break;
 		if (ktime_compare(ktime_get(), deadline) >= 0)
 			return -ETIMEDOUT;
-		udelay(UMS9117_POLL_DELAY_US);
+		udelay(UMS9117_MMC_POLL_DELAY_US);
 	}
-	target = value | UMS9117_CLOCK_CARD_EN;
-	ta1618_writel(host, RES_CLOCK_RESET, target);
-	if (ta1618_readl(host, RES_CLOCK_RESET) != target)
+	target = value | UMS9117_MMC_CLOCK_CARD_EN;
+	ta1618_mmc_writel(host, TA1618_MMC_RES_CLOCK_RESET, target);
+	if (ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_RESET) != target)
 		return -EIO;
 	host->card_clock_on = true;
-	host->actual_clock_hz = UMS9117_IDENT_CLOCK_HZ;
+	host->actual_clock_hz = UMS9117_MMC_IDENT_CLOCK_HZ;
 	spin_lock_irqsave(&host->lock, flags);
 	host->audit.selector_after_activate =
-		ta1618_readl(host, RES_CLOCK_SELECTOR);
+		ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_SELECTOR);
 	host->audit.clock_reset_after_activate = target;
-	host->audit.applied_clock_hz = UMS9117_IDENT_CLOCK_HZ;
+	host->audit.applied_clock_hz = UMS9117_MMC_IDENT_CLOCK_HZ;
 	host->audit.applied_clock_count++;
 	spin_unlock_irqrestore(&host->lock, flags);
-	msleep(UMS9117_INITIAL_CLOCKS_DELAY_MS);
+	msleep(UMS9117_MMC_INITIAL_CLOCKS_DELAY_MS);
 	return 0;
 }
 
-static int ta1618_configure_pins(struct ta1618_sd_mmc *host)
+static int ta1618_mmc_configure_pins(struct ta1618_mmc_host *host)
 {
 	unsigned int i;
 
-	for (i = 0; i < TA1618_PIN_COUNT; i++) {
-		if (ta1618_readl(host, ta1618_pins[i].resource) !=
+	for (i = 0; i < TA1618_MMC_PIN_COUNT; i++) {
+		if (ta1618_mmc_readl(host, ta1618_mmc_pins[i].resource) !=
 		    host->pin_snapshot[i])
 			return -EAGAIN;
-		ta1618_writel(host, ta1618_pins[i].resource,
-			      ta1618_pins[i].target);
-		if (ta1618_readl(host, ta1618_pins[i].resource) !=
-		    ta1618_pins[i].target)
+		ta1618_mmc_writel(host, ta1618_mmc_pins[i].resource,
+				  ta1618_mmc_pins[i].target);
+		if (ta1618_mmc_readl(host, ta1618_mmc_pins[i].resource) !=
+		    ta1618_mmc_pins[i].target)
 			return -EIO;
 	}
 	return 0;
 }
 
-static void ums9117_mask_and_ack(struct ta1618_sd_mmc *host)
+static void ums9117_mmc_mask_and_ack(struct ta1618_mmc_host *host)
 {
 	u32 status;
 	u32 owned;
 
-	ta1618_writel(host, RES_INTERRUPT_SIGNAL_ENABLE, 0);
-	status = ta1618_readl(host, RES_INTERRUPT_STATUS);
-	owned = status & UMS9117_OWNED_STATUS_MASK;
+	ta1618_mmc_writel(host, TA1618_MMC_RES_INTERRUPT_SIGNAL_ENABLE, 0);
+	status = ta1618_mmc_readl(host, TA1618_MMC_RES_INTERRUPT_STATUS);
+	owned = status & UMS9117_MMC_OWNED_STATUS_MASK;
 	if (owned)
-		ta1618_writel(host, RES_INTERRUPT_STATUS, owned);
+		ta1618_mmc_writel(host, TA1618_MMC_RES_INTERRUPT_STATUS, owned);
 }
 
-static int ta1618_activate_platform(struct ta1618_sd_mmc *host)
+static int ta1618_mmc_activate_platform(struct ta1618_mmc_host *host)
 {
 	unsigned long flags;
 	u32 readback;
@@ -938,49 +965,55 @@ static int ta1618_activate_platform(struct ta1618_sd_mmc *host)
 	int ret;
 
 	if (host->platform_active)
-		return ta1618_set_rails(host, true);
+		return ta1618_mmc_set_rails(host, true);
 	if (!host->snapshots_valid)
 		return -EINVAL;
 
-	ta1618_writel(host, RES_GATE_SET, TA1618_GATE_MASK);
+	ta1618_mmc_writel(host, TA1618_MMC_RES_GATE_SET, TA1618_MMC_GATE_MASK);
 	host->platform_active = true;
-	if (ta1618_readl(host, RES_GATE_STATE) !=
-	    (host->gate_snapshot | TA1618_GATE_MASK))
+	if (ta1618_mmc_readl(host, TA1618_MMC_RES_GATE_STATE) !=
+	    (host->gate_snapshot | TA1618_MMC_GATE_MASK))
 		return -EIO;
 
-	ta1618_writel(host, RES_AP_RESET_SET, TA1618_AP_RESET_MASK);
-	expected = host->reset_snapshot | TA1618_AP_RESET_MASK;
-	if (ta1618_readl(host, RES_AP_RESET_STATE) != expected)
+	ta1618_mmc_writel(host, TA1618_MMC_RES_AP_RESET_SET,
+			  TA1618_MMC_AP_RESET_MASK);
+	expected = host->reset_snapshot | TA1618_MMC_AP_RESET_MASK;
+	if (ta1618_mmc_readl(host, TA1618_MMC_RES_AP_RESET_STATE) != expected)
 		return -EIO;
-	ta1618_writel(host, RES_AP_RESET_CLEAR, TA1618_AP_RESET_MASK);
-	if (ta1618_readl(host, RES_AP_RESET_STATE) != host->reset_snapshot)
-		return -EIO;
-
-	value = host->selector_snapshot & ~TA1618_SELECTOR_MASK;
-	ta1618_writel(host, RES_CLOCK_SELECTOR, value);
-	if (ta1618_readl(host, RES_CLOCK_SELECTOR) != value)
-		return -EIO;
-	value |= TA1618_SELECTOR_SOURCE;
-	ta1618_writel(host, RES_CLOCK_SELECTOR, value);
-	if (ta1618_readl(host, RES_CLOCK_SELECTOR) != value)
+	ta1618_mmc_writel(host, TA1618_MMC_RES_AP_RESET_CLEAR,
+			  TA1618_MMC_AP_RESET_MASK);
+	if (ta1618_mmc_readl(host, TA1618_MMC_RES_AP_RESET_STATE) !=
+	    host->reset_snapshot)
 		return -EIO;
 
-	host->controller_snapshot = ta1618_readl(host, RES_CLOCK_RESET);
-	host->host_control1_snapshot = ta1618_readl(host, RES_HOST_CONTROL1);
+	value = host->selector_snapshot & ~TA1618_MMC_SELECTOR_MASK;
+	ta1618_mmc_writel(host, TA1618_MMC_RES_CLOCK_SELECTOR, value);
+	if (ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_SELECTOR) != value)
+		return -EIO;
+	value |= TA1618_MMC_SELECTOR_SOURCE;
+	ta1618_mmc_writel(host, TA1618_MMC_RES_CLOCK_SELECTOR, value);
+	if (ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_SELECTOR) != value)
+		return -EIO;
+
+	host->controller_snapshot =
+		ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_RESET);
+	host->host_control1_snapshot =
+		ta1618_mmc_readl(host, TA1618_MMC_RES_HOST_CONTROL1);
 	host->status_enable_snapshot =
-		ta1618_readl(host, RES_INTERRUPT_STATUS_ENABLE);
+		ta1618_mmc_readl(host, TA1618_MMC_RES_INTERRUPT_STATUS_ENABLE);
 	host->signal_enable_snapshot =
-		ta1618_readl(host, RES_INTERRUPT_SIGNAL_ENABLE);
+		ta1618_mmc_readl(host, TA1618_MMC_RES_INTERRUPT_SIGNAL_ENABLE);
 	host->controller_snapshot_valid = true;
-	if ((ta1618_readl(host, RES_HOST_VERSION) &
-	     UMS9117_HOST_VERSION_MASK) != UMS9117_HOST_VERSION_EXPECTED ||
+	if ((ta1618_mmc_readl(host, TA1618_MMC_RES_HOST_VERSION) &
+	     UMS9117_MMC_HOST_VERSION_MASK) !=
+		    UMS9117_MMC_HOST_VERSION_EXPECTED ||
 	    host->host_control1_snapshot ||
 	    (host->controller_snapshot &
-	     (UMS9117_HOST_RESET | UMS9117_CLOCK_CARD_EN)))
+	     (UMS9117_MMC_HOST_RESET | UMS9117_MMC_CLOCK_CARD_EN)))
 		return -EPROTONOSUPPORT;
 
-	ums9117_mask_and_ack(host);
-	ret = ums9117_reset_controller(host);
+	ums9117_mmc_mask_and_ack(host);
+	ret = ums9117_mmc_reset_controller(host);
 	if (ret)
 		return ret;
 	/*
@@ -992,33 +1025,34 @@ static int ta1618_activate_platform(struct ta1618_sd_mmc *host)
 	 * treated as a probe failure.
 	 */
 	host->audit.host_control2_after_reset =
-		ta1618_readl(host, RES_HOST_CONTROL2);
+		ta1618_mmc_readl(host, TA1618_MMC_RES_HOST_CONTROL2);
 	if (host->audit.host_control2_after_reset !=
-	    UMS9117_HOST_CTRL2_EXPECTED)
+	    UMS9117_MMC_HOST_CTRL2_EXPECTED)
 		dev_warn(host->dev,
 			 "unexpected host control 2 after reset: 0x%08x\n",
 			 host->audit.host_control2_after_reset);
-	ret = ta1618_configure_pins(host);
+	ret = ta1618_mmc_configure_pins(host);
 	if (ret)
 		return ret;
-	ret = ta1618_set_rails(host, false);
+	ret = ta1618_mmc_set_rails(host, false);
 	if (ret)
 		return ret;
-	ret = ta1618_set_rails(host, true);
+	ret = ta1618_mmc_set_rails(host, true);
 	if (ret)
 		return ret;
 
-	value = ta1618_readl(host, RES_HOST_CONTROL1);
-	value &= ~UMS9117_HOST_CTRL1_OWNED_MASK;
-	value |= UMS9117_HOST_CTRL1_1BIT_ADMA2;
-	ta1618_writel(host, RES_HOST_CONTROL1, value);
-	readback = ta1618_readl(host, RES_HOST_CONTROL1);
-	if (readback != value || (readback & UMS9117_HOST_CTRL1_OWNED_MASK) !=
-					 UMS9117_HOST_CTRL1_1BIT_ADMA2)
+	value = ta1618_mmc_readl(host, TA1618_MMC_RES_HOST_CONTROL1);
+	value &= ~UMS9117_MMC_HOST_CTRL1_OWNED_MASK;
+	value |= UMS9117_MMC_HOST_CTRL1_1BIT_ADMA2;
+	ta1618_mmc_writel(host, TA1618_MMC_RES_HOST_CONTROL1, value);
+	readback = ta1618_mmc_readl(host, TA1618_MMC_RES_HOST_CONTROL1);
+	if (readback != value ||
+	    (readback & UMS9117_MMC_HOST_CTRL1_OWNED_MASK) !=
+		    UMS9117_MMC_HOST_CTRL1_1BIT_ADMA2)
 		return -EIO;
-	ta1618_writel(host, RES_INTERRUPT_STATUS_ENABLE,
-		      UMS9117_STATUS_ENABLE_MASK);
-	ta1618_writel(host, RES_INTERRUPT_SIGNAL_ENABLE, 0);
+	ta1618_mmc_writel(host, TA1618_MMC_RES_INTERRUPT_STATUS_ENABLE,
+			  UMS9117_MMC_STATUS_ENABLE_MASK);
+	ta1618_mmc_writel(host, TA1618_MMC_RES_INTERRUPT_SIGNAL_ENABLE, 0);
 	host->physical_width4 = false;
 	host->width_acmd6_clean = false;
 	host->operational_clock_deferred = false;
@@ -1031,19 +1065,19 @@ static int ta1618_activate_platform(struct ta1618_sd_mmc *host)
 	host->audit.host_ctrl1_width_before = readback;
 	host->audit.host_ctrl1_width_after = readback;
 	host->audit.selector_after_activate =
-		ta1618_readl(host, RES_CLOCK_SELECTOR);
+		ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_SELECTOR);
 	host->audit.clock_reset_after_activate =
-		ta1618_readl(host, RES_CLOCK_RESET);
+		ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_RESET);
 	spin_unlock_irqrestore(&host->lock, flags);
 	host->platform_active = true;
 	return 0;
 }
 
-static int ta1618_restore_rails(struct ta1618_sd_mmc *host)
+static int ta1618_mmc_restore_rails(struct ta1618_mmc_host *host)
 {
-	static const enum ta1618_analog_index order[] = {
-		ANA_IO_PD,
-		ANA_CORE_PD,
+	static const enum ta1618_mmc_analog_index order[] = {
+		TA1618_MMC_ANA_IO_PD,
+		TA1618_MMC_ANA_CORE_PD,
 	};
 	unsigned int i;
 	u16 current_pd;
@@ -1052,31 +1086,31 @@ static int ta1618_restore_rails(struct ta1618_sd_mmc *host)
 	int first_error = 0;
 	int unlock_ret;
 
-	ret = ta1618_adi_lock(host);
+	ret = ta1618_mmc_adi_lock(host);
 	if (ret)
 		return ret;
 	for (i = 0; i < ARRAY_SIZE(order); i++) {
-		ret = ta1618_adi_read_locked(host, order[i], &current_pd);
+		ret = ta1618_mmc_adi_read_locked(host, order[i], &current_pd);
 		if (ret) {
 			if (!first_error)
 				first_error = ret;
 			continue;
 		}
-		target = (current_pd & ~TA1618_PD_MASK) |
-			 (host->analog_snapshot[order[i]] & TA1618_PD_MASK);
+		target = (current_pd & ~TA1618_MMC_PD_MASK) |
+			 (host->analog_snapshot[order[i]] & TA1618_MMC_PD_MASK);
 		if (target == current_pd)
 			continue;
-		ret = ta1618_adi_write_pd_locked(host, order[i], target);
+		ret = ta1618_mmc_adi_write_pd_locked(host, order[i], target);
 		if (ret && !first_error)
 			first_error = ret;
 	}
-	unlock_ret = ta1618_adi_unlock(host);
+	unlock_ret = ta1618_mmc_adi_unlock(host);
 	if (!first_error && unlock_ret)
 		first_error = unlock_ret;
 	return first_error;
 }
 
-static void ta1618_restore_platform(struct ta1618_sd_mmc *host)
+static void ta1618_mmc_restore_platform(struct ta1618_mmc_host *host)
 {
 	unsigned int i;
 	u32 value;
@@ -1085,29 +1119,34 @@ static void ta1618_restore_platform(struct ta1618_sd_mmc *host)
 	if (!host->platform_active)
 		return;
 	if (host->controller_snapshot_valid) {
-		ums9117_mask_and_ack(host);
-		ta1618_writel(host, RES_INTERRUPT_STATUS_ENABLE,
-			      host->status_enable_snapshot);
-		ta1618_writel(host, RES_HOST_CONTROL1,
-			      host->host_control1_snapshot);
-		ta1618_writel(host, RES_CLOCK_RESET,
-			      host->controller_snapshot & ~UMS9117_HOST_RESET);
+		ums9117_mmc_mask_and_ack(host);
+		ta1618_mmc_writel(host, TA1618_MMC_RES_INTERRUPT_STATUS_ENABLE,
+				  host->status_enable_snapshot);
+		ta1618_mmc_writel(host, TA1618_MMC_RES_HOST_CONTROL1,
+				  host->host_control1_snapshot);
+		ta1618_mmc_writel(host, TA1618_MMC_RES_CLOCK_RESET,
+				  host->controller_snapshot &
+					  ~UMS9117_MMC_HOST_RESET);
 	}
 
-	ret = ta1618_restore_rails(host);
+	ret = ta1618_mmc_restore_rails(host);
 	if (ret)
 		dev_err(host->dev, "failed to restore SD rails: %d\n", ret);
-	for (i = 0; i < TA1618_PIN_COUNT; i++)
-		ta1618_writel(host, ta1618_pins[i].resource,
-			      host->pin_snapshot[i]);
-	value = ta1618_readl(host, RES_CLOCK_SELECTOR);
-	value = (value & ~TA1618_SELECTOR_MASK) |
-		(host->selector_snapshot & TA1618_SELECTOR_MASK);
-	ta1618_writel(host, RES_CLOCK_SELECTOR, value);
-	if (ta1618_readl(host, RES_AP_RESET_STATE) != host->reset_snapshot)
-		ta1618_writel(host, RES_AP_RESET_CLEAR, TA1618_AP_RESET_MASK);
-	ta1618_writel(host, RES_GATE_CLEAR, TA1618_GATE_MASK);
-	if (ta1618_readl(host, RES_GATE_STATE) != host->gate_snapshot)
+	for (i = 0; i < TA1618_MMC_PIN_COUNT; i++)
+		ta1618_mmc_writel(host, ta1618_mmc_pins[i].resource,
+				  host->pin_snapshot[i]);
+	value = ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_SELECTOR);
+	value = (value & ~TA1618_MMC_SELECTOR_MASK) |
+		(host->selector_snapshot & TA1618_MMC_SELECTOR_MASK);
+	ta1618_mmc_writel(host, TA1618_MMC_RES_CLOCK_SELECTOR, value);
+	if (ta1618_mmc_readl(host, TA1618_MMC_RES_AP_RESET_STATE) !=
+	    host->reset_snapshot)
+		ta1618_mmc_writel(host, TA1618_MMC_RES_AP_RESET_CLEAR,
+				  TA1618_MMC_AP_RESET_MASK);
+	ta1618_mmc_writel(host, TA1618_MMC_RES_GATE_CLEAR,
+			  TA1618_MMC_GATE_MASK);
+	if (ta1618_mmc_readl(host, TA1618_MMC_RES_GATE_STATE) !=
+	    host->gate_snapshot)
 		dev_err(host->dev, "failed to restore SDIO0 gate state\n");
 	host->platform_active = false;
 	host->rails_on = false;
@@ -1115,7 +1154,7 @@ static void ta1618_restore_platform(struct ta1618_sd_mmc *host)
 	host->actual_clock_hz = 0;
 }
 
-static bool ums9117_destructive_command(const struct mmc_command *cmd)
+static bool ta1618_mmc_is_destructive_command(const struct mmc_command *cmd)
 {
 	switch (cmd->opcode) {
 	case MMC_WRITE_DAT_UNTIL_STOP:
@@ -1139,8 +1178,8 @@ static bool ums9117_destructive_command(const struct mmc_command *cmd)
 		 * switch are recognised; anything else could write a card
 		 * function group.
 		 */
-		return cmd->data && cmd->arg != UMS9117_CMD6_CHECK_ARG &&
-		       cmd->arg != UMS9117_CMD6_SWITCH_ARG;
+		return cmd->data && cmd->arg != UMS9117_MMC_CMD6_CHECK_ARG &&
+		       cmd->arg != UMS9117_MMC_CMD6_SWITCH_ARG;
 	default:
 		return false;
 	}
@@ -1155,8 +1194,8 @@ static bool ums9117_destructive_command(const struct mmc_command *cmd)
  * so an unexpected shape is refused before any register is touched instead of
  * being transferred wrongly.
  */
-static bool ums9117_is_multi_block(const struct mmc_request *mrq,
-				   const struct mmc_host *mmc, bool write)
+static bool ums9117_mmc_is_multi_block(const struct mmc_request *mrq,
+				       const struct mmc_host *mmc, bool write)
 {
 	const struct mmc_command *cmd = mrq->cmd;
 	const struct mmc_command *stop = mrq->stop;
@@ -1175,29 +1214,29 @@ static bool ums9117_is_multi_block(const struct mmc_request *mrq,
 	       mmc_resp_type(stop) == stop_response && !mrq->cap_cmd_during_tfr;
 }
 
-static int ums9117_response_flags(const struct mmc_command *cmd, u16 *flags)
+static int ums9117_mmc_response_flags(const struct mmc_command *cmd, u16 *flags)
 {
 	u32 response = mmc_resp_type(cmd);
 
 	if (!response)
-		*flags = UMS9117_RESP_NONE;
+		*flags = UMS9117_MMC_RESP_NONE;
 	else if (response == MMC_RSP_R2)
-		*flags = UMS9117_RESP_LONG | UMS9117_CMD_CRC;
+		*flags = UMS9117_MMC_RESP_LONG | UMS9117_MMC_CMD_CRC;
 	else if (response == MMC_RSP_R1B)
-		*flags = UMS9117_RESP_SHORT_BUSY | UMS9117_CMD_CRC |
-			 UMS9117_CMD_INDEX;
+		*flags = UMS9117_MMC_RESP_SHORT_BUSY | UMS9117_MMC_CMD_CRC |
+			 UMS9117_MMC_CMD_INDEX;
 	else if (response == MMC_RSP_R3)
-		*flags = UMS9117_RESP_SHORT;
+		*flags = UMS9117_MMC_RESP_SHORT;
 	else if (response == MMC_RSP_R1 || response == MMC_RSP_R6 ||
 		 response == MMC_RSP_R7)
-		*flags = UMS9117_RESP_SHORT | UMS9117_CMD_CRC |
-			 UMS9117_CMD_INDEX;
+		*flags = UMS9117_MMC_RESP_SHORT | UMS9117_MMC_CMD_CRC |
+			 UMS9117_MMC_CMD_INDEX;
 	else
 		return -EOPNOTSUPP;
 	return 0;
 }
 
-static void ums9117_set_request_error(struct mmc_request *mrq, int error)
+static void ums9117_mmc_set_request_error(struct mmc_request *mrq, int error)
 {
 	mrq->cmd->error = error;
 	if (mrq->cmd->data) {
@@ -1206,7 +1245,7 @@ static void ums9117_set_request_error(struct mmc_request *mrq, int error)
 	}
 }
 
-static void ums9117_unmap_data(struct ta1618_sd_mmc *host)
+static void ums9117_mmc_unmap_data(struct ta1618_mmc_host *host)
 {
 	struct mmc_data *data;
 
@@ -1224,8 +1263,8 @@ static void ums9117_unmap_data(struct ta1618_sd_mmc *host)
 	host->data_length = 0;
 }
 
-static int ums9117_prepare_data(struct ta1618_sd_mmc *host,
-				struct mmc_command *cmd)
+static int ums9117_mmc_prepare_data(struct ta1618_mmc_host *host,
+				    struct mmc_command *cmd)
 {
 	struct mmc_data *data = cmd->data;
 	struct scatterlist *sg;
@@ -1267,25 +1306,25 @@ static int ums9117_prepare_data(struct ta1618_sd_mmc *host,
 	mapped = dma_map_sg(host->dev, data->sg, data->sg_len, direction);
 	if (mapped <= 0)
 		return mapped < 0 ? mapped : -EIO;
-	if (mapped > (int)UMS9117_ADMA2_DESC_COUNT) {
+	if (mapped > (int)UMS9117_MMC_ADMA2_DESC_COUNT) {
 		dma_unmap_sg(host->dev, data->sg, data->sg_len, direction);
 		return -EOPNOTSUPP;
 	}
 
-	memset(host->descriptors, 0, UMS9117_ADMA2_TABLE_SIZE);
+	memset(host->descriptors, 0, UMS9117_MMC_ADMA2_TABLE_BYTES);
 	total = 0;
 	for_each_sg(data->sg, sg, mapped, i) {
 		address = sg_dma_address(sg);
 		length = sg_dma_len(sg);
 		if (!length || length > host->mmc->max_seg_size ||
-		    !ta1618_dma_address_valid(address, length)) {
+		    !ta1618_mmc_dma_address_valid(address, length)) {
 			dma_unmap_sg(host->dev, data->sg, data->sg_len,
 				     direction);
 			return -ERANGE;
 		}
 		host->descriptors[i].attr = cpu_to_le16(
-			i == mapped - 1 ? UMS9117_ADMA2_ATTR_TRANSFER_END :
-					  UMS9117_ADMA2_ATTR_TRANSFER);
+			i == mapped - 1 ? UMS9117_MMC_ADMA2_ATTR_TRANSFER_END :
+					  UMS9117_MMC_ADMA2_ATTR_TRANSFER);
 		host->descriptors[i].length = cpu_to_le16(length);
 		host->descriptors[i].address = cpu_to_le32((u32)address);
 		total += length;
@@ -1308,23 +1347,24 @@ static int ums9117_prepare_data(struct ta1618_sd_mmc *host,
 	return 0;
 }
 
-static int ums9117_wait_inhibit(struct ta1618_sd_mmc *host, bool data)
+static int ums9117_mmc_wait_inhibit(struct ta1618_mmc_host *host, bool data)
 {
 	unsigned int i;
-	u32 mask = UMS9117_CMD_INHIBIT;
+	u32 mask = UMS9117_MMC_CMD_INHIBIT;
 
 	if (data)
-		mask |= UMS9117_DAT_INHIBIT;
-	for (i = 0; i < UMS9117_INHIBIT_POLLS; i++) {
-		if (!(ta1618_readl(host, RES_PRESENT_STATE) & mask))
+		mask |= UMS9117_MMC_DAT_INHIBIT;
+	for (i = 0; i < UMS9117_MMC_INHIBIT_POLLS; i++) {
+		if (!(ta1618_mmc_readl(host, TA1618_MMC_RES_PRESENT_STATE) &
+		      mask))
 			return 0;
-		udelay(UMS9117_POLL_DELAY_US);
+		udelay(UMS9117_MMC_POLL_DELAY_US);
 	}
 	return -EBUSY;
 }
 
-static void ums9117_width_fail_closed(struct ta1618_sd_mmc *host,
-				      const char *reason, int error)
+static void ums9117_mmc_width_fail_closed(struct ta1618_mmc_host *host,
+					  const char *reason, int error)
 {
 	unsigned long flags;
 	u32 clock_before;
@@ -1333,23 +1373,25 @@ static void ums9117_width_fail_closed(struct ta1618_sd_mmc *host,
 	bool cleanup_confirmed;
 
 	/* Do not reset, re-clock, alter the divider, roll back ACMD6, or cycle rails. */
-	ta1618_writel(host, RES_INTERRUPT_SIGNAL_ENABLE, 0);
-	signal_after = ta1618_readl(host, RES_INTERRUPT_SIGNAL_ENABLE);
+	ta1618_mmc_writel(host, TA1618_MMC_RES_INTERRUPT_SIGNAL_ENABLE, 0);
+	signal_after =
+		ta1618_mmc_readl(host, TA1618_MMC_RES_INTERRUPT_SIGNAL_ENABLE);
 	synchronize_irq(host->irq);
-	clock_before = ta1618_readl(host, RES_CLOCK_RESET);
-	clock_after = clock_before & ~UMS9117_CLOCK_CARD_EN;
+	clock_before = ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_RESET);
+	clock_after = clock_before & ~UMS9117_MMC_CLOCK_CARD_EN;
 	if (clock_after != clock_before)
-		ta1618_writel(host, RES_CLOCK_RESET, clock_after);
-	clock_after = ta1618_readl(host, RES_CLOCK_RESET);
+		ta1618_mmc_writel(host, TA1618_MMC_RES_CLOCK_RESET,
+				  clock_after);
+	clock_after = ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_RESET);
 	cleanup_confirmed = !signal_after &&
-			    !(clock_after & UMS9117_CLOCK_CARD_EN);
+			    !(clock_after & UMS9117_MMC_CLOCK_CARD_EN);
 
 	spin_lock_irqsave(&host->lock, flags);
 	host->fatal_error = true;
 	host->width_switch_fatal = true;
 	host->terminal_cleanup_hold |= !cleanup_confirmed;
 	host->app_cmd_armed = false;
-	host->card_clock_on = !!(clock_after & UMS9117_CLOCK_CARD_EN);
+	host->card_clock_on = !!(clock_after & UMS9117_MMC_CLOCK_CARD_EN);
 	if (!host->card_clock_on)
 		host->actual_clock_hz = 0;
 	spin_unlock_irqrestore(&host->lock, flags);
@@ -1360,9 +1402,9 @@ static void ums9117_width_fail_closed(struct ta1618_sd_mmc *host,
 		cleanup_confirmed ? 1U : 0U);
 }
 
-static void ums9117_reject_request(struct ta1618_sd_mmc *host,
-				   struct mmc_request *mrq, int error,
-				   const char *reason)
+static void ums9117_mmc_reject_request(struct ta1618_mmc_host *host,
+				       struct mmc_request *mrq, int error,
+				       const char *reason)
 {
 	/*
 	 * Every caller runs before the first controller write, so neither the
@@ -1374,7 +1416,7 @@ static void ums9117_reject_request(struct ta1618_sd_mmc *host,
 		host->dev,
 		"request rejected before MMIO: %s; opcode=%u error=%d\n",
 		reason, mrq->cmd->opcode, error);
-	ums9117_set_request_error(mrq, error);
+	ums9117_mmc_set_request_error(mrq, error);
 	mmc_request_done(host->mmc, mrq);
 }
 
@@ -1384,19 +1426,20 @@ static void ums9117_reject_request(struct ta1618_sd_mmc *host,
  * frequency: a card without high speed asks for a number close to the fast one
  * and would otherwise be handed a bus it never agreed to.
  */
-static bool ums9117_is_operational_clock(u32 hz)
+static bool ums9117_mmc_is_operational_clock(u32 hz)
 {
-	return hz >= UMS9117_LEGACY_CLOCK_HZ && hz <= UMS9117_HS_CLOCK_HZ;
+	return hz >= UMS9117_MMC_LEGACY_CLOCK_HZ &&
+	       hz <= UMS9117_MMC_HS_CLOCK_HZ;
 }
 
-static bool ums9117_select_clock_profile(struct ta1618_sd_mmc *host,
-					 const struct mmc_ios *ios)
+static bool ums9117_mmc_select_clock_profile(struct ta1618_mmc_host *host,
+					     const struct mmc_ios *ios)
 {
 	if (ios->timing == MMC_TIMING_SD_HS && host->hs_timing_seen &&
-	    ios->clock >= UMS9117_HS_CLOCK_HZ) {
-		host->target_clock_hz = UMS9117_HS_CLOCK_HZ;
-		host->target_divider = UMS9117_HS_DIVIDER_ENCODED;
-		host->target_operational = UMS9117_HS_CLOCK_EXPECTED;
+	    ios->clock >= UMS9117_MMC_HS_CLOCK_HZ) {
+		host->target_clock_hz = UMS9117_MMC_HS_CLOCK_HZ;
+		host->target_divider = UMS9117_MMC_HS_DIVIDER_ENCODED;
+		host->target_operational = UMS9117_MMC_HS_CLOCK_EXPECTED;
 		return true;
 	}
 	/*
@@ -1406,16 +1449,16 @@ static bool ums9117_select_clock_profile(struct ta1618_sd_mmc *host,
 	 * asked for, so that request is answered with the proven slow profile
 	 * rather than refused.
 	 */
-	if (ios->clock >= UMS9117_LEGACY_CLOCK_HZ) {
-		host->target_clock_hz = UMS9117_LEGACY_CLOCK_HZ;
-		host->target_divider = UMS9117_LEGACY_DIVIDER_ENCODED;
-		host->target_operational = UMS9117_LEGACY_CLOCK_EXPECTED;
+	if (ios->clock >= UMS9117_MMC_LEGACY_CLOCK_HZ) {
+		host->target_clock_hz = UMS9117_MMC_LEGACY_CLOCK_HZ;
+		host->target_divider = UMS9117_MMC_LEGACY_DIVIDER_ENCODED;
+		host->target_operational = UMS9117_MMC_LEGACY_CLOCK_EXPECTED;
 		return true;
 	}
 	return false;
 }
 
-static int ums9117_transition_width4(struct ta1618_sd_mmc *host)
+static int ums9117_mmc_transition_width4(struct ta1618_mmc_host *host)
 {
 	unsigned long flags;
 	ktime_t deadline;
@@ -1434,7 +1477,7 @@ static int ums9117_transition_width4(struct ta1618_sd_mmc *host)
 	    READ_ONCE(host->physical_width4) ||
 	    !READ_ONCE(host->operational_clock_deferred))
 		return -EPERM;
-	ret = ums9117_wait_inhibit(host, true);
+	ret = ums9117_mmc_wait_inhibit(host, true);
 	if (ret)
 		return ret;
 
@@ -1443,96 +1486,101 @@ static int ums9117_transition_width4(struct ta1618_sd_mmc *host)
 		ret = -EBUSY;
 		goto out_unlock;
 	}
-	ta1618_writel(host, RES_INTERRUPT_SIGNAL_ENABLE, 0);
-	if (ta1618_readl(host, RES_INTERRUPT_SIGNAL_ENABLE)) {
+	ta1618_mmc_writel(host, TA1618_MMC_RES_INTERRUPT_SIGNAL_ENABLE, 0);
+	if (ta1618_mmc_readl(host, TA1618_MMC_RES_INTERRUPT_SIGNAL_ENABLE)) {
 		ret = -EIO;
 		goto out_unlock;
 	}
-	present = ta1618_readl(host, RES_PRESENT_STATE);
-	if (present & (UMS9117_CMD_INHIBIT | UMS9117_DAT_INHIBIT)) {
+	present = ta1618_mmc_readl(host, TA1618_MMC_RES_PRESENT_STATE);
+	if (present & (UMS9117_MMC_CMD_INHIBIT | UMS9117_MMC_DAT_INHIBIT)) {
 		ret = -EBUSY;
 		goto out_unlock;
 	}
 
-	selector_before = ta1618_readl(host, RES_CLOCK_SELECTOR);
-	clock_before = ta1618_readl(host, RES_CLOCK_RESET);
-	control_before = ta1618_readl(host, RES_HOST_CONTROL1);
+	selector_before = ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_SELECTOR);
+	clock_before = ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_RESET);
+	control_before = ta1618_mmc_readl(host, TA1618_MMC_RES_HOST_CONTROL1);
 	selector_after = selector_before;
 	clock_after = clock_before;
 	control_after = control_before;
 	host->audit.timeout_field_before =
-		FIELD_GET(UMS9117_CLOCK_TIMEOUT_MASK, clock_before);
+		FIELD_GET(UMS9117_MMC_CLOCK_TIMEOUT_MASK, clock_before);
 	host->audit.timeout_register_before = clock_before;
 	host->audit.timeout_field_candidate = 0;
 	host->audit.timeout_register_candidate = 0;
 	host->audit.timeout_field_readback = 0;
 	host->audit.timeout_register_readback = 0;
-	if ((selector_before & TA1618_SELECTOR_MASK) !=
-		    TA1618_SELECTOR_SOURCE ||
-	    (clock_before & UMS9117_CLOCK_DIVIDER_MASK) !=
-		    UMS9117_IDENT_DIVIDER_ENCODED ||
-	    (clock_before & UMS9117_CLOCK_TIMEOUT_MASK) ||
-	    !(clock_before & UMS9117_CLOCK_INT_EN) ||
-	    !(clock_before & UMS9117_CLOCK_INT_STABLE) ||
-	    !(clock_before & UMS9117_CLOCK_CARD_EN) ||
-	    (clock_before & (UMS9117_CLOCK_PROG_MODE | UMS9117_CLOCK_PLL_EN |
-			     UMS9117_HOST_RESET)) ||
-	    (control_before != UMS9117_HOST_CTRL1_1BIT_ADMA2) ||
-	    host->actual_clock_hz != UMS9117_IDENT_CLOCK_HZ) {
+	if ((selector_before & TA1618_MMC_SELECTOR_MASK) !=
+		    TA1618_MMC_SELECTOR_SOURCE ||
+	    (clock_before & UMS9117_MMC_CLOCK_DIVIDER_MASK) !=
+		    UMS9117_MMC_IDENT_DIVIDER_ENCODED ||
+	    (clock_before & UMS9117_MMC_CLOCK_TIMEOUT_MASK) ||
+	    !(clock_before & UMS9117_MMC_CLOCK_INT_EN) ||
+	    !(clock_before & UMS9117_MMC_CLOCK_INT_STABLE) ||
+	    !(clock_before & UMS9117_MMC_CLOCK_CARD_EN) ||
+	    (clock_before &
+	     (UMS9117_MMC_CLOCK_PROG_MODE | UMS9117_MMC_CLOCK_PLL_EN |
+	      UMS9117_MMC_HOST_RESET)) ||
+	    (control_before != UMS9117_MMC_HOST_CTRL1_1BIT_ADMA2) ||
+	    host->actual_clock_hz != UMS9117_MMC_IDENT_CLOCK_HZ) {
 		ret = -EPROTONOSUPPORT;
 		goto cache_and_unlock;
 	}
 
 	/* Gate the card clock before changing any physical width or divider bit. */
-	clock_candidate = clock_before & ~UMS9117_CLOCK_CARD_EN;
-	ta1618_writel(host, RES_CLOCK_RESET, clock_candidate);
-	clock_after = ta1618_readl(host, RES_CLOCK_RESET);
+	clock_candidate = clock_before & ~UMS9117_MMC_CLOCK_CARD_EN;
+	ta1618_mmc_writel(host, TA1618_MMC_RES_CLOCK_RESET, clock_candidate);
+	clock_after = ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_RESET);
 	if (clock_after != clock_candidate) {
 		ret = -EIO;
 		goto cache_and_unlock;
 	}
 
 	/* Stop the internal clock and confirm both enable and stable are clear. */
-	clock_candidate &= ~(UMS9117_CLOCK_INT_EN | UMS9117_CLOCK_INT_STABLE);
-	ta1618_writel(host, RES_CLOCK_RESET, clock_candidate);
-	deadline = ktime_add_ms(ktime_get(), UMS9117_CLOCK_DEADLINE_MS);
+	clock_candidate &=
+		~(UMS9117_MMC_CLOCK_INT_EN | UMS9117_MMC_CLOCK_INT_STABLE);
+	ta1618_mmc_writel(host, TA1618_MMC_RES_CLOCK_RESET, clock_candidate);
+	deadline = ktime_add_ms(ktime_get(), UMS9117_MMC_CLOCK_DEADLINE_MS);
 	for (;;) {
-		clock_after = ta1618_readl(host, RES_CLOCK_RESET);
-		if (!(clock_after &
-		      (UMS9117_CLOCK_INT_EN | UMS9117_CLOCK_INT_STABLE)) &&
+		clock_after =
+			ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_RESET);
+		if (!(clock_after & (UMS9117_MMC_CLOCK_INT_EN |
+				     UMS9117_MMC_CLOCK_INT_STABLE)) &&
 		    clock_after == clock_candidate)
 			break;
 		if (ktime_compare(ktime_get(), deadline) >= 0) {
 			ret = -ETIMEDOUT;
 			goto cache_and_unlock;
 		}
-		udelay(UMS9117_POLL_DELAY_US);
+		udelay(UMS9117_MMC_POLL_DELAY_US);
 	}
 
-	control_candidate = (control_before & ~UMS9117_HOST_CTRL1_OWNED_MASK) |
-			    UMS9117_HOST_CTRL1_4BIT_ADMA2;
-	ta1618_writel(host, RES_HOST_CONTROL1, control_candidate);
-	control_after = ta1618_readl(host, RES_HOST_CONTROL1);
+	control_candidate =
+		(control_before & ~UMS9117_MMC_HOST_CTRL1_OWNED_MASK) |
+		UMS9117_MMC_HOST_CTRL1_4BIT_ADMA2;
+	ta1618_mmc_writel(host, TA1618_MMC_RES_HOST_CONTROL1,
+			  control_candidate);
+	control_after = ta1618_mmc_readl(host, TA1618_MMC_RES_HOST_CONTROL1);
 	if (control_after != control_candidate ||
-	    (control_after & ~UMS9117_HOST_CTRL1_OWNED_MASK) !=
-		    (control_before & ~UMS9117_HOST_CTRL1_OWNED_MASK) ||
-	    (control_after & UMS9117_HOST_CTRL1_OWNED_MASK) !=
-		    UMS9117_HOST_CTRL1_4BIT_ADMA2) {
+	    (control_after & ~UMS9117_MMC_HOST_CTRL1_OWNED_MASK) !=
+		    (control_before & ~UMS9117_MMC_HOST_CTRL1_OWNED_MASK) ||
+	    (control_after & UMS9117_MMC_HOST_CTRL1_OWNED_MASK) !=
+		    UMS9117_MMC_HOST_CTRL1_4BIT_ADMA2) {
 		ret = -EIO;
 		goto cache_and_unlock;
 	}
 
-	clock_candidate = (clock_after & ~(UMS9117_CLOCK_DIVIDER_MASK |
-					   UMS9117_CLOCK_TIMEOUT_MASK)) |
+	clock_candidate = (clock_after & ~(UMS9117_MMC_CLOCK_DIVIDER_MASK |
+					   UMS9117_MMC_CLOCK_TIMEOUT_MASK)) |
 			  host->target_divider |
-			  UMS9117_CLOCK_TIMEOUT_FPDOOM_ENCODED;
+			  UMS9117_MMC_CLOCK_TIMEOUT_FPDOOM_ENCODED;
 	host->audit.timeout_field_candidate =
-		FIELD_GET(UMS9117_CLOCK_TIMEOUT_MASK, clock_candidate);
+		FIELD_GET(UMS9117_MMC_CLOCK_TIMEOUT_MASK, clock_candidate);
 	host->audit.timeout_register_candidate = clock_candidate;
-	ta1618_writel(host, RES_CLOCK_RESET, clock_candidate);
-	clock_after = ta1618_readl(host, RES_CLOCK_RESET);
+	ta1618_mmc_writel(host, TA1618_MMC_RES_CLOCK_RESET, clock_candidate);
+	clock_after = ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_RESET);
 	host->audit.timeout_field_readback =
-		FIELD_GET(UMS9117_CLOCK_TIMEOUT_MASK, clock_after);
+		FIELD_GET(UMS9117_MMC_CLOCK_TIMEOUT_MASK, clock_after);
 	host->audit.timeout_register_readback = clock_after;
 	if (clock_after != clock_candidate) {
 		ret = -EIO;
@@ -1540,40 +1588,41 @@ static int ums9117_transition_width4(struct ta1618_sd_mmc *host)
 	}
 
 	/* Start the custom internal clock and accept only the exact stable state. */
-	clock_candidate |= UMS9117_CLOCK_INT_EN;
-	ta1618_writel(host, RES_CLOCK_RESET, clock_candidate);
-	deadline = ktime_add_ms(ktime_get(), UMS9117_CLOCK_DEADLINE_MS);
+	clock_candidate |= UMS9117_MMC_CLOCK_INT_EN;
+	ta1618_mmc_writel(host, TA1618_MMC_RES_CLOCK_RESET, clock_candidate);
+	deadline = ktime_add_ms(ktime_get(), UMS9117_MMC_CLOCK_DEADLINE_MS);
 	for (;;) {
-		clock_after = ta1618_readl(host, RES_CLOCK_RESET);
-		if (!(clock_after & UMS9117_CLOCK_INT_EN) ||
-		    (clock_after & ~UMS9117_CLOCK_INT_STABLE) !=
-			    (clock_candidate & ~UMS9117_CLOCK_INT_STABLE)) {
+		clock_after =
+			ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_RESET);
+		if (!(clock_after & UMS9117_MMC_CLOCK_INT_EN) ||
+		    (clock_after & ~UMS9117_MMC_CLOCK_INT_STABLE) !=
+			    (clock_candidate & ~UMS9117_MMC_CLOCK_INT_STABLE)) {
 			ret = -EIO;
 			goto cache_and_unlock;
 		}
-		if (clock_after & UMS9117_CLOCK_INT_STABLE)
+		if (clock_after & UMS9117_MMC_CLOCK_INT_STABLE)
 			break;
 		if (ktime_compare(ktime_get(), deadline) >= 0) {
 			ret = -ETIMEDOUT;
 			goto cache_and_unlock;
 		}
-		udelay(UMS9117_POLL_DELAY_US);
+		udelay(UMS9117_MMC_POLL_DELAY_US);
 	}
 
-	clock_candidate = clock_after | UMS9117_CLOCK_CARD_EN;
-	ta1618_writel(host, RES_CLOCK_RESET, clock_candidate);
-	clock_after = ta1618_readl(host, RES_CLOCK_RESET);
-	selector_after = ta1618_readl(host, RES_CLOCK_SELECTOR);
-	control_after = ta1618_readl(host, RES_HOST_CONTROL1);
+	clock_candidate = clock_after | UMS9117_MMC_CLOCK_CARD_EN;
+	ta1618_mmc_writel(host, TA1618_MMC_RES_CLOCK_RESET, clock_candidate);
+	clock_after = ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_RESET);
+	selector_after = ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_SELECTOR);
+	control_after = ta1618_mmc_readl(host, TA1618_MMC_RES_HOST_CONTROL1);
 	ret = 0;
 	if (clock_after != clock_candidate ||
 	    clock_after != host->target_operational ||
 	    selector_after != selector_before ||
 	    control_after != control_candidate ||
-	    (clock_after & UMS9117_CLOCK_DIVIDER_MASK) !=
+	    (clock_after & UMS9117_MMC_CLOCK_DIVIDER_MASK) !=
 		    host->target_divider ||
-	    FIELD_GET(UMS9117_CLOCK_TIMEOUT_MASK, clock_after) !=
-		    UMS9117_CLOCK_TIMEOUT_FPDOOM_VALUE)
+	    FIELD_GET(UMS9117_MMC_CLOCK_TIMEOUT_MASK, clock_after) !=
+		    UMS9117_MMC_CLOCK_TIMEOUT_FPDOOM_VALUE)
 		ret = -EIO;
 
 cache_and_unlock:
@@ -1597,20 +1646,21 @@ out_unlock:
 	return ret;
 }
 
-static int ums9117_status_error(u32 status)
+static int ums9117_mmc_status_error(u32 status)
 {
-	if (status & (UMS9117_INT_TIMEOUT | UMS9117_INT_DATA_TIMEOUT))
+	if (status & (UMS9117_MMC_INT_TIMEOUT | UMS9117_MMC_INT_DATA_TIMEOUT))
 		return -ETIMEDOUT;
-	if (status &
-	    (UMS9117_INT_CRC | UMS9117_INT_END_BIT | UMS9117_INT_INDEX |
-	     UMS9117_INT_DATA_CRC | UMS9117_INT_DATA_END_BIT))
+	if (status & (UMS9117_MMC_INT_CRC | UMS9117_MMC_INT_END_BIT |
+		      UMS9117_MMC_INT_INDEX | UMS9117_MMC_INT_DATA_CRC |
+		      UMS9117_MMC_INT_DATA_END_BIT))
 		return -EILSEQ;
-	if (status & (UMS9117_DETAIL_ERROR_MASK | UMS9117_INT_ERROR))
+	if (status & (UMS9117_MMC_DETAIL_ERROR_MASK | UMS9117_MMC_INT_ERROR))
 		return -EIO;
 	return 0;
 }
 
-static int ums9117_response_error(const struct mmc_command *cmd, u32 response)
+static int ums9117_mmc_response_error(const struct mmc_command *cmd,
+				      u32 response)
 {
 	u32 status;
 
@@ -1629,20 +1679,20 @@ static int ums9117_response_error(const struct mmc_command *cmd, u32 response)
 	return -EIO;
 }
 
-static unsigned int ums9117_request_deadline_ms(const struct mmc_command *cmd,
-						bool write)
+static unsigned int
+ums9117_mmc_request_deadline_ms(const struct mmc_command *cmd, bool write)
 {
-	unsigned int base = write ? UMS9117_WRITE_REQUEST_TIMEOUT_MS :
-				    UMS9117_REQUEST_TIMEOUT_MS;
-	unsigned int per_block = write ? UMS9117_WRITE_BLOCK_BUDGET_MS :
-					 UMS9117_READ_BLOCK_BUDGET_MS;
+	unsigned int base = write ? UMS9117_MMC_WRITE_REQUEST_TIMEOUT_MS :
+				    UMS9117_MMC_REQUEST_TIMEOUT_MS;
+	unsigned int per_block = write ? UMS9117_MMC_WRITE_BLOCK_BUDGET_MS :
+					 UMS9117_MMC_READ_BLOCK_BUDGET_MS;
 
 	if (!cmd->data)
 		return base;
 	return base + cmd->data->blocks * per_block;
 }
 
-static bool ums9117_is_write_data(const struct mmc_command *cmd)
+static bool ums9117_mmc_is_write_data(const struct mmc_command *cmd)
 {
 	return cmd &&
 	       (cmd->opcode == MMC_WRITE_BLOCK ||
@@ -1650,16 +1700,17 @@ static bool ums9117_is_write_data(const struct mmc_command *cmd)
 	       cmd->data && cmd->data->flags == MMC_DATA_WRITE;
 }
 
-static bool ums9117_wait_quiescent(struct ta1618_sd_mmc *host,
-				   unsigned int deadline_ms, u32 *last_present)
+static bool ums9117_mmc_wait_quiescent(struct ta1618_mmc_host *host,
+				       unsigned int deadline_ms,
+				       u32 *last_present)
 {
 	ktime_t deadline = ktime_add_ms(ktime_get(), deadline_ms);
 	u32 present;
 
 	for (;;) {
-		present = ta1618_readl(host, RES_PRESENT_STATE);
-		if (!(present & UMS9117_DATA_ACTIVE_MASK) &&
-		    (present & UMS9117_DAT0_LEVEL)) {
+		present = ta1618_mmc_readl(host, TA1618_MMC_RES_PRESENT_STATE);
+		if (!(present & UMS9117_MMC_DATA_ACTIVE_MASK) &&
+		    (present & UMS9117_MMC_DAT0_LEVEL)) {
 			if (last_present)
 				*last_present = present;
 			return true;
@@ -1669,15 +1720,15 @@ static bool ums9117_wait_quiescent(struct ta1618_sd_mmc *host,
 				*last_present = present;
 			return false;
 		}
-		usleep_range(UMS9117_POLL_DELAY_US,
-			     UMS9117_POLL_DELAY_US + 20U);
+		usleep_range(UMS9117_MMC_POLL_DELAY_US,
+			     UMS9117_MMC_POLL_DELAY_US + 20U);
 	}
 }
 
-static void ums9117_finish_work(struct work_struct *work)
+static void ums9117_mmc_finish_work(struct work_struct *work)
 {
-	struct ta1618_sd_mmc *host =
-		container_of(work, struct ta1618_sd_mmc, finish_work);
+	struct ta1618_mmc_host *host =
+		container_of(work, struct ta1618_mmc_host, finish_work);
 	struct mmc_request *mrq;
 	struct mmc_command *cmd;
 	unsigned long flags;
@@ -1706,35 +1757,36 @@ static void ums9117_finish_work(struct work_struct *work)
 	if (!mrq)
 		return;
 	cmd = mrq->cmd;
-	write_request = ums9117_is_write_data(cmd);
+	write_request = ums9117_mmc_is_write_data(cmd);
 	quiesce_deadline_ms = write_request ?
-				      UMS9117_WRITE_QUIESCE_DEADLINE_MS :
-				      UMS9117_READ_QUIESCE_DEADLINE_MS;
+				      UMS9117_MMC_WRITE_QUIESCE_DEADLINE_MS :
+				      UMS9117_MMC_READ_QUIESCE_DEADLINE_MS;
 
-	error = ums9117_status_error(status);
+	error = ums9117_mmc_status_error(status);
 	if (!error && ack_failed)
 		error = -EIO;
 	if (!error && cmd->data &&
-	    (status & (UMS9117_INT_RESPONSE | UMS9117_INT_TRANSFER)) !=
-		    (UMS9117_INT_RESPONSE | UMS9117_INT_TRANSFER))
+	    (status & (UMS9117_MMC_INT_RESPONSE | UMS9117_MMC_INT_TRANSFER)) !=
+		    (UMS9117_MMC_INT_RESPONSE | UMS9117_MMC_INT_TRANSFER))
 		error = -EIO;
 	if (!error && !cmd->data && (cmd->flags & MMC_RSP_BUSY) &&
-	    (status & (UMS9117_INT_RESPONSE | UMS9117_INT_TRANSFER)) !=
-		    (UMS9117_INT_RESPONSE | UMS9117_INT_TRANSFER))
+	    (status & (UMS9117_MMC_INT_RESPONSE | UMS9117_MMC_INT_TRANSFER)) !=
+		    (UMS9117_MMC_INT_RESPONSE | UMS9117_MMC_INT_TRANSFER))
 		error = -EIO;
 	if (!error && !cmd->data && !(cmd->flags & MMC_RSP_BUSY) &&
-	    (cmd->flags & MMC_RSP_PRESENT) && !(status & UMS9117_INT_RESPONSE))
+	    (cmd->flags & MMC_RSP_PRESENT) &&
+	    !(status & UMS9117_MMC_INT_RESPONSE))
 		error = -EIO;
 	if (!error)
-		error = ums9117_response_error(cmd, response[0]);
+		error = ums9117_mmc_response_error(cmd, response[0]);
 	/*
 	 * The controller issued the stop command on its own, so its outcome is
 	 * reported only through the status bit and the automatic command error
 	 * field. Both are consulted: a stop that failed leaves the card in the
 	 * data state, and the core has to be told so it can recover.
 	 */
-	if (mrq->stop && ((status & UMS9117_INT_AUTO_CMD12_ERROR) ||
-			  (auto_cmd & UMS9117_AUTO_CMD_ERROR_MASK))) {
+	if (mrq->stop && ((status & UMS9117_MMC_INT_AUTO_CMD12_ERROR) ||
+			  (auto_cmd & UMS9117_MMC_AUTO_CMD_ERROR_MASK))) {
 		dev_err(host->dev,
 			"automatic CMD12 failed: irq_status=0x%08x host_control2=0x%08x opcode=%u\n",
 			status, auto_cmd, cmd->opcode);
@@ -1743,8 +1795,8 @@ static void ums9117_finish_work(struct work_struct *work)
 	}
 	memcpy(cmd->resp, response, sizeof(cmd->resp));
 	if (needs_quiesce) {
-		quiescent = ums9117_wait_quiescent(host, quiesce_deadline_ms,
-						   &present);
+		quiescent = ums9117_mmc_wait_quiescent(
+			host, quiesce_deadline_ms, &present);
 		if (!quiescent) {
 			/*
 			 * The transfer interrupt already arrived, so the
@@ -1784,7 +1836,7 @@ static void ums9117_finish_work(struct work_struct *work)
 			spin_lock_irqsave(&host->lock, flags);
 			host->audit.acmd6_failure_count++;
 			spin_unlock_irqrestore(&host->lock, flags);
-			ums9117_width_fail_closed(
+			ums9117_mmc_width_fail_closed(
 				host, "admitted ACMD6 did not complete cleanly",
 				error);
 		} else {
@@ -1796,8 +1848,8 @@ static void ums9117_finish_work(struct work_struct *work)
 	}
 
 	if (host->data_mapped)
-		ums9117_unmap_data(host);
-	if (error && (ums9117_is_write_data(cmd) ||
+		ums9117_mmc_unmap_data(host);
+	if (error && (ums9117_mmc_is_write_data(cmd) ||
 		      (READ_ONCE(host->write_status_pending) &&
 		       cmd->opcode == MMC_SEND_STATUS))) {
 		/*
@@ -1806,7 +1858,7 @@ static void ums9117_finish_work(struct work_struct *work)
 		 * status command below still has to run to clear the card.
 		 */
 		dev_err(host->dev, "write completion failed: %d\n", error);
-	} else if (!error && ums9117_is_write_data(cmd)) {
+	} else if (!error && ums9117_mmc_is_write_data(cmd)) {
 		WRITE_ONCE(host->write_status_pending, true);
 	} else if (!error && READ_ONCE(host->write_status_pending) &&
 		   cmd->opcode == MMC_SEND_STATUS &&
@@ -1814,7 +1866,7 @@ static void ums9117_finish_work(struct work_struct *work)
 		WRITE_ONCE(host->write_status_pending, false);
 	}
 	if (error)
-		ums9117_set_request_error(mrq, error);
+		ums9117_mmc_set_request_error(mrq, error);
 	else if (cmd->data) {
 		cmd->data->error = 0;
 		cmd->data->bytes_xfered =
@@ -1836,7 +1888,7 @@ static void ums9117_finish_work(struct work_struct *work)
 	mmc_request_done(host->mmc, mrq);
 }
 
-static int ums9117_recover(struct ta1618_sd_mmc *host)
+static int ums9117_mmc_recover(struct ta1618_mmc_host *host)
 {
 	int ret;
 	u32 control;
@@ -1844,25 +1896,25 @@ static int ums9117_recover(struct ta1618_sd_mmc *host)
 	if (READ_ONCE(host->physical_width4) ||
 	    READ_ONCE(host->width_acmd6_clean))
 		return -EPERM;
-	ums9117_mask_and_ack(host);
-	ret = ums9117_reset_controller(host);
+	ums9117_mmc_mask_and_ack(host);
+	ret = ums9117_mmc_reset_controller(host);
 	if (ret)
 		return ret;
-	control = ta1618_readl(host, RES_HOST_CONTROL1);
-	control &= ~UMS9117_HOST_CTRL1_OWNED_MASK;
-	control |= UMS9117_HOST_CTRL1_1BIT_ADMA2;
-	ta1618_writel(host, RES_HOST_CONTROL1, control);
-	ta1618_writel(host, RES_INTERRUPT_STATUS_ENABLE,
-		      UMS9117_STATUS_ENABLE_MASK);
+	control = ta1618_mmc_readl(host, TA1618_MMC_RES_HOST_CONTROL1);
+	control &= ~UMS9117_MMC_HOST_CTRL1_OWNED_MASK;
+	control |= UMS9117_MMC_HOST_CTRL1_1BIT_ADMA2;
+	ta1618_mmc_writel(host, TA1618_MMC_RES_HOST_CONTROL1, control);
+	ta1618_mmc_writel(host, TA1618_MMC_RES_INTERRUPT_STATUS_ENABLE,
+			  UMS9117_MMC_STATUS_ENABLE_MASK);
 	if (host->rails_on && host->card_clock_on)
-		ret = ums9117_set_card_clock(host, true);
+		ret = ums9117_mmc_set_card_clock(host, true);
 	return ret;
 }
 
-static void ums9117_timeout_work(struct work_struct *work)
+static void ums9117_mmc_timeout_work(struct work_struct *work)
 {
-	struct ta1618_sd_mmc *host = container_of(
-		to_delayed_work(work), struct ta1618_sd_mmc, timeout_work);
+	struct ta1618_mmc_host *host = container_of(
+		to_delayed_work(work), struct ta1618_mmc_host, timeout_work);
 	struct mmc_request *mrq;
 	unsigned long flags;
 	bool post_write_status_timed_out;
@@ -1881,7 +1933,7 @@ static void ums9117_timeout_work(struct work_struct *work)
 	spin_lock_irqsave(&host->lock, flags);
 	mrq = host->active_mrq;
 	width_acmd6_timed_out = mrq && host->active_width_acmd6;
-	write_timed_out = mrq && ums9117_is_write_data(mrq->cmd);
+	write_timed_out = mrq && ums9117_mmc_is_write_data(mrq->cmd);
 	post_write_status_timed_out = mrq &&
 				      READ_ONCE(host->write_status_pending) &&
 				      mrq->cmd->opcode == MMC_SEND_STATUS;
@@ -1895,7 +1947,8 @@ static void ums9117_timeout_work(struct work_struct *work)
 		last_lba = host->audit.last_lba;
 		last_lba_valid = host->audit.last_lba_valid;
 		last_cmd17_ordinal = host->audit.last_cmd17_ordinal;
-		ta1618_writel(host, RES_INTERRUPT_SIGNAL_ENABLE, 0);
+		ta1618_mmc_writel(host, TA1618_MMC_RES_INTERRUPT_SIGNAL_ENABLE,
+				  0);
 		host->active_mrq = NULL;
 		host->finish_mrq = mrq;
 		host->finish_width_acmd6 = host->active_width_acmd6;
@@ -1908,7 +1961,7 @@ static void ums9117_timeout_work(struct work_struct *work)
 		"software request watchdog fired: count=%u opcode=%u arg=0x%08x lba_valid=%u lba=%u cmd17_ordinal=%u deadline_ms=%u\n",
 		watchdog_count, last_opcode, last_argument,
 		last_lba_valid ? 1U : 0U, last_lba, last_cmd17_ordinal,
-		mrq ? ums9117_request_deadline_ms(mrq->cmd, write_related) :
+		mrq ? ums9117_mmc_request_deadline_ms(mrq->cmd, write_related) :
 		      0U);
 	synchronize_irq(host->irq);
 
@@ -1916,9 +1969,9 @@ static void ums9117_timeout_work(struct work_struct *work)
 		spin_lock_irqsave(&host->lock, flags);
 		host->audit.acmd6_failure_count++;
 		spin_unlock_irqrestore(&host->lock, flags);
-		ums9117_width_fail_closed(host, "admitted ACMD6 timed out",
-					  -ETIMEDOUT);
-		ums9117_set_request_error(mrq, -ETIMEDOUT);
+		ums9117_mmc_width_fail_closed(host, "admitted ACMD6 timed out",
+					      -ETIMEDOUT);
+		ums9117_mmc_set_request_error(mrq, -ETIMEDOUT);
 		spin_lock_irqsave(&host->lock, flags);
 		host->finish_width_acmd6 = false;
 		host->finish_mrq = NULL;
@@ -1935,9 +1988,9 @@ static void ums9117_timeout_work(struct work_struct *work)
 		 * one late write must not close the slot: that would also
 		 * block the status and stop commands the recovery needs.
 		 */
-		if (!ums9117_wait_quiescent(host,
-					    UMS9117_WRITE_QUIESCE_DEADLINE_MS,
-					    &present)) {
+		if (!ums9117_mmc_wait_quiescent(
+			    host, UMS9117_MMC_WRITE_QUIESCE_DEADLINE_MS,
+			    &present)) {
 			WRITE_ONCE(host->fatal_error, true);
 			dev_err(host->dev,
 				"write-related timeout without confirmed quiescence: present_state=0x%08x; blocking controller I/O until the slot is power-cycled\n",
@@ -1950,8 +2003,8 @@ static void ums9117_timeout_work(struct work_struct *work)
 				"post-write status command timed out; data lines quiescent, completing with an error and leaving the slot usable\n");
 		}
 		if (host->data_mapped)
-			ums9117_unmap_data(host);
-		ums9117_set_request_error(mrq, -ETIMEDOUT);
+			ums9117_mmc_unmap_data(host);
+		ums9117_mmc_set_request_error(mrq, -ETIMEDOUT);
 		spin_lock_irqsave(&host->lock, flags);
 		host->finish_width_acmd6 = false;
 		host->finish_mrq = NULL;
@@ -1968,10 +2021,10 @@ static void ums9117_timeout_work(struct work_struct *work)
 		 * until the core power-cycles the slot is enough.
 		 */
 		if (mrq->cmd->data &&
-		    !ums9117_wait_quiescent(host,
-					    UMS9117_WRITE_QUIESCE_DEADLINE_MS,
-					    &present)) {
-			ums9117_width_fail_closed(
+		    !ums9117_mmc_wait_quiescent(
+			    host, UMS9117_MMC_WRITE_QUIESCE_DEADLINE_MS,
+			    &present)) {
+			ums9117_mmc_width_fail_closed(
 				host, "timed-out transfer never quiesced",
 				-ETIMEDOUT);
 		} else {
@@ -1992,7 +2045,7 @@ static void ums9117_timeout_work(struct work_struct *work)
 		}
 	} else {
 		mutex_lock(&host->state_mutex);
-		ret = ums9117_recover(host);
+		ret = ums9117_mmc_recover(host);
 		if (ret) {
 			WRITE_ONCE(host->fatal_error, true);
 			dev_err(host->dev,
@@ -2002,8 +2055,8 @@ static void ums9117_timeout_work(struct work_struct *work)
 	}
 
 	if (host->data_mapped)
-		ums9117_unmap_data(host);
-	ums9117_set_request_error(mrq, -ETIMEDOUT);
+		ums9117_mmc_unmap_data(host);
+	ums9117_mmc_set_request_error(mrq, -ETIMEDOUT);
 	spin_lock_irqsave(&host->lock, flags);
 	host->finish_width_acmd6 = false;
 	host->finish_mrq = NULL;
@@ -2011,9 +2064,9 @@ static void ums9117_timeout_work(struct work_struct *work)
 	mmc_request_done(host->mmc, mrq);
 }
 
-static irqreturn_t ums9117_irq(int irq, void *data)
+static irqreturn_t ums9117_mmc_irq(int irq, void *data)
 {
-	struct ta1618_sd_mmc *host = data;
+	struct ta1618_mmc_host *host = data;
 	struct mmc_request *mrq;
 	struct mmc_command *cmd;
 	unsigned long flags;
@@ -2026,30 +2079,30 @@ static irqreturn_t ums9117_irq(int irq, void *data)
 
 	if (irq != host->irq)
 		return IRQ_NONE;
-	status = ta1618_readl(host, RES_INTERRUPT_STATUS);
-	owned = status & UMS9117_OWNED_STATUS_MASK;
+	status = ta1618_mmc_readl(host, TA1618_MMC_RES_INTERRUPT_STATUS);
+	owned = status & UMS9117_MMC_OWNED_STATUS_MASK;
 	if (!owned)
 		return IRQ_NONE;
 
 	/* SPI57 is level-high: mask the controller before ACKing owned W1C bits. */
-	ta1618_writel(host, RES_INTERRUPT_SIGNAL_ENABLE, 0);
+	ta1618_mmc_writel(host, TA1618_MMC_RES_INTERRUPT_SIGNAL_ENABLE, 0);
 	/*
 	 * The automatic command error bits are cleared together with the
 	 * interrupt status bit that reports them, so this has to be sampled
 	 * before the acknowledge below or it would always read back clean.
 	 */
-	auto_cmd = ta1618_readl(host, RES_HOST_CONTROL2);
-	ta1618_writel(host, RES_INTERRUPT_STATUS, owned);
-	readback = ta1618_readl(host, RES_INTERRUPT_STATUS);
+	auto_cmd = ta1618_mmc_readl(host, TA1618_MMC_RES_HOST_CONTROL2);
+	ta1618_mmc_writel(host, TA1618_MMC_RES_INTERRUPT_STATUS, owned);
+	readback = ta1618_mmc_readl(host, TA1618_MMC_RES_INTERRUPT_STATUS);
 
 	spin_lock_irqsave(&host->lock, flags);
-	ums9117_audit_irq_locked(host, status, owned, readback);
-	if (status & (UMS9117_INT_TIMEOUT | UMS9117_INT_DATA_TIMEOUT))
+	ums9117_mmc_audit_irq_locked(host, status, owned, readback);
+	if (status & (UMS9117_MMC_INT_TIMEOUT | UMS9117_MMC_INT_DATA_TIMEOUT))
 		dev_err(host->dev,
 			"hardware timeout IRQ: command=%u data=%u raw=0x%08x owned=0x%08x w1c_readback=0x%08x opcode=%u arg=0x%08x lba_valid=%u lba=%u cmd17_ordinal=%u\n",
-			(status & UMS9117_INT_TIMEOUT) ? 1U : 0U,
-			(status & UMS9117_INT_DATA_TIMEOUT) ? 1U : 0U, status,
-			owned, readback, host->audit.last_opcode,
+			(status & UMS9117_MMC_INT_TIMEOUT) ? 1U : 0U,
+			(status & UMS9117_MMC_INT_DATA_TIMEOUT) ? 1U : 0U,
+			status, owned, readback, host->audit.last_opcode,
 			host->audit.last_argument,
 			host->audit.last_lba_valid ? 1U : 0U,
 			host->audit.last_lba, host->audit.last_cmd17_ordinal);
@@ -2059,24 +2112,25 @@ static irqreturn_t ums9117_irq(int irq, void *data)
 		return IRQ_HANDLED;
 	}
 	cmd = mrq->cmd;
-	terminal = !!(status & (UMS9117_DETAIL_ERROR_MASK | UMS9117_INT_ERROR));
+	terminal = !!(status &
+		      (UMS9117_MMC_DETAIL_ERROR_MASK | UMS9117_MMC_INT_ERROR));
 	if (cmd->data || (cmd->flags & MMC_RSP_BUSY))
-		terminal |= !!(status & UMS9117_INT_TRANSFER);
+		terminal |= !!(status & UMS9117_MMC_INT_TRANSFER);
 	else
-		terminal |= !!(status & UMS9117_INT_RESPONSE);
+		terminal |= !!(status & UMS9117_MMC_INT_RESPONSE);
 	if (!terminal) {
-		ta1618_writel(host, RES_INTERRUPT_SIGNAL_ENABLE,
-			      cmd->data || (cmd->flags & MMC_RSP_BUSY) ?
-				      UMS9117_SIGNAL_DATA :
-				      UMS9117_SIGNAL_COMMAND);
+		ta1618_mmc_writel(host, TA1618_MMC_RES_INTERRUPT_SIGNAL_ENABLE,
+				  cmd->data || (cmd->flags & MMC_RSP_BUSY) ?
+					  UMS9117_MMC_SIGNAL_DATA :
+					  UMS9117_MMC_SIGNAL_COMMAND);
 		spin_unlock_irqrestore(&host->lock, flags);
 		return IRQ_HANDLED;
 	}
 
-	raw[0] = ta1618_readl(host, RES_RESPONSE0);
-	raw[1] = ta1618_readl(host, RES_RESPONSE1);
-	raw[2] = ta1618_readl(host, RES_RESPONSE2);
-	raw[3] = ta1618_readl(host, RES_RESPONSE3);
+	raw[0] = ta1618_mmc_readl(host, TA1618_MMC_RES_RESPONSE0);
+	raw[1] = ta1618_mmc_readl(host, TA1618_MMC_RES_RESPONSE1);
+	raw[2] = ta1618_mmc_readl(host, TA1618_MMC_RES_RESPONSE2);
+	raw[3] = ta1618_mmc_readl(host, TA1618_MMC_RES_RESPONSE3);
 	if (cmd->flags & MMC_RSP_136) {
 		host->finish_response[0] = (raw[3] << 8) | (raw[2] >> 24);
 		host->finish_response[1] = (raw[2] << 8) | (raw[1] >> 24);
@@ -2103,9 +2157,9 @@ static irqreturn_t ums9117_irq(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
+static void ums9117_mmc_request(struct mmc_host *mmc, struct mmc_request *mrq)
 {
-	struct ta1618_sd_mmc *host = mmc_priv(mmc);
+	struct ta1618_mmc_host *host = mmc_priv(mmc);
 	struct mmc_command *cmd = mrq->cmd;
 	struct mmc_data *data = cmd->data;
 	unsigned long flags;
@@ -2128,7 +2182,7 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	int ret;
 
 	if (READ_ONCE(host->width_switch_fatal)) {
-		ums9117_set_request_error(mrq, -EIO);
+		ums9117_mmc_set_request_error(mrq, -EIO);
 		mmc_request_done(mmc, mrq);
 		return;
 	}
@@ -2149,9 +2203,9 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	     (READ_ONCE(host->physical_width4) ||
 	      READ_ONCE(host->width_acmd6_clean) ||
 	      !READ_ONCE(host->operational_clock_deferred) ||
-	      READ_ONCE(host->actual_clock_hz) != UMS9117_IDENT_CLOCK_HZ ||
+	      READ_ONCE(host->actual_clock_hz) != UMS9117_MMC_IDENT_CLOCK_HZ ||
 	      !READ_ONCE(host->card_clock_on)))) {
-		ums9117_reject_request(
+		ums9117_mmc_reject_request(
 			host, mrq, -EPROTO,
 			"application-command qualification rejected request");
 		return;
@@ -2160,7 +2214,7 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 			    cmd->opcode == MMC_SEND_STATUS && !data;
 	if (READ_ONCE(host->write_status_pending) && !post_write_status) {
 		WRITE_ONCE(host->fatal_error, true);
-		ums9117_reject_request(
+		ums9117_mmc_reject_request(
 			host, mrq, -EIO,
 			"post-CMD24 status sequencing rejected request");
 		return;
@@ -2168,8 +2222,8 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	cmd24_write = cmd->opcode == MMC_WRITE_BLOCK && data &&
 		      data->flags == MMC_DATA_WRITE && data->blocks == 1 &&
 		      data->blksz == 512 && data->sg_len == 1;
-	multi_read = ums9117_is_multi_block(mrq, mmc, false);
-	multi_write = ums9117_is_multi_block(mrq, mmc, true);
+	multi_read = ums9117_mmc_is_multi_block(mrq, mmc, false);
+	multi_write = ums9117_mmc_is_multi_block(mrq, mmc, true);
 	write_request = cmd24_write || multi_write;
 	if ((cmd->opcode == MMC_READ_SINGLE_BLOCK ||
 	     cmd->opcode == MMC_READ_MULTIPLE_BLOCK ||
@@ -2177,59 +2231,61 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	     cmd->opcode == MMC_WRITE_MULTIPLE_BLOCK) &&
 	    (!READ_ONCE(host->physical_width4) ||
 	     !READ_ONCE(host->operational_clock_applied) ||
-	     !ums9117_is_operational_clock(READ_ONCE(host->actual_clock_hz)))) {
-		ums9117_reject_request(
+	     !ums9117_mmc_is_operational_clock(
+		     READ_ONCE(host->actual_clock_hz)))) {
+		ums9117_mmc_reject_request(
 			host, mrq, -EPROTO,
 			"block I/O requested before a physical 4-bit operational state");
 		return;
 	}
-	if (ums9117_destructive_command(cmd) ||
+	if (ta1618_mmc_is_destructive_command(cmd) ||
 	    (cmd->opcode == MMC_WRITE_BLOCK && !cmd24_write) ||
 	    (cmd->opcode == MMC_READ_MULTIPLE_BLOCK && !multi_read) ||
 	    (cmd->opcode == MMC_WRITE_MULTIPLE_BLOCK && !multi_write) ||
 	    (data && (data->flags & MMC_DATA_WRITE) && !write_request)) {
-		ums9117_reject_request(
+		ums9117_mmc_reject_request(
 			host, mrq, -EOPNOTSUPP,
 			"forbidden data or destructive opcode rejected before MMIO");
 		return;
 	}
 	if (mrq->sbc || (mrq->stop && !multi_read && !multi_write) ||
 	    cmd->opcode > 63U) {
-		ums9117_reject_request(
+		ums9117_mmc_reject_request(
 			host, mrq, -EOPNOTSUPP,
 			"SBC, STOP, or invalid opcode rejected before MMIO");
 		return;
 	}
-	ret = ums9117_response_flags(cmd, &command_flags);
+	ret = ums9117_mmc_response_flags(cmd, &command_flags);
 	if (ret) {
-		ums9117_reject_request(
+		ums9117_mmc_reject_request(
 			host, mrq, ret,
 			"unsupported response type rejected before MMIO");
 		return;
 	}
 	if (data) {
-		ret = ums9117_prepare_data(host, cmd);
+		ret = ums9117_mmc_prepare_data(host, cmd);
 		if (ret) {
-			ums9117_reject_request(
+			ums9117_mmc_reject_request(
 				host, mrq, ret,
 				"data mapping or shape rejected before MMIO");
 			return;
 		}
 		if (multi_read)
-			transfer = UMS9117_TRANSFER_CMD18_AUTO_CMD12_ADMA2;
+			transfer = UMS9117_MMC_TRANSFER_CMD18_AUTO_CMD12_ADMA2;
 		else if (multi_write)
-			transfer = UMS9117_TRANSFER_CMD25_AUTO_CMD12_ADMA2;
+			transfer = UMS9117_MMC_TRANSFER_CMD25_AUTO_CMD12_ADMA2;
 		else
 			transfer = data->flags == MMC_DATA_WRITE ?
-					   UMS9117_TRANSFER_WRITE_ADMA2 :
-					   UMS9117_TRANSFER_READ_ADMA2;
+					   UMS9117_MMC_TRANSFER_WRITE_ADMA2 :
+					   UMS9117_MMC_TRANSFER_READ_ADMA2;
 	}
 	if (READ_ONCE(host->fatal_error) || READ_ONCE(host->stopping) ||
 	    !READ_ONCE(host->rails_on) || !READ_ONCE(host->card_clock_on)) {
 		ret = -EIO;
 		goto out_error;
 	}
-	ret = ums9117_wait_inhibit(host, data || (cmd->flags & MMC_RSP_BUSY));
+	ret = ums9117_mmc_wait_inhibit(host,
+				       data || (cmd->flags & MMC_RSP_BUSY));
 	if (ret)
 		goto out_error;
 
@@ -2239,28 +2295,31 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 		spin_unlock_irqrestore(&host->lock, flags);
 		goto out_error;
 	}
-	ta1618_writel(host, RES_INTERRUPT_SIGNAL_ENABLE, 0);
-	if (width_acmd6 && ta1618_readl(host, RES_INTERRUPT_SIGNAL_ENABLE)) {
+	ta1618_mmc_writel(host, TA1618_MMC_RES_INTERRUPT_SIGNAL_ENABLE, 0);
+	if (width_acmd6 &&
+	    ta1618_mmc_readl(host, TA1618_MMC_RES_INTERRUPT_SIGNAL_ENABLE)) {
 		spin_unlock_irqrestore(&host->lock, flags);
 		ret = -EIO;
 		goto out_error;
 	}
 	if (width_acmd6 ||
 	    (cmd->opcode == MMC_APP_CMD && !host->physical_width4)) {
-		selector = ta1618_readl(host, RES_CLOCK_SELECTOR);
-		clock = ta1618_readl(host, RES_CLOCK_RESET);
-		control = ta1618_readl(host, RES_HOST_CONTROL1);
-		if ((selector & TA1618_SELECTOR_MASK) !=
-			    TA1618_SELECTOR_SOURCE ||
-		    (clock & UMS9117_CLOCK_DIVIDER_MASK) !=
-			    UMS9117_IDENT_DIVIDER_ENCODED ||
-		    !(clock & UMS9117_CLOCK_INT_EN) ||
-		    !(clock & UMS9117_CLOCK_INT_STABLE) ||
-		    !(clock & UMS9117_CLOCK_CARD_EN) ||
-		    (clock & (UMS9117_CLOCK_PROG_MODE | UMS9117_CLOCK_PLL_EN |
-			      UMS9117_HOST_RESET)) ||
-		    control != UMS9117_HOST_CTRL1_1BIT_ADMA2 ||
-		    host->actual_clock_hz != UMS9117_IDENT_CLOCK_HZ) {
+		selector =
+			ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_SELECTOR);
+		clock = ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_RESET);
+		control = ta1618_mmc_readl(host, TA1618_MMC_RES_HOST_CONTROL1);
+		if ((selector & TA1618_MMC_SELECTOR_MASK) !=
+			    TA1618_MMC_SELECTOR_SOURCE ||
+		    (clock & UMS9117_MMC_CLOCK_DIVIDER_MASK) !=
+			    UMS9117_MMC_IDENT_DIVIDER_ENCODED ||
+		    !(clock & UMS9117_MMC_CLOCK_INT_EN) ||
+		    !(clock & UMS9117_MMC_CLOCK_INT_STABLE) ||
+		    !(clock & UMS9117_MMC_CLOCK_CARD_EN) ||
+		    (clock &
+		     (UMS9117_MMC_CLOCK_PROG_MODE | UMS9117_MMC_CLOCK_PLL_EN |
+		      UMS9117_MMC_HOST_RESET)) ||
+		    control != UMS9117_MMC_HOST_CTRL1_1BIT_ADMA2 ||
+		    host->actual_clock_hz != UMS9117_MMC_IDENT_CLOCK_HZ) {
 			spin_unlock_irqrestore(&host->lock, flags);
 			ret = -EPROTO;
 			goto out_error;
@@ -2270,19 +2329,21 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	    cmd->opcode == MMC_READ_MULTIPLE_BLOCK ||
 	    cmd->opcode == MMC_WRITE_BLOCK ||
 	    cmd->opcode == MMC_WRITE_MULTIPLE_BLOCK) {
-		selector = ta1618_readl(host, RES_CLOCK_SELECTOR);
-		clock = ta1618_readl(host, RES_CLOCK_RESET);
-		control = ta1618_readl(host, RES_HOST_CONTROL1);
-		if ((selector & TA1618_SELECTOR_MASK) !=
-			    TA1618_SELECTOR_SOURCE ||
-		    (clock & UMS9117_CLOCK_DIVIDER_MASK) !=
+		selector =
+			ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_SELECTOR);
+		clock = ta1618_mmc_readl(host, TA1618_MMC_RES_CLOCK_RESET);
+		control = ta1618_mmc_readl(host, TA1618_MMC_RES_HOST_CONTROL1);
+		if ((selector & TA1618_MMC_SELECTOR_MASK) !=
+			    TA1618_MMC_SELECTOR_SOURCE ||
+		    (clock & UMS9117_MMC_CLOCK_DIVIDER_MASK) !=
 			    host->target_divider ||
-		    !(clock & UMS9117_CLOCK_INT_EN) ||
-		    !(clock & UMS9117_CLOCK_INT_STABLE) ||
-		    !(clock & UMS9117_CLOCK_CARD_EN) ||
-		    (clock & (UMS9117_CLOCK_PROG_MODE | UMS9117_CLOCK_PLL_EN |
-			      UMS9117_HOST_RESET)) ||
-		    control != UMS9117_HOST_CTRL1_4BIT_ADMA2 ||
+		    !(clock & UMS9117_MMC_CLOCK_INT_EN) ||
+		    !(clock & UMS9117_MMC_CLOCK_INT_STABLE) ||
+		    !(clock & UMS9117_MMC_CLOCK_CARD_EN) ||
+		    (clock &
+		     (UMS9117_MMC_CLOCK_PROG_MODE | UMS9117_MMC_CLOCK_PLL_EN |
+		      UMS9117_MMC_HOST_RESET)) ||
+		    control != UMS9117_MMC_HOST_CTRL1_4BIT_ADMA2 ||
 		    host->actual_clock_hz != host->target_clock_hz) {
 			spin_unlock_irqrestore(&host->lock, flags);
 			ret = -EPROTO;
@@ -2297,51 +2358,52 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	 * than trusted from probe time.
 	 */
 	if ((multi_read || multi_write) &&
-	    ta1618_readl(host, RES_HOST_CONTROL2) !=
-		    UMS9117_HOST_CTRL2_EXPECTED) {
+	    ta1618_mmc_readl(host, TA1618_MMC_RES_HOST_CONTROL2) !=
+		    UMS9117_MMC_HOST_CTRL2_EXPECTED) {
 		spin_unlock_irqrestore(&host->lock, flags);
 		ret = -EPROTO;
 		goto out_error;
 	}
-	stale = ta1618_readl(host, RES_INTERRUPT_STATUS) &
-		UMS9117_OWNED_STATUS_MASK;
+	stale = ta1618_mmc_readl(host, TA1618_MMC_RES_INTERRUPT_STATUS) &
+		UMS9117_MMC_OWNED_STATUS_MASK;
 	if (stale)
-		ta1618_writel(host, RES_INTERRUPT_STATUS, stale);
-	if (ta1618_readl(host, RES_INTERRUPT_STATUS) & stale) {
+		ta1618_mmc_writel(host, TA1618_MMC_RES_INTERRUPT_STATUS, stale);
+	if (ta1618_mmc_readl(host, TA1618_MMC_RES_INTERRUPT_STATUS) & stale) {
 		spin_unlock_irqrestore(&host->lock, flags);
 		ret = -EIO;
 		goto out_error;
 	}
-	ta1618_writel(host, RES_INTERRUPT_STATUS_ENABLE,
-		      UMS9117_STATUS_ENABLE_MASK);
+	ta1618_mmc_writel(host, TA1618_MMC_RES_INTERRUPT_STATUS_ENABLE,
+			  UMS9117_MMC_STATUS_ENABLE_MASK);
 	if (data) {
-		control = ta1618_readl(host, RES_HOST_CONTROL1);
-		control &= ~UMS9117_HOST_CTRL1_DMA_SEL_MASK;
-		control |= UMS9117_HOST_CTRL1_ADMA2;
-		ta1618_writel(host, RES_HOST_CONTROL1, control);
-		ta1618_writel(host, RES_BLOCK_COUNT, data->blocks);
-		ta1618_writel(host, RES_BLOCK_SIZE, data->blksz);
+		control = ta1618_mmc_readl(host, TA1618_MMC_RES_HOST_CONTROL1);
+		control &= ~UMS9117_MMC_HOST_CTRL1_DMA_SEL_MASK;
+		control |= UMS9117_MMC_HOST_CTRL1_ADMA2;
+		ta1618_mmc_writel(host, TA1618_MMC_RES_HOST_CONTROL1, control);
+		ta1618_mmc_writel(host, TA1618_MMC_RES_BLOCK_COUNT,
+				  data->blocks);
+		ta1618_mmc_writel(host, TA1618_MMC_RES_BLOCK_SIZE, data->blksz);
 		dma_wmb();
 		/* UMS9117 qualification requires high then low ADMA address writes. */
-		ta1618_writel(host, RES_ADMA_ADDRESS_HIGH, 0);
-		ta1618_writel(host, RES_ADMA_ADDRESS_LOW,
-			      (u32)host->descriptors_dma);
-		command_flags |= UMS9117_CMD_DATA;
-		signal = UMS9117_SIGNAL_DATA;
+		ta1618_mmc_writel(host, TA1618_MMC_RES_ADMA_ADDRESS_HIGH, 0);
+		ta1618_mmc_writel(host, TA1618_MMC_RES_ADMA_ADDRESS_LOW,
+				  (u32)host->descriptors_dma);
+		command_flags |= UMS9117_MMC_CMD_DATA;
+		signal = UMS9117_MMC_SIGNAL_DATA;
 	} else {
-		command_flags |= UMS9117_SUB_CMD_FLAG;
-		signal = cmd->flags & MMC_RSP_BUSY ? UMS9117_SIGNAL_DATA :
-						     UMS9117_SIGNAL_COMMAND;
+		command_flags |= UMS9117_MMC_SUB_CMD_FLAG;
+		signal = cmd->flags & MMC_RSP_BUSY ? UMS9117_MMC_SIGNAL_DATA :
+						     UMS9117_MMC_SIGNAL_COMMAND;
 	}
 	command = (cmd->opcode << 8) | command_flags;
 	host->active_mrq = mrq;
 	host->active_width_acmd6 = width_acmd6;
-	ums9117_audit_command_locked(host, cmd, width_acmd6);
-	ta1618_writel(host, RES_ARGUMENT, cmd->arg);
+	ums9117_mmc_audit_command_locked(host, cmd, width_acmd6);
+	ta1618_mmc_writel(host, TA1618_MMC_RES_ARGUMENT, cmd->arg);
 	schedule_delayed_work(&host->timeout_work,
-			      msecs_to_jiffies(ums9117_request_deadline_ms(
+			      msecs_to_jiffies(ums9117_mmc_request_deadline_ms(
 				      cmd, write_request)));
-	ta1618_writel(host, RES_INTERRUPT_SIGNAL_ENABLE, signal);
+	ta1618_mmc_writel(host, TA1618_MMC_RES_INTERRUPT_SIGNAL_ENABLE, signal);
 	/*
 	 * A command without data is issued by writing the whole word with a
 	 * zero transfer half, not by writing the command half on its own. That
@@ -2350,22 +2412,22 @@ static void ums9117_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	 * offer that to the very next command, which after a write is always
 	 * the status poll.
 	 */
-	ta1618_writel(host, RES_TRANSFER_COMMAND,
-		      ((u32)command << 16) | (data ? transfer : 0U));
+	ta1618_mmc_writel(host, TA1618_MMC_RES_TRANSFER_COMMAND,
+			  ((u32)command << 16) | (data ? transfer : 0U));
 	spin_unlock_irqrestore(&host->lock, flags);
 	return;
 
 out_error:
 	if (host->data_mapped) {
 		host->active_mrq = mrq;
-		ums9117_unmap_data(host);
+		ums9117_mmc_unmap_data(host);
 		host->active_mrq = NULL;
 	}
-	ums9117_set_request_error(mrq, ret);
+	ums9117_mmc_set_request_error(mrq, ret);
 	mmc_request_done(mmc, mrq);
 }
 
-static int ums9117_set_host_1bit_powered_off(struct ta1618_sd_mmc *host)
+static int ums9117_mmc_set_host_1bit_powered_off(struct ta1618_mmc_host *host)
 {
 	unsigned long flags;
 	u32 candidate;
@@ -2377,11 +2439,11 @@ static int ums9117_set_host_1bit_powered_off(struct ta1618_sd_mmc *host)
 		ret = -EBUSY;
 		goto out_unlock;
 	}
-	control = ta1618_readl(host, RES_HOST_CONTROL1);
-	candidate = (control & ~UMS9117_HOST_CTRL1_OWNED_MASK) |
-		    UMS9117_HOST_CTRL1_1BIT_ADMA2;
-	ta1618_writel(host, RES_HOST_CONTROL1, candidate);
-	if (ta1618_readl(host, RES_HOST_CONTROL1) != candidate) {
+	control = ta1618_mmc_readl(host, TA1618_MMC_RES_HOST_CONTROL1);
+	candidate = (control & ~UMS9117_MMC_HOST_CTRL1_OWNED_MASK) |
+		    UMS9117_MMC_HOST_CTRL1_1BIT_ADMA2;
+	ta1618_mmc_writel(host, TA1618_MMC_RES_HOST_CONTROL1, candidate);
+	if (ta1618_mmc_readl(host, TA1618_MMC_RES_HOST_CONTROL1) != candidate) {
 		ret = -EIO;
 		goto out_unlock;
 	}
@@ -2397,9 +2459,9 @@ out_unlock:
 	return ret;
 }
 
-static void ums9117_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
+static void ums9117_mmc_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 {
-	struct ta1618_sd_mmc *host = mmc_priv(mmc);
+	struct ta1618_mmc_host *host = mmc_priv(mmc);
 	unsigned long flags;
 	int ret = 0;
 
@@ -2427,9 +2489,9 @@ static void ums9117_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 	     ios->bus_width != MMC_BUS_WIDTH_4) ||
 	    (ios->timing != MMC_TIMING_LEGACY &&
 	     ios->timing != MMC_TIMING_SD_HS) ||
-	    (ios->clock && !ums9117_is_operational_clock(ios->clock) &&
-	     (ios->clock < UMS9117_IDENT_CLOCK_HZ ||
-	      ios->clock > UMS9117_IDENT_REQUEST_MAX_HZ))) {
+	    (ios->clock && !ums9117_mmc_is_operational_clock(ios->clock) &&
+	     (ios->clock < UMS9117_MMC_IDENT_CLOCK_HZ ||
+	      ios->clock > UMS9117_MMC_IDENT_REQUEST_MAX_HZ))) {
 		ret = -EOPNOTSUPP;
 		goto out_fail;
 	}
@@ -2437,12 +2499,13 @@ static void ums9117_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 	switch (ios->power_mode) {
 	case MMC_POWER_OFF:
 		if (host->platform_active) {
-			ums9117_mask_and_ack(host);
-			ret = ums9117_set_card_clock(host, false);
+			ums9117_mmc_mask_and_ack(host);
+			ret = ums9117_mmc_set_card_clock(host, false);
 			if (!ret)
-				ret = ta1618_set_rails(host, false);
+				ret = ta1618_mmc_set_rails(host, false);
 			if (!ret)
-				ret = ums9117_set_host_1bit_powered_off(host);
+				ret = ums9117_mmc_set_host_1bit_powered_off(
+					host);
 		}
 		if (!ret) {
 			/*
@@ -2479,7 +2542,7 @@ static void ums9117_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 			ret = -EPROTO;
 			break;
 		}
-		ret = ta1618_activate_platform(host);
+		ret = ta1618_mmc_activate_platform(host);
 		break;
 	case MMC_POWER_ON:
 		if (!host->platform_active || !host->rails_on) {
@@ -2493,17 +2556,17 @@ static void ums9117_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 				break;
 			}
 			if (ios->clock && !host->card_clock_on)
-				ret = ums9117_set_card_clock(host, true);
+				ret = ums9117_mmc_set_card_clock(host, true);
 			else if (!ios->clock && host->card_clock_on)
-				ret = ums9117_set_card_clock(host, false);
+				ret = ums9117_mmc_set_card_clock(host, false);
 			if (ret)
 				break;
-			if (ios->clock &&
-			    host->actual_clock_hz != UMS9117_IDENT_CLOCK_HZ) {
+			if (ios->clock && host->actual_clock_hz !=
+						  UMS9117_MMC_IDENT_CLOCK_HZ) {
 				ret = -EPROTO;
 				break;
 			}
-			if (ums9117_is_operational_clock(ios->clock)) {
+			if (ums9117_mmc_is_operational_clock(ios->clock)) {
 				host->operational_clock_deferred = true;
 				spin_lock_irqsave(&host->lock, flags);
 				host->audit.deferred_clock_hz = ios->clock;
@@ -2514,12 +2577,12 @@ static void ums9117_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 			}
 		} else {
 			if (!host->width_acmd6_clean || !host->card_clock_on ||
-			    !ums9117_select_clock_profile(host, ios)) {
+			    !ums9117_mmc_select_clock_profile(host, ios)) {
 				ret = -EPROTO;
 				break;
 			}
 			if (!host->physical_width4)
-				ret = ums9117_transition_width4(host);
+				ret = ums9117_mmc_transition_width4(host);
 			else if (!host->operational_clock_applied ||
 				 host->actual_clock_hz != host->target_clock_hz)
 				ret = -EPROTO;
@@ -2534,7 +2597,7 @@ static void ums9117_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 
 out_fail:
 	if (READ_ONCE(host->width_acmd6_clean)) {
-		ums9117_width_fail_closed(
+		ums9117_mmc_width_fail_closed(
 			host, "set_ios failed after accepted ACMD6", ret);
 		goto out_trace;
 	}
@@ -2543,13 +2606,13 @@ out_fail:
 		"set_ios failed: power=%u clock=%u width=%u timing=%u actual_clock=%u error=%d\n",
 		ios->power_mode, ios->clock, ios->bus_width, ios->timing,
 		host->actual_clock_hz, ret);
-	ta1618_restore_platform(host);
+	ta1618_mmc_restore_platform(host);
 out_trace:
-	ums9117_record_ios(host, ios, ret);
+	ums9117_mmc_record_ios(host, ios, ret);
 	mutex_unlock(&host->state_mutex);
 }
 
-static int ums9117_get_cd(struct mmc_host *mmc)
+static int ums9117_mmc_get_cd(struct mmc_host *mmc)
 {
 	/*
 	 * This reports card presence, which the board can detect but this
@@ -2563,7 +2626,7 @@ static int ums9117_get_cd(struct mmc_host *mmc)
 	return 1;
 }
 
-static int ums9117_get_ro(struct mmc_host *mmc)
+static int ums9117_mmc_get_ro(struct mmc_host *mmc)
 {
 	/*
 	 * The slot has no write-protect input to read. A card that is
@@ -2574,8 +2637,8 @@ static int ums9117_get_ro(struct mmc_host *mmc)
 	return 0;
 }
 
-static int ums9117_multi_io_quirk(struct mmc_card *card, unsigned int direction,
-				  int blk_size)
+static int ums9117_mmc_multi_io_quirk(struct mmc_card *card,
+				      unsigned int direction, int blk_size)
 {
 	/*
 	 * The core takes this answer as the block count for the request, so
@@ -2589,7 +2652,7 @@ static int ums9117_multi_io_quirk(struct mmc_card *card, unsigned int direction,
 static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 			  char *buf)
 {
-	struct ta1618_sd_mmc *host = dev_get_drvdata(dev);
+	struct ta1618_mmc_host *host = dev_get_drvdata(dev);
 	struct ta1618_mmc_audit audit;
 	unsigned long flags;
 	bool active;
@@ -2634,8 +2697,9 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 	len += sysfs_emit_at(
 		buf, len,
 		"clock_ident=selector:0x%08x,divider:0x%08x,actual_hz:%u,clock_reset:0x%08x\n",
-		audit.selector_after_activate, UMS9117_IDENT_DIVIDER_ENCODED,
-		UMS9117_IDENT_CLOCK_HZ, audit.clock_reset_after_activate);
+		audit.selector_after_activate,
+		UMS9117_MMC_IDENT_DIVIDER_ENCODED, UMS9117_MMC_IDENT_CLOCK_HZ,
+		audit.clock_reset_after_activate);
 	len += sysfs_emit_at(
 		buf, len,
 		"clock_state=requested_hz:%u,deferred_hz:%u,deferred_count:%u,applied_hz:%u,applied_count:%u,actual_hz:%u,deferred:%u,applied:%u,legacy_hz:%u,highspeed_hz:%u,target_divider:0x%08x,target_word:0x%08x\n",
@@ -2643,8 +2707,9 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		audit.deferred_clock_count, audit.applied_clock_hz,
 		audit.applied_clock_count, actual_clock_hz,
 		operational_clock_deferred ? 1U : 0U,
-		operational_clock_applied ? 1U : 0U, UMS9117_LEGACY_CLOCK_HZ,
-		UMS9117_HS_CLOCK_HZ, target_divider, target_operational);
+		operational_clock_applied ? 1U : 0U,
+		UMS9117_MMC_LEGACY_CLOCK_HZ, UMS9117_MMC_HS_CLOCK_HZ,
+		target_divider, target_operational);
 	len += sysfs_emit_at(
 		buf, len,
 		"cmd55=attempts:%u,clean:%u,app_cmd:%u,last_arg:0x%08x,last_response:0x%08x,armed:%u\n",
@@ -2661,8 +2726,9 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		"width=acmd6_clean:%u,physical_4bit:%u,host_ctrl1_before:0x%08x,host_ctrl1_after:0x%08x,owned_mask:0x%08x,owned_1bit:0x%08x,owned_4bit:0x%08x\n",
 		width_acmd6_clean ? 1U : 0U, physical_width4 ? 1U : 0U,
 		audit.host_ctrl1_width_before, audit.host_ctrl1_width_after,
-		(u32)UMS9117_HOST_CTRL1_OWNED_MASK,
-		UMS9117_HOST_CTRL1_1BIT_ADMA2, UMS9117_HOST_CTRL1_4BIT_ADMA2);
+		(u32)UMS9117_MMC_HOST_CTRL1_OWNED_MASK,
+		UMS9117_MMC_HOST_CTRL1_1BIT_ADMA2,
+		UMS9117_MMC_HOST_CTRL1_4BIT_ADMA2);
 	len += sysfs_emit_at(
 		buf, len,
 		"width_clock=selector_before:0x%08x,selector_after:0x%08x,clock_before:0x%08x,clock_after:0x%08x\n",
@@ -2671,12 +2737,12 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 	len += sysfs_emit_at(
 		buf, len,
 		"timeout_program=mask:0x%08x,fpdoom_value:%u,before_field:%u,before_register:0x%08x,candidate_field:%u,candidate_register:0x%08x,readback_field:%u,readback_register:0x%08x,operational_expected:0x%08x,operational_readback:0x%08x\n",
-		(u32)UMS9117_CLOCK_TIMEOUT_MASK,
-		UMS9117_CLOCK_TIMEOUT_FPDOOM_VALUE, audit.timeout_field_before,
-		audit.timeout_register_before, audit.timeout_field_candidate,
-		audit.timeout_register_candidate, audit.timeout_field_readback,
-		audit.timeout_register_readback, target_operational,
-		audit.clock_width_after);
+		(u32)UMS9117_MMC_CLOCK_TIMEOUT_MASK,
+		UMS9117_MMC_CLOCK_TIMEOUT_FPDOOM_VALUE,
+		audit.timeout_field_before, audit.timeout_register_before,
+		audit.timeout_field_candidate, audit.timeout_register_candidate,
+		audit.timeout_field_readback, audit.timeout_register_readback,
+		target_operational, audit.clock_width_after);
 	len += sysfs_emit_at(
 		buf, len,
 		"commands=cmd17:%u,cmd24:%u,cmd18:%u,cmd25:%u,max_blocks:%u\n",
@@ -2686,11 +2752,11 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		buf, len,
 		"highspeed=caps:%u,timing_seen:%u,cmd6_check:%u,cmd6_switch:%u,max_hs_hz:%u\n",
 		1U, hs_timing_seen ? 1U : 0U, audit.cmd6_check_count,
-		audit.cmd6_switch_count, UMS9117_HS_CLOCK_HZ);
+		audit.cmd6_switch_count, UMS9117_MMC_HS_CLOCK_HZ);
 	len += sysfs_emit_at(buf, len,
 			     "descriptors=table:%u,capacity:%u,max_used:%u\n",
-			     (u32)UMS9117_ADMA2_TABLE_SIZE,
-			     (u32)UMS9117_ADMA2_DESC_COUNT,
+			     (u32)UMS9117_MMC_ADMA2_TABLE_BYTES,
+			     (u32)UMS9117_MMC_ADMA2_DESC_COUNT,
 			     audit.max_descriptors);
 	len += sysfs_emit_at(
 		buf, len,
@@ -2706,12 +2772,13 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		audit.irq_adma_error_count, audit.irq_auto_cmd12_count);
 	len += sysfs_emit_at(
 		buf, len, "host_control2=after_reset:0x%08x,expected:0x%08x\n",
-		audit.host_control2_after_reset, UMS9117_HOST_CTRL2_EXPECTED);
+		audit.host_control2_after_reset,
+		UMS9117_MMC_HOST_CTRL2_EXPECTED);
 	len += sysfs_emit_at(
 		buf, len,
 		"timeouts=command_irq:%u,command_mask:0x%08x,data_irq:%u,data_mask:0x%08x,software_watchdog:%u\n",
-		audit.irq_command_timeout_count, UMS9117_INT_TIMEOUT,
-		audit.irq_data_timeout_count, UMS9117_INT_DATA_TIMEOUT,
+		audit.irq_command_timeout_count, UMS9117_MMC_INT_TIMEOUT,
+		audit.irq_data_timeout_count, UMS9117_MMC_INT_DATA_TIMEOUT,
 		audit.watchdog_timeout_count);
 	len += sysfs_emit_at(
 		buf, len,
@@ -2725,8 +2792,8 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		width_switch_fatal ? 1U : 0U, terminal_cleanup_hold ? 1U : 0U);
 	len += sysfs_emit_at(buf, len, "ios_trace=count:%u,total:%u\n",
 			     audit.ios_trace_count, audit.ios_calls);
-	for (i = 0; i < TA1618_IOS_TRACE_DEPTH && len < PAGE_SIZE; i++) {
-		const struct ta1618_ios_trace_entry *entry = &audit.ios[i];
+	for (i = 0; i < TA1618_MMC_IOS_TRACE_DEPTH && len < PAGE_SIZE; i++) {
+		const struct ta1618_mmc_ios_trace_entry *entry = &audit.ios[i];
 
 		if (!entry->sequence)
 			continue;
@@ -2741,40 +2808,40 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 static DEVICE_ATTR_RO(audit);
 
 static const struct mmc_host_ops ums9117_mmc_ops = {
-	.request = ums9117_request,
-	.set_ios = ums9117_set_ios,
-	.get_cd = ums9117_get_cd,
-	.get_ro = ums9117_get_ro,
-	.multi_io_quirk = ums9117_multi_io_quirk,
+	.request = ums9117_mmc_request,
+	.set_ios = ums9117_mmc_set_ios,
+	.get_cd = ums9117_mmc_get_cd,
+	.get_ro = ums9117_mmc_get_ro,
+	.multi_io_quirk = ums9117_mmc_multi_io_quirk,
 };
 
-static int ta1618_validate_resource(struct platform_device *pdev,
-				    unsigned int index,
-				    struct resource **validated)
+static int ta1618_mmc_validate_resource(struct platform_device *pdev,
+					unsigned int index,
+					struct resource **validated)
 {
-	const struct ta1618_resource_definition *definition =
-		&ta1618_resources[index];
+	const struct ta1618_mmc_resource_definition *definition =
+		&ta1618_mmc_resources[index];
 	struct resource *resource =
 		platform_get_resource(pdev, IORESOURCE_MEM, index);
 
 	if (!resource || resource_type(resource) != IORESOURCE_MEM ||
 	    !resource->name || strcmp(resource->name, definition->name) ||
-	    resource->start != definition->address ||
-	    resource_size(resource) != definition->size ||
-	    !IS_ALIGNED(resource->start, definition->size))
+	    resource->start != definition->address_phys ||
+	    resource_size(resource) != definition->mmio_bytes ||
+	    !IS_ALIGNED(resource->start, definition->mmio_bytes))
 		return dev_err_probe(
 			&pdev->dev, -EINVAL,
 			"resource %u must be %s at %pa with exact size %pa\n",
-			index, definition->name, &definition->address,
-			&definition->size);
+			index, definition->name, &definition->address_phys,
+			&definition->mmio_bytes);
 	*validated = resource;
 	return 0;
 }
 
-static int ums9117_ta1618_mmc_probe(struct platform_device *pdev)
+static int ta1618_mmc_probe(struct platform_device *pdev)
 {
-	struct resource *resources[RES_COUNT];
-	struct ta1618_sd_mmc *host;
+	struct resource *resources[TA1618_MMC_RES_COUNT];
+	struct ta1618_mmc_host *host;
 	struct mmc_host *mmc;
 	struct irq_data *irq_data;
 	irq_hw_number_t hwirq;
@@ -2783,15 +2850,15 @@ static int ums9117_ta1618_mmc_probe(struct platform_device *pdev)
 	int irq;
 	int ret;
 
-	for (i = 0; i < RES_COUNT; i++) {
-		ret = ta1618_validate_resource(pdev, i, &resources[i]);
+	for (i = 0; i < TA1618_MMC_RES_COUNT; i++) {
+		ret = ta1618_mmc_validate_resource(pdev, i, &resources[i]);
 		if (ret)
 			return ret;
 	}
-	if (platform_get_resource(pdev, IORESOURCE_MEM, RES_COUNT))
+	if (platform_get_resource(pdev, IORESOURCE_MEM, TA1618_MMC_RES_COUNT))
 		return dev_err_probe(&pdev->dev, -EINVAL,
 				     "exactly %u memory resources required\n",
-				     RES_COUNT);
+				     TA1618_MMC_RES_COUNT);
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0)
 		return irq;
@@ -2801,11 +2868,11 @@ static int ums9117_ta1618_mmc_probe(struct platform_device *pdev)
 				     "SPI57 has no IRQ domain data\n");
 	hwirq = irqd_to_hwirq(irq_data);
 	trigger = irqd_get_trigger_type(irq_data);
-	if (hwirq != TA1618_SDIO0_INTID || trigger != IRQ_TYPE_LEVEL_HIGH)
+	if (hwirq != TA1618_MMC_SDIO0_INTID || trigger != IRQ_TYPE_LEVEL_HIGH)
 		return dev_err_probe(
 			&pdev->dev, -EINVAL,
 			"IRQ must be SDIO0 SPI%u/INTID%u level-high, got %lu type 0x%x\n",
-			TA1618_SDIO0_SPI, TA1618_SDIO0_INTID,
+			TA1618_MMC_SDIO0_SPI, TA1618_MMC_SDIO0_INTID,
 			(unsigned long)hwirq, trigger);
 
 	mmc = mmc_alloc_host(sizeof(*host), &pdev->dev);
@@ -2817,10 +2884,10 @@ static int ums9117_ta1618_mmc_probe(struct platform_device *pdev)
 	host->irq = irq;
 	spin_lock_init(&host->lock);
 	mutex_init(&host->state_mutex);
-	INIT_DELAYED_WORK(&host->timeout_work, ums9117_timeout_work);
-	INIT_WORK(&host->finish_work, ums9117_finish_work);
-	for (i = 0; i < RES_COUNT; i++) {
-		if (i == RES_ADI || i == RES_ANALOG)
+	INIT_DELAYED_WORK(&host->timeout_work, ums9117_mmc_timeout_work);
+	INIT_WORK(&host->finish_work, ums9117_mmc_finish_work);
+	for (i = 0; i < TA1618_MMC_RES_COUNT; i++) {
+		if (i == TA1618_MMC_RES_ADI || i == TA1618_MMC_RES_ANALOG)
 			continue;
 		host->regs[i] = devm_ioremap_resource(&pdev->dev, resources[i]);
 		if (IS_ERR(host->regs[i])) {
@@ -2838,30 +2905,30 @@ static int ums9117_ta1618_mmc_probe(struct platform_device *pdev)
 	 */
 	dma_set_max_seg_size(&pdev->dev, PAGE_SIZE);
 	host->descriptors =
-		dma_alloc_coherent(&pdev->dev, UMS9117_ADMA2_TABLE_SIZE,
+		dma_alloc_coherent(&pdev->dev, UMS9117_MMC_ADMA2_TABLE_BYTES,
 				   &host->descriptors_dma, GFP_KERNEL);
 	if (!host->descriptors) {
 		ret = -ENOMEM;
 		goto out_free_host;
 	}
-	if (!ta1618_dma_address_valid(host->descriptors_dma,
-				      UMS9117_ADMA2_TABLE_SIZE)) {
+	if (!ta1618_mmc_dma_address_valid(host->descriptors_dma,
+					  UMS9117_MMC_ADMA2_TABLE_BYTES)) {
 		ret = -ERANGE;
 		goto out_free_descriptor;
 	}
 
-	ret = ta1618_snapshot_platform(host);
+	ret = ta1618_mmc_snapshot_platform(host);
 	if (ret)
 		goto out_free_descriptor;
-	ret = request_irq(irq, ums9117_irq, 0, dev_name(&pdev->dev), host);
+	ret = request_irq(irq, ums9117_mmc_irq, 0, dev_name(&pdev->dev), host);
 	if (ret)
 		goto out_free_descriptor;
 	host->irq_requested = true;
 
 	mmc->ops = &ums9117_mmc_ops;
-	mmc->f_min = UMS9117_IDENT_CLOCK_HZ;
-	mmc->f_max = UMS9117_HS_CLOCK_HZ;
-	mmc->f_init = UMS9117_IDENT_CLOCK_HZ;
+	mmc->f_min = UMS9117_MMC_IDENT_CLOCK_HZ;
+	mmc->f_max = UMS9117_MMC_HS_CLOCK_HZ;
+	mmc->f_init = UMS9117_MMC_IDENT_CLOCK_HZ;
 	mmc->ocr_avail = MMC_VDD_29_30 | MMC_VDD_30_31;
 	mmc->caps = MMC_CAP_4_BIT_DATA | MMC_CAP_SD_HIGHSPEED;
 	/*
@@ -2869,7 +2936,7 @@ static int ums9117_ta1618_mmc_probe(struct platform_device *pdev)
 	 * takes this as the ceiling for a high-speed card, so it keeps asking
 	 * for the frequency this board is already qualified at.
 	 */
-	mmc->max_sd_hs_hz = UMS9117_HS_CLOCK_HZ;
+	mmc->max_sd_hs_hz = UMS9117_MMC_HS_CLOCK_HZ;
 	mmc->caps2 = MMC_CAP2_NO_SDIO | MMC_CAP2_NO_MMC;
 	/*
 	 * These four numbers are the real limit on request shape: the block
@@ -2877,12 +2944,12 @@ static int ums9117_ta1618_mmc_probe(struct platform_device *pdev)
 	 * exceeds them before the driver is ever called. The segment count
 	 * must not outgrow the descriptor table.
 	 */
-	mmc->max_segs = UMS9117_ADMA2_DESC_COUNT;
+	mmc->max_segs = UMS9117_MMC_ADMA2_DESC_COUNT;
 	mmc->max_seg_size = PAGE_SIZE;
-	mmc->max_req_size = UMS9117_MAX_REQUEST_BYTES;
+	mmc->max_req_size = UMS9117_MMC_MAX_REQUEST_BYTES;
 	mmc->max_blk_size = 512;
-	mmc->max_blk_count = UMS9117_MAX_REQUEST_BYTES / 512;
-	mmc->max_busy_timeout = UMS9117_REQUEST_TIMEOUT_MS;
+	mmc->max_blk_count = UMS9117_MMC_MAX_REQUEST_BYTES / 512;
+	mmc->max_busy_timeout = UMS9117_MMC_REQUEST_TIMEOUT_MS;
 	platform_set_drvdata(pdev, host);
 
 	ret = mmc_add_host(mmc);
@@ -2895,8 +2962,8 @@ static int ums9117_ta1618_mmc_probe(struct platform_device *pdev)
 	dev_notice(
 		&pdev->dev,
 		"registered 4-bit UMS9117 SDIO0 MMC host on SPI57; identification 1-bit at %u Hz, the operational clock deferred until clean CMD55/ACMD6 and width4, up to %u 32-bit ADMA2 segments and %u bytes per request, multi-block reads and writes with automatic CMD12\n",
-		UMS9117_IDENT_CLOCK_HZ, UMS9117_ADMA2_DESC_COUNT,
-		UMS9117_MAX_REQUEST_BYTES);
+		UMS9117_MMC_IDENT_CLOCK_HZ, UMS9117_MMC_ADMA2_DESC_COUNT,
+		UMS9117_MMC_MAX_REQUEST_BYTES);
 	return 0;
 
 out_remove_host:
@@ -2905,14 +2972,14 @@ out_free_irq:
 	free_irq(irq, host);
 	host->irq_requested = false;
 out_free_descriptor:
-	dma_free_coherent(&pdev->dev, UMS9117_ADMA2_TABLE_SIZE,
+	dma_free_coherent(&pdev->dev, UMS9117_MMC_ADMA2_TABLE_BYTES,
 			  host->descriptors, host->descriptors_dma);
 out_free_host:
 	mmc_free_host(mmc);
 	return ret;
 }
 
-static bool ums9117_ta1618_mmc_idle(struct ta1618_sd_mmc *host)
+static bool ta1618_mmc_idle(struct ta1618_mmc_host *host)
 {
 	unsigned long flags;
 	bool idle;
@@ -2923,9 +2990,9 @@ static bool ums9117_ta1618_mmc_idle(struct ta1618_sd_mmc *host)
 	return idle;
 }
 
-static void ums9117_ta1618_mmc_shutdown(struct platform_device *pdev)
+static void ta1618_mmc_shutdown(struct platform_device *pdev)
 {
-	struct ta1618_sd_mmc *host = platform_get_drvdata(pdev);
+	struct ta1618_mmc_host *host = platform_get_drvdata(pdev);
 	unsigned long flags;
 	ktime_t deadline;
 	u32 present = 0;
@@ -2935,16 +3002,17 @@ static void ums9117_ta1618_mmc_shutdown(struct platform_device *pdev)
 	host->stopping = true;
 	spin_unlock_irqrestore(&host->lock, flags);
 
-	deadline = ktime_add_ms(ktime_get(), UMS9117_SHUTDOWN_DEADLINE_MS);
-	while (!ums9117_ta1618_mmc_idle(host) &&
+	deadline = ktime_add_ms(ktime_get(), UMS9117_MMC_SHUTDOWN_DEADLINE_MS);
+	while (!ta1618_mmc_idle(host) &&
 	       ktime_compare(ktime_get(), deadline) < 0)
-		msleep(UMS9117_SHUTDOWN_POLL_MS);
-	if (!ums9117_ta1618_mmc_idle(host))
+		msleep(UMS9117_MMC_SHUTDOWN_POLL_MS);
+	if (!ta1618_mmc_idle(host))
 		dev_err(host->dev,
 			"request did not stop before shutdown deadline\n");
 
 	if (host->platform_active)
-		ta1618_writel(host, RES_INTERRUPT_SIGNAL_ENABLE, 0);
+		ta1618_mmc_writel(host, TA1618_MMC_RES_INTERRUPT_SIGNAL_ENABLE,
+				  0);
 	cancel_delayed_work_sync(&host->timeout_work);
 	cancel_work_sync(&host->finish_work);
 	if (host->irq_requested)
@@ -2952,13 +3020,13 @@ static void ums9117_ta1618_mmc_shutdown(struct platform_device *pdev)
 
 	mutex_lock(&host->state_mutex);
 	if (host->platform_active &&
-	    !ums9117_wait_quiescent(host, UMS9117_WRITE_QUIESCE_DEADLINE_MS,
-				    &present)) {
+	    !ums9117_mmc_wait_quiescent(
+		    host, UMS9117_MMC_WRITE_QUIESCE_DEADLINE_MS, &present)) {
 		dev_err(host->dev,
 			"controller did not quiesce for shutdown: present_state=0x%08x\n",
 			present);
 	} else if (host->platform_active && host->card_clock_on) {
-		ret = ums9117_set_card_clock(host, false);
+		ret = ums9117_mmc_set_card_clock(host, false);
 		if (ret)
 			dev_err(host->dev,
 				"failed to stop card clock for shutdown: %d\n",
@@ -2967,9 +3035,9 @@ static void ums9117_ta1618_mmc_shutdown(struct platform_device *pdev)
 	mutex_unlock(&host->state_mutex);
 }
 
-static void ums9117_ta1618_mmc_remove(struct platform_device *pdev)
+static void ta1618_mmc_remove(struct platform_device *pdev)
 {
-	struct ta1618_sd_mmc *host = platform_get_drvdata(pdev);
+	struct ta1618_mmc_host *host = platform_get_drvdata(pdev);
 
 	if (host->audit_file_created) {
 		device_remove_file(&pdev->dev, &dev_attr_audit);
@@ -2978,7 +3046,8 @@ static void ums9117_ta1618_mmc_remove(struct platform_device *pdev)
 	mmc_remove_host(host->mmc);
 	WRITE_ONCE(host->stopping, true);
 	if (host->platform_active)
-		ta1618_writel(host, RES_INTERRUPT_SIGNAL_ENABLE, 0);
+		ta1618_mmc_writel(host, TA1618_MMC_RES_INTERRUPT_SIGNAL_ENABLE,
+				  0);
 	cancel_delayed_work_sync(&host->timeout_work);
 	cancel_work_sync(&host->finish_work);
 	if (host->irq_requested) {
@@ -2987,9 +3056,9 @@ static void ums9117_ta1618_mmc_remove(struct platform_device *pdev)
 		host->irq_requested = false;
 	}
 	mutex_lock(&host->state_mutex);
-	ta1618_restore_platform(host);
+	ta1618_mmc_restore_platform(host);
 	mutex_unlock(&host->state_mutex);
-	dma_free_coherent(host->dev, UMS9117_ADMA2_TABLE_SIZE,
+	dma_free_coherent(host->dev, UMS9117_MMC_ADMA2_TABLE_BYTES,
 			  host->descriptors, host->descriptors_dma);
 	mmc_free_host(host->mmc);
 }
@@ -3001,9 +3070,9 @@ static const struct of_device_id ta1618_mmc_of_match[] = {
 MODULE_DEVICE_TABLE(of, ta1618_mmc_of_match);
 
 static struct platform_driver ta1618_mmc_driver = {
-	.probe = ums9117_ta1618_mmc_probe,
-	.remove = ums9117_ta1618_mmc_remove,
-	.shutdown = ums9117_ta1618_mmc_shutdown,
+	.probe = ta1618_mmc_probe,
+	.remove = ta1618_mmc_remove,
+	.shutdown = ta1618_mmc_shutdown,
 	.driver = {
 		.name = "ta1618-mmc",
 		.of_match_table = ta1618_mmc_of_match,

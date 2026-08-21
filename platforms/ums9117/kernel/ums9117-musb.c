@@ -17,21 +17,21 @@
 
 #include "musb_core.h"
 
-#define UMS9117_DMA_MASK_STATUS 0x100cu
-#define UMS9117_DMA_CHANNEL(n) (0x1c00u + ((n) - 1u) * 0x20u)
-#define UMS9117_DMA_PAUSE 0x00u
-#define UMS9117_DMA_CFG 0x04u
-#define UMS9117_DMA_INTR 0x08u
-#define UMS9117_DMA_LLIST_PTR 0x14u
-#define UMS9117_DMA_INTR_CLEAR GENMASK(28, 24)
-#define UMS9117_DMA_CHN_EN BIT(0)
-#define UMS9117_DMA_CLEAR_INT_EN BIT(5)
-#define UMS9117_DMA_CHN_CLR BIT(15)
-#define UMS9117_DMA_CLEAR_STATUS BIT(21)
-#define UMS9117_DMA_CH5_STATUS BIT(4)
-#define UMS9117_DMA_CH21_STATUS BIT(20)
-#define UMS9117_DMA_OWNED_STATUS \
-	(UMS9117_DMA_CH5_STATUS | UMS9117_DMA_CH21_STATUS)
+#define UMS9117_MUSB_DMA_MASK_STATUS 0x100cU
+#define UMS9117_MUSB_DMA_CHANNEL(n) (0x1c00U + ((n) - 1U) * 0x20U)
+#define UMS9117_MUSB_DMA_PAUSE 0x00U
+#define UMS9117_MUSB_DMA_CFG 0x04U
+#define UMS9117_MUSB_DMA_INTR 0x08U
+#define UMS9117_MUSB_DMA_LLIST_PTR 0x14U
+#define UMS9117_MUSB_DMA_INTR_CLEAR_MASK GENMASK(28, 24)
+#define UMS9117_MUSB_DMA_CHANNEL_ENABLE BIT(0)
+#define UMS9117_MUSB_DMA_CLEAR_INTERRUPT_ENABLE BIT(5)
+#define UMS9117_MUSB_DMA_CHANNEL_CLEAR BIT(15)
+#define UMS9117_MUSB_DMA_CLEAR_STATUS BIT(21)
+#define UMS9117_MUSB_DMA_CHANNEL5_STATUS BIT(4)
+#define UMS9117_MUSB_DMA_CHANNEL21_STATUS BIT(20)
+#define UMS9117_MUSB_DMA_OWNED_STATUS_MASK \
+	(UMS9117_MUSB_DMA_CHANNEL5_STATUS | UMS9117_MUSB_DMA_CHANNEL21_STATUS)
 
 struct ums9117_musb_glue {
 	struct platform_device *musb;
@@ -64,20 +64,20 @@ static void ums9117_musb_read_fifo32(struct musb_hw_ep *hw_ep, u16 len, u8 *dst)
 	}
 }
 
-static bool ums9117_quiesce_dma_channel(void __iomem *base,
-					unsigned int channel,
-					unsigned int poll_limit)
+static bool ums9117_musb_quiesce_dma_channel(void __iomem *base,
+					     unsigned int channel,
+					     unsigned int poll_attempts)
 {
-	void __iomem *regs = base + UMS9117_DMA_CHANNEL(channel);
+	void __iomem *regs = base + UMS9117_MUSB_DMA_CHANNEL(channel);
 	u32 cfg;
 	u32 intr;
 	u32 pause;
 	unsigned int polls;
 
-	cfg = readl_relaxed(regs + UMS9117_DMA_CFG);
-	if (!(cfg & UMS9117_DMA_CHN_EN)) {
-		writel_relaxed(0, regs + UMS9117_DMA_LLIST_PTR);
-		writel_relaxed(0, regs + UMS9117_DMA_PAUSE);
+	cfg = readl_relaxed(regs + UMS9117_MUSB_DMA_CFG);
+	if (!(cfg & UMS9117_MUSB_DMA_CHANNEL_ENABLE)) {
+		writel_relaxed(0, regs + UMS9117_MUSB_DMA_LLIST_PTR);
+		writel_relaxed(0, regs + UMS9117_MUSB_DMA_PAUSE);
 		/*
 		 * The stores above are relaxed: drain them before returning
 		 * "quiesced", so the engine drops its descriptor pointer into
@@ -88,11 +88,12 @@ static bool ums9117_quiesce_dma_channel(void __iomem *base,
 		return true;
 	}
 
-	intr = readl_relaxed(regs + UMS9117_DMA_INTR);
-	writel_relaxed(intr | UMS9117_DMA_CLEAR_INT_EN,
-		       regs + UMS9117_DMA_INTR);
-	pause = readl_relaxed(regs + UMS9117_DMA_PAUSE);
-	writel_relaxed(pause | UMS9117_DMA_CHN_CLR, regs + UMS9117_DMA_PAUSE);
+	intr = readl_relaxed(regs + UMS9117_MUSB_DMA_INTR);
+	writel_relaxed(intr | UMS9117_MUSB_DMA_CLEAR_INTERRUPT_ENABLE,
+		       regs + UMS9117_MUSB_DMA_INTR);
+	pause = readl_relaxed(regs + UMS9117_MUSB_DMA_PAUSE);
+	writel_relaxed(pause | UMS9117_MUSB_DMA_CHANNEL_CLEAR,
+		       regs + UMS9117_MUSB_DMA_PAUSE);
 	/*
 	 * CHN_CLR is a request the channel acknowledges through
 	 * CLEAR_STATUS. Post the relaxed request before the bounded relaxed
@@ -101,16 +102,17 @@ static bool ums9117_quiesce_dma_channel(void __iomem *base,
 	 * result escalates to the sticky interrupt fail-safe.
 	 */
 	wmb();
-	for (polls = 0; polls < poll_limit; ++polls) {
-		intr = readl_relaxed(regs + UMS9117_DMA_INTR);
-		if (intr & UMS9117_DMA_CLEAR_STATUS)
+	for (polls = 0; polls < poll_attempts; ++polls) {
+		intr = readl_relaxed(regs + UMS9117_MUSB_DMA_INTR);
+		if (intr & UMS9117_MUSB_DMA_CLEAR_STATUS)
 			break;
 		cpu_relax();
 	}
-	writel_relaxed(intr | UMS9117_DMA_INTR_CLEAR, regs + UMS9117_DMA_INTR);
-	writel_relaxed(0, regs + UMS9117_DMA_CFG);
-	writel_relaxed(0, regs + UMS9117_DMA_LLIST_PTR);
-	writel_relaxed(0, regs + UMS9117_DMA_PAUSE);
+	writel_relaxed(intr | UMS9117_MUSB_DMA_INTR_CLEAR_MASK,
+		       regs + UMS9117_MUSB_DMA_INTR);
+	writel_relaxed(0, regs + UMS9117_MUSB_DMA_CFG);
+	writel_relaxed(0, regs + UMS9117_MUSB_DMA_LLIST_PTR);
+	writel_relaxed(0, regs + UMS9117_MUSB_DMA_PAUSE);
 	/*
 	 * Order the disable and pointer-clear stores before the CFG
 	 * readback in the return value: a stale readback either fails a
@@ -118,11 +120,12 @@ static bool ums9117_quiesce_dma_channel(void __iomem *base,
 	 * over reusable loader RAM.
 	 */
 	wmb();
-	return (intr & UMS9117_DMA_CLEAR_STATUS) &&
-	       !(readl_relaxed(regs + UMS9117_DMA_CFG) & UMS9117_DMA_CHN_EN);
+	return (intr & UMS9117_MUSB_DMA_CLEAR_STATUS) &&
+	       !(readl_relaxed(regs + UMS9117_MUSB_DMA_CFG) &
+		 UMS9117_MUSB_DMA_CHANNEL_ENABLE);
 }
 
-static irqreturn_t ums9117_musb_interrupt(int irq, void *data)
+static irqreturn_t ums9117_musb_irq(int irq, void *data)
 {
 	struct musb *musb = data;
 	struct ums9117_musb_glue *glue =
@@ -153,12 +156,12 @@ static irqreturn_t ums9117_musb_interrupt(int irq, void *data)
 	 * bootstrap handoff, clear the two channels fpdoom used rather than
 	 * allowing an unowned DMA source to hold SPI 55 asserted.
 	 */
-	legacy_dma = musb_readl(musb->mregs, UMS9117_DMA_MASK_STATUS);
-	if (legacy_dma & UMS9117_DMA_CH5_STATUS)
-		dma5 = ums9117_quiesce_dma_channel(musb->mregs, 5, 1024);
-	if (legacy_dma & UMS9117_DMA_CH21_STATUS)
-		dma21 = ums9117_quiesce_dma_channel(musb->mregs, 21, 1024);
-	remaining_dma = musb_readl(musb->mregs, UMS9117_DMA_MASK_STATUS);
+	legacy_dma = musb_readl(musb->mregs, UMS9117_MUSB_DMA_MASK_STATUS);
+	if (legacy_dma & UMS9117_MUSB_DMA_CHANNEL5_STATUS)
+		dma5 = ums9117_musb_quiesce_dma_channel(musb->mregs, 5, 1024);
+	if (legacy_dma & UMS9117_MUSB_DMA_CHANNEL21_STATUS)
+		dma21 = ums9117_musb_quiesce_dma_channel(musb->mregs, 21, 1024);
+	remaining_dma = musb_readl(musb->mregs, UMS9117_MUSB_DMA_MASK_STATUS);
 	if (legacy_dma || remaining_dma)
 		result = IRQ_HANDLED;
 	if ((!dma5 || !dma21 || remaining_dma) && !glue->irq_disabled) {
@@ -201,10 +204,10 @@ static int ums9117_musb_init(struct musb *musb)
 	 * MUSB_INDEXED_EP quirk is used.
 	 */
 	musb->dyn_fifo = true;
-	musb->isr = ums9117_musb_interrupt;
-	dma5 = ums9117_quiesce_dma_channel(musb->mregs, 5, 1000000);
-	dma21 = ums9117_quiesce_dma_channel(musb->mregs, 21, 1000000);
-	remaining_dma = musb_readl(musb->mregs, UMS9117_DMA_MASK_STATUS);
+	musb->isr = ums9117_musb_irq;
+	dma5 = ums9117_musb_quiesce_dma_channel(musb->mregs, 5, 1000000);
+	dma21 = ums9117_musb_quiesce_dma_channel(musb->mregs, 21, 1000000);
+	remaining_dma = musb_readl(musb->mregs, UMS9117_MUSB_DMA_MASK_STATUS);
 	if (!dma5 || !dma21 || remaining_dma) {
 		dev_err(musb->controller,
 			"refusing MUSB handoff: DMA5=%u DMA21=%u mask=%08x\n",
@@ -225,7 +228,7 @@ static const struct musb_platform_ops ums9117_musb_ops = {
 	.read_fifo = ums9117_musb_read_fifo32,
 };
 
-static const struct musb_fifo_cfg ums9117_fifo_cfg[] = {
+static const struct musb_fifo_cfg ums9117_musb_fifo_cfg[] = {
 	MUSB_EP_FIFO_SINGLE(1, FIFO_TX, 512),
 	MUSB_EP_FIFO_SINGLE(1, FIFO_RX, 512),
 	MUSB_EP_FIFO_SINGLE(2, FIFO_TX, 512),
@@ -233,8 +236,8 @@ static const struct musb_fifo_cfg ums9117_fifo_cfg[] = {
 };
 
 static const struct musb_hdrc_config ums9117_musb_config = {
-	.fifo_cfg = ums9117_fifo_cfg,
-	.fifo_cfg_size = ARRAY_SIZE(ums9117_fifo_cfg),
+	.fifo_cfg = ums9117_musb_fifo_cfg,
+	.fifo_cfg_size = ARRAY_SIZE(ums9117_musb_fifo_cfg),
 	.multipoint = false,
 	.dyn_fifo = true,
 	.num_eps = 16,

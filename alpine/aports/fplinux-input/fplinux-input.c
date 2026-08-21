@@ -12,11 +12,11 @@
 #include <termios.h>
 #include <unistd.h>
 
-#define DEFAULT_CHANNEL "/dev/ttyGS1"
-#define KEYBOARD_LEASE_MS 1000
-#define LINE_BYTES 64
-#define VENDOR 0x1d6b
-#define PRODUCT 0x0104
+#define FPLINUX_INPUT_DEFAULT_CHANNEL "/dev/ttyGS1"
+#define FPLINUX_INPUT_KEYBOARD_LEASE_MS 1000
+#define FPLINUX_INPUT_LINE_BYTES 64
+#define FPLINUX_INPUT_VENDOR_ID 0x1d6b
+#define FPLINUX_INPUT_PRODUCT_ID 0x0104
 
 static int open_channel(const char *path)
 {
@@ -66,8 +66,8 @@ static int open_device(void)
 
 	memset(&setup, 0, sizeof(setup));
 	setup.id.bustype = BUS_VIRTUAL;
-	setup.id.vendor = VENDOR;
-	setup.id.product = PRODUCT;
+	setup.id.vendor = FPLINUX_INPUT_VENDOR_ID;
+	setup.id.product = FPLINUX_INPUT_PRODUCT_ID;
 	strncpy(setup.name, "FPLinux host keyboard", UINPUT_MAX_NAME_SIZE - 1);
 	if (ioctl(fd, UI_DEV_SETUP, &setup) != 0 ||
 	    ioctl(fd, UI_DEV_CREATE) != 0) {
@@ -111,9 +111,9 @@ static void release_keys(int device, bool pressed[KEY_CNT])
 
 int main(int argc, char **argv)
 {
-	const char *path = argc > 1 ? argv[1] : DEFAULT_CHANNEL;
+	const char *path = argc > 1 ? argv[1] : FPLINUX_INPUT_DEFAULT_CHANNEL;
 	bool pressed[KEY_CNT] = { false };
-	char line[LINE_BYTES];
+	char line[FPLINUX_INPUT_LINE_BYTES];
 	size_t filled = 0;
 	int channel;
 	int device;
@@ -142,7 +142,8 @@ int main(int argc, char **argv)
 			int ready;
 
 			do {
-				ready = poll(&waiting, 1, KEYBOARD_LEASE_MS);
+				ready = poll(&waiting, 1,
+					     FPLINUX_INPUT_KEYBOARD_LEASE_MS);
 			} while (ready < 0 && errno == EINTR);
 			if (ready < 0) {
 				perror("poll");

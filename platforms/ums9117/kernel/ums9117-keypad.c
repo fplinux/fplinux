@@ -24,36 +24,36 @@
 #include <linux/soc/sprd/ums9117-adi.h>
 #include <linux/workqueue.h>
 
-#define KPD_CTRL 0x00
-#define KPD_INT_EN 0x04
-#define KPD_INT_RAW 0x08
-#define KPD_INT_CLR 0x10
-#define KPD_POLARITY 0x18
-#define KPD_DEBOUNCE 0x1c
-#define KPD_CLK_DIVIDE 0x28
-#define KPD_KEY_STATUS 0x2c
+#define UMS9117_KPD_CTRL 0x00
+#define UMS9117_KPD_INT_EN 0x04
+#define UMS9117_KPD_INT_RAW 0x08
+#define UMS9117_KPD_INT_CLR 0x10
+#define UMS9117_KPD_POLARITY 0x18
+#define UMS9117_KPD_DEBOUNCE 0x1c
+#define UMS9117_KPD_CLK_DIVIDE 0x28
+#define UMS9117_KPD_KEY_STATUS 0x2c
 
-#define KPD_CTRL_ENABLE BIT(0)
-#define KPD_CTRL_SLEEP BIT(1)
-#define KPD_CTRL_LONG_KEY BIT(2)
-#define KPD_CTRL_MATRIX_LINES GENMASK(7, 2)
-#define KPD_CTRL_ROW_SHIFT 16
-#define KPD_CTRL_COL_SHIFT 8
+#define UMS9117_KPD_CTRL_ENABLE BIT(0)
+#define UMS9117_KPD_CTRL_SLEEP BIT(1)
+#define UMS9117_KPD_CTRL_LONG_KEY BIT(2)
+#define UMS9117_KPD_CTRL_MATRIX_LINES_MASK GENMASK(7, 2)
+#define UMS9117_KPD_CTRL_ROW_SHIFT 16
+#define UMS9117_KPD_CTRL_COL_SHIFT 8
 
-#define APB_PWR_SET 0x1000
-#define APB_CLK_SET 0x1010
-#define APB_RST_SET 0x1008
-#define APB_RST_CLR 0x2008
+#define UMS9117_AON_APB_PWR_SET 0x1000
+#define UMS9117_AON_APB_CLK_SET 0x1010
+#define UMS9117_AON_APB_RST_SET 0x1008
+#define UMS9117_AON_APB_RST_CLR 0x2008
 
-#define UMS9117_ADI_SLAVE_PHYS 0x40608000u
-#define UMS9117_ADI_SLAVE_SIZE 0x1000u
+#define UMS9117_ADI_SLAVE_PHYS 0x40608000U
+#define UMS9117_ADI_SLAVE_MMIO_BYTES 0x1000U
 
 #define UMS9117_KPD_MAX_ROWS 8
 #define UMS9117_KPD_MAX_COLS 8
 #define UMS9117_KPD_POLL_MS 5
 
-#define UMS9117_EIC_POWER_BIT 1
-#define UMS9117_EIC9_BIT 9
+#define UMS9117_EIC_DATA_POWER_BIT 1
+#define UMS9117_EIC_DATA_EIC9_BIT 9
 
 struct ums9117_keypad {
 	struct device *dev;
@@ -93,12 +93,12 @@ static int ums9117_keypad_adi_read(struct ums9117_keypad *keypad, u16 *value)
 	return ret;
 }
 
-static void ums9117_keypad_matrix_poll(struct work_struct *work)
+static void ums9117_keypad_matrix_poll_work(struct work_struct *work)
 {
 	struct ums9117_keypad *keypad = container_of(
 		to_delayed_work(work), struct ums9117_keypad, matrix_poll_work);
 	unsigned short *keymap = keypad->input->keycode;
-	u32 event = readl(keypad->kpd + KPD_INT_RAW) & 0xff;
+	u32 event = readl(keypad->kpd + UMS9117_KPD_INT_RAW) & 0xff;
 	u32 status;
 	unsigned int index;
 	bool sync = false;
@@ -106,8 +106,8 @@ static void ums9117_keypad_matrix_poll(struct work_struct *work)
 	if (!event)
 		goto out;
 
-	status = readl(keypad->kpd + KPD_KEY_STATUS);
-	writel(0xfff, keypad->kpd + KPD_INT_CLR);
+	status = readl(keypad->kpd + UMS9117_KPD_KEY_STATUS);
+	writel(0xfff, keypad->kpd + UMS9117_KPD_INT_CLR);
 	if (status & BIT(3))
 		goto out;
 
@@ -147,7 +147,7 @@ out:
 				      msecs_to_jiffies(UMS9117_KPD_POLL_MS));
 }
 
-static void ums9117_keypad_eic_poll(struct work_struct *work)
+static void ums9117_keypad_eic_poll_work(struct work_struct *work)
 {
 	struct ums9117_keypad *keypad = container_of(
 		to_delayed_work(work), struct ums9117_keypad, eic_poll_work);
@@ -168,7 +168,7 @@ static void ums9117_keypad_eic_poll(struct work_struct *work)
 		goto out;
 	}
 
-	power_down = !(data & BIT(UMS9117_EIC_POWER_BIT));
+	power_down = !(data & BIT(UMS9117_EIC_DATA_POWER_BIT));
 	if (power_down != keypad->power_down) {
 		keypad->power_down = power_down;
 		input_report_key(keypad->input, KEY_POWER, power_down);
@@ -176,7 +176,7 @@ static void ums9117_keypad_eic_poll(struct work_struct *work)
 	}
 
 	if (keypad->has_eic9_key) {
-		bool level = !!(data & BIT(UMS9117_EIC9_BIT));
+		bool level = !!(data & BIT(UMS9117_EIC_DATA_EIC9_BIT));
 
 		if (!keypad->eic9_baseline_valid) {
 			/* Preserve the inherited EIC9 polarity and suppress boot noise. */
@@ -217,8 +217,8 @@ static int ums9117_keypad_matrix_masks(struct ums9117_keypad *keypad,
 			}
 
 	/* The controller reserves row and column lines 0 and 1. */
-	rows &= KPD_CTRL_MATRIX_LINES;
-	cols &= KPD_CTRL_MATRIX_LINES;
+	rows &= UMS9117_KPD_CTRL_MATRIX_LINES_MASK;
+	cols &= UMS9117_KPD_CTRL_MATRIX_LINES_MASK;
 	if (!rows || !cols)
 		return -EINVAL;
 
@@ -241,36 +241,38 @@ static int ums9117_keypad_hw_init(struct ums9117_keypad *keypad)
 			"keymap does not select usable controller lines\n");
 
 	/* Exact UMS9117 gate/reset sequence used by fpdoom. */
-	ret = regmap_write(keypad->aon_apb, APB_PWR_SET, 0x100);
+	ret = regmap_write(keypad->aon_apb, UMS9117_AON_APB_PWR_SET, 0x100);
 	if (ret)
 		return ret;
-	ret = regmap_write(keypad->aon_apb, APB_CLK_SET, 0x002);
+	ret = regmap_write(keypad->aon_apb, UMS9117_AON_APB_CLK_SET, 0x002);
 	if (ret)
 		return ret;
-	ret = regmap_write(keypad->aon_apb, APB_RST_SET, 0x100);
+	ret = regmap_write(keypad->aon_apb, UMS9117_AON_APB_RST_SET, 0x100);
 	if (ret)
 		return ret;
 	udelay(100);
-	ret = regmap_write(keypad->aon_apb, APB_RST_CLR, 0x100);
+	ret = regmap_write(keypad->aon_apb, UMS9117_AON_APB_RST_CLR, 0x100);
 	if (ret)
 		return ret;
 	udelay(100);
 
-	writel(0xfff, keypad->kpd + KPD_INT_CLR);
-	writel(1, keypad->kpd + KPD_CLK_DIVIDE);
-	writel(16, keypad->kpd + KPD_DEBOUNCE);
+	writel(0xfff, keypad->kpd + UMS9117_KPD_INT_CLR);
+	writel(1, keypad->kpd + UMS9117_KPD_CLK_DIVIDE);
+	writel(16, keypad->kpd + UMS9117_KPD_DEBOUNCE);
 	/* This enables controller event latches; the driver does not request an IRQ. */
-	writel(0xfff, keypad->kpd + KPD_INT_EN);
-	writel(0xffff, keypad->kpd + KPD_POLARITY);
+	writel(0xfff, keypad->kpd + UMS9117_KPD_INT_EN);
+	writel(0xffff, keypad->kpd + UMS9117_KPD_POLARITY);
 
-	ctrl = readl(keypad->kpd + KPD_CTRL);
-	ctrl |= KPD_CTRL_ENABLE | KPD_CTRL_LONG_KEY;
-	ctrl &= ~KPD_CTRL_SLEEP;
-	ctrl &= ~((u32)KPD_CTRL_MATRIX_LINES << KPD_CTRL_ROW_SHIFT |
-		  (u32)KPD_CTRL_MATRIX_LINES << KPD_CTRL_COL_SHIFT);
-	ctrl |= (u32)row_mask << KPD_CTRL_ROW_SHIFT;
-	ctrl |= (u32)col_mask << KPD_CTRL_COL_SHIFT;
-	writel(ctrl, keypad->kpd + KPD_CTRL);
+	ctrl = readl(keypad->kpd + UMS9117_KPD_CTRL);
+	ctrl |= UMS9117_KPD_CTRL_ENABLE | UMS9117_KPD_CTRL_LONG_KEY;
+	ctrl &= ~UMS9117_KPD_CTRL_SLEEP;
+	ctrl &= ~((u32)UMS9117_KPD_CTRL_MATRIX_LINES_MASK
+			  << UMS9117_KPD_CTRL_ROW_SHIFT |
+		  (u32)UMS9117_KPD_CTRL_MATRIX_LINES_MASK
+			  << UMS9117_KPD_CTRL_COL_SHIFT);
+	ctrl |= (u32)row_mask << UMS9117_KPD_CTRL_ROW_SHIFT;
+	ctrl |= (u32)col_mask << UMS9117_KPD_CTRL_COL_SHIFT;
+	writel(ctrl, keypad->kpd + UMS9117_KPD_CTRL);
 
 	return 0;
 }
@@ -289,7 +291,7 @@ static int ums9117_keypad_parse_eic(struct ums9117_keypad *keypad)
 	if (!IS_ALIGNED(keypad->eic_data_phys, sizeof(u32)) ||
 	    keypad->eic_data_phys < UMS9117_ADI_SLAVE_PHYS ||
 	    keypad->eic_data_phys > UMS9117_ADI_SLAVE_PHYS +
-					    UMS9117_ADI_SLAVE_SIZE -
+					    UMS9117_ADI_SLAVE_MMIO_BYTES -
 					    sizeof(u32))
 		return dev_err_probe(
 			keypad->dev, -EINVAL,
@@ -375,8 +377,8 @@ static int ums9117_keypad_probe(struct platform_device *pdev)
 		return ret;
 
 	INIT_DELAYED_WORK(&keypad->matrix_poll_work,
-			  ums9117_keypad_matrix_poll);
-	INIT_DELAYED_WORK(&keypad->eic_poll_work, ums9117_keypad_eic_poll);
+			  ums9117_keypad_matrix_poll_work);
+	INIT_DELAYED_WORK(&keypad->eic_poll_work, ums9117_keypad_eic_poll_work);
 	platform_set_drvdata(pdev, keypad);
 	schedule_delayed_work(&keypad->matrix_poll_work,
 			      msecs_to_jiffies(UMS9117_KPD_POLL_MS));

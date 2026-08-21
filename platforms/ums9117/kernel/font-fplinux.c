@@ -6,10 +6,10 @@
  */
 #include <linux/font.h>
 
-#define FONTDATAMAX 2048
+#define FPLINUX_FONT_6X8_DATA_BYTES 2048
 
 static const struct font_data fontdata_6x8 = {
-	.extra = { 0, 0, FONTDATAMAX, 0 },
+	.extra = { 0, 0, FPLINUX_FONT_6X8_DATA_BYTES, 0 },
 	.data = {
 						       /* 0 0x00 '^@' */
 						       0x00, /* 000000 */

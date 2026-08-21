@@ -33,69 +33,77 @@
 #include <time.h>
 #include <unistd.h>
 
-#define MULTITAP_MS 700
-#define STAR_HOLD_MS 400
-#define VISUAL_BELL_MS 250
-#define KEYPAD_REOPEN_MS 1000
-#define INPUT_DIRECTORY_ENTRY_LIMIT 1024
-#define KEYPAD_EVENT_COUNT 8
-#define KEYPAD_EVENT_MAX_BYTES 5
-#define TERMINAL_INPUT_BYTES 64
-#define TERMINAL_REPLY_BYTES 32
-#define TERMINAL_REPLY_HOLD_MS 40
-#define COMPOSED_CHARACTER_MAX_BYTES 2
+#define FPLINUX_CONSOLE_MULTITAP_MS 700
+#define FPLINUX_CONSOLE_STAR_HOLD_MS 400
+#define FPLINUX_CONSOLE_VISUAL_BELL_MS 250
+#define FPLINUX_CONSOLE_KEYPAD_REOPEN_MS 1000
+#define FPLINUX_CONSOLE_INPUT_DIRECTORY_ENTRY_LIMIT 1024
+#define FPLINUX_CONSOLE_KEYPAD_EVENT_COUNT 8
+#define FPLINUX_CONSOLE_KEYPAD_EVENT_MAX_BYTES 5
+#define FPLINUX_CONSOLE_TERMINAL_INPUT_BYTES 64
+#define FPLINUX_CONSOLE_TERMINAL_REPLY_BYTES 32
+#define FPLINUX_CONSOLE_TERMINAL_REPLY_HOLD_MS 40
+#define FPLINUX_CONSOLE_COMPOSED_CHARACTER_MAX_BYTES 2
 /* A 64-byte read can complete a 31-byte buffered terminal reply. */
-#define TERMINAL_REPLY_MAX_ENQUEUE_BYTES \
-	(TERMINAL_INPUT_BYTES + TERMINAL_REPLY_BYTES - 1)
-#define TERMINAL_INPUT_FIFO_RESERVE \
-	(TERMINAL_REPLY_MAX_ENQUEUE_BYTES + COMPOSED_CHARACTER_MAX_BYTES)
-#define KEYPAD_INPUT_FIFO_RESERVE                      \
-	(KEYPAD_EVENT_COUNT * KEYPAD_EVENT_MAX_BYTES + \
-	 COMPOSED_CHARACTER_MAX_BYTES)
-#define PTY_TX_CAPACITY 4096
-#define PTY_DRAIN_CHUNK_BYTES 512
-#define PTY_DRAIN_READ_BUDGET 4
-#define PTY_DRAIN_BUDGET_BYTES (PTY_DRAIN_CHUNK_BYTES * PTY_DRAIN_READ_BUDGET)
-#define VCSA_DEVICE_MAJOR 7U
-#define VCSA_DEVICE_MINOR_BASE 128U
-#define CHILD_EXIT_GRACE_MS 1000
-#define CHILD_EXIT_POLL_MS 20
-#define MAX_VT_ROWS 128
-#define MAX_VT_COLS 240
-#define MAX_VT_CELLS (MAX_VT_ROWS * MAX_VT_COLS)
-#define TRANSCRIPT_LINES 256
-#define TRANSCRIPT_LINE_BYTES MAX_VT_COLS
+#define FPLINUX_CONSOLE_TERMINAL_REPLY_MAX_ENQUEUE_BYTES \
+	(FPLINUX_CONSOLE_TERMINAL_INPUT_BYTES +          \
+	 FPLINUX_CONSOLE_TERMINAL_REPLY_BYTES - 1)
+#define FPLINUX_CONSOLE_TERMINAL_INPUT_FIFO_RESERVE_BYTES   \
+	(FPLINUX_CONSOLE_TERMINAL_REPLY_MAX_ENQUEUE_BYTES + \
+	 FPLINUX_CONSOLE_COMPOSED_CHARACTER_MAX_BYTES)
+#define FPLINUX_CONSOLE_KEYPAD_INPUT_FIFO_RESERVE_BYTES   \
+	(FPLINUX_CONSOLE_KEYPAD_EVENT_COUNT *             \
+		 FPLINUX_CONSOLE_KEYPAD_EVENT_MAX_BYTES + \
+	 FPLINUX_CONSOLE_COMPOSED_CHARACTER_MAX_BYTES)
+#define FPLINUX_CONSOLE_PTY_TX_BYTES 4096
+#define FPLINUX_CONSOLE_PTY_DRAIN_CHUNK_BYTES 512
+#define FPLINUX_CONSOLE_PTY_DRAIN_READ_BUDGET 4
+#define FPLINUX_CONSOLE_PTY_DRAIN_BUDGET_BYTES   \
+	(FPLINUX_CONSOLE_PTY_DRAIN_CHUNK_BYTES * \
+	 FPLINUX_CONSOLE_PTY_DRAIN_READ_BUDGET)
+#define FPLINUX_CONSOLE_VCSA_DEVICE_MAJOR 7U
+#define FPLINUX_CONSOLE_VCSA_DEVICE_MINOR_BASE 128U
+#define FPLINUX_CONSOLE_CHILD_EXIT_GRACE_MS 1000
+#define FPLINUX_CONSOLE_CHILD_EXIT_POLL_MS 20
+#define FPLINUX_CONSOLE_VT_MAX_ROWS 128
+#define FPLINUX_CONSOLE_VT_MAX_COLS 240
+#define FPLINUX_CONSOLE_VT_MAX_CELLS \
+	(FPLINUX_CONSOLE_VT_MAX_ROWS * FPLINUX_CONSOLE_VT_MAX_COLS)
+#define FPLINUX_CONSOLE_TRANSCRIPT_LINE_COUNT 256
+#define FPLINUX_CONSOLE_TRANSCRIPT_LINE_BYTES FPLINUX_CONSOLE_VT_MAX_COLS
 #define BITS_PER_LONG (sizeof(unsigned long) * 8)
 #define BIT_WORD(bit) ((bit) / BITS_PER_LONG)
 #define BIT_MASK(bit) (1UL << ((bit) % BITS_PER_LONG))
 #define BIT_ARRAY_SIZE(max_bit) (BIT_WORD(max_bit) + 1)
-#define KEY_STATE_BYTES ((KEY_CNT + 7u) / 8u)
+#define FPLINUX_CONSOLE_KEY_STATE_BYTES ((KEY_CNT + 7U) / 8U)
 
-_Static_assert(PTY_TX_CAPACITY >= TERMINAL_INPUT_FIFO_RESERVE,
+_Static_assert(FPLINUX_CONSOLE_PTY_TX_BYTES >=
+		       FPLINUX_CONSOLE_TERMINAL_INPUT_FIFO_RESERVE_BYTES,
 	       "PTY FIFO must hold one terminal-reply batch and Alt commit");
-_Static_assert(PTY_TX_CAPACITY >= KEYPAD_INPUT_FIFO_RESERVE,
+_Static_assert(FPLINUX_CONSOLE_PTY_TX_BYTES >=
+		       FPLINUX_CONSOLE_KEYPAD_INPUT_FIFO_RESERVE_BYTES,
 	       "PTY FIFO must hold one keypad batch and Alt commit");
 
 struct terminal_reply {
-	char bytes[TERMINAL_REPLY_BYTES];
+	char bytes[FPLINUX_CONSOLE_TERMINAL_REPLY_BYTES];
 	size_t length;
 	struct timespec deadline;
 };
 
 struct byte_fifo {
-	unsigned char bytes[PTY_TX_CAPACITY];
+	unsigned char bytes[FPLINUX_CONSOLE_PTY_TX_BYTES];
 	size_t head;
 	size_t length;
 };
 
-#define EXTRA_KEYPADS 3
-#define REPEAT_DELAY_MS 400u
-#define REPEAT_PERIOD_MS 40u
+#define FPLINUX_CONSOLE_EXTRA_KEYPAD_COUNT 3
+#define FPLINUX_CONSOLE_REPEAT_DELAY_MS 400U
+#define FPLINUX_CONSOLE_REPEAT_PERIOD_MS 40U
 
 struct runtime_state {
 	int keypad;
-	int extra_keypads[EXTRA_KEYPADS];
-	bool keypad_dropping[1 + EXTRA_KEYPADS];
+	int extra_keypads[FPLINUX_CONSOLE_EXTRA_KEYPAD_COUNT];
+	bool keypad_dropping[1 + FPLINUX_CONSOLE_EXTRA_KEYPAD_COUNT];
 	int pty;
 	int signal_fd;
 	int tty0;
@@ -117,10 +125,10 @@ struct runtime_state {
 };
 
 enum modifier {
-	MODIFIER_NONE,
-	MODIFIER_CTRL,
-	MODIFIER_ALT,
-	MODIFIER_SHIFT,
+	FPLINUX_CONSOLE_MODIFIER_NONE,
+	FPLINUX_CONSOLE_MODIFIER_CTRL,
+	FPLINUX_CONSOLE_MODIFIER_ALT,
+	FPLINUX_CONSOLE_MODIFIER_SHIFT,
 };
 
 struct composition {
@@ -144,24 +152,24 @@ struct vcsa_overlay {
 };
 
 struct transcript_line {
-	unsigned char bytes[TRANSCRIPT_LINE_BYTES];
+	unsigned char bytes[FPLINUX_CONSOLE_TRANSCRIPT_LINE_BYTES];
 	size_t length;
 	size_t cursor;
 };
 
 enum transcript_escape_state {
-	TRANSCRIPT_TEXT,
-	TRANSCRIPT_ESCAPE,
-	TRANSCRIPT_ESCAPE_SEQUENCE,
-	TRANSCRIPT_CSI,
-	TRANSCRIPT_OSC,
-	TRANSCRIPT_OSC_ESCAPE,
-	TRANSCRIPT_STRING,
-	TRANSCRIPT_STRING_ESCAPE,
+	FPLINUX_CONSOLE_TRANSCRIPT_TEXT,
+	FPLINUX_CONSOLE_TRANSCRIPT_ESCAPE,
+	FPLINUX_CONSOLE_TRANSCRIPT_ESCAPE_SEQUENCE,
+	FPLINUX_CONSOLE_TRANSCRIPT_CSI,
+	FPLINUX_CONSOLE_TRANSCRIPT_OSC,
+	FPLINUX_CONSOLE_TRANSCRIPT_OSC_ESCAPE,
+	FPLINUX_CONSOLE_TRANSCRIPT_STRING,
+	FPLINUX_CONSOLE_TRANSCRIPT_STRING_ESCAPE,
 };
 
 struct transcript {
-	struct transcript_line lines[TRANSCRIPT_LINES];
+	struct transcript_line lines[FPLINUX_CONSOLE_TRANSCRIPT_LINE_COUNT];
 	size_t first;
 	size_t count;
 	enum transcript_escape_state escape_state;
@@ -185,7 +193,7 @@ struct interface_state {
 	bool visual_bell;
 	bool suppress_backspace_until_release;
 	unsigned backspace_slot;
-	unsigned char history_cells[MAX_VT_CELLS * 2];
+	unsigned char history_cells[FPLINUX_CONSOLE_VT_MAX_CELLS * 2];
 };
 
 static struct runtime_state runtime = {
@@ -405,9 +413,10 @@ static void cleanup_runtime(void)
 {
 	struct timespec pause = {
 		.tv_sec = 0,
-		.tv_nsec = CHILD_EXIT_POLL_MS * 1000000L,
+		.tv_nsec = FPLINUX_CONSOLE_CHILD_EXIT_POLL_MS * 1000000L,
 	};
-	unsigned attempts = CHILD_EXIT_GRACE_MS / CHILD_EXIT_POLL_MS;
+	unsigned attempts = FPLINUX_CONSOLE_CHILD_EXIT_GRACE_MS /
+			    FPLINUX_CONSOLE_CHILD_EXIT_POLL_MS;
 	unsigned i;
 
 	if (runtime.cleanup_done)
@@ -418,7 +427,7 @@ static void cleanup_runtime(void)
 		close(runtime.keypad);
 		runtime.keypad = -1;
 	}
-	for (i = 0; i < EXTRA_KEYPADS; ++i) {
+	for (i = 0; i < FPLINUX_CONSOLE_EXTRA_KEYPAD_COUNT; ++i) {
 		if (runtime.extra_keypads[i] < 0)
 			continue;
 		close(runtime.extra_keypads[i]);
@@ -561,7 +570,8 @@ static bool bit_is_set(const unsigned long *bits, unsigned bit)
 
 static void set_repeat_rate(int fd)
 {
-	unsigned int settings[2] = { REPEAT_DELAY_MS, REPEAT_PERIOD_MS };
+	unsigned int settings[2] = { FPLINUX_CONSOLE_REPEAT_DELAY_MS,
+				     FPLINUX_CONSOLE_REPEAT_PERIOD_MS };
 
 	ioctl(fd, EVIOCSREP, settings);
 }
@@ -639,7 +649,8 @@ static void drop_keypad_gesture(int slot)
 
 static void close_extra_keypad(size_t slot)
 {
-	if (slot >= EXTRA_KEYPADS || runtime.extra_keypads[slot] < 0)
+	if (slot >= FPLINUX_CONSOLE_EXTRA_KEYPAD_COUNT ||
+	    runtime.extra_keypads[slot] < 0)
 		return;
 	close(runtime.extra_keypads[slot]);
 	runtime.extra_keypads[slot] = -1;
@@ -659,7 +670,7 @@ static void open_extra_keypads(int primary, int *extra)
 
 	if (primary < 0 || fstat(primary, &first) != 0)
 		return;
-	for (slot = 0; slot < EXTRA_KEYPADS; ++slot) {
+	for (slot = 0; slot < FPLINUX_CONSOLE_EXTRA_KEYPAD_COUNT; ++slot) {
 		struct stat status;
 
 		if (extra[slot] < 0)
@@ -680,7 +691,8 @@ static void open_extra_keypads(int primary, int *extra)
 		close(directory_fd);
 		return;
 	}
-	while (taken < EXTRA_KEYPADS && entries < INPUT_DIRECTORY_ENTRY_LIMIT &&
+	while (taken < FPLINUX_CONSOLE_EXTRA_KEYPAD_COUNT &&
+	       entries < FPLINUX_CONSOLE_INPUT_DIRECTORY_ENTRY_LIMIT &&
 	       (entry = readdir(directory)) != NULL) {
 		struct stat status;
 		bool duplicate;
@@ -699,7 +711,9 @@ static void open_extra_keypads(int primary, int *extra)
 			continue;
 		}
 		duplicate = status.st_rdev == first.st_rdev;
-		for (slot = 0; !duplicate && slot < EXTRA_KEYPADS; ++slot) {
+		for (slot = 0;
+		     !duplicate && slot < FPLINUX_CONSOLE_EXTRA_KEYPAD_COUNT;
+		     ++slot) {
 			struct stat existing;
 
 			if (extra[slot] >= 0 &&
@@ -711,10 +725,11 @@ static void open_extra_keypads(int primary, int *extra)
 			close(fd);
 			continue;
 		}
-		for (slot = 0; slot < EXTRA_KEYPADS; ++slot)
+		for (slot = 0; slot < FPLINUX_CONSOLE_EXTRA_KEYPAD_COUNT;
+		     ++slot)
 			if (extra[slot] < 0)
 				break;
-		if (slot == EXTRA_KEYPADS) {
+		if (slot == FPLINUX_CONSOLE_EXTRA_KEYPAD_COUNT) {
 			close(fd);
 			break;
 		}
@@ -743,7 +758,7 @@ static int open_keypad(void)
 		close(directory_fd);
 		return -1;
 	}
-	while (entries < INPUT_DIRECTORY_ENTRY_LIMIT &&
+	while (entries < FPLINUX_CONSOLE_INPUT_DIRECTORY_ENTRY_LIMIT &&
 	       (entry = readdir(directory)) != NULL) {
 		struct stat status;
 		int fd;
@@ -776,7 +791,8 @@ static struct winsize console_geometry(void)
 		die_errno("cannot read console geometry with TIOCGWINSZ");
 	if (!geometry.ws_row || !geometry.ws_col)
 		die("console geometry has zero rows or columns");
-	if (geometry.ws_row > MAX_VT_ROWS || geometry.ws_col > MAX_VT_COLS)
+	if (geometry.ws_row > FPLINUX_CONSOLE_VT_MAX_ROWS ||
+	    geometry.ws_col > FPLINUX_CONSOLE_VT_MAX_COLS)
 		die("console geometry exceeds shared console limits");
 	return geometry;
 }
@@ -824,14 +840,16 @@ static void validate_vcsa(int fd, unsigned vt, const struct winsize *geometry,
 	if (fstat(fd, &status) < 0)
 		die_errno("cannot inspect VCSA device identity");
 	if (!S_ISCHR(status.st_mode) ||
-	    major(status.st_rdev) != VCSA_DEVICE_MAJOR ||
-	    minor(status.st_rdev) != VCSA_DEVICE_MINOR_BASE + vt)
+	    major(status.st_rdev) != FPLINUX_CONSOLE_VCSA_DEVICE_MAJOR ||
+	    minor(status.st_rdev) !=
+		    FPLINUX_CONSOLE_VCSA_DEVICE_MINOR_BASE + vt)
 		die("VCSA path does not identify the expected Linux device");
 	if (!read_all_at(fd, header, sizeof(header), 0))
 		die_errno(message);
-	if (!header[0] || !header[1] || header[0] > MAX_VT_ROWS ||
-	    header[1] > MAX_VT_COLS || header[0] != geometry->ws_row ||
-	    header[1] != geometry->ws_col)
+	if (!header[0] || !header[1] ||
+	    header[0] > FPLINUX_CONSOLE_VT_MAX_ROWS ||
+	    header[1] > FPLINUX_CONSOLE_VT_MAX_COLS ||
+	    header[0] != geometry->ws_row || header[1] != geometry->ws_col)
 		die("VCSA geometry does not match the active Linux VT");
 	if (!read_all_at(fd, &cell, sizeof(cell), 4) ||
 	    !write_all_at(fd, &cell, sizeof(cell), 4))
@@ -1196,7 +1214,8 @@ static void forward_terminal_replies(struct byte_fifo *fifo,
 			}
 			reply->bytes[reply->length++] = (char)c;
 			reply->deadline = deadline_after_ms(
-				monotonic_now(), TERMINAL_REPLY_HOLD_MS);
+				monotonic_now(),
+				FPLINUX_CONSOLE_TERMINAL_REPLY_HOLD_MS);
 			continue;
 		}
 		if (reply->length == 1) {
@@ -1209,7 +1228,7 @@ static void forward_terminal_replies(struct byte_fifo *fifo,
 			if (c == '\033') {
 				reply->deadline = deadline_after_ms(
 					monotonic_now(),
-					TERMINAL_REPLY_HOLD_MS);
+					FPLINUX_CONSOLE_TERMINAL_REPLY_HOLD_MS);
 				continue;
 			}
 			reply->length = 0;
@@ -1254,7 +1273,7 @@ static struct transcript_line *current_transcript_line(void)
 {
 	size_t index =
 		(interface.transcript.first + interface.transcript.count - 1) %
-		TRANSCRIPT_LINES;
+		FPLINUX_CONSOLE_TRANSCRIPT_LINE_COUNT;
 
 	return &interface.transcript.lines[index];
 }
@@ -1264,14 +1283,15 @@ static void start_transcript_line(void)
 	struct transcript *transcript = &interface.transcript;
 	size_t index;
 
-	if (transcript->count < TRANSCRIPT_LINES) {
+	if (transcript->count < FPLINUX_CONSOLE_TRANSCRIPT_LINE_COUNT) {
 		index = (transcript->first + transcript->count) %
-			TRANSCRIPT_LINES;
+			FPLINUX_CONSOLE_TRANSCRIPT_LINE_COUNT;
 		++transcript->count;
 	} else {
-		transcript->first = (transcript->first + 1) % TRANSCRIPT_LINES;
+		transcript->first = (transcript->first + 1) %
+				    FPLINUX_CONSOLE_TRANSCRIPT_LINE_COUNT;
 		index = (transcript->first + transcript->count - 1) %
-			TRANSCRIPT_LINES;
+			FPLINUX_CONSOLE_TRANSCRIPT_LINE_COUNT;
 	}
 	memset(&transcript->lines[index], 0, sizeof(transcript->lines[index]));
 	if (runtime.history_active && interface.history_distance)
@@ -1305,76 +1325,90 @@ static void ingest_transcript_byte(unsigned char c)
 	struct transcript *transcript = &interface.transcript;
 	struct transcript_line *line;
 
-	if (transcript->escape_state != TRANSCRIPT_TEXT &&
+	if (transcript->escape_state != FPLINUX_CONSOLE_TRANSCRIPT_TEXT &&
 	    (c == 0x18 || c == 0x1a || c == 0x9c)) {
-		transcript->escape_state = TRANSCRIPT_TEXT;
+		transcript->escape_state = FPLINUX_CONSOLE_TRANSCRIPT_TEXT;
 		return;
 	}
 
 	switch (transcript->escape_state) {
-	case TRANSCRIPT_ESCAPE:
+	case FPLINUX_CONSOLE_TRANSCRIPT_ESCAPE:
 		if (c == '[')
-			transcript->escape_state = TRANSCRIPT_CSI;
+			transcript->escape_state =
+				FPLINUX_CONSOLE_TRANSCRIPT_CSI;
 		else if (c == ']')
-			transcript->escape_state = TRANSCRIPT_OSC;
+			transcript->escape_state =
+				FPLINUX_CONSOLE_TRANSCRIPT_OSC;
 		else if (c == 'P' || c == '^' || c == '_')
-			transcript->escape_state = TRANSCRIPT_STRING;
+			transcript->escape_state =
+				FPLINUX_CONSOLE_TRANSCRIPT_STRING;
 		else if (c >= 0x20 && c <= 0x2f)
-			transcript->escape_state = TRANSCRIPT_ESCAPE_SEQUENCE;
+			transcript->escape_state =
+				FPLINUX_CONSOLE_TRANSCRIPT_ESCAPE_SEQUENCE;
 		else
-			transcript->escape_state = TRANSCRIPT_TEXT;
+			transcript->escape_state =
+				FPLINUX_CONSOLE_TRANSCRIPT_TEXT;
 		return;
-	case TRANSCRIPT_ESCAPE_SEQUENCE:
+	case FPLINUX_CONSOLE_TRANSCRIPT_ESCAPE_SEQUENCE:
 		if (c >= 0x30 && c <= 0x7e)
-			transcript->escape_state = TRANSCRIPT_TEXT;
+			transcript->escape_state =
+				FPLINUX_CONSOLE_TRANSCRIPT_TEXT;
 		return;
-	case TRANSCRIPT_CSI:
+	case FPLINUX_CONSOLE_TRANSCRIPT_CSI:
 		if (c >= 0x40 && c <= 0x7e) {
 			if (c == 'K')
 				clear_current_transcript_line();
-			transcript->escape_state = TRANSCRIPT_TEXT;
+			transcript->escape_state =
+				FPLINUX_CONSOLE_TRANSCRIPT_TEXT;
 		}
 		return;
-	case TRANSCRIPT_OSC:
+	case FPLINUX_CONSOLE_TRANSCRIPT_OSC:
 		if (c == '\a')
-			transcript->escape_state = TRANSCRIPT_TEXT;
+			transcript->escape_state =
+				FPLINUX_CONSOLE_TRANSCRIPT_TEXT;
 		else if (c == '\033')
-			transcript->escape_state = TRANSCRIPT_OSC_ESCAPE;
+			transcript->escape_state =
+				FPLINUX_CONSOLE_TRANSCRIPT_OSC_ESCAPE;
 		return;
-	case TRANSCRIPT_OSC_ESCAPE:
+	case FPLINUX_CONSOLE_TRANSCRIPT_OSC_ESCAPE:
 		if (c == '\\')
-			transcript->escape_state = TRANSCRIPT_TEXT;
+			transcript->escape_state =
+				FPLINUX_CONSOLE_TRANSCRIPT_TEXT;
 		else if (c != '\033')
-			transcript->escape_state = TRANSCRIPT_OSC;
+			transcript->escape_state =
+				FPLINUX_CONSOLE_TRANSCRIPT_OSC;
 		return;
-	case TRANSCRIPT_STRING:
+	case FPLINUX_CONSOLE_TRANSCRIPT_STRING:
 		if (c == '\033')
-			transcript->escape_state = TRANSCRIPT_STRING_ESCAPE;
+			transcript->escape_state =
+				FPLINUX_CONSOLE_TRANSCRIPT_STRING_ESCAPE;
 		return;
-	case TRANSCRIPT_STRING_ESCAPE:
+	case FPLINUX_CONSOLE_TRANSCRIPT_STRING_ESCAPE:
 		if (c == '\\')
-			transcript->escape_state = TRANSCRIPT_TEXT;
+			transcript->escape_state =
+				FPLINUX_CONSOLE_TRANSCRIPT_TEXT;
 		else if (c != '\033')
-			transcript->escape_state = TRANSCRIPT_STRING;
+			transcript->escape_state =
+				FPLINUX_CONSOLE_TRANSCRIPT_STRING;
 		return;
-	case TRANSCRIPT_TEXT:
+	case FPLINUX_CONSOLE_TRANSCRIPT_TEXT:
 		break;
 	}
 
 	if (c == '\033') {
-		transcript->escape_state = TRANSCRIPT_ESCAPE;
+		transcript->escape_state = FPLINUX_CONSOLE_TRANSCRIPT_ESCAPE;
 		return;
 	}
 	if (c == 0x90 || c == 0x9e || c == 0x9f) {
-		transcript->escape_state = TRANSCRIPT_STRING;
+		transcript->escape_state = FPLINUX_CONSOLE_TRANSCRIPT_STRING;
 		return;
 	}
 	if (c == 0x9b) {
-		transcript->escape_state = TRANSCRIPT_CSI;
+		transcript->escape_state = FPLINUX_CONSOLE_TRANSCRIPT_CSI;
 		return;
 	}
 	if (c == 0x9d) {
-		transcript->escape_state = TRANSCRIPT_OSC;
+		transcript->escape_state = FPLINUX_CONSOLE_TRANSCRIPT_OSC;
 		return;
 	}
 	if (c == '\n') {
@@ -1467,13 +1501,13 @@ static unsigned char overlay_character(void)
 		return (unsigned char)characters[interface.composition.index];
 	}
 	switch (interface.composition.modifier) {
-	case MODIFIER_CTRL:
+	case FPLINUX_CONSOLE_MODIFIER_CTRL:
 		return 'C';
-	case MODIFIER_ALT:
+	case FPLINUX_CONSOLE_MODIFIER_ALT:
 		return 'A';
-	case MODIFIER_SHIFT:
+	case FPLINUX_CONSOLE_MODIFIER_SHIFT:
 		return 'S';
-	case MODIFIER_NONE:
+	case FPLINUX_CONSOLE_MODIFIER_NONE:
 		return 0;
 	}
 	return 0;
@@ -1490,8 +1524,9 @@ static void draw_overlay(unsigned char character)
 		return;
 	if (!read_all_at(runtime.primary_vcsa, header, sizeof(header), 0))
 		die_errno("cannot read primary VCSA cursor");
-	if (!header[0] || !header[1] || header[0] > MAX_VT_ROWS ||
-	    header[1] > MAX_VT_COLS || header[2] >= header[1] ||
+	if (!header[0] || !header[1] ||
+	    header[0] > FPLINUX_CONSOLE_VT_MAX_ROWS ||
+	    header[1] > FPLINUX_CONSOLE_VT_MAX_COLS || header[2] >= header[1] ||
 	    header[3] >= header[0])
 		die("primary VCSA reported invalid geometry or cursor");
 	offset = 4 + (off_t)2 * ((off_t)header[3] * header[1] + header[2]);
@@ -1514,7 +1549,7 @@ static void draw_overlay(unsigned char character)
  */
 static void draw_status_bar(void)
 {
-	struct vcsa_cell row[MAX_VT_COLS];
+	struct vcsa_cell row[FPLINUX_CONSOLE_VT_MAX_COLS];
 	unsigned char header[4];
 	char text[64];
 	const char *mode = interface.raw_input ? "QWERTY" : "T9";
@@ -1527,13 +1562,13 @@ static void draw_status_bar(void)
 	if (!interface.status_row || runtime.history_active)
 		return;
 	switch (interface.composition.modifier) {
-	case MODIFIER_CTRL:
+	case FPLINUX_CONSOLE_MODIFIER_CTRL:
 		modifier = " CTRL";
 		break;
-	case MODIFIER_ALT:
+	case FPLINUX_CONSOLE_MODIFIER_ALT:
 		modifier = " ALT";
 		break;
-	case MODIFIER_SHIFT:
+	case FPLINUX_CONSOLE_MODIFIER_SHIFT:
 		modifier = " SHIFT";
 		break;
 	default:
@@ -1544,8 +1579,9 @@ static void draw_status_bar(void)
 		die("cannot format status bar text");
 	if (!read_all_at(runtime.primary_vcsa, header, sizeof(header), 0))
 		die_errno("cannot read primary VCSA geometry");
-	if (!header[0] || !header[1] || header[0] > MAX_VT_ROWS ||
-	    header[1] > MAX_VT_COLS)
+	if (!header[0] || !header[1] ||
+	    header[0] > FPLINUX_CONSOLE_VT_MAX_ROWS ||
+	    header[1] > FPLINUX_CONSOLE_VT_MAX_COLS)
 		die("primary VCSA reported invalid geometry");
 	columns = header[1];
 	for (i = 0; i < columns; ++i) {
@@ -1575,7 +1611,8 @@ static void cancel_composition(void)
 static void start_visual_bell(struct timespec now)
 {
 	interface.visual_bell = true;
-	interface.visual_bell_deadline = deadline_after_ms(now, VISUAL_BELL_MS);
+	interface.visual_bell_deadline =
+		deadline_after_ms(now, FPLINUX_CONSOLE_VISUAL_BELL_MS);
 	refresh_overlay();
 }
 
@@ -1588,9 +1625,9 @@ static void dismiss_visual_bell(void)
 }
 
 enum enqueue_result {
-	ENQUEUE_OK,
-	ENQUEUE_REJECTED,
-	ENQUEUE_FULL,
+	FPLINUX_CONSOLE_ENQUEUE_OK,
+	FPLINUX_CONSOLE_ENQUEUE_REJECTED,
+	FPLINUX_CONSOLE_ENQUEUE_FULL,
 };
 
 static bool compose_character(unsigned char *bytes, size_t *length)
@@ -1601,17 +1638,17 @@ static bool compose_character(unsigned char *bytes, size_t *length)
 		(unsigned char)characters[interface.composition.index];
 
 	switch (interface.composition.modifier) {
-	case MODIFIER_NONE:
+	case FPLINUX_CONSOLE_MODIFIER_NONE:
 		bytes[(*length)++] = character;
 		return true;
-	case MODIFIER_SHIFT:
+	case FPLINUX_CONSOLE_MODIFIER_SHIFT:
 		bytes[(*length)++] = capital(character);
 		return true;
-	case MODIFIER_ALT:
+	case FPLINUX_CONSOLE_MODIFIER_ALT:
 		bytes[(*length)++] = '\033';
 		bytes[(*length)++] = character;
 		return true;
-	case MODIFIER_CTRL:
+	case FPLINUX_CONSOLE_MODIFIER_CTRL:
 		if ((character >= '@' && character <= '_') ||
 		    (character >= 'a' && character <= 'z')) {
 			bytes[(*length)++] = character & 0x1f;
@@ -1638,20 +1675,20 @@ static enum enqueue_result enqueue_composition_and(struct byte_fifo *fifo,
 	    !compose_character(bytes, &length)) {
 		cancel_composition();
 		start_visual_bell(now);
-		return ENQUEUE_REJECTED;
+		return FPLINUX_CONSOLE_ENQUEUE_REJECTED;
 	}
 	if (length + suffix_length > sizeof(bytes))
 		die("key sequence exceeds composition buffer");
 	memcpy(bytes + length, suffix, suffix_length);
 	length += suffix_length;
 	if (length && !fifo_push(fifo, bytes, length))
-		return ENQUEUE_FULL;
+		return FPLINUX_CONSOLE_ENQUEUE_FULL;
 	if (interface.composition.pending) {
 		cancel_composition();
-		interface.composition.modifier = MODIFIER_NONE;
+		interface.composition.modifier = FPLINUX_CONSOLE_MODIFIER_NONE;
 		refresh_overlay();
 	}
-	return ENQUEUE_OK;
+	return FPLINUX_CONSOLE_ENQUEUE_OK;
 }
 
 static bool start_or_cycle_composition(struct byte_fifo *fifo, uint16_t code,
@@ -1664,7 +1701,7 @@ static bool start_or_cycle_composition(struct byte_fifo *fifo, uint16_t code,
 		interface.composition.index =
 			(interface.composition.index + 1) % strlen(characters);
 		interface.composition.deadline =
-			deadline_after_ms(now, MULTITAP_MS);
+			deadline_after_ms(now, FPLINUX_CONSOLE_MULTITAP_MS);
 		refresh_overlay();
 		return true;
 	}
@@ -1672,15 +1709,16 @@ static bool start_or_cycle_composition(struct byte_fifo *fifo, uint16_t code,
 		enum enqueue_result result =
 			enqueue_composition_and(fifo, "", 0, now);
 
-		if (result == ENQUEUE_FULL)
+		if (result == FPLINUX_CONSOLE_ENQUEUE_FULL)
 			return false;
-		if (result == ENQUEUE_REJECTED)
+		if (result == FPLINUX_CONSOLE_ENQUEUE_REJECTED)
 			return true;
 	}
 	interface.composition.pending = true;
 	interface.composition.last_code = code;
 	interface.composition.index = 0;
-	interface.composition.deadline = deadline_after_ms(now, MULTITAP_MS);
+	interface.composition.deadline =
+		deadline_after_ms(now, FPLINUX_CONSOLE_MULTITAP_MS);
 	refresh_overlay();
 	return true;
 }
@@ -1698,8 +1736,9 @@ static size_t history_visible_rows(void)
 
 	if (!read_all_at(runtime.history_vcsa, header, sizeof(header), 0))
 		die_errno("cannot read history VCSA geometry");
-	if (!header[0] || !header[1] || header[0] > MAX_VT_ROWS ||
-	    header[1] > MAX_VT_COLS)
+	if (!header[0] || !header[1] ||
+	    header[0] > FPLINUX_CONSOLE_VT_MAX_ROWS ||
+	    header[1] > FPLINUX_CONSOLE_VT_MAX_COLS)
 		die("history VCSA reported invalid geometry");
 	return header[0] > 1 ? (size_t)header[0] - 1 : 0;
 }
@@ -1731,7 +1770,8 @@ static void render_history(void)
 		die_errno("cannot read history VCSA geometry");
 	rows = header[0];
 	columns = header[1];
-	if (!rows || !columns || rows > MAX_VT_ROWS || columns > MAX_VT_COLS)
+	if (!rows || !columns || rows > FPLINUX_CONSOLE_VT_MAX_ROWS ||
+	    columns > FPLINUX_CONSOLE_VT_MAX_COLS)
 		die("history VCSA reported invalid geometry");
 	cells = rows * columns;
 	for (i = 0; i < cells; ++i) {
@@ -1755,7 +1795,7 @@ static void render_history(void)
 	for (row = 0; row < visible && top + row < interface.transcript.count;
 	     ++row) {
 		size_t index = (interface.transcript.first + top + row) %
-			       TRANSCRIPT_LINES;
+			       FPLINUX_CONSOLE_TRANSCRIPT_LINE_COUNT;
 		const struct transcript_line *line =
 			&interface.transcript.lines[index];
 		size_t length = line->length < columns ? line->length : columns;
@@ -1859,14 +1899,14 @@ static bool handle_tab(struct byte_fifo *fifo, struct timespec now)
 
 	if (interface.composition.pending) {
 		result = enqueue_composition_and(fifo, "\t", 1, now);
-		return result != ENQUEUE_FULL;
+		return result != FPLINUX_CONSOLE_ENQUEUE_FULL;
 	}
-	if (interface.composition.modifier == MODIFIER_NONE)
+	if (interface.composition.modifier == FPLINUX_CONSOLE_MODIFIER_NONE)
 		return enqueue_sequence(fifo, "\t");
-	if (interface.composition.modifier == MODIFIER_SHIFT) {
+	if (interface.composition.modifier == FPLINUX_CONSOLE_MODIFIER_SHIFT) {
 		if (!enqueue_sequence(fifo, "\033\t"))
 			return false;
-		interface.composition.modifier = MODIFIER_NONE;
+		interface.composition.modifier = FPLINUX_CONSOLE_MODIFIER_NONE;
 		refresh_overlay();
 		return true;
 	}
@@ -1936,17 +1976,17 @@ static bool handle_primary_key(struct byte_fifo *fifo, uint16_t code,
 	}
 	if (code == KEY_KPASTERISK) {
 		result = enqueue_composition_and(fifo, "", 0, now);
-		if (result == ENQUEUE_FULL)
+		if (result == FPLINUX_CONSOLE_ENQUEUE_FULL)
 			return false;
-		if (result == ENQUEUE_OK)
+		if (result == FPLINUX_CONSOLE_ENQUEUE_OK)
 			cycle_modifier();
 		return true;
 	}
 	if (code == KEY_KPDOT) {
 		result = enqueue_composition_and(fifo, "", 0, now);
-		if (result == ENQUEUE_FULL)
+		if (result == FPLINUX_CONSOLE_ENQUEUE_FULL)
 			return false;
-		if (result == ENQUEUE_OK)
+		if (result == FPLINUX_CONSOLE_ENQUEUE_OK)
 			enter_history();
 		return true;
 	}
@@ -1973,7 +2013,7 @@ static bool handle_primary_key(struct byte_fifo *fifo, uint16_t code,
 		return true;
 	}
 	result = enqueue_composition_and(fifo, sequence, strlen(sequence), now);
-	return result != ENQUEUE_FULL;
+	return result != FPLINUX_CONSOLE_ENQUEUE_FULL;
 }
 
 static bool is_repeatable_key(uint16_t code)
@@ -1990,34 +2030,37 @@ static void disconnect_keypad(struct timespec *reopen_deadline,
 	runtime.keypad = -1;
 	runtime.keypad_dropping[0] = false;
 	cancel_composition();
-	interface.composition.modifier = MODIFIER_NONE;
+	interface.composition.modifier = FPLINUX_CONSOLE_MODIFIER_NONE;
 	interface.visual_bell = false;
 	reset_keypad_gesture(0);
 	refresh_overlay();
-	*reopen_deadline = deadline_after_ms(now, KEYPAD_REOPEN_MS);
+	*reopen_deadline =
+		deadline_after_ms(now, FPLINUX_CONSOLE_KEYPAD_REOPEN_MS);
 }
 
 enum pty_drain_result {
-	PTY_DRAIN_BUDGET_EXHAUSTED,
-	PTY_DRAIN_IDLE,
-	PTY_DRAIN_CLOSED,
+	FPLINUX_CONSOLE_PTY_DRAIN_BUDGET_EXHAUSTED,
+	FPLINUX_CONSOLE_PTY_DRAIN_IDLE,
+	FPLINUX_CONSOLE_PTY_DRAIN_CLOSED,
 };
 
 static enum pty_drain_result drain_shell_output(void)
 {
-	unsigned char output[PTY_DRAIN_CHUNK_BYTES];
-	enum pty_drain_result result = PTY_DRAIN_BUDGET_EXHAUSTED;
+	unsigned char output[FPLINUX_CONSOLE_PTY_DRAIN_CHUNK_BYTES];
+	enum pty_drain_result result =
+		FPLINUX_CONSOLE_PTY_DRAIN_BUDGET_EXHAUSTED;
 	size_t bytes = 0;
 	size_t reads = 0;
 	bool forwarded = false;
 
-	while (bytes < PTY_DRAIN_BUDGET_BYTES &&
-	       reads < PTY_DRAIN_READ_BUDGET) {
+	while (bytes < FPLINUX_CONSOLE_PTY_DRAIN_BUDGET_BYTES &&
+	       reads < FPLINUX_CONSOLE_PTY_DRAIN_READ_BUDGET) {
 		size_t capacity = sizeof(output);
 		ssize_t length;
 
-		if (capacity > PTY_DRAIN_BUDGET_BYTES - bytes)
-			capacity = PTY_DRAIN_BUDGET_BYTES - bytes;
+		if (capacity > FPLINUX_CONSOLE_PTY_DRAIN_BUDGET_BYTES - bytes)
+			capacity =
+				FPLINUX_CONSOLE_PTY_DRAIN_BUDGET_BYTES - bytes;
 		++reads;
 		length = read(runtime.pty, output, capacity);
 		if (length > 0) {
@@ -2030,17 +2073,17 @@ static enum pty_drain_result drain_shell_output(void)
 			continue;
 		}
 		if (!length) {
-			result = PTY_DRAIN_CLOSED;
+			result = FPLINUX_CONSOLE_PTY_DRAIN_CLOSED;
 			break;
 		}
 		if (errno == EINTR)
 			continue;
 		if (errno == EAGAIN || errno == EWOULDBLOCK) {
-			result = PTY_DRAIN_IDLE;
+			result = FPLINUX_CONSOLE_PTY_DRAIN_IDLE;
 			break;
 		}
 		if (errno == EIO) {
-			result = PTY_DRAIN_CLOSED;
+			result = FPLINUX_CONSOLE_PTY_DRAIN_CLOSED;
 			break;
 		}
 		die_errno("cannot read shell PTY");
@@ -2119,7 +2162,7 @@ static void commit_expired_composition(struct byte_fifo *pty_tx,
 	    !deadline_reached(now, interface.composition.deadline))
 		return;
 	result = enqueue_composition_and(pty_tx, "", 0, now);
-	if (result == ENQUEUE_FULL)
+	if (result == FPLINUX_CONSOLE_ENQUEUE_FULL)
 		die("PTY input FIFO capacity invariant violated");
 }
 
@@ -2156,8 +2199,8 @@ static void process_keypad_event(struct byte_fifo *pty_tx, int slot,
 			interface.star_slot = token;
 			interface.star_down = true;
 			interface.held_star_byte = false;
-			interface.star_hold_deadline =
-				deadline_after_ms(now, STAR_HOLD_MS);
+			interface.star_hold_deadline = deadline_after_ms(
+				now, FPLINUX_CONSOLE_STAR_HOLD_MS);
 			return;
 		}
 		if (value == 0) {
@@ -2227,14 +2270,14 @@ static int keypad_slot_fd(int slot)
 {
 	if (slot == 0)
 		return runtime.keypad;
-	if (slot > 0 && slot <= EXTRA_KEYPADS)
+	if (slot > 0 && slot <= FPLINUX_CONSOLE_EXTRA_KEYPAD_COUNT)
 		return runtime.extra_keypads[slot - 1];
 	return -1;
 }
 
 static void resync_keypad(int slot)
 {
-	unsigned char keys[KEY_STATE_BYTES] = { 0 };
+	unsigned char keys[FPLINUX_CONSOLE_KEY_STATE_BYTES] = { 0 };
 	int fd = keypad_slot_fd(slot);
 	unsigned token = (unsigned)slot + 1;
 	bool star_pressed;
@@ -2244,10 +2287,10 @@ static void resync_keypad(int slot)
 		reset_keypad_gesture(slot);
 		return;
 	}
-	star_pressed = keys[KEY_KPASTERISK / 8u] &
-		       (unsigned char)(1u << (KEY_KPASTERISK % 8u));
-	backspace_pressed = keys[KEY_BACKSPACE / 8u] &
-			    (unsigned char)(1u << (KEY_BACKSPACE % 8u));
+	star_pressed = keys[KEY_KPASTERISK / 8U] &
+		       (unsigned char)(1U << (KEY_KPASTERISK % 8U));
+	backspace_pressed = keys[KEY_BACKSPACE / 8U] &
+			    (unsigned char)(1U << (KEY_BACKSPACE % 8U));
 	if (interface.star_slot == token) {
 		if (star_pressed)
 			interface.star_down = true;
@@ -2259,7 +2302,7 @@ static void resync_keypad(int slot)
 		interface.star_slot = token;
 		interface.star_down = true;
 		interface.star_hold_deadline =
-			deadline_after_ms(now, STAR_HOLD_MS);
+			deadline_after_ms(now, FPLINUX_CONSOLE_STAR_HOLD_MS);
 	}
 	if (interface.backspace_slot == token && !backspace_pressed) {
 		interface.suppress_backspace_until_release = false;
@@ -2310,8 +2353,8 @@ int main(void)
 {
 	struct terminal_reply terminal_reply = { { 0 }, 0, { 0, 0 } };
 	struct byte_fifo pty_tx = { { 0 }, 0, 0 };
-	struct input_event events[KEYPAD_EVENT_COUNT];
-	struct pollfd descriptors[4 + EXTRA_KEYPADS];
+	struct input_event events[FPLINUX_CONSOLE_KEYPAD_EVENT_COUNT];
+	struct pollfd descriptors[4 + FPLINUX_CONSOLE_EXTRA_KEYPAD_COUNT];
 	struct timespec keypad_reopen_deadline = { 0 };
 	struct timespec extra_rescan_deadline = { 0 };
 	struct winsize geometry;
@@ -2382,28 +2425,29 @@ int main(void)
 			runtime.keypad = open_keypad();
 			if (runtime.keypad < 0) {
 				keypad_reopen_deadline = deadline_after_ms(
-					now, KEYPAD_REOPEN_MS);
+					now, FPLINUX_CONSOLE_KEYPAD_REOPEN_MS);
 			} else {
 				runtime.keypad_dropping[0] = false;
 				open_extra_keypads(runtime.keypad,
 						   runtime.extra_keypads);
 				sync_new_keypad(0);
 				extra_rescan_deadline = deadline_after_ms(
-					now, KEYPAD_REOPEN_MS * 4);
+					now,
+					FPLINUX_CONSOLE_KEYPAD_REOPEN_MS * 4);
 			}
 		}
 		if (deadline_reached(now, extra_rescan_deadline)) {
 			open_extra_keypads(runtime.keypad,
 					   runtime.extra_keypads);
-			extra_rescan_deadline =
-				deadline_after_ms(now, KEYPAD_REOPEN_MS * 4);
+			extra_rescan_deadline = deadline_after_ms(
+				now, FPLINUX_CONSOLE_KEYPAD_REOPEN_MS * 4);
 		}
 
 		descriptors[0].fd = runtime.keypad;
 		descriptors[0].events =
 			runtime.pty >= 0 && !runtime.pty_final_drain &&
 					fifo_free(&pty_tx) >=
-						KEYPAD_INPUT_FIFO_RESERVE ?
+						FPLINUX_CONSOLE_KEYPAD_INPUT_FIFO_RESERVE_BYTES ?
 				POLLIN :
 				0;
 		descriptors[0].revents = 0;
@@ -2419,7 +2463,7 @@ int main(void)
 		descriptors[2].events =
 			runtime.pty >= 0 && !runtime.pty_final_drain &&
 					fifo_free(&pty_tx) >=
-						TERMINAL_INPUT_FIFO_RESERVE ?
+						FPLINUX_CONSOLE_TERMINAL_INPUT_FIFO_RESERVE_BYTES ?
 				POLLIN :
 				0;
 		descriptors[2].revents = 0;
@@ -2453,12 +2497,13 @@ int main(void)
 		if (runtime.pty_final_drain)
 			timeout = 0;
 
-		for (size_t slot = 0; slot < EXTRA_KEYPADS; ++slot) {
+		for (size_t slot = 0; slot < FPLINUX_CONSOLE_EXTRA_KEYPAD_COUNT;
+		     ++slot) {
 			descriptors[4 + slot].fd = runtime.extra_keypads[slot];
 			descriptors[4 + slot].events =
 				runtime.pty >= 0 && !runtime.pty_final_drain &&
 						fifo_free(&pty_tx) >=
-							KEYPAD_INPUT_FIFO_RESERVE ?
+							FPLINUX_CONSOLE_KEYPAD_INPUT_FIFO_RESERVE_BYTES ?
 					POLLIN :
 					0;
 			descriptors[4 + slot].revents = 0;
@@ -2470,7 +2515,8 @@ int main(void)
 		/* The candidate exists only while this process is blocked in
 		 * poll. */
 		draw_overlay(overlay_character());
-		ready = poll(descriptors, 4 + EXTRA_KEYPADS, timeout);
+		ready = poll(descriptors,
+			     4 + FPLINUX_CONSOLE_EXTRA_KEYPAD_COUNT, timeout);
 		poll_errno = errno;
 		if (!remove_overlay())
 			die_errno("cannot remove primary VCSA overlay");
@@ -2500,9 +2546,9 @@ int main(void)
 					 descriptors[1].revents & POLLIN)) {
 			enum pty_drain_result result = drain_shell_output();
 
-			if (result == PTY_DRAIN_CLOSED ||
+			if (result == FPLINUX_CONSOLE_PTY_DRAIN_CLOSED ||
 			    (runtime.pty_final_drain &&
-			     result == PTY_DRAIN_IDLE))
+			     result == FPLINUX_CONSOLE_PTY_DRAIN_IDLE))
 				close_shell_pty(&pty_tx);
 		}
 		if (runtime.pty >= 0 && descriptors[1].revents & POLLNVAL)
@@ -2518,7 +2564,8 @@ int main(void)
 			disconnect_keypad(&keypad_reopen_deadline, now);
 		} else if (runtime.keypad >= 0 && !runtime.pty_final_drain &&
 			   descriptors[0].revents & POLLIN &&
-			   fifo_free(&pty_tx) >= KEYPAD_INPUT_FIFO_RESERVE) {
+			   fifo_free(&pty_tx) >=
+				   FPLINUX_CONSOLE_KEYPAD_INPUT_FIFO_RESERVE_BYTES) {
 			ssize_t length;
 
 			do {
@@ -2539,7 +2586,8 @@ int main(void)
 			}
 		}
 
-		for (size_t slot = 0; slot < EXTRA_KEYPADS; ++slot) {
+		for (size_t slot = 0; slot < FPLINUX_CONSOLE_EXTRA_KEYPAD_COUNT;
+		     ++slot) {
 			ssize_t length;
 
 			if (runtime.extra_keypads[slot] < 0)
@@ -2551,7 +2599,8 @@ int main(void)
 			}
 			if (!(descriptors[4 + slot].revents & POLLIN) ||
 			    runtime.pty_final_drain ||
-			    fifo_free(&pty_tx) < KEYPAD_INPUT_FIFO_RESERVE)
+			    fifo_free(&pty_tx) <
+				    FPLINUX_CONSOLE_KEYPAD_INPUT_FIFO_RESERVE_BYTES)
 				continue;
 			do {
 				length = read(runtime.extra_keypads[slot],
@@ -2569,8 +2618,9 @@ int main(void)
 
 		if (runtime.pty >= 0 && !runtime.pty_final_drain &&
 		    descriptors[2].revents & POLLIN &&
-		    fifo_free(&pty_tx) >= TERMINAL_INPUT_FIFO_RESERVE) {
-			char terminal_input[TERMINAL_INPUT_BYTES];
+		    fifo_free(&pty_tx) >=
+			    FPLINUX_CONSOLE_TERMINAL_INPUT_FIFO_RESERVE_BYTES) {
+			char terminal_input[FPLINUX_CONSOLE_TERMINAL_INPUT_BYTES];
 			ssize_t length;
 
 			do {

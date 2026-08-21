@@ -61,7 +61,7 @@ static const struct ums9117_fb_profile inoi244_fb_profile = {
 	.sleep_in_ms = 5,
 	.sleep_out_ms = 200,
 	.lcdc_ctrl_set = BIT(1),
-	.lcdc_ctrl_clear = BIT(2) | (7u << 5),
+	.lcdc_ctrl_clear = BIT(2) | (7U << 5),
 };
 
 static int inoi244_fb_probe(struct platform_device *pdev)

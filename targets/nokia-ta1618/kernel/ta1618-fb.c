@@ -52,7 +52,7 @@ static const struct ums9117_fb_profile ta1618_fb_profile = {
 	.sleep_in_ms = 5,
 	.sleep_out_ms = 120,
 	.lcdc_ctrl_set = BIT(2),
-	.lcdc_ctrl_clear = BIT(1) | (7u << 5),
+	.lcdc_ctrl_clear = BIT(1) | (7U << 5),
 };
 
 static int ta1618_fb_probe(struct platform_device *pdev)
