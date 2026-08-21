@@ -264,6 +264,7 @@ def check_contexts(reporter: RunReporter | None) -> None:
             sparse_command = [
                 *kbuild,
                 "-j1",
+                "W=1e",
                 "C=2",
                 "CHECK=sparse",
                 "CF=-D__CHECK_ENDIAN__ -Wsparse-error",

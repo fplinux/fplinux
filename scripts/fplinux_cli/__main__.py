@@ -22,6 +22,15 @@ if TYPE_CHECKING:
 
 _EXCLUSIVE_CACHE_COMMANDS = frozenset({"build", "check", "setup"})
 _SHARED_CACHE_COMMANDS = frozenset({"console", "package", "run", "verify"})
+_CHECK_SCOPE_METAVAR = "{" + ",".join(CHECK_SCOPES) + "}"
+
+
+def _check_scope(value: str) -> str:
+    """Validate one optional check scope without treating an empty list as a value."""
+    if value not in CHECK_SCOPES:
+        choices = ", ".join(repr(scope) for scope in CHECK_SCOPES)
+        raise argparse.ArgumentTypeError(f"invalid choice: {value!r} (choose from {choices})")
+    return value
 
 
 def _cache_lock_exclusive(args: argparse.Namespace) -> bool | None:
@@ -124,7 +133,12 @@ def main() -> None:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("doctor", help="check the rootless build host")
     check_parser = commands.add_parser("check", help="run the source quality gate")
-    check_parser.add_argument("scopes", nargs="*", choices=CHECK_SCOPES)
+    check_parser.add_argument(
+        "scopes",
+        nargs="*",
+        type=_check_scope,
+        metavar=_CHECK_SCOPE_METAVAR,
+    )
     check_parser.add_argument(
         "--list",
         dest="list_scopes",

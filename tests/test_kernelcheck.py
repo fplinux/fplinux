@@ -166,7 +166,24 @@ class SparseAnalysisTests(unittest.TestCase):
         self.assertFalse(stale.exists())
         self.assertTrue(any(f"O={self._cache_path('work')}" in command for command in second))
         sparse_command = next(command for command in second if "CHECK=sparse" in command)
-        self.assertIn("-j1", sparse_command)
+        self.assertEqual(
+            sparse_command,
+            [
+                "make",
+                "-C",
+                str(self.source),
+                f"O={self._cache_path('work')}",
+                "ARCH=arm",
+                "CROSS_COMPILE=arm-linux-gnueabihf-",
+                "-j1",
+                "W=1e",
+                "C=2",
+                "CHECK=sparse",
+                "CF=-D__CHECK_ENDIAN__ -Wsparse-error",
+                "drivers/test-a.o",
+                "drivers/test-b.o",
+            ],
+        )
         self.assertFalse((self._cache_path("success.json")).exists())
 
     def test_failure_never_creates_an_inner_success_receipt(self) -> None:
