@@ -1,240 +1,73 @@
 # FPLinux
 
-FPLinux ports Linux to feature phones. The project contains complete source ports,
-reproducible build environments and phone-specific RAM loaders. Shared SoC
-support is separate from each phone's board support.
+FPLinux is a source-built Linux port for selected feature phones. It loads into
+volatile RAM alongside the vendor firmware; the supported loader workflows do
+not flash, erase, partition, or modify phone storage.
 
-FPLinux boots alongside the original phone software: its boot paths load into
-volatile RAM and do not replace the vendor firmware.
+## Supported targets
 
-## Photos
-
-Photographs are not included in this source snapshot.
-
-<!-- Boot-screen photograph goes here. -->
-
-<!-- Local phone-console photograph goes here. -->
-
-## Phone targets
-
-| Target               | Device                  | Platform                                 | Profile   | Documentation                                                |
+| Target               | Device                  | Platform                                 | Profile   | Hardware status                                              |
 | -------------------- | ----------------------- | ---------------------------------------- | --------- | ------------------------------------------------------------ |
 | `inoi-240-modern-4g` | INOI 240 Modern 4G      | [`ums9117`](platforms/ums9117/README.md) | `console` | [Target documentation](targets/inoi-240-modern-4g/README.md) |
 | `inoi-244-modern-4g` | INOI 244 Modern 4G      | [`ums9117`](platforms/ums9117/README.md) | `console` | [Target documentation](targets/inoi-244-modern-4g/README.md) |
 | `nokia-ta1618`       | Nokia 3210 4G (TA-1618) | [`ums9117`](platforms/ums9117/README.md) | `console` | [Target documentation](targets/nokia-ta1618/README.md)       |
 
-Hardware support status, qualification state and phone-specific limitations are
-recorded only in the target documentation.
+Each target document is the source of truth for its tested phone variant,
+boot-key instructions, available hardware, and limitations.
 
-## Build from source
+## Quick start
 
-The source tree contains the kernel drivers, DTS files, bootstrap, root
-filesystem configuration and pinned build environment needed to reproduce the
-phone image.
-
-Host requirements:
-
-- Linux x86-64;
-- rootless Podman;
-- Python 3.11 or newer;
-- network access for the first build, or for the first source check when pinned
-  inputs are not cached.
-
-Rootless Podman requires subordinate UID and GID mappings in `/etc/subuid` and
-`/etc/subgid`. Follow the official [Podman installation guide](https://podman.io/docs/installation)
-and [rootless-mode requirements](https://docs.podman.io/en/latest/markdown/podman.1.html#rootless-mode)
-for your distribution. `./fplinux doctor` reports whether Podman is installed
-and running rootless.
-
-Build a phone target:
+Build hosts need Linux x86-64, rootless Podman, and Python 3.11 or newer.
+Network access is needed until the pinned build inputs are available locally.
 
 ```sh
 ./fplinux doctor
-./fplinux build nokia-ta1618
-```
-
-After an online build has prepared the pinned image and downloaded its inputs,
-`./fplinux build nokia-ta1618 --offline` runs a build miss with the container
-network disabled. A selected bundle still returns immediately without starting
-Podman; an offline miss with a missing or stale image tells you to run setup
-online first.
-
-`check` is not a build prerequisite. Run it when changing or reviewing source:
-
-```sh
 ./fplinux check
+./fplinux build <target>
 ```
 
-The no-argument command runs the full gate. Use `./fplinux check --list` to see
-named scopes, or select several such as `./fplinux check docs spelling`. Check
-and build commands print compact stage status by default, retain full output
-under `.cache/logs/`, and accept `--verbose` when live tool output is needed.
-Each check or build also writes a `run.json` alongside its stage logs:
-`.cache/logs/check/<run-id>/run.json` for checks and
-`.cache/logs/build/<target>/<run-id>/run.json` for builds.
+`check` is recommended when changing or reviewing source; it is not required
+before every ordinary build. See [Building FPLinux](docs/BUILDING.md) for setup,
+offline builds, logs, cache use, and cleanup.
 
-Successful checks reuse an exact per-scope result. If the recorded inputs do not
-match, the scope runs again. Use `--no-cache` to run every selected cacheable
-scope again:
+To load a built image, first power the phone off and disconnect USB. Start the
+loader for the exact target **before** connecting the phone:
 
 ```sh
-./fplinux check --no-cache
+./fplinux run <target>
 ```
 
-It checks Markdown, JSON, TOML, documentation, licensing metadata, Python,
-shell, Alpine APKBUILDs, the container recipe and C sources in the pinned
-environment. The C passes use Clang `scan-build` for
-userspace and `sparse` with the target's real Linux tree, Kconfig and generated
-headers for kernel code. Source snapshots are mounted read-only, userspace
-analysis uses an invocation-local temporary directory, the fixed Sparse state
-stays under `.cache/`, and analysis runs without network access after its pinned
-inputs have been downloaded.
+Wait until the loader requests the device, then connect the phone and follow the
+boot-key instructions in that target's document. USB detection is diagnostic;
+it does not select a target. The loader writes only volatile RAM. To reconnect to
+a running console, use `./fplinux console <target>` rather than starting another
+RAM load.
 
-The complete build stays under `.cache/`; it does not write generated files
-into the source tree. The runnable bundle is selected through:
+## Documentation
 
-```text
-.cache/out/nokia-ta1618/console.current.json
-```
+- [Building FPLinux](docs/BUILDING.md): host setup, builds, checks, cache, and
+  source-build boundaries.
+- [Release archives](docs/RELEASES.md): candidate archives, qualification,
+  USB access, and archive troubleshooting.
+- [Host-to-phone transfer](docs/TRANSFER.md): console commands and file copy.
+- [Phone targets](targets/README.md): target index and per-phone documents.
+- [Hardware platforms](platforms/README.md): reusable SoC support.
+- [Porting FPLinux](docs/porting/README.md): contributor-facing porting
+  contracts.
 
-The selected bundle is below
-`.cache/out/nokia-ta1618/bundles/console/<generation>/`. When the recorded build
-inputs match, `build` reports a cached result; otherwise it runs the normal build
-stages.
+## Architecture
 
-Targets are discovered from `targets/*/target.toml`. The data-only
-`fplinux.target/v1` manifest selects a platform and board inputs; the command
-dispatches stages 1–4 to the shared `scripts/fplinux_cli/builder.py`.
+The repository separates shared Alpine userspace, pre-Linux bootstrap code,
+host tooling, reusable SoC support, and phone-owned board support. A target
+selects those shared components through its manifest; phone-specific addresses,
+panel setup, keymaps, and hardware status remain with that target.
 
-See [Building FPLinux](docs/BUILDING.md) for the cache layout, inventory and
-pinned inputs.
+## Provenance
 
-## Run from the source checkout
-
-The generated host tools run on Linux x86-64 as static executables. The shared
-runner requires Python 3.11 or newer and the UMS9117 adapter requires GNU
-`stdbuf` from coreutils. USB access must allow the invoking user to read and write
-the Nokia TA-1618 BootROM
-and Linux console devices; install the [documented udev rule](docs/RELEASES.md#usb-access)
-before connecting the phone.
-
-Build the target, power the phone off and start the RAM loader before connecting
-the phone:
-
-```sh
-./fplinux run nokia-ta1618
-```
-
-The runner validates host-library dependencies before asking for the phone. The
-loader then tells you when to hold `*` and connect USB, verifies BootROM USB
-access and loads FDL1 and the FPLinux image into RAM. It contains no flash,
-erase, partition or NV operation.
-
-In the attached console, `Ctrl-]` detaches the host client without stopping the
-phone shell, rebooting Linux or powering the phone off. `Ctrl-C` is sent to the
-phone shell. After detaching, verify that the phone runs the image produced by the checkout:
-
-```sh
-./fplinux verify nokia-ta1618
-```
-
-`verify` first refuses a local bundle whose workspace or OCI recipe is stale.
-It then compares the phone's content-derived kernel suffix with the selected
-bundle. That suffix identifies the prepared Linux, Alpine rootfs receipt,
-kernel configuration, DTB and bootstrap recipe. It does not qualify the
-hardware or verify every bundle file. From the repository root,
-reconnect to the shell with interface 0:
-
-```sh
-./fplinux console nokia-ta1618
-```
-
-To forward a host keyboard, find its `/dev/input/eventN` node and run the same
-client on interface 1. `EVIOCGRAB` keeps those keys away from the host desktop
-until the client exits:
-
-```sh
-sudo ./fplinux console nokia-ta1618 --keyboard /dev/input/eventN
-```
-
-Interface 0 is available while the keyboard forwarder owns interface 1.
-The client also runs one command on the phone, reports its exit status, sends a
-file to it and takes a file off it without opening a terminal. See [Moving
-files between the host and the phone](docs/TRANSFER.md) for the modes, their
-checks and their measured rates.
-
-The TA-1618 has a guarded battery-only power-off path. Detach the console with
-`Ctrl-]`, disconnect USB and hold the red handset key for five seconds. The
-keypad reports the active-low SC2720 EIC1 line as `KEY_POWER`; the built-in
-power-off handler checks the exact PMIC identity, refuses shutdown while charger
-input is active and syncs the filesystems before entering system shutdown.
-
-A successful shutdown discards the RAM-loaded payload. Manual power-on uses the
-vendor boot path. Short power-key presses are ordinary input events. Linux reboot
-is unsupported. See [Console
-lifecycle](docs/RELEASES.md#console-lifecycle) for the complete procedure and
-failure behavior.
-
-## Release archives
-
-The repository does not provide a prebuilt archive. A successful local build can
-be packaged as a clearly named candidate:
-
-```sh
-./fplinux package nokia-ta1618 --candidate
-```
-
-The ZIP is written under `.cache/out/candidates/`. See
-[Release archives](docs/RELEASES.md) for the package contents, Linux host
-requirements and the phone-validation boundary. Windows archives are not
-available.
-
-## Port architecture
-
-```text
-fplinux             repository CLI entry point
-scripts/fplinux_cli shared validation, build and package orchestration
-Containerfile       the one pinned Alpine OCI build environment
-alpine/             shared APK packages, OpenRC policy and package build config
-bootstrap/          reusable freestanding pre-Linux UI primitives
-common/             shared host tooling and the shared RAM runner
-platforms/<soc>/    platform.toml, reusable SoC support and fixed host adapter
-targets/<phone>/    data-only target, board sources, assets and release inputs
-```
-
-A target does not provide an executable build hook, runner or launcher. Its
-`target.toml` is auto-discovered. The selected `platform.toml` declares
-Linux/Kbuild integration, bootstrap vendor projection, typed host-tool recipes
-and the runner API version. The builder packages the conventionally located
-shared runner and fixed platform adapter; manifests cannot select executable
-paths.
-
-Drivers required by a phone profile are built into that phone's kernel image.
-A target documents unavailable hardware explicitly instead of carrying
-placeholder drivers.
-
-Platform and phone indexes:
-
-- [Phone targets](targets/README.md)
-- [Hardware platforms](platforms/README.md)
-
-Porting templates live under [`docs/porting/`](docs/porting/README.md).
-
-## Hardware provenance
-
-FPLinux is an independent reverse-engineering project. Hardware behavior is
-recorded from firmware dumps, register probing and instrumented boot runs on real
-hardware, together with the published source of the
-[fpdoom](https://github.com/ilyakurdyukov/fpdoom) bare-metal port for the same
-SoC family.
-
-This repository contains no vendor source code, firmware binary or manufacturer
-document. The source quality gate rejects binary artifacts. The vendor
-download-mode loader and board maps required by the build are fetched from their
-upstream public releases and are not redistributed in the Git tree.
-
-Documentation states only observed or validated behavior. Unconfirmed hardware
-behavior is marked unqualified in the per-target status tables.
+FPLinux is an independent reverse-engineering project. The repository contains
+no vendor firmware, vendor source, or manufacturer documentation. Hardware
+claims in target documents distinguish current phone qualification from source
+or upstream evidence.
 
 ## License
 

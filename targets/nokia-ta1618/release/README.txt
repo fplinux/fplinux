@@ -1,78 +1,90 @@
 FPLinux for Nokia 3210 4G (TA-1618)
 
-This archive contains a volatile-RAM FPLinux payload and its fixed host runner.
-The runner has no flash, erase, partition or NV operation and does not modify
-the vendor firmware or phone storage. The archive filename identifies whether
-it is a hardware-qualification candidate or a qualified release. If
-CANDIDATE-NOTICE.txt is present, the archive is not a release.
+This archive starts Linux in volatile RAM. It does not flash the phone or access
+its internal storage. The current project provides no prebuilt archive or
+qualified runtime closure: this archive is a local hardware qualification
+candidate, not a release.
+
+What works on the Nokia 3210 4G (TA-1618):
+  - local 240x320 terminal, physical keypad and keypad backlight;
+  - USB shell and file transfer on interface 0;
+  - one forwarded host keyboard on interface 1;
+  - microSD access when the card is inserted before boot;
+  - battery-only power-off;
+  - TyrQuake with either input mode.
+
+Internal phone storage, audio, modem, Bluetooth, Wi-Fi, battery reporting and
+Linux reboot are not supported by this target.
 
 Host requirements:
-  - Linux x86-64
-  - Python 3.11 or newer
-  - GNU coreutils (stdbuf)
-  - USB permissions for devices 1782:4d00 and 0525:a4a6
+  - Linux x86-64;
+  - Python 3.11 or newer;
+  - GNU coreutils (stdbuf);
+  - USB permission for 1782:4d00 and 0525:a4a6.
 
-The bundled native host tools are static executables and do not require host
-libusb, libudev or a particular libc implementation.
+The bundled host tools are static executables. They do not require a particular
+host libc, libusb or libudev package.
 
 Start:
-  1. Extract the complete top-level directory.
-  2. Enter that extracted directory.
-  3. Run: sha256sum -c SHA256SUMS
-  4. Power the phone off and disconnect USB.
-  5. Run: ./runner/run.py
-  6. Hold * and connect USB while keeping * pressed when prompted.
+  1. Extract the complete top-level directory and enter it.
+  2. Check the extracted files: sha256sum -c SHA256SUMS
+  3. Power the phone off and disconnect USB.
+  4. Start the loader: ./runner/run.py
+  5. Wait until the loader explicitly asks for the phone.
+  6. Only then hold * and connect the powered-off phone, keeping * held as
+     instructed.
 
-The runner verifies the runtime manifest, bundled hashes and Python version
-before asking for the phone. It then checks BootROM USB access before attempting
-the fixed FDL1, RAM-payload and Linux USB-console sequence. Ctrl-] detaches the host
-console; it does not reboot or power off the phone. To reconnect while Linux is
-running, use ./host/fplinux-usb-console --interface 0 instead of the full
-runner.
+Do not connect the phone before starting the loader. If it was connected early,
+disconnect it and restart this sequence.
 
-OpenRC supervises the phone-side fplinux-input receiver automatically.
-Forward a host keyboard on interface 1 with:
-  sudo ./host/fplinux-usb-console --interface 1 --keyboard /dev/input/eventN
-The client uses EVIOCGRAB, so the selected keyboard stops reaching the host
-desktop while the process is running. Interface 0 is available for a shell
-or transfer client. Stop the forwarder with SIGINT or SIGTERM from another input
-device or session; Ctrl-C from the grabbed keyboard cannot stop the host process.
+Use after boot:
+  - Ctrl-] detaches the host console without stopping Linux.
+  - Reconnect to the USB shell with:
+      ./host/fplinux-usb-console --interface 0
+  - Forward one host keyboard on interface 1 with:
+      sudo ./host/fplinux-usb-console --interface 1 --keyboard /dev/input/eventN
+    The selected keyboard does not reach the host desktop while forwarding runs.
+    On a host with no second keyboard, use:
+      sudo timeout 60 ./host/fplinux-usb-console --interface 1 --keyboard /dev/input/eventN
+    GNU timeout sends SIGTERM and the client releases the keyboard; keys on the
+    grabbed keyboard do not stop the host process.
 
-The RAM image includes the TyrQuake 0.71 engine, but no Quake game data. Insert
-the microSD card before boot and provide a legally obtained file at:
+microSD:
+  - Insert the card before Linux starts. Hot-swap is not supported.
+  - Mount a FAT card read/write:
+      card=/dev/mmcblk0p1
+      [ -b "$card" ] || card=/dev/mmcblk0
+      mkdir -p /mnt/card
+      mount -t vfat -o rw "$card" /mnt/card
+  - Before removing the card or ending the session, run:
+      sync
+      umount /mnt/card
+
+TyrQuake 0.71 is included, but game data is not. Put a legally obtained PAK at:
   /mnt/card/fplinux/quake/id1/pak0.pak
-Start exactly one input mode from the phone shell:
+Then start exactly one mode from the phone shell:
   quake --input phone
   quake --input keyboard
-Both input modes are supported on physical TA-1618 hardware. Phone mode assumes
-that the phone is held counter-clockwise, with the screen on
-the left and keypad on the right; D-pad and alternate digit directions are
-rotated into that landscape view.
-The launcher uses a 32 MiB heap, null audio, and volatile configuration and
-saves. It links the user-supplied PAK into its volatile runtime tree without
-copying it. When the launcher mounts the card itself, it uses read-only mount
-flags; an existing /mnt/card mount keeps its flags. It restores the text
-console and framebuffer when the engine exits normally or receives INT, TERM,
-HUP or QUIT. Do not use SIGKILL as a normal way to stop the game.
 
-The physical keypad backlight is available through the binary Linux LED class
-interface. Turn it on or off from the phone shell with:
+The launcher uses temporary runtime storage. TyrQuake settings and saves are
+discarded when it exits; they are not written to microSD.
+
+Phone mode uses the physical keypad. Hold the phone counter-clockwise with the
+display on the left and keypad on the right:
+  - D-pad UP/DOWN: menu left/right; game turn left/right.
+  - D-pad LEFT/RIGHT: menu down/up; game backward/forward.
+  - Centre or dial: select/fire. Right soft: back/menu.
+  - Left soft or *: jump. 0: fire. 1/3: strafe. 2/5: turn.
+  - 4/6: backward/forward. 7/9: previous/next weapon. 8: run.
+
+The keypad backlight can be controlled from the phone shell:
   echo 1 > /sys/class/leds/:kbd_backlight/brightness
   echo 0 > /sys/class/leds/:kbd_backlight/brightness
-The maximum brightness value is 1. Each press on the physical TA-1618 keypad
-turns the backlight on and restarts its cutoff; releases and autorepeat do not
-extend it. The in-kernel cutoff turns the output off after about five seconds
-even if userspace does not write 0.
+Each physical keypad press also lights it for about five seconds.
 
-To end the RAM session through the qualified battery-only power-off path,
-detach with Ctrl-], disconnect USB and hold the red handset key continuously
-for five seconds. Releasing it sooner cancels the request; a short press is an
-ordinary input event. The built-in handler verifies the exact SC2720 identity
-and inactive charger status, then syncs the filesystems before starting shutdown.
-If the phone is powered after shutdown starts, remove and reinsert the battery
-before booting again. A successful shutdown discards the volatile FPLinux
-session. Manual power-on uses the vendor firmware. Linux reboot is not qualified.
-
-BUILD-MANIFEST.json records the content-addressed workspace and container
-receipts together with bundled-file hashes. Exact pinned inputs are defined by
-the corresponding source snapshot and its lock files.
+To end the RAM session, detach with Ctrl-], disconnect USB, make sure charger
+power is absent, then hold the red handset key continuously for five seconds.
+Releasing it earlier cancels shutdown. A successful shutdown discards the RAM
+session; boot normally to return to the vendor firmware. If the phone remains
+powered after shutdown starts, remove and reinsert the battery before booting.
+Linux reboot is not supported.

@@ -1,23 +1,13 @@
 # Shared pre-Linux components
 
-`bootstrap/` contains freestanding, platform-neutral code that phone targets may
-compile into their pre-Linux payloads. It is separate from the post-kernel code
-under [`common/`](../common/README.md) and has no Linux userspace dependency.
+`bootstrap/` owns freestanding components reused before Linux starts. They have
+no Linux userspace dependency and do not contain phone-specific addresses,
+register setup, panel sequences, or loader policy.
 
-## Boot screen
+A target owns hardware initialization, display presentation, board diagnostics,
+and transfer to its Linux image. Shared bootstrap code may expose bounded
+callbacks for those target-owned operations, but must not take over the board
+contract.
 
-`fplinux-boot-screen/` provides the shared FPLinux boot-screen font, rasterizer,
-portrait-aware layout, progress states, handoff status and bounded error view.
-It uses fixed-size state, performs no allocation and draws only through canvas
-callbacks supplied by the caller.
-
-A target is responsible for:
-
-- initializing its panel and framebuffer;
-- implementing bounded rectangle and presentation callbacks;
-- supplying model, variant, boot-mode, stage and checkpoint text;
-- sequencing hardware operations, diagnostics and the kernel handoff.
-
-The shared renderer must not contain phone addresses, SoC registers, panel setup
-or loader policy. A target stages the library into its pinned bootstrap build
-closure.
+Use this directory only for behavior already shared by current targets. See
+[Shared host and runtime stack](../common/README.md) for post-kernel code.

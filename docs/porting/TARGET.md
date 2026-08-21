@@ -1,236 +1,123 @@
-# {Manufacturer} {Model} ({hardware variant}) support
+# {Device} support
 
-<!-- Copy this file to targets/<target>/README.md and replace every placeholder. -->
+<!--
+Copy this file to targets/<target>/README.md. Describe the current target as a
+phone user would encounter it. Keep implementation details in code and
+platform documentation; keep only device-specific actions, limits and evidence
+here.
+-->
 
 ## Device
 
-| Field             | Value                                      |
-| ----------------- | ------------------------------------------ |
-| Manufacturer      | `<manufacturer>`                           |
-| Model             | `<marketing name>`                         |
-| Hardware variant  | `<model code / revision>`                  |
-| SoC               | [`<soc>`](../../platforms/<soc>/README.md) |
-| CPU used by Linux | `<architecture, cores, clock>`             |
-| FPLinux profile   | `<profile>`                                |
-| Boot method       | `<RAM / storage / other>`                  |
-| Linux version     | `<version>`                                |
+| Field    | Value                                                |
+| -------- | ---------------------------------------------------- |
+| Device   | `{manufacturer} {model} ({variant})`                 |
+| Platform | [`{platform}`](../../platforms/{platform}/README.md) |
+| Profile  | `{profile}`                                          |
+| Boot     | `{volatile RAM / other supported method}`            |
 
 ## Status
 
-In one paragraph, describe what the source implements and how a user interacts
-with it. State limitations and whether an exact runtime closure is recorded for
-this target in `releases.lock.toml`. Keep this section limited to source and
-runtime facts.
-
-## Target definition
-
-Start the target with this data-only `target.toml` and replace the placeholders:
-
-```toml
-schema = "fplinux.target/v1"
-name = "<target>"
-display_name = "<manufacturer> <model> (<variant>)"
-release_slug = "FPLinux-<manufacturer>-<model>-<variant>"
-platform = "<platform>"
-profile = "<profile>"
-release_manifest = "release/manifest.toml"
-assets_lock = "loader/assets.lock.toml"
-
-[rootfs]
-packages = []
-
-[linux]
-defconfig = "kernel/defconfig"
-dtb = "<vendor>/<target>.dtb"
-debug_dtb = "<target>.dtb"
-patches = ["kernel/0001-<target>-board.patch"]
-copies = [
-  { source = "dts/<target>.dts", destination = "arch/<arch>/boot/dts/<vendor>/<target>.dts" },
-]
-appends = []
-forbidden_config = ["CONFIG_<UNSAFE_STORAGE_PATH>=y"]
-forbidden_dtb_markers = ["<marker>", ...]
-
-[bootstrap]
-source = "bootstrap"
-image = "<target>_linux_bootstrap.bin"
-map = "obj/<target>_linux_bootstrap_map.txt"
-kernel_destination = "zImage"
-dtb_destination = "<target>.dtb"
-load_address = 0x00000000
-payload_limit = 0x00000000
-toolchain = "<toolchain>"
-lto = 0
-
-[runtime]
-fdl1_load_address = 0x00000000
-assets = { fdl1 = "assets/<fdl1>.bin" }
-
-[runtime.adapter]
-<platform_setting> = "<value>"
-
-[runtime.usb.bootrom]
-vendor_id = 0x0000
-product_id = 0x0000
-wait_seconds = 300
-
-[runtime.usb.linux_console]
-vendor_id = 0x0000
-product_id = 0x0000
-wait_seconds = 60
-```
-
-Use the real RAM load addresses and USB identifiers. The selected platform's
-fixed adapter defines the exact keys and types accepted under
-`[runtime.adapter]`; the target supplies values, not executable behavior. The
-build validates the target and writes only the generic runtime contract required
-by `common/run.py` to `runtime-manifest.json`; do not package the raw target
-configuration.
-
-A normalized directory containing a valid `target.toml` is auto-discovered. Do
-not add a registry entry or copy a target `build.py`, runner or launcher. The
-root command combines this manifest with `platforms/<platform>/platform.toml`
-and invokes the shared `scripts/fplinux_cli/builder.py`.
-
-## Asset and rootfs package data
-
-Use a generic `fplinux.assets/v1` lock at the declared `assets_lock` path. Each
-source states its kind, pinned URL and SHA-256; each output assigns a runtime
-role, bundle path and expected SHA-256. Keep extraction or download behavior in
-the shared builder rather than target scripts.
-
-`[rootfs]` is required even when its `packages` array is empty. It declares only
-target-owned package additions. The rootfs set is the exact union of the fixed
-common packages (`fplinux-base`, `fplinux-console`, `fplinux-input` and
-`fplinux-tyrquake`), the selected platform's `[rootfs].packages`, and this
-array. The target name never selects packages; targets with the same final set
-and other composition inputs share a rootfs.
-
-The declared release manifest uses `fplinux.release/v2` and contains exactly
-`schema`, `image`, `bundle_files`, `runtime_files` and `documents`. `bundle_files`
-is the complete generated bundle allowlist. `runtime_files` is its
-hardware-qualified subset and must contain the image, every runtime asset, the
-shared runner, host tools, platform adapter and `runtime-manifest.json`; exclude
-build receipts, provenance and documentation. `documents` names target files
-below `release/` that packaging adds to the archive. Executable roles come from
-the selected platform's typed host recipes and shared runner, not from
-target-controlled flags or launchers.
+In one short paragraph, state what a person can use on this exact phone and
+what remains unavailable. Distinguish physical-device evidence from a source
+build; neither is a release qualification. State plainly when no prebuilt
+archive or qualified runtime closure exists.
 
 ## Hardware support
 
-Use these feature-level status values consistently:
+Keep hardware presence separate from FPLinux support:
 
-- **Supported:** exercised on the named physical hardware variant, with the
-  implementation present in the target.
-- **Partial:** exercised with the stated limitation or qualification gap.
-- **Not supported:** not implemented or deliberately disabled.
-- **Unknown:** hardware exists, but its state has not been established.
-- **Not present:** this phone variant does not contain the hardware.
+- **Hardware:** **Present**, **Absent**, **Unknown**, or **N/A** for a
+  software-only capability. Absence requires evidence for this exact variant;
+  a missing driver or DTS node does not prove it.
+- **FPLinux:** **Supported** when implemented and exercised on this exact phone,
+  **Partial** when an exercised limitation or qualification gap remains,
+  **Not supported** when the current target provides no supported path,
+  **Unknown** when current support or validation has not been established, or
+  **N/A** when the capability does not apply.
 
-These values do not qualify an aggregate release. A qualified release requires
-the complete exact runtime closure to pass the phone gate and have its digest in
-`releases.lock.toml`.
+Keep this compact row set in every phone document so targets remain comparable.
+Add a row only for another user-visible capability of that phone; keep internal
+controllers and register-level evidence out of this table.
 
-| Area                             | Status     | Notes                                  |
-| -------------------------------- | ---------- | -------------------------------------- |
-| Boot                             | `<status>` | `<loader and persistence behavior>`    |
-| Linux kernel and root filesystem | `<status>` | `<versions/profile>`                   |
-| CPU / SMP                        | `<status>` | `<active cores and frequency>`         |
-| Interrupt controller             | `<status>` | `<driver>`                             |
-| Timers                           | `<status>` | `<clocksource/clockevent>`             |
-| Display                          | `<status>` | `<framebuffer/DRM, mode, limitations>` |
-| Keypad / keyboard                | `<status>` | `<input path>`                         |
-| Touchscreen                      | `<status>` | `<or Not present>`                     |
-| USB device mode                  | `<status>` | `<functions and USB IDs>`              |
-| USB host mode                    | `<status>` | `<limitations>`                        |
-| microSD / MMC                    | `<status>` | `<read/write and tested media>`        |
-| Internal flash                   | `<status>` | `<read/write policy>`                  |
-| Audio output                     | `<status>` | `<speaker/headphones>`                 |
-| Microphone                       | `<status>` | `<capture path>`                       |
-| Modem / calls / SMS / data       | `<status>` | `<available interfaces>`               |
-| Bluetooth                        | `<status>` | `<controller/firmware>`                |
-| Wi-Fi                            | `<status>` | `<controller/firmware>`                |
-| Battery / charging               | `<status>` | `<power-supply reporting/control>`     |
-| Suspend / power-off / reboot     | `<status>` | `<known behavior>`                     |
-| Camera                           | `<status>` | `<sensor and pipeline>`                |
-| LEDs / vibration                 | `<status>` | `<available controls>`                 |
-| RTC                              | `<status>` | `<time retention>`                     |
+| Area                        | Hardware     | FPLinux     | What a user can rely on / limit       |
+| --------------------------- | ------------ | ----------- | ------------------------------------- |
+| RAM boot                    | **N/A**      | `{support}` | `{volatile behavior}`                 |
+| Persistent boot             | **N/A**      | `{support}` | `{supported method or absence}`       |
+| Local screen                | `{presence}` | `{support}` | `{visible console or limitation}`     |
+| Physical keypad             | `{presence}` | `{support}` | `{input path or limitation}`          |
+| Keypad backlight            | `{presence}` | `{support}` | `{control or limitation}`             |
+| USB shell and file transfer | `{presence}` | `{support}` | `{available interface or limitation}` |
+| Host keyboard bridge        | **N/A**      | `{support}` | `{available interface or limitation}` |
+| USB host mode               | `{presence}` | `{support}` | `{available role or limitation}`      |
+| Removable storage           | `{presence}` | `{support}` | `{mounting or limitation}`            |
+| Internal phone storage      | `{presence}` | `{support}` | `{access policy}`                     |
+| Audio                       | `{presence}` | `{support}` | `{speaker, headphones, microphone}`   |
+| Modem and mobile service    | `{presence}` | `{support}` | `{calls, SMS, and data}`              |
+| Bluetooth                   | `{presence}` | `{support}` | `{connectivity}`                      |
+| Wi-Fi                       | `{presence}` | `{support}` | `{connectivity}`                      |
+| Camera                      | `{presence}` | `{support}` | `{capture path or limitation}`        |
+| Battery and charging        | `{presence}` | `{support}` | `{reporting or control}`              |
+| Indicator LEDs / vibration  | `{presence}` | `{support}` | `{control or limitation}`             |
+| Power-off                   | **N/A**      | `{support}` | `{safe way to end a session}`         |
+| Reboot and suspend          | **N/A**      | `{support}` | `{supported behavior or limitation}`  |
 
-Keep rows for hardware that is present, even when its state is **Unknown** or
-**Not supported**. Delete rows only for categories that do not apply to the
-target document.
+## Build and start from source
 
-## Build
+Follow [Building FPLinux](../../docs/BUILDING.md) for host requirements and
+source checks. Build this target from the repository root:
 
 ```sh
-./fplinux doctor
-./fplinux build <target>
+./fplinux build {target}
 ```
 
-Output:
+For every RAM run, use this order:
 
-```text
-.cache/out/<target>/<profile>/
-```
+1. Power the phone off and disconnect its USB cable.
+2. Start the loader:
 
-List any target-specific host requirement.
+    ```sh
+    ./fplinux run {target}
+    ```
 
-## Boot
+3. Wait until the loader explicitly asks for the phone.
+4. Only then hold `*` and connect the powered-off phone, keeping the key held
+   as instructed.
+
+The RAM loader does not make a persistent phone-storage change. Do not connect
+the phone before starting the loader; disconnect it and restart this sequence if
+that happens.
+
+## Use after boot
+
+State the local console behavior and the target's USB interfaces. Use these
+source-checkout commands when they apply:
 
 ```sh
-./fplinux run <target>
+./fplinux verify {target}
+./fplinux console {target}
+./fplinux console {target} --keyboard /dev/input/eventN
 ```
 
-Document whether the operation is RAM-only or persistent, the expected USB
-IDs, required physical actions and how to reach a console. If the target exposes
-multiple USB data interfaces, assign and document each interface number. When
-the target supports the build stamp check, include:
+Link to [the console contract](../../docs/porting/CONSOLE.md) and
+[file transfer](../../docs/TRANSFER.md) instead of duplicating generic behavior.
+Explain any target-specific storage procedure, game controls or other user
+workflow below.
 
-```sh
-./fplinux verify <target>
-```
+## Target-specific use
 
-State that this compares the running image with the local build receipt rather
-than qualifying hardware. Never hide a storage write inside a generic “run”
-instruction.
+Keep only actions that differ for this phone: for example, how to mount a card,
+where to put game data, an input layout, backlight control or a safe power-off
+procedure. Do not include register descriptions, configuration listings,
+implementation maps, cache paths or build internals.
 
-## Target-specific nuances
+## End the RAM session
 
-- `<inherited bootstrap or vendor state>`
-- `<memory-map and payload limits>`
-- `<required firmware or generated assets>`
-- `<known cold-boot/reboot behavior>`
-- `<hardware revision differences>`
+Document the exact safe exit for this target and how the user returns to the
+vendor firmware. State unsupported reboot or power-off behavior plainly.
 
-## Release qualification
+## Release status
 
-State whether the target provides a prebuilt archive and whether it has a
-matching entry in `releases.lock.toml`. If it does, identify the exact
-runtime closure digest and hardware variant. Do not list a candidate as a
-release.
-
-The generic [release contract](../RELEASES.md) defines candidate marking,
-archive contents and release requirements.
-
-## Driver configuration
-
-Drivers required for the phone profile use built-in kernel configuration (`=y`).
-Document any intentionally optional module and include it in the package contract
-when the profile depends on it. A target that exposes the host keyboard bridge
-also documents `CONFIG_INPUT_MISC=y`, `CONFIG_INPUT_UINPUT=y`, the gadget serial
-port assigned to input and the init path that starts its receiver.
-
-## Implementation map
-
-| Path          | Responsibility                                         |
-| ------------- | ------------------------------------------------------ |
-| `target.toml` | Data-only board inputs, identity and runtime values    |
-| `dts/`        | Board DTS and phone wiring                             |
-| `kernel/`     | Phone-specific Linux support and integration fragments |
-| `bootstrap/`  | Target payload source and Linux handoff                |
-| `loader/`     | Generic asset lock and asset provenance                |
-| `release/`    | Data-only package allowlist and archive documents      |
-
-Delete rows for directories the target does not need. Link back to the shared
-platform document at the end. Build, package and run behavior stays in the
-shared builder, packager, runner and the selected platform adapter.
+State whether a prebuilt archive and a qualified runtime closure currently
+exist. If neither exists, say that a locally packaged candidate is not a
+release, and link to [Release archives](../../docs/RELEASES.md).

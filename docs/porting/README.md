@@ -1,52 +1,35 @@
 # Porting FPLinux
 
-A phone port consists of the smallest complete source closure required to build,
-run and document the target. Keep temporary artifacts and unused implementation
-paths out of target and platform directories.
+A phone port is a small, complete description of one hardware variant. It uses
+shared components only where the current targets demonstrably share the same
+behaviour.
 
 ## Layers
 
-```text
-bootstrap/<component>/ reusable platform-neutral freestanding pre-Linux code
-common/               reusable post-kernel userspace and host tools
-platforms/<soc>/      reusable SoC support
-targets/<phone>/      concrete phone support
-```
+| Layer              | Owns                                                                                            |
+| ------------------ | ----------------------------------------------------------------------------------------------- |
+| `bootstrap/`       | Reusable freestanding pre-Linux components and their callback contracts.                        |
+| `common/`          | Shared post-kernel userspace and host-side tools.                                               |
+| `platforms/<soc>/` | SoC-wide Linux support and the fixed RAM-loader flow used by its targets.                       |
+| `targets/<phone>/` | One phone's board wiring, addresses, panel, keymap, assets, bootstrap inputs and support state. |
 
-Top-level bootstrap components own generic freestanding behavior and callback
-contracts only. A target composes them with its framebuffer and refresh adapter,
-device identity, stage and checkpoint text, error policy and hardware sequence.
-SoC registers and board-specific bootstrap actions stay in the platform or target
-layer.
+A platform never chooses a phone panel, keypad matrix, memory reservation or
+board-specific loader data. A target never duplicates SoC addresses, controller
+support or the platform loader sequence.
 
-A platform owns CPU integration, interrupt controllers, clocks, timers,
-reusable controller drivers and its fixed host-loader sequence. A target owns
-the board DTS, memory map, panel, keypad wiring, bootstrap, root filesystem
-profile, board assets and validated adapter values. The shared console consumes
-standard `fbcon`, evdev and gadget-tty interfaces; it does not own phone register
-or scan-code knowledge.
+## Porting checklist
 
-Start with:
+1. Start from the [target template](TARGET.md) and select an existing platform.
+2. Keep board-specific data in the target. Move code to a platform only after
+   more than one current target uses the same behaviour.
+3. Give the target a clear support table: hardware presence, FPLinux support,
+   and physical validation are separate facts.
+4. Build and package through the public CLI. For a RAM run, start
+   `./fplinux run <target>` before connecting the powered-off phone; connect it
+   only when the loader asks.
+5. Exercise every feature labelled **Supported** on the named hardware variant.
+   A release requires the exact runtime closure to pass the phone gate; a
+   successful build or candidate package alone is not release qualification.
 
-- [Phone target template](TARGET.md)
-- [Platform template](PLATFORM.md)
-- [Shared console contract](CONSOLE.md)
-
-## Verification requirements
-
-1. Build the target from a source-only checkout.
-2. Create a `--candidate` package.
-3. Run that exact runtime closure on the intended hardware variant.
-4. Verify every feature marked **Supported**.
-5. Record the printed runtime SHA-256 in `releases.lock.toml` only for a runtime
-   closure that passes the complete phone gate.
-6. Create the release package without `--candidate`.
-
-A target support table records feature-level hardware validation and
-limitations. Release qualification is stricter: it applies to the complete exact
-runtime closure and exists only when the matching digest is present in
-`releases.lock.toml`.
-
-Drivers required by a phone profile are built into its kernel (`=y`). Optional
-modules are not part of that profile unless the target documentation and package
-contract explicitly include them.
+Use the [platform template](PLATFORM.md) for reusable SoC support and the
+[console contract](CONSOLE.md) when a target offers the local terminal.
