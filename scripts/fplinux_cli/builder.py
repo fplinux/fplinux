@@ -1254,7 +1254,7 @@ def publish_bundle(
     rootfs_recipe: str,
     kbuild_receipt: dict[str, str],
 ) -> Path:
-    """Publish a complete immutable bundle without changing an older generation."""
+    """Publish a complete immutable bundle and select it as current."""
     profile = target_config["profile"]
     release = create_bundle_staging(OUTPUT, target, profile)
     try:
