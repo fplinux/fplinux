@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-#ifndef __UMS9117_FB_INTERNAL_H__
-#define __UMS9117_FB_INTERNAL_H__
+#ifndef FPLINUX_UMS9117_FB_INTERNAL_H
+#define FPLINUX_UMS9117_FB_INTERNAL_H
 
 #include <linux/completion.h>
 #include <linux/fb.h>
@@ -15,15 +15,15 @@
 
 #include "ums9117-fb.h"
 
-#define UMS9117_FB_MAX_WLED_CHANNELS 4
+#define UMS9117_FB_WLED_CHANNEL_COUNT 4
 
 enum ums9117_fb_panel_state {
-	UMS9117_FB_COLD_INIT,
-	UMS9117_FB_ACTIVE,
-	UMS9117_FB_BLANKING,
-	UMS9117_FB_BLANKED,
-	UMS9117_FB_WAKING,
-	UMS9117_FB_ERROR,
+	UMS9117_FB_PANEL_STATE_COLD_INIT,
+	UMS9117_FB_PANEL_STATE_ACTIVE,
+	UMS9117_FB_PANEL_STATE_BLANKING,
+	UMS9117_FB_PANEL_STATE_BLANKED,
+	UMS9117_FB_PANEL_STATE_WAKING,
+	UMS9117_FB_PANEL_STATE_ERROR,
 };
 
 struct ums9117_fb_stats {
@@ -82,7 +82,7 @@ struct ums9117_fb {
 	u32 pseudo_palette[16];
 	u32 pinmux_count;
 	u32 pinconf_count;
-	u32 wled_levels[UMS9117_FB_MAX_WLED_CHANNELS];
+	u32 wled_levels[UMS9117_FB_WLED_CHANNEL_COUNT];
 	unsigned long frame_deadline;
 	u64 damage_seq;
 	u64 submitted_seq;
@@ -121,4 +121,4 @@ int ums9117_fb_lcm_dcs(struct ums9117_fb *ufb, u8 command, const u8 *data,
 int ums9117_fb_lcm_begin_frame(struct ums9117_fb *ufb);
 u32 ums9117_fb_lcm_dbi_timing_for_test(const u32 ns[6]);
 
-#endif /* __UMS9117_FB_INTERNAL_H__ */
+#endif /* FPLINUX_UMS9117_FB_INTERNAL_H */

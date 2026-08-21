@@ -15,16 +15,16 @@
 #include <linux/workqueue.h>
 #include <linux/soc/sprd/ums9117-adi.h>
 
-#define SC2720_CHIP_ID_LOW 0xc00u
-#define SC2720_CHIP_ID_HIGH 0xc04u
-#define SC2720_POWER_PD_HW 0xc20u
-#define SC2720_CHGR_STATUS 0xe14u
-#define SC2720_EXPECTED_ID_LOW 0xa003u
-#define SC2720_EXPECTED_ID_HIGH 0x2720u
-#define SC2720_PWR_OFF_SEQ_EN BIT(0)
-#define SC2720_CHGR_ON BIT(3)
-#define SC2720_POWER_OFF_WAIT_MS 50u
-#define TA1618_POWER_KEY_HOLD_MS 5000u
+#define SC2720_CHIP_ID_LOW 0xc00U
+#define SC2720_CHIP_ID_HIGH 0xc04U
+#define SC2720_POWER_PD_HW 0xc20U
+#define SC2720_CHGR_STATUS 0xe14U
+#define SC2720_EXPECTED_ID_LOW 0xa003U
+#define SC2720_EXPECTED_ID_HIGH 0x2720U
+#define SC2720_POWER_PD_HW_POWER_OFF_SEQUENCE_ENABLE BIT(0)
+#define SC2720_CHGR_STATUS_CHARGER_ON BIT(3)
+#define SC2720_POWER_OFF_WAIT_MS 50U
+#define TA1618_POWER_KEY_HOLD_MS 5000U
 #define TA1618_KEYPAD_NAME "TA-1618 keypad"
 #define TA1618_KEYPAD_PHYS "ta1618/keypad0"
 
@@ -77,7 +77,7 @@ static int ta1618_power_key_preflight(void)
 	if (id_low != SC2720_EXPECTED_ID_LOW ||
 	    id_high != SC2720_EXPECTED_ID_HIGH)
 		return -ENODEV;
-	return charger & SC2720_CHGR_ON ? -EBUSY : 0;
+	return charger & SC2720_CHGR_STATUS_CHARGER_ON ? -EBUSY : 0;
 }
 
 static void ta1618_power_key_hold_work(struct work_struct *work)
@@ -221,14 +221,15 @@ static int ta1618_power_off(struct sys_off_data *data)
 	if (!ret)
 		ret = ums9117_adi_read(&transaction, SC2720_CHGR_STATUS,
 				       &charger);
-	if (!ret && (charger & SC2720_CHGR_ON))
+	if (!ret && (charger & SC2720_CHGR_STATUS_CHARGER_ON))
 		ret = -EBUSY;
 	if (!ret)
 		ret = ums9117_adi_read(&transaction, SC2720_POWER_PD_HW,
 				       &power);
 	if (!ret)
-		ret = ums9117_adi_write_final(&transaction, SC2720_POWER_PD_HW,
-					      power | SC2720_PWR_OFF_SEQ_EN);
+		ret = ums9117_adi_write_final(
+			&transaction, SC2720_POWER_PD_HW,
+			power | SC2720_POWER_PD_HW_POWER_OFF_SEQUENCE_ENABLE);
 	if (ret)
 		goto fail_locked;
 

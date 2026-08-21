@@ -19,21 +19,21 @@
 #include "quakedef.h"
 #include "sys.h"
 
-#define FPLINUX_EVENT_COUNT 32
-#define FPLINUX_PATH_SIZE 32
-#define FPLINUX_NAME_SIZE 128
-#define FPLINUX_PHYS_SIZE 128
+#define FPLINUX_QUAKE_INPUT_EVENT_COUNT 32
+#define FPLINUX_QUAKE_INPUT_PATH_BYTES 32
+#define FPLINUX_QUAKE_INPUT_NAME_BYTES 128
+#define FPLINUX_QUAKE_INPUT_PHYS_BYTES 128
 #define BITS_PER_LONG (8U * sizeof(unsigned long))
 #define NBITS(max) (((max) + BITS_PER_LONG) / BITS_PER_LONG)
 
 enum input_role {
-	INPUT_ROLE_PHONE,
-	INPUT_ROLE_HOST,
+	FPLINUX_QUAKE_INPUT_ROLE_PHONE,
+	FPLINUX_QUAKE_INPUT_ROLE_HOST,
 };
 
 enum input_mode {
-	INPUT_MODE_PHONE,
-	INPUT_MODE_HOST,
+	FPLINUX_QUAKE_INPUT_MODE_PHONE,
+	FPLINUX_QUAKE_INPUT_MODE_HOST,
 };
 
 struct input_device {
@@ -43,11 +43,11 @@ struct input_device {
 	qboolean grabbed;
 	qboolean sync_lost;
 	unsigned long key_state[NBITS(KEY_MAX)];
-	char path[FPLINUX_PATH_SIZE];
-	char name[FPLINUX_NAME_SIZE];
+	char path[FPLINUX_QUAKE_INPUT_PATH_BYTES];
+	char name[FPLINUX_QUAKE_INPUT_NAME_BYTES];
 };
 
-static struct input_device input_devices[FPLINUX_EVENT_COUNT];
+static struct input_device input_devices[FPLINUX_QUAKE_INPUT_EVENT_COUNT];
 static unsigned int input_device_count;
 static enum input_mode input_mode;
 
@@ -81,7 +81,7 @@ static void set_bit_value(unsigned int bit, unsigned long *bits, qboolean value)
 
 static const char *role_name(enum input_role role)
 {
-	return role == INPUT_ROLE_PHONE ? "phone" : "keyboard";
+	return role == FPLINUX_QUAKE_INPUT_ROLE_PHONE ? "phone" : "keyboard";
 }
 
 static void parse_input_mode(void)
@@ -102,9 +102,9 @@ static void parse_input_mode(void)
 		Sys_Error(
 			"FPLinux input: require exactly one -input phone|keyboard");
 	if (!strcmp(value, "phone"))
-		input_mode = INPUT_MODE_PHONE;
+		input_mode = FPLINUX_QUAKE_INPUT_MODE_PHONE;
 	else if (!strcmp(value, "keyboard"))
-		input_mode = INPUT_MODE_HOST;
+		input_mode = FPLINUX_QUAKE_INPUT_MODE_HOST;
 	else
 		Sys_Error("FPLinux input: unsupported mode '%s'", value);
 }
@@ -177,18 +177,18 @@ static qboolean validate_host_keyboard(int fd, const char *path)
 static qboolean is_fplinux_host_keyboard(const struct input_id *id)
 {
 	return id->bustype == BUS_VIRTUAL &&
-	       id->vendor == FPLINUX_HOST_INPUT_VENDOR &&
-	       id->product == FPLINUX_HOST_INPUT_PRODUCT;
+	       id->vendor == FPLINUX_INPUT_HOST_VENDOR_ID &&
+	       id->product == FPLINUX_INPUT_HOST_PRODUCT_ID;
 }
 
 static qboolean is_fplinux_phone_keypad(int fd)
 {
-	char phys[FPLINUX_PHYS_SIZE];
+	char phys[FPLINUX_QUAKE_INPUT_PHYS_BYTES];
 
 	if (ioctl(fd, EVIOCGPHYS(sizeof(phys)), phys) < 0)
 		return false;
 	phys[sizeof(phys) - 1] = '\0';
-	return strcmp(phys, FPLINUX_PHONE_INPUT_PHYS) == 0;
+	return strcmp(phys, FPLINUX_INPUT_PHONE_PHYS) == 0;
 }
 
 static qboolean grab_device(int fd, const char *path, const char *name)
@@ -213,10 +213,10 @@ static void register_input_device(const char *path)
 	struct input_device *device;
 	struct input_id id;
 	enum input_role role;
-	char name[FPLINUX_NAME_SIZE];
+	char name[FPLINUX_QUAKE_INPUT_NAME_BYTES];
 	int fd;
 
-	if (input_device_count >= FPLINUX_EVENT_COUNT)
+	if (input_device_count >= FPLINUX_QUAKE_INPUT_EVENT_COUNT)
 		return;
 
 	fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
@@ -230,14 +230,14 @@ static void register_input_device(const char *path)
 	name[sizeof(name) - 1] = '\0';
 
 	if (is_fplinux_host_keyboard(&id)) {
-		role = INPUT_ROLE_HOST;
+		role = FPLINUX_QUAKE_INPUT_ROLE_HOST;
 		if (!validate_host_keyboard(fd, path)) {
 			close(fd);
 			Sys_Error("FPLinux input: invalid host keyboard at %s",
 				  path);
 		}
 	} else if (is_fplinux_phone_keypad(fd)) {
-		role = INPUT_ROLE_PHONE;
+		role = FPLINUX_QUAKE_INPUT_ROLE_PHONE;
 		if (!validate_phone(fd, path)) {
 			close(fd);
 			Sys_Error("FPLinux input: invalid phone keypad at %s",
@@ -304,15 +304,15 @@ static void scan_input_devices(void)
 	unsigned int host_count;
 	unsigned int i;
 
-	for (i = 0; i < FPLINUX_EVENT_COUNT; ++i) {
-		char path[FPLINUX_PATH_SIZE];
+	for (i = 0; i < FPLINUX_QUAKE_INPUT_EVENT_COUNT; ++i) {
+		char path[FPLINUX_QUAKE_INPUT_PATH_BYTES];
 
 		snprintf(path, sizeof(path), "/dev/input/event%u", i);
 		register_input_device(path);
 	}
 
-	phone_count = count_role(INPUT_ROLE_PHONE);
-	host_count = count_role(INPUT_ROLE_HOST);
+	phone_count = count_role(FPLINUX_QUAKE_INPUT_ROLE_PHONE);
+	host_count = count_role(FPLINUX_QUAKE_INPUT_ROLE_HOST);
 	if (phone_count > 1 || host_count > 1) {
 		close_input_devices();
 		Sys_Error(
@@ -320,8 +320,9 @@ static void scan_input_devices(void)
 			phone_count, host_count);
 	}
 
-	selected_role = input_mode == INPUT_MODE_PHONE ? INPUT_ROLE_PHONE :
-							 INPUT_ROLE_HOST;
+	selected_role = input_mode == FPLINUX_QUAKE_INPUT_MODE_PHONE ?
+				FPLINUX_QUAKE_INPUT_ROLE_PHONE :
+				FPLINUX_QUAKE_INPUT_ROLE_HOST;
 	if (count_role(selected_role) != 1) {
 		const char *selected_name = role_name(selected_role);
 
@@ -539,7 +540,7 @@ static knum_t translate_keyboard(unsigned int code)
 static knum_t translate_key(const struct input_device *device,
 			    unsigned int code)
 {
-	if (device->role == INPUT_ROLE_PHONE)
+	if (device->role == FPLINUX_QUAKE_INPUT_ROLE_PHONE)
 		return translate_phone(code);
 	return translate_keyboard(code);
 }
@@ -643,7 +644,7 @@ static void read_input_device(struct input_device *device)
 	if (size == 0 || (size < 0 && errno != EAGAIN && errno != EWOULDBLOCK &&
 			  errno != EINTR)) {
 		qboolean was_active = device->active;
-		char name[FPLINUX_NAME_SIZE];
+		char name[FPLINUX_QUAKE_INPUT_NAME_BYTES];
 
 		snprintf(name, sizeof(name), "%s", device->name);
 		release_device_keys(device);

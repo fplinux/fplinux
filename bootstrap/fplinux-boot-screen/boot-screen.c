@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "boot-screen.h"
 
-#define COLOUR_BACKGROUND 0x0841u
-#define COLOUR_SURFACE 0x18c3u
-#define COLOUR_PRIMARY 0xf79eu
-#define COLOUR_MUTED 0xbdf7u
-#define COLOUR_RULE 0x4208u
-#define COLOUR_DIM 0x6b4du
-#define COLOUR_ERROR 0xe30cu
+#define FPLINUX_BOOT_SCREEN_COLOUR_BACKGROUND 0x0841U
+#define FPLINUX_BOOT_SCREEN_COLOUR_SURFACE 0x18c3U
+#define FPLINUX_BOOT_SCREEN_COLOUR_PRIMARY 0xf79eU
+#define FPLINUX_BOOT_SCREEN_COLOUR_MUTED 0xbdf7U
+#define FPLINUX_BOOT_SCREEN_COLOUR_RULE 0x4208U
+#define FPLINUX_BOOT_SCREEN_COLOUR_DIM 0x6b4dU
+#define FPLINUX_BOOT_SCREEN_COLOUR_ERROR 0xe30cU
 
 struct screen_font {
 	uint8_t width;
@@ -404,7 +404,7 @@ static void draw_character(struct fplinux_boot_screen *screen, uint32_t x,
 	rows = font->rows + (size_t)(character - 32) * font->glyph_bytes;
 	for (r = 0; r < font->height; ++r)
 		for (c = 0; c < font->width; ++c)
-			if (rows[r] & (0x80u >> c))
+			if (rows[r] & (0x80U >> c))
 				fill_rect(screen, x + c * scale, y + r * scale,
 					  scale, scale, colour);
 }
@@ -552,9 +552,10 @@ static void draw_wrapped_detail(struct fplinux_boot_screen *screen,
 				      screen->error_detail, capacity, 0);
 	copy_wrapped_line(second, sizeof(second), remaining, capacity, 1);
 	draw_text_n(screen, left, first_y, first, string_length(first), scale,
-		    COLOUR_PRIMARY);
+		    FPLINUX_BOOT_SCREEN_COLOUR_PRIMARY);
 	draw_text_n(screen, left, first_y + line_pitch, second,
-		    string_length(second), scale, COLOUR_PRIMARY);
+		    string_length(second), scale,
+		    FPLINUX_BOOT_SCREEN_COLOUR_PRIMARY);
 }
 
 static void draw_text_centered(struct fplinux_boot_screen *screen, uint32_t y,
@@ -562,7 +563,7 @@ static void draw_text_centered(struct fplinux_boot_screen *screen, uint32_t y,
 			       uint16_t colour)
 {
 	uint32_t width = text_width(string_length(text), scale);
-	uint32_t margin = screen->canvas.width / 12u;
+	uint32_t margin = screen->canvas.width / 12U;
 
 	if (width + margin * 2 > screen->canvas.width) {
 		draw_text_fit(screen, margin, screen->canvas.width - margin, y,
@@ -575,7 +576,7 @@ static void draw_text_centered(struct fplinux_boot_screen *screen, uint32_t y,
 
 static uint32_t progress_permille(const struct fplinux_boot_screen *screen)
 {
-	uint32_t total = (uint32_t)screen->stage_count * 2u;
+	uint32_t total = (uint32_t)screen->stage_count * 2U;
 	uint32_t done = 0;
 	size_t i;
 
@@ -591,22 +592,25 @@ static uint32_t progress_permille(const struct fplinux_boot_screen *screen)
 		else if (status == FPLINUX_BOOT_SCREEN_ACTIVE)
 			done += 1;
 	}
-	return done * 1000u / total;
+	return done * 1000U / total;
 }
 
 static void draw_progress_bar(struct fplinux_boot_screen *screen, uint32_t y,
 			      uint32_t height)
 {
-	uint32_t margin = screen->canvas.width / 8u;
+	uint32_t margin = screen->canvas.width / 8U;
 	uint32_t width = screen->canvas.width - margin * 2;
-	uint32_t fill = width * progress_permille(screen) / 1000u;
-	uint16_t colour = screen->has_error ? COLOUR_ERROR : COLOUR_PRIMARY;
+	uint32_t fill = width * progress_permille(screen) / 1000U;
+	uint16_t colour = screen->has_error ?
+				  FPLINUX_BOOT_SCREEN_COLOUR_ERROR :
+				  FPLINUX_BOOT_SCREEN_COLOUR_PRIMARY;
 
 	if (screen->has_error)
 		fill = width;
 	fill_rect(screen, margin - 1, y - 1, width + 2, height + 2,
-		  COLOUR_RULE);
-	fill_rect(screen, margin, y, width, height, COLOUR_SURFACE);
+		  FPLINUX_BOOT_SCREEN_COLOUR_RULE);
+	fill_rect(screen, margin, y, width, height,
+		  FPLINUX_BOOT_SCREEN_COLOUR_SURFACE);
 	if (fill != 0)
 		fill_rect(screen, margin, y, fill, height, colour);
 }
@@ -616,46 +620,49 @@ static void render_adaptive(struct fplinux_boot_screen *screen)
 	uint32_t w = screen->canvas.width;
 	uint32_t h = screen->canvas.height;
 	uint32_t brand_scale =
-		text_width(string_length(screen->brand), 2) + w / 6u <= w ? 2 :
+		text_width(string_length(screen->brand), 2) + w / 6U <= w ? 2 :
 									    1;
-	uint32_t bar_height = h / 24u < 6 ? 6 : h / 24u;
-	uint32_t bar_y = h * 45u / 100u;
-	uint32_t status_y = bar_y + bar_height + h / 24u;
-	uint32_t line = (uint32_t)active_font->height + 2u;
-	uint32_t y = h / 10u;
+	uint32_t bar_height = h / 24U < 6 ? 6 : h / 24U;
+	uint32_t bar_y = h * 45U / 100U;
+	uint32_t status_y = bar_y + bar_height + h / 24U;
+	uint32_t line = (uint32_t)active_font->height + 2U;
+	uint32_t y = h / 10U;
 	const char *status = screen->status_text;
-	uint16_t status_colour = COLOUR_MUTED;
+	uint16_t status_colour = FPLINUX_BOOT_SCREEN_COLOUR_MUTED;
 	char heading[14];
 
 	draw_text_centered(screen, y, screen->brand, brand_scale,
-			   COLOUR_PRIMARY);
+			   FPLINUX_BOOT_SCREEN_COLOUR_PRIMARY);
 	y += (uint32_t)active_font->height * brand_scale + line / 2;
-	draw_text_centered(screen, y, screen->model, 1, COLOUR_MUTED);
+	draw_text_centered(screen, y, screen->model, 1,
+			   FPLINUX_BOOT_SCREEN_COLOUR_MUTED);
 	y += line;
-	draw_text_centered(screen, y, screen->mode, 1, COLOUR_DIM);
+	draw_text_centered(screen, y, screen->mode, 1,
+			   FPLINUX_BOOT_SCREEN_COLOUR_DIM);
 
 	draw_progress_bar(screen, bar_y, bar_height);
 
 	if (screen->has_error) {
 		format_error_heading(heading, screen->error_code);
-		draw_text_centered(screen, status_y, heading, 1, COLOUR_ERROR);
-		draw_wrapped_detail(screen, w / 12u, w - w / 12u,
+		draw_text_centered(screen, status_y, heading, 1,
+				   FPLINUX_BOOT_SCREEN_COLOUR_ERROR);
+		draw_wrapped_detail(screen, w / 12U, w - w / 12U,
 				    status_y + line,
-				    (w - w / 6u) / active_font->advance, 1);
+				    (w - w / 6U) / active_font->advance, 1);
 		return;
 	}
 
 	if (status[0] == '\0' && screen->current_stage < screen->stage_count)
 		status = screen->stage_labels[screen->current_stage];
 	if (screen->status_state == FPLINUX_BOOT_SCREEN_ACTIVE)
-		status_colour = COLOUR_PRIMARY;
+		status_colour = FPLINUX_BOOT_SCREEN_COLOUR_PRIMARY;
 	else if (screen->status_state == FPLINUX_BOOT_SCREEN_FAILED)
-		status_colour = COLOUR_ERROR;
+		status_colour = FPLINUX_BOOT_SCREEN_COLOUR_ERROR;
 	draw_text_centered(screen, status_y, status, 1, status_colour);
 
 	if (screen->note[0] != '\0')
-		draw_text_centered(screen, h - h / 12u - 8, screen->note, 1,
-				   COLOUR_DIM);
+		draw_text_centered(screen, h - h / 12U - 8, screen->note, 1,
+				   FPLINUX_BOOT_SCREEN_COLOUR_DIM);
 }
 
 void fplinux_boot_screen_render(struct fplinux_boot_screen *screen)
@@ -664,7 +671,7 @@ void fplinux_boot_screen_render(struct fplinux_boot_screen *screen)
 		return;
 	active_font = screen_font(screen);
 	fill_rect(screen, 0, 0, screen->canvas.width, screen->canvas.height,
-		  COLOUR_BACKGROUND);
+		  FPLINUX_BOOT_SCREEN_COLOUR_BACKGROUND);
 	render_adaptive(screen);
 	screen->canvas.present(screen->canvas.context);
 }

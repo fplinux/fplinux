@@ -29,31 +29,31 @@
 #include <time.h>
 #include <unistd.h>
 
-#define DEFAULT_VID 0x0525u
-#define DEFAULT_PID 0xa4a6u
-#define DEFAULT_TIMEOUT_MS 250u
-#define DEFAULT_WAIT_SECONDS 30u
-#define KEYBOARD_BUFFER_BYTES 512u
-#define KEYBOARD_KEY_STATE_BYTES ((KEY_CNT + 7u) / 8u)
-#define KEYBOARD_POLL_MS 200
-#define DEFAULT_LINGER_MS 500u
-#define TRANSFER_BUFFER_SIZE 16384u
-#define UPLOAD_WINDOW_LINES 16u
-#define UPLOAD_CHUNK_LINES 4599u
-#define UPLOAD_COMMAND_BYTES 1800u
-#define MAX_EXEC_OUTPUT_BYTES (1u * 1024u * 1024u)
-#define PULL_BLOCK_BYTES (32u * 1024u)
-#define PULL_BLOCK_ATTEMPTS 3u
-#define LOCAL_ESCAPE 0x1du
+#define FPLINUX_USB_CONSOLE_DEFAULT_VENDOR_ID 0x0525U
+#define FPLINUX_USB_CONSOLE_DEFAULT_PRODUCT_ID 0xa4a6U
+#define FPLINUX_USB_CONSOLE_DEFAULT_TIMEOUT_MS 250U
+#define FPLINUX_USB_CONSOLE_DEFAULT_WAIT_SECONDS 30U
+#define FPLINUX_USB_CONSOLE_KEYBOARD_BUFFER_BYTES 512U
+#define FPLINUX_USB_CONSOLE_KEYBOARD_KEY_STATE_BYTES ((KEY_CNT + 7U) / 8U)
+#define FPLINUX_USB_CONSOLE_KEYBOARD_POLL_MS 200
+#define FPLINUX_USB_CONSOLE_DEFAULT_LINGER_MS 500U
+#define FPLINUX_USB_CONSOLE_TRANSFER_BUFFER_BYTES 16384U
+#define FPLINUX_USB_CONSOLE_UPLOAD_WINDOW_LINES 16U
+#define FPLINUX_USB_CONSOLE_UPLOAD_CHUNK_LINES 4599U
+#define FPLINUX_USB_CONSOLE_UPLOAD_COMMAND_BYTES 1800U
+#define FPLINUX_USB_CONSOLE_MAX_EXEC_OUTPUT_BYTES (1U * 1024U * 1024U)
+#define FPLINUX_USB_CONSOLE_PULL_BLOCK_BYTES (32U * 1024U)
+#define FPLINUX_USB_CONSOLE_PULL_BLOCK_ATTEMPTS 3U
+#define FPLINUX_USB_CONSOLE_LOCAL_ESCAPE 0x1dU
 
-#define USB_DT_CS_INTERFACE 0x24u
-#define USB_CDC_UNION_TYPE 0x06u
-#define USB_CDC_DATA_CLASS 0x0au
-#define USB_CDC_CONTROL_CLASS 0x02u
-#define USB_CDC_REQ_SET_LINE_CODING 0x20u
-#define USB_CDC_REQ_SET_CONTROL_LINE_STATE 0x22u
-#define USB_CDC_CONTROL_DTR 0x01u
-#define USB_CDC_CONTROL_RTS 0x02u
+#define USB_DT_CS_INTERFACE 0x24U
+#define USB_CDC_UNION_TYPE 0x06U
+#define USB_CDC_DATA_CLASS 0x0aU
+#define USB_CDC_CONTROL_CLASS 0x02U
+#define USB_CDC_REQ_SET_LINE_CODING 0x20U
+#define USB_CDC_REQ_SET_CONTROL_LINE_STATE 0x22U
+#define USB_CDC_CONTROL_DTR 0x01U
+#define USB_CDC_CONTROL_RTS 0x02U
 
 struct options {
 	uint16_t vid;
@@ -190,26 +190,26 @@ static bool parse_unsigned(const char *text, int base, unsigned long maximum,
 
 static uint32_t rotate_right(uint32_t value, unsigned int count)
 {
-	return (value >> count) | (value << (32u - count));
+	return (value >> count) | (value << (32U - count));
 }
 
 static void sha256_transform(struct sha256_state *state,
 			     const unsigned char block[64])
 {
 	static const uint32_t constants[64] = {
-		0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u, 0x3956c25bu,
-		0x59f111f1u, 0x923f82a4u, 0xab1c5ed5u, 0xd807aa98u, 0x12835b01u,
-		0x243185beu, 0x550c7dc3u, 0x72be5d74u, 0x80deb1feu, 0x9bdc06a7u,
-		0xc19bf174u, 0xe49b69c1u, 0xefbe4786u, 0x0fc19dc6u, 0x240ca1ccu,
-		0x2de92c6fu, 0x4a7484aau, 0x5cb0a9dcu, 0x76f988dau, 0x983e5152u,
-		0xa831c66du, 0xb00327c8u, 0xbf597fc7u, 0xc6e00bf3u, 0xd5a79147u,
-		0x06ca6351u, 0x14292967u, 0x27b70a85u, 0x2e1b2138u, 0x4d2c6dfcu,
-		0x53380d13u, 0x650a7354u, 0x766a0abbu, 0x81c2c92eu, 0x92722c85u,
-		0xa2bfe8a1u, 0xa81a664bu, 0xc24b8b70u, 0xc76c51a3u, 0xd192e819u,
-		0xd6990624u, 0xf40e3585u, 0x106aa070u, 0x19a4c116u, 0x1e376c08u,
-		0x2748774cu, 0x34b0bcb5u, 0x391c0cb3u, 0x4ed8aa4au, 0x5b9cca4fu,
-		0x682e6ff3u, 0x748f82eeu, 0x78a5636fu, 0x84c87814u, 0x8cc70208u,
-		0x90befffau, 0xa4506cebu, 0xbef9a3f7u, 0xc67178f2u,
+		0x428a2f98U, 0x71374491U, 0xb5c0fbcfU, 0xe9b5dba5U, 0x3956c25bU,
+		0x59f111f1U, 0x923f82a4U, 0xab1c5ed5U, 0xd807aa98U, 0x12835b01U,
+		0x243185beU, 0x550c7dc3U, 0x72be5d74U, 0x80deb1feU, 0x9bdc06a7U,
+		0xc19bf174U, 0xe49b69c1U, 0xefbe4786U, 0x0fc19dc6U, 0x240ca1ccU,
+		0x2de92c6fU, 0x4a7484aaU, 0x5cb0a9dcU, 0x76f988daU, 0x983e5152U,
+		0xa831c66dU, 0xb00327c8U, 0xbf597fc7U, 0xc6e00bf3U, 0xd5a79147U,
+		0x06ca6351U, 0x14292967U, 0x27b70a85U, 0x2e1b2138U, 0x4d2c6dfcU,
+		0x53380d13U, 0x650a7354U, 0x766a0abbU, 0x81c2c92eU, 0x92722c85U,
+		0xa2bfe8a1U, 0xa81a664bU, 0xc24b8b70U, 0xc76c51a3U, 0xd192e819U,
+		0xd6990624U, 0xf40e3585U, 0x106aa070U, 0x19a4c116U, 0x1e376c08U,
+		0x2748774cU, 0x34b0bcb5U, 0x391c0cb3U, 0x4ed8aa4aU, 0x5b9cca4fU,
+		0x682e6ff3U, 0x748f82eeU, 0x78a5636fU, 0x84c87814U, 0x8cc70208U,
+		0x90befffaU, 0xa4506cebU, 0xbef9a3f7U, 0xc67178f2U,
 	};
 	uint32_t schedule[64];
 	uint32_t a = state->words[0];
@@ -223,7 +223,7 @@ static void sha256_transform(struct sha256_state *state,
 	unsigned int index;
 
 	for (index = 0; index < 16; ++index) {
-		size_t offset = index * 4u;
+		size_t offset = index * 4U;
 		schedule[index] = ((uint32_t)block[offset] << 24) |
 				  ((uint32_t)block[offset + 1] << 16) |
 				  ((uint32_t)block[offset + 2] << 8) |
@@ -274,14 +274,14 @@ static void sha256_init(struct sha256_state *state)
 	*state = (struct sha256_state){
 	    .words =
 		{
-		    0x6a09e667u,
-		    0xbb67ae85u,
-		    0x3c6ef372u,
-		    0xa54ff53au,
-		    0x510e527fu,
-		    0x9b05688cu,
-		    0x1f83d9abu,
-		    0x5be0cd19u,
+		    0x6a09e667U,
+		    0xbb67ae85U,
+		    0x3c6ef372U,
+		    0xa54ff53aU,
+		    0x510e527fU,
+		    0x9b05688cU,
+		    0x1f83d9abU,
+		    0x5be0cd19U,
 		},
 	};
 }
@@ -307,7 +307,7 @@ static void sha256_update(struct sha256_state *state, const unsigned char *data,
 
 static void sha256_finish(struct sha256_state *state, unsigned char digest[32])
 {
-	uint64_t bit_count = state->bytes * 8u;
+	uint64_t bit_count = state->bytes * 8U;
 	unsigned int index;
 
 	state->block[state->block_size++] = 0x80;
@@ -320,7 +320,7 @@ static void sha256_finish(struct sha256_state *state, unsigned char digest[32])
 	memset(state->block + state->block_size, 0, 56 - state->block_size);
 	for (index = 0; index < 8; ++index) {
 		state->block[63 - index] =
-			(unsigned char)(bit_count >> (index * 8u));
+			(unsigned char)(bit_count >> (index * 8U));
 	}
 	sha256_transform(state, state->block);
 	for (index = 0; index < 8; ++index) {
@@ -336,38 +336,52 @@ static void sha256_finish(struct sha256_state *state, unsigned char digest[32])
 static int parse_options(int argc, char **argv, struct options *options)
 {
 	enum {
-		OPT_VID = 1000,
-		OPT_PID,
-		OPT_INTERFACE,
-		OPT_BUS,
-		OPT_ADDRESS,
-		OPT_TIMEOUT,
-		OPT_WAIT,
-		OPT_LINGER,
-		OPT_NO_DETACH,
-		OPT_LIST,
-		OPT_UPLOAD,
-		OPT_EXEC,
-		OPT_PULL,
-		OPT_SELF_TEST,
-		OPT_KEYBOARD,
+		FPLINUX_USB_CONSOLE_OPTION_VENDOR_ID = 1000,
+		FPLINUX_USB_CONSOLE_OPTION_PRODUCT_ID,
+		FPLINUX_USB_CONSOLE_OPTION_INTERFACE,
+		FPLINUX_USB_CONSOLE_OPTION_BUS,
+		FPLINUX_USB_CONSOLE_OPTION_ADDRESS,
+		FPLINUX_USB_CONSOLE_OPTION_TIMEOUT,
+		FPLINUX_USB_CONSOLE_OPTION_WAIT,
+		FPLINUX_USB_CONSOLE_OPTION_LINGER,
+		FPLINUX_USB_CONSOLE_OPTION_NO_DETACH,
+		FPLINUX_USB_CONSOLE_OPTION_LIST,
+		FPLINUX_USB_CONSOLE_OPTION_UPLOAD,
+		FPLINUX_USB_CONSOLE_OPTION_EXEC,
+		FPLINUX_USB_CONSOLE_OPTION_PULL,
+		FPLINUX_USB_CONSOLE_OPTION_SELF_TEST,
+		FPLINUX_USB_CONSOLE_OPTION_KEYBOARD,
 	};
 	static const struct option long_options[] = {
-		{ "vid", required_argument, NULL, OPT_VID },
-		{ "pid", required_argument, NULL, OPT_PID },
-		{ "interface", required_argument, NULL, OPT_INTERFACE },
-		{ "bus", required_argument, NULL, OPT_BUS },
-		{ "address", required_argument, NULL, OPT_ADDRESS },
-		{ "timeout-ms", required_argument, NULL, OPT_TIMEOUT },
-		{ "wait", required_argument, NULL, OPT_WAIT },
-		{ "linger-ms", required_argument, NULL, OPT_LINGER },
-		{ "no-detach", no_argument, NULL, OPT_NO_DETACH },
-		{ "list", no_argument, NULL, OPT_LIST },
-		{ "upload", required_argument, NULL, OPT_UPLOAD },
-		{ "exec", required_argument, NULL, OPT_EXEC },
-		{ "pull", required_argument, NULL, OPT_PULL },
-		{ "keyboard", required_argument, NULL, OPT_KEYBOARD },
-		{ "self-test", no_argument, NULL, OPT_SELF_TEST },
+		{ "vid", required_argument, NULL,
+		  FPLINUX_USB_CONSOLE_OPTION_VENDOR_ID },
+		{ "pid", required_argument, NULL,
+		  FPLINUX_USB_CONSOLE_OPTION_PRODUCT_ID },
+		{ "interface", required_argument, NULL,
+		  FPLINUX_USB_CONSOLE_OPTION_INTERFACE },
+		{ "bus", required_argument, NULL,
+		  FPLINUX_USB_CONSOLE_OPTION_BUS },
+		{ "address", required_argument, NULL,
+		  FPLINUX_USB_CONSOLE_OPTION_ADDRESS },
+		{ "timeout-ms", required_argument, NULL,
+		  FPLINUX_USB_CONSOLE_OPTION_TIMEOUT },
+		{ "wait", required_argument, NULL,
+		  FPLINUX_USB_CONSOLE_OPTION_WAIT },
+		{ "linger-ms", required_argument, NULL,
+		  FPLINUX_USB_CONSOLE_OPTION_LINGER },
+		{ "no-detach", no_argument, NULL,
+		  FPLINUX_USB_CONSOLE_OPTION_NO_DETACH },
+		{ "list", no_argument, NULL, FPLINUX_USB_CONSOLE_OPTION_LIST },
+		{ "upload", required_argument, NULL,
+		  FPLINUX_USB_CONSOLE_OPTION_UPLOAD },
+		{ "exec", required_argument, NULL,
+		  FPLINUX_USB_CONSOLE_OPTION_EXEC },
+		{ "pull", required_argument, NULL,
+		  FPLINUX_USB_CONSOLE_OPTION_PULL },
+		{ "keyboard", required_argument, NULL,
+		  FPLINUX_USB_CONSOLE_OPTION_KEYBOARD },
+		{ "self-test", no_argument, NULL,
+		  FPLINUX_USB_CONSOLE_OPTION_SELF_TEST },
 		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 },
 	};
@@ -375,21 +389,21 @@ static int parse_options(int argc, char **argv, struct options *options)
 	unsigned long value;
 
 	*options = (struct options){
-		.vid = DEFAULT_VID,
-		.pid = DEFAULT_PID,
+		.vid = FPLINUX_USB_CONSOLE_DEFAULT_VENDOR_ID,
+		.pid = FPLINUX_USB_CONSOLE_DEFAULT_PRODUCT_ID,
 		.interface_number = -1,
 		.bus_number = -1,
 		.device_address = -1,
-		.timeout_ms = DEFAULT_TIMEOUT_MS,
-		.wait_seconds = DEFAULT_WAIT_SECONDS,
-		.linger_ms = DEFAULT_LINGER_MS,
+		.timeout_ms = FPLINUX_USB_CONSOLE_DEFAULT_TIMEOUT_MS,
+		.wait_seconds = FPLINUX_USB_CONSOLE_DEFAULT_WAIT_SECONDS,
+		.linger_ms = FPLINUX_USB_CONSOLE_DEFAULT_LINGER_MS,
 		.detach_kernel_driver = true,
 	};
 
 	while ((option = getopt_long(argc, argv, "h", long_options, NULL)) !=
 	       -1) {
 		switch (option) {
-		case OPT_VID:
+		case FPLINUX_USB_CONSOLE_OPTION_VENDOR_ID:
 			if (!parse_unsigned(optarg, 16, UINT16_MAX, &value)) {
 				fprintf(stderr,
 					"fplinux-usb-console: invalid --vid: %s\n",
@@ -398,7 +412,7 @@ static int parse_options(int argc, char **argv, struct options *options)
 			}
 			options->vid = (uint16_t)value;
 			break;
-		case OPT_PID:
+		case FPLINUX_USB_CONSOLE_OPTION_PRODUCT_ID:
 			if (!parse_unsigned(optarg, 16, UINT16_MAX, &value)) {
 				fprintf(stderr,
 					"fplinux-usb-console: invalid --pid: %s\n",
@@ -407,10 +421,10 @@ static int parse_options(int argc, char **argv, struct options *options)
 			}
 			options->pid = (uint16_t)value;
 			break;
-		case OPT_KEYBOARD:
+		case FPLINUX_USB_CONSOLE_OPTION_KEYBOARD:
 			options->keyboard_device = optarg;
 			break;
-		case OPT_INTERFACE:
+		case FPLINUX_USB_CONSOLE_OPTION_INTERFACE:
 			if (!parse_unsigned(optarg, 0, 255, &value)) {
 				fprintf(stderr,
 					"fplinux-usb-console: invalid "
@@ -420,7 +434,7 @@ static int parse_options(int argc, char **argv, struct options *options)
 			}
 			options->interface_number = (int)value;
 			break;
-		case OPT_BUS:
+		case FPLINUX_USB_CONSOLE_OPTION_BUS:
 			if (!parse_unsigned(optarg, 0, 255, &value)) {
 				fprintf(stderr,
 					"fplinux-usb-console: invalid --bus: %s\n",
@@ -429,7 +443,7 @@ static int parse_options(int argc, char **argv, struct options *options)
 			}
 			options->bus_number = (int)value;
 			break;
-		case OPT_ADDRESS:
+		case FPLINUX_USB_CONSOLE_OPTION_ADDRESS:
 			if (!parse_unsigned(optarg, 0, 255, &value)) {
 				fprintf(stderr,
 					"fplinux-usb-console: invalid "
@@ -439,7 +453,7 @@ static int parse_options(int argc, char **argv, struct options *options)
 			}
 			options->device_address = (int)value;
 			break;
-		case OPT_TIMEOUT:
+		case FPLINUX_USB_CONSOLE_OPTION_TIMEOUT:
 			if (!parse_unsigned(optarg, 0, 60000, &value) ||
 			    value == 0) {
 				fprintf(stderr,
@@ -450,7 +464,7 @@ static int parse_options(int argc, char **argv, struct options *options)
 			}
 			options->timeout_ms = (unsigned int)value;
 			break;
-		case OPT_WAIT:
+		case FPLINUX_USB_CONSOLE_OPTION_WAIT:
 			if (!parse_unsigned(optarg, 0, 3600, &value)) {
 				fprintf(stderr,
 					"fplinux-usb-console: invalid --wait: %s\n",
@@ -459,7 +473,7 @@ static int parse_options(int argc, char **argv, struct options *options)
 			}
 			options->wait_seconds = (unsigned int)value;
 			break;
-		case OPT_LINGER:
+		case FPLINUX_USB_CONSOLE_OPTION_LINGER:
 			if (!parse_unsigned(optarg, 0, 60000, &value)) {
 				fprintf(stderr,
 					"fplinux-usb-console: invalid "
@@ -469,22 +483,22 @@ static int parse_options(int argc, char **argv, struct options *options)
 			}
 			options->linger_ms = (unsigned int)value;
 			break;
-		case OPT_NO_DETACH:
+		case FPLINUX_USB_CONSOLE_OPTION_NO_DETACH:
 			options->detach_kernel_driver = false;
 			break;
-		case OPT_LIST:
+		case FPLINUX_USB_CONSOLE_OPTION_LIST:
 			options->list_devices = true;
 			break;
-		case OPT_UPLOAD:
+		case FPLINUX_USB_CONSOLE_OPTION_UPLOAD:
 			options->upload_local = optarg;
 			break;
-		case OPT_EXEC:
+		case FPLINUX_USB_CONSOLE_OPTION_EXEC:
 			options->exec_command = optarg;
 			break;
-		case OPT_PULL:
+		case FPLINUX_USB_CONSOLE_OPTION_PULL:
 			options->pull_remote = optarg;
 			break;
-		case OPT_SELF_TEST:
+		case FPLINUX_USB_CONSOLE_OPTION_SELF_TEST:
 			options->self_test = true;
 			break;
 		case 'h':
@@ -639,8 +653,8 @@ static uint64_t monotonic_milliseconds(void)
 	if (clock_gettime(CLOCK_MONOTONIC, &value) != 0) {
 		return 0;
 	}
-	return (uint64_t)value.tv_sec * 1000u +
-	       (uint64_t)value.tv_nsec / 1000000u;
+	return (uint64_t)value.tv_sec * 1000U +
+	       (uint64_t)value.tv_nsec / 1000000U;
 }
 
 static int wait_for_device(libusb_context *context,
@@ -648,7 +662,7 @@ static int wait_for_device(libusb_context *context,
 			   libusb_device **device)
 {
 	uint64_t deadline = monotonic_milliseconds() +
-			    (uint64_t)options->wait_seconds * 1000u;
+			    (uint64_t)options->wait_seconds * 1000U;
 	int result;
 
 	do {
@@ -912,7 +926,7 @@ static int write_all(int fd, const unsigned char *data, size_t size)
 static void *reader_thread(void *opaque)
 {
 	struct reader_state *state = opaque;
-	unsigned char buffer[TRANSFER_BUFFER_SIZE];
+	unsigned char buffer[FPLINUX_USB_CONSOLE_TRANSFER_BUFFER_BYTES];
 
 	while (!atomic_load(state->stop)) {
 		int transferred = 0;
@@ -1002,7 +1016,7 @@ static int hash_file(FILE *file, char hex[65], uint64_t *byte_count,
 {
 	static const char digits[] = "0123456789abcdef";
 	struct sha256_state state;
-	unsigned char buffer[TRANSFER_BUFFER_SIZE];
+	unsigned char buffer[FPLINUX_USB_CONSOLE_TRANSFER_BUFFER_BYTES];
 	unsigned char digest[32];
 	size_t size;
 	unsigned int index;
@@ -1086,10 +1100,10 @@ static int wait_for_upload_result(libusb_device_handle *handle,
 				  const char *failure_marker,
 				  bool *failure_seen)
 {
-	unsigned char input[TRANSFER_BUFFER_SIZE];
+	unsigned char input[FPLINUX_USB_CONSOLE_TRANSFER_BUFFER_BYTES];
 	char response[8192];
 	size_t response_size = 0;
-	uint64_t deadline = monotonic_milliseconds() + 60000u;
+	uint64_t deadline = monotonic_milliseconds() + 60000U;
 
 	*failure_seen = false;
 	while (!signal_requested && monotonic_milliseconds() < deadline) {
@@ -1145,11 +1159,11 @@ static int wait_for_upload_prompts(libusb_device_handle *handle,
 				   unsigned int transfer_timeout_ms,
 				   const char *marker, unsigned int expected)
 {
-	unsigned char input[TRANSFER_BUFFER_SIZE];
+	unsigned char input[FPLINUX_USB_CONSOLE_TRANSFER_BUFFER_BYTES];
 	size_t marker_size = strlen(marker);
 	size_t matched = 0;
 	unsigned int seen = 0;
-	uint64_t deadline = monotonic_milliseconds() + 60000u;
+	uint64_t deadline = monotonic_milliseconds() + 60000U;
 
 	if (marker_size == 0 || expected == 0) {
 		return LIBUSB_ERROR_INVALID_PARAM;
@@ -1174,8 +1188,8 @@ static int wait_for_upload_prompts(libusb_device_handle *handle,
 				} else {
 					matched =
 						byte == (unsigned char)marker[0] ?
-							1u :
-							0u;
+							1U :
+							0U;
 				}
 				if (matched == marker_size) {
 					matched = 0;
@@ -1235,7 +1249,7 @@ static int finish_upload_chunk(libusb_device_handle *handle,
 			       const char *failure_marker, bool *chunk_open,
 			       bool *remote_failure)
 {
-	char command[UPLOAD_COMMAND_BYTES];
+	char command[FPLINUX_USB_CONSOLE_UPLOAD_COMMAND_BYTES];
 	int command_size =
 		snprintf(command, sizeof(command),
 			 "%s\n"
@@ -1271,7 +1285,7 @@ static int upload_file(libusb_device_handle *handle,
 	char hash[65];
 	char nonce[40];
 	char delimiter[96];
-	char command[UPLOAD_COMMAND_BYTES];
+	char command[FPLINUX_USB_CONSOLE_UPLOAD_COMMAND_BYTES];
 	char directory[256];
 	char *slash;
 	char ready_marker[96];
@@ -1281,7 +1295,7 @@ static int upload_file(libusb_device_handle *handle,
 	char failure_marker[128];
 	unsigned char input[57];
 	unsigned char encoded[77];
-	unsigned char batch[77 * UPLOAD_WINDOW_LINES];
+	unsigned char batch[77 * FPLINUX_USB_CONSOLE_UPLOAD_WINDOW_LINES];
 	size_t batched = 0;
 	uint64_t byte_count;
 	uint64_t sent_bytes = 0;
@@ -1363,7 +1377,7 @@ static int upload_file(libusb_device_handle *handle,
 		"SETUP_FAILED '%s'; PS2=$fplinux_old_ps2; stty echo; fi\n"
 		"%s\n",
 		directory, directory,
-		(unsigned long long)(byte_count / 1024u + 64u), directory,
+		(unsigned long long)(byte_count / 1024U + 64U), directory,
 		nonce, nonce);
 	if (command_size < 0 || command_size >= (int)sizeof(command)) {
 		result = LIBUSB_ERROR_INVALID_PARAM;
@@ -1470,7 +1484,7 @@ static int upload_file(libusb_device_handle *handle,
 		batched += encoded_size;
 		++window_lines;
 		++chunk_lines;
-		if (window_lines == UPLOAD_WINDOW_LINES) {
+		if (window_lines == FPLINUX_USB_CONSOLE_UPLOAD_WINDOW_LINES) {
 			result = send_bytes(handle, pair->endpoint_out, batch,
 					    batched, options->timeout_ms);
 			batched = 0;
@@ -1490,7 +1504,7 @@ static int upload_file(libusb_device_handle *handle,
 			}
 			window_lines = 0;
 		}
-		if (chunk_lines == UPLOAD_CHUNK_LINES) {
+		if (chunk_lines == FPLINUX_USB_CONSOLE_UPLOAD_CHUNK_LINES) {
 			if (window_lines > 0) {
 				result = send_bytes(handle, pair->endpoint_out,
 						    batch, batched,
@@ -1708,7 +1722,7 @@ static int collect_until(libusb_device_handle *handle, uint8_t endpoint,
 			 unsigned int overall_timeout_ms, const char *marker,
 			 struct capture *capture)
 {
-	unsigned char input[TRANSFER_BUFFER_SIZE];
+	unsigned char input[FPLINUX_USB_CONSOLE_TRANSFER_BUFFER_BYTES];
 	uint64_t deadline = monotonic_milliseconds() + overall_timeout_ms;
 
 	while (!signal_requested && monotonic_milliseconds() < deadline) {
@@ -1797,7 +1811,7 @@ static int decode_base64(const char *text, size_t size, unsigned char *output,
 				return -1;
 			}
 			output[written++] =
-				(unsigned char)((accumulator >> bits) & 0xffu);
+				(unsigned char)((accumulator >> bits) & 0xffU);
 		}
 	}
 	*decoded = written;
@@ -1809,9 +1823,9 @@ static void digest_to_hex(const unsigned char digest[32], char hex[65])
 	static const char digits[] = "0123456789abcdef";
 	size_t index;
 
-	for (index = 0; index < 32u; ++index) {
+	for (index = 0; index < 32U; ++index) {
 		hex[index * 2] = digits[digest[index] >> 4];
-		hex[index * 2 + 1] = digits[digest[index] & 0x0fu];
+		hex[index * 2 + 1] = digits[digest[index] & 0x0fU];
 	}
 	hex[64] = '\0';
 }
@@ -1871,7 +1885,7 @@ static void make_nonce(char nonce[33])
 /* A framing failure is otherwise indistinguishable from a dead link. */
 static void report_unframed(const struct capture *capture)
 {
-	size_t show = capture->size > 512u ? 512u : capture->size;
+	size_t show = capture->size > 512U ? 512U : capture->size;
 	const char *from = capture->data + capture->size - show;
 	size_t index;
 
@@ -1881,7 +1895,7 @@ static void report_unframed(const struct capture *capture)
 
 		if (symbol == '\n') {
 			fputs("\\n", stderr);
-		} else if (symbol >= 0x20u && symbol < 0x7fu) {
+		} else if (symbol >= 0x20U && symbol < 0x7fU) {
 			fputc((int)symbol, stderr);
 		} else {
 			fprintf(stderr, "\\x%02x", symbol);
@@ -1891,7 +1905,7 @@ static void report_unframed(const struct capture *capture)
 }
 
 struct keyboard_forward_state {
-	char buffer[KEYBOARD_BUFFER_BYTES];
+	char buffer[FPLINUX_USB_CONSOLE_KEYBOARD_BUFFER_BYTES];
 	size_t filled;
 	bool pressed[KEY_CNT];
 	bool pending[KEY_CNT];
@@ -1900,7 +1914,7 @@ struct keyboard_forward_state {
 
 static bool keyboard_state_bit(const unsigned char *state, unsigned int code)
 {
-	return (state[code / 8u] & (1u << (code % 8u))) != 0;
+	return (state[code / 8U] & (1U << (code % 8U))) != 0;
 }
 
 static bool keyboard_modifier(unsigned int code)
@@ -2002,7 +2016,9 @@ static int resync_keyboard(libusb_device_handle *handle,
 		{ true, true },
 		{ true, false },
 	};
-	unsigned char physical[KEYBOARD_KEY_STATE_BYTES] = { 0 };
+	unsigned char physical[FPLINUX_USB_CONSOLE_KEYBOARD_KEY_STATE_BYTES] = {
+		0
+	};
 	size_t phase;
 	int result;
 
@@ -2035,7 +2051,9 @@ static int release_keyboard(libusb_device_handle *handle,
 			    const struct options *options,
 			    struct keyboard_forward_state *state)
 {
-	unsigned char released[KEYBOARD_KEY_STATE_BYTES] = { 0 };
+	unsigned char released[FPLINUX_USB_CONSOLE_KEYBOARD_KEY_STATE_BYTES] = {
+		0
+	};
 	unsigned int code;
 	bool any = false;
 	int result;
@@ -2123,7 +2141,7 @@ static int forward_keyboard(libusb_device_handle *handle,
 		ssize_t got;
 		int ready;
 
-		ready = poll(&waiting, 1, KEYBOARD_POLL_MS);
+		ready = poll(&waiting, 1, FPLINUX_USB_CONSOLE_KEYBOARD_POLL_MS);
 		if (ready < 0) {
 			if (errno == EINTR)
 				continue;
@@ -2260,13 +2278,13 @@ static int exec_remote(libusb_device_handle *handle,
 		 "printf 'FPLINUX_EXEC_%%s:%%s:%%s\\n' END '%s' "
 		 "\"$fplinux_rc\"\n",
 		 nonce, options->exec_command, nonce);
-	capture_init(&capture, MAX_EXEC_OUTPUT_BYTES);
+	capture_init(&capture, FPLINUX_USB_CONSOLE_MAX_EXEC_OUTPUT_BYTES);
 	result = send_line(handle, pair, command, options->timeout_ms);
 	if (result != LIBUSB_SUCCESS) {
 		goto cleanup;
 	}
 	result = collect_until(handle, pair->endpoint_in, options->timeout_ms,
-			       120000u, end, &capture);
+			       120000U, end, &capture);
 	if (result != LIBUSB_SUCCESS) {
 		fprintf(stderr,
 			"fplinux-usb-console: the phone did not finish the "
@@ -2357,16 +2375,17 @@ static int pull_block(libusb_device_handle *handle,
 		 "printf '\\nFPLINUX_PULL_%%s:%%s:%llu:%%s\\n' B '%s' "
 		 "\"${fplinux_d%%%% *}\"; base64 \"$fplinux_blk\"; "
 		 "printf 'FPLINUX_PULL_%%s:%%s:%llu\\n' E '%s'\n",
-		 options->pull_remote, PULL_BLOCK_BYTES,
+		 options->pull_remote, FPLINUX_USB_CONSOLE_PULL_BLOCK_BYTES,
 		 (unsigned long long)index, (unsigned long long)index, nonce,
 		 (unsigned long long)index, nonce);
-	capture_init(&capture, PULL_BLOCK_BYTES * 2u + 8192u);
+	capture_init(&capture,
+		     FPLINUX_USB_CONSOLE_PULL_BLOCK_BYTES * 2U + 8192U);
 	result = send_line(handle, pair, command, options->timeout_ms);
 	if (result != LIBUSB_SUCCESS) {
 		goto cleanup;
 	}
 	result = collect_until(handle, pair->endpoint_in, options->timeout_ms,
-			       120000u, end, &capture);
+			       120000U, end, &capture);
 	if (result != LIBUSB_SUCCESS) {
 		goto cleanup;
 	}
@@ -2377,7 +2396,7 @@ static int pull_block(libusb_device_handle *handle,
 		goto cleanup;
 	}
 	data = begin_at + strlen(begin);
-	if ((size_t)(end_at - data) < 65u) {
+	if ((size_t)(end_at - data) < 65U) {
 		result = LIBUSB_ERROR_IO;
 		goto cleanup;
 	}
@@ -2385,7 +2404,8 @@ static int pull_block(libusb_device_handle *handle,
 	expected[64] = '\0';
 	data += 64;
 	if (decode_base64(data, (size_t)(end_at - data), block,
-			  PULL_BLOCK_BYTES, block_size) != 0) {
+			  FPLINUX_USB_CONSOLE_PULL_BLOCK_BYTES,
+			  block_size) != 0) {
 		result = LIBUSB_ERROR_IO;
 		goto cleanup;
 	}
@@ -2420,7 +2440,7 @@ static int pull_file(libusb_device_handle *handle,
 	bool echo_disabled = false;
 	int result;
 
-	capture_init(&capture, 65536u);
+	capture_init(&capture, 65536U);
 	if (!safe_remote_source(options->pull_remote)) {
 		fprintf(stderr,
 			"fplinux-usb-console: pull source must be an absolute "
@@ -2434,7 +2454,7 @@ static int pull_file(libusb_device_handle *handle,
 				"too long\n");
 		return LIBUSB_ERROR_INVALID_PARAM;
 	}
-	block = malloc(PULL_BLOCK_BYTES);
+	block = malloc(FPLINUX_USB_CONSOLE_PULL_BLOCK_BYTES);
 	if (block == NULL) {
 		result = LIBUSB_ERROR_NO_MEM;
 		goto cleanup;
@@ -2457,7 +2477,7 @@ static int pull_file(libusb_device_handle *handle,
 	}
 	echo_disabled = true;
 	result = collect_until(handle, pair->endpoint_in, options->timeout_ms,
-			       180000u, marker, &capture);
+			       180000U, marker, &capture);
 	if (result != LIBUSB_SUCCESS) {
 		fprintf(stderr, "fplinux-usb-console: the phone did not report "
 				"the size of the file\n");
@@ -2477,7 +2497,7 @@ static int pull_file(libusb_device_handle *handle,
 		goto cleanup;
 	}
 	remote_size = strtoull(field, &field, 10);
-	if (*field != ':' || strlen(field + 1) < 64u) {
+	if (*field != ':' || strlen(field + 1) < 64U) {
 		result = LIBUSB_ERROR_IO;
 		goto cleanup;
 	}
@@ -2499,7 +2519,9 @@ static int pull_file(libusb_device_handle *handle,
 		size_t block_size = 0;
 		unsigned int attempt;
 
-		for (attempt = 0; attempt < PULL_BLOCK_ATTEMPTS; ++attempt) {
+		for (attempt = 0;
+		     attempt < FPLINUX_USB_CONSOLE_PULL_BLOCK_ATTEMPTS;
+		     ++attempt) {
 			result = pull_block(handle, pair, options, nonce, index,
 					    block, &block_size);
 			if (result == LIBUSB_SUCCESS) {
@@ -2517,7 +2539,8 @@ static int pull_file(libusb_device_handle *handle,
 			fprintf(stderr,
 				"fplinux-usb-console: block %llu failed %u "
 				"times, giving up\n",
-				(unsigned long long)index, PULL_BLOCK_ATTEMPTS);
+				(unsigned long long)index,
+				FPLINUX_USB_CONSOLE_PULL_BLOCK_ATTEMPTS);
 			goto cleanup;
 		}
 		if (block_size == 0) {
@@ -2604,7 +2627,7 @@ static int self_test(void)
 	unsigned char digest[32];
 	unsigned char base64[77];
 	unsigned char decoded[16];
-	char upload_command[UPLOAD_COMMAND_BYTES];
+	char upload_command[FPLINUX_USB_CONSOLE_UPLOAD_COMMAND_BYTES];
 	char hash[65];
 	int command_size;
 	unsigned int index;
@@ -2670,8 +2693,9 @@ static int self_test(void)
 	command_size = format_upload_chunk_start_command(
 		upload_command, sizeof(upload_command), "FPLINUX_CHUNK_test");
 	if (command_size <= 0 || command_size >= (int)sizeof(upload_command) ||
-	    UPLOAD_CHUNK_LINES == 0 ||
-	    (uint64_t)UPLOAD_CHUNK_LINES * 57u > 256u * 1024u ||
+	    FPLINUX_USB_CONSOLE_UPLOAD_CHUNK_LINES == 0 ||
+	    (uint64_t)FPLINUX_USB_CONSOLE_UPLOAD_CHUNK_LINES * 57U >
+		    256U * 1024U ||
 	    strstr(upload_command, "base64 -d >>") == NULL ||
 	    strstr(upload_command, "mkfifo") != NULL ||
 	    strstr(upload_command, "<<'FPLINUX_CHUNK_test'") == NULL) {
@@ -2681,20 +2705,20 @@ static int self_test(void)
 	}
 	if (decode_base64("Zm9vYmFy\n", 9, decoded, sizeof(decoded), &size) !=
 		    0 ||
-	    size != 6u || memcmp(decoded, "foobar", 6) != 0) {
+	    size != 6U || memcmp(decoded, "foobar", 6) != 0) {
 		fprintf(stderr, "fplinux-usb-console: self-test failed: base64 "
 				"decode\n");
 		return 1;
 	}
 	if (decode_base64("AA==", 4, decoded, sizeof(decoded), &size) != 0 ||
-	    size != 1u || decoded[0] != 0u ||
+	    size != 1U || decoded[0] != 0U ||
 	    decode_base64("AAA=", 4, decoded, sizeof(decoded), &size) != 0 ||
-	    size != 2u) {
+	    size != 2U) {
 		fprintf(stderr, "fplinux-usb-console: self-test failed: base64 "
 				"decode padding\n");
 		return 1;
 	}
-	if (decode_base64("Zm9v", 4, decoded, 1u, &size) == 0 ||
+	if (decode_base64("Zm9v", 4, decoded, 1U, &size) == 0 ||
 	    decode_base64("Zm9!", 4, decoded, sizeof(decoded), &size) == 0) {
 		fprintf(stderr, "fplinux-usb-console: self-test failed: base64 "
 				"decode refuses bad input\n");
@@ -2726,7 +2750,7 @@ static int forward_console(libusb_device_handle *handle,
 		.timeout_ms = options->timeout_ms,
 		.stop = &stop,
 	};
-	unsigned char buffer[TRANSFER_BUFFER_SIZE];
+	unsigned char buffer[FPLINUX_USB_CONSOLE_TRANSFER_BUFFER_BYTES];
 	int result = LIBUSB_SUCCESS;
 	bool local_escape_requested = false;
 
@@ -2758,8 +2782,10 @@ static int forward_console(libusb_device_handle *handle,
 			ssize_t size =
 				read(STDIN_FILENO, buffer, sizeof(buffer));
 			if (size > 0) {
-				unsigned char *escape = memchr(
-					buffer, LOCAL_ESCAPE, (size_t)size);
+				unsigned char *escape =
+					memchr(buffer,
+					       FPLINUX_USB_CONSOLE_LOCAL_ESCAPE,
+					       (size_t)size);
 				size_t send_size =
 					escape == NULL ?
 						(size_t)size :

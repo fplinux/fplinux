@@ -23,9 +23,9 @@
 #include <stdlib.h>
 #include <time.h>
 
-#define CHAIN_LENGTH 256U
-#define DEFAULT_ROUNDS 5U
-#define DEFAULT_ITERATIONS 2000000U
+#define FPLINUX_CPUCLOCK_CHAIN_LENGTH 256U
+#define FPLINUX_CPUCLOCK_DEFAULT_ROUNDS 5U
+#define FPLINUX_CPUCLOCK_DEFAULT_ITERATIONS 2000000U
 
 /*
  * Kept out of line on purpose: the unrolled block is large enough that
@@ -52,7 +52,7 @@ dependent_chain(uint32_t seed, uint32_t step, uint32_t iterations)
 	 * analysis. It is never executed on the phone.
 	 */
 	while (iterations--)
-		for (unsigned int i = 0; i < CHAIN_LENGTH; i++)
+		for (unsigned int i = 0; i < FPLINUX_CPUCLOCK_CHAIN_LENGTH; i++)
 			accumulator += step;
 #endif
 	return accumulator;
@@ -67,8 +67,8 @@ static double elapsed_seconds(const struct timespec *start,
 
 int main(int argc, char **argv)
 {
-	unsigned long iterations = DEFAULT_ITERATIONS;
-	unsigned long rounds = DEFAULT_ROUNDS;
+	unsigned long iterations = FPLINUX_CPUCLOCK_DEFAULT_ITERATIONS;
+	unsigned long rounds = FPLINUX_CPUCLOCK_DEFAULT_ROUNDS;
 	double best = 0.0;
 
 	if (argc > 1)
@@ -83,7 +83,7 @@ int main(int argc, char **argv)
 
 	printf("fplinux-cpuclock: %lu rounds of %lu x %u dependent integer "
 	       "additions\n",
-	       rounds, iterations, CHAIN_LENGTH);
+	       rounds, iterations, FPLINUX_CPUCLOCK_CHAIN_LENGTH);
 	printf("fplinux-cpuclock: one addition retires per cycle on this core, "
 	       "so the\n");
 	printf("fplinux-cpuclock: instruction rate is the clock; loop overhead "
@@ -117,7 +117,8 @@ int main(int argc, char **argv)
 				"is the clocksource working?\n");
 			return 1;
 		}
-		hz = (double)iterations * (double)CHAIN_LENGTH / seconds;
+		hz = (double)iterations *
+		     (double)FPLINUX_CPUCLOCK_CHAIN_LENGTH / seconds;
 		if (hz > best)
 			best = hz;
 		printf("fplinux-cpuclock: round %lu: %.3f s -> %.2f MHz\n",

@@ -11,16 +11,16 @@
 #include "ums9117-bootstrap/bootstrap.h"
 
 enum ums9117_boot_stage {
-	BOOT_STAGE_PINMAP = 0,
-	BOOT_STAGE_DISPLAY,
-	BOOT_STAGE_TIMER,
-	BOOT_STAGE_KERNEL,
-	BOOT_STAGE_DEVICE_TREE,
-	BOOT_STAGE_PREPARE_LINUX,
-	BOOT_STAGE_COUNT,
+	UMS9117_BOOT_STAGE_PINMAP = 0,
+	UMS9117_BOOT_STAGE_DISPLAY,
+	UMS9117_BOOT_STAGE_TIMER,
+	UMS9117_BOOT_STAGE_KERNEL,
+	UMS9117_BOOT_STAGE_DEVICE_TREE,
+	UMS9117_BOOT_STAGE_PREPARE_LINUX,
+	UMS9117_BOOT_STAGE_COUNT,
 };
 
-static const char *const boot_stage_labels[BOOT_STAGE_COUNT] = {
+static const char *const boot_stage_labels[UMS9117_BOOT_STAGE_COUNT] = {
 	"PINMAP", "DISPLAY", "TIMER", "KERNEL", "DEVICE TREE", "PREPARE LINUX",
 };
 
@@ -36,11 +36,11 @@ static struct fplinux_boot_screen boot_screen;
 static struct ums9117_boot_canvas boot_canvas;
 
 static uint16_t *const framebuffer =
-	(uint16_t *)(uintptr_t)UMS9117_BOOT_FRAMEBUFFER;
+	(uint16_t *)(uintptr_t)UMS9117_BOOT_FRAMEBUFFER_PHYS;
 
 static int boot_canvas_safe(const struct ums9117_boot_canvas *canvas)
 {
-	const uint32_t limit = UMS9117_BOOT_FRAMEBUFFER_BYTES / 2u;
+	const uint32_t limit = UMS9117_BOOT_FRAMEBUFFER_BYTES / 2U;
 
 	return canvas != NULL && canvas->pixels != NULL && canvas->width != 0 &&
 	       canvas->height != 0 && canvas->stride >= canvas->width &&
@@ -153,8 +153,8 @@ static void quiesce_usb(void)
 void ums9117_boot_main(const struct ums9117_boot_board *board)
 {
 	uint32_t ram_bytes =
-		*(volatile uint32_t *)(uintptr_t)(UMS9117_BOOT_RAM_BASE +
-						  0x00100000u);
+		*(volatile uint32_t *)(uintptr_t)(UMS9117_BOOT_RAM_BASE_PHYS +
+						  0x00100000U);
 	size_t zimage_bytes = ums9117_bootstrap_zimage_size();
 	size_t dtb_bytes = ums9117_bootstrap_dtb_size();
 	struct fplinux_boot_screen_canvas canvas;
@@ -191,54 +191,56 @@ void ums9117_boot_main(const struct ums9117_boot_board *board)
 	sys_start();
 	sys_framebuffer(boot_canvas.pixels);
 	if (fplinux_boot_screen_init(&boot_screen, &canvas, &board->identity,
-				     boot_stage_labels, BOOT_STAGE_COUNT) != 0)
+				     boot_stage_labels,
+				     UMS9117_BOOT_STAGE_COUNT) != 0)
 		ums9117_boot_fail(8, "BOOT SCREEN INIT FAIL");
 
-	set_stage(BOOT_STAGE_PINMAP, FPLINUX_BOOT_SCREEN_DONE);
+	set_stage(UMS9117_BOOT_STAGE_PINMAP, FPLINUX_BOOT_SCREEN_DONE);
 	sprintf(note, "RAM %luM KERNEL %luK DTB %luK",
 		(unsigned long)(ram_bytes >> 20),
 		(unsigned long)(zimage_bytes >> 10),
 		(unsigned long)(dtb_bytes >> 10));
 	(void)fplinux_boot_screen_set_note(&boot_screen, note);
-	set_stage(BOOT_STAGE_DISPLAY, FPLINUX_BOOT_SCREEN_ACTIVE);
+	set_stage(UMS9117_BOOT_STAGE_DISPLAY, FPLINUX_BOOT_SCREEN_ACTIVE);
 	if (boot_canvas.width != board->display_width ||
 	    boot_canvas.height != board->display_height)
 		ums9117_boot_fail(1, "BAD DISPLAY SIZE");
-	set_stage(BOOT_STAGE_DISPLAY, FPLINUX_BOOT_SCREEN_DONE);
+	set_stage(UMS9117_BOOT_STAGE_DISPLAY, FPLINUX_BOOT_SCREEN_DONE);
 	record_stage(1, "DISPLAY OK");
 
-	set_stage(BOOT_STAGE_TIMER, FPLINUX_BOOT_SCREEN_ACTIVE);
+	set_stage(UMS9117_BOOT_STAGE_TIMER, FPLINUX_BOOT_SCREEN_ACTIVE);
 	if (!enable_and_probe_sprd_timer())
 		ums9117_boot_fail(5, "SPRD TIMER FAIL");
-	set_stage(BOOT_STAGE_TIMER, FPLINUX_BOOT_SCREEN_DONE);
+	set_stage(UMS9117_BOOT_STAGE_TIMER, FPLINUX_BOOT_SCREEN_DONE);
 	record_stage(2, "SPRD TIMER OK");
 
-	set_stage(BOOT_STAGE_KERNEL, FPLINUX_BOOT_SCREEN_ACTIVE);
-	if (ram_bytes < UMS9117_BOOT_RAM_REQUIRED)
+	set_stage(UMS9117_BOOT_STAGE_KERNEL, FPLINUX_BOOT_SCREEN_ACTIVE);
+	if (ram_bytes < UMS9117_BOOT_RAM_REQUIRED_BYTES)
 		ums9117_boot_fail(2, "64MB RAM REQUIRED");
-	if (!zimage_bytes || zimage_bytes > UMS9117_BOOT_ZIMAGE_LIMIT)
+	if (!zimage_bytes || zimage_bytes > UMS9117_BOOT_ZIMAGE_LIMIT_BYTES)
 		ums9117_boot_fail(3, "BAD KERNEL SIZE");
 	record_stage(3, "COPY KERNEL");
-	ums9117_bootstrap_copy_zimage(UMS9117_BOOT_ZIMAGE_STAGE, zimage_bytes);
-	set_stage(BOOT_STAGE_KERNEL, FPLINUX_BOOT_SCREEN_DONE);
+	ums9117_bootstrap_copy_zimage(UMS9117_BOOT_ZIMAGE_STAGE_PHYS,
+				      zimage_bytes);
+	set_stage(UMS9117_BOOT_STAGE_KERNEL, FPLINUX_BOOT_SCREEN_DONE);
 
-	set_stage(BOOT_STAGE_DEVICE_TREE, FPLINUX_BOOT_SCREEN_ACTIVE);
-	if (!dtb_bytes || dtb_bytes > UMS9117_BOOT_DTB_LIMIT)
+	set_stage(UMS9117_BOOT_STAGE_DEVICE_TREE, FPLINUX_BOOT_SCREEN_ACTIVE);
+	if (!dtb_bytes || dtb_bytes > UMS9117_BOOT_DTB_LIMIT_BYTES)
 		ums9117_boot_fail(4, "BAD DTB SIZE");
 	record_stage(4, "COPY DTB");
-	ums9117_bootstrap_copy_dtb(UMS9117_BOOT_DTB_STAGE, dtb_bytes);
-	set_stage(BOOT_STAGE_DEVICE_TREE, FPLINUX_BOOT_SCREEN_DONE);
+	ums9117_bootstrap_copy_dtb(UMS9117_BOOT_DTB_STAGE_PHYS, dtb_bytes);
+	set_stage(UMS9117_BOOT_STAGE_DEVICE_TREE, FPLINUX_BOOT_SCREEN_DONE);
 
-	set_stage(BOOT_STAGE_PREPARE_LINUX, FPLINUX_BOOT_SCREEN_ACTIVE);
+	set_stage(UMS9117_BOOT_STAGE_PREPARE_LINUX, FPLINUX_BOOT_SCREEN_ACTIVE);
 	/* The host stops libc_server after observing this final USB record. */
 	record_stage(5, "PREPARE LINUX");
 	quiesce_usb();
-	set_stage(BOOT_STAGE_PREPARE_LINUX, FPLINUX_BOOT_SCREEN_DONE);
+	set_stage(UMS9117_BOOT_STAGE_PREPARE_LINUX, FPLINUX_BOOT_SCREEN_DONE);
 	if (board->hooks != NULL && board->hooks->pre_handoff != NULL)
 		board->hooks->pre_handoff(board->hooks->context);
 	clean_invalidate_dcache();
 	invalidate_icache();
 
-	ums9117_linux_handoff(UMS9117_BOOT_ZIMAGE_STAGE,
-			      UMS9117_BOOT_DTB_STAGE);
+	ums9117_linux_handoff(UMS9117_BOOT_ZIMAGE_STAGE_PHYS,
+			      UMS9117_BOOT_DTB_STAGE_PHYS);
 }

@@ -14,17 +14,18 @@
 #include <linux/string.h>
 #include <linux/workqueue.h>
 
-#define SC2720_CHIP_ID_LOW 0xc00u
-#define SC2720_CHIP_ID_HIGH 0xc04u
-#define SC2720_EXPECTED_ID_LOW 0xa003u
-#define SC2720_EXPECTED_ID_HIGH 0x2720u
-#define SC2720_KPLED_CTRL0 0xdf8u
-#define SC2720_KPLED_CTRL1 0xdfcu
-#define SC2720_KPLED_CTRL0_PHYS 0x40608df8u
-#define SC2720_KPLED_LEVEL GENMASK(15, 12)
-#define SC2720_KPLED_PD BIT(11)
-#define SC2720_KPLED_OWNED_MASK (SC2720_KPLED_LEVEL | SC2720_KPLED_PD)
-#define TA1618_KPLED_CUTOFF_MS 4900u
+#define SC2720_CHIP_ID_LOW 0xc00U
+#define SC2720_CHIP_ID_HIGH 0xc04U
+#define SC2720_EXPECTED_ID_LOW 0xa003U
+#define SC2720_EXPECTED_ID_HIGH 0x2720U
+#define SC2720_KPLED_CTRL0 0xdf8U
+#define SC2720_KPLED_CTRL1 0xdfcU
+#define SC2720_KPLED_CTRL0_PHYS 0x40608df8U
+#define SC2720_KPLED_CTRL0_LEVEL_MASK GENMASK(15, 12)
+#define SC2720_KPLED_CTRL0_POWER_DOWN BIT(11)
+#define SC2720_KPLED_CTRL0_OWNED_MASK \
+	(SC2720_KPLED_CTRL0_LEVEL_MASK | SC2720_KPLED_CTRL0_POWER_DOWN)
+#define TA1618_KPLED_CUTOFF_MS 4900U
 #define TA1618_KEYPAD_NAME "TA-1618 keypad"
 #define TA1618_KEYPAD_PHYS "ta1618/keypad0"
 
@@ -108,7 +109,7 @@ static int ta1618_kpled_restore_locked(struct ta1618_kpled *kpled)
 	ret = ta1618_kpled_check_identity(&transaction);
 	if (!ret)
 		ret = ums9117_adi_update_bits(&transaction, SC2720_KPLED_CTRL0,
-					      SC2720_KPLED_OWNED_MASK,
+					      SC2720_KPLED_CTRL0_OWNED_MASK,
 					      kpled->initial_ctrl0);
 	if (!ret)
 		ret = ums9117_adi_read(&transaction, SC2720_KPLED_CTRL0,
@@ -116,8 +117,9 @@ static int ta1618_kpled_restore_locked(struct ta1618_kpled *kpled)
 	end_ret = ums9117_adi_end(&transaction);
 	if (!ret)
 		ret = end_ret;
-	if (!ret && (readback & SC2720_KPLED_OWNED_MASK) !=
-			    (kpled->initial_ctrl0 & SC2720_KPLED_OWNED_MASK))
+	if (!ret &&
+	    (readback & SC2720_KPLED_CTRL0_OWNED_MASK) !=
+		    (kpled->initial_ctrl0 & SC2720_KPLED_CTRL0_OWNED_MASK))
 		ret = -EIO;
 	if (!ret) {
 		kpled->may_be_on = false;
@@ -165,7 +167,7 @@ static int ta1618_kpled_enable_locked(struct ta1618_kpled *kpled)
 	ret = ta1618_kpled_check_identity(&transaction);
 	if (!ret)
 		ret = ums9117_adi_update_bits(&transaction, SC2720_KPLED_CTRL0,
-					      SC2720_KPLED_OWNED_MASK,
+					      SC2720_KPLED_CTRL0_OWNED_MASK,
 					      expected);
 	if (!ret)
 		ret = ums9117_adi_read(&transaction, SC2720_KPLED_CTRL0,
@@ -173,7 +175,7 @@ static int ta1618_kpled_enable_locked(struct ta1618_kpled *kpled)
 	end_ret = ums9117_adi_end(&transaction);
 	if (!ret)
 		ret = end_ret;
-	if (!ret && (readback & SC2720_KPLED_OWNED_MASK) != expected)
+	if (!ret && (readback & SC2720_KPLED_CTRL0_OWNED_MASK) != expected)
 		ret = -EIO;
 	if (!ret) {
 		kpled->owns_output = true;
@@ -387,7 +389,7 @@ static int ta1618_kpled_probe(struct platform_device *pdev)
 		return dev_err_probe(
 			dev, ret,
 			"failed to read SC2720 keypad backlight state\n");
-	if (!(kpled->initial_ctrl0 & SC2720_KPLED_PD))
+	if (!(kpled->initial_ctrl0 & SC2720_KPLED_CTRL0_POWER_DOWN))
 		return dev_err_probe(
 			dev, -EBUSY,
 			"refusing unexpected enabled keypad backlight\n");

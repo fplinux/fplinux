@@ -22,12 +22,12 @@
 #include <unistd.h>
 
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
-#define CARD_MOUNT "/mnt/card"
-#define GAME_DATA CARD_MOUNT "/fplinux/quake/id1"
-#define ENGINE "/usr/bin/tyr-quake"
-#define FRAMEBUFFER "/dev/fb0"
-#define LOCK_PATH "/tmp/fplinux-quake.lock"
-#define TTY "/dev/tty0"
+#define FPLINUX_QUAKE_CARD_MOUNT "/mnt/card"
+#define FPLINUX_QUAKE_GAME_DATA FPLINUX_QUAKE_CARD_MOUNT "/fplinux/quake/id1"
+#define FPLINUX_QUAKE_ENGINE "/usr/bin/tyr-quake"
+#define FPLINUX_QUAKE_FRAMEBUFFER_DEVICE "/dev/fb0"
+#define FPLINUX_QUAKE_LOCK_PATH "/tmp/fplinux-quake.lock"
+#define FPLINUX_QUAKE_TTY_DEVICE "/dev/tty0"
 
 struct display_state {
 	int framebuffer;
@@ -93,7 +93,8 @@ static int acquire_lock(void)
 		.l_type = F_WRLCK,
 		.l_whence = SEEK_SET,
 	};
-	int descriptor = open(LOCK_PATH, O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+	int descriptor = open(FPLINUX_QUAKE_LOCK_PATH,
+			      O_RDWR | O_CREAT | O_CLOEXEC, 0600);
 
 	if (descriptor < 0)
 		die_errno("cannot open game-session lock");
@@ -124,7 +125,7 @@ static bool card_is_mounted(void)
 	if (!mountinfo)
 		die_errno("cannot read mount table");
 	while (fgets(line, sizeof(line), mountinfo)) {
-		if (strstr(line, " " CARD_MOUNT " ")) {
+		if (strstr(line, " " FPLINUX_QUAKE_CARD_MOUNT " ")) {
 			fclose(mountinfo);
 			return true;
 		}
@@ -141,8 +142,8 @@ static void mount_card(void)
 {
 	const char *source;
 
-	if (mkdir(CARD_MOUNT, 0755) < 0 && errno != EEXIST)
-		die_errno("cannot create " CARD_MOUNT);
+	if (mkdir(FPLINUX_QUAKE_CARD_MOUNT, 0755) < 0 && errno != EEXIST)
+		die_errno("cannot create " FPLINUX_QUAKE_CARD_MOUNT);
 	if (card_is_mounted())
 		return;
 
@@ -153,9 +154,10 @@ static void mount_card(void)
 	else
 		die("microSD is unavailable; insert it before boot");
 
-	if (mount(source, CARD_MOUNT, "vfat",
+	if (mount(source, FPLINUX_QUAKE_CARD_MOUNT, "vfat",
 		  MS_RDONLY | MS_NODEV | MS_NOSUID | MS_NOEXEC, "utf8=1") < 0)
-		die_errno("cannot mount microSD read-only at " CARD_MOUNT);
+		die_errno(
+			"cannot mount microSD read-only at " FPLINUX_QUAKE_CARD_MOUNT);
 }
 
 static void require_pak(const char *path)
@@ -164,7 +166,8 @@ static void require_pak(const char *path)
 
 	if (stat(path, &status) < 0 || !S_ISREG(status.st_mode) ||
 	    access(path, R_OK) < 0)
-		die("game data is missing: " GAME_DATA "/pak0.pak");
+		die("game data is missing: " FPLINUX_QUAKE_GAME_DATA
+		    "/pak0.pak");
 }
 
 static void write_phone_config(const char *directory)
@@ -228,7 +231,8 @@ static void prepare_runtime(char *runtime, size_t runtime_size,
 		char destination[256];
 		struct stat status;
 
-		if (snprintf(source, sizeof(source), GAME_DATA "/pak%u.pak",
+		if (snprintf(source, sizeof(source),
+			     FPLINUX_QUAKE_GAME_DATA "/pak%u.pak",
 			     index) >= (int)sizeof(source) ||
 		    snprintf(destination, sizeof(destination), "%s/pak%u.pak",
 			     id1, index) >= (int)sizeof(destination))
@@ -247,7 +251,8 @@ static void prepare_runtime(char *runtime, size_t runtime_size,
 			found_pak0 = true;
 	}
 	if (!found_pak0)
-		die("game data is missing: " GAME_DATA "/pak0.pak");
+		die("game data is missing: " FPLINUX_QUAKE_GAME_DATA
+		    "/pak0.pak");
 	if (strcmp(input_mode, "phone") == 0)
 		write_phone_config(id1);
 }
@@ -303,9 +308,10 @@ static void save_display(struct display_state *state)
 
 	memset(state, 0, sizeof(*state));
 	state->framebuffer = -1;
-	state->tty = open(TTY, O_RDWR | O_NOCTTY | O_CLOEXEC);
+	state->tty =
+		open(FPLINUX_QUAKE_TTY_DEVICE, O_RDWR | O_NOCTTY | O_CLOEXEC);
 	if (state->tty < 0)
-		die_errno("cannot open " TTY);
+		die_errno("cannot open " FPLINUX_QUAKE_TTY_DEVICE);
 	if (ioctl(state->tty, KDGETMODE, &state->tty_mode) < 0 ||
 	    ioctl(state->tty, VT_GETSTATE, &vt) < 0)
 		die_errno("cannot read console state");
@@ -313,9 +319,10 @@ static void save_display(struct display_state *state)
 		die("active console is not in text mode");
 	state->active_vt = vt.v_active;
 
-	state->framebuffer = open(FRAMEBUFFER, O_RDWR | O_CLOEXEC);
+	state->framebuffer =
+		open(FPLINUX_QUAKE_FRAMEBUFFER_DEVICE, O_RDWR | O_CLOEXEC);
 	if (state->framebuffer < 0)
-		die_errno("cannot open " FRAMEBUFFER);
+		die_errno("cannot open " FPLINUX_QUAKE_FRAMEBUFFER_DEVICE);
 	if (ioctl(state->framebuffer, FBIOGET_FSCREENINFO, &fixed) < 0 ||
 	    ioctl(state->framebuffer, FBIOGET_VSCREENINFO, &state->variable) <
 		    0)
@@ -395,9 +402,16 @@ static void close_display(struct display_state *state)
 static pid_t start_engine(const char *runtime, const char *input_mode)
 {
 	char *const arguments[] = {
-		(char *)ENGINE, "-nolan", "-basedir", (char *)runtime,
-		"-heapsize",	"32768",  "-input",   (char *)input_mode,
-		"+mlook",	NULL,
+		(char *)FPLINUX_QUAKE_ENGINE,
+		"-nolan",
+		"-basedir",
+		(char *)runtime,
+		"-heapsize",
+		"32768",
+		"-input",
+		(char *)input_mode,
+		"+mlook",
+		NULL,
 	};
 	pid_t child = fork();
 
@@ -407,9 +421,9 @@ static pid_t start_engine(const char *runtime, const char *input_mode)
 		reset_signal_handlers();
 		if (setenv("HOME", runtime, 1) < 0)
 			_exit(126);
-		execv(ENGINE, arguments);
-		fprintf(stderr, "quake: cannot execute %s: %s\n", ENGINE,
-			strerror(errno));
+		execv(FPLINUX_QUAKE_ENGINE, arguments);
+		fprintf(stderr, "quake: cannot execute %s: %s\n",
+			FPLINUX_QUAKE_ENGINE, strerror(errno));
 		_exit(126);
 	}
 	return child;
@@ -461,7 +475,7 @@ int main(int argc, char **argv)
 	input_mode = argv[2];
 	lock = acquire_lock();
 	mount_card();
-	if (snprintf(pak0, sizeof(pak0), GAME_DATA "/pak0.pak") >=
+	if (snprintf(pak0, sizeof(pak0), FPLINUX_QUAKE_GAME_DATA "/pak0.pak") >=
 	    (int)sizeof(pak0))
 		die("game-data path is too long");
 	require_pak(pak0);

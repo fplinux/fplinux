@@ -7,8 +7,8 @@
  * damage coalescing, completion IRQ, WLED and the fail-dark path; the common
  * SPI and LCM files own only their respective wire protocols.
  */
-#ifndef __UMS9117_FB_H__
-#define __UMS9117_FB_H__
+#ifndef FPLINUX_UMS9117_FB_H
+#define FPLINUX_UMS9117_FB_H
 
 #include <linux/types.h>
 
@@ -62,4 +62,4 @@ int ums9117_fb_probe(struct platform_device *pdev,
 void ums9117_fb_remove(struct platform_device *pdev);
 void ums9117_fb_shutdown(struct platform_device *pdev);
 
-#endif /* __UMS9117_FB_H__ */
+#endif /* FPLINUX_UMS9117_FB_H */
