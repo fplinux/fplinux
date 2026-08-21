@@ -92,7 +92,7 @@ The engine runs with a fixed 32 MiB heap, null sound and CD backends, and LAN
 disabled. A supervising launcher owns the game session, forwards termination
 signals and restores both framebuffer pages, the original framebuffer geometry,
 the active VT and text mode after the engine exits. `SIGKILL` or power loss can
-still bypass process cleanup.
+bypass process cleanup.
 
 ## microSD card
 
