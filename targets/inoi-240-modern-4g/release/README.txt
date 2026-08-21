@@ -1,24 +1,54 @@
 FPLinux for INOI 240 Modern 4G
 
-This archive contains an experimental volatile-RAM Linux payload and its fixed
-host runner. It does not flash, erase or access the phone's internal storage.
+This archive starts an experimental Linux session in volatile RAM. It does not
+flash the phone or access its internal storage. The current project provides no
+prebuilt archive or qualified runtime closure: this archive is a local hardware
+qualification candidate, not a release.
 
-The console profile provides a local 128x160 framebuffer console, the physical
-keypad and two Linux USB serial interfaces. Interface 0 carries the BusyBox shell
-and file-transfer modes; interface 1 carries forwarded host-keyboard events into
-a persistent uinput keyboard. Audio, modem, Bluetooth, camera, microSD and phone
-power-off are not supported.
-To leave the RAM-only session, disconnect USB, remove and reinsert the battery,
-then boot the phone normally.
+What works on the INOI 240 Modern 4G:
+  - local 128x160 terminal and physical keypad;
+  - USB shell and file transfer on interface 0;
+  - one forwarded host keyboard on interface 1;
+  - TyrQuake with either input mode.
 
-The RAM image includes the TyrQuake 0.71 engine but no Quake game data. The
-shared backend derives the mode from fbdev: on this panel it renders 320x256,
-downsamples by two to 160x128 and rotates into the 128x160 display. TyrQuake
-works on physical INOI 240 hardware with both the phone keypad and forwarded host
-keyboard. Hardware support does not by itself qualify any archive or runtime
-closure as a release. A RAM-only game session uses an already mounted /mnt/card,
-for example:
+microSD, internal phone storage, audio, modem, Bluetooth, Wi-Fi and Linux
+power-off are not supported by this target.
 
+Host requirements:
+  - Linux x86-64;
+  - Python 3.11 or newer;
+  - GNU coreutils (stdbuf);
+  - USB permission for 1782:4d00 and 0525:a4a6.
+
+The bundled host tools are static executables. They do not require a particular
+host libc, libusb or libudev package.
+
+Start:
+  1. Extract the complete top-level directory and enter it.
+  2. Check the extracted files: sha256sum -c SHA256SUMS
+  3. Power the phone off and disconnect USB.
+  4. Start the loader: ./runner/run.py
+  5. Wait until the loader explicitly asks for the phone.
+  6. Only then hold * and connect the powered-off phone, keeping * held as
+     instructed.
+
+Do not connect the phone before starting the loader. If it was connected early,
+disconnect it and restart this sequence.
+
+Use after boot:
+  - Ctrl-] detaches the host console without stopping Linux.
+  - Reconnect to the USB shell with:
+      ./host/fplinux-usb-console --interface 0
+  - Forward one host keyboard on interface 1 with:
+      sudo ./host/fplinux-usb-console --interface 1 --keyboard /dev/input/eventN
+    The selected keyboard does not reach the host desktop while forwarding runs.
+    On a host with no second keyboard, use:
+      sudo timeout 60 ./host/fplinux-usb-console --interface 1 --keyboard /dev/input/eventN
+    GNU timeout sends SIGTERM and the client releases the keyboard; keys on the
+    grabbed keyboard do not stop the host process.
+
+TyrQuake 0.71 is included, but game data is not. This phone has no microSD
+driver, so use tmpfs for a legally obtained pak0.pak:
   ./host/fplinux-usb-console --interface 0 --exec \
     'mkdir -p /mnt/card && mount -t tmpfs none /mnt/card && mkdir -p /mnt/card/fplinux/quake/id1'
   ./host/fplinux-usb-console --interface 0 --upload \
@@ -26,28 +56,8 @@ for example:
   ./host/fplinux-usb-console --interface 0 --exec 'quake --input phone'
   ./host/fplinux-usb-console --interface 0 --exec 'quake --input keyboard'
 
-Forward a host keyboard on interface 1 with:
-  sudo ./host/fplinux-usb-console --interface 1 --keyboard /dev/input/eventN
-Interface 0 is available for the shell and file transfers while the keyboard
-forwarder owns interface 1.
+The phone has 64 MiB of RAM and the game reserves 32 MiB. A full PAK in tmpfs
+leaves little memory; there is no swap.
 
-Host requirements:
-  - Linux x86-64
-  - Python 3.11 or newer
-  - GNU coreutils (stdbuf)
-  - USB permissions for devices 1782:4d00 and 0525:a4a6
-
-The bundled native host tools are static executables and do not require host
-libusb, libudev or a particular libc implementation.
-
-Start:
-  1. Extract the complete top-level directory.
-  2. Enter that extracted directory.
-  3. Run: sha256sum -c SHA256SUMS
-  4. Power the phone off and disconnect USB.
-  5. Run: ./runner/run.py
-  6. Hold * and connect USB while keeping * pressed when prompted.
-
-Ctrl-] detaches the host console without rebooting the phone. Reconnect while
-Linux is running with ./host/fplinux-usb-console --interface 0. To return
-to the stock firmware, disconnect USB and remove and reinsert the battery.
+To end the RAM-only session, disconnect USB, remove and reinsert the battery,
+then boot the phone normally.

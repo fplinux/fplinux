@@ -1,44 +1,96 @@
 # INOI 244 Modern 4G
 
-This is an experimental, volatile-RAM-only target for the INOI 244 Modern 4G
-(`F2444G`) with the Unisoc UMS9117/T117 SoC.
+## Device
 
-## Scope
+| Field    | Value                                                      |
+| -------- | ---------------------------------------------------------- |
+| Device   | INOI 244 Modern 4G (`F2444G`)                              |
+| Platform | [Unisoc UMS9117 / T117](../../platforms/ums9117/README.md) |
+| Profile  | `console`                                                  |
+| Boot     | Volatile RAM only                                          |
 
-The target builds a minimal Linux initramfs with a framebuffer console on the
-NV3030 panel, the matrix keypad as a Linux input device and two non-ACM USB
-serial interfaces. Interface 0 (`ttyGS0`) carries the shell and file transfers;
-interface 1 (`ttyGS1`) carries forwarded host-keyboard events into a persistent
-uinput keyboard. Audio, modem, Bluetooth, camera, microSD and phone power-off
-paths are unavailable.
+## Status
 
-| Block                | Status                     | Notes                                                   |
-| -------------------- | -------------------------- | ------------------------------------------------------- |
-| CPU, GIC and timers  | Working on hardware        | Shared UMS9117 support                                  |
-| USB device           | Working on hardware        | Shared inherited-state MUSB PIO driver                  |
-| USB shell            | Working on hardware        | BusyBox `getty` on `ttyGS0`                             |
-| Host keyboard bridge | Working on hardware        | Host evdev through `ttyGS1` to persistent uinput        |
-| LCD                  | Working on hardware        | NV3030 profile over the shared LCM/DBI framebuffer core |
-| Keypad               | Working on hardware        | Shared matrix driver with the board keymap              |
-| Internal flash       | Intentionally inaccessible | No storage node or driver                               |
-| microSD              | Not supported              | No storage node or driver                               |
+This experimental target provides a local framebuffer terminal, physical keypad,
+USB shell and host-keyboard bridge on an INOI 244 Modern 4G. These functions and
+TyrQuake have been exercised on the phone. The session is lost when power is
+removed; it does not access internal phone storage. This is feature-level
+hardware evidence, not release qualification.
 
-The phone carries 64 MiB of RAM. The bootstrap verifies the detected size
-before copying the kernel; Linux maps the full range and reserves the top
-1 MiB for the framebuffer.
+## Hardware support
+
+**Hardware** records only what is established for this phone; **Unknown** does
+not mean absent. **FPLinux** is **Supported** only after exercise on this exact
+variant. **Not supported** describes the current target, not the hardware.
+
+| Area                        | Hardware | FPLinux       | What a user can rely on / limit                                |
+| --------------------------- | -------- | ------------- | -------------------------------------------------------------- |
+| RAM boot                    | N/A      | Supported     | Linux runs only in RAM; it is discarded when the session ends. |
+| Persistent boot             | N/A      | Not supported | No autonomous Linux boot path is provided.                     |
+| Local screen                | Present  | Supported     | `240×320` framebuffer console.                                 |
+| Physical keypad             | Present  | Supported     | Linux input device for the local terminal and TyrQuake.        |
+| Keypad backlight            | Unknown  | Not supported | No FPLinux keypad-backlight control is provided.               |
+| USB shell and file transfer | Present  | Supported     | Interface 0 provides the shell and transfer commands.          |
+| Host keyboard bridge        | N/A      | Supported     | Interface 1 forwards one host evdev keyboard.                  |
+| USB host mode               | Unknown  | Not supported | The target provides USB peripheral mode only.                  |
+| Removable storage           | Unknown  | Not supported | No microSD driver is provided.                                 |
+| Internal phone storage      | Present  | Not supported | Linux deliberately does not expose it.                         |
+| Audio                       | Present  | Not supported | No speaker, headphone or microphone support is provided.       |
+| Modem and mobile service    | Present  | Not supported | Calls, SMS and mobile data are unavailable.                    |
+| Bluetooth                   | Unknown  | Not supported | No Bluetooth support is provided.                              |
+| Wi-Fi                       | Unknown  | Not supported | No Wi-Fi support is provided.                                  |
+| Camera                      | Unknown  | Not supported | No camera support is provided.                                 |
+| Battery and charging        | Present  | Not supported | No battery reporting or charge control is provided.            |
+| Indicator LEDs / vibration  | Unknown  | Not supported | No indicator or vibration control is provided.                 |
+| Power-off                   | N/A      | Not supported | Disconnect USB, reseat the battery, then boot normally.        |
+| Reboot and suspend          | N/A      | Not supported | Neither path is provided.                                      |
+
+## Build and start from source
+
+Follow [Building FPLinux](../../docs/BUILDING.md) for host requirements and
+source checks. Build the target from the repository root:
+
+```sh
+./fplinux build inoi-244-modern-4g
+```
+
+For every RAM run, use this order:
+
+1. Power the phone off and disconnect USB.
+2. Start the loader:
+
+    ```sh
+    ./fplinux run inoi-244-modern-4g
+    ```
+
+3. Wait until it explicitly asks for the phone.
+4. Only then hold `*` and connect the powered-off phone, keeping `*` held as
+   instructed.
+
+The loader writes the volatile RAM session only. If the phone was connected
+early, disconnect it and restart the sequence.
+
+## Use after boot
+
+The local terminal is available on the phone; interface 0 is the USB shell and
+transfer channel. Detach the host client with `Ctrl-]` without stopping Linux,
+then reconnect or compare the running kernel with the local build:
+
+```sh
+./fplinux verify inoi-244-modern-4g
+./fplinux console inoi-244-modern-4g
+sudo ./fplinux console inoi-244-modern-4g --keyboard /dev/input/eventN
+```
+
+The keyboard forwarder uses interface 1 and keeps the selected host keyboard
+away from the host desktop while it runs. See the [console contract](../../docs/porting/CONSOLE.md)
+and [file-transfer guide](../../docs/TRANSFER.md) for shared behavior.
 
 ## TyrQuake
 
-The root filesystem includes the TyrQuake 0.71 engine without Quake game data.
-The shared backend reads the RGB565 framebuffer geometry from fbdev and has no
-INOI-specific profile. `--input phone` selects the physical keypad through the
-stable `fplinux/keypad0` identity; `--input keyboard` selects the FPLinux host
-keyboard through its stable virtual input identity. On this panel TyrQuake
-renders a `320×240` landscape image and rotates it into the phone's `240×320`
-framebuffer.
-
-This target has no microSD driver. Mount a filesystem at `/mnt/card` before
-starting the launcher; a volatile tmpfs is suitable for a RAM-only session:
+The image includes TyrQuake 0.71, but not Quake game data. This target has no
+microSD driver, so a RAM-only session can put a legally obtained `pak0.pak` in
+tmpfs:
 
 ```sh
 ./fplinux console inoi-244-modern-4g \
@@ -49,20 +101,17 @@ starting the launcher; a volatile tmpfs is suitable for a RAM-only session:
 ./fplinux console inoi-244-modern-4g --exec 'quake --input keyboard'
 ```
 
-The engine uses a fixed 32 MiB heap. Keeping a full PAK in tmpfs leaves a narrow
-memory margin and no swap. TyrQuake works on physical INOI 244 hardware in both
-input modes.
+`--input phone` uses the physical keypad; `--input keyboard` uses the forwarded
+host keyboard. The phone has 64 MiB of RAM and the game reserves 32 MiB; keeping
+a full PAK in tmpfs leaves little memory and there is no swap.
 
-## Build and run
+## End the RAM session
 
-```sh
-./fplinux check kernel
-./fplinux build inoi-244-modern-4g
-./fplinux run inoi-244-modern-4g
-```
+Disconnect USB, remove and reinsert the battery, then boot the phone normally.
+This target does not provide Linux power-off or reboot.
 
-Power the phone off, hold `*`, then connect USB while keeping the key pressed.
-The runner performs only the BootROM FDL1 and volatile payload sequence. It does
-not issue flash, erase, partition or NV commands. Linux re-enumerates on USB as
-`0525:a4a6`; interface 0 serves the interactive `ttyGS0` shell and interface 1
-carries host-keyboard events through `ttyGS1`.
+## Release status
+
+There is no prebuilt archive or qualified runtime closure for this target. A
+local `./fplinux package inoi-244-modern-4g --candidate` archive is a hardware
+qualification candidate, not a release. See [Release archives](../../docs/RELEASES.md).
