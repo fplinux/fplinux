@@ -3,6 +3,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <ftw.h>
 #include <linux/fb.h>
 #include <linux/kd.h>
 #include <linux/vt.h>
@@ -251,29 +252,20 @@ static void prepare_runtime(char *runtime, size_t runtime_size,
 		write_phone_config(id1);
 }
 
-static void remove_runtime(const char *runtime, const char *input_mode)
+static int remove_runtime_entry(const char *path, const struct stat *status,
+				int type, struct FTW *tree)
 {
-	char id1[256];
-	unsigned int index;
+	(void)status;
+	(void)tree;
+	return type == FTW_DP ? rmdir(path) : unlink(path);
+}
 
-	if (snprintf(id1, sizeof(id1), "%s/id1", runtime) >= (int)sizeof(id1))
-		return;
-	for (index = 0; index < 10; ++index) {
-		char path[256];
-
-		if (snprintf(path, sizeof(path), "%s/pak%u.pak", id1, index) <
-		    (int)sizeof(path))
-			unlink(path);
-	}
-	if (strcmp(input_mode, "phone") == 0) {
-		char path[256];
-
-		if (snprintf(path, sizeof(path), "%s/config.cfg", id1) <
-		    (int)sizeof(path))
-			unlink(path);
-	}
-	rmdir(id1);
-	rmdir(runtime);
+static void remove_runtime(const char *runtime)
+{
+	if (nftw(runtime, remove_runtime_entry, 8, FTW_DEPTH | FTW_PHYS) < 0 &&
+	    errno != ENOENT)
+		fprintf(stderr, "quake: cannot remove volatile runtime: %s\n",
+			strerror(errno));
 }
 
 static void validate_framebuffer(const struct fb_fix_screeninfo *fixed,
@@ -480,7 +472,7 @@ int main(int argc, char **argv)
 	child_status = wait_for_engine(child);
 	restored = restore_display(&display);
 	close_display(&display);
-	remove_runtime(runtime, input_mode);
+	remove_runtime(runtime);
 	close(lock);
 	return restored ? child_status : EXIT_FAILURE;
 }
