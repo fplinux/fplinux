@@ -5,6 +5,8 @@ FROM ${BASE_IMAGE}
 ARG BASE_IMAGE
 ARG RUFF_VERSION=0.16.0
 ARG RUFF_SHA256=2138b7bc58ff877f5bba09aea4cc984ad5699433b6a3f811003527b8cff8e9ad
+ARG PYTHON311_VERSION=3.11.16
+ARG PYTHON311_SHA256=91bcdebfdde239a003ae93738a7fce0f9230fee5c4bc2b86f6e6e8c6f98aabe8
 ARG SPARSE_COMMIT=37156835e3d725b6d750f000be33ba3814bb2310
 ARG SPARSE_SHA256=feca4eb2f0cb61416f4946e0a537d20da8e5eb0d8064fb3f1323a19cb5738ffc
 ARG TYPOS_VERSION=1.48.0
@@ -84,10 +86,13 @@ RUN set -eux; \
         elfutils-dev=0.195-r0 \
         eudev-dev=3.2.14-r6 \
         flex=2.6.4-r8 \
+        libffi-dev=3.5.2-r1 \
         libusb-dev=1.0.30-r0 \
         ncurses-dev=6.6_p20260516-r0 \
         openssl-dev=3.5.7-r0 \
-        swig=4.4.1-r1
+        swig=4.4.1-r1 \
+        xz-dev=5.8.3-r0 \
+        zlib-dev=1.3.2-r0
 
 RUN set -eux; \
     apk add --no-cache \
@@ -95,8 +100,6 @@ RUN set -eux; \
         npm=11.12.1-r0 \
         py3-dt-schema=2025.12-r1 \
         py3-elftools=0.32-r1 \
-        py3-flake8=7.3.0-r2 \
-        py3-magic=0.4.27-r4 \
         py3-mypy=1.19.1-r2 \
         python3=3.14.7-r1 \
         python3-dev=3.14.7-r1 \
@@ -142,6 +145,25 @@ RUN set -eux; \
     rm -rf /tmp/quality; \
     ruff --version; \
     reuse --version
+
+WORKDIR /tmp/python/Python-${PYTHON311_VERSION}
+RUN set -eux; \
+    mkdir -p /tmp/python; \
+    archive=/tmp/python/Python-${PYTHON311_VERSION}.tar.xz; \
+    curl -fsSL --retry 3 \
+        --output "${archive}" \
+        "https://www.python.org/ftp/python/${PYTHON311_VERSION}/Python-${PYTHON311_VERSION}.tar.xz"; \
+    printf '%s  %s\n' "${PYTHON311_SHA256}" "${archive}" | sha256sum -c -; \
+    tar -xJf "${archive}" -C /tmp/python; \
+    ./configure --prefix=/opt/quality/python311 --without-ensurepip; \
+    make -j2; \
+    make altinstall; \
+    ln -s /opt/quality/python311/bin/python3.11 /opt/quality/bin/python3.11; \
+    rm -rf /tmp/python; \
+    python3.11 --version; \
+    python3.11 -c 'import ctypes, lzma, tomllib, zlib'
+
+WORKDIR /workspace
 
 COPY package.json package-lock.json /opt/quality/node-tools/
 RUN set -eux; \

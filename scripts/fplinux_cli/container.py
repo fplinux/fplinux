@@ -423,7 +423,7 @@ def analyzer_cache_names(scopes: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def _is_shell_source(file: WorkspaceFile) -> bool:
-    if Path(file.path).suffix not in {"", ".sh"}:
+    if Path(file.path).suffix not in {"", ".initd", ".sh"}:
         return False
     first_line = file.contents.splitlines()[:1]
     if not first_line:

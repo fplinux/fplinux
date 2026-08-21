@@ -154,6 +154,45 @@ class CheckScopeTests(unittest.TestCase):
             self.assertTrue(receipt_matches(cache, first_recipe))
             self.assertFalse(receipt_matches(cache, second_recipe))
 
+    def test_alpine_state_change_causes_an_alpine_receipt_miss(self) -> None:
+        """Bind Alpine receipts to the code that validates their package state."""
+        first = WorkspaceSnapshot(
+            (
+                WorkspaceFile("scripts/check.py", b"checker\n", 0o755),
+                WorkspaceFile("scripts/fplinux_cli/alpine_state.py", b"first\n", 0o644),
+            ),
+            "a" * 64,
+        )
+        second = WorkspaceSnapshot(
+            (
+                first.files[0],
+                WorkspaceFile("scripts/fplinux_cli/alpine_state.py", b"second\n", 0o644),
+            ),
+            "b" * 64,
+        )
+        self.assertEqual(
+            check_scope_closure_digest("c", first),
+            check_scope_closure_digest("c", second),
+        )
+        image_identity = "sha256:" + "c" * 64
+        first_recipe = check_scope_receipt_recipe(
+            "alpine",
+            check_scope_closure_digest("alpine", first),
+            image_identity=image_identity,
+            orchestration_recipe="d" * 64,
+        )
+        second_recipe = check_scope_receipt_recipe(
+            "alpine",
+            check_scope_closure_digest("alpine", second),
+            image_identity=image_identity,
+            orchestration_recipe="d" * 64,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary)
+            publish_success_receipt(cache, first_recipe)
+            self.assertTrue(receipt_matches(cache, first_recipe))
+            self.assertFalse(receipt_matches(cache, second_recipe))
+
     def test_kernel_scope_tracks_manifest_sources_without_whole_bootstrap(self) -> None:
         """Track every projected Linux input but ignore bootstrap-only sources."""
         target_manifest = (
@@ -433,12 +472,13 @@ class CheckScopeTests(unittest.TestCase):
                     ),
                 )
 
-    def test_shell_scope_matches_checker_shebang_and_external_sources(self) -> None:
-        """Use the checker's stripped shebang and broaden when ShellCheck reads sources."""
+    def test_shell_scope_tracks_extensionless_and_openrc_sources(self) -> None:
+        """Track shell sources matching the checker, including OpenRC init scripts."""
         base = WorkspaceSnapshot(
             (
                 WorkspaceFile("scripts/check.py", b"checker\n", 0o755),
                 WorkspaceFile("tool", b"  #!/bin/sh  \necho ok\n", 0o755),
+                WorkspaceFile("service.initd", b"#!/sbin/openrc-run\ncommand=/bin/true\n", 0o755),
                 WorkspaceFile("helper.inc", b"first\n", 0o644),
             ),
             "a" * 64,
@@ -455,18 +495,46 @@ class CheckScopeTests(unittest.TestCase):
             check_scope_closure_digest("shell", base),
             check_scope_closure_digest("shell", changed_tool),
         )
+        changed_initd = WorkspaceSnapshot(
+            (
+                base.files[0],
+                base.files[1],
+                WorkspaceFile("service.initd", b"#!/sbin/openrc-run\ncommand=/bin/false\n", 0o755),
+                base.files[3],
+            ),
+            "c" * 64,
+        )
+        image_identity = "sha256:" + "e" * 64
+        first_recipe = check_scope_receipt_recipe(
+            "shell",
+            check_scope_closure_digest("shell", base),
+            image_identity=image_identity,
+            orchestration_recipe="f" * 64,
+        )
+        initd_recipe = check_scope_receipt_recipe(
+            "shell",
+            check_scope_closure_digest("shell", changed_initd),
+            image_identity=image_identity,
+            orchestration_recipe="f" * 64,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary)
+            publish_success_receipt(cache, first_recipe)
+            self.assertTrue(receipt_matches(cache, first_recipe))
+            self.assertFalse(receipt_matches(cache, initd_recipe))
         external = WorkspaceSnapshot(
             (*base.files, WorkspaceFile(".shellcheckrc", b"external-sources=true\n", 0o644)),
-            "c" * 64,
+            "g" * 64,
         )
         external_changed = WorkspaceSnapshot(
             (
                 external.files[0],
                 external.files[1],
+                external.files[2],
                 WorkspaceFile("helper.inc", b"second\n", 0o644),
-                external.files[3],
+                external.files[4],
             ),
-            "d" * 64,
+            "h" * 64,
         )
         self.assertNotEqual(
             check_scope_closure_digest("shell", external),

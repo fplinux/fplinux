@@ -390,6 +390,7 @@ def main() -> None:
             run(["mypy", *python_files])
             if (ROOT / "tests").is_dir():
                 run(["python3", "-m", "unittest", "discover", "-s", "tests"])
+                run(["python3.11", "-m", "unittest", "discover", "-s", "tests"])
     if "shell" in selected:
         with report_stage(reporter, "shell"):
             run(["shfmt", "-d", "-ln", "posix", *posix_shell_files])
