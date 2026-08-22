@@ -391,6 +391,19 @@ def _prepare_alpine_sysroot(
     )
 
 
+def _copy_shared_aport_sources(package: str, directory: Path) -> None:
+    """Materialize canonical shared sources as regular files in one aport stage."""
+    if directory.is_symlink() or not directory.is_dir():
+        fail(f"staged Alpine aport is missing or invalid: {directory}")
+    for shared_source in alpine_state.shared_aport_sources(package, root=ROOT):
+        source = require_file(shared_source)
+        destination = directory / source.name
+        if destination.exists() or destination.is_symlink():
+            fail(f"shared Alpine source conflicts with aport file: {destination}")
+        shutil.copyfile(source, destination)
+        destination.chmod(source.stat().st_mode & 0o777)
+
+
 def _build_fplinux_apks(
     lock: dict[str, Any],
     sysroot: Path,
@@ -406,7 +419,9 @@ def _build_fplinux_apks(
     home = work / "home"
     aports.mkdir()
     for name in build_packages:
-        shutil.copytree(ROOT / "alpine/aports" / name, aports / name)
+        directory = aports / name
+        shutil.copytree(ROOT / "alpine/aports" / name, directory)
+        _copy_shared_aport_sources(name, directory)
     home.mkdir()
     _chown_tree(aports, "builder")
     _chown_tree(home, "builder")

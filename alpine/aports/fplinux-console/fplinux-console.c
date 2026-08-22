@@ -33,7 +33,8 @@
 #include <time.h>
 #include <unistd.h>
 
-#define FPLINUX_CONSOLE_MULTITAP_MS 700
+#include "fplinux-multitap.h"
+
 #define FPLINUX_CONSOLE_STAR_HOLD_MS 400
 #define FPLINUX_CONSOLE_VISUAL_BELL_MS 250
 #define FPLINUX_CONSOLE_KEYPAD_REOPEN_MS 1000
@@ -132,10 +133,9 @@ enum modifier {
 };
 
 struct composition {
-	uint16_t last_code;
-	unsigned index;
-	bool pending;
+	struct fplinux_multitap multitap;
 	enum modifier modifier;
+	struct timespec last_press;
 	struct timespec deadline;
 };
 
@@ -1099,6 +1099,26 @@ static bool deadline_reached(struct timespec now, struct timespec deadline)
 		now.tv_nsec >= deadline.tv_nsec);
 }
 
+static uint32_t milliseconds_elapsed(struct timespec now,
+				     struct timespec earlier)
+{
+	time_t seconds;
+	long nanoseconds;
+	uintmax_t milliseconds;
+
+	if (!deadline_reached(now, earlier))
+		return 0;
+	seconds = now.tv_sec - earlier.tv_sec;
+	nanoseconds = now.tv_nsec - earlier.tv_nsec;
+	if (nanoseconds < 0) {
+		--seconds;
+		nanoseconds += 1000000000L;
+	}
+	milliseconds =
+		(uintmax_t)seconds * 1000U + (uintmax_t)nanoseconds / 1000000U;
+	return milliseconds > UINT32_MAX ? UINT32_MAX : (uint32_t)milliseconds;
+}
+
 static int milliseconds_until(struct timespec now, struct timespec deadline)
 {
 	time_t seconds;
@@ -1446,34 +1466,6 @@ static void ingest_transcript(const unsigned char *bytes, size_t length)
 		ingest_transcript_byte(bytes[i]);
 }
 
-static const char *characters_for(uint16_t code)
-{
-	switch (code) {
-	case KEY_0:
-		return " 0";
-	case KEY_1:
-		return ".,!?@$/+-=%^_:;'*#1";
-	case KEY_2:
-		return "abc2";
-	case KEY_3:
-		return "def3";
-	case KEY_4:
-		return "ghi4";
-	case KEY_5:
-		return "jkl5";
-	case KEY_6:
-		return "mno6";
-	case KEY_7:
-		return "pqrs7";
-	case KEY_8:
-		return "tuv8";
-	case KEY_9:
-		return "wxyz9";
-	default:
-		return NULL;
-	}
-}
-
 static unsigned char capital(unsigned char character)
 {
 	if (character >= 'a' && character <= 'z')
@@ -1492,14 +1484,11 @@ static unsigned char marker_attribute(unsigned char attribute)
 
 static unsigned char overlay_character(void)
 {
-	const char *characters;
-
 	if (interface.visual_bell)
 		return '!';
-	if (interface.composition.pending) {
-		characters = characters_for(interface.composition.last_code);
-		return (unsigned char)characters[interface.composition.index];
-	}
+	if (fplinux_multitap_pending(&interface.composition.multitap))
+		return fplinux_multitap_candidate(
+			&interface.composition.multitap);
 	switch (interface.composition.modifier) {
 	case FPLINUX_CONSOLE_MODIFIER_CTRL:
 		return 'C';
@@ -1603,9 +1592,7 @@ static void refresh_overlay(void)
 
 static void cancel_composition(void)
 {
-	interface.composition.pending = false;
-	interface.composition.last_code = 0;
-	interface.composition.index = 0;
+	fplinux_multitap_cancel(&interface.composition.multitap);
 }
 
 static void start_visual_bell(struct timespec now)
@@ -1630,13 +1617,9 @@ enum enqueue_result {
 	FPLINUX_CONSOLE_ENQUEUE_FULL,
 };
 
-static bool compose_character(unsigned char *bytes, size_t *length)
+static bool compose_character(unsigned char character, unsigned char *bytes,
+			      size_t *length)
 {
-	const char *characters =
-		characters_for(interface.composition.last_code);
-	unsigned char character =
-		(unsigned char)characters[interface.composition.index];
-
 	switch (interface.composition.modifier) {
 	case FPLINUX_CONSOLE_MODIFIER_NONE:
 		bytes[(*length)++] = character;
@@ -1663,62 +1646,109 @@ static bool compose_character(unsigned char *bytes, size_t *length)
 	return false;
 }
 
+struct composition_emit_context {
+	struct byte_fifo *fifo;
+	const char *suffix;
+	size_t suffix_length;
+};
+
+static enum fplinux_multitap_emit_result
+enqueue_composed_character(void *opaque, unsigned char character)
+{
+	struct composition_emit_context *context = opaque;
+	unsigned char bytes[8];
+	size_t length = 0;
+
+	if (!compose_character(character, bytes, &length))
+		return FPLINUX_MULTITAP_EMIT_REJECTED;
+	if (length + context->suffix_length > sizeof(bytes))
+		die("key sequence exceeds composition buffer");
+	memcpy(bytes + length, context->suffix, context->suffix_length);
+	length += context->suffix_length;
+	if (!fifo_push(context->fifo, bytes, length))
+		return FPLINUX_MULTITAP_EMIT_BLOCKED;
+	return FPLINUX_MULTITAP_EMIT_ACCEPTED;
+}
+
+static enum enqueue_result
+consume_multitap_result(enum fplinux_multitap_result result,
+			struct timespec now)
+{
+	switch (result) {
+	case FPLINUX_MULTITAP_COMMITTED:
+		interface.composition.modifier = FPLINUX_CONSOLE_MODIFIER_NONE;
+		refresh_overlay();
+		return FPLINUX_CONSOLE_ENQUEUE_OK;
+	case FPLINUX_MULTITAP_BLOCKED:
+		return FPLINUX_CONSOLE_ENQUEUE_FULL;
+	case FPLINUX_MULTITAP_REJECTED:
+		start_visual_bell(now);
+		return FPLINUX_CONSOLE_ENQUEUE_REJECTED;
+	case FPLINUX_MULTITAP_PENDING:
+	case FPLINUX_MULTITAP_IGNORED:
+		return FPLINUX_CONSOLE_ENQUEUE_OK;
+	}
+	return FPLINUX_CONSOLE_ENQUEUE_FULL;
+}
+
 static enum enqueue_result enqueue_composition_and(struct byte_fifo *fifo,
 						   const char *suffix,
 						   size_t suffix_length,
 						   struct timespec now)
 {
-	unsigned char bytes[8];
-	size_t length = 0;
+	struct composition_emit_context context = {
+		.fifo = fifo,
+		.suffix = suffix,
+		.suffix_length = suffix_length,
+	};
 
-	if (interface.composition.pending &&
-	    !compose_character(bytes, &length)) {
-		cancel_composition();
-		start_visual_bell(now);
-		return FPLINUX_CONSOLE_ENQUEUE_REJECTED;
+	if (!fplinux_multitap_pending(&interface.composition.multitap)) {
+		if (suffix_length && !fifo_push(fifo, suffix, suffix_length))
+			return FPLINUX_CONSOLE_ENQUEUE_FULL;
+		return FPLINUX_CONSOLE_ENQUEUE_OK;
 	}
-	if (length + suffix_length > sizeof(bytes))
-		die("key sequence exceeds composition buffer");
-	memcpy(bytes + length, suffix, suffix_length);
-	length += suffix_length;
-	if (length && !fifo_push(fifo, bytes, length))
-		return FPLINUX_CONSOLE_ENQUEUE_FULL;
-	if (interface.composition.pending) {
-		cancel_composition();
-		interface.composition.modifier = FPLINUX_CONSOLE_MODIFIER_NONE;
-		refresh_overlay();
-	}
-	return FPLINUX_CONSOLE_ENQUEUE_OK;
+	return consume_multitap_result(
+		fplinux_multitap_commit(&interface.composition.multitap,
+					enqueue_composed_character, &context),
+		now);
 }
 
-static bool start_or_cycle_composition(struct byte_fifo *fifo, uint16_t code,
-				       struct timespec now)
+static unsigned char multitap_key(uint16_t code)
 {
-	const char *characters = characters_for(code);
+	if (code == KEY_0)
+		return '0';
+	if (code >= KEY_1 && code <= KEY_9)
+		return (unsigned char)('1' + code - KEY_1);
+	return '\0';
+}
 
-	if (interface.composition.pending &&
-	    interface.composition.last_code == code) {
-		interface.composition.index =
-			(interface.composition.index + 1) % strlen(characters);
-		interface.composition.deadline =
-			deadline_after_ms(now, FPLINUX_CONSOLE_MULTITAP_MS);
-		refresh_overlay();
+static bool start_or_cycle_composition(struct byte_fifo *fifo,
+				       unsigned char key, struct timespec now)
+{
+	struct composition_emit_context context = {
+		.fifo = fifo,
+		.suffix = "",
+		.suffix_length = 0,
+	};
+	enum fplinux_multitap_result result;
+
+	result = fplinux_multitap_press(
+		&interface.composition.multitap, key,
+		milliseconds_elapsed(now, interface.composition.last_press),
+		enqueue_composed_character, &context);
+	if (result == FPLINUX_MULTITAP_BLOCKED)
+		return false;
+	if (result == FPLINUX_MULTITAP_REJECTED) {
+		start_visual_bell(now);
 		return true;
 	}
-	if (interface.composition.pending) {
-		enum enqueue_result result =
-			enqueue_composition_and(fifo, "", 0, now);
-
-		if (result == FPLINUX_CONSOLE_ENQUEUE_FULL)
-			return false;
-		if (result == FPLINUX_CONSOLE_ENQUEUE_REJECTED)
-			return true;
-	}
-	interface.composition.pending = true;
-	interface.composition.last_code = code;
-	interface.composition.index = 0;
+	if (result == FPLINUX_MULTITAP_IGNORED)
+		return true;
+	if (result == FPLINUX_MULTITAP_COMMITTED)
+		interface.composition.modifier = FPLINUX_CONSOLE_MODIFIER_NONE;
+	interface.composition.last_press = now;
 	interface.composition.deadline =
-		deadline_after_ms(now, FPLINUX_CONSOLE_MULTITAP_MS);
+		deadline_after_ms(now, FPLINUX_MULTITAP_TIMEOUT_MS);
 	refresh_overlay();
 	return true;
 }
@@ -1897,7 +1927,7 @@ static bool handle_tab(struct byte_fifo *fifo, struct timespec now)
 {
 	enum enqueue_result result;
 
-	if (interface.composition.pending) {
+	if (fplinux_multitap_pending(&interface.composition.multitap)) {
 		result = enqueue_composition_and(fifo, "\t", 1, now);
 		return result != FPLINUX_CONSOLE_ENQUEUE_FULL;
 	}
@@ -1951,23 +1981,23 @@ static bool multitap_handles(uint16_t code)
 	case KEY_RIGHT:
 		return true;
 	default:
-		return characters_for(code) != NULL;
+		return fplinux_multitap_handles(multitap_key(code));
 	}
 }
 
 static bool handle_primary_key(struct byte_fifo *fifo, uint16_t code,
 			       struct timespec now)
 {
-	const char *characters = characters_for(code);
+	unsigned char key = multitap_key(code);
 	enum enqueue_result result;
 	const char *sequence = NULL;
 
 	dismiss_visual_bell();
-	if (characters)
-		return start_or_cycle_composition(fifo, code, now);
+	if (key)
+		return start_or_cycle_composition(fifo, key, now);
 
 	if (code == KEY_BACKSPACE) {
-		if (interface.composition.pending) {
+		if (fplinux_multitap_pending(&interface.composition.multitap)) {
 			cancel_composition();
 			refresh_overlay();
 			return true;
@@ -2156,12 +2186,22 @@ static int child_exit_code(void)
 static void commit_expired_composition(struct byte_fifo *pty_tx,
 				       struct timespec now)
 {
+	struct composition_emit_context context = {
+		.fifo = pty_tx,
+		.suffix = "",
+		.suffix_length = 0,
+	};
 	enum enqueue_result result;
 
-	if (!interface.composition.pending ||
-	    !deadline_reached(now, interface.composition.deadline))
+	if (!fplinux_multitap_pending(&interface.composition.multitap))
 		return;
-	result = enqueue_composition_and(pty_tx, "", 0, now);
+	result = consume_multitap_result(
+		fplinux_multitap_expire(
+			&interface.composition.multitap,
+			milliseconds_elapsed(now,
+					     interface.composition.last_press),
+			enqueue_composed_character, &context),
+		now);
 	if (result == FPLINUX_CONSOLE_ENQUEUE_FULL)
 		die("PTY input FIFO capacity invariant violated");
 }
@@ -2471,7 +2511,7 @@ int main(void)
 		descriptors[3].events = POLLIN;
 		descriptors[3].revents = 0;
 
-		if (interface.composition.pending)
+		if (fplinux_multitap_pending(&interface.composition.multitap))
 			timeout = earlier_timeout(
 				timeout,
 				milliseconds_until(

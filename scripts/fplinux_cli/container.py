@@ -12,6 +12,7 @@ import tomllib
 from pathlib import Path, PurePath
 from typing import Any
 
+from . import alpine_state
 from .checkreceipts import (
     CheckReceiptRecipe,
     check_closure_entries_digest,
@@ -457,7 +458,7 @@ def _source_scope_uses_file(  # noqa: PLR0911
     suffix = path.suffix.lower()
     parts = path.parts
     if file.path in _CHECK_IMPLEMENTATION or (
-        scope == "alpine" and file.path == _ALPINE_CHECK_IMPLEMENTATION
+        scope in {"alpine", "c"} and file.path == _ALPINE_CHECK_IMPLEMENTATION
     ):
         return True
     if scope in {
@@ -507,7 +508,10 @@ def _c_scope_paths(snapshot: WorkspaceSnapshot) -> set[str]:
     selected = {file.path for file in snapshot.files if _source_scope_uses_file("c", file)}
     for file in snapshot.files:
         path = PurePath(file.path)
-        if path.suffix in {".c", ".h"} and path.parts[:2] == ("alpine", "aports"):
+        if path.suffix in {".c", ".h"} and (
+            path.parts[:2] == ("alpine", "aports")
+            or file.path in alpine_state.SHARED_APORT_SOURCE_PATHS
+        ):
             selected.add(file.path)
         if path.suffix in {".c", ".h"} and "bootstrap" in path.parts:
             selected.add(file.path)

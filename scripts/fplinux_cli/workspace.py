@@ -106,6 +106,13 @@ def target_build_source_files(target: str) -> list[tuple[str, Path]]:
     build_packages = (*rootfs_packages, *bundle_packages)
     for package in build_packages:
         add_source_path(files, ROOT / "alpine/aports" / package)
+    shared_sources = {
+        source
+        for package in build_packages
+        for source in alpine_state.shared_aport_sources(package, root=ROOT)
+    }
+    for source in sorted(shared_sources):
+        add_source_path(files, source)
     add_source_path(files, target_root / "target.toml")
     add_source_path(files, target_root / target_config["release_manifest"])
     add_source_path(files, target_root / target_config["assets_lock"])
