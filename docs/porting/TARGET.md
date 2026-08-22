@@ -21,7 +21,7 @@ here.
 In one short paragraph, state what a person can use on this exact phone and
 what remains unavailable. Distinguish physical-device evidence from a source
 build; neither is a release qualification. State plainly when no prebuilt
-archive or qualified runtime closure exists.
+archive or qualified executable payload exists.
 
 ## Hardware support
 
@@ -71,22 +71,15 @@ source checks. Build this target from the repository root:
 ./fplinux build {target}
 ```
 
-For every RAM run, use this order:
+For a RAM run, follow the shared loader-first connection sequence in
+[Building FPLinux](../../docs/BUILDING.md). Record only the details owned by
+this target:
 
-1. Power the phone off and disconnect its USB cable.
-2. Start the loader:
+- Boot key or sequence: `{target-specific boot key or sequence}`
+- Variant-specific timing or release condition: `{target-specific detail or none}`
 
-    ```sh
-    ./fplinux run {target}
-    ```
-
-3. Wait until the loader explicitly asks for the phone.
-4. Only then hold `*` and connect the powered-off phone, keeping the key held
-   as instructed.
-
-The RAM loader does not make a persistent phone-storage change. Do not connect
-the phone before starting the loader; disconnect it and restart this sequence if
-that happens.
+Do not copy the shared loader procedure into the target document. State any
+target-specific persistent-storage limitation in the status or hardware table.
 
 ## Use after boot
 
@@ -118,6 +111,6 @@ vendor firmware. State unsupported reboot or power-off behavior plainly.
 
 ## Release status
 
-State whether a prebuilt archive and a qualified runtime closure currently
+State whether a prebuilt archive and a qualified executable payload currently
 exist. If neither exists, say that a locally packaged candidate is not a
 release, and link to [Release archives](../../docs/RELEASES.md).

@@ -12,11 +12,16 @@
 ## Status
 
 This experimental target provides a local framebuffer terminal, physical keypad,
-USB shell and host-keyboard bridge on an INOI 244 Modern 4G. These functions and
-TyrQuake have been exercised on the phone. MicroPythonOS installation, launcher
-navigation and keypad text input have also been exercised. The session is lost
-when power is removed; it does not access internal phone storage. This is
-feature-level hardware evidence, not release qualification.
+USB shell and host-keyboard bridge on an INOI 244 Modern 4G. The session is lost
+when power is removed and does not access internal phone storage.
+
+## Evidence basis
+
+Supported entries record physical development observations on this exact phone:
+the terminal, keypad, USB interfaces, host-keyboard bridge, TyrQuake, and
+MicroPythonOS installation, launcher navigation, and keypad text input have
+been exercised. These observations are not a release qualification record and
+do not identify a qualified candidate or executable payload.
 
 ## Hardware support
 
@@ -71,81 +76,31 @@ For every RAM run, use this order:
 The loader writes the volatile RAM session only. If the phone was connected
 early, disconnect it and restart the sequence.
 
-## Use after boot
-
-The local terminal is available on the phone; interface 0 is the USB shell and
-transfer channel. Detach the host client with `Ctrl-]` without stopping Linux,
-then reconnect or compare the running kernel with the local build:
-
-```sh
-./fplinux verify inoi-244-modern-4g
-./fplinux console inoi-244-modern-4g
-sudo ./fplinux console inoi-244-modern-4g --keyboard /dev/input/eventN
-```
-
-The keyboard forwarder uses interface 1 and keeps the selected host keyboard
-away from the host desktop while it runs. See the [console contract](../../docs/porting/CONSOLE.md)
-and [file-transfer guide](../../docs/TRANSFER.md) for shared behavior.
-
-## Installable applications
+## Target-specific use
 
 ### TyrQuake
 
-TyrQuake 0.71 is provided as `fplinux-tyrquake.apk` under `apks/` in the
-`output:` directory printed by `./fplinux build`; it is not installed in the
-standard root filesystem. Set `bundle` to that printed directory, then install
-it in the current RAM session:
-
-```sh
-./fplinux console inoi-244-modern-4g --upload \
-  "$bundle/apks/fplinux-tyrquake.apk" /tmp/fplinux-tyrquake.apk
-./fplinux console inoi-244-modern-4g --exec \
-  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-tyrquake.apk'
-```
-
-This target has no microSD driver, so a RAM-only session can put a legally
-obtained `pak0.pak` in tmpfs:
+Use the shared [application guide](../../docs/APPLICATIONS.md) to install,
+start, and remove the APK. This FPLinux target has no supported microSD path,
+so a RAM-only session can put a legally obtained `pak0.pak` in tmpfs:
 
 ```sh
 ./fplinux console inoi-244-modern-4g \
   --exec 'mkdir -p /mnt/card && mount -t tmpfs tmpfs /mnt/card && mkdir -p /mnt/card/fplinux/quake/id1'
 ./fplinux console inoi-244-modern-4g \
   --upload ./pak0.pak /mnt/card/fplinux/quake/id1/pak0.pak
-./fplinux console inoi-244-modern-4g --exec 'quake --input phone'
-./fplinux console inoi-244-modern-4g --exec 'quake --input keyboard'
 ```
 
 `--input phone` uses the physical keypad; `--input keyboard` uses the forwarded
 host keyboard. The phone has 64 MiB of RAM and the game reserves 32 MiB; keeping
-a full PAK in tmpfs leaves little memory and there is no swap. After exiting the
-game, remove it without restarting the phone:
-
-```sh
-./fplinux console inoi-244-modern-4g --exec 'apk del fplinux-tyrquake'
-```
+a full PAK in tmpfs leaves little memory and there is no swap.
 
 ### MicroPythonOS
 
-MicroPythonOS is `fplinux-micropythonos.apk`. The package targets the shared
-FPLinux display and keypad ABI. Installation and removal, the `240×320` launcher,
-keypad text input and terminal restoration have been exercised on this phone.
-Individual bundled applications outside the exercised paths are not qualified.
-This target has no microSD capability, so application state remains in RAM.
-
-```sh
-./fplinux console inoi-244-modern-4g --upload \
-  "$bundle/apks/fplinux-micropythonos.apk" /tmp/fplinux-micropythonos.apk
-./fplinux console inoi-244-modern-4g --exec \
-  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-micropythonos.apk'
-./fplinux console inoi-244-modern-4g
-```
-
-At the phone shell prompt, run `micropythonos`. Press `Ctrl-C` to stop it and
-restore the terminal, then `Ctrl-]` to detach before removing the package:
-
-```sh
-./fplinux console inoi-244-modern-4g --exec 'apk del fplinux-micropythonos'
-```
+Use the shared [application guide](../../docs/APPLICATIONS.md). The package uses
+the shared FPLinux display and keypad ABI. Individual bundled applications
+outside the exercised paths are not qualified. This FPLinux target has no
+supported microSD path, so application state remains in RAM.
 
 ## End the RAM session
 
@@ -154,6 +109,6 @@ This target does not provide Linux power-off or reboot.
 
 ## Release status
 
-There is no prebuilt archive or qualified runtime closure for this target. A
+There is no prebuilt archive or qualified executable payload for this target. A
 local `./fplinux package inoi-244-modern-4g --candidate` archive is a hardware
 qualification candidate, not a release. See [Release archives](../../docs/RELEASES.md).

@@ -11,8 +11,9 @@ does not by itself qualify a phone or a release.
 | `nokia-ta1618`       | Nokia 3210 4G (TA-1618) | [`ums9117`](../platforms/ums9117/README.md) | `console` | [Read support and use notes](nokia-ta1618/README.md)       |
 
 Build and run commands are shared across targets; see
-[Building FPLinux](../docs/BUILDING.md). Before a RAM run, read the target's
-support table and follow its loader-first connection sequence exactly.
+[Building FPLinux](../docs/BUILDING.md). [Installable applications](../docs/APPLICATIONS.md)
+documents the common source-checkout APK workflow. Before a RAM run, read the
+target's support table and follow its loader-first connection sequence exactly.
 
 New target documentation starts from the [phone target template](../docs/porting/TARGET.md).
 Keep target documents focused on what the exact phone can do. Put reusable SoC
