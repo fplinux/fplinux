@@ -14,9 +14,11 @@
 This target provides a local `240×320` terminal, physical keypad and keypad
 backlight, USB shell, host-keyboard bridge and microSD access on a TA-1618. Boot,
 kernel, screen, keypad, backlight, USB interfaces, host keyboard bridge, microSD
-and battery-only power-off have been exercised on the phone. The Linux session is
-volatile and internal phone storage stays inaccessible. This is feature-level
-hardware evidence, not release qualification.
+and battery-only power-off have been exercised on the phone. MicroPythonOS
+installation, launcher navigation, keypad text input, File Manager and its
+microSD mount, synced write, read after remount and clean unmount have also
+been exercised. The Linux session is volatile and internal phone storage stays
+inaccessible. This is feature-level hardware evidence, not release qualification.
 
 ## Hardware support
 
@@ -29,7 +31,7 @@ variant. **Not supported** describes the current target, not the hardware.
 | RAM boot                    | N/A      | Supported     | Linux runs only in RAM and does not write phone storage.                   |
 | Persistent boot             | N/A      | Not supported | No autonomous Linux boot path is provided.                                 |
 | Local screen                | Present  | Supported     | `240×320` framebuffer terminal.                                            |
-| Physical keypad             | Present  | Supported     | Local terminal and TyrQuake input.                                         |
+| Physical keypad             | Present  | Supported     | Local terminal, TyrQuake and MicroPythonOS input.                          |
 | Keypad backlight            | Present  | Supported     | A key press lights it for about five seconds; manual control is available. |
 | USB shell and file transfer | Present  | Supported     | Interface 0 provides the shell and transfer commands.                      |
 | Host keyboard bridge        | N/A      | Supported     | Interface 1 forwards one host evdev keyboard.                              |
@@ -146,6 +148,40 @@ game, remove it without restarting the phone:
 ```sh
 ./fplinux console nokia-ta1618 --exec 'apk del fplinux-tyrquake'
 ```
+
+### MicroPythonOS
+
+MicroPythonOS requires its base and TA-1618 companion packages:
+
+```sh
+./fplinux console nokia-ta1618 --upload \
+  "$bundle/apks/fplinux-micropythonos.apk" /tmp/fplinux-micropythonos.apk
+./fplinux console nokia-ta1618 --upload \
+  "$bundle/apks/fplinux-micropythonos-nokia-ta1618.apk" \
+  /tmp/fplinux-micropythonos-nokia-ta1618.apk
+./fplinux console nokia-ta1618 --exec \
+  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-micropythonos.apk /tmp/fplinux-micropythonos-nokia-ta1618.apk'
+./fplinux console nokia-ta1618
+```
+
+At the phone shell prompt, run `micropythonos`. Press `Ctrl-C` to stop it and
+restore the terminal, then `Ctrl-]` to detach before removing the packages:
+
+```sh
+./fplinux console nokia-ta1618 --exec \
+  'apk del fplinux-micropythonos-nokia-ta1618 fplinux-micropythonos'
+```
+
+With a usable FAT32 card inserted before boot, MicroPythonOS uses `/mnt/card` and
+keeps application state under `/mnt/card/.fplinux/micropythonos`. It mounts the
+card when no matching mount exists and unmounts only a card that it mounted when
+the interface exits. Without a usable card, application state remains in RAM.
+The packages provide only features backed by the currently supported screen,
+keypad and filesystem interfaces; unsupported hardware services are not shown.
+Installation and removal, the launcher, keypad text input, File Manager,
+card-backed state, synced write, read after remount and clean unmount have been
+exercised on this phone. Individual bundled applications outside those paths
+are not qualified.
 
 ## microSD card
 

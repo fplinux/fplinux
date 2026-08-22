@@ -9,7 +9,8 @@ What works on the INOI 244 Modern 4G:
   - local 240x320 terminal and physical keypad;
   - USB shell and file transfer on interface 0;
   - one forwarded host keyboard on interface 1;
-  - installable TyrQuake with either input mode.
+  - installable TyrQuake with either input mode;
+  - installable MicroPythonOS launcher, navigation and keypad text input.
 
 microSD, internal phone storage, audio, modem, Bluetooth, Wi-Fi and Linux
 power-off are not supported by this target.
@@ -65,6 +66,21 @@ This phone has no microSD driver, so use tmpfs for a legally obtained pak0.pak:
 The phone has 64 MiB of RAM and the game reserves 32 MiB. A full PAK in tmpfs
 leaves little memory; there is no swap. After exiting TyrQuake, remove it with:
   ./host/fplinux-usb-console --interface 0 --exec 'apk del fplinux-tyrquake'
+
+MicroPythonOS is ./apks/fplinux-micropythonos.apk. It targets the shared FPLinux
+display and keypad ABI. Installation and removal, the 240x320 launcher, keypad
+text input and terminal restoration have been exercised. Individual bundled
+applications outside those paths are not qualified. This target has no microSD
+capability, so application state remains in RAM:
+  ./host/fplinux-usb-console --interface 0 --upload \
+    ./apks/fplinux-micropythonos.apk /tmp/fplinux-micropythonos.apk
+  ./host/fplinux-usb-console --interface 0 --exec \
+    'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-micropythonos.apk'
+  ./host/fplinux-usb-console --interface 0
+
+At the phone shell prompt, run micropythonos. Press Ctrl-C to stop it and restore
+the terminal, then Ctrl-] to detach before removing it with:
+  ./host/fplinux-usb-console --interface 0 --exec 'apk del fplinux-micropythonos'
 
 To end the RAM-only session, disconnect USB, remove and reinsert the battery,
 then boot the phone normally.

@@ -1,0 +1,21 @@
+{
+  "name": "Keypad Test",
+  "publisher": "FPLinux",
+  "short_description": "Numeric keypad multi-tap test",
+  "long_description": "Tests numeric keypad text entry with multi-tap letters.",
+  "fullname": "org.fplinux.keypadtest",
+  "version": "1.0.0",
+  "category": "utility",
+  "activities": [
+    {
+      "entrypoint": "fplinux-keypad-test.py",
+      "classname": "KeypadTest",
+      "intent_filters": [
+        {
+          "action": "main",
+          "category": "launcher"
+        }
+      ]
+    }
+  ]
+}

@@ -12,7 +12,7 @@ assets_lock = "loader/assets.lock.toml"
 packages = []
 
 [bundle]
-packages = []
+packages = ["fplinux-micropythonos-nokia-ta1618"]
 
 [linux]
 defconfig = "kernel/defconfig"

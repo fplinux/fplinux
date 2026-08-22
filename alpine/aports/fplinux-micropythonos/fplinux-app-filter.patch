@@ -1,0 +1,724 @@
+diff --git a/internal_filesystem/builtin/apps/com.micropythonos.about/about.py b/internal_filesystem/builtin/apps/com.micropythonos.about/about.py
+index 628fad6c..1d121b61 100644
+--- a/internal_filesystem/builtin/apps/com.micropythonos.about/about.py
++++ b/internal_filesystem/builtin/apps/com.micropythonos.about/about.py
+@@ -7,0 +8 @@ from mpos import Activity, DisplayMetrics, BuildInfo, DeviceInfo, FontManager, a
++from mpos.fplinux_storage import FPLinuxStorage
+@@ -27 +28 @@ class About(Activity):
+-        img.set_src("M:builtin/res/MicroPythonOS-logo-white-long-w296.png") # from the MPOS-logo repo
++        img.set_src("M:/builtin/res/MicroPythonOS-logo-white-long-w296.png") # from the MPOS-logo repo
+@@ -110,16 +110,0 @@ class About(Activity):
+-        # Network info
+-        try:
+-            self._add_label(screen, f"{lv.SYMBOL.WIFI} Network Info", is_header=True)
+-            from mpos import WifiService
+-            ipv4_address = WifiService.get_ipv4_address() or "127.0.0.1"
+-            ipv4_netmask = WifiService.get_ipv4_netmask() or "255.255.255.0"
+-            ipv4_gateway = WifiService.get_ipv4_gateway() or ""
+-            self._add_label(screen, f"IPv4 Address: {ipv4_address}")
+-            self._add_label(screen, f"IPv4 Netmask: {ipv4_netmask}")
+-            self._add_label(screen, f"IPv4 Gateway: {ipv4_gateway}")
+-        except Exception as e:
+-            error = f"Could not find network info because: {e}"
+-            self.logger.warning(error)
+-            self._add_label(screen, error)
+-
+-
+@@ -160 +145,3 @@ class About(Activity):
+-        self._add_disk_info(screen, '/sdcard')
++        mounted_storage = FPLinuxStorage.get_mount_point()
++        if FPLinuxStorage.is_mounted() and mounted_storage:
++            self._add_disk_info(screen, mounted_storage)
+diff --git a/internal_filesystem/builtin/apps/com.micropythonos.howto/howto.py b/internal_filesystem/builtin/apps/com.micropythonos.howto/howto.py
+index 033e4ff5..ee406944 100644
+--- a/internal_filesystem/builtin/apps/com.micropythonos.howto/howto.py
++++ b/internal_filesystem/builtin/apps/com.micropythonos.howto/howto.py
+@@ -23 +23 @@ class HowTo(Activity):
+-        preamble = "How to Navigate"
++        preamble = "Navigation"
+@@ -26,14 +26,7 @@ class HowTo(Activity):
+-        buttonhelp_intro = "As you don't have a touch screen, you need to use the buttons to navigate:"
+-        buttonhelp_items = [
+-            "If you have a joystick and at least 2 buttons, then use the joystick to move around. Use one of the buttons to ENTER and another to go BACK.",
+-            "If you have 3 buttons, then one is PREVIOUS, one is ENTER and one is NEXT. To go back, press PREVIOUS and NEXT together.",
+-            "If you have just 2 buttons, then one is PREVIOUS, the other is NEXT. To ENTER, press both at the same time. To go back, long-press the PREVIOUS button.",
+-        ]
+-        touchhelp = "Swipe from the left edge to go back and from the top edge to open the menu."
+-        from mpos import InputManager
+-        if InputManager.has_pointer():
+-            self._add_label(screen, touchhelp)
+-        else:
+-            self._add_label(screen, buttonhelp_intro)
+-            for item in buttonhelp_items:
+-                self._add_label(screen, f"• {item}")
++        for item in (
++            "Use the directional keys to move the focus.",
++            "Use Select to open the focused item.",
++            "Use Back to return to the previous screen.",
++            "Use Menu to open the drawer.",
++        ):
++            self._add_label(screen, item)
+diff --git a/internal_filesystem/builtin/apps/com.micropythonos.launcher/launcher.py b/internal_filesystem/builtin/apps/com.micropythonos.launcher/launcher.py
+index 18c66181..4d941a54 100644
+--- a/internal_filesystem/builtin/apps/com.micropythonos.launcher/launcher.py
++++ b/internal_filesystem/builtin/apps/com.micropythonos.launcher/launcher.py
+@@ -79,2 +79,2 @@ class Launcher(Activity):
+-            if "Launcher" in app.categories or (app.fullname != "com.micropythonos.settings.wifi" and app.fullname.startswith("com.micropythonos.settings.")):
+-                # Ignore launchers and MPOS settings (except wifi)
++            if "Launcher" in app.categories or app.fullname.startswith("com.micropythonos.settings."):
++                # Settings sub-pages are reached from the Settings app.
+@@ -195 +194,0 @@ class Launcher(Activity):
+-
+diff --git a/internal_filesystem/builtin/apps/com.micropythonos.settings/settings.py b/internal_filesystem/builtin/apps/com.micropythonos.settings/settings.py
+index 5a134cc9..0472c3c9 100644
+--- a/internal_filesystem/builtin/apps/com.micropythonos.settings/settings.py
++++ b/internal_filesystem/builtin/apps/com.micropythonos.settings/settings.py
+@@ -2,33 +2 @@
+-import logging
+-
+-from mpos import Activity, AppearanceManager, AppManager, AudioManager, InputManager, Intent, NumberFormat, SettingsActivity, TimeZone
+-from mpos.notification_manager import DEFAULT_NOTIFICATION_SOUND, NOTIFICATION_SOUND_OPTIONS
+-
+-logger = logging.getLogger(__name__)
+-
+-from bootloader import ResetIntoBootloader
+-from calibrate_imu import CalibrateIMUActivity
+-from check_imu_calibration import CheckIMUCalibrationActivity
+-
+-class LaunchWiFi(Activity):
+-
+-    def onCreate(self):
+-        AppManager.start_app("com.micropythonos.settings.wifi")
+-
+-
+-class LaunchHotspot(Activity):
+-
+-    def onCreate(self):
+-        AppManager.start_app("com.micropythonos.settings.hotspot")
+-
+-
+-class LaunchWebServer(Activity):
+-
+-    def onCreate(self):
+-        AppManager.start_app("com.micropythonos.settings.webserver")
+-
+-
+-class LaunchAudioSettings(Activity):
+-
+-    def onCreate(self):
+-        AppManager.start_app("com.micropythonos.settings.audio")
++from mpos import AppearanceManager, AppManager, Intent, NumberFormat, SettingsActivity
+@@ -70,28 +37,0 @@ class Settings(SettingsActivity):
+-            {
+-                "title": "Wi-Fi",
+-                "key": "wifi_settings",
+-                "ui": "activity",
+-                "activity_class": LaunchWiFi,
+-                "placeholder": "Scan and connect to Wi-Fi",
+-            },
+-            {
+-                "title": "Hotspot",
+-                "key": "hotspot_settings",
+-                "ui": "activity",
+-                "activity_class": LaunchHotspot,
+-                "placeholder": "Standalone Wi-Fi access point",
+-            },
+-            {
+-                "title": "WebServer",
+-                "key": "webserver_settings",
+-                "ui": "activity",
+-                "activity_class": LaunchWebServer,
+-                "placeholder": "WebREPL, password, port etc",
+-            },
+-            {
+-                "title": "Audio",
+-                "key": "audio_settings",
+-                "ui": "activity",
+-                "activity_class": LaunchAudioSettings,
+-                "placeholder": "Input/output devices",
+-            },
+@@ -99 +38,0 @@ class Settings(SettingsActivity):
+-            {"title": "Haptic feedback", "key": "haptic_feedback", "ui": "radiobuttons", "ui_options":  [("On", "on"), ("Off", "off")], "default_value": "off", "should_show": InputManager.has_haptic_feedback()},
+@@ -101,2 +39,0 @@ class Settings(SettingsActivity):
+-            {"title": "Notification", "key": "notification_sound", "ui": "radiobuttons", "ui_options": NOTIFICATION_SOUND_OPTIONS, "default_value": DEFAULT_NOTIFICATION_SOUND},
+-            {"title": "Startup sound", "key": "startup_sound", "ui": "radiobuttons", "ui_options":  [("On", "on"), ("Off", "off")], "default_value": "on", "should_show": AudioManager.find_output_by_kind("buzzer")},
+@@ -104 +40,0 @@ class Settings(SettingsActivity):
+-            {"title": "Timezone", "key": "timezone", "ui": "dropdown", "ui_options": [(tz, tz) for tz in TimeZone.get_timezones()], "changed_callback": lambda *args: TimeZone.refresh_timezone_preference()},
+@@ -112,9 +47,0 @@ class Settings(SettingsActivity):
+-            {"title": "Check IMU Calibration", "key": "check_imu_calibration", "ui": "activity", "activity_class": CheckIMUCalibrationActivity},
+-            {"title": "Calibrate IMU", "key": "calibrate_imu", "ui": "activity", "activity_class": CalibrateIMUActivity},
+-            # Expert settings, alphabetically
+-            {"title": "Restart to Bootloader", "key": "boot_mode", "dont_persist": True, "ui": "radiobuttons", "ui_options":  [("Normal", "normal"), ("Bootloader", "bootloader")], "changed_callback": self.reset_into_bootloader},
+-            {"title": "Format internal data partition", "key": "format_internal_data_partition", "dont_persist": True, "ui": "radiobuttons", "ui_options":  [("No, do not format", "no"), ("Yes, erase all settings, files and non-builtin apps", "yes")], "changed_callback": self.format_internal_data_partition},
+-            {"title": "Format sdcard FAT32", "key": "format_sdcard_fat32", "dont_persist": True, "ui": "radiobuttons", "ui_options":  [("No, do not format", "no"), ("Yes, format sdcard as FAT32", "yes")], "changed_callback": self.format_sdcard_fat32},
+-            # This is currently only in the drawer but would make sense to have it here for completeness:
+-            #{"title": "Display Brightness", "key": "display_brightness", "placeholder": "A value from 0 to 100."},
+-            # Maybe also add font size (but ideally then all fonts should scale up/down)
+@@ -124,43 +50,0 @@ class Settings(SettingsActivity):
+-    # Change handlers:
+-    def reset_into_bootloader(self, new_value):
+-        if new_value != "bootloader":
+-            return
+-        intent = Intent(activity_class=ResetIntoBootloader)
+-        self.startActivity(intent)
+-
+-    def format_internal_data_partition(self, new_value):
+-        if new_value != "yes":
+-            return # user picked "no" - abort
+-        # Inspired by lvgl_micropython/lib/micropython/ports/esp32/modules/inisetup.py
+-        # Note: it would be nice to create a "FormatInternalDataPartition" activity with some progress or confirmation
+-        try:
+-            import vfs
+-            from flashbdev import bdev
+-        except Exception as e:
+-            logger.error("could not format internal data partition: %s", e)
+-            return
+-        if bdev.info()[4] == "vfs":
+-            if __debug__: logger.debug("formatting %s as LittleFS2", bdev)
+-            vfs.VfsLfs2.mkfs(bdev, readsize=256, progsize=256)
+-            fs = vfs.VfsLfs2(bdev, readsize=256, progsize=256)
+-        elif bdev.info()[4] == "ffat":
+-            if __debug__: logger.debug("formatting %s as FAT", bdev)
+-            vfs.VfsFat.mkfs(bdev)
+-            fs = vfs.VfsFat(bdev)
+-        if __debug__: logger.debug("mounting %s at /", fs)
+-        vfs.mount(fs, "/")
+-        if __debug__: logger.debug("done formatting, remounting /builtin")
+-        try:
+-            import freezefs_mount_builtin   # noqa E401
+-        except Exception as e:
+-            logger.warning("could not import/run freezefs_mount_builtin: %s", e)
+-        if __debug__: logger.debug("done mounting, refreshing apps")
+-        AppManager.refresh_apps()
+-
+-    def format_sdcard_fat32(self, new_value):
+-        if new_value != "yes":
+-            return
+-        from mpos import SDCardManager
+-        SDCardManager.format()
+-        SDCardManager.mount()
+-
+diff --git a/internal_filesystem/lib/mpos/__init__.py b/internal_filesystem/lib/mpos/__init__.py
+index 37e193d7..695b71cd 100644
+--- a/internal_filesystem/lib/mpos/__init__.py
++++ b/internal_filesystem/lib/mpos/__init__.py
+@@ -11,4 +10,0 @@ from .shared_preferences import SharedPreferences
+-from .net.connectivity_manager import ConnectivityManager
+-from .net.wifi_service import WifiService
+-from .audio.audiomanager import AudioManager
+-from .net.download_manager import DownloadManager
+@@ -16,3 +11,0 @@ from .task_manager import TaskManager
+-from .camera_manager import CameraManager
+-from .sensor_manager import SensorManager
+-from .time_zone import TimeZone
+@@ -22,5 +14,0 @@ from .build_info import BuildInfo
+-from .lora_manager import LoRaManager
+-from .ir_manager import IRManager
+-from .gps_manager import GPSManager
+-from .device_manager import DeviceManager
+-from .lights import LightsManager
+@@ -28,3 +15,0 @@ from .lights import LightsManager
+-# Battery manager (imported early for UI dependencies)
+-from .battery_manager import BatteryManager
+-from .webserver.webserver import WebServer
+@@ -41 +25,0 @@ from .ui.settings_activity import SettingsActivity
+-from .ui.camera_activity import CameraActivity
+@@ -44,10 +27,0 @@ from .ui.keyboard import MposKeyboard
+-from .ui.testing import (
+-    wait_for_render, capture_screenshot, simulate_click, simulate_drag, get_widget_coords,
+-    find_label_with_text, verify_text_present, print_screen_labels, find_text_on_screen,
+-    click_button, click_label, click_keyboard_button, find_button_with_text,
+-    get_all_widgets_with_text, find_setting_value_label, get_setting_value_text,
+-    verify_setting_value_text, find_dropdown_widget, get_dropdown_options,
+-    find_dropdown_option_index, select_dropdown_option_by_text,
+-    get_all_children, simulate_long_press, wait_for_text, wait_for_widget, retry_action_until,
+-    wait_for_focus
+-)
+@@ -71 +44,0 @@ from . import shared_preferences
+-from . import net
+@@ -74,3 +46,0 @@ from . import time
+-from . import sensor_manager
+-from . import camera_manager
+-from . import audio
+@@ -84,2 +54,2 @@ __all__ = (
+-    "ConnectivityManager", "DownloadManager", "WifiService", "AudioManager", "Intent",
+-    "ActivityNavigator", "AppManager", "TaskManager", "CameraManager", "BatteryManager", "WebServer",
++    "Intent",
++    "ActivityNavigator", "AppManager", "TaskManager",
+@@ -87 +56,0 @@ __all__ = (
+-    "LoRaManager", "IRManager", "GPSManager", "DeviceManager", "LightsManager",
+@@ -92 +61 @@ __all__ = (
+-    "InputActivity", "SettingActivity", "SettingsActivity", "CameraActivity",
++    "InputActivity", "SettingActivity", "SettingsActivity",
+@@ -100 +68,0 @@ __all__ = (
+-    "SensorManager",
+@@ -111,9 +78,0 @@ __all__ = (
+-    # Testing utilities
+-    "wait_for_render", "capture_screenshot", "simulate_click", "simulate_drag", "get_widget_coords",
+-    "find_label_with_text", "verify_text_present", "print_screen_labels", "find_text_on_screen",
+-    "click_button", "click_label", "click_keyboard_button", "find_button_with_text",
+-    "get_all_widgets_with_text", "find_setting_value_label", "get_setting_value_text",
+-    "verify_setting_value_text", "find_dropdown_widget", "get_dropdown_options",
+-    "find_dropdown_option_index", "select_dropdown_option_by_text",
+-    "get_all_children", "simulate_long_press", "wait_for_text", "wait_for_widget",
+-    "retry_action_until", "wait_for_focus",
+@@ -121,4 +80 @@ __all__ = (
+-    "ui", "shared_preferences", "net", "content", "time", "sensor_manager",
+-    "camera_manager", "audio",
+-    # Timezone utilities
+-    "TimeZone"
++    "ui", "shared_preferences", "content", "time",
+diff --git a/internal_filesystem/lib/mpos/app/system_services.py b/internal_filesystem/lib/mpos/app/system_services.py
+index 450ff961..ea33b47f 100644
+--- a/internal_filesystem/lib/mpos/app/system_services.py
++++ b/internal_filesystem/lib/mpos/app/system_services.py
+@@ -1,41 +1 @@
+-import logging
+-from .service import Service
+-from ..content.app_manager import AppManager
+-
+-logger = logging.getLogger(__name__)
+-
+-
+-class WifiBootService(Service):
+-
+-    def onStart(self, intent):
+-        import _thread
+-        from ..net.wifi_service import WifiService
+-        from ..task_manager import TaskManager
+-        _thread.stack_size(TaskManager.good_stack_size())
+-        _thread.start_new_thread(WifiService.auto_connect, ())
+-
+-
+-class WebServerBootService(Service):
+-
+-    def onStart(self, intent):
+-        from ..webserver.webserver import WebServer
+-        WebServer.auto_start()
+-
+-
+-class AIOReplService(Service):
+-
+-    def onStart(self, intent):
+-        import aiorepl
+-        import lvgl as lv
+-        import mpos
+-        from ..task_manager import TaskManager
+-
+-        async def asyncio_repl():
+-            logger.warning("Starting very limited asyncio REPL task. To stop all asyncio tasks and go to real REPL, do: mpos.TaskManager.stop()")
+-            await aiorepl.task(g={"lv": lv, "mpos": mpos}, prompt=">>> ")
+-        TaskManager.create_task(asyncio_repl())
+-
+-
+-AppManager.register_service("boot_completed", WifiBootService, fullname="com.micropythonos.system")
+-AppManager.register_service("boot_completed", WebServerBootService, fullname="com.micropythonos.system")
+-AppManager.register_service("boot_completed", AIOReplService, fullname="com.micropythonos.system")
++"""This Linux build registers no optional boot services."""
+diff --git a/internal_filesystem/lib/mpos/content/app_manager.py b/internal_filesystem/lib/mpos/content/app_manager.py
+index dfd79881..56dfcac2 100644
+--- a/internal_filesystem/lib/mpos/content/app_manager.py
++++ b/internal_filesystem/lib/mpos/content/app_manager.py
+@@ -329,6 +329,13 @@ class AppManager:
+-        apps_dir         = "apps"
+-        apps_dir_builtin = "builtin/" + apps_dir
+-        # relative paths are here for local-file desktop runs and also ESP32 builds
+-        # "/" + apps_dir_builtin is here for frozen-only desktop runs (no local files)
+-        # "/" + apps_dir_builtin is not here because there's no use case for it currently
+-        for base in (apps_dir, apps_dir_builtin, "/" + apps_dir_builtin):
++        apps_root = os.getenv("MPOS_ROOT", "/var/lib/micropythonos")
++        apps_dir         = apps_root.rstrip("/") + "/apps"
++        apps_dir_packaged = os.getenv(
++            "MPOS_PACKAGED_APPS", "/usr/share/micropythonos/apps"
++        ).rstrip("/")
++        apps_dir_builtin = "builtin/apps"
++        # Mutable apps and packaged apps come from the launcher contract.
++        for base in (
++            apps_dir,
++            apps_dir_packaged,
++            apps_dir_builtin,
++            "/" + apps_dir_builtin,
++        ):
+diff --git a/internal_filesystem/lib/mpos/main.py b/internal_filesystem/lib/mpos/main.py
+index cadaa312..b8a641f1 100644
+--- a/internal_filesystem/lib/mpos/main.py
++++ b/internal_filesystem/lib/mpos/main.py
+@@ -29 +29 @@ def _get_boot_splash_src():
+-        return "M:builtin/res/MicroPythonOS-logo-white-long-w296.png"
++        return "M:/builtin/res/MicroPythonOS-logo-white-long-w296.png"
+@@ -388,12 +387,0 @@ except Exception as e:
+-async def ota_rollback_cancel():
+-    try:
+-        from esp32 import Partition
+-        Partition.mark_app_valid_cancel_rollback()
+-    except Exception as e:
+-        logger.warning("could not mark this update as valid: %s", e)
+-
+-if not started_launcher:
+-    logger.warning("launcher failed to start, not cancelling OTA update rollback")
+-else:
+-    TaskManager.create_task(ota_rollback_cancel()) # only gets started after TaskManager.start()
+-
+@@ -403 +391 @@ except KeyboardInterrupt as k:
+-    if __debug__: logger.debug("TaskManager.start() got KeyboardInterrupt, falling back to REPL shell...") # only works if no aiorepl is running
++    if __debug__: logger.debug("TaskManager.start() got KeyboardInterrupt, falling back to REPL shell...")
+diff --git a/internal_filesystem/lib/mpos/notification_manager.py b/internal_filesystem/lib/mpos/notification_manager.py
+index 08602246..8b5bd374 100644
+--- a/internal_filesystem/lib/mpos/notification_manager.py
++++ b/internal_filesystem/lib/mpos/notification_manager.py
+@@ -6 +5,0 @@ from .content.intent import Intent
+-from .audio.audiomanager import AudioManager
+@@ -175,7 +173,0 @@ class NotificationManager:
+-    @staticmethod
+-    def _find_buzzer_output():
+-        for output in AudioManager.get_outputs():
+-            if output.kind == "buzzer":
+-                return output
+-        return None
+-
+@@ -184,25 +176 @@ class NotificationManager:
+-        try:
+-            rtttl = cls._get_settings_prefs().get_string(
+-                cls._SETTINGS_KEY, DEFAULT_NOTIFICATION_SOUND
+-            )
+-            if not rtttl:
+-                return
+-            output = cls._find_buzzer_output()
+-            if output is None:
+-                return
+-
+-            now = time.ticks_ms()
+-            if cls._last_sound_ts is not None and time.ticks_diff(now, cls._last_sound_ts) < _NOTIFICATION_SOUND_MIN_INTERVAL_MS:
+-                if __debug__:
+-                    logger.debug("Notification sound rate-limited")
+-                return
+-            cls._last_sound_ts = now
+-
+-            AudioManager.player(
+-                rtttl=rtttl,
+-                stream_type=AudioManager.STREAM_NOTIFICATION,
+-                volume=60,
+-                output=output,
+-            ).start()
+-        except Exception as e:
+-            logger.warning("Failed to play notification sound: %s", e)
++        del cls
+diff --git a/internal_filesystem/lib/mpos/time.py b/internal_filesystem/lib/mpos/time.py
+index 4d3f016b..c3c976f7 100644
+--- a/internal_filesystem/lib/mpos/time.py
++++ b/internal_filesystem/lib/mpos/time.py
+@@ -1 +0,0 @@
+-import logging
+@@ -3,5 +1,0 @@ import time
+-from .time_zone import TimeZone
+-
+-import localPTZtime
+-
+-logger = logging.getLogger(__name__)
+@@ -17,21 +10,0 @@ def epoch_seconds():
+-def sync_time():
+-    import ntptime
+-    if __debug__: logger.debug("Synchronizing clock...")
+-    # Set the NTP server and sync time
+-    ntptime.host = 'pool.ntp.org'  # Set NTP server
+-    try:
+-        if __debug__: logger.debug("Syncing time with %s", ntptime.host)
+-        ntptime.settime()  # Fetch and set time (in UTC)
+-        if __debug__: logger.debug("Time sync'ed successfully")
+-        if hasattr(TimeZone, "rtc"):
+-            if __debug__: logger.debug("Real Time Clock (RTC) found, setting it")
+-            try: # RTC driver might throw an exception
+-                import time
+-                lt = time.localtime() # (year, month, mday, hour, minute, second, weekday, yearday)
+-                TimeZone.rtc.datetime((lt[0],lt[1],lt[2],lt[6],lt[3],lt[4],lt[5])) # weekday order is different
+-            except Exception as e:
+-                logger.error("Exception while setting RTC time: %s", e)
+-        TimeZone.refresh_timezone_preference() # if the time was sync'ed, then it needs refreshing
+-    except Exception as e:
+-        logger.error("Failed to sync time: %s", e)
+-
+@@ -39,10 +12 @@ def localtime():
+-    if not TimeZone.timezone_preference: # if it's the first time, then it needs refreshing
+-        TimeZone.refresh_timezone_preference()
+-    ptz = TimeZone.timezone_to_posix_time_zone(TimeZone.timezone_preference)
+-    t = time.time()
+-    try:
+-        localtime = localPTZtime.tztime(t, ptz)
+-    except Exception:
+-        return time.localtime()
+-    return localtime
+-
++    return time.localtime()
+diff --git a/internal_filesystem/lib/mpos/ui/file_explorer_activity.py b/internal_filesystem/lib/mpos/ui/file_explorer_activity.py
+index ec08ebbb..f1ab5bb6 100644
+--- a/internal_filesystem/lib/mpos/ui/file_explorer_activity.py
++++ b/internal_filesystem/lib/mpos/ui/file_explorer_activity.py
+@@ -9 +9 @@ import lvgl as lv
+-from ..sdcard import SDCardManager
++from ..fplinux_storage import FPLinuxStorage
+@@ -49 +49,4 @@ class FileExplorerActivity(Activity):
+-        SDCardManager.mount()
++        if FPLinuxStorage.is_mounted():
++            self._storage_path = FPLinuxStorage.get_mount_point()
++        else:
++            self._storage_path = None
+@@ -55 +58 @@ class FileExplorerActivity(Activity):
+-        self._start_dir = self.getIntent().extras.get("start_dir", ".")
++        self._start_dir = self.getIntent().extras.get("start_dir") or self._storage_path or "."
+@@ -108 +111 @@ class FileExplorerActivity(Activity):
+-        SDCardManager.mount()
++        pass
+diff --git a/internal_filesystem/lib/mpos/ui/input_activity.py b/internal_filesystem/lib/mpos/ui/input_activity.py
+index 5ceb51f3..c29eddc2 100644
+--- a/internal_filesystem/lib/mpos/ui/input_activity.py
++++ b/internal_filesystem/lib/mpos/ui/input_activity.py
+@@ -5 +4,0 @@ from ..app.activity import Activity
+-from .camera_activity import CameraActivity
+@@ -8 +6,0 @@ from .widget_animator import WidgetAnimator
+-from ..camera_manager import CameraManager
+@@ -177,14 +174,0 @@ class InputActivity(Activity):
+-        if ui == "textarea" and CameraManager.has_camera(): # Scan QR button for text settings (only if camera available)
+-            cambutton = lv.button(input_screen)
+-            cambutton.align(lv.ALIGN.BOTTOM_MID, 0, 0)
+-            cambutton.set_size(lv.pct(100), lv.pct(30))
+-            cambuttonlabel = lv.label(cambutton)
+-            cambuttonlabel.set_text("Scan data from QR code")
+-            cambuttonlabel.set_style_text_font(lv.font_montserrat_18, lv.PART.MAIN)
+-            cambuttonlabel.align(lv.ALIGN.TOP_MID, 0, 0)
+-            cambuttonlabel2 = lv.label(cambutton)
+-            cambuttonlabel2.set_text("Tip: Create your own QR code,\nusing https://genqrcode.com or another tool.")
+-            cambuttonlabel2.set_style_text_font(lv.font_montserrat_10, lv.PART.MAIN)
+-            cambuttonlabel2.align(lv.ALIGN.BOTTOM_MID, 0, 0)
+-            cambutton.add_event_cb(self.cambutton_cb, lv.EVENT.CLICKED, None)
+-
+@@ -252,12 +235,0 @@ class InputActivity(Activity):
+-    def gotqr_result_callback(self, result):
+-        if __debug__: logger.debug("QR capture finished, result: %s", result)
+-        if result.get("result_code"):
+-            data = result.get("data")
+-            if __debug__: logger.debug("Setting textarea data: %s", data)
+-            self.textarea.set_text(data)
+-
+-    def cambutton_cb(self, event):
+-        from ..content.intent import Intent
+-        if __debug__: logger.debug("cambutton clicked!")
+-        self.startActivityForResult(Intent(activity_class=CameraActivity).putExtra("scanqr_intent", True), self.gotqr_result_callback)
+-
+diff --git a/internal_filesystem/lib/mpos/ui/topmenu.py b/internal_filesystem/lib/mpos/ui/topmenu.py
+index 0a17868d..81c4c4a7 100644
+--- a/internal_filesystem/lib/mpos/ui/topmenu.py
++++ b/internal_filesystem/lib/mpos/ui/topmenu.py
+@@ -5,2 +4,0 @@ import mpos.time
+-import mpos.shared_preferences
+-from ..battery_manager import BatteryManager
+@@ -19,4 +16,0 @@ CLOCK_UPDATE_INTERVAL = 1000 # 10 or even 1 ms doesn't seem to change the framer
+-WIFI_ICON_UPDATE_INTERVAL = 1500
+-BATTERY_ICON_UPDATE_INTERVAL = 15000 # not too often, but not too short, otherwise it takes a while to appear
+-TEMPERATURE_UPDATE_INTERVAL = 2000
+-MEMFREE_UPDATE_INTERVAL = 5000 # not too frequent because there's a forced gc.collect() to give it a reliable value
+@@ -45 +38,0 @@ _notifications_listener_registered = False
+-_drawer_slider = None          # brightness slider; receives focus when the drawer opens
+@@ -257,2 +250,2 @@ def open_drawer():
+-    if _drawer_slider:
+-        lv.group_focus_obj(_drawer_slider)
++    if _drawer_focusables:
++        lv.group_focus_obj(_drawer_focusables[0])
+@@ -328,43 +320,0 @@ def create_notification_bar():
+-    temp_label = lv.label(notification_bar)
+-    temp_label.set_text("00°C")
+-    temp_label.align_to(time_label, lv.ALIGN.OUT_RIGHT_MID, DisplayMetrics.pct_of_width(10), 0)
+-    # WiFi icon
+-    wifi_icon = lv.label(notification_bar)
+-    wifi_icon.set_text(lv.SYMBOL.WIFI)
+-    wifi_icon.add_flag(lv.obj.FLAG.HIDDEN)
+-    wifi_icon.align(lv.ALIGN.RIGHT_MID, -DisplayMetrics.pct_of_width(10), 0)
+-
+-    # Battery percentage
+-    if BatteryManager.has_battery():
+-        # Battery icon
+-        battery_icon = lv.label(notification_bar)
+-        battery_icon.set_text(lv.SYMBOL.BATTERY_FULL)
+-        #battery_icon.align_to(battery_label, lv.ALIGN.OUT_LEFT_MID, 0, 0)
+-        battery_icon.align(lv.ALIGN.RIGHT_MID, -DisplayMetrics.pct_of_width(10), 0)
+-        wifi_icon.align_to(battery_icon, lv.ALIGN.OUT_LEFT_MID, -DisplayMetrics.pct_of_width(1), 0)
+-        battery_icon.add_flag(lv.obj.FLAG.HIDDEN) # keep it hidden until it has a correct value
+-        def update_battery_icon(timer=None):
+-            try:
+-                percent = BatteryManager.get_battery_percentage()
+-            except Exception as e:
+-                logger.error("BatteryManager.get_battery_percentage got exception, not updating battery_icon: %s", e)
+-                return
+-            if percent > 80:
+-                battery_icon.set_text(lv.SYMBOL.BATTERY_FULL)
+-            elif percent > 60:
+-                battery_icon.set_text(lv.SYMBOL.BATTERY_3)
+-            elif percent > 40:
+-                battery_icon.set_text(lv.SYMBOL.BATTERY_2)
+-            elif percent > 20:
+-                battery_icon.set_text(lv.SYMBOL.BATTERY_1)
+-            else:
+-                battery_icon.set_text(lv.SYMBOL.BATTERY_EMPTY)
+-            battery_icon.align(lv.ALIGN.RIGHT_MID, -DisplayMetrics.pct_of_width(10), 0)
+-            wifi_icon.align_to(battery_icon, lv.ALIGN.OUT_LEFT_MID, -DisplayMetrics.pct_of_width(1), 0)
+-            battery_icon.remove_flag(lv.obj.FLAG.HIDDEN)
+-            # Percentage is not shown for now:
+-            #battery_label.set_text(f"{round(percent)}%")
+-            #battery_label.remove_flag(lv.obj.FLAG.HIDDEN)
+-        update_battery_icon() # run it immediately instead of waiting for the timer
+-        lv.timer_create(update_battery_icon, BATTERY_ICON_UPDATE_INTERVAL, None)
+-
+@@ -378,6 +327,0 @@ def create_notification_bar():
+-    def update_wifi_icon(timer):
+-        from mpos import WifiService
+-        if WifiService.is_connected():
+-            wifi_icon.remove_flag(lv.obj.FLAG.HIDDEN)
+-        else:
+-            wifi_icon.add_flag(lv.obj.FLAG.HIDDEN)
+@@ -385,18 +328,0 @@ def create_notification_bar():
+-    # Get temperature sensor via SensorManager
+-    from mpos import SensorManager
+-    temp_sensor = None
+-    if SensorManager.is_available():
+-        # Prefer MCU temperature (more stable) over IMU temperature
+-        temp_sensor = SensorManager.get_default_sensor(SensorManager.TYPE_SOC_TEMPERATURE)
+-        if not temp_sensor:
+-            temp_sensor = SensorManager.get_default_sensor(SensorManager.TYPE_IMU_TEMPERATURE)
+-
+-    def update_temperature(timer):
+-        if temp_sensor:
+-            temp = SensorManager.read_sensor(temp_sensor)
+-            if temp is not None:
+-                temp_label.set_text(f"{round(temp)}°C")
+-            else:
+-                temp_label.set_text("--°C")
+-        else:
+-            temp_label.set_text("42°C")
+@@ -405,3 +330,0 @@ def create_notification_bar():
+-    lv.timer_create(update_temperature, TEMPERATURE_UPDATE_INTERVAL, None)
+-    #lv.timer_create(update_memfree, MEMFREE_UPDATE_INTERVAL, None)
+-    lv.timer_create(update_wifi_icon, WIFI_ICON_UPDATE_INTERVAL, None)
+@@ -450 +373 @@ def create_drawer():
+-    # ── Top section: FLOW COLUMN container (brightness + icon row) ──────────
++    # ── Top section: icon row ────────────────────────────────────────────────
+@@ -465,45 +387,0 @@ def create_drawer():
+-    # ── Brightness row ───────────────────────────────────────────────────────
+-    brightness_row = lv.obj(top_group)
+-    brightness_row.set_width(lv.pct(100))
+-    brightness_row.set_height(lv.SIZE_CONTENT)
+-    brightness_row.set_style_pad_all(0, lv.PART.MAIN)
+-    brightness_row.set_style_pad_row(2, lv.PART.MAIN)
+-    brightness_row.set_style_border_width(0, lv.PART.MAIN)
+-    brightness_row.set_style_radius(0, lv.PART.MAIN)
+-    brightness_row.set_style_bg_opa(lv.OPA.TRANSP, lv.PART.MAIN)
+-    brightness_row.remove_flag(lv.obj.FLAG.SCROLLABLE)
+-    brightness_row.set_layout(lv.LAYOUT.FLEX)
+-    brightness_row.set_flex_flow(lv.FLEX_FLOW.COLUMN)
+-    brightness_row.set_flex_align(lv.FLEX_ALIGN.START, lv.FLEX_ALIGN.CENTER, lv.FLEX_ALIGN.CENTER)
+-
+-    prefs = mpos.shared_preferences.SharedPreferences("com.micropythonos.settings")
+-    brightness_int = prefs.get_int("display_brightness", 100)
+-    if mpos.ui.main_display:
+-        mpos.ui.main_display.set_backlight(brightness_int)
+-
+-    global _drawer_slider
+-    slider = lv.slider(brightness_row)
+-    slider.set_range(1, 100)
+-    slider.set_value(int(brightness_int), False)
+-    slider.set_width(lv.pct(92))
+-    slider.set_style_margin_top(DisplayMetrics.pct_of_height(2), lv.PART.MAIN)
+-    slider.set_style_margin_bottom(DisplayMetrics.pct_of_height(2), lv.PART.MAIN)
+-    _drawer_slider = slider
+-    _register_focus_callbacks(_drawer_slider)
+-    _drawer_focusables.append(slider)
+-
+-    def brightness_slider_changed(e):
+-        brightness_int = slider.get_value()
+-        if mpos.ui.main_display:
+-            mpos.ui.main_display.set_backlight(brightness_int)
+-    def brightness_slider_released(e):
+-        brightness_int = slider.get_value()
+-        prefs = mpos.shared_preferences.SharedPreferences("com.micropythonos.settings")
+-        old_brightness_int = prefs.get_int("display_brightness")
+-        if old_brightness_int != brightness_int:
+-            editor = prefs.edit()
+-            editor.put_int("display_brightness", brightness_int)
+-            editor.commit()
+-    slider.add_event_cb(brightness_slider_changed, lv.EVENT.VALUE_CHANGED, None)
+-    slider.add_event_cb(brightness_slider_released, lv.EVENT.RELEASED, None)
+-
+@@ -527,14 +404,0 @@ def create_drawer():
+-    # WiFi button
+-    wifi_btn = lv.button(icon_row)
+-    wifi_btn.set_size(icon_btn_size, icon_btn_size)
+-    wifi_btn.set_style_pad_all(4, lv.PART.MAIN)
+-    wifi_label = lv.label(wifi_btn)
+-    wifi_label.set_text(lv.SYMBOL.WIFI)
+-    wifi_label.center()
+-    def wifi_event(e):
+-        close_drawer()
+-        AppManager.start_app("com.micropythonos.settings.wifi")
+-    wifi_btn.add_event_cb(wifi_event, lv.EVENT.CLICKED, None)
+-    _register_focus_callbacks(wifi_btn)
+-    _drawer_focusables.append(wifi_btn)
+-
+@@ -574,46 +437,0 @@ def create_drawer():
+-    # Reset button
+-    restart_btn = lv.button(icon_row)
+-    restart_btn.set_size(icon_btn_size, icon_btn_size)
+-    restart_btn.set_style_pad_all(4, lv.PART.MAIN)
+-    restart_label = lv.label(restart_btn)
+-    restart_label.set_text(lv.SYMBOL.REFRESH)
+-    restart_label.center()
+-    def reset_cb(e):
+-        from .view import remove_and_stop_current_activity
+-        remove_and_stop_current_activity()
+-        import machine
+-        if hasattr(machine, 'reset'):
+-            machine.reset()
+-        elif hasattr(machine, 'soft_reset'):
+-            machine.soft_reset()
+-        else:
+-            logger.warning("machine has no reset or soft_reset method available")
+-    restart_btn.add_event_cb(reset_cb, lv.EVENT.CLICKED, None)
+-    _register_focus_callbacks(restart_btn)
+-    _drawer_focusables.append(restart_btn)
+-
+-    # Power-off button
+-    poweroff_btn = lv.button(icon_row)
+-    poweroff_btn.set_size(icon_btn_size, icon_btn_size)
+-    poweroff_btn.set_style_pad_all(4, lv.PART.MAIN)
+-    poweroff_label = lv.label(poweroff_btn)
+-    poweroff_label.set_text(lv.SYMBOL.POWER)
+-    poweroff_label.center()
+-    def poweroff_cb(e):
+-        if __debug__: logger.debug("Power off action...")
+-        from .view import remove_and_stop_current_activity
+-        remove_and_stop_current_activity()
+-        import sys
+-        if sys.platform == "esp32":
+-            import machine
+-            if __debug__: logger.debug("Entering deep sleep...")
+-            machine.deepsleep()
+-        else:
+-            import mpos ; mpos.TaskManager.stop()
+-            lv.deinit()
+-            import os
+-            os.system("kill $PPID")
+-    poweroff_btn.add_event_cb(poweroff_cb, lv.EVENT.CLICKED, None)
+-    _register_focus_callbacks(poweroff_btn)
+-    _drawer_focusables.append(poweroff_btn)
+-
+diff --git a/internal_filesystem/lib/mpos/app/app.py b/internal_filesystem/lib/mpos/app/app.py
+index 43630ec..b96d668 100644
+--- a/internal_filesystem/lib/mpos/app/app.py
++++ b/internal_filesystem/lib/mpos/app/app.py
+@@ -57,0 +58 @@ class App:
++            f"{self.installed_path}/{icon_name}",
+@@ -68,0 +70 @@ class App:
++            f"{self.installed_path}/res/mipmap-mdpi/{icon_name}",
+diff --git a/internal_filesystem/main.py b/internal_filesystem/main.py
+index 97237857..a2b86dab 100644
+--- a/internal_filesystem/main.py
++++ b/internal_filesystem/main.py
+@@ -39,0 +40 @@ except Exception as e:
++    raise

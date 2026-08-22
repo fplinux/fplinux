@@ -13,9 +13,10 @@
 
 This experimental target provides a local framebuffer terminal, physical keypad,
 USB shell and host-keyboard bridge on an INOI 244 Modern 4G. These functions and
-TyrQuake have been exercised on the phone. The session is lost when power is
-removed; it does not access internal phone storage. This is feature-level
-hardware evidence, not release qualification.
+TyrQuake have been exercised on the phone. MicroPythonOS installation, launcher
+navigation and keypad text input have also been exercised. The session is lost
+when power is removed; it does not access internal phone storage. This is
+feature-level hardware evidence, not release qualification.
 
 ## Hardware support
 
@@ -28,7 +29,7 @@ variant. **Not supported** describes the current target, not the hardware.
 | RAM boot                    | N/A      | Supported     | Linux runs only in RAM; it is discarded when the session ends. |
 | Persistent boot             | N/A      | Not supported | No autonomous Linux boot path is provided.                     |
 | Local screen                | Present  | Supported     | `240×320` framebuffer console.                                 |
-| Physical keypad             | Present  | Supported     | Linux input device for the local terminal and TyrQuake.        |
+| Physical keypad             | Present  | Supported     | Local terminal, TyrQuake and MicroPythonOS input.              |
 | Keypad backlight            | Unknown  | Not supported | No FPLinux keypad-backlight control is provided.               |
 | USB shell and file transfer | Present  | Supported     | Interface 0 provides the shell and transfer commands.          |
 | Host keyboard bridge        | N/A      | Supported     | Interface 1 forwards one host evdev keyboard.                  |
@@ -121,6 +122,29 @@ game, remove it without restarting the phone:
 
 ```sh
 ./fplinux console inoi-244-modern-4g --exec 'apk del fplinux-tyrquake'
+```
+
+### MicroPythonOS
+
+MicroPythonOS is `fplinux-micropythonos.apk`. The package targets the shared
+FPLinux display and keypad ABI. Installation and removal, the `240×320` launcher,
+keypad text input and terminal restoration have been exercised on this phone.
+Individual bundled applications outside the exercised paths are not qualified.
+This target has no microSD capability, so application state remains in RAM.
+
+```sh
+./fplinux console inoi-244-modern-4g --upload \
+  "$bundle/apks/fplinux-micropythonos.apk" /tmp/fplinux-micropythonos.apk
+./fplinux console inoi-244-modern-4g --exec \
+  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-micropythonos.apk'
+./fplinux console inoi-244-modern-4g
+```
+
+At the phone shell prompt, run `micropythonos`. Press `Ctrl-C` to stop it and
+restore the terminal, then `Ctrl-]` to detach before removing the package:
+
+```sh
+./fplinux console inoi-244-modern-4g --exec 'apk del fplinux-micropythonos'
 ```
 
 ## End the RAM session

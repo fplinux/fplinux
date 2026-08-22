@@ -1,0 +1,160 @@
+diff --git a/internal_filesystem/apps/com.micropythonos.repl_shell/repl_shell.py b/internal_filesystem/apps/com.micropythonos.repl_shell/repl_shell.py
+index 060fe32..6d48427 100644
+--- a/internal_filesystem/apps/com.micropythonos.repl_shell/repl_shell.py
++++ b/internal_filesystem/apps/com.micropythonos.repl_shell/repl_shell.py
+@@ -36,0 +37,4 @@ class ReplShell(Activity):
++        group = lv.group_get_default()
++        if group is not None:
++            group.add_obj(self.input_area)
++
+@@ -37,0 +42 @@ class ReplShell(Activity):
++        self.keyboard.show_keyboard()
+@@ -40 +45 @@ class ReplShell(Activity):
+-        self.keyboard.remove_flag(lv.obj.FLAG.HIDDEN)
++        self.keyboard.show_keyboard()
+diff --git a/internal_filesystem/apps/com.micropythonos.texteditor/text_editor.py b/internal_filesystem/apps/com.micropythonos.texteditor/text_editor.py
+index f533fec..6197a4a 100644
+--- a/internal_filesystem/apps/com.micropythonos.texteditor/text_editor.py
++++ b/internal_filesystem/apps/com.micropythonos.texteditor/text_editor.py
+@@ -96,0 +97,7 @@ class TextEditor(Activity):
++        group = lv.group_get_default()
++        if group is not None:
++            group.add_obj(self._open_button)
++            group.add_obj(self._textarea)
++            group.add_obj(self._save_button)
++            lv.group_focus_obj(self._textarea)
++
+diff --git a/internal_filesystem/lib/mpos/ui/input_activity.py b/internal_filesystem/lib/mpos/ui/input_activity.py
+index c29eddc..6148868 100644
+--- a/internal_filesystem/lib/mpos/ui/input_activity.py
++++ b/internal_filesystem/lib/mpos/ui/input_activity.py
+@@ -174,0 +175,15 @@ class InputActivity(Activity):
++        group = lv.group_get_default()
++        if self.textarea is not None:
++            input_widget = self.textarea
++        elif self.dropdown is not None:
++            input_widget = self.dropdown
++        else:
++            input_widget = self.slider
++        if group is not None:
++            if input_widget is not None:
++                group.add_obj(input_widget)
++            group.add_obj(cancel_btn)
++            group.add_obj(save_btn)
++            if input_widget is not None:
++                lv.group_focus_obj(input_widget)
++
+@@ -175,0 +191,2 @@ class InputActivity(Activity):
++        if self.keyboard is not None:
++            self.keyboard.show_keyboard()
+@@ -182,0 +200 @@ class InputActivity(Activity):
++        del screen
+@@ -184 +202 @@ class InputActivity(Activity):
+-            WidgetAnimator.smooth_hide(self.keyboard)
++            self.keyboard.hide_keyboard()
+diff --git a/internal_filesystem/lib/mpos/ui/keyboard.py b/internal_filesystem/lib/mpos/ui/keyboard.py
+index a938cef..426b29b 100644
+--- a/internal_filesystem/lib/mpos/ui/keyboard.py
++++ b/internal_filesystem/lib/mpos/ui/keyboard.py
+@@ -18,0 +19 @@ import logging
++import time
+@@ -20,0 +22 @@ import lvgl as lv
++from .. import fplinux_multitap
+@@ -23 +24,0 @@ from .font_manager import FontManager
+-from .widget_animator import WidgetAnimator
+@@ -120,0 +122,3 @@ class MposKeyboard:
++        self._multitap = fplinux_multitap.MultiTapEngine(elapsed=time.ticks_diff)
++        self._multitap_timer = None
++
+@@ -139,0 +144,54 @@ class MposKeyboard:
++        self._keyboard.add_flag(lv.obj.FLAG.HIDDEN)
++
++        self._multitap_timer = lv.timer_create(self._expire_multitap, 50, None)
++
++    def _render_multitap(self):
++        if self._textarea is None:
++            return
++        text = self._multitap.display_text
++        if self._textarea.get_text() != text:
++            self._textarea.set_text(text)
++
++    def handle_physical_key(self, key, now_ms):
++        if self._textarea is None or not self._multitap.handle(key, now_ms):
++            return False
++        self._render_multitap()
++        return True
++
++    def commit_physical_input(self):
++        if self._multitap.commit():
++            self._render_multitap()
++
++    def submit_physical_input(self):
++        self.commit_physical_input()
++        self._keyboard.send_event(lv.EVENT.READY, None)
++
++    def dismiss_physical_input(self):
++        self.hide_keyboard()
++
++    def _expire_multitap(self, timer):
++        del timer
++        if fplinux_multitap.is_active(self) and self._multitap.expire(time.ticks_ms()):
++            self._render_multitap()
++
++    def _activate_multitap(self):
++        if self._textarea is None or fplinux_multitap.is_active(self):
++            return
++        self._multitap.reset(self._textarea.get_text())
++        fplinux_multitap.activate(self)
++
++        group = lv.group_get_default()
++        if group is not None:
++            present = any(
++                group.get_obj_by_index(index) is self._textarea
++                for index in range(group.get_obj_count())
++            )
++            if not present:
++                group.add_obj(self._textarea)
++            lv.group_focus_obj(self._textarea)
++
++    def _deactivate_multitap(self):
++        if not fplinux_multitap.is_active(self):
++            return
++        self.commit_physical_input()
++        fplinux_multitap.deactivate(self)
+@@ -143,0 +202,6 @@ class MposKeyboard:
++        if code == lv.EVENT.DELETE:
++            fplinux_multitap.deactivate(self)
++            if self._multitap_timer is not None:
++                self._multitap_timer.delete()
++                self._multitap_timer = None
++            return
+@@ -150,0 +215 @@ class MposKeyboard:
++        self.commit_physical_input()
+@@ -213,0 +279 @@ class MposKeyboard:
++        self._multitap.reset(new_text)
+@@ -251,0 +318,2 @@ class MposKeyboard:
++        self._deactivate_multitap()
++
+@@ -351,0 +420 @@ class MposKeyboard:
++        self._activate_multitap()
+@@ -354,11 +423 @@ class MposKeyboard:
+-        self._saved_scroll_y = self._parent.get_scroll_y()
+-        WidgetAnimator.smooth_show(self._keyboard, duration=500)
+-        # Scroll to view on a timer because it will be hidden initially
+-        lv.timer_create(self.scroll_after_show, 250, None).set_repeat_count(1)
+-        # When this is done from a timer, focus styling is not applied so the user doesn't see which button is selected.
+-        # Maybe because there's no active indev anymore?
+-        # Maybe it will be fixed in an update of LVGL 9.4 to a later version?
+-        # lv.timer_create(self.focus_on_keyboard,750,None).set_repeat_count(1)
+-        # Workaround: show the keyboard immediately and then focus on it - that works, and doesn't seem to flicker as feared:
+-        self._keyboard.remove_flag(lv.obj.FLAG.HIDDEN)
+-        self.focus_on_keyboard()
++        self._keyboard.add_flag(lv.obj.FLAG.HIDDEN)
+@@ -367,3 +426,4 @@ class MposKeyboard:
+-        WidgetAnimator.smooth_hide(self._keyboard, duration=500)
+-        # Do this after the hide so the scrollbars disappear automatically if not needed
+-        scroll_timer = lv.timer_create(self.scroll_back_after_hide,550,None).set_repeat_count(1)
++        self._deactivate_multitap()
++        self._keyboard.add_flag(lv.obj.FLAG.HIDDEN)
++        if self._on_hide:
++            self._on_hide()

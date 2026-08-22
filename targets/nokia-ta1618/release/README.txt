@@ -11,7 +11,9 @@ What works on the Nokia 3210 4G (TA-1618):
   - one forwarded host keyboard on interface 1;
   - microSD access when the card is inserted before boot;
   - battery-only power-off;
-  - installable TyrQuake with either input mode.
+  - installable TyrQuake with either input mode;
+  - installable MicroPythonOS launcher, keypad text input, File Manager and
+    card-backed application state.
 
 Internal phone storage, audio, modem, Bluetooth, Wi-Fi, battery reporting and
 Linux reboot are not supported by this target.
@@ -78,6 +80,30 @@ Then start exactly one mode:
 
 After exiting TyrQuake, remove it with:
   ./host/fplinux-usb-console --interface 0 --exec 'apk del fplinux-tyrquake'
+
+MicroPythonOS requires its base and TA-1618 companion packages:
+  ./host/fplinux-usb-console --interface 0 --upload \
+    ./apks/fplinux-micropythonos.apk /tmp/fplinux-micropythonos.apk
+  ./host/fplinux-usb-console --interface 0 --upload \
+    ./apks/fplinux-micropythonos-nokia-ta1618.apk \
+    /tmp/fplinux-micropythonos-nokia-ta1618.apk
+  ./host/fplinux-usb-console --interface 0 --exec \
+    'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-micropythonos.apk /tmp/fplinux-micropythonos-nokia-ta1618.apk'
+  ./host/fplinux-usb-console --interface 0
+
+At the phone shell prompt, run micropythonos. Press Ctrl-C to stop it and restore
+the terminal, then Ctrl-] to detach before removing it with:
+  ./host/fplinux-usb-console --interface 0 --exec \
+    'apk del fplinux-micropythonos-nokia-ta1618 fplinux-micropythonos'
+
+With a usable FAT32 microSD card inserted before boot, MicroPythonOS uses
+`/mnt/card` and stores its state under
+`/mnt/card/.fplinux/micropythonos`. It mounts the card when no matching mount
+exists and unmounts only a card that it mounted when the interface exits.
+Otherwise its state remains in RAM. Installation and removal, the launcher,
+keypad text input, File Manager, card-backed state, synced write, read after
+remount and clean unmount have been exercised on this phone. Individual bundled
+applications outside those paths are not qualified.
 
 The TyrQuake launcher uses temporary runtime storage. Its settings and saves
 are discarded when it exits; they are not written to microSD.

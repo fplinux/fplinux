@@ -1,0 +1,22 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-micropythonos-nokia-ta1618
+pkgver=1
+pkgrel=0
+pkgdesc="Nokia TA-1618 configuration for FPLinux MicroPythonOS"
+url="https://github.com/fplinux/fplinux"
+arch="noarch"
+license="MIT"
+depends="fplinux-micropythonos"
+options="!check"
+source="
+	micropythonos.conf
+"
+
+package() {
+	install -Dm644 "$srcdir/micropythonos.conf" \
+		"$pkgdir/etc/fplinux/micropythonos.conf"
+}
+
+sha512sums="
+1761c6829322c80afb2ef08db219790f2c35def2f98d55866f9858ff3b37cc374dbab506d1a72d95194a9dddddfa7861e35d1e2e3cc95e17d3075d0494e2b599  micropythonos.conf
+"
