@@ -28,7 +28,8 @@ and target bootstrap inputs out of the platform.
 Use **Supported**, **Partial**, **Not supported** and **Unknown** with the same
 meaning as the [target template](../../docs/porting/TARGET.md). This table
 describes shared implementation and hardware evidence; it does not qualify a
-complete phone runtime closure.
+complete phone runtime closure. Bundled installable APKs join that runtime in
+the executable payload used for release qualification.
 
 | Block                | Status     | Target-facing contract or limitation |
 | -------------------- | ---------- | ------------------------------------ |
@@ -68,4 +69,4 @@ implementation file maps here.
 
 Link each target to its own support state and release qualification. A platform
 capability can be physically validated without qualifying every target's full
-runtime closure.
+executable payload.

@@ -683,10 +683,22 @@ def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]
     }
     if not required_runtime.issubset(runtime_files):
         fail("release runtime files omit required runtime inputs")
+    qualification_files = [
+        *runtime_files,
+        *(
+            relative
+            for relative in bundle_files
+            if len(PurePosixPath(relative).parts) == 2
+            and PurePosixPath(relative).parts[0] == "apks"
+            and PurePosixPath(relative).suffix == ".apk"
+            and relative not in runtime_files
+        ),
+    ]
     return {
         "image": image,
         "bundle_files": bundle_files,
         "runtime_files": runtime_files,
+        "qualification_files": qualification_files,
         "documents": documents,
         "executables": executables,
     }
@@ -729,14 +741,17 @@ def package_target(target: str, *, candidate: bool = False) -> None:
             fail(f"release input differs from its successful build manifest: {source}")
         files[relative] = data
 
-    runtime_payload = {relative: files[relative] for relative in release["runtime_files"]}
-    runtime_digest = payload_digest(runtime_payload, release["executables"])
+    qualification_payload = {
+        relative: files[relative] for relative in release["qualification_files"]
+    }
+    qualification_digest = payload_digest(qualification_payload, release["executables"])
     files["BUILD-MANIFEST.json"] = bundle.manifest_bytes
     verified_digest = verified_runtime_digest(target)
-    if not candidate and verified_digest != runtime_digest:
+    if not candidate and verified_digest != qualification_digest:
         fail(
-            "this runtime closure is not hardware-qualified for release; "
-            f"use --candidate for device testing (runtime SHA256 {runtime_digest})"
+            "this executable payload is not hardware-qualified for release; "
+            "use --candidate for device testing "
+            f"(qualification SHA256 {qualification_digest})"
         )
 
     add_target_files(files, target, release["documents"])
@@ -788,7 +803,7 @@ def package_target(target: str, *, candidate: bool = False) -> None:
     image_digest = sha256_bytes(files[release["image"]])
     print(f"FPLinux {qualifier} package: {archive.relative_to(ROOT)}")
     print(f"Archive SHA256: {sha256_file(archive)}")
-    print(f"Runtime closure SHA256: {runtime_digest}")
+    print(f"Qualification payload SHA256: {qualification_digest}")
     print(f"ramboot.bin SHA256: {image_digest}")
 
 

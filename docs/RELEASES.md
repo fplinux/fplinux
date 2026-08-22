@@ -5,8 +5,9 @@ local build. They use the same RAM-only loader path as a source checkout.
 
 ## Current availability
 
-This checkout has no qualified release archive. A candidate is for physical
-qualification only and must not be published as a release.
+This checkout has no prebuilt release archive and no recorded qualified payload.
+A candidate is for physical qualification only and must not be published as a
+release.
 
 ## Create a candidate
 
@@ -21,8 +22,9 @@ The candidate ZIP is written below `.cache/out/candidates/`. Its filename and
 included notice identify it as a qualification candidate. Packaging validates the
 selected build and does not rebuild it.
 
-A release archive can be created only after the exact candidate has completed
-the phone-specific qualification gate and is recorded as qualified:
+A release archive can be created only after the exact executable payload from a
+candidate has completed the phone-specific qualification gate and its digest is
+recorded as qualified:
 
 ```sh
 ./fplinux package <target>
@@ -31,13 +33,31 @@ the phone-specific qualification gate and is recorded as qualified:
 Until then, this command refuses to create a release archive. A successful
 release archive is written below `.cache/out/releases/`.
 
+Candidate packaging prints the qualification payload SHA-256. After the phone
+gate, a maintainer records that exact digest for the target in
+`releases.lock.toml`; changing either the RAM runtime or a bundled APK produces a
+different digest and requires a new phone qualification.
+
 ## Qualification boundary
 
 A candidate proves that the source checkout produced a packageable bundle. It
-does not prove that the target boots or that any hardware feature works. Qualify
-the exact candidate on the intended phone variant and record feature results in
-that target's documentation. A successful source build, archive checksum, or
-host-side `verify` command does not replace the phone test.
+does not prove that the target boots or that any hardware feature works. The
+qualified payload covers the exact RAM runtime, loader and host runtime tools,
+runtime assets, runner, platform adapter, runtime manifest, and bundled
+top-level `apks/*.apk` files from that candidate.
+
+Documentation, license notices, provenance records, build metadata, checksums,
+and the candidate notice remain part of the archive but outside the
+phone-qualified payload. Their bytes are still covered by the archive checksum
+and content-derived filename. Candidate and release archives therefore need not
+be byte-identical: the release must contain the recorded executable payload,
+while candidate-only marking is removed.
+
+Run the gate on the intended phone variant and record each exercised feature and
+limitation in that target's documentation. Qualification binds the shipped
+executable bytes; it does not claim that every path in every bundled application
+was exercised. A successful source build, archive checksum, or host-side
+`verify` command does not replace the phone test.
 
 The [target index](../targets/README.md) links every phone's status, connection
 instructions, supported controls, and shutdown or recovery procedure.

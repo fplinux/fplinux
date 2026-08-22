@@ -28,7 +28,7 @@ support or the platform loader sequence.
    `./fplinux run <target>` before connecting the powered-off phone; connect it
    only when the loader asks.
 5. Exercise every feature labelled **Supported** on the named hardware variant.
-   A release requires the exact runtime closure to pass the phone gate; a
+   A release requires the exact executable payload to pass the phone gate; a
    successful build or candidate package alone is not release qualification.
 
 Use the [platform template](PLATFORM.md) for reusable SoC support and the

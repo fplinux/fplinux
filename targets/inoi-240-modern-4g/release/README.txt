@@ -2,8 +2,16 @@ FPLinux for INOI 240 Modern 4G
 
 This archive starts an experimental Linux session in volatile RAM. It does not
 flash the phone or access its internal storage. The current project provides no
-prebuilt archive or qualified runtime closure: this archive is a local hardware
-qualification candidate, not a release.
+prebuilt release archive or recorded qualified payload for this target. An
+archive containing CANDIDATE-NOTICE.txt is a local hardware-qualification
+candidate and must not be published as a release.
+
+Qualification binds the exact RAM runtime, loader and host runtime tools, runtime
+assets, runner, platform adapter, runtime manifest and bundled top-level
+apks/*.apk files.
+This README, license notices, provenance and build records, checksums and the
+candidate notice are archive metadata outside that phone-qualified payload.
+Feature statements below cover only the paths that were exercised.
 
 What works on the INOI 240 Modern 4G:
   - local 128x160 terminal and physical keypad;
@@ -73,7 +81,7 @@ display and keypad ABI. Installation and removal, launcher navigation, keypad
 text input and terminal restoration have been exercised. Its 128x160 UI is only
 partially adaptive: launcher content and some application controls are clipped.
 Individual bundled applications outside those paths are not qualified. This
-target has no microSD capability, so application state remains in RAM:
+target has no supported microSD path, so application state remains in RAM:
   ./host/fplinux-usb-console --interface 0 --upload \
     ./apks/fplinux-micropythonos.apk /tmp/fplinux-micropythonos.apk
   ./host/fplinux-usb-console --interface 0 --exec \
