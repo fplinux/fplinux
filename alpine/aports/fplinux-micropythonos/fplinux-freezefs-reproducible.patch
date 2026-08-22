@@ -1,0 +1,7 @@
+diff --git a/freezeFS/freezefs/archive.py b/freezeFS/freezefs/archive.py
+--- a/freezeFS/freezefs/archive.py
++++ b/freezeFS/freezefs/archive.py
+@@ -144,0 +145,3 @@
++    source_date_epoch = os.environ.get("SOURCE_DATE_EPOCH")
++    if source_date_epoch is not None:
++        t = time.gmtime(int(source_date_epoch))

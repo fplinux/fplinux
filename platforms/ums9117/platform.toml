@@ -6,7 +6,7 @@ name = "ums9117"
 packages = ["fplinux-cpuclock"]
 
 [bundle]
-packages = ["fplinux-tyrquake"]
+packages = ["fplinux-tyrquake", "fplinux-micropythonos"]
 
 [linux]
 source_lock = "linux"

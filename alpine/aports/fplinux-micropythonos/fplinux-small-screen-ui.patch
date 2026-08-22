@@ -1,0 +1,462 @@
+diff --git a/internal_filesystem/apps/com.micropythonos.connect4/connect4.py b/internal_filesystem/apps/com.micropythonos.connect4/connect4.py
+index 5f21eda..700935a 100644
+--- a/internal_filesystem/apps/com.micropythonos.connect4/connect4.py
++++ b/internal_filesystem/apps/com.micropythonos.connect4/connect4.py
+@@ -3,0 +4 @@ from mpos import Activity, add_focus_border
++from mpos.ui.fplinux_small_screen_layout import connect4_layout
+@@ -68,4 +69,4 @@ class Connect4(Activity):
+-        # Calculate scaling based on available space
+-        available_height = self.SCREEN_HEIGHT - 40  # Leave space for bottom bar only
+-        max_cell_size = min(available_height // self.ROWS, (self.SCREEN_WIDTH - 20) // self.COLS)
+-        self.CELL_SIZE = max_cell_size
++        layout = connect4_layout(
++            self.SCREEN_WIDTH, self.SCREEN_HEIGHT, self.COLS, self.ROWS
++        )
++        self.CELL_SIZE = layout["cell_size"]
+@@ -73 +74,3 @@ class Connect4(Activity):
+-        self.BOARD_TOP = 5
++        board_x, self.BOARD_TOP = layout["board_pos"]
++        board_width, board_height = layout["board_size"]
++        self._compact_labels = layout["compact"]
+@@ -78 +81,2 @@ class Connect4(Activity):
+-        self.status_label.align(lv.ALIGN.BOTTOM_LEFT, 5, -8)
++        self.status_label.set_width(layout["status_width"])
++        self.status_label.set_pos(*layout["status_pos"])
+@@ -82,2 +86,2 @@ class Connect4(Activity):
+-        difficulty_btn.set_size(70, 26)
+-        difficulty_btn.align(lv.ALIGN.BOTTOM_MID, 0, -5)
++        difficulty_btn.set_size(*layout["button_size"])
++        difficulty_btn.set_pos(*layout["difficulty_pos"])
+@@ -92,2 +96,2 @@ class Connect4(Activity):
+-        new_game_btn.set_size(70, 26)
+-        new_game_btn.align(lv.ALIGN.BOTTOM_RIGHT, -5, -5)
++        new_game_btn.set_size(*layout["button_size"])
++        new_game_btn.set_pos(*layout["new_game_pos"])
+@@ -101,5 +105,2 @@ class Connect4(Activity):
+-        board_bg.set_size(self.COLS * self.CELL_SIZE + 10, self.ROWS * self.CELL_SIZE + 10)
+-        board_bg.set_pos(
+-            (self.SCREEN_WIDTH - self.COLS * self.CELL_SIZE) // 2 - 5,
+-            self.BOARD_TOP - 5
+-        )
++        board_bg.set_size(board_width + 8, board_height + 8)
++        board_bg.set_pos(board_x - 4, self.BOARD_TOP - 4)
+@@ -111 +111,0 @@ class Connect4(Activity):
+-        board_x = (self.SCREEN_WIDTH - self.COLS * self.CELL_SIZE) // 2
+@@ -147 +147,5 @@ class Connect4(Activity):
+-        difficulty_names = ["Easy", "Medium", "Hard"]
++        difficulty_names = (
++            ["Easy", "Med", "Hard"]
++            if self._compact_labels
++            else ["Easy", "Medium", "Hard"]
++        )
+diff --git a/internal_filesystem/apps/com.micropythonos.imageview/imageview.py b/internal_filesystem/apps/com.micropythonos.imageview/imageview.py
+index 45864b9..6862a6a 100644
+--- a/internal_filesystem/apps/com.micropythonos.imageview/imageview.py
++++ b/internal_filesystem/apps/com.micropythonos.imageview/imageview.py
+@@ -6,0 +7,5 @@ from mpos import Activity, WidgetAnimator, DisplayMetrics, Intent, add_focus_bor
++from mpos.ui.fplinux_small_screen_layout import (
++    MAX_RAW_IMAGE_BYTES,
++    image_file_size_limit,
++    imageview_layout,
++)
+@@ -35 +40,2 @@ class ImageView(Activity):
+-            self.label.set_width(screen_width - 112)
++            layout = imageview_layout(screen_width, DisplayMetrics.height())
++            self.label.set_width(layout["label_width"])
+@@ -36,0 +43 @@ class ImageView(Activity):
++            layout = None
+@@ -40 +47,6 @@ class ImageView(Activity):
+-        self.open_button.set_size(DisplayMetrics.pct_of_width(25), DisplayMetrics.pct_of_height(15))
++        if layout:
++            self.open_button.set_size(*layout["button_size"])
++        else:
++            self.open_button.set_size(
++                DisplayMetrics.pct_of_width(25), DisplayMetrics.pct_of_height(15)
++            )
+@@ -44 +56 @@ class ImageView(Activity):
+-        open_label.set_text("Open file...")
++        open_label.set_text("Open" if layout and layout["compact"] else "Open file...")
+@@ -125 +137 @@ class ImageView(Activity):
+-                    if size > 10 * 1024 * 1024:
++                    if size > image_file_size_limit(path):
+@@ -152 +164 @@ class ImageView(Activity):
+-                if size > 10 * 1024 * 1024:
++                if size > image_file_size_limit(fullname):
+@@ -254 +265,0 @@ class ImageView(Activity):
+-            self.image.set_src(f"M:{name}")
+@@ -257,4 +268,4 @@ class ImageView(Activity):
+-                f = open(name, 'rb')
+-                image_data = f.read()
+-                print(f"loaded {len(image_data)} bytes from .raw file")
+-                f.close()
++                raw_size = os.stat(name)[6]
++                if raw_size > MAX_RAW_IMAGE_BYTES:
++                    self.label.set_text("Raw image is too large\nMaximum: 512 KiB")
++                    return
+@@ -263,0 +275 @@ class ImageView(Activity):
++                    self.label.set_text("Invalid raw image name")
+@@ -266 +277,0 @@ class ImageView(Activity):
+-                print(f"Raw image has width: {width}, Height: {height}, Color Format: {color_format}")
+@@ -273 +284,14 @@ class ImageView(Activity):
+-                    print(f"WARNING: unknown color format {color_format}, assuming RGB565...")
++                    self.label.set_text("Unsupported raw image format")
++                    return
++                expected_size = stride * height
++                if expected_size != raw_size or expected_size > MAX_RAW_IMAGE_BYTES:
++                    self.label.set_text("Invalid raw image size")
++                    return
++                gc.collect()
++                with open(name, "rb") as stream:
++                    image_data = stream.read()
++                print(f"loaded {len(image_data)} bytes from .raw file")
++                print(
++                    f"Raw image has width: {width}, Height: {height}, "
++                    f"Color Format: {color_format}"
++                )
+@@ -285,0 +310,2 @@ class ImageView(Activity):
++            else:
++                self.image.set_src(f"M:{name}")
+@@ -287 +313,8 @@ class ImageView(Activity):
+-        except OSError as e:
++        except (MemoryError, OSError) as e:
++            self.clear_image()
++            message = (
++                "Not enough memory to load image"
++                if isinstance(e, MemoryError)
++                else "Unable to load image"
++            )
++            self.label.set_text(message)
+diff --git a/internal_filesystem/apps/com.micropythonos.lights_out/lights_out.py b/internal_filesystem/apps/com.micropythonos.lights_out/lights_out.py
+index ec6214e..ca68587 100644
+--- a/internal_filesystem/apps/com.micropythonos.lights_out/lights_out.py
++++ b/internal_filesystem/apps/com.micropythonos.lights_out/lights_out.py
+@@ -1,0 +2 @@ from mpos import Activity, AppearanceManager, DisplayMetrics, SharedPreferences
++from mpos.ui.fplinux_small_screen_layout import game_dashboard_layout
+@@ -66,0 +68,4 @@ class LightsOut(Activity):
++        layout = game_dashboard_layout(
++            DisplayMetrics.width(), DisplayMetrics.height()
++        )
++        self._dashboard_layout = layout
+@@ -68 +73 @@ class LightsOut(Activity):
+-        self.level_label.align(lv.ALIGN.TOP_MID, 0, 10)
++        self.level_label.align(lv.ALIGN.TOP_LEFT, layout["padding"], layout["padding"])
+@@ -71 +76 @@ class LightsOut(Activity):
+-        self.moves_label.align(lv.ALIGN.TOP_RIGHT, -10, 10)
++        self.moves_label.align(lv.ALIGN.TOP_MID, 0, layout["padding"])
+@@ -74 +79,3 @@ class LightsOut(Activity):
+-        self.levels_label.align(lv.ALIGN.TOP_LEFT, 10, 10)
++        self.levels_label.align(
++            lv.ALIGN.TOP_RIGHT, -layout["padding"], layout["padding"]
++        )
+@@ -77 +84,3 @@ class LightsOut(Activity):
+-        self.score_label.align(lv.ALIGN.BOTTOM_LEFT, 10, -10)
++        self.score_label.align(
++            lv.ALIGN.BOTTOM_LEFT, layout["padding"], -layout["padding"]
++        )
+@@ -80 +89,5 @@ class LightsOut(Activity):
+-        self.highscore_label.align(lv.ALIGN.BOTTOM_MID, 0, -10)
++        self.highscore_label.align(
++            lv.ALIGN.BOTTOM_MID,
++            layout["best_offset"],
++            -layout["padding"],
++        )
+@@ -89,2 +102,3 @@ class LightsOut(Activity):
+-        reset_label.set_text("New Game")
+-        reset_btn.align(lv.ALIGN.BOTTOM_RIGHT, 0, 0)
++        reset_label.set_text("New" if layout["compact"] else "New Game")
++        reset_btn.set_size(*layout["reset_size"])
++        reset_btn.align(lv.ALIGN.BOTTOM_RIGHT, -layout["padding"], -layout["padding"])
+@@ -97,2 +111,2 @@ class LightsOut(Activity):
+-        self.container.set_size(lv.pct(100), DisplayMetrics.pct_of_height(75))
+-        self.container.align(lv.ALIGN.CENTER, 0, 0)
++        self.container.set_size(*self._dashboard_layout["board_size"])
++        self.container.set_pos(*self._dashboard_layout["board_pos"])
+@@ -127,4 +141,10 @@ class LightsOut(Activity):
+-        self.level_label.set_text(f"Level: {self.level}")
+-        self.moves_label.set_text(f"Moves: {self.moves}")
+-        self.levels_label.set_text(f"Solved: {self.total_levels}")
+-        self.score_label.set_text(f"Score: {self.score}")
++        if self._dashboard_layout["compact"]:
++            self.level_label.set_text(f"L:{self.level}")
++            self.moves_label.set_text(f"M:{self.moves}")
++            self.levels_label.set_text(f"S:{self.total_levels}")
++            self.score_label.set_text(f"S:{self.score}")
++        else:
++            self.level_label.set_text(f"Level: {self.level}")
++            self.moves_label.set_text(f"Moves: {self.moves}")
++            self.levels_label.set_text(f"Solved: {self.total_levels}")
++            self.score_label.set_text(f"Score: {self.score}")
+@@ -132 +152,3 @@ class LightsOut(Activity):
+-        self.highscore_label.set_text(f"Best: {best}")
++        self.highscore_label.set_text(
++            f"B:{best}" if self._dashboard_layout["compact"] else f"Best: {best}"
++        )
+diff --git a/internal_filesystem/apps/com.micropythonos.memory/memory.py b/internal_filesystem/apps/com.micropythonos.memory/memory.py
+index 4327e16..4c56a6d 100644
+--- a/internal_filesystem/apps/com.micropythonos.memory/memory.py
++++ b/internal_filesystem/apps/com.micropythonos.memory/memory.py
+@@ -1,0 +2 @@ from mpos import Activity, AppearanceManager, DisplayMetrics, SharedPreferences
++from mpos.ui.fplinux_small_screen_layout import game_dashboard_layout
+@@ -80,0 +82,4 @@ class Memory(Activity):
++        layout = game_dashboard_layout(
++            DisplayMetrics.width(), DisplayMetrics.height()
++        )
++        self._dashboard_layout = layout
+@@ -82 +87 @@ class Memory(Activity):
+-        self.level_label.align(lv.ALIGN.TOP_MID, 0, 10)
++        self.level_label.align(lv.ALIGN.TOP_LEFT, layout["padding"], layout["padding"])
+@@ -85 +90 @@ class Memory(Activity):
+-        self.moves_label.align(lv.ALIGN.TOP_RIGHT, -10, 10)
++        self.moves_label.align(lv.ALIGN.TOP_MID, 0, layout["padding"])
+@@ -88 +93,3 @@ class Memory(Activity):
+-        self.points_label.align(lv.ALIGN.TOP_LEFT, 10, 10)
++        self.points_label.align(
++            lv.ALIGN.TOP_RIGHT, -layout["padding"], layout["padding"]
++        )
+@@ -91 +98,3 @@ class Memory(Activity):
+-        self.score_label.align(lv.ALIGN.BOTTOM_LEFT, 10, -10)
++        self.score_label.align(
++            lv.ALIGN.BOTTOM_LEFT, layout["padding"], -layout["padding"]
++        )
+@@ -94 +103,5 @@ class Memory(Activity):
+-        self.highscore_label.align(lv.ALIGN.BOTTOM_MID, 0, -10)
++        self.highscore_label.align(
++            lv.ALIGN.BOTTOM_MID,
++            layout["best_offset"],
++            -layout["padding"],
++        )
+@@ -103,2 +116,3 @@ class Memory(Activity):
+-        reset_label.set_text("New Game")
+-        reset_btn.align(lv.ALIGN.BOTTOM_RIGHT, 0, 0)
++        reset_label.set_text("New" if layout["compact"] else "New Game")
++        reset_btn.set_size(*layout["reset_size"])
++        reset_btn.align(lv.ALIGN.BOTTOM_RIGHT, -layout["padding"], -layout["padding"])
+@@ -111,2 +125,2 @@ class Memory(Activity):
+-        self.container.set_size(lv.pct(100), DisplayMetrics.pct_of_height(75))
+-        self.container.align(lv.ALIGN.CENTER, 0, 0)
++        self.container.set_size(*self._dashboard_layout["board_size"])
++        self.container.set_pos(*self._dashboard_layout["board_pos"])
+@@ -159,4 +173,10 @@ class Memory(Activity):
+-        self.level_label.set_text(f"Level: {self.level}")
+-        self.moves_label.set_text(f"Moves: {self.moves}")
+-        self.points_label.set_text(f"Points: {self.total_points}")
+-        self.score_label.set_text(f"Score: {self.score}")
++        if self._dashboard_layout["compact"]:
++            self.level_label.set_text(f"L:{self.level}")
++            self.moves_label.set_text(f"M:{self.moves}")
++            self.points_label.set_text(f"P:{self.total_points}")
++            self.score_label.set_text(f"S:{self.score}")
++        else:
++            self.level_label.set_text(f"Level: {self.level}")
++            self.moves_label.set_text(f"Moves: {self.moves}")
++            self.points_label.set_text(f"Points: {self.total_points}")
++            self.score_label.set_text(f"Score: {self.score}")
+@@ -164 +184,3 @@ class Memory(Activity):
+-        self.highscore_label.set_text(f"Best: {best}")
++        self.highscore_label.set_text(
++            f"B:{best}" if self._dashboard_layout["compact"] else f"Best: {best}"
++        )
+diff --git a/internal_filesystem/apps/com.micropythonos.showfonts/showfonts.py b/internal_filesystem/apps/com.micropythonos.showfonts/showfonts.py
+index 120bd9c..1d68a77 100644
+--- a/internal_filesystem/apps/com.micropythonos.showfonts/showfonts.py
++++ b/internal_filesystem/apps/com.micropythonos.showfonts/showfonts.py
+@@ -110,5 +109,0 @@ class ShowFonts(Activity):
+-        import sys
+-        if sys.platform in ("linux", "darwin", "win32"):
+-            import time
+-            time.sleep(1) # simulate slowness on desktop for testing
+-
+@@ -187 +181,0 @@ class ShowFonts(Activity):
+-
+diff --git a/internal_filesystem/apps/cz.ucw.pavel.columns/main.py b/internal_filesystem/apps/cz.ucw.pavel.columns/main.py
+index 471f996..63bbf0c 100644
+--- a/internal_filesystem/apps/cz.ucw.pavel.columns/main.py
++++ b/internal_filesystem/apps/cz.ucw.pavel.columns/main.py
+@@ -22 +22,2 @@ different shapes?
+-from mpos import Activity
++from mpos import Activity, add_focus_border
++from mpos.ui.fplinux_small_screen_layout import columns_layout
+@@ -65,3 +66,11 @@ class Main(Activity):
+-        vert = 60
+-        horiz = 60
+-        font = lv.font_montserrat_20
++        d = lv.display_get_default()
++        self.SCREEN_WIDTH = d.get_horizontal_resolution()
++        self.SCREEN_HEIGHT = d.get_vertical_resolution()
++        layout = columns_layout(
++            self.SCREEN_WIDTH, self.SCREEN_HEIGHT, self.COLS, self.ROWS
++        )
++        font = (
++            lv.font_montserrat_14
++            if layout["compact"]
++            else lv.font_montserrat_20
++        )
+@@ -70,2 +79,2 @@ class Main(Activity):
+-        score.align(lv.ALIGN.TOP_LEFT, 5, 25)
+-        score.set_text("Score")
++        score.set_pos(*layout["score_pos"])
++        score.set_text("Score 0")
+@@ -76,2 +85,2 @@ class Main(Activity):
+-        btn_left.set_size(horiz, vert)
+-        btn_left.align(lv.ALIGN.BOTTOM_LEFT, 5, -10-vert)
++        btn_left.set_size(*layout["control_size"])
++        btn_left.set_pos(*layout["left_pos"])
+@@ -78,0 +88 @@ class Main(Activity):
++        add_focus_border(btn_left)
+@@ -85,2 +95,2 @@ class Main(Activity):
+-        btn_right.set_size(horiz, vert)
+-        btn_right.align(lv.ALIGN.BOTTOM_RIGHT, -5, -10-vert)
++        btn_right.set_size(*layout["control_size"])
++        btn_right.set_pos(*layout["right_pos"])
+@@ -87,0 +98 @@ class Main(Activity):
++        add_focus_border(btn_right)
+@@ -94,2 +105,2 @@ class Main(Activity):
+-        btn_rotate.set_size(horiz, vert)
+-        btn_rotate.align(lv.ALIGN.BOTTOM_RIGHT, -5, -15-vert-vert)
++        btn_rotate.set_size(*layout["control_size"])
++        btn_rotate.set_pos(*layout["rotate_pos"])
+@@ -96,0 +108 @@ class Main(Activity):
++        add_focus_border(btn_rotate)
+@@ -103,2 +115,2 @@ class Main(Activity):
+-        btn_down.set_size(horiz, vert)
+-        btn_down.align(lv.ALIGN.BOTTOM_LEFT, 5, -5)
++        btn_down.set_size(*layout["control_size"])
++        btn_down.set_pos(*layout["down_pos"])
+@@ -105,0 +118 @@ class Main(Activity):
++        add_focus_border(btn_down)
+@@ -111,11 +124,2 @@ class Main(Activity):
+-        d = lv.display_get_default()
+-        self.SCREEN_WIDTH = d.get_horizontal_resolution()
+-        self.SCREEN_HEIGHT = d.get_vertical_resolution()
+-
+-        self.CELL = min(
+-            self.SCREEN_WIDTH // (self.COLS + 1),
+-            self.SCREEN_HEIGHT // (self.ROWS + 1)
+-        )
+-
+-        board_x = (self.SCREEN_WIDTH - self.CELL * self.COLS) // 2
+-        board_y = (self.SCREEN_HEIGHT - self.CELL * self.ROWS) // 2
++        self.CELL = layout["cell_size"]
++        board_x, board_y = layout["board_pos"]
+@@ -242 +246 @@ class Main(Activity):
+-        self.lb_score.set_text("Score\n%d" % self.score)
++        self.lb_score.set_text("Score %d" % self.score)
+@@ -293 +297 @@ class Main(Activity):
+-        if key == ord("a"):
++        if key in (lv.KEY.LEFT, ord("4"), ord("a")):
+@@ -296 +300 @@ class Main(Activity):
+-        if key == ord("w"):
++        if key in (lv.KEY.UP, ord("2"), ord("w")):
+@@ -299 +303 @@ class Main(Activity):
+-        if key == ord("d"):
++        if key in (lv.KEY.RIGHT, ord("6"), ord("d")):
+@@ -302 +306 @@ class Main(Activity):
+-        if key == ord("s"):
++        if key in (lv.KEY.DOWN, ord("8"), ord("s")):
+diff --git a/internal_filesystem/apps/cz.ucw.pavel.floodit/main.py b/internal_filesystem/apps/cz.ucw.pavel.floodit/main.py
+index 0cc475f..f69bccd 100644
+--- a/internal_filesystem/apps/cz.ucw.pavel.floodit/main.py
++++ b/internal_filesystem/apps/cz.ucw.pavel.floodit/main.py
+@@ -13 +13,2 @@ starting from the top-left corner.
+-from mpos import Activity
++from mpos import Activity, add_focus_border
++from mpos.ui.fplinux_small_screen_layout import floodit_layout
+@@ -50,8 +50,0 @@ class Main(Activity):
+-        font = lv.font_montserrat_20
+-
+-        score = lv.label(self.screen)
+-        score.align(lv.ALIGN.TOP_LEFT, 5, 25)
+-        score.set_text("Moves")
+-        score.set_style_text_font(font, 0)
+-        self.lb_score = score
+-
+@@ -61,8 +54,11 @@ class Main(Activity):
+-
+-        # color buttons
+-        btn_size = 45
+-        spacing = 5
+-
+-        self.CELL = min(
+-            self.SCREEN_WIDTH // (self.COLS + 2),
+-            (self.SCREEN_HEIGHT - btn_size) // (self.ROWS + 3)
++        layout = floodit_layout(
++            self.SCREEN_WIDTH,
++            self.SCREEN_HEIGHT,
++            self.COLS,
++            self.ROWS,
++            len(self.COLORS),
++        )
++        font = (
++            lv.font_montserrat_14
++            if layout["compact"]
++            else lv.font_montserrat_20
+@@ -71,2 +67,8 @@ class Main(Activity):
+-        board_x = (self.SCREEN_WIDTH - self.CELL * self.COLS) // 2
+-        board_y = (self.SCREEN_HEIGHT - self.CELL * self.ROWS) // 2
++        score = lv.label(self.screen)
++        score.set_pos(*layout["score_pos"])
++        score.set_text("Moves 0")
++        score.set_style_text_font(font, 0)
++        self.lb_score = score
++
++        self.CELL = layout["cell_size"]
++        board_x, board_y = layout["board_pos"]
+@@ -83 +85 @@ class Main(Activity):
+-                    board_y + r * self.CELL + 1 - btn_size // 2
++                    board_y + r * self.CELL + 1
+@@ -97,7 +99,2 @@ class Main(Activity):
+-            btn.set_size(btn_size, btn_size)
+-
+-            btn.align(
+-                lv.ALIGN.BOTTOM_LEFT,
+-                5 + i * (btn_size + spacing),
+-                -5
+-            )
++            btn.set_size(*layout["button_size"])
++            btn.set_pos(*layout["button_pos"](i))
+@@ -105,0 +103 @@ class Main(Activity):
++            add_focus_border(btn)
+@@ -113,0 +112 @@ class Main(Activity):
++        self.screen.add_event_cb(self.on_key, lv.EVENT.KEY, None)
+@@ -124 +123 @@ class Main(Activity):
+-        self.lb_score.set_text("Moves\n0")
++        self.lb_score.set_text("Moves 0")
+@@ -145 +144 @@ class Main(Activity):
+-        self.lb_score.set_text("Moves\n%d" % self.moves)
++        self.lb_score.set_text("Moves %d" % self.moves)
+@@ -195,0 +195,5 @@ class Main(Activity):
++    def on_key(self, event):
++        key = event.get_key()
++        if ord("1") <= key <= ord("6"):
++            self.pick_color(key - ord("1"))
++
+diff --git a/internal_filesystem/builtin/apps/com.micropythonos.about/about.py b/internal_filesystem/builtin/apps/com.micropythonos.about/about.py
+index 1d121b6..eb5e216 100644
+--- a/internal_filesystem/builtin/apps/com.micropythonos.about/about.py
++++ b/internal_filesystem/builtin/apps/com.micropythonos.about/about.py
+@@ -8,0 +9 @@ from mpos.fplinux_storage import FPLinuxStorage
++from mpos.ui.fplinux_small_screen_layout import about_logo_scale
+@@ -28,0 +30,5 @@ class About(Activity):
++        img.set_scale(
++            about_logo_scale(
++                DisplayMetrics.width(), DisplayMetrics.pct_of_width(2)
++            )
++        )
+diff --git a/internal_filesystem/lib/mpos/ui/file_explorer_activity.py b/internal_filesystem/lib/mpos/ui/file_explorer_activity.py
+index f1ab5bb..762bdab 100644
+--- a/internal_filesystem/lib/mpos/ui/file_explorer_activity.py
++++ b/internal_filesystem/lib/mpos/ui/file_explorer_activity.py
+@@ -13,0 +14 @@ from .display_metrics import DisplayMetrics
++from .fplinux_small_screen_layout import icon_control_size
+@@ -80 +81 @@ class FileExplorerActivity(Activity):
+-        btn_size = DisplayMetrics.pct_of_width(10)
++        btn_size = icon_control_size(DisplayMetrics.width())
+diff --git a/internal_filesystem/lib/mpos/ui/topmenu.py b/internal_filesystem/lib/mpos/ui/topmenu.py
+index 81c4c4a..3700cee 100644
+--- a/internal_filesystem/lib/mpos/ui/topmenu.py
++++ b/internal_filesystem/lib/mpos/ui/topmenu.py
+@@ -5,0 +6 @@ from .display_metrics import DisplayMetrics
++from .fplinux_small_screen_layout import icon_control_size
+@@ -127 +128 @@ def _build_drawer_notification_item(parent, notification):
+-    icon_size = DisplayMetrics.pct_of_width(12)
++    icon_size = icon_control_size(DisplayMetrics.width())

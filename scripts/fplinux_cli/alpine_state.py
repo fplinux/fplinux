@@ -26,6 +26,10 @@ SHARED_APORT_SOURCES = {
         "alpine/shared/fplinux-multitap.c",
         "alpine/shared/fplinux-multitap.h",
     ),
+    "fplinux-micropythonos": (
+        "alpine/shared/fplinux-multitap.c",
+        "alpine/shared/fplinux-multitap.h",
+    ),
 }
 SHARED_APORT_SOURCE_PATHS = frozenset(
     path for paths in SHARED_APORT_SOURCES.values() for path in paths

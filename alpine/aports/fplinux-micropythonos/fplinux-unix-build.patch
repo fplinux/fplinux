@@ -1,0 +1,192 @@
+--- a/lvgl_micropython/builder/unix.py
++++ b/lvgl_micropython/builder/unix.py
+@@ -30,6 +30,7 @@ submodules_cmd = []
+ heap_size = 4194304
+ sdl_flags = ''
+
++FPLINUX = os.environ.get('MPOS_FPLINUX') == '1'
+ REAL_PORT = 'unix'
+
+
+@@ -101,9 +102,18 @@ def build_commands(_, extra_args, script_dir, lv_cflags, board):
+         ]
+     )
+
+-    if REAL_PORT == 'unix':
++    if REAL_PORT == 'unix' and not FPLINUX:
+         unix_cmd.append('LDFLAGS_EXTRA=-static')  # static binary (all libraries included) so it's more portable
+
++    if FPLINUX:
++        unix_cmd.extend(
++            [
++                f'CC="{os.environ["CC"]}"',
++                f'STRIP="{os.environ["STRIP"]}"',
++                f'CROSS_COMPILE={os.environ["CHOST"]}-',
++            ]
++        )
++
+     # unix_cmd.extend(extra_args)
+
+     clean_cmd.extend(unix_cmd[:])
+@@ -199,25 +209,26 @@ def build_sdl(addl_commands):
+
+
+ def submodules():
+-    if not os.path.exists('lib/SDL/include'):
+-        print()
+-        print('collecting SDL2')
+-        cmd_ = [
+-            'git',
+-            'submodule',
+-            'update',
+-            '--init',
+-            '--',
+-            f'lib/SDL'
+-        ]
++    if not FPLINUX:
++        if not os.path.exists('lib/SDL/include'):
++            print()
++            print('collecting SDL2')
++            cmd_ = [
++                'git',
++                'submodule',
++                'update',
++                '--init',
++                '--',
++                f'lib/SDL'
++            ]
++            _run(cmd_)
++
++        cmd_ = ['cd lib/SDL && git checkout release-2.30.2']
+         _run(cmd_)
+
+-    cmd_ = ['cd lib/SDL && git checkout release-2.30.2']
+-    _run(cmd_)
+-
+-    return_code, _ = spawn(submodules_cmd)
+-    if return_code != 0:
+-        sys.exit(return_code)
++        return_code, _ = spawn(submodules_cmd)
++        if return_code != 0:
++            sys.exit(return_code)
+
+
+ if not os.path.exists('micropy_updates/originals/unix'):
+@@ -241,9 +252,10 @@ def update_makefile():
+         code = [
+             'modjni.c \\',
+             '\tmachine_timer.c \\',
+-            '\tmachine_sdl.c \\',
+-            ''
+         ]
++        if not FPLINUX:
++            code.append('\tmachine_sdl.c \\')
++        code.append('')
+         data = data.replace('modjni.c \\\n', '\n'.join(code))
+
+         write_file(MAKEFILE_PATH, data)
+@@ -263,7 +275,6 @@ def update_modmachine():
+
+
+ def update_main():
+-
+     data = read_file(REAL_PORT, MAIN_PATH)
+
+     if 'machine_timer.h' not in data:
+@@ -273,7 +284,7 @@ def update_main():
+         ]
+         data = data.replace('#include "input.h"', '\n'.join(code))
+
+-    if 'machine_sdl.h' not in data:
++    if not FPLINUX and 'machine_sdl.h' not in data:
+         code = [
+             '#include "input.h"',
+             '#include "machine_sdl.h"'
+@@ -286,13 +297,13 @@ def update_main():
+             'machine_timer_deinit_all();\n    #if MICROPY_PY_SYS_ATEXIT'
+         )
+
+-    if 'deinit_sdl()' not in data:
++    if not FPLINUX and 'deinit_sdl()' not in data:
+         data = data.replace(
+             '#if MICROPY_PY_SYS_ATEXIT',
+             'deinit_sdl();\n    #if MICROPY_PY_SYS_ATEXIT'
+         )
+
+-    if 'init_sdl()' not in data:
++    if not FPLINUX and 'init_sdl()' not in data:
+         data = data.replace(
+             'mp_init();',
+             'mp_init();\n    init_sdl();'
+@@ -440,7 +451,8 @@ def compile(*args):  # NOQA
+     update_unix_mphal()
+     copy_micropy_updates(REAL_PORT)
+
+-    build_sdl(sdl_flags)
++    if not FPLINUX:
++        build_sdl(sdl_flags)
+
+     cmd_ = compile_cmd[:]
+     cmd_.extend(list(args))
+--- a/lvgl_micropython/make.py
++++ b/lvgl_micropython/make.py
+@@ -310,6 +310,6 @@ if __name__ == '__main__':
+     else:
+         mod.clean()
+
+-    if not os.path.exists('lib/micropython/mpy_cross/build/mpy-cross'):
++    if not os.path.exists('lib/micropython/mpy-cross/build/mpy-cross'):
+         print('Compiling mpy-cross....')
+         mod.mpy_cross()
+--- a/lvgl_micropython/micropy_updates/unix/machine_timer.c
++++ b/lvgl_micropython/micropy_updates/unix/machine_timer.c
+@@ -46,10 +46,14 @@ static void *timer_poll_thread(void *arg)
+
+     machine_timer_obj_t *timer;
+
+-    while (timer_polling) {
++    for (;;) {
+         usleep(TIMER_POLL_INTERVAL_US);
+
+         pthread_mutex_lock(&timer_lock);
++        if (!timer_polling) {
++            pthread_mutex_unlock(&timer_lock);
++            break;
++        }
+
+         for (uint8_t i=0;i<TIMER_COUNT;i++) {
+             timer = timer_objs[i];
+@@ -77,6 +81,10 @@ static void *timer_poll_thread(void *arg)
+
+ void machine_timer_deinit_all(void)
+ {
++    if (!timer_polling) {
++        return;
++    }
++
+     // Disable, deallocate and remove all timers from list
+     machine_timer_obj_t *timer;
+     pthread_mutex_lock(&timer_lock);
+@@ -88,9 +96,9 @@ void machine_timer_deinit_all(void)
+         }
+     }
+
++    timer_polling = false;
+     pthread_mutex_unlock(&timer_lock);
+
+-    timer_polling = false;
+     pthread_join(timer_poll_thread_id, NULL);
+     pthread_mutex_destroy(&timer_lock);
+
+@@ -140,10 +148,7 @@ static mp_obj_t machine_timer_make_new(const mp_obj_type_t *type, size_t n_args,
+     if (!timer_polling) {
+         pthread_mutex_init(&timer_lock, NULL);
+         timer_polling = true;
+-        pthread_attr_t attr;
+-        pthread_attr_init(&attr);
+-        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+-        pthread_create(&timer_poll_thread_id, &attr, &timer_poll_thread, NULL);
++        pthread_create(&timer_poll_thread_id, NULL, &timer_poll_thread, NULL);
+     }
+
+     int16_t mode = (int16_t)args[ARG_mode].u_int;

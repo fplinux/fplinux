@@ -1,0 +1,119 @@
+--- a/lvgl_micropython/lib/lvgl/src/drivers/display/fb/lv_linux_fbdev.c
++++ b/lvgl_micropython/lib/lvgl/src/drivers/display/fb/lv_linux_fbdev.c
+@@ -68,6 +68,9 @@ typedef struct {
+     long int screensize;
+     int fbfd;
+     bool force_refresh;
++#if !LV_LINUX_FBDEV_BSD
++    bool fplinux_pan;
++#endif
+ } lv_linux_fb_t;
+
+ /**********************
+@@ -178,6 +181,49 @@ void lv_linux_fbdev_set_file(lv_display_t * disp, const char * file)
+         perror("Error reading variable information");
+         return;
+     }
++
++    size_t page_bytes;
++    struct fb_var_screeninfo fplinux_vinfo;
++
++    if(dsc->finfo.type != FB_TYPE_PACKED_PIXELS ||
++       dsc->finfo.visual != FB_VISUAL_TRUECOLOR ||
++       dsc->vinfo.xres == 0U || dsc->vinfo.yres == 0U ||
++       dsc->vinfo.xres_virtual != dsc->vinfo.xres ||
++       dsc->vinfo.xoffset != 0U ||
++       dsc->vinfo.bits_per_pixel != 16U ||
++       dsc->vinfo.red.offset != 11U || dsc->vinfo.red.length != 5U ||
++       dsc->vinfo.red.msb_right != 0U ||
++       dsc->vinfo.green.offset != 5U || dsc->vinfo.green.length != 6U ||
++       dsc->vinfo.green.msb_right != 0U ||
++       dsc->vinfo.blue.offset != 0U || dsc->vinfo.blue.length != 5U ||
++       dsc->vinfo.blue.msb_right != 0U || dsc->vinfo.transp.length != 0U ||
++       dsc->finfo.line_length < dsc->vinfo.xres * sizeof(uint16_t) ||
++       dsc->vinfo.yres > SIZE_MAX / dsc->finfo.line_length) {
++        fprintf(stderr, "Unsupported FPLinux framebuffer mode\n");
++        return;
++    }
++    page_bytes = (size_t)dsc->finfo.line_length * dsc->vinfo.yres;
++    if(dsc->vinfo.yres > UINT32_MAX / 2U ||
++       page_bytes > SIZE_MAX / 2U ||
++       dsc->finfo.ypanstep == 0U ||
++       dsc->finfo.smem_len < page_bytes * 2U ||
++       LV_LINUX_FBDEV_RENDER_MODE != LV_DISPLAY_RENDER_MODE_FULL) {
++        fprintf(stderr, "FPLinux framebuffer requires RGB565 double buffering\n");
++        return;
++    }
++    fplinux_vinfo = dsc->vinfo;
++    fplinux_vinfo.xoffset = 0U;
++    fplinux_vinfo.yoffset = 0U;
++    fplinux_vinfo.yres_virtual = dsc->vinfo.yres * 2U;
++    fplinux_vinfo.activate = FB_ACTIVATE_NOW;
++    if(ioctl(dsc->fbfd, FBIOPUT_VSCREENINFO, &fplinux_vinfo) == -1 ||
++       ioctl(dsc->fbfd, FBIOGET_VSCREENINFO, &dsc->vinfo) == -1 ||
++       dsc->vinfo.xoffset != 0U || dsc->vinfo.yoffset != 0U ||
++       dsc->vinfo.yres_virtual != dsc->vinfo.yres * 2U) {
++        perror("Error enabling FPLinux double buffering");
++        return;
++    }
++    dsc->fplinux_pan = true;
+ #endif /* LV_LINUX_FBDEV_BSD */
+
+     LV_LOG_INFO("%dx%d, %dbpp", dsc->vinfo.xres, dsc->vinfo.yres, dsc->vinfo.bits_per_pixel);
+@@ -354,6 +400,14 @@ static void flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * colo
+         (area->x1 + dsc->vinfo.xoffset) * px_size +
+         (area->y1 + dsc->vinfo.yoffset) * dsc->finfo.line_length;
+
++#if !LV_LINUX_FBDEV_BSD
++    if(dsc->fplinux_pan) {
++        dsc->vinfo.yoffset = dsc->vinfo.yoffset == dsc->vinfo.yres ?
++            0U : dsc->vinfo.yres;
++        fb_pos = area->x1 * px_size +
++            (area->y1 + dsc->vinfo.yoffset) * dsc->finfo.line_length;
++    }
++#endif
+
+     const int32_t w = lv_area_get_width(area);
+     if(LV_LINUX_FBDEV_RENDER_MODE == LV_DISPLAY_RENDER_MODE_DIRECT && rotation == LV_DISPLAY_ROTATION_0) {
+@@ -383,6 +437,16 @@ static void flush_cb(lv_display_t * disp, const lv_area_t * area, uint8_t * colo
+         }
+     }
+
++#if !LV_LINUX_FBDEV_BSD
++    if(dsc->fplinux_pan) {
++        __sync_synchronize();
++        dsc->vinfo.xoffset = 0U;
++        dsc->vinfo.activate = FB_ACTIVATE_NOW;
++        if(ioctl(dsc->fbfd, FBIOPAN_DISPLAY, &dsc->vinfo) == -1)
++            perror("Error publishing FPLinux framebuffer page");
++    }
++#endif
++
+     lv_display_flush_ready(disp);
+ }
+
+--- a/lvgl_micropython/lib/lv_conf.h
++++ b/lvgl_micropython/lib/lv_conf.h
+@@ -1014,10 +1014,18 @@ extern void *mp_lv_roots;
+ /*Driver for /dev/fb*/
+ #define LV_USE_LINUX_FBDEV      MICROPY_FB
+ #if LV_USE_LINUX_FBDEV
+-    #define LV_LINUX_FBDEV_BSD           0
+-    #define LV_LINUX_FBDEV_RENDER_MODE   LV_DISPLAY_RENDER_MODE_PARTIAL
+-    #define LV_LINUX_FBDEV_BUFFER_COUNT  0
+-    #define LV_LINUX_FBDEV_BUFFER_SIZE   60
++    #ifndef LV_LINUX_FBDEV_BSD
++        #define LV_LINUX_FBDEV_BSD           0
++    #endif
++    #ifndef LV_LINUX_FBDEV_RENDER_MODE
++        #define LV_LINUX_FBDEV_RENDER_MODE   LV_DISPLAY_RENDER_MODE_PARTIAL
++    #endif
++    #ifndef LV_LINUX_FBDEV_BUFFER_COUNT
++        #define LV_LINUX_FBDEV_BUFFER_COUNT  0
++    #endif
++    #ifndef LV_LINUX_FBDEV_BUFFER_SIZE
++        #define LV_LINUX_FBDEV_BUFFER_SIZE   60
++    #endif
+ #endif
+
+ /*Use Nuttx to open window and handle touchscreen*/

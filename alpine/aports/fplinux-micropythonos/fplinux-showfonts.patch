@@ -1,0 +1,31 @@
+--- a/internal_filesystem/apps/com.micropythonos.showfonts/showfonts.py
++++ b/internal_filesystem/apps/com.micropythonos.showfonts/showfonts.py
+@@ -86,5 +86 @@ def onResume(self, screen):
+-        text = "😊 ☺️ 🥰 😍" # modern smile, basic smile 263A-FE0F, face with hearts around it, face with heart eyes
+-        text += "👍 👍🏻 / " # neutral thumbs up, light thumbs up
+-        text += "👌 👌🏻 / " # neutral OK symbol which should fall back to similarity group for thumbs up + light OK symbol
+-        text += "🤦 🤦🏻 🤦‍♀️ 🤦🏻‍♀️ / " # neutral facepalm, light facepalm, neutral woman facepalm, light woman facepalm
+-        text += "🏎️ 🌽 🍕 💨 💥 ✊ 🫶 🧡 💜 🐦 🇸🇻 🤷‍♂️" # newly added: racing car, corn, pizza, dash, collision, raised fist, heart hands, orange/purple heart, bird, El Salvador flag, man shrug (-> neutral shrug fallback)
++        text = "Builtin font samples"
+@@ -93 +89 @@ def onResume(self, screen):
+-        emojifont = FontManager.getFont(size=12, emoji=True)
++        emojifont = FontManager.getFont(size=12)
+@@ -100 +96 @@ def onResume(self, screen):
+-        emojifont2 = FontManager.getFont(size=28, emoji=True) # 32 givs height 33 is the maximum because Montserrat 28 is the maximum (TTF can go bigger)
++        emojifont2 = FontManager.getFont(size=28)
+@@ -110 +106 @@ def onResume(self, screen):
+-        self.addAllGlyphs(screen)
++        self.addAllGlyphs(screen, emoji=False)
+@@ -125,12 +121,0 @@ def addAllFontsTitles(self, screen):
+-        import os
+-        ttf_start = self._now_ms()
+-        mydir = os.path.dirname(os.path.abspath(__file__))
+-        self._ttf_font = FontManager.getFont(size=64, ttf=f"M:{mydir}/Rancourt-SmallCaps.ttf", emoji=True)
+-        print("_ttf_font height: ", self._ttf_font.get_line_height())
+-        #self._log_timing("addAllFontsTitles/getFont TTF", ttf_start)
+-        title = lv.label(screen)
+-        add_focus_border(title)
+-        title.set_width(lv.pct(100))
+-        title.set_style_text_font(self._ttf_font, lv.PART.MAIN)
+-        title.set_text(f"Rancourt ttf size height {self._ttf_font.get_line_height()} 👍 😊 ❤️")
+-

@@ -1,0 +1,279 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-micropythonos
+pkgver=0.16.2
+pkgrel=0
+pkgdesc="MicroPythonOS runtime for FPLinux framebuffer phones"
+url="https://github.com/MicroPythonOS/MicroPythonOS"
+arch="armv7"
+license="GPL-2.0-only AND MIT AND OFL-1.1 AND Zlib AND custom"
+makedepends_build="bash clang22 lld22 make patch python3"
+makedepends_host="musl-dev linux-headers gcc"
+options="!check !spdx"
+
+_mpos_commit=e532b885eca1d7f50ef65846824b075f88579774
+_lvgl_micropython_commit=d44ba872ddd2242b297bf3de0d04addedc7c6a54
+_micropython_commit=78ff170de9e32c79db6e64d3e33d2bd60002bdcd
+_micropython_lib_commit=6ae440a8a144233e6e703f6759b7e7a0afaa37a4
+_lvgl_commit=c016f72d4c125098287be5e83c0f1abed4706ee5
+_freezefs_commit=5f211e3ef1f189e271e9614e7a93f784aea243c0
+_pycparser_commit=3cf6bf5eb16f5eadd4a058e41596145c407a79ad
+
+source="
+	MicroPythonOS-$_mpos_commit.tar.gz::https://github.com/MicroPythonOS/MicroPythonOS/archive/$_mpos_commit.tar.gz
+	lvgl_micropython-$_lvgl_micropython_commit.tar.gz::https://github.com/MicroPythonOS/lvgl_micropython/archive/$_lvgl_micropython_commit.tar.gz
+	micropython-$_micropython_commit.tar.gz::https://github.com/micropython/micropython/archive/$_micropython_commit.tar.gz
+	micropython-lib-$_micropython_lib_commit.tar.gz::https://github.com/micropython/micropython-lib/archive/$_micropython_lib_commit.tar.gz
+	lvgl-$_lvgl_commit.tar.gz::https://github.com/lvgl/lvgl/archive/$_lvgl_commit.tar.gz
+	freezeFS-$_freezefs_commit.tar.gz::https://github.com/MicroPythonOS/freezeFS/archive/$_freezefs_commit.tar.gz
+	pycparser-$_pycparser_commit.tar.gz::https://github.com/eliben/pycparser/archive/$_pycparser_commit.tar.gz
+	fplinux-unix-build.patch
+	fplinux-lvgl-fbdev.patch
+	fplinux-freezefs-reproducible.patch
+	fplinux-app-filter.patch
+	fplinux-showfonts.patch
+	fplinux-small-screen-ui.patch
+	fplinux-text-input.patch
+	fplinux-small-screen-layout.py
+	fplinux-verify-app-imports.py
+	fplinux-builtin-apps.list
+	fplinux-select-builtin.py
+	fplinux-select-libraries.py
+	fplinux-packaged-apps.list
+	fplinux-keypad-test.MANIFEST.JSON
+	fplinux-keypad-test.py
+	fplinux-multitap.py
+	fplinux-multitap.c
+	fplinux-multitap.h
+	fplinux_multitap_native.c
+	manifest.py
+	mpconfigvariant.h
+	mpconfigvariant.mk
+	micropythonos
+	COPYING.GPL-2.0
+	LICENSE
+	NOTICE
+	fplinux-micropythonos-launcher.c
+	fplinux-micropythonos-launcher-internal.h
+	fplinux_keypad.c
+	micropython.mk
+	fplinux.py
+	fplinux_storage.py
+"
+builddir="$srcdir/MicroPythonOS-$_mpos_commit"
+
+prepare() {
+	install -d \
+		"$builddir/freezeFS" \
+		"$builddir/lvgl_micropython/lib/lvgl" \
+		"$builddir/lvgl_micropython/lib/micropython" \
+		"$builddir/lvgl_micropython/lib/pycparser"
+	cp -a "$srcdir/freezefs-$_freezefs_commit/." "$builddir/freezeFS/"
+	cp -a "$srcdir/lvgl_micropython-$_lvgl_micropython_commit/." \
+		"$builddir/lvgl_micropython/"
+	cp -a "$srcdir/micropython-$_micropython_commit/." \
+		"$builddir/lvgl_micropython/lib/micropython/"
+	install -d \
+		"$builddir/lvgl_micropython/lib/micropython/lib/micropython-lib"
+	cp -a "$srcdir/micropython-lib-$_micropython_lib_commit/." \
+		"$builddir/lvgl_micropython/lib/micropython/lib/micropython-lib/"
+	cp -a "$srcdir/lvgl-$_lvgl_commit/." \
+		"$builddir/lvgl_micropython/lib/lvgl/"
+	cp -a "$srcdir/pycparser-$_pycparser_commit/." \
+		"$builddir/lvgl_micropython/lib/pycparser/"
+
+	tr -d '\015' < "$builddir/freezeFS/freezefs/archive.py" \
+		> "$builddir/freezeFS/freezefs/archive.py.lf"
+	mv "$builddir/freezeFS/freezefs/archive.py.lf" \
+		"$builddir/freezeFS/freezefs/archive.py"
+	default_prepare
+	install -d \
+		"$builddir/internal_filesystem/apps/org.fplinux.keypadtest"
+	install -m644 "$srcdir/fplinux-keypad-test.MANIFEST.JSON" \
+		"$builddir/internal_filesystem/apps/org.fplinux.keypadtest/MANIFEST.JSON"
+	install -m644 "$srcdir/fplinux-keypad-test.py" \
+		"$builddir/internal_filesystem/apps/org.fplinux.keypadtest/fplinux-keypad-test.py"
+	install -m644 \
+		"$builddir/internal_filesystem/apps/com.micropythonos.texteditor/icon_64x64.png" \
+		"$builddir/internal_filesystem/apps/org.fplinux.keypadtest/icon_64x64.png"
+	python3 "$srcdir/fplinux-select-builtin.py" "$builddir" \
+		"$srcdir/fplinux-builtin-apps.list"
+	mv "$builddir/lvgl_micropython/ext_mod/lcd_bus/micropython.mk" \
+		"$builddir/lvgl_micropython/ext_mod/lcd_bus/micropython.mk.disabled"
+	cp -a "$builddir/lvgl_micropython/lib_lvgl_src_font/." \
+		"$builddir/lvgl_micropython/lib/lvgl/src/font/"
+	rm -f \
+		"$builddir/lvgl_micropython/lib/lvgl/src/font/lv_font_simsun_14_cjk.c" \
+		"$builddir/lvgl_micropython/lib/lvgl/src/font/lv_font_simsun_16_cjk.c"
+	patch --batch --forward -d "$builddir/lvgl_micropython/lib/lvgl" -p1 \
+		-i "$builddir/lvgl_micropython/lib_lvgl_lv_bmp.c.patch"
+	patch --batch --forward -d "$builddir/lvgl_micropython/lib/lvgl" -p1 \
+		-i "$builddir/lvgl_micropython/lib_lvgl_src_libs_tjpgd_fix_scaling.patch"
+	patch --batch --forward -d "$builddir/lvgl_micropython/lib/lvgl" -p1 \
+		-i "$builddir/lvgl_micropython/imgfont_set_range.patch"
+	install -Dm644 "$srcdir/manifest.py" "$builddir/manifests/manifest-fplinux.py"
+	install -Dm644 "$srcdir/mpconfigvariant.h" \
+		"$builddir/lvgl_micropython/lib/micropython/ports/unix/variants/fplinux/mpconfigvariant.h"
+	install -Dm644 "$srcdir/mpconfigvariant.mk" \
+		"$builddir/lvgl_micropython/lib/micropython/ports/unix/variants/fplinux/mpconfigvariant.mk"
+	install -Dm644 "$srcdir/fplinux_keypad.c" \
+		"$builddir/lvgl_micropython/ext_mod/fplinux_keypad/fplinux_keypad.c"
+	install -Dm644 "$srcdir/fplinux-multitap.c" \
+		"$builddir/lvgl_micropython/ext_mod/fplinux_keypad/fplinux-multitap.c"
+	install -Dm644 "$srcdir/fplinux-multitap.h" \
+		"$builddir/lvgl_micropython/ext_mod/fplinux_keypad/fplinux-multitap.h"
+	install -Dm644 "$srcdir/fplinux_multitap_native.c" \
+		"$builddir/lvgl_micropython/ext_mod/fplinux_keypad/fplinux_multitap_native.c"
+	install -Dm644 "$srcdir/micropython.mk" \
+		"$builddir/lvgl_micropython/ext_mod/fplinux_keypad/micropython.mk"
+	install -Dm644 "$srcdir/fplinux.py" \
+		"$builddir/internal_filesystem/lib/mpos/board/fplinux.py"
+	install -Dm644 "$srcdir/fplinux_storage.py" \
+		"$builddir/internal_filesystem/lib/mpos/fplinux_storage.py"
+	install -Dm644 "$srcdir/fplinux-multitap.py" \
+		"$builddir/internal_filesystem/lib/mpos/fplinux_multitap.py"
+	install -Dm644 "$srcdir/fplinux-small-screen-layout.py" \
+		"$builddir/internal_filesystem/lib/mpos/ui/fplinux_small_screen_layout.py"
+	python3 "$srcdir/fplinux-select-libraries.py" "$builddir"
+	python3 "$srcdir/fplinux-verify-app-imports.py" "$builddir" \
+		"$srcdir/fplinux-packaged-apps.list"
+	rm -f \
+		"$builddir/internal_filesystem/apps/com.micropythonos.showfonts/Rancourt-SmallCaps.ttf"
+}
+
+build() {
+	env -u CPPFLAGS -u CFLAGS -u LDFLAGS \
+		make -j"${JOBS:-1}" \
+		-C "$builddir/lvgl_micropython/lib/micropython/mpy-cross" \
+		CC=cc CROSS_COMPILE=
+	install -d "$builddir/.tmp/builtin"
+	"$builddir/scripts/compile_dir.sh" \
+		"$builddir/internal_filesystem/builtin" "$builddir/.tmp/builtin"
+	(
+		cd "$builddir/freezeFS"
+		python3 -m freezefs --target /builtin --on-import mount \
+			"$builddir/.tmp/builtin" freezefs_mount_builtin.py
+	)
+	test -f "$builddir/freezeFS/freezefs_mount_builtin.py"
+	(
+		cd "$builddir/lvgl_micropython"
+		MPOS_FPLINUX=1 \
+		CROSS_COMPILE="$CHOST-" \
+		CC="$CC" \
+		STRIP="$CHOST-strip" \
+		CFLAGS="$CFLAGS" \
+		CPPFLAGS="$CPPFLAGS" \
+		LDFLAGS="$LDFLAGS" \
+		python3 make.py unix \
+			VARIANT=fplinux \
+			--heap-size=4194304 \
+			'LV_CFLAGS=-O2 -g0 -DMICROPY_FB=1 -DLV_LINUX_FBDEV_RENDER_MODE=LV_DISPLAY_RENDER_MODE_FULL -DLV_LINUX_FBDEV_BUFFER_COUNT=1' \
+			"FROZEN_MANIFEST=$builddir/manifests/manifest-fplinux.py"
+	)
+	grep -Fq '#define MODULE_DEF_FPLINUX_MULTITAP_NATIVE {' \
+		"$builddir/lvgl_micropython/lib/micropython/ports/unix/build-fplinux/genhdr/moduledefs.h"
+	"$CC" $CPPFLAGS $CFLAGS -std=c11 -Wall -Wextra -Werror \
+		"$srcdir/fplinux-micropythonos-launcher.c" $LDFLAGS \
+		-o fplinux-micropythonos-launcher
+}
+
+package() {
+	local app
+
+	install -Dm755 "$builddir/lvgl_micropython/build/lvgl_micropy_unix" \
+		"$pkgdir/usr/libexec/fplinux-micropythonos/micropythonos"
+	install -Dm755 fplinux-micropythonos-launcher \
+		"$pkgdir/usr/libexec/fplinux-micropythonos/fplinux-micropythonos-launcher"
+	install -Dm755 "$srcdir/micropythonos" "$pkgdir/usr/bin/micropythonos"
+	install -d -m 0755 \
+		"$pkgdir/var/lib/micropythonos/apps" \
+		"$pkgdir/var/lib/micropythonos/cache" \
+		"$pkgdir/var/lib/micropythonos/data" \
+		"$pkgdir/var/lib/micropythonos/lib" \
+		"$pkgdir/var/lib/micropythonos/prefs"
+
+	while IFS= read -r app || [ -n "$app" ]; do
+		case "$app" in
+			"" | \#*) continue ;;
+			*[!A-Za-z0-9._-]*) return 1 ;;
+		esac
+		test -d "$builddir/internal_filesystem/apps/$app" || return 1
+		install -d "$pkgdir/usr/share/micropythonos/apps/$app"
+		cp -a "$builddir/internal_filesystem/apps/$app/." \
+			"$pkgdir/usr/share/micropythonos/apps/$app/"
+	done < "$srcdir/fplinux-packaged-apps.list"
+
+	install -Dm644 "$builddir/LICENSE" \
+		"$pkgdir/usr/share/licenses/$pkgname/MicroPythonOS-MIT.txt"
+	install -Dm644 "$builddir/lvgl_micropython/LICENSE" \
+		"$pkgdir/usr/share/licenses/$pkgname/lvgl_micropython-MIT.txt"
+	install -Dm644 "$builddir/lvgl_micropython/lib/micropython/LICENSE" \
+		"$pkgdir/usr/share/licenses/$pkgname/MicroPython-MIT.txt"
+	install -Dm644 "$builddir/lvgl_micropython/lib/micropython/lib/micropython-lib/LICENSE" \
+		"$pkgdir/usr/share/licenses/$pkgname/micropython-lib-LICENSE.txt"
+	install -Dm644 "$builddir/lvgl_micropython/lib/lvgl/LICENCE.txt" \
+		"$pkgdir/usr/share/licenses/$pkgname/LVGL-MIT.txt"
+	install -Dm644 "$builddir/freezeFS/LICENSE" \
+		"$pkgdir/usr/share/licenses/$pkgname/freezeFS-MIT.txt"
+	install -Dm644 "$builddir/lvgl_micropython/lib/lvgl/scripts/built_in_font/font_license/Montserrat/OFL.txt" \
+		"$pkgdir/usr/share/licenses/$pkgname/Montserrat-OFL-1.1.txt"
+	install -Dm644 "$builddir/lvgl_micropython/lib/lvgl/scripts/built_in_font/font_license/FontAwesome5/LICENSE.txt" \
+		"$pkgdir/usr/share/licenses/$pkgname/FontAwesome5-OFL-1.1.txt"
+	install -Dm644 "$builddir/lvgl_micropython/lib/lvgl/scripts/built_in_font/font_license/unscii/unscii.html" \
+		"$pkgdir/usr/share/licenses/$pkgname/Unscii-public-domain.html"
+	install -Dm644 "$builddir/lvgl_micropython/lib/lvgl/src/libs/lodepng/LICENSE.txt" \
+		"$pkgdir/usr/share/licenses/$pkgname/LodePNG-Zlib.txt"
+	install -Dm644 "$builddir/lvgl_micropython/lib/lvgl/src/libs/tjpgd/LICENSE.txt" \
+		"$pkgdir/usr/share/licenses/$pkgname/TJpgDec-ChaN.txt"
+	install -Dm644 "$builddir/lvgl_micropython/lib/lvgl/src/libs/qrcode/LICENSE.txt" \
+		"$pkgdir/usr/share/licenses/$pkgname/QRCode-MIT.txt"
+	install -Dm644 "$builddir/lvgl_micropython/lib/lvgl/src/stdlib/builtin/LICENSE_SPRINTF.txt" \
+		"$pkgdir/usr/share/licenses/$pkgname/sprintf-MIT.txt"
+	install -Dm644 "$srcdir/COPYING.GPL-2.0" \
+		"$pkgdir/usr/share/licenses/$pkgname/GPL-2.0-only.txt"
+	install -Dm644 "$srcdir/LICENSE" \
+		"$pkgdir/usr/share/licenses/$pkgname/FPLinux-MIT.txt"
+	install -Dm644 "$srcdir/NOTICE" \
+		"$pkgdir/usr/share/licenses/$pkgname/NOTICE"
+}
+
+sha512sums="
+555793a22400c3eef0a022e548b0885f8c8f34d6cc945b78144426daa0feb14d159dad59836c89796f2c077f0336bd7ccb276de98f693a1da05c9fe7627e760f  MicroPythonOS-e532b885eca1d7f50ef65846824b075f88579774.tar.gz
+00cdab1c00a537005b515f591d779fbf58224902de665ab3466171105a2ad80d9af7fbf940b63b043bd1a9e17be46704d296bb9fad91de6738914e8aae2e9ffc  lvgl_micropython-d44ba872ddd2242b297bf3de0d04addedc7c6a54.tar.gz
+cb5ff7978b32afa4537d5833d3d9ed5f2398ef4f552ca78fe42993c2dca1241eec1f5f9e803a4eb20c22a9a7fabd12e2002b9e683f49d1454f18f44b572b4991  micropython-78ff170de9e32c79db6e64d3e33d2bd60002bdcd.tar.gz
+0c48b3aa7b63eb56ad8f756e9f644f87463f4e5df62f7ed97554ed0b722312d57539ea40e822a435e38d8ec21a8c45ac3bd5208f16fb1ec61bca7cc0dcb42065  micropython-lib-6ae440a8a144233e6e703f6759b7e7a0afaa37a4.tar.gz
+0fe9ceb0591d83fef327ad3a5d5cb639881bd89836af613a3a817bcda4efd3d9d20aec458a3c4dce4fa4bb175552984c10835e5ff6aa860672d69bd44bce58d0  lvgl-c016f72d4c125098287be5e83c0f1abed4706ee5.tar.gz
+d541b1574e4fedcab812f9ebedd8b8a5e29ff071102324400cf608bd996f427690c8873711bc02b5aa5cab0ee3530f331b223c1948f630aed33a1022cfbec036  freezeFS-5f211e3ef1f189e271e9614e7a93f784aea243c0.tar.gz
+924588d0228f4243a2b16baabdb03e24fe77c8316d83dc32d0a466c410ccfad6cb4e1100a6690d3a82486e1cda4b8c8fdf603a8c404e537745354e5d2bc731ee  pycparser-3cf6bf5eb16f5eadd4a058e41596145c407a79ad.tar.gz
+8ce51885848f1ba652ca2ed1a7dcdd5dcbc506f3b55c3bf7abf03a8e8d5f5746cd5b4ecb51c481a3f08cde2c56379a059fdef36c4b35ddc27e2e8607501320c8  fplinux-unix-build.patch
+ecd537089d8d7e6524bb1b0a535744c601489c012fff4e0910982aa136a190219386f99b2f8dd1d17bd61649fc3962606b520f65ba108b18fa7136e77b24a4ec  fplinux-lvgl-fbdev.patch
+19fac6997cd60c66c69a83956e2d2fcd487e27c7fbf42deaf7bc7085843988f0cc6b84d204a30e0bcd02c69d562193ce65032804d33ef964bb984078a2612066  fplinux-freezefs-reproducible.patch
+2c7f1ec5d0a9353717b9e7cf98524efb3c4525c489f7b8e3502d21b0f098f990a94fe921dc3c5454833515dde633fd1c3f840f31b1b056996850ed0b6671ed49  fplinux-app-filter.patch
+81b5e6146a82387e41773e6637e9335ad7d013f4449e22df7531c2ae9b10572d18e11ef890d01c5c9292f6c2db435bf20d0ceed067c3a45fc3034b2592708b3a  fplinux-showfonts.patch
+b8a34c3d018ef1e395289f3774d5efb1eb5ff313b4d001eb2753e2678a7878dd060b3823a624ccacf5d3fe913790891603f1e564ba8d093fd3da70ca1199d844  fplinux-small-screen-ui.patch
+8d2e44f5383b72d1b938a25fa84bc5638c7f42d8cc522d584682f749723e3aafdc3f676d40a13bc15adf3da6d604abe7e7ece70a4c7f1596ec8197130aadb40b  fplinux-text-input.patch
+bd50accc04ccd874e6e2ffd64fbdfdb06870562396adefcf636b4b58760c3b33550ea6c7f07b762d120e3fdc43839178470bd7b710f495d11009ad853b433978  fplinux-small-screen-layout.py
+2434c1ba66def1d0e92abf330547c7e5805354e94cddea7920e92454b625867b3327c13480cae3d1e939199779706acdf0e2e8bc917e19d0c5ae770c5fc68e86  fplinux-verify-app-imports.py
+95c8420f2b2af2317dd4486d0bc704618cf7b3c5d5907f49f529270c0d841c54179c315d4ab9f00ceff4fff754cad8d67ece8cfb271736373d5df93ff9b9318d  fplinux-builtin-apps.list
+f7d9548dc2af958ba92d8706c3da177cb0aa075bb1d565a7923ebc112af2426a985981aeee168d8229be763720cf793dc0698c44846ad1979df673562119ef57  fplinux-select-builtin.py
+0b65ed2685ad8ec32de3e49983357acf686fbd6b9bf3675e8aba9f527918a04cb9c7e84cdcadb02f69fa331909480cf352ec67d5f0a6d22943d63b3a68638110  fplinux-select-libraries.py
+27ce7d0e57ca00acf864fa3903954b24853346397f8f75ac634b614e4171f99ed192b9fd728a0d68df6d150f13a22309c65390dd2178b718b7d3993a71ce27b7  fplinux-packaged-apps.list
+e89e14d86a8ffd92cbb596170eb1b220d2b4ae034c12dd57088ce6ac9fb362c46ca3144482bab7a27de5483e9b49ff02f47164d844b52400c06feeb9a86673b9  fplinux-keypad-test.MANIFEST.JSON
+af657ff18b7ed8635df09d291f025111d11d0edc9d1b478c84bef0c9d3c5852c4eb945d3767e3b5eba0fa108f54ec61692a288b477cda5624b2c35d6b4d5db3b  fplinux-keypad-test.py
+e568c11a2e387081f0de232c080fa92438863f2648d6ff5aa5fd41ce50f3f4c045db9333c3e6c50a8fdd78dce5a35fce929bae617150bfb502e1143c11740cf0  fplinux-multitap.py
+51d3626cc1b3107605d8f07423dc69bea22b008115abcde44314b285af27c1487a9c6c116b35c632adac71694d2fce73aa91bb4285f85faccc4f3482dde57fdc  fplinux-multitap.c
+a74c9221d3184802c885ea24296c7d13a3624d65d77a6c030f13e94898ce707d27b89da76084fa309016b96150676e5c2d00e0fd4f519883a5866efa666f3927  fplinux-multitap.h
+b8612972ef08193360a662ec0e8de696c518d1272be9ff275630ae45cff3ba4dffc0a75472c7bff4e03126b997772a592d8bab26b6d1a52a9135c37999dac4aa  fplinux_multitap_native.c
+8df5c29b85767c3353389e3eae7e973a1374c4821b7849972d79922878c1816b27effb00bcdf3a14bfb0aa553e36197aefecb811ca3001bd7278a5a1867c7d87  manifest.py
+aafc2094f617ee218d8f6e4111b88cc246c983845e2fbc9ae15ccadeb04d9ccb7007c6c393b65572c2703eeb357609d0dd88f8b67c5b90424fcb76e0d998be7f  mpconfigvariant.h
+4d5bb4df7aee96d02f1960e89611fab9ceee3ceaa33fc8c7a95587f8cce90967d72f481b6434df661beb0a65e14629ca95eadd7e59ff40487b5b1228a817293b  mpconfigvariant.mk
+bcaf077480b1bd4ca258f396bbd491c1dc0201cf3f48f1433537b88062e09bf987a73abb0213ebf310f0883c32fc5b65e85ca6003cbbbc5de4ea98ebcb75c278  micropythonos
+260c02ff0a3e04ff0c2a95a936494b6a114a0a22121557059591d44af5fab5644ab8484be61eb33c12a6c9eef2170a108d51e2972adaef942568d94ae0d4ec83  COPYING.GPL-2.0
+655b4f52228a32ce5423a3de8918960883a2c74cb423bdbf23526513d3669bbfa8eb833c164cf9b07fd3bdaf455a7fb5bbba64d7e663fa07aa5ad22345580206  LICENSE
+9302d3e4a8e68ce5cb8be3eec7902a7c07b767ba2ca9edb084e65a703f43ab894a9bb68b4002e52f1a2001725e0c2dd245b592a04b2789fcde0b7ae7b73284fb  NOTICE
+0ef8a4abf377f2c578639a6723387d26469f1e0905925e582216553334a588ff2f43422b18bc1cd31863a6dbef5ce269a9040b598524d210711aab2235175175  fplinux-micropythonos-launcher.c
+e232566b0b197d0cfaee76077a012eab01e9b79c049dad87eec95d8d1a780e2f7fb238176e3507866fdafe6a7dd88cbeb8617f30cfa05bd0511b93d0c1d4e8cb  fplinux-micropythonos-launcher-internal.h
+41788ba72597555234da8b52a7ca508dd07a439b8c62fe10d001c069f4137a27d843db24fd28db07319515cd317e1baa38ed7d6fc2b64ce6699e05742090742b  fplinux_keypad.c
+7263b8be8fab7df16e0d651b8a75eb24b7066e5b32655a92d8848142a6ea1c341235582d4986b2eb9879569f0781e03b8127606edda4fb5e6c880e8e96be5d68  micropython.mk
+b42e4515096714396adec62857c7c187b10ba57c89f1eb4422c7d26da7f4f5e899a4b986823b00fd1f164b79e705c8d5e31c3b1a297189d67271830a1535e92a  fplinux.py
+906c6d30180f01f86b4fe242e0dfd6d9d411efe2ef5701602e4e9117044096674259658586285d4df2d36cd34e045eb93c3f2cfdf7a03d7715a5389c355f5eec  fplinux_storage.py
+"
