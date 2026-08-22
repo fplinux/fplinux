@@ -27,7 +27,7 @@
 	(SC2720_KPLED_CTRL0_LEVEL_MASK | SC2720_KPLED_CTRL0_POWER_DOWN)
 #define TA1618_KPLED_CUTOFF_MS 4900U
 #define TA1618_KEYPAD_NAME "TA-1618 keypad"
-#define TA1618_KEYPAD_PHYS "ta1618/keypad0"
+#define TA1618_KEYPAD_PHYS "fplinux/keypad0"
 
 struct ta1618_kpled {
 	struct device *dev;

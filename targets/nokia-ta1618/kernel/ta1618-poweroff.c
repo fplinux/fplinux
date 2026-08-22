@@ -26,7 +26,7 @@
 #define SC2720_POWER_OFF_WAIT_MS 50U
 #define TA1618_POWER_KEY_HOLD_MS 5000U
 #define TA1618_KEYPAD_NAME "TA-1618 keypad"
-#define TA1618_KEYPAD_PHYS "ta1618/keypad0"
+#define TA1618_KEYPAD_PHYS "fplinux/keypad0"
 
 struct ta1618_power_key {
 	struct input_handle handle;
