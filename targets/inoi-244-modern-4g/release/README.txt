@@ -11,11 +11,15 @@ assets, runner, platform adapter, runtime manifest and bundled top-level
 apks/*.apk files.
 This README, license notices, provenance and build records, checksums and the
 candidate notice are archive metadata outside that phone-qualified payload.
-Feature statements below cover only the paths that were exercised.
+The current source artifact has physical evidence for the inherited-state USB
+profile at High-Speed, including shell, verified data pull and physical
+reconnect. That evidence does not qualify this archive's exact payload. Feature
+statements below cover only the paths that were exercised.
 
 What works on the INOI 244 Modern 4G:
   - local 240x320 terminal and physical keypad;
-  - USB shell and file transfer on interface 0;
+  - High-Speed USB shell, verified data pull and physical reconnect on
+    interface 0;
   - one forwarded host keyboard on interface 1;
   - installable TyrQuake with either input mode;
   - installable MicroPythonOS launcher, navigation and keypad text input.

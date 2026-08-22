@@ -23,20 +23,21 @@ diff --git a/arch/arm/Makefile b/arch/arm/Makefile
 diff --git a/drivers/usb/musb/Kconfig b/drivers/usb/musb/Kconfig
 --- a/drivers/usb/musb/Kconfig
 +++ b/drivers/usb/musb/Kconfig
-@@ -86,6 +86,17 @@ config USB_MUSB_UX500
+@@ -86,6 +86,18 @@ config USB_MUSB_UX500
  	tristate "Ux500 platforms"
  	depends on ARCH_U8500 || COMPILE_TEST
 
 +config USB_MUSB_UMS9117
-+	bool "Unisoc UMS9117 inherited-state RAM handoff"
++	bool "Unisoc UMS9117 MUSB peripheral glue"
 +	depends on ARCH_UMS9117
 +	depends on USB_MUSB_GADGET
 +	help
-+	  PIO-only gadget glue for the MUSB controller left powered by the
-+	  UMS9117 BootROM/FDL RAM-loading path. The glue performs no
-+	  cold-start clock, reset or PHY programming, quiesces the two
-+	  linked-list DMA channels the loader leaves armed, and works
-+	  around a FIFO that returns reliable data only for 32-bit reads.
++	  PIO-only gadget glue for the UMS9117 MUSB controller. Targets with
++	  the inherited-state compatible retain the BootROM/FDL USB handoff;
++	  targets with the cold-owned compatible initialize the controller,
++	  PHY and target USB regulator in Linux. Both profiles quiesce the
++	  loader DMA channels and work around a FIFO that returns reliable
++	  data only for 32-bit reads.
 +
  config USB_MUSB_JZ4740
  	tristate "JZ4740"
