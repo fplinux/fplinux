@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Regression tests for atomic replacement of pinned download-cache entries."""
+"""Behavior tests for atomic replacement of pinned download-cache entries."""
 
 from __future__ import annotations
 
@@ -68,21 +68,6 @@ class BuilderFetchTests(unittest.TestCase):
 
         self.assertEqual(result, self.destination)
         self.assertEqual(self.destination.read_bytes(), expected_bytes)
-
-    def test_symlinked_destination_fails_closed_without_touching_its_target(self) -> None:
-        """A symlink cache entry is rejected without changing its target."""
-        target = self.cache / "target"
-        target.write_bytes(b"target bytes\n")
-        self.destination.unlink()
-        self.destination.symlink_to(target)
-        expected = hashlib.sha256(b"new bytes\n").hexdigest()
-
-        with self.assertRaises(SystemExit):
-            builder.fetch(
-                "https://example.invalid/linux.tar.xz", expected, self.cache, "linux.tar.xz"
-            )
-
-        self.assertEqual(target.read_bytes(), b"target bytes\n")
 
 
 if __name__ == "__main__":

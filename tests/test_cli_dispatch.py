@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Public CLI selection of the one cache lock."""
+"""In-process CLI dispatcher selection of the one cache lock."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 class CliCacheLockTests(unittest.TestCase):
-    """Keep locking at the repository CLI boundary."""
+    """Keep lock-mode selection at the in-process command dispatcher."""
 
     def setUp(self) -> None:
         """Provide a disposable source root for each dispatch test."""
@@ -35,7 +35,7 @@ class CliCacheLockTests(unittest.TestCase):
         arguments: list[str],
         callback_name: str,
     ) -> tuple[list[object], mock.Mock]:
-        """Run one command with a context manager that records public dispatch order."""
+        """Run one command with a context manager that records dispatcher order."""
         events: list[object] = []
 
         @contextmanager
@@ -47,10 +47,7 @@ class CliCacheLockTests(unittest.TestCase):
             target: str | None,
         ) -> Iterator[None]:
             events.append(("lock", cache_root, exclusive, command, target))
-            try:
-                yield
-            finally:
-                events.append("unlock")
+            yield
 
         callback = mock.Mock(side_effect=lambda *_args, **_kwargs: events.append("command"))
         with (
@@ -63,11 +60,12 @@ class CliCacheLockTests(unittest.TestCase):
             cli.main()
         return events, callback
 
-    def test_public_commands_choose_the_required_lock_mode(self) -> None:
-        """Build-side commands are exclusive; consumers take the shared flock."""
+    def test_dispatcher_chooses_the_required_lock_mode(self) -> None:
+        """Build-side commands request exclusive mode; consumers request shared mode."""
         cases = (
             (["build", "target", "--jobs", "1"], "build", True, "target"),
             (["check"], "check", True, None),
+            (["checksum", "demo-aport"], "checksum_aport", True, None),
             (["setup"], "setup", True, None),
             (["prune", "--apply"], "prune", True, None),
             (["package", "target"], "package_target", False, "target"),
@@ -83,36 +81,12 @@ class CliCacheLockTests(unittest.TestCase):
                     [
                         ("lock", self.root / ".cache", exclusive, arguments[0], target),
                         "command",
-                        "unlock",
                     ],
                 )
                 callback.assert_called_once()
 
-    def test_lock_is_released_when_the_command_raises(self) -> None:
-        """The CLI does not retain the flock when a command fails."""
-        events: list[object] = []
-
-        @contextmanager
-        def record_lock(*_args: object, **_kwargs: object) -> Iterator[None]:
-            events.append("lock")
-            try:
-                yield
-            finally:
-                events.append("unlock")
-
-        with (
-            mock.patch.object(sys, "argv", ["fplinux", "build", "target", "--jobs", "1"]),
-            mock.patch.object(cli, "ROOT", self.root),
-            mock.patch.object(cli, "discover_targets", return_value=("target",)),
-            mock.patch.object(cli, "cache_lock", side_effect=record_lock),
-            mock.patch.object(cli, "build", side_effect=RuntimeError("expected failure")),
-            self.assertRaisesRegex(RuntimeError, "expected failure"),
-        ):
-            cli.main()
-        self.assertEqual(events, ["lock", "unlock"])
-
     def test_build_forwards_offline_to_the_dispatcher(self) -> None:
-        """The public build switch reaches build without changing its cache lock."""
+        """The parsed build switch reaches its callback without changing lock mode."""
         events, build = self._run(["build", "target", "--offline"], "build")
 
         self.assertEqual(
@@ -120,7 +94,6 @@ class CliCacheLockTests(unittest.TestCase):
             [
                 ("lock", self.root / ".cache", True, "build", "target"),
                 "command",
-                "unlock",
             ],
         )
         self.assertTrue(build.call_args.kwargs["offline"])

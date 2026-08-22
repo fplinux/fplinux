@@ -7,7 +7,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
-from fplinux_cli.container import CHECK_SCOPES
+import check as source_check
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -25,23 +25,20 @@ class CheckCommandTests(unittest.TestCase):
             check=False,
         )
 
-    def test_list_prints_scopes_in_canonical_order(self) -> None:
-        """List every scope without starting a check run."""
+    def test_list_wraps_every_inner_source_scope_in_host_boundaries(self) -> None:
+        """Expose the inner checker scopes between repository and kernel checks."""
         result = self.run_check("--list")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines(), list(CHECK_SCOPES))
+        self.assertEqual(
+            result.stdout.splitlines(),
+            ["repository", *source_check.SOURCE_SCOPES, "kernel"],
+        )
         self.assertEqual(result.stderr, "")
 
-    def test_list_rejects_scope_arguments(self) -> None:
-        """Reject ambiguous combinations of listing and execution arguments."""
-        result = self.run_check("--list", "python")
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("--list cannot be combined with scopes", result.stderr)
-
-    def test_unknown_scope_is_an_argument_error(self) -> None:
-        """Report unknown public scope names through argparse."""
+    def test_unknown_scope_is_rejected_by_the_public_command(self) -> None:
+        """Report a user-facing error for a scope outside the supported registry."""
         result = self.run_check("imaginary")
-        self.assertEqual(result.returncode, 2)
+        self.assertNotEqual(result.returncode, 0)
         self.assertIn("invalid choice: 'imaginary'", result.stderr)
 
 

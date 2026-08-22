@@ -3,13 +3,15 @@
 
 from __future__ import annotations
 
+import json
+import shutil
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from fplinux_cli import config, container
+from fplinux_cli import config, container, output
 from fplinux_cli.common import ROOT as SOURCE_ROOT
 from fplinux_cli.image_state import ImageState, load_image_state
 
@@ -26,29 +28,13 @@ def _container_lock() -> dict[str, object]:
     }
 
 
-def _write_image_recipe_inputs(root: Path) -> None:
-    """Materialize the exact location-independent image recipe closure."""
-    for relative, contents in {
-        ".containerignore": b".cache\n",
-        "Containerfile": b"ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\n",
-        "package.json": b"{}\n",
-        "package-lock.json": b"{}\n",
-    }.items():
-        (root / relative).write_bytes(contents)
-    for relative in (
-        "scripts/fplinux_cli/checkreceipts.py",
-        "scripts/fplinux_cli/common.py",
-        "scripts/fplinux_cli/config.py",
-        "scripts/fplinux_cli/container.py",
-        "scripts/fplinux_cli/image_state.py",
-        "scripts/fplinux_cli/output.py",
-        "scripts/fplinux_cli/workspace.py",
-    ):
-        source = SOURCE_ROOT / relative
-        destination = root / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(source.read_bytes())
-        destination.chmod(source.stat().st_mode & 0o777)
+def _copy_checkout(root: Path) -> None:
+    """Copy the checkout without maintaining a second recipe-input registry."""
+    shutil.copytree(
+        SOURCE_ROOT,
+        root,
+        ignore=shutil.ignore_patterns(".git", ".cache", "__pycache__"),
+    )
 
 
 class ContainerImageRecipeTests(unittest.TestCase):
@@ -61,10 +47,8 @@ class ContainerImageRecipeTests(unittest.TestCase):
             parent = Path(temporary)
             first = parent / "first"
             second = parent / "second"
-            first.mkdir()
-            second.mkdir()
-            _write_image_recipe_inputs(first)
-            _write_image_recipe_inputs(second)
+            _copy_checkout(first)
+            _copy_checkout(second)
 
             with mock.patch.object(config, "ROOT", first):
                 first_arguments = config.container_image_build_arguments(lock)
@@ -94,7 +78,6 @@ class SetupLifecycleTests(unittest.TestCase):
 
     def test_ready_direct_setup_finishes_its_own_reporter(self) -> None:
         """Publish successful direct-setup run metadata on an image hit."""
-        reporter = mock.Mock()
         lock = {
             "oci": {"image": "localhost/fplinux:locked"},
         }
@@ -102,10 +85,7 @@ class SetupLifecycleTests(unittest.TestCase):
             root = Path(temporary)
             with (
                 mock.patch.object(container, "ROOT", root),
-                mock.patch(
-                    "fplinux_cli.output.RunReporter.create",
-                    return_value=reporter,
-                ) as create,
+                mock.patch.object(output, "ROOT", root),
                 mock.patch.object(container, "require_podman", return_value="podman"),
                 mock.patch.object(
                     container,
@@ -118,7 +98,7 @@ class SetupLifecycleTests(unittest.TestCase):
                     "image_identifier",
                     return_value="sha256:" + "b" * 64,
                 ),
-                mock.patch.object(container, "install_git_hooks") as hooks,
+                mock.patch.object(container, "install_git_hooks"),
             ):
                 state = container.setup(lock=lock)
             self.assertEqual(
@@ -126,10 +106,12 @@ class SetupLifecycleTests(unittest.TestCase):
                 ImageState("a" * 64, "sha256:" + "b" * 64),
             )
             self.assertEqual(load_image_state(root / ".cache", "a" * 64), state)
-        create.assert_called_once_with("setup", target=None, verbose=False)
-        hooks.assert_called_once_with()
-        reporter.finish.assert_called_once_with()
-        reporter.stage.assert_not_called()
+            metadata_paths = list((root / ".cache/logs/setup").glob("*/run.json"))
+            self.assertEqual(len(metadata_paths), 1)
+            self.assertEqual(
+                json.loads(metadata_paths[0].read_text())["status"],
+                "success",
+            )
 
     def test_setup_passes_exact_podman_build_argv_to_stage(self) -> None:
         """Pass production build arguments to the mocked execution stage unchanged."""

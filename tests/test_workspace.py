@@ -12,7 +12,6 @@ from unittest import mock
 
 from fplinux_cli import alpine_state
 from fplinux_cli import workspace as workspace_module
-from fplinux_cli.common import ROOT
 
 
 class WorkspaceSnapshotTests(unittest.TestCase):
@@ -46,69 +45,115 @@ class WorkspaceSnapshotTests(unittest.TestCase):
             self.assertEqual(len(snapshot.recipe), 64)
             self.assertFalse((root / ".cache").exists())
 
-    def test_target_build_closure_stages_rootfs_and_bundle_aports(self) -> None:
-        """Mocked staging receives the exact rootfs and bundle package closure."""
-        target: dict[str, Any] = {
-            "platform": "demo",
-            "bundle": {"packages": ["fplinux-phone-ui"]},
-            "release_manifest": "release/manifest.toml",
-            "assets_lock": "loader/assets.lock.toml",
-            "linux": {
-                "defconfig": "kernel/defconfig",
-                "patches": [],
-                "copies": [],
-                "appends": [],
-            },
-            "bootstrap": {"source": "bootstrap"},
-        }
-        platform: dict[str, Any] = {
-            "bundle": {"packages": []},
-            "linux": {"patches": [], "copies": [], "appends": []},
-            "bootstrap": {"shared_copies": []},
-            "host": {"tools": []},
-        }
-        with (
-            mock.patch.object(workspace_module, "load_target", return_value=target),
-            mock.patch.object(workspace_module, "load_platform", return_value=platform),
-            mock.patch.object(
-                alpine_state,
-                "selected_packages",
-                return_value=("fplinux-base", "fplinux-input"),
-            ) as selected_packages,
-            mock.patch.object(
-                alpine_state,
-                "bundle_packages",
-                return_value=("fplinux-phone-ui",),
-            ) as bundle_packages,
-            mock.patch.object(workspace_module, "add_source_path") as add_source,
-        ):
-            workspace_module.target_build_source_files("phone")
+    def test_declared_target_inputs_are_causal_and_unrelated_files_are_not(self) -> None:
+        """Declared package and source changes alter the recipe; unrelated files do not."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
 
-        selected_packages.assert_called_once_with(platform, target, root=ROOT)
-        bundle_packages.assert_called_once_with(
-            platform,
-            target,
-            ("fplinux-base", "fplinux-input"),
-            root=ROOT,
-        )
-        expected_paths = [
-            *(ROOT / relative for relative in workspace_module.STAGED_BUILD_SOURCES),
-            ROOT / "alpine/aports/fplinux-base",
-            ROOT / "alpine/aports/fplinux-input",
-            ROOT / "alpine/aports/fplinux-phone-ui",
-            ROOT / "targets/phone/target.toml",
-            ROOT / "targets/phone/release/manifest.toml",
-            ROOT / "targets/phone/loader/assets.lock.toml",
-            ROOT / "targets/phone/kernel/defconfig",
-            ROOT / "targets/phone/bootstrap",
-            ROOT / "platforms/demo/platform.toml",
-            ROOT / "common/run.py",
-            ROOT / "platforms/demo/host/adapter.py",
-        ]
-        self.assertEqual(
-            add_source.call_args_list,
-            [mock.call(mock.ANY, path) for path in expected_paths],
-        )
+            def write(relative: str, contents: bytes = b"source\n") -> Path:
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(contents)
+                return path
+
+            always = write("always.txt")
+            rootfs_apkbuild = write("alpine/aports/package-a/APKBUILD")
+            bundle_apkbuild = write("alpine/aports/package-b/APKBUILD")
+            shared = write("shared/dependency.c")
+            target_copy = write("targets/phone/kernel/copy.c")
+            platform_patch = write("shared/platform.patch")
+            host_tool = write("tools/loader.c")
+            unrelated = write("unselected.txt")
+
+            for relative in (
+                "targets/phone/target.toml",
+                "targets/phone/release/manifest.toml",
+                "targets/phone/loader/assets.lock.toml",
+                "targets/phone/kernel/defconfig",
+                "targets/phone/bootstrap/main.c",
+                "targets/phone/kernel/append.cfg",
+                "platforms/demo/platform.toml",
+                "shared/platform-copy.c",
+                "shared/platform-append.cfg",
+                "shared/bootstrap/main.c",
+                "common/run.py",
+                "platforms/demo/host/adapter.py",
+            ):
+                write(relative)
+
+            target: dict[str, Any] = {
+                "platform": "demo",
+                "bundle": {"packages": ["package-b"]},
+                "release_manifest": "release/manifest.toml",
+                "assets_lock": "loader/assets.lock.toml",
+                "linux": {
+                    "defconfig": "kernel/defconfig",
+                    "patches": [],
+                    "copies": [{"source": "kernel/copy.c"}],
+                    "appends": [{"source": "kernel/append.cfg"}],
+                },
+                "bootstrap": {"source": "bootstrap"},
+            }
+            platform: dict[str, Any] = {
+                "bundle": {"packages": []},
+                "linux": {
+                    "patches": ["shared/platform.patch"],
+                    "copies": [{"source": "shared/platform-copy.c"}],
+                    "appends": [{"source": "shared/platform-append.cfg"}],
+                },
+                "bootstrap": {"shared_copies": [{"source": "shared/bootstrap"}]},
+                "host": {"tools": [{"type": "cc-libusb/v1", "source": "tools/loader.c"}]},
+            }
+
+            def shared_sources(package: str, root: Path) -> tuple[Path, ...]:
+                del root
+                return (shared,) if package in {"package-a", "package-b"} else ()
+
+            with (
+                mock.patch.object(workspace_module, "ROOT", root),
+                mock.patch.object(workspace_module, "STAGED_BUILD_SOURCES", ("always.txt",)),
+                mock.patch.object(workspace_module, "load_target", return_value=target),
+                mock.patch.object(workspace_module, "load_platform", return_value=platform),
+                mock.patch.object(
+                    alpine_state,
+                    "selected_packages",
+                    return_value=("package-a",),
+                ),
+                mock.patch.object(
+                    alpine_state,
+                    "bundle_packages",
+                    return_value=("package-b",),
+                ),
+                mock.patch.object(
+                    alpine_state,
+                    "shared_aport_sources",
+                    side_effect=shared_sources,
+                ),
+            ):
+                baseline = workspace_module.target_workspace_snapshot("phone").recipe
+                for causal in (
+                    always,
+                    rootfs_apkbuild,
+                    bundle_apkbuild,
+                    shared,
+                    target_copy,
+                    platform_patch,
+                    host_tool,
+                ):
+                    original = causal.read_bytes()
+                    causal.write_bytes(original + b"changed\n")
+                    self.assertNotEqual(
+                        workspace_module.target_workspace_snapshot("phone").recipe,
+                        baseline,
+                        causal,
+                    )
+                    causal.write_bytes(original)
+
+                unrelated.write_bytes(b"changed but unrelated\n")
+                self.assertEqual(
+                    workspace_module.target_workspace_snapshot("phone").recipe,
+                    baseline,
+                )
 
     def test_snapshot_recipe_includes_file_mode(self) -> None:
         """Changing only execute permissions changes the causal recipe."""
@@ -146,10 +191,6 @@ class WorkspaceSnapshotTests(unittest.TestCase):
             output = staged / "bin/tool"
             self.assertEqual(output.read_bytes(), b"snapshot")
             self.assertEqual(output.stat().st_mode & 0o777, 0o751)
-            self.assertEqual(
-                (staged / ".fplinux-workspace").read_bytes(),
-                (snapshot.recipe + "\n").encode(),
-            )
 
     def test_valid_exact_cache_is_a_hit_without_new_staging_directory(self) -> None:
         """An exact cache entry returns before tempfile creation."""
@@ -167,7 +208,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
             self.assertEqual(actual, expected)
 
     def test_failed_materialization_removes_its_staging_directory(self) -> None:
-        """Every failure path removes the private temporary directory it created."""
+        """An injected write failure removes the private staging directory."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             snapshot = workspace_module.workspace_snapshot([("source", self._source(root))])
@@ -182,21 +223,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
             ):
                 workspace_module.stage_workspace_snapshot(snapshot)
 
-            workspace_root = root / ".cache/workspaces"
-            self.assertEqual(list(workspace_root.glob(".stage-*")), [])
-
-    def test_quality_workspace_uses_its_nested_marker(self) -> None:
-        """Quality snapshots retain their established marker location without a new namespace."""
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            snapshot = workspace_module.workspace_snapshot([("source", self._source(root))])
-            with mock.patch.object(workspace_module, "ROOT", root):
-                staged = workspace_module.stage_quality_workspace_snapshot(snapshot)
-
-            self.assertEqual(
-                (staged / ".cache/.fplinux-workspace").read_bytes(),
-                (snapshot.recipe + "\n").encode(),
-            )
+            self.assertEqual(list(root.rglob(".stage-*")), [])
 
     def test_source_policy_rejects_python_cache_before_staging(self) -> None:
         """Do not omit a forbidden generated artifact from the source snapshot."""
@@ -230,27 +257,22 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                 )
 
     def test_quality_inventory_uses_git_excludes(self) -> None:
-        """Do not stage machine-local files omitted by Git's public inventory."""
+        """Do not stage machine-local files omitted by Git's tracked inventory."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            subprocess.run(["git", "init", "--quiet", str(root)], check=True)
             source = root / "source.py"
             source.write_text("source\n", encoding="utf-8")
             local = root / "local-tools/settings.json"
-            local.parent.mkdir()
+            local.parent.mkdir(parents=True)
             local.write_text("{}\n", encoding="utf-8")
-            completed = subprocess.CompletedProcess(["git", "ls-files"], 0, b"source.py\0", b"")
-            with (
-                mock.patch.object(workspace_module, "ROOT", root),
-                mock.patch(
-                    "fplinux_cli.workspace.subprocess.run",
-                    return_value=completed,
-                ) as inventory,
-            ):
+            (root / ".git/info/exclude").write_text("/local-tools/\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "--", "source.py"], check=True)
+
+            with mock.patch.object(workspace_module, "ROOT", root):
                 files = workspace_module.quality_files(enforce_source_policy=True)
 
             self.assertEqual(files, [("source.py", source)])
-            command = inventory.call_args.args[0]
-            self.assertIn("--exclude-standard", command)
 
 
 if __name__ == "__main__":

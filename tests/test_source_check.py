@@ -36,8 +36,8 @@ class SourceInventoryTests(unittest.TestCase):
             self.assertEqual(posix_shell, [])
             self.assertEqual(bash, [])
 
-    def test_openrc_scripts_are_checked_as_posix_shell(self) -> None:
-        """Include OpenRC init scripts in the public shell-check scope."""
+    def test_openrc_scripts_are_classified_as_posix_shell_sources(self) -> None:
+        """Classify OpenRC init scripts as declared POSIX shell sources."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             initd = root / "service.initd"
@@ -103,11 +103,11 @@ class SourceInventoryTests(unittest.TestCase):
             ):
                 source_check.source_files(enforce_policy=True)
 
-    def test_embedded_package_c_is_formatted_but_not_standalone_analyzed(self) -> None:
-        """Compile package-embedded C only in the upstream package context."""
+    def test_embedded_marker_changes_c_source_classification(self) -> None:
+        """Keep embedded package C out of the standalone-analysis inventory."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            package = root / "alpine/aports/fplinux-console"
+            package = root / "alpine/aports/demo-consumer"
             package.mkdir(parents=True)
             standalone = package / "app.c"
             embedded = package / "backend.c"
@@ -120,110 +120,52 @@ class SourceInventoryTests(unittest.TestCase):
             ):
                 self.assertEqual(
                     source_check.userspace_c_sources(files),
-                    [("alpine/aports/fplinux-console/app.c", False)],
+                    [("alpine/aports/demo-consumer/app.c", False)],
                 )
                 self.assertEqual(
                     source_check.userspace_c_sources(files, include_embedded=True),
                     [
-                        ("alpine/aports/fplinux-console/app.c", False),
-                        ("alpine/aports/fplinux-console/backend.c", False),
+                        ("alpine/aports/demo-consumer/app.c", False),
+                        ("alpine/aports/demo-consumer/backend.c", False),
                     ],
                 )
 
-    def test_alpine_inventory_includes_unselected_aports_and_headers(self) -> None:
-        """Check all present aport recipes and C/H files, not the runtime payload."""
+    def test_package_selection_validation_rejects_an_unresolved_target(self) -> None:
+        """A missing declared aport makes the repository selection gate fail."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            selected = root / "alpine/aports/fplinux-console"
-            unselected = root / "alpine/aports/local-only"
-            selected.mkdir(parents=True)
-            unselected.mkdir()
-            (selected / "APKBUILD").write_text("pkgname=fplinux-console\n")
-            (unselected / "APKBUILD").write_text("pkgname=local-only\n")
-            (unselected / "local-only.c").write_text("int local_only;\n")
-            (unselected / "local-only.h").write_text("#define LOCAL_ONLY 1\n")
-            (unselected / "notes.txt").write_text("not C\n")
+            for package in ("common-runtime", "platform-app", "phone-ui"):
+                aport = root / "alpine/aports" / package
+                aport.mkdir(parents=True)
+                (aport / "APKBUILD").write_text(f"pkgname={package}\n")
+            targets = {
+                "phone-a": {
+                    "platform": "soc",
+                    "bundle": {"packages": ["phone-ui"]},
+                    "rootfs": {"packages": []},
+                },
+                "phone-b": {
+                    "platform": "soc",
+                    "bundle": {"packages": []},
+                    "rootfs": {"packages": ["missing-board-app"]},
+                },
+            }
+            platform = {
+                "rootfs": {"packages": ["platform-app"]},
+                "bundle": {"packages": []},
+            }
             with (
                 mock.patch.object(source_check, "ROOT", root),
-                mock.patch.object(source_check, "discover_targets", return_value=()),
-            ):
-                files = source_check.source_files(enforce_policy=False)
-                self.assertEqual(
-                    source_check.alpine_apkbuilds(files),
-                    [
-                        "alpine/aports/fplinux-console/APKBUILD",
-                        "alpine/aports/local-only/APKBUILD",
-                    ],
-                )
-                self.assertEqual(
-                    source_check.userspace_c_sources(files),
-                    [("alpine/aports/local-only/local-only.c", False)],
-                )
-                self.assertEqual(
-                    source_check.userspace_c_format_sources(files),
-                    [
-                        "alpine/aports/local-only/local-only.c",
-                        "alpine/aports/local-only/local-only.h",
-                    ],
-                )
-
-    def test_package_selection_validation_stops_at_the_first_unresolved_target(self) -> None:
-        """The mocked resolver receives both targets and stops before a second bundle lookup."""
-        targets = {
-            "phone-a": {
-                "platform": "soc",
-                "bundle": {"packages": ["phone-ui"]},
-                "rootfs": {"packages": []},
-            },
-            "phone-b": {
-                "platform": "soc",
-                "bundle": {"packages": []},
-                "rootfs": {"packages": ["board-app"]},
-            },
-        }
-        platform = {
-            "rootfs": {"packages": ["platform-app"]},
-            "bundle": {"packages": []},
-        }
-        with (
-            mock.patch.object(source_check, "discover_targets", return_value=tuple(targets)),
-            mock.patch.object(source_check, "load_target", side_effect=targets.__getitem__),
-            mock.patch.object(source_check, "load_platform", return_value=platform),
-            mock.patch.object(
-                alpine_state,
-                "selected_packages",
-                side_effect=(
-                    ("fplinux-base", "platform-app"),
-                    SystemExit("selected aport is missing: board-app"),
+                mock.patch.object(source_check, "discover_targets", return_value=tuple(targets)),
+                mock.patch.object(source_check, "load_target", side_effect=targets.__getitem__),
+                mock.patch.object(source_check, "load_platform", return_value=platform),
+                mock.patch.object(alpine_state, "COMMON_PACKAGES", ("common-runtime",)),
+                self.assertRaisesRegex(
+                    SystemExit,
+                    "selected aport is missing or invalid: missing-board-app",
                 ),
-            ) as selected,
-            mock.patch.object(
-                alpine_state,
-                "bundle_packages",
-                return_value=("phone-ui",),
-            ) as bundle_packages,
-            self.assertRaisesRegex(SystemExit, "selected aport is missing"),
-        ):
-            source_check.validate_package_selections()
-
-        self.assertEqual(
-            selected.call_args_list,
-            [
-                mock.call(platform, targets["phone-a"], root=source_check.ROOT),
-                mock.call(platform, targets["phone-b"], root=source_check.ROOT),
-            ],
-        )
-        self.assertEqual(
-            bundle_packages.call_args_list,
-            [
-                mock.call(
-                    platform,
-                    targets["phone-a"],
-                    ("fplinux-base", "platform-app"),
-                    root=source_check.ROOT,
-                )
-            ],
-        )
+            ):
+                source_check.validate_package_selections()
 
 
 if __name__ == "__main__":

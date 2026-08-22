@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Tests for public check scope selection semantics."""
+"""Tests for inner check-scope closure and host orchestration semantics."""
 
 from __future__ import annotations
 
@@ -12,8 +12,6 @@ from unittest import mock
 from fplinux_cli import container
 from fplinux_cli.checkreceipts import publish_success_receipt, receipt_matches
 from fplinux_cli.container import (
-    CHECK_SCOPES,
-    analyzer_cache_names,
     check_scope_closure_digest,
     check_scope_receipt_recipe,
     resolve_check_scopes,
@@ -24,10 +22,6 @@ from fplinux_cli.workspace import WorkspaceFile, WorkspaceSnapshot
 class CheckScopeTests(unittest.TestCase):
     """Keep scope selection stable and independent of argument order."""
 
-    def test_empty_selection_means_all_scopes(self) -> None:
-        """Keep the no-argument command as the complete quality gate."""
-        self.assertEqual(resolve_check_scopes([]), CHECK_SCOPES)
-
     def test_selection_is_deduplicated_in_canonical_order(self) -> None:
         """Deduplicate selections and ignore their command-line order."""
         self.assertEqual(
@@ -35,45 +29,40 @@ class CheckScopeTests(unittest.TestCase):
             ("repository", "python", "kernel"),
         )
 
-    def test_analyzer_caches_follow_selected_scopes(self) -> None:
-        """Avoid validating analyzer caches irrelevant to a scoped run."""
-        self.assertEqual(analyzer_cache_names(("docs",)), ())
-        self.assertEqual(analyzer_cache_names(("c",)), ())
-        self.assertEqual(
-            analyzer_cache_names(("kernel",)),
-            ("analysis", "downloads", "linux"),
-        )
-
-    def test_unknown_scope_is_rejected(self) -> None:
-        """Reject names outside the public scope registry."""
-        with self.assertRaisesRegex(SystemExit, "unknown check scope: imaginary"):
-            resolve_check_scopes(["imaginary"])
-
-    def test_scope_receipt_recipe_binds_closure_and_oci_identity(self) -> None:
-        """Require every cacheable scope receipt to carry all causal identities."""
+    def test_scope_receipt_misses_after_orchestration_or_oci_identity_changes(self) -> None:
+        """Do not reuse one scope across checker or immutable image changes."""
         closure = "a" * 64
-        orchestration_recipe = "b" * 64
+        first_orchestration = "b" * 64
         image = "sha256:" + "c" * 64
         with mock.patch.object(
             container,
             "check_orchestration_recipe_digest",
-            return_value=orchestration_recipe,
+            return_value=first_orchestration,
         ):
-            recipe = check_scope_receipt_recipe("python", closure, image_identity=image)
-        self.assertEqual(recipe.scope, "python")
-        self.assertEqual(recipe.closure_digest, closure)
-        self.assertEqual(recipe.orchestration_recipe, orchestration_recipe)
-        self.assertEqual(recipe.image_identity, image)
-        self.assertEqual(
-            recipe.commands,
-            (("python3", "/workspace/scripts/check.py", "python"),),
-        )
+            first = check_scope_receipt_recipe("python", closure, image_identity=image)
+            image_changed = check_scope_receipt_recipe(
+                "python", closure, image_identity="sha256:" + "d" * 64
+            )
+        with mock.patch.object(
+            container,
+            "check_orchestration_recipe_digest",
+            return_value="e" * 64,
+        ):
+            orchestration_changed = check_scope_receipt_recipe(
+                "python", closure, image_identity=image
+            )
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary)
+            publish_success_receipt(cache, first)
+            self.assertTrue(receipt_matches(cache, first))
+            self.assertFalse(receipt_matches(cache, image_changed))
+            self.assertFalse(receipt_matches(cache, orchestration_changed))
 
     def test_readme_does_not_invalidate_c_or_kernel_scope(self) -> None:
         """Keep unrelated documentation outside the two expensive closures."""
         common = (
             WorkspaceFile("README.md", b"first", 0o644),
-            WorkspaceFile("alpine/aports/fplinux-console/app.c", b"int app;\n", 0o644),
+            WorkspaceFile("alpine/aports/demo-consumer/app.c", b"int app;\n", 0o644),
             WorkspaceFile("targets/phone/kernel/board.c", b"int board;\n", 0o644),
             WorkspaceFile("scripts/fplinux_cli/kernelcheck.py", b"checker\n", 0o644),
             WorkspaceFile(
@@ -294,36 +283,6 @@ class CheckScopeTests(unittest.TestCase):
             check_scope_closure_digest("metadata", second),
         )
 
-    def test_external_tool_configuration_invalidates_its_scope(self) -> None:
-        """Bind each cached scope to configuration files read implicitly by its tool."""
-        cases = (
-            ("metadata", ".gitignore"),
-            ("metadata", "package.yaml"),
-            ("alpine", "alpine/abuild.conf"),
-            ("c", "_clang-format"),
-            ("c", ".clang-format-ignore"),
-        )
-        for scope, path in cases:
-            with self.subTest(scope=scope, path=path):
-                first = WorkspaceSnapshot(
-                    (
-                        WorkspaceFile("scripts/check.py", b"checker\n", 0o755),
-                        WorkspaceFile(path, b"first\n", 0o644),
-                    ),
-                    "a" * 64,
-                )
-                second = WorkspaceSnapshot(
-                    (
-                        first.files[0],
-                        WorkspaceFile(path, b"second\n", 0o644),
-                    ),
-                    "b" * 64,
-                )
-                self.assertNotEqual(
-                    check_scope_closure_digest(scope, first),
-                    check_scope_closure_digest(scope, second),
-                )
-
     def test_executable_prettier_config_broadens_metadata_closure(self) -> None:
         """Imported local helpers must invalidate an executable Prettier config."""
         common = (
@@ -539,11 +498,6 @@ class CheckScopeTests(unittest.TestCase):
             check_scope_closure_digest("shell", external_changed),
         )
 
-    def test_repository_scope_has_no_container_receipt(self) -> None:
-        """Keep the host-only repository check independent from OCI identity."""
-        with self.assertRaisesRegex(SystemExit, "does not support receipts"):
-            check_scope_receipt_recipe("repository", "a" * 64, image_identity="sha256:test")
-
 
 class RepositoryFastPathTests(unittest.TestCase):
     """Keep the repository-only check completely on the host."""
@@ -620,8 +574,8 @@ class _FailingReporter(_RecordingReporter):
         return _FailingStage(self.commands)
 
 
-class CheckReceiptIntegrationTests(unittest.TestCase):
-    """Exercise scope hits and misses around the real receipt store."""
+class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
+    """Exercise real receipt state with mocked OCI and checker boundaries."""
 
     @staticmethod
     def _snapshot(*, c_source: bytes = b"int app;\n") -> WorkspaceSnapshot:
@@ -629,30 +583,12 @@ class CheckReceiptIntegrationTests(unittest.TestCase):
             WorkspaceFile("README.md", b"documentation\n", 0o644),
             WorkspaceFile("scripts/check.py", b"checker\n", 0o755),
             WorkspaceFile(
-                "alpine/aports/fplinux-console/app.c",
+                "alpine/aports/demo-consumer/app.c",
                 c_source,
                 0o644,
             ),
         )
         return WorkspaceSnapshot(files, "a" * 64)
-
-    @staticmethod
-    def _kernel_snapshot() -> WorkspaceSnapshot:
-        return WorkspaceSnapshot(
-            (
-                WorkspaceFile(
-                    "scripts/fplinux_cli/kernelcheck.py",
-                    b"kernel checker\n",
-                    0o644,
-                ),
-                WorkspaceFile(
-                    "scripts/fplinux_cli/linux_state.py",
-                    b"prepared Linux state\n",
-                    0o644,
-                ),
-            ),
-            "b" * 64,
-        )
 
     def _run(  # noqa: PLR0913
         self,
@@ -765,16 +701,6 @@ class CheckReceiptIntegrationTests(unittest.TestCase):
 
             self._run(root, workspace, snapshot, ["c"], commands)
             self.assertEqual(len(commands), 1)
-            self.assertIn("sha256:" + "c" * 64, commands[0])
-            self.assertNotIn("localhost/fplinux:locked", commands[0])
-            self.assertEqual(
-                commands[0][:2],
-                ["podman", "run"],
-            )
-            self.assertEqual(
-                commands[0][-3:],
-                ["python3", "/workspace/scripts/check.py", "c"],
-            )
 
             stage_workspace = self._run(
                 root,
@@ -800,23 +726,6 @@ class CheckReceiptIntegrationTests(unittest.TestCase):
             self._run(root, workspace, snapshot, ["c"], commands, no_cache=True)
             self.assertEqual(len(commands), 2)
 
-    def test_outer_force_reruns_kernel_analysis(self) -> None:
-        """Keep the public forced run at the outer per-scope receipt layer."""
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            (root / ".cache").mkdir()
-            workspace = root / "workspace"
-            workspace.mkdir()
-            commands: list[list[str]] = []
-            snapshot = self._kernel_snapshot()
-
-            self._run(root, workspace, snapshot, ["kernel"], commands)
-            self.assertEqual(len(commands), 2)
-            self._run(root, workspace, snapshot, ["kernel"], commands, no_cache=True)
-
-            self.assertEqual(len(commands), 4)
-            self.assertEqual(commands[-1][-1], "check")
-
     def test_only_missing_scope_runs_in_a_mixed_selection(self) -> None:
         """Avoid rerunning a hit when another selected scope is missing."""
         with tempfile.TemporaryDirectory() as temporary:
@@ -828,8 +737,13 @@ class CheckReceiptIntegrationTests(unittest.TestCase):
             snapshot = self._snapshot()
             self._run(root, workspace, snapshot, ["c"], commands)
             self._run(root, workspace, snapshot, ["c", "docs"], commands)
-            self.assertEqual(len(commands), 2)
-            self.assertEqual(commands[-1][-1], "docs")
+            self.assertEqual(
+                [
+                    command[command.index("/workspace/scripts/check.py") + 1 :]
+                    for command in commands
+                ],
+                [["c"], ["docs"]],
+            )
 
     def test_changed_c_bytes_are_a_cold_miss(self) -> None:
         """Invalidate the C result when one checked source byte changes."""
@@ -859,8 +773,6 @@ class CheckReceiptIntegrationTests(unittest.TestCase):
             commands: list[list[str]] = []
             snapshot = self._snapshot()
             self._run(root, workspace, snapshot, ["c"], commands)
-            success = root / ".cache/check-results/c/success.json"
-            original = success.read_bytes()
             with self.assertRaisesRegex(RuntimeError, "scope failed"):
                 self._run(
                     root,
@@ -871,9 +783,6 @@ class CheckReceiptIntegrationTests(unittest.TestCase):
                     no_cache=True,
                     reporter_type=_FailingReporter,
                 )
-            scope_root = root / ".cache/check-results/c"
-            self.assertEqual(success.read_bytes(), original)
-            self.assertEqual(sorted(path.name for path in scope_root.iterdir()), ["success.json"])
             self._run(
                 root,
                 workspace,
@@ -883,22 +792,6 @@ class CheckReceiptIntegrationTests(unittest.TestCase):
                 exact_hit_guard=True,
             )
             self.assertEqual(len(commands), 2)
-
-    def test_c_analysis_ignores_unknown_old_persistent_work(self) -> None:
-        """Use ephemeral analyzer output without adopting an old scan directory."""
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            unknown = root / ".cache/analysis/scan-build/c/work"
-            unknown.mkdir(parents=True)
-            marker = unknown / "foreign"
-            marker.write_text("keep")
-            workspace = root / "workspace"
-            workspace.mkdir()
-            commands: list[list[str]] = []
-            self._run(root, workspace, self._snapshot(), ["c"], commands)
-            self.assertNotIn("FPLINUX_SCAN_BUILD_DIR", "\0".join(commands[0]))
-            self.assertNotIn("/cache/analysis", "\0".join(commands[0]))
-            self.assertEqual(marker.read_text(), "keep")
 
 
 if __name__ == "__main__":

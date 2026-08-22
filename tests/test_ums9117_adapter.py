@@ -120,7 +120,7 @@ class BacklightConfigurationTests(unittest.TestCase):
             ):
                 ADAPTER.adapter_config(adapter_data(backlight_channels=channels))
 
-    def test_backlight_level_above_hardware_range_is_rejected(self) -> None:
+    def test_backlight_level_above_encoded_range_is_rejected(self) -> None:
         """Keep the level within the six-bit libc_server field."""
         with self.assertRaisesRegex(SystemExit, "backlight_level"):
             ADAPTER.adapter_config(adapter_data(backlight_level=0x40))

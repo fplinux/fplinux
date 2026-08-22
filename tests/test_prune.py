@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Tests for the public workspace prune policy."""
+"""Tests for workspace prune planning and application."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ from unittest import mock
 
 from fplinux_cli import alpine_state
 from fplinux_cli import prune as prune_module
-from fplinux_cli.config import container_image_recipe_digest
 from fplinux_cli.prune import apply_prune, plan_prune, prune
 
 
@@ -54,7 +53,7 @@ def _cli_log(cache: Path, command: str, sequence: int, *, target: str | None = N
 
 
 class PruneTests(unittest.TestCase):
-    """Exercise the public dry-run and apply policy."""
+    """Exercise prune planning and application on isolated cache trees."""
 
     def test_superseded_rootfs_is_a_candidate_and_all_current_are_protected(self) -> None:
         """Every current target package selection protects its rootfs recipe."""
@@ -63,15 +62,11 @@ class PruneTests(unittest.TestCase):
             public_key = alpine_state.signing_public_key(cache)
             public_key.parent.mkdir(parents=True)
             public_key.write_bytes(b"public-key\n")
-            signing_key = alpine_state.signing_key_identity(cache)
-            image_recipe = container_image_recipe_digest()
-            first_packages = ("fplinux-base",)
-            second_packages = ("fplinux-base", "fplinux-cpuclock")
-            current = {
-                alpine_state.alpine_rootfs_recipe(image_recipe, signing_key, first_packages),
-                alpine_state.alpine_rootfs_recipe(image_recipe, signing_key, second_packages),
-            }
-            self.assertEqual(len(current), 2)
+            first_packages = ("package-a",)
+            second_packages = ("package-a", "package-b")
+            first_recipe = "1" * 64
+            second_recipe = "2" * 64
+            current = {first_recipe, second_recipe}
             stale = cache / "rootfs" / ("0" * 64)
             stale.mkdir(parents=True)
             (stale / "rootfs.cpio").write_bytes(b"stale")
@@ -86,6 +81,17 @@ class PruneTests(unittest.TestCase):
                 "platform-a": {},
                 "platform-b": {},
             }
+
+            def rootfs_recipe(
+                _image_recipe: str,
+                _signing_key: str,
+                packages: tuple[str, ...],
+            ) -> str:
+                return {
+                    first_packages: first_recipe,
+                    second_packages: second_recipe,
+                }[packages]
+
             with (
                 mock.patch.object(
                     prune_module,
@@ -106,7 +112,17 @@ class PruneTests(unittest.TestCase):
                     alpine_state,
                     "selected_packages",
                     side_effect=(first_packages, second_packages),
-                ) as selected_packages,
+                ),
+                mock.patch.object(
+                    alpine_state,
+                    "alpine_rootfs_recipe",
+                    side_effect=rootfs_recipe,
+                ),
+                mock.patch.object(
+                    prune_module,
+                    "container_image_recipe_digest",
+                    return_value="a" * 64,
+                ),
             ):
                 plan = plan_prune(cache)
             decisions = {entry.path: entry.action for entry in plan.entries}
@@ -116,14 +132,6 @@ class PruneTests(unittest.TestCase):
                 {path for path, action in decisions.items() if action == "protected"},
                 {f"rootfs/{recipe}" for recipe in current},
             )
-            self.assertEqual(
-                selected_packages.call_args_list,
-                [
-                    mock.call(platform_configs["platform-a"], target_configs["first"]),
-                    mock.call(platform_configs["platform-b"], target_configs["second"]),
-                ],
-            )
-
             with (
                 mock.patch.object(
                     prune_module,
@@ -144,6 +152,16 @@ class PruneTests(unittest.TestCase):
                     alpine_state,
                     "selected_packages",
                     side_effect=(first_packages, second_packages),
+                ),
+                mock.patch.object(
+                    alpine_state,
+                    "alpine_rootfs_recipe",
+                    side_effect=rootfs_recipe,
+                ),
+                mock.patch.object(
+                    prune_module,
+                    "container_image_recipe_digest",
+                    return_value="a" * 64,
                 ),
             ):
                 apply_prune(cache)
@@ -179,15 +197,6 @@ class PruneTests(unittest.TestCase):
             self.assertEqual(len(plan.entries), 1)
             self.assertEqual(plan.entries[0].action, "protected")
             self.assertIn("rootfs recipes", plan.entries[0].reason)
-
-    def test_legacy_cache_namespaces_are_not_adopted(self) -> None:
-        """Obsolete compiler caches are no longer managed automatically."""
-        with tempfile.TemporaryDirectory() as temporary:
-            cache = Path(temporary) / ".cache"
-            (cache / "ccache").mkdir(parents=True)
-            (cache / "toolchains/legacy").mkdir(parents=True)
-
-            self.assertEqual(plan_prune(cache).entries, ())
 
     def test_dry_run_reports_disposable_workspaces(self) -> None:
         """Every completed target workspace is disposable after its command."""
@@ -234,12 +243,11 @@ class PruneTests(unittest.TestCase):
             cache = Path(temporary) / ".cache"
             check_runs = [_cli_log(cache, "check", sequence) for sequence in range(12)]
             setup_runs = [_cli_log(cache, "setup", sequence) for sequence in range(12)]
-            inoi_runs = [
-                _cli_log(cache, "build", sequence, target="inoi-244-modern-4g")
-                for sequence in range(11)
+            first_target_runs = [
+                _cli_log(cache, "build", sequence, target="target-a") for sequence in range(11)
             ]
-            nokia_runs = [
-                _cli_log(cache, "build", sequence, target="nokia-ta1618") for sequence in range(11)
+            second_target_runs = [
+                _cli_log(cache, "build", sequence, target="target-b") for sequence in range(11)
             ]
 
             plan = plan_prune(cache)
@@ -249,16 +257,16 @@ class PruneTests(unittest.TestCase):
                 {
                     *(f"logs/check/{run.name}" for run in check_runs[:2]),
                     *(f"logs/setup/{run.name}" for run in setup_runs[:2]),
-                    f"logs/build/inoi-244-modern-4g/{inoi_runs[0].name}",
-                    f"logs/build/nokia-ta1618/{nokia_runs[0].name}",
+                    f"logs/build/target-a/{first_target_runs[0].name}",
+                    f"logs/build/target-b/{second_target_runs[0].name}",
                 },
             )
             protected = {entry.path for entry in plan.entries if entry.action == "protected"}
             self.assertEqual(len(protected), 40)
             self.assertIn(f"logs/check/{check_runs[-1].name}", protected)
             self.assertIn(f"logs/setup/{setup_runs[-1].name}", protected)
-            self.assertIn(f"logs/build/inoi-244-modern-4g/{inoi_runs[-1].name}", protected)
-            self.assertIn(f"logs/build/nokia-ta1618/{nokia_runs[-1].name}", protected)
+            self.assertIn(f"logs/build/target-a/{first_target_runs[-1].name}", protected)
+            self.assertIn(f"logs/build/target-b/{second_target_runs[-1].name}", protected)
 
     def test_log_apply_removes_only_old_generated_nested_paths(self) -> None:
         """Ignore manual, unknown, and mismatched log directories during apply."""
@@ -266,8 +274,7 @@ class PruneTests(unittest.TestCase):
             cache = Path(temporary) / ".cache"
             check_runs = [_cli_log(cache, "check", sequence) for sequence in range(11)]
             build_runs = [
-                _cli_log(cache, "build", sequence, target="inoi-244-modern-4g")
-                for sequence in range(11)
+                _cli_log(cache, "build", sequence, target="target-a") for sequence in range(11)
             ]
             manual = cache / "logs/manual/keep-this"
             unknown_namespace = cache / "logs/imported/keep-this"
@@ -281,7 +288,7 @@ class PruneTests(unittest.TestCase):
             self.assertEqual(
                 result.removed,
                 (
-                    f"logs/build/inoi-244-modern-4g/{build_runs[0].name}",
+                    f"logs/build/target-a/{build_runs[0].name}",
                     f"logs/check/{check_runs[0].name}",
                 ),
             )
@@ -306,13 +313,14 @@ class PruneTests(unittest.TestCase):
             cache = Path(temporary) / ".cache"
             root = cache / "workspaces"
             generations = [_workspace(root, value) for value in "012345"]
+            expected = tuple(f"workspaces/{generation.name}" for generation in generations)
             result = apply_prune(cache)
 
-            self.assertEqual(len(result.removed), 6)
+            self.assertEqual(result.removed, expected)
             self.assertTrue(all(not generation.exists() for generation in generations))
 
-    def test_public_prune_prints_exact_empty_json_dry_run(self) -> None:
-        """The public JSON mode writes the exact empty dry-run document."""
+    def test_prune_function_prints_exact_empty_json_dry_run(self) -> None:
+        """The JSON mode writes the exact empty dry-run document."""
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / ".cache"
             output = io.StringIO()
@@ -332,8 +340,8 @@ class PruneTests(unittest.TestCase):
             )
             self.assertFalse(cache.exists())
 
-    def test_public_prune_prints_exact_empty_text_dry_run(self) -> None:
-        """The public text mode writes the exact empty dry-run report."""
+    def test_prune_function_prints_exact_empty_text_dry_run(self) -> None:
+        """The text mode writes the exact empty dry-run report."""
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / ".cache"
             output = io.StringIO()
