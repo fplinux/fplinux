@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from fplinux_cli import device_state
+from fplinux_cli import device_state, kbuild_state
 
 
 class DeviceStateTests(unittest.TestCase):
@@ -29,6 +29,8 @@ class DeviceStateTests(unittest.TestCase):
             "recipe": "7" * 64,
             "sha256": "8" * 64,
         }
+        self.implementation = Path(self.temporary.name) / "implementation.py"
+        self.implementation.write_text("first\n", encoding="utf-8")
         self.arch = "arm"
         self.dtb = "vendor/demo-device.dtb"
 
@@ -39,6 +41,9 @@ class DeviceStateTests(unittest.TestCase):
             bootstrap_recipe=self.bootstrap_recipe,
             rootfs=self.rootfs,
             rootfs_receipt=self.rootfs_receipt,
+            kbuild_implementation=kbuild_state.implementation_identity(
+                [("scripts/implementation.py", self.implementation)]
+            ),
             arch=self.arch,
             defconfig=self.defconfig,
             dtb=self.dtb,
@@ -110,6 +115,10 @@ class DeviceStateTests(unittest.TestCase):
         self.target = "other-device"
         self.assertNotEqual(before, self._identity())
 
+        self.target = "demo-device"
+        self.implementation.write_text("second\n", encoding="utf-8")
+        self.assertNotEqual(before, self._identity())
+
     def test_invalid_identity_inputs_fail_closed(self) -> None:
         """The helper cannot silently label a kernel from an incomplete closure."""
         with self.assertRaisesRegex(device_state.DeviceStateError, "rootfs identity"):
@@ -119,6 +128,7 @@ class DeviceStateTests(unittest.TestCase):
                 bootstrap_recipe=self.bootstrap_recipe,
                 rootfs={"sha256": "1" * 64},
                 rootfs_receipt=self.rootfs_receipt,
+                kbuild_implementation="9" * 64,
                 arch=self.arch,
                 defconfig=self.defconfig,
                 dtb=self.dtb,
@@ -130,6 +140,7 @@ class DeviceStateTests(unittest.TestCase):
                 bootstrap_recipe=self.bootstrap_recipe,
                 rootfs=self.rootfs,
                 rootfs_receipt=self.rootfs_receipt,
+                kbuild_implementation="9" * 64,
                 arch=self.arch,
                 defconfig=self.defconfig,
                 dtb="../unsafe.dtb",
