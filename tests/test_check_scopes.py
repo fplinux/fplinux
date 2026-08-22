@@ -154,8 +154,8 @@ class CheckScopeTests(unittest.TestCase):
             self.assertTrue(receipt_matches(cache, first_recipe))
             self.assertFalse(receipt_matches(cache, second_recipe))
 
-    def test_alpine_state_change_causes_an_alpine_receipt_miss(self) -> None:
-        """Bind Alpine receipts to the code that validates their package state."""
+    def test_direct_checker_dependency_change_invalidates_every_source_scope(self) -> None:
+        """A module imported by the checker is causal for every source-scope receipt."""
         first = WorkspaceSnapshot(
             (
                 WorkspaceFile("scripts/check.py", b"checker\n", 0o755),
@@ -170,28 +170,26 @@ class CheckScopeTests(unittest.TestCase):
             ),
             "b" * 64,
         )
-        self.assertEqual(
-            check_scope_closure_digest("c", first),
-            check_scope_closure_digest("c", second),
-        )
         image_identity = "sha256:" + "c" * 64
-        first_recipe = check_scope_receipt_recipe(
-            "alpine",
-            check_scope_closure_digest("alpine", first),
-            image_identity=image_identity,
-            orchestration_recipe="d" * 64,
-        )
-        second_recipe = check_scope_receipt_recipe(
-            "alpine",
-            check_scope_closure_digest("alpine", second),
-            image_identity=image_identity,
-            orchestration_recipe="d" * 64,
-        )
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary)
-            publish_success_receipt(cache, first_recipe)
-            self.assertTrue(receipt_matches(cache, first_recipe))
-            self.assertFalse(receipt_matches(cache, second_recipe))
+            for scope in container.SOURCE_CHECK_SCOPES:
+                with self.subTest(scope=scope):
+                    first_recipe = check_scope_receipt_recipe(
+                        scope,
+                        check_scope_closure_digest(scope, first),
+                        image_identity=image_identity,
+                        orchestration_recipe="d" * 64,
+                    )
+                    second_recipe = check_scope_receipt_recipe(
+                        scope,
+                        check_scope_closure_digest(scope, second),
+                        image_identity=image_identity,
+                        orchestration_recipe="d" * 64,
+                    )
+                    publish_success_receipt(cache, first_recipe)
+                    self.assertTrue(receipt_matches(cache, first_recipe))
+                    self.assertFalse(receipt_matches(cache, second_recipe))
 
     def test_kernel_scope_tracks_manifest_sources_without_whole_bootstrap(self) -> None:
         """Track every projected Linux input but ignore bootstrap-only sources."""

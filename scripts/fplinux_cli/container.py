@@ -92,12 +92,12 @@ _CHECK_IMPLEMENTATION = frozenset(
     {
         "scripts/check.py",
         "scripts/fplinux_cli/__init__.py",
+        "scripts/fplinux_cli/alpine_state.py",
         "scripts/fplinux_cli/common.py",
         "scripts/fplinux_cli/config.py",
         "scripts/fplinux_cli/output.py",
     }
 )
-_ALPINE_CHECK_IMPLEMENTATION = "scripts/fplinux_cli/alpine_state.py"
 _KERNEL_IMPLEMENTATION = frozenset(
     {
         "scripts/fplinux_cli/__init__.py",
@@ -457,9 +457,7 @@ def _source_scope_uses_file(  # noqa: PLR0911
     name = path.name
     suffix = path.suffix.lower()
     parts = path.parts
-    if file.path in _CHECK_IMPLEMENTATION or (
-        scope in {"alpine", "c"} and file.path == _ALPINE_CHECK_IMPLEMENTATION
-    ):
+    if file.path in _CHECK_IMPLEMENTATION:
         return True
     if scope in {
         "source",
