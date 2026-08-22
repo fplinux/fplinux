@@ -1,5 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Tests for kernel-check command status handling and Sparse analysis."""
+"""Host tests for kernel-check status handling and command orchestration.
+
+The orchestration tests replace every external analyzer with a command-recording stub.
+They verify generated argv and cleanup behavior; they do not run Clang, checkpatch,
+Kbuild, dtbs_check, Sparse, a cross-compiler, or a kernel build.
+"""
 
 from __future__ import annotations
 
@@ -22,23 +27,27 @@ class KernelCheckTests(unittest.TestCase):
         """Convert a negative subprocess return code before raising."""
         result = subprocess.CompletedProcess(["checkpatch"], -signal.SIGTERM, "", "")
         with (
-            mock.patch.object(kernelcheck, "capture_text", return_value=result),
-            mock.patch.object(kernelcheck, "record_text"),
+            mock.patch.object(kernelcheck, "capture_text", return_value=result) as capture_text,
+            mock.patch.object(kernelcheck, "record_text") as record_text,
             self.assertRaises(SystemExit) as raised,
         ):
             kernelcheck.run_checkpatch(["checkpatch"])
         self.assertEqual(raised.exception.code, 128 + signal.SIGTERM)
+        capture_text.assert_called_once_with(["checkpatch"])
+        record_text.assert_called_once_with(f"checkpatch exited {-signal.SIGTERM}\n")
 
     def test_dtbs_signal_uses_shell_status(self) -> None:
         """Convert a signalled dtbs_check status before propagating it."""
         result = subprocess.CompletedProcess(["dtbs_check"], -signal.SIGKILL, "", "")
         with (
-            mock.patch.object(kernelcheck, "capture_text", return_value=result),
-            mock.patch.object(kernelcheck, "record_text"),
+            mock.patch.object(kernelcheck, "capture_text", return_value=result) as capture_text,
+            mock.patch.object(kernelcheck, "record_text") as record_text,
             self.assertRaises(SystemExit) as raised,
         ):
             kernelcheck.run_dtbs_check(["dtbs_check"], "test-target")
         self.assertEqual(raised.exception.code, 128 + signal.SIGKILL)
+        capture_text.assert_called_once_with(["dtbs_check"])
+        record_text.assert_called_once_with(f"dtbs_check exited {-signal.SIGKILL}: test-target\n")
 
     def test_main_runs_the_check_phase(self) -> None:
         """Dispatch the check phase to the analyzer without an inner cache option."""
@@ -48,15 +57,16 @@ class KernelCheckTests(unittest.TestCase):
             mock.patch(
                 "fplinux_cli.kernelcheck.RunReporter.from_environment",
                 return_value=reporter,
-            ),
+            ) as from_environment,
             mock.patch.object(kernelcheck, "check_contexts") as check_contexts,
         ):
             kernelcheck.main()
+        from_environment.assert_called_once_with("check", "kernel-check")
         check_contexts.assert_called_once_with(reporter)
 
 
-class SparseAnalysisTests(unittest.TestCase):
-    """Exercise the fixed Sparse output on every outer-scope invocation."""
+class KernelAnalyzerOrchestrationWithCommandStubsTests(unittest.TestCase):
+    """Check exact analyzer argv while replacing all external commands with stubs."""
 
     target = "test-target"
 
@@ -152,8 +162,8 @@ class SparseAnalysisTests(unittest.TestCase):
         """Return one path inside this test's fixed Sparse cache directory."""
         return self.cache / "analysis" / "sparse" / self.target / name
 
-    def test_each_invocation_runs_all_analyzers(self) -> None:
-        """Outer scope cache hits are the only permitted analyzer skip."""
+    def test_each_invocation_emits_the_exact_analyzer_command_sequence(self) -> None:
+        """Record all stubbed commands and require the complete ordered argv contract."""
         first = self._run_check()
         stale = self._cache_path("work") / "drivers" / "test-a.o"
         stale.parent.mkdir(parents=True)
@@ -161,20 +171,35 @@ class SparseAnalysisTests(unittest.TestCase):
 
         second = self._run_check()
 
-        self.assertEqual(len(first), 6)
-        self.assertEqual(len(second), len(first))
-        self.assertFalse(stale.exists())
-        self.assertTrue(any(f"O={self._cache_path('work')}" in command for command in second))
-        sparse_command = next(command for command in second if "CHECK=sparse" in command)
-        self.assertEqual(
-            sparse_command,
+        output = self._cache_path("work")
+        kbuild = [
+            "make",
+            "-C",
+            str(self.source),
+            f"O={output}",
+            "ARCH=arm",
+            "CROSS_COMPILE=arm-linux-gnueabihf-",
+        ]
+        expected = [
             [
-                "make",
-                "-C",
-                str(self.source),
-                f"O={self._cache_path('work')}",
-                "ARCH=arm",
-                "CROSS_COMPILE=arm-linux-gnueabihf-",
+                "clang-format",
+                f"--style=file:{self.source / '.clang-format'}",
+                "--dry-run",
+                "--Werror",
+                str(self.projected),
+            ],
+            [
+                str(self.source / "scripts/checkpatch.pl"),
+                f"--root={self.source}",
+                "--terse",
+                "-f",
+                str(self.projected),
+            ],
+            [*kbuild, "olddefconfig", "prepare"],
+            [*kbuild, "savedefconfig"],
+            [*kbuild, "W=1", "dtbs_check"],
+            [
+                *kbuild,
                 "-j1",
                 "W=1e",
                 "C=2",
@@ -183,11 +208,15 @@ class SparseAnalysisTests(unittest.TestCase):
                 "drivers/test-a.o",
                 "drivers/test-b.o",
             ],
-        )
+        ]
+
+        self.assertEqual(first, expected)
+        self.assertEqual(second, expected)
+        self.assertFalse(stale.exists())
         self.assertFalse((self._cache_path("success.json")).exists())
 
-    def test_failure_never_creates_an_inner_success_receipt(self) -> None:
-        """Sparse owns no success receipt, including after a failed run."""
+    def test_stubbed_kconfig_failure_creates_no_inner_success_receipt(self) -> None:
+        """A stubbed command failure cannot leave an analyzer-owned success marker."""
         with self.assertRaises(subprocess.CalledProcessError):
             self._run_check(fail_command="olddefconfig")
 

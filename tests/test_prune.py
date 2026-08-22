@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import io
 import json
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -309,18 +311,40 @@ class PruneTests(unittest.TestCase):
             self.assertEqual(len(result.removed), 6)
             self.assertTrue(all(not generation.exists() for generation in generations))
 
-    def test_json_output_is_machine_readable(self) -> None:
-        """The dry-run JSON contains stable machine-readable summary fields."""
+    def test_public_prune_prints_exact_empty_json_dry_run(self) -> None:
+        """The public JSON mode writes the exact empty dry-run document."""
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / ".cache"
-            rendered = json.loads(plan_prune(cache).as_json())
-            self.assertEqual(rendered["candidate_count"], 0)
+            output = io.StringIO()
+            with redirect_stdout(output):
+                prune(cache=cache, json_output=True)
 
-    def test_public_prune_prints_without_creating_cache(self) -> None:
-        """A dry run against a missing cache remains read-only."""
+            self.assertEqual(
+                output.getvalue(),
+                "{\n"
+                '  "candidate_allocated_bytes": 0,\n'
+                '  "candidate_count": 0,\n'
+                '  "candidate_logical_bytes": 0,\n'
+                '  "entries": [],\n'
+                '  "mode": "dry-run",\n'
+                '  "unsafe": []\n'
+                "}\n",
+            )
+            self.assertFalse(cache.exists())
+
+    def test_public_prune_prints_exact_empty_text_dry_run(self) -> None:
+        """The public text mode writes the exact empty dry-run report."""
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / ".cache"
-            prune(cache=cache)
+            output = io.StringIO()
+            with redirect_stdout(output):
+                prune(cache=cache)
+
+            self.assertEqual(
+                output.getvalue(),
+                "prune: dry-run; no cache changes will be made\n"
+                "summary: 0 candidates; logical=0 B; allocated=0 B\n",
+            )
             self.assertFalse(cache.exists())
 
 

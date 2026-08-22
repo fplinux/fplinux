@@ -100,14 +100,19 @@ class PreparedLinuxTests(unittest.TestCase):
         self.assertEqual((source / "generated").read_text(encoding="utf-8"), "second\n")
         self.assertFalse((source / "untracked").exists())
 
-    def test_current_recipe_is_required_before_a_consumer_uses_the_tree(self) -> None:
-        """Require the current prepared-tree receipt before consumption."""
+    def test_tampered_receipt_is_rejected_before_a_consumer_uses_the_tree(self) -> None:
+        """Reject a prepared tree if its sealed recipe receipt changes."""
         source = self._tree("linux")
         state = self._seal(source, self.recipe_a)
+        (source / linux_state.RECEIPT_NAME).write_text(
+            '{"linux_recipe":"' + self.recipe_b + '"}\n', encoding="utf-8"
+        )
 
-        current = linux_state.require_prepared_linux(source, state)
-
-        self.assertEqual(current, state)
+        self.assertIsNone(linux_state.inspect_prepared_linux(source, self.recipe_a))
+        with self.assertRaisesRegex(
+            linux_state.LinuxStateError, "prepared Linux tree changed after preparation"
+        ):
+            linux_state.require_prepared_linux(source, state)
 
 
 if __name__ == "__main__":
