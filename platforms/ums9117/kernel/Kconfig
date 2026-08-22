@@ -8,8 +8,9 @@ menuconfig ARCH_UMS9117
 	help
 	  Minimal Device Tree support for RAM-booted UMS9117/T117 systems:
 	  a single Cortex-A7 with a GIC-400 behind ARCH_MULTI_V7. The port
-	  inherits the clock, PHY and regulator state left by the BootROM/FDL
-	  download path and performs no cold-start power sequencing. The 1 ms
-	  AP system counter provides the clocksource, the 32 kHz AON timer
-	  the clockevent, and the ARM architected timer stays disabled
-	  because it reads zero on this SoC.
+	  lets most peripheral blocks adopt state left by the BootROM/FDL
+	  download path. The Nokia TA-1618 USB peripheral profile is a narrow
+	  exception: it explicitly reinitializes its controller, PHY and USB
+	  3.3 V supply. The 1 ms AP system counter provides the clocksource,
+	  the 32 kHz AON timer the clockevent, and the ARM architected timer
+	  stays disabled because it reads zero on this SoC.

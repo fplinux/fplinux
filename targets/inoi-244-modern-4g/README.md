@@ -13,15 +13,18 @@
 
 This experimental target provides a local framebuffer terminal, physical keypad,
 USB shell and host-keyboard bridge on an INOI 244 Modern 4G. The session is lost
-when power is removed and does not access internal phone storage.
+when power is removed and does not access internal phone storage. USB remains on
+the inherited-state MUSB peripheral profile; this target does not use Nokia's
+cold-owned controller and PHY initialization.
 
 ## Evidence basis
 
 Supported entries record physical development observations on this exact phone:
-the terminal, keypad, USB interfaces, host-keyboard bridge, TyrQuake, and
-MicroPythonOS installation, launcher navigation, and keypad text input have
-been exercised. These observations are not a release qualification record and
-do not identify a qualified candidate or executable payload.
+the terminal, keypad, High-Speed USB shell, verified data pull, physical USB
+reconnect, host-keyboard bridge, TyrQuake, and MicroPythonOS installation,
+launcher navigation, and keypad text input have been exercised. These
+observations are not a release qualification record and do not identify a
+qualified candidate or executable payload.
 
 ## Hardware support
 
@@ -36,7 +39,7 @@ variant. **Not supported** describes the current target, not the hardware.
 | Local screen                | Present  | Supported     | `240×320` framebuffer console.                                 |
 | Physical keypad             | Present  | Supported     | Local terminal, TyrQuake and MicroPythonOS input.              |
 | Keypad backlight            | Unknown  | Not supported | No FPLinux keypad-backlight control is provided.               |
-| USB shell and file transfer | Present  | Supported     | Interface 0 provides the shell and transfer commands.          |
+| USB shell and file transfer | Present  | Supported     | Interface 0 provides High-Speed shell, transfer and reconnect. |
 | Host keyboard bridge        | N/A      | Supported     | Interface 1 forwards one host evdev keyboard.                  |
 | USB host mode               | Unknown  | Not supported | The target provides USB peripheral mode only.                  |
 | Removable storage           | Unknown  | Not supported | No microSD driver is provided.                                 |

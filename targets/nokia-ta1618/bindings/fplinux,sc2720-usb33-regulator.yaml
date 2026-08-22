@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: GPL-2.0-only
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/regulator/fplinux,sc2720-usb33-regulator.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: SC2720 USB 3.3 V regulator on Nokia TA-1618
+
+maintainers:
+  - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+
+description: |
+  The fitted Nokia TA-1618 USB initialization cycles the SC2720 analog die's
+  USB LDO. The regulator establishes and verifies the 3.3 V selector before
+  enabling the rail through its active-low power-down bit over the shared
+  UMS9117 ADI transport.
+
+allOf:
+  - $ref: regulator.yaml#
+
+properties:
+  compatible:
+    const: fplinux,sc2720-usb33-regulator
+
+  regulator-name:
+    const: sc2720-usb33
+
+  regulator-min-microvolt:
+    const: 3300000
+
+  regulator-max-microvolt:
+    const: 3300000
+
+required:
+  - compatible
+  - regulator-name
+  - regulator-min-microvolt
+  - regulator-max-microvolt
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    vddusb: regulator-usb33 {
+        compatible = "fplinux,sc2720-usb33-regulator";
+        regulator-name = "sc2720-usb33";
+        regulator-min-microvolt = <3300000>;
+        regulator-max-microvolt = <3300000>;
+    };

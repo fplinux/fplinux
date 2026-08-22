@@ -83,12 +83,16 @@ source = "platforms/ums9117/dts/ums9117.dtsi"
 destination = "arch/arm/boot/dts/unisoc/ums9117.dtsi"
 
 [[linux.copies]]
+source = "platforms/ums9117/dts/ums9117-musb-cold.dtsi"
+destination = "arch/arm/boot/dts/unisoc/ums9117-musb-cold.dtsi"
+
+[[linux.copies]]
 source = "platforms/ums9117/bindings/fplinux,ums9117-syscounter.yaml"
 destination = "Documentation/devicetree/bindings/timer/fplinux,ums9117-syscounter.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/fplinux,ums9117-musb-inherited.yaml"
-destination = "Documentation/devicetree/bindings/usb/fplinux,ums9117-musb-inherited.yaml"
+source = "platforms/ums9117/bindings/fplinux,ums9117-musb.yaml"
+destination = "Documentation/devicetree/bindings/usb/fplinux,ums9117-musb.yaml"
 
 [[linux.copies]]
 source = "platforms/ums9117/bindings/fplinux,ums9117-aon-apb.yaml"
