@@ -1,7 +1,8 @@
 # Building FPLinux
 
 FPLinux builds complete phone images from the current source checkout and
-pinned upstream inputs. Generated build data stays outside the source tree.
+pinned upstream inputs. Generated build data is kept under `.cache/`, outside
+tracked source files.
 
 ## Requirements and setup
 
@@ -32,6 +33,9 @@ prepared explicitly:
 In a Git checkout, `setup` also selects the repository's commit-message hook.
 Commits use `type(scope): subject`; the tracked commitlint configuration is the
 source of truth for accepted scopes.
+
+Use `./fplinux setup --force` to rebuild the pinned OCI image even when an image
+for the current recipe is already ready.
 
 ## Check source
 

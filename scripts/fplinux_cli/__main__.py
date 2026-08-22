@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 _EXCLUSIVE_CACHE_COMMANDS = frozenset({"build", "check", "checksum", "setup"})
 _SHARED_CACHE_COMMANDS = frozenset({"console", "package", "run", "verify"})
 _CHECK_SCOPE_METAVAR = "{" + ",".join(CHECK_SCOPES) + "}"
+_PUBLIC_COMMAND_METAVAR = "{doctor,check,setup,build,checksum,package,prune,run,console,verify}"
 
 
 def _check_scope(value: str) -> str:
@@ -139,7 +140,11 @@ def _command_action(
 def main() -> None:
     targets = discover_targets()
     parser = argparse.ArgumentParser(prog="fplinux")
-    commands = parser.add_subparsers(dest="command", required=True)
+    commands = parser.add_subparsers(
+        dest="command",
+        required=True,
+        metavar=_PUBLIC_COMMAND_METAVAR,
+    )
     commands.add_parser("doctor", help="check the rootless build host")
     check_parser = commands.add_parser("check", help="run the source quality gate")
     check_parser.add_argument(
@@ -165,8 +170,12 @@ def main() -> None:
         help="run every selected check even when an exact success receipt exists",
     )
     setup_parser = commands.add_parser("setup", help="build the pinned OCI environment")
-    setup_parser.add_argument("--force", action="store_true")
-    commit_message_parser = commands.add_parser("_commit-msg", help=argparse.SUPPRESS)
+    setup_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="rebuild the pinned image even when the current recipe is ready",
+    )
+    commit_message_parser = commands.add_parser("_commit-msg")
     commit_message_parser.add_argument("message_file")
     build_parser = commands.add_parser("build", help="build a target in .cache/out")
     build_parser.add_argument("target", choices=targets)
