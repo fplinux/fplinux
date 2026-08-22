@@ -11,6 +11,9 @@ assets_lock = "loader/assets.lock.toml"
 [rootfs]
 packages = []
 
+[bundle]
+packages = []
+
 [linux]
 defconfig = "kernel/defconfig"
 dtb = "unisoc/ums9117-inoi-244-modern-4g.dtb"

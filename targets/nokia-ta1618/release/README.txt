@@ -11,7 +11,7 @@ What works on the Nokia 3210 4G (TA-1618):
   - one forwarded host keyboard on interface 1;
   - microSD access when the card is inserted before boot;
   - battery-only power-off;
-  - TyrQuake with either input mode.
+  - installable TyrQuake with either input mode.
 
 Internal phone storage, audio, modem, Bluetooth, Wi-Fi, battery reporting and
 Linux reboot are not supported by this target.
@@ -60,14 +60,27 @@ microSD:
       sync
       umount /mnt/card
 
-TyrQuake 0.71 is included, but game data is not. Put a legally obtained PAK at:
-  /mnt/card/fplinux/quake/id1/pak0.pak
-Then start exactly one mode from the phone shell:
-  quake --input phone
-  quake --input keyboard
+Bundled APKs under ./apks are not installed in the standard root filesystem.
+Install and remove each application in the current RAM session without
+restarting the phone.
 
-The launcher uses temporary runtime storage. TyrQuake settings and saves are
-discarded when it exits; they are not written to microSD.
+TyrQuake 0.71 is fplinux-tyrquake.apk; game data is not included:
+  ./host/fplinux-usb-console --interface 0 --upload \
+    ./apks/fplinux-tyrquake.apk /tmp/fplinux-tyrquake.apk
+  ./host/fplinux-usb-console --interface 0 --exec \
+    'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-tyrquake.apk'
+
+Put a legally obtained PAK at:
+  /mnt/card/fplinux/quake/id1/pak0.pak
+Then start exactly one mode:
+  ./host/fplinux-usb-console --interface 0 --exec 'quake --input phone'
+  ./host/fplinux-usb-console --interface 0 --exec 'quake --input keyboard'
+
+After exiting TyrQuake, remove it with:
+  ./host/fplinux-usb-console --interface 0 --exec 'apk del fplinux-tyrquake'
+
+The TyrQuake launcher uses temporary runtime storage. Its settings and saves
+are discarded when it exits; they are not written to microSD.
 
 Phone mode uses the physical keypad. Hold the phone counter-clockwise with the
 display on the left and keypad on the right:

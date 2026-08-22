@@ -1,12 +1,12 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-base
 pkgver=1
-pkgrel=0
+pkgrel=1
 pkgdesc="Base userspace policy for FPLinux phones"
 url="https://github.com/fplinux/fplinux"
 arch="noarch"
 license="GPL-2.0-only"
-depends="openrc fplinux-console fplinux-input fplinux-tyrquake"
+depends="openrc fplinux-console fplinux-input"
 replaces="alpine-baselayout-data alpine-release"
 replaces_priority=100
 options="!check"

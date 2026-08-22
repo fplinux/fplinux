@@ -58,9 +58,10 @@ RAM load.
 ## Architecture
 
 The repository separates shared Alpine userspace, pre-Linux bootstrap code,
-host tooling, reusable SoC support, and phone-owned board support. A target
-selects those shared components through its manifest; phone-specific addresses,
-panel setup, keymaps, and hardware status remain with that target.
+host tooling, reusable SoC support, and phone-owned board support. Platform and
+target manifests select standard-rootfs packages separately from installable
+APKs published beside the image. Phone-specific addresses, panel setup, keymaps,
+and hardware status remain with the target.
 
 ## Provenance
 

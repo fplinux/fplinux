@@ -86,11 +86,24 @@ The keyboard forwarder uses interface 1 and keeps the selected host keyboard
 away from the host desktop while it runs. See the [console contract](../../docs/porting/CONSOLE.md)
 and [file-transfer guide](../../docs/TRANSFER.md) for shared behavior.
 
-## TyrQuake
+## Installable applications
 
-The image includes TyrQuake 0.71, but not Quake game data. This target has no
-microSD driver, so a RAM-only session can put a legally obtained `pak0.pak` in
-tmpfs:
+### TyrQuake
+
+TyrQuake 0.71 is provided as `fplinux-tyrquake.apk` under `apks/` in the
+`output:` directory printed by `./fplinux build`; it is not installed in the
+standard root filesystem. Set `bundle` to that printed directory, then install
+it in the current RAM session:
+
+```sh
+./fplinux console inoi-244-modern-4g --upload \
+  "$bundle/apks/fplinux-tyrquake.apk" /tmp/fplinux-tyrquake.apk
+./fplinux console inoi-244-modern-4g --exec \
+  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-tyrquake.apk'
+```
+
+This target has no microSD driver, so a RAM-only session can put a legally
+obtained `pak0.pak` in tmpfs:
 
 ```sh
 ./fplinux console inoi-244-modern-4g \
@@ -103,7 +116,12 @@ tmpfs:
 
 `--input phone` uses the physical keypad; `--input keyboard` uses the forwarded
 host keyboard. The phone has 64 MiB of RAM and the game reserves 32 MiB; keeping
-a full PAK in tmpfs leaves little memory and there is no swap.
+a full PAK in tmpfs leaves little memory and there is no swap. After exiting the
+game, remove it without restarting the phone:
+
+```sh
+./fplinux console inoi-244-modern-4g --exec 'apk del fplinux-tyrquake'
+```
 
 ## End the RAM session
 

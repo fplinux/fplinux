@@ -88,16 +88,32 @@ The keyboard forwarder uses interface 1 and keeps the selected host keyboard
 away from the host desktop while it runs. See the [console contract](../../docs/porting/CONSOLE.md)
 and [file-transfer guide](../../docs/TRANSFER.md) for shared behavior.
 
-## TyrQuake
+## Installable applications
 
-The image includes TyrQuake 0.71, but not Quake game data. Insert a microSD card
-before boot and put a legally obtained PAK at:
+The `output:` directory printed by `./fplinux build` contains bundled APKs under
+`apks/`. They are not installed in the standard root filesystem. Set `bundle`
+to that printed directory; every application uses the same upload, `apk add`,
+launch, and `apk del` workflow in the current RAM session.
+
+### TyrQuake
+
+TyrQuake 0.71 is `fplinux-tyrquake.apk`; Quake game data is not included.
+Install it without restarting the phone:
+
+```sh
+./fplinux console nokia-ta1618 --upload \
+  "$bundle/apks/fplinux-tyrquake.apk" /tmp/fplinux-tyrquake.apk
+./fplinux console nokia-ta1618 --exec \
+  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-tyrquake.apk'
+```
+
+Insert a microSD card before boot and put a legally obtained PAK at:
 
 ```text
 /mnt/card/fplinux/quake/id1/pak0.pak
 ```
 
-From the phone shell, start exactly one input mode:
+Start exactly one input mode:
 
 ```sh
 quake --input phone
@@ -124,7 +140,12 @@ keypad on the right:
 | `#`                    | Available for a bind | Available for a custom bind |
 
 The launcher uses temporary runtime storage. TyrQuake settings and saves are
-discarded when it exits; they are not written to microSD.
+discarded when it exits; they are not written to microSD. After exiting the
+game, remove it without restarting the phone:
+
+```sh
+./fplinux console nokia-ta1618 --exec 'apk del fplinux-tyrquake'
+```
 
 ## microSD card
 

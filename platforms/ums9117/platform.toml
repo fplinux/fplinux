@@ -5,6 +5,9 @@ name = "ums9117"
 [rootfs]
 packages = ["fplinux-cpuclock"]
 
+[bundle]
+packages = ["fplinux-tyrquake"]
+
 [linux]
 source_lock = "linux"
 arch = "arm"

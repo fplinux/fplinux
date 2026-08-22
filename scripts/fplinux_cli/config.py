@@ -147,6 +147,7 @@ def load_target(target: str) -> dict[str, Any]:
             "release_manifest",
             "assets_lock",
             "rootfs",
+            "bundle",
             "linux",
             "bootstrap",
             "runtime",
@@ -166,9 +167,10 @@ def load_target(target: str) -> dict[str, Any]:
             fail(f"target {target} has invalid {key}: {path}")
     for key in ("release_manifest", "assets_lock"):
         relative_value(config.get(key), f"target {target} {key}")
-
     rootfs = exact_table(config.get("rootfs"), {"packages"}, "target rootfs")
     package_array(rootfs.get("packages"), "target rootfs packages")
+    bundle = exact_table(config.get("bundle"), {"packages"}, "target bundle")
+    package_array(bundle.get("packages"), "target bundle packages")
 
     linux = exact_table(
         config.get("linux"),
@@ -343,7 +345,7 @@ def load_platform(platform: str) -> dict[str, Any]:
         raw = tomllib.load(stream)
     config = exact_table(
         raw,
-        {"schema", "name", "rootfs", "linux", "bootstrap", "host", "runner"},
+        {"schema", "name", "rootfs", "bundle", "linux", "bootstrap", "host", "runner"},
         f"platform {platform}",
     )
     if config.get("schema") != PLATFORM_SCHEMA:
@@ -353,6 +355,8 @@ def load_platform(platform: str) -> dict[str, Any]:
 
     rootfs = exact_table(config.get("rootfs"), {"packages"}, "platform rootfs")
     package_array(rootfs.get("packages"), "platform rootfs packages")
+    bundle = exact_table(config.get("bundle"), {"packages"}, "platform bundle")
+    package_array(bundle.get("packages"), "platform bundle packages")
 
     linux = exact_table(
         config.get("linux"),

@@ -9,7 +9,7 @@ What works on the INOI 240 Modern 4G:
   - local 128x160 terminal and physical keypad;
   - USB shell and file transfer on interface 0;
   - one forwarded host keyboard on interface 1;
-  - TyrQuake with either input mode.
+  - installable TyrQuake with either input mode.
 
 microSD, internal phone storage, audio, modem, Bluetooth, Wi-Fi and Linux
 power-off are not supported by this target.
@@ -47,8 +47,14 @@ Use after boot:
     GNU timeout sends SIGTERM and the client releases the keyboard; keys on the
     grabbed keyboard do not stop the host process.
 
-TyrQuake 0.71 is included, but game data is not. This phone has no microSD
-driver, so use tmpfs for a legally obtained pak0.pak:
+TyrQuake 0.71 is provided as ./apks/fplinux-tyrquake.apk and is not installed
+in the standard root filesystem. Install it in the current RAM session:
+  ./host/fplinux-usb-console --interface 0 --upload \
+    ./apks/fplinux-tyrquake.apk /tmp/fplinux-tyrquake.apk
+  ./host/fplinux-usb-console --interface 0 --exec \
+    'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-tyrquake.apk'
+
+This phone has no microSD driver, so use tmpfs for a legally obtained pak0.pak:
   ./host/fplinux-usb-console --interface 0 --exec \
     'mkdir -p /mnt/card && mount -t tmpfs none /mnt/card && mkdir -p /mnt/card/fplinux/quake/id1'
   ./host/fplinux-usb-console --interface 0 --upload \
@@ -57,7 +63,8 @@ driver, so use tmpfs for a legally obtained pak0.pak:
   ./host/fplinux-usb-console --interface 0 --exec 'quake --input keyboard'
 
 The phone has 64 MiB of RAM and the game reserves 32 MiB. A full PAK in tmpfs
-leaves little memory; there is no swap.
+leaves little memory; there is no swap. After exiting TyrQuake, remove it with:
+  ./host/fplinux-usb-console --interface 0 --exec 'apk del fplinux-tyrquake'
 
 To end the RAM-only session, disconnect USB, remove and reinsert the battery,
 then boot the phone normally.

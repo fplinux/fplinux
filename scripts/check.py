@@ -196,7 +196,8 @@ def validate_package_selections() -> None:
     for target in discover_targets():
         target_config = load_target(target)
         platform = load_platform(target_config["platform"])
-        alpine_state.selected_packages(platform, target_config, root=ROOT)
+        rootfs_packages = alpine_state.selected_packages(platform, target_config, root=ROOT)
+        alpine_state.bundle_packages(platform, target_config, rootfs_packages, root=ROOT)
 
 
 def package_c_is_embedded(path: Path) -> bool:

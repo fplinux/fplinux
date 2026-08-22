@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import fcntl
+import json
 import os
 import pwd
 import shlex
@@ -190,6 +191,128 @@ def _cached_package_files(repository: Path, names: set[str]) -> list[Path] | Non
     return packages
 
 
+def _apk_package_name(path: Path) -> str:
+    """Read the exact package identity carried by one Alpine APK."""
+    try:
+        with tarfile.open(require_file(path), "r:*") as archive:
+            metadata = archive.extractfile(".PKGINFO")
+            if metadata is None:
+                fail(f"Alpine package has no .PKGINFO: {path}")
+            lines = metadata.read().decode("utf-8").splitlines()
+    except (OSError, UnicodeDecodeError, tarfile.TarError) as error:
+        fail(f"cannot read Alpine package metadata: {path}: {error}")
+    names = [line.removeprefix("pkgname = ") for line in lines if line.startswith("pkgname = ")]
+    if len(names) != 1 or alpine_state.PACKAGE_ID.fullmatch(names[0]) is None:
+        fail(f"Alpine package has an invalid pkgname: {path}")
+    return names[0]
+
+
+def _package_receipt_data(
+    repository: Path, recipe: str, package_files: list[Path]
+) -> dict[str, object]:
+    """Describe the exact signed APK outputs in one aport cache slot."""
+    packages: dict[str, dict[str, int | str]] = {}
+    for path in sorted(package_files):
+        package = _apk_package_name(path)
+        if package in packages:
+            fail(f"aport produced duplicate package identity: {package}")
+        packages[package] = {
+            "path": path.relative_to(repository).as_posix(),
+            "sha256": sha256_file(path),
+            "size": path.stat().st_size,
+        }
+    if not packages:
+        fail("aport produced no APK packages")
+    return {"recipe": _require_sha256(recipe, "Alpine package recipe"), "packages": packages}
+
+
+def _write_package_receipt(repository: Path, recipe: str, package_files: list[Path]) -> None:
+    """Publish a package success receipt only after every APK is in its cache slot."""
+    receipt = repository / alpine_state.PACKAGE_RECEIPT_NAME
+    encoded = (
+        json.dumps(_package_receipt_data(repository, recipe, package_files), sort_keys=True) + "\n"
+    ).encode()
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb", dir=repository, prefix=f".{receipt.name}.", delete=False
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(encoded)
+        temporary.replace(receipt)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def _cached_package_record(
+    repository: Path, package: object, record: object
+) -> tuple[str, Path] | None:
+    """Validate one package entry from a current cache receipt."""
+    if (
+        not isinstance(package, str)
+        or alpine_state.PACKAGE_ID.fullmatch(package) is None
+        or not isinstance(record, dict)
+        or set(record) != {"path", "sha256", "size"}
+    ):
+        return None
+    relative = record.get("path")
+    if not isinstance(relative, str):
+        return None
+    path = PurePosixPath(relative)
+    output = repository / relative
+    digest = record.get("sha256")
+    size = record.get("size")
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or path.as_posix() != relative
+        or output.is_symlink()
+        or not output.is_file()
+        or output.suffix != ".apk"
+        or not isinstance(size, int)
+        or isinstance(size, bool)
+        or size < 0
+        or output.stat().st_size != size
+        or not isinstance(digest, str)
+        or sha256_file(output) != digest
+        or _apk_package_name(output) != package
+    ):
+        return None
+    return package, output
+
+
+def _cached_aport_packages(
+    name: str, image_recipe: str, signing_key_identity: str
+) -> dict[str, Path] | None:
+    """Return exact current APK outputs without invoking the cross-build sysroot."""
+    recipe = alpine_state.alpine_package_recipe(name, image_recipe, signing_key_identity)
+    repository = CACHE / alpine_state.PACKAGE_CACHE_DIRECTORY / name
+    try:
+        raw = json.loads(
+            (repository / alpine_state.PACKAGE_RECEIPT_NAME).read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(raw, dict) or set(raw) != {"recipe", "packages"}:
+        return None
+    packages = raw.get("packages")
+    if raw.get("recipe") != recipe or not isinstance(packages, dict) or name not in packages:
+        return None
+    result: dict[str, Path] = {}
+    try:
+        for package, record in packages.items():
+            cached = _cached_package_record(repository, package, record)
+            if cached is None:
+                return None
+            cached_package, output = cached
+            result[cached_package] = output
+    except SystemExit:
+        return None
+    return result
+
+
 def _builder_output(command: list[str], *, cwd: Path, environment: dict[str, str]) -> str:
     result = subprocess.run(
         _builder_command(command, environment),
@@ -275,14 +398,14 @@ def _build_fplinux_apks(
     jobs: int,
     private_key: Path,
     public_key: Path,
-    selected_packages: tuple[str, ...],
-) -> tuple[list[Path], Path, Path]:
+    build_packages: tuple[str, ...],
+) -> tuple[dict[str, Path], Path, Path]:
     if os.geteuid() != 0:
         fail("Alpine package builds require container root; rebuild the current build image")
     aports = work / "aports"
     home = work / "home"
     aports.mkdir()
-    for name in selected_packages:
+    for name in build_packages:
         shutil.copytree(ROOT / "alpine/aports" / name, aports / name)
     home.mkdir()
     _chown_tree(aports, "builder")
@@ -318,11 +441,11 @@ def _build_fplinux_apks(
         "JOBS": str(jobs),
         "MAKEFLAGS": f"-j{jobs}",
     }
-    expected_packages: set[str] = set()
-    package_files: list[Path] = []
+    expected_filenames: set[str] = set()
+    package_outputs: dict[str, Path] = {}
     image_recipe = os.environ.get("FPLINUX_CONTAINER_IMAGE_RECIPE", "")
     signing_key_identity = sha256_file(public_key)
-    for name in selected_packages:
+    for name in build_packages:
         directory = aports / name
         recipe = alpine_state.alpine_package_recipe(name, image_recipe, signing_key_identity)
         repository = CACHE / alpine_state.PACKAGE_CACHE_DIRECTORY / name
@@ -342,20 +465,17 @@ def _build_fplinux_apks(
             Path(package).name != package or not package.endswith(".apk") for package in listed
         ):
             fail(f"abuild listpkg returned invalid package names for {name}")
-        duplicate = expected_packages & listed
+        duplicate = expected_filenames & listed
         if duplicate:
             fail(f"abuild package names are duplicated: {', '.join(sorted(duplicate))}")
-        expected_packages.update(listed)
-        marker = repository / alpine_state.PACKAGE_RECIPE_NAME
-        cached = None
-        try:
-            if marker.read_text(encoding="utf-8").strip() == recipe:
-                cached = _cached_package_files(repository, listed)
-        except OSError:
-            pass
-        if cached is not None:
+        expected_filenames.update(listed)
+        cached = _cached_aport_packages(name, image_recipe, signing_key_identity)
+        if cached is not None and {path.name for path in cached.values()} == listed:
             _log_message(f"Alpine package cache hit: {name} {recipe[:16]}")
-            package_files.extend(cached)
+            overlap = set(package_outputs) & set(cached)
+            if overlap:
+                fail(f"abuild package identities are duplicated: {', '.join(sorted(overlap))}")
+            package_outputs.update(cached)
             continue
 
         build_repository = work / "packages" / name
@@ -369,13 +489,19 @@ def _build_fplinux_apks(
         if repository.exists():
             shutil.rmtree(repository)
         shutil.copytree(build_repository, repository)
-        marker.write_text(recipe + "\n", encoding="utf-8")
-        cached = _cached_package_files(repository, listed)
-        if cached is None:
+        cached_files = _cached_package_files(repository, listed)
+        if cached_files is None:
             fail(f"cached abuild output differs from listpkg for {name}")
-        package_files.extend(cached)
+        _write_package_receipt(repository, recipe, cached_files)
+        outputs = _cached_aport_packages(name, image_recipe, signing_key_identity)
+        if outputs is None or {path.name for path in outputs.values()} != listed:
+            fail(f"cached abuild receipt differs from listpkg for {name}")
+        overlap = set(package_outputs) & set(outputs)
+        if overlap:
+            fail(f"abuild package identities are duplicated: {', '.join(sorted(overlap))}")
+        package_outputs.update(outputs)
 
-    return sorted(package_files), local_private_key, local_public_key
+    return package_outputs, local_private_key, local_public_key
 
 
 def _build_alpine_composition_repository(
@@ -456,7 +582,27 @@ def _require_apk_owner(root: Path, path: str, package: str) -> None:
         fail(f"unexpected Alpine package owner for {path}: {detail}")
 
 
-def _verify_alpine_rootfs(root: Path, packages: tuple[str, ...]) -> None:
+def _require_bundle_package_absent(root: Path, package: str) -> None:
+    result = subprocess.run(
+        ["apk", "--root", str(root), "--no-network", "info", "--exists", package],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_build_environment(),
+    )
+    if result.returncode == 1:
+        return
+    if result.returncode == 0:
+        fail(f"bundle Alpine package was installed in the standard rootfs: {package}")
+    detail = result.stderr.strip() or result.stdout.strip() or "no APK diagnostic"
+    fail(f"cannot verify that bundle Alpine package is absent: {package}: {detail}")
+
+
+def _verify_alpine_rootfs(
+    root: Path,
+    packages: tuple[str, ...],
+    bundle_packages: tuple[str, ...] = (),
+) -> None:
     init = root / "init"
     if not init.is_symlink() or init.readlink() != Path("/sbin/init"):
         fail("Alpine rootfs /init must point to /sbin/init")
@@ -470,11 +616,12 @@ def _verify_alpine_rootfs(root: Path, packages: tuple[str, ...]) -> None:
         "/etc/init.d/fplinux-input": "fplinux-input-openrc",
         "/usr/bin/fplinux-console": "fplinux-console",
         "/usr/bin/fplinux-input": "fplinux-input",
-        "/usr/bin/quake": "fplinux-tyrquake",
-        "/usr/bin/tyr-quake": "fplinux-tyrquake",
     }
     if "fplinux-cpuclock" in packages:
         owners["/usr/bin/fplinux-cpuclock"] = "fplinux-cpuclock"
+    if "fplinux-tyrquake" in packages:
+        owners["/usr/bin/quake"] = "fplinux-tyrquake"
+        owners["/usr/bin/tyr-quake"] = "fplinux-tyrquake"
     for path, package in owners.items():
         require_file(root / path.removeprefix("/"))
         _require_apk_owner(root, path, package)
@@ -494,6 +641,8 @@ def _verify_alpine_rootfs(root: Path, packages: tuple[str, ...]) -> None:
     selected_world = {entry for entry in world if entry.startswith("fplinux-")}
     if selected_world != set(packages):
         fail("Alpine world does not contain the exact selected FPLinux package set")
+    for package in bundle_packages:
+        _require_bundle_package_absent(root, package)
 
     inittab = require_file(root / "etc/inittab").read_text(encoding="utf-8")
     if "ttyGS" in inittab or "getty" in inittab:
@@ -551,20 +700,44 @@ def _rootfs_install_command(
     ]
 
 
-def build_rootfs(jobs: int, packages: tuple[str, ...]) -> tuple[Path, Path, str]:
-    """Build or exactly reuse one selected content-addressed Alpine rootfs."""
+def build_rootfs(
+    jobs: int,
+    packages: tuple[str, ...],
+    bundle_packages: tuple[str, ...] = (),
+) -> tuple[Path, Path, str, dict[str, Path]]:
+    """Build the standard rootfs and any APKs published in its bundle."""
     image_recipe = os.environ.get("FPLINUX_CONTAINER_IMAGE_RECIPE", "")
     signing_private_key, signing_public_key, signing_key_identity = _ensure_apk_signing_key()
     recipe = alpine_state.alpine_rootfs_recipe(image_recipe, signing_key_identity, packages)
+    overlap = set(packages) & set(bundle_packages)
+    if overlap:
+        fail(
+            "packages cannot be both rootfs-selected and bundle-published: "
+            + ", ".join(sorted(overlap))
+        )
+    build_packages = tuple(sorted((*packages, *bundle_packages)))
     output = alpine_state.rootfs_output(CACHE, recipe)
     output.parent.mkdir(parents=True, exist_ok=True)
     lock_path = output.parent / f".{recipe}.lock"
 
     with lock_path.open("a+b") as lock_stream:
         fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
-        if alpine_state.receipt_matches(output, recipe):
+        rootfs_hit = alpine_state.receipt_matches(output, recipe)
+        cached_outputs: dict[str, Path] = {}
+        for name in build_packages:
+            outputs = _cached_aport_packages(name, image_recipe, signing_key_identity)
+            if outputs is None or set(cached_outputs) & set(outputs):
+                cached_outputs = {}
+                break
+            cached_outputs.update(outputs)
+        if rootfs_hit and cached_outputs:
             _log_message(f"Alpine rootfs causal receipt hit: {recipe[:16]}")
-            return require_file(output / alpine_state.ROOTFS_NAME), output, recipe
+            return (
+                require_file(output / alpine_state.ROOTFS_NAME),
+                output,
+                recipe,
+                {name: cached_outputs[name] for name in bundle_packages},
+            )
 
         lock = alpine_state.load_alpine_lock()
         records = alpine_state.package_records(lock)
@@ -582,6 +755,7 @@ def build_rootfs(jobs: int, packages: tuple[str, ...]) -> tuple[Path, Path, str]
 
         staging = Path(tempfile.mkdtemp(dir=output.parent, prefix=f".{recipe[:16]}-"))
         staging.chmod(0o755)
+        bundle_outputs: dict[str, Path] = {}
         try:
             root = staging / "root"
             sysroot = staging / "sysroot"
@@ -603,13 +777,25 @@ def build_rootfs(jobs: int, packages: tuple[str, ...]) -> tuple[Path, Path, str]
                 jobs,
                 signing_private_key,
                 signing_public_key,
-                packages,
+                build_packages,
             )
+            try:
+                bundle_outputs = {name: local_packages[name] for name in bundle_packages}
+            except KeyError as error:
+                fail(f"bundle aport did not produce its declared package: {error.args[0]}")
+            if rootfs_hit:
+                _log_message(f"Alpine rootfs causal receipt hit: {recipe[:16]}")
+                return (
+                    require_file(output / alpine_state.ROOTFS_NAME),
+                    output,
+                    recipe,
+                    bundle_outputs,
+                )
             composition_repository, composition_keys = _build_alpine_composition_repository(
                 lock,
                 root,
                 runtime_packages,
-                local_packages,
+                sorted(local_packages.values()),
                 private_key,
                 public_key,
                 package_work,
@@ -624,7 +810,7 @@ def build_rootfs(jobs: int, packages: tuple[str, ...]) -> tuple[Path, Path, str]
                 )
             )
 
-            _verify_alpine_rootfs(root, packages)
+            _verify_alpine_rootfs(root, packages, bundle_packages)
             _normalize_rootfs(root)
             _write_rootfs_cpio(root, staging / alpine_state.ROOTFS_NAME)
             shutil.rmtree(sysroot)
@@ -640,4 +826,9 @@ def build_rootfs(jobs: int, packages: tuple[str, ...]) -> tuple[Path, Path, str]
             if staging != Path() and staging.exists():
                 shutil.rmtree(staging)
 
-        return require_file(output / alpine_state.ROOTFS_NAME), output, recipe
+        return (
+            require_file(output / alpine_state.ROOTFS_NAME),
+            output,
+            recipe,
+            bundle_outputs,
+        )
