@@ -50,6 +50,8 @@ RAM load.
 - [Release archives](docs/RELEASES.md): candidate archives, qualification,
   USB access, and archive troubleshooting.
 - [Host-to-phone transfer](docs/TRANSFER.md): console commands and file copy.
+- [Installable applications](docs/APPLICATIONS.md): APK installation and
+  removal in a source-checkout RAM session.
 - [Phone targets](targets/README.md): target index and per-phone documents.
 - [Hardware platforms](platforms/README.md): reusable SoC support.
 - [Porting FPLinux](docs/porting/README.md): contributor-facing porting
@@ -67,8 +69,9 @@ and hardware status remain with the target.
 
 FPLinux is an independent reverse-engineering project. The repository contains
 no vendor firmware, vendor source, or manufacturer documentation. Hardware
-claims in target documents distinguish current phone qualification from source
-or upstream evidence.
+claims in target documents distinguish physical-device observations from
+source-build and upstream evidence. Release qualification is recorded
+separately for one exact executable payload.
 
 ## License
 

@@ -12,13 +12,18 @@
 ## Status
 
 This target provides a local `240×320` terminal, physical keypad and keypad
-backlight, USB shell, host-keyboard bridge and microSD access on a TA-1618. Boot,
-kernel, screen, keypad, backlight, USB interfaces, host keyboard bridge, microSD
-and battery-only power-off have been exercised on the phone. MicroPythonOS
+backlight, USB shell, host-keyboard bridge and microSD access on a TA-1618. The
+Linux session is volatile and internal phone storage stays inaccessible.
+
+## Evidence basis
+
+Supported entries record physical development observations on this exact phone:
+boot, kernel, screen, keypad, backlight, USB interfaces, host-keyboard bridge,
+microSD and battery-only power-off have been exercised. MicroPythonOS
 installation, launcher navigation, keypad text input, File Manager and its
-microSD mount, synced write, read after remount and clean unmount have also
-been exercised. The Linux session is volatile and internal phone storage stays
-inaccessible. This is feature-level hardware evidence, not release qualification.
+microSD mount, synced write, read after remount and clean unmount have also been
+exercised. These observations are not a release qualification record and do not
+identify a qualified candidate or executable payload.
 
 ## Hardware support
 
@@ -74,57 +79,29 @@ The loader starts a volatile RAM session and does not change the vendor firmware
 or internal storage. If the phone was connected early, disconnect it and restart
 the sequence.
 
-## Use after boot
+## Target-specific use
 
 The local terminal starts on the phone. Interface 0 is the USB shell and transfer
-channel; detach a host client with `Ctrl-]` without stopping Linux. Reconnect or
-compare the running kernel with the local build:
+channel; interface 1 forwards one host evdev keyboard. The selected keyboard does
+not reach the host desktop while forwarding runs. Shared console and transfer
+behavior is documented in the [console contract](../../docs/porting/CONSOLE.md)
+and [file-transfer guide](../../docs/TRANSFER.md).
 
-```sh
-./fplinux verify nokia-ta1618
-./fplinux console nokia-ta1618
-sudo ./fplinux console nokia-ta1618 --keyboard /dev/input/eventN
-```
-
-The keyboard forwarder uses interface 1 and keeps the selected host keyboard
-away from the host desktop while it runs. See the [console contract](../../docs/porting/CONSOLE.md)
-and [file-transfer guide](../../docs/TRANSFER.md) for shared behavior.
-
-## Installable applications
-
-The `output:` directory printed by `./fplinux build` contains bundled APKs under
-`apks/`. They are not installed in the standard root filesystem. Set `bundle`
-to that printed directory; every application uses the same upload, `apk add`,
-launch, and `apk del` workflow in the current RAM session.
+The [application guide](../../docs/APPLICATIONS.md) covers the shared APK
+upload, install, run, and removal workflow for this source checkout.
 
 ### TyrQuake
 
-TyrQuake 0.71 is `fplinux-tyrquake.apk`; Quake game data is not included.
-Install it without restarting the phone:
-
-```sh
-./fplinux console nokia-ta1618 --upload \
-  "$bundle/apks/fplinux-tyrquake.apk" /tmp/fplinux-tyrquake.apk
-./fplinux console nokia-ta1618 --exec \
-  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-tyrquake.apk'
-```
-
-Insert a microSD card before boot and put a legally obtained PAK at:
+TyrQuake 0.71 requires legally obtained game data. Insert a microSD card before
+boot and put `pak0.pak` at:
 
 ```text
 /mnt/card/fplinux/quake/id1/pak0.pak
 ```
 
-Start exactly one input mode:
-
-```sh
-quake --input phone
-quake --input keyboard
-```
-
-Phone mode uses the physical keypad. Keyboard mode uses the forwarded host
-keyboard. Hold the phone counter-clockwise with the display on the left and the
-keypad on the right:
+In the application guide, select either phone or keyboard input. Phone mode uses
+the physical keypad; keyboard mode uses the forwarded host keyboard. Hold the
+phone counter-clockwise with the display on the left and the keypad on the right:
 
 | Key                    | Menu                 | Game                        |
 | ---------------------- | -------------------- | --------------------------- |
@@ -142,35 +119,12 @@ keypad on the right:
 | `#`                    | Available for a bind | Available for a custom bind |
 
 The launcher uses temporary runtime storage. TyrQuake settings and saves are
-discarded when it exits; they are not written to microSD. After exiting the
-game, remove it without restarting the phone:
-
-```sh
-./fplinux console nokia-ta1618 --exec 'apk del fplinux-tyrquake'
-```
+discarded when it exits; they are not written to microSD.
 
 ### MicroPythonOS
 
-MicroPythonOS requires its base and TA-1618 companion packages:
-
-```sh
-./fplinux console nokia-ta1618 --upload \
-  "$bundle/apks/fplinux-micropythonos.apk" /tmp/fplinux-micropythonos.apk
-./fplinux console nokia-ta1618 --upload \
-  "$bundle/apks/fplinux-micropythonos-nokia-ta1618.apk" \
-  /tmp/fplinux-micropythonos-nokia-ta1618.apk
-./fplinux console nokia-ta1618 --exec \
-  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-micropythonos.apk /tmp/fplinux-micropythonos-nokia-ta1618.apk'
-./fplinux console nokia-ta1618
-```
-
-At the phone shell prompt, run `micropythonos`. Press `Ctrl-C` to stop it and
-restore the terminal, then `Ctrl-]` to detach before removing the packages:
-
-```sh
-./fplinux console nokia-ta1618 --exec \
-  'apk del fplinux-micropythonos-nokia-ta1618 fplinux-micropythonos'
-```
+MicroPythonOS requires both the base and TA-1618 companion packages. Use the
+[Nokia companion workflow](../../docs/APPLICATIONS.md#nokia-ta-1618-companion).
 
 With a usable FAT32 card inserted before boot, MicroPythonOS uses `/mnt/card` and
 keeps application state under `/mnt/card/.fplinux/micropythonos`. It mounts the
@@ -232,6 +186,6 @@ remove and reinsert the battery before booting. Linux reboot is not supported.
 
 ## Release status
 
-There is no prebuilt archive or qualified runtime closure for this target. A
+There is no prebuilt archive or qualified executable payload for this target. A
 local `./fplinux package nokia-ta1618 --candidate` archive is a hardware
 qualification candidate, not a release. See [Release archives](../../docs/RELEASES.md).
