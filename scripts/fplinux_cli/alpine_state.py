@@ -21,6 +21,15 @@ SIGNING_PRIVATE_KEY = "fplinux-build.rsa"
 SIGNING_PUBLIC_KEY = "fplinux-build.rsa.pub"
 PACKAGE_CACHE_DIRECTORY = "apks"
 PACKAGE_RECEIPT_NAME = ".fplinux-package-receipt.json"
+SHARED_APORT_SOURCES = {
+    "fplinux-console": (
+        "alpine/shared/fplinux-multitap.c",
+        "alpine/shared/fplinux-multitap.h",
+    ),
+}
+SHARED_APORT_SOURCE_PATHS = frozenset(
+    path for paths in SHARED_APORT_SOURCES.values() for path in paths
+)
 COMMON_PACKAGES = (
     "fplinux-base",
     "fplinux-console",
@@ -266,6 +275,20 @@ def _source_tree(path: Path, root: Path) -> list[dict[str, object]]:
     return entries
 
 
+def shared_aport_sources(package: str, root: Path = ROOT) -> tuple[Path, ...]:
+    """Return canonical project sources copied into one consuming aport."""
+    name = _package_id(package, "FPLinux package")
+    return tuple(root / relative for relative in SHARED_APORT_SOURCES.get(name, ()))
+
+
+def shared_aport_source_records(
+    packages: Sequence[str], root: Path = ROOT
+) -> list[dict[str, object]]:
+    """Describe each canonical shared source used by the given package set once."""
+    sources = {source for package in packages for source in shared_aport_sources(package, root)}
+    return [_source_file(source, root) for source in sorted(sources)]
+
+
 def signing_public_key(cache: Path) -> Path:
     """Return the persistent local abuild public key path."""
     return cache / SIGNING_KEY_DIRECTORY / SIGNING_PUBLIC_KEY
@@ -296,6 +319,7 @@ def alpine_rootfs_recipe(
         "lock": _source_file(root / "alpine.lock.toml", root),
         "abuild": _source_file(root / "alpine/abuild.conf", root),
         "aports": {name: _source_tree(root / "alpine/aports" / name, root) for name in selected},
+        "shared_aport_sources": shared_aport_source_records(selected, root),
         "implementation": [
             _source_file(root / "scripts/fplinux_cli/alpine_state.py", root),
             _source_file(root / "scripts/fplinux_cli/alpine_builder.py", root),
@@ -321,6 +345,7 @@ def alpine_package_recipe(
             "lock": _source_file(root / "alpine.lock.toml", root),
             "abuild": _source_file(root / "alpine/abuild.conf", root),
             "aport": _source_tree(root / "alpine/aports" / name, root),
+            "shared_aport_sources": shared_aport_source_records((name,), root),
             "implementation": [
                 _source_file(root / "scripts/fplinux_cli/alpine_state.py", root),
                 _source_file(root / "scripts/fplinux_cli/alpine_builder.py", root),

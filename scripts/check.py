@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 import tomllib
 from contextlib import contextmanager
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, NoReturn
 
 from fplinux_cli import alpine_state
@@ -212,15 +212,25 @@ def is_aport_source(path: Path, suffixes: frozenset[str]) -> bool:
     return relative.parts[:2] == APORT_ROOT and relative.suffix in suffixes
 
 
+def is_shared_aport_source(path: Path, suffixes: frozenset[str]) -> bool:
+    """Return whether a source is one canonical C/H file shared by aports."""
+    relative = path.relative_to(ROOT)
+    return (
+        relative.as_posix() in alpine_state.SHARED_APORT_SOURCE_PATHS
+        and relative.suffix in suffixes
+    )
+
+
 def userspace_c_sources(
     files: list[Path], *, include_embedded: bool = False
 ) -> list[tuple[str, bool]]:
     """Discover userspace C and whether each source needs libusb."""
     result: dict[str, bool] = {}
     for path in files:
-        if is_aport_source(path, APORT_C_SUFFIXES) and (
-            include_embedded or not package_c_is_embedded(path)
-        ):
+        if (
+            is_aport_source(path, APORT_C_SUFFIXES)
+            or is_shared_aport_source(path, APORT_C_SUFFIXES)
+        ) and (include_embedded or not package_c_is_embedded(path)):
             result[path.relative_to(ROOT).as_posix()] = False
 
     platform_names = {load_target(target)["platform"] for target in discover_targets()}
@@ -241,16 +251,29 @@ def userspace_c_sources(
 
 
 def userspace_c_format_sources(files: list[Path]) -> list[str]:
-    """Discover every C header and source under a first-party Alpine aport."""
+    """Discover C/H under a first-party aport or canonical shared source."""
     sources = {
         path.relative_to(ROOT).as_posix()
         for path in files
         if is_aport_source(path, APORT_C_FORMAT_SUFFIXES)
+        or is_shared_aport_source(path, APORT_C_FORMAT_SUFFIXES)
     }
     sources.update(
         source for source, _requires_libusb in userspace_c_sources(files, include_embedded=True)
     )
     return sorted(sources)
+
+
+def userspace_c_include_flags(source: str) -> list[str]:
+    """Return compile flags needed by one source's project-owned headers."""
+    path = PurePosixPath(source)
+    if (
+        len(path.parts) >= 3
+        and path.parts[:2] == APORT_ROOT
+        and path.parts[2] in alpine_state.SHARED_APORT_SOURCES
+    ):
+        return ["-I", "alpine/shared"]
+    return []
 
 
 def run_userspace_analysis(output: Path, sources: list[tuple[str, bool]]) -> None:
@@ -291,7 +314,7 @@ def run_userspace_analysis(output: Path, sources: list[tuple[str, bool]]) -> Non
         "clang",
     ]
     for index, (source, requires_libusb) in enumerate(sources):
-        flags = [*common_flags]
+        flags = [*common_flags, *userspace_c_include_flags(source)]
         if requires_libusb:
             flags.extend(libusb_flags)
             flags.append("-pthread")

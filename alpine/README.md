@@ -13,6 +13,9 @@ and the policy that selects how they are delivered.
   Use `[rootfs].packages` for packages installed in the standard root filesystem
   and `[bundle].packages` for installable APKs published beside the image. Do not
   select packages from target names in code.
+- Keep reusable source consumed by project aports under `shared/` and map each
+  consumer explicitly in `scripts/fplinux_cli/alpine_state.py`; do not copy the
+  same implementation into multiple aports.
 - Do not add rootfs overlays, duplicate package recipes, target-local copies, or
   ad-hoc installers for software that already belongs in an aport.
 - Add a hardware-specific package only when its public interface is genuinely
