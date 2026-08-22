@@ -99,6 +99,23 @@ def _source_file(identity: str, path: Path) -> dict[str, int | str]:
     return {"path": identity, **_file_record(path)}
 
 
+def _implementation_records(
+    implementation: list[tuple[str, Path]],
+) -> list[dict[str, int | str]]:
+    return [
+        _source_file(_relative(identity, "Kbuild implementation path"), path)
+        for identity, path in implementation
+    ]
+
+
+def implementation_identity(implementation: list[tuple[str, Path]]) -> str:
+    """Identify the exact builder implementation that can change kernel bytes."""
+    records = _implementation_records(implementation)
+    if not records:
+        _error("Kbuild implementation must not be empty")
+    return hashlib.sha256(_canonical_json(records)).hexdigest()
+
+
 def rootfs_identity(rootfs: Path) -> dict[str, int | str]:
     """Return the rootfs bytes consumed by Kbuild."""
     return _file_record(rootfs)
@@ -149,10 +166,7 @@ def create_plan(  # noqa: PLR0913 -- exact causal inputs remain separate.
         if not command or not all(isinstance(value, str) and value for value in command):
             _error("Kbuild command must contain non-empty strings")
         normalized_commands.append(_recipe_command(command))
-    implementation_records = [
-        _source_file(_relative(identity, "Kbuild implementation path"), path)
-        for identity, path in implementation
-    ]
+    implementation_records = _implementation_records(implementation)
     manifest: dict[str, object] = {
         "prepared_linux_recipe": prepared_linux_recipe,
         "defconfig": _source_file(_relative(defconfig_path, "Kbuild defconfig"), defconfig),

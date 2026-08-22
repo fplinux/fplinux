@@ -512,12 +512,21 @@ def build_kernel(
         ]
         config_script = require_file(linux_source / platform["linux"]["config_script"])
         current_linux = linux_state.require_prepared_linux(linux_source, prepared_linux)
+        implementation = [
+            ("scripts/fplinux_cli/builder.py", Path(__file__)),
+            (
+                "scripts/fplinux_cli/device_state.py",
+                Path(__file__).with_name("device_state.py"),
+            ),
+            ("scripts/fplinux_cli/kbuild_state.py", Path(kbuild_state.__file__)),
+        ]
         device_identity = device_kernel_identity(
             target=target,
             linux_recipe=current_linux.linux_recipe,
             bootstrap_recipe=bootstrap_recipe,
             rootfs=rootfs_record,
             rootfs_receipt=rootfs_receipt,
+            kbuild_implementation=kbuild_state.implementation_identity(implementation),
             arch=platform["linux"]["arch"],
             defconfig=defconfig,
             dtb=target_config["linux"]["dtb"],
@@ -558,14 +567,7 @@ def build_kernel(
             cross_compile=cross,
             commands=commands,
             outputs=output_paths,
-            implementation=[
-                ("scripts/fplinux_cli/builder.py", Path(__file__)),
-                (
-                    "scripts/fplinux_cli/device_state.py",
-                    Path(__file__).with_name("device_state.py"),
-                ),
-                ("scripts/fplinux_cli/kbuild_state.py", Path(kbuild_state.__file__)),
-            ],
+            implementation=implementation,
         )
         if kbuild_state.cache_hit(work, output, plan):
             log_message(f"Kbuild causal receipt hit: {plan.recipe[:16]}")

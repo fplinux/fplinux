@@ -82,6 +82,7 @@ def device_kernel_identity(  # noqa: PLR0913
     bootstrap_recipe: str,
     rootfs: Mapping[str, object],
     rootfs_receipt: Mapping[str, object],
+    kbuild_implementation: str,
     arch: str,
     defconfig: Path,
     dtb: str,
@@ -93,6 +94,7 @@ def device_kernel_identity(  # noqa: PLR0913
         "bootstrap_recipe": _require_digest(bootstrap_recipe, "bootstrap recipe"),
         "rootfs": _require_rootfs(rootfs),
         "rootfs_receipt": _require_receipt(rootfs_receipt),
+        "kbuild_implementation": _require_digest(kbuild_implementation, "Kbuild implementation"),
         "kernel": {
             "arch": _require_target(arch),
             "defconfig": _defconfig_identity(Path(defconfig)),
