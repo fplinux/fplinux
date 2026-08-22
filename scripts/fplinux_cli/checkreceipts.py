@@ -9,13 +9,8 @@ import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeVar
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 _SCOPE_ROOT = "check-results"
-_T = TypeVar("_T")
 
 
 def _canonical_json(value: object) -> bytes:
@@ -43,13 +38,6 @@ class CheckReceiptRecipe:
             "image_identity": self.image_identity,
             "commands": [list(command) for command in self.commands],
         }
-
-
-def check_closure_digest(files: list[tuple[str, Path]]) -> str:
-    """Hash the checked files' paths, bytes, and modes."""
-    return check_closure_entries_digest(
-        [(relative, path.read_bytes(), path.stat().st_mode & 0o777) for relative, path in files],
-    )
 
 
 def check_closure_entries_digest(entries: list[tuple[str, bytes, int]]) -> str:
@@ -83,7 +71,7 @@ def _read_payload(path: Path) -> object | None:
         return None
 
 
-def publish_success_receipt(cache_root: Path, recipe: CheckReceiptRecipe) -> Path:
+def publish_success_receipt(cache_root: Path, recipe: CheckReceiptRecipe) -> None:
     """Atomically publish a receipt after a scope has completed successfully."""
     destination = receipt_path(cache_root, recipe)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -98,15 +86,3 @@ def publish_success_receipt(cache_root: Path, recipe: CheckReceiptRecipe) -> Pat
         Path(temporary_name).replace(destination)
     finally:
         Path(temporary_name).unlink(missing_ok=True)
-    return destination
-
-
-def run_and_publish_success(
-    cache_root: Path,
-    recipe: CheckReceiptRecipe,
-    operation: Callable[[], _T],
-) -> _T:
-    """Run one scope and cache its receipt only if it succeeds."""
-    result = operation()
-    publish_success_receipt(cache_root, recipe)
-    return result

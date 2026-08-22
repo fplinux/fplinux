@@ -54,8 +54,6 @@ class RunReporterTests(unittest.TestCase):
             self.assertEqual(initial["stages"], [])
             self.assertEqual(initial["display_root"], ".cache/logs/test")
             self.assertIsNone(initial["parent"])
-            self.assertEqual(reporter.lock_metadata(), {"log": ".cache/logs/test/run.json"})
-
             with reporter.stage("prepare"):
                 entered = json.loads(reporter.metadata_path.read_text())
                 self.assertEqual(entered["status"], "running")

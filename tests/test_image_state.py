@@ -28,8 +28,7 @@ class ImageStateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / ".cache"
             expected = state()
-            published = publish_image_state(cache, expected)
-            self.assertEqual(published, image_state_path(cache))
+            publish_image_state(cache, expected)
             self.assertEqual(load_image_state(cache, "a" * 64), expected)
 
     def test_recipe_or_image_mismatch_is_a_miss(self) -> None:
@@ -37,8 +36,9 @@ class ImageStateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / ".cache"
             expected = state()
-            path = publish_image_state(cache, expected)
+            publish_image_state(cache, expected)
             self.assertIsNone(load_image_state(cache, "c" * 64))
+            path = image_state_path(cache)
             path.write_text(
                 '{"container_image_recipe":"'
                 + "a" * 64

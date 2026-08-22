@@ -227,15 +227,6 @@ class RunReporter:
         """Return the local, atomically replaced metadata file for this run."""
         return self.root / _RUN_METADATA_NAME
 
-    @property
-    def display_metadata_path(self) -> str:
-        """Return the stable user-facing metadata path for this run."""
-        return f"{self.display_root}/{_RUN_METADATA_NAME}"
-
-    def lock_metadata(self) -> dict[str, str]:
-        """Return the log pointer a cache-lock owner can publish without guessing paths."""
-        return {"log": self.display_metadata_path}
-
     def container_environment(self, mounted_root: str) -> dict[str, str]:
         """Return variables that attach a container-side reporter to this run."""
         return {
