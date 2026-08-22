@@ -21,6 +21,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "fplinux-quake-internal.h"
+
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
 #define FPLINUX_QUAKE_CARD_MOUNT "/mnt/card"
 #define FPLINUX_QUAKE_GAME_DATA FPLINUX_QUAKE_CARD_MOUNT "/fplinux/quake/id1"
@@ -265,7 +267,7 @@ static int remove_runtime_entry(const char *path, const struct stat *status,
 	return type == FTW_DP ? rmdir(path) : unlink(path);
 }
 
-static void remove_runtime(const char *runtime)
+void fplinux_quake_remove_runtime(const char *runtime)
 {
 	if (nftw(runtime, remove_runtime_entry, 8, FTW_DEPTH | FTW_PHYS) < 0 &&
 	    errno != ENOENT)
@@ -486,7 +488,7 @@ int main(int argc, char **argv)
 	child_status = wait_for_engine(child);
 	restored = restore_display(&display);
 	close_display(&display);
-	remove_runtime(runtime);
+	fplinux_quake_remove_runtime(runtime);
 	close(lock);
 	return restored ? child_status : EXIT_FAILURE;
 }
