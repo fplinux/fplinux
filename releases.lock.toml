@@ -1,3 +1,4 @@
 # SPDX-License-Identifier: GPL-2.0-only
-# Add a runtime closure only after the exact candidate passes the phone gate.
+# Add an executable-payload digest only after that exact candidate payload passes
+# the phone gate. The payload contains the runtime closure and bundled APKs.
 [verified]

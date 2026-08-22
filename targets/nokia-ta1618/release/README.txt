@@ -1,9 +1,17 @@
 FPLinux for Nokia 3210 4G (TA-1618)
 
 This archive starts Linux in volatile RAM. It does not flash the phone or access
-its internal storage. The current project provides no prebuilt archive or
-qualified runtime closure: this archive is a local hardware qualification
-candidate, not a release.
+its internal storage. The current project provides no prebuilt release archive
+or recorded qualified payload for this target. An archive containing
+CANDIDATE-NOTICE.txt is a local hardware-qualification candidate and must not be
+published as a release.
+
+Qualification binds the exact RAM runtime, loader and host runtime tools, runtime
+assets, runner, platform adapter, runtime manifest and bundled top-level
+apks/*.apk files.
+This README, license notices, provenance and build records, checksums and the
+candidate notice are archive metadata outside that phone-qualified payload.
+Feature statements below cover only the paths that were exercised.
 
 What works on the Nokia 3210 4G (TA-1618):
   - local 240x320 terminal, physical keypad and keypad backlight;
