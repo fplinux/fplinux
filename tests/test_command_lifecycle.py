@@ -55,8 +55,8 @@ class CommandLifecycleTests(unittest.TestCase):
         )
         self.snapshot = WorkspaceSnapshot((), "c" * 64)
 
-    def test_exact_build_hit_logs_without_podman_or_staging(self) -> None:
-        """A valid exact generation records the invocation but starts no build work."""
+    def test_exact_build_hit_ignores_jobs_and_avoids_podman_or_staging(self) -> None:
+        """Both job counts reuse the same valid generation without starting build work."""
         current = (self.bundle, json.loads(self.bundle.manifest_bytes))
         reporter = mock.Mock()
         discard_superseded = mock.Mock()
@@ -92,21 +92,35 @@ class CommandLifecycleTests(unittest.TestCase):
                 side_effect=AssertionError("cache hit must not stage a workspace"),
             ),
         ):
-            commands.build("phone", 8, verbose=True, offline=True)
+            for jobs in (1, 8):
+                with self.subTest(jobs=jobs):
+                    commands.build("phone", jobs, verbose=True, offline=True)
 
-        print_result.assert_called_once_with(
-            "phone",
-            self.bundle,
-            {"image": "image/ramboot.bin"},
-            cached=True,
+        self.assertEqual(
+            print_result.call_args_list,
+            [
+                mock.call(
+                    "phone",
+                    self.bundle,
+                    {"image": "image/ramboot.bin"},
+                    cached=True,
+                )
+            ]
+            * 2,
         )
-        discard_superseded.assert_called_once_with(
-            self.root / ".cache/out",
-            "phone",
-            "default",
-            self.bundle,
+        self.assertEqual(
+            discard_superseded.call_args_list,
+            [
+                mock.call(
+                    self.root / ".cache/out",
+                    "phone",
+                    "default",
+                    self.bundle,
+                )
+            ]
+            * 2,
         )
-        reporter.finish.assert_called_once_with()
+        self.assertEqual(reporter.finish.call_args_list, [mock.call(), mock.call()])
 
     def test_build_result_ignores_closed_stdout_pipe(self) -> None:
         """A closed output consumer must not turn a valid build result into failure."""
@@ -124,19 +138,6 @@ class CommandLifecycleTests(unittest.TestCase):
                 self.bundle,
                 {"image": "image/ramboot.bin"},
                 cached=False,
-            )
-
-    def test_jobs_do_not_change_an_exact_bundle_hit(self) -> None:
-        """Treat ``--jobs`` as scheduling rather than artifact identity."""
-        identity = commands.BuildIdentity(self.snapshot.recipe, "e" * 64, "7" * 64)
-        with mock.patch.object(commands, "resolve_current_bundle", return_value=self.bundle):
-            self.assertIsNotNone(
-                commands._matching_target_bundle(  # noqa: SLF001
-                    "phone",
-                    {"profile": "default"},
-                    identity,
-                    "image/ramboot.bin",
-                )
             )
 
     def test_corrupted_bundle_image_is_not_an_exact_hit(self) -> None:
@@ -362,7 +363,7 @@ class CommandLifecycleTests(unittest.TestCase):
         execute.assert_called_once_with(os.fsencode(runner), [os.fsencode(runner)])
 
     def test_verify_rejects_nonzero_console_status_even_with_matching_stdout(self) -> None:
-        """Console transport failure cannot be promoted to a successful verify."""
+        """Reject a mocked failed console result even when its stdout happens to match."""
         client = self.bundle_path / "host/fplinux-usb-console"
         client.parent.mkdir()
         client.write_text("client\n")
@@ -405,14 +406,32 @@ class CommandLifecycleTests(unittest.TestCase):
                 "_build_identity",
                 return_value=commands.BuildIdentity(self.snapshot.recipe, "e" * 64, "7" * 64),
             ),
-            mock.patch("fplinux_cli.commands.subprocess.run", return_value=result),
+            mock.patch("fplinux_cli.commands.subprocess.run", return_value=result) as console_run,
             self.assertRaisesRegex(SystemExit, "console client failed with exit status 7"),
         ):
             commands.verify_booted("phone")
         resolver.assert_called_once()
+        console_run.assert_called_once_with(
+            [
+                str(client),
+                "--vid",
+                "1782",
+                "--pid",
+                "4d00",
+                "--wait",
+                "10",
+                "--interface",
+                "0",
+                "--exec",
+                "uname -r",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
 
     def test_verify_matches_the_device_identity_not_the_workspace_digest(self) -> None:
-        """Compare uname with the content-derived kernel suffix recorded by the bundle."""
+        """Interpret a mocked uname result using the bundle's device-identity suffix."""
         client = self.bundle_path / "host/fplinux-usb-console"
         client.parent.mkdir()
         client.write_text("client\n")
@@ -454,13 +473,31 @@ class CommandLifecycleTests(unittest.TestCase):
                 "_build_identity",
                 return_value=commands.BuildIdentity(self.snapshot.recipe, "e" * 64, "7" * 64),
             ),
-            mock.patch("fplinux_cli.commands.subprocess.run", return_value=result),
+            mock.patch("fplinux_cli.commands.subprocess.run", return_value=result) as console_run,
             mock.patch("builtins.print") as output,
         ):
             commands.verify_booted("phone")
 
         output.assert_called_once_with(
             "verify: the phone runs the current build (9999999999999999)"
+        )
+        console_run.assert_called_once_with(
+            [
+                str(client),
+                "--vid",
+                "1782",
+                "--pid",
+                "4d00",
+                "--wait",
+                "10",
+                "--interface",
+                "0",
+                "--exec",
+                "uname -r",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
         )
 
     def test_build_argv_has_only_exact_nonoverlapping_mount_roots(self) -> None:

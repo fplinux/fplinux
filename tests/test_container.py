@@ -75,9 +75,16 @@ class ContainerImageRecipeTests(unittest.TestCase):
                 second_image = config.container_image_recipe_digest(lock)
                 second_check = config.check_orchestration_recipe_digest(second_image)
 
-        self.assertEqual(first_arguments, second_arguments)
-        file_index = first_arguments.index("--file")
-        self.assertEqual(first_arguments[file_index + 1], "Containerfile")
+        expected_arguments = (
+            "--platform",
+            "linux/amd64",
+            "--file",
+            "Containerfile",
+            "--build-arg",
+            f"BASE_IMAGE=example.invalid/base@sha256:{'a' * 64}",
+        )
+        self.assertEqual(first_arguments, expected_arguments)
+        self.assertEqual(second_arguments, expected_arguments)
         self.assertEqual(first_image, second_image)
         self.assertEqual(first_check, second_check)
 
@@ -124,14 +131,14 @@ class SetupLifecycleTests(unittest.TestCase):
         reporter.finish.assert_called_once_with()
         reporter.stage.assert_not_called()
 
-    def test_setup_runs_podman_build_directly(self) -> None:
-        """Run the image build with the ordinary direct Podman argv."""
+    def test_setup_passes_exact_podman_build_argv_to_stage(self) -> None:
+        """Pass production build arguments to the mocked execution stage unchanged."""
         reporter = mock.Mock()
         stage = mock.Mock()
         stage_context = mock.MagicMock()
         stage_context.__enter__.return_value = stage
         reporter.stage.return_value = stage_context
-        lock = {"oci": {"image": "localhost/fplinux:locked"}}
+        lock = _container_lock()
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             with (
@@ -142,7 +149,6 @@ class SetupLifecycleTests(unittest.TestCase):
                     "container_image_recipe_digest",
                     return_value="a" * 64,
                 ),
-                mock.patch.object(container, "container_image_build_arguments", return_value=()),
                 mock.patch.object(container, "image_ready", side_effect=(False, True)),
                 mock.patch.object(
                     container,
@@ -153,11 +159,24 @@ class SetupLifecycleTests(unittest.TestCase):
             ):
                 container.setup(reporter=reporter, lock=lock)
 
-        stage.run.assert_called_once()
-        command = stage.run.call_args.args[0]
-        self.assertEqual(command[:2], ["podman", "build"])
-        self.assertEqual(command[-1], ".")
-        self.assertEqual(stage.run.call_args.kwargs, {"cwd": root})
+        stage.run.assert_called_once_with(
+            [
+                "podman",
+                "build",
+                "--platform",
+                "linux/amd64",
+                "--file",
+                "Containerfile",
+                "--build-arg",
+                f"BASE_IMAGE=example.invalid/base@sha256:{'a' * 64}",
+                "--tag",
+                "localhost/fplinux:locked",
+                "--label",
+                f"org.fplinux.container.image-recipe={'a' * 64}",
+                ".",
+            ],
+            cwd=root,
+        )
 
     def test_podman_bare_image_id_is_normalized(self) -> None:
         """Accept the 64-hex ID emitted by the installed Podman inspect command."""
