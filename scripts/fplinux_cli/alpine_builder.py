@@ -391,17 +391,50 @@ def _prepare_alpine_sysroot(
     )
 
 
-def _copy_shared_aport_sources(package: str, directory: Path) -> None:
-    """Materialize canonical shared sources as regular files in one aport stage."""
+def _copy_shared_aport_sources(
+    package: str,
+    directory: Path,
+    *,
+    source_root: Path | None = None,
+) -> None:
+    """Copy one package's declared shared sources into an existing aport stage."""
+    if alpine_state.PACKAGE_ID.fullmatch(package) is None:
+        fail(f"invalid Alpine package identifier: {package}")
+    if source_root is None:
+        source_root = ROOT
+    if source_root.is_symlink() or not source_root.is_dir():
+        fail(f"Alpine source root is missing or invalid: {source_root}")
     if directory.is_symlink() or not directory.is_dir():
         fail(f"staged Alpine aport is missing or invalid: {directory}")
-    for shared_source in alpine_state.shared_aport_sources(package, root=ROOT):
+    for shared_source in alpine_state.shared_aport_sources(package, root=source_root):
         source = require_file(shared_source)
         destination = directory / source.name
         if destination.exists() or destination.is_symlink():
             fail(f"shared Alpine source conflicts with aport file: {destination}")
         shutil.copyfile(source, destination)
         destination.chmod(source.stat().st_mode & 0o777)
+
+
+def materialize_aport_sources(package: str, source_root: Path, destination: Path) -> Path:
+    """Copy one canonical aport and its mapped shared files into a writable stage."""
+    if alpine_state.PACKAGE_ID.fullmatch(package) is None:
+        fail(f"invalid Alpine package identifier: {package}")
+    if source_root.is_symlink() or not source_root.is_dir():
+        fail(f"Alpine source root is missing or invalid: {source_root}")
+    source_aport = source_root / "alpine/aports" / package
+    if source_aport.is_symlink() or not source_aport.is_dir():
+        fail(f"canonical Alpine aport is missing or invalid: {source_aport}")
+    if destination.exists() or destination.is_symlink():
+        fail(f"Alpine aport stage already exists: {destination}")
+    for source in [source_aport, *sorted(source_aport.rglob("*"))]:
+        if source.is_symlink() or (
+            source != source_aport and not source.is_dir() and not source.is_file()
+        ):
+            fail(f"canonical Alpine aport contains an invalid source: {source}")
+
+    shutil.copytree(source_aport, destination)
+    _copy_shared_aport_sources(package, destination, source_root=source_root)
+    return destination
 
 
 def _build_fplinux_apks(
@@ -420,8 +453,7 @@ def _build_fplinux_apks(
     aports.mkdir()
     for name in build_packages:
         directory = aports / name
-        shutil.copytree(ROOT / "alpine/aports" / name, directory)
-        _copy_shared_aport_sources(name, directory)
+        materialize_aport_sources(name, ROOT, directory)
     home.mkdir()
     _chown_tree(aports, "builder")
     _chown_tree(home, "builder")

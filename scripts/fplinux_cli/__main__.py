@@ -9,7 +9,14 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 from .cachelock import cache_lock
-from .commands import build, console_target, package_target, run_target, verify_booted
+from .commands import (
+    build,
+    checksum_aport,
+    console_target,
+    package_target,
+    run_target,
+    verify_booted,
+)
 from .common import ROOT
 from .config import discover_targets
 from .container import CHECK_SCOPES, check, check_commit_message, doctor, setup
@@ -20,7 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-_EXCLUSIVE_CACHE_COMMANDS = frozenset({"build", "check", "setup"})
+_EXCLUSIVE_CACHE_COMMANDS = frozenset({"build", "check", "checksum", "setup"})
 _SHARED_CACHE_COMMANDS = frozenset({"console", "package", "run", "verify"})
 _CHECK_SCOPE_METAVAR = "{" + ",".join(CHECK_SCOPES) + "}"
 
@@ -105,6 +112,8 @@ def _command_action(
             verbose=args.verbose,
             offline=args.offline,
         )
+    elif args.command == "checksum":
+        action = partial(checksum_aport, args.aport, offline=args.offline)
     elif args.command == "package":
         action = partial(package_target, args.target, candidate=args.candidate)
     elif args.command == "prune":
@@ -171,6 +180,16 @@ def main() -> None:
         "--offline",
         action="store_true",
         help="on a build miss, run the prepared build image without network access",
+    )
+    checksum_parser = commands.add_parser(
+        "checksum",
+        help="regenerate one Alpine aport sha512sums block in the pinned build image",
+    )
+    checksum_parser.add_argument("aport")
+    checksum_parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="regenerate only from the prepared Alpine source cache without network access",
     )
     package_parser = commands.add_parser(
         "package", help="package an existing build for Linux x86-64"
