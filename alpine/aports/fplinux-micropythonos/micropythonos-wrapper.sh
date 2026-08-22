@@ -1,0 +1,183 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+mpos_config_path=/etc/fplinux/micropythonos.conf
+mpos_framebuffer_path=/dev/fb0
+mpos_input_path=/dev/input
+mpos_mountinfo_path=/proc/self/mountinfo
+mpos_runtime_path=/usr/libexec/fplinux-micropythonos/micropythonos
+mpos_launcher_path=/usr/libexec/fplinux-micropythonos/fplinux-micropythonos-launcher
+
+storage_path_is_valid() {
+	case "$MPOS_STORAGE" in
+	"" | / | */) return 1 ;;
+	/*) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
+storage_state_dir_is_valid() {
+	case "$MPOS_STORAGE_STATE_DIR" in
+	"" | /* | .. | ../* | */.. | */../*) return 1 ;;
+	*) return 0 ;;
+	esac
+}
+
+storage_path_is_mounted() {
+	awk -v mount_point="$MPOS_STORAGE" '
+		$5 == mount_point { found = 1 }
+		END { exit !found }
+	' "$mpos_mountinfo_path"
+}
+
+storage_is_declared_mount() {
+	awk -v mount_point="$MPOS_STORAGE" -v filesystem="$MPOS_STORAGE_FSTYPE" \
+		-v devices="$MPOS_STORAGE_DEVICES" '
+		BEGIN {
+			count = split(devices, device, " ")
+			for (item = 1; item <= count; item++)
+				declared[device[item]] = 1
+		}
+		$5 == mount_point {
+			for (field = 6; field <= NF; field++) {
+				if ($field == "-") {
+					if ($(field + 1) == filesystem && declared[$(field + 2)])
+						found = 1
+					break
+				}
+			}
+		}
+		END { exit !found }
+	' "$mpos_mountinfo_path"
+}
+
+cleanup_storage() {
+	if [ "$storage_owned" -eq 1 ]; then
+		cd /
+		if ! umount "$storage_mountpoint"; then
+			echo "micropythonos: cannot unmount $storage_mountpoint" >&2
+		fi
+		storage_owned=0
+	fi
+}
+
+mount_storage() {
+	storage_path_is_valid || return 1
+
+	if [ -z "$MPOS_STORAGE_DEVICES" ] || [ -z "$MPOS_STORAGE_FSTYPE" ]; then
+		storage_path_is_mounted
+		return
+	fi
+
+	if storage_path_is_mounted; then
+		storage_is_declared_mount
+		return
+	fi
+
+	# shellcheck disable=SC2086
+	for storage_device in $MPOS_STORAGE_DEVICES; do
+		[ -e "$storage_device" ] || continue
+		mkdir -p "$MPOS_STORAGE" || return 1
+		if mount -t "$MPOS_STORAGE_FSTYPE" "$storage_device" "$MPOS_STORAGE"; then
+			storage_owned=1
+			return 0
+		fi
+	done
+	return 1
+}
+
+micropythonos_main() {
+	if [ -r "$mpos_config_path" ]; then
+		. "$mpos_config_path"
+	fi
+
+	: "${MPOS_STORAGE:=}"
+	: "${MPOS_STORAGE_DEVICES:=}"
+	: "${MPOS_STORAGE_FSTYPE:=}"
+	: "${MPOS_STORAGE_STATE_DIR:=}"
+	: "${MPOS_HEAP_SIZE:=4194304}"
+	: "${MPOS_ROOT:=/var/lib/micropythonos}"
+	: "${MPOS_PACKAGED_APPS:=/usr/share/micropythonos/apps}"
+
+	storage_owned=0
+	storage_mountpoint=$MPOS_STORAGE
+	fallback_root=$MPOS_ROOT
+
+	case "$MPOS_HEAP_SIZE" in
+	*[!0-9]* | "")
+		echo "micropythonos: MPOS_HEAP_SIZE must be a byte count" >&2
+		exit 1
+		;;
+	esac
+
+	[ -c "$mpos_framebuffer_path" ] || {
+		echo "micropythonos: $mpos_framebuffer_path is unavailable" >&2
+		exit 1
+	}
+	[ -d "$mpos_input_path" ] || {
+		echo "micropythonos: $mpos_input_path is unavailable" >&2
+		exit 1
+	}
+	[ -x "$mpos_runtime_path" ] || {
+		echo "micropythonos: runtime is unavailable" >&2
+		exit 1
+	}
+
+	if mount_storage && storage_state_dir_is_valid; then
+		if [ -n "$MPOS_STORAGE_STATE_DIR" ]; then
+			MPOS_ROOT="$MPOS_STORAGE/$MPOS_STORAGE_STATE_DIR"
+		fi
+	else
+		cleanup_storage
+		MPOS_STORAGE=
+		MPOS_ROOT=$fallback_root
+	fi
+
+	if ! mkdir -p "$MPOS_ROOT/apps" "$MPOS_ROOT/cache" "$MPOS_ROOT/data" \
+		"$MPOS_ROOT/lib" "$MPOS_ROOT/prefs"; then
+		cleanup_storage
+		MPOS_STORAGE=
+		MPOS_ROOT=$fallback_root
+		mkdir -p "$MPOS_ROOT/apps" "$MPOS_ROOT/cache" "$MPOS_ROOT/data" \
+			"$MPOS_ROOT/lib" "$MPOS_ROOT/prefs"
+	fi
+
+	export MPOS_STORAGE MPOS_HEAP_SIZE MPOS_ROOT MPOS_PACKAGED_APPS
+	if ! cd "$MPOS_ROOT"; then
+		cleanup_storage
+		echo "micropythonos: cannot enter $MPOS_ROOT" >&2
+		exit 1
+	fi
+	if [ "$#" -eq 0 ]; then
+		set -- -c 'from mpos import DeviceInfo; DeviceInfo.set_hardware_id("fplinux"); import main'
+	fi
+
+	"$mpos_launcher_path" \
+		"$mpos_runtime_path" \
+		-X "heapsize=$MPOS_HEAP_SIZE" \
+		"$@" &
+	launcher_pid=$!
+
+	handle_signal() {
+		signal_name=$1
+		trap - "$signal_name"
+		kill "-$signal_name" "$launcher_pid" 2>/dev/null || true
+		if wait "$launcher_pid"; then
+			status=0
+		else
+			status=$?
+		fi
+		cleanup_storage
+		exit "$status"
+	}
+
+	trap 'handle_signal HUP' HUP
+	trap 'handle_signal INT' INT
+	trap 'handle_signal TERM' TERM
+	if wait "$launcher_pid"; then
+		status=0
+	else
+		status=$?
+	fi
+	cleanup_storage
+	exit "$status"
+}

@@ -49,6 +49,7 @@ source="
 	mpconfigvariant.h
 	mpconfigvariant.mk
 	micropythonos
+	micropythonos-wrapper.sh
 	COPYING.GPL-2.0
 	LICENSE
 	NOTICE
@@ -183,6 +184,8 @@ package() {
 		"$pkgdir/usr/libexec/fplinux-micropythonos/micropythonos"
 	install -Dm755 fplinux-micropythonos-launcher \
 		"$pkgdir/usr/libexec/fplinux-micropythonos/fplinux-micropythonos-launcher"
+	install -Dm644 "$srcdir/micropythonos-wrapper.sh" \
+		"$pkgdir/usr/libexec/fplinux-micropythonos/micropythonos-wrapper.sh"
 	install -Dm755 "$srcdir/micropythonos" "$pkgdir/usr/bin/micropythonos"
 	install -d -m 0755 \
 		"$pkgdir/var/lib/micropythonos/apps" \
@@ -266,7 +269,8 @@ b8612972ef08193360a662ec0e8de696c518d1272be9ff275630ae45cff3ba4dffc0a75472c7bff4
 8df5c29b85767c3353389e3eae7e973a1374c4821b7849972d79922878c1816b27effb00bcdf3a14bfb0aa553e36197aefecb811ca3001bd7278a5a1867c7d87  manifest.py
 aafc2094f617ee218d8f6e4111b88cc246c983845e2fbc9ae15ccadeb04d9ccb7007c6c393b65572c2703eeb357609d0dd88f8b67c5b90424fcb76e0d998be7f  mpconfigvariant.h
 4d5bb4df7aee96d02f1960e89611fab9ceee3ceaa33fc8c7a95587f8cce90967d72f481b6434df661beb0a65e14629ca95eadd7e59ff40487b5b1228a817293b  mpconfigvariant.mk
-bcaf077480b1bd4ca258f396bbd491c1dc0201cf3f48f1433537b88062e09bf987a73abb0213ebf310f0883c32fc5b65e85ca6003cbbbc5de4ea98ebcb75c278  micropythonos
+616b9ee085752aa8d91f172fa6ca13e0ead7cb664e292f44937a5a2d1081d0de95fd6d79f336ca767dd4e0796c0776ab8a9774736b7643c9918e5b8458e71a44  micropythonos
+246dbe7a781d9a0d2819c31c3f366ad216da376c2df7fe8cfd7357e66c0106aba2590299a7d09a4ec2098b50fd101cfb1293177eb71a970126972c8cdf800dd2  micropythonos-wrapper.sh
 260c02ff0a3e04ff0c2a95a936494b6a114a0a22121557059591d44af5fab5644ab8484be61eb33c12a6c9eef2170a108d51e2972adaef942568d94ae0d4ec83  COPYING.GPL-2.0
 655b4f52228a32ce5423a3de8918960883a2c74cb423bdbf23526513d3669bbfa8eb833c164cf9b07fd3bdaf455a7fb5bbba64d7e663fa07aa5ad22345580206  LICENSE
 9302d3e4a8e68ce5cb8be3eec7902a7c07b767ba2ca9edb084e65a703f43ab894a9bb68b4002e52f1a2001725e0c2dd245b592a04b2789fcde0b7ae7b73284fb  NOTICE
