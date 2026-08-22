@@ -70,7 +70,7 @@ def load_image_state(cache_root: Path, image_recipe: str) -> ImageState | None:
         return state
 
 
-def publish_image_state(cache_root: Path, state: ImageState) -> Path:
+def publish_image_state(cache_root: Path, state: ImageState) -> None:
     """Atomically replace the host image state."""
     if not isinstance(state, ImageState):
         message = "host image state is invalid"
@@ -90,7 +90,6 @@ def publish_image_state(cache_root: Path, state: ImageState) -> Path:
         temporary.replace(destination)
     finally:
         temporary.unlink(missing_ok=True)
-    return destination
 
 
 def _read_state(path: Path) -> ImageState | None:
