@@ -8,6 +8,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from typing import cast
 from unittest import mock
 
 from fplinux_cli import alpine_state, builder
@@ -51,10 +52,23 @@ class BuilderPublicationTests(unittest.TestCase):
         self.rootfs_output = self.work / "rootfs"
         self.rootfs_recipe = "d" * 64
         self.rootfs = self.write("rootfs.cpio", b"rootfs\n", root=self.rootfs_output)
+        self.bundle_apks = {
+            "fplinux-phone-ui": self.write(
+                "packages/fplinux-phone-ui-1-r0.apk",
+                b"base apk\n",
+                root=self.work,
+            ),
+            "fplinux-phone-ui-demo": self.write(
+                "packages/fplinux-phone-ui-demo-3-r1.apk",
+                b"target apk\n",
+                root=self.work,
+            ),
+        }
         self.target_config = {
             "profile": "default",
             "display_name": "Demo",
             "platform": "demo",
+            "bundle": {"packages": list(self.bundle_apks)},
             "linux": {"debug_dtb": "demo.dtb"},
             "bootstrap": {"load_address": 2},
             "runtime": {
@@ -65,6 +79,7 @@ class BuilderPublicationTests(unittest.TestCase):
             },
         }
         self.platform = {
+            "bundle": {"packages": []},
             "linux": {"cross_compile": "arm-"},
             "host": {
                 "runtime_tools": {"console": "console"},
@@ -82,6 +97,8 @@ class BuilderPublicationTests(unittest.TestCase):
                 "runtime-manifest.json",
                 "assets.lock.toml",
                 "THIRD_PARTY_NOTICES.md",
+                "apks/fplinux-phone-ui.apk",
+                "apks/fplinux-phone-ui-demo.apk",
             ],
         }
         self.environment = {
@@ -118,7 +135,11 @@ class BuilderPublicationTests(unittest.TestCase):
         path.write_bytes(data)
         return path
 
-    def publish(self, ramboot: Path | None = None) -> Path:
+    def publish(
+        self,
+        ramboot: Path | None = None,
+        bundle_packages: tuple[str, ...] | None = None,
+    ) -> Path:
         """Publish the configured fixture through the builder entry point."""
         with mock.patch.dict(os.environ, self.environment, clear=False):
             return builder.publish_bundle(
@@ -141,6 +162,8 @@ class BuilderPublicationTests(unittest.TestCase):
                 self.rootfs_output,
                 self.rootfs_recipe,
                 {"recipe": "e" * 64, "sha256": "f" * 64},
+                tuple(self.bundle_apks) if bundle_packages is None else bundle_packages,
+                self.bundle_apks,
             )
 
     def staging_directories(self) -> list[Path]:
@@ -194,6 +217,16 @@ class BuilderPublicationTests(unittest.TestCase):
         self.assertIn("debug/rootfs.cpio", manifest["files"])
         self.assertIn("debug/vmlinux", manifest["files"])
         self.assertEqual(
+            (published / "apks/fplinux-phone-ui.apk").read_bytes(),
+            b"base apk\n",
+        )
+        self.assertEqual(
+            (published / "apks/fplinux-phone-ui-demo.apk").read_bytes(),
+            b"target apk\n",
+        )
+        self.assertIn("apks/fplinux-phone-ui.apk", manifest["files"])
+        self.assertIn("apks/fplinux-phone-ui-demo.apk", manifest["files"])
+        self.assertEqual(
             manifest["files"]["debug/rootfs.cpio"]["size"],
             self.rootfs.stat().st_size,
         )
@@ -202,6 +235,26 @@ class BuilderPublicationTests(unittest.TestCase):
             runtime["sha256"]["image/ramboot.bin"],
             sha256_file(published / "image/ramboot.bin"),
         )
+
+    def test_publish_rejects_apks_outside_the_declared_bundle_package_set(self) -> None:
+        """A bundle cannot silently add or omit one of its declared packages."""
+        current = self.publish()
+
+        with self.assertRaisesRegex(SystemExit, "declared bundle package set"):
+            self.publish(bundle_packages=("fplinux-phone-ui",))
+
+        self.assert_old_current_and_no_staging(current)
+
+    def test_publish_rejects_release_manifest_apks_outside_the_declared_set(self) -> None:
+        """The release manifest cannot omit or add an independently named APK."""
+        current = self.publish()
+        bundle_files = cast("list[str]", self.release_manifest["bundle_files"])
+        bundle_files.remove("apks/fplinux-phone-ui-demo.apk")
+
+        with self.assertRaisesRegex(SystemExit, "release manifest APK files"):
+            self.publish()
+
+        self.assert_old_current_and_no_staging(current)
 
     def test_copy_failure_preserves_the_current_bundle_and_cleans_staging(self) -> None:
         """Retain the current bundle when copying a new payload fails."""

@@ -74,9 +74,9 @@ client instead of starting a second RAM load:
 ./host/fplinux-usb-console --interface 0
 ```
 
-Archives contain the RAM image, required host tools and assets, a runner,
-checksums, target instructions, and license notices. They do not contain build
-trees, caches, or kernel debug output.
+Archives contain the RAM image, required host tools and assets, manifest-selected
+installable APKs, a runner, checksums, target instructions, and license notices.
+They do not contain build trees, caches, or kernel debug output.
 
 ## USB access
 

@@ -96,7 +96,15 @@ def target_build_source_files(target: str) -> list[tuple[str, Path]]:
 
     for relative in STAGED_BUILD_SOURCES:
         add_source_path(files, ROOT / relative)
-    for package in alpine_state.selected_packages(platform, target_config, root=ROOT):
+    rootfs_packages = alpine_state.selected_packages(platform, target_config, root=ROOT)
+    bundle_packages = alpine_state.bundle_packages(
+        platform,
+        target_config,
+        rootfs_packages,
+        root=ROOT,
+    )
+    build_packages = (*rootfs_packages, *bundle_packages)
+    for package in build_packages:
         add_source_path(files, ROOT / "alpine/aports" / package)
     add_source_path(files, target_root / "target.toml")
     add_source_path(files, target_root / target_config["release_manifest"])

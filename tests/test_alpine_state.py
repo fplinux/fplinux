@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -87,6 +89,26 @@ class AlpineStateTests(unittest.TestCase):
             self.root,
         )
         self.assertEqual(selected, self.packages)
+
+    def test_package_cannot_be_selected_and_bundle_published(self) -> None:
+        """One package cannot be both installed and published separately."""
+        with self.assertRaisesRegex(SystemExit, "both rootfs-selected and bundle-published"):
+            alpine_state.bundle_packages(
+                {"bundle": {"packages": ["fplinux-cpuclock"]}},
+                {"bundle": {"packages": []}},
+                self.packages,
+                self.root,
+            )
+
+    def test_bundle_selection_rejects_duplicate_platform_and_target_ownership(self) -> None:
+        """A bundle package has one declarative owner, just like a rootfs package."""
+        with self.assertRaisesRegex(SystemExit, "owned by both platform and target"):
+            alpine_state.bundle_packages(
+                {"bundle": {"packages": ["fplinux-cpuclock"]}},
+                {"bundle": {"packages": ["fplinux-cpuclock"]}},
+                (),
+                self.root,
+            )
 
     def test_selection_rejects_duplicate_ownership(self) -> None:
         """One package cannot be owned by both common and platform layers."""
@@ -206,8 +228,8 @@ class AlpineStateTests(unittest.TestCase):
         )
         self.assertNotEqual(self._recipe(), self._recipe(packages=without_cpuclock))
 
-    def test_rootfs_world_requires_the_exact_selected_package_set(self) -> None:
-        """Composition cannot silently omit or add a local FPLinux package."""
+    def test_rootfs_fixture_checks_world_and_delegates_apk_queries(self) -> None:
+        """Check filesystem rules while mocking only apk ownership/database queries."""
         rootfs = Path(self.temporary.name) / "rootfs"
         rootfs.mkdir()
         (rootfs / "init").symlink_to("/sbin/init")
@@ -221,8 +243,6 @@ class AlpineStateTests(unittest.TestCase):
             "usr/bin/fplinux-console": "",
             "usr/bin/fplinux-input": "",
             "usr/bin/fplinux-cpuclock": "",
-            "usr/bin/quake": "",
-            "usr/bin/tyr-quake": "",
         }
         for relative, contents_text in contents.items():
             destination = rootfs / relative
@@ -238,10 +258,47 @@ class AlpineStateTests(unittest.TestCase):
 
         with mock.patch.object(alpine_builder, "_require_apk_owner") as require_owner:
             alpine_builder._verify_alpine_rootfs(rootfs, self.packages)  # noqa: SLF001
-        self.assertIn(
-            mock.call(rootfs, "/usr/bin/fplinux-cpuclock", "fplinux-cpuclock"),
+        self.assertEqual(
             require_owner.call_args_list,
+            [
+                mock.call(rootfs, "/etc/fstab", "fplinux-base"),
+                mock.call(rootfs, "/etc/inittab", "fplinux-base"),
+                mock.call(rootfs, "/etc/os-release", "fplinux-base"),
+                mock.call(
+                    rootfs,
+                    "/etc/init.d/fplinux-console",
+                    "fplinux-console-openrc",
+                ),
+                mock.call(
+                    rootfs,
+                    "/etc/init.d/fplinux-usb-getty",
+                    "fplinux-console-openrc",
+                ),
+                mock.call(
+                    rootfs,
+                    "/etc/init.d/fplinux-input",
+                    "fplinux-input-openrc",
+                ),
+                mock.call(rootfs, "/usr/bin/fplinux-console", "fplinux-console"),
+                mock.call(rootfs, "/usr/bin/fplinux-input", "fplinux-input"),
+                mock.call(rootfs, "/usr/bin/fplinux-cpuclock", "fplinux-cpuclock"),
+            ],
         )
+
+        bundle_packages = ("fplinux-tyrquake",)
+        with (
+            mock.patch.object(alpine_builder, "_require_apk_owner"),
+            mock.patch.object(alpine_builder, "_require_bundle_package_absent") as require_absent,
+        ):
+            alpine_builder._verify_alpine_rootfs(  # noqa: SLF001
+                rootfs, self.packages, bundle_packages
+            )
+        self.assertEqual(
+            require_absent.call_args_list,
+            [mock.call(rootfs, package) for package in bundle_packages],
+        )
+        self.assertFalse((rootfs / "usr/bin/quake").exists())
+        self.assertFalse((rootfs / "usr/bin/tyr-quake").exists())
 
         world.write_text("\n".join(self.packages[:-1]) + "\n", encoding="utf-8")
         with (
@@ -289,8 +346,8 @@ class AlpineStateTests(unittest.TestCase):
         """A different persistent abuild key must produce a different recipe."""
         self.assertNotEqual(self._recipe(signing_key="d" * 64), self._recipe(signing_key="e" * 64))
 
-    def test_fixed_apk_slots_rebuild_only_changed_aport_and_keep_last_good(self) -> None:
-        """Normal repeat/edit/failure calls reuse exact APKs without losing a good slot."""
+    def test_apk_cache_control_flow_with_mocked_abuild_preserves_last_good(self) -> None:
+        """Exercise cache reuse, one-source invalidation and failure using fake abuild output."""
         cache = Path(self.temporary.name) / "cache"
         sources = cache / "downloads/alpine/sources"
         sources.mkdir(parents=True)
@@ -322,7 +379,7 @@ class AlpineStateTests(unittest.TestCase):
 
         invocation = 0
 
-        def build_apks() -> tuple[list[Path], Path, Path]:
+        def build_apks() -> tuple[dict[str, Path], Path, Path]:
             nonlocal invocation
             work = Path(self.temporary.name) / f"work-{invocation}"
             invocation += 1
@@ -346,6 +403,11 @@ class AlpineStateTests(unittest.TestCase):
             mock.patch.object(alpine_builder, "_chown_tree"),
             mock.patch.object(alpine_builder, "_builder_output", side_effect=list_packages),
             mock.patch.object(alpine_builder, "_run_as_builder", side_effect=run_as_builder),
+            mock.patch.object(
+                alpine_builder,
+                "_apk_package_name",
+                side_effect=lambda path: path.name.removesuffix("-1.0-r0.apk"),
+            ),
             mock.patch.object(alpine_builder, "_log_message"),
             mock.patch.object(alpine_state, "alpine_package_recipe", side_effect=package_recipe),
         ):
@@ -364,9 +426,9 @@ class AlpineStateTests(unittest.TestCase):
             self.assertEqual(builds, ["fplinux-cpuclock"])
 
             slot = cache / alpine_state.PACKAGE_CACHE_DIRECTORY / "fplinux-cpuclock"
-            marker = slot / alpine_state.PACKAGE_RECIPE_NAME
+            receipt = slot / alpine_state.PACKAGE_RECEIPT_NAME
             package = slot / "fplinux-cpuclock-1.0-r0.apk"
-            previous_marker = marker.read_bytes()
+            previous_receipt = receipt.read_bytes()
             previous_package = package.read_bytes()
             self._write(
                 "alpine/aports/fplinux-cpuclock/APKBUILD",
@@ -376,8 +438,160 @@ class AlpineStateTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "abuild failed for fplinux-cpuclock"):
                 build_apks()
 
-        self.assertEqual(marker.read_bytes(), previous_marker)
+        self.assertEqual(receipt.read_bytes(), previous_receipt)
         self.assertEqual(package.read_bytes(), previous_package)
+
+    def test_rootfs_hit_calls_apk_builder_after_bundle_cache_miss(self) -> None:
+        """Exercise cache-hit control flow with mocked package lookup and build results."""
+        cache = Path(self.temporary.name) / "cache"
+        output = cache / "rootfs" / ("9" * 64)
+        output.mkdir(parents=True)
+        rootfs = output / alpine_state.ROOTFS_NAME
+        rootfs.write_bytes(b"rootfs\n")
+        archive = self._write("downloads/minirootfs.tar.gz", b"archive\n")
+        private_key = self._write("keys/fplinux-build.rsa", b"private\n")
+        public_key = self._write("keys/fplinux-build.rsa.pub", b"public\n")
+        base_apk = self._write("built/fplinux-base.apk", b"base\n")
+        bundle_apk = self._write("built/fplinux-phone-ui.apk", b"bundle\n")
+        extracted = mock.MagicMock()
+        archive_context = mock.MagicMock()
+        archive_context.__enter__.return_value = extracted
+        lock = {
+            "release": "3.24.1",
+            "arch": "armv7",
+            "minirootfs": {
+                "url": "https://example.invalid",
+                "sha256": "a" * 64,
+                "bytes": archive.stat().st_size,
+            },
+        }
+
+        with (
+            mock.patch.object(alpine_builder, "CACHE", cache),
+            mock.patch.dict(os.environ, {"FPLINUX_CONTAINER_IMAGE_RECIPE": "1" * 64}),
+            mock.patch.object(
+                alpine_builder,
+                "_ensure_apk_signing_key",
+                return_value=(private_key, public_key, "2" * 64),
+            ),
+            mock.patch.object(alpine_state, "alpine_rootfs_recipe", return_value="9" * 64),
+            mock.patch.object(alpine_state, "receipt_matches", return_value=True),
+            mock.patch.object(
+                alpine_builder,
+                "_cached_aport_packages",
+                side_effect=({"fplinux-base": base_apk}, None),
+            ) as cached_aports,
+            mock.patch.object(alpine_state, "load_alpine_lock", return_value=lock),
+            mock.patch.object(alpine_state, "package_records", return_value={}),
+            mock.patch.object(alpine_builder, "_fetch", return_value=archive),
+            mock.patch.object(
+                alpine_builder,
+                "_alpine_group_packages",
+                side_effect=([], []),
+            ),
+            mock.patch.object(tarfile, "open", return_value=archive_context),
+            mock.patch.object(alpine_builder, "_prepare_alpine_sysroot"),
+            mock.patch.object(alpine_builder, "_log_message"),
+            mock.patch.object(
+                alpine_builder,
+                "_build_fplinux_apks",
+                return_value=(
+                    {"fplinux-base": base_apk, "fplinux-phone-ui": bundle_apk},
+                    private_key,
+                    public_key,
+                ),
+            ) as build_apks,
+            mock.patch.object(alpine_builder, "_build_alpine_composition_repository") as compose,
+        ):
+            actual_rootfs, actual_output, recipe, bundle_outputs = alpine_builder.build_rootfs(
+                2,
+                ("fplinux-base",),
+                ("fplinux-phone-ui",),
+            )
+
+        self.assertEqual((actual_rootfs, actual_output, recipe), (rootfs, output, "9" * 64))
+        self.assertEqual(bundle_outputs, {"fplinux-phone-ui": bundle_apk})
+        self.assertEqual(
+            cached_aports.call_args_list,
+            [
+                mock.call("fplinux-base", "1" * 64, "2" * 64),
+                mock.call("fplinux-phone-ui", "1" * 64, "2" * 64),
+            ],
+        )
+        build_apks.assert_called_once()
+        build_args = build_apks.call_args.args
+        self.assertEqual(build_args[0], lock)
+        self.assertEqual(build_args[1].name, "sysroot")
+        self.assertEqual(build_args[2].name, "package-work")
+        self.assertEqual(build_args[1].parent, build_args[2].parent)
+        self.assertEqual(build_args[2].parent.parent, output.parent)
+        self.assertEqual(build_args[3:6], (2, private_key, public_key))
+        self.assertEqual(build_args[6], ("fplinux-base", "fplinux-phone-ui"))
+        compose.assert_not_called()
+
+    def test_bundle_absence_check_interprets_mocked_apk_exit_codes(self) -> None:
+        """Map mocked ``apk info --exists`` results to absent and installed outcomes."""
+        root = Path(self.temporary.name) / "rootfs"
+        command = [
+            "apk",
+            "--root",
+            str(root),
+            "--no-network",
+            "info",
+            "--exists",
+            "fplinux-phone-ui",
+        ]
+        with mock.patch.object(
+            subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess([], 1, "", ""),
+        ) as run:
+            alpine_builder._require_bundle_package_absent(  # noqa: SLF001
+                root, "fplinux-phone-ui"
+            )
+        run.assert_called_once_with(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            env=mock.ANY,
+        )
+        with (
+            mock.patch.object(
+                subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess([], 0, "fplinux-phone-ui\n", ""),
+            ) as run,
+            self.assertRaisesRegex(SystemExit, "installed in the standard rootfs"),
+        ):
+            alpine_builder._require_bundle_package_absent(  # noqa: SLF001
+                root, "fplinux-phone-ui"
+            )
+        run.assert_called_once_with(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            env=mock.ANY,
+        )
+        with (
+            mock.patch.object(
+                subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess([], 2, "", "apk failed"),
+            ) as run,
+            self.assertRaisesRegex(SystemExit, "cannot verify.*apk failed"),
+        ):
+            alpine_builder._require_bundle_package_absent(  # noqa: SLF001
+                root, "fplinux-phone-ui"
+            )
+        run.assert_called_once_with(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            env=mock.ANY,
+        )
 
     def test_signing_key_identity_requires_one_regular_public_key(self) -> None:
         """Keep package signing state explicit rather than silently generating it in prune."""

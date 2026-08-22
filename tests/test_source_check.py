@@ -167,13 +167,24 @@ class SourceInventoryTests(unittest.TestCase):
                     ],
                 )
 
-    def test_package_selection_validation_resolves_every_target(self) -> None:
-        """Reject a manifest package typo before the public build path."""
+    def test_package_selection_validation_stops_at_the_first_unresolved_target(self) -> None:
+        """The mocked resolver receives both targets and stops before a second bundle lookup."""
         targets = {
-            "phone-a": {"platform": "soc", "rootfs": {"packages": []}},
-            "phone-b": {"platform": "soc", "rootfs": {"packages": ["board-app"]}},
+            "phone-a": {
+                "platform": "soc",
+                "bundle": {"packages": ["phone-ui"]},
+                "rootfs": {"packages": []},
+            },
+            "phone-b": {
+                "platform": "soc",
+                "bundle": {"packages": []},
+                "rootfs": {"packages": ["board-app"]},
+            },
         }
-        platform = {"rootfs": {"packages": ["platform-app"]}}
+        platform = {
+            "rootfs": {"packages": ["platform-app"]},
+            "bundle": {"packages": []},
+        }
         with (
             mock.patch.object(source_check, "discover_targets", return_value=tuple(targets)),
             mock.patch.object(source_check, "load_target", side_effect=targets.__getitem__),
@@ -186,11 +197,33 @@ class SourceInventoryTests(unittest.TestCase):
                     SystemExit("selected aport is missing: board-app"),
                 ),
             ) as selected,
+            mock.patch.object(
+                alpine_state,
+                "bundle_packages",
+                return_value=("phone-ui",),
+            ) as bundle_packages,
             self.assertRaisesRegex(SystemExit, "selected aport is missing"),
         ):
             source_check.validate_package_selections()
 
-        self.assertEqual(selected.call_count, 2)
+        self.assertEqual(
+            selected.call_args_list,
+            [
+                mock.call(platform, targets["phone-a"], root=source_check.ROOT),
+                mock.call(platform, targets["phone-b"], root=source_check.ROOT),
+            ],
+        )
+        self.assertEqual(
+            bundle_packages.call_args_list,
+            [
+                mock.call(
+                    platform,
+                    targets["phone-a"],
+                    ("fplinux-base", "platform-app"),
+                    root=source_check.ROOT,
+                )
+            ],
+        )
 
 
 if __name__ == "__main__":

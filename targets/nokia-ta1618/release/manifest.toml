@@ -13,6 +13,7 @@ bundle_files = [
   "runner/run.py",
   "runner/platform_adapter.py",
   "runtime-manifest.json",
+  "apks/fplinux-tyrquake.apk",
   "assets.lock.toml",
   "THIRD_PARTY_NOTICES.md",
 ]

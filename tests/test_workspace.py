@@ -46,10 +46,11 @@ class WorkspaceSnapshotTests(unittest.TestCase):
             self.assertEqual(len(snapshot.recipe), 64)
             self.assertFalse((root / ".cache").exists())
 
-    def test_target_build_closure_stages_only_selected_aports(self) -> None:
-        """The workspace delegates the exact selected package set to the shared resolver."""
+    def test_target_build_closure_stages_rootfs_and_bundle_aports(self) -> None:
+        """Mocked staging receives the exact rootfs and bundle package closure."""
         target: dict[str, Any] = {
             "platform": "demo",
+            "bundle": {"packages": ["fplinux-phone-ui"]},
             "release_manifest": "release/manifest.toml",
             "assets_lock": "loader/assets.lock.toml",
             "linux": {
@@ -61,6 +62,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
             "bootstrap": {"source": "bootstrap"},
         }
         platform: dict[str, Any] = {
+            "bundle": {"packages": []},
             "linux": {"patches": [], "copies": [], "appends": []},
             "bootstrap": {"shared_copies": []},
             "host": {"tools": []},
@@ -73,17 +75,40 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                 "selected_packages",
                 return_value=("fplinux-base", "fplinux-input"),
             ) as selected_packages,
+            mock.patch.object(
+                alpine_state,
+                "bundle_packages",
+                return_value=("fplinux-phone-ui",),
+            ) as bundle_packages,
             mock.patch.object(workspace_module, "add_source_path") as add_source,
         ):
             workspace_module.target_build_source_files("phone")
 
-        staged = {call.args[1] for call in add_source.call_args_list}
         selected_packages.assert_called_once_with(platform, target, root=ROOT)
-        self.assertNotIn(ROOT / "alpine", staged)
-        self.assertIn(ROOT / "alpine/abuild.conf", staged)
-        for package in ("fplinux-base", "fplinux-input"):
-            self.assertIn(ROOT / "alpine/aports" / package, staged)
-        self.assertNotIn(ROOT / "alpine/aports/fplinux-cpuclock", staged)
+        bundle_packages.assert_called_once_with(
+            platform,
+            target,
+            ("fplinux-base", "fplinux-input"),
+            root=ROOT,
+        )
+        expected_paths = [
+            *(ROOT / relative for relative in workspace_module.STAGED_BUILD_SOURCES),
+            ROOT / "alpine/aports/fplinux-base",
+            ROOT / "alpine/aports/fplinux-input",
+            ROOT / "alpine/aports/fplinux-phone-ui",
+            ROOT / "targets/phone/target.toml",
+            ROOT / "targets/phone/release/manifest.toml",
+            ROOT / "targets/phone/loader/assets.lock.toml",
+            ROOT / "targets/phone/kernel/defconfig",
+            ROOT / "targets/phone/bootstrap",
+            ROOT / "platforms/demo/platform.toml",
+            ROOT / "common/run.py",
+            ROOT / "platforms/demo/host/adapter.py",
+        ]
+        self.assertEqual(
+            add_source.call_args_list,
+            [mock.call(mock.ANY, path) for path in expected_paths],
+        )
 
     def test_snapshot_recipe_includes_file_mode(self) -> None:
         """Changing only execute permissions changes the causal recipe."""

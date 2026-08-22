@@ -1149,9 +1149,21 @@ def _publish_staged_bundle(
     rootfs_output: Path,
     rootfs_recipe: str,
     kbuild_receipt: dict[str, str],
+    bundle_packages: tuple[str, ...],
+    bundle_apks: dict[str, Path],
 ) -> Path:
     """Complete one already-private immutable bundle staging directory."""
     profile = target_config["profile"]
+    if set(bundle_packages) != set(bundle_apks):
+        fail("published bundle APKs differ from the declared bundle package set")
+    expected_apk_files = {f"apks/{package}.apk" for package in bundle_packages}
+    manifest_apk_files = {
+        relative
+        for relative in release_manifest["bundle_files"]
+        if relative.startswith("apks/") and relative.endswith(".apk")
+    }
+    if manifest_apk_files != expected_apk_files:
+        fail("release manifest APK files differ from the declared bundle package set")
 
     image_name = release_manifest["image"]
     copy_file(ramboot, release / image_name)
@@ -1176,6 +1188,8 @@ def _publish_staged_bundle(
     )
     copy_file(asset_lock_path, release / "assets.lock.toml")
     copy_file(ROOT / "THIRD_PARTY_NOTICES.md", release / "THIRD_PARTY_NOTICES.md")
+    for package, source in sorted(bundle_apks.items()):
+        copy_file(source, release / "apks" / f"{package}.apk")
 
     runtime = runtime_manifest(
         release,
@@ -1253,6 +1267,8 @@ def publish_bundle(
     rootfs_output: Path,
     rootfs_recipe: str,
     kbuild_receipt: dict[str, str],
+    bundle_packages: tuple[str, ...],
+    bundle_apks: dict[str, Path],
 ) -> Path:
     """Publish a complete immutable bundle and select it as current."""
     profile = target_config["profile"]
@@ -1279,6 +1295,8 @@ def publish_bundle(
             rootfs_output,
             rootfs_recipe,
             kbuild_receipt,
+            bundle_packages,
+            bundle_apks,
         )
     finally:
         discard_bundle_staging(OUTPUT, target, profile, release)
@@ -1297,7 +1315,8 @@ def main() -> None:
     with report_stage(reporter, "configuration"):
         target_config = load_target(args.target)
         platform = load_platform(target_config["platform"])
-        packages = alpine_state.selected_packages(platform, target_config)
+        rootfs_packages = alpine_state.selected_packages(platform, target_config)
+        bundle_packages = alpine_state.bundle_packages(platform, target_config, rootfs_packages)
         with (ROOT / "sources.lock.toml").open("rb") as stream:
             sources = tomllib.load(stream)
         linux_base = require_sha256(
@@ -1321,7 +1340,9 @@ def main() -> None:
         )
 
     with report_stage(reporter, "rootfs"):
-        rootfs, rootfs_output, rootfs_recipe = alpine_builder.build_rootfs(args.jobs, packages)
+        rootfs, rootfs_output, rootfs_recipe, bundle_apk_outputs = alpine_builder.build_rootfs(
+            args.jobs, rootfs_packages, bundle_packages
+        )
     cross = platform["linux"]["cross_compile"]
     kernel_output = work / "kernel"
     with report_stage(reporter, "kernel"):
@@ -1381,6 +1402,8 @@ def main() -> None:
             rootfs_output,
             rootfs_recipe,
             kbuild_receipt,
+            bundle_packages,
+            bundle_apk_outputs,
         )
 
 

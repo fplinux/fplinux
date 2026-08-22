@@ -20,12 +20,11 @@ SIGNING_KEY_DIRECTORY = "apk-signing"
 SIGNING_PRIVATE_KEY = "fplinux-build.rsa"
 SIGNING_PUBLIC_KEY = "fplinux-build.rsa.pub"
 PACKAGE_CACHE_DIRECTORY = "apks"
-PACKAGE_RECIPE_NAME = ".fplinux-package-recipe"
+PACKAGE_RECEIPT_NAME = ".fplinux-package-receipt.json"
 COMMON_PACKAGES = (
     "fplinux-base",
     "fplinux-console",
     "fplinux-input",
-    "fplinux-tyrquake",
 )
 PACKAGE_ID = re.compile(r"[a-z0-9][a-z0-9+._-]*")
 
@@ -82,19 +81,19 @@ def _package_id(value: object, name: str) -> str:
     return result
 
 
-def _declared_packages(config: Mapping[str, object], owner: str) -> tuple[str, ...]:
-    rootfs = config.get("rootfs")
-    if not isinstance(rootfs, Mapping) or set(rootfs) != {"packages"}:
-        _fail(f"{owner} rootfs must contain exactly packages")
-    raw = rootfs.get("packages")
+def _declared_packages(config: Mapping[str, object], owner: str, layer: str) -> tuple[str, ...]:
+    table = config.get(layer)
+    if not isinstance(table, Mapping) or set(table) != {"packages"}:
+        _fail(f"{owner} {layer} must contain exactly packages")
+    raw = table.get("packages")
     if not isinstance(raw, list):
-        _fail(f"{owner} rootfs packages must be an array")
+        _fail(f"{owner} {layer} packages must be an array")
     result = tuple(
-        _package_id(package, f"{owner} rootfs packages[{index}]")
+        _package_id(package, f"{owner} {layer} packages[{index}]")
         for index, package in enumerate(raw)
     )
     if len(set(result)) != len(result):
-        _fail(f"{owner} rootfs packages must not contain duplicates")
+        _fail(f"{owner} {layer} packages must not contain duplicates")
     return result
 
 
@@ -121,8 +120,8 @@ def selected_packages(
     owners: dict[str, str] = {}
     for owner, packages in (
         ("common", COMMON_PACKAGES),
-        ("platform", _declared_packages(platform_config, "platform")),
-        ("target", _declared_packages(target_config, "target")),
+        ("platform", _declared_packages(platform_config, "platform", "rootfs")),
+        ("target", _declared_packages(target_config, "target", "rootfs")),
     ):
         for package in packages:
             previous = owners.get(package)
@@ -130,6 +129,33 @@ def selected_packages(
                 _fail(f"package {package} is owned by both {previous} and {owner}")
             owners[package] = owner
     return _canonical_packages(tuple(owners), root)
+
+
+def bundle_packages(
+    platform_config: Mapping[str, object],
+    target_config: Mapping[str, object],
+    rootfs_packages: Sequence[str],
+    root: Path = ROOT,
+) -> tuple[str, ...]:
+    """Resolve platform and target APKs published alongside, not in, the rootfs."""
+    owners: dict[str, str] = {}
+    for owner, packages in (
+        ("platform", _declared_packages(platform_config, "platform", "bundle")),
+        ("target", _declared_packages(target_config, "target", "bundle")),
+    ):
+        for package in packages:
+            previous = owners.get(package)
+            if previous is not None:
+                _fail(f"bundle package {package} is owned by both {previous} and {owner}")
+            owners[package] = owner
+    result = _canonical_packages(tuple(owners), root)
+    overlap = set(result) & set(rootfs_packages)
+    if overlap:
+        _fail(
+            "packages cannot be both rootfs-selected and bundle-published: "
+            + ", ".join(sorted(overlap))
+        )
+    return result
 
 
 def load_alpine_lock(root: Path = ROOT) -> dict[str, Any]:
