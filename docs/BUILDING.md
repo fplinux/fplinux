@@ -49,6 +49,32 @@ an exact successful result when their current inputs match; otherwise they run
 again. `--no-cache` reruns selected cacheable scopes. This gate is useful for
 source work but is not a prerequisite for every build or RAM run.
 
+## Regenerate Alpine checksums
+
+When an Alpine aport source file changes, regenerate its `sha512sums` with the
+supported command instead of editing individual digests:
+
+```sh
+./fplinux checksum <aport>
+```
+
+The command snapshots the aport and its declared shared sources, runs `abuild
+checksum` in the pinned build image against the shared Alpine source cache, and
+atomically replaces only the canonical `APKBUILD` checksum block. It refuses to
+publish a result if the source closure changed while the command was running or
+if `abuild` changed any other recipe text.
+
+After the image and required source archives have been prepared, regeneration
+can run without network access:
+
+```sh
+./fplinux checksum <aport> --offline
+```
+
+`./fplinux checksum` is the sole supported path for regenerating FPLinux aport
+checksums. Do not run `abuild checksum` directly in the checkout or manually
+replace individual digest lines.
+
 ## Build a target
 
 ```sh
