@@ -22,6 +22,7 @@ patches = [
   "kernel/0001-nokia-ta1618-board.patch",
   "kernel/0002-nokia-ta1618-dt-bindings.patch",
   "kernel/0003-nokia-ta1618-kpled.patch",
+  "kernel/0004-nokia-ta1618-usb-regulator.patch",
 ]
 # The DTB must never describe internal storage or a generic SDHCI host; the
 # removable microSD slot is the only storage this target may reach.
@@ -57,8 +58,16 @@ source = "kernel/leds-ta1618-kpled.c"
 destination = "drivers/leds/leds-ta1618-kpled.c"
 
 [[linux.copies]]
+source = "kernel/sc2720-usb33-regulator.c"
+destination = "drivers/regulator/sc2720-usb33.c"
+
+[[linux.copies]]
 source = "bindings/fplinux,ta1618-kpled.yaml"
 destination = "Documentation/devicetree/bindings/leds/fplinux,ta1618-kpled.yaml"
+
+[[linux.copies]]
+source = "bindings/fplinux,sc2720-usb33-regulator.yaml"
+destination = "Documentation/devicetree/bindings/regulator/fplinux,sc2720-usb33-regulator.yaml"
 
 [[linux.copies]]
 source = "dts/ums9117-nokia-ta1618.dts"

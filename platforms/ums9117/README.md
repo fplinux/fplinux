@@ -21,16 +21,16 @@ and the values supplied to the loader.
 
 ## Reusable capabilities
 
-| Capability                                             | Status        | Target-facing requirement or limitation                                                                       |
-| ------------------------------------------------------ | ------------- | ------------------------------------------------------------------------------------------------------------- |
-| CPU / GIC / timers                                     | Supported     | The SoC has one Cortex-A7 CPU; targets use the shared interrupt and timer nodes.                              |
-| Clock controller                                       | Partial       | Fixed clock nodes are available; there is no general clock-controller driver.                                 |
-| USB device controller                                  | Partial       | PIO gadget mode only. The target bootstrap must leave the controller and PHY in the required inherited state. |
-| Analog-die interface                                   | Supported     | Target-owned clients use the shared inherited transport; it does not cold-initialize the controller.          |
-| LCDC framebuffer core                                  | Supported     | Targets provide a panel profile and the board-specific panel transport setup.                                 |
-| Matrix keypad                                          | Supported     | Targets provide matrix wiring, inherited EIC use where applicable, and the normalized keymap.                 |
-| USB host / DMA                                         | Not supported | No host-mode initialization or USB DMA path.                                                                  |
-| UART, GPIO/pin control, audio, SPI/I2C, watchdog/reset | Not supported | No generic platform framework or driver for these functions.                                                  |
+| Capability                                             | Status        | Target-facing requirement or limitation                                                                                                                                       |
+| ------------------------------------------------------ | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CPU / GIC / timers                                     | Supported     | The SoC has one Cortex-A7 CPU; targets use the shared interrupt and timer nodes.                                                                                              |
+| Clock controller                                       | Partial       | Fixed clock nodes are available; there is no general clock-controller driver.                                                                                                 |
+| USB device controller                                  | Supported     | PIO peripheral gadget mode only. The current Nokia cold-owned profile and both INOI inherited-state profiles have enumerated at USB High-Speed and exposed the serial gadget. |
+| Analog-die interface                                   | Supported     | Linux initializes the shared transport; feature clients and their board wiring remain target-owned.                                                                           |
+| LCDC framebuffer core                                  | Supported     | Targets provide a panel profile and the board-specific panel transport setup.                                                                                                 |
+| Matrix keypad                                          | Supported     | Targets provide matrix wiring, inherited EIC use where applicable, and the normalized keymap.                                                                                 |
+| USB host / DMA                                         | Not supported | No host-mode initialization or USB DMA path.                                                                                                                                  |
+| UART, GPIO/pin control, audio, SPI/I2C, watchdog/reset | Not supported | No generic platform framework or driver for these functions.                                                                                                                  |
 
 ## Shared framebuffer interface
 
@@ -49,15 +49,19 @@ is intentionally silent.
 ## Target requirements
 
 Targets enable only the SoC nodes their board can use. MUSB is disabled by
-default and a target enables peripheral mode only when its bootstrap and wiring
-provide the required inherited state. Targets add board devices and do not repeat
-the SoC timer, GIC or USB addresses.
+default. INOI targets enable its inherited-state peripheral profile. Nokia
+overrides the shared node with its cold-owned peripheral profile and the
+SC2720 USB 3.3 V supply. Targets add board devices and do not repeat the SoC
+timer, GIC or USB addresses.
 
 ## Known constraints
 
 - The platform brings up one CPU only.
-- USB uses PIO gadget mode and depends on inherited controller state; it is not
-  a complete cold-initialization path.
+- USB uses PIO gadget mode. INOI targets use inherited controller state; Nokia
+  initializes the controller, PHY and 3.3 V supply from Linux. On the current
+  artifacts, all three target profiles enumerated at High-Speed and completed
+  a shell/data-pull plus physical USB reconnect. This does not establish USB
+  host, DMA, host-keyboard or application-workflow support.
 - Clock, reset, pin-control and power-domain frameworks are not implemented.
 - The platform has no USB host or DMA support.
 

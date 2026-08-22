@@ -1,0 +1,47 @@
+From: FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+Date: Sat, 22 Aug 2026 12:00:00 +0500
+Subject: [PATCH] regulator: add Nokia TA-1618 USB supply
+
+Add the target-owned SC2720 USB 3.3 V regulator used by the Nokia TA-1618.
+The driver source and binding are supplied by the target manifest.
+
+Signed-off-by: FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+---
+ drivers/regulator/Kconfig  | 9 +++++++++
+ drivers/regulator/Makefile | 1 +
+ 2 files changed, 10 insertions(+)
+
+diff --git a/drivers/regulator/Kconfig b/drivers/regulator/Kconfig
+index d84f3d054c59..6f4cc3f4de81 100644
+--- a/drivers/regulator/Kconfig
++++ b/drivers/regulator/Kconfig
+@@ -37,6 +37,15 @@ config REGULATOR_FIXED_VOLTAGE
+ 	  useful for systems which use a combination of software
+ 	  managed regulators and simple non-configurable regulators.
+
++config REGULATOR_SC2720_USB33
++	bool "SC2720 USB 3.3 V regulator"
++	depends on MACH_NOKIA_TA1618
++	help
++	  Establish the USB LDO's 3.3 V selector and control its active-low
++	  power-down bit in the SC2720 analog die through the UMS9117 ADI
++	  transport. This driver exposes only that rail and does not
++	  configure any other SC2720 supply.
++
+ config REGULATOR_VIRTUAL_CONSUMER
+ 	tristate "Virtual regulator consumer support"
+ 	help
+diff --git a/drivers/regulator/Makefile b/drivers/regulator/Makefile
+index b3101376029d..e80b67378659 100644
+--- a/drivers/regulator/Makefile
++++ b/drivers/regulator/Makefile
+@@ -8,6 +8,7 @@ obj-$(CONFIG_REGULATOR) += core.o dummy.o fixed-helper.o helpers.o devres.o irq_helpers.o
+ obj-$(CONFIG_REGULATOR_NETLINK_EVENTS) += event.o
+ obj-$(CONFIG_OF) += of_regulator.o
+ obj-$(CONFIG_REGULATOR_FIXED_VOLTAGE) += fixed.o
++obj-$(CONFIG_REGULATOR_SC2720_USB33) += sc2720-usb33.o
+ obj-$(CONFIG_REGULATOR_VIRTUAL_CONSUMER) += virtual.o
+ obj-$(CONFIG_REGULATOR_USERSPACE_CONSUMER) += userspace-consumer.o
+
+--
+2.53.0
