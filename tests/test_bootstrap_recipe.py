@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Regression tests for the device-visible bootstrap recipe closure."""
+"""Behavior tests for the device-visible bootstrap recipe closure."""
 
 from __future__ import annotations
 

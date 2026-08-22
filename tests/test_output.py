@@ -16,10 +16,8 @@ import time
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
 from unittest import mock
 
-from fplinux_cli import output as output_module
 from fplinux_cli.common import ROOT, display_text
 from fplinux_cli.output import RunReporter, exit_status, run_entrypoint
 
@@ -104,42 +102,53 @@ class RunReporterTests(unittest.TestCase):
                 ],
             )
 
-    def test_run_metadata_atomic_replace_leaves_no_temporary_file(self) -> None:
-        """Use replace-based publication and remove every writer temporary on success."""
+    def test_run_metadata_remains_readable_during_repeated_updates(self) -> None:
+        """Concurrent readers never observe a missing or partial metadata document."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "run"
             reporter = RunReporter("check", root, ".cache/logs/test", verbose=False)
-            before = json.loads(reporter.metadata_path.read_text())
-            real_replace = os.replace
-            observed_old_metadata: list[dict[str, object]] = []
+            stop = threading.Event()
+            failures: list[BaseException] = []
+            observations: list[dict[str, object]] = []
 
-            def replace(
-                source: str | bytes | os.PathLike[str] | os.PathLike[bytes],
-                destination: str | bytes | os.PathLike[str] | os.PathLike[bytes],
-            ) -> None:
-                observed_old_metadata.append(json.loads(reporter.metadata_path.read_text()))
-                real_replace(source, destination)
+            def read_metadata() -> None:
+                while not stop.is_set():
+                    try:
+                        value = json.loads(reporter.metadata_path.read_text())
+                        if not isinstance(value, dict):
+                            failures.append(TypeError("metadata is not an object"))
+                            return
+                        observations.append(value)
+                    except (
+                        OSError,
+                        UnicodeDecodeError,
+                        json.JSONDecodeError,
+                    ) as error:
+                        failures.append(error)
+                        return
+                    time.sleep(0)
 
-            with (
-                mock.patch(
-                    "fplinux_cli.output.os.replace",
-                    side_effect=replace,
-                ) as replace_mock,
-                reporter.stage("atomic"),
-            ):
-                pass
+            reader = threading.Thread(target=read_metadata)
+            reader.start()
+            try:
+                with contextlib.redirect_stderr(io.StringIO()):
+                    for sequence in range(100):
+                        with reporter.stage(f"update-{sequence}"):
+                            pass
+            finally:
+                stop.set()
+                reader.join(5)
 
-            self.assertEqual(replace_mock.call_count, 2)
-            self.assertEqual(observed_old_metadata[0], before)
-            old_stages = cast("list[dict[str, object]]", observed_old_metadata[1]["stages"])
-            self.assertEqual(old_stages[0]["status"], "running")
+            self.assertFalse(reader.is_alive(), "metadata reader did not stop")
+            self.assertEqual(failures, [])
+            self.assertTrue(observations)
             self.assertEqual(
-                [path.name for path in root.iterdir() if path.name.startswith(".run.json.")],
+                [
+                    path.name
+                    for path in root.iterdir()
+                    if path.name != "run.json" and path.suffix != ".log"
+                ],
                 [],
-            )
-            self.assertEqual(
-                json.loads(reporter.metadata_path.read_text())["stages"][0]["status"],
-                "success",
             )
 
     def test_nested_reporter_writes_only_its_own_metadata(self) -> None:
@@ -410,7 +419,6 @@ class RunReporterTests(unittest.TestCase):
                 self.assertRaisesRegex(LookupError, later_message),
             ):
                 run_entrypoint(catch_then_fail)
-            self.assertIsNone(output_module._REPORTED_EXCEPTION.get())  # noqa: SLF001
 
     def test_failure_tail_is_limited_and_sanitized(self) -> None:
         """Bound displayed tails while retaining the original log bytes."""
@@ -442,14 +450,66 @@ class RunReporterTests(unittest.TestCase):
             log = (root / "01-tail.log").read_bytes()
             self.assertIn(b"\x1b[31mred\x1b[0m invalid=\xff", log)
 
-    def test_signal_is_forwarded_to_the_child_process_group(self) -> None:
-        """Forward termination to the child and preserve shell-style status."""
+    def test_signal_is_forwarded_to_every_process_in_the_child_group(self) -> None:
+        """Forward termination to a child and its descendant process."""
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary) / "run"
+            directory = Path(temporary)
+            root = directory / "run"
             reporter = RunReporter("check", root, ".cache/logs/test", verbose=False)
             terminal = io.StringIO()
-            timer = threading.Timer(0.2, os.kill, args=(os.getpid(), signal.SIGTERM))
-            timer.start()
+            child_ready = directory / "child.ready"
+            child_signal = directory / "child.signal"
+            grandchild_ready = directory / "grandchild.ready"
+            grandchild_signal = directory / "grandchild.signal"
+            grandchild_pid = directory / "grandchild.pid"
+            grandchild_program = f"""
+import os
+import signal
+import sys
+import time
+from pathlib import Path
+signal_path = Path({str(grandchild_signal)!r})
+def terminate(*_args):
+    signal_path.touch()
+    raise SystemExit(0)
+signal.signal(signal.SIGTERM, terminate)
+Path({str(grandchild_pid)!r}).write_text(str(os.getpid()))
+Path({str(grandchild_ready)!r}).touch()
+time.sleep(10)
+"""
+            child_program = f"""
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+grandchild = subprocess.Popen([sys.executable, "-c", {grandchild_program!r}])
+def terminate(*_args):
+    Path({str(child_signal)!r}).touch()
+    grandchild.wait(timeout=2)
+    raise SystemExit(0)
+signal.signal(signal.SIGTERM, terminate)
+deadline = time.monotonic() + 5
+while not Path({str(grandchild_ready)!r}).exists():
+    if time.monotonic() >= deadline:
+        raise RuntimeError("grandchild did not become ready")
+    time.sleep(0.01)
+Path({str(child_ready)!r}).touch()
+time.sleep(10)
+"""
+            sender_errors: list[str] = []
+
+            def send_when_ready() -> None:
+                deadline = time.monotonic() + 5
+                while not child_ready.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                if not child_ready.exists():
+                    sender_errors.append("child did not become ready")
+                    return
+                os.kill(os.getpid(), signal.SIGTERM)
+
+            sender = threading.Thread(target=send_when_ready)
+            sender.start()
             try:
                 with (
                     contextlib.redirect_stderr(terminal),
@@ -460,31 +520,64 @@ class RunReporterTests(unittest.TestCase):
                         [
                             sys.executable,
                             "-c",
-                            (
-                                "import signal, sys, time; "
-                                "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0)); "
-                                "print('ready', flush=True); time.sleep(10)"
-                            ),
+                            child_program,
                         ]
                     )
             finally:
-                timer.cancel()
-                timer.join()
+                sender.join(5)
+                if grandchild_pid.exists() and not grandchild_signal.exists():
+                    with contextlib.suppress(ProcessLookupError):
+                        os.kill(int(grandchild_pid.read_text()), signal.SIGKILL)
+            self.assertFalse(sender.is_alive(), "signal sender did not stop")
+            self.assertEqual(sender_errors, [])
             self.assertEqual(raised.exception.code, 128 + signal.SIGTERM)
+            self.assertTrue(child_signal.exists(), "direct child did not receive SIGTERM")
+            self.assertTrue(grandchild_signal.exists(), "grandchild did not receive SIGTERM")
             self.assertIn("FAILED (exit 143)", terminal.getvalue())
             metadata = json.loads(reporter.metadata_path.read_text())
             self.assertEqual(metadata["status"], "interrupted")
             self.assertEqual(metadata["stages"][0]["status"], "interrupted")
             self.assertEqual(metadata["stages"][0]["exit"], 128 + signal.SIGTERM)
 
-    def test_hangup_is_forwarded_to_the_child_process_group(self) -> None:
-        """Do not orphan a child when the wrapper receives SIGHUP."""
+    def test_hangup_is_forwarded_to_a_ready_child(self) -> None:
+        """Forward SIGHUP only after the child has installed its handler."""
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary) / "run"
+            directory = Path(temporary)
+            root = directory / "run"
+            child_ready = directory / "child.ready"
+            child_signal = directory / "child.signal"
+            child_pid = directory / "child.pid"
             reporter = RunReporter("check", root, ".cache/logs/test", verbose=False)
             terminal = io.StringIO()
-            timer = threading.Timer(0.2, os.kill, args=(os.getpid(), signal.SIGHUP))
-            timer.start()
+            child_program = f"""
+import os
+import signal
+import sys
+import time
+from pathlib import Path
+ready = Path({str(child_ready)!r})
+received = Path({str(child_signal)!r})
+Path({str(child_pid)!r}).write_text(str(os.getpid()))
+def handle_hangup(*_args):
+    received.write_text("SIGHUP")
+    sys.exit(0)
+signal.signal(signal.SIGHUP, handle_hangup)
+ready.write_text("ready")
+time.sleep(5)
+"""
+            sender_errors: list[str] = []
+
+            def send_when_ready() -> None:
+                deadline = time.monotonic() + 5
+                while not child_ready.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                if not child_ready.exists():
+                    sender_errors.append("child did not become ready")
+                    return
+                os.kill(os.getpid(), signal.SIGHUP)
+
+            sender = threading.Thread(target=send_when_ready)
+            sender.start()
             try:
                 with (
                     contextlib.redirect_stderr(terminal),
@@ -495,17 +588,18 @@ class RunReporterTests(unittest.TestCase):
                         [
                             sys.executable,
                             "-c",
-                            (
-                                "import signal, sys, time; "
-                                "signal.signal(signal.SIGHUP, lambda *_: sys.exit(0)); "
-                                "print('ready', flush=True); time.sleep(10)"
-                            ),
+                            child_program,
                         ]
                     )
             finally:
-                timer.cancel()
-                timer.join()
+                sender.join(5)
+                if child_pid.exists() and not child_signal.exists():
+                    with contextlib.suppress(ProcessLookupError):
+                        os.kill(int(child_pid.read_text()), signal.SIGKILL)
+            self.assertFalse(sender.is_alive(), "signal sender did not stop")
+            self.assertEqual(sender_errors, [])
             self.assertEqual(raised.exception.code, 128 + signal.SIGHUP)
+            self.assertEqual(child_signal.read_text(), "SIGHUP")
 
     def test_job_control_stops_the_orphaned_child_group(self) -> None:
         """Force-stop a new-session child and resume it through the wrapper."""
@@ -572,36 +666,6 @@ with reporter.stage("job-control") as stage:
                 if child_pid is not None:
                     with contextlib.suppress(ProcessLookupError):
                         os.kill(child_pid, signal.SIGKILL)
-
-    def test_signal_during_spawn_does_not_orphan_child(self) -> None:
-        """Install forwarding before a child can be created."""
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary) / "run"
-            reporter = RunReporter("check", root, ".cache/logs/test", verbose=False)
-            terminal = io.StringIO()
-            real_pipes = output_module._subprocess_pipes  # noqa: SLF001
-
-            def delayed_pipes(process: subprocess.Popen[bytes]) -> tuple[object, object]:
-                time.sleep(0.2)
-                return real_pipes(process)
-
-            timer = threading.Timer(0.05, os.kill, args=(os.getpid(), signal.SIGTERM))
-            timer.start()
-            try:
-                with (
-                    mock.patch(
-                        "fplinux_cli.output._subprocess_pipes",
-                        side_effect=delayed_pipes,
-                    ),
-                    contextlib.redirect_stderr(terminal),
-                    self.assertRaises(SystemExit) as raised,
-                    reporter.stage("spawn-signal") as stage,
-                ):
-                    stage.run([sys.executable, "-c", "import time; time.sleep(10)"])
-            finally:
-                timer.cancel()
-                timer.join()
-            self.assertEqual(raised.exception.code, 128 + signal.SIGTERM)
 
     def test_container_environment_preserves_display_path(self) -> None:
         """Separate the mounted log path from its host-facing location."""

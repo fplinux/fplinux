@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Focused builder tests for atomic immutable bundle publication."""
+"""Focused builder tests for immutable bundle publication."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
@@ -18,7 +19,6 @@ from fplinux_cli.bundle_state import (
     create_bundle_staging,
     resolve_current_bundle,
 )
-from fplinux_cli.common import sha256_file
 
 
 class BuilderPublicationTests(unittest.TestCase):
@@ -53,13 +53,13 @@ class BuilderPublicationTests(unittest.TestCase):
         self.rootfs_recipe = "d" * 64
         self.rootfs = self.write("rootfs.cpio", b"rootfs\n", root=self.rootfs_output)
         self.bundle_apks = {
-            "fplinux-phone-ui": self.write(
-                "packages/fplinux-phone-ui-1-r0.apk",
+            "fplinux-base-ui": self.write(
+                "packages/fplinux-base-ui-1-r0.apk",
                 b"base apk\n",
                 root=self.work,
             ),
-            "fplinux-phone-ui-demo": self.write(
-                "packages/fplinux-phone-ui-demo-3-r1.apk",
+            "fplinux-demo-ui": self.write(
+                "packages/fplinux-demo-ui-3-r1.apk",
                 b"target apk\n",
                 root=self.work,
             ),
@@ -97,8 +97,8 @@ class BuilderPublicationTests(unittest.TestCase):
                 "runtime-manifest.json",
                 "assets.lock.toml",
                 "THIRD_PARTY_NOTICES.md",
-                "apks/fplinux-phone-ui.apk",
-                "apks/fplinux-phone-ui-demo.apk",
+                "apks/fplinux-base-ui.apk",
+                "apks/fplinux-demo-ui.apk",
             ],
         }
         self.environment = {
@@ -155,7 +155,12 @@ class BuilderPublicationTests(unittest.TestCase):
                 self.ramboot if ramboot is None else ramboot,
                 self.ramboot_map,
                 self.asset_lock,
-                {"pin": ("pin.bin", sha256_file(self.work / "assets/pin.bin"))},
+                {
+                    "pin": (
+                        "pin.bin",
+                        hashlib.sha256((self.work / "assets/pin.bin").read_bytes()).hexdigest(),
+                    )
+                },
                 {"console": self.host_tool},
                 "c" * 64,
                 "9" * 64,
@@ -187,6 +192,15 @@ class BuilderPublicationTests(unittest.TestCase):
         current = resolve_current_bundle(self.output, "demo", "default")
         manifest = json.loads((published / BUILD_MANIFEST_NAME).read_text())
         runtime = json.loads((published / "runtime-manifest.json").read_text())
+        actual_payload = {
+            path.relative_to(published).as_posix(): {
+                "mode": path.stat().st_mode & 0o777,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "size": path.stat().st_size,
+            }
+            for path in published.rglob("*")
+            if path.is_file() and path.name != BUILD_MANIFEST_NAME
+        }
 
         self.assertEqual(current.path, published)
         self.assertEqual(
@@ -214,26 +228,22 @@ class BuilderPublicationTests(unittest.TestCase):
         self.assertEqual(manifest["rootfs_receipt"]["recipe"], self.rootfs_recipe)
         self.assertEqual(manifest["kbuild_receipt"]["recipe"], "e" * 64)
         self.assertEqual(manifest["device_identity"], "9" * 64)
-        self.assertIn("debug/rootfs.cpio", manifest["files"])
-        self.assertIn("debug/vmlinux", manifest["files"])
+        self.assertEqual(manifest["files"], actual_payload)
         self.assertEqual(
-            (published / "apks/fplinux-phone-ui.apk").read_bytes(),
+            (published / "apks/fplinux-base-ui.apk").read_bytes(),
             b"base apk\n",
         )
         self.assertEqual(
-            (published / "apks/fplinux-phone-ui-demo.apk").read_bytes(),
+            (published / "apks/fplinux-demo-ui.apk").read_bytes(),
             b"target apk\n",
         )
-        self.assertIn("apks/fplinux-phone-ui.apk", manifest["files"])
-        self.assertIn("apks/fplinux-phone-ui-demo.apk", manifest["files"])
         self.assertEqual(
             manifest["files"]["debug/rootfs.cpio"]["size"],
             self.rootfs.stat().st_size,
         )
-        self.assertNotIn(BUILD_MANIFEST_NAME, manifest["files"])
         self.assertEqual(
             runtime["sha256"]["image/ramboot.bin"],
-            sha256_file(published / "image/ramboot.bin"),
+            hashlib.sha256((published / "image/ramboot.bin").read_bytes()).hexdigest(),
         )
 
     def test_publish_rejects_apks_outside_the_declared_bundle_package_set(self) -> None:
@@ -241,7 +251,7 @@ class BuilderPublicationTests(unittest.TestCase):
         current = self.publish()
 
         with self.assertRaisesRegex(SystemExit, "declared bundle package set"):
-            self.publish(bundle_packages=("fplinux-phone-ui",))
+            self.publish(bundle_packages=("fplinux-base-ui",))
 
         self.assert_old_current_and_no_staging(current)
 
@@ -249,7 +259,7 @@ class BuilderPublicationTests(unittest.TestCase):
         """The release manifest cannot omit or add an independently named APK."""
         current = self.publish()
         bundle_files = cast("list[str]", self.release_manifest["bundle_files"])
-        bundle_files.remove("apks/fplinux-phone-ui-demo.apk")
+        bundle_files.remove("apks/fplinux-demo-ui.apk")
 
         with self.assertRaisesRegex(SystemExit, "release manifest APK files"):
             self.publish()

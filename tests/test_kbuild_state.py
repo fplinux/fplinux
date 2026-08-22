@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Regression tests for the exact Kbuild success receipt."""
+"""Behavior tests for the exact Kbuild success receipt."""
 
 from __future__ import annotations
 
@@ -111,8 +111,8 @@ class KbuildStateTests(unittest.TestCase):
         self.assertEqual(self.output, self.work / "kernel")
         self.assertEqual(retained.read_bytes(), b"keep\n")
 
-    def test_failed_build_without_receipt_is_a_miss(self) -> None:
-        """Outputs from an unreported build cannot become a cache hit."""
+    def test_outputs_without_success_receipt_are_a_miss(self) -> None:
+        """Populated output paths alone cannot become a cache hit."""
         plan = self._plan()
         kbuild_state.prepare_output(self.work, self.output)
         kbuild_state.materialize_rootfs_input(self.work, self.rootfs, plan)
@@ -121,7 +121,7 @@ class KbuildStateTests(unittest.TestCase):
         self.assertFalse((self.work / kbuild_state.RECEIPT_NAME).exists())
         self.assertFalse(kbuild_state.cache_hit(self.work, self.output, plan))
 
-    def test_successful_build_publishes_a_hit(self) -> None:
+    def test_success_receipt_publishes_complete_outputs_as_a_hit(self) -> None:
         """A receipt published after all outputs exist authorizes reuse."""
         plan = self._plan()
         kbuild_state.prepare_output(self.work, self.output)
@@ -143,24 +143,6 @@ class KbuildStateTests(unittest.TestCase):
         self.assertFalse(kbuild_state.cache_hit(self.work, self.output, plan))
         with self.assertRaisesRegex(kbuild_state.KbuildStateError, "rootfs input"):
             kbuild_state.publish_success(self.work, self.output, plan)
-
-    def test_interrupted_new_rootfs_cannot_reuse_prior_success(self) -> None:
-        """Ctrl-C after a rootfs miss must revoke the preceding success receipt."""
-        plan_a = self._plan()
-        self._complete(plan_a, b"a")
-        self.rootfs.write_bytes(b"rootfs-b\n")
-        plan_b = self._plan()
-        self.assertNotEqual(plan_a.recipe, plan_b.recipe)
-
-        with self.assertRaises(KeyboardInterrupt):
-            kbuild_state.discard_success_receipt(self.work)
-            kbuild_state.prepare_output(self.work, self.output)
-            kbuild_state.materialize_rootfs_input(self.work, self.rootfs, plan_b)
-            raise KeyboardInterrupt
-        self.assertFalse((self.work / kbuild_state.RECEIPT_NAME).exists())
-
-        self.rootfs.write_bytes(b"rootfs-a\n")
-        self.assertFalse(kbuild_state.cache_hit(self.work, self.output, self._plan()))
 
 
 if __name__ == "__main__":

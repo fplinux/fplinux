@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import hashlib
 import io
 import json
@@ -12,75 +13,106 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import mock
 
-from fplinux_cli import commands, config
-from fplinux_cli.bundle_state import CurrentBundle
+from fplinux_cli import commands, output
+from fplinux_cli import workspace as workspace_module
+from fplinux_cli.bundle_state import (
+    BUILD_MANIFEST_NAME,
+    bundle_pointer,
+    canonical_json_bytes,
+    publish_current_bundle,
+    published_file_records,
+)
 from fplinux_cli.workspace import WorkspaceSnapshot
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class CommandLifecycleTests(unittest.TestCase):
     """Keep cache hits and readers ahead of every mutable or external action."""
 
     def setUp(self) -> None:
-        """Create one exact immutable bundle fixture for each test."""
+        """Create a published generation and the signing input it claims."""
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        self.bundle_path = self.root / ".cache/out/phone/bundles/default" / ("a" * 64)
-        self.bundle_path.mkdir(parents=True)
-        image = self.bundle_path / "image/ramboot.bin"
-        image.parent.mkdir(parents=True)
-        image.write_bytes(b"ramboot\n")
-        self.bundle = CurrentBundle(
-            path=self.bundle_path,
-            generation="a" * 64,
-            manifest_sha256="b" * 64,
-            manifest_bytes=json.dumps(
-                {
-                    "workspace_digest": "c" * 64,
-                    "container_image_recipe": "e" * 64,
-                    "apk_signing_key": "7" * 64,
-                    "device_identity": "9" * 64,
-                    "rootfs_receipt": {"recipe": "f" * 64, "sha256": "0" * 64},
-                    "files": {
-                        "image/ramboot.bin": {
-                            "mode": 420,
-                            "size": 8,
-                            "sha256": hashlib.sha256(b"ramboot\n").hexdigest(),
-                        }
-                    },
-                }
-            ).encode(),
-        )
+        self.cache = self.root / ".cache"
+        self.output = self.cache / "out"
+        self.profile = "default"
+        self.target_config = {"profile": self.profile}
+        self.release = {"image": "image/ramboot.bin"}
+        self.lock = {
+            "oci": {
+                "image": "localhost/fplinux:locked",
+                "platform": "linux/amd64",
+            }
+        }
+        signing_key = self.cache / "apk-signing/fplinux-build.rsa.pub"
+        signing_key.parent.mkdir(parents=True)
+        signing_key.write_bytes(b"test public signing key\n")
+        self.signing_key = hashlib.sha256(signing_key.read_bytes()).hexdigest()
         self.snapshot = WorkspaceSnapshot((), "c" * 64)
+        self.bundle_path = self._create_generation("a" * 64)
+        self.bundle = publish_current_bundle(self.output, "phone", self.profile, self.bundle_path)
+
+    def _manifest(self, generation: str, path: Path) -> dict[str, object]:
+        """Describe one complete synthetic bundle independently of its resolver."""
+        return {
+            "workspace_digest": self.snapshot.recipe,
+            "container_image_recipe": "e" * 64,
+            "apk_signing_key": self.signing_key,
+            "device_identity": "9" * 64,
+            "rootfs_receipt": {"recipe": "f" * 64, "sha256": "0" * 64},
+            "files": published_file_records(path),
+            "generation": generation,
+            "kbuild_receipt": {"recipe": "1" * 64, "sha256": "3" * 64},
+            "linux_recipe": "2" * 64,
+            "profile": self.profile,
+            "target": "phone",
+        }
+
+    def _create_generation(self, generation: str, image: bytes = b"ramboot\n") -> Path:
+        """Write one complete immutable generation without selecting it."""
+        path = self.output / "phone/bundles" / self.profile / generation
+        path.mkdir(parents=True)
+        payload = path / self.release["image"]
+        payload.parent.mkdir(parents=True)
+        payload.write_bytes(image)
+        payload.chmod(0o644)
+        runner = path / "runner/run.py"
+        runner.parent.mkdir()
+        runner.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+        runner.chmod(0o755)
+        client = path / "host/fplinux-usb-console"
+        client.parent.mkdir()
+        client.write_text("console client\n", encoding="utf-8")
+        client.chmod(0o755)
+        (path / BUILD_MANIFEST_NAME).write_bytes(
+            canonical_json_bytes(self._manifest(generation, path))
+        )
+        return path
+
+    def _clear_current_bundle(self) -> None:
+        """Leave complete generations present while making the current receipt miss."""
+        bundle_pointer(self.output, "phone", self.profile).unlink()
 
     def test_exact_build_hit_ignores_jobs_and_avoids_podman_or_staging(self) -> None:
         """Both job counts reuse the same valid generation without starting build work."""
-        current = (self.bundle, json.loads(self.bundle.manifest_bytes))
-        reporter = mock.Mock()
-        discard_superseded = mock.Mock()
         with (
             mock.patch.object(commands, "ROOT", self.root),
-            mock.patch.object(commands, "load_target", return_value={"profile": "default"}),
-            mock.patch.object(
-                commands,
-                "load_release",
-                return_value={"image": "image/ramboot.bin"},
-            ),
+            mock.patch.object(output, "ROOT", self.root),
+            mock.patch.object(commands, "load_target", return_value=self.target_config),
+            mock.patch.object(commands, "load_release", return_value=self.release),
             mock.patch.object(
                 commands,
                 "target_workspace_snapshot",
                 return_value=self.snapshot,
             ),
-            mock.patch.object(commands, "_matching_target_bundle", return_value=current),
-            mock.patch.object(
-                commands,
-                "discard_superseded_bundle_generations",
-                discard_superseded,
-            ),
-            mock.patch.object(commands, "_print_build_result") as print_result,
-            mock.patch("fplinux_cli.commands.RunReporter.create", return_value=reporter),
+            mock.patch.object(commands, "load_container_lock", return_value=self.lock),
+            mock.patch.object(commands, "container_image_recipe_digest", return_value="e" * 64),
             mock.patch.object(
                 commands,
                 "require_podman",
@@ -94,33 +126,21 @@ class CommandLifecycleTests(unittest.TestCase):
         ):
             for jobs in (1, 8):
                 with self.subTest(jobs=jobs):
-                    commands.build("phone", jobs, verbose=True, offline=True)
+                    old = self._create_generation("b" * 64)
+                    stdout = io.StringIO()
+                    with contextlib.redirect_stdout(stdout):
+                        output.run_entrypoint(
+                            functools.partial(
+                                commands.build,
+                                "phone",
+                                jobs,
+                                verbose=True,
+                                offline=True,
+                            )
+                        )
 
-        self.assertEqual(
-            print_result.call_args_list,
-            [
-                mock.call(
-                    "phone",
-                    self.bundle,
-                    {"image": "image/ramboot.bin"},
-                    cached=True,
-                )
-            ]
-            * 2,
-        )
-        self.assertEqual(
-            discard_superseded.call_args_list,
-            [
-                mock.call(
-                    self.root / ".cache/out",
-                    "phone",
-                    "default",
-                    self.bundle,
-                )
-            ]
-            * 2,
-        )
-        self.assertEqual(reporter.finish.call_args_list, [mock.call(), mock.call()])
+                    self.assertIn("build phone: OK (cached)", stdout.getvalue())
+                    self.assertFalse(old.exists())
 
     def test_build_result_ignores_closed_stdout_pipe(self) -> None:
         """A closed output consumer must not turn a valid build result into failure."""
@@ -143,8 +163,8 @@ class CommandLifecycleTests(unittest.TestCase):
     def test_corrupted_bundle_image_is_not_an_exact_hit(self) -> None:
         """A bundle whose image bytes drifted from the manifest is rebuilt."""
         (self.bundle_path / "image/ramboot.bin").write_bytes(b"corrupt\n")
-        identity = commands.BuildIdentity(self.snapshot.recipe, "e" * 64, "7" * 64)
-        with mock.patch.object(commands, "resolve_current_bundle", return_value=self.bundle):
+        identity = commands.BuildIdentity(self.snapshot.recipe, "e" * 64, self.signing_key)
+        with mock.patch.object(commands, "ROOT", self.root):
             self.assertIsNone(
                 commands._matching_target_bundle(  # noqa: SLF001
                     "phone",
@@ -154,54 +174,60 @@ class CommandLifecycleTests(unittest.TestCase):
                 )
             )
 
+    def test_exact_bundle_identity_and_image_are_a_reusable_hit(self) -> None:
+        """Reuse a resolved generation only when its identity and image bytes match."""
+        identity = commands.BuildIdentity(self.snapshot.recipe, "e" * 64, self.signing_key)
+        with mock.patch.object(commands, "ROOT", self.root):
+            matched = commands._matching_target_bundle(  # noqa: SLF001
+                "phone",
+                {"profile": "default"},
+                identity,
+                "image/ramboot.bin",
+            )
+
+        if matched is None:
+            self.fail("an exact bundle was not reusable")
+        bundle, manifest = matched
+        self.assertEqual(bundle, self.bundle)
+        self.assertEqual(manifest, json.loads(self.bundle.manifest_bytes))
+
+    def test_each_build_identity_mismatch_is_a_cache_miss(self) -> None:
+        """Reject a generation when any host-visible causal identity changed."""
+        mismatches = (
+            commands.BuildIdentity("d" * 64, "e" * 64, self.signing_key),
+            commands.BuildIdentity("c" * 64, "f" * 64, self.signing_key),
+            commands.BuildIdentity("c" * 64, "e" * 64, "8" * 64),
+        )
+        with mock.patch.object(commands, "ROOT", self.root):
+            for identity in mismatches:
+                with self.subTest(identity=identity):
+                    self.assertIsNone(
+                        commands._matching_target_bundle(  # noqa: SLF001
+                            "phone",
+                            {"profile": "default"},
+                            identity,
+                            "image/ramboot.bin",
+                        )
+                    )
+
     def test_build_miss_requires_host_validation_after_container_success(self) -> None:
         """Container exit zero is insufficient without an exact published generation."""
         workspace = self.root / ".cache/workspaces/current"
         workspace.mkdir(parents=True)
-        logs = self.root / ".cache/logs/build/run"
-        logs.mkdir(parents=True)
-        workspace_context = mock.MagicMock()
-        workspace_context.__enter__.return_value = mock.Mock()
-        container_stage = mock.Mock()
-        container_context = mock.MagicMock()
-        container_context.__enter__.return_value = container_stage
-        reporter = mock.Mock(root=logs)
-        reporter.stage.side_effect = [workspace_context, container_context]
-        reporter.container_environment.return_value = {"FPLINUX_LOG_ROOT": "/logs"}
-        lock = {
-            "oci": {
-                "image": "localhost/fplinux:locked",
-                "platform": "linux/amd64",
-            }
-        }
-        matcher = mock.Mock(side_effect=(None, None))
-        discard_superseded = mock.Mock()
+        old = self._create_generation("b" * 64)
+        self._clear_current_bundle()
         with (
             mock.patch.object(commands, "ROOT", self.root),
-            mock.patch.object(commands, "load_target", return_value={"profile": "default"}),
-            mock.patch.object(
-                commands,
-                "load_release",
-                return_value={"image": "image/ramboot.bin"},
-            ),
+            mock.patch.object(output, "ROOT", self.root),
+            mock.patch.object(commands, "load_target", return_value=self.target_config),
+            mock.patch.object(commands, "load_release", return_value=self.release),
             mock.patch.object(
                 commands,
                 "target_workspace_snapshot",
                 return_value=self.snapshot,
             ),
-            mock.patch.object(commands, "load_container_lock", return_value=lock),
-            mock.patch.object(
-                commands,
-                "container_image_recipe_digest",
-                return_value="e" * 64,
-            ),
-            mock.patch.object(commands, "_matching_target_bundle", matcher),
-            mock.patch.object(
-                commands,
-                "discard_superseded_bundle_generations",
-                discard_superseded,
-            ),
-            mock.patch("fplinux_cli.commands.RunReporter.create", return_value=reporter),
+            mock.patch.object(commands, "load_container_lock", return_value=self.lock),
+            mock.patch.object(commands, "container_image_recipe_digest", return_value="e" * 64),
             mock.patch.object(commands, "require_podman", return_value="podman"),
             mock.patch.object(commands, "image_ready", return_value=True),
             mock.patch.object(
@@ -209,69 +235,41 @@ class CommandLifecycleTests(unittest.TestCase):
                 "stage_workspace_snapshot",
                 return_value=workspace,
             ),
+            mock.patch.object(output.Stage, "run", autospec=True),
             self.assertRaisesRegex(
                 SystemExit,
                 "without publishing an exact valid current bundle",
             ),
         ):
-            commands.build("phone", 4)
+            output.run_entrypoint(lambda: commands.build("phone", 4))
 
-        self.assertEqual(matcher.call_count, 2)
-        container_stage.run.assert_called_once()
-        self.assertEqual(container_stage.run.call_args.kwargs, {})
-        discard_superseded.assert_not_called()
-        reporter.finish.assert_not_called()
+        self.assertFalse(bundle_pointer(self.output, "phone", self.profile).exists())
+        self.assertTrue(old.exists())
+        metadata = next((self.root / ".cache/logs/build/phone").rglob("run.json"))
+        self.assertEqual(json.loads(metadata.read_text(encoding="utf-8"))["status"], "failed")
 
     def test_successful_build_discards_superseded_after_host_validation(self) -> None:
         """Retain old generations until the container result validates on the host."""
         workspace = self.root / ".cache/workspaces/current"
         workspace.mkdir(parents=True)
-        logs = self.root / ".cache/logs/build/run"
-        logs.mkdir(parents=True)
-        workspace_context = mock.MagicMock()
-        workspace_context.__enter__.return_value = mock.Mock()
-        container_stage = mock.Mock()
-        container_context = mock.MagicMock()
-        container_context.__enter__.return_value = container_stage
-        reporter = mock.Mock(root=logs)
-        reporter.stage.side_effect = [workspace_context, container_context]
-        reporter.container_environment.return_value = {"FPLINUX_LOG_ROOT": "/logs"}
-        lock = {
-            "oci": {
-                "image": "localhost/fplinux:locked",
-                "platform": "linux/amd64",
-            }
-        }
-        current = (self.bundle, json.loads(self.bundle.manifest_bytes))
-        matcher = mock.Mock(side_effect=(None, current))
-        discard_superseded = mock.Mock()
+        old = self._create_generation("b" * 64)
+        self._clear_current_bundle()
+
+        def publish_result(_stage: output.Stage, _command: list[str]) -> None:
+            publish_current_bundle(self.output, "phone", self.profile, self.bundle_path)
+
         with (
             mock.patch.object(commands, "ROOT", self.root),
-            mock.patch.object(commands, "load_target", return_value={"profile": "default"}),
-            mock.patch.object(
-                commands,
-                "load_release",
-                return_value={"image": "image/ramboot.bin"},
-            ),
+            mock.patch.object(output, "ROOT", self.root),
+            mock.patch.object(commands, "load_target", return_value=self.target_config),
+            mock.patch.object(commands, "load_release", return_value=self.release),
             mock.patch.object(
                 commands,
                 "target_workspace_snapshot",
                 return_value=self.snapshot,
             ),
-            mock.patch.object(commands, "load_container_lock", return_value=lock),
-            mock.patch.object(
-                commands,
-                "container_image_recipe_digest",
-                return_value="e" * 64,
-            ),
-            mock.patch.object(commands, "_matching_target_bundle", matcher),
-            mock.patch.object(
-                commands,
-                "discard_superseded_bundle_generations",
-                discard_superseded,
-            ),
-            mock.patch.object(commands, "_print_build_result") as print_result,
-            mock.patch("fplinux_cli.commands.RunReporter.create", return_value=reporter),
+            mock.patch.object(commands, "load_container_lock", return_value=self.lock),
+            mock.patch.object(commands, "container_image_recipe_digest", return_value="e" * 64),
             mock.patch.object(commands, "require_podman", return_value="podman"),
             mock.patch.object(commands, "image_ready", return_value=True),
             mock.patch.object(
@@ -279,58 +277,40 @@ class CommandLifecycleTests(unittest.TestCase):
                 "stage_workspace_snapshot",
                 return_value=workspace,
             ),
+            mock.patch.object(output.Stage, "run", autospec=True, side_effect=publish_result),
         ):
-            commands.build("phone", 4)
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                output.run_entrypoint(lambda: commands.build("phone", 4))
 
-        self.assertEqual(matcher.call_count, 2)
-        container_stage.run.assert_called_once()
-        discard_superseded.assert_called_once_with(
-            self.root / ".cache/out",
-            "phone",
-            "default",
-            self.bundle,
-        )
-        print_result.assert_called_once_with(
-            "phone",
-            self.bundle,
-            {"image": "image/ramboot.bin"},
-            cached=False,
-        )
-        reporter.finish.assert_called_once_with()
+        self.assertIn("build phone: OK", stdout.getvalue())
+        self.assertNotIn("build phone: OK (cached)", stdout.getvalue())
+        self.assertFalse(old.exists())
+        metadata = next((self.root / ".cache/logs/build/phone").rglob("run.json"))
+        self.assertEqual(json.loads(metadata.read_text(encoding="utf-8"))["status"], "success")
 
     def test_offline_build_miss_requires_the_current_image_without_setup(self) -> None:
         """Do not silently rebuild the OCI environment when offline was requested."""
-        reporter = mock.Mock()
-        lock = {
-            "oci": {
-                "image": "localhost/fplinux:locked",
-                "platform": "linux/amd64",
-            }
-        }
+        self._clear_current_bundle()
         with (
             mock.patch.object(commands, "ROOT", self.root),
-            mock.patch.object(commands, "load_target", return_value={"profile": "default"}),
-            mock.patch.object(
-                commands,
-                "load_release",
-                return_value={"image": "image/ramboot.bin"},
-            ),
+            mock.patch.object(output, "ROOT", self.root),
+            mock.patch.object(commands, "load_target", return_value=self.target_config),
+            mock.patch.object(commands, "load_release", return_value=self.release),
             mock.patch.object(
                 commands,
                 "target_workspace_snapshot",
                 return_value=self.snapshot,
             ),
-            mock.patch.object(commands, "load_container_lock", return_value=lock),
-            mock.patch.object(
-                commands,
-                "container_image_recipe_digest",
-                return_value="e" * 64,
-            ),
-            mock.patch.object(commands, "_matching_target_bundle", return_value=None),
-            mock.patch("fplinux_cli.commands.RunReporter.create", return_value=reporter),
+            mock.patch.object(commands, "load_container_lock", return_value=self.lock),
+            mock.patch.object(commands, "container_image_recipe_digest", return_value="e" * 64),
             mock.patch.object(commands, "require_podman", return_value="podman"),
             mock.patch.object(commands, "image_ready", return_value=False),
-            mock.patch.object(commands, "setup") as setup,
+            mock.patch.object(
+                commands,
+                "setup",
+                side_effect=AssertionError("offline build must not set up an image"),
+            ),
             mock.patch.object(
                 commands,
                 "stage_workspace_snapshot",
@@ -341,34 +321,25 @@ class CommandLifecycleTests(unittest.TestCase):
                 "offline build requires the current pinned OCI image",
             ),
         ):
-            commands.build("phone", 4, offline=True)
+            output.run_entrypoint(lambda: commands.build("phone", 4, offline=True))
 
-        setup.assert_not_called()
+        self.assertFalse(bundle_pointer(self.output, "phone", self.profile).exists())
 
     def test_run_executes_a_runner_from_the_resolved_generation(self) -> None:
         """Resolve current once and preserve that immutable generation path."""
         runner = self.bundle_path / "runner/run.py"
-        runner.parent.mkdir()
-        runner.write_text("#!/usr/bin/env python3\n")
-        runner.chmod(0o755)
-        resolver = mock.Mock(return_value=(self.bundle, {}))
         with (
+            mock.patch.object(commands, "ROOT", self.root),
             mock.patch.object(commands, "load_target", return_value={"profile": "default"}),
-            mock.patch.object(commands, "_resolve_target_bundle", resolver),
             mock.patch("fplinux_cli.commands.os.execv") as execute,
         ):
             commands.run_target("phone")
 
-        resolver.assert_called_once_with("phone", {"profile": "default"})
         execute.assert_called_once_with(os.fsencode(runner), [os.fsencode(runner)])
 
     def test_verify_rejects_nonzero_console_status_even_with_matching_stdout(self) -> None:
         """Reject a mocked failed console result even when its stdout happens to match."""
         client = self.bundle_path / "host/fplinux-usb-console"
-        client.parent.mkdir()
-        client.write_text("client\n")
-        client.chmod(0o755)
-        manifest = json.loads(self.bundle.manifest_bytes)
         target_config = {
             "profile": "default",
             "runtime": {
@@ -387,10 +358,9 @@ class CommandLifecycleTests(unittest.TestCase):
             stdout=f"6.12-fplinux-{'9' * 16}\n",
             stderr="transport failed\n",
         )
-        resolver = mock.Mock(return_value=(self.bundle, manifest))
         with (
+            mock.patch.object(commands, "ROOT", self.root),
             mock.patch.object(commands, "load_target", return_value=target_config),
-            mock.patch.object(commands, "_resolve_target_bundle", resolver),
             mock.patch.object(
                 commands,
                 "target_workspace_snapshot",
@@ -401,16 +371,10 @@ class CommandLifecycleTests(unittest.TestCase):
                 "container_image_recipe_digest",
                 return_value="e" * 64,
             ),
-            mock.patch.object(
-                commands,
-                "_build_identity",
-                return_value=commands.BuildIdentity(self.snapshot.recipe, "e" * 64, "7" * 64),
-            ),
             mock.patch("fplinux_cli.commands.subprocess.run", return_value=result) as console_run,
             self.assertRaisesRegex(SystemExit, "console client failed with exit status 7"),
         ):
             commands.verify_booted("phone")
-        resolver.assert_called_once()
         console_run.assert_called_once_with(
             [
                 str(client),
@@ -433,10 +397,6 @@ class CommandLifecycleTests(unittest.TestCase):
     def test_verify_matches_the_device_identity_not_the_workspace_digest(self) -> None:
         """Interpret a mocked uname result using the bundle's device-identity suffix."""
         client = self.bundle_path / "host/fplinux-usb-console"
-        client.parent.mkdir()
-        client.write_text("client\n")
-        client.chmod(0o755)
-        manifest = json.loads(self.bundle.manifest_bytes)
         target_config = {
             "profile": "default",
             "runtime": {
@@ -455,31 +415,24 @@ class CommandLifecycleTests(unittest.TestCase):
             stdout=f"6.12-fplinux-{'9' * 16}\n",
             stderr="",
         )
+        stdout = io.StringIO()
         with (
+            mock.patch.object(commands, "ROOT", self.root),
             mock.patch.object(commands, "load_target", return_value=target_config),
-            mock.patch.object(
-                commands,
-                "_resolve_target_bundle",
-                return_value=(self.bundle, manifest),
-            ),
             mock.patch.object(
                 commands,
                 "target_workspace_snapshot",
                 return_value=self.snapshot,
             ),
             mock.patch.object(commands, "container_image_recipe_digest", return_value="e" * 64),
-            mock.patch.object(
-                commands,
-                "_build_identity",
-                return_value=commands.BuildIdentity(self.snapshot.recipe, "e" * 64, "7" * 64),
-            ),
             mock.patch("fplinux_cli.commands.subprocess.run", return_value=result) as console_run,
-            mock.patch("builtins.print") as output,
+            contextlib.redirect_stdout(stdout),
         ):
             commands.verify_booted("phone")
 
-        output.assert_called_once_with(
-            "verify: the phone runs the current build (9999999999999999)"
+        self.assertEqual(
+            stdout.getvalue(),
+            "verify: the phone runs the current build (9999999999999999)\n",
         )
         console_run.assert_called_once_with(
             [
@@ -591,85 +544,98 @@ class CommandLifecycleTests(unittest.TestCase):
         self.assertLess(command.index("--network=none"), command.index("--platform"))
 
 
-class ContainerRecipeTests(unittest.TestCase):
-    """Keep image and cached-check identities limited to causal inputs."""
+class ChecksumAportTests(unittest.TestCase):
+    """Publish only validated checksum-block changes from an isolated OCI stage."""
 
-    IMAGE_INPUTS = (
-        ".containerignore",
-        "Containerfile",
-        "container.lock.toml",
-        "package.json",
-        "package-lock.json",
+    PACKAGE = "synthetic-checksum-aport"
+    BEFORE_APKBUILD = (
+        b"pkgname=synthetic-checksum-aport\n"
+        b"pkgver=1\n"
+        b'source="local.c"\n'
+        b'sha512sums="\n'
+        b"old-local  local.c\n"
+        b'"\n'
+        b"package() {\n"
+        b"\t:\n"
+        b"}\n"
     )
-    CHECK_INPUTS = (
-        "scripts/fplinux_cli/checkreceipts.py",
-        "scripts/fplinux_cli/common.py",
-        "scripts/fplinux_cli/config.py",
-        "scripts/fplinux_cli/container.py",
-        "scripts/fplinux_cli/image_state.py",
-        "scripts/fplinux_cli/output.py",
-        "scripts/fplinux_cli/workspace.py",
+    AFTER_APKBUILD = BEFORE_APKBUILD.replace(
+        b'sha512sums="\nold-local  local.c\n"\n',
+        b'sha512sums="\nnew-local  local.c\n"\n',
     )
 
     def setUp(self) -> None:
-        """Create exact image and check-orchestration input fixtures."""
+        """Create one canonical aport with an ordinary local source."""
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        paths = (*self.IMAGE_INPUTS, *self.CHECK_INPUTS, "scripts/fplinux_cli/prune.py")
-        for relative in paths:
-            path = self.root / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(relative.encode())
-        self.lock = {
-            "oci": {
-                "platform": "linux/amd64",
-                "base": "example.invalid/base@sha256:" + "a" * 64,
-            },
-        }
+        self.aport = self.root / "alpine/aports" / self.PACKAGE
+        self.aport.mkdir(parents=True)
+        self.apkbuild = self.aport / "APKBUILD"
+        self.apkbuild.write_bytes(self.BEFORE_APKBUILD)
+        self.apkbuild.chmod(0o640)
+        (self.aport / "local.c").write_bytes(b"int local_source;\n")
 
-    def test_check_implementation_edit_does_not_rebuild_image(self) -> None:
-        """Keep host check implementation out of the OCI image recipe."""
+    def _run(self, container_run: Callable[..., None]) -> None:
+        """Invoke the real checksum workflow with only its OCI execution replaced."""
         with (
-            mock.patch.object(config, "ROOT", self.root),
-            mock.patch.object(config, "load_container_lock", return_value=self.lock),
+            mock.patch.object(commands, "ROOT", self.root),
+            mock.patch.object(workspace_module, "ROOT", self.root),
+            mock.patch.object(output, "ROOT", self.root),
+            mock.patch.object(commands, "require_podman", return_value="/usr/bin/podman"),
+            mock.patch.object(commands, "image_ready", return_value=True),
+            mock.patch.object(output.Stage, "run", autospec=True, side_effect=container_run),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
         ):
-            image_before = config.container_image_recipe_digest()
-            check_before = config.check_orchestration_recipe_digest()
-            (self.root / "scripts/fplinux_cli/container.py").write_bytes(b"changed\0bytes")
-            image_after = config.container_image_recipe_digest()
-            check_after = config.check_orchestration_recipe_digest()
+            output.run_entrypoint(lambda: commands.checksum_aport(self.PACKAGE, offline=True))
 
-        self.assertEqual(image_before, image_after)
-        self.assertNotEqual(check_before, check_after)
+    def _staged_apkbuild(self, command: list[str]) -> Path:
+        """Resolve the private aport through the OCI workspace mount boundary."""
+        workspace_sources: list[Path] = []
+        for index, argument in enumerate(command[:-1]):
+            if argument != "--volume":
+                continue
+            mount = command[index + 1].rsplit(":", 2)
+            if len(mount) == 3 and mount[1] == "/workspace":
+                workspace_sources.append(Path(mount[0]))
+        self.assertEqual(len(workspace_sources), 1)
 
-    def test_prune_edit_does_not_invalidate_check_receipts(self) -> None:
-        """Keep unrelated cache-management code out of check identities."""
-        with (
-            mock.patch.object(config, "ROOT", self.root),
-            mock.patch.object(config, "load_container_lock", return_value=self.lock),
-        ):
-            before = config.check_orchestration_recipe_digest()
-            (self.root / "scripts/fplinux_cli/prune.py").write_bytes(b"changed\n")
-            after = config.check_orchestration_recipe_digest()
+        workdir_index = command.index("--workdir")
+        container_workdir = Path(command[workdir_index + 1])
+        relative_workdir = container_workdir.relative_to("/workspace")
+        return workspace_sources[0] / relative_workdir / "APKBUILD"
 
-        self.assertEqual(before, after)
+    def test_success_replaces_only_the_checksum_block_atomically(self) -> None:
+        """Publish complete generated bytes while preserving recipe text and mode."""
+        inode_before = self.apkbuild.stat().st_ino
 
-    def test_image_input_mode_changes_both_recipes(self) -> None:
-        """Treat an OCI input mode change as causal for both identities."""
-        path = self.root / "package-lock.json"
-        with (
-            mock.patch.object(config, "ROOT", self.root),
-            mock.patch.object(config, "load_container_lock", return_value=self.lock),
-        ):
-            image_before = config.container_image_recipe_digest()
-            check_before = config.check_orchestration_recipe_digest()
-            path.chmod(0o755)
-            image_after = config.container_image_recipe_digest()
-            check_after = config.check_orchestration_recipe_digest()
+        def generate(_stage: output.Stage, command: list[str], **_kwargs: object) -> None:
+            generated = self._staged_apkbuild(command)
+            generated.write_bytes(self.AFTER_APKBUILD)
 
-        self.assertNotEqual(image_before, image_after)
-        self.assertNotEqual(check_before, check_after)
+        self._run(generate)
+
+        self.assertEqual(self.apkbuild.read_bytes(), self.AFTER_APKBUILD)
+        self.assertEqual(self.apkbuild.stat().st_mode & 0o777, 0o640)
+        self.assertNotEqual(self.apkbuild.stat().st_ino, inode_before)
+        self.assertEqual(list(self.aport.glob(".APKBUILD.*")), [])
+
+    def test_non_checksum_generation_failure_keeps_canonical_apkbuild(self) -> None:
+        """Reject OCI output that changes recipe text before atomic publication."""
+        inode_before = self.apkbuild.stat().st_ino
+
+        def generate_invalid(_stage: output.Stage, command: list[str], **_kwargs: object) -> None:
+            generated = self._staged_apkbuild(command)
+            generated.write_bytes(self.AFTER_APKBUILD.replace(b"pkgver=1\n", b"pkgver=2\n"))
+
+        with self.assertRaises(SystemExit):
+            self._run(generate_invalid)
+
+        self.assertEqual(self.apkbuild.read_bytes(), self.BEFORE_APKBUILD)
+        self.assertEqual(self.apkbuild.stat().st_mode & 0o777, 0o640)
+        self.assertEqual(self.apkbuild.stat().st_ino, inode_before)
+        self.assertEqual(list(self.aport.glob(".APKBUILD.*")), [])
 
 
 if __name__ == "__main__":

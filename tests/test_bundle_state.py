@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Tests for atomic bundle generation publication."""
+"""Tests for immutable bundle generation publication."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from fplinux_cli.bundle_state import (
 
 
 class BundleStateTests(unittest.TestCase):
-    """Exercise atomic bundle generation publication."""
+    """Exercise immutable bundle generation publication."""
 
     def setUp(self) -> None:
         """Create an isolated bundle output directory."""
@@ -63,7 +63,7 @@ class BundleStateTests(unittest.TestCase):
         self.assertEqual(current.path, published)
         self.assertEqual((current.path / "payload").read_text(), "first")
 
-    def test_failed_staging_does_not_replace_last_good_pointer(self) -> None:
+    def test_discarded_staging_does_not_replace_last_good_pointer(self) -> None:
         """Discarding failed staging preserves the last good pointer."""
         first, generation = self._staging("first")
         published = publish_bundle_generation(self.output, "demo", "default", first, generation)
@@ -76,8 +76,8 @@ class BundleStateTests(unittest.TestCase):
 
         self.assertEqual((current.path / "payload").read_text(), "first")
 
-    def test_new_generation_switch_is_atomic_at_pointer_level(self) -> None:
-        """Switching generations leaves the prior pointer valid until publish."""
+    def test_current_pointer_changes_only_when_new_generation_is_published(self) -> None:
+        """A complete unselected generation does not change the current pointer."""
         first, first_generation = self._staging("first")
         first_path = publish_bundle_generation(
             self.output, "demo", "default", first, first_generation

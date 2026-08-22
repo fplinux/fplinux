@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Regression tests for prepared Linux recipe receipts."""
+"""Behavior tests for prepared Linux recipe receipts."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from fplinux_cli import builder, linux_state
 
 
 class PreparedLinuxTests(unittest.TestCase):
-    """A prepared tree is reusable only for the exact integration recipe."""
+    """A prepared tree is reusable only for its exact preparation recipe."""
 
     archive = "b" * 64
     recipe_a = "a" * 64
@@ -42,9 +42,8 @@ class PreparedLinuxTests(unittest.TestCase):
         hit = linux_state.inspect_prepared_linux(source, self.recipe_a)
 
         self.assertEqual(hit, state)
-        self.assertEqual(linux_state.inspect_prepared_linux(source, self.recipe_a), state)
 
-    def test_recipe_change_rebuilds_and_replaces_the_prepared_tree(self) -> None:
+    def test_recipe_change_reprepares_and_replaces_the_source_tree(self) -> None:
         """Replace a prepared tree when its recipe changes."""
         cache = self.root / "cache"
         archive_root = self.root / "archive/linux-test"

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Multiprocess coverage for the public cache-lock behaviour."""
+"""Multiprocess coverage for cache-lock behaviour."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ _EXEC_LOCK_TIMEOUT = "parent did not release exec'd shared cache lock"
 
 @dataclass(frozen=True)
 class _LockInvocation:
-    """The public cache-lock arguments sent to a spawned test process."""
+    """The cache-lock arguments sent to a spawned test process."""
 
     exclusive: bool
     command: str
@@ -71,7 +71,7 @@ def _wait_for_lock(
             Path(cache_root),
             exclusive=False,
             command="package",
-            target="nokia-ta1618",
+            target="demo-target",
         ),
     ):
         acquired.set()
@@ -86,7 +86,7 @@ def _exec_with_shared_lock(cache_root: str, acquired_path: str, release_path: st
         Path(cache_root),
         exclusive=False,
         command="run",
-        target="nokia-ta1618",
+        target="demo-target",
     ):
         program = (
             "from pathlib import Path\n"
@@ -132,7 +132,7 @@ class CacheLockTests(unittest.TestCase):
         *,
         exclusive: bool,
         command: str = "build",
-        target: str | None = "nokia-ta1618",
+        target: str | None = "demo-target",
     ) -> tuple[SpawnProcess, Event, Event]:
         """Start a process that has acquired the requested lock."""
         acquired = self.context.Event()
@@ -178,7 +178,7 @@ class CacheLockTests(unittest.TestCase):
             os.close(descriptor)
 
     def test_shared_invocations_run_together(self) -> None:
-        """The public shared modes do not block one another."""
+        """Shared cache-lock modes do not block one another."""
         first, _first_acquired, first_release = self._start_holder(exclusive=False, command="run")
         second: SpawnProcess | None = None
         second_release: Event | None = None
@@ -216,7 +216,7 @@ class CacheLockTests(unittest.TestCase):
             self.assertEqual(waiter.exitcode, 0)
             rendered = output.get(timeout=5)
             self.assertIn("command=build", rendered)
-            self.assertIn("target=nokia-ta1618", rendered)
+            self.assertIn("target=demo-target", rendered)
             self.assertIn(f"pid={owner.pid}", rendered)
             self.assertIn("started=", rendered)
             self.assertIn("cache released; continuing", rendered)
@@ -238,7 +238,7 @@ class CacheLockTests(unittest.TestCase):
                         self.cache_root,
                         exclusive=True,
                         command="build",
-                        target="nokia-ta1618",
+                        target="demo-target",
                     ):
                         pass
                 else:
@@ -248,7 +248,7 @@ class CacheLockTests(unittest.TestCase):
                             self.cache_root,
                             exclusive=True,
                             command="build",
-                            target="nokia-ta1618",
+                            target="demo-target",
                         ),
                     ):
                         raise exception_type()
