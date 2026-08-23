@@ -9,11 +9,13 @@ Current target support:
   - microSD access when the card is inserted before boot;
   - external charger connection status;
   - experimental battery voltage reporting;
+  - experimental calibrated SoC temperature reporting;
   - battery-only power-off;
 
 Internal phone storage, audio, modem, Bluetooth, Wi-Fi, battery level, current,
-temperature and charge control, and Linux reboot are not supported by this
-target. Battery-voltage accuracy has not been externally checked.
+battery temperature and charge control, and Linux reboot are not supported by
+this target. Battery-voltage and SoC-temperature accuracy have not been
+externally checked; no thermal-control policy is provided.
 
 Host requirements:
   - Linux x86-64;

@@ -128,6 +128,15 @@
 			function = LED_FUNCTION_KBD_BACKLIGHT;
 			fplinux,current-code = <1>;
 		};
+
+		thermal-sensor@40300000 {
+			compatible = "fplinux,ta1618-thm1";
+			reg = <0x40300000 0x00000100>,
+			      <0x40240000 0x00000058>,
+			      <0x40241064 0x00000004>;
+			reg-names = "thm", "efuse-control", "efuse-block25";
+			sprd,aon-apb = <&aon_apb>;
+		};
 	};
 };
 
