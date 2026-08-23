@@ -8,10 +8,12 @@ Current target support:
   - USB SSH/SFTP and host-keyboard forwarding;
   - microSD access when the card is inserted before boot;
   - external charger connection status;
+  - experimental battery voltage reporting;
   - battery-only power-off;
 
-Internal phone storage, audio, modem, Bluetooth, Wi-Fi, battery reporting and
-Linux reboot are not supported by this target.
+Internal phone storage, audio, modem, Bluetooth, Wi-Fi, battery level, current,
+temperature and charge control, and Linux reboot are not supported by this
+target. Battery-voltage accuracy has not been externally checked.
 
 Host requirements:
   - Linux x86-64;
