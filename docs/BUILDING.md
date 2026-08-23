@@ -35,8 +35,9 @@ prepared explicitly:
 ```
 
 In a Git checkout, `setup` also selects the repository's commit-message hook.
-Commits use `type(scope): subject`; the tracked commitlint configuration is the
-source of truth for accepted scopes.
+Commits use `type(scope): subject`, followed by a blank line and a non-empty
+explanatory body. The tracked commitlint configuration is the source of truth
+for accepted scopes.
 
 Use `./fplinux setup --force` to rebuild the pinned OCI image even when an image
 for the current recipe is already ready.
