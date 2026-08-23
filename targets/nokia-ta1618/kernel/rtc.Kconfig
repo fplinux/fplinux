@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config RTC_DRV_TA1618_SC2720
+	bool "Nokia TA-1618 SC2720 RTC"
+	depends on MACH_NOKIA_TA1618
+	depends on RTC_CLASS
+	depends on !PM
+	help
+	  Read-only real-time clock support for the Nokia 3210 4G TA-1618.
+	  The driver exposes the running SC2720 RTC counter through the standard
+	  RTC interface without setting time. Alarms, wakeup state and PMIC
+	  configuration are unavailable.

@@ -78,6 +78,14 @@ source = "bindings/fplinux,ta1618-thm1.yaml"
 destination = "Documentation/devicetree/bindings/thermal/fplinux,ta1618-thm1.yaml"
 
 [[linux.copies]]
+source = "kernel/ta1618-sc2720-rtc.c"
+destination = "drivers/rtc/ta1618-sc2720-rtc.c"
+
+[[linux.copies]]
+source = "bindings/fplinux,ta1618-sc2720-rtc.yaml"
+destination = "Documentation/devicetree/bindings/rtc/fplinux,ta1618-sc2720-rtc.yaml"
+
+[[linux.copies]]
 source = "bindings/fplinux,ta1618-kpled.yaml"
 destination = "Documentation/devicetree/bindings/leds/fplinux,ta1618-kpled.yaml"
 
@@ -116,6 +124,14 @@ destination = "drivers/thermal/Kconfig"
 [[linux.appends]]
 source = "kernel/thermal.Makefile"
 destination = "drivers/thermal/Makefile"
+
+[[linux.appends]]
+source = "kernel/rtc.Kconfig"
+destination = "drivers/rtc/Kconfig"
+
+[[linux.appends]]
+source = "kernel/rtc.Makefile"
+destination = "drivers/rtc/Makefile"
 
 [bootstrap]
 image = "ta1618_linux_bootstrap.bin"
