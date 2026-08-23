@@ -6,7 +6,7 @@ or access internal storage, and it is not a release archive.
 Current target support:
   - local 240x320 terminal, physical keypad and keypad backlight;
   - USB SSH/SFTP and host-keyboard forwarding;
-  - microSD access when the card is inserted before boot;
+  - microSD FAT read/write and unmounted hot-swap;
   - external charger connection status;
   - experimental battery voltage and current reporting;
   - experimental calibrated SoC temperature reporting;
@@ -66,7 +66,7 @@ Use after boot:
     The client releases the keyboard when the timeout expires.
 
 microSD:
-  - Insert the card before Linux starts. Hot-swap is not supported.
+  - The card may be inserted before or after Linux starts.
   - Mount a FAT card read/write:
       card=/dev/mmcblk0p1
       [ -b "$card" ] || card=/dev/mmcblk0
@@ -75,6 +75,8 @@ microSD:
   - Before removing the card or ending the session, run:
       sync
       umount /mnt/card
+  - After unmounting, the card may be removed and reinserted without restarting
+    Linux. Never remove a mounted card.
 
 Candidate SSH application procedures:
 
@@ -112,8 +114,8 @@ the terminal, then exit SSH before removing it with:
   ./runner/run.py --reconnect --exec \
     'apk del fplinux-micropythonos-nokia-ta1618 fplinux-micropythonos'
 
-With a usable FAT32 microSD card inserted before boot, the candidate
-MicroPythonOS procedure uses `/mnt/card` and stores its state under
+With a usable FAT32 microSD card available, the candidate MicroPythonOS
+procedure uses `/mnt/card` and stores its state under
 `/mnt/card/.fplinux/micropythonos`. It mounts the card when no matching mount
 exists and unmounts only a card that it mounted when MicroPythonOS exits.
 Otherwise its state remains in RAM.

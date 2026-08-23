@@ -18,9 +18,9 @@ diff --git a/drivers/mmc/host/Kconfig b/drivers/mmc/host/Kconfig
 +	  Cards are read and written over a 4-bit bus in transfers of up to
 +	  256 blocks, at 48.75 MHz once the card has agreed to high speed
 +	  and at 24.375 MHz otherwise. Erase, lock and write-protect are
-+	  refused before they can reach the controller. Card presence is not
-+	  detected: the card must already be inserted when Linux starts, and
-+	  removing it while mounted is not supported.
++	  refused before they can reach the controller. Card presence is polled,
++	  so an unmounted card can be inserted, removed and reinserted while
++	  Linux remains running. Removing a mounted card is not supported.
 +	  The phone's internal storage is raw NAND on a different controller
 +	  that this driver cannot reach.
 diff --git a/drivers/mmc/host/Makefile b/drivers/mmc/host/Makefile
