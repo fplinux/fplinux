@@ -20,17 +20,17 @@ description:
 
   Every window the driver needs is named individually, because the bring-up
   recipe spans the AP AHB gates, the AP clock selector, the SDIO0 registers,
-  the pin controller pads and the analog die interface. The driver validates
-  each window against a compile-time table and refuses to probe on any
-  mismatch.
+  the pin controller pads, the analog die interface and the EIC2 card-detect
+  registers. The driver validates each window against a compile-time table and
+  refuses to probe on any mismatch.
 
 properties:
   compatible:
     const: fplinux,ta1618-mmc
 
   reg:
-    minItems: 41
-    maxItems: 41
+    minItems: 43
+    maxItems: 43
 
   reg-names:
     items:
@@ -75,6 +75,8 @@ properties:
       - const: adi-controller
       - const: analog-slave
       - const: host-control2
+      - const: card-detect-data
+      - const: card-detect-mask
 
   interrupts:
     maxItems: 1
@@ -105,7 +107,8 @@ examples:
               <0x402a0134 0x4>, <0x402a0534 0x4>, <0x402a0120 0x4>,
               <0x402a0520 0x4>, <0x402a0124 0x4>, <0x402a0524 0x4>,
               <0x402a0130 0x4>, <0x402a0530 0x4>, <0x40600000 0x400>,
-              <0x40608000 0x1000>, <0x2030003c 0x4>;
-        reg-names = "gate-state", "gate-set", "gate-clear", "ap-reset-state", "ap-reset-set", "ap-reset-clear", "ap-clock-selector", "block-count", "block-size", "present-state", "host-control1", "clock-timeout-reset", "argument", "transfer-command", "response0", "response1", "response2", "response3", "interrupt-status", "interrupt-status-enable", "interrupt-signal-enable", "adma-error", "adma2-address-low", "adma2-address-high", "host-version-slot-int", "pwr-pad-ctl", "cmd-mux", "cmd-pad", "d0-mux", "d0-pad", "clk-mux", "clk-pad", "d3-mux", "d3-pad", "d2-mux", "d2-pad", "d1-mux", "d1-pad", "adi-controller", "analog-slave", "host-control2";
+              <0x40608000 0x1000>, <0x2030003c 0x4>, <0x402c0000 0x4>,
+              <0x402c0004 0x4>;
+        reg-names = "gate-state", "gate-set", "gate-clear", "ap-reset-state", "ap-reset-set", "ap-reset-clear", "ap-clock-selector", "block-count", "block-size", "present-state", "host-control1", "clock-timeout-reset", "argument", "transfer-command", "response0", "response1", "response2", "response3", "interrupt-status", "interrupt-status-enable", "interrupt-signal-enable", "adma-error", "adma2-address-low", "adma2-address-high", "host-version-slot-int", "pwr-pad-ctl", "cmd-mux", "cmd-pad", "d0-mux", "d0-pad", "clk-mux", "clk-pad", "d3-mux", "d3-pad", "d2-mux", "d2-pad", "d1-mux", "d1-pad", "adi-controller", "analog-slave", "host-control2", "card-detect-data", "card-detect-mask";
         interrupts = <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
     };

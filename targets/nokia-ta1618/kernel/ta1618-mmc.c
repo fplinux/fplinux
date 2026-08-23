@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Single-block 4-bit 13 MHz Linux MMC host for the UMS9117 SDIO0 instance in
- * Nokia TA-1618, driving the removable microSD slot.
+ * Board-specific Linux MMC host for the UMS9117 SDIO0 instance in Nokia
+ * TA-1618, driving the removable microSD slot.
  *
  * This is deliberately not an SDHCI driver.  UMS9117 has a related command,
  * response, interrupt and ADMA layout, but +0x28 is a 32-bit custom host
@@ -9,15 +9,17 @@
  * reset, selector, pin and ADI/PMIC sequencing is fixed to the hardware-proven
  * TA-1618 SDIO0 recipe.
  *
- * Identification starts in the proven 1-bit selector-1/divider-0x2100 state at
- * 393939 Hz.  A 13 MHz request is deferred physically while the bus is 1-bit,
- * so Linux MMC core performs CMD55 and ACMD6 at the proven low clock.  Only a
- * clean RCA-scoped CMD55 APP_CMD response and clean no-data ACMD6 argument 2
- * permit one atomic custom transition to 4-bit HOST_CONTROL1 0x12 and the
- * selector-1/divider-0x0100 13 MHz clock.  No high-speed, UHS, 1.8 V, tuning or
- * CMD23 capability exists.  Data I/O remains one ADMA2 segment and one 512-byte
- * CMD17 or one 512-byte CMD24.  CMD18, CMD25, erase, discard and lock are
- * rejected before controller MMIO.
+ * Identification runs at 399590 Hz over a 1-bit bus.  Only a clean RCA-scoped
+ * CMD55 APP_CMD response and clean no-data ACMD6 argument 2 permit the physical
+ * transition to a 4-bit bus.  Data then runs at 24.375 MHz, or 48.75 MHz after
+ * the card agrees to SD High Speed, with up to 32 ADMA2 segments and 128 KiB per
+ * request.  Multi-block reads and writes use automatic CMD12.  UHS, 1.8 V,
+ * tuning, CMD23, erase, discard, lock and write-protect commands are not
+ * supported.
+ *
+ * The MMC core polls the active-low EIC2 TF_DET input, so an unmounted card can
+ * be inserted, removed and reinserted while Linux remains running.  Filesystems
+ * must be synchronized and unmounted before removal.
  */
 #include <linux/bitfield.h>
 #include <linux/bitops.h>
@@ -49,6 +51,15 @@
 #define TA1618_MMC_REG_BYTES 4U
 #define TA1618_MMC_ADI_MMIO_BYTES 0x0400U
 #define TA1618_MMC_ANALOG_MMIO_BYTES 0x1000U
+
+/*
+ * EIC2 DATA becomes valid only for the inputs selected in DMSK.  The Nokia
+ * card-detect qualification observed a fully masked baseline and established
+ * that selecting EIC2 input 0 yields active-low TF_DET after 3--4 ms.
+ * This driver owns only that DMSK bit; it does not configure EIC interrupts.
+ */
+#define TA1618_MMC_CARD_DETECT_BIT BIT(0)
+#define TA1618_MMC_CARD_DETECT_DMSK_BASELINE 0x00000000U
 
 #define TA1618_MMC_GATE_MASK BIT(7)
 #define TA1618_MMC_AP_RESET_MASK BIT(11)
@@ -332,6 +343,8 @@ enum ta1618_mmc_resource_index {
 	TA1618_MMC_RES_ADI,
 	TA1618_MMC_RES_ANALOG,
 	TA1618_MMC_RES_HOST_CONTROL2,
+	TA1618_MMC_RES_CARD_DETECT_DATA,
+	TA1618_MMC_RES_CARD_DETECT_MASK,
 	TA1618_MMC_RES_COUNT,
 };
 
@@ -386,6 +399,8 @@ static const struct ta1618_mmc_resource_definition
 		{ "adi-controller", 0x40600000U, TA1618_MMC_ADI_MMIO_BYTES },
 		{ "analog-slave", 0x40608000U, TA1618_MMC_ANALOG_MMIO_BYTES },
 		{ "host-control2", 0x2030003cU, TA1618_MMC_REG_BYTES },
+		{ "card-detect-data", 0x402c0000U, TA1618_MMC_REG_BYTES },
+		{ "card-detect-mask", 0x402c0004U, TA1618_MMC_REG_BYTES },
 	};
 
 struct ta1618_mmc_pin_definition {
@@ -561,6 +576,9 @@ struct ta1618_mmc_host {
 	bool terminal_cleanup_hold;
 	bool fatal_error;
 	bool stopping;
+	u32 card_detect_dmsk_baseline;
+	bool card_detect_owned;
+	bool card_detect_enabled;
 	struct ums9117_adi_transaction adi_transaction;
 	bool audit_file_created;
 	struct ta1618_mmc_audit audit;
@@ -2614,16 +2632,27 @@ out_trace:
 
 static int ums9117_mmc_get_cd(struct mmc_host *mmc)
 {
-	/*
-	 * This reports card presence, which the board can detect but this
-	 * host never samples, so a card is assumed. Reporting absence to
-	 * signal a driver problem would be worse than useless: the core
-	 * answers it by powering the slot off and giving up, which is
-	 * exactly the recovery that a failed slot needs. A card that is
-	 * really gone still surfaces through the periodic status command.
-	 */
-	(void)mmc;
-	return 1;
+	struct ta1618_mmc_host *host = mmc_priv(mmc);
+	u32 dmsk;
+
+	if (!READ_ONCE(host->card_detect_enabled)) {
+		dev_err_ratelimited(
+			host->dev,
+			"card-detect is not enabled; reporting card absent\n");
+		return 0;
+	}
+
+	dmsk = ta1618_mmc_readl(host, TA1618_MMC_RES_CARD_DETECT_MASK);
+	if (!(dmsk & TA1618_MMC_CARD_DETECT_BIT)) {
+		dev_err_ratelimited(
+			host->dev,
+			"card-detect mask lost bit0 (dmsk=0x%08x); reporting card absent\n",
+			dmsk);
+		return 0;
+	}
+
+	return !(ta1618_mmc_readl(host, TA1618_MMC_RES_CARD_DETECT_DATA) &
+		 TA1618_MMC_CARD_DETECT_BIT);
 }
 
 static int ums9117_mmc_get_ro(struct mmc_host *mmc)
@@ -2838,6 +2867,85 @@ static int ta1618_mmc_validate_resource(struct platform_device *pdev,
 	return 0;
 }
 
+static void ta1618_mmc_restore_card_detect(struct ta1618_mmc_host *host)
+{
+	u32 before;
+	u32 target;
+	u32 readback;
+
+	if (!host->card_detect_owned)
+		return;
+
+	WRITE_ONCE(host->card_detect_enabled, false);
+	before = ta1618_mmc_readl(host, TA1618_MMC_RES_CARD_DETECT_MASK);
+	target = before & ~TA1618_MMC_CARD_DETECT_BIT;
+	if (before & TA1618_MMC_CARD_DETECT_BIT)
+		ta1618_mmc_writel(host, TA1618_MMC_RES_CARD_DETECT_MASK,
+				  target);
+	readback = ta1618_mmc_readl(host, TA1618_MMC_RES_CARD_DETECT_MASK);
+	if (readback != target) {
+		dev_err(host->dev,
+			"failed to restore card-detect mask: baseline=0x%08x before=0x%08x target=0x%08x readback=0x%08x\n",
+			host->card_detect_dmsk_baseline, before, target,
+			readback);
+		return;
+	}
+
+	host->card_detect_owned = false;
+}
+
+static int ta1618_mmc_enable_card_detect(struct ta1618_mmc_host *host)
+{
+	u32 candidate;
+	u32 data;
+	u32 readback;
+
+	host->card_detect_dmsk_baseline =
+		ta1618_mmc_readl(host, TA1618_MMC_RES_CARD_DETECT_MASK);
+	if (host->card_detect_dmsk_baseline !=
+	    TA1618_MMC_CARD_DETECT_DMSK_BASELINE) {
+		dev_err(host->dev,
+			"unsafe card-detect mask baseline: expected 0x%08x, got 0x%08x\n",
+			TA1618_MMC_CARD_DETECT_DMSK_BASELINE,
+			host->card_detect_dmsk_baseline);
+		return -EBUSY;
+	}
+
+	/* Refuse any drift before the sole owned-bit enable write. */
+	readback = ta1618_mmc_readl(host, TA1618_MMC_RES_CARD_DETECT_MASK);
+	if (readback != host->card_detect_dmsk_baseline) {
+		dev_err(host->dev,
+			"card-detect mask changed before enable: expected 0x%08x, got 0x%08x\n",
+			host->card_detect_dmsk_baseline, readback);
+		return -EBUSY;
+	}
+
+	/* Preserve all bits that do not belong to this board-specific reader. */
+	candidate = readback | TA1618_MMC_CARD_DETECT_BIT;
+	host->card_detect_owned = true;
+	ta1618_mmc_writel(host, TA1618_MMC_RES_CARD_DETECT_MASK, candidate);
+	readback = ta1618_mmc_readl(host, TA1618_MMC_RES_CARD_DETECT_MASK);
+	if (readback != candidate) {
+		dev_err(host->dev,
+			"card-detect enable readback mismatch: expected 0x%08x, got 0x%08x\n",
+			candidate, readback);
+		ta1618_mmc_restore_card_detect(host);
+		return -EIO;
+	}
+
+	usleep_range(3000, 4000);
+	data = ta1618_mmc_readl(host, TA1618_MMC_RES_CARD_DETECT_DATA);
+	if (data & ~TA1618_MMC_CARD_DETECT_BIT) {
+		dev_err(host->dev,
+			"unsafe card-detect data after enable: 0x%08x\n", data);
+		ta1618_mmc_restore_card_detect(host);
+		return -EUCLEAN;
+	}
+
+	WRITE_ONCE(host->card_detect_enabled, true);
+	return 0;
+}
+
 static int ta1618_mmc_probe(struct platform_device *pdev)
 {
 	struct resource *resources[TA1618_MMC_RES_COUNT];
@@ -2930,7 +3038,8 @@ static int ta1618_mmc_probe(struct platform_device *pdev)
 	mmc->f_max = UMS9117_MMC_HS_CLOCK_HZ;
 	mmc->f_init = UMS9117_MMC_IDENT_CLOCK_HZ;
 	mmc->ocr_avail = MMC_VDD_29_30 | MMC_VDD_30_31;
-	mmc->caps = MMC_CAP_4_BIT_DATA | MMC_CAP_SD_HIGHSPEED;
+	mmc->caps = MMC_CAP_4_BIT_DATA | MMC_CAP_SD_HIGHSPEED |
+		    MMC_CAP_NEEDS_POLL;
 	/*
 	 * High speed is claimed but the clock is not raised yet: the core
 	 * takes this as the ceiling for a high-speed card, so it keeps asking
@@ -2952,9 +3061,12 @@ static int ta1618_mmc_probe(struct platform_device *pdev)
 	mmc->max_busy_timeout = UMS9117_MMC_REQUEST_TIMEOUT_MS;
 	platform_set_drvdata(pdev, host);
 
+	ret = ta1618_mmc_enable_card_detect(host);
+	if (ret)
+		goto out_restore_card_detect;
 	ret = mmc_add_host(mmc);
 	if (ret)
-		goto out_free_irq;
+		goto out_restore_card_detect;
 	ret = device_create_file(&pdev->dev, &dev_attr_audit);
 	if (ret)
 		goto out_remove_host;
@@ -2968,7 +3080,8 @@ static int ta1618_mmc_probe(struct platform_device *pdev)
 
 out_remove_host:
 	mmc_remove_host(mmc);
-out_free_irq:
+out_restore_card_detect:
+	ta1618_mmc_restore_card_detect(host);
 	free_irq(irq, host);
 	host->irq_requested = false;
 out_free_descriptor:
@@ -3044,6 +3157,7 @@ static void ta1618_mmc_remove(struct platform_device *pdev)
 		host->audit_file_created = false;
 	}
 	mmc_remove_host(host->mmc);
+	ta1618_mmc_restore_card_detect(host);
 	WRITE_ONCE(host->stopping, true);
 	if (host->platform_active)
 		ta1618_mmc_writel(host, TA1618_MMC_RES_INTERRUPT_SIGNAL_ENABLE,
