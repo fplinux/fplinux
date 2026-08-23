@@ -42,6 +42,10 @@
 		regulator-max-microvolt = <3300000>;
 	};
 
+	charger {
+		compatible = "fplinux,ta1618-sc2720-charger";
+	};
+
 	soc {
 		display@83f00000 {
 			compatible = "fplinux,ums9117-st7789p3-spi-fb";
