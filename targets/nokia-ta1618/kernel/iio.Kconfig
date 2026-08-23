@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config IIO_TA1618_SC2720_AUXADC
+	bool "Nokia TA-1618 SC2720 AUXADC"
+	depends on MACH_NOKIA_TA1618
+	depends on IIO
+	depends on !PM
+	help
+	  Direct raw AUXADC readings for channels 0, 1, 2, 4 and 14 on the
+	  Nokia 3210 4G TA-1618. The provider performs one bounded conversion
+	  per read and does not configure interrupts, buffers, triggers or
+	  persistent ADC state.

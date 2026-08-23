@@ -78,6 +78,14 @@ source = "bindings/fplinux,ta1618-thm1.yaml"
 destination = "Documentation/devicetree/bindings/thermal/fplinux,ta1618-thm1.yaml"
 
 [[linux.copies]]
+source = "kernel/ta1618-sc2720-auxadc.c"
+destination = "drivers/iio/adc/ta1618-sc2720-auxadc.c"
+
+[[linux.copies]]
+source = "bindings/fplinux,ta1618-sc2720-auxadc.yaml"
+destination = "Documentation/devicetree/bindings/iio/adc/fplinux,ta1618-sc2720-auxadc.yaml"
+
+[[linux.copies]]
 source = "kernel/ta1618-sc2720-rtc.c"
 destination = "drivers/rtc/ta1618-sc2720-rtc.c"
 
@@ -124,6 +132,14 @@ destination = "drivers/thermal/Kconfig"
 [[linux.appends]]
 source = "kernel/thermal.Makefile"
 destination = "drivers/thermal/Makefile"
+
+[[linux.appends]]
+source = "kernel/iio.Kconfig"
+destination = "drivers/iio/adc/Kconfig"
+
+[[linux.appends]]
+source = "kernel/iio.Makefile"
+destination = "drivers/iio/adc/Makefile"
 
 [[linux.appends]]
 source = "kernel/rtc.Kconfig"
