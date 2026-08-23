@@ -54,6 +54,10 @@
 		compatible = "fplinux,ta1618-sc2720-rtc";
 	};
 
+	auxadc {
+		compatible = "fplinux,ta1618-sc2720-auxadc";
+	};
+
 	soc {
 		display@83f00000 {
 			compatible = "fplinux,ums9117-st7789p3-spi-fb";
