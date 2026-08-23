@@ -47,6 +47,8 @@ export default {
   ...conventional,
   rules: {
     ...conventional.rules,
+    "body-empty": [2, "never"],
+    "body-leading-blank": [2, "always"],
     "scope-empty": [2, "never"],
     "scope-enum": [2, "always", SCOPES],
   },
