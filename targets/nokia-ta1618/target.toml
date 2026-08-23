@@ -62,6 +62,14 @@ source = "bindings/fplinux,ta1618-sc2720-charger.yaml"
 destination = "Documentation/devicetree/bindings/power/supply/fplinux,ta1618-sc2720-charger.yaml"
 
 [[linux.copies]]
+source = "kernel/ta1618-sc2720-fgu.c"
+destination = "drivers/power/supply/ta1618-sc2720-fgu.c"
+
+[[linux.copies]]
+source = "bindings/fplinux,ta1618-sc2720-fgu.yaml"
+destination = "Documentation/devicetree/bindings/power/supply/fplinux,ta1618-sc2720-fgu.yaml"
+
+[[linux.copies]]
 source = "bindings/fplinux,ta1618-kpled.yaml"
 destination = "Documentation/devicetree/bindings/leds/fplinux,ta1618-kpled.yaml"
 

@@ -7,3 +7,10 @@ config POWER_SUPPLY_TA1618_SC2720_CHARGER
 	  Read-only charger-input observation for the Nokia 3210 4G
 	  TA-1618. The driver exports only the current SC2720 charger-present
 	  status and does not configure charging, the FGU, efuses or NV state.
+
+config POWER_SUPPLY_TA1618_SC2720_FGU
+	tristate "Nokia TA-1618 SC2720 battery voltage"
+	depends on MACH_NOKIA_TA1618
+	depends on POWER_SUPPLY
+	help
+	  Read-only battery voltage reporting for the Nokia 3210 4G TA-1618.
