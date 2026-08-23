@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: GPL-2.0-only
-schema = "fplinux.release/v2"
 image = "image/ramboot.bin"
 
 bundle_files = [
@@ -9,9 +8,10 @@ bundle_files = [
   "assets/t117_fdl1.bin",
   "host/spd_dump",
   "host/libc_server",
-  "host/fplinux-usb-console",
+  "host/fplinux-usb-keyboard",
   "runner/run.py",
   "runner/platform_adapter.py",
+  "runner/ssh_transport.py",
   "runtime-manifest.json",
   "apks/fplinux-tyrquake.apk",
   "apks/fplinux-micropythonos.apk",
@@ -26,9 +26,10 @@ runtime_files = [
   "assets/t117_fdl1.bin",
   "host/spd_dump",
   "host/libc_server",
-  "host/fplinux-usb-console",
+  "host/fplinux-usb-keyboard",
   "runner/run.py",
   "runner/platform_adapter.py",
+  "runner/ssh_transport.py",
   "runtime-manifest.json",
 ]
 

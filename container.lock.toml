@@ -1,7 +1,5 @@
-schema = "fplinux.container/v1"
-
 [oci]
-image = "localhost/fplinux-build:3.24.1-r1"
+repository = "localhost/fplinux-build"
 platform = "linux/amd64"
 base = "docker.io/library/alpine@sha256:79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f"
 base_created = "2026-06-16T00:01:29Z"

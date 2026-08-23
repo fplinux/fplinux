@@ -6,6 +6,7 @@ pkgdesc="USB host-keyboard input bridge for FPLinux"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="GPL-2.0-only"
+depends="fplinux-usb-gadget"
 makedepends_build="clang22 lld22"
 makedepends_host="musl-dev linux-headers gcc"
 subpackages="$pkgname-openrc"
@@ -29,6 +30,6 @@ openrc() {
 }
 
 sha512sums="
-aa0777dab58f7f2cbde9a673ad4063026b227575c8fbeb73ac1e89e6c1b99624116bc33bf2748a9b2b0a0756f366256e0b012a8df545723d3ffaeac6fa810be4  fplinux-input.c
-26e6f35394d14a9789bc703f720c9047dddfebda2ce7a640f3961e01a5baa50c4bbc3065dd1cb0c4ff5bca317385b04b95780b090069bd926640abc1d25d0749  fplinux-input.initd
+93ac6d1df4cd550de8d9bcf397b5795f9e74ff5c39e756c81c3d452dd5c0870eb8f2138cfa79204a0a3038681285eaf1ecbd83eb0d1728710c9b0aab66d8ff56  fplinux-input.c
+32a23b3153836409097f8f569cf0b9bb17123c79c45579ca6bd3b62430dda5cd551711d5cf3200842cf8b5d25d0ebb526a8951fabbca656187cf97ecf278b0e3  fplinux-input.initd
 "

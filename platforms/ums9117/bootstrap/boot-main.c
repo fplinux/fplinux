@@ -94,18 +94,12 @@ static void record_stage(uint32_t stage, const char *message)
 {
 	fprintf(stderr, "%s_LINUX_BOOTSTRAP stage=%lu message=%s\n",
 		active_board->marker, (unsigned long)stage, message);
-	if (active_board->hooks != NULL && active_board->hooks->record != NULL)
-		active_board->hooks->record(active_board->hooks->context, stage,
-					    message);
 }
 
 void ums9117_boot_fail(uint32_t code, const char *message)
 {
 	fprintf(stderr, "%s_LINUX_BOOTSTRAP stage=238 error=%lu message=%s\n",
 		active_board->marker, (unsigned long)code, message);
-	if (active_board->hooks != NULL && active_board->hooks->fail != NULL)
-		active_board->hooks->fail(active_board->hooks->context, code,
-					  message);
 	fplinux_boot_screen_fail(&boot_screen, code, message);
 	for (;;)
 		;
@@ -133,11 +127,6 @@ static int enable_and_probe_sprd_timer(void)
 
 static void quiesce_usb(void)
 {
-	if (active_board->hooks != NULL &&
-	    active_board->hooks->quiesce_usb != NULL) {
-		active_board->hooks->quiesce_usb(active_board->hooks->context);
-		return;
-	}
 	ums9117_boot_checkpoint("DMA 5 QUIESCE", FPLINUX_BOOT_SCREEN_ACTIVE);
 	if ((ums9117_bootstrap_quiesce_usb_dma_channel(5) &
 	     UMS9117_BOOTSTRAP_DMA_OK) != UMS9117_BOOTSTRAP_DMA_OK)
@@ -152,6 +141,7 @@ static void quiesce_usb(void)
 
 void ums9117_boot_main(const struct ums9117_boot_board *board)
 {
+	enum ums9117_bootstrap_session_status session_status;
 	uint32_t ram_bytes =
 		*(volatile uint32_t *)(uintptr_t)(UMS9117_BOOT_RAM_BASE_PHYS +
 						  0x00100000U);
@@ -167,10 +157,6 @@ void ums9117_boot_main(const struct ums9117_boot_board *board)
 		"ram=0x%08lx zimage=%lu dtb=%lu\n",
 		board->marker, (unsigned long)ram_bytes,
 		(unsigned long)zimage_bytes, (unsigned long)dtb_bytes);
-	if (board->hooks != NULL && board->hooks->entry != NULL)
-		board->hooks->entry(board->hooks->context, ram_bytes,
-				    (uint32_t)zimage_bytes,
-				    (uint32_t)dtb_bytes);
 
 	/* Fresh RAM is noise; clear the whole region the LCDC may scan. */
 	memset(framebuffer, 0, UMS9117_BOOT_FRAMEBUFFER_BYTES);
@@ -229,6 +215,13 @@ void ums9117_boot_main(const struct ums9117_boot_board *board)
 		ums9117_boot_fail(4, "BAD DTB SIZE");
 	record_stage(4, "COPY DTB");
 	ums9117_bootstrap_copy_dtb(UMS9117_BOOT_DTB_STAGE_PHYS, dtb_bytes);
+	ums9117_boot_checkpoint("SESSION VERIFY", FPLINUX_BOOT_SCREEN_ACTIVE);
+	session_status = ums9117_bootstrap_personalize_dtb(
+		UMS9117_BOOT_DTB_STAGE_PHYS, dtb_bytes);
+	if (session_status != UMS9117_BOOTSTRAP_SESSION_OK)
+		ums9117_boot_fail(
+			9, ums9117_bootstrap_session_error(session_status));
+	ums9117_boot_checkpoint("SESSION READY", FPLINUX_BOOT_SCREEN_DONE);
 	set_stage(UMS9117_BOOT_STAGE_DEVICE_TREE, FPLINUX_BOOT_SCREEN_DONE);
 
 	set_stage(UMS9117_BOOT_STAGE_PREPARE_LINUX, FPLINUX_BOOT_SCREEN_ACTIVE);
@@ -236,8 +229,6 @@ void ums9117_boot_main(const struct ums9117_boot_board *board)
 	record_stage(5, "PREPARE LINUX");
 	quiesce_usb();
 	set_stage(UMS9117_BOOT_STAGE_PREPARE_LINUX, FPLINUX_BOOT_SCREEN_DONE);
-	if (board->hooks != NULL && board->hooks->pre_handoff != NULL)
-		board->hooks->pre_handoff(board->hooks->context);
 	clean_invalidate_dcache();
 	invalidate_icache();
 

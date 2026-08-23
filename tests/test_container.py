@@ -20,7 +20,7 @@ def _container_lock() -> dict[str, object]:
     """Return the smallest valid build-image input set."""
     return {
         "oci": {
-            "image": "localhost/fplinux:locked",
+            "repository": "localhost/fplinux-build",
             "platform": "linux/amd64",
             "base": f"example.invalid/base@sha256:{'a' * 64}",
             "base_created": "2026-01-01T00:00:00Z",
@@ -72,15 +72,20 @@ class ContainerImageRecipeTests(unittest.TestCase):
         self.assertEqual(first_image, second_image)
         self.assertEqual(first_check, second_check)
 
+    def test_image_reference_is_bound_to_the_full_recipe_digest(self) -> None:
+        """A local image tag cannot be reused for a different build recipe."""
+        self.assertEqual(
+            config.container_image_reference(_container_lock(), "a" * 64),
+            f"localhost/fplinux-build:{'a' * 64}",
+        )
+
 
 class SetupLifecycleTests(unittest.TestCase):
     """Keep direct setup inside the unified run metadata lifecycle."""
 
     def test_ready_direct_setup_finishes_its_own_reporter(self) -> None:
         """Publish successful direct-setup run metadata on an image hit."""
-        lock = {
-            "oci": {"image": "localhost/fplinux:locked"},
-        }
+        lock = {"oci": {"repository": "localhost/fplinux-build"}}
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             with (
@@ -135,7 +140,7 @@ class SetupLifecycleTests(unittest.TestCase):
                 mock.patch.object(
                     container,
                     "image_identifier",
-                    side_effect=(None, "sha256:" + "b" * 64),
+                    return_value="sha256:" + "b" * 64,
                 ),
                 mock.patch.object(container, "install_git_hooks"),
             ):
@@ -152,7 +157,7 @@ class SetupLifecycleTests(unittest.TestCase):
                 "--build-arg",
                 f"BASE_IMAGE=example.invalid/base@sha256:{'a' * 64}",
                 "--tag",
-                "localhost/fplinux:locked",
+                f"localhost/fplinux-build:{'a' * 64}",
                 "--label",
                 f"org.fplinux.container.image-recipe={'a' * 64}",
                 ".",

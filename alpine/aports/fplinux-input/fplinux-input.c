@@ -12,7 +12,7 @@
 #include <termios.h>
 #include <unistd.h>
 
-#define FPLINUX_INPUT_DEFAULT_CHANNEL "/dev/ttyGS1"
+#define FPLINUX_INPUT_DEFAULT_CHANNEL "/dev/ttyGS0"
 #define FPLINUX_INPUT_KEYBOARD_LEASE_MS 1000
 #define FPLINUX_INPUT_LINE_BYTES 64
 #define FPLINUX_INPUT_VENDOR_ID 0x1d6b
@@ -109,9 +109,9 @@ static void release_keys(int device, bool pressed[KEY_CNT])
 		inject(device, EV_SYN, SYN_REPORT, 0);
 }
 
-int main(int argc, char **argv)
+int main(void)
 {
-	const char *path = argc > 1 ? argv[1] : FPLINUX_INPUT_DEFAULT_CHANNEL;
+	const char *path = FPLINUX_INPUT_DEFAULT_CHANNEL;
 	bool pressed[KEY_CNT] = { false };
 	char line[FPLINUX_INPUT_LINE_BYTES];
 	size_t filled = 0;

@@ -1,0 +1,15 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+
+set -eu
+
+session_id_property=/proc/device-tree/fplinux-session/fplinux,session-id
+
+[ -f "$session_id_property" ] || exit 1
+[ "$(wc -c <"$session_id_property")" -eq 32 ] || exit 1
+session_id=$(od -An -tx1 -v "$session_id_property" | tr -d ' \n')
+[ "${#session_id}" -eq 64 ] || exit 1
+case "$session_id" in
+*[!0-9a-f]*) exit 1 ;;
+esac
+printf '%s\n' "$session_id"

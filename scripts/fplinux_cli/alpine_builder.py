@@ -110,7 +110,7 @@ def _fetch(url: object, expected: object, cache: Path, name: object) -> Path:
             temporary = Path(output.name)
             request = urllib.request.Request(  # noqa: S310 -- HTTPS is required above.
                 url,
-                headers={"User-Agent": "FPLinux/1"},
+                headers={"User-Agent": "FPLinux"},
             )
             with urllib.request.urlopen(  # noqa: S310 -- HTTPS is required above.
                 request,
@@ -645,6 +645,12 @@ def _require_bundle_package_absent(root: Path, package: str) -> None:
     fail(f"cannot verify that bundle Alpine package is absent: {package}: {detail}")
 
 
+def _require_openrc_service(root: Path, runlevel: str, service: str) -> None:
+    link = root / "etc/runlevels" / runlevel / service
+    if not link.is_symlink() or link.readlink() != Path(f"/etc/init.d/{service}"):
+        fail(f"Alpine rootfs {runlevel} runlevel is missing {service}")
+
+
 def _verify_alpine_rootfs(
     root: Path,
     packages: tuple[str, ...],
@@ -659,7 +665,6 @@ def _verify_alpine_rootfs(
         "/etc/inittab": "fplinux-base",
         "/etc/os-release": "fplinux-base",
         "/etc/init.d/fplinux-console": "fplinux-console-openrc",
-        "/etc/init.d/fplinux-usb-getty": "fplinux-console-openrc",
         "/etc/init.d/fplinux-input": "fplinux-input-openrc",
         "/usr/bin/fplinux-console": "fplinux-console",
         "/usr/bin/fplinux-input": "fplinux-input",
@@ -669,14 +674,33 @@ def _verify_alpine_rootfs(
     if "fplinux-tyrquake" in packages:
         owners["/usr/bin/quake"] = "fplinux-tyrquake"
         owners["/usr/bin/tyr-quake"] = "fplinux-tyrquake"
+    if "fplinux-usb-gadget" in packages:
+        owners.update(
+            {
+                "/usr/libexec/fplinux/usb-gadget": "fplinux-usb-gadget",
+                "/etc/init.d/fplinux-usb-gadget": "fplinux-usb-gadget-openrc",
+                "/etc/init.d/fplinux-usb-dhcp": "fplinux-usb-gadget-openrc",
+            }
+        )
+    if "fplinux-ssh" in packages:
+        owners.update(
+            {
+                "/usr/libexec/fplinux/ssh-server": "fplinux-ssh",
+                "/usr/bin/fplinux-session-id": "fplinux-ssh",
+                "/etc/init.d/fplinux-ssh": "fplinux-ssh-openrc",
+            }
+        )
     for path, package in owners.items():
         require_file(root / path.removeprefix("/"))
         _require_apk_owner(root, path, package)
 
-    for service in ("fplinux-input", "fplinux-usb-getty", "fplinux-console"):
-        link = root / "etc/runlevels/default" / service
-        if not link.is_symlink() or link.readlink() != Path(f"/etc/init.d/{service}"):
-            fail(f"Alpine rootfs default runlevel is missing {service}")
+    for service in ("fplinux-input", "fplinux-console"):
+        _require_openrc_service(root, "default", service)
+    if "fplinux-usb-gadget" in packages:
+        _require_openrc_service(root, "sysinit", "fplinux-usb-gadget")
+        _require_openrc_service(root, "default", "fplinux-usb-dhcp")
+    if "fplinux-ssh" in packages:
+        _require_openrc_service(root, "default", "fplinux-ssh")
 
     fstab = require_file(root / "etc/fstab").read_text(encoding="utf-8")
     if "tmpfs\t/tmp\ttmpfs\trw,nosuid,nodev,mode=1777\t0 0" not in fstab:
@@ -694,6 +718,12 @@ def _verify_alpine_rootfs(
     inittab = require_file(root / "etc/inittab").read_text(encoding="utf-8")
     if "ttyGS" in inittab or "getty" in inittab:
         fail("Alpine inittab must leave all interactive consoles to OpenRC services")
+    for obsolete in (
+        "etc/init.d/fplinux-usb-getty",
+        "etc/runlevels/default/fplinux-usb-getty",
+    ):
+        if (root / obsolete).exists() or (root / obsolete).is_symlink():
+            fail(f"legacy USB ACM shell is present: /{obsolete}")
     for obsolete in (
         "etc/fplinux-build",
         "usr/libexec/fplinux/init",

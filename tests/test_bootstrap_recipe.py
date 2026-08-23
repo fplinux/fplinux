@@ -24,15 +24,9 @@ class BootstrapRecipeTests(unittest.TestCase):
         self._write("bootstrap/fplinux-boot-screen/screen.c", b"int screen;\n")
         self.target_config = {
             "bootstrap": {
-                "source": "bootstrap",
                 "image": "ramboot.bin",
                 "map": "obj/ramboot.map",
-                "kernel_destination": "zImage",
                 "dtb_destination": "target.dtb",
-                "load_address": 0x80100000,
-                "payload_limit": 0x82000000,
-                "toolchain": "arm-none-eabi",
-                "lto": 0,
             }
         }
         self.platform = {
@@ -47,6 +41,11 @@ class BootstrapRecipeTests(unittest.TestCase):
                 "safety_target": "fplinux-safety-check",
                 "build_targets": ["clean", "all", "map"],
                 "files": ["pack_reloc/Makefile"],
+                "kernel_destination": "zImage",
+                "load_address": 0x80100000,
+                "payload_limit": 0x82000000,
+                "toolchain": "arm-none-eabi",
+                "lto": 0,
                 "shared_copies": [
                     {
                         "source": "bootstrap/fplinux-boot-screen",
@@ -102,9 +101,9 @@ class BootstrapRecipeTests(unittest.TestCase):
         self.assertNotEqual(baseline, self._digest())
         self.sources["vendor"]["commit"] = "abc123"
 
-        self.target_config["bootstrap"]["toolchain"] = "arm-none-eabi-custom"
+        self.platform["bootstrap"]["toolchain"] = "arm-none-eabi-custom"
         self.assertNotEqual(baseline, self._digest())
-        self.target_config["bootstrap"]["toolchain"] = "arm-none-eabi"
+        self.platform["bootstrap"]["toolchain"] = "arm-none-eabi"
 
         self.platform["bootstrap"]["build_targets"] = ["clean", "all"]
         self.assertNotEqual(baseline, self._digest())

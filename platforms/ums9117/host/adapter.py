@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import importlib
 import os
 import shutil
 import signal
@@ -17,7 +18,6 @@ from typing import TYPE_CHECKING, Any, NoReturn
 if TYPE_CHECKING:
     from types import FrameType
 
-CAPABILITY = "fplinux.host.ums9117-ram/v1"
 BACKLIGHT_CHANNELS = "rgbw"
 
 
@@ -169,13 +169,11 @@ def stream(process: subprocess.Popen[str], marker: str, marker_seen: threading.E
             marker_seen.set()
 
 
-def run(bundle: Path, runtime: dict[str, Any]) -> None:
+def run(bundle: Path, runtime: dict[str, Any], session: dict[str, Any]) -> None:
     """Execute the fixed RAM-only UMS9117 sequence."""
-    if runtime.get("capability") != CAPABILITY:
-        fail(f"runtime capability must be {CAPABILITY}")
     assets = runtime["assets"]
     if set(assets) != {"fdl1", "pinmap", "keymap"}:
-        fail("runtime assets do not match the platform capability")
+        fail("runtime assets do not match the UMS9117 platform contract")
     pinmap = Path(assets["pinmap"])
     keymap = Path(assets["keymap"])
     if (
@@ -185,21 +183,20 @@ def run(bundle: Path, runtime: dict[str, Any]) -> None:
     ):
         fail("platform map assets must share a directory and fixed protocol names")
     tools = runtime["host_tools"]
-    if set(tools) != {"loader", "bridge", "console"}:
-        fail("runtime host tools do not match the platform capability")
+    if set(tools) != {"loader", "bridge", "keyboard"}:
+        fail("runtime host tools do not match the UMS9117 platform contract")
     config = adapter_config(runtime["adapter"])
     stdbuf = shutil.which("stdbuf")
     if stdbuf is None:
         fail("GNU stdbuf is required (install coreutils before starting the RAM loader)")
 
-    image = bundle / runtime["image"]
+    image = Path(session["image"])
     fdl1 = bundle / assets["fdl1"]
     loader = bundle / tools["loader"]
     bridge = bundle / tools["bridge"]
-    console = bundle / tools["console"]
     addresses = runtime["addresses"]
     bootrom_usb = runtime["usb"]["bootrom"]
-    linux_usb = runtime["usb"]["linux_console"]
+    linux_usb = runtime["usb"]["linux_gadget"]
 
     loader_argv = loader_arguments(
         loader,
@@ -235,7 +232,11 @@ def run(bundle: Path, runtime: dict[str, Any]) -> None:
             "install the documented udev rule and reconnect the phone"
         )
 
-    result = subprocess.run(loader_argv, check=False)
+    try:
+        result = subprocess.run(loader_argv, check=False)
+    finally:
+        transport_module = importlib.import_module("ssh_transport")
+        transport_module.remove_personalized_image(session)
     if result.returncode:
         fail(f"RAM loader exited with status {result.returncode}")
 
@@ -299,20 +300,9 @@ def run(bundle: Path, runtime: dict[str, Any]) -> None:
     linux_id = f"{linux_usb['vendor_id']:04x}:{linux_usb['product_id']:04x}"
     print(
         "Bootstrap released USB; waiting up to "
-        f"{linux_usb['wait_seconds']} seconds for Linux console {linux_id}."
+        f"{linux_usb['wait_seconds']} seconds for Linux USB-NCM {linux_id}."
     )
-    console_path = str(console)
-    os.execv(
-        console_path,
-        [
-            console_path,
-            "--vid",
-            f"{linux_usb['vendor_id']:04x}",
-            "--pid",
-            f"{linux_usb['product_id']:04x}",
-            "--wait",
-            str(linux_usb["wait_seconds"]),
-            "--interface",
-            "0",
-        ],
-    )
+    transport_module = importlib.import_module("ssh_transport")
+    ready = transport_module.wait_for_bound_session(session)
+    transport_module.open_shell(ready)
+    fail("SSH client returned without replacing the runner")

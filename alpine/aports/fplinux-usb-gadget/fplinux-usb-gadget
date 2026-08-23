@@ -1,0 +1,438 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+
+set -eu
+
+session_node=/proc/device-tree/fplinux-session
+usb_session_property=$session_node/fplinux,usb-session
+session_id_property=$session_node/fplinux,session-id
+gadget=/sys/kernel/config/usb_gadget/fplinux
+configuration=$gadget/configs/c.1
+runtime_session=/run/fplinux-usb-session.conf
+runtime_dhcp=/run/fplinux-udhcpd.conf
+log=/run/fplinux-usb-gadget.log
+session_ascii=/run/.fplinux-usb-session.$$
+session_prefix=/run/.fplinux-usb-session-prefix.$$
+session_runtime_tmp=/run/.fplinux-usb-session.conf.$$
+dhcp_runtime_tmp=/run/.fplinux-udhcpd.conf.$$
+stage=entry
+created=0
+runtime_created=0
+
+report() {
+	line="fplinux-usb-gadget: $*"
+	printf '%s\n' "$line" >>"$log"
+	if [ -c /dev/kmsg ]; then
+		printf '<6>%s\n' "$line" >/dev/kmsg || :
+	fi
+	if [ -c /dev/tty1 ]; then
+		printf '%s\r\n' "$line" >/dev/tty1 || :
+	fi
+}
+
+remove_temporary_files() {
+	rm -f -- "$session_ascii" "$session_prefix" \
+		"$session_runtime_tmp" "$dhcp_runtime_tmp"
+}
+
+remove_runtime_files() {
+	rm -f -- "$runtime_session" "$runtime_dhcp" /run/fplinux-udhcpd.leases
+}
+
+read_session_id() {
+	[ -f "$session_id_property" ] || return 1
+	[ "$(wc -c <"$session_id_property")" -eq 32 ] || return 1
+	session_id=$(od -An -tx1 -v "$session_id_property" | tr -d ' \n')
+	[ "${#session_id}" -eq 64 ] || return 1
+	case "$session_id" in
+	*[!0-9a-f]*) return 1 ;;
+	esac
+}
+
+validate_ipv4() {
+	ipv4_value=$1
+	case "$ipv4_value" in
+	'' | *[!0-9.]*) return 1 ;;
+	esac
+
+	old_ifs=$IFS
+	IFS=.
+	set -- $ipv4_value
+	IFS=$old_ifs
+	[ "$#" -eq 4 ] || return 1
+	for ipv4_octet in "$@"; do
+		case "$ipv4_octet" in
+		'' | *[!0-9]* | 0?*) return 1 ;;
+		esac
+		[ "$ipv4_octet" -le 255 ] || return 1
+	done
+	ipv4_a=$1
+	ipv4_b=$2
+	ipv4_c=$3
+	ipv4_d=$4
+}
+
+validate_mac() {
+	mac_value=$1
+	case "$mac_value" in
+	'' | *[!0-9a-f:]*) return 1 ;;
+	esac
+
+	old_ifs=$IFS
+	IFS=:
+	set -- $mac_value
+	IFS=$old_ifs
+	[ "$#" -eq 6 ] || return 1
+	for mac_octet in "$@"; do
+		case "$mac_octet" in
+		??)
+			case "$mac_octet" in
+			*[!0-9a-f]*) return 1 ;;
+			esac
+			;;
+		*) return 1 ;;
+		esac
+	done
+	mac_first=$(printf '%d' "0x$1")
+	[ $((mac_first % 4)) -eq 2 ]
+}
+
+parse_usb_session() {
+	[ -f "$usb_session_property" ] || return 1
+	[ "$(wc -c <"$usb_session_property")" -eq 256 ] || return 1
+
+	tr -d '\000' <"$usb_session_property" >"$session_ascii"
+	ascii_size=$(wc -c <"$session_ascii")
+	[ "$ascii_size" -gt 0 ] || return 1
+	[ "$ascii_size" -lt 256 ] || return 1
+	dd if="$usb_session_property" of="$session_prefix" bs=1 \
+		count="$ascii_size" 2>/dev/null
+	cmp "$session_ascii" "$session_prefix" >/dev/null 2>&1 || return 1
+	non_padding_size=$(
+		dd if="$usb_session_property" bs=1 skip="$ascii_size" 2>/dev/null |
+			tr -d '\000' | wc -c
+	)
+	[ "$non_padding_size" -eq 0 ] || return 1
+	last_byte=$(tail -c 1 "$session_ascii" | od -An -tu1 | tr -d ' \n')
+	[ "$last_byte" = 10 ] || return 1
+
+	usb_serial=
+	phone_address=
+	host_address=
+	netmask=
+	broadcast=
+	device_mac=
+	host_mac=
+	seen_usb_serial=0
+	seen_phone_address=0
+	seen_host_address=0
+	seen_netmask=0
+	seen_broadcast=0
+	seen_device_mac=0
+	seen_host_mac=0
+	line_count=0
+	while IFS= read -r line; do
+		line_count=$((line_count + 1))
+		case "$line" in
+		*=*)
+			key=${line%%=*}
+			value=${line#*=}
+			;;
+		*) return 1 ;;
+		esac
+		case "$key" in
+		usb_serial)
+			[ "$seen_usb_serial" -eq 0 ] || return 1
+			usb_serial=$value
+			seen_usb_serial=1
+			;;
+		phone_address)
+			[ "$seen_phone_address" -eq 0 ] || return 1
+			phone_address=$value
+			seen_phone_address=1
+			;;
+		host_address)
+			[ "$seen_host_address" -eq 0 ] || return 1
+			host_address=$value
+			seen_host_address=1
+			;;
+		netmask)
+			[ "$seen_netmask" -eq 0 ] || return 1
+			netmask=$value
+			seen_netmask=1
+			;;
+		broadcast)
+			[ "$seen_broadcast" -eq 0 ] || return 1
+			broadcast=$value
+			seen_broadcast=1
+			;;
+		device_mac)
+			[ "$seen_device_mac" -eq 0 ] || return 1
+			device_mac=$value
+			seen_device_mac=1
+			;;
+		host_mac)
+			[ "$seen_host_mac" -eq 0 ] || return 1
+			host_mac=$value
+			seen_host_mac=1
+			;;
+		*) return 1 ;;
+		esac
+	done <"$session_ascii"
+
+	[ "$line_count" -eq 7 ] || return 1
+	[ "$seen_usb_serial$seen_phone_address$seen_host_address" = 111 ] ||
+		return 1
+	[ "$seen_netmask$seen_broadcast$seen_device_mac$seen_host_mac" = 1111 ] ||
+		return 1
+	[ "${#usb_serial}" -eq 32 ] || return 1
+	case "$usb_serial" in
+	*[!0-9a-f]*) return 1 ;;
+	esac
+	[ "$netmask" = 255.255.255.252 ] || return 1
+
+	validate_ipv4 "$phone_address" || return 1
+	phone_prefix=$ipv4_a.$ipv4_b.$ipv4_c
+	phone_last=$ipv4_d
+	case "$ipv4_a:$ipv4_b" in
+	10:*) ;;
+	172:*)
+		[ "$ipv4_b" -ge 16 ] && [ "$ipv4_b" -le 31 ] || return 1
+		;;
+	192:168) ;;
+	*) return 1 ;;
+	esac
+	validate_ipv4 "$host_address" || return 1
+	host_prefix=$ipv4_a.$ipv4_b.$ipv4_c
+	host_last=$ipv4_d
+	validate_ipv4 "$broadcast" || return 1
+	broadcast_prefix=$ipv4_a.$ipv4_b.$ipv4_c
+	broadcast_last=$ipv4_d
+	[ "$phone_prefix" = "$host_prefix" ] || return 1
+	[ "$phone_prefix" = "$broadcast_prefix" ] || return 1
+	network_last=$((phone_last - phone_last % 4))
+	[ "$phone_last" -gt "$network_last" ] || return 1
+	[ "$phone_last" -lt $((network_last + 3)) ] || return 1
+	[ "$host_last" -gt "$network_last" ] || return 1
+	[ "$host_last" -lt $((network_last + 3)) ] || return 1
+	[ "$phone_last" -ne "$host_last" ] || return 1
+	[ "$broadcast_last" -eq $((network_last + 3)) ] || return 1
+
+	validate_mac "$device_mac" || return 1
+	validate_mac "$host_mac" || return 1
+	[ "$device_mac" != "$host_mac" ] || return 1
+
+	expected_serial=$(sha256sum "$session_id_property")
+	expected_serial=${expected_serial%% *}
+	expected_serial=$(printf '%.32s' "$expected_serial")
+	[ "$usb_serial" = "$expected_serial" ]
+}
+
+write_runtime_configs() {
+	umask 077
+	{
+		printf 'usb_serial=%s\n' "$usb_serial"
+		printf 'phone_address=%s\n' "$phone_address"
+		printf 'host_address=%s\n' "$host_address"
+		printf 'netmask=%s\n' "$netmask"
+		printf 'broadcast=%s\n' "$broadcast"
+		printf 'device_mac=%s\n' "$device_mac"
+		printf 'host_mac=%s\n' "$host_mac"
+	} >"$session_runtime_tmp"
+	{
+		printf 'start %s\n' "$host_address"
+		printf 'end %s\n' "$host_address"
+		printf 'interface usb0\n'
+		printf 'max_leases 1\n'
+		printf 'lease_file /run/fplinux-udhcpd.leases\n'
+		printf 'pidfile /run/fplinux-udhcpd.pid\n'
+		printf 'auto_time 0\n'
+		printf 'option subnet %s\n' "$netmask"
+		printf 'option broadcast %s\n' "$broadcast"
+		printf 'option lease 3600\n'
+	} >"$dhcp_runtime_tmp"
+	chmod 0600 "$session_runtime_tmp" "$dhcp_runtime_tmp"
+	runtime_created=1
+	mv -f -- "$session_runtime_tmp" "$runtime_session"
+	mv -f -- "$dhcp_runtime_tmp" "$runtime_dhcp"
+}
+
+cleanup() {
+	if [ -d "$gadget" ]; then
+		printf '\n' >"$gadget/UDC" 2>/dev/null || :
+		/sbin/ifconfig usb0 down 2>/dev/null || :
+		[ ! -L "$configuration/gser.keyboard" ] ||
+			rm -f -- "$configuration/gser.keyboard"
+		[ ! -L "$configuration/ncm.usb0" ] ||
+			rm -f -- "$configuration/ncm.usb0"
+		[ ! -d "$gadget/functions/ncm.usb0" ] ||
+			rmdir "$gadget/functions/ncm.usb0" 2>/dev/null || :
+		[ ! -d "$gadget/functions/gser.keyboard" ] ||
+			rmdir "$gadget/functions/gser.keyboard" 2>/dev/null || :
+		[ ! -d "$configuration/strings/0x409" ] ||
+			rmdir "$configuration/strings/0x409" 2>/dev/null || :
+		[ ! -d "$configuration" ] || rmdir "$configuration" 2>/dev/null || :
+		[ ! -d "$gadget/strings/0x409" ] ||
+			rmdir "$gadget/strings/0x409" 2>/dev/null || :
+		rmdir "$gadget" 2>/dev/null || :
+	fi
+	remove_runtime_files
+	[ ! -e "$gadget" ]
+}
+
+on_exit() {
+	status=$?
+	trap - EXIT HUP INT TERM
+	remove_temporary_files
+	if [ "$status" -ne 0 ]; then
+		report "FAIL stage=$stage status=$status"
+		if [ "$created" -eq 1 ]; then
+			if ! cleanup; then
+				report "ROLLBACK_FAIL path=$gadget"
+			fi
+		elif [ "$runtime_created" -eq 1 ]; then
+			remove_runtime_files
+		fi
+	fi
+	exit "$status"
+}
+
+start_gadget() {
+	mkdir -p /run
+	: >"$log"
+	exec >>"$log" 2>&1
+	report "START functions=gser,ncm kernel=$(uname -r)"
+	trap on_exit EXIT
+	trap 'exit 1' HUP INT TERM
+
+	stage=validate_session_id
+	read_session_id
+	stage=validate_usb_session
+	parse_usb_session
+
+	if [ ! -d /sys/kernel/config/usb_gadget ]; then
+		stage=configfs_unavailable
+		return 1
+	fi
+	if [ -e "$gadget" ]; then
+		stage=gadget_already_exists
+		return 1
+	fi
+	stage=publish_runtime_config
+	write_runtime_configs
+	remove_temporary_files
+
+	stage=create_gadget
+	mkdir "$gadget"
+	created=1
+	printf '0x0525\n' >"$gadget/idVendor"
+	printf '0xa4a6\n' >"$gadget/idProduct"
+	printf '0x0200\n' >"$gadget/bcdUSB"
+	printf '0x0000\n' >"$gadget/bcdDevice"
+	printf '0xef\n' >"$gadget/bDeviceClass"
+	printf '0x02\n' >"$gadget/bDeviceSubClass"
+	printf '0x01\n' >"$gadget/bDeviceProtocol"
+
+	stage=create_strings
+	mkdir "$gadget/strings/0x409"
+	printf 'FPLinux contributors\n' >"$gadget/strings/0x409/manufacturer"
+	printf 'FPLinux composite USB\n' >"$gadget/strings/0x409/product"
+	printf '%s\n' "$usb_serial" >"$gadget/strings/0x409/serialnumber"
+
+	stage=create_configuration
+	mkdir "$configuration"
+	printf '0x80\n' >"$configuration/bmAttributes"
+	printf '2\n' >"$configuration/MaxPower"
+	mkdir "$configuration/strings/0x409"
+	printf 'Keyboard and NCM\n' \
+		>"$configuration/strings/0x409/configuration"
+
+	stage=create_functions
+	mkdir "$gadget/functions/gser.keyboard"
+	mkdir "$gadget/functions/ncm.usb0"
+	printf '%s\n' "$device_mac" >"$gadget/functions/ncm.usb0/dev_addr"
+	printf '%s\n' "$host_mac" >"$gadget/functions/ncm.usb0/host_addr"
+	printf 'usb%%d\n' >"$gadget/functions/ncm.usb0/ifname"
+
+	stage=link_functions
+	ln -s "$gadget/functions/gser.keyboard" "$configuration/gser.keyboard"
+	ln -s "$gadget/functions/ncm.usb0" "$configuration/ncm.usb0"
+
+	stage=verify_prebind
+	if [ ! -c /dev/ttyGS0 ] || [ -e /dev/ttyGS1 ]; then
+		return 1
+	fi
+	stage=verify_network_policy
+	if [ "$(cat /proc/sys/net/ipv4/ip_forward)" != 0 ]; then
+		return 1
+	fi
+	if [ -n "$(/sbin/ip route show default)" ]; then
+		return 1
+	fi
+
+	stage=find_udc
+	set -- /sys/class/udc/*
+	if [ "$#" -ne 1 ] || [ ! -e "$1" ]; then
+		return 1
+	fi
+	udc=${1##*/}
+
+	stage=bind_udc
+	printf '%s\n' "$udc" >"$gadget/UDC"
+
+	stage=wait_network
+	attempt=0
+	while [ ! -e /sys/class/net/usb0 ]; do
+		attempt=$((attempt + 1))
+		if [ "$attempt" -ge 10 ]; then
+			return 1
+		fi
+		sleep 1
+	done
+
+	stage=configure_network
+	/sbin/ifconfig usb0 "$phone_address" netmask "$netmask" broadcast "$broadcast" up
+
+	stage=verify_runtime
+	if [ "$(cat "$gadget/UDC")" != "$udc" ]; then
+		return 1
+	fi
+	if [ ! -e /sys/class/net/usb0 ]; then
+		return 1
+	fi
+
+	{
+		printf 'forwarding=%s\n' "$(cat /proc/sys/net/ipv4/ip_forward)"
+		/sbin/ifconfig usb0
+		/sbin/route -n
+	} >>"$log"
+	report "READY udc=$udc keyboard=/dev/ttyGS0 network=usb0"
+	created=0
+	runtime_created=0
+	trap - EXIT HUP INT TERM
+}
+
+stop_gadget() {
+	mkdir -p /run
+	: >>"$log"
+	report "STOP"
+	remove_temporary_files
+	if ! cleanup; then
+		report "STOP_FAIL path=$gadget"
+		return 1
+	fi
+	report "STOP_PASS"
+}
+
+case "${1:-}" in
+start)
+	start_gadget
+	;;
+stop)
+	stop_gadget
+	;;
+*)
+	printf 'usage: %s start|stop\n' "$0" >&2
+	exit 2
+	;;
+esac

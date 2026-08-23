@@ -237,12 +237,12 @@ def userspace_c_sources(
     for platform_name in sorted(platform_names):
         platform = load_platform(platform_name)
         for recipe in platform["host"]["tools"]:
-            if recipe["type"] != "cc-libusb/v1":
+            if recipe["type"] != "cc-libusb":
                 continue
             source = recipe["source"]
             path = ROOT / source
             if path.suffix != ".c" or path.is_symlink() or not path.is_file():
-                fail(f"cc-libusb/v1 source must be a regular C file: {source}")
+                fail(f"cc-libusb source must be a regular C file: {source}")
             result[source] = True
 
     if not result:

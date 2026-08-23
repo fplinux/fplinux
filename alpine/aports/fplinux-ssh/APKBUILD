@@ -1,0 +1,34 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-ssh
+pkgver=1
+pkgrel=0
+pkgdesc="Session-bound SSH and SFTP service for FPLinux"
+url="https://github.com/fplinux/fplinux"
+arch="noarch"
+license="GPL-2.0-only"
+depends="dropbear fplinux-usb-gadget openssh-sftp-server openrc"
+subpackages="$pkgname-openrc"
+options="!check"
+source="fplinux-ssh fplinux-session-id fplinux-ssh.initd"
+
+package() {
+	install -Dm755 "$srcdir/fplinux-ssh" \
+		"$pkgdir/usr/libexec/fplinux/ssh-server"
+	install -Dm755 "$srcdir/fplinux-session-id" \
+		"$pkgdir/usr/bin/fplinux-session-id"
+	install -Dm755 "$srcdir/fplinux-ssh.initd" \
+		"$pkgdir/etc/init.d/fplinux-ssh"
+	mkdir -p "$pkgdir/etc/runlevels/default"
+	ln -s /etc/init.d/fplinux-ssh \
+		"$pkgdir/etc/runlevels/default/fplinux-ssh"
+}
+
+openrc() {
+	default_openrc
+}
+
+sha512sums="
+5b5f0a852fdc973984f0e622ff0e8291ee75735065602affed46abfa9701adb6924d59a214cb017d7e8beaa5965ca65221d9e6790d4f8490ba9e187eb84539f6  fplinux-ssh
+46dfcce3b94be3737342a31aa40eb689b1d2c49bf667d8ea3d041f3b6104d6285cc4768978ccbc7586980f607264822137d0511ea74f4612753bc8cd3a1ab69d  fplinux-session-id
+a84521d09512d66f63304432bdf5797c7ca33d23ddea2237e84009303e974ddafb248b23fdfee8cf44742705dc0888eb3ef9ace66473beee61bc1ff430ab8e62  fplinux-ssh.initd
+"
