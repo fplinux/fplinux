@@ -46,6 +46,10 @@
 		compatible = "fplinux,ta1618-sc2720-charger";
 	};
 
+	fuel-gauge {
+		compatible = "fplinux,ta1618-sc2720-fgu";
+	};
+
 	soc {
 		display@83f00000 {
 			compatible = "fplinux,ums9117-st7789p3-spi-fb";

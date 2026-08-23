@@ -12,8 +12,8 @@
 
 This target runs Linux in volatile RAM with a local `240×320` terminal, physical
 keypad and backlight, microSD, USB SSH/SFTP, host-keyboard forwarding and
-charger detection, and battery-only power-off. Internal phone storage remains
-inaccessible.
+charger detection, experimental battery-voltage reporting, and battery-only
+power-off. Internal phone storage remains inaccessible.
 
 ## Evidence basis
 
@@ -24,7 +24,8 @@ release qualification.
 
 **Hardware** records only what is established for this phone; **Unknown** does
 not mean absent. **FPLinux** is **Supported** only after exercise on this exact
-variant. **Not supported** describes the current target, not the hardware.
+variant. **Experimental** has been exercised but retains the stated limitation.
+**Not supported** describes the current target, not the hardware.
 
 | Area                       | Hardware | FPLinux       | What a user can rely on / limit                                            |
 | -------------------------- | -------- | ------------- | -------------------------------------------------------------------------- |
@@ -45,7 +46,8 @@ variant. **Not supported** describes the current target, not the hardware.
 | Wi-Fi                      | Absent   | N/A           | This board variant has no Wi-Fi controller.                                |
 | Camera                     | Present  | Not supported | No camera pipeline or sensor driver is provided.                           |
 | Charger detection          | Present  | Supported     | Reports whether external charger input is connected.                       |
-| Battery telemetry/control  | Present  | Not supported | No level, voltage, current, temperature or charge control is provided.     |
+| Battery voltage            | Present  | Experimental  | Reports voltage; absolute accuracy has not been externally checked.        |
+| Other battery functions    | Present  | Not supported | No level, current, temperature or charge control is provided.              |
 | Indicator LEDs / vibration | Unknown  | Not supported | No indicator or vibration control is provided.                             |
 | Power-off                  | N/A      | Supported     | Battery-only shutdown works when charger power is absent.                  |
 | Reboot and suspend         | N/A      | Not supported | Neither path is provided.                                                  |
