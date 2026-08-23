@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config TA1618_THM1_THERMAL
+	bool "Nokia TA-1618 THM1 temperature sensor"
+	depends on MACH_NOKIA_TA1618
+	depends on THERMAL
+	depends on OF
+	depends on MFD_SYSCON
+	depends on HAS_IOMEM
+	depends on !PM
+	help
+	  Read the calibrated UMS9117 THM1 sensor0 temperature on the Nokia
+	  3210 4G TA-1618 through a tripless thermal zone. The driver does not
+	  configure thermal trips, polling, interrupts or cooling devices.
+
+	  The calibration is read once from the UMS9117 eFuse controller during
+	  probe. The driver does not write eFuse data, thermal thresholds or
+	  interrupt configuration.

@@ -20,7 +20,9 @@ parm = "parm"
 UMS9117 = "UMS9117"
 
 [default.extend-words]
+THM = "THM"
 fbcon = "fbcon"
 initramfs = "initramfs"
 microSD = "microSD"
 musl = "musl"
+thm = "thm"
