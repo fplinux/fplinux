@@ -1,0 +1,37 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-usb-gadget
+pkgver=1
+pkgrel=0
+pkgdesc="ConfigFS USB gadget for FPLinux"
+url="https://github.com/fplinux/fplinux"
+arch="noarch"
+license="GPL-2.0-only"
+depends="busybox-extras openrc"
+subpackages="$pkgname-openrc"
+options="!check"
+source="fplinux-usb-gadget fplinux-usb-gadget.initd fplinux-usb-dhcp.initd"
+
+package() {
+	install -Dm755 "$srcdir/fplinux-usb-gadget" \
+		"$pkgdir/usr/libexec/fplinux/usb-gadget"
+	install -Dm755 "$srcdir/fplinux-usb-gadget.initd" \
+		"$pkgdir/etc/init.d/fplinux-usb-gadget"
+	install -Dm755 "$srcdir/fplinux-usb-dhcp.initd" \
+		"$pkgdir/etc/init.d/fplinux-usb-dhcp"
+	mkdir -p "$pkgdir/etc/runlevels/sysinit"
+	ln -s /etc/init.d/fplinux-usb-gadget \
+		"$pkgdir/etc/runlevels/sysinit/fplinux-usb-gadget"
+	mkdir -p "$pkgdir/etc/runlevels/default"
+	ln -s /etc/init.d/fplinux-usb-dhcp \
+		"$pkgdir/etc/runlevels/default/fplinux-usb-dhcp"
+}
+
+openrc() {
+	default_openrc
+}
+
+sha512sums="
+03f307c07f4fa2c4a6cfa3872d2695a68a6dca96e88485a31b77258c2e9d4c0ecf89998572e2e388a92cb2ce0dbda710a5deb26643044a41715949ae4c00d4b0  fplinux-usb-gadget
+3e926b616f3b0a960080e347736495754c62bb620e06d518abd27644607d4e53d9772befa12739a6c5c949b6064e7293243ce7bf1139e0cd0ca3fd8bce48e879  fplinux-usb-gadget.initd
+0d3984aba0c0402bfad5b013c42618876ba78741bac2e550987a4ac01876ae33dc69c68a2d7b04916746d446899e8b4efc660e4df1db3975bffa7259a070ccee  fplinux-usb-dhcp.initd
+"

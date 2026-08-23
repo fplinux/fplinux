@@ -31,22 +31,23 @@ class ReleasePackageTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.cache = self.root / ".cache"
         self.target = "phone"
-        self.profile = "default"
         self.snapshot = WorkspaceSnapshot((), "a" * 64)
         self.image_recipe = "b" * 64
         self.target_config = {
-            "profile": self.profile,
             "platform": "demo",
             "release_slug": "fplinux-phone",
-            "runtime": {"assets": {"pinmap": "assets/pinmap.bin"}},
+            "runtime": {
+                "assets": {"pinmap": "assets/pinmap.bin"},
+            },
         }
         self.release_manifest = {
             "image": "image/ramboot.bin",
             "bundle_files": [
                 "image/ramboot.bin",
                 "assets/pinmap.bin",
-                "host/console",
+                "host/keyboard",
                 "runner/run.py",
+                "runner/ssh_transport.py",
                 "runner/platform_adapter.py",
                 "runtime-manifest.json",
                 "apks/demo.apk",
@@ -55,14 +56,15 @@ class ReleasePackageTests(unittest.TestCase):
             "runtime_files": [
                 "image/ramboot.bin",
                 "assets/pinmap.bin",
-                "host/console",
+                "host/keyboard",
                 "runner/run.py",
+                "runner/ssh_transport.py",
                 "runner/platform_adapter.py",
                 "runtime-manifest.json",
             ],
             "documents": ["release/README.txt"],
         }
-        self.platform = {"host": {"tools": [{"name": "console"}]}}
+        self.platform = {"host": {"tools": [{"name": "keyboard"}]}}
         target_readme = self.root / "targets" / self.target / "release/README.txt"
         target_readme.parent.mkdir(parents=True)
         target_readme.write_text("phone instructions\n", encoding="utf-8")
@@ -88,12 +90,13 @@ class ReleasePackageTests(unittest.TestCase):
 
     def publish_bundle(self, generation: str, *, apk: bytes, metadata: bytes) -> None:
         """Publish one valid immutable generation with the requested APK bytes."""
-        bundle = self.cache / "out" / self.target / "bundles" / self.profile / generation
+        bundle = self.cache / "out" / self.target / "bundles" / generation
         payloads = {
             "image/ramboot.bin": b"ramboot\n",
             "assets/pinmap.bin": b"pinmap\n",
-            "host/console": b"console\n",
+            "host/keyboard": b"keyboard\n",
             "runner/run.py": b"#!/usr/bin/env python3\n",
+            "runner/ssh_transport.py": b"ssh helper\n",
             "runner/platform_adapter.py": b"adapter\n",
             "runtime-manifest.json": b"{}\n",
             "apks/demo.apk": apk,
@@ -103,7 +106,7 @@ class ReleasePackageTests(unittest.TestCase):
             path = bundle / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
-            path.chmod(0o755 if relative in {"host/console", "runner/run.py"} else 0o644)
+            path.chmod(0o755 if relative in {"host/keyboard", "runner/run.py"} else 0o644)
         manifest = {
             "rootfs_receipt": {"recipe": "d" * 64, "sha256": "e" * 64},
             "container_image_recipe": self.image_recipe,
@@ -113,12 +116,11 @@ class ReleasePackageTests(unittest.TestCase):
             "generation": generation,
             "kbuild_receipt": {"recipe": "0" * 64, "sha256": "1" * 64},
             "linux_recipe": "2" * 64,
-            "profile": self.profile,
             "target": self.target,
             "workspace_digest": self.snapshot.recipe,
         }
         (bundle / BUILD_MANIFEST_NAME).write_bytes(canonical_json_bytes(manifest))
-        publish_current_bundle(self.cache / "out", self.target, self.profile, bundle)
+        publish_current_bundle(self.cache / "out", self.target, bundle)
 
     def package(self, *, candidate: bool) -> tuple[str, str]:
         """Create an archive and return its archive and qualification digests."""

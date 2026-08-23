@@ -1,0 +1,23 @@
+#!/sbin/openrc-run
+# SPDX-License-Identifier: GPL-2.0-only
+# shellcheck shell=sh disable=SC2034
+
+description="FPLinux USB DHCP server"
+supervisor=supervise-daemon
+command=/bin/busybox-extras
+command_args="udhcpd -f /run/fplinux-udhcpd.conf"
+input_file=/dev/null
+output_log=/dev/kmsg
+error_log=/dev/kmsg
+respawn_delay=1
+respawn_max=3
+retry="TERM/2/KILL/2"
+
+depend() {
+	need fplinux-usb-gadget
+}
+
+start_pre() {
+	[ -f /run/fplinux-udhcpd.conf ] || return 1
+	checkpath -f -m 0600 /run/fplinux-udhcpd.leases
+}

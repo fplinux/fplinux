@@ -11,7 +11,7 @@
 	compatible = "nokia,ta-1618", "sprd,ums9117";
 
 	chosen {
-		bootargs = "console=tty0 loglevel=8 ignore_loglevel init=/init panic=-1 rdinit=/init vt.global_cursor_default=1 g_serial.use_acm=0 g_serial.n_ports=2";
+		bootargs = "console=tty0 loglevel=8 ignore_loglevel init=/init panic=-1 rdinit=/init vt.global_cursor_default=1 random.trust_bootloader=on";
 	};
 
 	memory@80000000 {
@@ -122,6 +122,8 @@
 		};
 	};
 };
+
+#include "ums9117-ram-session.dtsi"
 
 &keypad {
 	compatible = "fplinux,ums9117-keypad";

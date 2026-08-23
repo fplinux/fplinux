@@ -15,6 +15,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 from fplinux_cli import kernelcheck
@@ -73,15 +74,14 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
         self.projected = self.root / "driver.c"
         self.projected.write_text("int test_driver;\n")
         self.prepared_linux = PreparedLinuxState("a" * 64)
-        self.target_config = {
+        self.target_config: dict[str, Any] = {
             "linux": {
-                "defconfig": "defconfig",
                 "patches": [],
                 "copies": [],
                 "appends": [],
             }
         }
-        self.platform = {
+        self.platform: dict[str, Any] = {
             "linux": {
                 "arch": "arm",
                 "analysis_cross_compile": "arm-linux-gnueabihf-",
@@ -118,6 +118,7 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
                 return_value=(self.target_config, self.platform, self.source, state),
             ),
             mock.patch.object(kernelcheck, "target_source", side_effect=target_source),
+            mock.patch.object(kernelcheck, "target_defconfig_path", return_value=self.defconfig),
             mock.patch.object(kernelcheck, "projected_sources", return_value=[self.projected]),
             mock.patch.object(
                 kernelcheck,

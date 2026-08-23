@@ -10,6 +10,10 @@ tracked source files.
 - rootless Podman
 - Python 3.11 or newer
 - network access until the pinned build inputs are available locally
+- For a RAM run or reconnect over SSH: `ip` from iproute2, OpenSSH `ssh`,
+  `ssh-keygen`, `ssh-keyscan`, and `sftp`, plus a host network manager that
+  automatically runs IPv4 DHCP on a newly attached USB-NCM interface.
+  NetworkManager is supported.
 
 Check the host before building:
 
@@ -62,11 +66,8 @@ supported command instead of editing individual digests:
 ./fplinux checksum <aport>
 ```
 
-The command snapshots the aport and its declared shared sources, runs `abuild
-checksum` in the pinned build image against the shared Alpine source cache, and
-atomically replaces only the canonical `APKBUILD` checksum block. It refuses to
-publish a result if the source closure changed while the command was running or
-if `abuild` changed any other recipe text.
+The command updates only the canonical `APKBUILD` checksum block and refuses to
+publish if its declared inputs change while it runs.
 
 After the image and required source archives have been prepared, regeneration
 can run without network access:
@@ -120,9 +121,7 @@ Build and check print compact stage status. Add `--verbose` to stream their tool
 output; complete logs are retained under `.cache/logs/` and the command reports
 their location on failure.
 
-FPLinux coordinates public commands that use mutable build state. A conflicting
-command waits for the current build, check, or setup to finish rather than
-modifying the same state concurrently. The selected output for a target is kept
+Public commands serialize writes to shared build state. Target output is kept
 under `.cache/out/<target>/`; treat it as generated data, not as a user-managed
 workspace.
 

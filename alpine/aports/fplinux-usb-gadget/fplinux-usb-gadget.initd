@@ -1,0 +1,22 @@
+#!/sbin/openrc-run
+# SPDX-License-Identifier: GPL-2.0-only
+# shellcheck shell=sh disable=SC2034
+
+description="FPLinux ConfigFS USB gadget"
+
+depend() {
+	need devfs procfs sysfs
+	before fplinux-input
+}
+
+start() {
+	ebegin "Creating FPLinux USB gadget"
+	/usr/libexec/fplinux/usb-gadget start
+	eend $?
+}
+
+stop() {
+	ebegin "Removing FPLinux USB gadget"
+	/usr/libexec/fplinux/usb-gadget stop
+	eend $?
+}

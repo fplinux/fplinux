@@ -30,6 +30,7 @@ from .config import (
     load_platform,
     load_target,
     relative_value,
+    target_defconfig_path,
 )
 from .output import RunReporter, current_stage, exit_status, run_entrypoint
 
@@ -238,7 +239,7 @@ def check_contexts(reporter: RunReporter | None) -> None:
                 str(target_source(target, relative))
                 for relative in target_config["linux"]["patches"]
             ]
-            defconfig = require_file(target_source(target, target_config["linux"]["defconfig"]))
+            defconfig = require_file(target_defconfig_path(target))
             objects = sparse_targets(target, target_config, platform)
             output = sparse_output(target)
             kbuild = [

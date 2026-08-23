@@ -1,4 +1,3 @@
-schema = "fplinux.alpine/v1"
 release = "3.24.1"
 branch = "v3.24"
 arch = "armv7"
@@ -13,10 +12,16 @@ bytes = 3176829
 [runtime]
 packages = [
   "bridge-1.5-r5.apk",
+  "busybox-extras-1.37.0-r31.apk",
+  "dropbear-2026.91-r0.apk",
   "ifupdown-ng-0.13.0-r0.apk",
   "libcap2-2.78-r0.apk",
   "openrc-0.63.2-r0.apk",
   "openrc-user-0.63.2-r0.apk",
+  "openssh-sftp-server-10.3_p1-r0.apk",
+  "skalibs-libs-2.15.0.0-r0.apk",
+  "utmps-libs-0.1.3.3-r0.apk",
+  "zlib-1.3.2-r0.apk",
 ]
 
 [sysroot]
@@ -46,6 +51,16 @@ sha256 = "fe1081588fc302357cbda1a4bbe87d417a18f785ee9c9fdf81bbba8b18301490"
 bytes = 2851
 
 [[package]]
+file = "busybox-extras-1.37.0-r31.apk"
+sha256 = "6ca5c2ba1e828c402fa5f0154773e368a8e34b452c979e74d12547a848a0ab71"
+bytes = 62941
+
+[[package]]
+file = "dropbear-2026.91-r0.apk"
+sha256 = "6b9171bc1b8bd1883302396430f88a4ff173a194abfcc022f5d1b5c126b69c15"
+bytes = 193554
+
+[[package]]
 file = "ifupdown-ng-0.13.0-r0.apk"
 sha256 = "38e9b98b3ec3e6f65f929fd3e00719fb730f1de7999eb99d444b6ad6797d8c64"
 bytes = 62731
@@ -64,6 +79,21 @@ bytes = 199343
 file = "openrc-user-0.63.2-r0.apk"
 sha256 = "21d77b1c088b199a77b766d028ba061e0af43cb18d2b4f588da6db29c1c31971"
 bytes = 5817
+
+[[package]]
+file = "openssh-sftp-server-10.3_p1-r0.apk"
+sha256 = "5c3d359348636934c30dcb86e99a0652db196241c0a4f7f14785ce878a9f9698"
+bytes = 56330
+
+[[package]]
+file = "skalibs-libs-2.15.0.0-r0.apk"
+sha256 = "2303bad07c6ccf7524e8c313549b8e43f42f98ee7012700ee3f9f4bf7f99ce15"
+bytes = 88220
+
+[[package]]
+file = "utmps-libs-0.1.3.3-r0.apk"
+sha256 = "0bd6aea148eff8c953f68d51d1f4d9914a0e6047acc38051a927c81ada5e3917"
+bytes = 5325
 
 [[package]]
 file = "binutils-2.45.1-r1.apk"

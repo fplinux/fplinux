@@ -41,6 +41,7 @@ RUN set -eux; \
         gzip=1.14-r2 \
         libtool=2.6.0-r1 \
         make=4.4.1-r4 \
+        openssh-client-default=10.3_p1-r0 \
         patch=2.8-r0 \
         perl=5.42.2-r0 \
         pkgconf=2.5.1-r0 \
@@ -231,8 +232,7 @@ RUN mkdir -p /cache/analysis /cache/downloads /cache/linux /cache/rootfs \
 LABEL org.opencontainers.image.title="FPLinux build environment" \
       org.opencontainers.image.description="Reproducible Alpine Linux/amd64 environment for FPLinux kernel, APK and RAM-image builds" \
       org.opencontainers.image.base.name="${BASE_IMAGE}" \
-      org.opencontainers.image.licenses="GPL-2.0-only" \
-      org.opencontainers.image.version="3.24.1-r1"
+      org.opencontainers.image.licenses="GPL-2.0-only"
 
 WORKDIR /workspace
 CMD ["/bin/bash"]

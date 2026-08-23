@@ -17,26 +17,11 @@
 #define UMS9117_BOOT_FRAMEBUFFER_PHYS 0x83f00000U
 #define UMS9117_BOOT_FRAMEBUFFER_BYTES 0x00100000U
 
-/*
- * Optional board extensions.  Every callback may be NULL; quiesce_usb
- * replaces the default DMA channel quiesce when set.
- */
-struct ums9117_boot_hooks {
-	void *context;
-	void (*entry)(void *context, uint32_t ram_bytes, uint32_t zimage_bytes,
-		      uint32_t dtb_bytes);
-	void (*record)(void *context, uint32_t stage, const char *message);
-	void (*fail)(void *context, uint32_t code, const char *message);
-	void (*quiesce_usb)(void *context);
-	void (*pre_handoff)(void *context);
-};
-
 struct ums9117_boot_board {
 	const char *marker; /* record prefix, e.g. "TA1618" */
 	struct fplinux_boot_screen_identity identity;
 	uint32_t display_width;
 	uint32_t display_height;
-	const struct ums9117_boot_hooks *hooks;
 };
 
 /* Paint a transient checkpoint line on the boot screen. */

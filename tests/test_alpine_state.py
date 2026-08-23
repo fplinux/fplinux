@@ -29,7 +29,6 @@ class AlpineStateTests(unittest.TestCase):
         self.packages = ("fplinux-package-a", "fplinux-package-b")
         self._write(
             "alpine.lock.toml",
-            b'schema = "fplinux.alpine/v1"\n'
             b'release = "3.24.1"\n'
             b'branch = "v3.24"\n'
             b'arch = "armv7"\n'
@@ -82,14 +81,14 @@ class AlpineStateTests(unittest.TestCase):
             self.root,
         )
 
-    def test_selection_combines_declarative_ownership_layers(self) -> None:
-        """Common, platform and target ownership contribute one canonical set."""
+    def test_selection_combines_common_and_platform_ownership(self) -> None:
+        """Common and platform ownership contribute one canonical rootfs set."""
         third = "fplinux-package-c"
         self._write(f"alpine/aports/{third}/APKBUILD", f"pkgname={third}\n".encode())
         with mock.patch.object(alpine_state, "COMMON_PACKAGES", (self.packages[0],)):
             selected = alpine_state.selected_packages(
-                {"rootfs": {"packages": [self.packages[1]]}},
-                {"rootfs": {"packages": [third]}},
+                {"rootfs": {"packages": [self.packages[1], third]}},
+                {},
                 self.root,
             )
         self.assertEqual(selected, (*self.packages, third))
@@ -126,25 +125,6 @@ class AlpineStateTests(unittest.TestCase):
                 self.root,
             )
 
-    def test_same_selected_set_shares_one_rootfs_recipe(self) -> None:
-        """Ownership declaration order does not split identical rootfs content."""
-        with mock.patch.object(alpine_state, "COMMON_PACKAGES", (self.packages[0],)):
-            platform_owned = alpine_state.selected_packages(
-                {"rootfs": {"packages": [self.packages[1]]}},
-                {"rootfs": {"packages": []}},
-                self.root,
-            )
-            target_owned = alpine_state.selected_packages(
-                {"rootfs": {"packages": []}},
-                {"rootfs": {"packages": [self.packages[1]]}},
-                self.root,
-            )
-        self.assertEqual(platform_owned, target_owned)
-        self.assertEqual(
-            self._recipe(packages=platform_owned),
-            self._recipe(packages=target_owned),
-        )
-
     def test_lock_requires_every_selected_artifact_to_be_declared(self) -> None:
         """Reject a runtime/sysroot package without its exact artifact record."""
         lock = alpine_state.load_alpine_lock(self.root)
@@ -156,6 +136,13 @@ class AlpineStateTests(unittest.TestCase):
         )
         path.write_text(text)
         with self.assertRaisesRegex(SystemExit, "has no locked artifact"):
+            alpine_state.load_alpine_lock(self.root)
+
+    def test_lock_rejects_an_unknown_field(self) -> None:
+        """The exact lock shape rejects unrecognized metadata."""
+        path = self.root / "alpine.lock.toml"
+        path.write_text('unexpected = "value"\n' + path.read_text())
+        with self.assertRaisesRegex(SystemExit, "invalid Alpine lock"):
             alpine_state.load_alpine_lock(self.root)
 
     def test_selected_aport_bytes_change_the_rootfs_recipe(self) -> None:
@@ -495,7 +482,7 @@ class AlpineStateTests(unittest.TestCase):
         self.assertFalse(alpine_state.receipt_matches(output, recipe))
 
     def test_receipt_with_unknown_shape_is_a_cache_miss(self) -> None:
-        """Old or unrecognized cache artifacts are ignored without migration."""
+        """An unrecognized cache artifact is ignored without migration."""
         recipe = self._recipe()
         output = Path(self.temporary.name) / "output"
         output.mkdir()

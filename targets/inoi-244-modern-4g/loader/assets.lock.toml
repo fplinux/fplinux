@@ -1,6 +1,4 @@
 # SPDX-License-Identifier: GPL-2.0-only
-schema = "fplinux.assets/v1"
-
 [[source]]
 id = "maps"
 kind = "7z"

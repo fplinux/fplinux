@@ -63,7 +63,7 @@ running session, then attach to the phone shell and run `micropythonos`:
 ```
 
 Press `Ctrl-C` at the phone shell to stop MicroPythonOS and restore the terminal.
-Then detach with `Ctrl-]` and remove the package:
+Then exit the SSH shell and remove the package:
 
 ```sh
 ./fplinux console "$target" --exec 'apk del fplinux-micropythonos'

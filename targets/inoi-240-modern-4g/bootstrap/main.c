@@ -13,7 +13,6 @@ int main(int argc, char **argv)
 		},
 		.display_width = 128,
 		.display_height = 160,
-		.hooks = NULL,
 	};
 
 	(void)argc;

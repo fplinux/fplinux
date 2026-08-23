@@ -32,11 +32,13 @@ from .bundle_state import (
 )
 from .common import ROOT, sha256_bytes, sha256_file
 from .config import (
-    exact_table,
+    load_asset_lock,
     load_platform,
     load_release,
     load_target,
     relative_value,
+    target_asset_lock_path,
+    target_defconfig_path,
 )
 from .device_state import DeviceStateError, device_kernel_identity, localversion
 from .kbuild_state import KbuildStateError
@@ -49,7 +51,15 @@ if TYPE_CHECKING:
 CACHE = Path("/cache")
 OUTPUT = Path("/out")
 SOURCE_DATE_EPOCH = "1784919600"
-RUNTIME_MANIFEST_SCHEMA = "fplinux.runtime/v1"
+RAM_SESSION_BYTES = 512
+RAM_SESSION_ALIGNMENT = 64
+
+RAM_SESSION_RNG_SEED_MARKER = bytes([0xA1]) * 64
+RAM_SESSION_DTB_MARKERS = {
+    "fplinux,ssh-client-key": bytes([0xB2]) * 68,
+    "fplinux,session-id": bytes([0xC3]) * 32,
+    "fplinux,usb-session": bytes([0xD4]) * 256,
+}
 
 
 def fail(message: str) -> NoReturn:
@@ -95,6 +105,11 @@ def target_source(target: str, relative: str) -> Path:
 def runner_source() -> Path:
     """Return the one shared runner source path."""
     return ROOT / "common/run.py"
+
+
+def ssh_transport_source() -> Path:
+    """Return the SSH session helper published beside the runner."""
+    return ROOT / "scripts/fplinux_cli/ssh_transport.py"
 
 
 def adapter_source(platform: str) -> Path:
@@ -180,7 +195,7 @@ def fetch(url: object, expected: object, cache: Path, name: object) -> Path:
             temporary = Path(output.name)
             request = urllib.request.Request(  # noqa: S310 -- HTTPS is required above.
                 url,
-                headers={"User-Agent": "FPLinux/1"},
+                headers={"User-Agent": "FPLinux"},
             )
             with urllib.request.urlopen(  # noqa: S310 -- HTTPS is required above.
                 request,
@@ -335,7 +350,7 @@ def bootstrap_recipe_digest(
         "target": target,
         "target_bootstrap": target_bootstrap,
         "platform_bootstrap": platform_bootstrap,
-        "target_source": bootstrap_tree_entries(target_source(target, target_bootstrap["source"])),
+        "target_source": bootstrap_tree_entries(target_source(target, "bootstrap")),
         "shared_copies": shared_copies,
         "vendor_source": {
             "commit": vendor_commit,
@@ -497,8 +512,7 @@ def build_kernel(
     """Build or exactly reuse zImage and the declared target DTB in ``work/kernel``."""
     try:
         work = output.parent
-        defconfig_relative = target_config["linux"]["defconfig"]
-        defconfig = require_file(target_source(target, defconfig_relative))
+        defconfig = require_file(target_defconfig_path(target))
         rootfs_record = kbuild_state.rootfs_identity(rootfs)
         rootfs_input = kbuild_state.rootfs_input_path(work, rootfs_record)
         rootfs_receipt = alpine_state.trusted_receipt_identity(rootfs_output, rootfs_recipe)
@@ -559,7 +573,7 @@ def build_kernel(
             linux_recipe=current_linux.linux_recipe,
             linux_base=require_sha256(linux_base, "Linux base source"),
             defconfig=defconfig,
-            defconfig_path=f"targets/{target}/{defconfig_relative}",
+            defconfig_path=f"targets/{target}/kernel/defconfig",
             rootfs=rootfs_record,
             rootfs_input=rootfs_input,
             rootfs_receipt=rootfs_receipt,
@@ -607,6 +621,117 @@ def extract_vendor(archive: Path, prefix: str, files: list[str], output: Path) -
             destination.write_bytes(stream.read())
 
 
+def _fdt_session_properties(tree: bytes) -> tuple[dict[str, bytes], dict[str, bytes]]:
+    """Read exact properties from /chosen and /fplinux-session."""
+    if len(tree) < 40:
+        fail("target DTB does not have a complete FDT header")
+    (
+        magic,
+        total_size,
+        structure_offset,
+        strings_offset,
+        _reserved_offset,
+        version,
+        _last_compatible_version,
+        _boot_cpu,
+        strings_size,
+        structure_size,
+    ) = struct.unpack_from(">10I", tree)
+    if magic != 0xD00DFEED or total_size != len(tree) or version < 17:
+        fail("target DTB has an invalid FDT header")
+    structure_end = structure_offset + structure_size
+    strings_end = strings_offset + strings_size
+    if (
+        structure_offset < 40
+        or structure_end > len(tree)
+        or strings_offset < 40
+        or strings_end > len(tree)
+    ):
+        fail("target DTB has invalid block bounds")
+
+    position = structure_offset
+    stack: list[str] = []
+    paths: dict[tuple[str, ...], dict[str, bytes]] = {
+        ("", "chosen"): {},
+        ("", "fplinux-session"): {},
+    }
+    seen: set[tuple[str, ...]] = set()
+    while position + 4 <= structure_end:
+        token = struct.unpack_from(">I", tree, position)[0]
+        position += 4
+        if token == 1:  # FDT_BEGIN_NODE
+            terminator = tree.find(b"\0", position, structure_end)
+            if terminator < 0:
+                fail("target DTB has an unterminated node name")
+            try:
+                name = tree[position:terminator].decode("ascii")
+            except UnicodeDecodeError:
+                fail("target DTB has a non-ASCII node name")
+            stack.append(name)
+            path = tuple(stack)
+            if path in paths:
+                if path in seen:
+                    fail(f"target DTB repeats node /{'/'.join(path[1:])}")
+                seen.add(path)
+            position = (terminator + 4) & ~3
+        elif token == 2:  # FDT_END_NODE
+            if not stack:
+                fail("target DTB has an unmatched end-node token")
+            stack.pop()
+        elif token == 3:  # FDT_PROP
+            if position + 8 > structure_end:
+                fail("target DTB has a truncated property header")
+            value_size, name_offset = struct.unpack_from(">II", tree, position)
+            position += 8
+            value_end = position + value_size
+            if value_end > structure_end or name_offset >= strings_size:
+                fail("target DTB has an invalid property")
+            name_start = strings_offset + name_offset
+            name_end = tree.find(b"\0", name_start, strings_end)
+            if name_end < 0:
+                fail("target DTB has an unterminated property name")
+            try:
+                name = tree[name_start:name_end].decode("ascii")
+            except UnicodeDecodeError:
+                fail("target DTB has a non-ASCII property name")
+            path = tuple(stack)
+            if path in paths:
+                properties = paths[path]
+                if name in properties:
+                    fail(f"target DTB /{'/'.join(path[1:])} repeats property {name}")
+                properties[name] = tree[position:value_end]
+            position = (value_end + 3) & ~3
+        elif token == 4:  # FDT_NOP
+            continue
+        elif token == 9:  # FDT_END
+            if stack:
+                fail("target DTB ends before all nodes are closed")
+            missing = paths.keys() - seen
+            if missing:
+                path = min(missing)
+                fail(f"target DTB lacks node /{'/'.join(path[1:])}")
+            return paths[("", "chosen")], paths[("", "fplinux-session")]
+        else:
+            fail(f"target DTB has unknown structure token {token}")
+    fail("target DTB lacks its final structure token")
+
+
+def _verify_session_dtb(tree: bytes) -> None:
+    """Require one canonical marker for each RAM-session DT property."""
+    chosen, session = _fdt_session_properties(tree)
+    if chosen.get("rng-seed") != RAM_SESSION_RNG_SEED_MARKER:
+        fail("target DTB /chosen rng-seed does not contain its canonical marker")
+    if tree.count(RAM_SESSION_RNG_SEED_MARKER) != 1:
+        fail("target DTB marker rng-seed must occur exactly once")
+    if session.get("compatible") != b"fplinux,ram-session\0":
+        fail("target DTB /fplinux-session has an invalid compatible")
+    for name, marker in RAM_SESSION_DTB_MARKERS.items():
+        if session.get(name) != marker:
+            fail(f"target DTB /fplinux-session {name} does not contain its canonical marker")
+        if tree.count(marker) != 1:
+            fail(f"target DTB marker {name} must occur exactly once")
+
+
 def verify_images(
     ramboot: Path,
     zimage: Path,
@@ -615,7 +740,7 @@ def verify_images(
     load_address: int,
     payload_limit: int,
     forbidden_markers: list[str],
-) -> None:
+) -> dict[str, int | str]:
     """Enforce the generic RAM-only bootstrap image contract."""
     image = ramboot.read_bytes()
     kernel = zimage.read_bytes()
@@ -651,6 +776,8 @@ def verify_images(
         "linux_zimage_end",
         "linux_dtb_start",
         "linux_dtb_end",
+        "fplinux_session_start",
+        "fplinux_session_end",
         "FPLINUX_BOOTSTRAP_STORAGE_DISABLED",
     }
     missing = sorted(required - symbols.keys())
@@ -680,6 +807,26 @@ def verify_images(
     if image[dtb_start - load_address : dtb_end - load_address] != tree:
         fail("embedded DTB bytes differ from the built DTB")
 
+    session_start = symbols["fplinux_session_start"]
+    session_end = symbols["fplinux_session_end"]
+    expected_start = (dtb_end + RAM_SESSION_ALIGNMENT - 1) & -RAM_SESSION_ALIGNMENT
+    if session_start != expected_start or session_start % RAM_SESSION_ALIGNMENT:
+        fail("RAM-session slot does not immediately follow the aligned embedded DTB")
+    if session_end - session_start != RAM_SESSION_BYTES:
+        fail("RAM-session slot does not have its exact ABI size")
+    if not load_address <= session_start < session_end <= load_address + len(image):
+        fail("RAM-session slot lies outside the RAM image")
+    offset = session_start - load_address
+    template = image[offset : offset + RAM_SESSION_BYTES]
+    if template != bytes(RAM_SESSION_BYTES):
+        fail("canonical RAM-session slot is not all zero")
+    _verify_session_dtb(tree)
+    return {
+        "offset": offset,
+        "bytes": RAM_SESSION_BYTES,
+        "template_sha256": sha256_bytes(template),
+    }
+
 
 def build_bootstrap(
     sources: dict[str, Any],
@@ -689,7 +836,7 @@ def build_bootstrap(
     work: Path,
     zimage: Path,
     dtb: Path,
-) -> tuple[Path, Path]:
+) -> tuple[Path, Path, dict[str, int | str]]:
     """Build and verify the declarative bootstrap contract."""
     platform_bootstrap = platform["bootstrap"]
     target_bootstrap = target_config["bootstrap"]
@@ -705,7 +852,7 @@ def build_bootstrap(
     vendor = bootstrap_work / platform_bootstrap["vendor_destination"]
     projected_output = bootstrap_work / platform_bootstrap["output_destination"]
     shutil.copytree(
-        require_directory(target_source(target, target_bootstrap["source"])),
+        require_directory(target_source(target, "bootstrap")),
         bootstrap,
     )
     for step in platform_bootstrap["shared_copies"]:
@@ -755,7 +902,7 @@ def build_bootstrap(
     )
     ramboot = require_file(bootstrap / target_bootstrap["image"])
     ramboot_map = require_file(bootstrap / target_bootstrap["map"])
-    verify_images(
+    personalization = verify_images(
         ramboot,
         zimage,
         dtb,
@@ -764,7 +911,7 @@ def build_bootstrap(
         target_bootstrap["payload_limit"],
         target_config["linux"]["forbidden_dtb_markers"],
     )
-    return ramboot, ramboot_map
+    return ramboot, ramboot_map, personalization
 
 
 def extract_7z_member(archive: Path, member: str) -> bytes:
@@ -802,70 +949,6 @@ def write_checked(data: bytes, destination: Path, expected: str) -> None:
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
-
-
-def load_asset_lock(path: Path) -> list[dict[str, Any]]:
-    """Load the generic pinned asset and extraction schema."""
-    require_file(path)
-    with path.open("rb") as stream:
-        document = tomllib.load(stream)
-    root = exact_table(document, {"schema", "source"}, "asset lock")
-    if root.get("schema") != "fplinux.assets/v1":
-        fail("asset lock schema must be fplinux.assets/v1")
-    sources = root.get("source")
-    if not isinstance(sources, list) or not sources:
-        fail("asset lock source must be a non-empty array")
-
-    source_ids: set[str] = set()
-    roles: set[str] = set()
-    paths: set[str] = set()
-    for index, raw_source in enumerate(sources):
-        name = f"asset source[{index}]"
-        source = exact_table(
-            raw_source,
-            {"id", "kind", "url", "sha256", "cache_name", "license", "output"},
-            name,
-        )
-        source_id = source.get("id")
-        if not isinstance(source_id, str) or not source_id or source_id in source_ids:
-            fail(f"{name} id must be a unique non-empty string")
-        source_ids.add(source_id)
-        kind = source.get("kind")
-        if kind not in {"file", "7z"}:
-            fail(f"{name} kind must be file or 7z")
-        if not isinstance(source.get("url"), str) or not source["url"].startswith("https://"):
-            fail(f"{name} url must use HTTPS")
-        require_sha256(source.get("sha256"), f"{name} source")
-        relative_value(source.get("cache_name"), f"{name} cache_name")
-        if not isinstance(source.get("license"), str) or not source["license"]:
-            fail(f"{name} license must be a non-empty string")
-        outputs = source.get("output")
-        if not isinstance(outputs, list) or not outputs:
-            fail(f"{name} output must be a non-empty array")
-        for output_index, raw_output in enumerate(outputs):
-            output_name = f"{name} output[{output_index}]"
-            keys = (
-                {"role", "path", "sha256", "member"}
-                if kind == "7z"
-                else {
-                    "role",
-                    "path",
-                    "sha256",
-                }
-            )
-            output = exact_table(raw_output, keys, output_name)
-            role = output.get("role")
-            if not isinstance(role, str) or not role or role in roles:
-                fail(f"{output_name} role must be a unique non-empty string")
-            roles.add(role)
-            relative = relative_value(output.get("path"), f"{output_name} path")
-            if relative in paths:
-                fail(f"asset output path is duplicated: {relative}")
-            paths.add(relative)
-            require_sha256(output.get("sha256"), f"{output_name} output")
-            if kind == "7z":
-                relative_value(output.get("member"), f"{output_name} member")
-    return sources
 
 
 def build_assets(lock_path: Path, output: Path) -> dict[str, tuple[str, str]]:
@@ -983,7 +1066,7 @@ def _verify_static_host_binary(path: Path) -> None:
 
 
 def build_cc_libusb_tool(recipe: dict[str, Any], output: Path) -> Path:
-    """Build one portable static C/libusb host capability recipe."""
+    """Build one portable static C/libusb host-tool recipe."""
     pkg = subprocess.run(
         ["pkg-config", "--cflags", "--static", "--libs", "libusb-1.0"],
         capture_output=True,
@@ -1021,16 +1104,16 @@ def build_cc_libusb_tool(recipe: dict[str, Any], output: Path) -> Path:
 def build_host_tools(
     sources: dict[str, Any], platform: dict[str, Any], work: Path
 ) -> dict[str, Path]:
-    """Build every typed platform host capability recipe."""
+    """Build every typed platform host-tool recipe."""
     source_work = work / "host-build"
     output = work / "host"
     source_work.mkdir(parents=True, exist_ok=True)
     output.mkdir(parents=True, exist_ok=True)
     result: dict[str, Path] = {}
     for recipe in platform["host"]["tools"]:
-        if recipe["type"] == "make-archive/v1":
+        if recipe["type"] == "make-archive":
             built = build_make_host_tool(sources, recipe, source_work, output)
-        elif recipe["type"] == "cc-libusb/v1":
+        elif recipe["type"] == "cc-libusb":
             built = build_cc_libusb_tool(recipe, output)
         else:
             fail(f"unsupported host recipe type: {recipe['type']}")
@@ -1077,17 +1160,15 @@ def runtime_manifest(
     image: str,
     asset_outputs: dict[str, tuple[str, str]],
     host_tools: dict[str, Path],
+    personalization: dict[str, int | str],
 ) -> dict[str, Any]:
     """Create the generic runtime contract consumed by the common runner."""
-    declared_assets = target_config["runtime"]["assets"]
-    if set(declared_assets) != set(asset_outputs):
-        fail("target runtime asset roles differ from the pinned asset lock")
-    for role, bundle_path in declared_assets.items():
-        expected = f"assets/{asset_outputs[role][0]}"
-        if bundle_path != expected:
-            fail(f"target runtime asset {role} must resolve to {expected}")
+    declared_assets = {
+        role: f"assets/{relative}" for role, (relative, _digest) in asset_outputs.items()
+    }
 
     platform_host = platform["host"]
+    runtime = target_config["runtime"]
     runtime_tools = {role: f"host/{name}" for role, name in platform_host["runtime_tools"].items()}
     for name in platform_host["runtime_tools"].values():
         if name not in host_tools:
@@ -1098,6 +1179,9 @@ def runtime_manifest(
             require_file(release / "runner/platform_adapter.py")
         ),
     }
+    hashes["runner/ssh_transport.py"] = sha256_file(
+        require_file(release / "runner/ssh_transport.py")
+    )
     hashes.update(
         {
             declared_assets[role]: sha256_file(require_file(release / declared_assets[role]))
@@ -1110,19 +1194,17 @@ def runtime_manifest(
             for role in platform_host["runtime_tools"]
         }
     )
-    runtime = target_config["runtime"]
     return {
-        "schema": RUNTIME_MANIFEST_SCHEMA,
         "target": target,
         "display_name": target_config["display_name"],
         "platform": target_config["platform"],
-        "capability": platform_host["capability"],
         "image": image,
         "addresses": {
             "fdl1": runtime["fdl1_load_address"],
             "payload": target_config["bootstrap"]["load_address"],
         },
         "usb": runtime["usb"],
+        "personalization": personalization,
         "assets": declared_assets,
         "adapter": runtime["adapter"],
         "host_tools": runtime_tools,
@@ -1143,6 +1225,7 @@ def _publish_staged_bundle(
     dtb: Path,
     ramboot: Path,
     ramboot_map: Path,
+    personalization: dict[str, int | str],
     asset_lock_path: Path,
     asset_outputs: dict[str, tuple[str, str]],
     host_tools: dict[str, Path],
@@ -1155,7 +1238,6 @@ def _publish_staged_bundle(
     bundle_apks: dict[str, Path],
 ) -> Path:
     """Complete one already-private immutable bundle staging directory."""
-    profile = target_config["profile"]
     if set(bundle_packages) != set(bundle_apks):
         fail("published bundle APKs differ from the declared bundle package set")
     expected_apk_files = {f"apks/{package}.apk" for package in bundle_packages}
@@ -1184,6 +1266,7 @@ def _publish_staged_bundle(
     for name, source in host_tools.items():
         copy_file(source, release / "host" / name, executable=True)
     copy_file(runner_source(), release / "runner/run.py", executable=True)
+    copy_file(ssh_transport_source(), release / "runner/ssh_transport.py")
     copy_file(
         adapter_source(target_config["platform"]),
         release / "runner/platform_adapter.py",
@@ -1201,6 +1284,7 @@ def _publish_staged_bundle(
         image_name,
         asset_outputs,
         host_tools,
+        personalization,
     )
     write_json(release / "runtime-manifest.json", runtime, prefix=".runtime-manifest.")
 
@@ -1225,7 +1309,6 @@ def _publish_staged_bundle(
     }
     payload = {
         "target": target,
-        "profile": profile,
         "workspace_digest": workspace_digest,
         "container_image_recipe": container_image_recipe,
         "apk_signing_key": apk_signing_key,
@@ -1241,11 +1324,10 @@ def _publish_staged_bundle(
     generation_path = publish_bundle_generation(
         OUTPUT,
         target,
-        profile,
         release,
         generation,
     )
-    publish_current_bundle(OUTPUT, target, profile, generation_path)
+    publish_current_bundle(OUTPUT, target, generation_path)
     return generation_path
 
 
@@ -1261,6 +1343,7 @@ def publish_bundle(
     dtb: Path,
     ramboot: Path,
     ramboot_map: Path,
+    personalization: dict[str, int | str],
     asset_lock_path: Path,
     asset_outputs: dict[str, tuple[str, str]],
     host_tools: dict[str, Path],
@@ -1273,8 +1356,7 @@ def publish_bundle(
     bundle_apks: dict[str, Path],
 ) -> Path:
     """Publish a complete immutable bundle and select it as current."""
-    profile = target_config["profile"]
-    release = create_bundle_staging(OUTPUT, target, profile)
+    release = create_bundle_staging(OUTPUT, target)
     try:
         return _publish_staged_bundle(
             release,
@@ -1289,6 +1371,7 @@ def publish_bundle(
             dtb,
             ramboot,
             ramboot_map,
+            personalization,
             asset_lock_path,
             asset_outputs,
             host_tools,
@@ -1301,7 +1384,7 @@ def publish_bundle(
             bundle_apks,
         )
     finally:
-        discard_bundle_staging(OUTPUT, target, profile, release)
+        discard_bundle_staging(OUTPUT, target, release)
 
 
 def main() -> None:
@@ -1325,9 +1408,8 @@ def main() -> None:
             source_lock_entry(sources, platform["linux"]["source_lock"]).get("sha256"),
             "Linux source",
         )
-        target_directory = ROOT / "targets" / args.target
-        asset_lock_path = require_file(target_directory / target_config["assets_lock"])
-        release_manifest = load_release(args.target, target_config)
+        asset_lock_path = require_file(target_asset_lock_path(args.target))
+        release_manifest = load_release(args.target)
 
         work = OUTPUT / args.target / "work"
         work.mkdir(parents=True, exist_ok=True)
@@ -1370,7 +1452,7 @@ def main() -> None:
             args.jobs,
         )
     with report_stage(reporter, "bootstrap"):
-        ramboot, ramboot_map = build_bootstrap(
+        ramboot, ramboot_map, personalization = build_bootstrap(
             sources,
             args.target,
             target_config,
@@ -1396,6 +1478,7 @@ def main() -> None:
             dtb,
             ramboot,
             ramboot_map,
+            personalization,
             asset_lock_path,
             asset_outputs,
             host_tools,

@@ -15,3 +15,10 @@ linux_zimage_end:
 linux_dtb_start:
 	.incbin "../out/inoi244.dtb"
 linux_dtb_end:
+
+	.balign 64
+	.global fplinux_session_start
+	.global fplinux_session_end
+fplinux_session_start:
+	.space 512, 0
+fplinux_session_end:
