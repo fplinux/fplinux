@@ -9,8 +9,9 @@ config POWER_SUPPLY_TA1618_SC2720_CHARGER
 	  status and does not configure charging, the FGU, efuses or NV state.
 
 config POWER_SUPPLY_TA1618_SC2720_FGU
-	tristate "Nokia TA-1618 SC2720 battery voltage"
+	tristate "Nokia TA-1618 SC2720 battery voltage and current"
 	depends on MACH_NOKIA_TA1618
 	depends on POWER_SUPPLY
 	help
-	  Read-only battery voltage reporting for the Nokia 3210 4G TA-1618.
+	  Read-only battery voltage and current reporting for the Nokia 3210 4G
+	  TA-1618.
