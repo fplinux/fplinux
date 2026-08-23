@@ -39,7 +39,7 @@ variant. **Experimental** has been exercised but retains the stated limitation.
 | SSH, SFTP and upload       | Present  | Supported     | Shell, commands and verified file transfer; physical replug is supported.  |
 | Host keyboard bridge       | N/A      | Supported     | Forwards one host evdev keyboard while the client runs.                    |
 | USB host mode              | Unknown  | Not supported | The target provides USB peripheral mode only.                              |
-| Removable storage          | Present  | Supported     | Insert before boot; FAT32 read/write works, but hot-swap does not.         |
+| Removable storage          | Present  | Supported     | FAT32 read/write and unmounted hot-swap while Linux remains running.       |
 | Internal phone storage     | Present  | Not supported | Linux deliberately does not expose it.                                     |
 | Audio                      | Present  | Not supported | No speaker, headphone or microphone support is provided.                   |
 | Modem and mobile service   | Present  | Not supported | Calls, SMS and mobile data are unavailable.                                |
@@ -69,8 +69,8 @@ upload, install, run, and removal workflow for this source checkout.
 
 ### TyrQuake
 
-TyrQuake 0.71 requires legally obtained game data. Insert a microSD card before
-boot and put `pak0.pak` at:
+TyrQuake 0.71 requires legally obtained game data. Before starting it, insert
+and mount a microSD card with `pak0.pak` at:
 
 ```text
 /mnt/card/fplinux/quake/id1/pak0.pak
@@ -103,17 +103,17 @@ discarded when it exits; they are not written to microSD.
 MicroPythonOS requires both the base and TA-1618 companion packages. Use the
 [Nokia companion workflow](../../docs/APPLICATIONS.md#nokia-ta-1618-companion).
 
-With a usable FAT32 card inserted before boot, MicroPythonOS uses `/mnt/card` and
-keeps application state under `/mnt/card/.fplinux/micropythonos`. It mounts the
-card when no matching mount exists and unmounts only a card that it mounted when
+With a usable FAT32 card available, MicroPythonOS uses `/mnt/card` and keeps
+application state under `/mnt/card/.fplinux/micropythonos`. It mounts the card
+when no matching mount exists and unmounts only a card that it mounted when
 MicroPythonOS exits. Without a usable card, application state remains in RAM.
 The packages provide only features backed by the currently supported screen,
 keypad and filesystem interfaces; unsupported hardware services are not shown.
 
 ## microSD card
 
-Insert the card before Linux starts. Use the first partition when present, or
-the whole card otherwise:
+The card may be inserted before or after Linux starts. Wait for its block device,
+then use the first partition when present, or the whole card otherwise:
 
 ```sh
 card=/dev/mmcblk0p1
@@ -135,9 +135,10 @@ sync
 umount /mnt/card
 ```
 
-Do not remove a mounted card. Hot-swap is not supported. The TyrQuake launcher
-uses a read-only mount when `/mnt/card` is not already mounted and otherwise
-keeps the existing mount options.
+After `umount` the card may be removed and reinserted without restarting Linux.
+Never remove a mounted card. The TyrQuake launcher uses a read-only mount when
+`/mnt/card` is not already mounted and otherwise keeps the existing mount
+options.
 
 ## Keypad backlight
 

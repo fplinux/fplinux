@@ -111,7 +111,8 @@
 			      <0x402a0524 0x4>, <0x402a0130 0x4>, <0x402a0530 0x4>,
 			      /* Shared with the keypad through the hardware ADI user lock. */
 			      <0x40600000 0x400>, <0x40608000 0x1000>,
-			      <0x2030003c 0x4>;
+			      <0x2030003c 0x4>,
+			      <0x402c0000 0x4>, <0x402c0004 0x4>;
 			reg-names = "gate-state", "gate-set", "gate-clear",
 				    "ap-reset-state", "ap-reset-set", "ap-reset-clear",
 				    "ap-clock-selector", "block-count", "block-size",
@@ -126,7 +127,8 @@
 				    "d0-pad", "clk-mux", "clk-pad", "d3-mux", "d3-pad",
 				    "d2-mux", "d2-pad", "d1-mux", "d1-pad",
 				    "adi-controller", "analog-slave",
-				    "host-control2";
+				    "host-control2", "card-detect-data",
+				    "card-detect-mask";
 			interrupts = <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
 		};
 
