@@ -54,6 +54,14 @@ source = "kernel/sc2720-usb33-regulator.c"
 destination = "drivers/regulator/sc2720-usb33.c"
 
 [[linux.copies]]
+source = "kernel/ta1618-sc2720-charger.c"
+destination = "drivers/power/supply/ta1618-sc2720-charger.c"
+
+[[linux.copies]]
+source = "bindings/fplinux,ta1618-sc2720-charger.yaml"
+destination = "Documentation/devicetree/bindings/power/supply/fplinux,ta1618-sc2720-charger.yaml"
+
+[[linux.copies]]
 source = "bindings/fplinux,ta1618-kpled.yaml"
 destination = "Documentation/devicetree/bindings/leds/fplinux,ta1618-kpled.yaml"
 
@@ -76,6 +84,14 @@ destination = "arch/arm/mach-ums9117/Makefile"
 [[linux.appends]]
 source = "kernel/fbdev.Makefile"
 destination = "drivers/video/fbdev/Makefile"
+
+[[linux.appends]]
+source = "kernel/power-supply.Kconfig"
+destination = "drivers/power/supply/Kconfig"
+
+[[linux.appends]]
+source = "kernel/power-supply.Makefile"
+destination = "drivers/power/supply/Makefile"
 
 [bootstrap]
 image = "ta1618_linux_bootstrap.bin"
