@@ -10,6 +10,7 @@ Current target support:
   - external charger connection status;
   - experimental battery voltage and current reporting;
   - experimental calibrated SoC temperature reporting;
+  - experimental raw auxiliary ADC readings;
   - read-only real-time clock;
   - battery-only power-off;
 
@@ -17,6 +18,8 @@ Internal phone storage, audio, modem, Bluetooth, Wi-Fi, battery level, battery
 temperature and charge control, and Linux reboot are not supported by this
 target. Battery-voltage, current and SoC-temperature accuracy have not been
 externally checked; no thermal-control policy is provided.
+Auxiliary ADC readings are uncalibrated raw codes; they are not voltages or
+temperatures.
 RTC does not set the Linux system clock and may be stale or reset after battery
 removal. Setting RTC time and alarms is not supported.
 
