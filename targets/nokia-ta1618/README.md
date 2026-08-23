@@ -12,7 +12,8 @@
 
 This target runs Linux in volatile RAM with a local `240×320` terminal, physical
 keypad and backlight, microSD, USB SSH/SFTP, host-keyboard forwarding and
-battery-only power-off. Internal phone storage remains inaccessible.
+charger detection, and battery-only power-off. Internal phone storage remains
+inaccessible.
 
 ## Evidence basis
 
@@ -43,7 +44,8 @@ variant. **Not supported** describes the current target, not the hardware.
 | Bluetooth                  | Unknown  | Not supported | No Bluetooth support is provided.                                          |
 | Wi-Fi                      | Absent   | N/A           | This board variant has no Wi-Fi controller.                                |
 | Camera                     | Present  | Not supported | No camera pipeline or sensor driver is provided.                           |
-| Battery and charging       | Present  | Not supported | No battery reporting or charge control is provided.                        |
+| Charger detection          | Present  | Supported     | Reports whether external charger input is connected.                       |
+| Battery telemetry/control  | Present  | Not supported | No level, voltage, current, temperature or charge control is provided.     |
 | Indicator LEDs / vibration | Unknown  | Not supported | No indicator or vibration control is provided.                             |
 | Power-off                  | N/A      | Supported     | Battery-only shutdown works when charger power is absent.                  |
 | Reboot and suspend         | N/A      | Not supported | Neither path is provided.                                                  |

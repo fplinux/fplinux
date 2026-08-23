@@ -7,6 +7,7 @@ Current target support:
   - local 240x320 terminal, physical keypad and keypad backlight;
   - USB SSH/SFTP and host-keyboard forwarding;
   - microSD access when the card is inserted before boot;
+  - external charger connection status;
   - battery-only power-off;
 
 Internal phone storage, audio, modem, Bluetooth, Wi-Fi, battery reporting and
