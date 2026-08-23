@@ -12,9 +12,9 @@
 
 This target runs Linux in volatile RAM with a local `240×320` terminal, physical
 keypad and backlight, microSD, USB SSH/SFTP, host-keyboard forwarding and
-charger detection, experimental battery-voltage and SoC-temperature reporting,
-read-only RTC, and battery-only power-off. Internal phone storage remains
-inaccessible.
+charger detection, experimental battery voltage, current and SoC-temperature
+reporting, read-only RTC, and battery-only power-off. Internal phone storage
+remains inaccessible.
 
 ## Evidence basis
 
@@ -48,9 +48,10 @@ variant. **Experimental** has been exercised but retains the stated limitation.
 | Camera                     | Present  | Not supported | No camera pipeline or sensor driver is provided.                           |
 | Charger detection          | Present  | Supported     | Reports whether external charger input is connected.                       |
 | Battery voltage            | Present  | Experimental  | Reports voltage; absolute accuracy has not been externally checked.        |
+| Battery current            | Present  | Experimental  | Signed live current; absolute accuracy has not been externally checked.    |
 | SoC temperature            | Present  | Experimental  | Calibrated reading; no external accuracy check or thermal policy.          |
 | Real-time clock            | Present  | Experimental  | `/dev/rtc0` only; no Linux clock sync; may reset without the battery.      |
-| Other battery functions    | Present  | Not supported | No level, current, battery temperature or charge control is provided.      |
+| Other battery functions    | Present  | Not supported | No level, battery temperature or charge control is provided.               |
 | Indicator LEDs / vibration | Unknown  | Not supported | No indicator or vibration control is provided.                             |
 | Power-off                  | N/A      | Supported     | Battery-only shutdown works when charger power is absent.                  |
 | Reboot and suspend         | N/A      | Not supported | Neither path is provided.                                                  |

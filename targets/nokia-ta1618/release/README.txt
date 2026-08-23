@@ -8,14 +8,14 @@ Current target support:
   - USB SSH/SFTP and host-keyboard forwarding;
   - microSD access when the card is inserted before boot;
   - external charger connection status;
-  - experimental battery voltage reporting;
+  - experimental battery voltage and current reporting;
   - experimental calibrated SoC temperature reporting;
   - read-only real-time clock;
   - battery-only power-off;
 
-Internal phone storage, audio, modem, Bluetooth, Wi-Fi, battery level, current,
-battery temperature and charge control, and Linux reboot are not supported by
-this target. Battery-voltage and SoC-temperature accuracy have not been
+Internal phone storage, audio, modem, Bluetooth, Wi-Fi, battery level, battery
+temperature and charge control, and Linux reboot are not supported by this
+target. Battery-voltage, current and SoC-temperature accuracy have not been
 externally checked; no thermal-control policy is provided.
 RTC does not set the Linux system clock and may be stale or reset after battery
 removal. Setting RTC time and alarms is not supported.

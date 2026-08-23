@@ -7,6 +7,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/overflow.h>
 #include <linux/platform_device.h>
 #include <linux/power_supply.h>
 #include <linux/slab.h>
@@ -29,6 +30,7 @@
 #define SC2720_FGU_STATUS 0xa0cU
 #define SC2720_FGU_INT_RAW 0xa18U
 #define SC2720_FGU_VOLTAGE 0xa20U
+#define SC2720_FGU_CURRENT 0xa2cU
 #define SC2720_CHGR_DET_FGU_CTRL 0xe18U
 
 #define SC2720_EXPECTED_ID_LOW 0xa003U
@@ -51,11 +53,17 @@
 #define SC2720_CHGR_DET_FGU_ANALOG_MASK GENMASK(13, 12)
 #define SC2720_FGU_CONFIG_VOLT_H_VALID BIT(12)
 #define SC2720_FGU_CONFIG_DISABLE BIT(11)
+#define SC2720_FGU_CONFIG_SW_DIS_CURT BIT(3)
 #define SC2720_FGU_ADC_CONFIG_RESET BIT(1)
 #define SC2720_FGU_ADC_CONFIG_POWER_DOWN BIT(0)
+#define SC2720_FGU_ADC_CONFIG_SOFTWARE_FORCE_MASK GENMASK(7, 4)
 #define SC2720_FGU_STATUS_TOP_SELECTED BIT(6)
 #define SC2720_FGU_INT_RAW_VOLTAGE_VALID BIT(6)
+#define SC2720_FGU_INT_RAW_CURRENT_VALID BIT(7)
 #define SC2720_FGU_VOLTAGE_RESERVED GENMASK(15, 12)
+#define SC2720_FGU_CURRENT_RESERVED GENMASK(15, 14)
+#define SC2720_FGU_CURRENT_COUNTS_MASK GENMASK(13, 0)
+#define SC2720_FGU_CURRENT_ZERO 0x2000U
 
 #define TA1618_EFUSE3_BLOCK 3U
 #define TA1618_EFUSE_POLL_INTERVAL_MS 10U
@@ -64,12 +72,16 @@
 #define TA1618_FGU_ADC_4200_BASE 2611U
 #define TA1618_FGU_CODES_NUMERATOR 10U
 #define TA1618_FGU_CODES_DENOMINATOR 42U
+#define TA1618_FGU_CURRENT_FITTED_CALIBRATION_FACTOR 4U
+#define TA1618_FGU_CURRENT_FITTED_CALIBRATION_REAL 10U
+#define TA1618_FGU_CURRENT_FITTED_CALIBRATION_SPEC 20U
 #define TA1618_FGU_READY_POLL_MS 100U
 #define TA1618_FGU_READY_TIMEOUT_MS 5000U
 
 struct ta1618_fgu {
 	struct device *dev;
 	u32 codes_per_1000mv;
+	u32 codes_per_1000ma;
 	bool pclk_owned;
 };
 
@@ -101,6 +113,7 @@ struct ta1618_fgu_sample {
 	u16 status;
 	u16 int_raw;
 	u16 voltage[3];
+	u16 current_raw;
 };
 
 static int
@@ -633,7 +646,10 @@ static void ta1618_fgu_release_pclk(void *data)
 static int ta1618_fgu_calibrate(struct ta1618_fgu *fgu, u16 efuse3)
 {
 	u32 adc_4200;
+	u32 current_codes;
+	u32 current_ratio_product;
 	u32 codes_per_1000mv;
+	u32 codes_per_1000ma;
 
 	adc_4200 = (efuse3 & TA1618_FGU_TRIM_MASK) + TA1618_FGU_ADC_4200_BASE;
 	codes_per_1000mv =
@@ -641,8 +657,20 @@ static int ta1618_fgu_calibrate(struct ta1618_fgu *fgu, u16 efuse3)
 				  TA1618_FGU_CODES_DENOMINATOR);
 	if (!codes_per_1000mv)
 		return -ERANGE;
+	if (check_mul_overflow(codes_per_1000mv,
+			       TA1618_FGU_CURRENT_FITTED_CALIBRATION_FACTOR,
+			       &current_ratio_product) ||
+	    check_mul_overflow(current_ratio_product,
+			       TA1618_FGU_CURRENT_FITTED_CALIBRATION_REAL,
+			       &current_codes))
+		return -ERANGE;
+	codes_per_1000ma = DIV_ROUND_CLOSEST(
+		current_codes, TA1618_FGU_CURRENT_FITTED_CALIBRATION_SPEC);
+	if (!codes_per_1000ma)
+		return -ERANGE;
 
 	fgu->codes_per_1000mv = codes_per_1000mv;
+	fgu->codes_per_1000ma = codes_per_1000ma;
 	return 0;
 }
 
@@ -692,6 +720,8 @@ static int ta1618_fgu_read_sample(struct ta1618_fgu_sample *sample)
 				    &sample->voltage[1]);
 	ret = ta1618_fgu_read_if_ok(&transaction, ret, SC2720_FGU_VOLTAGE,
 				    &sample->voltage[2]);
+	ret = ta1618_fgu_read_if_ok(&transaction, ret, SC2720_FGU_CURRENT,
+				    &sample->current_raw);
 
 	return ta1618_fgu_finish_transaction(&transaction, ret);
 }
@@ -734,6 +764,51 @@ ta1618_fgu_sample_to_microvolt(const struct ta1618_fgu *fgu,
 	return 0;
 }
 
+static int ta1618_fgu_sample_to_microamp(const struct ta1618_fgu *fgu,
+					 const struct ta1618_fgu_sample *sample,
+					 int *microamp)
+{
+	s32 delta;
+	s64 microamps;
+	s64 scaled_delta;
+
+	if (sample->chip_id_low != SC2720_EXPECTED_ID_LOW ||
+	    sample->chip_id_high != SC2720_EXPECTED_ID_HIGH)
+		return -ENODEV;
+	if (!(sample->module_en0 & SC2720_MODULE_EN0_FGU))
+		return -EIO;
+	if (!(sample->rtc_clk_en0 & SC2720_RTC_CLK_EN0_FGU) ||
+	    sample->soft_rst0 & SC2720_SOFT_RST0_FGU ||
+	    sample->chgr_det_fgu_ctrl & SC2720_CHGR_DET_FGU_ANALOG_MASK)
+		return -ENODATA;
+	if (sample->config & (SC2720_FGU_CONFIG_DISABLE |
+			      SC2720_FGU_CONFIG_SW_DIS_CURT) ||
+	    sample->adc_config & (SC2720_FGU_ADC_CONFIG_RESET |
+				  SC2720_FGU_ADC_CONFIG_POWER_DOWN |
+				  SC2720_FGU_ADC_CONFIG_SOFTWARE_FORCE_MASK) ||
+	    !(sample->status & SC2720_FGU_STATUS_TOP_SELECTED) ||
+	    !(sample->int_raw & SC2720_FGU_INT_RAW_CURRENT_VALID) ||
+	    sample->current_raw & SC2720_FGU_CURRENT_RESERVED ||
+	    !fgu->codes_per_1000ma)
+		return -ENODATA;
+
+	delta = (s32)(sample->current_raw & SC2720_FGU_CURRENT_COUNTS_MASK) -
+		SC2720_FGU_CURRENT_ZERO;
+	if (check_mul_overflow((s64)delta, 1000000LL, &scaled_delta))
+		return -ERANGE;
+	if (scaled_delta < 0)
+		microamps = -(s64)DIV_ROUND_CLOSEST_ULL((u64)-scaled_delta,
+							fgu->codes_per_1000ma);
+	else
+		microamps = DIV_ROUND_CLOSEST_ULL(scaled_delta,
+						  fgu->codes_per_1000ma);
+	if (microamps < INT_MIN || microamps > INT_MAX)
+		return -ERANGE;
+
+	*microamp = (int)microamps;
+	return 0;
+}
+
 static int ta1618_fgu_wait_usable(const struct ta1618_fgu *fgu)
 {
 	struct ta1618_fgu_sample sample = {};
@@ -766,17 +841,25 @@ static int ta1618_fgu_get_property(struct power_supply *supply,
 	struct ta1618_fgu_sample sample = {};
 	int ret;
 
-	if (property != POWER_SUPPLY_PROP_VOLTAGE_NOW)
-		return -EINVAL;
 	ret = ta1618_fgu_read_sample(&sample);
 	if (ret)
 		return ret;
 
-	return ta1618_fgu_sample_to_microvolt(fgu, &sample, &value->intval);
+	switch (property) {
+	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
+		return ta1618_fgu_sample_to_microvolt(fgu, &sample,
+						      &value->intval);
+	case POWER_SUPPLY_PROP_CURRENT_NOW:
+		return ta1618_fgu_sample_to_microamp(fgu, &sample,
+						     &value->intval);
+	default:
+		return -EINVAL;
+	}
 }
 
 static enum power_supply_property ta1618_fgu_properties[] = {
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
+	POWER_SUPPLY_PROP_CURRENT_NOW,
 };
 
 static const struct power_supply_desc ta1618_fgu_description = {
@@ -857,5 +940,5 @@ static struct platform_driver ta1618_fgu_driver = {
 };
 module_platform_driver(ta1618_fgu_driver);
 
-MODULE_DESCRIPTION("Nokia TA-1618 read-only SC2720 battery voltage");
+MODULE_DESCRIPTION("Nokia TA-1618 read-only SC2720 battery telemetry");
 MODULE_LICENSE("GPL");
