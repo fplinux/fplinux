@@ -6,11 +6,11 @@ not flash, erase, partition, or modify phone storage.
 
 ## Supported targets
 
-| Target               | Device                  | Platform                                 | Profile   | Hardware status                                              |
-| -------------------- | ----------------------- | ---------------------------------------- | --------- | ------------------------------------------------------------ |
-| `inoi-240-modern-4g` | INOI 240 Modern 4G      | [`ums9117`](platforms/ums9117/README.md) | `console` | [Target documentation](targets/inoi-240-modern-4g/README.md) |
-| `inoi-244-modern-4g` | INOI 244 Modern 4G      | [`ums9117`](platforms/ums9117/README.md) | `console` | [Target documentation](targets/inoi-244-modern-4g/README.md) |
-| `nokia-ta1618`       | Nokia 3210 4G (TA-1618) | [`ums9117`](platforms/ums9117/README.md) | `console` | [Target documentation](targets/nokia-ta1618/README.md)       |
+| Target               | Device                  | Platform                                 | Hardware status                                              |
+| -------------------- | ----------------------- | ---------------------------------------- | ------------------------------------------------------------ |
+| `inoi-240-modern-4g` | INOI 240 Modern 4G      | [`ums9117`](platforms/ums9117/README.md) | [Target documentation](targets/inoi-240-modern-4g/README.md) |
+| `inoi-244-modern-4g` | INOI 244 Modern 4G      | [`ums9117`](platforms/ums9117/README.md) | [Target documentation](targets/inoi-244-modern-4g/README.md) |
+| `nokia-ta1618`       | Nokia 3210 4G (TA-1618) | [`ums9117`](platforms/ums9117/README.md) | [Target documentation](targets/nokia-ta1618/README.md)       |
 
 Each target document is the source of truth for its tested phone variant,
 boot-key instructions, available hardware, and limitations.

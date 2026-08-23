@@ -10,6 +10,20 @@
 #define UMS9117_BOOTSTRAP_DMA_OK \
 	(UMS9117_BOOTSTRAP_DMA_CLEAR_SEEN | UMS9117_BOOTSTRAP_DMA_DISABLED)
 
+enum ums9117_bootstrap_session_status {
+	UMS9117_BOOTSTRAP_SESSION_OK = 0,
+	UMS9117_BOOTSTRAP_SESSION_LAYOUT,
+	UMS9117_BOOTSTRAP_SESSION_MAGIC,
+	UMS9117_BOOTSTRAP_SESSION_SIZE,
+	UMS9117_BOOTSTRAP_SESSION_CRC,
+	UMS9117_BOOTSTRAP_SESSION_RESERVED,
+	UMS9117_BOOTSTRAP_SESSION_ID,
+	UMS9117_BOOTSTRAP_SESSION_SEED,
+	UMS9117_BOOTSTRAP_SESSION_CLIENT_KEY,
+	UMS9117_BOOTSTRAP_SESSION_USB_CONFIG,
+	UMS9117_BOOTSTRAP_SESSION_DTB,
+};
+
 struct ums9117_bootstrap_timer_gates {
 	uint32_t eb0_before;
 	uint32_t eb0_after;
@@ -41,6 +55,10 @@ size_t ums9117_bootstrap_zimage_size(void);
 size_t ums9117_bootstrap_dtb_size(void);
 void ums9117_bootstrap_copy_zimage(uint32_t destination, size_t bytes);
 void ums9117_bootstrap_copy_dtb(uint32_t destination, size_t bytes);
+enum ums9117_bootstrap_session_status
+ums9117_bootstrap_personalize_dtb(uint32_t destination, size_t bytes);
+const char *
+ums9117_bootstrap_session_error(enum ums9117_bootstrap_session_status status);
 
 __attribute__((noreturn)) void ums9117_linux_handoff(uint32_t zimage,
 						     uint32_t dtb);

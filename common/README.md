@@ -1,8 +1,8 @@
 # Shared host and runtime stack
 
 `common/` owns target-neutral host and runtime components: the RAM-only bundle
-runner, the USB console client, and their shared contracts. They must not depend
-on a phone memory map, board register layout, or bootstrap protocol.
+runner, the USB keyboard client, and their shared runtime contracts. They must
+not depend on a phone memory map, board register layout, or bootstrap protocol.
 
 Phone-owned drivers, display and keypad setup, DTS wiring, and runtime values
 belong under `targets/<phone>/`. Reusable SoC-specific host translation belongs

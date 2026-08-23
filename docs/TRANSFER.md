@@ -1,15 +1,24 @@
 # Host-to-phone transfer
 
-Console targets use the running USB console for an interactive shell, one-off
-commands, and file copy. Load the target first, then use the public CLI from the
-source checkout:
+Current targets expose an interactive shell, one-off commands, and file copy
+through their session-bound SSH/SFTP transport. Load the target first, then use
+the same public CLI from the source checkout:
 
 ```sh
 ./fplinux console <target>
 ```
 
-Target documents state whether a particular phone has the console profile and
-how to start its RAM-loaded run.
+After the session becomes ready, the same bound endpoint is also available to
+ordinary OpenSSH:
+
+```sh
+ssh -F "$XDG_RUNTIME_DIR/fplinux/current/<target>.ssh-config" fplinux
+```
+
+The private config is available only while that RAM session is ready.
+
+Target documents state the board-specific boot sequence and hardware
+limitations.
 
 ## Run a command
 
@@ -50,10 +59,9 @@ interrupted or failed pull does not replace the requested local destination.
 
 ## Concurrent use
 
-One client can own the shell-and-transfer channel at a time. Close an
-interactive console before starting `--exec`, `--upload`, or `--pull`. If a
-target supports host-keyboard forwarding, it uses a separate input channel and
-can run alongside the shell; see that target's document.
+An SSH target can accept another command or transfer while an interactive shell
+is open. If a target supports host-keyboard forwarding, it uses a separate input
+channel and can run alongside the shell; see that target's document.
 
 Keyboard forwarding grabs the selected input device, so keys from that keyboard
 do not reach the host desktop or stop the forwarding process. On a host with no
@@ -63,12 +71,12 @@ second keyboard, put a time limit on the client:
 sudo timeout 60s ./fplinux console <target> --keyboard /dev/input/eventN
 ```
 
-GNU `timeout` sends `SIGTERM`; the client then releases the keyboard.
+When the timeout expires, the client releases the keyboard.
 
-## Channel limitations
+## Transport limitations
 
-- Transfers use the existing console channel and preserve file bytes.
-- There is no compression, resume, raw block-device mode, or USB networking.
+- The private USB link supplies no internet access, DNS or forwarding.
+- The public file-copy operations provide no resume or raw block-device mode.
 - Interrupted transfers must be started again.
 - A transferred kernel module must match the running kernel and is part of the
   current volatile RAM-loaded run.

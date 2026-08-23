@@ -1,7 +1,7 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-console
 pkgver=1
-pkgrel=1
+pkgrel=0
 pkgdesc="Physical keypad and framebuffer console for FPLinux"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
@@ -10,7 +10,7 @@ makedepends_build="clang22 lld22"
 makedepends_host="musl-dev linux-headers gcc"
 subpackages="$pkgname-openrc"
 options="!check"
-source="fplinux-console.c fplinux-multitap.c fplinux-multitap.h fplinux-console.initd fplinux-usb-getty.initd"
+source="fplinux-console.c fplinux-multitap.c fplinux-multitap.h fplinux-console.initd"
 builddir="$srcdir"
 
 build() {
@@ -23,8 +23,6 @@ package() {
 	install -Dm755 "$builddir/fplinux-console" "$pkgdir/usr/bin/fplinux-console"
 	install -Dm755 "$srcdir/fplinux-console.initd" \
 		"$pkgdir/etc/init.d/fplinux-console"
-	install -Dm755 "$srcdir/fplinux-usb-getty.initd" \
-		"$pkgdir/etc/init.d/fplinux-usb-getty"
 }
 
 openrc() {
@@ -36,5 +34,4 @@ sha512sums="
 51d3626cc1b3107605d8f07423dc69bea22b008115abcde44314b285af27c1487a9c6c116b35c632adac71694d2fce73aa91bb4285f85faccc4f3482dde57fdc  fplinux-multitap.c
 a74c9221d3184802c885ea24296c7d13a3624d65d77a6c030f13e94898ce707d27b89da76084fa309016b96150676e5c2d00e0fd4f519883a5866efa666f3927  fplinux-multitap.h
 6c36784d17d9acabefc960c6295f420effc733e8531d8e98285b0c4bab8f38a1b5717600568f93721c8c628b421c4e40e8f5d18eb4a58748321874eb443e14b6  fplinux-console.initd
-5f96bf43237b56dc8a2f3b9f82bf42769eee96713fef0c69ad5ef92400700401f07187ea2663f837ce48252554a94de0b8ee6277d6c3ead981f7061d21bee572  fplinux-usb-getty.initd
 "

@@ -1,0 +1,50 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+/*
+ * Shared RAM-boot session markers.  The bootstrap replaces these exact bytes
+ * after validating the host-provided per-run session record.
+ */
+
+&{/chosen} {
+	rng-seed = [
+		a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1
+		a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1
+		a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1
+		a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1 a1
+	];
+};
+
+/ {
+	fplinux-session {
+		compatible = "fplinux,ram-session";
+		fplinux,ssh-client-key = [
+			b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2
+			b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2
+			b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2
+			b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2
+			b2 b2 b2 b2
+		];
+		fplinux,session-id = [
+			c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3
+			c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3
+		];
+		fplinux,usb-session = [
+			d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4
+			d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4
+			d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4
+			d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4
+			d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4
+			d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4
+			d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4
+			d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4
+			d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4
+			d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4
+			d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4
+			d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4
+			d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4
+			d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4
+			d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4
+			d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4
+		];
+	};
+};

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from fplinux_cli import alpine_state
+from fplinux_cli import alpine_state, config
 from fplinux_cli import workspace as workspace_module
 
 
@@ -84,10 +84,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
             target: dict[str, Any] = {
                 "platform": "demo",
                 "bundle": {"packages": ["package-b"]},
-                "release_manifest": "release/manifest.toml",
-                "assets_lock": "loader/assets.lock.toml",
                 "linux": {
-                    "defconfig": "kernel/defconfig",
                     "patches": [],
                     "copies": [{"source": "kernel/copy.c"}],
                     "appends": [{"source": "kernel/append.cfg"}],
@@ -102,7 +99,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                     "appends": [{"source": "shared/platform-append.cfg"}],
                 },
                 "bootstrap": {"shared_copies": [{"source": "shared/bootstrap"}]},
-                "host": {"tools": [{"type": "cc-libusb/v1", "source": "tools/loader.c"}]},
+                "host": {"tools": [{"type": "cc-libusb", "source": "tools/loader.c"}]},
             }
 
             def shared_sources(package: str, root: Path) -> tuple[Path, ...]:
@@ -111,6 +108,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
 
             with (
                 mock.patch.object(workspace_module, "ROOT", root),
+                mock.patch.object(config, "ROOT", root),
                 mock.patch.object(workspace_module, "STAGED_BUILD_SOURCES", ("always.txt",)),
                 mock.patch.object(workspace_module, "load_target", return_value=target),
                 mock.patch.object(workspace_module, "load_platform", return_value=platform),

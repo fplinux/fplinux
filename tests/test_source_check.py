@@ -142,16 +142,14 @@ class SourceInventoryTests(unittest.TestCase):
                 "phone-a": {
                     "platform": "soc",
                     "bundle": {"packages": ["phone-ui"]},
-                    "rootfs": {"packages": []},
                 },
                 "phone-b": {
                     "platform": "soc",
                     "bundle": {"packages": []},
-                    "rootfs": {"packages": ["missing-board-app"]},
                 },
             }
             platform = {
-                "rootfs": {"packages": ["platform-app"]},
+                "rootfs": {"packages": ["platform-app", "missing-board-app"]},
                 "bundle": {"packages": []},
             }
             with (

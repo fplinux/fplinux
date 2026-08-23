@@ -24,6 +24,7 @@ from .config import (
     check_orchestration_recipe_digest,
     container_image_build_arguments,
     container_image_recipe_digest,
+    container_image_reference,
     load_container_lock,
 )
 from .image_state import ImageState, ImageStateError, load_image_state, publish_image_state
@@ -259,21 +260,20 @@ def setup(
     if image_recipe is not None and image_recipe != current_recipe:
         fail("container image inputs changed before setup")
     image_recipe = current_recipe
-    oci = lock["oci"]
-    if image_ready(podman, oci["image"], image_recipe=image_recipe) and not force:
-        state = _publish_current_image_state(podman, oci["image"], image_recipe)
+    image = container_image_reference(lock, image_recipe)
+    if image_ready(podman, image, image_recipe=image_recipe) and not force:
+        state = _publish_current_image_state(podman, image, image_recipe)
         install_git_hooks()
-        print(f"Build image is ready: {oci['image']}")
+        print(f"Build image is ready: {image}")
         if own_reporter:
             reporter.finish()
         return state
-    previous_image = image_identifier(podman, oci["image"])
     command = [
         podman,
         "build",
         *container_image_build_arguments(lock),
         "--tag",
-        oci["image"],
+        image,
         "--label",
         f"org.fplinux.container.image-recipe={image_recipe}",
         ".",
@@ -282,26 +282,9 @@ def setup(
         stage.run(command, cwd=ROOT)
     if container_image_recipe_digest(lock) != image_recipe:
         fail("container image inputs changed while setup was running")
-    if not image_ready(podman, oci["image"], image_recipe=image_recipe):
+    if not image_ready(podman, image, image_recipe=image_recipe):
         fail("container setup completed without publishing the exact requested image")
-    state = _publish_current_image_state(podman, oci["image"], image_recipe)
-    current_image = state.image_identity
-    if (
-        previous_image is not None
-        and current_image is not None
-        and current_image != previous_image
-    ):
-        removed = subprocess.run(
-            [podman, "image", "rm", previous_image],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if removed.returncode:
-            detail = removed.stderr.strip() or "image is still in use"
-            print(f"warning: replaced build image was retained: {detail}", file=sys.stderr)
-        else:
-            print(f"Removed replaced build image: {previous_image}")
+    state = _publish_current_image_state(podman, image, image_recipe)
     install_git_hooks()
     if own_reporter:
         reporter.finish()
@@ -339,7 +322,8 @@ def doctor() -> None:
             problems.append("rootless Podman is not active")
         else:
             print("rootless:   yes")
-        image = load_container_lock()["oci"]["image"]
+        lock = load_container_lock()
+        image = container_image_reference(lock)
         state = "ready" if image_ready(podman, image) else "not built or stale"
         print(f"image:      {state} ({image})")
     if problems:
@@ -371,9 +355,14 @@ def check_commit_message(message_file: str) -> None:
     if config.is_symlink() or not config.is_file():
         fail("commitlint configuration is missing or invalid")
     podman = require_podman()
-    lock = load_container_lock()["oci"]
-    if not image_ready(podman, lock["image"]):
+    container_lock = load_container_lock()
+    lock = container_lock["oci"]
+    image = container_image_reference(container_lock)
+    if not image_ready(podman, image):
         fail("commit hook requires the current build image; run ./fplinux setup")
+    image_identity = image_identifier(podman, image)
+    if image_identity is None:
+        fail("commit hook requires an immutable current build image")
     result = subprocess.run(
         [
             podman,
@@ -394,7 +383,7 @@ def check_commit_message(message_file: str) -> None:
             "HOME=/tmp",
             "--workdir",
             "/workspace",
-            lock["image"],
+            image_identity,
             "sh",
             "-c",
             "commitlint < /message",
@@ -526,7 +515,7 @@ def _c_scope_paths(snapshot: WorkspaceSnapshot) -> set[str]:
         if not isinstance(tools, list):
             continue
         for recipe in tools:
-            if isinstance(recipe, dict) and recipe.get("type") == "cc-libusb/v1":
+            if isinstance(recipe, dict) and recipe.get("type") == "cc-libusb":
                 source = recipe.get("source")
                 if isinstance(source, str) and source in by_path:
                     selected.add(source)
@@ -559,9 +548,6 @@ def _linux_manifest_sources(linux: object, *, base: PurePath) -> set[str]:
     if not isinstance(linux, dict):
         return set()
     selected: set[str] = set()
-    defconfig = linux.get("defconfig")
-    if isinstance(defconfig, str):
-        selected.add((base / defconfig).as_posix())
     patches = linux.get("patches")
     if isinstance(patches, list):
         selected.update((base / patch).as_posix() for patch in patches if isinstance(patch, str))
@@ -600,6 +586,7 @@ def _kernel_scope_paths(snapshot: WorkspaceSnapshot) -> set[str]:
             continue
         if not isinstance(target, dict):
             continue
+        selected.add((target_path.parent / "kernel/defconfig").as_posix())
         selected.update(_linux_manifest_sources(target.get("linux"), base=target_path.parent))
         platform = target.get("platform")
         if not isinstance(platform, str):
@@ -739,10 +726,11 @@ def check(
 
     podman = require_podman()
     lock = container_lock["oci"]
-    if image_ready(podman, lock["image"], image_recipe=image_recipe):
+    image = container_image_reference(container_lock, image_recipe)
+    if image_ready(podman, image, image_recipe=image_recipe):
         current_image = _publish_current_image_state(
             podman,
-            lock["image"],
+            image,
             image_recipe,
         )
     else:

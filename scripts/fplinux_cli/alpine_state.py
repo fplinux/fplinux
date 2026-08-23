@@ -129,12 +129,12 @@ def selected_packages(
     target_config: Mapping[str, object],
     root: Path = ROOT,
 ) -> tuple[str, ...]:
-    """Resolve the exact common, platform and target package ownership layers."""
+    """Resolve the exact common and platform rootfs package ownership layers."""
+    del target_config
     owners: dict[str, str] = {}
     for owner, packages in (
         ("common", COMMON_PACKAGES),
         ("platform", _declared_packages(platform_config, "platform", "rootfs")),
-        ("target", _declared_packages(target_config, "target", "rootfs")),
     ):
         for package in packages:
             previous = owners.get(package)
@@ -179,23 +179,18 @@ def load_alpine_lock(root: Path = ROOT) -> dict[str, Any]:
             raw = tomllib.load(stream)
     except (OSError, tomllib.TOMLDecodeError) as error:
         _fail(f"cannot load {path}: {error}")
-    if (
-        set(raw)
-        != {
-            "schema",
-            "release",
-            "branch",
-            "arch",
-            "triplet",
-            "repository",
-            "minirootfs",
-            "runtime",
-            "sysroot",
-            "package",
-        }
-        or raw.get("schema") != "fplinux.alpine/v1"
-    ):
-        _fail(f"invalid schema: {path}")
+    if set(raw) != {
+        "release",
+        "branch",
+        "arch",
+        "triplet",
+        "repository",
+        "minirootfs",
+        "runtime",
+        "sysroot",
+        "package",
+    }:
+        _fail(f"invalid Alpine lock: {path}")
     if raw.get("arch") != "armv7" or raw.get("triplet") != "armv7-alpine-linux-musleabihf":
         _fail("only the FPLinux armv7 ABI is supported")
     _nonempty(raw.get("release"), "release")

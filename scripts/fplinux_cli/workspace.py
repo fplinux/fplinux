@@ -18,7 +18,13 @@ if TYPE_CHECKING:
 
 from . import alpine_state
 from .common import ROOT, fail, relative_name
-from .config import load_platform, load_target
+from .config import (
+    load_platform,
+    load_target,
+    target_asset_lock_path,
+    target_defconfig_path,
+    target_release_manifest_path,
+)
 
 STAGED_BUILD_SOURCES = (
     "Containerfile",
@@ -38,6 +44,7 @@ STAGED_BUILD_SOURCES = (
     "scripts/fplinux_cli/kbuild_state.py",
     "scripts/fplinux_cli/linux_state.py",
     "scripts/fplinux_cli/output.py",
+    "scripts/fplinux_cli/ssh_transport.py",
 )
 
 
@@ -114,9 +121,9 @@ def target_build_source_files(target: str) -> list[tuple[str, Path]]:
     for source in sorted(shared_sources):
         add_source_path(files, source)
     add_source_path(files, target_root / "target.toml")
-    add_source_path(files, target_root / target_config["release_manifest"])
-    add_source_path(files, target_root / target_config["assets_lock"])
-    add_source_path(files, target_root / target_config["linux"]["defconfig"])
+    add_source_path(files, target_release_manifest_path(target))
+    add_source_path(files, target_asset_lock_path(target))
+    add_source_path(files, target_defconfig_path(target))
     add_source_path(files, target_root / target_config["bootstrap"]["source"])
     for relative in target_config["linux"]["patches"]:
         add_source_path(files, target_root / relative)
@@ -134,7 +141,7 @@ def target_build_source_files(target: str) -> list[tuple[str, Path]]:
     for step in platform["bootstrap"]["shared_copies"]:
         add_source_path(files, ROOT / step["source"])
     for recipe in platform["host"]["tools"]:
-        if recipe["type"] == "cc-libusb/v1":
+        if recipe["type"] == "cc-libusb":
             add_source_path(files, ROOT / recipe["source"])
     add_source_path(files, ROOT / "common/run.py")
     add_source_path(files, platform_root / "host/adapter.py")

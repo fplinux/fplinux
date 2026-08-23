@@ -33,11 +33,10 @@ class BundleStateTests(unittest.TestCase):
         self.output = Path(self.temporary.name) / "out"
 
     def _staging(self, marker: str) -> tuple[Path, str]:
-        staging = create_bundle_staging(self.output, "demo", "default")
+        staging = create_bundle_staging(self.output, "demo")
         (staging / "payload").write_text(marker)
         payload = {
             "target": "demo",
-            "profile": "default",
             "workspace_digest": "a" * 64,
             "container_image_recipe": "b" * 64,
             "apk_signing_key": "9" * 64,
@@ -55,10 +54,10 @@ class BundleStateTests(unittest.TestCase):
     def test_publish_and_resolve_current_generation(self) -> None:
         """Publish and resolve the selected generation."""
         staging, generation = self._staging("first")
-        published = publish_bundle_generation(self.output, "demo", "default", staging, generation)
-        publish_current_bundle(self.output, "demo", "default", published)
+        published = publish_bundle_generation(self.output, "demo", staging, generation)
+        publish_current_bundle(self.output, "demo", published)
 
-        current = resolve_current_bundle(self.output, "demo", "default")
+        current = resolve_current_bundle(self.output, "demo")
 
         self.assertEqual(current.path, published)
         self.assertEqual((current.path / "payload").read_text(), "first")
@@ -66,59 +65,49 @@ class BundleStateTests(unittest.TestCase):
     def test_discarded_staging_does_not_replace_last_good_pointer(self) -> None:
         """Discarding failed staging preserves the last good pointer."""
         first, generation = self._staging("first")
-        published = publish_bundle_generation(self.output, "demo", "default", first, generation)
-        publish_current_bundle(self.output, "demo", "default", published)
-        failed = create_bundle_staging(self.output, "demo", "default")
+        published = publish_bundle_generation(self.output, "demo", first, generation)
+        publish_current_bundle(self.output, "demo", published)
+        failed = create_bundle_staging(self.output, "demo")
         (failed / "partial").write_text("partial")
-        discard_bundle_staging(self.output, "demo", "default", failed)
+        discard_bundle_staging(self.output, "demo", failed)
 
-        current = resolve_current_bundle(self.output, "demo", "default")
+        current = resolve_current_bundle(self.output, "demo")
 
         self.assertEqual((current.path / "payload").read_text(), "first")
 
     def test_current_pointer_changes_only_when_new_generation_is_published(self) -> None:
         """A complete unselected generation does not change the current pointer."""
         first, first_generation = self._staging("first")
-        first_path = publish_bundle_generation(
-            self.output, "demo", "default", first, first_generation
-        )
-        publish_current_bundle(self.output, "demo", "default", first_path)
+        first_path = publish_bundle_generation(self.output, "demo", first, first_generation)
+        publish_current_bundle(self.output, "demo", first_path)
         second, second_generation = self._staging("second")
-        second_path = publish_bundle_generation(
-            self.output, "demo", "default", second, second_generation
-        )
+        second_path = publish_bundle_generation(self.output, "demo", second, second_generation)
 
         self.assertEqual(
-            (resolve_current_bundle(self.output, "demo", "default").path / "payload").read_text(),
+            (resolve_current_bundle(self.output, "demo").path / "payload").read_text(),
             "first",
         )
-        publish_current_bundle(self.output, "demo", "default", second_path)
+        publish_current_bundle(self.output, "demo", second_path)
         self.assertEqual(
-            (resolve_current_bundle(self.output, "demo", "default").path / "payload").read_text(),
+            (resolve_current_bundle(self.output, "demo").path / "payload").read_text(),
             "second",
         )
 
     def test_exact_generation_reuses_existing_directory(self) -> None:
         """Publishing identical content reuses its generation directory."""
         first, generation = self._staging("same")
-        first_path = publish_bundle_generation(self.output, "demo", "default", first, generation)
+        first_path = publish_bundle_generation(self.output, "demo", first, generation)
         second, second_generation = self._staging("same")
-        second_path = publish_bundle_generation(
-            self.output, "demo", "default", second, second_generation
-        )
+        second_path = publish_bundle_generation(self.output, "demo", second, second_generation)
         self.assertEqual(first_path, second_path)
 
     def test_selected_generation_discards_only_complete_superseded_siblings(self) -> None:
         """Keep generations until a new pointer is selected, then retain it alone."""
         first, first_generation = self._staging("first")
-        first_path = publish_bundle_generation(
-            self.output, "demo", "default", first, first_generation
-        )
-        first_current = publish_current_bundle(self.output, "demo", "default", first_path)
+        first_path = publish_bundle_generation(self.output, "demo", first, first_generation)
+        first_current = publish_current_bundle(self.output, "demo", first_path)
         second, second_generation = self._staging("second")
-        second_path = publish_bundle_generation(
-            self.output, "demo", "default", second, second_generation
-        )
+        second_path = publish_bundle_generation(self.output, "demo", second, second_generation)
         generations = second_path.parent
         incomplete = generations / ("f" * 64)
         incomplete.mkdir()
@@ -126,10 +115,10 @@ class BundleStateTests(unittest.TestCase):
         unrelated_directory.mkdir()
         unrelated_file = generations / "notes.txt"
         unrelated_file.write_text("keep")
-        old_format = generations / ("e" * 64)
-        old_format.mkdir()
-        (old_format / BUILD_MANIFEST_NAME).write_text(
-            json.dumps({"generation": old_format.name, "schema": "old"})
+        unrecognized = generations / ("e" * 64)
+        unrecognized.mkdir()
+        (unrecognized / BUILD_MANIFEST_NAME).write_text(
+            json.dumps({"generation": unrecognized.name, "unexpected": "value"})
         )
 
         self.assertEqual(first_current.path, first_path)
@@ -139,40 +128,40 @@ class BundleStateTests(unittest.TestCase):
                 first_generation,
                 second_generation,
                 incomplete.name,
-                old_format.name,
+                unrecognized.name,
                 unrelated_directory.name,
             },
         )
         self.assertEqual(
-            resolve_current_bundle(self.output, "demo", "default").generation,
+            resolve_current_bundle(self.output, "demo").generation,
             first_generation,
         )
 
-        current = publish_current_bundle(self.output, "demo", "default", second_path)
-        discard_superseded_bundle_generations(self.output, "demo", "default", current)
+        current = publish_current_bundle(self.output, "demo", second_path)
+        discard_superseded_bundle_generations(self.output, "demo", current)
 
         self.assertEqual(
             {path.name for path in generations.iterdir() if path.is_dir()},
             {
                 second_generation,
                 incomplete.name,
-                old_format.name,
+                unrecognized.name,
                 unrelated_directory.name,
             },
         )
         self.assertTrue(unrelated_file.is_file())
         self.assertEqual(
-            resolve_current_bundle(self.output, "demo", "default").generation,
+            resolve_current_bundle(self.output, "demo").generation,
             second_generation,
         )
 
     def test_invalid_pointer_is_a_miss(self) -> None:
         """Reject a malformed current-generation pointer."""
-        pointer = self.output / "demo/default.current.json"
+        pointer = self.output / "demo/current.json"
         pointer.parent.mkdir(parents=True)
         pointer.write_text(json.dumps({"generation": "bad"}))
         with self.assertRaises(BundleStateError):
-            resolve_current_bundle(self.output, "demo", "default")
+            resolve_current_bundle(self.output, "demo")
 
 
 if __name__ == "__main__":

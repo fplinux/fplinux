@@ -4,19 +4,21 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import importlib.util
 import json
 import os
+import signal
 import sys
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, NoReturn
 
 if TYPE_CHECKING:
-    from types import ModuleType
+    from types import FrameType, ModuleType
 
-RUNTIME_MANIFEST_SCHEMA = "fplinux.runtime/v1"
 ADAPTER_PATH = "runner/platform_adapter.py"
+SSH_HELPER_PATH = "runner/ssh_transport.py"
 MINIMUM_PYTHON = (3, 11)
 
 
@@ -75,10 +77,15 @@ def require_integer(
     return value
 
 
-def validate_usb(value: object, name: str) -> dict[str, Any]:
+def validate_usb(value: object, name: str, *, interface_fields: bool = False) -> dict[str, Any]:
     """Validate USB identity and timeout metadata."""
-    device = require_object(value, {"vendor_id", "product_id", "wait_seconds"}, name)
-    return {
+    base_fields = {"vendor_id", "product_id", "wait_seconds"}
+    fields = base_fields | {"keyboard_interface"}
+    if interface_fields:
+        device = require_object(value, fields, name)
+    else:
+        device = require_object(value, base_fields, name)
+    result = {
         "vendor_id": require_integer(device, "vendor_id", f"{name} vendor_id", bounds=(0, 0xFFFF)),
         "product_id": require_integer(
             device,
@@ -93,6 +100,14 @@ def validate_usb(value: object, name: str) -> dict[str, Any]:
             bounds=(1, 3600),
         ),
     }
+    if interface_fields:
+        result["keyboard_interface"] = require_integer(
+            device,
+            "keyboard_interface",
+            f"{name} keyboard_interface",
+            bounds=(0, 255),
+        )
+    return result
 
 
 def validate_path_table(value: object, name: str) -> dict[str, str]:
@@ -119,12 +134,11 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
     root = require_object(
         document,
         {
-            "schema",
             "target",
             "display_name",
             "platform",
-            "capability",
             "image",
+            "personalization",
             "addresses",
             "usb",
             "assets",
@@ -134,11 +148,40 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
         },
         "runtime manifest",
     )
-    if root.get("schema") != RUNTIME_MANIFEST_SCHEMA:
-        fail(f"runtime manifest schema must be {RUNTIME_MANIFEST_SCHEMA}")
-    for key in ("target", "display_name", "platform", "capability"):
+    for key in ("target", "display_name", "platform"):
         root[key] = require_string(root.get(key), f"runtime {key}")
     root["image"] = relative_name(root.get("image"), "runtime image")
+
+    descriptor = require_object(
+        root.get("personalization"),
+        {"offset", "bytes", "template_sha256"},
+        "runtime personalization",
+    )
+    offset = require_integer(
+        descriptor,
+        "offset",
+        "runtime personalization offset",
+        bounds=(512, 0xFFFFFFFF),
+        alignment=64,
+    )
+    size = require_integer(
+        descriptor,
+        "bytes",
+        "runtime personalization bytes",
+        bounds=(512, 512),
+    )
+    template_hash = descriptor.get("template_sha256")
+    if (
+        not isinstance(template_hash, str)
+        or len(template_hash) != 64
+        or any(character not in "0123456789abcdef" for character in template_hash)
+    ):
+        fail("runtime personalization template_sha256 must be a lowercase SHA-256 digest")
+    root["personalization"] = {
+        "offset": offset,
+        "bytes": size,
+        "template_sha256": template_hash,
+    }
 
     addresses = require_object(root.get("addresses"), {"fdl1", "payload"}, "addresses")
     root["addresses"] = {
@@ -157,9 +200,12 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
             alignment=4,
         ),
     }
-    usb = require_object(root.get("usb"), {"bootrom", "linux_console"}, "USB metadata")
+    usb = require_object(root.get("usb"), {"bootrom", "linux_gadget"}, "USB metadata")
     root["usb"] = {
-        name: validate_usb(usb.get(name), f"{name} USB") for name in ("bootrom", "linux_console")
+        "bootrom": validate_usb(usb.get("bootrom"), "bootrom USB"),
+        "linux_gadget": validate_usb(
+            usb.get("linux_gadget"), "linux_gadget USB", interface_fields=True
+        ),
     }
     root["assets"] = validate_path_table(root.get("assets"), "runtime assets")
     root["host_tools"] = validate_path_table(root.get("host_tools"), "runtime host tools")
@@ -171,6 +217,7 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
         ADAPTER_PATH,
         *root["assets"].values(),
         *root["host_tools"].values(),
+        SSH_HELPER_PATH,
     }
     hashes = require_object(root.get("sha256"), expected_paths, "runtime hashes")
     for relative, value in hashes.items():
@@ -191,28 +238,55 @@ def require_file(path: Path, *, executable: bool = False) -> None:
         fail(f"host tool is not executable: {path}")
 
 
-def host_preflight(bundle: Path, runtime: dict[str, Any]) -> None:
+def host_preflight() -> None:
     """Reject an unsupported host runtime before any phone operation."""
-    del bundle, runtime
     if sys.version_info < MINIMUM_PYTHON:
         version = f"{sys.version_info.major}.{sys.version_info.minor}"
         fail(f"Python 3.11 or newer is required (found {version})")
 
 
+def load_module(path: Path, name: str) -> ModuleType:
+    """Load one already-hash-verified module from its fixed bundle path."""
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        fail(f"{name} could not be loaded")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def load_adapter(path: Path) -> ModuleType:
     """Load only the adapter bundled at the fixed platform-adapter path."""
-    spec = importlib.util.spec_from_file_location("fplinux_platform_adapter", path)
-    if spec is None or spec.loader is None:
-        fail("platform adapter could not be loaded")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_module(path, "fplinux_platform_adapter")
     if not callable(getattr(module, "run", None)):
-        fail("platform adapter does not expose run(bundle, runtime)")
+        fail("platform adapter does not expose run(bundle, runtime, session)")
     return module
+
+
+def arguments() -> argparse.Namespace:
+    """Parse either a fresh RAM load or an authenticated reconnect action."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--reconnect",
+        action="store_true",
+        help="reconnect to the ready SSH session for this exact bundle",
+    )
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument("--exec", dest="exec_command", metavar="COMMAND")
+    action.add_argument("--upload", nargs=2, metavar=("LOCAL", "REMOTE"))
+    action.add_argument("--pull", nargs=2, metavar=("REMOTE", "LOCAL"))
+    result = parser.parse_args()
+    if not result.reconnect and any(
+        value is not None for value in (result.exec_command, result.upload, result.pull)
+    ):
+        parser.error("--exec, --upload and --pull require --reconnect")
+    return result
 
 
 def main() -> None:
     """Verify the bundle closure and enter the fixed adapter."""
+    options = arguments()
     bundle = Path(__file__).resolve().parent.parent
     runtime = load_runtime_manifest(bundle / "runtime-manifest.json")
     for relative, expected in runtime["sha256"].items():
@@ -224,9 +298,50 @@ def main() -> None:
     image = bundle / runtime["image"]
     if image.read_bytes()[:4] != b"DHTB":
         fail("RAM payload does not have a DHTB header")
-    host_preflight(bundle, runtime)
+    host_preflight()
+    ssh = load_module(bundle / SSH_HELPER_PATH, "ssh_transport")
+    identity = ssh.bundle_identity(bundle, runtime)
+
+    if options.reconnect:
+        session = ssh.load_current_session(runtime["target"], identity)
+        session = ssh.reacquire_bound_session(session)
+        if options.exec_command is not None:
+            result = ssh.run_remote(session, options.exec_command)
+            if result.returncode:
+                raise SystemExit(result.returncode)
+            return
+        if options.upload is not None:
+            ssh.upload(session, options.upload[0], options.upload[1])
+            return
+        if options.pull is not None:
+            ssh.pull(session, options.pull[0], options.pull[1])
+            return
+        ssh.open_shell(session)
+        fail("SSH client returned without replacing the runner")
+
     adapter = load_adapter(bundle / ADAPTER_PATH)
-    adapter.run(bundle, runtime)
+    session = None
+    previous_handlers: dict[signal.Signals, Any] = {}
+
+    def stop_session(signum: int, _frame: FrameType | None) -> None:
+        raise SystemExit(128 + signum)
+
+    for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
+        previous_handlers[signum] = signal.signal(signum, stop_session)
+    try:
+        session = ssh.prepare_session(
+            image,
+            runtime["personalization"],
+            runtime["target"],
+            runtime["usb"]["linux_gadget"],
+            identity,
+        )
+        adapter.run(bundle, runtime, session)
+    finally:
+        if session is not None:
+            ssh.finish_session(session)
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
 
 
 if __name__ == "__main__":

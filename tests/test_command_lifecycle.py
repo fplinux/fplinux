@@ -41,12 +41,11 @@ class CommandLifecycleTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.cache = self.root / ".cache"
         self.output = self.cache / "out"
-        self.profile = "default"
-        self.target_config = {"profile": self.profile}
+        self.target_config: dict[str, object] = {}
         self.release = {"image": "image/ramboot.bin"}
         self.lock = {
             "oci": {
-                "image": "localhost/fplinux:locked",
+                "repository": "localhost/fplinux-build",
                 "platform": "linux/amd64",
             }
         }
@@ -56,7 +55,7 @@ class CommandLifecycleTests(unittest.TestCase):
         self.signing_key = hashlib.sha256(signing_key.read_bytes()).hexdigest()
         self.snapshot = WorkspaceSnapshot((), "c" * 64)
         self.bundle_path = self._create_generation("a" * 64)
-        self.bundle = publish_current_bundle(self.output, "phone", self.profile, self.bundle_path)
+        self.bundle = publish_current_bundle(self.output, "phone", self.bundle_path)
 
     def _manifest(self, generation: str, path: Path) -> dict[str, object]:
         """Describe one complete synthetic bundle independently of its resolver."""
@@ -70,13 +69,12 @@ class CommandLifecycleTests(unittest.TestCase):
             "generation": generation,
             "kbuild_receipt": {"recipe": "1" * 64, "sha256": "3" * 64},
             "linux_recipe": "2" * 64,
-            "profile": self.profile,
             "target": "phone",
         }
 
     def _create_generation(self, generation: str, image: bytes = b"ramboot\n") -> Path:
         """Write one complete immutable generation without selecting it."""
-        path = self.output / "phone/bundles" / self.profile / generation
+        path = self.output / "phone/bundles" / generation
         path.mkdir(parents=True)
         payload = path / self.release["image"]
         payload.parent.mkdir(parents=True)
@@ -86,10 +84,13 @@ class CommandLifecycleTests(unittest.TestCase):
         runner.parent.mkdir()
         runner.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
         runner.chmod(0o755)
-        client = path / "host/fplinux-usb-console"
+        client = path / "host/fplinux-usb-keyboard"
         client.parent.mkdir()
-        client.write_text("console client\n", encoding="utf-8")
+        client.write_text("keyboard client\n", encoding="utf-8")
         client.chmod(0o755)
+        ssh_helper = path / "runner/ssh_transport.py"
+        ssh_helper.write_text("# bundled SSH helper\n", encoding="utf-8")
+        ssh_helper.chmod(0o644)
         (path / BUILD_MANIFEST_NAME).write_bytes(
             canonical_json_bytes(self._manifest(generation, path))
         )
@@ -97,7 +98,7 @@ class CommandLifecycleTests(unittest.TestCase):
 
     def _clear_current_bundle(self) -> None:
         """Leave complete generations present while making the current receipt miss."""
-        bundle_pointer(self.output, "phone", self.profile).unlink()
+        bundle_pointer(self.output, "phone").unlink()
 
     def test_exact_build_hit_ignores_jobs_and_avoids_podman_or_staging(self) -> None:
         """Both job counts reuse the same valid generation without starting build work."""
@@ -168,7 +169,6 @@ class CommandLifecycleTests(unittest.TestCase):
             self.assertIsNone(
                 commands._matching_target_bundle(  # noqa: SLF001
                     "phone",
-                    {"profile": "default"},
                     identity,
                     "image/ramboot.bin",
                 )
@@ -180,7 +180,6 @@ class CommandLifecycleTests(unittest.TestCase):
         with mock.patch.object(commands, "ROOT", self.root):
             matched = commands._matching_target_bundle(  # noqa: SLF001
                 "phone",
-                {"profile": "default"},
                 identity,
                 "image/ramboot.bin",
             )
@@ -204,7 +203,6 @@ class CommandLifecycleTests(unittest.TestCase):
                     self.assertIsNone(
                         commands._matching_target_bundle(  # noqa: SLF001
                             "phone",
-                            {"profile": "default"},
                             identity,
                             "image/ramboot.bin",
                         )
@@ -230,6 +228,7 @@ class CommandLifecycleTests(unittest.TestCase):
             mock.patch.object(commands, "container_image_recipe_digest", return_value="e" * 64),
             mock.patch.object(commands, "require_podman", return_value="podman"),
             mock.patch.object(commands, "image_ready", return_value=True),
+            mock.patch.object(commands, "image_identifier", return_value="sha256:" + "a" * 64),
             mock.patch.object(
                 commands,
                 "stage_workspace_snapshot",
@@ -243,7 +242,7 @@ class CommandLifecycleTests(unittest.TestCase):
         ):
             output.run_entrypoint(lambda: commands.build("phone", 4))
 
-        self.assertFalse(bundle_pointer(self.output, "phone", self.profile).exists())
+        self.assertFalse(bundle_pointer(self.output, "phone").exists())
         self.assertTrue(old.exists())
         metadata = next((self.root / ".cache/logs/build/phone").rglob("run.json"))
         self.assertEqual(json.loads(metadata.read_text(encoding="utf-8"))["status"], "failed")
@@ -256,7 +255,7 @@ class CommandLifecycleTests(unittest.TestCase):
         self._clear_current_bundle()
 
         def publish_result(_stage: output.Stage, _command: list[str]) -> None:
-            publish_current_bundle(self.output, "phone", self.profile, self.bundle_path)
+            publish_current_bundle(self.output, "phone", self.bundle_path)
 
         with (
             mock.patch.object(commands, "ROOT", self.root),
@@ -272,6 +271,7 @@ class CommandLifecycleTests(unittest.TestCase):
             mock.patch.object(commands, "container_image_recipe_digest", return_value="e" * 64),
             mock.patch.object(commands, "require_podman", return_value="podman"),
             mock.patch.object(commands, "image_ready", return_value=True),
+            mock.patch.object(commands, "image_identifier", return_value="sha256:" + "a" * 64),
             mock.patch.object(
                 commands,
                 "stage_workspace_snapshot",
@@ -323,35 +323,23 @@ class CommandLifecycleTests(unittest.TestCase):
         ):
             output.run_entrypoint(lambda: commands.build("phone", 4, offline=True))
 
-        self.assertFalse(bundle_pointer(self.output, "phone", self.profile).exists())
+        self.assertFalse(bundle_pointer(self.output, "phone").exists())
 
     def test_run_executes_a_runner_from_the_resolved_generation(self) -> None:
         """Resolve current once and preserve that immutable generation path."""
         runner = self.bundle_path / "runner/run.py"
         with (
             mock.patch.object(commands, "ROOT", self.root),
-            mock.patch.object(commands, "load_target", return_value={"profile": "default"}),
+            mock.patch.object(commands, "load_target", return_value={}),
             mock.patch("fplinux_cli.commands.os.execv") as execute,
         ):
             commands.run_target("phone")
 
         execute.assert_called_once_with(os.fsencode(runner), [os.fsencode(runner)])
 
-    def test_verify_rejects_nonzero_console_status_even_with_matching_stdout(self) -> None:
-        """Reject a mocked failed console result even when its stdout happens to match."""
-        client = self.bundle_path / "host/fplinux-usb-console"
-        target_config = {
-            "profile": "default",
-            "runtime": {
-                "usb": {
-                    "linux_console": {
-                        "vendor_id": 0x1782,
-                        "product_id": 0x4D00,
-                        "wait_seconds": 10,
-                    }
-                }
-            },
-        }
+    def test_verify_rejects_nonzero_ssh_status_even_with_matching_stdout(self) -> None:
+        """Reject a failed SSH probe even when its stdout happens to match."""
+        target_config: dict[str, object] = {}
         result = subprocess.CompletedProcess(
             [],
             7,
@@ -371,44 +359,20 @@ class CommandLifecycleTests(unittest.TestCase):
                 "container_image_recipe_digest",
                 return_value="e" * 64,
             ),
-            mock.patch("fplinux_cli.commands.subprocess.run", return_value=result) as console_run,
-            self.assertRaisesRegex(SystemExit, "console client failed with exit status 7"),
+            mock.patch.object(
+                commands,
+                "_current_ssh_session",
+                return_value=(mock.Mock(run_remote=mock.Mock(return_value=result)), {}),
+            ) as current_session,
+            self.assertRaisesRegex(SystemExit, "SSH transport failed with exit status 7"),
         ):
             commands.verify_booted("phone")
-        console_run.assert_called_once_with(
-            [
-                str(client),
-                "--vid",
-                "1782",
-                "--pid",
-                "4d00",
-                "--wait",
-                "10",
-                "--interface",
-                "0",
-                "--exec",
-                "uname -r",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        ssh = current_session.return_value[0]
+        ssh.run_remote.assert_called_once_with({}, "uname -r", capture_output=True)
 
     def test_verify_matches_the_device_identity_not_the_workspace_digest(self) -> None:
         """Interpret a mocked uname result using the bundle's device-identity suffix."""
-        client = self.bundle_path / "host/fplinux-usb-console"
-        target_config = {
-            "profile": "default",
-            "runtime": {
-                "usb": {
-                    "linux_console": {
-                        "vendor_id": 0x1782,
-                        "product_id": 0x4D00,
-                        "wait_seconds": 10,
-                    }
-                }
-            },
-        }
+        target_config: dict[str, object] = {}
         result = subprocess.CompletedProcess(
             [],
             0,
@@ -425,7 +389,11 @@ class CommandLifecycleTests(unittest.TestCase):
                 return_value=self.snapshot,
             ),
             mock.patch.object(commands, "container_image_recipe_digest", return_value="e" * 64),
-            mock.patch("fplinux_cli.commands.subprocess.run", return_value=result) as console_run,
+            mock.patch.object(
+                commands,
+                "_current_ssh_session",
+                return_value=(mock.Mock(run_remote=mock.Mock(return_value=result)), {}),
+            ) as current_session,
             contextlib.redirect_stdout(stdout),
         ):
             commands.verify_booted("phone")
@@ -434,7 +402,54 @@ class CommandLifecycleTests(unittest.TestCase):
             stdout.getvalue(),
             "verify: the phone runs the current build (9999999999999999)\n",
         )
-        console_run.assert_called_once_with(
+        ssh = current_session.return_value[0]
+        ssh.run_remote.assert_called_once_with({}, "uname -r", capture_output=True)
+
+    def test_console_uses_ssh_for_commands_and_keyboard_tool_for_evdev(self) -> None:
+        """Route commands through SSH and evdev through the keyboard client."""
+        target_config = {
+            "runtime": {
+                "usb": {
+                    "linux_gadget": {
+                        "vendor_id": 0x1782,
+                        "product_id": 0x4D00,
+                        "wait_seconds": 10,
+                        "keyboard_interface": 1,
+                    },
+                },
+            },
+        }
+        result = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        ssh = mock.Mock(run_remote=mock.Mock(return_value=result))
+        with (
+            mock.patch.object(commands, "ROOT", self.root),
+            mock.patch.object(commands, "load_target", return_value=target_config),
+            mock.patch.object(commands, "_current_ssh_session", return_value=(ssh, {})),
+        ):
+            commands.console_target(
+                "phone",
+                keyboard=None,
+                exec_command="id",
+                upload=None,
+                pull=None,
+            )
+        ssh.run_remote.assert_called_once_with({}, "id")
+
+        client = self.bundle_path / "host/fplinux-usb-keyboard"
+        with (
+            mock.patch.object(commands, "ROOT", self.root),
+            mock.patch.object(commands, "load_target", return_value=target_config),
+            mock.patch("fplinux_cli.commands.os.execv") as execute,
+        ):
+            commands.console_target(
+                "phone",
+                keyboard="UP",
+                exec_command=None,
+                upload=None,
+                pull=None,
+            )
+        execute.assert_called_once_with(
+            client,
             [
                 str(client),
                 "--vid",
@@ -444,13 +459,10 @@ class CommandLifecycleTests(unittest.TestCase):
                 "--wait",
                 "10",
                 "--interface",
-                "0",
-                "--exec",
-                "uname -r",
+                "1",
+                "--keyboard",
+                "UP",
             ],
-            capture_output=True,
-            text=True,
-            check=False,
         )
 
     def test_build_argv_has_only_exact_nonoverlapping_mount_roots(self) -> None:
@@ -584,6 +596,7 @@ class ChecksumAportTests(unittest.TestCase):
             mock.patch.object(output, "ROOT", self.root),
             mock.patch.object(commands, "require_podman", return_value="/usr/bin/podman"),
             mock.patch.object(commands, "image_ready", return_value=True),
+            mock.patch.object(commands, "image_identifier", return_value="sha256:" + "a" * 64),
             mock.patch.object(output.Stage, "run", autospec=True, side_effect=container_run),
             contextlib.redirect_stdout(io.StringIO()),
             contextlib.redirect_stderr(io.StringIO()),

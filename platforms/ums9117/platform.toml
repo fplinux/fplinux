@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0-only
-schema = "fplinux.platform/v1"
 name = "ums9117"
 
 [rootfs]
-packages = ["fplinux-cpuclock"]
+packages = ["fplinux-cpuclock", "fplinux-ssh", "fplinux-usb-gadget"]
 
 [bundle]
 packages = ["fplinux-tyrquake", "fplinux-micropythonos"]
@@ -83,8 +82,16 @@ source = "platforms/ums9117/dts/ums9117.dtsi"
 destination = "arch/arm/boot/dts/unisoc/ums9117.dtsi"
 
 [[linux.copies]]
+source = "platforms/ums9117/dts/ums9117-ram-session.dtsi"
+destination = "arch/arm/boot/dts/unisoc/ums9117-ram-session.dtsi"
+
+[[linux.copies]]
 source = "platforms/ums9117/dts/ums9117-musb-cold.dtsi"
 destination = "arch/arm/boot/dts/unisoc/ums9117-musb-cold.dtsi"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/fplinux,ram-session.yaml"
+destination = "Documentation/devicetree/bindings/firmware/fplinux,ram-session.yaml"
 
 [[linux.copies]]
 source = "platforms/ums9117/bindings/fplinux,ums9117-syscounter.yaml"
@@ -148,6 +155,11 @@ files = [
   "ums9117/syscomm.c",
   "ums9117/usbio.c",
 ]
+kernel_destination = "zImage"
+load_address = 0x80100000
+payload_limit = 0x82000000
+toolchain = "arm-none-eabi"
+lto = 0
 
 [[bootstrap.shared_copies]]
 source = "bootstrap/fplinux-boot-screen"
@@ -157,16 +169,35 @@ destination = "fplinux-boot-screen"
 source = "platforms/ums9117/bootstrap"
 destination = "ums9117-bootstrap"
 
+[runtime]
+fdl1_load_address = 0x00006200
+
+[runtime.adapter]
+brightness = 50
+rotation = 0
+handoff_wait_seconds = 60
+release_wait_seconds = 10
+
+[runtime.usb.bootrom]
+vendor_id = 0x1782
+product_id = 0x4d00
+wait_seconds = 300
+
+[runtime.usb.linux_gadget]
+vendor_id = 0x0525
+product_id = 0xa4a6
+wait_seconds = 60
+keyboard_interface = 0
+
 [host]
-capability = "fplinux.host.ums9117-ram/v1"
 
 [host.runtime_tools]
 loader = "spd_dump"
 bridge = "libc_server"
-console = "fplinux-usb-console"
+keyboard = "fplinux-usb-keyboard"
 
 [[host.tools]]
-type = "make-archive/v1"
+type = "make-archive"
 name = "spd_dump"
 source_lock = "spreadtrum_flash"
 cache_name = "spreadtrum_flash.tar.gz"
@@ -188,7 +219,7 @@ path = "spd_cmd.h"
 digest_key = "spd_cmd_h_sha256"
 
 [[host.tools]]
-type = "make-archive/v1"
+type = "make-archive"
 name = "libc_server"
 source_lock = "fpdoom_host"
 cache_name = "fpdoom-host.tar.gz"
@@ -210,10 +241,7 @@ path = "cmd_def.h"
 digest_key = "cmd_def_h_sha256"
 
 [[host.tools]]
-type = "cc-libusb/v1"
-name = "fplinux-usb-console"
-source = "common/host/fplinux-usb-console.c"
+type = "cc-libusb"
+name = "fplinux-usb-keyboard"
+source = "common/host/fplinux-usb-keyboard.c"
 self_test = true
-
-[runner]
-api = "fplinux.host-adapter/v1"

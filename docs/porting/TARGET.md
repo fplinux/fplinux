@@ -13,7 +13,6 @@ here.
 | -------- | ---------------------------------------------------- |
 | Device   | `{manufacturer} {model} ({variant})`                 |
 | Platform | [`{platform}`](../../platforms/{platform}/README.md) |
-| Profile  | `{profile}`                                          |
 | Boot     | `{volatile RAM / other supported method}`            |
 
 ## Status

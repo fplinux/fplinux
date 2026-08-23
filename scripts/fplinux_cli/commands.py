@@ -3,16 +3,19 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import shlex
-import subprocess
 import sys
 import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 from . import alpine_state
 from .alpine_builder import SOURCE_DATE_EPOCH, materialize_aport_sources
@@ -32,13 +35,14 @@ from .common import (
 )
 from .config import (
     container_image_recipe_digest,
+    container_image_reference,
     load_container_lock,
     load_platform,
     load_release,
     load_target,
     verified_runtime_digest,
 )
-from .container import image_ready, require_podman, setup
+from .container import image_identifier, image_ready, require_podman, setup
 from .output import RunReporter, silence_broken_pipe
 from .workspace import (
     WorkspaceSnapshot,
@@ -53,6 +57,7 @@ CANDIDATE_NOTICE = b"""HARDWARE QUALIFICATION CANDIDATE - DO NOT PUBLISH
 This archive is for physical device qualification and testing only.
 Candidate packaging does not assert release qualification.
 """
+SSH_HELPER_PATH = "runner/ssh_transport.py"
 
 
 @dataclass(frozen=True)
@@ -81,14 +86,12 @@ def _bundle_manifest(bundle: CurrentBundle) -> dict[str, Any]:
 
 def _resolve_target_bundle(
     target: str,
-    config: dict[str, Any],
 ) -> tuple[CurrentBundle, dict[str, Any]]:
     """Resolve the current bundle pointer exactly once."""
     try:
         bundle = resolve_current_bundle(
             ROOT / ".cache/out",
             target,
-            config["profile"],
         )
         return bundle, _bundle_manifest(bundle)
     except (BundleStateError, OSError, UnicodeDecodeError, ValueError) as error:
@@ -111,7 +114,6 @@ def _manifest_matches_identity(manifest: dict[str, Any], identity: BuildIdentity
 
 def _matching_target_bundle(
     target: str,
-    config: dict[str, Any],
     identity: BuildIdentity | None,
     image_relative: str,
 ) -> tuple[CurrentBundle, dict[str, Any]] | None:
@@ -120,7 +122,6 @@ def _matching_target_bundle(
         bundle = resolve_current_bundle(
             ROOT / ".cache/out",
             target,
-            config["profile"],
         )
         manifest = _bundle_manifest(bundle)
     except (BundleStateError, OSError, UnicodeDecodeError, ValueError):
@@ -136,23 +137,79 @@ def _matching_target_bundle(
     return bundle, manifest
 
 
-def _console_client(bundle: CurrentBundle) -> Path:
-    client = bundle.path / "host/fplinux-usb-console"
+def _load_bundle_ssh_helper(
+    bundle: CurrentBundle,
+    manifest: dict[str, Any],
+) -> ModuleType:
+    """Load only the SSH helper hashed by the selected immutable generation."""
+    path = bundle.path / SSH_HELPER_PATH
+    files = manifest.get("files")
+    record = files.get(SSH_HELPER_PATH) if isinstance(files, dict) else None
+    expected = record.get("sha256") if isinstance(record, dict) else None
+    if (
+        not isinstance(expected, str)
+        or path.is_symlink()
+        or not path.is_file()
+        or sha256_file(path) != expected
+    ):
+        fail(f"current bundle has no valid SSH transport helper: {path}")
+    name = f"fplinux_bundle_ssh_transport_{bundle.generation}"
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        fail(f"current bundle SSH transport helper cannot be loaded: {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    required = {
+        "load_bundle_context",
+        "load_current_session",
+        "reacquire_bound_session",
+        "run_remote",
+        "upload",
+        "pull",
+        "open_shell",
+    }
+    if any(not callable(getattr(module, name, None)) for name in required):
+        fail("current bundle SSH transport helper has an incompatible API")
+    return module
+
+
+def _current_ssh_session(
+    bundle: CurrentBundle,
+    manifest: dict[str, Any],
+    target: str,
+) -> tuple[ModuleType, dict[str, Any]]:
+    """Load and reacquire only a session created by this exact selected bundle."""
+    ssh = _load_bundle_ssh_helper(bundle, manifest)
+    runtime, identity = ssh.load_bundle_context(bundle.path)
+    if runtime.get("target") != target or identity.get("bundle_generation") != bundle.generation:
+        fail("current bundle SSH identity disagrees with the selected generation")
+    session = ssh.load_current_session(target, identity)
+    return ssh, ssh.reacquire_bound_session(session)
+
+
+def _keyboard_client(bundle: CurrentBundle) -> Path:
+    client = bundle.path / "host/fplinux-usb-keyboard"
     if client.is_symlink() or not client.is_file():
-        fail(f"current bundle has no valid USB console client: {client}")
+        fail(f"current bundle has no valid USB keyboard client: {client}")
     return client
 
 
-def _console_connection(config: dict[str, Any]) -> list[str]:
-    console = config["runtime"]["usb"]["linux_console"]
+def _keyboard_connection(config: dict[str, Any]) -> list[str]:
+    gadget = config["runtime"]["usb"]["linux_gadget"]
     return [
         "--vid",
-        f"{console['vendor_id']:04x}",
+        f"{gadget['vendor_id']:04x}",
         "--pid",
-        f"{console['product_id']:04x}",
+        f"{gadget['product_id']:04x}",
         "--wait",
-        str(console["wait_seconds"]),
+        str(gadget["wait_seconds"]),
     ]
+
+
+def _keyboard_interface(config: dict[str, Any]) -> str:
+    """Return the runtime-declared generic-serial keyboard interface."""
+    return str(config["runtime"]["usb"]["linux_gadget"]["keyboard_interface"])
 
 
 def console_target(
@@ -163,31 +220,39 @@ def console_target(
     upload: list[str] | None,
     pull: list[str] | None,
 ) -> None:
-    """Run the built target's USB console client."""
+    """Open the SSH session, or forward one evdev keyboard over USB."""
     config = load_target(target)
-    bundle, _manifest = _resolve_target_bundle(target, config)
-    client = _console_client(bundle)
+    bundle, manifest = _resolve_target_bundle(target)
+    if keyboard is None:
+        ssh_transport, session = _current_ssh_session(bundle, manifest, target)
+        if exec_command is not None:
+            result = ssh_transport.run_remote(session, exec_command)
+            if result.returncode:
+                raise SystemExit(result.returncode)
+            return
+        if upload is not None:
+            ssh_transport.upload(session, upload[0], upload[1])
+            return
+        if pull is not None:
+            ssh_transport.pull(session, pull[0], pull[1])
+            return
+        ssh_transport.open_shell(session)
+        return
+    client = _keyboard_client(bundle)
     arguments = [
         str(client),
-        *_console_connection(config),
+        *_keyboard_connection(config),
         "--interface",
-        "1" if keyboard is not None else "0",
+        _keyboard_interface(config),
+        "--keyboard",
+        keyboard,
     ]
-    if keyboard is not None:
-        arguments.extend(["--keyboard", keyboard])
-    elif exec_command is not None:
-        arguments.extend(["--exec", exec_command])
-    elif upload is not None:
-        arguments.extend(["--upload", *upload])
-    elif pull is not None:
-        arguments.extend(["--pull", *pull])
     os.execv(client, arguments)
 
 
 def verify_booted(target: str) -> None:
     """Compare the running kernel identity with the current bundle."""
-    config = load_target(target)
-    bundle, manifest = _resolve_target_bundle(target, config)
+    bundle, manifest = _resolve_target_bundle(target)
     snapshot = target_workspace_snapshot(target)
     image_recipe = container_image_recipe_digest()
     identity = _build_identity(snapshot, image_recipe, ROOT / ".cache")
@@ -201,32 +266,21 @@ def verify_booted(target: str) -> None:
     ):
         fail(f"build output is stale; rebuild it: ./fplinux build {target}")
     expected_kernel_suffix = f"-fplinux-{device_identity[:16]}"
-    client = _console_client(bundle)
-    result = subprocess.run(
-        [
-            str(client),
-            *_console_connection(config),
-            "--interface",
-            "0",
-            "--exec",
-            "uname -r",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    ssh_transport, session = _current_ssh_session(bundle, manifest, target)
+    result = ssh_transport.run_remote(session, "uname -r", capture_output=True)
+    transport_name = "SSH transport"
     if result.returncode:
         detail = result.stderr.strip().splitlines()
         raise SystemExit(
-            f"verify: console client failed with exit status {result.returncode}\n  "
-            + (detail[-1] if detail else "the console client gave no diagnostic")
+            f"verify: {transport_name} failed with exit status {result.returncode}\n  "
+            + (detail[-1] if detail else f"the {transport_name} gave no diagnostic")
         )
     actual = result.stdout.splitlines()
     if not actual:
         detail = result.stderr.strip().splitlines()
         raise SystemExit(
             "verify: no kernel identity came back from the phone\n  "
-            + (detail[-1] if detail else "the console client said nothing")
+            + (detail[-1] if detail else f"the {transport_name} said nothing")
         )
     if len(actual) != 1 or not actual[0].endswith(expected_kernel_suffix):
         raise SystemExit(
@@ -411,14 +465,18 @@ def checksum_aport(package: str, *, offline: bool = False) -> None:
     image_recipe = container_image_recipe_digest(container_lock)
     podman = require_podman()
     lock = container_lock["oci"]
+    image = container_image_reference(container_lock, image_recipe)
     reporter = RunReporter.create("checksum", target=package, verbose=False)
-    if not image_ready(podman, lock["image"], image_recipe=image_recipe):
+    if not image_ready(podman, image, image_recipe=image_recipe):
         if offline:
             fail(
                 "offline checksum requires the current pinned OCI image; "
                 "run ./fplinux setup online first"
             )
         setup(reporter=reporter, lock=container_lock, image_recipe=image_recipe)
+    image_identity = image_identifier(podman, image)
+    if image_identity is None:
+        fail("checksum requires an immutable current build image")
     cache = ROOT / ".cache"
     downloads = _ensure_build_directory(cache / "downloads")
     with reporter.stage("workspace"):
@@ -438,7 +496,7 @@ def checksum_aport(package: str, *, offline: bool = False) -> None:
                     podman,
                     package=package,
                     platform=lock["platform"],
-                    image=lock["image"],
+                    image=image_identity,
                     offline=offline,
                     stage=stage,
                     downloads=downloads,
@@ -553,8 +611,7 @@ def _print_build_result(
 def build(target: str, jobs: int, *, verbose: bool = False, offline: bool = False) -> None:
     if jobs < 1:
         fail("--jobs must be positive")
-    target_config = load_target(target)
-    release = load_release(target, target_config)
+    release = load_release(target)
     snapshot = target_workspace_snapshot(target)
     container_lock = load_container_lock()
     image_recipe = container_image_recipe_digest(container_lock)
@@ -562,7 +619,6 @@ def build(target: str, jobs: int, *, verbose: bool = False, offline: bool = Fals
     identity = _build_identity(snapshot, image_recipe, cache)
     current = _matching_target_bundle(
         target,
-        target_config,
         identity,
         release["image"],
     )
@@ -571,7 +627,6 @@ def build(target: str, jobs: int, *, verbose: bool = False, offline: bool = Fals
         discard_superseded_bundle_generations(
             cache / "out",
             target,
-            target_config["profile"],
             bundle,
         )
         reporter = RunReporter.create("build", target=target, verbose=verbose)
@@ -582,13 +637,17 @@ def build(target: str, jobs: int, *, verbose: bool = False, offline: bool = Fals
     reporter = RunReporter.create("build", target=target, verbose=verbose)
     podman = require_podman()
     lock = container_lock["oci"]
-    if not image_ready(podman, lock["image"], image_recipe=image_recipe):
+    image = container_image_reference(container_lock, image_recipe)
+    if not image_ready(podman, image, image_recipe=image_recipe):
         if offline:
             fail(
                 "offline build requires the current pinned OCI image; "
                 "run ./fplinux setup online first"
             )
         setup(reporter=reporter, lock=container_lock, image_recipe=image_recipe)
+    image_identity = image_identifier(podman, image)
+    if image_identity is None:
+        fail("build requires an immutable current build image")
     apk_signing = _ensure_build_directory(cache / "apk-signing")
     downloads = _ensure_build_directory(cache / "downloads")
     apks = _ensure_build_directory(cache / "apks")
@@ -606,7 +665,7 @@ def build(target: str, jobs: int, *, verbose: bool = False, offline: bool = Fals
                 target=target,
                 jobs=jobs,
                 platform=lock["platform"],
-                image=lock["image"],
+                image=image_identity,
                 offline=offline,
                 snapshot=snapshot,
                 workspace=workspace,
@@ -624,7 +683,6 @@ def build(target: str, jobs: int, *, verbose: bool = False, offline: bool = Fals
     identity = _build_identity(snapshot, image_recipe, cache)
     current = _matching_target_bundle(
         target,
-        target_config,
         identity,
         release["image"],
     )
@@ -634,7 +692,6 @@ def build(target: str, jobs: int, *, verbose: bool = False, offline: bool = Fals
     discard_superseded_bundle_generations(
         output,
         target,
-        target_config["profile"],
         bundle,
     )
     _print_build_result(target, bundle, release, cached=False)
@@ -657,7 +714,7 @@ def target_archive_file(target: str, relative: str) -> tuple[str, Path]:
 
 def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]:
     """Resolve release documents and fixed platform executable roles."""
-    manifest = load_release(target, config)
+    manifest = load_release(target)
     image = manifest["image"]
     bundle_files = manifest["bundle_files"]
     runtime_files = manifest["runtime_files"]
@@ -681,6 +738,7 @@ def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]
         *config["runtime"]["assets"].values(),
         *executables,
     }
+    required_runtime.add(SSH_HELPER_PATH)
     if not required_runtime.issubset(runtime_files):
         fail("release runtime files omit required runtime inputs")
     qualification_files = [
@@ -713,8 +771,7 @@ def add_target_files(files: dict[str, bytes], target: str, relative_names: list[
 def package_target(target: str, *, candidate: bool = False) -> None:
     config = load_target(target)
     release = load_release_manifest(target, config)
-    profile = config["profile"]
-    bundle, manifest = _resolve_target_bundle(target, config)
+    bundle, manifest = _resolve_target_bundle(target)
     snapshot = target_workspace_snapshot(target)
     image_recipe = container_image_recipe_digest()
     identity = _build_identity(snapshot, image_recipe, ROOT / ".cache")
@@ -745,7 +802,7 @@ def package_target(target: str, *, candidate: bool = False) -> None:
         relative: files[relative] for relative in release["qualification_files"]
     }
     qualification_digest = payload_digest(qualification_payload, release["executables"])
-    files["BUILD-MANIFEST.json"] = bundle.manifest_bytes
+    files["build-manifest.json"] = bundle.manifest_bytes
     verified_digest = verified_runtime_digest(target)
     if not candidate and verified_digest != qualification_digest:
         fail(
@@ -766,7 +823,7 @@ def package_target(target: str, *, candidate: bool = False) -> None:
     content_digest = payload_digest(files, release["executables"])
 
     qualifier = "candidate" if candidate else "release"
-    stem = f"{config['release_slug']}-{profile}-{qualifier}-linux-x86_64-{content_digest[:16]}"
+    stem = f"{config['release_slug']}-{qualifier}-linux-x86_64-{content_digest[:16]}"
     destination = ROOT / ".cache/out" / ("candidates" if candidate else "releases")
     destination.mkdir(parents=True, exist_ok=True)
     archive = destination / f"{stem}.zip"
@@ -809,8 +866,7 @@ def package_target(target: str, *, candidate: bool = False) -> None:
 
 def run_target(target: str) -> None:
     """Run the fixed shared runner from a successful target bundle."""
-    config = load_target(target)
-    bundle, _manifest = _resolve_target_bundle(target, config)
+    bundle, _manifest = _resolve_target_bundle(target)
     runner = bundle.path / "runner/run.py"
     if runner.is_symlink() or not runner.is_file():
         fail(f"current bundle has no valid runner: {runner}")

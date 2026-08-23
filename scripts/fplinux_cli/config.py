@@ -14,9 +14,6 @@ from .common import ROOT, fail, relative_name
 
 TARGET_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
 VALUE_NAME = re.compile(r"[A-Za-z0-9._-]+")
-TARGET_SCHEMA = "fplinux.target/v1"
-PLATFORM_SCHEMA = "fplinux.platform/v1"
-RELEASE_SCHEMA = "fplinux.release/v2"
 
 
 def exact_table(value: object, keys: set[str], name: str) -> dict[str, Any]:
@@ -100,13 +97,108 @@ def path_steps(value: object, name: str) -> list[dict[str, str]]:
     return result
 
 
-def validate_usb(value: object, name: str) -> dict[str, Any]:
+def validate_usb(value: object, name: str, *, interface_fields: bool = False) -> dict[str, Any]:
     """Validate USB identity and timeout metadata."""
-    table = exact_table(value, {"vendor_id", "product_id", "wait_seconds"}, name)
+    base_fields = {"vendor_id", "product_id", "wait_seconds"}
+    fields = base_fields | ({"keyboard_interface"} if interface_fields else set())
+    table = exact_table(value, fields, name)
     integer_value(table.get("vendor_id"), f"{name} vendor_id", bounds=(0, 0xFFFF))
     integer_value(table.get("product_id"), f"{name} product_id", bounds=(0, 0xFFFF))
     integer_value(table.get("wait_seconds"), f"{name} wait_seconds", bounds=(1, 3600))
+    for field in ("keyboard_interface",):
+        if field in table:
+            integer_value(table[field], f"{name} {field}", bounds=(0, 255))
     return table
+
+
+def _sha256(value: object, name: str) -> str:
+    """Require one lowercase SHA-256 digest."""
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        fail(f"{name} must be a lowercase SHA-256 digest")
+    return value
+
+
+def load_asset_lock(path: Path) -> list[dict[str, Any]]:
+    """Load the current pinned asset outputs used to construct a RAM bundle."""
+    if path.is_symlink() or not path.is_file():
+        fail(f"asset lock is missing or invalid: {path}")
+    try:
+        with path.open("rb") as stream:
+            document = tomllib.load(stream)
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        fail(f"asset lock is invalid: {error}")
+    root = exact_table(document, {"source"}, "asset lock")
+    sources = root.get("source")
+    if not isinstance(sources, list) or not sources:
+        fail("asset lock source must be a non-empty array")
+
+    source_ids: set[str] = set()
+    roles: set[str] = set()
+    paths: set[str] = set()
+    result: list[dict[str, Any]] = []
+    for index, raw_source in enumerate(sources):
+        name = f"asset source[{index}]"
+        source = exact_table(
+            raw_source,
+            {"id", "kind", "url", "sha256", "cache_name", "license", "output"},
+            name,
+        )
+        source_id = nonempty_string(source.get("id"), f"{name} id")
+        if source_id in source_ids:
+            fail(f"{name} id must be unique")
+        source_ids.add(source_id)
+        kind = source.get("kind")
+        if kind not in {"file", "7z"}:
+            fail(f"{name} kind must be file or 7z")
+        url = nonempty_string(source.get("url"), f"{name} url")
+        if not url.startswith("https://"):
+            fail(f"{name} url must use HTTPS")
+        _sha256(source.get("sha256"), f"{name} source")
+        relative_value(source.get("cache_name"), f"{name} cache_name")
+        nonempty_string(source.get("license"), f"{name} license")
+        outputs = source.get("output")
+        if not isinstance(outputs, list) or not outputs:
+            fail(f"{name} output must be a non-empty array")
+        normalized_outputs: list[dict[str, Any]] = []
+        for output_index, raw_output in enumerate(outputs):
+            output_name = f"{name} output[{output_index}]"
+            keys = (
+                {"role", "path", "sha256", "member"}
+                if kind == "7z"
+                else {
+                    "role",
+                    "path",
+                    "sha256",
+                }
+            )
+            output = exact_table(raw_output, keys, output_name)
+            role = nonempty_string(output.get("role"), f"{output_name} role")
+            if role in roles:
+                fail(f"{output_name} role must be unique")
+            roles.add(role)
+            relative = relative_value(output.get("path"), f"{output_name} path")
+            if relative in paths:
+                fail(f"asset output path is duplicated: {relative}")
+            paths.add(relative)
+            _sha256(output.get("sha256"), f"{output_name} output")
+            if kind == "7z":
+                relative_value(output.get("member"), f"{output_name} member")
+            normalized_outputs.append(output)
+        result.append({**source, "output": normalized_outputs})
+    return result
+
+
+def asset_bundle_paths(path: Path) -> dict[str, str]:
+    """Derive bundle paths solely from the selected asset-lock outputs."""
+    return {
+        str(output["role"]): f"assets/{output['path']}"
+        for source in load_asset_lock(path)
+        for output in source["output"]
+    }
 
 
 def discover_targets() -> tuple[str, ...]:
@@ -126,11 +218,34 @@ def discover_targets() -> tuple[str, ...]:
     return targets
 
 
-def load_target(target: str) -> dict[str, Any]:
-    """Load the exact declarative target v1 schema."""
+def target_directory(target: str) -> Path:
+    """Return one validated target directory in the fixed repository layout."""
     if TARGET_NAME.fullmatch(target) is None:
         fail(f"invalid target name: {target}")
-    path = ROOT / "targets" / target / "target.toml"
+    path = ROOT / "targets" / target
+    if path.is_symlink() or not path.is_dir():
+        fail(f"unknown target: {target}")
+    return path
+
+
+def target_release_manifest_path(target: str) -> Path:
+    """Return the fixed release-manifest path for one target."""
+    return target_directory(target) / "release/manifest.toml"
+
+
+def target_asset_lock_path(target: str) -> Path:
+    """Return the fixed loader asset-lock path for one target."""
+    return target_directory(target) / "loader/assets.lock.toml"
+
+
+def target_defconfig_path(target: str) -> Path:
+    """Return the fixed kernel defconfig path for one target."""
+    return target_directory(target) / "kernel/defconfig"
+
+
+def load_target(target: str) -> dict[str, Any]:
+    """Load one exact target definition and materialize its platform contract."""
+    path = target_directory(target) / "target.toml"
     if path.is_symlink() or not path.is_file():
         fail(f"unknown target: {target}")
     with path.open("rb") as stream:
@@ -138,44 +253,32 @@ def load_target(target: str) -> dict[str, Any]:
     config = exact_table(
         raw,
         {
-            "schema",
             "name",
             "display_name",
             "release_slug",
             "platform",
-            "profile",
-            "release_manifest",
-            "assets_lock",
-            "rootfs",
             "bundle",
             "linux",
             "bootstrap",
-            "runtime",
+            "adapter",
         },
         f"target {target}",
     )
-    if config.get("schema") != TARGET_SCHEMA:
-        fail(f"target schema must be {TARGET_SCHEMA}: {path}")
     if config.get("name") != target:
         fail(f"target name does not match its directory: {path}")
     display_name = nonempty_string(config.get("display_name"), f"target {target} display_name")
     if not display_name.strip():
         fail(f"target {target} display_name must not be blank")
-    for key in ("release_slug", "platform", "profile"):
+    for key in ("release_slug", "platform"):
         value = nonempty_string(config.get(key), f"target {target} {key}")
         if VALUE_NAME.fullmatch(value) is None:
             fail(f"target {target} has invalid {key}: {path}")
-    for key in ("release_manifest", "assets_lock"):
-        relative_value(config.get(key), f"target {target} {key}")
-    rootfs = exact_table(config.get("rootfs"), {"packages"}, "target rootfs")
-    package_array(rootfs.get("packages"), "target rootfs packages")
     bundle = exact_table(config.get("bundle"), {"packages"}, "target bundle")
     package_array(bundle.get("packages"), "target bundle packages")
 
     linux = exact_table(
         config.get("linux"),
         {
-            "defconfig",
             "dtb",
             "debug_dtb",
             "patches",
@@ -186,7 +289,6 @@ def load_target(target: str) -> dict[str, Any]:
         },
         "target linux",
     )
-    relative_value(linux.get("defconfig"), "target linux defconfig")
     relative_value(linux.get("dtb"), "target linux dtb")
     relative_value(linux.get("debug_dtb"), "target linux debug_dtb")
     path_array(linux.get("patches"), "target linux patches", allow_empty=True)
@@ -198,75 +300,80 @@ def load_target(target: str) -> dict[str, Any]:
     bootstrap = exact_table(
         config.get("bootstrap"),
         {
-            "source",
             "image",
             "map",
-            "kernel_destination",
             "dtb_destination",
-            "load_address",
-            "payload_limit",
-            "toolchain",
-            "lto",
         },
         "target bootstrap",
     )
-    for key in ("source", "image", "map", "kernel_destination", "dtb_destination"):
+    for key in ("image", "map", "dtb_destination"):
         relative_value(bootstrap.get(key), f"target bootstrap {key}")
-    integer_value(
-        bootstrap.get("load_address"),
-        "target bootstrap load_address",
-        bounds=(0, 0xFFFFFFFF),
-        alignment=4,
-    )
-    integer_value(
-        bootstrap.get("payload_limit"),
-        "target bootstrap payload_limit",
-        bounds=(1, 0x100000000),
-        alignment=4,
-    )
-    nonempty_string(bootstrap.get("toolchain"), "target bootstrap toolchain")
-    integer_value(bootstrap.get("lto"), "target bootstrap lto", bounds=(0, 1))
 
-    runtime = exact_table(
-        config.get("runtime"),
-        {"fdl1_load_address", "assets", "adapter", "usb"},
-        "target runtime",
+    adapter = exact_table(
+        config.get("adapter"),
+        {
+            "spi_mode",
+            "lcd_id",
+            "exec_distance",
+            "backlight_channels",
+            "backlight_level",
+            "session_name",
+            "handoff_marker",
+            "boot_instructions",
+        },
+        "target adapter",
     )
+    integer_value(adapter.get("spi_mode"), "target adapter spi_mode", bounds=(0, 3))
+    integer_value(adapter.get("lcd_id"), "target adapter lcd_id", bounds=(0, 0xFFFFFFFF))
     integer_value(
-        runtime.get("fdl1_load_address"),
-        "target runtime fdl1_load_address",
-        bounds=(0, 0xFFFFFFFF),
-        alignment=4,
+        adapter.get("exec_distance"),
+        "target adapter exec_distance",
+        bounds=(0, 0xFFFF),
     )
-    assets = runtime.get("assets")
-    if not isinstance(assets, dict) or not assets:
-        fail("target runtime assets must be a non-empty table")
-    for role, asset in assets.items():
-        nonempty_string(role, "target runtime asset role")
-        relative_value(asset, f"target runtime asset {role}")
-    adapter = runtime.get("adapter")
-    if not isinstance(adapter, dict) or not adapter:
-        fail("target runtime adapter must be a non-empty table")
-    usb = exact_table(runtime.get("usb"), {"bootrom", "linux_console"}, "target runtime usb")
-    validate_usb(usb.get("bootrom"), "target runtime bootrom USB")
-    validate_usb(usb.get("linux_console"), "target runtime linux_console USB")
+    nonempty_string(adapter.get("backlight_channels"), "target adapter backlight_channels")
+    integer_value(
+        adapter.get("backlight_level"),
+        "target adapter backlight_level",
+        bounds=(0, 0x3F),
+    )
+    for key in ("session_name", "handoff_marker", "boot_instructions"):
+        nonempty_string(adapter.get(key), f"target adapter {key}")
+
+    platform = load_platform(str(config["platform"]))
+    platform_bootstrap = platform["bootstrap"]
+    platform_runtime = platform["runtime"]
+    config["bootstrap"] = {
+        "source": "bootstrap",
+        "image": bootstrap["image"],
+        "map": bootstrap["map"],
+        "kernel_destination": platform_bootstrap["kernel_destination"],
+        "dtb_destination": bootstrap["dtb_destination"],
+        "load_address": platform_bootstrap["load_address"],
+        "payload_limit": platform_bootstrap["payload_limit"],
+        "toolchain": platform_bootstrap["toolchain"],
+        "lto": platform_bootstrap["lto"],
+    }
+    config["runtime"] = {
+        "fdl1_load_address": platform_runtime["fdl1_load_address"],
+        "assets": asset_bundle_paths(target_asset_lock_path(target)),
+        "adapter": {**platform_runtime["adapter"], **adapter},
+        "usb": platform_runtime["usb"],
+    }
     return config
 
 
-def load_release(target: str, config: dict[str, Any]) -> dict[str, Any]:
-    """Load the data-only release v2 schema for one target."""
-    path = ROOT / "targets" / target / config["release_manifest"]
+def load_release(target: str) -> dict[str, Any]:
+    """Load the exact data-only release manifest for one target."""
+    path = target_release_manifest_path(target)
     if path.is_symlink() or not path.is_file():
         fail(f"target release manifest is missing or invalid: {path}")
     with path.open("rb") as stream:
         raw = tomllib.load(stream)
     manifest = exact_table(
         raw,
-        {"schema", "image", "bundle_files", "runtime_files", "documents"},
+        {"image", "bundle_files", "runtime_files", "documents"},
         f"target {target} release manifest",
     )
-    if manifest.get("schema") != RELEASE_SCHEMA:
-        fail(f"release manifest schema must be {RELEASE_SCHEMA}: {path}")
     image = relative_value(manifest.get("image"), "release manifest image")
     bundle_files = path_array(manifest.get("bundle_files"), "release bundle_files")
     runtime_files = path_array(manifest.get("runtime_files"), "release runtime_files")
@@ -276,7 +383,6 @@ def load_release(target: str, config: dict[str, Any]) -> dict[str, Any]:
     if not set(runtime_files).issubset(bundle_files):
         fail("release runtime files must be bundle files")
     return {
-        "schema": RELEASE_SCHEMA,
         "image": image,
         "bundle_files": bundle_files,
         "runtime_files": runtime_files,
@@ -290,7 +396,7 @@ def validate_host_tool(value: object, index: int) -> dict[str, Any]:
     if not isinstance(value, dict):
         fail(f"{name} must be a table")
     recipe_type = value.get("type")
-    if recipe_type == "make-archive/v1":
+    if recipe_type == "make-archive":
         recipe = exact_table(
             value,
             {
@@ -323,7 +429,7 @@ def validate_host_tool(value: object, index: int) -> dict[str, Any]:
             relative_value(member.get("path"), f"{name} member path")
             nonempty_string(member.get("digest_key"), f"{name} member digest_key")
         return recipe
-    if recipe_type == "cc-libusb/v1":
+    if recipe_type == "cc-libusb":
         recipe = exact_table(value, {"type", "name", "source", "self_test"}, name)
         nonempty_string(recipe.get("name"), f"{name} name")
         relative_value(recipe.get("source"), f"{name} source")
@@ -335,7 +441,7 @@ def validate_host_tool(value: object, index: int) -> dict[str, Any]:
 
 
 def load_platform(platform: str) -> dict[str, Any]:
-    """Load the exact reusable platform schema."""
+    """Load one exact reusable platform definition."""
     if TARGET_NAME.fullmatch(platform) is None:
         fail(f"invalid platform name: {platform}")
     path = ROOT / "platforms" / platform / "platform.toml"
@@ -345,11 +451,9 @@ def load_platform(platform: str) -> dict[str, Any]:
         raw = tomllib.load(stream)
     config = exact_table(
         raw,
-        {"schema", "name", "rootfs", "bundle", "linux", "bootstrap", "host", "runner"},
+        {"name", "rootfs", "bundle", "linux", "bootstrap", "runtime", "host"},
         f"platform {platform}",
     )
-    if config.get("schema") != PLATFORM_SCHEMA:
-        fail(f"platform schema must be {PLATFORM_SCHEMA}: {path}")
     if config.get("name") != platform:
         fail(f"platform name does not match its directory: {path}")
 
@@ -398,6 +502,11 @@ def load_platform(platform: str) -> dict[str, Any]:
             "build_targets",
             "files",
             "shared_copies",
+            "kernel_destination",
+            "load_address",
+            "payload_limit",
+            "toolchain",
+            "lto",
         },
         "platform bootstrap",
     )
@@ -408,13 +517,74 @@ def load_platform(platform: str) -> dict[str, Any]:
     string_array(bootstrap.get("build_targets"), "platform bootstrap build_targets")
     path_array(bootstrap.get("files"), "platform bootstrap files")
     path_steps(bootstrap.get("shared_copies"), "platform bootstrap shared_copies")
+    relative_value(bootstrap.get("kernel_destination"), "platform bootstrap kernel_destination")
+    integer_value(
+        bootstrap.get("load_address"),
+        "platform bootstrap load_address",
+        bounds=(0, 0xFFFFFFFF),
+        alignment=4,
+    )
+    integer_value(
+        bootstrap.get("payload_limit"),
+        "platform bootstrap payload_limit",
+        bounds=(1, 0x100000000),
+        alignment=4,
+    )
+    nonempty_string(bootstrap.get("toolchain"), "platform bootstrap toolchain")
+    integer_value(bootstrap.get("lto"), "platform bootstrap lto", bounds=(0, 1))
+
+    runtime = exact_table(
+        config.get("runtime"),
+        {"fdl1_load_address", "adapter", "usb"},
+        "platform runtime",
+    )
+    integer_value(
+        runtime.get("fdl1_load_address"),
+        "platform runtime fdl1_load_address",
+        bounds=(0, 0xFFFFFFFF),
+        alignment=4,
+    )
+    adapter = exact_table(
+        runtime.get("adapter"),
+        {
+            "brightness",
+            "rotation",
+            "handoff_wait_seconds",
+            "release_wait_seconds",
+        },
+        "platform runtime adapter",
+    )
+    integer_value(adapter.get("brightness"), "platform adapter brightness", bounds=(0, 100))
+    integer_value(
+        adapter.get("rotation"),
+        "platform adapter rotation",
+        bounds=(0, 270),
+    )
+    if adapter["rotation"] not in {0, 90, 180, 270}:
+        fail("platform adapter rotation must be 0, 90, 180 or 270")
+    integer_value(
+        adapter.get("handoff_wait_seconds"),
+        "platform adapter handoff_wait_seconds",
+        bounds=(1, 3600),
+    )
+    integer_value(
+        adapter.get("release_wait_seconds"),
+        "platform adapter release_wait_seconds",
+        bounds=(1, 300),
+    )
+    usb = exact_table(runtime.get("usb"), {"bootrom", "linux_gadget"}, "platform runtime usb")
+    validate_usb(usb.get("bootrom"), "platform runtime bootrom USB")
+    validate_usb(
+        usb.get("linux_gadget"),
+        "platform runtime linux_gadget USB",
+        interface_fields=True,
+    )
 
     host = exact_table(
         config.get("host"),
-        {"capability", "runtime_tools", "tools"},
+        {"runtime_tools", "tools"},
         "platform host",
     )
-    nonempty_string(host.get("capability"), "platform host capability")
     tools = host.get("tools")
     if not isinstance(tools, list) or not tools:
         fail("platform host tools must be a non-empty array")
@@ -430,9 +600,6 @@ def load_platform(platform: str) -> dict[str, Any]:
         if tool_name not in tool_names:
             fail(f"platform host runtime role {role} references an unknown tool")
 
-    runner = exact_table(config.get("runner"), {"api"}, "platform runner")
-    if runner.get("api") != "fplinux.host-adapter/v1":
-        fail("platform runner api must be fplinux.host-adapter/v1")
     return config
 
 
@@ -489,20 +656,20 @@ def load_container_lock() -> dict[str, Any]:
     path = ROOT / "container.lock.toml"
     with path.open("rb") as stream:
         lock = tomllib.load(stream)
-    if set(lock) != {"schema", "oci"} or lock.get("schema") != "fplinux.container/v1":
-        fail(f"invalid container lock schema: {path}")
+    if set(lock) != {"oci"}:
+        fail(f"container lock must contain exactly oci: {path}")
     oci = lock.get("oci")
     if not isinstance(oci, dict) or set(oci) != {
-        "image",
+        "repository",
         "platform",
         "base",
         "base_created",
     }:
-        fail(f"container lock must define exactly one OCI image: {path}")
-    image = oci.get("image")
+        fail(f"container lock must define exactly one OCI repository: {path}")
+    repository = oci.get("repository")
     base = oci.get("base")
-    if not isinstance(image, str) or not image.startswith("localhost/"):
-        fail(f"container image must be one local tag: {path}")
+    if repository != "localhost/fplinux-build":
+        fail(f"container repository must be localhost/fplinux-build: {path}")
     if not isinstance(base, str) or re.fullmatch(r"[^@\s]+@sha256:[0-9a-f]{64}", base) is None:
         fail(f"container base image must be digest-pinned: {path}")
     if oci.get("platform") != "linux/amd64":
@@ -576,6 +743,19 @@ def container_image_recipe_digest(lock: dict[str, Any] | None = None) -> str:
         ],
         prefix=encoded_arguments,
     )
+
+
+def container_image_reference(
+    lock: dict[str, Any] | None = None, recipe: str | None = None
+) -> str:
+    """Return the recipe-addressed local reference for one build image."""
+    if lock is None:
+        lock = load_container_lock()
+    if recipe is None:
+        recipe = container_image_recipe_digest(lock)
+    if len(recipe) != 64 or any(character not in "0123456789abcdef" for character in recipe):
+        fail("container image recipe must be a lowercase SHA-256")
+    return f"{lock['oci']['repository']}:{recipe}"
 
 
 def check_orchestration_recipe_digest(image_recipe: str | None = None) -> str:

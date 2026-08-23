@@ -701,6 +701,8 @@ static const struct musb_fifo_cfg ums9117_musb_fifo_cfg[] = {
 	MUSB_EP_FIFO_SINGLE(1, FIFO_RX, 512),
 	MUSB_EP_FIFO_SINGLE(2, FIFO_TX, 512),
 	MUSB_EP_FIFO_SINGLE(2, FIFO_RX, 512),
+	MUSB_EP_FIFO_SINGLE(3, FIFO_TX, 512),
+	MUSB_EP_FIFO_SINGLE(3, FIFO_RX, 512),
 };
 
 static const struct musb_hdrc_config ums9117_musb_config = {

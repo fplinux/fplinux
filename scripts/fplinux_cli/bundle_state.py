@@ -22,7 +22,6 @@ BUILD_MANIFEST_FIELDS = frozenset(
         "generation",
         "kbuild_receipt",
         "linux_recipe",
-        "profile",
         "target",
         "workspace_digest",
     }
@@ -50,18 +49,16 @@ def canonical_json_bytes(value: object) -> bytes:
     ).encode()
 
 
-def bundle_generations(output: Path, target: str, profile: str) -> Path:
+def bundle_generations(output: Path, target: str) -> Path:
     """Return the immutable bundle-generation directory."""
     _component(target, "target")
-    _component(profile, "profile")
-    return output / target / "bundles" / profile
+    return output / target / "bundles"
 
 
-def bundle_pointer(output: Path, target: str, profile: str) -> Path:
+def bundle_pointer(output: Path, target: str) -> Path:
     """Return the current-generation pointer path."""
     _component(target, "target")
-    _component(profile, "profile")
-    return output / target / f"{profile}.current.json"
+    return output / target / "current.json"
 
 
 def published_file_records(directory: Path) -> dict[str, dict[str, int | str]]:
@@ -79,16 +76,16 @@ def published_file_records(directory: Path) -> dict[str, dict[str, int | str]]:
     return records
 
 
-def create_bundle_staging(output: Path, target: str, profile: str) -> Path:
+def create_bundle_staging(output: Path, target: str) -> Path:
     """Create one private staging directory beside its future generations."""
-    generations = bundle_generations(output, target, profile)
+    generations = bundle_generations(output, target)
     generations.mkdir(parents=True, exist_ok=True)
     return Path(tempfile.mkdtemp(dir=generations, prefix=".stage-"))
 
 
-def discard_bundle_staging(output: Path, target: str, profile: str, staging: Path) -> None:
+def discard_bundle_staging(output: Path, target: str, staging: Path) -> None:
     """Discard only the private staging directory created for this bundle."""
-    generations = bundle_generations(output, target, profile)
+    generations = bundle_generations(output, target)
     if staging.parent != generations or not staging.name.startswith(".stage-"):
         message = "bundle staging directory is outside its generation directory"
         raise BundleStateError(message)
@@ -99,7 +96,6 @@ def discard_bundle_staging(output: Path, target: str, profile: str, staging: Pat
 def publish_bundle_generation(
     output: Path,
     target: str,
-    profile: str,
     staging: Path,
     generation: str,
 ) -> Path:
@@ -107,7 +103,7 @@ def publish_bundle_generation(
     if not _is_sha256(generation):
         message = "bundle generation is not a SHA-256 digest"
         raise BundleStateError(message)
-    generations = bundle_generations(output, target, profile)
+    generations = bundle_generations(output, target)
     if staging.parent != generations or not staging.name.startswith(".stage-"):
         message = "bundle staging directory is outside its generation directory"
         raise BundleStateError(message)
@@ -137,11 +133,10 @@ def pointer_bytes(generation: str, manifest_sha256: str) -> bytes:
 def publish_current_bundle(
     output: Path,
     target: str,
-    profile: str,
     generation_path: Path,
 ) -> CurrentBundle:
     """Atomically select one already-published complete generation."""
-    generations = bundle_generations(output, target, profile)
+    generations = bundle_generations(output, target)
     if generation_path.parent != generations or not _is_sha256(generation_path.name):
         message = "bundle generation is outside its generation directory"
         raise BundleStateError(message)
@@ -151,7 +146,7 @@ def publish_current_bundle(
         raise BundleStateError(message)
     manifest_bytes = manifest_path.read_bytes()
     manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
-    pointer = bundle_pointer(output, target, profile)
+    pointer = bundle_pointer(output, target)
     pointer.parent.mkdir(parents=True, exist_ok=True)
     temporary = pointer.with_name(f".{pointer.name}.{os.getpid()}.tmp")
     try:
@@ -165,11 +160,10 @@ def publish_current_bundle(
 def discard_superseded_bundle_generations(
     output: Path,
     target: str,
-    profile: str,
     current: CurrentBundle,
 ) -> None:
     """Discard complete immutable siblings after selecting ``current``."""
-    generations = bundle_generations(output, target, profile)
+    generations = bundle_generations(output, target)
     selected = generations / current.generation
     if current.path != selected or not _is_sha256(current.generation):
         message = "selected bundle generation is outside its generation directory"
@@ -193,15 +187,14 @@ def discard_superseded_bundle_generations(
             or set(manifest) != BUILD_MANIFEST_FIELDS
             or manifest.get("generation") != sibling.name
             or manifest.get("target") != target
-            or manifest.get("profile") != profile
         ):
             continue
         shutil.rmtree(sibling)
 
 
-def resolve_current_bundle(output: Path, target: str, profile: str) -> CurrentBundle:
+def resolve_current_bundle(output: Path, target: str) -> CurrentBundle:
     """Resolve one pointer once; any mismatch is a cache miss to the caller."""
-    pointer = bundle_pointer(output, target, profile)
+    pointer = bundle_pointer(output, target)
     try:
         value = json.loads(pointer.read_text(encoding="utf-8"))
         generation = value["generation"]
@@ -212,7 +205,7 @@ def resolve_current_bundle(output: Path, target: str, profile: str) -> CurrentBu
     if not _is_sha256(generation) or not _is_sha256(expected_manifest):
         message = "current bundle pointer contains an invalid digest"
         raise BundleStateError(message)
-    path = bundle_generations(output, target, profile) / generation
+    path = bundle_generations(output, target) / generation
     manifest_path = path / BUILD_MANIFEST_NAME
     try:
         manifest_bytes = manifest_path.read_bytes()

@@ -185,7 +185,6 @@ class CheckScopeTests(unittest.TestCase):
         target_manifest = (
             b'platform = "demo"\n'
             b"[linux]\n"
-            b'defconfig = "kernel/defconfig"\n'
             b'patches = ["kernel/target.patch"]\n'
             b"copies = [\n"
             b'  { source = "kernel/target-copy.c", destination = "target-copy.c" },\n'
@@ -306,10 +305,9 @@ class CheckScopeTests(unittest.TestCase):
         """Mirror dynamic userspace C discovery without including orphan kernel C."""
         manifest = (
             b"[host]\n"
-            b'capability = "demo"\n'
             b'runtime_tools = { console = "tool" }\n'
             b"[[host.tools]]\n"
-            b'type = "cc-libusb/v1"\n'
+            b'type = "cc-libusb"\n'
             b'name = "tool"\n'
             b'source = "platforms/demo/kernel/tool.c"\n'
             b"self_test = false\n"
@@ -624,7 +622,7 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
                 "load_container_lock",
                 return_value={
                     "oci": {
-                        "image": "localhost/fplinux:locked",
+                        "repository": "localhost/fplinux-build",
                         "platform": "linux/amd64",
                     }
                 },
