@@ -70,6 +70,14 @@ source = "bindings/fplinux,ta1618-sc2720-fgu.yaml"
 destination = "Documentation/devicetree/bindings/power/supply/fplinux,ta1618-sc2720-fgu.yaml"
 
 [[linux.copies]]
+source = "kernel/ta1618-thm1.c"
+destination = "drivers/thermal/ta1618-thm1.c"
+
+[[linux.copies]]
+source = "bindings/fplinux,ta1618-thm1.yaml"
+destination = "Documentation/devicetree/bindings/thermal/fplinux,ta1618-thm1.yaml"
+
+[[linux.copies]]
 source = "bindings/fplinux,ta1618-kpled.yaml"
 destination = "Documentation/devicetree/bindings/leds/fplinux,ta1618-kpled.yaml"
 
@@ -100,6 +108,14 @@ destination = "drivers/power/supply/Kconfig"
 [[linux.appends]]
 source = "kernel/power-supply.Makefile"
 destination = "drivers/power/supply/Makefile"
+
+[[linux.appends]]
+source = "kernel/thermal.Kconfig"
+destination = "drivers/thermal/Kconfig"
+
+[[linux.appends]]
+source = "kernel/thermal.Makefile"
+destination = "drivers/thermal/Makefile"
 
 [bootstrap]
 image = "ta1618_linux_bootstrap.bin"

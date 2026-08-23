@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: GPL-2.0-only
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/thermal/fplinux,ta1618-thm1.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Nokia TA-1618 UMS9117 THM1 temperature sensor
+
+maintainers:
+  - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+
+description:
+  Calibrated sensor0 temperature reporting through the UMS9117 THM1 block on
+  the Nokia 3210 4G TA-1618.
+
+properties:
+  compatible:
+    const: fplinux,ta1618-thm1
+
+  reg:
+    items:
+      - description: THM1 register block
+      - description: UMS9117 eFuse control registers
+      - description: UMS9117 eFuse block 25 read slot
+
+  reg-names:
+    items:
+      - const: thm
+      - const: efuse-control
+      - const: efuse-block25
+
+  sprd,aon-apb:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: Always-on APB syscon used for the THM1 and eFuse gates.
+
+required:
+  - compatible
+  - reg
+  - reg-names
+  - sprd,aon-apb
+
+additionalProperties: false
+
+examples:
+  - |
+    thermal-sensor@40300000 {
+        compatible = "fplinux,ta1618-thm1";
+        reg = <0x40300000 0x100>, <0x40240000 0x58>,
+              <0x40241064 0x4>;
+        reg-names = "thm", "efuse-control", "efuse-block25";
+        sprd,aon-apb = <&aon_apb>;
+    };
