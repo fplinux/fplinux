@@ -23,6 +23,9 @@ package() {
 	install -Dm755 "$builddir/fplinux-input" "$pkgdir/usr/bin/fplinux-input"
 	install -Dm755 "$srcdir/fplinux-input.initd" \
 		"$pkgdir/etc/init.d/fplinux-input"
+	mkdir -p "$pkgdir/etc/runlevels/default"
+	ln -s /etc/init.d/fplinux-input \
+		"$pkgdir/etc/runlevels/default/fplinux-input"
 }
 
 openrc() {
