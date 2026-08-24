@@ -37,6 +37,7 @@ class _LockInvocation:
     exclusive: bool
     command: str
     target: str | None
+    profile: str | None = None
 
 
 def _hold_lock(
@@ -51,6 +52,7 @@ def _hold_lock(
         exclusive=invocation.exclusive,
         command=invocation.command,
         target=invocation.target,
+        profile=invocation.profile,
     ):
         acquired.set()
         if not release.wait(10):
@@ -133,6 +135,7 @@ class CacheLockTests(unittest.TestCase):
         exclusive: bool,
         command: str = "build",
         target: str | None = "demo-target",
+        profile: str | None = None,
     ) -> tuple[SpawnProcess, Event, Event]:
         """Start a process that has acquired the requested lock."""
         acquired = self.context.Event()
@@ -141,7 +144,7 @@ class CacheLockTests(unittest.TestCase):
             target=_hold_lock,
             args=(
                 str(self.cache_root),
-                _LockInvocation(exclusive, command, target),
+                _LockInvocation(exclusive, command, target, profile),
                 acquired,
                 release,
             ),
@@ -194,7 +197,10 @@ class CacheLockTests(unittest.TestCase):
 
     def test_blocked_invocation_reports_owner_then_continues(self) -> None:
         """A shared command waits for an exclusive build and resumes after it exits."""
-        owner, _owner_acquired, owner_release = self._start_holder(exclusive=True)
+        owner, _owner_acquired, owner_release = self._start_holder(
+            exclusive=True,
+            profile="usb-host-lab",
+        )
         acquired = self.context.Event()
         release = self.context.Event()
         output = self.context.Queue()
@@ -217,6 +223,7 @@ class CacheLockTests(unittest.TestCase):
             rendered = output.get(timeout=5)
             self.assertIn("command=build", rendered)
             self.assertIn("target=demo-target", rendered)
+            self.assertIn("profile=usb-host-lab", rendered)
             self.assertIn(f"pid={owner.pid}", rendered)
             self.assertIn("started=", rendered)
             self.assertIn("cache released; continuing", rendered)

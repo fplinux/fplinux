@@ -3,12 +3,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+from unittest import mock
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -39,8 +42,10 @@ def runtime_manifest() -> dict[str, Any]:
     loader = "host/loader"
     return {
         "target": "demo",
+        "profile": None,
         "display_name": "Demo",
         "platform": "ums9117",
+        "transport": "usb-ncm",
         "image": image,
         "personalization": {
             "offset": 1024,
@@ -91,6 +96,32 @@ class RuntimeManifestTests(unittest.TestCase):
         self.assertEqual(loaded["personalization"]["bytes"], 512)
         self.assertEqual(loaded["usb"]["linux_gadget"]["keyboard_interface"], 1)
 
+    def test_accepts_an_explicit_no_transport_handoff_contract(self) -> None:
+        """A host-only bundle declares that it will not create USB-NCM transport."""
+        manifest = runtime_manifest()
+        manifest["transport"] = "none"
+
+        loaded = self.load(manifest)
+
+        self.assertEqual(loaded["transport"], "none")
+
+    def test_rejects_an_unknown_host_transport(self) -> None:
+        """Transport selection remains a closed runtime contract."""
+        manifest = runtime_manifest()
+        manifest["transport"] = "serial"
+
+        with self.assertRaisesRegex(SystemExit, "runtime transport must be one of"):
+            self.load(manifest)
+
+    def test_rejects_a_pre_profile_runtime_manifest(self) -> None:
+        """A runtime without an explicit profile and transport is not reinterpreted."""
+        manifest = runtime_manifest()
+        del manifest["profile"]
+        del manifest["transport"]
+
+        with self.assertRaisesRegex(SystemExit, "runtime manifest must contain exactly"):
+            self.load(manifest)
+
     def test_rejects_an_unknown_runtime_field(self) -> None:
         """Reject fields outside the exact runtime contract."""
         manifest = runtime_manifest()
@@ -114,6 +145,101 @@ class RuntimeManifestTests(unittest.TestCase):
 
         with self.assertRaisesRegex(SystemExit, "runtime hashes must contain exactly"):
             self.load(manifest)
+
+
+class NoTransportRunnerTests(unittest.TestCase):
+    """Exercise the shipped runner's no-transport handoff boundary."""
+
+    def setUp(self) -> None:
+        """Build one regular hashed bundle that has no USB-NCM transport."""
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.bundle = Path(self.temporary.name) / "bundle"
+        self.runner = self.bundle / "runner/run.py"
+        manifest = runtime_manifest()
+        manifest["transport"] = "none"
+        payloads = {
+            "image/ramboot.bin": b"DHTB RAM image\n",
+            "runner/platform_adapter.py": b"adapter\n",
+            "runner/ssh_transport.py": b"unused but hashed helper\n",
+            "assets/fdl1.bin": b"fdl1\n",
+            "host/loader": b"loader\n",
+        }
+        for relative, data in payloads.items():
+            path = self.bundle / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            path.chmod(0o755 if relative == "host/loader" else 0o644)
+            manifest["sha256"][relative] = hashlib.sha256(data).hexdigest()
+        self.runner.parent.mkdir(parents=True, exist_ok=True)
+        self.runner.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+        self.runner.chmod(0o755)
+        (self.bundle / "runtime-manifest.json").write_text(
+            json.dumps(manifest),
+            encoding="utf-8",
+        )
+        runtime_path = self.bundle / "runtime-manifest.json"
+
+        def record(path: Path) -> dict[str, int | str]:
+            return {
+                "mode": path.stat().st_mode & 0o777,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "size": path.stat().st_size,
+            }
+
+        payload = {
+            "rootfs_receipt": {"recipe": "a" * 64, "sha256": "b" * 64},
+            "container_image_recipe": "c" * 64,
+            "apk_signing_key": "d" * 64,
+            "device_identity": "e" * 64,
+            "files": {
+                "image/ramboot.bin": record(self.bundle / "image/ramboot.bin"),
+                "runtime-manifest.json": record(runtime_path),
+            },
+            "kbuild_receipt": {"recipe": "f" * 64, "sha256": "0" * 64},
+            "linux_recipe": "1" * 64,
+            "profile": None,
+            "target": "demo",
+            "workspace_digest": "2" * 64,
+        }
+        encoded = (
+            json.dumps(
+                payload,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            )
+            + "\n"
+        )
+        self.generation = hashlib.sha256(encoded.encode()).hexdigest()
+        (self.bundle / "build-manifest.json").write_text(
+            json.dumps({**payload, "generation": self.generation}, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    def test_none_transport_personalizes_without_waiting_for_usb_ncm(self) -> None:
+        """A host-only run still creates its required RAM session image before handoff."""
+        adapter = mock.Mock()
+        session = {"image": str(self.bundle / "image/ramboot.bin")}
+        ssh = mock.Mock()
+        ssh.bundle_identity.return_value = {"bundle_generation": self.generation}
+        ssh.prepare_session.return_value = session
+        with (
+            mock.patch.object(RUNNER, "__file__", str(self.runner)),
+            mock.patch.object(RUNNER, "host_preflight"),
+            mock.patch.object(RUNNER, "load_adapter", return_value=adapter),
+            mock.patch.object(RUNNER, "load_module", return_value=ssh),
+            mock.patch.object(sys, "argv", [str(self.runner)]),
+        ):
+            RUNNER.main()
+
+        runtime = adapter.run.call_args.args[1]
+        self.assertEqual(runtime["transport"], "none")
+        self.assertIs(adapter.run.call_args.args[2], session)
+        ssh.prepare_session.assert_called_once()
+        ssh.wait_for_bound_session.assert_not_called()
+        ssh.open_shell.assert_not_called()
+        ssh.finish_session.assert_called_once_with(session)
 
 
 if __name__ == "__main__":

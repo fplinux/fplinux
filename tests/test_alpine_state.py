@@ -125,6 +125,39 @@ class AlpineStateTests(unittest.TestCase):
                 self.root,
             )
 
+    def test_selected_profile_can_replace_platform_rootfs_packages(self) -> None:
+        """A profile delta removes declared base packages and adds a distinct package."""
+        extra = "fplinux-package-c"
+        self._write(f"alpine/aports/{extra}/APKBUILD", f"pkgname={extra}\n".encode())
+        with mock.patch.object(alpine_state, "COMMON_PACKAGES", (self.packages[0],)):
+            selected = alpine_state.selected_packages(
+                {"rootfs": {"packages": [self.packages[1]]}},
+                {
+                    "rootfs": {
+                        "packages": [extra],
+                        "exclude_packages": [self.packages[1]],
+                    }
+                },
+                self.root,
+            )
+        self.assertEqual(selected, (self.packages[0], extra))
+
+    def test_profile_rootfs_rejects_unknown_excludes_and_duplicate_additions(self) -> None:
+        """A profile cannot silently remove or repeat an unowned rootfs package."""
+        with mock.patch.object(alpine_state, "COMMON_PACKAGES", (self.packages[0],)):
+            with self.assertRaisesRegex(SystemExit, "excludes a package not owned"):
+                alpine_state.selected_packages(
+                    {"rootfs": {"packages": [self.packages[1]]}},
+                    {"rootfs": {"packages": [], "exclude_packages": ["fplinux-missing"]}},
+                    self.root,
+                )
+            with self.assertRaisesRegex(SystemExit, "duplicate common/platform ownership"):
+                alpine_state.selected_packages(
+                    {"rootfs": {"packages": [self.packages[1]]}},
+                    {"rootfs": {"packages": [self.packages[1]], "exclude_packages": []}},
+                    self.root,
+                )
+
     def test_lock_requires_every_selected_artifact_to_be_declared(self) -> None:
         """Reject a runtime/sysroot package without its exact artifact record."""
         lock = alpine_state.load_alpine_lock(self.root)
@@ -421,6 +454,101 @@ class AlpineStateTests(unittest.TestCase):
 
         self.assertEqual((actual_rootfs, actual_output, recipe), (rootfs, output, "9" * 64))
         self.assertEqual(bundle_outputs, {bundle_package: bundle_apk})
+
+    def test_rootfs_recipes_share_one_fixed_build_lock(self) -> None:
+        """Rootfs cache hits for distinct recipes leave only the shared build lock."""
+        cache = Path(self.temporary.name) / "cache"
+        package = self.packages[0]
+        recipes = ("3" * 64, "4" * 64)
+        cached_package = self._write("cached/package.apk", b"package\n")
+        for recipe in recipes:
+            output = cache / "rootfs" / recipe
+            output.mkdir(parents=True)
+            rootfs = output / alpine_state.ROOTFS_NAME
+            rootfs.write_bytes(b"rootfs\n")
+            with (
+                mock.patch.object(alpine_builder, "CACHE", cache),
+                mock.patch.object(
+                    alpine_builder,
+                    "_ensure_apk_signing_key",
+                    return_value=(Path("private"), Path("public"), "5" * 64),
+                ),
+                mock.patch.object(alpine_state, "alpine_rootfs_recipe", return_value=recipe),
+                mock.patch.object(alpine_state, "receipt_matches", return_value=True),
+                mock.patch.object(
+                    alpine_builder,
+                    "_cached_aport_packages",
+                    return_value={package: cached_package},
+                ),
+            ):
+                actual_rootfs, actual_output, actual_recipe, bundle_outputs = (
+                    alpine_builder.build_rootfs(1, (package,))
+                )
+            self.assertEqual(
+                (actual_rootfs, actual_output, actual_recipe),
+                (rootfs, output, recipe),
+            )
+            self.assertEqual(bundle_outputs, {})
+
+        locks = sorted(path.name for path in (cache / "rootfs").glob(".*.lock"))
+        self.assertEqual(locks, [".build.lock"])
+        for recipe in recipes:
+            self.assertFalse((cache / "rootfs" / f".{recipe}.lock").exists())
+
+    def test_rootfs_build_refuses_a_symlinked_cache_root(self) -> None:
+        """An unsafe rootfs-cache link cannot redirect a build into external state."""
+        cache = Path(self.temporary.name) / "cache"
+        cache.mkdir()
+        external = Path(self.temporary.name) / "external"
+        external.mkdir()
+        sentinel = external / "sentinel"
+        sentinel.write_bytes(b"keep\n")
+        (cache / "rootfs").symlink_to(external, target_is_directory=True)
+
+        with (
+            mock.patch.object(alpine_builder, "CACHE", cache),
+            mock.patch.object(
+                alpine_builder,
+                "_ensure_apk_signing_key",
+                return_value=(Path("private"), Path("public"), "5" * 64),
+            ),
+            mock.patch.object(alpine_state, "alpine_rootfs_recipe", return_value="6" * 64),
+            self.assertRaisesRegex(SystemExit, "rootfs cache directory is missing or invalid"),
+        ):
+            alpine_builder.build_rootfs(1, (self.packages[0],))
+
+        self.assertTrue((cache / "rootfs").is_symlink())
+        self.assertEqual(sentinel.read_bytes(), b"keep\n")
+
+    def test_rootfs_build_refuses_a_symlinked_or_nonregular_lock(self) -> None:
+        """The fixed lock cannot redirect to or become another cache object."""
+        cache = Path(self.temporary.name) / "cache"
+        rootfs = cache / "rootfs"
+        rootfs.mkdir(parents=True)
+        external = Path(self.temporary.name) / "external"
+        external.mkdir()
+        sentinel = external / "sentinel"
+        sentinel.write_bytes(b"keep\n")
+        lock = rootfs / ".build.lock"
+        lock.symlink_to(sentinel)
+
+        with (
+            mock.patch.object(alpine_builder, "CACHE", cache),
+            mock.patch.object(
+                alpine_builder,
+                "_ensure_apk_signing_key",
+                return_value=(Path("private"), Path("public"), "5" * 64),
+            ),
+            mock.patch.object(alpine_state, "alpine_rootfs_recipe", return_value="7" * 64),
+            self.assertRaisesRegex(SystemExit, "rootfs build lock is missing or invalid"),
+        ):
+            alpine_builder.build_rootfs(1, (self.packages[0],))
+
+        self.assertEqual(sentinel.read_bytes(), b"keep\n")
+        lock.unlink()
+        lock.mkdir()
+        with self.assertRaisesRegex(SystemExit, "rootfs build lock is missing or invalid"):
+            alpine_builder._open_rootfs_build_lock(rootfs)  # noqa: SLF001
 
     def test_bundle_absence_check_interprets_mocked_apk_exit_codes(self) -> None:
         """Map mocked ``apk info --exists`` results to absent and installed outcomes."""

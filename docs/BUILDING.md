@@ -104,6 +104,64 @@ If the required pinned environment is unavailable or stale, an offline build
 asks for an online `./fplinux setup` first. A matching bundle remains usable
 offline.
 
+### Development profiles
+
+A target may declare a development-only build profile at
+`targets/<target>/profiles/<profile>/profile.toml`. Profiles are small deltas
+over the target: they may enable or disable boolean kernel symbols, add Linux
+patch/copy/append inputs, add or exclude rootfs packages, and select either the
+`usb-ncm` or `none` host transport. Profile source paths are relative to that
+profile directory.
+
+The manifest has one exact, unversioned shape:
+
+```toml
+name = "example"
+
+[linux]
+config_enable = []
+config_disable = []
+patches = []
+copies = []
+appends = []
+
+[rootfs]
+packages = []
+exclude_packages = []
+
+[runtime]
+transport = "none"
+```
+
+Build, check and run a declared profile explicitly:
+
+```sh
+./fplinux check kernel --profile <profile>
+./fplinux build <target> --profile <profile>
+./fplinux run <target> --profile <profile>
+```
+
+The ordinary commands without `--profile` use only each target's default
+context; declared profiles are checked only when named explicitly. Profiles
+cannot be passed to `package`, `console` or `verify`, and they are never release
+inputs.
+
+`transport = "none"` changes only host-side runner behavior. The profile must
+also exclude any in-image gadget or SSH services it does not want. After the
+bootstrap handoff marker, `run` returns without waiting for USB-NCM. That marker
+does not prove that Linux started; the profile must define a separate physical
+observation or receipt boundary.
+
+Default and named builds have separate current bundle and stable work slots.
+Only one current bundle is retained per target/profile pair. Prepared Linux,
+Sparse, rootfs, staged workspaces and profile logs use bounded managed slots.
+Each locally built Alpine package has one cache slot at `.cache/apks/<package>`;
+the current default and declared profile package closures protect their slots.
+Successful builds discard superseded data, and `prune` removes interrupted or
+orphaned profile state. Cache records have no format versions, migrations or
+fallback readers: unknown or mismatched state is a cache miss and is replaced
+only inside its exact managed slot.
+
 Use the target document for its RAM-loader sequence and hardware status:
 
 ```sh

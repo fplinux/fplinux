@@ -57,7 +57,12 @@ class CommandLifecycleTests(unittest.TestCase):
         self.bundle_path = self._create_generation("a" * 64)
         self.bundle = publish_current_bundle(self.output, "phone", self.bundle_path)
 
-    def _manifest(self, generation: str, path: Path) -> dict[str, object]:
+    def _manifest(
+        self,
+        generation: str,
+        path: Path,
+        profile: str | None = None,
+    ) -> dict[str, object]:
         """Describe one complete synthetic bundle independently of its resolver."""
         return {
             "workspace_digest": self.snapshot.recipe,
@@ -69,12 +74,22 @@ class CommandLifecycleTests(unittest.TestCase):
             "generation": generation,
             "kbuild_receipt": {"recipe": "1" * 64, "sha256": "3" * 64},
             "linux_recipe": "2" * 64,
+            "profile": profile,
             "target": "phone",
         }
 
-    def _create_generation(self, generation: str, image: bytes = b"ramboot\n") -> Path:
+    def _create_generation(
+        self,
+        generation: str,
+        image: bytes = b"ramboot\n",
+        *,
+        profile: str | None = None,
+    ) -> Path:
         """Write one complete immutable generation without selecting it."""
-        path = self.output / "phone/bundles" / generation
+        slot = self.output / "phone"
+        if profile is not None:
+            slot = slot / "profiles" / profile
+        path = slot / "bundles" / generation
         path.mkdir(parents=True)
         payload = path / self.release["image"]
         payload.parent.mkdir(parents=True)
@@ -92,7 +107,7 @@ class CommandLifecycleTests(unittest.TestCase):
         ssh_helper.write_text("# bundled SSH helper\n", encoding="utf-8")
         ssh_helper.chmod(0o644)
         (path / BUILD_MANIFEST_NAME).write_bytes(
-            canonical_json_bytes(self._manifest(generation, path))
+            canonical_json_bytes(self._manifest(generation, path, profile))
         )
         return path
 
@@ -124,6 +139,13 @@ class CommandLifecycleTests(unittest.TestCase):
                 "stage_workspace_snapshot",
                 side_effect=AssertionError("cache hit must not stage a workspace"),
             ),
+            mock.patch.object(
+                commands,
+                "discard_staged_workspace_snapshot",
+                side_effect=AssertionError("cache hit must not discard an unstaged workspace"),
+            ),
+            mock.patch.object(commands, "discard_obsolete_rootfs") as rootfs_gc,
+            mock.patch.object(commands, "discard_obsolete_apks") as apks_gc,
         ):
             for jobs in (1, 8):
                 with self.subTest(jobs=jobs):
@@ -142,6 +164,14 @@ class CommandLifecycleTests(unittest.TestCase):
 
                     self.assertIn("build phone: OK (cached)", stdout.getvalue())
                     self.assertFalse(old.exists())
+            self.assertEqual(
+                rootfs_gc.call_args_list,
+                [mock.call(self.cache), mock.call(self.cache)],
+            )
+            self.assertEqual(
+                apks_gc.call_args_list,
+                [mock.call(self.cache), mock.call(self.cache)],
+            )
 
     def test_build_result_ignores_closed_stdout_pipe(self) -> None:
         """A closed output consumer must not turn a valid build result into failure."""
@@ -234,6 +264,9 @@ class CommandLifecycleTests(unittest.TestCase):
                 "stage_workspace_snapshot",
                 return_value=workspace,
             ),
+            mock.patch.object(commands, "discard_staged_workspace_snapshot") as discard,
+            mock.patch.object(commands, "discard_obsolete_rootfs") as rootfs_gc,
+            mock.patch.object(commands, "discard_obsolete_apks") as apks_gc,
             mock.patch.object(output.Stage, "run", autospec=True),
             self.assertRaisesRegex(
                 SystemExit,
@@ -244,6 +277,9 @@ class CommandLifecycleTests(unittest.TestCase):
 
         self.assertFalse(bundle_pointer(self.output, "phone").exists())
         self.assertTrue(old.exists())
+        discard.assert_called_once_with(self.snapshot, workspace)
+        rootfs_gc.assert_not_called()
+        apks_gc.assert_not_called()
         metadata = next((self.root / ".cache/logs/build/phone").rglob("run.json"))
         self.assertEqual(json.loads(metadata.read_text(encoding="utf-8"))["status"], "failed")
 
@@ -277,6 +313,9 @@ class CommandLifecycleTests(unittest.TestCase):
                 "stage_workspace_snapshot",
                 return_value=workspace,
             ),
+            mock.patch.object(commands, "discard_staged_workspace_snapshot") as discard,
+            mock.patch.object(commands, "discard_obsolete_rootfs") as rootfs_gc,
+            mock.patch.object(commands, "discard_obsolete_apks") as apks_gc,
             mock.patch.object(output.Stage, "run", autospec=True, side_effect=publish_result),
         ):
             stdout = io.StringIO()
@@ -286,6 +325,9 @@ class CommandLifecycleTests(unittest.TestCase):
         self.assertIn("build phone: OK", stdout.getvalue())
         self.assertNotIn("build phone: OK (cached)", stdout.getvalue())
         self.assertFalse(old.exists())
+        discard.assert_called_once_with(self.snapshot, workspace)
+        rootfs_gc.assert_called_once_with(self.cache)
+        apks_gc.assert_called_once_with(self.cache)
         metadata = next((self.root / ".cache/logs/build/phone").rglob("run.json"))
         self.assertEqual(json.loads(metadata.read_text(encoding="utf-8"))["status"], "success")
 
@@ -334,6 +376,27 @@ class CommandLifecycleTests(unittest.TestCase):
             mock.patch("fplinux_cli.commands.os.execv") as execute,
         ):
             commands.run_target("phone")
+
+        execute.assert_called_once_with(os.fsencode(runner), [os.fsencode(runner)])
+
+    def test_run_profile_executes_only_that_profiles_current_generation(self) -> None:
+        """A named run does not fall back to the target's default bundle pointer."""
+        profile = "usb-host-lab"
+        profile_path = self._create_generation("b" * 64, profile=profile)
+        profile_bundle = publish_current_bundle(
+            self.output,
+            "phone",
+            profile_path,
+            profile,
+        )
+        runner = profile_bundle.path / "runner/run.py"
+
+        with (
+            mock.patch.object(commands, "ROOT", self.root),
+            mock.patch.object(commands, "load_target", return_value={}),
+            mock.patch("fplinux_cli.commands.os.execv") as execute,
+        ):
+            commands.run_target("phone", profile=profile)
 
         execute.assert_called_once_with(os.fsencode(runner), [os.fsencode(runner)])
 
@@ -487,6 +550,7 @@ class CommandLifecycleTests(unittest.TestCase):
                 offline=False,
                 snapshot=self.snapshot,
                 **roots,
+                profile=None,
                 log_environment={"FPLINUX_LOG_ROOT": "/logs"},
                 image_recipe="e" * 64,
             )
@@ -548,6 +612,7 @@ class CommandLifecycleTests(unittest.TestCase):
             offline=True,
             snapshot=self.snapshot,
             **roots,
+            profile=None,
             log_environment={"FPLINUX_LOG_ROOT": "/logs"},
             image_recipe="e" * 64,
         )

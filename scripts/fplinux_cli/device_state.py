@@ -10,12 +10,13 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
 _LOCALVERSION_PREFIX = "-fplinux-"
 _LOCALVERSION_DIGEST_LENGTH = 16
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _TARGET = re.compile(r"[a-z0-9][a-z0-9._-]*\Z")
+_KCONFIG_SYMBOL = re.compile(r"[A-Z0-9_]+\Z")
 
 
 class DeviceStateError(ValueError):
@@ -42,6 +43,28 @@ def _require_relative(value: object, field: str) -> str:
     if path.is_absolute() or ".." in path.parts or path.as_posix() != value:
         raise DeviceStateError(f"{field} must be a normalized relative path: {value!r}")
     return value
+
+
+def _require_profile(value: object) -> str | None:
+    """Validate the optional named build profile without inventing a default."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or _TARGET.fullmatch(value) is None:
+        message = "profile must be None or a normalized profile name"
+        raise DeviceStateError(message)
+    return value
+
+
+def _require_kconfig_symbols(value: Sequence[object], field: str) -> list[str]:
+    """Return exactly the Kconfig actions whose order Kbuild will consume."""
+    result: list[str] = []
+    for symbol in value:
+        if not isinstance(symbol, str) or _KCONFIG_SYMBOL.fullmatch(symbol) is None:
+            raise DeviceStateError(f"{field} contains an invalid Kconfig symbol")
+        result.append(symbol)
+    if len(result) != len(set(result)):
+        raise DeviceStateError(f"{field} contains duplicate Kconfig symbols")
+    return result
 
 
 def _require_rootfs(value: Mapping[str, object]) -> dict[str, int | str]:
@@ -86,6 +109,9 @@ def device_kernel_identity(  # noqa: PLR0913
     arch: str,
     defconfig: Path,
     dtb: str,
+    profile: str | None = None,
+    config_enable: Sequence[object] = (),
+    config_disable: Sequence[object] = (),
 ) -> str:
     """Hash the exact pre-Kbuild device inputs, excluding workspace orchestration."""
     payload = {
@@ -99,6 +125,9 @@ def device_kernel_identity(  # noqa: PLR0913
             "arch": _require_target(arch),
             "defconfig": _defconfig_identity(Path(defconfig)),
             "dtb": _require_relative(dtb, "target DTB"),
+            "profile": _require_profile(profile),
+            "config_enable": _require_kconfig_symbols(config_enable, "config_enable"),
+            "config_disable": _require_kconfig_symbols(config_disable, "config_disable"),
         },
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")

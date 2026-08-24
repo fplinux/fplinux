@@ -81,6 +81,7 @@ class SshTransportTests(unittest.TestCase):
         image.write_bytes(b"DHTB image\n")
         runtime = {
             "target": "phone",
+            "profile": None,
             "image": "image/ramboot.bin",
             "sha256": {"image/ramboot.bin": hashlib.sha256(image.read_bytes()).hexdigest()},
         }
@@ -105,6 +106,7 @@ class SshTransportTests(unittest.TestCase):
             },
             "kbuild_receipt": {"recipe": "a" * 64, "sha256": "b" * 64},
             "linux_recipe": "c" * 64,
+            "profile": None,
             "target": "phone",
             "workspace_digest": "d" * 64,
         }
@@ -125,6 +127,61 @@ class SshTransportTests(unittest.TestCase):
         image.write_bytes(b"DHTB changed\n")
         with self.assertRaisesRegex(SystemExit, "runtime closure differs"):
             ssh_transport.bundle_identity(bundle, runtime)
+
+    def test_bundle_identity_rejects_a_runtime_from_another_profile(self) -> None:
+        """A named profile cannot reuse the default bundle's SSH identity."""
+        bundle = Path(self.temporary.name) / "bundle"
+        image = bundle / "image/ramboot.bin"
+        image.parent.mkdir(parents=True)
+        image.write_bytes(b"DHTB image\n")
+        runtime = {
+            "target": "phone",
+            "profile": None,
+            "image": "image/ramboot.bin",
+            "sha256": {"image/ramboot.bin": hashlib.sha256(image.read_bytes()).hexdigest()},
+        }
+        runtime_path = bundle / "runtime-manifest.json"
+        runtime_path.write_text(json.dumps(runtime, sort_keys=True) + "\n", encoding="utf-8")
+
+        def record(path: Path) -> dict[str, int | str]:
+            return {
+                "mode": path.stat().st_mode & 0o777,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "size": path.stat().st_size,
+            }
+
+        payload = {
+            "rootfs_receipt": {"recipe": "5" * 64, "sha256": "6" * 64},
+            "container_image_recipe": "7" * 64,
+            "apk_signing_key": "8" * 64,
+            "device_identity": "9" * 64,
+            "files": {
+                "image/ramboot.bin": record(image),
+                "runtime-manifest.json": record(runtime_path),
+            },
+            "kbuild_receipt": {"recipe": "a" * 64, "sha256": "b" * 64},
+            "linux_recipe": "c" * 64,
+            "profile": None,
+            "target": "phone",
+            "workspace_digest": "d" * 64,
+        }
+        encoded = (
+            json.dumps(
+                payload,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            )
+            + "\n"
+        )
+        generation = hashlib.sha256(encoded.encode()).hexdigest()
+        (bundle / "build-manifest.json").write_text(
+            json.dumps({**payload, "generation": generation}, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(SystemExit, "runtime target or profile"):
+            ssh_transport.bundle_identity(bundle, {**runtime, "profile": "usb-host-lab"})
 
     def test_current_session_rejects_another_bundle_generation(self) -> None:
         """A rebuilt bundle cannot silently reuse a phone loaded from older bytes."""

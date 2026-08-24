@@ -10,12 +10,13 @@ import os
 import pwd
 import shlex
 import shutil
+import stat
 import subprocess
 import tarfile
 import tempfile
 import urllib.request
 from pathlib import Path, PurePosixPath
-from typing import Any, NoReturn
+from typing import Any, BinaryIO, NoReturn
 
 from . import alpine_state
 from .common import ROOT, sha256_file
@@ -24,6 +25,7 @@ from .output import current_stage
 
 CACHE = Path("/cache")
 SOURCE_DATE_EPOCH = "1784919600"
+_ROOTFS_BUILD_LOCK = ".build.lock"
 
 
 def fail(message: str) -> NoReturn:
@@ -36,6 +38,57 @@ def require_file(path: Path) -> Path:
     if path.is_symlink() or not path.is_file():
         fail(f"expected file is missing or invalid: {path}")
     return path
+
+
+def _ensure_rootfs_directory(cache: Path) -> Path:
+    """Create the one real rootfs cache directory without traversing a link."""
+    rootfs = cache / "rootfs"
+    try:
+        metadata = rootfs.lstat()
+    except FileNotFoundError:
+        try:
+            rootfs.mkdir(parents=True)
+        except FileExistsError:
+            pass
+        except OSError as error:
+            fail(f"rootfs cache directory cannot be created: {rootfs}: {error}")
+        try:
+            metadata = rootfs.lstat()
+        except OSError as error:
+            fail(f"rootfs cache directory is missing or invalid: {rootfs}: {error}")
+    except OSError as error:
+        fail(f"rootfs cache directory is missing or invalid: {rootfs}: {error}")
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        fail(f"rootfs cache directory is missing or invalid: {rootfs}")
+    return rootfs
+
+
+def _open_rootfs_build_lock(rootfs: Path) -> BinaryIO:
+    """Open the one rootfs-build lock without accepting unsafe cache objects."""
+    path = rootfs / _ROOTFS_BUILD_LOCK
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        fail(f"rootfs build lock is missing or invalid: {path}: {error}")
+    else:
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+            fail(f"rootfs build lock is missing or invalid: {path}")
+
+    flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NONBLOCK
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except OSError as error:
+        fail(f"rootfs build lock cannot be opened: {path}: {error}")
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            fail(f"rootfs build lock is missing or invalid: {path}")
+        return os.fdopen(descriptor, "r+b")
+    except BaseException:
+        os.close(descriptor)
+        raise
 
 
 def _require_sha256(value: object, name: str) -> str:
@@ -793,11 +846,10 @@ def build_rootfs(
             + ", ".join(sorted(overlap))
         )
     build_packages = tuple(sorted((*packages, *bundle_packages)))
+    rootfs_directory = _ensure_rootfs_directory(CACHE)
     output = alpine_state.rootfs_output(CACHE, recipe)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = output.parent / f".{recipe}.lock"
 
-    with lock_path.open("a+b") as lock_stream:
+    with _open_rootfs_build_lock(rootfs_directory) as lock_stream:
         fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
         rootfs_hit = alpine_state.receipt_matches(output, recipe)
         cached_outputs: dict[str, Path] = {}

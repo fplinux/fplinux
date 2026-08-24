@@ -102,6 +102,54 @@ def target_source(target: str, relative: str) -> Path:
     return ROOT / "targets" / target / relative_value(relative, "target source path")
 
 
+def selected_profile(target_config: dict[str, Any]) -> str | None:
+    """Return the optional profile identity already validated by target loading."""
+    profile = target_config.get("profile")
+    if profile is None:
+        return None
+    if not isinstance(profile, str) or not profile:
+        fail("target profile is invalid")
+    return profile
+
+
+def profile_kconfig_actions(target_config: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """Return the profile-only scripts/config actions in declared order."""
+    linux = target_config["linux"]
+    enable = linux.get("config_enable", [])
+    disable = linux.get("config_disable", [])
+    if (
+        not isinstance(enable, list)
+        or not isinstance(disable, list)
+        or not all(isinstance(symbol, str) and symbol for symbol in [*enable, *disable])
+    ):
+        fail("target profile Kconfig actions are invalid")
+    return list(enable), list(disable)
+
+
+def profile_kconfig_arguments(config_enable: list[str], config_disable: list[str]) -> list[str]:
+    """Render declared CONFIG_* actions for the Linux scripts/config command."""
+    arguments: list[str] = []
+    for action, symbols in (("--enable", config_enable), ("--disable", config_disable)):
+        for symbol in symbols:
+            if not symbol.startswith("CONFIG_") or len(symbol) == len("CONFIG_"):
+                fail("target profile Kconfig symbol is invalid")
+            arguments.extend((action, symbol.removeprefix("CONFIG_")))
+    return arguments
+
+
+def assert_profile_kconfig(
+    config: Path, config_enable: list[str], config_disable: list[str]
+) -> None:
+    """Require selected profile Kconfig values after dependency resolution."""
+    text = require_file(config).read_text()
+    for symbol in config_enable:
+        if f"{symbol}=y\n" not in text:
+            fail(f"profile did not enable {symbol}")
+    for symbol in config_disable:
+        if f"# {symbol} is not set\n" not in text:
+            fail(f"profile did not disable {symbol}")
+
+
 def runner_source() -> Path:
     """Return the one shared runner source path."""
     return ROOT / "common/run.py"
@@ -410,6 +458,80 @@ def resolve_steps(
     return result
 
 
+def profile_linux_source_path(parent: Path, target: str, profile: str) -> Path:
+    """Create a profile-only prepared-Linux slot beside, never inside, the default tree."""
+    root = require_directory(parent.parent)
+    source = root
+    for component in ("profiles", target, profile):
+        source /= component
+        if source.exists():
+            require_directory(source)
+        else:
+            source.mkdir()
+    return require_directory(source)
+
+
+def discard_profile_linux_source(parent: Path, target: str, profile: str) -> None:
+    """Discard a stale dedicated source tree after a profile now shares default sources."""
+    root = require_directory(parent.parent)
+    profiles = root / "profiles"
+    if profiles.is_symlink():
+        fail(f"profile Linux source root must not be a symlink: {profiles}")
+    if not profiles.exists():
+        return
+    require_directory(profiles)
+    target_slot = profiles / target
+    if target_slot.is_symlink():
+        fail(f"profile Linux target slot must not be a symlink: {target_slot}")
+    if not target_slot.exists():
+        return
+    require_directory(target_slot)
+    source = target_slot / profile
+    if source.is_symlink():
+        fail(f"profile Linux source slot must not be a symlink: {source}")
+    if not source.exists():
+        return
+    if not source.is_dir():
+        fail(f"profile Linux source slot is invalid: {source}")
+    shutil.rmtree(source)
+
+
+def prepared_linux_staging_path(parent: Path, target: str, profile: str | None) -> Path:
+    """Create one empty, bounded staging slot for a default or named profile source tree."""
+    root = require_directory(parent.parent)
+    staging = root
+    components: tuple[str, ...]
+    if profile is None:
+        components = ("staging", target, "default")
+    else:
+        components = ("staging", target, "profiles", profile)
+    for component in components:
+        staging /= component
+        if staging.is_symlink():
+            fail(f"prepared Linux staging slot must not be a symlink: {staging}")
+        if staging.exists():
+            if not staging.is_dir():
+                fail(f"prepared Linux staging slot is invalid: {staging}")
+        else:
+            staging.mkdir()
+    if staging.is_symlink() or not staging.is_dir():
+        fail(f"prepared Linux staging slot is invalid: {staging}")
+    shutil.rmtree(staging)
+    staging.mkdir()
+    return staging
+
+
+def discard_prepared_linux_staging(staging: Path) -> None:
+    """Discard only one real staging slot after publish or a failed preparation."""
+    if staging.is_symlink():
+        fail(f"prepared Linux staging slot must not be a symlink: {staging}")
+    if not staging.exists():
+        return
+    if not staging.is_dir():
+        fail(f"prepared Linux staging slot is invalid: {staging}")
+    shutil.rmtree(staging)
+
+
 def prepare_linux(
     sources: dict[str, Any],
     target: str,
@@ -442,6 +564,14 @@ def prepare_linux(
     except LinuxStateError as error:
         fail(str(error))
     source = parent / target
+    profile = selected_profile(target_config)
+    if profile is not None:
+        default_config = load_target(target)
+        default_recipe = linux_recipe_digest(linux, target, default_config, platform)
+        if default_recipe != recipe:
+            source = profile_linux_source_path(parent, target, profile)
+        else:
+            discard_profile_linux_source(parent, target, profile)
 
     def apply_projection(destination: Path) -> None:
         apply_patches(destination, platform_patches)
@@ -459,7 +589,7 @@ def prepare_linux(
         CACHE / "downloads/linux",
         f"linux-{version}.tar.xz",
     )
-    staging = Path(tempfile.mkdtemp(dir=parent, prefix=f".prepare-{target}-{recipe[:12]}-"))
+    staging = prepared_linux_staging_path(parent, target, profile)
     try:
         with tarfile.open(archive, "r:xz") as tar:
             tar.extractall(staging, filter="data")
@@ -472,8 +602,7 @@ def prepare_linux(
         except LinuxStateError as error:
             fail(str(error))
     finally:
-        if staging.exists():
-            shutil.rmtree(staging)
+        discard_prepared_linux_staging(staging)
     return source, state
 
 
@@ -534,6 +663,7 @@ def build_kernel(
             ),
             ("scripts/fplinux_cli/kbuild_state.py", Path(kbuild_state.__file__)),
         ]
+        config_enable, config_disable = profile_kconfig_actions(target_config)
         device_identity = device_kernel_identity(
             target=target,
             linux_recipe=current_linux.linux_recipe,
@@ -544,6 +674,9 @@ def build_kernel(
             arch=platform["linux"]["arch"],
             defconfig=defconfig,
             dtb=target_config["linux"]["dtb"],
+            profile=selected_profile(target_config),
+            config_enable=config_enable,
+            config_disable=config_disable,
         )
         config_command = [
             str(config_script),
@@ -555,6 +688,7 @@ def build_kernel(
             "--set-str",
             "LOCALVERSION",
             localversion(device_identity),
+            *profile_kconfig_arguments(config_enable, config_disable),
         ]
         commands = kernel_build_commands(
             kbuild,
@@ -590,14 +724,17 @@ def build_kernel(
             kbuild_state.prepare_output(work, output)
             kbuild_state.materialize_rootfs_input(work, rootfs, plan)
             shutil.copyfile(defconfig, output / ".config")
-            for command in commands:
+            for command in commands[:3]:
                 run(command)
+            assert_profile_kconfig(output / ".config", config_enable, config_disable)
+            run(commands[3])
 
         zimage = require_file(output / platform["linux"]["image_output"])
         dtb = require_file(
             output / platform["linux"]["dtb_output_directory"] / target_config["linux"]["dtb"]
         )
         config_text = require_file(output / ".config").read_text()
+        assert_profile_kconfig(output / ".config", config_enable, config_disable)
         for forbidden in target_config["linux"]["forbidden_config"]:
             if forbidden in config_text:
                 fail(f"kernel unexpectedly contains {forbidden}")
@@ -1196,6 +1333,8 @@ def runtime_manifest(
     )
     return {
         "target": target,
+        "profile": selected_profile(target_config),
+        "transport": runtime.get("transport", "usb-ncm"),
         "display_name": target_config["display_name"],
         "platform": target_config["platform"],
         "image": image,
@@ -1309,6 +1448,7 @@ def _publish_staged_bundle(
     }
     payload = {
         "target": target,
+        "profile": selected_profile(target_config),
         "workspace_digest": workspace_digest,
         "container_image_recipe": container_image_recipe,
         "apk_signing_key": apk_signing_key,
@@ -1321,13 +1461,15 @@ def _publish_staged_bundle(
     generation = sha256_bytes(canonical_json_bytes(payload))
     manifest = {**payload, "generation": generation}
     write_json(release / "build-manifest.json", manifest, prefix=".build-manifest.")
+    profile = selected_profile(target_config)
     generation_path = publish_bundle_generation(
         OUTPUT,
         target,
         release,
         generation,
+        profile,
     )
-    publish_current_bundle(OUTPUT, target, generation_path)
+    publish_current_bundle(OUTPUT, target, generation_path, profile)
     return generation_path
 
 
@@ -1356,7 +1498,8 @@ def publish_bundle(
     bundle_apks: dict[str, Path],
 ) -> Path:
     """Publish a complete immutable bundle and select it as current."""
-    release = create_bundle_staging(OUTPUT, target)
+    profile = selected_profile(target_config)
+    release = create_bundle_staging(OUTPUT, target, profile)
     try:
         return _publish_staged_bundle(
             release,
@@ -1384,13 +1527,14 @@ def publish_bundle(
             bundle_apks,
         )
     finally:
-        discard_bundle_staging(OUTPUT, target, release)
+        discard_bundle_staging(OUTPUT, target, release, profile)
 
 
 def main() -> None:
     """Build stages 1-4 and publish one deterministic target bundle."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--target", required=True)
+    parser.add_argument("--profile")
     parser.add_argument("--jobs", type=int, required=True)
     args = parser.parse_args()
     if args.jobs < 1:
@@ -1398,7 +1542,7 @@ def main() -> None:
 
     reporter = RunReporter.from_environment(f"build {args.target}", "build")
     with report_stage(reporter, "configuration"):
-        target_config = load_target(args.target)
+        target_config = load_target(args.target, args.profile)
         platform = load_platform(target_config["platform"])
         rootfs_packages = alpine_state.selected_packages(platform, target_config)
         bundle_packages = alpine_state.bundle_packages(platform, target_config, rootfs_packages)
@@ -1411,7 +1555,10 @@ def main() -> None:
         asset_lock_path = require_file(target_asset_lock_path(args.target))
         release_manifest = load_release(args.target)
 
+        profile = selected_profile(target_config)
         work = OUTPUT / args.target / "work"
+        if profile is not None:
+            work = OUTPUT / args.target / "profiles" / profile / "work"
         work.mkdir(parents=True, exist_ok=True)
         CACHE.mkdir(parents=True, exist_ok=True)
 
