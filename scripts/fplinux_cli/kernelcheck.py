@@ -18,6 +18,8 @@ from . import linux_state
 from .builder import (
     CACHE,
     prepare_linux,
+    profile_kconfig_actions,
+    profile_kconfig_arguments,
     report_stage,
     require_file,
     root_source,
@@ -26,6 +28,7 @@ from .builder import (
 )
 from .common import ROOT
 from .config import (
+    discover_profiles,
     discover_targets,
     load_platform,
     load_target,
@@ -143,6 +146,19 @@ def record_text(text: str) -> None:
     stage.write(text.encode())
 
 
+def assert_profile_kconfig(
+    config: Path, config_enable: list[str], config_disable: list[str]
+) -> None:
+    """Require profile Kconfig actions to survive dependency resolution."""
+    text = require_file(config).read_text()
+    for symbol in config_enable:
+        if f"{symbol}=y\n" not in text:
+            raise SystemExit(f"sparse failed: profile did not enable {symbol}")
+    for symbol in config_disable:
+        if f"# {symbol} is not set\n" not in text:
+            raise SystemExit(f"sparse failed: profile did not disable {symbol}")
+
+
 def capture_text(command: list[str]) -> subprocess.CompletedProcess[str]:
     """Capture a command for policy inspection while retaining reporter output."""
     stage = current_stage()
@@ -181,50 +197,75 @@ def run_dtbs_check(command: list[str], target: str) -> str:
     return report.stdout + report.stderr
 
 
-def sparse_cache_directory(target: str) -> Path:
-    """Return the fixed Sparse output directory for one target."""
-    return CACHE / "analysis" / "sparse" / target
+def target_profiles(profile: str | None = None) -> tuple[tuple[str, str | None], ...]:
+    """Select every default context, or one explicitly named profile."""
+    if profile is None:
+        return tuple((target, None) for target in discover_targets())
+
+    selected: list[tuple[str, str | None]] = []
+    for target in discover_targets():
+        profiles = discover_profiles(target)
+        if profile in profiles:
+            selected.append((target, profile))
+    if profile is not None and not selected:
+        raise SystemExit(f"sparse failed: profile is not declared by any target: {profile}")
+    return tuple(selected)
 
 
-def sparse_output(target: str) -> Path:
-    """Return the one fixed Kbuild output path for one target."""
-    return sparse_cache_directory(target) / "work"
+def context_label(target: str, profile: str | None) -> str:
+    """Return the stable stage label for one target/profile kernel context."""
+    return target if profile is None else f"{target}-profile-{profile}"
 
 
-def reset_sparse_output(target: str) -> Path:
+def sparse_cache_directory(target: str, profile: str | None = None) -> Path:
+    """Return the fixed Sparse output directory for one target/profile."""
+    root = CACHE / "analysis" / "sparse" / target
+    return root if profile is None else root / "profiles" / profile
+
+
+def sparse_output(target: str, profile: str | None = None) -> Path:
+    """Return the one fixed Kbuild output path for one target/profile."""
+    return sparse_cache_directory(target, profile) / "work"
+
+
+def reset_sparse_output(target: str, profile: str | None = None) -> Path:
     """Cold-reset the one generated Kbuild output before each analysis."""
-    output = sparse_output(target)
+    output = sparse_output(target, profile)
     shutil.rmtree(output, ignore_errors=True)
     output.mkdir(parents=True, exist_ok=True)
     return output
 
 
 def target_context(
-    sources: dict[str, Any], target: str
+    sources: dict[str, Any], target: str, profile: str | None = None
 ) -> tuple[dict[str, Any], dict[str, Any], Path, PreparedLinuxState]:
-    """Load one target and prepare its exact pinned Linux integration tree."""
-    target_config = load_target(target)
+    """Load one target/profile and prepare its exact Linux integration tree."""
+    target_config = load_target(target, profile)
     platform = load_platform(target_config["platform"])
     source, prepared_linux = prepare_linux(sources, target, target_config, platform)
     return target_config, platform, source, prepared_linux
 
 
-def prepare_contexts(reporter: RunReporter | None) -> None:
-    """Populate each target's current recipe-validated Linux source context."""
+def prepare_contexts(reporter: RunReporter | None, profile: str | None = None) -> None:
+    """Populate default contexts or one explicitly selected profile."""
     sources = load_sources()
-    for target in discover_targets():
-        with report_stage(reporter, f"prepare-{target}"):
-            _config, _platform, _source, prepared_linux = target_context(sources, target)
-            record_text(f"sparse context: ready ({target}, {prepared_linux.linux_recipe[:16]})\n")
+    for target, selected in target_profiles(profile):
+        label = context_label(target, selected)
+        with report_stage(reporter, f"prepare-{label}"):
+            _config, _platform, _source, prepared_linux = target_context(sources, target, selected)
+            record_text(f"sparse context: ready ({label}, {prepared_linux.linux_recipe[:16]})\n")
 
 
-def check_contexts(reporter: RunReporter | None) -> None:
-    """Run sparse through Kbuild with target Kconfig and generated headers."""
+def check_contexts(reporter: RunReporter | None, profile: str | None = None) -> None:
+    """Run sparse through Kbuild for default or explicitly selected contexts."""
     sources = load_sources()
     checked = 0
-    for target in discover_targets():
-        with report_stage(reporter, f"context-{target}"):
-            target_config, platform, source, prepared_linux = target_context(sources, target)
+    for target, selected in target_profiles(profile):
+        label = context_label(target, selected)
+        with report_stage(reporter, f"context-{label}"):
+            target_config, platform, source, prepared_linux = target_context(
+                sources, target, selected
+            )
             projected = projected_sources(target, target_config, platform)
             style_files = [str(path) for path in projected if path.suffix in {".c", ".h"}]
             checkpatch = [
@@ -241,7 +282,8 @@ def check_contexts(reporter: RunReporter | None) -> None:
             ]
             defconfig = require_file(target_defconfig_path(target))
             objects = sparse_targets(target, target_config, platform)
-            output = sparse_output(target)
+            output = sparse_output(target, selected)
+            config_enable, config_disable = profile_kconfig_actions(target_config)
             kbuild = [
                 "make",
                 "-C",
@@ -259,6 +301,15 @@ def check_contexts(reporter: RunReporter | None) -> None:
             ]
             checkpatch_sources = [*checkpatch, "-f", *style_files, *kconfig_files]
             checkpatch_patches = [*checkpatch, *patch_files] if patch_files else None
+            first_kconfig_command = [*kbuild, "olddefconfig"]
+            profile_config_command: list[str] | None = None
+            if config_enable or config_disable:
+                profile_config_command = [
+                    str(require_file(source / platform["linux"]["config_script"])),
+                    "--file",
+                    str(output / ".config"),
+                    *profile_kconfig_arguments(config_enable, config_disable),
+                ]
             kconfig_command = [*kbuild, "olddefconfig", "prepare"]
             save_defconfig_command = [*kbuild, "savedefconfig"]
             dtbs_command = [*kbuild, "W=1", "dtbs_check"]
@@ -273,40 +324,46 @@ def check_contexts(reporter: RunReporter | None) -> None:
             ]
             linux_state.require_prepared_linux(source, prepared_linux)
 
-        output = reset_sparse_output(target)
-        with report_stage(reporter, f"format-{target}"):
+        output = reset_sparse_output(target, selected)
+        with report_stage(reporter, f"format-{label}"):
             run(format_command)
-        with report_stage(reporter, f"checkpatch-{target}"):
+        with report_stage(reporter, f"checkpatch-{label}"):
             # --root resolves the fplinux compatibles against projected bindings.
             run_checkpatch(checkpatch_sources)
             if checkpatch_patches is not None:
                 run_checkpatch(checkpatch_patches)
-        with report_stage(reporter, f"kconfig-{target}"):
+        with report_stage(reporter, f"kconfig-{label}"):
             shutil.copyfile(defconfig, output / ".config")
+            if profile_config_command is not None:
+                run(first_kconfig_command)
+                run(profile_config_command)
             run(kconfig_command)
-            run(save_defconfig_command)
-            current = defconfig.read_text()
-            canonical = require_file(output / "defconfig").read_text()
-            if canonical != current:
-                record_text(
-                    "".join(
-                        difflib.unified_diff(
-                            current.splitlines(keepends=True),
-                            canonical.splitlines(keepends=True),
-                            fromfile=str(defconfig),
-                            tofile="savedefconfig",
+            if selected is None:
+                run(save_defconfig_command)
+                current = defconfig.read_text()
+                canonical = require_file(output / "defconfig").read_text()
+                if canonical != current:
+                    record_text(
+                        "".join(
+                            difflib.unified_diff(
+                                current.splitlines(keepends=True),
+                                canonical.splitlines(keepends=True),
+                                fromfile=str(defconfig),
+                                tofile="savedefconfig",
+                            )
                         )
                     )
-                )
-                raise SystemExit(f"sparse failed: defconfig is not canonical: {defconfig}")
-        with report_stage(reporter, f"device-tree-{target}"):
+                    raise SystemExit(f"sparse failed: defconfig is not canonical: {defconfig}")
+            else:
+                assert_profile_kconfig(output / ".config", config_enable, config_disable)
+        with report_stage(reporter, f"device-tree-{label}"):
             combined = run_dtbs_check(dtbs_command, target)
             if "Warning" in combined or re.search(r"\.dtb: ", combined):
                 raise SystemExit(f"sparse failed: device tree findings: {target}")
-        with report_stage(reporter, f"sparse-{target}"):
+        with report_stage(reporter, f"sparse-{label}"):
             run(sparse_command)
         checked += len(objects)
-        print(f"sparse: OK ({target}, {len(objects)} kernel C objects)")
+        print(f"sparse: OK ({label}, {len(objects)} kernel C objects)")
     print(f"sparse: OK ({checked} kernel C objects total)")
 
 
@@ -314,12 +371,13 @@ def main() -> None:
     """Dispatch the internal preparation or offline analysis phase."""
     parser = argparse.ArgumentParser()
     parser.add_argument("phase", choices=("prepare", "check"))
+    parser.add_argument("--profile")
     args = parser.parse_args()
     reporter = RunReporter.from_environment("check", f"kernel-{args.phase}")
     if args.phase == "prepare":
-        prepare_contexts(reporter)
+        prepare_contexts(reporter, args.profile)
     else:
-        check_contexts(reporter)
+        check_contexts(reporter, args.profile)
 
 
 if __name__ == "__main__":

@@ -42,6 +42,7 @@ BUILD_MANIFEST_FIELDS = frozenset(
         "generation",
         "kbuild_receipt",
         "linux_recipe",
+        "profile",
         "target",
         "workspace_digest",
     }
@@ -175,11 +176,16 @@ def bundle_identity(bundle: Path, runtime: dict[str, Any]) -> dict[str, str]:
     runtime_path = bundle / "runtime-manifest.json"
     runtime_bytes = _regular_file_bytes(runtime_path, "runtime manifest")
     target = runtime.get("target")
+    profile = runtime.get("profile")
     image_relative = runtime.get("image")
     hashes = runtime.get("sha256")
     if (
         not isinstance(target, str)
         or TARGET_NAME.fullmatch(target) is None
+        or (
+            profile is not None
+            and (not isinstance(profile, str) or TARGET_NAME.fullmatch(profile) is None)
+        )
         or not isinstance(image_relative, str)
         or not isinstance(hashes, dict)
     ):
@@ -202,8 +208,9 @@ def bundle_identity(bundle: Path, runtime: dict[str, Any]) -> dict[str, str]:
         not isinstance(manifest, dict)
         or set(manifest) != BUILD_MANIFEST_FIELDS
         or manifest.get("target") != target
+        or manifest.get("profile") != profile
     ):
-        fail("build manifest does not match the runtime target")
+        fail("build manifest does not match the runtime target or profile")
     generation = manifest.get("generation")
     if not isinstance(generation, str) or SHA256.fullmatch(generation) is None:
         fail("build manifest generation is invalid")

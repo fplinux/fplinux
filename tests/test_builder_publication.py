@@ -10,7 +10,7 @@ import struct
 import tempfile
 import unittest
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from unittest import mock
 
 from fplinux_cli import alpine_state, builder
@@ -20,6 +20,37 @@ from fplinux_cli.bundle_state import (
     create_bundle_staging,
     resolve_current_bundle,
 )
+
+
+class ProfileKconfigTests(unittest.TestCase):
+    """Check the profile-only Kconfig actions consumed by the Kbuild plan."""
+
+    def test_actions_are_normalized_and_must_survive_olddefconfig(self) -> None:
+        """The final .config, rather than the requested input, is the build oracle."""
+        with tempfile.TemporaryDirectory() as temporary:
+            config = Path(temporary) / ".config"
+            config.write_text("CONFIG_PROFILE_ENABLED=y\n# CONFIG_PROFILE_DISABLED is not set\n")
+
+            self.assertEqual(
+                builder.profile_kconfig_arguments(
+                    ["CONFIG_PROFILE_ENABLED"], ["CONFIG_PROFILE_DISABLED"]
+                ),
+                [
+                    "--enable",
+                    "PROFILE_ENABLED",
+                    "--disable",
+                    "PROFILE_DISABLED",
+                ],
+            )
+            builder.assert_profile_kconfig(
+                config,
+                ["CONFIG_PROFILE_ENABLED"],
+                ["CONFIG_PROFILE_DISABLED"],
+            )
+
+            config.write_text("# CONFIG_PROFILE_ENABLED is not set\n")
+            with self.assertRaisesRegex(SystemExit, "profile did not enable"):
+                builder.assert_profile_kconfig(config, ["CONFIG_PROFILE_ENABLED"], [])
 
 
 class RamSessionImageTests(unittest.TestCase):
@@ -231,7 +262,7 @@ class BuilderPublicationTests(unittest.TestCase):
                 root=self.work,
             ),
         }
-        self.target_config = {
+        self.target_config: dict[str, Any] = {
             "display_name": "Demo",
             "platform": "demo",
             "bundle": {"packages": list(self.bundle_apks)},
@@ -393,11 +424,13 @@ class BuilderPublicationTests(unittest.TestCase):
                 "generation",
                 "kbuild_receipt",
                 "linux_recipe",
+                "profile",
                 "target",
                 "workspace_digest",
             },
         )
         self.assertEqual(manifest["generation"], published.name)
+        self.assertIsNone(manifest["profile"])
         self.assertEqual(manifest["apk_signing_key"], "7" * 64)
         self.assertEqual(manifest["rootfs_receipt"]["recipe"], self.rootfs_recipe)
         self.assertEqual(manifest["kbuild_receipt"]["recipe"], "e" * 64)
@@ -423,8 +456,10 @@ class BuilderPublicationTests(unittest.TestCase):
             set(runtime),
             {
                 "target",
+                "profile",
                 "display_name",
                 "platform",
+                "transport",
                 "image",
                 "addresses",
                 "usb",
@@ -435,6 +470,8 @@ class BuilderPublicationTests(unittest.TestCase):
                 "sha256",
             },
         )
+        self.assertIsNone(runtime["profile"])
+        self.assertEqual(runtime["transport"], "usb-ncm")
         helper = published / "runner/ssh_transport.py"
         self.assertEqual(runtime["personalization"]["bytes"], 512)
         self.assertEqual(runtime["assets"], {"pin": "assets/pin.bin"})
@@ -455,6 +492,22 @@ class BuilderPublicationTests(unittest.TestCase):
         helper.unlink()
         with self.assertRaisesRegex(SystemExit, "expected file is missing or invalid"):
             self.publish(personalization=descriptor)
+
+    def test_named_profile_publishes_to_its_own_current_bundle_slot(self) -> None:
+        """A host profile cannot replace the default target bundle pointer."""
+        self.target_config["profile"] = "usb-host-lab"
+        self.target_config["runtime"]["transport"] = "none"
+
+        published = self.publish()
+        current = resolve_current_bundle(self.output, "demo", "usb-host-lab")
+        manifest = json.loads((published / BUILD_MANIFEST_NAME).read_text())
+        runtime = json.loads((published / "runtime-manifest.json").read_text())
+
+        self.assertEqual(published.parent, self.output / "demo/profiles/usb-host-lab/bundles")
+        self.assertEqual(current.path, published)
+        self.assertEqual(manifest["profile"], "usb-host-lab")
+        self.assertEqual(runtime["profile"], "usb-host-lab")
+        self.assertEqual(runtime["transport"], "none")
 
     def test_publish_rejects_apks_outside_the_declared_bundle_package_set(self) -> None:
         """A bundle cannot silently add or omit one of its declared packages."""
@@ -479,7 +532,7 @@ class BuilderPublicationTests(unittest.TestCase):
     def test_copy_failure_preserves_the_current_bundle_and_cleans_staging(self) -> None:
         """Retain the current bundle when copying a new payload fails."""
         first = self.publish()
-        foreign_staging = create_bundle_staging(self.output, "demo")
+        create_bundle_staging(self.output, "demo")
         missing = self.work / "missing-ramboot.bin"
 
         with self.assertRaises(SystemExit):
@@ -489,7 +542,7 @@ class BuilderPublicationTests(unittest.TestCase):
             resolve_current_bundle(self.output, "demo").path,
             first,
         )
-        self.assertEqual(self.staging_directories(), [foreign_staging])
+        self.assertEqual(self.staging_directories(), [])
 
     def test_manifest_failure_preserves_the_current_bundle_and_cleans_staging(self) -> None:
         """Retain the current bundle when writing its new manifest fails."""

@@ -3,10 +3,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import unittest
 from pathlib import Path
 from typing import TYPE_CHECKING
+from unittest import mock
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -124,6 +127,33 @@ class BacklightConfigurationTests(unittest.TestCase):
         """Keep the level within the six-bit libc_server field."""
         with self.assertRaisesRegex(SystemExit, "backlight_level"):
             ADAPTER.adapter_config(adapter_data(backlight_level=0x40))
+
+
+class HandoffTransportTests(unittest.TestCase):
+    """Keep a host-only handoff independent of USB-NCM acquisition."""
+
+    def test_none_transport_returns_without_acquiring_ssh(self) -> None:
+        """A no-transport profile completes after handoff without acquiring SSH/NCM."""
+        rendered = io.StringIO()
+        with (
+            contextlib.redirect_stdout(rendered),
+            mock.patch.object(
+                ADAPTER.importlib,
+                "import_module",
+                side_effect=AssertionError("none transport must not acquire SSH/NCM"),
+            ),
+        ):
+            ADAPTER.complete_linux_handoff(
+                {"transport": "none"},
+                None,
+                {"vendor_id": 0x0525, "product_id": 0xA4A6, "wait_seconds": 30},
+            )
+
+        self.assertEqual(
+            rendered.getvalue(),
+            "Bootstrap handoff marker observed; no host-side transport is available "
+            "to confirm Linux startup.\n",
+        )
 
 
 if __name__ == "__main__":

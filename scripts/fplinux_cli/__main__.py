@@ -18,10 +18,15 @@ from .commands import (
     verify_booted,
 )
 from .common import ROOT
-from .config import discover_targets
+from .config import TARGET_NAME, discover_targets
 from .container import CHECK_SCOPES, check, check_commit_message, doctor, setup
 from .output import run_entrypoint
-from .prune import prune
+from .prune import (
+    discard_obsolete_apks,
+    discard_obsolete_rootfs,
+    discard_superseded_profile_logs,
+    prune,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -38,6 +43,13 @@ def _check_scope(value: str) -> str:
     if value not in CHECK_SCOPES:
         choices = ", ".join(repr(scope) for scope in CHECK_SCOPES)
         raise argparse.ArgumentTypeError(f"invalid choice: {value!r} (choose from {choices})")
+    return value
+
+
+def _profile_name(value: str) -> str:
+    """Accept only one target-owned profile path component."""
+    if TARGET_NAME.fullmatch(value) is None:
+        raise argparse.ArgumentTypeError(f"invalid profile name: {value!r}")
     return value
 
 
@@ -62,13 +74,38 @@ def _dispatch_with_cache_lock(args: argparse.Namespace, action: Callable[[], Non
         return
 
     target = getattr(args, "target", None)
+    profile = getattr(args, "profile", None)
     with cache_lock(
         ROOT / ".cache",
         exclusive=exclusive,
         command=args.command,
         target=target if isinstance(target, str) else None,
+        profile=profile if isinstance(profile, str) else None,
     ):
-        action()
+        try:
+            action()
+        finally:
+            _discard_profile_build_or_check_cache(args)
+
+
+def _discard_profile_build_or_check_cache(args: argparse.Namespace) -> None:
+    """Bound one named profile's logs even when its command exits unsuccessfully."""
+    profile = getattr(args, "profile", None)
+    if not isinstance(profile, str) or args.command not in {"build", "check"}:
+        return
+    target = getattr(args, "target", None)
+    if args.command == "build":
+        if not isinstance(target, str):
+            message = "build cache retention requires a target"
+            raise AssertionError(message)
+        discard_obsolete_rootfs(ROOT / ".cache")
+        discard_obsolete_apks(ROOT / ".cache")
+    discard_superseded_profile_logs(
+        ROOT / ".cache",
+        args.command,
+        profile=profile,
+        target=target if isinstance(target, str) else None,
+    )
 
 
 def _list_check_scopes(check_parser: argparse.ArgumentParser, scopes: list[str]) -> None:
@@ -84,6 +121,21 @@ def _setup_action(*, force: bool) -> None:
     setup(force=force)
 
 
+def _profile_check_scopes(
+    scopes: list[str],
+    profile: str | None,
+    check_parser: argparse.ArgumentParser,
+) -> list[str]:
+    """Restrict a selected profile check to the kernel it changes."""
+    if profile is None:
+        return scopes
+    if not scopes:
+        return ["kernel"]
+    if scopes != ["kernel"]:
+        check_parser.error("--profile requires no scope or exactly the kernel scope")
+    return scopes
+
+
 def _command_action(
     args: argparse.Namespace,
     check_parser: argparse.ArgumentParser,
@@ -93,11 +145,14 @@ def _command_action(
         action = doctor
     elif args.command == "check":
         if args.list_scopes:
+            if args.profile is not None:
+                check_parser.error("--profile cannot be combined with --list")
             action = partial(_list_check_scopes, check_parser, args.scopes)
         else:
             action = partial(
                 check,
-                args.scopes,
+                _profile_check_scopes(args.scopes, args.profile, check_parser),
+                profile=args.profile,
                 verbose=args.verbose,
                 no_cache=args.no_cache,
             )
@@ -110,6 +165,7 @@ def _command_action(
             build,
             args.target,
             args.jobs,
+            profile=args.profile,
             verbose=args.verbose,
             offline=args.offline,
         )
@@ -120,7 +176,7 @@ def _command_action(
     elif args.command == "prune":
         action = partial(prune, json_output=args.prune_json, apply=args.prune_apply)
     elif args.command == "run":
-        action = partial(run_target, args.target)
+        action = partial(run_target, args.target, profile=args.profile)
     elif args.command == "console":
         action = partial(
             console_target,
@@ -169,6 +225,12 @@ def main() -> None:
         action="store_true",
         help="run every selected check even when an exact success receipt exists",
     )
+    check_parser.add_argument(
+        "--profile",
+        type=_profile_name,
+        metavar="NAME",
+        help="check only the selected profile kernel",
+    )
     setup_parser = commands.add_parser("setup", help="build the pinned OCI environment")
     setup_parser.add_argument(
         "--force",
@@ -179,6 +241,12 @@ def main() -> None:
     commit_message_parser.add_argument("message_file")
     build_parser = commands.add_parser("build", help="build a target in .cache/out")
     build_parser.add_argument("target", choices=targets)
+    build_parser.add_argument(
+        "--profile",
+        type=_profile_name,
+        metavar="NAME",
+        help="build one target-owned non-default profile",
+    )
     build_parser.add_argument("--jobs", type=int, default=max(1, os.cpu_count() or 1))
     build_parser.add_argument(
         "--verbose",
@@ -226,6 +294,12 @@ def main() -> None:
     )
     run_parser = commands.add_parser("run", help="run a target's volatile-RAM loader")
     run_parser.add_argument("target", choices=targets)
+    run_parser.add_argument(
+        "--profile",
+        type=_profile_name,
+        metavar="NAME",
+        help="run one target-owned non-default profile",
+    )
 
     console_parser = commands.add_parser("console", help="connect to a running target over USB")
     console_parser.add_argument("target", choices=targets)

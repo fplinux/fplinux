@@ -116,6 +116,7 @@ class ReleasePackageTests(unittest.TestCase):
             "generation": generation,
             "kbuild_receipt": {"recipe": "0" * 64, "sha256": "1" * 64},
             "linux_recipe": "2" * 64,
+            "profile": None,
             "target": self.target,
             "workspace_digest": self.snapshot.recipe,
         }

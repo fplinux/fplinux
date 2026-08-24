@@ -58,6 +58,26 @@ class CheckScopeTests(unittest.TestCase):
             self.assertFalse(receipt_matches(cache, image_changed))
             self.assertFalse(receipt_matches(cache, orchestration_changed))
 
+    def test_named_kernel_profile_has_its_own_receipt_identity(self) -> None:
+        """The public kernel recipe keeps default and profile cache slots distinct."""
+        default = check_scope_receipt_recipe(
+            "kernel",
+            "a" * 64,
+            image_identity="sha256:" + "b" * 64,
+            orchestration_recipe="c" * 64,
+        )
+        profile = check_scope_receipt_recipe(
+            "kernel",
+            "a" * 64,
+            image_identity="sha256:" + "b" * 64,
+            orchestration_recipe="c" * 64,
+            profile="usb-host-lab",
+        )
+
+        self.assertIsNone(default.profile)
+        self.assertEqual(profile.profile, "usb-host-lab")
+        self.assertNotEqual(default.payload(), profile.payload())
+
     def test_readme_does_not_invalidate_c_or_kernel_scope(self) -> None:
         """Keep unrelated documentation outside the two expensive closures."""
         common = (
@@ -260,6 +280,83 @@ class CheckScopeTests(unittest.TestCase):
             cache = Path(temporary)
             publish_success_receipt(cache, first_recipe)
             self.assertFalse(receipt_matches(cache, header_recipe))
+
+    def test_named_kernel_profile_tracks_only_its_profile_manifest_and_sources(self) -> None:
+        """A narrow profile check does not reuse another profile's kernel receipt."""
+        target = WorkspaceFile(
+            "targets/phone/target.toml",
+            b'platform = "demo"\n[linux]\npatches = []\ncopies = []\nappends = []\n',
+            0o644,
+        )
+        platform = WorkspaceFile(
+            "platforms/demo/platform.toml",
+            b"[linux]\npatches = []\ncopies = []\nappends = []\n",
+            0o644,
+        )
+        host_manifest = WorkspaceFile(
+            "targets/phone/profiles/host/profile.toml",
+            b"[linux]\npatches = []\n"
+            b'copies = [{ source = "host.c", destination = "host.c" }]\n'
+            b"appends = []\n",
+            0o644,
+        )
+        other_manifest = WorkspaceFile(
+            "targets/phone/profiles/diagnostic/profile.toml",
+            b"[linux]\npatches = []\n"
+            b'copies = [{ source = "diagnostic.c", destination = "diagnostic.c" }]\n'
+            b"appends = []\n",
+            0o644,
+        )
+        files = (
+            WorkspaceFile("scripts/fplinux_cli/kernelcheck.py", b"checker\n", 0o644),
+            target,
+            platform,
+            host_manifest,
+            other_manifest,
+            WorkspaceFile("targets/phone/profiles/host/host.c", b"int host;\n", 0o644),
+            WorkspaceFile(
+                "targets/phone/profiles/diagnostic/diagnostic.c", b"int diagnostic;\n", 0o644
+            ),
+        )
+        host_before = WorkspaceSnapshot(files, "a" * 64)
+        other_changed = WorkspaceSnapshot(
+            (*files[:-1], WorkspaceFile(files[-1].path, b"int changed;\n", 0o644)),
+            "b" * 64,
+        )
+        host_changed = WorkspaceSnapshot(
+            (
+                *files[:5],
+                WorkspaceFile(files[5].path, b"int changed;\n", 0o644),
+                files[6],
+            ),
+            "c" * 64,
+        )
+        host_manifest_changed = WorkspaceSnapshot(
+            (
+                *files[:3],
+                WorkspaceFile(files[3].path, b"not even TOML", 0o644),
+                *files[4:],
+            ),
+            "d" * 64,
+        )
+
+        digest = check_scope_closure_digest("kernel", host_before, profile="host")
+        self.assertEqual(
+            digest,
+            check_scope_closure_digest("kernel", other_changed, profile="host"),
+        )
+        self.assertNotEqual(
+            digest,
+            check_scope_closure_digest("kernel", host_changed, profile="host"),
+        )
+        self.assertEqual(
+            check_scope_closure_digest("kernel", host_before),
+            check_scope_closure_digest("kernel", host_changed),
+        )
+        self.assertEqual(
+            check_scope_closure_digest("kernel", host_before),
+            check_scope_closure_digest("kernel", host_manifest_changed),
+        )
 
     def test_editorconfig_invalidates_metadata_scope(self) -> None:
         """Track Prettier's repository EditorConfig as metadata input."""
@@ -604,6 +701,7 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
         logs.mkdir(exist_ok=True)
         reporter = reporter_type(logs, commands)
         stage_workspace = mock.Mock(return_value=workspace)
+        discard_workspace = mock.Mock()
         with (
             mock.patch.object(container, "ROOT", root),
             mock.patch("fplinux_cli.output.RunReporter.create", return_value=reporter),
@@ -675,6 +773,11 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
             ),
             mock.patch.object(
                 container,
+                "discard_staged_quality_workspace_snapshot",
+                new=discard_workspace,
+            ),
+            mock.patch.object(
+                container,
                 "setup",
                 side_effect=(
                     AssertionError("exact check hit must not set up an image")
@@ -684,7 +787,16 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
                 return_value=None,
             ),
         ):
-            container.check(scopes, no_cache=no_cache)
+            try:
+                container.check(scopes, no_cache=no_cache)
+            except RuntimeError:
+                if not exact_hit_guard:
+                    discard_workspace.assert_called_once_with(snapshot, workspace)
+                raise
+        if exact_hit_guard:
+            discard_workspace.assert_not_called()
+        else:
+            discard_workspace.assert_called_once_with(snapshot, workspace)
         return stage_workspace
 
     def test_exact_success_hit_skips_workspace_and_checker(self) -> None:

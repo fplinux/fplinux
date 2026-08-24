@@ -25,13 +25,17 @@ from .config import (
     container_image_build_arguments,
     container_image_recipe_digest,
     container_image_reference,
+    discover_profiles,
+    discover_targets,
     load_container_lock,
 )
 from .image_state import ImageState, ImageStateError, load_image_state, publish_image_state
 from .output import RunReporter
+from .prune import discard_superseded_profile_logs
 from .workspace import (
     WorkspaceFile,
     WorkspaceSnapshot,
+    discard_staged_quality_workspace_snapshot,
     quality_workspace_snapshot,
     stage_quality_workspace_snapshot,
 )
@@ -562,33 +566,56 @@ def _linux_manifest_sources(linux: object, *, base: PurePath) -> set[str]:
     return selected
 
 
-def _kernel_scope_paths(snapshot: WorkspaceSnapshot) -> set[str]:
-    """Resolve exact Linux inputs named by the captured target manifests."""
+def _profile_manifest_parts(path: PurePath) -> tuple[str, str] | None:
+    """Return target/profile for one profile manifest path, if it has the fixed shape."""
+    if (
+        len(path.parts) == 5
+        and path.parts[0] == "targets"
+        and path.parts[2] == "profiles"
+        and path.name == "profile.toml"
+    ):
+        return path.parts[1], path.parts[3]
+    return None
+
+
+def _kernel_scope_paths(snapshot: WorkspaceSnapshot, profile: str | None = None) -> set[str]:
+    """Resolve default Linux inputs, or one explicitly named profile."""
     by_path = {file.path: file for file in snapshot.files}
     selected = {
         file.path
         for file in snapshot.files
         if file.path in _KERNEL_IMPLEMENTATION or file.path == "sources.lock.toml"
     }
-    target_manifests = (
+    profiles_by_target: dict[str, list[WorkspaceFile]] = {}
+    if profile is not None:
+        for file in snapshot.files:
+            parts = _profile_manifest_parts(PurePath(file.path))
+            if parts is None:
+                continue
+            target_name, declared = parts
+            if profile == declared:
+                profiles_by_target.setdefault(target_name, []).append(file)
+
+    target_manifests = [
         file
         for file in snapshot.files
         if (path := PurePath(file.path)).parts[:1] == ("targets",)
         and len(path.parts) == 3
         and path.name == "target.toml"
-    )
+        and (profile is None or path.parts[1] in profiles_by_target)
+    ]
     for target_manifest in target_manifests:
         target_path = PurePath(target_manifest.path)
         selected.add(target_manifest.path)
         try:
-            target = tomllib.loads(target_manifest.contents.decode("utf-8"))
+            target_data = tomllib.loads(target_manifest.contents.decode("utf-8"))
         except (UnicodeDecodeError, tomllib.TOMLDecodeError):
             continue
-        if not isinstance(target, dict):
+        if not isinstance(target_data, dict):
             continue
         selected.add((target_path.parent / "kernel/defconfig").as_posix())
-        selected.update(_linux_manifest_sources(target.get("linux"), base=target_path.parent))
-        platform = target.get("platform")
+        selected.update(_linux_manifest_sources(target_data.get("linux"), base=target_path.parent))
+        platform = target_data.get("platform")
         if not isinstance(platform, str):
             continue
         platform_path = PurePath("platforms") / platform / "platform.toml"
@@ -602,13 +629,26 @@ def _kernel_scope_paths(snapshot: WorkspaceSnapshot) -> set[str]:
             continue
         if isinstance(platform_data, dict):
             selected.update(_linux_manifest_sources(platform_data.get("linux"), base=PurePath()))
+        for profile_manifest in profiles_by_target.get(target_path.parent.name, []):
+            profile_path = PurePath(profile_manifest.path)
+            selected.add(profile_manifest.path)
+            try:
+                profile_data = tomllib.loads(profile_manifest.contents.decode("utf-8"))
+            except (UnicodeDecodeError, tomllib.TOMLDecodeError):
+                continue
+            if isinstance(profile_data, dict):
+                selected.update(
+                    _linux_manifest_sources(profile_data.get("linux"), base=profile_path.parent)
+                )
     return selected
 
 
-def check_scope_closure_digest(scope: str, snapshot: WorkspaceSnapshot) -> str:
+def check_scope_closure_digest(
+    scope: str, snapshot: WorkspaceSnapshot, *, profile: str | None = None
+) -> str:
     """Hash only captured files that can affect one exact check scope."""
     if scope == "kernel":
-        paths = _kernel_scope_paths(snapshot)
+        paths = _kernel_scope_paths(snapshot, profile)
         selected = [file for file in snapshot.files if file.path in paths]
     elif scope == "c":
         paths = _c_scope_paths(snapshot)
@@ -639,29 +679,32 @@ def check_scope_closure_digest(scope: str, snapshot: WorkspaceSnapshot) -> str:
     )
 
 
-def check_scope_commands(scope: str) -> tuple[tuple[str, ...], ...]:
+def check_scope_commands(scope: str, *, profile: str | None = None) -> tuple[tuple[str, ...], ...]:
     """Return the canonical checker argv whose result a receipt certifies."""
     if scope in SOURCE_CHECK_SCOPES:
         return ((*_SOURCE_CHECK_COMMAND, scope),)
     if scope == "kernel":
-        return _KERNEL_CHECK_COMMANDS
+        if profile is None:
+            return _KERNEL_CHECK_COMMANDS
+        return tuple((*command, "--profile", profile) for command in _KERNEL_CHECK_COMMANDS)
     fail(f"check scope does not support receipts: {scope}")
     return ()
 
 
-def check_scope_receipt_recipe(
+def check_scope_receipt_recipe(  # noqa: PLR0913 -- receipt identities are distinct inputs.
     scope: str,
     closure_digest: str,
     *,
     image_identity: str,
     commands: tuple[tuple[str, ...], ...] | None = None,
     orchestration_recipe: str | None = None,
+    profile: str | None = None,
 ) -> CheckReceiptRecipe:
     """Bind one cacheable source scope to its exact closure and OCI identities."""
     if scope not in (*SOURCE_CHECK_SCOPES, "kernel"):
         fail(f"check scope does not support receipts: {scope}")
     if commands is None:
-        commands = check_scope_commands(scope)
+        commands = check_scope_commands(scope, profile=profile)
     if orchestration_recipe is None:
         orchestration_recipe = check_orchestration_recipe_digest()
     return CheckReceiptRecipe(
@@ -670,7 +713,136 @@ def check_scope_receipt_recipe(
         orchestration_recipe=orchestration_recipe,
         image_identity=image_identity,
         commands=commands,
+        profile=profile,
     )
+
+
+def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
+    *,
+    reporter: RunReporter,
+    cache: Path,
+    missing: tuple[str, ...],
+    analyzer_cache: dict[str, Path],
+    workspace: Path,
+    podman: str,
+    lock: dict[str, Any],
+    image_identity: str,
+    recipes: dict[str, CheckReceiptRecipe],
+    profile: str | None,
+) -> None:
+    """Run cache-missing source and kernel checks against one disposable workspace."""
+    log_mount = ["--volume", f"{reporter.root}:/logs:rw,Z"]
+    source_scopes = [scope for scope in missing if scope in SOURCE_CHECK_SCOPES]
+    if source_scopes:
+        log_environment = reporter.container_environment("/logs/source")
+        log_environment["FPLINUX_LOG_DISPLAY_ROOT"] = (
+            f"{log_environment['FPLINUX_LOG_DISPLAY_ROOT']}/source"
+        )
+        log_arguments = [
+            argument
+            for key, value in log_environment.items()
+            for argument in ("--env", f"{key}={value}")
+        ]
+        with reporter.stage("source", passthrough=True, show_tail=False) as stage:
+            stage.run(
+                [
+                    podman,
+                    "run",
+                    "--rm",
+                    "--platform",
+                    lock["platform"],
+                    "--userns=keep-id",
+                    "--network=none",
+                    "--read-only",
+                    "--tmpfs",
+                    "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs.
+                    "--volume",
+                    f"{workspace}:/workspace:ro,Z",
+                    *log_mount,
+                    *log_arguments,
+                    "--env",
+                    "HOME=/tmp",
+                    "--env",
+                    "PYTHONPATH=/workspace/scripts",
+                    "--env",
+                    "RUFF_CACHE_DIR=/tmp/ruff",
+                    "--env",
+                    "PYTHONDONTWRITEBYTECODE=1",
+                    image_identity,
+                    "python3",
+                    "/workspace/scripts/check.py",
+                    *source_scopes,
+                ]
+            )
+        for scope in source_scopes:
+            publish_success_receipt(cache, recipes[scope])
+
+    if "kernel" not in missing:
+        return
+    log_environment = reporter.container_environment("/logs/kernel")
+    log_environment["FPLINUX_LOG_DISPLAY_ROOT"] = (
+        f"{log_environment['FPLINUX_LOG_DISPLAY_ROOT']}/kernel"
+    )
+    log_arguments = [
+        argument
+        for key, value in log_environment.items()
+        for argument in ("--env", f"{key}={value}")
+    ]
+    analyzer_runtime = [
+        podman,
+        "run",
+        "--rm",
+        "--platform",
+        lock["platform"],
+        "--userns=keep-id",
+    ]
+    analyzer_program = [
+        "--read-only",
+        "--tmpfs",
+        "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs.
+        "--volume",
+        f"{workspace}:/workspace:ro,Z",
+        *log_mount,
+        *log_arguments,
+        "--env",
+        "HOME=/tmp",
+        "--env",
+        "PYTHONPATH=/workspace/scripts",
+        "--env",
+        "PYTHONDONTWRITEBYTECODE=1",
+        image_identity,
+        "python3",
+        "-m",
+        "fplinux_cli.kernelcheck",
+    ]
+    with reporter.stage("kernel-prepare", passthrough=True, show_tail=False) as stage:
+        stage.run(
+            [
+                *analyzer_runtime,
+                "--volume",
+                f"{analyzer_cache['downloads']}:/cache/downloads:rw,Z",
+                "--volume",
+                f"{analyzer_cache['linux']}:/cache/linux:rw,Z",
+                *analyzer_program,
+                "prepare",
+                *([] if profile is None else ["--profile", profile]),
+            ]
+        )
+    with reporter.stage("kernel-analysis", passthrough=True, show_tail=False) as stage:
+        stage.run(
+            [
+                *analyzer_runtime,
+                "--network=none",
+                "--volume",
+                f"{analyzer_cache['analysis']}:/cache/analysis:rw,Z",
+                "--volume",
+                f"{analyzer_cache['linux']}:/cache/linux:ro,Z",
+                *analyzer_program,
+                "check",
+                *([] if profile is None else ["--profile", profile]),
+            ]
+        )
+    publish_success_receipt(cache, recipes["kernel"])
 
 
 def check(
@@ -678,10 +850,25 @@ def check(
     *,
     verbose: bool = False,
     no_cache: bool = False,
+    profile: str | None = None,
 ) -> None:
     selected = resolve_check_scopes(scopes)
+    if profile is not None:
+        declared_targets = tuple(
+            target for target in discover_targets() if profile in discover_profiles(target)
+        )
+        if not declared_targets:
+            fail(f"check profile is not declared by any target: {profile}")
+        if not scopes:
+            selected = ("kernel",)
+        elif selected != ("kernel",):
+            fail("--profile is supported only with the kernel check scope")
 
-    reporter = RunReporter.create("check", target=None, verbose=verbose)
+    reporter = RunReporter.create(
+        "check",
+        target=None if profile is None else f"profiles/{profile}",
+        verbose=verbose,
+    )
     if "repository" in selected:
         check_git_diff(reporter)
     if selected == ("repository",):
@@ -702,9 +889,10 @@ def check(
         return {
             scope: check_scope_receipt_recipe(
                 scope,
-                check_scope_closure_digest(scope, snapshot),
+                check_scope_closure_digest(scope, snapshot, profile=profile),
                 image_identity=image_identity,
                 orchestration_recipe=orchestration_recipe,
+                profile=profile,
             )
             for scope in cacheable_scopes
         }
@@ -766,127 +954,22 @@ def check(
     with reporter.stage("workspace"):
         workspace = stage_quality_workspace_snapshot(snapshot)
 
-    log_mount = ["--volume", f"{reporter.root}:/logs:rw,Z"]
-    source_scopes = [scope for scope in missing if scope in SOURCE_CHECK_SCOPES]
-    if source_scopes:
-        log_environment = reporter.container_environment("/logs/source")
-        log_environment["FPLINUX_LOG_DISPLAY_ROOT"] = (
-            f"{log_environment['FPLINUX_LOG_DISPLAY_ROOT']}/source"
+    try:
+        _run_missing_checks(
+            reporter=reporter,
+            cache=cache,
+            missing=missing,
+            analyzer_cache=analyzer_cache,
+            workspace=workspace,
+            podman=podman,
+            lock=lock,
+            image_identity=image_identity,
+            recipes=recipes,
+            profile=profile,
         )
-        log_arguments = [
-            argument
-            for key, value in log_environment.items()
-            for argument in ("--env", f"{key}={value}")
-        ]
-        with reporter.stage(
-            "source",
-            passthrough=True,
-            show_tail=False,
-        ) as stage:
-            stage.run(
-                [
-                    podman,
-                    "run",
-                    "--rm",
-                    "--platform",
-                    lock["platform"],
-                    "--userns=keep-id",
-                    "--network=none",
-                    "--read-only",
-                    "--tmpfs",
-                    "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs.
-                    "--volume",
-                    f"{workspace}:/workspace:ro,Z",
-                    *log_mount,
-                    *log_arguments,
-                    "--env",
-                    "HOME=/tmp",
-                    "--env",
-                    "PYTHONPATH=/workspace/scripts",
-                    "--env",
-                    "RUFF_CACHE_DIR=/tmp/ruff",
-                    "--env",
-                    "PYTHONDONTWRITEBYTECODE=1",
-                    image_identity,
-                    "python3",
-                    "/workspace/scripts/check.py",
-                    *source_scopes,
-                ]
-            )
-        for scope in source_scopes:
-            publish_success_receipt(cache, recipes[scope])
-
-    if "kernel" in missing:
-        log_environment = reporter.container_environment("/logs/kernel")
-        log_environment["FPLINUX_LOG_DISPLAY_ROOT"] = (
-            f"{log_environment['FPLINUX_LOG_DISPLAY_ROOT']}/kernel"
-        )
-        log_arguments = [
-            argument
-            for key, value in log_environment.items()
-            for argument in ("--env", f"{key}={value}")
-        ]
-        analyzer_runtime = [
-            podman,
-            "run",
-            "--rm",
-            "--platform",
-            lock["platform"],
-            "--userns=keep-id",
-        ]
-        analyzer_program = [
-            "--read-only",
-            "--tmpfs",
-            "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs.
-            "--volume",
-            f"{workspace}:/workspace:ro,Z",
-            *log_mount,
-            *log_arguments,
-            "--env",
-            "HOME=/tmp",
-            "--env",
-            "PYTHONPATH=/workspace/scripts",
-            "--env",
-            "PYTHONDONTWRITEBYTECODE=1",
-            image_identity,
-            "python3",
-            "-m",
-            "fplinux_cli.kernelcheck",
-        ]
-        with reporter.stage(
-            "kernel-prepare",
-            passthrough=True,
-            show_tail=False,
-        ) as stage:
-            stage.run(
-                [
-                    *analyzer_runtime,
-                    "--volume",
-                    f"{analyzer_cache['downloads']}:/cache/downloads:rw,Z",
-                    "--volume",
-                    f"{analyzer_cache['linux']}:/cache/linux:rw,Z",
-                    *analyzer_program,
-                    "prepare",
-                ]
-            )
-        with reporter.stage(
-            "kernel-analysis",
-            passthrough=True,
-            show_tail=False,
-        ) as stage:
-            stage.run(
-                [
-                    *analyzer_runtime,
-                    "--network=none",
-                    "--volume",
-                    f"{analyzer_cache['analysis']}:/cache/analysis:rw,Z",
-                    "--volume",
-                    f"{analyzer_cache['linux']}:/cache/linux:ro,Z",
-                    *analyzer_program,
-                    "check",
-                ],
-            )
-        publish_success_receipt(cache, recipes["kernel"])
-
+    finally:
+        discard_staged_quality_workspace_snapshot(snapshot, workspace)
     print("check: OK")
     reporter.finish()
+    if profile is not None:
+        discard_superseded_profile_logs(cache, "check", profile=profile)
