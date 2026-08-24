@@ -142,6 +142,31 @@ class AlpineStateTests(unittest.TestCase):
             )
         self.assertEqual(selected, (self.packages[0], extra))
 
+    def test_profile_can_exclude_gadget_input_stack_and_retain_console(self) -> None:
+        """A host-only rootfs removes gadget-only input without losing the console."""
+        common = ("fplinux-base", "fplinux-console", "fplinux-input")
+        platform = ("fplinux-usb-gadget", "fplinux-ssh")
+        for package in (*common, *platform):
+            self._write(f"alpine/aports/{package}/APKBUILD", f"pkgname={package}\n".encode())
+
+        with mock.patch.object(alpine_state, "COMMON_PACKAGES", common):
+            selected = alpine_state.selected_packages(
+                {"rootfs": {"packages": list(platform)}},
+                {
+                    "rootfs": {
+                        "packages": [],
+                        "exclude_packages": [
+                            "fplinux-input",
+                            "fplinux-usb-gadget",
+                            "fplinux-ssh",
+                        ],
+                    }
+                },
+                self.root,
+            )
+
+        self.assertEqual(selected, ("fplinux-base", "fplinux-console"))
+
     def test_profile_rootfs_rejects_unknown_excludes_and_duplicate_additions(self) -> None:
         """A profile cannot silently remove or repeat an unowned rootfs package."""
         with mock.patch.object(alpine_state, "COMMON_PACKAGES", (self.packages[0],)):
@@ -578,6 +603,46 @@ class AlpineStateTests(unittest.TestCase):
             self.assertRaisesRegex(SystemExit, "cannot verify.*apk failed"),
         ):
             alpine_builder._require_bundle_package_absent(root, package)  # noqa: SLF001
+
+    def test_rootfs_verifier_makes_input_files_and_service_conditional(self) -> None:
+        """A gadgetless rootfs needs the console, while a selected input bridge is required."""
+        root = Path(self.temporary.name) / "verified-rootfs"
+        (root / "etc/init.d").mkdir(parents=True)
+        (root / "etc/runlevels/default").mkdir(parents=True)
+        (root / "usr/bin").mkdir(parents=True)
+        (root / "etc/fstab").write_text(
+            "tmpfs\t/tmp\ttmpfs\trw,nosuid,nodev,mode=1777\t0 0\n",
+            encoding="utf-8",
+        )
+        (root / "etc/inittab").write_text("::sysinit:/sbin/openrc sysinit\n", encoding="utf-8")
+        (root / "etc/os-release").write_text("NAME=FPLinux\n", encoding="utf-8")
+        (root / "etc/init.d/fplinux-console").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "usr/bin/fplinux-console").write_text("console\n", encoding="utf-8")
+        (root / "etc/runlevels/default/fplinux-console").symlink_to("/etc/init.d/fplinux-console")
+        (root / "init").symlink_to("/sbin/init")
+
+        def write_world(packages: tuple[str, ...]) -> None:
+            (root / "etc/apk").mkdir(parents=True, exist_ok=True)
+            (root / "etc/apk/world").write_text(
+                "\n".join(packages) + "\n",
+                encoding="utf-8",
+            )
+
+        without_input = ("fplinux-base", "fplinux-console")
+        write_world(without_input)
+        with mock.patch.object(alpine_builder, "_require_apk_owner") as owners:
+            alpine_builder._verify_alpine_rootfs(root, without_input)  # noqa: SLF001
+        self.assertNotIn(
+            mock.call(root, "/usr/bin/fplinux-input", "fplinux-input"), owners.call_args_list
+        )
+
+        with_input = (*without_input, "fplinux-input")
+        write_world(with_input)
+        with (
+            mock.patch.object(alpine_builder, "_require_apk_owner"),
+            self.assertRaisesRegex(SystemExit, "fplinux-input"),
+        ):
+            alpine_builder._verify_alpine_rootfs(root, with_input)  # noqa: SLF001
 
     def test_signing_key_identity_requires_one_regular_public_key(self) -> None:
         """Keep package signing state explicit rather than silently generating it in prune."""

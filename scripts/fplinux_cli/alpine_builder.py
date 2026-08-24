@@ -718,10 +718,15 @@ def _verify_alpine_rootfs(
         "/etc/inittab": "fplinux-base",
         "/etc/os-release": "fplinux-base",
         "/etc/init.d/fplinux-console": "fplinux-console-openrc",
-        "/etc/init.d/fplinux-input": "fplinux-input-openrc",
         "/usr/bin/fplinux-console": "fplinux-console",
-        "/usr/bin/fplinux-input": "fplinux-input",
     }
+    if "fplinux-input" in packages:
+        owners.update(
+            {
+                "/etc/init.d/fplinux-input": "fplinux-input-openrc",
+                "/usr/bin/fplinux-input": "fplinux-input",
+            }
+        )
     if "fplinux-cpuclock" in packages:
         owners["/usr/bin/fplinux-cpuclock"] = "fplinux-cpuclock"
     if "fplinux-tyrquake" in packages:
@@ -747,8 +752,9 @@ def _verify_alpine_rootfs(
         require_file(root / path.removeprefix("/"))
         _require_apk_owner(root, path, package)
 
-    for service in ("fplinux-input", "fplinux-console"):
-        _require_openrc_service(root, "default", service)
+    _require_openrc_service(root, "default", "fplinux-console")
+    if "fplinux-input" in packages:
+        _require_openrc_service(root, "default", "fplinux-input")
     if "fplinux-usb-gadget" in packages:
         _require_openrc_service(root, "sysinit", "fplinux-usb-gadget")
         _require_openrc_service(root, "default", "fplinux-usb-dhcp")
