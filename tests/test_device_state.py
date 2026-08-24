@@ -7,6 +7,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 from fplinux_cli import device_state, kbuild_state
@@ -118,6 +119,38 @@ class DeviceStateTests(unittest.TestCase):
         self.target = "demo-device"
         self.implementation.write_text("second\n", encoding="utf-8")
         self.assertNotEqual(before, self._identity())
+
+    def test_named_profile_and_its_kconfig_actions_change_identity(self) -> None:
+        """Different profile selections must never share a device kernel suffix."""
+        default = self._identity()
+        common: dict[str, Any] = {
+            "target": self.target,
+            "linux_recipe": self.linux_recipe,
+            "bootstrap_recipe": self.bootstrap_recipe,
+            "rootfs": self.rootfs,
+            "rootfs_receipt": self.rootfs_receipt,
+            "kbuild_implementation": kbuild_state.implementation_identity(
+                [("scripts/implementation.py", self.implementation)]
+            ),
+            "arch": self.arch,
+            "defconfig": self.defconfig,
+            "dtb": self.dtb,
+        }
+        named = device_state.device_kernel_identity(
+            **common,
+            profile="usb-host-lab",
+            config_enable=("CONFIG_USB",),
+            config_disable=("CONFIG_USB_GADGET",),
+        )
+        changed_actions = device_state.device_kernel_identity(
+            **common,
+            profile="usb-host-lab",
+            config_enable=("CONFIG_USB_HID",),
+            config_disable=("CONFIG_USB_GADGET",),
+        )
+
+        self.assertNotEqual(default, named)
+        self.assertNotEqual(named, changed_actions)
 
     def test_invalid_identity_inputs_fail_closed(self) -> None:
         """The helper cannot silently label a kernel from an incomplete closure."""

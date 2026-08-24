@@ -44,9 +44,15 @@ from .config import (
 )
 from .container import image_identifier, image_ready, require_podman, setup
 from .output import RunReporter, silence_broken_pipe
+from .prune import (
+    discard_obsolete_apks,
+    discard_obsolete_rootfs,
+    discard_superseded_profile_logs,
+)
 from .workspace import (
     WorkspaceSnapshot,
     add_source_path,
+    discard_staged_workspace_snapshot,
     stage_workspace_snapshot,
     target_workspace_snapshot,
     workspace_snapshot,
@@ -75,6 +81,21 @@ PACKAGE_DOCUMENTS = {
 }
 
 
+def _profile_command(command: str, target: str, profile: str | None) -> str:
+    """Render the exact public command for one default or named profile."""
+    rendered = f"./fplinux {command} {target}"
+    if profile is not None:
+        rendered += f" --profile {profile}"
+    return rendered
+
+
+def _profile_log_target(target: str, profile: str | None) -> str:
+    """Keep one profile's persistent command logs below its target slot."""
+    if profile is None:
+        return target
+    return f"{target}/profiles/{profile}"
+
+
 def _bundle_manifest(bundle: CurrentBundle) -> dict[str, Any]:
     """Decode manifest bytes already validated by the immutable bundle resolver."""
     manifest = json.loads(bundle.manifest_bytes)
@@ -86,17 +107,20 @@ def _bundle_manifest(bundle: CurrentBundle) -> dict[str, Any]:
 
 def _resolve_target_bundle(
     target: str,
+    profile: str | None = None,
 ) -> tuple[CurrentBundle, dict[str, Any]]:
     """Resolve the current bundle pointer exactly once."""
     try:
         bundle = resolve_current_bundle(
             ROOT / ".cache/out",
             target,
+            profile,
         )
         return bundle, _bundle_manifest(bundle)
     except (BundleStateError, OSError, UnicodeDecodeError, ValueError) as error:
         fail(
-            f"current build is missing or invalid; rebuild it: ./fplinux build {target} ({error})"
+            "current build is missing or invalid; rebuild it: "
+            f"{_profile_command('build', target, profile)} ({error})"
         )
 
 
@@ -116,12 +140,14 @@ def _matching_target_bundle(
     target: str,
     identity: BuildIdentity | None,
     image_relative: str,
+    profile: str | None = None,
 ) -> tuple[CurrentBundle, dict[str, Any]] | None:
     """Return only a fully valid current generation for the exact causal inputs."""
     try:
         bundle = resolve_current_bundle(
             ROOT / ".cache/out",
             target,
+            profile,
         )
         manifest = _bundle_manifest(bundle)
     except (BundleStateError, OSError, UnicodeDecodeError, ValueError):
@@ -535,6 +561,7 @@ def _build_container_command(  # noqa: PLR0913
     logs: Path,
     log_environment: dict[str, str],
     image_recipe: str,
+    profile: str | None = None,
 ) -> list[str]:
     """Return the exact target-build argv with only narrow explicit mounts."""
     log_arguments = [
@@ -584,6 +611,7 @@ def _build_container_command(  # noqa: PLR0913
         "fplinux_cli.builder",
         "--target",
         target,
+        *(["--profile", profile] if profile is not None else []),
         "--jobs",
         str(jobs),
     ]
@@ -595,24 +623,35 @@ def _print_build_result(
     release: dict[str, Any],
     *,
     cached: bool,
+    profile: str | None = None,
 ) -> None:
     image = bundle.path / release["image"]
     if image.is_symlink() or not image.is_file():
         fail(f"current bundle image is missing or invalid: {image}")
     suffix = " (cached)" if cached else ""
     try:
-        print(f"build {target}: OK{suffix}", flush=True)
+        label = f"build {target}"
+        if profile is not None:
+            label += f" --profile {profile}"
+        print(f"{label}: OK{suffix}", flush=True)
         print(f"output: {bundle.path.relative_to(ROOT)}", flush=True)
         print(f"ramboot.bin SHA256: {sha256_file(image)}", flush=True)
     except BrokenPipeError:
         silence_broken_pipe(sys.stdout)
 
 
-def build(target: str, jobs: int, *, verbose: bool = False, offline: bool = False) -> None:
+def build(
+    target: str,
+    jobs: int,
+    *,
+    profile: str | None = None,
+    verbose: bool = False,
+    offline: bool = False,
+) -> None:
     if jobs < 1:
         fail("--jobs must be positive")
     release = load_release(target)
-    snapshot = target_workspace_snapshot(target)
+    snapshot = target_workspace_snapshot(target, profile)
     container_lock = load_container_lock()
     image_recipe = container_image_recipe_digest(container_lock)
     cache = ROOT / ".cache"
@@ -621,6 +660,7 @@ def build(target: str, jobs: int, *, verbose: bool = False, offline: bool = Fals
         target,
         identity,
         release["image"],
+        profile,
     )
     if current is not None:
         bundle, _manifest = current
@@ -628,13 +668,31 @@ def build(target: str, jobs: int, *, verbose: bool = False, offline: bool = Fals
             cache / "out",
             target,
             bundle,
+            profile,
         )
-        reporter = RunReporter.create("build", target=target, verbose=verbose)
-        _print_build_result(target, bundle, release, cached=True)
+        discard_obsolete_rootfs(cache)
+        discard_obsolete_apks(cache)
+        reporter = RunReporter.create(
+            "build",
+            target=_profile_log_target(target, profile),
+            verbose=verbose,
+        )
+        _print_build_result(target, bundle, release, cached=True, profile=profile)
         reporter.finish()
+        if profile is not None:
+            discard_superseded_profile_logs(
+                cache,
+                "build",
+                profile=profile,
+                target=target,
+            )
         return
 
-    reporter = RunReporter.create("build", target=target, verbose=verbose)
+    reporter = RunReporter.create(
+        "build",
+        target=_profile_log_target(target, profile),
+        verbose=verbose,
+    )
     podman = require_podman()
     lock = container_lock["oci"]
     image = container_image_reference(container_lock, image_recipe)
@@ -656,46 +714,60 @@ def build(target: str, jobs: int, *, verbose: bool = False, offline: bool = Fals
     output = _ensure_build_directory(cache / "out")
     with reporter.stage("workspace"):
         workspace = stage_workspace_snapshot(snapshot)
-
-    log_environment = reporter.container_environment("/logs")
-    with reporter.stage("container", passthrough=True, show_tail=False) as stage:
-        stage.run(
-            _build_container_command(
-                podman,
-                target=target,
-                jobs=jobs,
-                platform=lock["platform"],
-                image=image_identity,
-                offline=offline,
-                snapshot=snapshot,
-                workspace=workspace,
-                downloads=downloads,
-                apk_signing=apk_signing,
-                apks=apks,
-                rootfs=rootfs,
-                linux=linux,
-                output=output,
-                logs=reporter.root,
-                log_environment=log_environment,
-                image_recipe=image_recipe,
+    try:
+        log_environment = reporter.container_environment("/logs")
+        with reporter.stage("container", passthrough=True, show_tail=False) as stage:
+            stage.run(
+                _build_container_command(
+                    podman,
+                    target=target,
+                    profile=profile,
+                    jobs=jobs,
+                    platform=lock["platform"],
+                    image=image_identity,
+                    offline=offline,
+                    snapshot=snapshot,
+                    workspace=workspace,
+                    downloads=downloads,
+                    apk_signing=apk_signing,
+                    apks=apks,
+                    rootfs=rootfs,
+                    linux=linux,
+                    output=output,
+                    logs=reporter.root,
+                    log_environment=log_environment,
+                    image_recipe=image_recipe,
+                )
             )
+        identity = _build_identity(snapshot, image_recipe, cache)
+        current = _matching_target_bundle(
+            target,
+            identity,
+            release["image"],
+            profile,
         )
-    identity = _build_identity(snapshot, image_recipe, cache)
-    current = _matching_target_bundle(
-        target,
-        identity,
-        release["image"],
-    )
-    if current is None:
-        fail("build completed without publishing an exact valid current bundle")
-    bundle, _manifest = current
-    discard_superseded_bundle_generations(
-        output,
-        target,
-        bundle,
-    )
-    _print_build_result(target, bundle, release, cached=False)
-    reporter.finish()
+        if current is None:
+            fail("build completed without publishing an exact valid current bundle")
+        bundle, _manifest = current
+        discard_superseded_bundle_generations(
+            output,
+            target,
+            bundle,
+            profile,
+        )
+        discard_obsolete_rootfs(cache)
+        discard_obsolete_apks(cache)
+        _print_build_result(target, bundle, release, cached=False, profile=profile)
+        reporter.finish()
+        if profile is not None:
+            discard_superseded_profile_logs(
+                cache,
+                "build",
+                profile=profile,
+                target=target,
+            )
+    finally:
+        discard_staged_workspace_snapshot(snapshot, workspace)
 
 
 def target_archive_file(target: str, relative: str) -> tuple[str, Path]:
@@ -864,9 +936,11 @@ def package_target(target: str, *, candidate: bool = False) -> None:
     print(f"ramboot.bin SHA256: {image_digest}")
 
 
-def run_target(target: str) -> None:
+def run_target(target: str, *, profile: str | None = None) -> None:
     """Run the fixed shared runner from a successful target bundle."""
-    bundle, _manifest = _resolve_target_bundle(target)
+    if profile is not None:
+        load_target(target, profile)
+    bundle, _manifest = _resolve_target_bundle(target, profile)
     runner = bundle.path / "runner/run.py"
     if runner.is_symlink() or not runner.is_file():
         fail(f"current bundle has no valid runner: {runner}")

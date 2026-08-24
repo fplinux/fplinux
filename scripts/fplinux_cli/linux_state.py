@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -38,20 +39,44 @@ def _require_digest(value: object, field: str) -> str:
 
 
 def _require_directory(path: Path, field: str) -> Path:
-    if not path.is_dir():
+    try:
+        metadata = path.lstat()
+    except OSError as error:
+        raise LinuxStateError(f"{field} is missing or invalid: {path}") from error
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
         raise LinuxStateError(f"{field} is missing or invalid: {path}")
     return path
 
 
+def _ensure_real_directory(path: Path, field: str) -> Path:
+    """Create one cache component only when it is absent, never through a symlink."""
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        try:
+            path.mkdir()
+        except OSError as error:
+            raise LinuxStateError(f"{field} cannot be created: {path}") from error
+    except OSError as error:
+        raise LinuxStateError(f"{field} cannot be inspected: {path}") from error
+    else:
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            raise LinuxStateError(f"{field} is missing or invalid: {path}")
+        return path
+    return _require_directory(path, field)
+
+
 def ensure_sources_directory(cache: Path) -> Path:
     """Create and return the fixed prepared-Linux cache directory."""
-    sources = Path(cache) / "linux" / "sources"
+    cache = Path(cache)
     try:
-        sources.mkdir(parents=True, exist_ok=True)
+        cache.mkdir(parents=True, exist_ok=True)
     except OSError as error:
-        message = f"prepared Linux cache directory cannot be created: {sources}"
+        message = f"prepared Linux cache directory cannot be created: {cache}"
         raise LinuxStateError(message) from error
-    return _require_directory(sources, "prepared Linux cache directory")
+    _require_directory(cache, "prepared Linux cache root")
+    linux = _ensure_real_directory(cache / "linux", "prepared Linux cache directory")
+    return _ensure_real_directory(linux / "sources", "prepared Linux cache directory")
 
 
 def inspect_prepared_linux(source: Path, expected_recipe: str) -> PreparedLinuxState | None:
@@ -98,9 +123,14 @@ def publish_prepared_linux(source: Path, staging: Path) -> None:
     """Replace the old prepared tree with the completed staging tree."""
     source = Path(source)
     staging = _require_directory(Path(staging), "prepared Linux staging tree")
+    _require_directory(source.parent, "prepared Linux destination parent")
     try:
+        if source.is_symlink():
+            raise LinuxStateError(f"prepared Linux destination is missing or invalid: {source}")
         if source.exists():
+            _require_directory(source, "prepared Linux destination")
             shutil.rmtree(source)
+        _require_directory(source.parent, "prepared Linux destination parent")
         staging.replace(source)
     except OSError as error:
         raise LinuxStateError(f"prepared Linux tree could not be published: {source}") from error

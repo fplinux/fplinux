@@ -20,10 +20,13 @@ if TYPE_CHECKING:
 _LOCK_FILENAME = ".fplinux-cache.lock"
 
 
-def _owner_text(command: str, target: str | None) -> str:
+def _owner_text(command: str, target: str | None, profile: str | None) -> str:
     """Render the short status shown to a command that has to wait."""
     started = datetime.now(UTC).isoformat(timespec="seconds")
-    return f"command={command} target={target or '-'} pid={os.getpid()} started={started}"
+    return (
+        f"command={command} target={target or '-'} profile={profile or '-'} "
+        f"pid={os.getpid()} started={started}"
+    )
 
 
 def _read_owner(descriptor: int) -> str:
@@ -44,6 +47,7 @@ def cache_lock(
     exclusive: bool,
     command: str,
     target: str | None,
+    profile: str | None = None,
 ) -> Iterator[None]:
     """Hold the global cache flock and report one blocking owner, if any."""
     cache_root.mkdir(parents=True, exist_ok=True)
@@ -68,7 +72,7 @@ def cache_lock(
             fcntl.flock(descriptor, operation)
             waited = True
 
-        _write_owner(descriptor, _owner_text(command, target))
+        _write_owner(descriptor, _owner_text(command, target, profile))
         if not exclusive:
             # ``run`` and ``console`` replace this process with the runner.
             # Keep their shared flock alive until that process exits.

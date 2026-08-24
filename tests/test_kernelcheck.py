@@ -85,6 +85,7 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
             "linux": {
                 "arch": "arm",
                 "analysis_cross_compile": "arm-linux-gnueabihf-",
+                "config_script": "scripts/config",
                 "patches": [],
             }
         }
@@ -112,6 +113,7 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
             mock.patch.object(kernelcheck, "CACHE", self.cache),
             mock.patch.object(kernelcheck, "load_sources", return_value={}),
             mock.patch.object(kernelcheck, "discover_targets", return_value=(self.target,)),
+            mock.patch.object(kernelcheck, "discover_profiles", return_value=()),
             mock.patch.object(
                 kernelcheck,
                 "target_context",
@@ -148,6 +150,117 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
 
         self._run_check()
         self.assertFalse(stale.exists())
+
+    def test_profile_applies_actions_without_comparing_the_base_defconfig(self) -> None:
+        """A profile check uses its own effective .config, not the default canonical file."""
+        profile = "host"
+        output = self.cache / "analysis/sparse/test-target/profiles/host/work"
+        config_script = self.source / "scripts/config"
+        config_script.write_text("#!/bin/sh\n")
+        target_config = {
+            "linux": {
+                "patches": [],
+                "copies": [],
+                "appends": [],
+                "config_enable": ["CONFIG_PROFILE_ENABLED"],
+                "config_disable": ["CONFIG_PROFILE_DISABLED"],
+            }
+        }
+        calls: list[list[str]] = []
+
+        def run_command(command: list[str]) -> None:
+            calls.append(command)
+            if command[0] == str(config_script):
+                (output / ".config").write_text(
+                    "CONFIG_TEST=y\nCONFIG_PROFILE_ENABLED=y\n"
+                    "# CONFIG_PROFILE_DISABLED is not set\n"
+                )
+            if command[-1:] == ["savedefconfig"]:
+                self.fail("profile configuration must not be compared with base defconfig")
+
+        def target_source(_target: str, _relative: str) -> Path:
+            return self.defconfig
+
+        with (
+            mock.patch.object(kernelcheck, "CACHE", self.cache),
+            mock.patch.object(kernelcheck, "load_sources", return_value={}),
+            mock.patch.object(kernelcheck, "discover_targets", return_value=(self.target,)),
+            mock.patch.object(kernelcheck, "discover_profiles", return_value=(profile,)),
+            mock.patch.object(
+                kernelcheck,
+                "target_context",
+                return_value=(target_config, self.platform, self.source, self.prepared_linux),
+            ),
+            mock.patch.object(kernelcheck, "target_source", side_effect=target_source),
+            mock.patch.object(kernelcheck, "target_defconfig_path", return_value=self.defconfig),
+            mock.patch.object(kernelcheck, "projected_sources", return_value=[self.projected]),
+            mock.patch.object(kernelcheck, "sparse_targets", return_value=["drivers/test-a.o"]),
+            mock.patch(
+                "fplinux_cli.kernelcheck.linux_state.require_prepared_linux",
+                return_value=self.prepared_linux,
+            ),
+            mock.patch.object(kernelcheck, "run", side_effect=run_command),
+            mock.patch.object(kernelcheck, "run_checkpatch"),
+            mock.patch.object(kernelcheck, "run_dtbs_check", return_value=""),
+        ):
+            kernelcheck.check_contexts(None, profile)
+
+        profile_command = [
+            str(config_script),
+            "--file",
+            str(output / ".config"),
+            "--enable",
+            "PROFILE_ENABLED",
+            "--disable",
+            "PROFILE_DISABLED",
+        ]
+        self.assertIn(profile_command, calls)
+        self.assertFalse(any(command[-1:] == ["savedefconfig"] for command in calls))
+
+
+class KernelProfileSelectionTests(unittest.TestCase):
+    """Keep default and explicitly named kernel contexts separate."""
+
+    def test_default_ignores_declared_profiles_and_named_is_narrow(self) -> None:
+        """Only an explicit name selects declared profile contexts."""
+        profiles = {"first": ("host",), "second": ("host", "diagnostic")}
+        with (
+            mock.patch.object(kernelcheck, "discover_targets", return_value=("first", "second")),
+            mock.patch.object(
+                kernelcheck,
+                "discover_profiles",
+                side_effect=AssertionError("default kernel check must not inspect profiles"),
+            ),
+        ):
+            self.assertEqual(
+                kernelcheck.target_profiles(),
+                (
+                    ("first", None),
+                    ("second", None),
+                ),
+            )
+
+        with (
+            mock.patch.object(kernelcheck, "discover_targets", return_value=("first", "second")),
+            mock.patch.object(
+                kernelcheck,
+                "discover_profiles",
+                side_effect=lambda target: profiles[target],
+            ),
+        ):
+            self.assertEqual(
+                kernelcheck.target_profiles("host"),
+                (("first", "host"), ("second", "host")),
+            )
+
+    def test_unknown_profile_fails_before_analyzer_work(self) -> None:
+        """An unknown profile cannot start an analyzer or create its cache slot."""
+        with (
+            mock.patch.object(kernelcheck, "discover_targets", return_value=("first",)),
+            mock.patch.object(kernelcheck, "discover_profiles", return_value=()),
+            self.assertRaisesRegex(SystemExit, "not declared by any target"),
+        ):
+            kernelcheck.target_profiles("missing")
 
 
 if __name__ == "__main__":

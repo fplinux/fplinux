@@ -169,8 +169,38 @@ def stream(process: subprocess.Popen[str], marker: str, marker_seen: threading.E
             marker_seen.set()
 
 
-def run(bundle: Path, runtime: dict[str, Any], session: dict[str, Any]) -> None:
-    """Execute the fixed RAM-only UMS9117 sequence."""
+def complete_linux_handoff(
+    runtime: dict[str, Any],
+    session: dict[str, Any] | None,
+    linux_usb: dict[str, int],
+) -> None:
+    """Finish one already-observed handoff through its declared host transport."""
+    if runtime["transport"] == "none":
+        print(
+            "Bootstrap handoff marker observed; no host-side transport is available "
+            "to confirm Linux startup."
+        )
+        return
+
+    if session is None:
+        fail("USB-NCM transport has no prepared SSH session")
+    linux_id = f"{linux_usb['vendor_id']:04x}:{linux_usb['product_id']:04x}"
+    print(
+        "Bootstrap released USB; waiting up to "
+        f"{linux_usb['wait_seconds']} seconds for Linux USB-NCM {linux_id}."
+    )
+    transport_module = importlib.import_module("ssh_transport")
+    ready = transport_module.wait_for_bound_session(session)
+    transport_module.open_shell(ready)
+    fail("SSH client returned without replacing the runner")
+
+
+def run(
+    bundle: Path,
+    runtime: dict[str, Any],
+    session: dict[str, Any] | None,
+) -> None:
+    """Execute the fixed RAM-only UMS9117 sequence for one declared transport."""
     assets = runtime["assets"]
     if set(assets) != {"fdl1", "pinmap", "keymap"}:
         fail("runtime assets do not match the UMS9117 platform contract")
@@ -190,7 +220,7 @@ def run(bundle: Path, runtime: dict[str, Any], session: dict[str, Any]) -> None:
     if stdbuf is None:
         fail("GNU stdbuf is required (install coreutils before starting the RAM loader)")
 
-    image = Path(session["image"])
+    image = Path(session["image"]) if session is not None else bundle / runtime["image"]
     fdl1 = bundle / assets["fdl1"]
     loader = bundle / tools["loader"]
     bridge = bundle / tools["bridge"]
@@ -235,8 +265,9 @@ def run(bundle: Path, runtime: dict[str, Any], session: dict[str, Any]) -> None:
     try:
         result = subprocess.run(loader_argv, check=False)
     finally:
-        transport_module = importlib.import_module("ssh_transport")
-        transport_module.remove_personalized_image(session)
+        if session is not None:
+            transport_module = importlib.import_module("ssh_transport")
+            transport_module.remove_personalized_image(session)
     if result.returncode:
         fail(f"RAM loader exited with status {result.returncode}")
 
@@ -297,12 +328,4 @@ def run(bundle: Path, runtime: dict[str, Any], session: dict[str, Any]) -> None:
     finally:
         stop(bridge_process)
 
-    linux_id = f"{linux_usb['vendor_id']:04x}:{linux_usb['product_id']:04x}"
-    print(
-        "Bootstrap released USB; waiting up to "
-        f"{linux_usb['wait_seconds']} seconds for Linux USB-NCM {linux_id}."
-    )
-    transport_module = importlib.import_module("ssh_transport")
-    ready = transport_module.wait_for_bound_session(session)
-    transport_module.open_shell(ready)
-    fail("SSH client returned without replacing the runner")
+    complete_linux_handoff(runtime, session, linux_usb)

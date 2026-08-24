@@ -110,6 +110,37 @@ def _declared_packages(config: Mapping[str, object], owner: str, layer: str) -> 
     return result
 
 
+def _profile_rootfs(config: Mapping[str, object]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Read the optional, already selected target-profile rootfs delta."""
+    table = config.get("rootfs")
+    if table is None:
+        return (), ()
+    if not isinstance(table, Mapping) or set(table) != {"packages", "exclude_packages"}:
+        _fail("target profile rootfs must contain exactly packages and exclude_packages")
+
+    def read(field: str) -> tuple[str, ...]:
+        raw = table.get(field)
+        if not isinstance(raw, list):
+            _fail(f"target profile rootfs {field} must be an array")
+        result = tuple(
+            _package_id(package, f"target profile rootfs {field}[{index}]")
+            for index, package in enumerate(raw)
+        )
+        if len(set(result)) != len(result):
+            _fail(f"target profile rootfs {field} must not contain duplicates")
+        return result
+
+    packages = read("packages")
+    exclude_packages = read("exclude_packages")
+    overlap = set(packages) & set(exclude_packages)
+    if overlap:
+        _fail(
+            "target profile rootfs packages/exclude_packages conflict: "
+            + ", ".join(sorted(overlap))
+        )
+    return packages, exclude_packages
+
+
 def _canonical_packages(packages: Sequence[str], root: Path) -> tuple[str, ...]:
     result = tuple(sorted(_package_id(package, "FPLinux package") for package in packages))
     if len(set(result)) != len(result):
@@ -129,8 +160,7 @@ def selected_packages(
     target_config: Mapping[str, object],
     root: Path = ROOT,
 ) -> tuple[str, ...]:
-    """Resolve the exact common and platform rootfs package ownership layers."""
-    del target_config
+    """Resolve common/platform packages plus one selected target-profile delta."""
     owners: dict[str, str] = {}
     for owner, packages in (
         ("common", COMMON_PACKAGES),
@@ -141,6 +171,23 @@ def selected_packages(
             if previous is not None:
                 _fail(f"package {package} is owned by both {previous} and {owner}")
             owners[package] = owner
+    packages, exclude_packages = _profile_rootfs(target_config)
+    unknown_excludes = set(exclude_packages) - set(owners)
+    if unknown_excludes:
+        _fail(
+            "target profile rootfs excludes a package not owned by common/platform: "
+            + ", ".join(sorted(unknown_excludes))
+        )
+    duplicate_additions = set(packages) & set(owners)
+    if duplicate_additions:
+        _fail(
+            "target profile rootfs packages duplicate common/platform ownership: "
+            + ", ".join(sorted(duplicate_additions))
+        )
+    for package in exclude_packages:
+        del owners[package]
+    for package in packages:
+        owners[package] = "profile"
     return _canonical_packages(tuple(owners), root)
 
 

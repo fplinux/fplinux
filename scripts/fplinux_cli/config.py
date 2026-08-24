@@ -10,10 +10,12 @@ import tomllib
 from pathlib import Path
 from typing import Any, Protocol
 
+from .alpine_state import COMMON_PACKAGES
 from .common import ROOT, fail, relative_name
 
 TARGET_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
 VALUE_NAME = re.compile(r"[A-Za-z0-9._-]+")
+KCONFIG_SYMBOL = re.compile(r"CONFIG_[A-Z0-9_]+")
 
 
 def exact_table(value: object, keys: set[str], name: str) -> dict[str, Any]:
@@ -59,6 +61,15 @@ def package_array(value: object, name: str) -> list[str]:
         relative_value(package, name)
         if VALUE_NAME.fullmatch(package) is None:
             fail(f"{name} must contain only value-name package identifiers")
+    return result
+
+
+def kconfig_symbol_array(value: object, name: str) -> list[str]:
+    """Require unique Kconfig symbols, without assignments or values."""
+    result = string_array(value, name, allow_empty=True)
+    for symbol in result:
+        if KCONFIG_SYMBOL.fullmatch(symbol) is None:
+            fail(f"{name} must contain only CONFIG_* symbols")
     return result
 
 
@@ -243,8 +254,196 @@ def target_defconfig_path(target: str) -> Path:
     return target_directory(target) / "kernel/defconfig"
 
 
-def load_target(target: str) -> dict[str, Any]:
-    """Load one exact target definition and materialize its platform contract."""
+def profiles_directory(target: str) -> Path:
+    """Return the optional, target-owned root for build profiles."""
+    path = target_directory(target) / "profiles"
+    if path.is_symlink() or (path.exists() and not path.is_dir()):
+        fail(f"target profiles directory is invalid: {path}")
+    return path
+
+
+def profile_directory(target: str, profile: str) -> Path:
+    """Return one validated target-owned profile directory."""
+    if not isinstance(profile, str) or TARGET_NAME.fullmatch(profile) is None:
+        fail(f"invalid profile name: {profile}")
+    path = profiles_directory(target) / profile
+    if path.is_symlink() or not path.is_dir():
+        fail(f"unknown profile: {target}/{profile}")
+    return path
+
+
+def profile_manifest_path(target: str, profile: str) -> Path:
+    """Return the fixed manifest path for one target profile."""
+    path = profile_directory(target, profile) / "profile.toml"
+    if path.is_symlink() or not path.is_file():
+        fail(f"profile manifest is missing or invalid: {path}")
+    return path
+
+
+def profile_source_path(target: str, profile: str, relative: str) -> Path:
+    """Resolve one regular profile source without following a symlink."""
+    source = relative_value(relative, "profile source")
+    root = profile_directory(target, profile)
+    path = root
+    for part in Path(source).parts:
+        path /= part
+        if path.is_symlink():
+            fail(f"profile source must not be a symlink: {path}")
+    if not path.is_file():
+        fail(f"profile source is missing or invalid: {path}")
+    return path
+
+
+def discover_profiles(target: str) -> tuple[str, ...]:
+    """Discover only complete, non-symlinked profile definitions for one target."""
+    root = profiles_directory(target)
+    if not root.exists():
+        return ()
+    profiles: list[str] = []
+    for path in sorted(root.iterdir()):
+        if path.is_symlink() or not path.is_dir():
+            fail(f"target profile entry is invalid: {path}")
+        if TARGET_NAME.fullmatch(path.name) is None:
+            fail(f"invalid profile name: {path.name}")
+        manifest = path / "profile.toml"
+        if manifest.is_symlink() or not manifest.is_file():
+            fail(f"profile manifest is missing or invalid: {manifest}")
+        profiles.append(path.name)
+    return tuple(profiles)
+
+
+def _profile_relative_source(profile: str, source: str) -> str:
+    """Project one profile-relative source into the target-owned source tree."""
+    return f"profiles/{profile}/{relative_value(source, 'profile source')}"
+
+
+def _profile_linux_sources(target: str, profile: str, linux: dict[str, Any]) -> None:
+    """Require every profile projection input to be a direct regular file."""
+    for relative in linux["patches"]:
+        profile_source_path(target, profile, relative)
+    for key in ("copies", "appends"):
+        for step in linux[key]:
+            profile_source_path(target, profile, step["source"])
+
+
+def _profile_steps(profile: str, steps: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Turn profile-local projection inputs into target-relative inputs."""
+    return [
+        {
+            "source": _profile_relative_source(profile, step["source"]),
+            "destination": step["destination"],
+        }
+        for step in steps
+    ]
+
+
+def _reject_duplicate_steps(steps: list[dict[str, str]], name: str) -> None:
+    """Reject an operation that would apply the same projection more than once."""
+    operations = {(step["source"], step["destination"]) for step in steps}
+    if len(operations) != len(steps):
+        fail(f"{name} must not contain duplicate operations")
+
+
+def load_profile(target: str, profile: str) -> dict[str, Any]:
+    """Load one exact target-owned build profile without applying it."""
+    path = profile_manifest_path(target, profile)
+    try:
+        with path.open("rb") as stream:
+            raw = tomllib.load(stream)
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        fail(f"profile manifest is invalid: {path}: {error}")
+    config = exact_table(raw, {"name", "linux", "rootfs", "runtime"}, f"profile {profile}")
+    if config.get("name") != profile:
+        fail(f"profile name does not match its directory: {path}")
+
+    linux = exact_table(
+        config.get("linux"),
+        {"config_enable", "config_disable", "patches", "copies", "appends"},
+        f"profile {profile} linux",
+    )
+    config_enable = kconfig_symbol_array(
+        linux.get("config_enable"), f"profile {profile} linux config_enable"
+    )
+    config_disable = kconfig_symbol_array(
+        linux.get("config_disable"), f"profile {profile} linux config_disable"
+    )
+    overlap = set(config_enable) & set(config_disable)
+    if overlap:
+        fail(
+            f"profile {profile} linux config_enable/config_disable conflict: "
+            + ", ".join(sorted(overlap))
+        )
+    patches = path_array(
+        linux.get("patches"), f"profile {profile} linux patches", allow_empty=True
+    )
+    copies = path_steps(linux.get("copies"), f"profile {profile} linux copies")
+    appends = path_steps(linux.get("appends"), f"profile {profile} linux appends")
+    _reject_duplicate_steps(copies, f"profile {profile} linux copies")
+    _reject_duplicate_steps(appends, f"profile {profile} linux appends")
+    copy_destinations = [step["destination"] for step in copies]
+    if len(copy_destinations) != len(set(copy_destinations)):
+        fail(f"profile {profile} linux copies must not target one destination twice")
+    normalized_linux = {
+        "config_enable": config_enable,
+        "config_disable": config_disable,
+        "patches": patches,
+        "copies": copies,
+        "appends": appends,
+    }
+    _profile_linux_sources(target, profile, normalized_linux)
+
+    rootfs = exact_table(
+        config.get("rootfs"),
+        {"packages", "exclude_packages"},
+        f"profile {profile} rootfs",
+    )
+    packages = package_array(rootfs.get("packages"), f"profile {profile} rootfs packages")
+    exclude_packages = package_array(
+        rootfs.get("exclude_packages"), f"profile {profile} rootfs exclude_packages"
+    )
+    package_overlap = set(packages) & set(exclude_packages)
+    if package_overlap:
+        fail(
+            f"profile {profile} rootfs packages/exclude_packages conflict: "
+            + ", ".join(sorted(package_overlap))
+        )
+
+    runtime = exact_table(config.get("runtime"), {"transport"}, f"profile {profile} runtime")
+    transport = runtime.get("transport")
+    if transport not in {"usb-ncm", "none"}:
+        fail(f"profile {profile} runtime transport must be usb-ncm or none")
+
+    return {
+        "name": profile,
+        "linux": normalized_linux,
+        "rootfs": {"packages": packages, "exclude_packages": exclude_packages},
+        "runtime": {"transport": transport},
+    }
+
+
+def _validate_profile_rootfs_ownership(
+    profile: str, profile_rootfs: dict[str, Any], platform: dict[str, Any]
+) -> None:
+    """Reject profile rootfs changes that do not describe one base-package delta."""
+    owned = set(COMMON_PACKAGES) | set(platform["rootfs"]["packages"])
+    additions = set(profile_rootfs["packages"])
+    excludes = set(profile_rootfs["exclude_packages"])
+    unknown_excludes = excludes - owned
+    if unknown_excludes:
+        fail(
+            f"profile {profile} rootfs excludes a package not owned by common/platform: "
+            + ", ".join(sorted(unknown_excludes))
+        )
+    duplicate_additions = additions & owned
+    if duplicate_additions:
+        fail(
+            f"profile {profile} rootfs packages duplicate common/platform ownership: "
+            + ", ".join(sorted(duplicate_additions))
+        )
+
+
+def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
+    """Load one target definition and, when selected, apply one exact profile."""
     path = target_directory(target) / "target.toml"
     if path.is_symlink() or not path.is_file():
         fail(f"unknown target: {target}")
@@ -339,7 +538,57 @@ def load_target(target: str) -> dict[str, Any]:
     for key in ("session_name", "handoff_marker", "boot_instructions"):
         nonempty_string(adapter.get(key), f"target adapter {key}")
 
+    selected_profile: dict[str, Any] | None = None
+    if profile is not None:
+        selected_profile = load_profile(target, profile)
+
     platform = load_platform(str(config["platform"]))
+    if selected_profile is not None:
+        _validate_profile_rootfs_ownership(str(profile), selected_profile["rootfs"], platform)
+    profile_linux = (
+        selected_profile["linux"]
+        if selected_profile is not None
+        else {
+            "config_enable": [],
+            "config_disable": [],
+            "patches": [],
+            "copies": [],
+            "appends": [],
+        }
+    )
+    copied_destinations = {
+        step["destination"] for step in [*platform["linux"]["copies"], *linux["copies"]]
+    }
+    profile_copy_destinations = {step["destination"] for step in profile_linux["copies"]}
+    copy_conflicts = copied_destinations & profile_copy_destinations
+    if copy_conflicts:
+        fail(
+            f"profile {profile} linux copies conflict with an existing copy destination: "
+            + ", ".join(sorted(copy_conflicts))
+        )
+    config["linux"] = {
+        **linux,
+        "config_enable": profile_linux["config_enable"],
+        "config_disable": profile_linux["config_disable"],
+        "patches": [
+            *linux["patches"],
+            *[
+                _profile_relative_source(str(profile), source)
+                for source in profile_linux["patches"]
+            ],
+        ],
+        "copies": [*linux["copies"], *_profile_steps(str(profile), profile_linux["copies"])],
+        "appends": [
+            *linux["appends"],
+            *_profile_steps(str(profile), profile_linux["appends"]),
+        ],
+    }
+    config["rootfs"] = (
+        selected_profile["rootfs"]
+        if selected_profile is not None
+        else {"packages": [], "exclude_packages": []}
+    )
+    config["profile"] = profile
     platform_bootstrap = platform["bootstrap"]
     platform_runtime = platform["runtime"]
     config["bootstrap"] = {
@@ -353,11 +602,15 @@ def load_target(target: str) -> dict[str, Any]:
         "toolchain": platform_bootstrap["toolchain"],
         "lto": platform_bootstrap["lto"],
     }
+    transport = "usb-ncm"
+    if selected_profile is not None:
+        transport = selected_profile["runtime"]["transport"]
     config["runtime"] = {
         "fdl1_load_address": platform_runtime["fdl1_load_address"],
         "assets": asset_bundle_paths(target_asset_lock_path(target)),
         "adapter": {**platform_runtime["adapter"], **adapter},
         "usb": platform_runtime["usb"],
+        "transport": transport,
     }
     return config
 

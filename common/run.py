@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 ADAPTER_PATH = "runner/platform_adapter.py"
 SSH_HELPER_PATH = "runner/ssh_transport.py"
 MINIMUM_PYTHON = (3, 11)
+TRANSPORTS = frozenset({"usb-ncm", "none"})
 
 
 def fail(message: str) -> NoReturn:
@@ -48,6 +49,21 @@ def require_string(value: object, name: str) -> str:
     if not isinstance(value, str) or not value:
         fail(f"{name} must be a non-empty string")
     return value
+
+
+def require_transport(value: object) -> str:
+    """Validate the one host-side transport contract for this bundle."""
+    transport = require_string(value, "runtime transport")
+    if transport not in TRANSPORTS:
+        fail("runtime transport must be one of: none, usb-ncm")
+    return transport
+
+
+def require_optional_profile(value: object) -> str | None:
+    """Validate the selected profile identity without inventing a default."""
+    if value is None:
+        return None
+    return require_string(value, "runtime profile")
 
 
 def relative_name(value: object, name: str) -> str:
@@ -135,8 +151,10 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
         document,
         {
             "target",
+            "profile",
             "display_name",
             "platform",
+            "transport",
             "image",
             "personalization",
             "addresses",
@@ -150,6 +168,8 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
     )
     for key in ("target", "display_name", "platform"):
         root[key] = require_string(root.get(key), f"runtime {key}")
+    root["profile"] = require_optional_profile(root.get("profile"))
+    root["transport"] = require_transport(root.get("transport"))
     root["image"] = relative_name(root.get("image"), "runtime image")
 
     descriptor = require_object(
@@ -299,10 +319,11 @@ def main() -> None:
     if image.read_bytes()[:4] != b"DHTB":
         fail("RAM payload does not have a DHTB header")
     host_preflight()
-    ssh = load_module(bundle / SSH_HELPER_PATH, "ssh_transport")
-    identity = ssh.bundle_identity(bundle, runtime)
-
     if options.reconnect:
+        if runtime["transport"] != "usb-ncm":
+            fail("--reconnect is unavailable when runtime transport is none")
+        ssh = load_module(bundle / SSH_HELPER_PATH, "ssh_transport")
+        identity = ssh.bundle_identity(bundle, runtime)
         session = ssh.load_current_session(runtime["target"], identity)
         session = ssh.reacquire_bound_session(session)
         if options.exec_command is not None:
@@ -329,6 +350,8 @@ def main() -> None:
     for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
         previous_handlers[signum] = signal.signal(signum, stop_session)
     try:
+        ssh = load_module(bundle / SSH_HELPER_PATH, "ssh_transport")
+        identity = ssh.bundle_identity(bundle, runtime)
         session = ssh.prepare_session(
             image,
             runtime["personalization"],

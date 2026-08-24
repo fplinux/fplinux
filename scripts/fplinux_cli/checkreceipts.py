@@ -6,9 +6,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import tempfile
 from dataclasses import dataclass
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+from .config import TARGET_NAME
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _SCOPE_ROOT = "check-results"
 
@@ -27,6 +31,7 @@ class CheckReceiptRecipe:
     orchestration_recipe: str
     image_identity: str
     commands: tuple[tuple[str, ...], ...]
+    profile: str | None = None
 
     def payload(self) -> dict[str, object]:
         """Return the exact persisted payload for one successful check."""
@@ -37,6 +42,7 @@ class CheckReceiptRecipe:
             "orchestration_recipe": self.orchestration_recipe,
             "image_identity": self.image_identity,
             "commands": [list(command) for command in self.commands],
+            "profile": self.profile,
         }
 
 
@@ -52,8 +58,12 @@ def check_closure_entries_digest(entries: list[tuple[str, bytes, int]]) -> str:
 
 
 def receipt_path(cache_root: Path, recipe: CheckReceiptRecipe) -> Path:
-    """Return the one receipt path for a scope."""
-    return cache_root / _SCOPE_ROOT / recipe.scope / "success.json"
+    """Return the one default or named-profile receipt path for a scope."""
+    if recipe.profile is None:
+        return cache_root / _SCOPE_ROOT / recipe.scope / "success.json"
+    if TARGET_NAME.fullmatch(recipe.profile) is None:
+        raise ValueError(f"invalid receipt profile: {recipe.profile!r}")
+    return cache_root / _SCOPE_ROOT / "profiles" / recipe.profile / recipe.scope / "success.json"
 
 
 def receipt_matches(cache_root: Path, recipe: CheckReceiptRecipe) -> bool:
@@ -63,6 +73,8 @@ def receipt_matches(cache_root: Path, recipe: CheckReceiptRecipe) -> bool:
 
 def _read_payload(path: Path) -> object | None:
     """Read a receipt; unreadable or invalid JSON is a cache miss."""
+    if path.is_symlink():
+        return None
     try:
         with path.open(encoding="utf-8") as stream:
             value: object = json.load(stream)
@@ -75,14 +87,18 @@ def publish_success_receipt(cache_root: Path, recipe: CheckReceiptRecipe) -> Non
     """Atomically publish a receipt after a scope has completed successfully."""
     destination = receipt_path(cache_root, recipe)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        dir=destination.parent,
-        prefix=f".{destination.stem}.",
-        suffix=".tmp",
+    temporary = destination.parent / f".{destination.stem}.tmp"
+    descriptor = os.open(
+        temporary,
+        os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+        0o600,
     )
-    try:
-        with os.fdopen(descriptor, "wb") as stream:
+    with os.fdopen(descriptor, "wb") as stream:
+        try:
             stream.write(_canonical_json(recipe.payload()))
-        Path(temporary_name).replace(destination)
-    finally:
-        Path(temporary_name).unlink(missing_ok=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
+    temporary.replace(destination)

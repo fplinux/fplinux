@@ -6,13 +6,16 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import stat
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from . import alpine_state
 from .common import ROOT
 from .config import (
+    TARGET_NAME,
     container_image_recipe_digest,
+    discover_profiles,
     discover_targets,
     load_platform,
     load_target,
@@ -22,7 +25,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _WORKSPACE_NAMESPACES = frozenset({"quality-workspaces", "workspaces"})
-_MANAGED_NAMESPACES = _WORKSPACE_NAMESPACES | {"rootfs"}
+_MANAGED_NAMESPACES = _WORKSPACE_NAMESPACES | {"apks", "rootfs"}
 _LOG_RUN_LIMIT = 10
 _RUN_ID = re.compile(r"^\d{8}T\d{6}Z-p\d+(?:-\d+)?$")
 
@@ -163,7 +166,10 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
                 ),
             )
             for target in discover_targets()
-            for target_config in (load_target(target),)
+            for profile in (None, *discover_profiles(target))
+            for target_config in (
+                load_target(target) if profile is None else load_target(target, profile),
+            )
         }
     except (OSError, ValueError, SystemExit):
         return None
@@ -173,6 +179,16 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
 def _rootfs_entries(cache: Path) -> list[InventoryEntry]:
     """Classify immutable Alpine rootfs generations by all current target recipes."""
     rootfs = cache / "rootfs"
+    if rootfs.is_symlink():
+        return [
+            InventoryEntry(
+                "rootfs",
+                "protected",
+                "rootfs cache root is a symlink",
+                None,
+                None,
+            )
+        ]
     if not rootfs.is_dir():
         return []
     current = _current_rootfs_recipes(cache)
@@ -208,6 +224,342 @@ def _rootfs_entries(cache: Path) -> list[InventoryEntry]:
                     allocated,
                 )
             )
+    return entries
+
+
+def _current_apk_packages() -> frozenset[str] | None:
+    """Return every current aport name, or ``None`` when declarations are unavailable."""
+    try:
+        packages: set[str] = set()
+        for target in discover_targets():
+            for profile in (None, *discover_profiles(target)):
+                target_config = (
+                    load_target(target) if profile is None else load_target(target, profile)
+                )
+                platform_config = load_platform(target_config["platform"])
+                rootfs_packages = alpine_state.selected_packages(
+                    platform_config,
+                    target_config,
+                )
+                packages.update(rootfs_packages)
+                packages.update(
+                    alpine_state.bundle_packages(
+                        platform_config,
+                        target_config,
+                        rootfs_packages,
+                    )
+                )
+    except (KeyError, OSError, TypeError, ValueError, SystemExit):
+        return None
+    return frozenset(packages)
+
+
+def _apk_entries(cache: Path) -> list[InventoryEntry]:
+    """Classify one fixed cache slot for every currently declared aport."""
+    apks = cache / alpine_state.PACKAGE_CACHE_DIRECTORY
+    if apks.is_symlink():
+        return [
+            InventoryEntry(
+                alpine_state.PACKAGE_CACHE_DIRECTORY,
+                "protected",
+                "APK cache root is a symlink",
+                None,
+                None,
+            )
+        ]
+    if not apks.is_dir():
+        return []
+    current = _current_apk_packages()
+    entries: list[InventoryEntry] = []
+    for path in sorted(apks.iterdir(), key=lambda item: item.name):
+        identity = f"{alpine_state.PACKAGE_CACHE_DIRECTORY}/{path.name}"
+        if (
+            path.is_symlink()
+            or not path.is_dir()
+            or alpine_state.PACKAGE_ID.fullmatch(path.name) is None
+        ):
+            entries.append(
+                InventoryEntry(
+                    identity,
+                    "protected",
+                    "not a managed APK cache directory",
+                    None,
+                    None,
+                )
+            )
+        elif current is None:
+            entries.append(
+                InventoryEntry(
+                    identity,
+                    "protected",
+                    "current Alpine package closure is unavailable",
+                    None,
+                    None,
+                )
+            )
+        elif path.name in current:
+            entries.append(
+                InventoryEntry(
+                    identity,
+                    "protected",
+                    "current Alpine package cache",
+                    None,
+                    None,
+                )
+            )
+        else:
+            logical, allocated = _tree_size(path)
+            entries.append(
+                InventoryEntry(
+                    identity,
+                    "candidate",
+                    "superseded Alpine package cache",
+                    logical,
+                    allocated,
+                )
+            )
+    return entries
+
+
+def _declared_profiles() -> dict[str, frozenset[str]] | None:
+    """Return all target-owned profile names, or preserve cache if discovery fails."""
+    try:
+        return {target: frozenset(discover_profiles(target)) for target in discover_targets()}
+    except (OSError, ValueError, SystemExit):
+        return None
+
+
+def _profile_slot_entries(
+    root: Path,
+    identity_root: str,
+    declared: dict[str, frozenset[str]] | None,
+    *,
+    direct_profile: bool = False,
+    source_projection: bool = False,
+) -> list[InventoryEntry]:
+    """Classify managed target/profile slots without touching default target state."""
+    if not root.is_dir() or root.is_symlink():
+        return []
+    entries: list[InventoryEntry] = []
+    for target in sorted(root.iterdir(), key=lambda item: item.name):
+        if (
+            target.is_symlink()
+            or not target.is_dir()
+            or TARGET_NAME.fullmatch(target.name) is None
+        ):
+            continue
+        profiles = target if direct_profile else target / "profiles"
+        if not profiles.is_dir() or profiles.is_symlink():
+            continue
+        for path in sorted(profiles.iterdir(), key=lambda item: item.name):
+            identity = (
+                f"{identity_root}/{target.name}/{path.name}"
+                if direct_profile
+                else f"{identity_root}/{target.name}/profiles/{path.name}"
+            )
+            if path.is_symlink() or not path.is_dir() or TARGET_NAME.fullmatch(path.name) is None:
+                entries.append(
+                    InventoryEntry(
+                        identity,
+                        "protected",
+                        "not a managed profile cache directory",
+                        None,
+                        None,
+                    )
+                )
+            elif declared is None:
+                entries.append(
+                    InventoryEntry(
+                        identity,
+                        "protected",
+                        "profile declarations are unavailable",
+                        None,
+                        None,
+                    )
+                )
+            elif path.name in declared.get(target.name, frozenset()):
+                separate = (
+                    _profile_uses_separate_linux_source(target.name, path.name)
+                    if source_projection
+                    else True
+                )
+                if separate is None:
+                    entries.append(
+                        InventoryEntry(
+                            identity,
+                            "protected",
+                            "profile source integration is unavailable",
+                            None,
+                            None,
+                        )
+                    )
+                elif separate:
+                    entries.append(
+                        InventoryEntry(
+                            identity,
+                            "protected",
+                            "declared profile cache",
+                            None,
+                            None,
+                        )
+                    )
+                else:
+                    logical, allocated = _tree_size(path)
+                    entries.append(
+                        InventoryEntry(
+                            identity,
+                            "candidate",
+                            "profile now reuses the default Linux source",
+                            logical,
+                            allocated,
+                        )
+                    )
+            else:
+                logical, allocated = _tree_size(path)
+                entries.append(
+                    InventoryEntry(
+                        identity,
+                        "candidate",
+                        "orphaned managed profile cache",
+                        logical,
+                        allocated,
+                    )
+                )
+    return entries
+
+
+def _profile_uses_separate_linux_source(target: str, profile: str) -> bool | None:
+    """Return whether a profile still needs a dedicated prepared Linux tree."""
+    try:
+        default = load_target(target)
+        selected = load_target(target, profile)
+        return any(
+            default["linux"][field] != selected["linux"][field]
+            for field in ("patches", "copies", "appends")
+        )
+    except (OSError, ValueError, SystemExit, KeyError, TypeError):
+        return None
+
+
+def _profile_cache_entries(cache: Path) -> list[InventoryEntry]:
+    """Remove only orphaned profile-only cache slots in explicit CLI namespaces."""
+    declared = _declared_profiles()
+    return [
+        *_profile_slot_entries(cache / "out", "out", declared),
+        *(
+            _profile_slot_entries(
+                cache / "linux" / "profiles",
+                "linux/profiles",
+                declared,
+                direct_profile=True,
+                source_projection=True,
+            )
+        ),
+        *_profile_slot_entries(cache / "analysis" / "sparse", "analysis/sparse", declared),
+    ]
+
+
+def _profile_check_receipt_entries(cache: Path) -> list[InventoryEntry]:
+    """Classify fixed profile check receipts removed from every target declaration."""
+    root = cache / "check-results" / "profiles"
+    if not root.is_dir() or root.is_symlink():
+        return []
+    declared = _declared_profiles()
+    entries: list[InventoryEntry] = []
+    for profile in sorted(root.iterdir(), key=lambda item: item.name):
+        identity = f"check-results/profiles/{profile.name}"
+        if (
+            profile.is_symlink()
+            or not profile.is_dir()
+            or TARGET_NAME.fullmatch(profile.name) is None
+        ):
+            entries.append(
+                InventoryEntry(
+                    identity,
+                    "protected",
+                    "not a managed profile receipt directory",
+                    None,
+                    None,
+                )
+            )
+        elif declared is None:
+            entries.append(
+                InventoryEntry(
+                    identity,
+                    "protected",
+                    "profile declarations are unavailable",
+                    None,
+                    None,
+                )
+            )
+        elif any(profile.name in profiles for profiles in declared.values()):
+            entries.append(
+                InventoryEntry(
+                    identity,
+                    "protected",
+                    "declared profile check receipt",
+                    None,
+                    None,
+                )
+            )
+        else:
+            logical, allocated = _tree_size(profile)
+            entries.append(
+                InventoryEntry(
+                    identity,
+                    "candidate",
+                    "orphaned managed profile check receipt",
+                    logical,
+                    allocated,
+                )
+            )
+    return entries
+
+
+def _linux_staging_entries(cache: Path) -> list[InventoryEntry]:
+    """Classify the fixed, always-disposable prepared-Linux extraction slots."""
+    root = cache / "linux" / "staging"
+    if not root.is_dir() or root.is_symlink():
+        return []
+    entries: list[InventoryEntry] = []
+    for target in sorted(root.iterdir(), key=lambda item: item.name):
+        if (
+            target.is_symlink()
+            or not target.is_dir()
+            or TARGET_NAME.fullmatch(target.name) is None
+        ):
+            continue
+        default = target / "default"
+        if default.is_dir() and not default.is_symlink():
+            logical, allocated = _tree_size(default)
+            entries.append(
+                InventoryEntry(
+                    f"linux/staging/{target.name}/default",
+                    "candidate",
+                    "disposable prepared Linux staging slot",
+                    logical,
+                    allocated,
+                )
+            )
+        profiles = target / "profiles"
+        if not profiles.is_dir() or profiles.is_symlink():
+            continue
+        for profile in sorted(profiles.iterdir(), key=lambda item: item.name):
+            if (
+                profile.is_dir()
+                and not profile.is_symlink()
+                and TARGET_NAME.fullmatch(profile.name)
+            ):
+                logical, allocated = _tree_size(profile)
+                entries.append(
+                    InventoryEntry(
+                        f"linux/staging/{target.name}/profiles/{profile.name}",
+                        "candidate",
+                        "disposable prepared Linux staging slot",
+                        logical,
+                        allocated,
+                    )
+                )
     return entries
 
 
@@ -266,6 +618,73 @@ def _log_entries(root: Path, *, label: str, identity: str) -> list[InventoryEntr
     return entries
 
 
+def _profile_log_entries(  # noqa: PLR0913 -- profile log ownership is explicit.
+    root: Path,
+    *,
+    label: str,
+    identity: str,
+    profile: str,
+    declared: dict[str, frozenset[str]] | None,
+    target: str | None = None,
+) -> list[InventoryEntry]:
+    """Keep declared profile logs bounded and discard every valid orphaned run."""
+    entries = _log_entries(root, label=label, identity=identity)
+    if declared is None:
+        return entries
+    known = (
+        profile in declared.get(target, frozenset())
+        if target is not None
+        else any(profile in profiles for profiles in declared.values())
+    )
+    if known:
+        return entries
+    children = tuple(root.iterdir()) if root.is_dir() and not root.is_symlink() else ()
+    valid_names = {entry.path.rsplit("/", maxsplit=1)[-1] for entry in entries}
+    if not entries or {path.name for path in children} != valid_names:
+        return []
+    logical, allocated = _tree_size(root)
+    return [
+        InventoryEntry(
+            identity,
+            "candidate",
+            "orphaned managed profile log root",
+            logical,
+            allocated,
+        )
+    ]
+
+
+def discard_superseded_profile_logs(
+    cache: Path,
+    command: str,
+    *,
+    profile: str,
+    target: str | None = None,
+) -> tuple[str, ...]:
+    """Keep one current profile log group bounded without touching default command logs."""
+    if TARGET_NAME.fullmatch(profile) is None:
+        raise PruneSafetyError(f"invalid managed profile log name: {profile!r}")
+    if command == "check" and target is None:
+        root = cache / "logs" / "check" / "profiles" / profile
+        identity = f"logs/check/profiles/{profile}"
+        label = f"check profiles/{profile}"
+    elif command == "build" and isinstance(target, str) and TARGET_NAME.fullmatch(target):
+        root = cache / "logs" / "build" / target / "profiles" / profile
+        identity = f"logs/build/{target}/profiles/{profile}"
+        label = f"build {target}/profiles/{profile}"
+    else:
+        message = "invalid managed profile log group"
+        raise PruneSafetyError(message)
+    removed: list[str] = []
+    for entry in _log_entries(root, label=label, identity=identity):
+        if entry.action != "candidate":
+            continue
+        destination = _managed_candidate_directory(cache, entry.path)
+        shutil.rmtree(destination)
+        removed.append(entry.path)
+    return tuple(removed)
+
+
 def _log_retention_entries(cache: Path) -> list[InventoryEntry]:
     """Classify only the generated check, setup, and per-target build logs."""
     logs = cache / "logs"
@@ -273,6 +692,25 @@ def _log_retention_entries(cache: Path) -> list[InventoryEntry]:
         *_log_entries(logs / "check", label="check", identity="logs/check"),
         *_log_entries(logs / "setup", label="setup", identity="logs/setup"),
     ]
+    declared = _declared_profiles()
+    check_profiles = logs / "check" / "profiles"
+    if check_profiles.is_dir() and not check_profiles.is_symlink():
+        for profile in sorted(check_profiles.iterdir(), key=lambda item: item.name):
+            if (
+                profile.is_dir()
+                and not profile.is_symlink()
+                and TARGET_NAME.fullmatch(profile.name)
+            ):
+                identity = f"logs/check/profiles/{profile.name}"
+                entries.extend(
+                    _profile_log_entries(
+                        profile,
+                        label=f"check profiles/{profile.name}",
+                        identity=identity,
+                        profile=profile.name,
+                        declared=declared,
+                    )
+                )
     builds = logs / "build"
     if not builds.is_dir() or builds.is_symlink():
         return entries
@@ -281,17 +719,41 @@ def _log_retention_entries(cache: Path) -> list[InventoryEntry]:
             continue
         identity = f"logs/build/{target.name}"
         entries.extend(_log_entries(target, label=f"build {target.name}", identity=identity))
+        profiles = target / "profiles"
+        if not profiles.is_dir() or profiles.is_symlink():
+            continue
+        for profile in sorted(profiles.iterdir(), key=lambda item: item.name):
+            if (
+                profile.is_dir()
+                and not profile.is_symlink()
+                and TARGET_NAME.fullmatch(profile.name)
+            ):
+                profile_identity = f"{identity}/profiles/{profile.name}"
+                entries.extend(
+                    _profile_log_entries(
+                        profile,
+                        label=f"build {target.name}/profiles/{profile.name}",
+                        identity=profile_identity,
+                        profile=profile.name,
+                        declared=declared,
+                        target=target.name,
+                    )
+                )
     return entries
 
 
 def plan_prune(cache: Path) -> PrunePlan:
     """List disposable snapshots and bounded CLI logs in managed cache namespaces."""
     entries: list[InventoryEntry] = []
+    entries.extend(_apk_entries(cache))
     entries.extend(_rootfs_entries(cache))
+    entries.extend(_profile_cache_entries(cache))
+    entries.extend(_profile_check_receipt_entries(cache))
+    entries.extend(_linux_staging_entries(cache))
     entries.extend(_log_retention_entries(cache))
     for namespace in sorted(_WORKSPACE_NAMESPACES):
         root = cache / namespace
-        if not root.is_dir():
+        if not root.is_dir() or root.is_symlink():
             continue
         for path in sorted(root.iterdir(), key=lambda item: item.name):
             if not path.is_dir() or path.is_symlink():
@@ -318,14 +780,86 @@ def plan_prune(cache: Path) -> PrunePlan:
     return PrunePlan(tuple(sorted(entries, key=lambda entry: entry.path)))
 
 
-def _candidate_destination(cache: Path, identity: str) -> Path:
+def _candidate_destination(cache: Path, identity: str) -> Path:  # noqa: PLR0911 -- safe shapes.
     """Return the exact managed cache directory addressed by one candidate identity."""
     parts = identity.split("/")
     if len(parts) == 2 and parts[0] in _MANAGED_NAMESPACES and parts[1]:
         return cache / parts[0] / parts[1]
     if len(parts) == 3 and parts[:2] in (["logs", "check"], ["logs", "setup"]):
         return cache.joinpath(*parts)
+    if (
+        len(parts) == 3
+        and parts[:2] == ["check-results", "profiles"]
+        and TARGET_NAME.fullmatch(parts[2]) is not None
+    ):
+        return cache.joinpath(*parts)
     if len(parts) == 4 and parts[:2] == ["logs", "build"] and parts[2] and parts[3]:
+        return cache.joinpath(*parts)
+    if (
+        len(parts) == 4
+        and parts[0] == "out"
+        and parts[2] == "profiles"
+        and TARGET_NAME.fullmatch(parts[1]) is not None
+        and TARGET_NAME.fullmatch(parts[3]) is not None
+    ):
+        return cache.joinpath(*parts)
+    if (
+        len(parts) == 4
+        and parts[:2] == ["linux", "profiles"]
+        and TARGET_NAME.fullmatch(parts[2]) is not None
+        and TARGET_NAME.fullmatch(parts[3]) is not None
+    ) or (
+        len(parts) == 5
+        and parts[:2] == ["analysis", "sparse"]
+        and TARGET_NAME.fullmatch(parts[2]) is not None
+        and parts[3] == "profiles"
+        and TARGET_NAME.fullmatch(parts[4]) is not None
+    ):
+        return cache.joinpath(*parts)
+    if (
+        len(parts) == 4
+        and parts[:2] == ["linux", "staging"]
+        and TARGET_NAME.fullmatch(parts[2]) is not None
+        and parts[3] == "default"
+    ):
+        return cache.joinpath(*parts)
+    if (
+        len(parts) == 5
+        and parts[:2] == ["linux", "staging"]
+        and TARGET_NAME.fullmatch(parts[2]) is not None
+        and parts[3] == "profiles"
+        and TARGET_NAME.fullmatch(parts[4]) is not None
+    ):
+        return cache.joinpath(*parts)
+    if (
+        len(parts) == 4
+        and parts[:3] == ["logs", "check", "profiles"]
+        and TARGET_NAME.fullmatch(parts[3]) is not None
+    ):
+        return cache.joinpath(*parts)
+    if (
+        len(parts) == 5
+        and parts[:3] == ["logs", "check", "profiles"]
+        and TARGET_NAME.fullmatch(parts[3]) is not None
+        and parts[4]
+    ):
+        return cache.joinpath(*parts)
+    if (
+        len(parts) == 5
+        and parts[:2] == ["logs", "build"]
+        and TARGET_NAME.fullmatch(parts[2]) is not None
+        and parts[3] == "profiles"
+        and TARGET_NAME.fullmatch(parts[4]) is not None
+    ):
+        return cache.joinpath(*parts)
+    if (
+        len(parts) == 6
+        and parts[:2] == ["logs", "build"]
+        and TARGET_NAME.fullmatch(parts[2]) is not None
+        and parts[3] == "profiles"
+        and TARGET_NAME.fullmatch(parts[4]) is not None
+        and parts[5]
+    ):
         return cache.joinpath(*parts)
     raise PruneSafetyError(f"invalid managed candidate: {identity}")
 
@@ -337,13 +871,57 @@ def apply_prune(cache: Path) -> PruneApplyResult:
     logical = 0
     allocated = 0
     for entry in plan.candidates:
-        destination = _candidate_destination(cache, entry.path)
-        if destination.is_dir():
-            shutil.rmtree(destination)
+        destination = _managed_candidate_directory(cache, entry.path)
+        shutil.rmtree(destination)
         removed.append(entry.path)
         logical += entry.logical_bytes or 0
         allocated += entry.allocated_bytes or 0
     return PruneApplyResult(tuple(removed), logical, allocated)
+
+
+def discard_obsolete_rootfs(cache: Path) -> tuple[str, ...]:
+    """Discard only rootfs generations superseded by every current target/profile recipe."""
+    removed: list[str] = []
+    for entry in _rootfs_entries(cache):
+        if entry.action != "candidate":
+            continue
+        destination = _managed_candidate_directory(cache, entry.path)
+        shutil.rmtree(destination)
+        removed.append(entry.path)
+    return tuple(removed)
+
+
+def discard_obsolete_apks(cache: Path) -> tuple[str, ...]:
+    """Discard only aport cache slots absent from every current target/profile closure."""
+    removed: list[str] = []
+    for entry in _apk_entries(cache):
+        if entry.action != "candidate":
+            continue
+        destination = _managed_candidate_directory(cache, entry.path)
+        shutil.rmtree(destination)
+        removed.append(entry.path)
+    return tuple(removed)
+
+
+def _managed_candidate_directory(cache: Path, identity: str) -> Path:
+    """Resolve one candidate through real cache directories immediately before removal."""
+    destination = _candidate_destination(cache, identity)
+    _require_real_directory(cache, "cache root")
+    current = cache
+    for component in destination.relative_to(cache).parts:
+        current /= component
+        _require_real_directory(current, f"managed candidate component: {identity}")
+    return destination
+
+
+def _require_real_directory(path: Path, label: str) -> None:
+    """Reject a missing, non-directory or symlinked deletion path component."""
+    try:
+        state = path.lstat()
+    except OSError as error:
+        raise PruneSafetyError(f"{label} is missing or unreadable: {path}") from error
+    if stat.S_ISLNK(state.st_mode) or not stat.S_ISDIR(state.st_mode):
+        raise PruneSafetyError(f"{label} is not a real directory: {path}")
 
 
 def _tree_size(root: Path) -> tuple[int, int]:

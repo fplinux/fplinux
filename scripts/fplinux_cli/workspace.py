@@ -21,6 +21,7 @@ from .common import ROOT, fail, relative_name
 from .config import (
     load_platform,
     load_target,
+    profile_manifest_path,
     target_asset_lock_path,
     target_defconfig_path,
     target_release_manifest_path,
@@ -94,9 +95,9 @@ def add_source_path(files: dict[str, Path], path: Path) -> None:
         files[child.relative_to(ROOT).as_posix()] = child
 
 
-def target_build_source_files(target: str) -> list[tuple[str, Path]]:
+def target_build_source_files(target: str, profile: str | None = None) -> list[tuple[str, Path]]:
     """Resolve only the selected target/platform build closure."""
-    target_config = load_target(target)
+    target_config = load_target(target, profile)
     platform = load_platform(target_config["platform"])
     target_root = ROOT / "targets" / target
     files: dict[str, Path] = {}
@@ -124,6 +125,9 @@ def target_build_source_files(target: str) -> list[tuple[str, Path]]:
     add_source_path(files, target_release_manifest_path(target))
     add_source_path(files, target_asset_lock_path(target))
     add_source_path(files, target_defconfig_path(target))
+    selected_profile = target_config.get("profile")
+    if selected_profile is not None:
+        add_source_path(files, profile_manifest_path(target, selected_profile))
     add_source_path(files, target_root / target_config["bootstrap"]["source"])
     for relative in target_config["linux"]["patches"]:
         add_source_path(files, target_root / relative)
@@ -199,9 +203,9 @@ def quality_files(*, enforce_source_policy: bool) -> list[tuple[str, Path]]:
     return files
 
 
-def target_workspace_snapshot(target: str) -> WorkspaceSnapshot:
+def target_workspace_snapshot(target: str, profile: str | None = None) -> WorkspaceSnapshot:
     """Read the selected build closure before deciding whether staging is needed."""
-    return _snapshot_from_inventory(lambda: target_build_source_files(target))
+    return _snapshot_from_inventory(lambda: target_build_source_files(target, profile))
 
 
 def quality_workspace_snapshot(*, enforce_source_policy: bool) -> WorkspaceSnapshot:
@@ -230,6 +234,28 @@ def stage_quality_workspace_snapshot(snapshot: WorkspaceSnapshot) -> Path:
     """Materialize one previously captured quality workspace snapshot on a cache miss."""
     return _stage_snapshot(
         snapshot,
+        ROOT / ".cache/quality-workspaces",
+        PurePosixPath(".cache/.fplinux-workspace"),
+    )
+
+
+def discard_staged_workspace_snapshot(snapshot: WorkspaceSnapshot, workspace: Path) -> None:
+    """Remove only the exact completed target workspace addressed by one snapshot."""
+    _discard_staged_snapshot(
+        snapshot,
+        workspace,
+        ROOT / ".cache/workspaces",
+        PurePosixPath(".fplinux-workspace"),
+    )
+
+
+def discard_staged_quality_workspace_snapshot(
+    snapshot: WorkspaceSnapshot, workspace: Path
+) -> None:
+    """Remove only the exact completed quality workspace addressed by one snapshot."""
+    _discard_staged_snapshot(
+        snapshot,
+        workspace,
         ROOT / ".cache/quality-workspaces",
         PurePosixPath(".cache/.fplinux-workspace"),
     )
@@ -299,19 +325,23 @@ def _stage_snapshot(
 ) -> Path:
     """Publish one captured snapshot; a mismatched cache entry is a plain miss."""
     _validate_snapshot(snapshot, marker_relative)
+    _managed_workspace_namespace(workspaces, create=True)
     workspace = workspaces / snapshot.recipe
     marker = workspace / marker_relative
     try:
-        if workspace.is_dir() and marker.read_text(encoding="utf-8").strip() == snapshot.recipe:
+        if (
+            not workspace.is_symlink()
+            and workspace.is_dir()
+            and not marker.is_symlink()
+            and marker.read_text(encoding="utf-8").strip() == snapshot.recipe
+        ):
             return workspace
     except OSError:
         pass
-    if workspace.is_dir():
-        shutil.rmtree(workspace)
-    elif workspace.exists() or workspace.is_symlink():
-        workspace.unlink()
 
-    workspaces.mkdir(parents=True, exist_ok=True)
+    if workspace.exists() or workspace.is_symlink():
+        _remove_managed_workspace(workspaces, workspace, "stale workspace")
+
     staging = Path(tempfile.mkdtemp(dir=workspaces, prefix=f".stage-{snapshot.recipe[:12]}-"))
     try:
         for source in snapshot.files:
@@ -323,7 +353,74 @@ def _stage_snapshot(
         return workspace
     finally:
         if staging.exists():
-            shutil.rmtree(staging)
+            _remove_managed_workspace(workspaces, staging, "workspace staging directory")
+
+
+def _discard_staged_snapshot(
+    snapshot: WorkspaceSnapshot,
+    workspace: Path,
+    workspaces: Path,
+    marker_relative: PurePosixPath,
+) -> None:
+    """Discard one validated disposable workspace without accepting alternate paths."""
+    _validate_snapshot(snapshot, marker_relative)
+    _managed_workspace_namespace(workspaces, create=False)
+    expected = workspaces / snapshot.recipe
+    if workspace != expected:
+        fail(f"workspace discard path is outside its managed cache slot: {workspace}")
+    marker = workspace / marker_relative
+    expected_marker = (snapshot.recipe + "\n").encode()
+    try:
+        if workspace.is_symlink() or not workspace.is_dir():
+            fail(f"workspace discard path is missing or invalid: {workspace}")
+        marker_parent = workspace
+        for component in marker_relative.parts[:-1]:
+            marker_parent /= component
+            if marker_parent.is_symlink() or not marker_parent.is_dir():
+                fail(f"workspace discard marker parent is missing or invalid: {marker_parent}")
+        if marker.is_symlink() or not marker.is_file() or marker.read_bytes() != expected_marker:
+            fail(f"workspace discard marker is missing or invalid: {marker}")
+        _remove_managed_workspace(workspaces, workspace, "workspace discard path")
+    except OSError as error:
+        fail(f"workspace discard failed: {workspace}: {error}")
+
+
+def _managed_workspace_namespace(workspaces: Path, *, create: bool) -> None:
+    """Require the two managed cache components to be real directories."""
+    cache = ROOT / ".cache"
+    if workspaces not in {cache / "workspaces", cache / "quality-workspaces"}:
+        fail(f"workspace namespace is outside the managed cache: {workspaces}")
+    _managed_directory(cache, "workspace cache root", create=create)
+    _managed_directory(workspaces, "workspace namespace", create=create)
+
+
+def _managed_directory(path: Path, name: str, *, create: bool) -> None:
+    """Require one cache component to be a real directory, optionally creating it."""
+    try:
+        if path.is_symlink() or (path.exists() and not path.is_dir()):
+            fail(f"{name} is missing or invalid: {path}")
+        if not path.exists():
+            if not create:
+                fail(f"{name} is missing or invalid: {path}")
+            path.mkdir()
+        if path.is_symlink() or not path.is_dir():
+            fail(f"{name} is missing or invalid: {path}")
+    except OSError as error:
+        fail(f"{name} cannot be prepared: {path}: {error}")
+
+
+def _remove_managed_workspace(workspaces: Path, workspace: Path, name: str) -> None:
+    """Revalidate cache components and one real child immediately before removal."""
+    _managed_workspace_namespace(workspaces, create=False)
+    if workspace.parent != workspaces or workspace.is_symlink() or not workspace.is_dir():
+        fail(f"{name} is missing or invalid: {workspace}")
+    _managed_workspace_namespace(workspaces, create=False)
+    if workspace.parent != workspaces or workspace.is_symlink() or not workspace.is_dir():
+        fail(f"{name} is missing or invalid: {workspace}")
+    try:
+        shutil.rmtree(workspace)
+    except OSError as error:
+        fail(f"{name} cannot be removed: {workspace}: {error}")
 
 
 def _validate_snapshot(snapshot: WorkspaceSnapshot, marker_relative: PurePosixPath) -> None:
