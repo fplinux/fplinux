@@ -148,6 +148,27 @@ def usb_device_path(vendor: int, product: int) -> Path | None:
     return None
 
 
+def require_usb_device_access(device: Path, identity: str) -> None:
+    """Distinguish a vanished usbfs node from an access-control failure."""
+    try:
+        descriptor = os.open(device, os.O_RDWR | os.O_CLOEXEC)
+    except FileNotFoundError:
+        fail(
+            f"BootROM USB {identity} disconnected before the RAM loader could open it; "
+            "reconnect the powered-off phone in BootROM mode"
+        )
+    except PermissionError:
+        fail(
+            f"BootROM USB {identity} is not readable and writable by the current user; "
+            "install the documented udev rule and reconnect the phone"
+        )
+    except OSError as error:
+        detail = error.strerror or str(error)
+        fail(f"BootROM USB {identity} cannot be opened: {detail}")
+    else:
+        os.close(descriptor)
+
+
 def stop(process: subprocess.Popen[str] | None) -> None:
     if process is None or process.poll() is not None:
         return
@@ -256,11 +277,7 @@ def run(
             bootrom_usb["product_id"],
         )
     time.sleep(2)
-    if not os.access(bootrom_device, os.R_OK | os.W_OK):
-        fail(
-            f"BootROM USB {bootrom_id} is not readable and writable by the current user; "
-            "install the documented udev rule and reconnect the phone"
-        )
+    require_usb_device_access(bootrom_device, bootrom_id)
 
     try:
         result = subprocess.run(loader_argv, check=False)
