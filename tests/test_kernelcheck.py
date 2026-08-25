@@ -75,19 +75,26 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
         self.projected.write_text("int test_driver;\n")
         self.prepared_linux = PreparedLinuxState("a" * 64)
         self.target_config: dict[str, Any] = {
+            "identity": {
+                "display_name": "Test target",
+                "compatible": "test,target",
+            },
             "linux": {
+                "dtb": "test-target.dtb",
                 "patches": [],
                 "copies": [],
                 "appends": [],
-            }
+            },
         }
         self.platform: dict[str, Any] = {
+            "identity": {"compatible": "test,soc"},
             "linux": {
                 "arch": "arm",
                 "analysis_cross_compile": "arm-linux-gnueabihf-",
                 "config_script": "scripts/config",
+                "dtb_output_directory": "arch/arm/boot/dts",
                 "patches": [],
-            }
+            },
         }
 
     def tearDown(self) -> None:
@@ -134,6 +141,7 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
             mock.patch.object(kernelcheck, "run", side_effect=run_command),
             mock.patch.object(kernelcheck, "run_checkpatch"),
             mock.patch.object(kernelcheck, "run_dtbs_check", side_effect=run_dtbs_check),
+            mock.patch.object(kernelcheck, "verify_target_identity"),
         ):
             kernelcheck.check_contexts(None)
 
@@ -158,13 +166,18 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
         config_script = self.source / "scripts/config"
         config_script.write_text("#!/bin/sh\n")
         target_config = {
+            "identity": {
+                "display_name": "Test target",
+                "compatible": "test,target",
+            },
             "linux": {
+                "dtb": "test-target.dtb",
                 "patches": [],
                 "copies": [],
                 "appends": [],
                 "config_enable": ["CONFIG_PROFILE_ENABLED"],
                 "config_disable": ["CONFIG_PROFILE_DISABLED"],
-            }
+            },
         }
         calls: list[list[str]] = []
 
@@ -202,6 +215,7 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
             mock.patch.object(kernelcheck, "run", side_effect=run_command),
             mock.patch.object(kernelcheck, "run_checkpatch"),
             mock.patch.object(kernelcheck, "run_dtbs_check", return_value=""),
+            mock.patch.object(kernelcheck, "verify_target_identity"),
         ):
             kernelcheck.check_contexts(None, profile)
 

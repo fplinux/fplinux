@@ -18,14 +18,50 @@ if TYPE_CHECKING:
     from types import FrameType, ModuleType
 
 ADAPTER_PATH = "runner/platform_adapter.py"
+IDENTITY_PATH = "runner/identity.py"
 SSH_HELPER_PATH = "runner/ssh_transport.py"
 MINIMUM_PYTHON = (3, 11)
 TRANSPORTS = frozenset({"usb-ncm", "none"})
+_identity_module: ModuleType | None = None
 
 
 def fail(message: str) -> NoReturn:
     """Stop before invoking the platform adapter."""
     raise SystemExit(f"RAM runner failed: {message}")
+
+
+def identity_module() -> ModuleType:
+    """Load the shared identity contract from a bundle or source checkout."""
+    global _identity_module  # noqa: PLW0603
+
+    if _identity_module is not None:
+        return _identity_module
+    candidates = (
+        Path(__file__).with_name("identity.py"),
+        Path(__file__).resolve().parents[1] / "scripts/fplinux_cli/identity.py",
+    )
+    source = next((path for path in candidates if path.is_file()), None)
+    if source is None:
+        fail("runner identity contract is missing")
+    spec = importlib.util.spec_from_file_location("fplinux_runtime_identity", source)
+    if spec is None or spec.loader is None:
+        fail("runner identity contract cannot be loaded")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _identity_module = module
+    return module
+
+
+def validate_runtime_identity(runtime: dict[str, Any]) -> dict[str, Any]:
+    """Normalize identity only after the caller verifies the helper bytes."""
+    module = identity_module()
+    if getattr(module, "RUNTIME_IDENTITY_PATH", None) != IDENTITY_PATH:
+        fail("runner identity path differs from the shared contract")
+    try:
+        runtime["identity"] = module.validate_runtime_identity(runtime.get("identity"))
+    except ValueError as error:
+        fail(str(error))
+    return runtime
 
 
 def digest(path: Path) -> str:
@@ -152,8 +188,7 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
         {
             "target",
             "profile",
-            "display_name",
-            "platform",
+            "identity",
             "transport",
             "image",
             "personalization",
@@ -166,9 +201,10 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
         },
         "runtime manifest",
     )
-    for key in ("target", "display_name", "platform"):
-        root[key] = require_string(root.get(key), f"runtime {key}")
+    root["target"] = require_string(root.get("target"), "runtime target")
     root["profile"] = require_optional_profile(root.get("profile"))
+    if not isinstance(root.get("identity"), dict):
+        fail("runtime identity must be an object")
     root["transport"] = require_transport(root.get("transport"))
     root["image"] = relative_name(root.get("image"), "runtime image")
 
@@ -235,6 +271,7 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
     expected_paths = {
         root["image"],
         ADAPTER_PATH,
+        IDENTITY_PATH,
         *root["assets"].values(),
         *root["host_tools"].values(),
         SSH_HELPER_PATH,
@@ -315,6 +352,7 @@ def main() -> None:
         actual = digest(path)
         if actual != expected:
             fail(f"{relative} SHA256 mismatch: expected {expected}, got {actual}")
+    runtime = validate_runtime_identity(runtime)
     image = bundle / runtime["image"]
     if image.read_bytes()[:4] != b"DHTB":
         fail("RAM payload does not have a DHTB header")

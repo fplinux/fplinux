@@ -163,6 +163,60 @@ class CheckScopeTests(unittest.TestCase):
             self.assertTrue(receipt_matches(cache, first_recipe))
             self.assertFalse(receipt_matches(cache, second_recipe))
 
+    def test_device_tree_helper_change_is_a_python_and_kernel_input(self) -> None:
+        """Keep compiled-DT acceptance in each check scope that executes it."""
+        common = (
+            WorkspaceFile(
+                "targets/phone/target.toml",
+                b'platform = "phone"\n[linux]\npatches = []\n',
+                0o644,
+            ),
+            WorkspaceFile("scripts/tool.sh", b"#!/bin/sh\nexit 0\n", 0o755),
+        )
+        first = WorkspaceSnapshot(
+            (*common, WorkspaceFile("scripts/fplinux_cli/device_tree.py", b"first\n", 0o644)),
+            "a" * 64,
+        )
+        second = WorkspaceSnapshot(
+            (*common, WorkspaceFile("scripts/fplinux_cli/device_tree.py", b"second\n", 0o644)),
+            "b" * 64,
+        )
+
+        for scope in ("metadata", "shell", "alpine", "c"):
+            with self.subTest(scope=scope):
+                self.assertEqual(
+                    check_scope_closure_digest(scope, first),
+                    check_scope_closure_digest(scope, second),
+                )
+        for scope in ("python", "kernel"):
+            with self.subTest(scope=scope):
+                self.assertNotEqual(
+                    check_scope_closure_digest(scope, first),
+                    check_scope_closure_digest(scope, second),
+                )
+
+    def test_identity_helpers_change_every_source_scope(self) -> None:
+        """Identity validation and generation are direct checker dependencies."""
+        for relative in (
+            "scripts/fplinux_cli/identity.py",
+            "scripts/fplinux_cli/identity_codegen.py",
+        ):
+            first = WorkspaceSnapshot(
+                (WorkspaceFile(relative, b"first\n", 0o644),),
+                "a" * 64,
+            )
+            second = WorkspaceSnapshot(
+                (WorkspaceFile(relative, b"second\n", 0o644),),
+                "b" * 64,
+            )
+
+            for scope in container.SOURCE_CHECK_SCOPES:
+                with self.subTest(relative=relative, scope=scope):
+                    self.assertNotEqual(
+                        check_scope_closure_digest(scope, first),
+                        check_scope_closure_digest(scope, second),
+                    )
+
     def test_direct_checker_dependency_change_invalidates_every_source_scope(self) -> None:
         """A module imported by the checker is causal for every source-scope receipt."""
         first = WorkspaceSnapshot(

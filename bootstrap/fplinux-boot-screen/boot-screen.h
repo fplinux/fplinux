@@ -33,7 +33,6 @@ struct fplinux_boot_screen_canvas {
 
 struct fplinux_boot_screen_identity {
 	const char *brand;
-	const char *variant;
 	const char *model;
 	const char *mode;
 };
@@ -45,7 +44,6 @@ struct fplinux_boot_screen_identity {
 struct fplinux_boot_screen {
 	struct fplinux_boot_screen_canvas canvas;
 	char brand[FPLINUX_BOOT_SCREEN_IDENTITY_BYTES];
-	char variant[FPLINUX_BOOT_SCREEN_IDENTITY_BYTES];
 	char model[FPLINUX_BOOT_SCREEN_IDENTITY_BYTES];
 	char mode[FPLINUX_BOOT_SCREEN_IDENTITY_BYTES];
 	char stage_labels[FPLINUX_BOOT_SCREEN_MAX_STAGES]

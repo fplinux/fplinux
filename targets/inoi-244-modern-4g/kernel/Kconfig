@@ -5,7 +5,7 @@ config MACH_INOI_244_MODERN_4G
 	bool "INOI 244 Modern 4G"
 	select MFD_SYSCON
 	help
-	  Board support for the INOI 244 Modern 4G, a UMS9117/T117 feature
+	  Board support for the INOI 244 Modern 4G, a UMS9117 feature
 	  phone with a 240x320 NV3030 panel and matrix keypad. The current
 	  target is RAM-only and relies on the fpdoom bootstrap for the board
 	  pin state; Linux does not write the phone's flash storage.

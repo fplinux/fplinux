@@ -37,14 +37,30 @@ def runtime_manifest() -> dict[str, Any]:
     """Return one complete runtime contract."""
     image = "image/ramboot.bin"
     adapter = "runner/platform_adapter.py"
+    identity_helper = "runner/identity.py"
     ssh_helper = "runner/ssh_transport.py"
     fdl1 = "assets/fdl1.bin"
     loader = "host/loader"
     return {
         "target": "demo",
         "profile": None,
-        "display_name": "Demo",
-        "platform": "ums9117",
+        "identity": {
+            "target": {
+                "brand": "Demo",
+                "product": "Phone",
+                "hardware_codes": ["D-1", "D-2"],
+                "compatible": "demo,phone",
+                "display_name": "Demo Phone (D-1, D-2)",
+            },
+            "platform": {
+                "name": "ums9117",
+                "vendor": "Unisoc",
+                "soc": "UMS9117",
+                "aliases": ["T117"],
+                "compatible": "sprd,ums9117",
+                "display_name": "Unisoc UMS9117",
+            },
+        },
         "transport": "usb-ncm",
         "image": image,
         "personalization": {
@@ -68,6 +84,7 @@ def runtime_manifest() -> dict[str, Any]:
         "sha256": {
             image: "a" * 64,
             adapter: "b" * 64,
+            identity_helper: "1" * 64,
             ssh_helper: "c" * 64,
             fdl1: "d" * 64,
             loader: "f" * 64,
@@ -87,7 +104,8 @@ class RuntimeManifestTests(unittest.TestCase):
     def load(self, manifest: dict[str, Any]) -> dict[str, Any]:
         """Load one manifest through the shipped consumer."""
         self.path.write_text(json.dumps(manifest), encoding="utf-8")
-        return cast("dict[str, Any]", RUNNER.load_runtime_manifest(self.path))
+        runtime = cast("dict[str, Any]", RUNNER.load_runtime_manifest(self.path))
+        return cast("dict[str, Any]", RUNNER.validate_runtime_identity(runtime))
 
     def test_accepts_the_exact_runtime_contract(self) -> None:
         """Accept a complete manifest with explicit USB interfaces."""
@@ -95,6 +113,22 @@ class RuntimeManifestTests(unittest.TestCase):
 
         self.assertEqual(loaded["personalization"]["bytes"], 512)
         self.assertEqual(loaded["usb"]["linux_gadget"]["keyboard_interface"], 1)
+        self.assertEqual(
+            loaded["identity"]["target"]["display_name"],
+            "Demo Phone (D-1, D-2)",
+        )
+
+    def test_manifest_shape_does_not_execute_identity_code_before_hash_verification(self) -> None:
+        """Keep bundled Python execution behind the runner's declared-file hash loop."""
+        self.path.write_text(json.dumps(runtime_manifest()), encoding="utf-8")
+        with mock.patch.object(
+            RUNNER,
+            "identity_module",
+            side_effect=AssertionError("identity helper executed too early"),
+        ):
+            loaded = RUNNER.load_runtime_manifest(self.path)
+
+        self.assertIsInstance(loaded["identity"], dict)
 
     def test_accepts_an_explicit_no_transport_handoff_contract(self) -> None:
         """A host-only bundle declares that it will not create USB-NCM transport."""
@@ -104,6 +138,26 @@ class RuntimeManifestTests(unittest.TestCase):
         loaded = self.load(manifest)
 
         self.assertEqual(loaded["transport"], "none")
+
+    def test_accepts_identity_without_unverified_codes_or_aliases(self) -> None:
+        """An empty token array remains an explicit statement that no code is known."""
+        manifest = runtime_manifest()
+        manifest["identity"]["target"]["hardware_codes"] = []
+        manifest["identity"]["target"]["display_name"] = "Demo Phone"
+        manifest["identity"]["platform"]["aliases"] = []
+
+        loaded = self.load(manifest)
+
+        self.assertEqual(loaded["identity"]["target"]["hardware_codes"], [])
+        self.assertEqual(loaded["identity"]["platform"]["aliases"], [])
+
+    def test_rejects_one_compatible_for_both_target_and_platform(self) -> None:
+        """Require an exact machine identity followed by a distinct SoC fallback."""
+        manifest = runtime_manifest()
+        manifest["identity"]["platform"]["compatible"] = "demo,phone"
+
+        with self.assertRaisesRegex(SystemExit, "compatibles must differ"):
+            self.load(manifest)
 
     def test_rejects_an_unknown_host_transport(self) -> None:
         """Transport selection remains a closed runtime contract."""
@@ -130,6 +184,71 @@ class RuntimeManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "runtime manifest must contain exactly"):
             self.load(manifest)
 
+    def test_rejects_the_legacy_root_identity_fields(self) -> None:
+        """Do not reinterpret the previous display_name and platform schema."""
+        manifest = runtime_manifest()
+        del manifest["identity"]
+        manifest["display_name"] = "Demo Phone"
+        manifest["platform"] = "ums9117"
+
+        with self.assertRaisesRegex(SystemExit, "runtime manifest must contain exactly"):
+            self.load(manifest)
+
+    def test_rejects_noncanonical_identity_text(self) -> None:
+        """Identity text is stable printable ASCII without padding or doubled spaces."""
+        invalid_values = (" Demo", "Demo  Devices", "Démo", "Demo\nDevices")
+        for brand in invalid_values:
+            manifest = runtime_manifest()
+            manifest["identity"]["target"]["brand"] = brand
+            with (
+                self.subTest(brand=brand),
+                self.assertRaisesRegex(SystemExit, "canonical printable ASCII text"),
+            ):
+                self.load(manifest)
+
+    def test_rejects_identity_that_does_not_derive_its_display_name(self) -> None:
+        """Display names cannot become a second independently editable identity."""
+        manifest = runtime_manifest()
+        manifest["identity"]["target"]["display_name"] = "Independent label"
+
+        with self.assertRaisesRegex(SystemExit, "display_name must be derived"):
+            self.load(manifest)
+
+        manifest = runtime_manifest()
+        manifest["identity"]["platform"]["display_name"] = "Independent platform"
+
+        with self.assertRaisesRegex(SystemExit, "display_name must be derived"):
+            self.load(manifest)
+
+    def test_rejects_invalid_or_duplicate_hardware_tokens(self) -> None:
+        """Hardware codes and aliases remain ordered arrays of unique tokens."""
+        invalid_values: tuple[object, ...] = (
+            "D-1",
+            ["lowercase"],
+            ["D-1", "D-1"],
+        )
+        for hardware_codes in invalid_values:
+            manifest = runtime_manifest()
+            manifest["identity"]["target"]["hardware_codes"] = hardware_codes
+            with self.subTest(hardware_codes=hardware_codes), self.assertRaises(SystemExit):
+                self.load(manifest)
+
+    def test_rejects_alias_equal_to_the_platform_soc(self) -> None:
+        """An alias must add identity instead of repeating the canonical SoC name."""
+        manifest = runtime_manifest()
+        manifest["identity"]["platform"]["aliases"] = ["UMS9117"]
+
+        with self.assertRaisesRegex(SystemExit, "aliases must not repeat the SoC name"):
+            self.load(manifest)
+
+    def test_rejects_noncanonical_compatible(self) -> None:
+        """Runtime identity uses one lowercase vendor,device compatible."""
+        manifest = runtime_manifest()
+        manifest["identity"]["target"]["compatible"] = "Nokia,TA-1618"
+
+        with self.assertRaisesRegex(SystemExit, "lowercase vendor,device compatible"):
+            self.load(manifest)
+
     def test_rejects_runtime_without_declared_keyboard_interface(self) -> None:
         """Require every current Linux USB interface explicitly."""
         manifest = runtime_manifest()
@@ -138,13 +257,17 @@ class RuntimeManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "linux_gadget USB must contain exactly"):
             self.load(manifest)
 
-    def test_rejects_a_runtime_without_the_mandatory_ssh_helper_hash(self) -> None:
-        """Do not start an unbound RAM image without its reconnect consumer."""
-        manifest = runtime_manifest()
-        del manifest["sha256"]["runner/ssh_transport.py"]
+    def test_rejects_a_runtime_without_a_mandatory_runner_helper_hash(self) -> None:
+        """Bind both the SSH and identity consumers into the runtime closure."""
+        for helper in ("runner/ssh_transport.py", "runner/identity.py"):
+            manifest = runtime_manifest()
+            del manifest["sha256"][helper]
 
-        with self.assertRaisesRegex(SystemExit, "runtime hashes must contain exactly"):
-            self.load(manifest)
+            with (
+                self.subTest(helper=helper),
+                self.assertRaisesRegex(SystemExit, "runtime hashes must contain exactly"),
+            ):
+                self.load(manifest)
 
 
 class NoTransportRunnerTests(unittest.TestCase):
@@ -160,6 +283,7 @@ class NoTransportRunnerTests(unittest.TestCase):
         manifest["transport"] = "none"
         payloads = {
             "image/ramboot.bin": b"DHTB RAM image\n",
+            "runner/identity.py": (ROOT / "scripts/fplinux_cli/identity.py").read_bytes(),
             "runner/platform_adapter.py": b"adapter\n",
             "runner/ssh_transport.py": b"unused but hashed helper\n",
             "assets/fdl1.bin": b"fdl1\n",
@@ -226,6 +350,7 @@ class NoTransportRunnerTests(unittest.TestCase):
         ssh.prepare_session.return_value = session
         with (
             mock.patch.object(RUNNER, "__file__", str(self.runner)),
+            mock.patch.object(RUNNER, "_identity_module", None),
             mock.patch.object(RUNNER, "host_preflight"),
             mock.patch.object(RUNNER, "load_adapter", return_value=adapter),
             mock.patch.object(RUNNER, "load_module", return_value=ssh),

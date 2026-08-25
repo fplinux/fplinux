@@ -3,7 +3,6 @@
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 
 / {
-	compatible = "sprd,ums9117";
 	#address-cells = <1>;
 	#size-cells = <1>;
 	interrupt-parent = <&gic>;

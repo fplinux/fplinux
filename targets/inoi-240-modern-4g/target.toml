@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: GPL-2.0-only
-name = "inoi-240-modern-4g"
-display_name = "INOI 240 Modern 4G"
-release_slug = "FPLinux-INOI-240-Modern-4G"
 platform = "ums9117"
+
+[identity]
+brand = "INOI"
+product = "240 Modern 4G"
+hardware_codes = []
+compatible = "inoi,240-modern-4g"
 
 [bundle]
 packages = []
@@ -10,10 +13,7 @@ packages = []
 [linux]
 dtb = "unisoc/ums9117-inoi-240-modern-4g.dtb"
 debug_dtb = "ums9117-inoi-240-modern-4g.dtb"
-patches = [
-  "kernel/0001-inoi-240-modern-4g-dtb.patch",
-  "kernel/0002-inoi-240-modern-4g-dt-binding.patch",
-]
+patches = ["kernel/0001-inoi-240-modern-4g-dtb.patch"]
 forbidden_dtb_markers = ["sdhci", "mmc", "nand", "mtd", "ubi", "emmc"]
 forbidden_config = [
   "CONFIG_MTD=y",
@@ -49,6 +49,7 @@ destination = "drivers/video/fbdev/Makefile"
 image = "inoi240_linux_bootstrap.bin"
 map = "obj/inoi240_linux_bootstrap_map.txt"
 dtb_destination = "inoi240.dtb"
+record_prefix = "INOI240"
 
 [adapter]
 spi_mode = 3

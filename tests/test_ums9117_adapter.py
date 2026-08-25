@@ -88,6 +88,42 @@ def adapter_data(**overrides: object) -> dict[str, object]:
     return data
 
 
+def runtime_identity(*, platform_name: str = "ums9117") -> dict[str, object]:
+    """Return the identity portion consumed by the fixed UMS9117 adapter."""
+    return {
+        "identity": {
+            "target": {"display_name": "Nokia 3210 4G (TA-1618)"},
+            "platform": {"name": platform_name},
+        }
+    }
+
+
+class RuntimeIdentityTests(unittest.TestCase):
+    """Keep platform selection and the rendered target identity fail-closed."""
+
+    def test_reads_the_nested_target_display_name(self) -> None:
+        """The adapter renders the validated target identity rather than a root alias."""
+        runtime = runtime_identity()
+        runtime["display_name"] = "obsolete root name"
+
+        self.assertEqual(
+            ADAPTER.runtime_target_display_name(runtime),
+            "Nokia 3210 4G (TA-1618)",
+        )
+
+    def test_rejects_a_bundle_for_another_platform(self) -> None:
+        """The fixed adapter refuses a runtime manifest for another platform."""
+        with self.assertRaisesRegex(SystemExit, "platform identity must name ums9117"):
+            ADAPTER.runtime_target_display_name(runtime_identity(platform_name="other"))
+
+    def test_rejects_the_legacy_root_only_identity(self) -> None:
+        """A previous root display_name/platform pair cannot select this adapter."""
+        with self.assertRaisesRegex(SystemExit, "runtime identity must be an object"):
+            ADAPTER.runtime_target_display_name(
+                {"display_name": "Demo Phone", "platform": "ums9117"}
+            )
+
+
 class LoaderArgumentsTests(unittest.TestCase):
     """Keep exec-distance selection entirely target-driven."""
 
@@ -272,8 +308,7 @@ class BridgeAcknowledgementTests(unittest.TestCase):
     def runtime(self, transport: str = "none") -> dict[str, Any]:
         """Return the complete adapter input for one bridge acknowledgement case."""
         return {
-            "display_name": "Nokia 3210 4G (TA-1618)",
-            "platform": "ums9117",
+            **runtime_identity(),
             "transport": transport,
             "assets": {
                 "fdl1": "assets/fdl1.bin",

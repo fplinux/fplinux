@@ -1,5 +1,9 @@
 # SPDX-License-Identifier: GPL-2.0-only
-name = "ums9117"
+[identity]
+vendor = "Unisoc"
+soc = "UMS9117"
+aliases = ["T117"]
+compatible = "sprd,ums9117"
 
 [rootfs]
 packages = ["fplinux-cpuclock", "fplinux-ssh", "fplinux-usb-gadget"]
