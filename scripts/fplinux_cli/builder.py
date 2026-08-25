@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
 from . import alpine_builder, alpine_state, kbuild_state, linux_state
+from .build_env import build_environment
 from .bundle_state import (
     canonical_json_bytes,
     create_bundle_staging,
@@ -50,7 +51,6 @@ if TYPE_CHECKING:
 
 CACHE = Path("/cache")
 OUTPUT = Path("/out")
-SOURCE_DATE_EPOCH = "1784919600"
 RAM_SESSION_BYTES = 512
 RAM_SESSION_ALIGNMENT = 64
 
@@ -163,23 +163,6 @@ def ssh_transport_source() -> Path:
 def adapter_source(platform: str) -> Path:
     """Return the fixed adapter path for a validated platform."""
     return ROOT / "platforms" / platform / "host/adapter.py"
-
-
-def build_environment() -> dict[str, str]:
-    """Return the deterministic build environment."""
-    environment = os.environ.copy()
-    environment.update(
-        {
-            "LC_ALL": "C",
-            "SOURCE_DATE_EPOCH": SOURCE_DATE_EPOCH,
-            "KBUILD_BUILD_TIMESTAMP": "2026-07-24 19:00:00 +0000",
-            "KBUILD_BUILD_USER": "fplinux",
-            "KBUILD_BUILD_HOST": "builder",
-            "KBUILD_BUILD_VERSION": "1",
-            "KCONFIG_NOTIMESTAMP": "1",
-        }
-    )
-    return environment
 
 
 def run(
@@ -408,7 +391,14 @@ def bootstrap_recipe_digest(
             ),
         },
         # build_bootstrap() is in this file, already part of the Kbuild plan.
-        "implementation": {"scripts/fplinux_cli/builder.py": sha256_file(Path(__file__))},
+        "implementation": {
+            "scripts/fplinux_cli/build_env.py": sha256_file(
+                root_source("scripts/fplinux_cli/build_env.py")
+            ),
+            "scripts/fplinux_cli/builder.py": sha256_file(
+                root_source("scripts/fplinux_cli/builder.py")
+            ),
+        },
     }
     return sha256_bytes(canonical_json_bytes(manifest))
 
@@ -656,7 +646,14 @@ def build_kernel(
         config_script = require_file(linux_source / platform["linux"]["config_script"])
         current_linux = linux_state.require_prepared_linux(linux_source, prepared_linux)
         implementation = [
-            ("scripts/fplinux_cli/builder.py", Path(__file__)),
+            (
+                "scripts/fplinux_cli/build_env.py",
+                root_source("scripts/fplinux_cli/build_env.py"),
+            ),
+            (
+                "scripts/fplinux_cli/builder.py",
+                root_source("scripts/fplinux_cli/builder.py"),
+            ),
             (
                 "scripts/fplinux_cli/device_state.py",
                 Path(__file__).with_name("device_state.py"),

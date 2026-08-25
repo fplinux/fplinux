@@ -59,6 +59,7 @@ class AlpineStateTests(unittest.TestCase):
         self._write("scripts/fplinux_cli/alpine_state.py", b"state implementation\n")
         self._write("scripts/fplinux_cli/builder.py", b"builder implementation\n")
         self._write("scripts/fplinux_cli/alpine_builder.py", b"Alpine builder implementation\n")
+        self._write("scripts/fplinux_cli/build_env.py", b"build environment\n")
         self.shared_source = self._write("alpine/shared/shared.c", b"int shared;\n")
 
     def _write(self, relative: str, contents: bytes) -> Path:
@@ -233,6 +234,23 @@ class AlpineStateTests(unittest.TestCase):
             self.packages[0], "1" * 64, self.signing_key, self.root
         )
         self._write("scripts/fplinux_cli/alpine_builder.py", b"Alpine builder changed\n")
+        self.assertNotEqual(rootfs_before, self._recipe())
+        self.assertNotEqual(
+            package_before,
+            alpine_state.alpine_package_recipe(
+                self.packages[0], "1" * 64, self.signing_key, self.root
+            ),
+        )
+
+    def test_build_environment_bytes_change_alpine_recipes(self) -> None:
+        """A shared deterministic-environment edit invalidates rootfs and APK slots."""
+        rootfs_before = self._recipe()
+        package_before = alpine_state.alpine_package_recipe(
+            self.packages[0], "1" * 64, self.signing_key, self.root
+        )
+
+        self._write("scripts/fplinux_cli/build_env.py", b"changed environment\n")
+
         self.assertNotEqual(rootfs_before, self._recipe())
         self.assertNotEqual(
             package_before,

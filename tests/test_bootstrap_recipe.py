@@ -22,6 +22,8 @@ class BootstrapRecipeTests(unittest.TestCase):
         self._write("targets/demo/bootstrap/Makefile", b"all:\n\ttrue\n")
         self._write("targets/demo/bootstrap/main.c", b"int entry(void) { return 1; }\n")
         self._write("bootstrap/fplinux-boot-screen/screen.c", b"int screen;\n")
+        self._write("scripts/fplinux_cli/build_env.py", b"build environment\n")
+        self._write("scripts/fplinux_cli/builder.py", b"builder implementation\n")
         self.target_config = {
             "bootstrap": {
                 "image": "ramboot.bin",
@@ -106,6 +108,10 @@ class BootstrapRecipeTests(unittest.TestCase):
         self.platform["bootstrap"]["toolchain"] = "arm-none-eabi"
 
         self.platform["bootstrap"]["build_targets"] = ["clean", "all"]
+        self.assertNotEqual(baseline, self._digest())
+
+        self.platform["bootstrap"]["build_targets"] = ["clean", "all", "map"]
+        self._write("scripts/fplinux_cli/build_env.py", b"changed environment\n")
         self.assertNotEqual(baseline, self._digest())
 
     def test_host_and_docs_are_outside_the_bootstrap_closure(self) -> None:
