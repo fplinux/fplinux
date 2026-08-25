@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "fplinux-handoff-protocol.h"
+
 #define UMS9117_BOOTSTRAP_DMA_CLEAR_SEEN (1U << 0)
 #define UMS9117_BOOTSTRAP_DMA_DISABLED (1U << 1)
 #define UMS9117_BOOTSTRAP_DMA_OK \
@@ -22,6 +24,7 @@ enum ums9117_bootstrap_session_status {
 	UMS9117_BOOTSTRAP_SESSION_CLIENT_KEY,
 	UMS9117_BOOTSTRAP_SESSION_USB_CONFIG,
 	UMS9117_BOOTSTRAP_SESSION_DTB,
+	UMS9117_BOOTSTRAP_SESSION_OUTPUT,
 };
 
 struct ums9117_bootstrap_timer_gates {
@@ -55,8 +58,9 @@ size_t ums9117_bootstrap_zimage_size(void);
 size_t ums9117_bootstrap_dtb_size(void);
 void ums9117_bootstrap_copy_zimage(uint32_t destination, size_t bytes);
 void ums9117_bootstrap_copy_dtb(uint32_t destination, size_t bytes);
-enum ums9117_bootstrap_session_status
-ums9117_bootstrap_personalize_dtb(uint32_t destination, size_t bytes);
+enum ums9117_bootstrap_session_status ums9117_bootstrap_personalize_dtb(
+	uint32_t destination, size_t bytes,
+	uint8_t session_id[FPLINUX_HANDOFF_SESSION_ID_BYTES]);
 const char *
 ums9117_bootstrap_session_error(enum ums9117_bootstrap_session_status status);
 
