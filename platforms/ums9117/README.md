@@ -14,17 +14,18 @@
 ## Scope
 
 UMS9117 provides reusable CPU, interrupt, timer, USB gadget, analog-die,
-framebuffer and matrix-keypad support for the listed phones. The platform owns
-the SoC integration and its fixed RAM-only loader flow. A target owns board
-memory, panel profile and wiring, keypad map, bootstrap inputs, payload assembly
-and the values supplied to the loader.
+framebuffer and matrix-keypad support for the listed phones. Linux also reads and
+reports the inherited MPLL and Cortex-A7 rates without changing them. The
+platform owns the SoC integration and its fixed RAM-only loader flow. A target
+owns board memory, panel profile and wiring, keypad map, bootstrap inputs,
+payload assembly and the values supplied to the loader.
 
 ## Reusable capabilities
 
 | Capability                                             | Status        | Target-facing requirement or limitation                                                             |
 | ------------------------------------------------------ | ------------- | --------------------------------------------------------------------------------------------------- |
 | CPU / GIC / timers                                     | Supported     | The SoC has one Cortex-A7 CPU; targets use the shared interrupt and timer nodes.                    |
-| Clock controller                                       | Partial       | Fixed clock nodes are available; there is no general clock-controller driver.                       |
+| Clock controller                                       | Partial       | Linux reads and reports inherited MPLL/Cortex-A7 rates; it does not change clocks.                  |
 | USB device controller                                  | Supported     | USB peripheral support is shared; board USB setup remains target-owned.                             |
 | Analog-die interface                                   | Supported     | Linux initializes the shared transport; feature clients and their board wiring remain target-owned. |
 | LCDC framebuffer core                                  | Supported     | Targets provide a panel profile and the board-specific panel transport setup.                       |
@@ -54,7 +55,7 @@ setup remain target-owned.
 ## Known constraints
 
 - The platform brings up one CPU only.
-- Clock, reset, pin-control and power-domain frameworks are not implemented.
+- Reset, pin-control and power-domain frameworks are not implemented.
 - The platform has no USB host or DMA support.
 
 ## Targets using this platform
