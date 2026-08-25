@@ -57,5 +57,4 @@ exec_distance = 0
 backlight_channels = "rgb"
 backlight_level = 0x1f
 session_name = "inoi244-linux"
-handoff_marker = "INOI244_LINUX_BOOTSTRAP stage=5 message=PREPARE LINUX"
 boot_instructions = "Power the phone off, hold *, then connect USB while keeping * pressed."

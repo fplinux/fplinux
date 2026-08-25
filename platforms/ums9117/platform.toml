@@ -196,7 +196,7 @@ fdl1_load_address = 0x00006200
 brightness = 50
 rotation = 0
 handoff_wait_seconds = 60
-release_wait_seconds = 10
+usb_release_wait_seconds = 10
 
 [runtime.usb.bootrom]
 vendor_id = 0x1782
@@ -250,9 +250,12 @@ archive_prefix = "fpdoom-{commit}/libc_server/"
 source_directory = "libc_server"
 binary = "libc_server"
 link = "static-libusb"
-copies = []
-patches = []
-self_test = false
+self_test = true
+patches = ["platforms/ums9117/host/0001-libc-server-fplinux-handoff.patch"]
+
+[[host.tools.copies]]
+source = "platforms/ums9117/bootstrap/fplinux-handoff-protocol.h"
+destination = "fplinux-handoff-protocol.h"
 
 [[host.tools.members]]
 path = "Makefile"

@@ -54,7 +54,6 @@ exec_distance = 0
 backlight_channels = "mono"
 backlight_level = 0
 session_name = "demo"
-handoff_marker = "demo"
 boot_instructions = "demo"
 """,
             encoding="utf-8",

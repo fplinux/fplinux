@@ -1,0 +1,151 @@
+--- a/Makefile
++++ b/Makefile
+@@ -14,5 +14,5 @@
+ clean:
+ 	$(RM) $(APPNAME)
+
+-$(APPNAME): $(APPNAME).c cmd_def.h
+-	$(CC) -s $(CFLAGS) -o $@ $^ $(LIBS)
++$(APPNAME): $(APPNAME).c cmd_def.h fplinux-handoff-protocol.h
++	$(CC) -s $(CFLAGS) -o $@ $(APPNAME).c $(LIBS)
+--- a/libc_server.c
++++ b/libc_server.c
+@@ -32,6 +32,9 @@
+ #include <unistd.h>
+
+ #include "cmd_def.h"
++#include "fplinux-handoff-protocol.h"
++
++#define CMD_FPLINUX_HANDOFF FPLINUX_HANDOFF_OPCODE
+
+ static void print_mem(FILE *f, const uint8_t *buf, size_t len) {
+ 	size_t i; int a, j, n;
+@@ -393,6 +396,80 @@
+ 	return crc & 0xffff;
+ }
+
++static int handoff_hex_value(int character) {
++	if (character >= '0' && character <= '9')
++		return character - '0';
++	if (character >= 'a' && character <= 'f')
++		return character - 'a' + 10;
++	return -1;
++}
++
++static int parse_handoff_session(const char *text,
++		uint8_t session_id[FPLINUX_HANDOFF_SESSION_ID_BYTES]) {
++	size_t index;
++
++	if (strlen(text) != FPLINUX_HANDOFF_SESSION_ID_BYTES * 2U)
++		return 0;
++	for (index = 0; index < FPLINUX_HANDOFF_SESSION_ID_BYTES; ++index) {
++		int high = handoff_hex_value(text[index * 2U]);
++		int low = handoff_hex_value(text[index * 2U + 1U]);
++
++		if (high < 0 || low < 0)
++			return 0;
++		session_id[index] = (uint8_t)((high << 4) | low);
++	}
++	return 1;
++}
++
++static int complete_handoff(usbio_t *io,
++		const uint8_t expected_session_id[FPLINUX_HANDOFF_SESSION_ID_BYTES]) {
++	const uint8_t *request_session_id = io->buf;
++	uint8_t status = FPLINUX_HANDOFF_STATUS_ACK;
++	uint8_t response[FPLINUX_HANDOFF_RESPONSE_BYTES];
++
++	if (usb_recv(io, FPLINUX_HANDOFF_REQUEST_PAYLOAD_BYTES) !=
++	    FPLINUX_HANDOFF_REQUEST_PAYLOAD_BYTES)
++		ERR_EXIT("FPLinux handoff request timeout\n");
++	if (!fplinux_handoff_validate_request(request_session_id,
++				       expected_session_id))
++		status = FPLINUX_HANDOFF_STATUS_NACK;
++	fplinux_handoff_encode_response(response, status,
++		status == FPLINUX_HANDOFF_STATUS_ACK ? request_session_id : expected_session_id);
++	usb_send(io, response, sizeof(response));
++	return status == FPLINUX_HANDOFF_STATUS_ACK;
++}
++
++static int handoff_self_test(void) {
++	static const char session_hex[] =
++		"00112233445566778899aabbccddeeff"
++		"ffeeddccbbaa99887766554433221100";
++	uint8_t session_id[FPLINUX_HANDOFF_SESSION_ID_BYTES];
++	uint8_t request[FPLINUX_HANDOFF_REQUEST_PAYLOAD_BYTES];
++	uint8_t response[FPLINUX_HANDOFF_RESPONSE_BYTES];
++
++	if (!parse_handoff_session(session_hex, session_id))
++		return 1;
++	fplinux_handoff_encode_request(request, session_id);
++	if (!fplinux_handoff_validate_request(request, session_id))
++		return 1;
++	request[0] ^= 1U;
++	if (fplinux_handoff_validate_request(request, session_id))
++		return 1;
++	fplinux_handoff_encode_response(response, FPLINUX_HANDOFF_STATUS_ACK,
++				 session_id);
++	if (fplinux_handoff_validate_response(response, session_id) !=
++	    FPLINUX_HANDOFF_RESPONSE_ACK)
++		return 1;
++	response[0] = FPLINUX_HANDOFF_STATUS_NACK;
++	fplinux_handoff_write_le16(
++		response + 1U + FPLINUX_HANDOFF_SESSION_ID_BYTES,
++		fplinux_handoff_response_checksum(response[0], session_id));
++	if (fplinux_handoff_validate_response(response, session_id) !=
++	    FPLINUX_HANDOFF_RESPONSE_NACK)
++		return 1;
++	return 0;
++}
++
+ static int read_msg(usbio_t *io) {
+ 	if (usb_recv(io, 3) != 3)
+ 		ERR_EXIT("response timeout\n");
+@@ -485,11 +562,15 @@
+ #else
+ 	int serial;
+ #endif
+-	usbio_t *io; int ret, i;
++	uint8_t handoff_session_id[FPLINUX_HANDOFF_SESSION_ID_BYTES];
++	usbio_t *io; int ret, i, handoff_configured = 0;
+ 	int wait = 0 * REOPEN_FREQ;
+ 	const char *tty = "/dev/ttyUSB0";
+ 	int verbose = 0, is_tty;
+
++	if (argc == 2 && !strcmp(argv[1], "--self-test"))
++		return handoff_self_test();
++
+ #if USE_LIBUSB
+ 	ret = libusb_init(NULL);
+ 	if (ret < 0)
+@@ -509,6 +590,12 @@
+ 			if (argc <= 2) ERR_EXIT("bad option\n");
+ 			verbose = atoi(argv[2]);
+ 			argc -= 2; argv += 2;
++		} else if (!strcmp(argv[1], "--fplinux-handoff")) {
++			if (argc <= 2 || handoff_configured ||
++			    !parse_handoff_session(argv[2], handoff_session_id))
++				ERR_EXIT("invalid FPLinux handoff session\n");
++			handoff_configured = 1;
++			argc -= 2; argv += 2;
+ 		} else if (!strcmp(argv[1], "--")) {
+ 			argc -= 1; argv += 1;
+ 			break;
+@@ -812,6 +899,17 @@
+ 			}
+ 			break;
+
++		case CMD_FPLINUX_HANDOFF:
++			if (!handoff_configured)
++				ERR_EXIT("unexpected FPLinux handoff\n");
++			if (!complete_handoff(io, handoff_session_id))
++				ERR_EXIT("FPLinux handoff rejected\n");
++			usbio_free(io);
++#if USE_LIBUSB
++			libusb_exit(NULL);
++#endif
++			return 0;
++
+ 		default:
+ 			ERR_EXIT("unknown command\n");
+ 		}

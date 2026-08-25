@@ -6,7 +6,9 @@
 #include <string.h>
 
 #include "fplinux-boot-screen/boot-screen.h"
+#include "fplinux-handoff-protocol.h"
 #include "syscode.h"
+#include "usbio.h"
 #include "ums9117-bootstrap/boot-main.h"
 #include "ums9117-bootstrap/bootstrap.h"
 
@@ -125,18 +127,61 @@ static int enable_and_probe_sprd_timer(void)
 	return timer_ok;
 }
 
-static void quiesce_usb(void)
+static __attribute__((noreturn)) void
+ums9117_boot_halt_without_transport(uint32_t code, const char *message)
 {
-	ums9117_boot_checkpoint("DMA 5 QUIESCE", FPLINUX_BOOT_SCREEN_ACTIVE);
+	fplinux_boot_screen_fail(&boot_screen, code, message);
+	for (;;)
+		;
+}
+
+static void prepare_usb_handoff(void)
+{
 	if ((ums9117_bootstrap_quiesce_usb_dma_channel(5) &
 	     UMS9117_BOOTSTRAP_DMA_OK) != UMS9117_BOOTSTRAP_DMA_OK)
-		ums9117_boot_fail(6, "USB DMA5 QUIESCE FAIL");
-	ums9117_boot_checkpoint("DMA 21 QUIESCE", FPLINUX_BOOT_SCREEN_ACTIVE);
+		ums9117_boot_halt_without_transport(6, "USB DMA5 QUIESCE FAIL");
 	if ((ums9117_bootstrap_quiesce_usb_dma_channel(21) &
 	     UMS9117_BOOTSTRAP_DMA_OK) != UMS9117_BOOTSTRAP_DMA_OK)
-		ums9117_boot_fail(7, "USB DMA21 QUIESCE FAIL");
-	ums9117_boot_checkpoint("USB DISCONNECT", FPLINUX_BOOT_SCREEN_ACTIVE);
-	ums9117_bootstrap_cleanup_usb_dma_and_disconnect();
+		ums9117_boot_halt_without_transport(7,
+						    "USB DMA21 QUIESCE FAIL");
+}
+
+static int
+read_handoff_response(uint8_t response[FPLINUX_HANDOFF_RESPONSE_BYTES])
+{
+	uint32_t started = sys_timer_ms();
+	size_t index = 0;
+
+	while (index < FPLINUX_HANDOFF_RESPONSE_BYTES) {
+		int value = usb_getchar(USB_NOWAIT);
+
+		if (value >= 0) {
+			response[index++] = (uint8_t)value;
+			continue;
+		}
+		if ((uint32_t)(sys_timer_ms() - started) >=
+		    FPLINUX_HANDOFF_ACK_TIMEOUT_MS)
+			return 0;
+	}
+
+	return 1;
+}
+
+static int
+exchange_handoff_ack(const uint8_t session_id[FPLINUX_HANDOFF_SESSION_ID_BYTES])
+{
+	uint8_t opcode = FPLINUX_HANDOFF_OPCODE;
+	uint8_t request[FPLINUX_HANDOFF_REQUEST_PAYLOAD_BYTES];
+	uint8_t response[FPLINUX_HANDOFF_RESPONSE_BYTES];
+
+	fplinux_handoff_encode_request(request, session_id);
+	if (usb_write(&opcode, sizeof(opcode)) != (int)sizeof(opcode) ||
+	    usb_write(request, sizeof(request)) != (int)sizeof(request) ||
+	    !read_handoff_response(response))
+		return 0;
+
+	return fplinux_handoff_validate_response(response, session_id) ==
+	       FPLINUX_HANDOFF_RESPONSE_ACK;
 }
 
 void ums9117_boot_main(const struct ums9117_boot_board *board)
@@ -148,6 +193,7 @@ void ums9117_boot_main(const struct ums9117_boot_board *board)
 	size_t zimage_bytes = ums9117_bootstrap_zimage_size();
 	size_t dtb_bytes = ums9117_bootstrap_dtb_size();
 	struct fplinux_boot_screen_canvas canvas;
+	uint8_t session_id[FPLINUX_HANDOFF_SESSION_ID_BYTES];
 	char note[48];
 
 	active_board = board;
@@ -217,7 +263,7 @@ void ums9117_boot_main(const struct ums9117_boot_board *board)
 	ums9117_bootstrap_copy_dtb(UMS9117_BOOT_DTB_STAGE_PHYS, dtb_bytes);
 	ums9117_boot_checkpoint("SESSION VERIFY", FPLINUX_BOOT_SCREEN_ACTIVE);
 	session_status = ums9117_bootstrap_personalize_dtb(
-		UMS9117_BOOT_DTB_STAGE_PHYS, dtb_bytes);
+		UMS9117_BOOT_DTB_STAGE_PHYS, dtb_bytes, session_id);
 	if (session_status != UMS9117_BOOTSTRAP_SESSION_OK)
 		ums9117_boot_fail(
 			9, ums9117_bootstrap_session_error(session_status));
@@ -225,9 +271,12 @@ void ums9117_boot_main(const struct ums9117_boot_board *board)
 	set_stage(UMS9117_BOOT_STAGE_DEVICE_TREE, FPLINUX_BOOT_SCREEN_DONE);
 
 	set_stage(UMS9117_BOOT_STAGE_PREPARE_LINUX, FPLINUX_BOOT_SCREEN_ACTIVE);
-	/* The host stops libc_server after observing this final USB record. */
 	record_stage(5, "PREPARE LINUX");
-	quiesce_usb();
+	if (!exchange_handoff_ack(session_id))
+		ums9117_boot_halt_without_transport(10, "HANDOFF ACK FAIL");
+
+	prepare_usb_handoff();
+	ums9117_bootstrap_cleanup_usb_dma_and_disconnect();
 	set_stage(UMS9117_BOOT_STAGE_PREPARE_LINUX, FPLINUX_BOOT_SCREEN_DONE);
 	clean_invalidate_dcache();
 	invalidate_icache();
