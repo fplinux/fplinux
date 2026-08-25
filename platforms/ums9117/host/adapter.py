@@ -6,11 +6,10 @@ from __future__ import annotations
 
 import importlib
 import os
+import re
 import shutil
 import signal
 import subprocess
-import sys
-import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
@@ -19,6 +18,7 @@ if TYPE_CHECKING:
     from types import FrameType
 
 BACKLIGHT_CHANNELS = "rgbw"
+SESSION_ID = re.compile(r"[0-9a-f]{64}\Z")
 
 
 def fail(message: str) -> NoReturn:
@@ -57,6 +57,16 @@ def backlight_channels(table: dict[str, Any], key: str) -> str:
     return value
 
 
+def prepared_session_token(value: object) -> str:
+    """Return the exact session token that binds bridge completion to this run."""
+    if not isinstance(value, dict):
+        fail("RAM loader requires a prepared session")
+    token = value.get("session_id")
+    if not isinstance(token, str) or SESSION_ID.fullmatch(token) is None:
+        fail("prepared session has an invalid session_id")
+    return token
+
+
 def adapter_config(value: object) -> dict[str, Any]:
     keys = {
         "brightness",
@@ -67,9 +77,8 @@ def adapter_config(value: object) -> dict[str, Any]:
         "backlight_channels",
         "backlight_level",
         "session_name",
-        "handoff_marker",
         "handoff_wait_seconds",
-        "release_wait_seconds",
+        "usb_release_wait_seconds",
         "boot_instructions",
     }
     if not isinstance(value, dict) or set(value) != keys:
@@ -88,15 +97,14 @@ def adapter_config(value: object) -> dict[str, Any]:
         "backlight_channels": backlight_channels(value, "backlight_channels"),
         "backlight_level": integer(value, "backlight_level", bounds=(0, 0x3F)),
         "session_name": text(value, "session_name"),
-        "handoff_marker": text(value, "handoff_marker"),
         "handoff_wait_seconds": integer(
             value,
             "handoff_wait_seconds",
             bounds=(1, 3600),
         ),
-        "release_wait_seconds": integer(
+        "usb_release_wait_seconds": integer(
             value,
-            "release_wait_seconds",
+            "usb_release_wait_seconds",
             bounds=(1, 300),
         ),
         "boot_instructions": text(value, "boot_instructions"),
@@ -169,7 +177,7 @@ def require_usb_device_access(device: Path, identity: str) -> None:
         os.close(descriptor)
 
 
-def stop(process: subprocess.Popen[str] | None) -> None:
+def stop(process: subprocess.Popen[Any] | None) -> None:
     if process is None or process.poll() is not None:
         return
     process.terminate()
@@ -180,34 +188,28 @@ def stop(process: subprocess.Popen[str] | None) -> None:
         process.wait()
 
 
-def stream(process: subprocess.Popen[str], marker: str, marker_seen: threading.Event) -> None:
-    if process.stdout is None:
-        fail("bridge output pipe is missing")
-    for line in process.stdout:
-        sys.stdout.write(line)
-        sys.stdout.flush()
-        if marker in line:
-            marker_seen.set()
+def wait_for_bootrom_disconnect(device: Path, wait_seconds: int) -> None:
+    """Require the exact BootROM usbfs node to disappear after bridge acknowledgement."""
+    deadline = time.monotonic() + wait_seconds
+    while device.exists():
+        if time.monotonic() >= deadline:
+            fail("BootROM USB did not disconnect before the deadline")
+        time.sleep(0.1)
 
 
 def complete_linux_handoff(
     runtime: dict[str, Any],
-    session: dict[str, Any] | None,
+    session: dict[str, Any],
     linux_usb: dict[str, int],
 ) -> None:
-    """Finish one already-observed handoff through its declared host transport."""
+    """Finish one bridge-acknowledged transition through its declared transport."""
     if runtime["transport"] == "none":
-        print(
-            "Bootstrap handoff marker observed; no host-side transport is available "
-            "to confirm Linux startup."
-        )
+        print("Bridge acknowledged the Linux transition; no host-side transport is selected.")
         return
 
-    if session is None:
-        fail("USB-NCM transport has no prepared SSH session")
     linux_id = f"{linux_usb['vendor_id']:04x}:{linux_usb['product_id']:04x}"
     print(
-        "Bootstrap released USB; waiting up to "
+        "Bridge acknowledged the Linux transition; waiting up to "
         f"{linux_usb['wait_seconds']} seconds for Linux USB-NCM {linux_id}."
     )
     transport_module = importlib.import_module("ssh_transport")
@@ -219,9 +221,10 @@ def complete_linux_handoff(
 def run(
     bundle: Path,
     runtime: dict[str, Any],
-    session: dict[str, Any] | None,
+    session: dict[str, Any],
 ) -> None:
     """Execute the fixed RAM-only UMS9117 sequence for one declared transport."""
+    session_token = prepared_session_token(session)
     assets = runtime["assets"]
     if set(assets) != {"fdl1", "pinmap", "keymap"}:
         fail("runtime assets do not match the UMS9117 platform contract")
@@ -241,7 +244,7 @@ def run(
     if stdbuf is None:
         fail("GNU stdbuf is required (install coreutils before starting the RAM loader)")
 
-    image = Path(session["image"]) if session is not None else bundle / runtime["image"]
+    image = Path(session["image"])
     fdl1 = bundle / assets["fdl1"]
     loader = bundle / tools["loader"]
     bridge = bundle / tools["bridge"]
@@ -282,9 +285,8 @@ def run(
     try:
         result = subprocess.run(loader_argv, check=False)
     finally:
-        if session is not None:
-            transport_module = importlib.import_module("ssh_transport")
-            transport_module.remove_personalized_image(session)
+        transport_module = importlib.import_module("ssh_transport")
+        transport_module.remove_personalized_image(session)
     if result.returncode:
         fail(f"RAM loader exited with status {result.returncode}")
 
@@ -293,6 +295,8 @@ def run(
         "-oL",
         "-eL",
         str(bridge),
+        "--fplinux-handoff",
+        session_token,
         "--",
         "--bright",
         str(config["brightness"]),
@@ -306,7 +310,7 @@ def run(
         backlight_argument(config),
         config["session_name"],
     ]
-    bridge_process: subprocess.Popen[str] | None = None
+    bridge_process: subprocess.Popen[Any] | None = None
 
     def handle_signal(_signum: int, _frame: FrameType | None) -> None:
         stop(bridge_process)
@@ -318,31 +322,15 @@ def run(
         bridge_process = subprocess.Popen(
             bridge_argv,
             cwd=bundle / Path(assets["pinmap"]).parent,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
         )
-        marker_seen = threading.Event()
-        reader = threading.Thread(
-            target=stream,
-            args=(bridge_process, config["handoff_marker"], marker_seen),
-            daemon=True,
-        )
-        reader.start()
-        deadline = time.monotonic() + config["handoff_wait_seconds"]
-        while not marker_seen.wait(0.1):
-            status = bridge_process.poll()
-            if status is not None:
-                fail(f"bridge exited before Linux handoff (status {status})")
-            if time.monotonic() >= deadline:
-                fail("Linux handoff marker was not observed before the deadline")
-        release_deadline = time.monotonic() + config["release_wait_seconds"]
-        while bridge_process.poll() is None and time.monotonic() < release_deadline:
-            time.sleep(0.1)
-        stop(bridge_process)
-        reader.join(timeout=2)
+        try:
+            status = bridge_process.wait(timeout=config["handoff_wait_seconds"])
+        except subprocess.TimeoutExpired:
+            fail("bridge did not acknowledge the Linux transition before the deadline")
+        if status:
+            fail(f"bridge did not acknowledge the Linux transition (status {status})")
     finally:
         stop(bridge_process)
 
+    wait_for_bootrom_disconnect(bootrom_device, config["usb_release_wait_seconds"])
     complete_linux_handoff(runtime, session, linux_usb)

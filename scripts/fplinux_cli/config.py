@@ -517,7 +517,6 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
             "backlight_channels",
             "backlight_level",
             "session_name",
-            "handoff_marker",
             "boot_instructions",
         },
         "target adapter",
@@ -535,7 +534,7 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
         "target adapter backlight_level",
         bounds=(0, 0x3F),
     )
-    for key in ("session_name", "handoff_marker", "boot_instructions"):
+    for key in ("session_name", "boot_instructions"):
         nonempty_string(adapter.get(key), f"target adapter {key}")
 
     selected_profile: dict[str, Any] | None = None
@@ -810,7 +809,7 @@ def load_platform(platform: str) -> dict[str, Any]:
             "brightness",
             "rotation",
             "handoff_wait_seconds",
-            "release_wait_seconds",
+            "usb_release_wait_seconds",
         },
         "platform runtime adapter",
     )
@@ -828,8 +827,8 @@ def load_platform(platform: str) -> dict[str, Any]:
         bounds=(1, 3600),
     )
     integer_value(
-        adapter.get("release_wait_seconds"),
-        "platform adapter release_wait_seconds",
+        adapter.get("usb_release_wait_seconds"),
+        "platform adapter usb_release_wait_seconds",
         bounds=(1, 300),
     )
     usb = exact_table(runtime.get("usb"), {"bootrom", "linux_gadget"}, "platform runtime usb")

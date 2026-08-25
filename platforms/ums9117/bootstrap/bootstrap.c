@@ -443,8 +443,9 @@ void ums9117_bootstrap_copy_dtb(uint32_t destination, size_t bytes)
 			   (void *)(uintptr_t)(destination + bytes));
 }
 
-enum ums9117_bootstrap_session_status
-ums9117_bootstrap_personalize_dtb(uint32_t destination, size_t bytes)
+enum ums9117_bootstrap_session_status ums9117_bootstrap_personalize_dtb(
+	uint32_t destination, size_t bytes,
+	uint8_t session_id[FPLINUX_HANDOFF_SESSION_ID_BYTES])
 {
 	static const unsigned char rng_seed_name[] = "rng-seed";
 	static const unsigned char client_key_name[] = "fplinux,ssh-client-key";
@@ -459,6 +460,8 @@ ums9117_bootstrap_personalize_dtb(uint32_t destination, size_t bytes)
 	uintptr_t start;
 	uintptr_t end;
 
+	if (session_id == NULL)
+		return UMS9117_BOOTSTRAP_SESSION_OUTPUT;
 	start = (uintptr_t)fplinux_session_start;
 	end = (uintptr_t)fplinux_session_end;
 	if ((start & 63U) != 0 || end < start ||
@@ -517,6 +520,8 @@ ums9117_bootstrap_personalize_dtb(uint32_t destination, size_t bytes)
 	       FPLINUX_SESSION_ID_BYTES);
 	memcpy(usb_config_marker, record + FPLINUX_SESSION_USB_CONFIG_OFFSET,
 	       FPLINUX_SESSION_USB_CONFIG_BYTES);
+	memcpy(session_id, record + FPLINUX_SESSION_ID_OFFSET,
+	       FPLINUX_HANDOFF_SESSION_ID_BYTES);
 	clean_dcache_range(tree, tree + bytes);
 	clear_session_record(record);
 	return UMS9117_BOOTSTRAP_SESSION_OK;
@@ -546,6 +551,8 @@ ums9117_bootstrap_session_error(enum ums9117_bootstrap_session_status status)
 		return "SESSION USB CONFIG";
 	case UMS9117_BOOTSTRAP_SESSION_DTB:
 		return "SESSION DTB MARKERS";
+	case UMS9117_BOOTSTRAP_SESSION_OUTPUT:
+		return "SESSION OUTPUT";
 	case UMS9117_BOOTSTRAP_SESSION_OK:
 	default:
 		return "SESSION UNKNOWN";
