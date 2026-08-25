@@ -140,6 +140,29 @@ Never remove a mounted card. The TyrQuake launcher uses a read-only mount when
 `/mnt/card` is not already mounted and otherwise keeps the existing mount
 options.
 
+## Kernel tracing
+
+The target mounts debugfs and tracefs at boot and includes kprobe events and the
+`irqsoff` tracer for development diagnostics. No tracer or dynamic probe is
+active initially. Inspect their current state as root:
+
+```sh
+cat /sys/kernel/tracing/available_tracers
+cat /sys/kernel/tracing/current_tracer
+cat /sys/kernel/tracing/kprobe_events
+```
+
+Tracing and dynamic probes can destabilize the running kernel and consume RAM.
+Disable probes in any additional trace instances first. Then remove the root
+probes, select the `nop` tracer and shrink its ring buffer:
+
+```sh
+echo 0 > /sys/kernel/tracing/events/kprobes/enable
+echo > /sys/kernel/tracing/kprobe_events
+echo nop > /sys/kernel/tracing/current_tracer
+echo 1 > /sys/kernel/tracing/free_buffer
+```
+
 ## Keypad backlight
 
 The binary keypad backlight control is available from the phone shell:
