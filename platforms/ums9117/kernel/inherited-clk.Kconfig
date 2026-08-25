@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config SPRD_UMS9117_INHERITED_CLK
+	bool "UMS9117 inherited clock observer"
+	depends on ARCH_UMS9117
+	depends on COMMON_CLK
+	depends on OF
+	depends on HAS_IOMEM
+	help
+	  Observe the MPLL and current Cortex-A7 core clock state inherited from
+	  the boot firmware. The driver only reads the live UMS9117 mux, divider
+	  and MPLL registers. It cannot change clock rates, parents or gates.

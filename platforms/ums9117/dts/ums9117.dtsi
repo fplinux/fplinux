@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include <dt-bindings/clock/fplinux,ums9117-inherited-clk.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 
 / {
@@ -16,6 +17,8 @@
 			compatible = "arm,cortex-a7";
 			reg = <0>;
 			clock-frequency = <1000000000>;
+			clocks = <&ums9117_inherited_clocks
+				  FPLINUX_UMS9117_CLK_CA7_CORE>;
 		};
 	};
 
@@ -55,6 +58,15 @@
 		aon_apb: syscon@402e0000 {
 			compatible = "fplinux,ums9117-aon-apb", "syscon";
 			reg = <0x402e0000 0x00003000>;
+		};
+
+		ums9117_inherited_clocks: clock-controller@20e00038 {
+			compatible = "fplinux,ums9117-inherited-clocks";
+			reg = <0x20e00038 0x4>,
+			      <0x20e00054 0x4>,
+			      <0x403f0000 0xc>;
+			reg-names = "ca7-divider", "ca7-source", "mpll";
+			#clock-cells = <1>;
 		};
 
 		keypad: keypad@40250000 {
