@@ -19,12 +19,13 @@ from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO, NoReturn
 
 from . import alpine_state
+from .build_env import SOURCE_DATE_EPOCH
+from .build_env import build_environment as _build_environment
 from .common import ROOT, sha256_file
 from .config import relative_value
 from .output import current_stage
 
 CACHE = Path("/cache")
-SOURCE_DATE_EPOCH = "1784919600"
 _ROOTFS_BUILD_LOCK = ".build.lock"
 
 
@@ -99,19 +100,6 @@ def _require_sha256(value: object, name: str) -> str:
     ):
         fail(f"{name} must be a lowercase SHA-256 digest")
     return value
-
-
-def _build_environment() -> dict[str, str]:
-    return {
-        **os.environ,
-        "LC_ALL": "C",
-        "SOURCE_DATE_EPOCH": SOURCE_DATE_EPOCH,
-        "KBUILD_BUILD_TIMESTAMP": "2026-07-24 19:00:00 +0000",
-        "KBUILD_BUILD_USER": "fplinux",
-        "KBUILD_BUILD_HOST": "builder",
-        "KBUILD_BUILD_VERSION": "1",
-        "KCONFIG_NOTIMESTAMP": "1",
-    }
 
 
 def _run(

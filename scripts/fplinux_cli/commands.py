@@ -18,7 +18,8 @@ if TYPE_CHECKING:
     from types import ModuleType
 
 from . import alpine_state
-from .alpine_builder import SOURCE_DATE_EPOCH, materialize_aport_sources
+from .alpine_builder import materialize_aport_sources
+from .build_env import SOURCE_DATE_EPOCH
 from .bundle_state import (
     BundleStateError,
     CurrentBundle,

@@ -369,6 +369,7 @@ def alpine_rootfs_recipe(
         "implementation": [
             _source_file(root / "scripts/fplinux_cli/alpine_state.py", root),
             _source_file(root / "scripts/fplinux_cli/alpine_builder.py", root),
+            _source_file(root / "scripts/fplinux_cli/build_env.py", root),
         ],
     }
     return _canonical_digest(payload)
@@ -395,6 +396,7 @@ def alpine_package_recipe(
             "implementation": [
                 _source_file(root / "scripts/fplinux_cli/alpine_state.py", root),
                 _source_file(root / "scripts/fplinux_cli/alpine_builder.py", root),
+                _source_file(root / "scripts/fplinux_cli/build_env.py", root),
             ],
         }
     )
