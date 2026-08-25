@@ -662,6 +662,9 @@ def validate_host_tool(value: object, index: int) -> dict[str, Any]:
                 "binary",
                 "link",
                 "members",
+                "copies",
+                "patches",
+                "self_test",
             },
             name,
         )
@@ -681,6 +684,10 @@ def validate_host_tool(value: object, index: int) -> dict[str, Any]:
             )
             relative_value(member.get("path"), f"{name} member path")
             nonempty_string(member.get("digest_key"), f"{name} member digest_key")
+        path_steps(recipe.get("copies"), f"{name} copies")
+        path_array(recipe.get("patches"), f"{name} patches", allow_empty=True)
+        if type(recipe.get("self_test")) is not bool:
+            fail(f"{name} self_test must be a boolean")
         return recipe
     if recipe_type == "cc-libusb":
         recipe = exact_table(value, {"type", "name", "source", "self_test"}, name)

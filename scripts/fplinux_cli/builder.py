@@ -404,7 +404,7 @@ def bootstrap_recipe_digest(
 
 
 def apply_patches(source: Path, paths: list[Path]) -> None:
-    """Apply ordered, fuzz-free Linux patches."""
+    """Apply ordered, fuzz-free patches to one verified source projection."""
     for patch in paths:
         run(
             ["patch", "--batch", "--forward", "--fuzz=0", "-p1", "-i", str(patch)],
@@ -1132,6 +1132,16 @@ def extract_host_members(
                 fail(f"host source hash mismatch: {relative}")
 
 
+def copy_host_project_files(source: Path, copies: list[dict[str, str]]) -> None:
+    """Copy declared project-owned host inputs beside verified upstream sources."""
+    for step in copies:
+        destination = source / relative_value(step["destination"], "host copy destination")
+        if destination.exists() or destination.is_symlink():
+            fail(f"host copy destination collides with verified source: {destination}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(require_file(root_source(step["source"])), destination)
+
+
 def build_make_host_tool(
     sources: dict[str, Any],
     recipe: dict[str, Any],
@@ -1153,16 +1163,24 @@ def build_make_host_tool(
     if not isinstance(hashes, dict):
         fail(f"host source {recipe['source_lock']} files table is missing")
     prefix = recipe["archive_prefix"].replace("{commit}", commit)
-    source = work / recipe["source_directory"]
-    extract_host_members(archive, prefix, recipe["members"], hashes, source)
-    make_arguments = ["LIBS=-static -lusb-1.0"] if recipe["link"] == "static-libusb" else []
-    run(["make", "-C", str(source), "clean", "all", *make_arguments])
-    built = require_file(source / recipe["binary"])
-    destination: Path = output / recipe["name"]
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(built, destination)
-    destination.chmod(0o755)
-    return destination
+    with tempfile.TemporaryDirectory(
+        dir=work,
+        prefix=f".{recipe['source_directory']}.",
+    ) as temporary:
+        source = Path(temporary) / recipe["source_directory"]
+        extract_host_members(archive, prefix, recipe["members"], hashes, source)
+        copy_host_project_files(source, recipe["copies"])
+        apply_patches(source, [root_source(path) for path in recipe["patches"]])
+        make_arguments = ["LIBS=-static -lusb-1.0"] if recipe["link"] == "static-libusb" else []
+        run(["make", "-C", str(source), "clean", "all", *make_arguments])
+        built = require_file(source / recipe["binary"])
+        if recipe["self_test"]:
+            run([str(built), "--self-test"])
+        destination: Path = output / recipe["name"]
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(built, destination)
+        destination.chmod(0o755)
+        return destination
 
 
 def _verify_static_host_binary(path: Path) -> None:

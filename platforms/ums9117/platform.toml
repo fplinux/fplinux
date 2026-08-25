@@ -225,6 +225,9 @@ archive_prefix = "spreadtrum_flash-{commit}/"
 source_directory = "spd_dump"
 binary = "spd_dump"
 link = "static-libusb"
+copies = []
+patches = []
+self_test = false
 
 [[host.tools.members]]
 path = "Makefile"
@@ -247,6 +250,9 @@ archive_prefix = "fpdoom-{commit}/libc_server/"
 source_directory = "libc_server"
 binary = "libc_server"
 link = "static-libusb"
+copies = []
+patches = []
+self_test = false
 
 [[host.tools.members]]
 path = "Makefile"

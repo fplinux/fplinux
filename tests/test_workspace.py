@@ -63,6 +63,8 @@ class WorkspaceSnapshotTests(unittest.TestCase):
             target_copy = write("targets/phone/kernel/copy.c")
             platform_patch = write("shared/platform.patch")
             host_tool = write("tools/loader.c")
+            host_input = write("tools/local-input.h")
+            host_patch = write("tools/local.patch")
             unrelated = write("unselected.txt")
 
             for relative in (
@@ -99,7 +101,21 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                     "appends": [{"source": "shared/platform-append.cfg"}],
                 },
                 "bootstrap": {"shared_copies": [{"source": "shared/bootstrap"}]},
-                "host": {"tools": [{"type": "cc-libusb", "source": "tools/loader.c"}]},
+                "host": {
+                    "tools": [
+                        {"type": "cc-libusb", "source": "tools/loader.c"},
+                        {
+                            "type": "make-archive",
+                            "copies": [
+                                {
+                                    "source": "tools/local-input.h",
+                                    "destination": "local-input.h",
+                                }
+                            ],
+                            "patches": ["tools/local.patch"],
+                        },
+                    ]
+                },
             }
 
             def shared_sources(package: str, root: Path) -> tuple[Path, ...]:
@@ -137,6 +153,8 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                     target_copy,
                     platform_patch,
                     host_tool,
+                    host_input,
+                    host_patch,
                 ):
                     original = causal.read_bytes()
                     causal.write_bytes(original + b"changed\n")
