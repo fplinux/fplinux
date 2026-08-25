@@ -31,6 +31,42 @@ def load_adapter() -> ModuleType:
 ADAPTER = load_adapter()
 
 
+class UsbDeviceAccessTests(unittest.TestCase):
+    """Report disappearance and permission denial as different USB failures."""
+
+    device = Path("/dev/bus/usb/007/053")
+
+    def test_vanished_node_reports_disconnect(self) -> None:
+        """A transient USB disappearance must not be diagnosed as a udev failure."""
+        with (
+            mock.patch.object(ADAPTER.os, "open", side_effect=FileNotFoundError),
+            self.assertRaisesRegex(SystemExit, "disconnected before the RAM loader"),
+        ):
+            ADAPTER.require_usb_device_access(self.device, "1782:4d00")
+
+    def test_permission_denial_reports_access_control(self) -> None:
+        """An existing node rejected by the OS keeps the actionable udev diagnosis."""
+        with (
+            mock.patch.object(ADAPTER.os, "open", side_effect=PermissionError),
+            self.assertRaisesRegex(SystemExit, "not readable and writable"),
+        ):
+            ADAPTER.require_usb_device_access(self.device, "1782:4d00")
+
+    def test_successful_probe_closes_the_usbfs_node(self) -> None:
+        """The access probe must release its descriptor before libc opens the device."""
+        with (
+            mock.patch.object(ADAPTER.os, "open", return_value=41) as open_device,
+            mock.patch.object(ADAPTER.os, "close") as close_device,
+        ):
+            ADAPTER.require_usb_device_access(self.device, "1782:4d00")
+
+        open_device.assert_called_once_with(
+            self.device,
+            ADAPTER.os.O_RDWR | ADAPTER.os.O_CLOEXEC,
+        )
+        close_device.assert_called_once_with(41)
+
+
 def adapter_data(**overrides: object) -> dict[str, object]:
     """Return one valid adapter table with optional focused overrides."""
     data: dict[str, object] = {
