@@ -232,6 +232,7 @@ class BuilderPublicationTests(unittest.TestCase):
         self.output.mkdir()
         self.work.mkdir()
         self.write("common/run.py", b"#!/usr/bin/env python3\n")
+        self.write("scripts/fplinux_cli/identity.py", b"# identity contract\n")
         self.write("scripts/fplinux_cli/ssh_transport.py", b"# bundled SSH helper\n")
         self.write("platforms/demo/host/adapter.py", b"ADAPTER = 'demo'\n")
         self.write("THIRD_PARTY_NOTICES.md", b"notices\n")
@@ -263,7 +264,13 @@ class BuilderPublicationTests(unittest.TestCase):
             ),
         }
         self.target_config: dict[str, Any] = {
-            "display_name": "Demo",
+            "identity": {
+                "brand": "Demo",
+                "product": "Phone",
+                "hardware_codes": [],
+                "compatible": "demo,phone",
+                "display_name": "Demo Phone",
+            },
             "platform": "demo",
             "bundle": {"packages": list(self.bundle_apks)},
             "linux": {"debug_dtb": "demo.dtb"},
@@ -275,6 +282,13 @@ class BuilderPublicationTests(unittest.TestCase):
             },
         }
         self.platform = {
+            "identity": {
+                "vendor": "Demo",
+                "soc": "SOC1",
+                "aliases": [],
+                "compatible": "demo,soc1",
+                "display_name": "Demo SOC1",
+            },
             "bundle": {"packages": []},
             "linux": {"cross_compile": "arm-"},
             "host": {
@@ -288,6 +302,7 @@ class BuilderPublicationTests(unittest.TestCase):
                 "assets/pin.bin",
                 "host/keyboard",
                 "runner/run.py",
+                "runner/identity.py",
                 "runner/ssh_transport.py",
                 "runner/platform_adapter.py",
                 "runtime-manifest.json",
@@ -457,8 +472,7 @@ class BuilderPublicationTests(unittest.TestCase):
             {
                 "target",
                 "profile",
-                "display_name",
-                "platform",
+                "identity",
                 "transport",
                 "image",
                 "addresses",
@@ -471,6 +485,8 @@ class BuilderPublicationTests(unittest.TestCase):
             },
         )
         self.assertIsNone(runtime["profile"])
+        self.assertEqual(runtime["identity"]["target"]["display_name"], "Demo Phone")
+        self.assertEqual(runtime["identity"]["platform"]["name"], "demo")
         self.assertEqual(runtime["transport"], "usb-ncm")
         helper = published / "runner/ssh_transport.py"
         self.assertEqual(runtime["personalization"]["bytes"], 512)

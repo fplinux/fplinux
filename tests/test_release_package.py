@@ -35,7 +35,6 @@ class ReleasePackageTests(unittest.TestCase):
         self.image_recipe = "b" * 64
         self.target_config = {
             "platform": "demo",
-            "release_slug": "fplinux-phone",
             "runtime": {
                 "assets": {"pinmap": "assets/pinmap.bin"},
             },
@@ -47,6 +46,7 @@ class ReleasePackageTests(unittest.TestCase):
                 "assets/pinmap.bin",
                 "host/keyboard",
                 "runner/run.py",
+                "runner/identity.py",
                 "runner/ssh_transport.py",
                 "runner/platform_adapter.py",
                 "runtime-manifest.json",
@@ -58,6 +58,7 @@ class ReleasePackageTests(unittest.TestCase):
                 "assets/pinmap.bin",
                 "host/keyboard",
                 "runner/run.py",
+                "runner/identity.py",
                 "runner/ssh_transport.py",
                 "runner/platform_adapter.py",
                 "runtime-manifest.json",
@@ -96,6 +97,7 @@ class ReleasePackageTests(unittest.TestCase):
             "assets/pinmap.bin": b"pinmap\n",
             "host/keyboard": b"keyboard\n",
             "runner/run.py": b"#!/usr/bin/env python3\n",
+            "runner/identity.py": b"identity helper\n",
             "runner/ssh_transport.py": b"ssh helper\n",
             "runner/platform_adapter.py": b"adapter\n",
             "runtime-manifest.json": b"{}\n",
@@ -138,6 +140,24 @@ class ReleasePackageTests(unittest.TestCase):
             self.fail("package output omitted an archive or qualification digest")
         return values["Archive SHA256"], values["Qualification payload SHA256"]
 
+    def test_release_runtime_requires_the_shared_identity_helper(self) -> None:
+        """Do not package a standalone runner without its validated identity schema."""
+        broken = {
+            **self.release_manifest,
+            "runtime_files": [
+                path
+                for path in self.release_manifest["runtime_files"]
+                if path != "runner/identity.py"
+            ],
+        }
+        with (
+            mock.patch.object(commands, "ROOT", self.root),
+            mock.patch.object(commands, "load_release", return_value=broken),
+            mock.patch.object(commands, "load_platform", return_value=self.platform),
+            self.assertRaisesRegex(SystemExit, "omit required runtime inputs"),
+        ):
+            commands.load_release_manifest(self.target, self.target_config)
+
     def test_apk_bytes_but_not_archive_metadata_change_qualification(self) -> None:
         """Only a changed executable payload requires a new phone qualification."""
         patches = (
@@ -162,6 +182,9 @@ class ReleasePackageTests(unittest.TestCase):
                 stack.enter_context(patch)
 
             candidate_archive, original = self.package(candidate=True)
+            candidates = list((self.cache / "out/candidates").glob("*.zip"))
+            self.assertEqual(len(candidates), 1)
+            self.assertTrue(candidates[0].name.startswith("FPLinux-phone-candidate-"))
             with mock.patch.object(commands, "verified_runtime_digest", return_value=original):
                 release_archive, release_payload = self.package(candidate=False)
             self.assertEqual(release_payload, original)

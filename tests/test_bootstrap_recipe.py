@@ -6,6 +6,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 from fplinux_cli import builder
@@ -24,12 +25,20 @@ class BootstrapRecipeTests(unittest.TestCase):
         self._write("bootstrap/fplinux-boot-screen/screen.c", b"int screen;\n")
         self._write("scripts/fplinux_cli/build_env.py", b"build environment\n")
         self._write("scripts/fplinux_cli/builder.py", b"builder implementation\n")
-        self.target_config = {
+        self.target_config: dict[str, Any] = {
+            "identity": {
+                "brand": "Demo",
+                "product": "Phone",
+                "hardware_codes": [],
+                "compatible": "demo,phone",
+                "display_name": "Demo Phone",
+            },
             "bootstrap": {
                 "image": "ramboot.bin",
                 "map": "obj/ramboot.map",
                 "dtb_destination": "target.dtb",
-            }
+                "record_prefix": "DEMO",
+            },
         }
         self.platform = {
             "bootstrap": {
@@ -112,6 +121,16 @@ class BootstrapRecipeTests(unittest.TestCase):
 
         self.platform["bootstrap"]["build_targets"] = ["clean", "all", "map"]
         self._write("scripts/fplinux_cli/build_env.py", b"changed environment\n")
+        self.assertNotEqual(baseline, self._digest())
+        self._write("scripts/fplinux_cli/build_env.py", b"build environment\n")
+
+        self.target_config["identity"]["product"] = "Changed Phone"
+        self.target_config["identity"]["display_name"] = "Demo Changed Phone"
+        self.assertNotEqual(baseline, self._digest())
+
+        self.target_config["identity"]["product"] = "Phone"
+        self.target_config["identity"]["display_name"] = "Demo Phone"
+        self.target_config["bootstrap"]["record_prefix"] = "CHANGED"
         self.assertNotEqual(baseline, self._digest())
 
     def test_host_and_docs_are_outside_the_bootstrap_closure(self) -> None:

@@ -7,10 +7,18 @@
 
 #include "fplinux-boot-screen/boot-screen.h"
 #include "fplinux-handoff-protocol.h"
+#include "generated/fplinux-bootstrap-identity.h"
 #include "syscode.h"
 #include "usbio.h"
 #include "ums9117-bootstrap/boot-main.h"
 #include "ums9117-bootstrap/bootstrap.h"
+
+#ifndef FPLINUX_BOOTSTRAP_DISPLAY_NAME
+#error "generated bootstrap identity lacks FPLINUX_BOOTSTRAP_DISPLAY_NAME"
+#endif
+#ifndef FPLINUX_BOOTSTRAP_RECORD_PREFIX
+#error "generated bootstrap identity lacks FPLINUX_BOOTSTRAP_RECORD_PREFIX"
+#endif
 
 enum ums9117_boot_stage {
 	UMS9117_BOOT_STAGE_PINMAP = 0,
@@ -33,7 +41,12 @@ struct ums9117_boot_canvas {
 	uint32_t stride;
 };
 
-static const struct ums9117_boot_board *active_board;
+static const struct fplinux_boot_screen_identity boot_identity = {
+	.brand = "FPLinux",
+	.model = FPLINUX_BOOTSTRAP_DISPLAY_NAME,
+	.mode = "VOLATILE RAM BOOT",
+};
+
 static struct fplinux_boot_screen boot_screen;
 static struct ums9117_boot_canvas boot_canvas;
 
@@ -95,13 +108,13 @@ void ums9117_boot_checkpoint(const char *message,
 static void record_stage(uint32_t stage, const char *message)
 {
 	fprintf(stderr, "%s_LINUX_BOOTSTRAP stage=%lu message=%s\n",
-		active_board->marker, (unsigned long)stage, message);
+		FPLINUX_BOOTSTRAP_RECORD_PREFIX, (unsigned long)stage, message);
 }
 
 void ums9117_boot_fail(uint32_t code, const char *message)
 {
 	fprintf(stderr, "%s_LINUX_BOOTSTRAP stage=238 error=%lu message=%s\n",
-		active_board->marker, (unsigned long)code, message);
+		FPLINUX_BOOTSTRAP_RECORD_PREFIX, (unsigned long)code, message);
 	fplinux_boot_screen_fail(&boot_screen, code, message);
 	for (;;)
 		;
@@ -118,7 +131,8 @@ static int enable_and_probe_sprd_timer(void)
 	fprintf(stderr,
 		"%s_SPRD_TIMER syscnt=%lu->%lu polls=%lu "
 		"ctl=0x%08lx->0x%08lx value=%lu shadow=%lu int=0x%08lx\n",
-		active_board->marker, (unsigned long)timer.syscnt_before,
+		FPLINUX_BOOTSTRAP_RECORD_PREFIX,
+		(unsigned long)timer.syscnt_before,
 		(unsigned long)timer.syscnt_after, timer.polls,
 		(unsigned long)timer.ctl_before, (unsigned long)timer.ctl,
 		(unsigned long)timer.value, (unsigned long)timer.shadow,
@@ -196,12 +210,10 @@ void ums9117_boot_main(const struct ums9117_boot_board *board)
 	uint8_t session_id[FPLINUX_HANDOFF_SESSION_ID_BYTES];
 	char note[48];
 
-	active_board = board;
-
 	fprintf(stderr,
 		"%s_LINUX_BOOTSTRAP stage=0 message=ENTRY "
 		"ram=0x%08lx zimage=%lu dtb=%lu\n",
-		board->marker, (unsigned long)ram_bytes,
+		FPLINUX_BOOTSTRAP_RECORD_PREFIX, (unsigned long)ram_bytes,
 		(unsigned long)zimage_bytes, (unsigned long)dtb_bytes);
 
 	/* Fresh RAM is noise; clear the whole region the LCDC may scan. */
@@ -222,7 +234,7 @@ void ums9117_boot_main(const struct ums9117_boot_board *board)
 	scan_firmware(0);
 	sys_start();
 	sys_framebuffer(boot_canvas.pixels);
-	if (fplinux_boot_screen_init(&boot_screen, &canvas, &board->identity,
+	if (fplinux_boot_screen_init(&boot_screen, &canvas, &boot_identity,
 				     boot_stage_labels,
 				     UMS9117_BOOT_STAGE_COUNT) != 0)
 		ums9117_boot_fail(8, "BOOT SCREEN INIT FAIL");

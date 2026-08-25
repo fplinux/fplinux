@@ -2,7 +2,7 @@
 pkgname=fplinux-micropythonos-nokia-ta1618
 pkgver=1
 pkgrel=0
-pkgdesc="Nokia TA-1618 configuration for FPLinux MicroPythonOS"
+pkgdesc="Nokia 3210 4G (TA-1618) configuration for FPLinux MicroPythonOS"
 url="https://github.com/fplinux/fplinux"
 arch="noarch"
 license="MIT"

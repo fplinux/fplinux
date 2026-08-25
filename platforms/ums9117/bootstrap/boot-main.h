@@ -18,8 +18,6 @@
 #define UMS9117_BOOT_FRAMEBUFFER_BYTES 0x00100000U
 
 struct ums9117_boot_board {
-	const char *marker; /* record prefix, e.g. "TA1618" */
-	struct fplinux_boot_screen_identity identity;
 	uint32_t display_width;
 	uint32_t display_height;
 };

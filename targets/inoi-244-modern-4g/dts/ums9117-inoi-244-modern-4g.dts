@@ -3,11 +3,9 @@
 
 #include <dt-bindings/input/input.h>
 #include "ums9117.dtsi"
+#include "fplinux-target-identity.dtsi"
 
 / {
-	model = "INOI 244 Modern 4G Linux RAM boot";
-	compatible = "inoi,244-modern-4g", "sprd,ums9117";
-
 	chosen {
 		bootargs = "console=tty0 loglevel=8 ignore_loglevel init=/init panic=-1 rdinit=/init random.trust_bootloader=on";
 	};

@@ -25,10 +25,13 @@ class TargetProfileTests(unittest.TestCase):
         self.target_root = self.root / "targets" / self.target
         self.target_root.mkdir(parents=True)
         (self.target_root / "target.toml").write_text(
-            """name = "demo"
-display_name = "Demo"
-release_slug = "Demo"
-platform = "platform"
+            """platform = "platform"
+
+[identity]
+brand = "Demo"
+product = "Phone"
+hardware_codes = []
+compatible = "demo,phone"
 
 [bundle]
 packages = []
@@ -46,6 +49,7 @@ forbidden_dtb_markers = ["forbidden"]
 image = "bootstrap.bin"
 map = "bootstrap.map"
 dtb_destination = "demo.dtb"
+record_prefix = "DEMO"
 
 [adapter]
 spi_mode = 0
@@ -59,6 +63,13 @@ boot_instructions = "demo"
             encoding="utf-8",
         )
         self.platform = {
+            "identity": {
+                "vendor": "Demo",
+                "soc": "SOC1",
+                "aliases": [],
+                "compatible": "demo,soc1",
+                "display_name": "Demo SOC1",
+            },
             "rootfs": {"packages": ["fplinux-ssh"]},
             "linux": {"copies": [{"source": "platform.c", "destination": "drivers/base.c"}]},
             "bootstrap": {
@@ -124,9 +135,26 @@ transport = "none"
         after = self._load_target()
 
         self.assertIsNone(before["profile"])
+        self.assertEqual(before["identity"]["display_name"], "Demo Phone")
         self.assertEqual(before, after)
         self.assertEqual(before["runtime"]["transport"], "usb-ncm")
         self.assertEqual(before["linux"]["config_enable"], [])
+
+    def test_target_rejects_a_stored_legacy_display_name(self) -> None:
+        """Require public names to be derived from structured identity fields."""
+        manifest = self.target_root / "target.toml"
+        contents = manifest.read_text(encoding="utf-8")
+        manifest.write_text(
+            contents.replace(
+                'platform = "platform"\n',
+                'platform = "platform"\ndisplay_name = "Legacy"\n',
+                1,
+            ),
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(SystemExit, "must contain exactly"):
+            self._load_target()
 
     def test_selected_profile_is_exactly_merged_under_its_target_directory(self) -> None:
         """A selected profile contributes its own operations, rootfs delta and transport."""

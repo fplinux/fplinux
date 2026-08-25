@@ -100,6 +100,8 @@ _CHECK_IMPLEMENTATION = frozenset(
         "scripts/fplinux_cli/alpine_state.py",
         "scripts/fplinux_cli/common.py",
         "scripts/fplinux_cli/config.py",
+        "scripts/fplinux_cli/identity.py",
+        "scripts/fplinux_cli/identity_codegen.py",
         "scripts/fplinux_cli/output.py",
     }
 )
@@ -114,6 +116,9 @@ _KERNEL_IMPLEMENTATION = frozenset(
         "scripts/fplinux_cli/common.py",
         "scripts/fplinux_cli/config.py",
         "scripts/fplinux_cli/device_state.py",
+        "scripts/fplinux_cli/device_tree.py",
+        "scripts/fplinux_cli/identity.py",
+        "scripts/fplinux_cli/identity_codegen.py",
         "scripts/fplinux_cli/kbuild_state.py",
         "scripts/fplinux_cli/kernelcheck.py",
         "scripts/fplinux_cli/linux_state.py",

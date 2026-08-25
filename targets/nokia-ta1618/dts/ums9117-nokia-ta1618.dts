@@ -5,11 +5,9 @@
 #include <dt-bindings/leds/common.h>
 #include "ums9117.dtsi"
 #include "ums9117-musb-cold.dtsi"
+#include "fplinux-target-identity.dtsi"
 
 / {
-	model = "Nokia 3210 4G TA-1618 Linux RAM boot";
-	compatible = "nokia,ta-1618", "sprd,ums9117";
-
 	chosen {
 		bootargs = "console=tty0 loglevel=8 ignore_loglevel init=/init panic=-1 rdinit=/init vt.global_cursor_default=1 random.trust_bootloader=on";
 	};
