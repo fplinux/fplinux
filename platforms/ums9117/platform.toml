@@ -78,6 +78,10 @@ source = "platforms/ums9117/kernel/ums9117-fb-lcm.c"
 destination = "drivers/video/fbdev/ums9117-fb-lcm.c"
 
 [[linux.copies]]
+source = "platforms/ums9117/kernel/clk-ums9117-inherited.c"
+destination = "drivers/clk/sprd/clk-ums9117-inherited.c"
+
+[[linux.copies]]
 source = "platforms/ums9117/dts/ums9117.dtsi"
 destination = "arch/arm/boot/dts/unisoc/ums9117.dtsi"
 
@@ -112,6 +116,22 @@ destination = "Documentation/devicetree/bindings/input/fplinux,ums9117-keypad.ya
 [[linux.copies]]
 source = "platforms/ums9117/bindings/fplinux,ums9117-fb.yaml"
 destination = "Documentation/devicetree/bindings/display/fplinux,ums9117-fb.yaml"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/fplinux,ums9117-inherited-clocks.yaml"
+destination = "Documentation/devicetree/bindings/clock/fplinux,ums9117-inherited-clocks.yaml"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/fplinux,ums9117-inherited-clk.h"
+destination = "include/dt-bindings/clock/fplinux,ums9117-inherited-clk.h"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/inherited-clk.Kconfig"
+destination = "drivers/clk/sprd/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/inherited-clk.Makefile"
+destination = "drivers/clk/sprd/Makefile"
 
 [[linux.appends]]
 source = "platforms/ums9117/kernel/fbdev.Kconfig"
