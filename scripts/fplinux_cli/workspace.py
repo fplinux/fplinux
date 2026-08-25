@@ -148,6 +148,11 @@ def target_build_source_files(target: str, profile: str | None = None) -> list[t
     for recipe in platform["host"]["tools"]:
         if recipe["type"] == "cc-libusb":
             add_source_path(files, ROOT / recipe["source"])
+        elif recipe["type"] == "make-archive":
+            for step in recipe["copies"]:
+                add_source_path(files, ROOT / step["source"])
+            for relative in recipe["patches"]:
+                add_source_path(files, ROOT / relative)
     add_source_path(files, ROOT / "common/run.py")
     add_source_path(files, platform_root / "host/adapter.py")
     return sorted(files.items())
