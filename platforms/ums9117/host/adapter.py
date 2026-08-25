@@ -67,6 +67,23 @@ def prepared_session_token(value: object) -> str:
     return token
 
 
+def runtime_target_display_name(runtime: dict[str, Any]) -> str:
+    """Return the target name only for the exact UMS9117 platform contract."""
+    identity = runtime.get("identity")
+    if not isinstance(identity, dict):
+        fail("runtime identity must be an object")
+    platform = identity.get("platform")
+    if not isinstance(platform, dict) or platform.get("name") != "ums9117":
+        fail("runtime platform identity must name ums9117")
+    target = identity.get("target")
+    if not isinstance(target, dict):
+        fail("runtime target identity must be an object")
+    display_name = target.get("display_name")
+    if not isinstance(display_name, str) or not display_name:
+        fail("runtime target display_name must be a non-empty string")
+    return display_name
+
+
 def adapter_config(value: object) -> dict[str, Any]:
     keys = {
         "brightness",
@@ -224,6 +241,7 @@ def run(
     session: dict[str, Any],
 ) -> None:
     """Execute the fixed RAM-only UMS9117 sequence for one declared transport."""
+    display_name = runtime_target_display_name(runtime)
     session_token = prepared_session_token(session)
     assets = runtime["assets"]
     if set(assets) != {"fdl1", "pinmap", "keymap"}:
@@ -260,7 +278,7 @@ def run(
         config["exec_distance"],
     )
     bootrom_id = f"{bootrom_usb['vendor_id']:04x}:{bootrom_usb['product_id']:04x}"
-    print(f"{runtime['display_name']} console RAM boot")
+    print(f"{display_name} console RAM boot")
     operations = ["RAM FDL1 load", "RAM payload load"]
     if config["exec_distance"]:
         operations.insert(0, "exec-distance setup")

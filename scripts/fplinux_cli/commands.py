@@ -44,6 +44,7 @@ from .config import (
     verified_runtime_digest,
 )
 from .container import image_identifier, image_ready, require_podman, setup
+from .identity import RUNTIME_IDENTITY_PATH
 from .output import RunReporter, silence_broken_pipe
 from .prune import (
     discard_obsolete_apks,
@@ -812,6 +813,7 @@ def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]
         *executables,
     }
     required_runtime.add(SSH_HELPER_PATH)
+    required_runtime.add(RUNTIME_IDENTITY_PATH)
     if not required_runtime.issubset(runtime_files):
         fail("release runtime files omit required runtime inputs")
     qualification_files = [
@@ -896,7 +898,7 @@ def package_target(target: str, *, candidate: bool = False) -> None:
     content_digest = payload_digest(files, release["executables"])
 
     qualifier = "candidate" if candidate else "release"
-    stem = f"{config['release_slug']}-{qualifier}-linux-x86_64-{content_digest[:16]}"
+    stem = f"FPLinux-{target}-{qualifier}-linux-x86_64-{content_digest[:16]}"
     destination = ROOT / ".cache/out" / ("candidates" if candidate else "releases")
     destination.mkdir(parents=True, exist_ok=True)
     archive = destination / f"{stem}.zip"

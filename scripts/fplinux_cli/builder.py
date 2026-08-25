@@ -42,6 +42,22 @@ from .config import (
     target_defconfig_path,
 )
 from .device_state import DeviceStateError, device_kernel_identity, localversion
+from .device_tree import DeviceTreeError, exact_path_properties, verify_target_identity
+from .identity import (
+    RUNTIME_IDENTITY_PATH,
+    IdentityError,
+)
+from .identity_codegen import (
+    BOOTSTRAP_IDENTITY_HEADER,
+    LINUX_IDENTITY_DTSI,
+    LINUX_PLATFORM_IDENTITY_HEADER,
+    bootstrap_identity_header,
+    linux_identity_dtsi,
+    linux_machine_binding,
+    linux_machine_binding_path,
+    linux_platform_identity_header,
+    runtime_identity,
+)
 from .kbuild_state import KbuildStateError
 from .linux_state import LinuxStateError, PreparedLinuxState
 from .output import RunReporter, current_stage, run_entrypoint
@@ -158,6 +174,11 @@ def runner_source() -> Path:
 def ssh_transport_source() -> Path:
     """Return the SSH session helper published beside the runner."""
     return ROOT / "scripts/fplinux_cli/ssh_transport.py"
+
+
+def identity_source() -> Path:
+    """Return the shared identity contract published beside the runner."""
+    return ROOT / "scripts/fplinux_cli/identity.py"
 
 
 def adapter_source(platform: str) -> Path:
@@ -292,6 +313,31 @@ def integration_inputs(
     return result
 
 
+def generated_linux_identity(
+    target_config: dict[str, Any], platform: dict[str, Any]
+) -> dict[str, bytes]:
+    """Return exact generated Linux identity files keyed by destination."""
+    target_identity = target_config["identity"]
+    platform_identity = platform["identity"]
+    return {
+        LINUX_IDENTITY_DTSI: linux_identity_dtsi(target_identity, platform_identity),
+        LINUX_PLATFORM_IDENTITY_HEADER: linux_platform_identity_header(platform_identity),
+        linux_machine_binding_path(target_identity): linux_machine_binding(
+            target_identity, platform_identity
+        ),
+    }
+
+
+def write_generated_files(root: Path, files: dict[str, bytes], *, owner: str) -> None:
+    """Write generated files into one private projection without replacing source."""
+    for relative, contents in sorted(files.items()):
+        destination = root / relative_value(relative, f"{owner} generated path")
+        if destination.is_symlink() or destination.exists():
+            fail(f"{owner} generated path collides with projected source: {destination}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(contents)
+
+
 def linux_recipe_digest(
     linux_source: dict[str, Any],
     target: str,
@@ -315,6 +361,12 @@ def linux_recipe_digest(
             }
             for operation, relative, destination, path in integration_inputs(
                 target, target_config, platform
+            )
+        ],
+        "generated": [
+            {"destination": destination, "sha256": sha256_bytes(contents)}
+            for destination, contents in sorted(
+                generated_linux_identity(target_config, platform).items()
             )
         ],
     }
@@ -350,6 +402,17 @@ def bootstrap_tree_entries(source: Path) -> list[dict[str, int | str]]:
         else:
             fail(f"bootstrap source entry is not a regular file or directory: {path}")
     return entries
+
+
+def generated_bootstrap_identity(target_config: dict[str, Any]) -> bytes:
+    """Return the exact target identity header consumed by bootstrap C."""
+    try:
+        return bootstrap_identity_header(
+            target_config["identity"], target_config["bootstrap"]["record_prefix"]
+        )
+    except IdentityError as error:
+        fail(str(error))
+    return b""
 
 
 def bootstrap_recipe_digest(
@@ -389,6 +452,10 @@ def bootstrap_recipe_digest(
                 vendor_source.get("archive_sha256"),
                 "bootstrap vendor source",
             ),
+        },
+        "generated": {
+            "path": BOOTSTRAP_IDENTITY_HEADER,
+            "sha256": sha256_bytes(generated_bootstrap_identity(target_config)),
         },
         # build_bootstrap() is in this file, already part of the Kbuild plan.
         "implementation": {
@@ -549,6 +616,7 @@ def prepare_linux(
         *resolve_steps(target, platform_linux["appends"], platform_owned=True),
         *resolve_steps(target, target_config["linux"]["appends"], platform_owned=False),
     ]
+    generated_identity = generated_linux_identity(target_config, platform)
     try:
         parent = linux_state.ensure_sources_directory(CACHE)
     except LinuxStateError as error:
@@ -568,6 +636,7 @@ def prepare_linux(
         copy_steps(destination, copies)
         apply_patches(destination, target_patches)
         append_steps(destination, appends)
+        write_generated_files(destination, generated_identity, owner="Linux identity")
 
     prepared = linux_state.inspect_prepared_linux(source, recipe)
     if prepared is not None:
@@ -730,6 +799,18 @@ def build_kernel(
         dtb = require_file(
             output / platform["linux"]["dtb_output_directory"] / target_config["linux"]["dtb"]
         )
+        try:
+            verify_target_identity(
+                dtb,
+                target,
+                target_config["identity"]["display_name"],
+                (
+                    target_config["identity"]["compatible"],
+                    platform["identity"]["compatible"],
+                ),
+            )
+        except DeviceTreeError as error:
+            fail(str(error))
         config_text = require_file(output / ".config").read_text()
         assert_profile_kconfig(output / ".config", config_enable, config_disable)
         for forbidden in target_config["linux"]["forbidden_config"]:
@@ -755,104 +836,14 @@ def extract_vendor(archive: Path, prefix: str, files: list[str], output: Path) -
             destination.write_bytes(stream.read())
 
 
-def _fdt_session_properties(tree: bytes) -> tuple[dict[str, bytes], dict[str, bytes]]:
-    """Read exact properties from /chosen and /fplinux-session."""
-    if len(tree) < 40:
-        fail("target DTB does not have a complete FDT header")
-    (
-        magic,
-        total_size,
-        structure_offset,
-        strings_offset,
-        _reserved_offset,
-        version,
-        _last_compatible_version,
-        _boot_cpu,
-        strings_size,
-        structure_size,
-    ) = struct.unpack_from(">10I", tree)
-    if magic != 0xD00DFEED or total_size != len(tree) or version < 17:
-        fail("target DTB has an invalid FDT header")
-    structure_end = structure_offset + structure_size
-    strings_end = strings_offset + strings_size
-    if (
-        structure_offset < 40
-        or structure_end > len(tree)
-        or strings_offset < 40
-        or strings_end > len(tree)
-    ):
-        fail("target DTB has invalid block bounds")
-
-    position = structure_offset
-    stack: list[str] = []
-    paths: dict[tuple[str, ...], dict[str, bytes]] = {
-        ("", "chosen"): {},
-        ("", "fplinux-session"): {},
-    }
-    seen: set[tuple[str, ...]] = set()
-    while position + 4 <= structure_end:
-        token = struct.unpack_from(">I", tree, position)[0]
-        position += 4
-        if token == 1:  # FDT_BEGIN_NODE
-            terminator = tree.find(b"\0", position, structure_end)
-            if terminator < 0:
-                fail("target DTB has an unterminated node name")
-            try:
-                name = tree[position:terminator].decode("ascii")
-            except UnicodeDecodeError:
-                fail("target DTB has a non-ASCII node name")
-            stack.append(name)
-            path = tuple(stack)
-            if path in paths:
-                if path in seen:
-                    fail(f"target DTB repeats node /{'/'.join(path[1:])}")
-                seen.add(path)
-            position = (terminator + 4) & ~3
-        elif token == 2:  # FDT_END_NODE
-            if not stack:
-                fail("target DTB has an unmatched end-node token")
-            stack.pop()
-        elif token == 3:  # FDT_PROP
-            if position + 8 > structure_end:
-                fail("target DTB has a truncated property header")
-            value_size, name_offset = struct.unpack_from(">II", tree, position)
-            position += 8
-            value_end = position + value_size
-            if value_end > structure_end or name_offset >= strings_size:
-                fail("target DTB has an invalid property")
-            name_start = strings_offset + name_offset
-            name_end = tree.find(b"\0", name_start, strings_end)
-            if name_end < 0:
-                fail("target DTB has an unterminated property name")
-            try:
-                name = tree[name_start:name_end].decode("ascii")
-            except UnicodeDecodeError:
-                fail("target DTB has a non-ASCII property name")
-            path = tuple(stack)
-            if path in paths:
-                properties = paths[path]
-                if name in properties:
-                    fail(f"target DTB /{'/'.join(path[1:])} repeats property {name}")
-                properties[name] = tree[position:value_end]
-            position = (value_end + 3) & ~3
-        elif token == 4:  # FDT_NOP
-            continue
-        elif token == 9:  # FDT_END
-            if stack:
-                fail("target DTB ends before all nodes are closed")
-            missing = paths.keys() - seen
-            if missing:
-                path = min(missing)
-                fail(f"target DTB lacks node /{'/'.join(path[1:])}")
-            return paths[("", "chosen")], paths[("", "fplinux-session")]
-        else:
-            fail(f"target DTB has unknown structure token {token}")
-    fail("target DTB lacks its final structure token")
-
-
 def _verify_session_dtb(tree: bytes) -> None:
     """Require one canonical marker for each RAM-session DT property."""
-    chosen, session = _fdt_session_properties(tree)
+    try:
+        properties = exact_path_properties(tree, ("/chosen", "/fplinux-session"))
+    except DeviceTreeError as error:
+        fail(str(error))
+    chosen = properties["/chosen"]
+    session = properties["/fplinux-session"]
     if chosen.get("rng-seed") != RAM_SESSION_RNG_SEED_MARKER:
         fail("target DTB /chosen rng-seed does not contain its canonical marker")
     if tree.count(RAM_SESSION_RNG_SEED_MARKER) != 1:
@@ -997,6 +988,11 @@ def build_bootstrap(
         else:
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(require_file(source), destination)
+    write_generated_files(
+        bootstrap,
+        {BOOTSTRAP_IDENTITY_HEADER: generated_bootstrap_identity(target_config)},
+        owner="bootstrap identity",
+    )
 
     vendor_lock = source_lock_entry(sources, platform_bootstrap["vendor_source_lock"])
     archive = fetch(
@@ -1334,6 +1330,7 @@ def runtime_manifest(
     hashes["runner/ssh_transport.py"] = sha256_file(
         require_file(release / "runner/ssh_transport.py")
     )
+    hashes[RUNTIME_IDENTITY_PATH] = sha256_file(require_file(release / RUNTIME_IDENTITY_PATH))
     hashes.update(
         {
             declared_assets[role]: sha256_file(require_file(release / declared_assets[role]))
@@ -1350,8 +1347,11 @@ def runtime_manifest(
         "target": target,
         "profile": selected_profile(target_config),
         "transport": runtime.get("transport", "usb-ncm"),
-        "display_name": target_config["display_name"],
-        "platform": target_config["platform"],
+        "identity": runtime_identity(
+            target_config["identity"],
+            target_config["platform"],
+            platform["identity"],
+        ),
         "image": image,
         "addresses": {
             "fdl1": runtime["fdl1_load_address"],
@@ -1421,6 +1421,7 @@ def _publish_staged_bundle(
         copy_file(source, release / "host" / name, executable=True)
     copy_file(runner_source(), release / "runner/run.py", executable=True)
     copy_file(ssh_transport_source(), release / "runner/ssh_transport.py")
+    copy_file(identity_source(), release / RUNTIME_IDENTITY_PATH)
     copy_file(
         adapter_source(target_config["platform"]),
         release / "runner/platform_adapter.py",

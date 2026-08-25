@@ -695,8 +695,6 @@ int fplinux_boot_screen_init(struct fplinux_boot_screen *screen,
 	screen->canvas = *canvas;
 	copy_string(screen->brand, sizeof(screen->brand),
 		    identity != NULL ? identity->brand : NULL);
-	copy_string(screen->variant, sizeof(screen->variant),
-		    identity != NULL ? identity->variant : NULL);
 	copy_string(screen->model, sizeof(screen->model),
 		    identity != NULL ? identity->model : NULL);
 	copy_string(screen->mode, sizeof(screen->mode),

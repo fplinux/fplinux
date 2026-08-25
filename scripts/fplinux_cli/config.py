@@ -12,6 +12,12 @@ from typing import Any, Protocol
 
 from .alpine_state import COMMON_PACKAGES
 from .common import ROOT, fail, relative_name
+from .identity import (
+    IdentityError,
+    validate_platform_identity,
+    validate_target_identity,
+)
+from .identity_codegen import validate_record_prefix
 
 TARGET_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
 VALUE_NAME = re.compile(r"[A-Za-z0-9._-]+")
@@ -452,9 +458,7 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
     config = exact_table(
         raw,
         {
-            "name",
-            "display_name",
-            "release_slug",
+            "identity",
             "platform",
             "bundle",
             "linux",
@@ -463,15 +467,14 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
         },
         f"target {target}",
     )
-    if config.get("name") != target:
-        fail(f"target name does not match its directory: {path}")
-    display_name = nonempty_string(config.get("display_name"), f"target {target} display_name")
-    if not display_name.strip():
-        fail(f"target {target} display_name must not be blank")
-    for key in ("release_slug", "platform"):
-        value = nonempty_string(config.get(key), f"target {target} {key}")
-        if VALUE_NAME.fullmatch(value) is None:
-            fail(f"target {target} has invalid {key}: {path}")
+    try:
+        identity = validate_target_identity(config.get("identity"), f"target {target} identity")
+    except IdentityError as error:
+        fail(str(error))
+    config["identity"] = identity
+    platform_name = nonempty_string(config.get("platform"), f"target {target} platform")
+    if VALUE_NAME.fullmatch(platform_name) is None:
+        fail(f"target {target} has invalid platform: {path}")
     bundle = exact_table(config.get("bundle"), {"packages"}, "target bundle")
     package_array(bundle.get("packages"), "target bundle packages")
 
@@ -502,11 +505,16 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
             "image",
             "map",
             "dtb_destination",
+            "record_prefix",
         },
         "target bootstrap",
     )
     for key in ("image", "map", "dtb_destination"):
         relative_value(bootstrap.get(key), f"target bootstrap {key}")
+    try:
+        record_prefix = validate_record_prefix(bootstrap.get("record_prefix"))
+    except IdentityError as error:
+        fail(str(error))
 
     adapter = exact_table(
         config.get("adapter"),
@@ -542,6 +550,8 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
         selected_profile = load_profile(target, profile)
 
     platform = load_platform(str(config["platform"]))
+    if identity["compatible"] == platform["identity"]["compatible"]:
+        fail("target and platform compatibles must be distinct")
     if selected_profile is not None:
         _validate_profile_rootfs_ownership(str(profile), selected_profile["rootfs"], platform)
     profile_linux = (
@@ -594,6 +604,7 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
         "source": "bootstrap",
         "image": bootstrap["image"],
         "map": bootstrap["map"],
+        "record_prefix": record_prefix,
         "kernel_destination": platform_bootstrap["kernel_destination"],
         "dtb_destination": bootstrap["dtb_destination"],
         "load_address": platform_bootstrap["load_address"],
@@ -710,11 +721,23 @@ def load_platform(platform: str) -> dict[str, Any]:
         raw = tomllib.load(stream)
     config = exact_table(
         raw,
-        {"name", "rootfs", "bundle", "linux", "bootstrap", "runtime", "host"},
+        {
+            "identity",
+            "rootfs",
+            "bundle",
+            "linux",
+            "bootstrap",
+            "runtime",
+            "host",
+        },
         f"platform {platform}",
     )
-    if config.get("name") != platform:
-        fail(f"platform name does not match its directory: {path}")
+    try:
+        config["identity"] = validate_platform_identity(
+            config.get("identity"), f"platform {platform} identity"
+        )
+    except IdentityError as error:
+        fail(str(error))
 
     rootfs = exact_table(config.get("rootfs"), {"packages"}, "platform rootfs")
     package_array(rootfs.get("packages"), "platform rootfs packages")
@@ -1025,6 +1048,8 @@ def check_orchestration_recipe_digest(image_recipe: str | None = None) -> str:
         ROOT / "scripts/fplinux_cli/config.py",
         ROOT / "scripts/fplinux_cli/container.py",
         ROOT / "scripts/fplinux_cli/image_state.py",
+        ROOT / "scripts/fplinux_cli/identity.py",
+        ROOT / "scripts/fplinux_cli/identity_codegen.py",
         ROOT / "scripts/fplinux_cli/output.py",
         ROOT / "scripts/fplinux_cli/workspace.py",
     ]

@@ -35,6 +35,7 @@ from .config import (
     relative_value,
     target_defconfig_path,
 )
+from .device_tree import DeviceTreeError, verify_target_identity
 from .output import RunReporter, current_stage, exit_status, run_entrypoint
 
 if TYPE_CHECKING:
@@ -360,6 +361,20 @@ def check_contexts(reporter: RunReporter | None, profile: str | None = None) -> 
             combined = run_dtbs_check(dtbs_command, target)
             if "Warning" in combined or re.search(r"\.dtb: ", combined):
                 raise SystemExit(f"sparse failed: device tree findings: {target}")
+            identity = target_config["identity"]
+            platform_identity = platform["identity"]
+            dtb = (
+                output / platform["linux"]["dtb_output_directory"] / target_config["linux"]["dtb"]
+            )
+            try:
+                verify_target_identity(
+                    dtb,
+                    target,
+                    identity["display_name"],
+                    (identity["compatible"], platform_identity["compatible"]),
+                )
+            except DeviceTreeError as error:
+                raise SystemExit(f"sparse failed: {error}") from error
         with report_stage(reporter, f"sparse-{label}"):
             run(sparse_command)
         checked += len(objects)

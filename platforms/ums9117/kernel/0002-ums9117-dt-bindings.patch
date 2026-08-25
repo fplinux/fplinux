@@ -8,6 +8,13 @@ diff --git a/Documentation/devicetree/bindings/vendor-prefixes.yaml b/Documentat
 +    description: FPLinux project
    "^freebox,.*":
      description: Freebox SAS
+@@ -780,4 +782,6 @@
+   "^innolux,.*":
+     description: Innolux Corporation
++  "^inoi,.*":
++    description: INOI Limited
+   "^inside-secure,.*":
+     description: INSIDE Secure
 diff --git a/Documentation/devicetree/bindings/timer/sprd,sc9860-timer.yaml b/Documentation/devicetree/bindings/timer/sprd,sc9860-timer.yaml
 --- a/Documentation/devicetree/bindings/timer/sprd,sc9860-timer.yaml
 +++ b/Documentation/devicetree/bindings/timer/sprd,sc9860-timer.yaml

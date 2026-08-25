@@ -65,19 +65,33 @@ class PreparedLinuxTests(unittest.TestCase):
             }
         }
         target_config = {
+            "identity": {
+                "brand": "Demo",
+                "product": "Phone",
+                "hardware_codes": [],
+                "compatible": "demo,phone",
+                "display_name": "Demo Phone",
+            },
             "linux": {
                 "patches": [],
                 "copies": [{"source": "copied", "destination": "generated"}],
                 "appends": [],
-            }
+            },
         }
         platform = {
+            "identity": {
+                "vendor": "Demo",
+                "soc": "SOC1",
+                "aliases": [],
+                "compatible": "demo,soc1",
+                "display_name": "Demo SOC1",
+            },
             "linux": {
                 "source_lock": "linux",
                 "patches": [],
                 "copies": [],
                 "appends": [],
-            }
+            },
         }
 
         with (
@@ -135,9 +149,30 @@ class PreparedLinuxTests(unittest.TestCase):
         linux = {"version": "test", "sha256": "b" * 64}
         target = {
             "profile": "host",
+            "identity": {
+                "brand": "Demo",
+                "product": "Phone",
+                "hardware_codes": [],
+                "compatible": "demo,phone",
+                "display_name": "Demo Phone",
+            },
             "linux": {"patches": [], "copies": [], "appends": []},
         }
-        platform = {"linux": {"source_lock": "linux", "patches": [], "copies": [], "appends": []}}
+        platform = {
+            "identity": {
+                "vendor": "Demo",
+                "soc": "SOC1",
+                "aliases": [],
+                "compatible": "demo,soc1",
+                "display_name": "Demo SOC1",
+            },
+            "linux": {
+                "source_lock": "linux",
+                "patches": [],
+                "copies": [],
+                "appends": [],
+            },
+        }
 
         with (
             mock.patch.object(builder, "CACHE", cache),

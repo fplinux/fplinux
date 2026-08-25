@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: GPL-2.0-only
-name = "nokia-ta1618"
-display_name = "Nokia 3210 4G (TA-1618)"
-release_slug = "FPLinux-Nokia-3210-4G-TA1618"
 platform = "ums9117"
+
+[identity]
+brand = "Nokia"
+product = "3210 4G"
+hardware_codes = ["TA-1618"]
+compatible = "nokia,ta-1618"
 
 [bundle]
 packages = ["fplinux-micropythonos-nokia-ta1618"]
@@ -12,7 +15,6 @@ dtb = "unisoc/ums9117-nokia-ta1618.dtb"
 debug_dtb = "ums9117-nokia-ta1618.dtb"
 patches = [
   "kernel/0001-nokia-ta1618-board.patch",
-  "kernel/0002-nokia-ta1618-dt-bindings.patch",
   "kernel/0003-nokia-ta1618-kpled.patch",
   "kernel/0004-nokia-ta1618-usb-regulator.patch",
 ]
@@ -153,6 +155,7 @@ destination = "drivers/rtc/Makefile"
 image = "ta1618_linux_bootstrap.bin"
 map = "obj/ta1618_linux_bootstrap_map.txt"
 dtb_destination = "ta1618.dtb"
+record_prefix = "TA1618"
 
 [adapter]
 spi_mode = 1
