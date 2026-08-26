@@ -9,11 +9,11 @@ here.
 
 ## Device
 
-| Field    | Value                                                |
-| -------- | ---------------------------------------------------- |
-| Device   | `{manufacturer} {model} ({variant})`                 |
-| Platform | [`{platform}`](../../platforms/{platform}/README.md) |
-| Boot     | `{volatile RAM / other supported method}`            |
+| Field    | Value                                                                             |
+| -------- | --------------------------------------------------------------------------------- |
+| Device   | `{manufacturer} {model} ({variant})`                                              |
+| Platform | `platforms/{platform}/README.md`; see [platform index](../../platforms/README.md) |
+| Boot     | `{volatile RAM / other supported method}`                                         |
 
 ## Status
 
