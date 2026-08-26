@@ -78,7 +78,17 @@ class BuildIdentity:
 
 
 PACKAGE_DOCUMENTS = {
+    "70-fplinux.rules": ROOT / "common/70-fplinux.rules",
     "LICENSE": ROOT / "LICENSE",
+    "docs/apps/MICROPYTHONOS.md": ROOT / "docs/apps/MICROPYTHONOS.md",
+    "docs/apps/TYRQUAKE.md": ROOT / "docs/apps/TYRQUAKE.md",
+    "docs/features/CPU_CLOCK.md": ROOT / "docs/features/CPU_CLOCK.md",
+    "docs/features/FILE_TRANSFER.md": ROOT / "docs/features/FILE_TRANSFER.md",
+    "docs/features/HOST_KEYBOARD.md": ROOT / "docs/features/HOST_KEYBOARD.md",
+    "docs/features/LOCAL_CONSOLE.md": ROOT / "docs/features/LOCAL_CONSOLE.md",
+    "docs/features/SSH.md": ROOT / "docs/features/SSH.md",
+    "docs/features/USB_NETWORKING.md": ROOT / "docs/features/USB_NETWORKING.md",
+    "docs/guides/STANDALONE.md": ROOT / "docs/guides/STANDALONE.md",
     "licenses/musl/COPYRIGHT": ROOT / "THIRD_PARTY_LICENSES/musl/COPYRIGHT",
 }
 
@@ -773,15 +783,46 @@ def build(
 
 
 def target_archive_file(target: str, relative: str) -> tuple[str, Path]:
+    """Map one target-owned release document into its stable archive path."""
+    target_name = PurePosixPath(target)
+    if (
+        target_name.is_absolute()
+        or len(target_name.parts) != 1
+        or target_name.as_posix() != target
+    ):
+        fail(f"invalid target package name: {target}")
     source_name = PurePosixPath(relative)
+    if (
+        source_name.is_absolute()
+        or ".." in source_name.parts
+        or source_name.as_posix() != relative
+    ):
+        fail(f"target package file has an unsafe path: {relative}")
     try:
         archive_name = source_name.relative_to("release").as_posix()
     except ValueError:
-        fail(f"target package file must be below release/: {relative}")
+        if (
+            len(source_name.parts) == 2
+            and source_name.parts[0] == "features"
+            and source_name.suffix == ".md"
+        ):
+            archive_name = f"docs/target/{source_name.name}"
+        else:
+            fail(
+                "target package file must be below release/ or a direct "
+                f"features/*.md file: {relative}"
+            )
     if not archive_name or archive_name == ".":
         fail(f"target package file has no archive name: {relative}")
-    source = ROOT / "targets" / target / relative
-    if source.is_symlink() or not source.is_file():
+    target_root = ROOT / "targets" / target
+    if target_root.is_symlink() or not target_root.is_dir():
+        fail(f"target package root is missing or invalid: {target_root}")
+    source = target_root
+    for component in source_name.parts:
+        source /= component
+        if source.is_symlink():
+            fail(f"target package file must not traverse a symlink: {source}")
+    if not source.is_file():
         fail(f"target package file is missing or invalid: {source}")
     return archive_name, source
 
@@ -794,6 +835,10 @@ def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]
     runtime_files = manifest["runtime_files"]
     documents = manifest["documents"]
     archive_names = set(bundle_files)
+    shared_collisions = archive_names & PACKAGE_DOCUMENTS.keys()
+    if shared_collisions:
+        fail(f"duplicate release archive path: {min(shared_collisions)}")
+    archive_names.update(PACKAGE_DOCUMENTS)
     for relative in documents:
         archive_name, _source = target_archive_file(target, relative)
         if archive_name in archive_names:
@@ -840,6 +885,8 @@ def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]
 def add_target_files(files: dict[str, bytes], target: str, relative_names: list[str]) -> None:
     for relative in relative_names:
         archive_name, source = target_archive_file(target, relative)
+        if archive_name in files:
+            fail(f"duplicate release archive path: {archive_name}")
         files[archive_name] = source.read_bytes()
 
 

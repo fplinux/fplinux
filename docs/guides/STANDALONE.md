@@ -1,9 +1,10 @@
 # Using a standalone archive
 
 A standalone archive contains one target-specific FPLinux image, its host
-runner, installable applications and top-level target instructions. Read
-`README.txt` first: it names the phone, its boot key, supported hardware,
-storage limits and safe way to end the RAM session.
+runner, installable applications and the documentation needed to use them
+without a source checkout. Read the top-level `README.txt` first: it names the
+phone, its boot key, supported hardware, storage limits and safe way to end the
+RAM session.
 
 If `CANDIDATE-NOTICE.txt` is present, the executable payload is awaiting
 physical qualification. Creating or checking the archive does not turn that
@@ -34,11 +35,18 @@ cd <extracted-top-level-directory>
 sha256sum -c SHA256SUMS
 ```
 
-Install the two local rules from
-[USB access](LOADING.md#usb-access), reload udev, then disconnect the phone if it
-is already attached. Never make either USB device world-writable. Run the
-loader as the regular user; host-keyboard forwarding is the only documented
-operation that normally needs elevated access.
+Install the bundled udev rules, reload them, then disconnect the phone if it is
+already attached:
+
+```sh
+sudo install -m 0644 ./70-fplinux.rules /etc/udev/rules.d/70-fplinux.rules
+sudo udevadm control --reload-rules
+```
+
+The bundled rules use desktop logind access. On a headless host, adapt the local
+copy to a trusted group with `MODE="0660"`. Never make either USB device
+world-writable. Run the loader as the regular user; host-keyboard forwarding is
+the only documented operation that normally needs elevated access.
 
 ## Start the RAM session
 
@@ -66,7 +74,7 @@ Exiting the shell or unplugging USB does not stop Linux. Reconnect with:
 ./runner/run.py --reconnect
 ```
 
-For details, use the shared documentation:
+For details, use the bundled pages:
 
 - [local console](../features/LOCAL_CONSOLE.md);
 - [USB networking](../features/USB_NETWORKING.md);
