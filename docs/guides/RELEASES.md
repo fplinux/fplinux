@@ -50,9 +50,10 @@ status, boot key, hardware differences, and shutdown or recovery procedure.
 
 ## Archive contents and integrity
 
-An archive contains the RAM image, required host tools and assets, installable
-APKs, the standalone runner, checksums, target instructions, and license
-notices. It does not contain build trees, caches, or kernel debug output.
+An archive contains the RAM image, required host tools and assets, bundled
+installable APKs, the standalone runner, local USB rules, shared feature and
+application documents, checksums, target instructions, and license notices. It
+does not contain build trees, caches, or kernel debug output.
 
 Keep the extracted top-level directory intact. Enter it and verify every listed
 file before connecting a phone:
@@ -66,5 +67,7 @@ sha256sum -c SHA256SUMS
 by `./fplinux package` protects the ZIP as a whole when that digest is retained
 or published. Neither integrity check is hardware qualification.
 
-After validation, follow [Using a standalone archive](STANDALONE.md) for host
-runtime requirements, USB access, loader order and troubleshooting.
+After validation, follow [Using a standalone archive](STANDALONE.md). That guide
+is the source of truth for host runtime requirements, USB access, loader order
+and troubleshooting. The archive's bundled feature documents cover the running
+session without depending on a source checkout.
