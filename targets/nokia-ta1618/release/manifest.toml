@@ -36,4 +36,14 @@ runtime_files = [
   "runtime-manifest.json",
 ]
 
-documents = ["release/README.txt"]
+documents = [
+  "release/README.txt",
+  "features/AUXADC.md",
+  "features/BATTERY_TELEMETRY.md",
+  "features/CHARGER_STATUS.md",
+  "features/KEYPAD_BACKLIGHT.md",
+  "features/MICROSD.md",
+  "features/POWER_OFF.md",
+  "features/RTC.md",
+  "features/SOC_TEMPERATURE.md",
+]

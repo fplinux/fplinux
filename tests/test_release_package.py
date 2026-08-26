@@ -8,6 +8,7 @@ import hashlib
 import io
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -63,20 +64,46 @@ class ReleasePackageTests(unittest.TestCase):
                 "runner/platform_adapter.py",
                 "runtime-manifest.json",
             ],
-            "documents": ["release/README.txt"],
+            "documents": ["release/README.txt", "features/MICROSD.md"],
         }
         self.platform = {"host": {"tools": [{"name": "keyboard"}]}}
         target_readme = self.root / "targets" / self.target / "release/README.txt"
         target_readme.parent.mkdir(parents=True)
         target_readme.write_text("phone instructions\n", encoding="utf-8")
         self.target_readme = target_readme
+        target_feature = self.root / "targets" / self.target / "features/MICROSD.md"
+        target_feature.parent.mkdir(parents=True)
+        target_feature.write_bytes(b"phone microSD procedures\n")
+        self.target_documents = {
+            "docs/target/MICROSD.md": target_feature.read_bytes(),
+        }
         license_file = self.root / "LICENSE"
         license_file.write_text("project license\n", encoding="utf-8")
+        rules_file = self.root / "common/70-fplinux.rules"
+        rules_file.parent.mkdir(parents=True)
+        rules_file.write_text("SUBSYSTEM==usb\n", encoding="utf-8")
         musl_notice = self.root / "THIRD_PARTY_LICENSES/musl/COPYRIGHT"
         musl_notice.parent.mkdir(parents=True)
         musl_notice.write_text("musl notice\n", encoding="utf-8")
+        self.shared_documents = {
+            "docs/apps/MICROPYTHONOS.md": b"MicroPythonOS procedures\n",
+            "docs/apps/TYRQUAKE.md": b"TyrQuake procedures\n",
+            "docs/features/CPU_CLOCK.md": b"CPU clock reporting\n",
+            "docs/features/FILE_TRANSFER.md": b"File transfer procedures\n",
+            "docs/features/HOST_KEYBOARD.md": b"Host keyboard procedures\n",
+            "docs/features/LOCAL_CONSOLE.md": b"Local console procedures\n",
+            "docs/features/SSH.md": b"SSH procedures\n",
+            "docs/features/USB_NETWORKING.md": b"USB networking procedures\n",
+            "docs/guides/STANDALONE.md": b"Standalone archive procedures\n",
+        }
+        for relative, contents in self.shared_documents.items():
+            document = self.root / relative
+            document.parent.mkdir(parents=True, exist_ok=True)
+            document.write_bytes(contents)
         self.package_documents = {
+            "70-fplinux.rules": rules_file,
             "LICENSE": license_file,
+            **{relative: self.root / relative for relative in self.shared_documents},
             "licenses/musl/COPYRIGHT": musl_notice,
         }
         signing_key = alpine_state.signing_public_key(self.cache)
@@ -140,8 +167,118 @@ class ReleasePackageTests(unittest.TestCase):
             self.fail("package output omitted an archive or qualification digest")
         return values["Archive SHA256"], values["Qualification payload SHA256"]
 
+    def package_patches(self) -> tuple[contextlib.AbstractContextManager[object], ...]:
+        """Isolate package creation from host identity and repository files."""
+        return (
+            mock.patch.object(commands, "ROOT", self.root),
+            mock.patch.object(commands, "PACKAGE_DOCUMENTS", self.package_documents),
+            mock.patch.object(commands, "load_target", return_value=self.target_config),
+            mock.patch.object(commands, "load_release", return_value=self.release_manifest),
+            mock.patch.object(commands, "load_platform", return_value=self.platform),
+            mock.patch.object(
+                commands,
+                "target_workspace_snapshot",
+                return_value=self.snapshot,
+            ),
+            mock.patch.object(
+                commands,
+                "container_image_recipe_digest",
+                return_value=self.image_recipe,
+            ),
+        )
+
+    def test_candidate_contains_shared_documents_with_complete_checksums(self) -> None:
+        """Publish bundled procedures and cover every archive member by SHA-256."""
+        with contextlib.ExitStack() as stack:
+            for patch in self.package_patches():
+                stack.enter_context(patch)
+            self.package(candidate=True)
+
+        archives = list((self.cache / "out/candidates").glob("*.zip"))
+        self.assertEqual(len(archives), 1)
+        with zipfile.ZipFile(archives[0]) as archive:
+            members = archive.namelist()
+            roots = {name.partition("/")[0] for name in members}
+            self.assertEqual(len(roots), 1)
+            root = roots.pop()
+            payloads = {name.removeprefix(f"{root}/"): archive.read(name) for name in members}
+
+        expected_documents = {
+            "README.txt": b"phone instructions\n",
+            **self.target_documents,
+            **{
+                relative: source.read_bytes()
+                for relative, source in self.package_documents.items()
+            },
+        }
+        for relative, expected in expected_documents.items():
+            with self.subTest(relative=relative):
+                self.assertEqual(payloads[relative], expected)
+
+        checksums = {
+            relative: digest
+            for line in payloads["SHA256SUMS"].decode("utf-8").splitlines()
+            for digest, relative in (line.split("  ", 1),)
+        }
+        self.assertEqual(set(checksums), set(payloads) - {"SHA256SUMS"})
+        for relative, digest in checksums.items():
+            with self.subTest(checksum=relative):
+                self.assertEqual(digest, hashlib.sha256(payloads[relative]).hexdigest())
+
+    def test_target_document_paths_are_safe_and_collision_free(self) -> None:
+        """Map direct feature pages once and reject ambiguous or escaping sources."""
+        with mock.patch.object(commands, "ROOT", self.root):
+            readme_name, readme = commands.target_archive_file(self.target, "release/README.txt")
+            self.assertEqual(readme_name, "README.txt")
+            self.assertEqual(readme.read_bytes(), b"phone instructions\n")
+
+            archive_name, source = commands.target_archive_file(self.target, "features/MICROSD.md")
+            self.assertEqual(archive_name, "docs/target/MICROSD.md")
+            self.assertEqual(source.read_bytes(), self.target_documents[archive_name])
+
+            for relative in (
+                "../features/MICROSD.md",
+                "features/nested/MICROSD.md",
+                "features/MICROSD.txt",
+                "other/MICROSD.md",
+            ):
+                with (
+                    self.subTest(relative=relative),
+                    self.assertRaisesRegex(SystemExit, "target package file"),
+                ):
+                    commands.target_archive_file(self.target, relative)
+
+            with self.assertRaisesRegex(SystemExit, "invalid target package name"):
+                commands.target_archive_file("../phone", "features/MICROSD.md")
+
+            link = self.root / "targets/phone/features/LINK.md"
+            link.symlink_to("MICROSD.md")
+            with self.assertRaisesRegex(SystemExit, "must not traverse a symlink"):
+                commands.target_archive_file(self.target, "features/LINK.md")
+
+    def test_target_document_mapping_rejects_duplicate_archive_paths(self) -> None:
+        """Two declared sources cannot silently publish the same document path."""
+        duplicate = self.root / "targets/phone/release/docs/target/MICROSD.md"
+        duplicate.parent.mkdir(parents=True)
+        duplicate.write_bytes(b"duplicate\n")
+        manifest = {
+            **self.release_manifest,
+            "documents": [
+                "release/README.txt",
+                "release/docs/target/MICROSD.md",
+                "features/MICROSD.md",
+            ],
+        }
+        with (
+            mock.patch.object(commands, "ROOT", self.root),
+            mock.patch.object(commands, "load_release", return_value=manifest),
+            mock.patch.object(commands, "load_platform", return_value=self.platform),
+            self.assertRaisesRegex(SystemExit, "duplicate release archive path"),
+        ):
+            commands.load_release_manifest(self.target, self.target_config)
+
     def test_release_runtime_requires_the_shared_identity_helper(self) -> None:
-        """Do not package a standalone runner without its validated identity schema."""
+        """Do not package a standalone runner without its validated schema module."""
         broken = {
             **self.release_manifest,
             "runtime_files": [
@@ -160,31 +297,14 @@ class ReleasePackageTests(unittest.TestCase):
 
     def test_apk_bytes_but_not_archive_metadata_change_qualification(self) -> None:
         """Only a changed executable payload requires a new phone qualification."""
-        patches = (
-            mock.patch.object(commands, "ROOT", self.root),
-            mock.patch.object(commands, "PACKAGE_DOCUMENTS", self.package_documents),
-            mock.patch.object(commands, "load_target", return_value=self.target_config),
-            mock.patch.object(commands, "load_release", return_value=self.release_manifest),
-            mock.patch.object(commands, "load_platform", return_value=self.platform),
-            mock.patch.object(
-                commands,
-                "target_workspace_snapshot",
-                return_value=self.snapshot,
-            ),
-            mock.patch.object(
-                commands,
-                "container_image_recipe_digest",
-                return_value=self.image_recipe,
-            ),
-        )
         with contextlib.ExitStack() as stack:
-            for patch in patches:
+            for patch in self.package_patches():
                 stack.enter_context(patch)
 
             candidate_archive, original = self.package(candidate=True)
-            candidates = list((self.cache / "out/candidates").glob("*.zip"))
-            self.assertEqual(len(candidates), 1)
-            self.assertTrue(candidates[0].name.startswith("FPLinux-phone-candidate-"))
+            candidate_files = list((self.cache / "out/candidates").glob("*.zip"))
+            self.assertEqual(len(candidate_files), 1)
+            self.assertTrue(candidate_files[0].name.startswith("FPLinux-phone-candidate-"))
             with mock.patch.object(commands, "verified_runtime_digest", return_value=original):
                 release_archive, release_payload = self.package(candidate=False)
             self.assertEqual(release_payload, original)

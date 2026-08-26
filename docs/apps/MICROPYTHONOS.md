@@ -3,7 +3,8 @@
 MicroPythonOS is an optional graphical MicroPython environment for the local
 FPLinux framebuffer and physical keypad. It is installed into the current RAM
 session; it is not part of the normal root filesystem. First load or reconnect
-to the selected phone using its instructions.
+to the selected phone using its instructions. A standalone archive includes
+this page; start with its top-level `README.txt`.
 
 ## Included applications
 

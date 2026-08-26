@@ -3,7 +3,8 @@
 TyrQuake 0.71 is an optional native game for the current FPLinux RAM session.
 The APK contains the engine, not Quake game data. Provide a legally obtained
 `pak0.pak` before starting the game. First load or reconnect to the selected
-phone using its instructions.
+phone using its instructions. A standalone archive includes this page; start
+with its top-level `README.txt`.
 
 ## Install
 
