@@ -47,6 +47,43 @@ class SourceInventoryTests(unittest.TestCase):
             self.assertEqual(posix_shell, ["service.initd"])
             self.assertEqual(bash, [])
 
+    def test_markdown_links_require_real_files_and_anchors(self) -> None:
+        """Protect navigable local documentation without checking external URLs."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            index = root / "README.md"
+            guide = root / "guide.md"
+            spaced = root / "guide (copy).md"
+            guide.write_text("# Same heading\n\n## Same heading\n")
+            spaced.write_text("# Section\n")
+            index.write_text(
+                "# Index\n\n"
+                "[first](guide.md#same-heading)\n"
+                "[second](guide.md#same-heading-1)\n"
+                "[angle](<guide (copy).md#section>)\n"
+                "[parentheses](guide%20(copy).md#section)\n"
+                "[reference][guide-copy]\n"
+                "[guide-copy]: <guide (copy).md#section>\n"
+                "[self](#index)\n"
+                "[external](https://example.invalid/docs)\n"
+            )
+            with mock.patch.object(source_check, "ROOT", root):
+                source_check.check_markdown_links([index, guide, spaced])
+
+                index.write_text("# Index\n\n[missing](absent.md)\n")
+                with self.assertRaisesRegex(SystemExit, "link target is missing"):
+                    source_check.check_markdown_links([index, guide, spaced])
+
+                index.write_text("# Index\n\n[missing](guide.md#absent)\n")
+                with self.assertRaisesRegex(SystemExit, "link anchor is missing"):
+                    source_check.check_markdown_links([index, guide, spaced])
+
+                linked = root / "linked.md"
+                linked.symlink_to(guide)
+                index.write_text("# Index\n\n[linked](linked.md)\n")
+                with self.assertRaisesRegex(SystemExit, "link target is a symlink"):
+                    source_check.check_markdown_links([index, guide, spaced])
+
     def test_quality_workspace_skips_symlinks_outside_source_scope(self) -> None:
         """Keep host workspace staging aligned with scoped source policy."""
         with tempfile.TemporaryDirectory() as temporary:

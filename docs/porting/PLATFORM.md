@@ -63,10 +63,10 @@ implementation file maps here.
 
 ## Targets using this platform
 
-| Target                                         | Phone     | Enabled shared capabilities |
-| ---------------------------------------------- | --------- | --------------------------- |
-| [`<target>`](../../targets/<target>/README.md) | `<phone>` | `<capabilities>`            |
+| Target path         | Phone     | Enabled shared capabilities |
+| ------------------- | --------- | --------------------------- |
+| `targets/<target>/` | `<phone>` | `<capabilities>`            |
 
-Link each target to its own support state and release qualification. A platform
+Replace the placeholder with a real target link. A platform
 capability can be physically validated without qualifying every target's full
 executable payload.
