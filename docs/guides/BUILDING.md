@@ -9,11 +9,7 @@ tracked source files.
 - Linux x86-64
 - rootless Podman
 - Python 3.11 or newer
-- network access until the pinned build inputs are available locally
-- For a RAM run or reconnect over SSH: `ip` from iproute2, OpenSSH `ssh`,
-  `ssh-keygen`, `ssh-keyscan`, and `sftp`, plus a host network manager that
-  automatically runs IPv4 DHCP on a newly attached USB-NCM interface.
-  NetworkManager is supported.
+- network access until the pinned build inputs have been stored locally
 
 Check the host before building:
 
@@ -44,19 +40,26 @@ for the current recipe is already ready.
 
 ## Check source
 
-Run the source-quality gate when changing or reviewing source:
+Run the complete uncached source-quality gate before committing or submitting
+source changes:
 
 ```sh
-./fplinux check
+./fplinux check --no-cache
 ./fplinux check --list
 ./fplinux check docs spelling
-./fplinux check --no-cache
 ```
 
 With no scopes, `check` runs the complete gate. Selected cacheable scopes reuse
 an exact successful result when their current inputs match; otherwise they run
-again. `--no-cache` reruns selected cacheable scopes. This gate is useful for
-source work but is not a prerequisite for every build or RAM run.
+again. `--no-cache` reruns selected cacheable scopes. An ordinary build or RAM
+run without source changes does not need to repeat the gate.
+
+The `docs` scope also rejects repository-local Markdown links whose file or
+heading anchor does not exist.
+
+Kernel, bootstrap, host and phone-userspace messages follow the shared
+[logging contract](../reference/LOGGING.md). FPLinux-owned C follows
+[C code](../reference/C_STYLE.md).
 
 ## Regenerate Alpine checksums
 
@@ -90,7 +93,7 @@ replace individual digest lines.
 
 `--jobs` limits parallel compilation. A matching selected bundle is reused;
 otherwise the command rebuilds it from the current inputs. Target names are
-discovered from `targets/`; use the [target index](../targets/README.md) to
+discovered from `targets/`; use the [target index](../../targets/README.md) to
 choose one.
 
 After an online build has prepared the required inputs, an offline build miss
@@ -100,7 +103,7 @@ can run with networking disabled:
 ./fplinux build <target> --offline
 ```
 
-If the required pinned environment is unavailable or stale, an offline build
+If the required pinned environment is missing or stale, an offline build
 asks for an online `./fplinux setup` first. A matching bundle remains usable
 offline.
 
@@ -133,12 +136,11 @@ exclude_packages = []
 transport = "none"
 ```
 
-Build, check and run a declared profile explicitly:
+Build and check a declared profile explicitly:
 
 ```sh
 ./fplinux check kernel --profile <profile>
 ./fplinux build <target> --profile <profile>
-./fplinux run <target> --profile <profile>
 ```
 
 The ordinary commands without `--profile` use only each target's default
@@ -147,32 +149,16 @@ cannot be passed to `package`, `console` or `verify`, and they are never release
 inputs.
 
 `transport = "none"` changes only host-side runner behavior. The profile must
-also exclude any in-image gadget or SSH services it does not want. After the
-bootstrap handoff marker, `run` returns without waiting for USB-NCM. That marker
-does not prove that Linux started; the profile must define a separate physical
-observation or receipt boundary.
+also exclude any in-image gadget or SSH services it does not want. See
+[Loading from a source checkout](LOADING.md#from-a-source-checkout) for the matching
+run command and its evidence boundary.
 
-Default and named builds have separate current bundle and stable work slots.
-Only one current bundle is retained per target/profile pair. Prepared Linux,
-Sparse, rootfs, staged workspaces and profile logs use bounded managed slots.
-Each locally built Alpine package has one cache slot at `.cache/apks/<package>`;
-the current default and declared profile package closures protect their slots.
-Successful builds discard superseded data, and `prune` removes interrupted or
-orphaned profile state. Cache records have no format versions, migrations or
-fallback readers: unknown or mismatched state is a cache miss and is replaced
-only inside its exact managed slot.
+Default and named builds keep isolated current output and work state. Selecting
+a profile never replaces the default target bundle.
 
-Use the target document for its RAM-loader sequence and hardware status:
-
-```sh
-./fplinux run <target>
-```
-
-Before the first physical run, configure the loader and console permissions in
-[USB access](RELEASES.md#usb-access).
-
-Start the loader before connecting the powered-off phone. Wait until it requests
-the device, then connect the phone and follow that target's boot-key instructions.
+After building, follow [Loading from a source checkout](LOADING.md) to configure the
+runtime host, load the selected image, reconnect, and verify a running default
+target.
 
 ## Logs, cache, and parallel commands
 
@@ -183,6 +169,12 @@ their location on failure.
 Public commands serialize writes to shared build state. Target output is kept
 under `.cache/out/<target>/`; treat it as generated data, not as a user-managed
 workspace.
+
+Prepared Linux, Sparse, rootfs, staged workspaces, profile logs and locally
+built APKs use bounded managed slots. Successful commands discard superseded
+managed state, while `prune` handles interrupted or orphaned entries. Cache
+records have no migrations or fallback readers: unknown or mismatched state is
+a cache miss and is replaced only inside its managed slot.
 
 Inspect cache cleanup candidates before deleting generated data:
 
@@ -195,18 +187,6 @@ Inspect cache cleanup candidates before deleting generated data:
 `prune` without `--apply` is read-only. Unknown, old, or mismatched generated
 entries are cache misses and are not migrated.
 
-## Verify a running target
-
-With the selected bundle loaded and its console available:
-
-```sh
-./fplinux verify <target>
-```
-
-`verify` compares the running kernel identity with the selected local bundle
-and refuses a stale local bundle. It confirms that relationship only; it is not
-a phone hardware-qualification test.
-
 ## What a build proves
 
 A successful build proves that the current checkout produced the selected
@@ -214,5 +194,5 @@ bundle. It does not prove that the image boots or that a hardware feature works
 on a phone. Target documents record feature-level qualification and limitations.
 
 See [Release archives](RELEASES.md) to create a physical-qualification
-candidate. See [Host-to-phone transfer](TRANSFER.md) for working with an already
-running target.
+candidate. To use the result on a phone, continue with
+[Loading from a source checkout](LOADING.md).

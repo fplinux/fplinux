@@ -1,6 +1,10 @@
-# <SoC / platform name>
+# {Vendor} {SoC} platform
 
 <!-- Copy this file to platforms/<platform>/README.md and replace placeholders. -->
+
+Define the platform manifest according to the
+[identity contract](../../docs/reference/IDENTITY.md). Use the vendor and SoC as the
+public name; list vendor/reference aliases separately.
 
 ## Identity
 
@@ -8,6 +12,7 @@
 | ----------------------- | ----------------------------------- |
 | Vendor                  | `<vendor>`                          |
 | SoC / family            | `<part numbers>`                    |
+| Vendor/reference alias  | `<aliases or none>`                 |
 | Architecture            | `<architecture>`                    |
 | Linux platform symbol   | `<CONFIG_ARCH_...>`                 |
 | DTS compatible          | `<vendor,soc>`                      |
@@ -67,6 +72,11 @@ implementation file maps here.
 | ------------------- | --------- | --------------------------- |
 | `targets/<target>/` | `<phone>` | `<capabilities>`            |
 
-Replace the placeholder with a real target link. A platform
-capability can be physically validated without qualifying every target's full
-executable payload.
+Replace the placeholder with a real entry from the
+[phone target index](../../targets/README.md) and link that entry to its support
+document. A platform capability can be physically validated without qualifying
+every target's full executable payload.
+
+The project [documentation index](../../README.md#documentation) links the
+shared user workflows and the other contributor contracts. Do not reproduce
+those workflows in a platform document.

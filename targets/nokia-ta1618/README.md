@@ -1,182 +1,83 @@
 # Nokia 3210 4G (TA-1618)
 
-## Device
+## Identity
 
-| Field    | Value                                                      |
-| -------- | ---------------------------------------------------------- |
-| Device   | Nokia 3210 4G (TA-1618)                                    |
-| Platform | [Unisoc UMS9117 / T117](../../platforms/ums9117/README.md) |
-| Boot     | Volatile RAM only                                          |
+| Field         | Value                                               |
+| ------------- | --------------------------------------------------- |
+| Target        | `nokia-ta1618`                                      |
+| Device        | Nokia 3210 4G (TA-1618)                             |
+| Hardware code | `TA-1618`                                           |
+| Platform      | [Unisoc UMS9117](../../platforms/ums9117/README.md) |
+| Boot          | Volatile RAM only                                   |
 
 ## Status
 
-This target runs Linux in volatile RAM with a local `240×320` terminal, physical
-keypad and backlight, microSD, USB SSH/SFTP, host-keyboard forwarding and
-charger detection, experimental battery voltage, current and SoC-temperature
-reporting, experimental raw auxiliary ADC readings, read-only RTC, and
-battery-only power-off. Internal phone storage remains inaccessible.
+This exact phone runs a local `240×320` console, its physical keypad and
+backlight, the private USB session, microSD, charger status, partial telemetry,
+a read-only RTC and battery-only power-off.
 
-## Evidence basis
+Status terms and limits shared by every phone are defined in the
+[target index](../README.md#status-and-common-limits).
 
-The **Supported** entries below were exercised on this phone. This is not a
-release qualification.
+## Features
 
-## Hardware support
+| Feature                                                 | Hardware | FPLinux       | This phone                                                   |
+| ------------------------------------------------------- | -------- | ------------- | ------------------------------------------------------------ |
+| RAM boot                                                | N/A      | Supported     | —                                                            |
+| Persistent boot                                         | N/A      | Not supported | —                                                            |
+| [Local console](../../docs/features/LOCAL_CONSOLE.md)   | Present  | Supported     | `240×320`.                                                   |
+| [Keypad backlight](features/KEYPAD_BACKLIGHT.md)        | Present  | Supported     | Binary LED control plus a bounded key-press light.           |
+| [USB networking](../../docs/features/USB_NETWORKING.md) | Present  | Supported     | —                                                            |
+| [SSH access](../../docs/features/SSH.md)                | N/A      | Supported     | —                                                            |
+| [File transfer](../../docs/features/FILE_TRANSFER.md)   | N/A      | Supported     | RAM and a writable mounted microSD are valid destinations.   |
+| [Host keyboard](../../docs/features/HOST_KEYBOARD.md)   | N/A      | Supported     | —                                                            |
+| [CPU clock reporting](../../docs/features/CPU_CLOCK.md) | N/A      | Supported     | —                                                            |
+| USB host mode                                           | Unknown  | Not supported | —                                                            |
+| [microSD](features/MICROSD.md)                          | Present  | Supported     | FAT32 read/write and unmounted hot-swap are exercised.       |
+| Internal phone storage                                  | Present  | Not supported | —                                                            |
+| Audio                                                   | Present  | Not supported | —                                                            |
+| Modem and mobile service                                | Present  | Not supported | —                                                            |
+| Bluetooth                                               | Unknown  | Not supported | —                                                            |
+| Wi-Fi                                                   | Unknown  | Not supported | —                                                            |
+| Camera                                                  | Unknown  | Not supported | Installed sensor is not identified.                          |
+| [Charger status](features/CHARGER_STATUS.md)            | Present  | Supported     | Read-only external-input status.                             |
+| [Battery telemetry](features/BATTERY_TELEMETRY.md)      | Present  | Partial       | Voltage and signed current; absolute accuracy is unchecked.  |
+| [SoC temperature](features/SOC_TEMPERATURE.md)          | Present  | Partial       | Calibrated reading without external accuracy validation.     |
+| [Auxiliary ADC](features/AUXADC.md)                     | Present  | Partial       | Five raw channels without physical-unit conversion.          |
+| [Real-time clock](features/RTC.md)                      | Present  | Partial       | Read-only clock without system-time synchronization.         |
+| Other battery functions                                 | Present  | Not supported | No level, battery temperature or charge control is provided. |
+| Indicator LEDs / vibration                              | Unknown  | Not supported | —                                                            |
+| [Power-off](features/POWER_OFF.md)                      | N/A      | Supported     | Works only while external charger power is absent.           |
+| Reboot and suspend                                      | N/A      | Not supported | —                                                            |
 
-**Hardware** records only what is established for this phone; **Unknown** does
-not mean absent. **FPLinux** is **Supported** only after exercise on this exact
-variant. **Experimental** has been exercised but retains the stated limitation.
-**Not supported** describes the current target, not the hardware.
+## Applications
 
-| Area                       | Hardware | FPLinux       | What a user can rely on / limit                                            |
-| -------------------------- | -------- | ------------- | -------------------------------------------------------------------------- |
-| RAM boot                   | N/A      | Supported     | Linux runs only in RAM and does not write phone storage.                   |
-| Persistent boot            | N/A      | Not supported | No autonomous Linux boot path is provided.                                 |
-| Local screen               | Present  | Supported     | `240×320` framebuffer terminal.                                            |
-| Physical keypad            | Present  | Supported     | Local terminal, TyrQuake and MicroPythonOS input.                          |
-| Keypad backlight           | Present  | Supported     | A key press lights it for about five seconds; manual control is available. |
-| USB networking             | Present  | Supported     | Private host link only; no gateway, DNS or forwarding.                     |
-| SSH, SFTP and upload       | Present  | Supported     | Shell, commands and verified file transfer; physical replug is supported.  |
-| Host keyboard bridge       | N/A      | Supported     | Forwards one host evdev keyboard while the client runs.                    |
-| USB host mode              | Unknown  | Not supported | The target provides USB peripheral mode only.                              |
-| Removable storage          | Present  | Supported     | FAT32 read/write and unmounted hot-swap while Linux remains running.       |
-| Internal phone storage     | Present  | Not supported | Linux deliberately does not expose it.                                     |
-| Audio                      | Present  | Not supported | No speaker, headphone or microphone support is provided.                   |
-| Modem and mobile service   | Present  | Not supported | Calls, SMS and mobile data are unavailable.                                |
-| Bluetooth                  | Unknown  | Not supported | No Bluetooth support is provided.                                          |
-| Wi-Fi                      | Absent   | N/A           | This board variant has no Wi-Fi controller.                                |
-| Camera                     | Present  | Not supported | No camera pipeline or sensor driver is provided.                           |
-| Charger detection          | Present  | Supported     | Reports whether external charger input is connected.                       |
-| Battery voltage            | Present  | Experimental  | Reports voltage; absolute accuracy has not been externally checked.        |
-| Battery current            | Present  | Experimental  | Signed live current; absolute accuracy has not been externally checked.    |
-| SoC temperature            | Present  | Experimental  | Calibrated reading; no external accuracy check or thermal policy.          |
-| Auxiliary ADC              | Present  | Experimental  | Standard IIO raw readings only; no voltage or temperature conversion.      |
-| Real-time clock            | Present  | Experimental  | `/dev/rtc0` only; no Linux clock sync; may reset without the battery.      |
-| Other battery functions    | Present  | Not supported | No level, battery temperature or charge control is provided.               |
-| Indicator LEDs / vibration | Unknown  | Not supported | No indicator or vibration control is provided.                             |
-| Power-off                  | N/A      | Supported     | Battery-only shutdown works when charger power is absent.                  |
-| Reboot and suspend         | N/A      | Not supported | Neither path is provided.                                                  |
+| Application                                       | FPLinux   | This phone                                                     |
+| ------------------------------------------------- | --------- | -------------------------------------------------------------- |
+| [TyrQuake](../../docs/apps/TYRQUAKE.md)           | Supported | Game data can use the supported microSD path.                  |
+| [MicroPythonOS](../../docs/apps/MICROPYTHONOS.md) | Supported | Requires the TA-1618 companion package; state can use microSD. |
 
-## Build and start from source
+## Load into RAM
 
-Use the shared [build and loader procedure](../../docs/BUILDING.md). When the
-loader requests this phone, hold `*` and connect it powered off.
+Follow [Loading from a source checkout](../../docs/guides/LOADING.md). When the loader
+requests the phone, hold `*` and connect it powered off.
 
-## Target-specific use
+## Development diagnostics
 
-The [application guide](../../docs/APPLICATIONS.md) covers the shared APK
-upload, install, run, and removal workflow for this source checkout.
-
-### TyrQuake
-
-TyrQuake 0.71 requires legally obtained game data. Before starting it, insert
-and mount a microSD card with `pak0.pak` at:
-
-```text
-/mnt/card/fplinux/quake/id1/pak0.pak
-```
-
-In the application guide, select either phone or keyboard input. Phone mode uses
-the physical keypad; keyboard mode uses the forwarded host keyboard. Hold the
-phone counter-clockwise with the display on the left and the keypad on the right:
-
-| Key                    | Menu                 | Game                        |
-| ---------------------- | -------------------- | --------------------------- |
-| D-pad `UP` / `DOWN`    | Left / right         | Turn left / right           |
-| D-pad `LEFT` / `RIGHT` | Down / up            | Walk backward / forward     |
-| Centre or dial         | Select               | Fire                        |
-| Right soft             | Back                 | Menu                        |
-| Left soft or `*`       | —                    | Jump                        |
-| `0`                    | —                    | Fire                        |
-| `1` / `3`              | —                    | Strafe left / right         |
-| `2` / `5`              | —                    | Turn left / right           |
-| `4` / `6`              | —                    | Walk backward / forward     |
-| `7` / `9`              | —                    | Previous / next weapon      |
-| `8`                    | —                    | Run while held              |
-| `#`                    | Available for a bind | Available for a custom bind |
-
-The launcher uses temporary runtime storage. TyrQuake settings and saves are
-discarded when it exits; they are not written to microSD.
-
-### MicroPythonOS
-
-MicroPythonOS requires both the base and TA-1618 companion packages. Use the
-[Nokia companion workflow](../../docs/APPLICATIONS.md#nokia-ta-1618-companion).
-
-With a usable FAT32 card available, MicroPythonOS uses `/mnt/card` and keeps
-application state under `/mnt/card/.fplinux/micropythonos`. It mounts the card
-when no matching mount exists and unmounts only a card that it mounted when
-MicroPythonOS exits. Without a usable card, application state remains in RAM.
-The packages provide only features backed by the currently supported screen,
-keypad and filesystem interfaces; unsupported hardware services are not shown.
-
-## microSD card
-
-The card may be inserted before or after Linux starts. Wait for its block device,
-then use the first partition when present, or the whole card otherwise:
-
-```sh
-card=/dev/mmcblk0p1
-[ -b "$card" ] || card=/dev/mmcblk0
-mkdir -p /mnt/card
-mount -t vfat -o rw "$card" /mnt/card
-```
-
-For game data, a read-only mount is appropriate:
-
-```sh
-mount -t vfat -o ro,nodev,nosuid,noexec,utf8=1 "$card" /mnt/card
-```
-
-Flush and unmount before removing the card or ending the RAM session:
-
-```sh
-sync
-umount /mnt/card
-```
-
-After `umount` the card may be removed and reinserted without restarting Linux.
-Never remove a mounted card. The TyrQuake launcher uses a read-only mount when
-`/mnt/card` is not already mounted and otherwise keeps the existing mount
-options.
-
-## Kernel tracing
-
-The target mounts debugfs and tracefs at boot and includes kprobe events and the
-`irqsoff` tracer for development diagnostics. No tracer or dynamic probe is
-active initially. Inspect their current state as root:
-
-```sh
-cat /sys/kernel/tracing/available_tracers
-cat /sys/kernel/tracing/current_tracer
-cat /sys/kernel/tracing/kprobe_events
-```
-
-Tracing and dynamic probes can destabilize the running kernel and consume RAM.
-Disable probes in any additional trace instances first. Then remove the root
-probes, select the `nop` tracer and shrink its ring buffer:
-
-```sh
-echo 0 > /sys/kernel/tracing/events/kprobes/enable
-echo > /sys/kernel/tracing/kprobe_events
-echo nop > /sys/kernel/tracing/current_tracer
-echo 1 > /sys/kernel/tracing/free_buffer
-```
-
-## Keypad backlight
-
-The binary keypad backlight control is available from the phone shell:
-
-```sh
-echo 1 > /sys/class/leds/:kbd_backlight/brightness
-echo 0 > /sys/class/leds/:kbd_backlight/brightness
-```
+The default build includes inactive kprobe and `irqsoff` diagnostics. Enabling
+them can destabilize the kernel and consume RAM; follow
+[Hardware debugging](../../docs/guides/DEBUGGING.md).
 
 ## End the RAM session
 
-To end the RAM session, exit SSH, disconnect USB, make sure charger power is
-absent, then hold the red handset key continuously for five seconds. A
-short press is an ordinary input event and releasing the key early cancels the
-request. A successful shutdown discards the RAM session; boot normally to return
-to the vendor firmware. If the phone remains powered after shutdown starts,
-remove and reinsert the battery before booting. Linux reboot is not supported.
+Flush and unmount microSD first. Disconnect USB, make sure charger power is
+absent, then hold the red handset key continuously for five seconds. Releasing
+it early cancels the request. If the phone remains powered after shutdown
+starts, remove and reinsert the battery before booting normally. See
+[Power-off](features/POWER_OFF.md) for the complete boundary.
+
+## Release boundary
+
+Feature support above does not qualify an executable payload. A locally
+packaged candidate is not a release; see
+[Release archives](../../docs/guides/RELEASES.md).
