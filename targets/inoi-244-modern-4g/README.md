@@ -1,83 +1,68 @@
 # INOI 244 Modern 4G
 
-## Device
+## Identity
 
-| Field    | Value                                                      |
-| -------- | ---------------------------------------------------------- |
-| Device   | INOI 244 Modern 4G (`F2444G`)                              |
-| Platform | [Unisoc UMS9117 / T117](../../platforms/ums9117/README.md) |
-| Boot     | Volatile RAM only                                          |
+| Field    | Value                                               |
+| -------- | --------------------------------------------------- |
+| Target   | `inoi-244-modern-4g`                                |
+| Device   | INOI 244 Modern 4G                                  |
+| Platform | [Unisoc UMS9117](../../platforms/ums9117/README.md) |
+| Boot     | Volatile RAM only                                   |
 
 ## Status
 
-This experimental target runs Linux in volatile RAM with a local `240×320`
-terminal, physical keypad, USB SSH/SFTP and host-keyboard forwarding. Internal
-phone storage remains inaccessible.
+This exact phone runs a local `240×320` console, its physical keypad, the
+private USB session and the shared applications. No supported microSD,
+keypad-backlight, battery or power-off path is available.
 
-## Evidence basis
+Status terms and limits shared by every phone are defined in the
+[target index](../README.md#status-and-common-limits).
 
-The **Supported** entries below were exercised on this phone. This is not a
-release qualification.
+## Features
 
-## Hardware support
+| Feature                                                 | Hardware | FPLinux       | This phone                                                   |
+| ------------------------------------------------------- | -------- | ------------- | ------------------------------------------------------------ |
+| RAM boot                                                | N/A      | Supported     | —                                                            |
+| Persistent boot                                         | N/A      | Not supported | —                                                            |
+| [Local console](../../docs/features/LOCAL_CONSOLE.md)   | Present  | Supported     | `240×320`.                                                   |
+| Keypad backlight                                        | Unknown  | Not supported | No FPLinux control is provided.                              |
+| [USB networking](../../docs/features/USB_NETWORKING.md) | Present  | Supported     | —                                                            |
+| [SSH access](../../docs/features/SSH.md)                | N/A      | Supported     | —                                                            |
+| [File transfer](../../docs/features/FILE_TRANSFER.md)   | N/A      | Supported     | Destinations are RAM-backed on this target.                  |
+| [Host keyboard](../../docs/features/HOST_KEYBOARD.md)   | N/A      | Supported     | —                                                            |
+| [CPU clock reporting](../../docs/features/CPU_CLOCK.md) | N/A      | Supported     | —                                                            |
+| USB host mode                                           | Unknown  | Not supported | —                                                            |
+| Removable storage                                       | Unknown  | Not supported | No supported microSD path is provided.                       |
+| Internal phone storage                                  | Present  | Not supported | —                                                            |
+| Audio                                                   | Present  | Not supported | —                                                            |
+| Modem and mobile service                                | Present  | Not supported | —                                                            |
+| Bluetooth                                               | Unknown  | Not supported | —                                                            |
+| Wi-Fi                                                   | Unknown  | Not supported | —                                                            |
+| Camera                                                  | Unknown  | Not supported | —                                                            |
+| Battery and charging                                    | Present  | Not supported | No battery reporting or charge control is provided.          |
+| Indicator LEDs / vibration                              | Unknown  | Not supported | —                                                            |
+| Power-off                                               | N/A      | Not supported | End the session by reseating the battery as described below. |
+| Reboot and suspend                                      | N/A      | Not supported | —                                                            |
 
-**Hardware** records only what is established for this phone; **Unknown** does
-not mean absent. **FPLinux** is **Supported** only after exercise on this exact
-variant. **Not supported** describes the current target, not the hardware.
+## Applications
 
-| Area                        | Hardware | FPLinux       | What a user can rely on / limit                                           |
-| --------------------------- | -------- | ------------- | ------------------------------------------------------------------------- |
-| RAM boot                    | N/A      | Supported     | Linux runs only in RAM; it is discarded when the session ends.            |
-| Persistent boot             | N/A      | Not supported | No autonomous Linux boot path is provided.                                |
-| Local screen                | Present  | Supported     | `240×320` framebuffer console.                                            |
-| Physical keypad             | Present  | Supported     | Local terminal, TyrQuake and MicroPythonOS input.                         |
-| Keypad backlight            | Unknown  | Not supported | No FPLinux keypad-backlight control is provided.                          |
-| USB networking              | Present  | Supported     | Private host link only; no gateway, DNS or forwarding.                    |
-| SSH, SFTP and file transfer | N/A      | Supported     | Shell, commands and verified file transfer; physical replug is supported. |
-| Host keyboard bridge        | N/A      | Supported     | Forwards one host evdev keyboard while the client runs.                   |
-| USB host mode               | Unknown  | Not supported | The target provides USB peripheral mode only.                             |
-| Removable storage           | Unknown  | Not supported | No supported microSD path is provided.                                    |
-| Internal phone storage      | Present  | Not supported | Linux deliberately does not expose it.                                    |
-| Audio                       | Present  | Not supported | No speaker, headphone or microphone support is provided.                  |
-| Modem and mobile service    | Present  | Not supported | Calls, SMS and mobile data are unavailable.                               |
-| Bluetooth                   | Unknown  | Not supported | No Bluetooth support is provided.                                         |
-| Wi-Fi                       | Unknown  | Not supported | No Wi-Fi support is provided.                                             |
-| Camera                      | Unknown  | Not supported | No camera support is provided.                                            |
-| Battery and charging        | Present  | Not supported | No battery reporting or charge control is provided.                       |
-| Indicator LEDs / vibration  | Unknown  | Not supported | No indicator or vibration control is provided.                            |
-| Power-off                   | N/A      | Not supported | Disconnect USB, reseat the battery, then boot normally.                   |
-| Reboot and suspend          | N/A      | Not supported | Neither path is provided.                                                 |
+| Application                                       | FPLinux   | This phone                                                 |
+| ------------------------------------------------- | --------- | ---------------------------------------------------------- |
+| [TyrQuake](../../docs/apps/TYRQUAKE.md)           | Supported | Game data uses tmpfs and consumes the phone's limited RAM. |
+| [MicroPythonOS](../../docs/apps/MICROPYTHONOS.md) | Supported | Application state remains in RAM.                          |
 
-## Build and start from source
+## Load into RAM
 
-Use the shared [build and loader procedure](../../docs/BUILDING.md). When the
-loader requests this phone, hold `*` and connect it powered off.
-
-## Target-specific use
-
-### TyrQuake
-
-Use the shared [application guide](../../docs/APPLICATIONS.md) to install,
-start, and remove the APK. This FPLinux target has no supported microSD path,
-so a RAM-only session can put a legally obtained `pak0.pak` in tmpfs:
-
-```sh
-./fplinux console inoi-244-modern-4g \
-  --exec 'mkdir -p /mnt/card && mount -t tmpfs tmpfs /mnt/card && mkdir -p /mnt/card/fplinux/quake/id1'
-./fplinux console inoi-244-modern-4g \
-  --upload ./pak0.pak /mnt/card/fplinux/quake/id1/pak0.pak
-```
-
-`--input phone` uses the physical keypad; `--input keyboard` uses the forwarded
-host keyboard. The phone has 64 MiB of RAM and the game reserves 32 MiB; keeping
-a full PAK in tmpfs leaves little memory and there is no swap.
-
-### MicroPythonOS
-
-Use the shared [application guide](../../docs/APPLICATIONS.md). This target has
-no supported microSD path, so application state remains in RAM.
+Follow [Loading from a source checkout](../../docs/guides/LOADING.md). When the loader
+requests the phone, hold `*` and connect it powered off.
 
 ## End the RAM session
 
 Disconnect USB, remove and reinsert the battery, then boot the phone normally.
 This target does not provide Linux power-off or reboot.
+
+## Release boundary
+
+Feature support above does not qualify an executable payload. A locally
+packaged candidate is not a release; see
+[Release archives](../../docs/guides/RELEASES.md).
