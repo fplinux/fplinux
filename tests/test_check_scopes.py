@@ -134,6 +134,22 @@ class CheckScopeTests(unittest.TestCase):
             check_scope_closure_digest("kernel", kernel_changed),
         )
 
+    def test_c_harness_change_causes_a_c_receipt_miss(self) -> None:
+        """Treat a host C harness as formatting input to the C scope."""
+        first = WorkspaceSnapshot(
+            (WorkspaceFile("tests/harness.c", b"int main(void) { return 0; }\n", 0o644),),
+            "a" * 64,
+        )
+        second = WorkspaceSnapshot(
+            (WorkspaceFile("tests/harness.c", b"int main(void) { return 1; }\n", 0o644),),
+            "b" * 64,
+        )
+
+        self.assertNotEqual(
+            check_scope_closure_digest("c", first),
+            check_scope_closure_digest("c", second),
+        )
+
     def test_linux_state_change_causes_a_kernel_receipt_miss(self) -> None:
         """Include the prepared-Linux receipt implementation in the kernel closure."""
         first = WorkspaceSnapshot(

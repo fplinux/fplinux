@@ -508,6 +508,7 @@ def _c_scope_paths(snapshot: WorkspaceSnapshot) -> set[str]:
         if path.suffix in {".c", ".h"} and (
             path.parts[:2] == ("alpine", "aports")
             or file.path in alpine_state.SHARED_APORT_SOURCE_PATHS
+            or path.parts[0] == "tests"
         ):
             selected.add(file.path)
         if path.suffix in {".c", ".h"} and "bootstrap" in path.parts:
