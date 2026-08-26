@@ -185,8 +185,8 @@ exposes instead of depending on include order in one consumer.
 
 Follow the Linux coding style and the API of the subsystem being changed. Use
 kernel types, negative errno values, `devm_*` where its lifetime matches, and
-`dev_err_probe()` for probe errors that may defer. Keep logging severity and
-message shape consistent across the kernel layer.
+`dev_err_probe()` for probe errors that may defer. Logging severity and message
+shape belong to the [logging contract](LOGGING.md).
 
 Execution context is part of a kernel function's contract. Use these suffixes
 only with their usual meaning:
@@ -257,8 +257,8 @@ store the signal number in `volatile sig_atomic_t`; normal control flow then
 stops the child, restores state and chooses the exit status.
 
 Use `O_CLOEXEC` unless a descriptor is deliberately inherited. Keep public
-command output and exit behavior stable. Keep message prefixes and severity
-consistent across phone userspace.
+command output and exit behavior stable. Message prefixes and severity remain
+in the [logging contract](LOGGING.md).
 
 ## Host tools
 
@@ -350,6 +350,7 @@ level established for that hardware.
 - Run the checks and builds that compile the changed code in its real context.
 
 If an aport source changed, regenerate its checksum with `./fplinux checksum
-<aport>` before the final gate. The
+<aport>` before the final gate. The [identity contract](IDENTITY.md) covers
+public device names, the [logging contract](LOGGING.md) covers messages, and the
 [porting overview](../porting/README.md) defines project, platform and target
 ownership.

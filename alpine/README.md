@@ -4,6 +4,12 @@ FPLinux uses Alpine Linux for the phone root filesystem, installable bundle
 packages and service management. This directory owns FPLinux userspace packages
 and the policy that selects how they are delivered.
 
+Target-neutral host and runtime tools and their contracts belong in
+[`common/`](../common/README.md). Reusable pre-Linux components belong in
+[`bootstrap/`](../bootstrap/README.md), SoC integration in
+[`platforms/`](../platforms/README.md), and board support in
+[`targets/`](../targets/README.md).
+
 ## Contributor contract
 
 - Keep each userspace component in one conventional aport under `aports/`.
@@ -27,4 +33,11 @@ build installs rootfs-selected APKs into the ARM root filesystem. Bundle-selecte
 APKs are built and published under `apks/`, but are not installed in that root
 filesystem. Contributors do not need a separate target-local packaging workflow.
 
-See [Building FPLinux](../docs/BUILDING.md) for host setup and source checks.
+See [Building FPLinux](../docs/guides/BUILDING.md) for host setup and source
+checks, [TyrQuake](../docs/apps/TYRQUAKE.md) and
+[MicroPythonOS](../docs/apps/MICROPYTHONOS.md) for the published APKs, and the
+project [documentation index](../README.md#documentation) for the remaining user
+and contributor guides. Project-owned sources follow the
+[phone-userspace](../docs/reference/C_STYLE.md#phone-userspace) and
+[embedded-adapter](../docs/reference/C_STYLE.md#code-embedded-into-another-project)
+C rules.

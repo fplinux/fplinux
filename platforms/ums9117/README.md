@@ -1,15 +1,16 @@
-# Unisoc UMS9117 / T117 platform
+# Unisoc UMS9117 platform
 
 ## Identity
 
-| Field                 | Value                            |
-| --------------------- | -------------------------------- |
-| Vendor                | Unisoc / Spreadtrum              |
-| SoC                   | UMS9117, also identified as T117 |
-| Architecture          | ARMv7-A                          |
-| CPU                   | ARM Cortex-A7                    |
-| Linux platform symbol | `CONFIG_ARCH_UMS9117`            |
-| DTS compatible        | `sprd,ums9117`                   |
+| Field                  | Value                 |
+| ---------------------- | --------------------- |
+| Vendor                 | Unisoc                |
+| SoC                    | UMS9117               |
+| Vendor/reference alias | T117                  |
+| Architecture           | ARMv7-A               |
+| CPU                    | ARM Cortex-A7         |
+| Linux platform symbol  | `CONFIG_ARCH_UMS9117` |
+| DTS compatible         | `sprd,ums9117`        |
 
 ## Scope
 
@@ -22,16 +23,17 @@ payload assembly and the values supplied to the loader.
 
 ## Reusable capabilities
 
-| Capability                                             | Status        | Target-facing requirement or limitation                                                             |
-| ------------------------------------------------------ | ------------- | --------------------------------------------------------------------------------------------------- |
-| CPU / GIC / timers                                     | Supported     | The SoC has one Cortex-A7 CPU; targets use the shared interrupt and timer nodes.                    |
-| Clock controller                                       | Partial       | Linux reads and reports inherited MPLL/Cortex-A7 rates; it does not change clocks.                  |
-| USB device controller                                  | Supported     | USB peripheral support is shared; board USB setup remains target-owned.                             |
-| Analog-die interface                                   | Supported     | Linux initializes the shared transport; feature clients and their board wiring remain target-owned. |
-| LCDC framebuffer core                                  | Supported     | Targets provide a panel profile and the board-specific panel transport setup.                       |
-| Matrix keypad                                          | Supported     | Targets provide matrix wiring, inherited EIC use where applicable, and the normalized keymap.       |
-| USB host / DMA                                         | Not supported | No host-mode initialization or USB DMA path.                                                        |
-| UART, GPIO/pin control, audio, SPI/I2C, watchdog/reset | Not supported | No generic platform framework or driver for these functions.                                        |
+| Capability                                                     | Status        | Target-facing requirement or limitation                                                                  |
+| -------------------------------------------------------------- | ------------- | -------------------------------------------------------------------------------------------------------- |
+| CPU / GIC / timers                                             | Supported     | The SoC has one Cortex-A7 CPU; targets use the shared interrupt and timer nodes.                         |
+| [Clock controller](../../docs/features/CPU_CLOCK.md)           | Partial       | Linux reads and reports inherited MPLL/Cortex-A7 rates; it does not change clocks.                       |
+| [USB device controller](../../docs/features/USB_NETWORKING.md) | Supported     | USB peripheral support is shared; board USB setup remains target-owned.                                  |
+| USB host mode                                                  | Not supported | The shared MUSB integration is peripheral-only and provides no host-mode initialization.                 |
+| Generic DMA controller                                         | Not supported | There is no shared DMAengine provider; controller-private DMA remains owned by its controller or target. |
+| Analog-die interface                                           | Supported     | Linux initializes the shared transport; feature clients and their board wiring remain target-owned.      |
+| [LCDC framebuffer core](../../docs/features/LOCAL_CONSOLE.md)  | Supported     | Targets provide a panel profile and the board-specific panel transport setup.                            |
+| [Matrix keypad](../../docs/features/LOCAL_CONSOLE.md)          | Supported     | Targets provide matrix wiring, inherited EIC use where applicable, and the normalized keymap.            |
+| UART, GPIO/pin control, audio, SPI/I2C, watchdog/reset         | Not supported | No generic platform framework or driver for these functions.                                             |
 
 ## Shared framebuffer interface
 
@@ -52,12 +54,6 @@ is intentionally silent.
 Targets enable only the SoC nodes their board can use. Board devices and USB
 setup remain target-owned.
 
-## Known constraints
-
-- The platform brings up one CPU only.
-- Reset, pin-control and power-domain frameworks are not implemented.
-- The platform has no USB host or DMA support.
-
 ## Targets using this platform
 
 | Target                                                             | Phone                   |
@@ -68,3 +64,8 @@ setup remain target-owned.
 
 Platform status covers shared capabilities; target documents own board-specific
 status. Neither is release qualification.
+
+See the [hardware platform index](../README.md), the
+[porting overview](../../docs/porting/README.md), and the project
+[documentation index](../../README.md#documentation) for the surrounding
+contributor contracts and user workflows.

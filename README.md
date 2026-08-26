@@ -1,8 +1,10 @@
 # FPLinux
 
 FPLinux is a source-built Linux port for selected feature phones. It loads into
-volatile RAM alongside the vendor firmware; the supported loader workflows do
-not flash, erase, partition, or modify phone storage.
+volatile RAM alongside the vendor firmware. The supported loader never flashes,
+erases, partitions, or writes the phone's internal storage. A target may expose
+removable media separately; only the explicitly documented workflows may write
+such media, and they require a safe unmount before removal or shutdown.
 
 ## Supported targets
 
@@ -12,58 +14,76 @@ not flash, erase, partition, or modify phone storage.
 | `inoi-244-modern-4g` | INOI 244 Modern 4G      | [`ums9117`](platforms/ums9117/README.md) | [Target documentation](targets/inoi-244-modern-4g/README.md) |
 | `nokia-ta1618`       | Nokia 3210 4G (TA-1618) | [`ums9117`](platforms/ums9117/README.md) | [Target documentation](targets/nokia-ta1618/README.md)       |
 
-Each target document is the source of truth for its tested phone variant,
-boot-key instructions, available hardware, and limitations.
-
-## Quick start
-
-Build hosts need Linux x86-64, rootless Podman, and Python 3.11 or newer.
-Network access is needed until the pinned build inputs are available locally.
-
-```sh
-./fplinux doctor
-./fplinux check
-./fplinux build <target>
-```
-
-`check` is recommended when changing or reviewing source; it is not required
-before every ordinary build. See [Building FPLinux](docs/BUILDING.md) for setup,
-offline builds, logs, cache use, and cleanup.
-
-To load a built image, first power the phone off and disconnect USB. Start the
-loader for the exact target **before** connecting the phone:
-
-```sh
-./fplinux run <target>
-```
-
-Wait until the loader requests the device, then connect the phone and follow the
-boot-key instructions in that target's document. USB detection is diagnostic;
-it does not select a target. The loader writes only volatile RAM. To reconnect to
-a running console, use `./fplinux console <target>` rather than starting another
-RAM load.
+Target manifests own machine identity. Each target document owns the exact
+phone's boot key, hardware support, safe use, and limitations; see the shared
+[identity contract](docs/reference/IDENTITY.md).
 
 ## Documentation
 
-- [Building FPLinux](docs/BUILDING.md): host setup, builds, checks, cache, and
-  source-build boundaries.
-- [Release archives](docs/RELEASES.md): candidate archives, qualification,
-  USB access, and archive troubleshooting.
-- [Host-to-phone transfer](docs/TRANSFER.md): console commands and file copy.
-- [Installable applications](docs/APPLICATIONS.md): APK installation and
-  removal in a source-checkout RAM session.
-- [Phone targets](targets/README.md): target index and per-phone documents.
-- [Hardware platforms](platforms/README.md): reusable SoC support.
-- [Porting FPLinux](docs/porting/README.md): contributor-facing porting
-  contracts.
+### Quick start
+
+Build hosts need Linux x86-64, rootless Podman, and Python 3.11 or newer.
+Network access is needed until the pinned build inputs have been stored locally.
+
+```sh
+./fplinux doctor
+./fplinux build <target>
+```
+
+See [Building FPLinux](docs/guides/BUILDING.md) for setup, source checks, offline
+builds, logs, cache use, and cleanup.
+
+### Guides
+
+First choose the exact phone in [Phone targets](targets/README.md) and read its
+support status, boot key, storage rules and limitations.
+
+- [Building FPLinux](docs/guides/BUILDING.md)
+- [Loading from a source checkout](docs/guides/LOADING.md)
+- [Using a standalone archive](docs/guides/STANDALONE.md)
+- [Release archives](docs/guides/RELEASES.md)
+- [Hardware debugging](docs/guides/DEBUGGING.md)
+
+### Features
+
+- [Local console](docs/features/LOCAL_CONSOLE.md)
+- [USB networking](docs/features/USB_NETWORKING.md)
+- [SSH access](docs/features/SSH.md)
+- [File transfer](docs/features/FILE_TRANSFER.md)
+- [Host keyboard forwarding](docs/features/HOST_KEYBOARD.md)
+- [CPU clock reporting](docs/features/CPU_CLOCK.md)
+
+### Applications
+
+- [TyrQuake](docs/apps/TYRQUAKE.md)
+- [MicroPythonOS](docs/apps/MICROPYTHONOS.md)
+
+### Reference
+
+- [C code](docs/reference/C_STYLE.md)
+- [Target and platform identity](docs/reference/IDENTITY.md)
+- [Logging contract](docs/reference/LOGGING.md)
+
+Before submitting source changes, run the complete uncached quality gate from
+[Building FPLinux](docs/guides/BUILDING.md#check-source).
+
+### Porting
+
+- [Porting overview](docs/porting/README.md)
+- [Phone target contract](docs/porting/TARGET.md)
+- [Platform contract](docs/porting/PLATFORM.md)
+- [Console contract](docs/porting/CONSOLE.md)
 
 ## Architecture
 
-The repository separates shared Alpine userspace, pre-Linux bootstrap code,
-host tooling, reusable SoC support, and phone-owned board support. Platform and
-target manifests select standard-rootfs packages separately from installable
-APKs published beside the image. Phone-specific addresses, panel setup, keymaps,
-and hardware status remain with the target.
+The repository separates [Alpine userspace](alpine/README.md),
+[shared pre-Linux components](bootstrap/README.md), the
+[shared host and runtime stack](common/README.md), reusable
+[SoC platforms](platforms/README.md), and phone-owned
+[targets](targets/README.md). Platform and target manifests select standard
+rootfs packages separately from installable APKs published beside the image.
+Phone-specific addresses, panel setup, keymaps, and hardware status remain with
+the target.
 
 ## Provenance
 
