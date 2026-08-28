@@ -90,7 +90,7 @@ RUN set -eux; \
         libffi-dev=3.5.2-r1 \
         libusb-dev=1.0.30-r0 \
         ncurses-dev=6.6_p20260516-r0 \
-        openssl-dev=3.5.7-r0 \
+        openssl-dev=3.5.8-r0 \
         swig=4.4.1-r1 \
         xz-dev=5.8.3-r0 \
         zlib-dev=1.3.2-r0
