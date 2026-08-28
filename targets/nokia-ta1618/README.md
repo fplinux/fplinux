@@ -50,7 +50,8 @@ Status terms and limits shared by every phone are defined in the
 | Other battery functions                                           | Present  | Not supported | No level, battery temperature or charge control is provided.    |
 | Indicator LEDs / vibration                                        | Unknown  | Not supported | —                                                               |
 | [Power-off](features/POWER_OFF.md)                                | N/A      | Supported     | Works only while external charger power is absent.              |
-| Reboot and suspend                                                | N/A      | Not supported | —                                                               |
+| [Suspend](features/SUSPEND.md)                                    | N/A      | Supported     | RAM boot only; s2idle wakes from the red handset key.           |
+| Reboot                                                            | N/A      | Not supported | —                                                               |
 
 ## Applications
 

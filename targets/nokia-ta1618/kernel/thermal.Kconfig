@@ -6,7 +6,6 @@ config TA1618_THM1_THERMAL
 	depends on OF
 	depends on MFD_SYSCON
 	depends on HAS_IOMEM
-	depends on !PM
 	help
 	  Read the calibrated UMS9117 THM1 sensor0 temperature on the Nokia
 	  3210 4G TA-1618 through a tripless thermal zone. The driver does not

@@ -19,6 +19,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
+#include <linux/pm.h>
 #include <linux/slab.h>
 #include <video/mipi_display.h>
 
@@ -1249,6 +1250,11 @@ int ums9117_fb_probe(struct platform_device *pdev,
 	ret = register_framebuffer(info);
 	if (ret)
 		goto stop;
+	console_lock();
+	ret = fb_blank(info, FB_BLANK_UNBLANK);
+	console_unlock();
+	if (ret)
+		goto unregister;
 	/* fbcon may have drawn while registering; submit that first visible state. */
 	ums9117_fb_mark_damage(ufb);
 	ret = device_create_file(dev, &dev_attr_audit);
@@ -1346,6 +1352,62 @@ void ums9117_fb_shutdown(struct platform_device *pdev)
 	mutex_unlock(&ufb->transition_lock);
 }
 EXPORT_SYMBOL_GPL(ums9117_fb_shutdown);
+
+static int __maybe_unused ums9117_fb_suspend(struct device *dev)
+{
+	struct ums9117_fb *ufb = dev_get_drvdata(dev);
+	unsigned long flags;
+	bool restore_active = false;
+	int ret = 0;
+
+	if (!ufb)
+		return 0;
+	console_lock();
+	spin_lock_irqsave(&ufb->lock, flags);
+	if (ufb->stopping)
+		ret = -ENODEV;
+	else if (ufb->state == UMS9117_FB_PANEL_STATE_ACTIVE)
+		restore_active = true;
+	else if (ufb->state == UMS9117_FB_PANEL_STATE_ERROR)
+		ret = -EIO;
+	else if (ufb->state != UMS9117_FB_PANEL_STATE_BLANKED)
+		ret = -EBUSY;
+	spin_unlock_irqrestore(&ufb->lock, flags);
+	if (!ret && restore_active)
+		ret = fb_blank(ufb->info, FB_BLANK_POWERDOWN);
+	if (!ret) {
+		spin_lock_irqsave(&ufb->lock, flags);
+		ufb->pm_restore_active = restore_active;
+		spin_unlock_irqrestore(&ufb->lock, flags);
+		fb_set_suspend(ufb->info, 1);
+	}
+	console_unlock();
+	return ret;
+}
+
+static int __maybe_unused ums9117_fb_resume(struct device *dev)
+{
+	struct ums9117_fb *ufb = dev_get_drvdata(dev);
+	unsigned long flags;
+	bool restore_active;
+	int ret = 0;
+
+	if (!ufb)
+		return 0;
+	console_lock();
+	spin_lock_irqsave(&ufb->lock, flags);
+	restore_active = ufb->pm_restore_active;
+	ufb->pm_restore_active = false;
+	spin_unlock_irqrestore(&ufb->lock, flags);
+	if (restore_active)
+		ret = fb_blank(ufb->info, FB_BLANK_UNBLANK);
+	fb_set_suspend(ufb->info, 0);
+	console_unlock();
+	return ret;
+}
+
+DEFINE_SIMPLE_DEV_PM_OPS(ums9117_fb_pm_ops, ums9117_fb_suspend,
+			 ums9117_fb_resume);
 
 MODULE_DESCRIPTION("UMS9117 shared fbdev/LCDC core");
 MODULE_LICENSE("GPL");

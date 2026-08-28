@@ -19,5 +19,5 @@ A successful shutdown discards the volatile RAM session. Boot the phone
 normally to return to the vendor firmware. If it remains powered after shutdown
 starts, remove and reinsert the battery before booting.
 
-Linux reboot and suspend are not supported. Do not use reboot as a substitute
-for this shutdown sequence.
+Linux reboot is not supported. [Suspend](SUSPEND.md) preserves the RAM session
+and is not a substitute for this shutdown sequence.

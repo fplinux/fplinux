@@ -99,6 +99,7 @@ struct ums9117_fb {
 	bool wled_known;
 	bool wled_on;
 	bool audit_file_created;
+	bool pm_restore_active;
 };
 
 int ums9117_fb_transport_init(struct ums9117_fb *ufb,
