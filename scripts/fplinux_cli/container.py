@@ -57,6 +57,14 @@ CHECK_SCOPES = (
 )
 SOURCE_CHECK_SCOPES = CHECK_SCOPES[1:-1]
 GIT_HOOKS_PATH = ".githooks"
+_CHECK_GIT_TIMEOUT = 5 * 60
+_GIT_HOOK_TIMEOUT = 60
+_PODMAN_PROBE_TIMEOUT = 60
+_COMMIT_MESSAGE_TIMEOUT = 5 * 60
+_CONTAINER_SETUP_TIMEOUT = 2 * 60 * 60
+_SOURCE_CHECK_TIMEOUT = 2 * 60 * 60
+_KERNEL_PREPARE_TIMEOUT = 90 * 60
+_KERNEL_ANALYSIS_TIMEOUT = 90 * 60
 _CONTAINER_FILE = re.compile(r"(?:docker-)?compose(?:\.[^.]+)?\.ya?ml")
 _QUOTED_C_INCLUDE = re.compile(rb'^\s*#\s*include\s*"([^"\n]+)"', re.MULTILINE)
 _BARE_IMAGE_ID = re.compile(r"[0-9a-f]{64}\Z")
@@ -135,27 +143,33 @@ def require_podman() -> str:
 
 
 def image_exists(podman: str, image: str) -> bool:
-    return (
-        subprocess.run(
+    try:
+        result = subprocess.run(
             [podman, "image", "exists", image],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
-        ).returncode
-        == 0
-    )
+            timeout=_PODMAN_PROBE_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        fail(f"Podman image lookup timed out after {_PODMAN_PROBE_TIMEOUT}s")
+    return result.returncode == 0
 
 
 def image_identifier(podman: str, image: str) -> str | None:
     """Return the canonical immutable ID currently assigned to an image tag."""
     if not image_exists(podman, image):
         return None
-    result = subprocess.run(
-        [podman, "image", "inspect", "--format", "{{.Id}}", image],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            [podman, "image", "inspect", "--format", "{{.Id}}", image],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_PODMAN_PROBE_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        fail(f"Podman image identity lookup timed out after {_PODMAN_PROBE_TIMEOUT}s")
     identifier = result.stdout.strip()
     if result.returncode != 0:
         return None
@@ -174,19 +188,23 @@ def image_ready(
 ) -> bool:
     if not image_exists(podman, image):
         return False
-    result = subprocess.run(
-        [
-            podman,
-            "image",
-            "inspect",
-            "--format",
-            '{{ index .Labels "org.fplinux.container.image-recipe" }}',
-            image,
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            [
+                podman,
+                "image",
+                "inspect",
+                "--format",
+                '{{ index .Labels "org.fplinux.container.image-recipe" }}',
+                image,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_PODMAN_PROBE_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        fail(f"Podman image recipe lookup timed out after {_PODMAN_PROBE_TIMEOUT}s")
     if image_recipe is None:
         image_recipe = container_image_recipe_digest()
     return result.returncode == 0 and result.stdout.strip() == image_recipe
@@ -212,28 +230,37 @@ def _publish_current_image_state(
     return state
 
 
+def _run_git_hook_command(git: str, *arguments: str) -> subprocess.CompletedProcess[str]:
+    """Run one bounded Git query or mutation for hook ownership."""
+    try:
+        return subprocess.run(
+            [git, *arguments],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_GIT_HOOK_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        fail(f"Git hook configuration timed out after {_GIT_HOOK_TIMEOUT}s")
+
+
 def install_git_hooks() -> None:
     """Select the repository-owned hooks for this Git checkout."""
     git = shutil.which("git")
     if git is None:
         return
-    checkout = subprocess.run(
-        [git, "rev-parse", "--show-toplevel"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    checkout = _run_git_hook_command(git, "rev-parse", "--show-toplevel")
     if checkout.returncode:
         return
     if Path(checkout.stdout.strip()).resolve() != ROOT:
         fail("Git reports a different repository root")
-    configured = subprocess.run(
-        [git, "config", "--local", "--get", "core.hooksPath"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
+    configured = _run_git_hook_command(
+        git,
+        "config",
+        "--local",
+        "--get",
+        "core.hooksPath",
     )
     if configured.returncode not in {0, 1}:
         fail("could not read the local Git hooks path")
@@ -245,11 +272,15 @@ def install_git_hooks() -> None:
         if configured_path.resolve() != (ROOT / GIT_HOOKS_PATH).resolve():
             fail(f"core.hooksPath is already set to {hooks_path}")
     if not hooks_path:
-        subprocess.run(
-            [git, "config", "--local", "core.hooksPath", GIT_HOOKS_PATH],
-            cwd=ROOT,
-            check=True,
+        updated = _run_git_hook_command(
+            git,
+            "config",
+            "--local",
+            "core.hooksPath",
+            GIT_HOOKS_PATH,
         )
+        if updated.returncode:
+            fail("could not configure the local Git hooks path")
     print(f"Git hooks are ready: {GIT_HOOKS_PATH}")
 
 
@@ -289,7 +320,7 @@ def setup(
         ".",
     ]
     with reporter.stage("container-setup") as stage:
-        stage.run(command, cwd=ROOT)
+        stage.run(command, cwd=ROOT, timeout=_CONTAINER_SETUP_TIMEOUT)
     if container_image_recipe_digest(lock) != image_recipe:
         fail("container image inputs changed while setup was running")
     if not image_ready(podman, image, image_recipe=image_recipe):
@@ -312,26 +343,34 @@ def doctor() -> None:
     if podman is None:
         problems.append("podman was not found")
     else:
-        version = subprocess.run(
-            [podman, "version", "--format", "{{.Client.Version}}"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if version.returncode:
-            problems.append(version.stderr.strip() or "podman version failed")
-        else:
-            print(f"podman:     {version.stdout.strip()}")
-        rootless = subprocess.run(
-            [podman, "info", "--format", "{{.Host.Security.Rootless}}"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if rootless.returncode or rootless.stdout.strip() != "true":
-            problems.append("rootless Podman is not active")
-        else:
-            print("rootless:   yes")
+        try:
+            version = subprocess.run(
+                [podman, "version", "--format", "{{.Client.Version}}"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=_PODMAN_PROBE_TIMEOUT,
+            )
+            if version.returncode:
+                problems.append(version.stderr.strip() or "podman version failed")
+            else:
+                print(f"podman:     {version.stdout.strip()}")
+        except subprocess.TimeoutExpired:
+            problems.append(f"podman version timed out after {_PODMAN_PROBE_TIMEOUT}s")
+        try:
+            rootless = subprocess.run(
+                [podman, "info", "--format", "{{.Host.Security.Rootless}}"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=_PODMAN_PROBE_TIMEOUT,
+            )
+            if rootless.returncode or rootless.stdout.strip() != "true":
+                problems.append("rootless Podman is not active")
+            else:
+                print("rootless:   yes")
+        except subprocess.TimeoutExpired:
+            problems.append(f"podman info timed out after {_PODMAN_PROBE_TIMEOUT}s")
         lock = load_container_lock()
         image = container_image_reference(lock)
         state = "ready" if image_ready(podman, image) else "not built or stale"
@@ -344,16 +383,26 @@ def doctor() -> None:
 
 
 def check_git_diff(reporter: RunReporter) -> None:
-    head = subprocess.run(
-        ["git", "rev-parse", "--verify", "HEAD"],
-        cwd=ROOT,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
+    try:
+        head = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD"],
+            cwd=ROOT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=_CHECK_GIT_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise SystemExit(
+            f"check failed: Git HEAD lookup timed out after {_CHECK_GIT_TIMEOUT}s"
+        ) from error
     if head.returncode == 0:
         with reporter.stage("git-diff") as stage:
-            stage.run(["git", "diff", "--check", "HEAD", "--"], cwd=ROOT)
+            stage.run(
+                ["git", "diff", "--check", "HEAD", "--"],
+                cwd=ROOT,
+                timeout=_CHECK_GIT_TIMEOUT,
+            )
 
 
 def check_commit_message(message_file: str) -> None:
@@ -373,34 +422,38 @@ def check_commit_message(message_file: str) -> None:
     image_identity = image_identifier(podman, image)
     if image_identity is None:
         fail("commit hook requires an immutable current build image")
-    result = subprocess.run(
-        [
-            podman,
-            "run",
-            "--rm",
-            "--platform",
-            lock["platform"],
-            "--userns=keep-id",
-            "--network=none",
-            "--read-only",
-            "--tmpfs",
-            "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs.
-            "--volume",
-            f"{config}:/workspace/commitlint.config.mjs:ro,Z",
-            "--volume",
-            f"{message.resolve()}:/message:ro,Z",
-            "--env",
-            "HOME=/tmp",
-            "--workdir",
-            "/workspace",
-            image_identity,
-            "sh",
-            "-c",
-            "commitlint < /message",
-        ],
-        cwd=ROOT,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            [
+                podman,
+                "run",
+                "--rm",
+                "--platform",
+                lock["platform"],
+                "--userns=keep-id",
+                "--network=none",
+                "--read-only",
+                "--tmpfs",
+                "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs.
+                "--volume",
+                f"{config}:/workspace/commitlint.config.mjs:ro,Z",
+                "--volume",
+                f"{message.resolve()}:/message:ro,Z",
+                "--env",
+                "HOME=/tmp",
+                "--workdir",
+                "/workspace",
+                image_identity,
+                "sh",
+                "-c",
+                "commitlint < /message",
+            ],
+            cwd=ROOT,
+            check=False,
+            timeout=_COMMIT_MESSAGE_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        fail(f"commit message validation timed out after {_COMMIT_MESSAGE_TIMEOUT}s")
     if result.returncode:
         raise SystemExit(result.returncode)
 
@@ -779,7 +832,8 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
                     "python3",
                     "/workspace/scripts/check.py",
                     *source_scopes,
-                ]
+                ],
+                timeout=_SOURCE_CHECK_TIMEOUT,
             )
         for scope in source_scopes:
             publish_success_receipt(cache, recipes[scope])
@@ -833,7 +887,8 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
                 *analyzer_program,
                 "prepare",
                 *([] if profile is None else ["--profile", profile]),
-            ]
+            ],
+            timeout=_KERNEL_PREPARE_TIMEOUT,
         )
     with reporter.stage("kernel-analysis", passthrough=True, show_tail=False) as stage:
         stage.run(
@@ -847,7 +902,8 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
                 *analyzer_program,
                 "check",
                 *([] if profile is None else ["--profile", profile]),
-            ]
+            ],
+            timeout=_KERNEL_ANALYSIS_TIMEOUT,
         )
     publish_success_receipt(cache, recipes["kernel"])
 

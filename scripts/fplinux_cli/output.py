@@ -15,6 +15,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import traceback as traceback_module
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -467,6 +468,7 @@ class Stage:
         *,
         cwd: Path | None = None,
         env: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> None:
         """Run a command, logging both streams and optionally teeing them."""
         result = self._run(
@@ -474,6 +476,7 @@ class Stage:
             cwd=cwd,
             env=env,
             capture=False,
+            timeout=timeout,
         )
         if result.returncode:
             if result.returncode < 0:
@@ -486,6 +489,7 @@ class Stage:
         *,
         cwd: Path | None = None,
         env: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> subprocess.CompletedProcess[bytes]:
         """Run a command while retaining its separate stdout and stderr."""
         return self._run(
@@ -493,6 +497,7 @@ class Stage:
             cwd=cwd,
             env=env,
             capture=True,
+            timeout=timeout,
         )
 
     def _run(
@@ -502,9 +507,15 @@ class Stage:
         cwd: Path | None,
         env: dict[str, str] | None,
         capture: bool,
+        timeout: float | None,
     ) -> subprocess.CompletedProcess[bytes]:
+        if timeout is not None and timeout <= 0:
+            message = "stage command timeout must be positive"
+            raise ValueError(message)
         display = [display_text(argument) for argument in command]
+        timeout_seconds = timeout if timeout is not None else 0.0
         self.write(("+ " + shlex.join(display) + "\n").encode())
+        deadline = None if timeout is None else time.monotonic() + timeout
         selector = selectors.DefaultSelector()
         termination_signals = (
             signal.SIGINT,
@@ -519,6 +530,20 @@ class Stage:
         process: subprocess.Popen[bytes] | None = None
         stdout = bytearray()
         stderr = bytearray()
+
+        def expire() -> NoReturn:
+            self.write(
+                (
+                    "fplinux: command timed out after "
+                    f"{timeout_seconds:g}s: {shlex.join(display)}\n"
+                ).encode()
+            )
+            raise subprocess.TimeoutExpired(
+                command,
+                timeout_seconds,
+                output=bytes(stdout),
+                stderr=bytes(stderr),
+            )
 
         def forward_termination(signum: int, _frame: object) -> None:
             nonlocal forwarded_signal
@@ -562,7 +587,15 @@ class Stage:
             selector.register(process_stdout, selectors.EVENT_READ, (sys.stdout, stdout))
             selector.register(process_stderr, selectors.EVENT_READ, (sys.stderr, stderr))
             while selector.get_map():
-                for key, _events in selector.select():
+                select_timeout: float | None = None
+                if deadline is not None:
+                    select_timeout = deadline - time.monotonic()
+                    if select_timeout <= 0:
+                        expire()
+                events = selector.select(select_timeout)
+                if not events and deadline is not None:
+                    expire()
+                for key, _events in events:
                     chunk = os.read(key.fd, 64 * 1024)
                     if not chunk:
                         selector.unregister(key.fileobj)
@@ -573,7 +606,16 @@ class Stage:
                         captured.extend(chunk)
                     if self.reporter.verbose or self.passthrough:
                         _write_terminal(terminal, chunk)
-            returncode = process.wait()
+            if deadline is None:
+                returncode = process.wait()
+            else:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    expire()
+                try:
+                    returncode = process.wait(timeout=remaining)
+                except subprocess.TimeoutExpired:
+                    expire()
         except BaseException:
             if process is not None:
                 with suppress(ProcessLookupError):

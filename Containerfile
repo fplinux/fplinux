@@ -54,6 +54,7 @@ RUN set -eux; \
         sed=4.9-r2 \
         tar=1.35-r5 \
         unzip=6.0-r16 \
+        u-boot-tools=2026.04-r1 \
         wget=1.25.0-r3 \
         which=2.23-r0 \
         xz=5.8.3-r0 \

@@ -5,12 +5,15 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tomllib
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -45,6 +48,8 @@ from .output import RunReporter, current_stage, exit_status, run_entrypoint
 
 if TYPE_CHECKING:
     from .linux_state import PreparedLinuxState
+
+_KERNEL_CAPTURE_TIMEOUT = 30 * 60
 
 
 def load_sources() -> dict[str, Any]:
@@ -170,11 +175,32 @@ def capture_text(command: list[str]) -> subprocess.CompletedProcess[str]:
     stage = current_stage()
     if stage is None:
         print("+", shlex.join(command), flush=True)
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
-        print(result.stdout, end="")
-        print(result.stderr, end="", file=sys.stderr)
-        return result
-    captured = stage.capture(command)
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            stdout, stderr = process.communicate(timeout=_KERNEL_CAPTURE_TIMEOUT)
+        except subprocess.TimeoutExpired as error:
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            process.communicate()
+            raise SystemExit(
+                f"sparse failed: command timed out after {_KERNEL_CAPTURE_TIMEOUT}s: "
+                f"{shlex.join(command)}"
+            ) from error
+        except BaseException:
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            process.communicate()
+            raise
+        print(stdout, end="")
+        print(stderr, end="", file=sys.stderr)
+        return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+    captured = stage.capture(command, timeout=_KERNEL_CAPTURE_TIMEOUT)
     return subprocess.CompletedProcess(
         captured.args,
         captured.returncode,
