@@ -50,6 +50,18 @@ source = "platforms/ums9117/kernel/ums9117-adi.h"
 destination = "include/linux/soc/sprd/ums9117-adi.h"
 
 [[linux.copies]]
+source = "platforms/ums9117/common/ums9117-sdio-regs.h"
+destination = "drivers/mmc/host/ums9117-sdio-regs.h"
+
+[[linux.copies]]
+source = "platforms/ums9117/common/ums9117-sdio-core.h"
+destination = "drivers/mmc/host/ums9117-sdio-core.h"
+
+[[linux.copies]]
+source = "platforms/ums9117/common/ums9117-sdio-core.c"
+destination = "drivers/mmc/host/ums9117-sdio-core.c"
+
+[[linux.copies]]
 source = "platforms/ums9117/kernel/ums9117-musb.c"
 destination = "drivers/usb/musb/ums9117.c"
 
