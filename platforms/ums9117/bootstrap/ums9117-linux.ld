@@ -3,8 +3,7 @@
 OUTPUT_FORMAT("elf32-littlearm")
 OUTPUT_ARCH(arm)
 
-EXTRA_START = 0x80000000; EXTRA_SIZE = 0x100000;
-IMAGE_START = 0x80100000; IMAGE_SIZE = 0x01f00000;
+INCLUDE generated/fplinux-bootstrap-memory.ld
 
 ENTRY(_start)
 SECTIONS {

@@ -22,6 +22,8 @@ from .identity_codegen import validate_record_prefix
 TARGET_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
 VALUE_NAME = re.compile(r"[A-Za-z0-9._-]+")
 KCONFIG_SYMBOL = re.compile(r"CONFIG_[A-Z0-9_]+")
+GIT_COMMIT = re.compile(r"[0-9a-f]{40}")
+UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
 def exact_table(value: object, keys: set[str], name: str) -> dict[str, Any]:
@@ -41,6 +43,14 @@ def nonempty_string(value: object, name: str) -> str:
 def relative_value(value: object, name: str) -> str:
     """Require a normalized relative path."""
     return relative_name(value, field=name)
+
+
+def basename_value(value: object, name: str) -> str:
+    """Require one normalized relative filename without directories."""
+    result = relative_value(value, name)
+    if Path(result).name != result:
+        fail(f"{name} must be a filename without directories")
+    return result
 
 
 def string_array(value: object, name: str, *, allow_empty: bool = False) -> list[str]:
@@ -300,6 +310,23 @@ def profile_source_path(target: str, profile: str, relative: str) -> Path:
     return path
 
 
+def profile_source_directory_path(target: str, profile: str, relative: str) -> Path:
+    """Resolve one complete profile-owned source directory without symlinks."""
+    source = relative_value(relative, "profile source directory")
+    root = profile_directory(target, profile)
+    path = root
+    for part in Path(source).parts:
+        path /= part
+        if path.is_symlink():
+            fail(f"profile source directory must not contain a symlink: {path}")
+    if not path.is_dir():
+        fail(f"profile source directory is missing or invalid: {path}")
+    for child in path.rglob("*"):
+        if child.is_symlink():
+            fail(f"profile source directory must not contain a symlink: {child}")
+    return path
+
+
 def discover_profiles(target: str) -> tuple[str, ...]:
     """Discover only complete, non-symlinked profile definitions for one target."""
     root = profiles_directory(target)
@@ -350,7 +377,358 @@ def _reject_duplicate_steps(steps: list[dict[str, str]], name: str) -> None:
         fail(f"{name} must not contain duplicate operations")
 
 
-def load_profile(target: str, profile: str) -> dict[str, Any]:
+def _profile_linux_root(value: object, name: str) -> dict[str, Any]:
+    """Validate the root filesystem contract consumed by one profile kernel."""
+    if not isinstance(value, dict):
+        fail(f"{name} must be a table")
+    kind = value.get("kind")
+    if kind == "initramfs":
+        exact_table(value, {"kind"}, name)
+        return {"kind": "initramfs"}
+    if kind != "external":
+        fail(f"{name} kind must be initramfs or external")
+    root = exact_table(value, {"kind", "filesystem", "wait_seconds"}, name)
+    if root.get("filesystem") != "ext4":
+        fail(f"{name} filesystem must be ext4")
+    wait_seconds = integer_value(
+        root.get("wait_seconds"),
+        f"{name} wait_seconds",
+        bounds=(1, 60),
+    )
+    return {
+        "kind": "external",
+        "filesystem": "ext4",
+        "wait_seconds": wait_seconds,
+    }
+
+
+def _profile_bootstrap(target: str, profile: str, value: object, name: str) -> dict[str, str]:
+    """Validate the selected resident bootstrap implementation."""
+    if not isinstance(value, dict):
+        fail(f"{name} must be a table")
+    kind = value.get("kind")
+    if kind == "linux":
+        exact_table(value, {"kind"}, name)
+        return {"kind": "linux"}
+    if kind != "uboot-stage0":
+        fail(f"{name} kind must be linux or uboot-stage0")
+    bootstrap = exact_table(value, {"kind", "source", "image", "map"}, name)
+    source = relative_value(bootstrap.get("source"), f"{name} source")
+    profile_source_directory_path(target, profile, source)
+    return {
+        "kind": "uboot-stage0",
+        "source": source,
+        "image": relative_value(bootstrap.get("image"), f"{name} image"),
+        "map": relative_value(bootstrap.get("map"), f"{name} map"),
+    }
+
+
+def _profile_uboot_lock(target: str, profile: str, relative: str) -> dict[str, str]:
+    """Load one profile-owned immutable U-Boot source lock."""
+    path = profile_source_path(target, profile, relative)
+    try:
+        with path.open("rb") as stream:
+            raw = tomllib.load(stream)
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        fail(f"profile {profile} U-Boot lock is invalid: {path}: {error}")
+    lock = exact_table(
+        raw,
+        {
+            "version",
+            "repository",
+            "tag",
+            "commit",
+            "archive_url",
+            "archive_sha256",
+            "license",
+        },
+        f"profile {profile} U-Boot lock",
+    )
+    normalized: dict[str, Any] = {
+        key: nonempty_string(lock.get(key), f"profile {profile} U-Boot lock {key}") for key in lock
+    }
+    if re.fullmatch(r"[0-9]{4}\.[0-9]{2}", normalized["version"]) is None:
+        fail(f"profile {profile} U-Boot version must use YYYY.MM syntax")
+    if not normalized["repository"].startswith("https://"):
+        fail(f"profile {profile} U-Boot repository must use HTTPS")
+    if not normalized["archive_url"].startswith("https://"):
+        fail(f"profile {profile} U-Boot archive_url must use HTTPS")
+    if GIT_COMMIT.fullmatch(normalized["commit"]) is None:
+        fail(f"profile {profile} U-Boot commit must be 40 lowercase hex digits")
+    _sha256(normalized["archive_sha256"], f"profile {profile} U-Boot archive")
+    if normalized["tag"] != f"v{normalized['version']}":
+        fail(f"profile {profile} U-Boot tag must match its version")
+    return normalized
+
+
+def _profile_uboot(target: str, profile: str, value: object, name: str) -> dict[str, Any]:
+    """Validate the U-Boot capability actually implemented by the build."""
+    if not isinstance(value, dict):
+        fail(f"{name} must be a table")
+    kind = value.get("kind")
+    if kind == "none":
+        exact_table(value, {"kind"}, name)
+        return {"kind": "none"}
+    if kind != "full":
+        fail(f"{name} kind must be none or full")
+    uboot = exact_table(
+        value,
+        {"kind", "source", "archive_prefix", "defconfig", "patches", "copies"},
+        name,
+    )
+    source = relative_value(uboot.get("source"), f"{name} source")
+    archive_prefix = relative_value(uboot.get("archive_prefix"), f"{name} archive_prefix")
+    defconfig = relative_value(uboot.get("defconfig"), f"{name} defconfig")
+    patches = path_array(uboot.get("patches"), f"{name} patches", allow_empty=True)
+    copies = path_steps(uboot.get("copies"), f"{name} copies")
+    profile_source_path(target, profile, defconfig)
+    for relative in patches:
+        profile_source_path(target, profile, relative)
+    for step in copies:
+        copy_source = ROOT / step["source"]
+        if copy_source.is_symlink() or not copy_source.is_file():
+            fail(f"{name} copy source is missing or invalid: {copy_source}")
+    normalized: dict[str, Any] = {
+        "kind": "full",
+        "source": source,
+        "archive_prefix": archive_prefix,
+        "lock": _profile_uboot_lock(target, profile, source),
+        "defconfig": defconfig,
+        "patches": patches,
+        "copies": copies,
+    }
+    return normalized
+
+
+def _profile_layout(value: object, name: str, platform_layout: dict[str, int]) -> dict[str, int]:
+    """Merge and validate one profile delta over the platform boot layout."""
+    fields = {
+        "resident_start",
+        "resident_limit",
+        "uboot_load",
+        "uboot_size",
+        "uboot_stack",
+        "fit_load",
+        "fit_size",
+        "fdt_pad",
+    }
+    layout = exact_table(value, fields, name)
+    normalized = {
+        **platform_layout,
+        **{
+            field: integer_value(
+                layout.get(field),
+                f"{name} {field}",
+                bounds=(0, 0xFFFFFFFF),
+                alignment=0x1000,
+            )
+            for field in fields
+        },
+    }
+    ram_end = normalized["ram_base"] + normalized["ram_size"]
+    kernel_end = normalized["kernel_load"] + normalized["kernel_size"]
+    fit_end = normalized["fit_load"] + normalized["fit_size"]
+    fdt_end = normalized["fdt_load"] + normalized["fdt_size"]
+    framebuffer_end = normalized["framebuffer"] + normalized["framebuffer_size"]
+    if ram_end > 0x100000000:
+        fail(f"{name} RAM range exceeds the 32-bit address space")
+    if not (
+        normalized["ram_base"]
+        <= normalized["resident_start"]
+        < normalized["uboot_stack"]
+        < normalized["resident_limit"]
+        == normalized["uboot_load"]
+    ):
+        fail(f"{name} resident stage, stack and U-Boot load are inconsistent")
+    if normalized["uboot_load"] + normalized["uboot_size"] > normalized["kernel_load"]:
+        fail(f"{name} U-Boot binary arena overlaps the kernel arena")
+    if not (
+        normalized["kernel_load"]
+        <= normalized["kernel_entry"]
+        < kernel_end
+        == normalized["fit_load"]
+    ):
+        fail(f"{name} kernel entry or FIT boundary is inconsistent")
+    if fit_end != normalized["fdt_load"]:
+        fail(f"{name} FIT arena must end at the fixed DTB address")
+    if normalized["fdt_pad"] >= normalized["fdt_size"]:
+        fail(f"{name} U-Boot FDT padding must fit inside the DTB arena")
+    if fdt_end > normalized["framebuffer"]:
+        fail(f"{name} DTB arena overlaps the framebuffer")
+    if framebuffer_end != ram_end:
+        fail(f"{name} framebuffer must end at the RAM boundary")
+    return normalized
+
+
+def _platform_boot_layout(value: object, name: str) -> dict[str, int]:
+    """Validate the volatile Linux handoff layout shared by one platform."""
+    fields = {
+        "ram_base",
+        "ram_size",
+        "timer_hz",
+        "kernel_load",
+        "kernel_entry",
+        "kernel_size",
+        "fdt_load",
+        "fdt_size",
+        "framebuffer",
+        "framebuffer_size",
+    }
+    layout = exact_table(value, fields, name)
+    normalized = {
+        field: integer_value(
+            layout.get(field),
+            f"{name} {field}",
+            bounds=(0, 0xFFFFFFFF),
+            alignment=1 if field == "timer_hz" else (4 if field == "kernel_entry" else 0x1000),
+        )
+        for field in fields
+    }
+    ram_end = normalized["ram_base"] + normalized["ram_size"]
+    kernel_end = normalized["kernel_load"] + normalized["kernel_size"]
+    fdt_end = normalized["fdt_load"] + normalized["fdt_size"]
+    framebuffer_end = normalized["framebuffer"] + normalized["framebuffer_size"]
+    if ram_end > 0x100000000:
+        fail(f"{name} RAM range exceeds the 32-bit address space")
+    if not 1 <= normalized["timer_hz"] <= 1000000:
+        fail(f"{name} timer_hz is outside the supported range")
+    if not (
+        normalized["kernel_load"]
+        <= normalized["kernel_entry"]
+        < kernel_end
+        <= normalized["fdt_load"]
+    ):
+        fail(f"{name} kernel entry or DTB boundary is inconsistent")
+    if fdt_end > normalized["framebuffer"] or framebuffer_end != ram_end:
+        fail(f"{name} DTB/framebuffer ranges are inconsistent")
+    return normalized
+
+
+def _profile_fit(value: object, name: str, layout: dict[str, int] | None) -> dict[str, Any]:
+    """Validate one native FIT image contract."""
+    if not isinstance(value, dict):
+        fail(f"{name} must be a table")
+    kind = value.get("kind")
+    if kind == "none":
+        exact_table(value, {"kind"}, name)
+        return {"kind": "none"}
+    if kind != "sha256":
+        fail(f"{name} kind must be none or sha256")
+    if layout is None:
+        fail(f"{name} SHA-256 FIT requires a boot layout")
+    fit = exact_table(
+        value,
+        {"kind", "filename"},
+        name,
+    )
+    return {
+        "kind": "sha256",
+        "filename": basename_value(fit.get("filename"), f"{name} filename"),
+        "kernel_load": layout["kernel_load"],
+        "kernel_entry": layout["kernel_entry"],
+        "fdt_load": layout["fdt_load"],
+    }
+
+
+def _profile_storage(value: object, name: str) -> dict[str, Any]:
+    """Validate one fixed MBR/FAT/ext4 removable-media layout."""
+    storage = exact_table(
+        value,
+        {
+            "filename",
+            "disk_signature",
+            "boot_partition",
+            "boot_offset",
+            "boot_size",
+            "boot_label",
+            "root_partition",
+            "root_offset",
+            "root_size",
+            "root_filename",
+            "root_label",
+            "root_uuid",
+            "block_size",
+            "inode_size",
+        },
+        name,
+    )
+    disk_signature = integer_value(
+        storage.get("disk_signature"), f"{name} disk_signature", bounds=(1, 0xFFFFFFFF)
+    )
+    boot_partition = integer_value(
+        storage.get("boot_partition"), f"{name} boot_partition", bounds=(1, 4)
+    )
+    root_partition = integer_value(
+        storage.get("root_partition"), f"{name} root_partition", bounds=(1, 4)
+    )
+    if (boot_partition, root_partition) != (1, 2):
+        fail(f"{name} must use boot partition 1 followed by root partition 2")
+    boot_offset = integer_value(
+        storage.get("boot_offset"),
+        f"{name} boot_offset",
+        bounds=(1024 * 1024, 0xFFFFFFFF),
+        alignment=1024 * 1024,
+    )
+    boot_size = integer_value(
+        storage.get("boot_size"),
+        f"{name} boot_size",
+        bounds=(16 * 1024 * 1024, 4 * 1024 * 1024 * 1024),
+        alignment=1024 * 1024,
+    )
+    root_offset = integer_value(
+        storage.get("root_offset"),
+        f"{name} root_offset",
+        bounds=(1024 * 1024, 0xFFFFFFFF),
+        alignment=1024 * 1024,
+    )
+    if root_offset != boot_offset + boot_size:
+        fail(f"{name} root partition must immediately follow the boot partition")
+    root_size = integer_value(
+        storage.get("root_size"),
+        f"{name} root_size",
+        bounds=(16 * 1024 * 1024, 4 * 1024 * 1024 * 1024),
+        alignment=1024 * 1024,
+    )
+    if root_offset + root_size > 0x100000000:
+        fail(f"{name} image exceeds the 32-bit MBR addressable range")
+    boot_label = nonempty_string(storage.get("boot_label"), f"{name} boot_label")
+    if len(boot_label) > 11 or not boot_label.isascii():
+        fail(f"{name} boot_label must be at most 11 ASCII characters")
+    root_label = nonempty_string(storage.get("root_label"), f"{name} root_label")
+    if len(root_label) > 16 or not root_label.isascii():
+        fail(f"{name} root_label must be at most 16 ASCII characters")
+    filesystem_uuid = nonempty_string(storage.get("root_uuid"), f"{name} root_uuid")
+    if UUID.fullmatch(filesystem_uuid) is None:
+        fail(f"{name} root_uuid must use canonical lowercase UUID syntax")
+    block_size = integer_value(
+        storage.get("block_size"), f"{name} block_size", bounds=(1024, 4096)
+    )
+    if block_size not in {1024, 2048, 4096}:
+        fail(f"{name} block_size must be 1024, 2048 or 4096")
+    inode_size = integer_value(storage.get("inode_size"), f"{name} inode_size", bounds=(128, 512))
+    if inode_size not in {128, 256, 512}:
+        fail(f"{name} inode_size must be 128, 256 or 512")
+    partuuid = f"{disk_signature:08x}-{root_partition:02x}"
+    return {
+        "filename": basename_value(storage.get("filename"), f"{name} filename"),
+        "disk_signature": disk_signature,
+        "boot_partition": boot_partition,
+        "boot_offset": boot_offset,
+        "boot_size": boot_size,
+        "boot_label": boot_label,
+        "root_partition": root_partition,
+        "root_offset": root_offset,
+        "root_size": root_size,
+        "root_filename": basename_value(storage.get("root_filename"), f"{name} root_filename"),
+        "root_label": root_label,
+        "root_uuid": filesystem_uuid,
+        "partuuid": partuuid,
+        "block_size": block_size,
+        "inode_size": inode_size,
+    }
+
+
+def load_profile(target: str, profile: str, platform_layout: dict[str, int]) -> dict[str, Any]:
     """Load one exact target-owned build profile without applying it."""
     path = profile_manifest_path(target, profile)
     try:
@@ -358,13 +736,32 @@ def load_profile(target: str, profile: str) -> dict[str, Any]:
             raw = tomllib.load(stream)
     except (OSError, tomllib.TOMLDecodeError) as error:
         fail(f"profile manifest is invalid: {path}: {error}")
-    config = exact_table(raw, {"name", "linux", "rootfs", "runtime"}, f"profile {profile}")
+    required_fields = {
+        "name",
+        "linux",
+        "rootfs",
+        "bootstrap",
+        "uboot",
+        "fit",
+        "runtime",
+    }
+    optional_fields = {"layout", "storage"}
+    if (
+        not isinstance(raw, dict)
+        or not required_fields.issubset(raw)
+        or set(raw) - required_fields - optional_fields
+    ):
+        fail(
+            f"profile {profile} must contain exactly the required profile tables "
+            "and optional layout/storage"
+        )
+    config = raw
     if config.get("name") != profile:
         fail(f"profile name does not match its directory: {path}")
 
     linux = exact_table(
         config.get("linux"),
-        {"config_enable", "config_disable", "patches", "copies", "appends"},
+        {"config_enable", "config_disable", "patches", "copies", "appends", "root"},
         f"profile {profile} linux",
     )
     config_enable = kconfig_symbol_array(
@@ -379,6 +776,17 @@ def load_profile(target: str, profile: str) -> dict[str, Any]:
             f"profile {profile} linux config_enable/config_disable conflict: "
             + ", ".join(sorted(overlap))
         )
+    root = _profile_linux_root(linux.get("root"), f"profile {profile} linux root")
+    root_owned_symbols = {"CONFIG_BLK_DEV_INITRD", "CONFIG_EXT4_FS"}
+    duplicated_root_symbols = root_owned_symbols & (set(config_enable) | set(config_disable))
+    if duplicated_root_symbols:
+        fail(
+            f"profile {profile} linux root owns its Kconfig symbols: "
+            + ", ".join(sorted(duplicated_root_symbols))
+        )
+    if root["kind"] == "external":
+        config_enable.append("CONFIG_EXT4_FS")
+        config_disable.append("CONFIG_BLK_DEV_INITRD")
     patches = path_array(
         linux.get("patches"), f"profile {profile} linux patches", allow_empty=True
     )
@@ -395,6 +803,7 @@ def load_profile(target: str, profile: str) -> dict[str, Any]:
         "patches": patches,
         "copies": copies,
         "appends": appends,
+        "root": root,
     }
     _profile_linux_sources(target, profile, normalized_linux)
 
@@ -414,16 +823,75 @@ def load_profile(target: str, profile: str) -> dict[str, Any]:
             + ", ".join(sorted(package_overlap))
         )
 
-    runtime = exact_table(config.get("runtime"), {"transport"}, f"profile {profile} runtime")
+    runtime = exact_table(
+        config.get("runtime"),
+        {"transport", "runnable"},
+        f"profile {profile} runtime",
+    )
     transport = runtime.get("transport")
     if transport not in {"usb-ncm", "none"}:
         fail(f"profile {profile} runtime transport must be usb-ncm or none")
+    runnable = runtime.get("runnable")
+    if type(runnable) is not bool:
+        fail(f"profile {profile} runtime runnable must be a boolean")
+    bootstrap = _profile_bootstrap(
+        target, profile, config.get("bootstrap"), f"profile {profile} bootstrap"
+    )
+    uboot = _profile_uboot(target, profile, config.get("uboot"), f"profile {profile} uboot")
+    layout = (
+        _profile_layout(config.get("layout"), f"profile {profile} layout", platform_layout)
+        if "layout" in config
+        else None
+    )
+    fit = _profile_fit(config.get("fit"), f"profile {profile} fit", layout)
+    storage = (
+        _profile_storage(config.get("storage"), f"profile {profile} storage")
+        if "storage" in config
+        else None
+    )
+    image = (
+        {
+            "kind": "ext4-root",
+            "filename": storage["root_filename"],
+            "partuuid": storage["partuuid"],
+            "label": storage["root_label"],
+            "uuid": storage["root_uuid"],
+            "size": storage["root_size"],
+            "block_size": storage["block_size"],
+            "inode_size": storage["inode_size"],
+        }
+        if storage is not None
+        else {"kind": "none"}
+    )
+    if fit["kind"] == "sha256" and uboot["kind"] != "full":
+        fail(f"profile {profile} SHA-256 FIT requires full U-Boot")
+    if uboot["kind"] == "full" and fit["kind"] != "sha256":
+        fail(f"profile {profile} full U-Boot requires a SHA-256 FIT")
+    if (bootstrap["kind"] == "uboot-stage0") != (uboot["kind"] == "full"):
+        fail(f"profile {profile} resident U-Boot stage requires full U-Boot")
+    if root["kind"] == "external":
+        if layout is None or storage is None:
+            fail(f"profile {profile} external root requires layout and storage")
+        if image["kind"] != "ext4-root":
+            fail(f"profile {profile} external root requires an ext4-root image")
+        normalized_linux["root"] = {**root, "partuuid": image["partuuid"]}
+    elif layout is not None or storage is not None:
+        fail(f"profile {profile} layout/storage requires an external root")
 
     return {
         "name": profile,
         "linux": normalized_linux,
         "rootfs": {"packages": packages, "exclude_packages": exclude_packages},
-        "runtime": {"transport": transport},
+        "bootstrap": bootstrap,
+        "uboot": uboot,
+        "fit": fit,
+        "layout": layout,
+        "storage": storage,
+        "image": image,
+        "runtime": {
+            "transport": transport,
+            "runnable": runnable,
+        },
     }
 
 
@@ -545,11 +1013,11 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
     for key in ("session_name", "boot_instructions"):
         nonempty_string(adapter.get(key), f"target adapter {key}")
 
+    platform = load_platform(str(config["platform"]))
     selected_profile: dict[str, Any] | None = None
     if profile is not None:
-        selected_profile = load_profile(target, profile)
+        selected_profile = load_profile(target, profile, platform["bootstrap"]["layout"])
 
-    platform = load_platform(str(config["platform"]))
     if identity["compatible"] == platform["identity"]["compatible"]:
         fail("target and platform compatibles must be distinct")
     if selected_profile is not None:
@@ -563,6 +1031,7 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
             "patches": [],
             "copies": [],
             "appends": [],
+            "root": {"kind": "initramfs"},
         }
     )
     copied_destinations = {
@@ -591,6 +1060,7 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
             *linux["appends"],
             *_profile_steps(str(profile), profile_linux["appends"]),
         ],
+        "root": profile_linux["root"],
     }
     config["rootfs"] = (
         selected_profile["rootfs"]
@@ -600,27 +1070,72 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
     config["profile"] = profile
     platform_bootstrap = platform["bootstrap"]
     platform_runtime = platform["runtime"]
+    profile_bootstrap = selected_profile["bootstrap"] if selected_profile is not None else None
+    bootstrap_kind = profile_bootstrap["kind"] if profile_bootstrap is not None else "linux"
+    profile_layout = selected_profile["layout"] if selected_profile is not None else None
+    stage0_layout = profile_layout if isinstance(profile_layout, dict) else None
+    if bootstrap_kind == "uboot-stage0":
+        if stage0_layout is None:
+            fail(f"profile {profile} resident U-Boot stage has no layout")
+        if stage0_layout["resident_start"] != platform_bootstrap["load_address"]:
+            fail(f"profile {profile} resident stage must start at the platform load address")
     config["bootstrap"] = {
-        "source": "bootstrap",
-        "image": bootstrap["image"],
-        "map": bootstrap["map"],
+        "kind": bootstrap_kind,
+        "source": (
+            _profile_relative_source(str(profile), profile_bootstrap["source"])
+            if profile_bootstrap is not None and bootstrap_kind == "uboot-stage0"
+            else "bootstrap"
+        ),
+        "image": (
+            profile_bootstrap["image"]
+            if profile_bootstrap is not None and bootstrap_kind == "uboot-stage0"
+            else bootstrap["image"]
+        ),
+        "map": (
+            profile_bootstrap["map"]
+            if profile_bootstrap is not None and bootstrap_kind == "uboot-stage0"
+            else bootstrap["map"]
+        ),
         "record_prefix": record_prefix,
         "kernel_destination": platform_bootstrap["kernel_destination"],
         "dtb_destination": bootstrap["dtb_destination"],
-        "load_address": platform_bootstrap["load_address"],
-        "payload_limit": platform_bootstrap["payload_limit"],
+        "load_address": (
+            stage0_layout["resident_start"]
+            if stage0_layout is not None
+            else platform_bootstrap["load_address"]
+        ),
+        "payload_limit": (
+            stage0_layout["resident_limit"]
+            if stage0_layout is not None
+            else platform_bootstrap["payload_limit"]
+        ),
         "toolchain": platform_bootstrap["toolchain"],
         "lto": platform_bootstrap["lto"],
     }
+    config["uboot"] = (
+        selected_profile["uboot"] if selected_profile is not None else {"kind": "none"}
+    )
+    config["fit"] = selected_profile["fit"] if selected_profile is not None else {"kind": "none"}
+    config["layout"] = selected_profile["layout"] if selected_profile is not None else None
+    config["storage"] = selected_profile["storage"] if selected_profile is not None else None
+    config["image"] = (
+        selected_profile["image"] if selected_profile is not None else {"kind": "none"}
+    )
     transport = "usb-ncm"
     if selected_profile is not None:
         transport = selected_profile["runtime"]["transport"]
     config["runtime"] = {
         "fdl1_load_address": platform_runtime["fdl1_load_address"],
         "assets": asset_bundle_paths(target_asset_lock_path(target)),
-        "adapter": {**platform_runtime["adapter"], **adapter},
+        "adapter": {
+            **platform_runtime["adapter"],
+            **adapter,
+        },
         "usb": platform_runtime["usb"],
         "transport": transport,
+        "runnable": (
+            selected_profile["runtime"]["runnable"] if selected_profile is not None else True
+        ),
     }
     return config
 
@@ -787,6 +1302,7 @@ def load_platform(platform: str) -> dict[str, Any]:
             "kernel_destination",
             "load_address",
             "payload_limit",
+            "layout",
             "toolchain",
             "lto",
         },
@@ -811,6 +1327,9 @@ def load_platform(platform: str) -> dict[str, Any]:
         "platform bootstrap payload_limit",
         bounds=(1, 0x100000000),
         alignment=4,
+    )
+    bootstrap["layout"] = _platform_boot_layout(
+        bootstrap.get("layout"), "platform bootstrap layout"
     )
     nonempty_string(bootstrap.get("toolchain"), "platform bootstrap toolchain")
     integer_value(bootstrap.get("lto"), "platform bootstrap lto", bounds=(0, 1))

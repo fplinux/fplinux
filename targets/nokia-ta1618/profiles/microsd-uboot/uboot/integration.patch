@@ -1,0 +1,50 @@
+From: FPLinux contributors <fplinux@example.invalid>
+Subject: [PATCH] arm: add the FPLinux TA-1618 RAM second stage
+
+Register the FPLinux board and its control device tree. DRAM is already
+initialized by the USB/FDL path; the board reads only the removable boot card.
+
+Signed-off-by: FPLinux contributors <fplinux@example.invalid>
+---
+diff --git a/arch/arm/Kconfig b/arch/arm/Kconfig
+--- a/arch/arm/Kconfig
++++ b/arch/arm/Kconfig
+@@ -718,6 +718,17 @@ config TARGET_VEXPRESS_CA9X4
+ 	select CPU_V7A
+ 	select PL01X_SERIAL
+
++config TARGET_FPLINUX_TA1618
++	bool "Support FPLinux Nokia TA-1618 RAM second stage"
++	select CPU_V7A
++	select DM
++	select DM_SERIAL
++	select OF_CONTROL
++	select SKIP_LOWLEVEL_INIT_ONLY
++	select TIMER
++	select TIMER_EARLY
++	select HAS_CUSTOM_SYS_INIT_SP_ADDR
++
+ config TARGET_BCMNS
+ 	bool "Support Broadcom Northstar"
+ 	select CPU_V7A
+@@ -2422,6 +2433,7 @@
+ source "board/Marvell/octeontx2/Kconfig"
+ source "board/armltd/vexpress/Kconfig"
+ source "board/armltd/vexpress64/Kconfig"
++source "board/fplinux/ta1618/Kconfig"
+ source "board/cortina/presidio-asic/Kconfig"
+ source "board/broadcom/bcmns/Kconfig"
+ source "board/broadcom/bcmns3/Kconfig"
+diff --git a/arch/arm/dts/Makefile b/arch/arm/dts/Makefile
+--- a/arch/arm/dts/Makefile
++++ b/arch/arm/dts/Makefile
+@@ -1139,6 +1139,7 @@
+ # TODO(Linus Walleij <linus.walleij@linaro.org>): Should us a single vexpress
+ # Kconfig option to build all of these. See examples above.
+ dtb-$(CONFIG_TARGET_VEXPRESS_CA9X4) += vexpress-v2p-ca9.dtb
++dtb-$(CONFIG_TARGET_FPLINUX_TA1618) += ums9117-ta1618-u-boot.dtb
+ dtb-$(CONFIG_TARGET_VEXPRESS64_BASE_FVP) += fvp-base-revc.dtb
+ dtb-$(CONFIG_TARGET_VEXPRESS64_BASER_FVP) += arm_fvp.dtb
+ dtb-$(CONFIG_TARGET_VEXPRESS64_JUNO) += juno-r2.dtb
+--
+2.54.0

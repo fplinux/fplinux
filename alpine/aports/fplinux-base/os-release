@@ -1,4 +1,4 @@
 NAME="FPLinux"
-PRETTY_NAME="FPLinux Alpine RAM system"
+PRETTY_NAME="FPLinux Alpine system"
 ID=fplinux
 ID_LIKE=alpine

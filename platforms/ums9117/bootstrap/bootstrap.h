@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "fplinux-handoff-protocol.h"
+#include "ums9117-common/ums9117-boot-contract.h"
 
 #define UMS9117_BOOTSTRAP_DMA_CLEAR_SEEN (1U << 0)
 #define UMS9117_BOOTSTRAP_DMA_DISABLED (1U << 1)
@@ -53,6 +54,12 @@ int ums9117_bootstrap_probe_timer(struct ums9117_bootstrap_timer_result *result)
 
 uint32_t ums9117_bootstrap_quiesce_usb_dma_channel(unsigned channel);
 void ums9117_bootstrap_cleanup_usb_dma_and_disconnect(void);
+int ums9117_bootstrap_exchange_handoff_ack(
+	const uint8_t session_id[FPLINUX_HANDOFF_SESSION_ID_BYTES]);
+unsigned int ums9117_bootstrap_prepare_usb_handoff(void);
+
+__attribute__((noreturn)) void
+ums9117_bootstrap_handoff_to_linux(uint32_t zimage, uint32_t dtb);
 
 size_t ums9117_bootstrap_zimage_size(void);
 size_t ums9117_bootstrap_dtb_size(void);
@@ -63,9 +70,6 @@ enum ums9117_bootstrap_session_status ums9117_bootstrap_personalize_dtb(
 	uint8_t session_id[FPLINUX_HANDOFF_SESSION_ID_BYTES]);
 const char *
 ums9117_bootstrap_session_error(enum ums9117_bootstrap_session_status status);
-
-__attribute__((noreturn)) void ums9117_linux_handoff(uint32_t zimage,
-						     uint32_t dtb);
 
 void lcd_appinit(void);
 void keytrn_init(void);

@@ -175,8 +175,11 @@ def _locked_alpine_artifact(
     record = records.get(filename)
     if record is None:
         fail(f"locked Alpine package is missing: {filename}")
+    repository = record.get("repository")
+    if not isinstance(repository, str):
+        fail(f"locked Alpine package repository is invalid: {filename}")
     package = _fetch(
-        f"{lock['repository']}/{filename}",
+        f"{lock['repositories'][repository]}/{filename}",
         record.get("sha256"),
         CACHE / "downloads/alpine/packages",
         filename,
@@ -195,6 +198,18 @@ def _alpine_group_packages(
 ) -> list[Path]:
     return [
         _locked_alpine_artifact(lock, records, filename) for filename in lock[group]["packages"]
+    ]
+
+
+def _alpine_runtime_packages(
+    lock: dict[str, Any],
+    records: dict[str, dict[str, object]],
+    packages: tuple[str, ...],
+) -> list[Path]:
+    """Fetch only the locked Alpine closure needed by this rootfs selection."""
+    return [
+        _locked_alpine_artifact(lock, records, filename)
+        for filename in alpine_state.runtime_package_names(lock, packages)
     ]
 
 
@@ -748,6 +763,9 @@ def _verify_alpine_rootfs(
         _require_openrc_service(root, "default", "fplinux-usb-dhcp")
     if "fplinux-ssh" in packages:
         _require_openrc_service(root, "default", "fplinux-ssh")
+    if "fplinux-microsd-root" in packages:
+        for service in ("killprocs", "savecache", "mount-ro"):
+            _require_openrc_service(root, "shutdown", service)
 
     fstab = require_file(root / "etc/fstab").read_text(encoding="utf-8")
     if "tmpfs\t/tmp\ttmpfs\trw,nosuid,nodev,mode=1777\t0 0" not in fstab:
@@ -828,6 +846,9 @@ def build_rootfs(
     jobs: int,
     packages: tuple[str, ...],
     bundle_packages: tuple[str, ...] = (),
+    *,
+    external_image: dict[str, Any] | None = None,
+    external_output: Path | None = None,
 ) -> tuple[Path, Path, str, dict[str, Path]]:
     """Build the standard rootfs and any APKs published in its bundle."""
     image_recipe = os.environ.get("FPLINUX_CONTAINER_IMAGE_RECIPE", "")
@@ -842,10 +863,30 @@ def build_rootfs(
     build_packages = tuple(sorted((*packages, *bundle_packages)))
     rootfs_directory = _ensure_rootfs_directory(CACHE)
     output = alpine_state.rootfs_output(CACHE, recipe)
+    ext4_root: Any | None = None
+    ext4_plan: Any | None = None
+    ext4_hit = external_image is None
+    if (external_image is None) != (external_output is None):
+        fail("external root image and output must be selected together")
 
     with _open_rootfs_build_lock(rootfs_directory) as lock_stream:
         fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
         rootfs_hit = alpine_state.receipt_matches(output, recipe)
+        if external_image is not None and external_output is not None and rootfs_hit:
+            from . import ext4_root as ext4_root_module  # noqa: PLC0415
+
+            ext4_root = ext4_root_module
+            try:
+                rootfs_receipt = alpine_state.trusted_receipt_identity(output, recipe)
+                ext4_plan = ext4_root.create_plan(
+                    external_image,
+                    recipe,
+                    rootfs_receipt,
+                    image_recipe,
+                )
+                ext4_hit = ext4_root.cache_hit(external_output, ext4_plan)
+            except ext4_root.Ext4RootError as error:
+                fail(str(error))
         cached_outputs: dict[str, Path] = {}
         for name in build_packages:
             outputs = _cached_aport_packages(name, image_recipe, signing_key_identity)
@@ -853,7 +894,7 @@ def build_rootfs(
                 cached_outputs = {}
                 break
             cached_outputs.update(outputs)
-        if rootfs_hit and cached_outputs:
+        if rootfs_hit and cached_outputs and ext4_hit:
             _log_message(f"Alpine rootfs causal receipt hit: {recipe[:16]}")
             return (
                 require_file(output / alpine_state.ROOTFS_NAME),
@@ -873,7 +914,7 @@ def build_rootfs(
         )
         if minirootfs.stat().st_size != minirootfs_record.get("bytes"):
             fail("locked Alpine minirootfs size does not match its downloaded bytes")
-        runtime_packages = _alpine_group_packages(lock, records, "runtime")
+        runtime_packages = _alpine_runtime_packages(lock, records, packages)
         sysroot_packages = _alpine_group_packages(lock, records, "sysroot")
 
         staging = Path(tempfile.mkdtemp(dir=output.parent, prefix=f".{recipe[:16]}-"))
@@ -906,7 +947,7 @@ def build_rootfs(
                 bundle_outputs = {name: local_packages[name] for name in bundle_packages}
             except KeyError as error:
                 fail(f"bundle aport did not produce its declared package: {error.args[0]}")
-            if rootfs_hit:
+            if rootfs_hit and ext4_hit:
                 _log_message(f"Alpine rootfs causal receipt hit: {recipe[:16]}")
                 return (
                     require_file(output / alpine_state.ROOTFS_NAME),
@@ -935,16 +976,36 @@ def build_rootfs(
 
             _verify_alpine_rootfs(root, packages, bundle_packages)
             _normalize_rootfs(root)
-            _write_rootfs_cpio(root, staging / alpine_state.ROOTFS_NAME)
+            if not rootfs_hit:
+                _write_rootfs_cpio(root, staging / alpine_state.ROOTFS_NAME)
+                alpine_state.write_receipt(staging, recipe)
+                rootfs_receipt = alpine_state.trusted_receipt_identity(staging, recipe)
+            else:
+                rootfs_receipt = alpine_state.trusted_receipt_identity(output, recipe)
+            if external_image is not None and external_output is not None:
+                if ext4_root is None:
+                    from . import ext4_root as ext4_root_module  # noqa: PLC0415
+
+                    ext4_root = ext4_root_module
+                try:
+                    ext4_plan = ext4_root.create_plan(
+                        external_image,
+                        recipe,
+                        rootfs_receipt,
+                        image_recipe,
+                    )
+                    ext4_root.build(root, external_output, ext4_plan)
+                except (OSError, subprocess.SubprocessError, ext4_root.Ext4RootError) as error:
+                    fail(str(error))
             shutil.rmtree(sysroot)
             shutil.rmtree(package_work)
             shutil.rmtree(root)
-            alpine_state.write_receipt(staging, recipe)
 
-            if output.exists():
-                shutil.rmtree(output)
-            staging.replace(output)
-            staging = Path()
+            if not rootfs_hit:
+                if output.exists():
+                    shutil.rmtree(output)
+                staging.replace(output)
+                staging = Path()
         finally:
             if staging != Path() and staging.exists():
                 shutil.rmtree(staging)

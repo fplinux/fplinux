@@ -84,6 +84,7 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
                 "patches": [],
                 "copies": [],
                 "appends": [],
+                "root": {"kind": "initramfs"},
             },
         }
         self.platform: dict[str, Any] = {
@@ -177,6 +178,7 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
                 "appends": [],
                 "config_enable": ["CONFIG_PROFILE_ENABLED"],
                 "config_disable": ["CONFIG_PROFILE_DISABLED"],
+                "root": {"kind": "initramfs"},
             },
         }
         calls: list[list[str]] = []

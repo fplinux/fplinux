@@ -435,7 +435,7 @@ def _profile_uses_separate_linux_source(target: str, profile: str) -> bool | Non
         selected = load_target(target, profile)
         return any(
             default["linux"][field] != selected["linux"][field]
-            for field in ("patches", "copies", "appends")
+            for field in ("patches", "copies", "appends", "root")
         )
     except (OSError, ValueError, SystemExit, KeyError, TypeError):
         return None

@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/dts-v1/;
+
+/ {
+	model = "Nokia 3210 4G (TA-1618) U-Boot control tree";
+	compatible = "nokia,ta-1618", "sprd,ums9117";
+	#address-cells = <1>;
+	#size-cells = <1>;
+
+	aliases {
+		serial0 = &stage0_console;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+		tick-timer = &stage0_timer;
+	};
+
+#include "fplinux-uboot-layout.dtsi"
+
+	stage0_console: console {
+		compatible = "fplinux,stage0-console";
+		bootph-all;
+	};
+
+	stage0_timer: timer {
+		compatible = "fplinux,stage0-timer";
+		clock-frequency = <FPLINUX_UBOOT_TIMER_HZ>;
+		bootph-all;
+	};
+
+	mmc@20300000 {
+		compatible = "fplinux,ta1618-mmc";
+		reg = <0x20300000 0x100>;
+		bus-width = <4>;
+		max-frequency = <48750000>;
+	};
+};

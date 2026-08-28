@@ -76,6 +76,7 @@ class PreparedLinuxTests(unittest.TestCase):
                 "patches": [],
                 "copies": [{"source": "copied", "destination": "generated"}],
                 "appends": [],
+                "root": {"kind": "initramfs"},
             },
         }
         platform = {
@@ -91,6 +92,7 @@ class PreparedLinuxTests(unittest.TestCase):
                 "patches": [],
                 "copies": [],
                 "appends": [],
+                "root": {"kind": "initramfs"},
             },
         }
 
@@ -156,7 +158,12 @@ class PreparedLinuxTests(unittest.TestCase):
                 "compatible": "demo,phone",
                 "display_name": "Demo Phone",
             },
-            "linux": {"patches": [], "copies": [], "appends": []},
+            "linux": {
+                "patches": [],
+                "copies": [],
+                "appends": [],
+                "root": {"kind": "initramfs"},
+            },
         }
         platform = {
             "identity": {

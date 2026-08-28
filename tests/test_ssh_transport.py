@@ -97,6 +97,7 @@ class SshTransportTests(unittest.TestCase):
 
         payload = {
             "rootfs_receipt": {"recipe": "5" * 64, "sha256": "6" * 64},
+            "boot_artifacts": {"required": []},
             "container_image_recipe": "7" * 64,
             "apk_signing_key": "8" * 64,
             "device_identity": "9" * 64,
@@ -152,6 +153,7 @@ class SshTransportTests(unittest.TestCase):
 
         payload = {
             "rootfs_receipt": {"recipe": "5" * 64, "sha256": "6" * 64},
+            "boot_artifacts": {"required": []},
             "container_image_recipe": "7" * 64,
             "apk_signing_key": "8" * 64,
             "device_identity": "9" * 64,

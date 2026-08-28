@@ -62,7 +62,7 @@ boot_instructions = "demo"
 """,
             encoding="utf-8",
         )
-        self.platform = {
+        self.platform: dict[str, Any] = {
             "identity": {
                 "vendor": "Demo",
                 "soc": "SOC1",
@@ -74,8 +74,20 @@ boot_instructions = "demo"
             "linux": {"copies": [{"source": "platform.c", "destination": "drivers/base.c"}]},
             "bootstrap": {
                 "kernel_destination": "zImage",
-                "load_address": 0,
-                "payload_limit": 4,
+                "load_address": 0x80100000,
+                "payload_limit": 0x82000000,
+                "layout": {
+                    "ram_base": 0x80000000,
+                    "ram_size": 0x04000000,
+                    "timer_hz": 1000,
+                    "kernel_load": 0x82000000,
+                    "kernel_entry": 0x82000000,
+                    "kernel_size": 0x01200000,
+                    "fdt_load": 0x83E00000,
+                    "fdt_size": 0x00010000,
+                    "framebuffer": 0x83F00000,
+                    "framebuffer_size": 0x00100000,
+                },
                 "toolchain": "toolchain",
                 "lto": 0,
             },
@@ -100,6 +112,9 @@ config_enable = ["CONFIG_USB", "CONFIG_HID"]
 config_disable = ["CONFIG_USB_GADGET"]
 patches = ["host.patch"]
 
+[linux.root]
+kind = "initramfs"
+
 [[linux.copies]]
 source = "host.c"
 destination = "drivers/host.c"
@@ -112,8 +127,18 @@ destination = "drivers/Kconfig"
 packages = ["fplinux-host"]
 exclude_packages = ["fplinux-ssh"]
 
+[bootstrap]
+kind = "linux"
+
+[uboot]
+kind = "none"
+
+[fit]
+kind = "none"
+
 [runtime]
 transport = "none"
+runnable = true
 """,
             encoding="utf-8",
         )
@@ -138,7 +163,15 @@ transport = "none"
         self.assertEqual(before["identity"]["display_name"], "Demo Phone")
         self.assertEqual(before, after)
         self.assertEqual(before["runtime"]["transport"], "usb-ncm")
+        self.assertTrue(before["runtime"]["runnable"])
         self.assertEqual(before["linux"]["config_enable"], [])
+        self.assertEqual(before["linux"]["root"], {"kind": "initramfs"})
+        self.assertEqual(before["bootstrap"]["kind"], "linux")
+        self.assertEqual(before["uboot"], {"kind": "none"})
+        self.assertEqual(before["fit"], {"kind": "none"})
+        self.assertIsNone(before["layout"])
+        self.assertIsNone(before["storage"])
+        self.assertEqual(before["image"], {"kind": "none"})
 
     def test_target_rejects_a_stored_legacy_display_name(self) -> None:
         """Require public names to be derived from structured identity fields."""
@@ -177,7 +210,105 @@ transport = "none"
             loaded["rootfs"],
             {"packages": ["fplinux-host"], "exclude_packages": ["fplinux-ssh"]},
         )
+        self.assertEqual(loaded["linux"]["root"], {"kind": "initramfs"})
+        self.assertEqual(loaded["bootstrap"]["kind"], "linux")
+        self.assertEqual(loaded["uboot"], {"kind": "none"})
+        self.assertEqual(loaded["fit"], {"kind": "none"})
+        self.assertIsNone(loaded["layout"])
+        self.assertIsNone(loaded["storage"])
+        self.assertEqual(loaded["image"], {"kind": "none"})
         self.assertEqual(loaded["runtime"]["transport"], "none")
+        self.assertTrue(loaded["runtime"]["runnable"])
+
+    def test_external_root_requires_full_uboot_fit_and_matching_image(self) -> None:
+        """Normalize one implemented pipeline and reject unsupported stage claims."""
+        profile = self._write_profile("microsd")
+        (profile / "stage0").mkdir()
+        (profile / "u-boot.defconfig").write_text("CONFIG_TEST=y\n", encoding="utf-8")
+        (profile / "u-boot.lock.toml").write_text(
+            """version = "2026.07"
+repository = "https://source.denx.de/u-boot/u-boot.git"
+tag = "v2026.07"
+commit = "ece349ade2973e220f524ce59e59711cc919263f"
+archive_url = "https://ftp.denx.de/pub/u-boot/u-boot-2026.07.tar.bz2"
+archive_sha256 = "78e8bfc382fe388f9b55aa1daf8c563522a037779b5d4c349d1415e381f1243e"
+license = "GPL-2.0-only"
+""",
+            encoding="utf-8",
+        )
+        manifest = profile / "profile.toml"
+        contents = manifest.read_text(encoding="utf-8")
+        contents = contents.replace(
+            '[linux.root]\nkind = "initramfs"',
+            '[linux.root]\nkind = "external"\nfilesystem = "ext4"\nwait_seconds = 10',
+        )
+        contents = contents.replace(
+            '[bootstrap]\nkind = "linux"',
+            '[bootstrap]\nkind = "uboot-stage0"\nsource = "stage0"\n'
+            'image = "stage0.bin"\nmap = "stage0.map"',
+        )
+        contents = contents.replace(
+            '[uboot]\nkind = "none"',
+            '[uboot]\nkind = "full"\nsource = "u-boot.lock.toml"\n'
+            'archive_prefix = "u-boot-2026.07"\n'
+            'defconfig = "u-boot.defconfig"\npatches = []\ncopies = []',
+        )
+        contents = contents.replace(
+            '[fit]\nkind = "none"',
+            '[fit]\nkind = "sha256"\nfilename = "FPLINUX.ITB"',
+        )
+        contents = contents.replace(
+            "[runtime]",
+            """[layout]
+resident_start = 0x80100000
+resident_limit = 0x81000000
+uboot_load = 0x81000000
+uboot_size = 0x00100000
+uboot_stack = 0x80f00000
+fit_load = 0x83200000
+fit_size = 0x00c00000
+fdt_pad = 0x00003000
+
+[storage]
+filename = "FPLINUX.img"
+disk_signature = 0x46504c58
+boot_partition = 1
+boot_offset = 0x00100000
+boot_size = 0x04000000
+boot_label = "FPLBOOT"
+root_partition = 2
+root_offset = 0x04100000
+root_size = 0x04000000
+root_filename = "FPLROOT.ext4"
+root_label = "FPLROOT"
+root_uuid = "042681b5-d000-5b78-9c16-8e8b2944594e"
+block_size = 4096
+inode_size = 256
+
+[runtime]""",
+        )
+        manifest.write_text(contents, encoding="utf-8")
+
+        loaded = self._load_target("microsd")
+
+        self.assertEqual(loaded["linux"]["root"]["partuuid"], "46504c58-02")
+        self.assertEqual(
+            loaded["linux"]["config_enable"],
+            ["CONFIG_USB", "CONFIG_HID", "CONFIG_EXT4_FS"],
+        )
+        self.assertEqual(
+            loaded["linux"]["config_disable"],
+            ["CONFIG_USB_GADGET", "CONFIG_BLK_DEV_INITRD"],
+        )
+        self.assertEqual(loaded["uboot"]["lock"]["version"], "2026.07")
+        self.assertEqual(loaded["fit"]["filename"], "FPLINUX.ITB")
+        self.assertEqual(loaded["layout"]["fit_load"], 0x83200000)
+        self.assertEqual(loaded["storage"]["partuuid"], "46504c58-02")
+        self.assertEqual(loaded["image"]["size"], 64 * 1024 * 1024)
+
+        manifest.write_text(contents.replace('kind = "full"', 'kind = "spl"'), encoding="utf-8")
+        with self.assertRaisesRegex(SystemExit, "kind must be none or full"):
+            self._load_target("microsd")
 
     def test_discovery_rejects_invalid_or_linked_profile_entries(self) -> None:
         """No linked or unnamed data can become a selectable profile."""
@@ -216,7 +347,7 @@ transport = "none"
             mock.patch.object(config, "ROOT", self.root),
             self.assertRaisesRegex(SystemExit, "config_enable/config_disable conflict"),
         ):
-            config.load_profile(self.target, "usb-host")
+            config.load_profile(self.target, "usb-host", self.platform["bootstrap"]["layout"])
 
         self._write_profile("linked")
         linked = self.target_root / "profiles" / "linked"
@@ -226,7 +357,7 @@ transport = "none"
             mock.patch.object(config, "ROOT", self.root),
             self.assertRaisesRegex(SystemExit, "profile source must not be a symlink"),
         ):
-            config.load_profile(self.target, "linked")
+            config.load_profile(self.target, "linked", self.platform["bootstrap"]["layout"])
 
     def test_profile_copy_cannot_replace_an_existing_projection(self) -> None:
         """Profiles have no copy-override mode in the first profile contract."""

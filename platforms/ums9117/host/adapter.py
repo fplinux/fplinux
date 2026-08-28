@@ -8,14 +8,10 @@ import importlib
 import os
 import re
 import shutil
-import signal
 import subprocess
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NoReturn
-
-if TYPE_CHECKING:
-    from types import FrameType
+from typing import Any, NoReturn
 
 BACKLIGHT_CHANNELS = "rgbw"
 SESSION_ID = re.compile(r"[0-9a-f]{64}\Z")
@@ -313,29 +309,26 @@ def run(
         "-oL",
         "-eL",
         str(bridge),
-        "--fplinux-handoff",
-        session_token,
-        "--",
-        "--bright",
-        str(config["brightness"]),
-        "--rotate",
-        str(config["rotation"]),
-        "--spi_mode",
-        str(config["spi_mode"]),
-        "--lcd",
-        f"0x{config['lcd_id']:x}",
-        "--bl_extra",
-        backlight_argument(config),
-        config["session_name"],
     ]
+    bridge_argv.extend(
+        [
+            "--fplinux-handoff",
+            session_token,
+            "--",
+            "--bright",
+            str(config["brightness"]),
+            "--rotate",
+            str(config["rotation"]),
+            "--spi_mode",
+            str(config["spi_mode"]),
+            "--lcd",
+            f"0x{config['lcd_id']:x}",
+            "--bl_extra",
+            backlight_argument(config),
+            config["session_name"],
+        ]
+    )
     bridge_process: subprocess.Popen[Any] | None = None
-
-    def handle_signal(_signum: int, _frame: FrameType | None) -> None:
-        stop(bridge_process)
-        raise KeyboardInterrupt
-
-    signal.signal(signal.SIGINT, handle_signal)
-    signal.signal(signal.SIGTERM, handle_signal)
     try:
         bridge_process = subprocess.Popen(
             bridge_argv,

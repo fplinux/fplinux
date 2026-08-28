@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
-from . import alpine_builder, alpine_state, kbuild_state, linux_state
+from . import alpine_builder, alpine_state, kbuild_state, linux_state, profile_layout
 from .build_env import build_environment
 from .bundle_state import (
     canonical_json_bytes,
@@ -42,7 +42,13 @@ from .config import (
     target_defconfig_path,
 )
 from .device_state import DeviceStateError, device_kernel_identity, localversion
-from .device_tree import DeviceTreeError, exact_path_properties, verify_target_identity
+from .device_tree import (
+    DeviceTreeError,
+    exact_path_properties,
+    verify_profile_dtb_layout,
+    verify_root_bootargs,
+    verify_target_identity,
+)
 from .identity import (
     RUNTIME_IDENTITY_PATH,
     IdentityError,
@@ -64,6 +70,8 @@ from .output import RunReporter, current_stage, run_entrypoint
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+    from .uboot_tools import UbootBuild
 
 CACHE = Path("/cache")
 OUTPUT = Path("/out")
@@ -313,19 +321,26 @@ def integration_inputs(
     return result
 
 
-def generated_linux_identity(
+PROFILE_ROOT_DTSI = "arch/arm/boot/dts/unisoc/fplinux-external-root.dtsi"
+
+
+def generated_linux_files(
     target_config: dict[str, Any], platform: dict[str, Any]
 ) -> dict[str, bytes]:
-    """Return exact generated Linux identity files keyed by destination."""
+    """Return exact generated Linux files keyed by destination."""
     target_identity = target_config["identity"]
     platform_identity = platform["identity"]
-    return {
+    files = {
         LINUX_IDENTITY_DTSI: linux_identity_dtsi(target_identity, platform_identity),
         LINUX_PLATFORM_IDENTITY_HEADER: linux_platform_identity_header(platform_identity),
         linux_machine_binding_path(target_identity): linux_machine_binding(
             target_identity, platform_identity
         ),
     }
+    root = target_config["linux"]["root"]
+    if root["kind"] == "external":
+        files[PROFILE_ROOT_DTSI] = profile_layout.external_root_dtsi(root)
+    return files
 
 
 def write_generated_files(root: Path, files: dict[str, bytes], *, owner: str) -> None:
@@ -366,7 +381,7 @@ def linux_recipe_digest(
         "generated": [
             {"destination": destination, "sha256": sha256_bytes(contents)}
             for destination, contents in sorted(
-                generated_linux_identity(target_config, platform).items()
+                generated_linux_files(target_config, platform).items()
             )
         ],
     }
@@ -415,6 +430,28 @@ def generated_bootstrap_identity(target_config: dict[str, Any]) -> bytes:
     return b""
 
 
+def effective_boot_layout(
+    target_config: dict[str, Any], platform: dict[str, Any]
+) -> dict[str, int]:
+    """Return the one layout selected for this bootstrap build."""
+    layout = target_config.get("layout")
+    return layout if isinstance(layout, dict) else platform["bootstrap"]["layout"]
+
+
+def generated_bootstrap_files(
+    target_config: dict[str, Any], platform: dict[str, Any]
+) -> dict[str, bytes]:
+    """Return every transient input generated for one bootstrap build."""
+    layout = effective_boot_layout(target_config, platform)
+    return {
+        BOOTSTRAP_IDENTITY_HEADER: generated_bootstrap_identity(target_config),
+        "generated/fplinux-boot-layout.h": profile_layout.boot_layout_header(layout),
+        "generated/fplinux-bootstrap-memory.ld": profile_layout.bootstrap_memory_ld(
+            target_config["bootstrap"], layout
+        ),
+    }
+
+
 def bootstrap_recipe_digest(
     sources: dict[str, Any],
     target: str,
@@ -440,11 +477,15 @@ def bootstrap_recipe_digest(
         else:
             copied["sha256"] = sha256_file(require_file(source))
         shared_copies.append(copied)
+    generated = {
+        path: sha256_bytes(contents)
+        for path, contents in generated_bootstrap_files(target_config, platform).items()
+    }
     manifest = {
         "target": target,
         "target_bootstrap": target_bootstrap,
         "platform_bootstrap": platform_bootstrap,
-        "target_source": bootstrap_tree_entries(target_source(target, "bootstrap")),
+        "target_source": bootstrap_tree_entries(target_source(target, target_bootstrap["source"])),
         "shared_copies": shared_copies,
         "vendor_source": {
             "commit": vendor_commit,
@@ -453,10 +494,7 @@ def bootstrap_recipe_digest(
                 "bootstrap vendor source",
             ),
         },
-        "generated": {
-            "path": BOOTSTRAP_IDENTITY_HEADER,
-            "sha256": sha256_bytes(generated_bootstrap_identity(target_config)),
-        },
+        "generated": generated,
         # build_bootstrap() is in this file, already part of the Kbuild plan.
         "implementation": {
             "scripts/fplinux_cli/build_env.py": sha256_file(
@@ -616,7 +654,7 @@ def prepare_linux(
         *resolve_steps(target, platform_linux["appends"], platform_owned=True),
         *resolve_steps(target, target_config["linux"]["appends"], platform_owned=False),
     ]
-    generated_identity = generated_linux_identity(target_config, platform)
+    generated_files = generated_linux_files(target_config, platform)
     try:
         parent = linux_state.ensure_sources_directory(CACHE)
     except LinuxStateError as error:
@@ -636,7 +674,7 @@ def prepare_linux(
         copy_steps(destination, copies)
         apply_patches(destination, target_patches)
         append_steps(destination, appends)
-        write_generated_files(destination, generated_identity, owner="Linux identity")
+        write_generated_files(destination, generated_files, owner="Linux projection")
 
     prepared = linux_state.inspect_prepared_linux(source, recipe)
     if prepared is not None:
@@ -701,9 +739,23 @@ def build_kernel(
     try:
         work = output.parent
         defconfig = require_file(target_defconfig_path(target))
-        rootfs_record = kbuild_state.rootfs_identity(rootfs)
-        rootfs_input = kbuild_state.rootfs_input_path(work, rootfs_record)
-        rootfs_receipt = alpine_state.trusted_receipt_identity(rootfs_output, rootfs_recipe)
+        root_contract = target_config["linux"]["root"]
+        initramfs_record: dict[str, int | str] | None = None
+        initramfs_input: Path | None = None
+        initramfs_receipt: dict[str, str] | None = None
+        if root_contract["kind"] == "initramfs":
+            initramfs_record = kbuild_state.initramfs_identity(rootfs)
+            initramfs_input = kbuild_state.initramfs_input_path(work, initramfs_record)
+            initramfs_receipt = alpine_state.trusted_receipt_identity(rootfs_output, rootfs_recipe)
+            device_root: dict[str, object] = {
+                "kind": "initramfs",
+                "artifact": initramfs_record,
+                "receipt": initramfs_receipt,
+            }
+        elif root_contract["kind"] == "external":
+            device_root = root_contract
+        else:
+            fail(f"unsupported Linux root kind: {root_contract['kind']}")
         kbuild = [
             "make",
             "-C",
@@ -734,8 +786,7 @@ def build_kernel(
             target=target,
             linux_recipe=current_linux.linux_recipe,
             bootstrap_recipe=bootstrap_recipe,
-            rootfs=rootfs_record,
-            rootfs_receipt=rootfs_receipt,
+            root=device_root,
             kbuild_implementation=kbuild_state.implementation_identity(implementation),
             arch=platform["linux"]["arch"],
             defconfig=defconfig,
@@ -744,13 +795,14 @@ def build_kernel(
             config_enable=config_enable,
             config_disable=config_disable,
         )
+        initramfs_source = str(initramfs_input) if initramfs_input is not None else ""
         config_command = [
             str(config_script),
             "--file",
             str(output / ".config"),
             "--set-str",
             "INITRAMFS_SOURCE",
-            str(rootfs_input),
+            initramfs_source,
             "--set-str",
             "LOCALVERSION",
             localversion(device_identity),
@@ -774,9 +826,10 @@ def build_kernel(
             linux_base=require_sha256(linux_base, "Linux base source"),
             defconfig=defconfig,
             defconfig_path=f"targets/{target}/kernel/defconfig",
-            rootfs=rootfs_record,
-            rootfs_input=rootfs_input,
-            rootfs_receipt=rootfs_receipt,
+            root=root_contract,
+            initramfs=initramfs_record,
+            initramfs_input=initramfs_input,
+            initramfs_receipt=initramfs_receipt,
             arch=platform["linux"]["arch"],
             cross_compile=cross,
             commands=commands,
@@ -788,7 +841,8 @@ def build_kernel(
         else:
             kbuild_state.discard_success_receipt(work)
             kbuild_state.prepare_output(work, output)
-            kbuild_state.materialize_rootfs_input(work, rootfs, plan)
+            if initramfs_record is not None:
+                kbuild_state.materialize_initramfs_input(work, rootfs, plan)
             shutil.copyfile(defconfig, output / ".config")
             for command in commands[:3]:
                 run(command)
@@ -809,6 +863,10 @@ def build_kernel(
                     platform["identity"]["compatible"],
                 ),
             )
+            verify_root_bootargs(dtb, root_contract)
+            layout = target_config.get("layout")
+            if isinstance(layout, dict):
+                verify_profile_dtb_layout(dtb, layout)
         except DeviceTreeError as error:
             fail(str(error))
         config_text = require_file(output / ".config").read_text()
@@ -953,6 +1011,105 @@ def verify_images(
     }
 
 
+def uboot_build_header(uboot: UbootBuild) -> bytes:
+    """Generate exact stage0 constants from the verified U-Boot artifact."""
+    license_tag = "SPDX-License-" + "Identifier"
+    return (
+        f"/* {license_tag}: GPL-2.0-only */\n"
+        "/* Generated from the selected full U-Boot artifact. */\n"
+        "#ifndef FPLINUX_UBOOT_BUILD_H\n"
+        "#define FPLINUX_UBOOT_BUILD_H\n\n"
+        f"#define FPLINUX_UBOOT_ENTRY_PHYS 0x{uboot.entry:08x}U\n"
+        f"#define FPLINUX_UBOOT_BINARY_BYTES {uboot.binary.stat().st_size}U\n"
+        "\n"
+        "#endif\n"
+    ).encode("ascii")
+
+
+def _bootstrap_map_symbols(map_file: Path) -> dict[str, int]:
+    symbols: dict[str, int] = {}
+    for line in map_file.read_text().splitlines():
+        fields = line.split()
+        if len(fields) < 3:
+            continue
+        try:
+            symbols[fields[2]] = int(fields[0], 16)
+        except ValueError:
+            continue
+    return symbols
+
+
+def verify_sd_stage0_image(
+    ramboot: Path,
+    uboot: UbootBuild,
+    map_file: Path,
+    load_address: int,
+    payload_limit: int,
+    layout: dict[str, int],
+) -> dict[str, int | str]:
+    """Verify the resident stage0, embedded U-Boot and session slot."""
+    image = ramboot.read_bytes()
+    binary = uboot.binary.read_bytes()
+    if image[:4] != b"DHTB" or len(image) < 0x200:
+        fail("U-Boot stage0 output does not have a complete DHTB header")
+    declared = struct.unpack_from("<I", image, 0x30)[0]
+    if declared + 0x200 > len(image):
+        fail("U-Boot stage0 DHTB declared size exceeds the RAM image")
+    if load_address + len(image) >= payload_limit:
+        fail("U-Boot stage0 reaches its declared payload limit")
+
+    symbols = _bootstrap_map_symbols(map_file)
+    required = {
+        "__image_start",
+        "__bss_end",
+        "uboot_payload_start",
+        "uboot_payload_end",
+        "fplinux_session_start",
+        "fplinux_session_end",
+        "stage0_ops",
+        "uboot_handoff",
+        "FPLINUX_BOOTSTRAP_STORAGE_DISABLED",
+    }
+    missing = sorted(required - symbols.keys())
+    if missing:
+        fail(f"U-Boot stage0 map lacks symbols: {', '.join(missing)}")
+    if symbols["FPLINUX_BOOTSTRAP_STORAGE_DISABLED"] != 1:
+        fail("U-Boot stage0 storage-disabled marker is not one")
+    if symbols["__image_start"] != load_address:
+        fail("U-Boot stage0 map image start differs from target load_address")
+    if symbols["__bss_end"] > layout["uboot_stack"]:
+        fail("resident U-Boot stage0 overlaps the full U-Boot stack")
+
+    uboot_start = symbols["uboot_payload_start"]
+    uboot_end = symbols["uboot_payload_end"]
+    if not load_address <= uboot_start < uboot_end <= load_address + len(image):
+        fail("embedded full U-Boot range lies outside stage0")
+    if uboot_end - uboot_start != len(binary):
+        fail("embedded full U-Boot size differs from its verified binary")
+    if image[uboot_start - load_address : uboot_end - load_address] != binary:
+        fail("embedded full U-Boot bytes differ from its verified binary")
+
+    session_start = symbols["fplinux_session_start"]
+    session_end = symbols["fplinux_session_end"]
+    expected_start = (uboot_end + RAM_SESSION_ALIGNMENT - 1) & -RAM_SESSION_ALIGNMENT
+    if session_start != expected_start or session_start % RAM_SESSION_ALIGNMENT:
+        fail("stage0 session slot does not immediately follow embedded U-Boot")
+    if session_end - session_start != RAM_SESSION_BYTES:
+        fail("stage0 session slot does not have its exact ABI size")
+    offset = session_start - load_address
+    template = image[offset : offset + RAM_SESSION_BYTES]
+    if template != bytes(RAM_SESSION_BYTES):
+        fail("canonical stage0 session slot is not all zero")
+    for name in ("stage0_ops", "uboot_handoff"):
+        if not load_address <= symbols[name] < symbols["__bss_end"]:
+            fail(f"resident {name} lies outside the stage0 image")
+    return {
+        "offset": offset,
+        "bytes": RAM_SESSION_BYTES,
+        "template_sha256": sha256_bytes(template),
+    }
+
+
 def build_bootstrap(
     sources: dict[str, Any],
     target: str,
@@ -961,6 +1118,7 @@ def build_bootstrap(
     work: Path,
     zimage: Path,
     dtb: Path,
+    uboot: UbootBuild | None = None,
 ) -> tuple[Path, Path, dict[str, int | str]]:
     """Build and verify the declarative bootstrap contract."""
     platform_bootstrap = platform["bootstrap"]
@@ -977,7 +1135,7 @@ def build_bootstrap(
     vendor = bootstrap_work / platform_bootstrap["vendor_destination"]
     projected_output = bootstrap_work / platform_bootstrap["output_destination"]
     shutil.copytree(
-        require_directory(target_source(target, "bootstrap")),
+        require_directory(target_source(target, target_bootstrap["source"])),
         bootstrap,
     )
     for step in platform_bootstrap["shared_copies"]:
@@ -990,9 +1148,17 @@ def build_bootstrap(
             shutil.copyfile(require_file(source), destination)
     write_generated_files(
         bootstrap,
-        {BOOTSTRAP_IDENTITY_HEADER: generated_bootstrap_identity(target_config)},
-        owner="bootstrap identity",
+        generated_bootstrap_files(target_config, platform),
+        owner="bootstrap generated inputs",
     )
+    if target_bootstrap["kind"] == "uboot-stage0":
+        if uboot is None:
+            fail("U-Boot stage0 requires a verified full U-Boot artifact")
+        write_generated_files(
+            bootstrap,
+            {"generated/fplinux-uboot-build.h": uboot_build_header(uboot)},
+            owner="U-Boot stage0",
+        )
 
     vendor_lock = source_lock_entry(sources, platform_bootstrap["vendor_source_lock"])
     archive = fetch(
@@ -1008,8 +1174,13 @@ def build_bootstrap(
     extract_vendor(archive, prefix, platform_bootstrap["files"], vendor)
 
     projected_output.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(zimage, projected_output / target_bootstrap["kernel_destination"])
-    shutil.copyfile(dtb, projected_output / target_bootstrap["dtb_destination"])
+    if target_bootstrap["kind"] == "uboot-stage0":
+        if uboot is None:
+            fail("U-Boot stage0 lost its verified full U-Boot artifact")
+        shutil.copyfile(uboot.binary, projected_output / "u-boot.bin")
+    else:
+        shutil.copyfile(zimage, projected_output / target_bootstrap["kernel_destination"])
+        shutil.copyfile(dtb, projected_output / target_bootstrap["dtb_destination"])
     run(
         [
             "make",
@@ -1032,15 +1203,27 @@ def build_bootstrap(
     )
     ramboot = require_file(bootstrap / target_bootstrap["image"])
     ramboot_map = require_file(bootstrap / target_bootstrap["map"])
-    personalization = verify_images(
-        ramboot,
-        zimage,
-        dtb,
-        ramboot_map,
-        target_bootstrap["load_address"],
-        target_bootstrap["payload_limit"],
-        target_config["linux"]["forbidden_dtb_markers"],
-    )
+    if target_bootstrap["kind"] == "uboot-stage0":
+        if uboot is None:
+            fail("U-Boot stage0 lost its verified full U-Boot artifact")
+        personalization = verify_sd_stage0_image(
+            ramboot,
+            uboot,
+            ramboot_map,
+            target_bootstrap["load_address"],
+            target_bootstrap["payload_limit"],
+            target_config["layout"],
+        )
+    else:
+        personalization = verify_images(
+            ramboot,
+            zimage,
+            dtb,
+            ramboot_map,
+            target_bootstrap["load_address"],
+            target_bootstrap["payload_limit"],
+            target_config["linux"]["forbidden_dtb_markers"],
+        )
     return ramboot, ramboot_map, personalization
 
 
@@ -1270,6 +1453,215 @@ def build_host_tools(
     return result
 
 
+def build_profile_uboot(
+    target: str, target_config: dict[str, Any], work: Path, jobs: int
+) -> UbootBuild | None:
+    """Build the full U-Boot selected by one profile."""
+    config = target_config["uboot"]
+    if config["kind"] == "none":
+        return None
+    if config["kind"] != "full":
+        fail(f"unsupported U-Boot profile kind: {config['kind']}")
+    lock = config["lock"]
+    archive = fetch(
+        lock["archive_url"],
+        lock["archive_sha256"],
+        CACHE / "downloads/uboot",
+        "source.tar.bz2",
+    )
+    container_recipe = require_sha256(
+        os.environ.get("FPLINUX_CONTAINER_IMAGE_RECIPE"),
+        "container image recipe",
+    )
+    from . import uboot_tools  # noqa: PLC0415 -- profile-only source.
+
+    try:
+        profile = selected_profile(target_config)
+        if profile is None:
+            fail("full U-Boot requires a selected profile")
+        profile_root = ROOT / "targets" / target / "profiles" / profile
+        projections = [
+            (require_file(ROOT / step["source"]), step["destination"]) for step in config["copies"]
+        ]
+        work.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=work, prefix=".uboot-inputs.") as name:
+            generated = Path(name)
+            defconfig = generated / "ta1618_defconfig"
+            layout_header = generated / "fplinux-boot-layout.h"
+            layout_dtsi = generated / "fplinux-uboot-layout.dtsi"
+            defconfig.write_bytes(
+                profile_layout.uboot_defconfig(
+                    require_file(profile_root / config["defconfig"]).read_bytes(),
+                    target_config["layout"],
+                )
+            )
+            layout_header.write_bytes(profile_layout.boot_layout_header(target_config["layout"]))
+            layout_dtsi.write_bytes(profile_layout.uboot_layout_dtsi(target_config["layout"]))
+            projections.append((layout_header, "include/fplinux-boot-layout.h"))
+            projections.append((layout_dtsi, "arch/arm/dts/fplinux-uboot-layout.dtsi"))
+            uboot = uboot_tools.build_full(
+                archive,
+                config,
+                defconfig,
+                projections,
+                [require_file(profile_root / path) for path in config["patches"]],
+                work,
+                jobs,
+                container_recipe,
+                "arm-none-eabi-",
+                target_config["layout"],
+            )
+    except (
+        OSError,
+        subprocess.SubprocessError,
+        tarfile.TarError,
+        uboot_tools.UbootToolsError,
+    ) as error:
+        fail(str(error))
+    log_message(f"U-Boot build ready: {uboot.receipt['recipe'][:16]}")
+    return uboot
+
+
+def profile_ext4_artifact(
+    target_config: dict[str, Any],
+    work: Path,
+    rootfs_output: Path,
+    rootfs_recipe: str,
+) -> Path | None:
+    """Recheck and return the selected ext4 artifact."""
+    config = target_config["image"]
+    if config["kind"] == "none":
+        return None
+    if config["kind"] != "ext4-root":
+        fail(f"unsupported profile image kind: {config['kind']}")
+    from . import ext4_root  # noqa: PLC0415 -- profile-only source.
+
+    try:
+        rootfs_receipt = alpine_state.trusted_receipt_identity(rootfs_output, rootfs_recipe)
+        plan = ext4_root.create_plan(
+            config,
+            rootfs_recipe,
+            rootfs_receipt,
+            require_sha256(
+                os.environ.get("FPLINUX_CONTAINER_IMAGE_RECIPE"),
+                "container image recipe",
+            ),
+        )
+        output = work / "rootfs-image"
+        ext4_root.receipt_identity(output, plan)
+    except (OSError, ext4_root.Ext4RootError) as error:
+        fail(str(error))
+    return require_file(output / config["filename"])
+
+
+def build_profile_fit(
+    target: str,
+    target_config: dict[str, Any],
+    work: Path,
+    zimage: Path,
+    dtb: Path,
+    uboot: UbootBuild | None,
+) -> Path | None:
+    """Build and recheck the native FIT selected by one profile."""
+    config = target_config["fit"]
+    if config["kind"] == "none":
+        return None
+    if config["kind"] != "sha256" or uboot is None:
+        fail("SHA-256 FIT requires verified U-Boot tools")
+    from . import fit_image  # noqa: PLC0415 -- profile-only source.
+
+    try:
+        plan = fit_image.create_plan(
+            target,
+            target_config["identity"]["display_name"],
+            config,
+            zimage,
+            dtb,
+            uboot.receipt,
+        )
+        output = work / "fit"
+        fit = fit_image.build(
+            uboot.mkimage,
+            uboot.dumpimage,
+            zimage,
+            dtb,
+            output,
+            plan,
+        )
+        fit_image.receipt_identity(output, plan)
+    except (
+        OSError,
+        subprocess.SubprocessError,
+        DeviceTreeError,
+        fit_image.FitImageError,
+    ) as error:
+        fail(str(error))
+    return require_file(fit)
+
+
+def build_profile_sd_image(
+    target_config: dict[str, Any],
+    work: Path,
+    fit: Path | None,
+    ext4: Path | None,
+) -> Path | None:
+    """Assemble the selected whole-card image from verified profile artifacts."""
+    image_config = target_config["image"]
+    if image_config["kind"] == "none":
+        return None
+    if image_config["kind"] != "ext4-root" or fit is None or ext4 is None:
+        fail("whole-card image requires FIT and ext4 root artifacts")
+    storage = target_config["storage"]
+    if not isinstance(storage, dict):
+        fail("whole-card image requires a storage layout")
+    from . import sd_image  # noqa: PLC0415 -- profile-only source.
+
+    destination = work / "sd-image" / sd_image.compressed_image_name(storage)
+    try:
+        return require_file(
+            sd_image.build(
+                fit,
+                ext4,
+                destination,
+                fit_spec=target_config["fit"],
+                storage=storage,
+            )
+        )
+    except (OSError, subprocess.SubprocessError, sd_image.SdImageError) as error:
+        fail(str(error))
+
+
+def profile_boot_artifact_set(
+    target_config: dict[str, Any],
+    disk_image: Path | None,
+) -> tuple[dict[str, Path], dict[str, Any]]:
+    """Collect the profile payload consumed by package and run."""
+    files: dict[str, Path] = {}
+    image_config = target_config["image"]
+    if image_config["kind"] == "ext4-root":
+        if disk_image is None:
+            fail("whole-card image artifact is missing")
+        image_bundle_path = disk_image.name
+        files[image_bundle_path] = disk_image
+        required = [image_bundle_path]
+    else:
+        required = []
+
+    metadata = {
+        "required": required,
+        "runnable": target_config["runtime"]["runnable"],
+    }
+    return files, metadata
+
+
+def default_boot_artifacts() -> dict[str, Any]:
+    """Return the ordinary RAM pipeline contract for callers without extra artifacts."""
+    return {
+        "required": [],
+        "runnable": True,
+    }
+
+
 def copy_file(source: Path, destination: Path, *, executable: bool = False) -> None:
     """Copy a validated output with a normalized mode."""
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -1390,6 +1782,8 @@ def _publish_staged_bundle(
     kbuild_receipt: dict[str, str],
     bundle_packages: tuple[str, ...],
     bundle_apks: dict[str, Path],
+    boot_files: dict[str, Path],
+    boot_artifacts: dict[str, Any],
 ) -> Path:
     """Complete one already-private immutable bundle staging directory."""
     if set(bundle_packages) != set(bundle_apks):
@@ -1405,15 +1799,17 @@ def _publish_staged_bundle(
 
     image_name = release_manifest["image"]
     copy_file(ramboot, release / image_name)
-    for source, name in (
+    debug_outputs = [
         (zimage, "zImage"),
         (dtb, target_config["linux"]["debug_dtb"]),
-        (rootfs, "rootfs.cpio"),
         (kernel_output / "vmlinux", "vmlinux"),
         (kernel_output / "System.map", "System.map"),
         (kernel_output / ".config", "kernel.config"),
         (ramboot_map, "ramboot.map"),
-    ):
+    ]
+    if target_config["linux"]["root"]["kind"] == "initramfs":
+        debug_outputs.append((rootfs, "rootfs.cpio"))
+    for source, name in debug_outputs:
         copy_file(source, release / "debug" / name)
     for relative, _digest in asset_outputs.values():
         copy_file(work / "assets" / relative, release / "assets" / relative)
@@ -1430,6 +1826,11 @@ def _publish_staged_bundle(
     copy_file(ROOT / "THIRD_PARTY_NOTICES.md", release / "THIRD_PARTY_NOTICES.md")
     for package, source in sorted(bundle_apks.items()):
         copy_file(source, release / "apks" / f"{package}.apk")
+    for relative, source in sorted(boot_files.items()):
+        destination = release / relative_value(relative, "boot artifact path")
+        if destination.exists() or destination.is_symlink():
+            fail(f"boot artifact collides with a bundle file: {relative}")
+        copy_file(source, destination)
 
     runtime = runtime_manifest(
         release,
@@ -1472,6 +1873,7 @@ def _publish_staged_bundle(
         "device_identity": device_identity,
         "rootfs_receipt": rootfs_receipt,
         "kbuild_receipt": kbuild_receipt,
+        "boot_artifacts": boot_artifacts,
         "files": published_file_records(release),
     }
     generation = sha256_bytes(canonical_json_bytes(payload))
@@ -1512,10 +1914,16 @@ def publish_bundle(
     kbuild_receipt: dict[str, str],
     bundle_packages: tuple[str, ...],
     bundle_apks: dict[str, Path],
+    boot_files: dict[str, Path] | None = None,
+    boot_artifacts: dict[str, Any] | None = None,
 ) -> Path:
     """Publish a complete immutable bundle and select it as current."""
     profile = selected_profile(target_config)
     release = create_bundle_staging(OUTPUT, target, profile)
+    if boot_files is None:
+        boot_files = {}
+    if boot_artifacts is None:
+        boot_artifacts = default_boot_artifacts()
     try:
         return _publish_staged_bundle(
             release,
@@ -1541,6 +1949,8 @@ def publish_bundle(
             kbuild_receipt,
             bundle_packages,
             bundle_apks,
+            boot_files,
+            boot_artifacts,
         )
     finally:
         discard_bundle_staging(OUTPUT, target, release, profile)
@@ -1587,8 +1997,23 @@ def main() -> None:
         )
 
     with report_stage(reporter, "rootfs"):
-        rootfs, rootfs_output, rootfs_recipe, bundle_apk_outputs = alpine_builder.build_rootfs(
-            args.jobs, rootfs_packages, bundle_packages
+        if target_config["image"]["kind"] == "ext4-root":
+            rootfs, rootfs_output, rootfs_recipe, bundle_apk_outputs = alpine_builder.build_rootfs(
+                args.jobs,
+                rootfs_packages,
+                bundle_packages,
+                external_image=target_config["image"],
+                external_output=work / "rootfs-image",
+            )
+        else:
+            rootfs, rootfs_output, rootfs_recipe, bundle_apk_outputs = alpine_builder.build_rootfs(
+                args.jobs, rootfs_packages, bundle_packages
+            )
+        ext4_artifact = profile_ext4_artifact(
+            target_config,
+            work,
+            rootfs_output,
+            rootfs_recipe,
         )
     cross = platform["linux"]["cross_compile"]
     kernel_output = work / "kernel"
@@ -1614,6 +2039,34 @@ def main() -> None:
             rootfs_recipe,
             args.jobs,
         )
+    profile_uboot = None
+    if target_config["uboot"]["kind"] != "none":
+        with report_stage(reporter, "uboot"):
+            profile_uboot = build_profile_uboot(args.target, target_config, work, args.jobs)
+    fit_artifact = None
+    if target_config["fit"]["kind"] != "none":
+        with report_stage(reporter, "fit"):
+            fit_artifact = build_profile_fit(
+                args.target,
+                target_config,
+                work,
+                zimage,
+                dtb,
+                profile_uboot,
+            )
+    sd_image_artifact = None
+    if target_config["image"]["kind"] != "none":
+        with report_stage(reporter, "sd-image"):
+            sd_image_artifact = build_profile_sd_image(
+                target_config,
+                work,
+                fit_artifact,
+                ext4_artifact,
+            )
+    boot_files, boot_artifacts = profile_boot_artifact_set(
+        target_config,
+        sd_image_artifact,
+    )
     with report_stage(reporter, "bootstrap"):
         ramboot, ramboot_map, personalization = build_bootstrap(
             sources,
@@ -1623,6 +2076,7 @@ def main() -> None:
             work,
             zimage,
             dtb,
+            profile_uboot,
         )
     with report_stage(reporter, "assets"):
         asset_outputs = build_assets(asset_lock_path, work / "assets")
@@ -1652,6 +2106,8 @@ def main() -> None:
             kbuild_receipt,
             bundle_packages,
             bundle_apk_outputs,
+            boot_files,
+            boot_artifacts,
         )
 
 

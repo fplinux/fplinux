@@ -34,10 +34,14 @@ class BootstrapRecipeTests(unittest.TestCase):
                 "display_name": "Demo Phone",
             },
             "bootstrap": {
+                "kind": "linux",
+                "source": "bootstrap",
                 "image": "ramboot.bin",
                 "map": "obj/ramboot.map",
                 "dtb_destination": "target.dtb",
                 "record_prefix": "DEMO",
+                "load_address": 0x80100000,
+                "payload_limit": 0x82000000,
             },
         }
         self.platform = {
@@ -55,6 +59,18 @@ class BootstrapRecipeTests(unittest.TestCase):
                 "kernel_destination": "zImage",
                 "load_address": 0x80100000,
                 "payload_limit": 0x82000000,
+                "layout": {
+                    "ram_base": 0x80000000,
+                    "ram_size": 0x04000000,
+                    "timer_hz": 1000,
+                    "kernel_load": 0x82000000,
+                    "kernel_entry": 0x82000000,
+                    "kernel_size": 0x01200000,
+                    "fdt_load": 0x83E00000,
+                    "fdt_size": 0x00010000,
+                    "framebuffer": 0x83F00000,
+                    "framebuffer_size": 0x00100000,
+                },
                 "toolchain": "arm-none-eabi",
                 "lto": 0,
                 "shared_copies": [

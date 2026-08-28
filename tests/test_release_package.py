@@ -31,7 +31,7 @@ class ReleasePackageTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.cache = self.root / ".cache"
-        self.target = "phone"
+        self.target = "nokia-ta1618"
         self.snapshot = WorkspaceSnapshot((), "a" * 64)
         self.image_recipe = "b" * 64
         self.target_config = {
@@ -138,6 +138,7 @@ class ReleasePackageTests(unittest.TestCase):
             path.chmod(0o755 if relative in {"host/keyboard", "runner/run.py"} else 0o644)
         manifest = {
             "rootfs_receipt": {"recipe": "d" * 64, "sha256": "e" * 64},
+            "boot_artifacts": {"required": []},
             "container_image_recipe": self.image_recipe,
             "apk_signing_key": self.signing_key,
             "device_identity": "f" * 64,
@@ -225,6 +226,121 @@ class ReleasePackageTests(unittest.TestCase):
             with self.subTest(checksum=relative):
                 self.assertEqual(digest, hashlib.sha256(payloads[relative]).hexdigest())
 
+    def test_profile_and_public_boot_candidates_use_one_generation(self) -> None:
+        """Both selectors package the same image while keeping their public names distinct."""
+        profile = "microsd-uboot"
+        self.target_config["profile"] = profile
+        self.addCleanup(self.target_config.pop, "profile", None)
+        profile_root = self.root / "targets" / self.target / "profiles" / profile
+        profile_readme = profile_root / "release/README.txt"
+        profile_readme.parent.mkdir(parents=True)
+        profile_readme.write_bytes(b"profile instructions\n")
+        profile_storage = profile_root / "features/MICROSD.md"
+        profile_storage.parent.mkdir(parents=True)
+        profile_storage.write_bytes(b"profile storage rules\n")
+        generation = "3" * 64
+        profile_snapshot = WorkspaceSnapshot((), "4" * 64)
+        default_bundle = next((self.cache / "out" / self.target / "bundles").iterdir())
+        profile_bundle = self.cache.joinpath(
+            "out", self.target, "profiles", profile, "bundles", generation
+        )
+        for source in default_bundle.rglob("*"):
+            if not source.is_file() or source.name == BUILD_MANIFEST_NAME:
+                continue
+            destination = profile_bundle / source.relative_to(default_bundle)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(source.read_bytes())
+            destination.chmod(source.stat().st_mode & 0o777)
+        required = {
+            "FPLINUX.img.xz": b"profile whole-card image\n",
+        }
+        for relative, data in required.items():
+            path = profile_bundle / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            path.chmod(0o644)
+        manifest = {
+            "rootfs_receipt": {"recipe": "d" * 64, "sha256": "e" * 64},
+            "boot_artifacts": {
+                "required": list(required),
+                "runnable": True,
+            },
+            "container_image_recipe": self.image_recipe,
+            "apk_signing_key": self.signing_key,
+            "device_identity": "f" * 64,
+            "files": published_file_records(profile_bundle),
+            "generation": generation,
+            "kbuild_receipt": {"recipe": "0" * 64, "sha256": "1" * 64},
+            "linux_recipe": "2" * 64,
+            "profile": profile,
+            "target": self.target,
+            "workspace_digest": profile_snapshot.recipe,
+        }
+        (profile_bundle / BUILD_MANIFEST_NAME).write_bytes(canonical_json_bytes(manifest))
+        publish_current_bundle(
+            self.cache / "out",
+            self.target,
+            profile_bundle,
+            profile,
+        )
+
+        with contextlib.ExitStack() as stack:
+            for patch in self.package_patches():
+                stack.enter_context(patch)
+            workspace = stack.enter_context(
+                mock.patch.object(
+                    commands,
+                    "target_workspace_snapshot",
+                    return_value=profile_snapshot,
+                )
+            )
+            with self.assertRaisesRegex(SystemExit, "only be packaged with --candidate"):
+                commands.package_target(
+                    self.target,
+                    profile=profile,
+                    candidate=False,
+                )
+            commands.package_target(
+                self.target,
+                profile=profile,
+                candidate=True,
+            )
+            commands.package_target(
+                self.target,
+                boot="microsd",
+                candidate=True,
+            )
+
+        self.assertEqual(
+            workspace.call_args_list,
+            [
+                mock.call(self.target, profile),
+                mock.call(self.target, profile),
+            ],
+        )
+        archives = list((self.cache / "out/candidates").glob("*.zip"))
+        self.assertEqual(len(archives), 2)
+        names = {archive.name for archive in archives}
+        self.assertTrue(
+            any(name.startswith(f"FPLinux-{self.target}-{profile}-candidate-") for name in names)
+        )
+        self.assertTrue(
+            any(name.startswith(f"FPLinux-{self.target}-microsd-candidate-") for name in names)
+        )
+        for archive_path in archives:
+            with zipfile.ZipFile(archive_path) as archive:
+                root = archive.namelist()[0].partition("/")[0]
+                for relative, data in required.items():
+                    self.assertEqual(archive.read(f"{root}/{relative}"), data)
+                self.assertEqual(
+                    archive.read(f"{root}/README.txt"),
+                    profile_readme.read_bytes(),
+                )
+                self.assertEqual(
+                    archive.read(f"{root}/docs/target/MICROSD.md"),
+                    profile_storage.read_bytes(),
+                )
+
     def test_target_document_paths_are_safe_and_collision_free(self) -> None:
         """Map direct feature pages once and reject ambiguous or escaping sources."""
         with mock.patch.object(commands, "ROOT", self.root):
@@ -235,6 +351,19 @@ class ReleasePackageTests(unittest.TestCase):
             archive_name, source = commands.target_archive_file(self.target, "features/MICROSD.md")
             self.assertEqual(archive_name, "docs/target/MICROSD.md")
             self.assertEqual(source.read_bytes(), self.target_documents[archive_name])
+
+            profile_readme = self.root.joinpath(
+                "targets", self.target, "profiles/microsd/release/README.txt"
+            )
+            profile_readme.parent.mkdir(parents=True)
+            profile_readme.write_bytes(b"profile instructions\n")
+            readme_name, readme = commands.target_archive_file(
+                self.target,
+                "release/README.txt",
+                "microsd",
+            )
+            self.assertEqual(readme_name, "README.txt")
+            self.assertEqual(readme, profile_readme)
 
             for relative in (
                 "../features/MICROSD.md",
@@ -251,14 +380,14 @@ class ReleasePackageTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "invalid target package name"):
                 commands.target_archive_file("../phone", "features/MICROSD.md")
 
-            link = self.root / "targets/phone/features/LINK.md"
+            link = self.root / "targets" / self.target / "features/LINK.md"
             link.symlink_to("MICROSD.md")
             with self.assertRaisesRegex(SystemExit, "must not traverse a symlink"):
                 commands.target_archive_file(self.target, "features/LINK.md")
 
     def test_target_document_mapping_rejects_duplicate_archive_paths(self) -> None:
         """Two declared sources cannot silently publish the same document path."""
-        duplicate = self.root / "targets/phone/release/docs/target/MICROSD.md"
+        duplicate = self.root / "targets" / self.target / "release/docs/target/MICROSD.md"
         duplicate.parent.mkdir(parents=True)
         duplicate.write_bytes(b"duplicate\n")
         manifest = {
@@ -304,7 +433,7 @@ class ReleasePackageTests(unittest.TestCase):
             candidate_archive, original = self.package(candidate=True)
             candidate_files = list((self.cache / "out/candidates").glob("*.zip"))
             self.assertEqual(len(candidate_files), 1)
-            self.assertTrue(candidate_files[0].name.startswith("FPLinux-phone-candidate-"))
+            self.assertTrue(candidate_files[0].name.startswith("FPLinux-nokia-ta1618-candidate-"))
             with mock.patch.object(commands, "verified_runtime_digest", return_value=original):
                 release_archive, release_payload = self.package(candidate=False)
             self.assertEqual(release_payload, original)

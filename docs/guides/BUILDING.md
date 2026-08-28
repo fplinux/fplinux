@@ -112,9 +112,10 @@ offline.
 A target may declare a development-only build profile at
 `targets/<target>/profiles/<profile>/profile.toml`. Profiles are small deltas
 over the target: they may enable or disable boolean kernel symbols, add Linux
-patch/copy/append inputs, add or exclude rootfs packages, and select either the
-`usb-ncm` or `none` host transport. Profile source paths are relative to that
-profile directory.
+patch/copy/append inputs, add or exclude rootfs packages, select the root
+mechanism and request extra boot artifacts. Profile source paths are relative
+to that profile directory, except U-Boot copy sources, which are repository
+paths so a board port can consume current shared platform code directly.
 
 The manifest has one exact, unversioned shape:
 
@@ -128,25 +129,76 @@ patches = []
 copies = []
 appends = []
 
+[linux.root]
+kind = "initramfs"
+
 [rootfs]
 packages = []
 exclude_packages = []
 
+[bootstrap]
+kind = "linux"
+
+[uboot]
+kind = "none"
+
+[fit]
+kind = "none"
+
 [runtime]
 transport = "none"
+runnable = true
 ```
+
+`linux.root.kind = "initramfs"` keeps the ordinary embedded root. An external
+ext4 root adds the current `[layout]` and `[storage]` tables. Its PARTUUID is
+derived from the MBR signature and root partition number; the profile does not
+store a second copy. The profile also owns `CONFIG_EXT4_FS` and
+`CONFIG_BLK_DEV_INITRD` automatically instead of repeating them in Kconfig.
+
+The implemented U-Boot capability is `kind = "full"`. It builds the pinned full
+U-Boot together with `mkimage` and `dumpimage`. The full U-Boot binary is
+embedded in the profile's RAM bootstrap; the host tools are internal build
+inputs, not runtime bundle programs.
+
+A profile that combines full U-Boot, a SHA-256 FIT and ext4 root storage
+produces a complete partitioned `FPLINUX.img.xz`. The raw image exists only
+while it is assembled. Building the profile never writes removable media.
+Hardware use remains limited to the workflow and support status in the target
+documentation.
+
+Build-only profiles set `runtime.runnable = false`. The public `run` command
+rejects them before opening a bundle or waiting for USB.
 
 Build and check a declared profile explicitly:
 
 ```sh
 ./fplinux check kernel --profile <profile>
 ./fplinux build <target> --profile <profile>
+./fplinux package <target> --profile <profile> --candidate
+./fplinux console <target> --profile <profile>
 ```
 
 The ordinary commands without `--profile` use only each target's default
 context; declared profiles are checked only when named explicitly. Profiles
-cannot be passed to `package`, `console` or `verify`, and they are never release
-inputs.
+can only be packaged as candidates. They cannot be passed to `verify` and are
+never qualified release inputs. Profile package and console commands resolve
+the same isolated bundle generation selected by the corresponding build.
+
+`microsd-uboot` is the contributor-facing build context for the Nokia
+microSD system candidate. Build it by name, then use the public `microsd` boot
+mode to run or package that context:
+
+```sh
+./fplinux build nokia-ta1618 --profile microsd-uboot
+./fplinux run nokia-ta1618 --boot microsd
+./fplinux package nokia-ta1618 --boot microsd --candidate
+```
+
+The public boot mode is available only for `nokia-ta1618`. It has no fallback
+to the default target or another profile. The corresponding `--profile`
+commands remain available for contributor work; they are not another public
+name for the boot mode.
 
 `transport = "none"` changes only host-side runner behavior. The profile must
 also exclude any in-image gadget or SSH services it does not want. See

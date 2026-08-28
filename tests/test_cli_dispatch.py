@@ -60,7 +60,11 @@ class CliCacheLockTests(unittest.TestCase):
         with (
             mock.patch.object(sys, "argv", ["fplinux", *arguments]),
             mock.patch.object(cli, "ROOT", self.root),
-            mock.patch.object(cli, "discover_targets", return_value=("target",)),
+            mock.patch.object(
+                cli,
+                "discover_targets",
+                return_value=("target", "nokia-ta1618"),
+            ),
             mock.patch.object(cli, "cache_lock", side_effect=record_lock),
             mock.patch.object(cli, callback_name, callback),
         ):
@@ -129,12 +133,95 @@ class CliCacheLockTests(unittest.TestCase):
         )
         self.assertEqual(build.call_args.kwargs["profile"], "usb-host-lab")
 
+    def test_profile_package_and_console_use_the_selected_shared_lock_identity(self) -> None:
+        """Profile consumers retain the named bundle slot under the shared cache lock."""
+        cases = (
+            (
+                ["package", "target", "--profile", "microsd-uboot", "--candidate"],
+                "package_target",
+            ),
+            (
+                ["console", "target", "--profile", "microsd-uboot", "--exec", "id"],
+                "console_target",
+            ),
+        )
+        for arguments, callback_name in cases:
+            with self.subTest(command=arguments[0]):
+                events, callback = self._run(arguments, callback_name)
+
+                self.assertEqual(
+                    events,
+                    [
+                        (
+                            "lock",
+                            self.root / ".cache",
+                            False,
+                            arguments[0],
+                            "target",
+                            "microsd-uboot",
+                        ),
+                        "command",
+                    ],
+                )
+                self.assertEqual(callback.call_args.kwargs["profile"], "microsd-uboot")
+
+    def test_public_microsd_boot_locks_the_single_selected_context(self) -> None:
+        """The public name selects the profile bundle slot before taking the shared lock."""
+        for command, callback_name in (("run", "run_target"), ("package", "package_target")):
+            arguments = [command, "nokia-ta1618", "--boot", "microsd"]
+            if command == "package":
+                arguments.append("--candidate")
+            with self.subTest(command=command):
+                events, callback = self._run(arguments, callback_name)
+
+                self.assertEqual(
+                    events,
+                    [
+                        (
+                            "lock",
+                            self.root / ".cache",
+                            False,
+                            command,
+                            "nokia-ta1618",
+                            "microsd-uboot",
+                        ),
+                        "command",
+                    ],
+                )
+                self.assertEqual(callback.call_args.kwargs["boot"], "microsd")
+                self.assertIsNone(callback.call_args.kwargs["profile"])
+
+    def test_microsd_boot_does_not_fall_back_to_another_target(self) -> None:
+        """Reject the public mode before a shared lock or command can touch another target."""
+        with (
+            mock.patch.object(sys, "argv", ["fplinux", "run", "target", "--boot", "microsd"]),
+            mock.patch.object(cli, "ROOT", self.root),
+            mock.patch.object(
+                cli,
+                "discover_targets",
+                return_value=("target", "nokia-ta1618"),
+            ),
+            mock.patch.object(
+                cli,
+                "cache_lock",
+                side_effect=AssertionError("unsupported boot mode must not take the cache lock"),
+            ) as lock,
+            mock.patch.object(cli, "run_target") as run,
+            self.assertRaisesRegex(SystemExit, "not available for target target"),
+        ):
+            cli.main()
+
+        lock.assert_not_called()
+        run.assert_not_called()
+
     def test_invalid_profile_is_rejected_before_any_cache_or_retention_action(self) -> None:
         """Profile names are path components, not cache paths or deferred cleanup inputs."""
         cases = (
             ("check", "--profile", "../../x"),
             ("build", "target", "--profile", "../../x"),
+            ("package", "target", "--profile", "../../x"),
             ("run", "target", "--profile", "../../x"),
+            ("console", "target", "--profile", "../../x"),
         )
         for arguments in cases:
             with self.subTest(arguments=arguments):

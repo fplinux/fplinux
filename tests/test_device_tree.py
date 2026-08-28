@@ -7,12 +7,15 @@ import struct
 import tempfile
 import unittest
 from pathlib import Path
+from typing import ClassVar
 
 from fplinux_cli.device_tree import (
     DeviceTreeError,
     exact_path_properties,
     parse_nul_string,
     parse_nul_string_list,
+    verify_profile_dtb_layout,
+    verify_root_bootargs,
     verify_target_identity,
 )
 
@@ -64,6 +67,111 @@ def _compiled_tree(
         ">10I",
         0xD00DFEED,
         total_size,
+        structure_offset,
+        strings_offset,
+        40,
+        17,
+        16,
+        0,
+        len(strings),
+        len(structure),
+    )
+    return header + reserved + structure + strings
+
+
+def _compiled_profile_layout_tree(
+    layout: dict[str, int],
+    *,
+    memory_size: int | None = None,
+    reserved_range: tuple[int, int] | None = None,
+    display_range: tuple[int, int] | None = None,
+) -> bytes:
+    """Construct one compiled DTB artifact with the named volatile memory ranges."""
+    names = (
+        "device_type",
+        "reg",
+        "#address-cells",
+        "#size-cells",
+        "ranges",
+        "no-map",
+        "reg-names",
+    )
+    strings = b""
+    offsets: dict[str, int] = {}
+    for name in names:
+        offsets[name] = len(strings)
+        strings += name.encode("ascii") + b"\0"
+
+    def property_node(name: str, value: bytes) -> bytes:
+        return struct.pack(">III", 3, len(value), offsets[name]) + _aligned(value)
+
+    def node(name: str, properties: list[tuple[str, bytes]], children: list[bytes]) -> bytes:
+        return (
+            struct.pack(">I", 1)
+            + _aligned(name.encode("ascii") + b"\0")
+            + b"".join(property_node(key, value) for key, value in properties)
+            + b"".join(children)
+            + struct.pack(">I", 2)
+        )
+
+    ram_base = layout["ram_base"]
+    framebuffer = layout["framebuffer"]
+    resolved_memory_size = (
+        memory_size if memory_size is not None else layout["fdt_load"] - ram_base
+    )
+    reserved_base, reserved_size = reserved_range or (
+        framebuffer,
+        layout["framebuffer_size"],
+    )
+    display_base, display_size = display_range or (
+        framebuffer,
+        layout["framebuffer_size"],
+    )
+    memory = node(
+        f"memory@{ram_base:x}",
+        [
+            ("device_type", b"memory\0"),
+            ("reg", struct.pack(">II", ram_base, resolved_memory_size)),
+        ],
+        [],
+    )
+    reserved_framebuffer = node(
+        f"framebuffer@{framebuffer:x}",
+        [
+            ("reg", struct.pack(">II", reserved_base, reserved_size)),
+            ("no-map", b""),
+        ],
+        [],
+    )
+    reserved_memory = node(
+        "reserved-memory",
+        [
+            ("#address-cells", struct.pack(">I", 1)),
+            ("#size-cells", struct.pack(">I", 1)),
+            ("ranges", b""),
+        ],
+        [reserved_framebuffer],
+    )
+    display = node(
+        f"display@{framebuffer:x}",
+        [
+            (
+                "reg",
+                struct.pack(">IIII", display_base, display_size, 0x20800000, 0x1000),
+            ),
+            ("reg-names", b"framebuffer\0lcdc\0"),
+        ],
+        [],
+    )
+    soc = node("soc", [], [display])
+    structure = node("", [], [memory, reserved_memory, soc]) + struct.pack(">I", 9)
+    reserved = b"\0" * 16
+    structure_offset = 40 + len(reserved)
+    strings_offset = structure_offset + len(structure)
+    header = struct.pack(
+        ">10I",
+        0xD00DFEED,
+        strings_offset + len(strings),
         structure_offset,
         strings_offset,
         40,
@@ -172,6 +280,100 @@ class TargetIdentityTests(unittest.TestCase):
                 self.assertRaisesRegex(DeviceTreeError, rf"root lacks property {missing}"),
             ):
                 verify_target_identity(tree, self.target, self.model, self.compatibles)
+
+
+class RootBootargsTests(unittest.TestCase):
+    """Verify external-root behavior from the compiled DTB artifact."""
+
+    root: ClassVar[dict[str, object]] = {
+        "kind": "external",
+        "filesystem": "ext4",
+        "partuuid": "46504c58-02",
+        "wait_seconds": 10,
+    }
+
+    def tree(self, bootargs: str) -> bytes:
+        """Build one compiled /chosen node with the requested command line."""
+        return _compiled_tree([], [("chosen", [("bootargs", bootargs.encode() + b"\0")])])
+
+    def test_exact_external_root_contract_is_accepted(self) -> None:
+        """Allow unrelated diagnostics around the exact persistent-root options."""
+        verify_root_bootargs(
+            self.tree(
+                "console=tty0 root=PARTUUID=46504c58-02 rootfstype=ext4 "
+                "rootwait=10 rw init=/sbin/init panic=-1"
+            ),
+            self.root,
+        )
+
+    def test_conflicting_or_unbounded_root_options_are_rejected(self) -> None:
+        """Reject command lines that can mount a different or unbounded root."""
+        valid = "root=PARTUUID=46504c58-02 rootfstype=ext4 rootwait=10 rw init=/sbin/init"
+        cases = (
+            valid.replace("46504c58-02", "46504c59-02"),
+            valid + " root=/dev/mmcblk0p2",
+            valid.replace("rootwait=10", "rootwait"),
+            valid.replace("rw", "ro"),
+            valid + " rdinit=/init",
+            valid.replace("init=/sbin/init", "init=/init"),
+        )
+        for bootargs in cases:
+            with self.subTest(bootargs=bootargs), self.assertRaises(DeviceTreeError):
+                verify_root_bootargs(self.tree(bootargs), self.root)
+
+
+class ProfileLayoutDtbTests(unittest.TestCase):
+    """Verify fixed microSD boot memory ownership from compiled DTB bytes."""
+
+    layout: ClassVar[dict[str, int]] = {
+        "ram_base": 0x80000000,
+        "ram_size": 0x04000000,
+        "fdt_load": 0x83E00000,
+        "fdt_size": 0x00010000,
+        "fdt_pad": 0x00003000,
+        "framebuffer": 0x83F00000,
+        "framebuffer_size": 0x00100000,
+    }
+
+    def test_compiled_dtb_matches_the_fixed_fdt_and_framebuffer_arenas(self) -> None:
+        """Accept the fixed profile ranges when the compiled artifact owns each exactly."""
+        verify_profile_dtb_layout(_compiled_profile_layout_tree(self.layout), self.layout)
+
+    def test_memory_framebuffer_and_padded_fdt_mismatches_are_rejected(self) -> None:
+        """Reject each range error before the loader can hand it to U-Boot."""
+        memory = _compiled_profile_layout_tree(
+            self.layout,
+            memory_size=self.layout["fdt_load"] - self.layout["ram_base"] - 0x1000,
+        )
+        reserved = _compiled_profile_layout_tree(
+            self.layout,
+            reserved_range=(
+                self.layout["framebuffer"],
+                self.layout["framebuffer_size"] - 0x1000,
+            ),
+        )
+        display = _compiled_profile_layout_tree(
+            self.layout,
+            display_range=(
+                self.layout["framebuffer"] + 0x1000,
+                self.layout["framebuffer_size"],
+            ),
+        )
+        padded = _compiled_profile_layout_tree(self.layout)
+        too_small = dict(self.layout)
+        too_small["fdt_size"] = len(padded) + self.layout["fdt_pad"] - 1
+        cases = (
+            (memory, self.layout, "memory range"),
+            (reserved, self.layout, "framebuffer reservation"),
+            (display, self.layout, "display framebuffer range"),
+            (padded, too_small, "padding exceeds"),
+        )
+        for tree, layout, message in cases:
+            with (
+                self.subTest(message=message),
+                self.assertRaisesRegex(DeviceTreeError, message),
+            ):
+                verify_profile_dtb_layout(tree, layout)
 
 
 if __name__ == "__main__":

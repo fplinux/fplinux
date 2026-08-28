@@ -1,8 +1,9 @@
 # Release archives
 
 FPLinux archives are target-specific standalone bundles for Linux x86-64 hosts,
-made from a successful local build. They use the same RAM-only loader path as a
-source checkout.
+made from a successful local build. Every current archive begins through the
+same volatile RAM loader as a source checkout; a selected boot mode may then use
+additional removable-media artifacts bundled with its candidate.
 
 ## Current availability
 
@@ -40,7 +41,21 @@ A candidate proves that the source checkout produced a packageable bundle. It
 does not prove that the target boots or that any hardware feature works.
 Qualification covers the RAM runtime and bundled APKs. Documentation, notices,
 checksums and build metadata remain outside that phone-qualified payload but are
-still covered by archive integrity checks.
+still covered by archive integrity checks. A boot-mode candidate also includes
+its declared boot artifacts in the qualification payload.
+
+The Nokia microSD system candidate is selected independently of the ordinary
+RAM-only target archive:
+
+```sh
+./fplinux build nokia-ta1618 --profile microsd-uboot
+./fplinux package nokia-ta1618 --boot microsd --candidate
+```
+
+Its archive name uses `microsd`, includes the whole-card image from the selected
+context and cannot be packaged as a release. The contributor-facing
+`--profile microsd-uboot` package command remains available for qualification
+work, but it is not the public boot-mode name.
 
 Changing the executable payload requires another phone qualification. A build,
 archive checksum or host-side `verify` does not replace that phone test.

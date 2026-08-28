@@ -1,0 +1,12 @@
+if TARGET_FPLINUX_TA1618
+
+config SYS_BOARD
+	default "ta1618"
+
+config SYS_VENDOR
+	default "fplinux"
+
+config SYS_CONFIG_NAME
+	default "ta1618"
+
+endif

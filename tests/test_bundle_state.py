@@ -54,6 +54,7 @@ class BundleStateTests(unittest.TestCase):
             "linux_recipe": "c" * 64,
             "device_identity": "d" * 64,
             "rootfs_receipt": {"recipe": "e" * 64, "sha256": "f" * 64},
+            "boot_artifacts": {"required": []},
             "kbuild_receipt": {"recipe": "0" * 64, "sha256": "1" * 64},
             "profile": manifest_profile,
             "files": published_file_records(staging),

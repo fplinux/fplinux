@@ -1,0 +1,30 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-microsd-root
+pkgver=1
+pkgrel=0
+pkgdesc="Persistent microSD root filesystem support for FPLinux"
+url="https://github.com/fplinux/fplinux"
+arch="noarch"
+license="GPL-2.0-only"
+depends="cloud-utils-growpart e2fsprogs-extra openrc"
+options="!check"
+source="fplinux-microsd-grow fplinux-microsd-grow.initd"
+
+package() {
+	install -Dm755 "$srcdir/fplinux-microsd-grow" \
+		"$pkgdir/usr/libexec/fplinux/microsd-grow"
+	install -Dm755 "$srcdir/fplinux-microsd-grow.initd" \
+		"$pkgdir/etc/init.d/fplinux-microsd-grow"
+	mkdir -p "$pkgdir/etc/runlevels/boot" "$pkgdir/etc/runlevels/shutdown"
+	ln -s /etc/init.d/fplinux-microsd-grow \
+		"$pkgdir/etc/runlevels/boot/fplinux-microsd-grow"
+	for service in killprocs savecache mount-ro; do
+		ln -s "/etc/init.d/$service" \
+			"$pkgdir/etc/runlevels/shutdown/$service"
+	done
+}
+
+sha512sums="
+3a1aa8f10c24c5942d84474f54a49f2ae2cdf1815a5163352ef60cf259e56ca907f46c2bd317f3b833656ee9001042a7743c1a9206446665e223dda5c56406a4  fplinux-microsd-grow
+665cdb2a5369c42a6faf9413fb8836767ef26cbd678805b10d1d5896573514ea93c3d35add09004ec4c72e2fa8781feacd22d9e7e4af1884d2b39afc972b6844  fplinux-microsd-grow.initd
+"

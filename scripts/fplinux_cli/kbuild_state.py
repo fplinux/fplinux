@@ -15,7 +15,7 @@ from typing import NoReturn
 from .common import sha256_file
 
 RECEIPT_NAME = ".fplinux-kbuild-receipt.json"
-_ROOTFS_INPUT = "rootfs.cpio"
+_INITRAMFS_INPUT = "rootfs.cpio"
 
 
 class KbuildStateError(ValueError):
@@ -31,8 +31,9 @@ class KbuildPlan:
     """The exact recipe and files required to reuse ``work/kernel``."""
 
     recipe: str
-    rootfs: dict[str, int | str]
-    rootfs_input: Path
+    root: dict[str, object]
+    initramfs: dict[str, int | str] | None
+    initramfs_input: Path | None
     outputs: tuple[str, ...]
 
 
@@ -87,12 +88,45 @@ def _file_record_or_none(path: Path) -> dict[str, int | str] | None:
         return None
 
 
-def _rootfs_record(rootfs: dict[str, int | str]) -> dict[str, int | str]:
-    digest = _require_digest(rootfs.get("sha256"), "rootfs SHA-256")
-    size = rootfs.get("size")
+def _initramfs_record(initramfs: dict[str, int | str]) -> dict[str, int | str]:
+    digest = _require_digest(initramfs.get("sha256"), "initramfs SHA-256")
+    size = initramfs.get("size")
     if type(size) is not int or size < 0:
-        _error("rootfs size must be a non-negative integer")
+        _error("initramfs size must be a non-negative integer")
     return {"sha256": digest, "size": size}
+
+
+def _root_contract(root: dict[str, object]) -> dict[str, object]:
+    kind = root.get("kind")
+    if kind == "initramfs" and set(root) == {"kind"}:
+        return {"kind": "initramfs"}
+    if kind != "external" or set(root) != {
+        "kind",
+        "filesystem",
+        "partuuid",
+        "wait_seconds",
+    }:
+        _error("Kbuild root contract is invalid")
+    filesystem = root.get("filesystem")
+    partuuid = root.get("partuuid")
+    wait_seconds = root.get("wait_seconds")
+    if filesystem != "ext4":
+        _error("Kbuild external root filesystem must be ext4")
+    if (
+        not isinstance(partuuid, str)
+        or len(partuuid) != 11
+        or partuuid[8] != "-"
+        or any(character not in "0123456789abcdef" for character in partuuid[:8] + partuuid[9:])
+    ):
+        _error("Kbuild external root PARTUUID is invalid")
+    if type(wait_seconds) is not int or not 1 <= wait_seconds <= 60:
+        _error("Kbuild external root wait_seconds must be in 1..60")
+    return {
+        "kind": "external",
+        "filesystem": "ext4",
+        "partuuid": partuuid,
+        "wait_seconds": wait_seconds,
+    }
 
 
 def _source_file(identity: str, path: Path) -> dict[str, int | str]:
@@ -116,15 +150,15 @@ def implementation_identity(implementation: list[tuple[str, Path]]) -> str:
     return hashlib.sha256(_canonical_json(records)).hexdigest()
 
 
-def rootfs_identity(rootfs: Path) -> dict[str, int | str]:
-    """Return the rootfs bytes consumed by Kbuild."""
-    return _file_record(rootfs)
+def initramfs_identity(initramfs: Path) -> dict[str, int | str]:
+    """Return the initramfs bytes consumed by Kbuild."""
+    return _file_record(initramfs)
 
 
-def rootfs_input_path(work: Path, rootfs: dict[str, int | str]) -> Path:
+def initramfs_input_path(work: Path, initramfs: dict[str, int | str]) -> Path:
     """Return the fixed initramfs input path passed to Kbuild."""
-    _rootfs_record(rootfs)
-    return work / _ROOTFS_INPUT
+    _initramfs_record(initramfs)
+    return work / _INITRAMFS_INPUT
 
 
 def create_plan(  # noqa: PLR0913 -- exact causal inputs remain separate.
@@ -132,9 +166,10 @@ def create_plan(  # noqa: PLR0913 -- exact causal inputs remain separate.
     linux_recipe: str,
     defconfig: Path,
     defconfig_path: str,
-    rootfs: dict[str, int | str],
-    rootfs_input: Path,
-    rootfs_receipt: dict[str, str],
+    root: dict[str, object],
+    initramfs: dict[str, int | str] | None,
+    initramfs_input: Path | None,
+    initramfs_receipt: dict[str, str] | None,
     arch: str,
     cross_compile: str,
     commands: list[list[str]],
@@ -149,13 +184,23 @@ def create_plan(  # noqa: PLR0913 -- exact causal inputs remain separate.
     its normal defconfig and ``olddefconfig`` steps.
     """
     prepared_linux_recipe = _require_digest(linux_recipe, "prepared Linux recipe")
-    rootfs_record = _rootfs_record(rootfs)
-    if not isinstance(rootfs_receipt, dict) or set(rootfs_receipt) != {"recipe", "sha256"}:
-        _error("rootfs receipt identity is invalid")
-    rootfs_receipt_identity = {
-        "recipe": _require_digest(rootfs_receipt.get("recipe"), "rootfs recipe"),
-        "sha256": _require_digest(rootfs_receipt.get("sha256"), "rootfs receipt SHA-256"),
-    }
+    root_contract = _root_contract(root)
+    initramfs_record: dict[str, int | str] | None = None
+    initramfs_receipt_identity: dict[str, str] | None = None
+    if root_contract["kind"] == "initramfs":
+        if initramfs is None or initramfs_input is None or initramfs_receipt is None:
+            _error("initramfs root requires its artifact, input and receipt")
+        initramfs_record = _initramfs_record(initramfs)
+        if set(initramfs_receipt) != {"recipe", "sha256"}:
+            _error("initramfs receipt identity is invalid")
+        initramfs_receipt_identity = {
+            "recipe": _require_digest(initramfs_receipt.get("recipe"), "initramfs recipe"),
+            "sha256": _require_digest(
+                initramfs_receipt.get("sha256"), "initramfs receipt SHA-256"
+            ),
+        }
+    elif any(value is not None for value in (initramfs, initramfs_input, initramfs_receipt)):
+        _error("external root must not declare an initramfs input")
     if not isinstance(arch, str) or not arch:
         _error("Kbuild ARCH must be a non-empty string")
     normalized_outputs = tuple(_relative(value, "Kbuild output") for value in outputs)
@@ -163,16 +208,22 @@ def create_plan(  # noqa: PLR0913 -- exact causal inputs remain separate.
         _error("Kbuild outputs must be unique and non-empty")
     normalized_commands: list[list[str]] = []
     for command in commands:
-        if not command or not all(isinstance(value, str) and value for value in command):
-            _error("Kbuild command must contain non-empty strings")
+        if (
+            not command
+            or not isinstance(command[0], str)
+            or not command[0]
+            or not all(isinstance(value, str) for value in command)
+        ):
+            _error("Kbuild command must begin with a non-empty executable string")
         normalized_commands.append(_recipe_command(command))
     implementation_records = _implementation_records(implementation)
     manifest: dict[str, object] = {
         "prepared_linux_recipe": prepared_linux_recipe,
         "defconfig": _source_file(_relative(defconfig_path, "Kbuild defconfig"), defconfig),
-        "rootfs": rootfs_record,
-        "rootfs_input": str(rootfs_input),
-        "rootfs_receipt": rootfs_receipt_identity,
+        "root": root_contract,
+        "initramfs": initramfs_record,
+        "initramfs_input": str(initramfs_input) if initramfs_input is not None else None,
+        "initramfs_receipt": initramfs_receipt_identity,
         "arch": arch,
         "cross_compile": str(cross_compile),
         "commands": normalized_commands,
@@ -184,8 +235,9 @@ def create_plan(  # noqa: PLR0913 -- exact causal inputs remain separate.
     recipe = hashlib.sha256(_canonical_json(manifest)).hexdigest()
     return KbuildPlan(
         recipe=recipe,
-        rootfs=rootfs_record,
-        rootfs_input=rootfs_input,
+        root=root_contract,
+        initramfs=initramfs_record,
+        initramfs_input=initramfs_input,
         outputs=normalized_outputs,
     )
 
@@ -234,7 +286,13 @@ def cache_hit(work: Path, output: Path, plan: KbuildPlan) -> bool:
     return (
         receipt == _receipt_payload(plan)
         and _outputs_exist(output, plan)
-        and _file_record_or_none(plan.rootfs_input) == plan.rootfs
+        and (
+            plan.initramfs is None
+            or (
+                plan.initramfs_input is not None
+                and _file_record_or_none(plan.initramfs_input) == plan.initramfs
+            )
+        )
     )
 
 
@@ -256,15 +314,17 @@ def prepare_output(work: Path, output: Path) -> None:
         _error(f"Kbuild output directory is invalid: {output}")
 
 
-def materialize_rootfs_input(work: Path, source: Path, plan: KbuildPlan) -> Path:
+def materialize_initramfs_input(work: Path, source: Path, plan: KbuildPlan) -> Path:
     """Copy the current rootfs to the digest-derived Kbuild input path."""
-    destination = plan.rootfs_input
-    if destination != rootfs_input_path(work, plan.rootfs):
-        _error("Kbuild rootfs input path is outside the managed directory")
-    if _file_record_or_none(destination) == plan.rootfs:
+    if plan.initramfs is None or plan.initramfs_input is None:
+        _error("Kbuild plan does not consume an initramfs")
+    destination = plan.initramfs_input
+    if destination != initramfs_input_path(work, plan.initramfs):
+        _error("Kbuild initramfs input path is outside the managed directory")
+    if _file_record_or_none(destination) == plan.initramfs:
         return destination
-    if rootfs_identity(source) != plan.rootfs:
-        _error("rootfs changed while preparing Kbuild input")
+    if initramfs_identity(source) != plan.initramfs:
+        _error("initramfs changed while preparing Kbuild input")
     descriptor, temporary_name = tempfile.mkstemp(
         dir=work,
         prefix=f".{destination.name}.",
@@ -274,8 +334,8 @@ def materialize_rootfs_input(work: Path, source: Path, plan: KbuildPlan) -> Path
     try:
         with os.fdopen(descriptor, "wb") as target, source.open("rb") as origin:
             shutil.copyfileobj(origin, target)
-        if _file_record(temporary) != plan.rootfs:
-            _error("materialized Kbuild rootfs differs from its digest")
+        if _file_record(temporary) != plan.initramfs:
+            _error("materialized Kbuild initramfs differs from its digest")
         temporary.replace(destination)
     finally:
         temporary.unlink(missing_ok=True)
@@ -286,8 +346,11 @@ def publish_success(work: Path, output: Path, plan: KbuildPlan) -> None:
     """Publish the exact receipt only after every declared output exists."""
     if not _outputs_exist(output, plan):
         _error("Kbuild declared output is missing or invalid")
-    if _file_record_or_none(plan.rootfs_input) != plan.rootfs:
-        _error("Kbuild rootfs input is missing or differs from its digest")
+    if plan.initramfs is not None and (
+        plan.initramfs_input is None
+        or _file_record_or_none(plan.initramfs_input) != plan.initramfs
+    ):
+        _error("Kbuild initramfs input is missing or differs from its digest")
     _write_json_atomic(_receipt_path(work), _receipt_payload(plan))
 
 
