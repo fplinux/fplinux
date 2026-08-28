@@ -25,10 +25,10 @@ class DeviceStateTests(unittest.TestCase):
         self.target = "demo-device"
         self.linux_recipe = "2" * 64
         self.bootstrap_recipe = "3" * 64
-        self.rootfs: dict[str, object] = {"sha256": "1" * 64, "size": 1234}
-        self.rootfs_receipt: dict[str, object] = {
-            "recipe": "7" * 64,
-            "sha256": "8" * 64,
+        self.root: dict[str, object] = {
+            "kind": "initramfs",
+            "artifact": {"sha256": "1" * 64, "size": 1234},
+            "receipt": {"recipe": "7" * 64, "sha256": "8" * 64},
         }
         self.implementation = Path(self.temporary.name) / "implementation.py"
         self.implementation.write_text("first\n", encoding="utf-8")
@@ -40,8 +40,7 @@ class DeviceStateTests(unittest.TestCase):
             target=self.target,
             linux_recipe=self.linux_recipe,
             bootstrap_recipe=self.bootstrap_recipe,
-            rootfs=self.rootfs,
-            rootfs_receipt=self.rootfs_receipt,
+            root=self.root,
             kbuild_implementation=kbuild_state.implementation_identity(
                 [("scripts/implementation.py", self.implementation)]
             ),
@@ -81,7 +80,7 @@ class DeviceStateTests(unittest.TestCase):
         os.utime(self.defconfig, ns=(1_000_000_000, 1_000_000_000))
         self.assertEqual(before, self._identity())
 
-    def test_actual_linux_rootfs_and_target_kernel_inputs_change_identity(self) -> None:
+    def test_actual_linux_root_and_target_kernel_inputs_change_identity(self) -> None:
         """Each pre-Kbuild input that changes device-visible kernel content is causal."""
         before = self._identity()
 
@@ -93,13 +92,21 @@ class DeviceStateTests(unittest.TestCase):
         self.assertNotEqual(before, self._identity())
         self.bootstrap_recipe = "3" * 64
 
-        self.rootfs = {"sha256": "6" * 64, "size": 1234}
+        self.root = {
+            "kind": "initramfs",
+            "artifact": {"sha256": "6" * 64, "size": 1234},
+            "receipt": {"recipe": "7" * 64, "sha256": "8" * 64},
+        }
         self.assertNotEqual(before, self._identity())
-        self.rootfs = {"sha256": "1" * 64, "size": 1234}
+        self.root = {
+            "kind": "initramfs",
+            "artifact": {"sha256": "1" * 64, "size": 1234},
+            "receipt": {"recipe": "7" * 64, "sha256": "8" * 64},
+        }
 
-        self.rootfs_receipt = {"recipe": "9" * 64, "sha256": "8" * 64}
+        self.root["receipt"] = {"recipe": "9" * 64, "sha256": "8" * 64}
         self.assertNotEqual(before, self._identity())
-        self.rootfs_receipt = {"recipe": "7" * 64, "sha256": "8" * 64}
+        self.root["receipt"] = {"recipe": "7" * 64, "sha256": "8" * 64}
 
         self.arch = "arm64"
         self.assertNotEqual(before, self._identity())
@@ -127,8 +134,7 @@ class DeviceStateTests(unittest.TestCase):
             "target": self.target,
             "linux_recipe": self.linux_recipe,
             "bootstrap_recipe": self.bootstrap_recipe,
-            "rootfs": self.rootfs,
-            "rootfs_receipt": self.rootfs_receipt,
+            "root": self.root,
             "kbuild_implementation": kbuild_state.implementation_identity(
                 [("scripts/implementation.py", self.implementation)]
             ),
@@ -154,13 +160,12 @@ class DeviceStateTests(unittest.TestCase):
 
     def test_invalid_identity_inputs_fail_closed(self) -> None:
         """The helper cannot silently label a kernel from an incomplete closure."""
-        with self.assertRaisesRegex(device_state.DeviceStateError, "rootfs identity"):
+        with self.assertRaisesRegex(device_state.DeviceStateError, "initramfs root"):
             device_state.device_kernel_identity(
                 target=self.target,
                 linux_recipe=self.linux_recipe,
                 bootstrap_recipe=self.bootstrap_recipe,
-                rootfs={"sha256": "1" * 64},
-                rootfs_receipt=self.rootfs_receipt,
+                root={"kind": "initramfs", "artifact": {"sha256": "1" * 64}},
                 kbuild_implementation="9" * 64,
                 arch=self.arch,
                 defconfig=self.defconfig,
@@ -171,8 +176,7 @@ class DeviceStateTests(unittest.TestCase):
                 target=self.target,
                 linux_recipe=self.linux_recipe,
                 bootstrap_recipe=self.bootstrap_recipe,
-                rootfs=self.rootfs,
-                rootfs_receipt=self.rootfs_receipt,
+                root=self.root,
                 kbuild_implementation="9" * 64,
                 arch=self.arch,
                 defconfig=self.defconfig,

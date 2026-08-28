@@ -1,0 +1,137 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name = "microsd-uboot"
+
+[linux]
+config_enable = []
+config_disable = []
+patches = ["0001-nokia-ta1618-external-root.patch"]
+copies = []
+appends = []
+
+[linux.root]
+kind = "external"
+filesystem = "ext4"
+wait_seconds = 10
+
+[rootfs]
+packages = ["fplinux-microsd-root"]
+exclude_packages = []
+
+[bootstrap]
+kind = "uboot-stage0"
+source = "bootstrap"
+image = "ta1618_sd_stage0.bin"
+map = "obj/ta1618_sd_stage0_map.txt"
+
+[uboot]
+kind = "full"
+source = "u-boot.lock.toml"
+archive_prefix = "u-boot-2026.07"
+defconfig = "uboot/ta1618_defconfig"
+patches = ["uboot/integration.patch"]
+
+[[uboot.copies]]
+source = "targets/nokia-ta1618/profiles/microsd-uboot/uboot/ums9117-ta1618-u-boot.dts"
+destination = "arch/arm/dts/ums9117-ta1618-u-boot.dts"
+
+[[uboot.copies]]
+source = "targets/nokia-ta1618/profiles/microsd-uboot/uboot/board.Kconfig"
+destination = "board/fplinux/ta1618/Kconfig"
+
+[[uboot.copies]]
+source = "targets/nokia-ta1618/profiles/microsd-uboot/uboot/board.Makefile"
+destination = "board/fplinux/ta1618/Makefile"
+
+[[uboot.copies]]
+source = "targets/nokia-ta1618/profiles/microsd-uboot/uboot/entry.S"
+destination = "board/fplinux/ta1618/entry.S"
+
+[[uboot.copies]]
+source = "targets/nokia-ta1618/profiles/microsd-uboot/uboot/stage0-handoff.h"
+destination = "board/fplinux/ta1618/stage0-handoff.h"
+
+[[uboot.copies]]
+source = "targets/nokia-ta1618/profiles/microsd-uboot/uboot/stage0-console.c"
+destination = "board/fplinux/ta1618/stage0-console.c"
+
+[[uboot.copies]]
+source = "targets/nokia-ta1618/profiles/microsd-uboot/uboot/stage0-timer.c"
+destination = "board/fplinux/ta1618/stage0-timer.c"
+
+[[uboot.copies]]
+source = "targets/nokia-ta1618/profiles/microsd-uboot/uboot/ta1618-mmc.c"
+destination = "board/fplinux/ta1618/ta1618-mmc.c"
+
+[[uboot.copies]]
+source = "targets/nokia-ta1618/profiles/microsd-uboot/uboot/ta1618-mmc.h"
+destination = "board/fplinux/ta1618/ta1618-mmc.h"
+
+[[uboot.copies]]
+source = "targets/nokia-ta1618/profiles/microsd-uboot/uboot/ta1618-sdboot.c"
+destination = "board/fplinux/ta1618/ta1618-sdboot.c"
+
+[[uboot.copies]]
+source = "targets/nokia-ta1618/profiles/microsd-uboot/uboot/board.c"
+destination = "board/fplinux/ta1618/board.c"
+
+[[uboot.copies]]
+source = "targets/nokia-ta1618/profiles/microsd-uboot/uboot/ta1618.h"
+destination = "include/configs/ta1618.h"
+
+[[uboot.copies]]
+source = "platforms/ums9117/common/ums9117-boot-contract.h"
+destination = "board/fplinux/ta1618/ums9117-boot-contract.h"
+
+[[uboot.copies]]
+source = "platforms/ums9117/common/ums9117-sdio-regs.h"
+destination = "board/fplinux/ta1618/ums9117-sdio-regs.h"
+
+[[uboot.copies]]
+source = "platforms/ums9117/common/ums9117-sdio-core.h"
+destination = "board/fplinux/ta1618/ums9117-sdio-core.h"
+
+[[uboot.copies]]
+source = "platforms/ums9117/common/ums9117-sdio-core.c"
+destination = "board/fplinux/ta1618/ums9117-sdio-core.c"
+
+[[uboot.copies]]
+source = "targets/nokia-ta1618/common/ta1618-sdio-board.h"
+destination = "board/fplinux/ta1618/ta1618-sdio-board.h"
+
+[[uboot.copies]]
+source = "targets/nokia-ta1618/common/ta1618-sdio-board.c"
+destination = "board/fplinux/ta1618/ta1618-sdio-board.c"
+
+[fit]
+kind = "sha256"
+filename = "FPLINUX.ITB"
+
+[layout]
+resident_start = 0x80100000
+resident_limit = 0x81000000
+uboot_load = 0x81000000
+uboot_size = 0x00100000
+uboot_stack = 0x80f00000
+fit_load = 0x83200000
+fit_size = 0x00c00000
+fdt_pad = 0x00003000
+
+[storage]
+filename = "FPLINUX.img"
+disk_signature = 0x46504c58
+boot_partition = 1
+boot_offset = 0x00100000
+boot_size = 0x04000000
+boot_label = "FPLBOOT"
+root_partition = 2
+root_offset = 0x04100000
+root_size = 0x04000000
+root_filename = "FPLROOT.ext4"
+root_label = "FPLROOT"
+root_uuid = "042681b5-d000-5b78-9c16-8e8b2944594e"
+block_size = 4096
+inode_size = 256
+
+[runtime]
+transport = "usb-ncm"
+runnable = true

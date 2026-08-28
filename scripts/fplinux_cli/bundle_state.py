@@ -15,6 +15,7 @@ BUILD_MANIFEST_NAME = "build-manifest.json"
 BUILD_MANIFEST_FIELDS = frozenset(
     {
         "rootfs_receipt",
+        "boot_artifacts",
         "container_image_recipe",
         "apk_signing_key",
         "device_identity",

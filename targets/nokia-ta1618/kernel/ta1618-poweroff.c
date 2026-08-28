@@ -11,7 +11,6 @@
 #include <linux/reboot.h>
 #include <linux/slab.h>
 #include <linux/string.h>
-#include <linux/syscalls.h>
 #include <linux/workqueue.h>
 #include <linux/soc/sprd/ums9117-adi.h>
 
@@ -101,13 +100,11 @@ static void ta1618_power_key_hold_work(struct work_struct *work)
 		return;
 	}
 
-	pr_info("TA-1618 five-second power-key hold accepted\n");
-	ksys_sync();
+	pr_info("TA-1618 five-second power-key orderly shutdown requested\n");
 	if (READ_ONCE(system_state) != SYSTEM_RUNNING)
 		return;
-	kernel_power_off();
-	pr_emerg("TA-1618 power-key kernel_power_off returned\n");
-	ta1618_halt();
+	/* Never force power off if userspace cannot make storage safe. */
+	orderly_poweroff(false);
 }
 
 static void ta1618_power_key_event(struct input_handle *handle,

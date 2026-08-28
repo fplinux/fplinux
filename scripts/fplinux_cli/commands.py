@@ -66,6 +66,10 @@ This archive is for physical device qualification and testing only.
 Candidate packaging does not assert release qualification.
 """
 SSH_HELPER_PATH = "runner/ssh_transport.py"
+MICROSD_BOOT_MODE = "microsd"
+MICROSD_BOOT_TARGET = "nokia-ta1618"
+MICROSD_BOOT_PROFILE = "microsd-uboot"
+PUBLIC_BOOT_MODES = (MICROSD_BOOT_MODE,)
 
 
 @dataclass(frozen=True)
@@ -108,6 +112,25 @@ def _profile_log_target(target: str, profile: str | None) -> str:
     return f"{target}/profiles/{profile}"
 
 
+def selected_context_profile(
+    target: str | None,
+    *,
+    profile: str | None,
+    boot: str | None,
+) -> str | None:
+    """Resolve one explicit contributor profile or public boot mode without fallback."""
+    if profile is not None and boot is not None:
+        fail("--boot and --profile cannot be used together")
+    if boot is None:
+        return profile
+    if boot == MICROSD_BOOT_MODE and target == MICROSD_BOOT_TARGET:
+        return MICROSD_BOOT_PROFILE
+    if target is None:
+        fail(f"boot mode {boot} requires a target")
+    fail(f"boot mode {boot} is not available for target {target}")
+    return None
+
+
 def _bundle_manifest(bundle: CurrentBundle) -> dict[str, Any]:
     """Decode manifest bytes already validated by the immutable bundle resolver."""
     manifest = json.loads(bundle.manifest_bytes)
@@ -148,6 +171,27 @@ def _manifest_matches_identity(manifest: dict[str, Any], identity: BuildIdentity
     )
 
 
+def _required_boot_artifacts(manifest: dict[str, Any]) -> tuple[str, ...]:
+    """Return the normalized profile artifacts owned by one build manifest."""
+    boot_artifacts = manifest.get("boot_artifacts")
+    required = boot_artifacts.get("required") if isinstance(boot_artifacts, dict) else None
+    if (
+        not isinstance(required, list)
+        or not all(isinstance(relative, str) and relative for relative in required)
+        or len(required) != len(set(required))
+    ):
+        message = "build manifest boot artifacts are invalid"
+        raise ValueError(message)
+    normalized: list[str] = []
+    for relative in required:
+        path = PurePosixPath(relative)
+        if path.is_absolute() or ".." in path.parts or path.as_posix() != relative:
+            message = "build manifest boot artifact path is unsafe"
+            raise ValueError(message)
+        normalized.append(relative)
+    return tuple(normalized)
+
+
 def _matching_target_bundle(
     target: str,
     identity: BuildIdentity | None,
@@ -167,11 +211,23 @@ def _matching_target_bundle(
     if not _manifest_matches_identity(manifest, identity):
         return None
     files = manifest.get("files")
-    record = files.get(image_relative) if isinstance(files, dict) else None
-    expected = record.get("sha256") if isinstance(record, dict) else None
-    image = bundle.path / image_relative
-    if not isinstance(expected, str) or not image.is_file() or sha256_file(image) != expected:
+    try:
+        required = _required_boot_artifacts(manifest)
+    except ValueError:
         return None
+    if not isinstance(files, dict):
+        return None
+    for relative in (image_relative, *required):
+        record = files.get(relative)
+        expected = record.get("sha256") if isinstance(record, dict) else None
+        artifact = bundle.path / relative
+        if (
+            not isinstance(expected, str)
+            or artifact.is_symlink()
+            or not artifact.is_file()
+            or sha256_file(artifact) != expected
+        ):
+            return None
     return bundle, manifest
 
 
@@ -250,17 +306,18 @@ def _keyboard_interface(config: dict[str, Any]) -> str:
     return str(config["runtime"]["usb"]["linux_gadget"]["keyboard_interface"])
 
 
-def console_target(
+def console_target(  # noqa: PLR0913 -- public CLI modes remain explicit.
     target: str,
     *,
+    profile: str | None = None,
     keyboard: str | None,
     exec_command: str | None,
     upload: list[str] | None,
     pull: list[str] | None,
 ) -> None:
     """Open the SSH session, or forward one evdev keyboard over USB."""
-    config = load_target(target)
-    bundle, manifest = _resolve_target_bundle(target)
+    config = load_target(target, profile)
+    bundle, manifest = _resolve_target_bundle(target, profile)
     if keyboard is None:
         ssh_transport, session = _current_ssh_session(bundle, manifest, target)
         if exec_command is not None:
@@ -782,7 +839,11 @@ def build(
         discard_staged_workspace_snapshot(snapshot, workspace)
 
 
-def target_archive_file(target: str, relative: str) -> tuple[str, Path]:
+def target_archive_file(
+    target: str,
+    relative: str,
+    profile: str | None = None,
+) -> tuple[str, Path]:
     """Map one target-owned release document into its stable archive path."""
     target_name = PurePosixPath(target)
     if (
@@ -824,6 +885,23 @@ def target_archive_file(target: str, relative: str) -> tuple[str, Path]:
             fail(f"target package file must not traverse a symlink: {source}")
     if not source.is_file():
         fail(f"target package file is missing or invalid: {source}")
+    if profile is not None:
+        profile_name = PurePosixPath(profile)
+        if (
+            profile_name.is_absolute()
+            or len(profile_name.parts) != 1
+            or profile_name.as_posix() != profile
+        ):
+            fail(f"invalid profile package name: {profile}")
+        override = target_root / "profiles" / profile
+        for component in source_name.parts:
+            override /= component
+            if override.is_symlink():
+                fail(f"profile package file must not traverse a symlink: {override}")
+        if override.exists():
+            if not override.is_file():
+                fail(f"profile package file is invalid: {override}")
+            source = override
     return archive_name, source
 
 
@@ -834,13 +912,14 @@ def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]
     bundle_files = manifest["bundle_files"]
     runtime_files = manifest["runtime_files"]
     documents = manifest["documents"]
+    profile = config.get("profile")
     archive_names = set(bundle_files)
     shared_collisions = archive_names & PACKAGE_DOCUMENTS.keys()
     if shared_collisions:
         fail(f"duplicate release archive path: {min(shared_collisions)}")
     archive_names.update(PACKAGE_DOCUMENTS)
     for relative in documents:
-        archive_name, _source = target_archive_file(target, relative)
+        archive_name, _source = target_archive_file(target, relative, profile)
         if archive_name in archive_names:
             fail(f"duplicate release archive path: {archive_name}")
         archive_names.add(archive_name)
@@ -882,31 +961,64 @@ def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]
     }
 
 
-def add_target_files(files: dict[str, bytes], target: str, relative_names: list[str]) -> None:
+def add_target_files(
+    files: dict[str, bytes],
+    target: str,
+    relative_names: list[str],
+    profile: str | None = None,
+) -> None:
     for relative in relative_names:
-        archive_name, source = target_archive_file(target, relative)
+        archive_name, source = target_archive_file(target, relative, profile)
         if archive_name in files:
             fail(f"duplicate release archive path: {archive_name}")
         files[archive_name] = source.read_bytes()
 
 
-def package_target(target: str, *, candidate: bool = False) -> None:
-    config = load_target(target)
+def package_target(
+    target: str,
+    *,
+    profile: str | None = None,
+    boot: str | None = None,
+    candidate: bool = False,
+) -> None:
+    selected_profile = selected_context_profile(target, profile=profile, boot=boot)
+    if selected_profile is not None and not candidate:
+        fail("non-default boot contexts can only be packaged with --candidate")
+    config = load_target(target, selected_profile)
     release = load_release_manifest(target, config)
-    bundle, manifest = _resolve_target_bundle(target)
-    snapshot = target_workspace_snapshot(target)
+    bundle, manifest = _resolve_target_bundle(target, selected_profile)
+    snapshot = target_workspace_snapshot(target, selected_profile)
     image_recipe = container_image_recipe_digest()
     identity = _build_identity(snapshot, image_recipe, ROOT / ".cache")
     files_table = manifest.get("files")
+    try:
+        required_boot_artifacts = _required_boot_artifacts(manifest)
+    except ValueError as error:
+        fail(str(error))
+    reserved = {
+        "build-manifest.json",
+        "CANDIDATE-NOTICE.txt",
+        "SHA256SUMS",
+        *PACKAGE_DOCUMENTS,
+    }
+    collision = reserved & set(required_boot_artifacts)
+    if collision:
+        fail(f"profile boot artifact has a reserved archive path: {min(collision)}")
+    bundle_files = list(dict.fromkeys((*release["bundle_files"], *required_boot_artifacts)))
+    qualification_files = list(
+        dict.fromkeys((*release["qualification_files"], *required_boot_artifacts))
+    )
     if (
         not _manifest_matches_identity(manifest, identity)
         or not isinstance(files_table, dict)
-        or not set(release["bundle_files"]).issubset(files_table)
+        or not set(bundle_files).issubset(files_table)
     ):
-        fail(f"build output is stale; rebuild it: ./fplinux build {target}")
-
+        fail(
+            "build output is stale; rebuild it: "
+            f"{_profile_command('build', target, selected_profile)}"
+        )
     files: dict[str, bytes] = {}
-    for relative in release["bundle_files"]:
+    for relative in bundle_files:
         source = bundle.path / relative
         if source.is_symlink() or not source.is_file():
             fail(f"release input is missing or invalid: {source}")
@@ -920,12 +1032,10 @@ def package_target(target: str, *, candidate: bool = False) -> None:
             fail(f"release input differs from its successful build manifest: {source}")
         files[relative] = data
 
-    qualification_payload = {
-        relative: files[relative] for relative in release["qualification_files"]
-    }
+    qualification_payload = {relative: files[relative] for relative in qualification_files}
     qualification_digest = payload_digest(qualification_payload, release["executables"])
     files["build-manifest.json"] = bundle.manifest_bytes
-    verified_digest = verified_runtime_digest(target)
+    verified_digest = None if candidate else verified_runtime_digest(target)
     if not candidate and verified_digest != qualification_digest:
         fail(
             "this executable payload is not hardware-qualified for release; "
@@ -933,7 +1043,7 @@ def package_target(target: str, *, candidate: bool = False) -> None:
             f"(qualification SHA256 {qualification_digest})"
         )
 
-    add_target_files(files, target, release["documents"])
+    add_target_files(files, target, release["documents"], selected_profile)
     if candidate:
         files["CANDIDATE-NOTICE.txt"] = CANDIDATE_NOTICE
     for archive_name, source in PACKAGE_DOCUMENTS.items():
@@ -945,7 +1055,9 @@ def package_target(target: str, *, candidate: bool = False) -> None:
     content_digest = payload_digest(files, release["executables"])
 
     qualifier = "candidate" if candidate else "release"
-    stem = f"FPLinux-{target}-{qualifier}-linux-x86_64-{content_digest[:16]}"
+    context = boot if boot is not None else selected_profile
+    context_component = "" if context is None else f"-{context}"
+    stem = f"FPLinux-{target}{context_component}-{qualifier}-linux-x86_64-{content_digest[:16]}"
     destination = ROOT / ".cache/out" / ("candidates" if candidate else "releases")
     destination.mkdir(parents=True, exist_ok=True)
     archive = destination / f"{stem}.zip"
@@ -986,11 +1098,23 @@ def package_target(target: str, *, candidate: bool = False) -> None:
     print(f"ramboot.bin SHA256: {image_digest}")
 
 
-def run_target(target: str, *, profile: str | None = None) -> None:
+def run_target(
+    target: str,
+    *,
+    profile: str | None = None,
+    boot: str | None = None,
+) -> None:
     """Run the fixed shared runner from a successful target bundle."""
-    if profile is not None:
-        load_target(target, profile)
-    bundle, _manifest = _resolve_target_bundle(target, profile)
+    selected_profile = selected_context_profile(target, profile=profile, boot=boot)
+    if selected_profile is not None:
+        target_config = load_target(target, selected_profile)
+        if not target_config["runtime"]["runnable"]:
+            fail(f"profile is build-only and cannot be run: {target}/{selected_profile}")
+    bundle, manifest = _resolve_target_bundle(target, selected_profile)
+    if selected_profile is not None:
+        boot_artifacts = manifest.get("boot_artifacts")
+        if not isinstance(boot_artifacts, dict) or boot_artifacts.get("runnable") is not True:
+            fail(f"profile bundle is build-only and cannot be run: {target}/{selected_profile}")
     runner = bundle.path / "runner/run.py"
     if runner.is_symlink() or not runner.is_file():
         fail(f"current bundle has no valid runner: {runner}")

@@ -205,6 +205,22 @@ destination = "fplinux-boot-screen"
 source = "platforms/ums9117/bootstrap"
 destination = "ums9117-bootstrap"
 
+[[bootstrap.shared_copies]]
+source = "platforms/ums9117/common/ums9117-boot-contract.h"
+destination = "ums9117-common/ums9117-boot-contract.h"
+
+[bootstrap.layout]
+ram_base = 0x80000000
+ram_size = 0x04000000
+timer_hz = 1000
+kernel_load = 0x82000000
+kernel_entry = 0x82000000
+kernel_size = 0x01200000
+fdt_load = 0x83e00000
+fdt_size = 0x00010000
+framebuffer = 0x83f00000
+framebuffer_size = 0x00100000
+
 [runtime]
 fdl1_load_address = 0x00006200
 

@@ -1,0 +1,15 @@
+#!/sbin/openrc-run
+# SPDX-License-Identifier: GPL-2.0-only
+# shellcheck shell=sh disable=SC2034
+
+description="Expand the FPLinux microSD root filesystem"
+
+depend() {
+	need localmount
+}
+
+start() {
+	ebegin "Expanding the microSD root filesystem"
+	/usr/libexec/fplinux/microsd-grow
+	eend $?
+}

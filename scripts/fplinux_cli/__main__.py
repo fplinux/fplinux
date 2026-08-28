@@ -10,11 +10,13 @@ from typing import TYPE_CHECKING
 
 from .cachelock import cache_lock
 from .commands import (
+    PUBLIC_BOOT_MODES,
     build,
     checksum_aport,
     console_target,
     package_target,
     run_target,
+    selected_context_profile,
     verify_booted,
 )
 from .common import ROOT
@@ -74,13 +76,17 @@ def _dispatch_with_cache_lock(args: argparse.Namespace, action: Callable[[], Non
         return
 
     target = getattr(args, "target", None)
-    profile = getattr(args, "profile", None)
+    profile = selected_context_profile(
+        target if isinstance(target, str) else None,
+        profile=getattr(args, "profile", None),
+        boot=getattr(args, "boot", None),
+    )
     with cache_lock(
         ROOT / ".cache",
         exclusive=exclusive,
         command=args.command,
         target=target if isinstance(target, str) else None,
-        profile=profile if isinstance(profile, str) else None,
+        profile=profile,
     ):
         try:
             action()
@@ -172,15 +178,27 @@ def _command_action(
     elif args.command == "checksum":
         action = partial(checksum_aport, args.aport, offline=args.offline)
     elif args.command == "package":
-        action = partial(package_target, args.target, candidate=args.candidate)
+        action = partial(
+            package_target,
+            args.target,
+            profile=args.profile,
+            boot=args.boot,
+            candidate=args.candidate,
+        )
     elif args.command == "prune":
         action = partial(prune, json_output=args.prune_json, apply=args.prune_apply)
     elif args.command == "run":
-        action = partial(run_target, args.target, profile=args.profile)
+        action = partial(
+            run_target,
+            args.target,
+            profile=args.profile,
+            boot=args.boot,
+        )
     elif args.command == "console":
         action = partial(
             console_target,
             args.target,
+            profile=args.profile,
             keyboard=args.keyboard,
             exec_command=args.exec_command,
             upload=args.upload,
@@ -272,6 +290,18 @@ def main() -> None:
         "package", help="package an existing build for Linux x86-64"
     )
     package_parser.add_argument("target", choices=targets)
+    package_context = package_parser.add_mutually_exclusive_group()
+    package_context.add_argument(
+        "--boot",
+        choices=PUBLIC_BOOT_MODES,
+        help="package the selected public boot mode",
+    )
+    package_context.add_argument(
+        "--profile",
+        type=_profile_name,
+        metavar="NAME",
+        help="package one contributor-selected target profile",
+    )
     package_parser.add_argument(
         "--candidate",
         action="store_true",
@@ -294,15 +324,27 @@ def main() -> None:
     )
     run_parser = commands.add_parser("run", help="run a target's volatile-RAM loader")
     run_parser.add_argument("target", choices=targets)
-    run_parser.add_argument(
+    run_context = run_parser.add_mutually_exclusive_group()
+    run_context.add_argument(
+        "--boot",
+        choices=PUBLIC_BOOT_MODES,
+        help="run the selected public boot mode",
+    )
+    run_context.add_argument(
         "--profile",
         type=_profile_name,
         metavar="NAME",
-        help="run one target-owned non-default profile",
+        help="run one contributor-selected target profile",
     )
 
     console_parser = commands.add_parser("console", help="connect to a running target over USB")
     console_parser.add_argument("target", choices=targets)
+    console_parser.add_argument(
+        "--profile",
+        type=_profile_name,
+        metavar="NAME",
+        help="reconnect to a session started from one target-owned profile",
+    )
     console_actions = console_parser.add_mutually_exclusive_group()
     console_actions.add_argument("--keyboard", metavar="EVDEV")
     console_actions.add_argument("--exec", dest="exec_command", metavar="COMMAND")

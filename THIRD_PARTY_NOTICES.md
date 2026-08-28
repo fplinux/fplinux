@@ -2,32 +2,34 @@
 
 The corresponding source snapshot records exact versions, URLs, commits and
 hashes in `sources.lock.toml`, `container.lock.toml`, `alpine.lock.toml`,
-`Containerfile`, `package-lock.json` and the target asset locks. Binary archives
-carry the target asset lock as `assets.lock.toml`, plus content receipts and
-`SHA256SUMS`. Aport `APKBUILD` files pin their own upstream archives or commits
-and verify remote and local source members with SHA-512 sums.
+`Containerfile`, `package-lock.json`, target asset locks and profile-owned source
+locks. Binary archives carry the target asset lock as `assets.lock.toml`, plus
+content receipts and `SHA256SUMS`. Aport `APKBUILD` files pin their own upstream
+archives or commits and verify remote and local source members with SHA-512
+sums.
 
 Original FPLinux code and documentation are licensed under `GPL-2.0-only`
 unless an individual file carries a different SPDX identifier.
 
-| Component                       | Role                                           | Declared license / provenance                                                  |
-| ------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------ |
-| Linux 6.18.42                   | Target kernel                                  | GPL-2.0-only; official kernel.org archive                                      |
-| Alpine Linux 3.24.1             | Target userspace and APK package base          | Multiple upstream licenses; exact armv7 artifacts pinned in `alpine.lock.toml` |
-| OpenRC                          | Init, service supervision and runlevels        | BSD-2-Clause; supplied by the pinned Alpine package set                        |
-| Dropbear                        | USB-network SSH server                         | MIT; supplied by the pinned Alpine package set                                 |
-| OpenSSH SFTP server             | SSH file-transfer subsystem                    | SSH-OpenSSH; supplied by the pinned Alpine package set                         |
-| skalibs / utmps                 | Dropbear runtime libraries                     | ISC; supplied by the pinned Alpine package set                                 |
-| zlib                            | Dropbear compression library                   | Zlib; supplied by the pinned Alpine package set                                |
-| TyrQuake 0.71                   | Quake engine for FPLinux                       | GPL-2.0-or-later; bundled decoders use MIT-0, CC0-1.0 and MIT                  |
-| MicroPythonOS 0.16.2 stack      | Optional graphical runtime and applications    | GPL-2.0-only, MIT, OFL-1.1, Zlib and bundled custom notices                    |
-| BusyBox                         | Shell and base userspace applets               | GPL-2.0-only; supplied by the pinned Alpine package set                        |
-| musl                            | Target C library                               | MIT; full notice packaged at `licenses/musl/COPYRIGHT`                         |
-| fpdoom bootstrap closure        | T117 bootstrap, relocation tool and USB helper | The Unlicense; pinned fpdoom source                                            |
-| libusb                          | Host USB access                                | LGPL-2.1-or-later; linked into the static bundled host tools at build time     |
-| `spreadtrum_flash` / `spd_dump` | Spreadtrum loader transport                    | The Unlicense; pinned upstream source                                          |
-| fpdoom `t117_maps.7z`           | Firmware-derived TA-1618 register-map data     | Pinned fpdoom release mirror (`NOASSERTION`)                                   |
-| `t117_fdl1.bin`                 | T117 first-stage RAM loader                    | The Unlicense; pinned spreadtrum_flash release asset                           |
+| Component                       | Role                                           | Declared license / provenance                                                   |
+| ------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------- |
+| Linux 6.18.42                   | Target kernel                                  | GPL-2.0-only; official kernel.org archive                                       |
+| Alpine Linux 3.24.1             | Target userspace and APK package base          | Multiple upstream licenses; exact armv7 artifacts pinned in `alpine.lock.toml`  |
+| OpenRC                          | Init, service supervision and runlevels        | BSD-2-Clause; supplied by the pinned Alpine package set                         |
+| Dropbear                        | USB-network SSH server                         | MIT; supplied by the pinned Alpine package set                                  |
+| OpenSSH SFTP server             | SSH file-transfer subsystem                    | SSH-OpenSSH; supplied by the pinned Alpine package set                          |
+| skalibs / utmps                 | Dropbear runtime libraries                     | ISC; supplied by the pinned Alpine package set                                  |
+| zlib                            | Dropbear compression library                   | Zlib; supplied by the pinned Alpine package set                                 |
+| TyrQuake 0.71                   | Quake engine for FPLinux                       | GPL-2.0-or-later; bundled decoders use MIT-0, CC0-1.0 and MIT                   |
+| MicroPythonOS 0.16.2 stack      | Optional graphical runtime and applications    | GPL-2.0-only, MIT, OFL-1.1, Zlib and bundled custom notices                     |
+| BusyBox                         | Shell and base userspace applets               | GPL-2.0-only; supplied by the pinned Alpine package set                         |
+| musl                            | Target C library                               | MIT; full notice packaged at `licenses/musl/COPYRIGHT`                          |
+| fpdoom bootstrap closure        | T117 bootstrap, relocation tool and USB helper | The Unlicense; pinned fpdoom source                                             |
+| U-Boot 2026.07                  | RAM second stage and FIT tooling               | GPL-2.0-only; official DENX archive; target binary is embedded in `ramboot.bin` |
+| libusb                          | Host USB access                                | LGPL-2.1-or-later; linked into the static bundled host tools at build time      |
+| `spreadtrum_flash` / `spd_dump` | Spreadtrum loader transport                    | The Unlicense; pinned upstream source                                           |
+| fpdoom `t117_maps.7z`           | Firmware-derived TA-1618 register-map data     | Pinned fpdoom release mirror (`NOASSERTION`)                                    |
+| `t117_fdl1.bin`                 | T117 first-stage RAM loader                    | The Unlicense; pinned spreadtrum_flash release asset                            |
 
 The TyrQuake APKBUILD verifies the upstream 0.71 source archive and each local
 source or patch through its checked-in SHA-512 sums. Its FLAC, MP3 and WAV

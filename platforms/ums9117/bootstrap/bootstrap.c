@@ -5,6 +5,10 @@
 
 #include "bootstrap.h"
 #include "syscode.h"
+#include "usbio.h"
+
+void ums9117_linux_handoff(uint32_t zimage, uint32_t dtb)
+	__attribute__((noreturn));
 
 #define UMS9117_AON_TIMER_BASE_PHYS 0x40050000U
 #define UMS9117_AP_SYSCNT_PHYS 0x4023000cU
@@ -79,6 +83,55 @@ extern unsigned char fplinux_session_end[];
 static const unsigned char fplinux_session_magic[8] = {
 	'F', 'P', 'L', 'S', 'E', 'S', 'S', '\0',
 };
+
+static int
+read_handoff_response(uint8_t response[FPLINUX_HANDOFF_RESPONSE_BYTES])
+{
+	uint32_t started = sys_timer_ms();
+	size_t index = 0;
+
+	while (index < FPLINUX_HANDOFF_RESPONSE_BYTES) {
+		int value = usb_getchar(USB_NOWAIT);
+
+		if (value >= 0) {
+			response[index++] = (uint8_t)value;
+			continue;
+		}
+		if ((uint32_t)(sys_timer_ms() - started) >=
+		    FPLINUX_HANDOFF_ACK_TIMEOUT_MS)
+			return 0;
+	}
+	return 1;
+}
+
+int ums9117_bootstrap_exchange_handoff_ack(
+	const uint8_t session_id[FPLINUX_HANDOFF_SESSION_ID_BYTES])
+{
+	uint8_t opcode = FPLINUX_HANDOFF_OPCODE;
+	uint8_t request[FPLINUX_HANDOFF_REQUEST_PAYLOAD_BYTES];
+	uint8_t response[FPLINUX_HANDOFF_RESPONSE_BYTES];
+
+	fplinux_handoff_encode_request(request, session_id);
+	if (usb_write(&opcode, sizeof(opcode)) != (int)sizeof(opcode) ||
+	    usb_write(request, sizeof(request)) != (int)sizeof(request) ||
+	    !read_handoff_response(response))
+		return 0;
+	return fplinux_handoff_validate_response(response, session_id) ==
+	       FPLINUX_HANDOFF_RESPONSE_ACK;
+}
+
+unsigned int ums9117_bootstrap_prepare_usb_handoff(void)
+{
+	if ((ums9117_bootstrap_quiesce_usb_dma_channel(
+		     FPLINUX_BOOT_USB_TX_DMA_CHANNEL) &
+	     UMS9117_BOOTSTRAP_DMA_OK) != UMS9117_BOOTSTRAP_DMA_OK)
+		return FPLINUX_BOOT_USB_TX_DMA_CHANNEL;
+	if ((ums9117_bootstrap_quiesce_usb_dma_channel(
+		     FPLINUX_BOOT_USB_RX_DMA_CHANNEL) &
+	     UMS9117_BOOTSTRAP_DMA_OK) != UMS9117_BOOTSTRAP_DMA_OK)
+		return FPLINUX_BOOT_USB_RX_DMA_CHANNEL;
+	return 0;
+}
 
 static uint32_t reg_read(uint32_t address)
 {
@@ -417,6 +470,13 @@ void ums9117_bootstrap_cleanup_usb_dma_and_disconnect(void)
 		   reg_read8(UMS9117_MUSB_BASE_PHYS + UMS9117_MUSB_POWER) &
 			   ~UMS9117_MUSB_POWER_SOFTCONN);
 	__asm__ volatile("dsb sy\n\tisb" : : : "memory");
+}
+
+void ums9117_bootstrap_handoff_to_linux(uint32_t zimage, uint32_t dtb)
+{
+	clean_invalidate_dcache();
+	invalidate_icache();
+	ums9117_linux_handoff(zimage, dtb);
 }
 
 size_t ums9117_bootstrap_zimage_size(void)

@@ -16,6 +16,8 @@ extend-ignore-re = ["\\b[0-9a-f]{7,}\\b"]
 [default.extend-identifiers]
 FPLinux = "FPLinux"
 MMIO = "MMIO"
+MKE2FS = "MKE2FS"
+mke2fs = "mke2fs"
 parm = "parm"
 UMS9117 = "UMS9117"
 
@@ -24,5 +26,6 @@ THM = "THM"
 fbcon = "fbcon"
 initramfs = "initramfs"
 microSD = "microSD"
+mke = "mke"
 musl = "musl"
 thm = "thm"

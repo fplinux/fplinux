@@ -1,0 +1,35 @@
+From: FPLinux contributors <fplinux@example.invalid>
+Subject: [PATCH] arm: dts: select the external profile root
+
+Keep the default command line unchanged. Include the external-root property
+only in the selected development profile. The fixed DTB arena already lies
+outside Linux memory, so do not also make U-Boot treat it as no-map memory.
+
+Signed-off-by: FPLinux contributors <fplinux@example.invalid>
+---
+diff --git a/arch/arm/boot/dts/unisoc/ums9117-nokia-ta1618.dts b/arch/arm/boot/dts/unisoc/ums9117-nokia-ta1618.dts
+--- a/arch/arm/boot/dts/unisoc/ums9117-nokia-ta1618.dts
++++ b/arch/arm/boot/dts/unisoc/ums9117-nokia-ta1618.dts
+@@ -9,7 +9,7 @@
+
+ / {
+ 	chosen {
+-		bootargs = "console=tty0 loglevel=8 ignore_loglevel init=/init panic=-1 rdinit=/init vt.global_cursor_default=1 random.trust_bootloader=on";
++#include "fplinux-external-root.dtsi"
+ 	};
+
+ 	memory@80000000 {
+@@ -22,11 +22,6 @@
+ 		#size-cells = <1>;
+ 		ranges;
+-
+-		dtb@83e00000 {
+-			reg = <0x83e00000 0x00010000>;
+-			no-map;
+-		};
+
+ 		framebuffer@83f00000 {
+ 			reg = <0x83f00000 0x00100000>;
+ 			no-map;
+--
+2.54.0

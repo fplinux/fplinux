@@ -8,8 +8,10 @@
 #include "fplinux-boot-screen/boot-screen.h"
 #include "fplinux-handoff-protocol.h"
 #include "generated/fplinux-bootstrap-identity.h"
+#include "generated/fplinux-boot-layout.h"
 #include "syscode.h"
 #include "usbio.h"
+#include "ums9117-bootstrap/boot-common.h"
 #include "ums9117-bootstrap/boot-main.h"
 #include "ums9117-bootstrap/bootstrap.h"
 
@@ -34,13 +36,6 @@ static const char *const boot_stage_labels[UMS9117_BOOT_STAGE_COUNT] = {
 	"PINMAP", "DISPLAY", "TIMER", "KERNEL", "DEVICE TREE", "PREPARE LINUX",
 };
 
-struct ums9117_boot_canvas {
-	uint16_t *pixels;
-	uint32_t width;
-	uint32_t height;
-	uint32_t stride;
-};
-
 static const struct fplinux_boot_screen_identity boot_identity = {
 	.brand = "FPLinux",
 	.model = FPLINUX_BOOTSTRAP_DISPLAY_NAME,
@@ -51,48 +46,7 @@ static struct fplinux_boot_screen boot_screen;
 static struct ums9117_boot_canvas boot_canvas;
 
 static uint16_t *const framebuffer =
-	(uint16_t *)(uintptr_t)UMS9117_BOOT_FRAMEBUFFER_PHYS;
-
-static int boot_canvas_safe(const struct ums9117_boot_canvas *canvas)
-{
-	const uint32_t limit = UMS9117_BOOT_FRAMEBUFFER_BYTES / 2U;
-
-	return canvas != NULL && canvas->pixels != NULL && canvas->width != 0 &&
-	       canvas->height != 0 && canvas->stride >= canvas->width &&
-	       canvas->stride <= limit &&
-	       canvas->height <= limit / canvas->stride;
-}
-
-static void boot_screen_fill_rect(void *context, uint32_t x, uint32_t y,
-				  uint32_t width, uint32_t height,
-				  uint16_t colour)
-{
-	struct ums9117_boot_canvas *canvas = context;
-	uint32_t xx;
-	uint32_t yy;
-
-	if (!boot_canvas_safe(canvas) || width == 0 || height == 0 ||
-	    x >= canvas->width || y >= canvas->height)
-		return;
-	if (width > canvas->width - x)
-		width = canvas->width - x;
-	if (height > canvas->height - y)
-		height = canvas->height - y;
-	for (yy = 0; yy < height; ++yy) {
-		uint32_t offset = (y + yy) * canvas->stride + x;
-
-		for (xx = 0; xx < width; ++xx)
-			canvas->pixels[offset + xx] = colour;
-	}
-}
-
-static void boot_screen_present(void *context)
-{
-	if (!boot_canvas_safe(context))
-		return;
-	sys_start_refresh();
-	sys_wait_refresh();
-}
+	(uint16_t *)(uintptr_t)FPLINUX_BOOT_LAYOUT_FRAMEBUFFER_PHYS;
 
 static void set_stage(uint32_t stage, enum fplinux_boot_screen_status status)
 {
@@ -151,59 +105,19 @@ ums9117_boot_halt_without_transport(uint32_t code, const char *message)
 
 static void prepare_usb_handoff(void)
 {
-	if ((ums9117_bootstrap_quiesce_usb_dma_channel(5) &
-	     UMS9117_BOOTSTRAP_DMA_OK) != UMS9117_BOOTSTRAP_DMA_OK)
+	unsigned int channel = ums9117_bootstrap_prepare_usb_handoff();
+
+	if (channel == FPLINUX_BOOT_USB_TX_DMA_CHANNEL)
 		ums9117_boot_halt_without_transport(6, "USB DMA5 QUIESCE FAIL");
-	if ((ums9117_bootstrap_quiesce_usb_dma_channel(21) &
-	     UMS9117_BOOTSTRAP_DMA_OK) != UMS9117_BOOTSTRAP_DMA_OK)
+	if (channel == FPLINUX_BOOT_USB_RX_DMA_CHANNEL)
 		ums9117_boot_halt_without_transport(7,
 						    "USB DMA21 QUIESCE FAIL");
-}
-
-static int
-read_handoff_response(uint8_t response[FPLINUX_HANDOFF_RESPONSE_BYTES])
-{
-	uint32_t started = sys_timer_ms();
-	size_t index = 0;
-
-	while (index < FPLINUX_HANDOFF_RESPONSE_BYTES) {
-		int value = usb_getchar(USB_NOWAIT);
-
-		if (value >= 0) {
-			response[index++] = (uint8_t)value;
-			continue;
-		}
-		if ((uint32_t)(sys_timer_ms() - started) >=
-		    FPLINUX_HANDOFF_ACK_TIMEOUT_MS)
-			return 0;
-	}
-
-	return 1;
-}
-
-static int
-exchange_handoff_ack(const uint8_t session_id[FPLINUX_HANDOFF_SESSION_ID_BYTES])
-{
-	uint8_t opcode = FPLINUX_HANDOFF_OPCODE;
-	uint8_t request[FPLINUX_HANDOFF_REQUEST_PAYLOAD_BYTES];
-	uint8_t response[FPLINUX_HANDOFF_RESPONSE_BYTES];
-
-	fplinux_handoff_encode_request(request, session_id);
-	if (usb_write(&opcode, sizeof(opcode)) != (int)sizeof(opcode) ||
-	    usb_write(request, sizeof(request)) != (int)sizeof(request) ||
-	    !read_handoff_response(response))
-		return 0;
-
-	return fplinux_handoff_validate_response(response, session_id) ==
-	       FPLINUX_HANDOFF_RESPONSE_ACK;
 }
 
 void ums9117_boot_main(const struct ums9117_boot_board *board)
 {
 	enum ums9117_bootstrap_session_status session_status;
-	uint32_t ram_bytes =
-		*(volatile uint32_t *)(uintptr_t)(UMS9117_BOOT_RAM_BASE_PHYS +
-						  0x00100000U);
+	uint32_t ram_bytes = ums9117_bootstrap_ram_bytes();
 	size_t zimage_bytes = ums9117_bootstrap_zimage_size();
 	size_t dtb_bytes = ums9117_bootstrap_dtb_size();
 	struct fplinux_boot_screen_canvas canvas;
@@ -217,18 +131,18 @@ void ums9117_boot_main(const struct ums9117_boot_board *board)
 		(unsigned long)zimage_bytes, (unsigned long)dtb_bytes);
 
 	/* Fresh RAM is noise; clear the whole region the LCDC may scan. */
-	memset(framebuffer, 0, UMS9117_BOOT_FRAMEBUFFER_BYTES);
+	memset(framebuffer, 0, FPLINUX_BOOT_LAYOUT_FRAMEBUFFER_BYTES);
 	boot_canvas.pixels = framebuffer;
 	boot_canvas.width = sys_data.display.w1;
 	boot_canvas.height = sys_data.display.h1;
 	boot_canvas.stride = sys_data.display.w1;
-	if (!boot_canvas_safe(&boot_canvas))
+	if (!ums9117_boot_canvas_valid(&boot_canvas))
 		ums9117_boot_fail(1, "BAD DISPLAY SIZE");
 	canvas.width = boot_canvas.width;
 	canvas.height = boot_canvas.height;
 	canvas.context = &boot_canvas;
-	canvas.fill_rect = boot_screen_fill_rect;
-	canvas.present = boot_screen_present;
+	canvas.fill_rect = ums9117_boot_canvas_fill_rect;
+	canvas.present = ums9117_boot_canvas_present;
 
 	/* Loads the board pin map over the host libc channel. */
 	scan_firmware(0);
@@ -259,23 +173,24 @@ void ums9117_boot_main(const struct ums9117_boot_board *board)
 	record_stage(2, "SPRD TIMER OK");
 
 	set_stage(UMS9117_BOOT_STAGE_KERNEL, FPLINUX_BOOT_SCREEN_ACTIVE);
-	if (ram_bytes < UMS9117_BOOT_RAM_REQUIRED_BYTES)
+	if (ram_bytes < FPLINUX_BOOT_LAYOUT_RAM_REQUIRED_BYTES)
 		ums9117_boot_fail(2, "64MB RAM REQUIRED");
-	if (!zimage_bytes || zimage_bytes > UMS9117_BOOT_ZIMAGE_LIMIT_BYTES)
+	if (!zimage_bytes ||
+	    zimage_bytes > FPLINUX_BOOT_LAYOUT_ZIMAGE_LIMIT_BYTES)
 		ums9117_boot_fail(3, "BAD KERNEL SIZE");
 	record_stage(3, "COPY KERNEL");
-	ums9117_bootstrap_copy_zimage(UMS9117_BOOT_ZIMAGE_STAGE_PHYS,
+	ums9117_bootstrap_copy_zimage(FPLINUX_BOOT_LAYOUT_ZIMAGE_PHYS,
 				      zimage_bytes);
 	set_stage(UMS9117_BOOT_STAGE_KERNEL, FPLINUX_BOOT_SCREEN_DONE);
 
 	set_stage(UMS9117_BOOT_STAGE_DEVICE_TREE, FPLINUX_BOOT_SCREEN_ACTIVE);
-	if (!dtb_bytes || dtb_bytes > UMS9117_BOOT_DTB_LIMIT_BYTES)
+	if (!dtb_bytes || dtb_bytes > FPLINUX_BOOT_LAYOUT_DTB_LIMIT_BYTES)
 		ums9117_boot_fail(4, "BAD DTB SIZE");
 	record_stage(4, "COPY DTB");
-	ums9117_bootstrap_copy_dtb(UMS9117_BOOT_DTB_STAGE_PHYS, dtb_bytes);
+	ums9117_bootstrap_copy_dtb(FPLINUX_BOOT_LAYOUT_DTB_PHYS, dtb_bytes);
 	ums9117_boot_checkpoint("SESSION VERIFY", FPLINUX_BOOT_SCREEN_ACTIVE);
 	session_status = ums9117_bootstrap_personalize_dtb(
-		UMS9117_BOOT_DTB_STAGE_PHYS, dtb_bytes, session_id);
+		FPLINUX_BOOT_LAYOUT_DTB_PHYS, dtb_bytes, session_id);
 	if (session_status != UMS9117_BOOTSTRAP_SESSION_OK)
 		ums9117_boot_fail(
 			9, ums9117_bootstrap_session_error(session_status));
@@ -284,15 +199,12 @@ void ums9117_boot_main(const struct ums9117_boot_board *board)
 
 	set_stage(UMS9117_BOOT_STAGE_PREPARE_LINUX, FPLINUX_BOOT_SCREEN_ACTIVE);
 	record_stage(5, "PREPARE LINUX");
-	if (!exchange_handoff_ack(session_id))
+	if (!ums9117_bootstrap_exchange_handoff_ack(session_id))
 		ums9117_boot_halt_without_transport(10, "HANDOFF ACK FAIL");
 
 	prepare_usb_handoff();
 	ums9117_bootstrap_cleanup_usb_dma_and_disconnect();
 	set_stage(UMS9117_BOOT_STAGE_PREPARE_LINUX, FPLINUX_BOOT_SCREEN_DONE);
-	clean_invalidate_dcache();
-	invalidate_icache();
-
-	ums9117_linux_handoff(UMS9117_BOOT_ZIMAGE_STAGE_PHYS,
-			      UMS9117_BOOT_DTB_STAGE_PHYS);
+	ums9117_bootstrap_handoff_to_linux(FPLINUX_BOOT_LAYOUT_ZIMAGE_PHYS,
+					   FPLINUX_BOOT_LAYOUT_DTB_PHYS);
 }

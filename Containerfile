@@ -35,12 +35,17 @@ RUN set -eux; \
         cpio=2.15-r0 \
         curl=8.21.0-r0 \
         diffutils=3.12-r0 \
+        dosfstools=4.2-r2 \
+        e2fsprogs=1.47.4-r0 \
+        e2fsprogs-extra=1.47.4-r0 \
         file=5.47-r2 \
         gawk=5.3.2-r2 \
+        genimage=19-r0 \
         git=2.54.0-r0 \
         gzip=1.14-r2 \
         libtool=2.6.0-r1 \
         make=4.4.1-r4 \
+        mtools=4.0.49-r0 \
         openssh-client-default=10.3_p1-r0 \
         patch=2.8-r0 \
         perl=5.42.2-r0 \
