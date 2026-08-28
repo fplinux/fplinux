@@ -31,6 +31,8 @@ diff --git a/drivers/mmc/host/Makefile b/drivers/mmc/host/Makefile
  obj-$(CONFIG_MMC_SDHCI_XENON)	+= sdhci-xenon-driver.o
  sdhci-xenon-driver-y		+= sdhci-xenon.o sdhci-xenon-phy.o
 +obj-$(CONFIG_MMC_TA1618)		+= ta1618-mmc.o
++ta1618-mmc-y			+= ta1618-mmc-linux.o ta1618-sdio-board.o \\
++				   ums9117-sdio-core.o
 diff --git a/drivers/video/fbdev/Kconfig b/drivers/video/fbdev/Kconfig
 --- a/drivers/video/fbdev/Kconfig
 +++ b/drivers/video/fbdev/Kconfig
