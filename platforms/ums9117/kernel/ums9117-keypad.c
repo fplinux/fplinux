@@ -1,27 +1,31 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Polled matrix keypad driver for UMS9117 feature phones.
+ * Matrix keypad driver for UMS9117 feature phones.
  *
  * The controller registers, gate/reset recipe and packed scan-code decoding
- * are inherited from the UMS9117 fpdoom implementation.  The controller IRQ
- * route is not qualified, so both matrix and inherited EIC state are polled.
- * In particular, this driver does not initialize the analog EIC controller;
- * it only reads the state left by the RAM bootstrap through the shared ADI
- * provider.
+ * are inherited from the UMS9117 fpdoom implementation. The direct matrix
+ * IRQ is optional and is used when the board describes its route. Target-owned
+ * analog EIC keys are optional GPIO inputs supplied by the SC2720 EIC provider.
+ * This driver consumes their events; it does not configure the analog EIC
+ * controller directly.
  */
 #include <linux/bitops.h>
 #include <linux/delay.h>
+#include <linux/gpio/consumer.h>
 #include <linux/input.h>
 #include <linux/input/matrix_keypad.h>
+#include <linux/interrupt.h>
 #include <linux/io.h>
+#include <linux/irq.h>
 #include <linux/kernel.h>
 #include <linux/mfd/syscon.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
+#include <linux/pm.h>
+#include <linux/pm_wakeup.h>
 #include <linux/property.h>
 #include <linux/regmap.h>
-#include <linux/soc/sprd/ums9117-adi.h>
 #include <linux/workqueue.h>
 
 #define UMS9117_KPD_CTRL 0x00
@@ -39,21 +43,34 @@
 #define UMS9117_KPD_CTRL_MATRIX_LINES_MASK GENMASK(7, 2)
 #define UMS9117_KPD_CTRL_ROW_SHIFT 16
 #define UMS9117_KPD_CTRL_COL_SHIFT 8
+#define UMS9117_KPD_INT_EVENT_MASK GENMASK(7, 0)
+#define UMS9117_KPD_INT_OWNED_MASK GENMASK(11, 0)
 
 #define UMS9117_AON_APB_PWR_SET 0x1000
 #define UMS9117_AON_APB_CLK_SET 0x1010
 #define UMS9117_AON_APB_RST_SET 0x1008
 #define UMS9117_AON_APB_RST_CLR 0x2008
 
-#define UMS9117_ADI_SLAVE_PHYS 0x40608000U
-#define UMS9117_ADI_SLAVE_MMIO_BYTES 0x1000U
-
 #define UMS9117_KPD_MAX_ROWS 8
 #define UMS9117_KPD_MAX_COLS 8
 #define UMS9117_KPD_POLL_MS 5
+#define UMS9117_GIC_SPI_HWIRQ_BASE 32
+#define UMS9117_KPD_MATRIX_IRQ_SPI 36
+#define UMS9117_KPD_MATRIX_IRQ_HWIRQ \
+	(UMS9117_GIC_SPI_HWIRQ_BASE + UMS9117_KPD_MATRIX_IRQ_SPI)
 
-#define UMS9117_EIC_DATA_POWER_BIT 1
-#define UMS9117_EIC_DATA_EIC9_BIT 9
+struct ums9117_keypad;
+
+struct ums9117_keypad_eic_key {
+	struct ums9117_keypad *keypad;
+	struct gpio_desc *gpiod;
+	unsigned int keycode;
+	int irq;
+	bool down;
+	bool irq_enabled;
+	bool suspend_disabled;
+	bool wake_enabled;
+};
 
 struct ums9117_keypad {
 	struct device *dev;
@@ -61,55 +78,25 @@ struct ums9117_keypad {
 	struct regmap *aon_apb;
 	struct input_dev *input;
 	struct delayed_work matrix_poll_work;
-	struct delayed_work eic_poll_work;
-	u32 eic_data_phys;
-	u32 eic9_keycode;
+	int matrix_irq;
+	struct ums9117_keypad_eic_key eic1;
+	struct ums9117_keypad_eic_key eic9;
 	unsigned int rows;
 	unsigned int cols;
 	unsigned int row_shift;
-	bool has_eic9_key;
-	bool eic9_baseline_valid;
-	bool eic9_baseline;
-	bool eic9_down;
-	bool power_down;
-	bool eic_error_reported;
+	bool matrix_irq_mode;
 	bool stopping;
 };
 
-static int ums9117_keypad_adi_read(struct ums9117_keypad *keypad, u16 *value)
+static void ums9117_keypad_report_matrix(struct ums9117_keypad *keypad,
+					 u32 event, u32 status)
 {
-	struct ums9117_adi_transaction transaction = {};
-	u32 offset = keypad->eic_data_phys - UMS9117_ADI_SLAVE_PHYS;
-	int end_ret;
-	int ret;
-
-	ret = ums9117_adi_begin(&transaction);
-	if (ret)
-		return ret;
-	ret = ums9117_adi_read(&transaction, offset, value);
-	end_ret = ums9117_adi_end(&transaction);
-	if (!ret)
-		ret = end_ret;
-	return ret;
-}
-
-static void ums9117_keypad_matrix_poll_work(struct work_struct *work)
-{
-	struct ums9117_keypad *keypad = container_of(
-		to_delayed_work(work), struct ums9117_keypad, matrix_poll_work);
 	unsigned short *keymap = keypad->input->keycode;
-	u32 event = readl(keypad->kpd + UMS9117_KPD_INT_RAW) & 0xff;
-	u32 status;
 	unsigned int index;
 	bool sync = false;
 
-	if (!event)
-		goto out;
-
-	status = readl(keypad->kpd + UMS9117_KPD_KEY_STATUS);
-	writel(0xfff, keypad->kpd + UMS9117_KPD_INT_CLR);
 	if (status & BIT(3))
-		goto out;
+		return;
 
 	for (index = 0; index < 8; ++index) {
 		unsigned int packed;
@@ -141,62 +128,108 @@ static void ums9117_keypad_matrix_poll_work(struct work_struct *work)
 
 	if (sync)
 		input_sync(keypad->input);
-out:
+}
+
+static void ums9117_keypad_matrix_poll_work(struct work_struct *work)
+{
+	struct ums9117_keypad *keypad = container_of(
+		to_delayed_work(work), struct ums9117_keypad, matrix_poll_work);
+	u32 event = readl(keypad->kpd + UMS9117_KPD_INT_RAW) &
+		    UMS9117_KPD_INT_EVENT_MASK;
+	u32 status;
+
+	if (event) {
+		status = readl(keypad->kpd + UMS9117_KPD_KEY_STATUS);
+		writel(UMS9117_KPD_INT_OWNED_MASK,
+		       keypad->kpd + UMS9117_KPD_INT_CLR);
+		ums9117_keypad_report_matrix(keypad, event, status);
+	}
 	if (!READ_ONCE(keypad->stopping))
 		schedule_delayed_work(&keypad->matrix_poll_work,
 				      msecs_to_jiffies(UMS9117_KPD_POLL_MS));
 }
 
-static void ums9117_keypad_eic_poll_work(struct work_struct *work)
+static void ums9117_keypad_mask_matrix_irq(struct ums9117_keypad *keypad)
 {
-	struct ums9117_keypad *keypad = container_of(
-		to_delayed_work(work), struct ums9117_keypad, eic_poll_work);
-	bool power_down;
-	bool sync = false;
-	u16 data;
+	u32 ctrl;
+
+	writel(0, keypad->kpd + UMS9117_KPD_INT_EN);
+	ctrl = readl(keypad->kpd + UMS9117_KPD_CTRL);
+	ctrl &= ~UMS9117_KPD_CTRL_ENABLE;
+	writel(ctrl, keypad->kpd + UMS9117_KPD_CTRL);
+	writel(UMS9117_KPD_INT_OWNED_MASK, keypad->kpd + UMS9117_KPD_INT_CLR);
+}
+
+static irqreturn_t ums9117_keypad_matrix_irq(int irq, void *data)
+{
+	struct ums9117_keypad *keypad = data;
+	u32 raw;
+	u32 status;
+
+	if (READ_ONCE(keypad->stopping))
+		return IRQ_HANDLED;
+
+	raw = readl(keypad->kpd + UMS9117_KPD_INT_RAW) &
+	      UMS9117_KPD_INT_OWNED_MASK;
+	if (!raw) {
+		ums9117_keypad_mask_matrix_irq(keypad);
+		dev_err(keypad->dev,
+			"matrix IRQ arrived without owned status; controller masked\n");
+		return IRQ_HANDLED;
+	}
+
+	/* Bits 8 through 11 are long-key latches and have no scan-code payload. */
+	status = readl(keypad->kpd + UMS9117_KPD_KEY_STATUS);
+	writel(raw, keypad->kpd + UMS9117_KPD_INT_CLR);
+	ums9117_keypad_report_matrix(keypad, raw & UMS9117_KPD_INT_EVENT_MASK,
+				     status);
+
+	return IRQ_HANDLED;
+}
+
+static int ums9117_keypad_sample_eic_key(struct ums9117_keypad_eic_key *key,
+					 bool report)
+{
+	struct ums9117_keypad *keypad = key->keypad;
+	int value;
+
+	if (!key->gpiod)
+		return 0;
+
+	value = gpiod_get_value_cansleep(key->gpiod);
+	if (value < 0)
+		return value;
+	if (!!value == key->down)
+		return 0;
+
+	key->down = !!value;
+	if (report)
+		input_report_key(keypad->input, key->keycode, key->down);
+
+	return report;
+}
+
+static irqreturn_t ums9117_keypad_eic_irq_thread(int irq, void *data)
+{
+	struct ums9117_keypad_eic_key *key = data;
 	int ret;
 
-	ret = ums9117_keypad_adi_read(keypad, &data);
-	if (ret) {
-		if (!keypad->eic_error_reported) {
-			dev_warn(
-				keypad->dev,
-				"inherited analog EIC read unavailable (%d); matrix keypad remains active\n",
-				ret);
-			keypad->eic_error_reported = true;
-		}
-		goto out;
-	}
+	if (READ_ONCE(key->keypad->stopping))
+		return IRQ_HANDLED;
 
-	power_down = !(data & BIT(UMS9117_EIC_DATA_POWER_BIT));
-	if (power_down != keypad->power_down) {
-		keypad->power_down = power_down;
-		input_report_key(keypad->input, KEY_POWER, power_down);
-		sync = true;
-	}
+	if (key == &key->keypad->eic1 && device_may_wakeup(key->keypad->dev))
+		pm_wakeup_event(key->keypad->dev, 0);
 
-	if (keypad->has_eic9_key) {
-		bool level = !!(data & BIT(UMS9117_EIC_DATA_EIC9_BIT));
+	ret = ums9117_keypad_sample_eic_key(key, true);
+	if (ret < 0)
+		dev_warn_ratelimited(
+			key->keypad->dev,
+			"EIC GPIO read failed for input code %u: %d\n",
+			key->keycode, ret);
+	else if (ret)
+		input_sync(key->keypad->input);
 
-		if (!keypad->eic9_baseline_valid) {
-			/* Preserve the inherited EIC9 polarity and suppress boot noise. */
-			keypad->eic9_baseline = level;
-			keypad->eic9_baseline_valid = true;
-		} else if ((level != keypad->eic9_baseline) !=
-			   keypad->eic9_down) {
-			keypad->eic9_down = level != keypad->eic9_baseline;
-			input_report_key(keypad->input, keypad->eic9_keycode,
-					 keypad->eic9_down);
-			sync = true;
-		}
-	}
-
-	if (sync)
-		input_sync(keypad->input);
-out:
-	if (!READ_ONCE(keypad->stopping))
-		schedule_delayed_work(&keypad->eic_poll_work,
-				      msecs_to_jiffies(UMS9117_KPD_POLL_MS));
+	return IRQ_HANDLED;
 }
 
 static int ums9117_keypad_matrix_masks(struct ums9117_keypad *keypad,
@@ -256,15 +289,22 @@ static int ums9117_keypad_hw_init(struct ums9117_keypad *keypad)
 		return ret;
 	udelay(100);
 
-	writel(0xfff, keypad->kpd + UMS9117_KPD_INT_CLR);
+	writel(UMS9117_KPD_INT_OWNED_MASK, keypad->kpd + UMS9117_KPD_INT_CLR);
 	writel(1, keypad->kpd + UMS9117_KPD_CLK_DIVIDE);
 	writel(16, keypad->kpd + UMS9117_KPD_DEBOUNCE);
-	/* This enables controller event latches; the driver does not request an IRQ. */
-	writel(0xfff, keypad->kpd + UMS9117_KPD_INT_EN);
+	if (keypad->matrix_irq_mode)
+		writel(0, keypad->kpd + UMS9117_KPD_INT_EN);
+	else
+		writel(UMS9117_KPD_INT_OWNED_MASK,
+		       keypad->kpd + UMS9117_KPD_INT_EN);
 	writel(0xffff, keypad->kpd + UMS9117_KPD_POLARITY);
 
 	ctrl = readl(keypad->kpd + UMS9117_KPD_CTRL);
-	ctrl |= UMS9117_KPD_CTRL_ENABLE | UMS9117_KPD_CTRL_LONG_KEY;
+	ctrl |= UMS9117_KPD_CTRL_LONG_KEY;
+	if (keypad->matrix_irq_mode)
+		ctrl &= ~UMS9117_KPD_CTRL_ENABLE;
+	else
+		ctrl |= UMS9117_KPD_CTRL_ENABLE;
 	ctrl &= ~UMS9117_KPD_CTRL_SLEEP;
 	ctrl &= ~((u32)UMS9117_KPD_CTRL_MATRIX_LINES_MASK
 			  << UMS9117_KPD_CTRL_ROW_SHIFT |
@@ -277,39 +317,225 @@ static int ums9117_keypad_hw_init(struct ums9117_keypad *keypad)
 	return 0;
 }
 
-static int ums9117_keypad_parse_eic(struct ums9117_keypad *keypad)
+static int ums9117_keypad_get_matrix_irq(struct platform_device *pdev,
+					 struct ums9117_keypad *keypad)
 {
-	struct device_node *np = keypad->dev->of_node;
-	int ret;
+	struct irq_data *irq_data;
+	irq_hw_number_t hwirq;
+	u32 trigger;
+	int irq;
 
-	ret = of_property_read_u32(np, "sprd,eic-data-address",
-				   &keypad->eic_data_phys);
-	if (ret)
-		return dev_err_probe(
-			keypad->dev, ret,
-			"missing inherited analog EIC data address\n");
-	if (!IS_ALIGNED(keypad->eic_data_phys, sizeof(u32)) ||
-	    keypad->eic_data_phys < UMS9117_ADI_SLAVE_PHYS ||
-	    keypad->eic_data_phys > UMS9117_ADI_SLAVE_PHYS +
-					    UMS9117_ADI_SLAVE_MMIO_BYTES -
-					    sizeof(u32))
+	if (!of_find_property(keypad->dev->of_node, "interrupts", NULL))
+		return 0;
+
+	irq = platform_get_irq_byname_optional(pdev, "matrix");
+	if (irq < 0)
+		return dev_err_probe(keypad->dev, irq,
+				     "could not resolve matrix IRQ\n");
+
+	irq_data = irq_get_irq_data(irq);
+	if (!irq_data)
+		return dev_err_probe(keypad->dev, -EINVAL,
+				     "matrix IRQ has no IRQ domain data\n");
+	hwirq = irqd_to_hwirq(irq_data);
+	trigger = irqd_get_trigger_type(irq_data);
+	if (hwirq != UMS9117_KPD_MATRIX_IRQ_HWIRQ ||
+	    trigger != IRQ_TYPE_LEVEL_HIGH)
 		return dev_err_probe(
 			keypad->dev, -EINVAL,
-			"invalid inherited analog EIC data address\n");
+			"matrix IRQ must be SPI%u/hwirq%u level-high, got hwirq%lu type 0x%x\n",
+			UMS9117_KPD_MATRIX_IRQ_SPI,
+			UMS9117_KPD_MATRIX_IRQ_HWIRQ, (unsigned long)hwirq,
+			trigger);
 
-	ret = of_property_read_u32(np, "sprd,eic9-keycode",
-				   &keypad->eic9_keycode);
-	if (ret == -EINVAL)
+	keypad->matrix_irq = irq;
+	keypad->matrix_irq_mode = true;
+	return 0;
+}
+
+static void ums9117_keypad_start_matrix_irq(struct ums9117_keypad *keypad)
+{
+	u32 ctrl;
+
+	writel(UMS9117_KPD_INT_OWNED_MASK, keypad->kpd + UMS9117_KPD_INT_CLR);
+	writel(UMS9117_KPD_INT_OWNED_MASK, keypad->kpd + UMS9117_KPD_INT_EN);
+	ctrl = readl(keypad->kpd + UMS9117_KPD_CTRL);
+	ctrl |= UMS9117_KPD_CTRL_ENABLE;
+	writel(ctrl, keypad->kpd + UMS9117_KPD_CTRL);
+}
+
+static int ums9117_keypad_get_eic_key(struct ums9117_keypad *keypad,
+				      struct ums9117_keypad_eic_key *key,
+				      const char *con_id,
+				      const char *keycode_property)
+{
+	int ret;
+
+	key->keypad = keypad;
+	key->irq = -1;
+	key->gpiod = devm_gpiod_get_optional(keypad->dev, con_id, GPIOD_IN);
+	if (IS_ERR(key->gpiod))
+		return dev_err_probe(keypad->dev, PTR_ERR(key->gpiod),
+				     "could not acquire %s GPIO\n", con_id);
+
+	if (!key->gpiod) {
+		if (device_property_present(keypad->dev, keycode_property))
+			return dev_err_probe(keypad->dev, -EINVAL,
+					     "%s requires a matching GPIO\n",
+					     keycode_property);
 		return 0;
+	}
+
+	ret = device_property_read_u32(keypad->dev, keycode_property,
+				       &key->keycode);
 	if (ret)
 		return dev_err_probe(keypad->dev, ret,
-				     "invalid EIC9 keycode\n");
-	if (keypad->eic9_keycode > KEY_MAX)
+				     "%s GPIO has no keycode\n", con_id);
+	if (key->keycode > KEY_MAX)
 		return dev_err_probe(keypad->dev, -EINVAL,
-				     "EIC9 keycode is outside the input ABI\n");
+				     "%s keycode is outside the input ABI\n",
+				     con_id);
 
-	keypad->has_eic9_key = true;
+	key->irq = gpiod_to_irq(key->gpiod);
+	if (key->irq < 0)
+		return dev_err_probe(keypad->dev, key->irq,
+				     "could not resolve %s GPIO IRQ\n", con_id);
+
 	return 0;
+}
+
+static int ums9117_keypad_parse_eic(struct ums9117_keypad *keypad)
+{
+	int ret;
+
+	ret = ums9117_keypad_get_eic_key(keypad, &keypad->eic1, "eic1",
+					 "sprd,eic1-keycode");
+	if (ret)
+		return ret;
+
+	return ums9117_keypad_get_eic_key(keypad, &keypad->eic9, "eic9",
+					  "sprd,eic9-keycode");
+}
+
+static int ums9117_keypad_request_eic_irq(struct ums9117_keypad_eic_key *key)
+{
+	if (!key->gpiod)
+		return 0;
+
+	return devm_request_threaded_irq(
+		key->keypad->dev, key->irq, NULL, ums9117_keypad_eic_irq_thread,
+		IRQF_ONESHOT | IRQF_NO_AUTOEN | IRQF_TRIGGER_RISING |
+			IRQF_TRIGGER_FALLING,
+		dev_name(key->keypad->dev), key);
+}
+
+static int ums9117_keypad_start_eic_irqs(struct ums9117_keypad *keypad)
+{
+	struct ums9117_keypad_eic_key *keys[] = {
+		&keypad->eic1,
+		&keypad->eic9,
+	};
+	bool sync = false;
+	unsigned int index;
+	int ret;
+
+	for (index = 0; index < ARRAY_SIZE(keys); ++index) {
+		ret = ums9117_keypad_sample_eic_key(keys[index], true);
+		if (ret < 0)
+			return ret;
+		sync |= ret;
+	}
+	if (sync)
+		input_sync(keypad->input);
+
+	for (index = 0; index < ARRAY_SIZE(keys); ++index) {
+		if (!keys[index]->gpiod)
+			continue;
+		enable_irq(keys[index]->irq);
+		keys[index]->irq_enabled = true;
+	}
+
+	return 0;
+}
+
+static int ums9117_keypad_suspend(struct device *dev)
+{
+	struct ums9117_keypad *controller = dev_get_drvdata(dev);
+	int ret;
+
+	/*
+	 * Nested EIC child IRQs are not masked by suspend_device_irqs(). EIC9
+	 * therefore has to be disabled explicitly before the shared parent gets
+	 * wake permission for EIC1.
+	 */
+	if (controller->eic9.irq_enabled &&
+	    !controller->eic9.suspend_disabled) {
+		disable_irq(controller->eic9.irq);
+		controller->eic9.suspend_disabled = true;
+	}
+
+	if (!device_may_wakeup(dev) || controller->eic1.wake_enabled)
+		return 0;
+
+	ret = enable_irq_wake(controller->eic1.irq);
+	if (ret) {
+		if (controller->eic9.suspend_disabled) {
+			enable_irq(controller->eic9.irq);
+			controller->eic9.suspend_disabled = false;
+		}
+		dev_err(dev, "could not enable EIC1 power-key wake IRQ: %d\n",
+			ret);
+		return ret;
+	}
+
+	controller->eic1.wake_enabled = true;
+	return 0;
+}
+
+static int ums9117_keypad_resume(struct device *dev)
+{
+	struct ums9117_keypad *controller = dev_get_drvdata(dev);
+	int ret;
+
+	if (controller->eic1.wake_enabled) {
+		ret = disable_irq_wake(controller->eic1.irq);
+		if (ret) {
+			dev_err(dev,
+				"could not disable EIC1 power-key wake IRQ: %d\n",
+				ret);
+			return ret;
+		}
+
+		controller->eic1.wake_enabled = false;
+	}
+	if (controller->eic9.suspend_disabled) {
+		ret = ums9117_keypad_sample_eic_key(&controller->eic9, true);
+		enable_irq(controller->eic9.irq);
+		controller->eic9.suspend_disabled = false;
+		if (ret < 0) {
+			dev_err(dev,
+				"could not resample EIC9 after system sleep: %d\n",
+				ret);
+			return ret;
+		}
+		if (ret)
+			input_sync(controller->input);
+	}
+	return 0;
+}
+
+static int ums9117_keypad_disarm_eic1_wake(struct ums9117_keypad *keypad)
+{
+	int ret;
+
+	if (!keypad->eic1.wake_enabled)
+		return 0;
+
+	ret = disable_irq_wake(keypad->eic1.irq);
+	if (!ret)
+		keypad->eic1.wake_enabled = false;
+
+	return ret;
 }
 
 static int ums9117_keypad_probe(struct platform_device *pdev)
@@ -347,6 +573,14 @@ static int ums9117_keypad_probe(struct platform_device *pdev)
 	ret = ums9117_keypad_parse_eic(keypad);
 	if (ret)
 		return ret;
+	if (device_property_present(dev, "wakeup-source") &&
+	    !keypad->eic1.gpiod)
+		return dev_err_probe(
+			dev, -EINVAL,
+			"wakeup-source requires EIC1 power-key GPIO\n");
+	ret = ums9117_keypad_get_matrix_irq(pdev, keypad);
+	if (ret)
+		return ret;
 
 	input = devm_input_allocate_device(dev);
 	if (!input)
@@ -365,37 +599,120 @@ static int ums9117_keypad_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, ret,
 				     "failed to build matrix keymap\n");
 	input_set_capability(input, EV_MSC, MSC_SCAN);
-	input_set_capability(input, EV_KEY, KEY_POWER);
-	if (keypad->has_eic9_key)
-		input_set_capability(input, EV_KEY, keypad->eic9_keycode);
+	if (keypad->eic1.gpiod)
+		input_set_capability(input, EV_KEY, keypad->eic1.keycode);
+	if (keypad->eic9.gpiod)
+		input_set_capability(input, EV_KEY, keypad->eic9.keycode);
+	if (device_property_present(dev, "wakeup-source")) {
+		ret = devm_device_init_wakeup(dev);
+		if (ret)
+			return dev_err_probe(
+				dev, ret,
+				"could not enable keypad wake capability\n");
+	}
 
 	ret = ums9117_keypad_hw_init(keypad);
 	if (ret)
 		return ret;
+	if (keypad->matrix_irq_mode) {
+		ret = devm_request_irq(dev, keypad->matrix_irq,
+				       ums9117_keypad_matrix_irq, 0,
+				       dev_name(dev), keypad);
+		if (ret) {
+			dev_err_probe(dev, ret,
+				      "could not request matrix IRQ\n");
+			goto err_mask_matrix;
+		}
+	}
+	ret = ums9117_keypad_request_eic_irq(&keypad->eic1);
+	if (ret) {
+		dev_err_probe(dev, ret, "could not request EIC1 IRQ\n");
+		goto err_mask_matrix;
+	}
+	ret = ums9117_keypad_request_eic_irq(&keypad->eic9);
+	if (ret) {
+		dev_err_probe(dev, ret, "could not request EIC9 IRQ\n");
+		goto err_mask_matrix;
+	}
 	ret = input_register_device(input);
-	if (ret)
-		return ret;
+	if (ret) {
+		dev_err_probe(dev, ret, "could not register keypad input\n");
+		goto err_mask_matrix;
+	}
 
 	INIT_DELAYED_WORK(&keypad->matrix_poll_work,
 			  ums9117_keypad_matrix_poll_work);
-	INIT_DELAYED_WORK(&keypad->eic_poll_work, ums9117_keypad_eic_poll_work);
+	ret = ums9117_keypad_start_eic_irqs(keypad);
+	if (ret) {
+		dev_err_probe(dev, ret, "could not sample EIC GPIO\n");
+		goto err_mask_matrix;
+	}
 	platform_set_drvdata(pdev, keypad);
-	schedule_delayed_work(&keypad->matrix_poll_work,
-			      msecs_to_jiffies(UMS9117_KPD_POLL_MS));
-	schedule_delayed_work(&keypad->eic_poll_work,
-			      msecs_to_jiffies(UMS9117_KPD_POLL_MS));
+	if (keypad->matrix_irq_mode)
+		ums9117_keypad_start_matrix_irq(keypad);
+	else
+		schedule_delayed_work(&keypad->matrix_poll_work,
+				      msecs_to_jiffies(UMS9117_KPD_POLL_MS));
 
-	dev_info(dev, "polled UMS9117 keypad registered (EIC1 power%s)\n",
-		 keypad->has_eic9_key ? " and EIC9 key" : "");
+	if (keypad->matrix_irq_mode &&
+	    (keypad->eic1.gpiod || keypad->eic9.gpiod))
+		dev_info(
+			dev,
+			"UMS9117 keypad: matrix IRQ SPI%u/hwirq%u; EIC GPIO IRQs\n",
+			UMS9117_KPD_MATRIX_IRQ_SPI,
+			UMS9117_KPD_MATRIX_IRQ_HWIRQ);
+	else if (keypad->matrix_irq_mode)
+		dev_info(
+			dev,
+			"UMS9117 keypad registered with matrix IRQ SPI%u/hwirq%u\n",
+			UMS9117_KPD_MATRIX_IRQ_SPI,
+			UMS9117_KPD_MATRIX_IRQ_HWIRQ);
+	else if (keypad->eic1.gpiod || keypad->eic9.gpiod)
+		dev_info(
+			dev,
+			"polled UMS9117 matrix keypad registered with EIC GPIO IRQs\n");
+	else
+		dev_info(dev, "polled UMS9117 matrix keypad registered\n");
 	return 0;
+
+err_mask_matrix:
+	ums9117_keypad_mask_matrix_irq(keypad);
+	return ret;
 }
 
-static void ums9117_keypad_stop(struct ums9117_keypad *keypad)
+static void ums9117_keypad_stop(struct ums9117_keypad *controller)
 {
-	WRITE_ONCE(keypad->stopping, true);
-	cancel_delayed_work_sync(&keypad->matrix_poll_work);
-	cancel_delayed_work_sync(&keypad->eic_poll_work);
+	int ret;
+
+	WRITE_ONCE(controller->stopping, true);
+	if (controller->matrix_irq_mode) {
+		ums9117_keypad_mask_matrix_irq(controller);
+		synchronize_irq(controller->matrix_irq);
+	} else {
+		cancel_delayed_work_sync(&controller->matrix_poll_work);
+	}
+	ret = ums9117_keypad_disarm_eic1_wake(controller);
+	if (ret)
+		dev_err(controller->dev,
+			"could not disable EIC1 power-key wake IRQ: %d\n", ret);
+	if (controller->eic9.suspend_disabled) {
+		enable_irq(controller->eic9.irq);
+		controller->eic9.suspend_disabled = false;
+	}
+	if (controller->eic1.irq_enabled) {
+		disable_irq(controller->eic1.irq);
+		synchronize_irq(controller->eic1.irq);
+		controller->eic1.irq_enabled = false;
+	}
+	if (controller->eic9.irq_enabled) {
+		disable_irq(controller->eic9.irq);
+		synchronize_irq(controller->eic9.irq);
+		controller->eic9.irq_enabled = false;
+	}
 }
+
+static DEFINE_SIMPLE_DEV_PM_OPS(ums9117_keypad_pm_ops, ums9117_keypad_suspend,
+				ums9117_keypad_resume);
 
 static void ums9117_keypad_remove(struct platform_device *pdev)
 {
@@ -420,9 +737,10 @@ static struct platform_driver ums9117_keypad_driver = {
 	.driver = {
 		.name = "ums9117-keypad",
 		.of_match_table = ums9117_keypad_of_match,
+		.pm = pm_sleep_ptr(&ums9117_keypad_pm_ops),
 	},
 };
 module_platform_driver(ums9117_keypad_driver);
 
-MODULE_DESCRIPTION("Polled UMS9117 matrix and inherited EIC keypad");
+MODULE_DESCRIPTION("UMS9117 keypad with optional matrix and EIC GPIO IRQs");
 MODULE_LICENSE("GPL");

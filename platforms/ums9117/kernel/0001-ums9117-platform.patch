@@ -52,24 +52,94 @@ diff --git a/drivers/usb/musb/Makefile b/drivers/usb/musb/Makefile
  obj-$(CONFIG_USB_MUSB_JZ4740)			+= jz4740.o
  obj-$(CONFIG_USB_MUSB_SUNXI)			+= sunxi.o
  obj-$(CONFIG_USB_MUSB_MEDIATEK)      		+= mediatek.o
+diff --git a/drivers/usb/musb/musb_core.c b/drivers/usb/musb/musb_core.c
+--- a/drivers/usb/musb/musb_core.c
++++ b/drivers/usb/musb/musb_core.c
+@@ -72,6 +72,7 @@
+ #include <linux/kobject.h>
+ #include <linux/prefetch.h>
+ #include <linux/platform_device.h>
++#include <linux/property.h>
+ #include <linux/string_choices.h>
+ #include <linux/io.h>
+ #include <linux/iopoll.h>
+@@ -2511,8 +2512,8 @@ static int musb_init_controller(struct device *dev, int nIrq, void __iomem *ctrl)
+ 		goto fail3;
+ 	}
+ 	musb->nIrq = nIrq;
+-	/* FIXME this handles wakeup irqs wrong */
+-	if (enable_irq_wake(nIrq) == 0) {
++	if (device_property_read_bool(dev, "wakeup-source") &&
++	    enable_irq_wake(nIrq) == 0) {
+ 		musb->irq_wake = 1;
+ 		device_init_wakeup(dev, 1);
+ 	} else {
+@@ -2821,6 +2822,8 @@ static int musb_suspend(struct device *dev)
+ 	while (flush_delayed_work(&musb->irq_work))
+ 		;
+ 	musb->flush_irq_work = false;
++	if (musb->port_mode == MUSB_PERIPHERAL && !musb->irq_wake)
++		cancel_delayed_work_sync(&musb->gadget_work);
+
+ 	if (!(musb->ops->quirks & MUSB_PRESERVE_SESSION))
+ 		musb_writeb(musb->mregs, MUSB_DEVCTL, 0);
+@@ -2829,10 +2832,11 @@ static int musb_suspend(struct device *dev)
+
+ 	spin_lock_irqsave(&musb->lock, flags);
+
+-	if (is_peripheral_active(musb)) {
+-		/* FIXME force disconnect unless we know USB will wake
+-		 * the system up quickly enough to respond ...
+-		 */
++	if (musb->port_mode == MUSB_PERIPHERAL && !musb->irq_wake) {
++		u8 power = musb_readb(musb->mregs, MUSB_POWER);
++
++		power &= ~MUSB_POWER_SOFTCONN;
++		musb_writeb(musb->mregs, MUSB_POWER, power);
+ 	} else if (is_host_active(musb)) {
+ 		/* we know all the children are suspended; sometimes
+ 		 * they will even be wakeup-enabled.
+@@ -2852,6 +2856,7 @@ static int musb_resume(struct device *dev)
+ 	int error;
+ 	u8 devctl;
+ 	u8 mask;
++	u8 power;
+
+ 	/*
+ 	 * For static cmos like DaVinci, register values were preserved
+@@ -2872,6 +2877,15 @@ static int musb_resume(struct device *dev)
+
+ 	musb_enable_interrupts(musb);
+ 	musb_platform_enable(musb);
++	if (musb->port_mode == MUSB_PERIPHERAL && !musb->irq_wake) {
++		spin_lock_irqsave(&musb->lock, flags);
++		if (musb->softconnect) {
++			power = musb_readb(musb->mregs, MUSB_POWER);
++			power |= MUSB_POWER_SOFTCONN;
++			musb_writeb(musb->mregs, MUSB_POWER, power);
++		}
++		spin_unlock_irqrestore(&musb->lock, flags);
++	}
+
+ 	/* session might be disabled in suspend */
+ 	if (musb->port_mode == MUSB_HOST &&
 diff --git a/drivers/input/keyboard/Kconfig b/drivers/input/keyboard/Kconfig
 --- a/drivers/input/keyboard/Kconfig
 +++ b/drivers/input/keyboard/Kconfig
-@@ -715,6 +715,17 @@ config KEYBOARD_TWL4030
+@@ -715,6 +715,16 @@ config KEYBOARD_TWL4030
 
  	  To compile this driver as a module, choose M here: the
  	  module will be called twl4030_keypad.
 +
 +config KEYBOARD_UMS9117
-+	bool "Unisoc UMS9117 polled keypad"
++	bool "Unisoc UMS9117 keypad"
 +	depends on ARCH_UMS9117
 +	select INPUT_MATRIXKMAP
 +	help
-+	  Poll the UMS9117 matrix keypad and inherited analog EIC state.
-+	  The keypad controller interrupt route is not hardware-qualified, so
-+	  this driver uses the controller's packed event state and the EIC
-+	  data register through polling only. It does not configure the EIC
-+	  controller or attempt cold power initialization.
++	  Use the UMS9117 matrix keypad. The matrix can use an optional direct
++	  controller interrupt where the board describes that route; otherwise
++	  it is polled. A board may add target-owned analog keys through a
++	  qualified GPIO interrupt provider while retaining one input device.
 
  config KEYBOARD_XTKBD
  	tristate "XT keyboard"

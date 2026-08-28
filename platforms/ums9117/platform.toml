@@ -74,6 +74,10 @@ source = "platforms/ums9117/kernel/ums9117-keypad.c"
 destination = "drivers/input/keyboard/ums9117-keypad.c"
 
 [[linux.copies]]
+source = "platforms/ums9117/kernel/sc2720-eic-ums9117.c"
+destination = "drivers/gpio/gpio-sc2720-eic-ums9117.c"
+
+[[linux.copies]]
 source = "platforms/ums9117/kernel/ums9117-fb.h"
 destination = "drivers/video/fbdev/ums9117-fb.h"
 
@@ -130,6 +134,10 @@ source = "platforms/ums9117/bindings/fplinux,ums9117-keypad.yaml"
 destination = "Documentation/devicetree/bindings/input/fplinux,ums9117-keypad.yaml"
 
 [[linux.copies]]
+source = "platforms/ums9117/bindings/sprd,ums9117-sc2720-eic.yaml"
+destination = "Documentation/devicetree/bindings/gpio/sprd,ums9117-sc2720-eic.yaml"
+
+[[linux.copies]]
 source = "platforms/ums9117/bindings/fplinux,ums9117-fb.yaml"
 destination = "Documentation/devicetree/bindings/display/fplinux,ums9117-fb.yaml"
 
@@ -156,6 +164,14 @@ destination = "drivers/video/fbdev/Kconfig"
 [[linux.appends]]
 source = "platforms/ums9117/kernel/fbdev.Makefile"
 destination = "drivers/video/fbdev/Makefile"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/sc2720-eic.Kconfig"
+destination = "drivers/gpio/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/sc2720-eic.Makefile"
+destination = "drivers/gpio/Makefile"
 
 [bootstrap]
 vendor_source_lock = "fpdoom_bootstrap"

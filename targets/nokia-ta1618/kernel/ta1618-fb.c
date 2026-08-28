@@ -73,6 +73,7 @@ static struct platform_driver ta1618_fb_driver = {
 	.driver = {
 		.name = "ta1618-fb",
 		.of_match_table = ta1618_fb_of_match,
+		.pm = pm_sleep_ptr(&ums9117_fb_pm_ops),
 	},
 };
 module_platform_driver(ta1618_fb_driver);
