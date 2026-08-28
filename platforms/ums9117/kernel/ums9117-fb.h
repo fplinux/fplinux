@@ -10,6 +10,7 @@
 #ifndef FPLINUX_UMS9117_FB_H
 #define FPLINUX_UMS9117_FB_H
 
+#include <linux/pm.h>
 #include <linux/types.h>
 
 struct platform_device;
@@ -61,5 +62,6 @@ int ums9117_fb_probe(struct platform_device *pdev,
 		     const struct ums9117_fb_profile *profile);
 void ums9117_fb_remove(struct platform_device *pdev);
 void ums9117_fb_shutdown(struct platform_device *pdev);
+extern const struct dev_pm_ops ums9117_fb_pm_ops;
 
 #endif /* FPLINUX_UMS9117_FB_H */

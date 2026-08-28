@@ -2,6 +2,7 @@
 /dts-v1/;
 
 #include <dt-bindings/input/input.h>
+#include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/leds/common.h>
 #include "ums9117.dtsi"
 #include "ums9117-musb-cold.dtsi"
@@ -54,6 +55,16 @@
 
 	auxadc {
 		compatible = "fplinux,ta1618-sc2720-auxadc";
+	};
+
+	sc2720_eic: sc2720-eic {
+		compatible = "sprd,ums9117-sc2720-eic";
+		interrupt-parent = <&gic>;
+		interrupts = <GIC_SPI 38 IRQ_TYPE_LEVEL_HIGH>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		interrupt-controller;
+		#interrupt-cells = <2>;
 	};
 
 	soc {
@@ -152,6 +163,8 @@
 
 &keypad {
 	compatible = "fplinux,ums9117-keypad";
+	interrupts = <GIC_SPI 36 IRQ_TYPE_LEVEL_HIGH>;
+	interrupt-names = "matrix";
 	status = "okay";
 	label = "TA-1618 keypad";
 	keypad,num-rows = <5>;
@@ -178,6 +191,10 @@
 		MATRIX_KEY(4, 2, KEY_UP)
 		MATRIX_KEY(4, 3, KEY_BACKSPACE) /* right soft */
 	>;
+	eic1-gpios = <&sc2720_eic 1 GPIO_ACTIVE_LOW>;
+	sprd,eic1-keycode = <KEY_POWER>;
+	wakeup-source;
+	eic9-gpios = <&sc2720_eic 9 GPIO_ACTIVE_HIGH>;
 	sprd,eic9-keycode = <KEY_8>;
 };
 

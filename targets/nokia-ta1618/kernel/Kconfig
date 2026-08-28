@@ -4,6 +4,8 @@ if ARCH_UMS9117
 config MACH_NOKIA_TA1618
 	bool "Nokia 3210 4G (TA-1618)"
 	select FB_IOMEM_HELPERS if FB
+	select GPIOLIB
+	select GPIO_SC2720_EIC_UMS9117
 	select MFD_SYSCON
 	help
 	  Board support for the Nokia 3210 4G (TA-1618), a UMS9117

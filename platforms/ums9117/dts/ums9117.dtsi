@@ -71,7 +71,6 @@
 		keypad: keypad@40250000 {
 			reg = <0x40250000 0x00000100>;
 			sprd,aon-apb = <&aon_apb>;
-			sprd,eic-data-address = <0x40608280>;
 			status = "disabled";
 		};
 

@@ -4,16 +4,16 @@
 $id: http://devicetree.org/schemas/input/fplinux,ums9117-keypad.yaml#
 $schema: http://devicetree.org/meta-schemas/core.yaml#
 
-title: Unisoc UMS9117 polled matrix keypad
+title: Unisoc UMS9117 matrix keypad
 
 maintainers:
   - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
 
 description: |
-  Matrix keypad controller found in UMS9117 feature phones. The controller and
-  inherited analog EIC state are polled because their interrupt routes are not
-  hardware-qualified. The driver only reads the inherited EIC data register;
-  it does not configure the EIC controller.
+  Matrix keypad controller found in UMS9117 feature phones. The matrix may use
+  an optional direct controller interrupt described by the board; otherwise it
+  is polled. Target-owned analog EIC keys may be supplied as GPIO inputs by a
+  separate SC2720 EIC provider.
 
 allOf:
   - $ref: matrix-keymap.yaml#
@@ -25,6 +25,13 @@ properties:
   reg:
     maxItems: 1
 
+  interrupts:
+    maxItems: 1
+    description: Optional direct matrix controller interrupt.
+
+  interrupt-names:
+    const: matrix
+
   label:
     $ref: /schemas/types.yaml#/definitions/string
     description: Stable input device name.
@@ -33,14 +40,27 @@ properties:
     $ref: /schemas/types.yaml#/definitions/phandle
     description: AON APB syscon that gates and resets the keypad controller.
 
-  sprd,eic-data-address:
+  wakeup-source:
+    description: The target-owned EIC1 power key can wake system sleep.
+    type: boolean
+
+  eic1-gpios:
+    maxItems: 1
+    description: Optional target-owned SC2720 EIC1 input.
+
+  sprd,eic1-keycode:
     $ref: /schemas/types.yaml#/definitions/uint32
-    description: Inherited analog EIC data register, read through shared ADI.
+    maximum: 767
+    description: Target-owned keycode for eic1-gpios.
+
+  eic9-gpios:
+    maxItems: 1
+    description: Optional target-owned SC2720 EIC9 input.
 
   sprd,eic9-keycode:
     $ref: /schemas/types.yaml#/definitions/uint32
-    const: 9
-    description: Optional EIC9 key. UMS9117 phones use Linux KEY_8 (9).
+    maximum: 767
+    description: Target-owned keycode for eic9-gpios.
 
 required:
   - compatible
@@ -50,7 +70,14 @@ required:
   - keypad,num-columns
   - linux,keymap
   - sprd,aon-apb
-  - sprd,eic-data-address
+dependencies:
+  interrupts: [interrupt-names]
+  interrupt-names: [interrupts]
+  eic1-gpios: ["sprd,eic1-keycode"]
+  "sprd,eic1-keycode": [eic1-gpios]
+  wakeup-source: [eic1-gpios]
+  eic9-gpios: ["sprd,eic9-keycode"]
+  "sprd,eic9-keycode": [eic9-gpios]
 
 unevaluatedProperties: false
 
@@ -71,5 +98,4 @@ examples:
             MATRIX_KEY(0, 3, KEY_ENTER)
         >;
         sprd,aon-apb = <&aon_apb>;
-        sprd,eic-data-address = <0x40608280>;
     };
