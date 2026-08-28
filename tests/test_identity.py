@@ -112,7 +112,12 @@ class IdentityTests(unittest.TestCase):
         source = {"version": "test", "sha256": "a" * 64}
         target = {
             "identity": validate_target_identity(self.target()),
-            "linux": {"patches": [], "copies": [], "appends": []},
+            "linux": {
+                "patches": [],
+                "copies": [],
+                "appends": [],
+                "root": {"kind": "initramfs"},
+            },
         }
         platform = {
             "identity": validate_platform_identity(self.platform()),

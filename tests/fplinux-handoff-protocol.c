@@ -20,7 +20,8 @@ static int test_roundtrip(void)
 {
 	uint8_t session_id[FPLINUX_HANDOFF_SESSION_ID_BYTES];
 	uint8_t request[FPLINUX_HANDOFF_REQUEST_PAYLOAD_BYTES];
-	uint8_t response[FPLINUX_HANDOFF_RESPONSE_BYTES];
+	uint8_t response_storage[FPLINUX_HANDOFF_RESPONSE_BYTES + 1U];
+	uint8_t *response = response_storage + 1U;
 
 	fill_session_id(session_id);
 	fplinux_handoff_encode_request(request, session_id);

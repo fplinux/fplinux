@@ -35,7 +35,12 @@ from .config import (
     relative_value,
     target_defconfig_path,
 )
-from .device_tree import DeviceTreeError, verify_target_identity
+from .device_tree import (
+    DeviceTreeError,
+    verify_profile_dtb_layout,
+    verify_root_bootargs,
+    verify_target_identity,
+)
 from .output import RunReporter, current_stage, exit_status, run_entrypoint
 
 if TYPE_CHECKING:
@@ -373,6 +378,10 @@ def check_contexts(reporter: RunReporter | None, profile: str | None = None) -> 
                     identity["display_name"],
                     (identity["compatible"], platform_identity["compatible"]),
                 )
+                verify_root_bootargs(dtb, target_config["linux"]["root"])
+                layout = target_config.get("layout")
+                if isinstance(layout, dict):
+                    verify_profile_dtb_layout(dtb, layout)
             except DeviceTreeError as error:
                 raise SystemExit(f"sparse failed: {error}") from error
         with report_stage(reporter, f"sparse-{label}"):

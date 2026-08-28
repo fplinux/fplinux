@@ -1,0 +1,13 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+
+status=0
+growpart --update=on /dev/mmcblk0 2 || status=$?
+case $status in
+0 | 1)
+	exec resize2fs /dev/mmcblk0p2
+	;;
+*)
+	exit "$status"
+	;;
+esac

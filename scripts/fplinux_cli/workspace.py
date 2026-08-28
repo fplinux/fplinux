@@ -49,6 +49,7 @@ STAGED_BUILD_SOURCES = (
     "scripts/fplinux_cli/kbuild_state.py",
     "scripts/fplinux_cli/linux_state.py",
     "scripts/fplinux_cli/output.py",
+    "scripts/fplinux_cli/profile_layout.py",
     "scripts/fplinux_cli/ssh_transport.py",
 )
 
@@ -132,6 +133,26 @@ def target_build_source_files(target: str, profile: str | None = None) -> list[t
     selected_profile = target_config.get("profile")
     if selected_profile is not None:
         add_source_path(files, profile_manifest_path(target, selected_profile))
+        add_source_path(files, ROOT / "scripts/fplinux_cli/artifact_state.py")
+    if target_config["uboot"]["kind"] == "full":
+        add_source_path(files, ROOT / "scripts/fplinux_cli/uboot_tools.py")
+        add_source_path(
+            files,
+            target_root / "profiles" / str(selected_profile) / target_config["uboot"]["source"],
+        )
+        profile_root = target_root / "profiles" / str(selected_profile)
+        add_source_path(files, profile_root / target_config["uboot"]["defconfig"])
+        for relative in target_config["uboot"]["patches"]:
+            add_source_path(files, profile_root / relative)
+        for step in target_config["uboot"]["copies"]:
+            add_source_path(files, ROOT / step["source"])
+    if target_config["image"]["kind"] == "ext4-root":
+        add_source_path(files, ROOT / "scripts/fplinux_cli/ext4_root.py")
+        add_source_path(files, ROOT / "scripts/fplinux_cli/mke2fs.conf")
+        if target_config["fit"]["kind"] == "sha256":
+            add_source_path(files, ROOT / "scripts/fplinux_cli/sd_image.py")
+    if target_config["fit"]["kind"] == "sha256":
+        add_source_path(files, ROOT / "scripts/fplinux_cli/fit_image.py")
     add_source_path(files, target_root / target_config["bootstrap"]["source"])
     for relative in target_config["linux"]["patches"]:
         add_source_path(files, target_root / relative)

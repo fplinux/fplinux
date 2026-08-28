@@ -33,20 +33,25 @@ class AlpineStateTests(unittest.TestCase):
             b'branch = "v3.24"\n'
             b'arch = "armv7"\n'
             b'triplet = "armv7-alpine-linux-musleabihf"\n'
-            b'repository = "https://example.invalid/alpine/v3.24/main"\n'
+            b"\n[repositories]\n"
+            b'main = "https://example.invalid/alpine/v3.24/main"\n'
+            b'community = "https://example.invalid/alpine/v3.24/community"\n'
             b"\n[minirootfs]\n"
             b'url = "https://example.invalid/alpine-minirootfs.tar.gz"\n'
             b'sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"\n'
             b"bytes = 1\n"
             b"\n[runtime]\n"
             b'packages = ["openrc-1-r0.apk"]\n'
+            b"\n[runtime.additions]\n"
             b"\n[sysroot]\n"
             b'packages = ["musl-dev-1-r0.apk"]\n'
             b"\n[[package]]\n"
+            b'repository = "main"\n'
             b'file = "openrc-1-r0.apk"\n'
             b'sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"\n'
             b"bytes = 2\n"
             b"\n[[package]]\n"
+            b'repository = "main"\n'
             b'file = "musl-dev-1-r0.apk"\n'
             b'sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"\n'
             b"bytes = 3\n",
@@ -93,6 +98,21 @@ class AlpineStateTests(unittest.TestCase):
                 self.root,
             )
         self.assertEqual(selected, (*self.packages, third))
+
+    def test_runtime_addition_is_selected_only_with_its_local_package(self) -> None:
+        """A profile-only Alpine closure is unrelated to ordinary rootfs builds."""
+        lock = {
+            "runtime": {
+                "packages": ["base-1-r0.apk"],
+                "additions": {"fplinux-feature": ["feature-dependency-1-r0.apk"]},
+            }
+        }
+
+        self.assertEqual(alpine_state.runtime_package_names(lock, ()), ("base-1-r0.apk",))
+        self.assertEqual(
+            alpine_state.runtime_package_names(lock, ("fplinux-feature",)),
+            ("base-1-r0.apk", "feature-dependency-1-r0.apk"),
+        )
 
     def test_package_cannot_be_selected_and_bundle_published(self) -> None:
         """One package cannot be both installed and published separately."""
@@ -466,10 +486,11 @@ class AlpineStateTests(unittest.TestCase):
             mock.patch.object(alpine_state, "load_alpine_lock", return_value=lock),
             mock.patch.object(alpine_state, "package_records", return_value={}),
             mock.patch.object(alpine_builder, "_fetch", return_value=archive),
+            mock.patch.object(alpine_builder, "_alpine_runtime_packages", return_value=[]),
             mock.patch.object(
                 alpine_builder,
                 "_alpine_group_packages",
-                side_effect=([], []),
+                return_value=[],
             ),
             mock.patch.object(tarfile, "open", return_value=archive_context),
             mock.patch.object(alpine_builder, "_prepare_alpine_sysroot"),
@@ -661,6 +682,20 @@ class AlpineStateTests(unittest.TestCase):
             self.assertRaisesRegex(SystemExit, "fplinux-input"),
         ):
             alpine_builder._verify_alpine_rootfs(root, with_input)  # noqa: SLF001
+
+        microsd_root = (*without_input, "fplinux-microsd-root")
+        write_world(microsd_root)
+        with (
+            mock.patch.object(alpine_builder, "_require_apk_owner"),
+            self.assertRaisesRegex(SystemExit, "shutdown runlevel is missing killprocs"),
+        ):
+            alpine_builder._verify_alpine_rootfs(root, microsd_root)  # noqa: SLF001
+        shutdown = root / "etc/runlevels/shutdown"
+        shutdown.mkdir(parents=True)
+        for service in ("killprocs", "savecache", "mount-ro"):
+            (shutdown / service).symlink_to(f"/etc/init.d/{service}")
+        with mock.patch.object(alpine_builder, "_require_apk_owner"):
+            alpine_builder._verify_alpine_rootfs(root, microsd_root)  # noqa: SLF001
 
     def test_signing_key_identity_requires_one_regular_public_key(self) -> None:
         """Keep package signing state explicit rather than silently generating it in prune."""

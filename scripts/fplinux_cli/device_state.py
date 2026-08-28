@@ -6,11 +6,12 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Sequence
 
 _LOCALVERSION_PREFIX = "-fplinux-"
 _LOCALVERSION_DIGEST_LENGTH = 16
@@ -67,25 +68,70 @@ def _require_kconfig_symbols(value: Sequence[object], field: str) -> list[str]:
     return result
 
 
-def _require_rootfs(value: Mapping[str, object]) -> dict[str, int | str]:
+def _require_initramfs(value: Mapping[str, object]) -> dict[str, int | str]:
     if set(value) != {"sha256", "size"}:
-        message = "rootfs identity must contain exactly sha256 and size"
+        message = "initramfs identity must contain exactly sha256 and size"
         raise DeviceStateError(message)
-    digest = _require_digest(value.get("sha256"), "rootfs SHA-256")
+    digest = _require_digest(value.get("sha256"), "initramfs SHA-256")
     size = value.get("size")
     if type(size) is not int or size < 0:
-        message = "rootfs size must be a non-negative integer"
+        message = "initramfs size must be a non-negative integer"
         raise DeviceStateError(message)
     return {"sha256": digest, "size": size}
 
 
 def _require_receipt(value: Mapping[str, object]) -> dict[str, str]:
     if set(value) != {"recipe", "sha256"}:
-        message = "rootfs receipt must contain exactly recipe and sha256"
+        message = "initramfs receipt must contain exactly recipe and sha256"
         raise DeviceStateError(message)
     return {
-        "recipe": _require_digest(value.get("recipe"), "rootfs recipe"),
-        "sha256": _require_digest(value.get("sha256"), "rootfs receipt SHA-256"),
+        "recipe": _require_digest(value.get("recipe"), "initramfs recipe"),
+        "sha256": _require_digest(value.get("sha256"), "initramfs receipt SHA-256"),
+    }
+
+
+def _require_root(value: Mapping[str, object]) -> dict[str, object]:
+    """Normalize only root inputs that can alter the kernel or compiled DTB."""
+    kind = value.get("kind")
+    if kind == "initramfs":
+        if set(value) != {"kind", "artifact", "receipt"}:
+            message = "initramfs root must contain exactly kind, artifact and receipt"
+            raise DeviceStateError(message)
+        artifact = value.get("artifact")
+        receipt = value.get("receipt")
+        if not isinstance(artifact, Mapping) or not isinstance(receipt, Mapping):
+            message = "initramfs root artifact and receipt must be tables"
+            raise DeviceStateError(message)
+        return {
+            "kind": "initramfs",
+            "artifact": _require_initramfs(artifact),
+            "receipt": _require_receipt(receipt),
+        }
+    if kind != "external" or set(value) != {
+        "kind",
+        "filesystem",
+        "partuuid",
+        "wait_seconds",
+    }:
+        message = "external root contract is invalid"
+        raise DeviceStateError(message)
+    filesystem = value.get("filesystem")
+    partuuid = value.get("partuuid")
+    wait_seconds = value.get("wait_seconds")
+    if filesystem != "ext4":
+        message = "external root filesystem must be ext4"
+        raise DeviceStateError(message)
+    if not isinstance(partuuid, str) or re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{2}", partuuid) is None:
+        message = "external root PARTUUID is invalid"
+        raise DeviceStateError(message)
+    if type(wait_seconds) is not int or not 1 <= wait_seconds <= 60:
+        message = "external root wait_seconds must be in 1..60"
+        raise DeviceStateError(message)
+    return {
+        "kind": "external",
+        "filesystem": filesystem,
+        "partuuid": partuuid,
+        "wait_seconds": wait_seconds,
     }
 
 
@@ -103,8 +149,7 @@ def device_kernel_identity(  # noqa: PLR0913
     target: str,
     linux_recipe: str,
     bootstrap_recipe: str,
-    rootfs: Mapping[str, object],
-    rootfs_receipt: Mapping[str, object],
+    root: Mapping[str, object],
     kbuild_implementation: str,
     arch: str,
     defconfig: Path,
@@ -118,8 +163,7 @@ def device_kernel_identity(  # noqa: PLR0913
         "target": _require_target(target),
         "linux_recipe": _require_digest(linux_recipe, "prepared Linux recipe"),
         "bootstrap_recipe": _require_digest(bootstrap_recipe, "bootstrap recipe"),
-        "rootfs": _require_rootfs(rootfs),
-        "rootfs_receipt": _require_receipt(rootfs_receipt),
+        "root": _require_root(root),
         "kbuild_implementation": _require_digest(kbuild_implementation, "Kbuild implementation"),
         "kernel": {
             "arch": _require_target(arch),

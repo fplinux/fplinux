@@ -556,8 +556,22 @@ class PruneTests(unittest.TestCase):
             slot = cache / "linux/profiles/phone/host"
             slot.mkdir(parents=True)
             (slot / "prepared").write_text("generated\n")
-            default: dict[str, object] = {"linux": {"patches": [], "copies": [], "appends": []}}
-            profile: dict[str, object] = {"linux": {"patches": [], "copies": [], "appends": []}}
+            default: dict[str, object] = {
+                "linux": {
+                    "patches": [],
+                    "copies": [],
+                    "appends": [],
+                    "root": {"kind": "initramfs"},
+                }
+            }
+            profile: dict[str, object] = {
+                "linux": {
+                    "patches": [],
+                    "copies": [],
+                    "appends": [],
+                    "root": {"kind": "initramfs"},
+                }
+            }
 
             def load_target(_target: str, selected: str | None = None) -> dict[str, object]:
                 return profile if selected is not None else default
@@ -571,6 +585,44 @@ class PruneTests(unittest.TestCase):
 
             self.assertEqual(result.removed, ("linux/profiles/phone/host",))
             self.assertFalse(slot.exists())
+
+    def test_external_root_profile_keeps_its_generated_linux_tree(self) -> None:
+        """Generated external-root bootargs require a dedicated prepared source."""
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary) / ".cache"
+            slot = cache / "linux/profiles/phone/microsd"
+            slot.mkdir(parents=True)
+            (slot / "prepared").write_text("generated\n")
+            base_linux: dict[str, object] = {"patches": [], "copies": [], "appends": []}
+            default: dict[str, object] = {"linux": {**base_linux, "root": {"kind": "initramfs"}}}
+            profile: dict[str, object] = {
+                "linux": {
+                    **base_linux,
+                    "root": {
+                        "kind": "external",
+                        "filesystem": "ext4",
+                        "partuuid": "46504c58-02",
+                        "wait_seconds": 10,
+                    },
+                }
+            }
+
+            def load_target(_target: str, selected: str | None = None) -> dict[str, object]:
+                return profile if selected is not None else default
+
+            with (
+                mock.patch.object(prune_module, "discover_targets", return_value=("phone",)),
+                mock.patch.object(prune_module, "discover_profiles", return_value=("microsd",)),
+                mock.patch.object(prune_module, "load_target", side_effect=load_target),
+            ):
+                plan = plan_prune(cache)
+
+            entry = next(
+                item for item in plan.entries if item.path == "linux/profiles/phone/microsd"
+            )
+            self.assertEqual(entry.action, "protected")
+            self.assertEqual(entry.reason, "declared profile cache")
+            self.assertTrue(slot.exists())
 
     def test_fixed_linux_staging_slots_are_disposable(self) -> None:
         """Interrupted preparation leaves only exact staging paths that prune may remove."""

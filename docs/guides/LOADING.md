@@ -59,12 +59,24 @@ Build the target as described in [Building FPLinux](BUILDING.md), then run:
 ./fplinux run <target>
 ```
 
-For a declared development profile, use the same profile that selected the
-build:
+For a runnable development profile, use the same profile that selected the
+build. Build-only profiles are rejected before the loader touches USB.
 
 ```sh
 ./fplinux run <target> --profile <profile>
 ```
+
+The Nokia microSD system mode has a public boot selector. Its build remains
+isolated from the ordinary RAM-only bundle:
+
+```sh
+./fplinux build nokia-ta1618 --profile microsd-uboot
+./fplinux run nokia-ta1618 --boot microsd
+```
+
+The second command selects only that prepared microSD context. It does not fall
+back to the default Nokia bundle. Running `./fplinux run nokia-ta1618` without
+`--boot` continues to use the ordinary RAM-only system.
 
 A profile with `transport = "none"` returns after the bridge acknowledges the
 session-bound handoff and the original BootROM USB device disappears. With no

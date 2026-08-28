@@ -390,9 +390,27 @@ def project_c_format_sources(files: list[Path]) -> list[str]:
     sources = {
         path.relative_to(ROOT).as_posix()
         for path in files
-        if is_aport_source(path, APORT_C_FORMAT_SUFFIXES)
-        or is_shared_aport_source(path, APORT_C_FORMAT_SUFFIXES)
-        or (path.relative_to(ROOT).parts[0] == "tests" and path.suffix in APORT_C_FORMAT_SUFFIXES)
+        if (
+            is_aport_source(path, APORT_C_FORMAT_SUFFIXES)
+            or is_shared_aport_source(path, APORT_C_FORMAT_SUFFIXES)
+            or (
+                path.relative_to(ROOT).parts[0] == "tests"
+                and path.suffix in APORT_C_FORMAT_SUFFIXES
+            )
+            or (
+                len(path.relative_to(ROOT).parts) >= 4
+                and path.relative_to(ROOT).parts[0] in {"platforms", "targets"}
+                and path.relative_to(ROOT).parts[2] == "common"
+                and path.suffix in APORT_C_FORMAT_SUFFIXES
+            )
+            or (
+                len(path.relative_to(ROOT).parts) >= 6
+                and path.relative_to(ROOT).parts[0] == "targets"
+                and path.relative_to(ROOT).parts[2] == "profiles"
+                and path.relative_to(ROOT).parts[4] == "uboot"
+                and path.suffix in APORT_C_FORMAT_SUFFIXES
+            )
+        )
     }
     sources.update(
         source for source, _requires_libusb in userspace_c_sources(files, include_embedded=True)

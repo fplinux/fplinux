@@ -32,9 +32,21 @@ class KbuildStateTests(unittest.TestCase):
         path.write_bytes(contents)
         return path
 
-    def _plan(self, jobs: int = 2) -> kbuild_state.KbuildPlan:
-        rootfs = kbuild_state.rootfs_identity(self.rootfs)
-        rootfs_input = kbuild_state.rootfs_input_path(self.work, rootfs)
+    def _plan(self, jobs: int = 2, *, external: bool = False) -> kbuild_state.KbuildPlan:
+        initramfs = None if external else kbuild_state.initramfs_identity(self.rootfs)
+        initramfs_input = (
+            None if initramfs is None else kbuild_state.initramfs_input_path(self.work, initramfs)
+        )
+        root: dict[str, object] = (
+            {
+                "kind": "external",
+                "filesystem": "ext4",
+                "partuuid": "46504c58-02",
+                "wait_seconds": 10,
+            }
+            if external
+            else {"kind": "initramfs"}
+        )
         kbuild = [
             "make",
             "-C",
@@ -48,9 +60,10 @@ class KbuildStateTests(unittest.TestCase):
             linux_base="c" * 64,
             defconfig=self.defconfig,
             defconfig_path="targets/demo/kernel/defconfig",
-            rootfs=rootfs,
-            rootfs_input=rootfs_input,
-            rootfs_receipt={"recipe": "d" * 64, "sha256": "e" * 64},
+            root=root,
+            initramfs=initramfs,
+            initramfs_input=initramfs_input,
+            initramfs_receipt=(None if external else {"recipe": "d" * 64, "sha256": "e" * 64}),
             arch="arm",
             cross_compile=self.cross,
             commands=builder.kernel_build_commands(
@@ -61,7 +74,7 @@ class KbuildStateTests(unittest.TestCase):
                     str(self.output / ".config"),
                     "--set-str",
                     "INITRAMFS_SOURCE",
-                    str(rootfs_input),
+                    "" if initramfs_input is None else str(initramfs_input),
                 ],
                 ["zImage", "dtbs"],
                 jobs,
@@ -79,7 +92,7 @@ class KbuildStateTests(unittest.TestCase):
 
     def _complete(self, plan: kbuild_state.KbuildPlan, tag: bytes) -> None:
         kbuild_state.prepare_output(self.work, self.output)
-        kbuild_state.materialize_rootfs_input(self.work, self.rootfs, plan)
+        kbuild_state.materialize_initramfs_input(self.work, self.rootfs, plan)
         self._write_outputs(tag)
         kbuild_state.publish_success(self.work, self.output, plan)
 
@@ -107,7 +120,7 @@ class KbuildStateTests(unittest.TestCase):
         self.assertNotEqual(first.recipe, changed.recipe)
         self.assertFalse(kbuild_state.cache_hit(self.work, self.output, changed))
         kbuild_state.prepare_output(self.work, self.output)
-        kbuild_state.materialize_rootfs_input(self.work, self.rootfs, changed)
+        kbuild_state.materialize_initramfs_input(self.work, self.rootfs, changed)
         self.assertEqual(self.output, self.work / "kernel")
         self.assertEqual(retained.read_bytes(), b"keep\n")
 
@@ -115,7 +128,7 @@ class KbuildStateTests(unittest.TestCase):
         """Populated output paths alone cannot become a cache hit."""
         plan = self._plan()
         kbuild_state.prepare_output(self.work, self.output)
-        kbuild_state.materialize_rootfs_input(self.work, self.rootfs, plan)
+        kbuild_state.materialize_initramfs_input(self.work, self.rootfs, plan)
         self._write_outputs(b"partial")
 
         self.assertFalse((self.work / kbuild_state.RECEIPT_NAME).exists())
@@ -125,7 +138,7 @@ class KbuildStateTests(unittest.TestCase):
         """A receipt published after all outputs exist authorizes reuse."""
         plan = self._plan()
         kbuild_state.prepare_output(self.work, self.output)
-        kbuild_state.materialize_rootfs_input(self.work, self.rootfs, plan)
+        kbuild_state.materialize_initramfs_input(self.work, self.rootfs, plan)
         self._write_outputs(b"complete")
 
         self.assertFalse(kbuild_state.cache_hit(self.work, self.output, plan))
@@ -134,15 +147,56 @@ class KbuildStateTests(unittest.TestCase):
         identity = kbuild_state.receipt_identity(self.work, self.output, plan)
         self.assertEqual(identity["recipe"], plan.recipe)
 
-    def test_changed_rootfs_input_revokes_hit_and_success_publication(self) -> None:
-        """A receipt cannot reuse or republish outputs with another rootfs copy."""
+    def test_changed_initramfs_input_revokes_hit_and_success_publication(self) -> None:
+        """A receipt cannot reuse or republish outputs with another initramfs copy."""
         plan = self._plan()
         self._complete(plan, b"a")
-        plan.rootfs_input.write_bytes(b"rootfs-tampered\n")
+        if plan.initramfs_input is None:
+            self.fail("embedded plan did not expose its initramfs input")
+        plan.initramfs_input.write_bytes(b"rootfs-tampered\n")
 
         self.assertFalse(kbuild_state.cache_hit(self.work, self.output, plan))
-        with self.assertRaisesRegex(kbuild_state.KbuildStateError, "rootfs input"):
+        with self.assertRaisesRegex(kbuild_state.KbuildStateError, "initramfs input"):
             kbuild_state.publish_success(self.work, self.output, plan)
+
+    def test_external_root_has_no_materialized_initramfs_dependency(self) -> None:
+        """External root reuse depends on boot parameters, not filesystem bytes."""
+        plan = self._plan(external=True)
+        kbuild_state.prepare_output(self.work, self.output)
+        self._write_outputs(b"external")
+        kbuild_state.publish_success(self.work, self.output, plan)
+
+        self.rootfs.write_bytes(b"unrelated external filesystem bytes\n")
+
+        self.assertTrue(kbuild_state.cache_hit(self.work, self.output, self._plan(external=True)))
+        self.assertFalse((self.work / "rootfs.cpio").exists())
+        with self.assertRaisesRegex(kbuild_state.KbuildStateError, "does not consume"):
+            kbuild_state.materialize_initramfs_input(self.work, self.rootfs, plan)
+
+    def test_changing_external_root_contract_is_a_kbuild_miss(self) -> None:
+        """Compiled bootargs cannot reuse a receipt for another PARTUUID."""
+        plan = self._plan(external=True)
+        kbuild_state.prepare_output(self.work, self.output)
+        self._write_outputs(b"external")
+        kbuild_state.publish_success(self.work, self.output, plan)
+        changed = kbuild_state.create_plan(
+            linux_recipe="a" * 64,
+            linux_base="c" * 64,
+            defconfig=self.defconfig,
+            defconfig_path="targets/demo/kernel/defconfig",
+            root={**plan.root, "partuuid": "46504c59-02"},
+            initramfs=None,
+            initramfs_input=None,
+            initramfs_receipt=None,
+            arch="arm",
+            cross_compile=self.cross,
+            commands=[["make", "olddefconfig"]],
+            outputs=("arch/zImage", "arch/demo.dtb", "vmlinux", "System.map", ".config"),
+            implementation=[],
+        )
+
+        self.assertNotEqual(plan.recipe, changed.recipe)
+        self.assertFalse(kbuild_state.cache_hit(self.work, self.output, changed))
 
 
 if __name__ == "__main__":

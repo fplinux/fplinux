@@ -8,7 +8,7 @@ import struct
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
     from pathlib import Path
 
 FDT_MAGIC = 0xD00DFEED
@@ -231,6 +231,77 @@ def parse_nul_string_list(value: bytes, name: str) -> tuple[str, ...]:
         raise DeviceTreeError(f"{name} is not valid UTF-8") from error
 
 
+def _u32_pair(value: bytes, name: str) -> tuple[int, int]:
+    """Decode exactly one 32-bit address/size pair from a compiled property."""
+    if len(value) != 8:
+        raise DeviceTreeError(f"{name} is not one 32-bit address/size pair")
+    return struct.unpack(">II", value)
+
+
+def _layout_u32(layout: Mapping[str, int], field: str) -> int:
+    """Read one already-normalized profile layout value defensively."""
+    try:
+        value = layout[field]
+    except KeyError as error:
+        raise DeviceTreeError(f"profile layout lacks {field}") from error
+    if type(value) is not int or not 0 <= value <= 0xFFFFFFFF:
+        raise DeviceTreeError(f"profile layout {field} is not a 32-bit integer")
+    return value
+
+
+def verify_profile_dtb_layout(
+    tree: bytes | Path,
+    layout: Mapping[str, int],
+) -> None:
+    """Verify the selected profile's volatile layout against its compiled DTB."""
+    ram_base = _layout_u32(layout, "ram_base")
+    fdt_load = _layout_u32(layout, "fdt_load")
+    fdt_limit = _layout_u32(layout, "fdt_size")
+    fdt_pad_bytes = _layout_u32(layout, "fdt_pad")
+    framebuffer = _layout_u32(layout, "framebuffer")
+    framebuffer_size = _layout_u32(layout, "framebuffer_size")
+    ram_size = _layout_u32(layout, "ram_size")
+    if fdt_load % 0x1000:
+        raise DeviceTreeError("profile DTB fixed FDT address is not page-aligned")
+    if fdt_load < ram_base or fdt_load + fdt_limit > framebuffer:
+        raise DeviceTreeError("profile DTB fixed FDT arena does not precede the framebuffer")
+    if framebuffer + framebuffer_size != ram_base + ram_size:
+        raise DeviceTreeError("profile DTB framebuffer does not end at the RAM boundary")
+
+    memory_path = f"/memory@{ram_base:x}"
+    reserved_path = f"/reserved-memory/framebuffer@{framebuffer:x}"
+    display_path = f"/soc/display@{framebuffer:x}"
+    tree_bytes = _read_tree(tree)
+    properties = exact_path_properties(tree_bytes, (memory_path, reserved_path, display_path))
+    memory = properties[memory_path]
+    if parse_nul_string(memory.get("device_type", b""), f"{memory_path} device_type") != "memory":
+        raise DeviceTreeError("profile DTB memory node is not memory")
+    memory_base, memory_size = _u32_pair(memory.get("reg", b""), f"{memory_path} reg")
+    if memory_base != ram_base or memory_base + memory_size != fdt_load:
+        raise DeviceTreeError("profile DTB memory range must end exactly at the fixed FDT arena")
+
+    if len(tree_bytes) + fdt_pad_bytes > fdt_limit:
+        raise DeviceTreeError("profile DTB plus U-Boot padding exceeds the fixed FDT arena")
+
+    reserved = properties[reserved_path]
+    reserved_base, reserved_size = _u32_pair(reserved.get("reg", b""), f"{reserved_path} reg")
+    if (reserved_base, reserved_size) != (framebuffer, framebuffer_size):
+        raise DeviceTreeError("profile DTB framebuffer reservation differs from the layout")
+    if reserved.get("no-map") != b"":
+        raise DeviceTreeError("profile DTB framebuffer reservation must be no-map")
+
+    display = properties[display_path]
+    display_reg = display.get("reg", b"")
+    if len(display_reg) < 8 or len(display_reg) % 8:
+        raise DeviceTreeError("profile DTB display reg has no complete 32-bit ranges")
+    display_base, display_size = _u32_pair(display_reg[:8], f"{display_path} first reg")
+    names = parse_nul_string_list(display.get("reg-names", b""), f"{display_path} reg-names")
+    if not names or names[0] != "framebuffer":
+        raise DeviceTreeError("profile DTB display does not name its first range framebuffer")
+    if (display_base, display_size) != (framebuffer, framebuffer_size):
+        raise DeviceTreeError("profile DTB display framebuffer range differs from the layout")
+
+
 def verify_target_identity(
     tree: bytes | Path,
     target: str,
@@ -254,4 +325,34 @@ def verify_target_identity(
         raise DeviceTreeError(
             f"{target} DTB compatible mismatch: expected {expected_compatibles!r}, "
             f"got {actual_compatibles!r}"
+        )
+
+
+def verify_root_bootargs(tree: bytes | Path, root: dict[str, object]) -> None:
+    """Require compiled external-root boot parameters to match the profile contract."""
+    if root.get("kind") == "initramfs":
+        return
+    if root.get("kind") != "external":
+        raise DeviceTreeError("DTB root contract kind is invalid")
+    chosen = exact_path_properties(tree, "/chosen")["/chosen"]
+    if "bootargs" not in chosen:
+        raise DeviceTreeError("external-root DTB /chosen lacks property bootargs")
+    bootargs = parse_nul_string(chosen["bootargs"], "external-root DTB bootargs")
+    tokens = bootargs.split()
+    expected = {
+        "root": f"root=PARTUUID={root['partuuid']}",
+        "rootfstype": f"rootfstype={root['filesystem']}",
+        "rootwait": f"rootwait={root['wait_seconds']}",
+        "init": "init=/sbin/init",
+    }
+    for key, token in expected.items():
+        matches = [value for value in tokens if value == token]
+        conflicting = [value for value in tokens if value.startswith(f"{key}=") and value != token]
+        if len(matches) != 1 or conflicting:
+            raise DeviceTreeError(f"external-root DTB bootargs must contain exactly one {token}")
+    if tokens.count("rw") != 1 or "ro" in tokens:
+        raise DeviceTreeError("external-root DTB bootargs must select rw and must not select ro")
+    if any(argument == "rootwait" or argument.startswith("rdinit=") for argument in tokens):
+        raise DeviceTreeError(
+            "external-root DTB bootargs must use bounded rootwait and must not use rdinit"
         )

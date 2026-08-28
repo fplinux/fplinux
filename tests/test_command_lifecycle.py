@@ -62,6 +62,8 @@ class CommandLifecycleTests(unittest.TestCase):
         generation: str,
         path: Path,
         profile: str | None = None,
+        *,
+        runnable: bool = True,
     ) -> dict[str, object]:
         """Describe one complete synthetic bundle independently of its resolver."""
         return {
@@ -70,6 +72,7 @@ class CommandLifecycleTests(unittest.TestCase):
             "apk_signing_key": self.signing_key,
             "device_identity": "9" * 64,
             "rootfs_receipt": {"recipe": "f" * 64, "sha256": "0" * 64},
+            "boot_artifacts": {"required": [], "runnable": runnable},
             "files": published_file_records(path),
             "generation": generation,
             "kbuild_receipt": {"recipe": "1" * 64, "sha256": "3" * 64},
@@ -84,6 +87,7 @@ class CommandLifecycleTests(unittest.TestCase):
         image: bytes = b"ramboot\n",
         *,
         profile: str | None = None,
+        runnable: bool = True,
     ) -> Path:
         """Write one complete immutable generation without selecting it."""
         slot = self.output / "phone"
@@ -107,7 +111,7 @@ class CommandLifecycleTests(unittest.TestCase):
         ssh_helper.write_text("# bundled SSH helper\n", encoding="utf-8")
         ssh_helper.chmod(0o644)
         (path / BUILD_MANIFEST_NAME).write_bytes(
-            canonical_json_bytes(self._manifest(generation, path, profile))
+            canonical_json_bytes(self._manifest(generation, path, profile, runnable=runnable))
         )
         return path
 
@@ -379,6 +383,71 @@ class CommandLifecycleTests(unittest.TestCase):
 
         execute.assert_called_once_with(os.fsencode(runner), [os.fsencode(runner)])
 
+    def test_public_microsd_boot_has_one_exact_context_and_no_fallback(self) -> None:
+        """Resolve the public Nokia mode without turning the profile name into an alias."""
+        self.assertEqual(
+            commands.selected_context_profile(
+                "nokia-ta1618",
+                profile=None,
+                boot="microsd",
+            ),
+            "microsd-uboot",
+        )
+        self.assertIsNone(
+            commands.selected_context_profile("nokia-ta1618", profile=None, boot=None)
+        )
+        self.assertEqual(
+            commands.selected_context_profile(
+                "nokia-ta1618",
+                profile="microsd-uboot",
+                boot=None,
+            ),
+            "microsd-uboot",
+        )
+        with self.assertRaisesRegex(SystemExit, "not available for target inoi-240-modern-4g"):
+            commands.selected_context_profile(
+                "inoi-240-modern-4g",
+                profile=None,
+                boot="microsd",
+            )
+        with self.assertRaisesRegex(SystemExit, "cannot be used together"):
+            commands.selected_context_profile(
+                "nokia-ta1618",
+                profile="microsd-uboot",
+                boot="microsd",
+            )
+
+    def test_public_microsd_run_opens_the_selected_profile_runner(self) -> None:
+        """The public boot mode consumes the existing profile generation exactly once."""
+        profile = "microsd-uboot"
+        profile_path = self._create_generation("b" * 64, profile=profile)
+        profile_bundle = publish_current_bundle(
+            self.output,
+            "phone",
+            profile_path,
+            profile,
+        )
+        manifest = self._manifest("b" * 64, profile_bundle.path, profile)
+        with (
+            mock.patch.object(
+                commands,
+                "load_target",
+                return_value={"runtime": {"runnable": True}},
+            ) as load_target,
+            mock.patch.object(
+                commands,
+                "_resolve_target_bundle",
+                return_value=(profile_bundle, manifest),
+            ) as resolve,
+            mock.patch("fplinux_cli.commands.os.execv") as execute,
+        ):
+            commands.run_target("nokia-ta1618", boot="microsd")
+
+        load_target.assert_called_once_with("nokia-ta1618", profile)
+        resolve.assert_called_once_with("nokia-ta1618", profile)
+        runner = profile_bundle.path / "runner/run.py"
+        execute.assert_called_once_with(os.fsencode(runner), [os.fsencode(runner)])
+
     def test_run_profile_executes_only_that_profiles_current_generation(self) -> None:
         """A named run does not fall back to the target's default bundle pointer."""
         profile = "usb-host-lab"
@@ -393,12 +462,55 @@ class CommandLifecycleTests(unittest.TestCase):
 
         with (
             mock.patch.object(commands, "ROOT", self.root),
-            mock.patch.object(commands, "load_target", return_value={}),
+            mock.patch.object(
+                commands,
+                "load_target",
+                return_value={"runtime": {"runnable": True}},
+            ),
             mock.patch("fplinux_cli.commands.os.execv") as execute,
         ):
             commands.run_target("phone", profile=profile)
 
         execute.assert_called_once_with(os.fsencode(runner), [os.fsencode(runner)])
+
+    def test_build_only_profile_is_rejected_before_bundle_or_usb_access(self) -> None:
+        """A profile without a complete boot path cannot start the RAM loader."""
+        with (
+            mock.patch.object(
+                commands,
+                "load_target",
+                return_value={"runtime": {"runnable": False}},
+            ),
+            mock.patch.object(
+                commands,
+                "_resolve_target_bundle",
+                side_effect=AssertionError("build-only profile must not resolve a bundle"),
+            ),
+            mock.patch("fplinux_cli.commands.os.execv") as execute,
+            self.assertRaisesRegex(SystemExit, "profile is build-only"),
+        ):
+            commands.run_target("phone", profile="microsd")
+
+        execute.assert_not_called()
+
+    def test_stale_build_only_profile_bundle_remains_non_runnable(self) -> None:
+        """Changing source policy cannot authorize an older build-only bundle."""
+        profile = "microsd"
+        profile_path = self._create_generation("c" * 64, profile=profile, runnable=False)
+        publish_current_bundle(self.output, "phone", profile_path, profile)
+        with (
+            mock.patch.object(commands, "ROOT", self.root),
+            mock.patch.object(
+                commands,
+                "load_target",
+                return_value={"runtime": {"runnable": True}},
+            ),
+            mock.patch("fplinux_cli.commands.os.execv") as execute,
+            self.assertRaisesRegex(SystemExit, "profile bundle is build-only"),
+        ):
+            commands.run_target("phone", profile=profile)
+
+        execute.assert_not_called()
 
     def test_verify_rejects_nonzero_ssh_status_even_with_matching_stdout(self) -> None:
         """Reject a failed SSH probe even when its stdout happens to match."""
@@ -527,6 +639,55 @@ class CommandLifecycleTests(unittest.TestCase):
                 "UP",
             ],
         )
+
+    def test_console_profile_reconnects_only_through_its_selected_generation(self) -> None:
+        """A profile RAM session is never compared with the target's default bundle."""
+        profile = "microsd-uboot"
+        profile_path = self._create_generation("b" * 64, profile=profile)
+        profile_bundle = publish_current_bundle(
+            self.output,
+            "phone",
+            profile_path,
+            profile,
+        )
+        target_config = {
+            "runtime": {
+                "usb": {
+                    "linux_gadget": {
+                        "vendor_id": 0x0525,
+                        "product_id": 0xA4A6,
+                        "wait_seconds": 60,
+                        "keyboard_interface": 1,
+                    },
+                },
+            },
+        }
+        result = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        ssh = mock.Mock(run_remote=mock.Mock(return_value=result))
+        with (
+            mock.patch.object(commands, "ROOT", self.root),
+            mock.patch.object(commands, "load_target", return_value=target_config) as load_target,
+            mock.patch.object(
+                commands,
+                "_current_ssh_session",
+                return_value=(ssh, {}),
+            ) as current_session,
+        ):
+            commands.console_target(
+                "phone",
+                profile=profile,
+                keyboard=None,
+                exec_command="id",
+                upload=None,
+                pull=None,
+            )
+
+        load_target.assert_called_once_with("phone", profile)
+        selected_bundle, selected_manifest, selected_target = current_session.call_args.args
+        self.assertEqual(selected_bundle, profile_bundle)
+        self.assertEqual(selected_manifest["profile"], profile)
+        self.assertEqual(selected_target, "phone")
+        ssh.run_remote.assert_called_once_with({}, "id")
 
     def test_build_argv_has_only_exact_nonoverlapping_mount_roots(self) -> None:
         """Do not expose the cache root or an ancestor alias to the build container."""

@@ -273,7 +273,7 @@ class BuilderPublicationTests(unittest.TestCase):
             },
             "platform": "demo",
             "bundle": {"packages": list(self.bundle_apks)},
-            "linux": {"debug_dtb": "demo.dtb"},
+            "linux": {"debug_dtb": "demo.dtb", "root": {"kind": "initramfs"}},
             "bootstrap": {"load_address": 2},
             "runtime": {
                 "fdl1_load_address": 1,
@@ -432,6 +432,7 @@ class BuilderPublicationTests(unittest.TestCase):
             set(manifest),
             {
                 "rootfs_receipt",
+                "boot_artifacts",
                 "container_image_recipe",
                 "apk_signing_key",
                 "device_identity",
@@ -448,6 +449,13 @@ class BuilderPublicationTests(unittest.TestCase):
         self.assertIsNone(manifest["profile"])
         self.assertEqual(manifest["apk_signing_key"], "7" * 64)
         self.assertEqual(manifest["rootfs_receipt"]["recipe"], self.rootfs_recipe)
+        self.assertEqual(
+            manifest["boot_artifacts"],
+            {
+                "required": [],
+                "runnable": True,
+            },
+        )
         self.assertEqual(manifest["kbuild_receipt"]["recipe"], "e" * 64)
         self.assertEqual(manifest["device_identity"], "9" * 64)
         self.assertEqual(manifest["files"], actual_payload)
@@ -524,6 +532,22 @@ class BuilderPublicationTests(unittest.TestCase):
         self.assertEqual(manifest["profile"], "usb-host-lab")
         self.assertEqual(runtime["profile"], "usb-host-lab")
         self.assertEqual(runtime["transport"], "none")
+
+    def test_external_root_bundle_does_not_copy_an_unused_initramfs(self) -> None:
+        """A profile whose kernel boots ext4 omits the unrelated cpio debug copy."""
+        self.target_config["profile"] = "microsd"
+        self.target_config["linux"]["root"] = {
+            "kind": "external",
+            "filesystem": "ext4",
+            "partuuid": "46504c58-02",
+            "wait_seconds": 10,
+        }
+
+        published = self.publish()
+
+        self.assertFalse((published / "debug/rootfs.cpio").exists())
+        manifest = json.loads((published / BUILD_MANIFEST_NAME).read_text())
+        self.assertNotIn("debug/rootfs.cpio", manifest["files"])
 
     def test_publish_rejects_apks_outside_the_declared_bundle_package_set(self) -> None:
         """A bundle cannot silently add or omit one of its declared packages."""

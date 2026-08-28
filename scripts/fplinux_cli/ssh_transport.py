@@ -35,6 +35,7 @@ BUNDLE_IDENTITY_FIELDS = frozenset({"bundle_generation"})
 BUILD_MANIFEST_FIELDS = frozenset(
     {
         "rootfs_receipt",
+        "boot_artifacts",
         "container_image_recipe",
         "apk_signing_key",
         "device_identity",

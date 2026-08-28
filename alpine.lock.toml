@@ -2,7 +2,10 @@ release = "3.24.1"
 branch = "v3.24"
 arch = "armv7"
 triplet = "armv7-alpine-linux-musleabihf"
-repository = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/armv7"
+
+[repositories]
+main = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/armv7"
+community = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/armv7"
 
 [minirootfs]
 url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/armv7/alpine-minirootfs-3.24.1-armv7.tar.gz"
@@ -22,6 +25,25 @@ packages = [
   "skalibs-libs-2.15.0.0-r0.apk",
   "utmps-libs-0.1.3.3-r0.apk",
   "zlib-1.3.2-r0.apk",
+]
+
+[runtime.additions]
+fplinux-microsd-root = [
+  "cloud-utils-growpart-0.33-r1.apk",
+  "e2fsprogs-1.47.4-r0.apk",
+  "e2fsprogs-extra-1.47.4-r0.apk",
+  "e2fsprogs-libs-1.47.4-r0.apk",
+  "libblkid-2.42.1-r0.apk",
+  "libcom_err-1.47.4-r0.apk",
+  "libeconf-0.8.3-r0.apk",
+  "libfdisk-2.42.1-r0.apk",
+  "libgcc-15.2.0-r5.apk",
+  "libncursesw-6.6_p20260516-r0.apk",
+  "libsmartcols-2.42.1-r0.apk",
+  "libuuid-2.42.1-r0.apk",
+  "ncurses-terminfo-base-6.6_p20260516-r0.apk",
+  "partx-2.42.1-r0.apk",
+  "sfdisk-2.42.1-r0.apk",
 ]
 
 [sysroot]
@@ -46,136 +68,247 @@ packages = [
 ]
 
 [[package]]
+repository = "main"
 file = "bridge-1.5-r5.apk"
 sha256 = "fe1081588fc302357cbda1a4bbe87d417a18f785ee9c9fdf81bbba8b18301490"
 bytes = 2851
 
 [[package]]
+repository = "main"
 file = "busybox-extras-1.37.0-r31.apk"
 sha256 = "6ca5c2ba1e828c402fa5f0154773e368a8e34b452c979e74d12547a848a0ab71"
 bytes = 62941
 
 [[package]]
+repository = "main"
 file = "dropbear-2026.91-r0.apk"
 sha256 = "6b9171bc1b8bd1883302396430f88a4ff173a194abfcc022f5d1b5c126b69c15"
 bytes = 193554
 
 [[package]]
+repository = "main"
 file = "ifupdown-ng-0.13.0-r0.apk"
 sha256 = "38e9b98b3ec3e6f65f929fd3e00719fb730f1de7999eb99d444b6ad6797d8c64"
 bytes = 62731
 
 [[package]]
+repository = "main"
 file = "libcap2-2.78-r0.apk"
 sha256 = "f92c87875498f527d2b4bb3c43af63d9301b0d54ef08a95d6f50b82c3d772e02"
 bytes = 18471
 
 [[package]]
+repository = "main"
 file = "openrc-0.63.2-r0.apk"
 sha256 = "f9a960bf5281250ee7fcff1ef6fbb78bb72aeadfad80b0bc2465b5088b314cd9"
 bytes = 199343
 
 [[package]]
+repository = "main"
 file = "openrc-user-0.63.2-r0.apk"
 sha256 = "21d77b1c088b199a77b766d028ba061e0af43cb18d2b4f588da6db29c1c31971"
 bytes = 5817
 
 [[package]]
+repository = "main"
 file = "openssh-sftp-server-10.3_p1-r0.apk"
 sha256 = "5c3d359348636934c30dcb86e99a0652db196241c0a4f7f14785ce878a9f9698"
 bytes = 56330
 
 [[package]]
+repository = "main"
 file = "skalibs-libs-2.15.0.0-r0.apk"
 sha256 = "2303bad07c6ccf7524e8c313549b8e43f42f98ee7012700ee3f9f4bf7f99ce15"
 bytes = 88220
 
 [[package]]
+repository = "main"
 file = "utmps-libs-0.1.3.3-r0.apk"
 sha256 = "0bd6aea148eff8c953f68d51d1f4d9914a0e6047acc38051a927c81ada5e3917"
 bytes = 5325
 
 [[package]]
+repository = "main"
 file = "binutils-2.45.1-r1.apk"
 sha256 = "a26ba698213c0509afb7444beaeae1f8d69dbe0d6bd336c1b8c180ae322fb284"
 bytes = 2805659
 
 [[package]]
+repository = "main"
 file = "gcc-15.2.0-r5.apk"
 sha256 = "5a09f1654ff4e4b724dae867fcf92a9fc2055691af368bc5c90205d5540c84c9"
 bytes = 41651034
 
 [[package]]
+repository = "main"
 file = "gmp-6.3.0-r4.apk"
 sha256 = "b280bd56f442aa12abc377f40000e683974fe9ca430d7a1a09cb8a2e8229f7fe"
 bytes = 181711
 
 [[package]]
+repository = "main"
 file = "isl26-0.26-r2.apk"
 sha256 = "4fe3ef352ca81467948a718c41fcc2b501bcad1c37914bc0fe91519a77229c76"
 bytes = 687865
 
 [[package]]
+repository = "main"
 file = "jansson-2.15.0-r0.apk"
 sha256 = "448a028a84226bb710d5101e8ead9f652ef0e6e5e2abde7b13378e25a2c87d42"
 bytes = 44984
 
 [[package]]
+repository = "main"
 file = "libatomic-15.2.0-r5.apk"
 sha256 = "f4e32956cf9d353f6b6f1c1e570a896eb7934047c635c89f6a12ec599befbeeb"
 bytes = 7897
 
 [[package]]
+repository = "main"
 file = "libgcc-15.2.0-r5.apk"
 sha256 = "70aa586717f20bf57f80c06d454712095964261c02c92f8d3a120a0aecd05934"
 bytes = 20013
 
 [[package]]
+repository = "main"
 file = "libgcc-static-15.2.0-r5.apk"
 sha256 = "9a8f82b607183621c03c5e0caaf65695f5d3c66643133649e0d030dc3416fcf3"
 bytes = 23819
 
 [[package]]
+repository = "main"
 file = "libgomp-15.2.0-r5.apk"
 sha256 = "a12f05478d71db2d416081c17b1de3cfe23dd603b328d7642f276e8a844c6413"
 bytes = 129457
 
 [[package]]
+repository = "main"
 file = "libstdc++-15.2.0-r5.apk"
 sha256 = "c57f103f92812e2c6c8fb81ffa61df3dcb08a49917a2284aff64bddeade6f310"
 bytes = 842112
 
 [[package]]
+repository = "main"
 file = "linux-headers-7.0.0-r1.apk"
 sha256 = "88acd70556ed1aa85fe617c9ad02012f8cc36eaf7d06da09e701c47fc8a98222"
 bytes = 1945405
 
 [[package]]
+repository = "main"
 file = "mpc1-1.3.1-r1.apk"
 sha256 = "60617a1afaefe06fbcc1dcc85adadf4c4395ee32a08e94b82bc906ee16133bde"
 bytes = 43320
 
 [[package]]
+repository = "main"
 file = "mpfr4-4.2.2-r0.apk"
 sha256 = "310fbc9ee2264b70b9fc8e3287fce481293f1cf726b7d99eb3344091646a1f64"
 bytes = 182575
 
 [[package]]
+repository = "main"
 file = "musl-1.2.6-r2.apk"
 sha256 = "84a62250f10aa1c5b7687f21f3a0f19ec17b561176d67c4c797123ed8f98555c"
 bytes = 390064
 
 [[package]]
+repository = "main"
 file = "musl-dev-1.2.6-r2.apk"
 sha256 = "11eef6d1aa6129c8403d826b58cbaf40e13a67e330f8108db6f0db0e61277cd1"
 bytes = 2296118
 
 [[package]]
+repository = "main"
 file = "zlib-1.3.2-r0.apk"
 sha256 = "9ceb0ce727602c3acd7c8bf6ca02d7b019afc2b5ad81095684ecf18c2c48d8f2"
 bytes = 43949
 
 [[package]]
+repository = "main"
 file = "zstd-libs-1.5.7-r2.apk"
 sha256 = "15a00d79b69cb9b3ce7252dc35a370406623ebc96e8631e04f6d48c7421a55d4"
 bytes = 337879
+
+[[package]]
+repository = "community"
+file = "cloud-utils-growpart-0.33-r1.apk"
+sha256 = "e3e284edbbe0e0ea8dab836ba3301cc7e10537e0e33340fcae487787a9fccad7"
+bytes = 11871
+
+[[package]]
+repository = "main"
+file = "e2fsprogs-1.47.4-r0.apk"
+sha256 = "8e1e53b75fb2446aad37cfa3c1bc6c660df33a54e52f779f3d8ef1797e1b30c0"
+bytes = 179746
+
+[[package]]
+repository = "main"
+file = "e2fsprogs-extra-1.47.4-r0.apk"
+sha256 = "8e113b0ebe10a88fe8b1d6e9a292568071d3764e2aa922f3006df0f7bf9f2807"
+bytes = 217731
+
+[[package]]
+repository = "main"
+file = "e2fsprogs-libs-1.47.4-r0.apk"
+sha256 = "f010f72c1b83c3ab7abaed0dd4a195c44049a75dfe1cc42c1dec4e8748b7852d"
+bytes = 196530
+
+[[package]]
+repository = "main"
+file = "libblkid-2.42.1-r0.apk"
+sha256 = "68afc2c9b79b688d8a54aeda0a03fce89ee03925243c7ebc1c480e2a753cd98a"
+bytes = 95566
+
+[[package]]
+repository = "main"
+file = "libcom_err-1.47.4-r0.apk"
+sha256 = "b1fad1d5ef6ead4f35da55919499b27badd53d25e959047651aed6accfab7f7b"
+bytes = 5889
+
+[[package]]
+repository = "main"
+file = "libeconf-0.8.3-r0.apk"
+sha256 = "1ced9b481d9c0a6e1ce6e04650a13da1e45c9cadb655efe6c8b17c595d764bd7"
+bytes = 23664
+
+[[package]]
+repository = "main"
+file = "libfdisk-2.42.1-r0.apk"
+sha256 = "01421d9c123eccb77cbafb50361341ac41898a8b053451e82eb46c24bd109503"
+bytes = 125848
+
+[[package]]
+repository = "main"
+file = "libncursesw-6.6_p20260516-r0.apk"
+sha256 = "c58cc03abe88cc770d11c5b63b423f6b2099ee6319e2d5b72b71d767d125a39c"
+bytes = 140842
+
+[[package]]
+repository = "main"
+file = "libsmartcols-2.42.1-r0.apk"
+sha256 = "54671380f8e187885ead8ecc08bfe2d40d279744a72986428f26bc30dbb7b58c"
+bytes = 50759
+
+[[package]]
+repository = "main"
+file = "libuuid-2.42.1-r0.apk"
+sha256 = "e8f91383cfa6d19d032a363f736c292cf17e52bb66b01957bf95195f47b032f3"
+bytes = 14086
+
+[[package]]
+repository = "main"
+file = "ncurses-terminfo-base-6.6_p20260516-r0.apk"
+sha256 = "ae9f8408f746583c8da79f3dc24663ca058c9b12eec6c1a028ad1dea538629bb"
+bytes = 22170
+
+[[package]]
+repository = "main"
+file = "partx-2.42.1-r0.apk"
+sha256 = "edd78f5e668836213efdf0941a50f8158b8b3f3c265d2b362c08d5d8120a32d3"
+bytes = 21977
+
+[[package]]
+repository = "main"
+file = "sfdisk-2.42.1-r0.apk"
+sha256 = "97f92e72a5d27c7fbc06621562b35cc2c0f4da2c27386b7d7136db5ff9eaf780"
+bytes = 35381

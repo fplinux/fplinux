@@ -167,6 +167,42 @@ class SourceInventoryTests(unittest.TestCase):
                     ],
                 )
 
+    def test_boot_and_shared_driver_c_use_the_project_format_contract(self) -> None:
+        """Profile U-Boot and shared driver sources use the project C style."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            uboot = root / "targets/phone/profiles/microsd/uboot"
+            uboot.mkdir(parents=True)
+            source = uboot / "board.c"
+            header = uboot / "board.h"
+            source.write_text("int board;\n")
+            header.write_text("int board;\n")
+            platform_common = root / "platforms/soc/common/core.c"
+            platform_common.parent.mkdir(parents=True)
+            platform_common.write_text("int core;\n")
+            target_common = root / "targets/phone/common/board.h"
+            target_common.parent.mkdir(parents=True)
+            target_common.write_text("int board;\n")
+            userspace = root / "alpine/aports/demo/app.c"
+            userspace.parent.mkdir(parents=True)
+            userspace.write_text("int app;\n")
+            with (
+                mock.patch.object(source_check, "ROOT", root),
+                mock.patch.object(source_check, "discover_targets", return_value=()),
+            ):
+                self.assertEqual(
+                    source_check.project_c_format_sources(
+                        [source, header, platform_common, target_common, userspace]
+                    ),
+                    [
+                        "alpine/aports/demo/app.c",
+                        "platforms/soc/common/core.c",
+                        "targets/phone/common/board.h",
+                        "targets/phone/profiles/microsd/uboot/board.c",
+                        "targets/phone/profiles/microsd/uboot/board.h",
+                    ],
+                )
+
     def test_package_selection_validation_rejects_an_unresolved_target(self) -> None:
         """A missing declared aport makes the repository selection gate fail."""
         with tempfile.TemporaryDirectory() as temporary:

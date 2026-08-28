@@ -27,13 +27,15 @@ enum fplinux_handoff_response_status {
 static inline uint16_t
 fplinux_handoff_fastchk16(uint32_t checksum, const uint8_t *bytes, size_t count)
 {
+	const volatile uint8_t *cursor = bytes;
+
 	while (count > 1U) {
-		checksum += (uint32_t)bytes[0] | ((uint32_t)bytes[1] << 8);
-		bytes += 2;
+		checksum += (uint32_t)cursor[0] | ((uint32_t)cursor[1] << 8);
+		cursor += 2;
 		count -= 2U;
 	}
 	if (count != 0U)
-		checksum += bytes[0];
+		checksum += cursor[0];
 	checksum = (checksum >> 16) + (checksum & 0xffffU);
 	checksum += checksum >> 16;
 
@@ -43,13 +45,17 @@ fplinux_handoff_fastchk16(uint32_t checksum, const uint8_t *bytes, size_t count)
 static inline void fplinux_handoff_write_le16(uint8_t *destination,
 					      uint16_t value)
 {
-	destination[0] = (uint8_t)value;
-	destination[1] = (uint8_t)(value >> 8);
+	volatile uint8_t *bytes = destination;
+
+	bytes[0] = (uint8_t)value;
+	bytes[1] = (uint8_t)(value >> 8);
 }
 
 static inline uint16_t fplinux_handoff_read_le16(const uint8_t *source)
 {
-	return (uint16_t)source[0] | ((uint16_t)source[1] << 8);
+	const volatile uint8_t *bytes = source;
+
+	return (uint16_t)bytes[0] | ((uint16_t)bytes[1] << 8);
 }
 
 static inline uint16_t fplinux_handoff_request_checksum(

@@ -92,6 +92,9 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                     "appends": [{"source": "kernel/append.cfg"}],
                 },
                 "bootstrap": {"source": "bootstrap"},
+                "uboot": {"kind": "none"},
+                "fit": {"kind": "none"},
+                "image": {"kind": "none"},
             }
             platform: dict[str, Any] = {
                 "bundle": {"packages": []},

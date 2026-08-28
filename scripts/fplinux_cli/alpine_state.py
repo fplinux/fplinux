@@ -231,7 +231,7 @@ def load_alpine_lock(root: Path = ROOT) -> dict[str, Any]:
         "branch",
         "arch",
         "triplet",
-        "repository",
+        "repositories",
         "minirootfs",
         "runtime",
         "sysroot",
@@ -242,7 +242,11 @@ def load_alpine_lock(root: Path = ROOT) -> dict[str, Any]:
         _fail("only the FPLinux armv7 ABI is supported")
     _nonempty(raw.get("release"), "release")
     _nonempty(raw.get("branch"), "branch")
-    _https(raw.get("repository"), "repository")
+    repositories = raw.get("repositories")
+    if not isinstance(repositories, dict) or set(repositories) != {"main", "community"}:
+        _fail("repositories must contain exactly main and community")
+    for name, url in repositories.items():
+        _https(url, f"{name} repository")
 
     minirootfs = raw.get("minirootfs")
     if not isinstance(minirootfs, dict) or set(minirootfs) != {"url", "sha256", "bytes"}:
@@ -256,8 +260,16 @@ def load_alpine_lock(root: Path = ROOT) -> dict[str, Any]:
         _fail("package lock must be a non-empty array")
     records: dict[str, dict[str, object]] = {}
     for index, value in enumerate(packages):
-        if not isinstance(value, dict) or set(value) != {"file", "sha256", "bytes"}:
-            _fail(f"package[{index}] must contain exactly file, sha256 and bytes")
+        if not isinstance(value, dict) or set(value) != {
+            "repository",
+            "file",
+            "sha256",
+            "bytes",
+        }:
+            _fail(f"package[{index}] must contain repository, file, sha256 and bytes")
+        repository = value.get("repository")
+        if repository not in repositories:
+            _fail(f"package[{index}] references an unknown repository")
         filename = _package_name(value.get("file"), f"package[{index}] file")
         if filename in records:
             _fail(f"duplicate package lock entry: {filename}")
@@ -266,22 +278,40 @@ def load_alpine_lock(root: Path = ROOT) -> dict[str, Any]:
         records[filename] = value
 
     selected: set[str] = set()
-    for group in ("runtime", "sysroot"):
+
+    def locked_names(value: object, name: str) -> list[str]:
+        if not isinstance(value, list) or not value:
+            _fail(f"{name} must be a non-empty array")
+        result = [_package_name(item, f"{name}[{index}]") for index, item in enumerate(value)]
+        if len(result) != len(set(result)):
+            _fail(f"duplicate {name} package")
+        for filename in result:
+            if filename not in records:
+                _fail(f"{name} package has no locked artifact: {filename}")
+        return result
+
+    runtime = raw.get("runtime")
+    if not isinstance(runtime, dict) or set(runtime) != {"packages", "additions"}:
+        _fail("runtime must contain exactly packages and additions")
+    runtime_names = locked_names(runtime.get("packages"), "runtime packages")
+    selected.update(runtime_names)
+    additions = runtime.get("additions")
+    if not isinstance(additions, dict):
+        _fail("runtime additions must be a table")
+    for package, values in additions.items():
+        package_name = _package_id(package, "runtime addition")
+        addition_names = locked_names(values, f"runtime addition {package_name}")
+        overlap = set(runtime_names) & set(addition_names)
+        if overlap:
+            _fail(f"runtime addition {package_name} repeats a common runtime package")
+        selected.update(addition_names)
+
+    for group in ("sysroot",):
         table = raw.get(group)
         if not isinstance(table, dict) or set(table) != {"packages"}:
             _fail(f"{group} must contain exactly packages")
         values = table.get("packages")
-        if not isinstance(values, list) or not values:
-            _fail(f"{group} packages must be a non-empty array")
-        group_names: set[str] = set()
-        for index, value in enumerate(values):
-            filename = _package_name(value, f"{group} packages[{index}]")
-            if filename in group_names:
-                _fail(f"duplicate {group} package: {filename}")
-            if filename not in records:
-                _fail(f"{group} package has no locked artifact: {filename}")
-            group_names.add(filename)
-            selected.add(filename)
+        selected.update(locked_names(values, f"{group} packages"))
     if selected != set(records):
         unused = ", ".join(sorted(set(records) - selected))
         _fail(f"package lock contains unused artifacts: {unused}")
@@ -291,6 +321,15 @@ def load_alpine_lock(root: Path = ROOT) -> dict[str, Any]:
 def package_records(lock: dict[str, Any]) -> dict[str, dict[str, object]]:
     """Index already-validated locked package records by filename."""
     return {str(record["file"]): record for record in lock["package"]}
+
+
+def runtime_package_names(lock: dict[str, Any], packages: Sequence[str]) -> tuple[str, ...]:
+    """Select the common runtime closure plus additions required by local APKs."""
+    names = list(lock["runtime"]["packages"])
+    additions = lock["runtime"]["additions"]
+    for package in packages:
+        names.extend(additions.get(package, ()))
+    return tuple(dict.fromkeys(names))
 
 
 def _canonical_digest(value: object) -> str:

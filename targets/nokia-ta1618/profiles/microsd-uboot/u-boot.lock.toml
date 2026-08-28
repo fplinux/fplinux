@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-only
+version = "2026.07"
+repository = "https://source.denx.de/u-boot/u-boot.git"
+tag = "v2026.07"
+commit = "ece349ade2973e220f524ce59e59711cc919263f"
+archive_url = "https://ftp.denx.de/pub/u-boot/u-boot-2026.07.tar.bz2"
+archive_sha256 = "78e8bfc382fe388f9b55aa1daf8c563522a037779b5d4c349d1415e381f1243e"
+license = "GPL-2.0-only"

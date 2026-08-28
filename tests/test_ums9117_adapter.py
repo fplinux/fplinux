@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import signal
 import subprocess
 import tempfile
 import unittest
@@ -305,7 +306,10 @@ class BridgeAcknowledgementTests(unittest.TestCase):
 
     session_id = "a" * 64
 
-    def runtime(self, transport: str = "none") -> dict[str, Any]:
+    def runtime(
+        self,
+        transport: str = "none",
+    ) -> dict[str, Any]:
         """Return the complete adapter input for one bridge acknowledgement case."""
         return {
             **runtime_identity(),
@@ -363,7 +367,6 @@ class BridgeAcknowledgementTests(unittest.TestCase):
                 ),
                 mock.patch.object(ADAPTER.subprocess, "Popen", popen),
                 mock.patch.object(ADAPTER.shutil, "which", return_value="/usr/bin/stdbuf"),
-                mock.patch.object(ADAPTER.signal, "signal"),
                 mock.patch.object(
                     ADAPTER.importlib,
                     "import_module",
@@ -378,8 +381,26 @@ class BridgeAcknowledgementTests(unittest.TestCase):
                 stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
                 for patch in patches:
                     stack.enter_context(patch)
-                ADAPTER.run(bundle, self.runtime(transport), self.session())
+                ADAPTER.run(
+                    bundle,
+                    self.runtime(transport),
+                    self.session(),
+                )
         return popen, transport_module, bundle, bootrom
+
+    def test_adapter_preserves_runner_owned_signal_handlers(self) -> None:
+        """The adapter must not replace the outer runner's process-lifecycle owner."""
+        signals = (signal.SIGINT, signal.SIGTERM)
+        before = {signum: signal.getsignal(signum) for signum in signals}
+        try:
+            self.run_bridge(BridgeProcess(0), bootrom_states=[True, False])
+            self.assertEqual(
+                {signum: signal.getsignal(signum) for signum in signals},
+                before,
+            )
+        finally:
+            for signum, handler in before.items():
+                signal.signal(signum, handler)
 
     def test_exit_zero_and_bootrom_disconnect_continue_with_the_exact_session_token(self) -> None:
         """Bridge success needs no output; the original USB node must then disappear."""
