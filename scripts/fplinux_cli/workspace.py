@@ -52,6 +52,7 @@ STAGED_BUILD_SOURCES = (
     "scripts/fplinux_cli/profile_layout.py",
     "scripts/fplinux_cli/ssh_transport.py",
 )
+_GIT_INVENTORY_TIMEOUT = 60
 
 
 @dataclass(frozen=True)
@@ -184,20 +185,25 @@ def target_build_source_files(target: str, profile: str | None = None) -> list[t
 
 def quality_files(*, enforce_source_policy: bool) -> list[tuple[str, Path]]:
     """Return tracked and non-ignored untracked files used by quality checks."""
-    result = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(ROOT),
-            "ls-files",
-            "-z",
-            "--cached",
-            "--others",
-            "--exclude-standard",
-        ],
-        capture_output=True,
-        check=False,
-    )
+    command = [
+        "git",
+        "-C",
+        str(ROOT),
+        "ls-files",
+        "-z",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            check=False,
+            timeout=_GIT_INVENTORY_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        fail(f"Git source inventory timed out after {_GIT_INVENTORY_TIMEOUT}s")
     if result.returncode != 0:
         detail = result.stderr.decode(errors="replace").strip()
         fail(f"cannot inventory Git source files: {detail or 'git ls-files failed'}")

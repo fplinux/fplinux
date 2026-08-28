@@ -8,10 +8,11 @@ import argparse
 import os
 import re
 import shlex
+import signal
 import subprocess
 import tempfile
 import tomllib
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, NoReturn
 from urllib.parse import unquote
@@ -46,19 +47,76 @@ SOURCE_SCOPES = (
     "alpine",
     "c",
 )
+_CHECK_COMMAND_TIMEOUT = 15 * 60
+_PACKAGE_CONFIG_TIMEOUT = 30
+_PYTHON_TEST_TIERS = (
+    ("small", 90),
+    ("host_process", 180),
+    ("host_tool", 240),
+    ("artifact", 300),
+    ("public_workflow", 90),
+)
 
 
 def fail(message: str) -> NoReturn:
     raise SystemExit(f"check failed: {message}")
 
 
-def run(command: list[str]) -> None:
+def _run_direct(
+    command: list[str],
+    *,
+    timeout: float,
+    capture: bool,
+) -> subprocess.CompletedProcess[str]:
+    """Run one standalone checker tool with a finite process-group lifetime."""
+    display = shlex.join(command)
+    print("+", display, flush=True)
+    process = subprocess.Popen(
+        command,
+        cwd=ROOT,
+        stdout=subprocess.PIPE if capture else None,
+        stderr=subprocess.PIPE if capture else None,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        process.communicate()
+        fail(f"command timed out after {timeout:g}s: {display}")
+    except BaseException:
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        process.communicate()
+        raise
+    return subprocess.CompletedProcess(command, process.returncode, stdout or "", stderr or "")
+
+
+def run(command: list[str], *, timeout: float = _CHECK_COMMAND_TIMEOUT) -> None:
+    """Run one checker tool, using the active stage when logging is available."""
     stage = current_stage()
     if stage is not None:
-        stage.run(command, cwd=ROOT)
+        stage.run(command, cwd=ROOT, timeout=timeout)
         return
-    print("+", shlex.join(command), flush=True)
-    subprocess.run(command, cwd=ROOT, check=True)
+    result = _run_direct(command, timeout=timeout, capture=False)
+    if result.returncode:
+        raise subprocess.CalledProcessError(result.returncode, command)
+
+
+def capture(command: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
+    """Capture one checker tool while keeping the same timeout policy as stages."""
+    stage = current_stage()
+    if stage is None:
+        return _run_direct(command, timeout=timeout, capture=True)
+    result = stage.capture(command, cwd=ROOT, timeout=timeout)
+    return subprocess.CompletedProcess(
+        result.args,
+        result.returncode,
+        result.stdout.decode(errors="replace"),
+        result.stderr.decode(errors="replace"),
+    )
 
 
 @contextmanager
@@ -448,12 +506,9 @@ def run_userspace_analysis(output: Path, sources: list[tuple[str, bool]]) -> Non
     needs_libusb = any(libusb for _source, libusb in sources)
     libusb_flags: list[str] = []
     if needs_libusb:
-        pkg_config = subprocess.run(
+        pkg_config = capture(
             ["pkg-config", "--cflags", "libusb-1.0"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            check=False,
+            timeout=_PACKAGE_CONFIG_TIMEOUT,
         )
         if pkg_config.returncode:
             fail(pkg_config.stderr.strip() or "pkg-config could not resolve libusb-1.0")
@@ -569,8 +624,21 @@ def main() -> None:
             run(["ruff", "format", "--check", *python_files])
             run(["mypy", *python_files])
             if (ROOT / "tests").is_dir():
-                run(["python3", "-m", "unittest", "discover", "-s", "tests"])
-                run(["python3.11", "-m", "unittest", "discover", "-s", "tests"])
+                for tier, timeout in _PYTHON_TEST_TIERS:
+                    for interpreter in ("python3", "python3.11"):
+                        run(
+                            [
+                                interpreter,
+                                "-m",
+                                "unittest",
+                                "discover",
+                                "-s",
+                                f"tests/{tier}",
+                                "-t",
+                                ".",
+                            ],
+                            timeout=timeout,
+                        )
     if "shell" in selected:
         with report_stage(reporter, "shell"):
             run(["shfmt", "-d", "-ln", "posix", *posix_shell_files])

@@ -25,7 +25,7 @@ an upstream tree follows the boundary described below.
 | `alpine/aports/`, `alpine/shared/`                             | musl/Linux on the phone            | C11 or the GNU dialect selected by the APKBUILD, POSIX and Linux UAPI |
 | `common/host/`                                                 | Linux x86-64 host                  | C11, POSIX, Linux UAPI and libusb                                     |
 | Sources marked `fplinux-check: package-embedded`               | TyrQuake or MicroPython build tree | Destination project's dialect and external ABI                        |
-| `tests/*.c`                                                    | Host-only harness                  | The dialect selected by the test that compiles it                     |
+| `tests/host_tool/*.c`                                          | Host-only harness                  | The dialect selected by the test that compiles it                     |
 
 Do not move an API or language assumption from one row to another. `errno`, file
 descriptors and signals do not belong in the bootstrap. Kernel code does not use
