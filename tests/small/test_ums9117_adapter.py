@@ -229,8 +229,8 @@ class HandoffTransportTests(unittest.TestCase):
             "Bridge acknowledged the Linux transition; no host-side transport is selected.\n",
         )
 
-    def test_usb_ncm_waits_for_the_prepared_session(self) -> None:
-        """The USB-NCM path acquires exactly the session that bridge acknowledged."""
+    def test_interactive_usb_ncm_opens_the_prepared_session(self) -> None:
+        """A terminal enters exactly the session that the bridge acknowledged."""
         session = {"session_id": "a" * 64}
         transport = mock.Mock()
         ready = {"session_id": "a" * 64, "status": "ready"}
@@ -239,6 +239,7 @@ class HandoffTransportTests(unittest.TestCase):
         with (
             contextlib.redirect_stdout(io.StringIO()),
             mock.patch.object(ADAPTER.importlib, "import_module", return_value=transport),
+            mock.patch.object(ADAPTER.os, "isatty", return_value=True),
             self.assertRaisesRegex(SystemExit, "SSH client returned"),
         ):
             ADAPTER.complete_linux_handoff(
@@ -249,6 +250,35 @@ class HandoffTransportTests(unittest.TestCase):
 
         transport.wait_for_bound_session.assert_called_once_with(session)
         transport.open_shell.assert_called_once_with(ready)
+
+    def test_noninteractive_usb_ncm_returns_after_the_session_is_ready(self) -> None:
+        """A loader without a terminal succeeds after exact SSH authentication."""
+        rendered = io.StringIO()
+        session = {"session_id": "a" * 64}
+        transport = mock.Mock()
+        ready = {"session_id": "a" * 64, "status": "ready"}
+        transport.wait_for_bound_session.return_value = ready
+
+        with (
+            contextlib.redirect_stdout(rendered),
+            mock.patch.object(ADAPTER.importlib, "import_module", return_value=transport),
+            mock.patch.object(ADAPTER.os, "isatty", return_value=False),
+        ):
+            ADAPTER.complete_linux_handoff(
+                {"transport": "usb-ncm"},
+                session,
+                {"vendor_id": 0x0525, "product_id": 0xA4A6, "wait_seconds": 30},
+            )
+
+        transport.wait_for_bound_session.assert_called_once_with(session)
+        transport.open_shell.assert_not_called()
+        self.assertEqual(
+            rendered.getvalue(),
+            "Bridge acknowledged the Linux transition; waiting up to 30 seconds for "
+            "Linux USB-NCM 0525:a4a6.\n"
+            "Private USB-NCM SSH session is ready.\n"
+            "No interactive terminal is attached; the loader is complete.\n",
+        )
 
 
 class BridgeProcess:

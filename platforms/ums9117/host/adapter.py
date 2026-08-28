@@ -223,10 +223,15 @@ def complete_linux_handoff(
     linux_id = f"{linux_usb['vendor_id']:04x}:{linux_usb['product_id']:04x}"
     print(
         "Bridge acknowledged the Linux transition; waiting up to "
-        f"{linux_usb['wait_seconds']} seconds for Linux USB-NCM {linux_id}."
+        f"{linux_usb['wait_seconds']} seconds for Linux USB-NCM {linux_id}.",
+        flush=True,
     )
     transport_module = importlib.import_module("ssh_transport")
     ready = transport_module.wait_for_bound_session(session)
+    print("Private USB-NCM SSH session is ready.", flush=True)
+    if not os.isatty(0):
+        print("No interactive terminal is attached; the loader is complete.", flush=True)
+        return
     transport_module.open_shell(ready)
     fail("SSH client returned without replacing the runner")
 
@@ -282,7 +287,10 @@ def run(
     print("There are no flash, erase, partition, or NV commands.")
     print()
     print(config["boot_instructions"])
-    print(f"Waiting up to {bootrom_usb['wait_seconds']} seconds for BootROM USB {bootrom_id}...")
+    print(
+        f"Waiting up to {bootrom_usb['wait_seconds']} seconds for BootROM USB {bootrom_id}...",
+        flush=True,
+    )
     deadline = time.monotonic() + bootrom_usb["wait_seconds"]
     bootrom_device = usb_device_path(bootrom_usb["vendor_id"], bootrom_usb["product_id"])
     while bootrom_device is None:

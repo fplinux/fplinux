@@ -25,7 +25,7 @@ disconnect USB and start:
 
 When the runner asks for the phone, hold * (asterisk) and connect USB. The
 remaining microSD boot is automatic and does not require keyboard input. Keep
-USB connected until Linux starts and the SSH session opens.
+USB connected until Linux starts and the SSH session becomes ready.
 
 The RAM loader, resident stage0 and full U-Boot do not alter NAND, NV data or
 the stock boot chain. Starting the phone without a fresh USB RAM load returns
