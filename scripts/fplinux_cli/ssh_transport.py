@@ -1126,6 +1126,8 @@ def reacquire_bound_session(session: dict[str, Any]) -> dict[str, Any]:
 def open_shell(session: dict[str, Any]) -> None:
     """Replace the runner with the session-scoped interactive SSH client."""
     session = _validate_session(session)
+    if not os.isatty(0):
+        fail("interactive SSH requires a terminal; use --exec for a non-interactive command")
     argv = _ssh_argv(session)
     argv[1:1] = ["-tt"]
     os.execv(argv[0], argv)

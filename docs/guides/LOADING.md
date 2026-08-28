@@ -95,6 +95,13 @@ writes to removable media through its documented mounted-filesystem workflow.
 
 ## After boot
 
+From an interactive terminal, `run` opens the new SSH session. Without an input
+terminal, it returns successfully as soon as that exact session is ready. For a
+default source-checkout session, use `./fplinux console <target>` later to open
+a shell, or `./fplinux console <target> --exec '<command>'` to run one command.
+Use the matching profile or standalone reconnect workflow when that is how the
+session was started.
+
 Exiting the shell or unplugging USB does not end Linux. Do not start another RAM
 load merely to reopen the shell. Use [USB networking](../features/USB_NETWORKING.md)
 to understand the private host link and [SSH access](../features/SSH.md) to open

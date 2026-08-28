@@ -66,6 +66,10 @@ The loader writes only volatile RAM. It does not flash, erase, partition or
 write internal phone storage. Any removable-media writes are separate and must
 follow the selected target's instructions.
 
+From an interactive terminal, the runner opens the new SSH session. Without an
+input terminal, it returns successfully when that session is ready. Reconnect
+with the command below to open a shell later.
+
 ## Use the running session
 
 Exiting the shell or unplugging USB does not stop Linux. Reconnect with:

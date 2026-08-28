@@ -43,6 +43,39 @@ class SshTransportSmallTests(unittest.TestCase):
     def _session(self, *, status: str = "ready") -> dict[str, Any]:
         return create_ready_session(self.root, status=status, identity=self.identity)
 
+    def test_open_shell_rejects_a_noninteractive_process(self) -> None:
+        """Do not launch forced-PTY SSH when the host has no input terminal."""
+        session = self._session()
+        with (
+            mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
+            mock.patch("fplinux_cli.ssh_transport.os.isatty", return_value=False),
+            mock.patch("fplinux_cli.ssh_transport.os.execv") as execute,
+            self.assertRaisesRegex(SystemExit, "interactive SSH requires a terminal"),
+        ):
+            ssh_transport.open_shell(session)
+
+        execute.assert_not_called()
+
+    def test_open_shell_executes_for_an_input_terminal(self) -> None:
+        """Keep forced remote PTY allocation for an interactive host terminal."""
+        session = self._session()
+        with (
+            mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
+            mock.patch("fplinux_cli.ssh_transport.os.isatty", return_value=True),
+            mock.patch.object(
+                ssh_transport,
+                "_ssh_argv",
+                return_value=["/usr/bin/ssh", "fplinux"],
+            ),
+            mock.patch("fplinux_cli.ssh_transport.os.execv") as execute,
+        ):
+            ssh_transport.open_shell(session)
+
+        execute.assert_called_once_with(
+            "/usr/bin/ssh",
+            ["/usr/bin/ssh", "-tt", "fplinux"],
+        )
+
     def test_bundle_identity_rejects_a_runtime_image_outside_its_build_manifest(self) -> None:
         """Refuse reconnect state when the RAM payload no longer matches the generation."""
         bundle = Path(self.temporary.name) / "bundle"
