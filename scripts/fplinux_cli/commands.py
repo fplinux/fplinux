@@ -31,6 +31,7 @@ from .common import (
     ZIP_TIMESTAMP,
     fail,
     payload_digest,
+    replace_file_atomically,
     sha256_bytes,
     sha256_file,
 )
@@ -464,27 +465,6 @@ def _checksum_block_only_changed(before: bytes, after: bytes, *, path: Path) -> 
         fail(f"abuild checksum changed recipe text outside sha512sums: {path}")
 
 
-def _replace_file_atomically(path: Path, contents: bytes, mode: int) -> None:
-    """Publish one verified regular file without exposing a partial write."""
-    temporary: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            dir=path.parent,
-            prefix=f".{path.name}.",
-            delete=False,
-        ) as stream:
-            temporary = Path(stream.name)
-            stream.write(contents)
-            stream.flush()
-            os.fsync(stream.fileno())
-        temporary.chmod(mode)
-        temporary.replace(path)
-        temporary = None
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
-
-
 def _checksum_container_command(  # noqa: PLR0913
     podman: str,
     *,
@@ -606,7 +586,7 @@ def checksum_aport(package: str, *, offline: bool = False) -> None:
     if apkbuild.is_symlink() or not apkbuild.is_file() or apkbuild.read_bytes() != before_apkbuild:
         fail(f"canonical APKBUILD changed while checksums were generated: {apkbuild}")
     _checksum_block_only_changed(before_apkbuild, generated_apkbuild, path=apkbuild)
-    _replace_file_atomically(apkbuild, generated_apkbuild, mode)
+    replace_file_atomically(apkbuild, generated_apkbuild, mode)
     print(f"checksum {package}: OK", flush=True)
     reporter.finish()
 

@@ -12,6 +12,7 @@ from unittest import mock
 import check as source_check
 from fplinux_cli import alpine_state
 from fplinux_cli import workspace as workspace_module
+from fplinux_cli.source_formats import classify_source_formats
 
 
 class SourceInventoryTests(unittest.TestCase):
@@ -28,13 +29,11 @@ class SourceInventoryTests(unittest.TestCase):
             (root / "linked.md").symlink_to(markdown)
             with mock.patch.object(source_check, "ROOT", root):
                 files = source_check.source_files(enforce_policy=False)
-                _python, discovered_markdown, posix_shell, bash = source_check.quality_sources(
-                    files
-                )
+            formats = classify_source_formats(files, root=root)
             self.assertEqual(files, [markdown, root / "tool"])
-            self.assertEqual(discovered_markdown, ["document.md"])
-            self.assertEqual(posix_shell, [])
-            self.assertEqual(bash, [])
+            self.assertEqual(formats.markdown, ("document.md",))
+            self.assertEqual(formats.posix_shell, ())
+            self.assertEqual(formats.bash, ())
 
     def test_openrc_scripts_are_classified_as_posix_shell_sources(self) -> None:
         """Classify OpenRC init scripts as declared POSIX shell sources."""
@@ -42,10 +41,9 @@ class SourceInventoryTests(unittest.TestCase):
             root = Path(temporary)
             initd = root / "service.initd"
             initd.write_text("#!/sbin/openrc-run\ncommand=/bin/true\n")
-            with mock.patch.object(source_check, "ROOT", root):
-                _python, _markdown, posix_shell, bash = source_check.quality_sources([initd])
-            self.assertEqual(posix_shell, ["service.initd"])
-            self.assertEqual(bash, [])
+            formats = classify_source_formats([initd], root=root)
+            self.assertEqual(formats.posix_shell, ("service.initd",))
+            self.assertEqual(formats.bash, ())
 
     def test_markdown_links_require_real_files_and_anchors(self) -> None:
         """Protect navigable local documentation without checking external URLs."""

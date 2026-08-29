@@ -38,6 +38,33 @@ for accepted scopes.
 Use `./fplinux setup --force` to rebuild the pinned OCI image even when an image
 for the current recipe is already ready.
 
+## Format source
+
+Format only the files being edited:
+
+```sh
+./fplinux format scripts/fplinux_cli/example.py docs/example.md
+```
+
+The command accepts one or more normalized repository-relative file paths. It
+does not recurse into directories or provide a whole-checkout mode. Tracked and
+non-ignored untracked project sources are accepted.
+
+Formatting uses the same pinned tools and classification as the quality gate:
+
+- C and headers: `clang-format`;
+- Python: `ruff format`;
+- Markdown, JSON and JSONC: Prettier;
+- TOML: Taplo;
+- POSIX and Bash scripts recognized by their shebang: `shfmt`.
+
+Files without a project formatter, including Devicetree sources and bindings,
+Kconfig, Makefiles, patches, APKBUILDs, Containerfiles and plain text, are
+rejected instead of being passed to a guessed tool. The checkout is never
+mounted writable in the container. All selected files are formatted in a
+private projection. Only after every formatter succeeds and the checkout is
+confirmed unchanged is each changed source file replaced atomically.
+
 ## Check source
 
 Run the complete uncached source-quality gate before committing or submitting
@@ -220,9 +247,9 @@ target.
 
 ## Logs, cache, and parallel commands
 
-Build and check print compact stage status. Add `--verbose` to stream their tool
-output; complete logs are retained under `.cache/logs/` and the command reports
-their location on failure.
+Build, check and format print compact stage status. Add `--verbose` to build or
+check to stream their tool output. Complete logs are retained under
+`.cache/logs/`, and each command reports their location on failure.
 
 Public commands serialize writes to shared build state. Target output is kept
 under `.cache/out/<target>/`; treat it as generated data, not as a user-managed

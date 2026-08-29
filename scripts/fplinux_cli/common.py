@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shlex
 import subprocess
+import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any, NoReturn
 
@@ -36,6 +38,27 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             value.update(chunk)
     return value.hexdigest()
+
+
+def replace_file_atomically(path: Path, contents: bytes, mode: int) -> None:
+    """Publish one verified regular file without exposing a partial write."""
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(contents)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.chmod(mode)
+        temporary.replace(path)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def payload_digest(files: dict[str, bytes], executables: set[str]) -> str:
