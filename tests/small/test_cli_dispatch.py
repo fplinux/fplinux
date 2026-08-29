@@ -73,7 +73,7 @@ class CliCacheLockTests(unittest.TestCase):
 
     def test_dispatcher_chooses_the_required_lock_mode(self) -> None:
         """Build-side commands request exclusive mode; consumers request shared mode."""
-        cases = (
+        cases: tuple[tuple[list[str], str, bool, str | None], ...] = (
             (["build", "target", "--jobs", "1"], "build", True, "target"),
             (["check"], "check", True, None),
             (["checksum", "demo-aport"], "checksum_aport", True, None),
@@ -109,6 +109,43 @@ class CliCacheLockTests(unittest.TestCase):
         )
         self.assertTrue(build.call_args.kwargs["offline"])
         self.assertFalse(build.call_args.kwargs["verbose"])
+
+    def test_check_forwards_the_kernel_worker_limit_without_changing_its_lock(self) -> None:
+        """Pass the requested kernel limit through the existing exclusive check boundary."""
+        events, check = self._run(["check", "kernel", "--jobs", "2"], "check")
+
+        self.assertEqual(
+            events,
+            [
+                ("lock", self.root / ".cache", True, "check", None, None),
+                "command",
+            ],
+        )
+        check.assert_called_once_with(
+            ["kernel"],
+            profile=None,
+            verbose=False,
+            no_cache=False,
+            jobs=2,
+        )
+
+    def test_check_defaults_match_the_selected_execution_boundary(self) -> None:
+        """Use two kernel workers normally and one when no parallel work can run."""
+        cases: tuple[tuple[list[str], list[str], bool, int], ...] = (
+            (["check"], [], False, 2),
+            (["check", "docs"], ["docs"], False, 1),
+            (["check", "--verbose"], [], True, 1),
+        )
+        for arguments, scopes, verbose, jobs in cases:
+            with self.subTest(arguments=arguments):
+                _events, check = self._run(arguments, "check")
+                check.assert_called_once_with(
+                    scopes,
+                    profile=None,
+                    verbose=verbose,
+                    no_cache=False,
+                    jobs=jobs,
+                )
 
     def test_profile_is_recorded_in_the_global_cache_lock_owner(self) -> None:
         """A blocked build identifies its profile without splitting the global lock."""

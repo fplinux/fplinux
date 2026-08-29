@@ -12,8 +12,11 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
+import time
 import tomllib
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -47,9 +50,14 @@ from .device_tree import (
 from .output import RunReporter, current_stage, exit_status, run_entrypoint
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from typing import BinaryIO, TextIO
+
     from .linux_state import PreparedLinuxState
 
 _KERNEL_CAPTURE_TIMEOUT = 30 * 60
+_CONTEXT_TERMINATE_TIMEOUT = 5.0
+_CONTEXT_KILL_TIMEOUT = 5.0
 
 
 def load_sources() -> dict[str, Any]:
@@ -288,132 +296,364 @@ def prepare_contexts(reporter: RunReporter | None, profile: str | None = None) -
             record_text(f"sparse context: ready ({label}, {prepared_linux.linux_recipe[:16]})\n")
 
 
-def check_contexts(reporter: RunReporter | None, profile: str | None = None) -> None:
-    """Run sparse through Kbuild for default or explicitly selected contexts."""
-    sources = load_sources()
-    checked = 0
-    for target, selected in target_profiles(profile):
-        label = context_label(target, selected)
-        with report_stage(reporter, f"context-{label}"):
-            target_config, platform, source, prepared_linux = target_context(
-                sources, target, selected
-            )
-            projected = projected_sources(target, target_config, platform)
-            style_files = [str(path) for path in projected if path.suffix in {".c", ".h"}]
-            checkpatch = [
-                str(require_file(source / "scripts/checkpatch.pl")),
-                f"--root={source}",
-                "--terse",
+def check_one_context(
+    reporter: RunReporter | None,
+    sources: dict[str, Any],
+    target: str,
+    profile: str | None,
+) -> int:
+    """Run the complete analyzer sequence for one target-owned context."""
+    label = context_label(target, profile)
+    with report_stage(reporter, f"context-{label}"):
+        target_config, platform, source, prepared_linux = target_context(sources, target, profile)
+        projected = projected_sources(target, target_config, platform)
+        style_files = [str(path) for path in projected if path.suffix in {".c", ".h"}]
+        checkpatch = [
+            str(require_file(source / "scripts/checkpatch.pl")),
+            f"--root={source}",
+            "--terse",
+        ]
+        kconfig_files = [str(path) for path in projected if path.name == "Kconfig"]
+        patch_files = [str(root_source(relative)) for relative in platform["linux"]["patches"]] + [
+            str(target_source(target, relative)) for relative in target_config["linux"]["patches"]
+        ]
+        defconfig = require_file(target_defconfig_path(target))
+        objects = sparse_targets(target, target_config, platform)
+        output = sparse_output(target, profile)
+        config_enable, config_disable = profile_kconfig_actions(target_config)
+        kbuild = [
+            "make",
+            "-C",
+            str(source),
+            f"O={output}",
+            f"ARCH={platform['linux']['arch']}",
+            f"CROSS_COMPILE={platform['linux']['analysis_cross_compile']}",
+        ]
+        format_command = [
+            "clang-format",
+            f"--style=file:{require_file(source / '.clang-format')}",
+            "--dry-run",
+            "--Werror",
+            *style_files,
+        ]
+        checkpatch_sources = [*checkpatch, "-f", *style_files, *kconfig_files]
+        checkpatch_patches = [*checkpatch, *patch_files] if patch_files else None
+        first_kconfig_command = [*kbuild, "olddefconfig"]
+        profile_config_command: list[str] | None = None
+        if config_enable or config_disable:
+            profile_config_command = [
+                str(require_file(source / platform["linux"]["config_script"])),
+                "--file",
+                str(output / ".config"),
+                *profile_kconfig_arguments(config_enable, config_disable),
             ]
-            kconfig_files = [str(path) for path in projected if path.name == "Kconfig"]
-            patch_files = [
-                str(root_source(relative)) for relative in platform["linux"]["patches"]
-            ] + [
-                str(target_source(target, relative))
-                for relative in target_config["linux"]["patches"]
-            ]
-            defconfig = require_file(target_defconfig_path(target))
-            objects = sparse_targets(target, target_config, platform)
-            output = sparse_output(target, selected)
-            config_enable, config_disable = profile_kconfig_actions(target_config)
-            kbuild = [
-                "make",
-                "-C",
-                str(source),
-                f"O={output}",
-                f"ARCH={platform['linux']['arch']}",
-                f"CROSS_COMPILE={platform['linux']['analysis_cross_compile']}",
-            ]
-            format_command = [
-                "clang-format",
-                f"--style=file:{require_file(source / '.clang-format')}",
-                "--dry-run",
-                "--Werror",
-                *style_files,
-            ]
-            checkpatch_sources = [*checkpatch, "-f", *style_files, *kconfig_files]
-            checkpatch_patches = [*checkpatch, *patch_files] if patch_files else None
-            first_kconfig_command = [*kbuild, "olddefconfig"]
-            profile_config_command: list[str] | None = None
-            if config_enable or config_disable:
-                profile_config_command = [
-                    str(require_file(source / platform["linux"]["config_script"])),
-                    "--file",
-                    str(output / ".config"),
-                    *profile_kconfig_arguments(config_enable, config_disable),
-                ]
-            kconfig_command = [*kbuild, "olddefconfig", "prepare"]
-            save_defconfig_command = [*kbuild, "savedefconfig"]
-            dtbs_command = [*kbuild, "W=1", "dtbs_check"]
-            sparse_command = [
-                *kbuild,
-                "-j1",
-                "W=1e",
-                "C=2",
-                "CHECK=sparse",
-                "CF=-D__CHECK_ENDIAN__ -Wsparse-error",
-                *objects,
-            ]
-            linux_state.require_prepared_linux(source, prepared_linux)
+        kconfig_command = [*kbuild, "olddefconfig", "prepare"]
+        save_defconfig_command = [*kbuild, "savedefconfig"]
+        dtbs_command = [*kbuild, "W=1", "dtbs_check"]
+        sparse_command = [
+            *kbuild,
+            "-j1",
+            "W=1e",
+            "C=2",
+            "CHECK=sparse",
+            "CF=-D__CHECK_ENDIAN__ -Wsparse-error",
+            *objects,
+        ]
+        linux_state.require_prepared_linux(source, prepared_linux)
 
-        output = reset_sparse_output(target, selected)
-        with report_stage(reporter, f"format-{label}"):
-            run(format_command)
-        with report_stage(reporter, f"checkpatch-{label}"):
-            # --root resolves the fplinux compatibles against projected bindings.
-            run_checkpatch(checkpatch_sources)
-            if checkpatch_patches is not None:
-                run_checkpatch(checkpatch_patches)
-        with report_stage(reporter, f"kconfig-{label}"):
-            shutil.copyfile(defconfig, output / ".config")
-            if profile_config_command is not None:
-                run(first_kconfig_command)
-                run(profile_config_command)
-            run(kconfig_command)
-            if selected is None:
-                run(save_defconfig_command)
-                current = defconfig.read_text()
-                canonical = require_file(output / "defconfig").read_text()
-                if canonical != current:
-                    record_text(
-                        "".join(
-                            difflib.unified_diff(
-                                current.splitlines(keepends=True),
-                                canonical.splitlines(keepends=True),
-                                fromfile=str(defconfig),
-                                tofile="savedefconfig",
-                            )
+    output = reset_sparse_output(target, profile)
+    with report_stage(reporter, f"format-{label}"):
+        run(format_command)
+    with report_stage(reporter, f"checkpatch-{label}"):
+        # --root resolves the fplinux compatibles against projected bindings.
+        run_checkpatch(checkpatch_sources)
+        if checkpatch_patches is not None:
+            run_checkpatch(checkpatch_patches)
+    with report_stage(reporter, f"kconfig-{label}"):
+        shutil.copyfile(defconfig, output / ".config")
+        if profile_config_command is not None:
+            run(first_kconfig_command)
+            run(profile_config_command)
+        run(kconfig_command)
+        if profile is None:
+            run(save_defconfig_command)
+            current = defconfig.read_text()
+            canonical = require_file(output / "defconfig").read_text()
+            if canonical != current:
+                record_text(
+                    "".join(
+                        difflib.unified_diff(
+                            current.splitlines(keepends=True),
+                            canonical.splitlines(keepends=True),
+                            fromfile=str(defconfig),
+                            tofile="savedefconfig",
                         )
                     )
-                    raise SystemExit(f"sparse failed: defconfig is not canonical: {defconfig}")
-            else:
-                assert_profile_kconfig(output / ".config", config_enable, config_disable)
-        with report_stage(reporter, f"device-tree-{label}"):
-            combined = run_dtbs_check(dtbs_command, target)
-            if "Warning" in combined or re.search(r"\.dtb: ", combined):
-                raise SystemExit(f"sparse failed: device tree findings: {target}")
-            identity = target_config["identity"]
-            platform_identity = platform["identity"]
-            dtb = (
-                output / platform["linux"]["dtb_output_directory"] / target_config["linux"]["dtb"]
-            )
-            try:
-                verify_target_identity(
-                    dtb,
-                    target,
-                    identity["display_name"],
-                    (identity["compatible"], platform_identity["compatible"]),
                 )
-                verify_root_bootargs(dtb, target_config["linux"]["root"])
-                layout = target_config.get("layout")
-                if isinstance(layout, dict):
-                    verify_profile_dtb_layout(dtb, layout)
-            except DeviceTreeError as error:
-                raise SystemExit(f"sparse failed: {error}") from error
-        with report_stage(reporter, f"sparse-{label}"):
-            run(sparse_command)
-        checked += len(objects)
-        print(f"sparse: OK ({label}, {len(objects)} kernel C objects)")
+                raise SystemExit(f"sparse failed: defconfig is not canonical: {defconfig}")
+        else:
+            assert_profile_kconfig(output / ".config", config_enable, config_disable)
+    with report_stage(reporter, f"device-tree-{label}"):
+        combined = run_dtbs_check(dtbs_command, target)
+        if "Warning" in combined or re.search(r"\.dtb: ", combined):
+            raise SystemExit(f"sparse failed: device tree findings: {target}")
+        identity = target_config["identity"]
+        platform_identity = platform["identity"]
+        dtb = output / platform["linux"]["dtb_output_directory"] / target_config["linux"]["dtb"]
+        try:
+            verify_target_identity(
+                dtb,
+                target,
+                identity["display_name"],
+                (identity["compatible"], platform_identity["compatible"]),
+            )
+            verify_root_bootargs(dtb, target_config["linux"]["root"])
+            layout = target_config.get("layout")
+            if isinstance(layout, dict):
+                verify_profile_dtb_layout(dtb, layout)
+        except DeviceTreeError as error:
+            raise SystemExit(f"sparse failed: {error}") from error
+    with report_stage(reporter, f"sparse-{label}"):
+        run(sparse_command)
+    print(f"sparse: OK ({label}, {len(objects)} kernel C objects)")
+    return len(objects)
+
+
+def context_object_count(target: str, profile: str | None) -> int:
+    """Count one context's projected objects for the stable final summary."""
+    target_config = load_target(target, profile)
+    platform = load_platform(target_config["platform"])
+    return len(sparse_targets(target, target_config, platform))
+
+
+@dataclass
+class _ContextWorker:
+    """Own one child analyzer and its process-local scratch directories."""
+
+    index: int
+    target: str
+    profile: str | None
+    process: subprocess.Popen[bytes]
+    workspace: tempfile.TemporaryDirectory[str]
+    stdout: BinaryIO
+    stderr: BinaryIO
+
+
+def _context_worker_command(target: str, profile: str | None) -> list[str]:
+    """Return the internal command that checks exactly one context."""
+    command = [
+        sys.executable,
+        "-m",
+        "fplinux_cli.kernelcheck",
+        "check",
+        "--jobs",
+        "1",
+        "--context-target",
+        target,
+    ]
+    if profile is not None:
+        command.extend(("--profile", profile))
+    return command
+
+
+def _start_context_worker(
+    index: int,
+    target: str,
+    profile: str | None,
+    command_for: Callable[[str, str | None], list[str]],
+) -> _ContextWorker:
+    """Start one analyzer with isolated HOME, TMPDIR, and output streams."""
+    label = context_label(target, profile)
+    workspace = tempfile.TemporaryDirectory(prefix=f"fplinux-kernel-{label}-")
+    root = Path(workspace.name)
+    home = root / "home"
+    temporary = root / "tmp"
+    home.mkdir()
+    temporary.mkdir()
+    environment = {
+        **os.environ,
+        "HOME": str(home),
+        "TMPDIR": str(temporary),
+    }
+    stdout = (root / "stdout").open("w+b")
+    stderr = (root / "stderr").open("w+b")
+    try:
+        process = subprocess.Popen(
+            command_for(target, profile),
+            stdout=stdout,
+            stderr=stderr,
+            env=environment,
+        )
+    except BaseException:
+        stdout.close()
+        stderr.close()
+        workspace.cleanup()
+        raise
+    return _ContextWorker(
+        index=index,
+        target=target,
+        profile=profile,
+        process=process,
+        workspace=workspace,
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+
+def _completed_context_workers(
+    running: dict[int, _ContextWorker],
+) -> list[tuple[_ContextWorker, int]]:
+    """Poll and reap every worker that has reached a terminal state."""
+    completed: list[tuple[_ContextWorker, int]] = []
+    for worker in sorted(running.values(), key=lambda item: item.index):
+        returncode = worker.process.poll()
+        if returncode is None:
+            continue
+        running.pop(worker.index)
+        completed.append((worker, returncode))
+    return completed
+
+
+def _wait_context_workers(running: dict[int, _ContextWorker], timeout: float) -> None:
+    """Reap workers that exit within one bounded cancellation phase."""
+    deadline = time.monotonic() + timeout
+    while running and time.monotonic() < deadline:
+        _completed_context_workers(running)
+        if running:
+            time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+
+
+def _stop_context_workers(running: dict[int, _ContextWorker]) -> None:
+    """Escalate worker cancellation while allowing Stage to kill its tool group."""
+    for worker in running.values():
+        with suppress(ProcessLookupError):
+            worker.process.terminate()
+    _wait_context_workers(running, _CONTEXT_TERMINATE_TIMEOUT)
+
+    # A repeated termination makes an active Stage kill its command group.
+    for worker in running.values():
+        with suppress(ProcessLookupError):
+            worker.process.terminate()
+    _wait_context_workers(running, _CONTEXT_KILL_TIMEOUT)
+
+    for worker in running.values():
+        with suppress(ProcessLookupError):
+            worker.process.kill()
+    _wait_context_workers(running, _CONTEXT_KILL_TIMEOUT)
+
+    if running:
+        labels = ", ".join(
+            context_label(worker.target, worker.profile)
+            for worker in sorted(running.values(), key=lambda item: item.index)
+        )
+        raise RuntimeError(f"kernel context workers could not be reaped: {labels}")
+
+
+def _write_captured(stream: TextIO, data: bytes) -> None:
+    """Replay child output through text streams used by the current invocation."""
+    buffer = getattr(stream, "buffer", None)
+    if buffer is not None:
+        buffer.write(data)
+        buffer.flush()
+        return
+    stream.write(data.decode(errors="replace"))
+    stream.flush()
+
+
+def _replay_context_workers(workers: list[_ContextWorker]) -> None:
+    """Publish completed context output in stable target order."""
+    for worker in sorted(workers, key=lambda item: item.index):
+        worker.stderr.seek(0)
+        _write_captured(sys.stderr, worker.stderr.read())
+        worker.stdout.seek(0)
+        _write_captured(sys.stdout, worker.stdout.read())
+
+
+def _discard_context_workers(workers: list[_ContextWorker]) -> None:
+    """Close captured streams before deleting worker scratch directories."""
+    for worker in workers:
+        worker.stdout.close()
+        worker.stderr.close()
+        worker.workspace.cleanup()
+
+
+def _run_context_processes(
+    contexts: tuple[tuple[str, str | None], ...],
+    jobs: int,
+    *,
+    command_for: Callable[[str, str | None], list[str]] = _context_worker_command,
+) -> None:
+    """Run context workers concurrently with bounded fail-fast cancellation."""
+    limit = min(jobs, len(contexts))
+    workers: list[_ContextWorker] = []
+    running: dict[int, _ContextWorker] = {}
+    next_index = 0
+    failure: tuple[int, int] | None = None
+
+    def start_available() -> None:
+        nonlocal next_index
+        while next_index < len(contexts) and len(running) < limit:
+            target, profile = contexts[next_index]
+            worker = _start_context_worker(next_index, target, profile, command_for)
+            workers.append(worker)
+            running[worker.index] = worker
+            next_index += 1
+
+    try:
+        start_available()
+        while running:
+            completed = _completed_context_workers(running)
+            failed = [(worker.index, returncode) for worker, returncode in completed if returncode]
+            if failed:
+                failed_index, returncode = min(failed)
+                failure = (failed_index, returncode)
+                break
+            start_available()
+            if running and not completed:
+                time.sleep(0.05)
+        if failure is not None:
+            _stop_context_workers(running)
+    except BaseException:
+        _stop_context_workers(running)
+        raise
+    finally:
+        try:
+            _replay_context_workers(workers)
+        finally:
+            _discard_context_workers(workers)
+
+    if failure is None:
+        return
+    failed_index, returncode = failure
+    target, profile = contexts[failed_index]
+    label = context_label(target, profile)
+    raise SystemExit(f"sparse failed: context {label} exited {exit_status(returncode)}")
+
+
+def check_contexts(
+    reporter: RunReporter | None,
+    profile: str | None = None,
+    *,
+    jobs: int = 1,
+) -> None:
+    """Run sparse through Kbuild for default or explicitly selected contexts."""
+    if jobs < 1:
+        message = "sparse failed: jobs must be positive"
+        raise SystemExit(message)
+    contexts = target_profiles(profile)
+    if reporter is not None and reporter.verbose and jobs > 1:
+        message = "sparse failed: --verbose cannot use more than one job"
+        raise SystemExit(message)
+    if len(contexts) == 1 or (jobs == 1 and (reporter is None or reporter.verbose)):
+        sources = load_sources()
+        checked = sum(
+            check_one_context(reporter, sources, target, selected) for target, selected in contexts
+        )
+        print(f"sparse: OK ({checked} kernel C objects total)")
+        return
+
+    _run_context_processes(contexts, jobs)
+    checked = sum(context_object_count(target, selected) for target, selected in contexts)
     print(f"sparse: OK ({checked} kernel C objects total)")
 
 
@@ -422,12 +662,29 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("phase", choices=("prepare", "check"))
     parser.add_argument("--profile")
+    parser.add_argument("--jobs", type=int, default=1)
+    parser.add_argument("--context-target", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.jobs < 1:
+        parser.error("--jobs must be positive")
+    if args.context_target is not None:
+        if args.phase != "check" or args.jobs != 1:
+            parser.error("--context-target requires check --jobs 1")
+        context = (args.context_target, args.profile)
+        if context not in target_profiles(args.profile):
+            parser.error(f"invalid kernel context: {context_label(*context)}")
+        label = context_label(*context)
+        reporter = RunReporter.from_environment("check", f"kernel-context-{label}")
+        check_one_context(reporter, load_sources(), *context)
+        return
+
     reporter = RunReporter.from_environment("check", f"kernel-{args.phase}")
     if args.phase == "prepare":
+        if args.jobs != 1:
+            parser.error("--jobs is supported only by the check phase")
         prepare_contexts(reporter, args.profile)
     else:
-        check_contexts(reporter, args.profile)
+        check_contexts(reporter, args.profile, jobs=args.jobs)
 
 
 if __name__ == "__main__":

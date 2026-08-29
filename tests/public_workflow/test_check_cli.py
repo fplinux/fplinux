@@ -78,6 +78,46 @@ class CheckCommandTests(unittest.TestCase):
         )
         self.assertEqual(result.stderr, "")
 
+    def test_list_rejects_a_worker_limit_that_cannot_affect_listing(self) -> None:
+        """Do not silently ignore a kernel execution option on the no-work path."""
+        result = self.run_check("--list", "--jobs", "2")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--jobs cannot be combined with --list", result.stderr)
+
+    def test_help_describes_the_measured_kernel_worker_default(self) -> None:
+        """Expose the default and verbose fallback chosen by the public A/B."""
+        result = self.run_check("--help")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertRegex(result.stdout, r"default: 2, or\s+1 with --verbose")
+
+    def test_jobs_requires_a_positive_integer_before_running_checks(self) -> None:
+        """Reject malformed or nonpositive execution limits at the public parser boundary."""
+        for value in ("0", "-1", "two"):
+            with self.subTest(value=value):
+                result = self.run_check("--jobs", value)
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("argument --jobs: must be a positive integer", result.stderr)
+
+    def test_parallel_jobs_require_the_kernel_scope(self) -> None:
+        """Reject an execution limit that no selected source checker can consume."""
+        result = self.run_check("docs", "--jobs", "2")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--jobs greater than 1 requires the kernel check scope", result.stderr)
+
+    def test_parallel_jobs_reject_verbose_streaming(self) -> None:
+        """Do not advertise live streaming while parallel output is replayed in order."""
+        result = self.run_check("kernel", "--jobs", "2", "--verbose")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "--verbose cannot be combined with --jobs greater than 1",
+            result.stderr,
+        )
+
     def test_unknown_scope_is_rejected_by_the_public_command(self) -> None:
         """Report a user-facing error for a scope outside the supported registry."""
         result = self.run_check("imaginary")

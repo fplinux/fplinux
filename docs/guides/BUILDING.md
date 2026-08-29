@@ -45,6 +45,7 @@ source changes:
 
 ```sh
 ./fplinux check --no-cache
+./fplinux check --no-cache --jobs 1
 ./fplinux check --list
 ./fplinux check docs spelling
 ```
@@ -53,6 +54,11 @@ With no scopes, `check` runs the complete gate. Selected cacheable scopes reuse
 an exact successful result when their current inputs match; otherwise they run
 again. `--no-cache` reruns selected cacheable scopes. An ordinary build or RAM
 run without source changes does not need to repeat the gate.
+
+The complete gate checks up to two independent default kernel contexts at once.
+Use `--jobs 1` to force serial kernel analysis on a memory-constrained host.
+Source-only checks and named profiles do not gain extra work from a larger
+limit. `--verbose` uses serial analysis so tool output can remain live.
 
 The `docs` scope also rejects repository-local Markdown links whose file or
 heading anchor does not exist.
