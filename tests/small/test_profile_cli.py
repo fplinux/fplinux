@@ -52,6 +52,7 @@ class ProfileParserDispatchTests(unittest.TestCase):
             profile="usb-host-lab",
             verbose=False,
             no_cache=False,
+            jobs=2,
         )
 
     def test_profile_check_accepts_only_the_explicit_kernel_scope(self) -> None:
@@ -65,6 +66,25 @@ class ProfileParserDispatchTests(unittest.TestCase):
             profile="usb-host-lab",
             verbose=False,
             no_cache=False,
+            jobs=2,
+        )
+
+    def test_profile_check_forwards_an_explicit_kernel_worker_limit(self) -> None:
+        """Keep a named profile on the same bounded kernel-analysis path."""
+        check, _build, _run, _package, _console = self.invoke(
+            "check",
+            "--profile",
+            "usb-host-lab",
+            "--jobs",
+            "2",
+        )
+
+        check.assert_called_once_with(
+            ["kernel"],
+            profile="usb-host-lab",
+            verbose=False,
+            no_cache=False,
+            jobs=2,
         )
 
     def test_profile_check_rejects_unrelated_scopes(self) -> None:

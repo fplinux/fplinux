@@ -301,6 +301,85 @@ time.sleep(30)
 class StageSignalProcessTests(unittest.TestCase):
     """Exercise signal forwarding through an isolated Stage wrapper process."""
 
+    def test_repeated_termination_kills_an_unresponsive_child_group(self) -> None:
+        """Escalate only after the Stage-owned child group ignores its first SIGTERM."""
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            child_ready = directory / "child.ready"
+            child_group = directory / "child.pgid"
+            child_pid_path = directory / "child.pid"
+            child_term = directory / "child.term"
+            grandchild_ready = directory / "grandchild.ready"
+            grandchild_pid_path = directory / "grandchild.pid"
+            grandchild_term = directory / "grandchild.term"
+            grandchild_program = f"""
+import os
+import signal
+import time
+from pathlib import Path
+Path({str(grandchild_pid_path)!r}).write_text(str(os.getpid()))
+def ignore_term(*_args):
+    Path({str(grandchild_term)!r}).touch()
+signal.signal(signal.SIGTERM, ignore_term)
+Path({str(grandchild_ready)!r}).touch()
+time.sleep(30)
+"""
+            child_program = f"""
+import os
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+Path({str(child_pid_path)!r}).write_text(str(os.getpid()))
+grandchild = subprocess.Popen([sys.executable, "-c", {grandchild_program!r}])
+def ignore_term(*_args):
+    Path({str(child_term)!r}).touch()
+signal.signal(signal.SIGTERM, ignore_term)
+Path({str(child_group)!r}).write_text(str(os.getpgrp()))
+deadline = time.monotonic() + 5
+while not Path({str(grandchild_ready)!r}).exists():
+    if time.monotonic() >= deadline:
+        raise RuntimeError("grandchild did not become ready")
+    time.sleep(0.01)
+Path({str(child_ready)!r}).touch()
+time.sleep(30)
+"""
+            wrapper_program = f"""
+import sys
+from pathlib import Path
+from fplinux_cli.output import RunReporter
+reporter = RunReporter("check", Path({str(directory / "run")!r}), "test", verbose=False)
+with reporter.stage("signal escalation") as stage:
+    stage.run([sys.executable, "-c", {child_program!r}], timeout=10)
+"""
+
+            def escalate_ready_wrapper(wrapper: subprocess.Popen[str], deadline: float) -> None:
+                _wait_for_path(child_ready, deadline, "stage child")
+                os.kill(wrapper.pid, signal.SIGTERM)
+                _wait_for_path(child_term, deadline, "child SIGTERM receipt")
+                _wait_for_path(grandchild_term, deadline, "grandchild SIGTERM receipt")
+                os.kill(wrapper.pid, signal.SIGTERM)
+
+            try:
+                result = run_process(
+                    [sys.executable, "-c", wrapper_program],
+                    name="stage repeated SIGTERM escalation",
+                    timeout=_PROCESS_TIMEOUT,
+                    cwd=ROOT,
+                    env=_python_environment(),
+                    while_running=escalate_ready_wrapper,
+                )
+            finally:
+                _kill_recorded_process_group(child_group)
+            self.assertEqual(result.returncode, 128 + signal.SIGTERM, result.stderr)
+            child_pid = int(child_pid_path.read_text())
+            grandchild_pid = int(grandchild_pid_path.read_text())
+            deadline = time.monotonic() + 2
+            _wait_until_not_running(child_pid, deadline)
+            _wait_until_not_running(grandchild_pid, deadline)
+            self.assertIn("FAILED (exit 143)", result.stderr)
+
     def test_signal_is_forwarded_to_every_process_in_the_child_group(self) -> None:
         """Forward SIGTERM from a wrapper to its child and descendant."""
         with tempfile.TemporaryDirectory() as temporary:

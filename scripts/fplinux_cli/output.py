@@ -527,6 +527,7 @@ class Stage:
         handled_signals = (*termination_signals, *suspension_signals, signal.SIGCONT)
         previous_handlers = {signum: signal.getsignal(signum) for signum in handled_signals}
         forwarded_signal: int | None = None
+        termination_escalated = False
         process: subprocess.Popen[bytes] | None = None
         stdout = bytearray()
         stderr = bytearray()
@@ -546,13 +547,15 @@ class Stage:
             )
 
         def forward_termination(signum: int, _frame: object) -> None:
-            nonlocal forwarded_signal
+            nonlocal forwarded_signal, termination_escalated
             if forwarded_signal is None:
                 forwarded_signal = signum
+            else:
+                termination_escalated = True
             if process is None:
                 return
             with suppress(ProcessLookupError):
-                os.killpg(process.pid, signum)
+                os.killpg(process.pid, signal.SIGKILL if termination_escalated else signum)
 
         def forward_suspension(signum: int, _frame: object) -> None:
             if process is not None:
@@ -582,7 +585,10 @@ class Stage:
             )
             if forwarded_signal is not None:
                 with suppress(ProcessLookupError):
-                    os.killpg(process.pid, forwarded_signal)
+                    os.killpg(
+                        process.pid,
+                        signal.SIGKILL if termination_escalated else forwarded_signal,
+                    )
             process_stdout, process_stderr = _subprocess_pipes(process)
             selector.register(process_stdout, selectors.EVENT_READ, (sys.stdout, stdout))
             selector.register(process_stderr, selectors.EVENT_READ, (sys.stderr, stderr))

@@ -241,5 +241,21 @@ class KernelProfileSelectionTests(unittest.TestCase):
             kernelcheck.target_profiles("missing")
 
 
+class KernelContextDispatchTests(unittest.TestCase):
+    """Reject an invalid worker limit before analyzer work starts."""
+
+    def test_nonpositive_jobs_fail_before_context_discovery(self) -> None:
+        """An invalid worker limit cannot inspect contexts or start analyzers."""
+        with (
+            mock.patch.object(
+                kernelcheck,
+                "target_profiles",
+                side_effect=AssertionError("invalid jobs must fail first"),
+            ),
+            self.assertRaisesRegex(SystemExit, "jobs must be positive"),
+        ):
+            kernelcheck.check_contexts(None, jobs=0)
+
+
 if __name__ == "__main__":
     unittest.main()
