@@ -25,9 +25,10 @@ All current targets share these limits:
 - Linux runs only in volatile RAM; there is no autonomous Linux boot path.
 - Internal phone storage is deliberately not exposed.
 - USB operates as a peripheral; USB host and OTG are not supported.
-- Audio, calls, SMS, mobile data, Bluetooth, Wi-Fi, camera, indicator LEDs and
-  vibration have no supported FPLinux path.
-- Linux reboot and suspend are not supported.
+- Audio, calls, SMS, mobile data, Bluetooth, Wi-Fi, camera and indicator LEDs
+  have no supported FPLinux path.
+- Linux reboot is not supported. Suspend and vibration support are
+  target-specific and documented by the exact phone where available.
 
 Hardware presence still belongs to each phone table. For example, a missing
 camera driver does not prove that a camera is physically absent.
