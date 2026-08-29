@@ -10,7 +10,7 @@ from typing import Literal, Self
 from unittest import mock
 
 from fplinux_cli import container
-from fplinux_cli.checkreceipts import publish_success_receipt, receipt_matches
+from fplinux_cli.checkreceipts import publish_success_receipt, receipt_matches, receipt_path
 from fplinux_cli.container import (
     check_scope_closure_digest,
     check_scope_receipt_recipe,
@@ -629,6 +629,83 @@ class _RecordingReporter:
 class _FailingReporter(_RecordingReporter):
     def stage(self, *_args: object, **_kwargs: object) -> _RecordingStage:
         return _FailingStage(self.commands)
+
+
+class KernelExecutionLimitTests(unittest.TestCase):
+    """Keep kernel worker limits outside prepare and receipt identity."""
+
+    def test_kernel_limit_changes_analysis_only_and_not_receipt_bytes(self) -> None:
+        """Treat worker count as execution policy, not a different kernel result."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cache = root / "cache"
+            cache.mkdir()
+            workspace = root / "workspace"
+            workspace.mkdir()
+            analyzer_cache = {name: root / name for name in ("analysis", "downloads", "linux")}
+            for path in analyzer_cache.values():
+                path.mkdir()
+            commands: list[list[str]] = []
+            recipe = check_scope_receipt_recipe(
+                "kernel",
+                "a" * 64,
+                image_identity="sha256:" + "b" * 64,
+                orchestration_recipe="c" * 64,
+                profile="microsd-uboot",
+            )
+
+            def run_with_jobs(jobs: int) -> None:
+                container._run_missing_checks(  # noqa: SLF001 -- execution boundary.
+                    reporter=_RecordingReporter(  # type: ignore[arg-type]
+                        root / f"logs-{jobs}", commands
+                    ),
+                    cache=cache,
+                    missing=("kernel",),
+                    analyzer_cache=analyzer_cache,
+                    workspace=workspace,
+                    podman="podman",
+                    lock={"platform": "linux/amd64"},
+                    image_identity="sha256:" + "b" * 64,
+                    recipes={"kernel": recipe},
+                    profile="microsd-uboot",
+                    jobs=jobs,
+                )
+
+            run_with_jobs(1)
+            first_receipt = receipt_path(cache, recipe).read_bytes()
+            run_with_jobs(2)
+            second_receipt = receipt_path(cache, recipe).read_bytes()
+
+            first_prepare, first_analysis, second_prepare, second_analysis = commands
+            self.assertEqual(
+                first_prepare[-3:],
+                ["prepare", "--profile", "microsd-uboot"],
+            )
+            self.assertEqual(
+                first_analysis[-5:],
+                ["check", "--jobs", "1", "--profile", "microsd-uboot"],
+            )
+            self.assertEqual(
+                second_prepare[-3:],
+                ["prepare", "--profile", "microsd-uboot"],
+            )
+            self.assertEqual(
+                second_analysis[-5:],
+                ["check", "--jobs", "2", "--profile", "microsd-uboot"],
+            )
+            self.assertEqual(first_receipt, second_receipt)
+            self.assertTrue(
+                receipt_matches(
+                    cache,
+                    check_scope_receipt_recipe(
+                        "kernel",
+                        "a" * 64,
+                        image_identity="sha256:" + "b" * 64,
+                        orchestration_recipe="c" * 64,
+                        profile="microsd-uboot",
+                    ),
+                )
+            )
 
 
 class MockedCheckReceiptOrchestrationTests(unittest.TestCase):

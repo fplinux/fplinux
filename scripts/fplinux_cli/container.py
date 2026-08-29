@@ -740,7 +740,7 @@ def check_scope_closure_digest(
 
 
 def check_scope_commands(scope: str, *, profile: str | None = None) -> tuple[tuple[str, ...], ...]:
-    """Return the canonical checker argv whose result a receipt certifies."""
+    """Return semantic checker argv without execution-only scheduling flags."""
     if scope in SOURCE_CHECK_SCOPES:
         return ((*_SOURCE_CHECK_COMMAND, scope),)
     if scope == "kernel":
@@ -789,6 +789,7 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
     image_identity: str,
     recipes: dict[str, CheckReceiptRecipe],
     profile: str | None,
+    jobs: int,
 ) -> None:
     """Run cache-missing source and kernel checks against one disposable workspace."""
     log_mount = ["--volume", f"{reporter.root}:/logs:rw,Z"]
@@ -901,6 +902,8 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
                 f"{analyzer_cache['linux']}:/cache/linux:ro,Z",
                 *analyzer_program,
                 "check",
+                "--jobs",
+                str(jobs),
                 *([] if profile is None else ["--profile", profile]),
             ],
             timeout=_KERNEL_ANALYSIS_TIMEOUT,
@@ -914,7 +917,10 @@ def check(
     verbose: bool = False,
     no_cache: bool = False,
     profile: str | None = None,
+    jobs: int = 1,
 ) -> None:
+    if not isinstance(jobs, int) or isinstance(jobs, bool) or jobs < 1:
+        fail("--jobs must be a positive integer")
     selected = resolve_check_scopes(scopes)
     if profile is not None:
         declared_targets = tuple(
@@ -926,6 +932,8 @@ def check(
             selected = ("kernel",)
         elif selected != ("kernel",):
             fail("--profile is supported only with the kernel check scope")
+    if jobs > 1 and verbose:
+        fail("--verbose cannot be combined with --jobs greater than 1")
 
     reporter = RunReporter.create(
         "check",
@@ -1029,6 +1037,7 @@ def check(
             image_identity=image_identity,
             recipes=recipes,
             profile=profile,
+            jobs=jobs,
         )
     finally:
         discard_staged_quality_workspace_snapshot(snapshot, workspace)

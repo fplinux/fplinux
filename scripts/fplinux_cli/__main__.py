@@ -48,6 +48,19 @@ def _check_scope(value: str) -> str:
     return value
 
 
+def _positive_jobs(value: str) -> int:
+    """Parse one positive worker limit before it can take the cache lock."""
+    try:
+        jobs = int(value)
+    except ValueError as error:
+        message = "must be a positive integer"
+        raise argparse.ArgumentTypeError(message) from error
+    if jobs < 1:
+        message = "must be a positive integer"
+        raise argparse.ArgumentTypeError(message)
+    return jobs
+
+
 def _profile_name(value: str) -> str:
     """Accept only one target-owned profile path component."""
     if TARGET_NAME.fullmatch(value) is None:
@@ -153,14 +166,24 @@ def _command_action(
         if args.list_scopes:
             if args.profile is not None:
                 check_parser.error("--profile cannot be combined with --list")
+            if args.jobs is not None:
+                check_parser.error("--jobs cannot be combined with --list")
             action = partial(_list_check_scopes, check_parser, args.scopes)
         else:
+            jobs = args.jobs
+            if jobs is None:
+                jobs = 1 if args.verbose or (args.scopes and "kernel" not in args.scopes) else 2
+            if jobs > 1 and args.verbose:
+                check_parser.error("--verbose cannot be combined with --jobs greater than 1")
+            if jobs > 1 and args.scopes and "kernel" not in args.scopes:
+                check_parser.error("--jobs greater than 1 requires the kernel check scope")
             action = partial(
                 check,
                 _profile_check_scopes(args.scopes, args.profile, check_parser),
                 profile=args.profile,
                 verbose=args.verbose,
                 no_cache=args.no_cache,
+                jobs=jobs,
             )
     elif args.command == "setup":
         action = partial(_setup_action, force=args.force)
@@ -242,6 +265,13 @@ def main() -> None:
         "--no-cache",
         action="store_true",
         help="run every selected check even when an exact success receipt exists",
+    )
+    check_parser.add_argument(
+        "--jobs",
+        type=_positive_jobs,
+        default=None,
+        metavar="N",
+        help="limit concurrent kernel check contexts (default: 2, or 1 with --verbose)",
     )
     check_parser.add_argument(
         "--profile",
