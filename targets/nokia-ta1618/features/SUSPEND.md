@@ -18,6 +18,9 @@ stays blank.
 The red handset key is the only supported wake source. The `8` key and the
 matrix keypad do not wake the phone.
 
+An active [vibration](VIBRATION.md) is stopped before sleep and is not resumed
+after wake.
+
 This path is qualified without a microSD card installed. Suspend with a data
 card or the [microSD system root](../profiles/microsd-uboot/features/MICROSD.md)
 is not supported yet. Unmount and remove a data card before entering s2idle.
