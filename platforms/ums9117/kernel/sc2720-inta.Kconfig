@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config IRQCHIP_SC2720_INTA_UMS9117
+	bool "SC2720 analog interrupt aggregate on UMS9117"
+	depends on ARCH_UMS9117
+	select IRQ_DOMAIN
+	help
+	  Own the SC2720 analog interrupt aggregate carried by UMS9117 GIC
+	  SPI38. The controller exposes the qualified RTC alarm and analog EIC
+	  sources as nested Device Tree interrupts through the platform-wide ADI
+	  transport.

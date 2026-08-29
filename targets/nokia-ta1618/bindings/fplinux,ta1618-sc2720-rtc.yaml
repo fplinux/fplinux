@@ -10,20 +10,35 @@ maintainers:
   - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
 
 description:
-  Read-only time reporting through the SC2720 RTC counter on the Nokia 3210
-  4G TA-1618.
+  Time reporting and normal one-shot alarms through the SC2720 RTC on the
+  Nokia 3210 4G TA-1618.
 
 properties:
   compatible:
     const: fplinux,ta1618-sc2720-rtc
 
+  interrupts:
+    maxItems: 1
+
+  interrupt-names:
+    const: alarm
+
+  wakeup-source: true
+
 required:
   - compatible
+  - interrupts
+  - interrupt-names
 
 additionalProperties: false
 
 examples:
   - |
+    #include <dt-bindings/interrupt-controller/irq.h>
+
     rtc {
         compatible = "fplinux,ta1618-sc2720-rtc";
+        interrupt-parent = <&sc2720_inta>;
+        interrupts = <1 IRQ_TYPE_LEVEL_HIGH>;
+        interrupt-names = "alarm";
     };

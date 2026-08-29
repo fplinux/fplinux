@@ -11,12 +11,11 @@ echo freeze > /sys/power/state
 ```
 
 The display and USB gadget turn off before sleep. A short press of the red
-handset key wakes the phone. The USB gadget reconnects after wake, and a display
-that was active before sleep turns on again. A display that was already blank
-stays blank.
+handset key or an armed normal [RTC alarm](RTC.md) wakes the phone. The USB
+gadget reconnects after wake, and a display that was active before sleep turns
+on again. A display that was already blank stays blank.
 
-The red handset key is the only supported wake source. The `8` key and the
-matrix keypad do not wake the phone.
+The `8` key and the matrix keypad do not wake the phone.
 
 An active [vibration](VIBRATION.md) is stopped before sleep and is not resumed
 after wake.
