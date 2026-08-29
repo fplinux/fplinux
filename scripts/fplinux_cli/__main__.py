@@ -22,6 +22,7 @@ from .commands import (
 from .common import ROOT
 from .config import TARGET_NAME, discover_targets
 from .container import CHECK_SCOPES, check, check_commit_message, doctor, setup
+from .format import format_sources
 from .output import run_entrypoint
 from .prune import (
     discard_obsolete_apks,
@@ -34,10 +35,12 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-_EXCLUSIVE_CACHE_COMMANDS = frozenset({"build", "check", "checksum", "setup"})
+_EXCLUSIVE_CACHE_COMMANDS = frozenset({"build", "check", "checksum", "format", "setup"})
 _SHARED_CACHE_COMMANDS = frozenset({"console", "package", "run", "verify"})
 _CHECK_SCOPE_METAVAR = "{" + ",".join(CHECK_SCOPES) + "}"
-_PUBLIC_COMMAND_METAVAR = "{doctor,check,setup,build,checksum,package,prune,run,console,verify}"
+_PUBLIC_COMMAND_METAVAR = (
+    "{doctor,check,format,setup,build,checksum,package,prune,run,console,verify}"
+)
 
 
 def _check_scope(value: str) -> str:
@@ -187,6 +190,8 @@ def _command_action(
             )
     elif args.command == "setup":
         action = partial(_setup_action, force=args.force)
+    elif args.command == "format":
+        action = partial(format_sources, args.paths)
     elif args.command == "_commit-msg":
         action = partial(check_commit_message, args.message_file)
     elif args.command == "build":
@@ -278,6 +283,15 @@ def main() -> None:
         type=_profile_name,
         metavar="NAME",
         help="check only the selected profile kernel",
+    )
+    format_parser = commands.add_parser(
+        "format", help="format explicit project sources in the pinned environment"
+    )
+    format_parser.add_argument(
+        "paths",
+        nargs="+",
+        metavar="PATH",
+        help="normalized repository-relative source path",
     )
     setup_parser = commands.add_parser("setup", help="build the pinned OCI environment")
     setup_parser.add_argument(

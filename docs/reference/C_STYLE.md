@@ -35,6 +35,7 @@ musl, bootstrap or kernel code builds.
 ## Run the check that understands the layer
 
 ```sh
+./fplinux format path/to/source.c path/to/header.h
 ./fplinux check c --no-cache
 ./fplinux check kernel --no-cache
 ./fplinux check python --no-cache

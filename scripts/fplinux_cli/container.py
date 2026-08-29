@@ -32,6 +32,7 @@ from .config import (
 from .image_state import ImageState, ImageStateError, load_image_state, publish_image_state
 from .output import RunReporter
 from .prune import discard_superseded_profile_logs
+from .source_formats import shell_dialect
 from .workspace import (
     WorkspaceFile,
     WorkspaceSnapshot,
@@ -111,6 +112,7 @@ _CHECK_IMPLEMENTATION = frozenset(
         "scripts/fplinux_cli/identity.py",
         "scripts/fplinux_cli/identity_codegen.py",
         "scripts/fplinux_cli/output.py",
+        "scripts/fplinux_cli/source_formats.py",
     }
 )
 _KERNEL_IMPLEMENTATION = frozenset(
@@ -481,16 +483,7 @@ def _is_shell_source(file: WorkspaceFile) -> bool:
     first_line = file.contents.splitlines()[:1]
     if not first_line:
         return False
-    try:
-        shebang = first_line[0].decode().strip()
-    except UnicodeDecodeError:
-        return False
-    return shebang in {
-        "#!/bin/sh",
-        "#!/usr/bin/env sh",
-        "#!/usr/bin/env bash",
-        "#!/sbin/openrc-run",
-    }
+    return shell_dialect(first_line[0]) is not None
 
 
 def _is_prettier_configuration(path: str) -> bool:

@@ -661,10 +661,11 @@ class PruneTests(unittest.TestCase):
             self.assertFalse(old.exists())
 
     def test_cli_log_retention_keeps_the_newest_runs_per_command_and_target(self) -> None:
-        """Keep ten generated check/setup logs and ten builds for every target."""
+        """Keep ten generated check/format/setup logs and builds per target."""
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / ".cache"
             check_runs = [_cli_log(cache, "check", sequence) for sequence in range(12)]
+            format_runs = [_cli_log(cache, "format", sequence) for sequence in range(12)]
             setup_runs = [_cli_log(cache, "setup", sequence) for sequence in range(12)]
             first_target_runs = [
                 _cli_log(cache, "build", sequence, target="target-a") for sequence in range(11)
@@ -679,14 +680,16 @@ class PruneTests(unittest.TestCase):
                 {entry.path for entry in plan.candidates},
                 {
                     *(f"logs/check/{run.name}" for run in check_runs[:2]),
+                    *(f"logs/format/{run.name}" for run in format_runs[:2]),
                     *(f"logs/setup/{run.name}" for run in setup_runs[:2]),
                     f"logs/build/target-a/{first_target_runs[0].name}",
                     f"logs/build/target-b/{second_target_runs[0].name}",
                 },
             )
             protected = {entry.path for entry in plan.entries if entry.action == "protected"}
-            self.assertEqual(len(protected), 40)
+            self.assertEqual(len(protected), 50)
             self.assertIn(f"logs/check/{check_runs[-1].name}", protected)
+            self.assertIn(f"logs/format/{format_runs[-1].name}", protected)
             self.assertIn(f"logs/setup/{setup_runs[-1].name}", protected)
             self.assertIn(f"logs/build/target-a/{first_target_runs[-1].name}", protected)
             self.assertIn(f"logs/build/target-b/{second_target_runs[-1].name}", protected)
@@ -696,6 +699,7 @@ class PruneTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / ".cache"
             check_runs = [_cli_log(cache, "check", sequence) for sequence in range(11)]
+            format_runs = [_cli_log(cache, "format", sequence) for sequence in range(11)]
             build_runs = [
                 _cli_log(cache, "build", sequence, target="target-a") for sequence in range(11)
             ]
@@ -713,12 +717,15 @@ class PruneTests(unittest.TestCase):
                 (
                     f"logs/build/target-a/{build_runs[0].name}",
                     f"logs/check/{check_runs[0].name}",
+                    f"logs/format/{format_runs[0].name}",
                 ),
             )
             self.assertFalse(check_runs[0].exists())
             self.assertFalse(build_runs[0].exists())
+            self.assertFalse(format_runs[0].exists())
             self.assertTrue(check_runs[-1].exists())
             self.assertTrue(build_runs[-1].exists())
+            self.assertTrue(format_runs[-1].exists())
             self.assertTrue(manual.exists())
             self.assertTrue(unknown_namespace.exists())
             self.assertTrue(mismatched.exists())
