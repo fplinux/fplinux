@@ -20,29 +20,37 @@ Status terms and limits shared by every phone are defined in the
 
 ## Features
 
-| Feature                                                 | Hardware | FPLinux       | This phone                                                   |
-| ------------------------------------------------------- | -------- | ------------- | ------------------------------------------------------------ |
-| RAM boot                                                | N/A      | Supported     | —                                                            |
-| Persistent boot                                         | N/A      | Not supported | —                                                            |
-| [Local console](../../docs/features/LOCAL_CONSOLE.md)   | Present  | Supported     | `240×320`.                                                   |
-| Keypad backlight                                        | Unknown  | Not supported | No FPLinux control is provided.                              |
-| [USB networking](../../docs/features/USB_NETWORKING.md) | Present  | Supported     | —                                                            |
-| [SSH access](../../docs/features/SSH.md)                | N/A      | Supported     | —                                                            |
-| [File transfer](../../docs/features/FILE_TRANSFER.md)   | N/A      | Supported     | Destinations are RAM-backed on this target.                  |
-| [Host keyboard](../../docs/features/HOST_KEYBOARD.md)   | N/A      | Supported     | —                                                            |
-| [CPU clock reporting](../../docs/features/CPU_CLOCK.md) | N/A      | Supported     | —                                                            |
-| USB host mode                                           | Unknown  | Not supported | —                                                            |
-| Removable storage                                       | Unknown  | Not supported | No supported microSD path is provided.                       |
-| Internal phone storage                                  | Present  | Not supported | —                                                            |
-| Audio                                                   | Present  | Not supported | —                                                            |
-| Modem and mobile service                                | Present  | Not supported | —                                                            |
-| Bluetooth                                               | Unknown  | Not supported | —                                                            |
-| Wi-Fi                                                   | Unknown  | Not supported | —                                                            |
-| Camera                                                  | Unknown  | Not supported | —                                                            |
-| Battery and charging                                    | Present  | Not supported | No battery reporting or charge control is provided.          |
-| Indicator LEDs / vibration                              | Unknown  | Not supported | —                                                            |
-| Power-off                                               | N/A      | Not supported | End the session by reseating the battery as described below. |
-| Reboot and suspend                                      | N/A      | Not supported | —                                                            |
+| Feature                                                      | Hardware | FPLinux       | This phone                                                   |
+| ------------------------------------------------------------ | -------- | ------------- | ------------------------------------------------------------ |
+| RAM boot                                                     | N/A      | Supported     | —                                                            |
+| Persistent boot                                              | N/A      | Not supported | —                                                            |
+| [Local console](../../docs/features/LOCAL_CONSOLE.md)        | Present  | Supported     | `240×320`.                                                   |
+| Keypad backlight                                             | Unknown  | Not supported | No FPLinux control is provided.                              |
+| [USB networking](../../docs/features/USB_NETWORKING.md)      | Present  | Supported     | —                                                            |
+| [SSH access](../../docs/features/SSH.md)                     | N/A      | Supported     | —                                                            |
+| [File transfer](../../docs/features/FILE_TRANSFER.md)        | N/A      | Supported     | Destinations are RAM-backed on this target.                  |
+| [Host keyboard bridge](../../docs/features/HOST_KEYBOARD.md) | N/A      | Supported     | —                                                            |
+| [CPU clock reporting](../../docs/features/CPU_CLOCK.md)      | N/A      | Supported     | —                                                            |
+| USB host mode                                                | Unknown  | Not supported | —                                                            |
+| Removable storage                                            | Unknown  | Not supported | No supported microSD path is provided.                       |
+| Removable system root                                        | Unknown  | Not supported | —                                                            |
+| Internal phone storage                                       | Present  | Not supported | —                                                            |
+| Audio                                                        | Present  | Not supported | —                                                            |
+| Modem and mobile service                                     | Present  | Not supported | —                                                            |
+| Bluetooth                                                    | Unknown  | Not supported | —                                                            |
+| Wi-Fi                                                        | Unknown  | Not supported | —                                                            |
+| Camera                                                       | Unknown  | Not supported | —                                                            |
+| Charger status                                               | Unknown  | Not supported | No external-input status is exposed.                         |
+| Battery telemetry                                            | Unknown  | Not supported | No voltage or current reporting is provided.                 |
+| SoC temperature                                              | Unknown  | Not supported | —                                                            |
+| Auxiliary ADC                                                | Unknown  | Not supported | —                                                            |
+| Real-time clock                                              | Unknown  | Not supported | —                                                            |
+| Other battery functions                                      | Unknown  | Not supported | No battery level, temperature or charge control is provided. |
+| Vibration                                                    | Unknown  | Not supported | —                                                            |
+| Indicator LEDs                                               | Unknown  | Not supported | —                                                            |
+| Power-off                                                    | N/A      | Not supported | End the session by reseating the battery as described below. |
+| Suspend                                                      | N/A      | Not supported | —                                                            |
+| Reboot                                                       | N/A      | Not supported | —                                                            |
 
 ## Applications
 
