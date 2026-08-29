@@ -20,6 +20,7 @@ from urllib.parse import unquote
 from fplinux_cli import alpine_state
 from fplinux_cli.config import discover_targets, load_platform, load_target
 from fplinux_cli.output import RunReporter, current_stage, run_entrypoint
+from fplinux_cli.source_formats import classify_source_formats
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -346,30 +347,6 @@ def check_release_lock() -> None:
             fail(f"invalid verified qualification SHA256 for target: {name}")
 
 
-def quality_sources(
-    files: list[Path],
-) -> tuple[list[str], list[str], list[str], list[str]]:
-    python_files = [str(path.relative_to(ROOT)) for path in files if path.suffix == ".py"]
-    markdown_files = [str(path.relative_to(ROOT)) for path in files if path.suffix == ".md"]
-    posix_shell_files: list[str] = []
-    bash_files: list[str] = []
-    for path in files:
-        if path.suffix not in {"", ".initd", ".sh"}:
-            continue
-        with path.open("rb") as stream:
-            raw_first_line = stream.readline()
-        try:
-            first_line = raw_first_line.decode().strip()
-        except UnicodeDecodeError:
-            continue
-        relative = str(path.relative_to(ROOT))
-        if first_line == "#!/usr/bin/env bash":
-            bash_files.append(relative)
-        elif first_line in {"#!/bin/sh", "#!/usr/bin/env sh", "#!/sbin/openrc-run"}:
-            posix_shell_files.append(relative)
-    return python_files, markdown_files, posix_shell_files, bash_files
-
-
 def alpine_apkbuilds(files: list[Path]) -> list[str]:
     """Discover every regular first-party Alpine aport recipe."""
     result = [
@@ -560,13 +537,13 @@ def main() -> None:
 
     with report_stage(reporter, "source-inventory"):
         files = source_files(enforce_policy="source" in selected)
-        python_files, markdown_files, posix_shell_files, bash_files = quality_sources(files)
-        toml_files = [str(path.relative_to(ROOT)) for path in files if path.suffix == ".toml"]
-        json_files = [
-            str(path.relative_to(ROOT))
-            for path in files
-            if path.suffix in {".json", ".jsonc"} and path.name != "package-lock.json"
-        ]
+        formats = classify_source_formats(files, root=ROOT)
+        python_files = list(formats.python)
+        markdown_files = list(formats.markdown)
+        posix_shell_files = list(formats.posix_shell)
+        bash_files = list(formats.bash)
+        toml_files = list(formats.toml)
+        json_files = list(formats.json)
 
     if "source" in selected:
         with report_stage(reporter, "source-text"):

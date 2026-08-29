@@ -686,10 +686,11 @@ def discard_superseded_profile_logs(
 
 
 def _log_retention_entries(cache: Path) -> list[InventoryEntry]:
-    """Classify only the generated check, setup, and per-target build logs."""
+    """Classify only generated check, format, setup, and per-target build logs."""
     logs = cache / "logs"
     entries = [
         *_log_entries(logs / "check", label="check", identity="logs/check"),
+        *_log_entries(logs / "format", label="format", identity="logs/format"),
         *_log_entries(logs / "setup", label="setup", identity="logs/setup"),
     ]
     declared = _declared_profiles()
@@ -785,7 +786,11 @@ def _candidate_destination(cache: Path, identity: str) -> Path:  # noqa: PLR0911
     parts = identity.split("/")
     if len(parts) == 2 and parts[0] in _MANAGED_NAMESPACES and parts[1]:
         return cache / parts[0] / parts[1]
-    if len(parts) == 3 and parts[:2] in (["logs", "check"], ["logs", "setup"]):
+    if len(parts) == 3 and parts[:2] in (
+        ["logs", "check"],
+        ["logs", "format"],
+        ["logs", "setup"],
+    ):
         return cache.joinpath(*parts)
     if (
         len(parts) == 3

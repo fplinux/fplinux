@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PUBLIC_COMMANDS = (
     "doctor",
     "check",
+    "format",
     "setup",
     "build",
     "checksum",

@@ -77,6 +77,7 @@ class CliCacheLockTests(unittest.TestCase):
             (["build", "target", "--jobs", "1"], "build", True, "target"),
             (["check"], "check", True, None),
             (["checksum", "demo-aport"], "checksum_aport", True, None),
+            (["format", "scripts/demo.py"], "format_sources", True, None),
             (["setup"], "setup", True, None),
             (["prune", "--apply"], "prune", True, None),
             (["package", "target"], "package_target", False, "target"),
@@ -95,6 +96,15 @@ class CliCacheLockTests(unittest.TestCase):
                     ],
                 )
                 callback.assert_called_once()
+
+    def test_format_forwards_only_the_explicit_paths(self) -> None:
+        """Pass the ordered source selection through the exclusive command boundary."""
+        _events, formatter = self._run(
+            ["format", "scripts/tool.py", "README.md"],
+            "format_sources",
+        )
+
+        formatter.assert_called_once_with(["scripts/tool.py", "README.md"])
 
     def test_build_forwards_offline_to_the_dispatcher(self) -> None:
         """The parsed build switch reaches its callback without changing lock mode."""
