@@ -148,6 +148,12 @@
 			fplinux,current-code = <1>;
 		};
 
+		vibrator@40608e00 {
+			compatible = "fplinux,ta1618-sc2720-vibrator";
+			reg = <0x40608e00 0x00000004>;
+			fplinux,voltage-code = <0>;
+		};
+
 		thermal-sensor@40300000 {
 			compatible = "fplinux,ta1618-thm1";
 			reg = <0x40300000 0x00000100>,
