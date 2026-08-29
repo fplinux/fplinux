@@ -3,9 +3,11 @@ config GPIO_SC2720_EIC_UMS9117
 	bool "SC2720 analog EIC on UMS9117"
 	depends on ARCH_UMS9117
 	depends on GPIOLIB
+	select IRQCHIP_SC2720_INTA_UMS9117
 	select GPIOLIB_IRQCHIP
 	help
-	  Own the SC2720 analog interrupt aggregate and expose its EICA inputs
-	  as a sleeping GPIO and nested interrupt controller through the UMS9117
-	  ADI transport. Boards describe the qualified input lines and their
-	  key mappings in Device Tree.
+	  Expose the SC2720 EICA inputs as a sleeping GPIO and nested interrupt
+	  controller through the UMS9117 ADI transport. The shared SC2720 analog
+	  aggregate is owned by the platform INTA irqchip; this driver consumes
+	  its EICA child source. Boards describe qualified input lines and key
+	  mappings in Device Tree.

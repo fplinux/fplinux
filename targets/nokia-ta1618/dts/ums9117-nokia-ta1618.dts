@@ -49,18 +49,30 @@
 		compatible = "fplinux,ta1618-sc2720-fgu";
 	};
 
-	rtc {
-		compatible = "fplinux,ta1618-sc2720-rtc";
-	};
-
 	auxadc {
 		compatible = "fplinux,ta1618-sc2720-auxadc";
 	};
 
-	sc2720_eic: sc2720-eic {
-		compatible = "sprd,ums9117-sc2720-eic";
+	sc2720_inta: sc2720-inta {
+		compatible = "sprd,ums9117-sc2720-inta";
 		interrupt-parent = <&gic>;
 		interrupts = <GIC_SPI 38 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-controller;
+		#interrupt-cells = <2>;
+	};
+
+	rtc {
+		compatible = "fplinux,ta1618-sc2720-rtc";
+		interrupt-parent = <&sc2720_inta>;
+		interrupts = <1 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "alarm";
+		wakeup-source;
+	};
+
+	sc2720_eic: sc2720-eic {
+		compatible = "sprd,ums9117-sc2720-eic";
+		interrupt-parent = <&sc2720_inta>;
+		interrupts = <4 IRQ_TYPE_LEVEL_HIGH>;
 		gpio-controller;
 		#gpio-cells = <2>;
 		interrupt-controller;

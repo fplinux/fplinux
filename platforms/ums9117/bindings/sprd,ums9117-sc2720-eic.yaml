@@ -13,7 +13,8 @@ description: |
   The SC2720 debounced external-interrupt controller is reached through the
   UMS9117 ADI transport. The transport has one platform-wide owner, so this
   node deliberately has no reg property. During Linux runtime this controller
-  owns the SC2720 analog interrupt aggregate carried by its parent interrupt.
+  consumes the EICA child source supplied by the SC2720 analog interrupt
+  aggregate controller.
 
 properties:
   compatible:
@@ -21,7 +22,7 @@ properties:
 
   interrupts:
     maxItems: 1
-    description: UMS9117 GIC SPI38, the SC2720 analog interrupt aggregate.
+    description: SC2720 INTA source 4, the EICA aggregate.
 
   gpio-controller: true
 
@@ -45,7 +46,7 @@ additionalProperties: false
 
 examples:
   - |
-    #include <dt-bindings/interrupt-controller/arm-gic.h>
+    #include <dt-bindings/interrupt-controller/irq.h>
 
     analog-eic {
         compatible = "sprd,ums9117-sc2720-eic";
@@ -53,7 +54,7 @@ examples:
         #gpio-cells = <2>;
         interrupt-controller;
         #interrupt-cells = <2>;
-        interrupt-parent = <&gic>;
-        interrupts = <GIC_SPI 38 IRQ_TYPE_LEVEL_HIGH>;
+        interrupt-parent = <&sc2720_inta>;
+        interrupts = <4 IRQ_TYPE_LEVEL_HIGH>;
     };
 ...

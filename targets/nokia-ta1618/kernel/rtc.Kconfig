@@ -3,8 +3,9 @@ config RTC_DRV_TA1618_SC2720
 	bool "Nokia TA-1618 SC2720 RTC"
 	depends on MACH_NOKIA_TA1618
 	depends on RTC_CLASS
+	select IRQCHIP_SC2720_INTA_UMS9117
 	help
-	  Read-only real-time clock support for the Nokia 3210 4G TA-1618.
-	  The driver exposes the running SC2720 RTC counter through the standard
-	  RTC interface without setting time. Alarms, wakeup state and PMIC
-	  configuration are unavailable.
+	  Real-time clock support for the Nokia 3210 4G TA-1618. The driver
+	  exposes the running SC2720 counter and normal one-shot alarms without
+	  allowing the system time to be changed. Normal alarms can wake Linux
+	  s2idle; deep suspend and off-state power-on are not enabled.

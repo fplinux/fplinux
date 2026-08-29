@@ -78,6 +78,10 @@ source = "platforms/ums9117/kernel/sc2720-eic-ums9117.c"
 destination = "drivers/gpio/gpio-sc2720-eic-ums9117.c"
 
 [[linux.copies]]
+source = "platforms/ums9117/kernel/sc2720-inta-ums9117.c"
+destination = "drivers/irqchip/irq-sc2720-inta-ums9117.c"
+
+[[linux.copies]]
 source = "platforms/ums9117/kernel/ums9117-fb.h"
 destination = "drivers/video/fbdev/ums9117-fb.h"
 
@@ -138,6 +142,10 @@ source = "platforms/ums9117/bindings/sprd,ums9117-sc2720-eic.yaml"
 destination = "Documentation/devicetree/bindings/gpio/sprd,ums9117-sc2720-eic.yaml"
 
 [[linux.copies]]
+source = "platforms/ums9117/bindings/sprd,ums9117-sc2720-inta.yaml"
+destination = "Documentation/devicetree/bindings/interrupt-controller/sprd,ums9117-sc2720-inta.yaml"
+
+[[linux.copies]]
 source = "platforms/ums9117/bindings/fplinux,ums9117-fb.yaml"
 destination = "Documentation/devicetree/bindings/display/fplinux,ums9117-fb.yaml"
 
@@ -172,6 +180,14 @@ destination = "drivers/gpio/Kconfig"
 [[linux.appends]]
 source = "platforms/ums9117/kernel/sc2720-eic.Makefile"
 destination = "drivers/gpio/Makefile"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/sc2720-inta.Kconfig"
+destination = "drivers/irqchip/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/sc2720-inta.Makefile"
+destination = "drivers/irqchip/Makefile"
 
 [bootstrap]
 vendor_source_lock = "fpdoom_bootstrap"
