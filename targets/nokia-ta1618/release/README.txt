@@ -7,6 +7,7 @@ powered-off phone.
 
 Current target support:
   - local 240x320 terminal, physical keypad and keypad backlight;
+  - bounded vibration through the Linux force-feedback interface;
   - USB SSH/SFTP and host-keyboard forwarding;
   - microSD FAT32 read/write and unmounted hot-swap;
   - external charger connection status;
@@ -25,6 +26,8 @@ The exact Nokia interfaces, limits and safety procedures are bundled at:
   - docs/target/POWER_OFF.md
   - docs/target/RTC.md
   - docs/target/SOC_TEMPERATURE.md
+  - docs/target/SUSPEND.md
+  - docs/target/VIBRATION.md
 
 Internal phone storage, audio, modem, Bluetooth, Wi-Fi, battery level, battery
 temperature and charge control, and Linux reboot are not supported. The bundled
