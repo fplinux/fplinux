@@ -46,4 +46,6 @@ documents = [
   "features/POWER_OFF.md",
   "features/RTC.md",
   "features/SOC_TEMPERATURE.md",
+  "features/SUSPEND.md",
+  "features/VIBRATION.md",
 ]

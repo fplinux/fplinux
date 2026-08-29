@@ -60,6 +60,14 @@ source = "kernel/leds-ta1618-kpled.c"
 destination = "drivers/leds/leds-ta1618-kpled.c"
 
 [[linux.copies]]
+source = "kernel/ta1618-sc2720-vibrator.c"
+destination = "drivers/input/misc/ta1618-sc2720-vibrator.c"
+
+[[linux.copies]]
+source = "bindings/fplinux,ta1618-sc2720-vibrator.yaml"
+destination = "Documentation/devicetree/bindings/input/fplinux,ta1618-sc2720-vibrator.yaml"
+
+[[linux.copies]]
 source = "kernel/sc2720-usb33-regulator.c"
 destination = "drivers/regulator/sc2720-usb33.c"
 
@@ -150,6 +158,14 @@ destination = "drivers/iio/adc/Kconfig"
 [[linux.appends]]
 source = "kernel/iio.Makefile"
 destination = "drivers/iio/adc/Makefile"
+
+[[linux.appends]]
+source = "kernel/input.Kconfig"
+destination = "drivers/input/misc/Kconfig"
+
+[[linux.appends]]
+source = "kernel/input.Makefile"
+destination = "drivers/input/misc/Makefile"
 
 [[linux.appends]]
 source = "kernel/rtc.Kconfig"

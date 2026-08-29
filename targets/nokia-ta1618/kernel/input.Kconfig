@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config INPUT_TA1618_SC2720_VIBRATOR
+	bool "Nokia TA-1618 SC2720 vibrator"
+	depends on MACH_NOKIA_TA1618
+	depends on INPUT_MISC && OF
+	select INPUT_FF_MEMLESS
+	help
+	  Force-feedback control for the vibrator output on the Nokia 3210 4G
+	  TA-1618. The driver accesses the SC2720 through the shared UMS9117
+	  analog-die interface and exposes binary FF_RUMBLE effects.
+	  Effects are stopped by a driver-owned bounded cutoff.
