@@ -40,30 +40,42 @@ Keep an explicit status for this exact phone even when it uses shared code.
 Link a shared feature or application page instead of copying its commands,
 controls or generic limitations. The final column contains only a difference
 specific to this phone; use an em dash when there is none. Add another row only
-for a user-visible capability, not for an internal controller.
+for a user-visible capability, not for an internal controller. Keep the shared
+row order below in every target. When a target gains a capability that is not
+listed, add it to this template and to every target table in the same change;
+unsupported targets retain an explicit `Unknown` or `Not supported` entry.
 
-| Feature                                                          | Hardware     | FPLinux     | This phone                     |
-| ---------------------------------------------------------------- | ------------ | ----------- | ------------------------------ |
-| RAM boot                                                         | **N/A**      | `{support}` | `{target-specific limitation}` |
-| Persistent boot                                                  | **N/A**      | `{support}` | `{target-specific limitation}` |
-| [Local console](../../docs/features/LOCAL_CONSOLE.md)            | `{presence}` | `{support}` | `{resolution or other delta}`  |
-| [USB networking](../../docs/features/USB_NETWORKING.md)          | `{presence}` | `{support}` | `{target-specific delta or —}` |
-| [SSH access](../../docs/features/SSH.md)                         | **N/A**      | `{support}` | `{target-specific delta or —}` |
-| [File transfer](../../docs/features/FILE_TRANSFER.md)            | **N/A**      | `{support}` | `{target-specific delta or —}` |
-| [Host keyboard forwarding](../../docs/features/HOST_KEYBOARD.md) | **N/A**      | `{support}` | `{target-specific delta or —}` |
-| [CPU clock reporting](../../docs/features/CPU_CLOCK.md)          | **N/A**      | `{support}` | `{target-specific delta or —}` |
-| USB host mode                                                    | `{presence}` | `{support}` | `{available role or limit}`    |
-| Removable storage                                                | `{presence}` | `{support}` | `{mounting or limitation}`     |
-| Internal phone storage                                           | `{presence}` | `{support}` | `{access policy}`              |
-| Audio                                                            | `{presence}` | `{support}` | `{available path or limit}`    |
-| Modem and mobile service                                         | `{presence}` | `{support}` | `{calls, SMS and data}`        |
-| Bluetooth                                                        | `{presence}` | `{support}` | `{connectivity}`               |
-| Wi-Fi                                                            | `{presence}` | `{support}` | `{connectivity}`               |
-| Camera                                                           | `{presence}` | `{support}` | `{capture path or limit}`      |
-| Battery and charging                                             | `{presence}` | `{support}` | `{reporting or control}`       |
-| Indicator LEDs / vibration                                       | `{presence}` | `{support}` | `{control or limitation}`      |
-| Power-off                                                        | **N/A**      | `{support}` | `{safe end-of-session path}`   |
-| Reboot and suspend                                               | **N/A**      | `{support}` | `{supported behavior}`         |
+| Feature                                                      | Hardware     | FPLinux     | This phone                     |
+| ------------------------------------------------------------ | ------------ | ----------- | ------------------------------ |
+| RAM boot                                                     | **N/A**      | `{support}` | `{target-specific limitation}` |
+| Persistent boot                                              | **N/A**      | `{support}` | `{target-specific limitation}` |
+| [Local console](../../docs/features/LOCAL_CONSOLE.md)        | `{presence}` | `{support}` | `{resolution or other delta}`  |
+| Keypad backlight                                             | `{presence}` | `{support}` | `{control or limitation}`      |
+| [USB networking](../../docs/features/USB_NETWORKING.md)      | `{presence}` | `{support}` | `{target-specific delta or —}` |
+| [SSH access](../../docs/features/SSH.md)                     | **N/A**      | `{support}` | `{target-specific delta or —}` |
+| [File transfer](../../docs/features/FILE_TRANSFER.md)        | **N/A**      | `{support}` | `{target-specific delta or —}` |
+| [Host keyboard bridge](../../docs/features/HOST_KEYBOARD.md) | **N/A**      | `{support}` | `{target-specific delta or —}` |
+| [CPU clock reporting](../../docs/features/CPU_CLOCK.md)      | **N/A**      | `{support}` | `{target-specific delta or —}` |
+| USB host mode                                                | `{presence}` | `{support}` | `{available role or limit}`    |
+| Removable storage                                            | `{presence}` | `{support}` | `{mounting or limitation}`     |
+| Removable system root                                        | `{presence}` | `{support}` | `{boot or mounting limit}`     |
+| Internal phone storage                                       | `{presence}` | `{support}` | `{access policy}`              |
+| Audio                                                        | `{presence}` | `{support}` | `{available path or limit}`    |
+| Modem and mobile service                                     | `{presence}` | `{support}` | `{calls, SMS and data}`        |
+| Bluetooth                                                    | `{presence}` | `{support}` | `{connectivity}`               |
+| Wi-Fi                                                        | `{presence}` | `{support}` | `{connectivity}`               |
+| Camera                                                       | `{presence}` | `{support}` | `{capture path or limit}`      |
+| Charger status                                               | `{presence}` | `{support}` | `{external-input reporting}`   |
+| Battery telemetry                                            | `{presence}` | `{support}` | `{voltage/current limits}`     |
+| SoC temperature                                              | `{presence}` | `{support}` | `{accuracy or policy limit}`   |
+| Auxiliary ADC                                                | `{presence}` | `{support}` | `{channels or unit limit}`     |
+| Real-time clock                                              | `{presence}` | `{support}` | `{read/write/alarm limit}`     |
+| Other battery functions                                      | `{presence}` | `{support}` | `{reporting or control}`       |
+| Vibration                                                    | `{presence}` | `{support}` | `{control or limitation}`      |
+| Indicator LEDs                                               | `{presence}` | `{support}` | `{control or limitation}`      |
+| Power-off                                                    | **N/A**      | `{support}` | `{safe end-of-session path}`   |
+| Suspend                                                      | **N/A**      | `{support}` | `{wake source or limitation}`  |
+| Reboot                                                       | **N/A**      | `{support}` | `{supported behavior}`         |
 
 ## Applications
 
