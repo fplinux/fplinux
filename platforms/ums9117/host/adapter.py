@@ -21,6 +21,10 @@ def fail(message: str) -> NoReturn:
     raise SystemExit(f"RAM adapter failed: {message}")
 
 
+class BootromDisconnectedError(Exception):
+    """The enumerated BootROM node vanished before userspace opened it."""
+
+
 def integer(
     table: dict[str, Any],
     key: str,
@@ -132,7 +136,7 @@ def loader_arguments(
     exec_distance: int,
 ) -> list[str]:
     """Build the RAM-only loader command for one target."""
-    arguments = [str(loader)]
+    arguments = [str(loader), "--wait", "0"]
     if exec_distance:
         arguments.extend(["t117_exec_dist", f"0x{exec_distance:x}"])
     arguments.extend(
@@ -170,24 +174,26 @@ def usb_device_path(vendor: int, product: int) -> Path | None:
 
 
 def require_usb_device_access(device: Path, identity: str) -> None:
-    """Distinguish a vanished usbfs node from an access-control failure."""
-    try:
-        descriptor = os.open(device, os.O_RDWR | os.O_CLOEXEC)
-    except FileNotFoundError:
-        fail(
-            f"BootROM USB {identity} disconnected before the RAM loader could open it; "
-            "reconnect the powered-off phone in BootROM mode"
-        )
-    except PermissionError:
-        fail(
-            f"BootROM USB {identity} is not readable and writable by the current user; "
-            "install the documented udev rule and reconnect the phone"
-        )
-    except OSError as error:
-        detail = error.strerror or str(error)
-        fail(f"BootROM USB {identity} cannot be opened: {detail}")
-    else:
-        os.close(descriptor)
+    """Wait briefly for uaccess while preserving exact USB failure diagnostics."""
+    deadline = time.monotonic() + 0.25
+    while True:
+        try:
+            descriptor = os.open(device, os.O_RDWR | os.O_CLOEXEC)
+        except FileNotFoundError:
+            raise BootromDisconnectedError from None
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                fail(
+                    f"BootROM USB {identity} is not readable and writable by the current user; "
+                    "install the documented udev rule and reconnect the phone"
+                )
+            time.sleep(0.01)
+        except OSError as error:
+            detail = error.strerror or str(error)
+            fail(f"BootROM USB {identity} cannot be opened: {detail}")
+        else:
+            os.close(descriptor)
+            return
 
 
 def stop(process: subprocess.Popen[Any] | None) -> None:
@@ -292,25 +298,58 @@ def run(
         flush=True,
     )
     deadline = time.monotonic() + bootrom_usb["wait_seconds"]
-    bootrom_device = usb_device_path(bootrom_usb["vendor_id"], bootrom_usb["product_id"])
-    while bootrom_device is None:
-        if time.monotonic() >= deadline:
-            fail("BootROM USB was not detected")
-        time.sleep(0.25)
-        bootrom_device = usb_device_path(
-            bootrom_usb["vendor_id"],
-            bootrom_usb["product_id"],
-        )
-    time.sleep(2)
-    require_usb_device_access(bootrom_device, bootrom_id)
-
+    max_loader_attempts = 3
+    successful_bootrom_device: Path | None = None
     try:
-        result = subprocess.run(loader_argv, check=False)
+        for attempt in range(1, max_loader_attempts + 1):
+            while True:
+                bootrom_device = usb_device_path(
+                    bootrom_usb["vendor_id"],
+                    bootrom_usb["product_id"],
+                )
+                while bootrom_device is None:
+                    if time.monotonic() >= deadline:
+                        fail("BootROM USB was not detected")
+                    time.sleep(0.01)
+                    bootrom_device = usb_device_path(
+                        bootrom_usb["vendor_id"],
+                        bootrom_usb["product_id"],
+                    )
+                try:
+                    require_usb_device_access(bootrom_device, bootrom_id)
+                except BootromDisconnectedError:
+                    if time.monotonic() >= deadline:
+                        fail(
+                            f"BootROM USB {bootrom_id} repeatedly disconnected "
+                            "before it could be opened"
+                        )
+                    time.sleep(0.01)
+                    continue
+                break
+            result = subprocess.run(loader_argv, check=False)
+            if result.returncode == 0:
+                successful_bootrom_device = bootrom_device
+                break
+            if attempt == max_loader_attempts:
+                fail(
+                    f"RAM loader failed after {max_loader_attempts} attempts; "
+                    f"last exit status {result.returncode}"
+                )
+            print(
+                f"RAM loader attempt {attempt}/{max_loader_attempts} exited with "
+                f"status {result.returncode}. Disconnect and power off the phone, "
+                "then reconnect it in BootROM mode; waiting for a fresh USB device.",
+                flush=True,
+            )
+            while bootrom_device.exists():
+                if time.monotonic() >= deadline:
+                    fail("BootROM USB did not disconnect before the retry deadline")
+                time.sleep(0.01)
     finally:
         transport_module = importlib.import_module("ssh_transport")
         transport_module.remove_personalized_image(session)
-    if result.returncode:
-        fail(f"RAM loader exited with status {result.returncode}")
+    if successful_bootrom_device is None:
+        fail("RAM loader completed without a BootROM USB device")
 
     bridge_argv = [
         stdbuf,
@@ -351,5 +390,8 @@ def run(
     finally:
         stop(bridge_process)
 
-    wait_for_bootrom_disconnect(bootrom_device, config["usb_release_wait_seconds"])
+    wait_for_bootrom_disconnect(
+        successful_bootrom_device,
+        config["usb_release_wait_seconds"],
+    )
     complete_linux_handoff(runtime, session, linux_usb)
