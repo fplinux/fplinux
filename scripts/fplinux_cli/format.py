@@ -190,6 +190,8 @@ def _container_command(
     return [
         podman,
         "run",
+        "--security-opt",
+        "label=disable",
         "--rm",
         "--platform",
         platform,
@@ -199,7 +201,7 @@ def _container_command(
         "--tmpfs",
         "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs.
         "--volume",
-        f"{workspace}:/workspace:rw,Z",
+        f"{workspace}:/workspace:rw",
         "--workdir",
         "/workspace",
         "--env",
