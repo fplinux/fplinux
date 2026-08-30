@@ -26,12 +26,15 @@ Source builds additionally require the tools in
 
 Current targets use the Unisoc BootROM device `1782:4d00` during the RAM load
 and Linux gadget `0525:a4a6` after boot. On a desktop managed by logind, create
-`/etc/udev/rules.d/70-fplinux.rules` with:
+`/etc/udev/rules.d/60-fplinux.rules` with:
 
 ```udev
-SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="1782", ATTR{idProduct}=="4d00", TAG+="uaccess"
-SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0525", ATTR{idProduct}=="a4a6", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="1782", ATTR{idProduct}=="4d00", ENV{MTP_NO_PROBE}="1", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0525", ATTR{idProduct}=="a4a6", ENV{MTP_NO_PROBE}="1", TAG+="uaccess"
 ```
+
+Keep the `60-` prefix: the rule must suppress the desktop MTP probe before the
+system libmtp rule runs.
 
 For a headless host, use a distribution-appropriate local group and
 `MODE="0660"` instead of `TAG+="uaccess"`. Do not make either device

@@ -34,6 +34,30 @@ def load_adapter() -> ModuleType:
 ADAPTER = load_adapter()
 
 
+class UdevRulesTests(unittest.TestCase):
+    """Keep desktop device discovery away from the RAM transport."""
+
+    def test_usb_rule_precedes_libmtp_and_suppresses_its_probe(self) -> None:
+        """BootROM and Linux gadget events must not run the generic MTP probe."""
+        rules = ROOT / "common/60-fplinux.rules"
+        self.assertLess(int(rules.name.partition("-")[0]), 69)
+        lines = [
+            line
+            for line in rules.read_text(encoding="utf-8").splitlines()
+            if line and not line.startswith("#")
+        ]
+
+        for vendor, product in (("1782", "4d00"), ("0525", "a4a6")):
+            matches = [
+                line
+                for line in lines
+                if f'ATTR{{idVendor}}=="{vendor}"' in line
+                and f'ATTR{{idProduct}}=="{product}"' in line
+            ]
+            self.assertEqual(len(matches), 1)
+            self.assertIn('ENV{MTP_NO_PROBE}="1"', matches[0])
+
+
 class UsbDeviceAccessTests(unittest.TestCase):
     """Report disappearance and permission denial as different USB failures."""
 

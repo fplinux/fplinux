@@ -83,7 +83,7 @@ class BuildIdentity:
 
 
 PACKAGE_DOCUMENTS = {
-    "70-fplinux.rules": ROOT / "common/70-fplinux.rules",
+    "60-fplinux.rules": ROOT / "common/60-fplinux.rules",
     "LICENSE": ROOT / "LICENSE",
     "docs/apps/MICROPYTHONOS.md": ROOT / "docs/apps/MICROPYTHONOS.md",
     "docs/apps/TYRQUAKE.md": ROOT / "docs/apps/TYRQUAKE.md",
