@@ -79,7 +79,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
         }
         license_file = self.root / "LICENSE"
         license_file.write_text("project license\n", encoding="utf-8")
-        rules_file = self.root / "common/70-fplinux.rules"
+        rules_file = self.root / "common/60-fplinux.rules"
         rules_file.parent.mkdir(parents=True)
         rules_file.write_text("SUBSYSTEM==usb\n", encoding="utf-8")
         musl_notice = self.root / "THIRD_PARTY_LICENSES/musl/COPYRIGHT"
@@ -101,7 +101,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             document.parent.mkdir(parents=True, exist_ok=True)
             document.write_bytes(contents)
         self.package_documents = {
-            "70-fplinux.rules": rules_file,
+            "60-fplinux.rules": rules_file,
             "LICENSE": license_file,
             **{relative: self.root / relative for relative in self.shared_documents},
             "licenses/musl/COPYRIGHT": musl_notice,

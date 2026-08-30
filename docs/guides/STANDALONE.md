@@ -39,7 +39,7 @@ Install the bundled udev rules, reload them, then disconnect the phone if it is
 already attached:
 
 ```sh
-sudo install -m 0644 ./70-fplinux.rules /etc/udev/rules.d/70-fplinux.rules
+sudo install -m 0644 ./60-fplinux.rules /etc/udev/rules.d/60-fplinux.rules
 sudo udevadm control --reload-rules
 ```
 
