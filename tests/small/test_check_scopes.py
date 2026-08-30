@@ -677,6 +677,11 @@ class KernelExecutionLimitTests(unittest.TestCase):
             second_receipt = receipt_path(cache, recipe).read_bytes()
 
             first_prepare, first_analysis, second_prepare, second_analysis = commands
+            self.assertIn(f"{root / 'logs-1/containers'}:/logs:rw", first_prepare)
+            self.assertIn(f"{analyzer_cache['linux']}:/cache/linux:rw", first_prepare)
+            self.assertIn(f"{analyzer_cache['linux']}:/cache/linux:ro", first_analysis)
+            self.assertIn("label=disable", first_prepare)
+            self.assertIn("label=disable", first_analysis)
             self.assertEqual(
                 first_prepare[-3:],
                 ["prepare", "--profile", "microsd-uboot"],
