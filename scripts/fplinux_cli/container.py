@@ -429,6 +429,8 @@ def check_commit_message(message_file: str) -> None:
             [
                 podman,
                 "run",
+                "--security-opt",
+                "label=disable",
                 "--rm",
                 "--platform",
                 lock["platform"],
@@ -438,9 +440,9 @@ def check_commit_message(message_file: str) -> None:
                 "--tmpfs",
                 "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs.
                 "--volume",
-                f"{config}:/workspace/commitlint.config.mjs:ro,Z",
+                f"{config}:/workspace/commitlint.config.mjs:ro",
                 "--volume",
-                f"{message.resolve()}:/message:ro,Z",
+                f"{message.resolve()}:/message:ro",
                 "--env",
                 "HOME=/tmp",
                 "--workdir",
@@ -785,12 +787,16 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
     jobs: int,
 ) -> None:
     """Run cache-missing source and kernel checks against one disposable workspace."""
-    log_mount = ["--volume", f"{reporter.root}:/logs:rw,Z"]
+    container_logs = reporter.root / "containers"
+    if container_logs.is_symlink() or (container_logs.exists() and not container_logs.is_dir()):
+        fail(f"invalid checker container log directory: {container_logs}")
+    container_logs.mkdir(parents=True, exist_ok=True)
+    log_mount = ["--volume", f"{container_logs}:/logs:rw"]
     source_scopes = [scope for scope in missing if scope in SOURCE_CHECK_SCOPES]
     if source_scopes:
         log_environment = reporter.container_environment("/logs/source")
         log_environment["FPLINUX_LOG_DISPLAY_ROOT"] = (
-            f"{log_environment['FPLINUX_LOG_DISPLAY_ROOT']}/source"
+            f"{log_environment['FPLINUX_LOG_DISPLAY_ROOT']}/containers/source"
         )
         log_arguments = [
             argument
@@ -802,6 +808,8 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
                 [
                     podman,
                     "run",
+                    "--security-opt",
+                    "label=disable",
                     "--rm",
                     "--platform",
                     lock["platform"],
@@ -811,7 +819,7 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
                     "--tmpfs",
                     "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs.
                     "--volume",
-                    f"{workspace}:/workspace:ro,Z",
+                    f"{workspace}:/workspace:ro",
                     *log_mount,
                     *log_arguments,
                     "--env",
@@ -836,7 +844,7 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
         return
     log_environment = reporter.container_environment("/logs/kernel")
     log_environment["FPLINUX_LOG_DISPLAY_ROOT"] = (
-        f"{log_environment['FPLINUX_LOG_DISPLAY_ROOT']}/kernel"
+        f"{log_environment['FPLINUX_LOG_DISPLAY_ROOT']}/containers/kernel"
     )
     log_arguments = [
         argument
@@ -846,6 +854,8 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
     analyzer_runtime = [
         podman,
         "run",
+        "--security-opt",
+        "label=disable",
         "--rm",
         "--platform",
         lock["platform"],
@@ -856,7 +866,7 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
         "--tmpfs",
         "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs.
         "--volume",
-        f"{workspace}:/workspace:ro,Z",
+        f"{workspace}:/workspace:ro",
         *log_mount,
         *log_arguments,
         "--env",
@@ -875,9 +885,9 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
             [
                 *analyzer_runtime,
                 "--volume",
-                f"{analyzer_cache['downloads']}:/cache/downloads:rw,Z",
+                f"{analyzer_cache['downloads']}:/cache/downloads:rw",
                 "--volume",
-                f"{analyzer_cache['linux']}:/cache/linux:rw,Z",
+                f"{analyzer_cache['linux']}:/cache/linux:rw",
                 *analyzer_program,
                 "prepare",
                 *([] if profile is None else ["--profile", profile]),
@@ -890,9 +900,9 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
                 *analyzer_runtime,
                 "--network=none",
                 "--volume",
-                f"{analyzer_cache['analysis']}:/cache/analysis:rw,Z",
+                f"{analyzer_cache['analysis']}:/cache/analysis:rw",
                 "--volume",
-                f"{analyzer_cache['linux']}:/cache/linux:ro,Z",
+                f"{analyzer_cache['linux']}:/cache/linux:ro",
                 *analyzer_program,
                 "check",
                 "--jobs",

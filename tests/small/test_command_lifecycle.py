@@ -720,17 +720,18 @@ class CommandLifecycleTests(unittest.TestCase):
         self.assertEqual(
             mounts,
             [
-                f"{roots['downloads']}:/cache/downloads:rw,Z",
-                f"{roots['apk_signing']}:/cache/apk-signing:rw,Z",
-                f"{roots['apks']}:/cache/apks:rw,Z",
-                f"{roots['rootfs']}:/cache/rootfs:rw,Z",
-                f"{roots['linux']}:/cache/linux:rw,Z",
-                f"{roots['output']}:/out:rw,Z",
-                f"{roots['logs']}:/logs:rw,Z",
-                f"{roots['workspace']}:/workspace:ro,Z",
+                f"{roots['downloads']}:/cache/downloads:rw",
+                f"{roots['apk_signing']}:/cache/apk-signing:rw",
+                f"{roots['apks']}:/cache/apks:rw",
+                f"{roots['rootfs']}:/cache/rootfs:rw",
+                f"{roots['linux']}:/cache/linux:rw",
+                f"{roots['output']}:/out:rw",
+                f"{roots['logs']}:/logs:rw",
+                f"{roots['workspace']}:/workspace:ro",
             ],
         )
-        self.assertNotIn(f"{self.root / 'cache'}:/cache:rw,Z", command)
+        self.assertNotIn(f"{self.root / 'cache'}:/cache:rw", command)
+        self.assertIn("label=disable", command)
         self.assertIn("--read-only", command)
         self.assertFalse(any(mount.split(":", 2)[1] == "/cache" for mount in mounts))
         self.assertEqual(

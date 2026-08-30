@@ -506,6 +506,8 @@ def _checksum_container_command(  # noqa: PLR0913
     return [
         podman,
         "run",
+        "--security-opt",
+        "label=disable",
         "--rm",
         *(["--network=none"] if offline else []),
         "--platform",
@@ -515,9 +517,9 @@ def _checksum_container_command(  # noqa: PLR0913
         "--tmpfs",
         "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs.
         "--volume",
-        f"{downloads}:/cache/downloads:rw,Z",
+        f"{downloads}:/cache/downloads:rw",
         "--volume",
-        f"{stage}:/workspace:rw,Z",
+        f"{stage}:/workspace:rw",
         "--workdir",
         stage_aport,
         "--env",
@@ -621,6 +623,8 @@ def _build_container_command(  # noqa: PLR0913
     return [
         podman,
         "run",
+        "--security-opt",
+        "label=disable",
         "--rm",
         *(["--network=none"] if offline else []),
         "--platform",
@@ -630,21 +634,21 @@ def _build_container_command(  # noqa: PLR0913
         "--tmpfs",
         "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs.
         "--volume",
-        f"{downloads}:/cache/downloads:rw,Z",
+        f"{downloads}:/cache/downloads:rw",
         "--volume",
-        f"{apk_signing}:/cache/apk-signing:rw,Z",
+        f"{apk_signing}:/cache/apk-signing:rw",
         "--volume",
-        f"{apks}:/cache/apks:rw,Z",
+        f"{apks}:/cache/apks:rw",
         "--volume",
-        f"{rootfs}:/cache/rootfs:rw,Z",
+        f"{rootfs}:/cache/rootfs:rw",
         "--volume",
-        f"{linux}:/cache/linux:rw,Z",
+        f"{linux}:/cache/linux:rw",
         "--volume",
-        f"{output}:/out:rw,Z",
+        f"{output}:/out:rw",
         "--volume",
-        f"{logs}:/logs:rw,Z",
+        f"{logs}:/logs:rw",
         "--volume",
-        f"{workspace}:/workspace:ro,Z",
+        f"{workspace}:/workspace:ro",
         *log_arguments,
         "--env",
         "HOME=/tmp/fplinux-home",
@@ -764,7 +768,11 @@ def build(
     with reporter.stage("workspace"):
         workspace = stage_workspace_snapshot(snapshot)
     try:
+        container_logs = _ensure_build_directory(reporter.root / "container")
         log_environment = reporter.container_environment("/logs")
+        log_environment["FPLINUX_LOG_DISPLAY_ROOT"] = (
+            f"{log_environment['FPLINUX_LOG_DISPLAY_ROOT']}/container"
+        )
         with reporter.stage("container", passthrough=True, show_tail=False) as stage:
             stage.run(
                 _build_container_command(
@@ -783,7 +791,7 @@ def build(
                     rootfs=rootfs,
                     linux=linux,
                     output=output,
-                    logs=reporter.root,
+                    logs=container_logs,
                     log_environment=log_environment,
                     image_recipe=image_recipe,
                 )
