@@ -19,6 +19,7 @@ from fplinux_cli.bundle_state import (
     publish_current_bundle,
     published_file_records,
 )
+from fplinux_cli.image_state import ImageState
 from fplinux_cli.workspace import WorkspaceSnapshot
 
 
@@ -140,6 +141,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             "rootfs_receipt": {"recipe": "d" * 64, "sha256": "e" * 64},
             "boot_artifacts": {"required": []},
             "container_image_recipe": self.image_recipe,
+            "container_image_generation": "c" * 64,
             "apk_signing_key": self.signing_key,
             "device_identity": "f" * 64,
             "files": published_file_records(bundle),
@@ -185,6 +187,11 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
                 commands,
                 "container_image_recipe_digest",
                 return_value=self.image_recipe,
+            ),
+            mock.patch.object(
+                commands,
+                "load_image_state",
+                return_value=ImageState(self.image_recipe, "c" * 64),
             ),
         )
 
@@ -266,6 +273,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
                 "runnable": True,
             },
             "container_image_recipe": self.image_recipe,
+            "container_image_generation": "c" * 64,
             "apk_signing_key": self.signing_key,
             "device_identity": "f" * 64,
             "files": published_file_records(profile_bundle),

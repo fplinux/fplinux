@@ -16,23 +16,23 @@ from fplinux_cli.image_state import (
 
 
 def state() -> ImageState:
-    """Return one stable image state with distinct recipe and ID bytes."""
-    return ImageState("a" * 64, "sha256:" + "b" * 64)
+    """Return one stable state with distinct recipe and generation bytes."""
+    return ImageState("a" * 64, "b" * 64)
 
 
 class ImageStateTests(unittest.TestCase):
-    """Use only an exact recipe and immutable image ID."""
+    """Use only an exact recipe and image generation."""
 
     def test_exact_state_is_a_hit(self) -> None:
-        """Persist one exact immutable image identity at the fixed path."""
+        """Persist one exact image generation at the fixed path."""
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / ".cache"
             expected = state()
             publish_image_state(cache, expected)
             self.assertEqual(load_image_state(cache, "a" * 64), expected)
 
-    def test_recipe_or_image_mismatch_is_a_miss(self) -> None:
-        """A different recipe or non-immutable image reference cannot be reused."""
+    def test_recipe_or_generation_mismatch_is_a_miss(self) -> None:
+        """A different recipe or malformed generation cannot be reused."""
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / ".cache"
             expected = state()
@@ -42,7 +42,7 @@ class ImageStateTests(unittest.TestCase):
             path.write_text(
                 '{"container_image_recipe":"'
                 + "a" * 64
-                + '","image_identity":"localhost/fplinux:locked"}\n',
+                + '","image_generation":"not-a-generation"}\n',
                 encoding="utf-8",
             )
             self.assertIsNone(load_image_state(cache, "a" * 64))
@@ -60,7 +60,7 @@ class ImageStateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / ".cache"
             publish_image_state(cache, state())
-            replacement = ImageState("c" * 64, "sha256:" + "d" * 64)
+            replacement = ImageState("c" * 64, "d" * 64)
             publish_image_state(cache, replacement)
             self.assertIsNone(load_image_state(cache, "a" * 64))
             self.assertEqual(load_image_state(cache, "c" * 64), replacement)

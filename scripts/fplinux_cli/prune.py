@@ -15,11 +15,13 @@ from .common import ROOT
 from .config import (
     TARGET_NAME,
     container_image_recipe_digest,
+    container_runtime_recipe_digest,
     discover_profiles,
     discover_targets,
     load_platform,
     load_target,
 )
+from .image_state import load_image_state
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -156,7 +158,14 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
     """Return every currently valid rootfs recipe, or ``None`` if that is unknown."""
     try:
         signing_key = alpine_state.signing_key_identity(cache)
-        image_recipe = container_image_recipe_digest()
+        image_source_recipe = container_image_recipe_digest()
+        image_state = load_image_state(cache, image_source_recipe)
+        if image_state is None:
+            return None
+        image_recipe = container_runtime_recipe_digest(
+            image_source_recipe,
+            image_state.image_generation,
+        )
         recipes = {
             alpine_state.alpine_rootfs_recipe(
                 image_recipe,

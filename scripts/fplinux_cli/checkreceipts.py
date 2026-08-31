@@ -29,7 +29,7 @@ class CheckReceiptRecipe:
     scope: str
     closure_digest: str
     orchestration_recipe: str
-    image_identity: str
+    image_generation: str
     commands: tuple[tuple[str, ...], ...]
     profile: str | None = None
 
@@ -40,7 +40,7 @@ class CheckReceiptRecipe:
             "scope": self.scope,
             "closure_digest": self.closure_digest,
             "orchestration_recipe": self.orchestration_recipe,
-            "image_identity": self.image_identity,
+            "image_generation": self.image_generation,
             "commands": [list(command) for command in self.commands],
             "profile": self.profile,
         }

@@ -14,6 +14,7 @@ from unittest import mock
 
 from fplinux_cli import alpine_state
 from fplinux_cli import prune as prune_module
+from fplinux_cli.image_state import ImageState, publish_image_state
 from fplinux_cli.prune import PruneSafetyError, apply_prune, plan_prune, prune
 
 
@@ -63,6 +64,7 @@ class PruneTests(unittest.TestCase):
             public_key = alpine_state.signing_public_key(cache)
             public_key.parent.mkdir(parents=True)
             public_key.write_bytes(b"public-key\n")
+            publish_image_state(cache, ImageState("a" * 64, "b" * 64))
             first_packages = ("package-a",)
             second_packages = ("package-a", "package-b")
             first_recipe = "1" * 64
@@ -189,6 +191,7 @@ class PruneTests(unittest.TestCase):
             public_key = alpine_state.signing_public_key(cache)
             public_key.parent.mkdir(parents=True)
             public_key.write_bytes(b"public-key\n")
+            publish_image_state(cache, ImageState("a" * 64, "b" * 64))
             default_recipe = "3" * 64
             profile_recipe = "4" * 64
             for recipe in (default_recipe, profile_recipe):
@@ -239,6 +242,7 @@ class PruneTests(unittest.TestCase):
             public_key = alpine_state.signing_public_key(cache)
             public_key.parent.mkdir(parents=True)
             public_key.write_bytes(b"public-key\n")
+            publish_image_state(cache, ImageState("a" * 64, "b" * 64))
             current = "5" * 64
             stale = "6" * 64
             for recipe in (current, stale):

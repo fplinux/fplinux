@@ -1,16 +1,25 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Manage the single rootless Podman build environment."""
+"""Manage the single project-local Kern build environment."""
 
 from __future__ import annotations
 
+import json
+import os
 import platform
 import re
+import secrets
 import shutil
 import subprocess
 import sys
+import tarfile
+import tempfile
 import tomllib
-from pathlib import Path, PurePath
-from typing import Any
+import urllib.request
+from pathlib import Path, PurePath, PurePosixPath
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from . import alpine_state
 from .checkreceipts import (
@@ -19,9 +28,10 @@ from .checkreceipts import (
     publish_success_receipt,
     receipt_matches,
 )
-from .common import ROOT, fail
+from .common import ROOT, fail, sha256_file
 from .config import (
     check_orchestration_recipe_digest,
+    container_base_image_reference,
     container_image_build_arguments,
     container_image_recipe_digest,
     container_image_reference,
@@ -60,16 +70,14 @@ SOURCE_CHECK_SCOPES = CHECK_SCOPES[1:-1]
 GIT_HOOKS_PATH = ".githooks"
 _CHECK_GIT_TIMEOUT = 5 * 60
 _GIT_HOOK_TIMEOUT = 60
-_PODMAN_PROBE_TIMEOUT = 60
+_KERN_PROBE_TIMEOUT = 60
 _COMMIT_MESSAGE_TIMEOUT = 5 * 60
 _CONTAINER_SETUP_TIMEOUT = 2 * 60 * 60
 _SOURCE_CHECK_TIMEOUT = 2 * 60 * 60
 _KERNEL_PREPARE_TIMEOUT = 90 * 60
 _KERNEL_ANALYSIS_TIMEOUT = 90 * 60
-_CONTAINER_FILE = re.compile(r"(?:docker-)?compose(?:\.[^.]+)?\.ya?ml")
 _QUOTED_C_INCLUDE = re.compile(rb'^\s*#\s*include\s*"([^"\n]+)"', re.MULTILINE)
-_BARE_IMAGE_ID = re.compile(r"[0-9a-f]{64}\Z")
-_PREFIXED_IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _PRETTIER_CONFIGURATION_NAMES = frozenset(
     {
         ".prettierrc",
@@ -137,95 +145,394 @@ _KERNEL_IMPLEMENTATION = frozenset(
 )
 
 
-def require_podman() -> str:
-    executable = shutil.which("podman")
-    if executable is None:
-        fail("Podman is required (rootless Podman is the supported build backend)")
-    return executable
+def _ensure_project_directory(path: Path) -> Path:
+    """Create one exact project-owned directory without following a symlink."""
+    if path.is_symlink() or (path.exists() and not path.is_dir()):
+        fail(f"invalid project runtime directory: {path}")
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return path
 
 
-def image_exists(podman: str, image: str) -> bool:
+def kern_environment() -> dict[str, str]:
+    """Confine persistent Kern state while retaining the host runtime directory."""
+    root = _ensure_project_directory(ROOT / ".cache/kern")
+    environment = os.environ.copy()
+    for variable, name in (
+        ("XDG_CACHE_HOME", "cache"),
+        ("XDG_DATA_HOME", "data"),
+        ("XDG_CONFIG_HOME", "config"),
+    ):
+        environment[variable] = str(_ensure_project_directory(root / name))
+    return environment
+
+
+def _kern_path() -> Path:
+    return ROOT / ".cache/tools/kern/kern"
+
+
+def kern_available(lock: dict[str, Any] | None = None) -> bool:
+    """Return whether the exact pinned Kern binary is already project-local."""
+    if lock is None:
+        lock = load_container_lock()
+    executable = _kern_path()
+    return (
+        not executable.is_symlink()
+        and executable.is_file()
+        and sha256_file(executable) == lock["kern"]["binary_sha256"]
+    )
+
+
+def require_kern(lock: dict[str, Any] | None = None) -> str:
+    """Return the exact project-local Kern binary."""
+    if lock is None:
+        lock = load_container_lock()
+    if not kern_available(lock):
+        fail("Kern is not ready for this checkout; run ./fplinux setup online first")
+    return str(_kern_path())
+
+
+def _download_locked_file(
+    url: str,
+    digest: str,
+    destination: Path,
+) -> Path:
+    """Download one exact HTTPS runtime input atomically into the project cache."""
+    if not url.startswith("https://"):
+        fail("runtime download URL must use HTTPS")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.is_symlink() or (destination.exists() and not destination.is_file()):
+        fail(f"invalid runtime download path: {destination}")
+    if destination.is_file() and sha256_file(destination) == digest:
+        return destination
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            delete=False,
+        ) as output:
+            temporary = Path(output.name)
+            request = urllib.request.Request(  # noqa: S310 -- HTTPS is required above.
+                url,
+                headers={"User-Agent": "FPLinux"},
+            )
+            with urllib.request.urlopen(  # noqa: S310 -- HTTPS is required above.
+                request,
+                timeout=60,
+            ) as response:
+                shutil.copyfileobj(response, output)
+        actual = sha256_file(temporary)
+        if actual != digest:
+            fail(f"runtime download SHA256 mismatch: expected {digest}, received {actual}")
+        temporary.replace(destination)
+        temporary = None
+    except OSError as error:
+        fail(f"runtime download failed: {error}")
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return destination
+
+
+def _install_kern(lock: dict[str, Any]) -> str:
+    """Install the pinned static Kern binary under the project cache."""
+    if kern_available(lock):
+        return str(_kern_path())
+    kern_lock = lock["kern"]
+    archive = _download_locked_file(
+        kern_lock["archive_url"],
+        kern_lock["archive_sha256"],
+        ROOT / ".cache/downloads/kern/kern.tar.gz",
+    )
+    destination = _kern_path()
+    _ensure_project_directory(destination.parent)
+    temporary: Path | None = None
+    try:
+        with tarfile.open(archive, "r:gz") as bundle:
+            try:
+                member = bundle.getmember("kern")
+            except KeyError:
+                fail("pinned Kern archive contains no kern binary")
+            if not member.isfile():
+                fail("pinned Kern archive kern entry is not a regular file")
+            source = bundle.extractfile(member)
+            if source is None:
+                fail("could not read kern from the pinned release archive")
+            with tempfile.NamedTemporaryFile(
+                dir=destination.parent,
+                prefix=".kern.",
+                delete=False,
+            ) as output:
+                temporary = Path(output.name)
+                shutil.copyfileobj(source, output)
+        actual = sha256_file(temporary)
+        if actual != kern_lock["binary_sha256"]:
+            fail(
+                "Kern binary SHA256 mismatch: "
+                f"expected {kern_lock['binary_sha256']}, received {actual}"
+            )
+        temporary.chmod(0o755)
+        temporary.replace(destination)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return str(destination)
+
+
+def kern_box_name(label: str) -> str:
+    """Return one collision-resistant foreground box name owned by this invocation."""
+    normalized = re.sub(r"[^a-z0-9-]+", "-", label.lower()).strip("-") or "task"
+    return f"fplinux-{normalized}-{os.getpid()}-{secrets.token_hex(3)}"
+
+
+def _kern_image_references(kern: str) -> frozenset[str]:
+    """Return the exact images in this checkout's isolated Kern store."""
     try:
         result = subprocess.run(
-            [podman, "image", "exists", image],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-            timeout=_PODMAN_PROBE_TIMEOUT,
-        )
-    except subprocess.TimeoutExpired:
-        fail(f"Podman image lookup timed out after {_PODMAN_PROBE_TIMEOUT}s")
-    return result.returncode == 0
-
-
-def image_identifier(podman: str, image: str) -> str | None:
-    """Return the canonical immutable ID currently assigned to an image tag."""
-    if not image_exists(podman, image):
-        return None
-    try:
-        result = subprocess.run(
-            [podman, "image", "inspect", "--format", "{{.Id}}", image],
+            [kern, "images", "--json"],
+            cwd=ROOT,
+            env=kern_environment(),
             capture_output=True,
             text=True,
             check=False,
-            timeout=_PODMAN_PROBE_TIMEOUT,
+            timeout=_KERN_PROBE_TIMEOUT,
         )
     except subprocess.TimeoutExpired:
-        fail(f"Podman image identity lookup timed out after {_PODMAN_PROBE_TIMEOUT}s")
-    identifier = result.stdout.strip()
-    if result.returncode != 0:
+        fail(f"Kern image inventory timed out after {_KERN_PROBE_TIMEOUT}s")
+    if result.returncode:
+        fail(result.stderr.strip() or "Kern image inventory failed")
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        fail("Kern image inventory is not valid JSON")
+    if not isinstance(payload, list):
+        fail("Kern image inventory root is invalid")
+    references: set[str] = set()
+    for entry in payload:
+        reference = entry.get("image") if isinstance(entry, dict) else None
+        if not isinstance(reference, str) or not reference:
+            fail("Kern image inventory entry is invalid")
+        references.add(reference)
+    return frozenset(references)
+
+
+def _remove_kern_images(kern: str, references: set[str]) -> None:
+    """Remove exact provider-owned image references, never the whole Kern store."""
+    if not references:
+        return
+    try:
+        result = subprocess.run(
+            [kern, "rmi", *sorted(references)],
+            cwd=ROOT,
+            env=kern_environment(),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_KERN_PROBE_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        fail(f"Kern image removal timed out after {_KERN_PROBE_TIMEOUT}s")
+    if result.returncode:
+        fail(result.stderr.strip() or "Kern image removal failed")
+
+
+def _prune_kern_build_history(kern: str) -> None:
+    """Remove provider build records after FPLinux has retained its own setup logs."""
+    try:
+        result = subprocess.run(
+            [kern, "build", "prune", "--keep", "0"],
+            cwd=ROOT,
+            env=kern_environment(),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_KERN_PROBE_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        fail(f"Kern build-history pruning timed out after {_KERN_PROBE_TIMEOUT}s")
+    if result.returncode:
+        fail(result.stderr.strip() or "Kern build-history pruning failed")
+
+
+def _discard_obsolete_kern_images(
+    kern: str,
+    lock: dict[str, Any],
+    image_recipe: str,
+) -> None:
+    """Keep only the exact current FPLinux base and build images."""
+    keep = {
+        container_base_image_reference(lock),
+        container_image_reference(lock, image_recipe),
+    }
+    prefixes = (
+        f"{lock['oci']['base_repository']}:",
+        f"{lock['oci']['repository']}:",
+    )
+    stale = {
+        reference
+        for reference in _kern_image_references(kern)
+        if reference not in keep and reference.startswith(prefixes)
+    }
+    _remove_kern_images(kern, stale)
+
+
+def _discard_transient_kern_images(kern: str, lock: dict[str, Any]) -> None:
+    """Remove only abandoned FPLinux staging and backup tags from an earlier invocation."""
+    prefixes = (
+        f"{lock['oci']['base_repository']}:",
+        f"{lock['oci']['repository']}:",
+    )
+    stale = {
+        reference
+        for reference in _kern_image_references(kern)
+        if reference.startswith(prefixes) and ("-staging-" in reference or "-backup-" in reference)
+    }
+    _remove_kern_images(kern, stale)
+
+
+def _temporary_image_reference(image: str, role: str) -> str:
+    """Return one invocation-owned staging or backup tag beside a final image tag."""
+    return f"{image}-{role}-{os.getpid()}-{secrets.token_hex(3)}"
+
+
+def _tag_kern_image(kern: str, source: str, destination: str) -> None:
+    """Apply one bounded provider tag operation."""
+    try:
+        result = subprocess.run(
+            [kern, "tag", source, destination],
+            cwd=ROOT,
+            env=kern_environment(),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_KERN_PROBE_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        fail(f"Kern image publication timed out after {_KERN_PROBE_TIMEOUT}s")
+    if result.returncode:
+        fail(result.stderr.strip() or "Kern image publication failed")
+
+
+def _publish_staged_kern_image(
+    kern: str,
+    staging: str,
+    destination: str,
+    validate: Callable[[str], bool],
+) -> None:
+    """Replace one consumer tag while retaining a restorable last-good image."""
+    existing = destination in _kern_image_references(kern)
+    backup = _temporary_image_reference(destination, "backup") if existing else None
+    if backup is not None:
+        _tag_kern_image(kern, destination, backup)
+    try:
+        _tag_kern_image(kern, staging, destination)
+        if not validate(destination):
+            fail("published Kern image failed its exact validation")
+    except BaseException:
+        if backup is not None:
+            _tag_kern_image(kern, backup, destination)
+        else:
+            current = _kern_image_references(kern)
+            _remove_kern_images(kern, {destination} & set(current))
+        raise
+    finally:
+        current = _kern_image_references(kern)
+        disposable = {staging}
+        if backup is not None:
+            disposable.add(backup)
+        _remove_kern_images(kern, disposable & set(current))
+
+
+def _image_metadata(kern: str, image: str) -> tuple[str, str] | None:
+    """Read FPLinux's static recipe and generation through the Kern runtime."""
+    try:
+        result = subprocess.run(
+            [
+                kern,
+                "box",
+                kern_box_name("image-probe"),
+                "--image",
+                image,
+                "--pull",
+                "never",
+                "--read-only",
+                "--network",
+                "none",
+                "--no-uid-range",
+                "--quiet",
+                "--",
+                "cat",
+                "/etc/fplinux-image-state",
+            ],
+            cwd=ROOT,
+            env=kern_environment(),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_KERN_PROBE_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        fail(f"Kern image lookup timed out after {_KERN_PROBE_TIMEOUT}s")
+    lines = result.stdout.splitlines()
+    if result.returncode != 0 or len(lines) != 2:
         return None
-    if _BARE_IMAGE_ID.fullmatch(identifier) is not None:
-        return f"sha256:{identifier}"
-    if _PREFIXED_IMAGE_ID.fullmatch(identifier) is not None:
-        return identifier
-    return None
+    recipe, generation = lines
+    if _SHA256.fullmatch(recipe) is None:
+        return None
+    if _SHA256.fullmatch(generation) is None:
+        return None
+    return recipe, generation
+
+
+def image_generation(kern: str, image: str) -> str | None:
+    """Return the exact build generation embedded in one project-built Kern image."""
+    metadata = _image_metadata(kern, image)
+    return None if metadata is None else metadata[1]
+
+
+def current_image_state(
+    kern: str,
+    image: str,
+    image_recipe: str | None = None,
+) -> ImageState | None:
+    """Read one valid current recipe and generation with a single Kern probe."""
+    metadata = _image_metadata(kern, image)
+    if metadata is None:
+        return None
+    if image_recipe is None:
+        image_recipe = container_image_recipe_digest()
+    recipe, generation = metadata
+    if recipe != image_recipe:
+        return None
+    try:
+        return ImageState(recipe, generation)
+    except ImageStateError:
+        return None
 
 
 def image_ready(
-    podman: str,
+    kern: str,
     image: str,
     *,
     image_recipe: str | None = None,
 ) -> bool:
-    if not image_exists(podman, image):
-        return False
-    try:
-        result = subprocess.run(
-            [
-                podman,
-                "image",
-                "inspect",
-                "--format",
-                '{{ index .Labels "org.fplinux.container.image-recipe" }}',
-                image,
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=_PODMAN_PROBE_TIMEOUT,
-        )
-    except subprocess.TimeoutExpired:
-        fail(f"Podman image recipe lookup timed out after {_PODMAN_PROBE_TIMEOUT}s")
-    if image_recipe is None:
-        image_recipe = container_image_recipe_digest()
-    return result.returncode == 0 and result.stdout.strip() == image_recipe
+    return current_image_state(kern, image, image_recipe) is not None
 
 
-def _publish_current_image_state(
-    podman: str,
+def publish_current_image_state(
+    kern: str,
     image: str,
     image_recipe: str,
+    *,
+    state: ImageState | None = None,
 ) -> ImageState:
-    """Persist the immutable ID of one image already checked against its recipe."""
-    image_identity = image_identifier(podman, image)
-    if image_identity is None:
-        fail("current build image has no immutable identity")
+    """Persist the marker of one image already checked against its static recipe."""
+    if state is None:
+        state = current_image_state(kern, image, image_recipe)
+    if state is None or state.container_image_recipe != image_recipe:
+        fail("current build image has no valid generation")
     try:
-        state = ImageState(
-            container_image_recipe=image_recipe,
-            image_identity=image_identity,
-        )
         publish_image_state(ROOT / ".cache", state)
     except ImageStateError as error:
         fail(f"could not publish host image state: {error}")
@@ -286,6 +593,147 @@ def install_git_hooks() -> None:
     print(f"Git hooks are ready: {GIT_HOOKS_PATH}")
 
 
+def _alpine_tar_filter(member: tarfile.TarInfo, destination: str) -> tarfile.TarInfo | None:
+    """Apply Python's data filter while preserving safe absolute Alpine symlinks."""
+    if member.issym() or member.islnk():
+        target = PurePosixPath(member.linkname)
+        if target.is_absolute():
+            if ".." in target.parts:
+                fail(f"Alpine minirootfs link escapes the root: {member.name}")
+            relative_target = target.as_posix().lstrip("/")
+            filtered = tarfile.data_filter(member.replace(linkname=relative_target), destination)
+            if filtered is None:
+                return None
+            return filtered.replace(linkname=member.linkname)
+    return tarfile.data_filter(member, destination)
+
+
+def _base_image_ready(kern: str, lock: dict[str, Any], image: str | None = None) -> bool:
+    """Require the local base tag to expose the exact locked release and rootfs marker."""
+    oci = lock["oci"]
+    if image is None:
+        image = container_base_image_reference(lock)
+    try:
+        result = subprocess.run(
+            [
+                kern,
+                "box",
+                kern_box_name("base-probe"),
+                "--image",
+                image,
+                "--pull",
+                "never",
+                "--read-only",
+                "--network",
+                "none",
+                "--no-uid-range",
+                "--quiet",
+                "--",
+                "/bin/cat",
+                "/etc/alpine-release",
+                "/etc/fplinux-base-rootfs-sha256",
+            ],
+            cwd=ROOT,
+            env=kern_environment(),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_KERN_PROBE_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        fail(f"Kern base image lookup timed out after {_KERN_PROBE_TIMEOUT}s")
+    expected = f"{oci['base_release']}\n{oci['base_rootfs_sha256']}\n"
+    return result.returncode == 0 and result.stdout == expected
+
+
+def _build_base_image(kern: str, reporter: RunReporter, lock: dict[str, Any]) -> None:
+    """Build one local Kern base from the exact official Alpine minirootfs archive."""
+    oci = lock["oci"]
+    image = container_base_image_reference(lock)
+    staging_image = _temporary_image_reference(image, "staging")
+    archive = _download_locked_file(
+        oci["base_rootfs_url"],
+        oci["base_rootfs_sha256"],
+        ROOT / ".cache/downloads/kern/alpine-minirootfs.tar.gz",
+    )
+    temporary_parent = _ensure_project_directory(ROOT / ".cache/kern")
+    with tempfile.TemporaryDirectory(dir=temporary_parent, prefix="base-build-") as temporary:
+        context = Path(temporary)
+        rootfs = context / "rootfs"
+        rootfs.mkdir()
+        with tarfile.open(archive, "r:gz") as bundle:
+            bundle.extractall(  # noqa: S202 -- every member passes the data-derived filter above.
+                rootfs,
+                filter=_alpine_tar_filter,
+            )
+        marker = rootfs / "etc/fplinux-base-rootfs-sha256"
+        marker.write_text(f"{oci['base_rootfs_sha256']}\n", encoding="utf-8")
+        recipe = context / "Containerfile"
+        recipe.write_text("FROM scratch\nCOPY rootfs/ /\n", encoding="utf-8")
+        with reporter.stage("container-base") as stage:
+            stage.run(
+                [
+                    kern,
+                    "build",
+                    "-t",
+                    staging_image,
+                    "-f",
+                    str(recipe),
+                    str(context),
+                ],
+                cwd=ROOT,
+                env=kern_environment(),
+                timeout=_CONTAINER_SETUP_TIMEOUT,
+            )
+    if not _base_image_ready(kern, lock, staging_image):
+        fail("Kern base build completed without publishing the exact locked rootfs")
+    _publish_staged_kern_image(
+        kern,
+        staging_image,
+        image,
+        lambda candidate: _base_image_ready(kern, lock, candidate),
+    )
+
+
+def _kern_build_user_ready(kern: str, image: str) -> bool:
+    """Return whether the host can map the image's unprivileged package builder."""
+    try:
+        result = subprocess.run(
+            [
+                kern,
+                "box",
+                kern_box_name("doctor-build-user"),
+                "--image",
+                image,
+                "--pull",
+                "never",
+                "--read-only",
+                "--network",
+                "none",
+                "--tmpfs",
+                "/tmp:16m",  # noqa: S108 -- disposable runtime probe.
+                "--quiet",
+                "--",
+                "sh",
+                "-ceu",
+                (
+                    "install -d -o builder -g builder /tmp/fplinux-builder; "
+                    "su builder -s /bin/sh -c 'test -w /tmp/fplinux-builder; "
+                    ": > /tmp/fplinux-builder/probe'"
+                ),
+            ],
+            cwd=ROOT,
+            env=kern_environment(),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_KERN_PROBE_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return False
+    return result.returncode == 0
+
+
 def setup(
     *,
     force: bool = False,
@@ -296,38 +744,72 @@ def setup(
     own_reporter = reporter is None
     if reporter is None:
         reporter = RunReporter.create("setup", target=None, verbose=False)
-    podman = require_podman()
     if lock is None:
         lock = load_container_lock()
+    kern = _install_kern(lock)
+    _prune_kern_build_history(kern)
     current_recipe = container_image_recipe_digest(lock)
     if image_recipe is not None and image_recipe != current_recipe:
         fail("container image inputs changed before setup")
     image_recipe = current_recipe
     image = container_image_reference(lock, image_recipe)
-    if image_ready(podman, image, image_recipe=image_recipe) and not force:
-        state = _publish_current_image_state(podman, image, image_recipe)
+    _discard_transient_kern_images(kern, lock)
+    current_state = current_image_state(kern, image, image_recipe)
+    if current_state is not None and not force:
+        state = publish_current_image_state(
+            kern,
+            image,
+            image_recipe,
+            state=current_state,
+        )
+        _discard_obsolete_kern_images(kern, lock, image_recipe)
         install_git_hooks()
         print(f"Build image is ready: {image}")
         if own_reporter:
             reporter.finish()
         return state
+
+    if not _base_image_ready(kern, lock):
+        _build_base_image(kern, reporter, lock)
+
+    generation = secrets.token_hex(32)
+    staging_image = _temporary_image_reference(image, "staging")
+    for relative in (".kernignore", "Containerfile", "package.json", "package-lock.json"):
+        source = ROOT / relative
+        if source.is_symlink() or not source.is_file():
+            fail(f"container image input is missing or invalid: {source}")
     command = [
-        podman,
+        kern,
         "build",
+        "-t",
+        staging_image,
         *container_image_build_arguments(lock),
-        "--tag",
-        image,
-        "--label",
-        f"org.fplinux.container.image-recipe={image_recipe}",
+        "--build-arg",
+        f"FPLINUX_IMAGE_RECIPE={image_recipe}",
+        "--build-arg",
+        f"FPLINUX_IMAGE_GENERATION={generation}",
         ".",
     ]
     with reporter.stage("container-setup") as stage:
-        stage.run(command, cwd=ROOT, timeout=_CONTAINER_SETUP_TIMEOUT)
+        stage.run(
+            command,
+            cwd=ROOT,
+            env=kern_environment(),
+            timeout=_CONTAINER_SETUP_TIMEOUT,
+        )
     if container_image_recipe_digest(lock) != image_recipe:
         fail("container image inputs changed while setup was running")
-    if not image_ready(podman, image, image_recipe=image_recipe):
+    if _image_metadata(kern, staging_image) != (image_recipe, generation):
         fail("container setup completed without publishing the exact requested image")
-    state = _publish_current_image_state(podman, image, image_recipe)
+    _publish_staged_kern_image(
+        kern,
+        staging_image,
+        image,
+        lambda candidate: _image_metadata(kern, candidate) == (image_recipe, generation),
+    )
+    state = publish_current_image_state(kern, image, image_recipe)
+    _discard_obsolete_kern_images(kern, lock, image_recipe)
+    _prune_kern_build_history(kern)
     install_git_hooks()
     if own_reporter:
         reporter.finish()
@@ -341,42 +823,59 @@ def doctor() -> None:
         problems.append("the build interface currently supports Linux hosts only")
     if platform.machine() not in {"x86_64", "amd64"}:
         problems.append("the pinned build image currently targets linux/amd64")
-    podman = shutil.which("podman")
-    if podman is None:
-        problems.append("podman was not found")
+    lock = load_container_lock()
+    if not kern_available(lock):
+        problems.append("Kern is not ready for this checkout; run ./fplinux setup")
     else:
+        kern = require_kern(lock)
         try:
             version = subprocess.run(
-                [podman, "version", "--format", "{{.Client.Version}}"],
+                [kern, "--version"],
+                cwd=ROOT,
+                env=kern_environment(),
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=_PODMAN_PROBE_TIMEOUT,
+                timeout=_KERN_PROBE_TIMEOUT,
             )
-            if version.returncode:
-                problems.append(version.stderr.strip() or "podman version failed")
-            else:
-                print(f"podman:     {version.stdout.strip()}")
         except subprocess.TimeoutExpired:
-            problems.append(f"podman version timed out after {_PODMAN_PROBE_TIMEOUT}s")
+            problems.append(f"Kern version timed out after {_KERN_PROBE_TIMEOUT}s")
+        else:
+            expected_version = f"kern {lock['kern']['version']}"
+            if version.returncode or version.stdout.strip() != expected_version:
+                problems.append(version.stderr.strip() or "unexpected Kern version")
+            else:
+                print(f"kern:      {lock['kern']['version']} (project-local)")
         try:
-            rootless = subprocess.run(
-                [podman, "info", "--format", "{{.Host.Security.Rootless}}"],
+            runtime = subprocess.run(
+                [kern, "doctor"],
+                cwd=ROOT,
+                env=kern_environment(),
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=_PODMAN_PROBE_TIMEOUT,
+                timeout=_KERN_PROBE_TIMEOUT,
             )
-            if rootless.returncode or rootless.stdout.strip() != "true":
-                problems.append("rootless Podman is not active")
-            else:
-                print("rootless:   yes")
         except subprocess.TimeoutExpired:
-            problems.append(f"podman info timed out after {_PODMAN_PROBE_TIMEOUT}s")
-        lock = load_container_lock()
+            problems.append(f"Kern doctor timed out after {_KERN_PROBE_TIMEOUT}s")
+        else:
+            if runtime.returncode:
+                problems.append(
+                    runtime.stderr.strip() or runtime.stdout.strip() or "Kern doctor failed"
+                )
+            else:
+                print("runtime:   ready")
         image = container_image_reference(lock)
-        state = "ready" if image_ready(podman, image) else "not built or stale"
-        print(f"image:      {state} ({image})")
+        ready = current_image_state(kern, image) is not None
+        state = "ready" if ready else "not built or stale"
+        print(f"image:     {state} ({image})")
+        if not ready:
+            problems.append("the pinned build image is not ready; run ./fplinux setup")
+        elif not _kern_build_user_ready(kern, image):
+            problems.append(
+                "Kern cannot map the package builder; configure newuidmap/newgidmap "
+                "and subordinate UID/GID ranges"
+            )
     if problems:
         for problem in problems:
             print(f"error: {problem}", file=sys.stderr)
@@ -415,30 +914,28 @@ def check_commit_message(message_file: str) -> None:
     config = ROOT / "commitlint.config.mjs"
     if config.is_symlink() or not config.is_file():
         fail("commitlint configuration is missing or invalid")
-    podman = require_podman()
     container_lock = load_container_lock()
-    lock = container_lock["oci"]
+    kern = require_kern(container_lock)
     image = container_image_reference(container_lock)
-    if not image_ready(podman, image):
+    image_state = current_image_state(kern, image)
+    if image_state is None:
         fail("commit hook requires the current build image; run ./fplinux setup")
-    image_identity = image_identifier(podman, image)
-    if image_identity is None:
-        fail("commit hook requires an immutable current build image")
     try:
         result = subprocess.run(
             [
-                podman,
-                "run",
-                "--security-opt",
-                "label=disable",
-                "--rm",
-                "--platform",
-                lock["platform"],
-                "--userns=keep-id",
-                "--network=none",
+                kern,
+                "box",
+                kern_box_name("commitlint"),
+                "--image",
+                image,
+                "--pull",
+                "never",
                 "--read-only",
+                "--network",
+                "none",
                 "--tmpfs",
-                "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs.
+                "/tmp:64m",  # noqa: S108 -- container tmpfs.
+                "--no-uid-range",
                 "--volume",
                 f"{config}:/workspace/commitlint.config.mjs:ro",
                 "--volume",
@@ -447,12 +944,14 @@ def check_commit_message(message_file: str) -> None:
                 "HOME=/tmp",
                 "--workdir",
                 "/workspace",
-                image_identity,
+                "--quiet",
+                "--",
                 "sh",
                 "-c",
                 "commitlint < /message",
             ],
             cwd=ROOT,
+            env=kern_environment(),
             check=False,
             timeout=_COMMIT_MESSAGE_TIMEOUT,
         )
@@ -516,11 +1015,7 @@ def _source_scope_uses_file(  # noqa: PLR0911
     }:
         return True
     if scope == "container":
-        return (
-            name in {"Containerfile", "Dockerfile"}
-            or _CONTAINER_FILE.fullmatch(name) is not None
-            or name.startswith(".hadolint")
-        )
+        return name in {".kernignore", "Containerfile"} or name.startswith(".hadolint")
     if scope == "metadata":
         return (
             suffix == ".toml"
@@ -750,7 +1245,7 @@ def check_scope_receipt_recipe(  # noqa: PLR0913 -- receipt identities are disti
     scope: str,
     closure_digest: str,
     *,
-    image_identity: str,
+    image_generation: str,
     commands: tuple[tuple[str, ...], ...] | None = None,
     orchestration_recipe: str | None = None,
     profile: str | None = None,
@@ -766,7 +1261,7 @@ def check_scope_receipt_recipe(  # noqa: PLR0913 -- receipt identities are disti
         scope=scope,
         closure_digest=closure_digest,
         orchestration_recipe=orchestration_recipe,
-        image_identity=image_identity,
+        image_generation=image_generation,
         commands=commands,
         profile=profile,
     )
@@ -779,9 +1274,8 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
     missing: tuple[str, ...],
     analyzer_cache: dict[str, Path],
     workspace: Path,
-    podman: str,
-    lock: dict[str, Any],
-    image_identity: str,
+    kern: str,
+    image: str,
     recipes: dict[str, CheckReceiptRecipe],
     profile: str | None,
     jobs: int,
@@ -791,7 +1285,8 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
     if container_logs.is_symlink() or (container_logs.exists() and not container_logs.is_dir()):
         fail(f"invalid checker container log directory: {container_logs}")
     container_logs.mkdir(parents=True, exist_ok=True)
-    log_mount = ["--volume", f"{container_logs}:/logs:rw"]
+    environment = kern_environment()
+    log_mount = ["--volume", f"{container_logs}:/logs"]
     source_scopes = [scope for scope in missing if scope in SOURCE_CHECK_SCOPES]
     if source_scopes:
         log_environment = reporter.container_environment("/logs/source")
@@ -806,18 +1301,19 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
         with reporter.stage("source", passthrough=True, show_tail=False) as stage:
             stage.run(
                 [
-                    podman,
-                    "run",
-                    "--security-opt",
-                    "label=disable",
-                    "--rm",
-                    "--platform",
-                    lock["platform"],
-                    "--userns=keep-id",
-                    "--network=none",
+                    kern,
+                    "box",
+                    kern_box_name("check-source"),
+                    "--image",
+                    image,
+                    "--pull",
+                    "never",
                     "--read-only",
+                    "--network",
+                    "none",
                     "--tmpfs",
-                    "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs.
+                    "/tmp:1g",  # noqa: S108 -- container tmpfs.
+                    "--no-uid-range",
                     "--volume",
                     f"{workspace}:/workspace:ro",
                     *log_mount,
@@ -830,11 +1326,16 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
                     "RUFF_CACHE_DIR=/tmp/ruff",
                     "--env",
                     "PYTHONDONTWRITEBYTECODE=1",
-                    image_identity,
+                    "--workdir",
+                    "/workspace",
+                    "--init",
+                    "--quiet",
+                    "--",
                     "python3",
                     "/workspace/scripts/check.py",
                     *source_scopes,
                 ],
+                env=environment,
                 timeout=_SOURCE_CHECK_TIMEOUT,
             )
         for scope in source_scopes:
@@ -851,20 +1352,15 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
         for key, value in log_environment.items()
         for argument in ("--env", f"{key}={value}")
     ]
-    analyzer_runtime = [
-        podman,
-        "run",
-        "--security-opt",
-        "label=disable",
-        "--rm",
-        "--platform",
-        lock["platform"],
-        "--userns=keep-id",
-    ]
-    analyzer_program = [
+    common = [
+        "--image",
+        image,
+        "--pull",
+        "never",
         "--read-only",
         "--tmpfs",
-        "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs.
+        "/tmp:8g",  # noqa: S108 -- container tmpfs.
+        "--no-uid-range",
         "--volume",
         f"{workspace}:/workspace:ro",
         *log_mount,
@@ -875,40 +1371,57 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
         "PYTHONPATH=/workspace/scripts",
         "--env",
         "PYTHONDONTWRITEBYTECODE=1",
-        image_identity,
-        "python3",
-        "-m",
-        "fplinux_cli.kernelcheck",
+        "--workdir",
+        "/workspace",
+        "--init",
+        "--quiet",
     ]
     with reporter.stage("kernel-prepare", passthrough=True, show_tail=False) as stage:
         stage.run(
             [
-                *analyzer_runtime,
+                kern,
+                "box",
+                kern_box_name("kernel-prepare"),
+                *common,
+                "--network",
+                "host",
                 "--volume",
-                f"{analyzer_cache['downloads']}:/cache/downloads:rw",
+                f"{analyzer_cache['downloads']}:/cache/downloads",
                 "--volume",
-                f"{analyzer_cache['linux']}:/cache/linux:rw",
-                *analyzer_program,
+                f"{analyzer_cache['linux']}:/cache/linux",
+                "--",
+                "python3",
+                "-m",
+                "fplinux_cli.kernelcheck",
                 "prepare",
                 *([] if profile is None else ["--profile", profile]),
             ],
+            env=environment,
             timeout=_KERNEL_PREPARE_TIMEOUT,
         )
     with reporter.stage("kernel-analysis", passthrough=True, show_tail=False) as stage:
         stage.run(
             [
-                *analyzer_runtime,
-                "--network=none",
+                kern,
+                "box",
+                kern_box_name("kernel-analysis"),
+                *common,
+                "--network",
+                "none",
                 "--volume",
-                f"{analyzer_cache['analysis']}:/cache/analysis:rw",
+                f"{analyzer_cache['analysis']}:/cache/analysis",
                 "--volume",
                 f"{analyzer_cache['linux']}:/cache/linux:ro",
-                *analyzer_program,
+                "--",
+                "python3",
+                "-m",
+                "fplinux_cli.kernelcheck",
                 "check",
                 "--jobs",
                 str(jobs),
                 *([] if profile is None else ["--profile", profile]),
             ],
+            env=environment,
             timeout=_KERNEL_ANALYSIS_TIMEOUT,
         )
     publish_success_receipt(cache, recipes["kernel"])
@@ -959,12 +1472,12 @@ def check(
     image_recipe = container_image_recipe_digest(container_lock)
     orchestration_recipe = check_orchestration_recipe_digest(image_recipe)
 
-    def receipt_recipes(image_identity: str) -> dict[str, CheckReceiptRecipe]:
+    def receipt_recipes(image_generation: str) -> dict[str, CheckReceiptRecipe]:
         return {
             scope: check_scope_receipt_recipe(
                 scope,
                 check_scope_closure_digest(scope, snapshot, profile=profile),
-                image_identity=image_identity,
+                image_generation=image_generation,
                 orchestration_recipe=orchestration_recipe,
                 profile=profile,
             )
@@ -973,7 +1486,7 @@ def check(
 
     cached_image = load_image_state(cache, image_recipe)
     if cached_image is not None:
-        recipes = receipt_recipes(cached_image.image_identity)
+        recipes = receipt_recipes(cached_image.image_generation)
         missing = tuple(
             scope
             for scope in cacheable_scopes
@@ -986,24 +1499,32 @@ def check(
             reporter.finish()
             return
 
-    podman = require_podman()
-    lock = container_lock["oci"]
     image = container_image_reference(container_lock, image_recipe)
-    if image_ready(podman, image, image_recipe=image_recipe):
-        current_image = _publish_current_image_state(
-            podman,
-            image,
-            image_recipe,
-        )
+    if kern_available(container_lock):
+        kern = require_kern(container_lock)
+        inspected_image = current_image_state(kern, image, image_recipe)
+        if inspected_image is not None:
+            current_image = publish_current_image_state(
+                kern,
+                image,
+                image_recipe,
+                state=inspected_image,
+            )
+        else:
+            current_image = setup(
+                reporter=reporter,
+                lock=container_lock,
+                image_recipe=image_recipe,
+            )
     else:
         current_image = setup(
             reporter=reporter,
             lock=container_lock,
             image_recipe=image_recipe,
         )
+        kern = require_kern(container_lock)
 
-    image_identity = current_image.image_identity
-    recipes = receipt_recipes(current_image.image_identity)
+    recipes = receipt_recipes(current_image.image_generation)
     missing = tuple(
         scope
         for scope in cacheable_scopes
@@ -1035,9 +1556,8 @@ def check(
             missing=missing,
             analyzer_cache=analyzer_cache,
             workspace=workspace,
-            podman=podman,
-            lock=lock,
-            image_identity=image_identity,
+            kern=kern,
+            image=image,
             recipes=recipes,
             profile=profile,
             jobs=jobs,

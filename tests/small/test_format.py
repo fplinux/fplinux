@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from fplinux_cli import format as format_module
 from fplinux_cli.format import format_snapshot, resolve_format_paths
 from fplinux_cli.workspace import WorkspaceSnapshot, workspace_snapshot
 
@@ -58,6 +59,25 @@ class FormatResolutionTests(unittest.TestCase):
             for paths, message in cases:
                 with self.subTest(paths=paths), self.assertRaisesRegex(SystemExit, message):
                     resolve_format_paths(paths, root=root, inventory=inventory)
+
+
+class FormatContainerBoundaryTests(unittest.TestCase):
+    """Keep each formatter projection private to its disposable container."""
+
+    def test_projection_is_the_only_writable_host_mount(self) -> None:
+        """Mount only the private writable projection under the pinned formatter."""
+        workspace = Path("/tmp/fplinux-format-projection")  # noqa: S108 -- synthetic path.
+        command = format_module._container_command(  # noqa: SLF001 -- command boundary.
+            "/usr/bin/kern",
+            image="localhost/fplinux-build:locked",
+            workspace=workspace,
+            formatter=["ruff", "format", "scripts/tool.py"],
+        )
+
+        self.assertIn(f"{workspace}:/workspace", command)
+        network = command.index("--network")
+        self.assertEqual(command[network + 1], "none")
+        self.assertEqual(command[-4:], ["--", "ruff", "format", "scripts/tool.py"])
 
 
 class FormatPublicationTests(unittest.TestCase):

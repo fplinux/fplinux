@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Persist one exact immutable host image identity for check receipt lookup."""
+"""Persist the current exact Kern image generation for cache receipt lookup."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ from pathlib import Path
 
 IMAGE_STATE_NAME = "host-image-state.json"
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
-_IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
 
 class ImageStateError(ValueError):
@@ -25,30 +24,30 @@ def _require_digest(value: object, field: str) -> str:
     return value
 
 
-def _require_image_identity(value: object) -> str:
-    if not isinstance(value, str) or _IMAGE_ID.fullmatch(value) is None:
-        message = "image identity must be an immutable sha256 image ID"
+def _require_image_generation(value: object) -> str:
+    if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
+        message = "image generation must be a lowercase SHA-256 digest"
         raise ImageStateError(message)
     return value
 
 
 @dataclass(frozen=True)
 class ImageState:
-    """The immutable OCI image that supplied one exact image recipe."""
+    """The exact Kern image generation built for one static image recipe."""
 
     container_image_recipe: str
-    image_identity: str
+    image_generation: str
 
     def __post_init__(self) -> None:
         """Reject values that cannot identify an exact reusable image."""
         _require_digest(self.container_image_recipe, "container image recipe")
-        _require_image_identity(self.image_identity)
+        _require_image_generation(self.image_generation)
 
     def payload(self) -> dict[str, str]:
         """Return the complete, fixed state payload."""
         return {
             "container_image_recipe": self.container_image_recipe,
-            "image_identity": self.image_identity,
+            "image_generation": self.image_generation,
         }
 
 
@@ -97,12 +96,12 @@ def _read_state(path: Path) -> ImageState | None:
         value = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(value, dict) or set(value) != {
             "container_image_recipe",
-            "image_identity",
+            "image_generation",
         }:
             return None
         return ImageState(
             container_image_recipe=value["container_image_recipe"],
-            image_identity=value["image_identity"],
+            image_generation=value["image_generation"],
         )
     except ImageStateError, OSError, ValueError:
         return None
