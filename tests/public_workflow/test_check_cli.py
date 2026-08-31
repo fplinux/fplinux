@@ -91,7 +91,7 @@ class CheckCommandTests(unittest.TestCase):
         result = self.run_check("--help")
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertRegex(result.stdout, r"default: 2, or\s+1 with --verbose")
+        self.assertRegex(result.stdout, r"default: 3, or\s+1 with --verbose")
 
     def test_jobs_requires_a_positive_integer_before_running_checks(self) -> None:
         """Reject malformed or nonpositive execution limits at the public parser boundary."""

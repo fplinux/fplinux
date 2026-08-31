@@ -52,7 +52,7 @@ class ProfileParserDispatchTests(unittest.TestCase):
             profile="usb-host-lab",
             verbose=False,
             no_cache=False,
-            jobs=2,
+            jobs=3,
         )
 
     def test_profile_check_accepts_only_the_explicit_kernel_scope(self) -> None:
@@ -66,7 +66,7 @@ class ProfileParserDispatchTests(unittest.TestCase):
             profile="usb-host-lab",
             verbose=False,
             no_cache=False,
-            jobs=2,
+            jobs=3,
         )
 
     def test_profile_check_forwards_an_explicit_kernel_worker_limit(self) -> None:
