@@ -299,7 +299,7 @@ def _active_session_networks(sessions: Path) -> set[ipaddress.IPv4Network]:
             if not isinstance(state, dict):
                 continue
             network = ipaddress.IPv4Network(state.get("network"), strict=True)
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+        except OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError:
             continue
         if network.prefixlen == 30 and _is_rfc1918(network):
             networks.add(network)
@@ -511,7 +511,7 @@ def _cleanup_target_sessions(root: Path, target: str) -> None:
             owner = json.loads(_regular_file_bytes(owner_path, "session owner record"))
         except SystemExit:
             continue
-        except (UnicodeDecodeError, json.JSONDecodeError):
+        except UnicodeDecodeError, json.JSONDecodeError:
             continue
         if (
             isinstance(owner, dict)
@@ -675,7 +675,7 @@ def finish_session(session: dict[str, Any]) -> None:
     state_path = directory / "session.json"
     try:
         state = json.loads(state_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+    except OSError, UnicodeDecodeError, json.JSONDecodeError:
         state = None
     ready = False
     if isinstance(state, dict) and state.get("status") == "ready":
@@ -701,7 +701,7 @@ def _usb_devices(session: dict[str, Any]) -> list[Path]:
                 16,
             )
             serial = (device / "serial").read_text(encoding="ascii").strip()
-        except (FileNotFoundError, PermissionError, UnicodeDecodeError, ValueError):
+        except FileNotFoundError, PermissionError, UnicodeDecodeError, ValueError:
             continue
         if (
             vendor == session["vendor_id"]
@@ -719,7 +719,7 @@ def _driver_is_cdc_ncm(path: Path, usb_device: Path) -> bool:
         try:
             if driver.resolve().name == "cdc_ncm":
                 return True
-        except (FileNotFoundError, OSError):
+        except FileNotFoundError, OSError:
             pass
         if current == usb_device:
             break
@@ -733,7 +733,7 @@ def _ncm_interface(usb_device: Path, expected_mac: str) -> str | None:
         try:
             device = (netdev / "device").resolve(strict=True)
             address = (netdev / "address").read_text(encoding="ascii").strip().lower()
-        except (FileNotFoundError, PermissionError, UnicodeDecodeError, OSError):
+        except FileNotFoundError, PermissionError, UnicodeDecodeError, OSError:
             continue
         if usb_device not in (device, *device.parents):
             continue
@@ -1046,7 +1046,7 @@ def _validate_session(
         fail("current SSH session identity is invalid")
     try:
         network = ipaddress.IPv4Network(value.get("network"), strict=True)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         fail("current SSH session network is invalid")
     if network.prefixlen != 30 or not _is_rfc1918(network):
         fail("current SSH session network is not a private /30")

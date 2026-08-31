@@ -349,7 +349,7 @@ def _cached_aport_packages(
         raw = json.loads(
             (repository / alpine_state.PACKAGE_RECEIPT_NAME).read_text(encoding="utf-8")
         )
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+    except OSError, UnicodeDecodeError, json.JSONDecodeError:
         return None
     if not isinstance(raw, dict) or set(raw) != {"recipe", "packages"}:
         return None

@@ -86,7 +86,7 @@ def inspect_prepared_linux(source: Path, expected_recipe: str) -> PreparedLinuxS
         source = _require_directory(Path(source), "prepared Linux tree")
         marker = (source / MARKER_NAME).read_text(encoding="utf-8")
         receipt = json.loads((source / RECEIPT_NAME).read_text(encoding="utf-8"))
-    except (LinuxStateError, OSError, json.JSONDecodeError):
+    except LinuxStateError, OSError, json.JSONDecodeError:
         return None
     state = PreparedLinuxState(recipe)
     if marker != f"{recipe}\n" or receipt != state.payload():

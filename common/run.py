@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.14
 # SPDX-License-Identifier: GPL-2.0-only
 """Run a validated FPLinux RAM-only bundle through its fixed platform adapter."""
 
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 ADAPTER_PATH = "runner/platform_adapter.py"
 IDENTITY_PATH = "runner/identity.py"
 SSH_HELPER_PATH = "runner/ssh_transport.py"
-MINIMUM_PYTHON = (3, 11)
+REQUIRED_PYTHON = (3, 14)
 TRANSPORTS = frozenset({"usb-ncm", "none"})
 _identity_module: ModuleType | None = None
 
@@ -297,9 +297,10 @@ def require_file(path: Path, *, executable: bool = False) -> None:
 
 def host_preflight() -> None:
     """Reject an unsupported host runtime before any phone operation."""
-    if sys.version_info < MINIMUM_PYTHON:
-        version = f"{sys.version_info.major}.{sys.version_info.minor}"
-        fail(f"Python 3.11 or newer is required (found {version})")
+    version_info = (sys.version_info.major, sys.version_info.minor)
+    if version_info != REQUIRED_PYTHON:
+        version = f"{version_info[0]}.{version_info[1]}"
+        fail(f"Python 3.14 is required (found {version})")
 
 
 def load_module(path: Path, name: str) -> ModuleType:

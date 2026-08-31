@@ -5,8 +5,6 @@ FROM ${BASE_IMAGE}
 ARG BASE_IMAGE
 ARG RUFF_VERSION=0.16.0
 ARG RUFF_SHA256=2138b7bc58ff877f5bba09aea4cc984ad5699433b6a3f811003527b8cff8e9ad
-ARG PYTHON311_VERSION=3.11.16
-ARG PYTHON311_SHA256=91bcdebfdde239a003ae93738a7fce0f9230fee5c4bc2b86f6e6e8c6f98aabe8
 ARG SPARSE_COMMIT=37156835e3d725b6d750f000be33ba3814bb2310
 ARG SPARSE_SHA256=feca4eb2f0cb61416f4946e0a537d20da8e5eb0d8064fb3f1323a19cb5738ffc
 ARG TYPOS_VERSION=1.48.0
@@ -152,23 +150,6 @@ RUN set -eux; \
     rm -rf /tmp/quality; \
     ruff --version; \
     reuse --version
-
-WORKDIR /tmp/python/Python-${PYTHON311_VERSION}
-RUN set -eux; \
-    mkdir -p /tmp/python; \
-    archive=/tmp/python/Python-${PYTHON311_VERSION}.tar.xz; \
-    curl -fsSL --retry 3 \
-        --output "${archive}" \
-        "https://www.python.org/ftp/python/${PYTHON311_VERSION}/Python-${PYTHON311_VERSION}.tar.xz"; \
-    printf '%s  %s\n' "${PYTHON311_SHA256}" "${archive}" | sha256sum -c -; \
-    tar -xJf "${archive}" -C /tmp/python; \
-    ./configure --prefix=/opt/quality/python311 --without-ensurepip; \
-    make -j2; \
-    make altinstall; \
-    ln -s /opt/quality/python311/bin/python3.11 /opt/quality/bin/python3.11; \
-    rm -rf /tmp/python; \
-    python3.11 --version; \
-    python3.11 -c 'import ctypes, lzma, tomllib, zlib'
 
 WORKDIR /workspace
 

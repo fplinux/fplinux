@@ -15,7 +15,7 @@ candidate into a release.
 The host needs:
 
 - Linux x86-64;
-- Python 3.11 or newer;
+- Python 3.14;
 - GNU `stdbuf` from coreutils;
 - `ip` from iproute2;
 - `ssh`, `ssh-keygen`, `ssh-keyscan` and `sftp` from OpenSSH;

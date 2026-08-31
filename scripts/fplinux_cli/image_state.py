@@ -104,7 +104,7 @@ def _read_state(path: Path) -> ImageState | None:
             container_image_recipe=value["container_image_recipe"],
             image_identity=value["image_identity"],
         )
-    except (ImageStateError, OSError, ValueError):
+    except ImageStateError, OSError, ValueError:
         return None
 
 

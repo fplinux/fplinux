@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import tempfile
 import unittest
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -68,6 +71,28 @@ class CheckCommandTests(unittest.TestCase):
             PUBLIC_COMMANDS,
         )
         self.assertNotIn("_commit-msg", result.stdout)
+
+    def test_launcher_rejects_a_host_without_python314(self) -> None:
+        """Fail clearly before importing the CLI when its only Python is absent."""
+        bash = shutil.which("bash")
+        if bash is None:
+            self.fail("bash is missing from the pinned quality image")
+        with tempfile.TemporaryDirectory() as empty_path:
+            dirname = shutil.which("dirname")
+            if dirname is None:
+                self.fail("dirname is missing from the pinned quality image")
+            (Path(empty_path) / "dirname").symlink_to(dirname)
+            result = run_process(
+                [bash, str(ROOT / "fplinux"), "--help"],
+                name="public fplinux Python preflight",
+                timeout=10,
+                cwd=ROOT,
+                env={**os.environ, "PATH": empty_path},
+            )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "FPLinux requires Python 3.14.\n")
 
     def test_list_wraps_every_inner_source_scope_in_host_boundaries(self) -> None:
         """Expose the inner checker scopes between repository and kernel checks."""

@@ -56,7 +56,7 @@ def silence_broken_pipe(stream: IO[str]) -> None:
     """Keep interpreter shutdown from failing after a consumer closes a pipe."""
     try:
         descriptor = stream.fileno()
-    except (AttributeError, OSError, ValueError, io.UnsupportedOperation):
+    except AttributeError, OSError, ValueError, io.UnsupportedOperation:
         return
 
     try:

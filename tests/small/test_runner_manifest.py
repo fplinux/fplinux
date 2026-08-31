@@ -33,6 +33,31 @@ def load_runner() -> ModuleType:
 RUNNER = load_runner()
 
 
+class PythonRuntimeTests(unittest.TestCase):
+    """Keep the standalone runner on its single supported Python series."""
+
+    def test_accepts_python_314(self) -> None:
+        """The pinned quality interpreter satisfies the standalone preflight."""
+        RUNNER.host_preflight()
+
+    def test_rejects_other_python_series(self) -> None:
+        """Older and unqualified newer interpreters fail before phone access."""
+        for major, minor in ((3, 13), (3, 15)):
+            with (
+                self.subTest(version=f"{major}.{minor}"),
+                mock.patch.object(
+                    RUNNER.sys,
+                    "version_info",
+                    mock.Mock(major=major, minor=minor),
+                ),
+                self.assertRaisesRegex(
+                    SystemExit,
+                    rf"Python 3\.14 is required \(found {major}\.{minor}\)",
+                ),
+            ):
+                RUNNER.host_preflight()
+
+
 def runtime_manifest() -> dict[str, Any]:
     """Return one complete runtime contract."""
     image = "image/ramboot.bin"

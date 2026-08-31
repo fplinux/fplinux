@@ -79,7 +79,7 @@ def _read_payload(path: Path) -> object | None:
         with path.open(encoding="utf-8") as stream:
             value: object = json.load(stream)
             return value
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+    except OSError, UnicodeDecodeError, json.JSONDecodeError:
         return None
 
 
