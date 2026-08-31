@@ -38,14 +38,24 @@ from .common import (
 from .config import (
     container_image_recipe_digest,
     container_image_reference,
+    container_runtime_recipe_digest,
     load_container_lock,
     load_platform,
     load_release,
     load_target,
     verified_runtime_digest,
 )
-from .container import image_identifier, image_ready, require_podman, setup
+from .container import (
+    current_image_state,
+    kern_available,
+    kern_box_name,
+    kern_environment,
+    publish_current_image_state,
+    require_kern,
+    setup,
+)
 from .identity import RUNTIME_IDENTITY_PATH
+from .image_state import ImageState, load_image_state
 from .output import RunReporter, silence_broken_pipe
 from .prune import (
     discard_obsolete_apks,
@@ -79,6 +89,7 @@ class BuildIdentity:
 
     workspace_digest: str
     container_image_recipe: str
+    container_image_generation: str
     apk_signing_key: str
 
 
@@ -167,6 +178,7 @@ def _manifest_matches_identity(manifest: dict[str, Any], identity: BuildIdentity
         for field, value in (
             ("workspace_digest", identity.workspace_digest),
             ("container_image_recipe", identity.container_image_recipe),
+            ("container_image_generation", identity.container_image_generation),
             ("apk_signing_key", identity.apk_signing_key),
         )
     )
@@ -351,7 +363,8 @@ def verify_booted(target: str) -> None:
     bundle, manifest = _resolve_target_bundle(target)
     snapshot = target_workspace_snapshot(target)
     image_recipe = container_image_recipe_digest()
-    identity = _build_identity(snapshot, image_recipe, ROOT / ".cache")
+    image_state = load_image_state(ROOT / ".cache", image_recipe)
+    identity = _build_identity(snapshot, image_state, ROOT / ".cache")
     if not _manifest_matches_identity(manifest, identity):
         fail(f"build output is stale; rebuild it: ./fplinux build {target}")
     device_identity = manifest.get("device_identity")
@@ -389,14 +402,21 @@ def verify_booted(target: str) -> None:
 
 
 def _build_identity(
-    snapshot: WorkspaceSnapshot, image_recipe: str, cache: Path
+    snapshot: WorkspaceSnapshot, image_state: ImageState | None, cache: Path
 ) -> BuildIdentity | None:
     """Read the exact host-visible inputs without creating signing state."""
+    if image_state is None:
+        return None
     try:
         signing_key = alpine_state.signing_key_identity(cache)
     except SystemExit:
         return None
-    return BuildIdentity(snapshot.recipe, image_recipe, signing_key)
+    return BuildIdentity(
+        snapshot.recipe,
+        image_state.container_image_recipe,
+        image_state.image_generation,
+        signing_key,
+    )
 
 
 def _ensure_build_directory(path: Path) -> Path:
@@ -466,10 +486,9 @@ def _checksum_block_only_changed(before: bytes, after: bytes, *, path: Path) -> 
 
 
 def _checksum_container_command(  # noqa: PLR0913
-    podman: str,
+    kern: str,
     *,
     package: str,
-    platform: str,
     image: str,
     offline: bool,
     stage: Path,
@@ -504,27 +523,29 @@ def _checksum_container_command(  # noqa: PLR0913
         )
     )
     return [
-        podman,
-        "run",
-        "--security-opt",
-        "label=disable",
-        "--rm",
-        *(["--network=none"] if offline else []),
-        "--platform",
-        platform,
-        "--userns=keep-id:uid=0,gid=0",
+        kern,
+        "box",
+        kern_box_name("checksum"),
+        "--image",
+        image,
+        "--pull",
+        "never",
         "--read-only",
+        "--network",
+        "none" if offline else "host",
         "--tmpfs",
-        "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs.
+        "/tmp:1g",  # noqa: S108 -- container tmpfs.
         "--volume",
-        f"{downloads}:/cache/downloads:rw",
+        f"{downloads}:/cache/downloads",
         "--volume",
-        f"{stage}:/workspace:rw",
+        f"{stage}:/workspace",
         "--workdir",
         stage_aport,
         "--env",
         "HOME=/tmp/fplinux-home",
-        image,
+        "--init",
+        "--quiet",
+        "--",
         "sh",
         "-ceu",
         prepare_command,
@@ -540,20 +561,23 @@ def checksum_aport(package: str, *, offline: bool = False) -> None:
     mode = apkbuild.stat().st_mode & 0o777
     container_lock = load_container_lock()
     image_recipe = container_image_recipe_digest(container_lock)
-    podman = require_podman()
-    lock = container_lock["oci"]
     image = container_image_reference(container_lock, image_recipe)
     reporter = RunReporter.create("checksum", target=package, verbose=False)
-    if not image_ready(podman, image, image_recipe=image_recipe):
+    if not kern_available(container_lock):
         if offline:
             fail(
                 "offline checksum requires the current pinned OCI image; "
                 "run ./fplinux setup online first"
             )
         setup(reporter=reporter, lock=container_lock, image_recipe=image_recipe)
-    image_identity = image_identifier(podman, image)
-    if image_identity is None:
-        fail("checksum requires an immutable current build image")
+    kern = require_kern(container_lock)
+    if current_image_state(kern, image, image_recipe) is None:
+        if offline:
+            fail(
+                "offline checksum requires the current pinned OCI image; "
+                "run ./fplinux setup online first"
+            )
+        setup(reporter=reporter, lock=container_lock, image_recipe=image_recipe)
     cache = ROOT / ".cache"
     downloads = _ensure_build_directory(cache / "downloads")
     with reporter.stage("workspace"):
@@ -570,14 +594,14 @@ def checksum_aport(package: str, *, offline: bool = False) -> None:
         with reporter.stage("container", passthrough=True, show_tail=False) as stage_report:
             stage_report.run(
                 _checksum_container_command(
-                    podman,
+                    kern,
                     package=package,
-                    platform=lock["platform"],
-                    image=image_identity,
+                    image=image,
                     offline=offline,
                     stage=stage,
                     downloads=downloads,
-                )
+                ),
+                env=kern_environment(),
             )
         generated = stage / "alpine/aports" / package / "APKBUILD"
         if generated.is_symlink() or not generated.is_file():
@@ -594,11 +618,10 @@ def checksum_aport(package: str, *, offline: bool = False) -> None:
 
 
 def _build_container_command(  # noqa: PLR0913
-    podman: str,
+    kern: str,
     *,
     target: str,
     jobs: int,
-    platform: str,
     image: str,
     offline: bool,
     snapshot: WorkspaceSnapshot,
@@ -612,6 +635,7 @@ def _build_container_command(  # noqa: PLR0913
     logs: Path,
     log_environment: dict[str, str],
     image_recipe: str,
+    image_generation: str,
     profile: str | None = None,
 ) -> list[str]:
     """Return the exact target-build argv with only narrow explicit mounts."""
@@ -621,32 +645,33 @@ def _build_container_command(  # noqa: PLR0913
         for argument in ("--env", f"{key}={value}")
     ]
     return [
-        podman,
-        "run",
-        "--security-opt",
-        "label=disable",
-        "--rm",
-        *(["--network=none"] if offline else []),
-        "--platform",
-        platform,
-        "--userns=keep-id:uid=0,gid=0",
+        kern,
+        "box",
+        kern_box_name("build"),
+        "--image",
+        image,
+        "--pull",
+        "never",
         "--read-only",
+        "--privileged",
+        "--network",
+        "none" if offline else "host",
         "--tmpfs",
-        "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs.
+        "/tmp:8g",  # noqa: S108 -- container tmpfs.
         "--volume",
-        f"{downloads}:/cache/downloads:rw",
+        f"{downloads}:/cache/downloads",
         "--volume",
-        f"{apk_signing}:/cache/apk-signing:rw",
+        f"{apk_signing}:/cache/apk-signing",
         "--volume",
-        f"{apks}:/cache/apks:rw",
+        f"{apks}:/cache/apks",
         "--volume",
-        f"{rootfs}:/cache/rootfs:rw",
+        f"{rootfs}:/cache/rootfs",
         "--volume",
-        f"{linux}:/cache/linux:rw",
+        f"{linux}:/cache/linux",
         "--volume",
-        f"{output}:/out:rw",
+        f"{output}:/out",
         "--volume",
-        f"{logs}:/logs:rw",
+        f"{logs}:/logs",
         "--volume",
         f"{workspace}:/workspace:ro",
         *log_arguments,
@@ -655,10 +680,21 @@ def _build_container_command(  # noqa: PLR0913
         "--env",
         "PYTHONPATH=/workspace/scripts",
         "--env",
-        f"FPLINUX_CONTAINER_IMAGE_RECIPE={image_recipe}",
+        (
+            "FPLINUX_CONTAINER_IMAGE_RECIPE="
+            f"{container_runtime_recipe_digest(image_recipe, image_generation)}"
+        ),
+        "--env",
+        f"FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE={image_recipe}",
+        "--env",
+        f"FPLINUX_CONTAINER_IMAGE_GENERATION={image_generation}",
         "--env",
         f"FPLINUX_WORKSPACE_DIGEST={snapshot.recipe}",
-        image,
+        "--workdir",
+        "/workspace",
+        "--init",
+        "--quiet",
+        "--",
         "python3",
         "-m",
         "fplinux_cli.builder",
@@ -708,7 +744,8 @@ def build(
     container_lock = load_container_lock()
     image_recipe = container_image_recipe_digest(container_lock)
     cache = ROOT / ".cache"
-    identity = _build_identity(snapshot, image_recipe, cache)
+    image_state = load_image_state(cache, image_recipe)
+    identity = _build_identity(snapshot, image_state, cache)
     current = _matching_target_bundle(
         target,
         identity,
@@ -746,19 +783,32 @@ def build(
         target=_profile_log_target(target, profile),
         verbose=verbose,
     )
-    podman = require_podman()
-    lock = container_lock["oci"]
     image = container_image_reference(container_lock, image_recipe)
-    if not image_ready(podman, image, image_recipe=image_recipe):
+    if not kern_available(container_lock):
         if offline:
             fail(
                 "offline build requires the current pinned OCI image; "
                 "run ./fplinux setup online first"
             )
-        setup(reporter=reporter, lock=container_lock, image_recipe=image_recipe)
-    image_identity = image_identifier(podman, image)
-    if image_identity is None:
-        fail("build requires an immutable current build image")
+        current_image = setup(reporter=reporter, lock=container_lock, image_recipe=image_recipe)
+    else:
+        current_image = None
+    kern = require_kern(container_lock)
+    inspected_image = current_image_state(kern, image, image_recipe)
+    if inspected_image is None:
+        if offline:
+            fail(
+                "offline build requires the current pinned OCI image; "
+                "run ./fplinux setup online first"
+            )
+        current_image = setup(reporter=reporter, lock=container_lock, image_recipe=image_recipe)
+    elif current_image is None:
+        current_image = publish_current_image_state(
+            kern,
+            image,
+            image_recipe,
+            state=inspected_image,
+        )
     apk_signing = _ensure_build_directory(cache / "apk-signing")
     downloads = _ensure_build_directory(cache / "downloads")
     apks = _ensure_build_directory(cache / "apks")
@@ -776,12 +826,11 @@ def build(
         with reporter.stage("container", passthrough=True, show_tail=False) as stage:
             stage.run(
                 _build_container_command(
-                    podman,
+                    kern,
                     target=target,
                     profile=profile,
                     jobs=jobs,
-                    platform=lock["platform"],
-                    image=image_identity,
+                    image=image,
                     offline=offline,
                     snapshot=snapshot,
                     workspace=workspace,
@@ -794,9 +843,11 @@ def build(
                     logs=container_logs,
                     log_environment=log_environment,
                     image_recipe=image_recipe,
-                )
+                    image_generation=current_image.image_generation,
+                ),
+                env=kern_environment(),
             )
-        identity = _build_identity(snapshot, image_recipe, cache)
+        identity = _build_identity(snapshot, current_image, cache)
         current = _matching_target_bundle(
             target,
             identity,
@@ -977,7 +1028,8 @@ def package_target(
     bundle, manifest = _resolve_target_bundle(target, selected_profile)
     snapshot = target_workspace_snapshot(target, selected_profile)
     image_recipe = container_image_recipe_digest()
-    identity = _build_identity(snapshot, image_recipe, ROOT / ".cache")
+    image_state = load_image_state(ROOT / ".cache", image_recipe)
+    identity = _build_identity(snapshot, image_state, ROOT / ".cache")
     files_table = manifest.get("files")
     try:
         required_boot_artifacts = _required_boot_artifacts(manifest)

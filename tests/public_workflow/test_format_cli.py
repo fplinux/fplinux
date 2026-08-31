@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class FormatCliWorkflowTests(unittest.TestCase):
-    """Exercise public parser and pre-Podman refusal behavior."""
+    """Exercise public parser and pre-runtime refusal behavior."""
 
     def run_format(self, *arguments: str, root: Path = ROOT) -> subprocess.CompletedProcess[str]:
         """Invoke the repository entrypoint with a bounded process lifetime."""
@@ -44,7 +44,7 @@ class FormatCliWorkflowTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("the following arguments are required: PATH", result.stderr)
 
-    def test_unsupported_source_is_rejected_before_podman(self) -> None:
+    def test_unsupported_source_is_rejected_before_runtime(self) -> None:
         """A checker-only source gets a named public error without tool execution."""
         with tempfile.TemporaryDirectory() as temporary:
             checkout = Path(temporary) / "source"
@@ -68,8 +68,8 @@ class FormatCliWorkflowTests(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("no project formatter is defined", result.stderr)
-        self.assertNotIn("podman", result.stdout.lower())
-        self.assertNotIn("podman", result.stderr.lower())
+        self.assertNotIn("kern", result.stdout.lower())
+        self.assertNotIn("kern", result.stderr.lower())
 
 
 if __name__ == "__main__":

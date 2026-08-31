@@ -46,7 +46,7 @@ PUBLIC_CHECK_SCOPES = (
 
 
 class CheckCommandTests(unittest.TestCase):
-    """Exercise parsing paths that must not start Podman."""
+    """Exercise parsing paths that must not start the container runtime."""
 
     def run_fplinux(self, *arguments: str) -> subprocess.CompletedProcess[str]:
         """Run the repository entrypoint and capture its short response."""

@@ -33,6 +33,7 @@ from .bundle_state import (
 )
 from .common import ROOT, sha256_bytes, sha256_file
 from .config import (
+    container_runtime_recipe_digest,
     load_asset_lock,
     load_platform,
     load_release,
@@ -114,6 +115,25 @@ def require_sha256(value: object, name: str) -> str:
     ):
         fail(f"{name} must be a lowercase SHA-256 digest")
     return value
+
+
+def container_image_environment() -> tuple[str, str, str]:
+    """Validate the static image recipe, exact generation and derived runtime recipe."""
+    image_recipe = require_sha256(
+        os.environ.get("FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE", ""),
+        "container image recipe",
+    )
+    generation = require_sha256(
+        os.environ.get("FPLINUX_CONTAINER_IMAGE_GENERATION", ""),
+        "container image generation",
+    )
+    runtime_recipe = require_sha256(
+        os.environ.get("FPLINUX_CONTAINER_IMAGE_RECIPE", ""),
+        "container runtime recipe",
+    )
+    if runtime_recipe != container_runtime_recipe_digest(image_recipe, generation):
+        fail("container runtime recipe does not match its image recipe and generation")
+    return image_recipe, generation, runtime_recipe
 
 
 def root_source(relative: str) -> Path:
@@ -1848,9 +1868,10 @@ def _publish_staged_bundle(
         require_file(release / relative)
 
     workspace_digest = os.environ.get("FPLINUX_WORKSPACE_DIGEST", "")
-    container_image_recipe = os.environ.get("FPLINUX_CONTAINER_IMAGE_RECIPE", "")
+    container_image_recipe, container_image_generation, _runtime_recipe = (
+        container_image_environment()
+    )
     require_sha256(workspace_digest, "workspace digest")
-    require_sha256(container_image_recipe, "container image recipe")
     require_sha256(linux_recipe, "Linux recipe")
     require_sha256(device_identity, "device identity")
     apk_signing_key = require_sha256(
@@ -1868,6 +1889,7 @@ def _publish_staged_bundle(
         "profile": selected_profile(target_config),
         "workspace_digest": workspace_digest,
         "container_image_recipe": container_image_recipe,
+        "container_image_generation": container_image_generation,
         "apk_signing_key": apk_signing_key,
         "linux_recipe": linux_recipe,
         "device_identity": device_identity,
@@ -1965,6 +1987,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.jobs < 1:
         fail("jobs must be positive")
+
+    container_image_environment()
 
     reporter = RunReporter.from_environment(f"build {args.target}", "build")
     with report_stage(reporter, "configuration"):

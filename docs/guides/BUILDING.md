@@ -7,28 +7,27 @@ tracked source files.
 ## Requirements and setup
 
 - Linux x86-64
-- rootless Podman
 - Python 3.14
+- unprivileged user namespaces
+- `newuidmap` and `newgidmap` with subordinate UID and GID ranges
 - network access until the pinned build inputs have been stored locally
 
-Check the host before building:
-
-```sh
-./fplinux doctor
-```
-
-`doctor` checks the host architecture, rootless Podman, and the pinned build
-environment. Rootless Podman needs subordinate UID and GID mappings; follow the
-[Podman installation guide](https://podman.io/docs/installation) and
-[rootless-mode requirements](https://docs.podman.io/en/latest/markdown/podman.1.html#rootless-mode)
-for the host distribution.
-
-The first build prepares its required environment automatically. It can also be
-prepared explicitly:
+Prepare the project-local Kern binary and pinned build environment, then check
+the host:
 
 ```sh
 ./fplinux setup
+./fplinux doctor
 ```
+
+`setup` downloads the pinned Kern release into the project cache and builds the
+pinned OCI environment. No system container engine is required. `doctor` checks
+the host architecture, the exact project-local Kern binary, Kern's host
+requirements, and the pinned build environment. Kern's image store,
+configuration and downloaded binary remain under `.cache/`. Temporary box state
+uses the current user's `$XDG_RUNTIME_DIR`.
+
+The first build also prepares a missing environment automatically.
 
 In a Git checkout, `setup` also selects the repository's commit-message hook.
 Commits use `type(scope): subject`, followed by a blank line and a non-empty

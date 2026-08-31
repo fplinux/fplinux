@@ -3,6 +3,8 @@ ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 
 ARG BASE_IMAGE
+ARG FPLINUX_IMAGE_RECIPE
+ARG FPLINUX_IMAGE_GENERATION
 ARG RUFF_VERSION=0.16.0
 ARG RUFF_SHA256=2138b7bc58ff877f5bba09aea4cc984ad5699433b6a3f811003527b8cff8e9ad
 ARG SPARSE_COMMIT=37156835e3d725b6d750f000be33ba3814bb2310
@@ -18,7 +20,7 @@ ENV LANG=C.UTF-8 \
     NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_FUND=false \
     NPM_CONFIG_UPDATE_NOTIFIER=false \
-    PATH=/opt/quality/bin:/opt/quality/node-tools/node_modules/.bin:${PATH}
+    PATH=/opt/quality/bin:/opt/quality/node-tools/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 RUN set -eux; \
     printf '%s\n' \
@@ -40,7 +42,7 @@ RUN set -eux; \
         gawk=5.3.2-r2 \
         genimage=19-r0 \
         git=2.54.0-r0 \
-        gzip=1.14-r2 \
+        gzip=1.14-r3 \
         libtool=2.6.0-r1 \
         make=4.4.1-r4 \
         mtools=4.0.49-r0 \
@@ -215,6 +217,10 @@ RUN set -eux; \
 RUN mkdir -p /cache/analysis /cache/downloads /cache/linux /cache/rootfs \
     /tmp/fplinux-home /workspace /work \
     && chmod 1777 /cache /tmp/fplinux-home /work
+
+RUN set -eu; \
+    printf '%s\n%s\n' "${FPLINUX_IMAGE_RECIPE}" "${FPLINUX_IMAGE_GENERATION}" \
+        > /etc/fplinux-image-state
 
 LABEL org.opencontainers.image.title="FPLinux build environment" \
       org.opencontainers.image.description="Reproducible Alpine Linux/amd64 environment for FPLinux kernel, APK and RAM-image builds" \

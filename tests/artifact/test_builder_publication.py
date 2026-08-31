@@ -20,6 +20,7 @@ from fplinux_cli.bundle_state import (
     create_bundle_staging,
     resolve_current_bundle,
 )
+from fplinux_cli.config import container_runtime_recipe_digest
 
 
 class RamSessionImageTests(unittest.TestCase):
@@ -283,7 +284,9 @@ class BuilderPublicationTests(unittest.TestCase):
         }
         self.environment = {
             "FPLINUX_WORKSPACE_DIGEST": "a" * 64,
-            "FPLINUX_CONTAINER_IMAGE_RECIPE": "b" * 64,
+            "FPLINUX_CONTAINER_IMAGE_RECIPE": container_runtime_recipe_digest("b" * 64, "c" * 64),
+            "FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE": "b" * 64,
+            "FPLINUX_CONTAINER_IMAGE_GENERATION": "c" * 64,
         }
         self.root_patch = mock.patch.object(builder, "ROOT", self.root)
         self.output_patch = mock.patch.object(builder, "OUTPUT", self.output)
@@ -403,6 +406,7 @@ class BuilderPublicationTests(unittest.TestCase):
                 "rootfs_receipt",
                 "boot_artifacts",
                 "container_image_recipe",
+                "container_image_generation",
                 "apk_signing_key",
                 "device_identity",
                 "files",
@@ -416,6 +420,8 @@ class BuilderPublicationTests(unittest.TestCase):
         )
         self.assertEqual(manifest["generation"], published.name)
         self.assertIsNone(manifest["profile"])
+        self.assertEqual(manifest["container_image_recipe"], "b" * 64)
+        self.assertEqual(manifest["container_image_generation"], "c" * 64)
         self.assertEqual(manifest["apk_signing_key"], "7" * 64)
         self.assertEqual(manifest["rootfs_receipt"]["recipe"], self.rootfs_recipe)
         self.assertEqual(

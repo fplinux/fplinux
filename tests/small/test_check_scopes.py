@@ -16,6 +16,7 @@ from fplinux_cli.container import (
     check_scope_receipt_recipe,
     resolve_check_scopes,
 )
+from fplinux_cli.image_state import ImageState
 from fplinux_cli.workspace import WorkspaceFile, WorkspaceSnapshot
 
 
@@ -29,19 +30,19 @@ class CheckScopeTests(unittest.TestCase):
             ("repository", "python", "kernel"),
         )
 
-    def test_scope_receipt_misses_after_orchestration_or_oci_identity_changes(self) -> None:
-        """Do not reuse one scope across checker or immutable image changes."""
+    def test_scope_receipt_misses_after_orchestration_or_generation_changes(self) -> None:
+        """Do not reuse one scope across checker or image generation changes."""
         closure = "a" * 64
         first_orchestration = "b" * 64
-        image = "sha256:" + "c" * 64
+        generation = "c" * 64
         with mock.patch.object(
             container,
             "check_orchestration_recipe_digest",
             return_value=first_orchestration,
         ):
-            first = check_scope_receipt_recipe("python", closure, image_identity=image)
-            image_changed = check_scope_receipt_recipe(
-                "python", closure, image_identity="sha256:" + "d" * 64
+            first = check_scope_receipt_recipe("python", closure, image_generation=generation)
+            generation_changed = check_scope_receipt_recipe(
+                "python", closure, image_generation="d" * 64
             )
         with mock.patch.object(
             container,
@@ -49,27 +50,27 @@ class CheckScopeTests(unittest.TestCase):
             return_value="e" * 64,
         ):
             orchestration_changed = check_scope_receipt_recipe(
-                "python", closure, image_identity=image
+                "python", closure, image_generation=generation
             )
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary)
             publish_success_receipt(cache, first)
             self.assertTrue(receipt_matches(cache, first))
-            self.assertFalse(receipt_matches(cache, image_changed))
+            self.assertFalse(receipt_matches(cache, generation_changed))
             self.assertFalse(receipt_matches(cache, orchestration_changed))
 
-    def test_named_kernel_profile_has_its_own_receipt_identity(self) -> None:
+    def test_named_kernel_profile_has_its_own_receipt_generation(self) -> None:
         """Profile selection keeps default and named cache slots distinct."""
         default = check_scope_receipt_recipe(
             "kernel",
             "a" * 64,
-            image_identity="sha256:" + "b" * 64,
+            image_generation="b" * 64,
             orchestration_recipe="c" * 64,
         )
         profile = check_scope_receipt_recipe(
             "kernel",
             "a" * 64,
-            image_identity="sha256:" + "b" * 64,
+            image_generation="b" * 64,
             orchestration_recipe="c" * 64,
             profile="usb-host-lab",
         )
@@ -229,13 +230,13 @@ class CheckScopeTests(unittest.TestCase):
         first_recipe = check_scope_receipt_recipe(
             "kernel",
             first_digest,
-            image_identity="sha256:" + "c" * 64,
+            image_generation="c" * 64,
             orchestration_recipe="d" * 64,
         )
         header_recipe = check_scope_receipt_recipe(
             "kernel",
             header_digest,
-            image_identity="sha256:" + "c" * 64,
+            image_generation="c" * 64,
             orchestration_recipe="d" * 64,
         )
         with tempfile.TemporaryDirectory() as temporary:
@@ -518,17 +519,17 @@ class CheckScopeTests(unittest.TestCase):
             ),
             "c" * 64,
         )
-        image_identity = "sha256:" + "e" * 64
+        image_generation = "e" * 64
         first_recipe = check_scope_receipt_recipe(
             "shell",
             check_scope_closure_digest("shell", base),
-            image_identity=image_identity,
+            image_generation=image_generation,
             orchestration_recipe="f" * 64,
         )
         initd_recipe = check_scope_receipt_recipe(
             "shell",
             check_scope_closure_digest("shell", changed_initd),
-            image_identity=image_identity,
+            image_generation=image_generation,
             orchestration_recipe="f" * 64,
         )
         with tempfile.TemporaryDirectory() as temporary:
@@ -559,7 +560,7 @@ class CheckScopeTests(unittest.TestCase):
 class RepositoryFastPathTests(unittest.TestCase):
     """Keep the repository-only check completely on the host."""
 
-    def test_repository_check_returns_before_podman_or_workspace(self) -> None:
+    def test_repository_check_returns_before_runtime_or_workspace(self) -> None:
         """Return after the host check without requiring a container or snapshot."""
         reporter = mock.Mock()
         with (
@@ -567,8 +568,8 @@ class RepositoryFastPathTests(unittest.TestCase):
             mock.patch.object(container, "check_git_diff") as git_diff,
             mock.patch.object(
                 container,
-                "require_podman",
-                side_effect=AssertionError("repository check must not require Podman"),
+                "kern_available",
+                side_effect=AssertionError("repository check must not inspect Kern"),
             ),
             mock.patch.object(
                 container,
@@ -649,27 +650,27 @@ class KernelExecutionLimitTests(unittest.TestCase):
             recipe = check_scope_receipt_recipe(
                 "kernel",
                 "a" * 64,
-                image_identity="sha256:" + "b" * 64,
+                image_generation="b" * 64,
                 orchestration_recipe="c" * 64,
                 profile="microsd-uboot",
             )
 
             def run_with_jobs(jobs: int) -> None:
-                container._run_missing_checks(  # noqa: SLF001 -- execution boundary.
-                    reporter=_RecordingReporter(  # type: ignore[arg-type]
-                        root / f"logs-{jobs}", commands
-                    ),
-                    cache=cache,
-                    missing=("kernel",),
-                    analyzer_cache=analyzer_cache,
-                    workspace=workspace,
-                    podman="podman",
-                    lock={"platform": "linux/amd64"},
-                    image_identity="sha256:" + "b" * 64,
-                    recipes={"kernel": recipe},
-                    profile="microsd-uboot",
-                    jobs=jobs,
-                )
+                with mock.patch.object(container, "kern_environment", return_value={}):
+                    container._run_missing_checks(  # noqa: SLF001 -- execution boundary.
+                        reporter=_RecordingReporter(  # type: ignore[arg-type]
+                            root / f"logs-{jobs}", commands
+                        ),
+                        cache=cache,
+                        missing=("kernel",),
+                        analyzer_cache=analyzer_cache,
+                        workspace=workspace,
+                        kern="kern",
+                        image="localhost/fplinux-build:locked",
+                        recipes={"kernel": recipe},
+                        profile="microsd-uboot",
+                        jobs=jobs,
+                    )
 
             run_with_jobs(1)
             first_receipt = receipt_path(cache, recipe).read_bytes()
@@ -677,11 +678,12 @@ class KernelExecutionLimitTests(unittest.TestCase):
             second_receipt = receipt_path(cache, recipe).read_bytes()
 
             first_prepare, first_analysis, second_prepare, second_analysis = commands
-            self.assertIn(f"{root / 'logs-1/containers'}:/logs:rw", first_prepare)
-            self.assertIn(f"{analyzer_cache['linux']}:/cache/linux:rw", first_prepare)
+            self.assertIn(f"{root / 'logs-1/containers'}:/logs", first_prepare)
+            self.assertIn(f"{workspace}:/workspace:ro", first_prepare)
+            self.assertIn(f"{analyzer_cache['downloads']}:/cache/downloads", first_prepare)
+            self.assertIn(f"{analyzer_cache['linux']}:/cache/linux", first_prepare)
+            self.assertIn(f"{analyzer_cache['analysis']}:/cache/analysis", first_analysis)
             self.assertIn(f"{analyzer_cache['linux']}:/cache/linux:ro", first_analysis)
-            self.assertIn("label=disable", first_prepare)
-            self.assertIn("label=disable", first_analysis)
             self.assertEqual(
                 first_prepare[-3:],
                 ["prepare", "--profile", "microsd-uboot"],
@@ -705,7 +707,7 @@ class KernelExecutionLimitTests(unittest.TestCase):
                     check_scope_receipt_recipe(
                         "kernel",
                         "a" * 64,
-                        image_identity="sha256:" + "b" * 64,
+                        image_generation="b" * 64,
                         orchestration_recipe="c" * 64,
                         profile="microsd-uboot",
                     ),
@@ -751,13 +753,23 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
             mock.patch("fplinux_cli.output.RunReporter.create", return_value=reporter),
             mock.patch.object(
                 container,
-                "require_podman",
+                "kern_available",
                 side_effect=(
-                    AssertionError("exact check hit must not require Podman")
+                    AssertionError("exact check hit must not inspect Kern")
                     if exact_hit_guard
                     else None
                 ),
-                return_value=None if exact_hit_guard else "podman",
+                return_value=None if exact_hit_guard else True,
+            ),
+            mock.patch.object(
+                container,
+                "require_kern",
+                side_effect=(
+                    AssertionError("exact check hit must not require Kern")
+                    if exact_hit_guard
+                    else None
+                ),
+                return_value=None if exact_hit_guard else "kern",
             ),
             mock.patch.object(
                 container,
@@ -771,24 +783,15 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
             ),
             mock.patch.object(
                 container,
-                "image_ready",
+                "current_image_state",
                 side_effect=(
                     AssertionError("exact check hit must not inspect an image")
                     if exact_hit_guard
                     else None
                 ),
-                return_value=None if exact_hit_guard else True,
+                return_value=(None if exact_hit_guard else ImageState("b" * 64, "c" * 64)),
             ),
-            mock.patch.object(
-                container,
-                "image_identifier",
-                side_effect=(
-                    AssertionError("exact check hit must not inspect an image ID")
-                    if exact_hit_guard
-                    else None
-                ),
-                return_value=(None if exact_hit_guard else "sha256:" + "c" * 64),
-            ),
+            mock.patch.object(container, "kern_environment", return_value={}),
             mock.patch.object(
                 container,
                 "container_image_recipe_digest",

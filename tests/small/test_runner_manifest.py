@@ -340,6 +340,7 @@ class NoTransportRunnerTests(unittest.TestCase):
             "rootfs_receipt": {"recipe": "a" * 64, "sha256": "b" * 64},
             "boot_artifacts": {"required": []},
             "container_image_recipe": "c" * 64,
+            "container_image_generation": "9" * 64,
             "apk_signing_key": "d" * 64,
             "device_identity": "e" * 64,
             "files": {

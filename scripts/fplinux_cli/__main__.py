@@ -247,7 +247,7 @@ def main() -> None:
         required=True,
         metavar=_PUBLIC_COMMAND_METAVAR,
     )
-    commands.add_parser("doctor", help="check the rootless build host")
+    commands.add_parser("doctor", help="check the project-local build runtime")
     check_parser = commands.add_parser("check", help="run the source quality gate")
     check_parser.add_argument(
         "scopes",

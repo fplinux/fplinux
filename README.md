@@ -22,10 +22,13 @@ phone's boot key, hardware support, safe use, and limitations; see the shared
 
 ### Quick start
 
-Build hosts need Linux x86-64, rootless Podman, and Python 3.14.
-Network access is needed until the pinned build inputs have been stored locally.
+Build hosts need Linux x86-64 and Python 3.14. FPLinux installs its
+pinned Kern binary inside the project cache; no system container engine is
+required. Network access is needed until the pinned build inputs have been
+stored locally.
 
 ```sh
+./fplinux setup
 ./fplinux doctor
 ./fplinux build <target>
 ```
