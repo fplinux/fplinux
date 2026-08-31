@@ -1,5 +1,13 @@
+[kern]
+version = "0.7.1"
+archive_url = "https://github.com/getkern/kern/releases/download/v0.7.1/kern-x86_64-unknown-linux-musl.tar.gz"
+archive_sha256 = "d056c09831e5b571fe68465f877087ba4716e60f37deaa2ae9b99ed2f814858e"
+binary_sha256 = "d93b8dff36e7fc59644ba3f967a6bc3d388b0432142b76c8555350149c90a973"
+
 [oci]
 repository = "localhost/fplinux-build"
 platform = "linux/amd64"
-base = "docker.io/library/alpine@sha256:79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f"
-base_created = "2026-06-16T00:01:29Z"
+base_repository = "localhost/fplinux-alpine-base"
+base_release = "3.24.1"
+base_rootfs_url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86_64/alpine-minirootfs-3.24.1-x86_64.tar.gz"
+base_rootfs_sha256 = "41f73e3cf5fa919b8aa5ca6b30dc48f0da2720776d7423e2a7748211456fe081"

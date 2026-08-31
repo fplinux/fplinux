@@ -311,14 +311,11 @@ def check_markdown_links(files: list[Path]) -> None:
 
 def check_container_policy(files: list[Path]) -> None:
     containerfiles = [path for path in files if path.name == "Containerfile"]
-    dockerfiles = [path for path in files if path.name == "Dockerfile"]
-    compose_files = [
-        path
-        for path in files
-        if re.fullmatch(r"(?:docker-)?compose(?:\.[^.]+)?\.ya?ml", path.name)
-    ]
-    if len(containerfiles) != 1 or dockerfiles or compose_files:
-        fail("source must contain exactly one Containerfile and no Dockerfile or compose file")
+    context_ignores = [path for path in files if path.name == ".kernignore"]
+    if [path.relative_to(ROOT).as_posix() for path in containerfiles] != ["Containerfile"]:
+        fail("source must contain exactly one root Containerfile")
+    if [path.relative_to(ROOT).as_posix() for path in context_ignores] != [".kernignore"]:
+        fail("source must contain exactly one root .kernignore")
     instructions = [
         line.strip()
         for line in containerfiles[0].read_text().splitlines()
@@ -630,8 +627,8 @@ def main() -> None:
             )
     if "container" in selected:
         with report_stage(reporter, "container-lint"):
-            # Podman's OCI output has no SHELL support, so pipefail cannot be enabled
-            # (DL4006); every pipe feeds printf output into a checked sha256sum.
+            # The build recipe intentionally uses POSIX sh without pipefail (DL4006);
+            # every pipe feeds printf output into a checked sha256sum.
             run(["hadolint", "--ignore", "DL4006", "Containerfile"])
     if "alpine" in selected:
         apkbuilds = alpine_apkbuilds(files)

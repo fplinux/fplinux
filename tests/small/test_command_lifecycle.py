@@ -25,6 +25,8 @@ from fplinux_cli.bundle_state import (
     publish_current_bundle,
     published_file_records,
 )
+from fplinux_cli.config import container_runtime_recipe_digest
+from fplinux_cli.image_state import ImageState, publish_image_state
 from fplinux_cli.workspace import WorkspaceSnapshot
 
 if TYPE_CHECKING:
@@ -54,6 +56,7 @@ class CommandLifecycleTests(unittest.TestCase):
         signing_key.write_bytes(b"test public signing key\n")
         self.signing_key = hashlib.sha256(signing_key.read_bytes()).hexdigest()
         self.snapshot = WorkspaceSnapshot((), "c" * 64)
+        publish_image_state(self.cache, ImageState("e" * 64, "a" * 64))
         self.bundle_path = self._create_generation("a" * 64)
         self.bundle = publish_current_bundle(self.output, "phone", self.bundle_path)
 
@@ -69,6 +72,7 @@ class CommandLifecycleTests(unittest.TestCase):
         return {
             "workspace_digest": self.snapshot.recipe,
             "container_image_recipe": "e" * 64,
+            "container_image_generation": "a" * 64,
             "apk_signing_key": self.signing_key,
             "device_identity": "9" * 64,
             "rootfs_receipt": {"recipe": "f" * 64, "sha256": "0" * 64},
@@ -119,7 +123,7 @@ class CommandLifecycleTests(unittest.TestCase):
         """Leave complete generations present while making the current receipt miss."""
         bundle_pointer(self.output, "phone").unlink()
 
-    def test_exact_build_hit_ignores_jobs_and_avoids_podman_or_staging(self) -> None:
+    def test_exact_build_hit_ignores_jobs_and_avoids_runtime_or_staging(self) -> None:
         """Both job counts reuse the same valid generation without starting build work."""
         with (
             mock.patch.object(commands, "ROOT", self.root),
@@ -135,8 +139,8 @@ class CommandLifecycleTests(unittest.TestCase):
             mock.patch.object(commands, "container_image_recipe_digest", return_value="e" * 64),
             mock.patch.object(
                 commands,
-                "require_podman",
-                side_effect=AssertionError("cache hit must not inspect Podman"),
+                "kern_available",
+                side_effect=AssertionError("cache hit must not inspect Kern"),
             ),
             mock.patch.object(
                 commands,
@@ -198,7 +202,9 @@ class CommandLifecycleTests(unittest.TestCase):
     def test_corrupted_bundle_image_is_not_an_exact_hit(self) -> None:
         """A bundle whose image bytes drifted from the manifest is rebuilt."""
         (self.bundle_path / "image/ramboot.bin").write_bytes(b"corrupt\n")
-        identity = commands.BuildIdentity(self.snapshot.recipe, "e" * 64, self.signing_key)
+        identity = commands.BuildIdentity(
+            self.snapshot.recipe, "e" * 64, "a" * 64, self.signing_key
+        )
         with mock.patch.object(commands, "ROOT", self.root):
             self.assertIsNone(
                 commands._matching_target_bundle(  # noqa: SLF001
@@ -210,7 +216,9 @@ class CommandLifecycleTests(unittest.TestCase):
 
     def test_exact_bundle_identity_and_image_are_a_reusable_hit(self) -> None:
         """Reuse a resolved generation only when its identity and image bytes match."""
-        identity = commands.BuildIdentity(self.snapshot.recipe, "e" * 64, self.signing_key)
+        identity = commands.BuildIdentity(
+            self.snapshot.recipe, "e" * 64, "a" * 64, self.signing_key
+        )
         with mock.patch.object(commands, "ROOT", self.root):
             matched = commands._matching_target_bundle(  # noqa: SLF001
                 "phone",
@@ -227,9 +235,10 @@ class CommandLifecycleTests(unittest.TestCase):
     def test_each_build_identity_mismatch_is_a_cache_miss(self) -> None:
         """Reject a generation when any host-visible causal identity changed."""
         mismatches = (
-            commands.BuildIdentity("d" * 64, "e" * 64, self.signing_key),
-            commands.BuildIdentity("c" * 64, "f" * 64, self.signing_key),
-            commands.BuildIdentity("c" * 64, "e" * 64, "8" * 64),
+            commands.BuildIdentity("d" * 64, "e" * 64, "a" * 64, self.signing_key),
+            commands.BuildIdentity("c" * 64, "f" * 64, "a" * 64, self.signing_key),
+            commands.BuildIdentity("c" * 64, "e" * 64, "b" * 64, self.signing_key),
+            commands.BuildIdentity("c" * 64, "e" * 64, "a" * 64, "8" * 64),
         )
         with mock.patch.object(commands, "ROOT", self.root):
             for identity in mismatches:
@@ -260,9 +269,19 @@ class CommandLifecycleTests(unittest.TestCase):
             ),
             mock.patch.object(commands, "load_container_lock", return_value=self.lock),
             mock.patch.object(commands, "container_image_recipe_digest", return_value="e" * 64),
-            mock.patch.object(commands, "require_podman", return_value="podman"),
-            mock.patch.object(commands, "image_ready", return_value=True),
-            mock.patch.object(commands, "image_identifier", return_value="sha256:" + "a" * 64),
+            mock.patch.object(commands, "kern_available", return_value=True),
+            mock.patch.object(commands, "require_kern", return_value="kern"),
+            mock.patch.object(
+                commands,
+                "current_image_state",
+                return_value=ImageState("e" * 64, "a" * 64),
+            ),
+            mock.patch.object(
+                commands,
+                "publish_current_image_state",
+                return_value=ImageState("e" * 64, "a" * 64),
+            ),
+            mock.patch.object(commands, "kern_environment", return_value={}),
             mock.patch.object(
                 commands,
                 "stage_workspace_snapshot",
@@ -294,7 +313,7 @@ class CommandLifecycleTests(unittest.TestCase):
         old = self._create_generation("b" * 64)
         self._clear_current_bundle()
 
-        def publish_result(_stage: output.Stage, _command: list[str]) -> None:
+        def publish_result(_stage: output.Stage, _command: list[str], **_kwargs: object) -> None:
             publish_current_bundle(self.output, "phone", self.bundle_path)
 
         with (
@@ -309,9 +328,19 @@ class CommandLifecycleTests(unittest.TestCase):
             ),
             mock.patch.object(commands, "load_container_lock", return_value=self.lock),
             mock.patch.object(commands, "container_image_recipe_digest", return_value="e" * 64),
-            mock.patch.object(commands, "require_podman", return_value="podman"),
-            mock.patch.object(commands, "image_ready", return_value=True),
-            mock.patch.object(commands, "image_identifier", return_value="sha256:" + "a" * 64),
+            mock.patch.object(commands, "kern_available", return_value=True),
+            mock.patch.object(commands, "require_kern", return_value="kern"),
+            mock.patch.object(
+                commands,
+                "current_image_state",
+                return_value=ImageState("e" * 64, "a" * 64),
+            ),
+            mock.patch.object(
+                commands,
+                "publish_current_image_state",
+                return_value=ImageState("e" * 64, "a" * 64),
+            ),
+            mock.patch.object(commands, "kern_environment", return_value={}),
             mock.patch.object(
                 commands,
                 "stage_workspace_snapshot",
@@ -350,8 +379,9 @@ class CommandLifecycleTests(unittest.TestCase):
             ),
             mock.patch.object(commands, "load_container_lock", return_value=self.lock),
             mock.patch.object(commands, "container_image_recipe_digest", return_value="e" * 64),
-            mock.patch.object(commands, "require_podman", return_value="podman"),
-            mock.patch.object(commands, "image_ready", return_value=False),
+            mock.patch.object(commands, "kern_available", return_value=True),
+            mock.patch.object(commands, "require_kern", return_value="kern"),
+            mock.patch.object(commands, "current_image_state", return_value=None),
             mock.patch.object(
                 commands,
                 "setup",
@@ -703,10 +733,9 @@ class CommandLifecycleTests(unittest.TestCase):
         }
         with mock.patch.dict(os.environ, {}, clear=True):
             command = commands._build_container_command(  # noqa: SLF001
-                "/usr/bin/podman",
+                "/usr/bin/kern",
                 target="phone",
                 jobs=6,
-                platform="linux/amd64",
                 image="localhost/fplinux-build:locked",
                 offline=False,
                 snapshot=self.snapshot,
@@ -714,30 +743,37 @@ class CommandLifecycleTests(unittest.TestCase):
                 profile=None,
                 log_environment={"FPLINUX_LOG_ROOT": "/logs"},
                 image_recipe="e" * 64,
+                image_generation="a" * 64,
             )
 
         mounts = [command[index + 1] for index, value in enumerate(command) if value == "--volume"]
         self.assertEqual(
             mounts,
             [
-                f"{roots['downloads']}:/cache/downloads:rw",
-                f"{roots['apk_signing']}:/cache/apk-signing:rw",
-                f"{roots['apks']}:/cache/apks:rw",
-                f"{roots['rootfs']}:/cache/rootfs:rw",
-                f"{roots['linux']}:/cache/linux:rw",
-                f"{roots['output']}:/out:rw",
-                f"{roots['logs']}:/logs:rw",
+                f"{roots['downloads']}:/cache/downloads",
+                f"{roots['apk_signing']}:/cache/apk-signing",
+                f"{roots['apks']}:/cache/apks",
+                f"{roots['rootfs']}:/cache/rootfs",
+                f"{roots['linux']}:/cache/linux",
+                f"{roots['output']}:/out",
+                f"{roots['logs']}:/logs",
                 f"{roots['workspace']}:/workspace:ro",
             ],
         )
-        self.assertNotIn(f"{self.root / 'cache'}:/cache:rw", command)
-        self.assertIn("label=disable", command)
         self.assertIn("--read-only", command)
+        self.assertIn("--privileged", command)
         self.assertFalse(any(mount.split(":", 2)[1] == "/cache" for mount in mounts))
+        self.assertIn(
+            "FPLINUX_CONTAINER_IMAGE_RECIPE="
+            + container_runtime_recipe_digest("e" * 64, "a" * 64),
+            command,
+        )
+        self.assertIn("FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE=" + "e" * 64, command)
+        self.assertIn("FPLINUX_CONTAINER_IMAGE_GENERATION=" + "a" * 64, command)
         self.assertEqual(
             command[-8:],
             [
-                "localhost/fplinux-build:locked",
+                "--",
                 "python3",
                 "-m",
                 "fplinux_cli.builder",
@@ -747,11 +783,9 @@ class CommandLifecycleTests(unittest.TestCase):
                 "6",
             ],
         )
-        self.assertEqual(
-            command[:2],
-            ["/usr/bin/podman", "run"],
-        )
-        self.assertNotIn("--network=none", command)
+        self.assertEqual(command[:2], ["/usr/bin/kern", "box"])
+        network = command.index("--network")
+        self.assertEqual(command[network + 1], "host")
 
     def test_offline_build_argv_disables_container_network(self) -> None:
         """Offline mode is an execution policy, not a separate build identity."""
@@ -766,10 +800,9 @@ class CommandLifecycleTests(unittest.TestCase):
             "logs": self.root / "cache/logs/build/run",
         }
         command = commands._build_container_command(  # noqa: SLF001
-            "/usr/bin/podman",
+            "/usr/bin/kern",
             target="phone",
             jobs=6,
-            platform="linux/amd64",
             image="localhost/fplinux-build:locked",
             offline=True,
             snapshot=self.snapshot,
@@ -777,10 +810,11 @@ class CommandLifecycleTests(unittest.TestCase):
             profile=None,
             log_environment={"FPLINUX_LOG_ROOT": "/logs"},
             image_recipe="e" * 64,
+            image_generation="a" * 64,
         )
 
-        self.assertIn("--network=none", command)
-        self.assertLess(command.index("--network=none"), command.index("--platform"))
+        network = command.index("--network")
+        self.assertEqual(command[network + 1], "none")
 
 
 class ChecksumAportTests(unittest.TestCase):
@@ -821,9 +855,14 @@ class ChecksumAportTests(unittest.TestCase):
             mock.patch.object(commands, "ROOT", self.root),
             mock.patch.object(workspace_module, "ROOT", self.root),
             mock.patch.object(output, "ROOT", self.root),
-            mock.patch.object(commands, "require_podman", return_value="/usr/bin/podman"),
-            mock.patch.object(commands, "image_ready", return_value=True),
-            mock.patch.object(commands, "image_identifier", return_value="sha256:" + "a" * 64),
+            mock.patch.object(commands, "kern_available", return_value=True),
+            mock.patch.object(commands, "require_kern", return_value="/usr/bin/kern"),
+            mock.patch.object(
+                commands,
+                "current_image_state",
+                return_value=ImageState("e" * 64, "a" * 64),
+            ),
+            mock.patch.object(commands, "kern_environment", return_value={}),
             mock.patch.object(output.Stage, "run", autospec=True, side_effect=container_run),
             contextlib.redirect_stdout(io.StringIO()),
             contextlib.redirect_stderr(io.StringIO()),
@@ -836,8 +875,8 @@ class ChecksumAportTests(unittest.TestCase):
         for index, argument in enumerate(command[:-1]):
             if argument != "--volume":
                 continue
-            mount = command[index + 1].rsplit(":", 2)
-            if len(mount) == 3 and mount[1] == "/workspace":
+            mount = command[index + 1].split(":")
+            if len(mount) >= 2 and mount[1] == "/workspace":
                 workspace_sources.append(Path(mount[0]))
         self.assertEqual(len(workspace_sources), 1)
 
@@ -860,6 +899,29 @@ class ChecksumAportTests(unittest.TestCase):
         self.assertEqual(self.apkbuild.stat().st_mode & 0o777, 0o640)
         self.assertNotEqual(self.apkbuild.stat().st_ino, inode_before)
         self.assertEqual(list(self.aport.glob(".APKBUILD.*")), [])
+
+    def test_container_shares_downloads_and_keeps_the_stage_private(self) -> None:
+        """Keep the persistent source cache shared without exposing the private stage."""
+
+        def inspect(_stage: output.Stage, command: list[str], **_kwargs: object) -> None:
+            mounts = {}
+            for index, argument in enumerate(command[:-1]):
+                if argument != "--volume":
+                    continue
+                parts = command[index + 1].split(":")
+                destination = parts[1]
+                mounts[destination] = "ro" if parts[2:] == ["ro"] else "rw"
+            self.assertEqual(
+                mounts,
+                {
+                    "/cache/downloads": "rw",
+                    "/workspace": "rw",
+                },
+            )
+            generated = self._staged_apkbuild(command)
+            generated.write_bytes(self.AFTER_APKBUILD)
+
+        self._run(inspect)
 
     def test_non_checksum_generation_failure_keeps_canonical_apkbuild(self) -> None:
         """Reject OCI output that changes recipe text before atomic publication."""

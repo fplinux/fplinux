@@ -6,7 +6,7 @@ SPDX-PackageSupplier = "FPLinux contributors"
 path = [
   ".cache/.fplinux-workspace",
   ".clang-format",
-  ".containerignore",
+  ".kernignore",
   ".editorconfig",
   ".gitattributes",
   ".githooks/**",

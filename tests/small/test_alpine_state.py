@@ -340,7 +340,7 @@ class AlpineStateTests(unittest.TestCase):
         """Removing one otherwise valid package selects a different rootfs."""
         self.assertNotEqual(self._recipe(), self._recipe(packages=self.packages[:1]))
 
-    def test_container_image_identity_is_causal(self) -> None:
+    def test_container_runtime_recipe_is_causal(self) -> None:
         """Changing the build environment invalidates the rootfs recipe."""
         self.assertNotEqual(self._recipe("1" * 64), self._recipe("2" * 64))
 

@@ -14,7 +14,14 @@ from .config import (
     container_image_reference,
     load_container_lock,
 )
-from .container import image_identifier, image_ready, require_podman, setup
+from .container import (
+    current_image_state,
+    kern_available,
+    kern_box_name,
+    kern_environment,
+    require_kern,
+    setup,
+)
 from .output import RunReporter
 from .source_formats import SourceFormats, classify_source_formats
 from .workspace import (
@@ -180,35 +187,37 @@ def formatter_commands(
 
 
 def _container_command(
-    podman: str,
+    kern: str,
     *,
-    platform: str,
     image: str,
     workspace: Path,
     formatter: list[str],
 ) -> list[str]:
     return [
-        podman,
-        "run",
-        "--security-opt",
-        "label=disable",
-        "--rm",
-        "--platform",
-        platform,
-        "--userns=keep-id",
-        "--network=none",
+        kern,
+        "box",
+        kern_box_name("format"),
+        "--image",
+        image,
+        "--pull",
+        "never",
+        "--network",
+        "none",
         "--read-only",
         "--tmpfs",
-        "/tmp:rw,nosuid,nodev",  # noqa: S108 -- container tmpfs.
+        "/tmp:256m",  # noqa: S108 -- container tmpfs.
+        "--no-uid-range",
         "--volume",
-        f"{workspace}:/workspace:rw",
+        f"{workspace}:/workspace",
         "--workdir",
         "/workspace",
         "--env",
         "HOME=/tmp",
         "--env",
         "RUFF_CACHE_DIR=/tmp/ruff",
-        image,
+        "--init",
+        "--quiet",
+        "--",
         *formatter,
     ]
 
@@ -298,16 +307,12 @@ def format_sources(values: Sequence[str]) -> None:
     snapshot = workspace_snapshot(inventory)
     container_lock = load_container_lock()
     image_recipe = container_image_recipe_digest(container_lock)
-    lock = container_lock["oci"]
-    podman = require_podman()
     image = container_image_reference(container_lock, image_recipe)
-    if not image_ready(podman, image, image_recipe=image_recipe):
-        image_identity = setup(lock=container_lock, image_recipe=image_recipe).image_identity
-    else:
-        current_identity = image_identifier(podman, image)
-        if current_identity is None:
-            fail("format requires an immutable current build image")
-        image_identity = current_identity
+    if not kern_available(container_lock):
+        setup(lock=container_lock, image_recipe=image_recipe)
+    kern = require_kern(container_lock)
+    if current_image_state(kern, image, image_recipe) is None:
+        setup(lock=container_lock, image_recipe=image_recipe)
 
     reporter = RunReporter.create("format", target=None, verbose=False)
     with reporter.stage("sources", passthrough=True, show_tail=True) as stage:
@@ -316,12 +321,12 @@ def format_sources(values: Sequence[str]) -> None:
             for _name, command in formatter_commands(groups):
                 stage.run(
                     _container_command(
-                        podman,
-                        platform=lock["platform"],
-                        image=image_identity,
+                        kern,
+                        image=image,
                         workspace=projection,
                         formatter=command,
                     ),
+                    env=kern_environment(),
                     timeout=_FORMAT_TIMEOUT_SECONDS,
                 )
 
