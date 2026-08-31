@@ -140,9 +140,9 @@ class CliCacheLockTests(unittest.TestCase):
         )
 
     def test_check_defaults_match_the_selected_execution_boundary(self) -> None:
-        """Use two kernel workers normally and one when no parallel work can run."""
+        """Use three kernel workers normally and one when no parallel work can run."""
         cases: tuple[tuple[list[str], list[str], bool, int], ...] = (
-            (["check"], [], False, 2),
+            (["check"], [], False, 3),
             (["check", "docs"], ["docs"], False, 1),
             (["check", "--verbose"], [], True, 1),
         )
