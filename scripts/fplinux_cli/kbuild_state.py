@@ -259,7 +259,7 @@ def _outputs_exist(output: Path, plan: KbuildPlan) -> bool:
 def _read_json(path: Path) -> dict[str, object] | None:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return None
     return value if isinstance(value, dict) else None
 

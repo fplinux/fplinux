@@ -22,7 +22,7 @@ phone's boot key, hardware support, safe use, and limitations; see the shared
 
 ### Quick start
 
-Build hosts need Linux x86-64, rootless Podman, and Python 3.11 or newer.
+Build hosts need Linux x86-64, rootless Podman, and Python 3.14.
 Network access is needed until the pinned build inputs have been stored locally.
 
 ```sh

@@ -207,7 +207,7 @@ def _matching_target_bundle(
             profile,
         )
         manifest = _bundle_manifest(bundle)
-    except (BundleStateError, OSError, UnicodeDecodeError, ValueError):
+    except BundleStateError, OSError, UnicodeDecodeError, ValueError:
         return None
     if not _manifest_matches_identity(manifest, identity):
         return None

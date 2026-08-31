@@ -49,7 +49,7 @@ def read_json_object(path: Path) -> dict[str, object] | None:
     """Read a receipt only when it is an ordinary JSON object."""
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return None
     return value if isinstance(value, dict) else None
 

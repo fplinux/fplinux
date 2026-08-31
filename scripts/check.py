@@ -602,20 +602,19 @@ def main() -> None:
             run(["mypy", *python_files])
             if (ROOT / "tests").is_dir():
                 for tier, timeout in _PYTHON_TEST_TIERS:
-                    for interpreter in ("python3", "python3.11"):
-                        run(
-                            [
-                                interpreter,
-                                "-m",
-                                "unittest",
-                                "discover",
-                                "-s",
-                                f"tests/{tier}",
-                                "-t",
-                                ".",
-                            ],
-                            timeout=timeout,
-                        )
+                    run(
+                        [
+                            "python3",
+                            "-m",
+                            "unittest",
+                            "discover",
+                            "-s",
+                            f"tests/{tier}",
+                            "-t",
+                            ".",
+                        ],
+                        timeout=timeout,
+                    )
     if "shell" in selected:
         with report_stage(reporter, "shell"):
             run(["shfmt", "-d", "-ln", "posix", *posix_shell_files])
