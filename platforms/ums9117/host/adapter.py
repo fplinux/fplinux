@@ -166,7 +166,7 @@ def usb_device_path(vendor: int, product: int) -> Path | None:
             current_product = int(vendor_file.with_name("idProduct").read_text().strip(), 16)
             bus = int((device / "busnum").read_text().strip())
             number = int((device / "devnum").read_text().strip())
-        except (FileNotFoundError, PermissionError, ValueError):
+        except FileNotFoundError, PermissionError, ValueError:
             continue
         if (current_vendor, current_product) == (vendor, product):
             return Path(f"/dev/bus/usb/{bus:03d}/{number:03d}")

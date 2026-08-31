@@ -8,7 +8,7 @@ tracked source files.
 
 - Linux x86-64
 - rootless Podman
-- Python 3.11 or newer
+- Python 3.14
 - network access until the pinned build inputs have been stored locally
 
 Check the host before building:

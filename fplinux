@@ -8,4 +8,9 @@ PYTHONPATH="$ROOT/scripts${PYTHONPATH:+:$PYTHONPATH}"
 PYTHONDONTWRITEBYTECODE=1
 export PYTHONPATH PYTHONDONTWRITEBYTECODE
 
-exec python3 -m fplinux_cli "$@"
+if ! command -v python3.14 >/dev/null 2>&1; then
+	echo "FPLinux requires Python 3.14." >&2
+	exit 1
+fi
+
+exec python3.14 -m fplinux_cli "$@"

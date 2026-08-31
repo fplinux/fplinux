@@ -568,7 +568,7 @@ def _c_scope_paths(snapshot: WorkspaceSnapshot) -> set[str]:
             continue
         try:
             manifest = tomllib.loads(file.contents.decode("utf-8"))
-        except (UnicodeDecodeError, tomllib.TOMLDecodeError):
+        except UnicodeDecodeError, tomllib.TOMLDecodeError:
             continue
         tools = manifest.get("host", {}).get("tools", [])
         if not isinstance(tools, list):
@@ -664,7 +664,7 @@ def _kernel_scope_paths(snapshot: WorkspaceSnapshot, profile: str | None = None)
         selected.add(target_manifest.path)
         try:
             target_data = tomllib.loads(target_manifest.contents.decode("utf-8"))
-        except (UnicodeDecodeError, tomllib.TOMLDecodeError):
+        except UnicodeDecodeError, tomllib.TOMLDecodeError:
             continue
         if not isinstance(target_data, dict):
             continue
@@ -680,7 +680,7 @@ def _kernel_scope_paths(snapshot: WorkspaceSnapshot, profile: str | None = None)
         selected.add(platform_manifest.path)
         try:
             platform_data = tomllib.loads(platform_manifest.contents.decode("utf-8"))
-        except (UnicodeDecodeError, tomllib.TOMLDecodeError):
+        except UnicodeDecodeError, tomllib.TOMLDecodeError:
             continue
         if isinstance(platform_data, dict):
             selected.update(_linux_manifest_sources(platform_data.get("linux"), base=PurePath()))
@@ -689,7 +689,7 @@ def _kernel_scope_paths(snapshot: WorkspaceSnapshot, profile: str | None = None)
             selected.add(profile_manifest.path)
             try:
                 profile_data = tomllib.loads(profile_manifest.contents.decode("utf-8"))
-            except (UnicodeDecodeError, tomllib.TOMLDecodeError):
+            except UnicodeDecodeError, tomllib.TOMLDecodeError:
                 continue
             if isinstance(profile_data, dict):
                 selected.update(

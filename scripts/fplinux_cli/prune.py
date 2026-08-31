@@ -171,7 +171,7 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
                 load_target(target) if profile is None else load_target(target, profile),
             )
         }
-    except (OSError, ValueError, SystemExit):
+    except OSError, ValueError, SystemExit:
         return None
     return frozenset(recipes)
 
@@ -249,7 +249,7 @@ def _current_apk_packages() -> frozenset[str] | None:
                         rootfs_packages,
                     )
                 )
-    except (KeyError, OSError, TypeError, ValueError, SystemExit):
+    except KeyError, OSError, TypeError, ValueError, SystemExit:
         return None
     return frozenset(packages)
 
@@ -325,7 +325,7 @@ def _declared_profiles() -> dict[str, frozenset[str]] | None:
     """Return all target-owned profile names, or preserve cache if discovery fails."""
     try:
         return {target: frozenset(discover_profiles(target)) for target in discover_targets()}
-    except (OSError, ValueError, SystemExit):
+    except OSError, ValueError, SystemExit:
         return None
 
 
@@ -437,7 +437,7 @@ def _profile_uses_separate_linux_source(target: str, profile: str) -> bool | Non
             default["linux"][field] != selected["linux"][field]
             for field in ("patches", "copies", "appends", "root")
         )
-    except (OSError, ValueError, SystemExit, KeyError, TypeError):
+    except OSError, ValueError, SystemExit, KeyError, TypeError:
         return None
 
 
@@ -572,7 +572,7 @@ def _log_run_matches(path: Path, *, label: str, identity: str) -> bool:
         return False
     try:
         decoded = json.loads(metadata.read_text())
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+    except OSError, UnicodeDecodeError, json.JSONDecodeError:
         return False
     return (
         isinstance(decoded, dict)
