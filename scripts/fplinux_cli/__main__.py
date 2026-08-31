@@ -175,7 +175,7 @@ def _command_action(
         else:
             jobs = args.jobs
             if jobs is None:
-                jobs = 1 if args.verbose or (args.scopes and "kernel" not in args.scopes) else 2
+                jobs = 1 if args.verbose or (args.scopes and "kernel" not in args.scopes) else 3
             if jobs > 1 and args.verbose:
                 check_parser.error("--verbose cannot be combined with --jobs greater than 1")
             if jobs > 1 and args.scopes and "kernel" not in args.scopes:
@@ -276,7 +276,7 @@ def main() -> None:
         type=_positive_jobs,
         default=None,
         metavar="N",
-        help="limit concurrent kernel check contexts (default: 2, or 1 with --verbose)",
+        help="limit concurrent kernel check contexts (default: 3, or 1 with --verbose)",
     )
     check_parser.add_argument(
         "--profile",
