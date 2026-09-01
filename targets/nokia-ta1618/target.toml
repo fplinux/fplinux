@@ -8,7 +8,7 @@ hardware_codes = ["TA-1618"]
 compatible = "nokia,ta-1618"
 
 [bundle]
-packages = ["fplinux-micropythonos-nokia-ta1618"]
+packages = ["fplinux-charge", "fplinux-micropythonos-nokia-ta1618"]
 
 [linux]
 dtb = "unisoc/ums9117-nokia-ta1618.dtb"

@@ -13,6 +13,7 @@ Current target support:
   - external charger connection status;
   - battery voltage, current and relative charge counter reporting with the
     documented accuracy limits;
+  - optional per-command charge measurement through the bundled APK;
   - calibrated SoC temperature reporting without a thermal-control policy;
   - raw auxiliary ADC readings without unit conversion;
   - read-only real-time clock;
