@@ -373,7 +373,6 @@ class NoTransportRunnerTests(unittest.TestCase):
         adapter = mock.Mock()
         session = {"image": str(self.bundle / "image/ramboot.bin")}
         ssh = mock.Mock()
-        ssh.bundle_identity.return_value = {"bundle_generation": self.generation}
         ssh.prepare_session.return_value = session
         with (
             mock.patch.object(RUNNER, "__file__", str(self.runner)),
@@ -392,6 +391,74 @@ class NoTransportRunnerTests(unittest.TestCase):
         ssh.wait_for_bound_session.assert_not_called()
         ssh.open_shell.assert_not_called()
         ssh.finish_session.assert_called_once_with(session)
+
+    def test_standalone_reconnect_checks_the_running_device_identity(self) -> None:
+        """Reconnect through the bundle manifest's kernel identity, not its generation."""
+        runtime_path = self.bundle / "runtime-manifest.json"
+        manifest = json.loads(runtime_path.read_text(encoding="utf-8"))
+        manifest["transport"] = "usb-ncm"
+        runtime_path.write_text(json.dumps(manifest), encoding="utf-8")
+        session: dict[str, str] = {}
+        ready = {**session, "interface": "usb0"}
+        result = mock.Mock(returncode=0)
+        ssh = mock.Mock()
+        ssh.build_manifest_device_identity.return_value = "e" * 64
+        ssh.load_current_session.return_value = session
+        ssh.reacquire_bound_session.return_value = ready
+        ssh.run_remote.return_value = result
+
+        with (
+            mock.patch.object(RUNNER, "__file__", str(self.runner)),
+            mock.patch.object(RUNNER, "_identity_module", None),
+            mock.patch.object(RUNNER, "host_preflight"),
+            mock.patch.object(RUNNER, "load_module", return_value=ssh),
+            mock.patch.object(
+                sys,
+                "argv",
+                [str(self.runner), "--reconnect", "--exec", "true"],
+            ),
+        ):
+            RUNNER.main()
+
+        ssh.bundle_identity.assert_called_once_with(self.bundle, mock.ANY)
+        ssh.build_manifest_device_identity.assert_called_once_with(self.bundle)
+        ssh.load_current_session.assert_called_once_with("demo")
+        ssh.reacquire_bound_session.assert_called_once_with(session)
+        ssh.require_device_identity.assert_called_once_with(ready, "e" * 64)
+        ssh.run_remote.assert_called_once_with(ready, "true")
+
+    def test_standalone_reconnect_rejects_another_device_before_remote_action(self) -> None:
+        """A mismatched kernel identity prevents the requested standalone command."""
+        runtime_path = self.bundle / "runtime-manifest.json"
+        manifest = json.loads(runtime_path.read_text(encoding="utf-8"))
+        manifest["transport"] = "usb-ncm"
+        runtime_path.write_text(json.dumps(manifest), encoding="utf-8")
+        session: dict[str, str] = {}
+        ready = {**session, "interface": "usb0"}
+        ssh = mock.Mock()
+        ssh.build_manifest_device_identity.return_value = "e" * 64
+        ssh.load_current_session.return_value = session
+        ssh.reacquire_bound_session.return_value = ready
+        ssh.require_device_identity.side_effect = SystemExit(
+            "SSH transport failed: current SSH session exposes a different kernel identity"
+        )
+
+        with (
+            mock.patch.object(RUNNER, "__file__", str(self.runner)),
+            mock.patch.object(RUNNER, "_identity_module", None),
+            mock.patch.object(RUNNER, "host_preflight"),
+            mock.patch.object(RUNNER, "load_module", return_value=ssh),
+            mock.patch.object(
+                sys,
+                "argv",
+                [str(self.runner), "--reconnect", "--exec", "touch /tmp/should-not-run"],
+            ),
+            self.assertRaisesRegex(SystemExit, "different kernel identity"),
+        ):
+            RUNNER.main()
+
+        ssh.require_device_identity.assert_called_once_with(ready, "e" * 64)
+        ssh.run_remote.assert_not_called()
 
 
 if __name__ == "__main__":
