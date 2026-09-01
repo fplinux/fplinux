@@ -36,7 +36,6 @@ SSH_PORT = 22
 REMOTE_PATH = re.compile(r"/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+")
 TARGET_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
 SHA256 = re.compile(r"[0-9a-f]{64}")
-BUNDLE_IDENTITY_FIELDS = frozenset({"bundle_generation"})
 BUILD_MANIFEST_FIELDS = frozenset(
     {
         "rootfs_receipt",
@@ -179,7 +178,7 @@ def _file_record(manifest: dict[str, Any], relative: str) -> dict[str, Any]:
 
 
 def bundle_identity(bundle: Path, runtime: dict[str, Any]) -> dict[str, str]:
-    """Return the immutable build identity that created this runtime closure."""
+    """Validate the runtime closure and return its bundle generation."""
     runtime_path = bundle / "runtime-manifest.json"
     runtime_bytes = _regular_file_bytes(runtime_path, "runtime manifest")
     target = runtime.get("target")
@@ -253,14 +252,17 @@ def load_bundle_context(bundle: Path) -> tuple[dict[str, Any], dict[str, str]]:
     return runtime, bundle_identity(bundle, runtime)
 
 
-def _validate_bundle_identity(value: object) -> dict[str, str]:
-    if not isinstance(value, dict) or set(value) != BUNDLE_IDENTITY_FIELDS:
-        fail("bundle identity has unexpected fields")
-    for field in BUNDLE_IDENTITY_FIELDS:
-        digest = value.get(field)
-        if not isinstance(digest, str) or SHA256.fullmatch(digest) is None:
-            fail(f"bundle identity {field} is invalid")
-    return value
+def build_manifest_device_identity(bundle: Path) -> str:
+    """Read the device identity from an already-validated bundle manifest."""
+    data = _regular_file_bytes(bundle / "build-manifest.json", "build manifest")
+    try:
+        manifest = json.loads(data)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        fail(f"build manifest is invalid: {error}")
+    device_identity = manifest.get("device_identity") if isinstance(manifest, dict) else None
+    if not isinstance(device_identity, str) or SHA256.fullmatch(device_identity) is None:
+        fail("build manifest device identity is invalid")
+    return device_identity
 
 
 def _host_route_networks(ip_tool: str) -> set[ipaddress.IPv4Network]:
@@ -534,12 +536,10 @@ def prepare_session(
     personalization: dict[str, Any],
     target: str,
     linux_usb: dict[str, Any],
-    identity: dict[str, str],
 ) -> dict[str, Any]:
     """Create keys, addressing and one mode-0600 personalized image copy."""
     if TARGET_NAME.fullmatch(target) is None:
         fail(f"invalid target name: {target}")
-    identity = _validate_bundle_identity(identity)
     root = _runtime_root()
     _cleanup_target_sessions(root, target)
     for tool in ("ip", "ssh", "ssh-keygen", "ssh-keyscan", "sftp"):
@@ -640,7 +640,6 @@ def prepare_session(
         "product_id": linux_usb["product_id"],
         "wait_seconds": linux_usb["wait_seconds"],
         "status": "prepared",
-        **identity,
     }
     try:
         _write_json(state_path, state)
@@ -1011,7 +1010,6 @@ def wait_for_bound_session(session: dict[str, Any]) -> dict[str, Any]:
 def _validate_session(
     value: object,
     target: str | None = None,
-    identity: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     required = {
         "target",
@@ -1030,7 +1028,6 @@ def _validate_session(
         "wait_seconds",
         "status",
         "interface",
-        *BUNDLE_IDENTITY_FIELDS,
     }
     if not isinstance(value, dict) or set(value) != required:
         fail("current SSH session state has unexpected fields")
@@ -1038,11 +1035,6 @@ def _validate_session(
         fail("current SSH session state is not ready")
     if target is not None and value.get("target") != target:
         fail("current SSH session belongs to another target")
-    if identity is not None:
-        identity = _validate_bundle_identity(identity)
-        if any(value.get(field) != identity[field] for field in BUNDLE_IDENTITY_FIELDS):
-            fail("current SSH session belongs to a stale bundle; load the current build")
-    _validate_bundle_identity({field: value.get(field) for field in BUNDLE_IDENTITY_FIELDS})
     session_id = value.get("session_id")
     if (
         not isinstance(session_id, str)
@@ -1109,7 +1101,7 @@ def _validate_session(
     return value
 
 
-def load_current_session(target: str, identity: dict[str, str]) -> dict[str, Any]:
+def load_current_session(target: str) -> dict[str, Any]:
     """Load only the session that completed USB and private identity binding."""
     if TARGET_NAME.fullmatch(target) is None:
         fail(f"invalid target name: {target}")
@@ -1120,7 +1112,7 @@ def load_current_session(target: str, identity: dict[str, str]) -> dict[str, Any
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         fail(f"current SSH session state is invalid: {error}")
-    return _validate_session(value, target, identity)
+    return _validate_session(value, target)
 
 
 def reacquire_bound_session(session: dict[str, Any]) -> dict[str, Any]:
@@ -1153,6 +1145,29 @@ def run_remote(
         text=True,
         check=False,
     )
+
+
+def require_device_identity(session: dict[str, Any], device_identity: str) -> str:
+    """Require the authenticated phone to expose the selected kernel identity."""
+    if SHA256.fullmatch(device_identity) is None:
+        fail("expected device identity is invalid")
+    result = run_remote(session, "uname -r", capture_output=True)
+    if result.returncode:
+        detail = result.stderr.strip().splitlines()
+        fail(
+            f"cannot read the running kernel identity (exit {result.returncode})"
+            + (f": {detail[-1]}" if detail else "")
+        )
+    releases = result.stdout.splitlines()
+    expected_suffix = f"-fplinux-{device_identity[:16]}"
+    if len(releases) != 1 or not releases[0].endswith(expected_suffix):
+        actual = result.stdout.strip() or "no kernel release"
+        fail(
+            "current SSH session exposes a different kernel identity\n"
+            f"  phone:  {actual}\n"
+            f"  bundle: kernel *{expected_suffix}"
+        )
+    return releases[0]
 
 
 def _stream_stderr_detail(stream: BinaryIO) -> str:
