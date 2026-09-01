@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config TA1618_NANDC_RO_LAB
+	bool "Nokia TA-1618 read-only NANDC diagnostic"
+	depends on MACH_NOKIA_TA1618 && HAS_DMA && !MTD && !SPI
+	help
+	  Enable read-only access to the Nokia TA-1618 internal NAND in the
+	  nand-ro-lab profile. After checking the NAND identity and feature state,
+	  the driver exposes one physical stream containing every page's main and
+	  OOB bytes. It provides no MTD, generic SPI, ioctl, mmap, feature-write,
+	  program or erase operation.

@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name = "nand-ro-lab"
+
+[linux]
+config_enable = ["CONFIG_TA1618_NANDC_RO_LAB"]
+config_disable = ["CONFIG_MTD", "CONFIG_SPI"]
+patches = []
+forbidden_dtb_markers = ["sdhci", "spi-nand", "mtd", "ubi", "emmc"]
+
+[linux.root]
+kind = "initramfs"
+
+[[linux.copies]]
+source = "kernel/ta1618-nandc-ro.c"
+destination = "arch/arm/mach-ums9117/ta1618-nandc-ro.c"
+
+[[linux.copies]]
+source = "bindings/fplinux,ta1618-nandc-ro.yaml"
+destination = "Documentation/devicetree/bindings/memory-controllers/fplinux,ta1618-nandc-ro.yaml"
+
+[[linux.appends]]
+source = "kernel/Kconfig"
+destination = "arch/arm/mach-ums9117/Kconfig"
+
+[[linux.appends]]
+source = "kernel/Makefile"
+destination = "arch/arm/mach-ums9117/Makefile"
+
+[[linux.appends]]
+source = "dts/nand-ro-lab.dtsi"
+destination = "arch/arm/boot/dts/unisoc/ums9117-nokia-ta1618.dts"
+
+[rootfs]
+packages = []
+exclude_packages = []
+
+[bootstrap]
+kind = "linux"
+
+[uboot]
+kind = "none"
+
+[fit]
+kind = "none"
+
+[runtime]
+transport = "usb-ncm"
+runnable = true

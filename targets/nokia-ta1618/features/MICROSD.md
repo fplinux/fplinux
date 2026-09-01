@@ -39,6 +39,8 @@ erase or discard is not a supported workflow.
 Card detection is polled. Wait for the block node to appear or disappear; no
 exact detection delay is part of the supported interface.
 
-This support covers removable microSD only. FPLinux does not expose the phone's
-internal storage. The TyrQuake and MicroPythonOS pages under `docs/apps/`
-describe how those applications use the card.
+This support covers removable microSD only. The default Nokia target and release
+workflows do not expose internal storage. The development-only `nand-ro-lab`
+profile can capture one read-only physical backup; it provides no filesystem
+mount, write or restore path. The TyrQuake and MicroPythonOS pages under
+`docs/apps/` describe how those applications use the card.
