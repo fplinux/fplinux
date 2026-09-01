@@ -1,0 +1,34 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+&{/soc} {
+	nand-controller@21a00000 {
+		compatible = "fplinux,ta1618-nandc-ro";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x21a00000 0x00001000>,
+		      <0x20e00000 0x00000004>,
+		      <0x20e01000 0x00000004>,
+		      <0x20e02000 0x00000004>,
+		      <0x20e00004 0x00000004>,
+		      <0x20e01004 0x00000004>,
+		      <0x20e02004 0x00000004>,
+		      <0x21500024 0x00000004>,
+		      <0x21500060 0x00000004>,
+		      <0x402a0024 0x00000004>,
+		      <0x402a0154 0x00000044>,
+		      <0x402a0554 0x00000044>;
+		reg-names = "nandc", "ap-ahb-gate-state", "ap-ahb-gate-set",
+			    "ap-ahb-gate-clear", "ap-ahb-reset-state",
+			    "ap-ahb-reset-set", "ap-ahb-reset-clear",
+			    "nandc-ecc-clock", "nandc-2x-clock",
+			    "pin-control", "pinmux", "pinconf";
+		sprd,aon-apb = <&aon_apb>;
+		sprd,pinmux-values = <0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0>;
+		sprd,pinconf-values = <
+			0x00300000 0x00300000 0x00300000 0x00300000
+			0x00300000 0x00300000 0x00300000 0x00300000
+			0x00300000 0x00300000 0x00300000 0x00300000
+			0x00300000 0x00300000 0x00300080 0x00301000
+		>;
+	};
+};
