@@ -1,0 +1,139 @@
+# SPDX-License-Identifier: GPL-2.0-only
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/memory-controllers/fplinux,ta1618-nandc-ro.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Nokia TA-1618 UMS9117 fixed-command physical NAND reader
+
+maintainers:
+  - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+
+description: |
+  The Nokia TA-1618 internal NAND is attached to the UMS9117 NANDC SPI path.
+  This lab-only node owns the exact board resources needed for fixed-command,
+  read-only access. The driver exposes one 142606336-byte physical stream with
+  2048 main bytes followed by 128 OOB bytes for each of 65536 pages. It applies
+  no ECC correction or OOB interpretation and registers no MTD, SPI, spi-mem,
+  IRQ, ioctl, mmap or arbitrary-command endpoint. The controller and its owned
+  platform state are restored before bytes reach userspace. This compatible is
+  limited to the Nokia lab profile; it is not a reusable UMS9117 controller
+  binding.
+
+properties:
+  compatible:
+    const: fplinux,ta1618-nandc-ro
+
+  "#address-cells":
+    const: 1
+
+  "#size-cells":
+    const: 0
+
+  reg:
+    minItems: 12
+    maxItems: 12
+
+  reg-names:
+    items:
+      - const: nandc
+      - const: ap-ahb-gate-state
+      - const: ap-ahb-gate-set
+      - const: ap-ahb-gate-clear
+      - const: ap-ahb-reset-state
+      - const: ap-ahb-reset-set
+      - const: ap-ahb-reset-clear
+      - const: nandc-ecc-clock
+      - const: nandc-2x-clock
+      - const: pin-control
+      - const: pinmux
+      - const: pinconf
+
+  sprd,aon-apb:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: |
+      UMS9117 AON APB syscon. The driver sets only the two FDL-proven shared
+      pin gates at offsets 0x000 and 0x0b0 and never clears either gate.
+
+  sprd,pinmux-values:
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    minItems: 17
+    maxItems: 17
+    items:
+      - const: 0
+      - const: 0
+      - const: 0
+      - const: 0
+      - const: 0
+      - const: 0
+      - const: 0
+      - const: 0
+      - const: 0
+      - const: 0
+      - const: 0
+      - const: 0
+      - const: 0
+      - const: 0
+      - const: 0
+      - const: 0
+      - const: 0
+    description: Values written at the paired pinmux offsets.
+
+  sprd,pinconf-values:
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    minItems: 16
+    maxItems: 16
+    items:
+      - const: 3145728
+      - const: 3145728
+      - const: 3145728
+      - const: 3145728
+      - const: 3145728
+      - const: 3145728
+      - const: 3145728
+      - const: 3145728
+      - const: 3145728
+      - const: 3145728
+      - const: 3145728
+      - const: 3145728
+      - const: 3145728
+      - const: 3145728
+      - const: 3145856
+      - const: 3149824
+    description: Values written at the paired pinconf offsets.
+
+required:
+  - compatible
+  - "#address-cells"
+  - "#size-cells"
+  - reg
+  - reg-names
+  - sprd,aon-apb
+  - sprd,pinmux-values
+  - sprd,pinconf-values
+
+additionalProperties: false
+
+examples:
+  - |
+    nand-controller@21a00000 {
+        compatible = "fplinux,ta1618-nandc-ro";
+        #address-cells = <1>;
+        #size-cells = <0>;
+        reg = <0x21a00000 0x1000>,
+              <0x20e00000 0x4>, <0x20e01000 0x4>, <0x20e02000 0x4>,
+              <0x20e00004 0x4>, <0x20e01004 0x4>, <0x20e02004 0x4>,
+              <0x21500024 0x4>, <0x21500060 0x4>,
+              <0x402a0024 0x4>, <0x402a0154 0x44>, <0x402a0554 0x44>;
+        reg-names = "nandc", "ap-ahb-gate-state", "ap-ahb-gate-set",
+                    "ap-ahb-gate-clear", "ap-ahb-reset-state",
+                    "ap-ahb-reset-set", "ap-ahb-reset-clear",
+                    "nandc-ecc-clock", "nandc-2x-clock",
+                    "pin-control", "pinmux", "pinconf";
+        sprd,aon-apb = <&aon_apb>;
+        sprd,pinmux-values = <0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0>;
+        sprd,pinconf-values = <0x00300000 0x00300000 0x00300000 0x00300000
+                               0x00300000 0x00300000 0x00300000 0x00300000
+                               0x00300000 0x00300000 0x00300000 0x00300000
+                               0x00300000 0x00300000 0x00300080 0x00301000>;
+    };

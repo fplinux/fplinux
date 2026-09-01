@@ -23,37 +23,37 @@ Status terms and limits shared by every phone are defined in the
 
 ## Features
 
-| Feature                                                             | Hardware | FPLinux       | This phone                                                              |
-| ------------------------------------------------------------------- | -------- | ------------- | ----------------------------------------------------------------------- |
-| RAM boot                                                            | N/A      | Supported     | —                                                                       |
-| Persistent boot                                                     | N/A      | Not supported | The RAM bootstrap must be loaded over USB for every Linux boot.         |
-| [Local console](../../docs/features/LOCAL_CONSOLE.md)               | Present  | Supported     | `240×320`.                                                              |
-| [Keypad backlight](features/KEYPAD_BACKLIGHT.md)                    | Present  | Supported     | Binary LED control plus a bounded key-press light.                      |
-| [USB networking](../../docs/features/USB_NETWORKING.md)             | Present  | Supported     | —                                                                       |
-| [SSH access](../../docs/features/SSH.md)                            | N/A      | Supported     | —                                                                       |
-| [File transfer](../../docs/features/FILE_TRANSFER.md)               | N/A      | Supported     | RAM and a writable mounted microSD are valid destinations.              |
-| [Host keyboard bridge](../../docs/features/HOST_KEYBOARD.md)        | N/A      | Supported     | —                                                                       |
-| [CPU clock reporting](../../docs/features/CPU_CLOCK.md)             | N/A      | Supported     | —                                                                       |
-| USB host mode                                                       | Unknown  | Not supported | —                                                                       |
-| [Removable storage](features/MICROSD.md)                            | Present  | Supported     | microSD FAT32 read/write and unmounted hot-swap are exercised.          |
-| [Removable system root](profiles/microsd-uboot/features/MICROSD.md) | Present  | Supported     | microSD FAT32 FIT plus writable ext4; the system card stays installed.  |
-| Internal phone storage                                              | Present  | Not supported | —                                                                       |
-| Audio                                                               | Present  | Not supported | —                                                                       |
-| Modem and mobile service                                            | Present  | Not supported | —                                                                       |
-| Bluetooth                                                           | Unknown  | Not supported | —                                                                       |
-| Wi-Fi                                                               | Unknown  | Not supported | —                                                                       |
-| Camera                                                              | Unknown  | Not supported | Installed sensor is not identified.                                     |
-| [Charger status](features/CHARGER_STATUS.md)                        | Present  | Supported     | Read-only external-input status.                                        |
-| [Battery telemetry](features/BATTERY_TELEMETRY.md)                  | Present  | Partial       | Voltage and signed current; absolute accuracy is unchecked.             |
-| [SoC temperature](features/SOC_TEMPERATURE.md)                      | Present  | Partial       | Calibrated reading without external accuracy validation.                |
-| [Auxiliary ADC](features/AUXADC.md)                                 | Present  | Partial       | Five raw channels without physical-unit conversion.                     |
-| [Real-time clock](features/RTC.md)                                  | Present  | Partial       | Read-only time and one-shot alarms; no time-setting or synchronization. |
-| Other battery functions                                             | Present  | Not supported | No level, battery temperature or charge control is provided.            |
-| [Vibration](features/VIBRATION.md)                                  | Present  | Supported     | Binary `FF_RUMBLE` effects with a five-second automatic cutoff.         |
-| Indicator LEDs                                                      | Unknown  | Not supported | —                                                                       |
-| [Power-off](features/POWER_OFF.md)                                  | N/A      | Supported     | Works only while external charger power is absent.                      |
-| [Suspend](features/SUSPEND.md)                                      | N/A      | Supported     | RAM boot only; the red handset key and RTC alarms wake s2idle.          |
-| Reboot                                                              | N/A      | Not supported | —                                                                       |
+| Feature                                                             | Hardware | FPLinux       | This phone                                                                                 |
+| ------------------------------------------------------------------- | -------- | ------------- | ------------------------------------------------------------------------------------------ |
+| RAM boot                                                            | N/A      | Supported     | —                                                                                          |
+| Persistent boot                                                     | N/A      | Not supported | The RAM bootstrap must be loaded over USB for every Linux boot.                            |
+| [Local console](../../docs/features/LOCAL_CONSOLE.md)               | Present  | Supported     | `240×320`.                                                                                 |
+| [Keypad backlight](features/KEYPAD_BACKLIGHT.md)                    | Present  | Supported     | Binary LED control plus a bounded key-press light.                                         |
+| [USB networking](../../docs/features/USB_NETWORKING.md)             | Present  | Supported     | —                                                                                          |
+| [SSH access](../../docs/features/SSH.md)                            | N/A      | Supported     | —                                                                                          |
+| [File transfer](../../docs/features/FILE_TRANSFER.md)               | N/A      | Supported     | RAM and a writable mounted microSD are valid destinations.                                 |
+| [Host keyboard bridge](../../docs/features/HOST_KEYBOARD.md)        | N/A      | Supported     | —                                                                                          |
+| [CPU clock reporting](../../docs/features/CPU_CLOCK.md)             | N/A      | Supported     | —                                                                                          |
+| USB host mode                                                       | Unknown  | Not supported | —                                                                                          |
+| [Removable storage](features/MICROSD.md)                            | Present  | Supported     | microSD FAT32 read/write and unmounted hot-swap are exercised.                             |
+| [Removable system root](profiles/microsd-uboot/features/MICROSD.md) | Present  | Supported     | microSD FAT32 FIT plus writable ext4; the system card stays installed.                     |
+| Internal phone storage                                              | Present  | Not supported | Default/release workflows expose none; `nand-ro-lab` is read-only development diagnostics. |
+| Audio                                                               | Present  | Not supported | —                                                                                          |
+| Modem and mobile service                                            | Present  | Not supported | —                                                                                          |
+| Bluetooth                                                           | Unknown  | Not supported | —                                                                                          |
+| Wi-Fi                                                               | Unknown  | Not supported | —                                                                                          |
+| Camera                                                              | Unknown  | Not supported | Installed sensor is not identified.                                                        |
+| [Charger status](features/CHARGER_STATUS.md)                        | Present  | Supported     | Read-only external-input status.                                                           |
+| [Battery telemetry](features/BATTERY_TELEMETRY.md)                  | Present  | Partial       | Voltage and signed current; absolute accuracy is unchecked.                                |
+| [SoC temperature](features/SOC_TEMPERATURE.md)                      | Present  | Partial       | Calibrated reading without external accuracy validation.                                   |
+| [Auxiliary ADC](features/AUXADC.md)                                 | Present  | Partial       | Five raw channels without physical-unit conversion.                                        |
+| [Real-time clock](features/RTC.md)                                  | Present  | Partial       | Read-only time and one-shot alarms; no time-setting or synchronization.                    |
+| Other battery functions                                             | Present  | Not supported | No level, battery temperature or charge control is provided.                               |
+| [Vibration](features/VIBRATION.md)                                  | Present  | Supported     | Binary `FF_RUMBLE` effects with a five-second automatic cutoff.                            |
+| Indicator LEDs                                                      | Unknown  | Not supported | —                                                                                          |
+| [Power-off](features/POWER_OFF.md)                                  | N/A      | Supported     | Works only while external charger power is absent.                                         |
+| [Suspend](features/SUSPEND.md)                                      | N/A      | Supported     | RAM boot only; the red handset key and RTC alarms wake s2idle.                             |
+| Reboot                                                              | N/A      | Not supported | —                                                                                          |
 
 ## Applications
 

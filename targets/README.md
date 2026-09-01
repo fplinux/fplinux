@@ -23,7 +23,9 @@ no supported path.
 All current targets share these limits:
 
 - Linux runs only in volatile RAM; there is no autonomous Linux boot path.
-- Internal phone storage is deliberately not exposed.
+- Default target and release workflows do not expose internal phone storage.
+  Target-owned development profiles may provide isolated read-only diagnostics;
+  those profiles do not qualify storage as a supported target feature.
 - USB operates as a peripheral; USB host and OTG are not supported.
 - Audio, calls, SMS, mobile data, Bluetooth, Wi-Fi, camera and indicator LEDs
   have no supported FPLinux path.

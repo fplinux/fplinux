@@ -17,6 +17,7 @@ extend-ignore-re = ["\\b[0-9a-f]{7,}\\b"]
 FPLinux = "FPLinux"
 MMIO = "MMIO"
 MKE2FS = "MKE2FS"
+ki_filp = "ki_filp"
 mke2fs = "mke2fs"
 parm = "parm"
 UMS9117 = "UMS9117"
