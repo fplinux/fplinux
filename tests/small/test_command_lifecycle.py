@@ -542,15 +542,9 @@ class CommandLifecycleTests(unittest.TestCase):
 
         execute.assert_not_called()
 
-    def test_verify_rejects_nonzero_ssh_status_even_with_matching_stdout(self) -> None:
-        """Reject a failed SSH probe even when its stdout happens to match."""
+    def test_verify_propagates_the_authenticated_runtime_identity_failure(self) -> None:
+        """Do not report success when reconnect cannot identify the running kernel."""
         target_config: dict[str, object] = {}
-        result = subprocess.CompletedProcess(
-            [],
-            7,
-            stdout=f"6.12-fplinux-{'9' * 16}\n",
-            stderr="transport failed\n",
-        )
         with (
             mock.patch.object(commands, "ROOT", self.root),
             mock.patch.object(commands, "load_target", return_value=target_config),
@@ -567,23 +561,70 @@ class CommandLifecycleTests(unittest.TestCase):
             mock.patch.object(
                 commands,
                 "_current_ssh_session",
-                return_value=(mock.Mock(run_remote=mock.Mock(return_value=result)), {}),
-            ) as current_session,
-            self.assertRaisesRegex(SystemExit, "SSH transport failed with exit status 7"),
+                side_effect=SystemExit(
+                    "SSH transport failed: cannot read the running kernel identity (exit 7)"
+                ),
+            ),
+            self.assertRaisesRegex(SystemExit, r"running kernel identity \(exit 7\)"),
         ):
             commands.verify_booted("phone")
-        ssh = current_session.return_value[0]
-        ssh.run_remote.assert_called_once_with({}, "uname -r", capture_output=True)
 
-    def test_verify_matches_the_device_identity_not_the_workspace_digest(self) -> None:
-        """Interpret a mocked uname result using the bundle's device-identity suffix."""
-        target_config: dict[str, object] = {}
-        result = subprocess.CompletedProcess(
-            [],
-            0,
-            stdout=f"6.12-fplinux-{'9' * 16}\n",
-            stderr="",
+    def test_reconnect_accepts_an_older_session_generation_for_the_same_device_runtime(
+        self,
+    ) -> None:
+        """An application-only bundle rebuild does not invalidate the loaded kernel."""
+        manifest = json.loads(self.bundle.manifest_bytes)
+        session: dict[str, str] = {}
+        ssh = mock.Mock()
+        ssh.load_bundle_context.return_value = (
+            {"target": "phone"},
+            {"bundle_generation": self.bundle.generation},
         )
+        ssh.load_current_session.return_value = session
+        ssh.reacquire_bound_session.return_value = session
+        ssh.require_device_identity.return_value = "6.12-fplinux-9999999999999999"
+
+        with mock.patch.object(commands, "_load_bundle_ssh_helper", return_value=ssh):
+            resolved_ssh, resolved_session = commands._current_ssh_session(  # noqa: SLF001
+                self.bundle,
+                manifest,
+                "phone",
+            )
+
+        self.assertIs(resolved_ssh, ssh)
+        self.assertIs(resolved_session, session)
+        ssh.load_current_session.assert_called_once_with("phone")
+        ssh.reacquire_bound_session.assert_called_once_with(session)
+        ssh.require_device_identity.assert_called_once_with(session, "9" * 64)
+
+    def test_reconnect_rejects_an_authenticated_session_with_another_device_runtime(
+        self,
+    ) -> None:
+        """Do not use a reconnected phone whose kernel differs from the selected bundle."""
+        manifest = json.loads(self.bundle.manifest_bytes)
+        session: dict[str, str] = {}
+        ssh = mock.Mock()
+        ssh.load_bundle_context.return_value = (
+            {"target": "phone"},
+            {"bundle_generation": self.bundle.generation},
+        )
+        ssh.load_current_session.return_value = session
+        ssh.reacquire_bound_session.return_value = session
+        ssh.require_device_identity.side_effect = SystemExit(
+            "SSH transport failed: current SSH session exposes a different kernel identity"
+        )
+
+        with (
+            mock.patch.object(commands, "_load_bundle_ssh_helper", return_value=ssh),
+            self.assertRaisesRegex(SystemExit, "different kernel identity"),
+        ):
+            commands._current_ssh_session(self.bundle, manifest, "phone")  # noqa: SLF001
+
+        ssh.require_device_identity.assert_called_once_with(session, "9" * 64)
+
+    def test_verify_reports_the_manifest_identity_after_authenticated_reconnect(self) -> None:
+        """Report the selected device identity after the reconnect boundary accepts it."""
+        target_config: dict[str, object] = {}
         stdout = io.StringIO()
         with (
             mock.patch.object(commands, "ROOT", self.root),
@@ -597,7 +638,7 @@ class CommandLifecycleTests(unittest.TestCase):
             mock.patch.object(
                 commands,
                 "_current_ssh_session",
-                return_value=(mock.Mock(run_remote=mock.Mock(return_value=result)), {}),
+                return_value=(mock.Mock(), {}),
             ) as current_session,
             contextlib.redirect_stdout(stdout),
         ):
@@ -607,8 +648,7 @@ class CommandLifecycleTests(unittest.TestCase):
             stdout.getvalue(),
             "verify: the phone runs the current build (9999999999999999)\n",
         )
-        ssh = current_session.return_value[0]
-        ssh.run_remote.assert_called_once_with({}, "uname -r", capture_output=True)
+        current_session.assert_called_once_with(self.bundle, mock.ANY, "phone")
 
     def test_console_uses_ssh_for_commands_and_keyboard_tool_for_evdev(self) -> None:
         """Route commands through SSH and evdev through the keyboard client."""

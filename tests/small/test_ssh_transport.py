@@ -16,7 +16,7 @@ from unittest import mock
 
 from fplinux_cli import ssh_transport
 
-from tests.ssh_transport_support import TEST_BUNDLE_IDENTITY, create_ready_session
+from tests.ssh_transport_support import create_ready_session
 
 
 def ieee_crc32(data: bytes) -> int:
@@ -38,10 +38,9 @@ class SshTransportSmallTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name) / "runtime"
         self.root.mkdir(mode=0o700)
-        self.identity = TEST_BUNDLE_IDENTITY
 
     def _session(self, *, status: str = "ready") -> dict[str, Any]:
-        return create_ready_session(self.root, status=status, identity=self.identity)
+        return create_ready_session(self.root, status=status)
 
     def test_open_shell_rejects_a_noninteractive_process(self) -> None:
         """Do not launch forced-PTY SSH when the host has no input terminal."""
@@ -128,6 +127,7 @@ class SshTransportSmallTests(unittest.TestCase):
 
         identity = ssh_transport.bundle_identity(bundle, runtime)
         self.assertEqual(identity, {"bundle_generation": generation})
+        self.assertEqual(ssh_transport.build_manifest_device_identity(bundle), "9" * 64)
 
         image.write_bytes(b"DHTB changed\n")
         with self.assertRaisesRegex(SystemExit, "runtime closure differs"):
@@ -190,20 +190,64 @@ class SshTransportSmallTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "runtime target or profile"):
             ssh_transport.bundle_identity(bundle, {**runtime, "profile": "usb-host-lab"})
 
-    def test_current_session_rejects_another_bundle_generation(self) -> None:
-        """A rebuilt bundle cannot silently reuse a phone loaded from older bytes."""
+    def test_current_session_loads_ready_bound_session(self) -> None:
+        """A ready RAM session remains usable through its private binding."""
         state = self._session()
         current = self.root / "current"
         current.mkdir(mode=0o700)
         (current / "phone.json").write_text(json.dumps(state), encoding="utf-8")
         (current / "phone.json").chmod(0o600)
-        changed = {**self.identity, "bundle_generation": "9" * 64}
 
+        with mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root):
+            loaded = ssh_transport.load_current_session("phone")
+
+        self.assertEqual(loaded, state)
+
+    def test_device_identity_accepts_the_running_selected_kernel(self) -> None:
+        """Accept an authenticated session when uname identifies the selected runtime."""
+        session = self._session()
+        device_identity = "9" * 64
+        result = subprocess.CompletedProcess(
+            [],
+            0,
+            stdout=f"6.12-fplinux-{device_identity[:16]}\n",
+            stderr="",
+        )
+        with mock.patch.object(ssh_transport, "run_remote", return_value=result) as remote:
+            release = ssh_transport.require_device_identity(session, device_identity)
+
+        self.assertEqual(release, f"6.12-fplinux-{device_identity[:16]}")
+        remote.assert_called_once_with(session, "uname -r", capture_output=True)
+
+    def test_device_identity_rejects_a_different_running_kernel(self) -> None:
+        """Reject a ready authenticated session running another device runtime."""
+        session = self._session()
+        result = subprocess.CompletedProcess(
+            [],
+            0,
+            stdout="6.12-fplinux-aaaaaaaaaaaaaaaa\n",
+            stderr="",
+        )
         with (
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
-            self.assertRaisesRegex(SystemExit, "stale bundle"),
+            mock.patch.object(ssh_transport, "run_remote", return_value=result),
+            self.assertRaisesRegex(SystemExit, "different kernel identity"),
         ):
-            ssh_transport.load_current_session("phone", changed)
+            ssh_transport.require_device_identity(session, "9" * 64)
+
+    def test_device_identity_rejects_a_failed_kernel_probe(self) -> None:
+        """A matching-looking stdout cannot hide a failed authenticated probe."""
+        session = self._session()
+        result = subprocess.CompletedProcess(
+            [],
+            7,
+            stdout=f"6.12-fplinux-{'9' * 16}\n",
+            stderr="transport failed\n",
+        )
+        with (
+            mock.patch.object(ssh_transport, "run_remote", return_value=result),
+            self.assertRaisesRegex(SystemExit, r"running kernel identity \(exit 7\)"),
+        ):
+            ssh_transport.require_device_identity(session, "9" * 64)
 
     def test_current_session_rejects_an_unknown_field(self) -> None:
         """An unrecognized host-state record is not a reconnect session."""
@@ -217,7 +261,7 @@ class SshTransportSmallTests(unittest.TestCase):
             mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
             self.assertRaisesRegex(SystemExit, "unexpected fields"),
         ):
-            ssh_transport.load_current_session("phone", self.identity)
+            ssh_transport.load_current_session("phone")
 
     def test_usb_session_text_is_exactly_seven_fields_with_nul_padding(self) -> None:
         """Emit the canonical fixed USB-gadget consumer record."""
@@ -345,7 +389,6 @@ class SshTransportSmallTests(unittest.TestCase):
                 descriptor,
                 "phone",
                 {"vendor_id": 0x0525, "product_id": 0xA4A6, "wait_seconds": 1},
-                self.identity,
             )
 
         self.assertFalse((current / "phone.json").exists())

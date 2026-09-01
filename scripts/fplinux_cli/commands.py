@@ -316,13 +316,27 @@ def _current_ssh_session(
     manifest: dict[str, Any],
     target: str,
 ) -> tuple[ModuleType, dict[str, Any]]:
-    """Load and reacquire only a session created by this exact selected bundle."""
+    """Reacquire an authenticated session with the selected device identity."""
     ssh = _load_bundle_ssh_helper(bundle, manifest)
     runtime, identity = ssh.load_bundle_context(bundle.path)
     if runtime.get("target") != target or identity.get("bundle_generation") != bundle.generation:
         fail("current bundle SSH identity disagrees with the selected generation")
-    session = ssh.load_current_session(target, identity)
-    return ssh, ssh.reacquire_bound_session(session)
+    session = ssh.load_current_session(target)
+    session = ssh.reacquire_bound_session(session)
+    ssh.require_device_identity(session, _manifest_device_identity(manifest))
+    return ssh, session
+
+
+def _manifest_device_identity(manifest: dict[str, Any]) -> str:
+    """Return the exact kernel-visible identity declared by one build manifest."""
+    device_identity = manifest.get("device_identity")
+    if (
+        not isinstance(device_identity, str)
+        or len(device_identity) != 64
+        or any(character not in "0123456789abcdef" for character in device_identity)
+    ):
+        fail("current bundle device identity is invalid")
+    return device_identity
 
 
 def _keyboard_client(bundle: CurrentBundle) -> Path:
@@ -408,37 +422,8 @@ def verify_booted(target: str) -> None:
     identity = _build_identity(snapshot, image_state, ROOT / ".cache")
     if not _manifest_matches_identity(manifest, identity):
         fail(f"build output is stale; rebuild it: ./fplinux build {target}")
-    device_identity = manifest.get("device_identity")
-    if (
-        not isinstance(device_identity, str)
-        or len(device_identity) != 64
-        or any(character not in "0123456789abcdef" for character in device_identity)
-    ):
-        fail(f"build output is stale; rebuild it: ./fplinux build {target}")
-    expected_kernel_suffix = f"-fplinux-{device_identity[:16]}"
-    ssh_transport, session = _current_ssh_session(bundle, manifest, target)
-    result = ssh_transport.run_remote(session, "uname -r", capture_output=True)
-    transport_name = "SSH transport"
-    if result.returncode:
-        detail = result.stderr.strip().splitlines()
-        raise SystemExit(
-            f"verify: {transport_name} failed with exit status {result.returncode}\n  "
-            + (detail[-1] if detail else f"the {transport_name} gave no diagnostic")
-        )
-    actual = result.stdout.splitlines()
-    if not actual:
-        detail = result.stderr.strip().splitlines()
-        raise SystemExit(
-            "verify: no kernel identity came back from the phone\n  "
-            + (detail[-1] if detail else f"the {transport_name} said nothing")
-        )
-    if len(actual) != 1 or not actual[0].endswith(expected_kernel_suffix):
-        raise SystemExit(
-            "verify: the phone is running a different build\n"
-            f"  phone:  {result.stdout.strip()}\n"
-            f"  bundle: kernel *{expected_kernel_suffix}\n"
-            "Load the current image before trusting anything you measure."
-        )
+    device_identity = _manifest_device_identity(manifest)
+    _current_ssh_session(bundle, manifest, target)
     print(f"verify: the phone runs the current build ({device_identity[:16]})")
 
 

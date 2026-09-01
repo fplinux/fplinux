@@ -328,7 +328,7 @@ def arguments() -> argparse.Namespace:
     parser.add_argument(
         "--reconnect",
         action="store_true",
-        help="reconnect to the ready SSH session for this exact bundle",
+        help="reconnect to a ready SSH session with this device identity",
     )
     action = parser.add_mutually_exclusive_group()
     action.add_argument("--exec", dest="exec_command", metavar="COMMAND")
@@ -362,9 +362,11 @@ def main() -> None:
         if runtime["transport"] != "usb-ncm":
             fail("--reconnect is unavailable when runtime transport is none")
         ssh = load_module(bundle / SSH_HELPER_PATH, "ssh_transport")
-        identity = ssh.bundle_identity(bundle, runtime)
-        session = ssh.load_current_session(runtime["target"], identity)
+        ssh.bundle_identity(bundle, runtime)
+        device_identity = ssh.build_manifest_device_identity(bundle)
+        session = ssh.load_current_session(runtime["target"])
         session = ssh.reacquire_bound_session(session)
+        ssh.require_device_identity(session, device_identity)
         if options.exec_command is not None:
             result = ssh.run_remote(session, options.exec_command)
             if result.returncode:
@@ -390,13 +392,12 @@ def main() -> None:
         previous_handlers[signum] = signal.signal(signum, stop_session)
     try:
         ssh = load_module(bundle / SSH_HELPER_PATH, "ssh_transport")
-        identity = ssh.bundle_identity(bundle, runtime)
+        ssh.bundle_identity(bundle, runtime)
         session = ssh.prepare_session(
             image,
             runtime["personalization"],
             runtime["target"],
             runtime["usb"]["linux_gadget"],
-            identity,
         )
         adapter.run(bundle, runtime, session)
     finally:

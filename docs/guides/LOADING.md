@@ -120,9 +120,11 @@ With the default target bundle loaded and its console ready, run:
 ./fplinux verify <target>
 ```
 
-`verify` compares the running kernel identity with the selected local bundle
-and refuses a stale local bundle. It proves only that relationship; it is not a
-phone hardware-qualification test and does not apply to standalone archives.
+`verify` compares the running device identity with the selected local runtime.
+Changes to optional APKs or documentation do not require another RAM load. A
+different loaded kernel, initramfs, profile or bootstrap is refused. This is
+not a phone hardware-qualification test and does not apply to standalone
+archives.
 
 ## End the RAM session
 

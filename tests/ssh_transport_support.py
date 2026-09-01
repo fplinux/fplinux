@@ -12,14 +12,11 @@ from fplinux_cli import ssh_transport
 if TYPE_CHECKING:
     from pathlib import Path
 
-TEST_BUNDLE_IDENTITY = {"bundle_generation": "1" * 64}
-
 
 def create_ready_session(
     root: Path,
     *,
     status: str = "ready",
-    identity: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Create one complete private session directory for a transport consumer."""
     session_id = b"session identity is exactly 32!!"
@@ -56,7 +53,6 @@ def create_ready_session(
         "wait_seconds": 1,
         "status": status,
         "interface": "usb0",
-        **(TEST_BUNDLE_IDENTITY if identity is None else identity),
     }
     state_path = directory / "session.json"
     state_path.write_text(json.dumps(state), encoding="utf-8")
