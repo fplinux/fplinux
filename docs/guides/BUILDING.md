@@ -182,6 +182,10 @@ transport = "none"
 runnable = true
 ```
 
+`linux.forbidden_dtb_markers` is optional. When present, it replaces the
+target's forbidden-marker list only for that profile, allowing a hardware lab
+to add one node that remains forbidden in the default target.
+
 `linux.root.kind = "initramfs"` keeps the ordinary embedded root. An external
 ext4 root adds the current `[layout]` and `[storage]` tables. Its PARTUUID is
 derived from the MBR signature and root partition number; the profile does not
@@ -210,6 +214,19 @@ Build and check a declared profile explicitly:
 ./fplinux package <target> --profile <profile> --candidate
 ./fplinux console <target> --profile <profile>
 ```
+
+A profile may provide `host_plugin.py` for host operations that belong only to
+that profile. The plugin exposes `run(connect, arguments)` and is published in
+the same immutable bundle as the profile image. Run one of its commands through
+the scoped namespace:
+
+```sh
+./fplinux profile <target> <profile> <command> [arguments...]
+```
+
+Only the selected bundle's hash-verified plugin is loaded. Its commands do not
+become global FPLinux commands. Calling `connect()` returns the authenticated
+SSH transport and session when an operation needs the running phone.
 
 The ordinary commands without `--profile` use only each target's default
 context; declared profiles are checked only when named explicitly. Profiles

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Public CLI help tests for the supported microSD boot selector."""
+"""Public CLI help tests for boot selectors and profile commands."""
 
 from __future__ import annotations
 
@@ -28,6 +28,21 @@ class ProfileCliHelpWorkflowTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("--boot {microsd}", result.stdout)
                 self.assertNotIn("microsd-uboot", result.stdout)
+
+    def test_profile_help_exposes_only_the_scoped_plugin_namespace(self) -> None:
+        """Profile-owned commands stay below an explicit target and profile."""
+        result = run_process(
+            [str(ROOT / "fplinux"), "profile", "--help"],
+            name="fplinux profile help",
+            timeout=_PUBLIC_HELP_TIMEOUT_SECONDS,
+            cwd=ROOT,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("nokia-ta1618", result.stdout)
+        self.assertIn("profile", result.stdout.lower())
+        self.assertIn("arg", result.stdout.lower())
+        self.assertNotIn("nand-backup", result.stdout)
 
 
 if __name__ == "__main__":
