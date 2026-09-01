@@ -49,6 +49,11 @@ frames keeps a submitted page unchanged while the display pipeline can snapshot
 it and uses fully populated alternate pages. A mapped write without publication
 is intentionally silent.
 
+The framebuffer core remains the single WLED owner. A target may opt into a
+standard backlight class only for a range qualified on that exact board; targets
+without such a range retain their fixed display-power lifecycle without a user
+brightness interface.
+
 ## Target requirements
 
 Targets enable only the SoC nodes their board can use. Board devices and USB

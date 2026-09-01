@@ -42,6 +42,7 @@ documents = [
   "features/AUXADC.md",
   "features/BATTERY_TELEMETRY.md",
   "features/CHARGER_STATUS.md",
+  "features/DISPLAY_BACKLIGHT.md",
   "features/KEYPAD_BACKLIGHT.md",
   "features/MICROSD.md",
   "features/POWER_OFF.md",
