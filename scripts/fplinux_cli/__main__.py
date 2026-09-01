@@ -15,6 +15,7 @@ from .commands import (
     checksum_aport,
     console_target,
     package_target,
+    profile_command,
     run_target,
     selected_context_profile,
     verify_booted,
@@ -36,10 +37,10 @@ if TYPE_CHECKING:
 
 
 _EXCLUSIVE_CACHE_COMMANDS = frozenset({"build", "check", "checksum", "format", "setup"})
-_SHARED_CACHE_COMMANDS = frozenset({"console", "package", "run", "verify"})
+_SHARED_CACHE_COMMANDS = frozenset({"console", "package", "profile", "run", "verify"})
 _CHECK_SCOPE_METAVAR = "{" + ",".join(CHECK_SCOPES) + "}"
 _PUBLIC_COMMAND_METAVAR = (
-    "{doctor,check,format,setup,build,checksum,package,prune,run,console,verify}"
+    "{doctor,check,format,setup,build,checksum,package,prune,run,console,profile,verify}"
 )
 
 
@@ -232,6 +233,8 @@ def _command_action(
             upload=args.upload,
             pull=args.pull,
         )
+    elif args.command == "profile":
+        action = partial(profile_command, args.target, args.profile, args.arguments)
     elif args.command == "verify":
         action = partial(verify_booted, args.target)
     else:
@@ -394,6 +397,13 @@ def main() -> None:
     console_actions.add_argument("--exec", dest="exec_command", metavar="COMMAND")
     console_actions.add_argument("--upload", nargs=2, metavar=("LOCAL", "REMOTE"))
     console_actions.add_argument("--pull", nargs=2, metavar=("REMOTE", "LOCAL"))
+
+    profile_parser = commands.add_parser(
+        "profile", help="run a host command owned by one target profile"
+    )
+    profile_parser.add_argument("target", choices=targets)
+    profile_parser.add_argument("profile", type=_profile_name, metavar="PROFILE")
+    profile_parser.add_argument("arguments", nargs=argparse.REMAINDER, metavar="ARG")
 
     verify_parser = commands.add_parser(
         "verify", help="check that the booted phone runs the current build"

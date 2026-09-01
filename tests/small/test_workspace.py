@@ -65,6 +65,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
             host_tool = write("tools/loader.c")
             host_input = write("tools/local-input.h")
             host_patch = write("tools/local.patch")
+            profile_plugin = write("targets/phone/profiles/lab/host_plugin.py")
             unrelated = write("unselected.txt")
 
             for relative in (
@@ -95,6 +96,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                 "uboot": {"kind": "none"},
                 "fit": {"kind": "none"},
                 "image": {"kind": "none"},
+                "runtime": {"host_plugin": "profiles/lab/host_plugin.py"},
             }
             platform: dict[str, Any] = {
                 "bundle": {"packages": []},
@@ -158,6 +160,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                     host_tool,
                     host_input,
                     host_patch,
+                    profile_plugin,
                 ):
                     original = causal.read_bytes()
                     causal.write_bytes(original + b"changed\n")

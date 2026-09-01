@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, cast
 from unittest import mock
 
-from fplinux_cli import alpine_state, builder
+from fplinux_cli import alpine_state, builder, commands
 from fplinux_cli.bundle_state import (
     BUILD_MANIFEST_NAME,
     bundle_generations,
@@ -507,6 +507,32 @@ class BuilderPublicationTests(unittest.TestCase):
         self.assertEqual(manifest["profile"], "usb-host-lab")
         self.assertEqual(runtime["profile"], "usb-host-lab")
         self.assertEqual(runtime["transport"], "none")
+
+    def test_named_profile_publishes_and_loads_its_host_plugin(self) -> None:
+        """The selected generation owns the exact executable profile command bytes."""
+        plugin = self.write(
+            "targets/demo/profiles/nand-ro-lab/host_plugin.py",
+            b"calls = []\ndef run(connect, arguments):\n    calls.append(arguments)\n",
+        )
+        self.target_config["profile"] = "nand-ro-lab"
+        self.target_config["runtime"]["transport"] = "none"
+        self.target_config["runtime"]["host_plugin"] = "profiles/nand-ro-lab/host_plugin.py"
+
+        published = self.publish()
+        current = resolve_current_bundle(self.output, "demo", "nand-ro-lab")
+        manifest = json.loads((published / BUILD_MANIFEST_NAME).read_text())
+        bundled = published / "runner/profile_plugin.py"
+
+        self.assertEqual(bundled.read_bytes(), plugin.read_bytes())
+        self.assertEqual(
+            manifest["files"]["runner/profile_plugin.py"]["sha256"],
+            hashlib.sha256(plugin.read_bytes()).hexdigest(),
+        )
+        module = commands._load_bundle_profile_plugin(  # noqa: SLF001 - artifact boundary
+            current, manifest
+        )
+        module.run(lambda: None, ["probe"])
+        self.assertEqual(module.calls, [["probe"]])
 
     def test_external_root_bundle_does_not_copy_an_unused_initramfs(self) -> None:
         """A profile whose kernel boots ext4 omits the unrelated cpio debug copy."""

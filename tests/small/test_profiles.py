@@ -166,6 +166,7 @@ runnable = true
         self.assertTrue(before["runtime"]["runnable"])
         self.assertEqual(before["linux"]["config_enable"], [])
         self.assertEqual(before["linux"]["root"], {"kind": "initramfs"})
+        self.assertEqual(before["linux"]["forbidden_dtb_markers"], ["forbidden"])
         self.assertEqual(before["bootstrap"]["kind"], "linux")
         self.assertEqual(before["uboot"], {"kind": "none"})
         self.assertEqual(before["fit"], {"kind": "none"})
@@ -211,6 +212,7 @@ runnable = true
             {"packages": ["fplinux-host"], "exclude_packages": ["fplinux-ssh"]},
         )
         self.assertEqual(loaded["linux"]["root"], {"kind": "initramfs"})
+        self.assertEqual(loaded["linux"]["forbidden_dtb_markers"], ["forbidden"])
         self.assertEqual(loaded["bootstrap"]["kind"], "linux")
         self.assertEqual(loaded["uboot"], {"kind": "none"})
         self.assertEqual(loaded["fit"], {"kind": "none"})
@@ -219,6 +221,26 @@ runnable = true
         self.assertEqual(loaded["image"], {"kind": "none"})
         self.assertEqual(loaded["runtime"]["transport"], "none")
         self.assertTrue(loaded["runtime"]["runnable"])
+
+    def test_selected_profile_can_own_its_dtb_safety_markers(self) -> None:
+        """A hardware lab replaces DT markers only inside its selected profile."""
+        profile = self._write_profile()
+        manifest = profile / "profile.toml"
+        contents = manifest.read_text(encoding="utf-8")
+        manifest.write_text(
+            contents.replace(
+                'patches = ["host.patch"]',
+                'patches = ["host.patch"]\nforbidden_dtb_markers = ["profile-danger"]',
+                1,
+            ),
+            encoding="utf-8",
+        )
+
+        selected = self._load_target("usb-host")
+        default = self._load_target()
+
+        self.assertEqual(selected["linux"]["forbidden_dtb_markers"], ["profile-danger"])
+        self.assertEqual(default["linux"]["forbidden_dtb_markers"], ["forbidden"])
 
     def test_external_root_requires_full_uboot_fit_and_matching_image(self) -> None:
         """Normalize one implemented pipeline and reject unsupported stage claims."""
