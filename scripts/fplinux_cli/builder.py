@@ -33,6 +33,7 @@ from .bundle_state import (
 )
 from .common import ROOT, sha256_bytes, sha256_file
 from .config import (
+    PROFILE_HOST_PLUGIN_BUNDLE_PATH,
     container_runtime_recipe_digest,
     load_asset_lock,
     load_platform,
@@ -1837,6 +1838,12 @@ def _publish_staged_bundle(
         copy_file(source, release / "host" / name, executable=True)
     copy_file(runner_source(), release / "runner/run.py", executable=True)
     copy_file(ssh_transport_source(), release / "runner/ssh_transport.py")
+    profile_plugin = target_config["runtime"].get("host_plugin")
+    if isinstance(profile_plugin, str):
+        copy_file(
+            ROOT / "targets" / target / profile_plugin,
+            release / PROFILE_HOST_PLUGIN_BUNDLE_PATH,
+        )
     copy_file(identity_source(), release / RUNTIME_IDENTITY_PATH)
     copy_file(
         adapter_source(target_config["platform"]),

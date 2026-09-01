@@ -14,6 +14,7 @@ import math
 import os
 import re
 import shutil
+import signal
 import stat
 import struct
 import subprocess
@@ -21,7 +22,11 @@ import tempfile
 import time
 import zlib
 from pathlib import Path, PurePosixPath
-from typing import Any, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn
+
+if TYPE_CHECKING:
+    from types import FrameType
+    from typing import BinaryIO
 
 SESSION_OWNER_KIND = "fplinux-host-session-owner"
 SESSION_MAGIC = b"FPLSESS\0"
@@ -1148,6 +1153,89 @@ def run_remote(
         text=True,
         check=False,
     )
+
+
+def _stream_stderr_detail(stream: BinaryIO) -> str:
+    """Return a bounded diagnostic without ever mixing it into downloaded bytes."""
+    stream.seek(0, os.SEEK_END)
+    stream.seek(max(0, stream.tell() - 4096))
+    return stream.read().decode("utf-8", errors="replace").strip()
+
+
+def _terminate_stream_process(process: subprocess.Popen[bytes]) -> None:
+    """Stop one isolated SSH process group and wait for every child it owns."""
+    if process.poll() is not None:
+        return
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGTERM)
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+
+
+def stream_remote(
+    session: dict[str, Any],
+    command: str,
+    destination: BinaryIO,
+    *,
+    timeout: float,
+) -> None:
+    """Stream one authenticated SSH command directly to an already-open local file."""
+    if timeout <= 0:
+        message = "SSH stream timeout must be positive"
+        raise ValueError(message)
+    session = _validate_session(session)
+    interrupted: int | None = None
+    with tempfile.TemporaryFile(mode="w+b") as stderr:
+        process = subprocess.Popen(
+            _ssh_argv(session, command),
+            stdout=destination,
+            stderr=stderr,
+            start_new_session=True,
+        )
+
+        def forward_signal(signum: int, _frame: FrameType | None) -> None:
+            nonlocal interrupted
+            interrupted = signum
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signum)
+
+        previous_handlers = {
+            signum: signal.signal(signum, forward_signal)
+            for signum in (signal.SIGINT, signal.SIGTERM)
+        }
+        timed_out = False
+        try:
+            deadline = time.monotonic() + timeout
+            while process.poll() is None and interrupted is None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    timed_out = True
+                    break
+                try:
+                    process.wait(timeout=min(remaining, 0.25))
+                except subprocess.TimeoutExpired:
+                    continue
+            if process.poll() is None:
+                _terminate_stream_process(process)
+        except BaseException:
+            _terminate_stream_process(process)
+            raise
+        finally:
+            for signum, handler in previous_handlers.items():
+                signal.signal(signum, handler)
+
+        detail = _stream_stderr_detail(stderr)
+        if interrupted is not None:
+            raise SystemExit(128 + interrupted)
+        if timed_out:
+            fail(f"SSH remote command timed out after {timeout:g}s")
+        if process.returncode:
+            message = f"SSH remote command failed with exit status {process.returncode}"
+            fail(message + (f": {detail}" if detail else ""))
 
 
 def _remote_path(value: str, name: str) -> str:

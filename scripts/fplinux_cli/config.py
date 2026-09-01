@@ -24,6 +24,8 @@ VALUE_NAME = re.compile(r"[A-Za-z0-9._-]+")
 KCONFIG_SYMBOL = re.compile(r"CONFIG_[A-Z0-9_]+")
 GIT_COMMIT = re.compile(r"[0-9a-f]{40}")
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+PROFILE_HOST_PLUGIN_SOURCE = "host_plugin.py"
+PROFILE_HOST_PLUGIN_BUNDLE_PATH = "runner/profile_plugin.py"
 
 
 def exact_table(value: object, keys: set[str], name: str) -> dict[str, Any]:
@@ -293,6 +295,16 @@ def profile_manifest_path(target: str, profile: str) -> Path:
     path = profile_directory(target, profile) / "profile.toml"
     if path.is_symlink() or not path.is_file():
         fail(f"profile manifest is missing or invalid: {path}")
+    return path
+
+
+def profile_host_plugin_path(target: str, profile: str) -> Path | None:
+    """Return the conventional host plugin owned by one selected profile."""
+    path = profile_directory(target, profile) / PROFILE_HOST_PLUGIN_SOURCE
+    if not path.exists() and not path.is_symlink():
+        return None
+    if path.is_symlink() or not path.is_file():
+        fail(f"profile host plugin is invalid: {path}")
     return path
 
 
@@ -759,11 +771,26 @@ def load_profile(target: str, profile: str, platform_layout: dict[str, int]) -> 
     if config.get("name") != profile:
         fail(f"profile name does not match its directory: {path}")
 
-    linux = exact_table(
-        config.get("linux"),
-        {"config_enable", "config_disable", "patches", "copies", "appends", "root"},
-        f"profile {profile} linux",
-    )
+    linux_value = config.get("linux")
+    required_linux_fields = {
+        "config_enable",
+        "config_disable",
+        "patches",
+        "copies",
+        "appends",
+        "root",
+    }
+    optional_linux_fields = {"forbidden_dtb_markers"}
+    if (
+        not isinstance(linux_value, dict)
+        or not required_linux_fields.issubset(linux_value)
+        or set(linux_value) - required_linux_fields - optional_linux_fields
+    ):
+        fail(
+            f"profile {profile} linux must contain exactly the required fields "
+            "and optional forbidden_dtb_markers"
+        )
+    linux = linux_value
     config_enable = kconfig_symbol_array(
         linux.get("config_enable"), f"profile {profile} linux config_enable"
     )
@@ -804,6 +831,14 @@ def load_profile(target: str, profile: str, platform_layout: dict[str, int]) -> 
         "copies": copies,
         "appends": appends,
         "root": root,
+        "forbidden_dtb_markers": (
+            string_array(
+                linux.get("forbidden_dtb_markers"),
+                f"profile {profile} linux forbidden_dtb_markers",
+            )
+            if "forbidden_dtb_markers" in linux
+            else None
+        ),
     }
     _profile_linux_sources(target, profile, normalized_linux)
 
@@ -834,6 +869,7 @@ def load_profile(target: str, profile: str, platform_layout: dict[str, int]) -> 
     runnable = runtime.get("runnable")
     if type(runnable) is not bool:
         fail(f"profile {profile} runtime runnable must be a boolean")
+    host_plugin = profile_host_plugin_path(target, profile)
     bootstrap = _profile_bootstrap(
         target, profile, config.get("bootstrap"), f"profile {profile} bootstrap"
     )
@@ -891,6 +927,11 @@ def load_profile(target: str, profile: str, platform_layout: dict[str, int]) -> 
         "runtime": {
             "transport": transport,
             "runnable": runnable,
+            "host_plugin": (
+                _profile_relative_source(profile, PROFILE_HOST_PLUGIN_SOURCE)
+                if host_plugin is not None
+                else None
+            ),
         },
     }
 
@@ -1032,6 +1073,7 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
             "copies": [],
             "appends": [],
             "root": {"kind": "initramfs"},
+            "forbidden_dtb_markers": None,
         }
     )
     copied_destinations = {
@@ -1061,6 +1103,11 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
             *_profile_steps(str(profile), profile_linux["appends"]),
         ],
         "root": profile_linux["root"],
+        "forbidden_dtb_markers": (
+            profile_linux["forbidden_dtb_markers"]
+            if profile_linux["forbidden_dtb_markers"] is not None
+            else linux["forbidden_dtb_markers"]
+        ),
     }
     config["rootfs"] = (
         selected_profile["rootfs"]
@@ -1135,6 +1182,9 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
         "transport": transport,
         "runnable": (
             selected_profile["runtime"]["runnable"] if selected_profile is not None else True
+        ),
+        "host_plugin": (
+            selected_profile["runtime"]["host_plugin"] if selected_profile is not None else None
         ),
     }
     return config

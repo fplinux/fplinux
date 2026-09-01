@@ -73,29 +73,49 @@ class CliCacheLockTests(unittest.TestCase):
 
     def test_dispatcher_chooses_the_required_lock_mode(self) -> None:
         """Build-side commands request exclusive mode; consumers request shared mode."""
-        cases: tuple[tuple[list[str], str, bool, str | None], ...] = (
-            (["build", "target", "--jobs", "1"], "build", True, "target"),
-            (["check"], "check", True, None),
-            (["checksum", "demo-aport"], "checksum_aport", True, None),
-            (["format", "scripts/demo.py"], "format_sources", True, None),
-            (["setup"], "setup", True, None),
-            (["prune", "--apply"], "prune", True, None),
-            (["package", "target"], "package_target", False, "target"),
-            (["run", "target"], "run_target", False, "target"),
-            (["verify", "target"], "verify_booted", False, "target"),
-            (["console", "target"], "console_target", False, "target"),
+        cases: tuple[tuple[list[str], str, bool, str | None, str | None], ...] = (
+            (["build", "target", "--jobs", "1"], "build", True, "target", None),
+            (["check"], "check", True, None, None),
+            (["checksum", "demo-aport"], "checksum_aport", True, None, None),
+            (["format", "scripts/demo.py"], "format_sources", True, None, None),
+            (["setup"], "setup", True, None, None),
+            (["prune", "--apply"], "prune", True, None, None),
+            (["package", "target"], "package_target", False, "target", None),
+            (["run", "target"], "run_target", False, "target", None),
+            (["verify", "target"], "verify_booted", False, "target", None),
+            (["console", "target"], "console_target", False, "target", None),
+            (
+                [
+                    "profile",
+                    "nokia-ta1618",
+                    "nand-ro-lab",
+                    "nand-backup",
+                    "backup.bin",
+                ],
+                "profile_command",
+                False,
+                "nokia-ta1618",
+                "nand-ro-lab",
+            ),
         )
-        for arguments, callback_name, exclusive, target in cases:
+        for arguments, callback_name, exclusive, target, profile in cases:
             with self.subTest(arguments=arguments):
                 events, callback = self._run(arguments, callback_name)
                 self.assertEqual(
                     events,
                     [
-                        ("lock", self.root / ".cache", exclusive, arguments[0], target, None),
+                        ("lock", self.root / ".cache", exclusive, arguments[0], target, profile),
                         "command",
                     ],
                 )
-                callback.assert_called_once()
+                if callback_name == "profile_command":
+                    callback.assert_called_once_with(
+                        "nokia-ta1618",
+                        "nand-ro-lab",
+                        ["nand-backup", "backup.bin"],
+                    )
+                else:
+                    callback.assert_called_once()
 
     def test_format_forwards_only_the_explicit_paths(self) -> None:
         """Pass the ordered source selection through the exclusive command boundary."""

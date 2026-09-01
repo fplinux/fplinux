@@ -131,6 +131,10 @@ def target_build_source_files(target: str, profile: str | None = None) -> list[t
     add_source_path(files, target_release_manifest_path(target))
     add_source_path(files, target_asset_lock_path(target))
     add_source_path(files, target_defconfig_path(target))
+    runtime = target_config.get("runtime")
+    profile_plugin = runtime.get("host_plugin") if isinstance(runtime, dict) else None
+    if isinstance(profile_plugin, str):
+        add_source_path(files, target_root / profile_plugin)
     selected_profile = target_config.get("profile")
     if selected_profile is not None:
         add_source_path(files, profile_manifest_path(target, selected_profile))

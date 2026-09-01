@@ -36,6 +36,7 @@ from .common import (
     sha256_file,
 )
 from .config import (
+    PROFILE_HOST_PLUGIN_BUNDLE_PATH,
     container_image_recipe_digest,
     container_image_reference,
     container_runtime_recipe_digest,
@@ -272,12 +273,41 @@ def _load_bundle_ssh_helper(
         "load_current_session",
         "reacquire_bound_session",
         "run_remote",
+        "stream_remote",
         "upload",
         "pull",
         "open_shell",
     }
     if any(not callable(getattr(module, name, None)) for name in required):
         fail("current bundle SSH transport helper has an incompatible API")
+    return module
+
+
+def _load_bundle_profile_plugin(
+    bundle: CurrentBundle,
+    manifest: dict[str, Any],
+) -> ModuleType:
+    """Load the one host plugin hashed by the selected profile bundle."""
+    path = bundle.path / PROFILE_HOST_PLUGIN_BUNDLE_PATH
+    files = manifest.get("files")
+    record = files.get(PROFILE_HOST_PLUGIN_BUNDLE_PATH) if isinstance(files, dict) else None
+    expected = record.get("sha256") if isinstance(record, dict) else None
+    if (
+        not isinstance(expected, str)
+        or path.is_symlink()
+        or not path.is_file()
+        or sha256_file(path) != expected
+    ):
+        fail("selected profile has no valid host plugin; rebuild it")
+    name = f"fplinux_bundle_profile_plugin_{bundle.generation}"
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        fail(f"profile host plugin cannot be loaded: {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    if not callable(getattr(module, "run", None)):
+        fail("profile host plugin does not expose run(connect, arguments)")
     return module
 
 
@@ -356,6 +386,17 @@ def console_target(  # noqa: PLR0913 -- public CLI modes remain explicit.
         keyboard,
     ]
     os.execv(client, arguments)
+
+
+def profile_command(target: str, profile: str, arguments: list[str]) -> None:
+    """Run the host plugin from one explicitly selected profile bundle."""
+    load_target(target, profile)
+    bundle, manifest = _resolve_target_bundle(target, profile)
+    plugin = _load_bundle_profile_plugin(bundle, manifest)
+    plugin.run(
+        lambda: _current_ssh_session(bundle, manifest, target),
+        arguments,
+    )
 
 
 def verify_booted(target: str) -> None:
