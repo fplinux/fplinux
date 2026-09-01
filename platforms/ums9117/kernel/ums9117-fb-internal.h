@@ -2,6 +2,7 @@
 #ifndef FPLINUX_UMS9117_FB_INTERNAL_H
 #define FPLINUX_UMS9117_FB_INTERNAL_H
 
+#include <linux/backlight.h>
 #include <linux/completion.h>
 #include <linux/fb.h>
 #include <linux/io.h>
@@ -46,6 +47,7 @@ struct ums9117_fb_stats {
 
 struct ums9117_fb {
 	struct fb_info *info;
+	struct backlight_device *backlight;
 	const struct ums9117_fb_profile *profile;
 	void __iomem *screen;
 	void __iomem *transfer;
@@ -83,6 +85,9 @@ struct ums9117_fb {
 	u32 pinmux_count;
 	u32 pinconf_count;
 	u32 wled_levels[UMS9117_FB_WLED_CHANNEL_COUNT];
+	u32 backlight_max_brightness;
+	u32 backlight_effective;
+	u32 backlight_applied;
 	unsigned long frame_deadline;
 	u64 damage_seq;
 	u64 submitted_seq;

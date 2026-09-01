@@ -113,17 +113,20 @@ static void ums9117_fb_stop_lcdc(struct ums9117_fb *ufb)
 }
 
 static void ums9117_fb_set_wled_state(struct ums9117_fb *ufb, bool known,
-				      bool on)
+				      bool on, unsigned int brightness)
 {
 	unsigned long flags;
 
 	spin_lock_irqsave(&ufb->lock, flags);
 	ufb->wled_known = known;
 	ufb->wled_on = known && on;
+	if (ufb->backlight_max_brightness)
+		ufb->backlight_applied = known ? brightness : 0;
 	spin_unlock_irqrestore(&ufb->lock, flags);
 }
 
-static int ums9117_fb_wled_set(struct ums9117_fb *ufb, bool on)
+static int ums9117_fb_wled_set(struct ums9117_fb *ufb, bool on,
+			       unsigned int brightness)
 {
 	static const u32 current_regs[UMS9117_FB_WLED_CHANNEL_COUNT] = {
 		SC2720_BLTC_CURRENT0,
@@ -138,6 +141,9 @@ static int ums9117_fb_wled_set(struct ums9117_fb *ufb, bool on)
 	int ret;
 	int end_ret;
 
+	if (on && ufb->backlight_max_brightness &&
+	    (!brightness || brightness > ufb->backlight_max_brightness))
+		return -EINVAL;
 	ret = ums9117_adi_begin(&transaction);
 	if (ret)
 		goto out;
@@ -165,8 +171,13 @@ static int ums9117_fb_wled_set(struct ums9117_fb *ufb, bool on)
 	}
 	if (!ret && on) {
 		for (i = 0; !ret && i < ARRAY_SIZE(current_regs); i++) {
+			u32 current_level = ufb->wled_levels[i];
+
 			if (ufb->wled_levels[i])
 				active_mask |= 0xc << (i * 4);
+			if (ufb->backlight_max_brightness &&
+			    ufb->wled_levels[i])
+				current_level = brightness;
 			ret = ums9117_adi_read(&transaction, current_regs[i],
 					       &value);
 			if (!ret)
@@ -174,7 +185,7 @@ static int ums9117_fb_wled_set(struct ums9117_fb *ufb, bool on)
 					&transaction, current_regs[i],
 					(value &
 					 ~SC2720_BLTC_CURRENT_LEVEL_MASK) |
-						ufb->wled_levels[i]);
+						current_level);
 		}
 	}
 	if (!ret && on)
@@ -199,7 +210,7 @@ static int ums9117_fb_wled_set(struct ums9117_fb *ufb, bool on)
 out:
 	if (ret)
 		ufb->stats.wled_errors++;
-	ums9117_fb_set_wled_state(ufb, !ret, on);
+	ums9117_fb_set_wled_state(ufb, !ret, on, on ? brightness : 0);
 	return ret;
 }
 
@@ -210,7 +221,7 @@ static int ums9117_fb_wled_off_bounded(struct ums9117_fb *ufb)
 
 	for (attempt = 0; attempt < UMS9117_FB_WLED_DISABLE_ATTEMPTS;
 	     attempt++) {
-		ret = ums9117_fb_wled_set(ufb, false);
+		ret = ums9117_fb_wled_set(ufb, false, 0);
 		if (ret != -EBUSY)
 			break;
 		usleep_range(UMS9117_FB_WLED_DISABLE_RETRY_US,
@@ -407,6 +418,73 @@ static void ums9117_fb_enter_error(struct ums9117_fb *ufb, int error)
 	ums9117_fb_fail_dark(ufb);
 }
 
+static unsigned int ums9117_fb_cached_backlight_level(struct ums9117_fb *ufb)
+{
+	unsigned long flags;
+	unsigned int brightness;
+
+	spin_lock_irqsave(&ufb->lock, flags);
+	brightness = ufb->backlight_effective;
+	spin_unlock_irqrestore(&ufb->lock, flags);
+	return brightness;
+}
+
+#if IS_ENABLED(CONFIG_BACKLIGHT_CLASS_DEVICE)
+static int
+ums9117_fb_backlight_update_status(struct backlight_device *backlight)
+{
+	struct ums9117_fb *ufb = bl_get_data(backlight);
+	unsigned long flags;
+	int effective = backlight_get_brightness(backlight);
+	bool apply = false;
+	int ret = 0;
+
+	/* The backlight core already holds its update lock. */
+	mutex_lock(&ufb->transition_lock);
+	mutex_lock(&ufb->panel_lock);
+	spin_lock_irqsave(&ufb->lock, flags);
+	ufb->backlight_effective = effective;
+	if (ufb->stopping)
+		ret = -ENODEV;
+	else if (ufb->state == UMS9117_FB_PANEL_STATE_ERROR)
+		ret = -EIO;
+	else if (ufb->state == UMS9117_FB_PANEL_STATE_ACTIVE)
+		apply = true;
+	spin_unlock_irqrestore(&ufb->lock, flags);
+	if (apply) {
+		ret = ums9117_fb_wled_set(ufb, effective != 0, effective);
+		if (ret)
+			ums9117_fb_enter_error(ufb, ret);
+	}
+	mutex_unlock(&ufb->panel_lock);
+	mutex_unlock(&ufb->transition_lock);
+	return ret;
+}
+
+static int
+ums9117_fb_backlight_get_brightness(struct backlight_device *backlight)
+{
+	struct ums9117_fb *ufb = bl_get_data(backlight);
+	unsigned long flags;
+	int brightness;
+
+	spin_lock_irqsave(&ufb->lock, flags);
+	if (ufb->stopping)
+		brightness = -ENODEV;
+	else if (!ufb->wled_known)
+		brightness = -EIO;
+	else
+		brightness = ufb->backlight_applied;
+	spin_unlock_irqrestore(&ufb->lock, flags);
+	return brightness;
+}
+
+static const struct backlight_ops ums9117_fb_backlight_ops = {
+	.update_status = ums9117_fb_backlight_update_status,
+	.get_brightness = ums9117_fb_backlight_get_brightness,
+};
+#endif
+
 /*
  * A successful completion, whether delivered by Nokia's IRQ or an INOI raw
  * status poll, follows exactly one lifecycle and releases the same waiters.
@@ -551,7 +629,14 @@ static void ums9117_fb_wake_work(struct work_struct *work)
 		goto out;
 	}
 	spin_unlock_irqrestore(&ufb->lock, flags);
-	ret = ums9117_fb_wled_set(ufb, true);
+	if (ufb->backlight_max_brightness) {
+		unsigned int brightness =
+			ums9117_fb_cached_backlight_level(ufb);
+
+		ret = ums9117_fb_wled_set(ufb, brightness != 0, brightness);
+	} else {
+		ret = ums9117_fb_wled_set(ufb, true, 0);
+	}
 	if (ret) {
 		ums9117_fb_enter_error(ufb, ret);
 		goto out;
@@ -1022,6 +1107,7 @@ static int ums9117_fb_reset_panel(struct ums9117_fb *ufb)
 static int ums9117_fb_cold_init(struct ums9117_fb *ufb)
 {
 	unsigned long flags;
+	unsigned int brightness;
 	int ret;
 
 	memset_io(ufb->screen, 0, 2 * ums9117_fb_size_bytes(ufb));
@@ -1048,8 +1134,12 @@ static int ums9117_fb_cold_init(struct ums9117_fb *ufb)
 		    &ufb->frame_done,
 		    msecs_to_jiffies(UMS9117_FB_FRAME_TIMEOUT_MS)))
 		ret = -ETIMEDOUT;
-	if (!ret)
-		ret = ums9117_fb_wled_set(ufb, true);
+	if (!ret) {
+		brightness = ums9117_fb_cached_backlight_level(ufb);
+		ret = ums9117_fb_wled_set(
+			ufb, !ufb->backlight_max_brightness || brightness != 0,
+			brightness);
+	}
 	if (ret) {
 		ums9117_fb_enter_error(ufb, ret);
 		return ret;
@@ -1067,6 +1157,7 @@ static int ums9117_fb_map_common_resources(struct ums9117_fb *ufb,
 	struct resource *fbres;
 	struct resource *adires;
 	struct resource *analogres;
+	unsigned int i;
 	int ret;
 
 	fbres = platform_get_resource_byname(pdev, IORESOURCE_MEM,
@@ -1110,11 +1201,73 @@ static int ums9117_fb_map_common_resources(struct ums9117_fb *ufb,
 					 ARRAY_SIZE(ufb->wled_levels));
 	if (ret)
 		return ret;
-	for (ret = 0; ret < ARRAY_SIZE(ufb->wled_levels); ret++)
-		if (ufb->wled_levels[ret] > SC2720_BLTC_CURRENT_LEVEL_MASK)
+	for (i = 0; i < ARRAY_SIZE(ufb->wled_levels); i++) {
+		if (ufb->wled_levels[i] > SC2720_BLTC_CURRENT_LEVEL_MASK)
 			return -EINVAL;
+		if (!ufb->profile->wled_backlight_name)
+			continue;
+		if (!ufb->wled_levels[i])
+			return -EINVAL;
+		if (!ufb->backlight_max_brightness)
+			ufb->backlight_max_brightness = ufb->wled_levels[i];
+		else if (ufb->wled_levels[i] != ufb->backlight_max_brightness)
+			return -EINVAL;
+	}
+	if (ufb->profile->wled_backlight_name && !ufb->backlight_max_brightness)
+		return -EINVAL;
+	ufb->backlight_effective = ufb->backlight_max_brightness;
 	return ums9117_fb_configure_pins(ufb, pdev);
 }
+
+#if IS_ENABLED(CONFIG_BACKLIGHT_CLASS_DEVICE)
+static int ums9117_fb_register_backlight(struct ums9117_fb *ufb,
+					 struct platform_device *pdev)
+{
+	struct backlight_properties properties = {
+		.type = BACKLIGHT_RAW,
+		.scale = BACKLIGHT_SCALE_UNKNOWN,
+	};
+
+	if (!ufb->profile->wled_backlight_name)
+		return 0;
+	if (!ufb->backlight_max_brightness)
+		return -EINVAL;
+	properties.max_brightness = ufb->backlight_max_brightness;
+	properties.brightness = properties.max_brightness;
+	properties.power = BACKLIGHT_POWER_ON;
+	ufb->backlight_effective = properties.brightness;
+	ufb->backlight = backlight_device_register(
+		ufb->profile->wled_backlight_name, &pdev->dev, ufb,
+		&ums9117_fb_backlight_ops, &properties);
+	if (IS_ERR(ufb->backlight)) {
+		int ret = PTR_ERR(ufb->backlight);
+
+		ufb->backlight = NULL;
+		return ret;
+	}
+	return 0;
+}
+
+static void ums9117_fb_unregister_backlight(struct ums9117_fb *ufb)
+{
+	if (!ufb->backlight)
+		return;
+	backlight_device_unregister(ufb->backlight);
+	ufb->backlight = NULL;
+}
+#else
+static int ums9117_fb_register_backlight(struct ums9117_fb *ufb,
+					 struct platform_device *pdev)
+{
+	(void)pdev;
+	return ufb->profile->wled_backlight_name ? -EINVAL : 0;
+}
+
+static void ums9117_fb_unregister_backlight(struct ums9117_fb *ufb)
+{
+	(void)ufb;
+}
+#endif
 
 int ums9117_fb_transport_init(struct ums9117_fb *ufb,
 			      struct platform_device *pdev)
@@ -1261,10 +1414,17 @@ int ums9117_fb_probe(struct platform_device *pdev,
 	if (ret)
 		goto unregister;
 	ufb->audit_file_created = true;
+	ret = ums9117_fb_register_backlight(ufb, pdev);
+	if (ret)
+		goto unregister;
 	dev_info(dev, "%s framebuffer registered as fb%d\n", profile->name,
 		 info->node);
 	return 0;
 unregister:
+	if (ufb->audit_file_created) {
+		device_remove_file(dev, &dev_attr_audit);
+		ufb->audit_file_created = false;
+	}
 	ums9117_fb_shutdown(pdev);
 	platform_set_drvdata(pdev, NULL);
 	console_lock();
@@ -1302,6 +1462,7 @@ void ums9117_fb_remove(struct platform_device *pdev)
 	ufb->stopping = true;
 	spin_unlock_irqrestore(&ufb->lock, flags);
 	mutex_unlock(&ufb->transition_lock);
+	ums9117_fb_unregister_backlight(ufb);
 	if (ufb->audit_file_created) {
 		device_remove_file(&pdev->dev, &dev_attr_audit);
 		ufb->audit_file_created = false;
@@ -1343,6 +1504,7 @@ void ums9117_fb_shutdown(struct platform_device *pdev)
 	ufb->stopping = true;
 	spin_unlock_irqrestore(&ufb->lock, flags);
 	mutex_unlock(&ufb->transition_lock);
+	ums9117_fb_unregister_backlight(ufb);
 	cancel_work_sync(&ufb->wake_work);
 	mutex_lock(&ufb->transition_lock);
 	ums9117_fb_quiesce(ufb);

@@ -35,7 +35,7 @@ diff --git a/drivers/mmc/host/Makefile b/drivers/mmc/host/Makefile
 diff --git a/drivers/video/fbdev/Kconfig b/drivers/video/fbdev/Kconfig
 --- a/drivers/video/fbdev/Kconfig
 +++ b/drivers/video/fbdev/Kconfig
-@@ -1781,6 +1781,18 @@ config FB_HYPERV
+@@ -1781,6 +1781,19 @@ config FB_HYPERV
  	  This driver is deprecated, please use the Hyper-V DRM driver at
  	  drivers/gpu/drm/hyperv (CONFIG_DRM_HYPERV) instead.
 
@@ -43,6 +43,7 @@ diff --git a/drivers/video/fbdev/Kconfig b/drivers/video/fbdev/Kconfig
 +	bool "Nokia TA-1618 LCDC framebuffer"
 +	depends on FB && MACH_NOKIA_TA1618
 +	select FB_UMS9117
++	select BACKLIGHT_CLASS_DEVICE
 +	help
 +	  Cold-initialize and drive the TA-1618 ST7789P3 panel through SPI1
 +	  and the LCDC. Damage submits full RGB565 frames through a private

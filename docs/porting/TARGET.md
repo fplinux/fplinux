@@ -50,6 +50,7 @@ unsupported targets retain an explicit `Unknown` or `Not supported` entry.
 | RAM boot                                                     | **N/A**      | `{support}` | `{target-specific limitation}` |
 | Persistent boot                                              | **N/A**      | `{support}` | `{target-specific limitation}` |
 | [Local console](../../docs/features/LOCAL_CONSOLE.md)        | `{presence}` | `{support}` | `{resolution or other delta}`  |
+| LCD backlight                                                | `{presence}` | `{support}` | `{range or control limit}`     |
 | Keypad backlight                                             | `{presence}` | `{support}` | `{control or limitation}`      |
 | [USB networking](../../docs/features/USB_NETWORKING.md)      | `{presence}` | `{support}` | `{target-specific delta or —}` |
 | [SSH access](../../docs/features/SSH.md)                     | **N/A**      | `{support}` | `{target-specific delta or —}` |

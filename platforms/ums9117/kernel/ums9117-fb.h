@@ -53,6 +53,11 @@ struct ums9117_fb_profile {
 	u16 reset_release_ms;
 	u16 sleep_in_ms;
 	u16 sleep_out_ms;
+	/*
+	 * NULL retains the fixed WLED recipe. A name enables a raw range whose
+	 * maximum is derived from equal non-zero board WLED current levels.
+	 */
+	const char *wled_backlight_name;
 	/* LCDC CTRL bits required by this panel's transport. */
 	u32 lcdc_ctrl_set;
 	u32 lcdc_ctrl_clear;

@@ -25,6 +25,7 @@ Status terms and limits shared by every phone are defined in the
 | RAM boot                                                     | N/A      | Supported     | —                                                            |
 | Persistent boot                                              | N/A      | Not supported | —                                                            |
 | [Local console](../../docs/features/LOCAL_CONSOLE.md)        | Present  | Supported     | `128×160`.                                                   |
+| LCD backlight                                                | Present  | Not supported | No user brightness interface is provided.                    |
 | Keypad backlight                                             | Unknown  | Not supported | No FPLinux control is provided.                              |
 | [USB networking](../../docs/features/USB_NETWORKING.md)      | Present  | Supported     | —                                                            |
 | [SSH access](../../docs/features/SSH.md)                     | N/A      | Supported     | —                                                            |
