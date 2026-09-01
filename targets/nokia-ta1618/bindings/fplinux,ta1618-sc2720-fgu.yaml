@@ -10,8 +10,8 @@ maintainers:
   - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
 
 description:
-  Read-only battery voltage and current reporting through the SC2720 fuel
-  gauge on the Nokia 3210 4G TA-1618.
+  Read-only battery voltage, current and relative charge counter reporting
+  through the SC2720 fuel gauge on the Nokia 3210 4G TA-1618.
 
 properties:
   compatible:

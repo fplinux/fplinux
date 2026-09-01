@@ -31,6 +31,8 @@
 #define SC2720_FGU_INT_RAW 0xa18U
 #define SC2720_FGU_VOLTAGE 0xa20U
 #define SC2720_FGU_CURRENT 0xa2cU
+#define SC2720_FGU_CLBCNT_VALUE_HIGH 0xa68U
+#define SC2720_FGU_CLBCNT_VALUE_LOW 0xa6cU
 #define SC2720_CHGR_DET_FGU_CTRL 0xe18U
 
 #define SC2720_EXPECTED_ID_LOW 0xa003U
@@ -64,6 +66,8 @@
 #define SC2720_FGU_CURRENT_RESERVED GENMASK(15, 14)
 #define SC2720_FGU_CURRENT_COUNTS_MASK GENMASK(13, 0)
 #define SC2720_FGU_CURRENT_ZERO 0x2000U
+#define SC2720_FGU_CLBCNT_SIGN_EXTENSION GENMASK(31, 29)
+#define SC2720_FGU_CLBCNT_SIGN_BIT 29U
 
 #define TA1618_EFUSE3_BLOCK 3U
 #define TA1618_EFUSE_POLL_INTERVAL_MS 10U
@@ -77,6 +81,10 @@
 #define TA1618_FGU_CURRENT_FITTED_CALIBRATION_SPEC 20U
 #define TA1618_FGU_READY_POLL_MS 100U
 #define TA1618_FGU_READY_TIMEOUT_MS 5000U
+#define TA1618_FGU_CLBCNT_READ_ATTEMPTS 3U
+#define TA1618_FGU_CLBCNT_SAMPLE_HZ 2U
+#define TA1618_FGU_MICROAMPS_PER_AMP 1000000ULL
+#define TA1618_FGU_SECONDS_PER_HOUR 3600U
 
 struct ta1618_fgu {
 	struct device *dev;
@@ -114,6 +122,13 @@ struct ta1618_fgu_sample {
 	u16 int_raw;
 	u16 voltage[3];
 	u16 current_raw;
+};
+
+struct ta1618_fgu_charge_sample {
+	struct ta1618_fgu_sample state;
+	u16 high_before;
+	u16 low;
+	u16 high_after;
 };
 
 static int
@@ -686,6 +701,34 @@ static u16 ta1618_fgu_median3(u16 a, u16 b, u16 c)
 	return b;
 }
 
+static int ta1618_fgu_read_runtime_state_locked(
+	struct ums9117_adi_transaction *transaction,
+	struct ta1618_fgu_sample *sample)
+{
+	int ret = 0;
+
+	ret = ta1618_fgu_read_if_ok(transaction, ret, SC2720_CHIP_ID_LOW,
+				    &sample->chip_id_low);
+	ret = ta1618_fgu_read_if_ok(transaction, ret, SC2720_CHIP_ID_HIGH,
+				    &sample->chip_id_high);
+	ret = ta1618_fgu_read_if_ok(transaction, ret, SC2720_MODULE_EN0,
+				    &sample->module_en0);
+	ret = ta1618_fgu_read_if_ok(transaction, ret, SC2720_RTC_CLK_EN0,
+				    &sample->rtc_clk_en0);
+	ret = ta1618_fgu_read_if_ok(transaction, ret, SC2720_SOFT_RST0,
+				    &sample->soft_rst0);
+	ret = ta1618_fgu_read_if_ok(transaction, ret, SC2720_CHGR_DET_FGU_CTRL,
+				    &sample->chgr_det_fgu_ctrl);
+	ret = ta1618_fgu_read_if_ok(transaction, ret, SC2720_FGU_CONFIG,
+				    &sample->config);
+	ret = ta1618_fgu_read_if_ok(transaction, ret, SC2720_FGU_ADC_CONFIG,
+				    &sample->adc_config);
+	ret = ta1618_fgu_read_if_ok(transaction, ret, SC2720_FGU_STATUS,
+				    &sample->status);
+	return ta1618_fgu_read_if_ok(transaction, ret, SC2720_FGU_INT_RAW,
+				     &sample->int_raw);
+}
+
 static int ta1618_fgu_read_sample(struct ta1618_fgu_sample *sample)
 {
 	struct ums9117_adi_transaction transaction = {};
@@ -694,26 +737,7 @@ static int ta1618_fgu_read_sample(struct ta1618_fgu_sample *sample)
 	ret = ums9117_adi_begin(&transaction);
 	if (ret)
 		return ret;
-	ret = ta1618_fgu_read_if_ok(&transaction, ret, SC2720_CHIP_ID_LOW,
-				    &sample->chip_id_low);
-	ret = ta1618_fgu_read_if_ok(&transaction, ret, SC2720_CHIP_ID_HIGH,
-				    &sample->chip_id_high);
-	ret = ta1618_fgu_read_if_ok(&transaction, ret, SC2720_MODULE_EN0,
-				    &sample->module_en0);
-	ret = ta1618_fgu_read_if_ok(&transaction, ret, SC2720_RTC_CLK_EN0,
-				    &sample->rtc_clk_en0);
-	ret = ta1618_fgu_read_if_ok(&transaction, ret, SC2720_SOFT_RST0,
-				    &sample->soft_rst0);
-	ret = ta1618_fgu_read_if_ok(&transaction, ret, SC2720_CHGR_DET_FGU_CTRL,
-				    &sample->chgr_det_fgu_ctrl);
-	ret = ta1618_fgu_read_if_ok(&transaction, ret, SC2720_FGU_CONFIG,
-				    &sample->config);
-	ret = ta1618_fgu_read_if_ok(&transaction, ret, SC2720_FGU_ADC_CONFIG,
-				    &sample->adc_config);
-	ret = ta1618_fgu_read_if_ok(&transaction, ret, SC2720_FGU_STATUS,
-				    &sample->status);
-	ret = ta1618_fgu_read_if_ok(&transaction, ret, SC2720_FGU_INT_RAW,
-				    &sample->int_raw);
+	ret = ta1618_fgu_read_runtime_state_locked(&transaction, sample);
 	ret = ta1618_fgu_read_if_ok(&transaction, ret, SC2720_FGU_VOLTAGE,
 				    &sample->voltage[0]);
 	ret = ta1618_fgu_read_if_ok(&transaction, ret, SC2720_FGU_VOLTAGE,
@@ -724,6 +748,42 @@ static int ta1618_fgu_read_sample(struct ta1618_fgu_sample *sample)
 				    &sample->current_raw);
 
 	return ta1618_fgu_finish_transaction(&transaction, ret);
+}
+
+static int
+ta1618_fgu_read_charge_sample(struct ta1618_fgu_charge_sample *sample)
+{
+	struct ums9117_adi_transaction transaction = {};
+	unsigned int attempt;
+	int ret;
+
+	for (attempt = 0; attempt < TA1618_FGU_CLBCNT_READ_ATTEMPTS;
+	     attempt++) {
+		ret = ums9117_adi_begin(&transaction);
+		if (ret)
+			return ret;
+		ret = ta1618_fgu_read_runtime_state_locked(&transaction,
+							   &sample->state);
+		ret = ta1618_fgu_read_if_ok(&transaction, ret,
+					    SC2720_FGU_CURRENT,
+					    &sample->state.current_raw);
+		ret = ta1618_fgu_read_if_ok(&transaction, ret,
+					    SC2720_FGU_CLBCNT_VALUE_HIGH,
+					    &sample->high_before);
+		ret = ta1618_fgu_read_if_ok(&transaction, ret,
+					    SC2720_FGU_CLBCNT_VALUE_LOW,
+					    &sample->low);
+		ret = ta1618_fgu_read_if_ok(&transaction, ret,
+					    SC2720_FGU_CLBCNT_VALUE_HIGH,
+					    &sample->high_after);
+		ret = ta1618_fgu_finish_transaction(&transaction, ret);
+		if (ret)
+			return ret;
+		if (sample->high_before == sample->high_after)
+			return 0;
+	}
+
+	return -EAGAIN;
 }
 
 static int
@@ -809,6 +869,63 @@ static int ta1618_fgu_sample_to_microamp(const struct ta1618_fgu *fgu,
 	return 0;
 }
 
+static int
+ta1618_fgu_charge_sample_to_uah(const struct ta1618_fgu *fgu,
+				const struct ta1618_fgu_charge_sample *sample,
+				int *microamp_hours)
+{
+	u64 denominator;
+	u32 raw_count;
+	u32 extension;
+	s32 count;
+	s64 charge;
+	s64 scaled_count;
+	int current_microamps;
+	int ret;
+
+	ret = ta1618_fgu_sample_to_microamp(fgu, &sample->state,
+					    &current_microamps);
+	if (ret)
+		return ret;
+
+	raw_count = ((u32)sample->high_before << 16) | sample->low;
+	extension = raw_count & SC2720_FGU_CLBCNT_SIGN_EXTENSION;
+	if (extension && extension != SC2720_FGU_CLBCNT_SIGN_EXTENSION)
+		return -ENODATA;
+
+	count = sign_extend32(raw_count, SC2720_FGU_CLBCNT_SIGN_BIT);
+	denominator = (u64)fgu->codes_per_1000ma * TA1618_FGU_CLBCNT_SAMPLE_HZ *
+		      TA1618_FGU_SECONDS_PER_HOUR;
+	if (!denominator)
+		return -ENODATA;
+
+	/* The accumulator adds one calibrated current code every 500 ms. */
+	scaled_count = (s64)count * TA1618_FGU_MICROAMPS_PER_AMP;
+	if (scaled_count < 0)
+		charge = -(s64)DIV_ROUND_CLOSEST_ULL((u64)-scaled_count,
+						     denominator);
+	else
+		charge = DIV_ROUND_CLOSEST_ULL((u64)scaled_count, denominator);
+	if (charge < INT_MIN || charge > INT_MAX)
+		return -ERANGE;
+
+	*microamp_hours = (int)charge;
+	return 0;
+}
+
+static int ta1618_fgu_get_charge_counter(const struct ta1618_fgu *fgu,
+					 int *microamp_hours)
+{
+	struct ta1618_fgu_charge_sample sample = {};
+	int ret;
+
+	ret = ta1618_fgu_read_charge_sample(&sample);
+	if (ret)
+		return ret;
+
+	return ta1618_fgu_charge_sample_to_uah(fgu, &sample, microamp_hours);
+}
+
 static int ta1618_fgu_wait_usable(const struct ta1618_fgu *fgu)
 {
 	struct ta1618_fgu_sample sample = {};
@@ -841,6 +958,9 @@ static int ta1618_fgu_get_property(struct power_supply *supply,
 	struct ta1618_fgu_sample sample = {};
 	int ret;
 
+	if (property == POWER_SUPPLY_PROP_CHARGE_COUNTER)
+		return ta1618_fgu_get_charge_counter(fgu, &value->intval);
+
 	ret = ta1618_fgu_read_sample(&sample);
 	if (ret)
 		return ret;
@@ -860,6 +980,7 @@ static int ta1618_fgu_get_property(struct power_supply *supply,
 static enum power_supply_property ta1618_fgu_properties[] = {
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
 	POWER_SUPPLY_PROP_CURRENT_NOW,
+	POWER_SUPPLY_PROP_CHARGE_COUNTER,
 };
 
 static const struct power_supply_desc ta1618_fgu_description = {
