@@ -1,0 +1,27 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-charge
+pkgver=1
+pkgrel=0
+pkgdesc="Application charge measurement helper for FPLinux"
+url="https://github.com/fplinux/fplinux"
+arch="armv7"
+license="GPL-2.0-only"
+makedepends_build="clang22 lld22"
+makedepends_host="musl-dev"
+options="!check"
+source="fplinux-charge.c"
+builddir="$srcdir"
+
+build() {
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		"$srcdir/fplinux-charge.c" $LDFLAGS -o fplinux-charge
+}
+
+package() {
+	install -Dm755 "$builddir/fplinux-charge" \
+		"$pkgdir/usr/bin/fplinux-charge"
+}
+
+sha512sums="
+7eb7291a1b7992bb5dfec2d5e78210e3a7cc4908e4fefb7a15467e572777c6db557bbb1d7eaa3ec336ea93f050f9afac1d8ba4725d1d974243f9a7e301a532b4  fplinux-charge.c
+"
