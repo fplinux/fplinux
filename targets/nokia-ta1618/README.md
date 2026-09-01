@@ -12,11 +12,11 @@
 
 ## Status
 
-This exact phone runs a local `240×320` console, its physical keypad and
-backlight, the private USB session, removable microSD storage, a USB-loaded
-microSD system root, charger status, partial telemetry, RTC time reporting,
-one-shot alarms and battery-only power-off. Its vibrator is available through
-the standard Linux force-feedback interface.
+This exact phone runs a local `240×320` console with adjustable LCD backlight,
+its physical keypad and backlight, the private USB session, removable microSD
+storage, a USB-loaded microSD system root, charger status, partial telemetry,
+RTC time reporting, one-shot alarms and battery-only power-off. Its vibrator is
+available through the standard Linux force-feedback interface.
 
 Status terms and limits shared by every phone are defined in the
 [target index](../README.md#status-and-common-limits).
@@ -28,6 +28,7 @@ Status terms and limits shared by every phone are defined in the
 | RAM boot                                                            | N/A      | Supported     | —                                                                                          |
 | Persistent boot                                                     | N/A      | Not supported | The RAM bootstrap must be loaded over USB for every Linux boot.                            |
 | [Local console](../../docs/features/LOCAL_CONSOLE.md)               | Present  | Supported     | `240×320`.                                                                                 |
+| [LCD backlight](features/DISPLAY_BACKLIGHT.md)                      | Present  | Supported     | Eleven levels from off through the qualified maximum.                                      |
 | [Keypad backlight](features/KEYPAD_BACKLIGHT.md)                    | Present  | Supported     | Binary LED control plus a bounded key-press light.                                         |
 | [USB networking](../../docs/features/USB_NETWORKING.md)             | Present  | Supported     | —                                                                                          |
 | [SSH access](../../docs/features/SSH.md)                            | N/A      | Supported     | —                                                                                          |

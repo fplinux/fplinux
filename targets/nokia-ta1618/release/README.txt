@@ -6,7 +6,8 @@ This target's BootROM key is * (asterisk); hold it when the loader asks for the
 powered-off phone.
 
 Current target support:
-  - local 240x320 terminal, physical keypad and keypad backlight;
+  - local 240x320 terminal with 11 LCD backlight levels;
+  - physical keypad and keypad backlight;
   - bounded vibration through the Linux force-feedback interface;
   - USB SSH/SFTP and host-keyboard forwarding;
   - microSD FAT32 read/write and unmounted hot-swap;
@@ -23,6 +24,7 @@ The exact Nokia interfaces, limits and safety procedures are bundled at:
   - docs/target/AUXADC.md
   - docs/target/BATTERY_TELEMETRY.md
   - docs/target/CHARGER_STATUS.md
+  - docs/target/DISPLAY_BACKLIGHT.md
   - docs/target/KEYPAD_BACKLIGHT.md
   - docs/target/MICROSD.md
   - docs/target/POWER_OFF.md
