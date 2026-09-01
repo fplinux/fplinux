@@ -44,7 +44,7 @@ Status terms and limits shared by every phone are defined in the
 | Wi-Fi                                                               | Unknown  | Not supported | —                                                                                          |
 | Camera                                                              | Unknown  | Not supported | Installed sensor is not identified.                                                        |
 | [Charger status](features/CHARGER_STATUS.md)                        | Present  | Supported     | Read-only external-input status.                                                           |
-| [Battery telemetry](features/BATTERY_TELEMETRY.md)                  | Present  | Partial       | Voltage and signed current; absolute accuracy is unchecked.                                |
+| [Battery telemetry](features/BATTERY_TELEMETRY.md)                  | Present  | Partial       | Voltage, signed current and a relative charge counter; absolute accuracy is unchecked.     |
 | [SoC temperature](features/SOC_TEMPERATURE.md)                      | Present  | Partial       | Calibrated reading without external accuracy validation.                                   |
 | [Auxiliary ADC](features/AUXADC.md)                                 | Present  | Partial       | Five raw channels without physical-unit conversion.                                        |
 | [Real-time clock](features/RTC.md)                                  | Present  | Partial       | Read-only time and one-shot alarms; no time-setting or synchronization.                    |

@@ -11,7 +11,8 @@ Current target support:
   - USB SSH/SFTP and host-keyboard forwarding;
   - microSD FAT32 read/write and unmounted hot-swap;
   - external charger connection status;
-  - battery voltage and current reporting with the accuracy limits below;
+  - battery voltage, current and relative charge counter reporting with the
+    documented accuracy limits;
   - calibrated SoC temperature reporting without a thermal-control policy;
   - raw auxiliary ADC readings without unit conversion;
   - read-only real-time clock;
