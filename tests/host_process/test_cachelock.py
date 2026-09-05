@@ -30,6 +30,19 @@ _CHILD_WAIT_TIMEOUT = "parent did not release waiting child"
 _EXEC_LOCK_TIMEOUT = "parent did not release exec'd shared cache lock"
 
 
+class _ObservedStderr(io.StringIO):
+    """Signal when the real cache-lock wait diagnostic reaches stderr."""
+
+    def __init__(self, waiting: Event) -> None:
+        super().__init__()
+        self.waiting = waiting
+
+    def write(self, text: str) -> int:
+        if "cache is held by" in text and "waiting" in text:
+            self.waiting.set()
+        return super().write(text)
+
+
 @dataclass(frozen=True)
 class _LockInvocation:
     """The cache-lock arguments sent to a spawned test process."""
@@ -61,27 +74,13 @@ def _hold_lock(
 
 def _wait_for_lock(
     cache_root: str,
-    blocked: Event,
+    waiting: Event,
     acquired: Event,
     release: Event,
     output: Queue[str],
 ) -> None:
     """Capture the wait notice emitted by an invocation that is genuinely blocked."""
-    lock_path = Path(cache_root) / _LOCK_FILENAME
-    descriptor = os.open(lock_path, os.O_RDWR | os.O_CLOEXEC)
-    try:
-        try:
-            fcntl.flock(descriptor, fcntl.LOCK_SH | fcntl.LOCK_NB)
-        except OSError as error:
-            if error.errno not in {errno.EACCES, errno.EAGAIN}:
-                raise
-            blocked.set()
-        else:
-            message = "waiter unexpectedly acquired the held cache lock"
-            raise RuntimeError(message)
-    finally:
-        os.close(descriptor)
-    stderr = io.StringIO()
+    stderr = _ObservedStderr(waiting)
     with (
         contextlib.redirect_stderr(stderr),
         cache_lock(
@@ -230,17 +229,17 @@ class CacheLockTests(unittest.TestCase):
             exclusive=True,
             profile="usb-host-lab",
         )
-        blocked = self.context.Event()
+        waiting = self.context.Event()
         acquired = self.context.Event()
         release = self.context.Event()
         output = self.context.Queue()
         waiter = self.context.Process(
             target=_wait_for_lock,
-            args=(str(self.cache_root), blocked, acquired, release, output),
+            args=(str(self.cache_root), waiting, acquired, release, output),
         )
         waiter.start()
         try:
-            self.assertTrue(blocked.wait(5), "waiter did not observe lock contention")
+            self.assertTrue(waiting.wait(5), "waiter did not enter the cache-lock wait")
             self.assertFalse(acquired.is_set(), "waiter bypassed the exclusive lock")
             owner_release.set()
             self._join_or_kill(owner)
