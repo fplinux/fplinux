@@ -98,6 +98,7 @@ PACKAGE_DOCUMENTS = {
     "60-fplinux.rules": ROOT / "common/60-fplinux.rules",
     "LICENSE": ROOT / "LICENSE",
     "docs/apps/MICROPYTHONOS.md": ROOT / "docs/apps/MICROPYTHONOS.md",
+    "docs/apps/SHOWCASE.md": ROOT / "docs/apps/SHOWCASE.md",
     "docs/apps/TYRQUAKE.md": ROOT / "docs/apps/TYRQUAKE.md",
     "docs/features/CPU_CLOCK.md": ROOT / "docs/features/CPU_CLOCK.md",
     "docs/features/FILE_TRANSFER.md": ROOT / "docs/features/FILE_TRANSFER.md",

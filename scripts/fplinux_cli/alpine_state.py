@@ -21,15 +21,19 @@ SIGNING_PRIVATE_KEY = "fplinux-build.rsa"
 SIGNING_PUBLIC_KEY = "fplinux-build.rsa.pub"
 PACKAGE_CACHE_DIRECTORY = "apks"
 PACKAGE_RECEIPT_NAME = ".fplinux-package-receipt.json"
+MULTITAP_SOURCES = (
+    "alpine/shared/fplinux-multitap.c",
+    "alpine/shared/fplinux-multitap.h",
+)
+FB_SESSION_SOURCES = (
+    "alpine/shared/fplinux-fb-session.c",
+    "alpine/shared/fplinux-fb-session.h",
+)
 SHARED_APORT_SOURCES = {
-    "fplinux-console": (
-        "alpine/shared/fplinux-multitap.c",
-        "alpine/shared/fplinux-multitap.h",
-    ),
-    "fplinux-micropythonos": (
-        "alpine/shared/fplinux-multitap.c",
-        "alpine/shared/fplinux-multitap.h",
-    ),
+    "fplinux-console": MULTITAP_SOURCES,
+    "fplinux-micropythonos": (*MULTITAP_SOURCES, *FB_SESSION_SOURCES),
+    "fplinux-showcase": FB_SESSION_SOURCES,
+    "fplinux-tyrquake": FB_SESSION_SOURCES,
 }
 SHARED_APORT_SOURCE_PATHS = frozenset(
     path for paths in SHARED_APORT_SOURCES.values() for path in paths
