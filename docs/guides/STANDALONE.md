@@ -86,6 +86,7 @@ For details, use the bundled pages:
 - [file transfer](../features/FILE_TRANSFER.md);
 - [host keyboard forwarding](../features/HOST_KEYBOARD.md);
 - [CPU clock reporting](../features/CPU_CLOCK.md);
+- [FPLinux: ARMADA](../apps/SHOWCASE.md);
 - [TyrQuake](../apps/TYRQUAKE.md);
 - [MicroPythonOS](../apps/MICROPYTHONOS.md).
 

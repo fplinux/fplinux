@@ -13,6 +13,8 @@ from tests.process import run_process
 ROOT = Path(__file__).resolve().parents[2]
 HARNESS = ROOT / "tests/host_tool/fplinux-micropythonos-launcher-helpers.c"
 LAUNCHER = ROOT / "alpine/aports/fplinux-micropythonos/fplinux-micropythonos-launcher.c"
+SHARED = ROOT / "alpine/shared/fplinux-fb-session.c"
+SHARED_INCLUDE = ROOT / "alpine/shared"
 
 
 class MicroPythonOsLauncherHostHelperTests(unittest.TestCase):
@@ -36,6 +38,7 @@ class MicroPythonOsLauncherHostHelperTests(unittest.TestCase):
                 "-Wall",
                 "-Wextra",
                 "-Werror",
+                f"-I{SHARED_INCLUDE}",
                 "-Dmain=fplinux_micropythonos_launcher_program_main",
                 f'-DFPLINUX_MICROPYTHONOS_LAUNCHER_LOCK_PATH="{lock_path}"',
                 "-c",
@@ -56,6 +59,7 @@ class MicroPythonOsLauncherHostHelperTests(unittest.TestCase):
                 "-Werror",
                 str(HARNESS),
                 str(launcher_object),
+                str(SHARED),
                 "-o",
                 str(cls.executable),
             ],

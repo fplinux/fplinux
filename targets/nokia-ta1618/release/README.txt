@@ -15,6 +15,7 @@ Current target support:
   - battery voltage, current and relative charge counter reporting with the
     documented accuracy limits;
   - optional per-command charge measurement through the bundled APK;
+  - optional FPLinux: ARMADA display, keypad-light and vibration showcase;
   - calibrated SoC temperature reporting without a thermal-control policy;
   - raw auxiliary ADC readings without unit conversion;
   - read-only real-time clock;
@@ -32,6 +33,9 @@ The exact Nokia interfaces, limits and safety procedures are bundled at:
   - docs/target/SOC_TEMPERATURE.md
   - docs/target/SUSPEND.md
   - docs/target/VIBRATION.md
+
+Install and run the optional showcase by following:
+  - docs/apps/SHOWCASE.md
 
 Internal phone storage, audio, modem, Bluetooth, Wi-Fi, battery level, battery
 temperature and charge control, and Linux reboot are not supported. The bundled

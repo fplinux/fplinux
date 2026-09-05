@@ -12,6 +12,8 @@ from tests.process import run_process
 ROOT = Path(__file__).resolve().parents[2]
 HARNESS = ROOT / "tests/host_tool/fplinux-tyrquake-launcher-helpers.c"
 LAUNCHER = ROOT / "alpine/aports/fplinux-tyrquake/fplinux-quake.c"
+SHARED = ROOT / "alpine/shared/fplinux-fb-session.c"
+SHARED_INCLUDE = ROOT / "alpine/shared"
 
 
 class TyrQuakeLauncherHelperTests(unittest.TestCase):
@@ -43,6 +45,7 @@ class TyrQuakeLauncherHelperTests(unittest.TestCase):
                     "-Wall",
                     "-Wextra",
                     "-Werror",
+                    f"-I{SHARED_INCLUDE}",
                     "-Dmain=fplinux_quake_program_main",
                     "-c",
                     str(LAUNCHER),
@@ -62,6 +65,7 @@ class TyrQuakeLauncherHelperTests(unittest.TestCase):
                     "-Werror",
                     str(HARNESS),
                     str(launcher_object),
+                    str(SHARED),
                     "-o",
                     str(executable),
                 ],

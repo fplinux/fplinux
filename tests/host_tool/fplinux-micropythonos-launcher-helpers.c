@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include "../../alpine/aports/fplinux-micropythonos/fplinux-micropythonos-launcher-internal.h"
+#include "../../alpine/shared/fplinux-fb-session.h"
 
 static int test_framebuffer_helpers(void)
 {
@@ -27,24 +28,26 @@ static int test_framebuffer_helpers(void)
 		.green = { .offset = 5, .length = 6 },
 		.blue = { .offset = 0, .length = 5 },
 	};
+	size_t page_bytes;
+	unsigned int pages;
 
-	if (!fplinux_micropythonos_launcher_framebuffer_valid(&fixed,
-							      &variable) ||
-	    fplinux_micropythonos_launcher_has_two_pages(&variable))
+	if (!fplinux_fb_session_layout_valid(&fixed, &variable, &page_bytes,
+					     &pages) ||
+	    page_bytes != 256U * 160U || pages != 1U)
 		return EXIT_FAILURE;
 
 	variable.yres_virtual = 320;
 	variable.yoffset = 160;
 	fixed.ypanstep = 1;
 	fixed.smem_len *= 2;
-	if (!fplinux_micropythonos_launcher_framebuffer_valid(&fixed,
-							      &variable) ||
-	    !fplinux_micropythonos_launcher_has_two_pages(&variable))
+	if (!fplinux_fb_session_layout_valid(&fixed, &variable, &page_bytes,
+					     &pages) ||
+	    page_bytes != 256U * 160U || pages != 2U)
 		return EXIT_FAILURE;
 
 	variable.yres_virtual = 480;
 	fixed.smem_len *= 3;
-	if (fplinux_micropythonos_launcher_framebuffer_valid(&fixed, &variable))
+	if (fplinux_fb_session_layout_valid(&fixed, &variable, NULL, NULL))
 		return EXIT_FAILURE;
 	return EXIT_SUCCESS;
 }

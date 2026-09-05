@@ -4,17 +4,11 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <ftw.h>
-#include <linux/fb.h>
-#include <linux/kd.h>
-#include <linux/vt.h>
 #include <signal.h>
 #include <stdbool.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -22,6 +16,7 @@
 #include <unistd.h>
 
 #include "fplinux-quake-internal.h"
+#include "fplinux-fb-session.h"
 
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
 #define FPLINUX_QUAKE_CARD_MOUNT "/mnt/card"
@@ -32,14 +27,7 @@
 #define FPLINUX_QUAKE_TTY_DEVICE "/dev/tty0"
 
 struct display_state {
-	int framebuffer;
-	int tty;
-	int tty_mode;
-	int active_vt;
-	uint8_t *mapping;
-	uint8_t *backup;
-	size_t size;
-	struct fb_var_screeninfo variable;
+	struct fplinux_fb_session session;
 };
 
 static volatile sig_atomic_t pending_signal;
@@ -275,130 +263,19 @@ void fplinux_quake_remove_runtime(const char *runtime)
 			strerror(errno));
 }
 
-static void validate_framebuffer(const struct fb_fix_screeninfo *fixed,
-				 const struct fb_var_screeninfo *variable)
-{
-	size_t page_bytes;
-
-	if (fixed->type != FB_TYPE_PACKED_PIXELS ||
-	    fixed->visual != FB_VISUAL_TRUECOLOR || variable->xres == 0 ||
-	    variable->yres == 0 || variable->xres_virtual != variable->xres ||
-	    (variable->yres_virtual != variable->yres &&
-	     variable->yres_virtual != variable->yres * 2) ||
-	    variable->xoffset != 0 ||
-	    (variable->yoffset != 0 && variable->yoffset != variable->yres) ||
-	    variable->bits_per_pixel != 16 || variable->red.offset != 11 ||
-	    variable->red.length != 5 || variable->red.msb_right != 0 ||
-	    variable->green.offset != 5 || variable->green.length != 6 ||
-	    variable->green.msb_right != 0 || variable->blue.offset != 0 ||
-	    variable->blue.length != 5 || variable->blue.msb_right != 0 ||
-	    variable->transp.length != 0 ||
-	    fixed->line_length < variable->xres * sizeof(uint16_t))
-		die("unexpected framebuffer ABI");
-
-	page_bytes = (size_t)fixed->line_length * variable->yres;
-	if (fixed->smem_len < page_bytes ||
-	    (variable->yres_virtual == variable->yres * 2 &&
-	     (fixed->ypanstep == 0 || fixed->smem_len < page_bytes * 2)))
-		die("unexpected framebuffer memory layout");
-}
-
 static void save_display(struct display_state *state)
 {
-	struct fb_fix_screeninfo fixed;
-	struct vt_stat vt;
+	char error[128];
 
-	memset(state, 0, sizeof(*state));
-	state->framebuffer = -1;
-	state->tty =
-		open(FPLINUX_QUAKE_TTY_DEVICE, O_RDWR | O_NOCTTY | O_CLOEXEC);
-	if (state->tty < 0)
-		die_errno("cannot open " FPLINUX_QUAKE_TTY_DEVICE);
-	if (ioctl(state->tty, KDGETMODE, &state->tty_mode) < 0 ||
-	    ioctl(state->tty, VT_GETSTATE, &vt) < 0)
-		die_errno("cannot read console state");
-	if (state->tty_mode != KD_TEXT)
-		die("active console is not in text mode");
-	state->active_vt = vt.v_active;
-
-	state->framebuffer =
-		open(FPLINUX_QUAKE_FRAMEBUFFER_DEVICE, O_RDWR | O_CLOEXEC);
-	if (state->framebuffer < 0)
-		die_errno("cannot open " FPLINUX_QUAKE_FRAMEBUFFER_DEVICE);
-	if (ioctl(state->framebuffer, FBIOGET_FSCREENINFO, &fixed) < 0 ||
-	    ioctl(state->framebuffer, FBIOGET_VSCREENINFO, &state->variable) <
-		    0)
-		die_errno("cannot read framebuffer state");
-	validate_framebuffer(&fixed, &state->variable);
-	state->size = fixed.smem_len;
-	state->mapping = mmap(NULL, state->size, PROT_READ | PROT_WRITE,
-			      MAP_SHARED, state->framebuffer, 0);
-	if (state->mapping == MAP_FAILED) {
-		state->mapping = NULL;
-		die_errno("cannot map framebuffer");
-	}
-	state->backup = malloc(state->size);
-	if (!state->backup)
-		die("cannot allocate framebuffer backup");
-	memcpy(state->backup, state->mapping, state->size);
+	if (!fplinux_fb_session_open(
+		    &state->session, FPLINUX_QUAKE_FRAMEBUFFER_DEVICE,
+		    FPLINUX_QUAKE_TTY_DEVICE, error, sizeof(error)))
+		die(error);
 }
 
 static bool restore_display(struct display_state *state)
 {
-	struct fb_var_screeninfo current;
-	bool restored = true;
-
-	memcpy(state->mapping, state->backup, state->size);
-	__sync_synchronize();
-	if (ioctl(state->framebuffer, FBIOGET_VSCREENINFO, &current) < 0) {
-		fprintf(stderr,
-			"quake: cannot read framebuffer during restore: %s\n",
-			strerror(errno));
-		restored = false;
-	} else {
-		current.xoffset = 0;
-		current.yoffset = state->variable.yoffset;
-		current.activate = FB_ACTIVATE_NOW;
-		if (current.yoffset + state->variable.yres <=
-			    current.yres_virtual &&
-		    ioctl(state->framebuffer, FBIOPAN_DISPLAY, &current) < 0) {
-			fprintf(stderr,
-				"quake: cannot restore framebuffer page: %s\n",
-				strerror(errno));
-			restored = false;
-		}
-	}
-	if (ioctl(state->tty, KDSETMODE, state->tty_mode) < 0) {
-		fprintf(stderr, "quake: cannot restore console mode: %s\n",
-			strerror(errno));
-		restored = false;
-	}
-	state->variable.activate = FB_ACTIVATE_NOW;
-	if (ioctl(state->framebuffer, FBIOPUT_VSCREENINFO, &state->variable) <
-	    0) {
-		fprintf(stderr,
-			"quake: cannot restore framebuffer geometry: %s\n",
-			strerror(errno));
-		restored = false;
-	}
-	if (ioctl(state->tty, VT_ACTIVATE, state->active_vt) < 0 ||
-	    ioctl(state->tty, VT_WAITACTIVE, state->active_vt) < 0) {
-		fprintf(stderr, "quake: cannot reactivate console VT: %s\n",
-			strerror(errno));
-		restored = false;
-	}
-	return restored;
-}
-
-static void close_display(struct display_state *state)
-{
-	free(state->backup);
-	if (state->mapping)
-		munmap(state->mapping, state->size);
-	if (state->framebuffer >= 0)
-		close(state->framebuffer);
-	if (state->tty >= 0)
-		close(state->tty);
+	return fplinux_fb_session_close(&state->session);
 }
 
 static pid_t start_engine(const char *runtime, const char *input_mode)
@@ -487,7 +364,6 @@ int main(int argc, char **argv)
 	child = start_engine(runtime, input_mode);
 	child_status = wait_for_engine(child);
 	restored = restore_display(&display);
-	close_display(&display);
 	fplinux_quake_remove_runtime(runtime);
 	close(lock);
 	return restored ? child_status : EXIT_FAILURE;

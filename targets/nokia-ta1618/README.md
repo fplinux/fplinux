@@ -60,6 +60,7 @@ Status terms and limits shared by every phone are defined in the
 
 | Application                                       | FPLinux   | This phone                                                     |
 | ------------------------------------------------- | --------- | -------------------------------------------------------------- |
+| [FPLinux: ARMADA](../../docs/apps/SHOWCASE.md)    | Supported | Synchronizes the display, keypad light and vibrator.           |
 | [TyrQuake](../../docs/apps/TYRQUAKE.md)           | Supported | Game data can use the supported microSD path.                  |
 | [MicroPythonOS](../../docs/apps/MICROPYTHONOS.md) | Supported | Requires the TA-1618 companion package; state can use microSD. |
 

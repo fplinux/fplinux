@@ -58,6 +58,7 @@ support status, boot key, storage rules and limitations.
 
 ### Applications
 
+- [FPLinux: ARMADA](docs/apps/SHOWCASE.md)
 - [TyrQuake](docs/apps/TYRQUAKE.md)
 - [MicroPythonOS](docs/apps/MICROPYTHONOS.md)
 

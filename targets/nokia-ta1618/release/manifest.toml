@@ -15,6 +15,7 @@ bundle_files = [
   "runner/ssh_transport.py",
   "runtime-manifest.json",
   "apks/fplinux-charge.apk",
+  "apks/fplinux-showcase.apk",
   "apks/fplinux-tyrquake.apk",
   "apks/fplinux-micropythonos.apk",
   "apks/fplinux-micropythonos-nokia-ta1618.apk",
