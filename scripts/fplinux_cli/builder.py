@@ -42,6 +42,7 @@ from .common import ROOT, sha256_bytes, sha256_file
 from .config import (
     compose_kernel_config,
     container_runtime_recipe_digest,
+    kconfig_values,
     kernel_config_paths,
     load_asset_lock,
     load_platform,
@@ -193,12 +194,12 @@ def assert_profile_kconfig(
     config: Path, config_enable: list[str], config_disable: list[str]
 ) -> None:
     """Require selected profile Kconfig values after dependency resolution."""
-    text = require_file(config).read_text()
+    values = kconfig_values(require_file(config).read_text())
     for symbol in config_enable:
-        if f"{symbol}=y\n" not in text:
+        if values.get(symbol, "n") != "y":
             fail(f"profile did not enable {symbol}")
     for symbol in config_disable:
-        if f"# {symbol} is not set\n" not in text:
+        if values.get(symbol, "n") != "n":
             fail(f"profile did not disable {symbol}")
 
 

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from fplinux_cli import config
+from fplinux_cli import builder, config
 from fplinux_cli.common import ROOT
 
 
@@ -292,6 +292,70 @@ class KernelConfigCompositionTests(unittest.TestCase):
                     b"# CONFIG_UNUSED is not set\nCONFIG_DEVICE=y\n"
                 ),
             )
+
+
+class RepositoryProfileCompressionTests(unittest.TestCase):
+    """Admit prepared Kconfig files only for the selected compressor policy."""
+
+    def test_each_profile_rejects_the_opposite_prepared_compressor(self) -> None:
+        """RAM admits ZSTD and microSD admits LZO-RLE for every target."""
+        prepared_configs = {
+            "default": {
+                "correct": (
+                    "CONFIG_ZRAM=y\n"
+                    "# CONFIG_ZRAM_BACKEND_LZO is not set\n"
+                    "CONFIG_ZRAM_BACKEND_ZSTD=y\n"
+                    "CONFIG_ZRAM_DEF_COMP_ZSTD=y\n"
+                ),
+                "opposite": (
+                    "CONFIG_ZRAM=y\n"
+                    "CONFIG_ZRAM_BACKEND_LZO=y\n"
+                    "# CONFIG_ZRAM_BACKEND_ZSTD is not set\n"
+                    "CONFIG_ZRAM_DEF_COMP_LZORLE=y\n"
+                ),
+            },
+            "microsd-uboot": {
+                "correct": (
+                    "# CONFIG_BLK_DEV_INITRD is not set\n"
+                    "CONFIG_EXT4_FS=y\n"
+                    "CONFIG_ZRAM=y\n"
+                    "CONFIG_ZRAM_BACKEND_LZO=y\n"
+                    "# CONFIG_ZRAM_BACKEND_ZSTD is not set\n"
+                    "CONFIG_ZRAM_DEF_COMP_LZORLE=y\n"
+                ),
+                "opposite": (
+                    "# CONFIG_BLK_DEV_INITRD is not set\n"
+                    "CONFIG_EXT4_FS=y\n"
+                    "CONFIG_ZRAM=y\n"
+                    "# CONFIG_ZRAM_BACKEND_LZO is not set\n"
+                    "CONFIG_ZRAM_BACKEND_ZSTD=y\n"
+                    "CONFIG_ZRAM_DEF_COMP_ZSTD=y\n"
+                ),
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as temporary:
+            prepared = Path(temporary) / ".config"
+            for target in config.discover_targets():
+                for profile, contents in prepared_configs.items():
+                    with self.subTest(target=target, profile=profile):
+                        linux = config.load_target(target, profile)["linux"]
+                        prepared.write_text(contents["correct"])
+                        builder.assert_profile_kconfig(
+                            prepared,
+                            linux["config_enable"],
+                            linux["config_disable"],
+                        )
+
+                        prepared.write_text(contents["opposite"])
+                        with self.assertRaisesRegex(
+                            SystemExit, "profile did not (enable|disable)"
+                        ):
+                            builder.assert_profile_kconfig(
+                                prepared,
+                                linux["config_enable"],
+                                linux["config_disable"],
+                            )
 
 
 if __name__ == "__main__":

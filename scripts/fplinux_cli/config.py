@@ -801,11 +801,31 @@ def load_profile(
             "block_size": storage["block_size"],
             "inode_size": storage["inode_size"],
         }
+    if external:
+        config_enable = [
+            "CONFIG_EXT4_FS",
+            "CONFIG_ZRAM_BACKEND_LZO",
+            "CONFIG_ZRAM_DEF_COMP_LZORLE",
+        ]
+        config_disable = [
+            "CONFIG_BLK_DEV_INITRD",
+            "CONFIG_ZRAM_BACKEND_ZSTD",
+            "CONFIG_ZRAM_DEF_COMP_ZSTD",
+        ]
+    else:
+        config_enable = [
+            "CONFIG_ZRAM_BACKEND_ZSTD",
+            "CONFIG_ZRAM_DEF_COMP_ZSTD",
+        ]
+        config_disable = [
+            "CONFIG_ZRAM_BACKEND_LZO",
+            "CONFIG_ZRAM_DEF_COMP_LZORLE",
+        ]
     return {
         "name": profile,
         "linux": {
-            "config_enable": ["CONFIG_EXT4_FS"] if external else [],
-            "config_disable": ["CONFIG_BLK_DEV_INITRD"] if external else [],
+            "config_enable": config_enable,
+            "config_disable": config_disable,
             "patches": microsd["linux_patches"] if external else [],
             "root": root,
         },

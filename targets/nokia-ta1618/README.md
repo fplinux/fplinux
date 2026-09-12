@@ -28,8 +28,8 @@ Status terms and limits shared by every phone are defined in the
 | RAM boot                                                          | N/A      | Supported     | —                                                                                                                                           |
 | Persistent boot                                                   | N/A      | Not supported | The RAM bootstrap must be loaded over USB for every Linux boot.                                                                             |
 | [Local console](../../docs/features/LOCAL_CONSOLE.md)             | Present  | Supported     | `240×320`; AP DMA framebuffer copies.                                                                                                       |
-| [LCD backlight](features/DISPLAY_BACKLIGHT.md)                    | Present  | Supported     | Eleven levels from off through the qualified maximum.                                                                                       |
-| [Keypad backlight](features/KEYPAD_BACKLIGHT.md)                  | Present  | Supported     | Binary LED control plus a bounded key-press light.                                                                                          |
+| [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)         | Present  | Supported     | Eleven levels from off through the qualified maximum.                                                                                       |
+| [Keypad backlight](../../docs/features/KEYPAD_BACKLIGHT.md)       | Present  | Supported     | Binary LED control plus a bounded key-press light.                                                                                          |
 | [USB networking](../../docs/features/USB_NETWORKING.md)           | Present  | Supported     | —                                                                                                                                           |
 | [SSH access](../../docs/features/SSH.md)                          | N/A      | Supported     | —                                                                                                                                           |
 | [File transfer](../../docs/features/FILE_TRANSFER.md)             | N/A      | Supported     | RAM and a writable mounted microSD are valid destinations.                                                                                  |
@@ -48,13 +48,13 @@ Status terms and limits shared by every phone are defined in the
 | [Bluetooth](../../docs/features/BLUETOOTH.md)                     | Present  | Partial       | BR/EDR pairing, bidirectional OPP and PAN Internet in both profiles; requires firmware from this phone.                                     |
 | Wi-Fi                                                             | Unknown  | Not supported | —                                                                                                                                           |
 | Camera                                                            | Unknown  | Not supported | Installed sensor is not identified.                                                                                                         |
-| [Charger status](features/CHARGER_STATUS.md)                      | Present  | Supported     | Read-only external-input status.                                                                                                            |
-| [Battery telemetry](features/BATTERY_TELEMETRY.md)                | Present  | Partial       | Voltage, signed current and a relative charge counter; absolute accuracy is unchecked.                                                      |
-| [SoC temperature](features/SOC_TEMPERATURE.md)                    | Present  | Partial       | Calibrated reading without external accuracy validation.                                                                                    |
-| [Auxiliary ADC](features/AUXADC.md)                               | Present  | Partial       | Five raw channels without physical-unit conversion.                                                                                         |
+| [Charger status](../../docs/features/CHARGER_STATUS.md)           | Present  | Supported     | Read-only external-input status.                                                                                                            |
+| [Battery telemetry](../../docs/features/BATTERY_TELEMETRY.md)     | Present  | Partial       | Voltage, signed current and a relative charge counter; absolute accuracy is unchecked.                                                      |
+| [SoC temperature](../../docs/features/SOC_TEMPERATURE.md)         | Present  | Partial       | Calibrated reading without external accuracy validation.                                                                                    |
+| [Auxiliary ADC](../../docs/features/AUXADC.md)                    | Present  | Partial       | Five raw channels without physical-unit conversion.                                                                                         |
 | [Real-time clock](../../docs/features/RTC.md)                     | Present  | Partial       | Read/set time and one-shot alarms; RTC wake works in both profiles, including after time correction.                                        |
 | Other battery functions                                           | Present  | Not supported | No level, battery temperature or charge control is provided.                                                                                |
-| [Vibration](features/VIBRATION.md)                                | Present  | Supported     | Binary `FF_RUMBLE` effects with a five-second automatic cutoff.                                                                             |
+| [Vibration](../../docs/features/VIBRATION.md)                     | Present  | Supported     | Binary `FF_RUMBLE` effects with a five-second automatic cutoff.                                                                             |
 | Indicator LEDs                                                    | Unknown  | Not supported | —                                                                                                                                           |
 | [Power-off](../../docs/features/POWER_OFF.md)                     | N/A      | Supported     | Hold the red handset key for five seconds; external charger power must be absent.                                                           |
 | [Suspend](../../docs/features/SUSPEND.md)                         | N/A      | Supported     | s2idle in both profiles, including Bluetooth, mounted data cards and card-backed swap; the red handset key and RTC alarms are wake sources. |
@@ -70,6 +70,25 @@ Status terms and limits shared by every phone are defined in the
 | [Image rotation](../../docs/apps/ROTATE.md)             | Supported | Included in the normal root filesystem; explicit CPU/ROTA selection and framebuffer preview.   |
 | [JPEG codec and scaling](../../docs/apps/JPEG.md)       | Supported | Included in the normal root filesystem; hardware decode, fixed encode, and fixed half-scaling. |
 | [Native image presentation](../../docs/apps/PRESENT.md) | Supported | Included in the normal root filesystem; direct NV16 or CPU-converted RGB565 presentation.      |
+
+## Hardware interfaces
+
+The `240×320` `ST7789P3` panel uses SPI with interrupt-driven transfer completion.
+LCD levels `1` through `10` increase monotonically up to the qualified maximum;
+`10` is the default. They are raw current steps rather than percentages or
+calibrated optical units.
+
+Use these identifiers with the linked shared interfaces. Numeric IIO, thermal
+and input-device indices are assigned at boot.
+
+| Interface                                                     | Identifier on this phone                 |
+| ------------------------------------------------------------- | ---------------------------------------- |
+| [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)     | `/sys/class/backlight/ta1618-backlight`  |
+| [Battery telemetry](../../docs/features/BATTERY_TELEMETRY.md) | `/sys/class/power_supply/ta1618-battery` |
+| [Charger status](../../docs/features/CHARGER_STATUS.md)       | `/sys/class/power_supply/ta1618-charger` |
+| [Auxiliary ADC](../../docs/features/AUXADC.md)                | IIO `name`: `ta1618-sc2720-auxadc`       |
+| [SoC temperature](../../docs/features/SOC_TEMPERATURE.md)     | Thermal-zone `type`: `ta1618-soc`        |
+| [Vibration](../../docs/features/VIBRATION.md)                 | Input name: `TA-1618 vibrator`           |
 
 ## Bluetooth
 

@@ -1,16 +1,15 @@
-# Battery telemetry on Nokia 3210 4G (TA-1618)
+# Battery telemetry
 
-This page applies only to Nokia 3210 4G (TA-1618). FPLinux exposes live battery
-voltage, signed current and a relative charge counter through the standard Linux
-power-supply class.
+FPLinux exposes battery voltage, signed current and a relative charge counter
+through the standard Linux power-supply class. The selected
+[target's documentation](../../targets/README.md) states its device name and
+measurement limits. A standalone archive carries that status in `README.txt`.
 
 ## Interface
 
-```sh
-cat /sys/class/power_supply/ta1618-battery/voltage_now
-cat /sys/class/power_supply/ta1618-battery/current_now
-cat /sys/class/power_supply/ta1618-battery/charge_counter
-```
+Find the battery under `/sys/class/power_supply/` by its target-specific name
+and `type` value `Battery`. Read its `voltage_now`, `current_now` and
+`charge_counter` attributes.
 
 `voltage_now` is reported in microvolts and `current_now` in microamps, as
 defined by the power-supply ABI. The current value is signed: negative means
@@ -23,16 +22,19 @@ interpret the absolute value as remaining charge or battery percentage.
 
 ## Measure an application
 
-The optional `fplinux-charge.apk` package in the Nokia build bundle measures
-one command without storing a sampling history. Install it into the current RAM
-session:
+The optional `fplinux-charge.apk` package measures one command without storing
+a sampling history. It discovers the battery charge counter automatically.
+Install it into the active system root; installation is temporary in the
+`default` RAM profile and persistent in `microsd-uboot`:
 
 ```sh
-# Source checkout: use the checkout-relative path printed after `output:`
-bundle=.cache/out/nokia-ta1618/bundles/<generation>
-./fplinux console nokia-ta1618 --upload \
+# Source checkout: match the running target and profile.
+target=inoi-244-modern-4g
+profile=default
+bundle=/absolute/path/printed-by-fplinux-build
+./fplinux console "$target" --profile "$profile" --upload \
   "$bundle/apks/fplinux-charge.apk" /tmp/fplinux-charge.apk
-./fplinux console nokia-ta1618 --exec \
+./fplinux console "$target" --profile "$profile" --exec \
   'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-charge.apk'
 
 # Standalone archive
@@ -64,4 +66,5 @@ The absolute accuracy of the voltage, current and charge-counter readings has
 not been checked against an external instrument. These values are PMIC
 telemetry, not a direct measurement at the battery terminals. FPLinux does not
 provide capacity, state of charge, battery temperature, health, charge status
-or charge control on this target.
+or charge control through this interface. Readings made without a battery do
+not qualify battery measurements or charging.

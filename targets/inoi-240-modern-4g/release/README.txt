@@ -16,7 +16,9 @@ Current target support:
     both profiles, including mounted ext4 storage and card-backed swap;
   - brightness, force-feedback and read-only power telemetry interfaces.
 
-MicroPythonOS is not supported on this target.
+The optional MicroPythonOS APK launches on this target. Support is partial:
+its UI is not fully adapted to the 128x160 screen. See docs/apps/MICROPYTHONOS.md
+for installation and use.
 
 FAT32 data storage and card hot-swap remain unqualified. Internal phone storage
 writes, audio, modem, Wi-Fi and Linux reboot are not supported. Battery-only
@@ -30,6 +32,22 @@ TyrQuake game data can use RAM or ext4 microSD storage. Applications, files and
 Bluetooth pairing records persist on the ext4 system root across cold boots.
 Bluetooth requires firmware and configuration prepared from this exact phone;
 see docs/features/BLUETOOTH.md for its shared use and limits.
+
+The shared hardware interfaces and their limits are described in:
+  - docs/features/AUXADC.md
+  - docs/features/BATTERY_TELEMETRY.md
+  - docs/features/CHARGER_STATUS.md
+  - docs/features/DISPLAY_BACKLIGHT.md
+  - docs/features/KEYPAD_BACKLIGHT.md
+  - docs/features/SOC_TEMPERATURE.md
+  - docs/features/VIBRATION.md
+
+This phone uses backlight device inoi240-backlight, with configured levels
+0 through 31 and default 31; power-supply devices inoi240-battery and
+inoi240-charger; IIO name inoi240-sc2720-auxadc; thermal-zone type inoi240-soc;
+and input name INOI 240 Modern 4G vibrator. IIO, thermal and input-device
+numbers are assigned at boot. These identifiers do not qualify the physical
+effects or measurements noted above.
 
 Before ending a RAM session, stop applications using microSD, disable any
 card-backed swap and unmount card filesystems as described in

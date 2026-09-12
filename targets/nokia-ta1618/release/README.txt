@@ -32,17 +32,22 @@ Current target support:
   - battery-only power-off.
 
 Interfaces, limits and safety procedures are bundled at:
-  - docs/target/AUXADC.md
-  - docs/target/BATTERY_TELEMETRY.md
-  - docs/target/CHARGER_STATUS.md
-  - docs/target/DISPLAY_BACKLIGHT.md
-  - docs/target/KEYPAD_BACKLIGHT.md
+  - docs/features/AUXADC.md
+  - docs/features/BATTERY_TELEMETRY.md
+  - docs/features/CHARGER_STATUS.md
+  - docs/features/DISPLAY_BACKLIGHT.md
+  - docs/features/KEYPAD_BACKLIGHT.md
   - docs/features/MICROSD.md
   - docs/features/POWER_OFF.md
   - docs/features/RTC.md
-  - docs/target/SOC_TEMPERATURE.md
+  - docs/features/SOC_TEMPERATURE.md
   - docs/features/SUSPEND.md
-  - docs/target/VIBRATION.md
+  - docs/features/VIBRATION.md
+
+This phone uses backlight device ta1618-backlight, with levels 0 through 10
+and default 10; power-supply devices ta1618-battery and ta1618-charger;
+IIO name ta1618-sc2720-auxadc; thermal-zone type ta1618-soc; and input name
+TA-1618 vibrator. IIO, thermal and input-device numbers are assigned at boot.
 
 Install and run the optional showcase by following:
   - docs/apps/SHOWCASE.md

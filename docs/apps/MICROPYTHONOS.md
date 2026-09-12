@@ -1,10 +1,14 @@
 # MicroPythonOS
 
 MicroPythonOS is an optional graphical MicroPython environment for the local
-FPLinux framebuffer and physical keypad on Nokia TA-1618 and INOI 244 Modern 4G.
-It is not supported on INOI 240 Modern 4G. It is installed separately into the
-active system root: installation lasts until shutdown in the `default` RAM
-profile and persists across boots in `microsd-uboot`. First load or reconnect
+FPLinux framebuffer and physical keypad. It runs on Nokia TA-1618 and INOI 244
+Modern 4G. It also launches on INOI 240 Modern 4G, with partial support because
+the UI is not fully adapted to its `128×160` screen.
+
+The package is installed separately into the active system root; it is not
+preinstalled in the normal root filesystem. Installation lasts until shutdown
+in the `default` RAM profile and persists across boots in `microsd-uboot`.
+First load or reconnect
 to the selected phone using its instructions. A standalone archive includes
 this page; start with its
 top-level `README.txt`.
@@ -25,7 +29,7 @@ not made available by FPLinux.
 
 ## Install
 
-Both supported targets use the same `fplinux-micropythonos.apk` package.
+All three targets use the same `fplinux-micropythonos.apk` package.
 
 ### Source checkout
 

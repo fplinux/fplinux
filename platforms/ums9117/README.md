@@ -79,11 +79,9 @@ frames keeps a submitted page unchanged while the display pipeline can snapshot
 it and uses fully populated alternate pages. A mapped write without publication
 is intentionally silent.
 
-The framebuffer core remains the single WLED owner. Each target selects whether
-to expose a standard backlight class and its brightness range. Consult the
-phone's support status for physical brightness limits. Targets without a
-backlight class retain their fixed display-power lifecycle without a user
-brightness interface.
+All three phones expose the shared [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)
+interface. The target selects the brightness range, panel transport and
+initialization; consult its support status for physical brightness limits.
 
 ## Target requirements
 
