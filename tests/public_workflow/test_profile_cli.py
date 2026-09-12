@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Public CLI help tests for boot selectors and profile commands."""
+"""Public CLI help tests for boot selectors and diagnostic tools."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 _PUBLIC_HELP_TIMEOUT_SECONDS = 10
 
 
-class ProfileCliHelpWorkflowTests(unittest.TestCase):
+class ProfileAndToolCliHelpWorkflowTests(unittest.TestCase):
     """Exercise the repository CLI without resolving a bundle or touching USB."""
 
     def test_help_exposes_the_microsd_boot_alias_and_global_profile_selector(self) -> None:
@@ -29,6 +29,19 @@ class ProfileCliHelpWorkflowTests(unittest.TestCase):
                 self.assertIn("--boot {microsd}", result.stdout)
                 self.assertIn("--profile NAME", result.stdout)
 
+    def test_nand_backup_help_exposes_the_read_only_tool_without_connecting(self) -> None:
+        """NAND backup is an explicit target command, not a legacy profile plugin."""
+        result = run_process(
+            [str(ROOT / "fplinux"), "nand", "backup", "--help"],
+            name="fplinux nand backup help",
+            timeout=_PUBLIC_HELP_TIMEOUT_SECONDS,
+            cwd=ROOT,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("nokia-ta1618", result.stdout)
+        self.assertIn("output", result.stdout.lower())
+        self.assertIn("--profile NAME", result.stdout)
 
 
 if __name__ == "__main__":

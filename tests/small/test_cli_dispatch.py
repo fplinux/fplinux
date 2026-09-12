@@ -84,6 +84,20 @@ class CliCacheLockTests(unittest.TestCase):
             (["run", "target"], "run_target", False, "target", None),
             (["verify", "target"], "verify_booted", False, "target", None),
             (["console", "target"], "console_target", False, "target", None),
+            (
+                ["nand", "backup", "nokia-ta1618", "backup.bin"],
+                "backup_target_nand",
+                True,
+                "nokia-ta1618",
+                None,
+            ),
+            (
+                ["nand", "backup", "nokia-ta1618", "backup.bin", "--profile", "microsd-uboot"],
+                "backup_target_nand",
+                True,
+                "nokia-ta1618",
+                "microsd-uboot",
+            ),
         )
         for arguments, callback_name, exclusive, target, profile in cases:
             with self.subTest(arguments=arguments):
@@ -95,7 +109,12 @@ class CliCacheLockTests(unittest.TestCase):
                         "command",
                     ],
                 )
-                callback.assert_called_once()
+                if callback_name == "backup_target_nand":
+                    callback.assert_called_once_with(
+                        "nokia-ta1618", Path("backup.bin"), profile=profile
+                    )
+                else:
+                    callback.assert_called_once()
 
     def test_format_forwards_only_the_explicit_paths(self) -> None:
         """Pass the ordered source selection through the exclusive command boundary."""

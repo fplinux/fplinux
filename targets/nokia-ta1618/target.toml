@@ -7,6 +7,11 @@ product = "3210 4G"
 hardware_codes = ["TA-1618"]
 compatible = "nokia,ta-1618"
 
+[nand]
+raw_device = "/dev/ta1618-nand-raw"
+id = 0xb1a1
+raw_page_bytes = 2176
+
 [rootfs]
 packages = []
 
@@ -22,9 +27,9 @@ patches = [
   "kernel/0001-nokia-ta1618-board.patch",
   "kernel/0004-nokia-ta1618-usb-regulator.patch",
 ]
-# The DTB must never describe internal storage or a generic SDHCI host; the
-# removable microSD slot is the only storage this target may reach.
-forbidden_dtb_markers = ["sdhci", "nand", "mtd", "ubi", "emmc"]
+# Only the removable microSD is writable. Internal NAND has a fixed-command
+# read-only interface, without an MTD or generic SPI controller.
+forbidden_dtb_markers = ["sdhci", "spi-nand", "mtd", "ubi", "emmc"]
 forbidden_config = [
   "CONFIG_MTD=y",
   "CONFIG_UBI=y",
@@ -34,6 +39,10 @@ forbidden_config = [
   "CONFIG_DEVMEM=y",
   "CONFIG_MMC_SDHCI=y",
 ]
+
+[[linux.copies]]
+source = "dts/nand-readonly.dtsi"
+destination = "arch/arm/boot/dts/unisoc/nokia-ta1618-nand-readonly.dtsi"
 
 [[linux.copies]]
 source = "kernel/ta1618-mmc-linux.c"

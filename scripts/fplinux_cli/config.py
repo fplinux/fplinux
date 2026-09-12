@@ -798,6 +798,7 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
         {
             "identity",
             "microsd",
+            *({"nand"} if "nand" in raw else set()),
             "platform",
             "rootfs",
             "bundle",
@@ -812,6 +813,13 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
     except IdentityError as error:
         fail(str(error))
     config["identity"] = identity
+    if "nand" in config:
+        nand = exact_table(config["nand"], {"raw_device", "raw_page_bytes", "id"}, "target nand")
+        raw_device = nonempty_string(nand["raw_device"], "target nand raw_device")
+        if re.fullmatch(r"/dev/[A-Za-z0-9][A-Za-z0-9._-]*", raw_device) is None:
+            fail("target nand raw_device must name one device directly under /dev")
+        if (nand["id"], nand["raw_page_bytes"]) not in {(0xB1A1, 2176), (0x21E5, 2112)}:
+            fail("target nand must declare a supported chip identity and physical page size")
     platform_name = nonempty_string(config.get("platform"), f"target {target} platform")
     if VALUE_NAME.fullmatch(platform_name) is None:
         fail(f"target {target} has invalid platform: {path}")

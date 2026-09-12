@@ -224,6 +224,31 @@ copies = []
                     },
                 )
 
+    def test_nand_reader_stays_board_owned_across_boot_profiles(self) -> None:
+        """Boot policy preserves an explicit reader and supplies none to other boards."""
+        path = self.root / "targets/first/target.toml"
+        path.write_text(
+            path.read_text()
+            + '\n[nand]\nraw_device = "/dev/first-nand-raw"\nid = 0xb1a1\nraw_page_bytes = 2176\n'
+        )
+        for profile in ("default", "microsd-uboot"):
+            with self.subTest(profile=profile):
+                self.assertEqual(
+                    config.load_target("first", profile)["nand"],
+                    {"raw_device": "/dev/first-nand-raw", "id": 0xB1A1, "raw_page_bytes": 2176},
+                )
+                self.assertNotIn("nand", config.load_target("second", profile))
+
+    def test_nand_reader_requires_a_device_path(self) -> None:
+        """A board cannot accidentally point a physical NAND backup at a regular file."""
+        path = self.root / "targets/first/target.toml"
+        path.write_text(
+            path.read_text()
+            + '\n[nand]\nraw_device = "/tmp/nand.raw"\nid = 0xb1a1\nraw_page_bytes = 2176\n'
+        )
+        with self.assertRaisesRegex(SystemExit, "device directly under /dev"):
+            config.load_target("first")
+
 
 class KernelConfigCompositionTests(unittest.TestCase):
     """The shared base and board fragment produce one unambiguous Kconfig input."""

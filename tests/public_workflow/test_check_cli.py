@@ -28,6 +28,7 @@ PUBLIC_COMMANDS = (
     "prune",
     "run",
     "console",
+    "nand",
     "verify",
 )
 PUBLIC_CHECK_SCOPES = (

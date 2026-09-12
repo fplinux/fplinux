@@ -7,6 +7,11 @@ product = "244 Modern 4G"
 hardware_codes = []
 compatible = "inoi,244-modern-4g"
 
+[nand]
+raw_device = "/dev/ums9117-nand-raw"
+id = 0x21e5
+raw_page_bytes = 2112
+
 [rootfs]
 packages = []
 
@@ -19,7 +24,7 @@ memory = { base = 0x80000000, size = 0x03f00000 }
 dtb = "unisoc/ums9117-inoi-244-modern-4g.dtb"
 debug_dtb = "ums9117-inoi-244-modern-4g.dtb"
 patches = ["kernel/0001-inoi-244-modern-4g-dtb.patch"]
-forbidden_dtb_markers = ["sdhci", "nand", "mtd", "ubi", "emmc"]
+forbidden_dtb_markers = ["sdhci", "spi-nand", "mtd", "ubi", "emmc"]
 forbidden_config = [
   "CONFIG_MTD=y",
   "CONFIG_UBI=y",
@@ -32,6 +37,10 @@ forbidden_config = [
 [[linux.copies]]
 source = "dts/ums9117-inoi-244-modern-4g.dts"
 destination = "arch/arm/boot/dts/unisoc/ums9117-inoi-244-modern-4g.dts"
+
+[[linux.copies]]
+source = "dts/nand-readonly.dtsi"
+destination = "arch/arm/boot/dts/unisoc/inoi-244-modern-4g-nand-readonly.dtsi"
 
 [[linux.copies]]
 source = "kernel/inoi244-fb.c"

@@ -397,6 +397,14 @@ def verify_booted(target: str, *, profile: str | None = None) -> None:
     print(f"verify: the phone runs the current build ({device_identity[:16]})")
 
 
+def current_target_ssh_session(
+    target: str, *, profile: str | None = None
+) -> tuple[ModuleType, dict[str, Any]]:
+    """Resolve the authenticated session for one exact target and build profile."""
+    bundle, manifest = _resolve_target_bundle(target, normalize_profile(profile))
+    return _current_ssh_session(bundle, manifest, target)
+
+
 def _build_identity(
     snapshot: WorkspaceSnapshot, image_state: ImageState | None, cache: Path
 ) -> BuildIdentity | None:

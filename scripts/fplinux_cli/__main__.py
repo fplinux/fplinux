@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import os
 from functools import partial
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .cachelock import cache_lock
@@ -23,6 +24,7 @@ from .common import ROOT
 from .config import GLOBAL_PROFILES, TARGET_NAME, discover_targets, normalize_profile
 from .container import CHECK_SCOPES, check, check_commit_message, doctor, setup
 from .format import format_sources
+from .nand_backup import backup_target_nand
 from .output import run_entrypoint
 from .prune import (
     discard_obsolete_apks,
@@ -36,12 +38,12 @@ if TYPE_CHECKING:
 
 
 _EXCLUSIVE_CACHE_COMMANDS = frozenset(
-    {"build", "check", "checksum", "format", "setup"}
+    {"build", "check", "checksum", "format", "nand", "setup"}
 )
 _SHARED_CACHE_COMMANDS = frozenset({"console", "package", "run", "verify"})
 _CHECK_SCOPE_METAVAR = "{" + ",".join(CHECK_SCOPES) + "}"
 _PUBLIC_COMMAND_METAVAR = (
-    "{doctor,check,format,setup,build,checksum,package,prune,run,console,verify}"
+    "{doctor,check,format,setup,build,checksum,package,prune,run,console,nand,verify}"
 )
 
 
@@ -149,6 +151,9 @@ def _setup_action(*, force: bool) -> None:
     setup(force=force)
 
 
+def _nand_backup_action(target: str, output: Path, *, profile: str | None) -> None:
+    """Save a complete NAND image through the selected running system."""
+    backup_target_nand(target, output, profile=profile)
 
 
 def _command_action(
@@ -225,6 +230,8 @@ def _command_action(
             upload=args.upload,
             pull=args.pull,
         )
+    elif args.command == "nand":
+        action = partial(_nand_backup_action, args.target, args.output, profile=args.profile)
     elif args.command == "verify":
         action = partial(verify_booted, args.target, profile=args.profile)
     else:
@@ -387,6 +394,15 @@ def main() -> None:
     console_actions.add_argument("--exec", dest="exec_command", metavar="COMMAND")
     console_actions.add_argument("--upload", nargs=2, metavar=("LOCAL", "REMOTE"))
     console_actions.add_argument("--pull", nargs=2, metavar=("REMOTE", "LOCAL"))
+
+    nand_parser = commands.add_parser("nand", help="read the target's internal NAND")
+    nand_commands = nand_parser.add_subparsers(dest="nand_command", required=True)
+    nand_backup_parser = nand_commands.add_parser(
+        "backup", help="save a complete read-only NAND image"
+    )
+    nand_backup_parser.add_argument("target", choices=targets)
+    nand_backup_parser.add_argument("output", type=Path)
+    nand_backup_parser.add_argument("--profile", type=_profile_name, metavar="NAME")
 
 
     verify_parser = commands.add_parser(

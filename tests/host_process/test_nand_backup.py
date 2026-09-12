@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import signal
 import subprocess
@@ -13,28 +12,11 @@ import time
 import unittest
 from contextlib import suppress
 from pathlib import Path
-from typing import TYPE_CHECKING
 from unittest import mock
 
-from fplinux_cli import ssh_transport
+from fplinux_cli import nand_backup, ssh_transport
 
 from tests.ssh_transport_support import create_ready_session
-
-if TYPE_CHECKING:
-    from types import ModuleType
-
-ROOT = Path(__file__).resolve().parents[2]
-PLUGIN = ROOT / "targets/nokia-ta1618/profiles/nand-ro-lab/host_plugin.py"
-
-
-def load_plugin() -> ModuleType:
-    """Load the production profile plugin through its normal module entry point."""
-    spec = importlib.util.spec_from_file_location("test_nand_ro_lab_plugin", PLUGIN)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load profile plugin: {PLUGIN}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 class NandBackupSshStreamTests(unittest.TestCase):
@@ -50,9 +32,12 @@ class NandBackupSshStreamTests(unittest.TestCase):
         self.tools = Path(self.temporary.name) / "bin"
         self.tools.mkdir()
         self.ssh = self.tools / "ssh"
-        self.plugin = load_plugin()
         self.ssh.write_text(
             """#!/bin/sh
+if [ -n "${FPLINUX_EXPECTED_READ:-}" ]; then
+  for argument do remote_command=$argument; done
+  [ "$remote_command" = "$FPLINUX_EXPECTED_READ" ] || exit 64
+fi
 case "${FPLINUX_STREAM_MODE:?}" in
 success)
   printf 'raw-page-bytes'
@@ -112,18 +97,92 @@ esac
         destination = Path(self.temporary.name) / "nand.raw"
         destination.write_bytes(b"previous raw image")
         with (
-            mock.patch.object(self.plugin, "RAW_BYTES", 16),
             mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
             mock.patch.dict(
                 os.environ,
                 {"PATH": f"{self.tools}:{os.environ['PATH']}", "FPLINUX_STREAM_MODE": "short"},
             ),
-            self.assertRaisesRegex(SystemExit, "incomplete raw image"),
+            self.assertRaisesRegex(SystemExit, "incomplete raw NAND image"),
         ):
-            self.plugin.backup(ssh_transport, self.session, str(destination))
+            nand_backup.backup_nand(
+                lambda: (ssh_transport, self.session),
+                destination,
+                raw_device="/dev/ta1618-nand-raw",
+                raw_page_bytes=2176,
+            )
 
         self.assertEqual(destination.read_bytes(), b"previous raw image")
         self.assertEqual(list(destination.parent.glob(".nand.raw.*")), [])
+
+    def test_target_backup_streams_only_its_declared_read_device(self) -> None:
+        """Board selection reaches the real SSH process with only a read command."""
+        for target, profile, expected_read, expected_size in (
+            (
+                "nokia-ta1618",
+                "microsd-uboot",
+                "exec dd if=/dev/ta1618-nand-raw bs=65280",
+                142606336,
+            ),
+            (
+                "inoi-240-modern-4g",
+                None,
+                "exec dd if=/dev/ums9117-nand-raw bs=63360",
+                138412032,
+            ),
+            (
+                "inoi-244-modern-4g",
+                None,
+                "exec dd if=/dev/ums9117-nand-raw bs=63360",
+                138412032,
+            ),
+        ):
+            with (
+                self.subTest(target=target, profile=profile),
+                mock.patch(
+                    "fplinux_cli.commands.current_target_ssh_session",
+                    return_value=(ssh_transport, self.session),
+                ) as acquire,
+                mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
+                mock.patch.dict(
+                    os.environ,
+                    {
+                        "PATH": f"{self.tools}:{os.environ['PATH']}",
+                        "FPLINUX_STREAM_MODE": "success",
+                        "FPLINUX_EXPECTED_READ": expected_read,
+                    },
+                ),
+            ):
+                destination = Path(self.temporary.name) / f"{target}.raw"
+                with self.assertRaisesRegex(SystemExit, f"expected {expected_size} bytes, got 14"):
+                    nand_backup.backup_target_nand(target, destination, profile=profile)
+
+                self.assertFalse(destination.exists())
+                acquire.assert_called_once_with(target, profile=profile)
+
+    def test_rejected_device_read_cannot_publish_or_replace_an_image(self) -> None:
+        """A remote reader error leaves an existing INOI backup intact."""
+        destination = Path(self.temporary.name) / "inoi.raw"
+        destination.write_bytes(b"previous complete image")
+        with (
+            mock.patch(
+                "fplinux_cli.commands.current_target_ssh_session",
+                return_value=(ssh_transport, self.session),
+            ),
+            mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
+            mock.patch.dict(
+                os.environ,
+                {
+                    "PATH": f"{self.tools}:{os.environ['PATH']}",
+                    "FPLINUX_STREAM_MODE": "nonzero",
+                    "FPLINUX_EXPECTED_READ": "exec dd if=/dev/ums9117-nand-raw bs=63360",
+                },
+            ),
+            self.assertRaisesRegex(SystemExit, "exit status 8: NAND read failed"),
+        ):
+            nand_backup.backup_target_nand("inoi-244-modern-4g", destination)
+
+        self.assertEqual(destination.read_bytes(), b"previous complete image")
+        self.assertEqual(list(destination.parent.glob(".inoi.raw.*")), [])
 
     def test_timeout_kills_and_reaps_the_isolated_ssh_process_group(self) -> None:
         """A stuck transfer terminates within its deadline without leaving its SSH child alive."""

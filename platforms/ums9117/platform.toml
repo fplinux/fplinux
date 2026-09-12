@@ -140,6 +140,14 @@ source = "platforms/ums9117/kernel/ums9117-adi.h"
 destination = "include/linux/soc/sprd/ums9117-adi.h"
 
 [[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-nandc-ro.c"
+destination = "arch/arm/mach-ums9117/ums9117-nandc-ro.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/fplinux,ums9117-nandc-ro.yaml"
+destination = "Documentation/devicetree/bindings/memory-controllers/fplinux,ums9117-nandc-ro.yaml"
+
+[[linux.copies]]
 source = "platforms/ums9117/common/ums9117-sdio-regs.h"
 destination = "drivers/mmc/host/ums9117-sdio-regs.h"
 
@@ -406,6 +414,14 @@ destination = "Documentation/devicetree/bindings/clock/fplinux,ums9117-inherited
 [[linux.copies]]
 source = "platforms/ums9117/bindings/fplinux,ums9117-inherited-clk.h"
 destination = "include/dt-bindings/clock/fplinux,ums9117-inherited-clk.h"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/nand.Kconfig"
+destination = "arch/arm/mach-ums9117/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/nand.Makefile"
+destination = "arch/arm/mach-ums9117/Makefile"
 
 [[linux.appends]]
 source = "platforms/ums9117/kernel/mmc.Kconfig"
