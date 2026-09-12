@@ -77,6 +77,22 @@ source = "platforms/ums9117/kernel/ums9117-musb.c"
 destination = "drivers/usb/musb/ums9117.c"
 
 [[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-dma.c"
+destination = "drivers/dma/ums9117-dma.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-dma-test.h"
+destination = "include/linux/dma/ums9117-dma-test.h"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-dma.h"
+destination = "include/linux/dma/ums9117-dma.h"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/sprd,ums9117-dma.yaml"
+destination = "Documentation/devicetree/bindings/dma/sprd,ums9117-dma.yaml"
+
+[[linux.copies]]
 source = "platforms/ums9117/kernel/sc2720-charger-ums9117.c"
 destination = "drivers/power/supply/sc2720-charger-ums9117.c"
 
@@ -267,6 +283,14 @@ destination = "drivers/clk/sprd/Kconfig"
 [[linux.appends]]
 source = "platforms/ums9117/kernel/inherited-clk.Makefile"
 destination = "drivers/clk/sprd/Makefile"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/dma.Kconfig"
+destination = "drivers/dma/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/dma.Makefile"
+destination = "drivers/dma/Makefile"
 
 [[linux.appends]]
 source = "platforms/ums9117/kernel/fbdev.Kconfig"

@@ -115,6 +115,10 @@
 	label = "inoi244-soc";
 };
 
+&ap_dma {
+	status = "okay";
+};
+
 &keypad {
 	compatible = "sprd,ums9117-keypad";
 	status = "okay";

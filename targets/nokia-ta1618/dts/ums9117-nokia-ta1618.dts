@@ -154,6 +154,10 @@
 	label = "ta1618-soc";
 };
 
+&ap_dma {
+	status = "okay";
+};
+
 &keypad {
 	compatible = "sprd,ums9117-keypad";
 	interrupts = <GIC_SPI 36 IRQ_TYPE_LEVEL_HIGH>;
