@@ -4,7 +4,7 @@
  *
  * A board wrapper owns the panel profile and calls these helpers from its
  * platform_driver callbacks.  The core owns the framebuffer, LCDC lifecycle,
- * damage coalescing, completion IRQ, WLED and the fail-dark path; the common
+ * damage coalescing, frame completion, WLED and the fail-dark path; the common
  * SPI and LCM files own only their respective wire protocols.
  */
 #ifndef FPLINUX_UMS9117_FB_H
@@ -47,10 +47,17 @@ struct ums9117_fb_profile {
 	enum ums9117_fb_completion_kind completion;
 	const struct ums9117_fb_command *init;
 	unsigned int init_count;
+	/* Optional cold-start suffix after the shared initialization commands. */
+	const struct ums9117_fb_command *init_finish;
+	unsigned int init_finish_count;
+	/* Reset and replay init before this suffix; NULL uses short DCS wake. */
+	const struct ums9117_fb_command *wake_finish;
+	unsigned int wake_finish_count;
 	u16 width;
 	u16 height;
 	u16 reset_phase_ms;
 	u16 reset_release_ms;
+	u16 wake_reset_phase_ms;
 	u16 sleep_in_ms;
 	u16 sleep_out_ms;
 	/*
@@ -58,6 +65,10 @@ struct ums9117_fb_profile {
 	 * maximum is derived from equal non-zero board WLED current levels.
 	 */
 	const char *wled_backlight_name;
+	/* Board-qualified AP DMA copy into the LCDC's private transfer buffer. */
+	bool dma_memcpy;
+	/* Enable native-size presentation with this profile's frame completion. */
+	bool native_nv16;
 	/* LCDC CTRL bits required by this panel's transport. */
 	u32 lcdc_ctrl_set;
 	u32 lcdc_ctrl_clear;

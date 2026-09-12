@@ -1,0 +1,51 @@
+#!/sbin/openrc-run
+# SPDX-License-Identifier: GPL-2.0-only
+# shellcheck shell=sh disable=SC2034
+
+name="FPLinux Bluetooth setup"
+description="Prepare the Bluetooth system account and start fitted CM4 firmware"
+
+depend() {
+	need localmount
+	before dbus
+}
+
+start() {
+	ebegin "Preparing the D-Bus system account"
+
+	if ! getent group messagebus >/dev/null 2>&1; then
+		addgroup -S messagebus || {
+			eend 1 "Could not create the messagebus group"
+			return 1
+		}
+	fi
+	if ! getent passwd messagebus >/dev/null 2>&1; then
+		adduser -S -D -H -h /dev/null -s /sbin/nologin \
+			-G messagebus -g messagebus messagebus || {
+			eend 1 "Could not create the messagebus user"
+			return 1
+		}
+	fi
+
+	user_id=$(id -u messagebus 2>/dev/null) || {
+		eend 1 "The messagebus user is unavailable"
+		return 1
+	}
+	group_id=$(id -g messagebus 2>/dev/null) || {
+		eend 1 "The messagebus primary group is unavailable"
+		return 1
+	}
+	if [ "$user_id" -eq 0 ] || [ "$group_id" -eq 0 ] ||
+		[ "$(id -gn messagebus 2>/dev/null)" != messagebus ]; then
+		eend 1 "The messagebus account is not a non-root system account"
+		return 1
+	fi
+
+	eend 0
+
+	ebegin "Starting fitted Bluetooth firmware"
+	fplinux-bluetooth enable --if-present
+	result=$?
+	eend "$result" "Could not start fitted Bluetooth firmware"
+	return "$result"
+}

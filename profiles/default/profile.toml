@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name = "default"
+
+[linux.root]
+kind = "initramfs"
+
+[rootfs]
+packages = []
+
+[bootstrap]
+kind = "linux"
+
+[uboot]
+kind = "none"
+
+[fit]
+kind = "none"
+
+[runtime]
+transport = "usb-ncm"
+runnable = true

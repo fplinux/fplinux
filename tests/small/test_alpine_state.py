@@ -65,6 +65,7 @@ class AlpineStateTests(unittest.TestCase):
         self._write("scripts/fplinux_cli/builder.py", b"builder implementation\n")
         self._write("scripts/fplinux_cli/alpine_builder.py", b"Alpine builder implementation\n")
         self._write("scripts/fplinux_cli/build_env.py", b"build environment\n")
+        self._write("scripts/fplinux_cli/firmware_inputs.py", b"firmware inputs\n")
         self.shared_source = self._write("alpine/shared/shared.c", b"int shared;\n")
 
     def _write(self, relative: str, contents: bytes) -> Path:
@@ -94,10 +95,34 @@ class AlpineStateTests(unittest.TestCase):
         with mock.patch.object(alpine_state, "COMMON_PACKAGES", (self.packages[0],)):
             selected = alpine_state.selected_packages(
                 {"rootfs": {"packages": [self.packages[1], third]}},
-                {},
+                {"rootfs": {"base_packages": [], "packages": [], "exclude_packages": []}},
                 self.root,
             )
         self.assertEqual(selected, (*self.packages, third))
+
+    def test_selection_composes_target_base_with_profile_delta(self) -> None:
+        """A normalized target base and profile delta retain only unexcluded packages."""
+        target_package = "fplinux-package-c"
+        profile_package = "fplinux-package-d"
+        self._write(
+            f"alpine/aports/{target_package}/APKBUILD", f"pkgname={target_package}\n".encode()
+        )
+        self._write(
+            f"alpine/aports/{profile_package}/APKBUILD", f"pkgname={profile_package}\n".encode()
+        )
+        with mock.patch.object(alpine_state, "COMMON_PACKAGES", (self.packages[0],)):
+            selected = alpine_state.selected_packages(
+                {"rootfs": {"packages": [self.packages[1]]}},
+                {
+                    "rootfs": {
+                        "base_packages": [target_package],
+                        "packages": [profile_package],
+                        "exclude_packages": [target_package],
+                    }
+                },
+                self.root,
+            )
+        self.assertEqual(selected, (*self.packages, profile_package))
 
     def test_runtime_addition_is_selected_only_with_its_local_package(self) -> None:
         """A profile-only Alpine closure is unrelated to ordinary rootfs builds."""
@@ -142,7 +167,7 @@ class AlpineStateTests(unittest.TestCase):
         ):
             alpine_state.selected_packages(
                 {"rootfs": {"packages": [self.packages[0]]}},
-                {"rootfs": {"packages": []}},
+                {"rootfs": {"base_packages": [], "packages": [], "exclude_packages": []}},
                 self.root,
             )
 
@@ -155,6 +180,7 @@ class AlpineStateTests(unittest.TestCase):
                 {"rootfs": {"packages": [self.packages[1]]}},
                 {
                     "rootfs": {
+                        "base_packages": [],
                         "packages": [extra],
                         "exclude_packages": [self.packages[1]],
                     }
@@ -175,6 +201,7 @@ class AlpineStateTests(unittest.TestCase):
                 {"rootfs": {"packages": list(platform)}},
                 {
                     "rootfs": {
+                        "base_packages": [],
                         "packages": [],
                         "exclude_packages": [
                             "fplinux-input",
@@ -194,13 +221,25 @@ class AlpineStateTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "excludes a package not owned"):
                 alpine_state.selected_packages(
                     {"rootfs": {"packages": [self.packages[1]]}},
-                    {"rootfs": {"packages": [], "exclude_packages": ["fplinux-missing"]}},
+                    {
+                        "rootfs": {
+                            "base_packages": [],
+                            "packages": [],
+                            "exclude_packages": ["fplinux-missing"],
+                        }
+                    },
                     self.root,
                 )
-            with self.assertRaisesRegex(SystemExit, "duplicate common/platform ownership"):
+            with self.assertRaisesRegex(SystemExit, "duplicate base ownership"):
                 alpine_state.selected_packages(
                     {"rootfs": {"packages": [self.packages[1]]}},
-                    {"rootfs": {"packages": [self.packages[1]], "exclude_packages": []}},
+                    {
+                        "rootfs": {
+                            "base_packages": [],
+                            "packages": [self.packages[1]],
+                            "exclude_packages": [],
+                        }
+                    },
                     self.root,
                 )
 

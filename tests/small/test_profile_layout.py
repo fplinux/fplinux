@@ -139,7 +139,7 @@ class ProfileLayoutRenderTests(unittest.TestCase):
             "root_label": "FPLROOT",
         }
 
-        bootargs = profile_layout.external_root_dtsi(root).decode("ascii")
+        bootargs = profile_layout.root_bootargs_dtsi(root).decode("ascii")
         self.assertTrue(bootargs.startswith('bootargs = "'))
         self.assertTrue(bootargs.endswith('";\n'))
         for argument in (
@@ -151,6 +151,11 @@ class ProfileLayoutRenderTests(unittest.TestCase):
         ):
             with self.subTest(argument=argument):
                 self.assertIn(argument, bootargs)
+
+        ram_bootargs = profile_layout.root_bootargs_dtsi({"kind": "initramfs"}).decode("ascii")
+        self.assertIn("init=/init rdinit=/init initramfs_options=size=40M", ram_bootargs)
+        self.assertNotIn("root=", ram_bootargs)
+        self.assertNotIn("rootfstype=", ram_bootargs)
 
         image = profile_layout.genimage_config(fit, storage).decode("ascii")
         for value in (

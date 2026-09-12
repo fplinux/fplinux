@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config VIDEO_UMS9117_ROTA
+	tristate "Unisoc UMS9117 image rotation engine"
+	depends on V4L_MEM2MEM_DRIVERS
+	depends on VIDEO_DEV
+	depends on ARCH_UMS9117 || COMPILE_TEST
+	depends on OF
+	depends on UMS9117_DMA
+	select V4L2_MEM2MEM_DEV
+	select VIDEOBUF2_DMA_CONTIG
+	help
+	  V4L2 memory-to-memory support for the UMS9117 ROTA image rotation
+	  engine. The engine uses a dedicated request route on the UMS9117 AP
+	  DMA controller and has no separate completion interrupt. It supports
+	  the hardware's packed RGB, grayscale, and semiplanar YUV formats.
+
+config VIDEO_UMS9117_JPEG
+	bool "Unisoc UMS9117 JPEG decoder"
+	depends on V4L_MEM2MEM_DRIVERS
+	depends on VIDEO_DEV
+	depends on ARCH_UMS9117 || COMPILE_TEST
+	depends on OF
+	select V4L2_MEM2MEM_DEV
+	select V4L2_JPEG_HELPER
+	select VIDEOBUF2_VMALLOC
+	help
+	  Decode baseline JPEG images from memory using the UMS9117 VSP.
+	  The V4L2 memory-to-memory interface accepts JPEG and produces
+	  full-range semiplanar YCbCr. No camera or sensor is required.

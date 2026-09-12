@@ -18,7 +18,8 @@ duration API. A new activation is accepted only after the previous output has
 been confirmed off.
 
 Closing the last input handle, removing the driver, shutting Linux down or
-entering [s2idle](SUSPEND.md) stops an active pulse and restores the inherited
+entering [s2idle](../../../docs/features/SUSPEND.md) stops an active pulse and
+restores the inherited
 SC2720 state. A pulse interrupted by s2idle is not resumed after wake.
 
 Repeated effects may form a pulse train. The driver does not define a

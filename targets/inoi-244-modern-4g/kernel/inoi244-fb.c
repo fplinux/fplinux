@@ -7,7 +7,7 @@
 
 #include "ums9117-fb.h"
 
-/* Exact LCM/DBI sequence from fpdoom model 104 (commit 9695f3739639). */
+/* NV3030 register setup shared by cold start and wake. */
 static const struct ums9117_fb_command inoi244_panel_init[] = {
 	/* Exact cmd3001_inoi delay after reset and final DBI timing. */
 	{ 0x00, 0, 50, {} },
@@ -41,9 +41,22 @@ static const struct ums9117_fb_command inoi244_panel_init[] = {
 	{ 0xfd, 2, 0, { 0xfa, 0xfc } },
 	{ 0x3a, 1, 0, { 0x55 } },
 	{ 0x35, 1, 0, { 0x00 } },
+};
+
+/* Cold-start sequence from fpdoom model 104 (commit 9695f3739639). */
+static const struct ums9117_fb_command inoi244_panel_init_finish[] = {
 	{ 0x11, 0, 200, {} },
 	{ 0x29, 0, 0, {} },
 	{ 0x36, 1, 0, { 0x00 } },
+	{ 0x2a, 4, 0, { 0x00, 0x00, 0x00, 0xef } },
+	{ 0x2b, 4, 0, { 0x00, 0x00, 0x01, 0x3f } },
+};
+
+/* Reestablish panel state and the full window before the retained frame. */
+static const struct ums9117_fb_command inoi244_panel_wake_finish[] = {
+	{ 0x36, 1, 0, { 0x00 } },
+	{ 0x11, 0, 200, {} },
+	{ 0x29, 0, 20, {} },
 	{ 0x2a, 4, 0, { 0x00, 0x00, 0x00, 0xef } },
 	{ 0x2b, 4, 0, { 0x00, 0x00, 0x01, 0x3f } },
 };
@@ -54,12 +67,20 @@ static const struct ums9117_fb_profile inoi244_fb_profile = {
 	.completion = UMS9117_FB_COMPLETION_POLL,
 	.init = inoi244_panel_init,
 	.init_count = ARRAY_SIZE(inoi244_panel_init),
+	.init_finish = inoi244_panel_init_finish,
+	.init_finish_count = ARRAY_SIZE(inoi244_panel_init_finish),
+	.wake_finish = inoi244_panel_wake_finish,
+	.wake_finish_count = ARRAY_SIZE(inoi244_panel_wake_finish),
 	.width = 240,
 	.height = 320,
 	.reset_phase_ms = 10,
 	.reset_release_ms = 0,
+	.wake_reset_phase_ms = 16,
 	.sleep_in_ms = 5,
 	.sleep_out_ms = 200,
+	.wled_backlight_name = "inoi244-backlight",
+	.dma_memcpy = IS_ENABLED(CONFIG_UMS9117_DMA),
+	.native_nv16 = true,
 	.lcdc_ctrl_set = BIT(1),
 	.lcdc_ctrl_clear = BIT(2) | (7U << 5),
 };
@@ -82,6 +103,7 @@ static struct platform_driver inoi244_fb_driver = {
 	.driver = {
 		.name = "inoi244-fb",
 		.of_match_table = inoi244_fb_of_match,
+		.pm = &ums9117_fb_pm_ops,
 	},
 };
 module_platform_driver(inoi244_fb_driver);

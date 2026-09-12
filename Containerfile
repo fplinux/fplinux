@@ -33,7 +33,7 @@ RUN set -eux; \
         bzip2=1.0.8-r6 \
         ca-certificates=20260611-r0 \
         cpio=2.15-r0 \
-        curl=8.21.0-r0 \
+        curl=8.22.0-r0 \
         diffutils=3.12-r0 \
         dosfstools=4.2-r2 \
         e2fsprogs=1.47.4-r0 \
@@ -46,11 +46,11 @@ RUN set -eux; \
         libtool=2.6.0-r1 \
         make=4.4.1-r4 \
         mtools=4.0.49-r0 \
-        openssh-client-default=10.3_p1-r0 \
+        openssh-client-default=10.3_p1-r1 \
         patch=2.8-r0 \
         perl=5.42.2-r0 \
         pkgconf=2.5.1-r0 \
-        rsync=3.4.3-r1 \
+        rsync=3.5.0-r0 \
         sed=4.9-r2 \
         tar=1.35-r5 \
         unzip=6.0-r16 \
@@ -73,7 +73,7 @@ RUN set -eux; \
 RUN set -eux; \
     apk add --no-cache \
         abuild=3.17.0-r0 \
-        atools-go=0.6.1-r4 \
+        atools-go=0.6.1-r5 \
         build-base=0.5-r4 \
         clang22=22.1.3-r2 \
         linux-headers=7.0.0-r1 \
@@ -112,9 +112,9 @@ RUN set -eux; \
         python3-dev=3.14.7-r1 \
         reuse=6.2.0-r0 \
         shellcheck=0.11.0-r1 \
-        shfmt=3.13.1-r1 \
+        shfmt=3.13.1-r2 \
         taplo=0.10.0-r0 \
-        vale=3.13.0-r6
+        vale=3.13.0-r7
 
 RUN set -eux; \
     mkdir -p /opt/quality/bin /tmp/quality; \
@@ -213,6 +213,13 @@ RUN set -eux; \
     install -m 0755 "${binary}" /opt/quality/bin/hadolint; \
     rm -f "${binary}"; \
     hadolint --version
+
+RUN apk add --no-cache \
+    cmake=4.2.3-r0 \
+    dbus=1.16.2-r2 \
+    dbus-dev=1.16.2-r2 \
+    libjpeg-turbo-dev=3.1.3-r0 \
+    samurai=1.2-r8
 
 RUN mkdir -p /cache/analysis /cache/downloads /cache/linux /cache/rootfs \
     /tmp/fplinux-home /workspace /work \

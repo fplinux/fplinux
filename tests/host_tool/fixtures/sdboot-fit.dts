@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/dts-v1/;
+/ {
+	description = "ALIGNMENT";
+	images {
+		kernel {
+			data = /incbin/("zImage");
+			type = "kernel";
+			arch = "arm";
+			os = "linux";
+			compression = "none";
+			load = <0x10010000>;
+			entry = <0x10010000>;
+			hash { algo = "sha256"; value = /incbin/("kernel.sha256"); };
+		};
+		fdt {
+			data = /incbin/("linux.dtb");
+			type = "flat_dt";
+			arch = "arm";
+			compression = "none";
+			load = <0x10020000>;
+			hash { algo = "sha256"; value = /incbin/("fdt.sha256"); };
+		};
+	};
+	configurations {
+		default = "test-board";
+		test-board { kernel = "kernel"; fdt = "fdt"; };
+	};
+};

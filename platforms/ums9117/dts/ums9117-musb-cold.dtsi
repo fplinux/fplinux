@@ -7,7 +7,7 @@
  */
 
 &usb {
-	compatible = "fplinux,ums9117-musb";
+	compatible = "sprd,ums9117-musb";
 	reg = <0x20200000 0x00002000>,
 	      <0x20e00000 0x00004000>,
 	      <0x40430000 0x00003000>,

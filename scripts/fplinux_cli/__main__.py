@@ -6,8 +6,10 @@ from __future__ import annotations
 import argparse
 import os
 from functools import partial
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .bluetooth_prepare import prepare_bluetooth
 from .cachelock import cache_lock
 from .commands import (
     PUBLIC_BOOT_MODES,
@@ -15,15 +17,15 @@ from .commands import (
     checksum_aport,
     console_target,
     package_target,
-    profile_command,
     run_target,
     selected_context_profile,
     verify_booted,
 )
 from .common import ROOT
-from .config import TARGET_NAME, discover_targets
+from .config import GLOBAL_PROFILES, TARGET_NAME, discover_targets, normalize_profile
 from .container import CHECK_SCOPES, check, check_commit_message, doctor, setup
 from .format import format_sources
+from .nand_backup import backup_target_nand
 from .output import run_entrypoint
 from .prune import (
     discard_obsolete_apks,
@@ -36,11 +38,13 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-_EXCLUSIVE_CACHE_COMMANDS = frozenset({"build", "check", "checksum", "format", "setup"})
-_SHARED_CACHE_COMMANDS = frozenset({"console", "package", "profile", "run", "verify"})
+_EXCLUSIVE_CACHE_COMMANDS = frozenset(
+    {"bluetooth", "build", "check", "checksum", "format", "nand", "setup"}
+)
+_SHARED_CACHE_COMMANDS = frozenset({"console", "package", "run", "verify"})
 _CHECK_SCOPE_METAVAR = "{" + ",".join(CHECK_SCOPES) + "}"
 _PUBLIC_COMMAND_METAVAR = (
-    "{doctor,check,format,setup,build,checksum,package,prune,run,console,profile,verify}"
+    "{doctor,check,format,setup,build,checksum,package,prune,run,console,nand,bluetooth,verify}"
 )
 
 
@@ -66,9 +70,13 @@ def _positive_jobs(value: str) -> int:
 
 
 def _profile_name(value: str) -> str:
-    """Accept only one target-owned profile path component."""
+    """Accept one of the two public build profiles."""
     if TARGET_NAME.fullmatch(value) is None:
         raise argparse.ArgumentTypeError(f"invalid profile name: {value!r}")
+    if value not in GLOBAL_PROFILES:
+        raise argparse.ArgumentTypeError(
+            f"unknown profile: {value!r} (choose from default, microsd-uboot)"
+        )
     return value
 
 
@@ -144,19 +152,9 @@ def _setup_action(*, force: bool) -> None:
     setup(force=force)
 
 
-def _profile_check_scopes(
-    scopes: list[str],
-    profile: str | None,
-    check_parser: argparse.ArgumentParser,
-) -> list[str]:
-    """Restrict a selected profile check to the kernel it changes."""
-    if profile is None:
-        return scopes
-    if not scopes:
-        return ["kernel"]
-    if scopes != ["kernel"]:
-        check_parser.error("--profile requires no scope or exactly the kernel scope")
-    return scopes
+def _nand_backup_action(target: str, output: Path, *, profile: str | None) -> None:
+    """Save a complete NAND image through the selected running system."""
+    backup_target_nand(target, output, profile=profile)
 
 
 def _command_action(
@@ -183,7 +181,7 @@ def _command_action(
                 check_parser.error("--jobs greater than 1 requires the kernel check scope")
             action = partial(
                 check,
-                _profile_check_scopes(args.scopes, args.profile, check_parser),
+                args.scopes,
                 profile=args.profile,
                 verbose=args.verbose,
                 no_cache=args.no_cache,
@@ -233,10 +231,20 @@ def _command_action(
             upload=args.upload,
             pull=args.pull,
         )
-    elif args.command == "profile":
-        action = partial(profile_command, args.target, args.profile, args.arguments)
+    elif args.command == "nand":
+        action = partial(_nand_backup_action, args.target, args.output, profile=args.profile)
+    elif args.command == "bluetooth":
+        if args.bluetooth_command != "prepare":
+            raise AssertionError(f"unhandled Bluetooth command: {args.bluetooth_command}")
+        action = partial(
+            prepare_bluetooth,
+            args.target,
+            from_dump=args.from_dump,
+            jobs=args.jobs,
+            offline=args.offline,
+        )
     elif args.command == "verify":
-        action = partial(verify_booted, args.target)
+        action = partial(verify_booted, args.target, profile=args.profile)
     else:
         raise AssertionError(f"unhandled command: {args.command}")
     return action
@@ -285,7 +293,7 @@ def main() -> None:
         "--profile",
         type=_profile_name,
         metavar="NAME",
-        help="check only the selected profile kernel",
+        help="check the selected global profile (default: default)",
     )
     format_parser = commands.add_parser(
         "format", help="format explicit project sources in the pinned environment"
@@ -310,7 +318,7 @@ def main() -> None:
         "--profile",
         type=_profile_name,
         metavar="NAME",
-        help="build one target-owned non-default profile",
+        help="build one global profile (default: default)",
     )
     build_parser.add_argument("--jobs", type=int, default=max(1, os.cpu_count() or 1))
     build_parser.add_argument(
@@ -347,7 +355,7 @@ def main() -> None:
         "--profile",
         type=_profile_name,
         metavar="NAME",
-        help="package one contributor-selected target profile",
+        help="package the selected global profile",
     )
     package_parser.add_argument(
         "--candidate",
@@ -381,7 +389,7 @@ def main() -> None:
         "--profile",
         type=_profile_name,
         metavar="NAME",
-        help="run one contributor-selected target profile",
+        help="run the selected global profile",
     )
 
     console_parser = commands.add_parser("console", help="connect to a running target over USB")
@@ -390,7 +398,7 @@ def main() -> None:
         "--profile",
         type=_profile_name,
         metavar="NAME",
-        help="reconnect to a session started from one target-owned profile",
+        help="reconnect to a session started from the selected global profile",
     )
     console_actions = console_parser.add_mutually_exclusive_group()
     console_actions.add_argument("--keyboard", metavar="EVDEV")
@@ -398,18 +406,54 @@ def main() -> None:
     console_actions.add_argument("--upload", nargs=2, metavar=("LOCAL", "REMOTE"))
     console_actions.add_argument("--pull", nargs=2, metavar=("REMOTE", "LOCAL"))
 
-    profile_parser = commands.add_parser(
-        "profile", help="run a host command owned by one target profile"
+    nand_parser = commands.add_parser("nand", help="read the target's internal NAND")
+    nand_commands = nand_parser.add_subparsers(dest="nand_command", required=True)
+    nand_backup_parser = nand_commands.add_parser(
+        "backup", help="save a complete read-only NAND image"
     )
-    profile_parser.add_argument("target", choices=targets)
-    profile_parser.add_argument("profile", type=_profile_name, metavar="PROFILE")
-    profile_parser.add_argument("arguments", nargs=argparse.REMAINDER, metavar="ARG")
+    nand_backup_parser.add_argument("target", choices=targets)
+    nand_backup_parser.add_argument("output", type=Path)
+    nand_backup_parser.add_argument("--profile", type=_profile_name, metavar="NAME")
+
+    bluetooth_parser = commands.add_parser(
+        "bluetooth", help="prepare target-owned Bluetooth firmware inputs"
+    )
+    bluetooth_commands = bluetooth_parser.add_subparsers(
+        dest="bluetooth_command",
+        required=True,
+        metavar="{prepare}",
+    )
+    bluetooth_prepare_parser = bluetooth_commands.add_parser(
+        "prepare", help="extract fitted firmware from a read-only NAND backup"
+    )
+    bluetooth_prepare_parser.add_argument("target", choices=targets)
+    bluetooth_prepare_parser.add_argument(
+        "--from-dump",
+        type=Path,
+        metavar="PATH",
+        help="use an existing physical NAND backup without connecting the phone",
+    )
+    bluetooth_prepare_parser.add_argument(
+        "--jobs",
+        type=_positive_jobs,
+        default=max(1, os.cpu_count() or 1),
+        metavar="N",
+        help="limit jobs when the read-only NAND loader must be built",
+    )
+    bluetooth_prepare_parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="build the read-only NAND loader without network access",
+    )
 
     verify_parser = commands.add_parser(
         "verify", help="check that the booted phone runs the current build"
     )
     verify_parser.add_argument("target", choices=targets)
+    verify_parser.add_argument("--profile", type=_profile_name, metavar="NAME")
     args = parser.parse_args()
+    if hasattr(args, "profile") and not (args.command == "check" and args.list_scopes):
+        args.profile = normalize_profile(args.profile)
     _dispatch_with_cache_lock(args, _command_action(args, check_parser))
 
 

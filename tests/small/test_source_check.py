@@ -169,7 +169,7 @@ class SourceInventoryTests(unittest.TestCase):
         """Profile U-Boot and shared driver sources use the project C style."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            uboot = root / "targets/phone/profiles/microsd/uboot"
+            uboot = root / "targets/phone/uboot"
             uboot.mkdir(parents=True)
             source = uboot / "board.c"
             header = uboot / "board.h"
@@ -196,8 +196,8 @@ class SourceInventoryTests(unittest.TestCase):
                         "alpine/aports/demo/app.c",
                         "platforms/soc/common/core.c",
                         "targets/phone/common/board.h",
-                        "targets/phone/profiles/microsd/uboot/board.c",
-                        "targets/phone/profiles/microsd/uboot/board.h",
+                        "targets/phone/uboot/board.c",
+                        "targets/phone/uboot/board.h",
                     ],
                 )
 
@@ -212,10 +212,12 @@ class SourceInventoryTests(unittest.TestCase):
             targets = {
                 "phone-a": {
                     "platform": "soc",
+                    "rootfs": {"base_packages": [], "packages": [], "exclude_packages": []},
                     "bundle": {"packages": ["phone-ui"]},
                 },
                 "phone-b": {
                     "platform": "soc",
+                    "rootfs": {"base_packages": [], "packages": [], "exclude_packages": []},
                     "bundle": {"packages": []},
                 },
             }

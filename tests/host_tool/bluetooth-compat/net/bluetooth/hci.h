@@ -1,0 +1,33 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+#ifndef BLUETOOTH_HOST_HCI_H
+#define BLUETOOTH_HOST_HCI_H
+
+/* Kernel API constants for compilation, independent of literal wire oracles. */
+#define HCI_COMMAND_PKT 1
+#define HCI_ACLDATA_PKT 2
+#define HCI_SCODATA_PKT 3
+#define HCI_EVENT_PKT 4
+#define HCI_COMMAND_HDR_SIZE 3
+#define HCI_ACL_HDR_SIZE 4
+#define HCI_SCO_HDR_SIZE 3
+#define HCI_EVENT_HDR_SIZE 2
+#define HCI_MAX_FRAME_SIZE 1028
+#define HCI_MAX_SCO_SIZE 255
+#define HCI_MAX_EVENT_SIZE 260
+#define HCI_EV_CMD_COMPLETE 0x0e
+#define HCI_EV_CMD_STATUS 0x0f
+#define HCI_OP_CREATE_CONN 0x0405
+#define HCI_OP_ADD_SCO 0x0407
+#define HCI_OP_ACCEPT_CONN_REQ 0x0409
+#define HCI_OP_SETUP_SYNC_CONN 0x0428
+#define HCI_OP_ACCEPT_SYNC_CONN_REQ 0x0429
+#define HCI_OP_ENHANCED_SETUP_SYNC_CONN 0x043d
+#define HCI_OP_LE_CREATE_CONN 0x200d
+#define HCI_OP_LE_EXT_CREATE_CONN 0x2043
+#define HCI_OP_LE_PA_CREATE_SYNC 0x2044
+#define HCI_OP_LE_CREATE_CIS 0x2064
+#define HCI_OP_LE_ACCEPT_CIS 0x2066
+#define HCI_OP_LE_CREATE_BIG 0x2068
+#define HCI_OP_LE_BIG_CREATE_SYNC 0x206b
+
+#endif

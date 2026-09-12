@@ -5,28 +5,22 @@
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/leds/common.h>
 #include "ums9117.dtsi"
+#include "ums9117-sc2720.dtsi"
 #include "ums9117-musb-cold.dtsi"
 #include "fplinux-target-identity.dtsi"
+#include "nokia-ta1618-nand-readonly.dtsi"
+#include "nokia-ta1618-bluetooth.dtsi"
 
 / {
-	chosen {
-		bootargs = "console=tty0 loglevel=8 ignore_loglevel init=/init panic=-1 rdinit=/init vt.global_cursor_default=1 random.trust_bootloader=on";
-	};
-
-	memory@80000000 {
+	memory@80200000 {
 		device_type = "memory";
-		reg = <0x80000000 0x03e00000>;
+		reg = <0x80200000 0x03c00000>;
 	};
 
 	reserved-memory {
 		#address-cells = <1>;
 		#size-cells = <1>;
 		ranges;
-
-		dtb@83e00000 {
-			reg = <0x83e00000 0x00010000>;
-			no-map;
-		};
 
 		framebuffer@83f00000 {
 			reg = <0x83f00000 0x00100000>;
@@ -39,44 +33,6 @@
 		regulator-name = "sc2720-usb33";
 		regulator-min-microvolt = <3300000>;
 		regulator-max-microvolt = <3300000>;
-	};
-
-	charger {
-		compatible = "fplinux,ta1618-sc2720-charger";
-	};
-
-	fuel-gauge {
-		compatible = "fplinux,ta1618-sc2720-fgu";
-	};
-
-	auxadc {
-		compatible = "fplinux,ta1618-sc2720-auxadc";
-	};
-
-	sc2720_inta: sc2720-inta {
-		compatible = "sprd,ums9117-sc2720-inta";
-		interrupt-parent = <&gic>;
-		interrupts = <GIC_SPI 38 IRQ_TYPE_LEVEL_HIGH>;
-		interrupt-controller;
-		#interrupt-cells = <2>;
-	};
-
-	rtc {
-		compatible = "fplinux,ta1618-sc2720-rtc";
-		interrupt-parent = <&sc2720_inta>;
-		interrupts = <1 IRQ_TYPE_LEVEL_HIGH>;
-		interrupt-names = "alarm";
-		wakeup-source;
-	};
-
-	sc2720_eic: sc2720-eic {
-		compatible = "sprd,ums9117-sc2720-eic";
-		interrupt-parent = <&sc2720_inta>;
-		interrupts = <4 IRQ_TYPE_LEVEL_HIGH>;
-		gpio-controller;
-		#gpio-cells = <2>;
-		interrupt-controller;
-		#interrupt-cells = <2>;
 	};
 
 	soc {
@@ -154,33 +110,57 @@
 		};
 
 		keypad-backlight@40608df8 {
-			compatible = "fplinux,ta1618-kpled";
+			compatible = "sprd,ums9117-sc2720-kpled";
 			reg = <0x40608df8 0x00000004>;
 			function = LED_FUNCTION_KBD_BACKLIGHT;
+			fplinux,keypad = <&keypad>;
 			fplinux,current-code = <1>;
 		};
 
 		vibrator@40608e00 {
-			compatible = "fplinux,ta1618-sc2720-vibrator";
+			compatible = "sprd,ums9117-sc2720-vibrator";
 			reg = <0x40608e00 0x00000004>;
+			label = "TA-1618 vibrator";
 			fplinux,voltage-code = <0>;
 		};
 
-		thermal-sensor@40300000 {
-			compatible = "fplinux,ta1618-thm1";
-			reg = <0x40300000 0x00000100>,
-			      <0x40240000 0x00000058>,
-			      <0x40241064 0x00000004>;
-			reg-names = "thm", "efuse-control", "efuse-block25";
-			sprd,aon-apb = <&aon_apb>;
-		};
 	};
 };
 
 #include "ums9117-ram-session.dtsi"
 
+&sc2720_charger {
+	label = "ta1618-charger";
+};
+
+&sc2720_fgu {
+	label = "ta1618-battery";
+	fplinux,current-calibration = <10 20>;
+};
+
+&sc2720_auxadc {
+	label = "ta1618-sc2720-auxadc";
+};
+
+&thm1 {
+	status = "okay";
+	label = "ta1618-soc";
+};
+
+&ap_dma {
+	status = "okay";
+};
+
+&rota {
+	status = "okay";
+};
+
+&jpeg {
+	status = "okay";
+};
+
 &keypad {
-	compatible = "fplinux,ums9117-keypad";
+	compatible = "sprd,ums9117-keypad";
 	interrupts = <GIC_SPI 36 IRQ_TYPE_LEVEL_HIGH>;
 	interrupt-names = "matrix";
 	status = "okay";

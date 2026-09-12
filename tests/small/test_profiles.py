@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Behavioral tests for target-owned build-profile configuration."""
+"""Global boot-policy selection and board configuration composition."""
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,68 +11,28 @@ from typing import Any
 from unittest import mock
 
 from fplinux_cli import config
-from fplinux_cli import workspace as workspace_module
+from fplinux_cli.common import ROOT
 
 
-class TargetProfileTests(unittest.TestCase):
-    """Keep profile selection explicit, local and causal."""
+class GlobalProfileTests(unittest.TestCase):
+    """Keep target features common while changing the system root."""
 
     def setUp(self) -> None:
-        """Create one complete target manifest and profile-owned source fixture."""
+        """Provide two board manifests and real global boot-policy inputs."""
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        self.target = "demo"
-        self.target_root = self.root / "targets" / self.target
-        self.target_root.mkdir(parents=True)
-        (self.target_root / "target.toml").write_text(
-            """platform = "platform"
-
-[identity]
-brand = "Demo"
-product = "Phone"
-hardware_codes = []
-compatible = "demo,phone"
-
-[bundle]
-packages = []
-
-[linux]
-dtb = "demo.dtb"
-debug_dtb = "demo.dtb"
-patches = []
-copies = []
-appends = []
-forbidden_config = ["CONFIG_FORBIDDEN=y"]
-forbidden_dtb_markers = ["forbidden"]
-
-[bootstrap]
-image = "bootstrap.bin"
-map = "bootstrap.map"
-dtb_destination = "demo.dtb"
-record_prefix = "DEMO"
-
-[adapter]
-spi_mode = 0
-lcd_id = 0
-exec_distance = 0
-backlight_channels = "mono"
-backlight_level = 0
-session_name = "demo"
-boot_instructions = "demo"
-""",
-            encoding="utf-8",
-        )
+        shutil.copytree(ROOT / "profiles", self.root / "profiles")
         self.platform: dict[str, Any] = {
-            "identity": {
-                "vendor": "Demo",
-                "soc": "SOC1",
-                "aliases": [],
-                "compatible": "demo,soc1",
-                "display_name": "Demo SOC1",
+            "identity": {"compatible": "demo,soc"},
+            "rootfs": {"packages": ["fplinux-ssh", "fplinux-feature"]},
+            "linux": {"defconfig": "platforms/demo/kernel/defconfig"},
+            "uboot": {
+                "source": "platforms/demo/uboot.lock.toml",
+                "archive_prefix": "u-boot-2026.07",
+                "patches": [],
+                "copies": [],
             },
-            "rootfs": {"packages": ["fplinux-ssh"]},
-            "linux": {"copies": [{"source": "platform.c", "destination": "drivers/base.c"}]},
             "bootstrap": {
                 "kernel_destination": "zImage",
                 "load_address": 0x80100000,
@@ -91,356 +52,246 @@ boot_instructions = "demo"
                 "toolchain": "toolchain",
                 "lto": 0,
             },
-            "runtime": {
-                "fdl1_load_address": 0,
-                "adapter": {},
-                "usb": {"linux_gadget": {}},
-            },
+            "runtime": {"fdl1_load_address": 0, "adapter": {}, "usb": {}},
         }
-
-    def _write_profile(self, name: str = "usb-host") -> Path:
-        profile = self.target_root / "profiles" / name
-        profile.mkdir(parents=True)
-        (profile / "host.patch").write_text("patch\n", encoding="utf-8")
-        (profile / "host.c").write_text("source\n", encoding="utf-8")
-        (profile / "host.append").write_text("append\n", encoding="utf-8")
-        (profile / "profile.toml").write_text(
-            f"""name = "{name}"
-
-[linux]
-config_enable = ["CONFIG_USB", "CONFIG_HID"]
-config_disable = ["CONFIG_USB_GADGET"]
-patches = ["host.patch"]
-
-[linux.root]
-kind = "initramfs"
-
-[[linux.copies]]
-source = "host.c"
-destination = "drivers/host.c"
-
-[[linux.appends]]
-source = "host.append"
-destination = "drivers/Kconfig"
-
+        shared = self.root / "platforms/demo"
+        (shared / "kernel").mkdir(parents=True)
+        (shared / "kernel/defconfig").write_text("CONFIG_FEATURE=y\nCONFIG_BOARD=1\n")
+        (shared / "uboot.lock.toml").write_text(
+            'version = "2026.07"\nrepository = "https://example.invalid/u-boot"\n'
+            'tag = "v2026.07"\ncommit = "' + "a" * 40 + '"\n'
+            'archive_url = "https://example.invalid/u-boot.tar.bz2"\n'
+            'archive_sha256 = "' + "b" * 64 + '"\nlicense = "GPL-2.0-only"\n'
+        )
+        for target in ("first", "second"):
+            target_root = self.root / "targets" / target
+            (target_root / "kernel").mkdir(parents=True)
+            (target_root / "kernel/config.fragment").write_text("CONFIG_BOARD=2\n")
+            (target_root / "bootstrap-microsd").mkdir()
+            (target_root / "uboot").mkdir()
+            (target_root / "uboot/defconfig").write_text("CONFIG_ARM=y\n")
+            (target_root / "target.toml").write_text(
+                f"""platform = "demo"
+[identity]
+brand = "Demo"
+product = "{target}"
+hardware_codes = []
+compatible = "demo,{target}"
 [rootfs]
-packages = ["fplinux-host"]
-exclude_packages = ["fplinux-ssh"]
-
+packages = []
+[bundle]
+packages = []
+[linux]
+config_fragment = "kernel/config.fragment"
+memory = {{ base = 0x80200000, size = 0x03c00000 }}
+dtb = "{target}.dtb"
+debug_dtb = "{target}.dtb"
+patches = []
+copies = []
+appends = []
+forbidden_config = ["CONFIG_FORBIDDEN=y"]
+forbidden_dtb_markers = ["forbidden"]
 [bootstrap]
-kind = "linux"
+image = "bootstrap.bin"
+map = "bootstrap.map"
+dtb_destination = "{target}.dtb"
+record_prefix = "DEMO"
+[adapter]
+spi_mode = 0
+lcd_id = 0
+exec_distance = 0
+backlight_channels = "mono"
+backlight_level = 0
+session_name = "{target}"
+boot_instructions = "Power off and connect."
+[microsd]
+linux_patches = []
+[microsd.bootstrap]
+source = "bootstrap-microsd"
+image = "sd-stage0.bin"
+map = "sd-stage0.map"
+[microsd.uboot]
+defconfig = "uboot/defconfig"
+patches = []
+copies = []
+[bluetooth]
+parser = "radio_parser.py"
+[[bluetooth.firmware]]
+source = "radio.bin"
+destination = "demo/radio.bin"
+size = 4
+"""
+            )
+        self.addCleanup(mock.patch.stopall)
+        mock.patch.object(config, "ROOT", self.root).start()
+        mock.patch.object(config, "load_platform", return_value=self.platform).start()
+        mock.patch.object(config, "asset_bundle_paths", return_value={}).start()
 
-[uboot]
-kind = "none"
+    def test_default_alias_has_the_same_identity_and_configuration(self) -> None:
+        """Spelling default explicitly does not create a second build context."""
+        for target in ("first", "second"):
+            with self.subTest(target=target):
+                implicit = config.load_target(target)
+                explicit = config.load_target(target, "default")
+                self.assertEqual(implicit, explicit)
+                self.assertIsNone(explicit["profile"])
+                self.assertEqual(explicit["linux"]["root"], {"kind": "initramfs"})
+                self.assertEqual(explicit["bootstrap"]["kind"], "linux")
 
-[fit]
-kind = "none"
+    def test_both_boards_share_boot_policy_and_keep_their_own_boot_sources(self) -> None:
+        """MicroSD changes root placement but keeps feature and firmware inputs."""
+        for target in ("first", "second"):
+            with self.subTest(target=target):
+                ram = config.load_target(target)
+                card = config.load_target(target, "microsd-uboot")
+                self.assertEqual(config.discover_profiles(target), ("default", "microsd-uboot"))
+                self.assertEqual(card["profile"], "microsd-uboot")
+                self.assertEqual(
+                    card["linux"]["root"],
+                    {
+                        "kind": "external",
+                        "filesystem": "ext4",
+                        "wait_seconds": 10,
+                        "partuuid": "46504c58-02",
+                    },
+                )
+                self.assertEqual(card["rootfs"]["packages"], ["fplinux-microsd-root"])
+                self.assertEqual(ram["rootfs"]["packages"], [])
+                self.assertEqual(card["rootfs"]["base_packages"], ram["rootfs"]["base_packages"])
+                self.assertEqual(
+                    card["rootfs"]["firmware"],
+                    [
+                        {
+                            "source": "radio.bin",
+                            "destination": "demo/radio.bin",
+                            "size": 4,
+                        }
+                    ],
+                )
+                self.assertEqual(card["rootfs"]["firmware"], ram["rootfs"]["firmware"])
+                self.assertEqual(card["linux"]["memory"], {"base": 0x80200000, "size": 0x03C00000})
+                self.assertEqual(card["linux"]["config_fragment"], ram["linux"]["config_fragment"])
+                self.assertEqual(card["bootstrap"]["source"], "bootstrap-microsd")
+                self.assertEqual(card["uboot"]["defconfig"], "uboot/defconfig")
+                self.assertEqual(card["runtime"], ram["runtime"])
 
-[runtime]
-transport = "none"
-runnable = true
-""",
-            encoding="utf-8",
+    def test_feature_profiles_are_unavailable_even_if_old_directories_exist(self) -> None:
+        """An obsolete board-local profile cannot change a global selection."""
+        previous = self.root / "targets/first/profiles/bt-qual"
+        previous.mkdir(parents=True)
+        (previous / "profile.toml").write_text("invalid = true\n")
+        self.assertEqual(config.discover_profiles("first"), ("default", "microsd-uboot"))
+        with self.assertRaisesRegex(SystemExit, "unknown profile"):
+            config.load_target("first", "bt-qual")
+        self.assertEqual(config.load_target("first")["linux"]["root"], {"kind": "initramfs"})
+
+    def test_boot_profile_cannot_exclude_shared_features(self) -> None:
+        """Feature-package ownership is rejected at the boot-policy boundary."""
+        path = self.root / "profiles/default/profile.toml"
+        path.write_text(path.read_text().replace("packages = []", 'packages = ["feature"]'))
+        with self.assertRaisesRegex(SystemExit, "boot maintenance"):
+            config.load_target("first")
+
+    def test_missing_bluetooth_declaration_does_not_require_private_inputs(self) -> None:
+        """A board without a Bluetooth declaration has no firmware input group."""
+        path = self.root / "targets/first/target.toml"
+        path.write_text(path.read_text().split("[bluetooth]")[0])
+        for profile in ("default", "microsd-uboot"):
+            with self.subTest(profile=profile):
+                self.assertEqual(config.load_target("first", profile)["rootfs"]["firmware"], [])
+
+    def test_missing_board_boot_sources_fail_only_when_microsd_is_selected(self) -> None:
+        """RAM operation does not read unused U-Boot sources or fall back to another board."""
+        (self.root / "targets/second/uboot/defconfig").unlink()
+        self.assertEqual(config.load_target("second")["bootstrap"]["kind"], "linux")
+        with self.assertRaisesRegex(SystemExit, "U-Boot source is missing"):
+            config.load_target("second", "microsd-uboot")
+
+    def test_uboot_combines_shared_sources_with_the_selected_board(self) -> None:
+        """Shared boot logic and the chosen slot descriptor reach one projection."""
+        shared = self.root / "platforms/demo"
+        (shared / "boot.c").write_text("shared boot flow\n")
+        (shared / "boot.patch").write_text("shared integration patch\n")
+        self.platform["uboot"]["patches"] = ["platforms/demo/boot.patch"]
+        self.platform["uboot"]["copies"] = [
+            {"source": "platforms/demo/boot.c", "destination": "board/demo/boot.c"}
+        ]
+        for target in ("first", "second"):
+            target_root = self.root / "targets" / target
+            (target_root / "uboot/slot.c").write_text(f"{target} slot\n")
+            (target_root / "uboot/board.patch").write_text(f"{target} integration patch\n")
+            manifest = target_root / "target.toml"
+            manifest.write_text(
+                manifest.read_text().replace(
+                    'defconfig = "uboot/defconfig"\npatches = []\ncopies = []',
+                    'defconfig = "uboot/defconfig"\npatches = ["uboot/board.patch"]\n'
+                    'copies = [{ source = "targets/'
+                    + target
+                    + '/uboot/slot.c", destination = "board/demo/slot.c" }]',
+                )
+            )
+
+            with self.subTest(target=target):
+                uboot = config.load_target(target, "microsd-uboot")["uboot"]
+                self.assertEqual(
+                    [(self.root / path).read_text() for path in uboot["patches"]],
+                    ["shared integration patch\n", f"{target} integration patch\n"],
+                )
+                projected = {
+                    step["destination"]: (self.root / step["source"]).read_text()
+                    for step in uboot["copies"]
+                }
+                self.assertEqual(
+                    projected,
+                    {
+                        "board/demo/boot.c": "shared boot flow\n",
+                        "board/demo/slot.c": f"{target} slot\n",
+                    },
+                )
+
+    def test_nand_reader_stays_board_owned_across_boot_profiles(self) -> None:
+        """Boot policy preserves an explicit reader and supplies none to other boards."""
+        path = self.root / "targets/first/target.toml"
+        path.write_text(
+            path.read_text()
+            + '\n[nand]\nraw_device = "/dev/first-nand-raw"\nid = 0xb1a1\nraw_page_bytes = 2176\n'
         )
-        return profile
+        for profile in ("default", "microsd-uboot"):
+            with self.subTest(profile=profile):
+                self.assertEqual(
+                    config.load_target("first", profile)["nand"],
+                    {"raw_device": "/dev/first-nand-raw", "id": 0xB1A1, "raw_page_bytes": 2176},
+                )
+                self.assertNotIn("nand", config.load_target("second", profile))
 
-    def _load_target(self, profile: str | None = None) -> dict[str, Any]:
-        with (
-            mock.patch.object(config, "ROOT", self.root),
-            mock.patch.object(config, "load_platform", return_value=self.platform),
-            mock.patch.object(config, "asset_bundle_paths", return_value={}),
-        ):
-            return config.load_target(self.target, profile)
-
-    def test_default_target_ignores_existing_profiles(self) -> None:
-        """A normal build neither selects nor hashes an unrelated profile manifest."""
-        profile = self._write_profile()
-        before = self._load_target()
-        (profile / "profile.toml").write_text("invalid = true\n", encoding="utf-8")
-        after = self._load_target()
-
-        self.assertIsNone(before["profile"])
-        self.assertEqual(before["identity"]["display_name"], "Demo Phone")
-        self.assertEqual(before, after)
-        self.assertEqual(before["runtime"]["transport"], "usb-ncm")
-        self.assertTrue(before["runtime"]["runnable"])
-        self.assertEqual(before["linux"]["config_enable"], [])
-        self.assertEqual(before["linux"]["root"], {"kind": "initramfs"})
-        self.assertEqual(before["linux"]["forbidden_dtb_markers"], ["forbidden"])
-        self.assertEqual(before["bootstrap"]["kind"], "linux")
-        self.assertEqual(before["uboot"], {"kind": "none"})
-        self.assertEqual(before["fit"], {"kind": "none"})
-        self.assertIsNone(before["layout"])
-        self.assertIsNone(before["storage"])
-        self.assertEqual(before["image"], {"kind": "none"})
-
-    def test_target_rejects_a_stored_legacy_display_name(self) -> None:
-        """Require public names to be derived from structured identity fields."""
-        manifest = self.target_root / "target.toml"
-        contents = manifest.read_text(encoding="utf-8")
-        manifest.write_text(
-            contents.replace(
-                'platform = "platform"\n',
-                'platform = "platform"\ndisplay_name = "Legacy"\n',
-                1,
-            ),
-            encoding="utf-8",
+    def test_nand_reader_requires_a_device_path(self) -> None:
+        """A board cannot accidentally point a physical NAND backup at a regular file."""
+        path = self.root / "targets/first/target.toml"
+        path.write_text(
+            path.read_text()
+            + '\n[nand]\nraw_device = "/tmp/nand.raw"\nid = 0xb1a1\nraw_page_bytes = 2176\n'
         )
+        with self.assertRaisesRegex(SystemExit, "device directly under /dev"):
+            config.load_target("first")
 
-        with self.assertRaisesRegex(SystemExit, "must contain exactly"):
-            self._load_target()
 
-    def test_selected_profile_is_exactly_merged_under_its_target_directory(self) -> None:
-        """A selected profile contributes its own operations, rootfs delta and transport."""
-        self._write_profile()
-        loaded = self._load_target("usb-host")
+class KernelConfigCompositionTests(unittest.TestCase):
+    """The shared base and board fragment produce one unambiguous Kconfig input."""
 
-        self.assertEqual(loaded["profile"], "usb-host")
-        self.assertEqual(loaded["linux"]["config_enable"], ["CONFIG_USB", "CONFIG_HID"])
-        self.assertEqual(loaded["linux"]["config_disable"], ["CONFIG_USB_GADGET"])
-        self.assertEqual(loaded["linux"]["patches"], ["profiles/usb-host/host.patch"])
-        self.assertEqual(
-            loaded["linux"]["copies"],
-            [{"source": "profiles/usb-host/host.c", "destination": "drivers/host.c"}],
-        )
-        self.assertEqual(
-            loaded["linux"]["appends"],
-            [{"source": "profiles/usb-host/host.append", "destination": "drivers/Kconfig"}],
-        )
-        self.assertEqual(
-            loaded["rootfs"],
-            {"packages": ["fplinux-host"], "exclude_packages": ["fplinux-ssh"]},
-        )
-        self.assertEqual(loaded["linux"]["root"], {"kind": "initramfs"})
-        self.assertEqual(loaded["linux"]["forbidden_dtb_markers"], ["forbidden"])
-        self.assertEqual(loaded["bootstrap"]["kind"], "linux")
-        self.assertEqual(loaded["uboot"], {"kind": "none"})
-        self.assertEqual(loaded["fit"], {"kind": "none"})
-        self.assertIsNone(loaded["layout"])
-        self.assertIsNone(loaded["storage"])
-        self.assertEqual(loaded["image"], {"kind": "none"})
-        self.assertEqual(loaded["runtime"]["transport"], "none")
-        self.assertTrue(loaded["runtime"]["runnable"])
-
-    def test_selected_profile_can_own_its_dtb_safety_markers(self) -> None:
-        """A hardware lab replaces DT markers only inside its selected profile."""
-        profile = self._write_profile()
-        manifest = profile / "profile.toml"
-        contents = manifest.read_text(encoding="utf-8")
-        manifest.write_text(
-            contents.replace(
-                'patches = ["host.patch"]',
-                'patches = ["host.patch"]\nforbidden_dtb_markers = ["profile-danger"]',
-                1,
-            ),
-            encoding="utf-8",
-        )
-
-        selected = self._load_target("usb-host")
-        default = self._load_target()
-
-        self.assertEqual(selected["linux"]["forbidden_dtb_markers"], ["profile-danger"])
-        self.assertEqual(default["linux"]["forbidden_dtb_markers"], ["forbidden"])
-
-    def test_external_root_requires_full_uboot_fit_and_matching_image(self) -> None:
-        """Normalize one implemented pipeline and reject unsupported stage claims."""
-        profile = self._write_profile("microsd")
-        (profile / "stage0").mkdir()
-        (profile / "u-boot.defconfig").write_text("CONFIG_TEST=y\n", encoding="utf-8")
-        (profile / "u-boot.lock.toml").write_text(
-            """version = "2026.07"
-repository = "https://source.denx.de/u-boot/u-boot.git"
-tag = "v2026.07"
-commit = "ece349ade2973e220f524ce59e59711cc919263f"
-archive_url = "https://ftp.denx.de/pub/u-boot/u-boot-2026.07.tar.bz2"
-archive_sha256 = "78e8bfc382fe388f9b55aa1daf8c563522a037779b5d4c349d1415e381f1243e"
-license = "GPL-2.0-only"
-""",
-            encoding="utf-8",
-        )
-        manifest = profile / "profile.toml"
-        contents = manifest.read_text(encoding="utf-8")
-        contents = contents.replace(
-            '[linux.root]\nkind = "initramfs"',
-            '[linux.root]\nkind = "external"\nfilesystem = "ext4"\nwait_seconds = 10',
-        )
-        contents = contents.replace(
-            '[bootstrap]\nkind = "linux"',
-            '[bootstrap]\nkind = "uboot-stage0"\nsource = "stage0"\n'
-            'image = "stage0.bin"\nmap = "stage0.map"',
-        )
-        contents = contents.replace(
-            '[uboot]\nkind = "none"',
-            '[uboot]\nkind = "full"\nsource = "u-boot.lock.toml"\n'
-            'archive_prefix = "u-boot-2026.07"\n'
-            'defconfig = "u-boot.defconfig"\npatches = []\ncopies = []',
-        )
-        contents = contents.replace(
-            '[fit]\nkind = "none"',
-            '[fit]\nkind = "sha256"\nfilename = "FPLINUX.ITB"',
-        )
-        contents = contents.replace(
-            "[runtime]",
-            """[layout]
-resident_start = 0x80100000
-resident_limit = 0x81000000
-uboot_load = 0x81000000
-uboot_size = 0x00100000
-uboot_stack = 0x80f00000
-fit_load = 0x83200000
-fit_size = 0x00c00000
-fdt_pad = 0x00003000
-
-[storage]
-filename = "FPLINUX.img"
-disk_signature = 0x46504c58
-boot_partition = 1
-boot_offset = 0x00100000
-boot_size = 0x04000000
-boot_label = "FPLBOOT"
-root_partition = 2
-root_offset = 0x04100000
-root_size = 0x04000000
-root_filename = "FPLROOT.ext4"
-root_label = "FPLROOT"
-root_uuid = "042681b5-d000-5b78-9c16-8e8b2944594e"
-block_size = 4096
-inode_size = 256
-
-[runtime]""",
-        )
-        manifest.write_text(contents, encoding="utf-8")
-
-        loaded = self._load_target("microsd")
-
-        self.assertEqual(loaded["linux"]["root"]["partuuid"], "46504c58-02")
-        self.assertEqual(
-            loaded["linux"]["config_enable"],
-            ["CONFIG_USB", "CONFIG_HID", "CONFIG_EXT4_FS"],
-        )
-        self.assertEqual(
-            loaded["linux"]["config_disable"],
-            ["CONFIG_USB_GADGET", "CONFIG_BLK_DEV_INITRD"],
-        )
-        self.assertEqual(loaded["uboot"]["lock"]["version"], "2026.07")
-        self.assertEqual(loaded["fit"]["filename"], "FPLINUX.ITB")
-        self.assertEqual(loaded["layout"]["fit_load"], 0x83200000)
-        self.assertEqual(loaded["storage"]["partuuid"], "46504c58-02")
-        self.assertEqual(loaded["image"]["size"], 64 * 1024 * 1024)
-
-        manifest.write_text(contents.replace('kind = "full"', 'kind = "spl"'), encoding="utf-8")
-        with self.assertRaisesRegex(SystemExit, "kind must be none or full"):
-            self._load_target("microsd")
-
-    def test_discovery_rejects_invalid_or_linked_profile_entries(self) -> None:
-        """No linked or unnamed data can become a selectable profile."""
-        self._write_profile()
-        invalid = self.target_root / "profiles" / "Bad"
-        invalid.mkdir()
-        (invalid / "profile.toml").write_text("", encoding="utf-8")
-        with (
-            mock.patch.object(config, "ROOT", self.root),
-            self.assertRaisesRegex(SystemExit, "invalid profile name"),
-        ):
-            config.discover_profiles(self.target)
-
-        (invalid / "profile.toml").unlink()
-        invalid.rmdir()
-        linked = self.target_root / "profiles" / "linked"
-        linked.symlink_to(self.target_root / "profiles" / "usb-host", target_is_directory=True)
-        with (
-            mock.patch.object(config, "ROOT", self.root),
-            self.assertRaisesRegex(SystemExit, "profile entry is invalid"),
-        ):
-            config.discover_profiles(self.target)
-
-    def test_profile_rejects_conflicting_operations_and_linked_sources(self) -> None:
-        """Profiles cannot enable and disable one symbol or dereference a source link."""
-        profile = self._write_profile()
-        manifest = profile / "profile.toml"
-        manifest.write_text(
-            manifest.read_text(encoding="utf-8").replace(
-                'config_disable = ["CONFIG_USB_GADGET"]',
-                'config_disable = ["CONFIG_USB"]',
-            ),
-            encoding="utf-8",
-        )
-        with (
-            mock.patch.object(config, "ROOT", self.root),
-            self.assertRaisesRegex(SystemExit, "config_enable/config_disable conflict"),
-        ):
-            config.load_profile(self.target, "usb-host", self.platform["bootstrap"]["layout"])
-
-        self._write_profile("linked")
-        linked = self.target_root / "profiles" / "linked"
-        (linked / "host.patch").unlink()
-        (linked / "host.patch").symlink_to(profile / "host.patch")
-        with (
-            mock.patch.object(config, "ROOT", self.root),
-            self.assertRaisesRegex(SystemExit, "profile source must not be a symlink"),
-        ):
-            config.load_profile(self.target, "linked", self.platform["bootstrap"]["layout"])
-
-    def test_profile_copy_cannot_replace_an_existing_projection(self) -> None:
-        """Profiles have no copy-override mode in the first profile contract."""
-        profile = self._write_profile()
-        (profile / "profile.toml").write_text(
-            (profile / "profile.toml")
-            .read_text(encoding="utf-8")
-            .replace('destination = "drivers/host.c"', 'destination = "drivers/base.c"'),
-            encoding="utf-8",
-        )
-        with self.assertRaisesRegex(SystemExit, "copies conflict"):
-            self._load_target("usb-host")
-
-    def test_profile_rootfs_cannot_exclude_or_repeat_an_unowned_package(self) -> None:
-        """Profile rootfs changes are constrained to the effective base package set."""
-        profile = self._write_profile()
-        manifest = profile / "profile.toml"
-        manifest.write_text(
-            manifest.read_text(encoding="utf-8").replace(
-                'exclude_packages = ["fplinux-ssh"]',
-                'exclude_packages = ["fplinux-missing"]',
-            ),
-            encoding="utf-8",
-        )
-        with self.assertRaisesRegex(SystemExit, "excludes a package not owned"):
-            self._load_target("usb-host")
-
-        self._write_profile("duplicate")
-        duplicate = self.target_root / "profiles" / "duplicate" / "profile.toml"
-        duplicate.write_text(
-            duplicate.read_text(encoding="utf-8")
-            .replace('packages = ["fplinux-host"]', 'packages = ["fplinux-ssh"]')
-            .replace('exclude_packages = ["fplinux-ssh"]', "exclude_packages = []"),
-            encoding="utf-8",
-        )
-        with self.assertRaisesRegex(SystemExit, "duplicate common/platform ownership"):
-            self._load_target("duplicate")
-
-    def test_selected_workspace_is_distinct_while_default_has_no_profile_input(self) -> None:
-        """Only an explicitly selected profile changes the target workspace recipe."""
-        source = self.root / "source"
-        source.write_bytes(b"default")
-        profile_source = self.root / "profile-source"
-        profile_source.write_bytes(b"profile")
-        calls: list[str | None] = []
-
-        def inventory(target: str, profile: str | None = None) -> list[tuple[str, Path]]:
-            self.assertEqual(target, "demo")
-            calls.append(profile)
-            if profile is None:
-                return [("source", source)]
-            return [("source", source), ("profiles/usb-host/profile.toml", profile_source)]
-
-        with mock.patch.object(
-            workspace_module, "target_build_source_files", side_effect=inventory
-        ):
-            default = workspace_module.target_workspace_snapshot("demo")
-            selected = workspace_module.target_workspace_snapshot("demo", "usb-host")
-
-        self.assertEqual(calls, [None, "usb-host"])
-        self.assertNotEqual(default.recipe, selected.recipe)
+    def test_board_values_override_the_base_without_losing_shared_features(self) -> None:
+        """Both enabled and explicitly disabled board settings replace base values."""
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary) / "base"
+            fragment = Path(temporary) / "fragment"
+            base.write_text("CONFIG_SHARED=y\nCONFIG_BOARD=1\nCONFIG_UNUSED=y\n")
+            fragment.write_text("CONFIG_BOARD=2\n# CONFIG_UNUSED is not set\nCONFIG_DEVICE=y\n")
+            self.assertEqual(
+                config.compose_kernel_config(base, fragment),
+                (
+                    b"CONFIG_SHARED=y\nCONFIG_BOARD=2\n"
+                    b"# CONFIG_UNUSED is not set\nCONFIG_DEVICE=y\n"
+                ),
+            )
 
 
 if __name__ == "__main__":

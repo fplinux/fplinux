@@ -76,6 +76,10 @@ mount_storage() {
 	# shellcheck disable=SC2086
 	for storage_device in $MPOS_STORAGE_DEVICES; do
 		[ -e "$storage_device" ] || continue
+		# Keep the system card's boot partition out of automatic data mounts.
+		case " $(blkid "$storage_device" 2>/dev/null) " in
+		*' LABEL="FPLBOOT" '*) return 1 ;;
+		esac
 		mkdir -p "$MPOS_STORAGE" || return 1
 		if mount -t "$MPOS_STORAGE_FSTYPE" "$storage_device" "$MPOS_STORAGE"; then
 			storage_owned=1

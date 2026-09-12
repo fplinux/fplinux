@@ -82,6 +82,7 @@ def _binary_tree(
 def _binary_profile_layout_tree(
     layout: dict[str, int],
     *,
+    memory_base: int | None = None,
     memory_size: int | None = None,
     reserved_range: tuple[int, int] | None = None,
     display_range: tuple[int, int] | None = None,
@@ -114,7 +115,7 @@ def _binary_profile_layout_tree(
             + struct.pack(">I", 2)
         )
 
-    ram_base = layout["ram_base"]
+    ram_base = memory_base if memory_base is not None else layout["ram_base"]
     framebuffer = layout["framebuffer"]
     resolved_memory_size = (
         memory_size if memory_size is not None else layout["fdt_load"] - ram_base
@@ -334,10 +335,28 @@ class ProfileLayoutDtbTests(unittest.TestCase):
         "framebuffer": 0x83F00000,
         "framebuffer_size": 0x00100000,
     }
+    linux_memory: ClassVar[dict[str, int]] = {"base": 0x80000000, "size": 0x03E00000}
 
     def test_binary_fdt_matches_the_fixed_fdt_and_display_arenas(self) -> None:
         """Accept the fixed profile ranges when the binary fixture owns each exactly."""
-        verify_profile_dtb_layout(_binary_profile_layout_tree(self.layout), self.layout)
+        verify_profile_dtb_layout(
+            _binary_profile_layout_tree(self.layout), self.layout, self.linux_memory
+        )
+
+    def test_linux_can_start_after_a_coprocessor_reservation(self) -> None:
+        """A board's exact Linux range can exclude the first two MiB of physical RAM."""
+        tree = _binary_profile_layout_tree(
+            self.layout, memory_base=0x80200000, memory_size=0x03C00000
+        )
+        verify_profile_dtb_layout(tree, self.layout, {"base": 0x80200000, "size": 0x03C00000})
+        with self.assertRaisesRegex(DeviceTreeError, "lacks node /memory@80000000"):
+            verify_profile_dtb_layout(tree, self.layout, self.linux_memory)
+
+    def test_linux_cannot_claim_the_fixed_fdt_arena(self) -> None:
+        """Even a matching target declaration cannot overlap the loaded DTB."""
+        tree = _binary_profile_layout_tree(self.layout, memory_size=0x03F00000)
+        with self.assertRaisesRegex(DeviceTreeError, "overlaps"):
+            verify_profile_dtb_layout(tree, self.layout, {"base": 0x80000000, "size": 0x03F00000})
 
     def test_memory_display_and_padded_fdt_mismatches_are_rejected(self) -> None:
         """Reject each range error before the loader can hand it to U-Boot."""
@@ -373,7 +392,7 @@ class ProfileLayoutDtbTests(unittest.TestCase):
                 self.subTest(message=message),
                 self.assertRaisesRegex(DeviceTreeError, message),
             ):
-                verify_profile_dtb_layout(tree, layout)
+                verify_profile_dtb_layout(tree, layout, self.linux_memory)
 
 
 if __name__ == "__main__":

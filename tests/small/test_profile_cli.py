@@ -43,13 +43,15 @@ class ProfileParserDispatchTests(unittest.TestCase):
             cli.main()
         return check, build, run, package, console
 
-    def test_profile_check_without_scopes_runs_only_the_profile_kernel(self) -> None:
-        """A profile request never runs unrelated source scopes."""
-        check, _build, _run, _package, _console = self.invoke("check", "--profile", "usb-host-lab")
+    def test_profile_check_without_scopes_preserves_the_full_check_selection(self) -> None:
+        """Omitting scopes has the same full-check meaning in both boot modes."""
+        check, _build, _run, _package, _console = self.invoke(
+            "check", "--profile", "microsd-uboot"
+        )
 
         check.assert_called_once_with(
-            ["kernel"],
-            profile="usb-host-lab",
+            [],
+            profile="microsd-uboot",
             verbose=False,
             no_cache=False,
             jobs=3,
@@ -58,12 +60,12 @@ class ProfileParserDispatchTests(unittest.TestCase):
     def test_profile_check_accepts_only_the_explicit_kernel_scope(self) -> None:
         """The selected profile's kernel can be checked without a broad quality gate."""
         check, _build, _run, _package, _console = self.invoke(
-            "check", "kernel", "--profile", "usb-host-lab"
+            "check", "kernel", "--profile", "microsd-uboot"
         )
 
         check.assert_called_once_with(
             ["kernel"],
-            profile="usb-host-lab",
+            profile="microsd-uboot",
             verbose=False,
             no_cache=False,
             jobs=3,
@@ -74,46 +76,46 @@ class ProfileParserDispatchTests(unittest.TestCase):
         check, _build, _run, _package, _console = self.invoke(
             "check",
             "--profile",
-            "usb-host-lab",
+            "microsd-uboot",
             "--jobs",
             "2",
         )
 
         check.assert_called_once_with(
-            ["kernel"],
-            profile="usb-host-lab",
+            [],
+            profile="microsd-uboot",
             verbose=False,
             no_cache=False,
             jobs=2,
         )
 
-    def test_profile_check_rejects_unrelated_scopes(self) -> None:
-        """A profile does not silently imply a source or repository check."""
+    def test_feature_profile_is_rejected_before_dispatch(self) -> None:
+        """An old feature-only profile is no longer a supported public selection."""
         with self.assertRaisesRegex(SystemExit, "2"):
-            self.invoke("check", "source", "--profile", "usb-host-lab")
+            self.invoke("check", "source", "--profile", "bt-qual")
 
     def test_build_and_run_forward_the_same_named_profile(self) -> None:
-        """Build and RAM run select the same target-owned slot."""
+        """Build and RAM run select the same target/profile slot."""
         _check, build, _run, _package, _console = self.invoke(
             "build",
             "demo",
             "--profile",
-            "usb-host-lab",
+            "microsd-uboot",
             "--jobs",
             "3",
         )
         build.assert_called_once_with(
             "demo",
             3,
-            profile="usb-host-lab",
+            profile="microsd-uboot",
             verbose=False,
             offline=False,
         )
 
         _check, _build, run, _package, _console = self.invoke(
-            "run", "demo", "--profile", "usb-host-lab"
+            "run", "demo", "--profile", "microsd-uboot"
         )
-        run.assert_called_once_with("demo", profile="usb-host-lab", boot=None)
+        run.assert_called_once_with("demo", profile="microsd-uboot", boot=None)
 
     def test_package_and_console_forward_the_same_named_profile(self) -> None:
         """Qualification archives and reconnects select the profile generation explicitly."""
@@ -121,12 +123,12 @@ class ProfileParserDispatchTests(unittest.TestCase):
             "package",
             "demo",
             "--profile",
-            "usb-host-lab",
+            "microsd-uboot",
             "--candidate",
         )
         package.assert_called_once_with(
             "demo",
-            profile="usb-host-lab",
+            profile="microsd-uboot",
             boot=None,
             candidate=True,
         )
@@ -135,13 +137,13 @@ class ProfileParserDispatchTests(unittest.TestCase):
             "console",
             "demo",
             "--profile",
-            "usb-host-lab",
+            "microsd-uboot",
             "--exec",
             "id",
         )
         console.assert_called_once_with(
             "demo",
-            profile="usb-host-lab",
+            profile="microsd-uboot",
             keyboard=None,
             exec_command="id",
             upload=None,
@@ -149,7 +151,7 @@ class ProfileParserDispatchTests(unittest.TestCase):
         )
 
     def test_microsd_boot_selector_is_forwarded_separately_from_profiles(self) -> None:
-        """The boot selector and contributor profile choose distinct dispatch inputs."""
+        """The boot selector and global profile choose distinct dispatch inputs."""
         _check, _build, run, _package, _console = self.invoke(
             "run",
             "nokia-ta1618",
@@ -177,7 +179,7 @@ class ProfileParserDispatchTests(unittest.TestCase):
         )
 
     def test_boot_selector_and_contributor_profile_are_mutually_exclusive(self) -> None:
-        """One parser invocation selects either a boot mode or a contributor profile."""
+        """One parser invocation selects either a boot mode or a global profile."""
         for command in ("run", "package"):
             with (
                 self.subTest(command=command),

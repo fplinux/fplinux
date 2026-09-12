@@ -123,6 +123,7 @@ replace individual digest lines.
 ./fplinux build <target> --jobs 8
 ```
 
+Each build container starts with a 2 GiB memory budget.
 `--jobs` limits parallel compilation. A matching selected bundle is reused;
 otherwise the command rebuilds it from the current inputs. Target names are
 discovered from `targets/`; use the [target index](../../targets/README.md) to
@@ -139,127 +140,130 @@ If the required pinned environment is missing or stale, an offline build
 asks for an online `./fplinux setup` first. A matching bundle remains usable
 offline.
 
-### Development profiles
+### Two global profiles
 
-A target may declare a development-only build profile at
-`targets/<target>/profiles/<profile>/profile.toml`. Profiles are small deltas
-over the target: they may enable or disable boolean kernel symbols, add Linux
-patch/copy/append inputs, add or exclude rootfs packages, select the root
-mechanism and request extra boot artifacts. Profile source paths are relative
-to that profile directory, except U-Boot copy sources, which are repository
-paths so a board port can consume current shared platform code directly.
+FPLinux has two global profiles, declared once under `profiles/`:
 
-The manifest has one exact, unversioned shape:
+- `default`: the system root is in RAM. Omitting `--profile` and explicitly
+  selecting `--profile default` use the same build and runtime identity.
+- `microsd-uboot`: the USB loader starts U-Boot in RAM, then Linux uses the
+  microSD card as its persistent ext4 root.
 
-```toml
-name = "example"
+Both profiles use the shared platform configuration and the selected target's
+board configuration. A profile selects boot and storage policy, not individual
+peripheral features. Board initialization, panel geometry, keys and fitted
+firmware declarations remain target-owned. Separate feature profiles are not
+accepted.
 
-[linux]
-config_enable = []
-config_disable = []
-patches = []
-copies = []
-appends = []
-
-[linux.root]
-kind = "initramfs"
-
-[rootfs]
-packages = []
-exclude_packages = []
-
-[bootstrap]
-kind = "linux"
-
-[uboot]
-kind = "none"
-
-[fit]
-kind = "none"
-
-[runtime]
-transport = "none"
-runnable = true
-```
-
-`linux.forbidden_dtb_markers` is optional. When present, it replaces the
-target's forbidden-marker list only for that profile, allowing a hardware lab
-to add one node that remains forbidden in the default target.
-
-`linux.root.kind = "initramfs"` keeps the ordinary embedded root. An external
-ext4 root adds the current `[layout]` and `[storage]` tables. Its PARTUUID is
-derived from the MBR signature and root partition number; the profile does not
-store a second copy. The profile also owns `CONFIG_EXT4_FS` and
-`CONFIG_BLK_DEV_INITRD` automatically instead of repeating them in Kconfig.
-
-The implemented U-Boot capability is `kind = "full"`. It builds the pinned full
-U-Boot together with `mkimage` and `dumpimage`. The full U-Boot binary is
-embedded in the profile's RAM bootstrap; the host tools are internal build
-inputs, not runtime bundle programs.
-
-A profile that combines full U-Boot, a SHA-256 FIT and ext4 root storage
-produces a complete partitioned `FPLINUX.img.xz`. The raw image exists only
-while it is assembled. Building the profile never writes removable media.
-Hardware use remains limited to the workflow and support status in the target
-documentation.
-
-Build-only profiles set `runtime.runnable = false`. The public `run` command
-rejects them before opening a bundle or waiting for USB.
-
-Build and check a declared profile explicitly:
+Build, check, load and inspect the selected context explicitly:
 
 ```sh
-./fplinux check kernel --profile <profile>
-./fplinux build <target> --profile <profile>
-./fplinux package <target> --profile <profile> --candidate
-./fplinux console <target> --profile <profile>
+./fplinux check kernel --profile microsd-uboot
+./fplinux build <target> --profile microsd-uboot
+./fplinux package <target> --profile microsd-uboot --candidate
+./fplinux run <target> --profile microsd-uboot
+./fplinux console <target> --profile microsd-uboot
+./fplinux verify <target> --profile microsd-uboot
 ```
 
-A profile may provide `host_plugin.py` for host operations that belong only to
-that profile. The plugin exposes `run(connect, arguments)` and is published in
-the same immutable bundle as the profile image. Run one of its commands through
-the scoped namespace:
+For `run` and `package`, `--boot microsd` is an alias for
+`--profile microsd-uboot`. Do not combine the two selectors. Neither selector
+falls back to a different target or boot mode. Actual board support is recorded
+in the [target index](../../targets/README.md); selecting a global profile does
+not establish hardware support.
+
+Default and microSD builds keep separate current bundles and work state. A
+microSD build cannot replace the default bundle. Non-default archives currently
+require `--candidate`; candidate packaging is not physical qualification.
+
+The microSD build produces a partitioned `FPLINUX.img.xz`, containing a SHA-256
+FIT on FAT32 and an ext4 system root. Building never writes removable media.
+Follow [microSD system root](MICROSD_ROOT.md) for the layout, persistence and
+shutdown rules.
+
+### Local Bluetooth firmware
+
+A target declares its fitted firmware in `[bluetooth].firmware`. Each source
+is a basename under `.cache/firmware/<target>/`; its destination is relative
+to `/lib/firmware`. Declarations specify an exact byte count and may also
+require a lowercase SHA-256 digest.
+
+The complete group may be absent, allowing the normal RAM system to boot for
+read-only firmware preparation. Once any declared input exists, all inputs
+must pass the size and digest checks. A partial or invalid group fails the
+build. Admitted bytes are captured in the build input and installed with mode
+`0600` in either profile. A relevant firmware change selects a different
+build result; unrelated files in the directory do not.
+
+FPLinux does not download fitted vendor firmware. Prepare the supported phone's
+inputs from its physical NAND backup as described below.
+
+After building, follow [Loading from a source checkout](LOADING.md) to configure
+the host, load the selected image, reconnect and verify the running context.
+
+#### Prepare Bluetooth firmware
+
+Bluetooth needs firmware fitted to the exact phone selected by `<target>`.
+Prepare it from a complete physical NAND backup; do not copy
+firmware from another phone. No manual extraction, renaming, or patching is
+needed. Preparation requires this source checkout, not a standalone archive.
+
+Start with the phone powered off and USB disconnected, then run:
 
 ```sh
-./fplinux profile <target> <profile> <command> [arguments...]
+./fplinux bluetooth prepare <target>
 ```
 
-Only the selected bundle's hash-verified plugin is loaded. Its commands do not
-become global FPLinux commands. Calling `connect()` returns the authenticated
-SSH transport and session when an operation needs the running phone.
+The command first builds and starts the default RAM system. Wait
+until its loader asks for the phone; only then hold its boot key and connect the
+powered-off phone. This is the normal loader-first sequence in
+[Loading from a source checkout](LOADING.md#connect-the-phone); see
+the selected phone's instructions in the [target index](../../targets/README.md)
+for the target-specific key.
 
-The ordinary commands without `--profile` use only each target's default
-context; declared profiles are checked only when named explicitly. Profiles
-can only be packaged as candidates. They cannot be passed to `verify` and are
-never qualified release inputs. Profile package and console commands resolve
-the same isolated bundle generation selected by the corresponding build.
-
-`microsd-uboot` is the contributor-facing build context for the Nokia
-microSD system candidate. Build it by name, then use the public `microsd` boot
-mode to run or package that context:
+For a backup already saved from this exact physical NAND, use:
 
 ```sh
-./fplinux build nokia-ta1618 --profile microsd-uboot
-./fplinux run nokia-ta1618 --boot microsd
-./fplinux package nokia-ta1618 --boot microsd --candidate
+./fplinux bluetooth prepare <target> --from-dump PATH
 ```
 
-The public boot mode is available only for `nokia-ta1618`. It has no fallback
-to the default target or another profile. The corresponding `--profile`
-commands remain available for contributor work; they are not another public
-name for the boot mode.
+This form does not build a loader or connect to the phone. `--jobs N` limits
+parallel work when the read-only loader is built, and `--offline` requests that
+build without network access.
 
-`transport = "none"` changes only host-side runner behavior. The profile must
-also exclude any in-image gadget or SSH services it does not want. See
-[Loading from a source checkout](LOADING.md#from-a-source-checkout) for the matching
-run command and its evidence boundary.
+The backup must contain the selected phone's complete physical NAND, with each
+page's main bytes followed by its OOB bytes. Page size and accepted firmware
+layout are target-specific. The command rejects an unsupported target, another
+layout or length, damaged required firmware or calibration data, and ambiguous
+selected-block mappings. A backup from another phone is not a substitute.
 
-Default and named builds keep isolated current output and work state. Selecting
-a profile never replaces the default target bundle.
+It derives the CM4 image and the individual NV401, NV402, and NV404 values
+only from that physical backup. A live backup is kept at
+`.cache/firmware/<target>/sources/run-*/nand.bin`; both paths retain the
+unchanged extracted originals in the corresponding `originals/` directory. A
+saved input remains unchanged at its original path. The command applies its
+checked compatibility patch only to the CM4 build copy, keeps the original CM4
+and NV values unchanged, and publishes the four required build inputs under
+`.cache/firmware/<target>/`.
 
-After building, follow [Loading from a source checkout](LOADING.md) to configure the
-runtime host, load the selected image, reconnect, and verify a running default
-target.
+The dump, extracted originals, prepared inputs, and any bundle or root
+filesystem containing them are private and non-redistributable unless you have
+the necessary rights. They are not supplied by the source checkout or its
+pinned build environment. The reader is read-only: it does not mount, erase,
+restore, or otherwise write the phone's NAND or NV storage.
+
+When preparation finishes, it prints the exact next commands:
+
+```sh
+./fplinux build <target>
+./fplinux run <target>
+```
+
+Build the selected profile, then end the preparation RAM session with the
+selected target's shutdown procedure
+and disconnect USB. For the prepared RAM load, start `run` with the phone
+again powered off and disconnected; wait for its loader invitation before
+holding its boot key and connecting it.
 
 ## Logs, cache, and parallel commands
 

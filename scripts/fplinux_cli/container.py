@@ -35,9 +35,8 @@ from .config import (
     container_image_build_arguments,
     container_image_recipe_digest,
     container_image_reference,
-    discover_profiles,
-    discover_targets,
     load_container_lock,
+    normalize_profile,
 )
 from .image_state import ImageState, ImageStateError, load_image_state, publish_image_state
 from .output import RunReporter
@@ -141,6 +140,7 @@ _KERNEL_IMPLEMENTATION = frozenset(
         "scripts/fplinux_cli/kernelcheck.py",
         "scripts/fplinux_cli/linux_state.py",
         "scripts/fplinux_cli/output.py",
+        "scripts/fplinux_cli/profile_layout.py",
     }
 )
 
@@ -1052,6 +1052,11 @@ def _c_scope_paths(snapshot: WorkspaceSnapshot) -> set[str]:
             path.parts[:2] == ("alpine", "aports")
             or file.path in alpine_state.SHARED_APORT_SOURCE_PATHS
             or path.parts[0] == "tests"
+            or (
+                len(path.parts) >= 4
+                and path.parts[0] in {"platforms", "targets"}
+                and path.parts[2] in {"common", "uboot"}
+            )
         ):
             selected.add(file.path)
         if path.suffix in {".c", ".h"} and "bootstrap" in path.parts:
@@ -1102,6 +1107,10 @@ def _linux_manifest_sources(linux: object, *, base: PurePath) -> set[str]:
     if not isinstance(linux, dict):
         return set()
     selected: set[str] = set()
+    for key in ("defconfig", "config_fragment"):
+        value = linux.get(key)
+        if isinstance(value, str):
+            selected.add((base / value).as_posix())
     patches = linux.get("patches")
     if isinstance(patches, list):
         selected.update((base / patch).as_posix() for patch in patches if isinstance(patch, str))
@@ -1116,43 +1125,22 @@ def _linux_manifest_sources(linux: object, *, base: PurePath) -> set[str]:
     return selected
 
 
-def _profile_manifest_parts(path: PurePath) -> tuple[str, str] | None:
-    """Return target/profile for one profile manifest path, if it has the fixed shape."""
-    if (
-        len(path.parts) == 5
-        and path.parts[0] == "targets"
-        and path.parts[2] == "profiles"
-        and path.name == "profile.toml"
-    ):
-        return path.parts[1], path.parts[3]
-    return None
-
-
 def _kernel_scope_paths(snapshot: WorkspaceSnapshot, profile: str | None = None) -> set[str]:
-    """Resolve default Linux inputs, or one explicitly named profile."""
+    """Resolve the selected global profile and every board's Linux inputs."""
+    profile = normalize_profile(profile)
     by_path = {file.path: file for file in snapshot.files}
     selected = {
         file.path
         for file in snapshot.files
         if file.path in _KERNEL_IMPLEMENTATION or file.path == "sources.lock.toml"
     }
-    profiles_by_target: dict[str, list[WorkspaceFile]] = {}
-    if profile is not None:
-        for file in snapshot.files:
-            parts = _profile_manifest_parts(PurePath(file.path))
-            if parts is None:
-                continue
-            target_name, declared = parts
-            if profile == declared:
-                profiles_by_target.setdefault(target_name, []).append(file)
-
+    selected.add(f"profiles/{profile or 'default'}/profile.toml")
     target_manifests = [
         file
         for file in snapshot.files
         if (path := PurePath(file.path)).parts[:1] == ("targets",)
         and len(path.parts) == 3
         and path.name == "target.toml"
-        and (profile is None or path.parts[1] in profiles_by_target)
     ]
     for target_manifest in target_manifests:
         target_path = PurePath(target_manifest.path)
@@ -1161,10 +1149,15 @@ def _kernel_scope_paths(snapshot: WorkspaceSnapshot, profile: str | None = None)
             target_data = tomllib.loads(target_manifest.contents.decode("utf-8"))
         except UnicodeDecodeError, tomllib.TOMLDecodeError:
             continue
-        if not isinstance(target_data, dict):
-            continue
-        selected.add((target_path.parent / "kernel/defconfig").as_posix())
         selected.update(_linux_manifest_sources(target_data.get("linux"), base=target_path.parent))
+        if profile == "microsd-uboot":
+            microsd = target_data.get("microsd", {})
+            if isinstance(microsd, dict):
+                selected.update(
+                    _linux_manifest_sources(
+                        {"patches": microsd.get("linux_patches")}, base=target_path.parent
+                    )
+                )
         platform = target_data.get("platform")
         if not isinstance(platform, str):
             continue
@@ -1177,19 +1170,7 @@ def _kernel_scope_paths(snapshot: WorkspaceSnapshot, profile: str | None = None)
             platform_data = tomllib.loads(platform_manifest.contents.decode("utf-8"))
         except UnicodeDecodeError, tomllib.TOMLDecodeError:
             continue
-        if isinstance(platform_data, dict):
-            selected.update(_linux_manifest_sources(platform_data.get("linux"), base=PurePath()))
-        for profile_manifest in profiles_by_target.get(target_path.parent.name, []):
-            profile_path = PurePath(profile_manifest.path)
-            selected.add(profile_manifest.path)
-            try:
-                profile_data = tomllib.loads(profile_manifest.contents.decode("utf-8"))
-            except UnicodeDecodeError, tomllib.TOMLDecodeError:
-                continue
-            if isinstance(profile_data, dict):
-                selected.update(
-                    _linux_manifest_sources(profile_data.get("linux"), base=profile_path.parent)
-                )
+        selected.update(_linux_manifest_sources(platform_data.get("linux"), base=PurePath()))
     return selected
 
 
@@ -1437,17 +1418,8 @@ def check(
 ) -> None:
     if not isinstance(jobs, int) or isinstance(jobs, bool) or jobs < 1:
         fail("--jobs must be a positive integer")
+    profile = normalize_profile(profile)
     selected = resolve_check_scopes(scopes)
-    if profile is not None:
-        declared_targets = tuple(
-            target for target in discover_targets() if profile in discover_profiles(target)
-        )
-        if not declared_targets:
-            fail(f"check profile is not declared by any target: {profile}")
-        if not scopes:
-            selected = ("kernel",)
-        elif selected != ("kernel",):
-            fail("--profile is supported only with the kernel check scope")
     if jobs > 1 and verbose:
         fail("--verbose cannot be combined with --jobs greater than 1")
 

@@ -7,14 +7,24 @@ product = "240 Modern 4G"
 hardware_codes = []
 compatible = "inoi,240-modern-4g"
 
+[nand]
+raw_device = "/dev/ums9117-nand-raw"
+id = 0x21e5
+raw_page_bytes = 2112
+
+[rootfs]
+packages = []
+
 [bundle]
 packages = []
 
 [linux]
+config_fragment = "kernel/config.fragment"
+memory = { base = 0x80200000, size = 0x03c00000 }
 dtb = "unisoc/ums9117-inoi-240-modern-4g.dtb"
 debug_dtb = "ums9117-inoi-240-modern-4g.dtb"
 patches = ["kernel/0001-inoi-240-modern-4g-dtb.patch"]
-forbidden_dtb_markers = ["sdhci", "mmc", "nand", "mtd", "ubi", "emmc"]
+forbidden_dtb_markers = ["sdhci", "spi-nand", "mtd", "ubi", "emmc"]
 forbidden_config = [
   "CONFIG_MTD=y",
   "CONFIG_UBI=y",
@@ -22,7 +32,6 @@ forbidden_config = [
   "CONFIG_ATA=y",
   "CONFIG_NVME_CORE=y",
   "CONFIG_DEVMEM=y",
-  "CONFIG_MMC=y",
 ]
 
 [[linux.copies]]
@@ -30,8 +39,36 @@ source = "dts/ums9117-inoi-240-modern-4g.dts"
 destination = "arch/arm/boot/dts/unisoc/ums9117-inoi-240-modern-4g.dts"
 
 [[linux.copies]]
+source = "dts/nand-readonly.dtsi"
+destination = "arch/arm/boot/dts/unisoc/inoi-240-modern-4g-nand-readonly.dtsi"
+
+[[linux.copies]]
+source = "dts/bluetooth.dtsi"
+destination = "arch/arm/boot/dts/unisoc/inoi-240-modern-4g-bluetooth.dtsi"
+
+[[linux.copies]]
 source = "kernel/inoi240-fb.c"
 destination = "drivers/video/fbdev/inoi240-fb.c"
+
+[[linux.copies]]
+source = "dts/microsd.dtsi"
+destination = "arch/arm/boot/dts/unisoc/inoi-240-modern-4g-microsd.dtsi"
+
+[[linux.copies]]
+source = "kernel/inoi240-mmc-linux.c"
+destination = "drivers/mmc/host/inoi240-mmc-linux.c"
+
+[[linux.copies]]
+source = "common/inoi240-sdio-board.h"
+destination = "drivers/mmc/host/inoi240-sdio-board.h"
+
+[[linux.copies]]
+source = "common/inoi240-sdio-board.c"
+destination = "drivers/mmc/host/inoi240-sdio-board.c"
+
+[[linux.copies]]
+source = "bindings/fplinux,inoi240-mmc.yaml"
+destination = "Documentation/devicetree/bindings/mmc/fplinux,inoi240-mmc.yaml"
 
 [[linux.appends]]
 source = "kernel/Kconfig"
@@ -44,6 +81,14 @@ destination = "drivers/video/fbdev/Kconfig"
 [[linux.appends]]
 source = "kernel/fbdev.Makefile"
 destination = "drivers/video/fbdev/Makefile"
+
+[[linux.appends]]
+source = "kernel/mmc.Kconfig"
+destination = "drivers/mmc/host/Kconfig"
+
+[[linux.appends]]
+source = "kernel/mmc.Makefile"
+destination = "drivers/mmc/host/Makefile"
 
 [bootstrap]
 image = "inoi240_linux_bootstrap.bin"
@@ -59,3 +104,40 @@ backlight_channels = "rgb"
 backlight_level = 0x1f
 session_name = "inoi240-linux"
 boot_instructions = "Power the phone off, hold *, then connect USB while keeping * pressed."
+
+[bluetooth]
+parser = "inoi240_bluetooth_firmware.py"
+firmware = [
+  { source = "inoi240-cm4.bin", destination = "ums9117/inoi240-cm4.bin", size = 463296, sha256 = "ffe5e4cb568552601281a0026bc1f9f5715f1715b1261062c23669e95b5e086d" },
+  { source = "inoi240-bt-config.bin", destination = "ums9117/inoi240-bt-config.bin", size = 8 },
+  { source = "inoi240-bt-sprd.bin", destination = "ums9117/inoi240-bt-sprd.bin", size = 176 },
+  { source = "inoi240-bt-rf-config.bin", destination = "ums9117/inoi240-bt-rf-config.bin", size = 252 },
+]
+
+[microsd]
+linux_patches = []
+
+[microsd.bootstrap]
+source = "bootstrap-microsd"
+image = "inoi240_sd_stage0.bin"
+map = "obj/inoi240_sd_stage0_map.txt"
+
+[microsd.uboot]
+defconfig = "uboot/inoi240_defconfig"
+patches = []
+
+[[microsd.uboot.copies]]
+source = "targets/inoi-240-modern-4g/uboot/ums9117-inoi240-u-boot.dts"
+destination = "arch/arm/dts/ums9117-inoi240-u-boot.dts"
+
+[[microsd.uboot.copies]]
+source = "targets/inoi-240-modern-4g/uboot/slot.c"
+destination = "board/fplinux/ums9117/slot.c"
+
+[[microsd.uboot.copies]]
+source = "targets/inoi-240-modern-4g/common/inoi240-sdio-board.h"
+destination = "board/fplinux/ums9117/inoi240-sdio-board.h"
+
+[[microsd.uboot.copies]]
+source = "targets/inoi-240-modern-4g/common/inoi240-sdio-board.c"
+destination = "board/fplinux/ums9117/sdio-board.c"

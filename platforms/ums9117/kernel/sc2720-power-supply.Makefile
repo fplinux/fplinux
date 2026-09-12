@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: GPL-2.0-only
+obj-$(CONFIG_POWER_SUPPLY_SC2720_CHARGER_UMS9117) += sc2720-charger-ums9117.o
+obj-$(CONFIG_POWER_SUPPLY_SC2720_FGU_UMS9117) += sc2720-fgu-ums9117.o

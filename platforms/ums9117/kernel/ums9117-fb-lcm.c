@@ -8,9 +8,10 @@
 #include "ums9117-fb-internal.h"
 
 #define UMS9117_FB_LCM_CTRL 0x000
+#define UMS9117_FB_LCM_STATUS 0x008
 #define UMS9117_FB_LCM_CS0_MODE 0x010
 #define UMS9117_FB_LCM_CS0_TIMING 0x014
-#define UMS9117_FB_LCM_CTRL_BUSY BIT(1)
+#define UMS9117_FB_LCM_STATUS_WRITE_BUSY BIT(1)
 #define UMS9117_FB_LCM_IDLE_TIMEOUT_US 250000
 #define UMS9117_FB_LCM_AHB_MHZ 128
 
@@ -47,9 +48,10 @@ static int ums9117_fb_lcm_wait_idle(struct ums9117_fb *ufb)
 {
 	u32 status;
 
-	return readl_poll_timeout_atomic(ufb->lcm + UMS9117_FB_LCM_CTRL, status,
-					 !(status & UMS9117_FB_LCM_CTRL_BUSY),
-					 1, UMS9117_FB_LCM_IDLE_TIMEOUT_US);
+	return readl_poll_timeout_atomic(
+		ufb->lcm + UMS9117_FB_LCM_STATUS, status,
+		!(status & UMS9117_FB_LCM_STATUS_WRITE_BUSY), 1,
+		UMS9117_FB_LCM_IDLE_TIMEOUT_US);
 }
 
 static int ums9117_fb_lcm_init(struct ums9117_fb *ufb,

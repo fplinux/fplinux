@@ -85,17 +85,34 @@ class CliCacheLockTests(unittest.TestCase):
             (["verify", "target"], "verify_booted", False, "target", None),
             (["console", "target"], "console_target", False, "target", None),
             (
-                [
-                    "profile",
-                    "nokia-ta1618",
-                    "nand-ro-lab",
-                    "nand-backup",
-                    "backup.bin",
-                ],
-                "profile_command",
-                False,
+                ["nand", "backup", "nokia-ta1618", "backup.bin"],
+                "backup_target_nand",
+                True,
                 "nokia-ta1618",
-                "nand-ro-lab",
+                None,
+            ),
+            (
+                ["nand", "backup", "nokia-ta1618", "backup.bin", "--profile", "microsd-uboot"],
+                "backup_target_nand",
+                True,
+                "nokia-ta1618",
+                "microsd-uboot",
+            ),
+            (
+                [
+                    "bluetooth",
+                    "prepare",
+                    "nokia-ta1618",
+                    "--from-dump",
+                    "saved-nand.bin",
+                    "--jobs",
+                    "2",
+                    "--offline",
+                ],
+                "prepare_bluetooth",
+                True,
+                "nokia-ta1618",
+                None,
             ),
         )
         for arguments, callback_name, exclusive, target, profile in cases:
@@ -108,11 +125,16 @@ class CliCacheLockTests(unittest.TestCase):
                         "command",
                     ],
                 )
-                if callback_name == "profile_command":
+                if callback_name == "backup_target_nand":
+                    callback.assert_called_once_with(
+                        "nokia-ta1618", Path("backup.bin"), profile=profile
+                    )
+                elif callback_name == "prepare_bluetooth":
                     callback.assert_called_once_with(
                         "nokia-ta1618",
-                        "nand-ro-lab",
-                        ["nand-backup", "backup.bin"],
+                        from_dump=Path("saved-nand.bin"),
+                        jobs=2,
+                        offline=True,
                     )
                 else:
                     callback.assert_called_once()
@@ -139,6 +161,30 @@ class CliCacheLockTests(unittest.TestCase):
         )
         self.assertTrue(build.call_args.kwargs["offline"])
         self.assertFalse(build.call_args.kwargs["verbose"])
+
+    def test_bluetooth_prepare_rejects_a_nonpositive_job_limit_before_locking(self) -> None:
+        """Invalid worker limits cannot create cache state or start preparation."""
+        with (
+            mock.patch.object(
+                sys,
+                "argv",
+                ["fplinux", "bluetooth", "prepare", "nokia-ta1618", "--jobs", "0"],
+            ),
+            mock.patch.object(cli, "ROOT", self.root),
+            mock.patch.object(cli, "discover_targets", return_value=("nokia-ta1618",)),
+            mock.patch.object(
+                cli,
+                "cache_lock",
+                side_effect=AssertionError("invalid arguments must not lock"),
+            ) as lock,
+            contextlib.redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit) as stopped,
+        ):
+            cli.main()
+
+        self.assertEqual(stopped.exception.code, 2)
+        lock.assert_not_called()
+        self.assertFalse((self.root / ".cache").exists())
 
     def test_check_forwards_the_kernel_worker_limit_without_changing_its_lock(self) -> None:
         """Pass the requested kernel limit through the existing exclusive check boundary."""
@@ -180,7 +226,7 @@ class CliCacheLockTests(unittest.TestCase):
     def test_profile_is_recorded_in_the_global_cache_lock_owner(self) -> None:
         """A blocked build identifies its profile without splitting the global lock."""
         events, build = self._run(
-            ["build", "target", "--profile", "usb-host-lab"],
+            ["build", "target", "--profile", "microsd-uboot"],
             "build",
         )
 
@@ -193,12 +239,12 @@ class CliCacheLockTests(unittest.TestCase):
                     True,
                     "build",
                     "target",
-                    "usb-host-lab",
+                    "microsd-uboot",
                 ),
                 "command",
             ],
         )
-        self.assertEqual(build.call_args.kwargs["profile"], "usb-host-lab")
+        self.assertEqual(build.call_args.kwargs["profile"], "microsd-uboot")
 
     def test_profile_package_and_console_use_the_selected_shared_lock_identity(self) -> None:
         """Profile consumers retain the named bundle slot under the shared cache lock."""
@@ -258,28 +304,48 @@ class CliCacheLockTests(unittest.TestCase):
                 self.assertEqual(callback.call_args.kwargs["boot"], "microsd")
                 self.assertIsNone(callback.call_args.kwargs["profile"])
 
-    def test_microsd_boot_does_not_fall_back_to_another_target(self) -> None:
-        """Reject the unsupported mode before a lock or command touches another target."""
-        with (
-            mock.patch.object(sys, "argv", ["fplinux", "run", "target", "--boot", "microsd"]),
-            mock.patch.object(cli, "ROOT", self.root),
-            mock.patch.object(
-                cli,
-                "discover_targets",
-                return_value=("target", "nokia-ta1618"),
-            ),
-            mock.patch.object(
-                cli,
-                "cache_lock",
-                side_effect=AssertionError("unsupported boot mode must not take the cache lock"),
-            ) as lock,
-            mock.patch.object(cli, "run_target") as run,
-            self.assertRaisesRegex(SystemExit, "not available for target target"),
-        ):
-            cli.main()
+    def test_microsd_boot_keeps_the_selected_target(self) -> None:
+        """Every configured board uses its own microSD build and cache identity."""
+        events, run = self._run(["run", "target", "--boot", "microsd"], "run_target")
+        self.assertEqual(
+            events[0], ("lock", self.root / ".cache", False, "run", "target", "microsd-uboot")
+        )
+        run.assert_called_once_with("target", profile=None, boot="microsd")
 
-        lock.assert_not_called()
-        run.assert_not_called()
+    def test_explicit_default_reuses_the_implicit_context(self) -> None:
+        """The alias reaches each consumer with the same profile and lock identity."""
+        for command, callback in (
+            ("build", "build"),
+            ("console", "console_target"),
+            ("verify", "verify_booted"),
+        ):
+            with self.subTest(command=command):
+                implicit_events, implicit = self._run([command, "target"], callback)
+                explicit_events, explicit = self._run(
+                    [command, "target", "--profile", "default"], callback
+                )
+                self.assertEqual(explicit_events, implicit_events)
+                self.assertEqual(explicit.call_args, implicit.call_args)
+
+    def test_named_profile_keeps_explicit_check_scopes(self) -> None:
+        """Both boot modes can run the same source checks without selecting Kbuild."""
+        _events, check = self._run(
+            ["check", "python", "source", "--profile", "microsd-uboot"], "check"
+        )
+        check.assert_called_once_with(
+            ["python", "source"], profile="microsd-uboot", verbose=False, no_cache=False, jobs=1
+        )
+
+    def test_verify_forwards_the_selected_profile(self) -> None:
+        """A microSD verification cannot silently resolve the default bundle."""
+        events, verify = self._run(
+            ["verify", "target", "--profile", "microsd-uboot"], "verify_booted"
+        )
+        self.assertEqual(
+            events[0],
+            ("lock", self.root / ".cache", False, "verify", "target", "microsd-uboot"),
+        )
+        verify.assert_called_once_with("target", profile="microsd-uboot")
 
     def test_invalid_profile_is_rejected_before_any_cache_or_retention_action(self) -> None:
         """Profile names are path components, not cache paths or deferred cleanup inputs."""
@@ -362,7 +428,7 @@ class CliCacheLockTests(unittest.TestCase):
 
     def test_failed_profile_build_and_check_bound_only_valid_profile_logs(self) -> None:
         """Dispatch-finally bounds profile state after failures without touching valid slots."""
-        profile = "usb-host-lab"
+        profile = "microsd-uboot"
         default_runs = [
             self._write_profile_run("build", target="nokia", profile=None, index=index)
             for index in range(11)

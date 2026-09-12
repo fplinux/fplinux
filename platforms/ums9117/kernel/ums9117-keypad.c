@@ -725,7 +725,7 @@ static void ums9117_keypad_shutdown(struct platform_device *pdev)
 }
 
 static const struct of_device_id ums9117_keypad_of_match[] = {
-	{ .compatible = "fplinux,ums9117-keypad" },
+	{ .compatible = "sprd,ums9117-keypad" },
 	{}
 };
 MODULE_DEVICE_TABLE(of, ums9117_keypad_of_match);

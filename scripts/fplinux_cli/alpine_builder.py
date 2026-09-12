@@ -16,14 +16,17 @@ import tarfile
 import tempfile
 import urllib.request
 from pathlib import Path, PurePosixPath
-from typing import Any, BinaryIO, NoReturn
+from typing import TYPE_CHECKING, Any, BinaryIO, NoReturn
 
-from . import alpine_state
+from . import alpine_state, firmware_inputs
 from .build_env import SOURCE_DATE_EPOCH
 from .build_env import build_environment as _build_environment
 from .common import ROOT, sha256_file
 from .config import relative_value
 from .output import current_stage
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 CACHE = Path("/cache")
 _ROOTFS_BUILD_LOCK = ".build.lock"
@@ -711,6 +714,7 @@ def _verify_alpine_rootfs(
     root: Path,
     packages: tuple[str, ...],
     bundle_packages: tuple[str, ...] = (),
+    firmware: Sequence[firmware_inputs.FirmwareInput] = (),
 ) -> None:
     init = root / "init"
     if not init.is_symlink() or init.readlink() != Path("/sbin/init"):
@@ -796,6 +800,7 @@ def _verify_alpine_rootfs(
     ):
         if (root / obsolete).exists() or (root / obsolete).is_symlink():
             fail(f"obsolete pre-Alpine runtime path is present: /{obsolete}")
+    firmware_inputs.verify_installed_firmware_inputs(root, firmware)
 
 
 def _normalize_rootfs(root: Path) -> None:
@@ -847,13 +852,19 @@ def build_rootfs(
     packages: tuple[str, ...],
     bundle_packages: tuple[str, ...] = (),
     *,
+    firmware: Sequence[firmware_inputs.FirmwareInput] = (),
     external_image: dict[str, Any] | None = None,
     external_output: Path | None = None,
 ) -> tuple[Path, Path, str, dict[str, Path]]:
     """Build the standard rootfs and any APKs published in its bundle."""
     image_recipe = os.environ.get("FPLINUX_CONTAINER_IMAGE_RECIPE", "")
     signing_private_key, signing_public_key, signing_key_identity = _ensure_apk_signing_key()
-    recipe = alpine_state.alpine_rootfs_recipe(image_recipe, signing_key_identity, packages)
+    recipe = alpine_state.alpine_rootfs_recipe(
+        image_recipe,
+        signing_key_identity,
+        packages,
+        firmware_inputs=firmware,
+    )
     overlap = set(packages) & set(bundle_packages)
     if overlap:
         fail(
@@ -974,7 +985,8 @@ def build_rootfs(
                 )
             )
 
-            _verify_alpine_rootfs(root, packages, bundle_packages)
+            firmware_inputs.install_firmware_inputs(root, firmware)
+            _verify_alpine_rootfs(root, packages, bundle_packages, firmware)
             _normalize_rootfs(root)
             if not rootfs_hit:
                 _write_rootfs_cpio(root, staging / alpine_state.ROOTFS_NAME)

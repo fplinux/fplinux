@@ -3,6 +3,8 @@ if ARCH_UMS9117
 
 config MACH_INOI_244_MODERN_4G
 	bool "INOI 244 Modern 4G"
+	select GPIOLIB
+	select GPIO_SC2720_EIC_UMS9117
 	select MFD_SYSCON
 	help
 	  Board support for the INOI 244 Modern 4G, a UMS9117 feature

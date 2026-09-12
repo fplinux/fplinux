@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config BT_UMS9117_CM4
+	bool "UMS9117 CM4 Bluetooth controller"
+	depends on ARCH_UMS9117 && BT=y && FW_LOADER
+	depends on !SMP && PREEMPT_NONE && MFD_SYSCON
+	select CRYPTO_LIB_SHA256
+	help
+	  Start the UMS9117 CM4 controller from external firmware and fitted
+	  Bluetooth records, then expose its mailbox transport as a Linux HCI
+	  device. The selected device tree must exclude the first two MiB from
+	  System RAM. Firmware is loaded on an explicit start after the root
+	  filesystem is mounted. System sleep retains the controller and is
+	  refused while a Bluetooth connection or initialization is active.

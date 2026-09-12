@@ -7,24 +7,29 @@ product = "3210 4G"
 hardware_codes = ["TA-1618"]
 compatible = "nokia,ta-1618"
 
+[nand]
+raw_device = "/dev/ta1618-nand-raw"
+id = 0xb1a1
+raw_page_bytes = 2176
+
+[rootfs]
+packages = []
+
 [bundle]
-packages = [
-  "fplinux-charge",
-  "fplinux-micropythonos-nokia-ta1618",
-  "fplinux-showcase",
-]
+packages = []
 
 [linux]
+config_fragment = "kernel/config.fragment"
+memory = { base = 0x80200000, size = 0x03c00000 }
 dtb = "unisoc/ums9117-nokia-ta1618.dtb"
 debug_dtb = "ums9117-nokia-ta1618.dtb"
 patches = [
   "kernel/0001-nokia-ta1618-board.patch",
-  "kernel/0003-nokia-ta1618-kpled.patch",
   "kernel/0004-nokia-ta1618-usb-regulator.patch",
 ]
-# The DTB must never describe internal storage or a generic SDHCI host; the
-# removable microSD slot is the only storage this target may reach.
-forbidden_dtb_markers = ["sdhci", "nand", "mtd", "ubi", "emmc"]
+# Only the removable microSD is writable. Internal NAND has a fixed-command
+# read-only interface, without an MTD or generic SPI controller.
+forbidden_dtb_markers = ["sdhci", "spi-nand", "mtd", "ubi", "emmc"]
 forbidden_config = [
   "CONFIG_MTD=y",
   "CONFIG_UBI=y",
@@ -36,8 +41,12 @@ forbidden_config = [
 ]
 
 [[linux.copies]]
-source = "kernel/ta1618-poweroff.c"
-destination = "arch/arm/mach-ums9117/ta1618-poweroff.c"
+source = "dts/nand-readonly.dtsi"
+destination = "arch/arm/boot/dts/unisoc/nokia-ta1618-nand-readonly.dtsi"
+
+[[linux.copies]]
+source = "dts/bluetooth.dtsi"
+destination = "arch/arm/boot/dts/unisoc/nokia-ta1618-bluetooth.dtsi"
 
 [[linux.copies]]
 source = "kernel/ta1618-mmc-linux.c"
@@ -60,64 +69,8 @@ source = "kernel/ta1618-fb.c"
 destination = "drivers/video/fbdev/ta1618-fb.c"
 
 [[linux.copies]]
-source = "kernel/leds-ta1618-kpled.c"
-destination = "drivers/leds/leds-ta1618-kpled.c"
-
-[[linux.copies]]
-source = "kernel/ta1618-sc2720-vibrator.c"
-destination = "drivers/input/misc/ta1618-sc2720-vibrator.c"
-
-[[linux.copies]]
-source = "bindings/fplinux,ta1618-sc2720-vibrator.yaml"
-destination = "Documentation/devicetree/bindings/input/fplinux,ta1618-sc2720-vibrator.yaml"
-
-[[linux.copies]]
 source = "kernel/sc2720-usb33-regulator.c"
 destination = "drivers/regulator/sc2720-usb33.c"
-
-[[linux.copies]]
-source = "kernel/ta1618-sc2720-charger.c"
-destination = "drivers/power/supply/ta1618-sc2720-charger.c"
-
-[[linux.copies]]
-source = "bindings/fplinux,ta1618-sc2720-charger.yaml"
-destination = "Documentation/devicetree/bindings/power/supply/fplinux,ta1618-sc2720-charger.yaml"
-
-[[linux.copies]]
-source = "kernel/ta1618-sc2720-fgu.c"
-destination = "drivers/power/supply/ta1618-sc2720-fgu.c"
-
-[[linux.copies]]
-source = "bindings/fplinux,ta1618-sc2720-fgu.yaml"
-destination = "Documentation/devicetree/bindings/power/supply/fplinux,ta1618-sc2720-fgu.yaml"
-
-[[linux.copies]]
-source = "kernel/ta1618-thm1.c"
-destination = "drivers/thermal/ta1618-thm1.c"
-
-[[linux.copies]]
-source = "bindings/fplinux,ta1618-thm1.yaml"
-destination = "Documentation/devicetree/bindings/thermal/fplinux,ta1618-thm1.yaml"
-
-[[linux.copies]]
-source = "kernel/ta1618-sc2720-auxadc.c"
-destination = "drivers/iio/adc/ta1618-sc2720-auxadc.c"
-
-[[linux.copies]]
-source = "bindings/fplinux,ta1618-sc2720-auxadc.yaml"
-destination = "Documentation/devicetree/bindings/iio/adc/fplinux,ta1618-sc2720-auxadc.yaml"
-
-[[linux.copies]]
-source = "kernel/ta1618-sc2720-rtc.c"
-destination = "drivers/rtc/ta1618-sc2720-rtc.c"
-
-[[linux.copies]]
-source = "bindings/fplinux,ta1618-sc2720-rtc.yaml"
-destination = "Documentation/devicetree/bindings/rtc/fplinux,ta1618-sc2720-rtc.yaml"
-
-[[linux.copies]]
-source = "bindings/fplinux,ta1618-kpled.yaml"
-destination = "Documentation/devicetree/bindings/leds/fplinux,ta1618-kpled.yaml"
 
 [[linux.copies]]
 source = "bindings/fplinux,sc2720-usb33-regulator.yaml"
@@ -132,52 +85,8 @@ source = "kernel/Kconfig"
 destination = "arch/arm/mach-ums9117/Kconfig"
 
 [[linux.appends]]
-source = "kernel/Makefile"
-destination = "arch/arm/mach-ums9117/Makefile"
-
-[[linux.appends]]
 source = "kernel/fbdev.Makefile"
 destination = "drivers/video/fbdev/Makefile"
-
-[[linux.appends]]
-source = "kernel/power-supply.Kconfig"
-destination = "drivers/power/supply/Kconfig"
-
-[[linux.appends]]
-source = "kernel/power-supply.Makefile"
-destination = "drivers/power/supply/Makefile"
-
-[[linux.appends]]
-source = "kernel/thermal.Kconfig"
-destination = "drivers/thermal/Kconfig"
-
-[[linux.appends]]
-source = "kernel/thermal.Makefile"
-destination = "drivers/thermal/Makefile"
-
-[[linux.appends]]
-source = "kernel/iio.Kconfig"
-destination = "drivers/iio/adc/Kconfig"
-
-[[linux.appends]]
-source = "kernel/iio.Makefile"
-destination = "drivers/iio/adc/Makefile"
-
-[[linux.appends]]
-source = "kernel/input.Kconfig"
-destination = "drivers/input/misc/Kconfig"
-
-[[linux.appends]]
-source = "kernel/input.Makefile"
-destination = "drivers/input/misc/Makefile"
-
-[[linux.appends]]
-source = "kernel/rtc.Kconfig"
-destination = "drivers/rtc/Kconfig"
-
-[[linux.appends]]
-source = "kernel/rtc.Makefile"
-destination = "drivers/rtc/Makefile"
 
 [bootstrap]
 image = "ta1618_linux_bootstrap.bin"
@@ -193,3 +102,40 @@ backlight_channels = "rgbw"
 backlight_level = 0x14
 session_name = "ta1618-linux"
 boot_instructions = "Power the phone off, hold *, then connect USB while keeping * pressed."
+
+[bluetooth]
+parser = "bluetooth_firmware.py"
+firmware = [
+  { source = "ta1618-cm4.bin", destination = "ums9117/ta1618-cm4.bin", size = 463468, sha256 = "2288d4979f056b200bbcf341921730a600cd94ff3d1afb14ee1e76d505539535" },
+  { source = "ta1618-bt-config.bin", destination = "ums9117/ta1618-bt-config.bin", size = 8 },
+  { source = "ta1618-bt-sprd.bin", destination = "ums9117/ta1618-bt-sprd.bin", size = 176 },
+  { source = "ta1618-bt-rf-config.bin", destination = "ums9117/ta1618-bt-rf-config.bin", size = 252 },
+]
+
+[microsd]
+linux_patches = []
+
+[microsd.bootstrap]
+source = "bootstrap-microsd"
+image = "ta1618_sd_stage0.bin"
+map = "obj/ta1618_sd_stage0_map.txt"
+
+[microsd.uboot]
+defconfig = "uboot/ta1618_defconfig"
+patches = []
+
+[[microsd.uboot.copies]]
+source = "targets/nokia-ta1618/uboot/ums9117-ta1618-u-boot.dts"
+destination = "arch/arm/dts/ums9117-ta1618-u-boot.dts"
+
+[[microsd.uboot.copies]]
+source = "targets/nokia-ta1618/uboot/slot.c"
+destination = "board/fplinux/ums9117/slot.c"
+
+[[microsd.uboot.copies]]
+source = "targets/nokia-ta1618/common/ta1618-sdio-board.h"
+destination = "board/fplinux/ums9117/ta1618-sdio-board.h"
+
+[[microsd.uboot.copies]]
+source = "targets/nokia-ta1618/common/ta1618-sdio-board.c"
+destination = "board/fplinux/ums9117/sdio-board.c"

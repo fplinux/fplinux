@@ -252,6 +252,7 @@ def _layout_u32(layout: Mapping[str, int], field: str) -> int:
 def verify_profile_dtb_layout(
     tree: bytes | Path,
     layout: Mapping[str, int],
+    linux_memory: Mapping[str, int],
 ) -> None:
     """Verify the selected profile's volatile layout against its compiled DTB."""
     ram_base = _layout_u32(layout, "ram_base")
@@ -261,14 +262,20 @@ def verify_profile_dtb_layout(
     framebuffer = _layout_u32(layout, "framebuffer")
     framebuffer_size = _layout_u32(layout, "framebuffer_size")
     ram_size = _layout_u32(layout, "ram_size")
+    linux_base = _layout_u32(linux_memory, "base")
+    linux_size = _layout_u32(linux_memory, "size")
     if fdt_load % 0x1000:
         raise DeviceTreeError("profile DTB fixed FDT address is not page-aligned")
     if fdt_load < ram_base or fdt_load + fdt_limit > framebuffer:
         raise DeviceTreeError("profile DTB fixed FDT arena does not precede the framebuffer")
     if framebuffer + framebuffer_size != ram_base + ram_size:
         raise DeviceTreeError("profile DTB framebuffer does not end at the RAM boundary")
+    if not ram_base <= linux_base < linux_base + linux_size <= fdt_load:
+        raise DeviceTreeError(
+            "profile DTB Linux memory overlaps reserved RAM or the fixed FDT arena"
+        )
 
-    memory_path = f"/memory@{ram_base:x}"
+    memory_path = f"/memory@{linux_base:x}"
     reserved_path = f"/reserved-memory/framebuffer@{framebuffer:x}"
     display_path = f"/soc/display@{framebuffer:x}"
     tree_bytes = _read_tree(tree)
@@ -277,8 +284,8 @@ def verify_profile_dtb_layout(
     if parse_nul_string(memory.get("device_type", b""), f"{memory_path} device_type") != "memory":
         raise DeviceTreeError("profile DTB memory node is not memory")
     memory_base, memory_size = _u32_pair(memory.get("reg", b""), f"{memory_path} reg")
-    if memory_base != ram_base or memory_base + memory_size != fdt_load:
-        raise DeviceTreeError("profile DTB memory range must end exactly at the fixed FDT arena")
+    if (memory_base, memory_size) != (linux_base, linux_size):
+        raise DeviceTreeError("profile DTB memory range differs from the target Linux range")
 
     if len(tree_bytes) + fdt_pad_bytes > fdt_limit:
         raise DeviceTreeError("profile DTB plus U-Boot padding exceeds the fixed FDT arena")

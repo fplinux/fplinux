@@ -2,17 +2,19 @@
 /dts-v1/;
 
 #include <dt-bindings/input/input.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/leds/common.h>
 #include "ums9117.dtsi"
+#include "ums9117-sc2720.dtsi"
 #include "fplinux-target-identity.dtsi"
+#include "inoi-240-modern-4g-nand-readonly.dtsi"
+#include "inoi-240-modern-4g-bluetooth.dtsi"
+#include "inoi-240-modern-4g-microsd.dtsi"
 
 / {
-	chosen {
-		bootargs = "console=tty0 loglevel=8 ignore_loglevel init=/init panic=-1 rdinit=/init random.trust_bootloader=on";
-	};
-
-	memory@80000000 {
+	memory@80200000 {
 		device_type = "memory";
-		reg = <0x80000000 0x03f00000>;
+		reg = <0x80200000 0x03c00000>;
 	};
 
 	reserved-memory {
@@ -27,6 +29,21 @@
 	};
 
 	soc {
+		keypad-backlight@40608df8 {
+			compatible = "sprd,ums9117-sc2720-kpled";
+			reg = <0x40608df8 0x00000004>;
+			function = LED_FUNCTION_KBD_BACKLIGHT;
+			fplinux,keypad = <&keypad>;
+			fplinux,current-code = <13>;
+		};
+
+		vibrator@40608e00 {
+			compatible = "sprd,ums9117-sc2720-vibrator";
+			reg = <0x40608e00 0x00000004>;
+			label = "INOI 240 Modern 4G vibrator";
+			fplinux,voltage-code = <2>;
+		};
+
 		display@83f00000 {
 			compatible = "fplinux,ums9117-nv3023-lcm-fb";
 			reg = <0x83f00000 0x00100000>,
@@ -39,37 +56,46 @@
 			      <0x20e01000 0x00000004>,
 			      <0x20e01004 0x00000004>,
 			      <0x20e02004 0x00000004>,
-			      <0x402a00b0 0x00000170>,
-			      <0x402a04b0 0x00000170>;
+			      <0x402a00b0 0x0000001c>,
+			      <0x402a04b0 0x0000001c>,
+			      <0x402a01f8 0x00000028>,
+			      <0x402a05f8 0x00000028>;
 			reg-names = "framebuffer", "lcdc", "adi-controller",
 				    "analog-slave", "lcm", "lcm-command", "lcm-data",
 				    "ap-ahb-gate-set", "ap-ahb-reset-set",
-				    "ap-ahb-reset-clear", "pinmux", "pinconf";
+				    "ap-ahb-reset-clear", "pinmux", "pinconf",
+				    "pinmux-data", "pinconf-data";
 			sprd,aon-apb = <&aon_apb>;
 			/* fpdoom cmd3025_inoi MCU timing at the 128 MHz AHB clock. */
 			sprd,dbi-timing-ns = <50 55 110 20 70 35>;
-			/* LCM control pins followed by the ten DBI data pins. */
+			/* LCM control pins. */
 			sprd,pinmux-offsets = <
 				0x000 0x004 0x008 0x00c 0x010 0x014 0x018
-				0x148 0x14c 0x150 0x154 0x158
-				0x15c 0x160 0x164 0x168 0x16c
 			>;
 			sprd,pinmux-values = <
 				0 0 0x10 0x10 0x10 0x10 0x10
-				0x10 0x10 0x10 0x10 0x10
-				0x10 0x10 0x10 0x10 0x10
 			>;
 			sprd,pinconf-offsets = <
 				0x000 0x004 0x008 0x00c 0x010 0x014 0x018
-				0x148 0x14c 0x150 0x154 0x158
-				0x15c 0x160 0x164 0x168 0x16c
 			>;
 			sprd,pinconf-values = <
 				0x00182001 0x00182046 0x00182001
 				0x00182004 0x00182004 0x00182004 0x00182004
-				0x00182004 0x00182004 0x00182004 0x00182004
-				0x00182004 0x00182004 0x00182004 0x00182004
-				0x00182004 0x00182004
+			>;
+			/* Ten DBI data pins, separate from the intervening peripherals. */
+			sprd,pinmux-data-offsets = <
+				0x00 0x04 0x08 0x0c 0x10 0x14 0x18 0x1c 0x20 0x24
+			>;
+			sprd,pinmux-data-values = <
+				0x10 0x10 0x10 0x10 0x10
+				0x10 0x10 0x10 0x10 0x10
+			>;
+			sprd,pinconf-data-offsets = <
+				0x00 0x04 0x08 0x0c 0x10 0x14 0x18 0x1c 0x20 0x24
+			>;
+			sprd,pinconf-data-values = <
+				0x00182004 0x00182004 0x00182004 0x00182004 0x00182004
+				0x00182004 0x00182004 0x00182004 0x00182004 0x00182004
 			>;
 			/* INOI uses RGB WLED channels only; the W channel stays dark. */
 			sprd,wled-current-levels = <31 31 31 0>;
@@ -79,8 +105,38 @@
 
 #include "ums9117-ram-session.dtsi"
 
+&sc2720_charger {
+	label = "inoi240-charger";
+};
+
+&sc2720_fgu {
+	label = "inoi240-battery";
+	fplinux,current-calibration = <10 20>;
+};
+
+&sc2720_auxadc {
+	label = "inoi240-sc2720-auxadc";
+};
+
+&thm1 {
+	status = "okay";
+	label = "inoi240-soc";
+};
+
+&ap_dma {
+	status = "okay";
+};
+
+&rota {
+	status = "okay";
+};
+
+&jpeg {
+	status = "okay";
+};
+
 &keypad {
-	compatible = "fplinux,ums9117-keypad";
+	compatible = "sprd,ums9117-keypad";
 	status = "okay";
 	label = "INOI 240 Modern 4G keypad";
 	keypad,num-rows = <5>;
@@ -107,6 +163,9 @@
 		MATRIX_KEY(4, 2, KEY_BACKSPACE) /* right soft */
 		MATRIX_KEY(4, 3, KEY_UP)
 	>;
+	eic1-gpios = <&sc2720_eic 1 GPIO_ACTIVE_LOW>;
+	sprd,eic1-keycode = <KEY_POWER>;
+	wakeup-source;
 };
 
 &usb {

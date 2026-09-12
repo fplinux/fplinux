@@ -28,7 +28,8 @@ PUBLIC_COMMANDS = (
     "prune",
     "run",
     "console",
-    "profile",
+    "nand",
+    "bluetooth",
     "verify",
 )
 PUBLIC_CHECK_SCOPES = (

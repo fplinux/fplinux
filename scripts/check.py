@@ -432,14 +432,7 @@ def project_c_format_sources(files: list[Path]) -> list[str]:
             or (
                 len(path.relative_to(ROOT).parts) >= 4
                 and path.relative_to(ROOT).parts[0] in {"platforms", "targets"}
-                and path.relative_to(ROOT).parts[2] == "common"
-                and path.suffix in APORT_C_FORMAT_SUFFIXES
-            )
-            or (
-                len(path.relative_to(ROOT).parts) >= 6
-                and path.relative_to(ROOT).parts[0] == "targets"
-                and path.relative_to(ROOT).parts[2] == "profiles"
-                and path.relative_to(ROOT).parts[4] == "uboot"
+                and path.relative_to(ROOT).parts[2] in {"common", "uboot"}
                 and path.suffix in APORT_C_FORMAT_SUFFIXES
             )
         )
@@ -450,15 +443,34 @@ def project_c_format_sources(files: list[Path]) -> list[str]:
     return sorted(sources)
 
 
+def pkg_config_cflags(package: str) -> list[str]:
+    """Resolve the installed header flags for one declared C dependency."""
+    result = capture(
+        ["pkg-config", "--cflags", package],
+        timeout=_PACKAGE_CONFIG_TIMEOUT,
+    )
+    if result.returncode:
+        fail(result.stderr.strip() or f"pkg-config could not resolve {package}")
+    return shlex.split(result.stdout)
+
+
 def userspace_c_include_flags(source: str) -> list[str]:
-    """Return compile flags needed by one source's project-owned headers."""
+    """Return compile flags needed by one source's headers."""
     path = PurePosixPath(source)
+    if path.parts[:3] == (*APORT_ROOT, "fplinux-bluetooth"):
+        return pkg_config_cflags("dbus-1")
     if (
         len(path.parts) >= 3
         and path.parts[:2] == APORT_ROOT
         and path.parts[2] in alpine_state.SHARED_APORT_SOURCES
     ):
-        return ["-I", "alpine/shared"]
+        directories = sorted(
+            {
+                str(PurePosixPath(shared).parent)
+                for shared in alpine_state.SHARED_APORT_SOURCES[path.parts[2]]
+            }
+        )
+        return [flag for directory in directories for flag in ("-I", directory)]
     return []
 
 
@@ -480,13 +492,7 @@ def run_userspace_analysis(output: Path, sources: list[tuple[str, bool]]) -> Non
     needs_libusb = any(libusb for _source, libusb in sources)
     libusb_flags: list[str] = []
     if needs_libusb:
-        pkg_config = capture(
-            ["pkg-config", "--cflags", "libusb-1.0"],
-            timeout=_PACKAGE_CONFIG_TIMEOUT,
-        )
-        if pkg_config.returncode:
-            fail(pkg_config.stderr.strip() or "pkg-config could not resolve libusb-1.0")
-        libusb_flags = shlex.split(pkg_config.stdout)
+        libusb_flags = pkg_config_cflags("libusb-1.0")
 
     analyzer = [
         "scan-build",

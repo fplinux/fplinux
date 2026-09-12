@@ -231,7 +231,7 @@ def _verify_full_output(output: Path, layout: dict[str, int]) -> int:
         raise UbootToolsError("full U-Boot ELF entry lies outside its loaded binary")
     config = (output / ".config").read_text(encoding="utf-8")
     required = (
-        "CONFIG_TARGET_FPLINUX_TA1618=y\n",
+        "CONFIG_TARGET_FPLINUX_UMS9117=y\n",
         "CONFIG_ENV_IS_NOWHERE=y\n",
         "CONFIG_AUTOBOOT=y\n",
         "CONFIG_BOOTDELAY=-2\n",
@@ -324,7 +324,7 @@ def build_full(  # noqa: PLR0913, PLR0917 -- build inputs stay explicit.
     cross_compile: str,
     layout: dict[str, int],
 ) -> UbootBuild:
-    """Build or exactly reuse the read-only MMC TA-1618 full U-Boot."""
+    """Build or exactly reuse the read-only MMC UMS9117 full U-Boot."""
     if jobs < 1:
         raise UbootToolsError("full U-Boot jobs must be positive")
     recipe = _full_recipe(

@@ -7,6 +7,22 @@
 	#size-cells = <1>;
 	interrupt-parent = <&gic>;
 
+	chosen {
+#include "fplinux-root.dtsi"
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		jpeg_dma: jpeg-dma-pool {
+			compatible = "shared-dma-pool";
+			reusable;
+			size = <0x00400000>;
+		};
+	};
+
 	cpus {
 		#address-cells = <1>;
 		#size-cells = <0>;
@@ -43,7 +59,7 @@
 		ranges;
 
 		syscounter@40230000 {
-			compatible = "fplinux,ums9117-syscounter";
+			compatible = "sprd,ums9117-syscounter";
 			reg = <0x40230000 0x10>;
 		};
 
@@ -55,7 +71,7 @@
 		};
 
 		aon_apb: syscon@402e0000 {
-			compatible = "fplinux,ums9117-aon-apb", "syscon";
+			compatible = "sprd,ums9117-aon-apb", "syscon";
 			reg = <0x402e0000 0x00003000>;
 		};
 
@@ -71,6 +87,59 @@
 		keypad: keypad@40250000 {
 			reg = <0x40250000 0x00000100>;
 			sprd,aon-apb = <&aon_apb>;
+			status = "disabled";
+		};
+
+		thm1: thermal-sensor@40300000 {
+			compatible = "sprd,ums9117-thm1";
+			reg = <0x40300000 0x00000100>,
+			      <0x40240000 0x00000058>,
+			      <0x40241064 0x00000004>;
+			reg-names = "thm", "efuse-control", "efuse-block25";
+			sprd,aon-apb = <&aon_apb>;
+			status = "disabled";
+		};
+
+		ap_dma: dma-controller@20100000 {
+			compatible = "sprd,ums9117-dma";
+			#dma-cells = <1>;
+			reg = <0x20100000 0x2100>,
+			      <0x20e00000 0x4>,
+			      <0x20e01000 0x4>,
+			      <0x20e02000 0x4>;
+			reg-names = "dma", "ap-ahb-state", "ap-ahb-set", "ap-ahb-clear";
+			interrupts = <GIC_SPI 50 IRQ_TYPE_LEVEL_HIGH>;
+			status = "disabled";
+		};
+
+		rota: rotate@20900000 {
+			compatible = "sprd,ums9117-rota";
+			reg = <0x20900000 0x450>,
+			      <0x20e00000 0x4>,
+			      <0x20e01000 0x4>,
+			      <0x20e02000 0x4>,
+			      <0x20e01004 0x4>,
+			      <0x20e02004 0x4>;
+			reg-names = "rota", "ap-ahb-gate-state", "ap-ahb-gate-set",
+				    "ap-ahb-gate-clear", "ap-ahb-reset-set",
+				    "ap-ahb-reset-clear";
+			status = "disabled";
+		};
+
+		jpeg: jpeg@20c00000 {
+			compatible = "sprd,ums9117-jpeg";
+			reg = <0x20c00000 0x11a00>,
+			      <0x20e00000 0x4>,
+			      <0x20e01000 0x4>,
+			      <0x20e02000 0x4>,
+			      <0x20e01004 0x4>,
+			      <0x20e02004 0x4>,
+			      <0x21500088 0x4>;
+			reg-names = "jpeg", "ap-ahb-gate-state", "ap-ahb-gate-set",
+				    "ap-ahb-gate-clear", "ap-ahb-reset-set",
+				    "ap-ahb-reset-clear", "dcam-clock";
+			interrupts = <GIC_SPI 45 IRQ_TYPE_LEVEL_HIGH>;
+			memory-region = <&jpeg_dma>;
 			status = "disabled";
 		};
 

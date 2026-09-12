@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config MMC_UMS9117
+	tristate
+	depends on MMC && ARCH_UMS9117 && HAS_DMA
+	help
+	  Shared UMS9117 SDIO0 command, DMA and slot-control implementation.
+	  The target driver supplies the slot wiring, voltage baseline and
+	  card-detect operations.

@@ -17,4 +17,4 @@ cat /sys/class/power_supply/ta1618-charger/online
 This is connection status, not proof that the battery is charging. The
 interface does not enable, disable or configure charging and does not report a
 charge rate or battery level. External charger input also prevents the
-supported [power-off](POWER_OFF.md) path.
+supported [power-off](../../../docs/features/POWER_OFF.md) path.

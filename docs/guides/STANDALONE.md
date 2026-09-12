@@ -48,7 +48,11 @@ copy to a trusted group with `MODE="0660"`. Never make either USB device
 world-writable. Run the loader as the regular user; host-keyboard forwarding is
 the only documented operation that normally needs elevated access.
 
-## Start the RAM session
+## Start the session
+
+If the archive contains `FPLINUX.img.xz`, prepare and insert the system card
+using [microSD system root](MICROSD_ROOT.md) before loading. An archive without
+that image uses a volatile RAM root.
 
 Power the phone off and disconnect USB. Start the runner before attaching the
 phone:
@@ -72,7 +76,9 @@ with the command below to open a shell later.
 
 ## Use the running session
 
-Exiting the shell or unplugging USB does not stop Linux. Reconnect with:
+Exiting the shell does not stop Linux. Disconnecting USB leaves Linux running
+only while another power source is available; without a battery, it cuts
+power. Reopen a shell on a still-running phone with:
 
 ```sh
 ./runner/run.py --reconnect
@@ -86,12 +92,15 @@ For details, use the bundled pages:
 - [file transfer](../features/FILE_TRANSFER.md);
 - [host keyboard forwarding](../features/HOST_KEYBOARD.md);
 - [CPU clock reporting](../features/CPU_CLOCK.md);
+- [Bluetooth](../features/BLUETOOTH.md), on supported targets with prepared firmware;
 - [FPLinux: ARMADA](../apps/SHOWCASE.md);
 - [TyrQuake](../apps/TYRQUAKE.md);
 - [MicroPythonOS](../apps/MICROPYTHONOS.md).
 
 ## End the session
 
-Flush and unmount any removable media first. Then use the exact shutdown or
-recovery procedure in the top-level `README.txt`. Closing SSH or disconnecting
-USB alone leaves the RAM session running.
+In a RAM-only session, flush and unmount removable filesystems first. With a
+microSD system root, follow [system-card shutdown](MICROSD_ROOT.md#persistence-and-shutdown)
+before cutting power. Use the exact shutdown procedure in the top-level
+`README.txt`. Closing SSH leaves Linux running; unplugging USB from a phone
+without a battery removes power immediately.

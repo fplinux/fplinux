@@ -12,7 +12,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from fplinux_cli import alpine_state
+from fplinux_cli import alpine_state, firmware_inputs
 from fplinux_cli import prune as prune_module
 from fplinux_cli.image_state import ImageState, publish_image_state
 from fplinux_cli.prune import PruneSafetyError, apply_prune, plan_prune, prune
@@ -77,8 +77,8 @@ class PruneTests(unittest.TestCase):
                 (cache / "rootfs" / recipe).mkdir(parents=True)
 
             target_configs = {
-                "first": {"platform": "platform-a"},
-                "second": {"platform": "platform-b"},
+                "first": {"platform": "platform-a", "rootfs": {"firmware": []}},
+                "second": {"platform": "platform-b", "rootfs": {"firmware": []}},
             }
             platform_configs: dict[str, dict[str, object]] = {
                 "platform-a": {},
@@ -89,7 +89,10 @@ class PruneTests(unittest.TestCase):
                 _image_recipe: str,
                 _signing_key: str,
                 packages: tuple[str, ...],
+                *,
+                firmware_inputs: tuple[firmware_inputs.FirmwareInput, ...],
             ) -> str:
+                self.assertEqual(firmware_inputs, ())
                 return {
                     first_packages: first_recipe,
                     second_packages: second_recipe,
@@ -184,6 +187,46 @@ class PruneTests(unittest.TestCase):
             self.assertEqual(plan.entries[0].action, "protected")
             self.assertIn("rootfs recipes", plan.entries[0].reason)
 
+    def test_missing_declared_firmware_protects_existing_rootfs(self) -> None:
+        """Unknown private inputs make retention conservative instead of guessing a recipe."""
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary) / ".cache"
+            public_key = alpine_state.signing_public_key(cache)
+            public_key.parent.mkdir(parents=True)
+            public_key.write_bytes(b"public-key\n")
+            publish_image_state(cache, ImageState("a" * 64, "b" * 64))
+            existing = cache / "rootfs" / ("1" * 64)
+            existing.mkdir(parents=True)
+            target_config = {
+                "platform": "platform",
+                "rootfs": {
+                    "firmware": [
+                        {
+                            "source": "missing.bin",
+                            "destination": "chip/missing.bin",
+                            "size": 8,
+                        }
+                    ]
+                },
+            }
+
+            with (
+                mock.patch.object(prune_module, "discover_targets", return_value=("phone",)),
+                mock.patch.object(prune_module, "discover_profiles", return_value=("bluetooth",)),
+                mock.patch.object(prune_module, "load_target", return_value=target_config),
+                mock.patch.object(
+                    prune_module,
+                    "container_image_recipe_digest",
+                    return_value="a" * 64,
+                ),
+            ):
+                plan = plan_prune(cache)
+
+            self.assertEqual(len(plan.entries), 1)
+            self.assertEqual(plan.entries[0].action, "protected")
+            self.assertIn("rootfs recipes", plan.entries[0].reason)
+            self.assertTrue(existing.exists())
+
     def test_current_rootfs_recipes_include_each_declared_profile(self) -> None:
         """One profile-only rootfs remains protected even when default differs."""
         with tempfile.TemporaryDirectory() as temporary:
@@ -196,20 +239,49 @@ class PruneTests(unittest.TestCase):
             profile_recipe = "4" * 64
             for recipe in (default_recipe, profile_recipe):
                 (cache / "rootfs" / recipe).mkdir(parents=True)
+            firmware_directory = cache / "firmware/phone"
+            firmware_directory.mkdir(parents=True)
+            (firmware_directory / "controller.bin").write_bytes(b"firmware")
 
             def target_config(_target: str, profile: str | None = None) -> dict[str, object]:
-                return {"platform": "platform", "profile": profile}
+                firmware = (
+                    [
+                        {
+                            "source": "controller.bin",
+                            "destination": "chip/controller.bin",
+                            "size": 8,
+                        }
+                    ]
+                    if profile == "host"
+                    else []
+                )
+                return {
+                    "platform": "platform",
+                    "profile": profile,
+                    "rootfs": {"firmware": firmware},
+                }
 
             def selected_packages(
                 _platform: dict[str, object], config: dict[str, object]
             ) -> tuple[str, ...]:
                 return ("package-host",) if config["profile"] == "host" else ("package-base",)
 
-            def rootfs_recipe(_image: str, _key: str, packages: tuple[str, ...]) -> str:
+            def rootfs_recipe(
+                _image: str,
+                _key: str,
+                packages: tuple[str, ...],
+                *,
+                firmware_inputs: tuple[firmware_inputs.FirmwareInput, ...],
+            ) -> str:
                 recipes: dict[tuple[str, ...], str] = {
                     ("package-base",): default_recipe,
                     ("package-host",): profile_recipe,
                 }
+                if packages == ("package-base",):
+                    self.assertEqual(firmware_inputs, ())
+                else:
+                    self.assertEqual(len(firmware_inputs), 1)
+                    self.assertEqual(firmware_inputs[0].contents, b"firmware")
                 return recipes[packages]
 
             with (
@@ -254,7 +326,7 @@ class PruneTests(unittest.TestCase):
                 mock.patch.object(
                     prune_module,
                     "load_target",
-                    return_value={"platform": "platform"},
+                    return_value={"platform": "platform", "rootfs": {"firmware": []}},
                 ),
                 mock.patch.object(prune_module, "load_platform", return_value={}),
                 mock.patch.object(

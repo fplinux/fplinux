@@ -2,7 +2,7 @@
 """Host-process coverage for the MicroPythonOS shell storage policy.
 
 The shipped policy library is sourced normally and run against temporary paths
-and stub ``mount``/``umount`` programs. These tests verify command selection,
+and stub ``blkid``/``mount``/``umount`` programs. These tests verify command selection,
 ownership and exported environment; they do not validate MMC, VFAT, write-back
 or card persistence.
 """
@@ -40,6 +40,8 @@ class StoragePolicyRun:
     runtime_working_directory: str
     configured_state_directory_created: bool
     fallback_state_directory_created: bool
+    configured_state_file: str | None
+    fallback_state_file: str | None
 
 
 class MicroPythonOsStoragePolicyTests(unittest.TestCase):
@@ -51,6 +53,8 @@ class MicroPythonOsStoragePolicyTests(unittest.TestCase):
         device_nodes_present: bool = True,
         reject_partition: bool = False,
         mountinfo_filesystem: str | None = None,
+        root_mountinfo_entry: str = "1 1 0:2 / / rw - rootfs rootfs rw\n",
+        partition_label: str = "DATA",
     ) -> StoragePolicyRun:
         """Run the shipped policy through a driver that supplies controlled paths."""
         with tempfile.TemporaryDirectory() as temporary:
@@ -59,7 +63,7 @@ class MicroPythonOsStoragePolicyTests(unittest.TestCase):
             card = root / "mnt/card"
             device_one = root / "dev/mmcblk0p1"
             device_two = root / "dev/mmcblk0"
-            volatile_root = root / "volatile"
+            fallback_root = root / "var/lib/micropythonos"
             runtime = root / "runtime"
             launcher = root / "launcher"
             commands = root / "bin"
@@ -75,7 +79,7 @@ class MicroPythonOsStoragePolicyTests(unittest.TestCase):
                         f'MPOS_STORAGE_DEVICES="{device_one} {device_two}"',
                         "MPOS_STORAGE_FSTYPE=vfat",
                         "MPOS_STORAGE_STATE_DIR=.fplinux/micropythonos",
-                        f"MPOS_ROOT={volatile_root}",
+                        f"MPOS_ROOT={fallback_root}",
                         "MPOS_HEAP_SIZE=4194304",
                     )
                 )
@@ -83,7 +87,8 @@ class MicroPythonOsStoragePolicyTests(unittest.TestCase):
                 encoding="utf-8",
             )
             mountinfo_path.write_text(
-                (
+                root_mountinfo_entry
+                + (
                     f"36 25 179:1 / {card} rw,relatime - {mountinfo_filesystem} {device_one} rw\n"
                     if mountinfo_filesystem is not None
                     else ""
@@ -107,10 +112,19 @@ class MicroPythonOsStoragePolicyTests(unittest.TestCase):
                 printf 'argv=%s\\n' "$argument"
         done
 } > "$FPLINUX_TEST_RUNTIME_ENVIRONMENT"
+printf 'application state\\n' > data/storage-probe.txt
 """,
             )
             self.write_executable(launcher, '#!/bin/sh\nexec "$@"\n')
             commands.mkdir()
+            self.write_executable(
+                commands / "blkid",
+                """#!/bin/sh
+[ "$#" -eq 1 ] || exit 1
+[ "$1" = "$FPLINUX_TEST_PARTITION" ] || exit 0
+printf '%s: LABEL="%s" TYPE="vfat"\\n' "$1" "$FPLINUX_TEST_PARTITION_LABEL"
+""",
+            )
             self.write_executable(
                 commands / "mount",
                 """#!/bin/sh
@@ -158,6 +172,8 @@ micropythonos_main "$@"
             environment = os.environ | {
                 "PATH": f"{commands}:{os.environ['PATH']}",
                 "FPLINUX_TEST_EVENTS": str(events),
+                "FPLINUX_TEST_PARTITION": str(device_one),
+                "FPLINUX_TEST_PARTITION_LABEL": partition_label,
                 "FPLINUX_TEST_REJECT_DEVICE": str(device_one) if reject_partition else "",
                 "FPLINUX_TEST_CARD": str(card),
                 "FPLINUX_TEST_CONFIG": str(configuration),
@@ -188,7 +204,7 @@ micropythonos_main "$@"
                 result_stderr=result.stderr,
                 fixture_root=root,
                 configured_storage_path=card,
-                fallback_root=volatile_root,
+                fallback_root=fallback_root,
                 partition_device_path=device_one,
                 whole_device_path=device_two,
                 command_events=tuple(events.read_text(encoding="utf-8").splitlines())
@@ -200,8 +216,19 @@ micropythonos_main "$@"
                 configured_state_directory_created=(
                     card / ".fplinux/micropythonos/prefs"
                 ).is_dir(),
-                fallback_state_directory_created=(volatile_root / "prefs").is_dir(),
+                fallback_state_directory_created=(fallback_root / "prefs").is_dir(),
+                configured_state_file=self.read_optional_text(
+                    card / ".fplinux/micropythonos/data/storage-probe.txt"
+                ),
+                fallback_state_file=self.read_optional_text(
+                    fallback_root / "data/storage-probe.txt"
+                ),
             )
+
+    @staticmethod
+    def read_optional_text(path: Path) -> str | None:
+        """Read the state file if the runtime wrote it at this location."""
+        return path.read_text(encoding="utf-8") if path.exists() else None
 
     @staticmethod
     def write_executable(path: Path, contents: str) -> None:
@@ -263,6 +290,27 @@ micropythonos_main "$@"
         self.assertEqual(run.runtime_working_directory, run.runtime_environment["MPOS_ROOT"])
         self.assertFalse(run.configured_state_directory_created)
         self.assertTrue(run.fallback_state_directory_created)
+
+    def test_policy_uses_system_root_when_data_candidate_is_boot_partition(self) -> None:
+        """Both root modes store app writes without auto-mounting the system card's boot FAT."""
+        for root_entry in (
+            "1 1 0:2 / / rw - rootfs rootfs rw\n",
+            "16 1 179:2 / / rw,relatime - ext4 /dev/root rw\n",
+        ):
+            with self.subTest(root_mountinfo=root_entry):
+                run = self.run_storage_policy(
+                    root_mountinfo_entry=root_entry,
+                    partition_label="FPLBOOT",
+                )
+
+                self.assertEqual(run.result_returncode, 0, run.result_stderr)
+                self.assertEqual(run.runtime_environment["MPOS_ROOT"], str(run.fallback_root))
+                self.assertEqual(run.runtime_working_directory, str(run.fallback_root))
+                self.assertEqual(run.runtime_environment["MPOS_STORAGE"], "")
+                self.assertEqual(run.command_events, ())
+                self.assertEqual(run.fallback_state_file, "application state\n")
+                self.assertIsNone(run.configured_state_file)
+                self.assertFalse(run.configured_state_directory_created)
 
     def test_policy_does_not_unmount_a_matching_mountinfo_declaration(self) -> None:
         """A matching declared mount is used without invoking either command stub."""

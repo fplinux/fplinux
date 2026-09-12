@@ -83,6 +83,9 @@ static const struct ums9117_fb_profile inoi240_fb_profile = {
 	.reset_release_ms = 0,
 	.sleep_in_ms = 5,
 	.sleep_out_ms = 200,
+	.wled_backlight_name = "inoi240-backlight",
+	.dma_memcpy = IS_ENABLED(CONFIG_UMS9117_DMA),
+	.native_nv16 = true,
 	.lcdc_ctrl_set = BIT(1),
 	.lcdc_ctrl_clear = BIT(2) | (7U << 5),
 };
@@ -105,6 +108,7 @@ static struct platform_driver inoi240_fb_driver = {
 	.driver = {
 		.name = "inoi240-fb",
 		.of_match_table = inoi240_fb_of_match,
+		.pm = &ums9117_fb_pm_ops,
 	},
 };
 module_platform_driver(inoi240_fb_driver);

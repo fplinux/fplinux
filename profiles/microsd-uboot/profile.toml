@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name = "microsd-uboot"
+
+[linux.root]
+kind = "external"
+filesystem = "ext4"
+wait_seconds = 10
+
+[rootfs]
+packages = ["fplinux-microsd-root"]
+
+[bootstrap]
+kind = "uboot-stage0"
+
+[uboot]
+kind = "full"
+
+[fit]
+kind = "sha256"
+filename = "FPLINUX.ITB"
+
+[layout]
+resident_start = 0x80100000
+resident_limit = 0x81000000
+uboot_load = 0x81000000
+uboot_size = 0x00100000
+uboot_stack = 0x80f00000
+fit_load = 0x83200000
+fit_size = 0x00c00000
+fdt_pad = 0x00003000
+
+[storage]
+filename = "FPLINUX.img"
+disk_signature = 0x46504c58
+boot_partition = 1
+boot_offset = 0x00100000
+boot_size = 0x04000000
+boot_label = "FPLBOOT"
+root_partition = 2
+root_offset = 0x04100000
+root_size = 0x04000000
+root_filename = "FPLROOT.ext4"
+root_label = "FPLROOT"
+root_uuid = "042681b5-d000-5b78-9c16-8e8b2944594e"
+block_size = 4096
+inode_size = 256
+
+[runtime]
+transport = "usb-ncm"
+runnable = true

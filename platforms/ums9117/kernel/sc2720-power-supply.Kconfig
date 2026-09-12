@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config POWER_SUPPLY_SC2720_CHARGER_UMS9117
+	tristate "SC2720 charger status on UMS9117"
+	depends on ARCH_UMS9117
+	depends on POWER_SUPPLY
+	help
+	  Read-only charger-input observation through the shared UMS9117 ADI
+	  interface. The driver exports only the current SC2720 charger-present
+	  status and does not configure charging, the FGU, efuses or NV state.
+
+config POWER_SUPPLY_SC2720_FGU_UMS9117
+	tristate "SC2720 battery telemetry on UMS9117"
+	depends on ARCH_UMS9117
+	depends on POWER_SUPPLY
+	help
+	  Read-only battery voltage, current and relative charge counter reporting
+	  through the shared UMS9117 ADI interface. Current calibration is
+	  supplied by the board description.

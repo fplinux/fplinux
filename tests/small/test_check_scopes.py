@@ -10,7 +10,12 @@ from typing import Literal, Self
 from unittest import mock
 
 from fplinux_cli import container
-from fplinux_cli.checkreceipts import publish_success_receipt, receipt_matches, receipt_path
+from fplinux_cli.checkreceipts import (
+    CheckReceiptRecipe,
+    publish_success_receipt,
+    receipt_matches,
+    receipt_path,
+)
 from fplinux_cli.container import (
     check_scope_closure_digest,
     check_scope_receipt_recipe,
@@ -72,11 +77,11 @@ class CheckScopeTests(unittest.TestCase):
             "a" * 64,
             image_generation="b" * 64,
             orchestration_recipe="c" * 64,
-            profile="usb-host-lab",
+            profile="microsd-uboot",
         )
 
         self.assertIsNone(default.profile)
-        self.assertEqual(profile.profile, "usb-host-lab")
+        self.assertEqual(profile.profile, "microsd-uboot")
         self.assertNotEqual(default.payload(), profile.payload())
 
     def test_readme_does_not_invalidate_c_or_kernel_scope(self) -> None:
@@ -244,82 +249,63 @@ class CheckScopeTests(unittest.TestCase):
             publish_success_receipt(cache, first_recipe)
             self.assertFalse(receipt_matches(cache, header_recipe))
 
-    def test_named_kernel_profile_tracks_only_its_profile_manifest_and_sources(self) -> None:
-        """A narrow profile check does not reuse another profile's kernel receipt."""
-        target = WorkspaceFile(
-            "targets/phone/target.toml",
-            b'platform = "demo"\n[linux]\npatches = []\ncopies = []\nappends = []\n',
-            0o644,
-        )
-        platform = WorkspaceFile(
-            "platforms/demo/platform.toml",
-            b"[linux]\npatches = []\ncopies = []\nappends = []\n",
-            0o644,
-        )
-        host_manifest = WorkspaceFile(
-            "targets/phone/profiles/host/profile.toml",
-            b"[linux]\npatches = []\n"
-            b'copies = [{ source = "host.c", destination = "host.c" }]\n'
-            b"appends = []\n",
-            0o644,
-        )
-        other_manifest = WorkspaceFile(
-            "targets/phone/profiles/diagnostic/profile.toml",
-            b"[linux]\npatches = []\n"
-            b'copies = [{ source = "diagnostic.c", destination = "diagnostic.c" }]\n'
-            b"appends = []\n",
-            0o644,
-        )
-        files = (
-            WorkspaceFile("scripts/fplinux_cli/kernelcheck.py", b"checker\n", 0o644),
-            target,
-            platform,
-            host_manifest,
-            other_manifest,
-            WorkspaceFile("targets/phone/profiles/host/host.c", b"int host;\n", 0o644),
-            WorkspaceFile(
-                "targets/phone/profiles/diagnostic/diagnostic.c", b"int diagnostic;\n", 0o644
+    def test_global_kernel_receipt_tracks_shared_and_board_configs(self) -> None:
+        """Relevant config changes miss while the other boot mode remains unrelated."""
+        inputs = {
+            "targets/phone/target.toml": (
+                b'platform = "demo"\n[linux]\nconfig_fragment = "kernel/config.fragment"\n'
             ),
-        )
-        host_before = WorkspaceSnapshot(files, "a" * 64)
-        other_changed = WorkspaceSnapshot(
-            (*files[:-1], WorkspaceFile(files[-1].path, b"int changed;\n", 0o644)),
-            "b" * 64,
-        )
-        host_changed = WorkspaceSnapshot(
-            (
-                *files[:5],
-                WorkspaceFile(files[5].path, b"int changed;\n", 0o644),
-                files[6],
+            "platforms/demo/platform.toml": (
+                b'[linux]\ndefconfig = "platforms/demo/kernel/defconfig"\n'
             ),
-            "c" * 64,
-        )
-        host_manifest_changed = WorkspaceSnapshot(
-            (
-                *files[:3],
-                WorkspaceFile(files[3].path, b"not even TOML", 0o644),
-                *files[4:],
-            ),
-            "d" * 64,
-        )
+            "platforms/demo/kernel/defconfig": b"CONFIG_SHARED=y\n",
+            "targets/phone/kernel/config.fragment": b"CONFIG_BOARD=y\n",
+            "scripts/fplinux_cli/profile_layout.py": b'root_policy = "ram"\n',
+            "profiles/default/profile.toml": b'[linux.root]\nkind = "initramfs"\n',
+            "profiles/microsd-uboot/profile.toml": b'[linux.root]\nkind = "external"\n',
+            "targets/phone/bootstrap/main.c": b"int bootstrap;\n",
+        }
 
-        digest = check_scope_closure_digest("kernel", host_before, profile="host")
-        self.assertEqual(
-            digest,
-            check_scope_closure_digest("kernel", other_changed, profile="host"),
-        )
-        self.assertNotEqual(
-            digest,
-            check_scope_closure_digest("kernel", host_changed, profile="host"),
-        )
-        self.assertEqual(
-            check_scope_closure_digest("kernel", host_before),
-            check_scope_closure_digest("kernel", host_changed),
-        )
-        self.assertEqual(
-            check_scope_closure_digest("kernel", host_before),
-            check_scope_closure_digest("kernel", host_manifest_changed),
-        )
+        def receipt(contents: dict[str, bytes], profile: str | None) -> CheckReceiptRecipe:
+            snapshot = WorkspaceSnapshot(
+                tuple(WorkspaceFile(path, data, 0o644) for path, data in contents.items()),
+                "a" * 64,
+            )
+            return check_scope_receipt_recipe(
+                "kernel",
+                check_scope_closure_digest("kernel", snapshot, profile=profile),
+                image_generation="b" * 64,
+                orchestration_recipe="c" * 64,
+                profile=profile,
+            )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary)
+            for profile in (None, "microsd-uboot"):
+                with self.subTest(profile=profile):
+                    original = receipt(inputs, profile)
+                    publish_success_receipt(cache, original)
+                    self.assertTrue(receipt_matches(cache, receipt(inputs, profile)))
+                    for path in (
+                        "platforms/demo/kernel/defconfig",
+                        "targets/phone/kernel/config.fragment",
+                        "scripts/fplinux_cli/profile_layout.py",
+                    ):
+                        changed = {**inputs, path: b"CONFIG_CHANGED=y\n"}
+                        self.assertFalse(receipt_matches(cache, receipt(changed, profile)))
+                    unrelated = {**inputs, "targets/phone/bootstrap/main.c": b"int changed;\n"}
+                    self.assertTrue(receipt_matches(cache, receipt(unrelated, profile)))
+                    other_profile = "default" if profile else "microsd-uboot"
+                    other_changed = {
+                        **inputs,
+                        f"profiles/{other_profile}/profile.toml": b"changed\n",
+                    }
+                    self.assertTrue(receipt_matches(cache, receipt(other_changed, profile)))
+                    selected_changed = {
+                        **inputs,
+                        f"profiles/{profile or 'default'}/profile.toml": b"changed\n",
+                    }
+                    self.assertFalse(receipt_matches(cache, receipt(selected_changed, profile)))
 
     def test_editorconfig_change_updates_metadata_closure(self) -> None:
         """Track Prettier's repository EditorConfig as metadata input."""
@@ -577,7 +563,7 @@ class RepositoryFastPathTests(unittest.TestCase):
                 side_effect=AssertionError("repository check must not snapshot a workspace"),
             ),
         ):
-            container.check(["repository"])
+            container.check(["repository"], profile="microsd-uboot")
         git_diff.assert_called_once_with(reporter)
         reporter.finish.assert_called_once_with()
 

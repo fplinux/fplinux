@@ -14,26 +14,56 @@
 
 ## Scope
 
-UMS9117 provides reusable CPU, interrupt, timer, USB gadget, analog-die,
-framebuffer and matrix-keypad support for the listed phones. Linux also reads and
+UMS9117 provides reusable CPU, interrupt, timer, USB gadget, memory-copy DMA,
+ROTA, JPEG codec/scaler, analog-die, framebuffer and matrix-keypad support for
+the listed phones. Linux also reads and
 reports the inherited MPLL and Cortex-A7 rates without changing them. The
-platform owns the SoC integration and its fixed RAM-only loader flow. A target
+platform owns the SoC integration and shared loader support. A target
 owns board memory, panel profile and wiring, keypad map, bootstrap inputs,
 payload assembly and the values supplied to the loader.
 
 ## Reusable capabilities
 
-| Capability                                                     | Status        | Target-facing requirement or limitation                                                                  |
-| -------------------------------------------------------------- | ------------- | -------------------------------------------------------------------------------------------------------- |
-| CPU / GIC / timers                                             | Supported     | The SoC has one Cortex-A7 CPU; targets use the shared interrupt and timer nodes.                         |
-| [Clock controller](../../docs/features/CPU_CLOCK.md)           | Partial       | Linux reads and reports inherited MPLL/Cortex-A7 rates; it does not change clocks.                       |
-| [USB device controller](../../docs/features/USB_NETWORKING.md) | Supported     | USB peripheral support is shared; board USB setup remains target-owned.                                  |
-| USB host mode                                                  | Not supported | The shared MUSB integration is peripheral-only and provides no host-mode initialization.                 |
-| Generic DMA controller                                         | Not supported | There is no shared DMAengine provider; controller-private DMA remains owned by its controller or target. |
-| Analog-die interface                                           | Supported     | Linux initializes the shared transport; feature clients and their board wiring remain target-owned.      |
-| [LCDC framebuffer core](../../docs/features/LOCAL_CONSOLE.md)  | Supported     | Targets provide a panel profile and the board-specific panel transport setup.                            |
-| [Matrix keypad](../../docs/features/LOCAL_CONSOLE.md)          | Supported     | Targets provide matrix wiring, inherited EIC use where applicable, and the normalized keymap.            |
-| UART, GPIO/pin control, audio, SPI/I2C, watchdog/reset         | Not supported | No generic platform framework or driver for these functions.                                             |
+| Capability                                                     | Status        | Target-facing requirement or limitation                                                                     |
+| -------------------------------------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------- |
+| CPU / GIC / timers                                             | Supported     | The SoC has one Cortex-A7 CPU; targets use the shared interrupt and timer nodes.                            |
+| [Clock controller](../../docs/features/CPU_CLOCK.md)           | Partial       | Linux reads and reports inherited MPLL/Cortex-A7 rates; it does not change clocks.                          |
+| [USB device controller](../../docs/features/USB_NETWORKING.md) | Supported     | USB peripheral support is shared; board USB setup remains target-owned.                                     |
+| USB host mode                                                  | Not supported | The shared MUSB integration is peripheral-only and provides no host-mode initialization.                    |
+| [AP DMAengine](#memory-copy-dma)                               | Partial       | 32 shared channels for memory copies and the fixed ROTA request; client availability depends on the target. |
+| [Image rotation](../../docs/apps/ROTATE.md)                    | Supported     | V4L2 mem2mem ROTA with a shared userspace interface.                                                        |
+| [JPEG codec and scaling](../../docs/apps/JPEG.md)              | Supported     | Baseline JPEG decode, fixed quality-85 JPEG encode, and two fixed half-size NV16 scaler pairs.              |
+| [Native image presentation](../../docs/apps/PRESENT.md)        | Supported     | Native-size NV16 or RGB565 presentation through the target framebuffer.                                     |
+| Analog-die interface                                           | Supported     | Linux initializes the shared transport; feature clients and their board wiring remain target-owned.         |
+| [LCDC framebuffer core](../../docs/features/LOCAL_CONSOLE.md)  | Supported     | Targets provide a panel profile and the board-specific panel transport setup.                               |
+| [Matrix keypad](../../docs/features/LOCAL_CONSOLE.md)          | Supported     | Targets provide matrix wiring, inherited EIC use where applicable, and the normalized keymap.               |
+| Audio playback                                                 | Not supported | No audio driver is included.                                                                                |
+| UART, GPIO/pin control, SPI/I2C, watchdog/reset                | Not supported | No generic platform framework or driver for these functions.                                                |
+
+## Memory-copy DMA
+
+The AP DMA controller provides 32 channels through the standard Linux DMAengine
+`DMA_MEMCPY` interface. It supports arbitrary byte alignment, queued transfers,
+interrupt-driven completion, pause/resume and synchronous termination. Transfers
+larger than one hardware block are split transparently. Residue is reported at
+completed-segment granularity, not as a live byte counter.
+
+A configuration error aborts the active and queued transfers with `DMA_ERROR`
+and `DMA_TRANS_ABORTED`. Release and request the channel again before reusing it.
+If the controller cannot be stopped, termination returns an error; the client
+must retain its DMA buffers until a cold boot. Error recovery is qualified for
+the source-alignment fault; other hardware fault conditions are unqualified.
+
+Framebuffer DMA copies, when enabled by the target, and ROTA use one channel
+each. They share the same DMA controller owner. This does not change the
+framebuffer publication or page-flip contract.
+
+ROTA uses its fixed peripheral request and hardware-generated external linked
+lists through this controller. Generic peripheral requests, cyclic transfers,
+caller-supplied hardware linked lists and a userspace memory-copy API are not
+provided. Controller-private DMA
+remains owned by its controller or target. See the target documentation for
+the enabled clients and hardware support status of each phone.
 
 ## Shared framebuffer interface
 
@@ -49,9 +79,10 @@ frames keeps a submitted page unchanged while the display pipeline can snapshot
 it and uses fully populated alternate pages. A mapped write without publication
 is intentionally silent.
 
-The framebuffer core remains the single WLED owner. A target may opt into a
-standard backlight class only for a range qualified on that exact board; targets
-without such a range retain their fixed display-power lifecycle without a user
+The framebuffer core remains the single WLED owner. Each target selects whether
+to expose a standard backlight class and its brightness range. Consult the
+phone's support status for physical brightness limits. Targets without a
+backlight class retain their fixed display-power lifecycle without a user
 brightness interface.
 
 ## Target requirements

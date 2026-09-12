@@ -21,7 +21,14 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
-from . import alpine_builder, alpine_state, kbuild_state, linux_state, profile_layout
+from . import (
+    alpine_builder,
+    alpine_state,
+    firmware_inputs,
+    kbuild_state,
+    linux_state,
+    profile_layout,
+)
 from .build_env import build_environment
 from .bundle_state import (
     canonical_json_bytes,
@@ -33,15 +40,15 @@ from .bundle_state import (
 )
 from .common import ROOT, sha256_bytes, sha256_file
 from .config import (
-    PROFILE_HOST_PLUGIN_BUNDLE_PATH,
+    compose_kernel_config,
     container_runtime_recipe_digest,
+    kernel_config_paths,
     load_asset_lock,
     load_platform,
     load_release,
     load_target,
     relative_value,
     target_asset_lock_path,
-    target_defconfig_path,
 )
 from .device_state import DeviceStateError, device_kernel_identity, localversion
 from .device_tree import (
@@ -342,7 +349,7 @@ def integration_inputs(
     return result
 
 
-PROFILE_ROOT_DTSI = "arch/arm/boot/dts/unisoc/fplinux-external-root.dtsi"
+PROFILE_ROOT_DTSI = "arch/arm/boot/dts/unisoc/fplinux-root.dtsi"
 
 
 def generated_linux_files(
@@ -359,8 +366,7 @@ def generated_linux_files(
         ),
     }
     root = target_config["linux"]["root"]
-    if root["kind"] == "external":
-        files[PROFILE_ROOT_DTSI] = profile_layout.external_root_dtsi(root)
+    files[PROFILE_ROOT_DTSI] = profile_layout.root_bootargs_dtsi(root)
     return files
 
 
@@ -759,7 +765,10 @@ def build_kernel(
     """Build or exactly reuse zImage and the declared target DTB in ``work/kernel``."""
     try:
         work = output.parent
-        defconfig = require_file(target_defconfig_path(target))
+        base, fragment = kernel_config_paths(target, target_config, platform)
+        work.mkdir(parents=True, exist_ok=True)
+        defconfig = work / "kernel.defconfig"
+        defconfig.write_bytes(compose_kernel_config(base, fragment))
         root_contract = target_config["linux"]["root"]
         initramfs_record: dict[str, int | str] | None = None
         initramfs_input: Path | None = None
@@ -846,7 +855,7 @@ def build_kernel(
             linux_recipe=current_linux.linux_recipe,
             linux_base=require_sha256(linux_base, "Linux base source"),
             defconfig=defconfig,
-            defconfig_path=f"targets/{target}/kernel/defconfig",
+            defconfig_path="generated/kernel.defconfig",
             root=root_contract,
             initramfs=initramfs_record,
             initramfs_input=initramfs_input,
@@ -887,7 +896,7 @@ def build_kernel(
             verify_root_bootargs(dtb, root_contract)
             layout = target_config.get("layout")
             if isinstance(layout, dict):
-                verify_profile_dtb_layout(dtb, layout)
+                verify_profile_dtb_layout(dtb, layout, target_config["linux"]["memory"])
         except DeviceTreeError as error:
             fail(str(error))
         config_text = require_file(output / ".config").read_text()
@@ -1500,32 +1509,37 @@ def build_profile_uboot(
         profile = selected_profile(target_config)
         if profile is None:
             fail("full U-Boot requires a selected profile")
-        profile_root = ROOT / "targets" / target / "profiles" / profile
+        target_root = ROOT / "targets" / target
         projections = [
             (require_file(ROOT / step["source"]), step["destination"]) for step in config["copies"]
         ]
         work.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=work, prefix=".uboot-inputs.") as name:
             generated = Path(name)
-            defconfig = generated / "ta1618_defconfig"
+            defconfig = generated / Path(config["defconfig"]).name
             layout_header = generated / "fplinux-boot-layout.h"
             layout_dtsi = generated / "fplinux-uboot-layout.dtsi"
+            target_header = generated / "fplinux-uboot-target.h"
             defconfig.write_bytes(
                 profile_layout.uboot_defconfig(
-                    require_file(profile_root / config["defconfig"]).read_bytes(),
+                    require_file(target_root / config["defconfig"]).read_bytes(),
                     target_config["layout"],
                 )
             )
             layout_header.write_bytes(profile_layout.boot_layout_header(target_config["layout"]))
             layout_dtsi.write_bytes(profile_layout.uboot_layout_dtsi(target_config["layout"]))
+            target_header.write_text(
+                f'#define FPLINUX_UBOOT_TARGET "{target}"\n', encoding="ascii"
+            )
             projections.append((layout_header, "include/fplinux-boot-layout.h"))
             projections.append((layout_dtsi, "arch/arm/dts/fplinux-uboot-layout.dtsi"))
+            projections.append((target_header, "include/fplinux-uboot-target.h"))
             uboot = uboot_tools.build_full(
                 archive,
                 config,
                 defconfig,
                 projections,
-                [require_file(profile_root / path) for path in config["patches"]],
+                [require_file(ROOT / path) for path in config["patches"]],
                 work,
                 jobs,
                 container_recipe,
@@ -1838,12 +1852,6 @@ def _publish_staged_bundle(
         copy_file(source, release / "host" / name, executable=True)
     copy_file(runner_source(), release / "runner/run.py", executable=True)
     copy_file(ssh_transport_source(), release / "runner/ssh_transport.py")
-    profile_plugin = target_config["runtime"].get("host_plugin")
-    if isinstance(profile_plugin, str):
-        copy_file(
-            ROOT / "targets" / target / profile_plugin,
-            release / PROFILE_HOST_PLUGIN_BUNDLE_PATH,
-        )
     copy_file(identity_source(), release / RUNTIME_IDENTITY_PATH)
     copy_file(
         adapter_source(target_config["platform"]),
@@ -2003,6 +2011,11 @@ def main() -> None:
         platform = load_platform(target_config["platform"])
         rootfs_packages = alpine_state.selected_packages(platform, target_config)
         bundle_packages = alpine_state.bundle_packages(platform, target_config, rootfs_packages)
+        firmware = firmware_inputs.capture_snapshot_firmware_inputs(
+            args.target,
+            target_config["rootfs"]["firmware"],
+            ROOT,
+        )
         with (ROOT / "sources.lock.toml").open("rb") as stream:
             sources = tomllib.load(stream)
         linux_base = require_sha256(
@@ -2033,12 +2046,16 @@ def main() -> None:
                 args.jobs,
                 rootfs_packages,
                 bundle_packages,
+                firmware=firmware,
                 external_image=target_config["image"],
                 external_output=work / "rootfs-image",
             )
         else:
             rootfs, rootfs_output, rootfs_recipe, bundle_apk_outputs = alpine_builder.build_rootfs(
-                args.jobs, rootfs_packages, bundle_packages
+                args.jobs,
+                rootfs_packages,
+                bundle_packages,
+                firmware=firmware,
             )
         ext4_artifact = profile_ext4_artifact(
             target_config,

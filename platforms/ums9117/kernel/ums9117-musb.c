@@ -86,6 +86,7 @@ struct ums9117_musb_glue {
 	void __iomem *anlg_phy_top;
 	struct regulator *vddusb;
 	atomic_t irq_count;
+	u16 rx_pending;
 	bool cold_owned;
 	bool vddusb_enabled;
 	bool vddusb_force_off;
@@ -591,6 +592,29 @@ fail:
 	return ret;
 }
 
+/* Called with musb->lock held and IRQs disabled by the request queue. */
+static int ums9117_musb_restart_rx(struct musb *musb, u8 epnum)
+{
+	struct ums9117_musb_glue *glue =
+		dev_get_drvdata(musb->controller->parent);
+	u16 pending = glue->rx_pending;
+	int ret;
+
+	if (!(musb_readw(musb->endpoints[epnum].regs, MUSB_RXCSR) &
+	      MUSB_RXCSR_RXPKTRDY))
+		return 0;
+	/*
+	 * The packet survived an IRQ with no queued request. Preserve it and
+	 * retry from the normal IRQ handler: completing it here would call the
+	 * gadget driver from usb_ep_queue(), which can deadlock network RX.
+	 */
+	glue->rx_pending |= BIT(epnum);
+	ret = irq_set_irqchip_state(musb->nIrq, IRQCHIP_STATE_PENDING, true);
+	if (ret)
+		glue->rx_pending = pending;
+	return ret;
+}
+
 static irqreturn_t ums9117_musb_irq(int irq, void *data)
 {
 	struct musb *musb = data;
@@ -612,7 +636,10 @@ static irqreturn_t ums9117_musb_irq(int irq, void *data)
 	mask16 = musb_readw(musb->mregs, MUSB_INTRTXE);
 	musb->int_tx = musb_readw(musb->mregs, MUSB_INTRTX) & mask16;
 	mask16 = musb_readw(musb->mregs, MUSB_INTRRXE);
-	musb->int_rx = musb_readw(musb->mregs, MUSB_INTRRX) & mask16;
+	musb->int_rx =
+		(musb_readw(musb->mregs, MUSB_INTRRX) | glue->rx_pending) &
+		mask16;
+	glue->rx_pending = 0;
 
 	if (musb->int_usb || musb->int_tx || musb->int_rx)
 		result = musb_interrupt(musb);
@@ -695,6 +722,7 @@ static const struct musb_platform_ops ums9117_musb_ops = {
 	.init = ums9117_musb_init,
 	.exit = ums9117_musb_exit,
 	.read_fifo = ums9117_musb_read_fifo32,
+	.restart_rx = ums9117_musb_restart_rx,
 };
 
 static const struct musb_fifo_cfg ums9117_musb_fifo_cfg[] = {
@@ -872,7 +900,7 @@ static const struct of_device_id ums9117_musb_of_match[] = {
 		.data = &ums9117_musb_inherited_data,
 	},
 	{
-		.compatible = "fplinux,ums9117-musb",
+		.compatible = "sprd,ums9117-musb",
 		.data = &ums9117_musb_cold_data,
 	},
 	{}
@@ -887,6 +915,7 @@ static struct platform_driver ums9117_musb_driver = {
 		.of_match_table = ums9117_musb_of_match,
 	},
 };
+
 module_platform_driver(ums9117_musb_driver);
 
 MODULE_DESCRIPTION("UMS9117 MUSB gadget glue");

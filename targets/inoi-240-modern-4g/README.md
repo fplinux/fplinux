@@ -7,68 +7,104 @@
 | Target   | `inoi-240-modern-4g`                                |
 | Device   | INOI 240 Modern 4G                                  |
 | Platform | [Unisoc UMS9117](../../platforms/ums9117/README.md) |
-| Boot     | Volatile RAM only                                   |
+| Boot     | USB-loaded RAM bootstrap; initramfs or microSD root |
 
 ## Status
 
-This exact phone runs a local `128×160` console, its physical keypad, the
-private USB session and the shared applications. No supported microSD,
-keypad-backlight, battery or power-off path is available.
+This exact phone runs the `128×160` console interface, the private USB session,
+ARMADA, TyrQuake and the shared graphics applications. microSD ext4 storage
+and a writable microSD system root work. Bluetooth pairing, bidirectional
+file transfer and PAN Internet work in both profiles. RTC alarms wake the
+phone from s2idle, including with mounted ext4 storage and card-backed swap;
+applications, Bluetooth and graphics work again after wake.
+
+Physical display, key and brightness effects remain unqualified on this
+configuration. The force-feedback interface responds, but no physical
+vibration was observed under Linux without a battery. The motor works in
+stock firmware; the cause of the Linux limitation is unknown, and Linux
+vibration with a battery is unqualified. Telemetry read without a battery
+does not qualify battery operation, measurement accuracy or charging.
 
 Status terms and limits shared by every phone are defined in the
 [target index](../README.md#status-and-common-limits).
 
 ## Features
 
-| Feature                                                      | Hardware | FPLinux       | This phone                                                   |
-| ------------------------------------------------------------ | -------- | ------------- | ------------------------------------------------------------ |
-| RAM boot                                                     | N/A      | Supported     | —                                                            |
-| Persistent boot                                              | N/A      | Not supported | —                                                            |
-| [Local console](../../docs/features/LOCAL_CONSOLE.md)        | Present  | Supported     | `128×160`.                                                   |
-| LCD backlight                                                | Present  | Not supported | No user brightness interface is provided.                    |
-| Keypad backlight                                             | Unknown  | Not supported | No FPLinux control is provided.                              |
-| [USB networking](../../docs/features/USB_NETWORKING.md)      | Present  | Supported     | —                                                            |
-| [SSH access](../../docs/features/SSH.md)                     | N/A      | Supported     | —                                                            |
-| [File transfer](../../docs/features/FILE_TRANSFER.md)        | N/A      | Supported     | Destinations are RAM-backed on this target.                  |
-| [Host keyboard bridge](../../docs/features/HOST_KEYBOARD.md) | N/A      | Supported     | —                                                            |
-| [CPU clock reporting](../../docs/features/CPU_CLOCK.md)      | N/A      | Supported     | —                                                            |
-| USB host mode                                                | Unknown  | Not supported | —                                                            |
-| Removable storage                                            | Unknown  | Not supported | No supported microSD path is provided.                       |
-| Removable system root                                        | Unknown  | Not supported | —                                                            |
-| Internal phone storage                                       | Present  | Not supported | —                                                            |
-| Audio                                                        | Present  | Not supported | —                                                            |
-| Modem and mobile service                                     | Present  | Not supported | —                                                            |
-| Bluetooth                                                    | Unknown  | Not supported | —                                                            |
-| Wi-Fi                                                        | Unknown  | Not supported | —                                                            |
-| Camera                                                       | Unknown  | Not supported | —                                                            |
-| Charger status                                               | Unknown  | Not supported | No external-input status is exposed.                         |
-| Battery telemetry                                            | Unknown  | Not supported | No voltage or current reporting is provided.                 |
-| SoC temperature                                              | Unknown  | Not supported | —                                                            |
-| Auxiliary ADC                                                | Unknown  | Not supported | —                                                            |
-| Real-time clock                                              | Unknown  | Not supported | —                                                            |
-| Other battery functions                                      | Unknown  | Not supported | No battery level, temperature or charge control is provided. |
-| Vibration                                                    | Unknown  | Not supported | —                                                            |
-| Indicator LEDs                                               | Unknown  | Not supported | —                                                            |
-| Power-off                                                    | N/A      | Not supported | End the session by reseating the battery as described below. |
-| Suspend                                                      | N/A      | Not supported | —                                                            |
-| Reboot                                                       | N/A      | Not supported | —                                                            |
+| Feature                                                           | Hardware | FPLinux       | This phone                                                                                                                                    |
+| ----------------------------------------------------------------- | -------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| RAM boot                                                          | N/A      | Supported     | —                                                                                                                                             |
+| Persistent boot                                                   | N/A      | Not supported | A USB-loaded RAM bootstrap is required for every Linux boot.                                                                                  |
+| [Local console](../../docs/features/LOCAL_CONSOLE.md)             | Present  | Partial       | `128×160`; physical display and keys are unqualified.                                                                                         |
+| LCD backlight                                                     | Present  | Partial       | Brightness interface enabled; physical brightness levels are unqualified.                                                                     |
+| Keypad backlight                                                  | Unknown  | Partial       | LED control is available; physical effect is unqualified.                                                                                     |
+| [USB networking](../../docs/features/USB_NETWORKING.md)           | Present  | Supported     | —                                                                                                                                             |
+| [SSH access](../../docs/features/SSH.md)                          | N/A      | Supported     | —                                                                                                                                             |
+| [File transfer](../../docs/features/FILE_TRANSFER.md)             | N/A      | Supported     | RAM and writable mounted ext4 microSD storage are valid destinations.                                                                         |
+| [Host keyboard bridge](../../docs/features/HOST_KEYBOARD.md)      | N/A      | Supported     | —                                                                                                                                             |
+| [CPU clock reporting](../../docs/features/CPU_CLOCK.md)           | N/A      | Supported     | —                                                                                                                                             |
+| [AP DMAengine](../../platforms/ums9117/README.md#memory-copy-dma) | Present  | Partial       | Memory copies and the fixed ROTA request; see platform limits.                                                                                |
+| [Image rotation](../../docs/apps/ROTATE.md)                       | Present  | Supported     | RGB, grayscale and two-plane YUV through V4L2 mem2mem.                                                                                        |
+| [JPEG codec and scaling](../../docs/apps/JPEG.md)                 | Present  | Supported     | Baseline decode, fixed encode geometries and fixed NV16 scaler pairs.                                                                         |
+| [Native image presentation](../../docs/apps/PRESENT.md)           | Present  | Partial       | Native `128×160` NV16 or RGB565; physical display is unqualified.                                                                             |
+| USB host mode                                                     | Unknown  | Not supported | —                                                                                                                                             |
+| [Removable storage](../../docs/features/MICROSD.md)               | Present  | Partial       | ext4 read/write and card-backed swap work in the RAM profile; FAT32 data storage and hot-swap are unqualified.                                |
+| [Removable system root](../../docs/guides/MICROSD_ROOT.md)        | Present  | Supported     | FAT32 boot files plus writable ext4 root; applications, files and Bluetooth pairing records persist across cold boots.                        |
+| Internal phone storage                                            | Present  | Not supported | Bluetooth preparation uses a separate read-only path; no writes.                                                                              |
+| Audio                                                             | Present  | Not supported | —                                                                                                                                             |
+| Modem and mobile service                                          | Present  | Not supported | —                                                                                                                                             |
+| [Bluetooth](../../docs/features/BLUETOOTH.md)                     | Present  | Partial       | Pairing, bidirectional OPP, PAN Internet and recovery after RTC-woken s2idle work in both profiles.                                           |
+| Wi-Fi                                                             | Unknown  | Not supported | —                                                                                                                                             |
+| Camera                                                            | Unknown  | Not supported | —                                                                                                                                             |
+| Charger status                                                    | Present  | Partial       | External-input status is available; battery charging is unqualified.                                                                          |
+| Battery telemetry                                                 | Present  | Partial       | Voltage, current and charge counter respond; battery measurements are unqualified.                                                            |
+| SoC temperature                                                   | Present  | Partial       | Temperature readings are available; physical accuracy is unqualified.                                                                         |
+| Auxiliary ADC                                                     | Present  | Partial       | Raw-channel interface enabled; physical inputs and accuracy are unqualified.                                                                  |
+| [Real-time clock](../../docs/features/RTC.md)                     | Present  | Partial       | Read/set time, one-shot alarms and RTC wake work in both profiles.                                                                            |
+| Other battery functions                                           | Unknown  | Not supported | No battery level, temperature or charge control is provided.                                                                                  |
+| Vibration                                                         | Present  | Partial       | Force-feedback interface responds; no physical vibration under Linux without a battery. Battery-powered operation is unqualified.             |
+| Indicator LEDs                                                    | Unknown  | Not supported | —                                                                                                                                             |
+| [Power-off](../../docs/features/POWER_OFF.md)                     | N/A      | Partial       | Establish card safety before disconnecting USB power; battery-only power-off is unqualified.                                                  |
+| [Suspend](../../docs/features/SUSPEND.md)                         | N/A      | Partial       | Repeated RTC-woken s2idle works in both profiles, including mounted ext4 data storage and card-backed swap; physical-key wake is unqualified. |
+| Reboot                                                            | N/A      | Not supported | —                                                                                                                                             |
 
 ## Applications
 
-| Application                                       | FPLinux   | This phone                                                              |
-| ------------------------------------------------- | --------- | ----------------------------------------------------------------------- |
-| [TyrQuake](../../docs/apps/TYRQUAKE.md)           | Supported | Game data uses tmpfs and consumes the phone's limited RAM.              |
-| [MicroPythonOS](../../docs/apps/MICROPYTHONOS.md) | Partial   | State remains in RAM; the `128×160` UI clips some content and controls. |
+| Application                                             | FPLinux       | This phone                                                                                                              |
+| ------------------------------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| [FPLinux: ARMADA](../../docs/apps/SHOWCASE.md)          | Supported     | Runs in both profiles; physical display and light effects are unqualified, and there is no vibration without a battery. |
+| [TyrQuake](../../docs/apps/TYRQUAKE.md)                 | Supported     | Game data can use RAM or ext4 microSD storage, including the system root.                                               |
+| [MicroPythonOS](../../docs/apps/MICROPYTHONOS.md)       | Not supported | Not included in this target's supported applications.                                                                   |
+| [Image rotation](../../docs/apps/ROTATE.md)             | Supported     | Explicit CPU/ROTA selection and framebuffer preview.                                                                    |
+| [JPEG codec and scaling](../../docs/apps/JPEG.md)       | Supported     | Hardware decode, fixed encode and fixed half-scaling.                                                                   |
+| [Native image presentation](../../docs/apps/PRESENT.md) | Supported     | Direct NV16 or CPU-converted RGB565 presentation.                                                                       |
+
+## Bluetooth
+
+Follow the shared [firmware preparation procedure](../../docs/guides/BUILDING.md#prepare-bluetooth-firmware)
+using firmware and configuration from this exact phone. See the shared
+[Bluetooth limits](../../docs/features/BLUETOOTH.md#limits-and-persistence)
+for peer compatibility, persistence and unqualified features.
 
 ## Load into RAM
 
 Follow [Loading from a source checkout](../../docs/guides/LOADING.md). When the loader
 requests the phone, hold `*` and connect it powered off.
 
+For a persistent system, follow the shared
+[microSD system-root procedure](../../docs/guides/MICROSD_ROOT.md).
+
 ## End the RAM session
 
-Disconnect USB, remove and reinsert the battery, then boot the phone normally.
-This target does not provide Linux power-off or reboot.
+Stop applications using microSD and follow the shared
+[safe-removal procedure](../../docs/features/MICROSD.md#safe-removal), including
+disabling card-backed swap and unmounting card filesystems. Then disconnect
+USB. If a battery is installed, remove and reinsert it before booting the
+phone normally.
+
+A writable microSD system root requires the shared
+[USB-powered shutdown procedure](../../docs/guides/MICROSD_ROOT.md#shutdown-with-usb-power)
+before removing power. Battery-only Linux power-off is unqualified; Linux
+reboot is not supported.
 
 ## Release boundary
 

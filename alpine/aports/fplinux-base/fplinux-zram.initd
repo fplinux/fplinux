@@ -1,0 +1,48 @@
+#!/sbin/openrc-run
+# SPDX-License-Identifier: GPL-2.0-only
+# shellcheck shell=sh disable=SC2034
+
+description="Enable compressed RAM swap"
+
+depend() {
+	need devfs procfs sysfs
+}
+
+zram_swap_active() {
+	grep -q '^/dev/zram0[[:space:]]' /proc/swaps
+}
+
+start() {
+	ebegin "Enabling compressed RAM swap"
+
+	if zram_swap_active; then
+		eend 0
+		return 0
+	fi
+
+	zram_initstate=$(cat /sys/block/zram0/initstate) || {
+		eend 1 "Could not read /dev/zram0 state"
+		return 1
+	}
+	if [ "$zram_initstate" -eq 0 ]; then
+		printf '64M\n' >/sys/block/zram0/disksize || {
+			eend 1 "Could not size /dev/zram0"
+			return 1
+		}
+	fi
+	mkswap /dev/zram0 || {
+		eend 1 "Could not format /dev/zram0"
+		return 1
+	}
+	swapon /dev/zram0 || {
+		eend 1 "Could not enable /dev/zram0"
+		return 1
+	}
+
+	eend 0
+}
+
+stop() {
+	# Keep RAM swap active: swapping it off may not fit in RAM.
+	return 0
+}

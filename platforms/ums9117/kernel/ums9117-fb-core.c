@@ -10,20 +10,25 @@
 #include <linux/console.h>
 #include <linux/delay.h>
 #include <linux/device.h>
+#include <linux/dma-mapping.h>
 #include <linux/fb.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/iopoll.h>
 #include <linux/jiffies.h>
+#include <linux/ktime.h>
 #include <linux/mfd/syscon.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/pm.h>
 #include <linux/slab.h>
+#include <linux/string.h>
+#include <linux/uaccess.h>
 #include <video/mipi_display.h>
 
 #include "ums9117-fb-internal.h"
+#include "ums9117-present.h"
 
 #define UMS9117_LCDC_CTRL 0x000
 #define UMS9117_LCDC_DISP_SIZE 0x004
@@ -32,11 +37,16 @@
 #define UMS9117_LCDC_BG_COLOR 0x010
 #define UMS9117_LCDC_IMG_CTRL 0x020
 #define UMS9117_LCDC_IMG_Y_BASE 0x024
+#define UMS9117_LCDC_IMG_UV_BASE 0x028
 #define UMS9117_LCDC_IMG_SIZE_XY 0x02c
 #define UMS9117_LCDC_IMG_PITCH 0x030
 #define UMS9117_LCDC_IMG_DISP_XY 0x034
 #define UMS9117_LCDC_CAP_CTRL 0x0e0
 #define UMS9117_LCDC_CAP_BASE 0x0e4
+#define UMS9117_LCDC_Y2R_CTRL 0x100
+#define UMS9117_LCDC_Y2R_CONTRAST 0x104
+#define UMS9117_LCDC_Y2R_SATURATION 0x108
+#define UMS9117_LCDC_Y2R_BRIGHTNESS 0x10c
 #define UMS9117_LCDC_IRQ_EN 0x110
 #define UMS9117_LCDC_IRQ_CLR 0x114
 #define UMS9117_LCDC_IRQ_STATUS 0x118
@@ -76,6 +86,8 @@
 #define UMS9117_FB_FRAME_TIMEOUT_US (UMS9117_FB_FRAME_TIMEOUT_MS * 1000U)
 #define UMS9117_FB_WLED_DISABLE_ATTEMPTS 3U
 #define UMS9117_FB_WLED_DISABLE_RETRY_US 5000U
+#define UMS9117_FB_PRESENT_GUARD_BYTES 64U
+#define UMS9117_FB_PRESENT_GUARD 0xa5
 
 static DEFINE_MUTEX(ums9117_fb_lifetime_lock);
 static struct fb_info *ums9117_fb_retired_info;
@@ -97,8 +109,136 @@ static bool ums9117_fb_damage_pending(const struct ums9117_fb *ufb)
 
 static bool ums9117_fb_can_refresh(const struct ums9117_fb *ufb)
 {
-	return !ufb->stopping && !ufb->in_flight &&
+	return !ufb->stopping && !ufb->in_flight && !ufb->present_busy &&
 	       ufb->state == UMS9117_FB_PANEL_STATE_ACTIVE;
+}
+
+static bool ums9117_fb_dma_filter(struct dma_chan *channel, void *parameter)
+{
+	(void)parameter;
+	return of_device_is_compatible(channel->device->dev->of_node,
+				       "sprd,ums9117-dma");
+}
+
+static int ums9117_fb_init_copy_dma(struct ums9117_fb *ufb)
+{
+	struct dma_chan *channel;
+	struct device *dma_dev;
+	dma_cap_mask_t mask;
+	dma_addr_t source;
+	dma_addr_t destination;
+	size_t size = ums9117_fb_size_bytes(ufb);
+
+	if (!ufb->profile->dma_memcpy)
+		return 0;
+	dma_cap_zero(mask);
+	dma_cap_set(DMA_MEMCPY, mask);
+	channel = dma_request_channel(mask, ums9117_fb_dma_filter, NULL);
+	if (!channel)
+		return -EPROBE_DEFER;
+	dma_dev = dmaengine_get_dma_device(channel);
+	/*
+	 * This board's reserved no-map RAM has only write-combined mappings.
+	 * There is no cached linear alias to synchronize. In particular, do not
+	 * pass an ioremap pointer through dma_map_single() or pretend RAM is MMIO.
+	 */
+	source = dma_map_phys(dma_dev, ufb->screen_phys, 2 * size,
+			      DMA_TO_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
+	if (dma_mapping_error(dma_dev, source))
+		goto release;
+	destination = dma_map_phys(dma_dev, ufb->transfer_phys, size,
+				   DMA_FROM_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
+	if (dma_mapping_error(dma_dev, destination)) {
+		dma_unmap_phys(dma_dev, source, 2 * size, DMA_TO_DEVICE,
+			       DMA_ATTR_SKIP_CPU_SYNC);
+		goto release;
+	}
+	ufb->copy_channel = channel;
+	ufb->copy_source = source;
+	ufb->copy_destination = destination;
+	init_completion(&ufb->copy_done);
+	return 0;
+release:
+	dma_release_channel(channel);
+	return -EIO;
+}
+
+static bool ums9117_fb_release_copy_dma(struct ums9117_fb *ufb)
+{
+	struct device *dma_dev;
+	size_t size = ums9117_fb_size_bytes(ufb);
+
+	if (!ufb->copy_channel)
+		return true;
+	if (ufb->copy_unsafe)
+		return false;
+	if (dmaengine_terminate_sync(ufb->copy_channel)) {
+		ufb->copy_unsafe = true;
+		return false;
+	}
+	dma_dev = dmaengine_get_dma_device(ufb->copy_channel);
+	dma_unmap_phys(dma_dev, ufb->copy_destination, size, DMA_FROM_DEVICE,
+		       DMA_ATTR_SKIP_CPU_SYNC);
+	dma_unmap_phys(dma_dev, ufb->copy_source, 2 * size, DMA_TO_DEVICE,
+		       DMA_ATTR_SKIP_CPU_SYNC);
+	dma_release_channel(ufb->copy_channel);
+	ufb->copy_channel = NULL;
+	return true;
+}
+
+static void ums9117_fb_copy_done(void *data,
+				 const struct dmaengine_result *result)
+{
+	struct ums9117_fb *ufb = data;
+
+	ufb->copy_result = result && result->result == DMA_TRANS_NOERROR &&
+					   !result->residue ?
+				   0 :
+				   -EIO;
+	complete(&ufb->copy_done);
+}
+
+static int ums9117_fb_copy_frame(struct ums9117_fb *ufb, unsigned int shown)
+{
+	struct dma_async_tx_descriptor *descriptor;
+	dma_cookie_t cookie;
+	size_t size = ums9117_fb_size_bytes(ufb);
+	size_t offset = shown * ums9117_fb_stride_bytes(ufb);
+	int ret;
+
+	if (!ufb->copy_channel) {
+		memcpy_fromio(ufb->snapshot, ufb->screen + offset, size);
+		memcpy_toio(ufb->transfer, ufb->snapshot, size);
+		return 0;
+	}
+	reinit_completion(&ufb->copy_done);
+	descriptor = dmaengine_prep_dma_memcpy(
+		ufb->copy_channel, ufb->copy_destination,
+		ufb->copy_source + offset, size,
+		DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
+	if (!descriptor)
+		return -ENOMEM;
+	descriptor->callback_result = ums9117_fb_copy_done;
+	descriptor->callback_param = ufb;
+	cookie = dmaengine_submit(descriptor);
+	ret = dma_submit_error(cookie);
+	if (ret)
+		return ret;
+	/* Publish framebuffer writes before the AP DMA reads the selected page. */
+	wmb();
+	dma_async_issue_pending(ufb->copy_channel);
+	if (!wait_for_completion_timeout(
+		    &ufb->copy_done,
+		    msecs_to_jiffies(UMS9117_FB_FRAME_TIMEOUT_MS)))
+		ret = -ETIMEDOUT;
+	else
+		ret = ufb->copy_result;
+	if (ret && dmaengine_terminate_sync(ufb->copy_channel)) {
+		ufb->copy_unsafe = true;
+		dev_err(ufb->info->device,
+			"frame copy did not stop; resources retained until a cold boot\n");
+	}
+	return ret;
 }
 
 static void ums9117_fb_stop_lcdc(struct ums9117_fb *ufb)
@@ -284,14 +424,15 @@ static int ums9117_fb_fail_dark(struct ums9117_fb *ufb)
 	return wled_ret ? wled_ret : dcs_ret;
 }
 
-static int ums9117_fb_run_init(struct ums9117_fb *ufb)
+static int ums9117_fb_run_commands(struct ums9117_fb *ufb,
+				   const struct ums9117_fb_command *commands,
+				   unsigned int count)
 {
 	unsigned int i;
 	int ret;
 
-	for (i = 0; i < ufb->profile->init_count; i++) {
-		const struct ums9117_fb_command *command =
-			&ufb->profile->init[i];
+	for (i = 0; i < count; i++) {
+		const struct ums9117_fb_command *command = &commands[i];
 
 		if (command->length > ARRAY_SIZE(command->data))
 			return -EINVAL;
@@ -314,6 +455,63 @@ static int ums9117_fb_begin_transport_frame(struct ums9117_fb *ufb)
 	return ums9117_fb_lcm_begin_frame(ufb);
 }
 
+static void ums9117_fb_present_restore(struct ums9117_fb *ufb)
+{
+	writel(ufb->present_saved_img_ctrl, ufb->lcdc + UMS9117_LCDC_IMG_CTRL);
+	writel(ufb->present_saved_y_base, ufb->lcdc + UMS9117_LCDC_IMG_Y_BASE);
+	writel(ufb->present_saved_uv_base,
+	       ufb->lcdc + UMS9117_LCDC_IMG_UV_BASE);
+	writel(ufb->present_saved_y2r_ctrl, ufb->lcdc + UMS9117_LCDC_Y2R_CTRL);
+	writel(ufb->present_saved_y2r_contrast,
+	       ufb->lcdc + UMS9117_LCDC_Y2R_CONTRAST);
+	writel(ufb->present_saved_y2r_saturation,
+	       ufb->lcdc + UMS9117_LCDC_Y2R_SATURATION);
+	writel(ufb->present_saved_y2r_brightness,
+	       ufb->lcdc + UMS9117_LCDC_Y2R_BRIGHTNESS);
+}
+
+static void ums9117_fb_present_program(struct ums9117_fb *ufb)
+{
+	ufb->present_saved_img_ctrl = readl(ufb->lcdc + UMS9117_LCDC_IMG_CTRL);
+	ufb->present_saved_y_base = readl(ufb->lcdc + UMS9117_LCDC_IMG_Y_BASE);
+	ufb->present_saved_uv_base =
+		readl(ufb->lcdc + UMS9117_LCDC_IMG_UV_BASE);
+	ufb->present_saved_y2r_ctrl = readl(ufb->lcdc + UMS9117_LCDC_Y2R_CTRL);
+	ufb->present_saved_y2r_contrast =
+		readl(ufb->lcdc + UMS9117_LCDC_Y2R_CONTRAST);
+	ufb->present_saved_y2r_saturation =
+		readl(ufb->lcdc + UMS9117_LCDC_Y2R_SATURATION);
+	ufb->present_saved_y2r_brightness =
+		readl(ufb->lcdc + UMS9117_LCDC_Y2R_BRIGHTNESS);
+	writel((u32)(ufb->present_phys >> 2),
+	       ufb->lcdc + UMS9117_LCDC_IMG_Y_BASE);
+	if (ufb->present_format == UMS9117_PRESENT_NV16) {
+		writel(0x2101, ufb->lcdc + UMS9117_LCDC_IMG_CTRL);
+		writel((u32)((ufb->present_phys +
+			      ums9117_fb_size_bytes(ufb) / 2) >>
+			     2),
+		       ufb->lcdc + UMS9117_LCDC_IMG_UV_BASE);
+		writel(1, ufb->lcdc + UMS9117_LCDC_Y2R_CTRL);
+		writel(64, ufb->lcdc + UMS9117_LCDC_Y2R_CONTRAST);
+		writel(64, ufb->lcdc + UMS9117_LCDC_Y2R_SATURATION);
+		writel(0, ufb->lcdc + UMS9117_LCDC_Y2R_BRIGHTNESS);
+	}
+}
+
+static bool ums9117_fb_present_guards_ok(struct ums9117_fb *ufb)
+{
+	u32 size = ums9117_fb_size_bytes(ufb);
+	unsigned int i;
+
+	for (i = 0; i < UMS9117_FB_PRESENT_GUARD_BYTES; i++) {
+		if (readb(ufb->present - UMS9117_FB_PRESENT_GUARD_BYTES + i) !=
+			    UMS9117_FB_PRESENT_GUARD ||
+		    readb(ufb->present + size + i) != UMS9117_FB_PRESENT_GUARD)
+			return false;
+	}
+	return true;
+}
+
 static int ums9117_fb_start_frame(struct ums9117_fb *ufb, bool cold)
 {
 	unsigned long flags;
@@ -321,30 +519,36 @@ static int ums9117_fb_start_frame(struct ums9117_fb *ufb, bool cold)
 	u32 height = ufb->profile->height;
 	u32 value;
 	u64 submitted;
+	unsigned int shown;
+	bool present;
 	int ret;
 
 	spin_lock_irqsave(&ufb->lock, flags);
 	if (ufb->stopping || ufb->in_flight ||
+	    (ufb->present_busy && !ufb->present_pending) ||
 	    ufb->state == UMS9117_FB_PANEL_STATE_ERROR ||
 	    (!cold && ufb->state != UMS9117_FB_PANEL_STATE_ACTIVE &&
 	     ufb->state != UMS9117_FB_PANEL_STATE_WAKING)) {
 		spin_unlock_irqrestore(&ufb->lock, flags);
 		return -ESHUTDOWN;
 	}
-	if (!cold && !ums9117_fb_damage_pending(ufb)) {
+	present = ufb->present_pending;
+	if (!cold && !present && !ums9117_fb_damage_pending(ufb)) {
 		spin_unlock_irqrestore(&ufb->lock, flags);
 		return -ESHUTDOWN;
 	}
 	submitted = ufb->damage_seq;
+	shown = ufb->shown;
 	spin_unlock_irqrestore(&ufb->lock, flags);
 
 	ret = ums9117_fb_begin_transport_frame(ufb);
 	if (ret)
 		return ret;
-	memcpy_fromio(ufb->snapshot,
-		      ufb->screen + ufb->shown * ums9117_fb_stride_bytes(ufb),
-		      ums9117_fb_size_bytes(ufb));
-	memcpy_toio(ufb->transfer, ufb->snapshot, ums9117_fb_size_bytes(ufb));
+	if (!present) {
+		ret = ums9117_fb_copy_frame(ufb, shown);
+		if (ret)
+			return ret;
+	}
 	/* Publish the frame pixels before the LCDC is programmed to fetch. */
 	wmb();
 
@@ -373,6 +577,8 @@ static int ums9117_fb_start_frame(struct ums9117_fb *ufb, bool cold)
 	value |= 0x20;
 	writel(value, ufb->lcdc + UMS9117_LCDC_CAP_CTRL);
 	writel((u32)(ufb->stream_phys >> 2), ufb->lcdc + UMS9117_LCDC_CAP_BASE);
+	if (present)
+		ums9117_fb_present_program(ufb);
 	/* Complete the LCDC programming before arming and starting a frame. */
 	wmb();
 	reinit_completion(&ufb->frame_done);
@@ -392,14 +598,22 @@ static int ums9117_fb_start_frame(struct ums9117_fb *ufb, bool cold)
 	if (ufb->stopping || ufb->in_flight) {
 		spin_unlock_irqrestore(&ufb->lock, flags);
 		ums9117_fb_stop_lcdc(ufb);
+		if (present)
+			ums9117_fb_present_restore(ufb);
 		return -ESHUTDOWN;
 	}
-	ufb->submitted_seq = submitted;
+	if (!present)
+		ufb->submitted_seq = submitted;
 	ufb->generation++;
 	ufb->frame_deadline =
 		jiffies + msecs_to_jiffies(UMS9117_FB_FRAME_TIMEOUT_MS);
 	ufb->in_flight = true;
 	ufb->stats.frames_started++;
+	if (present) {
+		ufb->present_pending = false;
+		ufb->present_active = true;
+		ufb->present_started_ns = ktime_get_ns();
+	}
 	writel(value | UMS9117_LCDC_CTRL_RUN, ufb->lcdc + UMS9117_LCDC_CTRL);
 	spin_unlock_irqrestore(&ufb->lock, flags);
 	return 0;
@@ -486,11 +700,12 @@ static const struct backlight_ops ums9117_fb_backlight_ops = {
 #endif
 
 /*
- * A successful completion, whether delivered by Nokia's IRQ or an INOI raw
- * status poll, follows exactly one lifecycle and releases the same waiters.
+ * IRQ delivery and raw-status polling share the same completion lifecycle,
+ * including staging-buffer validation and register restoration.
  */
 static void ums9117_fb_frame_done(struct ums9117_fb *ufb, bool from_irq)
 {
+	u64 completed_ns = ktime_get_ns();
 	unsigned long flags;
 	bool wake_done;
 
@@ -502,6 +717,19 @@ static void ums9117_fb_frame_done(struct ums9117_fb *ufb, bool from_irq)
 	}
 	ufb->in_flight = false;
 	ufb->done_generation = ufb->generation;
+	if (ufb->present_active) {
+		ufb->present_transfer_ns =
+			completed_ns - ufb->present_started_ns;
+		ufb->present_guard_ok = ums9117_fb_present_guards_ok(ufb);
+		if (!ufb->present_guard_ok)
+			ufb->stats.present_guard_failures++;
+		else if (ufb->present_format == UMS9117_PRESENT_NV16)
+			ufb->stats.present_nv16++;
+		else
+			ufb->stats.present_rgb565++;
+		ums9117_fb_present_restore(ufb);
+		ufb->present_active = false;
+	}
 	if (from_irq)
 		ufb->stats.frames_done_irq++;
 	else
@@ -805,11 +1033,56 @@ static int ums9117_fb_pan_display(struct fb_var_screeninfo *var,
 	return 0;
 }
 
+static int ums9117_fb_reset_panel(struct ums9117_fb *ufb, u16 phase_ms)
+{
+	int ret;
+
+	ret = regmap_write(ufb->aon_apb, UMS9117_AON_PANEL_RESET_SET, BIT(0));
+	if (ret)
+		return ret;
+	msleep(phase_ms);
+	ret = regmap_write(ufb->aon_apb, UMS9117_AON_PANEL_RESET_CLEAR, BIT(0));
+	if (ret)
+		return ret;
+	msleep(phase_ms);
+	ret = regmap_write(ufb->aon_apb, UMS9117_AON_PANEL_RESET_SET, BIT(0));
+	if (ret)
+		return ret;
+	msleep(phase_ms);
+	return 0;
+}
+
+static int ums9117_fb_wake_panel(struct ums9117_fb *ufb)
+{
+	const struct ums9117_fb_profile *profile = ufb->profile;
+	int ret;
+
+	if (profile->wake_finish) {
+		writel(readl(ufb->lcdc + UMS9117_LCDC_CTRL) | BIT(0),
+		       ufb->lcdc + UMS9117_LCDC_CTRL);
+		ret = ums9117_fb_reset_panel(ufb, profile->wake_reset_phase_ms);
+		if (!ret)
+			ret = ums9117_fb_run_commands(ufb, profile->init,
+						      profile->init_count);
+		if (!ret)
+			ret = ums9117_fb_run_commands(
+				ufb, profile->wake_finish,
+				profile->wake_finish_count);
+		return ret;
+	}
+	ret = ums9117_fb_dcs(ufb, MIPI_DCS_EXIT_SLEEP_MODE, NULL, 0);
+	if (ret)
+		return ret;
+	msleep(profile->sleep_out_ms);
+	return ums9117_fb_dcs(ufb, MIPI_DCS_SET_DISPLAY_ON, NULL, 0);
+}
+
 static int ums9117_fb_blank(int blank, struct fb_info *info)
 {
 	struct ums9117_fb *ufb = info->par;
 	unsigned long flags;
 	bool do_blank = false;
+	bool do_wake = false;
 	int ret = 0;
 
 	mutex_lock(&ufb->transition_lock);
@@ -822,18 +1095,15 @@ static int ums9117_fb_blank(int blank, struct fb_info *info)
 		else if (ufb->state == UMS9117_FB_PANEL_STATE_BLANKED) {
 			ufb->state = UMS9117_FB_PANEL_STATE_WAKING;
 			ufb->damage_seq++;
+			do_wake = true;
 		}
 		spin_unlock_irqrestore(&ufb->lock, flags);
-		if (ret || ufb->state != UMS9117_FB_PANEL_STATE_WAKING)
+		/* fbcon can repeat unblank before the first asynchronous wake ends. */
+		if (ret || !do_wake)
 			goto out;
 		ums9117_fb_prepare_irq_frame(ufb);
 		mutex_lock(&ufb->panel_lock);
-		ret = ums9117_fb_dcs(ufb, MIPI_DCS_EXIT_SLEEP_MODE, NULL, 0);
-		if (!ret)
-			msleep(ufb->profile->sleep_out_ms);
-		if (!ret)
-			ret = ums9117_fb_dcs(ufb, MIPI_DCS_SET_DISPLAY_ON, NULL,
-					     0);
+		ret = ums9117_fb_wake_panel(ufb);
 		if (!ret)
 			ret = ums9117_fb_start_frame(ufb, false);
 		mutex_unlock(&ufb->panel_lock);
@@ -890,6 +1160,8 @@ static void ums9117_fb_destroy(struct fb_info *info)
 {
 	struct ums9117_fb *ufb = info->par;
 
+	if (!ums9117_fb_release_copy_dma(ufb))
+		return;
 	fb_dealloc_cmap(&info->cmap);
 	kvfree(ufb->snapshot);
 	iounmap(ufb->screen);
@@ -913,12 +1185,136 @@ static int ums9117_fb_open(struct fb_info *info, int user)
 	return ret;
 }
 
+static int ums9117_fb_present(struct ums9117_fb *ufb,
+			      struct ums9117_present *request,
+			      const void *pixels)
+{
+	unsigned long flags;
+	u64 generation;
+	u32 size = ums9117_fb_size_bytes(ufb);
+	int ret = 0;
+
+	/* fbdev holds info->lock here; do not acquire console_lock in this path. */
+	mutex_lock(&ufb->transition_lock);
+	spin_lock_irqsave(&ufb->lock, flags);
+	if (ufb->stopping)
+		ret = -ENODEV;
+	else if (ufb->state == UMS9117_FB_PANEL_STATE_ERROR)
+		ret = -EIO;
+	else if (ufb->state != UMS9117_FB_PANEL_STATE_ACTIVE)
+		ret = -EBUSY;
+	else
+		ufb->present_busy = true;
+	spin_unlock_irqrestore(&ufb->lock, flags);
+	if (ret)
+		goto unlock;
+	ret = ums9117_fb_quiesce(ufb);
+	if (ret)
+		goto finish;
+	spin_lock_irqsave(&ufb->lock, flags);
+	if (ufb->state != UMS9117_FB_PANEL_STATE_ACTIVE)
+		ret = -EIO;
+	spin_unlock_irqrestore(&ufb->lock, flags);
+	if (ret)
+		goto finish;
+
+	memset_io(ufb->present - UMS9117_FB_PRESENT_GUARD_BYTES,
+		  UMS9117_FB_PRESENT_GUARD, UMS9117_FB_PRESENT_GUARD_BYTES);
+	memcpy_toio(ufb->present, pixels, size);
+	memset_io(ufb->present + size, UMS9117_FB_PRESENT_GUARD,
+		  UMS9117_FB_PRESENT_GUARD_BYTES);
+	spin_lock_irqsave(&ufb->lock, flags);
+	ufb->present_format = request->format;
+	ufb->present_guard_ok = false;
+	ufb->present_transfer_ns = 0;
+	ufb->present_pending = true;
+	spin_unlock_irqrestore(&ufb->lock, flags);
+	mutex_lock(&ufb->panel_lock);
+	ret = ums9117_fb_start_frame(ufb, false);
+	mutex_unlock(&ufb->panel_lock);
+	if (ret)
+		goto finish;
+	spin_lock_irqsave(&ufb->lock, flags);
+	generation = ufb->generation;
+	spin_unlock_irqrestore(&ufb->lock, flags);
+	if (ufb->profile->completion == UMS9117_FB_COMPLETION_POLL) {
+		ret = ums9117_fb_poll_frame_done(ufb);
+	} else {
+		ums9117_fb_arm_irq_timeout(ufb);
+		if (!wait_for_completion_timeout(
+			    &ufb->frame_done,
+			    msecs_to_jiffies(UMS9117_FB_FRAME_TIMEOUT_MS)))
+			ret = -ETIMEDOUT;
+		cancel_delayed_work_sync(&ufb->timeout_work);
+		synchronize_irq(ufb->irq);
+	}
+	spin_lock_irqsave(&ufb->lock, flags);
+	if (!ret && (ufb->done_generation != generation ||
+		     ufb->state != UMS9117_FB_PANEL_STATE_ACTIVE ||
+		     ufb->present_active || !ufb->present_guard_ok))
+		ret = -EIO;
+	if (!ret) {
+		request->sequence = generation;
+		request->transfer_ns = ufb->present_transfer_ns;
+	}
+	spin_unlock_irqrestore(&ufb->lock, flags);
+finish:
+	if (ret) {
+		mutex_lock(&ufb->panel_lock);
+		ums9117_fb_enter_error(ufb, ret);
+		mutex_unlock(&ufb->panel_lock);
+		if (ufb->profile->completion == UMS9117_FB_COMPLETION_IRQ)
+			synchronize_irq(ufb->irq);
+	}
+	spin_lock_irqsave(&ufb->lock, flags);
+	if (ufb->present_active) {
+		ums9117_fb_present_restore(ufb);
+		ufb->present_active = false;
+	}
+	ufb->present_pending = false;
+	ufb->present_busy = false;
+	if (ums9117_fb_can_refresh(ufb) && ums9117_fb_damage_pending(ufb))
+		schedule_work(&ufb->refresh_work);
+	spin_unlock_irqrestore(&ufb->lock, flags);
+unlock:
+	mutex_unlock(&ufb->transition_lock);
+	return ret;
+}
+
+static int ums9117_fb_ioctl(struct fb_info *info, unsigned int command,
+			    unsigned long argument)
+{
+	struct ums9117_fb *ufb = info->par;
+	struct ums9117_present request;
+	void __user *user = (void __user *)argument;
+	void *pixels;
+	int ret;
+
+	if (command != UMS9117_FBIO_PRESENT || !ufb->profile->native_nv16)
+		return -ENOTTY;
+	if (copy_from_user(&request, user, sizeof(request)))
+		return -EFAULT;
+	if ((request.format != UMS9117_PRESENT_NV16 &&
+	     request.format != UMS9117_PRESENT_RGB565) ||
+	    request.bytes != ums9117_fb_size_bytes(ufb))
+		return -EINVAL;
+	pixels = vmemdup_user(u64_to_user_ptr(request.pixels), request.bytes);
+	if (IS_ERR(pixels))
+		return PTR_ERR(pixels);
+	ret = ums9117_fb_present(ufb, &request, pixels);
+	kvfree(pixels);
+	if (!ret && copy_to_user(user, &request, sizeof(request)))
+		ret = -EFAULT;
+	return ret;
+}
+
 static const struct fb_ops ums9117_fb_ops = {
 	.owner = THIS_MODULE,
 	__FB_DEFAULT_DEFERRED_OPS_RDWR(ums9117),
 	__FB_DEFAULT_DEFERRED_OPS_DRAW(ums9117),
 	__FB_DEFAULT_IOMEM_OPS_MMAP,
 	.fb_open = ums9117_fb_open,
+	.fb_ioctl = ums9117_fb_ioctl,
 	.fb_setcolreg = ums9117_fb_setcolreg,
 	.fb_check_var = ums9117_fb_check_var,
 	.fb_pan_display = ums9117_fb_pan_display,
@@ -971,6 +1367,9 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		"dcs_timeouts=%llu\n"
 		"wled_errors=%llu\n"
 		"fail_dark_failures=%llu\n"
+		"present_nv16=%llu\n"
+		"present_rgb565=%llu\n"
+		"present_guard_failures=%llu\n"
 		"last_error_errno=%d\n"
 		"last_error_dcs_command=0x%02x\n"
 		"last_error_irq_status=0x%08x\n"
@@ -993,9 +1392,10 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		stats.frame_timeouts, stats.irq_spurious, stats.irq_missed,
 		stats.blank_count, stats.blank_completed, stats.wake_count,
 		stats.dcs_errors, stats.dcs_timeouts, stats.wled_errors,
-		stats.fail_dark_failures, ufb->last_error_errno,
-		ufb->last_dcs_command, stats.last_error_irq_status,
-		stats.last_error_irq_raw);
+		stats.fail_dark_failures, stats.present_nv16,
+		stats.present_rgb565, stats.present_guard_failures,
+		ufb->last_error_errno, ufb->last_dcs_command,
+		stats.last_error_irq_status, stats.last_error_irq_raw);
 	spin_unlock_irqrestore(&ufb->lock, flags);
 	return len;
 }
@@ -1013,12 +1413,19 @@ static void __iomem *ums9117_fb_ioremap_shared(struct platform_device *pdev,
 			    resource_size(resource));
 }
 
-static int ums9117_fb_configure_pins(struct ums9117_fb *ufb,
-				     struct platform_device *pdev)
+static int ums9117_fb_configure_pin_group(struct platform_device *pdev,
+					  const char *mux_name,
+					  const char *conf_name)
 {
 	struct device_node *np = pdev->dev.of_node;
 	struct resource *mux_resource;
 	struct resource *conf_resource;
+	void __iomem *pinmux;
+	void __iomem *pinconf;
+	char mux_values_name[40];
+	char mux_offsets_name[40];
+	char conf_values_name[40];
+	char conf_offsets_name[40];
 	u32 *mux_values;
 	u32 *mux_offsets;
 	u32 *conf_values;
@@ -1027,13 +1434,19 @@ static int ums9117_fb_configure_pins(struct ums9117_fb *ufb,
 	int conf_count;
 	unsigned int i;
 
-	mux_count = of_property_count_u32_elems(np, "sprd,pinmux-values");
-	conf_count = of_property_count_u32_elems(np, "sprd,pinconf-values");
+	snprintf(mux_values_name, sizeof(mux_values_name), "sprd,%s-values",
+		 mux_name);
+	snprintf(mux_offsets_name, sizeof(mux_offsets_name), "sprd,%s-offsets",
+		 mux_name);
+	snprintf(conf_values_name, sizeof(conf_values_name), "sprd,%s-values",
+		 conf_name);
+	snprintf(conf_offsets_name, sizeof(conf_offsets_name),
+		 "sprd,%s-offsets", conf_name);
+	mux_count = of_property_count_u32_elems(np, mux_values_name);
+	conf_count = of_property_count_u32_elems(np, conf_values_name);
 	if (mux_count <= 0 || conf_count <= 0 || mux_count != conf_count ||
-	    mux_count !=
-		    of_property_count_u32_elems(np, "sprd,pinmux-offsets") ||
-	    conf_count !=
-		    of_property_count_u32_elems(np, "sprd,pinconf-offsets"))
+	    mux_count != of_property_count_u32_elems(np, mux_offsets_name) ||
+	    conf_count != of_property_count_u32_elems(np, conf_offsets_name))
 		return -EINVAL;
 	mux_values = devm_kmalloc_array(&pdev->dev, mux_count,
 					sizeof(*mux_values), GFP_KERNEL);
@@ -1044,25 +1457,25 @@ static int ums9117_fb_configure_pins(struct ums9117_fb *ufb,
 	conf_offsets = devm_kmalloc_array(&pdev->dev, conf_count,
 					  sizeof(*conf_offsets), GFP_KERNEL);
 	if (!mux_values || !mux_offsets || !conf_values || !conf_offsets ||
-	    of_property_read_u32_array(np, "sprd,pinmux-values", mux_values,
+	    of_property_read_u32_array(np, mux_values_name, mux_values,
 				       mux_count) ||
-	    of_property_read_u32_array(np, "sprd,pinmux-offsets", mux_offsets,
+	    of_property_read_u32_array(np, mux_offsets_name, mux_offsets,
 				       mux_count) ||
-	    of_property_read_u32_array(np, "sprd,pinconf-values", conf_values,
+	    of_property_read_u32_array(np, conf_values_name, conf_values,
 				       conf_count) ||
-	    of_property_read_u32_array(np, "sprd,pinconf-offsets", conf_offsets,
+	    of_property_read_u32_array(np, conf_offsets_name, conf_offsets,
 				       conf_count))
 		return -EINVAL;
-	ufb->pinmux = devm_platform_ioremap_resource_byname(pdev, "pinmux");
-	if (IS_ERR(ufb->pinmux))
-		return PTR_ERR(ufb->pinmux);
-	ufb->pinconf = devm_platform_ioremap_resource_byname(pdev, "pinconf");
-	if (IS_ERR(ufb->pinconf))
-		return PTR_ERR(ufb->pinconf);
+	pinmux = devm_platform_ioremap_resource_byname(pdev, mux_name);
+	if (IS_ERR(pinmux))
+		return PTR_ERR(pinmux);
+	pinconf = devm_platform_ioremap_resource_byname(pdev, conf_name);
+	if (IS_ERR(pinconf))
+		return PTR_ERR(pinconf);
 	mux_resource =
-		platform_get_resource_byname(pdev, IORESOURCE_MEM, "pinmux");
+		platform_get_resource_byname(pdev, IORESOURCE_MEM, mux_name);
 	conf_resource =
-		platform_get_resource_byname(pdev, IORESOURCE_MEM, "pinconf");
+		platform_get_resource_byname(pdev, IORESOURCE_MEM, conf_name);
 	if (!mux_resource || !conf_resource ||
 	    resource_size(mux_resource) < sizeof(u32) ||
 	    resource_size(conf_resource) < sizeof(u32))
@@ -1075,33 +1488,22 @@ static int ums9117_fb_configure_pins(struct ums9117_fb *ufb,
 		    conf_offsets[i] >
 			    resource_size(conf_resource) - sizeof(u32))
 			return -EINVAL;
-		writel(mux_values[i], ufb->pinmux + mux_offsets[i]);
-		writel(conf_values[i], ufb->pinconf + conf_offsets[i]);
+		writel(mux_values[i], pinmux + mux_offsets[i]);
+		writel(conf_values[i], pinconf + conf_offsets[i]);
 	}
-	readl(ufb->pinconf + conf_offsets[conf_count - 1]);
-	ufb->pinmux_count = mux_count;
-	ufb->pinconf_count = conf_count;
+	readl(pinconf + conf_offsets[conf_count - 1]);
 	return 0;
 }
 
-static int ums9117_fb_reset_panel(struct ums9117_fb *ufb)
+static int ums9117_fb_configure_pins(struct ums9117_fb *ufb,
+				     struct platform_device *pdev)
 {
-	int ret;
+	int ret = ums9117_fb_configure_pin_group(pdev, "pinmux", "pinconf");
 
-	ret = regmap_write(ufb->aon_apb, UMS9117_AON_PANEL_RESET_SET, BIT(0));
-	if (ret)
+	if (ret || ufb->profile->transport != UMS9117_FB_TRANSPORT_LCM_DBI)
 		return ret;
-	msleep(ufb->profile->reset_phase_ms);
-	ret = regmap_write(ufb->aon_apb, UMS9117_AON_PANEL_RESET_CLEAR, BIT(0));
-	if (ret)
-		return ret;
-	msleep(ufb->profile->reset_phase_ms);
-	ret = regmap_write(ufb->aon_apb, UMS9117_AON_PANEL_RESET_SET, BIT(0));
-	if (ret)
-		return ret;
-	msleep(ufb->profile->reset_phase_ms);
-	msleep(ufb->profile->reset_release_ms);
-	return 0;
+	return ums9117_fb_configure_pin_group(pdev, "pinmux-data",
+					      "pinconf-data");
 }
 
 static int ums9117_fb_cold_init(struct ums9117_fb *ufb)
@@ -1112,17 +1514,24 @@ static int ums9117_fb_cold_init(struct ums9117_fb *ufb)
 
 	memset_io(ufb->screen, 0, 2 * ums9117_fb_size_bytes(ufb));
 	memset_io(ufb->transfer, 0, ums9117_fb_size_bytes(ufb));
-	memset(ufb->snapshot, 0, ums9117_fb_size_bytes(ufb));
+	if (ufb->snapshot)
+		memset(ufb->snapshot, 0, ums9117_fb_size_bytes(ufb));
 	/* Flush the cleared framebuffers before panel init scans them out. */
 	wmb();
 	ret = ums9117_fb_wled_off_bounded(ufb);
 	if (ret)
 		return ret;
-	ret = ums9117_fb_reset_panel(ufb);
+	ret = ums9117_fb_reset_panel(ufb, ufb->profile->reset_phase_ms);
+	if (!ret)
+		msleep(ufb->profile->reset_release_ms);
 	if (!ret)
 		ret = ums9117_fb_transport_post_reset(ufb);
 	if (!ret)
-		ret = ums9117_fb_run_init(ufb);
+		ret = ums9117_fb_run_commands(ufb, ufb->profile->init,
+					      ufb->profile->init_count);
+	if (!ret)
+		ret = ums9117_fb_run_commands(ufb, ufb->profile->init_finish,
+					      ufb->profile->init_finish_count);
 	if (!ret)
 		ums9117_fb_prepare_irq_frame(ufb);
 	if (!ret)
@@ -1158,11 +1567,16 @@ static int ums9117_fb_map_common_resources(struct ums9117_fb *ufb,
 	struct resource *adires;
 	struct resource *analogres;
 	unsigned int i;
+	u32 frame_bytes = ums9117_fb_size_bytes(ufb);
+	u32 required_bytes = 3 * frame_bytes;
 	int ret;
 
+	if (ufb->profile->native_nv16)
+		required_bytes +=
+			frame_bytes + 2 * UMS9117_FB_PRESENT_GUARD_BYTES;
 	fbres = platform_get_resource_byname(pdev, IORESOURCE_MEM,
 					     "framebuffer");
-	if (!fbres || resource_size(fbres) < 3 * ums9117_fb_size_bytes(ufb))
+	if (!fbres || resource_size(fbres) < required_bytes)
 		return -EINVAL;
 	ufb->screen_phys = fbres->start;
 	ufb->transfer_phys = ufb->screen_phys + 2 * ums9117_fb_size_bytes(ufb);
@@ -1170,6 +1584,12 @@ static int ums9117_fb_map_common_resources(struct ums9117_fb *ufb,
 	if (!ufb->screen)
 		return -ENOMEM;
 	ufb->transfer = ufb->screen + 2 * ums9117_fb_size_bytes(ufb);
+	if (ufb->profile->native_nv16) {
+		ufb->present_phys = ufb->screen_phys + 3 * frame_bytes +
+				    UMS9117_FB_PRESENT_GUARD_BYTES;
+		ufb->present = ufb->screen + 3 * frame_bytes +
+			       UMS9117_FB_PRESENT_GUARD_BYTES;
+	}
 	ufb->lcdc = devm_platform_ioremap_resource_byname(pdev, "lcdc");
 	if (IS_ERR(ufb->lcdc))
 		return PTR_ERR(ufb->lcdc);
@@ -1204,10 +1624,8 @@ static int ums9117_fb_map_common_resources(struct ums9117_fb *ufb,
 	for (i = 0; i < ARRAY_SIZE(ufb->wled_levels); i++) {
 		if (ufb->wled_levels[i] > SC2720_BLTC_CURRENT_LEVEL_MASK)
 			return -EINVAL;
-		if (!ufb->profile->wled_backlight_name)
+		if (!ufb->profile->wled_backlight_name || !ufb->wled_levels[i])
 			continue;
-		if (!ufb->wled_levels[i])
-			return -EINVAL;
 		if (!ufb->backlight_max_brightness)
 			ufb->backlight_max_brightness = ufb->wled_levels[i];
 		else if (ufb->wled_levels[i] != ufb->backlight_max_brightness)
@@ -1311,6 +1729,10 @@ int ums9117_fb_probe(struct platform_device *pdev,
 	    !profile->init || !profile->init_count ||
 	    profile->completion > UMS9117_FB_COMPLETION_POLL)
 		return -EINVAL;
+	if (profile->native_nv16 &&
+	    !((profile->width == 240 && profile->height == 320) ||
+	      (profile->width == 128 && profile->height == 160)))
+		return -EINVAL;
 	mutex_lock(&ums9117_fb_lifetime_lock);
 	ret = ums9117_fb_retired_info ? -EBUSY : 0;
 	mutex_unlock(&ums9117_fb_lifetime_lock);
@@ -1332,12 +1754,18 @@ int ums9117_fb_probe(struct platform_device *pdev,
 	INIT_WORK(&ufb->wake_work, ums9117_fb_wake_work);
 	INIT_WORK(&ufb->poll_work, ums9117_fb_poll_work);
 	INIT_DELAYED_WORK(&ufb->timeout_work, ums9117_fb_timeout_work);
-	ufb->snapshot = kvmalloc(ums9117_fb_size_bytes(ufb), GFP_KERNEL);
-	if (!ufb->snapshot) {
-		ret = -ENOMEM;
-		goto release;
+	if (!profile->dma_memcpy) {
+		ufb->snapshot =
+			kvmalloc(ums9117_fb_size_bytes(ufb), GFP_KERNEL);
+		if (!ufb->snapshot) {
+			ret = -ENOMEM;
+			goto release;
+		}
 	}
 	ret = ums9117_fb_map_common_resources(ufb, pdev);
+	if (ret)
+		goto release;
+	ret = ums9117_fb_init_copy_dma(ufb);
 	if (ret)
 		goto release;
 	ret = ums9117_fb_transport_init(ufb, pdev);
@@ -1438,6 +1866,12 @@ stop:
 cmap:
 	fb_dealloc_cmap(&info->cmap);
 release:
+	if (!ums9117_fb_release_copy_dma(ufb)) {
+		mutex_lock(&ums9117_fb_lifetime_lock);
+		ums9117_fb_retired_info = info;
+		mutex_unlock(&ums9117_fb_lifetime_lock);
+		return ret;
+	}
 	if (ufb->screen)
 		iounmap(ufb->screen);
 	kvfree(ufb->snapshot);

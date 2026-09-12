@@ -7,10 +7,9 @@ import hashlib
 import os
 import re
 import tomllib
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
-from .alpine_state import COMMON_PACKAGES
 from .common import ROOT, fail, relative_name
 from .identity import (
     IdentityError,
@@ -24,8 +23,16 @@ VALUE_NAME = re.compile(r"[A-Za-z0-9._-]+")
 KCONFIG_SYMBOL = re.compile(r"CONFIG_[A-Z0-9_]+")
 GIT_COMMIT = re.compile(r"[0-9a-f]{40}")
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
-PROFILE_HOST_PLUGIN_SOURCE = "host_plugin.py"
-PROFILE_HOST_PLUGIN_BUNDLE_PATH = "runner/profile_plugin.py"
+GLOBAL_PROFILES = ("default", "microsd-uboot")
+
+
+def normalize_profile(profile: str | None) -> str | None:
+    """Keep explicit default and omitted selection in the same build context."""
+    if profile is None or profile == "default":
+        return None
+    if profile not in GLOBAL_PROFILES:
+        fail(f"unknown profile: {profile}; choose default or microsd-uboot")
+    return profile
 
 
 def exact_table(value: object, keys: set[str], name: str) -> dict[str, Any]:
@@ -151,6 +158,41 @@ def _sha256(value: object, name: str) -> str:
     return value
 
 
+def firmware_array(value: object, name: str) -> list[dict[str, Any]]:
+    """Validate explicitly named files installed below /lib/firmware."""
+    if not isinstance(value, list) or not value:
+        fail(f"{name} must be a non-empty array")
+    result: list[dict[str, Any]] = []
+    sources: set[str] = set()
+    destinations: set[str] = set()
+    for index, raw in enumerate(value):
+        item_name = f"{name}[{index}]"
+        if not isinstance(raw, dict) or set(raw) not in (
+            {"source", "destination", "size"},
+            {"source", "destination", "size", "sha256"},
+        ):
+            fail(f"{item_name} must contain exactly source, destination, size and optional sha256")
+        source = basename_value(raw.get("source"), f"{item_name} source")
+        if source in sources:
+            fail(f"{name} must not contain duplicate sources: {source}")
+        sources.add(source)
+        destination = relative_value(raw.get("destination"), f"{item_name} destination")
+        if not PurePosixPath(destination).name:
+            fail(f"{item_name} destination must name a file below /lib/firmware")
+        if destination in destinations:
+            fail(f"{name} must not contain duplicate destinations: {destination}")
+        destinations.add(destination)
+        normalized: dict[str, Any] = {
+            "source": source,
+            "destination": destination,
+            "size": integer_value(raw.get("size"), f"{item_name} size", bounds=(1, 0xFFFFFFFF)),
+        }
+        if "sha256" in raw:
+            normalized["sha256"] = _sha256(raw.get("sha256"), f"{item_name} sha256")
+        result.append(normalized)
+    return result
+
+
 def load_asset_lock(path: Path) -> list[dict[str, Any]]:
     """Load the current pinned asset outputs used to construct a RAM bundle."""
     if path.is_symlink() or not path.is_file():
@@ -267,126 +309,75 @@ def target_asset_lock_path(target: str) -> Path:
     return target_directory(target) / "loader/assets.lock.toml"
 
 
-def target_defconfig_path(target: str) -> Path:
-    """Return the fixed kernel defconfig path for one target."""
-    return target_directory(target) / "kernel/defconfig"
+def kernel_config_paths(
+    target: str, target_config: dict[str, Any], platform: dict[str, Any]
+) -> tuple[Path, Path]:
+    """Return the shared Linux base and the selected board's hardware fragment."""
+    return (
+        ROOT / platform["linux"]["defconfig"],
+        target_directory(target) / target_config["linux"]["config_fragment"],
+    )
 
 
-def profiles_directory(target: str) -> Path:
-    """Return the optional, target-owned root for build profiles."""
-    path = target_directory(target) / "profiles"
-    if path.is_symlink() or (path.exists() and not path.is_dir()):
-        fail(f"target profiles directory is invalid: {path}")
+def kconfig_values(contents: str) -> dict[str, str]:
+    """Read explicit assignments and disabled symbols from a Kconfig input."""
+    values: dict[str, str] = {}
+    for line in contents.splitlines():
+        if line.startswith("# CONFIG_") and line.endswith(" is not set"):
+            values[line[2:-11]] = "n"
+        elif line.startswith("CONFIG_") and "=" in line:
+            symbol, value = line.split("=", 1)
+            values[symbol] = value
+        elif line and not line.startswith("#"):
+            fail(f"invalid Kconfig input line: {line}")
+    return values
+
+
+def compose_kernel_config(base: Path, fragment: Path) -> bytes:
+    """Apply board assignments over the shared base for both Kbuild consumers."""
+    values: dict[str, str] = {}
+    for path in (base, fragment):
+        if path.is_symlink() or not path.is_file():
+            fail(f"kernel configuration input is missing or invalid: {path}")
+        values.update(kconfig_values(path.read_text()))
+    return "".join(
+        f"# {symbol} is not set\n" if value == "n" else f"{symbol}={value}\n"
+        for symbol, value in values.items()
+    ).encode()
+
+
+def profiles_directory(target: str | None = None) -> Path:
+    """Return the shared build-profile directory."""
+    if target is not None:
+        target_directory(target)
+    path = ROOT / "profiles"
+    if path.is_symlink() or not path.is_dir():
+        fail(f"profiles directory is missing or invalid: {path}")
     return path
 
 
 def profile_directory(target: str, profile: str) -> Path:
-    """Return one validated target-owned profile directory."""
-    if not isinstance(profile, str) or TARGET_NAME.fullmatch(profile) is None:
-        fail(f"invalid profile name: {profile}")
+    """Return one of the two global profile directories."""
+    normalize_profile(profile)
     path = profiles_directory(target) / profile
     if path.is_symlink() or not path.is_dir():
-        fail(f"unknown profile: {target}/{profile}")
+        fail(f"global profile directory is missing or invalid: {path}")
     return path
 
 
 def profile_manifest_path(target: str, profile: str) -> Path:
-    """Return the fixed manifest path for one target profile."""
+    """Return the shared manifest for the selected build profile."""
     path = profile_directory(target, profile) / "profile.toml"
     if path.is_symlink() or not path.is_file():
         fail(f"profile manifest is missing or invalid: {path}")
     return path
 
 
-def profile_host_plugin_path(target: str, profile: str) -> Path | None:
-    """Return the conventional host plugin owned by one selected profile."""
-    path = profile_directory(target, profile) / PROFILE_HOST_PLUGIN_SOURCE
-    if not path.exists() and not path.is_symlink():
-        return None
-    if path.is_symlink() or not path.is_file():
-        fail(f"profile host plugin is invalid: {path}")
-    return path
-
-
-def profile_source_path(target: str, profile: str, relative: str) -> Path:
-    """Resolve one regular profile source without following a symlink."""
-    source = relative_value(relative, "profile source")
-    root = profile_directory(target, profile)
-    path = root
-    for part in Path(source).parts:
-        path /= part
-        if path.is_symlink():
-            fail(f"profile source must not be a symlink: {path}")
-    if not path.is_file():
-        fail(f"profile source is missing or invalid: {path}")
-    return path
-
-
-def profile_source_directory_path(target: str, profile: str, relative: str) -> Path:
-    """Resolve one complete profile-owned source directory without symlinks."""
-    source = relative_value(relative, "profile source directory")
-    root = profile_directory(target, profile)
-    path = root
-    for part in Path(source).parts:
-        path /= part
-        if path.is_symlink():
-            fail(f"profile source directory must not contain a symlink: {path}")
-    if not path.is_dir():
-        fail(f"profile source directory is missing or invalid: {path}")
-    for child in path.rglob("*"):
-        if child.is_symlink():
-            fail(f"profile source directory must not contain a symlink: {child}")
-    return path
-
-
 def discover_profiles(target: str) -> tuple[str, ...]:
-    """Discover only complete, non-symlinked profile definitions for one target."""
-    root = profiles_directory(target)
-    if not root.exists():
-        return ()
-    profiles: list[str] = []
-    for path in sorted(root.iterdir()):
-        if path.is_symlink() or not path.is_dir():
-            fail(f"target profile entry is invalid: {path}")
-        if TARGET_NAME.fullmatch(path.name) is None:
-            fail(f"invalid profile name: {path.name}")
-        manifest = path / "profile.toml"
-        if manifest.is_symlink() or not manifest.is_file():
-            fail(f"profile manifest is missing or invalid: {manifest}")
-        profiles.append(path.name)
-    return tuple(profiles)
-
-
-def _profile_relative_source(profile: str, source: str) -> str:
-    """Project one profile-relative source into the target-owned source tree."""
-    return f"profiles/{profile}/{relative_value(source, 'profile source')}"
-
-
-def _profile_linux_sources(target: str, profile: str, linux: dict[str, Any]) -> None:
-    """Require every profile projection input to be a direct regular file."""
-    for relative in linux["patches"]:
-        profile_source_path(target, profile, relative)
-    for key in ("copies", "appends"):
-        for step in linux[key]:
-            profile_source_path(target, profile, step["source"])
-
-
-def _profile_steps(profile: str, steps: list[dict[str, str]]) -> list[dict[str, str]]:
-    """Turn profile-local projection inputs into target-relative inputs."""
-    return [
-        {
-            "source": _profile_relative_source(profile, step["source"]),
-            "destination": step["destination"],
-        }
-        for step in steps
-    ]
-
-
-def _reject_duplicate_steps(steps: list[dict[str, str]], name: str) -> None:
-    """Reject an operation that would apply the same projection more than once."""
-    operations = {(step["source"], step["destination"]) for step in steps}
-    if len(operations) != len(steps):
-        fail(f"{name} must not contain duplicate operations")
+    """Expose the same two boot policies for every configured target."""
+    for profile in GLOBAL_PROFILES:
+        profile_manifest_path(target, profile)
+    return GLOBAL_PROFILES
 
 
 def _profile_linux_root(value: object, name: str) -> dict[str, Any]:
@@ -414,30 +405,29 @@ def _profile_linux_root(value: object, name: str) -> dict[str, Any]:
     }
 
 
-def _profile_bootstrap(target: str, profile: str, value: object, name: str) -> dict[str, str]:
-    """Validate the selected resident bootstrap implementation."""
-    if not isinstance(value, dict):
-        fail(f"{name} must be a table")
-    kind = value.get("kind")
+def _profile_bootstrap(target: str, value: object, board: object) -> dict[str, str]:
+    """Select Linux or the board-declared resident U-Boot bootstrap."""
+    selection = exact_table(value, {"kind"}, "profile bootstrap")
+    kind = selection["kind"]
     if kind == "linux":
-        exact_table(value, {"kind"}, name)
         return {"kind": "linux"}
     if kind != "uboot-stage0":
-        fail(f"{name} kind must be linux or uboot-stage0")
-    bootstrap = exact_table(value, {"kind", "source", "image", "map"}, name)
-    source = relative_value(bootstrap.get("source"), f"{name} source")
-    profile_source_directory_path(target, profile, source)
-    return {
-        "kind": "uboot-stage0",
-        "source": source,
-        "image": relative_value(bootstrap.get("image"), f"{name} image"),
-        "map": relative_value(bootstrap.get("map"), f"{name} map"),
-    }
+        fail("profile bootstrap kind must be linux or uboot-stage0")
+    bootstrap = exact_table(board, {"source", "image", "map"}, "target microsd bootstrap")
+    result = {"kind": kind}
+    for key in ("source", "image", "map"):
+        result[key] = relative_value(bootstrap.get(key), f"target microsd bootstrap {key}")
+    source = target_directory(target) / result["source"]
+    if source.is_symlink() or not source.is_dir():
+        fail(f"target microSD bootstrap source is missing or invalid: {source}")
+    return result
 
 
-def _profile_uboot_lock(target: str, profile: str, relative: str) -> dict[str, str]:
-    """Load one profile-owned immutable U-Boot source lock."""
-    path = profile_source_path(target, profile, relative)
+def _profile_uboot_lock(profile: str, relative: str) -> dict[str, str]:
+    """Load the immutable U-Boot source lock declared by the platform."""
+    path = ROOT / relative
+    if path.is_symlink() or not path.is_file():
+        fail(f"U-Boot source lock is missing or invalid: {path}")
     try:
         with path.open("rb") as stream:
             raw = tomllib.load(stream)
@@ -473,43 +463,48 @@ def _profile_uboot_lock(target: str, profile: str, relative: str) -> dict[str, s
     return normalized
 
 
-def _profile_uboot(target: str, profile: str, value: object, name: str) -> dict[str, Any]:
-    """Validate the U-Boot capability actually implemented by the build."""
-    if not isinstance(value, dict):
-        fail(f"{name} must be a table")
-    kind = value.get("kind")
+def _profile_uboot(
+    target: str, profile: str, value: object, board: object, platform: dict[str, Any]
+) -> dict[str, Any]:
+    """Combine shared U-Boot sources with the selected board integration."""
+    selection = exact_table(value, {"kind"}, "profile uboot")
+    kind = selection["kind"]
     if kind == "none":
-        exact_table(value, {"kind"}, name)
         return {"kind": "none"}
     if kind != "full":
-        fail(f"{name} kind must be none or full")
-    uboot = exact_table(
-        value,
-        {"kind", "source", "archive_prefix", "defconfig", "patches", "copies"},
-        name,
+        fail("profile uboot kind must be none or full")
+    uboot = exact_table(board, {"defconfig", "patches", "copies"}, "target microsd uboot")
+    base = exact_table(
+        platform.get("uboot"), {"source", "archive_prefix", "patches", "copies"}, "platform uboot"
     )
-    source = relative_value(uboot.get("source"), f"{name} source")
-    archive_prefix = relative_value(uboot.get("archive_prefix"), f"{name} archive_prefix")
-    defconfig = relative_value(uboot.get("defconfig"), f"{name} defconfig")
-    patches = path_array(uboot.get("patches"), f"{name} patches", allow_empty=True)
-    copies = path_steps(uboot.get("copies"), f"{name} copies")
-    profile_source_path(target, profile, defconfig)
-    for relative in patches:
-        profile_source_path(target, profile, relative)
+    source = relative_value(base.get("source"), "platform uboot source")
+    archive_prefix = relative_value(base.get("archive_prefix"), "platform uboot archive_prefix")
+    defconfig = relative_value(uboot.get("defconfig"), "target microsd uboot defconfig")
+    patches = path_array(uboot.get("patches"), "target microsd uboot patches", allow_empty=True)
+    patches = [
+        *path_array(base.get("patches"), "platform uboot patches", allow_empty=True),
+        *(f"targets/{target}/{path}" for path in patches),
+    ]
+    copies = [
+        *path_steps(base.get("copies"), "platform uboot copies"),
+        *path_steps(uboot.get("copies"), "target microsd uboot copies"),
+    ]
+    for path in (target_directory(target) / defconfig, *(ROOT / path for path in patches)):
+        if path.is_symlink() or not path.is_file():
+            fail(f"U-Boot source is missing or invalid: {path}")
     for step in copies:
-        copy_source = ROOT / step["source"]
-        if copy_source.is_symlink() or not copy_source.is_file():
-            fail(f"{name} copy source is missing or invalid: {copy_source}")
-    normalized: dict[str, Any] = {
-        "kind": "full",
+        path = ROOT / step["source"]
+        if path.is_symlink() or not path.is_file():
+            fail(f"U-Boot copy source is missing or invalid: {path}")
+    return {
+        "kind": kind,
         "source": source,
         "archive_prefix": archive_prefix,
-        "lock": _profile_uboot_lock(target, profile, source),
+        "lock": _profile_uboot_lock(profile, source),
         "defconfig": defconfig,
         "patches": patches,
         "copies": copies,
     }
-    return normalized
 
 
 def _profile_layout(value: object, name: str, platform_layout: dict[str, int]) -> dict[str, int]:
@@ -740,153 +735,63 @@ def _profile_storage(value: object, name: str) -> dict[str, Any]:
     }
 
 
-def load_profile(target: str, profile: str, platform_layout: dict[str, int]) -> dict[str, Any]:
-    """Load one exact target-owned build profile without applying it."""
+def load_profile(
+    target: str, profile: str, platform: dict[str, Any], microsd: dict[str, Any]
+) -> dict[str, Any]:
+    """Load one global boot policy and resolve its board-owned inputs."""
     path = profile_manifest_path(target, profile)
     try:
         with path.open("rb") as stream:
             raw = tomllib.load(stream)
     except (OSError, tomllib.TOMLDecodeError) as error:
         fail(f"profile manifest is invalid: {path}: {error}")
-    required_fields = {
-        "name",
-        "linux",
-        "rootfs",
-        "bootstrap",
-        "uboot",
-        "fit",
-        "runtime",
-    }
-    optional_fields = {"layout", "storage"}
-    if (
-        not isinstance(raw, dict)
-        or not required_fields.issubset(raw)
-        or set(raw) - required_fields - optional_fields
-    ):
-        fail(
-            f"profile {profile} must contain exactly the required profile tables "
-            "and optional layout/storage"
-        )
-    config = raw
-    if config.get("name") != profile:
+    fields = {"name", "linux", "rootfs", "bootstrap", "uboot", "fit", "runtime"}
+    if profile == "microsd-uboot":
+        fields |= {"layout", "storage"}
+    config = exact_table(raw, fields, f"profile {profile}")
+    if config["name"] != profile:
         fail(f"profile name does not match its directory: {path}")
-
-    linux_value = config.get("linux")
-    required_linux_fields = {
-        "config_enable",
-        "config_disable",
-        "patches",
-        "copies",
-        "appends",
-        "root",
-    }
-    optional_linux_fields = {"forbidden_dtb_markers"}
-    if (
-        not isinstance(linux_value, dict)
-        or not required_linux_fields.issubset(linux_value)
-        or set(linux_value) - required_linux_fields - optional_linux_fields
-    ):
-        fail(
-            f"profile {profile} linux must contain exactly the required fields "
-            "and optional forbidden_dtb_markers"
-        )
-    linux = linux_value
-    config_enable = kconfig_symbol_array(
-        linux.get("config_enable"), f"profile {profile} linux config_enable"
-    )
-    config_disable = kconfig_symbol_array(
-        linux.get("config_disable"), f"profile {profile} linux config_disable"
-    )
-    overlap = set(config_enable) & set(config_disable)
-    if overlap:
-        fail(
-            f"profile {profile} linux config_enable/config_disable conflict: "
-            + ", ".join(sorted(overlap))
-        )
-    root = _profile_linux_root(linux.get("root"), f"profile {profile} linux root")
-    root_owned_symbols = {"CONFIG_BLK_DEV_INITRD", "CONFIG_EXT4_FS"}
-    duplicated_root_symbols = root_owned_symbols & (set(config_enable) | set(config_disable))
-    if duplicated_root_symbols:
-        fail(
-            f"profile {profile} linux root owns its Kconfig symbols: "
-            + ", ".join(sorted(duplicated_root_symbols))
-        )
-    if root["kind"] == "external":
-        config_enable.append("CONFIG_EXT4_FS")
-        config_disable.append("CONFIG_BLK_DEV_INITRD")
-    patches = path_array(
-        linux.get("patches"), f"profile {profile} linux patches", allow_empty=True
-    )
-    copies = path_steps(linux.get("copies"), f"profile {profile} linux copies")
-    appends = path_steps(linux.get("appends"), f"profile {profile} linux appends")
-    _reject_duplicate_steps(copies, f"profile {profile} linux copies")
-    _reject_duplicate_steps(appends, f"profile {profile} linux appends")
-    copy_destinations = [step["destination"] for step in copies]
-    if len(copy_destinations) != len(set(copy_destinations)):
-        fail(f"profile {profile} linux copies must not target one destination twice")
-    normalized_linux = {
-        "config_enable": config_enable,
-        "config_disable": config_disable,
-        "patches": patches,
-        "copies": copies,
-        "appends": appends,
-        "root": root,
-        "forbidden_dtb_markers": (
-            string_array(
-                linux.get("forbidden_dtb_markers"),
-                f"profile {profile} linux forbidden_dtb_markers",
-            )
-            if "forbidden_dtb_markers" in linux
-            else None
-        ),
-    }
-    _profile_linux_sources(target, profile, normalized_linux)
-
-    rootfs = exact_table(
-        config.get("rootfs"),
-        {"packages", "exclude_packages"},
-        f"profile {profile} rootfs",
-    )
-    packages = package_array(rootfs.get("packages"), f"profile {profile} rootfs packages")
-    exclude_packages = package_array(
-        rootfs.get("exclude_packages"), f"profile {profile} rootfs exclude_packages"
-    )
-    package_overlap = set(packages) & set(exclude_packages)
-    if package_overlap:
-        fail(
-            f"profile {profile} rootfs packages/exclude_packages conflict: "
-            + ", ".join(sorted(package_overlap))
-        )
-
+    linux = exact_table(config["linux"], {"root"}, f"profile {profile} linux")
+    root = _profile_linux_root(linux["root"], f"profile {profile} linux root")
+    expected_root = "external" if profile == "microsd-uboot" else "initramfs"
+    if root["kind"] != expected_root:
+        fail(f"profile {profile} requires {expected_root} root")
+    rootfs = exact_table(config["rootfs"], {"packages"}, f"profile {profile} rootfs")
+    packages = package_array(rootfs["packages"], f"profile {profile} rootfs packages")
+    expected_packages = ["fplinux-microsd-root"] if profile == "microsd-uboot" else []
+    if packages != expected_packages:
+        fail(f"profile {profile} rootfs packages must describe only boot maintenance")
     runtime = exact_table(
-        config.get("runtime"),
-        {"transport", "runnable"},
-        f"profile {profile} runtime",
+        config["runtime"], {"transport", "runnable"}, f"profile {profile} runtime"
     )
-    transport = runtime.get("transport")
-    if transport not in {"usb-ncm", "none"}:
-        fail(f"profile {profile} runtime transport must be usb-ncm or none")
-    runnable = runtime.get("runnable")
-    if type(runnable) is not bool:
-        fail(f"profile {profile} runtime runnable must be a boolean")
-    host_plugin = profile_host_plugin_path(target, profile)
-    bootstrap = _profile_bootstrap(
-        target, profile, config.get("bootstrap"), f"profile {profile} bootstrap"
-    )
-    uboot = _profile_uboot(target, profile, config.get("uboot"), f"profile {profile} uboot")
+    if runtime != {"transport": "usb-ncm", "runnable": True}:
+        fail("both profiles require runnable usb-ncm transport")
+    bootstrap = _profile_bootstrap(target, config["bootstrap"], microsd.get("bootstrap"))
+    uboot = _profile_uboot(target, profile, config["uboot"], microsd.get("uboot"), platform)
     layout = (
-        _profile_layout(config.get("layout"), f"profile {profile} layout", platform_layout)
+        _profile_layout(
+            config["layout"], f"profile {profile} layout", platform["bootstrap"]["layout"]
+        )
         if "layout" in config
         else None
     )
-    fit = _profile_fit(config.get("fit"), f"profile {profile} fit", layout)
     storage = (
-        _profile_storage(config.get("storage"), f"profile {profile} storage")
+        _profile_storage(config["storage"], f"profile {profile} storage")
         if "storage" in config
         else None
     )
-    image = (
-        {
+    fit = _profile_fit(config["fit"], f"profile {profile} fit", layout)
+    external = root["kind"] == "external"
+    if (
+        (bootstrap["kind"] == "uboot-stage0") != external
+        or (uboot["kind"] == "full") != external
+        or (fit["kind"] == "sha256") != external
+    ):
+        fail(f"profile {profile} boot components do not match its root filesystem")
+    image: dict[str, Any] = {"kind": "none"}
+    if storage is not None:
+        root = {**root, "partuuid": storage["partuuid"]}
+        image = {
             "kind": "ext4-root",
             "filename": storage["root_filename"],
             "partuuid": storage["partuuid"],
@@ -896,69 +801,28 @@ def load_profile(target: str, profile: str, platform_layout: dict[str, int]) -> 
             "block_size": storage["block_size"],
             "inode_size": storage["inode_size"],
         }
-        if storage is not None
-        else {"kind": "none"}
-    )
-    if fit["kind"] == "sha256" and uboot["kind"] != "full":
-        fail(f"profile {profile} SHA-256 FIT requires full U-Boot")
-    if uboot["kind"] == "full" and fit["kind"] != "sha256":
-        fail(f"profile {profile} full U-Boot requires a SHA-256 FIT")
-    if (bootstrap["kind"] == "uboot-stage0") != (uboot["kind"] == "full"):
-        fail(f"profile {profile} resident U-Boot stage requires full U-Boot")
-    if root["kind"] == "external":
-        if layout is None or storage is None:
-            fail(f"profile {profile} external root requires layout and storage")
-        if image["kind"] != "ext4-root":
-            fail(f"profile {profile} external root requires an ext4-root image")
-        normalized_linux["root"] = {**root, "partuuid": image["partuuid"]}
-    elif layout is not None or storage is not None:
-        fail(f"profile {profile} layout/storage requires an external root")
-
     return {
         "name": profile,
-        "linux": normalized_linux,
-        "rootfs": {"packages": packages, "exclude_packages": exclude_packages},
+        "linux": {
+            "config_enable": ["CONFIG_EXT4_FS"] if external else [],
+            "config_disable": ["CONFIG_BLK_DEV_INITRD"] if external else [],
+            "patches": microsd["linux_patches"] if external else [],
+            "root": root,
+        },
+        "rootfs": {"packages": packages},
         "bootstrap": bootstrap,
         "uboot": uboot,
         "fit": fit,
         "layout": layout,
         "storage": storage,
         "image": image,
-        "runtime": {
-            "transport": transport,
-            "runnable": runnable,
-            "host_plugin": (
-                _profile_relative_source(profile, PROFILE_HOST_PLUGIN_SOURCE)
-                if host_plugin is not None
-                else None
-            ),
-        },
+        "runtime": runtime,
     }
 
 
-def _validate_profile_rootfs_ownership(
-    profile: str, profile_rootfs: dict[str, Any], platform: dict[str, Any]
-) -> None:
-    """Reject profile rootfs changes that do not describe one base-package delta."""
-    owned = set(COMMON_PACKAGES) | set(platform["rootfs"]["packages"])
-    additions = set(profile_rootfs["packages"])
-    excludes = set(profile_rootfs["exclude_packages"])
-    unknown_excludes = excludes - owned
-    if unknown_excludes:
-        fail(
-            f"profile {profile} rootfs excludes a package not owned by common/platform: "
-            + ", ".join(sorted(unknown_excludes))
-        )
-    duplicate_additions = additions & owned
-    if duplicate_additions:
-        fail(
-            f"profile {profile} rootfs packages duplicate common/platform ownership: "
-            + ", ".join(sorted(duplicate_additions))
-        )
-
-
 def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
-    """Load one target definition and, when selected, apply one exact profile."""
+    """Combine shared boot policy with one board and platform configuration."""
+    profile = normalize_profile(profile)
     path = target_directory(target) / "target.toml"
     if path.is_symlink() or not path.is_file():
         fail(f"unknown target: {target}")
@@ -968,7 +832,11 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
         raw,
         {
             "identity",
+            "microsd",
+            *({"bluetooth"} if "bluetooth" in raw else set()),
+            *({"nand"} if "nand" in raw else set()),
             "platform",
+            "rootfs",
             "bundle",
             "linux",
             "bootstrap",
@@ -981,16 +849,27 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
     except IdentityError as error:
         fail(str(error))
     config["identity"] = identity
+    if "nand" in config:
+        nand = exact_table(config["nand"], {"raw_device", "raw_page_bytes", "id"}, "target nand")
+        raw_device = nonempty_string(nand["raw_device"], "target nand raw_device")
+        if re.fullmatch(r"/dev/[A-Za-z0-9][A-Za-z0-9._-]*", raw_device) is None:
+            fail("target nand raw_device must name one device directly under /dev")
+        if (nand["id"], nand["raw_page_bytes"]) not in {(0xB1A1, 2176), (0x21E5, 2112)}:
+            fail("target nand must declare a supported chip identity and physical page size")
     platform_name = nonempty_string(config.get("platform"), f"target {target} platform")
     if VALUE_NAME.fullmatch(platform_name) is None:
         fail(f"target {target} has invalid platform: {path}")
     bundle = exact_table(config.get("bundle"), {"packages"}, "target bundle")
     package_array(bundle.get("packages"), "target bundle packages")
+    rootfs = exact_table(config.get("rootfs"), {"packages"}, "target rootfs")
+    target_rootfs_packages = package_array(rootfs.get("packages"), "target rootfs packages")
 
     linux = exact_table(
         config.get("linux"),
         {
             "dtb",
+            "config_fragment",
+            "memory",
             "debug_dtb",
             "patches",
             "copies",
@@ -1000,6 +879,14 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
         },
         "target linux",
     )
+    relative_value(linux.get("config_fragment"), "target linux config_fragment")
+    memory = exact_table(linux.get("memory"), {"base", "size"}, "target linux memory")
+    for key in ("base", "size"):
+        integer_value(
+            memory[key], f"target linux memory {key}", bounds=(0, 0xFFFFFFFF), alignment=0x1000
+        )
+    if not memory["size"] or memory["base"] + memory["size"] > 0x100000000:
+        fail("target linux memory range is invalid")
     relative_value(linux.get("dtb"), "target linux dtb")
     relative_value(linux.get("debug_dtb"), "target linux debug_dtb")
     path_array(linux.get("patches"), "target linux patches", allow_empty=True)
@@ -1055,71 +942,48 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
         nonempty_string(adapter.get(key), f"target adapter {key}")
 
     platform = load_platform(str(config["platform"]))
-    selected_profile: dict[str, Any] | None = None
-    if profile is not None:
-        selected_profile = load_profile(target, profile, platform["bootstrap"]["layout"])
-
+    microsd = exact_table(
+        config.get("microsd"), {"linux_patches", "bootstrap", "uboot"}, "target microsd"
+    )
+    path_array(microsd.get("linux_patches"), "target microsd linux_patches", allow_empty=True)
+    selected_profile = load_profile(target, profile or "default", platform, microsd)
+    physical = platform["bootstrap"]["layout"]
+    if not (
+        physical["ram_base"]
+        <= memory["base"]
+        < memory["base"] + memory["size"]
+        <= physical["ram_base"] + physical["ram_size"]
+    ):
+        fail("target Linux memory must fit inside physical RAM")
     if identity["compatible"] == platform["identity"]["compatible"]:
         fail("target and platform compatibles must be distinct")
-    if selected_profile is not None:
-        _validate_profile_rootfs_ownership(str(profile), selected_profile["rootfs"], platform)
-    profile_linux = (
-        selected_profile["linux"]
-        if selected_profile is not None
-        else {
-            "config_enable": [],
-            "config_disable": [],
-            "patches": [],
-            "copies": [],
-            "appends": [],
-            "root": {"kind": "initramfs"},
-            "forbidden_dtb_markers": None,
-        }
-    )
-    copied_destinations = {
-        step["destination"] for step in [*platform["linux"]["copies"], *linux["copies"]]
-    }
-    profile_copy_destinations = {step["destination"] for step in profile_linux["copies"]}
-    copy_conflicts = copied_destinations & profile_copy_destinations
-    if copy_conflicts:
-        fail(
-            f"profile {profile} linux copies conflict with an existing copy destination: "
-            + ", ".join(sorted(copy_conflicts))
-        )
+    profile_linux = selected_profile["linux"]
     config["linux"] = {
         **linux,
         "config_enable": profile_linux["config_enable"],
         "config_disable": profile_linux["config_disable"],
-        "patches": [
-            *linux["patches"],
-            *[
-                _profile_relative_source(str(profile), source)
-                for source in profile_linux["patches"]
-            ],
-        ],
-        "copies": [*linux["copies"], *_profile_steps(str(profile), profile_linux["copies"])],
-        "appends": [
-            *linux["appends"],
-            *_profile_steps(str(profile), profile_linux["appends"]),
-        ],
+        "patches": [*linux["patches"], *profile_linux["patches"]],
         "root": profile_linux["root"],
-        "forbidden_dtb_markers": (
-            profile_linux["forbidden_dtb_markers"]
-            if profile_linux["forbidden_dtb_markers"] is not None
-            else linux["forbidden_dtb_markers"]
-        ),
     }
-    config["rootfs"] = (
-        selected_profile["rootfs"]
-        if selected_profile is not None
-        else {"packages": [], "exclude_packages": []}
-    )
+    firmware: list[dict[str, Any]] = []
+    if "bluetooth" in config:
+        bluetooth = exact_table(config["bluetooth"], {"parser", "firmware"}, "target bluetooth")
+        parser = basename_value(bluetooth["parser"], "target bluetooth parser")
+        if not parser.endswith(".py"):
+            fail("target bluetooth parser must be a Python filename")
+        firmware = firmware_array(bluetooth["firmware"], "target bluetooth firmware")
+    config["rootfs"] = {
+        "base_packages": target_rootfs_packages,
+        "packages": selected_profile["rootfs"]["packages"],
+        "exclude_packages": [],
+        "firmware": firmware,
+    }
     config["profile"] = profile
     platform_bootstrap = platform["bootstrap"]
     platform_runtime = platform["runtime"]
-    profile_bootstrap = selected_profile["bootstrap"] if selected_profile is not None else None
-    bootstrap_kind = profile_bootstrap["kind"] if profile_bootstrap is not None else "linux"
-    profile_layout = selected_profile["layout"] if selected_profile is not None else None
+    profile_bootstrap = selected_profile["bootstrap"]
+    bootstrap_kind = profile_bootstrap["kind"]
+    profile_layout = selected_profile["layout"]
     stage0_layout = profile_layout if isinstance(profile_layout, dict) else None
     if bootstrap_kind == "uboot-stage0":
         if stage0_layout is None:
@@ -1129,19 +993,13 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
     config["bootstrap"] = {
         "kind": bootstrap_kind,
         "source": (
-            _profile_relative_source(str(profile), profile_bootstrap["source"])
-            if profile_bootstrap is not None and bootstrap_kind == "uboot-stage0"
-            else "bootstrap"
+            profile_bootstrap["source"] if bootstrap_kind == "uboot-stage0" else "bootstrap"
         ),
         "image": (
-            profile_bootstrap["image"]
-            if profile_bootstrap is not None and bootstrap_kind == "uboot-stage0"
-            else bootstrap["image"]
+            profile_bootstrap["image"] if bootstrap_kind == "uboot-stage0" else bootstrap["image"]
         ),
         "map": (
-            profile_bootstrap["map"]
-            if profile_bootstrap is not None and bootstrap_kind == "uboot-stage0"
-            else bootstrap["map"]
+            profile_bootstrap["map"] if bootstrap_kind == "uboot-stage0" else bootstrap["map"]
         ),
         "record_prefix": record_prefix,
         "kernel_destination": platform_bootstrap["kernel_destination"],
@@ -1159,18 +1017,9 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
         "toolchain": platform_bootstrap["toolchain"],
         "lto": platform_bootstrap["lto"],
     }
-    config["uboot"] = (
-        selected_profile["uboot"] if selected_profile is not None else {"kind": "none"}
-    )
-    config["fit"] = selected_profile["fit"] if selected_profile is not None else {"kind": "none"}
-    config["layout"] = selected_profile["layout"] if selected_profile is not None else None
-    config["storage"] = selected_profile["storage"] if selected_profile is not None else None
-    config["image"] = (
-        selected_profile["image"] if selected_profile is not None else {"kind": "none"}
-    )
-    transport = "usb-ncm"
-    if selected_profile is not None:
-        transport = selected_profile["runtime"]["transport"]
+    for key in ("uboot", "fit", "layout", "storage", "image"):
+        config[key] = selected_profile[key]
+    transport = selected_profile["runtime"]["transport"]
     config["runtime"] = {
         "fdl1_load_address": platform_runtime["fdl1_load_address"],
         "assets": asset_bundle_paths(target_asset_lock_path(target)),
@@ -1180,12 +1029,7 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
         },
         "usb": platform_runtime["usb"],
         "transport": transport,
-        "runnable": (
-            selected_profile["runtime"]["runnable"] if selected_profile is not None else True
-        ),
-        "host_plugin": (
-            selected_profile["runtime"]["host_plugin"] if selected_profile is not None else None
-        ),
+        "runnable": selected_profile["runtime"]["runnable"],
     }
     return config
 
@@ -1294,6 +1138,7 @@ def load_platform(platform: str) -> dict[str, Any]:
             "bootstrap",
             "runtime",
             "host",
+            "uboot",
         },
         f"platform {platform}",
     )
@@ -1313,6 +1158,7 @@ def load_platform(platform: str) -> dict[str, Any]:
         config.get("linux"),
         {
             "source_lock",
+            "defconfig",
             "arch",
             "cross_compile",
             "analysis_cross_compile",
@@ -1328,12 +1174,20 @@ def load_platform(platform: str) -> dict[str, Any]:
     )
     for key in ("source_lock", "arch", "cross_compile", "analysis_cross_compile"):
         nonempty_string(linux.get(key), f"platform linux {key}")
-    for key in ("config_script", "image_output", "dtb_output_directory"):
+    for key in ("defconfig", "config_script", "image_output", "dtb_output_directory"):
         relative_value(linux.get(key), f"platform linux {key}")
     string_array(linux.get("targets"), "platform linux targets")
     path_array(linux.get("patches"), "platform linux patches", allow_empty=True)
     path_steps(linux.get("copies"), "platform linux copies")
     path_steps(linux.get("appends"), "platform linux appends")
+
+    uboot = exact_table(
+        config.get("uboot"), {"source", "archive_prefix", "patches", "copies"}, "platform uboot"
+    )
+    for key in ("source", "archive_prefix"):
+        relative_value(uboot[key], f"platform uboot {key}")
+    path_array(uboot.get("patches"), "platform uboot patches", allow_empty=True)
+    path_steps(uboot.get("copies"), "platform uboot copies")
 
     bootstrap = exact_table(
         config.get("bootstrap"),

@@ -22,19 +22,10 @@ phone's boot key, hardware support, safe use, and limitations; see the shared
 
 ### Quick start
 
-Build hosts need Linux x86-64 and Python 3.14. FPLinux installs its
-pinned Kern binary inside the project cache; no system container engine is
-required. Network access is needed until the pinned build inputs have been
-stored locally.
-
-```sh
-./fplinux setup
-./fplinux doctor
-./fplinux build <target>
-```
-
-See [Building FPLinux](docs/guides/BUILDING.md) for setup, source checks, offline
-builds, logs, cache use, and cleanup.
+Follow [Building FPLinux](docs/guides/BUILDING.md) for host requirements,
+setup and the first build, then [Loading from a source checkout](docs/guides/LOADING.md)
+to start the selected phone. The build guide also covers source checks,
+offline builds, logs, cache use and cleanup.
 
 ### Guides
 
@@ -43,6 +34,7 @@ support status, boot key, storage rules and limitations.
 
 - [Building FPLinux](docs/guides/BUILDING.md)
 - [Loading from a source checkout](docs/guides/LOADING.md)
+- [microSD system root](docs/guides/MICROSD_ROOT.md)
 - [Using a standalone archive](docs/guides/STANDALONE.md)
 - [Release archives](docs/guides/RELEASES.md)
 - [Hardware debugging](docs/guides/DEBUGGING.md)
@@ -55,12 +47,20 @@ support status, boot key, storage rules and limitations.
 - [File transfer](docs/features/FILE_TRANSFER.md)
 - [Host keyboard forwarding](docs/features/HOST_KEYBOARD.md)
 - [CPU clock reporting](docs/features/CPU_CLOCK.md)
+- [Removable microSD storage](docs/features/MICROSD.md)
+- [Bluetooth](docs/features/BLUETOOTH.md)
+- [Real-time clock](docs/features/RTC.md)
+- [Power-off](docs/features/POWER_OFF.md)
+- [Suspend](docs/features/SUSPEND.md)
 
 ### Applications
 
 - [FPLinux: ARMADA](docs/apps/SHOWCASE.md)
 - [TyrQuake](docs/apps/TYRQUAKE.md)
 - [MicroPythonOS](docs/apps/MICROPYTHONOS.md)
+- [Image rotation](docs/apps/ROTATE.md)
+- [JPEG codec and scaling](docs/apps/JPEG.md)
+- [Native image presentation](docs/apps/PRESENT.md)
 
 ### Reference
 

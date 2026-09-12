@@ -69,19 +69,6 @@ class ReleaseManifestPolicyTests(unittest.TestCase):
             self.assertEqual(archive_name, "docs/target/MICROSD.md")
             self.assertEqual(source.read_bytes(), b"phone microSD procedures\n")
 
-            profile_readme = self.root.joinpath(
-                "targets",
-                self.target,
-                "profiles/microsd/release/README.txt",
-            )
-            profile_readme.parent.mkdir(parents=True)
-            profile_readme.write_bytes(b"profile instructions\n")
-            readme_name, readme = commands.target_archive_file(
-                self.target, "release/README.txt", "microsd"
-            )
-            self.assertEqual(readme_name, "README.txt")
-            self.assertEqual(readme, profile_readme)
-
             for relative in (
                 "../features/MICROSD.md",
                 "features/nested/MICROSD.md",

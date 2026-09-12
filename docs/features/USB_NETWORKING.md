@@ -23,7 +23,10 @@ checkout uses `./fplinux run <target>`; a standalone archive uses
 archive's top-level `README.txt` for the loader-first procedure and host USB
 permissions.
 
-Linux keeps running when the USB cable is unplugged. Reconnect the cable, then
+Linux keeps running after USB disconnection only while another power source
+is available. Without a battery, USB disconnection cuts power: follow the
+target's storage and shutdown rules first. To reconnect to a still-running
+phone, reconnect the cable, then
 use the appropriate command in [SSH sessions](SSH.md); do not load a second
 image just to restore the link. A power-off, fresh RAM load or different image
 creates a different session and therefore a different private link.

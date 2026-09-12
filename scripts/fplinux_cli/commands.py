@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 import shlex
+import subprocess
 import sys
 import tempfile
 import zipfile
@@ -36,7 +37,6 @@ from .common import (
     sha256_file,
 )
 from .config import (
-    PROFILE_HOST_PLUGIN_BUNDLE_PATH,
     container_image_recipe_digest,
     container_image_reference,
     container_runtime_recipe_digest,
@@ -44,6 +44,7 @@ from .config import (
     load_platform,
     load_release,
     load_target,
+    normalize_profile,
     verified_runtime_digest,
 )
 from .container import (
@@ -79,7 +80,6 @@ Candidate packaging does not assert release qualification.
 """
 SSH_HELPER_PATH = "runner/ssh_transport.py"
 MICROSD_BOOT_MODE = "microsd"
-MICROSD_BOOT_TARGET = "nokia-ta1618"
 MICROSD_BOOT_PROFILE = "microsd-uboot"
 PUBLIC_BOOT_MODES = (MICROSD_BOOT_MODE,)
 
@@ -97,16 +97,25 @@ class BuildIdentity:
 PACKAGE_DOCUMENTS = {
     "60-fplinux.rules": ROOT / "common/60-fplinux.rules",
     "LICENSE": ROOT / "LICENSE",
+    "docs/apps/JPEG.md": ROOT / "docs/apps/JPEG.md",
+    "docs/apps/PRESENT.md": ROOT / "docs/apps/PRESENT.md",
+    "docs/apps/ROTATE.md": ROOT / "docs/apps/ROTATE.md",
     "docs/apps/MICROPYTHONOS.md": ROOT / "docs/apps/MICROPYTHONOS.md",
     "docs/apps/SHOWCASE.md": ROOT / "docs/apps/SHOWCASE.md",
     "docs/apps/TYRQUAKE.md": ROOT / "docs/apps/TYRQUAKE.md",
+    "docs/features/BLUETOOTH.md": ROOT / "docs/features/BLUETOOTH.md",
     "docs/features/CPU_CLOCK.md": ROOT / "docs/features/CPU_CLOCK.md",
     "docs/features/FILE_TRANSFER.md": ROOT / "docs/features/FILE_TRANSFER.md",
     "docs/features/HOST_KEYBOARD.md": ROOT / "docs/features/HOST_KEYBOARD.md",
     "docs/features/LOCAL_CONSOLE.md": ROOT / "docs/features/LOCAL_CONSOLE.md",
+    "docs/features/MICROSD.md": ROOT / "docs/features/MICROSD.md",
+    "docs/features/POWER_OFF.md": ROOT / "docs/features/POWER_OFF.md",
+    "docs/features/RTC.md": ROOT / "docs/features/RTC.md",
     "docs/features/SSH.md": ROOT / "docs/features/SSH.md",
+    "docs/features/SUSPEND.md": ROOT / "docs/features/SUSPEND.md",
     "docs/features/USB_NETWORKING.md": ROOT / "docs/features/USB_NETWORKING.md",
     "docs/guides/STANDALONE.md": ROOT / "docs/guides/STANDALONE.md",
+    "docs/guides/MICROSD_ROOT.md": ROOT / "docs/guides/MICROSD_ROOT.md",
     "licenses/musl/COPYRIGHT": ROOT / "THIRD_PARTY_LICENSES/musl/COPYRIGHT",
 }
 
@@ -136,11 +145,11 @@ def selected_context_profile(
     if profile is not None and boot is not None:
         fail("--boot and --profile cannot be used together")
     if boot is None:
-        return profile
-    if boot == MICROSD_BOOT_MODE and target == MICROSD_BOOT_TARGET:
-        return MICROSD_BOOT_PROFILE
+        return normalize_profile(profile)
     if target is None:
         fail(f"boot mode {boot} requires a target")
+    if boot == MICROSD_BOOT_MODE:
+        return MICROSD_BOOT_PROFILE
     fail(f"boot mode {boot} is not available for target {target}")
     return None
 
@@ -284,34 +293,6 @@ def _load_bundle_ssh_helper(
     return module
 
 
-def _load_bundle_profile_plugin(
-    bundle: CurrentBundle,
-    manifest: dict[str, Any],
-) -> ModuleType:
-    """Load the one host plugin hashed by the selected profile bundle."""
-    path = bundle.path / PROFILE_HOST_PLUGIN_BUNDLE_PATH
-    files = manifest.get("files")
-    record = files.get(PROFILE_HOST_PLUGIN_BUNDLE_PATH) if isinstance(files, dict) else None
-    expected = record.get("sha256") if isinstance(record, dict) else None
-    if (
-        not isinstance(expected, str)
-        or path.is_symlink()
-        or not path.is_file()
-        or sha256_file(path) != expected
-    ):
-        fail("selected profile has no valid host plugin; rebuild it")
-    name = f"fplinux_bundle_profile_plugin_{bundle.generation}"
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        fail(f"profile host plugin cannot be loaded: {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    if not callable(getattr(module, "run", None)):
-        fail("profile host plugin does not expose run(connect, arguments)")
-    return module
-
-
 def _current_ssh_session(
     bundle: CurrentBundle,
     manifest: dict[str, Any],
@@ -403,29 +384,27 @@ def console_target(  # noqa: PLR0913 -- public CLI modes remain explicit.
     os.execv(client, arguments)
 
 
-def profile_command(target: str, profile: str, arguments: list[str]) -> None:
-    """Run the host plugin from one explicitly selected profile bundle."""
-    load_target(target, profile)
-    bundle, manifest = _resolve_target_bundle(target, profile)
-    plugin = _load_bundle_profile_plugin(bundle, manifest)
-    plugin.run(
-        lambda: _current_ssh_session(bundle, manifest, target),
-        arguments,
-    )
-
-
-def verify_booted(target: str) -> None:
+def verify_booted(target: str, *, profile: str | None = None) -> None:
     """Compare the running kernel identity with the current bundle."""
-    bundle, manifest = _resolve_target_bundle(target)
-    snapshot = target_workspace_snapshot(target)
+    profile = normalize_profile(profile)
+    bundle, manifest = _resolve_target_bundle(target, profile)
+    snapshot = target_workspace_snapshot(target, profile)
     image_recipe = container_image_recipe_digest()
     image_state = load_image_state(ROOT / ".cache", image_recipe)
     identity = _build_identity(snapshot, image_state, ROOT / ".cache")
     if not _manifest_matches_identity(manifest, identity):
-        fail(f"build output is stale; rebuild it: ./fplinux build {target}")
+        fail(f"build output is stale; rebuild it: {_profile_command('build', target, profile)}")
     device_identity = _manifest_device_identity(manifest)
     _current_ssh_session(bundle, manifest, target)
     print(f"verify: the phone runs the current build ({device_identity[:16]})")
+
+
+def current_target_ssh_session(
+    target: str, *, profile: str | None = None
+) -> tuple[ModuleType, dict[str, Any]]:
+    """Resolve the authenticated session for one exact target and build profile."""
+    bundle, manifest = _resolve_target_bundle(target, normalize_profile(profile))
+    return _current_ssh_session(bundle, manifest, target)
 
 
 def _build_identity(
@@ -681,6 +660,8 @@ def _build_container_command(  # noqa: PLR0913
         "never",
         "--read-only",
         "--privileged",
+        "--memory",
+        "2g",
         "--network",
         "none" if offline else "host",
         "--tmpfs",
@@ -908,7 +889,6 @@ def build(
 def target_archive_file(
     target: str,
     relative: str,
-    profile: str | None = None,
 ) -> tuple[str, Path]:
     """Map one target-owned release document into its stable archive path."""
     target_name = PurePosixPath(target)
@@ -951,23 +931,6 @@ def target_archive_file(
             fail(f"target package file must not traverse a symlink: {source}")
     if not source.is_file():
         fail(f"target package file is missing or invalid: {source}")
-    if profile is not None:
-        profile_name = PurePosixPath(profile)
-        if (
-            profile_name.is_absolute()
-            or len(profile_name.parts) != 1
-            or profile_name.as_posix() != profile
-        ):
-            fail(f"invalid profile package name: {profile}")
-        override = target_root / "profiles" / profile
-        for component in source_name.parts:
-            override /= component
-            if override.is_symlink():
-                fail(f"profile package file must not traverse a symlink: {override}")
-        if override.exists():
-            if not override.is_file():
-                fail(f"profile package file is invalid: {override}")
-            source = override
     return archive_name, source
 
 
@@ -978,14 +941,13 @@ def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]
     bundle_files = manifest["bundle_files"]
     runtime_files = manifest["runtime_files"]
     documents = manifest["documents"]
-    profile = config.get("profile")
     archive_names = set(bundle_files)
     shared_collisions = archive_names & PACKAGE_DOCUMENTS.keys()
     if shared_collisions:
         fail(f"duplicate release archive path: {min(shared_collisions)}")
     archive_names.update(PACKAGE_DOCUMENTS)
     for relative in documents:
-        archive_name, _source = target_archive_file(target, relative, profile)
+        archive_name, _source = target_archive_file(target, relative)
         if archive_name in archive_names:
             fail(f"duplicate release archive path: {archive_name}")
         archive_names.add(archive_name)
@@ -1031,13 +993,16 @@ def add_target_files(
     files: dict[str, bytes],
     target: str,
     relative_names: list[str],
-    profile: str | None = None,
 ) -> None:
     for relative in relative_names:
-        archive_name, source = target_archive_file(target, relative, profile)
+        archive_name, source = target_archive_file(target, relative)
         if archive_name in files:
             fail(f"duplicate release archive path: {archive_name}")
-        files[archive_name] = source.read_bytes()
+        data = source.read_bytes()
+        if relative.startswith("features/"):
+            # Feature pages move from targets/<target>/features to docs/target.
+            data = data.replace(b"](../../../docs/", b"](../")
+        files[archive_name] = data
 
 
 def package_target(
@@ -1110,13 +1075,18 @@ def package_target(
             f"(qualification SHA256 {qualification_digest})"
         )
 
-    add_target_files(files, target, release["documents"], selected_profile)
+    add_target_files(files, target, release["documents"])
     if candidate:
         files["CANDIDATE-NOTICE.txt"] = CANDIDATE_NOTICE
     for archive_name, source in PACKAGE_DOCUMENTS.items():
         if source.is_symlink() or not source.is_file():
             fail(f"release document is missing or invalid: {source}")
-        files[archive_name] = source.read_bytes()
+        data = source.read_bytes()
+        if archive_name.endswith(".md"):
+            # An archive owns its target status and loading instructions locally.
+            data = data.replace(b"](../../targets/README.md)", b"](../../README.txt)")
+            data = data.replace(b"](../guides/LOADING.md)", b"](../guides/STANDALONE.md)")
+        files[archive_name] = data
     checksums = "".join(f"{sha256_bytes(files[name])}  {name}\n" for name in sorted(files))
     files["SHA256SUMS"] = checksums.encode()
     content_digest = payload_digest(files, release["executables"])
@@ -1165,13 +1135,13 @@ def package_target(
     print(f"ramboot.bin SHA256: {image_digest}")
 
 
-def run_target(
+def _runnable_target_runner(
     target: str,
     *,
     profile: str | None = None,
     boot: str | None = None,
-) -> None:
-    """Run the fixed shared runner from a successful target bundle."""
+) -> Path:
+    """Resolve the fixed shared runner for one runnable bundle."""
     selected_profile = selected_context_profile(target, profile=profile, boot=boot)
     if selected_profile is not None:
         target_config = load_target(target, selected_profile)
@@ -1185,4 +1155,27 @@ def run_target(
     runner = bundle.path / "runner/run.py"
     if runner.is_symlink() or not runner.is_file():
         fail(f"current bundle has no valid runner: {runner}")
+    return runner
+
+
+def run_target(
+    target: str,
+    *,
+    profile: str | None = None,
+    boot: str | None = None,
+) -> None:
+    """Run the fixed shared runner from a successful target bundle."""
+    runner = _runnable_target_runner(target, profile=profile, boot=boot)
     os.execv(os.fsencode(runner), [os.fsencode(runner)])
+
+
+def run_target_noninteractive(target: str, *, profile: str | None = None) -> None:
+    """Run a loader to its authenticated handoff without taking over this CLI process."""
+    runner = _runnable_target_runner(target, profile=profile)
+    result = subprocess.run(
+        [os.fsencode(runner)],
+        stdin=subprocess.DEVNULL,
+        check=False,
+    )
+    if result.returncode:
+        fail(f"RAM loader failed with exit status {result.returncode}")

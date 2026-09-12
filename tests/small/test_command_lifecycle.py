@@ -434,12 +434,10 @@ class CommandLifecycleTests(unittest.TestCase):
             ),
             "microsd-uboot",
         )
-        with self.assertRaisesRegex(SystemExit, "not available for target inoi-240-modern-4g"):
-            commands.selected_context_profile(
-                "inoi-240-modern-4g",
-                profile=None,
-                boot="microsd",
-            )
+        self.assertEqual(
+            commands.selected_context_profile("inoi-240-modern-4g", profile=None, boot="microsd"),
+            "microsd-uboot",
+        )
         with self.assertRaisesRegex(SystemExit, "cannot be used together"):
             commands.selected_context_profile(
                 "nokia-ta1618",
@@ -480,7 +478,7 @@ class CommandLifecycleTests(unittest.TestCase):
 
     def test_run_profile_executes_only_that_profiles_current_generation(self) -> None:
         """A named run does not fall back to the target's default bundle pointer."""
-        profile = "usb-host-lab"
+        profile = "microsd-uboot"
         profile_path = self._create_generation("b" * 64, profile=profile)
         profile_bundle = publish_current_bundle(
             self.output,
@@ -519,13 +517,13 @@ class CommandLifecycleTests(unittest.TestCase):
             mock.patch("fplinux_cli.commands.os.execv") as execute,
             self.assertRaisesRegex(SystemExit, "profile is build-only"),
         ):
-            commands.run_target("phone", profile="microsd")
+            commands.run_target("phone", profile="microsd-uboot")
 
         execute.assert_not_called()
 
     def test_stale_build_only_profile_bundle_remains_non_runnable(self) -> None:
         """Changing source policy cannot authorize an older build-only bundle."""
-        profile = "microsd"
+        profile = "microsd-uboot"
         profile_path = self._create_generation("c" * 64, profile=profile, runnable=False)
         publish_current_bundle(self.output, "phone", profile_path, profile)
         with (
@@ -621,6 +619,27 @@ class CommandLifecycleTests(unittest.TestCase):
             commands._current_ssh_session(self.bundle, manifest, "phone")  # noqa: SLF001
 
         ssh.require_device_identity.assert_called_once_with(session, "9" * 64)
+
+    def test_verify_resolves_the_selected_microsd_generation(self) -> None:
+        """Verification checks the selected bundle identity without falling back to RAM."""
+        profile = "microsd-uboot"
+        path = self._create_generation("b" * 64, profile=profile)
+        selected = publish_current_bundle(self.output, "phone", path, profile)
+        with (
+            mock.patch.object(commands, "ROOT", self.root),
+            mock.patch.object(
+                commands, "target_workspace_snapshot", return_value=self.snapshot
+            ) as snapshot,
+            mock.patch.object(commands, "container_image_recipe_digest", return_value="e" * 64),
+            mock.patch.object(
+                commands, "_current_ssh_session", return_value=(mock.Mock(), {})
+            ) as session,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            commands.verify_booted("phone", profile=profile)
+        snapshot.assert_called_once_with("phone", profile)
+        self.assertEqual(session.call_args.args[0], selected)
+        self.assertEqual(session.call_args.args[1]["profile"], profile)
 
     def test_verify_reports_the_manifest_identity_after_authenticated_reconnect(self) -> None:
         """Report the selected device identity after the reconnect boundary accepts it."""
@@ -759,8 +778,8 @@ class CommandLifecycleTests(unittest.TestCase):
         self.assertEqual(selected_target, "phone")
         ssh.run_remote.assert_called_once_with({}, "id")
 
-    def test_build_argv_has_only_exact_nonoverlapping_mount_roots(self) -> None:
-        """Do not expose the cache root or an ancestor alias to the build container."""
+    def test_build_argv_has_explicit_memory_budget_and_narrow_mounts(self) -> None:
+        """Request a 2 GiB build budget without exposing broad cache mounts."""
         roots = {
             "workspace": self.root / "workspace",
             "downloads": self.root / "cache/downloads",
@@ -802,6 +821,8 @@ class CommandLifecycleTests(unittest.TestCase):
         )
         self.assertIn("--read-only", command)
         self.assertIn("--privileged", command)
+        self.assertIn("--memory", command)
+        self.assertEqual(command[command.index("--memory") + 1], "2g")
         self.assertFalse(any(mount.split(":", 2)[1] == "/cache" for mount in mounts))
         self.assertIn(
             "FPLINUX_CONTAINER_IMAGE_RECIPE="

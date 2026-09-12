@@ -23,7 +23,7 @@ properties:
       - fplinux,ums9117-nv3023-lcm-fb
 
   reg:
-    minItems: 12
+    minItems: 14
     maxItems: 14
 
   reg-names:
@@ -56,6 +56,8 @@ properties:
           - const: ap-ahb-reset-clear
           - const: pinmux
           - const: pinconf
+          - const: pinmux-data
+          - const: pinconf-data
 
   interrupts:
     maxItems: 1
@@ -70,26 +72,50 @@ properties:
   sprd,pinmux-values:
     $ref: /schemas/types.yaml#/definitions/uint32-array
     minItems: 1
-    maxItems: 17
+    maxItems: 7
     description: Values written at the paired pinmux offsets.
 
   sprd,pinmux-offsets:
     $ref: /schemas/types.yaml#/definitions/uint32-array
     minItems: 1
-    maxItems: 17
+    maxItems: 7
     description: Byte offsets in the pinmux resource, paired with pinmux-values.
 
   sprd,pinconf-values:
     $ref: /schemas/types.yaml#/definitions/uint32-array
     minItems: 1
-    maxItems: 17
+    maxItems: 7
     description: Values written at the paired pinconf offsets.
 
   sprd,pinconf-offsets:
     $ref: /schemas/types.yaml#/definitions/uint32-array
     minItems: 1
-    maxItems: 17
+    maxItems: 7
     description: Byte offsets in the pinconf resource, paired with pinconf-values.
+
+  sprd,pinmux-data-values:
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    minItems: 10
+    maxItems: 10
+    description: Values written at the paired DBI data pinmux offsets.
+
+  sprd,pinmux-data-offsets:
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    minItems: 10
+    maxItems: 10
+    description: Byte offsets in the pinmux-data resource.
+
+  sprd,pinconf-data-values:
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    minItems: 10
+    maxItems: 10
+    description: Values written at the paired DBI data pinconf offsets.
+
+  sprd,pinconf-data-offsets:
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    minItems: 10
+    maxItems: 10
+    description: Byte offsets in the pinconf-data resource.
 
   sprd,wled-current-levels:
     $ref: /schemas/types.yaml#/definitions/uint32-array
@@ -139,8 +165,16 @@ allOf:
     then:
       required:
         - sprd,dbi-timing-ns
+        - sprd,pinmux-data-values
+        - sprd,pinmux-data-offsets
+        - sprd,pinconf-data-values
+        - sprd,pinconf-data-offsets
     else:
       properties:
         sprd,dbi-timing-ns: false
+        sprd,pinmux-data-values: false
+        sprd,pinmux-data-offsets: false
+        sprd,pinconf-data-values: false
+        sprd,pinconf-data-offsets: false
 
 additionalProperties: false
