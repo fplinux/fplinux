@@ -1,8 +1,8 @@
 [kern]
-version = "0.7.1"
-archive_url = "https://github.com/getkern/kern/releases/download/v0.7.1/kern-x86_64-unknown-linux-musl.tar.gz"
-archive_sha256 = "d056c09831e5b571fe68465f877087ba4716e60f37deaa2ae9b99ed2f814858e"
-binary_sha256 = "d93b8dff36e7fc59644ba3f967a6bc3d388b0432142b76c8555350149c90a973"
+version = "0.9.3"
+archive_url = "https://github.com/getkern/kern/releases/download/v0.9.3/kern-x86_64-unknown-linux-musl.tar.gz"
+archive_sha256 = "4dd31be2935a95c8cb842cbe11b7163d2799b3c83bf0aec582fb30209f3ffe27"
+binary_sha256 = "77afff3515251eb2c396b3e12383dba3f180a7b69a42a52831c111b48eef66bc"
 
 [oci]
 repository = "localhost/fplinux-build"
