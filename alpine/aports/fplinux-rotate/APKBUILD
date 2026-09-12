@@ -1,0 +1,41 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-rotate
+pkgver=1
+pkgrel=0
+pkgdesc="V4L2 ROTA image rotation and verification tool for FPLinux"
+url="https://github.com/fplinux/fplinux"
+arch="armv7"
+license="GPL-2.0-only"
+makedepends_build="clang22 lld22"
+makedepends_host="musl-dev linux-headers"
+options="!check"
+source="
+	fplinux-rotate.c
+	fplinux-rotate-core.c
+	fplinux-rotate.h
+	fplinux-fb-session.c
+	fplinux-fb-session.h
+"
+builddir="$srcdir"
+
+build() {
+	"$CC" $CPPFLAGS $CFLAGS -O2 -std=c11 -Wall -Wextra -Werror \
+		-I"$srcdir" \
+		"$srcdir/fplinux-rotate.c" \
+		"$srcdir/fplinux-rotate-core.c" \
+		"$srcdir/fplinux-fb-session.c" \
+		$LDFLAGS -o fplinux-rotate
+}
+
+package() {
+	install -Dm755 "$builddir/fplinux-rotate" \
+		"$pkgdir/usr/bin/fplinux-rotate"
+}
+
+sha512sums="
+07c1f878cf26284e2928a4e547fef80a6ba69a5db5d527cade901fa122b7ef212465241fc16a8af8630769bb85d4da9a45acc7bd9dd8a37f51dd1619edbc0315  fplinux-rotate.c
+da2b76b4b6491c0693a4bbc65f97a7abd2c4e1ba0ca42eb1b93be77afab11c0b247b03e97afb5857ded7bb0848b14e1af21127843848be7d381779e0eb10514a  fplinux-rotate-core.c
+1acd761bea4de0b377f569ed887bbd5bf635cd0ca8bb6746fa1b1ab62d06050b97d546debca38bf165e7a2a4efde68d981615abd6eb0fbbec264ea0d9b67eb6b  fplinux-rotate.h
+cbf7e3cb0a9fe2fda9d387e72ab49d13b3d7828e282f0ce2f528183f1fce0c337b29e8c62775671fe424548c0526027d3d50bc57ef7fe5a69c92af79da56598d  fplinux-fb-session.c
+38f849284be27b63ae553dc66c1427b885ef0e332a89b035f9465659e3a080435bd7fde0c788c1a97129cd0b252bd151268f568bab3065029a7874a2740b6279  fplinux-fb-session.h
+"

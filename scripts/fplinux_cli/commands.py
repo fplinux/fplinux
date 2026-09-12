@@ -97,6 +97,7 @@ class BuildIdentity:
 PACKAGE_DOCUMENTS = {
     "60-fplinux.rules": ROOT / "common/60-fplinux.rules",
     "LICENSE": ROOT / "LICENSE",
+    "docs/apps/ROTATE.md": ROOT / "docs/apps/ROTATE.md",
     "docs/apps/MICROPYTHONOS.md": ROOT / "docs/apps/MICROPYTHONOS.md",
     "docs/apps/SHOWCASE.md": ROOT / "docs/apps/SHOWCASE.md",
     "docs/apps/TYRQUAKE.md": ROOT / "docs/apps/TYRQUAKE.md",

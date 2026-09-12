@@ -119,6 +119,10 @@
 	status = "okay";
 };
 
+&rota {
+	status = "okay";
+};
+
 &keypad {
 	compatible = "sprd,ums9117-keypad";
 	status = "okay";

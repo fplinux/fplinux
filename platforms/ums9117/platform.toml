@@ -10,6 +10,7 @@ packages = [
   "fplinux-cpuclock",
   "fplinux-ssh",
   "fplinux-usb-gadget",
+  "fplinux-rotate",
 ]
 
 [bundle]
@@ -87,6 +88,14 @@ destination = "include/linux/dma/ums9117-dma-test.h"
 [[linux.copies]]
 source = "platforms/ums9117/kernel/ums9117-dma.h"
 destination = "include/linux/dma/ums9117-dma.h"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-rota.c"
+destination = "drivers/media/platform/ums9117-rota.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/sprd,ums9117-rota.yaml"
+destination = "Documentation/devicetree/bindings/media/sprd,ums9117-rota.yaml"
 
 [[linux.copies]]
 source = "platforms/ums9117/bindings/sprd,ums9117-dma.yaml"
@@ -291,6 +300,14 @@ destination = "drivers/dma/Kconfig"
 [[linux.appends]]
 source = "platforms/ums9117/kernel/dma.Makefile"
 destination = "drivers/dma/Makefile"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/media.Kconfig"
+destination = "drivers/media/platform/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/media.Makefile"
+destination = "drivers/media/platform/Makefile"
 
 [[linux.appends]]
 source = "platforms/ums9117/kernel/fbdev.Kconfig"

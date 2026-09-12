@@ -96,6 +96,21 @@
 			status = "disabled";
 		};
 
+		rota: rotate@20900000 {
+			compatible = "sprd,ums9117-rota";
+			reg = <0x20900000 0x450>,
+			      <0x20e00000 0x4>,
+			      <0x20e01000 0x4>,
+			      <0x20e02000 0x4>,
+			      <0x20e01004 0x4>,
+			      <0x20e02004 0x4>;
+			reg-names = "rota", "ap-ahb-gate-state", "ap-ahb-gate-set",
+				    "ap-ahb-gate-clear", "ap-ahb-reset-set",
+				    "ap-ahb-reset-clear";
+			status = "disabled";
+		};
+
+		jpeg: jpeg@20c00000 {
 		usb: usb@20200000 {
 			compatible = "fplinux,ums9117-musb-inherited";
 			reg = <0x20200000 0x2000>;
