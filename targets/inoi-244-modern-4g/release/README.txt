@@ -8,15 +8,44 @@ powered-off phone.
 Current target support:
   - local 240x320 terminal and physical keypad;
   - USB SSH/SFTP and host-keyboard forwarding;
-  - installable TyrQuake;
-  - installable MicroPythonOS launcher, navigation and keypad text input.
+  - microSD ext4 read/write, card-backed swap and a writable microSD system root;
+  - RTC reading, setting, one-shot alarms and RTC-woken s2idle in both profiles,
+    including mounted ext4 storage and card-backed swap;
+  - Bluetooth pairing, bidirectional file transfer, PAN Internet and recovery
+    after wake, with firmware prepared from this exact phone;
+  - installable ARMADA and TyrQuake in both profiles;
+  - installable MicroPythonOS launcher, navigation and keypad text input,
+    with persistent state on the ext4 system root;
+  - image rotation, JPEG codec/scaling and native presentation transfers.
 
-microSD, internal phone storage, audio, modem, Bluetooth, Wi-Fi and Linux
-power-off are not supported by this target.
+The shared brightness, keypad-light, vibrator, telemetry and power-off
+interfaces are enabled. Physical brightness, keypad light and native image
+fidelity are unqualified. No physical vibration was observed under Linux
+without a battery. Stock firmware can drive the motor, but the cause of the
+Linux limitation is unknown; Linux vibration with a battery is unqualified.
+Telemetry has been read with the battery absent; battery measurements, charging,
+battery-only shutdown and physical-key wake remain unqualified.
 
-This target has no supported microSD path. TyrQuake therefore keeps game data
-in tmpfs, where it consumes the phone's limited RAM. MicroPythonOS state also
-remains in RAM.
+Unmounted card hot-swap and FAT32 data storage are unqualified on this phone.
+Internal phone storage writes, audio, modem, Wi-Fi and Linux reboot are not
+supported.
 
-To end the RAM-only session, disconnect USB, remove and reinsert the battery,
-then boot the phone normally.
+The shared interfaces and storage safety rules are described in:
+  - docs/features/MICROSD.md
+  - docs/features/RTC.md
+  - docs/features/POWER_OFF.md
+  - docs/features/SUSPEND.md
+  - docs/guides/MICROSD_ROOT.md
+
+TyrQuake game data can use RAM or ext4 microSD storage. Applications, files,
+MicroPythonOS state and Bluetooth pairing records persist on the ext4 system
+root across cold boots. Optional MicroPythonOS FAT32 data-card storage is
+unqualified.
+
+Before ending a RAM-only session, stop applications using the card and follow
+the safe-removal procedure in docs/features/MICROSD.md, including disabling
+card-backed swap and unmounting card filesystems. Then disconnect USB. If a
+battery is installed, remove and reinsert it before booting the phone normally.
+Never use battery
+removal to stop a writable microSD system root; follow the system-card safety
+requirements in docs/guides/MICROSD_ROOT.md first.

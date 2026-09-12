@@ -22,13 +22,16 @@ no supported path.
 
 All current targets share these limits:
 
-- Linux runs only in volatile RAM; there is no autonomous Linux boot path.
-- Default target and release workflows do not expose internal phone storage.
-  Target-owned development profiles may provide isolated read-only diagnostics;
-  those profiles do not qualify storage as a supported target feature.
+- A cold FPLinux start requires USB loading; the stock boot chain is unchanged.
+  The default profile uses a RAM root. The `microsd-uboot` profile uses a
+  persistent microSD root on supported targets.
+- Internal phone storage is not writable. A supported target may expose a
+  fixed-command read-only physical NAND backup, not a mounted filesystem.
 - USB operates as a peripheral; USB host and OTG are not supported.
-- Audio, calls, SMS, mobile data, Bluetooth, Wi-Fi, camera and indicator LEDs
-  have no supported FPLinux path.
+- Audio, calls, SMS, mobile data, Wi-Fi, camera and indicator LEDs have no
+  supported FPLinux path.
+- Bluetooth support is target-specific and uses the same interfaces in both
+  global profiles; follow the phone document for support and limitations.
 - Linux reboot is not supported. Suspend and vibration support are
   target-specific and documented by the exact phone where available.
 
@@ -45,6 +48,8 @@ Shared guides own workflows that do not change between phones:
   runner and offline documentation shipped with a package.
 - [Release archives](../docs/guides/RELEASES.md) defines candidates, qualification and
   releases. Target support does not by itself qualify an executable payload.
+- [microSD system root](../docs/guides/MICROSD_ROOT.md) covers card preparation,
+  persistent boot and system-card safety.
 
 Feature and application documents own behavior shared by the current targets:
 
@@ -54,8 +59,17 @@ Feature and application documents own behavior shared by the current targets:
 - [File transfer](../docs/features/FILE_TRANSFER.md)
 - [Host keyboard forwarding](../docs/features/HOST_KEYBOARD.md)
 - [CPU clock reporting](../docs/features/CPU_CLOCK.md)
+- [Removable microSD storage](../docs/features/MICROSD.md)
+- [Real-time clock](../docs/features/RTC.md)
+- [Power-off](../docs/features/POWER_OFF.md)
+- [Suspend](../docs/features/SUSPEND.md)
+- [Bluetooth](../docs/features/BLUETOOTH.md)
+- [FPLinux: ARMADA](../docs/apps/SHOWCASE.md)
 - [TyrQuake](../docs/apps/TYRQUAKE.md)
 - [MicroPythonOS](../docs/apps/MICROPYTHONOS.md)
+- [Image rotation](../docs/apps/ROTATE.md)
+- [JPEG codec and scaling](../docs/apps/JPEG.md)
+- [Native image presentation](../docs/apps/PRESENT.md)
 
 New target documentation starts from the [phone target template](../docs/porting/TARGET.md).
 Keep target documents focused on exact-phone qualification and differences.

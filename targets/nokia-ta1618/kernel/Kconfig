@@ -10,10 +10,10 @@ config MACH_NOKIA_TA1618
 	help
 	  Board support for the Nokia 3210 4G (TA-1618), a UMS9117
 	  feature phone with 64 MiB of DRAM, a 240x320 panel and a matrix
-	  keypad. The target is RAM-only: kernel, DTB and initramfs are
-	  staged over the BootROM/FDL USB download path and nothing is
-	  written to flash. The top 2 MiB of DRAM stay reserved for DTB
-	  staging and the display buffer.
+	  keypad. BootROM/FDL USB loading supports a RAM system or U-Boot
+	  with a microSD system root. Internal NAND remains read-only. The
+	  low 2 MiB of DRAM belong to CM4; the top 2 MiB stay reserved for
+	  DTB staging and the display buffer.
 
 config FB_TA1618_DMA_MEMCPY
 	bool "AP DMA framebuffer copy on Nokia TA-1618"
