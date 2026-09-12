@@ -1,9 +1,12 @@
-# Vibration on Nokia 3210 4G (TA-1618)
+# Vibration
 
-The vibrator is exposed as a Linux input force-feedback device named
-`TA-1618 vibrator`, with physical path `fplinux/vibrator0`. Applications should
-locate it by those identifiers rather than assuming a fixed `/dev/input/eventN`
-number.
+The vibrator is exposed as a Linux input force-feedback device with physical
+path `fplinux/vibrator0`. The selected
+[target's documentation](../../targets/README.md) states its input-device name
+and physical support. A standalone archive carries that status in `README.txt`.
+Applications should locate the device by its name and physical path rather
+than assuming a fixed `/dev/input/eventN` number. An accepted effect does not
+by itself establish that the motor vibrates on the selected phone.
 
 ## Interface
 
@@ -18,8 +21,7 @@ duration API. A new activation is accepted only after the previous output has
 been confirmed off.
 
 Closing the last input handle, removing the driver, shutting Linux down or
-entering [s2idle](../../../docs/features/SUSPEND.md) stops an active pulse and
-restores the inherited
+entering [s2idle](SUSPEND.md) stops an active pulse and restores the inherited
 SC2720 state. A pulse interrupted by s2idle is not resumed after wake.
 
 Repeated effects may form a pulse train. The driver does not define a

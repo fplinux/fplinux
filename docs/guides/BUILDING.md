@@ -146,8 +146,9 @@ FPLinux has two global profiles, declared once under `profiles/`:
 
 - `default`: the system root is in RAM. Omitting `--profile` and explicitly
   selecting `--profile default` use the same build and runtime identity.
+  zram uses ZSTD compression.
 - `microsd-uboot`: the USB loader starts U-Boot in RAM, then Linux uses the
-  microSD card as its persistent ext4 root.
+  microSD card as its persistent ext4 root. zram uses LZO-RLE compression.
 
 Both profiles use the shared platform configuration and the selected target's
 board configuration. A profile selects boot and storage policy, not individual

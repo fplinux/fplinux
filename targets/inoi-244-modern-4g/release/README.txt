@@ -31,11 +31,25 @@ Internal phone storage writes, audio, modem, Wi-Fi and Linux reboot are not
 supported.
 
 The shared interfaces and storage safety rules are described in:
+  - docs/features/AUXADC.md
+  - docs/features/BATTERY_TELEMETRY.md
+  - docs/features/CHARGER_STATUS.md
+  - docs/features/DISPLAY_BACKLIGHT.md
+  - docs/features/KEYPAD_BACKLIGHT.md
   - docs/features/MICROSD.md
   - docs/features/RTC.md
   - docs/features/POWER_OFF.md
+  - docs/features/SOC_TEMPERATURE.md
   - docs/features/SUSPEND.md
+  - docs/features/VIBRATION.md
   - docs/guides/MICROSD_ROOT.md
+
+This phone uses backlight device inoi244-backlight, with configured levels
+0 through 31 and default 31; power-supply devices inoi244-battery and
+inoi244-charger; IIO name inoi244-sc2720-auxadc; thermal-zone type inoi244-soc;
+and input name INOI 244 Modern 4G vibrator. IIO, thermal and input-device
+numbers are assigned at boot. These identifiers do not qualify the physical
+effects or measurements noted above.
 
 TyrQuake game data can use RAM or ext4 microSD storage. Applications, files,
 MicroPythonOS state and Bluetooth pairing records persist on the ext4 system

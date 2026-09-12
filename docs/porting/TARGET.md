@@ -103,8 +103,10 @@ target-specific persistent-storage limitation in the status or feature table.
 
 Keep only actions and limits that differ for this phone: for example a supported
 removable-storage lifecycle, a display-size limitation, backlight control or a
-safe power-off procedure. Common console controls, application controls, SSH,
-file transfer and host-keyboard behavior belong in their feature pages. Do not
+safe power-off procedure. Common interfaces and their limits belong in
+`docs/features/`; target device names, brightness ranges and physical support
+remain in the target README. Common console controls, application controls, SSH,
+file transfer and host-keyboard behavior belong in their shared pages. Do not
 include register descriptions, configuration listings, implementation maps,
 cache paths or build internals.
 

@@ -1,11 +1,13 @@
-# Keypad backlight on Nokia 3210 4G (TA-1618)
+# Keypad backlight
 
-This page applies only to Nokia 3210 4G (TA-1618). The keypad backlight is
-exposed as a binary Linux LED-class device.
+The keypad backlight is exposed as the binary Linux LED-class device
+`/sys/class/leds/:kbd_backlight`. The selected
+[target's documentation](../../targets/README.md) states whether its physical
+light is qualified. A standalone archive carries that status in `README.txt`.
 
 ## Interface
 
-A physical key press turns the backlight on for about five seconds. The same
+A physical key press requests the backlight for about five seconds. The same
 bounded light can be requested or cancelled through the standard brightness
 attribute:
 
