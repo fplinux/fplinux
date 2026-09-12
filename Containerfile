@@ -214,6 +214,9 @@ RUN set -eux; \
     rm -f "${binary}"; \
     hadolint --version
 
+RUN apk add --no-cache \
+    libjpeg-turbo-dev=3.1.3-r0
+
 RUN mkdir -p /cache/analysis /cache/downloads /cache/linux /cache/rootfs \
     /tmp/fplinux-home /workspace /work \
     && chmod 1777 /cache /tmp/fplinux-home /work

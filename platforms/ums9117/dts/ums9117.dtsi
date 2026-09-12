@@ -7,6 +7,18 @@
 	#size-cells = <1>;
 	interrupt-parent = <&gic>;
 
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		jpeg_dma: jpeg-dma-pool {
+			compatible = "shared-dma-pool";
+			reusable;
+			size = <0x00400000>;
+		};
+	};
+
 	cpus {
 		#address-cells = <1>;
 		#size-cells = <0>;
@@ -111,6 +123,22 @@
 		};
 
 		jpeg: jpeg@20c00000 {
+			compatible = "sprd,ums9117-jpeg";
+			reg = <0x20c00000 0x11a00>,
+			      <0x20e00000 0x4>,
+			      <0x20e01000 0x4>,
+			      <0x20e02000 0x4>,
+			      <0x20e01004 0x4>,
+			      <0x20e02004 0x4>,
+			      <0x21500088 0x4>;
+			reg-names = "jpeg", "ap-ahb-gate-state", "ap-ahb-gate-set",
+				    "ap-ahb-gate-clear", "ap-ahb-reset-set",
+				    "ap-ahb-reset-clear", "dcam-clock";
+			interrupts = <GIC_SPI 45 IRQ_TYPE_LEVEL_HIGH>;
+			memory-region = <&jpeg_dma>;
+			status = "disabled";
+		};
+
 		usb: usb@20200000 {
 			compatible = "fplinux,ums9117-musb-inherited";
 			reg = <0x20200000 0x2000>;

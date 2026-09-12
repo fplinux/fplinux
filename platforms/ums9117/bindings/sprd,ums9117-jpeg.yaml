@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: GPL-2.0-only
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/media/sprd,ums9117-jpeg.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Unisoc UMS9117 memory-to-memory JPEG decoder
+
+maintainers:
+  - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+
+description: |
+  The VSP JPEG decoder shares its register aperture, SRAM and clock gate with
+  DCAM. This binding assigns the block exclusively to memory-to-memory JPEG
+  decoding; concurrent camera use is not supported. Input and output transfers
+  use the block's own AHB master, with completion on the shared DCAM interrupt.
+
+properties:
+  compatible:
+    const: sprd,ums9117-jpeg
+
+  reg:
+    items:
+      - description: DCAM and VSP registers and table SRAM
+      - description: Shared AP AHB clock-enable state
+      - description: Shared AP AHB clock-enable SET alias
+      - description: Shared AP AHB clock-enable CLEAR alias
+      - description: Shared AP AHB reset SET alias
+      - description: Shared AP AHB reset CLEAR alias
+      - description: DCAM clock source and divider
+
+  reg-names:
+    items:
+      - const: jpeg
+      - const: ap-ahb-gate-state
+      - const: ap-ahb-gate-set
+      - const: ap-ahb-gate-clear
+      - const: ap-ahb-reset-set
+      - const: ap-ahb-reset-clear
+      - const: dcam-clock
+
+  interrupts:
+    maxItems: 1
+
+  memory-region:
+    maxItems: 1
+    description: Reusable DMA pool for the JPEG and RAM scaling engines.
+
+required:
+  - compatible
+  - reg
+  - reg-names
+  - interrupts
+  - memory-region
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+    jpeg@20c00000 {
+        compatible = "sprd,ums9117-jpeg";
+        reg = <0x20c00000 0x11a00>,
+              <0x20e00000 0x4>,
+              <0x20e01000 0x4>,
+              <0x20e02000 0x4>,
+              <0x20e01004 0x4>,
+              <0x20e02004 0x4>,
+              <0x21500088 0x4>;
+        reg-names = "jpeg", "ap-ahb-gate-state", "ap-ahb-gate-set",
+                    "ap-ahb-gate-clear", "ap-ahb-reset-set",
+                    "ap-ahb-reset-clear", "dcam-clock";
+        interrupts = <GIC_SPI 45 IRQ_TYPE_LEVEL_HIGH>;
+        memory-region = <&jpeg_dma>;
+    };

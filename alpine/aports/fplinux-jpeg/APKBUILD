@@ -1,0 +1,69 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-jpeg
+pkgver=1
+pkgrel=1
+pkgdesc="V4L2 and software JPEG tools for FPLinux"
+url="https://github.com/fplinux/fplinux"
+arch="armv7"
+license="GPL-2.0-only AND IJG"
+makedepends_build="clang22 lld22 cmake samurai"
+makedepends_host="musl-dev linux-headers"
+options="!check"
+source="
+	fplinux-jpeg.c
+	fplinux-jpeg-cpu.c
+	libjpeg-turbo-3.1.3.tar.gz::https://github.com/libjpeg-turbo/libjpeg-turbo/archive/refs/tags/3.1.3.tar.gz
+"
+builddir="$srcdir"
+
+build() {
+	"$CC" $CPPFLAGS $CFLAGS -O2 -std=c11 -Wall -Wextra -Werror \
+		"$srcdir/fplinux-jpeg.c" \
+		$LDFLAGS -o fplinux-jpeg
+
+	: "${CC:?missing target CC}" \
+		"${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
+	local jpeg_ar
+	jpeg_ar="$(command -v "$CHOST-ar")"
+	CC="$CC" \
+	CFLAGS="$CFLAGS -O3 -mcpu=cortex-a7 -mfpu=vfpv4 -mfloat-abi=hard" \
+	cmake -S "$srcdir/libjpeg-turbo-3.1.3" -B jpeg-build -G Ninja \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=armv7 \
+		-DCMAKE_C_COMPILER="$CC" -DCMAKE_ASM_COMPILER="$CC" \
+		-DCMAKE_C_COMPILER_TARGET="$CHOST" -DCMAKE_ASM_COMPILER_TARGET="$CHOST" \
+		-DCMAKE_AR="$jpeg_ar" -DCMAKE_SYSROOT="$CBUILDROOT" \
+		-DCMAKE_FIND_ROOT_PATH="$CBUILDROOT" \
+		-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+		-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+		-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+		-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
+		-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+		-DENABLE_SHARED=OFF -DENABLE_STATIC=ON \
+		-DWITH_SIMD=ON -DWITH_JPEG8=ON -DWITH_JPEG7=OFF \
+		-DWITH_12BIT=OFF \
+		-DWITH_TURBOJPEG=OFF -DWITH_TOOLS=OFF -DWITH_TESTS=OFF
+	cmake --build jpeg-build --target jpeg-static
+	"$CC" $CPPFLAGS $CFLAGS -O3 -mcpu=cortex-a7 -mfpu=vfpv4 -mfloat-abi=hard \
+		-std=c11 -Wall -Wextra -Werror \
+		-I"$srcdir/libjpeg-turbo-3.1.3/src" -Ijpeg-build \
+		"$srcdir/fplinux-jpeg-cpu.c" jpeg-build/libjpeg.a \
+		$LDFLAGS -lm -o fplinux-jpeg-cpu
+}
+
+package() {
+	install -Dm755 "$builddir/fplinux-jpeg" \
+		"$pkgdir/usr/bin/fplinux-jpeg"
+	install -Dm755 "$builddir/fplinux-jpeg-cpu" \
+		"$pkgdir/usr/bin/fplinux-jpeg-cpu"
+	install -Dm644 "$srcdir/libjpeg-turbo-3.1.3/LICENSE.md" \
+		"$pkgdir/usr/share/licenses/$pkgname/libjpeg-turbo-LICENSE.md"
+	install -Dm644 "$srcdir/libjpeg-turbo-3.1.3/README.ijg" \
+		"$pkgdir/usr/share/licenses/$pkgname/README.ijg"
+}
+
+sha512sums="
+c44d508db1db04792dc0dd8f6e4213902bba97646f0e5251f525821c8bada46380ea81aebe820477f9273b58d979ae96acb63a595b0997dd166a2501cc59ca24  fplinux-jpeg.c
+83f668322f667eb841f985832446de8fb2897cbb8c46c381030f09ec8f1b5356e5d935b166c6f911a8947e8b2b7a3892a2e4e0cc127df3083e685f18558fe848  fplinux-jpeg-cpu.c
+d95bf0689fb2862ad5ea9e902b73724098d911d9c312aa69157bec9de77f32e4d5ac7dfa105d844110cc66dbdb0336056ba7f96781fcbc848b72fd0661604d50  libjpeg-turbo-3.1.3.tar.gz
+"

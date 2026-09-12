@@ -11,6 +11,7 @@ packages = [
   "fplinux-ssh",
   "fplinux-usb-gadget",
   "fplinux-rotate",
+  "fplinux-jpeg",
 ]
 
 [bundle]
@@ -92,6 +93,30 @@ destination = "include/linux/dma/ums9117-dma.h"
 [[linux.copies]]
 source = "platforms/ums9117/kernel/ums9117-rota.c"
 destination = "drivers/media/platform/ums9117-rota.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-jpeg.c"
+destination = "drivers/media/platform/ums9117-jpeg.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-jpeg-codec.c"
+destination = "drivers/media/platform/ums9117-jpeg-codec.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-jpeg-codec.h"
+destination = "drivers/media/platform/ums9117-jpeg-codec.h"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-jpeg-hw.c"
+destination = "drivers/media/platform/ums9117-jpeg-hw.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-jpeg-hw.h"
+destination = "drivers/media/platform/ums9117-jpeg-hw.h"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/sprd,ums9117-jpeg.yaml"
+destination = "Documentation/devicetree/bindings/media/sprd,ums9117-jpeg.yaml"
 
 [[linux.copies]]
 source = "platforms/ums9117/bindings/sprd,ums9117-rota.yaml"

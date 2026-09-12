@@ -14,3 +14,16 @@ config VIDEO_UMS9117_ROTA
 	  DMA controller and has no separate completion interrupt. It supports
 	  the hardware's packed RGB, grayscale, and semiplanar YUV formats.
 
+config VIDEO_UMS9117_JPEG
+	bool "Unisoc UMS9117 JPEG decoder"
+	depends on V4L_MEM2MEM_DRIVERS
+	depends on VIDEO_DEV
+	depends on ARCH_UMS9117 || COMPILE_TEST
+	depends on OF
+	select V4L2_MEM2MEM_DEV
+	select V4L2_JPEG_HELPER
+	select VIDEOBUF2_VMALLOC
+	help
+	  Decode baseline JPEG images from memory using the UMS9117 VSP.
+	  The V4L2 memory-to-memory interface accepts JPEG and produces
+	  full-range semiplanar YCbCr. No camera or sensor is required.
