@@ -7,19 +7,19 @@ product = "3210 4G"
 hardware_codes = ["TA-1618"]
 compatible = "nokia,ta-1618"
 
+[rootfs]
+packages = []
+
 [bundle]
-packages = [
-  "fplinux-charge",
-  "fplinux-micropythonos-nokia-ta1618",
-  "fplinux-showcase",
-]
+packages = ["fplinux-micropythonos-nokia-ta1618"]
 
 [linux]
+config_fragment = "kernel/config.fragment"
+memory = { base = 0x80000000, size = 0x03e00000 }
 dtb = "unisoc/ums9117-nokia-ta1618.dtb"
 debug_dtb = "ums9117-nokia-ta1618.dtb"
 patches = [
   "kernel/0001-nokia-ta1618-board.patch",
-  "kernel/0003-nokia-ta1618-kpled.patch",
   "kernel/0004-nokia-ta1618-usb-regulator.patch",
 ]
 # The DTB must never describe internal storage or a generic SDHCI host; the
@@ -34,10 +34,6 @@ forbidden_config = [
   "CONFIG_DEVMEM=y",
   "CONFIG_MMC_SDHCI=y",
 ]
-
-[[linux.copies]]
-source = "kernel/ta1618-poweroff.c"
-destination = "arch/arm/mach-ums9117/ta1618-poweroff.c"
 
 [[linux.copies]]
 source = "kernel/ta1618-mmc-linux.c"
@@ -60,64 +56,8 @@ source = "kernel/ta1618-fb.c"
 destination = "drivers/video/fbdev/ta1618-fb.c"
 
 [[linux.copies]]
-source = "kernel/leds-ta1618-kpled.c"
-destination = "drivers/leds/leds-ta1618-kpled.c"
-
-[[linux.copies]]
-source = "kernel/ta1618-sc2720-vibrator.c"
-destination = "drivers/input/misc/ta1618-sc2720-vibrator.c"
-
-[[linux.copies]]
-source = "bindings/fplinux,ta1618-sc2720-vibrator.yaml"
-destination = "Documentation/devicetree/bindings/input/fplinux,ta1618-sc2720-vibrator.yaml"
-
-[[linux.copies]]
 source = "kernel/sc2720-usb33-regulator.c"
 destination = "drivers/regulator/sc2720-usb33.c"
-
-[[linux.copies]]
-source = "kernel/ta1618-sc2720-charger.c"
-destination = "drivers/power/supply/ta1618-sc2720-charger.c"
-
-[[linux.copies]]
-source = "bindings/fplinux,ta1618-sc2720-charger.yaml"
-destination = "Documentation/devicetree/bindings/power/supply/fplinux,ta1618-sc2720-charger.yaml"
-
-[[linux.copies]]
-source = "kernel/ta1618-sc2720-fgu.c"
-destination = "drivers/power/supply/ta1618-sc2720-fgu.c"
-
-[[linux.copies]]
-source = "bindings/fplinux,ta1618-sc2720-fgu.yaml"
-destination = "Documentation/devicetree/bindings/power/supply/fplinux,ta1618-sc2720-fgu.yaml"
-
-[[linux.copies]]
-source = "kernel/ta1618-thm1.c"
-destination = "drivers/thermal/ta1618-thm1.c"
-
-[[linux.copies]]
-source = "bindings/fplinux,ta1618-thm1.yaml"
-destination = "Documentation/devicetree/bindings/thermal/fplinux,ta1618-thm1.yaml"
-
-[[linux.copies]]
-source = "kernel/ta1618-sc2720-auxadc.c"
-destination = "drivers/iio/adc/ta1618-sc2720-auxadc.c"
-
-[[linux.copies]]
-source = "bindings/fplinux,ta1618-sc2720-auxadc.yaml"
-destination = "Documentation/devicetree/bindings/iio/adc/fplinux,ta1618-sc2720-auxadc.yaml"
-
-[[linux.copies]]
-source = "kernel/ta1618-sc2720-rtc.c"
-destination = "drivers/rtc/ta1618-sc2720-rtc.c"
-
-[[linux.copies]]
-source = "bindings/fplinux,ta1618-sc2720-rtc.yaml"
-destination = "Documentation/devicetree/bindings/rtc/fplinux,ta1618-sc2720-rtc.yaml"
-
-[[linux.copies]]
-source = "bindings/fplinux,ta1618-kpled.yaml"
-destination = "Documentation/devicetree/bindings/leds/fplinux,ta1618-kpled.yaml"
 
 [[linux.copies]]
 source = "bindings/fplinux,sc2720-usb33-regulator.yaml"
@@ -132,52 +72,8 @@ source = "kernel/Kconfig"
 destination = "arch/arm/mach-ums9117/Kconfig"
 
 [[linux.appends]]
-source = "kernel/Makefile"
-destination = "arch/arm/mach-ums9117/Makefile"
-
-[[linux.appends]]
 source = "kernel/fbdev.Makefile"
 destination = "drivers/video/fbdev/Makefile"
-
-[[linux.appends]]
-source = "kernel/power-supply.Kconfig"
-destination = "drivers/power/supply/Kconfig"
-
-[[linux.appends]]
-source = "kernel/power-supply.Makefile"
-destination = "drivers/power/supply/Makefile"
-
-[[linux.appends]]
-source = "kernel/thermal.Kconfig"
-destination = "drivers/thermal/Kconfig"
-
-[[linux.appends]]
-source = "kernel/thermal.Makefile"
-destination = "drivers/thermal/Makefile"
-
-[[linux.appends]]
-source = "kernel/iio.Kconfig"
-destination = "drivers/iio/adc/Kconfig"
-
-[[linux.appends]]
-source = "kernel/iio.Makefile"
-destination = "drivers/iio/adc/Makefile"
-
-[[linux.appends]]
-source = "kernel/input.Kconfig"
-destination = "drivers/input/misc/Kconfig"
-
-[[linux.appends]]
-source = "kernel/input.Makefile"
-destination = "drivers/input/misc/Makefile"
-
-[[linux.appends]]
-source = "kernel/rtc.Kconfig"
-destination = "drivers/rtc/Kconfig"
-
-[[linux.appends]]
-source = "kernel/rtc.Makefile"
-destination = "drivers/rtc/Makefile"
 
 [bootstrap]
 image = "ta1618_linux_bootstrap.bin"

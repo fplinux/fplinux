@@ -34,14 +34,15 @@ from .bundle_state import (
 from .common import ROOT, sha256_bytes, sha256_file
 from .config import (
     PROFILE_HOST_PLUGIN_BUNDLE_PATH,
+    compose_kernel_config,
     container_runtime_recipe_digest,
+    kernel_config_paths,
     load_asset_lock,
     load_platform,
     load_release,
     load_target,
     relative_value,
     target_asset_lock_path,
-    target_defconfig_path,
 )
 from .device_state import DeviceStateError, device_kernel_identity, localversion
 from .device_tree import (
@@ -759,7 +760,10 @@ def build_kernel(
     """Build or exactly reuse zImage and the declared target DTB in ``work/kernel``."""
     try:
         work = output.parent
-        defconfig = require_file(target_defconfig_path(target))
+        base, fragment = kernel_config_paths(target, target_config, platform)
+        work.mkdir(parents=True, exist_ok=True)
+        defconfig = work / "kernel.defconfig"
+        defconfig.write_bytes(compose_kernel_config(base, fragment))
         root_contract = target_config["linux"]["root"]
         initramfs_record: dict[str, int | str] | None = None
         initramfs_input: Path | None = None
@@ -846,7 +850,7 @@ def build_kernel(
             linux_recipe=current_linux.linux_recipe,
             linux_base=require_sha256(linux_base, "Linux base source"),
             defconfig=defconfig,
-            defconfig_path=f"targets/{target}/kernel/defconfig",
+            defconfig_path="generated/kernel.defconfig",
             root=root_contract,
             initramfs=initramfs_record,
             initramfs_input=initramfs_input,
@@ -887,7 +891,7 @@ def build_kernel(
             verify_root_bootargs(dtb, root_contract)
             layout = target_config.get("layout")
             if isinstance(layout, dict):
-                verify_profile_dtb_layout(dtb, layout)
+                verify_profile_dtb_layout(dtb, layout, target_config["linux"]["memory"])
         except DeviceTreeError as error:
             fail(str(error))
         config_text = require_file(output / ".config").read_text()

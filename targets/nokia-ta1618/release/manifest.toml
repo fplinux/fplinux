@@ -45,10 +45,6 @@ documents = [
   "features/CHARGER_STATUS.md",
   "features/DISPLAY_BACKLIGHT.md",
   "features/KEYPAD_BACKLIGHT.md",
-  "features/MICROSD.md",
-  "features/POWER_OFF.md",
-  "features/RTC.md",
   "features/SOC_TEMPERATURE.md",
-  "features/SUSPEND.md",
   "features/VIBRATION.md",
 ]

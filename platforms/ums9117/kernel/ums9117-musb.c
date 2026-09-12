@@ -872,7 +872,7 @@ static const struct of_device_id ums9117_musb_of_match[] = {
 		.data = &ums9117_musb_inherited_data,
 	},
 	{
-		.compatible = "fplinux,ums9117-musb",
+		.compatible = "sprd,ums9117-musb",
 		.data = &ums9117_musb_cold_data,
 	},
 	{}

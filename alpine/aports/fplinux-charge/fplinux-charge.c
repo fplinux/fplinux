@@ -4,6 +4,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <glob.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -15,14 +16,18 @@
 #include <unistd.h>
 
 #ifndef FPLINUX_CHARGE_COUNTER_PATH
-#define FPLINUX_CHARGE_COUNTER_PATH \
-	"/sys/class/power_supply/ta1618-battery/charge_counter"
+#define FPLINUX_CHARGE_COUNTER_PATH ""
+#endif
+
+#ifndef FPLINUX_CHARGE_COUNTER_GLOB
+#define FPLINUX_CHARGE_COUNTER_GLOB "/sys/class/power_supply/*/charge_counter"
 #endif
 
 #define FPLINUX_CHARGE_INTERNAL_ERROR 125
 #define FPLINUX_CHARGE_EXEC_NOENT 127
 #define FPLINUX_CHARGE_EXEC_ERROR 126
 #define FPLINUX_CHARGE_TEXT_BYTES 64
+#define FPLINUX_CHARGE_COUNTER_SUFFIX "/charge_counter"
 
 static volatile sig_atomic_t child_pid = -1;
 static volatile sig_atomic_t pending_signal;
@@ -172,6 +177,109 @@ static bool command_succeeded(int status)
 	return WIFEXITED(status) && !WEXITSTATUS(status) && !pending_signal;
 }
 
+static bool read_power_supply_type(const char *counter_path)
+{
+	static const char suffix[] = FPLINUX_CHARGE_COUNTER_SUFFIX;
+	char text[FPLINUX_CHARGE_TEXT_BYTES];
+	char *type_path;
+	ssize_t length;
+	size_t base_length;
+	size_t path_length;
+	int descriptor;
+
+	path_length = strlen(counter_path);
+	if (path_length < sizeof(suffix) - 1U ||
+	    strcmp(counter_path + path_length - sizeof(suffix) + 1U, suffix)) {
+		errno = EINVAL;
+		return false;
+	}
+	base_length = path_length - (sizeof(suffix) - 1U);
+	type_path = malloc(base_length + sizeof("/type"));
+	if (!type_path)
+		return false;
+	memcpy(type_path, counter_path, base_length);
+	type_path[base_length] = '\0';
+	strcat(type_path, "/type");
+	descriptor = open(type_path, O_RDONLY | O_CLOEXEC);
+	free(type_path);
+	if (descriptor < 0)
+		return false;
+	length = read(descriptor, text, sizeof(text) - 1U);
+	if (close(descriptor) < 0 && length >= 0)
+		length = -1;
+	if (length < 0)
+		return false;
+	text[length] = '\0';
+	return !strcmp(text, "Battery\n") || !strcmp(text, "Battery");
+}
+
+static int select_charge_counter(char **selected, const char **error)
+{
+	glob_t matches = { 0 };
+	const char *candidate = NULL;
+	int result;
+	size_t index;
+
+	*selected = NULL;
+	*error = NULL;
+	if (FPLINUX_CHARGE_COUNTER_PATH[0] != '\0') {
+		*selected = strdup(FPLINUX_CHARGE_COUNTER_PATH);
+		return *selected ? 0 : -1;
+	}
+	result = glob(FPLINUX_CHARGE_COUNTER_GLOB, 0, NULL, &matches);
+	if (result == GLOB_NOMATCH) {
+		*error = "no Battery charge counter is available";
+		errno = ENODEV;
+		return -1;
+	}
+	if (result != 0) {
+		errno = EIO;
+		return -1;
+	}
+	for (index = 0; index < matches.gl_pathc; ++index) {
+		if (!read_power_supply_type(matches.gl_pathv[index]))
+			continue;
+		if (candidate) {
+			*error =
+				"multiple Battery charge counters are available";
+			errno = ENOTUNIQ;
+			goto fail;
+		}
+		candidate = matches.gl_pathv[index];
+	}
+	if (!candidate) {
+		*error = "no Battery charge counter is available";
+		errno = ENODEV;
+		goto fail;
+	}
+	*selected = strdup(candidate);
+	if (!*selected)
+		goto fail;
+	globfree(&matches);
+	return 0;
+
+fail:
+	globfree(&matches);
+	return -1;
+}
+
+static bool parse_arguments(int argc, char **argv, const char **counter_path,
+			    char ***command)
+{
+	*counter_path = NULL;
+	if (argc >= 4 && !strcmp(argv[1], "--counter")) {
+		if (argv[2][0] == '\0')
+			return false;
+		*counter_path = argv[2];
+		argv += 2;
+		argc -= 2;
+	}
+	if (argc < 3 || strcmp(argv[1], "--"))
+		return false;
+	*command = &argv[2];
+	return true;
+}
+
 int main(int argc, char **argv)
 {
 	struct timespec start;
@@ -179,50 +287,79 @@ int main(int argc, char **argv)
 	long long charge_before;
 	long long charge_after;
 	long long charge_delta;
+	char **command;
+	char *selected_counter = NULL;
+	const char *counter_error;
+	const char *counter_path;
 	double average_current;
 	double elapsed;
 	int status;
 	int result;
 
-	if (argc < 3 || strcmp(argv[1], "--")) {
+	if (!parse_arguments(argc, argv, &counter_path, &command)) {
 		fprintf(stderr,
-			"usage: fplinux-charge -- command [argument ...]\n");
+			"usage: fplinux-charge [--counter PATH] -- command [argument ...]\n");
 		return 2;
 	}
-	if (read_charge_counter(FPLINUX_CHARGE_COUNTER_PATH, &charge_before)) {
+	if (counter_path) {
+		selected_counter = strdup(counter_path);
+		if (!selected_counter) {
+			perror("fplinux-charge: cannot select charge counter");
+			return FPLINUX_CHARGE_INTERNAL_ERROR;
+		}
+	} else if (select_charge_counter(&selected_counter, &counter_error)) {
+		if (counter_error)
+			fprintf(stderr,
+				"fplinux-charge: cannot select charge counter: %s: %s\n",
+				counter_error, strerror(errno));
+		else
+			fprintf(stderr,
+				"fplinux-charge: cannot select charge counter: %s\n",
+				strerror(errno));
+		return FPLINUX_CHARGE_INTERNAL_ERROR;
+	}
+	if (read_charge_counter(selected_counter, &charge_before)) {
 		fprintf(stderr, "fplinux-charge: cannot read %s: %s\n",
-			FPLINUX_CHARGE_COUNTER_PATH, strerror(errno));
+			selected_counter, strerror(errno));
+		free(selected_counter);
 		return FPLINUX_CHARGE_INTERNAL_ERROR;
 	}
 	if (clock_gettime(CLOCK_MONOTONIC, &start)) {
 		perror("fplinux-charge: clock_gettime");
+		free(selected_counter);
 		return FPLINUX_CHARGE_INTERNAL_ERROR;
 	}
 	if (install_signal_handlers()) {
 		perror("fplinux-charge: sigaction");
+		free(selected_counter);
 		return FPLINUX_CHARGE_INTERNAL_ERROR;
 	}
-	if (run_command(&argv[2], &status)) {
+	if (run_command(command, &status)) {
 		perror("fplinux-charge: waitpid");
+		free(selected_counter);
 		return FPLINUX_CHARGE_INTERNAL_ERROR;
 	}
 
 	if (clock_gettime(CLOCK_MONOTONIC, &end) ||
-	    read_charge_counter(FPLINUX_CHARGE_COUNTER_PATH, &charge_after)) {
+	    read_charge_counter(selected_counter, &charge_after)) {
 		fprintf(stderr,
 			"fplinux-charge: command finished, but the final measurement failed: %s\n",
 			strerror(errno));
-		return command_succeeded(status) ?
-			       FPLINUX_CHARGE_INTERNAL_ERROR :
-			       command_result(status);
+		result = command_succeeded(status) ?
+				 FPLINUX_CHARGE_INTERNAL_ERROR :
+				 command_result(status);
+		free(selected_counter);
+		return result;
 	}
 	elapsed = elapsed_seconds(&start, &end);
 	if (elapsed <= 0.0) {
 		fprintf(stderr,
 			"fplinux-charge: command finished, but monotonic time did not advance\n");
-		return command_succeeded(status) ?
-			       FPLINUX_CHARGE_INTERNAL_ERROR :
-			       command_result(status);
+		result = command_succeeded(status) ?
+				 FPLINUX_CHARGE_INTERNAL_ERROR :
+				 command_result(status);
+		free(selected_counter);
+		return result;
 	}
 	charge_delta = charge_after - charge_before;
 	average_current = (double)charge_delta * 3600.0 / elapsed;
@@ -231,5 +368,6 @@ int main(int argc, char **argv)
 		elapsed, charge_delta, average_current);
 	fflush(stderr);
 	result = command_result(status);
+	free(selected_counter);
 	return result;
 }

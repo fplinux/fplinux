@@ -1102,6 +1102,10 @@ def _linux_manifest_sources(linux: object, *, base: PurePath) -> set[str]:
     if not isinstance(linux, dict):
         return set()
     selected: set[str] = set()
+    for key in ("defconfig", "config_fragment"):
+        value = linux.get(key)
+        if isinstance(value, str):
+            selected.add((base / value).as_posix())
     patches = linux.get("patches")
     if isinstance(patches, list):
         selected.update((base / patch).as_posix() for patch in patches if isinstance(patch, str))
@@ -1161,9 +1165,6 @@ def _kernel_scope_paths(snapshot: WorkspaceSnapshot, profile: str | None = None)
             target_data = tomllib.loads(target_manifest.contents.decode("utf-8"))
         except UnicodeDecodeError, tomllib.TOMLDecodeError:
             continue
-        if not isinstance(target_data, dict):
-            continue
-        selected.add((target_path.parent / "kernel/defconfig").as_posix())
         selected.update(_linux_manifest_sources(target_data.get("linux"), base=target_path.parent))
         platform = target_data.get("platform")
         if not isinstance(platform, str):

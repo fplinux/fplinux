@@ -123,6 +123,7 @@ replace individual digest lines.
 ./fplinux build <target> --jobs 8
 ```
 
+Each build container starts with a 2 GiB memory budget.
 `--jobs` limits parallel compilation. A matching selected bundle is reused;
 otherwise the command rebuilds it from the current inputs. Target names are
 discovered from `targets/`; use the [target index](../../targets/README.md) to

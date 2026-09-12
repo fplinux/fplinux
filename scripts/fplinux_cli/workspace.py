@@ -19,11 +19,11 @@ if TYPE_CHECKING:
 from . import alpine_state
 from .common import ROOT, fail, relative_name
 from .config import (
+    kernel_config_paths,
     load_platform,
     load_target,
     profile_manifest_path,
     target_asset_lock_path,
-    target_defconfig_path,
     target_release_manifest_path,
 )
 
@@ -130,11 +130,12 @@ def target_build_source_files(target: str, profile: str | None = None) -> list[t
     add_source_path(files, target_root / "target.toml")
     add_source_path(files, target_release_manifest_path(target))
     add_source_path(files, target_asset_lock_path(target))
-    add_source_path(files, target_defconfig_path(target))
     runtime = target_config.get("runtime")
     profile_plugin = runtime.get("host_plugin") if isinstance(runtime, dict) else None
     if isinstance(profile_plugin, str):
         add_source_path(files, target_root / profile_plugin)
+    for path in kernel_config_paths(target, target_config, platform):
+        add_source_path(files, path)
     selected_profile = target_config.get("profile")
     if selected_profile is not None:
         add_source_path(files, profile_manifest_path(target, selected_profile))

@@ -6,12 +6,23 @@ aliases = ["T117"]
 compatible = "sprd,ums9117"
 
 [rootfs]
-packages = ["fplinux-cpuclock", "fplinux-ssh", "fplinux-usb-gadget"]
+packages = [
+  "fplinux-cpuclock",
+  "fplinux-ssh",
+  "fplinux-usb-gadget",
+]
 
 [bundle]
-packages = ["fplinux-tyrquake", "fplinux-micropythonos"]
+packages = [
+  "fplinux-charge",
+  "fplinux-micropythonos",
+  "fplinux-showcase",
+  "fplinux-tyrquake",
+]
+
 
 [linux]
+defconfig = "platforms/ums9117/kernel/defconfig"
 source_lock = "linux"
 arch = "arm"
 cross_compile = "arm-none-eabi-"
@@ -66,6 +77,38 @@ source = "platforms/ums9117/kernel/ums9117-musb.c"
 destination = "drivers/usb/musb/ums9117.c"
 
 [[linux.copies]]
+source = "platforms/ums9117/kernel/sc2720-charger-ums9117.c"
+destination = "drivers/power/supply/sc2720-charger-ums9117.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/sc2720-fgu-ums9117.c"
+destination = "drivers/power/supply/sc2720-fgu-ums9117.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/sc2720-auxadc-ums9117.c"
+destination = "drivers/iio/adc/sc2720-auxadc-ums9117.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-thm1.c"
+destination = "drivers/thermal/ums9117-thm1.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/sprd,ums9117-sc2720-charger.yaml"
+destination = "Documentation/devicetree/bindings/power/supply/sprd,ums9117-sc2720-charger.yaml"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/sprd,ums9117-sc2720-fgu.yaml"
+destination = "Documentation/devicetree/bindings/power/supply/sprd,ums9117-sc2720-fgu.yaml"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/sprd,ums9117-sc2720-auxadc.yaml"
+destination = "Documentation/devicetree/bindings/iio/adc/sprd,ums9117-sc2720-auxadc.yaml"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/sprd,ums9117-thm1.yaml"
+destination = "Documentation/devicetree/bindings/thermal/sprd,ums9117-thm1.yaml"
+
+[[linux.copies]]
 source = "platforms/ums9117/kernel/font-fplinux.c"
 destination = "lib/fonts/font_6x8.c"
 
@@ -80,6 +123,62 @@ destination = "drivers/gpio/gpio-sc2720-eic-ums9117.c"
 [[linux.copies]]
 source = "platforms/ums9117/kernel/sc2720-inta-ums9117.c"
 destination = "drivers/irqchip/irq-sc2720-inta-ums9117.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/rtc-sc2720-ums9117.c"
+destination = "drivers/rtc/rtc-sc2720-ums9117.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/sc2720-poweroff-ums9117.c"
+destination = "drivers/power/reset/sc2720-poweroff-ums9117.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/sprd,ums9117-sc2720-poweroff.yaml"
+destination = "Documentation/devicetree/bindings/power/reset/sprd,ums9117-sc2720-poweroff.yaml"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/sc2720-vibrator-ums9117.c"
+destination = "drivers/input/misc/sc2720-vibrator-ums9117.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/leds-sc2720-ums9117.c"
+destination = "drivers/leds/leds-sc2720-ums9117.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/sprd,ums9117-sc2720-rtc.yaml"
+destination = "Documentation/devicetree/bindings/rtc/sprd,ums9117-sc2720-rtc.yaml"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/sprd,ums9117-sc2720-vibrator.yaml"
+destination = "Documentation/devicetree/bindings/input/sprd,ums9117-sc2720-vibrator.yaml"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/sprd,ums9117-sc2720-kpled.yaml"
+destination = "Documentation/devicetree/bindings/leds/sprd,ums9117-sc2720-kpled.yaml"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/sc2720-rtc.Kconfig"
+destination = "drivers/rtc/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/sc2720-rtc.Makefile"
+destination = "drivers/rtc/Makefile"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/sc2720-vibrator.Kconfig"
+destination = "drivers/input/misc/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/sc2720-vibrator.Makefile"
+destination = "drivers/input/misc/Makefile"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/sc2720-kpled.Kconfig"
+destination = "drivers/leds/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/sc2720-kpled.Makefile"
+destination = "drivers/leds/Makefile"
 
 [[linux.copies]]
 source = "platforms/ums9117/kernel/ums9117-fb.h"
@@ -110,6 +209,10 @@ source = "platforms/ums9117/dts/ums9117.dtsi"
 destination = "arch/arm/boot/dts/unisoc/ums9117.dtsi"
 
 [[linux.copies]]
+source = "platforms/ums9117/dts/ums9117-sc2720.dtsi"
+destination = "arch/arm/boot/dts/unisoc/ums9117-sc2720.dtsi"
+
+[[linux.copies]]
 source = "platforms/ums9117/dts/ums9117-ram-session.dtsi"
 destination = "arch/arm/boot/dts/unisoc/ums9117-ram-session.dtsi"
 
@@ -122,20 +225,20 @@ source = "platforms/ums9117/bindings/fplinux,ram-session.yaml"
 destination = "Documentation/devicetree/bindings/firmware/fplinux,ram-session.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/fplinux,ums9117-syscounter.yaml"
-destination = "Documentation/devicetree/bindings/timer/fplinux,ums9117-syscounter.yaml"
+source = "platforms/ums9117/bindings/sprd,ums9117-syscounter.yaml"
+destination = "Documentation/devicetree/bindings/timer/sprd,ums9117-syscounter.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/fplinux,ums9117-musb.yaml"
-destination = "Documentation/devicetree/bindings/usb/fplinux,ums9117-musb.yaml"
+source = "platforms/ums9117/bindings/sprd,ums9117-musb.yaml"
+destination = "Documentation/devicetree/bindings/usb/sprd,ums9117-musb.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/fplinux,ums9117-aon-apb.yaml"
-destination = "Documentation/devicetree/bindings/mfd/fplinux,ums9117-aon-apb.yaml"
+source = "platforms/ums9117/bindings/sprd,ums9117-aon-apb.yaml"
+destination = "Documentation/devicetree/bindings/mfd/sprd,ums9117-aon-apb.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/fplinux,ums9117-keypad.yaml"
-destination = "Documentation/devicetree/bindings/input/fplinux,ums9117-keypad.yaml"
+source = "platforms/ums9117/bindings/sprd,ums9117-keypad.yaml"
+destination = "Documentation/devicetree/bindings/input/sprd,ums9117-keypad.yaml"
 
 [[linux.copies]]
 source = "platforms/ums9117/bindings/sprd,ums9117-sc2720-eic.yaml"
@@ -174,8 +277,40 @@ source = "platforms/ums9117/kernel/fbdev.Makefile"
 destination = "drivers/video/fbdev/Makefile"
 
 [[linux.appends]]
+source = "platforms/ums9117/kernel/sc2720-power-supply.Kconfig"
+destination = "drivers/power/supply/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/sc2720-power-supply.Makefile"
+destination = "drivers/power/supply/Makefile"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/sc2720-auxadc.Kconfig"
+destination = "drivers/iio/adc/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/sc2720-auxadc.Makefile"
+destination = "drivers/iio/adc/Makefile"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/thm1.Kconfig"
+destination = "drivers/thermal/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/thm1.Makefile"
+destination = "drivers/thermal/Makefile"
+
+[[linux.appends]]
 source = "platforms/ums9117/kernel/sc2720-eic.Kconfig"
 destination = "drivers/gpio/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/sc2720-poweroff.Kconfig"
+destination = "drivers/power/reset/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/sc2720-poweroff.Makefile"
+destination = "drivers/power/reset/Makefile"
 
 [[linux.appends]]
 source = "platforms/ums9117/kernel/sc2720-eic.Makefile"

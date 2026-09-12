@@ -10,7 +10,7 @@ depends="openrc fplinux-console"
 replaces="alpine-baselayout-data alpine-release"
 replaces_priority=100
 options="!check"
-source="fstab inittab hostname issue os-release"
+source="fstab inittab hostname issue os-release fplinux-zram.initd"
 
 package() {
 	install -Dm644 "$srcdir/fstab" "$pkgdir/etc/fstab"
@@ -18,12 +18,16 @@ package() {
 	install -Dm644 "$srcdir/hostname" "$pkgdir/etc/hostname"
 	install -Dm644 "$srcdir/issue" "$pkgdir/etc/issue"
 	install -Dm644 "$srcdir/os-release" "$pkgdir/etc/os-release"
+	install -Dm755 "$srcdir/fplinux-zram.initd" \
+		"$pkgdir/etc/init.d/fplinux-zram"
 
 	mkdir -p "$pkgdir/etc/runlevels/sysinit" "$pkgdir/etc/runlevels/boot" \
 		"$pkgdir/etc/runlevels/default"
 	for service in devfs dmesg procfs sysfs; do
 		ln -s "/etc/init.d/$service" "$pkgdir/etc/runlevels/sysinit/$service"
 	done
+	ln -s /etc/init.d/fplinux-zram \
+		"$pkgdir/etc/runlevels/sysinit/fplinux-zram"
 	for service in bootmisc hostname; do
 		ln -s "/etc/init.d/$service" "$pkgdir/etc/runlevels/boot/$service"
 	done
@@ -39,4 +43,5 @@ d0814f22cabb82c9dce842e5d20e56a2b8d035129eed55042fb0a6564b093cee123059bc6d95c9a4
 0d3253622d9bb758ab32dd1695f29afe97863b219b987652b74763818bcb576dccb5db1e08308f728893495c6abd002b79254fd2c38773ae38079f19e166ab70  hostname
 49021c0bcdfe0034ccafc330ca63886aa0a00a8e9100e2ecae21678178e4df98775932be6195067e944a79b8620a420484b9d70e1b41e095696a9358f3cbc4f9  issue
 c78d6b9b4995a018827d2a36fec591310cc90fe3e1e31d9ac9ca3c1dbac7d10445e46f19cce2c312ec6d19135d3009388d75ff405c16180ebb70ce29cc001b1b  os-release
+9597e6bc4e84af64ac808cd72cb32e32a1ba829aaac3789457df3a53c857008c6e0d1cbd3b57b17f00e0dd7b8c15d9419ebf7e566c29564bad95b791dffaa993  fplinux-zram.initd
 "

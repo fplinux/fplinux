@@ -6,6 +6,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <glob.h>
 #include <inttypes.h>
 #include <linux/input.h>
 #include <signal.h>
@@ -23,16 +24,15 @@
 #define SHOWCASE_FRAMEBUFFER "/dev/fb0"
 #define SHOWCASE_TTY "/dev/tty0"
 #define SHOWCASE_KEYPAD_PHYS "fplinux/keypad0"
-#define SHOWCASE_VIBRATOR_NAME "TA-1618 vibrator"
 #define SHOWCASE_VIBRATOR_PHYS "fplinux/vibrator0"
-#define SHOWCASE_KEYPAD_BRIGHTNESS "/sys/class/leds/:kbd_backlight/brightness"
-#define SHOWCASE_KEYPAD_MAX_BRIGHTNESS \
-	"/sys/class/leds/:kbd_backlight/max_brightness"
-#define SHOWCASE_LCD_BRIGHTNESS \
-	"/sys/class/backlight/ta1618-backlight/brightness"
-#define SHOWCASE_LCD_MAX_BRIGHTNESS \
-	"/sys/class/backlight/ta1618-backlight/max_brightness"
+#ifndef FPLINUX_SHOWCASE_KEYPAD_LED_GLOB
+#define FPLINUX_SHOWCASE_KEYPAD_LED_GLOB "/sys/class/leds/*/brightness"
+#endif
+#ifndef FPLINUX_SHOWCASE_LCD_BACKLIGHT_GLOB
+#define FPLINUX_SHOWCASE_LCD_BACKLIGHT_GLOB "/sys/class/backlight/*/brightness"
+#endif
 #define SHOWCASE_MAX_INPUT_DEVICES 64
+#define SHOWCASE_CLASS_PATH_BYTES 512U
 #define SHOWCASE_EFFECT_LENGTH_MS 5000U
 #define SHOWCASE_NANOSECONDS_PER_SECOND 1000000000ULL
 #define SHOWCASE_MICROSECONDS_PER_SECOND 1000000ULL
@@ -40,6 +40,17 @@
 	(SHOWCASE_NANOSECONDS_PER_SECOND / ARMADA_FRAMES_PER_SECOND)
 #define SHOWCASE_CYCLE_DURATION_NS \
 	(SHOWCASE_FRAME_PERIOD_NS * ARMADA_DURATION_FRAMES)
+
+struct class_output {
+	char brightness[SHOWCASE_CLASS_PATH_BYTES];
+	char max_brightness[SHOWCASE_CLASS_PATH_BYTES];
+};
+
+struct showcase_options {
+	uint64_t runs;
+	const char *keypad_led;
+	const char *lcd_backlight;
+};
 
 struct hardware_state {
 	int keypad;
@@ -54,6 +65,8 @@ struct hardware_state {
 	bool rumble_on;
 	uint16_t rumble_cue_id;
 	int lcd_level;
+	struct class_output keypad_led;
+	struct class_output lcd_backlight;
 };
 
 struct frame_statistics {
@@ -67,42 +80,76 @@ static volatile sig_atomic_t stop_requested;
 
 static void print_usage(void)
 {
-	fprintf(stderr, "usage: fplinux-showcase [--runs N]\n");
+	fprintf(stderr, "usage: fplinux-showcase [--runs N] [--keypad-led DIR] "
+			"[--lcd-backlight DIR]\n");
 }
 
-static bool parse_requested_runs(int argc, char **argv, uint64_t *runs,
-				 const char **error)
+static bool parse_positive_runs(const char *value, uint64_t *runs,
+				const char **error)
 {
 	char *end;
 	const char *cursor;
 	uint64_t parsed;
 
-	*runs = 0;
-	*error = NULL;
-	if (argc == 1)
-		return true;
-	if (argc != 3 || strcmp(argv[1], "--runs") != 0) {
-		*error = "invalid arguments";
-		return false;
-	}
-	if (argv[2][0] == '\0') {
+	if (value[0] == '\0') {
 		*error = "--runs requires a positive decimal count";
 		return false;
 	}
-	for (cursor = argv[2]; *cursor; ++cursor)
+	for (cursor = value; *cursor; ++cursor)
 		if (*cursor < '0' || *cursor > '9') {
 			*error = "--runs requires a positive decimal count";
 			return false;
 		}
 	errno = 0;
-	parsed = strtoull(argv[2], &end, 10);
-	if (errno == ERANGE || end == argv[2] || *end != '\0' || parsed == 0 ||
+	parsed = strtoull(value, &end, 10);
+	if (errno == ERANGE || end == value || *end != '\0' || parsed == 0 ||
 	    parsed > UINT64_MAX / SHOWCASE_CYCLE_DURATION_NS) {
 		*error = "--runs count is out of range";
 		return false;
 	}
 	*runs = parsed;
 	return true;
+}
+
+static bool parse_options(int argc, char **argv,
+			  struct showcase_options *options, const char **error)
+{
+	bool runs_set = false;
+	int index;
+
+	memset(options, 0, sizeof(*options));
+	*error = NULL;
+	for (index = 1; index < argc; ++index) {
+		const char *argument = argv[index];
+
+		if (!strcmp(argument, "--runs")) {
+			if (runs_set || ++index == argc ||
+			    !parse_positive_runs(argv[index], &options->runs,
+						 error))
+				return false;
+			runs_set = true;
+			continue;
+		}
+		if (!strcmp(argument, "--keypad-led")) {
+			if (options->keypad_led || ++index == argc ||
+			    argv[index][0] == '\0')
+				break;
+			options->keypad_led = argv[index];
+			continue;
+		}
+		if (!strcmp(argument, "--lcd-backlight")) {
+			if (options->lcd_backlight || ++index == argc ||
+			    argv[index][0] == '\0')
+				break;
+			options->lcd_backlight = argv[index];
+			continue;
+		}
+		break;
+	}
+	if (index == argc)
+		return true;
+	*error = "invalid arguments";
+	return false;
 }
 
 static void catch_signal(int signal_number)
@@ -213,6 +260,111 @@ static bool write_number(const char *path, int value)
 	return true;
 }
 
+static bool set_class_output(struct class_output *output, const char *directory)
+{
+	int brightness_length;
+	int maximum_length;
+
+	brightness_length = snprintf(output->brightness,
+				     sizeof(output->brightness),
+				     "%s/brightness", directory);
+	maximum_length = snprintf(output->max_brightness,
+				  sizeof(output->max_brightness),
+				  "%s/max_brightness", directory);
+	if (brightness_length < 0 || maximum_length < 0 ||
+	    brightness_length >= (int)sizeof(output->brightness) ||
+	    maximum_length >= (int)sizeof(output->max_brightness)) {
+		errno = ENAMETOOLONG;
+		return false;
+	}
+	return true;
+}
+
+static bool keyboard_led_path(const char *brightness_path)
+{
+	static const char function[] = "kbd_backlight";
+	const char *component;
+	const char *brightness;
+	size_t component_length;
+
+	brightness = strrchr(brightness_path, '/');
+	if (!brightness || strcmp(brightness, "/brightness"))
+		return false;
+	component = brightness;
+	while (component > brightness_path && component[-1] != '/')
+		--component;
+	component_length = (size_t)(brightness - component);
+	return (component_length == sizeof(function) - 1U &&
+		!memcmp(component, function, sizeof(function) - 1U)) ||
+	       (component_length > sizeof(function) - 1U &&
+		component[component_length - sizeof(function)] == ':' &&
+		!memcmp(component + component_length - sizeof(function) + 1U,
+			function, sizeof(function) - 1U));
+}
+
+static bool select_class_output(const char *pattern, bool keypad_led,
+				struct class_output *output, char *error,
+				size_t error_size)
+{
+	char directory[SHOWCASE_CLASS_PATH_BYTES];
+	const char *attribute;
+	glob_t matches = { 0 };
+	const char *selected = NULL;
+	int result;
+	size_t index;
+
+	result = glob(pattern, 0, NULL, &matches);
+	if (result == GLOB_NOMATCH) {
+		snprintf(error, error_size, "required %s is unavailable",
+			 keypad_led ? "keypad LED" : "LCD backlight");
+		errno = ENODEV;
+		return false;
+	}
+	if (result != 0) {
+		snprintf(error, error_size, "cannot enumerate %s",
+			 keypad_led ? "keypad LEDs" : "LCD backlights");
+		errno = EIO;
+		return false;
+	}
+	for (index = 0; index < matches.gl_pathc; ++index) {
+		if (keypad_led && !keyboard_led_path(matches.gl_pathv[index]))
+			continue;
+		if (selected) {
+			snprintf(error, error_size, "ambiguous %s",
+				 keypad_led ? "keypad LEDs" : "LCD backlights");
+			errno = ENOTUNIQ;
+			goto fail;
+		}
+		selected = matches.gl_pathv[index];
+	}
+	if (!selected) {
+		snprintf(error, error_size, "required %s is unavailable",
+			 keypad_led ? "keypad LED" : "LCD backlight");
+		errno = ENODEV;
+		goto fail;
+	}
+	attribute = strrchr(selected, '/');
+	if (!attribute || (size_t)(attribute - selected) >= sizeof(directory)) {
+		snprintf(error, error_size, "%s path is too long",
+			 keypad_led ? "keypad LED" : "LCD backlight");
+		errno = ENAMETOOLONG;
+		goto fail;
+	}
+	memcpy(directory, selected, (size_t)(attribute - selected));
+	directory[attribute - selected] = '\0';
+	if (!set_class_output(output, directory)) {
+		snprintf(error, error_size, "%s path is too long",
+			 keypad_led ? "keypad LED" : "LCD backlight");
+		goto fail;
+	}
+	globfree(&matches);
+	return true;
+
+fail:
+	globfree(&matches);
+	return false;
+}
+
 static bool bit_is_set(const unsigned long *bits, unsigned int bit)
 {
 	return (bits[bit / (8U * sizeof(*bits))] &
@@ -281,7 +433,8 @@ static bool write_force_feedback(int descriptor, int effect_id, int value)
 	return false;
 }
 
-static bool open_hardware(struct hardware_state *state, char *error,
+static bool open_hardware(struct hardware_state *state,
+			  const struct showcase_options *options, char *error,
 			  size_t error_size)
 {
 	unsigned long event_bits[(EV_MAX + 8U * sizeof(unsigned long)) /
@@ -302,11 +455,34 @@ static bool open_hardware(struct hardware_state *state, char *error,
 	state->keypad_original = -1;
 	state->lcd_original = -1;
 	state->lcd_level = -1;
+	if (options->keypad_led) {
+		if (!set_class_output(&state->keypad_led,
+				      options->keypad_led)) {
+			snprintf(error, error_size,
+				 "keypad LED path is too long");
+			return false;
+		}
+	} else if (!select_class_output(FPLINUX_SHOWCASE_KEYPAD_LED_GLOB, true,
+					&state->keypad_led, error,
+					error_size)) {
+		return false;
+	}
+	if (options->lcd_backlight) {
+		if (!set_class_output(&state->lcd_backlight,
+				      options->lcd_backlight)) {
+			snprintf(error, error_size,
+				 "LCD backlight path is too long");
+			return false;
+		}
+	} else if (!select_class_output(FPLINUX_SHOWCASE_LCD_BACKLIGHT_GLOB,
+					false, &state->lcd_backlight, error,
+					error_size)) {
+		return false;
+	}
 	state->keypad =
 		open_input(NULL, SHOWCASE_KEYPAD_PHYS, O_RDONLY | O_NONBLOCK);
 	if (state->keypad < 0) {
-		snprintf(error, error_size,
-			 "required Nokia keypad %s is unavailable",
+		snprintf(error, error_size, "required keypad %s is unavailable",
 			 SHOWCASE_KEYPAD_PHYS);
 		return false;
 	}
@@ -315,21 +491,20 @@ static bool open_hardware(struct hardware_state *state, char *error,
 	    !bit_is_set(event_bits, EV_KEY) ||
 	    !input_supports(state->keypad, EV_KEY, KEY_BACKSPACE, KEY_MAX)) {
 		snprintf(error, error_size,
-			 "Nokia keypad does not expose KEY_BACKSPACE");
+			 "keypad does not expose KEY_BACKSPACE");
 		return false;
 	}
 	if (ioctl(state->keypad, EVIOCGRAB, 1) < 0) {
 		snprintf(error, error_size,
-			 "cannot exclusively acquire Nokia keypad");
+			 "cannot exclusively acquire keypad");
 		return false;
 	}
 	state->keypad_grabbed = true;
 
-	state->vibrator = open_input(SHOWCASE_VIBRATOR_NAME,
-				     SHOWCASE_VIBRATOR_PHYS, O_RDWR);
+	state->vibrator = open_input(NULL, SHOWCASE_VIBRATOR_PHYS, O_RDWR);
 	if (state->vibrator < 0) {
 		snprintf(error, error_size,
-			 "required Nokia vibrator %s is unavailable",
+			 "required vibrator %s is unavailable",
 			 SHOWCASE_VIBRATOR_PHYS);
 		return false;
 	}
@@ -339,41 +514,39 @@ static bool open_hardware(struct hardware_state *state, char *error,
 	    !bit_is_set(event_bits, EV_FF) ||
 	    !input_supports(state->vibrator, EV_FF, FF_RUMBLE, FF_MAX)) {
 		snprintf(error, error_size,
-			 "Nokia vibrator does not expose FF_RUMBLE");
+			 "vibrator does not expose FF_RUMBLE");
 		return false;
 	}
 	if (ioctl(state->vibrator, EVIOCSFF, &effect) < 0) {
-		snprintf(error, error_size,
-			 "cannot upload Nokia rumble effect");
+		snprintf(error, error_size, "cannot upload rumble effect");
 		return false;
 	}
 	state->effect_uploaded = true;
 	state->effect_id = effect.id;
 	if (!write_force_feedback(state->vibrator, state->effect_id, 0)) {
-		snprintf(error, error_size, "cannot switch Nokia vibrator off");
+		snprintf(error, error_size, "cannot switch vibrator off");
 		return false;
 	}
 
-	if (!read_number(SHOWCASE_KEYPAD_MAX_BRIGHTNESS, &maximum) ||
+	if (!read_number(state->keypad_led.max_brightness, &maximum) ||
 	    maximum < 1 ||
-	    !read_number(SHOWCASE_KEYPAD_BRIGHTNESS, &state->keypad_original)) {
-		snprintf(
-			error, error_size,
-			"required Nokia keypad-backlight interface is unavailable");
+	    !read_number(state->keypad_led.brightness,
+			 &state->keypad_original)) {
+		snprintf(error, error_size,
+			 "required keypad LED interface is unavailable");
 		return false;
 	}
 	state->keypad_interface = true;
-	if (!write_number(SHOWCASE_KEYPAD_BRIGHTNESS, 0)) {
-		snprintf(error, error_size,
-			 "cannot switch Nokia keypad backlight off");
+	if (!write_number(state->keypad_led.brightness, 0)) {
+		snprintf(error, error_size, "cannot switch keypad LED off");
 		return false;
 	}
-	if (!read_number(SHOWCASE_LCD_MAX_BRIGHTNESS, &maximum) ||
+	if (!read_number(state->lcd_backlight.max_brightness, &maximum) ||
 	    maximum < 10 ||
-	    !read_number(SHOWCASE_LCD_BRIGHTNESS, &state->lcd_original)) {
-		snprintf(
-			error, error_size,
-			"required Nokia LCD-backlight interface is unavailable");
+	    !read_number(state->lcd_backlight.brightness,
+			 &state->lcd_original)) {
+		snprintf(error, error_size,
+			 "required LCD backlight interface is unavailable");
 		return false;
 	}
 	state->lcd_level = state->lcd_original;
@@ -385,7 +558,7 @@ static bool close_hardware(struct hardware_state *state)
 	bool ok = true;
 
 	if (state->keypad_interface && state->keypad_original >= 0 &&
-	    !write_number(SHOWCASE_KEYPAD_BRIGHTNESS, state->keypad_original))
+	    !write_number(state->keypad_led.brightness, state->keypad_original))
 		ok = false;
 	state->keypad_on = false;
 	if (state->vibrator >= 0 && state->effect_uploaded) {
@@ -397,7 +570,7 @@ static bool close_hardware(struct hardware_state *state)
 			ok = false;
 	}
 	if (state->lcd_original >= 0 &&
-	    !write_number(SHOWCASE_LCD_BRIGHTNESS, state->lcd_original))
+	    !write_number(state->lcd_backlight.brightness, state->lcd_original))
 		ok = false;
 	if (state->keypad_grabbed && ioctl(state->keypad, EVIOCGRAB, 0) < 0)
 		ok = false;
@@ -417,7 +590,7 @@ static bool apply_outputs(struct hardware_state *state,
 					    state->lcd_original;
 
 	if (outputs->keypad != state->keypad_on) {
-		if (!write_number(SHOWCASE_KEYPAD_BRIGHTNESS,
+		if (!write_number(state->keypad_led.brightness,
 				  outputs->keypad ? 1 : 0))
 			return false;
 		state->keypad_on = outputs->keypad;
@@ -436,7 +609,7 @@ static bool apply_outputs(struct hardware_state *state,
 		state->rumble_cue_id = outputs->rumble ? outputs->cue_id : 0;
 	}
 	if (lcd != state->lcd_level) {
-		if (!write_number(SHOWCASE_LCD_BRIGHTNESS, lcd))
+		if (!write_number(state->lcd_backlight.brightness, lcd))
 			return false;
 		state->lcd_level = lcd;
 	}
@@ -546,10 +719,10 @@ int main(int argc, char **argv)
 {
 	struct fplinux_fb_session display;
 	struct hardware_state hardware;
+	struct showcase_options options;
 	struct frame_statistics statistics = { 0 };
 	struct armada_scene *scene = NULL;
 	uint16_t *pixels = NULL;
-	uint64_t requested_runs;
 	uint64_t frame_limit;
 	uint64_t completed_runs = 0;
 	uint64_t finished_ns = 0;
@@ -570,20 +743,19 @@ int main(int argc, char **argv)
 	hardware.keypad = -1;
 	hardware.vibrator = -1;
 	hardware.lcd_original = -1;
-	if (!parse_requested_runs(argc, argv, &requested_runs,
-				  &argument_error)) {
+	if (!parse_options(argc, argv, &options, &argument_error)) {
 		fprintf(stderr, "fplinux-showcase: %s\n", argument_error);
 		print_usage();
 		return EXIT_FAILURE;
 	}
-	frame_limit = requested_runs * ARMADA_DURATION_FRAMES;
+	frame_limit = options.runs * ARMADA_DURATION_FRAMES;
 	if (!install_signal_handlers()) {
 		fprintf(stderr,
 			"fplinux-showcase: cannot install signal handlers: %s\n",
 			strerror(errno));
 		return EXIT_FAILURE;
 	}
-	if (!open_hardware(&hardware, error, sizeof(error))) {
+	if (!open_hardware(&hardware, &options, error, sizeof(error))) {
 		fprintf(stderr, "fplinux-showcase: %s: %s\n", error,
 			strerror(errno));
 		hardware_open = true;
@@ -654,7 +826,7 @@ int main(int argc, char **argv)
 		key_result = exit_key_pressed(hardware.keypad);
 		if (key_result < 0) {
 			fprintf(stderr,
-				"fplinux-showcase: cannot read Nokia keypad: %s\n",
+				"fplinux-showcase: cannot read keypad: %s\n",
 				strerror(errno));
 			goto cleanup;
 		}
@@ -663,15 +835,15 @@ int main(int argc, char **argv)
 			break;
 		}
 		desired_frame = (now_ns - statistics.started_ns) / frame_period;
-		if (requested_runs && desired_frame >= frame_limit) {
-			completed_runs = requested_runs;
+		if (options.runs && desired_frame >= frame_limit) {
+			completed_runs = options.runs;
 			success = true;
 			break;
 		}
 		if (desired_frame > next_frame)
 			next_frame = desired_frame;
-		if (requested_runs && next_frame >= frame_limit) {
-			completed_runs = requested_runs;
+		if (options.runs && next_frame >= frame_limit) {
+			completed_runs = options.runs;
 			success = true;
 			break;
 		}
@@ -736,14 +908,14 @@ int main(int argc, char **argv)
 			fprintf(stderr,
 				"fplinux-showcase: cannot read CLOCK_MONOTONIC\n");
 			success = false;
-		} else if (success && !requested_runs) {
+		} else if (success && !options.runs) {
 			completed_runs = (finished_ns - statistics.started_ns) /
 					 SHOWCASE_CYCLE_DURATION_NS;
 		} else if (success && !completed_runs) {
 			completed_runs = (finished_ns - statistics.started_ns) /
 					 SHOWCASE_CYCLE_DURATION_NS;
-			if (completed_runs > requested_runs)
-				completed_runs = requested_runs;
+			if (completed_runs > options.runs)
+				completed_runs = options.runs;
 		}
 		report_result = success;
 	}

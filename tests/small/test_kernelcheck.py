@@ -33,6 +33,8 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
         (self.source / "scripts/checkpatch.pl").write_text("#!/usr/bin/env perl\n")
         self.defconfig = self.root / "defconfig"
         self.defconfig.write_text("CONFIG_TEST=y\n")
+        self.fragment = self.root / "fragment"
+        self.fragment.write_text("CONFIG_BOARD=y\n")
         self.projected = self.root / "driver.c"
         self.projected.write_text("int test_driver;\n")
         self.prepared_linux = PreparedLinuxState("a" * 64)
@@ -90,7 +92,9 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
                 return_value=(self.target_config, self.platform, self.source, state),
             ),
             mock.patch.object(kernelcheck, "target_source", side_effect=target_source),
-            mock.patch.object(kernelcheck, "target_defconfig_path", return_value=self.defconfig),
+            mock.patch.object(
+                kernelcheck, "kernel_config_paths", return_value=(self.defconfig, self.fragment)
+            ),
             mock.patch.object(kernelcheck, "projected_sources", return_value=[self.projected]),
             mock.patch.object(
                 kernelcheck,
@@ -149,7 +153,7 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
             calls.append(command)
             if command[0] == str(config_script):
                 (output / ".config").write_text(
-                    "CONFIG_TEST=y\nCONFIG_PROFILE_ENABLED=y\n"
+                    "CONFIG_TEST=y\nCONFIG_BOARD=y\nCONFIG_PROFILE_ENABLED=y\n"
                     "# CONFIG_PROFILE_DISABLED is not set\n"
                 )
             if command[-1:] == ["savedefconfig"]:
@@ -169,7 +173,9 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
                 return_value=(target_config, self.platform, self.source, self.prepared_linux),
             ),
             mock.patch.object(kernelcheck, "target_source", side_effect=target_source),
-            mock.patch.object(kernelcheck, "target_defconfig_path", return_value=self.defconfig),
+            mock.patch.object(
+                kernelcheck, "kernel_config_paths", return_value=(self.defconfig, self.fragment)
+            ),
             mock.patch.object(kernelcheck, "projected_sources", return_value=[self.projected]),
             mock.patch.object(kernelcheck, "sparse_targets", return_value=["drivers/test-a.o"]),
             mock.patch(

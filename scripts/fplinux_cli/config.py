@@ -267,9 +267,41 @@ def target_asset_lock_path(target: str) -> Path:
     return target_directory(target) / "loader/assets.lock.toml"
 
 
-def target_defconfig_path(target: str) -> Path:
-    """Return the fixed kernel defconfig path for one target."""
-    return target_directory(target) / "kernel/defconfig"
+def kernel_config_paths(
+    target: str, target_config: dict[str, Any], platform: dict[str, Any]
+) -> tuple[Path, Path]:
+    """Return the shared Linux base and the selected board's hardware fragment."""
+    return (
+        ROOT / platform["linux"]["defconfig"],
+        target_directory(target) / target_config["linux"]["config_fragment"],
+    )
+
+
+def kconfig_values(contents: str) -> dict[str, str]:
+    """Read explicit assignments and disabled symbols from a Kconfig input."""
+    values: dict[str, str] = {}
+    for line in contents.splitlines():
+        if line.startswith("# CONFIG_") and line.endswith(" is not set"):
+            values[line[2:-11]] = "n"
+        elif line.startswith("CONFIG_") and "=" in line:
+            symbol, value = line.split("=", 1)
+            values[symbol] = value
+        elif line and not line.startswith("#"):
+            fail(f"invalid Kconfig input line: {line}")
+    return values
+
+
+def compose_kernel_config(base: Path, fragment: Path) -> bytes:
+    """Apply board assignments over the shared base for both Kbuild consumers."""
+    values: dict[str, str] = {}
+    for path in (base, fragment):
+        if path.is_symlink() or not path.is_file():
+            fail(f"kernel configuration input is missing or invalid: {path}")
+        values.update(kconfig_values(path.read_text()))
+    return "".join(
+        f"# {symbol} is not set\n" if value == "n" else f"{symbol}={value}\n"
+        for symbol, value in values.items()
+    ).encode()
 
 
 def profiles_directory(target: str) -> Path:
@@ -991,6 +1023,8 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
         config.get("linux"),
         {
             "dtb",
+            "config_fragment",
+            "memory",
             "debug_dtb",
             "patches",
             "copies",
@@ -1000,6 +1034,14 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
         },
         "target linux",
     )
+    relative_value(linux.get("config_fragment"), "target linux config_fragment")
+    memory = exact_table(linux.get("memory"), {"base", "size"}, "target linux memory")
+    for key in ("base", "size"):
+        integer_value(
+            memory[key], f"target linux memory {key}", bounds=(0, 0xFFFFFFFF), alignment=0x1000
+        )
+    if not memory["size"] or memory["base"] + memory["size"] > 0x100000000:
+        fail("target linux memory range is invalid")
     relative_value(linux.get("dtb"), "target linux dtb")
     relative_value(linux.get("debug_dtb"), "target linux debug_dtb")
     path_array(linux.get("patches"), "target linux patches", allow_empty=True)
@@ -1059,6 +1101,14 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
     if profile is not None:
         selected_profile = load_profile(target, profile, platform["bootstrap"]["layout"])
 
+    physical = platform["bootstrap"]["layout"]
+    if not (
+        physical["ram_base"]
+        <= memory["base"]
+        < memory["base"] + memory["size"]
+        <= physical["ram_base"] + physical["ram_size"]
+    ):
+        fail("target Linux memory must fit inside physical RAM")
     if identity["compatible"] == platform["identity"]["compatible"]:
         fail("target and platform compatibles must be distinct")
     if selected_profile is not None:
@@ -1313,6 +1363,7 @@ def load_platform(platform: str) -> dict[str, Any]:
         config.get("linux"),
         {
             "source_lock",
+            "defconfig",
             "arch",
             "cross_compile",
             "analysis_cross_compile",
@@ -1328,7 +1379,7 @@ def load_platform(platform: str) -> dict[str, Any]:
     )
     for key in ("source_lock", "arch", "cross_compile", "analysis_cross_compile"):
         nonempty_string(linux.get(key), f"platform linux {key}")
-    for key in ("config_script", "image_output", "dtb_output_directory"):
+    for key in ("defconfig", "config_script", "image_output", "dtb_output_directory"):
         relative_value(linux.get(key), f"platform linux {key}")
     string_array(linux.get("targets"), "platform linux targets")
     path_array(linux.get("patches"), "platform linux patches", allow_empty=True)

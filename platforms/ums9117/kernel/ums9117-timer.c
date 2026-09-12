@@ -41,5 +41,5 @@ static int __init ums9117_syscnt_init(struct device_node *node)
 	return ret;
 }
 
-TIMER_OF_DECLARE(ums9117_syscnt, "fplinux,ums9117-syscounter",
+TIMER_OF_DECLARE(ums9117_syscnt, "sprd,ums9117-syscounter",
 		 ums9117_syscnt_init);

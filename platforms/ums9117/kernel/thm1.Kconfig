@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config UMS9117_THM1_THERMAL
+	bool "UMS9117 THM1 temperature sensor"
+	depends on ARCH_UMS9117
+	depends on THERMAL
+	depends on OF
+	depends on MFD_SYSCON
+	depends on HAS_IOMEM
+	help
+	  Read the calibrated UMS9117 THM1 sensor0 temperature through a
+	  tripless thermal zone. The driver does not
+	  configure thermal trips, polling, interrupts or cooling devices.
+
+	  The calibration is read once from the UMS9117 eFuse controller during
+	  probe. The driver does not write eFuse data, thermal thresholds or
+	  interrupt configuration.

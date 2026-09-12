@@ -72,7 +72,8 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                 "targets/phone/target.toml",
                 "targets/phone/release/manifest.toml",
                 "targets/phone/loader/assets.lock.toml",
-                "targets/phone/kernel/defconfig",
+                "targets/phone/kernel/config.fragment",
+                "platforms/demo/kernel/defconfig",
                 "targets/phone/bootstrap/main.c",
                 "targets/phone/kernel/append.cfg",
                 "platforms/demo/platform.toml",
@@ -88,6 +89,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                 "platform": "demo",
                 "bundle": {"packages": ["package-b"]},
                 "linux": {
+                    "config_fragment": "kernel/config.fragment",
                     "patches": [],
                     "copies": [{"source": "kernel/copy.c"}],
                     "appends": [{"source": "kernel/append.cfg"}],
@@ -101,6 +103,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
             platform: dict[str, Any] = {
                 "bundle": {"packages": []},
                 "linux": {
+                    "defconfig": "platforms/demo/kernel/defconfig",
                     "patches": ["shared/platform.patch"],
                     "copies": [{"source": "shared/platform-copy.c"}],
                     "appends": [{"source": "shared/platform-append.cfg"}],

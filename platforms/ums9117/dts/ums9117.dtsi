@@ -43,7 +43,7 @@
 		ranges;
 
 		syscounter@40230000 {
-			compatible = "fplinux,ums9117-syscounter";
+			compatible = "sprd,ums9117-syscounter";
 			reg = <0x40230000 0x10>;
 		};
 
@@ -55,7 +55,7 @@
 		};
 
 		aon_apb: syscon@402e0000 {
-			compatible = "fplinux,ums9117-aon-apb", "syscon";
+			compatible = "sprd,ums9117-aon-apb", "syscon";
 			reg = <0x402e0000 0x00003000>;
 		};
 
@@ -70,6 +70,16 @@
 
 		keypad: keypad@40250000 {
 			reg = <0x40250000 0x00000100>;
+			sprd,aon-apb = <&aon_apb>;
+			status = "disabled";
+		};
+
+		thm1: thermal-sensor@40300000 {
+			compatible = "sprd,ums9117-thm1";
+			reg = <0x40300000 0x00000100>,
+			      <0x40240000 0x00000058>,
+			      <0x40241064 0x00000004>;
+			reg-names = "thm", "efuse-control", "efuse-block25";
 			sprd,aon-apb = <&aon_apb>;
 			status = "disabled";
 		};

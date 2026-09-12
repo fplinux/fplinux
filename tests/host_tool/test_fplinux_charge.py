@@ -75,6 +75,42 @@ class FPLinuxChargeHostToolTests(unittest.TestCase):
             timeout=timeout,
         )
 
+    def compile_discovery_wrapper(self, power_supply: Path) -> Path:
+        """Compile the production wrapper with a test-owned sysfs glob."""
+        executable = self.work / "fplinux-charge-discovery"
+        counter_glob = power_supply / "*" / "charge_counter"
+        run_process(
+            [
+                "cc",
+                "-std=c11",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                f'-DFPLINUX_CHARGE_COUNTER_GLOB="{counter_glob}"',
+                str(SOURCE),
+                "-o",
+                str(executable),
+            ],
+            name="compile fplinux-charge discovery",
+            timeout=30,
+            check=True,
+        )
+        return executable
+
+    def add_power_supply(
+        self,
+        root: Path,
+        name: str,
+        supply_type: str,
+        charge_counter: int,
+    ) -> Path:
+        """Create one fake power-supply class device with a counter."""
+        device = root / name
+        device.mkdir(parents=True)
+        (device / "type").write_text(f"{supply_type}\n", encoding="ascii")
+        (device / "charge_counter").write_text(f"{charge_counter}\n", encoding="ascii")
+        return device / "charge_counter"
+
     def test_reports_charge_delta_after_successful_command(self) -> None:
         """A successful command produces its real counter delta and exits zero."""
         counter = self.add_battery(1000)
@@ -172,6 +208,75 @@ class FPLinuxChargeHostToolTests(unittest.TestCase):
         self.assertEqual(result.returncode, 127, result.stderr)
         self.assertIn(f"cannot execute {missing_command}:", result.stderr)
         self.assertIn("charge_delta=+0 uAh average_current=+0 uA", result.stderr)
+
+    def test_default_discovery_selects_only_the_battery_counter(self) -> None:
+        """The default class scan ignores non-Battery charge counters."""
+        power_supply = self.work / "power_supply-selected"
+        battery_counter = self.add_power_supply(power_supply, "battery", "Battery", 1000)
+        self.add_power_supply(power_supply, "charger", "USB", 2000)
+        executable = self.compile_discovery_wrapper(power_supply)
+
+        result = run_process(
+            [
+                str(executable),
+                "--",
+                "/bin/sh",
+                "-c",
+                'printf "1120\\n" > "$1"',
+                "fplinux-charge-test",
+                str(battery_counter),
+            ],
+            name="run fplinux-charge Battery discovery",
+            timeout=5,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("charge_delta=+120 uAh", result.stderr)
+
+    def test_default_discovery_rejects_multiple_battery_counters(self) -> None:
+        """Ambiguous Battery telemetry prevents the command from starting."""
+        power_supply = self.work / "power_supply-ambiguous"
+        self.add_power_supply(power_supply, "battery0", "Battery", 1000)
+        self.add_power_supply(power_supply, "battery1", "Battery", 2000)
+        executable = self.compile_discovery_wrapper(power_supply)
+        sentinel = self.work / "ambiguous-command-ran"
+
+        result = run_process(
+            [
+                str(executable),
+                "--",
+                "/bin/sh",
+                "-c",
+                'printf ran > "$1"',
+                "fplinux-charge-test",
+                str(sentinel),
+            ],
+            name="reject ambiguous fplinux-charge Battery counters",
+            timeout=5,
+        )
+
+        self.assertEqual(result.returncode, 125, result.stderr)
+        self.assertFalse(sentinel.exists())
+        self.assertIn("multiple Battery charge counters", result.stderr)
+
+    def test_explicit_counter_overrides_default_discovery(self) -> None:
+        """A caller can select a known counter without class discovery."""
+        counter = self.add_battery(1000)
+
+        result = run_process(
+            [
+                str(self.executable),
+                "--counter",
+                str(counter),
+                "--",
+                "/bin/true",
+            ],
+            name="run fplinux-charge explicit counter",
+            timeout=5,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("charge_delta=+0 uAh", result.stderr)
 
 
 if __name__ == "__main__":

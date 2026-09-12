@@ -37,6 +37,8 @@ compatible = "demo,phone"
 packages = []
 
 [linux]
+config_fragment = "kernel/config.fragment"
+memory = { base = 0x80000000, size = 0x03e00000 }
 dtb = "demo.dtb"
 debug_dtb = "demo.dtb"
 patches = []
@@ -71,7 +73,7 @@ boot_instructions = "demo"
                 "display_name": "Demo SOC1",
             },
             "rootfs": {"packages": ["fplinux-ssh"]},
-            "linux": {"copies": [{"source": "platform.c", "destination": "drivers/base.c"}]},
+            "linux": {"defconfig": "platforms/demo/kernel/defconfig", "copies": [{"source": "platform.c", "destination": "drivers/base.c"}]},
             "bootstrap": {
                 "kernel_destination": "zImage",
                 "load_address": 0x80100000,

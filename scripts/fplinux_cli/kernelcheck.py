@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import difflib
 import os
 import re
 import shlex
@@ -35,11 +34,13 @@ from .builder import (
 from .common import ROOT
 from .config import (
     discover_profiles,
+    compose_kernel_config,
     discover_targets,
+    kconfig_values,
+    kernel_config_paths,
     load_platform,
     load_target,
     relative_value,
-    target_defconfig_path,
 )
 from .device_tree import (
     DeviceTreeError,
@@ -317,7 +318,8 @@ def check_one_context(
         patch_files = [str(root_source(relative)) for relative in platform["linux"]["patches"]] + [
             str(target_source(target, relative)) for relative in target_config["linux"]["patches"]
         ]
-        defconfig = require_file(target_defconfig_path(target))
+        base, fragment = kernel_config_paths(target, target_config, platform)
+        defconfig = compose_kernel_config(base, fragment).decode()
         objects = sparse_targets(target, target_config, platform)
         output = sparse_output(target, profile)
         config_enable, config_disable = profile_kconfig_actions(target_config)
@@ -348,7 +350,6 @@ def check_one_context(
                 *profile_kconfig_arguments(config_enable, config_disable),
             ]
         kconfig_command = [*kbuild, "olddefconfig", "prepare"]
-        save_defconfig_command = [*kbuild, "savedefconfig"]
         dtbs_command = [*kbuild, "W=1", "dtbs_check"]
         sparse_command = [
             *kbuild,
@@ -370,29 +371,20 @@ def check_one_context(
         if checkpatch_patches is not None:
             run_checkpatch(checkpatch_patches)
     with report_stage(reporter, f"kconfig-{label}"):
-        shutil.copyfile(defconfig, output / ".config")
+        (output / ".config").write_text(defconfig)
         if profile_config_command is not None:
             run(first_kconfig_command)
             run(profile_config_command)
         run(kconfig_command)
-        if profile is None:
-            run(save_defconfig_command)
-            current = defconfig.read_text()
-            canonical = require_file(output / "defconfig").read_text()
-            if canonical != current:
-                record_text(
-                    "".join(
-                        difflib.unified_diff(
-                            current.splitlines(keepends=True),
-                            canonical.splitlines(keepends=True),
-                            fromfile=str(defconfig),
-                            tofile="savedefconfig",
-                        )
-                    )
+        requested = kconfig_values(defconfig)
+        requested.update(dict.fromkeys(config_enable, "y"))
+        requested.update(dict.fromkeys(config_disable, "n"))
+        actual = kconfig_values(require_file(output / ".config").read_text())
+        for symbol, value in requested.items():
+            if actual.get(symbol, "n") != value:
+                raise SystemExit(
+                    f"sparse failed: kernel configuration did not preserve {symbol}={value}"
                 )
-                raise SystemExit(f"sparse failed: defconfig is not canonical: {defconfig}")
-        else:
-            assert_profile_kconfig(output / ".config", config_enable, config_disable)
     with report_stage(reporter, f"device-tree-{label}"):
         combined = run_dtbs_check(dtbs_command, target)
         if "Warning" in combined or re.search(r"\.dtb: ", combined):
@@ -410,7 +402,7 @@ def check_one_context(
             verify_root_bootargs(dtb, target_config["linux"]["root"])
             layout = target_config.get("layout")
             if isinstance(layout, dict):
-                verify_profile_dtb_layout(dtb, layout)
+                verify_profile_dtb_layout(dtb, layout, target_config["linux"]["memory"])
         except DeviceTreeError as error:
             raise SystemExit(f"sparse failed: {error}") from error
     with report_stage(reporter, f"sparse-{label}"):

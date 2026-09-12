@@ -48,12 +48,12 @@ Status terms and limits shared by every phone are defined in the
 | [Battery telemetry](features/BATTERY_TELEMETRY.md)                  | Present  | Partial       | Voltage, signed current and a relative charge counter; absolute accuracy is unchecked.     |
 | [SoC temperature](features/SOC_TEMPERATURE.md)                      | Present  | Partial       | Calibrated reading without external accuracy validation.                                   |
 | [Auxiliary ADC](features/AUXADC.md)                                 | Present  | Partial       | Five raw channels without physical-unit conversion.                                        |
-| [Real-time clock](features/RTC.md)                                  | Present  | Partial       | Read-only time and one-shot alarms; no time-setting or synchronization.                    |
+| [Real-time clock](../../docs/features/RTC.md)                                  | Present  | Partial       | Read-only time and one-shot alarms; no time-setting or synchronization.                    |
 | Other battery functions                                             | Present  | Not supported | No level, battery temperature or charge control is provided.                               |
 | [Vibration](features/VIBRATION.md)                                  | Present  | Supported     | Binary `FF_RUMBLE` effects with a five-second automatic cutoff.                            |
 | Indicator LEDs                                                      | Unknown  | Not supported | —                                                                                          |
-| [Power-off](features/POWER_OFF.md)                                  | N/A      | Supported     | Works only while external charger power is absent.                                         |
-| [Suspend](features/SUSPEND.md)                                      | N/A      | Supported     | RAM boot only; the red handset key and RTC alarms wake s2idle.                             |
+| [Power-off](../../docs/features/POWER_OFF.md)                                  | N/A      | Supported     | Works only while external charger power is absent.                                         |
+| [Suspend](../../docs/features/SUSPEND.md)                                      | N/A      | Supported     | RAM boot only; the red handset key and RTC alarms wake s2idle.                             |
 | Reboot                                                              | N/A      | Not supported | —                                                                                          |
 
 ## Applications
@@ -93,7 +93,7 @@ Flush and unmount microSD first. Disconnect USB, make sure charger power is
 absent, then hold the red handset key continuously for five seconds. Releasing
 it early cancels the request. If the phone remains powered after shutdown
 starts, remove and reinsert the battery before booting normally. See
-[Power-off](features/POWER_OFF.md) for the complete boundary.
+[Power-off](../../docs/features/POWER_OFF.md) for the complete boundary.
 
 ## Release boundary
 

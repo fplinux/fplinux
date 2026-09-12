@@ -17,6 +17,6 @@ request, and detected external charger input refuses shutdown.
 
 Do not try to unmount the root partition and do not remove the card from a
 running system. Linux reboot is not supported, and
-[s2idle](../../../features/SUSPEND.md) is not qualified with the microSD system
+[s2idle](../../../../../docs/features/SUSPEND.md) is not qualified with the microSD system
 root. If shutdown does not complete, remove and reinsert the battery before
 booting again; treat the card as unclean until it has been checked.

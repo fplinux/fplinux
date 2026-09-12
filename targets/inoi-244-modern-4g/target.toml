@@ -7,10 +7,15 @@ product = "244 Modern 4G"
 hardware_codes = []
 compatible = "inoi,244-modern-4g"
 
+[rootfs]
+packages = []
+
 [bundle]
 packages = []
 
 [linux]
+config_fragment = "kernel/config.fragment"
+memory = { base = 0x80000000, size = 0x03f00000 }
 dtb = "unisoc/ums9117-inoi-244-modern-4g.dtb"
 debug_dtb = "ums9117-inoi-244-modern-4g.dtb"
 patches = ["kernel/0001-inoi-244-modern-4g-dtb.patch"]

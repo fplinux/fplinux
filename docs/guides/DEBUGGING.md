@@ -11,9 +11,9 @@ reported `.cache/logs/` path. Add `--verbose` when live tool output is useful.
 Kernel, bootstrap, host and phone-userspace messages follow the shared
 [logging contract](../reference/LOGGING.md).
 
-## Nokia kernel tracing
+## Kernel tracing
 
-The default Nokia 3210 4G (TA-1618) kernel includes debugfs, tracefs, kprobe
+The shared UMS9117 kernel configuration includes debugfs, tracefs, kprobe
 events and the `irqsoff` tracer. No tracer or dynamic probe is active after
 boot. Inspect the current state from the phone shell as root:
 
@@ -34,7 +34,7 @@ echo nop > /sys/kernel/tracing/current_tracer
 echo 1 > /sys/kernel/tracing/free_buffer
 ```
 
-The [Nokia target document](../../targets/nokia-ta1618/README.md) states the
-phone-specific support boundary. Use [Building FPLinux](BUILDING.md) for the
+The selected phone's [target document](../../targets/README.md) states its
+hardware support boundary. Use [Building FPLinux](BUILDING.md) for the
 source workflow and [Loading from a source checkout](LOADING.md) for the physical
 session.

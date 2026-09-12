@@ -1,36 +1,42 @@
 # FPLinux: ARMADA
 
-FPLinux: ARMADA is an optional Nokia 3210 4G (TA-1618) showcase. Its native
-software renderer presents a synchronized 3D scene while the LCD brightness,
-keypad light and vibrator reinforce the same timeline.
+FPLinux: ARMADA is an optional UMS9117 showcase. Its native software renderer
+presents a 3D scene with LCD brightness, keypad light and vibration following
+the same timeline where the selected phone supports those physical effects.
+
+The application requires a compatible framebuffer, keypad, LCD backlight,
+keypad light and vibrator. See the [target documentation](../../targets/README.md)
+for hardware support and physical-effect limitations on the selected phone.
 
 The package is not part of the normal root filesystem and does not start as a
 service. In the default RAM boot, installation lasts only for the current
 session. On the writable microSD system root, it remains installed until it is
-removed. Follow the microSD shutdown rules in
-`targets/nokia-ta1618/profiles/microsd-uboot/features/MICROSD.md` from a source
-checkout or `docs/target/MICROSD.md` from the standalone archive.
+removed. Follow the [microSD system-root shutdown rules](../guides/MICROSD_ROOT.md).
 
 ## Install
 
 ### Source checkout
 
-Set `bundle` to the `output:` directory printed by the Nokia build, then upload
-and install the bundled APK:
+Load the selected phone using the shared [loading guide](../guides/LOADING.md).
+Set `target` and `profile` to match the running system and `bundle` to the
+`output:` directory printed by that build, then upload and install the bundled APK.
+Use `profile=microsd-uboot` for a microSD system root:
 
 ```sh
-target=nokia-ta1618
+target=inoi-244-modern-4g
+profile=default
 bundle=/absolute/path/printed-by-fplinux-build
 
-./fplinux console "$target" --upload \
+./fplinux console "$target" --profile "$profile" --upload \
   "$bundle/apks/fplinux-showcase.apk" /tmp/fplinux-showcase.apk
-./fplinux console "$target" --exec \
+./fplinux console "$target" --profile "$profile" --exec \
   'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-showcase.apk'
 ```
 
 ### Standalone archive
 
-From the extracted Nokia archive directory:
+Load the image using the archive's top-level `README.txt` and the shared
+[archive guide](../guides/STANDALONE.md). From the extracted archive directory:
 
 ```sh
 ./runner/run.py --reconnect --upload \
@@ -46,7 +52,7 @@ presentation exits:
 
 ```sh
 # Source checkout
-./fplinux console nokia-ta1618 --exec 'fplinux-showcase'
+./fplinux console "$target" --profile "$profile" --exec 'fplinux-showcase'
 
 # Standalone archive
 ./runner/run.py --reconnect --exec 'fplinux-showcase'
@@ -58,7 +64,7 @@ actual result without manually stopping the phone:
 
 ```sh
 # One complete cycle, then normal cleanup and a result line on the console
-./fplinux console nokia-ta1618 --exec 'fplinux-showcase --runs 1'
+./fplinux console "$target" --profile "$profile" --exec 'fplinux-showcase --runs 1'
 ```
 
 After a normal exit, the application prints one result line to stdout:
@@ -84,14 +90,22 @@ cleanup runs after a handled termination signal or startup failure.
 
 ## Display and physical effects
 
-The current package supports the Nokia's `240x320` RGB565 framebuffer. The
-renderer derives its projection and scene layout from the active framebuffer
-geometry, but no `128x160` phone is currently supported by this package.
+The application accepts a two-page RGB565 framebuffer at `240x320` or
+`128x160`. The renderer derives its projection and scene layout from the active
+framebuffer geometry.
 
-LCD brightness uses the Nokia backlight interface. The keypad light and
-vibrator are binary devices: the presentation can vary their pulse timing, not
-their intensity. Daylight and LCD brightness change continuously throughout the
-complete presentation. During the hardware act the keypad light and vibrator
+LCD brightness and keypad light use Linux backlight and LED interfaces. The
+application discovers them automatically and refuses to start if either is
+missing or ambiguous. `--lcd-backlight DIR` and `--keypad-led DIR` select the
+respective sysfs device directory explicitly; each directory must provide
+`brightness` and `max_brightness`. LCD `max_brightness` must be at least 10.
+The keypad must provide the right soft key, and the vibrator must support
+`FF_RUMBLE`. Missing required controls prevent the presentation from starting.
+
+The presentation switches the keypad light and vibrator on and off; it varies
+their pulse timing, not their intensity. Daylight and LCD brightness change
+continuously throughout the complete presentation. During the hardware act the
+keypad light and vibrator
 transmit `FPLINUX` in Morse code while the corresponding letter pulses on
 screen. The final two seconds hold on the water after the letters submerge.
 There is no audio output; vibration carries rhythm, not musical pitch.
@@ -103,7 +117,7 @@ root:
 
 ```sh
 # Source checkout
-./fplinux console nokia-ta1618 --exec 'apk del fplinux-showcase'
+./fplinux console "$target" --profile "$profile" --exec 'apk del fplinux-showcase'
 
 # Standalone archive
 ./runner/run.py --reconnect --exec 'apk del fplinux-showcase'
