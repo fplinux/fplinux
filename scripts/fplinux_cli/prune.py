@@ -10,7 +10,7 @@ import stat
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from . import alpine_state
+from . import alpine_state, firmware_inputs
 from .common import ROOT
 from .config import (
     TARGET_NAME,
@@ -166,20 +166,27 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
             image_source_recipe,
             image_state.image_generation,
         )
-        recipes = {
-            alpine_state.alpine_rootfs_recipe(
-                image_recipe,
-                signing_key,
-                alpine_state.selected_packages(
-                    load_platform(target_config["platform"]), target_config
-                ),
-            )
-            for target in discover_targets()
-            for profile in (None, *discover_profiles(target))
-            for target_config in (
-                load_target(target) if profile is None else load_target(target, profile),
-            )
-        }
+        recipes: set[str] = set()
+        for target in discover_targets():
+            for profile in (None, *discover_profiles(target)):
+                target_config = (
+                    load_target(target) if profile is None else load_target(target, profile)
+                )
+                firmware = firmware_inputs.capture_external_firmware_inputs(
+                    target,
+                    target_config["rootfs"]["firmware"],
+                    cache,
+                )
+                recipes.add(
+                    alpine_state.alpine_rootfs_recipe(
+                        image_recipe,
+                        signing_key,
+                        alpine_state.selected_packages(
+                            load_platform(target_config["platform"]), target_config
+                        ),
+                        firmware_inputs=firmware,
+                    )
+                )
     except OSError, ValueError, SystemExit:
         return None
     return frozenset(recipes)

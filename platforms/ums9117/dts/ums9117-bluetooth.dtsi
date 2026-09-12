@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+/ {
+	soc {
+		bt_pmu: syscon@402b0000 {
+			compatible = "sprd,ums9117-pmu-apb", "syscon";
+			reg = <0x402b0000 0x3000>;
+		};
+
+		bluetooth: bluetooth@400a0000 {
+			compatible = "fplinux,ums9117-bluetooth";
+			reg = <0x400a0000 0x1000>, <0x400a8000 0x1000>,
+			      <0x80000000 0x100000>, <0x50800000 0x1000>;
+			reg-names = "send", "receive", "sipc-cm4", "boot-vector";
+			interrupts = <GIC_SPI 68 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 69 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "send", "receive";
+			sprd,aon-apb = <&aon_apb>;
+			sprd,pmu-apb = <&bt_pmu>;
+		};
+	};
+};

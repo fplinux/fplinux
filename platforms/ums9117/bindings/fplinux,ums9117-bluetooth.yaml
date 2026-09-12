@@ -1,0 +1,116 @@
+# SPDX-License-Identifier: GPL-2.0-only
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/net/bluetooth/fplinux,ums9117-bluetooth.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: UMS9117 CM4 Bluetooth controller
+
+maintainers:
+  - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+
+description: |
+  The CM4 controller uses the UMS9117 AP mailbox and shared
+  memory for HCI transport. The first two MiB at 0x80000000 must be excluded
+  from System RAM. PMU and AON syscons share their control banks with other
+  devices; controller power and reset use only the relevant SET/CLEAR bits.
+
+properties:
+  compatible:
+    const: fplinux,ums9117-bluetooth
+
+  reg:
+    items:
+      - description: AP mailbox send bank
+      - description: AP mailbox receive bank
+      - description: Shared IPC memory and CM4 firmware window
+      - description: CM4 boot vector in IRAM
+
+  reg-names:
+    items:
+      - const: send
+      - const: receive
+      - const: sipc-cm4
+      - const: boot-vector
+
+  interrupts:
+    items:
+      - description: AP mailbox send delivery interrupt
+      - description: AP mailbox receive interrupt
+
+  interrupt-names:
+    items:
+      - const: send
+      - const: receive
+
+  sprd,aon-apb:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: AON APB syscon
+
+  sprd,pmu-apb:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: PMU APB syscon
+
+  firmware-name:
+    description: Firmware and fitted Bluetooth records from this board.
+    items:
+      - description: Prepared CM4 executable
+      - description: Bluetooth address record
+      - description: Bluetooth PSKEY record
+      - description: Bluetooth RF calibration record
+
+  fplinux,cm4-sha256:
+    $ref: /schemas/types.yaml#/definitions/uint8-array
+    minItems: 32
+    maxItems: 32
+    description: SHA-256 of the prepared CM4 executable for this board.
+
+  fplinux,cm4-size:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    minimum: 1
+    maximum: 917504
+    description: Exact byte length of the prepared CM4 executable.
+
+  fplinux,cm4-version:
+    $ref: /schemas/types.yaml#/definitions/uint8-array
+    minItems: 6
+    maxItems: 6
+    description: Six firmware-version bytes returned by the FCA0 setup command.
+
+required:
+  - compatible
+  - reg
+  - reg-names
+  - interrupts
+  - interrupt-names
+  - sprd,aon-apb
+  - sprd,pmu-apb
+  - firmware-name
+  - fplinux,cm4-sha256
+  - fplinux,cm4-size
+  - fplinux,cm4-version
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+    bluetooth@400a0000 {
+        compatible = "fplinux,ums9117-bluetooth";
+        reg = <0x400a0000 0x1000>, <0x400a8000 0x1000>,
+              <0x80000000 0x100000>, <0x50800000 0x1000>;
+        reg-names = "send", "receive", "sipc-cm4", "boot-vector";
+        interrupts = <GIC_SPI 68 IRQ_TYPE_LEVEL_HIGH>,
+                     <GIC_SPI 69 IRQ_TYPE_LEVEL_HIGH>;
+        interrupt-names = "send", "receive";
+        sprd,aon-apb = <&aon_apb>;
+        sprd,pmu-apb = <&bt_pmu>;
+        firmware-name = "ums9117/ta1618-cm4.bin",
+                        "ums9117/ta1618-bt-config.bin",
+                        "ums9117/ta1618-bt-sprd.bin",
+                        "ums9117/ta1618-bt-rf-config.bin";
+        fplinux,cm4-sha256 = [22 88 d4 97 9f 05 6b 20 0b bc f3 41 92 17 30 a6
+                            00 cd 94 ff 3d 1a fb 14 ee 1e 76 d5 05 53 95 35];
+        fplinux,cm4-size = <463468>;
+        fplinux,cm4-version = [42 16 05 12 15 20];
+    };

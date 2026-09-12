@@ -215,7 +215,11 @@ RUN set -eux; \
     hadolint --version
 
 RUN apk add --no-cache \
-    libjpeg-turbo-dev=3.1.3-r0
+    cmake=4.2.3-r0 \
+    dbus=1.16.2-r2 \
+    dbus-dev=1.16.2-r2 \
+    libjpeg-turbo-dev=3.1.3-r0 \
+    samurai=1.2-r8
 
 RUN mkdir -p /cache/analysis /cache/downloads /cache/linux /cache/rootfs \
     /tmp/fplinux-home /workspace /work \

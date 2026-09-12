@@ -7,7 +7,7 @@ import hashlib
 import os
 import re
 import tomllib
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
 from .common import ROOT, fail, relative_name
@@ -156,6 +156,41 @@ def _sha256(value: object, name: str) -> str:
     ):
         fail(f"{name} must be a lowercase SHA-256 digest")
     return value
+
+
+def firmware_array(value: object, name: str) -> list[dict[str, Any]]:
+    """Validate explicitly named files installed below /lib/firmware."""
+    if not isinstance(value, list) or not value:
+        fail(f"{name} must be a non-empty array")
+    result: list[dict[str, Any]] = []
+    sources: set[str] = set()
+    destinations: set[str] = set()
+    for index, raw in enumerate(value):
+        item_name = f"{name}[{index}]"
+        if not isinstance(raw, dict) or set(raw) not in (
+            {"source", "destination", "size"},
+            {"source", "destination", "size", "sha256"},
+        ):
+            fail(f"{item_name} must contain exactly source, destination, size and optional sha256")
+        source = basename_value(raw.get("source"), f"{item_name} source")
+        if source in sources:
+            fail(f"{name} must not contain duplicate sources: {source}")
+        sources.add(source)
+        destination = relative_value(raw.get("destination"), f"{item_name} destination")
+        if not PurePosixPath(destination).name:
+            fail(f"{item_name} destination must name a file below /lib/firmware")
+        if destination in destinations:
+            fail(f"{name} must not contain duplicate destinations: {destination}")
+        destinations.add(destination)
+        normalized: dict[str, Any] = {
+            "source": source,
+            "destination": destination,
+            "size": integer_value(raw.get("size"), f"{item_name} size", bounds=(1, 0xFFFFFFFF)),
+        }
+        if "sha256" in raw:
+            normalized["sha256"] = _sha256(raw.get("sha256"), f"{item_name} sha256")
+        result.append(normalized)
+    return result
 
 
 def load_asset_lock(path: Path) -> list[dict[str, Any]]:
@@ -798,6 +833,7 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
         {
             "identity",
             "microsd",
+            *({"bluetooth"} if "bluetooth" in raw else set()),
             *({"nand"} if "nand" in raw else set()),
             "platform",
             "rootfs",
@@ -929,10 +965,18 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
         "patches": [*linux["patches"], *profile_linux["patches"]],
         "root": profile_linux["root"],
     }
+    firmware: list[dict[str, Any]] = []
+    if "bluetooth" in config:
+        bluetooth = exact_table(config["bluetooth"], {"parser", "firmware"}, "target bluetooth")
+        parser = basename_value(bluetooth["parser"], "target bluetooth parser")
+        if not parser.endswith(".py"):
+            fail("target bluetooth parser must be a Python filename")
+        firmware = firmware_array(bluetooth["firmware"], "target bluetooth firmware")
     config["rootfs"] = {
         "base_packages": target_rootfs_packages,
         "packages": selected_profile["rootfs"]["packages"],
         "exclude_packages": [],
+        "firmware": firmware,
     }
     config["profile"] = profile
     platform_bootstrap = platform["bootstrap"]

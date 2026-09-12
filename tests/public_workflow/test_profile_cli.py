@@ -43,6 +43,21 @@ class ProfileAndToolCliHelpWorkflowTests(unittest.TestCase):
         self.assertIn("output", result.stdout.lower())
         self.assertIn("--profile NAME", result.stdout)
 
+    def test_bluetooth_prepare_help_exposes_live_and_saved_dump_inputs(self) -> None:
+        """Preparation advertises one command for a phone or an existing raw dump."""
+        result = run_process(
+            [str(ROOT / "fplinux"), "bluetooth", "prepare", "--help"],
+            name="fplinux bluetooth prepare help",
+            timeout=_PUBLIC_HELP_TIMEOUT_SECONDS,
+            cwd=ROOT,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("nokia-ta1618", result.stdout)
+        self.assertIn("--from-dump PATH", result.stdout)
+        self.assertIn("--jobs N", result.stdout)
+        self.assertIn("--offline", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

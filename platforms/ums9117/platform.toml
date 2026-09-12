@@ -13,6 +13,7 @@ packages = [
   "fplinux-rotate",
   "fplinux-jpeg",
   "fplinux-present",
+  "fplinux-bluetooth",
 ]
 
 [bundle]
@@ -364,6 +365,10 @@ source = "platforms/ums9117/dts/ums9117.dtsi"
 destination = "arch/arm/boot/dts/unisoc/ums9117.dtsi"
 
 [[linux.copies]]
+source = "platforms/ums9117/dts/ums9117-bluetooth.dtsi"
+destination = "arch/arm/boot/dts/unisoc/ums9117-bluetooth.dtsi"
+
+[[linux.copies]]
 source = "platforms/ums9117/dts/ums9117-sc2720.dtsi"
 destination = "arch/arm/boot/dts/unisoc/ums9117-sc2720.dtsi"
 
@@ -510,6 +515,66 @@ destination = "drivers/irqchip/Kconfig"
 [[linux.appends]]
 source = "platforms/ums9117/kernel/sc2720-inta.Makefile"
 destination = "drivers/irqchip/Makefile"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-bluetooth.c"
+destination = "drivers/bluetooth/ums9117/ums9117-bluetooth.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/cm4-mailbox.c"
+destination = "drivers/bluetooth/ums9117/cm4-mailbox.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/cm4-mailbox.h"
+destination = "drivers/bluetooth/ums9117/cm4-mailbox.h"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/cm4-setup.c"
+destination = "drivers/bluetooth/ums9117/cm4-setup.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/cm4-setup.h"
+destination = "drivers/bluetooth/ums9117/cm4-setup.h"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/cm4-hci.c"
+destination = "drivers/bluetooth/ums9117/cm4-hci.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/cm4-hci.h"
+destination = "drivers/bluetooth/ums9117/cm4-hci.h"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/cm4-h4.c"
+destination = "drivers/bluetooth/ums9117/cm4-h4.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/cm4-h4.h"
+destination = "drivers/bluetooth/ums9117/cm4-h4.h"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/bluetooth.Kconfig"
+destination = "drivers/bluetooth/ums9117/Kconfig"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/bluetooth.Makefile"
+destination = "drivers/bluetooth/ums9117/Makefile"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/fplinux,ums9117-bluetooth.yaml"
+destination = "Documentation/devicetree/bindings/net/bluetooth/fplinux,ums9117-bluetooth.yaml"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/sprd,ums9117-pmu-apb.yaml"
+destination = "Documentation/devicetree/bindings/mfd/sprd,ums9117-pmu-apb.yaml"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/bluetooth-parent.Kconfig"
+destination = "drivers/bluetooth/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/bluetooth-parent.Makefile"
+destination = "drivers/bluetooth/Makefile"
 
 [bootstrap]
 vendor_source_lock = "fpdoom_bootstrap"

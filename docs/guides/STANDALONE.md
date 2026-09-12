@@ -92,6 +92,7 @@ For details, use the bundled pages:
 - [file transfer](../features/FILE_TRANSFER.md);
 - [host keyboard forwarding](../features/HOST_KEYBOARD.md);
 - [CPU clock reporting](../features/CPU_CLOCK.md);
+- [Bluetooth](../features/BLUETOOTH.md), on supported targets with prepared firmware;
 - [FPLinux: ARMADA](../apps/SHOWCASE.md);
 - [TyrQuake](../apps/TYRQUAKE.md);
 - [MicroPythonOS](../apps/MICROPYTHONOS.md).

@@ -65,6 +65,7 @@ class AlpineStateTests(unittest.TestCase):
         self._write("scripts/fplinux_cli/builder.py", b"builder implementation\n")
         self._write("scripts/fplinux_cli/alpine_builder.py", b"Alpine builder implementation\n")
         self._write("scripts/fplinux_cli/build_env.py", b"build environment\n")
+        self._write("scripts/fplinux_cli/firmware_inputs.py", b"firmware inputs\n")
         self.shared_source = self._write("alpine/shared/shared.c", b"int shared;\n")
 
     def _write(self, relative: str, contents: bytes) -> Path:

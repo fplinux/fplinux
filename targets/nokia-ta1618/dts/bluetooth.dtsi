@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-only
+#include "ums9117-bluetooth.dtsi"
+
+&bluetooth {
+	firmware-name = "ums9117/ta1618-cm4.bin",
+			"ums9117/ta1618-bt-config.bin",
+			"ums9117/ta1618-bt-sprd.bin",
+			"ums9117/ta1618-bt-rf-config.bin";
+	fplinux,cm4-sha256 = [
+		22 88 d4 97 9f 05 6b 20 0b bc f3 41 92 17 30 a6
+		00 cd 94 ff 3d 1a fb 14 ee 1e 76 d5 05 53 95 35
+	];
+	fplinux,cm4-size = <463468>;
+	fplinux,cm4-version = [42 16 05 12 15 20];
+};

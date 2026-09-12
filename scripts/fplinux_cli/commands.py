@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 import shlex
+import subprocess
 import sys
 import tempfile
 import zipfile
@@ -102,6 +103,7 @@ PACKAGE_DOCUMENTS = {
     "docs/apps/MICROPYTHONOS.md": ROOT / "docs/apps/MICROPYTHONOS.md",
     "docs/apps/SHOWCASE.md": ROOT / "docs/apps/SHOWCASE.md",
     "docs/apps/TYRQUAKE.md": ROOT / "docs/apps/TYRQUAKE.md",
+    "docs/features/BLUETOOTH.md": ROOT / "docs/features/BLUETOOTH.md",
     "docs/features/CPU_CLOCK.md": ROOT / "docs/features/CPU_CLOCK.md",
     "docs/features/FILE_TRANSFER.md": ROOT / "docs/features/FILE_TRANSFER.md",
     "docs/features/HOST_KEYBOARD.md": ROOT / "docs/features/HOST_KEYBOARD.md",
@@ -1131,13 +1133,13 @@ def package_target(
     print(f"ramboot.bin SHA256: {image_digest}")
 
 
-def run_target(
+def _runnable_target_runner(
     target: str,
     *,
     profile: str | None = None,
     boot: str | None = None,
-) -> None:
-    """Run the fixed shared runner from a successful target bundle."""
+) -> Path:
+    """Resolve the fixed shared runner for one runnable bundle."""
     selected_profile = selected_context_profile(target, profile=profile, boot=boot)
     if selected_profile is not None:
         target_config = load_target(target, selected_profile)
@@ -1151,4 +1153,27 @@ def run_target(
     runner = bundle.path / "runner/run.py"
     if runner.is_symlink() or not runner.is_file():
         fail(f"current bundle has no valid runner: {runner}")
+    return runner
+
+
+def run_target(
+    target: str,
+    *,
+    profile: str | None = None,
+    boot: str | None = None,
+) -> None:
+    """Run the fixed shared runner from a successful target bundle."""
+    runner = _runnable_target_runner(target, profile=profile, boot=boot)
     os.execv(os.fsencode(runner), [os.fsencode(runner)])
+
+
+def run_target_noninteractive(target: str, *, profile: str | None = None) -> None:
+    """Run a loader to its authenticated handoff without taking over this CLI process."""
+    runner = _runnable_target_runner(target, profile=profile)
+    result = subprocess.run(
+        [os.fsencode(runner)],
+        stdin=subprocess.DEVNULL,
+        check=False,
+    )
+    if result.returncode:
+        fail(f"RAM loader failed with exit status {result.returncode}")

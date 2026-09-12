@@ -10,9 +10,12 @@ import tempfile
 import tomllib
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
-from typing import Any, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from .common import ROOT, sha256_file
+
+if TYPE_CHECKING:
+    from .firmware_inputs import FirmwareInput
 
 RECEIPT_NAME = ".fplinux-rootfs-receipt.json"
 ROOTFS_NAME = "rootfs.cpio"
@@ -126,10 +129,13 @@ def _target_rootfs(
         "packages",
         "exclude_packages",
     }
-    if not isinstance(table, Mapping) or set(table) != package_fields:
+    if not isinstance(table, Mapping) or set(table) not in (
+        package_fields,
+        package_fields | {"firmware"},
+    ):
         _fail(
             "normalized target rootfs must contain base_packages, packages, "
-            "exclude_packages"
+            "exclude_packages and optional firmware"
         )
 
     def read(field: str) -> tuple[str, ...]:
@@ -415,6 +421,8 @@ def alpine_rootfs_recipe(
     signing_key_sha256: str,
     packages: Sequence[str],
     root: Path = ROOT,
+    *,
+    firmware_inputs: Sequence[FirmwareInput] = (),
 ) -> str:
     """Hash every input that can affect one selected Alpine root filesystem."""
     _sha256(container_image_recipe, "container image recipe")
@@ -428,10 +436,12 @@ def alpine_rootfs_recipe(
         "abuild": _source_file(root / "alpine/abuild.conf", root),
         "aports": {name: _source_tree(root / "alpine/aports" / name, root) for name in selected},
         "shared_aport_sources": shared_aport_source_records(selected, root),
+        "firmware": [firmware.recipe_record() for firmware in firmware_inputs],
         "implementation": [
             _source_file(root / "scripts/fplinux_cli/alpine_state.py", root),
             _source_file(root / "scripts/fplinux_cli/alpine_builder.py", root),
             _source_file(root / "scripts/fplinux_cli/build_env.py", root),
+            _source_file(root / "scripts/fplinux_cli/firmware_inputs.py", root),
         ],
     }
     return _canonical_digest(payload)

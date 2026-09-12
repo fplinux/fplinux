@@ -21,7 +21,14 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
-from . import alpine_builder, alpine_state, kbuild_state, linux_state, profile_layout
+from . import (
+    alpine_builder,
+    alpine_state,
+    firmware_inputs,
+    kbuild_state,
+    linux_state,
+    profile_layout,
+)
 from .build_env import build_environment
 from .bundle_state import (
     canonical_json_bytes,
@@ -2004,6 +2011,11 @@ def main() -> None:
         platform = load_platform(target_config["platform"])
         rootfs_packages = alpine_state.selected_packages(platform, target_config)
         bundle_packages = alpine_state.bundle_packages(platform, target_config, rootfs_packages)
+        firmware = firmware_inputs.capture_snapshot_firmware_inputs(
+            args.target,
+            target_config["rootfs"]["firmware"],
+            ROOT,
+        )
         with (ROOT / "sources.lock.toml").open("rb") as stream:
             sources = tomllib.load(stream)
         linux_base = require_sha256(
@@ -2034,12 +2046,16 @@ def main() -> None:
                 args.jobs,
                 rootfs_packages,
                 bundle_packages,
+                firmware=firmware,
                 external_image=target_config["image"],
                 external_output=work / "rootfs-image",
             )
         else:
             rootfs, rootfs_output, rootfs_recipe, bundle_apk_outputs = alpine_builder.build_rootfs(
-                args.jobs, rootfs_packages, bundle_packages
+                args.jobs,
+                rootfs_packages,
+                bundle_packages,
+                firmware=firmware,
             )
         ext4_artifact = profile_ext4_artifact(
             target_config,

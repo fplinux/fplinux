@@ -98,6 +98,22 @@ class CliCacheLockTests(unittest.TestCase):
                 "nokia-ta1618",
                 "microsd-uboot",
             ),
+            (
+                [
+                    "bluetooth",
+                    "prepare",
+                    "nokia-ta1618",
+                    "--from-dump",
+                    "saved-nand.bin",
+                    "--jobs",
+                    "2",
+                    "--offline",
+                ],
+                "prepare_bluetooth",
+                True,
+                "nokia-ta1618",
+                None,
+            ),
         )
         for arguments, callback_name, exclusive, target, profile in cases:
             with self.subTest(arguments=arguments):
@@ -112,6 +128,13 @@ class CliCacheLockTests(unittest.TestCase):
                 if callback_name == "backup_target_nand":
                     callback.assert_called_once_with(
                         "nokia-ta1618", Path("backup.bin"), profile=profile
+                    )
+                elif callback_name == "prepare_bluetooth":
+                    callback.assert_called_once_with(
+                        "nokia-ta1618",
+                        from_dump=Path("saved-nand.bin"),
+                        jobs=2,
+                        offline=True,
                     )
                 else:
                     callback.assert_called_once()
@@ -138,6 +161,30 @@ class CliCacheLockTests(unittest.TestCase):
         )
         self.assertTrue(build.call_args.kwargs["offline"])
         self.assertFalse(build.call_args.kwargs["verbose"])
+
+    def test_bluetooth_prepare_rejects_a_nonpositive_job_limit_before_locking(self) -> None:
+        """Invalid worker limits cannot create cache state or start preparation."""
+        with (
+            mock.patch.object(
+                sys,
+                "argv",
+                ["fplinux", "bluetooth", "prepare", "nokia-ta1618", "--jobs", "0"],
+            ),
+            mock.patch.object(cli, "ROOT", self.root),
+            mock.patch.object(cli, "discover_targets", return_value=("nokia-ta1618",)),
+            mock.patch.object(
+                cli,
+                "cache_lock",
+                side_effect=AssertionError("invalid arguments must not lock"),
+            ) as lock,
+            contextlib.redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit) as stopped,
+        ):
+            cli.main()
+
+        self.assertEqual(stopped.exception.code, 2)
+        lock.assert_not_called()
+        self.assertFalse((self.root / ".cache").exists())
 
     def test_check_forwards_the_kernel_worker_limit_without_changing_its_lock(self) -> None:
         """Pass the requested kernel limit through the existing exclusive check boundary."""

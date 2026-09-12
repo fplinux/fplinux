@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-only
+#include "ums9117-bluetooth.dtsi"
+
+&bluetooth {
+	firmware-name = "ums9117/inoi244-cm4.bin",
+			"ums9117/inoi244-bt-config.bin",
+			"ums9117/inoi244-bt-sprd.bin",
+			"ums9117/inoi244-bt-rf-config.bin";
+	fplinux,cm4-sha256 = [
+		7f d7 d0 06 a2 72 76 c0 38 96 2f b1 de 5a b8 f3
+		fc 60 f9 75 4d c3 29 24 27 ca ec 06 8f 9a f3 fd
+	];
+	fplinux,cm4-size = <463296>;
+	fplinux,cm4-version = [65 10 06 09 15 20];
+};

@@ -28,6 +28,35 @@ packages = [
 ]
 
 [runtime.additions]
+fplinux-bluetooth = [
+  "bluez-5.86-r2.apk",
+  "bluez-obexd-5.86-r2.apk",
+  "bluez-openrc-5.86-r2.apk",
+  "dbus-1.16.2-r2.apk",
+  "dbus-libs-1.16.2-r2.apk",
+  "dbus-openrc-1.16.2-r2.apk",
+  "glib-2.88.1-r1.apk",
+  "icu-data-en-78.1-r0.apk",
+  "icu-libs-78.1-r0.apk",
+  "json-c-0.18-r1.apk",
+  "libblkid-2.42.1-r0.apk",
+  "libeconf-0.8.3-r0.apk",
+  "libexpat-2.8.4-r0.apk",
+  "libffi-3.5.2-r1.apk",
+  "libgcc-15.2.0-r5.apk",
+  "libical-3.0.20-r1.apk",
+  "libintl-1.0-r0.apk",
+  "libmount-2.42.3-r1.apk",
+  "libncursesw-6.6_p20260516-r0.apk",
+  "libstdc++-15.2.0-r5.apk",
+  "libudev-zero-1.0.4-r0.apk",
+  "libxml2-2.13.9-r2.apk",
+  "ncurses-terminfo-base-6.6_p20260516-r0.apk",
+  "pcre2-10.48-r0.apk",
+  "readline-8.3.3-r1.apk",
+  "xz-libs-5.8.3-r0.apk",
+]
+
 fplinux-microsd-root = [
   "cloud-utils-growpart-0.33-r1.apk",
   "e2fsprogs-1.47.4-r0.apk",
@@ -49,6 +78,8 @@ fplinux-microsd-root = [
 [sysroot]
 packages = [
   "binutils-2.45.1-r1.apk",
+  "dbus-dev-1.16.2-r2.apk",
+  "dbus-libs-1.16.2-r2.apk",
   "gcc-15.2.0-r5.apk",
   "gmp-6.3.0-r4.apk",
   "isl26-0.26-r2.apk",
@@ -63,6 +94,7 @@ packages = [
   "mpfr4-4.2.2-r0.apk",
   "musl-1.2.6-r2.apk",
   "musl-dev-1.2.6-r2.apk",
+  "pkgconf-2.5.1-r0.apk",
   "zlib-1.3.2-r0.apk",
   "zstd-libs-1.5.7-r2.apk",
 ]
@@ -312,3 +344,135 @@ repository = "main"
 file = "sfdisk-2.42.1-r0.apk"
 sha256 = "97f92e72a5d27c7fbc06621562b35cc2c0f4da2c27386b7d7136db5ff9eaf780"
 bytes = 35381
+
+[[package]]
+repository = "main"
+file = "bluez-5.86-r2.apk"
+sha256 = "0441041437f90d75673603cb7d06e23199d19a1857f838729005d6af027914dc"
+bytes = 1001995
+
+[[package]]
+repository = "main"
+file = "bluez-obexd-5.86-r2.apk"
+sha256 = "e9fc863914596ba42526bd728ffbbfca57b4c4c8d2667d063a3c347f6abb16d0"
+bytes = 108807
+
+[[package]]
+repository = "main"
+file = "bluez-openrc-5.86-r2.apk"
+sha256 = "350c32681eb2e60808da4210a9bccba3226912c224f627b8dd5898d97463ca5b"
+bytes = 1739
+
+[[package]]
+repository = "main"
+file = "dbus-1.16.2-r2.apk"
+sha256 = "4d446831858f8195f2d141c43a234a76719b5fa26531069956d3fa8646726083"
+bytes = 107802
+
+[[package]]
+repository = "main"
+file = "dbus-dev-1.16.2-r2.apk"
+sha256 = "99d6292830566b5e8d20f965fdb27a143c9b56f9187ed805ae82ed5906377e8c"
+bytes = 28138
+
+[[package]]
+repository = "main"
+file = "dbus-libs-1.16.2-r2.apk"
+sha256 = "817faaf79c5b5251c3f256e6972f5f2835c6a80525f416da660fc61d058d51c9"
+bytes = 110121
+
+[[package]]
+repository = "main"
+file = "dbus-openrc-1.16.2-r2.apk"
+sha256 = "4c7a378a388a10c50faae5d0cfd4357073266b4557196166075f3b761d6f1d84"
+bytes = 2799
+
+[[package]]
+repository = "main"
+file = "glib-2.88.1-r1.apk"
+sha256 = "4a2bf7b7d6255307f2c818087b740626c404f577b5f62dca1dd0ba8f57292237"
+bytes = 1778244
+
+[[package]]
+repository = "main"
+file = "icu-data-en-78.1-r0.apk"
+sha256 = "344b21bbd5b2f288ec21d2e2a7143f3782b64a622b1ebbc44beb9704b075327e"
+bytes = 1025818
+
+[[package]]
+repository = "main"
+file = "icu-libs-78.1-r0.apk"
+sha256 = "6f4316b3a46ce659daf05ea07809965d92423a420affa9039cee43dfcca80b2a"
+bytes = 2003952
+
+[[package]]
+repository = "main"
+file = "json-c-0.18-r1.apk"
+sha256 = "f1324ea7fe535bee259e71cc0541a2647c4c576a33221a10baea164983f6c667"
+bytes = 24070
+
+[[package]]
+repository = "main"
+file = "libexpat-2.8.4-r0.apk"
+sha256 = "54dc11612ece68f67d98b67d0fa75c82c18bcbbd3a878493a80228ccbd7911f9"
+bytes = 52472
+
+[[package]]
+repository = "main"
+file = "libffi-3.5.2-r1.apk"
+sha256 = "cf9343ce68d6c54f1112c5328c8a39ea3a3c289c1020ddec164f0f5e5e19aaf4"
+bytes = 15149
+
+[[package]]
+repository = "main"
+file = "libical-3.0.20-r1.apk"
+sha256 = "9a8fc0cd2bb6aa22ce811bdbbda97ffe51710a9840dcc6d1df116447cacbcae9"
+bytes = 362095
+
+[[package]]
+repository = "main"
+file = "libintl-1.0-r0.apk"
+sha256 = "b3c661a74bfefc8aa5c52782756650a5f35ba7b1b7e0b64de1393146054f0e57"
+bytes = 33174
+
+[[package]]
+repository = "main"
+file = "libmount-2.42.3-r1.apk"
+sha256 = "6b05c9467bc7a1132a89f02dc23f2ada0621d5c989b2d08cd685af6cf7cd3380"
+bytes = 127712
+
+[[package]]
+repository = "community"
+file = "libudev-zero-1.0.4-r0.apk"
+sha256 = "6b5298e7f54ae8db9dcaee10200a54c4dc00a20dd06cd3c165224efde9db904e"
+bytes = 10337
+
+[[package]]
+repository = "main"
+file = "libxml2-2.13.9-r2.apk"
+sha256 = "13493e76a0a019114c8cb2600a5417971d417bc61ee1d74c55614fa3be3520a4"
+bytes = 428943
+
+[[package]]
+repository = "main"
+file = "pcre2-10.48-r0.apk"
+sha256 = "b51989dfd79a40f334ad82fbabd86d146f7482e571b8905c7b8710abfd1c11ed"
+bytes = 270643
+
+[[package]]
+repository = "main"
+file = "pkgconf-2.5.1-r0.apk"
+sha256 = "f28a0d95d7cbf7460d59d9a169cdc8cbf56ac9cfb4a7ecb0a2029883da5a1d55"
+bytes = 47341
+
+[[package]]
+repository = "main"
+file = "readline-8.3.3-r1.apk"
+sha256 = "c74b5824b5ca5a86ba707f37346626d92bad92d807a538e12fca4d71cbb2ef1b"
+bytes = 112798
+
+[[package]]
+repository = "main"
+file = "xz-libs-5.8.3-r0.apk"
+sha256 = "68092adc186ffbb31de64c6f1f5485bb866a8a967b1be29ed3e49cbc2386b27e"
+bytes = 103441

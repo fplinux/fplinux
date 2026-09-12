@@ -114,6 +114,12 @@ map = "sd-stage0.map"
 defconfig = "uboot/defconfig"
 patches = []
 copies = []
+[bluetooth]
+parser = "radio_parser.py"
+[[bluetooth.firmware]]
+source = "radio.bin"
+destination = "demo/radio.bin"
+size = 4
 """
             )
         self.addCleanup(mock.patch.stopall)
@@ -152,6 +158,17 @@ copies = []
                 self.assertEqual(card["rootfs"]["packages"], ["fplinux-microsd-root"])
                 self.assertEqual(ram["rootfs"]["packages"], [])
                 self.assertEqual(card["rootfs"]["base_packages"], ram["rootfs"]["base_packages"])
+                self.assertEqual(
+                    card["rootfs"]["firmware"],
+                    [
+                        {
+                            "source": "radio.bin",
+                            "destination": "demo/radio.bin",
+                            "size": 4,
+                        }
+                    ],
+                )
+                self.assertEqual(card["rootfs"]["firmware"], ram["rootfs"]["firmware"])
                 self.assertEqual(card["linux"]["memory"], {"base": 0x80200000, "size": 0x03C00000})
                 self.assertEqual(card["linux"]["config_fragment"], ram["linux"]["config_fragment"])
                 self.assertEqual(card["bootstrap"]["source"], "bootstrap-microsd")
@@ -174,6 +191,14 @@ copies = []
         path.write_text(path.read_text().replace("packages = []", 'packages = ["feature"]'))
         with self.assertRaisesRegex(SystemExit, "boot maintenance"):
             config.load_target("first")
+
+    def test_missing_bluetooth_declaration_does_not_require_private_inputs(self) -> None:
+        """A board without a Bluetooth declaration has no firmware input group."""
+        path = self.root / "targets/first/target.toml"
+        path.write_text(path.read_text().split("[bluetooth]")[0])
+        for profile in ("default", "microsd-uboot"):
+            with self.subTest(profile=profile):
+                self.assertEqual(config.load_target("first", profile)["rootfs"]["firmware"], [])
 
     def test_missing_board_boot_sources_fail_only_when_microsd_is_selected(self) -> None:
         """RAM operation does not read unused U-Boot sources or fall back to another board."""

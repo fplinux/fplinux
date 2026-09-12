@@ -8,12 +8,13 @@
 #include "ums9117-sc2720.dtsi"
 #include "fplinux-target-identity.dtsi"
 #include "inoi-244-modern-4g-nand-readonly.dtsi"
+#include "inoi-244-modern-4g-bluetooth.dtsi"
 #include "inoi-244-modern-4g-microsd.dtsi"
 
 / {
-	memory@80000000 {
+	memory@80200000 {
 		device_type = "memory";
-		reg = <0x80000000 0x03f00000>;
+		reg = <0x80200000 0x03c00000>;
 	};
 
 	reserved-memory {

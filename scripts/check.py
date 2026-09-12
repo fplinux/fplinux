@@ -443,9 +443,22 @@ def project_c_format_sources(files: list[Path]) -> list[str]:
     return sorted(sources)
 
 
+def pkg_config_cflags(package: str) -> list[str]:
+    """Resolve the installed header flags for one declared C dependency."""
+    result = capture(
+        ["pkg-config", "--cflags", package],
+        timeout=_PACKAGE_CONFIG_TIMEOUT,
+    )
+    if result.returncode:
+        fail(result.stderr.strip() or f"pkg-config could not resolve {package}")
+    return shlex.split(result.stdout)
+
+
 def userspace_c_include_flags(source: str) -> list[str]:
-    """Return compile flags needed by one source's project-owned headers."""
+    """Return compile flags needed by one source's headers."""
     path = PurePosixPath(source)
+    if path.parts[:3] == (*APORT_ROOT, "fplinux-bluetooth"):
+        return pkg_config_cflags("dbus-1")
     if (
         len(path.parts) >= 3
         and path.parts[:2] == APORT_ROOT
@@ -479,13 +492,7 @@ def run_userspace_analysis(output: Path, sources: list[tuple[str, bool]]) -> Non
     needs_libusb = any(libusb for _source, libusb in sources)
     libusb_flags: list[str] = []
     if needs_libusb:
-        pkg_config = capture(
-            ["pkg-config", "--cflags", "libusb-1.0"],
-            timeout=_PACKAGE_CONFIG_TIMEOUT,
-        )
-        if pkg_config.returncode:
-            fail(pkg_config.stderr.strip() or "pkg-config could not resolve libusb-1.0")
-        libusb_flags = shlex.split(pkg_config.stdout)
+        libusb_flags = pkg_config_cflags("libusb-1.0")
 
     analyzer = [
         "scan-build",

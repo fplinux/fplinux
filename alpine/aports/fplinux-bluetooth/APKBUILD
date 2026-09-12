@@ -1,0 +1,38 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-bluetooth
+pkgver=1
+pkgrel=0
+pkgdesc="BlueZ OPP and PAN client for FPLinux"
+url="https://github.com/fplinux/fplinux"
+arch="armv7"
+license="GPL-2.0-only"
+depends="bluez bluez-obexd bluez-openrc dbus dbus-openrc"
+makedepends_build="clang22 lld22"
+makedepends_host="dbus-dev musl-dev pkgconf"
+options="!check"
+source="fplinux-bluetooth.c fplinux-obexd.initd fplinux-bluetooth-setup.initd"
+builddir="$srcdir"
+
+build() {
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		$(pkg-config --cflags dbus-1) "$srcdir/fplinux-bluetooth.c" \
+		$(pkg-config --libs dbus-1) $LDFLAGS -o fplinux-bluetooth
+}
+
+package() {
+	install -Dm755 "$builddir/fplinux-bluetooth" \
+		"$pkgdir/usr/bin/fplinux-bluetooth"
+	install -Dm755 "$srcdir/fplinux-obexd.initd" \
+		"$pkgdir/etc/init.d/fplinux-obexd"
+	install -Dm755 "$srcdir/fplinux-bluetooth-setup.initd" \
+		"$pkgdir/etc/init.d/fplinux-bluetooth-setup"
+	mkdir -p "$pkgdir/etc/runlevels/default"
+	ln -s /etc/init.d/fplinux-obexd \
+		"$pkgdir/etc/runlevels/default/fplinux-obexd"
+}
+
+sha512sums="
+5f5055866199e41aea6469c2c9b2652af3320bd55edd0124f81085dafff7e3201bc85e9b22a5960545479e72bb718ec9bc7232e5c490888d4a145ed9a5368424  fplinux-bluetooth.c
+932215875be2fed5e599231bf68d08305f5b24db3ffe8bd5faf0e83fc0aae3633210d71ef1e653bcc405fe79964eb390006b6458032f5016e95655abe08edf77  fplinux-obexd.initd
+369569257926d5ff711107b7379bb71046ca97d98abd74ab4827eda0669ac900d7fcc7d926eeb2a82066f65436546319e773958667d3a776bd16b044c8828ce5  fplinux-bluetooth-setup.initd
+"

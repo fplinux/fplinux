@@ -9,11 +9,12 @@
 #include "ums9117-musb-cold.dtsi"
 #include "fplinux-target-identity.dtsi"
 #include "nokia-ta1618-nand-readonly.dtsi"
+#include "nokia-ta1618-bluetooth.dtsi"
 
 / {
-	memory@80000000 {
+	memory@80200000 {
 		device_type = "memory";
-		reg = <0x80000000 0x03e00000>;
+		reg = <0x80200000 0x03c00000>;
 	};
 
 	reserved-memory {

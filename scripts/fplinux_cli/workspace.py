@@ -11,12 +11,12 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-from . import alpine_state
+from . import alpine_state, firmware_inputs
 from .common import ROOT, fail, relative_name
 from .config import (
     kernel_config_paths,
@@ -44,6 +44,7 @@ STAGED_BUILD_SOURCES = (
     "scripts/fplinux_cli/config.py",
     "scripts/fplinux_cli/device_state.py",
     "scripts/fplinux_cli/device_tree.py",
+    "scripts/fplinux_cli/firmware_inputs.py",
     "scripts/fplinux_cli/identity.py",
     "scripts/fplinux_cli/identity_codegen.py",
     "scripts/fplinux_cli/kbuild_state.py",
@@ -101,9 +102,15 @@ def add_source_path(files: dict[str, Path], path: Path) -> None:
         files[child.relative_to(ROOT).as_posix()] = child
 
 
-def target_build_source_files(target: str, profile: str | None = None) -> list[tuple[str, Path]]:
+def target_build_source_files(
+    target: str,
+    profile: str | None = None,
+    *,
+    target_config: dict[str, Any] | None = None,
+) -> list[tuple[str, Path]]:
     """Resolve only the selected target/platform build closure."""
-    target_config = load_target(target, profile)
+    if target_config is None:
+        target_config = load_target(target, profile)
     platform = load_platform(target_config["platform"])
     target_root = ROOT / "targets" / target
     files: dict[str, Path] = {}
@@ -242,7 +249,35 @@ def quality_files(*, enforce_source_policy: bool) -> list[tuple[str, Path]]:
 
 def target_workspace_snapshot(target: str, profile: str | None = None) -> WorkspaceSnapshot:
     """Read the selected build closure before deciding whether staging is needed."""
-    return _snapshot_from_inventory(lambda: target_build_source_files(target, profile))
+    target_config = load_target(target, profile)
+    source_snapshot = _snapshot_from_inventory(
+        lambda: target_build_source_files(
+            target,
+            profile,
+            target_config=target_config,
+        )
+    )
+    captured = firmware_inputs.capture_external_firmware_inputs(
+        target,
+        target_config["rootfs"]["firmware"],
+        ROOT / ".cache",
+    )
+    firmware_files = tuple(
+        WorkspaceFile(
+            firmware_inputs.snapshot_firmware_path(target, firmware.source),
+            firmware.contents,
+            0o600,
+        )
+        for firmware in captured
+    )
+    if not firmware_files:
+        return source_snapshot
+    snapshot_files = tuple(
+        sorted((*source_snapshot.files, *firmware_files), key=lambda item: item.path)
+    )
+    if len({source.path for source in snapshot_files}) != len(snapshot_files):
+        fail("firmware input collides with a build workspace source path")
+    return WorkspaceSnapshot(snapshot_files, _snapshot_recipe(snapshot_files))
 
 
 def quality_workspace_snapshot(*, enforce_source_policy: bool) -> WorkspaceSnapshot:

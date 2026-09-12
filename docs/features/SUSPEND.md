@@ -27,4 +27,7 @@ A mounted data card, active card-backed swap in the RAM profile, and the
 where the target qualifies that storage condition. Keep the card installed
 throughout sleep and wake. Suspend is not a safe-removal or shutdown procedure.
 
+[Bluetooth](BLUETOOTH.md#suspend) can remain powered
+with pairings retained; follow its connection and wake limits before sleeping.
+
 Reboot and deep suspend-to-RAM are not supported.

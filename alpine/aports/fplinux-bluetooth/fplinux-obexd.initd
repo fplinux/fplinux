@@ -1,0 +1,13 @@
+#!/sbin/openrc-run
+# SPDX-License-Identifier: GPL-2.0-only
+# shellcheck shell=sh disable=SC2034
+
+name="FPLinux Bluetooth OBEX"
+command="/usr/lib/bluetooth/obexd"
+command_args="--system-bus --root=/ --plugin=opp,filesystem,bluetooth"
+command_background=true
+pidfile="/run/fplinux-obexd.pid"
+
+depend() {
+	need fplinux-bluetooth-setup dbus bluetooth
+}

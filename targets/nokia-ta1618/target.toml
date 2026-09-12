@@ -20,7 +20,7 @@ packages = ["fplinux-micropythonos-nokia-ta1618"]
 
 [linux]
 config_fragment = "kernel/config.fragment"
-memory = { base = 0x80000000, size = 0x03e00000 }
+memory = { base = 0x80200000, size = 0x03c00000 }
 dtb = "unisoc/ums9117-nokia-ta1618.dtb"
 debug_dtb = "ums9117-nokia-ta1618.dtb"
 patches = [
@@ -43,6 +43,10 @@ forbidden_config = [
 [[linux.copies]]
 source = "dts/nand-readonly.dtsi"
 destination = "arch/arm/boot/dts/unisoc/nokia-ta1618-nand-readonly.dtsi"
+
+[[linux.copies]]
+source = "dts/bluetooth.dtsi"
+destination = "arch/arm/boot/dts/unisoc/nokia-ta1618-bluetooth.dtsi"
 
 [[linux.copies]]
 source = "kernel/ta1618-mmc-linux.c"
@@ -98,6 +102,16 @@ backlight_channels = "rgbw"
 backlight_level = 0x14
 session_name = "ta1618-linux"
 boot_instructions = "Power the phone off, hold *, then connect USB while keeping * pressed."
+
+[bluetooth]
+parser = "bluetooth_firmware.py"
+firmware = [
+  { source = "ta1618-cm4.bin", destination = "ums9117/ta1618-cm4.bin", size = 463468, sha256 = "2288d4979f056b200bbcf341921730a600cd94ff3d1afb14ee1e76d505539535" },
+  { source = "ta1618-bt-config.bin", destination = "ums9117/ta1618-bt-config.bin", size = 8 },
+  { source = "ta1618-bt-sprd.bin", destination = "ums9117/ta1618-bt-sprd.bin", size = 176 },
+  { source = "ta1618-bt-rf-config.bin", destination = "ums9117/ta1618-bt-rf-config.bin", size = 252 },
+]
+
 [microsd]
 linux_patches = []
 

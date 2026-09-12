@@ -35,6 +35,11 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                     "target_build_source_files",
                     return_value=[("nested/source", source)],
                 ),
+                mock.patch.object(
+                    workspace_module,
+                    "load_target",
+                    return_value={"rootfs": {"firmware": []}},
+                ),
             ):
                 snapshot = workspace_module.target_workspace_snapshot("demo")
 
@@ -87,6 +92,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
 
             target: dict[str, Any] = {
                 "platform": "demo",
+                "rootfs": {"firmware": []},
                 "bundle": {"packages": ["package-b"]},
                 "linux": {
                     "config_fragment": "kernel/config.fragment",
