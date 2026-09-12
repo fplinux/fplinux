@@ -89,3 +89,30 @@ backlight_channels = "rgbw"
 backlight_level = 0x14
 session_name = "ta1618-linux"
 boot_instructions = "Power the phone off, hold *, then connect USB while keeping * pressed."
+[microsd]
+linux_patches = []
+
+[microsd.bootstrap]
+source = "bootstrap-microsd"
+image = "ta1618_sd_stage0.bin"
+map = "obj/ta1618_sd_stage0_map.txt"
+
+[microsd.uboot]
+defconfig = "uboot/ta1618_defconfig"
+patches = []
+
+[[microsd.uboot.copies]]
+source = "targets/nokia-ta1618/uboot/ums9117-ta1618-u-boot.dts"
+destination = "arch/arm/dts/ums9117-ta1618-u-boot.dts"
+
+[[microsd.uboot.copies]]
+source = "targets/nokia-ta1618/uboot/slot.c"
+destination = "board/fplinux/ums9117/slot.c"
+
+[[microsd.uboot.copies]]
+source = "targets/nokia-ta1618/common/ta1618-sdio-board.h"
+destination = "board/fplinux/ums9117/ta1618-sdio-board.h"
+
+[[microsd.uboot.copies]]
+source = "targets/nokia-ta1618/common/ta1618-sdio-board.c"
+destination = "board/fplinux/ums9117/sdio-board.c"

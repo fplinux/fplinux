@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/dts-v1/;
+
+#include "ums9117-u-boot.dtsi"
+
+/ {
+	model = "INOI 244 Modern 4G U-Boot control tree";
+	compatible = "inoi,244-modern-4g", "sprd,ums9117";
+};

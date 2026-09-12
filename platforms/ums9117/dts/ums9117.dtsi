@@ -7,6 +7,10 @@
 	#size-cells = <1>;
 	interrupt-parent = <&gic>;
 
+	chosen {
+#include "fplinux-root.dtsi"
+	};
+
 	reserved-memory {
 		#address-cells = <1>;
 		#size-cells = <1>;

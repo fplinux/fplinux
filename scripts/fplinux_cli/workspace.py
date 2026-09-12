@@ -130,13 +130,10 @@ def target_build_source_files(target: str, profile: str | None = None) -> list[t
     add_source_path(files, target_root / "target.toml")
     add_source_path(files, target_release_manifest_path(target))
     add_source_path(files, target_asset_lock_path(target))
-    runtime = target_config.get("runtime")
-    profile_plugin = runtime.get("host_plugin") if isinstance(runtime, dict) else None
-    if isinstance(profile_plugin, str):
-        add_source_path(files, target_root / profile_plugin)
     for path in kernel_config_paths(target, target_config, platform):
         add_source_path(files, path)
     selected_profile = target_config.get("profile")
+    add_source_path(files, profile_manifest_path(target, "default"))
     if selected_profile is not None:
         add_source_path(files, profile_manifest_path(target, selected_profile))
         add_source_path(files, ROOT / "scripts/fplinux_cli/artifact_state.py")
@@ -144,12 +141,11 @@ def target_build_source_files(target: str, profile: str | None = None) -> list[t
         add_source_path(files, ROOT / "scripts/fplinux_cli/uboot_tools.py")
         add_source_path(
             files,
-            target_root / "profiles" / str(selected_profile) / target_config["uboot"]["source"],
+            ROOT / target_config["uboot"]["source"],
         )
-        profile_root = target_root / "profiles" / str(selected_profile)
-        add_source_path(files, profile_root / target_config["uboot"]["defconfig"])
+        add_source_path(files, target_root / target_config["uboot"]["defconfig"])
         for relative in target_config["uboot"]["patches"]:
-            add_source_path(files, profile_root / relative)
+            add_source_path(files, ROOT / relative)
         for step in target_config["uboot"]["copies"]:
             add_source_path(files, ROOT / step["source"])
     if target_config["image"]["kind"] == "ext4-root":

@@ -6,11 +6,15 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import io
+import posixpath
+import re
+import shutil
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
 from unittest import mock
+from urllib.parse import urlsplit
 
 from fplinux_cli import alpine_state, commands
 from fplinux_cli.bundle_state import (
@@ -19,6 +23,7 @@ from fplinux_cli.bundle_state import (
     publish_current_bundle,
     published_file_records,
 )
+from fplinux_cli.config import load_release
 from fplinux_cli.image_state import ImageState
 from fplinux_cli.workspace import WorkspaceSnapshot
 
@@ -239,13 +244,6 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
         profile = "microsd-uboot"
         self.target_config["profile"] = profile
         self.addCleanup(self.target_config.pop, "profile", None)
-        profile_root = self.root / "targets" / self.target / "profiles" / profile
-        profile_readme = profile_root / "release/README.txt"
-        profile_readme.parent.mkdir(parents=True)
-        profile_readme.write_bytes(b"profile instructions\n")
-        profile_storage = profile_root / "features/MICROSD.md"
-        profile_storage.parent.mkdir(parents=True)
-        profile_storage.write_bytes(b"profile storage rules\n")
         generation = "3" * 64
         profile_snapshot = WorkspaceSnapshot((), "4" * 64)
         default_bundle = next((self.cache / "out" / self.target / "bundles").iterdir())
@@ -343,12 +341,78 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
                     self.assertEqual(archive.read(f"{root}/{relative}"), data)
                 self.assertEqual(
                     archive.read(f"{root}/README.txt"),
-                    profile_readme.read_bytes(),
+                    b"phone instructions\n",
                 )
                 self.assertEqual(
                     archive.read(f"{root}/docs/target/MICROSD.md"),
-                    profile_storage.read_bytes(),
+                    b"phone microSD procedures\n",
                 )
+
+    def test_relocated_feature_links_reach_bundled_guides(self) -> None:
+        """Target links keep their destination and fragments after archive relocation."""
+        source = self.root / "targets" / self.target / "features/MICROSD.md"
+        source.write_text(
+            "[Transfer](../../../docs/features/FILE_TRANSFER.md#upload)\n"
+            "[Card](MICROSD.md) [Section](#details)\n"
+            "[External](https://example.org/docs/)\n",
+            encoding="utf-8",
+        )
+        with contextlib.ExitStack() as stack:
+            for patch in self.package_patches():
+                stack.enter_context(patch)
+            self.package(candidate=True)
+
+        archive_path = next((self.cache / "out/candidates").glob("*.zip"))
+        with zipfile.ZipFile(archive_path) as archive:
+            root = archive.namelist()[0].partition("/")[0]
+            self.assertEqual(
+                archive.read(f"{root}/docs/target/MICROSD.md"),
+                b"[Transfer](../features/FILE_TRANSFER.md#upload)\n"
+                b"[Card](MICROSD.md) [Section](#details)\n"
+                b"[External](https://example.org/docs/)\n",
+            )
+            self.assertEqual(
+                archive.read(f"{root}/docs/features/FILE_TRANSFER.md"),
+                b"File transfer procedures\n",
+            )
+
+    def test_bundled_document_links_resolve_without_a_source_checkout(self) -> None:
+        """Actual release pages only link to local files included in the archive."""
+        source_root = Path(__file__).resolve().parents[2]
+        self.release_manifest["documents"] = load_release(self.target)["documents"]
+        for relative in self.release_manifest["documents"]:
+            source = source_root / "targets" / self.target / relative
+            destination = self.root / "targets" / self.target / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+        self.package_documents = {}
+        for relative, source in commands.PACKAGE_DOCUMENTS.items():
+            destination = self.root / source.relative_to(source_root)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+            self.package_documents[relative] = destination
+
+        with contextlib.ExitStack() as stack:
+            for patch in self.package_patches():
+                stack.enter_context(patch)
+            self.package(candidate=True)
+
+        archive_path = next((self.cache / "out/candidates").glob("*.zip"))
+        with zipfile.ZipFile(archive_path) as archive:
+            members = set(archive.namelist())
+            for name in sorted(members):
+                if not name.endswith(".md"):
+                    continue
+                document = archive.read(name).decode("utf-8")
+                for link in re.findall(r"\]\(([^\s)]+)\)", document):
+                    url = urlsplit(link)
+                    if url.scheme or url.netloc or not url.path:
+                        continue
+                    linked_member = posixpath.normpath(
+                        posixpath.join(posixpath.dirname(name), url.path)
+                    )
+                    with self.subTest(document=name, link=link):
+                        self.assertIn(linked_member, members)
 
     def test_apk_bytes_but_not_archive_metadata_change_qualification(self) -> None:
         """Only a changed executable payload requires a new phone qualification."""

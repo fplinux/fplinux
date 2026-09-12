@@ -33,13 +33,13 @@ from .builder import (
 )
 from .common import ROOT
 from .config import (
-    discover_profiles,
     compose_kernel_config,
     discover_targets,
     kconfig_values,
     kernel_config_paths,
     load_platform,
     load_target,
+    normalize_profile,
     relative_value,
 )
 from .device_tree import (
@@ -239,18 +239,9 @@ def run_dtbs_check(command: list[str], target: str) -> str:
 
 
 def target_profiles(profile: str | None = None) -> tuple[tuple[str, str | None], ...]:
-    """Select every default context, or one explicitly named profile."""
-    if profile is None:
-        return tuple((target, None) for target in discover_targets())
-
-    selected: list[tuple[str, str | None]] = []
-    for target in discover_targets():
-        profiles = discover_profiles(target)
-        if profile in profiles:
-            selected.append((target, profile))
-    if profile is not None and not selected:
-        raise SystemExit(f"sparse failed: profile is not declared by any target: {profile}")
-    return tuple(selected)
+    """Select the same global boot policy for every configured board."""
+    profile = normalize_profile(profile)
+    return tuple((target, profile) for target in discover_targets())
 
 
 def context_label(target: str, profile: str | None) -> str:

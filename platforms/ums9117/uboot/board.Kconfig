@@ -1,0 +1,12 @@
+if TARGET_FPLINUX_UMS9117
+
+config SYS_BOARD
+	default "ums9117"
+
+config SYS_VENDOR
+	default "fplinux"
+
+config SYS_CONFIG_NAME
+	default "ums9117"
+
+endif

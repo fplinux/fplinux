@@ -23,6 +23,82 @@ packages = [
   "fplinux-tyrquake",
 ]
 
+[uboot]
+source = "platforms/ums9117/uboot/u-boot.lock.toml"
+archive_prefix = "u-boot-2026.07"
+patches = ["platforms/ums9117/uboot/integration.patch"]
+
+[[uboot.copies]]
+source = "platforms/ums9117/uboot/board.Kconfig"
+destination = "board/fplinux/ums9117/Kconfig"
+
+[[uboot.copies]]
+source = "platforms/ums9117/uboot/board.Makefile"
+destination = "board/fplinux/ums9117/Makefile"
+
+[[uboot.copies]]
+source = "platforms/ums9117/uboot/entry.S"
+destination = "board/fplinux/ums9117/entry.S"
+
+[[uboot.copies]]
+source = "platforms/ums9117/uboot/stage0-handoff.h"
+destination = "board/fplinux/ums9117/stage0-handoff.h"
+
+[[uboot.copies]]
+source = "platforms/ums9117/uboot/stage0-console.c"
+destination = "board/fplinux/ums9117/stage0-console.c"
+
+[[uboot.copies]]
+source = "platforms/ums9117/uboot/stage0-timer.c"
+destination = "board/fplinux/ums9117/stage0-timer.c"
+
+[[uboot.copies]]
+source = "platforms/ums9117/uboot/ums9117-mmc.c"
+destination = "board/fplinux/ums9117/ums9117-mmc.c"
+
+[[uboot.copies]]
+source = "platforms/ums9117/uboot/ums9117-mmc.h"
+destination = "board/fplinux/ums9117/ums9117-mmc.h"
+
+[[uboot.copies]]
+source = "platforms/ums9117/uboot/ums9117-sdboot.c"
+destination = "board/fplinux/ums9117/ums9117-sdboot.c"
+
+[[uboot.copies]]
+source = "platforms/ums9117/uboot/board.c"
+destination = "board/fplinux/ums9117/board.c"
+
+[[uboot.copies]]
+source = "platforms/ums9117/uboot/ums9117.h"
+destination = "include/configs/ums9117.h"
+
+[[uboot.copies]]
+source = "platforms/ums9117/uboot/ums9117-u-boot.dtsi"
+destination = "arch/arm/dts/ums9117-u-boot.dtsi"
+
+[[uboot.copies]]
+source = "platforms/ums9117/common/ums9117-boot-contract.h"
+destination = "board/fplinux/ums9117/ums9117-boot-contract.h"
+
+[[uboot.copies]]
+source = "platforms/ums9117/common/ums9117-sdio-regs.h"
+destination = "board/fplinux/ums9117/ums9117-sdio-regs.h"
+
+[[uboot.copies]]
+source = "platforms/ums9117/common/ums9117-sdio-core.h"
+destination = "board/fplinux/ums9117/ums9117-sdio-core.h"
+
+[[uboot.copies]]
+source = "platforms/ums9117/common/ums9117-sdio-core.c"
+destination = "board/fplinux/ums9117/ums9117-sdio-core.c"
+
+[[uboot.copies]]
+source = "platforms/ums9117/common/ums9117-sdio-slot.h"
+destination = "board/fplinux/ums9117/ums9117-sdio-slot.h"
+
+[[uboot.copies]]
+source = "platforms/ums9117/common/ums9117-sdio-slot.c"
+destination = "board/fplinux/ums9117/ums9117-sdio-slot.c"
 
 [linux]
 defconfig = "platforms/ums9117/kernel/defconfig"
@@ -74,6 +150,22 @@ destination = "drivers/mmc/host/ums9117-sdio-core.h"
 [[linux.copies]]
 source = "platforms/ums9117/common/ums9117-sdio-core.c"
 destination = "drivers/mmc/host/ums9117-sdio-core.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/common/ums9117-sdio-slot.h"
+destination = "drivers/mmc/host/ums9117-sdio-slot.h"
+
+[[linux.copies]]
+source = "platforms/ums9117/common/ums9117-sdio-slot.c"
+destination = "drivers/mmc/host/ums9117-sdio-slot.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-mmc.h"
+destination = "drivers/mmc/host/ums9117-mmc.h"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-mmc-linux.c"
+destination = "drivers/mmc/host/ums9117-mmc-linux.c"
 
 [[linux.copies]]
 source = "platforms/ums9117/kernel/ums9117-musb.c"
@@ -314,6 +406,14 @@ destination = "Documentation/devicetree/bindings/clock/fplinux,ums9117-inherited
 [[linux.copies]]
 source = "platforms/ums9117/bindings/fplinux,ums9117-inherited-clk.h"
 destination = "include/dt-bindings/clock/fplinux,ums9117-inherited-clk.h"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/mmc.Kconfig"
+destination = "drivers/mmc/host/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/mmc.Makefile"
+destination = "drivers/mmc/host/Makefile"
 
 [[linux.appends]]
 source = "platforms/ums9117/kernel/inherited-clk.Kconfig"

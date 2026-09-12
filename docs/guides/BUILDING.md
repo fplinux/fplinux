@@ -140,127 +140,50 @@ If the required pinned environment is missing or stale, an offline build
 asks for an online `./fplinux setup` first. A matching bundle remains usable
 offline.
 
-### Development profiles
+### Two global profiles
 
-A target may declare a development-only build profile at
-`targets/<target>/profiles/<profile>/profile.toml`. Profiles are small deltas
-over the target: they may enable or disable boolean kernel symbols, add Linux
-patch/copy/append inputs, add or exclude rootfs packages, select the root
-mechanism and request extra boot artifacts. Profile source paths are relative
-to that profile directory, except U-Boot copy sources, which are repository
-paths so a board port can consume current shared platform code directly.
+FPLinux has two global profiles, declared once under `profiles/`:
 
-The manifest has one exact, unversioned shape:
+- `default`: the system root is in RAM. Omitting `--profile` and explicitly
+  selecting `--profile default` use the same build and runtime identity.
+- `microsd-uboot`: the USB loader starts U-Boot in RAM, then Linux uses the
+  microSD card as its persistent ext4 root.
 
-```toml
-name = "example"
+Both profiles use the shared platform configuration and the selected target's
+board configuration. A profile selects boot and storage policy, not individual
+peripheral features. Board initialization, panel geometry, keys and fitted
+firmware declarations remain target-owned. Separate feature profiles are not
+accepted.
 
-[linux]
-config_enable = []
-config_disable = []
-patches = []
-copies = []
-appends = []
-
-[linux.root]
-kind = "initramfs"
-
-[rootfs]
-packages = []
-exclude_packages = []
-
-[bootstrap]
-kind = "linux"
-
-[uboot]
-kind = "none"
-
-[fit]
-kind = "none"
-
-[runtime]
-transport = "none"
-runnable = true
-```
-
-`linux.forbidden_dtb_markers` is optional. When present, it replaces the
-target's forbidden-marker list only for that profile, allowing a hardware lab
-to add one node that remains forbidden in the default target.
-
-`linux.root.kind = "initramfs"` keeps the ordinary embedded root. An external
-ext4 root adds the current `[layout]` and `[storage]` tables. Its PARTUUID is
-derived from the MBR signature and root partition number; the profile does not
-store a second copy. The profile also owns `CONFIG_EXT4_FS` and
-`CONFIG_BLK_DEV_INITRD` automatically instead of repeating them in Kconfig.
-
-The implemented U-Boot capability is `kind = "full"`. It builds the pinned full
-U-Boot together with `mkimage` and `dumpimage`. The full U-Boot binary is
-embedded in the profile's RAM bootstrap; the host tools are internal build
-inputs, not runtime bundle programs.
-
-A profile that combines full U-Boot, a SHA-256 FIT and ext4 root storage
-produces a complete partitioned `FPLINUX.img.xz`. The raw image exists only
-while it is assembled. Building the profile never writes removable media.
-Hardware use remains limited to the workflow and support status in the target
-documentation.
-
-Build-only profiles set `runtime.runnable = false`. The public `run` command
-rejects them before opening a bundle or waiting for USB.
-
-Build and check a declared profile explicitly:
+Build, check, load and inspect the selected context explicitly:
 
 ```sh
-./fplinux check kernel --profile <profile>
-./fplinux build <target> --profile <profile>
-./fplinux package <target> --profile <profile> --candidate
-./fplinux console <target> --profile <profile>
+./fplinux check kernel --profile microsd-uboot
+./fplinux build <target> --profile microsd-uboot
+./fplinux package <target> --profile microsd-uboot --candidate
+./fplinux run <target> --profile microsd-uboot
+./fplinux console <target> --profile microsd-uboot
+./fplinux verify <target> --profile microsd-uboot
 ```
 
-A profile may provide `host_plugin.py` for host operations that belong only to
-that profile. The plugin exposes `run(connect, arguments)` and is published in
-the same immutable bundle as the profile image. Run one of its commands through
-the scoped namespace:
+For `run` and `package`, `--boot microsd` is an alias for
+`--profile microsd-uboot`. Do not combine the two selectors. Neither selector
+falls back to a different target or boot mode. Actual board support is recorded
+in the [target index](../../targets/README.md); selecting a global profile does
+not establish hardware support.
 
-```sh
-./fplinux profile <target> <profile> <command> [arguments...]
-```
+Default and microSD builds keep separate current bundles and work state. A
+microSD build cannot replace the default bundle. Non-default archives currently
+require `--candidate`; candidate packaging is not physical qualification.
 
-Only the selected bundle's hash-verified plugin is loaded. Its commands do not
-become global FPLinux commands. Calling `connect()` returns the authenticated
-SSH transport and session when an operation needs the running phone.
+The microSD build produces a partitioned `FPLINUX.img.xz`, containing a SHA-256
+FIT on FAT32 and an ext4 system root. Building never writes removable media.
+Follow [microSD system root](MICROSD_ROOT.md) for the layout, persistence and
+shutdown rules.
 
-The ordinary commands without `--profile` use only each target's default
-context; declared profiles are checked only when named explicitly. Profiles
-can only be packaged as candidates. They cannot be passed to `verify` and are
-never qualified release inputs. Profile package and console commands resolve
-the same isolated bundle generation selected by the corresponding build.
+After building, follow [Loading from a source checkout](LOADING.md) to configure
+the host, load the selected image, reconnect and verify the running context.
 
-`microsd-uboot` is the contributor-facing build context for the Nokia
-microSD system candidate. Build it by name, then use the public `microsd` boot
-mode to run or package that context:
-
-```sh
-./fplinux build nokia-ta1618 --profile microsd-uboot
-./fplinux run nokia-ta1618 --boot microsd
-./fplinux package nokia-ta1618 --boot microsd --candidate
-```
-
-The public boot mode is available only for `nokia-ta1618`. It has no fallback
-to the default target or another profile. The corresponding `--profile`
-commands remain available for contributor work; they are not another public
-name for the boot mode.
-
-`transport = "none"` changes only host-side runner behavior. The profile must
-also exclude any in-image gadget or SSH services it does not want. See
-[Loading from a source checkout](LOADING.md#from-a-source-checkout) for the matching
-run command and its evidence boundary.
-
-Default and named builds keep isolated current output and work state. Selecting
-a profile never replaces the default target bundle.
-
-After building, follow [Loading from a source checkout](LOADING.md) to configure the
-runtime host, load the selected image, reconnect, and verify a running default
-target.
 
 ## Logs, cache, and parallel commands
 

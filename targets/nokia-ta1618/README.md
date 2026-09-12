@@ -36,8 +36,8 @@ Status terms and limits shared by every phone are defined in the
 | [Host keyboard bridge](../../docs/features/HOST_KEYBOARD.md)        | N/A      | Supported     | —                                                                                          |
 | [CPU clock reporting](../../docs/features/CPU_CLOCK.md)             | N/A      | Supported     | —                                                                                          |
 | USB host mode                                                       | Unknown  | Not supported | —                                                                                          |
-| [Removable storage](features/MICROSD.md)                            | Present  | Supported     | microSD FAT32 read/write and unmounted hot-swap are exercised.                             |
-| [Removable system root](profiles/microsd-uboot/features/MICROSD.md) | Present  | Supported     | microSD FAT32 FIT plus writable ext4; the system card stays installed.                     |
+| [Removable storage](../../docs/features/MICROSD.md)                            | Present  | Supported     | microSD FAT32 read/write and unmounted hot-swap are exercised.                             |
+| [Removable system root](../../docs/guides/MICROSD_ROOT.md) | Present  | Supported     | microSD FAT32 FIT plus writable ext4; the system card stays installed.                     |
 | Internal phone storage                                              | Present  | Not supported | Default/release workflows expose none; `nand-ro-lab` is read-only development diagnostics. |
 | Audio                                                               | Present  | Not supported | —                                                                                          |
 | Modem and mobile service                                            | Present  | Not supported | —                                                                                          |

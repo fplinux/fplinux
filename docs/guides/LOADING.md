@@ -62,28 +62,25 @@ Build the target as described in [Building FPLinux](BUILDING.md), then run:
 ./fplinux run <target>
 ```
 
-For a runnable development profile, use the same profile that selected the
-build. Build-only profiles are rejected before the loader touches USB.
+Use the same global profile that selected the build. Omitting the selector is
+equivalent to `--profile default` and loads the RAM-only system.
 
 ```sh
 ./fplinux run <target> --profile <profile>
 ```
 
-The Nokia microSD system mode has a public boot selector. Its build remains
-isolated from the ordinary RAM-only bundle:
+The microSD system mode also has a public boot selector. Its build remains
+isolated from the RAM-only bundle:
 
 ```sh
-./fplinux build nokia-ta1618 --profile microsd-uboot
-./fplinux run nokia-ta1618 --boot microsd
+./fplinux build <target> --profile microsd-uboot
+./fplinux run <target> --boot microsd
 ```
 
-The second command selects only that prepared microSD context. It does not fall
-back to the default Nokia bundle. Running `./fplinux run nokia-ta1618` without
-`--boot` continues to use the ordinary RAM-only system.
-
-A profile with `transport = "none"` returns after the bridge acknowledges the
-session-bound handoff and the original BootROM USB device disappears. With no
-Linux-side transport, establish startup separately on the phone.
+The second command selects the same context as `--profile microsd-uboot`, with
+no fallback to a RAM-only bundle. Prepare the card as described in
+[microSD system root](MICROSD_ROOT.md) and check the selected phone's support
+status before using this mode on hardware.
 
 ### Connect the phone
 
@@ -105,8 +102,10 @@ a shell, or `./fplinux console <target> --exec '<command>'` to run one command.
 Use the matching profile or standalone reconnect workflow when that is how the
 session was started.
 
-Exiting the shell or unplugging USB does not end Linux. Do not start another RAM
-load merely to reopen the shell. Use [USB networking](../features/USB_NETWORKING.md)
+Exiting the shell does not end Linux. Do not start another RAM load merely to
+reopen the shell. Disconnecting USB leaves Linux running only if the phone has
+another power source; without a battery, it cuts power. Use
+[USB networking](../features/USB_NETWORKING.md)
 to understand the private host link and [SSH access](../features/SSH.md) to open
 or reconnect to the running session. [File transfer](../features/FILE_TRANSFER.md)
 and [host keyboard forwarding](../features/HOST_KEYBOARD.md) are separate
@@ -128,9 +127,10 @@ archives.
 
 ## End the RAM session
 
-Exiting SSH and disconnecting USB leave the volatile Linux session running.
-Before ending it, flush and unmount any removable media according to the target
-document. Then follow that document's
+Exiting SSH leaves the volatile Linux session running. Before disconnecting
+power, follow [microSD safe removal](../features/MICROSD.md#safe-removal) for a
+data card or [system-root shutdown](MICROSD_ROOT.md#persistence-and-shutdown)
+for a microSD root. Then follow the
 [target-specific end-of-session procedure](../../targets/README.md). Current
 targets differ: some provide battery-only Linux power-off, while others require
 removing and reinserting the battery. Linux reboot is not a supported substitute.

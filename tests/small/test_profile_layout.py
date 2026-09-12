@@ -139,7 +139,7 @@ class ProfileLayoutRenderTests(unittest.TestCase):
             "root_label": "FPLROOT",
         }
 
-        bootargs = profile_layout.external_root_dtsi(root).decode("ascii")
+        bootargs = profile_layout.root_bootargs_dtsi(root).decode("ascii")
         self.assertTrue(bootargs.startswith('bootargs = "'))
         self.assertTrue(bootargs.endswith('";\n'))
         for argument in (

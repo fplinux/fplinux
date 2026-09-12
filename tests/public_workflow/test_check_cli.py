@@ -28,7 +28,6 @@ PUBLIC_COMMANDS = (
     "prune",
     "run",
     "console",
-    "profile",
     "verify",
 )
 PUBLIC_CHECK_SCOPES = (

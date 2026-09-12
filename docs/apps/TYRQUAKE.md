@@ -1,28 +1,30 @@
 # TyrQuake
 
-TyrQuake 0.71 is an optional native game for the current FPLinux RAM session.
+TyrQuake 0.71 is an optional native game for FPLinux.
 The APK contains the engine, not Quake game data. Provide a legally obtained
 `pak0.pak` before starting the game. First load or reconnect to the selected
-phone using its instructions. A standalone archive includes this page; start
-with its top-level `README.txt`.
+phone using its instructions.
+A standalone archive includes this page; start with its top-level `README.txt`.
 
 ## Install
 
-The package is not part of the normal root filesystem. Installing it changes
-only the current RAM session.
+The package is installed separately into the active system root. Installation
+lasts until shutdown in the `default` RAM profile and persists across boots in
+`microsd-uboot`.
 
 ### Source checkout
 
-Set `target` to the running target and `bundle` to the `output:` directory from
-its build, then upload and install the APK:
+Set `target` and `profile` to match the running system and `bundle` to the
+`output:` directory from its build, then upload and install the APK:
 
 ```sh
 target=inoi-244-modern-4g
+profile=default
 bundle=/absolute/path/printed-by-fplinux-build
 
-./fplinux console "$target" --upload \
+./fplinux console "$target" --profile "$profile" --upload \
   "$bundle/apks/fplinux-tyrquake.apk" /tmp/fplinux-tyrquake.apk
-./fplinux console "$target" --exec \
+./fplinux console "$target" --profile "$profile" --exec \
   'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-tyrquake.apk'
 ```
 
@@ -48,26 +50,48 @@ The launcher reads `pak0.pak` from this exact path:
 It also accepts readable `pak1.pak` through `pak9.pak` from that directory.
 The game data is never copied into the APK or its temporary runtime directory.
 
-### Nokia 3210 4G (TA-1618)
+### Data card in the RAM profile
 
-Use a FAT32 microSD card. Follow the TA-1618 target document to mount the card,
-make `fplinux/quake/id1`, and upload the PAK. Before removing the card, run its
-documented `sync` and `umount` procedure.
+Use a filesystem supported by the selected phone: FAT32 on Nokia TA-1618,
+or ext4 on either INOI target. Follow the shared
+[microSD instructions](../features/MICROSD.md) to mount it at `/mnt/card`,
+make `fplinux/quake/id1`, and upload the PAK using
+[file transfer](../features/FILE_TRANSFER.md). Follow the shared safe-removal
+procedure before removing the card.
 
-When `/mnt/card` is not already mounted, `quake` mounts the card read-only for
-the game. Game data remains on the card, but the game never writes saves or
+On a supported FAT32 data card, `quake` can mount the card read-only when
+`/mnt/card` is not already mounted. Mount ext4 manually before launching the
+game. Game data remains on the card, but the game never writes saves or
 settings there.
 
-### INOI 240 Modern 4G and INOI 244 Modern 4G
+### microSD system root
 
-Neither target has a supported microSD path. Create a temporary mount and copy
-the PAK into it for this one RAM session:
+With `microsd-uboot`, the system ext4 root is not automatically made available
+at `/mnt/card`. Keep game data in a directory on the root filesystem and bind
+mount that directory at `/mnt/card` before launching the game. For example,
+with `/mnt/card` not already mounted, run on the phone:
+
+```sh
+mkdir -p /var/lib/quake-data/fplinux/quake/id1 /mnt/card
+mount -o bind /var/lib/quake-data /mnt/card
+```
+
+Upload the PAK to `/mnt/card/fplinux/quake/id1/pak0.pak`. The data persists on
+the ext4 root; repeat the bind mount after each boot. Keep the `FPLBOOT`
+partition reserved for boot files.
+Follow [microSD root shutdown](../guides/MICROSD_ROOT.md#persistence-and-shutdown)
+before removing or rewriting the system card.
+
+### Without a data card
+
+In the RAM profile, when `/mnt/card` is not already mounted, create a temporary
+mount and copy the PAK into it for this session:
 
 ```sh
 # Source checkout
-./fplinux console "$target" --exec \
+./fplinux console "$target" --profile "$profile" --exec \
   'mkdir -p /mnt/card && mount -t tmpfs tmpfs /mnt/card && mkdir -p /mnt/card/fplinux/quake/id1'
-./fplinux console "$target" --upload \
+./fplinux console "$target" --profile "$profile" --upload \
   ./pak0.pak /mnt/card/fplinux/quake/id1/pak0.pak
 
 # Standalone archive
@@ -78,8 +102,7 @@ the PAK into it for this one RAM session:
 ```
 
 The PAK consumes phone RAM and disappears with the session. A full PAK leaves
-less room for the game; see the selected INOI target document for its memory
-limit.
+less room for the game.
 
 ## Run
 
@@ -90,8 +113,8 @@ with the phone keypad. Start forwarding first as described in
 
 ```sh
 # Source checkout
-./fplinux console "$target" --exec 'quake --input phone'
-./fplinux console "$target" --exec 'quake --input keyboard'
+./fplinux console "$target" --profile "$profile" --exec 'quake --input phone'
+./fplinux console "$target" --profile "$profile" --exec 'quake --input keyboard'
 
 # Standalone archive
 ./runner/run.py --reconnect --exec 'quake --input phone'
@@ -125,19 +148,20 @@ target.
 
 The launcher creates a fresh temporary game directory every time it starts and
 removes it when TyrQuake exits. Settings, bindings, and saved games are
-therefore discarded after each run. The PAK files remain where they were
-provided, either on the Nokia card or in INOI tmpfs until the RAM session ends.
+therefore discarded after each run in both profiles. The PAK files remain
+where they were provided: files on persistent storage survive a boot, while
+files in tmpfs disappear when the system shuts down.
 
 Audio is not available. TyrQuake is built with no sound backend.
 
 ## Remove
 
-Exit TyrQuake first, then remove its APK if it is no longer needed in the
-current session:
+Exit TyrQuake first, then remove its APK from the active system root if it is
+no longer needed:
 
 ```sh
 # Source checkout
-./fplinux console "$target" --exec 'apk del fplinux-tyrquake'
+./fplinux console "$target" --profile "$profile" --exec 'apk del fplinux-tyrquake'
 
 # Standalone archive
 ./runner/run.py --reconnect --exec 'apk del fplinux-tyrquake'

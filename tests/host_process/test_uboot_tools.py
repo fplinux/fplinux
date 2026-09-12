@@ -4,14 +4,16 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import subprocess
 import tarfile
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from fplinux_cli import uboot_tools
+from fplinux_cli import builder, uboot_tools
 
 
 class UbootToolsTests(unittest.TestCase):
@@ -19,7 +21,7 @@ class UbootToolsTests(unittest.TestCase):
 
     _REQUIRED_CONFIG = textwrap.dedent(
         """\
-        CONFIG_TARGET_FPLINUX_TA1618=y
+        CONFIG_TARGET_FPLINUX_UMS9117=y
         CONFIG_TEXT_BASE=0x81000000
         CONFIG_CUSTOM_SYS_INIT_SP_ADDR=0x80f00000
         CONFIG_SYS_LOAD_ADDR=0x83200000
@@ -69,6 +71,7 @@ class UbootToolsTests(unittest.TestCase):
                 """\
                 #!/usr/bin/env python3
                 import pathlib
+                import subprocess
                 import sys
 
                 output = pathlib.Path(sys.argv[1])
@@ -82,7 +85,18 @@ class UbootToolsTests(unittest.TestCase):
                 elf[24:28] = (0x81000000).to_bytes(4, "little")
                 (output / "u-boot").write_bytes(bytes(elf) + b"DEBUG")
                 (output / "u-boot-dtb.bin").write_bytes(b"binary")
-                (output / "u-boot.dtb").write_bytes(b"dtb")
+                target_header = pathlib.Path("include/fplinux-uboot-target.h")
+                if target_header.exists():
+                    target = subprocess.run(
+                        ["cc", "-E", "-P", "-I", "include", "-"],
+                        input=b'#include "fplinux-uboot-target.h"\\nFPLINUX_UBOOT_TARGET\\n',
+                        capture_output=True,
+                        check=True,
+                        timeout=30,
+                    ).stdout
+                    (output / "u-boot.dtb").write_bytes(target)
+                else:
+                    (output / "u-boot.dtb").write_bytes(b"dtb")
                 (output / "u-boot.map").write_text(
                     (output / ".config").read_text(encoding="utf-8"),
                     encoding="utf-8",
@@ -105,10 +119,10 @@ class UbootToolsTests(unittest.TestCase):
         (source / "Makefile").write_text(
             textwrap.dedent(
                 """\
-                .PHONY: ta1618_defconfig all
-                ta1618_defconfig:
+                .PHONY: all
+                %_defconfig:
                 \t@mkdir -p "$(O)"
-                \t@cp configs/ta1618_defconfig "$(O)/.config"
+                \t@cp configs/$@ "$(O)/.config"
                 all:
                 \t@if grep -qx 'CONFIG_TEST_FAIL=y' "$(O)/.config"; then exit 42; fi
                 \t@sh scripts/build-log.sh
@@ -245,6 +259,81 @@ class UbootToolsTests(unittest.TestCase):
         after = {name: path.read_bytes() for name, path in visible_outputs.items()}
         self.assertEqual(after, before)
         self.assertEqual(self._build_log_lines(), ["build"])
+
+    def test_writable_or_unverified_config_cannot_replace_complete_output(self) -> None:
+        """The producer rejects unsafe compiled configs before publishing them."""
+        current = self._build()
+        before = current.config.read_bytes()
+        for previous, unsafe in (
+            ("# CONFIG_MMC_WRITE is not set", "CONFIG_MMC_WRITE=y"),
+            ("CONFIG_ENV_IS_NOWHERE=y", "CONFIG_ENV_IS_IN_FAT=y"),
+            ("CONFIG_FIT_FULL_CHECK=y", "# CONFIG_FIT_FULL_CHECK is not set"),
+        ):
+            with self.subTest(config=unsafe):
+                self.defconfig.write_text(self._REQUIRED_CONFIG.replace(previous, unsafe))
+                with self.assertRaisesRegex(uboot_tools.UbootToolsError, "read-only MMC contract"):
+                    self._build()
+                self.assertEqual(current.config.read_bytes(), before)
+
+    def test_profile_preparation_emits_the_selected_target_identity(self) -> None:
+        """A C preprocessor in the synthetic build consumes the chosen target name."""
+        layout_prefixes = (
+            "CONFIG_TEXT_BASE=",
+            "CONFIG_CUSTOM_SYS_INIT_SP_ADDR=",
+            "CONFIG_SYS_LOAD_ADDR=",
+            "CONFIG_SYS_FDT_PAD=",
+        )
+        base = "\n".join(
+            line
+            for line in self._REQUIRED_CONFIG.splitlines()
+            if not line.startswith(layout_prefixes)
+        )
+        receipts = []
+        for target, defconfig in (
+            ("nokia-ta1618", "ta1618_defconfig"),
+            ("inoi-240-modern-4g", "inoi240_defconfig"),
+            ("inoi-244-modern-4g", "inoi244_defconfig"),
+        ):
+            source = self.root / "targets" / target / "uboot" / defconfig
+            source.parent.mkdir(parents=True)
+            source.write_text(base)
+            target_config = {
+                "profile": "microsd-uboot",
+                "layout": {
+                    **self.layout,
+                    "ram_base": 0x80000000,
+                    "ram_size": 0x04000000,
+                    "timer_hz": 1000,
+                    "kernel_load": 0x82000000,
+                    "kernel_entry": 0x82000000,
+                    "kernel_size": 0x01200000,
+                    "fdt_load": 0x83E00000,
+                    "fdt_size": 0x00010000,
+                    "framebuffer": 0x83F00000,
+                    "framebuffer_size": 0x00100000,
+                    "fit_size": 0x00C00000,
+                    "resident_start": 0x80100000,
+                    "resident_limit": 0x81000000,
+                },
+                "uboot": {
+                    **self.config,
+                    "defconfig": f"uboot/{defconfig}",
+                    "patches": [],
+                    "copies": [{"source": "build-log.sh", "destination": "scripts/build-log.sh"}],
+                },
+            }
+            with (
+                self.subTest(target=target),
+                mock.patch.object(builder, "ROOT", self.root),
+                mock.patch.object(builder, "fetch", return_value=self.archive),
+                mock.patch.dict(os.environ, {"FPLINUX_CONTAINER_IMAGE_RECIPE": "a" * 64}),
+            ):
+                built = builder.build_profile_uboot(target, target_config, self.work, 1)
+                if built is None:
+                    self.fail("configured U-Boot build did not produce an artifact")
+                self.assertEqual(built.dtb.read_bytes().strip(), f'"{target}"'.encode("ascii"))
+                receipts.append(built.receipt["recipe"])
+        self.assertEqual(len(set(receipts)), 3)
 
 
 if __name__ == "__main__":

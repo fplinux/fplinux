@@ -432,14 +432,7 @@ def project_c_format_sources(files: list[Path]) -> list[str]:
             or (
                 len(path.relative_to(ROOT).parts) >= 4
                 and path.relative_to(ROOT).parts[0] in {"platforms", "targets"}
-                and path.relative_to(ROOT).parts[2] == "common"
-                and path.suffix in APORT_C_FORMAT_SUFFIXES
-            )
-            or (
-                len(path.relative_to(ROOT).parts) >= 6
-                and path.relative_to(ROOT).parts[0] == "targets"
-                and path.relative_to(ROOT).parts[2] == "profiles"
-                and path.relative_to(ROOT).parts[4] == "uboot"
+                and path.relative_to(ROOT).parts[2] in {"common", "uboot"}
                 and path.suffix in APORT_C_FORMAT_SUFFIXES
             )
         )

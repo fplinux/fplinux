@@ -44,18 +44,18 @@ checksums and build metadata remain outside that phone-qualified payload but are
 still covered by archive integrity checks. A boot-mode candidate also includes
 its declared boot artifacts in the qualification payload.
 
-The Nokia microSD system candidate is selected independently of the ordinary
-RAM-only target archive:
+The microSD system candidate is selected independently of the RAM-only target
+archive:
 
 ```sh
-./fplinux build nokia-ta1618 --profile microsd-uboot
-./fplinux package nokia-ta1618 --boot microsd --candidate
+./fplinux build <target> --profile microsd-uboot
+./fplinux package <target> --boot microsd --candidate
 ```
 
 Its archive name uses `microsd`, includes the whole-card image from the selected
-context and cannot be packaged as a release. The contributor-facing
-`--profile microsd-uboot` package command remains available for qualification
-work, but it is not the public boot-mode name.
+context and currently requires candidate packaging. The equivalent
+`--profile microsd-uboot` selector packages the same context with
+`microsd-uboot` in the archive name.
 
 Changing the executable payload requires another phone qualification. A build,
 archive checksum or host-side `verify` does not replace that phone test.

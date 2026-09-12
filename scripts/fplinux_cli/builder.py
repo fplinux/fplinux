@@ -33,7 +33,6 @@ from .bundle_state import (
 )
 from .common import ROOT, sha256_bytes, sha256_file
 from .config import (
-    PROFILE_HOST_PLUGIN_BUNDLE_PATH,
     compose_kernel_config,
     container_runtime_recipe_digest,
     kernel_config_paths,
@@ -343,7 +342,7 @@ def integration_inputs(
     return result
 
 
-PROFILE_ROOT_DTSI = "arch/arm/boot/dts/unisoc/fplinux-external-root.dtsi"
+PROFILE_ROOT_DTSI = "arch/arm/boot/dts/unisoc/fplinux-root.dtsi"
 
 
 def generated_linux_files(
@@ -360,8 +359,7 @@ def generated_linux_files(
         ),
     }
     root = target_config["linux"]["root"]
-    if root["kind"] == "external":
-        files[PROFILE_ROOT_DTSI] = profile_layout.external_root_dtsi(root)
+    files[PROFILE_ROOT_DTSI] = profile_layout.root_bootargs_dtsi(root)
     return files
 
 
@@ -1504,32 +1502,37 @@ def build_profile_uboot(
         profile = selected_profile(target_config)
         if profile is None:
             fail("full U-Boot requires a selected profile")
-        profile_root = ROOT / "targets" / target / "profiles" / profile
+        target_root = ROOT / "targets" / target
         projections = [
             (require_file(ROOT / step["source"]), step["destination"]) for step in config["copies"]
         ]
         work.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=work, prefix=".uboot-inputs.") as name:
             generated = Path(name)
-            defconfig = generated / "ta1618_defconfig"
+            defconfig = generated / Path(config["defconfig"]).name
             layout_header = generated / "fplinux-boot-layout.h"
             layout_dtsi = generated / "fplinux-uboot-layout.dtsi"
+            target_header = generated / "fplinux-uboot-target.h"
             defconfig.write_bytes(
                 profile_layout.uboot_defconfig(
-                    require_file(profile_root / config["defconfig"]).read_bytes(),
+                    require_file(target_root / config["defconfig"]).read_bytes(),
                     target_config["layout"],
                 )
             )
             layout_header.write_bytes(profile_layout.boot_layout_header(target_config["layout"]))
             layout_dtsi.write_bytes(profile_layout.uboot_layout_dtsi(target_config["layout"]))
+            target_header.write_text(
+                f'#define FPLINUX_UBOOT_TARGET "{target}"\n', encoding="ascii"
+            )
             projections.append((layout_header, "include/fplinux-boot-layout.h"))
             projections.append((layout_dtsi, "arch/arm/dts/fplinux-uboot-layout.dtsi"))
+            projections.append((target_header, "include/fplinux-uboot-target.h"))
             uboot = uboot_tools.build_full(
                 archive,
                 config,
                 defconfig,
                 projections,
-                [require_file(profile_root / path) for path in config["patches"]],
+                [require_file(ROOT / path) for path in config["patches"]],
                 work,
                 jobs,
                 container_recipe,
@@ -1842,12 +1845,6 @@ def _publish_staged_bundle(
         copy_file(source, release / "host" / name, executable=True)
     copy_file(runner_source(), release / "runner/run.py", executable=True)
     copy_file(ssh_transport_source(), release / "runner/ssh_transport.py")
-    profile_plugin = target_config["runtime"].get("host_plugin")
-    if isinstance(profile_plugin, str):
-        copy_file(
-            ROOT / "targets" / target / profile_plugin,
-            release / PROFILE_HOST_PLUGIN_BUNDLE_PATH,
-        )
     copy_file(identity_source(), release / RUNTIME_IDENTITY_PATH)
     copy_file(
         adapter_source(target_config["platform"]),

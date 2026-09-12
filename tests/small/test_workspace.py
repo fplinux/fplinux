@@ -65,7 +65,6 @@ class WorkspaceSnapshotTests(unittest.TestCase):
             host_tool = write("tools/loader.c")
             host_input = write("tools/local-input.h")
             host_patch = write("tools/local.patch")
-            profile_plugin = write("targets/phone/profiles/lab/host_plugin.py")
             unrelated = write("unselected.txt")
 
             for relative in (
@@ -74,6 +73,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                 "targets/phone/loader/assets.lock.toml",
                 "targets/phone/kernel/config.fragment",
                 "platforms/demo/kernel/defconfig",
+                "profiles/default/profile.toml",
                 "targets/phone/bootstrap/main.c",
                 "targets/phone/kernel/append.cfg",
                 "platforms/demo/platform.toml",
@@ -98,7 +98,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                 "uboot": {"kind": "none"},
                 "fit": {"kind": "none"},
                 "image": {"kind": "none"},
-                "runtime": {"host_plugin": "profiles/lab/host_plugin.py"},
+                "runtime": {},
             }
             platform: dict[str, Any] = {
                 "bundle": {"packages": []},
@@ -163,7 +163,6 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                     host_tool,
                     host_input,
                     host_patch,
-                    profile_plugin,
                 ):
                     original = causal.read_bytes()
                     causal.write_bytes(original + b"changed\n")
@@ -189,6 +188,20 @@ class WorkspaceSnapshotTests(unittest.TestCase):
             second = workspace_module.workspace_snapshot([("source", source)])
 
             self.assertNotEqual(first.recipe, second.recipe)
+
+    def test_microsd_source_snapshot_loads_selected_and_default_configuration(self) -> None:
+        """The staged source supports the Linux consumer's comparison with RAM policy."""
+        sources = workspace_module.target_build_source_files("nokia-ta1618", "microsd-uboot")
+        snapshot = workspace_module.workspace_snapshot(sources)
+        with tempfile.TemporaryDirectory() as temporary:
+            with mock.patch.object(workspace_module, "ROOT", Path(temporary)):
+                staged = workspace_module.stage_workspace_snapshot(snapshot)
+            with mock.patch.object(config, "ROOT", staged):
+                card = config.load_target("nokia-ta1618", "microsd-uboot")
+                ram = config.load_target("nokia-ta1618")
+
+            self.assertEqual(card["linux"]["root"]["kind"], "external")
+            self.assertEqual(ram["linux"]["root"], {"kind": "initramfs"})
 
     def test_snapshot_rejects_symlinked_input(self) -> None:
         """A snapshot cannot turn a linked source into a regular staged file."""

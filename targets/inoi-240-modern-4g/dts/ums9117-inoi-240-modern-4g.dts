@@ -7,12 +7,9 @@
 #include "ums9117.dtsi"
 #include "ums9117-sc2720.dtsi"
 #include "fplinux-target-identity.dtsi"
+#include "inoi-240-modern-4g-microsd.dtsi"
 
 / {
-	chosen {
-		bootargs = "console=tty0 loglevel=8 ignore_loglevel init=/init panic=-1 rdinit=/init random.trust_bootloader=on";
-	};
-
 	memory@80000000 {
 		device_type = "memory";
 		reg = <0x80000000 0x03f00000>;

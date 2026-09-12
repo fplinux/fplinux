@@ -85,7 +85,6 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
             mock.patch.object(kernelcheck, "CACHE", self.cache),
             mock.patch.object(kernelcheck, "load_sources", return_value={}),
             mock.patch.object(kernelcheck, "discover_targets", return_value=(self.target,)),
-            mock.patch.object(kernelcheck, "discover_profiles", return_value=()),
             mock.patch.object(
                 kernelcheck,
                 "target_context",
@@ -128,8 +127,8 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
 
     def test_profile_applies_actions_without_comparing_the_base_defconfig(self) -> None:
         """A profile check uses its own effective .config, not the default canonical file."""
-        profile = "host"
-        output = self.cache / "analysis/sparse/test-target/profiles/host/work"
+        profile = "microsd-uboot"
+        output = self.cache / "analysis/sparse/test-target/profiles/microsd-uboot/work"
         config_script = self.source / "scripts/config"
         config_script.write_text("#!/bin/sh\n")
         target_config = {
@@ -166,7 +165,6 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
             mock.patch.object(kernelcheck, "CACHE", self.cache),
             mock.patch.object(kernelcheck, "load_sources", return_value={}),
             mock.patch.object(kernelcheck, "discover_targets", return_value=(self.target,)),
-            mock.patch.object(kernelcheck, "discover_profiles", return_value=(profile,)),
             mock.patch.object(
                 kernelcheck,
                 "target_context",
@@ -205,45 +203,21 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
 class KernelProfileSelectionTests(unittest.TestCase):
     """Keep default and explicitly named kernel contexts separate."""
 
-    def test_default_ignores_declared_profiles_and_named_is_narrow(self) -> None:
-        """Only an explicit name selects declared profile contexts."""
-        profiles = {"first": ("host",), "second": ("host", "diagnostic")}
-        with (
-            mock.patch.object(kernelcheck, "discover_targets", return_value=("first", "second")),
-            mock.patch.object(
-                kernelcheck,
-                "discover_profiles",
-                side_effect=AssertionError("default kernel check must not inspect profiles"),
-            ),
-        ):
+    def test_each_global_profile_selects_every_board(self) -> None:
+        """The default alias preserves identity and microSD never drops a board."""
+        with mock.patch.object(kernelcheck, "discover_targets", return_value=("first", "second")):
+            self.assertEqual(kernelcheck.target_profiles(), (("first", None), ("second", None)))
             self.assertEqual(
-                kernelcheck.target_profiles(),
-                (
-                    ("first", None),
-                    ("second", None),
-                ),
+                kernelcheck.target_profiles("default"), (("first", None), ("second", None))
             )
-
-        with (
-            mock.patch.object(kernelcheck, "discover_targets", return_value=("first", "second")),
-            mock.patch.object(
-                kernelcheck,
-                "discover_profiles",
-                side_effect=lambda target: profiles[target],
-            ),
-        ):
             self.assertEqual(
-                kernelcheck.target_profiles("host"),
-                (("first", "host"), ("second", "host")),
+                kernelcheck.target_profiles("microsd-uboot"),
+                (("first", "microsd-uboot"), ("second", "microsd-uboot")),
             )
 
     def test_unknown_profile_fails_before_analyzer_work(self) -> None:
         """An unknown profile cannot start an analyzer or create its cache slot."""
-        with (
-            mock.patch.object(kernelcheck, "discover_targets", return_value=("first",)),
-            mock.patch.object(kernelcheck, "discover_profiles", return_value=()),
-            self.assertRaisesRegex(SystemExit, "not declared by any target"),
-        ):
+        with self.assertRaisesRegex(SystemExit, "unknown profile"):
             kernelcheck.target_profiles("missing")
 
 

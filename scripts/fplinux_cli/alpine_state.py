@@ -116,35 +116,44 @@ def _declared_packages(config: Mapping[str, object], owner: str, layer: str) -> 
     return result
 
 
-def _profile_rootfs(config: Mapping[str, object]) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Read the optional, already selected target-profile rootfs delta."""
+def _target_rootfs(
+    config: Mapping[str, object],
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    """Read normalized target base packages and its optional profile delta."""
     table = config.get("rootfs")
-    if table is None:
-        return (), ()
-    if not isinstance(table, Mapping) or set(table) != {"packages", "exclude_packages"}:
-        _fail("target profile rootfs must contain exactly packages and exclude_packages")
+    package_fields = {
+        "base_packages",
+        "packages",
+        "exclude_packages",
+    }
+    if not isinstance(table, Mapping) or set(table) != package_fields:
+        _fail(
+            "normalized target rootfs must contain base_packages, packages, "
+            "exclude_packages"
+        )
 
     def read(field: str) -> tuple[str, ...]:
         raw = table.get(field)
         if not isinstance(raw, list):
-            _fail(f"target profile rootfs {field} must be an array")
+            _fail(f"normalized target rootfs {field} must be an array")
         result = tuple(
-            _package_id(package, f"target profile rootfs {field}[{index}]")
+            _package_id(package, f"normalized target rootfs {field}[{index}]")
             for index, package in enumerate(raw)
         )
         if len(set(result)) != len(result):
-            _fail(f"target profile rootfs {field} must not contain duplicates")
+            _fail(f"normalized target rootfs {field} must not contain duplicates")
         return result
 
+    base_packages = read("base_packages")
     packages = read("packages")
     exclude_packages = read("exclude_packages")
     overlap = set(packages) & set(exclude_packages)
     if overlap:
         _fail(
-            "target profile rootfs packages/exclude_packages conflict: "
+            "normalized target rootfs packages/exclude_packages conflict: "
             + ", ".join(sorted(overlap))
         )
-    return packages, exclude_packages
+    return base_packages, packages, exclude_packages
 
 
 def _canonical_packages(packages: Sequence[str], root: Path) -> tuple[str, ...]:
@@ -166,7 +175,7 @@ def selected_packages(
     target_config: Mapping[str, object],
     root: Path = ROOT,
 ) -> tuple[str, ...]:
-    """Resolve common/platform packages plus one selected target-profile delta."""
+    """Resolve common, platform and target packages plus one selected profile delta."""
     owners: dict[str, str] = {}
     for owner, packages in (
         ("common", COMMON_PACKAGES),
@@ -177,23 +186,31 @@ def selected_packages(
             if previous is not None:
                 _fail(f"package {package} is owned by both {previous} and {owner}")
             owners[package] = owner
-    packages, exclude_packages = _profile_rootfs(target_config)
-    unknown_excludes = set(exclude_packages) - set(owners)
-    if unknown_excludes:
+    base_packages, packages, exclude_packages = _target_rootfs(target_config)
+    duplicate_additions = set(base_packages) & set(owners)
+    if duplicate_additions:
         _fail(
-            "target profile rootfs excludes a package not owned by common/platform: "
-            + ", ".join(sorted(unknown_excludes))
+            "target rootfs base_packages duplicate common/platform ownership: "
+            + ", ".join(sorted(duplicate_additions))
         )
+    for package in base_packages:
+        owners[package] = "target"
     duplicate_additions = set(packages) & set(owners)
     if duplicate_additions:
         _fail(
-            "target profile rootfs packages duplicate common/platform ownership: "
+            "target profile rootfs packages duplicate base ownership: "
             + ", ".join(sorted(duplicate_additions))
+        )
+    for package in packages:
+        owners[package] = "profile"
+    unknown_excludes = set(exclude_packages) - set(owners)
+    if unknown_excludes:
+        _fail(
+            "target profile rootfs excludes a package not owned by the base rootfs: "
+            + ", ".join(sorted(unknown_excludes))
         )
     for package in exclude_packages:
         del owners[package]
-    for package in packages:
-        owners[package] = "profile"
     return _canonical_packages(tuple(owners), root)
 
 
