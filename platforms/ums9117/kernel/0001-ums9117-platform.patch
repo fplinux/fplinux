@@ -123,6 +123,37 @@ diff --git a/drivers/usb/musb/musb_core.c b/drivers/usb/musb/musb_core.c
 
  	/* session might be disabled in suspend */
  	if (musb->port_mode == MUSB_HOST &&
+diff --git a/drivers/usb/musb/musb_core.h b/drivers/usb/musb/musb_core.h
+--- a/drivers/usb/musb/musb_core.h
++++ b/drivers/usb/musb/musb_core.h
+@@ -126,6 +126,7 @@
+  * @clearw:	could be clear-on-readw or W1C
+  * @read_fifo:	reads the fifo
+  * @write_fifo:	writes to fifo
++ * @restart_rx:	restarts RX without completing a request inline; lock held
+  * @get_toggle:	platform specific get toggle function
+  * @set_toggle:	platform specific set toggle function
+  * @dma_init:	platform specific dma init function
+@@ -175,5 +176,6 @@ struct musb_platform_ops {
+ 	void	(*read_fifo)(struct musb_hw_ep *hw_ep, u16 len, u8 *buf);
+ 	void	(*write_fifo)(struct musb_hw_ep *hw_ep, u16 len, const u8 *buf);
++	int	(*restart_rx)(struct musb *musb, u8 epnum);
+ 	u16	(*get_toggle)(struct musb_qh *qh, int is_out);
+ 	u16	(*set_toggle)(struct musb_qh *qh, int is_out, struct urb *urb);
+ 	struct dma_controller *
+diff --git a/drivers/usb/musb/musb_gadget.c b/drivers/usb/musb/musb_gadget.c
+--- a/drivers/usb/musb/musb_gadget.c
++++ b/drivers/usb/musb/musb_gadget.c
+@@ -1181,6 +1181,9 @@ static int musb_ep_restart_resume_work(struct musb *musb, void *data)
+ {
+ 	struct musb_request *req = data;
+
++	if (!req->tx && musb->ops->restart_rx)
++		return musb->ops->restart_rx(musb, req->epnum);
++
+ 	musb_ep_restart(musb, req);
+
+ 	return 0;
 diff --git a/drivers/input/keyboard/Kconfig b/drivers/input/keyboard/Kconfig
 --- a/drivers/input/keyboard/Kconfig
 +++ b/drivers/input/keyboard/Kconfig
