@@ -1,8 +1,8 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
-pkgname=fplinux-micropythonos-nokia-ta1618
+pkgname=fplinux-micropythonos-storage
 pkgver=1
 pkgrel=0
-pkgdesc="Nokia 3210 4G (TA-1618) configuration for FPLinux MicroPythonOS"
+pkgdesc="Optional microSD storage configuration for FPLinux MicroPythonOS"
 url="https://github.com/fplinux/fplinux"
 arch="noarch"
 license="MIT"

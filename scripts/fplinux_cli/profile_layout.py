@@ -95,7 +95,7 @@ def uboot_defconfig(base: bytes, layout: Mapping[str, int]) -> bytes:
 def root_bootargs_dtsi(root: Mapping[str, Any]) -> bytes:
     """Select the root filesystem while retaining the shared boot policy."""
     if root["kind"] == "initramfs":
-        root_arguments = "init=/init rdinit=/init"
+        root_arguments = "init=/init rdinit=/init initramfs_options=size=40M"
     elif root["kind"] == "external":
         root_arguments = (
             f"root=PARTUUID={root['partuuid']} "
@@ -105,9 +105,11 @@ def root_bootargs_dtsi(root: Mapping[str, Any]) -> bytes:
     else:
         message = "unsupported Linux root filesystem kind"
         raise ValueError(message)
+    # A pageblock-sized watermark boost can strand usable RAM on these phones.
     bootargs = (
         f"console=tty0 loglevel=8 ignore_loglevel {root_arguments} "
-        "panic=-1 vt.global_cursor_default=1 random.trust_bootloader=on"
+        "panic=-1 vt.global_cursor_default=1 random.trust_bootloader=on "
+        "sysctl.vm.watermark_boost_factor=0"
     )
     return f'bootargs = "{bootargs}";\n'.encode("ascii")
 

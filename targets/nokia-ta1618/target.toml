@@ -16,7 +16,7 @@ raw_page_bytes = 2176
 packages = []
 
 [bundle]
-packages = ["fplinux-micropythonos-nokia-ta1618"]
+packages = []
 
 [linux]
 config_fragment = "kernel/config.fragment"

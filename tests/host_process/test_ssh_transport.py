@@ -5,9 +5,13 @@ from __future__ import annotations
 
 import base64
 import os
+import shlex
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 from fplinux_cli import ssh_transport
@@ -113,6 +117,73 @@ printf '%s\n' '{state["session_id"]}'
             }
             <= arguments
         )
+
+
+class SshTransportUploadTests(unittest.TestCase):
+    """Run upload shell commands locally with controlled filesystem statistics."""
+
+    def test_upload_checks_capacity_without_a_df_mount_entry(self) -> None:
+        """Publish with sufficient space; preserve the destination otherwise."""
+        cases = (
+            ("ram-root", 581, True, True),
+            ("reserve-exact", 17, True, True),
+            ("reserve-short", 16, True, False),
+            ("missing-directory", 581, False, False),
+        )
+        for name, available_blocks, directory_exists, succeeds in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                runtime = root / "runtime"
+                runtime.mkdir(mode=0o700)
+                session = create_ready_session(runtime)
+                source = root / "source"
+                payload = b"x" * 4096
+                source.write_bytes(payload)
+                directory = root / "destination"
+                destination = directory / "config"
+                if directory_exists:
+                    directory.mkdir()
+                    destination.write_bytes(b"previous contents")
+
+                # SSH executes a local shell; only df/stat reports are synthetic.
+                # Hashing, temporary-file publication and cleanup use real files.
+                shell_tools = (
+                    "df() { "
+                    "printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n'; "
+                    "printf 'df: cannot find mount point\\n' >&2; return 1; }; "
+                    f"stat() {{ printf '%s\\n' '{available_blocks} 4096'; }}; "
+                )
+
+                def local_ssh(
+                    _session: dict[str, Any], command: str, shell_prefix: str = shell_tools
+                ) -> list[str]:
+                    return ["/bin/sh", "-c", shell_prefix + command]
+
+                def local_sftp(
+                    _session: dict[str, Any], command: str
+                ) -> subprocess.CompletedProcess[str]:
+                    operation, local_name, remote_name = shlex.split(command)
+                    self.assertEqual(operation, "put")
+                    shutil.copyfile(local_name, remote_name)
+                    return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+                with (
+                    mock.patch.object(ssh_transport, "_runtime_root", return_value=runtime),
+                    mock.patch.object(ssh_transport, "_ssh_argv", side_effect=local_ssh),
+                    mock.patch.object(ssh_transport, "_sftp", side_effect=local_sftp),
+                    mock.patch("builtins.print"),
+                ):
+                    if succeeds:
+                        ssh_transport.upload(session, str(source), str(destination))
+                        self.assertEqual(destination.read_bytes(), payload)
+                    else:
+                        with self.assertRaisesRegex(SystemExit, "not have enough free space"):
+                            ssh_transport.upload(session, str(source), str(destination))
+                        if directory_exists:
+                            self.assertEqual(destination.read_bytes(), b"previous contents")
+                        else:
+                            self.assertFalse(directory.exists())
+                self.assertEqual(list(directory.glob(".fplinux-upload.*")), [])
 
 
 if __name__ == "__main__":

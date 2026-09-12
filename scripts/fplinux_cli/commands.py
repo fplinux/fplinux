@@ -660,6 +660,8 @@ def _build_container_command(  # noqa: PLR0913
         "never",
         "--read-only",
         "--privileged",
+        "--memory",
+        "2g",
         "--network",
         "none" if offline else "host",
         "--tmpfs",

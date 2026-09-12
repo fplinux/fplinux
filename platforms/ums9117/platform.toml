@@ -20,6 +20,7 @@ packages = [
 packages = [
   "fplinux-charge",
   "fplinux-micropythonos",
+  "fplinux-micropythonos-storage",
   "fplinux-showcase",
   "fplinux-tyrquake",
 ]

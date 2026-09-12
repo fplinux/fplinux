@@ -778,8 +778,8 @@ class CommandLifecycleTests(unittest.TestCase):
         self.assertEqual(selected_target, "phone")
         ssh.run_remote.assert_called_once_with({}, "id")
 
-    def test_build_argv_has_only_exact_nonoverlapping_mount_roots(self) -> None:
-        """Do not expose the cache root or an ancestor alias to the build container."""
+    def test_build_argv_has_explicit_memory_budget_and_narrow_mounts(self) -> None:
+        """Request a 2 GiB build budget without exposing broad cache mounts."""
         roots = {
             "workspace": self.root / "workspace",
             "downloads": self.root / "cache/downloads",
@@ -821,6 +821,8 @@ class CommandLifecycleTests(unittest.TestCase):
         )
         self.assertIn("--read-only", command)
         self.assertIn("--privileged", command)
+        self.assertIn("--memory", command)
+        self.assertEqual(command[command.index("--memory") + 1], "2g")
         self.assertFalse(any(mount.split(":", 2)[1] == "/cache" for mount in mounts))
         self.assertIn(
             "FPLINUX_CONTAINER_IMAGE_RECIPE="

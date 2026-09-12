@@ -18,7 +18,7 @@ bundle_files = [
   "apks/fplinux-showcase.apk",
   "apks/fplinux-tyrquake.apk",
   "apks/fplinux-micropythonos.apk",
-  "apks/fplinux-micropythonos-nokia-ta1618.apk",
+  "apks/fplinux-micropythonos-storage.apk",
   "assets.lock.toml",
   "THIRD_PARTY_NOTICES.md",
 ]

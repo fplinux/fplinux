@@ -1317,8 +1317,9 @@ def upload(session: dict[str, Any], local_name: str, remote_name: str) -> None:
     free_kib = expected_size // 1024 + 64
     check = run_remote(
         session,
-        f"[ -d '{directory}' ] && free=$(df -Pk '{directory}' | "
-        f"awk 'NR==2{{print $4}}') && [ \"$free\" -ge {free_kib} ]",
+        f"[ -d '{directory}' ] && free=$(stat -f -c '%a %S' '{directory}') && "
+        "set -- $free && "
+        f'[ "$(($1 * $2 / 1024))" -ge {free_kib} ]',
         capture_output=True,
     )
     if check.returncode:
