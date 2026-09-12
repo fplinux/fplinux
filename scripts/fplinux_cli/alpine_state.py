@@ -32,6 +32,7 @@ FB_SESSION_SOURCES = (
 SHARED_APORT_SOURCES = {
     "fplinux-console": MULTITAP_SOURCES,
     "fplinux-micropythonos": (*MULTITAP_SOURCES, *FB_SESSION_SOURCES),
+    "fplinux-present": (*FB_SESSION_SOURCES, "platforms/ums9117/common/ums9117-present.h"),
     "fplinux-rotate": FB_SESSION_SOURCES,
     "fplinux-showcase": FB_SESSION_SOURCES,
     "fplinux-tyrquake": FB_SESSION_SOURCES,

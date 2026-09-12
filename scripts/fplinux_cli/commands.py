@@ -98,6 +98,7 @@ PACKAGE_DOCUMENTS = {
     "60-fplinux.rules": ROOT / "common/60-fplinux.rules",
     "LICENSE": ROOT / "LICENSE",
     "docs/apps/JPEG.md": ROOT / "docs/apps/JPEG.md",
+    "docs/apps/PRESENT.md": ROOT / "docs/apps/PRESENT.md",
     "docs/apps/ROTATE.md": ROOT / "docs/apps/ROTATE.md",
     "docs/apps/MICROPYTHONOS.md": ROOT / "docs/apps/MICROPYTHONOS.md",
     "docs/apps/SHOWCASE.md": ROOT / "docs/apps/SHOWCASE.md",

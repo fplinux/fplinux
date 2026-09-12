@@ -4,6 +4,7 @@
 
 #include <linux/backlight.h>
 #include <linux/completion.h>
+#include <linux/dmaengine.h>
 #include <linux/fb.h>
 #include <linux/io.h>
 #include <linux/mutex.h>
@@ -41,6 +42,9 @@ struct ums9117_fb_stats {
 	u64 dcs_timeouts;
 	u64 wled_errors;
 	u64 fail_dark_failures;
+	u64 present_nv16;
+	u64 present_rgb565;
+	u64 present_guard_failures;
 	u32 last_error_irq_status;
 	u32 last_error_irq_raw;
 };
@@ -51,14 +55,19 @@ struct ums9117_fb {
 	const struct ums9117_fb_profile *profile;
 	void __iomem *screen;
 	void __iomem *transfer;
+	void __iomem *present;
 	void *snapshot;
+	struct dma_chan *copy_channel;
+	dma_addr_t copy_source;
+	dma_addr_t copy_destination;
+	struct completion copy_done;
+	int copy_result;
+	bool copy_unsafe;
 	void __iomem *lcdc;
 	void __iomem *lcm;
 	void __iomem *ap_ahb_gate_set;
 	void __iomem *ap_ahb_reset_set;
 	void __iomem *ap_ahb_reset_clear;
-	void __iomem *pinmux;
-	void __iomem *pinconf;
 	/* Transport-private MMIO is initialized by ums9117-fb-spi/lcm.c. */
 	void __iomem *spi;
 	void __iomem *spi_clock_selector;
@@ -68,6 +77,7 @@ struct ums9117_fb {
 	void __iomem *lcm_data;
 	phys_addr_t screen_phys;
 	phys_addr_t transfer_phys;
+	phys_addr_t present_phys;
 	phys_addr_t stream_phys;
 	struct regmap *aon_apb;
 	struct ums9117_adi_transaction adi_transaction;
@@ -82,8 +92,6 @@ struct ums9117_fb {
 	spinlock_t lock;
 	struct ums9117_fb_stats stats;
 	u32 pseudo_palette[16];
-	u32 pinmux_count;
-	u32 pinconf_count;
 	u32 wled_levels[UMS9117_FB_WLED_CHANNEL_COUNT];
 	u32 backlight_max_brightness;
 	u32 backlight_effective;
@@ -93,6 +101,16 @@ struct ums9117_fb {
 	u64 submitted_seq;
 	u64 generation;
 	u64 done_generation;
+	u64 present_started_ns;
+	u64 present_transfer_ns;
+	u32 present_format;
+	u32 present_saved_img_ctrl;
+	u32 present_saved_y_base;
+	u32 present_saved_uv_base;
+	u32 present_saved_y2r_ctrl;
+	u32 present_saved_y2r_contrast;
+	u32 present_saved_y2r_saturation;
+	u32 present_saved_y2r_brightness;
 	unsigned int shown;
 	int irq;
 	int last_error_errno;
@@ -100,6 +118,10 @@ struct ums9117_fb {
 	enum ums9117_fb_panel_state state;
 	bool stopping;
 	bool in_flight;
+	bool present_busy;
+	bool present_pending;
+	bool present_active;
+	bool present_guard_ok;
 	bool transport_faulted;
 	bool wled_known;
 	bool wled_on;

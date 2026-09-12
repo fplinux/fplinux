@@ -458,7 +458,13 @@ def userspace_c_include_flags(source: str) -> list[str]:
         and path.parts[:2] == APORT_ROOT
         and path.parts[2] in alpine_state.SHARED_APORT_SOURCES
     ):
-        return ["-I", "alpine/shared"]
+        directories = sorted(
+            {
+                str(PurePosixPath(shared).parent)
+                for shared in alpine_state.SHARED_APORT_SOURCES[path.parts[2]]
+            }
+        )
+        return [flag for directory in directories for flag in ("-I", directory)]
     return []
 
 

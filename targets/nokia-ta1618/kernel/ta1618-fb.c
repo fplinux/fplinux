@@ -52,6 +52,8 @@ static const struct ums9117_fb_profile ta1618_fb_profile = {
 	.sleep_in_ms = 5,
 	.sleep_out_ms = 120,
 	.wled_backlight_name = "ta1618-backlight",
+	.dma_memcpy = IS_ENABLED(CONFIG_FB_TA1618_DMA_MEMCPY),
+	.native_nv16 = true,
 	.lcdc_ctrl_set = BIT(2),
 	.lcdc_ctrl_clear = BIT(1) | (7U << 5),
 };

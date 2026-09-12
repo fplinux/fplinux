@@ -12,6 +12,7 @@ packages = [
   "fplinux-usb-gadget",
   "fplinux-rotate",
   "fplinux-jpeg",
+  "fplinux-present",
 ]
 
 [bundle]
@@ -233,6 +234,10 @@ destination = "drivers/leds/Makefile"
 [[linux.copies]]
 source = "platforms/ums9117/kernel/ums9117-fb.h"
 destination = "drivers/video/fbdev/ums9117-fb.h"
+
+[[linux.copies]]
+source = "platforms/ums9117/common/ums9117-present.h"
+destination = "drivers/video/fbdev/ums9117-present.h"
 
 [[linux.copies]]
 source = "platforms/ums9117/kernel/ums9117-fb-internal.h"
