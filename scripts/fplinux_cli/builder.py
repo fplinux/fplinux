@@ -512,6 +512,10 @@ def bootstrap_recipe_digest(
         "platform_bootstrap": platform_bootstrap,
         "target_source": bootstrap_tree_entries(target_source(target, target_bootstrap["source"])),
         "shared_copies": shared_copies,
+        "patches": [
+            {"path": relative, "sha256": sha256_file(require_file(root_source(relative)))}
+            for relative in platform_bootstrap["patches"]
+        ],
         "vendor_source": {
             "commit": vendor_commit,
             "archive_sha256": require_sha256(
@@ -1196,6 +1200,10 @@ def build_bootstrap(  # noqa: PLR0913 -- source selection and payload inputs sta
         fail("bootstrap vendor commit must be a non-empty string")
     prefix = platform_bootstrap["archive_prefix"].replace("{commit}", commit)
     extract_vendor(archive, prefix, platform_bootstrap["files"], vendor)
+    apply_patches(
+        vendor,
+        [require_file(root_source(relative)) for relative in platform_bootstrap["patches"]],
+    )
 
     projected_output.mkdir(parents=True, exist_ok=True)
     if target_bootstrap["kind"] == "uboot-stage0":

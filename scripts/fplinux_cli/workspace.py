@@ -178,6 +178,8 @@ def target_build_source_files(
             add_source_path(files, ROOT / step["source"])
     for step in platform["bootstrap"]["shared_copies"]:
         add_source_path(files, ROOT / step["source"])
+    for relative in platform["bootstrap"]["patches"]:
+        add_source_path(files, ROOT / relative)
     for recipe in platform["host"]["tools"]:
         if recipe["type"] == "cc-libusb":
             add_source_path(files, ROOT / recipe["source"])

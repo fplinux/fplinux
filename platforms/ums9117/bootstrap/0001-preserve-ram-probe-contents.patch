@@ -1,0 +1,27 @@
+--- a/ums9117/entry.c
++++ b/ums9117/entry.c
+@@ -2,6 +2,7 @@
+ #include "cmd_def.h"
+ #include "usbio.h"
+ #include "syscode.h"
++#include "ram-probe.h"
+
+ #include <stdio.h>
+ #include <string.h>
+@@ -66,10 +67,12 @@
+
+ /* dcache must be disabled for this function */
+ static uint32_t get_ram_size(uint32_t addr) {
+-	uint32_t v1 = 0x12345678, i = 3;
+-	do MEM4(addr + (i << 24)) = i + v1; while (--i);
+-	do i++; while (i < 4 && MEM4(addr + (i << 24)) == i + v1);
+-	return i << 24; // 16M, 32M, 48M, 64M
++	volatile uint32_t *const probe_words[3] = {
++		(volatile uint32_t*)(uintptr_t)(addr + 0x01000000),
++		(volatile uint32_t*)(uintptr_t)(addr + 0x02000000),
++		(volatile uint32_t*)(uintptr_t)(addr + 0x03000000)
++	};
++	return ums9117_probe_ram_size(probe_words);
+ }
+
+ #define ERR_EXIT(...) do { \
