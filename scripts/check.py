@@ -25,6 +25,8 @@ from fplinux_cli.source_formats import classify_source_formats
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from fplinux_cli.source_formats import SourceFormats
+
 ROOT = Path(__file__).resolve().parents[1]
 EXCLUDED_PARTS = {".cache", ".git", "__pycache__"}
 BINARY_SUFFIXES = {".bin", ".jpg", ".png", ".pyc", ".zip"}
@@ -531,6 +533,43 @@ def check_userspace_c(sources: list[tuple[str, bool]]) -> None:
         run_userspace_analysis(Path(temporary), sources)
 
 
+def check_prettier_sources(formats: SourceFormats, selected: tuple[str, ...]) -> None:
+    """Check the selected document and metadata formats with their required parsers."""
+    inferred = [
+        *(formats.markdown if "docs" in selected else ()),
+        *(formats.json if "metadata" in selected else ()),
+        *(formats.javascript if "metadata" in selected else ()),
+    ]
+    if inferred:
+        run(["prettier", "--check", "--ignore-unknown", *inferred])
+    if "metadata" in selected and formats.explicit_json:
+        run(["prettier", "--check", "--parser", "json", *formats.explicit_json])
+
+
+def check_shell_sources(formats: SourceFormats) -> None:
+    """Check declared shell dialects, including configurations sourced by consumers."""
+    posix = (*formats.posix_shell, *formats.posix_shell_fragments)
+    if posix:
+        run(["shfmt", "-d", "-ln", "posix", *posix])
+    if formats.bash:
+        run(["shfmt", "-d", "-ln", "bash", *formats.bash])
+    scripts = (*formats.posix_shell, *formats.bash)
+    if scripts:
+        run(["shellcheck", "--enable=all", "--severity=warning", *scripts])
+    if formats.posix_shell_fragments:
+        # These assignments are consumed by the sourcing program, not this file.
+        run(
+            [
+                "shellcheck",
+                "--enable=all",
+                "--severity=warning",
+                "--shell=sh",
+                "--exclude=SC2034",
+                *formats.posix_shell_fragments,
+            ]
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("scopes", nargs="*", choices=SOURCE_SCOPES)
@@ -543,10 +582,7 @@ def main() -> None:
         formats = classify_source_formats(files, root=ROOT)
         python_files = list(formats.python)
         markdown_files = list(formats.markdown)
-        posix_shell_files = list(formats.posix_shell)
-        bash_files = list(formats.bash)
         toml_files = list(formats.toml)
-        json_files = list(formats.json)
 
     if "source" in selected:
         with report_stage(reporter, "source-text"):
@@ -560,12 +596,8 @@ def main() -> None:
             run(["taplo", "check", *toml_files])
             run(["taplo", "fmt", "--check", *toml_files])
     if "metadata" in selected or "docs" in selected:
-        prettier_files = [
-            *(markdown_files if "docs" in selected else []),
-            *(json_files if "metadata" in selected else []),
-        ]
         with report_stage(reporter, "prettier"):
-            run(["prettier", "--check", "--ignore-unknown", *prettier_files])
+            check_prettier_sources(formats, selected)
     if "docs" in selected:
         markdown_paths = [path for path in files if path.suffix == ".md"]
         text_files = [
@@ -620,17 +652,7 @@ def main() -> None:
                     )
     if "shell" in selected:
         with report_stage(reporter, "shell"):
-            run(["shfmt", "-d", "-ln", "posix", *posix_shell_files])
-            run(["shfmt", "-d", "-ln", "bash", *bash_files])
-            run(
-                [
-                    "shellcheck",
-                    "--enable=all",
-                    "--severity=warning",
-                    *posix_shell_files,
-                    *bash_files,
-                ]
-            )
+            check_shell_sources(formats)
     if "container" in selected:
         with report_stage(reporter, "container-lint"):
             # The build recipe intentionally uses POSIX sh without pipefail (DL4006);

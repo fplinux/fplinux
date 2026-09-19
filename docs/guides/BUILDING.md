@@ -53,9 +53,14 @@ Formatting uses the same pinned tools and classification as the quality gate:
 
 - C and headers: `clang-format`;
 - Python: `ruff format`;
-- Markdown, JSON and JSONC: Prettier;
+- Markdown, JSON, JSONC, `commitlint.config.mjs` and the uppercase keypad app
+  JSON manifest: Prettier;
 - TOML: Taplo;
-- POSIX and Bash scripts recognized by their shebang: `shfmt`.
+- POSIX and Bash scripts recognized by their shebang, plus the POSIX sourced
+  configurations `alpine/abuild.conf` and
+  `alpine/aports/fplinux-micropythonos-storage/micropythonos.conf`: `shfmt`.
+
+The npm-owned `package-lock.json` is excluded from formatting.
 
 Files without a project formatter, including Devicetree sources and bindings,
 Kconfig, Makefiles, patches, APKBUILDs, Containerfiles and plain text, are
