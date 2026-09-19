@@ -24,7 +24,6 @@ def recipe(profile: str | None = None) -> CheckReceiptRecipe:
         closure_digest="a" * 64,
         orchestration_recipe="b" * 64,
         image_generation="c" * 64,
-        commands=(("python3", "/workspace/scripts/check.py", "python"),),
         profile=profile,
     )
 

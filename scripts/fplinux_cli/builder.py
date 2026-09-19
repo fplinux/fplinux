@@ -129,8 +129,8 @@ def require_sha256(value: object, name: str) -> str:
     return value
 
 
-def container_image_environment() -> tuple[str, str, str]:
-    """Validate the static image recipe, exact generation and derived runtime recipe."""
+def container_image_environment() -> tuple[str, str]:
+    """Validate the static image recipe and exact generation supplied by the host."""
     image_recipe = require_sha256(
         os.environ.get("FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE", ""),
         "container image recipe",
@@ -139,13 +139,7 @@ def container_image_environment() -> tuple[str, str, str]:
         os.environ.get("FPLINUX_CONTAINER_IMAGE_GENERATION", ""),
         "container image generation",
     )
-    runtime_recipe = require_sha256(
-        os.environ.get("FPLINUX_CONTAINER_IMAGE_RECIPE", ""),
-        "container runtime recipe",
-    )
-    if runtime_recipe != container_runtime_recipe_digest(image_recipe, generation):
-        fail("container runtime recipe does not match its image recipe and generation")
-    return image_recipe, generation, runtime_recipe
+    return image_recipe, generation
 
 
 def root_source(relative: str) -> Path:
@@ -1857,9 +1851,7 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
         require_file(release / relative)
 
     workspace_digest = os.environ.get("FPLINUX_WORKSPACE_DIGEST", "")
-    container_image_recipe, container_image_generation, _runtime_recipe = (
-        container_image_environment()
-    )
+    container_image_recipe, container_image_generation = container_image_environment()
     require_sha256(workspace_digest, "workspace digest")
     require_sha256(linux_recipe, "Linux recipe")
     require_sha256(device_identity, "device identity")
@@ -1978,7 +1970,10 @@ def main() -> None:
     if args.jobs < 1:
         fail("jobs must be positive")
 
-    container_image_environment()
+    image_recipe, image_generation = container_image_environment()
+    os.environ["FPLINUX_CONTAINER_IMAGE_RECIPE"] = container_runtime_recipe_digest(
+        image_recipe, image_generation
+    )
 
     reporter = RunReporter.from_environment(f"build {args.target}", "build")
     with report_stage(reporter, "configuration"):

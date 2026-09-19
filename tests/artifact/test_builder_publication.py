@@ -20,7 +20,6 @@ from fplinux_cli.bundle_state import (
     create_bundle_staging,
     resolve_current_bundle,
 )
-from fplinux_cli.config import container_runtime_recipe_digest
 
 
 class RamSessionImageTests(unittest.TestCase):
@@ -284,7 +283,6 @@ class BuilderPublicationTests(unittest.TestCase):
         }
         self.environment = {
             "FPLINUX_WORKSPACE_DIGEST": "a" * 64,
-            "FPLINUX_CONTAINER_IMAGE_RECIPE": container_runtime_recipe_digest("b" * 64, "c" * 64),
             "FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE": "b" * 64,
             "FPLINUX_CONTAINER_IMAGE_GENERATION": "c" * 64,
         }

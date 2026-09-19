@@ -25,7 +25,6 @@ from fplinux_cli.bundle_state import (
     published_file_records,
 )
 from fplinux_cli.common import canonical_json_bytes
-from fplinux_cli.config import container_runtime_recipe_digest
 from fplinux_cli.image_state import ImageState, publish_image_state
 from fplinux_cli.workspace import WorkspaceSnapshot
 
@@ -824,11 +823,6 @@ class CommandLifecycleTests(unittest.TestCase):
         self.assertIn("--memory", command)
         self.assertEqual(command[command.index("--memory") + 1], "2g")
         self.assertFalse(any(mount.split(":", 2)[1] == "/cache" for mount in mounts))
-        self.assertIn(
-            "FPLINUX_CONTAINER_IMAGE_RECIPE="
-            + container_runtime_recipe_digest("e" * 64, "a" * 64),
-            command,
-        )
         self.assertIn("FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE=" + "e" * 64, command)
         self.assertIn("FPLINUX_CONTAINER_IMAGE_GENERATION=" + "a" * 64, command)
         self.assertEqual(

@@ -25,7 +25,6 @@ class CheckReceiptRecipe:
     closure_digest: str
     orchestration_recipe: str
     image_generation: str
-    commands: tuple[tuple[str, ...], ...]
     profile: str | None = None
 
     def payload(self) -> dict[str, object]:
@@ -36,7 +35,6 @@ class CheckReceiptRecipe:
             "closure_digest": self.closure_digest,
             "orchestration_recipe": self.orchestration_recipe,
             "image_generation": self.image_generation,
-            "commands": [list(command) for command in self.commands],
             "profile": self.profile,
         }
 
