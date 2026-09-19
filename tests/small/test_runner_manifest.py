@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from unittest import mock
 
+from tests.bundle_support import file_record
+
 if TYPE_CHECKING:
     from types import ModuleType
 
@@ -329,13 +331,6 @@ class NoTransportRunnerTests(unittest.TestCase):
         )
         runtime_path = self.bundle / "runtime-manifest.json"
 
-        def record(path: Path) -> dict[str, int | str]:
-            return {
-                "mode": path.stat().st_mode & 0o777,
-                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                "size": path.stat().st_size,
-            }
-
         payload = {
             "rootfs_receipt": {"recipe": "a" * 64, "sha256": "b" * 64},
             "boot_artifacts": {"required": []},
@@ -344,8 +339,8 @@ class NoTransportRunnerTests(unittest.TestCase):
             "apk_signing_key": "d" * 64,
             "device_identity": "e" * 64,
             "files": {
-                "image/ramboot.bin": record(self.bundle / "image/ramboot.bin"),
-                "runtime-manifest.json": record(runtime_path),
+                "image/ramboot.bin": file_record(self.bundle / "image/ramboot.bin"),
+                "runtime-manifest.json": file_record(runtime_path),
             },
             "kbuild_receipt": {"recipe": "f" * 64, "sha256": "0" * 64},
             "linux_recipe": "1" * 64,

@@ -19,64 +19,7 @@ from fplinux_cli.device_tree import (
     verify_target_identity,
 )
 
-
-def _aligned(value: bytes) -> bytes:
-    """Pad one structure-block field to its required four-byte boundary."""
-    return value + b"\0" * (-len(value) % 4)
-
-
-def _binary_tree(
-    properties: list[tuple[str, bytes]],
-    children: list[tuple[str, list[tuple[str, bytes]]]] | None = None,
-) -> bytes:
-    """Construct a minimal binary FDT fixture with root properties and children."""
-    child_nodes = children or []
-    property_names = list(
-        dict.fromkeys(
-            name
-            for name, _value in [
-                *properties,
-                *(item for _child, values in child_nodes for item in values),
-            ]
-        )
-    )
-    strings = b""
-    name_offsets: dict[str, int] = {}
-    for name in property_names:
-        name_offsets[name] = len(strings)
-        strings += name.encode("ascii") + b"\0"
-
-    def encoded_property(name: str, value: bytes) -> bytes:
-        return struct.pack(">III", 3, len(value), name_offsets[name]) + _aligned(value)
-
-    structure = struct.pack(">I", 1) + _aligned(b"\0")
-    for name, value in properties:
-        structure += encoded_property(name, value)
-    for child, values in child_nodes:
-        structure += struct.pack(">I", 1) + _aligned(child.encode("ascii") + b"\0")
-        for name, value in values:
-            structure += encoded_property(name, value)
-        structure += struct.pack(">I", 2)
-    structure += struct.pack(">II", 2, 9)
-
-    reserved = b"\0" * 16
-    structure_offset = 40 + len(reserved)
-    strings_offset = structure_offset + len(structure)
-    total_size = strings_offset + len(strings)
-    header = struct.pack(
-        ">10I",
-        0xD00DFEED,
-        total_size,
-        structure_offset,
-        strings_offset,
-        40,
-        17,
-        16,
-        0,
-        len(strings),
-        len(structure),
-    )
-    return header + reserved + structure + strings
+from tests.fdt import binary_tree
 
 
 def _binary_profile_layout_tree(
@@ -88,33 +31,6 @@ def _binary_profile_layout_tree(
     display_range: tuple[int, int] | None = None,
 ) -> bytes:
     """Construct one binary FDT fixture with the named volatile-memory ranges."""
-    names = (
-        "device_type",
-        "reg",
-        "#address-cells",
-        "#size-cells",
-        "ranges",
-        "no-map",
-        "reg-names",
-    )
-    strings = b""
-    offsets: dict[str, int] = {}
-    for name in names:
-        offsets[name] = len(strings)
-        strings += name.encode("ascii") + b"\0"
-
-    def property_node(name: str, value: bytes) -> bytes:
-        return struct.pack(">III", 3, len(value), offsets[name]) + _aligned(value)
-
-    def node(name: str, properties: list[tuple[str, bytes]], children: list[bytes]) -> bytes:
-        return (
-            struct.pack(">I", 1)
-            + _aligned(name.encode("ascii") + b"\0")
-            + b"".join(property_node(key, value) for key, value in properties)
-            + b"".join(children)
-            + struct.pack(">I", 2)
-        )
-
     ram_base = memory_base if memory_base is not None else layout["ram_base"]
     framebuffer = layout["framebuffer"]
     resolved_memory_size = (
@@ -128,61 +44,56 @@ def _binary_profile_layout_tree(
         framebuffer,
         layout["framebuffer_size"],
     )
-    memory = node(
-        f"memory@{ram_base:x}",
-        [
-            ("device_type", b"memory\0"),
-            ("reg", struct.pack(">II", ram_base, resolved_memory_size)),
-        ],
+    return binary_tree(
         [],
-    )
-    reserved_framebuffer = node(
-        f"framebuffer@{framebuffer:x}",
-        [
-            ("reg", struct.pack(">II", reserved_base, reserved_size)),
-            ("no-map", b""),
-        ],
-        [],
-    )
-    reserved_memory = node(
-        "reserved-memory",
-        [
-            ("#address-cells", struct.pack(">I", 1)),
-            ("#size-cells", struct.pack(">I", 1)),
-            ("ranges", b""),
-        ],
-        [reserved_framebuffer],
-    )
-    display = node(
-        f"display@{framebuffer:x}",
         [
             (
-                "reg",
-                struct.pack(">IIII", display_base, display_size, 0x20800000, 0x1000),
+                f"memory@{ram_base:x}",
+                [
+                    ("device_type", b"memory\0"),
+                    ("reg", struct.pack(">II", ram_base, resolved_memory_size)),
+                ],
+                [],
             ),
-            ("reg-names", b"framebuffer\0lcdc\0"),
+            (
+                "reserved-memory",
+                [
+                    ("#address-cells", struct.pack(">I", 1)),
+                    ("#size-cells", struct.pack(">I", 1)),
+                    ("ranges", b""),
+                ],
+                [
+                    (
+                        f"framebuffer@{framebuffer:x}",
+                        [
+                            ("reg", struct.pack(">II", reserved_base, reserved_size)),
+                            ("no-map", b""),
+                        ],
+                        [],
+                    )
+                ],
+            ),
+            (
+                "soc",
+                [],
+                [
+                    (
+                        f"display@{framebuffer:x}",
+                        [
+                            (
+                                "reg",
+                                struct.pack(
+                                    ">IIII", display_base, display_size, 0x20800000, 0x1000
+                                ),
+                            ),
+                            ("reg-names", b"framebuffer\0lcdc\0"),
+                        ],
+                        [],
+                    )
+                ],
+            ),
         ],
-        [],
     )
-    soc = node("soc", [], [display])
-    structure = node("", [], [memory, reserved_memory, soc]) + struct.pack(">I", 9)
-    reserved = b"\0" * 16
-    structure_offset = 40 + len(reserved)
-    strings_offset = structure_offset + len(structure)
-    header = struct.pack(
-        ">10I",
-        0xD00DFEED,
-        strings_offset + len(strings),
-        structure_offset,
-        strings_offset,
-        40,
-        17,
-        16,
-        0,
-        len(strings),
-        len(structure),
-    )
-    return header + reserved + structure + strings
 
 
 class DeviceTreePropertyTests(unittest.TestCase):
@@ -190,9 +101,15 @@ class DeviceTreePropertyTests(unittest.TestCase):
 
     def test_exact_paths_do_not_mix_properties_from_different_nodes(self) -> None:
         """The same property name at root and child retains path ownership."""
-        tree = _binary_tree(
+        tree = binary_tree(
             [("compatible", b"vendor,board\0")],
-            [("chosen", [("compatible", b"fplinux,session\0"), ("bootargs", b"x\0")])],
+            [
+                (
+                    "chosen",
+                    [("compatible", b"fplinux,session\0"), ("bootargs", b"x\0")],
+                    [],
+                )
+            ],
         )
 
         properties = exact_path_properties(tree, ("/", "/chosen"))
@@ -203,7 +120,7 @@ class DeviceTreePropertyTests(unittest.TestCase):
 
     def test_missing_exact_path_is_rejected(self) -> None:
         """A similarly named property cannot substitute for the requested node."""
-        tree = _binary_tree([("model", b"Demo\0")])
+        tree = binary_tree([("model", b"Demo\0")])
 
         with self.assertRaisesRegex(DeviceTreeError, r"lacks node /chosen"):
             exact_path_properties(tree, "/chosen")
@@ -237,7 +154,7 @@ class TargetIdentityTests(unittest.TestCase):
             properties.append(("model", model))
         if compatible is not None:
             properties.append(("compatible", compatible))
-        return _binary_tree(properties)
+        return binary_tree(properties)
 
     def test_matching_identity_is_accepted_from_a_binary_fdt_path(self) -> None:
         """The verifier reads and accepts matching binary FDT properties."""
@@ -295,7 +212,7 @@ class RootBootargsTests(unittest.TestCase):
 
     def tree(self, bootargs: str) -> bytes:
         """Build one binary /chosen node with the requested command line."""
-        return _binary_tree([], [("chosen", [("bootargs", bootargs.encode() + b"\0")])])
+        return binary_tree([], [("chosen", [("bootargs", bootargs.encode() + b"\0")], [])])
 
     def test_exact_external_root_contract_is_accepted(self) -> None:
         """Allow unrelated diagnostics around the exact persistent-root options."""

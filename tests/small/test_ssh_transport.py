@@ -16,6 +16,7 @@ from unittest import mock
 
 from fplinux_cli import ssh_transport
 
+from tests.bundle_support import file_record
 from tests.ssh_transport_support import create_ready_session
 
 
@@ -90,13 +91,6 @@ class SshTransportSmallTests(unittest.TestCase):
         runtime_path = bundle / "runtime-manifest.json"
         runtime_path.write_text(json.dumps(runtime, sort_keys=True) + "\n", encoding="utf-8")
 
-        def record(path: Path) -> dict[str, int | str]:
-            return {
-                "mode": path.stat().st_mode & 0o777,
-                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                "size": path.stat().st_size,
-            }
-
         payload = {
             "rootfs_receipt": {"recipe": "5" * 64, "sha256": "6" * 64},
             "boot_artifacts": {"required": []},
@@ -105,8 +99,8 @@ class SshTransportSmallTests(unittest.TestCase):
             "apk_signing_key": "8" * 64,
             "device_identity": "9" * 64,
             "files": {
-                "image/ramboot.bin": record(image),
-                "runtime-manifest.json": record(runtime_path),
+                "image/ramboot.bin": file_record(image),
+                "runtime-manifest.json": file_record(runtime_path),
             },
             "kbuild_receipt": {"recipe": "a" * 64, "sha256": "b" * 64},
             "linux_recipe": "c" * 64,
@@ -148,13 +142,6 @@ class SshTransportSmallTests(unittest.TestCase):
         runtime_path = bundle / "runtime-manifest.json"
         runtime_path.write_text(json.dumps(runtime, sort_keys=True) + "\n", encoding="utf-8")
 
-        def record(path: Path) -> dict[str, int | str]:
-            return {
-                "mode": path.stat().st_mode & 0o777,
-                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                "size": path.stat().st_size,
-            }
-
         payload = {
             "rootfs_receipt": {"recipe": "5" * 64, "sha256": "6" * 64},
             "boot_artifacts": {"required": []},
@@ -163,8 +150,8 @@ class SshTransportSmallTests(unittest.TestCase):
             "apk_signing_key": "8" * 64,
             "device_identity": "9" * 64,
             "files": {
-                "image/ramboot.bin": record(image),
-                "runtime-manifest.json": record(runtime_path),
+                "image/ramboot.bin": file_record(image),
+                "runtime-manifest.json": file_record(runtime_path),
             },
             "kbuild_receipt": {"recipe": "a" * 64, "sha256": "b" * 64},
             "linux_recipe": "c" * 64,
