@@ -23,6 +23,7 @@ class BootstrapRecipeTests(unittest.TestCase):
         self._write("targets/demo/bootstrap/Makefile", b"all:\n\ttrue\n")
         self._write("targets/demo/bootstrap/main.c", b"int entry(void) { return 1; }\n")
         self._write("bootstrap/fplinux-boot-screen/screen.c", b"int screen;\n")
+        self._write("patches/vendor.patch", b"vendor patch\n")
         self._write("scripts/fplinux_cli/build_env.py", b"build environment\n")
         self._write("scripts/fplinux_cli/builder.py", b"builder implementation\n")
         self.target_config: dict[str, Any] = {
@@ -55,6 +56,7 @@ class BootstrapRecipeTests(unittest.TestCase):
                 "pack_reloc": "pack_reloc",
                 "safety_target": "fplinux-safety-check",
                 "build_targets": ["clean", "all", "map"],
+                "patches": ["patches/vendor.patch"],
                 "files": ["pack_reloc/Makefile"],
                 "kernel_destination": "zImage",
                 "load_address": 0x80100000,
@@ -119,6 +121,10 @@ class BootstrapRecipeTests(unittest.TestCase):
         self._write("bootstrap/fplinux-boot-screen/screen.c", b"int changed_screen;\n")
         self.assertNotEqual(baseline, self._digest())
         self._write("bootstrap/fplinux-boot-screen/screen.c", b"int screen;\n")
+
+        self._write("patches/vendor.patch", b"changed vendor patch\n")
+        self.assertNotEqual(baseline, self._digest())
+        self._write("patches/vendor.patch", b"vendor patch\n")
 
         self.sources["vendor"]["archive_sha256"] = "b" * 64
         self.assertNotEqual(baseline, self._digest())

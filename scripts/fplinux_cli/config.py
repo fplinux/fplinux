@@ -1221,6 +1221,7 @@ def load_platform(platform: str) -> dict[str, Any]:
             "pack_reloc",
             "safety_target",
             "build_targets",
+            "patches",
             "files",
             "shared_copies",
             "kernel_destination",
@@ -1237,6 +1238,7 @@ def load_platform(platform: str) -> dict[str, Any]:
     for key in ("source_destination", "vendor_destination", "output_destination", "pack_reloc"):
         relative_value(bootstrap.get(key), f"platform bootstrap {key}")
     string_array(bootstrap.get("build_targets"), "platform bootstrap build_targets")
+    path_array(bootstrap.get("patches"), "platform bootstrap patches", allow_empty=True)
     path_array(bootstrap.get("files"), "platform bootstrap files")
     path_steps(bootstrap.get("shared_copies"), "platform bootstrap shared_copies")
     relative_value(bootstrap.get("kernel_destination"), "platform bootstrap kernel_destination")

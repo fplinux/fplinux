@@ -67,6 +67,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
             shared = write("shared/dependency.c")
             target_copy = write("targets/phone/kernel/copy.c")
             platform_patch = write("shared/platform.patch")
+            bootstrap_patch = write("patches/bootstrap.patch")
             host_tool = write("tools/loader.c")
             host_cli_source = write("alpine/shared/fplinux-cli.c")
             host_cli_header = write("alpine/shared/fplinux-cli.h")
@@ -116,7 +117,10 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                     "copies": [{"source": "shared/platform-copy.c"}],
                     "appends": [{"source": "shared/platform-append.cfg"}],
                 },
-                "bootstrap": {"shared_copies": [{"source": "shared/bootstrap"}]},
+                "bootstrap": {
+                    "shared_copies": [{"source": "shared/bootstrap"}],
+                    "patches": ["patches/bootstrap.patch"],
+                },
                 "host": {
                     "tools": [
                         {"type": "cc-libusb", "source": "tools/loader.c"},
@@ -168,6 +172,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                     shared,
                     target_copy,
                     platform_patch,
+                    bootstrap_patch,
                     host_tool,
                     host_cli_source,
                     host_cli_header,
