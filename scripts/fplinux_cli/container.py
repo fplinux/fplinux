@@ -105,11 +105,6 @@ _EXECUTABLE_PRETTIER_CONFIGURATION_NAMES = frozenset(
     for name in _PRETTIER_CONFIGURATION_NAMES
     if Path(name).suffix in {".cjs", ".cts", ".js", ".mjs", ".mts", ".ts"}
 )
-_SOURCE_CHECK_COMMAND = ("python3", "/workspace/scripts/check.py")
-_KERNEL_CHECK_COMMANDS = (
-    ("python3", "-m", "fplinux_cli.kernelcheck", "prepare"),
-    ("python3", "-m", "fplinux_cli.kernelcheck", "check"),
-)
 _CHECK_IMPLEMENTATION = frozenset(
     {
         "scripts/check.py",
@@ -1199,32 +1194,17 @@ def check_scope_closure_digest(
     )
 
 
-def check_scope_commands(scope: str, *, profile: str | None = None) -> tuple[tuple[str, ...], ...]:
-    """Return semantic checker argv without execution-only scheduling flags."""
-    if scope in SOURCE_CHECK_SCOPES:
-        return ((*_SOURCE_CHECK_COMMAND, scope),)
-    if scope == "kernel":
-        if profile is None:
-            return _KERNEL_CHECK_COMMANDS
-        return tuple((*command, "--profile", profile) for command in _KERNEL_CHECK_COMMANDS)
-    fail(f"check scope does not support receipts: {scope}")
-    return ()
-
-
-def check_scope_receipt_recipe(  # noqa: PLR0913 -- receipt identities are distinct inputs.
+def check_scope_receipt_recipe(
     scope: str,
     closure_digest: str,
     *,
     image_generation: str,
-    commands: tuple[tuple[str, ...], ...] | None = None,
     orchestration_recipe: str | None = None,
     profile: str | None = None,
 ) -> CheckReceiptRecipe:
     """Bind one cacheable source scope to its exact closure and OCI identities."""
     if scope not in (*SOURCE_CHECK_SCOPES, "kernel"):
         fail(f"check scope does not support receipts: {scope}")
-    if commands is None:
-        commands = check_scope_commands(scope, profile=profile)
     if orchestration_recipe is None:
         orchestration_recipe = check_orchestration_recipe_digest()
     return CheckReceiptRecipe(
@@ -1232,7 +1212,6 @@ def check_scope_receipt_recipe(  # noqa: PLR0913 -- receipt identities are disti
         closure_digest=closure_digest,
         orchestration_recipe=orchestration_recipe,
         image_generation=image_generation,
-        commands=commands,
         profile=profile,
     )
 

@@ -39,7 +39,6 @@ from .common import (
 from .config import (
     container_image_recipe_digest,
     container_image_reference,
-    container_runtime_recipe_digest,
     load_container_lock,
     load_platform,
     load_release,
@@ -694,11 +693,6 @@ def _build_container_command(  # noqa: PLR0913
         "HOME=/tmp/fplinux-home",
         "--env",
         "PYTHONPATH=/workspace/scripts",
-        "--env",
-        (
-            "FPLINUX_CONTAINER_IMAGE_RECIPE="
-            f"{container_runtime_recipe_digest(image_recipe, image_generation)}"
-        ),
         "--env",
         f"FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE={image_recipe}",
         "--env",
