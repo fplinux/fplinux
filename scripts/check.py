@@ -459,8 +459,9 @@ def pkg_config_cflags(package: str) -> list[str]:
 def userspace_c_include_flags(source: str) -> list[str]:
     """Return compile flags needed by one source's headers."""
     path = PurePosixPath(source)
+    flags: list[str] = []
     if path.parts[:3] == (*APORT_ROOT, "fplinux-bluetooth"):
-        return pkg_config_cflags("dbus-1")
+        flags.extend(pkg_config_cflags("dbus-1"))
     if (
         len(path.parts) >= 3
         and path.parts[:2] == APORT_ROOT
@@ -472,8 +473,10 @@ def userspace_c_include_flags(source: str) -> list[str]:
                 for shared in alpine_state.SHARED_APORT_SOURCES[path.parts[2]]
             }
         )
-        return [flag for directory in directories for flag in ("-I", directory)]
-    return []
+        flags.extend(flag for directory in directories for flag in ("-I", directory))
+    elif source == "common/host/fplinux-usb-keyboard.c":
+        flags.extend(("-I", "alpine/shared"))
+    return flags
 
 
 def run_userspace_analysis(output: Path, sources: list[tuple[str, bool]]) -> None:

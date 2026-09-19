@@ -7,6 +7,8 @@
  */
 #define _POSIX_C_SOURCE 200809L
 
+#include "fplinux-cli.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -37,6 +39,20 @@ enum {
 enum operation { OP_ENCODE, OP_DECODE, OP_SCALE };
 enum decode_mode { DECODE_REDUCED, DECODE_BOX };
 
+enum cli_option {
+	CLI_OPTION_OPERATION,
+	CLI_OPTION_INPUT,
+	CLI_OPTION_OUTPUT,
+	CLI_OPTION_WIDTH,
+	CLI_OPTION_HEIGHT,
+	CLI_OPTION_SCALE,
+	CLI_OPTION_QUALITY,
+	CLI_OPTION_RESTART,
+	CLI_OPTION_REPEAT,
+	CLI_OPTION_DQT,
+	CLI_OPTION_DECODE_MODE,
+};
+
 struct options {
 	enum operation operation;
 	enum decode_mode decode_mode;
@@ -49,7 +65,6 @@ struct options {
 	unsigned quality;
 	unsigned restart;
 	unsigned repeat;
-	bool operation_set;
 	bool width_set;
 	bool height_set;
 	bool scale_set;
@@ -127,21 +142,6 @@ struct encode_operation {
 	bool ok;
 };
 
-static void usage(FILE *stream)
-{
-	fprintf(stream,
-		"usage:\n"
-		"  fplinux-jpeg-cpu --operation encode --input NV16 --output JPEG "
-		"--width W --height H [--quality 1..100] [--restart 0..65535] "
-		"[--dqt DQT128] [--repeat 1..4096]\n"
-		"  fplinux-jpeg-cpu --operation decode --input JPEG --output NV12_OR_NV16 "
-		"[--scale 1|2|4] [--decode-mode reduced|box] [--repeat 1..4096]\n"
-		"  fplinux-jpeg-cpu --operation scale --input NV16 --output NV16 "
-		"--width 640 --height 480 [--scale 2] [--repeat 1..4096]\n"
-		"  fplinux-jpeg-cpu --operation scale --input NV16 --output NV16 "
-		"--width 320 --height 240 [--scale 2] [--repeat 1..4096]\n");
-}
-
 static void set_error(char *error, size_t error_size, const char *format, ...)
 {
 	va_list arguments;
@@ -204,117 +204,190 @@ static struct metric add_metrics(const struct metric *left,
 	};
 }
 
-static bool parse_unsigned(const char *text, unsigned maximum, unsigned *value)
+static const char *parse_cli_option(size_t option, const char *value,
+				    void *data)
 {
-	char *end = NULL;
-	unsigned long parsed;
+	struct options *options = data;
 
-	errno = 0;
-	parsed = strtoul(text, &end, 10);
-	if (errno || text[0] == '\0' || end[0] != '\0' || parsed > maximum)
-		return false;
-	*value = (unsigned)parsed;
-	return true;
+	switch (option) {
+	case CLI_OPTION_OPERATION:
+		if (!strcmp(value, "encode"))
+			options->operation = OP_ENCODE;
+		else if (!strcmp(value, "decode"))
+			options->operation = OP_DECODE;
+		else if (!strcmp(value, "scale"))
+			options->operation = OP_SCALE;
+		else
+			return "--operation must be encode, decode or scale";
+		break;
+	case CLI_OPTION_WIDTH:
+		if (!fplinux_cli_unsigned(value, 1, UINT_MAX, &options->width))
+			return "--width and --height must be positive unsigned integers";
+		break;
+	case CLI_OPTION_HEIGHT:
+		if (!fplinux_cli_unsigned(value, 1, UINT_MAX, &options->height))
+			return "--width and --height must be positive unsigned integers";
+		break;
+	case CLI_OPTION_SCALE:
+		if (!fplinux_cli_unsigned(value, 0, 4, &options->scale) ||
+		    (options->scale != 1 && options->scale != 2 &&
+		     options->scale != 4))
+			return "--scale must be 1, 2 or 4";
+		break;
+	case CLI_OPTION_QUALITY:
+		if (!fplinux_cli_unsigned(value, 1, 100, &options->quality))
+			return "--quality must be in 1..100";
+		break;
+	case CLI_OPTION_RESTART:
+		if (!fplinux_cli_unsigned(value, 0, 65535, &options->restart))
+			return "--restart must be in 0..65535";
+		break;
+	case CLI_OPTION_REPEAT:
+		if (!fplinux_cli_unsigned(value, 1, MAX_REPEAT,
+					  &options->repeat))
+			return "--repeat must be in 1..4096";
+		break;
+	case CLI_OPTION_DECODE_MODE:
+		if (!strcmp(value, "reduced"))
+			options->decode_mode = DECODE_REDUCED;
+		else if (!strcmp(value, "box"))
+			options->decode_mode = DECODE_BOX;
+		else
+			return "--decode-mode must be reduced or box";
+		break;
+	case CLI_OPTION_INPUT:
+	case CLI_OPTION_OUTPUT:
+	case CLI_OPTION_DQT:
+		break;
+	}
+	return NULL;
 }
 
-static bool parse_options(int argc, char **argv, struct options *options)
+static enum fplinux_cli_result parse_options(int argc, char **argv,
+					     struct options *options)
 {
-	int index;
+	struct fplinux_cli_option cli_options[] = {
+		[CLI_OPTION_OPERATION] = {
+			.name = "operation",
+			.metavar = "encode|decode|scale",
+			.help = "select the operation",
+			.flags = FPLINUX_CLI_REQUIRED | FPLINUX_CLI_REPEAT,
+		},
+		[CLI_OPTION_INPUT] = {
+			.name = "input",
+			.metavar = "FILE",
+			.help = "read the input image",
+			.flags = FPLINUX_CLI_REQUIRED | FPLINUX_CLI_REPEAT,
+		},
+		[CLI_OPTION_OUTPUT] = {
+			.name = "output",
+			.metavar = "FILE",
+			.help = "write the output image",
+			.flags = FPLINUX_CLI_REQUIRED | FPLINUX_CLI_REPEAT,
+		},
+		[CLI_OPTION_WIDTH] = {
+			.name = "width",
+			.metavar = "N",
+			.help = "set positive raw input width for encode or scale",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[CLI_OPTION_HEIGHT] = {
+			.name = "height",
+			.metavar = "N",
+			.help = "set positive raw input height for encode or scale",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[CLI_OPTION_SCALE] = {
+			.name = "scale",
+			.metavar = "1|2|4",
+			.help = "set the divisor (default: decode 1, scale 2)",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[CLI_OPTION_QUALITY] = {
+			.name = "quality",
+			.metavar = "N",
+			.help = "set encode quality in 1..100 (default: 75)",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[CLI_OPTION_RESTART] = {
+			.name = "restart",
+			.metavar = "N",
+			.help = "set encode restart interval in 0..65535 (default: 0)",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[CLI_OPTION_REPEAT] = {
+			.name = "repeat",
+			.metavar = "N",
+			.help = "repeat the operation 1..4096 times (default: 1)",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[CLI_OPTION_DQT] = {
+			.name = "dqt",
+			.metavar = "FILE",
+			.help = "read 128 encode quantization bytes in natural DCT order",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[CLI_OPTION_DECODE_MODE] = {
+			.name = "decode-mode",
+			.metavar = "reduced|box",
+			.help = "select decode scaling (default: reduced)",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+	};
+	struct fplinux_cli cli = {
+		.program = argv[0],
+		.description =
+			"Encode NV16 to JPEG, decode JPEG to NV12/NV16 or scale NV16 on the CPU.\n"
+			"Encode requires even raw width and a height. Scale accepts "
+			"640x480 or 320x240 input with divisor 2.\n"
+			"Quality, restart and DQT apply only to encode; decode-mode only to decode.",
+		.options = cli_options,
+		.option_count = sizeof(cli_options) / sizeof(cli_options[0]),
+		.parse_option = parse_cli_option,
+		.data = options,
+	};
+	enum fplinux_cli_result result;
+	bool valid;
 
 	memset(options, 0, sizeof(*options));
 	options->decode_mode = DECODE_REDUCED;
 	options->scale = 1;
 	options->quality = 75;
 	options->repeat = 1;
-	for (index = 1; index < argc; index++) {
-		const char *argument = argv[index];
-		const char *value;
-
-		if (!strcmp(argument, "--help")) {
-			usage(stdout);
-			exit(EXIT_SUCCESS);
-		}
-		if (++index >= argc)
-			return false;
-		value = argv[index];
-		if (!strcmp(argument, "--operation")) {
-			if (!strcmp(value, "encode"))
-				options->operation = OP_ENCODE;
-			else if (!strcmp(value, "decode"))
-				options->operation = OP_DECODE;
-			else if (!strcmp(value, "scale"))
-				options->operation = OP_SCALE;
-			else
-				return false;
-			options->operation_set = true;
-		} else if (!strcmp(argument, "--input")) {
-			options->input_path = value;
-		} else if (!strcmp(argument, "--output")) {
-			options->output_path = value;
-		} else if (!strcmp(argument, "--width")) {
-			if (!parse_unsigned(value, UINT_MAX, &options->width) ||
-			    !options->width)
-				return false;
-			options->width_set = true;
-		} else if (!strcmp(argument, "--height")) {
-			if (!parse_unsigned(value, UINT_MAX,
-					    &options->height) ||
-			    !options->height)
-				return false;
-			options->height_set = true;
-		} else if (!strcmp(argument, "--scale")) {
-			if (!parse_unsigned(value, 4, &options->scale) ||
-			    (options->scale != 1 && options->scale != 2 &&
-			     options->scale != 4))
-				return false;
-			options->scale_set = true;
-		} else if (!strcmp(argument, "--quality")) {
-			if (!parse_unsigned(value, 100, &options->quality) ||
-			    !options->quality)
-				return false;
-			options->quality_set = true;
-		} else if (!strcmp(argument, "--restart")) {
-			if (!parse_unsigned(value, 65535, &options->restart))
-				return false;
-			options->restart_set = true;
-		} else if (!strcmp(argument, "--repeat")) {
-			if (!parse_unsigned(value, MAX_REPEAT,
-					    &options->repeat) ||
-			    !options->repeat)
-				return false;
-		} else if (!strcmp(argument, "--dqt")) {
-			options->dqt_path = value;
-		} else if (!strcmp(argument, "--decode-mode")) {
-			if (!strcmp(value, "reduced"))
-				options->decode_mode = DECODE_REDUCED;
-			else if (!strcmp(value, "box"))
-				options->decode_mode = DECODE_BOX;
-			else
-				return false;
-			options->decode_mode_set = true;
-		} else {
-			return false;
-		}
-	}
-	if (!options->operation_set || !options->input_path ||
-	    !options->output_path)
-		return false;
+	result = fplinux_cli_parse(&cli, argc, argv);
+	if (result != FPLINUX_CLI_READY)
+		return result;
+	options->input_path = cli_options[CLI_OPTION_INPUT].value;
+	options->output_path = cli_options[CLI_OPTION_OUTPUT].value;
+	options->dqt_path = cli_options[CLI_OPTION_DQT].value;
+	options->width_set = cli_options[CLI_OPTION_WIDTH].count != 0;
+	options->height_set = cli_options[CLI_OPTION_HEIGHT].count != 0;
+	options->scale_set = cli_options[CLI_OPTION_SCALE].count != 0;
+	options->quality_set = cli_options[CLI_OPTION_QUALITY].count != 0;
+	options->restart_set = cli_options[CLI_OPTION_RESTART].count != 0;
+	options->decode_mode_set = cli_options[CLI_OPTION_DECODE_MODE].count !=
+				   0;
 	if (options->operation == OP_ENCODE)
-		return options->width_set && options->height_set &&
-		       !(options->width & 1U) && !options->scale_set &&
-		       !options->decode_mode_set;
-	if (options->operation == OP_SCALE) {
+		valid = options->width_set && options->height_set &&
+			!(options->width & 1U) && !options->scale_set &&
+			!options->decode_mode_set;
+	else if (options->operation == OP_SCALE) {
 		if (!options->scale_set)
 			options->scale = 2;
-		return ((options->width == 640 && options->height == 480) ||
-			(options->width == 320 && options->height == 240)) &&
-		       options->scale == 2 && !options->decode_mode_set &&
-		       !options->dqt_path && !options->quality_set &&
-		       !options->restart_set;
+		valid = ((options->width == 640 && options->height == 480) ||
+			 (options->width == 320 && options->height == 240)) &&
+			options->scale == 2 && !options->decode_mode_set &&
+			!options->dqt_path && !options->quality_set &&
+			!options->restart_set;
+	} else {
+		valid = !options->width_set && !options->height_set &&
+			!options->dqt_path && !options->quality_set &&
+			!options->restart_set;
 	}
-	return !options->width_set && !options->height_set &&
-	       !options->dqt_path && !options->quality_set &&
-	       !options->restart_set;
+	if (!valid)
+		return fplinux_cli_error(
+			&cli, "invalid options for the selected operation");
+	return FPLINUX_CLI_READY;
 }
 
 static bool multiply_size(size_t left, size_t right, size_t *result)
@@ -1474,11 +1547,11 @@ int main(int argc, char **argv)
 	size_t expected_size = 0;
 	char error[256] = { 0 };
 	bool ok;
+	enum fplinux_cli_result parse_result;
 
-	if (!parse_options(argc, argv, &options)) {
-		usage(stderr);
-		return EXIT_FAILURE;
-	}
+	parse_result = parse_options(argc, argv, &options);
+	if (parse_result != FPLINUX_CLI_READY)
+		return parse_result;
 	if (!metric_start(&start) ||
 	    !read_file_bounded(options.input_path, MAX_RAW_BYTES, &input,
 			       &input_size, error, sizeof(error)) ||

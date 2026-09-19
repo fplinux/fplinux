@@ -32,8 +32,14 @@ Without `--input`, the application generates a deterministic image. Without
 result to RGB565 and presents it through the existing framebuffer. The result
 must match the active framebuffer dimensions: preview does not scale the image
 or change console orientation. For a 128x160 display, use a 160x128 input with
-`--rotate 90`. `--display-ms N` sets the preview hold time; the default is 2000 ms.
+`--rotate 90`. `--display-ms N` enables the preview and sets its hold time.
+`--display` enables it with a 2000 ms hold, including when it follows an earlier
+`--display-ms`; whichever of those two options appears last selects the hold.
 The console is restored when the preview ends.
+
+Other scalar value options may also be repeated; the last one selects the
+effective value. Each occurrence must pass its syntax checks. Geometry and
+transform restrictions apply to the final effective values.
 
 ## Formats and raw files
 

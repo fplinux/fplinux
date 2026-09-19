@@ -2,7 +2,9 @@
 #define _GNU_SOURCE
 #include "fplinux-rotate.h"
 #include "fplinux-fb-session.h"
+#include "fplinux-cli.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <glob.h>
@@ -67,6 +69,10 @@ struct mapped_queue {
 	uint32_t stride[MAX_PLANES];
 };
 
+static const char *const format_names[] = {
+	"rgb565", "xrgb32", "grey", "nv12", "nv16",
+};
+
 static uint64_t monotonic_us(void)
 {
 	struct timespec value;
@@ -110,169 +116,136 @@ static uint32_t format_fourcc(enum fplinux_rotate_format format)
 
 static const char *format_name(enum fplinux_rotate_format format)
 {
-	static const char *const names[] = { "rgb565", "xrgb32", "grey", "nv12",
-					     "nv16" };
-
-	return names[format];
+	return format_names[format];
 }
 
-static bool parse_u32(const char *text, uint32_t *value)
+static bool parse_crop_component(const char **text, char terminator,
+				 uint32_t *value)
 {
+	const unsigned char *cursor = (const unsigned char *)*text;
 	char *end;
 	unsigned long parsed;
 
+	while (isspace(*cursor))
+		++cursor;
+	if (*cursor == '-')
+		return false;
 	errno = 0;
-	parsed = strtoul(text, &end, 10);
-	if (errno || *text == '\0' || *end != '\0' || parsed > UINT32_MAX)
+	parsed = strtoul(*text, &end, 10);
+	if (errno || end == *text || parsed > UINT32_MAX || *end != terminator)
 		return false;
 	*value = (uint32_t)parsed;
+	*text = terminator ? end + 1 : end;
 	return true;
 }
 
 static bool parse_crop(const char *text, struct fplinux_rotate_transform *value)
 {
-	unsigned int left;
-	unsigned int top;
-	unsigned int width;
-	unsigned int height;
-	char tail;
+	struct fplinux_rotate_transform parsed = *value;
 
-	if (sscanf(text, "%u,%u,%u,%u%c", &left, &top, &width, &height,
-		   &tail) != 4)
+	if (!parse_crop_component(&text, ',', &parsed.left) ||
+	    !parse_crop_component(&text, ',', &parsed.top) ||
+	    !parse_crop_component(&text, ',', &parsed.width) ||
+	    !parse_crop_component(&text, '\0', &parsed.height))
 		return false;
-	value->left = left;
-	value->top = top;
-	value->width = width;
-	value->height = height;
+	*value = parsed;
 	return true;
 }
 
-static void usage(FILE *stream)
+enum option_index {
+	OPT_ENGINE,
+	OPT_FORMAT,
+	OPT_WIDTH,
+	OPT_HEIGHT,
+	OPT_STRIDE,
+	OPT_CROP,
+	OPT_ROTATION,
+	OPT_HFLIP,
+	OPT_VFLIP,
+	OPT_INPUT,
+	OPT_OUTPUT,
+	OPT_DEVICE,
+	OPT_DISPLAY,
+	OPT_DISPLAY_MS,
+	OPT_VERIFY,
+	OPT_ITERATIONS,
+	OPT_BENCHMARK,
+};
+
+static const char *parse_option(size_t option, const char *value, void *data)
 {
-	fprintf(stream,
-		"usage: fplinux-rotate --engine cpu|rota --format FORMAT --width N --height N [options]\n"
-		"formats: rgb565, xrgb32, grey, nv12, nv16\n"
-		"options:\n"
-		"  --stride N          source stride in bytes (default: packed row)\n"
-		"  --crop X,Y,W,H      source crop (default: whole image)\n"
-		"  --rotate 0|90|180|270 --hflip --vflip\n"
-		"  --input PATH        raw planes in order (default: deterministic corpus)\n"
-		"  --output PATH       must be below /run or /tmp (default: /run/fplinux-rotate.raw)\n"
-		"  --device PATH       matching V4L2 mem2mem device (default: discover)\n"
-		"  --display           present a native-size RGB565 preview\n"
-		"  --display-ms N      preview hold time (default: 2000)\n"
-		"  --verify            compare ROTA output with the CPU reference\n"
-		"  --iterations N      repeat the selected engine on the same input\n"
-		"  --benchmark N       run same-input CPU/ROTA/ROTA/CPU batches\n");
+	struct options *options = data;
+	unsigned int *number;
+	unsigned int minimum = 0;
+	unsigned int maximum = UINT32_MAX;
+	unsigned int candidate;
+
+	switch (option) {
+	case OPT_ENGINE:
+		if (!strcmp(value, "cpu"))
+			options->engine = ENGINE_CPU;
+		else if (!strcmp(value, "rota"))
+			options->engine = ENGINE_ROTA;
+		else
+			goto invalid;
+		return NULL;
+	case OPT_FORMAT:
+		for (candidate = 0; candidate < ARRAY_SIZE(format_names);
+		     ++candidate) {
+			if (!strcmp(value, format_names[candidate])) {
+				options->format =
+					(enum fplinux_rotate_format)candidate;
+				return NULL;
+			}
+		}
+		goto invalid;
+	case OPT_WIDTH:
+		number = &options->width;
+		break;
+	case OPT_HEIGHT:
+		number = &options->height;
+		break;
+	case OPT_STRIDE:
+		number = &options->stride;
+		break;
+	case OPT_CROP:
+		if (!parse_crop(value, &options->transform))
+			goto invalid;
+		return NULL;
+	case OPT_ROTATION:
+		number = &options->transform.rotation;
+		break;
+	case OPT_DISPLAY:
+		options->display = true;
+		options->display_ms = 2000U;
+		return NULL;
+	case OPT_DISPLAY_MS:
+		options->display = true;
+		number = &options->display_ms;
+		maximum = 60000;
+		break;
+	case OPT_ITERATIONS:
+		number = &options->iterations;
+		minimum = 1;
+		maximum = 10000;
+		break;
+	case OPT_BENCHMARK:
+		number = &options->benchmark;
+		minimum = 1;
+		maximum = 10000;
+		break;
+	default:
+		return NULL;
+	}
+	if (fplinux_cli_unsigned(value, minimum, maximum, number))
+		return NULL;
+invalid:
+	return "invalid option value or combination";
 }
 
-static bool parse_options(int argc, char **argv, struct options *options)
+static bool options_valid(struct options *options)
 {
-	int index;
-	bool have_engine = false;
-	bool have_format = false;
-
-	memset(options, 0, sizeof(*options));
-	options->output = "/run/fplinux-rotate.raw";
-	options->iterations = 1U;
-	options->transform.rotation = 90U;
-	for (index = 1; index < argc; ++index) {
-		const char *argument = argv[index];
-		const char *value = index + 1 < argc ? argv[index + 1] : NULL;
-
-		if (!strcmp(argument, "--hflip"))
-			options->transform.hflip = true;
-		else if (!strcmp(argument, "--vflip"))
-			options->transform.vflip = true;
-		else if (!strcmp(argument, "--display"))
-			options->display = true, options->display_ms = 2000U;
-		else if (!strcmp(argument, "--verify"))
-			options->verify = true;
-		else if (!strcmp(argument, "--help")) {
-			usage(stdout);
-			exit(EXIT_SUCCESS);
-		} else if (!value)
-			return false;
-		else if (!strcmp(argument, "--engine")) {
-			if (!strcmp(value, "cpu"))
-				options->engine = ENGINE_CPU;
-			else if (!strcmp(value, "rota"))
-				options->engine = ENGINE_ROTA;
-			else
-				return false;
-			have_engine = true;
-			++index;
-		} else if (!strcmp(argument, "--format")) {
-			static const char *const names[] = { "rgb565", "xrgb32",
-							     "grey", "nv12",
-							     "nv16" };
-			unsigned int candidate;
-
-			for (candidate = 0; candidate < ARRAY_SIZE(names);
-			     ++candidate)
-				if (!strcmp(value, names[candidate]))
-					break;
-			if (candidate == ARRAY_SIZE(names))
-				return false;
-			options->format = (enum fplinux_rotate_format)candidate;
-			have_format = true;
-			++index;
-		} else if (!strcmp(argument, "--width")) {
-			if (!parse_u32(value, &options->width))
-				return false;
-			++index;
-		} else if (!strcmp(argument, "--height")) {
-			if (!parse_u32(value, &options->height))
-				return false;
-			++index;
-		} else if (!strcmp(argument, "--stride")) {
-			if (!parse_u32(value, &options->stride))
-				return false;
-			++index;
-		} else if (!strcmp(argument, "--rotate")) {
-			if (!parse_u32(value, &options->transform.rotation))
-				return false;
-			++index;
-		} else if (!strcmp(argument, "--display-ms")) {
-			if (!parse_u32(value, &options->display_ms) ||
-			    options->display_ms > 60000U)
-				return false;
-			options->display = true;
-			++index;
-		} else if (!strcmp(argument, "--crop")) {
-			if (!parse_crop(value, &options->transform))
-				return false;
-			++index;
-		} else if (!strcmp(argument, "--benchmark")) {
-			uint32_t count;
-
-			if (!parse_u32(value, &count) || count == 0U ||
-			    count > 10000U)
-				return false;
-			options->benchmark = count;
-			++index;
-		} else if (!strcmp(argument, "--iterations")) {
-			uint32_t count;
-
-			if (!parse_u32(value, &count) || count == 0U ||
-			    count > 10000U)
-				return false;
-			options->iterations = count;
-			++index;
-		} else if (!strcmp(argument, "--input")) {
-			options->input = value;
-			++index;
-		} else if (!strcmp(argument, "--output")) {
-			options->output = value;
-			++index;
-		} else if (!strcmp(argument, "--device")) {
-			options->device = value;
-			++index;
-		} else
-			return false;
-	}
-	if (!have_engine || !have_format || options->width == 0U ||
-	    options->height == 0U)
+	if (options->width == 0U || options->height == 0U)
 		return false;
 	if (options->transform.width == 0U) {
 		options->transform.width = options->width;
@@ -293,6 +266,138 @@ static bool parse_options(int argc, char **argv, struct options *options)
 							   options->width) &&
 	       (!options->output || !strncmp(options->output, "/run/", 5) ||
 		!strncmp(options->output, "/tmp/", 5));
+}
+
+static int parse_options(int argc, char **argv, struct options *options)
+{
+	struct fplinux_cli_option arguments[] = {
+		[OPT_ENGINE] = {
+			.name = "engine",
+			.metavar = "cpu|rota",
+			.help = "Rotation engine",
+			.flags = FPLINUX_CLI_REQUIRED | FPLINUX_CLI_REPEAT,
+		},
+		[OPT_FORMAT] = {
+			.name = "format",
+			.metavar = "FORMAT",
+			.help = "Pixel format: rgb565, xrgb32, grey, nv12, nv16",
+			.flags = FPLINUX_CLI_REQUIRED | FPLINUX_CLI_REPEAT,
+		},
+		[OPT_WIDTH] = {
+			.name = "width",
+			.metavar = "N",
+			.help = "Source width in pixels",
+			.flags = FPLINUX_CLI_REQUIRED | FPLINUX_CLI_REPEAT,
+		},
+		[OPT_HEIGHT] = {
+			.name = "height",
+			.metavar = "N",
+			.help = "Source height in pixels",
+			.flags = FPLINUX_CLI_REQUIRED | FPLINUX_CLI_REPEAT,
+		},
+		[OPT_STRIDE] = {
+			.name = "stride",
+			.metavar = "N",
+			.help = "Source stride in bytes (default: packed row)",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[OPT_CROP] = {
+			.name = "crop",
+			.metavar = "X,Y,W,H",
+			.help = "Source crop (default: whole image)",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[OPT_ROTATION] = {
+			.name = "rotate",
+			.metavar = "0|90|180|270",
+			.help = "Rotation in degrees (default: 90)",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[OPT_HFLIP] = {
+			.name = "hflip",
+			.help = "Flip horizontally (requires --rotate 0)",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[OPT_VFLIP] = {
+			.name = "vflip",
+			.help = "Flip vertically (currently unsupported)",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[OPT_INPUT] = {
+			.name = "input",
+			.metavar = "PATH",
+			.help = "Raw planes in order (default: deterministic corpus)",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[OPT_OUTPUT] = {
+			.name = "output",
+			.metavar = "PATH",
+			.help = "Output below /run or /tmp (default: /run/fplinux-rotate.raw)",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[OPT_DEVICE] = {
+			.name = "device",
+			.metavar = "PATH",
+			.help = "Matching V4L2 mem2mem device (default: discover)",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[OPT_DISPLAY] = {
+			.name = "display",
+			.help = "Present a native-size RGB565 preview for 2000 ms",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[OPT_DISPLAY_MS] = {
+			.name = "display-ms",
+			.metavar = "N",
+			.help = "Present a preview for 0..60000 ms; last display option wins",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[OPT_VERIFY] = {
+			.name = "verify",
+			.help = "Compare output with the CPU reference",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[OPT_ITERATIONS] = {
+			.name = "iterations",
+			.metavar = "N",
+			.help = "Repeat the selected engine 1..10000 times (default: 1)",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[OPT_BENCHMARK] = {
+			.name = "benchmark",
+			.metavar = "N",
+			.help = "Run CPU/ROTA/ROTA/CPU batches of 1..10000 iterations",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+	};
+	struct fplinux_cli cli = {
+		.program = "fplinux-rotate",
+		.description = "Rotate, verify and preview raw images.",
+		.options = arguments,
+		.option_count = ARRAY_SIZE(arguments),
+		.parse_option = parse_option,
+		.data = options,
+	};
+	int status;
+
+	memset(options, 0, sizeof(*options));
+	options->output = "/run/fplinux-rotate.raw";
+	options->transform.rotation = 90U;
+	options->iterations = 1;
+	status = fplinux_cli_parse(&cli, argc, argv);
+	if (status != FPLINUX_CLI_READY)
+		return status;
+	options->transform.hflip = arguments[OPT_HFLIP].count != 0;
+	options->transform.vflip = arguments[OPT_VFLIP].count != 0;
+	options->verify = arguments[OPT_VERIFY].count != 0;
+	options->input = arguments[OPT_INPUT].value;
+	if (arguments[OPT_OUTPUT].count)
+		options->output = arguments[OPT_OUTPUT].value;
+	options->device = arguments[OPT_DEVICE].value;
+	if (!options_valid(options))
+		return fplinux_cli_error(&cli,
+					 "invalid option value or combination");
+	return FPLINUX_CLI_READY;
 }
 
 static bool allocate_image(struct fplinux_rotate_image *image,
@@ -1035,12 +1140,16 @@ int main(int argc, char **argv)
 	uint32_t source_strides[MAX_PLANES] = { 0 };
 	unsigned int sequence;
 	bool ok = false;
+	int parse_status = parse_options(argc, argv, &options);
 
-	if (!parse_options(argc, argv, &options) ||
-	    !fplinux_rotate_dimensions(&options.transform, &destination_width,
+	if (parse_status != FPLINUX_CLI_READY)
+		return parse_status;
+	if (!fplinux_rotate_dimensions(&options.transform, &destination_width,
 				       &destination_height)) {
-		usage(stderr);
-		return EXIT_FAILURE;
+		return fplinux_cli_error(
+			&(const struct fplinux_cli){ .program =
+							     "fplinux-rotate" },
+			"invalid crop dimensions");
 	}
 	source_strides[0] = options.stride;
 	if (fplinux_rotate_plane_count(options.format) == 2U)

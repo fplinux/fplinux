@@ -15,6 +15,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "fplinux-cli.h"
+
 #ifndef FPLINUX_CHARGE_COUNTER_PATH
 #define FPLINUX_CHARGE_COUNTER_PATH ""
 #endif
@@ -263,21 +265,39 @@ fail:
 	return -1;
 }
 
-static bool parse_arguments(int argc, char **argv, const char **counter_path,
-			    char ***command)
+static enum fplinux_cli_result parse_arguments(int argc, char **argv,
+					       const char **counter_path,
+					       char ***command)
 {
+	struct fplinux_cli_option options[] = {
+		{
+			.name = "counter",
+			.metavar = "PATH",
+			.help = "read this counter instead of discovering a Battery",
+		},
+	};
+	struct fplinux_cli cli = {
+		.program = argv[0],
+		.description = "Measure battery charge while a command runs.",
+		.options = options,
+		.option_count = sizeof(options) / sizeof(options[0]),
+		.tail_usage = "command [argument ...]",
+	};
+	enum fplinux_cli_result result;
+
 	*counter_path = NULL;
-	if (argc >= 4 && !strcmp(argv[1], "--counter")) {
-		if (argv[2][0] == '\0')
-			return false;
-		*counter_path = argv[2];
-		argv += 2;
-		argc -= 2;
-	}
-	if (argc < 3 || strcmp(argv[1], "--"))
-		return false;
-	*command = &argv[2];
-	return true;
+	*command = NULL;
+	result = fplinux_cli_parse(&cli, argc, argv);
+	if (result != FPLINUX_CLI_READY)
+		return result;
+	if (!cli.tail_argv || !cli.tail_argv[0])
+		return fplinux_cli_error(&cli,
+					 "command must follow a -- separator");
+	if (!cli.tail_argv[0][0])
+		return fplinux_cli_error(&cli, "command must not be empty");
+	*counter_path = options[0].value;
+	*command = cli.tail_argv;
+	return FPLINUX_CLI_READY;
 }
 
 int main(int argc, char **argv)
@@ -296,11 +316,9 @@ int main(int argc, char **argv)
 	int status;
 	int result;
 
-	if (!parse_arguments(argc, argv, &counter_path, &command)) {
-		fprintf(stderr,
-			"usage: fplinux-charge [--counter PATH] -- command [argument ...]\n");
-		return 2;
-	}
+	result = parse_arguments(argc, argv, &counter_path, &command);
+	if (result != FPLINUX_CLI_READY)
+		return result;
 	if (counter_path) {
 		selected_counter = strdup(counter_path);
 		if (!selected_counter) {

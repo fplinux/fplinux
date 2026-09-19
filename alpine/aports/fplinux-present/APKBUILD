@@ -13,6 +13,8 @@ source="
 	fplinux-present.c
 	fplinux-fb-session.c
 	fplinux-fb-session.h
+	fplinux-cli.c
+	fplinux-cli.h
 	ums9117-present.h
 "
 builddir="$srcdir"
@@ -22,7 +24,7 @@ build() {
 		-I"$srcdir" \
 		"$srcdir/fplinux-present.c" \
 		"$srcdir/fplinux-fb-session.c" \
-		$LDFLAGS -o fplinux-present
+		"$srcdir/fplinux-cli.c" $LDFLAGS -Wl,--gc-sections -o fplinux-present
 }
 
 package() {
@@ -31,8 +33,10 @@ package() {
 }
 
 sha512sums="
-3cbee1a4620623b92a6c6465116c8f335d99ca575cb61b191d8bbee85e35e89732b7b8a28b3bf9fe178f3d7b87dfe9c5df4be7bdaedcb50243d9a361184878c3  fplinux-present.c
+b574a8fa0af0d0265c3e157e1a581b5a4a2ffbdb20d68adf5b72f6f5427b0f83477fb8227a69f4eef2ef48a25e266cbaa92c2692a85b66761c2227225488f13d  fplinux-present.c
 cbf7e3cb0a9fe2fda9d387e72ab49d13b3d7828e282f0ce2f528183f1fce0c337b29e8c62775671fe424548c0526027d3d50bc57ef7fe5a69c92af79da56598d  fplinux-fb-session.c
 38f849284be27b63ae553dc66c1427b885ef0e332a89b035f9465659e3a080435bd7fde0c788c1a97129cd0b252bd151268f568bab3065029a7874a2740b6279  fplinux-fb-session.h
+60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
+9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
 9ccfa1d4ff07d5111863d47f74b369dd84f1849b578a92ffe34ecb3caf4f317125685b86ebbaced6f19beb7558c90a55cb0f8b3141c6f0e49503c30a7a021b36  ums9117-present.h
 "

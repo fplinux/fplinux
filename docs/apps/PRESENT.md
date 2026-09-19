@@ -37,6 +37,9 @@ fplinux-present --input /run/frame.nv16 --mode cpu-rgb565 \
 uninterrupted presentation, final hold, and successful framebuffer and console
 restore. The direct NV16 mode does not write a converted output.
 
+Scalar value options may be repeated. Every occurrence must be valid, and the
+last one selects the effective value.
+
 The complete options are:
 
 - `--repeat N`: completed presentations from 1 through 4096; default 1;

@@ -17,6 +17,9 @@ instructions. Commands below run on the phone. Prefer `/run` or `/tmp` for input
 and output unless the target documentation explicitly supports a mounted
 writable filesystem.
 
+Both commands allow scalar value options to be repeated. Every occurrence must
+be valid, and the last one selects the effective value.
+
 ## Hardware command
 
 The complete command synopsis is:

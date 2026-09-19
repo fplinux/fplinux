@@ -41,6 +41,7 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
                 str(SOURCE),
                 str(APORT / "armada-scene.c"),
                 str(SHARED / "fplinux-fb-session.c"),
+                str(SHARED / "fplinux-cli.c"),
                 "-o",
                 str(cls.executable),
             ],
@@ -49,8 +50,32 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
             check=True,
         )
 
+    def test_help_returns_before_opening_phone_hardware(self) -> None:
+        """A parsed help option wins over later parser and domain errors."""
+        help_arguments = (
+            ("-h",),
+            ("--help",),
+            ("--help", "--runs=0"),
+            ("--help", "--unknown"),
+        )
+
+        for arguments in help_arguments:
+            with self.subTest(arguments=arguments):
+                result = run_process(
+                    [str(self.executable), *arguments],
+                    name=f"show FPLinux Showcase help with {arguments}",
+                    timeout=5,
+                )
+
+                self.assertEqual(result.returncode, 0)
+                self.assertIn("Usage:", result.stdout)
+                self.assertIn("--runs", result.stdout)
+                self.assertIn("--keypad-led", result.stdout)
+                self.assertIn("--lcd-backlight", result.stdout)
+                self.assertEqual(result.stderr, "")
+
     def test_invalid_arguments_fail_before_opening_phone_hardware(self) -> None:
-        """Malformed run counts return usage without probing keypad or framebuffer."""
+        """Malformed options return native diagnostics without probing keypad or framebuffer."""
         invalid_arguments = (
             ("--runs",),
             ("--runs", "0"),
@@ -59,6 +84,12 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
             ("--runs", "1ms"),
             ("--runs", "18446744073709551616"),
             ("--runs", "1", "extra"),
+            ("--runs", "--help"),
+            ("--runs", "1", "--runs", "2"),
+            ("--keypad-led", "one", "--keypad-led", "two"),
+            ("--lcd-backlight", "one", "--lcd-backlight", "two"),
+            ("--keypad-led=",),
+            ("--lcd-backlight=",),
             ("--unknown",),
         )
 
@@ -70,8 +101,9 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
                     timeout=5,
                 )
 
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn("usage: fplinux-showcase [--runs N]", result.stderr)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("Try '", result.stderr)
+                self.assertIn("--help' for more information.", result.stderr)
                 self.assertNotIn("required keypad", result.stderr)
                 self.assertEqual(result.stdout, "")
 
@@ -96,6 +128,29 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
         self.assertNotIn("usage: fplinux-showcase", result.stderr)
         self.assertEqual(result.stdout, "")
 
+    def test_native_long_options_reach_the_real_hardware_boundary(self) -> None:
+        """Equals-delimited options and an unambiguous native prefix are accepted."""
+        keypad_led = Path(self.temporary.name) / "keypad-led"
+        lcd_backlight = Path(self.temporary.name) / "lcd-backlight"
+
+        for runs_option in ("--runs=1", "--r=1"):
+            with self.subTest(runs_option=runs_option):
+                result = run_process(
+                    [
+                        str(self.executable),
+                        runs_option,
+                        f"--keypad-led={keypad_led}",
+                        f"--lcd-backlight={lcd_backlight}",
+                    ],
+                    name="accept native FPLinux Showcase long options",
+                    timeout=5,
+                )
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("required keypad fplinux/keypad0", result.stderr)
+                self.assertNotIn("Try '", result.stderr)
+                self.assertEqual(result.stdout, "")
+
     def compile_with_class_roots(self, class_root: Path) -> Path:
         """Compile the real application against a test-owned class tree."""
         executable = class_root / "fplinux-showcase"
@@ -116,6 +171,7 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
                 str(SOURCE),
                 str(APORT / "armada-scene.c"),
                 str(SHARED / "fplinux-fb-session.c"),
+                str(SHARED / "fplinux-cli.c"),
                 "-o",
                 str(executable),
             ],

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #define _GNU_SOURCE
 
+#include "fplinux-cli.h"
 #include "fplinux-fb-session.h"
 #include "ums9117-present.h"
 
@@ -89,6 +90,17 @@ struct run_stats {
 	unsigned int completed;
 };
 
+enum present_option {
+	OPTION_INPUT,
+	OPTION_MODE,
+	OPTION_REPEAT,
+	OPTION_FPS,
+	OPTION_HOLD_MS,
+	OPTION_FRAMEBUFFER,
+	OPTION_TTY,
+	OPTION_OUTPUT,
+};
+
 static volatile sig_atomic_t stop_signal;
 
 static void request_stop(int signal_number)
@@ -114,89 +126,111 @@ static const char *mode_name(enum present_mode mode)
 	return mode == PRESENT_MODE_CPU_RGB565 ? "cpu-rgb565" : "nv16";
 }
 
-static void usage(FILE *stream)
+static const char *parse_option(size_t option, const char *value, void *data)
 {
-	fprintf(stream,
-		"usage: fplinux-present --input NV16 [options]\n"
-		"options:\n"
-		"  --mode nv16|cpu-rgb565  presentation path (default: nv16)\n"
-		"  --repeat N              completed frames, 1..4096 (default: 1)\n"
-		"  --fps N                 absolute-deadline pace, 1..30 (default: 10)\n"
-		"  --hold-ms N             hold final frame, 0..60000 (default: 0)\n"
-		"  --framebuffer PATH      framebuffer (default: /dev/fb0)\n"
-		"  --tty PATH              console tty (default: /dev/tty0)\n"
-		"  --output RGB565         optional CPU-converted raw output path\n"
-		"  --help                  show this text\n");
-}
+	struct options *options = data;
 
-static bool parse_bounded(const char *text, unsigned int minimum,
-			  unsigned int maximum, unsigned int *value)
-{
-	char *end;
-	unsigned long parsed;
-
-	errno = 0;
-	parsed = strtoul(text, &end, 10);
-	if (errno || text[0] == '\0' || text[0] == '-' || end[0] != '\0' ||
-	    parsed < minimum || parsed > maximum)
-		return false;
-	*value = (unsigned int)parsed;
-	return true;
-}
-
-static bool parse_options(int argc, char **argv, struct options *options)
-{
-	int index;
-
-	memset(options, 0, sizeof(*options));
-	options->framebuffer_path = DEFAULT_FRAMEBUFFER;
-	options->tty_path = DEFAULT_TTY;
-	options->mode = PRESENT_MODE_NV16;
-	options->repeat = DEFAULT_REPEAT;
-	options->fps = DEFAULT_FPS;
-	for (index = 1; index < argc; index += 2) {
-		const char *argument = argv[index];
-		const char *value = index + 1 < argc ? argv[index + 1] : NULL;
-
-		if (!strcmp(argument, "--help")) {
-			usage(stdout);
-			exit(EXIT_SUCCESS);
-		}
-		if (!value)
-			return false;
-		if (!strcmp(argument, "--input")) {
-			options->input_path = value;
-		} else if (!strcmp(argument, "--mode")) {
-			if (!strcmp(value, "nv16"))
-				options->mode = PRESENT_MODE_NV16;
-			else if (!strcmp(value, "cpu-rgb565"))
-				options->mode = PRESENT_MODE_CPU_RGB565;
-			else
-				return false;
-		} else if (!strcmp(argument, "--repeat")) {
-			if (!parse_bounded(value, 1, MAX_REPEAT,
-					   &options->repeat))
-				return false;
-		} else if (!strcmp(argument, "--fps")) {
-			if (!parse_bounded(value, 1, MAX_FPS, &options->fps))
-				return false;
-		} else if (!strcmp(argument, "--hold-ms")) {
-			if (!parse_bounded(value, 0, MAX_HOLD_MS,
-					   &options->hold_ms))
-				return false;
-		} else if (!strcmp(argument, "--framebuffer")) {
-			options->framebuffer_path = value;
-		} else if (!strcmp(argument, "--tty")) {
-			options->tty_path = value;
-		} else if (!strcmp(argument, "--output")) {
-			options->output_path = value;
-		} else {
-			return false;
-		}
+	switch (option) {
+	case OPTION_INPUT:
+		options->input_path = value;
+		break;
+	case OPTION_MODE:
+		if (!strcmp(value, "nv16"))
+			options->mode = PRESENT_MODE_NV16;
+		else if (!strcmp(value, "cpu-rgb565"))
+			options->mode = PRESENT_MODE_CPU_RGB565;
+		else
+			return "--mode must be nv16 or cpu-rgb565";
+		break;
+	case OPTION_REPEAT:
+		if (!fplinux_cli_unsigned(value, 1, MAX_REPEAT,
+					  &options->repeat))
+			return "--repeat must be an integer from 1 to 4096";
+		break;
+	case OPTION_FPS:
+		if (!fplinux_cli_unsigned(value, 1, MAX_FPS, &options->fps))
+			return "--fps must be an integer from 1 to 30";
+		break;
+	case OPTION_HOLD_MS:
+		if (!fplinux_cli_unsigned(value, 0, MAX_HOLD_MS,
+					  &options->hold_ms))
+			return "--hold-ms must be an integer from 0 to 60000";
+		break;
+	case OPTION_FRAMEBUFFER:
+		options->framebuffer_path = value;
+		break;
+	case OPTION_TTY:
+		options->tty_path = value;
+		break;
+	case OPTION_OUTPUT:
+		options->output_path = value;
+		break;
 	}
-	return options->input_path &&
-	       (!options->output_path ||
-		options->mode == PRESENT_MODE_CPU_RGB565);
+	return NULL;
+}
+
+static enum fplinux_cli_result parse_options(int argc, char **argv,
+					     struct options *options)
+{
+	struct fplinux_cli_option arguments[] = {
+		[OPTION_INPUT] = { .name = "input",
+				   .metavar = "NV16",
+				   .help = "NV16 input frame",
+				   .flags = FPLINUX_CLI_REQUIRED |
+					    FPLINUX_CLI_REPEAT },
+		[OPTION_MODE] = { .name = "mode",
+				  .metavar = "nv16|cpu-rgb565",
+				  .help = "presentation path (default: nv16)",
+				  .flags = FPLINUX_CLI_REPEAT },
+		[OPTION_REPEAT] = { .name = "repeat",
+				    .metavar = "N",
+				    .help = "completed frames, 1..4096 (default: 1)",
+				    .flags = FPLINUX_CLI_REPEAT },
+		[OPTION_FPS] = { .name = "fps",
+				 .metavar = "N",
+				 .help = "absolute-deadline pace, 1..30 (default: 10)",
+				 .flags = FPLINUX_CLI_REPEAT },
+		[OPTION_HOLD_MS] = { .name = "hold-ms",
+				     .metavar = "N",
+				     .help = "hold final frame, 0..60000 (default: 0)",
+				     .flags = FPLINUX_CLI_REPEAT },
+		[OPTION_FRAMEBUFFER] = { .name = "framebuffer",
+					 .metavar = "PATH",
+					 .help = "framebuffer (default: /dev/fb0)",
+					 .flags = FPLINUX_CLI_REPEAT },
+		[OPTION_TTY] = { .name = "tty",
+				 .metavar = "PATH",
+				 .help = "console tty (default: /dev/tty0)",
+				 .flags = FPLINUX_CLI_REPEAT },
+		[OPTION_OUTPUT] = { .name = "output",
+				    .metavar = "RGB565",
+				    .help = "optional CPU-converted raw output path",
+				    .flags = FPLINUX_CLI_REPEAT },
+	};
+	struct fplinux_cli cli = {
+		.program = argv[0],
+		.description = "Present NV16 frames through the framebuffer.",
+		.options = arguments,
+		.option_count = sizeof(arguments) / sizeof(arguments[0]),
+		.parse_option = parse_option,
+		.data = options,
+	};
+	enum fplinux_cli_result result;
+
+	*options = (struct options){
+		.framebuffer_path = DEFAULT_FRAMEBUFFER,
+		.tty_path = DEFAULT_TTY,
+		.mode = PRESENT_MODE_NV16,
+		.repeat = DEFAULT_REPEAT,
+		.fps = DEFAULT_FPS,
+	};
+	result = fplinux_cli_parse(&cli, argc, argv);
+	if (result != FPLINUX_CLI_READY)
+		return result;
+	if (options->output_path && options->mode != PRESENT_MODE_CPU_RGB565)
+		return fplinux_cli_error(&cli,
+					 "--output requires --mode cpu-rgb565");
+	return FPLINUX_CLI_READY;
 }
 
 static void set_errno_error(char *error, size_t error_size, const char *message)
@@ -679,11 +713,11 @@ int main(int argc, char **argv)
 	bool interrupted = false;
 	bool failed = false;
 	int run_status;
+	enum fplinux_cli_result parse_result;
 
-	if (!parse_options(argc, argv, &options)) {
-		usage(stderr);
-		return EXIT_FAILURE;
-	}
+	parse_result = parse_options(argc, argv, &options);
+	if (parse_result != FPLINUX_CLI_READY)
+		return parse_result;
 	if (install_signal_handlers() < 0) {
 		perror("fplinux-present: cannot install signal handlers");
 		return EXIT_FAILURE;

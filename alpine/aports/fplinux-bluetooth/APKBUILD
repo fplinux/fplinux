@@ -10,13 +10,21 @@ depends="bluez bluez-obexd bluez-openrc dbus dbus-openrc"
 makedepends_build="clang22 lld22"
 makedepends_host="dbus-dev musl-dev pkgconf"
 options="!check"
-source="fplinux-bluetooth.c fplinux-obexd.initd fplinux-bluetooth-setup.initd"
+source="
+	fplinux-bluetooth.c
+	fplinux-cli.c
+	fplinux-cli.h
+	fplinux-obexd.initd
+	fplinux-bluetooth-setup.initd
+"
 builddir="$srcdir"
 
 build() {
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		-I"$srcdir" \
 		$(pkg-config --cflags dbus-1) "$srcdir/fplinux-bluetooth.c" \
-		$(pkg-config --libs dbus-1) $LDFLAGS -o fplinux-bluetooth
+		"$srcdir/fplinux-cli.c" $(pkg-config --libs dbus-1) $LDFLAGS \
+		-Wl,--gc-sections -o fplinux-bluetooth
 }
 
 package() {
@@ -32,7 +40,9 @@ package() {
 }
 
 sha512sums="
-5f5055866199e41aea6469c2c9b2652af3320bd55edd0124f81085dafff7e3201bc85e9b22a5960545479e72bb718ec9bc7232e5c490888d4a145ed9a5368424  fplinux-bluetooth.c
+a96f873a2c3b0536c750bf7106138934eb774888fb13ddef7aab6c87dab7cbbeecdda51c524c3bcfa1874086dbbd645b3a9bfedbd56d83f27f50da7f25ebe6b9  fplinux-bluetooth.c
+60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
+9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
 932215875be2fed5e599231bf68d08305f5b24db3ffe8bd5faf0e83fc0aae3633210d71ef1e653bcc405fe79964eb390006b6458032f5016e95655abe08edf77  fplinux-obexd.initd
 369569257926d5ff711107b7379bb71046ca97d98abd74ab4827eda0669ac900d7fcc7d926eeb2a82066f65436546319e773958667d3a776bd16b044c8828ce5  fplinux-bluetooth-setup.initd
 "

@@ -61,6 +61,7 @@ class FplinuxRotateHostToolTests(unittest.TestCase):
                 APORT / "fplinux-rotate.c",
                 APORT / "fplinux-rotate-core.c",
                 SHARED / "fplinux-fb-session.c",
+                SHARED / "fplinux-cli.c",
             )
             result = run_process(
                 [

@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 
 #include "armada-scene.h"
+#include "fplinux-cli.h"
 #include "fplinux-fb-session.h"
 
 #include <errno.h>
@@ -76,13 +77,13 @@ struct frame_statistics {
 	uint32_t render_us_max;
 };
 
-static volatile sig_atomic_t stop_requested;
+enum showcase_option {
+	SHOWCASE_OPTION_RUNS,
+	SHOWCASE_OPTION_KEYPAD_LED,
+	SHOWCASE_OPTION_LCD_BACKLIGHT,
+};
 
-static void print_usage(void)
-{
-	fprintf(stderr, "usage: fplinux-showcase [--runs N] [--keypad-led DIR] "
-			"[--lcd-backlight DIR]\n");
-}
+static volatile sig_atomic_t stop_requested;
 
 static bool parse_positive_runs(const char *value, uint64_t *runs,
 				const char **error)
@@ -111,45 +112,59 @@ static bool parse_positive_runs(const char *value, uint64_t *runs,
 	return true;
 }
 
-static bool parse_options(int argc, char **argv,
-			  struct showcase_options *options, const char **error)
+static const char *parse_showcase_option(size_t option, const char *value,
+					 void *data)
 {
-	bool runs_set = false;
-	int index;
+	struct showcase_options *options = data;
+	const char *argument_error;
 
-	memset(options, 0, sizeof(*options));
-	*error = NULL;
-	for (index = 1; index < argc; ++index) {
-		const char *argument = argv[index];
-
-		if (!strcmp(argument, "--runs")) {
-			if (runs_set || ++index == argc ||
-			    !parse_positive_runs(argv[index], &options->runs,
-						 error))
-				return false;
-			runs_set = true;
-			continue;
-		}
-		if (!strcmp(argument, "--keypad-led")) {
-			if (options->keypad_led || ++index == argc ||
-			    argv[index][0] == '\0')
-				break;
-			options->keypad_led = argv[index];
-			continue;
-		}
-		if (!strcmp(argument, "--lcd-backlight")) {
-			if (options->lcd_backlight || ++index == argc ||
-			    argv[index][0] == '\0')
-				break;
-			options->lcd_backlight = argv[index];
-			continue;
-		}
+	switch (option) {
+	case SHOWCASE_OPTION_RUNS:
+		if (!parse_positive_runs(value, &options->runs,
+					 &argument_error))
+			return argument_error;
+		break;
+	case SHOWCASE_OPTION_KEYPAD_LED:
+		options->keypad_led = value;
+		break;
+	case SHOWCASE_OPTION_LCD_BACKLIGHT:
+		options->lcd_backlight = value;
 		break;
 	}
-	if (index == argc)
-		return true;
-	*error = "invalid arguments";
-	return false;
+	return NULL;
+}
+
+static enum fplinux_cli_result parse_options(int argc, char **argv,
+					     struct showcase_options *parsed)
+{
+	struct fplinux_cli_option options[] = {
+		{
+			.name = "runs",
+			.metavar = "N",
+			.help = "run the showcase N times",
+		},
+		{
+			.name = "keypad-led",
+			.metavar = "DIR",
+			.help = "use the keypad LED brightness directory",
+		},
+		{
+			.name = "lcd-backlight",
+			.metavar = "DIR",
+			.help = "use the LCD backlight brightness directory",
+		},
+	};
+	struct fplinux_cli cli = {
+		.program = argv[0],
+		.description = "Display the Armada showcase.",
+		.options = options,
+		.option_count = ARRAY_SIZE(options),
+		.parse_option = parse_showcase_option,
+		.data = parsed,
+	};
+
+	memset(parsed, 0, sizeof(*parsed));
+	return fplinux_cli_parse(&cli, argc, argv);
 }
 
 static void catch_signal(int signal_number)
@@ -735,7 +750,7 @@ int main(int argc, char **argv)
 	bool hardware_open = false;
 	bool success = false;
 	bool report_result = false;
-	const char *argument_error;
+	enum fplinux_cli_result parse_result;
 	char error[160] = { 0 };
 
 	memset(&display, 0, sizeof(display));
@@ -743,11 +758,9 @@ int main(int argc, char **argv)
 	hardware.keypad = -1;
 	hardware.vibrator = -1;
 	hardware.lcd_original = -1;
-	if (!parse_options(argc, argv, &options, &argument_error)) {
-		fprintf(stderr, "fplinux-showcase: %s\n", argument_error);
-		print_usage();
-		return EXIT_FAILURE;
-	}
+	parse_result = parse_options(argc, argv, &options);
+	if (parse_result != FPLINUX_CLI_READY)
+		return parse_result;
 	frame_limit = options.runs * ARMADA_DURATION_FRAMES;
 	if (!install_signal_handlers()) {
 		fprintf(stderr,

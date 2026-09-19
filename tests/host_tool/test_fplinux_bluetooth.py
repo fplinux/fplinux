@@ -19,6 +19,7 @@ from tests.process import run_process
 
 ROOT = Path(__file__).resolve().parents[2]
 CLIENT_SOURCE = ROOT / "alpine/aports/fplinux-bluetooth/fplinux-bluetooth.c"
+SHARED_INCLUDE = ROOT / "alpine/shared"
 SERVICE_SOURCE = ROOT / "tests/host_tool/fplinux-bluetooth-service.c"
 PEER = "01:23:45:67:89:AB"
 CONNECTED = "connected 01:23:45:67:89:AB via bnep0; configure IP, DHCP and NAT separately\n"
@@ -66,9 +67,14 @@ class FplinuxBluetoothHostToolTests(unittest.TestCase):
         cls.client = cls.work / "fplinux-bluetooth"
         cls.service = cls.work / "fplinux-bluetooth-service"
         cls.driver_directory = cls.work / "platform-driver"
-        for source, output, name in (
-            (CLIENT_SOURCE, cls.client, "compile FPLinux Bluetooth client"),
-            (SERVICE_SOURCE, cls.service, "compile FPLinux Bluetooth test service"),
+        for source, output, name, extra_sources in (
+            (
+                CLIENT_SOURCE,
+                cls.client,
+                "compile FPLinux Bluetooth client",
+                [str(SHARED_INCLUDE / "fplinux-cli.c")],
+            ),
+            (SERVICE_SOURCE, cls.service, "compile FPLinux Bluetooth test service", []),
         ):
             run_process(
                 [
@@ -77,9 +83,11 @@ class FplinuxBluetoothHostToolTests(unittest.TestCase):
                     "-Wall",
                     "-Wextra",
                     "-Werror",
+                    f"-I{SHARED_INCLUDE}",
                     f'-DFPLINUX_BLUETOOTH_DRIVER_DIR="{cls.driver_directory}"',
                     *cflags,
                     str(source),
+                    *extra_sources,
                     "-o",
                     str(output),
                     *libraries,
@@ -181,6 +189,56 @@ class FplinuxBluetoothHostToolTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(start.read_bytes(), b"1\n")
         self.assertIn("CM4 transport started", result.stdout)
+
+    def test_help_leaves_a_bound_controller_stopped(self) -> None:
+        """Root and subcommand help cannot write the synthetic start control."""
+        directory = self.prepare_driver_directory()
+        device = directory / "400a0000.bluetooth"
+        device.mkdir()
+        start = device / "start"
+        start.write_bytes(b"")
+
+        for arguments in (
+            ("-h",),
+            ("--help",),
+            ("enable", "--help"),
+            ("enable", "--if-present", "-h"),
+            ("enable", "--unknown", "--help"),
+            ("send", "--help"),
+            ("receive", PEER, "--help"),
+            ("network", "--help"),
+        ):
+            with self.subTest(arguments=arguments):
+                result = self.run_client(*arguments)
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("Usage:", result.stdout)
+                self.assertIn("--help", result.stdout)
+                self.assertEqual(result.stderr, "")
+                self.assertEqual(start.read_bytes(), b"")
+
+    def test_invalid_command_arguments_exit_before_a_bus_operation(self) -> None:
+        """Syntax and value errors are diagnosed with no running BlueZ service."""
+        for arguments in (
+            (),
+            ("unknown",),
+            ("enable", "extra"),
+            ("enable", "--if-present=value"),
+            ("send", PEER),
+            ("send", "invalid-peer", "unused"),
+            ("network", PEER, "extra"),
+            ("receive", PEER, "/unused", "0"),
+            ("receive", PEER, "/unused", "3601"),
+            ("receive", PEER, "/unused", "1tail"),
+            ("receive", PEER, "/unused", "99999999999999999999999"),
+            ("enable", "--", "--help"),
+        ):
+            with self.subTest(arguments=arguments):
+                result = self.run_client(*arguments)
+
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("--help", result.stderr)
 
     def test_enable_missing_board_is_optional_only_when_requested(self) -> None:
         """Boot may omit an unsupported controller; explicit enable must explain it."""

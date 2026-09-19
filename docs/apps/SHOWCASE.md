@@ -47,6 +47,10 @@ Load the image using the archive's top-level `README.txt` and the shared
 
 ## Run
 
+`fplinux-showcase -h` or `fplinux-showcase --help` lists the options without
+starting the presentation. Value options accept `--name VALUE` or
+`--name=VALUE` and may each appear only once.
+
 Start the complete presentation from the host. The command returns when the
 presentation exits:
 

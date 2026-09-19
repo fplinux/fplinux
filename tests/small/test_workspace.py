@@ -68,6 +68,8 @@ class WorkspaceSnapshotTests(unittest.TestCase):
             target_copy = write("targets/phone/kernel/copy.c")
             platform_patch = write("shared/platform.patch")
             host_tool = write("tools/loader.c")
+            host_cli_source = write("alpine/shared/fplinux-cli.c")
+            host_cli_header = write("alpine/shared/fplinux-cli.h")
             host_input = write("tools/local-input.h")
             host_patch = write("tools/local.patch")
             unrelated = write("unselected.txt")
@@ -167,6 +169,8 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                     target_copy,
                     platform_patch,
                     host_tool,
+                    host_cli_source,
+                    host_cli_header,
                     host_input,
                     host_patch,
                 ):

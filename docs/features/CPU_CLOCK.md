@@ -29,6 +29,13 @@ Optional arguments select the number of loop iterations and measurement rounds:
 fplinux-cpuclock [iterations] [rounds]
 ```
 
+The defaults are 2000000 iterations and 5 rounds. Each supplied value must be a
+complete positive decimal integer from 1 through 4294967295. Extra positional
+arguments are rejected. Use `fplinux-cpuclock -h` or
+`fplinux-cpuclock --help` to show the syntax without running the workload.
+
 This is a diagnostic workload, not a performance guarantee, thermal test or
-clock-control interface. The selected target document states whether the
-observer and helper have been exercised on that exact phone.
+clock-control interface. Its result describes the machine on which that
+workload ran; a host run is not evidence of the phone's clock. The selected
+target document states whether the observer and helper have been exercised on
+that exact phone.

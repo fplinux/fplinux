@@ -15,6 +15,11 @@ Preparation requires a source checkout; a standalone archive's runner does not
 provide firmware preparation. Use an image built with the inputs fitted to that
 phone, not firmware copied from another device.
 
+`fplinux-bluetooth -h` or `fplinux-bluetooth --help` lists the available
+commands. Place `-h` or `--help` after `enable`, `send`, `receive`, or `network`
+for that command's syntax. Help is shown without contacting D-Bus or changing
+the controller state.
+
 ## Pair and trust a peer
 
 Use `bluetoothctl` on both peers and identify each controller by its exact MAC

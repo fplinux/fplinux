@@ -43,8 +43,11 @@ class FPLinuxChargeHostToolTests(unittest.TestCase):
                 "-Wall",
                 "-Wextra",
                 "-Werror",
+                "-I",
+                str(ROOT / "alpine/shared"),
                 f'-DFPLINUX_CHARGE_COUNTER_PATH="{cls.counter}"',
                 str(SOURCE),
+                str(ROOT / "alpine/shared" / "fplinux-cli.c"),
                 "-o",
                 str(cls.executable),
             ],
@@ -86,8 +89,11 @@ class FPLinuxChargeHostToolTests(unittest.TestCase):
                 "-Wall",
                 "-Wextra",
                 "-Werror",
+                "-I",
+                str(ROOT / "alpine/shared"),
                 f'-DFPLINUX_CHARGE_COUNTER_GLOB="{counter_glob}"',
                 str(SOURCE),
+                str(ROOT / "alpine/shared" / "fplinux-cli.c"),
                 "-o",
                 str(executable),
             ],
@@ -134,6 +140,118 @@ class FPLinuxChargeHostToolTests(unittest.TestCase):
             r"^fplinux-charge: elapsed=\d+\.\d{3} s "
             r"charge_delta=\+120 uAh average_current=\+\d+ uA\n$",
         )
+
+    def test_help_exits_without_reading_a_counter(self) -> None:
+        """Recognized help takes priority even when a command or option is invalid."""
+        for arguments in (["-h"], ["--help"], ["--unknown", "--help"]):
+            with self.subTest(arguments=arguments):
+                result = run_process(
+                    [str(self.executable), *arguments],
+                    name="read fplinux-charge help without a counter",
+                    timeout=5,
+                )
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stderr, "")
+                self.assertIn("Usage:", result.stdout)
+                self.assertIn("--help", result.stdout)
+                self.assertIn("--counter", result.stdout)
+                self.assertIn("command", result.stdout)
+
+    def test_help_does_not_execute_the_child(self) -> None:
+        """Help exits before a valid counter and child command can have effects."""
+        self.add_battery(1000)
+        sentinel = self.work / "help-command-ran"
+
+        result = run_process(
+            [
+                str(self.executable),
+                "--help",
+                "--",
+                "/bin/sh",
+                "-c",
+                'printf ran > "$1"',
+                "fplinux-charge-test",
+                str(sentinel),
+            ],
+            name="read fplinux-charge help with a child command",
+            timeout=5,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        self.assertFalse(sentinel.exists())
+
+    def test_invalid_arguments_fail_before_measurement(self) -> None:
+        """Bad options or a missing command separator are syntax errors."""
+        cases: tuple[list[str], ...] = (
+            [],
+            ["--"],
+            ["--", ""],
+            ["/bin/true"],
+            ["--unknown", "--", "/bin/true"],
+            ["--counter"],
+            ["--counter=", "--", "/bin/true"],
+            ["--counter", "", "--", "/bin/true"],
+            ["--counter", "first", "--counter=second", "--", "/bin/true"],
+            ["--counter", "--", "/bin/true"],
+            ["unexpected", "--", "/bin/true"],
+            ["--counter", "counter", "unexpected", "--", "/bin/true"],
+        )
+        for arguments in cases:
+            with self.subTest(arguments=arguments):
+                result = run_process(
+                    [str(self.executable), *arguments],
+                    name="reject invalid fplinux-charge arguments",
+                    timeout=5,
+                )
+
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("--help", result.stderr)
+                self.assertNotIn("cannot read", result.stderr)
+
+    def test_child_arguments_are_preserved_after_the_separator(self) -> None:
+        """Child options, empty arguments and separators reach the child unchanged."""
+        self.add_battery(1000)
+
+        result = self.run_charge(
+            [
+                "/bin/sh",
+                "-c",
+                'printf "<%s>\\n" "$@"',
+                "fplinux-charge-test",
+                "--help",
+                "--counter",
+                "two words",
+                "",
+                "--",
+                "--counter=child",
+            ]
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout,
+            "<--help>\n<--counter>\n<two words>\n<>\n<-->\n<--counter=child>\n",
+        )
+        self.assertIn("charge_delta=+0 uAh", result.stderr)
+
+    def test_counter_value_can_look_like_an_option(self) -> None:
+        """Counter values named -- or --help are paths, with a separate child delimiter."""
+        for name in ("--", "--help"):
+            with self.subTest(name=name):
+                (self.work / name).write_text("1000\n", encoding="ascii")
+                result = run_process(
+                    [str(self.executable), "--counter", name, "--", "/bin/true"],
+                    name="run fplinux-charge with an option-shaped counter path",
+                    timeout=5,
+                    cwd=self.work,
+                )
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("charge_delta=+0 uAh", result.stderr)
 
     def test_preserves_child_exit_status(self) -> None:
         """A normally exiting child keeps its nonzero status after measurement."""
@@ -261,22 +379,18 @@ class FPLinuxChargeHostToolTests(unittest.TestCase):
 
     def test_explicit_counter_overrides_default_discovery(self) -> None:
         """A caller can select a known counter without class discovery."""
-        counter = self.add_battery(1000)
+        counter = self.work / "explicit_counter"
+        counter.write_text("1000\n", encoding="ascii")
+        for arguments in (["--counter", str(counter)], [f"--counter={counter}"]):
+            with self.subTest(arguments=arguments):
+                result = run_process(
+                    [str(self.executable), *arguments, "--", "/bin/true"],
+                    name="run fplinux-charge explicit counter",
+                    timeout=5,
+                )
 
-        result = run_process(
-            [
-                str(self.executable),
-                "--counter",
-                str(counter),
-                "--",
-                "/bin/true",
-            ],
-            name="run fplinux-charge explicit counter",
-            timeout=5,
-        )
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("charge_delta=+0 uAh", result.stderr)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("charge_delta=+0 uAh", result.stderr)
 
 
 if __name__ == "__main__":

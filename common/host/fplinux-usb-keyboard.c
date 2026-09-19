@@ -3,9 +3,11 @@
 
 #define _DEFAULT_SOURCE
 
+#include "fplinux-cli.h"
+
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <getopt.h>
 #include <libusb.h>
 #include <linux/input.h>
 #include <poll.h>
@@ -58,86 +60,164 @@ struct keyboard_forward_state {
 
 static volatile sig_atomic_t signal_requested;
 
-static void usage(FILE *stream)
-{
-	fprintf(stream,
-		"Usage: fplinux-usb-keyboard [OPTIONS] --interface N "
-		"--keyboard EVDEV\n"
-		"\n"
-		"Forward one Linux evdev keyboard to the FPLinux generic-serial "
-		"USB\n"
-		"function. The selected device is exclusively grabbed while "
-		"forwarding.\n"
-		"\n"
-		"Options:\n"
-		"  --vid HEX          exact USB vendor ID (default: 0525)\n"
-		"  --pid HEX          exact USB product ID (default: a4a6)\n"
-		"  --interface N      exact generic-serial interface (required)\n"
-		"  --keyboard EVDEV   evdev device to grab and forward (required)\n"
-		"  --bus N            select one USB bus\n"
-		"  --address N        select one USB device address\n"
-		"  --timeout-ms N     bulk-transfer timeout (default: 250)\n"
-		"  --wait N           wait up to N seconds (default: 30)\n"
-		"  --no-detach        do not detach an active kernel USB driver\n"
-		"  --list             list visible USB devices and exit\n"
-		"  --self-test        check the keyboard wire format and exit\n"
-		"  -h, --help         show this help and exit\n");
-}
-
 static void signal_handler(int number)
 {
 	(void)number;
 	signal_requested = 1;
 }
 
-static bool parse_unsigned(const char *text, int base, unsigned long maximum,
-			   unsigned long *value)
+static bool parse_unsigned(const char *text, int base, unsigned long minimum,
+			   unsigned long maximum, unsigned long *value)
 {
+	const unsigned char *cursor;
 	char *end = NULL;
 	unsigned long parsed;
 
-	if (text == NULL || text[0] == '\0' || text[0] == '-')
+	if (text == NULL)
+		return false;
+	cursor = (const unsigned char *)text;
+	while (isspace(*cursor))
+		++cursor;
+	if (*cursor == '\0' || *cursor == '-')
 		return false;
 	errno = 0;
 	parsed = strtoul(text, &end, base);
-	if (errno != 0 || end == text || *end != '\0' || parsed > maximum)
+	if (errno != 0 || end == text || *end != '\0' || parsed < minimum ||
+	    parsed > maximum)
 		return false;
 	*value = parsed;
 	return true;
 }
 
-static int parse_options(int argc, char **argv, struct options *options)
+enum keyboard_option {
+	OPTION_VID,
+	OPTION_PID,
+	OPTION_INTERFACE,
+	OPTION_KEYBOARD,
+	OPTION_BUS,
+	OPTION_ADDRESS,
+	OPTION_TIMEOUT,
+	OPTION_WAIT,
+	OPTION_NO_DETACH,
+	OPTION_LIST,
+	OPTION_SELF_TEST,
+};
+
+static const char *parse_option(size_t option, const char *text, void *data)
 {
-	enum {
-		OPTION_VENDOR_ID = 1000,
-		OPTION_PRODUCT_ID,
-		OPTION_INTERFACE,
-		OPTION_KEYBOARD,
-		OPTION_BUS,
-		OPTION_ADDRESS,
-		OPTION_TIMEOUT,
-		OPTION_WAIT,
-		OPTION_NO_DETACH,
-		OPTION_LIST,
-		OPTION_SELF_TEST,
-	};
-	static const struct option long_options[] = {
-		{ "vid", required_argument, NULL, OPTION_VENDOR_ID },
-		{ "pid", required_argument, NULL, OPTION_PRODUCT_ID },
-		{ "interface", required_argument, NULL, OPTION_INTERFACE },
-		{ "keyboard", required_argument, NULL, OPTION_KEYBOARD },
-		{ "bus", required_argument, NULL, OPTION_BUS },
-		{ "address", required_argument, NULL, OPTION_ADDRESS },
-		{ "timeout-ms", required_argument, NULL, OPTION_TIMEOUT },
-		{ "wait", required_argument, NULL, OPTION_WAIT },
-		{ "no-detach", no_argument, NULL, OPTION_NO_DETACH },
-		{ "list", no_argument, NULL, OPTION_LIST },
-		{ "self-test", no_argument, NULL, OPTION_SELF_TEST },
-		{ "help", no_argument, NULL, 'h' },
-		{ NULL, 0, NULL, 0 },
-	};
+	struct options *options = data;
 	unsigned long value;
-	int option;
+
+	switch (option) {
+	case OPTION_VID:
+		if (!parse_unsigned(text, 16, 0, UINT16_MAX, &value))
+			return "--vid must be a 16-bit hexadecimal value";
+		options->vid = (uint16_t)value;
+		break;
+	case OPTION_PID:
+		if (!parse_unsigned(text, 16, 0, UINT16_MAX, &value))
+			return "--pid must be a 16-bit hexadecimal value";
+		options->pid = (uint16_t)value;
+		break;
+	case OPTION_INTERFACE:
+		if (!parse_unsigned(text, 0, 0, 255, &value))
+			return "--interface must be in 0..255";
+		options->interface_number = (int)value;
+		break;
+	case OPTION_KEYBOARD:
+		options->keyboard_device = text;
+		break;
+	case OPTION_BUS:
+		if (!parse_unsigned(text, 0, 0, 255, &value))
+			return "--bus must be in 0..255";
+		options->bus_number = (int)value;
+		break;
+	case OPTION_ADDRESS:
+		if (!parse_unsigned(text, 0, 0, 255, &value))
+			return "--address must be in 0..255";
+		options->device_address = (int)value;
+		break;
+	case OPTION_TIMEOUT:
+		if (!parse_unsigned(text, 0, 1, 60000, &value))
+			return "--timeout-ms must be in 1..60000";
+		options->timeout_ms = (unsigned int)value;
+		break;
+	case OPTION_WAIT:
+		if (!parse_unsigned(text, 0, 0, 3600, &value))
+			return "--wait must be in 0..3600";
+		options->wait_seconds = (unsigned int)value;
+		break;
+	case OPTION_NO_DETACH:
+		options->detach_kernel_driver = false;
+		break;
+	case OPTION_LIST:
+		options->list_devices = true;
+		break;
+	case OPTION_SELF_TEST:
+		options->self_test = true;
+		break;
+	}
+	return NULL;
+}
+
+static enum fplinux_cli_result parse_options(int argc, char **argv,
+					     struct options *options)
+{
+	struct fplinux_cli_option arguments[] = {
+		[OPTION_VID] = { .name = "vid",
+				 .metavar = "HEX",
+				 .help = "exact USB vendor ID (default: 0525)",
+				 .flags = FPLINUX_CLI_REPEAT },
+		[OPTION_PID] = { .name = "pid",
+				 .metavar = "HEX",
+				 .help = "exact USB product ID (default: a4a6)",
+				 .flags = FPLINUX_CLI_REPEAT },
+		[OPTION_INTERFACE] = { .name = "interface",
+				       .metavar = "N",
+				       .help = "exact generic-serial interface (required)",
+				       .flags = FPLINUX_CLI_REPEAT },
+		[OPTION_KEYBOARD] = { .name = "keyboard",
+				      .metavar = "EVDEV",
+				      .help = "evdev device to grab and forward (required)",
+				      .flags = FPLINUX_CLI_REPEAT },
+		[OPTION_BUS] = { .name = "bus",
+				 .metavar = "N",
+				 .help = "select one USB bus",
+				 .flags = FPLINUX_CLI_REPEAT },
+		[OPTION_ADDRESS] = { .name = "address",
+				     .metavar = "N",
+				     .help = "select one USB device address",
+				     .flags = FPLINUX_CLI_REPEAT },
+		[OPTION_TIMEOUT] = { .name = "timeout-ms",
+				     .metavar = "N",
+				     .help = "bulk-transfer timeout (default: 250)",
+				     .flags = FPLINUX_CLI_REPEAT },
+		[OPTION_WAIT] = { .name = "wait",
+				  .metavar = "N",
+				  .help = "wait up to N seconds (default: 30)",
+				  .flags = FPLINUX_CLI_REPEAT },
+		[OPTION_NO_DETACH] = { .name = "no-detach",
+				       .help = "do not detach an active kernel USB driver",
+				       .flags = FPLINUX_CLI_REPEAT },
+		[OPTION_LIST] = { .name = "list",
+				  .help = "list visible USB devices and exit",
+				  .flags = FPLINUX_CLI_REPEAT },
+		[OPTION_SELF_TEST] = { .name = "self-test",
+				       .help = "check the keyboard wire format and exit",
+				       .flags = FPLINUX_CLI_REPEAT },
+	};
+	struct fplinux_cli cli = {
+		.program = argv[0],
+		.description =
+			"Forward one Linux evdev keyboard to the FPLinux "
+			"generic-serial USB function.\n"
+			"The selected device is exclusively grabbed while forwarding.",
+		.options = arguments,
+		.option_count = sizeof(arguments) / sizeof(arguments[0]),
+		.parse_option = parse_option,
+		.data = options,
+	};
+	enum fplinux_cli_result result;
 
 	*options = (struct options){
 		.vid = FPLINUX_USB_KEYBOARD_DEFAULT_VENDOR_ID,
@@ -149,126 +229,31 @@ static int parse_options(int argc, char **argv, struct options *options)
 		.wait_seconds = FPLINUX_USB_KEYBOARD_DEFAULT_WAIT_SECONDS,
 		.detach_kernel_driver = true,
 	};
-
-	while ((option = getopt_long(argc, argv, "h", long_options, NULL)) !=
-	       -1) {
-		switch (option) {
-		case OPTION_VENDOR_ID:
-			if (!parse_unsigned(optarg, 16, UINT16_MAX, &value)) {
-				fprintf(stderr,
-					"fplinux-usb-keyboard: invalid --vid: %s\n",
-					optarg);
-				return -1;
-			}
-			options->vid = (uint16_t)value;
-			break;
-		case OPTION_PRODUCT_ID:
-			if (!parse_unsigned(optarg, 16, UINT16_MAX, &value)) {
-				fprintf(stderr,
-					"fplinux-usb-keyboard: invalid --pid: %s\n",
-					optarg);
-				return -1;
-			}
-			options->pid = (uint16_t)value;
-			break;
-		case OPTION_INTERFACE:
-			if (!parse_unsigned(optarg, 0, 255, &value)) {
-				fprintf(stderr,
-					"fplinux-usb-keyboard: invalid --interface: %s\n",
-					optarg);
-				return -1;
-			}
-			options->interface_number = (int)value;
-			break;
-		case OPTION_KEYBOARD:
-			options->keyboard_device = optarg;
-			break;
-		case OPTION_BUS:
-			if (!parse_unsigned(optarg, 0, 255, &value)) {
-				fprintf(stderr,
-					"fplinux-usb-keyboard: invalid --bus: %s\n",
-					optarg);
-				return -1;
-			}
-			options->bus_number = (int)value;
-			break;
-		case OPTION_ADDRESS:
-			if (!parse_unsigned(optarg, 0, 255, &value)) {
-				fprintf(stderr,
-					"fplinux-usb-keyboard: invalid --address: %s\n",
-					optarg);
-				return -1;
-			}
-			options->device_address = (int)value;
-			break;
-		case OPTION_TIMEOUT:
-			if (!parse_unsigned(optarg, 0, 60000, &value) ||
-			    value == 0) {
-				fprintf(stderr,
-					"fplinux-usb-keyboard: invalid --timeout-ms: %s\n",
-					optarg);
-				return -1;
-			}
-			options->timeout_ms = (unsigned int)value;
-			break;
-		case OPTION_WAIT:
-			if (!parse_unsigned(optarg, 0, 3600, &value)) {
-				fprintf(stderr,
-					"fplinux-usb-keyboard: invalid --wait: %s\n",
-					optarg);
-				return -1;
-			}
-			options->wait_seconds = (unsigned int)value;
-			break;
-		case OPTION_NO_DETACH:
-			options->detach_kernel_driver = false;
-			break;
-		case OPTION_LIST:
-			options->list_devices = true;
-			break;
-		case OPTION_SELF_TEST:
-			options->self_test = true;
-			break;
-		case 'h':
-			usage(stdout);
-			exit(0);
-		default:
-			usage(stderr);
-			return -1;
-		}
-	}
-
-	if (optind != argc) {
-		fprintf(stderr,
-			"fplinux-usb-keyboard: unexpected positional argument: %s\n",
-			argv[optind]);
-		return -1;
-	}
-	if ((options->bus_number < 0) != (options->device_address < 0)) {
-		fprintf(stderr,
-			"fplinux-usb-keyboard: --bus and --address must be used together\n");
-		return -1;
-	}
+	result = fplinux_cli_parse(&cli, argc, argv);
+	if (result != FPLINUX_CLI_READY)
+		return result;
+	if ((arguments[OPTION_BUS].count == 0) !=
+	    (arguments[OPTION_ADDRESS].count == 0))
+		return fplinux_cli_error(
+			&cli, "--bus and --address must be used together");
 	if (options->list_devices || options->self_test) {
-		if (options->list_devices && options->self_test) {
-			fprintf(stderr,
-				"fplinux-usb-keyboard: --list and --self-test are mutually exclusive\n");
-			return -1;
-		}
-		if (options->keyboard_device != NULL ||
-		    options->interface_number >= 0) {
-			fprintf(stderr,
-				"fplinux-usb-keyboard: --list and --self-test cannot be combined with forwarding options\n");
-			return -1;
-		}
-		return 0;
+		if (options->list_devices && options->self_test)
+			return fplinux_cli_error(
+				&cli,
+				"--list and --self-test are mutually exclusive");
+		if (arguments[OPTION_KEYBOARD].count ||
+		    arguments[OPTION_INTERFACE].count)
+			return fplinux_cli_error(
+				&cli,
+				"--list and --self-test cannot be combined with "
+				"forwarding options");
+		return FPLINUX_CLI_READY;
 	}
-	if (options->interface_number < 0 || options->keyboard_device == NULL) {
-		fprintf(stderr,
-			"fplinux-usb-keyboard: --interface and --keyboard are required\n");
-		return -1;
-	}
-	return 0;
+	if (!arguments[OPTION_INTERFACE].count ||
+	    !arguments[OPTION_KEYBOARD].count)
+		return fplinux_cli_error(
+			&cli, "--interface and --keyboard are required");
+	return FPLINUX_CLI_READY;
 }
 
 static int list_devices(libusb_context *context)
@@ -879,11 +864,13 @@ int main(int argc, char **argv)
 	struct endpoint_pair pair = { .interface_number = -1 };
 	bool detached = false;
 	bool claimed = false;
+	enum fplinux_cli_result parse_result;
 	int result;
 	int exit_status = 1;
 
-	if (parse_options(argc, argv, &options) != 0)
-		return 2;
+	parse_result = parse_options(argc, argv, &options);
+	if (parse_result != FPLINUX_CLI_READY)
+		return parse_result;
 	if (options.self_test)
 		return self_test();
 	result = libusb_init(&context);
