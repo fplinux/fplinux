@@ -61,6 +61,9 @@ def _select_groups(formats: SourceFormats, selected: frozenset[str]) -> SourceFo
         keep(formats.posix_shell),
         keep(formats.bash),
         keep(formats.c),
+        keep(formats.javascript),
+        keep(formats.explicit_json),
+        keep(formats.posix_shell_fragments),
     )
 
 
@@ -124,7 +127,7 @@ def formatter_commands(
         commands.append(
             ("taplo", ["taplo", "fmt", "--", *_formatter_paths(groups.toml, workspace)])
         )
-    prettier = (*groups.markdown, *groups.json)
+    prettier = (*groups.markdown, *groups.json, *groups.javascript)
     if prettier:
         commands.append(
             (
@@ -138,11 +141,26 @@ def formatter_commands(
                 ],
             )
         )
+    if groups.explicit_json:
+        commands.append(
+            (
+                "prettier-json",
+                [
+                    "prettier",
+                    "--write",
+                    "--parser",
+                    "json",
+                    "--",
+                    *_formatter_paths(groups.explicit_json, workspace),
+                ],
+            )
+        )
     if groups.python:
         commands.append(
             ("ruff", ["ruff", "format", "--", *_formatter_paths(groups.python, workspace)])
         )
-    if groups.posix_shell:
+    posix_shell = (*groups.posix_shell, *groups.posix_shell_fragments)
+    if posix_shell:
         commands.append(
             (
                 "shfmt-posix",
@@ -152,7 +170,7 @@ def formatter_commands(
                     "-ln",
                     "posix",
                     "--",
-                    *_formatter_paths(groups.posix_shell, workspace),
+                    *_formatter_paths(posix_shell, workspace),
                 ],
             )
         )

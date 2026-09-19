@@ -22,6 +22,9 @@ class SourceFormats:
     posix_shell: tuple[str, ...]
     bash: tuple[str, ...]
     c: tuple[str, ...]
+    javascript: tuple[str, ...]
+    explicit_json: tuple[str, ...]
+    posix_shell_fragments: tuple[str, ...]
 
     def supported(self) -> frozenset[str]:
         """Return every source path owned by one formatter."""
@@ -34,6 +37,9 @@ class SourceFormats:
                 *self.posix_shell,
                 *self.bash,
                 *self.c,
+                *self.javascript,
+                *self.explicit_json,
+                *self.posix_shell_fragments,
             )
         )
 
@@ -51,6 +57,24 @@ def shell_dialect(raw_first_line: bytes) -> Literal["posix", "bash"] | None:
     return None
 
 
+def is_javascript_source(relative: str) -> bool:
+    """Identify the project-owned JavaScript configuration."""
+    return relative == "commitlint.config.mjs"
+
+
+def is_explicit_json_source(relative: str) -> bool:
+    """Identify JSON whose filename is not recognized by Prettier."""
+    return relative == "alpine/aports/fplinux-micropythonos/fplinux-keypad-test.MANIFEST.JSON"
+
+
+def is_posix_shell_fragment(relative: str) -> bool:
+    """Identify sourced configuration files with a declared POSIX dialect."""
+    return relative in {
+        "alpine/abuild.conf",
+        "alpine/aports/fplinux-micropythonos-storage/micropythonos.conf",
+    }
+
+
 def classify_source_formats(files: Sequence[Path], *, root: Path) -> SourceFormats:
     """Apply the quality gate's formatter routing to regular source paths."""
     python: list[str] = []
@@ -60,6 +84,9 @@ def classify_source_formats(files: Sequence[Path], *, root: Path) -> SourceForma
     posix_shell: list[str] = []
     bash: list[str] = []
     c: list[str] = []
+    javascript: list[str] = []
+    explicit_json: list[str] = []
+    posix_shell_fragments: list[str] = []
 
     for path in files:
         relative = path.relative_to(root).as_posix()
@@ -73,7 +100,14 @@ def classify_source_formats(files: Sequence[Path], *, root: Path) -> SourceForma
             toml.append(relative)
         elif path.suffix in {".c", ".h"}:
             c.append(relative)
+        elif is_javascript_source(relative):
+            javascript.append(relative)
+        elif is_explicit_json_source(relative):
+            explicit_json.append(relative)
 
+        if is_posix_shell_fragment(relative):
+            posix_shell_fragments.append(relative)
+            continue
         if path.suffix not in {"", ".initd", ".sh"}:
             continue
         with path.open("rb") as stream:
@@ -92,4 +126,7 @@ def classify_source_formats(files: Sequence[Path], *, root: Path) -> SourceForma
         tuple(sorted(posix_shell)),
         tuple(sorted(bash)),
         tuple(sorted(c)),
+        tuple(sorted(javascript)),
+        tuple(sorted(explicit_json)),
+        tuple(sorted(posix_shell_fragments)),
     )

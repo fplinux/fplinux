@@ -42,7 +42,12 @@ from .config import (
 from .image_state import ImageState, ImageStateError, load_image_state, publish_image_state
 from .output import RunReporter
 from .prune import discard_superseded_profile_logs
-from .source_formats import shell_dialect
+from .source_formats import (
+    is_explicit_json_source,
+    is_javascript_source,
+    is_posix_shell_fragment,
+    shell_dialect,
+)
 from .workspace import (
     WorkspaceFile,
     WorkspaceSnapshot,
@@ -963,6 +968,8 @@ def analyzer_cache_names(scopes: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def _is_shell_source(file: WorkspaceFile) -> bool:
+    if is_posix_shell_fragment(file.path):
+        return True
     if Path(file.path).suffix not in {"", ".initd", ".sh"}:
         return False
     first_line = file.contents.splitlines()[:1]
@@ -985,7 +992,7 @@ def _source_scope_uses_file(  # noqa: PLR0911
     """Return whether one captured file can affect the selected source scope."""
     path = PurePath(file.path)
     name = path.name
-    suffix = path.suffix.lower()
+    suffix = path.suffix
     parts = path.parts
     if file.path in _CHECK_IMPLEMENTATION:
         return True
@@ -1004,6 +1011,8 @@ def _source_scope_uses_file(  # noqa: PLR0911
         return (
             suffix == ".toml"
             or (suffix in {".json", ".jsonc"} and name != "package-lock.json")
+            or is_javascript_source(file.path)
+            or is_explicit_json_source(file.path)
             or name == ".editorconfig"
             or _is_prettier_configuration(file.path)
         )

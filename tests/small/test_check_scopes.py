@@ -543,6 +543,59 @@ class CheckScopeTests(unittest.TestCase):
             check_scope_closure_digest("shell", external_changed),
         )
 
+    def test_configuration_receipts_follow_the_files_checked_by_each_scope(self) -> None:
+        """Relevant edits miss while unsupported neighbors and npm's lock remain hits."""
+        cases = (
+            (
+                "metadata",
+                {
+                    "commitlint.config.mjs": b"export default {};\n",
+                    "alpine/aports/fplinux-micropythonos/fplinux-keypad-test.MANIFEST.JSON": (
+                        b'{"name": "Keypad"}\n'
+                    ),
+                },
+                {"other.mjs": b"export default {};\n", "other.JSON": b"{}\n"},
+            ),
+            (
+                "shell",
+                {
+                    "alpine/abuild.conf": b"CFLAGS=-Os\n",
+                    "alpine/aports/fplinux-micropythonos-storage/micropythonos.conf": (
+                        b"MPOS_STORAGE=/mnt/card\n"
+                    ),
+                },
+                {"other.conf": b"setting=value\n"},
+            ),
+        )
+
+        def recipe(scope: str, contents: dict[str, bytes]) -> CheckReceiptRecipe:
+            snapshot = WorkspaceSnapshot(
+                tuple(WorkspaceFile(path, data, 0o644) for path, data in contents.items()),
+                "a" * 64,
+            )
+            return check_scope_receipt_recipe(
+                scope,
+                check_scope_closure_digest(scope, snapshot),
+                image_generation="b" * 64,
+                orchestration_recipe="c" * 64,
+            )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary)
+            for scope, checked, unsupported in cases:
+                unrelated = {**unsupported, "package-lock.json": b"{}\n"}
+                contents = {**checked, **unrelated}
+                publish_success_receipt(cache, recipe(scope, contents))
+                self.assertTrue(receipt_matches(cache, recipe(scope, contents)))
+                for path in checked:
+                    with self.subTest(scope=scope, causal=path):
+                        changed = {**contents, path: contents[path] + b"\n"}
+                        self.assertFalse(receipt_matches(cache, recipe(scope, changed)))
+                for path in unrelated:
+                    with self.subTest(scope=scope, unrelated=path):
+                        changed = {**contents, path: contents[path] + b"\n"}
+                        self.assertTrue(receipt_matches(cache, recipe(scope, changed)))
+
 
 class RepositoryFastPathTests(unittest.TestCase):
     """Keep the repository-only check completely on the host."""

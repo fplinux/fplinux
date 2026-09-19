@@ -31,6 +31,9 @@ class SourceFormatClassificationTests(unittest.TestCase):
                 "helper": "#!/usr/bin/env bash\necho ok\n",
                 "binding.yaml": "---\n",
                 "notes.txt": "plain\n",
+                "other.conf": "setting=value\n",
+                "other.mjs": "export default {};\n",
+                "other.JSON": "{}\n",
             }
             for relative, text in contents.items():
                 (root / relative).write_text(text, encoding="utf-8")
@@ -50,6 +53,9 @@ class SourceFormatClassificationTests(unittest.TestCase):
         self.assertNotIn("package-lock.json", formats.supported())
         self.assertNotIn("binding.yaml", formats.supported())
         self.assertNotIn("notes.txt", formats.supported())
+        self.assertNotIn("other.conf", formats.supported())
+        self.assertNotIn("other.mjs", formats.supported())
+        self.assertNotIn("other.JSON", formats.supported())
 
 
 if __name__ == "__main__":
