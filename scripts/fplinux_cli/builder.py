@@ -1430,9 +1430,13 @@ def build_cc_libusb_tool(recipe: dict[str, Any], output: Path) -> Path:
             "-Werror",
             "-fno-ident",
             "-static",
+            "-Wl,--gc-sections",
+            "-I",
+            str(ROOT / "alpine/shared"),
             "-o",
             str(destination),
             str(require_file(root_source(recipe["source"]))),
+            str(require_file(root_source("alpine/shared/fplinux-cli.c"))),
             *shlex.split(pkg.stdout),
             "-pthread",
         ]

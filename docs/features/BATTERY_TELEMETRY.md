@@ -52,6 +52,11 @@ fplinux-charge -- quake --input phone
 fplinux-charge -- micropythonos
 ```
 
+Use `fplinux-charge -h` or `fplinux-charge --help` to list options without
+reading a counter or starting a command. `--counter PATH` or `--counter=PATH`
+selects a specific counter file and may appear only once. The `--` separator
+is required before the command; everything after it belongs to that command.
+
 When the command exits, the helper reports elapsed monotonic time, charge delta
 and average battery current. Positive values mean net charge entered the
 battery; negative values mean net discharge. The helper preserves the command's

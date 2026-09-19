@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _GNU_SOURCE
 
+#include "fplinux-cli.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <glob.h>
@@ -40,6 +42,18 @@ enum operation {
 	OPERATION_DECODE,
 	OPERATION_ENCODE,
 	OPERATION_SCALE,
+};
+
+enum cli_option {
+	CLI_OPTION_INPUT,
+	CLI_OPTION_OUTPUT,
+	CLI_OPTION_DEVICE,
+	CLI_OPTION_OPERATION,
+	CLI_OPTION_SCALE,
+	CLI_OPTION_WIDTH,
+	CLI_OPTION_HEIGHT,
+	CLI_OPTION_REPEAT,
+	CLI_OPTION_TIMING,
 };
 
 struct options {
@@ -106,27 +120,6 @@ static int xioctl(int fd, unsigned long request, void *argument)
 	return result;
 }
 
-static void usage(FILE *stream)
-{
-	fprintf(stream,
-		"usage: fplinux-jpeg --input FILE --output FILE [--operation decode|encode|scale] [--device /dev/videoN] [--repeat N] [--timing] [--scale 1|4] [--width N --height N]\n");
-}
-
-static bool parse_unsigned(const char *text, unsigned int maximum,
-			   unsigned int *value)
-{
-	char *end;
-	unsigned long parsed;
-
-	errno = 0;
-	parsed = strtoul(text, &end, 10);
-	if (errno || text[0] == '\0' || end[0] != '\0' || parsed == 0 ||
-	    parsed > maximum)
-		return false;
-	*value = (unsigned int)parsed;
-	return true;
-}
-
 static bool parse_operation(const char *text, enum operation *operation)
 {
 	if (!strcmp(text, "decode"))
@@ -140,70 +133,151 @@ static bool parse_operation(const char *text, enum operation *operation)
 	return true;
 }
 
-static bool parse_options(int argc, char **argv, struct options *options)
+static const char *parse_cli_option(size_t option, const char *value,
+				    void *data)
 {
-	int i;
+	struct options *options = data;
+
+	switch (option) {
+	case CLI_OPTION_OPERATION:
+		if (!parse_operation(value, &options->operation))
+			return "--operation must be decode, encode or scale";
+		break;
+	case CLI_OPTION_SCALE:
+		if (!fplinux_cli_unsigned(value, 1, 4, &options->scale) ||
+		    (options->scale != 1 && options->scale != 4))
+			return "--scale must be 1 or 4";
+		break;
+	case CLI_OPTION_WIDTH:
+		if (!fplinux_cli_unsigned(value, 1, MAX_RAW_DIMENSION,
+					  &options->width))
+			return "--width and --height must be in 1..2048";
+		break;
+	case CLI_OPTION_HEIGHT:
+		if (!fplinux_cli_unsigned(value, 1, MAX_RAW_DIMENSION,
+					  &options->height))
+			return "--width and --height must be in 1..2048";
+		break;
+	case CLI_OPTION_REPEAT:
+		if (!fplinux_cli_unsigned(value, 1, MAX_REPEAT,
+					  &options->repeat))
+			return "--repeat must be in 1..4096";
+		break;
+	case CLI_OPTION_INPUT:
+	case CLI_OPTION_OUTPUT:
+	case CLI_OPTION_DEVICE:
+	case CLI_OPTION_TIMING:
+		break;
+	}
+	return NULL;
+}
+
+static enum fplinux_cli_result parse_options(int argc, char **argv,
+					     struct options *options)
+{
+	struct fplinux_cli_option cli_options[] = {
+		[CLI_OPTION_INPUT] = {
+			.name = "input",
+			.metavar = "FILE",
+			.help = "read the input image",
+			.flags = FPLINUX_CLI_REQUIRED | FPLINUX_CLI_REPEAT,
+		},
+		[CLI_OPTION_OUTPUT] = {
+			.name = "output",
+			.metavar = "FILE",
+			.help = "write the output image",
+			.flags = FPLINUX_CLI_REQUIRED | FPLINUX_CLI_REPEAT,
+		},
+		[CLI_OPTION_DEVICE] = {
+			.name = "device",
+			.metavar = "PATH",
+			.help = "use this V4L2 device (default: discover)",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[CLI_OPTION_OPERATION] = {
+			.name = "operation",
+			.metavar = "decode|encode|scale",
+			.help = "select the operation (default: decode)",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[CLI_OPTION_SCALE] = {
+			.name = "scale",
+			.metavar = "1|4",
+			.help = "set the decode divisor (default: 1)",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[CLI_OPTION_WIDTH] = {
+			.name = "width",
+			.metavar = "N",
+			.help = "set raw input width in 1..2048 for encode or scale",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[CLI_OPTION_HEIGHT] = {
+			.name = "height",
+			.metavar = "N",
+			.help = "set raw input height in 1..2048 for encode or scale",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[CLI_OPTION_REPEAT] = {
+			.name = "repeat",
+			.metavar = "N",
+			.help = "repeat the operation 1..4096 times (default: 1)",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+		[CLI_OPTION_TIMING] = {
+			.name = "timing",
+			.help = "print operation timings",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
+	};
+	struct fplinux_cli cli = {
+		.program = argv[0],
+		.description =
+			"Decode, encode or scale images with the UMS9117 V4L2 devices.\n"
+			"Encode requires even raw width and a height. Scale accepts "
+			"640x480 or 320x240 NV16 input.",
+		.options = cli_options,
+		.option_count = sizeof(cli_options) / sizeof(cli_options[0]),
+		.parse_option = parse_cli_option,
+		.data = options,
+	};
+	enum fplinux_cli_result result;
 
 	memset(options, 0, sizeof(*options));
 	options->operation = OPERATION_DECODE;
 	options->scale = 1;
 	options->repeat = 1;
-	for (i = 1; i < argc; ++i) {
-		const char *argument = argv[i];
-		const char *value;
-
-		if (!strcmp(argument, "--help")) {
-			usage(stdout);
-			exit(EXIT_SUCCESS);
+	result = fplinux_cli_parse(&cli, argc, argv);
+	if (result != FPLINUX_CLI_READY)
+		return result;
+	options->input_path = cli_options[CLI_OPTION_INPUT].value;
+	options->output_path = cli_options[CLI_OPTION_OUTPUT].value;
+	options->device_path = cli_options[CLI_OPTION_DEVICE].value;
+	options->timing = cli_options[CLI_OPTION_TIMING].count != 0;
+	if (options->operation == OPERATION_DECODE) {
+		if (options->width || options->height) {
+			return fplinux_cli_error(
+				&cli,
+				"decode does not accept --width or --height");
 		}
-		if (!strcmp(argument, "--timing")) {
-			options->timing = true;
-			continue;
+	} else {
+		if (options->scale != 1 || !options->width ||
+		    !options->height || (options->width & 1U)) {
+			return fplinux_cli_error(
+				&cli, "encode and scale require even --width, "
+				      "--height and --scale 1");
 		}
-		if (++i >= argc)
-			return false;
-		value = argv[i];
-		if (!strcmp(argument, "--input"))
-			options->input_path = value;
-		else if (!strcmp(argument, "--output"))
-			options->output_path = value;
-		else if (!strcmp(argument, "--device"))
-			options->device_path = value;
-		else if (!strcmp(argument, "--operation")) {
-			if (!parse_operation(value, &options->operation))
-				return false;
-		} else if (!strcmp(argument, "--scale")) {
-			if (!parse_unsigned(value, 4, &options->scale) ||
-			    (options->scale != 1 && options->scale != 4))
-				return false;
-		} else if (!strcmp(argument, "--width")) {
-			if (!parse_unsigned(value, MAX_RAW_DIMENSION,
-					    &options->width))
-				return false;
-		} else if (!strcmp(argument, "--height")) {
-			if (!parse_unsigned(value, MAX_RAW_DIMENSION,
-					    &options->height))
-				return false;
-		} else if (!strcmp(argument, "--repeat")) {
-			if (!parse_unsigned(value, MAX_REPEAT,
-					    &options->repeat))
-				return false;
-		} else {
-			return false;
+		if (options->operation == OPERATION_SCALE &&
+		    !((options->width == SCALE_LARGE_WIDTH &&
+		       options->height == SCALE_LARGE_HEIGHT) ||
+		      (options->width == SCALE_SMALL_WIDTH &&
+		       options->height == SCALE_SMALL_HEIGHT))) {
+			return fplinux_cli_error(
+				&cli,
+				"scale requires 640x480 or 320x240 input");
 		}
 	}
-	if (!options->input_path || !options->output_path)
-		return false;
-	if (options->operation == OPERATION_DECODE)
-		return !options->width && !options->height;
-	if (options->scale != 1 || !options->width || !options->height ||
-	    (options->width & 1U))
-		return false;
-	return options->operation != OPERATION_SCALE ||
-	       ((options->width == SCALE_LARGE_WIDTH &&
-		 options->height == SCALE_LARGE_HEIGHT) ||
-		(options->width == SCALE_SMALL_WIDTH &&
-		 options->height == SCALE_SMALL_HEIGHT));
+	return FPLINUX_CLI_READY;
 }
 
 static int read_input(const char *path, size_t maximum, size_t expected,
@@ -1329,11 +1403,11 @@ int main(int argc, char **argv)
 	bool capture_requested = false;
 	unsigned int iteration;
 	int result = EXIT_FAILURE;
+	enum fplinux_cli_result parse_result;
 
-	if (!parse_options(argc, argv, &options)) {
-		usage(stderr);
-		return EXIT_FAILURE;
-	}
+	parse_result = parse_options(argc, argv, &options);
+	if (parse_result != FPLINUX_CLI_READY)
+		return parse_result;
 	if (options.timing &&
 	    (clock_gettime(CLOCK_MONOTONIC, &timings.started) < 0 ||
 	     getrusage(RUSAGE_SELF, &timings.usage_started) < 0)) {
@@ -1478,7 +1552,7 @@ int main(int argc, char **argv)
 			goto out;
 		}
 		output_streaming = true;
-		if (options.operation == OPERATION_SCALE)
+		if (options.operation != OPERATION_ENCODE)
 			raw_capture_layout(&capture_format, &layout);
 	}
 	if (options.operation == OPERATION_ENCODE)
@@ -1497,7 +1571,8 @@ int main(int argc, char **argv)
 		perror("fplinux-jpeg: timing");
 		goto out;
 	}
-	for (iteration = 0; iteration < options.repeat; ++iteration) {
+	iteration = 0;
+	do {
 		struct timespec loop_started;
 		struct timespec wait_started;
 		struct timespec wait_done;
@@ -1604,7 +1679,7 @@ int main(int argc, char **argv)
 		timings.loop_ns += duration;
 		if (iteration)
 			timings.warm_loop_ns += duration;
-	}
+	} while (++iteration < options.repeat);
 	/* The verified result no longer needs device buffers while being saved. */
 	(void)stream(fd, V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE, false);
 	(void)stream(fd, V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE, false);

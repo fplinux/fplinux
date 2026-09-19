@@ -9,12 +9,18 @@ license="GPL-2.0-only"
 makedepends_build="clang22 lld22"
 makedepends_host="musl-dev"
 options="!check"
-source="fplinux-charge.c"
+source="
+	fplinux-charge.c
+	fplinux-cli.c
+	fplinux-cli.h
+"
 builddir="$srcdir"
 
 build() {
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
-		"$srcdir/fplinux-charge.c" $LDFLAGS -o fplinux-charge
+		-I"$srcdir" \
+		"$srcdir/fplinux-charge.c" "$srcdir/fplinux-cli.c" \
+		$LDFLAGS -Wl,--gc-sections -o fplinux-charge
 }
 
 package() {
@@ -23,5 +29,7 @@ package() {
 }
 
 sha512sums="
-ad2a4019578f5696bd69f00bf9dfc42e3642272c484d5f4f79bd46836b6ea1bec9ebd1781b007501ac0ea85509564688f10ee5bfddf7499ee1b2b87e0c6882f7  fplinux-charge.c
+2bfd487d9549a74aa12889d325047a5a5962b2f86e18029846a75f5de552dae991b56d418a63a2f8797f8ac8605295699a3030bfdb3e5ff2f5bb4d4ad910d345  fplinux-charge.c
+60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
+9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
 "

@@ -27,6 +27,9 @@ The source-checkout command gets the gadget identity and interface from the
 selected target; the current standalone archives use generic-serial interface
 `0`.
 
+Scalar value options may be repeated. Every occurrence must be valid, and the
+last one selects the effective value.
+
 The bridge can run alongside an SSH shell, one-off command, upload or download.
 If the USB connection or keyboard disappears, the phone releases forwarded keys
 instead of leaving a modifier held. Stopping the client also releases the host

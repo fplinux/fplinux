@@ -20,8 +20,9 @@
 
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <time.h>
+
+#include "fplinux-cli.h"
 
 #define FPLINUX_CPUCLOCK_CHAIN_LENGTH 256U
 #define FPLINUX_CPUCLOCK_DEFAULT_ROUNDS 5U
@@ -65,25 +66,68 @@ static double elapsed_seconds(const struct timespec *start,
 	       (double)(end->tv_nsec - start->tv_nsec) / 1e9;
 }
 
+struct cpuclock_options {
+	unsigned int iterations;
+	unsigned int rounds;
+};
+
+static const char *parse_cpuclock_option(size_t option, const char *value,
+					 void *data)
+{
+	struct cpuclock_options *options = data;
+	unsigned int parsed;
+
+	if (!fplinux_cli_unsigned(value, 1, UINT32_MAX, &parsed))
+		return "iterations and rounds must be between 1 and 4294967295";
+	if (option == 0)
+		options->iterations = parsed;
+	else
+		options->rounds = parsed;
+	return NULL;
+}
+
+static enum fplinux_cli_result parse_arguments(int argc, char **argv,
+					       struct cpuclock_options *parsed)
+{
+	struct fplinux_cli_option options[] = {
+		{
+			.metavar = "iterations",
+			.help = "loop iterations per round (default: 2000000)",
+		},
+		{
+			.metavar = "rounds",
+			.help = "measurement rounds (default: 5)",
+		},
+	};
+	struct fplinux_cli cli = {
+		.program = argv[0],
+		.description = "Measure the dependent integer-addition rate.",
+		.options = options,
+		.option_count = sizeof(options) / sizeof(options[0]),
+		.parse_option = parse_cpuclock_option,
+		.data = parsed,
+	};
+
+	return fplinux_cli_parse(&cli, argc, argv);
+}
+
 int main(int argc, char **argv)
 {
-	unsigned long iterations = FPLINUX_CPUCLOCK_DEFAULT_ITERATIONS;
-	unsigned long rounds = FPLINUX_CPUCLOCK_DEFAULT_ROUNDS;
+	struct cpuclock_options options = {
+		.iterations = FPLINUX_CPUCLOCK_DEFAULT_ITERATIONS,
+		.rounds = FPLINUX_CPUCLOCK_DEFAULT_ROUNDS,
+	};
 	double best = 0.0;
+	enum fplinux_cli_result parse_result;
 
-	if (argc > 1)
-		iterations = strtoul(argv[1], NULL, 0);
-	if (argc > 2)
-		rounds = strtoul(argv[2], NULL, 0);
-	if (!iterations || !rounds) {
-		fprintf(stderr,
-			"usage: fplinux-cpuclock [iterations] [rounds]\n");
-		return 2;
-	}
+	parse_result = parse_arguments(argc, argv, &options);
+	if (parse_result != FPLINUX_CLI_READY)
+		return parse_result;
 
-	printf("fplinux-cpuclock: %lu rounds of %lu x %u dependent integer "
+	printf("fplinux-cpuclock: %u rounds of %u x %u dependent integer "
 	       "additions\n",
-	       rounds, iterations, FPLINUX_CPUCLOCK_CHAIN_LENGTH);
+	       options.rounds, options.iterations,
+	       FPLINUX_CPUCLOCK_CHAIN_LENGTH);
 	printf("fplinux-cpuclock: one addition retires per cycle on this core, "
 	       "so the\n");
 	printf("fplinux-cpuclock: instruction rate is the clock; loop overhead "
@@ -94,7 +138,7 @@ int main(int argc, char **argv)
 	 */
 	(void)dependent_chain(1U, 1U, 1000U);
 
-	for (unsigned long round = 0; round < rounds; round++) {
+	for (unsigned int round = 0; round < options.rounds; round++) {
 		struct timespec start;
 		struct timespec end;
 		double seconds;
@@ -104,7 +148,7 @@ int main(int argc, char **argv)
 			perror("clock_gettime");
 			return 1;
 		}
-		(void)dependent_chain(round, 1U, (uint32_t)iterations);
+		(void)dependent_chain(round, 1U, (uint32_t)options.iterations);
 		if (clock_gettime(CLOCK_MONOTONIC, &end)) {
 			perror("clock_gettime");
 			return 1;
@@ -117,16 +161,16 @@ int main(int argc, char **argv)
 				"is the clocksource working?\n");
 			return 1;
 		}
-		hz = (double)iterations *
+		hz = (double)options.iterations *
 		     (double)FPLINUX_CPUCLOCK_CHAIN_LENGTH / seconds;
 		if (hz > best)
 			best = hz;
-		printf("fplinux-cpuclock: round %lu: %.3f s -> %.2f MHz\n",
+		printf("fplinux-cpuclock: round %u: %.3f s -> %.2f MHz\n",
 		       round + 1, seconds, hz / 1e6);
 	}
 
-	printf("fplinux-cpuclock: best of %lu rounds: %.2f MHz\n", rounds,
-	       best / 1e6);
+	printf("fplinux-cpuclock: best of %u rounds: %.2f MHz\n",
+	       options.rounds, best / 1e6);
 	printf("fplinux-cpuclock: the device tree currently claims %.2f MHz\n",
 	       1000.0);
 	return 0;

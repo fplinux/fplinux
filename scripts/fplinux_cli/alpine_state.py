@@ -31,12 +31,24 @@ FB_SESSION_SOURCES = (
     "alpine/shared/fplinux-fb-session.c",
     "alpine/shared/fplinux-fb-session.h",
 )
+CLI_SOURCES = (
+    "alpine/shared/fplinux-cli.c",
+    "alpine/shared/fplinux-cli.h",
+)
 SHARED_APORT_SOURCES = {
+    "fplinux-bluetooth": CLI_SOURCES,
+    "fplinux-charge": CLI_SOURCES,
     "fplinux-console": MULTITAP_SOURCES,
+    "fplinux-cpuclock": CLI_SOURCES,
+    "fplinux-jpeg": CLI_SOURCES,
     "fplinux-micropythonos": (*MULTITAP_SOURCES, *FB_SESSION_SOURCES),
-    "fplinux-present": (*FB_SESSION_SOURCES, "platforms/ums9117/common/ums9117-present.h"),
-    "fplinux-rotate": FB_SESSION_SOURCES,
-    "fplinux-showcase": FB_SESSION_SOURCES,
+    "fplinux-present": (
+        *FB_SESSION_SOURCES,
+        *CLI_SOURCES,
+        "platforms/ums9117/common/ums9117-present.h",
+    ),
+    "fplinux-rotate": (*FB_SESSION_SOURCES, *CLI_SOURCES),
+    "fplinux-showcase": (*FB_SESSION_SOURCES, *CLI_SOURCES),
     "fplinux-tyrquake": FB_SESSION_SOURCES,
 }
 SHARED_APORT_SOURCE_PATHS = frozenset(

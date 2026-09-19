@@ -181,6 +181,8 @@ def target_build_source_files(
     for recipe in platform["host"]["tools"]:
         if recipe["type"] == "cc-libusb":
             add_source_path(files, ROOT / recipe["source"])
+            for relative in alpine_state.CLI_SOURCES:
+                add_source_path(files, ROOT / relative)
         elif recipe["type"] == "make-archive":
             for step in recipe["copies"]:
                 add_source_path(files, ROOT / step["source"])

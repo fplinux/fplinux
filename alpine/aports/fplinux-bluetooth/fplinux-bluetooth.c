@@ -23,6 +23,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "fplinux-cli.h"
+
 #ifndef RENAME_NOREPLACE
 #define RENAME_NOREPLACE (1U << 0)
 #endif
@@ -76,20 +78,6 @@ static void on_signal(int unused)
 {
 	(void)unused;
 	interrupted = 1;
-}
-
-static void usage(void)
-{
-	fprintf(stderr,
-		"usage:\n"
-		"  fplinux-bluetooth enable [--if-present]\n"
-		"  fplinux-bluetooth send <XX:XX:XX:XX:XX:XX> <file>\n"
-		"  fplinux-bluetooth receive <XX:XX:XX:XX:XX:XX> <directory> <seconds>\n"
-		"  fplinux-bluetooth network <XX:XX:XX:XX:XX:XX>\n"
-		"\n"
-		"enable starts the board's prepared CM4 firmware after root mount.\n"
-		"--if-present permits an unconfigured board or absent firmware at boot.\n"
-		"Use bluetoothctl for adapter power, discovery and pairing.\n");
 }
 
 static int fail(const char *format, ...)
@@ -1071,41 +1059,208 @@ static int command_network(const char *peer)
 	return watch.owner_lost ? 1 : 0;
 }
 
+enum command {
+	COMMAND_ENABLE,
+	COMMAND_SEND,
+	COMMAND_RECEIVE,
+	COMMAND_NETWORK,
+	COMMAND_NONE,
+};
+
+struct options {
+	enum command command;
+	bool if_present;
+	const char *peer;
+	const char *path;
+	int seconds;
+};
+
+static const char *parse_option(size_t option, const char *value, void *data)
+{
+	struct options *options = data;
+	unsigned int seconds;
+
+	if ((options->command == COMMAND_SEND ||
+	     options->command == COMMAND_NETWORK ||
+	     options->command == COMMAND_RECEIVE) &&
+	    option == 0 && !valid_peer(value))
+		return "peer must be a Bluetooth address such as 01:23:45:67:89:AB";
+	if (options->command == COMMAND_RECEIVE && option == 2) {
+		if (!fplinux_cli_unsigned(value, 1, 3600, &seconds))
+			return "receive seconds must be between 1 and 3600";
+		options->seconds = (int)seconds;
+	}
+	return NULL;
+}
+
+static int parse_arguments(int argc, char **argv, struct options *options)
+{
+	struct fplinux_cli_option root_options[] = {
+		{
+			.metavar = "COMMAND",
+			.help = "enable, send, receive or network",
+			.flags = FPLINUX_CLI_REQUIRED,
+		},
+	};
+	struct fplinux_cli_option enable_options[] = {
+		{
+			.name = "if-present",
+			.help = "permit an unconfigured board or absent firmware",
+		},
+	};
+	struct fplinux_cli_option send_options[] = {
+		{
+			.metavar = "PEER",
+			.help = "Bluetooth address XX:XX:XX:XX:XX:XX",
+			.flags = FPLINUX_CLI_REQUIRED,
+		},
+		{
+			.metavar = "FILE",
+			.help = "file to send",
+			.flags = FPLINUX_CLI_REQUIRED,
+		},
+	};
+	struct fplinux_cli_option receive_options[] = {
+		{
+			.metavar = "PEER",
+			.help = "Bluetooth address XX:XX:XX:XX:XX:XX",
+			.flags = FPLINUX_CLI_REQUIRED,
+		},
+		{
+			.metavar = "DIR",
+			.help = "receive directory",
+			.flags = FPLINUX_CLI_REQUIRED,
+		},
+		{
+			.metavar = "SECONDS",
+			.help = "receive timeout, from 1 to 3600",
+			.flags = FPLINUX_CLI_REQUIRED,
+		},
+	};
+	struct fplinux_cli_option network_options[] = {
+		{
+			.metavar = "PEER",
+			.help = "Bluetooth address XX:XX:XX:XX:XX:XX",
+			.flags = FPLINUX_CLI_REQUIRED,
+		},
+	};
+	struct fplinux_cli commands[] = {
+		[COMMAND_ENABLE] = {
+			.command = "enable",
+			.description =
+				"Start the board's prepared CM4 firmware after root mount.",
+			.options = enable_options,
+			.option_count = sizeof(enable_options) /
+					sizeof(enable_options[0]),
+		},
+		[COMMAND_SEND] = {
+			.command = "send",
+			.description = "Send one file to a paired peer.",
+			.options = send_options,
+			.option_count = sizeof(send_options) / sizeof(send_options[0]),
+		},
+		[COMMAND_RECEIVE] = {
+			.command = "receive",
+			.description = "Accept one file from a paired peer.",
+			.options = receive_options,
+			.option_count = sizeof(receive_options) /
+					sizeof(receive_options[0]),
+		},
+		[COMMAND_NETWORK] = {
+			.command = "network",
+			.description = "Connect to a paired peer's NAP service.",
+			.options = network_options,
+			.option_count = sizeof(network_options) /
+					sizeof(network_options[0]),
+		},
+	};
+	struct fplinux_cli root_cli = {
+		.program = argv[0],
+		.description =
+			"Use bluetoothctl for adapter power, discovery and pairing.",
+		.options = root_options,
+		.option_count = sizeof(root_options) / sizeof(root_options[0]),
+	};
+	struct fplinux_cli *selected = NULL;
+	enum fplinux_cli_result result;
+	enum command command;
+
+	options->command = COMMAND_NONE;
+	for (command = COMMAND_ENABLE; command < COMMAND_NONE; ++command) {
+		if (argc > 1 && !strcmp(argv[1], commands[command].command)) {
+			options->command = command;
+			selected = &commands[command];
+			break;
+		}
+	}
+	if (options->command == COMMAND_NONE) {
+		result = fplinux_cli_parse(&root_cli, argc, argv);
+		if (result == FPLINUX_CLI_HELP) {
+			fputs("\nCommands:\n", stdout);
+			for (command = COMMAND_ENABLE; command < COMMAND_NONE;
+			     ++command) {
+				commands[command].program = argv[0];
+				fputs("  ", stdout);
+				fplinux_cli_usage(stdout, &commands[command]);
+				fputc('\n', stdout);
+			}
+		}
+		if (result != FPLINUX_CLI_READY)
+			return result;
+		return fplinux_cli_error(&root_cli, "unknown command");
+	}
+	selected->program = argv[0];
+	selected->parse_option = parse_option;
+	selected->data = options;
+	result = fplinux_cli_parse(selected, argc - 1, argv + 1);
+	if (result != FPLINUX_CLI_READY)
+		return result;
+	switch (options->command) {
+	case COMMAND_ENABLE:
+		options->if_present = selected->options[0].count != 0;
+		break;
+	case COMMAND_SEND:
+		options->peer = selected->options[0].value;
+		options->path = selected->options[1].value;
+		break;
+	case COMMAND_RECEIVE:
+		options->peer = selected->options[0].value;
+		options->path = selected->options[1].value;
+		break;
+	case COMMAND_NETWORK:
+		options->peer = selected->options[0].value;
+		break;
+	case COMMAND_NONE:
+		return FPLINUX_CLI_ERROR;
+	}
+	return FPLINUX_CLI_READY;
+}
+
 int main(int argc, char **argv)
 {
-	if (argc < 2 || strcmp(argv[1], "--help") == 0) {
-		usage();
-		return argc < 2;
-	}
+	struct options options = { 0 };
 	struct sigaction action = { .sa_handler = on_signal };
+	int parse_result = parse_arguments(argc, argv, &options);
+
+	if (parse_result != FPLINUX_CLI_READY)
+		return parse_result;
 	sigemptyset(&action.sa_mask);
 	if (sigaction(SIGINT, &action, NULL) < 0 ||
 	    sigaction(SIGTERM, &action, NULL) < 0)
 		return fail("cannot install signal handlers: %s",
 			    strerror(errno));
-	if (strcmp(argv[1], "enable") == 0 &&
-	    (argc == 2 || (argc == 3 && strcmp(argv[2], "--if-present") == 0)))
-		return command_enable(argc == 3);
-	if ((strcmp(argv[1], "send") == 0 && argc == 4) ||
-	    (strcmp(argv[1], "receive") == 0 && argc == 5) ||
-	    (strcmp(argv[1], "network") == 0 && argc == 3)) {
-		if (!valid_peer(argv[2]))
-			return fail(
-				"peer must be a Bluetooth address such as 01:23:45:67:89:AB");
-		if (strcmp(argv[1], "send") == 0)
-			return command_send(argv[2], argv[3]);
-		if (strcmp(argv[1], "receive") == 0) {
-			char *end;
-			errno = 0;
-			long seconds = strtol(argv[4], &end, 10);
-			if (errno != 0 || *end != '\0' || seconds < 1 ||
-			    seconds > 3600)
-				return fail(
-					"receive seconds must be between 1 and 3600");
-			return command_receive(argv[2], argv[3], (int)seconds);
-		}
-		return command_network(argv[2]);
+	switch (options.command) {
+	case COMMAND_ENABLE:
+		return command_enable(options.if_present);
+	case COMMAND_SEND:
+		return command_send(options.peer, options.path);
+	case COMMAND_RECEIVE:
+		return command_receive(options.peer, options.path,
+				       options.seconds);
+	case COMMAND_NETWORK:
+		return command_network(options.peer);
+	case COMMAND_NONE:
+		return 2;
 	}
-	usage();
-	return 1;
+	return 2;
 }
