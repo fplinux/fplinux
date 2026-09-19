@@ -138,11 +138,8 @@ def _write_private_text(path: Path, value: str) -> None:
 
 
 def _sha256_file(path: Path) -> str:
-    value = hashlib.sha256()
     with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            value.update(chunk)
-    return value.hexdigest()
+        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def _canonical_json_bytes(value: object) -> bytes:

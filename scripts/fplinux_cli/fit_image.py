@@ -14,13 +14,12 @@ from typing import Any
 
 from . import artifact_state, build_env
 from .artifact_state import (
-    canonical_json_bytes,
     receipt_matches,
     regular_file_record,
     require_lowercase_sha256,
     write_canonical_json,
 )
-from .common import sha256_file
+from .common import canonical_json_bytes, sha256_file
 from .device_tree import exact_path_properties, parse_nul_string
 
 RECEIPT_NAME = ".fplinux-fit-receipt.json"
@@ -103,10 +102,11 @@ def _its_source(target: str, display_name: str, spec: dict[str, Any]) -> bytes:
 """.encode()
 
 
-def create_plan(  # noqa: PLR0913, PLR0917 -- causal inputs remain separate.
+def create_plan(  # noqa: PLR0913 -- causal inputs remain separate.
     target: str,
     display_name: str,
     spec: dict[str, Any],
+    *,
     zimage: Path,
     dtb: Path,
     tools_receipt: dict[str, str],
@@ -286,7 +286,8 @@ def _run_dumpimage(dumpimage: Path, fit: Path, temporary: Path, zimage: Path, dt
             raise FitImageError(f"dumpimage extracted different {name} bytes")
 
 
-def build(  # noqa: PLR0913, PLR0917 -- tool and artifact paths remain explicit.
+def build(  # noqa: PLR0913 -- tool and artifact paths remain explicit.
+    *,
     mkimage: Path,
     dumpimage: Path,
     zimage: Path,

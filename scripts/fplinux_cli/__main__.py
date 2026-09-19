@@ -250,6 +250,21 @@ def _command_action(
     return action
 
 
+def _add_boot_profile_options(parser: argparse.ArgumentParser, verb: str) -> None:
+    context = parser.add_mutually_exclusive_group()
+    context.add_argument(
+        "--boot",
+        choices=PUBLIC_BOOT_MODES,
+        help=f"{verb} the selected public boot mode",
+    )
+    context.add_argument(
+        "--profile",
+        type=_profile_name,
+        metavar="NAME",
+        help=f"{verb} the selected global profile",
+    )
+
+
 def main() -> None:
     targets = discover_targets()
     parser = argparse.ArgumentParser(prog="fplinux")
@@ -345,18 +360,7 @@ def main() -> None:
         "package", help="package an existing build for Linux x86-64"
     )
     package_parser.add_argument("target", choices=targets)
-    package_context = package_parser.add_mutually_exclusive_group()
-    package_context.add_argument(
-        "--boot",
-        choices=PUBLIC_BOOT_MODES,
-        help="package the selected public boot mode",
-    )
-    package_context.add_argument(
-        "--profile",
-        type=_profile_name,
-        metavar="NAME",
-        help="package the selected global profile",
-    )
+    _add_boot_profile_options(package_parser, "package")
     package_parser.add_argument(
         "--candidate",
         action="store_true",
@@ -379,18 +383,7 @@ def main() -> None:
     )
     run_parser = commands.add_parser("run", help="run a target's volatile-RAM loader")
     run_parser.add_argument("target", choices=targets)
-    run_context = run_parser.add_mutually_exclusive_group()
-    run_context.add_argument(
-        "--boot",
-        choices=PUBLIC_BOOT_MODES,
-        help="run the selected public boot mode",
-    )
-    run_context.add_argument(
-        "--profile",
-        type=_profile_name,
-        metavar="NAME",
-        help="run the selected global profile",
-    )
+    _add_boot_profile_options(run_parser, "run")
 
     console_parser = commands.add_parser("console", help="connect to a running target over USB")
     console_parser.add_argument("target", choices=targets)

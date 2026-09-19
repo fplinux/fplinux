@@ -6,13 +6,12 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import tempfile
 import tomllib
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, NoReturn
 
-from .common import ROOT, sha256_file
+from .common import ROOT, replace_file_atomically, sha256_file
 
 if TYPE_CHECKING:
     from .firmware_inputs import FirmwareInput
@@ -440,6 +439,7 @@ def alpine_rootfs_recipe(
         "implementation": [
             _source_file(root / "scripts/fplinux_cli/alpine_state.py", root),
             _source_file(root / "scripts/fplinux_cli/alpine_builder.py", root),
+            _source_file(root / "scripts/fplinux_cli/common.py", root),
             _source_file(root / "scripts/fplinux_cli/build_env.py", root),
             _source_file(root / "scripts/fplinux_cli/firmware_inputs.py", root),
         ],
@@ -468,6 +468,7 @@ def alpine_package_recipe(
             "implementation": [
                 _source_file(root / "scripts/fplinux_cli/alpine_state.py", root),
                 _source_file(root / "scripts/fplinux_cli/alpine_builder.py", root),
+                _source_file(root / "scripts/fplinux_cli/common.py", root),
                 _source_file(root / "scripts/fplinux_cli/build_env.py", root),
             ],
         }
@@ -531,18 +532,7 @@ def write_receipt(output: Path, recipe: str) -> None:
     if output.is_symlink() or not output.is_dir():
         _fail(f"rootfs output directory is invalid: {output}")
     encoded = (json.dumps(_receipt_data(output, recipe), sort_keys=True) + "\n").encode()
-    temporary: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="wb", dir=output, prefix=f".{RECEIPT_NAME}.", delete=False
-        ) as stream:
-            temporary = Path(stream.name)
-            stream.write(encoded)
-        temporary.replace(output / RECEIPT_NAME)
-        temporary = None
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    replace_file_atomically(output / RECEIPT_NAME, encoded, 0o600, sync=False)
 
 
 def trusted_receipt_identity(output: Path, recipe: str) -> dict[str, str]:

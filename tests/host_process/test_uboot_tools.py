@@ -178,14 +178,14 @@ class UbootToolsTests(unittest.TestCase):
         return uboot_tools.build_full(
             self.archive,
             self.config,
-            self.defconfig,
-            [(self.projection, "scripts/build-log.sh")],
-            [],
-            self.work,
-            jobs,
-            "a" * 64,
-            "arm-linux-gnueabi-",
-            self.layout,
+            defconfig=self.defconfig,
+            projections=[(self.projection, "scripts/build-log.sh")],
+            patches=[],
+            work=self.work,
+            jobs=jobs,
+            container_recipe="a" * 64,
+            cross_compile="arm-linux-gnueabi-",
+            layout=self.layout,
         )
 
     def _build_log_lines(self) -> list[str]:

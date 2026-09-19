@@ -4,11 +4,11 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+from .common import canonical_json_bytes, replace_file_atomically
 
 IMAGE_STATE_NAME = "host-image-state.json"
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -76,19 +76,7 @@ def publish_image_state(cache_root: Path, state: ImageState) -> None:
         raise ImageStateError(message)
     directory = _ensure_cache_root(Path(cache_root))
     destination = image_state_path(directory)
-    descriptor, temporary_name = tempfile.mkstemp(
-        dir=directory,
-        prefix=f".{destination.stem}.",
-        suffix=".tmp",
-    )
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            json.dump(state.payload(), stream, sort_keys=True, separators=(",", ":"))
-            stream.write("\n")
-        temporary.replace(destination)
-    finally:
-        temporary.unlink(missing_ok=True)
+    replace_file_atomically(destination, canonical_json_bytes(state.payload()), 0o600, sync=False)
 
 
 def _read_state(path: Path) -> ImageState | None:

@@ -15,7 +15,8 @@ import tarfile
 import tempfile
 import tomllib
 import urllib.request
-from pathlib import Path, PurePath, PurePosixPath
+from functools import partial
+from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -28,7 +29,7 @@ from .checkreceipts import (
     publish_success_receipt,
     receipt_matches,
 )
-from .common import ROOT, fail, sha256_file
+from .common import ROOT, alpine_tar_filter, fail, sha256_file
 from .config import (
     check_orchestration_recipe_digest,
     container_base_image_reference,
@@ -593,19 +594,7 @@ def install_git_hooks() -> None:
     print(f"Git hooks are ready: {GIT_HOOKS_PATH}")
 
 
-def _alpine_tar_filter(member: tarfile.TarInfo, destination: str) -> tarfile.TarInfo | None:
-    """Apply Python's data filter while preserving safe absolute Alpine symlinks."""
-    if member.issym() or member.islnk():
-        target = PurePosixPath(member.linkname)
-        if target.is_absolute():
-            if ".." in target.parts:
-                fail(f"Alpine minirootfs link escapes the root: {member.name}")
-            relative_target = target.as_posix().lstrip("/")
-            filtered = tarfile.data_filter(member.replace(linkname=relative_target), destination)
-            if filtered is None:
-                return None
-            return filtered.replace(linkname=member.linkname)
-    return tarfile.data_filter(member, destination)
+_alpine_tar_filter = partial(alpine_tar_filter, on_error=fail)
 
 
 def _base_image_ready(kern: str, lock: dict[str, Any], image: str | None = None) -> bool:

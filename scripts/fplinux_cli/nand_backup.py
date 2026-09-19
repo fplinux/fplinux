@@ -10,6 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, BinaryIO, Protocol, cast
 
+from . import commands
 from .common import fail, sha256_file
 from .config import load_target
 
@@ -101,11 +102,8 @@ def backup_target_nand(
     if nand is None:
         fail(f"NAND backup is not supported for target {target}")
 
-    # Import lazily so the backend can be wired by the CLI without an import cycle.
-    from .commands import current_target_ssh_session  # noqa: PLC0415
-
     def connect() -> tuple[SshTransport, dict[str, Any]]:
-        ssh, session = current_target_ssh_session(target, profile=profile)
+        ssh, session = commands.current_target_ssh_session(target, profile=profile)
         return cast("SshTransport", ssh), session
 
     return backup_nand(

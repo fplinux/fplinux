@@ -5,21 +5,16 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .common import canonical_json_bytes, replace_file_atomically
 from .config import TARGET_NAME
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 _SCOPE_ROOT = "check-results"
-
-
-def _canonical_json(value: object) -> bytes:
-    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    return encoded.encode() + b"\n"
 
 
 @dataclass(frozen=True)
@@ -87,18 +82,4 @@ def publish_success_receipt(cache_root: Path, recipe: CheckReceiptRecipe) -> Non
     """Atomically publish a receipt after a scope has completed successfully."""
     destination = receipt_path(cache_root, recipe)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.parent / f".{destination.stem}.tmp"
-    descriptor = os.open(
-        temporary,
-        os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
-        0o600,
-    )
-    with os.fdopen(descriptor, "wb") as stream:
-        try:
-            stream.write(_canonical_json(recipe.payload()))
-            stream.flush()
-            os.fsync(stream.fileno())
-        except BaseException:
-            temporary.unlink(missing_ok=True)
-            raise
-    temporary.replace(destination)
+    replace_file_atomically(destination, canonical_json_bytes(recipe.payload()), 0o600)

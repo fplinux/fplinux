@@ -11,6 +11,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from .common import canonical_json_bytes, sha256_file
+
 BUILD_MANIFEST_NAME = "build-manifest.json"
 BUILD_MANIFEST_FIELDS = frozenset(
     {
@@ -45,13 +47,6 @@ class CurrentBundle:
     manifest_bytes: bytes
 
 
-def canonical_json_bytes(value: object) -> bytes:
-    """Encode deterministic JSON used for content identities."""
-    return (
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n"
-    ).encode()
-
-
 def bundle_slot(output: Path, target: str, profile: str | None = None) -> Path:
     """Return the one managed bundle slot for a target and optional profile."""
     _component(target, "target")
@@ -80,7 +75,7 @@ def published_file_records(directory: Path) -> dict[str, dict[str, int | str]]:
         relative = path.relative_to(directory).as_posix()
         records[relative] = {
             "mode": path.stat().st_mode & 0o777,
-            "sha256": _sha256_file(path),
+            "sha256": sha256_file(path),
             "size": path.stat().st_size,
         }
     return records
@@ -364,11 +359,3 @@ def _is_sha256(value: object) -> bool:
         and len(value) == 64
         and all(character in "0123456789abcdef" for character in value)
     )
-
-
-def _sha256_file(path: Path) -> str:
-    value = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            value.update(block)
-    return value.hexdigest()

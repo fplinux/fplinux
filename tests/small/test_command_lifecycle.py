@@ -21,10 +21,10 @@ from fplinux_cli import workspace as workspace_module
 from fplinux_cli.bundle_state import (
     BUILD_MANIFEST_NAME,
     bundle_pointer,
-    canonical_json_bytes,
     publish_current_bundle,
     published_file_records,
 )
+from fplinux_cli.common import canonical_json_bytes
 from fplinux_cli.config import container_runtime_recipe_digest
 from fplinux_cli.image_state import ImageState, publish_image_state
 from fplinux_cli.workspace import WorkspaceSnapshot

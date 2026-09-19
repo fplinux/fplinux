@@ -66,11 +66,8 @@ def validate_runtime_identity(runtime: dict[str, Any]) -> dict[str, Any]:
 
 def digest(path: Path) -> str:
     """Return a file SHA-256 digest."""
-    value = hashlib.sha256()
     with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            value.update(chunk)
-    return value.hexdigest()
+        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def require_object(value: object, keys: set[str], name: str) -> dict[str, Any]:
