@@ -19,20 +19,11 @@ from unittest import mock
 from fplinux_cli.common import ROOT
 from fplinux_cli.output import RunReporter
 
-from tests.process import run_process
+from tests.process import process_state, python_environment, run_process
 
 _PROCESS_TIMEOUT = 8.0
 _STAGE_TIMEOUT = 5.0
-
-
-def _python_environment() -> dict[str, str]:
-    environment = os.environ.copy()
-    existing = environment.get("PYTHONPATH")
-    paths = [str(ROOT / "scripts")]
-    if existing:
-        paths.append(existing)
-    environment["PYTHONPATH"] = os.pathsep.join(paths)
-    return environment
+_PROCESS_FIXTURES = ROOT / "tests" / "fixtures" / "processes"
 
 
 def _wait_for_path(path: Path, deadline: float, description: str) -> None:
@@ -40,14 +31,6 @@ def _wait_for_path(path: Path, deadline: float, description: str) -> None:
         if time.monotonic() >= deadline:
             raise AssertionError(f"{description} did not become ready")
         time.sleep(0.01)
-
-
-def _process_state(process_id: int) -> str | None:
-    try:
-        status = Path(f"/proc/{process_id}/status").read_text()
-    except FileNotFoundError:
-        return None
-    return next(line.split()[1] for line in status.splitlines() if line.startswith("State:"))
 
 
 def _kill_recorded_process_group(path: Path) -> None:
@@ -59,18 +42,18 @@ def _kill_recorded_process_group(path: Path) -> None:
         os.killpg(process_group, signal.SIGKILL)
     deadline = time.monotonic() + 2
     while time.monotonic() < deadline:
-        if _process_state(process_group) in {None, "Z"}:
+        if process_state(process_group) in {None, "Z"}:
             return
         time.sleep(0.01)
 
 
 def _wait_until_not_running(process_id: int, deadline: float) -> None:
     while time.monotonic() < deadline:
-        state = _process_state(process_id)
+        state = process_state(process_id)
         if state is None or state == "Z":
             return
         time.sleep(0.01)
-    raise AssertionError(f"process {process_id} remained in state {_process_state(process_id)}")
+    raise AssertionError(f"process {process_id} remained in state {process_state(process_id)}")
 
 
 class StageProcessTests(unittest.TestCase):
@@ -220,21 +203,13 @@ class StageProcessTests(unittest.TestCase):
             root = Path(temporary) / "run"
             reporter = RunReporter("check", root, ".cache/logs/test", verbose=False)
             terminal = io.StringIO()
-            program = (
-                "import sys; "
-                "[sys.stdout.write(f'line-{i:03d}\\n') for i in range(100)]; "
-                "sys.stdout.flush(); "
-                "sys.stdout.buffer.write(b'\\x1b[31mred\\x1b[0m invalid=\\xff\\n'); "
-                "sys.stdout.buffer.write('utf8=проверка\\n'.encode()); "
-                "raise SystemExit(1)"
-            )
             with (
                 contextlib.redirect_stderr(terminal),
                 self.assertRaises(SystemExit),
                 reporter.stage("tail") as stage,
             ):
                 stage.run(
-                    [sys.executable, "-c", program],
+                    [sys.executable, str(_PROCESS_FIXTURES / "failure_tail.py")],
                     timeout=_STAGE_TIMEOUT,
                 )
             output = terminal.getvalue()
@@ -254,27 +229,6 @@ class StageProcessTests(unittest.TestCase):
             root = directory / "run"
             child_pid_path = directory / "child.pid"
             descendant_pid_path = directory / "descendant.pid"
-            descendant_ready = directory / "descendant.ready"
-            descendant_program = f"""
-import os
-import time
-from pathlib import Path
-Path({str(descendant_pid_path)!r}).write_text(str(os.getpid()))
-Path({str(descendant_ready)!r}).touch()
-time.sleep(30)
-"""
-            child_program = f"""
-import os
-import subprocess
-import sys
-import time
-from pathlib import Path
-Path({str(child_pid_path)!r}).write_text(str(os.getpid()))
-subprocess.Popen([sys.executable, "-c", {descendant_program!r}])
-while not Path({str(descendant_ready)!r}).exists():
-    time.sleep(0.01)
-time.sleep(30)
-"""
             reporter = RunReporter("check", root, ".cache/logs/test", verbose=False)
             terminal = io.StringIO()
             with (
@@ -282,7 +236,10 @@ time.sleep(30)
                 self.assertRaises(subprocess.TimeoutExpired),
                 reporter.stage("bounded child") as stage,
             ):
-                stage.run([sys.executable, "-c", child_program], timeout=0.5)
+                stage.run(
+                    [sys.executable, str(_PROCESS_FIXTURES / "timeout_tree.py"), str(directory)],
+                    timeout=0.5,
+                )
 
             child_pid = int(child_pid_path.read_text())
             descendant_pid = int(descendant_pid_path.read_text())
@@ -309,50 +266,8 @@ class StageSignalProcessTests(unittest.TestCase):
             child_group = directory / "child.pgid"
             child_pid_path = directory / "child.pid"
             child_term = directory / "child.term"
-            grandchild_ready = directory / "grandchild.ready"
             grandchild_pid_path = directory / "grandchild.pid"
             grandchild_term = directory / "grandchild.term"
-            grandchild_program = f"""
-import os
-import signal
-import time
-from pathlib import Path
-Path({str(grandchild_pid_path)!r}).write_text(str(os.getpid()))
-def ignore_term(*_args):
-    Path({str(grandchild_term)!r}).touch()
-signal.signal(signal.SIGTERM, ignore_term)
-Path({str(grandchild_ready)!r}).touch()
-time.sleep(30)
-"""
-            child_program = f"""
-import os
-import signal
-import subprocess
-import sys
-import time
-from pathlib import Path
-Path({str(child_pid_path)!r}).write_text(str(os.getpid()))
-grandchild = subprocess.Popen([sys.executable, "-c", {grandchild_program!r}])
-def ignore_term(*_args):
-    Path({str(child_term)!r}).touch()
-signal.signal(signal.SIGTERM, ignore_term)
-Path({str(child_group)!r}).write_text(str(os.getpgrp()))
-deadline = time.monotonic() + 5
-while not Path({str(grandchild_ready)!r}).exists():
-    if time.monotonic() >= deadline:
-        raise RuntimeError("grandchild did not become ready")
-    time.sleep(0.01)
-Path({str(child_ready)!r}).touch()
-time.sleep(30)
-"""
-            wrapper_program = f"""
-import sys
-from pathlib import Path
-from fplinux_cli.output import RunReporter
-reporter = RunReporter("check", Path({str(directory / "run")!r}), "test", verbose=False)
-with reporter.stage("signal escalation") as stage:
-    stage.run([sys.executable, "-c", {child_program!r}], timeout=10)
-"""
 
             def escalate_ready_wrapper(wrapper: subprocess.Popen[str], deadline: float) -> None:
                 _wait_for_path(child_ready, deadline, "stage child")
@@ -363,11 +278,20 @@ with reporter.stage("signal escalation") as stage:
 
             try:
                 result = run_process(
-                    [sys.executable, "-c", wrapper_program],
+                    [
+                        sys.executable,
+                        str(_PROCESS_FIXTURES / "stage_wrapper.py"),
+                        str(directory),
+                        "check",
+                        "signal escalation",
+                        sys.executable,
+                        str(_PROCESS_FIXTURES / "ignoring_tree.py"),
+                        str(directory),
+                    ],
                     name="stage repeated SIGTERM escalation",
                     timeout=_PROCESS_TIMEOUT,
                     cwd=ROOT,
-                    env=_python_environment(),
+                    env=python_environment(),
                     while_running=escalate_ready_wrapper,
                 )
             finally:
@@ -387,49 +311,7 @@ with reporter.stage("signal escalation") as stage:
             child_ready = directory / "child.ready"
             child_group = directory / "child.pgid"
             child_signal = directory / "child.signal"
-            grandchild_ready = directory / "grandchild.ready"
             grandchild_signal = directory / "grandchild.signal"
-            grandchild_program = f"""
-import signal
-import time
-from pathlib import Path
-def terminate(*_args):
-    Path({str(grandchild_signal)!r}).touch()
-    raise SystemExit(0)
-signal.signal(signal.SIGTERM, terminate)
-Path({str(grandchild_ready)!r}).touch()
-time.sleep(30)
-"""
-            child_program = f"""
-import signal
-import subprocess
-import sys
-import time
-import os
-from pathlib import Path
-grandchild = subprocess.Popen([sys.executable, "-c", {grandchild_program!r}])
-def terminate(*_args):
-    Path({str(child_signal)!r}).touch()
-    grandchild.wait(timeout=2)
-    raise SystemExit(0)
-signal.signal(signal.SIGTERM, terminate)
-Path({str(child_group)!r}).write_text(str(os.getpgrp()))
-deadline = time.monotonic() + 5
-while not Path({str(grandchild_ready)!r}).exists():
-    if time.monotonic() >= deadline:
-        raise RuntimeError("grandchild did not become ready")
-    time.sleep(0.01)
-Path({str(child_ready)!r}).touch()
-time.sleep(30)
-"""
-            wrapper_program = f"""
-import sys
-from pathlib import Path
-from fplinux_cli.output import RunReporter
-reporter = RunReporter("check", Path({str(directory / "run")!r}), "test", verbose=False)
-with reporter.stage("signal") as stage:
-    stage.run([sys.executable, "-c", {child_program!r}], timeout=10)
-"""
 
             def terminate_ready_wrapper(wrapper: subprocess.Popen[str], deadline: float) -> None:
                 _wait_for_path(child_ready, deadline, "stage child")
@@ -437,11 +319,20 @@ with reporter.stage("signal") as stage:
 
             try:
                 result = run_process(
-                    [sys.executable, "-c", wrapper_program],
+                    [
+                        sys.executable,
+                        str(_PROCESS_FIXTURES / "stage_wrapper.py"),
+                        str(directory),
+                        "check",
+                        "signal",
+                        sys.executable,
+                        str(_PROCESS_FIXTURES / "terminating_tree.py"),
+                        str(directory),
+                    ],
                     name="stage SIGTERM forwarding",
                     timeout=_PROCESS_TIMEOUT,
                     cwd=ROOT,
-                    env=_python_environment(),
+                    env=python_environment(),
                     while_running=terminate_ready_wrapper,
                 )
             finally:
@@ -462,28 +353,6 @@ with reporter.stage("signal") as stage:
             child_ready = directory / "child.ready"
             child_group = directory / "child.pgid"
             child_signal = directory / "child.signal"
-            child_program = f"""
-import signal
-import sys
-import time
-import os
-from pathlib import Path
-def handle_hangup(*_args):
-    Path({str(child_signal)!r}).write_text("SIGHUP")
-    sys.exit(0)
-signal.signal(signal.SIGHUP, handle_hangup)
-Path({str(child_group)!r}).write_text(str(os.getpgrp()))
-Path({str(child_ready)!r}).write_text("ready")
-time.sleep(30)
-"""
-            wrapper_program = f"""
-import sys
-from pathlib import Path
-from fplinux_cli.output import RunReporter
-reporter = RunReporter("check", Path({str(directory / "run")!r}), "test", verbose=False)
-with reporter.stage("hangup") as stage:
-    stage.run([sys.executable, "-c", {child_program!r}], timeout=10)
-"""
 
             def hangup_ready_wrapper(wrapper: subprocess.Popen[str], deadline: float) -> None:
                 _wait_for_path(child_ready, deadline, "stage child")
@@ -491,11 +360,20 @@ with reporter.stage("hangup") as stage:
 
             try:
                 result = run_process(
-                    [sys.executable, "-c", wrapper_program],
+                    [
+                        sys.executable,
+                        str(_PROCESS_FIXTURES / "stage_wrapper.py"),
+                        str(directory),
+                        "check",
+                        "hangup",
+                        sys.executable,
+                        str(_PROCESS_FIXTURES / "hangup_child.py"),
+                        str(directory),
+                    ],
                     name="stage SIGHUP forwarding",
                     timeout=_PROCESS_TIMEOUT,
                     cwd=ROOT,
-                    env=_python_environment(),
+                    env=python_environment(),
                     while_running=hangup_ready_wrapper,
                 )
             finally:
@@ -509,25 +387,6 @@ with reporter.stage("hangup") as stage:
             directory = Path(temporary)
             child_pid_path = directory / "child.pid"
             child_group = directory / "child.pgid"
-            child_program = f"""
-import os
-import signal
-import sys
-import time
-from pathlib import Path
-signal.signal(signal.SIGCONT, lambda *_: sys.exit(0))
-Path({str(child_group)!r}).write_text(str(os.getpgrp()))
-Path({str(child_pid_path)!r}).write_text(str(os.getpid()))
-time.sleep(30)
-"""
-            wrapper_program = f"""
-import sys
-from pathlib import Path
-from fplinux_cli.output import RunReporter
-reporter = RunReporter("test", Path({str(directory / "run")!r}), "test", verbose=False)
-with reporter.stage("job-control") as stage:
-    stage.run([sys.executable, "-c", {child_program!r}], timeout=10)
-"""
 
             def suspend_and_resume(wrapper: subprocess.Popen[str], deadline: float) -> None:
                 _wait_for_path(child_pid_path, deadline, "stage child")
@@ -536,7 +395,7 @@ with reporter.stage("job-control") as stage:
                 try:
                     state = ""
                     while time.monotonic() < deadline:
-                        state = _process_state(child_pid) or ""
+                        state = process_state(child_pid) or ""
                         if state == "T":
                             break
                         time.sleep(0.01)
@@ -548,11 +407,20 @@ with reporter.stage("job-control") as stage:
 
             try:
                 result = run_process(
-                    [sys.executable, "-c", wrapper_program],
+                    [
+                        sys.executable,
+                        str(_PROCESS_FIXTURES / "stage_wrapper.py"),
+                        str(directory),
+                        "test",
+                        "job-control",
+                        sys.executable,
+                        str(_PROCESS_FIXTURES / "job_control_child.py"),
+                        str(directory),
+                    ],
                     name="stage job-control forwarding",
                     timeout=_PROCESS_TIMEOUT,
                     cwd=ROOT,
-                    env=_python_environment(),
+                    env=python_environment(),
                     while_running=suspend_and_resume,
                 )
             finally:
@@ -568,16 +436,6 @@ class TestProcessHelperTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             pid_path = Path(temporary) / "process.pid"
             ready_path = Path(temporary) / "process.ready"
-            program = f"""
-import os
-import signal
-import time
-from pathlib import Path
-signal.signal(signal.SIGTERM, signal.SIG_IGN)
-Path({str(pid_path)!r}).write_text(str(os.getpid()))
-Path({str(ready_path)!r}).touch()
-time.sleep(30)
-"""
 
             def wait_until_ready(_process: subprocess.Popen[str], deadline: float) -> None:
                 _wait_for_path(ready_path, deadline, "helper child")
@@ -587,7 +445,7 @@ time.sleep(30)
                 "named helper process timed out after 1s",
             ):
                 run_process(
-                    [sys.executable, "-c", program],
+                    [sys.executable, str(_PROCESS_FIXTURES / "ignoring_process.py"), temporary],
                     name="named helper process",
                     timeout=1,
                     while_running=wait_until_ready,

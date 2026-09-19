@@ -18,118 +18,14 @@ from typing import TYPE_CHECKING
 from fplinux_cli import kernelcheck
 from fplinux_cli.common import ROOT
 
-from tests.process import run_process
+from tests.process import process_state, python_environment, run_process
 
 if TYPE_CHECKING:
     import subprocess
     from collections.abc import Callable
 
 
-_CONTEXT_HELPER = """
-import os
-import sys
-from pathlib import Path
-
-root = Path(sys.argv[1])
-message = "|".join(
-    (sys.argv[2], str(os.getpid()), os.environ["HOME"], os.environ["TMPDIR"])
-)
-with (root / f"{sys.argv[2]}.ready").open("wb", buffering=0) as ready:
-    ready.write((message + "\\n").encode())
-with (root / f"{sys.argv[2]}.control").open("rb", buffering=0) as control:
-    action = control.read(1)
-if action == b"F":
-    raise SystemExit(23)
-if action != b"S":
-    raise SystemExit(24)
-"""
-
-_IGNORING_GRANDCHILD = """
-import os
-import signal
-import sys
-import time
-from pathlib import Path
-
-root = Path(sys.argv[1])
-Path(root / "grandchild.pid").write_text(str(os.getpid()))
-def ignore_term(*_args):
-    Path(root / "grandchild.term").touch()
-signal.signal(signal.SIGTERM, ignore_term)
-Path(root / "grandchild.ready").touch()
-time.sleep(30)
-"""
-
-_IGNORING_TOOL = f"""
-import os
-import signal
-import subprocess
-import sys
-import time
-from pathlib import Path
-
-root = Path(sys.argv[1])
-target = sys.argv[2]
-worker_pid = sys.argv[3]
-Path(root / "tool.pid").write_text(str(os.getpid()))
-grandchild = subprocess.Popen([sys.executable, "-c", {_IGNORING_GRANDCHILD!r}, str(root)])
-def ignore_term(*_args):
-    Path(root / "tool.term").touch()
-signal.signal(signal.SIGTERM, ignore_term)
-deadline = time.monotonic() + 5
-while not Path(root / "grandchild.ready").exists():
-    if time.monotonic() >= deadline:
-        raise RuntimeError("grandchild did not become ready")
-    time.sleep(0.01)
-message = "|".join((target, worker_pid, os.environ["HOME"], os.environ["TMPDIR"]))
-with (root / f"{{target}}.ready").open("wb", buffering=0) as ready:
-    ready.write((message + "\\n").encode())
-time.sleep(30)
-"""
-
-_STAGE_CONTEXT_HELPER = f"""
-import os
-import sys
-from pathlib import Path
-from fplinux_cli.output import RunReporter
-
-root = Path(sys.argv[1])
-target = sys.argv[2]
-reporter = RunReporter("check", root / "stage-run", "test", verbose=False)
-with reporter.stage("blocked tool") as stage:
-    stage.run(
-        [sys.executable, "-c", {_IGNORING_TOOL!r}, str(root), target, str(os.getpid())],
-        timeout=20,
-    )
-"""
-
-_SCHEDULER_HELPER = f"""
-import sys
-from pathlib import Path
-from fplinux_cli import kernelcheck
-
-root = Path(sys.argv[1])
-stage_first = sys.argv[2] == "stage"
-contexts = (("first", None), ("second", None))
-def command(target, _profile):
-    if stage_first and target == "first":
-        return [sys.executable, "-c", {_STAGE_CONTEXT_HELPER!r}, str(root), target]
-    return [sys.executable, "-c", {_CONTEXT_HELPER!r}, str(root), target]
-kernelcheck._CONTEXT_TERMINATE_TIMEOUT = 0.25
-kernelcheck._CONTEXT_KILL_TIMEOUT = 0.5
-kernelcheck._run_context_processes(contexts, 2, command_for=command)
-"""
-
-
-def _python_environment() -> dict[str, str]:
-    """Expose the current production package to an isolated scheduler process."""
-    environment = os.environ.copy()
-    existing = environment.get("PYTHONPATH")
-    paths = [str(ROOT / "scripts")]
-    if existing:
-        paths.append(existing)
-    environment["PYTHONPATH"] = os.pathsep.join(paths)
-    return environment
+_PROCESS_FIXTURES = ROOT / "tests" / "fixtures" / "processes"
 
 
 class KernelCheckSubprocessStatusTests(unittest.TestCase):
@@ -211,15 +107,14 @@ class KernelContextSchedulerTests(unittest.TestCase):
         return run_process(
             [
                 sys.executable,
-                "-c",
-                _SCHEDULER_HELPER,
+                str(_PROCESS_FIXTURES / "kernel_scheduler.py"),
                 str(self.root),
                 "stage" if stage_first else "simple",
             ],
             name="kernel context scheduler",
             timeout=10,
             cwd=ROOT,
-            env=_python_environment(),
+            env=python_environment(),
             while_running=while_running,
         )
 
@@ -240,29 +135,20 @@ class KernelContextSchedulerTests(unittest.TestCase):
         self.assertEqual(len(action), 1)
         os.write(self.control_descriptors[target], action)
 
-    @staticmethod
-    def _process_state(process_id: int) -> str | None:
-        """Return one Linux process state without signaling the test runner."""
-        try:
-            status = Path(f"/proc/{process_id}/status").read_text()
-        except FileNotFoundError:
-            return None
-        return next(line.split()[1] for line in status.splitlines() if line.startswith("State:"))
-
     def _assert_process_reaped(self, process_id: int) -> None:
         """Require a direct worker owned by the coordinator to disappear."""
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline:
-            if self._process_state(process_id) is None:
+            if process_state(process_id) is None:
                 return
             time.sleep(0.01)
-        self.fail(f"process {process_id} was not reaped; state={self._process_state(process_id)}")
+        self.fail(f"process {process_id} was not reaped; state={process_state(process_id)}")
 
     def _assert_process_stopped(self, process_id: int) -> None:
         """Require an adopted descendant to be absent or terminal."""
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline:
-            state = self._process_state(process_id)
+            state = process_state(process_id)
             if state is None:
                 return
             if state == "Z":
@@ -292,21 +178,15 @@ class KernelContextSchedulerTests(unittest.TestCase):
     def test_failure_names_context_and_reaps_blocked_sibling(self) -> None:
         """A failing context cancels and reaps a sibling blocked at the barrier."""
         pids: dict[str, int] = {}
-
-        def fail_second(_process: subprocess.Popen[str], _deadline: float) -> None:
-            for _index in range(2):
-                target, pid, _home, _temporary = self._accept_worker()
-                pids[target] = pid
-            self._release_worker("second", b"F")
-
-        result = self._run_scheduler(fail_second)
+        result = self._run_scheduler(self._fail_second_worker(pids))
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("sparse failed: context second exited 23", result.stderr)
         self._assert_process_reaped(pids["first"])
 
-    def test_failure_kills_worker_stage_tool_and_grandchild(self) -> None:
-        """Repeated cancellation reaches the active Stage-owned command group."""
-        pids: dict[str, int] = {}
+    def _fail_second_worker(
+        self, pids: dict[str, int]
+    ) -> Callable[[subprocess.Popen[str], float], None]:
+        """Record both ready workers and release the second with a failure."""
 
         def fail_second(_process: subprocess.Popen[str], _deadline: float) -> None:
             for _index in range(2):
@@ -314,8 +194,13 @@ class KernelContextSchedulerTests(unittest.TestCase):
                 pids[target] = pid
             self._release_worker("second", b"F")
 
+        return fail_second
+
+    def test_failure_kills_worker_stage_tool_and_grandchild(self) -> None:
+        """Repeated cancellation reaches the active Stage-owned command group."""
+        pids: dict[str, int] = {}
         try:
-            result = self._run_scheduler(fail_second, stage_first=True)
+            result = self._run_scheduler(self._fail_second_worker(pids), stage_first=True)
         finally:
             tool_pid_path = self.root / "tool.pid"
             if tool_pid_path.exists():

@@ -8,14 +8,36 @@ import signal
 import subprocess
 import time
 from contextlib import suppress
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+from fplinux_cli.common import ROOT
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
-    from pathlib import Path
     from typing import NoReturn
 
 _TERMINATE_GRACE_SECONDS = 1.0
+
+
+def python_environment() -> dict[str, str]:
+    """Expose the current production package to an isolated Python process."""
+    environment = os.environ.copy()
+    existing = environment.get("PYTHONPATH")
+    paths = [str(ROOT / "scripts")]
+    if existing:
+        paths.append(existing)
+    environment["PYTHONPATH"] = os.pathsep.join(paths)
+    return environment
+
+
+def process_state(process_id: int) -> str | None:
+    """Read a Linux process state without signaling the process."""
+    try:
+        status = Path(f"/proc/{process_id}/status").read_text()
+    except FileNotFoundError:
+        return None
+    return next(line.split()[1] for line in status.splitlines() if line.startswith("State:"))
 
 
 def _terminate_and_reap(process: subprocess.Popen[str]) -> tuple[str, str]:

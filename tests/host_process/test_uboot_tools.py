@@ -5,153 +5,63 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import subprocess
 import tarfile
 import tempfile
-import textwrap
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 from fplinux_cli import builder, uboot_tools
 
+ROOT = Path(__file__).resolve().parents[2]
+UBOOT_FIXTURES = ROOT / "tests/fixtures/uboot_tools"
+
 
 class UbootToolsTests(unittest.TestCase):
     """Exercise the producer without claiming a real U-Boot build."""
-
-    _REQUIRED_CONFIG = textwrap.dedent(
-        """\
-        CONFIG_TARGET_FPLINUX_UMS9117=y
-        CONFIG_TEXT_BASE=0x81000000
-        CONFIG_CUSTOM_SYS_INIT_SP_ADDR=0x80f00000
-        CONFIG_SYS_LOAD_ADDR=0x83200000
-        CONFIG_SYS_FDT_PAD=0x00003000
-        CONFIG_ENV_IS_NOWHERE=y
-        CONFIG_AUTOBOOT=y
-        CONFIG_BOOTDELAY=-2
-        CONFIG_USE_BOOTCOMMAND=y
-        CONFIG_BOOTCOMMAND=\"sdboot\"
-        # CONFIG_BOOTSTD is not set
-        CONFIG_SYS_DCACHE_OFF=y
-        CONFIG_FIT=y
-        CONFIG_FIT_FULL_CHECK=y
-        CONFIG_SHA256=y
-        CONFIG_LMB=y
-        # CONFIG_FIT_SIGNATURE is not set
-        # CONFIG_LEGACY_IMAGE_FORMAT is not set
-        CONFIG_CMD_BOOTM=y
-        CONFIG_MMC=y
-        CONFIG_DM_MMC=y
-        # CONFIG_CMD_MMC is not set
-        # CONFIG_MMC_WRITE is not set
-        # CONFIG_MMC_HW_PARTITIONING is not set
-        # CONFIG_CMD_FAT is not set
-        # CONFIG_CMD_FS_GENERIC is not set
-        CONFIG_FS_FAT=y
-        CONFIG_DOS_PARTITION=y
-        # CONFIG_FAT_WRITE is not set
-        # CONFIG_BLOCK_CACHE is not set
-        # CONFIG_USB is not set
-        # CONFIG_NET is not set
-        # CONFIG_EFI_LOADER is not set
-        CONFIG_TEST_INPUT=one
-        """
-    )
 
     def setUp(self) -> None:
         """Create the make-compatible external source boundary used by every case."""
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+        self.required_config = (UBOOT_FIXTURES / "required.config").read_text(encoding="utf-8")
         source = self.root / "source/u-boot-2026.07"
-        (source / "configs").mkdir(parents=True)
-        (source / "scripts").mkdir()
-        (source / "scripts/fake-build.py").write_text(
-            textwrap.dedent(
-                """\
-                #!/usr/bin/env python3
-                import pathlib
-                import subprocess
-                import sys
-
-                output = pathlib.Path(sys.argv[1])
-                output.mkdir(parents=True, exist_ok=True)
-                elf = bytearray(52)
-                elf[0:4] = b"\\x7fELF"
-                elf[4:7] = b"\\x01\\x01\\x01"
-                elf[16:18] = (2).to_bytes(2, "little")
-                elf[18:20] = (40).to_bytes(2, "little")
-                elf[20:24] = (1).to_bytes(4, "little")
-                elf[24:28] = (0x81000000).to_bytes(4, "little")
-                (output / "u-boot").write_bytes(bytes(elf) + b"DEBUG")
-                (output / "u-boot-dtb.bin").write_bytes(b"binary")
-                target_header = pathlib.Path("include/fplinux-uboot-target.h")
-                if target_header.exists():
-                    target = subprocess.run(
-                        ["cc", "-E", "-P", "-I", "include", "-"],
-                        input=b'#include "fplinux-uboot-target.h"\\nFPLINUX_UBOOT_TARGET\\n',
-                        capture_output=True,
-                        check=True,
-                        timeout=30,
-                    ).stdout
-                    (output / "u-boot.dtb").write_bytes(target)
-                else:
-                    (output / "u-boot.dtb").write_bytes(b"dtb")
-                (output / "u-boot.map").write_text(
-                    (output / ".config").read_text(encoding="utf-8"),
-                    encoding="utf-8",
-                )
-                tools = output / "tools"
-                tools.mkdir()
-                for name in ("mkimage", "dumpimage"):
-                    tool = tools / name
-                    tool.write_text(
-                        '#!/bin/sh\\n'
-                        'test "$1" = -V || exit 1\\n'
-                        f'echo "{name} version 2026.07"\\n',
-                        encoding="utf-8",
-                    )
-                    tool.chmod(0o755)
-                """
-            ),
-            encoding="utf-8",
-        )
-        (source / "Makefile").write_text(
-            textwrap.dedent(
-                """\
-                .PHONY: all
-                %_defconfig:
-                \t@mkdir -p "$(O)"
-                \t@cp configs/$@ "$(O)/.config"
-                all:
-                \t@if grep -qx 'CONFIG_TEST_FAIL=y' "$(O)/.config"; then exit 42; fi
-                \t@sh scripts/build-log.sh
-                \t@python3 scripts/fake-build.py "$(O)"
-                """
-            ),
-            encoding="utf-8",
-        )
+        self.prepare_synthetic_source(source)
         self.defconfig = self.root / "ta1618_defconfig"
-        self.defconfig.write_text(self._REQUIRED_CONFIG, encoding="utf-8")
+        self.defconfig.write_text(self.required_config, encoding="utf-8")
         self.build_log = self.root / "build.log"
         self.projection = self.root / "build-log.sh"
-        self.projection.write_text(
-            f"printf '%s\\n' build >> {self.build_log}\n",
-            encoding="utf-8",
+        shutil.copyfile(UBOOT_FIXTURES / "build-log.sh", self.projection)
+        self.record_builds_in(self.build_log)
+        self.archive = self.archive_synthetic_source(source)
+        self.config = self.full_uboot_config(self.archive)
+        self.work = self.root / "work"
+        self.layout = self.full_uboot_layout()
+
+    def record_builds_in(self, build_log: Path) -> None:
+        """Expose the per-test build log to the projected fixture program."""
+        environment = mock.patch.dict(
+            os.environ,
+            {"FPLINUX_TEST_BUILD_LOG": str(build_log)},
         )
-        self.archive = self.root / "source.tar.bz2"
-        unpacked = self.root / "source.tar"
-        with tarfile.open(unpacked, "w:") as output:
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def archive_synthetic_source(self, source: Path) -> Path:
+        """Create the compressed source input with the standard tar implementation."""
+        archive = self.root / "source.tar.bz2"
+        with tarfile.open(archive, "w:bz2") as output:
             output.add(source, arcname="u-boot-2026.07")
-        with self.archive.open("wb") as output:
-            subprocess.run(
-                ["bzip2", "-c", str(unpacked)],
-                stdout=output,
-                check=True,
-                timeout=30,
-            )
-        digest = hashlib.sha256(self.archive.read_bytes()).hexdigest()
-        self.config = {
+        return archive
+
+    @staticmethod
+    def full_uboot_config(archive: Path) -> dict[str, Any]:
+        """Bind the synthetic archive to the full U-Boot source contract."""
+        return {
             "kind": "full",
             "source": "u-boot.lock.toml",
             "archive_prefix": "u-boot-2026.07",
@@ -161,18 +71,31 @@ class UbootToolsTests(unittest.TestCase):
                 "tag": "v2026.07",
                 "commit": "e" * 40,
                 "archive_url": "https://example.invalid/u-boot.tar.bz2",
-                "archive_sha256": digest,
+                "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
                 "license": "GPL-2.0-only",
             },
         }
-        self.work = self.root / "work"
-        self.layout = {
+
+    @staticmethod
+    def full_uboot_layout() -> dict[str, int]:
+        """Provide the memory layout independently expected by the producer checks."""
+        return {
             "uboot_load": 0x81000000,
             "uboot_size": 0x00100000,
             "uboot_stack": 0x80F00000,
             "fit_load": 0x83200000,
             "fdt_pad": 0x00003000,
         }
+
+    @staticmethod
+    def prepare_synthetic_source(source: Path) -> None:
+        """Install the explicit fixture programs that model the external source tree."""
+        (source / "configs").mkdir(parents=True)
+        scripts = source / "scripts"
+        scripts.mkdir()
+        shutil.copyfile(UBOOT_FIXTURES / "Makefile", source / "Makefile")
+        for name in ("fake-build.py", "tool-version.py"):
+            shutil.copyfile(UBOOT_FIXTURES / name, scripts / name)
 
     def _build(self, *, jobs: int = 1) -> uboot_tools.UbootBuild:
         return uboot_tools.build_full(
@@ -199,7 +122,7 @@ class UbootToolsTests(unittest.TestCase):
         first_binary = first.binary.read_bytes()
 
         self.assertEqual(first.elf.read_bytes()[:4], b"\x7fELF")
-        self.assertEqual(first.config.read_text(encoding="utf-8"), self._REQUIRED_CONFIG)
+        self.assertEqual(first.config.read_text(encoding="utf-8"), self.required_config)
         self.assertEqual(self._build_log_lines(), ["build"])
 
         (self.root / "unrelated-sibling.txt").write_text("unchanged input\n", encoding="utf-8")
@@ -213,7 +136,7 @@ class UbootToolsTests(unittest.TestCase):
         """One declared input changes the result, while missing or altered outputs revoke reuse."""
         first = self._build()
         self.defconfig.write_text(
-            self._REQUIRED_CONFIG.replace("CONFIG_TEST_INPUT=one", "CONFIG_TEST_INPUT=two"),
+            self.required_config.replace("CONFIG_TEST_INPUT=one", "CONFIG_TEST_INPUT=two"),
             encoding="utf-8",
         )
 
@@ -249,7 +172,7 @@ class UbootToolsTests(unittest.TestCase):
         }
         before = {name: path.read_bytes() for name, path in visible_outputs.items()}
         self.defconfig.write_text(
-            self._REQUIRED_CONFIG.replace("CONFIG_TEST_INPUT=one", "CONFIG_TEST_FAIL=y"),
+            self.required_config.replace("CONFIG_TEST_INPUT=one", "CONFIG_TEST_FAIL=y"),
             encoding="utf-8",
         )
 
@@ -270,7 +193,7 @@ class UbootToolsTests(unittest.TestCase):
             ("CONFIG_FIT_FULL_CHECK=y", "# CONFIG_FIT_FULL_CHECK is not set"),
         ):
             with self.subTest(config=unsafe):
-                self.defconfig.write_text(self._REQUIRED_CONFIG.replace(previous, unsafe))
+                self.defconfig.write_text(self.required_config.replace(previous, unsafe))
                 with self.assertRaisesRegex(uboot_tools.UbootToolsError, "read-only MMC contract"):
                     self._build()
                 self.assertEqual(current.config.read_bytes(), before)
@@ -285,7 +208,7 @@ class UbootToolsTests(unittest.TestCase):
         )
         base = "\n".join(
             line
-            for line in self._REQUIRED_CONFIG.splitlines()
+            for line in self.required_config.splitlines()
             if not line.startswith(layout_prefixes)
         )
         receipts = []

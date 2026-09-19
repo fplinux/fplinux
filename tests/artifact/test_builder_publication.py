@@ -21,70 +21,11 @@ from fplinux_cli.bundle_state import (
     resolve_current_bundle,
 )
 
+from tests.fdt import binary_tree
+
 
 class RamSessionImageTests(unittest.TestCase):
     """Exercise the canonical static-image personalization boundary."""
-
-    @staticmethod
-    def fdt(
-        chosen_properties: list[tuple[str, bytes]],
-        session_properties: list[tuple[str, bytes]],
-    ) -> bytes:
-        """Build one minimal independent /chosen plus /fplinux-session fixture."""
-        names = b""
-        offsets: dict[str, int] = {}
-        for properties in (chosen_properties, session_properties):
-            for name, _value in properties:
-                if name not in offsets:
-                    offsets[name] = len(names)
-                    names += name.encode("ascii") + b"\0"
-
-        structure = bytearray()
-
-        def word(value: int) -> None:
-            structure.extend(struct.pack(">I", value))
-
-        def align() -> None:
-            structure.extend(bytes(-len(structure) % 4))
-
-        word(1)
-        structure.extend(b"\0")
-        align()
-        for node, properties in (
-            ("chosen", chosen_properties),
-            ("fplinux-session", session_properties),
-        ):
-            word(1)
-            structure.extend(node.encode("ascii") + b"\0")
-            align()
-            for name, value in properties:
-                word(3)
-                word(len(value))
-                word(offsets[name])
-                structure.extend(value)
-                align()
-            word(2)
-        word(2)
-        word(9)
-
-        reserved_offset = 40
-        structure_offset = reserved_offset + 16
-        strings_offset = structure_offset + len(structure)
-        total_size = strings_offset + len(names)
-        header = struct.pack(
-            ">10I",
-            0xD00DFEED,
-            total_size,
-            structure_offset,
-            strings_offset,
-            reserved_offset,
-            17,
-            16,
-            0,
-            len(names),
-            len(structure),
-        )
-        return header + bytes(16) + structure + names
 
     def image_fixture(self) -> tuple[Path, Path, Path, Path, int, int]:
         """Create one RAM image with the exact externally defined ABI."""
@@ -92,15 +33,20 @@ class RamSessionImageTests(unittest.TestCase):
         load_address = 0x80100000
         kernel = bytearray(0x28)
         kernel[0x24:0x28] = b"\x18\x28\x6f\x01"
-        tree = self.fdt(
+        tree = binary_tree(
+            [],
             [
-                ("rng-seed", bytes([0xA1]) * 64),
-            ],
-            [
-                ("compatible", b"fplinux,ram-session\0"),
-                ("fplinux,ssh-client-key", bytes([0xB2]) * 68),
-                ("fplinux,session-id", bytes([0xC3]) * 32),
-                ("fplinux,usb-session", bytes([0xD4]) * 256),
+                ("chosen", [("rng-seed", bytes([0xA1]) * 64)], []),
+                (
+                    "fplinux-session",
+                    [
+                        ("compatible", b"fplinux,ram-session\0"),
+                        ("fplinux,ssh-client-key", bytes([0xB2]) * 68),
+                        ("fplinux,session-id", bytes([0xC3]) * 32),
+                        ("fplinux,usb-session", bytes([0xD4]) * 256),
+                    ],
+                    [],
+                ),
             ],
         )
         zimage_offset = 0x200

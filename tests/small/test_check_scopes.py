@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
-from typing import Literal, Self
+from typing import Any, Literal, Self
 from unittest import mock
 
 from fplinux_cli import container
@@ -717,45 +718,52 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
         )
         return WorkspaceSnapshot(files, "a" * 64)
 
-    def _run(  # noqa: PLR0913
-        self,
-        root: Path,
-        workspace: Path,
-        snapshot: WorkspaceSnapshot,
-        scopes: list[str],
-        commands: list[list[str]],
+    @staticmethod
+    def _guarded_boundary(
+        name: str,
+        normal_result: object,
         *,
-        no_cache: bool = False,
-        reporter_type: type[_RecordingReporter] = _RecordingReporter,
-        exact_hit_guard: bool = False,
+        exact_hit_guard: bool,
     ) -> mock.Mock:
-        logs = root / f"logs-{len(commands)}"
-        logs.mkdir(exist_ok=True)
-        reporter = reporter_type(logs, commands)
-        stage_workspace = mock.Mock(return_value=workspace)
-        discard_workspace = mock.Mock()
-        with (
+        """Fail if an exact receipt hit crosses a boundary that should remain untouched."""
+        return mock.Mock(
+            side_effect=(
+                AssertionError(f"exact check hit must not {name}") if exact_hit_guard else None
+            ),
+            return_value=None if exact_hit_guard else normal_result,
+        )
+
+    def _check_boundary_patches(  # noqa: PLR0913
+        self,
+        *,
+        root: Path,
+        reporter: _RecordingReporter,
+        snapshot: WorkspaceSnapshot,
+        stage_workspace: mock.Mock,
+        discard_workspace: mock.Mock,
+        exact_hit_guard: bool,
+    ) -> tuple[Any, ...]:
+        """Describe the controlled OCI, image, and workspace boundaries for a scenario."""
+        return (
             mock.patch.object(container, "ROOT", root),
             mock.patch("fplinux_cli.output.RunReporter.create", return_value=reporter),
             mock.patch.object(
                 container,
                 "kern_available",
-                side_effect=(
-                    AssertionError("exact check hit must not inspect Kern")
-                    if exact_hit_guard
-                    else None
+                new=self._guarded_boundary(
+                    "inspect Kern",
+                    normal_result=True,
+                    exact_hit_guard=exact_hit_guard,
                 ),
-                return_value=None if exact_hit_guard else True,
             ),
             mock.patch.object(
                 container,
                 "require_kern",
-                side_effect=(
-                    AssertionError("exact check hit must not require Kern")
-                    if exact_hit_guard
-                    else None
+                new=self._guarded_boundary(
+                    "require Kern",
+                    "kern",
+                    exact_hit_guard=exact_hit_guard,
                 ),
-                return_value=None if exact_hit_guard else "kern",
             ),
             mock.patch.object(
                 container,
@@ -770,12 +778,11 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
             mock.patch.object(
                 container,
                 "current_image_state",
-                side_effect=(
-                    AssertionError("exact check hit must not inspect an image")
-                    if exact_hit_guard
-                    else None
+                new=self._guarded_boundary(
+                    "inspect an image",
+                    ImageState("b" * 64, "c" * 64),
+                    exact_hit_guard=exact_hit_guard,
                 ),
-                return_value=(None if exact_hit_guard else ImageState("b" * 64, "c" * 64)),
             ),
             mock.patch.object(container, "kern_environment", return_value={}),
             mock.patch.object(
@@ -797,8 +804,10 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
                 container,
                 "stage_quality_workspace_snapshot",
                 new=(
-                    mock.Mock(
-                        side_effect=AssertionError("exact check hit must not stage a workspace")
+                    self._guarded_boundary(
+                        "stage a workspace",
+                        None,
+                        exact_hit_guard=True,
                     )
                     if exact_hit_guard
                     else stage_workspace
@@ -812,20 +821,58 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
             mock.patch.object(
                 container,
                 "setup",
-                side_effect=(
-                    AssertionError("exact check hit must not set up an image")
-                    if exact_hit_guard
-                    else None
+                new=self._guarded_boundary(
+                    "set up an image",
+                    None,
+                    exact_hit_guard=exact_hit_guard,
                 ),
-                return_value=None,
             ),
-        ):
-            try:
-                container.check(scopes, no_cache=no_cache)
-            except RuntimeError:
-                if not exact_hit_guard:
-                    discard_workspace.assert_called_once_with(snapshot, workspace)
-                raise
+        )
+
+    def _execute_check(
+        self,
+        scopes: list[str],
+        *,
+        no_cache: bool,
+        patches: tuple[Any, ...],
+    ) -> None:
+        """Run the production check entry point with the scenario's controlled boundaries."""
+        with ExitStack() as stack:
+            for boundary in patches:
+                stack.enter_context(boundary)
+            container.check(scopes, no_cache=no_cache)
+
+    def _run(  # noqa: PLR0913
+        self,
+        root: Path,
+        workspace: Path,
+        snapshot: WorkspaceSnapshot,
+        scopes: list[str],
+        commands: list[list[str]],
+        *,
+        no_cache: bool = False,
+        reporter_type: type[_RecordingReporter] = _RecordingReporter,
+        exact_hit_guard: bool = False,
+    ) -> mock.Mock:
+        logs = root / f"logs-{len(commands)}"
+        logs.mkdir(exist_ok=True)
+        reporter = reporter_type(logs, commands)
+        stage_workspace = mock.Mock(return_value=workspace)
+        discard_workspace = mock.Mock()
+        patches = self._check_boundary_patches(
+            root=root,
+            reporter=reporter,
+            snapshot=snapshot,
+            stage_workspace=stage_workspace,
+            discard_workspace=discard_workspace,
+            exact_hit_guard=exact_hit_guard,
+        )
+        try:
+            self._execute_check(scopes, no_cache=no_cache, patches=patches)
+        except RuntimeError:
+            if not exact_hit_guard:
+                discard_workspace.assert_called_once_with(snapshot, workspace)
+            raise
         if exact_hit_guard:
             discard_workspace.assert_not_called()
         else:
