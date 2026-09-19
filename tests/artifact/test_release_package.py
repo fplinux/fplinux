@@ -19,10 +19,10 @@ from urllib.parse import urlsplit
 from fplinux_cli import alpine_state, commands
 from fplinux_cli.bundle_state import (
     BUILD_MANIFEST_NAME,
-    canonical_json_bytes,
     publish_current_bundle,
     published_file_records,
 )
+from fplinux_cli.common import canonical_json_bytes
 from fplinux_cli.config import load_release
 from fplinux_cli.image_state import ImageState
 from fplinux_cli.workspace import WorkspaceSnapshot

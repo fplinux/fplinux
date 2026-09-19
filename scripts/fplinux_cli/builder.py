@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
-# ruff: noqa: PLR0913, PLR0917
 """Build any declarative FPLinux target inside the pinned OCI environment."""
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import shlex
@@ -31,14 +29,19 @@ from . import (
 )
 from .build_env import build_environment
 from .bundle_state import (
-    canonical_json_bytes,
     create_bundle_staging,
     discard_bundle_staging,
     publish_bundle_generation,
     publish_current_bundle,
     published_file_records,
 )
-from .common import ROOT, sha256_bytes, sha256_file
+from .common import (
+    ROOT,
+    canonical_json_bytes,
+    replace_file_atomically,
+    sha256_bytes,
+    sha256_file,
+)
 from .config import (
     compose_kernel_config,
     container_runtime_recipe_digest,
@@ -414,7 +417,7 @@ def linux_recipe_digest(
         ],
     }
     encoded = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(encoded).hexdigest()
+    return sha256_bytes(encoded)
 
 
 def bootstrap_tree_entries(source: Path) -> list[dict[str, int | str]]:
@@ -748,10 +751,11 @@ def kernel_build_commands(
     ]
 
 
-def build_kernel(
+def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay explicit.
     target: str,
     target_config: dict[str, Any],
     platform: dict[str, Any],
+    *,
     bootstrap_recipe: str,
     linux_source: Path,
     prepared_linux: PreparedLinuxState,
@@ -946,8 +950,9 @@ def _verify_session_dtb(tree: bytes) -> None:
             fail(f"target DTB marker {name} must occur exactly once")
 
 
-def verify_images(
+def verify_images(  # noqa: PLR0913 -- artifacts and target limits stay explicit.
     ramboot: Path,
+    *,
     zimage: Path,
     dtb: Path,
     map_file: Path,
@@ -975,15 +980,7 @@ def verify_images(
         if marker.lower().encode() in lowered:
             fail(f"target DTB contains forbidden storage marker {marker}")
 
-    symbols: dict[str, int] = {}
-    for line in map_file.read_text().splitlines():
-        fields = line.split()
-        if len(fields) < 3:
-            continue
-        try:
-            symbols[fields[2]] = int(fields[0], 16)
-        except ValueError:
-            continue
+    symbols = _bootstrap_map_symbols(map_file)
     required = {
         "__image_start",
         "linux_zimage_start",
@@ -1070,9 +1067,10 @@ def _bootstrap_map_symbols(map_file: Path) -> dict[str, int]:
     return symbols
 
 
-def verify_sd_stage0_image(
+def verify_sd_stage0_image(  # noqa: PLR0913 -- artifacts and target limits stay explicit.
     ramboot: Path,
     uboot: UbootBuild,
+    *,
     map_file: Path,
     load_address: int,
     payload_limit: int,
@@ -1141,11 +1139,12 @@ def verify_sd_stage0_image(
     }
 
 
-def build_bootstrap(
+def build_bootstrap(  # noqa: PLR0913 -- source selection and payload inputs stay explicit.
     sources: dict[str, Any],
     target: str,
     target_config: dict[str, Any],
     platform: dict[str, Any],
+    *,
     work: Path,
     zimage: Path,
     dtb: Path,
@@ -1240,20 +1239,20 @@ def build_bootstrap(
         personalization = verify_sd_stage0_image(
             ramboot,
             uboot,
-            ramboot_map,
-            target_bootstrap["load_address"],
-            target_bootstrap["payload_limit"],
-            target_config["layout"],
+            map_file=ramboot_map,
+            load_address=target_bootstrap["load_address"],
+            payload_limit=target_bootstrap["payload_limit"],
+            layout=target_config["layout"],
         )
     else:
         personalization = verify_images(
             ramboot,
-            zimage,
-            dtb,
-            ramboot_map,
-            target_bootstrap["load_address"],
-            target_bootstrap["payload_limit"],
-            target_config["linux"]["forbidden_dtb_markers"],
+            zimage=zimage,
+            dtb=dtb,
+            map_file=ramboot_map,
+            load_address=target_bootstrap["load_address"],
+            payload_limit=target_bootstrap["payload_limit"],
+            forbidden_markers=target_config["linux"]["forbidden_dtb_markers"],
         )
     return ramboot, ramboot_map, personalization
 
@@ -1275,24 +1274,11 @@ def extract_7z_member(archive: Path, member: str) -> bytes:
 
 def write_checked(data: bytes, destination: Path, expected: str) -> None:
     """Atomically write bytes that match their declared digest."""
-    actual = hashlib.sha256(data).hexdigest()
+    actual = sha256_bytes(data)
     if actual != expected:
         fail(f"{destination.name} SHA256 mismatch: expected {expected}, got {actual}")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            dir=destination.parent,
-            prefix=f".{destination.name}.",
-            delete=False,
-        ) as output:
-            temporary = Path(output.name)
-            output.write(data)
-        temporary.replace(destination)
-        temporary = None
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    replace_file_atomically(destination, data, 0o600, sync=False)
 
 
 def build_assets(lock_path: Path, output: Path) -> dict[str, tuple[str, str]]:
@@ -1538,14 +1524,14 @@ def build_profile_uboot(
             uboot = uboot_tools.build_full(
                 archive,
                 config,
-                defconfig,
-                projections,
-                [require_file(ROOT / path) for path in config["patches"]],
-                work,
-                jobs,
-                container_recipe,
-                "arm-none-eabi-",
-                target_config["layout"],
+                defconfig=defconfig,
+                projections=projections,
+                patches=[require_file(ROOT / path) for path in config["patches"]],
+                work=work,
+                jobs=jobs,
+                container_recipe=container_recipe,
+                cross_compile="arm-none-eabi-",
+                layout=target_config["layout"],
             )
     except (
         OSError,
@@ -1590,9 +1576,10 @@ def profile_ext4_artifact(
     return require_file(output / config["filename"])
 
 
-def build_profile_fit(
+def build_profile_fit(  # noqa: PLR0913 -- target selection and artifact paths stay explicit.
     target: str,
     target_config: dict[str, Any],
+    *,
     work: Path,
     zimage: Path,
     dtb: Path,
@@ -1611,18 +1598,18 @@ def build_profile_fit(
             target,
             target_config["identity"]["display_name"],
             config,
-            zimage,
-            dtb,
-            uboot.receipt,
+            zimage=zimage,
+            dtb=dtb,
+            tools_receipt=uboot.receipt,
         )
         output = work / "fit"
         fit = fit_image.build(
-            uboot.mkimage,
-            uboot.dumpimage,
-            zimage,
-            dtb,
-            output,
-            plan,
+            mkimage=uboot.mkimage,
+            dumpimage=uboot.dumpimage,
+            zimage=zimage,
+            dtb=dtb,
+            output=output,
+            plan=plan,
         )
         fit_image.receipt_identity(output, plan)
     except (
@@ -1705,34 +1692,19 @@ def copy_file(source: Path, destination: Path, *, executable: bool = False) -> N
     destination.chmod(0o755 if executable else 0o644)
 
 
-def write_json(path: Path, value: dict[str, Any], *, prefix: str) -> None:
+def write_json(path: Path, value: dict[str, Any]) -> None:
     """Atomically write deterministic JSON metadata."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            dir=path.parent,
-            prefix=prefix,
-            mode="w",
-            encoding="utf-8",
-            delete=False,
-        ) as stream:
-            temporary = Path(stream.name)
-            json.dump(value, stream, indent=2, sort_keys=True)
-            stream.write("\n")
-        temporary.chmod(0o644)
-        temporary.replace(path)
-        temporary = None
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    encoded = (json.dumps(value, indent=2, sort_keys=True) + "\n").encode()
+    replace_file_atomically(path, encoded, 0o644, sync=False)
 
 
-def runtime_manifest(
+def runtime_manifest(  # noqa: PLR0913 -- each published artifact role stays explicit.
     release: Path,
     target: str,
     target_config: dict[str, Any],
     platform: dict[str, Any],
+    *,
     image: str,
     asset_outputs: dict[str, tuple[str, str]],
     host_tools: dict[str, Path],
@@ -1794,11 +1766,12 @@ def runtime_manifest(
     }
 
 
-def _publish_staged_bundle(
+def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay explicit.
     release: Path,
     target: str,
     target_config: dict[str, Any],
     platform: dict[str, Any],
+    *,
     release_manifest: dict[str, Any],
     work: Path,
     rootfs: Path,
@@ -1873,12 +1846,12 @@ def _publish_staged_bundle(
         target,
         target_config,
         platform,
-        image_name,
-        asset_outputs,
-        host_tools,
-        personalization,
+        image=image_name,
+        asset_outputs=asset_outputs,
+        host_tools=host_tools,
+        personalization=personalization,
     )
-    write_json(release / "runtime-manifest.json", runtime, prefix=".runtime-manifest.")
+    write_json(release / "runtime-manifest.json", runtime)
 
     for relative in release_manifest["bundle_files"]:
         require_file(release / relative)
@@ -1916,7 +1889,7 @@ def _publish_staged_bundle(
     }
     generation = sha256_bytes(canonical_json_bytes(payload))
     manifest = {**payload, "generation": generation}
-    write_json(release / "build-manifest.json", manifest, prefix=".build-manifest.")
+    write_json(release / "build-manifest.json", manifest)
     profile = selected_profile(target_config)
     generation_path = publish_bundle_generation(
         OUTPUT,
@@ -1929,10 +1902,11 @@ def _publish_staged_bundle(
     return generation_path
 
 
-def publish_bundle(
+def publish_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay explicit.
     target: str,
     target_config: dict[str, Any],
     platform: dict[str, Any],
+    *,
     release_manifest: dict[str, Any],
     work: Path,
     rootfs: Path,
@@ -1968,27 +1942,27 @@ def publish_bundle(
             target,
             target_config,
             platform,
-            release_manifest,
-            work,
-            rootfs,
-            kernel_output,
-            zimage,
-            dtb,
-            ramboot,
-            ramboot_map,
-            personalization,
-            asset_lock_path,
-            asset_outputs,
-            host_tools,
-            linux_recipe,
-            device_identity,
-            rootfs_output,
-            rootfs_recipe,
-            kbuild_receipt,
-            bundle_packages,
-            bundle_apks,
-            boot_files,
-            boot_artifacts,
+            release_manifest=release_manifest,
+            work=work,
+            rootfs=rootfs,
+            kernel_output=kernel_output,
+            zimage=zimage,
+            dtb=dtb,
+            ramboot=ramboot,
+            ramboot_map=ramboot_map,
+            personalization=personalization,
+            asset_lock_path=asset_lock_path,
+            asset_outputs=asset_outputs,
+            host_tools=host_tools,
+            linux_recipe=linux_recipe,
+            device_identity=device_identity,
+            rootfs_output=rootfs_output,
+            rootfs_recipe=rootfs_recipe,
+            kbuild_receipt=kbuild_receipt,
+            bundle_packages=bundle_packages,
+            bundle_apks=bundle_apks,
+            boot_files=boot_files,
+            boot_artifacts=boot_artifacts,
         )
     finally:
         discard_bundle_staging(OUTPUT, target, release, profile)
@@ -2077,16 +2051,16 @@ def main() -> None:
             args.target,
             target_config,
             platform,
-            bootstrap_recipe,
-            linux_source,
-            prepared_linux,
-            linux_base,
-            kernel_output,
-            cross,
-            rootfs,
-            rootfs_output,
-            rootfs_recipe,
-            args.jobs,
+            bootstrap_recipe=bootstrap_recipe,
+            linux_source=linux_source,
+            prepared_linux=prepared_linux,
+            linux_base=linux_base,
+            output=kernel_output,
+            cross=cross,
+            rootfs=rootfs,
+            rootfs_output=rootfs_output,
+            rootfs_recipe=rootfs_recipe,
+            jobs=args.jobs,
         )
     profile_uboot = None
     if target_config["uboot"]["kind"] != "none":
@@ -2098,10 +2072,10 @@ def main() -> None:
             fit_artifact = build_profile_fit(
                 args.target,
                 target_config,
-                work,
-                zimage,
-                dtb,
-                profile_uboot,
+                work=work,
+                zimage=zimage,
+                dtb=dtb,
+                uboot=profile_uboot,
             )
     sd_image_artifact = None
     if target_config["image"]["kind"] != "none":
@@ -2122,10 +2096,10 @@ def main() -> None:
             args.target,
             target_config,
             platform,
-            work,
-            zimage,
-            dtb,
-            profile_uboot,
+            work=work,
+            zimage=zimage,
+            dtb=dtb,
+            uboot=profile_uboot,
         )
     with report_stage(reporter, "assets"):
         asset_outputs = build_assets(asset_lock_path, work / "assets")
@@ -2136,27 +2110,27 @@ def main() -> None:
             args.target,
             target_config,
             platform,
-            release_manifest,
-            work,
-            rootfs,
-            kernel_output,
-            zimage,
-            dtb,
-            ramboot,
-            ramboot_map,
-            personalization,
-            asset_lock_path,
-            asset_outputs,
-            host_tools,
-            prepared_linux.linux_recipe,
-            device_identity,
-            rootfs_output,
-            rootfs_recipe,
-            kbuild_receipt,
-            bundle_packages,
-            bundle_apk_outputs,
-            boot_files,
-            boot_artifacts,
+            release_manifest=release_manifest,
+            work=work,
+            rootfs=rootfs,
+            kernel_output=kernel_output,
+            zimage=zimage,
+            dtb=dtb,
+            ramboot=ramboot,
+            ramboot_map=ramboot_map,
+            personalization=personalization,
+            asset_lock_path=asset_lock_path,
+            asset_outputs=asset_outputs,
+            host_tools=host_tools,
+            linux_recipe=prepared_linux.linux_recipe,
+            device_identity=device_identity,
+            rootfs_output=rootfs_output,
+            rootfs_recipe=rootfs_recipe,
+            kbuild_receipt=kbuild_receipt,
+            bundle_packages=bundle_packages,
+            bundle_apks=bundle_apk_outputs,
+            boot_files=boot_files,
+            boot_artifacts=boot_artifacts,
         )
 
 

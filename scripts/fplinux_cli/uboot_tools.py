@@ -16,13 +16,12 @@ from typing import Any
 
 from . import artifact_state, build_env
 from .artifact_state import (
-    canonical_json_bytes,
     receipt_matches,
     regular_file_record,
     require_lowercase_sha256,
     write_canonical_json,
 )
-from .common import sha256_file
+from .common import canonical_json_bytes, sha256_file
 
 RECEIPT_NAME = ".fplinux-uboot-receipt.json"
 _BUILD_TIMEOUT_SECONDS = 1800
@@ -118,9 +117,10 @@ FULL_OUTPUTS = (
 )
 
 
-def _full_recipe(  # noqa: PLR0913, PLR0917 -- causal inputs stay explicit.
+def _full_recipe(  # noqa: PLR0913 -- causal inputs stay explicit.
     archive: Path,
     config: dict[str, Any],
+    *,
     defconfig: Path,
     projections: list[tuple[Path, str]],
     patches: list[Path],
@@ -312,9 +312,10 @@ def _full_result(output: Path, recipe: str, layout: dict[str, int]) -> UbootBuil
     )
 
 
-def build_full(  # noqa: PLR0913, PLR0917 -- build inputs stay explicit.
+def build_full(  # noqa: PLR0913 -- build inputs stay explicit.
     archive: Path,
     config: dict[str, Any],
+    *,
     defconfig: Path,
     projections: list[tuple[Path, str]],
     patches: list[Path],
@@ -330,11 +331,11 @@ def build_full(  # noqa: PLR0913, PLR0917 -- build inputs stay explicit.
     recipe = _full_recipe(
         archive,
         config,
-        defconfig,
-        projections,
-        patches,
-        container_recipe,
-        cross_compile,
+        defconfig=defconfig,
+        projections=projections,
+        patches=patches,
+        container_recipe=container_recipe,
+        cross_compile=cross_compile,
     )
     version = str(config["lock"]["version"])
     output = work / "uboot"

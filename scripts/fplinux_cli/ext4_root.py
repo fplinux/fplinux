@@ -17,13 +17,12 @@ from typing import Any
 
 from . import artifact_state, build_env
 from .artifact_state import (
-    canonical_json_bytes,
     receipt_matches,
     regular_file_record,
     require_lowercase_sha256,
     write_canonical_json,
 )
-from .common import sha256_file
+from .common import canonical_json_bytes, sha256_file
 
 RECEIPT_NAME = ".fplinux-ext4-receipt.json"
 SUPERBLOCK_OFFSET = 1024

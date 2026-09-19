@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: GPL-2.0-only
-# ruff: noqa: PLR0913, PLR0917
 """Build the selected locked Alpine rootfs and its local APKs."""
 
 from __future__ import annotations
@@ -15,13 +14,14 @@ import subprocess
 import tarfile
 import tempfile
 import urllib.request
+from functools import partial
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, BinaryIO, NoReturn
 
 from . import alpine_state, firmware_inputs
 from .build_env import SOURCE_DATE_EPOCH
 from .build_env import build_environment as _build_environment
-from .common import ROOT, sha256_file
+from .common import ROOT, alpine_tar_filter, sha256_file
 from .config import relative_value
 from .output import current_stage
 
@@ -496,8 +496,9 @@ def materialize_aport_sources(package: str, source_root: Path, destination: Path
     return destination
 
 
-def _build_fplinux_apks(
+def _build_fplinux_apks(  # noqa: PLR0913 -- package, signing and build inputs stay explicit.
     lock: dict[str, Any],
+    *,
     sysroot: Path,
     work: Path,
     jobs: int,
@@ -610,8 +611,9 @@ def _build_fplinux_apks(
     return package_outputs, local_private_key, local_public_key
 
 
-def _build_alpine_composition_repository(
+def _build_alpine_composition_repository(  # noqa: PLR0913 -- package and signing inputs stay explicit.
     lock: dict[str, Any],
+    *,
     root: Path,
     runtime_packages: list[Path],
     local_packages: list[Path],
@@ -660,18 +662,7 @@ def _build_alpine_composition_repository(
     return repository, trust
 
 
-def _alpine_tar_filter(member: tarfile.TarInfo, destination: str) -> tarfile.TarInfo | None:
-    if member.issym() or member.islnk():
-        target = PurePosixPath(member.linkname)
-        if target.is_absolute():
-            if ".." in target.parts:
-                fail(f"Alpine minirootfs link escapes the root: {member.name}")
-            relative_target = target.as_posix().lstrip("/")
-            filtered = tarfile.data_filter(member.replace(linkname=relative_target), destination)
-            if filtered is None:
-                return None
-            return filtered.replace(linkname=member.linkname)
-    return tarfile.data_filter(member, destination)
+_alpine_tar_filter = partial(alpine_tar_filter, on_error=fail)
 
 
 def _require_apk_owner(root: Path, path: str, package: str) -> None:
@@ -847,7 +838,7 @@ def _rootfs_install_command(
     ]
 
 
-def build_rootfs(
+def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output stay explicit.
     jobs: int,
     packages: tuple[str, ...],
     bundle_packages: tuple[str, ...] = (),
@@ -947,12 +938,12 @@ def build_rootfs(
             _prepare_alpine_sysroot(lock, sysroot_packages, sysroot, root / "etc/apk/keys")
             local_packages, private_key, public_key = _build_fplinux_apks(
                 lock,
-                sysroot,
-                package_work,
-                jobs,
-                signing_private_key,
-                signing_public_key,
-                build_packages,
+                sysroot=sysroot,
+                work=package_work,
+                jobs=jobs,
+                private_key=signing_private_key,
+                public_key=signing_public_key,
+                build_packages=build_packages,
             )
             try:
                 bundle_outputs = {name: local_packages[name] for name in bundle_packages}
@@ -968,12 +959,12 @@ def build_rootfs(
                 )
             composition_repository, composition_keys = _build_alpine_composition_repository(
                 lock,
-                root,
-                runtime_packages,
-                sorted(local_packages.values()),
-                private_key,
-                public_key,
-                package_work,
+                root=root,
+                runtime_packages=runtime_packages,
+                local_packages=sorted(local_packages.values()),
+                private_key=private_key,
+                public_key=public_key,
+                work=package_work,
             )
             _run(
                 _rootfs_install_command(

@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: GPL-2.0-only
-# ruff: noqa: PLR0913
 """Compact progress and persistent diagnostics for long-running CLI stages."""
 
 from __future__ import annotations
@@ -14,7 +13,6 @@ import shlex
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 import traceback as traceback_module
 from contextlib import suppress
@@ -22,7 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, NoReturn, Self
 
-from .common import ROOT, display_text
+from .common import ROOT, display_text, replace_file_atomically
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -345,24 +343,13 @@ class RunReporter:
         if len(encoded) > _RUN_METADATA_MAX_BYTES:
             message = f"run metadata exceeds {_RUN_METADATA_MAX_BYTES} bytes"
             raise RuntimeError(message)
-        descriptor, temporary_name = tempfile.mkstemp(
-            dir=self.root,
-            prefix=f".{_RUN_METADATA_NAME}.",
-            suffix=".tmp",
-        )
-        temporary = Path(temporary_name)
-        try:
-            with os.fdopen(descriptor, "wb") as stream:
-                stream.write(encoded)
-            temporary.replace(self.metadata_path)
-        finally:
-            temporary.unlink(missing_ok=True)
+        replace_file_atomically(self.metadata_path, encoded, 0o600, sync=False)
 
 
 class Stage:
     """Collect subprocess diagnostics for one named stage."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 -- log paths and output policies stay explicit.
         self,
         reporter: RunReporter,
         name: str,

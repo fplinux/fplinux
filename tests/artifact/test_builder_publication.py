@@ -151,12 +151,12 @@ class RamSessionImageTests(unittest.TestCase):
 
         descriptor = builder.verify_images(
             ramboot,
-            zimage,
-            dtb,
-            map_file,
-            load_address,
-            load_address + ramboot.stat().st_size + 1,
-            [],
+            zimage=zimage,
+            dtb=dtb,
+            map_file=map_file,
+            load_address=load_address,
+            payload_limit=load_address + ramboot.stat().st_size + 1,
+            forbidden_markers=[],
         )
 
         self.assertEqual(
@@ -179,12 +179,12 @@ class RamSessionImageTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "not all zero"):
             builder.verify_images(
                 ramboot,
-                zimage,
-                dtb,
-                map_file,
-                load_address,
-                load_address + len(image) + 1,
-                [],
+                zimage=zimage,
+                dtb=dtb,
+                map_file=map_file,
+                load_address=load_address,
+                payload_limit=load_address + len(image) + 1,
+                forbidden_markers=[],
             )
 
 
@@ -327,18 +327,18 @@ class BuilderPublicationTests(unittest.TestCase):
         """Publish the configured fixture through the builder entry point."""
         with mock.patch.dict(os.environ, self.environment, clear=False):
             return builder.publish_bundle(
-                "demo",
-                self.target_config,
-                self.platform,
-                self.release_manifest,
-                self.work,
-                self.rootfs,
-                self.kernel,
-                self.zimage,
-                self.dtb,
-                self.ramboot if ramboot is None else ramboot,
-                self.ramboot_map,
-                (
+                target="demo",
+                target_config=self.target_config,
+                platform=self.platform,
+                release_manifest=self.release_manifest,
+                work=self.work,
+                rootfs=self.rootfs,
+                kernel_output=self.kernel,
+                zimage=self.zimage,
+                dtb=self.dtb,
+                ramboot=self.ramboot if ramboot is None else ramboot,
+                ramboot_map=self.ramboot_map,
+                personalization=(
                     {
                         "offset": 1024,
                         "bytes": 512,
@@ -347,21 +347,23 @@ class BuilderPublicationTests(unittest.TestCase):
                     if personalization is None
                     else personalization
                 ),
-                self.asset_lock,
-                {
+                asset_lock_path=self.asset_lock,
+                asset_outputs={
                     "pin": (
                         "pin.bin",
                         hashlib.sha256((self.work / "assets/pin.bin").read_bytes()).hexdigest(),
                     )
                 },
-                {"keyboard": self.host_tool},
-                "c" * 64,
-                "9" * 64,
-                self.rootfs_output,
-                self.rootfs_recipe,
-                {"recipe": "e" * 64, "sha256": "f" * 64},
-                tuple(self.bundle_apks) if bundle_packages is None else bundle_packages,
-                self.bundle_apks,
+                host_tools={"keyboard": self.host_tool},
+                linux_recipe="c" * 64,
+                device_identity="9" * 64,
+                rootfs_output=self.rootfs_output,
+                rootfs_recipe=self.rootfs_recipe,
+                kbuild_receipt={"recipe": "e" * 64, "sha256": "f" * 64},
+                bundle_packages=(
+                    tuple(self.bundle_apks) if bundle_packages is None else bundle_packages
+                ),
+                bundle_apks=self.bundle_apks,
             )
 
     def staging_directories(self) -> list[Path]:
@@ -565,10 +567,10 @@ class BuilderPublicationTests(unittest.TestCase):
         real_write_json = builder.write_json
         message = "manifest write failed"
 
-        def write_json(path: Path, value: dict[str, object], *, prefix: str) -> None:
+        def write_json(path: Path, value: dict[str, object]) -> None:
             if path.name == BUILD_MANIFEST_NAME:
                 raise OSError(message)
-            real_write_json(path, value, prefix=prefix)
+            real_write_json(path, value)
 
         with (
             mock.patch.object(builder, "write_json", side_effect=write_json),

@@ -14,7 +14,6 @@ from fplinux_cli.bundle_state import (
     BundleStateError,
     bundle_generations,
     bundle_pointer,
-    canonical_json_bytes,
     create_bundle_staging,
     discard_bundle_staging,
     discard_superseded_bundle_generations,
@@ -24,6 +23,7 @@ from fplinux_cli.bundle_state import (
     published_file_records,
     resolve_current_bundle,
 )
+from fplinux_cli.common import canonical_json_bytes
 
 
 class BundleStateTests(unittest.TestCase):

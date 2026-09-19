@@ -79,9 +79,9 @@ class FitImageTests(unittest.TestCase):
             "nokia-ta1618",
             "Nokia 3210 4G (TA-1618)",
             self.spec,
-            self.zimage,
-            self.dtb,
-            self.tools_receipt,
+            zimage=self.zimage,
+            dtb=self.dtb,
+            tools_receipt=self.tools_receipt,
         )
 
     def build(
@@ -92,12 +92,12 @@ class FitImageTests(unittest.TestCase):
     ) -> Path:
         """Publish the current FIT through the declared U-Boot tools."""
         return fit_image.build(
-            self.mkimage if mkimage is None else mkimage,
-            self.dumpimage,
-            self.zimage,
-            self.dtb,
-            self.output,
-            self.plan() if plan is None else plan,
+            mkimage=self.mkimage if mkimage is None else mkimage,
+            dumpimage=self.dumpimage,
+            zimage=self.zimage,
+            dtb=self.dtb,
+            output=self.output,
+            plan=self.plan() if plan is None else plan,
         )
 
     def test_builds_a_verified_fit_artifact(self) -> None:

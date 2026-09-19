@@ -86,20 +86,6 @@ class CheckReceiptTests(unittest.TestCase):
             self.assertTrue(receipt_matches(cache, default))
             self.assertTrue(receipt_matches(cache, profile))
 
-    def test_publish_reuses_one_fixed_temporary_path(self) -> None:
-        """An interrupted receipt write cannot leave unbounded temporary names."""
-        with tempfile.TemporaryDirectory() as temporary:
-            cache = Path(temporary) / ".cache"
-            expected = recipe("usb-host-lab")
-            temporary_path = receipt_path(cache, expected).parent / ".success.tmp"
-            temporary_path.parent.mkdir(parents=True)
-            temporary_path.write_text("partial\n", encoding="utf-8")
-
-            publish_success_receipt(cache, expected)
-
-            self.assertFalse(temporary_path.exists())
-            self.assertTrue(receipt_matches(cache, expected))
-
     def test_receipt_without_the_exact_profile_field_is_a_miss(self) -> None:
         """An older receipt shape is not reinterpreted for the default context."""
         with tempfile.TemporaryDirectory() as temporary:

@@ -3,23 +3,15 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from .common import sha256_file
+from .common import canonical_json_bytes, read_json_object, sha256_file
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 Failure = Callable[[str], Exception]
-
-
-def canonical_json_bytes(value: object) -> bytes:
-    """Encode one deterministic JSON receipt or causal manifest."""
-    return (
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n"
-    ).encode()
 
 
 def require_lowercase_sha256(value: object, field: str, failure: Failure) -> str:
@@ -43,15 +35,6 @@ def regular_file_record(path: Path, description: str, failure: Failure) -> dict[
         "sha256": sha256_file(path),
         "size": metadata.st_size,
     }
-
-
-def read_json_object(path: Path) -> dict[str, object] | None:
-    """Read a receipt only when it is an ordinary JSON object."""
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except OSError, ValueError:
-        return None
-    return value if isinstance(value, dict) else None
 
 
 def write_canonical_json(path: Path, value: object, *, mode: int | None = None) -> None:

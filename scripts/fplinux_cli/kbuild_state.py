@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import shutil
 import tempfile
@@ -12,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import NoReturn
 
-from .common import sha256_file
+from .common import canonical_json_bytes, read_json_object, replace_file_atomically, sha256_file
 
 RECEIPT_NAME = ".fplinux-kbuild-receipt.json"
 _INITRAMFS_INPUT = "rootfs.cpio"
@@ -58,13 +57,6 @@ def _relative(value: object, field: str) -> str:
     if path.is_absolute() or ".." in path.parts or value != path.as_posix():
         _error(f"{field} must be a normalized relative path: {value!r}")
     return value
-
-
-def _canonical_json(value: object) -> bytes:
-    return (
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
-        + b"\n"
-    )
 
 
 def _recipe_command(command: list[str]) -> list[str]:
@@ -147,7 +139,7 @@ def implementation_identity(implementation: list[tuple[str, Path]]) -> str:
     records = _implementation_records(implementation)
     if not records:
         _error("Kbuild implementation must not be empty")
-    return hashlib.sha256(_canonical_json(records)).hexdigest()
+    return hashlib.sha256(canonical_json_bytes(records)).hexdigest()
 
 
 def initramfs_identity(initramfs: Path) -> dict[str, int | str]:
@@ -232,7 +224,7 @@ def create_plan(  # noqa: PLR0913 -- exact causal inputs remain separate.
     }
     if linux_base is not None:
         manifest["linux_base"] = _require_digest(linux_base, "Linux base source")
-    recipe = hashlib.sha256(_canonical_json(manifest)).hexdigest()
+    recipe = hashlib.sha256(canonical_json_bytes(manifest)).hexdigest()
     return KbuildPlan(
         recipe=recipe,
         root=root_contract,
@@ -256,33 +248,14 @@ def _outputs_exist(output: Path, plan: KbuildPlan) -> bool:
     return all((output / relative).is_file() for relative in plan.outputs)
 
 
-def _read_json(path: Path) -> dict[str, object] | None:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except OSError, ValueError:
-        return None
-    return value if isinstance(value, dict) else None
-
-
 def _write_json_atomic(path: Path, value: object) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        dir=path.parent,
-        prefix=f".{path.stem}.",
-        suffix=".tmp",
-    )
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(_canonical_json(value))
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    replace_file_atomically(path, canonical_json_bytes(value), 0o600, sync=False)
 
 
 def cache_hit(work: Path, output: Path, plan: KbuildPlan) -> bool:
     """Return true only when the exact success receipt and outputs exist."""
-    receipt = _read_json(_receipt_path(work))
+    receipt = read_json_object(_receipt_path(work))
     return (
         receipt == _receipt_payload(plan)
         and _outputs_exist(output, plan)

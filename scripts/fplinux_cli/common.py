@@ -4,12 +4,17 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shlex
 import subprocess
+import tarfile
 import tempfile
 from pathlib import Path, PurePosixPath
-from typing import Any, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 ROOT = Path(__file__).resolve().parents[2]
 ZIP_TIMESTAMP = (2026, 7, 24, 19, 0, 0)
@@ -33,14 +38,50 @@ def sha256_bytes(data: bytes) -> str:
 
 
 def sha256_file(path: Path) -> str:
-    value = hashlib.sha256()
     with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            value.update(chunk)
-    return value.hexdigest()
+        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def replace_file_atomically(path: Path, contents: bytes, mode: int) -> None:
+def canonical_json_bytes(value: object) -> bytes:
+    """Encode deterministic JSON receipts and causal manifests."""
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return (encoded + "\n").encode()
+
+
+def read_json_object(path: Path) -> dict[str, object] | None:
+    """Read a receipt only when it is an ordinary JSON object."""
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except OSError, ValueError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def alpine_tar_filter(
+    member: tarfile.TarInfo,
+    destination: str,
+    *,
+    on_error: Callable[[str], NoReturn],
+) -> tarfile.TarInfo | None:
+    """Apply the data filter while retaining Alpine's absolute rootfs links.
+
+    The consumer owns the diagnostic prefix for rejected Alpine links.
+    Other rejection errors come directly from the standard data filter.
+    """
+    if member.issym() or member.islnk():
+        target = PurePosixPath(member.linkname)
+        if target.is_absolute():
+            if ".." in target.parts:
+                on_error(f"Alpine minirootfs link escapes the root: {member.name}")
+            relative_target = target.as_posix().lstrip("/")
+            filtered = tarfile.data_filter(member.replace(linkname=relative_target), destination)
+            if filtered is None:
+                return None
+            return filtered.replace(linkname=member.linkname)
+    return tarfile.data_filter(member, destination)
+
+
+def replace_file_atomically(path: Path, contents: bytes, mode: int, *, sync: bool = True) -> None:
     """Publish one verified regular file without exposing a partial write."""
     temporary: Path | None = None
     try:
@@ -51,8 +92,9 @@ def replace_file_atomically(path: Path, contents: bytes, mode: int) -> None:
         ) as stream:
             temporary = Path(stream.name)
             stream.write(contents)
-            stream.flush()
-            os.fsync(stream.fileno())
+            if sync:
+                stream.flush()
+                os.fsync(stream.fileno())
         temporary.chmod(mode)
         temporary.replace(path)
         temporary = None
