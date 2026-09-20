@@ -109,7 +109,9 @@ another power source; without a battery, it cuts power. Use
 to understand the private host link and [SSH access](../features/SSH.md) to open
 or reconnect to the running session. [File transfer](../features/FILE_TRANSFER.md)
 and [host keyboard forwarding](../features/HOST_KEYBOARD.md) are separate
-features of that session.
+features of that session. Optional applications can be added without another
+RAM load by following
+[Installing and removing optional APK packages](APK_PACKAGES.md).
 
 ## Verify a source-checkout session
 

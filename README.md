@@ -34,6 +34,7 @@ support status, boot key, storage rules and limitations.
 
 - [Building FPLinux](docs/guides/BUILDING.md)
 - [Loading from a source checkout](docs/guides/LOADING.md)
+- [Installing and removing optional APK packages](docs/guides/APK_PACKAGES.md)
 - [microSD system root](docs/guides/MICROSD_ROOT.md)
 - [Using a standalone archive](docs/guides/STANDALONE.md)
 - [Release archives](docs/guides/RELEASES.md)

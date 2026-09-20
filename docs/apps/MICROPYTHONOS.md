@@ -29,54 +29,21 @@ not made available by FPLinux.
 
 ## Install
 
-All three targets use the same `fplinux-micropythonos.apk` package.
+All three targets use the same `fplinux-micropythonos.apk` file. Its installed
+package name is `fplinux-micropythonos`. Follow
+[Installing and removing optional APK packages](../guides/APK_PACKAGES.md) for
+either a source checkout or a standalone archive.
 
-### Source checkout
-
-Set `target` and `profile` to match the running system and `bundle` to the
-`output:` directory from its build, then upload and install the base APK:
-
-```sh
-target=inoi-244-modern-4g
-profile=default
-bundle=/absolute/path/printed-by-fplinux-build
-
-./fplinux console "$target" --profile "$profile" --upload \
-  "$bundle/apks/fplinux-micropythonos.apk" /tmp/fplinux-micropythonos.apk
-./fplinux console "$target" --profile "$profile" --exec \
-  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-micropythonos.apk'
-```
-
-### Standalone archive
-
-From the extracted archive directory:
-
-```sh
-./runner/run.py --reconnect --upload \
-  ./apks/fplinux-micropythonos.apk /tmp/fplinux-micropythonos.apk
-./runner/run.py --reconnect --exec \
-  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-micropythonos.apk'
-```
+The source-checkout example below uses `inoi-244-modern-4g` with the `default`
+profile. Replace both values with the target and profile of the running phone.
 
 ### Optional FAT32 data-card configuration
 
 After installing the base package, install `fplinux-micropythonos-storage.apk`
 to select the optional FAT32 data-card path. This shared configuration does
 not enable a missing microSD driver; check the selected phone's storage support.
-
-```sh
-# Source checkout
-./fplinux console "$target" --profile "$profile" --upload \
-  "$bundle/apks/fplinux-micropythonos-storage.apk" /tmp/fplinux-micropythonos-storage.apk
-./fplinux console "$target" --profile "$profile" --exec \
-  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-micropythonos-storage.apk'
-
-# Standalone archive
-./runner/run.py --reconnect --upload \
-  ./apks/fplinux-micropythonos-storage.apk /tmp/fplinux-micropythonos-storage.apk
-./runner/run.py --reconnect --exec \
-  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-micropythonos-storage.apk'
-```
+Its installed package name is `fplinux-micropythonos-storage`; use the same
+shared installation procedure after the base package is installed.
 
 ## Run
 
@@ -84,7 +51,7 @@ Open an interactive shell and start the application on the phone:
 
 ```sh
 # Source checkout
-./fplinux console "$target" --profile "$profile"
+./fplinux console inoi-244-modern-4g --profile default
 
 # Standalone archive
 ./runner/run.py --reconnect
@@ -147,20 +114,7 @@ it cannot be hot-swapped while Linux is running.
 ## Remove
 
 Stop MicroPythonOS with `Ctrl-C`, exit the interactive shell, then remove the
-package or packages from the active system root:
-
-```sh
-# Source checkout, base package only
-./fplinux console "$target" --profile "$profile" --exec 'apk del fplinux-micropythonos'
-
-# Source checkout, with the optional storage package
-./fplinux console "$target" --profile "$profile" --exec \
-  'apk del fplinux-micropythonos-storage fplinux-micropythonos'
-
-# Standalone archive, base package only
-./runner/run.py --reconnect --exec 'apk del fplinux-micropythonos'
-
-# Standalone archive, with the optional storage package
-./runner/run.py --reconnect --exec \
-  'apk del fplinux-micropythonos-storage fplinux-micropythonos'
-```
+package or packages from the active system root. Follow the shared
+[package removal instructions](../guides/APK_PACKAGES.md#remove-a-package).
+Remove `fplinux-micropythonos-storage` if it is installed, then remove
+`fplinux-micropythonos`.

@@ -15,35 +15,13 @@ removed. Follow the [microSD system-root shutdown rules](../guides/MICROSD_ROOT.
 
 ## Install
 
-### Source checkout
+The APK filename is `fplinux-showcase.apk`; its installed package name is
+`fplinux-showcase`. Follow
+[Installing and removing optional APK packages](../guides/APK_PACKAGES.md) for
+either a source checkout or a standalone archive.
 
-Load the selected phone using the shared [loading guide](../guides/LOADING.md).
-Set `target` and `profile` to match the running system and `bundle` to the
-`output:` directory printed by that build, then upload and install the bundled APK.
-Use `profile=microsd-uboot` for a microSD system root:
-
-```sh
-target=inoi-244-modern-4g
-profile=default
-bundle=/absolute/path/printed-by-fplinux-build
-
-./fplinux console "$target" --profile "$profile" --upload \
-  "$bundle/apks/fplinux-showcase.apk" /tmp/fplinux-showcase.apk
-./fplinux console "$target" --profile "$profile" --exec \
-  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-showcase.apk'
-```
-
-### Standalone archive
-
-Load the image using the archive's top-level `README.txt` and the shared
-[archive guide](../guides/STANDALONE.md). From the extracted archive directory:
-
-```sh
-./runner/run.py --reconnect --upload \
-  ./apks/fplinux-showcase.apk /tmp/fplinux-showcase.apk
-./runner/run.py --reconnect --exec \
-  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-showcase.apk'
-```
+The source-checkout examples below use `inoi-244-modern-4g` with the `default`
+profile. Replace both values with the target and profile of the running phone.
 
 ## Run
 
@@ -56,7 +34,8 @@ presentation exits:
 
 ```sh
 # Source checkout
-./fplinux console "$target" --profile "$profile" --exec 'fplinux-showcase'
+./fplinux console inoi-244-modern-4g --profile default --exec \
+  'fplinux-showcase'
 
 # Standalone archive
 ./runner/run.py --reconnect --exec 'fplinux-showcase'
@@ -68,7 +47,8 @@ actual result without manually stopping the phone:
 
 ```sh
 # One complete cycle, then normal cleanup and a result line on the console
-./fplinux console "$target" --profile "$profile" --exec 'fplinux-showcase --runs 1'
+./fplinux console inoi-244-modern-4g --profile default --exec \
+  'fplinux-showcase --runs 1'
 ```
 
 After a normal exit, the application prints one result line to stdout:
@@ -116,13 +96,6 @@ There is no audio output; vibration carries rhythm, not musical pitch.
 
 ## Remove
 
-Exit the presentation first, then remove its package from the active system
-root:
-
-```sh
-# Source checkout
-./fplinux console "$target" --profile "$profile" --exec 'apk del fplinux-showcase'
-
-# Standalone archive
-./runner/run.py --reconnect --exec 'apk del fplinux-showcase'
-```
+Exit the presentation first, then follow the shared
+[package removal instructions](../guides/APK_PACKAGES.md#remove-a-package) for
+`fplinux-showcase`.
