@@ -18,4 +18,5 @@ while post-kernel userspace, APKs and services belong in
 See the [porting overview](../docs/porting/README.md) for the complete ownership
 model and the project [documentation index](../README.md#documentation) for
 shared user workflows. Project-owned sources follow the
-[bootstrap C rules](../docs/reference/C_STYLE.md#bootstrap-code).
+[code style](../docs/reference/CODE_STYLE.md). Pre-Linux C also follows the
+[bootstrap rules](../docs/reference/style/C.md#bootstrap-code).

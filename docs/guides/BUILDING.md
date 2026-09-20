@@ -95,8 +95,8 @@ The `docs` scope also rejects repository-local Markdown links whose file or
 heading anchor does not exist.
 
 Kernel, bootstrap, host and phone-userspace messages follow the shared
-[logging contract](../reference/LOGGING.md). FPLinux-owned C follows
-[C code](../reference/C_STYLE.md).
+[logging contract](../reference/LOGGING.md). Project-owned source and tests
+follow the [code style](../reference/CODE_STYLE.md).
 
 ## Regenerate Alpine checksums
 

@@ -1,4 +1,4 @@
-# C code
+# C
 
 This guide applies to project-owned C in `bootstrap/`, `platforms/`, `targets/`,
 `alpine/`, `common/host/` and the C test harnesses.
@@ -32,33 +32,28 @@ descriptors and signals do not belong in the bootstrap. Kernel code does not use
 libc types or POSIX calls. A successful host compile does not prove that ARM,
 musl, bootstrap or kernel code builds.
 
-## Run the check that understands the layer
+## Use the check that understands the layer
 
-```sh
-./fplinux format path/to/source.c path/to/header.h
-./fplinux check c --no-cache
-./fplinux check kernel --no-cache
-./fplinux check python --no-cache
-./fplinux build <target>
-```
+Use the canonical [format, check and build procedures](../../guides/BUILDING.md).
+The relevant commands establish different things:
 
-These commands establish different things:
-
-- `check c` formats bootstrap, phone userspace, host C, embedded adapter files
-  and C test harnesses. Its Clang analysis covers independently compilable phone
-  userspace and host translation units only.
-- Bootstrap files are formatted by `check c`, but their real compile proof is an
-  affected target build.
-- Embedded TyrQuake and MicroPython files are formatted by `check c`, but they
-  are compiled only in their pinned upstream package builds. C fragments inside
-  patch files are judged by that destination build, not by standalone analysis.
+- `check c` checks formatting for bootstrap, phone userspace, host C, embedded
+  adapter files and C test harnesses. Its Clang analysis covers independently
+  compilable phone userspace and host translation units only.
+- Bootstrap file formatting is checked by `check c`, but their real compile
+  proof is an affected target build.
+- Embedded TyrQuake and MicroPython file formatting is checked by `check c`, but
+  they are compiled only in their pinned upstream package builds. C fragments
+  inside patch files are judged by that destination build, not by standalone
+  analysis.
 - `check kernel` projects code into the pinned Linux tree and runs its formatter,
   checkpatch, configuration, Devicetree and Sparse checks.
 - `check python` compiles and runs the host C harnesses driven by the unit suite.
   That result remains host-only evidence.
 
-Run the complete `./fplinux check --no-cache` before submitting a change. Build
-every target affected by bootstrap, package, host-tool or kernel integration.
+Before submitting a change, run the complete `./fplinux check --no-cache` gate
+and build every target affected by bootstrap, package, host-tool or kernel
+integration as described in the build guide.
 
 ## Rules shared by project C
 
@@ -94,15 +89,13 @@ bootstrap helper remains `ums9117_*` when called by a Nokia target. Board values
 do not become platform data merely because all current phones happen to share a
 number.
 
-Useful cross-file names from the current tree include:
-
-```text
-fplinux_boot_screen_render()
-fplinux_multitap_press()
-ums9117_bootstrap_personalize_dtb()
-ums9117_adi_begin()
-ta1618_kpled_probe()
-```
+Selector-facing runtime device names follow the component that owns the
+interface. Do not put a phone model in a power-supply, IIO, thermal, input,
+ALSA or misc-device name when one shared driver exposes the same interface and
+each target has one instance. Keep a target name when the selector identifies
+genuinely different board behavior, such as a panel profile, LCD backlight or
+keypad map. Board calibration and descriptive model text remain target-owned
+even when the selector name is shared.
 
 An exported or cross-file name carries the owner and component. A `static`
 helper can be concise when its file supplies the context: `write_all()`,
@@ -170,7 +163,7 @@ Do not add suffixes only for decoration. Kernel code uses kernel integer types;
 userspace and bootstrap use the standard or interface types established by
 their component.
 
-Repository-local header guards are non-reserved and owner-qualified:
+Repository-local header guards are non-reserved and owner-prefixed:
 
 ```text
 FPLINUX_BOOT_SCREEN_H
@@ -182,12 +175,42 @@ Avoid guards beginning with `__` or an underscore followed by an uppercase
 letter. A public header includes the declarations needed for every type it
 exposes instead of depending on include order in one consumer.
 
+### Keep command-line parsing consistent
+
+Public C commands use the [shared CLI library](../../../alpine/shared/fplinux-cli.h).
+Declare named flags, options with values and positional arguments in one table,
+then call `fplinux_cli_parse()`. `-h` and `--help` print generated
+syntax and option help to standard output and return zero before the command
+opens devices, reads inputs or starts a child. Help takes priority when the rest
+of the command line is missing or invalid. Syntax errors and command-owned value
+or combination errors go to standard error and return status 2.
+
+A long option value may follow a space or `=`, as in `--output FILE` and
+`--output=FILE`. The parser also accepts an unambiguous prefix of a long option;
+documentation and scripts use the complete name so they remain clear when an
+option table grows.
+
+The command owns its repeated-option policy. Preserve its per-value validation
+and final combination checks when retaining the last occurrence of a scalar
+option. A scalar which must appear once uses that cardinality in the option
+table and rejects duplicates. Keep ordering rules that cross option names,
+defaults, numeric ranges and valid combinations in the command that owns them.
+
+The parser resolves syntax, required arguments and help before invoking the
+command's option callback. The callback validates and assigns each occurrence
+in the original argument order; it does not access resources or run workloads.
+The table exposes occurrence counts and borrowed last values for final command
+validation. Initialize command defaults before parsing and start work only after
+`FPLINUX_CLI_READY`. A command wrapper can opt into an untouched argument tail
+after `--`. Parsing does not reorder the caller's argument array or allocate
+argument tables.
+
 ## Kernel code
 
 Follow the Linux coding style and the API of the subsystem being changed. Use
 kernel types, negative errno values, `devm_*` where its lifetime matches, and
 `dev_err_probe()` for probe errors that may defer. Logging severity and message
-shape belong to the [logging contract](LOGGING.md).
+shape belong to the [logging contract](../LOGGING.md).
 
 Execution context is part of a kernel function's contract. Use these suffixes
 only with their usual meaning:
@@ -244,6 +267,15 @@ GNU11 where the component requires it. They may use musl, POSIX and Linux UAPI,
 but they still have to validate the actual device and kernel ABI before using
 an `ioctl`, `mmap` region or evdev stream.
 
+Use the shared command-line contract above rather than hand-written
+flag chains. Keep option effects, numeric ranges and valid combinations in the
+program that owns them; a library's integer type is not a replacement for
+exact-width or hardware-specific validation.
+
+A parser refactor preserves the command's accepted inputs, option effects and
+help behavior unless an interface change is explicitly intended. Parse a
+wrapper's own options without altering the child command's arguments.
+
 Initialize resource-owning state so partial cleanup is safe: descriptors start
 at `-1`, pointers at `NULL`, and ownership flags at false. Release resources in
 reverse acquisition order. Restore grabbed input devices, terminal modes,
@@ -259,7 +291,7 @@ stops the child, restores state and chooses the exit status.
 
 Use `O_CLOEXEC` unless a descriptor is deliberately inherited. Keep public
 command output and exit behavior stable. Message prefixes and severity remain
-in the [logging contract](LOGGING.md).
+in the [logging contract](../LOGGING.md).
 
 ## Host tools
 
@@ -305,8 +337,8 @@ Match the subject's C dialect, keep `main()` small and make the harness
 self-checking. A harness result proves only the host behavior it actually runs;
 it does not prove an ARM package, framebuffer, kernel path or phone.
 
-`check c` formats harnesses. `check python` compiles and runs the current host
-harness suite.
+`check c` checks harness formatting. `check python` compiles and runs the current
+host harness suite.
 
 ## Hardware names and registers
 
@@ -344,14 +376,15 @@ level established for that hardware.
 ## Before sending a C change
 
 - Identify both the execution environment and the owner.
-- Keep cross-file names qualified and file-local names concise.
+- Prefix cross-file names with their owner and keep file-local names concise.
 - Make resource acquisition, cleanup and state restoration visible.
 - Check sizes, units, narrowing conversions and arithmetic boundaries.
 - Preserve required external names and wire formats.
 - Run the checks and builds that compile the changed code in its real context.
 
-If an aport source changed, regenerate its checksum with `./fplinux checksum
-<aport>` before the final gate. The [identity contract](IDENTITY.md) covers
-public device names, the [logging contract](LOGGING.md) covers messages, and the
-[porting overview](../porting/README.md) defines project, platform and target
+If an aport source changed, regenerate its checksum through the
+[supported build workflow](../../guides/BUILDING.md#regenerate-alpine-checksums)
+before the final gate. The [identity contract](../IDENTITY.md) covers public
+device names, the [logging contract](../LOGGING.md) covers messages, and the
+[porting overview](../../porting/README.md) defines project, platform and target
 ownership.

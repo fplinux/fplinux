@@ -33,6 +33,6 @@ every retry. The local VT may use a compact visual format when it is not parsed
 as a protocol.
 
 Use [Hardware debugging](../guides/DEBUGGING.md) for diagnostic logs and
-tracing. The [C code guide](C_STYLE.md) covers implementation and identifiers,
+tracing. The [code style](CODE_STYLE.md) covers implementation and identifiers,
 while the [porting overview](../porting/README.md) defines which layer owns a
 new component.

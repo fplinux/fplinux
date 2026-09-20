@@ -40,5 +40,6 @@ Use the [platform template](PLATFORM.md) for reusable SoC support and the
 
 The project [documentation index](../../README.md#documentation) links the user
 workflows and the remaining contributor contracts without duplicating them
-here. The [C code guide](../reference/C_STYLE.md) covers the language and
-lifetime rules for each layer.
+here. The [code style](../reference/CODE_STYLE.md) defines shared principles
+and links to each language guide. The [C guide](../reference/style/C.md) covers
+the runtime and lifetime rules for C code in each layer.

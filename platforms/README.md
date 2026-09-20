@@ -16,6 +16,7 @@ boundary between reusable SoC support and target-owned board data.
 See the project [documentation index](../README.md#documentation) for shared
 build, userspace and release guides, and the
 [porting overview](../docs/porting/README.md) for the complete repository
-ownership model. Platform sources use the relevant
-[kernel](../docs/reference/C_STYLE.md#kernel-code) or
-[bootstrap](../docs/reference/C_STYLE.md#bootstrap-code) C rules.
+ownership model. Platform sources follow the
+[code style](../docs/reference/CODE_STYLE.md). C sources use the relevant
+[kernel](../docs/reference/style/C.md#kernel-code) or
+[bootstrap](../docs/reference/style/C.md#bootstrap-code) rules.
