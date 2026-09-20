@@ -15,8 +15,6 @@
 #define SC2720_MODULE_EN0 0xc08U
 #define SC2720_ARM_CLK_EN0 0xc0cU
 #define SC2720_SOFT_RST0 0xc14U
-#define SC2720_XTL_WAIT_CTRL0 0xde8U
-
 #define SC2720_AUXADC_VERSION 0x400U
 #define SC2720_AUXADC_CTRL 0x404U
 #define SC2720_AUXADC_SW_CH_CFG 0x408U
@@ -36,8 +34,6 @@
 #define SC2720_ARM_CLK_EN0_AUXADC BIT(5)
 #define SC2720_ARM_CLK_EN0_AUXAD BIT(6)
 #define SC2720_SOFT_RST0_ADC BIT(6)
-#define SC2720_XTL_WAIT_CTRL0_EN BIT(8)
-
 #define SC2720_AUXADC_CTRL_EN BIT(0)
 #define SC2720_AUXADC_CTRL_RUN BIT(1)
 #define SC2720_AUXADC_CTRL_RUN_NUM_MASK GENMASK(7, 4)
@@ -71,7 +67,6 @@ struct sc2720_auxadc_gates {
 	bool module_enabled;
 	bool auxadc_clock_enabled;
 	bool auxad_clock_enabled;
-	bool xtl_enabled;
 };
 
 struct sc2720_auxadc_bank {
@@ -85,6 +80,7 @@ struct sc2720_auxadc_session {
 	struct sc2720_auxadc_gates gates;
 	struct sc2720_auxadc_bank bank;
 	bool gates_active;
+	bool xtal_held;
 };
 
 static int
@@ -159,7 +155,6 @@ static int sc2720_auxadc_enable_gates(struct sc2720_auxadc_session *session,
 	u16 id_low;
 	u16 module_en0;
 	u16 soft_rst0;
-	u16 xtl_wait_ctrl0;
 	int ret;
 
 	*uncertain = false;
@@ -183,8 +178,6 @@ static int sc2720_auxadc_enable_gates(struct sc2720_auxadc_session *session,
 				       &arm_clk_en0);
 	ret = sc2720_auxadc_read_if_ok(&transaction, ret, SC2720_SOFT_RST0,
 				       &soft_rst0);
-	ret = sc2720_auxadc_read_if_ok(&transaction, ret, SC2720_XTL_WAIT_CTRL0,
-				       &xtl_wait_ctrl0);
 	if (!ret)
 		ret = sc2720_auxadc_validate_identity(id_low, id_high);
 	if (!ret && (module_en0 & SC2720_MODULE_EN0_ADC))
@@ -211,13 +204,6 @@ static int sc2720_auxadc_enable_gates(struct sc2720_auxadc_session *session,
 		ret = ums9117_adi_update_bits(&transaction, SC2720_ARM_CLK_EN0,
 					      SC2720_ARM_CLK_EN0_AUXADC,
 					      SC2720_ARM_CLK_EN0_AUXADC);
-	}
-	if (!ret && !(xtl_wait_ctrl0 & SC2720_XTL_WAIT_CTRL0_EN)) {
-		session->gates.xtl_enabled = true;
-		ret = ums9117_adi_update_bits(&transaction,
-					      SC2720_XTL_WAIT_CTRL0,
-					      SC2720_XTL_WAIT_CTRL0_EN,
-					      SC2720_XTL_WAIT_CTRL0_EN);
 	}
 	if (ret)
 		*uncertain = true;
@@ -577,7 +563,6 @@ static int sc2720_auxadc_restore_gates(struct sc2720_auxadc_session *session,
 	struct sc2720_auxadc_gates *gates = &session->gates;
 	u16 arm_clk_en0;
 	u16 module_en0;
-	u16 xtl_wait_ctrl0;
 	int ret;
 
 	*uncertain = false;
@@ -586,11 +571,8 @@ static int sc2720_auxadc_restore_gates(struct sc2720_auxadc_session *session,
 		*uncertain = true;
 		return ret;
 	}
-	if (gates->xtl_enabled)
-		ret = ums9117_adi_update_bits(&transaction,
-					      SC2720_XTL_WAIT_CTRL0,
-					      SC2720_XTL_WAIT_CTRL0_EN, 0);
-	if (!ret && gates->auxadc_clock_enabled)
+	ret = 0;
+	if (gates->auxadc_clock_enabled)
 		ret = ums9117_adi_update_bits(&transaction, SC2720_ARM_CLK_EN0,
 					      SC2720_ARM_CLK_EN0_AUXADC, 0);
 	if (!ret && gates->auxad_clock_enabled)
@@ -603,8 +585,6 @@ static int sc2720_auxadc_restore_gates(struct sc2720_auxadc_session *session,
 				       &module_en0);
 	ret = sc2720_auxadc_read_if_ok(&transaction, ret, SC2720_ARM_CLK_EN0,
 				       &arm_clk_en0);
-	ret = sc2720_auxadc_read_if_ok(&transaction, ret, SC2720_XTL_WAIT_CTRL0,
-				       &xtl_wait_ctrl0);
 	if (ret)
 		*uncertain = true;
 	ret = sc2720_auxadc_finish_transaction(&transaction, ret, uncertain);
@@ -616,9 +596,7 @@ static int sc2720_auxadc_restore_gates(struct sc2720_auxadc_session *session,
 	    (gates->auxadc_clock_enabled &&
 	     (arm_clk_en0 & SC2720_ARM_CLK_EN0_AUXADC)) ||
 	    (gates->auxad_clock_enabled &&
-	     (arm_clk_en0 & SC2720_ARM_CLK_EN0_AUXAD)) ||
-	    (gates->xtl_enabled &&
-	     (xtl_wait_ctrl0 & SC2720_XTL_WAIT_CTRL0_EN))) {
+	     (arm_clk_en0 & SC2720_ARM_CLK_EN0_AUXAD))) {
 		*uncertain = true;
 		return -EPROTO;
 	}
@@ -644,6 +622,11 @@ static int sc2720_auxadc_sample(struct sc2720_auxadc *adc, u8 channel, int *raw)
 	ret = sc2720_auxadc_enable_gates(&session, &uncertain);
 	if (ret)
 		goto finish;
+	ret = ums9117_adi_xtal_acquire(&session.xtal_held);
+	if (ret) {
+		uncertain = ums9117_adi_is_poisoned();
+		goto finish;
+	}
 	usleep_range(SC2720_AUXADC_SETTLE_MIN_US, SC2720_AUXADC_SETTLE_MAX_US);
 	ret = sc2720_auxadc_snapshot_bank(&session, &uncertain);
 	if (ret)
@@ -667,6 +650,10 @@ finish:
 		cleanup_ret = sc2720_auxadc_restore_bank(&session, &uncertain);
 	if (!cleanup_ret && session.gates_active)
 		cleanup_ret = sc2720_auxadc_restore_gates(&session, &uncertain);
+	if (!cleanup_ret && !uncertain && session.xtal_held) {
+		cleanup_ret = ums9117_adi_xtal_release(&session.xtal_held);
+		uncertain = ums9117_adi_is_poisoned();
+	}
 	if (cleanup_ret || uncertain) {
 		adc->faulted = true;
 		dev_err_ratelimited(
