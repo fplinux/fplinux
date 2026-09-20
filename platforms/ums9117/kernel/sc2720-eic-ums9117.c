@@ -54,62 +54,6 @@ struct ums9117_sc2720_eic {
 	bool failed;
 };
 
-static int ums9117_sc2720_eic_adi_read(u32 offset, u16 *value)
-{
-	struct ums9117_adi_transaction transaction = {};
-	int end_ret;
-	int ret;
-
-	ret = ums9117_adi_begin(&transaction);
-	if (ret)
-		return ret;
-	ret = ums9117_adi_read(&transaction, offset, value);
-	end_ret = ums9117_adi_end(&transaction);
-	return ret ? ret : end_ret;
-}
-
-static int ums9117_sc2720_eic_adi_write(u32 offset, u16 value)
-{
-	struct ums9117_adi_transaction transaction = {};
-	int end_ret;
-	int ret;
-
-	ret = ums9117_adi_begin(&transaction);
-	if (ret)
-		return ret;
-	ret = ums9117_adi_write(&transaction, offset, value);
-	end_ret = ums9117_adi_end(&transaction);
-	return ret ? ret : end_ret;
-}
-
-static int ums9117_sc2720_eic_adi_update(u32 offset, u16 mask, u16 value)
-{
-	struct ums9117_adi_transaction transaction = {};
-	int end_ret;
-	int ret;
-
-	ret = ums9117_adi_begin(&transaction);
-	if (ret)
-		return ret;
-	ret = ums9117_adi_update_bits(&transaction, offset, mask, value);
-	end_ret = ums9117_adi_end(&transaction);
-	return ret ? ret : end_ret;
-}
-
-static int ums9117_sc2720_eic_adi_command(u32 offset, u16 value)
-{
-	struct ums9117_adi_transaction transaction = {};
-	int end_ret;
-	int ret;
-
-	ret = ums9117_adi_begin(&transaction);
-	if (ret)
-		return ret;
-	ret = ums9117_adi_write_final(&transaction, offset, value);
-	end_ret = ums9117_adi_end(&transaction);
-	return ret ? ret : end_ret;
-}
-
 static int ums9117_sc2720_eic_read_baseline(struct ums9117_sc2720_eic *eic)
 {
 	u16 iev;
@@ -121,20 +65,19 @@ static int ums9117_sc2720_eic_read_baseline(struct ums9117_sc2720_eic *eic)
 	if (ums9117_adi_is_poisoned())
 		return -EIO;
 
-	ret = ums9117_sc2720_eic_adi_read(SC2720_EICA_DMSK,
-					  &eic->baseline_dmsk);
+	ret = ums9117_adi_read_once(SC2720_EICA_DMSK, &eic->baseline_dmsk);
 	if (ret)
 		return ret;
-	ret = ums9117_sc2720_eic_adi_read(SC2720_EICA_IEV, &iev);
+	ret = ums9117_adi_read_once(SC2720_EICA_IEV, &iev);
 	if (ret)
 		return ret;
-	ret = ums9117_sc2720_eic_adi_read(SC2720_EICA_IE, &ie);
+	ret = ums9117_adi_read_once(SC2720_EICA_IE, &ie);
 	if (ret)
 		return ret;
-	ret = ums9117_sc2720_eic_adi_read(SC2720_EICA_RIS, &ris);
+	ret = ums9117_adi_read_once(SC2720_EICA_RIS, &ris);
 	if (ret)
 		return ret;
-	ret = ums9117_sc2720_eic_adi_read(SC2720_EICA_MIS, &mis);
+	ret = ums9117_adi_read_once(SC2720_EICA_MIS, &mis);
 	if (ret)
 		return ret;
 	if ((eic->baseline_dmsk & ~SC2720_EICA_OWNED_MASK) ||
@@ -163,7 +106,7 @@ static void ums9117_sc2720_eic_fail_locked(struct ums9117_sc2720_eic *eic,
 
 	eic->failed = true;
 	ums9117_sc2720_eic_disable_parent(eic);
-	ie_ret = ums9117_sc2720_eic_adi_write(SC2720_EICA_IE, 0);
+	ie_ret = ums9117_adi_write_once(SC2720_EICA_IE, 0);
 	dev_err(eic->dev, "SC2720 EIC disabled at %s: %d (EICA IE %d)\n", where,
 		error, ie_ret);
 }
@@ -176,12 +119,12 @@ static int ums9117_sc2720_eic_set_polarity(struct ums9117_sc2720_eic *eic,
 	u16 value;
 	int ret;
 
-	ret = ums9117_sc2720_eic_adi_read(SC2720_EICA_DATA, &data);
+	ret = ums9117_adi_read_once(SC2720_EICA_DATA, &data);
 	if (ret)
 		return ret;
 	value = (data & bit) ? 0 : bit;
 
-	return ums9117_sc2720_eic_adi_update(SC2720_EICA_IEV, bit, value);
+	return ums9117_adi_update_bits_once(SC2720_EICA_IEV, bit, value);
 }
 
 static int ums9117_sc2720_eic_sync_line(struct ums9117_sc2720_eic *eic,
@@ -191,18 +134,18 @@ static int ums9117_sc2720_eic_sync_line(struct ums9117_sc2720_eic *eic,
 	int ret;
 
 	if (!(eic->enabled & bit))
-		return ums9117_sc2720_eic_adi_update(SC2720_EICA_IE, bit, 0);
+		return ums9117_adi_update_bits_once(SC2720_EICA_IE, bit, 0);
 
 	ret = ums9117_sc2720_eic_set_polarity(eic, offset);
 	if (ret)
 		return ret;
-	ret = ums9117_sc2720_eic_adi_command(SC2720_EICA_IC, bit);
+	ret = ums9117_adi_write_final_once(SC2720_EICA_IC, bit);
 	if (ret)
 		return ret;
-	ret = ums9117_sc2720_eic_adi_update(SC2720_EICA_IE, bit, bit);
+	ret = ums9117_adi_update_bits_once(SC2720_EICA_IE, bit, bit);
 	if (ret)
 		return ret;
-	return ums9117_sc2720_eic_adi_command(SC2720_EICA_TRIG, bit);
+	return ums9117_adi_write_final_once(SC2720_EICA_TRIG, bit);
 }
 
 static int ums9117_sc2720_eic_rearm_edge_both(struct ums9117_sc2720_eic *eic,
@@ -218,10 +161,10 @@ static int ums9117_sc2720_eic_rearm_edge_both(struct ums9117_sc2720_eic *eic,
 	ret = ums9117_sc2720_eic_set_polarity(eic, offset);
 	if (ret)
 		goto fail;
-	ret = ums9117_sc2720_eic_adi_update(SC2720_EICA_IE, bit, bit);
+	ret = ums9117_adi_update_bits_once(SC2720_EICA_IE, bit, bit);
 	if (ret)
 		goto fail;
-	ret = ums9117_sc2720_eic_adi_command(SC2720_EICA_TRIG, bit);
+	ret = ums9117_adi_write_final_once(SC2720_EICA_TRIG, bit);
 	if (ret)
 		goto fail;
 	goto out;
@@ -248,7 +191,7 @@ static irqreturn_t ums9117_sc2720_eic_parent_thread(int irq, void *data)
 	if (eic->failed)
 		goto out_unlock;
 
-	ret = ums9117_sc2720_eic_adi_read(SC2720_EICA_MIS, &mis);
+	ret = ums9117_adi_read_once(SC2720_EICA_MIS, &mis);
 	if (ret)
 		goto fail;
 
@@ -263,16 +206,16 @@ static irqreturn_t ums9117_sc2720_eic_parent_thread(int irq, void *data)
 		goto fail;
 	}
 
-	ret = ums9117_sc2720_eic_adi_update(SC2720_EICA_IE, pending, 0);
+	ret = ums9117_adi_update_bits_once(SC2720_EICA_IE, pending, 0);
 	if (ret)
 		goto fail;
-	ret = ums9117_sc2720_eic_adi_command(SC2720_EICA_IC, pending);
+	ret = ums9117_adi_write_final_once(SC2720_EICA_IC, pending);
 	if (ret)
 		goto fail;
-	ret = ums9117_sc2720_eic_adi_read(SC2720_EICA_RIS, &post_ris);
+	ret = ums9117_adi_read_once(SC2720_EICA_RIS, &post_ris);
 	if (ret)
 		goto fail;
-	ret = ums9117_sc2720_eic_adi_read(SC2720_EICA_MIS, &post_mis);
+	ret = ums9117_adi_read_once(SC2720_EICA_MIS, &post_mis);
 	if (ret)
 		goto fail;
 	if ((post_ris & pending) || (post_mis & pending) ||
@@ -321,14 +264,14 @@ static int ums9117_sc2720_eic_request(struct gpio_chip *chip,
 		ret = -EIO;
 		goto out;
 	}
-	ret = ums9117_sc2720_eic_adi_read(SC2720_EICA_CTRL(offset), &ctrl);
+	ret = ums9117_adi_read_once(SC2720_EICA_CTRL(offset), &ctrl);
 	if (ret)
 		goto fail;
 	if (ctrl != SC2720_EICA_CTRL_EXPECTED) {
 		ret = -EPROTO;
 		goto out;
 	}
-	ret = ums9117_sc2720_eic_adi_update(SC2720_EICA_DMSK, bit, bit);
+	ret = ums9117_adi_update_bits_once(SC2720_EICA_DMSK, bit, bit);
 	if (ret)
 		goto fail;
 	goto out;
@@ -347,8 +290,8 @@ static void ums9117_sc2720_eic_free(struct gpio_chip *chip, unsigned int offset)
 
 	mutex_lock(&eic->lock);
 	if (!eic->failed) {
-		ret = ums9117_sc2720_eic_adi_update(SC2720_EICA_DMSK, bit,
-						    eic->baseline_dmsk & bit);
+		ret = ums9117_adi_update_bits_once(SC2720_EICA_DMSK, bit,
+						   eic->baseline_dmsk & bit);
 		if (ret)
 			ums9117_sc2720_eic_fail_locked(eic, "GPIO release",
 						       ret);
@@ -367,7 +310,7 @@ static int ums9117_sc2720_eic_get(struct gpio_chip *chip, unsigned int offset)
 		ret = -EIO;
 		goto out;
 	}
-	ret = ums9117_sc2720_eic_adi_read(SC2720_EICA_DATA, &data);
+	ret = ums9117_adi_read_once(SC2720_EICA_DATA, &data);
 	if (!ret)
 		ret = !!(data & BIT(offset));
 out:
@@ -601,12 +544,12 @@ static void ums9117_sc2720_eic_shutdown(struct platform_device *pdev)
 	synchronize_irq(eic->parent_irq);
 	mutex_lock(&eic->lock);
 	eic->failed = true;
-	ret = ums9117_sc2720_eic_adi_write(SC2720_EICA_IE, 0);
+	ret = ums9117_adi_write_once(SC2720_EICA_IE, 0);
 	if (ret)
 		dev_err(eic->dev, "could not disable SC2720 EIC lines: %d\n",
 			ret);
-	ret = ums9117_sc2720_eic_adi_command(SC2720_EICA_IC,
-					     SC2720_EICA_OWNED_MASK);
+	ret = ums9117_adi_write_final_once(SC2720_EICA_IC,
+					   SC2720_EICA_OWNED_MASK);
 	if (ret)
 		dev_err(eic->dev,
 			"could not clear owned SC2720 EIC status: %d\n", ret);

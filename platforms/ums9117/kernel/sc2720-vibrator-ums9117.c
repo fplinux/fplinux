@@ -106,12 +106,6 @@ static int sc2720_vibrator_read_initial(struct sc2720_vibrator *vibrator)
 	return 0;
 }
 
-static void sc2720_vibrator_record_error(int *ret, int step_ret)
-{
-	if (!*ret && step_ret)
-		*ret = step_ret;
-}
-
 static int
 sc2720_vibrator_stop_transaction(struct sc2720_vibrator *vibrator,
 				 struct ums9117_adi_transaction *transaction)
@@ -125,23 +119,23 @@ sc2720_vibrator_stop_transaction(struct sc2720_vibrator *vibrator,
 	ldo_off_ret = ums9117_adi_update_bits(transaction, SC2720_VIBR_CTRL0,
 					      SC2720_VIBR_LDO_POWER_DOWN,
 					      SC2720_VIBR_LDO_POWER_DOWN);
-	sc2720_vibrator_record_error(&ret, ldo_off_ret);
+	ums9117_adi_record_first_error(&ret, ldo_off_ret);
 	step_ret = ums9117_adi_update_bits(transaction, SC2720_VIBR_CTRL0,
 					   SC2720_VIBR_SLEEP_POWER_DOWN,
 					   SC2720_VIBR_SLEEP_POWER_DOWN);
-	sc2720_vibrator_record_error(&ret, step_ret);
+	ums9117_adi_record_first_error(&ret, step_ret);
 	if (!ldo_off_ret) {
 		step_ret = ums9117_adi_update_bits(transaction,
 						   SC2720_VIBR_CTRL0,
 						   SC2720_VIBR_VOLTAGE_MASK,
 						   vibrator->initial_ctrl0);
-		sc2720_vibrator_record_error(&ret, step_ret);
+		ums9117_adi_record_first_error(&ret, step_ret);
 	}
 	step_ret = ums9117_adi_read(transaction, SC2720_VIBR_CTRL0, &readback);
-	sc2720_vibrator_record_error(&ret, step_ret);
+	ums9117_adi_record_first_error(&ret, step_ret);
 	if (!step_ret && !ldo_off_ret &&
 	    (readback & SC2720_VIBR_OWNED_MASK) != expected)
-		sc2720_vibrator_record_error(&ret, -EIO);
+		ums9117_adi_record_first_error(&ret, -EIO);
 	return ret;
 }
 
@@ -159,7 +153,7 @@ static int sc2720_vibrator_restore_locked(struct sc2720_vibrator *vibrator)
 		return ret;
 	ret = sc2720_vibrator_stop_transaction(vibrator, &transaction);
 	end_ret = ums9117_adi_end(&transaction);
-	sc2720_vibrator_record_error(&ret, end_ret);
+	ums9117_adi_record_first_error(&ret, end_ret);
 	if (!ret) {
 		vibrator->may_be_on = false;
 		vibrator->owns_output = false;
@@ -209,7 +203,7 @@ static int sc2720_vibrator_enable_locked(struct sc2720_vibrator *vibrator)
 							    &transaction);
 	}
 	end_ret = ums9117_adi_end(&transaction);
-	sc2720_vibrator_record_error(&ret, end_ret);
+	ums9117_adi_record_first_error(&ret, end_ret);
 	if (stop_ret)
 		dev_crit(
 			vibrator->dev,

@@ -15,21 +15,6 @@
 #define SC2720_LDO_USB_VSEL_3300_MV 0x60U
 #define SC2720_LDO_USB_UV 3300000
 
-static int sc2720_usb33_update_power_down(u16 value)
-{
-	struct ums9117_adi_transaction transaction = {};
-	int end_ret;
-	int ret;
-
-	ret = ums9117_adi_begin(&transaction);
-	if (ret)
-		return ret;
-	ret = ums9117_adi_update_bits(&transaction, SC2720_LDO_PD_CTRL,
-				      SC2720_LDO_USB_PD, value);
-	end_ret = ums9117_adi_end(&transaction);
-	return ret ? ret : end_ret;
-}
-
 static int sc2720_usb33_enable(struct regulator_dev *rdev)
 {
 	struct ums9117_adi_transaction transaction = {};
@@ -51,7 +36,8 @@ static int sc2720_usb33_enable(struct regulator_dev *rdev)
 
 static int sc2720_usb33_disable(struct regulator_dev *rdev)
 {
-	return sc2720_usb33_update_power_down(SC2720_LDO_USB_PD);
+	return ums9117_adi_update_bits_once(
+		SC2720_LDO_PD_CTRL, SC2720_LDO_USB_PD, SC2720_LDO_USB_PD);
 }
 
 static int sc2720_usb33_is_enabled(struct regulator_dev *rdev)
