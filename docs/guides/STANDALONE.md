@@ -100,6 +100,7 @@ For details, use the bundled pages:
   [SoC temperature](../features/SOC_TEMPERATURE.md) and
   [auxiliary ADC](../features/AUXADC.md);
 - [vibration](../features/VIBRATION.md), subject to the phone's physical limits;
+- [installing and removing optional APK packages](APK_PACKAGES.md);
 - [FPLinux: ARMADA](../apps/SHOWCASE.md);
 - [TyrQuake](../apps/TYRQUAKE.md);
 - [MicroPythonOS](../apps/MICROPYTHONOS.md).

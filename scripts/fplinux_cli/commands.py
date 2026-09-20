@@ -120,6 +120,7 @@ PACKAGE_DOCUMENTS = {
     "docs/features/SUSPEND.md": ROOT / "docs/features/SUSPEND.md",
     "docs/features/USB_NETWORKING.md": ROOT / "docs/features/USB_NETWORKING.md",
     "docs/features/VIBRATION.md": ROOT / "docs/features/VIBRATION.md",
+    "docs/guides/APK_PACKAGES.md": ROOT / "docs/guides/APK_PACKAGES.md",
     "docs/guides/STANDALONE.md": ROOT / "docs/guides/STANDALONE.md",
     "docs/guides/MICROSD_ROOT.md": ROOT / "docs/guides/MICROSD_ROOT.md",
     "licenses/musl/COPYRIGHT": ROOT / "THIRD_PARTY_LICENSES/musl/COPYRIGHT",

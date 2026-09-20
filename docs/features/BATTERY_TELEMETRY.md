@@ -25,24 +25,10 @@ interpret the absolute value as remaining charge or battery percentage.
 The optional `fplinux-charge.apk` package measures one command without storing
 a sampling history. It discovers the battery charge counter automatically.
 Install it into the active system root; installation is temporary in the
-`default` RAM profile and persistent in `microsd-uboot`:
-
-```sh
-# Source checkout: match the running target and profile.
-target=inoi-244-modern-4g
-profile=default
-bundle=/absolute/path/printed-by-fplinux-build
-./fplinux console "$target" --profile "$profile" --upload \
-  "$bundle/apks/fplinux-charge.apk" /tmp/fplinux-charge.apk
-./fplinux console "$target" --profile "$profile" --exec \
-  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-charge.apk'
-
-# Standalone archive
-./runner/run.py --reconnect --upload \
-  ./apks/fplinux-charge.apk /tmp/fplinux-charge.apk
-./runner/run.py --reconnect --exec \
-  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-charge.apk'
-```
+`default` RAM profile and persistent in `microsd-uboot`. Its installed package
+name is `fplinux-charge`. Follow
+[Installing and removing optional APK packages](../guides/APK_PACKAGES.md) for
+either a source checkout or a standalone archive.
 
 Run an installed command through the helper:
 

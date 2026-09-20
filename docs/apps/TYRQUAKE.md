@@ -11,33 +11,13 @@ A standalone archive includes this page; start with its top-level `README.txt`.
 The package is installed separately into the active system root. Installation
 lasts until shutdown in the `default` RAM profile and persists across boots in
 `microsd-uboot`.
+The APK filename is `fplinux-tyrquake.apk`; its installed package name is
+`fplinux-tyrquake`. Follow
+[Installing and removing optional APK packages](../guides/APK_PACKAGES.md) for
+either a source checkout or a standalone archive.
 
-### Source checkout
-
-Set `target` and `profile` to match the running system and `bundle` to the
-`output:` directory from its build, then upload and install the APK:
-
-```sh
-target=inoi-244-modern-4g
-profile=default
-bundle=/absolute/path/printed-by-fplinux-build
-
-./fplinux console "$target" --profile "$profile" --upload \
-  "$bundle/apks/fplinux-tyrquake.apk" /tmp/fplinux-tyrquake.apk
-./fplinux console "$target" --profile "$profile" --exec \
-  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-tyrquake.apk'
-```
-
-### Standalone archive
-
-From the extracted archive directory, use its bundled APK:
-
-```sh
-./runner/run.py --reconnect --upload \
-  ./apks/fplinux-tyrquake.apk /tmp/fplinux-tyrquake.apk
-./runner/run.py --reconnect --exec \
-  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-tyrquake.apk'
-```
+The source-checkout examples below use `inoi-244-modern-4g` with the `default`
+profile. Replace both values with the target and profile of the running phone.
 
 ## Game data
 
@@ -89,9 +69,9 @@ mount and copy the PAK into it for this session:
 
 ```sh
 # Source checkout
-./fplinux console "$target" --profile "$profile" --exec \
+./fplinux console inoi-244-modern-4g --profile default --exec \
   'mkdir -p /mnt/card && mount -t tmpfs tmpfs /mnt/card && mkdir -p /mnt/card/fplinux/quake/id1'
-./fplinux console "$target" --profile "$profile" --upload \
+./fplinux console inoi-244-modern-4g --profile default --upload \
   ./pak0.pak /mnt/card/fplinux/quake/id1/pak0.pak
 
 # Standalone archive
@@ -113,8 +93,10 @@ with the phone keypad. Start forwarding first as described in
 
 ```sh
 # Source checkout
-./fplinux console "$target" --profile "$profile" --exec 'quake --input phone'
-./fplinux console "$target" --profile "$profile" --exec 'quake --input keyboard'
+./fplinux console inoi-244-modern-4g --profile default --exec \
+  'quake --input phone'
+./fplinux console inoi-244-modern-4g --profile default --exec \
+  'quake --input keyboard'
 
 # Standalone archive
 ./runner/run.py --reconnect --exec 'quake --input phone'
@@ -132,7 +114,7 @@ the game data, so a phone that holds that data in RAM has correspondingly less
 room and may need a smaller figure:
 
 ```sh
-./fplinux console "$target" --profile "$profile" --exec \
+./fplinux console inoi-244-modern-4g --profile default --exec \
   'quake --input phone --heapsize 16384'
 ```
 
@@ -173,12 +155,6 @@ Audio is not available. TyrQuake is built with no sound backend.
 ## Remove
 
 Exit TyrQuake first, then remove its APK from the active system root if it is
-no longer needed:
-
-```sh
-# Source checkout
-./fplinux console "$target" --profile "$profile" --exec 'apk del fplinux-tyrquake'
-
-# Standalone archive
-./runner/run.py --reconnect --exec 'apk del fplinux-tyrquake'
-```
+no longer needed. Follow the shared
+[package removal instructions](../guides/APK_PACKAGES.md#remove-a-package) for
+`fplinux-tyrquake`.
