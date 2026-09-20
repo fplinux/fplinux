@@ -39,7 +39,7 @@ class NandBackupTests(unittest.TestCase):
             timeout: float,
         ) -> None:
             self.assertIs(actual_session, session)
-            self.assertEqual(command, "exec dd if=/dev/ta1618-nand-raw bs=65280")
+            self.assertEqual(command, "exec dd if=/dev/ums9117-nand-raw bs=65280")
             self.assertEqual(timeout, 15 * 60)
             destination.write(payload)
 
@@ -48,7 +48,7 @@ class NandBackupTests(unittest.TestCase):
             result = nand_backup.backup_nand(
                 connect,
                 self.destination,
-                raw_device="/dev/ta1618-nand-raw",
+                raw_device="/dev/ums9117-nand-raw",
                 raw_page_bytes=2176,
                 raw_page_count=1,
             )
@@ -80,7 +80,7 @@ class NandBackupTests(unittest.TestCase):
             nand_backup.backup_nand(
                 connect,
                 self.destination,
-                raw_device="/dev/ta1618-nand-raw",
+                raw_device="/dev/ums9117-nand-raw",
                 raw_page_bytes=2176,
                 raw_page_count=1,
             )
@@ -95,7 +95,7 @@ class NandBackupTests(unittest.TestCase):
 
         with self.assertRaisesRegex(SystemExit, "output directory is missing or invalid"):
             nand_backup.backup_nand(
-                connect, missing_parent, raw_device="/dev/ta1618-nand-raw", raw_page_bytes=2176
+                connect, missing_parent, raw_device="/dev/ums9117-nand-raw", raw_page_bytes=2176
             )
 
         connect.assert_not_called()
