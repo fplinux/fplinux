@@ -58,19 +58,15 @@ static const struct ums9117_fb_profile ta1618_fb_profile = {
 	.lcdc_ctrl_clear = BIT(1) | (7U << 5),
 };
 
-static int ta1618_fb_probe(struct platform_device *pdev)
-{
-	return ums9117_fb_probe(pdev, &ta1618_fb_profile);
-}
-
 static const struct of_device_id ta1618_fb_of_match[] = {
-	{ .compatible = "fplinux,ums9117-st7789p3-spi-fb" },
+	{ .compatible = "fplinux,ums9117-st7789p3-spi-fb",
+	  .data = &ta1618_fb_profile },
 	{}
 };
 MODULE_DEVICE_TABLE(of, ta1618_fb_of_match);
 
 static struct platform_driver ta1618_fb_driver = {
-	.probe = ta1618_fb_probe,
+	.probe = ums9117_fb_probe,
 	.remove = ums9117_fb_remove,
 	.shutdown = ums9117_fb_shutdown,
 	.driver = {

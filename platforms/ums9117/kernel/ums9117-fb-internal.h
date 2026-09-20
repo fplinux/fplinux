@@ -147,6 +147,5 @@ int ums9117_fb_lcm_post_reset(struct ums9117_fb *ufb);
 int ums9117_fb_lcm_dcs(struct ums9117_fb *ufb, u8 command, const u8 *data,
 		       size_t length);
 int ums9117_fb_lcm_begin_frame(struct ums9117_fb *ufb);
-u32 ums9117_fb_lcm_dbi_timing_for_test(const u32 ns[6]);
 
 #endif /* FPLINUX_UMS9117_FB_INTERNAL_H */

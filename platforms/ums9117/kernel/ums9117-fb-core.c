@@ -2,9 +2,10 @@
 /*
  * Shared UMS9117 framebuffer/LCDC lifecycle.
  *
- * The target wrapper provides a fixed, source-validated panel script.  DT
- * supplies only board wiring (MMIO resources, pin configuration, WLED levels
- * and DBI timings); it never supplies panel command bytes or detects a panel.
+ * The target driver provides a fixed, source-validated panel script through OF
+ * match data.  DT supplies only board wiring (MMIO resources, pin
+ * configuration, WLED levels and DBI timings); it never supplies panel command
+ * bytes or detects a panel.
  */
 #include <linux/bitops.h>
 #include <linux/console.h>
@@ -22,6 +23,7 @@
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/pm.h>
+#include <linux/property.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/uaccess.h>
@@ -1717,10 +1719,10 @@ static void ums9117_fb_retire(struct fb_info *info)
 	unregister_framebuffer(info);
 }
 
-int ums9117_fb_probe(struct platform_device *pdev,
-		     const struct ums9117_fb_profile *profile)
+int ums9117_fb_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
+	const struct ums9117_fb_profile *profile = device_get_match_data(dev);
 	struct fb_info *info;
 	struct ums9117_fb *ufb;
 	int ret;

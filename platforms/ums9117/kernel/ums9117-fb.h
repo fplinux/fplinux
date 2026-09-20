@@ -2,10 +2,10 @@
 /*
  * UMS9117 fbdev core contract.
  *
- * A board wrapper owns the panel profile and calls these helpers from its
- * platform_driver callbacks.  The core owns the framebuffer, LCDC lifecycle,
- * damage coalescing, frame completion, WLED and the fail-dark path; the common
- * SPI and LCM files own only their respective wire protocols.
+ * A target driver owns the panel profile and publishes it as OF match data.
+ * The core owns the framebuffer, LCDC lifecycle, damage coalescing, frame
+ * completion, WLED and the fail-dark path; the common SPI and LCM files own
+ * only their respective wire protocols.
  */
 #ifndef FPLINUX_UMS9117_FB_H
 #define FPLINUX_UMS9117_FB_H
@@ -74,8 +74,7 @@ struct ums9117_fb_profile {
 	u32 lcdc_ctrl_clear;
 };
 
-int ums9117_fb_probe(struct platform_device *pdev,
-		     const struct ums9117_fb_profile *profile);
+int ums9117_fb_probe(struct platform_device *pdev);
 void ums9117_fb_remove(struct platform_device *pdev);
 void ums9117_fb_shutdown(struct platform_device *pdev);
 extern const struct dev_pm_ops ums9117_fb_pm_ops;
