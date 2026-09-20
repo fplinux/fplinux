@@ -719,6 +719,51 @@ class AlpineStateTests(unittest.TestCase):
         ):
             alpine_builder._verify_alpine_rootfs(root, with_bluetooth)  # noqa: SLF001
 
+    def test_replaced_package_manager_root_rejects_openssl_leftovers(self) -> None:
+        """A root with the Mbed TLS apk must own /sbin/apk and hold no OpenSSL packages."""
+        root = self._verified_rootfs()
+        base = ("fplinux-base", "fplinux-console")
+        with_apk_tools = (*base, "fplinux-apk-tools")
+        installed: set[str] = {"apk-tools", "libapk", "libcrypto3", "libssl3", "ssl_client"}
+        minirootfs_owner = self._fake_apk_owner({"/sbin/apk": "apk-tools"})
+
+        def fake_installed(_root: Path, package: str) -> bool:
+            return package in installed
+
+        self._write_world(root, base)
+        with (
+            mock.patch.object(alpine_builder, "_require_apk_owner", minirootfs_owner),
+            mock.patch.object(alpine_builder, "_alpine_package_installed", fake_installed),
+        ):
+            alpine_builder._verify_alpine_rootfs(root, base)  # noqa: SLF001
+
+        self._write_world(root, with_apk_tools)
+        with (
+            mock.patch.object(alpine_builder, "_require_apk_owner", minirootfs_owner),
+            mock.patch.object(alpine_builder, "_alpine_package_installed", fake_installed),
+            self.assertRaisesRegex(SystemExit, "/sbin/apk: apk-tools"),
+        ):
+            alpine_builder._verify_alpine_rootfs(root, with_apk_tools)  # noqa: SLF001
+
+        for leftover in ("apk-tools", "libapk", "libcrypto3", "libssl3"):
+            with self.subTest(leftover=leftover):
+                installed = {leftover}
+                with (
+                    mock.patch.object(
+                        alpine_builder, "_require_apk_owner", self._fake_apk_owner({})
+                    ),
+                    mock.patch.object(alpine_builder, "_alpine_package_installed", fake_installed),
+                    self.assertRaisesRegex(SystemExit, f"remains in the rootfs: {leftover}"),
+                ):
+                    alpine_builder._verify_alpine_rootfs(root, with_apk_tools)  # noqa: SLF001
+
+        installed = set()
+        with (
+            mock.patch.object(alpine_builder, "_require_apk_owner", self._fake_apk_owner({})),
+            mock.patch.object(alpine_builder, "_alpine_package_installed", fake_installed),
+        ):
+            alpine_builder._verify_alpine_rootfs(root, with_apk_tools)  # noqa: SLF001
+
     def test_persistent_root_requires_orderly_shutdown_services(self) -> None:
         """A persistent root rejects a shutdown runlevel missing data-safety services."""
         root = self._verified_rootfs()

@@ -679,7 +679,7 @@ def _require_apk_owner(root: Path, path: str, package: str) -> None:
         fail(f"unexpected Alpine package owner for {path}: {detail}")
 
 
-def _require_bundle_package_absent(root: Path, package: str) -> None:
+def _alpine_package_installed(root: Path, package: str) -> bool:
     result = subprocess.run(
         ["apk", "--root", str(root), "--no-network", "info", "--exists", package],
         capture_output=True,
@@ -687,12 +687,15 @@ def _require_bundle_package_absent(root: Path, package: str) -> None:
         check=False,
         env=_build_environment(),
     )
-    if result.returncode == 1:
-        return
-    if result.returncode == 0:
-        fail(f"bundle Alpine package was installed in the standard rootfs: {package}")
+    if result.returncode in {0, 1}:
+        return result.returncode == 0
     detail = result.stderr.strip() or result.stdout.strip() or "no APK diagnostic"
-    fail(f"cannot verify that bundle Alpine package is absent: {package}: {detail}")
+    fail(f"cannot verify whether Alpine package is installed: {package}: {detail}")
+
+
+def _require_bundle_package_absent(root: Path, package: str) -> None:
+    if _alpine_package_installed(root, package):
+        fail(f"bundle Alpine package was installed in the standard rootfs: {package}")
 
 
 def _require_openrc_service(root: Path, runlevel: str, service: str) -> None:
@@ -755,6 +758,13 @@ def _verify_alpine_rootfs(
         # own them rather than the Alpine libical and glib closures.
         _require_apk_owner(root, "/usr/lib/libicalvcal.so.3", "fplinux-libical")
         _require_apk_owner(root, "/usr/lib/libglib-2.0.so.0", "fplinux-glib")
+    if "fplinux-apk-tools" in packages:
+        # The Mbed TLS package manager replaces the minirootfs apk-tools, and
+        # the OpenSSL closure that only apk-tools needed must not remain.
+        _require_apk_owner(root, "/sbin/apk", "fplinux-apk-tools")
+        for package in ("apk-tools", "libapk", "libcrypto3", "libssl3"):
+            if _alpine_package_installed(root, package):
+                fail(f"replaced Alpine package remains in the rootfs: {package}")
 
     _require_openrc_service(root, "default", "fplinux-console")
     if "fplinux-input" in packages:
@@ -816,14 +826,14 @@ def _write_rootfs_cpio(root: Path, destination: Path) -> None:
     require_file(destination)
 
 
-def _rootfs_install_command(
+def _rootfs_apk_command(
     lock: dict[str, Any],
     root: Path,
     keys: Path,
     repository: Path,
-    packages: tuple[str, ...],
+    *arguments: str,
 ) -> list[str]:
-    """Return the exact offline apk composition command for one selected set."""
+    """Return one offline apk invocation against the composed root."""
     return [
         "apk",
         "--root",
@@ -839,9 +849,30 @@ def _rootfs_install_command(
         "/dev/null",
         "--repository",
         str(repository),
-        "add",
-        *packages,
+        *arguments,
     ]
+
+
+def _rootfs_install_command(
+    lock: dict[str, Any],
+    root: Path,
+    keys: Path,
+    repository: Path,
+    packages: tuple[str, ...],
+) -> list[str]:
+    """Return the exact offline apk composition command for one selected set."""
+    return _rootfs_apk_command(lock, root, keys, repository, "add", *packages)
+
+
+def _rootfs_remove_command(
+    lock: dict[str, Any],
+    root: Path,
+    keys: Path,
+    repository: Path,
+    packages: tuple[str, ...],
+) -> list[str]:
+    """Return the offline apk command that drops minirootfs packages and their orphans."""
+    return _rootfs_apk_command(lock, root, keys, repository, "del", *packages)
 
 
 def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output stay explicit.
@@ -972,6 +1003,19 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
                 public_key=public_key,
                 work=package_work,
             )
+            if "fplinux-apk-tools" in packages:
+                # The minirootfs package manager leaves the world first so that
+                # its OpenSSL closure is dropped instead of kept beside the
+                # Mbed TLS build that the selected set installs.
+                _run(
+                    _rootfs_remove_command(
+                        lock,
+                        root,
+                        composition_keys,
+                        composition_repository,
+                        ("apk-tools",),
+                    )
+                )
             _run(
                 _rootfs_install_command(
                     lock,

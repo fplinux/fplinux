@@ -1,0 +1,57 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-apk-tools
+pkgver=3.0.6
+pkgrel=0
+pkgdesc="Alpine Package Keeper for FPLinux built with Mbed TLS instead of OpenSSL"
+url="https://gitlab.alpinelinux.org/alpine/apk-tools"
+arch="armv7"
+license="GPL-2.0-only"
+makedepends_build="clang22 lld22 meson samurai"
+makedepends_host="linux-headers mbedtls3-dev musl-dev zlib-dev"
+options="!check"
+source="https://gitlab.alpinelinux.org/alpine/apk-tools/-/archive/v$pkgver/apk-tools-v$pkgver.tar.gz"
+builddir="$srcdir/apk-tools-v$pkgver"
+_library="libapk.so.3.0.0"
+
+build() {
+	: "${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
+	# abuild-meson describes the target machine and sysroot; this file adds
+	# the archiver and keeps pkg-config inside the sysroot.
+	cat >fplinux-cross.meson <<-EOF
+		[binaries]
+		ar = '$CHOST-ar'
+		[properties]
+		pkg_config_libdir = ['$CBUILDROOT/usr/lib/pkgconfig', '$CBUILDROOT/usr/share/pkgconfig']
+	EOF
+	# Mbed TLS provides the digests and signatures; downloads go through
+	# BusyBox wget, so no TLS library is linked. Help text needs Lua and is
+	# left out. Thumb-2 keeps the binaries smaller than the ARM instruction
+	# set, as in the Alpine build.
+	CFLAGS="$CFLAGS -mthumb" VERSION="$pkgver-r$pkgrel" abuild-meson \
+		--cross-file fplinux-cross.meson \
+		--auto-features=disabled \
+		--bindir=/sbin \
+		-Darch=armv7 \
+		-Dcrypto_backend=mbedtls \
+		-Ddocs=disabled \
+		-Dhelp=disabled \
+		-Dlua=disabled \
+		-Dpython=disabled \
+		-Dtests=disabled \
+		-Durl_backend=wget \
+		-Dzstd=disabled \
+		output
+	ninja -C output
+}
+
+package() {
+	# The runtime tag installs only /sbin/apk and the libapk soname; headers
+	# and pkg-config files stay out of the phone root.
+	DESTDIR="$pkgdir" meson install -C output --no-rebuild --tags runtime
+	test -x "$pkgdir/sbin/apk"
+	test -f "$pkgdir/usr/lib/$_library"
+}
+
+sha512sums="
+86c6ba9aad517d7a39d204373b37a28c143afe1438fa5090df90845f205c7f01e8aaee00ed0b6f7b27206ff745e0f1db160e3b919d17b37639fb19ae78bd13e6  apk-tools-v3.0.6.tar.gz
+"
