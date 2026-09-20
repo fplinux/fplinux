@@ -90,19 +90,15 @@ static const struct ums9117_fb_profile inoi240_fb_profile = {
 	.lcdc_ctrl_clear = BIT(2) | (7U << 5),
 };
 
-static int inoi240_fb_probe(struct platform_device *pdev)
-{
-	return ums9117_fb_probe(pdev, &inoi240_fb_profile);
-}
-
 static const struct of_device_id inoi240_fb_of_match[] = {
-	{ .compatible = "fplinux,ums9117-nv3023-lcm-fb" },
+	{ .compatible = "fplinux,ums9117-nv3023-lcm-fb",
+	  .data = &inoi240_fb_profile },
 	{}
 };
 MODULE_DEVICE_TABLE(of, inoi240_fb_of_match);
 
 static struct platform_driver inoi240_fb_driver = {
-	.probe = inoi240_fb_probe,
+	.probe = ums9117_fb_probe,
 	.remove = ums9117_fb_remove,
 	.shutdown = ums9117_fb_shutdown,
 	.driver = {

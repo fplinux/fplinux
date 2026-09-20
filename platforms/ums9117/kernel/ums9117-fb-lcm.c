@@ -177,8 +177,3 @@ int ums9117_fb_lcm_post_reset(struct ums9117_fb *ufb)
 {
 	return ums9117_fb_lcm_program_after_reset(ufb);
 }
-
-u32 ums9117_fb_lcm_dbi_timing_for_test(const u32 ns[6])
-{
-	return ums9117_fb_lcm_dbi_timing(ns);
-}
