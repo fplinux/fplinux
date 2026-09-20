@@ -698,6 +698,64 @@ def _require_bundle_package_absent(root: Path, package: str) -> None:
         fail(f"bundle Alpine package was installed in the standard rootfs: {package}")
 
 
+def _require_bundle_packages_installable(root: Path, bundle_apks: Sequence[Path]) -> None:
+    """Require the published bundle APKs to install offline into this exact root.
+
+    The phone installs them with the documented ``apk add --no-network
+    --allow-untrusted --force-non-repository`` command and has no package
+    repository, so every dependency must already be provided by the composed
+    root or by another bundle APK rather than by an incidental Alpine closure.
+    """
+    if not bundle_apks:
+        return
+    result = subprocess.run(
+        [
+            "apk",
+            "--root",
+            str(root),
+            "--no-network",
+            "--repositories-file",
+            "/dev/null",
+            "--allow-untrusted",
+            "--force-non-repository",
+            "--simulate",
+            "add",
+            *(str(require_file(apk)) for apk in bundle_apks),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_build_environment(),
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "no APK diagnostic"
+        fail(f"bundle Alpine packages cannot be installed into the rootfs offline: {detail}")
+
+
+def _require_cached_bundle_packages_installable(rootfs: Path, bundle_apks: Sequence[Path]) -> None:
+    """Check the cached root's package database without recomposing its files."""
+    if not bundle_apks:
+        return
+    with tempfile.TemporaryDirectory(prefix="fplinux-apk-check-") as temporary:
+        root = Path(temporary)
+        _run(
+            [
+                "cpio",
+                "--extract",
+                "--quiet",
+                "--make-directories",
+                "--no-preserve-owner",
+                "--file",
+                str(rootfs),
+                "--directory",
+                str(root),
+                "etc/apk/*",
+                "lib/apk/db/*",
+            ]
+        )
+        _require_bundle_packages_installable(root, bundle_apks)
+
+
 def _require_openrc_service(root: Path, runlevel: str, service: str) -> None:
     link = root / "etc/runlevels" / runlevel / service
     if not link.is_symlink() or link.readlink() != Path(f"/etc/init.d/{service}"):
@@ -709,6 +767,8 @@ def _verify_alpine_rootfs(
     packages: tuple[str, ...],
     bundle_packages: tuple[str, ...] = (),
     firmware: Sequence[firmware_inputs.FirmwareInput] = (),
+    *,
+    bundle_apks: Sequence[Path] = (),
 ) -> None:
     init = root / "init"
     if not init.is_symlink() or init.readlink() != Path("/sbin/init"):
@@ -790,6 +850,7 @@ def _verify_alpine_rootfs(
         fail("Alpine world does not contain the exact selected FPLinux package set")
     for package in bundle_packages:
         _require_bundle_package_absent(root, package)
+    _require_bundle_packages_installable(root, bundle_apks)
 
     inittab = require_file(root / "etc/inittab").read_text(encoding="utf-8")
     if "ttyGS" in inittab or "getty" in inittab:
@@ -934,6 +995,10 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
                 break
             cached_outputs.update(outputs)
         if rootfs_hit and cached_outputs and ext4_hit:
+            _require_cached_bundle_packages_installable(
+                output / alpine_state.ROOTFS_NAME,
+                tuple(cached_outputs[name] for name in bundle_packages),
+            )
             _log_message(f"Alpine rootfs causal receipt hit: {recipe[:16]}")
             return (
                 require_file(output / alpine_state.ROOTFS_NAME),
@@ -987,6 +1052,10 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
             except KeyError as error:
                 fail(f"bundle aport did not produce its declared package: {error.args[0]}")
             if rootfs_hit and ext4_hit:
+                _require_cached_bundle_packages_installable(
+                    output / alpine_state.ROOTFS_NAME,
+                    tuple(bundle_outputs[name] for name in bundle_packages),
+                )
                 _log_message(f"Alpine rootfs causal receipt hit: {recipe[:16]}")
                 return (
                     require_file(output / alpine_state.ROOTFS_NAME),
@@ -1027,7 +1096,13 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
             )
 
             firmware_inputs.install_firmware_inputs(root, firmware)
-            _verify_alpine_rootfs(root, packages, bundle_packages, firmware)
+            _verify_alpine_rootfs(
+                root,
+                packages,
+                bundle_packages,
+                firmware,
+                bundle_apks=tuple(bundle_outputs[name] for name in bundle_packages),
+            )
             _normalize_rootfs(root)
             if not rootfs_hit:
                 _write_rootfs_cpio(root, staging / alpine_state.ROOTFS_NAME)

@@ -489,8 +489,8 @@ class AlpineStateTests(unittest.TestCase):
         self.assertEqual(receipt.read_bytes(), previous_receipt)
         self.assertEqual(package.read_bytes(), previous_package)
 
-    def test_rootfs_hit_rebuilds_a_missing_bundle_without_recomposing_rootfs(self) -> None:
-        """A missing bundle APK is recovered while the last-good rootfs remains selected."""
+    def test_cached_rootfs_reuse_honors_mocked_bundle_solver_results(self) -> None:
+        """Stub APK builds and CPIO/solver processes; reuse must honor installation errors."""
         cache = Path(self.temporary.name) / "cache"
         output = cache / "rootfs" / ("9" * 64)
         output.mkdir(parents=True)
@@ -515,56 +515,67 @@ class AlpineStateTests(unittest.TestCase):
             },
         }
 
-        with (
-            mock.patch.object(alpine_builder, "CACHE", cache),
-            mock.patch.dict(os.environ, {"FPLINUX_CONTAINER_IMAGE_RECIPE": "1" * 64}),
-            mock.patch.object(
-                alpine_builder,
-                "_ensure_apk_signing_key",
-                return_value=(private_key, public_key, "2" * 64),
-            ),
-            mock.patch.object(alpine_state, "alpine_rootfs_recipe", return_value="9" * 64),
-            mock.patch.object(alpine_state, "receipt_matches", return_value=True),
-            mock.patch.object(
-                alpine_builder,
-                "_cached_aport_packages",
-                side_effect=({rootfs_package: base_apk}, None),
-            ),
-            mock.patch.object(alpine_state, "load_alpine_lock", return_value=lock),
-            mock.patch.object(alpine_state, "package_records", return_value={}),
-            mock.patch.object(alpine_builder, "_fetch", return_value=archive),
-            mock.patch.object(alpine_builder, "_alpine_runtime_packages", return_value=[]),
-            mock.patch.object(
-                alpine_builder,
-                "_alpine_group_packages",
-                return_value=[],
-            ),
-            mock.patch.object(tarfile, "open", return_value=archive_context),
-            mock.patch.object(alpine_builder, "_prepare_alpine_sysroot"),
-            mock.patch.object(alpine_builder, "_log_message"),
-            mock.patch.object(
-                alpine_builder,
-                "_build_fplinux_apks",
-                return_value=(
-                    {rootfs_package: base_apk, bundle_package: bundle_apk},
-                    private_key,
-                    public_key,
-                ),
-            ),
-            mock.patch.object(
-                alpine_builder,
-                "_build_alpine_composition_repository",
-                side_effect=AssertionError("rootfs cache hit must not recompose the rootfs"),
-            ),
-        ):
-            actual_rootfs, actual_output, recipe, bundle_outputs = alpine_builder.build_rootfs(
-                2,
-                (rootfs_package,),
-                (bundle_package,),
-            )
+        for cached_bundle, solver_status in ((False, 0), (False, 7), (True, 0), (True, 7)):
 
-        self.assertEqual((actual_rootfs, actual_output, recipe), (rootfs, output, "9" * 64))
-        self.assertEqual(bundle_outputs, {bundle_package: bundle_apk})
+            def run_external(
+                command: list[str],
+                *,
+                error_status: int = solver_status,
+                **_kwargs: object,
+            ) -> subprocess.CompletedProcess[str]:
+                status = error_status if "--simulate" in command else 0
+                detail = "missing runtime dependency" if status else ""
+                return subprocess.CompletedProcess(command, status, "", detail)
+
+            cached_outputs = {bundle_package: bundle_apk} if cached_bundle else None
+            with (
+                self.subTest(cached_bundle=cached_bundle, solver_status=solver_status),
+                mock.patch.object(alpine_builder, "CACHE", cache),
+                mock.patch.dict(os.environ, {"FPLINUX_CONTAINER_IMAGE_RECIPE": "1" * 64}),
+                mock.patch.object(
+                    alpine_builder,
+                    "_ensure_apk_signing_key",
+                    return_value=(private_key, public_key, "2" * 64),
+                ),
+                mock.patch.object(alpine_state, "alpine_rootfs_recipe", return_value="9" * 64),
+                mock.patch.object(alpine_state, "receipt_matches", return_value=True),
+                mock.patch.object(
+                    alpine_builder,
+                    "_cached_aport_packages",
+                    side_effect=({rootfs_package: base_apk}, cached_outputs),
+                ),
+                mock.patch.object(alpine_state, "load_alpine_lock", return_value=lock),
+                mock.patch.object(alpine_state, "package_records", return_value={}),
+                mock.patch.object(alpine_builder, "_fetch", return_value=archive),
+                mock.patch.object(alpine_builder, "_alpine_runtime_packages", return_value=[]),
+                mock.patch.object(alpine_builder, "_alpine_group_packages", return_value=[]),
+                mock.patch.object(tarfile, "open", return_value=archive_context),
+                mock.patch.object(alpine_builder, "_prepare_alpine_sysroot"),
+                mock.patch.object(alpine_builder, "_log_message"),
+                mock.patch.object(
+                    alpine_builder,
+                    "_build_fplinux_apks",
+                    return_value=(
+                        {rootfs_package: base_apk, bundle_package: bundle_apk},
+                        private_key,
+                        public_key,
+                    ),
+                ),
+                mock.patch.object(
+                    alpine_builder,
+                    "_build_alpine_composition_repository",
+                    side_effect=AssertionError("rootfs cache hit must not recompose the rootfs"),
+                ),
+                mock.patch.object(subprocess, "run", side_effect=run_external),
+            ):
+                if solver_status:
+                    with self.assertRaisesRegex(SystemExit, "offline: missing runtime dependency"):
+                        alpine_builder.build_rootfs(2, (rootfs_package,), (bundle_package,))
+                else:
+                    actual = alpine_builder.build_rootfs(2, (rootfs_package,), (bundle_package,))
+                    self.assertEqual(actual[:3], (rootfs, output, "9" * 64))
+                    self.assertEqual(actual[3], {bundle_package: bundle_apk})
+                self.assertEqual(rootfs.read_bytes(), b"rootfs\n")
 
     def test_rootfs_cache_hits_reuse_cached_outputs(self) -> None:
         """Rootfs cache hits reuse cached outputs for distinct recipes."""
@@ -629,6 +640,39 @@ class AlpineStateTests(unittest.TestCase):
             self.assertRaisesRegex(SystemExit, "cannot verify.*apk failed"),
         ):
             alpine_builder._require_bundle_package_absent(root, package)  # noqa: SLF001
+
+    def test_bundle_install_check_interprets_mocked_apk_simulation(self) -> None:
+        """A mocked offline ``apk add --simulate`` result accepts or rejects the bundle APKs."""
+        root = self._verified_rootfs()
+        base = ("fplinux-base", "fplinux-console")
+        bundle_apk = self._write("built/fplinux-package-b.apk", b"bundle\n")
+        unresolved = (
+            "ERROR: unable to select packages:\n"
+            "  so:libexample.so.1 (no such package):\n"
+            "    required by: fplinux-package-b-1-r0[so:libexample.so.1]\n"
+        )
+        self._write_world(root, base)
+
+        with (
+            mock.patch.object(alpine_builder, "_require_apk_owner"),
+            mock.patch.object(
+                subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")
+            ),
+        ):
+            alpine_builder._verify_alpine_rootfs(root, base, bundle_apks=(bundle_apk,))  # noqa: SLF001
+
+        with (
+            mock.patch.object(alpine_builder, "_require_apk_owner"),
+            mock.patch.object(
+                subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess([], 7, "", unresolved),
+            ),
+            self.assertRaises(SystemExit) as rejected,
+        ):
+            alpine_builder._verify_alpine_rootfs(root, base, bundle_apks=(bundle_apk,))  # noqa: SLF001
+        self.assertIn("cannot be installed into the rootfs offline", str(rejected.exception))
+        self.assertIn("so:libexample.so.1 (no such package)", str(rejected.exception))
 
     def _verified_rootfs(self) -> Path:
         """Create the smallest root tree accepted without optional packages."""
