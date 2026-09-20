@@ -49,7 +49,7 @@ SHARED_APORT_SOURCES = {
     ),
     "fplinux-rotate": (*FB_SESSION_SOURCES, *CLI_SOURCES),
     "fplinux-showcase": (*FB_SESSION_SOURCES, *CLI_SOURCES),
-    "fplinux-tyrquake": FB_SESSION_SOURCES,
+    "fplinux-tyrquake": (*FB_SESSION_SOURCES, *CLI_SOURCES),
 }
 SHARED_APORT_SOURCE_PATHS = frozenset(
     path for paths in SHARED_APORT_SOURCES.values() for path in paths
