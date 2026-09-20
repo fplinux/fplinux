@@ -25,10 +25,6 @@
 #endif
 #define FPLINUX_MICROPYTHONOS_LAUNCHER_TTY_DEVICE "/dev/tty0"
 
-struct fplinux_micropythonos_display_state {
-	struct fplinux_fb_session session;
-};
-
 static volatile sig_atomic_t pending_signal;
 
 static _Noreturn void fplinux_micropythonos_launcher_die(const char *message)
@@ -72,23 +68,16 @@ int fplinux_micropythonos_launcher_acquire_session_lock(void)
 	return descriptor;
 }
 
-static void fplinux_micropythonos_launcher_save_display(
-	struct fplinux_micropythonos_display_state *state)
+static void
+fplinux_micropythonos_launcher_save_display(struct fplinux_fb_session *session)
 {
 	char error[128];
 
 	if (!fplinux_fb_session_open(
-		    &state->session,
-		    FPLINUX_MICROPYTHONOS_LAUNCHER_FRAMEBUFFER_DEVICE,
+		    session, FPLINUX_MICROPYTHONOS_LAUNCHER_FRAMEBUFFER_DEVICE,
 		    FPLINUX_MICROPYTHONOS_LAUNCHER_TTY_DEVICE, error,
 		    sizeof(error)))
 		fplinux_micropythonos_launcher_die(error);
-}
-
-static bool fplinux_micropythonos_launcher_restore_display(
-	struct fplinux_micropythonos_display_state *state)
-{
-	return fplinux_fb_session_close(&state->session);
 }
 
 static void fplinux_micropythonos_launcher_catch_signal(int signal_number)
@@ -173,7 +162,7 @@ int fplinux_micropythonos_launcher_wait_for_command(pid_t child)
 
 int main(int argc, char **argv)
 {
-	struct fplinux_micropythonos_display_state display;
+	struct fplinux_fb_session display;
 	pid_t child;
 	int command_status;
 	int lock;
@@ -190,7 +179,7 @@ int main(int argc, char **argv)
 	{
 		char error[128];
 
-		if (!fplinux_fb_session_set_graphics(&display.session, error,
+		if (!fplinux_fb_session_set_graphics(&display, error,
 						     sizeof(error)))
 			fplinux_micropythonos_launcher_die(error);
 	}
@@ -203,7 +192,7 @@ int main(int argc, char **argv)
 		command_status =
 			fplinux_micropythonos_launcher_wait_for_command(child);
 	}
-	restored = fplinux_micropythonos_launcher_restore_display(&display);
+	restored = fplinux_fb_session_close(&display);
 	close(lock);
 	return restored ? command_status : EXIT_FAILURE;
 }

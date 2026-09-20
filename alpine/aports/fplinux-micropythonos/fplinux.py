@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# ruff: noqa: ANN001, ANN002, ANN003, ANN201, ANN202, ANN204, ANN205, BLE001, D102, D107, EM101, FBT003, I001, INP001, PLC0415
+# ruff: noqa: ANN001, ANN002, ANN003, ANN201, ANN202, ANN204, ANN205, D102, D107, EM101, FBT003, I001, INP001, PLC0415
 # mypy: ignore-errors
 """Generic FPLinux framebuffer and keypad board adaptation."""
 
@@ -137,7 +137,7 @@ class FPLinuxKeypad:
         if isinstance(focused, lv.dropdown):
             try:
                 return navigation_key if focused.is_open() else None
-            except Exception:
+            except Exception:  # noqa: BLE001 -- binding errors fall back to directional focus.
                 return None
         return None
 

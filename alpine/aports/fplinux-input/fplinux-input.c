@@ -193,8 +193,4 @@ int main(void)
 		close(channel);
 		sleep(1);
 	}
-
-	ioctl(device, UI_DEV_DESTROY);
-	close(device);
-	return 0;
 }
