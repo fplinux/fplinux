@@ -352,7 +352,7 @@ def main() -> None:
         "paths",
         nargs="+",
         metavar="PATH",
-        help="normalized repository-relative source path",
+        help="normalized repository-relative source path or declared Linux patch",
     )
     setup_parser = commands.add_parser("setup", help="build the pinned OCI environment")
     setup_parser.add_argument(
