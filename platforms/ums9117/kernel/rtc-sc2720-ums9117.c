@@ -99,68 +99,6 @@ struct sc2720_rtc {
 	bool time_invalid;
 };
 
-static void sc2720_rtc_record_error(int *ret, int step_ret)
-{
-	if (!*ret && step_ret)
-		*ret = step_ret;
-}
-
-static int sc2720_rtc_adi_read(u32 offset, u16 *value)
-{
-	struct ums9117_adi_transaction transaction = {};
-	int end_ret;
-	int ret;
-
-	ret = ums9117_adi_begin(&transaction);
-	if (ret)
-		return ret;
-	ret = ums9117_adi_read(&transaction, offset, value);
-	end_ret = ums9117_adi_end(&transaction);
-	return ret ? ret : end_ret;
-}
-
-static int sc2720_rtc_adi_write(u32 offset, u16 value)
-{
-	struct ums9117_adi_transaction transaction = {};
-	int end_ret;
-	int ret;
-
-	ret = ums9117_adi_begin(&transaction);
-	if (ret)
-		return ret;
-	ret = ums9117_adi_write(&transaction, offset, value);
-	end_ret = ums9117_adi_end(&transaction);
-	return ret ? ret : end_ret;
-}
-
-static int sc2720_rtc_adi_update(u32 offset, u16 mask, u16 value)
-{
-	struct ums9117_adi_transaction transaction = {};
-	int end_ret;
-	int ret;
-
-	ret = ums9117_adi_begin(&transaction);
-	if (ret)
-		return ret;
-	ret = ums9117_adi_update_bits(&transaction, offset, mask, value);
-	end_ret = ums9117_adi_end(&transaction);
-	return ret ? ret : end_ret;
-}
-
-static int sc2720_rtc_adi_command(u32 offset, u16 value)
-{
-	struct ums9117_adi_transaction transaction = {};
-	int end_ret;
-	int ret;
-
-	ret = ums9117_adi_begin(&transaction);
-	if (ret)
-		return ret;
-	ret = ums9117_adi_write_final(&transaction, offset, value);
-	end_ret = ums9117_adi_end(&transaction);
-	return ret ? ret : end_ret;
-}
-
 static int sc2720_rtc_read_if_ok(struct ums9117_adi_transaction *transaction,
 				 int ret, u32 offset, u16 *value)
 {
@@ -283,19 +221,19 @@ static int sc2720_rtc_read_alarm_state(struct sc2720_rtc_alarm_state *state)
 {
 	int ret;
 
-	ret = sc2720_rtc_adi_read(SC2720_RTC_INT_EN, &state->int_en);
+	ret = ums9117_adi_read_once(SC2720_RTC_INT_EN, &state->int_en);
 	if (ret)
 		return ret;
-	ret = sc2720_rtc_adi_read(SC2720_RTC_RSTS, &state->rsts);
+	ret = ums9117_adi_read_once(SC2720_RTC_RSTS, &state->rsts);
 	if (ret)
 		return ret;
-	ret = sc2720_rtc_adi_read(SC2720_RTC_MSK, &state->msk);
+	ret = ums9117_adi_read_once(SC2720_RTC_MSK, &state->msk);
 	if (ret)
 		return ret;
-	ret = sc2720_rtc_adi_read(SC2720_RTC_SPG_VALUE, &state->spg_value);
+	ret = ums9117_adi_read_once(SC2720_RTC_SPG_VALUE, &state->spg_value);
 	if (ret)
 		return ret;
-	return sc2720_rtc_adi_read(SC2720_RTC_SPG_UPD, &state->spg_upd);
+	return ums9117_adi_read_once(SC2720_RTC_SPG_UPD, &state->spg_upd);
 }
 
 static int sc2720_rtc_validate_alarm_baseline(struct sc2720_rtc *rtc,
@@ -337,7 +275,7 @@ static int sc2720_rtc_wait_status(u16 mask, u16 expected)
 	int ret;
 
 	do {
-		ret = sc2720_rtc_adi_read(SC2720_RTC_RSTS, &status);
+		ret = ums9117_adi_read_once(SC2720_RTC_RSTS, &status);
 		if (ret)
 			return ret;
 		if ((status & mask) == expected)
@@ -353,7 +291,7 @@ static int sc2720_rtc_clear_status(u16 mask)
 {
 	int ret;
 
-	ret = sc2720_rtc_adi_command(SC2720_RTC_CLR, mask);
+	ret = ums9117_adi_write_final_once(SC2720_RTC_CLR, mask);
 	if (ret)
 		return ret;
 	return sc2720_rtc_wait_status(mask, 0);
@@ -367,12 +305,12 @@ static int sc2720_rtc_update_spg(struct sc2720_rtc *rtc, u8 low)
 	ret = sc2720_rtc_wait_status(SC2720_RTC_SPG_ACK, 0);
 	if (ret)
 		return ret;
-	ret = sc2720_rtc_adi_read(SC2720_RTC_SPG_VALUE, &value);
+	ret = ums9117_adi_read_once(SC2720_RTC_SPG_VALUE, &value);
 	if (ret)
 		return ret;
 	value = (value & ~SC2720_RTC_SPG_LOW_MASK) | low;
 	rtc->spg_may_have_changed = true;
-	ret = sc2720_rtc_adi_write(SC2720_RTC_SPG_UPD, value);
+	ret = ums9117_adi_write_once(SC2720_RTC_SPG_UPD, value);
 	if (ret)
 		return ret;
 	ret = sc2720_rtc_wait_status(SC2720_RTC_SPG_ACK, SC2720_RTC_SPG_ACK);
@@ -381,7 +319,7 @@ static int sc2720_rtc_update_spg(struct sc2720_rtc *rtc, u8 low)
 	ret = sc2720_rtc_clear_status(SC2720_RTC_SPG_ACK);
 	if (ret)
 		return ret;
-	ret = sc2720_rtc_adi_read(SC2720_RTC_SPG_VALUE, &value);
+	ret = ums9117_adi_read_once(SC2720_RTC_SPG_VALUE, &value);
 	if (ret)
 		return ret;
 	return (value & SC2720_RTC_SPG_LOW_MASK) == low ? 0 : -EIO;
@@ -422,37 +360,38 @@ static int sc2720_rtc_disarm_locked(struct sc2720_rtc *rtc)
 	    !rtc->spg_may_have_changed)
 		return 0;
 
-	step_ret = sc2720_rtc_adi_write(SC2720_RTC_INT_EN, safe_int_en);
-	sc2720_rtc_record_error(&ret, step_ret);
+	step_ret = ums9117_adi_write_once(SC2720_RTC_INT_EN, safe_int_en);
+	ums9117_adi_record_first_error(&ret, step_ret);
 	if (rtc->irq_enabled) {
 		disable_irq_nosync(rtc->irq);
 		rtc->irq_enabled = false;
 	}
 
-	read_ret = sc2720_rtc_adi_read(SC2720_RTC_RSTS, &state.rsts);
-	sc2720_rtc_record_error(&ret, read_ret);
+	read_ret = ums9117_adi_read_once(SC2720_RTC_RSTS, &state.rsts);
+	ums9117_adi_record_first_error(&ret, read_ret);
 	if (!read_ret && (state.rsts & SC2720_RTC_ALARM_EVENT)) {
 		step_ret = sc2720_rtc_clear_status(SC2720_RTC_ALARM_EVENT);
-		sc2720_rtc_record_error(&ret, step_ret);
+		ums9117_adi_record_first_error(&ret, step_ret);
 	}
 	if (!read_ret && (state.rsts & SC2720_RTC_ALARM_ACK_MASK)) {
 		step_ret = sc2720_rtc_clear_status(state.rsts &
 						   SC2720_RTC_ALARM_ACK_MASK);
-		sc2720_rtc_record_error(&ret, step_ret);
+		ums9117_adi_record_first_error(&ret, step_ret);
 	}
 	if (!read_ret && (state.rsts & SC2720_RTC_SPG_ACK)) {
 		step_ret = sc2720_rtc_clear_status(SC2720_RTC_SPG_ACK);
-		sc2720_rtc_record_error(&ret, step_ret);
+		ums9117_adi_record_first_error(&ret, step_ret);
 	}
 
 	if (rtc->spg_may_have_changed) {
 		step_ret = sc2720_rtc_update_spg(rtc, rtc->initial_spg_low);
-		sc2720_rtc_record_error(&ret, step_ret);
+		ums9117_adi_record_first_error(&ret, step_ret);
 	}
-	step_ret = sc2720_rtc_adi_write(SC2720_RTC_INT_EN, rtc->initial_int_en);
-	sc2720_rtc_record_error(&ret, step_ret);
+	step_ret =
+		ums9117_adi_write_once(SC2720_RTC_INT_EN, rtc->initial_int_en);
+	ums9117_adi_record_first_error(&ret, step_ret);
 	step_ret = sc2720_rtc_read_alarm_state(&state);
-	sc2720_rtc_record_error(&ret, step_ret);
+	ums9117_adi_record_first_error(&ret, step_ret);
 	if (!step_ret &&
 	    (state.int_en != rtc->initial_int_en ||
 	     (state.rsts & pending_mask) || (state.msk & pending_mask) ||
@@ -460,7 +399,7 @@ static int sc2720_rtc_disarm_locked(struct sc2720_rtc *rtc)
 		     rtc->initial_spg_low ||
 	     (state.spg_upd & SC2720_RTC_SPG_LOW_MASK) ==
 		     SC2720_RTC_ALARM_UNLOCK))
-		sc2720_rtc_record_error(&ret, -EIO);
+		ums9117_adi_record_first_error(&ret, -EIO);
 	if (!ret) {
 		rtc->state_may_have_changed = false;
 		rtc->armed = false;
@@ -501,8 +440,8 @@ static int sc2720_rtc_set_time(struct device *dev, struct rtc_time *time)
 	synchronize_irq(rtc->irq);
 	mutex_lock(&rtc->lock);
 
-	ret = sc2720_rtc_adi_update(SC2720_RTC_INT_EN, SC2720_RTC_TIME_ACK_MASK,
-				    0);
+	ret = ums9117_adi_update_bits_once(SC2720_RTC_INT_EN,
+					   SC2720_RTC_TIME_ACK_MASK, 0);
 	if (ret)
 		goto out;
 	ret = sc2720_rtc_clear_status(SC2720_RTC_TIME_ACK_MASK);
@@ -511,16 +450,16 @@ static int sc2720_rtc_set_time(struct device *dev, struct rtc_time *time)
 
 	/* A partial write must not make a plausible mixed date readable. */
 	rtc->time_invalid = true;
-	ret = sc2720_rtc_adi_write(SC2720_RTC_SECONDS_UPDATE, seconds);
+	ret = ums9117_adi_write_once(SC2720_RTC_SECONDS_UPDATE, seconds);
 	if (ret)
 		goto out;
-	ret = sc2720_rtc_adi_write(SC2720_RTC_MINUTES_UPDATE, minutes);
+	ret = ums9117_adi_write_once(SC2720_RTC_MINUTES_UPDATE, minutes);
 	if (ret)
 		goto out;
-	ret = sc2720_rtc_adi_write(SC2720_RTC_HOURS_UPDATE, hours);
+	ret = ums9117_adi_write_once(SC2720_RTC_HOURS_UPDATE, hours);
 	if (ret)
 		goto out;
-	ret = sc2720_rtc_adi_write(SC2720_RTC_DAYS_UPDATE, days);
+	ret = ums9117_adi_write_once(SC2720_RTC_DAYS_UPDATE, days);
 	if (ret)
 		goto out;
 	ret = sc2720_rtc_wait_status(SC2720_RTC_TIME_ACK_MASK,
@@ -530,9 +469,9 @@ static int sc2720_rtc_set_time(struct device *dev, struct rtc_time *time)
 	ret = sc2720_rtc_clear_status(SC2720_RTC_TIME_ACK_MASK);
 	if (ret)
 		goto out;
-	ret = sc2720_rtc_adi_update(SC2720_RTC_INT_EN, SC2720_RTC_TIME_ACK_MASK,
-				    rtc->initial_int_en &
-					    SC2720_RTC_TIME_ACK_MASK);
+	ret = ums9117_adi_update_bits_once(
+		SC2720_RTC_INT_EN, SC2720_RTC_TIME_ACK_MASK,
+		rtc->initial_int_en & SC2720_RTC_TIME_ACK_MASK);
 	if (!ret)
 		rtc->time_invalid = false;
 
@@ -577,22 +516,22 @@ static int sc2720_rtc_program_alarm_locked(struct sc2720_rtc *rtc,
 		return ret;
 
 	rtc->state_may_have_changed = true;
-	ret = sc2720_rtc_adi_write(SC2720_RTC_INT_EN, safe_int_en);
+	ret = ums9117_adi_write_once(SC2720_RTC_INT_EN, safe_int_en);
 	if (ret)
 		goto fail;
 	ret = sc2720_rtc_wait_status(SC2720_RTC_ALARM_ACK_MASK, 0);
 	if (ret)
 		goto fail;
-	ret = sc2720_rtc_adi_write(SC2720_RTC_ALARM_SECONDS, seconds);
+	ret = ums9117_adi_write_once(SC2720_RTC_ALARM_SECONDS, seconds);
 	if (ret)
 		goto fail;
-	ret = sc2720_rtc_adi_write(SC2720_RTC_ALARM_MINUTES, minutes);
+	ret = ums9117_adi_write_once(SC2720_RTC_ALARM_MINUTES, minutes);
 	if (ret)
 		goto fail;
-	ret = sc2720_rtc_adi_write(SC2720_RTC_ALARM_HOURS, hours);
+	ret = ums9117_adi_write_once(SC2720_RTC_ALARM_HOURS, hours);
 	if (ret)
 		goto fail;
-	ret = sc2720_rtc_adi_write(SC2720_RTC_ALARM_DAYS, days);
+	ret = ums9117_adi_write_once(SC2720_RTC_ALARM_DAYS, days);
 	if (ret)
 		goto fail;
 	ret = sc2720_rtc_wait_status(SC2720_RTC_ALARM_ACK_MASK,
@@ -608,8 +547,9 @@ static int sc2720_rtc_program_alarm_locked(struct sc2720_rtc *rtc,
 
 	enable_irq(rtc->irq);
 	rtc->irq_enabled = true;
-	ret = sc2720_rtc_adi_update(SC2720_RTC_INT_EN, SC2720_RTC_ALARM_EVENT,
-				    SC2720_RTC_ALARM_EVENT);
+	ret = ums9117_adi_update_bits_once(SC2720_RTC_INT_EN,
+					   SC2720_RTC_ALARM_EVENT,
+					   SC2720_RTC_ALARM_EVENT);
 	if (ret)
 		goto fail;
 	rtc->armed = true;

@@ -63,34 +63,6 @@ struct ums9117_sc2720_inta {
 	bool published;
 };
 
-static int ums9117_sc2720_inta_adi_read(u32 offset, u16 *value)
-{
-	struct ums9117_adi_transaction transaction = {};
-	int end_ret;
-	int ret;
-
-	ret = ums9117_adi_begin(&transaction);
-	if (ret)
-		return ret;
-	ret = ums9117_adi_read(&transaction, offset, value);
-	end_ret = ums9117_adi_end(&transaction);
-	return ret ? ret : end_ret;
-}
-
-static int ums9117_sc2720_inta_adi_write(u32 offset, u16 value)
-{
-	struct ums9117_adi_transaction transaction = {};
-	int end_ret;
-	int ret;
-
-	ret = ums9117_adi_begin(&transaction);
-	if (ret)
-		return ret;
-	ret = ums9117_adi_write(&transaction, offset, value);
-	end_ret = ums9117_adi_end(&transaction);
-	return ret ? ret : end_ret;
-}
-
 static bool ums9117_sc2720_inta_source_supported(irq_hw_number_t source)
 {
 	return source == SC2720_INTA_SOURCE_RTC ||
@@ -114,34 +86,34 @@ static int ums9117_sc2720_inta_read_baseline(struct ums9117_sc2720_inta *inta)
 	if (ums9117_adi_is_poisoned())
 		return -EIO;
 
-	ret = ums9117_sc2720_inta_adi_read(SC2720_CHIP_ID_LOW, &chip_id_low);
+	ret = ums9117_adi_read_once(SC2720_CHIP_ID_LOW, &chip_id_low);
 	if (ret)
 		return ret;
-	ret = ums9117_sc2720_inta_adi_read(SC2720_CHIP_ID_HIGH, &chip_id_high);
+	ret = ums9117_adi_read_once(SC2720_CHIP_ID_HIGH, &chip_id_high);
 	if (ret)
 		return ret;
-	ret = ums9117_sc2720_inta_adi_read(SC2720_MODULE_EN0, &module_en0);
+	ret = ums9117_adi_read_once(SC2720_MODULE_EN0, &module_en0);
 	if (ret)
 		return ret;
-	ret = ums9117_sc2720_inta_adi_read(SC2720_RTC_CLK_EN0, &rtc_clk_en0);
+	ret = ums9117_adi_read_once(SC2720_RTC_CLK_EN0, &rtc_clk_en0);
 	if (ret)
 		return ret;
-	ret = ums9117_sc2720_inta_adi_read(SC2720_SOFT_RST0, &soft_rst0);
+	ret = ums9117_adi_read_once(SC2720_SOFT_RST0, &soft_rst0);
 	if (ret)
 		return ret;
-	ret = ums9117_sc2720_inta_adi_read(SC2720_ARCH_EN, &arch_en);
+	ret = ums9117_adi_read_once(SC2720_ARCH_EN, &arch_en);
 	if (ret)
 		return ret;
-	ret = ums9117_sc2720_inta_adi_read(SC2720_ANA_INT_STATUS, &status);
+	ret = ums9117_adi_read_once(SC2720_ANA_INT_STATUS, &status);
 	if (ret)
 		return ret;
-	ret = ums9117_sc2720_inta_adi_read(SC2720_ANA_INT_RAW, &raw);
+	ret = ums9117_adi_read_once(SC2720_ANA_INT_RAW, &raw);
 	if (ret)
 		return ret;
-	ret = ums9117_sc2720_inta_adi_read(SC2720_ANA_INT_ENABLE, &enable);
+	ret = ums9117_adi_read_once(SC2720_ANA_INT_ENABLE, &enable);
 	if (ret)
 		return ret;
-	ret = ums9117_sc2720_inta_adi_read(SC2720_ANA_INT_STATUS_SYNC, &sync);
+	ret = ums9117_adi_read_once(SC2720_ANA_INT_STATUS_SYNC, &sync);
 	if (ret)
 		return ret;
 
@@ -178,7 +150,7 @@ static void ums9117_sc2720_inta_fail_locked(struct ums9117_sc2720_inta *inta,
 	inta->failed = true;
 	inta->enabled = 0;
 	ums9117_sc2720_inta_disable_parent(inta);
-	mask_ret = ums9117_sc2720_inta_adi_write(SC2720_ANA_INT_ENABLE, 0);
+	mask_ret = ums9117_adi_write_once(SC2720_ANA_INT_ENABLE, 0);
 	dev_err(inta->dev, "SC2720 INTA disabled at %s: %d (ANA INT EN %d)\n",
 		where, error, mask_ret);
 }
@@ -263,8 +235,8 @@ static void ums9117_sc2720_inta_irq_bus_sync_unlock(struct irq_data *data)
 
 	if (!inta->failed && inta->dirty) {
 		inta->dirty = 0;
-		ret = ums9117_sc2720_inta_adi_write(SC2720_ANA_INT_ENABLE,
-						    inta->enabled);
+		ret = ums9117_adi_write_once(SC2720_ANA_INT_ENABLE,
+					     inta->enabled);
 		if (ret)
 			ums9117_sc2720_inta_fail_locked(inta, "child IRQ setup",
 							ret);
@@ -365,16 +337,16 @@ static irqreturn_t ums9117_sc2720_inta_parent_thread(int irq, void *data)
 	if (inta->failed)
 		goto out_unlock;
 
-	ret = ums9117_sc2720_inta_adi_read(SC2720_ANA_INT_STATUS, &status);
+	ret = ums9117_adi_read_once(SC2720_ANA_INT_STATUS, &status);
 	if (ret)
 		goto fail;
-	ret = ums9117_sc2720_inta_adi_read(SC2720_ANA_INT_RAW, &raw);
+	ret = ums9117_adi_read_once(SC2720_ANA_INT_RAW, &raw);
 	if (ret)
 		goto fail;
-	ret = ums9117_sc2720_inta_adi_read(SC2720_ANA_INT_ENABLE, &enable);
+	ret = ums9117_adi_read_once(SC2720_ANA_INT_ENABLE, &enable);
 	if (ret)
 		goto fail;
-	ret = ums9117_sc2720_inta_adi_read(SC2720_ANA_INT_STATUS_SYNC, &sync);
+	ret = ums9117_adi_read_once(SC2720_ANA_INT_STATUS_SYNC, &sync);
 	if (ret)
 		goto fail;
 
@@ -474,7 +446,7 @@ static int ums9117_sc2720_inta_probe(struct platform_device *pdev)
 	if (ret)
 		goto out_remove_domain;
 
-	ret = ums9117_sc2720_inta_adi_write(SC2720_ANA_INT_ENABLE, 0);
+	ret = ums9117_adi_write_once(SC2720_ANA_INT_ENABLE, 0);
 	if (ret)
 		goto out_free_irq;
 
@@ -488,7 +460,7 @@ static int ums9117_sc2720_inta_probe(struct platform_device *pdev)
 
 out_free_irq:
 	/* Do not restore the inherited all-sources-enabled state on failure. */
-	ums9117_sc2720_inta_adi_write(SC2720_ANA_INT_ENABLE, 0);
+	ums9117_adi_write_once(SC2720_ANA_INT_ENABLE, 0);
 	free_irq(inta->parent_irq, inta);
 out_remove_domain:
 	irq_domain_remove(inta->domain);
@@ -508,7 +480,7 @@ static void ums9117_sc2720_inta_shutdown(struct platform_device *pdev)
 	mutex_lock(&inta->lock);
 	inta->failed = true;
 	inta->enabled = 0;
-	ret = ums9117_sc2720_inta_adi_write(SC2720_ANA_INT_ENABLE, 0);
+	ret = ums9117_adi_write_once(SC2720_ANA_INT_ENABLE, 0);
 	if (ret)
 		dev_err(inta->dev,
 			"could not disable SC2720 analog interrupt sources: %d\n",

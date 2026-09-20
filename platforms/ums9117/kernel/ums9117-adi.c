@@ -367,6 +367,66 @@ int ums9117_adi_write_final(struct ums9117_adi_transaction *transaction,
 }
 EXPORT_SYMBOL_GPL(ums9117_adi_write_final);
 
+int ums9117_adi_read_once(u32 offset, u16 *value)
+{
+	struct ums9117_adi_transaction transaction = {};
+	int end_ret;
+	int ret;
+
+	ret = ums9117_adi_begin(&transaction);
+	if (ret)
+		return ret;
+	ret = ums9117_adi_read(&transaction, offset, value);
+	end_ret = ums9117_adi_end(&transaction);
+	return ret ? ret : end_ret;
+}
+EXPORT_SYMBOL_GPL(ums9117_adi_read_once);
+
+int ums9117_adi_write_once(u32 offset, u16 value)
+{
+	struct ums9117_adi_transaction transaction = {};
+	int end_ret;
+	int ret;
+
+	ret = ums9117_adi_begin(&transaction);
+	if (ret)
+		return ret;
+	ret = ums9117_adi_write(&transaction, offset, value);
+	end_ret = ums9117_adi_end(&transaction);
+	return ret ? ret : end_ret;
+}
+EXPORT_SYMBOL_GPL(ums9117_adi_write_once);
+
+int ums9117_adi_update_bits_once(u32 offset, u16 mask, u16 value)
+{
+	struct ums9117_adi_transaction transaction = {};
+	int end_ret;
+	int ret;
+
+	ret = ums9117_adi_begin(&transaction);
+	if (ret)
+		return ret;
+	ret = ums9117_adi_update_bits(&transaction, offset, mask, value);
+	end_ret = ums9117_adi_end(&transaction);
+	return ret ? ret : end_ret;
+}
+EXPORT_SYMBOL_GPL(ums9117_adi_update_bits_once);
+
+int ums9117_adi_write_final_once(u32 offset, u16 value)
+{
+	struct ums9117_adi_transaction transaction = {};
+	int end_ret;
+	int ret;
+
+	ret = ums9117_adi_begin(&transaction);
+	if (ret)
+		return ret;
+	ret = ums9117_adi_write_final(&transaction, offset, value);
+	end_ret = ums9117_adi_end(&transaction);
+	return ret ? ret : end_ret;
+}
+EXPORT_SYMBOL_GPL(ums9117_adi_write_final_once);
+
 bool ums9117_adi_is_poisoned(void)
 {
 	return READ_ONCE(adi_poisoned);
