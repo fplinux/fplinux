@@ -1357,7 +1357,7 @@ static void ums9117_mmc_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	      !READ_ONCE(host->sdio_state.controller.card_clock_on)))) {
 		ums9117_mmc_reject_request(
 			host, mrq, -EPROTO,
-			"application-command qualification rejected request");
+			"application-command validation rejected request");
 		return;
 	}
 	post_write_status = READ_ONCE(host->write_status_pending) &&
@@ -2109,7 +2109,7 @@ static int ums9117_mmc_probe(struct platform_device *pdev)
 	/*
 	 * High speed is claimed but the clock is not raised yet: the core
 	 * takes this as the ceiling for a high-speed card, so it keeps asking
-	 * for the frequency this board is already qualified at.
+	 * for the frequency this slot is already tested at.
 	 */
 	mmc->max_sd_hs_hz = UMS9117_SDIO_HS_CLOCK_HZ;
 	mmc->caps2 = MMC_CAP2_NO_SDIO | MMC_CAP2_NO_MMC;

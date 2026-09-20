@@ -9,7 +9,7 @@
  * The analog EIC bank is reachable only through the platform-wide ADI
  * transport. SC2720 INTA owns the shared analog aggregate on GIC SPI38; this
  * driver consumes only its EICA child source. It deliberately accepts only
- * the qualified UMS9117/SC2720 state left by the RAM bootstrap instead of
+ * the initialized UMS9117/SC2720 state left by the RAM bootstrap instead of
  * trying to initialize the PMIC.
  */
 #include <linux/bitops.h>

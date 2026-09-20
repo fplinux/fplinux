@@ -924,15 +924,15 @@ static int ums9117_nandc_fail(struct ums9117_nandc *nandc, int error,
 		"%s failed: %d page=%u operation=%u feature_address=0x%02x completed=%u\n",
 		stage, error, nandc->last_page, nandc->last_operation,
 		nandc->last_feature_address, nandc->completed_operations);
-	dev_err(nandc->dev,
+	dev_dbg(nandc->dev,
 		"observed_int=0x%08x observed_axim=0x%08x observed_spi=0x%08x\n",
 		nandc->last_int_raw, nandc->last_axim_status,
 		nandc->last_spi_status);
-	dev_err(nandc->dev, "post_abort_int=0x%08x axim_sts=0x%08x\n", int_raw,
+	dev_dbg(nandc->dev, "post_abort_int=0x%08x axim_sts=0x%08x\n", int_raw,
 		axim_sts);
-	dev_err(nandc->dev, "spi_status=0x%08x feature=0x%08x start=0x%08x\n",
+	dev_dbg(nandc->dev, "spi_status=0x%08x feature=0x%08x start=0x%08x\n",
 		spi_status, feature, start);
-	dev_err(nandc->dev,
+	dev_dbg(nandc->dev,
 		"cfg0=0x%08x cfg1=0x%08x cfg4=0x%08x reset_error=%d\n", cfg0,
 		cfg1, cfg4, reset_error);
 	if (reset_error)

@@ -65,7 +65,7 @@ struct ums9117_fb_profile {
 	 * maximum is derived from equal non-zero board WLED current levels.
 	 */
 	const char *wled_backlight_name;
-	/* Board-qualified AP DMA copy into the LCDC's private transfer buffer. */
+	/* Board-specific AP DMA copy into the LCDC's private transfer buffer. */
 	bool dma_memcpy;
 	/* Enable native-size presentation with this profile's frame completion. */
 	bool native_nv16;
