@@ -139,6 +139,8 @@ _KERNEL_IMPLEMENTATION = frozenset(
         "scripts/fplinux_cli/identity_codegen.py",
         "scripts/fplinux_cli/kbuild_state.py",
         "scripts/fplinux_cli/kernelcheck.py",
+        "scripts/fplinux_cli/kernel_patches.py",
+        "scripts/fplinux_cli/workspace.py",
         "scripts/fplinux_cli/linux_state.py",
         "scripts/fplinux_cli/output.py",
         "scripts/fplinux_cli/profile_layout.py",
