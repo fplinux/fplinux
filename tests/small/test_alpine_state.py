@@ -6,14 +6,19 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import mock
 
 from fplinux_cli import alpine_builder, alpine_state
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class AlpineStateTests(unittest.TestCase):
@@ -667,6 +672,52 @@ class AlpineStateTests(unittest.TestCase):
             self.assertRaisesRegex(SystemExit, "fplinux-input"),
         ):
             alpine_builder._verify_alpine_rootfs(root, with_input)  # noqa: SLF001
+
+    @staticmethod
+    def _fake_apk_owner(owners: dict[str, str]) -> Callable[[Path, str, str], None]:
+        """Fake apk file-ownership answers; paths outside ``owners`` always match."""
+
+        def fake_apk_owner(_root: Path, path: str, package: str) -> None:
+            owner = owners.get(path, package)
+            if owner != package:
+                raise SystemExit(f"unexpected Alpine package owner for {path}: {owner}")
+
+        return fake_apk_owner
+
+    def test_bluetooth_root_requires_project_built_daemon_libraries(self) -> None:
+        """Bluetooth roots take the BlueZ daemons' vCard and GLib sonames from project builds."""
+        root = self._verified_rootfs()
+        base = ("fplinux-base", "fplinux-console")
+        with_bluetooth = (*base, "fplinux-bluetooth")
+        replaced = {
+            "/usr/lib/libicalvcal.so.3": ("libical", "fplinux-libical"),
+            "/usr/lib/libglib-2.0.so.0": ("glib", "fplinux-glib"),
+        }
+        project_owners = {path: project for path, (_, project) in replaced.items()}
+
+        self._write_world(root, base)
+        alpine_owners = {path: alpine for path, (alpine, _) in replaced.items()}
+        with mock.patch.object(
+            alpine_builder, "_require_apk_owner", self._fake_apk_owner(alpine_owners)
+        ):
+            alpine_builder._verify_alpine_rootfs(root, base)  # noqa: SLF001
+
+        self._write_world(root, with_bluetooth)
+        for path, (alpine, _) in replaced.items():
+            with self.subTest(path=path):
+                owners = {**project_owners, path: alpine}
+                with (
+                    mock.patch.object(
+                        alpine_builder, "_require_apk_owner", self._fake_apk_owner(owners)
+                    ),
+                    self.assertRaisesRegex(SystemExit, f"{re.escape(path)}: {alpine}"),
+                ):
+                    alpine_builder._verify_alpine_rootfs(root, with_bluetooth)  # noqa: SLF001
+
+        with mock.patch.object(
+            alpine_builder, "_require_apk_owner", self._fake_apk_owner(project_owners)
+        ):
+            alpine_builder._verify_alpine_rootfs(root, with_bluetooth)  # noqa: SLF001
 
     def test_persistent_root_requires_orderly_shutdown_services(self) -> None:
         """A persistent root rejects a shutdown runlevel missing data-safety services."""

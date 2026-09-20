@@ -1,0 +1,61 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-glib
+pkgver=2.88.1
+pkgrel=0
+pkgdesc="GLib core library for BlueZ without GIO, GObject and introspection"
+url="https://gitlab.gnome.org/GNOME/glib"
+arch="armv7"
+license="LGPL-2.1-or-later"
+makedepends_build="clang22 lld22 meson python3 samurai"
+makedepends_host="libffi-dev musl-dev musl-libintl pcre2-dev zlib-dev"
+options="!check"
+source="https://download.gnome.org/sources/glib/${pkgver%.*}/glib-$pkgver.tar.xz"
+builddir="$srcdir/glib-$pkgver"
+# GLib names its shared library 0.<minor * 100>.<micro>.
+_minor="${pkgver#*.}"
+_library="libglib-2.0.so.0.$((${_minor%.*} * 100)).${pkgver##*.}"
+
+build() {
+	: "${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
+	# abuild-meson describes the target machine and sysroot; this file adds
+	# the archiver, keeps pkg-config inside the sysroot and answers the
+	# run-time probes that a cross build cannot execute (musl passes them).
+	cat >fplinux-cross.meson <<-EOF
+		[binaries]
+		ar = '$CHOST-ar'
+		[properties]
+		pkg_config_libdir = ['$CBUILDROOT/usr/lib/pkgconfig', '$CBUILDROOT/usr/share/pkgconfig']
+		have_c99_vsnprintf = true
+		have_c99_snprintf = true
+		have_unix98_printf = true
+		have_proc_self_cmdline = true
+		growing_stack = false
+	EOF
+	# GLib needs no C++. Without CXX, meson skips the optional C++ probe
+	# whose driver would otherwise run the C library checks and fail on the
+	# sysroot without a C++ standard library. Thumb-2 keeps the library
+	# smaller than the ARM instruction set, as in the Alpine build.
+	CFLAGS="$CFLAGS -mthumb" env -u CXX abuild-meson \
+		--cross-file fplinux-cross.meson \
+		-Dglib_debug=disabled \
+		-Dintrospection=disabled \
+		-Dlibelf=disabled \
+		-Dlibmount=disabled \
+		-Dman-pages=disabled \
+		-Dnls=disabled \
+		-Dselinux=disabled \
+		-Dsysprof=disabled \
+		-Dtests=false \
+		-Dxattr=false \
+		output
+	ninja -C output "glib/$_library"
+}
+
+package() {
+	install -Dm755 "$builddir/output/glib/$_library" "$pkgdir/usr/lib/$_library"
+	ln -s "$_library" "$pkgdir/usr/lib/libglib-2.0.so.0"
+}
+
+sha512sums="
+74e6d6086081e5dfb5b7fd3b74f59171033be0c340ff2dd798fea9cb42e5f680e13b2ac3dde8dd423bceb9c6556103005f9542aeda166e9a3b89da8bacecca23  glib-2.88.1.tar.xz
+"

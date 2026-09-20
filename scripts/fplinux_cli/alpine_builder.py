@@ -749,6 +749,12 @@ def _verify_alpine_rootfs(
     for path, package in owners.items():
         require_file(root / path.removeprefix("/"))
         _require_apk_owner(root, path, package)
+    if "fplinux-bluetooth" in packages:
+        # obexd loads its vCard parser and both BlueZ daemons load GLib through
+        # these sonames; the project builds without ICU, GIO and GObject must
+        # own them rather than the Alpine libical and glib closures.
+        _require_apk_owner(root, "/usr/lib/libicalvcal.so.3", "fplinux-libical")
+        _require_apk_owner(root, "/usr/lib/libglib-2.0.so.0", "fplinux-glib")
 
     _require_openrc_service(root, "default", "fplinux-console")
     if "fplinux-input" in packages:

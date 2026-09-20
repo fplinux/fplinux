@@ -31,7 +31,7 @@ RUN set -eux; \
         7zip=26.01-r0 \
         bash=5.3.9-r1 \
         bzip2=1.0.8-r6 \
-        ca-certificates=20260611-r0 \
+        ca-certificates=20260909-r0 \
         cpio=2.15-r0 \
         curl=8.22.0-r0 \
         diffutils=3.12-r0 \
@@ -57,7 +57,7 @@ RUN set -eux; \
         u-boot-tools=2026.04-r1 \
         wget=1.25.0-r3 \
         which=2.23-r0 \
-        xz=5.8.3-r0 \
+        xz=5.8.4-r0 \
         zip=3.0-r13 \
         zstd=1.5.7-r2
 
@@ -98,7 +98,7 @@ RUN set -eux; \
         ncurses-dev=6.6_p20260516-r0 \
         openssl-dev=3.5.8-r0 \
         swig=4.4.1-r1 \
-        xz-dev=5.8.3-r0 \
+        xz-dev=5.8.4-r0 \
         zlib-dev=1.3.2-r0
 
 RUN set -eux; \
@@ -219,6 +219,7 @@ RUN apk add --no-cache \
     dbus=1.16.2-r2 \
     dbus-dev=1.16.2-r2 \
     libjpeg-turbo-dev=3.1.3-r0 \
+    meson=1.11.1-r0 \
     samurai=1.2-r8
 
 RUN mkdir -p /cache/analysis /cache/downloads /cache/linux /cache/rootfs \
