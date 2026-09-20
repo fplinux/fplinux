@@ -16,7 +16,12 @@
 		#size-cells = <1>;
 		ranges;
 
-		jpeg_dma: jpeg-dma-pool {
+		/*
+		 * JPEG and ROTA need physically contiguous DMA buffers. Sharing
+		 * one reusable CMA pool avoids a second reservation and leaves
+		 * unused pages available for movable allocations.
+		 */
+		codec_dma: codec-dma-pool {
 			compatible = "shared-dma-pool";
 			reusable;
 			size = <0x00400000>;
@@ -163,6 +168,7 @@
 			reg-names = "rota", "ap-ahb-gate-state", "ap-ahb-gate-set",
 				    "ap-ahb-gate-clear", "ap-ahb-reset-set",
 				    "ap-ahb-reset-clear";
+			memory-region = <&codec_dma>;
 			status = "disabled";
 		};
 
@@ -179,7 +185,7 @@
 				    "ap-ahb-gate-clear", "ap-ahb-reset-set",
 				    "ap-ahb-reset-clear", "dcam-clock";
 			interrupts = <GIC_SPI 45 IRQ_TYPE_LEVEL_HIGH>;
-			memory-region = <&jpeg_dma>;
+			memory-region = <&codec_dma>;
 			status = "disabled";
 		};
 
