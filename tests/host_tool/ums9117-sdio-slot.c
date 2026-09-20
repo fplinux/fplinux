@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Characterize slot ownership and power policy with fake board MMIO/ADI. */
+/* Characterize slot ownership and power policy with fake MMIO/ADI. */
 #include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
 
-#include "ums9117-mmc.h"
+#include "ums9117-sdio-slot.h"
 
 struct fake_slot {
 	u32 regs[UMS9117_SDIO_SLOT_REG_COUNT];
@@ -54,11 +54,9 @@ static void fake_sleep_ms(void *context, u32 msec)
 	((struct fake_slot *)context)->sleep_ms += msec;
 }
 
-static struct ums9117_sdio_slot_io
-fake_io(struct fake_slot *fake, const struct ums9117_sdio_slot_board *board)
+static struct ums9117_sdio_slot_io fake_io(struct fake_slot *fake)
 {
 	struct ums9117_sdio_slot_io io = {
-		.board = board,
 		.context = fake,
 		.read = fake_read,
 		.write = fake_write,
@@ -80,10 +78,10 @@ static int expect(bool condition, const char *message)
 	return 1;
 }
 
-static int test_voltage_admission(const struct ums9117_sdio_slot_board *board)
+static int test_voltage_admission(void)
 {
 	struct fake_slot fake = { 0 };
-	struct ums9117_sdio_slot_io io = fake_io(&fake, board);
+	struct ums9117_sdio_slot_io io = fake_io(&fake);
 	struct ums9117_sdio_slot_state state = { 0 };
 	int failed = 0;
 
@@ -101,11 +99,10 @@ static int test_voltage_admission(const struct ums9117_sdio_slot_board *board)
 	return failed;
 }
 
-static int
-test_card_detect_ownership(const struct ums9117_sdio_slot_board *board)
+static int test_card_detect_ownership(void)
 {
 	struct fake_slot fake = { 0 };
-	struct ums9117_sdio_slot_io io = fake_io(&fake, board);
+	struct ums9117_sdio_slot_io io = fake_io(&fake);
 	struct ums9117_sdio_slot_state state = { 0 };
 	int failed = 0;
 
@@ -144,11 +141,10 @@ test_card_detect_ownership(const struct ums9117_sdio_slot_board *board)
 	return failed;
 }
 
-static int test_power_preserves_voltage_and_other_pmic_bits(
-	const struct ums9117_sdio_slot_board *board)
+static int test_power_preserves_voltage_and_other_pmic_bits(void)
 {
 	struct fake_slot fake = { 0 };
-	struct ums9117_sdio_slot_io io = fake_io(&fake, board);
+	struct ums9117_sdio_slot_io io = fake_io(&fake);
 	struct ums9117_sdio_slot_state state = { 0 };
 	int failed = 0;
 
@@ -190,10 +186,6 @@ static int test_power_preserves_voltage_and_other_pmic_bits(
 
 int main(void)
 {
-	const struct ums9117_sdio_slot_board *board =
-		ums9117_uboot_sdio_board();
-
-	return test_voltage_admission(board) |
-	       test_card_detect_ownership(board) |
-	       test_power_preserves_voltage_and_other_pmic_bits(board);
+	return test_voltage_admission() | test_card_detect_ownership() |
+	       test_power_preserves_voltage_and_other_pmic_bits();
 }

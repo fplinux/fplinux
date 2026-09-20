@@ -3,8 +3,6 @@
 #include <linux/kernel.h>
 #ifdef __UBOOT__
 #include <linux/compat.h>
-#else
-#include <linux/export.h>
 #endif
 
 #include "ums9117-sdio-slot.h"
@@ -15,9 +13,18 @@
 #define UMS9117_SDIO_SLOT_SELECTOR_SOURCE 0x00000004U
 #define UMS9117_SDIO_SLOT_PIN_ADMISSIBLE_MASK 0x00000030U
 #define UMS9117_SDIO_SLOT_PD_MASK 0x0001U
+#define UMS9117_SDIO_SLOT_CORE_VOLTAGE 0x0050U
+#define UMS9117_SDIO_SLOT_IO_VOLTAGE 0x006fU
+#define UMS9117_SDIO_SLOT_RAIL_DELAY_MS 300U
 #define UMS9117_SDIO_EIC_CARD_DETECT_BIT 0x00000001U
 /* Settling interval used for the polled EIC input. */
 #define UMS9117_SDIO_EIC_CARD_DETECT_SETTLE_MS 3U
+
+struct ums9117_sdio_slot_pin {
+	enum ums9117_sdio_slot_reg reg;
+	u32 target;
+	bool mux;
+};
 
 static const struct ums9117_sdio_resource
 	ums9117_sdio_slot_controller_resources[UMS9117_SDIO_REG_COUNT] = {
@@ -58,6 +65,62 @@ static const struct ums9117_sdio_resource
 						    0x203000fcU, 4U },
 	};
 
+static const struct ums9117_sdio_resource
+	ums9117_sdio_slot_resources[UMS9117_SDIO_SLOT_REG_COUNT] = {
+		[UMS9117_SDIO_SLOT_REG_GATE_STATE] = { "gate-state",
+						       0x20e00000U, 4U },
+		[UMS9117_SDIO_SLOT_REG_GATE_SET] = { "gate-set", 0x20e01000U,
+						     4U },
+		[UMS9117_SDIO_SLOT_REG_GATE_CLEAR] = { "gate-clear",
+						       0x20e02000U, 4U },
+		[UMS9117_SDIO_SLOT_REG_RESET_STATE] = { "ap-reset-state",
+							0x20e00004U, 4U },
+		[UMS9117_SDIO_SLOT_REG_RESET_SET] = { "ap-reset-set",
+						      0x20e01004U, 4U },
+		[UMS9117_SDIO_SLOT_REG_RESET_CLEAR] = { "ap-reset-clear",
+							0x20e02004U, 4U },
+		[UMS9117_SDIO_SLOT_REG_CLOCK_SELECTOR] = { "ap-clock-selector",
+							   0x2150006cU, 4U },
+		[UMS9117_SDIO_SLOT_REG_PWR_PAD_CTL] = { "pwr-pad-ctl",
+							0x402a0000U, 4U },
+		[UMS9117_SDIO_SLOT_REG_CMD_MUX] = { "cmd-mux", 0x402a0128U,
+						    4U },
+		[UMS9117_SDIO_SLOT_REG_CMD_PAD] = { "cmd-pad", 0x402a0528U,
+						    4U },
+		[UMS9117_SDIO_SLOT_REG_D0_MUX] = { "d0-mux", 0x402a012cU, 4U },
+		[UMS9117_SDIO_SLOT_REG_D0_PAD] = { "d0-pad", 0x402a052cU, 4U },
+		[UMS9117_SDIO_SLOT_REG_CLK_MUX] = { "clk-mux", 0x402a0134U,
+						    4U },
+		[UMS9117_SDIO_SLOT_REG_CLK_PAD] = { "clk-pad", 0x402a0534U,
+						    4U },
+		[UMS9117_SDIO_SLOT_REG_D3_MUX] = { "d3-mux", 0x402a0120U, 4U },
+		[UMS9117_SDIO_SLOT_REG_D3_PAD] = { "d3-pad", 0x402a0520U, 4U },
+		[UMS9117_SDIO_SLOT_REG_D2_MUX] = { "d2-mux", 0x402a0124U, 4U },
+		[UMS9117_SDIO_SLOT_REG_D2_PAD] = { "d2-pad", 0x402a0524U, 4U },
+		[UMS9117_SDIO_SLOT_REG_D1_MUX] = { "d1-mux", 0x402a0130U, 4U },
+		[UMS9117_SDIO_SLOT_REG_D1_PAD] = { "d1-pad", 0x402a0530U, 4U },
+		[UMS9117_SDIO_SLOT_REG_CARD_DETECT_DATA] = { "card-detect-data",
+							     0x402c0000U, 4U },
+		[UMS9117_SDIO_SLOT_REG_CARD_DETECT_MASK] = { "card-detect-mask",
+							     0x402c0004U, 4U },
+	};
+
+static const struct ums9117_sdio_slot_pin
+	ums9117_sdio_slot_pins[UMS9117_SDIO_SLOT_PIN_COUNT] = {
+		{ UMS9117_SDIO_SLOT_REG_CMD_MUX, 0x00000000U, true },
+		{ UMS9117_SDIO_SLOT_REG_CMD_PAD, 0x00182084U, false },
+		{ UMS9117_SDIO_SLOT_REG_D0_MUX, 0x00000000U, true },
+		{ UMS9117_SDIO_SLOT_REG_D0_PAD, 0x00182084U, false },
+		{ UMS9117_SDIO_SLOT_REG_CLK_MUX, 0x00000000U, true },
+		{ UMS9117_SDIO_SLOT_REG_CLK_PAD, 0x00302001U, false },
+		{ UMS9117_SDIO_SLOT_REG_D3_MUX, 0x00000000U, true },
+		{ UMS9117_SDIO_SLOT_REG_D3_PAD, 0x00182084U, false },
+		{ UMS9117_SDIO_SLOT_REG_D2_MUX, 0x00000000U, true },
+		{ UMS9117_SDIO_SLOT_REG_D2_PAD, 0x00182084U, false },
+		{ UMS9117_SDIO_SLOT_REG_D1_MUX, 0x00000000U, true },
+		{ UMS9117_SDIO_SLOT_REG_D1_PAD, 0x00182084U, false },
+	};
+
 static const u32
 	ums9117_sdio_slot_analog_addresses[UMS9117_SDIO_SLOT_ANALOG_COUNT] = {
 		[UMS9117_SDIO_SLOT_ANALOG_CORE_PD] = 0x40608d00U,
@@ -91,11 +154,11 @@ ums9117_sdio_slot_controller_resource(enum ums9117_sdio_reg reg)
 }
 
 const struct ums9117_sdio_resource *
-ums9117_sdio_slot_board_resource(const struct ums9117_sdio_slot_board *board,
-				 enum ums9117_sdio_slot_reg reg)
+ums9117_sdio_slot_resource(enum ums9117_sdio_slot_reg reg)
 {
-	return reg < UMS9117_SDIO_SLOT_REG_COUNT ? &board->resources[reg] :
-						   NULL;
+	return reg < UMS9117_SDIO_SLOT_REG_COUNT ?
+		       &ums9117_sdio_slot_resources[reg] :
+		       NULL;
 }
 
 const struct ums9117_sdio_resource *ums9117_sdio_slot_adi_resource(void)
@@ -171,7 +234,8 @@ static int ums9117_sdio_slot_set_rails(const struct ums9117_sdio_slot_io *io,
 	if (!ret) {
 		state->rails_on = enable;
 		if (changed)
-			io->sleep_ms(io->context, io->board->rail_delay_ms);
+			io->sleep_ms(io->context,
+				     UMS9117_SDIO_SLOT_RAIL_DELAY_MS);
 	}
 	return ret;
 }
@@ -245,12 +309,14 @@ int ums9117_sdio_slot_snapshot(const struct ums9117_sdio_slot_io *io,
 		io, UMS9117_SDIO_SLOT_REG_CLOCK_SELECTOR);
 	(void)ums9117_sdio_slot_read(io, UMS9117_SDIO_SLOT_REG_PWR_PAD_CTL);
 	for (index = 0; index < UMS9117_SDIO_SLOT_PIN_COUNT; ++index) {
-		value = ums9117_sdio_slot_read(io, io->board->pins[index].reg);
+		const struct ums9117_sdio_slot_pin *pin =
+			&ums9117_sdio_slot_pins[index];
+
+		value = ums9117_sdio_slot_read(io, pin->reg);
 		state->pin_snapshot[index] = value;
-		if (ums9117_sdio_slot_read(io, io->board->pins[index].reg) !=
-		    value)
+		if (ums9117_sdio_slot_read(io, pin->reg) != value)
 			return -EAGAIN;
-		if (io->board->pins[index].mux &&
+		if (pin->mux &&
 		    (value & ~UMS9117_SDIO_SLOT_PIN_ADMISSIBLE_MASK))
 			return -ERANGE;
 	}
@@ -277,16 +343,17 @@ int ums9117_sdio_slot_snapshot(const struct ums9117_sdio_slot_io *io,
 	if (ret)
 		return ret;
 	if (state->analog_snapshot[UMS9117_SDIO_SLOT_ANALOG_CORE_VOLT] !=
-		    io->board->core_voltage ||
+		    UMS9117_SDIO_SLOT_CORE_VOLTAGE ||
 	    state->analog_snapshot[UMS9117_SDIO_SLOT_ANALOG_IO_VOLT] !=
-		    io->board->io_voltage)
+		    UMS9117_SDIO_SLOT_IO_VOLTAGE)
 		return -ERANGE;
 	state->snapshots_valid = true;
 	return 0;
 }
 
-int ums9117_sdio_eic_enable_card_detect(const struct ums9117_sdio_slot_io *io,
-					struct ums9117_sdio_slot_state *state)
+/* Active-low EIC DATA0; acquire an idle mask and release only bit0. */
+int ums9117_sdio_slot_enable_card_detect(const struct ums9117_sdio_slot_io *io,
+					 struct ums9117_sdio_slot_state *state)
 {
 	u32 baseline =
 		io->read(io->context, UMS9117_SDIO_SLOT_REG_CARD_DETECT_MASK);
@@ -308,10 +375,9 @@ int ums9117_sdio_eic_enable_card_detect(const struct ums9117_sdio_slot_io *io,
 		return -EUCLEAN;
 	return 0;
 }
-EXPORT_SYMBOL_GPL(ums9117_sdio_eic_enable_card_detect);
 
-int ums9117_sdio_eic_restore_card_detect(const struct ums9117_sdio_slot_io *io,
-					 struct ums9117_sdio_slot_state *state)
+int ums9117_sdio_slot_restore_card_detect(const struct ums9117_sdio_slot_io *io,
+					  struct ums9117_sdio_slot_state *state)
 {
 	u32 before;
 	u32 target;
@@ -329,10 +395,9 @@ int ums9117_sdio_eic_restore_card_detect(const struct ums9117_sdio_slot_io *io,
 	state->card_detect_owned = false;
 	return 0;
 }
-EXPORT_SYMBOL_GPL(ums9117_sdio_eic_restore_card_detect);
 
-int ums9117_sdio_eic_card_present(const struct ums9117_sdio_slot_io *io,
-				  const struct ums9117_sdio_slot_state *state)
+int ums9117_sdio_slot_card_present(const struct ums9117_sdio_slot_io *io,
+				   const struct ums9117_sdio_slot_state *state)
 {
 	u32 data;
 
@@ -342,25 +407,6 @@ int ums9117_sdio_eic_card_present(const struct ums9117_sdio_slot_io *io,
 		return -EIO;
 	data = io->read(io->context, UMS9117_SDIO_SLOT_REG_CARD_DETECT_DATA);
 	return !(data & UMS9117_SDIO_EIC_CARD_DETECT_BIT);
-}
-EXPORT_SYMBOL_GPL(ums9117_sdio_eic_card_present);
-
-int ums9117_sdio_slot_enable_card_detect(const struct ums9117_sdio_slot_io *io,
-					 struct ums9117_sdio_slot_state *state)
-{
-	return io->board->enable_card_detect(io, state);
-}
-
-int ums9117_sdio_slot_restore_card_detect(const struct ums9117_sdio_slot_io *io,
-					  struct ums9117_sdio_slot_state *state)
-{
-	return io->board->restore_card_detect(io, state);
-}
-
-int ums9117_sdio_slot_card_present(const struct ums9117_sdio_slot_io *io,
-				   const struct ums9117_sdio_slot_state *state)
-{
-	return io->board->card_present(io, state);
 }
 
 int ums9117_sdio_slot_activate(const struct ums9117_sdio_slot_io *io,
@@ -417,13 +463,14 @@ int ums9117_sdio_slot_activate(const struct ums9117_sdio_slot_io *io,
 	if (ret)
 		return ret;
 	for (index = 0; index < UMS9117_SDIO_SLOT_PIN_COUNT; ++index) {
-		if (ums9117_sdio_slot_read(io, io->board->pins[index].reg) !=
+		const struct ums9117_sdio_slot_pin *pin =
+			&ums9117_sdio_slot_pins[index];
+
+		if (ums9117_sdio_slot_read(io, pin->reg) !=
 		    state->pin_snapshot[index])
 			return -EAGAIN;
-		ums9117_sdio_slot_write(io, io->board->pins[index].reg,
-					io->board->pins[index].target);
-		if (ums9117_sdio_slot_read(io, io->board->pins[index].reg) !=
-		    io->board->pins[index].target)
+		ums9117_sdio_slot_write(io, pin->reg, pin->target);
+		if (ums9117_sdio_slot_read(io, pin->reg) != pin->target)
 			return -EIO;
 	}
 	ret = ums9117_sdio_slot_set_rails(io, state, false);
@@ -525,8 +572,9 @@ int ums9117_sdio_slot_restore_platform(const struct ums9117_sdio_slot_io *io,
 		if (ret && !first_error)
 			first_error = ret;
 		for (index = 0; index < UMS9117_SDIO_SLOT_PIN_COUNT; ++index)
-			ums9117_sdio_slot_write(io, io->board->pins[index].reg,
-						state->pin_snapshot[index]);
+			ums9117_sdio_slot_write(
+				io, ums9117_sdio_slot_pins[index].reg,
+				state->pin_snapshot[index]);
 		value = ums9117_sdio_slot_read(
 			io, UMS9117_SDIO_SLOT_REG_CLOCK_SELECTOR);
 		value = (value & ~UMS9117_SDIO_SLOT_SELECTOR_MASK) |

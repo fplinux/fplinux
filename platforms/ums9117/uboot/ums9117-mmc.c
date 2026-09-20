@@ -11,6 +11,7 @@
 
 #include "stage0-handoff.h"
 #include "ums9117-mmc.h"
+#include "ums9117-sdio-slot.h"
 
 #ifndef CONFIG_SYS_DCACHE_OFF
 #error "UMS9117 MMC has no descriptor/data cache maintenance; CONFIG_SYS_DCACHE_OFF is required"
@@ -68,22 +69,22 @@ static void ums9117_controller_write(void *context, enum ums9117_sdio_reg reg,
 	writel(value, (void __iomem *)(uintptr_t)resource->address);
 }
 
-static u32 ums9117_board_read(void *context, enum ums9117_sdio_slot_reg reg)
+static u32 ums9117_slot_read(void *context, enum ums9117_sdio_slot_reg reg)
 {
-	const struct ums9117_mmc_priv *priv = context;
 	const struct ums9117_sdio_resource *resource =
-		ums9117_sdio_slot_board_resource(priv->io.board, reg);
+		ums9117_sdio_slot_resource(reg);
 
+	(void)context;
 	return readl((void __iomem *)(uintptr_t)resource->address);
 }
 
-static void ums9117_board_write(void *context, enum ums9117_sdio_slot_reg reg,
-				u32 value)
+static void ums9117_slot_write(void *context, enum ums9117_sdio_slot_reg reg,
+			       u32 value)
 {
-	const struct ums9117_mmc_priv *priv = context;
 	const struct ums9117_sdio_resource *resource =
-		ums9117_sdio_slot_board_resource(priv->io.board, reg);
+		ums9117_sdio_slot_resource(reg);
 
+	(void)context;
 	writel(value, (void __iomem *)(uintptr_t)resource->address);
 }
 
@@ -195,8 +196,8 @@ static const struct ums9117_sdio_slot_io sdio_io = {
 		.sleep_us = ums9117_sleep_us,
 		.data_barrier = ums9117_data_barrier,
 	},
-	.read = ums9117_board_read,
-	.write = ums9117_board_write,
+	.read = ums9117_slot_read,
+	.write = ums9117_slot_write,
 	.adi_begin = ums9117_adi_begin,
 	.adi_read = ums9117_adi_read,
 	.adi_write = ums9117_adi_write,
@@ -667,7 +668,6 @@ static int ums9117_mmc_probe(struct udevice *dev)
 
 	priv->io = sdio_io;
 	priv->io.context = priv;
-	priv->io.board = ums9117_uboot_sdio_board();
 	ret = ums9117_sdio_slot_snapshot(&priv->io, &priv->state);
 	if (ret)
 		return ret;
