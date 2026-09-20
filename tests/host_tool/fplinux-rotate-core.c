@@ -15,6 +15,11 @@ struct guarded_image {
 	uint8_t *allocation[2];
 };
 
+struct transform_case {
+	unsigned int rotation;
+	int mirror;
+};
+
 static int guarded_allocate(struct guarded_image *guarded,
 			    enum fplinux_rotate_format format, uint32_t width,
 			    uint32_t height, uint32_t padding)
@@ -188,6 +193,75 @@ static const uint8_t *literal_map(enum fplinux_rotate_format format,
 	return map;
 }
 
+struct expected_plane {
+	const uint8_t *source_indexes;
+	size_t index_count;
+	uint32_t source_width;
+	uint32_t source_left;
+	uint32_t source_top;
+	uint32_t destination_samples;
+	uint32_t destination_rows;
+	unsigned int sample_bytes;
+};
+
+static int
+destination_padding_is_untouched(const struct fplinux_rotate_image *destination,
+				 unsigned int plane, uint32_t rows,
+				 uint32_t active_row_bytes)
+{
+	uint32_t row;
+
+	for (row = 0; row < rows; ++row) {
+		uint32_t byte;
+
+		for (byte = active_row_bytes;
+		     byte < destination->plane[plane].stride; ++byte)
+			if (destination->plane[plane]
+				    .data[(size_t)row * destination->plane[plane]
+								.stride +
+					  byte] != DESTINATION_VALUE)
+				return 0;
+	}
+	return 1;
+}
+
+static int
+expected_plane_matches(const struct fplinux_rotate_image *source,
+		       const struct fplinux_rotate_image *destination,
+		       unsigned int plane,
+		       const struct expected_plane *expected)
+{
+	size_t index;
+
+	if (expected->index_count !=
+	    (size_t)expected->destination_samples * expected->destination_rows)
+		return 0;
+	for (index = 0; index < expected->index_count; ++index) {
+		uint32_t destination_y = index / expected->destination_samples;
+		uint32_t destination_x = index % expected->destination_samples;
+		uint32_t source_x = expected->source_indexes[index] %
+					    expected->source_width +
+				    expected->source_left;
+		uint32_t source_y = expected->source_indexes[index] /
+					    expected->source_width +
+				    expected->source_top;
+
+		if (memcmp(destination->plane[plane].data +
+				   (size_t)destination_y *
+					   destination->plane[plane].stride +
+				   destination_x * expected->sample_bytes,
+			   source->plane[plane].data +
+				   (size_t)source_y *
+					   source->plane[plane].stride +
+				   source_x * expected->sample_bytes,
+			   expected->sample_bytes) != 0)
+			return 0;
+	}
+	return destination_padding_is_untouched(
+		destination, plane, expected->destination_rows,
+		expected->destination_samples * expected->sample_bytes);
+}
+
 static int expected_matches(const struct fplinux_rotate_image *source,
 			    const struct fplinux_rotate_image *destination,
 			    const struct fplinux_rotate_transform *transform)
@@ -201,7 +275,6 @@ static int expected_matches(const struct fplinux_rotate_image *source,
 		uint32_t height = fplinux_rotate_plane_height(
 			destination->format, plane, destination->height);
 		uint32_t samples = plane == 1U ? width / 2U : width;
-		uint32_t row_bytes = samples * sample_bytes;
 		uint32_t source_width;
 		uint32_t source_left = plane == 1U ? transform->left / 2U :
 						     transform->left;
@@ -211,44 +284,23 @@ static int expected_matches(const struct fplinux_rotate_image *source,
 				transform->top;
 		const uint8_t *map;
 		size_t count;
-		size_t index;
+		struct expected_plane expected;
 
 		map = literal_map(source->format, plane, transform->rotation,
 				  transform->hflip, &count, &source_width);
-		if (count != (size_t)samples * height)
+		expected = (struct expected_plane){
+			.source_indexes = map,
+			.index_count = count,
+			.source_width = source_width,
+			.source_left = source_left,
+			.source_top = source_top,
+			.destination_samples = samples,
+			.destination_rows = height,
+			.sample_bytes = sample_bytes,
+		};
+		if (!expected_plane_matches(source, destination, plane,
+					    &expected))
 			return 0;
-		for (index = 0; index < count; ++index) {
-			uint32_t destination_y = index / samples;
-			uint32_t destination_x = index % samples;
-			uint32_t source_x =
-				map[index] % source_width + source_left;
-			uint32_t source_y =
-				map[index] / source_width + source_top;
-
-			if (memcmp(destination->plane[plane].data +
-					   (size_t)destination_y *
-						   destination->plane[plane]
-							   .stride +
-					   destination_x * sample_bytes,
-				   source->plane[plane].data +
-					   (size_t)source_y *
-						   source->plane[plane].stride +
-					   source_x * sample_bytes,
-				   sample_bytes) != 0)
-				return 0;
-		}
-		for (index = 0; index < height; ++index) {
-			uint32_t byte;
-
-			for (byte = row_bytes;
-			     byte < destination->plane[plane].stride; ++byte)
-				if (destination->plane[plane]
-					    .data[index * destination
-								  ->plane[plane]
-								  .stride +
-						  byte] != DESTINATION_VALUE)
-					return 0;
-		}
 	}
 	return 1;
 }
@@ -327,43 +379,20 @@ odd_nv16_expected_matches(const struct fplinux_rotate_image *source,
 		uint32_t output_rows = destination->height;
 		uint32_t source_left = plane == 0U ? transform->left :
 						     transform->left / 2U;
-		size_t index;
+		struct expected_plane expected = {
+			.source_indexes = indexes[plane],
+			.index_count = counts[plane],
+			.source_width = crop_samples,
+			.source_left = source_left,
+			.source_top = transform->top,
+			.destination_samples = output_samples,
+			.destination_rows = output_rows,
+			.sample_bytes = sample_bytes,
+		};
 
-		if (counts[plane] != (size_t)output_samples * output_rows)
+		if (!expected_plane_matches(source, destination, plane,
+					    &expected))
 			return 0;
-		for (index = 0; index < counts[plane]; ++index) {
-			uint32_t destination_y = index / output_samples;
-			uint32_t destination_x = index % output_samples;
-			uint32_t source_x =
-				indexes[plane][index] % crop_samples;
-			uint32_t source_y =
-				indexes[plane][index] / crop_samples;
-
-			if (memcmp(destination->plane[plane].data +
-					   (size_t)destination_y *
-						   destination->plane[plane]
-							   .stride +
-					   destination_x * sample_bytes,
-				   source->plane[plane].data +
-					   (size_t)(source_y + transform->top) *
-						   source->plane[plane].stride +
-					   (source_x + source_left) *
-						   sample_bytes,
-				   sample_bytes) != 0)
-				return 0;
-		}
-		for (index = 0; index < output_rows; ++index) {
-			uint32_t byte;
-
-			for (byte = output_samples * sample_bytes;
-			     byte < destination->plane[plane].stride; ++byte)
-				if (destination->plane[plane]
-					    .data[index * destination
-								  ->plane[plane]
-								  .stride +
-						  byte] != DESTINATION_VALUE)
-					return 0;
-		}
 	}
 	return 1;
 }
@@ -491,22 +520,30 @@ int main(void)
 		FPLINUX_ROTATE_GREY,   FPLINUX_ROTATE_NV12,
 		FPLINUX_ROTATE_NV16,
 	};
-	static const unsigned int rotations[] = { 90U, 180U, 270U };
+	static const struct transform_case regular_cases[] = {
+		{ 0U, 1 },
+		{ 90U, 0 },
+		{ 180U, 0 },
+		{ 270U, 0 },
+	};
 	unsigned int format;
-	unsigned int rotation;
+	unsigned int transform;
 
 	for (format = 0; format < sizeof(formats) / sizeof(formats[0]);
-	     ++format) {
-		if (!run_case(formats[format], 0, 1))
-			return EXIT_FAILURE;
-		for (rotation = 0;
-		     rotation < sizeof(rotations) / sizeof(rotations[0]);
-		     ++rotation)
-			if (!run_case(formats[format], rotations[rotation], 0))
+	     ++format)
+		for (transform = 0;
+		     transform <
+		     sizeof(regular_cases) / sizeof(regular_cases[0]);
+		     ++transform)
+			if (!run_case(formats[format],
+				      regular_cases[transform].rotation,
+				      regular_cases[transform].mirror))
 				return EXIT_FAILURE;
-	}
-	if (!run_odd_nv16_case(0, 1) || !run_odd_nv16_case(90, 0) ||
-	    !run_odd_nv16_case(180, 0) || !run_odd_nv16_case(270, 0))
-		return EXIT_FAILURE;
+	for (transform = 0;
+	     transform < sizeof(regular_cases) / sizeof(regular_cases[0]);
+	     ++transform)
+		if (!run_odd_nv16_case(regular_cases[transform].rotation,
+				       regular_cases[transform].mirror))
+			return EXIT_FAILURE;
 	return preview_conversion_is_stable() ? EXIT_SUCCESS : EXIT_FAILURE;
 }

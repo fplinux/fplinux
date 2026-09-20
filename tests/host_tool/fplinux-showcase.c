@@ -9,6 +9,23 @@
 
 #define GUARD_PIXELS 16U
 #define GUARD_VALUE 0xa55aU
+#define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
+
+enum expected_output_field {
+	EXPECT_KEYPAD = 1U << 0,
+	EXPECT_RUMBLE = 1U << 1,
+	EXPECT_CUE_ID = 1U << 2,
+	EXPECT_LCD_LEVEL = 1U << 3,
+};
+
+struct output_expectation {
+	uint32_t frame;
+	bool keypad;
+	bool rumble;
+	uint16_t cue_id;
+	int lcd_level;
+	unsigned int fields;
+};
 
 static uint64_t frame_hash(const uint16_t *pixels, size_t count)
 {
@@ -44,12 +61,81 @@ static int frame_has_detail(const uint16_t *pixels, size_t count)
 	return different > count / 16U;
 }
 
+static int output_cases_match(struct armada_scene *scene,
+			      const struct armada_metrics *metrics,
+			      const struct output_expectation *expectations,
+			      size_t count)
+{
+	size_t index;
+
+	for (index = 0; index < count; ++index) {
+		const struct output_expectation *expected =
+			&expectations[index];
+		struct armada_outputs actual;
+
+		armada_scene_render(scene, expected->frame, metrics, &actual);
+		if (((expected->fields & EXPECT_KEYPAD) &&
+		     actual.keypad != expected->keypad) ||
+		    ((expected->fields & EXPECT_RUMBLE) &&
+		     actual.rumble != expected->rumble) ||
+		    ((expected->fields & EXPECT_CUE_ID) &&
+		     actual.cue_id != expected->cue_id) ||
+		    ((expected->fields & EXPECT_LCD_LEVEL) &&
+		     actual.lcd_level != expected->lcd_level))
+			return 0;
+	}
+	return 1;
+}
+
 static int render_case(unsigned int width, unsigned int height)
 {
 	static const uint32_t frames[] = {
 		0U,   42U,   43U,   44U,   45U,	  45U,	 58U,	42U,
 		120U, 210U,  390U,  570U,  660U,  720U,	 720U,	726U,
 		930U, 1020U, 1051U, 1031U, 1032U, 1033U, 1080U, 1139U,
+	};
+	static const struct output_expectation output_expectations[] = {
+		{ .frame = 600U,
+		  .lcd_level = 6,
+		  .fields = EXPECT_KEYPAD | EXPECT_RUMBLE | EXPECT_LCD_LEVEL },
+		{ .frame = 720U,
+		  .keypad = true,
+		  .rumble = true,
+		  .cue_id = 1U,
+		  .lcd_level = 6,
+		  .fields = EXPECT_KEYPAD | EXPECT_RUMBLE | EXPECT_CUE_ID |
+			    EXPECT_LCD_LEVEL },
+		{ .frame = 723U,
+		  .lcd_level = 6,
+		  .fields = EXPECT_KEYPAD | EXPECT_RUMBLE | EXPECT_CUE_ID |
+			    EXPECT_LCD_LEVEL },
+		{ .frame = 726U,
+		  .keypad = true,
+		  .rumble = true,
+		  .cue_id = 2U,
+		  .fields = EXPECT_KEYPAD | EXPECT_RUMBLE | EXPECT_CUE_ID },
+		{ .frame = 740U,
+		  .keypad = true,
+		  .rumble = true,
+		  .cue_id = 3U,
+		  .fields = EXPECT_KEYPAD | EXPECT_RUMBLE | EXPECT_CUE_ID },
+		{ .frame = 756U,
+		  .keypad = true,
+		  .rumble = true,
+		  .cue_id = 5U,
+		  .fields = EXPECT_KEYPAD | EXPECT_RUMBLE | EXPECT_CUE_ID },
+		{ .frame = 938U,
+		  .keypad = true,
+		  .rumble = true,
+		  .cue_id = 23U,
+		  .fields = EXPECT_KEYPAD | EXPECT_RUMBLE | EXPECT_CUE_ID },
+		{ .frame = 939U,
+		  .fields = EXPECT_KEYPAD | EXPECT_RUMBLE | EXPECT_CUE_ID },
+		{ .frame = 0U, .lcd_level = 10, .fields = EXPECT_LCD_LEVEL },
+		{ .frame = 285U, .lcd_level = 6, .fields = EXPECT_LCD_LEVEL },
+		{ .frame = 570U, .lcd_level = 6, .fields = EXPECT_LCD_LEVEL },
+		{ .frame = 855U, .lcd_level = 6, .fields = EXPECT_LCD_LEVEL },
+		{ .frame = 1139U, .lcd_level = 10, .fields = EXPECT_LCD_LEVEL },
 	};
 	struct armada_metrics metrics = {
 		.average_fps_tenths = 300,
@@ -105,51 +191,13 @@ static int render_case(unsigned int width, unsigned int height)
 			goto fail;
 	}
 	{
-		struct armada_outputs quiet;
-		struct armada_outputs pulse;
-		struct armada_outputs gap;
-		struct armada_outputs second_dot;
-		struct armada_outputs dash_end;
-		struct armada_outputs letter_start;
-		struct armada_outputs final_signal;
-		struct armada_outputs after_morse;
-		struct armada_outputs first_noon;
-		struct armada_outputs sunset;
-		struct armada_outputs midnight;
-		struct armada_outputs sunrise;
-		struct armada_outputs next_noon;
 		struct armada_outputs first;
 		struct armada_outputs wrapped;
 		uint64_t first_hash;
 		uint64_t wrapped_hash;
 
-		armada_scene_render(scene, 600U, &metrics, &quiet);
-		armada_scene_render(scene, 720U, &metrics, &pulse);
-		armada_scene_render(scene, 723U, &metrics, &gap);
-		armada_scene_render(scene, 726U, &metrics, &second_dot);
-		armada_scene_render(scene, 740U, &metrics, &dash_end);
-		armada_scene_render(scene, 756U, &metrics, &letter_start);
-		armada_scene_render(scene, 938U, &metrics, &final_signal);
-		armada_scene_render(scene, 939U, &metrics, &after_morse);
-		armada_scene_render(scene, 0U, &metrics, &first_noon);
-		armada_scene_render(scene, 285U, &metrics, &sunset);
-		armada_scene_render(scene, 570U, &metrics, &midnight);
-		armada_scene_render(scene, 855U, &metrics, &sunrise);
-		armada_scene_render(scene, 1139U, &metrics, &next_noon);
-		if (quiet.keypad || quiet.rumble || quiet.lcd_level != 6 ||
-		    !pulse.keypad || !pulse.rumble || pulse.cue_id != 1U ||
-		    pulse.lcd_level != 6 || gap.keypad || gap.rumble ||
-		    gap.cue_id != 0U || gap.lcd_level != 6 ||
-		    !second_dot.keypad || !second_dot.rumble ||
-		    second_dot.cue_id != 2U || !dash_end.keypad ||
-		    !dash_end.rumble || dash_end.cue_id != 3U ||
-		    !letter_start.keypad || !letter_start.rumble ||
-		    letter_start.cue_id != 5U || !final_signal.keypad ||
-		    !final_signal.rumble || final_signal.cue_id != 23U ||
-		    after_morse.keypad || after_morse.rumble ||
-		    after_morse.cue_id != 0U || first_noon.lcd_level != 10 ||
-		    sunset.lcd_level != 6 || midnight.lcd_level != 6 ||
-		    sunrise.lcd_level != 6 || next_noon.lcd_level != 10)
+		if (!output_cases_match(scene, &metrics, output_expectations,
+					ARRAY_SIZE(output_expectations)))
 			goto fail;
 		memset(pixels, 0, count * sizeof(*pixels));
 		armada_scene_render(scene, 0U, &metrics, &first);
