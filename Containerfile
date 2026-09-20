@@ -115,7 +115,8 @@ RUN set -eux; \
         shellcheck=0.11.0-r1 \
         shfmt=3.13.1-r2 \
         taplo=0.10.0-r0 \
-        vale=3.13.0-r7
+        vale=3.13.0-r7 \
+        yamllint=1.38.0-r0
 
 RUN set -eux; \
     mkdir -p /opt/quality/bin /tmp/quality; \
