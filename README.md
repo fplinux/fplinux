@@ -112,7 +112,7 @@ the target.
 ## Hardware support
 
 Hardware claims in target documents distinguish physical-device observations from
-source-build and upstream evidence. Release qualification is recorded
+source-build and upstream evidence. Phone-tested release status is recorded
 separately for one exact executable payload.
 
 ## License

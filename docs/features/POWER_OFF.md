@@ -1,8 +1,8 @@
 # Power-off
 
 The shared SC2720 power-off interface requests an orderly Linux shutdown while
-external charger input is absent. Use the sequence below only on a target
-that qualifies battery-only power-off. Check the selected phone's
+external charger input is absent. Use the sequence below only on a target whose
+documentation lists battery-only power-off as supported. Check the selected phone's
 documentation, or `README.txt` in a standalone archive, for its support status
 and physical power key.
 

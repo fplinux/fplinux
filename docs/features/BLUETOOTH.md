@@ -146,7 +146,8 @@ In a standalone archive, the top-level `README.txt` identifies those pages.
 Finish OPP transfers and stop the foreground PAN command before sleeping.
 Wait until the peer is disconnected. A connected link or busy controller
 causes the sleep request to fail rather than tearing down the link. Use the
-phone's supported key or RTC alarm to wake it; Bluetooth wake is not qualified.
+phone's supported key or RTC alarm to wake it; wake over Bluetooth has not been
+tested.
 
 ## Limits and persistence
 
@@ -155,4 +156,4 @@ phone's supported key or RTC alarm to wake it; Bluetooth wake is not qualified.
   temporary RAM files still disappear. Save needed files to persistent storage.
 - Bluetooth use does not write the phone's NAND or NV storage.
 - Warm controller restart, BLE, Bluetooth audio, HID, range, wake over
-  Bluetooth and deep suspend are not qualified.
+  Bluetooth and deep suspend have not been tested.

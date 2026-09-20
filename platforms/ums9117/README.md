@@ -51,8 +51,8 @@ completed-segment granularity, not as a live byte counter.
 A configuration error aborts the active and queued transfers with `DMA_ERROR`
 and `DMA_TRANS_ABORTED`. Release and request the channel again before reusing it.
 If the controller cannot be stopped, termination returns an error; the client
-must retain its DMA buffers until a cold boot. Error recovery is qualified for
-the source-alignment fault; other hardware fault conditions are unqualified.
+must retain its DMA buffers until a cold boot. Recovery from a source-alignment
+fault has been tested; other hardware fault conditions have not.
 
 Framebuffer DMA copies, when enabled by the target, and ROTA use one channel
 each. They share the same DMA controller owner. This does not change the
@@ -97,7 +97,7 @@ setup remain target-owned.
 | [`nokia-ta1618`](../../targets/nokia-ta1618/README.md)             | Nokia 3210 4G (TA-1618) |
 
 Platform status covers shared capabilities; target documents own board-specific
-status. Neither is release qualification.
+status. Neither makes an executable payload release-ready.
 
 See the [hardware platform index](../README.md), the
 [porting overview](../../docs/porting/README.md), and the project

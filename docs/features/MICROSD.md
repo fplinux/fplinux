@@ -2,7 +2,7 @@
 
 Use this interface in the default RAM profile on a phone with supported
 microSD storage. The selected target's documentation states which filesystems
-and card-removal behavior are qualified; sharing this interface does not
+and card-removal behavior are supported; sharing this interface does not
 establish support on another phone. In a standalone archive, consult its
 `README.txt` for the target's support status.
 
@@ -52,10 +52,10 @@ sync
 umount /mnt/card
 ```
 
-Only targets that qualify unmounted hot-swap support removal and reinsertion
-without restarting Linux. Never remove a mounted card or a card with active
-swap. Removal during a write, filesystem repair, erase or discard is not a
-supported workflow.
+Only targets whose documentation lists unmounted hot-swap as supported allow
+removal and reinsertion without restarting Linux. Never remove a mounted card
+or a card with active swap. Removal during a write, filesystem repair, erase or
+discard is not a supported workflow.
 
 Card detection is polled. Wait for the block node to appear or disappear; no
 exact detection delay is part of the supported interface.

@@ -399,7 +399,7 @@ def main() -> None:
     package_parser.add_argument(
         "--candidate",
         action="store_true",
-        help="create a clearly marked hardware-qualification candidate",
+        help="create a clearly marked phone-test candidate",
     )
     prune_parser = commands.add_parser(
         "prune", help="show a safe cache-prune inventory or apply it"

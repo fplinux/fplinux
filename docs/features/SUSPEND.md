@@ -1,6 +1,6 @@
 # Suspend
 
-FPLinux uses Linux s2idle on targets and profiles that qualify suspend. Check
+FPLinux uses Linux s2idle on targets and profiles where suspend is supported. Check
 the selected phone's documentation, or `README.txt` in a standalone archive,
 for supported storage conditions and wake sources before sleeping. s2idle
 preserves the running system, but it is not deep suspend-to-RAM and does not
@@ -12,8 +12,8 @@ Enter s2idle from a root shell:
 echo freeze > /sys/power/state
 ```
 
-The display and USB gadget turn off before sleep. Use the phone's qualified
-power key or an armed normal [RTC alarm](RTC.md) to wake it. The USB gadget
+The display and USB gadget turn off before sleep. Use the phone's documented
+wake-capable power key or an armed normal [RTC alarm](RTC.md) to wake it. The USB gadget
 reconnects after wake, and a display that was active before sleep turns on
 again. A display that was already blank stays blank.
 
@@ -24,7 +24,7 @@ before sleep and is not resumed after wake.
 
 A mounted data card, active card-backed swap in the RAM profile, and the
 [microSD system root](../guides/MICROSD_ROOT.md) can remain in use across s2idle
-where the target qualifies that storage condition. Keep the card installed
+where the target documentation lists that storage condition as supported. Keep the card installed
 throughout sleep and wake. Suspend is not a safe-removal or shutdown procedure.
 
 [Bluetooth](BLUETOOTH.md#suspend) can remain powered

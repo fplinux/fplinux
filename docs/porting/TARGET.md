@@ -31,7 +31,8 @@ Keep hardware presence separate from FPLinux support:
   software-only capability. Absence requires evidence for this exact variant;
   a missing driver or DTS node does not prove it.
 - **FPLinux:** **Supported** when implemented and exercised on this exact phone,
-  **Partial** when an exercised limitation or qualification gap remains,
+  **Partial** when an exercised limitation remains or relevant physical behavior
+  has not been checked,
   **Not supported** when the current target provides no supported path,
   **Unknown** when current support or validation has not been established, or
   **N/A** when the capability does not apply.
@@ -104,11 +105,12 @@ target-specific persistent-storage limitation in the status or feature table.
 Keep only actions and limits that differ for this phone: for example a supported
 removable-storage lifecycle, a display-size limitation, backlight control or a
 safe power-off procedure. Common interfaces and their limits belong in
-`docs/features/`; target device names, brightness ranges and physical support
-remain in the target README. Common console controls, application controls, SSH,
-file transfer and host-keyboard behavior belong in their shared pages. Do not
-include register descriptions, configuration listings, implementation maps,
-cache paths or build internals.
+`docs/features/`; target-specific device names, brightness ranges and physical
+support remain in the target README only when the device itself is
+target-specific, such as a panel, backlight or keypad. Common console controls,
+application controls, SSH, file transfer and host-keyboard behavior belong in
+their shared pages. Do not include register descriptions, configuration
+listings, implementation maps, cache paths or build internals.
 
 Give a substantial target-only function its own file under
 `targets/<target>/features/` and link it from the status table. That file owns
@@ -122,7 +124,7 @@ vendor firmware. State unsupported reboot or power-off behavior plainly.
 
 ## Release boundary
 
-Explain that target support alone does not qualify an executable payload and
-that a locally packaged candidate is not a release. Link to
+Explain that target support alone does not make an executable payload
+release-ready and that a locally packaged candidate is not a release. Link to
 [Release archives](../../docs/guides/RELEASES.md) for current availability and the
-qualification boundary instead of copying that information here.
+phone-test boundary instead of copying that information here.

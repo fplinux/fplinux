@@ -16,8 +16,8 @@ visible light.
 
 The levels are raw board-specific current steps, not percentages or calibrated
 optical units. The range and physical effect differ by phone; an available
-brightness interface does not establish that its levels are physically
-qualified. FPLinux does not provide automatic brightness control.
+brightness interface does not demonstrate that its levels visibly change the
+screen. FPLinux does not provide automatic brightness control.
 
 ## Power and display lifecycle
 

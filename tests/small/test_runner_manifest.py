@@ -43,7 +43,7 @@ class PythonRuntimeTests(unittest.TestCase):
         RUNNER.host_preflight()
 
     def test_rejects_other_python_series(self) -> None:
-        """Older and unqualified newer interpreters fail before phone access."""
+        """Older and unsupported newer interpreters fail before phone access."""
         for major, minor in ((3, 13), (3, 15)):
             with (
                 self.subTest(version=f"{major}.{minor}"),

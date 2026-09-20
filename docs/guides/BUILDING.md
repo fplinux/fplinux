@@ -180,7 +180,7 @@ not establish hardware support.
 
 Default and microSD builds keep separate current bundles and work state. A
 microSD build cannot replace the default bundle. Non-default archives currently
-require `--candidate`; candidate packaging is not physical qualification.
+require `--candidate`; candidate packaging does not test the image on a phone.
 
 The microSD build produces a partitioned `FPLINUX.img.xz`, containing a SHA-256
 FIT on FAT32 and an ext4 system root. Building never writes removable media.
@@ -300,8 +300,8 @@ entries are cache misses and are not migrated.
 
 A successful build proves that the current checkout produced the selected
 bundle. It does not prove that the image boots or that a hardware feature works
-on a phone. Target documents record feature-level qualification and limitations.
+on a phone. Target documents record current feature support and limitations.
 
-See [Release archives](RELEASES.md) to create a physical-qualification
-candidate. To use the result on a phone, continue with
+See [Release archives](RELEASES.md) to create a phone-test candidate. To use the
+result on a phone, continue with
 [Loading from a source checkout](LOADING.md).

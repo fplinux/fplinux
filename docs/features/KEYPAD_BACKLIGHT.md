@@ -2,8 +2,8 @@
 
 The keypad backlight is exposed as the binary Linux LED-class device
 `/sys/class/leds/:kbd_backlight`. The selected
-[target's documentation](../../targets/README.md) states whether its physical
-light is qualified. A standalone archive carries that status in `README.txt`.
+[target's documentation](../../targets/README.md) states whether the physical
+light works. A standalone archive carries that status in `README.txt`.
 
 ## Interface
 
