@@ -45,11 +45,18 @@
 #define UMS9117_ADI_USER_LOCK_RELEASE 0x5348554cU
 #define UMS9117_ADI_POLL_BUDGET_US 3000U
 
+#define SC2720_XTL_WAIT_CTRL0 0xde8U
+#define SC2720_XTL_WAIT_CTRL0_EN BIT(8)
+
 static void __iomem *adi_controller;
 static void __iomem *analog_slave;
 static DEFINE_RAW_SPINLOCK(adi_lock);
 static bool adi_ready;
 static bool adi_poisoned;
+/* The ADI transaction lock protects the shared 26 MHz output request. */
+static unsigned int adi_xtal_users;
+static bool adi_xtal_owned;
+static bool adi_xtal_failed;
 
 struct ums9117_adi_initial_state {
 	u32 mst_pril;
@@ -359,6 +366,92 @@ int ums9117_adi_update_bits(struct ums9117_adi_transaction *transaction,
 				 (old_value & ~mask) | (value & mask));
 }
 EXPORT_SYMBOL_GPL(ums9117_adi_update_bits);
+
+int ums9117_adi_xtal_acquire(bool *held)
+{
+	struct ums9117_adi_transaction transaction = {};
+	u16 value;
+	int ret;
+	int end_ret;
+
+	if (!held)
+		return -EINVAL;
+	ret = ums9117_adi_begin(&transaction);
+	if (ret)
+		return ret;
+	if (adi_xtal_failed) {
+		ret = -EIO;
+		goto end;
+	}
+	if (*held)
+		goto end;
+	if (!adi_xtal_users) {
+		ret = ums9117_adi_read(&transaction, SC2720_XTL_WAIT_CTRL0,
+				       &value);
+		if (ret)
+			goto end;
+		if (!(value & SC2720_XTL_WAIT_CTRL0_EN)) {
+			ret = ums9117_adi_write(
+				&transaction, SC2720_XTL_WAIT_CTRL0,
+				value | SC2720_XTL_WAIT_CTRL0_EN);
+			if (ret) {
+				/* An unverified write must not become inherited state. */
+				adi_xtal_failed = true;
+				goto end;
+			}
+			adi_xtal_owned = true;
+		}
+	}
+	adi_xtal_users++;
+	*held = true;
+
+end:
+	end_ret = ums9117_adi_end(&transaction);
+	return ret ? ret : end_ret;
+}
+EXPORT_SYMBOL_GPL(ums9117_adi_xtal_acquire);
+
+int ums9117_adi_xtal_release(bool *held)
+{
+	struct ums9117_adi_transaction transaction = {};
+	u16 value;
+	int ret;
+	int end_ret;
+
+	if (!held)
+		return -EINVAL;
+	ret = ums9117_adi_begin(&transaction);
+	if (ret)
+		return ret;
+	if (!*held)
+		goto end;
+	if (adi_xtal_failed) {
+		ret = -EIO;
+		goto end;
+	}
+	if (adi_xtal_users == 1 && adi_xtal_owned) {
+		ret = ums9117_adi_read(&transaction, SC2720_XTL_WAIT_CTRL0,
+				       &value);
+		if (ret)
+			goto end;
+		ret = ums9117_adi_write(&transaction, SC2720_XTL_WAIT_CTRL0,
+					value & ~SC2720_XTL_WAIT_CTRL0_EN);
+		if (ret) {
+			/* A failed clear leaves the output state unconfirmed. */
+			adi_xtal_failed = true;
+			goto end;
+		}
+	}
+	adi_xtal_users--;
+	if (!adi_xtal_users)
+		adi_xtal_owned = false;
+	*held = false;
+
+end:
+	end_ret = ums9117_adi_end(&transaction);
+	return ret ? ret : end_ret;
+}
+EXPORT_SYMBOL_GPL(ums9117_adi_xtal_release);
 
 int ums9117_adi_write_final(struct ums9117_adi_transaction *transaction,
 			    u32 offset, u16 value)
