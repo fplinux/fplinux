@@ -15,8 +15,9 @@
 This exact phone runs a local `240×320` console with adjustable LCD backlight,
 its physical keypad and backlight, the private USB session, removable microSD
 storage, a USB-loaded microSD system root, charger status, partial telemetry,
-RTC time reading and setting, one-shot alarms and battery-only power-off.
-Its vibrator is available through the standard Linux force-feedback interface.
+RTC time reading and setting, one-shot alarms, stereo headphone PCM and
+battery-only power-off. Its vibrator is available through the standard Linux
+force-feedback interface.
 
 Status terms and limits shared by every phone are defined in the
 [target index](../README.md#status-and-common-limits).
@@ -28,7 +29,7 @@ Status terms and limits shared by every phone are defined in the
 | RAM boot                                                          | N/A      | Supported     | —                                                                                                                                           |
 | Persistent boot                                                   | N/A      | Not supported | The RAM bootstrap must be loaded over USB for every Linux boot.                                                                             |
 | [Local console](../../docs/features/LOCAL_CONSOLE.md)             | Present  | Supported     | `240×320`; AP DMA framebuffer copies.                                                                                                       |
-| [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)         | Present  | Supported     | Eleven levels from off through the qualified maximum.                                                                                       |
+| [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)         | Present  | Supported     | Eleven levels from off through the tested maximum.                                                                                          |
 | [Keypad backlight](../../docs/features/KEYPAD_BACKLIGHT.md)       | Present  | Supported     | Binary LED control plus a bounded key-press light.                                                                                          |
 | [USB networking](../../docs/features/USB_NETWORKING.md)           | Present  | Supported     | —                                                                                                                                           |
 | [SSH access](../../docs/features/SSH.md)                          | N/A      | Supported     | —                                                                                                                                           |
@@ -42,8 +43,8 @@ Status terms and limits shared by every phone are defined in the
 | USB host mode                                                     | Unknown  | Not supported | —                                                                                                                                           |
 | [Removable storage](../../docs/features/MICROSD.md)               | Present  | Supported     | microSD FAT32 read/write and unmounted hot-swap are exercised.                                                                              |
 | [Removable system root](../../docs/guides/MICROSD_ROOT.md)        | Present  | Supported     | microSD FAT32 FIT plus writable ext4; the system card stays installed.                                                                      |
-| Internal phone storage                                            | Present  | Not supported | Default and release workflows expose none. The Bluetooth preparation path is a separate read-only diagnostic.                               |
-| Audio                                                             | Present  | Not supported | —                                                                                                                                           |
+| Internal phone storage                                            | Present  | Not supported | Normal builds and runs do not read or expose NAND; fitted-data preparation is separate and read-only.                                       |
+| [Headphone audio](../../docs/features/HEADPHONE_AUDIO.md)         | Present  | Partial       | Stereo S16_LE playback and fitted gain levels; stock VBC EQ is not implemented, so output uses the flat Linux path.                         |
 | Modem and mobile service                                          | Present  | Not supported | —                                                                                                                                           |
 | [Bluetooth](../../docs/features/BLUETOOTH.md)                     | Present  | Partial       | BR/EDR pairing, bidirectional OPP and PAN Internet in both profiles; requires firmware from this phone.                                     |
 | Wi-Fi                                                             | Unknown  | Not supported | —                                                                                                                                           |
@@ -74,29 +75,22 @@ Status terms and limits shared by every phone are defined in the
 ## Hardware interfaces
 
 The `240×320` `ST7789P3` panel uses SPI with interrupt-driven transfer completion.
-LCD levels `1` through `10` increase monotonically up to the qualified maximum;
+LCD levels `1` through `10` increase monotonically up to the tested maximum;
 `10` is the default. They are raw current steps rather than percentages or
 calibrated optical units.
 
-Use these identifiers with the linked shared interfaces. Numeric IIO, thermal
-and input-device indices are assigned at boot.
+The target-specific [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)
+is `/sys/class/backlight/ta1618-backlight`. Shared feature pages document the
+common power, sensor, audio and vibration identifiers.
 
-| Interface                                                     | Identifier on this phone                 |
-| ------------------------------------------------------------- | ---------------------------------------- |
-| [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)     | `/sys/class/backlight/ta1618-backlight`  |
-| [Battery telemetry](../../docs/features/BATTERY_TELEMETRY.md) | `/sys/class/power_supply/sc2720-battery` |
-| [Charger status](../../docs/features/CHARGER_STATUS.md)       | `/sys/class/power_supply/sc2720-charger` |
-| [Auxiliary ADC](../../docs/features/AUXADC.md)                | IIO `name`: `sc2720-auxadc`              |
-| [SoC temperature](../../docs/features/SOC_TEMPERATURE.md)     | Thermal-zone `type`: `ums9117-thm1`      |
-| [Vibration](../../docs/features/VIBRATION.md)                 | Input name: `SC2720 vibrator`            |
-
-## Bluetooth
+## Fitted device data
 
 Both profiles use the shared
-[Bluetooth preparation procedure](../../docs/guides/BUILDING.md#prepare-device-data)
-with firmware from this exact phone. See the shared
-[Bluetooth limits](../../docs/features/BLUETOOTH.md#limits-and-persistence)
-for peer compatibility, persistence and unqualified features.
+[device-data preparation procedure](../../docs/guides/BUILDING.md#prepare-device-data)
+with a NAND backup from this exact phone. One acquisition prepares the Bluetooth
+group and fitted headphone gain profile. See the shared
+[Bluetooth limits](../../docs/features/BLUETOOTH.md#limits-and-persistence) and
+[headphone audio behavior](../../docs/features/HEADPHONE_AUDIO.md).
 
 ## Load into RAM
 
@@ -120,6 +114,6 @@ wakes the phone from s2idle; `8` and the matrix keypad do not wake it.
 
 ## Release boundary
 
-Feature support above does not qualify an executable payload. A locally
+Feature support above does not make an executable payload release-ready. A locally
 packaged candidate is not a release; see
 [Release archives](../../docs/guides/RELEASES.md).

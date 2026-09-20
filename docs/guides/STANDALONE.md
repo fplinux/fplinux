@@ -86,20 +86,32 @@ power. Reopen a shell on a still-running phone with:
 
 For details, use the bundled pages:
 
-- [local console](../features/LOCAL_CONSOLE.md);
-- [LCD backlight](../features/DISPLAY_BACKLIGHT.md) and
-  [keypad backlight](../features/KEYPAD_BACKLIGHT.md);
+### Access and file transfer
+
 - [USB networking](../features/USB_NETWORKING.md);
 - [SSH access](../features/SSH.md);
 - [file transfer](../features/FILE_TRANSFER.md);
-- [host keyboard forwarding](../features/HOST_KEYBOARD.md);
-- [CPU clock reporting](../features/CPU_CLOCK.md);
 - [Bluetooth](../features/BLUETOOTH.md), on supported targets with prepared firmware;
+
+### Local interface
+
+- [local console](../features/LOCAL_CONSOLE.md);
+- [host keyboard forwarding](../features/HOST_KEYBOARD.md);
+- [headphone audio](../features/HEADPHONE_AUDIO.md), on supported phones;
+- [LCD backlight](../features/DISPLAY_BACKLIGHT.md) and
+  [keypad backlight](../features/KEYPAD_BACKLIGHT.md);
+- [vibration](../features/VIBRATION.md), subject to the phone's physical limits;
+
+### Hardware telemetry
+
+- [CPU clock reporting](../features/CPU_CLOCK.md);
 - [charger status](../features/CHARGER_STATUS.md),
   [battery telemetry](../features/BATTERY_TELEMETRY.md),
   [SoC temperature](../features/SOC_TEMPERATURE.md) and
   [auxiliary ADC](../features/AUXADC.md);
-- [vibration](../features/VIBRATION.md), subject to the phone's physical limits;
+
+### Applications and packages
+
 - [installing and removing optional APK packages](APK_PACKAGES.md);
 - [FPLinux: ARMADA](../apps/SHOWCASE.md);
 - [TyrQuake](../apps/TYRQUAKE.md);

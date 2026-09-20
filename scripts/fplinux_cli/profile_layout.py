@@ -106,10 +106,18 @@ def root_bootargs_dtsi(root: Mapping[str, Any]) -> bytes:
         message = "unsupported Linux root filesystem kind"
         raise ValueError(message)
     # A pageblock-sized watermark boost can strand usable RAM on these phones.
+    # Drawing a kernel message on the phone's own screen keeps interrupts
+    # disabled for several milliseconds, which is longer than the playback
+    # hardware can run unattended. Boot messages stay visible, but the running
+    # system keeps the message level it selects.
+    # Tracing costs nothing until it is switched on, and then it claims its
+    # buffer twice over. The default claim is 2.75 MB on these phones, which a
+    # loaded system cannot spare, so the buffer a tracer grows into is sized for
+    # the machine; callers that need more still ask for it explicitly.
     bootargs = (
-        f"console=tty0 loglevel=8 ignore_loglevel {root_arguments} "
+        f"console=tty0 loglevel=8 {root_arguments} "
         "panic=-1 vt.global_cursor_default=1 random.trust_bootloader=on "
-        "sysctl.vm.watermark_boost_factor=0"
+        "sysctl.vm.watermark_boost_factor=0 trace_buf_size=256K"
     )
     return f'bootargs = "{bootargs}";\n'.encode("ascii")
 

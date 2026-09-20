@@ -24,6 +24,8 @@ unless an individual file carries a different SPDX identifier.
 | GLib 2.88.1                     | Core library for the BlueZ daemons             | LGPL-2.1-or-later; upstream release archive built without GIO, GObject or introspection |
 | apk-tools 3.0.6                 | Package manager for optional APKs              | GPL-2.0-only; upstream release archive built with Mbed TLS instead of OpenSSL           |
 | Mbed TLS 3.6                    | apk-tools digest and signature library         | Apache-2.0 OR GPL-2.0-or-later; supplied by the pinned Alpine package set               |
+| ALSA utils 1.2.15.2             | Headphone playback and mixer tools             | GPL-2.0-or-later; upstream aplay and amixer built by the audio aport                    |
+| ALSA library 1.2.15.3           | PCM conversion and mixer interface             | LGPL-2.1-or-later; supplied by the pinned Alpine package set                            |
 | TyrQuake 0.71                   | Quake engine for FPLinux                       | GPL-2.0-or-later; bundled decoders use MIT-0, CC0-1.0 and MIT                           |
 | MicroPythonOS 0.16.2 stack      | Optional graphical runtime and applications    | GPL-2.0-only, MIT, OFL-1.1, Zlib and bundled custom notices                             |
 | BusyBox                         | Shell and base userspace applets               | GPL-2.0-only; supplied by the pinned Alpine package set                                 |

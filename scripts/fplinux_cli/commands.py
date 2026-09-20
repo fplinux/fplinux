@@ -109,6 +109,7 @@ PACKAGE_DOCUMENTS = {
     "docs/features/CPU_CLOCK.md": ROOT / "docs/features/CPU_CLOCK.md",
     "docs/features/DISPLAY_BACKLIGHT.md": ROOT / "docs/features/DISPLAY_BACKLIGHT.md",
     "docs/features/FILE_TRANSFER.md": ROOT / "docs/features/FILE_TRANSFER.md",
+    "docs/features/HEADPHONE_AUDIO.md": ROOT / "docs/features/HEADPHONE_AUDIO.md",
     "docs/features/HOST_KEYBOARD.md": ROOT / "docs/features/HOST_KEYBOARD.md",
     "docs/features/KEYPAD_BACKLIGHT.md": ROOT / "docs/features/KEYPAD_BACKLIGHT.md",
     "docs/features/LOCAL_CONSOLE.md": ROOT / "docs/features/LOCAL_CONSOLE.md",

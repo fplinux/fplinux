@@ -89,6 +89,19 @@
 
 #include "ums9117-ram-session.dtsi"
 
+&audio {
+	firmware-name = "fplinux/ta1618-audio-profile.bin";
+	fplinux,pad-settings = <
+		0x00 0 0x0008e001
+		0x08 0 0x0008e001
+		0x0c 0 0x0008e001
+		0x1c 0 0x0008e001
+	>;
+	fplinux,card-longname = "Nokia TA-1618 headphone output";
+	fplinux,idle-silence;
+	status = "okay";
+};
+
 &sc2720_fgu {
 	fplinux,current-calibration = <10 20>;
 };
