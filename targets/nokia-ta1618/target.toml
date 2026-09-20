@@ -49,22 +49,6 @@ source = "dts/bluetooth.dtsi"
 destination = "arch/arm/boot/dts/unisoc/nokia-ta1618-bluetooth.dtsi"
 
 [[linux.copies]]
-source = "kernel/ta1618-mmc-linux.c"
-destination = "drivers/mmc/host/ta1618-mmc-linux.c"
-
-[[linux.copies]]
-source = "common/ta1618-sdio-board.h"
-destination = "drivers/mmc/host/ta1618-sdio-board.h"
-
-[[linux.copies]]
-source = "common/ta1618-sdio-board.c"
-destination = "drivers/mmc/host/ta1618-sdio-board.c"
-
-[[linux.copies]]
-source = "bindings/fplinux,ta1618-mmc.yaml"
-destination = "Documentation/devicetree/bindings/mmc/fplinux,ta1618-mmc.yaml"
-
-[[linux.copies]]
 source = "kernel/ta1618-fb.c"
 destination = "drivers/video/fbdev/ta1618-fb.c"
 
@@ -127,15 +111,3 @@ patches = []
 [[microsd.uboot.copies]]
 source = "targets/nokia-ta1618/uboot/ums9117-ta1618-u-boot.dts"
 destination = "arch/arm/dts/ums9117-ta1618-u-boot.dts"
-
-[[microsd.uboot.copies]]
-source = "targets/nokia-ta1618/uboot/slot.c"
-destination = "board/fplinux/ums9117/slot.c"
-
-[[microsd.uboot.copies]]
-source = "targets/nokia-ta1618/common/ta1618-sdio-board.h"
-destination = "board/fplinux/ums9117/ta1618-sdio-board.h"
-
-[[microsd.uboot.copies]]
-source = "targets/nokia-ta1618/common/ta1618-sdio-board.c"
-destination = "board/fplinux/ums9117/sdio-board.c"

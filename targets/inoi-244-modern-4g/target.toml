@@ -50,26 +50,6 @@ destination = "arch/arm/boot/dts/unisoc/inoi-244-modern-4g-bluetooth.dtsi"
 source = "kernel/inoi244-fb.c"
 destination = "drivers/video/fbdev/inoi244-fb.c"
 
-[[linux.copies]]
-source = "dts/microsd.dtsi"
-destination = "arch/arm/boot/dts/unisoc/inoi-244-modern-4g-microsd.dtsi"
-
-[[linux.copies]]
-source = "kernel/inoi244-mmc-linux.c"
-destination = "drivers/mmc/host/inoi244-mmc-linux.c"
-
-[[linux.copies]]
-source = "common/inoi244-sdio-board.h"
-destination = "drivers/mmc/host/inoi244-sdio-board.h"
-
-[[linux.copies]]
-source = "common/inoi244-sdio-board.c"
-destination = "drivers/mmc/host/inoi244-sdio-board.c"
-
-[[linux.copies]]
-source = "bindings/fplinux,inoi244-mmc.yaml"
-destination = "Documentation/devicetree/bindings/mmc/fplinux,inoi244-mmc.yaml"
-
 [[linux.appends]]
 source = "kernel/Kconfig"
 destination = "arch/arm/mach-ums9117/Kconfig"
@@ -81,14 +61,6 @@ destination = "drivers/video/fbdev/Kconfig"
 [[linux.appends]]
 source = "kernel/fbdev.Makefile"
 destination = "drivers/video/fbdev/Makefile"
-
-[[linux.appends]]
-source = "kernel/mmc.Kconfig"
-destination = "drivers/mmc/host/Kconfig"
-
-[[linux.appends]]
-source = "kernel/mmc.Makefile"
-destination = "drivers/mmc/host/Makefile"
 
 [bootstrap]
 image = "inoi244_linux_bootstrap.bin"
@@ -129,15 +101,3 @@ patches = []
 [[microsd.uboot.copies]]
 source = "targets/inoi-244-modern-4g/uboot/ums9117-inoi244-u-boot.dts"
 destination = "arch/arm/dts/ums9117-inoi244-u-boot.dts"
-
-[[microsd.uboot.copies]]
-source = "targets/inoi-244-modern-4g/uboot/slot.c"
-destination = "board/fplinux/ums9117/slot.c"
-
-[[microsd.uboot.copies]]
-source = "targets/inoi-244-modern-4g/common/inoi244-sdio-board.h"
-destination = "board/fplinux/ums9117/inoi244-sdio-board.h"
-
-[[microsd.uboot.copies]]
-source = "targets/inoi-244-modern-4g/common/inoi244-sdio-board.c"
-destination = "board/fplinux/ums9117/sdio-board.c"

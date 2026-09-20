@@ -170,12 +170,12 @@ source = "platforms/ums9117/common/ums9117-sdio-slot.c"
 destination = "drivers/mmc/host/ums9117-sdio-slot.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-mmc.h"
-destination = "drivers/mmc/host/ums9117-mmc.h"
-
-[[linux.copies]]
 source = "platforms/ums9117/kernel/ums9117-mmc-linux.c"
 destination = "drivers/mmc/host/ums9117-mmc-linux.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/fplinux,ums9117-mmc.yaml"
+destination = "Documentation/devicetree/bindings/mmc/fplinux,ums9117-mmc.yaml"
 
 [[linux.copies]]
 source = "platforms/ums9117/kernel/ums9117-musb.c"

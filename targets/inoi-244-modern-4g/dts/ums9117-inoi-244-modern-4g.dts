@@ -9,7 +9,6 @@
 #include "fplinux-target-identity.dtsi"
 #include "inoi-244-modern-4g-nand-readonly.dtsi"
 #include "inoi-244-modern-4g-bluetooth.dtsi"
-#include "inoi-244-modern-4g-microsd.dtsi"
 
 / {
 	memory@80200000 {
@@ -132,6 +131,10 @@
 };
 
 &jpeg {
+	status = "okay";
+};
+
+&sdio0_mmc {
 	status = "okay";
 };
 

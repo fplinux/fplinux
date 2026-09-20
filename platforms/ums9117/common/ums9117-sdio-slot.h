@@ -48,31 +48,7 @@ struct ums9117_sdio_resource {
 	u32 size;
 };
 
-struct ums9117_sdio_slot_pin {
-	enum ums9117_sdio_slot_reg reg;
-	u32 target;
-	bool mux;
-};
-
-struct ums9117_sdio_slot_io;
-struct ums9117_sdio_slot_state;
-
-struct ums9117_sdio_slot_board {
-	const struct ums9117_sdio_resource *resources;
-	const struct ums9117_sdio_slot_pin *pins;
-	u16 core_voltage;
-	u16 io_voltage;
-	u32 rail_delay_ms;
-	int (*enable_card_detect)(const struct ums9117_sdio_slot_io *io,
-				  struct ums9117_sdio_slot_state *state);
-	int (*restore_card_detect)(const struct ums9117_sdio_slot_io *io,
-				   struct ums9117_sdio_slot_state *state);
-	int (*card_present)(const struct ums9117_sdio_slot_io *io,
-			    const struct ums9117_sdio_slot_state *state);
-};
-
 struct ums9117_sdio_slot_io {
-	const struct ums9117_sdio_slot_board *board;
 	void *context;
 	struct ums9117_sdio_io controller;
 	u32 (*read)(void *context, enum ums9117_sdio_slot_reg reg);
@@ -113,20 +89,11 @@ struct ums9117_sdio_slot_transition_record {
 const struct ums9117_sdio_resource *
 ums9117_sdio_slot_controller_resource(enum ums9117_sdio_reg reg);
 const struct ums9117_sdio_resource *
-ums9117_sdio_slot_board_resource(const struct ums9117_sdio_slot_board *board,
-				 enum ums9117_sdio_slot_reg reg);
+ums9117_sdio_slot_resource(enum ums9117_sdio_slot_reg reg);
 const struct ums9117_sdio_resource *ums9117_sdio_slot_adi_resource(void);
 const struct ums9117_sdio_resource *ums9117_sdio_slot_analog_resource(void);
 u32 ums9117_sdio_slot_analog_address(enum ums9117_sdio_slot_analog_reg reg);
 u32 ums9117_sdio_slot_analog_offset(enum ums9117_sdio_slot_analog_reg reg);
-
-/* Active-low EIC DATA0; acquire an idle mask and release only bit0. */
-int ums9117_sdio_eic_enable_card_detect(const struct ums9117_sdio_slot_io *io,
-					struct ums9117_sdio_slot_state *state);
-int ums9117_sdio_eic_restore_card_detect(const struct ums9117_sdio_slot_io *io,
-					 struct ums9117_sdio_slot_state *state);
-int ums9117_sdio_eic_card_present(const struct ums9117_sdio_slot_io *io,
-				  const struct ums9117_sdio_slot_state *state);
 
 int ums9117_sdio_slot_snapshot(const struct ums9117_sdio_slot_io *io,
 			       struct ums9117_sdio_slot_state *state);

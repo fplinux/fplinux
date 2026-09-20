@@ -11,7 +11,6 @@ from tests.process import run_process
 
 ROOT = Path(__file__).resolve().parents[2]
 COMMON = ROOT / "platforms/ums9117/common"
-UBOOT = ROOT / "platforms/ums9117/uboot"
 HARNESS = ROOT / "tests/host_tool/ums9117-sdio-slot.c"
 COMPAT = ROOT / "tests/host_tool/ums9117-sdio-compat"
 
@@ -21,16 +20,6 @@ class Ums9117SdioSlotTests(unittest.TestCase):
 
     def test_slot_ownership_and_power_policy(self) -> None:
         """Preserve VSEL admission, EIC ownership and the power-down bit policy."""
-        for target, board in (
-            ("nokia-ta1618", "ta1618"),
-            ("inoi-244-modern-4g", "inoi244"),
-        ):
-            with self.subTest(target=target):
-                self.check_slot(target, board)
-
-    def check_slot(self, target: str, board: str) -> None:
-        """Link the selected board and verify its observable slot operations."""
-        target_root = ROOT / "targets" / target
         with tempfile.TemporaryDirectory() as temporary:
             executable = Path(temporary) / "ums9117-sdio-slot"
             run_process(
@@ -42,11 +31,7 @@ class Ums9117SdioSlotTests(unittest.TestCase):
                     "-Werror",
                     f"-I{COMPAT}",
                     f"-I{COMMON}",
-                    f"-I{UBOOT}",
-                    f"-I{target_root / 'common'}",
                     str(HARNESS),
-                    str(target_root / "common" / f"{board}-sdio-board.c"),
-                    str(target_root / "uboot/slot.c"),
                     str(COMMON / "ums9117-sdio-slot.c"),
                     str(COMMON / "ums9117-sdio-core.c"),
                     "-o",

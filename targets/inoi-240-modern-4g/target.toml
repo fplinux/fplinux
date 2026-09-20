@@ -50,26 +50,6 @@ destination = "arch/arm/boot/dts/unisoc/inoi-240-modern-4g-bluetooth.dtsi"
 source = "kernel/inoi240-fb.c"
 destination = "drivers/video/fbdev/inoi240-fb.c"
 
-[[linux.copies]]
-source = "dts/microsd.dtsi"
-destination = "arch/arm/boot/dts/unisoc/inoi-240-modern-4g-microsd.dtsi"
-
-[[linux.copies]]
-source = "kernel/inoi240-mmc-linux.c"
-destination = "drivers/mmc/host/inoi240-mmc-linux.c"
-
-[[linux.copies]]
-source = "common/inoi240-sdio-board.h"
-destination = "drivers/mmc/host/inoi240-sdio-board.h"
-
-[[linux.copies]]
-source = "common/inoi240-sdio-board.c"
-destination = "drivers/mmc/host/inoi240-sdio-board.c"
-
-[[linux.copies]]
-source = "bindings/fplinux,inoi240-mmc.yaml"
-destination = "Documentation/devicetree/bindings/mmc/fplinux,inoi240-mmc.yaml"
-
 [[linux.appends]]
 source = "kernel/Kconfig"
 destination = "arch/arm/mach-ums9117/Kconfig"
@@ -81,14 +61,6 @@ destination = "drivers/video/fbdev/Kconfig"
 [[linux.appends]]
 source = "kernel/fbdev.Makefile"
 destination = "drivers/video/fbdev/Makefile"
-
-[[linux.appends]]
-source = "kernel/mmc.Kconfig"
-destination = "drivers/mmc/host/Kconfig"
-
-[[linux.appends]]
-source = "kernel/mmc.Makefile"
-destination = "drivers/mmc/host/Makefile"
 
 [bootstrap]
 image = "inoi240_linux_bootstrap.bin"
@@ -129,15 +101,3 @@ patches = []
 [[microsd.uboot.copies]]
 source = "targets/inoi-240-modern-4g/uboot/ums9117-inoi240-u-boot.dts"
 destination = "arch/arm/dts/ums9117-inoi240-u-boot.dts"
-
-[[microsd.uboot.copies]]
-source = "targets/inoi-240-modern-4g/uboot/slot.c"
-destination = "board/fplinux/ums9117/slot.c"
-
-[[microsd.uboot.copies]]
-source = "targets/inoi-240-modern-4g/common/inoi240-sdio-board.h"
-destination = "board/fplinux/ums9117/inoi240-sdio-board.h"
-
-[[microsd.uboot.copies]]
-source = "targets/inoi-240-modern-4g/common/inoi240-sdio-board.c"
-destination = "board/fplinux/ums9117/sdio-board.c"

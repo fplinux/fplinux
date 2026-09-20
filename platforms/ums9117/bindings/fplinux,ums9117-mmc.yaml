@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0-only
 %YAML 1.2
 ---
-$id: http://devicetree.org/schemas/mmc/fplinux,inoi240-mmc.yaml#
+$id: http://devicetree.org/schemas/mmc/fplinux,ums9117-mmc.yaml#
 $schema: http://devicetree.org/meta-schemas/core.yaml#
 
-title: INOI 240 Modern 4G removable microSD host
+title: Unisoc UMS9117 SDIO0 removable microSD host
 
 maintainers:
   - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
@@ -16,13 +16,13 @@ description:
   separate controller and is not reachable through this node.
 
   Register windows cover the AP AHB gates and reset, clock selection, SDIO0,
-  bus pins, ADI and card detection. Each window must match the target's
+  bus pins, ADI and card detection. Each window must match the platform's
   address and size. Card-detect DATA and DMSK are EIC2 bit0; no GPIO output
   is part of this interface.
 
 properties:
   compatible:
-    const: fplinux,inoi240-mmc
+    const: fplinux,ums9117-mmc
 
   reg:
     minItems: 43

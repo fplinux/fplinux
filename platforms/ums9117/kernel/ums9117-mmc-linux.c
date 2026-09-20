@@ -5,8 +5,8 @@
  * This is deliberately not an SDHCI driver.  UMS9117 has a related command,
  * response, interrupt and ADMA layout, but +0x28 is a 32-bit custom host
  * control register and there is no SDHCI POWER_CONTROL byte.  Platform gate,
- * reset, selector and ADI/PMIC sequencing is shared; the target supplies its
- * pin configuration, rail baseline and card-detect operations.
+ * reset, selector, pin, ADI/PMIC and card-detect sequencing is shared by the
+ * current UMS9117 targets.
  *
  * Identification runs at 399590 Hz over a 1-bit bus.  Only a clean RCA-scoped
  * CMD55 APP_CMD response and clean no-data ACMD6 argument 2 permit the physical
@@ -16,7 +16,7 @@
  * tuning, CMD23, erase, discard, lock and write-protect commands are not
  * supported.
  *
- * The MMC core polls the target's card-detect input, so an unmounted card can
+ * The MMC core polls the slot's card-detect input, so an unmounted card can
  * be inserted, removed and reinserted while Linux remains running.  Filesystems
  * must be synchronized and unmounted before removal.
  */
@@ -48,7 +48,6 @@
 #include <linux/workqueue.h>
 
 #include "ums9117-sdio-slot.h"
-#include "ums9117-mmc.h"
 
 #define UMS9117_MMC_IOS_TRACE_DEPTH 16U
 
@@ -170,7 +169,7 @@ struct ums9117_mmc_host {
 	struct device *dev;
 	struct mmc_host *mmc;
 	void __iomem *controller_regs[UMS9117_SDIO_REG_COUNT];
-	void __iomem *board_regs[UMS9117_SDIO_SLOT_REG_COUNT];
+	void __iomem *slot_regs[UMS9117_SDIO_SLOT_REG_COUNT];
 	struct ums9117_sdio_slot_io sdio;
 	struct ums9117_sdio_slot_state sdio_state;
 	int irq;
@@ -233,19 +232,19 @@ static void ums9117_mmc_controller_write(void *context,
 	writel(value, host->controller_regs[reg]);
 }
 
-static u32 ums9117_mmc_board_read(void *context, enum ums9117_sdio_slot_reg reg)
+static u32 ums9117_mmc_slot_read(void *context, enum ums9117_sdio_slot_reg reg)
 {
 	struct ums9117_mmc_host *host = context;
 
-	return readl(host->board_regs[reg]);
+	return readl(host->slot_regs[reg]);
 }
 
-static void ums9117_mmc_board_write(void *context,
-				    enum ums9117_sdio_slot_reg reg, u32 value)
+static void ums9117_mmc_slot_write(void *context,
+				   enum ums9117_sdio_slot_reg reg, u32 value)
 {
 	struct ums9117_mmc_host *host = context;
 
-	writel(value, host->board_regs[reg]);
+	writel(value, host->slot_regs[reg]);
 }
 
 static u64 ums9117_mmc_time_us(void *context)
@@ -472,7 +471,7 @@ static int ums9117_mmc_activate_platform(struct ums9117_mmc_host *host)
 	spin_lock_irqsave(&host->lock, flags);
 	host->audit.host_ctrl1_width_before = control;
 	host->audit.host_ctrl1_width_after = control;
-	host->audit.selector_after_activate = ums9117_mmc_board_read(
+	host->audit.selector_after_activate = ums9117_mmc_slot_read(
 		host, UMS9117_SDIO_SLOT_REG_CLOCK_SELECTOR);
 	host->audit.clock_reset_after_activate =
 		ums9117_mmc_controller_read(host, UMS9117_SDIO_REG_CLOCK_RESET);
@@ -1950,10 +1949,9 @@ static int ums9117_mmc_map_sdio_resources(struct platform_device *pdev,
 			return ret;
 	}
 	for (index = 0; index < UMS9117_SDIO_SLOT_REG_COUNT; ++index) {
-		definition = ums9117_sdio_slot_board_resource(host->sdio.board,
-							      index);
+		definition = ums9117_sdio_slot_resource(index);
 		ret = ums9117_mmc_map_resource(pdev, definition,
-					       &host->board_regs[index]);
+					       &host->slot_regs[index]);
 		if (ret)
 			return ret;
 	}
@@ -1988,8 +1986,8 @@ static int ums9117_mmc_map_sdio_resources(struct platform_device *pdev,
 static void ums9117_mmc_init_sdio(struct ums9117_mmc_host *host)
 {
 	host->sdio.context = host;
-	host->sdio.read = ums9117_mmc_board_read;
-	host->sdio.write = ums9117_mmc_board_write;
+	host->sdio.read = ums9117_mmc_slot_read;
+	host->sdio.write = ums9117_mmc_slot_write;
 	host->sdio.adi_begin = ums9117_mmc_adi_begin;
 	host->sdio.adi_read = ums9117_mmc_adi_read;
 	host->sdio.adi_write = ums9117_mmc_adi_write;
@@ -2030,8 +2028,7 @@ static int ums9117_mmc_enable_card_detect(struct ums9117_mmc_host *host)
 	return 0;
 }
 
-int ums9117_mmc_probe(struct platform_device *pdev,
-		      const struct ums9117_sdio_slot_board *board)
+static int ums9117_mmc_probe(struct platform_device *pdev)
 {
 	struct ums9117_mmc_host *host;
 	struct mmc_host *mmc;
@@ -2063,7 +2060,6 @@ int ums9117_mmc_probe(struct platform_device *pdev,
 	host = mmc_priv(mmc);
 	host->dev = &pdev->dev;
 	host->mmc = mmc;
-	host->sdio.board = board;
 	host->irq = irq;
 	spin_lock_init(&host->lock);
 	mutex_init(&host->state_mutex);
@@ -2161,7 +2157,6 @@ out_free_host:
 	mmc_free_host(mmc);
 	return ret;
 }
-EXPORT_SYMBOL_GPL(ums9117_mmc_probe);
 
 static bool ums9117_mmc_idle(struct ums9117_mmc_host *host)
 {
@@ -2174,7 +2169,7 @@ static bool ums9117_mmc_idle(struct ums9117_mmc_host *host)
 	return idle;
 }
 
-void ums9117_mmc_shutdown(struct platform_device *pdev)
+static void ums9117_mmc_shutdown(struct platform_device *pdev)
 {
 	struct ums9117_mmc_host *host = platform_get_drvdata(pdev);
 	unsigned long flags;
@@ -2219,9 +2214,8 @@ void ums9117_mmc_shutdown(struct platform_device *pdev)
 	}
 	mutex_unlock(&host->state_mutex);
 }
-EXPORT_SYMBOL_GPL(ums9117_mmc_shutdown);
 
-void ums9117_mmc_remove(struct platform_device *pdev)
+static void ums9117_mmc_remove(struct platform_device *pdev)
 {
 	struct ums9117_mmc_host *host = platform_get_drvdata(pdev);
 
@@ -2249,7 +2243,24 @@ void ums9117_mmc_remove(struct platform_device *pdev)
 			  host->descriptors, host->descriptors_dma);
 	mmc_free_host(host->mmc);
 }
-EXPORT_SYMBOL_GPL(ums9117_mmc_remove);
+
+static const struct of_device_id ums9117_mmc_of_match[] = {
+	{ .compatible = "fplinux,ums9117-mmc" },
+	{}
+};
+MODULE_DEVICE_TABLE(of, ums9117_mmc_of_match);
+
+static struct platform_driver ums9117_mmc_driver = {
+	.probe = ums9117_mmc_probe,
+	.remove = ums9117_mmc_remove,
+	.shutdown = ums9117_mmc_shutdown,
+	.driver = {
+		.name = "ums9117-mmc",
+		.of_match_table = ums9117_mmc_of_match,
+		.suppress_bind_attrs = true,
+	},
+};
+module_platform_driver(ums9117_mmc_driver);
 
 MODULE_DESCRIPTION("UMS9117 SDIO0 removable microSD host");
 MODULE_LICENSE("GPL");
