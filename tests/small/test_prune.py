@@ -84,6 +84,10 @@ class PruneTests(unittest.TestCase):
                 "platform-a": {},
                 "platform-b": {},
             }
+            package_selections = {
+                "platform-a": first_packages,
+                "platform-b": second_packages,
+            }
 
             def rootfs_recipe(
                 _image_recipe: str,
@@ -118,7 +122,7 @@ class PruneTests(unittest.TestCase):
                 mock.patch.object(
                     alpine_state,
                     "selected_packages",
-                    side_effect=(first_packages, second_packages),
+                    side_effect=lambda _platform, target: package_selections[target["platform"]],
                 ),
                 mock.patch.object(
                     alpine_state,
@@ -132,46 +136,13 @@ class PruneTests(unittest.TestCase):
                 ),
             ):
                 plan = plan_prune(cache)
-            decisions = {entry.path: entry.action for entry in plan.entries}
+                decisions = {entry.path: entry.action for entry in plan.entries}
 
-            self.assertEqual(decisions[f"rootfs/{'0' * 64}"], "candidate")
-            self.assertEqual(
-                {path for path, action in decisions.items() if action == "protected"},
-                {f"rootfs/{recipe}" for recipe in current},
-            )
-            with (
-                mock.patch.object(
-                    prune_module,
-                    "discover_targets",
-                    return_value=("first", "second"),
-                ),
-                mock.patch.object(prune_module, "discover_profiles", return_value=()),
-                mock.patch.object(
-                    prune_module,
-                    "load_target",
-                    side_effect=lambda target: target_configs[target],
-                ),
-                mock.patch.object(
-                    prune_module,
-                    "load_platform",
-                    side_effect=lambda platform: platform_configs[platform],
-                ),
-                mock.patch.object(
-                    alpine_state,
-                    "selected_packages",
-                    side_effect=(first_packages, second_packages),
-                ),
-                mock.patch.object(
-                    alpine_state,
-                    "alpine_rootfs_recipe",
-                    side_effect=rootfs_recipe,
-                ),
-                mock.patch.object(
-                    prune_module,
-                    "container_image_recipe_digest",
-                    return_value="a" * 64,
-                ),
-            ):
+                self.assertEqual(decisions[f"rootfs/{'0' * 64}"], "candidate")
+                self.assertEqual(
+                    {path for path, action in decisions.items() if action == "protected"},
+                    {f"rootfs/{recipe}" for recipe in current},
+                )
                 apply_prune(cache)
             self.assertFalse(stale.exists())
             self.assertTrue(all((cache / "rootfs" / recipe).exists() for recipe in current))
@@ -872,9 +843,12 @@ class PruneTests(unittest.TestCase):
     def test_profile_log_cleanup_keeps_ten_valid_runs_and_preserves_malformed_entries(
         self,
     ) -> None:
-        """Automatic retention removes only generated build runs in the selected profile slot."""
+        """Automatic retention leaves default logs and manual entries outside its selected slot."""
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / ".cache"
+            default_runs = [
+                _cli_log(cache, "build", sequence, target="phone") for sequence in range(11)
+            ]
             runs = [
                 _cli_log(cache, "build", sequence, target="phone/profiles/host")
                 for sequence in range(11)
@@ -894,6 +868,7 @@ class PruneTests(unittest.TestCase):
             self.assertFalse(runs[0].exists())
             self.assertTrue(runs[-1].exists())
             self.assertTrue(malformed.exists())
+            self.assertTrue(all(run.is_dir() for run in default_runs))
 
     def test_orphaned_profile_logs_are_all_disposable(self) -> None:
         """A deleted target/profile does not keep even its newest host-created log."""

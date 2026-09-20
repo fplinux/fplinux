@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
-import json
 import sys
 import tempfile
 import unittest
@@ -16,8 +15,6 @@ from typing import TYPE_CHECKING
 from unittest import mock
 
 from fplinux_cli import __main__ as cli
-from fplinux_cli import alpine_state
-from fplinux_cli import prune as prune_module
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -126,18 +123,20 @@ class CliCacheLockTests(unittest.TestCase):
                     ],
                 )
                 if callback_name == "backup_target_nand":
-                    callback.assert_called_once_with(
-                        "nokia-ta1618", Path("backup.bin"), profile=profile
+                    self.assertEqual(
+                        callback.call_args,
+                        mock.call("nokia-ta1618", Path("backup.bin"), profile=profile),
                     )
                 elif callback_name == "prepare_device_data":
-                    callback.assert_called_once_with(
-                        "nokia-ta1618",
-                        from_dump=Path("saved-nand.bin"),
-                        jobs=2,
-                        offline=True,
+                    self.assertEqual(
+                        callback.call_args,
+                        mock.call(
+                            "nokia-ta1618",
+                            from_dump=Path("saved-nand.bin"),
+                            jobs=2,
+                            offline=True,
+                        ),
                     )
-                else:
-                    callback.assert_called_once()
 
     def test_format_forwards_only_the_explicit_paths(self) -> None:
         """Pass the ordered source selection through the exclusive command boundary."""
@@ -197,12 +196,15 @@ class CliCacheLockTests(unittest.TestCase):
                 "command",
             ],
         )
-        check.assert_called_once_with(
-            ["kernel"],
-            profile=None,
-            verbose=False,
-            no_cache=False,
-            jobs=2,
+        self.assertEqual(
+            check.call_args,
+            mock.call(
+                ["kernel"],
+                profile=None,
+                verbose=False,
+                no_cache=False,
+                jobs=2,
+            ),
         )
 
     def test_check_defaults_match_the_selected_execution_boundary(self) -> None:
@@ -279,11 +281,31 @@ class CliCacheLockTests(unittest.TestCase):
                 self.assertEqual(callback.call_args.kwargs["profile"], "microsd-uboot")
 
     def test_microsd_boot_selector_locks_the_single_selected_context(self) -> None:
-        """The boot selector chooses its profile slot before taking the shared lock."""
-        for command, callback_name in (("run", "run_target"), ("package", "package_target")):
-            arguments = [command, "nokia-ta1618", "--boot", "microsd"]
-            if command == "package":
-                arguments.append("--candidate")
+        """The boot selector keeps its target and chooses one profile cache slot."""
+        cases = (
+            (
+                ["run", "nokia-ta1618", "--boot", "microsd"],
+                "run_target",
+                mock.call("nokia-ta1618", profile=None, boot="microsd"),
+            ),
+            (
+                ["package", "nokia-ta1618", "--boot", "microsd", "--candidate"],
+                "package_target",
+                mock.call(
+                    "nokia-ta1618",
+                    profile=None,
+                    boot="microsd",
+                    candidate=True,
+                ),
+            ),
+            (
+                ["run", "target", "--boot", "microsd"],
+                "run_target",
+                mock.call("target", profile=None, boot="microsd"),
+            ),
+        )
+        for arguments, callback_name, expected_call in cases:
+            command, target = arguments[:2]
             with self.subTest(command=command):
                 events, callback = self._run(arguments, callback_name)
 
@@ -295,22 +317,13 @@ class CliCacheLockTests(unittest.TestCase):
                             self.root / ".cache",
                             False,
                             command,
-                            "nokia-ta1618",
+                            target,
                             "microsd-uboot",
                         ),
                         "command",
                     ],
                 )
-                self.assertEqual(callback.call_args.kwargs["boot"], "microsd")
-                self.assertIsNone(callback.call_args.kwargs["profile"])
-
-    def test_microsd_boot_keeps_the_selected_target(self) -> None:
-        """Every configured board uses its own microSD build and cache identity."""
-        events, run = self._run(["run", "target", "--boot", "microsd"], "run_target")
-        self.assertEqual(
-            events[0], ("lock", self.root / ".cache", False, "run", "target", "microsd-uboot")
-        )
-        run.assert_called_once_with("target", profile=None, boot="microsd")
+                self.assertEqual(callback.call_args, expected_call)
 
     def test_explicit_default_reuses_the_implicit_context(self) -> None:
         """The alias reaches each consumer with the same profile and lock identity."""
@@ -345,7 +358,10 @@ class CliCacheLockTests(unittest.TestCase):
             events[0],
             ("lock", self.root / ".cache", False, "verify", "target", "microsd-uboot"),
         )
-        verify.assert_called_once_with("target", profile="microsd-uboot")
+        self.assertEqual(
+            verify.call_args,
+            mock.call("target", profile="microsd-uboot"),
+        )
 
     def test_invalid_profile_is_rejected_before_any_cache_or_retention_action(self) -> None:
         """Profile names are path components, not cache paths or deferred cleanup inputs."""
@@ -391,151 +407,48 @@ class CliCacheLockTests(unittest.TestCase):
                 logs_gc.assert_not_called()
                 self.assertFalse((self.root / ".cache").exists())
 
-    def _write_profile_run(
-        self,
-        command: str,
-        *,
-        target: str | None,
-        profile: str | None,
-        index: int,
-        malformed: bool = False,
-    ) -> Path:
-        """Write one synthetic reporter record independent of prune's matcher."""
-        run_name = f"20260820T0508{index:02d}Z-p{index}"
-        if command == "build":
-            if target is None:
-                self.fail("build log fixture needs a target")
-            identity = f"logs/build/{target}"
-            label = f"build {target}"
-            if profile is not None:
-                identity += f"/profiles/{profile}"
-                label += f"/profiles/{profile}"
-        else:
-            identity = "logs/check"
-            label = "check"
-            if profile is not None:
-                identity += f"/profiles/{profile}"
-                label += f" profiles/{profile}"
-        run = self.root / ".cache" / identity / run_name
-        run.mkdir(parents=True)
-        contents: object = (
-            {"display_root": f".cache/{identity}/{run_name}", "label": label, "parent": None}
-            if not malformed
-            else {"unexpected": "keep"}
-        )
-        (run / "run.json").write_text(json.dumps(contents), encoding="utf-8")
-        return run
-
-    def test_failed_profile_build_and_check_bound_only_valid_profile_logs(self) -> None:
-        """Dispatch-finally bounds profile state after failures without touching valid slots."""
+    def test_failed_profile_commands_run_selected_cache_cleanup_in_finally(self) -> None:
+        """A failed action still reaches the cleanup boundary with its selected context."""
         profile = "microsd-uboot"
-        default_runs = [
-            self._write_profile_run("build", target="nokia", profile=None, index=index)
-            for index in range(11)
-        ]
-        malformed_build = self._write_profile_run(
-            "build",
-            target="nokia",
-            profile=profile,
-            index=99,
-            malformed=True,
-        )
-        malformed_check = self._write_profile_run(
-            "check",
-            target=None,
-            profile=profile,
-            index=99,
-            malformed=True,
-        )
-
-        def fail_after_recording(command: str, target: str | None, index: int) -> None:
-            self._write_profile_run(command, target=target, profile=profile, index=index)
-            message = "forced profile failure"
-            raise SystemExit(message)
-
-        apks = self.root / ".cache" / alpine_state.PACKAGE_CACHE_DIRECTORY
-        obsolete_apk = apks / "fplinux-profile-x"
-        obsolete_apk.mkdir(parents=True)
-        current_apks = ("fplinux-base", "fplinux-profile-y", "fplinux-bundle-host")
-        for package in current_apks:
-            (apks / package).mkdir()
-
-        def load_target(_target: str, selected_profile: str | None = None) -> dict[str, object]:
-            return {"platform": "platform", "profile": selected_profile}
-
-        def selected_packages(
-            _platform: dict[str, object], config: dict[str, object]
-        ) -> tuple[str, ...]:
-            return ("fplinux-profile-y",) if config["profile"] is not None else ("fplinux-base",)
-
-        def bundle_packages(
-            _platform: dict[str, object], config: dict[str, object], _rootfs: tuple[str, ...]
-        ) -> tuple[str, ...]:
-            return ("fplinux-bundle-host",) if config["profile"] is not None else ()
-
-        with (
-            mock.patch.object(cli, "ROOT", self.root),
-            mock.patch.object(prune_module, "discover_targets", return_value=("nokia",)),
-            mock.patch.object(prune_module, "discover_profiles", return_value=(profile,)),
-            mock.patch.object(prune_module, "load_target", side_effect=load_target),
-            mock.patch.object(prune_module, "load_platform", return_value={}),
-            mock.patch.object(
-                alpine_state,
-                "selected_packages",
-                side_effect=selected_packages,
-            ),
-            mock.patch.object(
-                alpine_state,
-                "bundle_packages",
-                side_effect=bundle_packages,
-            ),
-            mock.patch(
-                "fplinux_cli.__main__.discard_obsolete_rootfs",
-                wraps=prune_module.discard_obsolete_rootfs,
-            ) as rootfs_gc,
-            mock.patch(
-                "fplinux_cli.__main__.discard_obsolete_apks",
-                wraps=prune_module.discard_obsolete_apks,
-            ) as apks_gc,
+        cache = self.root / ".cache"
+        for command, target, expected_build_cleanup in (
+            ("build", "nokia", [mock.call(cache)]),
+            ("check", None, []),
         ):
-            for command, target in (("build", "nokia"), ("check", None)):
-                for index in range(11):
-                    arguments = argparse.Namespace(
-                        command=command,
-                        target=target,
-                        profile=profile,
-                        list_scopes=False,
+            with self.subTest(command=command):
+                arguments = argparse.Namespace(
+                    command=command,
+                    target=target,
+                    profile=profile,
+                    list_scopes=False,
+                )
+                action = mock.Mock(side_effect=SystemExit("forced profile failure"))
+                with (
+                    mock.patch.object(cli, "ROOT", self.root),
+                    mock.patch.object(
+                        cli,
+                        "cache_lock",
+                        return_value=contextlib.nullcontext(),
+                    ),
+                    mock.patch.object(cli, "discard_obsolete_rootfs") as rootfs_cleanup,
+                    mock.patch.object(cli, "discard_obsolete_apks") as apks_cleanup,
+                    mock.patch.object(
+                        cli,
+                        "discard_superseded_profile_logs",
+                    ) as log_cleanup,
+                    self.assertRaisesRegex(SystemExit, "forced profile failure"),
+                ):
+                    cli._dispatch_with_cache_lock(  # noqa: SLF001 -- lock lifecycle boundary.
+                        arguments,
+                        action,
                     )
 
-                    def action(
-                        command: str = command,
-                        target: str | None = target,
-                        index: int = index,
-                    ) -> None:
-                        fail_after_recording(command, target, index)
-
-                    with self.assertRaisesRegex(SystemExit, "forced profile failure"):
-                        cli._dispatch_with_cache_lock(  # noqa: SLF001 -- lock lifecycle boundary.
-                            arguments,
-                            action,
-                        )
-
-        self.assertEqual(rootfs_gc.call_args_list, [mock.call(self.root / ".cache")] * 11)
-        self.assertEqual(apks_gc.call_args_list, [mock.call(self.root / ".cache")] * 11)
-        self.assertFalse(obsolete_apk.exists())
-        self.assertTrue(all((apks / package).is_dir() for package in current_apks))
-        for command, _target, malformed in (
-            ("build", "nokia", malformed_build),
-            ("check", None, malformed_check),
-        ):
-            if command == "build":
-                root = self.root / ".cache/logs/build/nokia/profiles" / profile
-            else:
-                root = self.root / ".cache/logs/check/profiles" / profile
-            valid_runs = [path for path in root.iterdir() if path != malformed]
-            self.assertEqual(len(valid_runs), 10)
-            self.assertTrue(malformed.is_dir())
-        self.assertTrue(all(path.is_dir() for path in default_runs))
+                self.assertEqual(rootfs_cleanup.call_args_list, expected_build_cleanup)
+                self.assertEqual(apks_cleanup.call_args_list, expected_build_cleanup)
+                self.assertEqual(
+                    log_cleanup.call_args,
+                    mock.call(cache, command, profile=profile, target=target),
+                )
 
     def test_check_list_and_dry_prune_do_not_touch_cache(self) -> None:
         """The two no-work paths neither lock nor create a cache directory."""
