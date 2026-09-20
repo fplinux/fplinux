@@ -1262,7 +1262,6 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
                     "none",
                     "--tmpfs",
                     "/tmp:1g",  # noqa: S108 -- container tmpfs.
-                    "--no-uid-range",
                     "--volume",
                     f"{workspace}:/workspace:ro",
                     *log_mount,

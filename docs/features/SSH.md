@@ -16,14 +16,22 @@ the command that matches how the image was started:
 ./runner/run.py --reconnect
 ```
 
-Leaving the shell or using the OpenSSH escape `~.` disconnects the host. It
-does not stop Linux. After a physical USB replug, run the same reconnect command
-again.
+Leaving the shell or using the OpenSSH escape `~.` closes that shell without
+stopping Linux. Session checks and file transfers reuse an authenticated
+connection for the same RAM session; it closes after 60 seconds with no active
+channels. Starting a new RAM session closes the previous session's connection.
+
+After a physical USB replug, run the same reconnect command again. FPLinux checks
+the phone's session and image identity again before running the requested
+operation. Interrupted commands and transfers are not automatically repeated.
 
 ## Run one command
 
 Use `--exec` when an interactive shell is unnecessary. The command runs on the
 phone; its output and exit status are returned to the host.
+
+Each `--exec` command and raw NAND download uses a separate connection. This
+keeps cancellation of its remote process independent of other open channels.
 
 ```sh
 # Source checkout

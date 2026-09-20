@@ -492,6 +492,26 @@ def _remove_owned_session(directory: Path, target: str, usb_serial: str) -> None
         "usb_serial": usb_serial,
     }:
         fail(f"refusing to remove an unrecognized session directory: {directory}")
+    control_path = directory / "mux"
+    if control_path.exists():
+        try:
+            subprocess.run(
+                [
+                    _require_tool("ssh"),
+                    "-F",
+                    "/dev/null",
+                    "-S",
+                    str(control_path),
+                    "-O",
+                    "exit",
+                    "localhost",
+                ],
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            fail(f"SSH connection did not stop before session cleanup: {directory}")
     shutil.rmtree(directory)
 
 
@@ -794,8 +814,15 @@ def _ssh_option_values(
 ) -> list[tuple[str, str]]:
     """Return the client policy shared by bundled and direct OpenSSH use."""
     alias = f"fplinux-{session['usb_serial']}"
+    directory = _session_directory(_runtime_root(), session["target"], session["usb_serial"])
     return [
         ("BatchMode", "yes"),
+        ("ControlMaster", "auto"),
+        ("ControlPersist", "60"),
+        # OpenSSH appends a temporary suffix; keep the Unix socket path short.
+        ("ControlPath", str(directory / "mux")),
+        ("ServerAliveInterval", "5"),
+        ("ServerAliveCountMax", "3"),
         ("IdentitiesOnly", "yes"),
         ("IdentityAgent", "none"),
         ("PasswordAuthentication", "no"),
@@ -869,9 +896,11 @@ def _ssh_argv(
     command: str | None = None,
     *,
     connect_timeout: int = 5,
+    shared: bool = True,
 ) -> list[str]:
     argv = [
         _require_tool("ssh"),
+        *([] if shared else ["-S", "none"]),
         *_ssh_options(session, connect_timeout=connect_timeout),
         f"root@{session['phone_address']}",
     ]
@@ -981,12 +1010,21 @@ def _wait_for_authenticated_endpoint(
             if not announced_key:
                 print("SSH host key observed; validating the private RAM session identity.")
                 announced_key = True
-        result = subprocess.run(
-            _ssh_argv(candidate, "fplinux-session-id", connect_timeout=timeout),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            # ConnectTimeout cannot bound a channel opened on an existing master.
+            result = subprocess.run(
+                _ssh_argv(candidate, "fplinux-session-id", connect_timeout=timeout),
+                capture_output=True,
+                text=True,
+                timeout=min(5, remaining),
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            _retry_pause(deadline)
+            continue
         if result.returncode:
             _retry_pause(deadline)
             continue
@@ -1133,11 +1171,12 @@ def run_remote(
     command: str,
     *,
     capture_output: bool = False,
+    shared: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    """Run one command through the already-bound SSH endpoint."""
+    """Share transport only for controlled identity and file operations."""
     session = _validate_session(session)
     return subprocess.run(
-        _ssh_argv(session, command),
+        _ssh_argv(session, command, shared=shared),
         capture_output=capture_output,
         text=True,
         check=False,
@@ -1148,7 +1187,7 @@ def require_device_identity(session: dict[str, Any], device_identity: str) -> st
     """Require the authenticated phone to expose the selected kernel identity."""
     if SHA256.fullmatch(device_identity) is None:
         fail("expected device identity is invalid")
-    result = run_remote(session, "uname -r", capture_output=True)
+    result = run_remote(session, "uname -r", capture_output=True, shared=True)
     if result.returncode:
         detail = result.stderr.strip().splitlines()
         fail(
@@ -1203,7 +1242,9 @@ def stream_remote(
     interrupted: int | None = None
     with tempfile.TemporaryFile(mode="w+b") as stderr:
         process = subprocess.Popen(
-            _ssh_argv(session, command),
+            # Dropbear may retain a writer after a multiplexed channel closes.
+            # A dedicated transport preserves cancellation of the remote reader.
+            _ssh_argv(session, command, shared=False),
             stdout=destination,
             stderr=stderr,
             start_new_session=True,
@@ -1288,7 +1329,7 @@ def _remote_metadata(session: dict[str, Any], remote: str) -> tuple[int, str]:
         f"set -- $(sha256sum '{remote}'); size=$(wc -c < '{remote}'); "
         'printf "%s %s\\n" "$size" "$1"; else exit 44; fi'
     )
-    result = run_remote(session, command, capture_output=True)
+    result = run_remote(session, command, capture_output=True, shared=True)
     if result.returncode:
         fail(f"the phone cannot read {remote}")
     fields = result.stdout.strip().split()
@@ -1318,6 +1359,7 @@ def upload(session: dict[str, Any], local_name: str, remote_name: str) -> None:
         "set -- $free && "
         f'[ "$(($1 * $2 / 1024))" -ge {free_kib} ]',
         capture_output=True,
+        shared=True,
     )
     if check.returncode:
         fail("upload destination is missing or does not have enough free space")
@@ -1343,13 +1385,14 @@ def upload(session: dict[str, Any], local_name: str, remote_name: str) -> None:
             f'[ "$got" = \'{expected_hash}\' ] && [ "$size" -eq {expected_size} ] && '
             f"[ ! -d '{remote}' ] && [ ! -L '{remote}' ] && mv -f '{temporary}' '{remote}'",
             capture_output=True,
+            shared=True,
         )
         if publish.returncode:
             fail("device-side SHA-256 verification or atomic upload publication failed")
         published = True
     finally:
         if not published:
-            run_remote(session, f"rm -f '{temporary}'", capture_output=True)
+            run_remote(session, f"rm -f '{temporary}'", capture_output=True, shared=True)
     print(
         f"upload verified: {local} ({expected_size} bytes, sha256={expected_hash}) -> {remote}",
         flush=True,

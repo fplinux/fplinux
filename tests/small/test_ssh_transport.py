@@ -204,7 +204,7 @@ class SshTransportSmallTests(unittest.TestCase):
             release = ssh_transport.require_device_identity(session, device_identity)
 
         self.assertEqual(release, f"6.12-fplinux-{device_identity[:16]}")
-        remote.assert_called_once_with(session, "uname -r", capture_output=True)
+        remote.assert_called_once_with(session, "uname -r", capture_output=True, shared=True)
 
     def test_device_identity_rejects_a_different_running_kernel(self) -> None:
         """Reject a ready authenticated session running another device runtime."""

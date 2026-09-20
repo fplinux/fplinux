@@ -17,15 +17,16 @@ def create_ready_session(
     root: Path,
     *,
     status: str = "ready",
+    target: str = "phone",
 ) -> dict[str, Any]:
     """Create one complete private session directory for a transport consumer."""
     session_id = b"session identity is exactly 32!!"
     usb_serial = hashlib.sha256(session_id).hexdigest()[:32]
-    directory = root / "sessions" / f"phone.{usb_serial}"
+    directory = root / "sessions" / f"{target}.{usb_serial}"
     directory.mkdir(parents=True, mode=0o700)
     owner = {
         "kind": ssh_transport.SESSION_OWNER_KIND,
-        "target": "phone",
+        "target": target,
         "usb_serial": usb_serial,
     }
     owner_path = directory / "owner.json"
@@ -37,7 +38,7 @@ def create_ready_session(
         path.write_text("private\n", encoding="ascii")
         path.chmod(0o600)
     state: dict[str, Any] = {
-        "target": "phone",
+        "target": target,
         "session_id": session_id.hex(),
         "usb_serial": usb_serial,
         "network": "10.23.45.0/30",
