@@ -89,14 +89,14 @@ default. Physical brightness levels and keypad-light effects remain unqualified.
 Use these identifiers with the linked shared interfaces. Numeric IIO, thermal
 and input-device indices are assigned at boot.
 
-| Interface                                                     | Identifier on this phone                  |
-| ------------------------------------------------------------- | ----------------------------------------- |
-| [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)     | `/sys/class/backlight/inoi244-backlight`  |
-| [Battery telemetry](../../docs/features/BATTERY_TELEMETRY.md) | `/sys/class/power_supply/inoi244-battery` |
-| [Charger status](../../docs/features/CHARGER_STATUS.md)       | `/sys/class/power_supply/inoi244-charger` |
-| [Auxiliary ADC](../../docs/features/AUXADC.md)                | IIO `name`: `inoi244-sc2720-auxadc`       |
-| [SoC temperature](../../docs/features/SOC_TEMPERATURE.md)     | Thermal-zone `type`: `inoi244-soc`        |
-| [Vibration](../../docs/features/VIBRATION.md)                 | Input name: `INOI 244 Modern 4G vibrator` |
+| Interface                                                     | Identifier on this phone                 |
+| ------------------------------------------------------------- | ---------------------------------------- |
+| [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)     | `/sys/class/backlight/inoi244-backlight` |
+| [Battery telemetry](../../docs/features/BATTERY_TELEMETRY.md) | `/sys/class/power_supply/sc2720-battery` |
+| [Charger status](../../docs/features/CHARGER_STATUS.md)       | `/sys/class/power_supply/sc2720-charger` |
+| [Auxiliary ADC](../../docs/features/AUXADC.md)                | IIO `name`: `sc2720-auxadc`              |
+| [SoC temperature](../../docs/features/SOC_TEMPERATURE.md)     | Thermal-zone `type`: `ums9117-thm1`      |
+| [Vibration](../../docs/features/VIBRATION.md)                 | Input name: `SC2720 vibrator`            |
 
 ## Bluetooth
 

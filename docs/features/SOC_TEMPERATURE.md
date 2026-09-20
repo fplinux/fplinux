@@ -2,15 +2,14 @@
 
 FPLinux exposes the calibrated THM1 reading through the standard Linux thermal
 class. The selected [target's documentation](../../targets/README.md) states
-its thermal-zone name and physical accuracy limits. A standalone archive carries
-that status in `README.txt`.
+its physical accuracy limits. A standalone archive carries that status in
+`README.txt`.
 
 ## Interface
 
-Find the target's zone under `/sys/class/thermal/` by reading its `type` file.
-The adjacent `temp` file reports temperature in millidegrees Celsius. The
-numeric `thermal_zoneN` index is assigned at boot and is not part of the target
-contract.
+Find the zone whose `type` is `ums9117-thm1` under `/sys/class/thermal/`. The
+adjacent `temp` file reports temperature in millidegrees Celsius. The numeric
+`thermal_zoneN` index is assigned at boot and is not part of the interface.
 
 ## Limits
 

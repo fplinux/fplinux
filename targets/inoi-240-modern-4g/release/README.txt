@@ -43,9 +43,9 @@ The shared hardware interfaces and their limits are described in:
   - docs/features/VIBRATION.md
 
 This phone uses backlight device inoi240-backlight, with configured levels
-0 through 31 and default 31; power-supply devices inoi240-battery and
-inoi240-charger; IIO name inoi240-sc2720-auxadc; thermal-zone type inoi240-soc;
-and input name INOI 240 Modern 4G vibrator. IIO, thermal and input-device
+0 through 31 and default 31; power-supply devices sc2720-battery and
+sc2720-charger; IIO name sc2720-auxadc; thermal-zone type ums9117-thm1;
+and input name SC2720 vibrator. IIO, thermal and input-device
 numbers are assigned at boot. These identifiers do not qualify the physical
 effects or measurements noted above.
 

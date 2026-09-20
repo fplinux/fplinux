@@ -45,9 +45,9 @@ Interfaces, limits and safety procedures are bundled at:
   - docs/features/VIBRATION.md
 
 This phone uses backlight device ta1618-backlight, with levels 0 through 10
-and default 10; power-supply devices ta1618-battery and ta1618-charger;
-IIO name ta1618-sc2720-auxadc; thermal-zone type ta1618-soc; and input name
-TA-1618 vibrator. IIO, thermal and input-device numbers are assigned at boot.
+and default 10; power-supply devices sc2720-battery and sc2720-charger;
+IIO name sc2720-auxadc; thermal-zone type ums9117-thm1; and input name
+SC2720 vibrator. IIO, thermal and input-device numbers are assigned at boot.
 
 Install and run the optional showcase by following:
   - docs/apps/SHOWCASE.md

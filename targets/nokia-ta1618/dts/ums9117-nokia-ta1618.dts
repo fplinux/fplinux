@@ -81,7 +81,6 @@
 		vibrator@40608e00 {
 			compatible = "sprd,ums9117-sc2720-vibrator";
 			reg = <0x40608e00 0x00000004>;
-			label = "TA-1618 vibrator";
 			fplinux,voltage-code = <0>;
 		};
 
@@ -90,22 +89,12 @@
 
 #include "ums9117-ram-session.dtsi"
 
-&sc2720_charger {
-	label = "ta1618-charger";
-};
-
 &sc2720_fgu {
-	label = "ta1618-battery";
 	fplinux,current-calibration = <10 20>;
-};
-
-&sc2720_auxadc {
-	label = "ta1618-sc2720-auxadc";
 };
 
 &thm1 {
 	status = "okay";
-	label = "ta1618-soc";
 };
 
 &ap_dma {

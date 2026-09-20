@@ -84,11 +84,11 @@ and input-device indices are assigned at boot.
 | Interface                                                     | Identifier on this phone                 |
 | ------------------------------------------------------------- | ---------------------------------------- |
 | [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)     | `/sys/class/backlight/ta1618-backlight`  |
-| [Battery telemetry](../../docs/features/BATTERY_TELEMETRY.md) | `/sys/class/power_supply/ta1618-battery` |
-| [Charger status](../../docs/features/CHARGER_STATUS.md)       | `/sys/class/power_supply/ta1618-charger` |
-| [Auxiliary ADC](../../docs/features/AUXADC.md)                | IIO `name`: `ta1618-sc2720-auxadc`       |
-| [SoC temperature](../../docs/features/SOC_TEMPERATURE.md)     | Thermal-zone `type`: `ta1618-soc`        |
-| [Vibration](../../docs/features/VIBRATION.md)                 | Input name: `TA-1618 vibrator`           |
+| [Battery telemetry](../../docs/features/BATTERY_TELEMETRY.md) | `/sys/class/power_supply/sc2720-battery` |
+| [Charger status](../../docs/features/CHARGER_STATUS.md)       | `/sys/class/power_supply/sc2720-charger` |
+| [Auxiliary ADC](../../docs/features/AUXADC.md)                | IIO `name`: `sc2720-auxadc`              |
+| [SoC temperature](../../docs/features/SOC_TEMPERATURE.md)     | Thermal-zone `type`: `ums9117-thm1`      |
+| [Vibration](../../docs/features/VIBRATION.md)                 | Input name: `SC2720 vibrator`            |
 
 ## Bluetooth
 

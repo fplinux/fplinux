@@ -21,9 +21,6 @@ properties:
   reg:
     maxItems: 1
 
-  label:
-    description: Input device name for the fitted vibrator
-
   fplinux,voltage-code:
     $ref: /schemas/types.yaml#/definitions/uint32
     minimum: 0
@@ -33,7 +30,6 @@ properties:
 required:
   - compatible
   - reg
-  - label
   - fplinux,voltage-code
 
 additionalProperties: false
@@ -43,6 +39,5 @@ examples:
     vibrator@40608e00 {
         compatible = "sprd,ums9117-sc2720-vibrator";
         reg = <0x40608e00 0x4>;
-        label = "TA-1618 vibrator";
         fplinux,voltage-code = <0>;
     };

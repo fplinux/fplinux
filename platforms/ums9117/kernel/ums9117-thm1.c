@@ -13,7 +13,6 @@
 #include <linux/mfd/syscon.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
-#include <linux/property.h>
 #include <linux/regmap.h>
 #include <linux/string.h>
 #include <linux/thermal.h>
@@ -694,15 +693,10 @@ static int ums9117_thm1_probe(struct platform_device *pdev)
 {
 	struct ums9117_thm1 *thm;
 	struct resource *resource;
-	const char *label;
 	u32 calibration;
 	int temperature;
 	int ret;
 
-	ret = device_property_read_string(&pdev->dev, "label", &label);
-	if (ret)
-		return dev_err_probe(&pdev->dev, ret,
-				     "missing thermal zone label\n");
 	thm = devm_kzalloc(&pdev->dev, sizeof(*thm), GFP_KERNEL);
 	if (!thm)
 		return -ENOMEM;
@@ -785,7 +779,8 @@ static int ums9117_thm1_probe(struct platform_device *pdev)
 			"THM1 initial temperature is unavailable\n");
 
 	thm->zone = thermal_tripless_zone_device_register(
-		label, thm, &ums9117_thm1_ops, &ums9117_thm1_zone_params);
+		"ums9117-thm1", thm, &ums9117_thm1_ops,
+		&ums9117_thm1_zone_params);
 	if (IS_ERR(thm->zone)) {
 		ret = PTR_ERR(thm->zone);
 		thm->zone = NULL;

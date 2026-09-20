@@ -17,12 +17,8 @@ properties:
   compatible:
     const: sprd,ums9117-sc2720-charger
 
-  label:
-    description: Power supply name for the charger-input status
-
 required:
   - compatible
-  - label
 
 additionalProperties: false
 
@@ -30,5 +26,4 @@ examples:
   - |
     charger {
         compatible = "sprd,ums9117-sc2720-charger";
-        label = "ta1618-charger";
     };

@@ -17,9 +17,6 @@ properties:
   compatible:
     const: sprd,ums9117-thm1
 
-  label:
-    description: Thermal zone type for the on-die sensor
-
   reg:
     items:
       - description: THM1 register block
@@ -38,7 +35,6 @@ properties:
 
 required:
   - compatible
-  - label
   - reg
   - reg-names
   - sprd,aon-apb
@@ -49,7 +45,6 @@ examples:
   - |
     thermal-sensor@40300000 {
         compatible = "sprd,ums9117-thm1";
-        label = "ta1618-soc";
         reg = <0x40300000 0x100>, <0x40240000 0x58>,
               <0x40241064 0x4>;
         reg-names = "thm", "efuse-control", "efuse-block25";

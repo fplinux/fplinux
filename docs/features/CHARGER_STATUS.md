@@ -2,14 +2,12 @@
 
 FPLinux reports whether external charger input is present through the standard
 Linux power-supply class. The selected
-[target's documentation](../../targets/README.md) states its charger device
-name and hardware limits. A standalone archive carries that status in
-`README.txt`.
+[target's documentation](../../targets/README.md) states its hardware limits.
+A standalone archive carries that status in `README.txt`.
 
 ## Interface
 
-Read the `online` attribute of the target's charger device under
-`/sys/class/power_supply/`.
+Read `/sys/class/power_supply/sc2720-charger/online`.
 
 `1` means external charger input is detected; `0` means it is not detected.
 
