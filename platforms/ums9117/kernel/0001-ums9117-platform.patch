@@ -1,7 +1,8 @@
 diff --git a/arch/arm/Kconfig b/arch/arm/Kconfig
+index e481254..013d46d 100644
 --- a/arch/arm/Kconfig
 +++ b/arch/arm/Kconfig
-@@ -378,6 +378,8 @@ source "arch/arm/mach-davinci/Kconfig"
+@@ -379,6 +379,8 @@ source "arch/arm/mach-davinci/Kconfig"
 
  source "arch/arm/mach-digicolor/Kconfig"
 
@@ -11,19 +12,77 @@ diff --git a/arch/arm/Kconfig b/arch/arm/Kconfig
 
  source "arch/arm/mach-ep93xx/Kconfig"
 diff --git a/arch/arm/Makefile b/arch/arm/Makefile
+index b7de4b6..d37528d 100644
 --- a/arch/arm/Makefile
 +++ b/arch/arm/Makefile
-@@ -220,5 +220,6 @@ machine-$(CONFIG_ARCH_STI)		+= sti
+@@ -220,6 +220,7 @@ machine-$(CONFIG_ARCH_INTEL_SOCFPGA)	+= socfpga
+ machine-$(CONFIG_ARCH_STI)		+= sti
  machine-$(CONFIG_ARCH_STM32)		+= stm32
  machine-$(CONFIG_ARCH_SUNXI)		+= sunxi
 +machine-$(CONFIG_ARCH_UMS9117)		+= ums9117
  machine-$(CONFIG_ARCH_TEGRA)		+= tegra
  machine-$(CONFIG_ARCH_U8500)		+= ux500
  machine-$(CONFIG_ARCH_VT8500)		+= vt8500
+diff --git a/drivers/clocksource/Kconfig b/drivers/clocksource/Kconfig
+index 1119fbd..31518ac 100644
+--- a/drivers/clocksource/Kconfig
++++ b/drivers/clocksource/Kconfig
+@@ -507,7 +507,7 @@ config MTK_CPUX_TIMER
+ config SPRD_TIMER
+ 	bool "Spreadtrum timer driver" if EXPERT
+ 	depends on HAS_IOMEM
+-	depends on (ARCH_SPRD || COMPILE_TEST)
++	depends on (ARCH_SPRD || ARCH_UMS9117 || COMPILE_TEST)
+ 	default ARCH_SPRD
+ 	select TIMER_OF
+ 	help
+diff --git a/drivers/clocksource/timer-sprd.c b/drivers/clocksource/timer-sprd.c
+index 430cb99..9f3ad5b 100644
+--- a/drivers/clocksource/timer-sprd.c
++++ b/drivers/clocksource/timer-sprd.c
+@@ -207,3 +207,6 @@ static int __init sprd_suspend_timer_init(struct device_node *np)
+ TIMER_OF_DECLARE(sc9860_timer, "sprd,sc9860-timer", sprd_timer_init);
+ TIMER_OF_DECLARE(sc9860_persistent_timer, "sprd,sc9860-suspend-timer",
+ 		 sprd_suspend_timer_init);
++TIMER_OF_DECLARE(pike2_timer, "sprd,pike2-timer", sprd_timer_init);
++TIMER_OF_DECLARE(pike2_persistent_timer, "sprd,pike2-suspend-timer",
++		 sprd_suspend_timer_init);
+diff --git a/drivers/input/keyboard/Kconfig b/drivers/input/keyboard/Kconfig
+index 2ff4fef..3ba6eb0 100644
+--- a/drivers/input/keyboard/Kconfig
++++ b/drivers/input/keyboard/Kconfig
+@@ -715,6 +715,16 @@ config KEYBOARD_TWL4030
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called twl4030_keypad.
+
++config KEYBOARD_UMS9117
++	bool "Unisoc UMS9117 keypad"
++	depends on ARCH_UMS9117
++	select INPUT_MATRIXKMAP
++	help
++	  Use the UMS9117 matrix keypad. The matrix can use an optional direct
++	  controller interrupt where the board describes that route; otherwise
++	  it is polled. A board may add target-owned analog keys through a
++	  GPIO interrupt provider while retaining one input device.
++
+ config KEYBOARD_XTKBD
+ 	tristate "XT keyboard"
+ 	select SERIO
+diff --git a/drivers/input/keyboard/Makefile b/drivers/input/keyboard/Makefile
+index 2d906e1..2b64479 100644
+--- a/drivers/input/keyboard/Makefile
++++ b/drivers/input/keyboard/Makefile
+@@ -69,4 +69,5 @@ obj-$(CONFIG_KEYBOARD_TC3589X)		+= tc3589x-keypad.o
+ obj-$(CONFIG_KEYBOARD_TEGRA)		+= tegra-kbc.o
+ obj-$(CONFIG_KEYBOARD_TM2_TOUCHKEY)	+= tm2-touchkey.o
+ obj-$(CONFIG_KEYBOARD_TWL4030)		+= twl4030_keypad.o
++obj-$(CONFIG_KEYBOARD_UMS9117)		+= ums9117-keypad.o
+ obj-$(CONFIG_KEYBOARD_XTKBD)		+= xtkbd.o
 diff --git a/drivers/usb/musb/Kconfig b/drivers/usb/musb/Kconfig
+index f569292..d9b68e0 100644
 --- a/drivers/usb/musb/Kconfig
 +++ b/drivers/usb/musb/Kconfig
-@@ -86,6 +86,18 @@ config USB_MUSB_UX500
+@@ -98,6 +98,18 @@ config USB_MUSB_UX500
  	tristate "Ux500 platforms"
  	depends on ARCH_U8500 || COMPILE_TEST
 
@@ -43,9 +102,11 @@ diff --git a/drivers/usb/musb/Kconfig b/drivers/usb/musb/Kconfig
  	tristate "JZ4740"
  	depends on OF
 diff --git a/drivers/usb/musb/Makefile b/drivers/usb/musb/Makefile
+index 5dccf0e..c496d9b 100644
 --- a/drivers/usb/musb/Makefile
 +++ b/drivers/usb/musb/Makefile
-@@ -22,5 +22,6 @@ obj-$(CONFIG_USB_MUSB_TUSB6010)			+= tusb6010.o
+@@ -20,6 +20,7 @@ obj-$(CONFIG_USB_MUSB_DSPS)			+= musb_dsps.o
+ obj-$(CONFIG_USB_MUSB_TUSB6010)			+= tusb6010.o
  obj-$(CONFIG_USB_MUSB_DA8XX)			+= da8xx.o
  obj-$(CONFIG_USB_MUSB_UX500)			+= ux500.o
 +obj-$(CONFIG_USB_MUSB_UMS9117)			+= ums9117.o
@@ -53,6 +114,7 @@ diff --git a/drivers/usb/musb/Makefile b/drivers/usb/musb/Makefile
  obj-$(CONFIG_USB_MUSB_SUNXI)			+= sunxi.o
  obj-$(CONFIG_USB_MUSB_MEDIATEK)      		+= mediatek.o
 diff --git a/drivers/usb/musb/musb_core.c b/drivers/usb/musb/musb_core.c
+index c7234b2..4389fe5 100644
 --- a/drivers/usb/musb/musb_core.c
 +++ b/drivers/usb/musb/musb_core.c
 @@ -72,6 +72,7 @@
@@ -63,7 +125,7 @@ diff --git a/drivers/usb/musb/musb_core.c b/drivers/usb/musb/musb_core.c
  #include <linux/string_choices.h>
  #include <linux/io.h>
  #include <linux/iopoll.h>
-@@ -2511,8 +2512,8 @@ static int musb_init_controller(struct device *dev, int nIrq, void __iomem *ctrl)
+@@ -2511,8 +2512,8 @@ musb_init_controller(struct device *dev, int nIrq, void __iomem *ctrl)
  		goto fail3;
  	}
  	musb->nIrq = nIrq;
@@ -124,9 +186,10 @@ diff --git a/drivers/usb/musb/musb_core.c b/drivers/usb/musb/musb_core.c
  	/* session might be disabled in suspend */
  	if (musb->port_mode == MUSB_HOST &&
 diff --git a/drivers/usb/musb/musb_core.h b/drivers/usb/musb/musb_core.h
+index 91b5b6b..223ac8f 100644
 --- a/drivers/usb/musb/musb_core.h
 +++ b/drivers/usb/musb/musb_core.h
-@@ -126,6 +126,7 @@
+@@ -126,6 +126,7 @@ struct musb_io;
   * @clearw:	could be clear-on-readw or W1C
   * @read_fifo:	reads the fifo
   * @write_fifo:	writes to fifo
@@ -134,14 +197,16 @@ diff --git a/drivers/usb/musb/musb_core.h b/drivers/usb/musb/musb_core.h
   * @get_toggle:	platform specific get toggle function
   * @set_toggle:	platform specific set toggle function
   * @dma_init:	platform specific dma init function
-@@ -175,5 +176,6 @@ struct musb_platform_ops {
+@@ -174,6 +175,7 @@ struct musb_platform_ops {
+ 	u16	(*clearw)(void __iomem *addr, u32 offset);
  	void	(*read_fifo)(struct musb_hw_ep *hw_ep, u16 len, u8 *buf);
  	void	(*write_fifo)(struct musb_hw_ep *hw_ep, u16 len, const u8 *buf);
-+	int	(*restart_rx)(struct musb *musb, u8 epnum);
++	int (*restart_rx)(struct musb *musb, u8 epnum);
  	u16	(*get_toggle)(struct musb_qh *qh, int is_out);
  	u16	(*set_toggle)(struct musb_qh *qh, int is_out, struct urb *urb);
  	struct dma_controller *
 diff --git a/drivers/usb/musb/musb_gadget.c b/drivers/usb/musb/musb_gadget.c
+index caf4d4c..e788f6b 100644
 --- a/drivers/usb/musb/musb_gadget.c
 +++ b/drivers/usb/musb/musb_gadget.c
 @@ -1181,6 +1181,9 @@ static int musb_ep_restart_resume_work(struct musb *musb, void *data)
@@ -154,53 +219,3 @@ diff --git a/drivers/usb/musb/musb_gadget.c b/drivers/usb/musb/musb_gadget.c
  	musb_ep_restart(musb, req);
 
  	return 0;
-diff --git a/drivers/input/keyboard/Kconfig b/drivers/input/keyboard/Kconfig
---- a/drivers/input/keyboard/Kconfig
-+++ b/drivers/input/keyboard/Kconfig
-@@ -715,6 +715,16 @@ config KEYBOARD_TWL4030
-
- 	  To compile this driver as a module, choose M here: the
- 	  module will be called twl4030_keypad.
-+
-+config KEYBOARD_UMS9117
-+	bool "Unisoc UMS9117 keypad"
-+	depends on ARCH_UMS9117
-+	select INPUT_MATRIXKMAP
-+	help
-+	  Use the UMS9117 matrix keypad. The matrix can use an optional direct
-+	  controller interrupt where the board describes that route; otherwise
-+	  it is polled. A board may add target-owned analog keys through a
-+	  GPIO interrupt provider while retaining one input device.
-
- config KEYBOARD_XTKBD
- 	tristate "XT keyboard"
-diff --git a/drivers/input/keyboard/Makefile b/drivers/input/keyboard/Makefile
---- a/drivers/input/keyboard/Makefile
-+++ b/drivers/input/keyboard/Makefile
-@@ -70,3 +70,4 @@ obj-$(CONFIG_KEYBOARD_TEGRA)		+= tegra-kbc.o
- obj-$(CONFIG_KEYBOARD_TM2_TOUCHKEY)	+= tm2-touchkey.o
- obj-$(CONFIG_KEYBOARD_TWL4030)		+= twl4030_keypad.o
-+obj-$(CONFIG_KEYBOARD_UMS9117)		+= ums9117-keypad.o
- obj-$(CONFIG_KEYBOARD_XTKBD)		+= xtkbd.o
-diff --git a/drivers/clocksource/Kconfig b/drivers/clocksource/Kconfig
---- a/drivers/clocksource/Kconfig
-+++ b/drivers/clocksource/Kconfig
-@@ -506,7 +506,7 @@ config MTK_TIMER
- config SPRD_TIMER
- 	bool "Spreadtrum timer driver" if EXPERT
- 	depends on HAS_IOMEM
--	depends on (ARCH_SPRD || COMPILE_TEST)
-+	depends on (ARCH_SPRD || ARCH_UMS9117 || COMPILE_TEST)
- 	default ARCH_SPRD
- 	select TIMER_OF
- 	help
-diff --git a/drivers/clocksource/timer-sprd.c b/drivers/clocksource/timer-sprd.c
---- a/drivers/clocksource/timer-sprd.c
-+++ b/drivers/clocksource/timer-sprd.c
-@@ -207,3 +207,6 @@ static int __init sprd_suspend_timer_init(struct device_node *np)
- TIMER_OF_DECLARE(sc9860_timer, "sprd,sc9860-timer", sprd_timer_init);
- TIMER_OF_DECLARE(sc9860_persistent_timer, "sprd,sc9860-suspend-timer",
- 		 sprd_suspend_timer_init);
-+TIMER_OF_DECLARE(pike2_timer, "sprd,pike2-timer", sprd_timer_init);
-+TIMER_OF_DECLARE(pike2_persistent_timer, "sprd,pike2-suspend-timer",
-+		 sprd_suspend_timer_init);
