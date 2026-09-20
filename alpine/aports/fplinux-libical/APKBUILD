@@ -1,0 +1,53 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-libical
+pkgver=3.0.20
+pkgrel=0
+pkgdesc="libical vCard parser for BlueZ obexd without ICU"
+url="https://libical.github.io/libical/"
+arch="armv7"
+license="LGPL-2.1-only OR MPL-2.0"
+makedepends_build="clang22 lld22 cmake perl samurai"
+makedepends_host="musl-dev"
+options="!check"
+source="https://github.com/libical/libical/releases/download/v$pkgver/libical-$pkgver.tar.gz"
+builddir="$srcdir/libical-$pkgver"
+
+build() {
+	: "${CC:?missing target CC}" \
+		"${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
+	CC="$CC" \
+	cmake -B build -G Ninja \
+		-DCMAKE_BUILD_TYPE=MinSizeRel \
+		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DCMAKE_INSTALL_LIBDIR=lib \
+		-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=armv7 \
+		-DCMAKE_C_COMPILER="$CC" -DCMAKE_C_COMPILER_TARGET="$CHOST" \
+		-DCMAKE_SYSROOT="$CBUILDROOT" \
+		-DCMAKE_FIND_ROOT_PATH="$CBUILDROOT" \
+		-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+		-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+		-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+		-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
+		-DCMAKE_DISABLE_FIND_PACKAGE_ICU=True \
+		-DSHARED_ONLY=True \
+		-DWITH_CXX_BINDINGS=False \
+		-DICAL_GLIB=False \
+		-DGOBJECT_INTROSPECTION=False \
+		-DICAL_BUILD_DOCS=False \
+		-DLIBICAL_BUILD_TESTING=False
+	cmake --build build
+	DESTDIR="$builddir/stage" cmake --install build
+}
+
+package() {
+	install -Dm755 "$builddir/stage/usr/lib/libical.so.$pkgver" \
+		"$pkgdir/usr/lib/libical.so.$pkgver"
+	ln -s "libical.so.$pkgver" "$pkgdir/usr/lib/libical.so.3"
+	install -Dm755 "$builddir/stage/usr/lib/libicalvcal.so.$pkgver" \
+		"$pkgdir/usr/lib/libicalvcal.so.$pkgver"
+	ln -s "libicalvcal.so.$pkgver" "$pkgdir/usr/lib/libicalvcal.so.3"
+}
+
+sha512sums="
+2506320240ba0e4287b6ef1b90b653eacd51105d392b91f8c772f3b0745fecbf55eecfe81f89413cc56106b71ccca780754df31f5190ffce6c372126e27bf1da  libical-3.0.20.tar.gz
+"

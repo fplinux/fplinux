@@ -35,26 +35,14 @@ fplinux-bluetooth = [
   "dbus-1.16.2-r2.apk",
   "dbus-libs-1.16.2-r2.apk",
   "dbus-openrc-1.16.2-r2.apk",
-  "glib-2.88.1-r1.apk",
-  "icu-data-en-78.1-r0.apk",
-  "icu-libs-78.1-r0.apk",
   "json-c-0.18-r1.apk",
-  "libblkid-2.42.1-r0.apk",
-  "libeconf-0.8.3-r0.apk",
   "libexpat-2.8.4-r0.apk",
-  "libffi-3.5.2-r1.apk",
   "libgcc-15.2.0-r5.apk",
-  "libical-3.0.20-r1.apk",
-  "libintl-1.0-r0.apk",
-  "libmount-2.42.3-r1.apk",
   "libncursesw-6.6_p20260516-r0.apk",
-  "libstdc++-15.2.0-r5.apk",
   "libudev-zero-1.0.4-r0.apk",
-  "libxml2-2.13.9-r2.apk",
   "ncurses-terminfo-base-6.6_p20260516-r0.apk",
   "pcre2-10.48-r0.apk",
   "readline-8.3.3-r1.apk",
-  "xz-libs-5.8.3-r0.apk",
 ]
 
 fplinux-microsd-root = [
@@ -78,6 +66,7 @@ fplinux-microsd-root = [
 [sysroot]
 packages = [
   "binutils-2.45.1-r1.apk",
+  "bsd-compat-headers-0.7.2-r6.apk",
   "dbus-dev-1.16.2-r2.apk",
   "dbus-libs-1.16.2-r2.apk",
   "gcc-15.2.0-r5.apk",
@@ -85,17 +74,34 @@ packages = [
   "isl26-0.26-r2.apk",
   "jansson-2.15.0-r0.apk",
   "libatomic-15.2.0-r5.apk",
+  "libedit-20260508.3.1-r1.apk",
+  "libedit-dev-20260508.3.1-r1.apk",
+  "libffi-3.5.2-r1.apk",
+  "libffi-dev-3.5.2-r1.apk",
+  "libformw-6.6_p20260516-r0.apk",
   "libgcc-15.2.0-r5.apk",
   "libgcc-static-15.2.0-r5.apk",
   "libgomp-15.2.0-r5.apk",
+  "libmenuw-6.6_p20260516-r0.apk",
+  "libncurses++-6.6_p20260516-r0.apk",
+  "libncursesw-6.6_p20260516-r0.apk",
+  "libpanelw-6.6_p20260516-r0.apk",
+  "libpcre2-16-10.48-r0.apk",
+  "libpcre2-32-10.48-r0.apk",
   "libstdc++-15.2.0-r5.apk",
   "linux-headers-7.0.0-r1.apk",
   "mpc1-1.3.1-r1.apk",
   "mpfr4-4.2.2-r0.apk",
   "musl-1.2.6-r2.apk",
   "musl-dev-1.2.6-r2.apk",
+  "musl-libintl-1.2.6-r2.apk",
+  "ncurses-dev-6.6_p20260516-r0.apk",
+  "ncurses-terminfo-base-6.6_p20260516-r0.apk",
+  "pcre2-10.48-r0.apk",
+  "pcre2-dev-10.48-r0.apk",
   "pkgconf-2.5.1-r0.apk",
   "zlib-1.3.2-r0.apk",
+  "zlib-dev-1.3.2-r0.apk",
   "zstd-libs-1.5.7-r2.apk",
 ]
 
@@ -389,24 +395,6 @@ bytes = 2799
 
 [[package]]
 repository = "main"
-file = "glib-2.88.1-r1.apk"
-sha256 = "4a2bf7b7d6255307f2c818087b740626c404f577b5f62dca1dd0ba8f57292237"
-bytes = 1778244
-
-[[package]]
-repository = "main"
-file = "icu-data-en-78.1-r0.apk"
-sha256 = "344b21bbd5b2f288ec21d2e2a7143f3782b64a622b1ebbc44beb9704b075327e"
-bytes = 1025818
-
-[[package]]
-repository = "main"
-file = "icu-libs-78.1-r0.apk"
-sha256 = "6f4316b3a46ce659daf05ea07809965d92423a420affa9039cee43dfcca80b2a"
-bytes = 2003952
-
-[[package]]
-repository = "main"
 file = "json-c-0.18-r1.apk"
 sha256 = "f1324ea7fe535bee259e71cc0541a2647c4c576a33221a10baea164983f6c667"
 bytes = 24070
@@ -424,34 +412,10 @@ sha256 = "cf9343ce68d6c54f1112c5328c8a39ea3a3c289c1020ddec164f0f5e5e19aaf4"
 bytes = 15149
 
 [[package]]
-repository = "main"
-file = "libical-3.0.20-r1.apk"
-sha256 = "9a8fc0cd2bb6aa22ce811bdbbda97ffe51710a9840dcc6d1df116447cacbcae9"
-bytes = 362095
-
-[[package]]
-repository = "main"
-file = "libintl-1.0-r0.apk"
-sha256 = "b3c661a74bfefc8aa5c52782756650a5f35ba7b1b7e0b64de1393146054f0e57"
-bytes = 33174
-
-[[package]]
-repository = "main"
-file = "libmount-2.42.3-r1.apk"
-sha256 = "6b05c9467bc7a1132a89f02dc23f2ada0621d5c989b2d08cd685af6cf7cd3380"
-bytes = 127712
-
-[[package]]
 repository = "community"
 file = "libudev-zero-1.0.4-r0.apk"
 sha256 = "6b5298e7f54ae8db9dcaee10200a54c4dc00a20dd06cd3c165224efde9db904e"
 bytes = 10337
-
-[[package]]
-repository = "main"
-file = "libxml2-2.13.9-r2.apk"
-sha256 = "13493e76a0a019114c8cb2600a5417971d417bc61ee1d74c55614fa3be3520a4"
-bytes = 428943
 
 [[package]]
 repository = "main"
@@ -473,6 +437,84 @@ bytes = 112798
 
 [[package]]
 repository = "main"
-file = "xz-libs-5.8.3-r0.apk"
-sha256 = "68092adc186ffbb31de64c6f1f5485bb866a8a967b1be29ed3e49cbc2386b27e"
-bytes = 103441
+file = "bsd-compat-headers-0.7.2-r6.apk"
+sha256 = "7549b5815ea588e727e0930b9e416553a944694aaec422686311be7e0b190569"
+bytes = 12020
+
+[[package]]
+repository = "main"
+file = "libedit-20260508.3.1-r1.apk"
+sha256 = "62be3fb7907bb5fbb471589872d544b8f6b7880e8fd7ac2bb86f1bac72cbd1d2"
+bytes = 64523
+
+[[package]]
+repository = "main"
+file = "libedit-dev-20260508.3.1-r1.apk"
+sha256 = "f77cad3949c05230839f65cadee6baa4b06590469cfd7f4eee738a715050bb54"
+bytes = 7759
+
+[[package]]
+repository = "main"
+file = "libffi-dev-3.5.2-r1.apk"
+sha256 = "f4a07c9f59c177ac3d3d3cc6eba982b6a8d8fdf356af67cd18a01c660d43775d"
+bytes = 75512
+
+[[package]]
+repository = "main"
+file = "libformw-6.6_p20260516-r0.apk"
+sha256 = "51e9222d2f80b425cd63376b49857856a0b0cd5cff2f0df7c509e5e8261a639f"
+bytes = 22393
+
+[[package]]
+repository = "main"
+file = "libmenuw-6.6_p20260516-r0.apk"
+sha256 = "15c07b53c5f70fe5c9a602c4747474328c554db17f1332b02b96fe551ed040da"
+bytes = 12174
+
+[[package]]
+repository = "main"
+file = "libncurses++-6.6_p20260516-r0.apk"
+sha256 = "97357f764e64bd867bfa89e05840e94b77f9f01a7e4fe09ae5fdfdf40ca3bde6"
+bytes = 21215
+
+[[package]]
+repository = "main"
+file = "libpanelw-6.6_p20260516-r0.apk"
+sha256 = "188ab20ed6a84c68d8d7e6e3e76d5ccc08e4ecc60e784145df2f99d6afbf1f92"
+bytes = 5031
+
+[[package]]
+repository = "main"
+file = "libpcre2-16-10.48-r0.apk"
+sha256 = "5c913685d48cb0f31f6241a79eed31142feda3fb3839a5770517128ed50197ee"
+bytes = 249087
+
+[[package]]
+repository = "main"
+file = "libpcre2-32-10.48-r0.apk"
+sha256 = "da39e2827a2c98118fc40d0e46047f338cdd8f12715244e76672d0bc03296b2a"
+bytes = 234501
+
+[[package]]
+repository = "main"
+file = "ncurses-dev-6.6_p20260516-r0.apk"
+sha256 = "dd91a81552c56ae7fe1c7b1cdbc4cef0ae1636146838981dfb05abce2a888f43"
+bytes = 71981
+
+[[package]]
+repository = "main"
+file = "pcre2-dev-10.48-r0.apk"
+sha256 = "89589d785c0cdb0b37511f4b0b4ad0d9b585bd499d846940462c0fd69a2e9f30"
+bytes = 17157
+
+[[package]]
+repository = "main"
+file = "zlib-dev-1.3.2-r0.apk"
+sha256 = "5975381ff03d0977ba0fa702a7055c98445a761594de70c5948a02273a54e19a"
+bytes = 34424
+
+[[package]]
+repository = "main"
+file = "musl-libintl-1.2.6-r2.apk"
+sha256 = "79bf3e2d9fc3ea46c8b50b9d5d60241dcc5cb9d7b29e64466a905b9a358758e4"
+bytes = 1806

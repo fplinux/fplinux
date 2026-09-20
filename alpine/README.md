@@ -24,6 +24,11 @@ Target-neutral host and runtime tools and their contracts belong in
   same implementation into multiple aports.
 - Do not add rootfs overlays, duplicate package recipes, target-local copies, or
   ad-hoc installers for software that already belongs in an aport.
+- Rebuild an upstream component in its own `fplinux-` aport only when the
+  locked Alpine build drags a runtime closure the RAM root filesystem cannot
+  afford. Install only the runtime files its consumer loads and drop the
+  replaced Alpine artifacts from `alpine.lock.toml`; `fplinux-libical` and
+  `fplinux-glib` replace `libical` and `glib` for the BlueZ daemons this way.
 - Add a hardware-specific package only when its public interface is genuinely
   specific to that hardware. Shared kernel and userspace interfaces belong in a
   shared package.
