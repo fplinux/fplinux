@@ -28,7 +28,7 @@ def _is_exact_mount(path):
 
 
 class FPLinuxStorage:
-    """Expose one target-declared removable filesystem mounted by the wrapper."""
+    """Expose an already-mounted filesystem selected by the Linux wrapper."""
 
     @classmethod
     def init(cls, *args, **kwargs):

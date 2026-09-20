@@ -1,0 +1,15 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+# The harness supplies the controlled policy path and its override variables.
+# The dynamically sourced policy consumes every mpos_* assignment below.
+# shellcheck disable=SC1090,SC2034,SC2154
+set -eu
+set -f
+. "$FPLINUX_TEST_POLICY"
+mpos_config_path=$FPLINUX_TEST_CONFIG
+mpos_framebuffer_path=/dev/null
+mpos_input_path=/dev
+mpos_mountinfo_path=$FPLINUX_TEST_MOUNTINFO
+mpos_runtime_path=$FPLINUX_TEST_RUNTIME
+mpos_launcher_path=$FPLINUX_TEST_LAUNCHER
+micropythonos_main "$@"

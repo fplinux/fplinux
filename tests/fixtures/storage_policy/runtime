@@ -1,0 +1,14 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+# The policy and host-process harness supply this runtime environment contract.
+# shellcheck disable=SC2154
+{
+	printf 'cwd=%s\n' "$PWD"
+	printf 'MPOS_STORAGE=%s\n' "$MPOS_STORAGE"
+	printf 'MPOS_ROOT=%s\n' "$MPOS_ROOT"
+	printf 'MPOS_PACKAGED_APPS=%s\n' "$MPOS_PACKAGED_APPS"
+	for argument in "$@"; do
+		printf 'argv=%s\n' "$argument"
+	done
+} >"$FPLINUX_TEST_RUNTIME_ENVIRONMENT"
+printf 'application state\n' >data/storage-probe.txt
