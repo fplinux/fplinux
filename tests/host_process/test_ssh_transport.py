@@ -8,7 +8,9 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from typing import Any
@@ -53,6 +55,27 @@ esac
 
         with mock.patch.dict(os.environ, {"PATH": str(tool_directory)}):
             self.assertTrue(ssh_transport._network_ready("usb0", session))  # noqa: SLF001
+
+    def test_reacquire_bounds_an_unresponsive_identity_command(self) -> None:
+        """A stalled SSH probe cannot outlive the session reconnect deadline."""
+        session = create_ready_session(self.root)
+        # A sleeping local process replaces an SSH channel that never replies.
+        # USB discovery is controlled; the process timeout and cleanup are real.
+        with (
+            mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
+            mock.patch.object(ssh_transport, "_usb_devices", return_value=[Path("/usb/phone")]),
+            mock.patch.object(ssh_transport, "_ncm_interface", return_value="usb0"),
+            mock.patch.object(ssh_transport, "_network_ready", return_value=True),
+            mock.patch.object(
+                ssh_transport,
+                "_ssh_argv",
+                return_value=[sys.executable, "-c", "import time; time.sleep(5)"],
+            ),
+        ):
+            started = time.monotonic()
+            with self.assertRaisesRegex(SystemExit, "did not reconnect before the deadline"):
+                ssh_transport.reacquire_bound_session(session)
+            self.assertLess(time.monotonic() - started, 3)
 
     def test_initial_binding_retries_fake_ssh_tools_and_enforces_key_policy(self) -> None:
         """Retry deterministic keyscan output before accepting a matching session id."""
@@ -155,7 +178,10 @@ class SshTransportUploadTests(unittest.TestCase):
                 )
 
                 def local_ssh(
-                    _session: dict[str, Any], command: str, shell_prefix: str = shell_tools
+                    _session: dict[str, Any],
+                    command: str,
+                    shell_prefix: str = shell_tools,
+                    **_options: object,
                 ) -> list[str]:
                     return ["/bin/sh", "-c", shell_prefix + command]
 

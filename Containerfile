@@ -47,6 +47,7 @@ RUN set -eux; \
         make=4.4.1-r4 \
         mtools=4.0.49-r0 \
         openssh-client-default=10.3_p1-r1 \
+        openssh-server=10.3_p1-r1 \
         patch=2.8-r0 \
         perl=5.42.2-r0 \
         pkgconf=2.5.1-r0 \
