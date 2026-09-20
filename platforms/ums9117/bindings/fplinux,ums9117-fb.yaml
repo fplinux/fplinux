@@ -124,9 +124,13 @@ properties:
     description: Four BLTC current codes, one per WLED channel, each 0 through 63.
 
   sprd,dbi-timing-ns:
-    $ref: /schemas/types.yaml#/definitions/uint32-array
-    minItems: 6
-    maxItems: 6
+    items:
+      - description: Read CS setup
+      - description: Read low pulse
+      - description: Read high pulse
+      - description: Write CS setup
+      - description: Write low pulse
+      - description: Write high pulse
     description: |
       LCM/DBI timing tuple in nanoseconds: read CS setup, read low pulse,
       read high pulse, write CS setup, write low pulse, write high pulse.

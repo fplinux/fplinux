@@ -70,8 +70,6 @@ properties:
 
   sprd,pinmux-values:
     $ref: /schemas/types.yaml#/definitions/uint32-array
-    minItems: 17
-    maxItems: 17
     items:
       - const: 0
       - const: 0
@@ -94,8 +92,6 @@ properties:
 
   sprd,pinconf-values:
     $ref: /schemas/types.yaml#/definitions/uint32-array
-    minItems: 16
-    maxItems: 16
     items:
       - const: 3145728
       - const: 3145728
