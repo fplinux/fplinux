@@ -5,13 +5,12 @@
 #include <linux/io.h>
 #include <linux/types.h>
 
-struct platform_device;
-struct regmap;
+struct device;
 
-/* Resolve mappings and exclusive IRQs before changing controller power. */
-int ums9117_cm4_mailbox_init(struct platform_device *pdev);
+/* Claim the native mailbox channel before changing controller power. */
+int ums9117_cm4_mailbox_init(struct device *dev);
 /* One cold boot, CM4 reset held, noncached 128-KiB SIPC mapping. */
-int ums9117_cm4_mailbox_prepare(void __iomem *sipc, struct regmap *aon);
+int ums9117_cm4_mailbox_prepare(void __iomem *sipc);
 /* Single IRQ-enabled caller: first the prologue, then the stream worker. */
 int ums9117_cm4_mailbox_poll(void);
 /* Wait for DONE delivery and CM4's initial tx_rd reset before any H4 TX. */
@@ -25,13 +24,13 @@ int ums9117_cm4_mailbox_h4_continue(void);
 int ums9117_cm4_mailbox_h4_write(const u8 *data, size_t bytes, size_t *written);
 int ums9117_cm4_mailbox_h4_read(u8 *data, size_t capacity, size_t *received);
 /*
- * The stream owner has stopped new I/O. Suspend masks IRQs only after both
- * ring0 directions and notifications drain; -EBUSY leaves service unchanged.
- * Resume preserves the peer's descriptors, counters and any retained input.
+ * The stream owner has stopped new I/O. Suspend succeeds only after both ring0
+ * directions and queued notifications drain; the native channel remains
+ * claimed to service its no-suspend IRQ. Resume preserves peer state.
  */
 int ums9117_cm4_mailbox_suspend(void);
 int ums9117_cm4_mailbox_resume(void);
-/* Quiesce the stream first, then mask IRQs here before holding CM4 reset. */
+/* Quiesce the stream first, then hold CM4 reset after this returns. */
 void ums9117_cm4_mailbox_stop(void);
 
 #endif

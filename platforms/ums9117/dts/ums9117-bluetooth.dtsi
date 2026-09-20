@@ -7,14 +7,23 @@
 			reg = <0x402b0000 0x3000>;
 		};
 
-		bluetooth: bluetooth@400a0000 {
-			compatible = "fplinux,ums9117-bluetooth";
-			reg = <0x400a0000 0x1000>, <0x400a8000 0x1000>,
-			      <0x80000000 0x100000>, <0x50800000 0x1000>;
-			reg-names = "send", "receive", "sipc-cm4", "boot-vector";
+		mailbox: mailbox@400a0000 {
+			compatible = "sprd,sc9860-mailbox";
+			reg = <0x400a0000 0x1000>, <0x400a8000 0x1000>;
 			interrupts = <GIC_SPI 68 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 69 IRQ_TYPE_LEVEL_HIGH>;
-			interrupt-names = "send", "receive";
+			interrupt-names = "inbox", "outbox";
+			clocks = <&aonapb_gate CLK_MBOX_EB>;
+			clock-names = "enable";
+			#mbox-cells = <1>;
+		};
+
+		bluetooth: bluetooth@80000000 {
+			compatible = "fplinux,ums9117-bluetooth";
+			reg = <0x80000000 0x100000>, <0x50800000 0x1000>;
+			reg-names = "sipc-cm4", "boot-vector";
+			mboxes = <&mailbox 1>;
+			mbox-names = "cm4";
 			sprd,aon-apb = <&aon_apb>;
 			sprd,pmu-apb = <&bt_pmu>;
 		};

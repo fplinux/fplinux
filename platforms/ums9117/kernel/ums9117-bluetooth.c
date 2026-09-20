@@ -322,7 +322,7 @@ static int start_controller(struct ums9117_bluetooth *bt)
 	u64 started;
 	int ret;
 
-	ret = ums9117_cm4_mailbox_prepare(bt->low, bt->aon);
+	ret = ums9117_cm4_mailbox_prepare(bt->low);
 	if (ret)
 		return ret;
 	/* Ordinary idle is polled; only a quiesced system suspend releases it. */
@@ -604,7 +604,11 @@ static int ums9117_bluetooth_probe(struct platform_device *pdev)
 	if (IS_ERR(bt->iram))
 		return dev_err_probe(dev, PTR_ERR(bt->iram),
 				     "CM4 boot vector unavailable\n");
-	ret = ums9117_cm4_mailbox_init(pdev);
+	/* Binding a mailbox channel resets its FIFO; the CM4 must be stopped. */
+	ret = check_cold_state(bt);
+	if (ret)
+		return dev_err_probe(dev, ret, "CM4 is not in cold state\n");
+	ret = ums9117_cm4_mailbox_init(dev);
 	if (ret)
 		return dev_err_probe(dev, ret,
 				     "mailbox resources unavailable\n");

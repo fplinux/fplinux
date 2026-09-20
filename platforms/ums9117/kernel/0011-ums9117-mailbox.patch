@@ -1,0 +1,55 @@
+diff --git a/drivers/mailbox/Kconfig b/drivers/mailbox/Kconfig
+index 29f16f2..c950f68 100644
+--- a/drivers/mailbox/Kconfig
++++ b/drivers/mailbox/Kconfig
+@@ -325,7 +325,7 @@ config SUN6I_MSGBOX
+
+ config SPRD_MBOX
+ 	tristate "Spreadtrum Mailbox"
+-	depends on ARCH_SPRD || COMPILE_TEST
++	depends on ARCH_SPRD || ARCH_UMS9117 || COMPILE_TEST
+ 	help
+ 	  Mailbox driver implementation for the Spreadtrum platform. It is used
+ 	  to send message between application processors and MCU. Say Y here if
+diff --git a/drivers/mailbox/sprd-mailbox.c b/drivers/mailbox/sprd-mailbox.c
+index 46d0c34..a6cf1f4 100644
+--- a/drivers/mailbox/sprd-mailbox.c
++++ b/drivers/mailbox/sprd-mailbox.c
+@@ -117,7 +117,8 @@ static irqreturn_t do_outbox_isr(void __iomem *base, struct sprd_mbox_priv *priv
+ 	for (i = 0; i < fifo_len; i++) {
+ 		msg[0] = readl(base + SPRD_MBOX_MSG_LOW);
+ 		msg[1] = readl(base + SPRD_MBOX_MSG_HIGH);
+-		id = readl(base + SPRD_MBOX_ID);
++		/* Only the low three ID bits select one of the eight channels. */
++		id = readl(base + SPRD_MBOX_ID) & (SPRD_MBOX_CHAN_MAX - 1);
+
+ 		chan = &priv->chan[id];
+ 		if (chan->cl)
+@@ -328,6 +329,18 @@ static int sprd_mbox_probe(struct platform_device *pdev)
+ 		return PTR_ERR(clk);
+ 	}
+
++	/*
++	 * Firmware can leave a FIFO interrupt pending across the Linux handoff.
++	 * Keep the primary boxes quiet until startup() has bound and initialized
++	 * the first client; it restores the masks before returning.
++	 */
++	writel(SPRD_INBOX_FIFO_IRQ_MASK, priv->inbox_base + SPRD_MBOX_IRQ_MSK);
++	writel(SPRD_OUTBOX_FIFO_IRQ_MASK,
++	       priv->outbox_base + SPRD_MBOX_IRQ_MSK);
++	/* Finish peripheral masking before request_irq() enables either GIC line. */
++	readl(priv->inbox_base + SPRD_MBOX_IRQ_MSK);
++	readl(priv->outbox_base + SPRD_MBOX_IRQ_MSK);
++
+ 	inbox_irq = platform_get_irq_byname(pdev, "inbox");
+ 	if (inbox_irq < 0)
+ 		return inbox_irq;
+@@ -351,7 +364,7 @@ static int sprd_mbox_probe(struct platform_device *pdev)
+ 	}
+
+ 	/* Supplementary outbox IRQ is optional */
+-	supp_irq = platform_get_irq_byname(pdev, "supp-outbox");
++	supp_irq = platform_get_irq_byname_optional(pdev, "supp-outbox");
+ 	if (supp_irq > 0) {
+ 		ret = devm_request_irq(dev, supp_irq, sprd_mbox_supp_isr,
+ 				       IRQF_NO_SUSPEND, dev_name(dev), priv);

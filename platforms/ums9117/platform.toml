@@ -126,6 +126,7 @@ patches = [
   "platforms/ums9117/kernel/0008-ums9117-thermal-efuse.patch",
   "platforms/ums9117/kernel/0009-sc2720-adc-efuse.patch",
   "platforms/ums9117/kernel/0010-sc2720-leaf-drivers.patch",
+  "platforms/ums9117/kernel/0011-ums9117-mailbox.patch",
 ]
 
 [[linux.copies]]
@@ -431,14 +432,6 @@ destination = "drivers/bluetooth/ums9117/cm4-hci.c"
 [[linux.copies]]
 source = "platforms/ums9117/kernel/cm4-hci.h"
 destination = "drivers/bluetooth/ums9117/cm4-hci.h"
-
-[[linux.copies]]
-source = "platforms/ums9117/kernel/cm4-h4.c"
-destination = "drivers/bluetooth/ums9117/cm4-h4.c"
-
-[[linux.copies]]
-source = "platforms/ums9117/kernel/cm4-h4.h"
-destination = "drivers/bluetooth/ums9117/cm4-h4.h"
 
 [[linux.copies]]
 source = "platforms/ums9117/kernel/bluetooth.Kconfig"
