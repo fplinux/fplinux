@@ -22,8 +22,8 @@ description: |
   block-lock programming is exposed. Other nonzero B0 states are rejected.
   The controller and its owned platform state are also restored. Hardware is
   activated only for explicit reads. A compatible selects the board resource
-  contract, not the identity of the fitted flash. The Nokia compatible keeps
-  /dev/ta1618-nand-raw; both INOI compatibles use /dev/ums9117-nand-raw.
+  contract, not the identity of the fitted flash. The driver registers
+  /dev/ums9117-nand-raw for every compatible.
 
 properties:
   compatible:

@@ -107,7 +107,7 @@ esac
             nand_backup.backup_nand(
                 lambda: (ssh_transport, self.session),
                 destination,
-                raw_device="/dev/ta1618-nand-raw",
+                raw_device="/dev/ums9117-nand-raw",
                 raw_page_bytes=2176,
             )
 
@@ -120,7 +120,7 @@ esac
             (
                 "nokia-ta1618",
                 "microsd-uboot",
-                "exec dd if=/dev/ta1618-nand-raw bs=65280",
+                "exec dd if=/dev/ums9117-nand-raw bs=65280",
                 142606336,
             ),
             (

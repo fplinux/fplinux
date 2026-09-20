@@ -25,7 +25,6 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
 #include <linux/sched/signal.h>
@@ -1351,12 +1350,9 @@ static const struct file_operations ums9117_nandc_raw_fops = {
 
 static int ums9117_nandc_probe(struct platform_device *pdev)
 {
-	const char *raw_device_name = of_device_get_match_data(&pdev->dev);
 	struct ums9117_nandc *nandc;
 	int ret;
 
-	if (!raw_device_name)
-		return -ENODEV;
 	nandc = devm_kzalloc(&pdev->dev, sizeof(*nandc), GFP_KERNEL);
 	if (!nandc)
 		return -ENOMEM;
@@ -1427,7 +1423,7 @@ static int ums9117_nandc_probe(struct platform_device *pdev)
 	}
 	nandc->audit_file_created = true;
 	nandc->raw_misc.minor = MISC_DYNAMIC_MINOR;
-	nandc->raw_misc.name = raw_device_name;
+	nandc->raw_misc.name = "ums9117-nand-raw";
 	nandc->raw_misc.fops = &ums9117_nandc_raw_fops;
 	nandc->raw_misc.parent = &pdev->dev;
 	nandc->raw_misc.mode = 0444;
@@ -1483,18 +1479,9 @@ static void ums9117_nandc_shutdown(struct platform_device *pdev)
 }
 
 static const struct of_device_id ums9117_nandc_of_match[] = {
-	{
-		.compatible = "fplinux,ta1618-nandc-ro",
-		.data = "ta1618-nand-raw",
-	},
-	{
-		.compatible = "fplinux,inoi240-nandc-ro",
-		.data = "ums9117-nand-raw",
-	},
-	{
-		.compatible = "fplinux,inoi244-nandc-ro",
-		.data = "ums9117-nand-raw",
-	},
+	{ .compatible = "fplinux,ta1618-nandc-ro" },
+	{ .compatible = "fplinux,inoi240-nandc-ro" },
+	{ .compatible = "fplinux,inoi244-nandc-ro" },
 	{}
 };
 MODULE_DEVICE_TABLE(of, ums9117_nandc_of_match);
