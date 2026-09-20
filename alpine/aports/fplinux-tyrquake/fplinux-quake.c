@@ -15,6 +15,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "fplinux-cli.h"
 #include "fplinux-quake-internal.h"
 #include "fplinux-fb-session.h"
 
@@ -25,10 +26,13 @@
 #define FPLINUX_QUAKE_FRAMEBUFFER_DEVICE "/dev/fb0"
 #define FPLINUX_QUAKE_LOCK_PATH "/tmp/fplinux-quake.lock"
 #define FPLINUX_QUAKE_TTY_DEVICE "/dev/tty0"
-
-struct display_state {
-	struct fplinux_fb_session session;
-};
+/* Kibibytes the engine reserves for its own allocator. The default suits a
+ * phone that keeps its game data on a card; a phone holding that data in RAM
+ * has less room and can ask for less. Below the classic minimum the engine
+ * refuses to start, so the range stops there. */
+#define FPLINUX_QUAKE_HEAP_DEFAULT_KIB 32768UL
+#define FPLINUX_QUAKE_HEAP_MINIMUM_KIB 8192UL
+#define FPLINUX_QUAKE_HEAP_MAXIMUM_KIB 262144UL
 
 static volatile sig_atomic_t pending_signal;
 
@@ -263,36 +267,39 @@ void fplinux_quake_remove_runtime(const char *runtime)
 			strerror(errno));
 }
 
-static void save_display(struct display_state *state)
+static void save_display(struct fplinux_fb_session *session)
 {
 	char error[128];
 
-	if (!fplinux_fb_session_open(
-		    &state->session, FPLINUX_QUAKE_FRAMEBUFFER_DEVICE,
-		    FPLINUX_QUAKE_TTY_DEVICE, error, sizeof(error)))
+	if (!fplinux_fb_session_open(session, FPLINUX_QUAKE_FRAMEBUFFER_DEVICE,
+				     FPLINUX_QUAKE_TTY_DEVICE, error,
+				     sizeof(error)))
 		die(error);
 }
 
-static bool restore_display(struct display_state *state)
+static pid_t start_engine(const char *runtime, const char *input_mode,
+			  unsigned long heap_kib)
 {
-	return fplinux_fb_session_close(&state->session);
-}
+	char heap[32];
+	pid_t child;
 
-static pid_t start_engine(const char *runtime, const char *input_mode)
-{
+	if (snprintf(heap, sizeof(heap), "%lu", heap_kib) >= (int)sizeof(heap))
+		die("heap size is too long");
+
 	char *const arguments[] = {
 		(char *)FPLINUX_QUAKE_ENGINE,
 		"-nolan",
 		"-basedir",
 		(char *)runtime,
 		"-heapsize",
-		"32768",
+		heap,
 		"-input",
 		(char *)input_mode,
 		"+mlook",
 		NULL,
 	};
-	pid_t child = fork();
+
+	child = fork();
 
 	if (child < 0)
 		die_errno("cannot start TyrQuake");
@@ -334,36 +341,124 @@ static int wait_for_engine(pid_t child)
 	return EXIT_FAILURE;
 }
 
+enum quake_option {
+	QUAKE_OPTION_INPUT,
+	QUAKE_OPTION_HEAPSIZE,
+};
+
+struct quake_options {
+	const char *input_mode;
+	unsigned long heap_kib;
+};
+
+static bool parse_heap_kib(const char *value, unsigned long *heap_kib,
+			   const char **error)
+{
+	static const char *const decimal_only =
+		"--heapsize requires a decimal size in kibibytes";
+	const char *cursor;
+	unsigned long parsed;
+	char *end;
+
+	if (value[0] == '\0') {
+		*error = decimal_only;
+		return false;
+	}
+	for (cursor = value; *cursor; ++cursor)
+		if (*cursor < '0' || *cursor > '9') {
+			*error = decimal_only;
+			return false;
+		}
+	errno = 0;
+	parsed = strtoul(value, &end, 10);
+	if (errno == ERANGE || end == value || *end != '\0' ||
+	    parsed < FPLINUX_QUAKE_HEAP_MINIMUM_KIB ||
+	    parsed > FPLINUX_QUAKE_HEAP_MAXIMUM_KIB) {
+		*error = "--heapsize must be between 8192 and 262144 kibibytes";
+		return false;
+	}
+	*heap_kib = parsed;
+	return true;
+}
+
+static const char *parse_quake_option(size_t option, const char *value,
+				      void *data)
+{
+	struct quake_options *options = data;
+	const char *argument_error;
+
+	switch (option) {
+	case QUAKE_OPTION_INPUT:
+		if (strcmp(value, "phone") && strcmp(value, "keyboard"))
+			return "--input must be phone or keyboard";
+		options->input_mode = value;
+		return NULL;
+	case QUAKE_OPTION_HEAPSIZE:
+		if (!parse_heap_kib(value, &options->heap_kib, &argument_error))
+			return argument_error;
+		return NULL;
+	default:
+		return "unknown option";
+	}
+}
+
+static enum fplinux_cli_result parse_arguments(int argc, char **argv,
+					       struct quake_options *options)
+{
+	struct fplinux_cli_option entries[] = {
+		[QUAKE_OPTION_INPUT] = {
+			.name = "input",
+			.metavar = "phone|keyboard",
+			.help = "select the game controls",
+			.flags = FPLINUX_CLI_REQUIRED,
+		},
+		[QUAKE_OPTION_HEAPSIZE] = {
+			.name = "heapsize",
+			.metavar = "KIBIBYTES",
+			.help = "memory the engine reserves (default 32768)",
+		},
+	};
+	struct fplinux_cli cli = {
+		.program = argv[0],
+		.description = "Run Quake with the selected controls.",
+		.options = entries,
+		.option_count = ARRAY_SIZE(entries),
+		.parse_option = parse_quake_option,
+		.data = options,
+	};
+
+	options->input_mode = NULL;
+	options->heap_kib = FPLINUX_QUAKE_HEAP_DEFAULT_KIB;
+	return fplinux_cli_parse(&cli, argc, argv);
+}
+
 int main(int argc, char **argv)
 {
-	struct display_state display;
+	struct fplinux_fb_session display;
+	struct quake_options options;
 	char pak0[256];
 	char runtime[128];
-	const char *input_mode;
 	pid_t child;
 	int child_status;
 	int lock;
+	enum fplinux_cli_result parse_result;
 	bool restored;
 
-	if (argc != 3 || strcmp(argv[1], "--input") != 0 ||
-	    (strcmp(argv[2], "phone") != 0 &&
-	     strcmp(argv[2], "keyboard") != 0)) {
-		fprintf(stderr, "usage: quake --input phone|keyboard\n");
-		return EXIT_FAILURE;
-	}
-	input_mode = argv[2];
+	parse_result = parse_arguments(argc, argv, &options);
+	if (parse_result != FPLINUX_CLI_READY)
+		return parse_result;
 	lock = acquire_lock();
 	mount_card();
 	if (snprintf(pak0, sizeof(pak0), FPLINUX_QUAKE_GAME_DATA "/pak0.pak") >=
 	    (int)sizeof(pak0))
 		die("game-data path is too long");
 	require_pak(pak0);
-	prepare_runtime(runtime, sizeof(runtime), input_mode);
+	prepare_runtime(runtime, sizeof(runtime), options.input_mode);
 	save_display(&display);
 	install_signal_handlers();
-	child = start_engine(runtime, input_mode);
+	child = start_engine(runtime, options.input_mode, options.heap_kib);
 	child_status = wait_for_engine(child);
-	restored = restore_display(&display);
+	restored = fplinux_fb_session_close(&display);
 	fplinux_quake_remove_runtime(runtime);
 	close(lock);
 	return restored ? child_status : EXIT_FAILURE;

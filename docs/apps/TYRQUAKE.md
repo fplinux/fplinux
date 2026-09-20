@@ -123,6 +123,22 @@ with the phone keypad. Start forwarding first as described in
 
 The command keeps the phone display in game mode until TyrQuake exits.
 
+The launcher requires exactly one `--input` option. A duplicate or an extra
+argument is rejected before game data is mounted or TyrQuake starts.
+
+`--heapsize` sets the memory TyrQuake reserves for itself, in kibibytes,
+between 8192 and 262144; the default is 32768. The reservation is separate from
+the game data, so a phone that holds that data in RAM has correspondingly less
+room and may need a smaller figure:
+
+```sh
+./fplinux console "$target" --profile "$profile" --exec \
+  'quake --input phone --heapsize 16384'
+```
+
+A size below what the selected game data needs makes TyrQuake stop during
+startup rather than run with less.
+
 ## Controls
 
 In phone mode, turn the phone counter-clockwise: the display is on the left
