@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# ruff: noqa: A002, ANN001, ANN002, ANN003, ANN201, ANN202, ANN206, D102, FBT002, INP001, PLC0415, PTH123, PTH208, UP015
+# ruff: noqa: A002, ANN001, ANN002, ANN003, ANN201, ANN202, ANN206, D102, FBT002, INP001, PLC0415, PTH123, PTH208
 # mypy: ignore-errors
 """Mounted Linux storage capability for MicroPythonOS."""
 
@@ -17,7 +17,7 @@ def _storage_path():
 
 def _is_exact_mount(path):
     try:
-        with open("/proc/self/mountinfo", "r") as mountinfo:
+        with open("/proc/self/mountinfo") as mountinfo:
             for line in mountinfo:
                 fields = line.split()
                 if len(fields) > 5 and fields[4] == path:
