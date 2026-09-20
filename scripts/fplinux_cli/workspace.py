@@ -473,12 +473,13 @@ def _managed_workspace_namespace(workspaces: Path, *, create: bool) -> None:
 def _managed_directory(path: Path, name: str, *, create: bool) -> None:
     """Require one cache component to be a real directory, optionally creating it."""
     try:
-        if path.is_symlink() or (path.exists() and not path.is_dir()):
+        if path.is_symlink():
             fail(f"{name} is missing or invalid: {path}")
-        if not path.exists():
-            if not create:
-                fail(f"{name} is missing or invalid: {path}")
-            path.mkdir()
+        if path.is_dir():
+            return
+        if path.exists() or not create:
+            fail(f"{name} is missing or invalid: {path}")
+        path.mkdir()
         if path.is_symlink() or not path.is_dir():
             fail(f"{name} is missing or invalid: {path}")
     except OSError as error:
@@ -487,9 +488,6 @@ def _managed_directory(path: Path, name: str, *, create: bool) -> None:
 
 def _remove_managed_workspace(workspaces: Path, workspace: Path, name: str) -> None:
     """Revalidate cache components and one real child immediately before removal."""
-    _managed_workspace_namespace(workspaces, create=False)
-    if workspace.parent != workspaces or workspace.is_symlink() or not workspace.is_dir():
-        fail(f"{name} is missing or invalid: {workspace}")
     _managed_workspace_namespace(workspaces, create=False)
     if workspace.parent != workspaces or workspace.is_symlink() or not workspace.is_dir():
         fail(f"{name} is missing or invalid: {workspace}")

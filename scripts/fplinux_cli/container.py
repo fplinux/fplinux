@@ -512,15 +512,6 @@ def current_image_state(
         return None
 
 
-def image_ready(
-    kern: str,
-    image: str,
-    *,
-    image_recipe: str | None = None,
-) -> bool:
-    return current_image_state(kern, image, image_recipe) is not None
-
-
 def publish_current_image_state(
     kern: str,
     image: str,
