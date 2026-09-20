@@ -40,7 +40,6 @@ from .config import (
     load_platform,
     load_target,
     normalize_profile,
-    relative_value,
 )
 from .device_tree import (
     DeviceTreeError,
@@ -48,6 +47,7 @@ from .device_tree import (
     verify_root_bootargs,
     verify_target_identity,
 )
+from .kernel_patches import patch_destinations
 from .output import RunReporter, current_stage, exit_status, run_entrypoint
 
 if TYPE_CHECKING:
@@ -68,52 +68,10 @@ def load_sources() -> dict[str, Any]:
 
 
 def patch_c_destinations(path: Path) -> list[str]:
-    """Return C paths touched by one validated ``patch -p1`` input."""
-    result: list[str] = []
-    old_remaining = 0
-    new_remaining = 0
-    expect_destination = False
-    hunk = re.compile(r"^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
-    for line in require_file(path).read_text().splitlines():
-        if old_remaining or new_remaining:
-            if line.startswith("\\"):
-                continue
-            marker = line[:1] or " "
-            if marker in {" ", "-"}:
-                old_remaining -= 1
-            if marker in {" ", "+"}:
-                new_remaining -= 1
-            if marker not in {" ", "-", "+"} or min(old_remaining, new_remaining) < 0:
-                raise SystemExit(f"sparse failed: malformed patch hunk: {path}")
-            continue
-
-        match = hunk.match(line)
-        if match is not None:
-            old_remaining = int(match.group(1) or "1")
-            new_remaining = int(match.group(2) or "1")
-            expect_destination = False
-            continue
-        if expect_destination:
-            expect_destination = False
-            if not line.startswith("+++ "):
-                continue
-            patched = line[4:].split("\t", 1)[0]
-            if patched == "/dev/null":
-                continue
-            if patched.startswith("/"):
-                raise SystemExit(f"sparse failed: absolute patch destination: {path}")
-            prefix, separator, destination = patched.partition("/")
-            if not separator or prefix in {"", ".."}:
-                raise SystemExit(f"sparse failed: patch destination has no -p1 prefix: {path}")
-            destination = relative_value(destination, "Linux patch C destination")
-            if destination.endswith(".c"):
-                result.append(destination)
-            continue
-        if line.startswith("--- "):
-            expect_destination = True
-    if old_remaining or new_remaining:
-        raise SystemExit(f"sparse failed: incomplete patch hunk: {path}")
-    return result
+    """Select compilable C destinations from the shared Linux patch reader."""
+    return [
+        name for name in patch_destinations(path, include_deleted=False) if name.endswith(".c")
+    ]
 
 
 def sparse_targets(
