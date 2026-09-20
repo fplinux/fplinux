@@ -51,6 +51,8 @@
 			interrupt-names = "lcdc-done";
 			sprd,aon-apb = <&aon_apb>;
 			sprd,pmic = <&sc2720_pmic>;
+			dmas = <&ap_dma 0>;
+			dma-names = "copy";
 			sprd,pinmux-offsets = <0 4 8 12 16 20 24>;
 			sprd,pinmux-values = <0 0 0 0 0 0 0>;
 			sprd,pinconf-offsets = <0 4 8 12 16 20 24>;

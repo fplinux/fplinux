@@ -121,6 +121,7 @@ patches = [
   "platforms/ums9117/kernel/0003-ums9117-clock-providers.patch",
   "platforms/ums9117/kernel/0004-sc2720-pmic-core.patch",
   "platforms/ums9117/kernel/0005-ums9117-adi.patch",
+  "platforms/ums9117/kernel/0006-ums9117-dma.patch",
   "platforms/ums9117/kernel/0007-ums9117-native-bindings.patch",
   "platforms/ums9117/kernel/0008-ums9117-thermal-efuse.patch",
   "platforms/ums9117/kernel/0009-sc2720-adc-efuse.patch",
@@ -156,18 +157,6 @@ source = "platforms/ums9117/kernel/ums9117-musb.c"
 destination = "drivers/usb/musb/ums9117.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-dma.c"
-destination = "drivers/dma/ums9117-dma.c"
-
-[[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-dma-test.h"
-destination = "include/linux/dma/ums9117-dma-test.h"
-
-[[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-dma.h"
-destination = "include/linux/dma/ums9117-dma.h"
-
-[[linux.copies]]
 source = "platforms/ums9117/kernel/ums9117-rota.c"
 destination = "drivers/media/platform/ums9117-rota.c"
 
@@ -198,10 +187,6 @@ destination = "Documentation/devicetree/bindings/media/sprd,ums9117-jpeg.yaml"
 [[linux.copies]]
 source = "platforms/ums9117/bindings/sprd,ums9117-rota.yaml"
 destination = "Documentation/devicetree/bindings/media/sprd,ums9117-rota.yaml"
-
-[[linux.copies]]
-source = "platforms/ums9117/bindings/sprd,ums9117-dma.yaml"
-destination = "Documentation/devicetree/bindings/dma/sprd,ums9117-dma.yaml"
 
 [[linux.copies]]
 source = "platforms/ums9117/kernel/ums9117-audio.c"
@@ -386,14 +371,6 @@ destination = "drivers/clk/sprd/Kconfig"
 [[linux.appends]]
 source = "platforms/ums9117/kernel/inherited-clk.Makefile"
 destination = "drivers/clk/sprd/Makefile"
-
-[[linux.appends]]
-source = "platforms/ums9117/kernel/dma.Kconfig"
-destination = "drivers/dma/Kconfig"
-
-[[linux.appends]]
-source = "platforms/ums9117/kernel/dma.Makefile"
-destination = "drivers/dma/Makefile"
 
 [[linux.appends]]
 source = "platforms/ums9117/kernel/media.Kconfig"
@@ -677,6 +654,10 @@ destination = "include/linux/spi/sprd-adi.h"
 [[linux.copies]]
 source = "platforms/ums9117/kernel/ums9117-sdhci.c"
 destination = "drivers/mmc/host/ums9117-sdhci.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/sprd,ums9117-dma.yaml"
+destination = "Documentation/devicetree/bindings/dma/sprd,ums9117-dma.yaml"
 
 [[linux.copies]]
 source = "platforms/ums9117/bindings/sprd,ums9117-sdhci.yaml"

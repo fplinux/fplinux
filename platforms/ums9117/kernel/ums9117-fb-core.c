@@ -111,29 +111,19 @@ static bool ums9117_fb_can_refresh(const struct ums9117_fb *ufb)
 	       ufb->state == UMS9117_FB_PANEL_STATE_ACTIVE;
 }
 
-static bool ums9117_fb_dma_filter(struct dma_chan *channel, void *parameter)
-{
-	(void)parameter;
-	return of_device_is_compatible(channel->device->dev->of_node,
-				       "sprd,ums9117-dma");
-}
-
 static int ums9117_fb_init_copy_dma(struct ums9117_fb *ufb)
 {
 	struct dma_chan *channel;
 	struct device *dma_dev;
-	dma_cap_mask_t mask;
 	dma_addr_t source;
 	dma_addr_t destination;
 	size_t size = ums9117_fb_size_bytes(ufb);
 
 	if (!ufb->profile->dma_memcpy)
 		return 0;
-	dma_cap_zero(mask);
-	dma_cap_set(DMA_MEMCPY, mask);
-	channel = dma_request_channel(mask, ums9117_fb_dma_filter, NULL);
-	if (!channel)
-		return -EPROBE_DEFER;
+	channel = dma_request_chan(ufb->info->device, "copy");
+	if (IS_ERR(channel))
+		return PTR_ERR(channel);
 	dma_dev = dmaengine_get_dma_device(channel);
 	/*
 	 * This board's reserved no-map RAM has only write-combined mappings.

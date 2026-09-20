@@ -3,7 +3,7 @@
 #include <linux/delay.h>
 #include <linux/dma-buf.h>
 #include <linux/dma-mapping.h>
-#include <linux/dma/ums9117-dma.h>
+#include <linux/dma/sprd-dma.h>
 #include <linux/dmaengine.h>
 #include <linux/fs.h>
 #include <linux/io.h>
@@ -962,9 +962,15 @@ static int ums9117_rota_program_pass(struct ums9117_rota_ctx *ctx)
 	       rota->base + UMS9117_ROTA_ORIGINAL_OFFSET);
 	writel(control, rota->base + UMS9117_ROTA_CONTROL);
 
-	descriptor = ums9117_dma_prep_rota(
-		rota->dma, UMS9117_ROTA_PHYS + UMS9117_ROTA_LIST_OFFSET,
-		UMS9117_ROTA_LIST_BYTES, DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
+	descriptor = sprd_dma_prep_external_llist(
+		rota->dma,
+		&(struct sprd_dma_external_llist){
+			.address = UMS9117_ROTA_PHYS + UMS9117_ROTA_LIST_OFFSET,
+			.block_len = 32,
+			.transaction_len = 512,
+			.tracked_bytes = UMS9117_ROTA_LIST_BYTES,
+		},
+		DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
 	if (!descriptor)
 		return -EIO;
 	descriptor->callback_result = ums9117_rota_dma_callback;
@@ -1347,7 +1353,7 @@ static int ums9117_rota_probe(struct platform_device *pdev)
 		return dev_err_probe(&pdev->dev, ret,
 				     "failed to attach ROTA DMA pool\n");
 
-	rota->dma = ums9117_dma_request_rota();
+	rota->dma = dma_request_chan(&pdev->dev, "rotation");
 	if (IS_ERR(rota->dma)) {
 		of_reserved_mem_device_release(&pdev->dev);
 		return dev_err_probe(&pdev->dev, PTR_ERR(rota->dma),
@@ -1407,13 +1413,20 @@ release_dma:
 static void ums9117_rota_remove(struct platform_device *pdev)
 {
 	struct ums9117_rota_dev *rota = platform_get_drvdata(pdev);
+	int ret;
 
 	video_unregister_device(&rota->video);
 	cancel_delayed_work_sync(&rota->timeout_work);
 	cancel_work_sync(&rota->completion_work);
 	v4l2_m2m_release(rota->m2m);
 	v4l2_device_unregister(&rota->v4l2);
-	dmaengine_terminate_sync(rota->dma);
+	ret = dmaengine_terminate_sync(rota->dma);
+	if (ret) {
+		dev_err(rota->dev,
+			"DMA still active; channel and clock retained: %d\n",
+			ret);
+		return;
+	}
 	dma_release_channel(rota->dma);
 	of_reserved_mem_device_release(&pdev->dev);
 	ums9117_rota_restore_gate(rota);
