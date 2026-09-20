@@ -166,19 +166,6 @@ def record_text(text: str) -> None:
     stage.write(text.encode())
 
 
-def assert_profile_kconfig(
-    config: Path, config_enable: list[str], config_disable: list[str]
-) -> None:
-    """Require profile Kconfig actions to survive dependency resolution."""
-    text = require_file(config).read_text()
-    for symbol in config_enable:
-        if f"{symbol}=y\n" not in text:
-            raise SystemExit(f"sparse failed: profile did not enable {symbol}")
-    for symbol in config_disable:
-        if f"# {symbol} is not set\n" not in text:
-            raise SystemExit(f"sparse failed: profile did not disable {symbol}")
-
-
 def capture_text(command: list[str]) -> subprocess.CompletedProcess[str]:
     """Capture a command for policy inspection while retaining reporter output."""
     stage = current_stage()

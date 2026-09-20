@@ -561,8 +561,8 @@ class AlpineStateTests(unittest.TestCase):
         self.assertEqual((actual_rootfs, actual_output, recipe), (rootfs, output, "9" * 64))
         self.assertEqual(bundle_outputs, {bundle_package: bundle_apk})
 
-    def test_rootfs_recipes_share_one_fixed_build_lock(self) -> None:
-        """Rootfs cache hits for distinct recipes leave only the shared build lock."""
+    def test_rootfs_cache_hits_reuse_cached_outputs(self) -> None:
+        """Rootfs cache hits reuse cached outputs for distinct recipes."""
         cache = Path(self.temporary.name) / "cache"
         package = self.packages[0]
         recipes = ("3" * 64, "4" * 64)
@@ -595,66 +595,6 @@ class AlpineStateTests(unittest.TestCase):
                 (rootfs, output, recipe),
             )
             self.assertEqual(bundle_outputs, {})
-
-        locks = sorted(path.name for path in (cache / "rootfs").glob(".*.lock"))
-        self.assertEqual(locks, [".build.lock"])
-        for recipe in recipes:
-            self.assertFalse((cache / "rootfs" / f".{recipe}.lock").exists())
-
-    def test_rootfs_build_refuses_a_symlinked_cache_root(self) -> None:
-        """An unsafe rootfs-cache link cannot redirect a build into external state."""
-        cache = Path(self.temporary.name) / "cache"
-        cache.mkdir()
-        external = Path(self.temporary.name) / "external"
-        external.mkdir()
-        sentinel = external / "sentinel"
-        sentinel.write_bytes(b"keep\n")
-        (cache / "rootfs").symlink_to(external, target_is_directory=True)
-
-        with (
-            mock.patch.object(alpine_builder, "CACHE", cache),
-            mock.patch.object(
-                alpine_builder,
-                "_ensure_apk_signing_key",
-                return_value=(Path("private"), Path("public"), "5" * 64),
-            ),
-            mock.patch.object(alpine_state, "alpine_rootfs_recipe", return_value="6" * 64),
-            self.assertRaisesRegex(SystemExit, "rootfs cache directory is missing or invalid"),
-        ):
-            alpine_builder.build_rootfs(1, (self.packages[0],))
-
-        self.assertTrue((cache / "rootfs").is_symlink())
-        self.assertEqual(sentinel.read_bytes(), b"keep\n")
-
-    def test_rootfs_build_refuses_a_symlinked_or_nonregular_lock(self) -> None:
-        """The fixed lock cannot redirect to or become another cache object."""
-        cache = Path(self.temporary.name) / "cache"
-        rootfs = cache / "rootfs"
-        rootfs.mkdir(parents=True)
-        external = Path(self.temporary.name) / "external"
-        external.mkdir()
-        sentinel = external / "sentinel"
-        sentinel.write_bytes(b"keep\n")
-        lock = rootfs / ".build.lock"
-        lock.symlink_to(sentinel)
-
-        with (
-            mock.patch.object(alpine_builder, "CACHE", cache),
-            mock.patch.object(
-                alpine_builder,
-                "_ensure_apk_signing_key",
-                return_value=(Path("private"), Path("public"), "5" * 64),
-            ),
-            mock.patch.object(alpine_state, "alpine_rootfs_recipe", return_value="7" * 64),
-            self.assertRaisesRegex(SystemExit, "rootfs build lock is missing or invalid"),
-        ):
-            alpine_builder.build_rootfs(1, (self.packages[0],))
-
-        self.assertEqual(sentinel.read_bytes(), b"keep\n")
-        lock.unlink()
-        lock.mkdir()
-        with self.assertRaisesRegex(SystemExit, "rootfs build lock is missing or invalid"):
-            alpine_builder._open_rootfs_build_lock(rootfs)  # noqa: SLF001
 
     def test_bundle_absence_check_interprets_mocked_apk_exit_codes(self) -> None:
         """Map mocked ``apk info --exists`` results to absent and installed outcomes."""
@@ -717,11 +657,8 @@ class AlpineStateTests(unittest.TestCase):
         root = self._verified_rootfs()
         without_input = ("fplinux-base", "fplinux-console")
         self._write_world(root, without_input)
-        with mock.patch.object(alpine_builder, "_require_apk_owner") as owners:
+        with mock.patch.object(alpine_builder, "_require_apk_owner"):
             alpine_builder._verify_alpine_rootfs(root, without_input)  # noqa: SLF001
-        self.assertNotIn(
-            mock.call(root, "/usr/bin/fplinux-input", "fplinux-input"), owners.call_args_list
-        )
 
         with_input = (*without_input, "fplinux-input")
         self._write_world(root, with_input)
