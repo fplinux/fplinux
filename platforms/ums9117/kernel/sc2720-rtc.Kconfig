@@ -8,3 +8,4 @@ config RTC_DRV_SC2720_UMS9117
 	  Read and set the SC2720 clock and use normal one-shot alarms through
 	  the shared UMS9117 analog-die interface. Normal alarms can wake Linux
 	  s2idle; deep suspend and off-state power-on are not enabled.
+	  Expose time and alarm operations through the standard RTC class.

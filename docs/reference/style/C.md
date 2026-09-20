@@ -48,6 +48,9 @@ The relevant commands establish different things:
   analysis.
 - `check kernel` projects code into the pinned Linux tree and runs its formatter,
   checkpatch, configuration, Devicetree and Sparse checks.
+  For C/H changes stored in Linux patches, formatting covers the changed
+  regions in their complete source context. Unrelated upstream code is not
+  reformatted. Use `format PATH.patch` to regenerate a declared Linux patch.
 - `check python` compiles and runs the host C harnesses driven by the unit suite.
   That result remains host-only evidence.
 

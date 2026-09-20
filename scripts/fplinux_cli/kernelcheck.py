@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 from . import linux_state
 from .builder import (
     CACHE,
+    fetch,
     prepare_linux,
     profile_kconfig_actions,
     profile_kconfig_arguments,
@@ -29,6 +30,7 @@ from .builder import (
     require_file,
     root_source,
     run,
+    source_lock_entry,
     target_source,
 )
 from .common import ROOT
@@ -47,7 +49,7 @@ from .device_tree import (
     verify_root_bootargs,
     verify_target_identity,
 )
-from .kernel_patches import patch_destinations
+from .kernel_patches import binding_paths, check_linux_changes, context_inputs, patch_destinations
 from .output import RunReporter, current_stage, exit_status, run_entrypoint
 
 if TYPE_CHECKING:
@@ -183,6 +185,24 @@ def run_dtbs_check(command: list[str], target: str) -> str:
     return report.stdout + report.stderr
 
 
+def check_bindings(
+    source: Path, kbuild: list[str], bindings: tuple[str, ...], target: str
+) -> None:
+    """Check selected schemas and examples without relying on make's masked lint status."""
+    schema_root = source / "Documentation/devicetree/bindings"
+    paths = [str(source / name) for name in bindings]
+    run(["yamllint", "--strict", "-c", str(schema_root / ".yamllint"), *paths])
+    report = capture_text(["dt-doc-validate", "-u", str(schema_root), *paths])
+    # Reference diagnostics can be printed even when dt-doc-validate returns zero.
+    if report.returncode or report.stdout.strip() or report.stderr.strip():
+        raise SystemExit(f"sparse failed: binding schema findings: {target}")
+    combined = run_dtbs_check(
+        [*kbuild, "W=1", "dt_binding_check", "DT_SCHEMA_FILES=" + ":".join(bindings)], target
+    )
+    if re.search(r"(?im)\b(?:warning|error)(?:\s*\([^\n)]*\))?:|\.example\.dtb:", combined):
+        raise SystemExit(f"sparse failed: binding example findings: {target}")
+
+
 def target_profiles(profile: str | None = None) -> tuple[tuple[str, str | None], ...]:
     """Select the same global boot policy for every configured board."""
     profile = normalize_profile(profile)
@@ -230,6 +250,13 @@ def prepare_contexts(reporter: RunReporter | None, profile: str | None = None) -
         label = context_label(target, selected)
         with report_stage(reporter, f"prepare-{label}"):
             _config, _platform, _source, prepared_linux = target_context(sources, target, selected)
+            linux = source_lock_entry(sources, _platform["linux"]["source_lock"])
+            fetch(
+                linux["url"],
+                linux["sha256"],
+                CACHE / "downloads/linux",
+                f"linux-{linux['version']}.tar.xz",
+            )
             record_text(f"sparse context: ready ({label}, {prepared_linux.linux_recipe[:16]})\n")
 
 
@@ -251,9 +278,10 @@ def check_one_context(
             "--terse",
         ]
         kconfig_files = [str(path) for path in projected if path.name == "Kconfig"]
-        patch_files = [str(root_source(relative)) for relative in platform["linux"]["patches"]] + [
-            str(target_source(target, relative)) for relative in target_config["linux"]["patches"]
-        ]
+        inputs = context_inputs(target, target_config, platform)
+        bindings = binding_paths(inputs, source)
+        linux = source_lock_entry(sources, platform["linux"]["source_lock"])
+        archive = CACHE / "downloads/linux" / f"linux-{linux['version']}.tar.xz"
         base, fragment = kernel_config_paths(target, target_config, platform)
         defconfig = compose_kernel_config(base, fragment).decode()
         objects = sparse_targets(target, target_config, platform)
@@ -275,7 +303,6 @@ def check_one_context(
             *style_files,
         ]
         checkpatch_sources = [*checkpatch, "-f", *style_files, *kconfig_files]
-        checkpatch_patches = [*checkpatch, *patch_files] if patch_files else None
         first_kconfig_command = [*kbuild, "olddefconfig"]
         profile_config_command: list[str] | None = None
         if config_enable or config_disable:
@@ -299,13 +326,17 @@ def check_one_context(
         linux_state.require_prepared_linux(source, prepared_linux)
 
     output = reset_sparse_output(target, profile)
+    config_diff = output / "integration-kbuild.patch"
     with report_stage(reporter, f"format-{label}"):
         run(format_command)
+        patch_files = check_linux_changes(inputs, archive, linux["version"], config_diff)
     with report_stage(reporter, f"checkpatch-{label}"):
         # --root resolves the fplinux compatibles against projected bindings.
         run_checkpatch(checkpatch_sources)
-        if checkpatch_patches is not None:
-            run_checkpatch(checkpatch_patches)
+        if patch_files:
+            run_checkpatch([*checkpatch, *(str(path) for path in patch_files)])
+        if config_diff.stat().st_size:
+            run_checkpatch([*checkpatch, str(config_diff)])
     with report_stage(reporter, f"kconfig-{label}"):
         (output / ".config").write_text(defconfig)
         if profile_config_command is not None:
@@ -321,6 +352,9 @@ def check_one_context(
                 raise SystemExit(
                     f"sparse failed: kernel configuration did not preserve {symbol}={value}"
                 )
+    if bindings:
+        with report_stage(reporter, f"bindings-{label}"):
+            check_bindings(source, kbuild, bindings, target)
     with report_stage(reporter, f"device-tree-{label}"):
         combined = run_dtbs_check(dtbs_command, target)
         if "Warning" in combined or re.search(r"\.dtb: ", combined):

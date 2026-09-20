@@ -102,6 +102,12 @@ limit. `--verbose` uses serial analysis so tool output can remain live.
 The `docs` scope also rejects repository-local Markdown links whose file or
 heading anchor does not exist.
 
+The `kernel` scope checks formatting inside Linux patches as well as standalone
+C/H sources. Kconfig and Kbuild fragments are checked as changes to their Linux
+destination files, before the complete configuration and compilation checks.
+Changed Devicetree bindings use the kernel's `yamllint` configuration and
+`dt_binding_check`; built board trees use `dtbs_check`.
+
 Kernel, bootstrap, host and phone-userspace messages follow the shared
 [logging contract](../reference/LOGGING.md). Project-owned source and tests
 follow the [code style](../reference/CODE_STYLE.md).

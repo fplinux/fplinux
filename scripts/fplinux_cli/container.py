@@ -1361,6 +1361,8 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
                 "--volume",
                 f"{analyzer_cache['analysis']}:/cache/analysis",
                 "--volume",
+                f"{analyzer_cache['downloads']}:/cache/downloads:ro",
+                "--volume",
                 f"{analyzer_cache['linux']}:/cache/linux:ro",
                 "--",
                 "python3",
