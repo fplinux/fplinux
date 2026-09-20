@@ -13,8 +13,8 @@ from typing import Any, BinaryIO, Protocol, cast
 from . import commands
 from .common import fail, sha256_file
 from .config import load_target
+from .device_data import PHYSICAL_PAGE_COUNT
 
-RAW_PAGE_COUNT = 65536
 BACKUP_TIMEOUT_SECONDS = 15 * 60
 
 
@@ -41,7 +41,7 @@ def backup_nand(
     *,
     raw_device: str,
     raw_page_bytes: int,
-    raw_page_count: int = RAW_PAGE_COUNT,
+    raw_page_count: int = PHYSICAL_PAGE_COUNT,
 ) -> Path:
     """Acquire one exact session and publish a complete physical NAND image."""
     if output.name in {"", ".", ".."}:

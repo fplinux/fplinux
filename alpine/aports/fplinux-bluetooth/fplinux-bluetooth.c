@@ -159,7 +159,7 @@ static int command_enable(bool optional)
 		saved_error = EIO;
 	if (saved_error == ENODATA) {
 		const char *message =
-			"Bluetooth firmware is absent; prepare it on the host with ./fplinux bluetooth prepare <target> and install the resulting system";
+			"Bluetooth firmware is absent; prepare it on the host with ./fplinux device-data prepare <target> and install the resulting system";
 
 		if (optional) {
 			fprintf(stderr, "fplinux-bluetooth: %s\n", message);

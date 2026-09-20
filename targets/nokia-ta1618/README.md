@@ -93,7 +93,7 @@ and input-device indices are assigned at boot.
 ## Bluetooth
 
 Both profiles use the shared
-[Bluetooth preparation procedure](../../docs/guides/BUILDING.md#prepare-bluetooth-firmware)
+[Bluetooth preparation procedure](../../docs/guides/BUILDING.md#prepare-device-data)
 with firmware from this exact phone. See the shared
 [Bluetooth limits](../../docs/features/BLUETOOTH.md#limits-and-persistence)
 for peer compatibility, persistence and unqualified features.

@@ -187,37 +187,43 @@ FIT on FAT32 and an ext4 system root. Building never writes removable media.
 Follow [microSD system root](MICROSD_ROOT.md) for the layout, persistence and
 shutdown rules.
 
-### Local Bluetooth firmware
+### Local fitted device data
 
-A target declares its fitted firmware in `[bluetooth].firmware`. Each source
-is a basename under `.cache/firmware/<target>/`; its destination is relative
-to `/lib/firmware`. Declarations specify an exact byte count and may also
-require a lowercase SHA-256 digest.
+Some targets declare fitted device-data groups that must come from the exact
+physical phone. Bluetooth firmware is delivered through the root filesystem.
+The fitted headphone gain profile is built into the kernel image. FPLinux does
+not download or supply either group.
 
-The complete group may be absent, allowing the normal RAM system to boot for
-read-only firmware preparation. Once any declared input exists, all inputs
-must pass the size and digest checks. A partial or invalid group fails the
-build. Admitted bytes are captured in the build input and installed with mode
-`0600` in either profile. A relevant firmware change selects a different
-build result; unrelated files in the directory do not.
+Each group is independently optional. A missing group contributes no fitted
+data to the build. Bluetooth requires its group to operate. If any part of a
+group is present, the complete group must pass its declared size and digest
+checks; a partial, damaged, or mismatched group fails the build.
 
-FPLinux does not download fitted vendor firmware. Prepare the supported phone's
-inputs from its physical NAND backup as described below.
+Normal `build` and `run` commands consume only already prepared local data.
+They do not read the phone's NAND.
 
 After building, follow [Loading from a source checkout](LOADING.md) to configure
 the host, load the selected image, reconnect and verify the running context.
 
-#### Prepare Bluetooth firmware
+#### Prepare device data
 
-Bluetooth needs firmware fitted to the exact phone selected by `<target>`.
-Prepare it from a complete physical NAND backup; do not copy
-firmware from another phone. No manual extraction, renaming, or patching is
-needed. Preparation requires this source checkout, not a standalone archive.
+Prepare every group declared by `<target>` from one complete physical NAND
+backup. One acquisition prepares the Bluetooth group and the independent
+headphone gain group. The fitted profile must come from the exact phone
+selected by `<target>`; do not reuse data from another handset or model. No
+manual extraction, renaming or patching is needed. Preparation requires this
+source checkout, not a standalone archive.
+
+The complete command syntax is:
+
+```sh
+./fplinux device-data prepare TARGET [--from-dump PATH] [--jobs N] [--offline]
+```
 
 Start with the phone powered off and USB disconnected, then run:
 
 ```sh
-./fplinux bluetooth prepare <target>
+./fplinux device-data prepare <target>
 ```
 
 The command first builds and starts the default RAM system. Wait
@@ -230,7 +236,7 @@ for the target-specific key.
 For a backup already saved from this exact physical NAND, use:
 
 ```sh
-./fplinux bluetooth prepare <target> --from-dump PATH
+./fplinux device-data prepare <target> --from-dump PATH
 ```
 
 This form does not build a loader or connect to the phone. `--jobs N` limits
@@ -238,25 +244,16 @@ parallel work when the read-only loader is built, and `--offline` requests that
 build without network access.
 
 The backup must contain the selected phone's complete physical NAND, with each
-page's main bytes followed by its OOB bytes. Page size and accepted firmware
-layout are target-specific. The command rejects an unsupported target, another
-layout or length, damaged required firmware or calibration data, and ambiguous
-selected-block mappings. A backup from another phone is not a substitute.
+page's main bytes followed by its OOB bytes. Page size and accepted layouts are
+target-specific. The command rejects an unsupported target, another layout or
+length, damaged required data, and ambiguous selected-block mappings. A saved
+input remains unchanged at its original path.
 
-It derives the CM4 image and the individual NV401, NV402, and NV404 values
-only from that physical backup. A live backup is kept at
-`.cache/firmware/<target>/sources/run-*/nand.bin`; both paths retain the
-unchanged extracted originals in the corresponding `originals/` directory. A
-saved input remains unchanged at its original path. The command applies its
-checked compatibility patch only to the CM4 build copy, keeps the original CM4
-and NV values unchanged, and publishes the four required build inputs under
-`.cache/firmware/<target>/`.
-
-The dump, extracted originals, prepared inputs, and any bundle or root
-filesystem containing them are private and non-redistributable unless you have
-the necessary rights. They are not supplied by the source checkout or its
-pinned build environment. The reader is read-only: it does not mount, erase,
-restore, or otherwise write the phone's NAND or NV storage.
+The dump, extracted originals, prepared groups, and any image containing them
+are private and non-redistributable unless you have the necessary rights. They
+are local inputs and are not supplied by the source checkout or its pinned build
+environment. The live reader is read-only: it does not mount, erase, restore,
+or otherwise write the phone's NAND or NV storage.
 
 When preparation finishes, it prints the exact next commands:
 

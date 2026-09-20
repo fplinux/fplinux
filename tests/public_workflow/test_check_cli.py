@@ -29,7 +29,7 @@ PUBLIC_COMMANDS = (
     "run",
     "console",
     "nand",
-    "bluetooth",
+    "device-data",
     "verify",
 )
 PUBLIC_CHECK_SCOPES = (

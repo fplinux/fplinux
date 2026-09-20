@@ -100,7 +100,7 @@ and input-device indices are assigned at boot.
 
 ## Bluetooth
 
-Use the shared [firmware preparation procedure](../../docs/guides/BUILDING.md#prepare-bluetooth-firmware)
+Use the shared [firmware preparation procedure](../../docs/guides/BUILDING.md#prepare-device-data)
 with firmware and configuration from this exact phone. See the shared
 [Bluetooth limits](../../docs/features/BLUETOOTH.md#limits-and-persistence)
 for peer compatibility, persistence and unqualified features.

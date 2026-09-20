@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import mmap
 import os
 import shlex
 import shutil
@@ -749,6 +750,83 @@ def kernel_build_commands(
     ]
 
 
+def audio_profile_kconfig_arguments(
+    target: str,
+    firmware: tuple[firmware_inputs.FirmwareInput, ...] | None,
+) -> list[str]:
+    """Embed the fitted audio profile only when its complete group is present."""
+    if firmware is None:
+        return []
+    directory = firmware_inputs.snapshot_device_data_group_directory(
+        ROOT,
+        target,
+        "audio-profile",
+    )
+    names = " ".join(item.destination for item in firmware)
+    return [
+        "--set-str",
+        "EXTRA_FIRMWARE",
+        names,
+        "--set-str",
+        "EXTRA_FIRMWARE_DIR",
+        str(directory),
+    ]
+
+
+def audio_profile_implementation(
+    target: str,
+    firmware: tuple[firmware_inputs.FirmwareInput, ...] | None,
+) -> list[tuple[str, Path]]:
+    """Expose exact fitted-profile bytes to the Kbuild causal-input receipt."""
+    if firmware is None:
+        return []
+    records = []
+    for item in firmware:
+        relative = firmware_inputs.snapshot_device_data_path(
+            target,
+            "audio-profile",
+            item.destination,
+        )
+        records.append((relative, ROOT / relative))
+    return records
+
+
+def _file_contains(path: Path, contents: bytes) -> bool:
+    """Search a built artifact without copying the complete file into host memory."""
+    with (
+        path.open("rb") as stream,
+        mmap.mmap(stream.fileno(), 0, access=mmap.ACCESS_READ) as image,
+    ):
+        return image.find(contents) >= 0
+
+
+def verify_builtin_audio_profile(
+    target: str,
+    config_path: Path,
+    vmlinux: Path,
+    firmware: tuple[firmware_inputs.FirmwareInput, ...] | None,
+) -> None:
+    """Require the configured fitted-profile names and exact bytes in vmlinux."""
+    if firmware is None:
+        return
+    directory = firmware_inputs.snapshot_device_data_group_directory(
+        ROOT,
+        target,
+        "audio-profile",
+    )
+    names = " ".join(item.destination for item in firmware)
+    config_text = config_path.read_text()
+    for expected in (
+        f'CONFIG_EXTRA_FIRMWARE="{names}"',
+        f'CONFIG_EXTRA_FIRMWARE_DIR="{directory}"',
+    ):
+        if expected not in config_text.splitlines():
+            fail("kernel configuration lost the built-in audio-profile group")
+    for item in firmware:
+        if not _file_contains(vmlinux, item.contents):
+            fail(f"kernel artifact does not embed audio-profile input {item.destination}")
+
+
 def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay explicit.
     target: str,
     target_config: dict[str, Any],
@@ -763,6 +841,7 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
     rootfs: Path,
     rootfs_output: Path,
     rootfs_recipe: str,
+    audio_profile_firmware: tuple[firmware_inputs.FirmwareInput, ...] | None,
     jobs: int,
 ) -> tuple[Path, Path, dict[str, str], str]:
     """Build or exactly reuse zImage and the declared target DTB in ``work/kernel``."""
@@ -814,6 +893,7 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
             ),
             ("scripts/fplinux_cli/kbuild_state.py", Path(kbuild_state.__file__)),
         ]
+        implementation.extend(audio_profile_implementation(target, audio_profile_firmware))
         config_enable, config_disable = profile_kconfig_actions(target_config)
         device_identity = device_kernel_identity(
             target=target,
@@ -839,6 +919,7 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
             "--set-str",
             "LOCALVERSION",
             localversion(device_identity),
+            *audio_profile_kconfig_arguments(target, audio_profile_firmware),
             *profile_kconfig_arguments(config_enable, config_disable),
         ]
         commands = kernel_build_commands(
@@ -883,6 +964,7 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
             run(commands[3])
 
         zimage = require_file(output / platform["linux"]["image_output"])
+        vmlinux = require_file(output / "vmlinux")
         dtb = require_file(
             output / platform["linux"]["dtb_output_directory"] / target_config["linux"]["dtb"]
         )
@@ -904,6 +986,12 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
             fail(str(error))
         config_text = require_file(output / ".config").read_text()
         assert_profile_kconfig(output / ".config", config_enable, config_disable)
+        verify_builtin_audio_profile(
+            target,
+            output / ".config",
+            vmlinux,
+            audio_profile_firmware,
+        )
         for forbidden in target_config["linux"]["forbidden_config"]:
             if forbidden in config_text:
                 fail(f"kernel unexpectedly contains {forbidden}")
@@ -1993,11 +2081,13 @@ def main() -> None:
         platform = load_platform(target_config["platform"])
         rootfs_packages = alpine_state.selected_packages(platform, target_config)
         bundle_packages = alpine_state.bundle_packages(platform, target_config, rootfs_packages)
-        firmware = firmware_inputs.capture_snapshot_firmware_inputs(
+        device_data = firmware_inputs.capture_snapshot_device_data(
             args.target,
-            target_config["rootfs"]["firmware"],
+            target_config["device_data"]["groups"],
             ROOT,
         )
+        firmware = device_data.get("bluetooth", ())
+        audio_profile_firmware = device_data.get("audio-profile")
         with (ROOT / "sources.lock.toml").open("rb") as stream:
             sources = tomllib.load(stream)
         linux_base = require_sha256(
@@ -2067,6 +2157,7 @@ def main() -> None:
             rootfs=rootfs,
             rootfs_output=rootfs_output,
             rootfs_recipe=rootfs_recipe,
+            audio_profile_firmware=audio_profile_firmware,
             jobs=args.jobs,
         )
     profile_uboot = None

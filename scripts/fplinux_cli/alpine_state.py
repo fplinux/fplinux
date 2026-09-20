@@ -140,13 +140,10 @@ def _target_rootfs(
         "packages",
         "exclude_packages",
     }
-    if not isinstance(table, Mapping) or set(table) not in (
-        package_fields,
-        package_fields | {"firmware"},
-    ):
+    if not isinstance(table, Mapping) or set(table) != package_fields:
         _fail(
-            "normalized target rootfs must contain base_packages, packages, "
-            "exclude_packages and optional firmware"
+            "normalized target rootfs must contain exactly base_packages, packages and "
+            "exclude_packages"
         )
 
     def read(field: str) -> tuple[str, ...]:

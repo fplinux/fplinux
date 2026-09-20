@@ -77,8 +77,8 @@ class PruneTests(unittest.TestCase):
                 (cache / "rootfs" / recipe).mkdir(parents=True)
 
             target_configs = {
-                "first": {"platform": "platform-a", "rootfs": {"firmware": []}},
-                "second": {"platform": "platform-b", "rootfs": {"firmware": []}},
+                "first": {"platform": "platform-a", "device_data": {"groups": {}}},
+                "second": {"platform": "platform-b", "device_data": {"groups": {}}},
             }
             platform_configs: dict[str, dict[str, object]] = {
                 "platform-a": {},
@@ -187,8 +187,8 @@ class PruneTests(unittest.TestCase):
             self.assertEqual(plan.entries[0].action, "protected")
             self.assertIn("rootfs recipes", plan.entries[0].reason)
 
-    def test_missing_declared_firmware_protects_existing_rootfs(self) -> None:
-        """Unknown private inputs make retention conservative instead of guessing a recipe."""
+    def test_partial_device_data_group_protects_existing_rootfs(self) -> None:
+        """A selected but incomplete private group makes the current recipe unknown."""
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / ".cache"
             public_key = alpine_state.signing_public_key(cache)
@@ -197,23 +197,41 @@ class PruneTests(unittest.TestCase):
             publish_image_state(cache, ImageState("a" * 64, "b" * 64))
             existing = cache / "rootfs" / ("1" * 64)
             existing.mkdir(parents=True)
+            generation = cache / "device-data/phone/generations/generation-test"
+            bluetooth = generation / "groups/bluetooth"
+            bluetooth.mkdir(parents=True)
+            (bluetooth / "present.bin").write_bytes(b"present!")
+            current = cache / "device-data/phone/current"
+            current.write_text("generation-test\n", encoding="ascii")
             target_config = {
                 "platform": "platform",
-                "rootfs": {
-                    "firmware": [
-                        {
-                            "source": "missing.bin",
-                            "destination": "chip/missing.bin",
-                            "size": 8,
-                        }
-                    ]
+                "device_data": {
+                    "groups": {
+                        "bluetooth": [
+                            {
+                                "source": "present.bin",
+                                "destination": "chip/present.bin",
+                                "size": 8,
+                            },
+                            {
+                                "source": "missing.bin",
+                                "destination": "chip/missing.bin",
+                                "size": 8,
+                            },
+                        ]
+                    }
                 },
             }
 
             with (
                 mock.patch.object(prune_module, "discover_targets", return_value=("phone",)),
-                mock.patch.object(prune_module, "discover_profiles", return_value=("bluetooth",)),
+                mock.patch.object(prune_module, "discover_profiles", return_value=()),
                 mock.patch.object(prune_module, "load_target", return_value=target_config),
+                mock.patch.object(
+                    prune_module,
+                    "load_platform",
+                    side_effect=AssertionError("partial group must stop before rootfs recipe"),
+                ),
                 mock.patch.object(
                     prune_module,
                     "container_image_recipe_digest",
@@ -239,9 +257,11 @@ class PruneTests(unittest.TestCase):
             profile_recipe = "4" * 64
             for recipe in (default_recipe, profile_recipe):
                 (cache / "rootfs" / recipe).mkdir(parents=True)
-            firmware_directory = cache / "firmware/phone"
+            device_data = cache / "device-data/phone"
+            firmware_directory = device_data / "generations/generation-test/groups/bluetooth"
             firmware_directory.mkdir(parents=True)
             (firmware_directory / "controller.bin").write_bytes(b"firmware")
+            (device_data / "current").write_text("generation-test\n", encoding="ascii")
 
             def target_config(_target: str, profile: str | None = None) -> dict[str, object]:
                 firmware = (
@@ -258,7 +278,15 @@ class PruneTests(unittest.TestCase):
                 return {
                     "platform": "platform",
                     "profile": profile,
-                    "rootfs": {"firmware": firmware},
+                    "device_data": {
+                        "groups": (
+                            {
+                                "bluetooth": firmware,
+                            }
+                            if firmware
+                            else {}
+                        )
+                    },
                 }
 
             def selected_packages(
@@ -326,7 +354,7 @@ class PruneTests(unittest.TestCase):
                 mock.patch.object(
                     prune_module,
                     "load_target",
-                    return_value={"platform": "platform", "rootfs": {"firmware": []}},
+                    return_value={"platform": "platform", "device_data": {"groups": {}}},
                 ),
                 mock.patch.object(prune_module, "load_platform", return_value={}),
                 mock.patch.object(

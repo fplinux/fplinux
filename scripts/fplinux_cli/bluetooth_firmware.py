@@ -7,13 +7,15 @@ values come from the backup; this reader does not remap blocks or recover ECC.
 
 from __future__ import annotations
 
-import hashlib
 import struct
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-PAGE_MAIN_BYTES = 2048
-PAGES_PER_BLOCK = 64
-BLOCK_MAIN_BYTES = PAGE_MAIN_BYTES * PAGES_PER_BLOCK
+from .common import sha256_bytes
+from .device_data import PhysicalNand, PreparedGroup, RequiredPartition, fixed_nv_records
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 NV_FILES = {
     401: ("bt-config.bin", 8),
@@ -21,123 +23,25 @@ NV_FILES = {
     404: ("bt-rf-config.bin", 252),
 }
 
+DOWNLOADED_NV_PARTITION_ID = 0x10000001
+PROTECT_NV_PARTITION_ID = 0x1000000F
+CM4_PARTITION_ID = 0x10000018
+RUNNING_NV_PARTITION_ID = 0x10000003
 
-@dataclass(frozen=True)
-class FirmwarePreparation:
-    """Unchanged extracted originals and the complete build-ready input set."""
-
-    originals: dict[str, bytes]
-    prepared: dict[str, bytes]
-
-
-@dataclass(frozen=True)
-class PhysicalNand:
-    """Main-area reads and factory-marker checks for one physical page geometry."""
-
-    raw: bytes
-    page_bytes: int
-
-    @classmethod
-    def from_dump(cls, raw: bytes, *, page_bytes: int) -> PhysicalNand:
-        """Require a complete physical backup before interpreting target partitions."""
-        expected_size = 65536 * page_bytes
-        if len(raw) != expected_size:
-            raise ValueError(
-                f"expected a complete {expected_size}-byte physical NAND backup "
-                f"(2048 main + {page_bytes - 2048} OOB bytes per page), got {len(raw)} bytes"
-            )
-        return cls(raw, page_bytes)
-
-    def main_bytes(self, offset: int, size: int) -> bytes:
-        """Read main-area bytes without including the intervening physical OOB."""
-        available = len(self.raw) // self.page_bytes * PAGE_MAIN_BYTES
-        if offset < 0 or size < 0 or offset + size > available:
-            message = "partition extent is outside the physical NAND backup"
-            raise ValueError(message)
-        output = bytearray()
-        while size:
-            page, column = divmod(offset, PAGE_MAIN_BYTES)
-            count = min(size, PAGE_MAIN_BYTES - column)
-            position = page * self.page_bytes + column
-            output.extend(self.raw[position : position + count])
-            offset += count
-            size -= count
-        return bytes(output)
-
-    def require_good_blocks(self, offset: int, size: int) -> None:
-        """Reject selected bad-marked blocks instead of guessing BML replacements."""
-        first = offset // BLOCK_MAIN_BYTES
-        last = (offset + size - 1) // BLOCK_MAIN_BYTES
-        for block in range(first, last + 1):
-            for page_in_block in (0, 1):
-                page = block * PAGES_PER_BLOCK + page_in_block
-                if self.raw[page * self.page_bytes + PAGE_MAIN_BYTES] != 0xFF:
-                    raise ValueError(
-                        f"unsupported bad-block mapping: selected NAND block {block} is marked bad"
-                    )
-
-    def partition_bytes(self, extent: tuple[int, int]) -> bytes:
-        """Read an admitted physical extent only when its factory markers are clean."""
-        offset, size = extent
-        contents = self.main_bytes(offset, size)
-        self.require_good_blocks(offset, size)
-        return contents
-
-
-def inoi_vbm_partitions(nand: PhysicalNand) -> dict[int, tuple[int, int]]:
-    """Admit the matching INOI 240/244 VBM tables and direct physical extents."""
-    table = b""
-    for offset in (0x7FC0000, 0x7FE0000):
-        header = nand.partition_bytes((offset, 0xC2))
-        if header[:8] != b"VBM_BOOT" or struct.unpack_from("<I", header, 8)[0] != 0x102:
-            message = "unsupported or damaged INOI VBM header"
-            raise ValueError(message)
-        table = header[0x16:]
-        if hashlib.sha256(table).hexdigest() != (
-            "e25eb8d1ede9629d46abcfb0335d3170d5b553fad7c439e3f82f25ca14b0ab85"
-        ):
-            message = "unsupported or damaged INOI partition table"
-            raise ValueError(message)
-    count = struct.unpack_from("<H", table)[0]
-    result = {}
-    for index in range(count):
-        identifier, _attributes, first, last = struct.unpack_from("<I3H", table, 2 + index * 10)
-        result[identifier] = (first * BLOCK_MAIN_BYTES, (last - first + 1) * BLOCK_MAIN_BYTES)
-    return result
+REQUIRED_BLUETOOTH_PARTITIONS = {
+    DOWNLOADED_NV_PARTITION_ID: RequiredPartition("DownloadedNV", 0x100),
+    PROTECT_NV_PARTITION_ID: RequiredPartition("ProtectNV", 0x100),
+    CM4_PARTITION_ID: RequiredPartition("CM4", 0x100),
+    RUNNING_NV_PARTITION_ID: RequiredPartition("RunningNV", 0x001),
+}
 
 
 def fixed_nv(partition: bytes) -> dict[int, bytes]:
     """Read the three Bluetooth records from a complete sorted NV1 stream."""
-    if len(partition) < 8:
-        message = "incomplete fixed NV stream"
-        raise ValueError(message)
-    # The first word is a per-phone generation, not a fixed magic signature.
-    cursor = 4
-    previous_id = 0
-    records: dict[int, bytes] = {}
-    while cursor + 4 <= len(partition):
-        identifier, length = struct.unpack_from("<HH", partition, cursor)
-        cursor += 4
-        if identifier == 0xFFFF and length == 0xFFFF:
-            for required_id, (_filename, required_size) in NV_FILES.items():
-                if required_id not in records or len(records[required_id]) != required_size:
-                    raise ValueError(
-                        f"fixed NV record {required_id} is missing or has the wrong size"
-                    )
-            return records
-        if identifier <= previous_id or identifier == 0xFFFF:
-            message = "damaged fixed NV record ordering"
-            raise ValueError(message)
-        previous_id = identifier
-        padded_length = (length + 3) & ~3
-        if cursor + padded_length > len(partition):
-            message = "truncated fixed NV record"
-            raise ValueError(message)
-        if identifier in NV_FILES:
-            records[identifier] = partition[cursor : cursor + length]
-        cursor += padded_length
-    message = "fixed NV stream has no complete terminator"
-    raise ValueError(message)
+    return fixed_nv_records(
+        partition,
+        {identifier: size for identifier, (_filename, size) in NV_FILES.items()},
+    )
 
 
 def nv_checksum(data: bytes) -> int:
@@ -206,35 +110,34 @@ class Cm4Revision:
 
     def prepare(self, original: bytes) -> bytes:
         """Admit the unchanged image before producing its compatible output copy."""
-        if (
-            len(original) != self.size
-            or hashlib.sha256(original).hexdigest() != self.original_sha256
-        ):
+        if len(original) != self.size or sha256_bytes(original) != self.original_sha256:
             message = "unsupported or damaged original CM4 firmware revision"
             raise ValueError(message)
         prepared = omit_initial_pub_policy(original, self.pub_policy_offsets)
-        if hashlib.sha256(prepared).hexdigest() != self.prepared_sha256:
+        if sha256_bytes(prepared) != self.prepared_sha256:
             message = "CM4 compatibility patch produced an unexpected image"
             raise ValueError(message)
         return prepared
 
 
-def prepare_from_partitions(
+def prepare_bluetooth_from_records(  # noqa: PLR0913 -- exact source boundaries stay explicit.
     nand: PhysicalNand,
     partitions: dict[int, tuple[int, int]],
     *,
     prefix: str,
     revision: Cm4Revision,
-) -> FirmwarePreparation:
-    """Extract the common CM4/NV set from a target's admitted physical partitions."""
-    cm4 = nand.partition_bytes(partitions[0x10000018])[: revision.size]
+    downloaded: Mapping[int, bytes],
+    protected: Mapping[int, bytes],
+) -> PreparedGroup:
+    """Prepare Bluetooth from already parsed fixed NV records and the shared NAND."""
+    cm4 = nand.partition_bytes(partitions[CM4_PARTITION_ID])[: revision.size]
     prepared_cm4 = revision.prepare(cm4)
-    fixed = fixed_nv(nand.partition_bytes(partitions[0x10000001]))
-    protected = fixed_nv(nand.partition_bytes(partitions[0x1000000F]))
-    if fixed != protected:
+    fixed = {identifier: downloaded[identifier] for identifier in NV_FILES}
+    protected_bluetooth = {identifier: protected[identifier] for identifier in NV_FILES}
+    if fixed != protected_bluetooth:
         message = "ambiguous Bluetooth settings: DownloadedNV and ProtectNV disagree"
         raise ValueError(message)
-    running = nand.partition_bytes(partitions[0x10000003])
+    running = nand.partition_bytes(partitions[RUNNING_NV_PARTITION_ID])
     verify_running_nv(running, fixed)
 
     cm4_filename = f"{prefix}-cm4.bin"
@@ -243,4 +146,24 @@ def prepare_from_partitions(
         originals[f"{prefix}-{filename}"] = fixed[identifier]
     prepared = dict(originals)
     prepared[cm4_filename] = prepared_cm4
-    return FirmwarePreparation(originals=originals, prepared=prepared)
+    return PreparedGroup(originals=originals, prepared=prepared)
+
+
+def prepare_bluetooth_from_partitions(
+    nand: PhysicalNand,
+    partitions: dict[int, tuple[int, int]],
+    *,
+    prefix: str,
+    revision: Cm4Revision,
+) -> PreparedGroup:
+    """Extract the common CM4/NV set from a target's admitted physical partitions."""
+    downloaded = fixed_nv(nand.partition_bytes(partitions[DOWNLOADED_NV_PARTITION_ID]))
+    protected = fixed_nv(nand.partition_bytes(partitions[PROTECT_NV_PARTITION_ID]))
+    return prepare_bluetooth_from_records(
+        nand,
+        partitions,
+        prefix=prefix,
+        revision=revision,
+        downloaded=downloaded,
+        protected=protected,
+    )

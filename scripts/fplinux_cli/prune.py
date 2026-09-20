@@ -172,11 +172,13 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
                 target_config = (
                     load_target(target) if profile is None else load_target(target, profile)
                 )
-                firmware = firmware_inputs.capture_external_firmware_inputs(
+                device_data_groups = target_config["device_data"]["groups"]
+                device_data = firmware_inputs.capture_external_device_data(
                     target,
-                    target_config["rootfs"]["firmware"],
+                    device_data_groups,
                     cache,
                 )
+                firmware = device_data.get("bluetooth", ())
                 recipes.add(
                     alpine_state.alpine_rootfs_recipe(
                         image_recipe,

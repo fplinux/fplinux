@@ -77,13 +77,20 @@ backlight_level = 0x1f
 session_name = "inoi244-linux"
 boot_instructions = "Power the phone off, hold *, then connect USB while keeping * pressed."
 
+[device_data]
+parser = "inoi244_device_data.py"
+
 [bluetooth]
-parser = "inoi244_bluetooth_firmware.py"
 firmware = [
   { source = "inoi244-cm4.bin", destination = "ums9117/inoi244-cm4.bin", size = 463296, sha256 = "7fd7d006a27276c038962fb1de5ab8f3fc60f9754dc3292427caec068f9af3fd" },
   { source = "inoi244-bt-config.bin", destination = "ums9117/inoi244-bt-config.bin", size = 8 },
   { source = "inoi244-bt-sprd.bin", destination = "ums9117/inoi244-bt-sprd.bin", size = 176 },
   { source = "inoi244-bt-rf-config.bin", destination = "ums9117/inoi244-bt-rf-config.bin", size = 252 },
+]
+
+[audio_profile]
+firmware = [
+  { source = "inoi244-audio-profile.bin", destination = "fplinux/inoi244-audio-profile.bin", size = 43 },
 ]
 
 [microsd]

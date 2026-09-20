@@ -43,11 +43,11 @@ class ProfileAndToolCliHelpWorkflowTests(unittest.TestCase):
         self.assertIn("output", result.stdout.lower())
         self.assertIn("--profile NAME", result.stdout)
 
-    def test_bluetooth_prepare_help_exposes_live_and_saved_dump_inputs(self) -> None:
-        """Preparation advertises one command for a phone or an existing raw dump."""
+    def test_device_data_help_exposes_every_preparation_input(self) -> None:
+        """The canonical command exposes the complete fitted-data source contract."""
         result = run_process(
-            [str(ROOT / "fplinux"), "bluetooth", "prepare", "--help"],
-            name="fplinux bluetooth prepare help",
+            [str(ROOT / "fplinux"), "device-data", "prepare", "--help"],
+            name="fplinux device-data prepare help",
             timeout=_PUBLIC_HELP_TIMEOUT_SECONDS,
             cwd=ROOT,
         )
