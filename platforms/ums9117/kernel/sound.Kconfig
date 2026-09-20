@@ -6,3 +6,5 @@ config SND_UMS9117
 	help
 	  Enable the 24 kHz and 48 kHz stereo S16_LE ALSA headphone PCM device
 	  for supported UMS9117 boards.
+	  Provide stereo mixer controls and optional idle zero-PCM playback.
+	  Microphone capture is not supported by this driver.

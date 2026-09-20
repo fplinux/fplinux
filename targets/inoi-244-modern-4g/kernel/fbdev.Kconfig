@@ -7,3 +7,5 @@ config FB_INOI244
 	help
 	  Drive the INOI 244 Modern 4G NV3030 panel through the UMS9117
 	  parallel LCM/DBI interface and common LCDC framebuffer lifecycle.
+	  Use the fixed board panel timings and expose RGB565 framebuffer
+	  memory with LCD backlight control through the backlight class.
