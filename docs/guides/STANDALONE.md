@@ -6,9 +6,9 @@ without a source checkout. Read the top-level `README.txt` first: it names the
 phone, its boot key, supported hardware, storage limits and safe way to end the
 RAM session.
 
-If `CANDIDATE-NOTICE.txt` is present, the executable payload is awaiting
-physical qualification. Creating or checking the archive does not turn that
-candidate into a release.
+If `CANDIDATE-NOTICE.txt` is present, this is a phone-test candidate: its
+executable payload has not yet been phone-tested. Creating or checking the
+archive does not turn that candidate into a release.
 
 ## Host requirements
 

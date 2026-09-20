@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Artifact tests for release archives and qualification payloads."""
+"""Artifact tests for release archives and phone-test payloads."""
 
 from __future__ import annotations
 
@@ -162,19 +162,19 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
         publish_current_bundle(self.cache / "out", self.target, bundle)
 
     def package(self, *, candidate: bool) -> tuple[str, str]:
-        """Create an archive and return its archive and qualification digests."""
+        """Create an archive and return its archive and phone-test payload digests."""
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
             commands.package_target(self.target, candidate=candidate)
         values: dict[str, str] = {}
         for line in stdout.getvalue().splitlines():
-            for label in ("Archive SHA256", "Qualification payload SHA256"):
+            for label in ("Archive SHA256", "Phone-test payload SHA256"):
                 prefix = f"{label}: "
                 if line.startswith(prefix):
                     values[label] = line.removeprefix(prefix)
-        if set(values) != {"Archive SHA256", "Qualification payload SHA256"}:
-            self.fail("package output omitted an archive or qualification digest")
-        return values["Archive SHA256"], values["Qualification payload SHA256"]
+        if set(values) != {"Archive SHA256", "Phone-test payload SHA256"}:
+            self.fail("package output omitted an archive or phone-test payload digest")
+        return values["Archive SHA256"], values["Phone-test payload SHA256"]
 
     def package_patches(self) -> tuple[contextlib.AbstractContextManager[object], ...]:
         """Isolate package creation from host identity and repository files."""
@@ -218,6 +218,11 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             payloads = {name.removeprefix(f"{root}/"): archive.read(name) for name in members}
 
         expected_documents = {
+            "CANDIDATE-NOTICE.txt": (
+                b"PHONE-TEST CANDIDATE - DO NOT PUBLISH\n\n"
+                b"This archive is for testing on the target phone only.\n"
+                b"Candidate packaging does not make it release-ready.\n"
+            ),
             "README.txt": b"phone instructions\n",
             **self.target_documents,
             **{
@@ -414,8 +419,8 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
                     with self.subTest(document=name, link=link):
                         self.assertIn(linked_member, members)
 
-    def test_apk_bytes_but_not_archive_metadata_change_qualification(self) -> None:
-        """Only a changed executable payload requires a new phone qualification."""
+    def test_apk_bytes_but_not_archive_metadata_change_phone_test_payload(self) -> None:
+        """Only a changed executable payload requires another complete phone test."""
         with contextlib.ExitStack() as stack:
             for patch in self.package_patches():
                 stack.enter_context(patch)
@@ -453,7 +458,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
                     "verified_runtime_digest",
                     return_value=original,
                 ),
-                self.assertRaisesRegex(SystemExit, "not hardware-qualified"),
+                self.assertRaisesRegex(SystemExit, "not phone-tested"),
             ):
                 commands.package_target(self.target)
 

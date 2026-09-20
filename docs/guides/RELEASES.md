@@ -3,13 +3,13 @@
 FPLinux archives are target-specific standalone bundles for Linux x86-64 hosts,
 made from a successful local build. Every current archive begins through the
 same volatile RAM loader as a source checkout; a selected boot mode may then use
-additional removable-media artifacts bundled with its candidate.
+additional removable-media artifacts bundled with its phone-test candidate.
 
 ## Current availability
 
-This checkout has no prebuilt release archive and no recorded qualified payload.
-A candidate is for physical qualification only and must not be published as a
-release.
+This checkout has no prebuilt release archive and no recorded phone-tested
+executable payload digest. A candidate exists only for testing on the target
+phone and must not be published as a release.
 
 ## Create a candidate
 
@@ -22,11 +22,12 @@ package it:
 ```
 
 The candidate ZIP is written below `.cache/out/candidates/`. Its filename and
-included notice identify it as a qualification candidate. Packaging validates the
+included notice identify it as a phone-test candidate. Packaging validates the
 selected build and does not rebuild it.
 
-A release archive can be created only after the exact executable payload from a
-candidate has completed phone-specific qualification:
+A release archive can be created only after the digest of the exact executable
+payload from a candidate has been recorded following the required tests on that
+phone:
 
 ```sh
 ./fplinux package <target>
@@ -35,14 +36,14 @@ candidate has completed phone-specific qualification:
 Until then, this command refuses to create a release archive. A successful
 release archive is written below `.cache/out/releases/`.
 
-## Qualification boundary
+## Phone-test boundary
 
 A candidate proves that the source checkout produced a packageable bundle. It
 does not prove that the target boots or that any hardware feature works.
-Qualification covers the RAM runtime and bundled APKs. Documentation, notices,
-checksums and build metadata remain outside that phone-qualified payload but are
-still covered by archive integrity checks. A boot-mode candidate also includes
-its declared boot artifacts in the qualification payload.
+Phone testing covers the RAM runtime and bundled APKs. Documentation, notices,
+checksums and build metadata remain outside the executable payload tested on the
+phone but are still covered by archive integrity checks. A boot-mode candidate
+also includes its declared boot artifacts in the phone test.
 
 The microSD system candidate is selected independently of the RAM-only target
 archive:
@@ -57,7 +58,7 @@ context and currently requires candidate packaging. The equivalent
 `--profile microsd-uboot` selector packages the same context with
 `microsd-uboot` in the archive name.
 
-Changing the executable payload requires another phone qualification. A build,
+Changing the executable payload requires another complete phone test. A build,
 archive checksum or host-side `verify` does not replace that phone test.
 
 The [target index](../../targets/README.md) links every phone's exact support
@@ -80,7 +81,7 @@ sha256sum -c SHA256SUMS
 
 `SHA256SUMS` protects the extracted archive contents. The archive digest printed
 by `./fplinux package` protects the ZIP as a whole when that digest is retained
-or published. Neither integrity check is hardware qualification.
+or published. Neither integrity check demonstrates working phone hardware.
 
 After validation, follow [Using a standalone archive](STANDALONE.md). That guide
 is the source of truth for host runtime requirements, USB access, loader order

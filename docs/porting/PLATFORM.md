@@ -32,9 +32,9 @@ and target bootstrap inputs out of the platform.
 
 Use **Supported**, **Partial**, **Not supported** and **Unknown** with the same
 meaning as the [target template](../../docs/porting/TARGET.md). This table
-describes shared implementation and hardware evidence; it does not qualify a
-complete phone runtime closure. Bundled installable APKs join that runtime in
-the executable payload used for release qualification.
+describes shared implementation and hardware evidence; it does not demonstrate
+a complete phone runtime. Bundled installable APKs join that runtime in the
+executable payload used for release testing on the phone.
 
 | Block                | Status     | Target-facing contract or limitation |
 | -------------------- | ---------- | ------------------------------------ |
@@ -74,7 +74,7 @@ implementation file maps here.
 
 Replace the placeholder with a real entry from the
 [phone target index](../../targets/README.md) and link that entry to its support
-document. A platform capability can be physically validated without qualifying
+document. A platform capability can be tested on hardware without demonstrating
 every target's full executable payload.
 
 The project [documentation index](../../README.md#documentation) links the

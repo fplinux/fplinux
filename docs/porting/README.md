@@ -26,13 +26,13 @@ support or the platform loader sequence.
 2. Keep board-specific data in the target. Move code to a platform only after
    more than one current target uses the same behaviour.
 3. Give the target a clear support table: hardware presence, FPLinux support,
-   and physical validation are separate facts.
+   and observed physical behavior are separate facts.
 4. Follow the shared [build workflow](../guides/BUILDING.md) and
    [loader procedure](../guides/LOADING.md). Keep loader ordering and common host
    procedures out of target and platform documents.
 5. Exercise every feature labelled **Supported** on the named hardware variant.
    A release requires the exact executable payload to pass the phone gate; a
-   successful build or candidate package alone is not release qualification.
+   successful build or candidate package alone is not a phone test.
 
 Use the [platform template](PLATFORM.md) for reusable SoC support and the
 [console port contract](CONSOLE.md) when a target offers the

@@ -1356,7 +1356,7 @@ def load_platform(platform: str) -> dict[str, Any]:
 
 
 def verified_runtime_digest(target: str) -> str | None:
-    """Return the hardware-qualified runtime closure digest, if present."""
+    """Return the recorded phone-tested runtime closure digest, if present."""
     path = ROOT / "releases.lock.toml"
     if not path.is_file():
         fail(f"release verification lock is missing: {path}")

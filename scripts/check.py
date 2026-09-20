@@ -343,7 +343,7 @@ def check_release_lock() -> None:
             or len(digest) != 64
             or any(character not in "0123456789abcdef" for character in digest)
         ):
-            fail(f"invalid verified qualification SHA256 for target: {name}")
+            fail(f"invalid recorded phone-test SHA256 for target: {name}")
 
 
 def alpine_apkbuilds(files: list[Path]) -> list[str]:

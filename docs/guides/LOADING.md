@@ -124,7 +124,7 @@ With the default target bundle loaded and its console ready, run:
 `verify` compares the running device identity with the selected local runtime.
 Changes to optional APKs or documentation do not require another RAM load. A
 different loaded kernel, initramfs, profile or bootstrap is refused. This is
-not a phone hardware-qualification test and does not apply to standalone
+not a phone hardware test and does not apply to standalone
 archives.
 
 ## End the RAM session

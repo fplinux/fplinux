@@ -2,7 +2,7 @@
 
 This guide covers diagnostics available in source-built development images.
 Debug output and tracing help investigate a running RAM session; they do not
-prove hardware support or qualify a release payload.
+prove hardware support or make a payload release-ready.
 
 ## Build and command logs
 

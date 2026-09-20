@@ -72,10 +72,10 @@ from .workspace import (
     workspace_snapshot,
 )
 
-CANDIDATE_NOTICE = b"""HARDWARE QUALIFICATION CANDIDATE - DO NOT PUBLISH
+CANDIDATE_NOTICE = b"""PHONE-TEST CANDIDATE - DO NOT PUBLISH
 
-This archive is for physical device qualification and testing only.
-Candidate packaging does not assert release qualification.
+This archive is for testing on the target phone only.
+Candidate packaging does not make it release-ready.
 """
 SSH_HELPER_PATH = "runner/ssh_transport.py"
 MICROSD_BOOT_MODE = "microsd"
@@ -1073,9 +1073,9 @@ def package_target(
     verified_digest = None if candidate else verified_runtime_digest(target)
     if not candidate and verified_digest != qualification_digest:
         fail(
-            "this executable payload is not hardware-qualified for release; "
-            "use --candidate for device testing "
-            f"(qualification SHA256 {qualification_digest})"
+            "this executable payload is not phone-tested for release; "
+            "use --candidate for phone testing "
+            f"(phone-test payload SHA256 {qualification_digest})"
         )
 
     add_target_files(files, target, release["documents"])
@@ -1134,7 +1134,7 @@ def package_target(
     image_digest = sha256_bytes(files[release["image"]])
     print(f"FPLinux {qualifier} package: {archive.relative_to(ROOT)}")
     print(f"Archive SHA256: {sha256_file(archive)}")
-    print(f"Qualification payload SHA256: {qualification_digest}")
+    print(f"Phone-test payload SHA256: {qualification_digest}")
     print(f"ramboot.bin SHA256: {image_digest}")
 
 

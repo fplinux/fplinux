@@ -98,6 +98,15 @@ The decoder accepts self-contained, eight-bit baseline Huffman YCbCr with one
 interleaved scan. Width and height may each be from 1 through 2048 pixels. The
 complete JPEG file must not exceed 1 MiB.
 
+Those dimensions are a syntax limit, not a promise that every image fits. A
+decoded frame is one byte per luma sample plus one byte per chroma sample, so
+2048x2048 is 8 MiB for 4:2:2 and 6 MiB for 4:2:0, and the output file is that
+size. The destination filesystem must have room for it: a RAM filesystem is
+sized from the phone's memory and is shared with everything else placed there,
+so the largest images may not fit even when the filesystem looks large. When
+the output cannot be written the command fails with the reason it was given,
+and a partially written output file may remain.
+
 The current input contract is:
 
 - exactly one baseline SOF0 frame and one SOS scan, with three components;

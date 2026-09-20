@@ -52,12 +52,12 @@ cold boot. Files in temporary RAM filesystems such as `/tmp` do not. Keep
 The system card cannot be unmounted or hot-swapped while Linux is running.
 `sync` alone does not make it safe to remove the card or cut power. Use the
 [power-key shutdown procedure](../features/POWER_OFF.md#safe-shutdown) only
-on a phone with qualified battery-only power-off. Wait for shutdown to finish
+on a phone whose documentation lists battery-only power-off as supported. Wait for shutdown to finish
 before removing or rewriting the card.
 
 ### Shutdown with USB power
 
-On INOI, battery-only power-off is unqualified. A `poweroff` request or a lost
+On INOI, battery-only power-off has not been tested. A `poweroff` request or a lost
 USB connection alone does not establish that the card is safe to remove.
 Keep USB connected while stopping applications and services that write to the
 card. Disable all card-backed swap and unmount every card filesystem except
@@ -73,5 +73,5 @@ The remount must succeed, and `/proc/mounts` must show the ext4 `/` mount with
 the `ro` option. If the remount fails, stop the remaining writers and try again;
 leave the phone powered until all card filesystems are unmounted or read-only.
 Only after that condition is established, request shutdown with `poweroff`
-and disconnect power. This sequence protects the card; it does not qualify
+and disconnect power. This sequence protects the card; it does not demonstrate
 battery-powered operation or the phone's physical power-off control.

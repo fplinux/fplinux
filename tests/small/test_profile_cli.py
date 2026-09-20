@@ -118,7 +118,7 @@ class ProfileParserDispatchTests(unittest.TestCase):
         run.assert_called_once_with("demo", profile="microsd-uboot", boot=None)
 
     def test_package_and_console_forward_the_same_named_profile(self) -> None:
-        """Qualification archives and reconnects select the profile generation explicitly."""
+        """Phone-test archives and reconnects select the profile generation explicitly."""
         _check, _build, _run, package, _console = self.invoke(
             "package",
             "demo",

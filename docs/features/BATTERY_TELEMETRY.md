@@ -58,4 +58,4 @@ not been checked against an external instrument. These values are PMIC
 telemetry, not a direct measurement at the battery terminals. FPLinux does not
 provide capacity, state of charge, battery temperature, health, charge status
 or charge control through this interface. Readings made without a battery do
-not qualify battery measurements or charging.
+not demonstrate battery operation, measurement accuracy or charging behavior.
