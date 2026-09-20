@@ -1,9 +1,13 @@
 # SPDX-License-Identifier: GPL-2.0-only
 config BT_UMS9117_CM4
 	bool "UMS9117 CM4 Bluetooth controller"
-	depends on ARCH_UMS9117 && BT=y && FW_LOADER
+	depends on ARCH_UMS9117 && BT=y
 	depends on !SMP && PREEMPT_NONE && MFD_SYSCON
+	depends on MAILBOX && BT_HCIUART
 	select CRYPTO_LIB_SHA256
+	select FW_LOADER
+	select SPRD_MBOX
+	select BT_HCIUART_H4
 	help
 	  Start the UMS9117 CM4 controller from external firmware and fitted
 	  Bluetooth records, then expose its mailbox transport as a Linux HCI

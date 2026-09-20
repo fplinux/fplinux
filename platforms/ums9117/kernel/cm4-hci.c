@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include <linux/delay.h>
+#include <linux/err.h>
 #include <linux/errno.h>
 #include <linux/kernel.h>
 #include <linux/ktime.h>
@@ -10,7 +11,8 @@
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
 
-#include "cm4-h4.h"
+#include <hci_uart.h>
+
 #include "cm4-hci.h"
 #include "cm4-mailbox.h"
 
@@ -24,7 +26,8 @@ static struct {
 	struct delayed_work work;
 	struct sk_buff_head tx_queue;
 	struct sk_buff *tx_skb;
-	struct ums9117_h4_rx rx;
+	struct hci_uart rx_hu;
+	struct sk_buff *rx_skb;
 	u8 tx_data[UMS9117_HCI_TX_BYTES];
 	size_t tx_length;
 	size_t tx_sent;
@@ -32,6 +35,7 @@ static struct {
 	bool running;
 	bool opened;
 	bool rx_discard;
+	int rx_callback_error;
 	bool suspending;
 	bool transport_suspended;
 	bool core_suspended;
@@ -39,6 +43,14 @@ static struct {
 	bool checking_pm_commands;
 	int pm_command_error;
 } runtime;
+
+static int receive_frame(struct hci_dev *hdev, struct sk_buff *skb);
+
+static const struct h4_recv_pkt cm4_recv_pkts[] = {
+	{ H4_RECV_ACL, .recv = receive_frame },
+	{ H4_RECV_SCO, .recv = receive_frame },
+	{ H4_RECV_EVENT, .recv = receive_frame },
+};
 
 /*
  * io_lock serializes worker, open/close/flush and transport suspend/resume.
@@ -75,54 +87,98 @@ static void fail_transport(int error)
 	purge_queued_tx();
 	spin_unlock_irqrestore(&runtime.tx_queue.lock, flags);
 	release_tx();
-	ums9117_h4_rx_reset(&runtime.rx);
+	kfree_skb(runtime.rx_skb);
+	runtime.rx_skb = NULL;
+	runtime.rx_callback_error = 0;
 	bt_dev_err(runtime.hdev, "CM4 transport stopped: %d", error);
 }
 
-static void observe_pm_reply(void)
+static void observe_pm_reply(const struct sk_buff *skb)
 {
-	const struct ums9117_h4_rx *rx = &runtime.rx;
-
-	if (!runtime.checking_pm_commands || rx->type != HCI_EVENT_PKT)
+	if (!runtime.checking_pm_commands ||
+	    hci_skb_pkt_type(skb) != HCI_EVENT_PKT)
 		return;
 	/* Native HCI suspend/resume do not propagate every command's status. */
-	if ((rx->data[0] == HCI_EV_CMD_COMPLETE && rx->length >= 6 &&
-	     rx->data[5]) ||
-	    (rx->data[0] == HCI_EV_CMD_STATUS && rx->length >= 6 &&
-	     rx->data[2]))
+	if ((skb->data[0] == HCI_EV_CMD_COMPLETE && skb->len >= 6 &&
+	     skb->data[5]) ||
+	    (skb->data[0] == HCI_EV_CMD_STATUS && skb->len >= 6 &&
+	     skb->data[2]))
 		runtime.pm_command_error = -EREMOTEIO;
+}
+
+static int receive_frame(struct hci_dev *hdev, struct sk_buff *skb)
+{
+	int ret;
+
+	if (runtime.rx_callback_error) {
+		kfree_skb(skb);
+		return 0;
+	}
+	observe_pm_reply(skb);
+	if (runtime.rx_discard) {
+		kfree_skb(skb);
+		runtime.rx_discard = !runtime.opened;
+		return 0;
+	}
+	/* hci_recv_frame consumes skb on success and failure. */
+	ret = hci_recv_frame(hdev, skb);
+	if (ret && ret != -ENXIO)
+		runtime.rx_callback_error = ret;
+	runtime.rx_discard = !runtime.opened;
+	return 0;
 }
 
 static int receive_bytes(const u8 *input, size_t length)
 {
-	struct hci_dev *hdev = runtime.hdev;
-	struct sk_buff *skb;
-	size_t i;
 	int ret;
 
-	for (i = 0; i < length; i++) {
-		if (!runtime.rx.type)
-			runtime.rx_discard = !runtime.opened;
-		ret = ums9117_h4_rx_byte(&runtime.rx, input[i]);
-		if (ret < 0)
-			return ret;
-		if (!ret)
-			continue;
-		observe_pm_reply();
-		if (!runtime.rx_discard && runtime.opened) {
-			skb = bt_skb_alloc(runtime.rx.length, GFP_KERNEL);
-			if (!skb)
-				return -ENOMEM;
-			hci_skb_pkt_type(skb) = runtime.rx.type;
-			skb_put_data(skb, runtime.rx.data, runtime.rx.length);
-			/* hci_recv_frame consumes skb on success and failure. */
-			ret = hci_recv_frame(hdev, skb);
-			if (ret && ret != -ENXIO)
-				return ret;
-		}
-		ums9117_h4_rx_reset(&runtime.rx);
+	if (!runtime.rx_skb)
+		runtime.rx_discard = !runtime.opened;
+	runtime.rx_skb = h4_recv_buf(&runtime.rx_hu, runtime.rx_skb, input,
+				     length, cm4_recv_pkts,
+				     ARRAY_SIZE(cm4_recv_pkts));
+	if (IS_ERR(runtime.rx_skb)) {
+		ret = PTR_ERR(runtime.rx_skb);
+		runtime.rx_skb = NULL;
+		return ret;
 	}
-	return 0;
+	if (!runtime.rx_callback_error)
+		return 0;
+	ret = runtime.rx_callback_error;
+	runtime.rx_callback_error = 0;
+	kfree_skb(runtime.rx_skb);
+	runtime.rx_skb = NULL;
+	return ret;
+}
+
+static int validate_tx_frame(u8 type, const u8 *header, size_t length)
+{
+	size_t header_size;
+	size_t payload;
+	size_t limit;
+
+	switch (type) {
+	case HCI_COMMAND_PKT:
+		header_size = HCI_COMMAND_HDR_SIZE;
+		limit = HCI_COMMAND_HDR_SIZE + 255;
+		break;
+	case HCI_ACLDATA_PKT:
+		header_size = HCI_ACL_HDR_SIZE;
+		limit = HCI_MAX_FRAME_SIZE;
+		break;
+	case HCI_SCODATA_PKT:
+		header_size = HCI_SCO_HDR_SIZE;
+		limit = HCI_MAX_SCO_SIZE;
+		break;
+	default:
+		return -EILSEQ;
+	}
+	if (length < header_size || length > limit)
+		return -EMSGSIZE;
+	payload = header[2];
+	if (type == HCI_ACLDATA_PKT)
+		payload |= header[3] << 8;
+	return length == header_size + payload ? 0 : -EPROTO;
 }
 
 static int transmit_frame(size_t *written)
@@ -305,7 +361,7 @@ static int runtime_send(struct hci_dev *hdev, struct sk_buff *skb)
 			    min_t(size_t, skb->len, sizeof(header)));
 	if (ret)
 		return ret;
-	ret = ums9117_h4_tx_validate(hci_skb_pkt_type(skb), header, skb->len);
+	ret = validate_tx_frame(hci_skb_pkt_type(skb), header, skb->len);
 	if (ret)
 		return ret;
 	spin_lock_irqsave(&runtime.tx_queue.lock, flags);
@@ -350,6 +406,8 @@ int ums9117_hci_runtime_register(struct device *dev, const u8 *rx_prefix,
 		return -ENOMEM;
 	}
 	runtime.hdev = hdev;
+	runtime.rx_hu.hdev = hdev;
+	runtime.rx_hu.alignment = 1;
 	/* The prologue owns these byte counters; preserve its partial RX boundary. */
 	ret = receive_bytes(rx_prefix, prefix_bytes);
 	if (ret) {
@@ -415,7 +473,7 @@ int ums9117_hci_suspend_prepare(void)
 	else if (!runtime.running)
 		ret = -ESHUTDOWN;
 	else if (runtime.suspending || hci_busy(hdev) || runtime.tx_skb ||
-		 runtime.rx.type || !skb_queue_empty(&runtime.tx_queue))
+		 runtime.rx_skb || !skb_queue_empty(&runtime.tx_queue))
 		ret = -EBUSY;
 	else {
 		runtime.suspending = true;
@@ -465,7 +523,7 @@ int ums9117_hci_suspend(void)
 		else if (!runtime.suspending || !runtime.running)
 			ret = -ESHUTDOWN;
 		else if (runtime.pm_activity || hci_busy(hdev) ||
-			 runtime.tx_skb || runtime.rx.type ||
+			 runtime.tx_skb || runtime.rx_skb ||
 			 !skb_queue_empty(&runtime.tx_queue))
 			ret = -EBUSY;
 		else {
@@ -572,7 +630,8 @@ void ums9117_hci_runtime_unregister(void)
 	hci_unregister_dev(hdev);
 	mutex_lock(&io_lock);
 	release_tx();
-	ums9117_h4_rx_reset(&runtime.rx);
+	kfree_skb(runtime.rx_skb);
+	runtime.rx_skb = NULL;
 	runtime.hdev = NULL;
 	mutex_unlock(&io_lock);
 	hci_free_dev(hdev);

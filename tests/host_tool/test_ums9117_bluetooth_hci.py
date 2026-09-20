@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Host component checks for UMS9117 Bluetooth setup, H4 and retained transport."""
+"""Host component checks for UMS9117 Bluetooth setup and retained transport."""
 
 from __future__ import annotations
 
@@ -20,11 +20,8 @@ class Ums9117BluetoothHciHostTests(unittest.TestCase):
 
     def run_component(self, component: str) -> None:
         """Compile and execute an isolated, self-checking C fixture."""
-        sources = (
-            [KERNEL / "cm4-hci.c", KERNEL / "cm4-h4.c"]
-            if component == "runtime"
-            else [KERNEL / f"cm4-{component}.c"]
-        )
+        source = KERNEL / "cm4-hci.c" if component == "runtime" else KERNEL / f"cm4-{component}.c"
+        sources = [source]
         with tempfile.TemporaryDirectory() as temporary:
             executable = Path(temporary) / component
             run_process(
@@ -59,9 +56,9 @@ class Ums9117BluetoothHciHostTests(unittest.TestCase):
         """Synthetic records produce exact commands and require matching replies."""
         self.run_component("setup")
 
-    def test_h4_packets_partial_input_and_length_validation(self) -> None:
-        """H4 preserves packet boundaries and rejects invalid types and lengths."""
-        self.run_component("h4")
+    def test_mailbox_copies_received_values_and_retains_suspend_channel(self) -> None:
+        """Host callback mutation preserves queued values; non-idle suspend is vetoed."""
+        self.run_component("mailbox")
 
     def test_retained_transport_admission_rollback_and_stream(self) -> None:
         """Fake peer/core boundaries exercise real suspend gating and stream retention."""

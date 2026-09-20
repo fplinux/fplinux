@@ -2,39 +2,15 @@
 /* UMS9117 CM4 channel-4 handshake and ring0 H4 stream. */
 
 #include <linux/bitops.h>
-#include <linux/interrupt.h>
-#include <linux/ioport.h>
-#include <linux/irq.h>
+#include <linux/err.h>
+#include <linux/errno.h>
 #include <linux/kernel.h>
-#include <linux/platform_device.h>
-#include <linux/regmap.h>
+#include <linux/mailbox_client.h>
 #include <linux/string.h>
 
 #include "cm4-mailbox.h"
 
-#define UMS9117_MBOX_ID 0x00
-#define UMS9117_MBOX_MSG_L 0x04
-#define UMS9117_MBOX_MSG_H 0x08
-#define UMS9117_MBOX_TRI 0x0c
-#define UMS9117_MBOX_FIFO_RST 0x10
-#define UMS9117_MBOX_FIFO_STS 0x14
-#define UMS9117_MBOX_IRQ_STS 0x18
-#define UMS9117_MBOX_IRQ_MSK 0x1c
-#define UMS9117_MBOX_FIFO_DEPTH 0x24
-#define UMS9117_MBOX_VERSION 0x28
-
-#define UMS9117_MBOX_MASK_ALL 0xffffffffU
-#define UMS9117_MBOX_SEND_IDLE 0xfffffffcU
-#define UMS9117_MBOX_SEND_DELIVERY 0xfffffffbU
-#define UMS9117_MBOX_RECEIVE_ARMED 0xfffffffeU
-#define UMS9117_MBOX_PEER_PENDING BIT(25)
-#define UMS9117_MBOX_PEER_DELIVERED BIT(17)
-#define UMS9117_MBOX_BLOCK_MASK 0x000000ffU
-#define UMS9117_MBOX_CLEAR_MASK 0x00ffff00U
-#define UMS9117_MBOX_SOURCE_MASK 0x0000ff00U
-#define UMS9117_MBOX_FIFO_UNAVAILABLE (BIT(31) | BIT(30))
 #define UMS9117_MBOX_EVENT_LIMIT 256U
-#define UMS9117_MBOX_IRQ_LIMIT 256U
 #define UMS9117_MBOX_OPEN 0xbeee0104U
 #define UMS9117_MBOX_CMD 0x00010504U
 #define UMS9117_MBOX_DONE 0x00020604U
@@ -72,25 +48,14 @@ enum sbuf_counter_mode {
 	UMS9117_SBUF_COUNTERS_STREAM,
 };
 
-struct mailbox_bank {
-	void __iomem *base;
-	int virq;
-	u32 count;
-	bool requested;
-	bool enabled;
-};
-
 struct mailbox_message {
 	u32 low;
 	u32 high;
-	u32 id;
-	bool from_irq;
 	bool local_open_at_receive;
 };
 
 struct mailbox_send {
-	u32 low;
-	u32 high;
+	u32 data[2];
 	bool triggered;
 	bool delivered;
 };
@@ -114,16 +79,14 @@ struct sbuf_stream {
 static struct {
 	void __iomem *sipc;
 	struct device *dev;
-	struct mailbox_bank send;
-	struct mailbox_bank receive;
+	struct mbox_client client;
+	struct mbox_chan *channel;
 	struct mailbox_message queue[UMS9117_MBOX_EVENT_LIMIT];
 	u32 queued;
 	u32 consumed;
-	u32 depth;
 	u32 allocator_before;
 	bool peer_open;
 	bool peer_cmd;
-	bool gate_enabled;
 	bool prepared;
 	bool stopped;
 	bool suspended;
@@ -135,62 +98,14 @@ static struct {
 	int error;
 } mailbox;
 
-static void mailbox_mask_banks(void)
-{
-	if (!mailbox.gate_enabled)
-		return;
-	if (mailbox.send.base)
-		writel(UMS9117_MBOX_MASK_ALL,
-		       mailbox.send.base + UMS9117_MBOX_IRQ_MSK);
-	if (mailbox.receive.base)
-		writel(UMS9117_MBOX_MASK_ALL,
-		       mailbox.receive.base + UMS9117_MBOX_IRQ_MSK);
-	/* Complete peripheral masking before disabling Linux IRQs or resetting CM4. */
-	mb();
-}
-
-static void mailbox_disable_irqs(void)
-{
-	mailbox_mask_banks();
-	if (mailbox.send.requested && mailbox.send.enabled) {
-		disable_irq_nosync(mailbox.send.virq);
-		mailbox.send.enabled = false;
-	}
-	if (mailbox.receive.requested && mailbox.receive.enabled) {
-		disable_irq_nosync(mailbox.receive.virq);
-		mailbox.receive.enabled = false;
-	}
-}
-
-/* Called with local IRQs excluded, or before either IRQ has been enabled. */
+/* Called with local IRQs excluded or from an atomic mailbox callback. */
 static int mailbox_fail(const char *reason, int error)
 {
 	if (!mailbox.error) {
 		mailbox.error = error;
 		dev_err(mailbox.dev, "mailbox %s: %d\n", reason, error);
 	}
-	if (mailbox.continuous)
-		mailbox_disable_irqs();
-	else
-		mailbox_mask_banks();
 	return mailbox.error;
-}
-
-static int mailbox_fifo_count(u32 status)
-{
-	u32 read_pointer = status >> 24;
-	u32 write_pointer = (status >> 16) & 0xff;
-	u32 count;
-
-	if (read_pointer >= mailbox.depth || write_pointer >= mailbox.depth)
-		return -EOVERFLOW;
-	if (read_pointer == write_pointer)
-		count = status & BIT(2) ? mailbox.depth : 0;
-	else if (write_pointer > read_pointer)
-		count = write_pointer - read_pointer;
-	else
-		count = mailbox.depth - read_pointer + write_pointer;
-	return count <= mailbox.depth ? count : -EOVERFLOW;
 }
 
 /* The ring counters own progress; no reply is needed for these notifications. */
@@ -204,198 +119,87 @@ static bool sbuf_accept_event(const struct mailbox_message *message)
 
 static int mailbox_accept_service_message(const struct mailbox_message *message)
 {
-	if ((message->id & 7) != 1 ||
-	    ((message->low & 0xff) != 4 && (message->low & 0xff) != 5))
+	if ((message->low & 0xff) != 4 && (message->low & 0xff) != 5)
 		return mailbox_fail("unexpected route", -EPROTO);
 	/* Channel 5 carries controller logging, with no AP consumer. */
 	if ((message->low & 0xff) == 5)
 		return 0;
-	if (message->from_irq && sbuf_accept_event(message))
+	if (sbuf_accept_event(message))
 		return 0;
 	return mailbox_fail("unexpected protocol", -EPROTO);
 }
 
-/* Only preparation while masked, then the receive hard IRQ, may pop entries. */
-static int mailbox_drain_receive(bool from_irq)
+/* The native controller owns the FIFO; its callback data dies on return. */
+static void mailbox_receive(struct mbox_client *client, void *data)
 {
-	u32 batches = mailbox.continuous ? 1 : UMS9117_MBOX_EVENT_LIMIT;
-	u32 batch;
+	const u32 *payload = data;
+	struct mailbox_message message = {
+		.low = payload[0],
+		.high = payload[1],
+		.local_open_at_receive = mailbox.open.triggered,
+	};
 
-	for (batch = 0; batch < batches; batch++) {
-		u32 status =
-			readl(mailbox.receive.base + UMS9117_MBOX_FIFO_STS);
-		u32 irq_status =
-			readl(mailbox.receive.base + UMS9117_MBOX_IRQ_STS);
-		u32 sources = status & UMS9117_MBOX_SOURCE_MASK;
-		int count = mailbox_fifo_count(status);
-		int i;
-
-		if (irq_status & UMS9117_MBOX_FIFO_UNAVAILABLE)
-			return mailbox_fail("FIFO_UNAVAILABLE", -EIO);
-		if (count < 0)
-			return mailbox_fail("FIFO_OR_QUEUE_BOUND", count);
-		for (i = 0; i < count; i++) {
-			struct mailbox_message received;
-			struct mailbox_message *message;
-
-			if (mailbox.continuous) {
-				message = &received;
-			} else {
-				if (mailbox.queued == UMS9117_MBOX_EVENT_LIMIT)
-					return mailbox_fail(
-						"FIFO_OR_QUEUE_BOUND",
-						-EOVERFLOW);
-				message = &mailbox.queue[mailbox.queued];
-			}
-			message->low = readl(mailbox.receive.base +
-					     UMS9117_MBOX_MSG_L);
-			message->high = readl(mailbox.receive.base +
-					      UMS9117_MBOX_MSG_H);
-			message->id =
-				readl(mailbox.receive.base + UMS9117_MBOX_ID);
-			message->from_irq = from_irq;
-			message->local_open_at_receive = mailbox.open.triggered;
-			writel(1, mailbox.receive.base + UMS9117_MBOX_TRI);
-			if (mailbox.continuous) {
-				if (mailbox_accept_service_message(message))
-					return mailbox.error;
-			} else {
-				mailbox.queued++;
-			}
-		}
-		writel(sources | BIT(0),
-		       mailbox.receive.base + UMS9117_MBOX_IRQ_STS);
-		status = readl(mailbox.receive.base + UMS9117_MBOX_FIFO_STS);
-		count = mailbox_fifo_count(status);
-		if (count < 0)
-			return mailbox_fail("FIFO_OR_QUEUE_BOUND", count);
-		if (!count && !(status & UMS9117_MBOX_SOURCE_MASK))
-			return 0;
-	}
+	if (mailbox.error || mailbox.stopped)
+		return;
 	if (mailbox.continuous) {
-		/*
-		 * One FIFO snapshot (at most depth entries) per runtime IRQ.
-		 * FIFO-not-empty is level-triggered: raced arrivals remain in the
-		 * hardware FIFO for the next IRQ after this batch's W1C completes.
-		 */
-		mb();
-		return 0;
+		mailbox_accept_service_message(&message);
+		return;
 	}
-	return mailbox_fail("FIFO_OR_QUEUE_BOUND", -EOVERFLOW);
+	if (mailbox.queued == UMS9117_MBOX_EVENT_LIMIT) {
+		mailbox_fail("RX_QUEUE_BOUND", -EOVERFLOW);
+		return;
+	}
+	mailbox.queue[mailbox.queued++] = message;
 }
 
-static irqreturn_t mailbox_receive_irq(int irq, void *data)
-{
-	mailbox.receive.count++;
-	if (mailbox.error || mailbox.stopped || mailbox.suspended) {
-		mailbox_mask_banks();
-		return IRQ_HANDLED;
-	}
-	if (!mailbox.continuous &&
-	    mailbox.receive.count > UMS9117_MBOX_IRQ_LIMIT)
-		mailbox_fail("IRQ_BOUND", -EOVERFLOW);
-	else
-		mailbox_drain_receive(true);
-	return IRQ_HANDLED;
-}
-
-static irqreturn_t mailbox_send_irq(int irq, void *data)
+static void mailbox_transmitted(struct mbox_client *client, void *data,
+				int result)
 {
 	struct mailbox_send *send;
-	u32 status;
-	u32 clear;
-	u32 irq_status;
 
-	mailbox.send.count++;
-	if (mailbox.error || mailbox.stopped || mailbox.suspended) {
-		mailbox_mask_banks();
-		return IRQ_HANDLED;
-	}
-	status = readl(mailbox.send.base + UMS9117_MBOX_FIFO_STS);
-	irq_status = readl(mailbox.send.base + UMS9117_MBOX_IRQ_STS);
-	if (!mailbox.continuous &&
-	    mailbox.send.count > UMS9117_MBOX_IRQ_LIMIT) {
-		mailbox_fail("IRQ_BOUND", -EOVERFLOW);
-		return IRQ_HANDLED;
-	}
-	clear = status & UMS9117_MBOX_CLEAR_MASK;
-	if ((irq_status & UMS9117_MBOX_FIFO_UNAVAILABLE) ||
-	    clear != UMS9117_MBOX_PEER_DELIVERED ||
-	    (status &
-	     ~(UMS9117_MBOX_PEER_DELIVERED | UMS9117_MBOX_PEER_PENDING))) {
-		mailbox_fail("UNEXPECTED_SEND_IRQ", -EPROTO);
-		return IRQ_HANDLED;
-	}
-	if (mailbox.open.triggered && !mailbox.open.delivered) {
+	if (data == mailbox.open.data)
 		send = &mailbox.open;
-	} else if (mailbox.done.triggered && !mailbox.done.delivered) {
+	else if (data == mailbox.done.data)
 		send = &mailbox.done;
-	} else if (mailbox.h4.enabled && mailbox.h4.notify.triggered &&
-		   !mailbox.h4.notify.delivered) {
+	else if (data == mailbox.h4.notify.data)
 		send = &mailbox.h4.notify;
-	} else {
-		mailbox_fail("UNEXPECTED_SEND_IRQ", -EPROTO);
-		return IRQ_HANDLED;
+	else {
+		mailbox_fail("UNEXPECTED_TX_DONE", -EPROTO);
+		return;
 	}
-	writel(clear, mailbox.send.base + UMS9117_MBOX_FIFO_RST);
-	writel(BIT(0), mailbox.send.base + UMS9117_MBOX_IRQ_STS);
+	if (result) {
+		mailbox_fail("TX_FAILED", result);
+		return;
+	}
+	if (!send->triggered || send->delivered) {
+		mailbox_fail("UNEXPECTED_TX_DONE", -EPROTO);
+		return;
+	}
 	send->delivered = true;
-	writel(UMS9117_MBOX_SEND_IDLE,
-	       mailbox.send.base + UMS9117_MBOX_IRQ_MSK);
-	/* Complete the W1C sequence before returning to the level-triggered GIC. */
-	mb();
-	return IRQ_HANDLED;
 }
 
-static int mailbox_claim_bank(struct platform_device *pdev, const char *name,
-			      resource_size_t start, struct mailbox_bank *bank)
+static void mailbox_release_channel(void *data)
 {
-	struct resource *resource;
-
-	resource = platform_get_resource_byname(pdev, IORESOURCE_MEM, name);
-	if (!resource || resource->start != start ||
-	    resource_size(resource) != 0x1000)
-		return -EINVAL;
-	bank->base = devm_ioremap_resource(&pdev->dev, resource);
-	return PTR_ERR_OR_ZERO(bank->base);
+	mbox_free_channel(data);
+	mailbox.channel = NULL;
 }
 
-static int mailbox_claim_irq(struct platform_device *pdev, const char *name,
-			     u32 expected, irq_handler_t handler,
-			     struct mailbox_bank *bank)
-{
-	struct irq_data *data;
-	int ret;
-
-	bank->virq = platform_get_irq_byname(pdev, name);
-	if (bank->virq < 0)
-		return bank->virq;
-	data = irq_get_irq_data(bank->virq);
-	if (!data || irqd_to_hwirq(data) != expected ||
-	    irq_get_trigger_type(bank->virq) != IRQ_TYPE_LEVEL_HIGH)
-		return -EINVAL;
-	ret = devm_request_irq(&pdev->dev, bank->virq, handler,
-			       IRQF_NO_AUTOEN | IRQF_NO_THREAD, name, bank);
-	if (!ret)
-		bank->requested = true;
-	return ret;
-}
-
-int ums9117_cm4_mailbox_init(struct platform_device *pdev)
+int ums9117_cm4_mailbox_init(struct device *dev)
 {
 	int ret;
 
-	mailbox.dev = &pdev->dev;
-	ret = mailbox_claim_bank(pdev, "send", 0x400a0000, &mailbox.send);
-	if (!ret)
-		ret = mailbox_claim_bank(pdev, "receive", 0x400a8000,
-					 &mailbox.receive);
-	if (!ret)
-		ret = mailbox_claim_irq(pdev, "send", 100, mailbox_send_irq,
-					&mailbox.send);
-	if (!ret)
-		ret = mailbox_claim_irq(pdev, "receive", 101,
-					mailbox_receive_irq, &mailbox.receive);
+	mailbox.dev = dev;
+	mailbox.client.dev = dev;
+	mailbox.client.rx_callback = mailbox_receive;
+	mailbox.client.tx_done = mailbox_transmitted;
+	mailbox.channel = mbox_request_channel_byname(&mailbox.client, "cm4");
+	if (IS_ERR(mailbox.channel)) {
+		ret = PTR_ERR(mailbox.channel);
+		mailbox.channel = NULL;
+		return ret;
+	}
+	ret = devm_add_action_or_reset(dev, mailbox_release_channel,
+				       mailbox.channel);
 	return ret;
 }
 
@@ -488,60 +292,39 @@ static int sbuf_prepare(void)
 	return 0;
 }
 
-int ums9117_cm4_mailbox_prepare(void __iomem *sipc, struct regmap *aon)
+int ums9117_cm4_mailbox_prepare(void __iomem *sipc)
 {
 	unsigned long flags;
-	u32 send_fifo, receive_fifo;
-	u32 send_irq, receive_irq;
-	u32 depth, version;
 	int ret;
 
+	if (!mailbox.channel || mailbox.prepared || mailbox.stopped)
+		return -EINVAL;
 	mailbox.sipc = sipc;
-	mailbox.open.low = UMS9117_MBOX_OPEN;
-	mailbox.done.low = UMS9117_MBOX_DONE;
-	mailbox.done.high = UMS9117_SIPC_PHYS + UMS9117_SBUF_DESCRIPTOR;
-	ret = regmap_write(aon, 0x1004, BIT(21));
+	mailbox.open.data[0] = UMS9117_MBOX_OPEN;
+	mailbox.done.data[0] = UMS9117_MBOX_DONE;
+	mailbox.done.data[1] = UMS9117_SIPC_PHYS + UMS9117_SBUF_DESCRIPTOR;
+	local_irq_save(flags);
+	if (mailbox.error)
+		ret = mailbox.error;
+	else if (mailbox.queued)
+		ret = mailbox_fail("STALE_MAILBOX_STATE", -EBUSY);
+	else
+		ret = 0;
+	local_irq_restore(flags);
 	if (ret)
 		return ret;
-	mailbox.gate_enabled = true;
-	mailbox_mask_banks();
-	version = readl(mailbox.receive.base + UMS9117_MBOX_VERSION);
-	depth = readl(mailbox.receive.base + UMS9117_MBOX_FIFO_DEPTH);
-	if (depth >= 128 || version == U32_MAX)
-		return mailbox_fail("BAD_FIFO_DEPTH_VERSION", -EINVAL);
-	mailbox.depth = depth + 1;
-	writel(0, mailbox.receive.base + UMS9117_MBOX_FIFO_RST);
-	send_fifo = readl(mailbox.send.base + UMS9117_MBOX_FIFO_STS);
-	receive_fifo = readl(mailbox.receive.base + UMS9117_MBOX_FIFO_STS);
-	send_irq = readl(mailbox.send.base + UMS9117_MBOX_IRQ_STS);
-	receive_irq = readl(mailbox.receive.base + UMS9117_MBOX_IRQ_STS);
-	if ((send_irq | receive_irq) & UMS9117_MBOX_FIFO_UNAVAILABLE)
-		return mailbox_fail("FIFO_UNAVAILABLE", -EIO);
-	ret = mailbox_drain_receive(false);
-	if (ret)
-		return ret;
-	if (mailbox.queued || (receive_fifo & UMS9117_MBOX_SOURCE_MASK) ||
-	    send_fifo || readl(mailbox.send.base + UMS9117_MBOX_FIFO_STS))
-		return mailbox_fail("STALE_MAILBOX_STATE", -EBUSY);
 	ret = sbuf_prepare();
 	if (ret)
 		return ret;
-	mailbox.prepared = true;
-	mailbox.send.enabled = true;
-	enable_irq(mailbox.send.virq);
-	mailbox.receive.enabled = true;
-	enable_irq(mailbox.receive.virq);
 	local_irq_save(flags);
-	if (!mailbox.error) {
-		writel(UMS9117_MBOX_SEND_IDLE,
-		       mailbox.send.base + UMS9117_MBOX_IRQ_MSK);
-		writel(UMS9117_MBOX_RECEIVE_ARMED,
-		       mailbox.receive.base + UMS9117_MBOX_IRQ_MSK);
-		/* Handlers and peripheral masks must precede CM4 reset release. */
-		mb();
-	}
+	if (mailbox.error)
+		ret = mailbox.error;
+	else if (mailbox.queued)
+		ret = mailbox_fail("STALE_MAILBOX_STATE", -EBUSY);
+	else
+		mailbox.prepared = true;
 	local_irq_restore(flags);
-	return mailbox.error;
+	return ret;
 }
 
 static void mailbox_accept_message(u32 index)
@@ -549,15 +332,12 @@ static void mailbox_accept_message(u32 index)
 	const struct mailbox_message *message = &mailbox.queue[index];
 	const char *reason = "UNEXPECTED_PROTOCOL";
 
-	if ((message->id & 7) != 1 ||
-	    ((message->low & 0xff) != 4 && (message->low & 0xff) != 5)) {
+	if ((message->low & 0xff) != 4 && (message->low & 0xff) != 5) {
 		reason = "UNEXPECTED_ROUTE";
 		goto fail;
 	}
 	if ((message->low & 0xff) == 5)
 		return;
-	if (!message->from_irq)
-		goto fail;
 	if (sbuf_accept_event(message))
 		return;
 	if (message->low == UMS9117_MBOX_OPEN && !message->high &&
@@ -589,35 +369,20 @@ static void mailbox_consume_queue(void)
 static int mailbox_trigger(struct mailbox_send *send)
 {
 	unsigned long flags;
-	u32 status;
 	int ret = -EINPROGRESS;
 
 	local_irq_save(flags);
-	if (mailbox.error || mailbox.stopped ||
+	if (mailbox.error || mailbox.stopped || mailbox.suspended ||
 	    mailbox.consumed != mailbox.queued)
 		goto out;
-	status = readl(mailbox.send.base + UMS9117_MBOX_FIFO_STS);
-	if (status & UMS9117_MBOX_BLOCK_MASK) {
-		mailbox_fail("SEND_BLOCKED", -EBUSY);
-		goto out;
-	}
-	if (status & ~UMS9117_MBOX_PEER_PENDING) {
-		mailbox_fail("STALE_SEND_STATE", -EPROTO);
-		goto out;
-	}
-	if (status & UMS9117_MBOX_PEER_PENDING)
-		goto out;
-	writel(UMS9117_MBOX_SEND_DELIVERY,
-	       mailbox.send.base + UMS9117_MBOX_IRQ_MSK);
-	writel(send->low, mailbox.send.base + UMS9117_MBOX_MSG_L);
-	writel(send->high, mailbox.send.base + UMS9117_MBOX_MSG_H);
-	writel(1, mailbox.send.base + UMS9117_MBOX_ID);
 	send->triggered = true;
-	/* IRQ handlers must see the committed state before the peer can answer. */
-	mb();
-	writel(1, mailbox.send.base + UMS9117_MBOX_TRI);
-	/* Complete the trigger before allowing a reciprocal IRQ to run. */
-	mb();
+	ret = mbox_send_message(mailbox.channel, send->data);
+	if (ret >= 0)
+		ret = -EINPROGRESS;
+	else {
+		send->triggered = false;
+		ret = mailbox_fail("TX_SUBMIT_FAILED", ret);
+	}
 out:
 	if (mailbox.error)
 		ret = mailbox.error;
@@ -636,17 +401,17 @@ static int sbuf_poll_notifications(void)
 		local_irq_restore(flags);
 		return -EINPROGRESS;
 	}
-	if ((!stream->notify.low || stream->notify.delivered) &&
+	if ((!stream->notify.data[0] || stream->notify.delivered) &&
 	    stream->pending) {
 		stream->active_event = __ffs(stream->pending);
 		stream->pending &= ~BIT(stream->active_event);
 		memset(&stream->notify, 0, sizeof(stream->notify));
-		stream->notify.low = stream->active_event ==
-						     UMS9117_SBUF_DATA_READY ?
-					     UMS9117_MBOX_EVENT_DATA :
-					     UMS9117_MBOX_EVENT_SPACE;
+		stream->notify.data[0] =
+			stream->active_event == UMS9117_SBUF_DATA_READY ?
+				UMS9117_MBOX_EVENT_DATA :
+				UMS9117_MBOX_EVENT_SPACE;
 	}
-	pending = stream->notify.low && !stream->notify.triggered;
+	pending = stream->notify.data[0] && !stream->notify.triggered;
 	local_irq_restore(flags);
 	if (pending)
 		return mailbox_trigger(&stream->notify);
@@ -922,7 +687,6 @@ out:
 int ums9117_cm4_mailbox_suspend(void)
 {
 	u32 ring[UMS9117_SBUF_RING_WORDS];
-	u32 status;
 	unsigned long flags;
 	int ret;
 
@@ -942,23 +706,16 @@ int ums9117_cm4_mailbox_suspend(void)
 	ret = -EBUSY;
 	if (ring[UMS9117_SBUF_TX_WRITE] != ring[UMS9117_SBUF_TX_READ] ||
 	    ring[UMS9117_SBUF_RX_WRITE] != ring[UMS9117_SBUF_RX_READ] ||
-	    mailbox.h4.pending ||
-	    (mailbox.h4.notify.low && !mailbox.h4.notify.delivered))
+	    mailbox.consumed != mailbox.queued || mailbox.h4.pending ||
+	    (mailbox.open.triggered && !mailbox.open.delivered) ||
+	    (mailbox.done.triggered && !mailbox.done.delivered) ||
+	    (mailbox.h4.notify.data[0] && !mailbox.h4.notify.delivered))
 		goto out;
-	status = readl(mailbox.receive.base + UMS9117_MBOX_FIFO_STS);
-	if (mailbox_fifo_count(status) || (status & UMS9117_MBOX_SOURCE_MASK) ||
-	    readl(mailbox.send.base + UMS9117_MBOX_FIFO_STS))
-		goto out;
-	/* No FIFO entry is popped here: normal hard IRQs own delivery. */
-	mailbox_disable_irqs();
+	/* Keep the native channel claimed so its no-suspend IRQ can drain notices. */
 	mailbox.suspended = true;
 	ret = 0;
 out:
 	local_irq_restore(flags);
-	if (!ret && mailbox.suspended) {
-		synchronize_irq(mailbox.send.virq);
-		synchronize_irq(mailbox.receive.virq);
-	}
 	return ret;
 }
 
@@ -982,23 +739,6 @@ int ums9117_cm4_mailbox_resume(void)
 	if (ret)
 		goto out;
 	mailbox.suspended = false;
-	local_irq_restore(flags);
-
-	/* Retained arrivals stay in the FIFO until its original mask is restored. */
-	mailbox.send.enabled = true;
-	enable_irq(mailbox.send.virq);
-	mailbox.receive.enabled = true;
-	enable_irq(mailbox.receive.virq);
-	local_irq_save(flags);
-	if (!mailbox.error) {
-		writel(UMS9117_MBOX_SEND_IDLE,
-		       mailbox.send.base + UMS9117_MBOX_IRQ_MSK);
-		writel(UMS9117_MBOX_RECEIVE_ARMED,
-		       mailbox.receive.base + UMS9117_MBOX_IRQ_MSK);
-		/* Restore device masks before local IRQs can service retained entries. */
-		mb();
-	}
-	ret = mailbox.error;
 out:
 	local_irq_restore(flags);
 	return ret;
@@ -1011,8 +751,7 @@ void ums9117_cm4_mailbox_stop(void)
 	local_irq_save(flags);
 	if (mailbox.stopped)
 		goto out;
-	mailbox_disable_irqs();
-	/* Process the IRQ-queued tail without touching an unserviced hardware FIFO. */
+	/* The provider keeps hardware ownership until the device resource releases. */
 	if (mailbox.prepared)
 		mailbox_consume_queue();
 	mailbox.stopped = true;

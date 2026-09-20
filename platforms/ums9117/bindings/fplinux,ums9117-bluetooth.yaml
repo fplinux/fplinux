@@ -21,27 +21,19 @@ properties:
 
   reg:
     items:
-      - description: AP mailbox send bank
-      - description: AP mailbox receive bank
       - description: Shared IPC memory and CM4 firmware window
       - description: CM4 boot vector in IRAM
 
   reg-names:
     items:
-      - const: send
-      - const: receive
       - const: sipc-cm4
       - const: boot-vector
 
-  interrupts:
-    items:
-      - description: AP mailbox send delivery interrupt
-      - description: AP mailbox receive interrupt
+  mboxes:
+    maxItems: 1
 
-  interrupt-names:
-    items:
-      - const: send
-      - const: receive
+  mbox-names:
+    const: cm4
 
   sprd,aon-apb:
     $ref: /schemas/types.yaml#/definitions/phandle
@@ -81,8 +73,8 @@ required:
   - compatible
   - reg
   - reg-names
-  - interrupts
-  - interrupt-names
+  - mboxes
+  - mbox-names
   - sprd,aon-apb
   - sprd,pmu-apb
   - firmware-name
@@ -95,14 +87,12 @@ additionalProperties: false
 examples:
   - |
     #include <dt-bindings/interrupt-controller/arm-gic.h>
-    bluetooth@400a0000 {
+    bluetooth@80000000 {
         compatible = "fplinux,ums9117-bluetooth";
-        reg = <0x400a0000 0x1000>, <0x400a8000 0x1000>,
-              <0x80000000 0x100000>, <0x50800000 0x1000>;
-        reg-names = "send", "receive", "sipc-cm4", "boot-vector";
-        interrupts = <GIC_SPI 68 IRQ_TYPE_LEVEL_HIGH>,
-                     <GIC_SPI 69 IRQ_TYPE_LEVEL_HIGH>;
-        interrupt-names = "send", "receive";
+        reg = <0x80000000 0x100000>, <0x50800000 0x1000>;
+        reg-names = "sipc-cm4", "boot-vector";
+        mboxes = <&mailbox 1>;
+        mbox-names = "cm4";
         sprd,aon-apb = <&aon_apb>;
         sprd,pmu-apb = <&bt_pmu>;
         firmware-name = "ums9117/ta1618-cm4.bin",
