@@ -44,7 +44,7 @@ properties:
 
   memory-region:
     maxItems: 1
-    description: Reusable DMA pool for the JPEG and RAM scaling engines.
+    description: Reusable DMA pool shared by the frame-moving engines.
 
 required:
   - compatible
@@ -71,5 +71,5 @@ examples:
                     "ap-ahb-gate-clear", "ap-ahb-reset-set",
                     "ap-ahb-reset-clear", "dcam-clock";
         interrupts = <GIC_SPI 45 IRQ_TYPE_LEVEL_HIGH>;
-        memory-region = <&jpeg_dma>;
+        memory-region = <&codec_dma>;
     };

@@ -38,10 +38,15 @@ properties:
       - const: ap-ahb-reset-set
       - const: ap-ahb-reset-clear
 
+  memory-region:
+    maxItems: 1
+    description: Reusable DMA pool shared by the frame-moving engines.
+
 required:
   - compatible
   - reg
   - reg-names
+  - memory-region
 
 additionalProperties: false
 
@@ -58,4 +63,5 @@ examples:
         reg-names = "rota", "ap-ahb-gate-state", "ap-ahb-gate-set",
                     "ap-ahb-gate-clear", "ap-ahb-reset-set",
                     "ap-ahb-reset-clear";
+        memory-region = <&codec_dma>;
     };

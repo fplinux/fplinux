@@ -9,6 +9,7 @@
 #include <linux/io.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/of_reserved_mem.h>
 #include <linux/overflow.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
@@ -1341,11 +1342,17 @@ static int ums9117_rota_probe(struct platform_device *pdev)
 	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
 	if (ret)
 		return ret;
+	ret = of_reserved_mem_device_init(&pdev->dev);
+	if (ret)
+		return dev_err_probe(&pdev->dev, ret,
+				     "failed to attach ROTA DMA pool\n");
 
 	rota->dma = ums9117_dma_request_rota();
-	if (IS_ERR(rota->dma))
+	if (IS_ERR(rota->dma)) {
+		of_reserved_mem_device_release(&pdev->dev);
 		return dev_err_probe(&pdev->dev, PTR_ERR(rota->dma),
 				     "could not reserve ROTA DMA route\n");
+	}
 	gate_state = readl(rota->gate_state);
 	rota->gate_acquired = !(gate_state & UMS9117_AP_AHB_ROTA_GATE);
 	if (rota->gate_acquired)
@@ -1393,6 +1400,7 @@ restore_gate:
 	ums9117_rota_restore_gate(rota);
 release_dma:
 	dma_release_channel(rota->dma);
+	of_reserved_mem_device_release(&pdev->dev);
 	return dev_err_probe(&pdev->dev, ret, "could not initialize ROTA\n");
 }
 
@@ -1407,6 +1415,7 @@ static void ums9117_rota_remove(struct platform_device *pdev)
 	v4l2_device_unregister(&rota->v4l2);
 	dmaengine_terminate_sync(rota->dma);
 	dma_release_channel(rota->dma);
+	of_reserved_mem_device_release(&pdev->dev);
 	ums9117_rota_restore_gate(rota);
 }
 
