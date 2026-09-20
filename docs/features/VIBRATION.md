@@ -1,12 +1,12 @@
 # Vibration
 
 The vibrator is exposed as a Linux input force-feedback device with physical
-path `fplinux/vibrator0`. The selected
-[target's documentation](../../targets/README.md) states its input-device name
-and physical support. A standalone archive carries that status in `README.txt`.
-Applications should locate the device by its name and physical path rather
-than assuming a fixed `/dev/input/eventN` number. An accepted effect does not
-by itself establish that the motor vibrates on the selected phone.
+path `fplinux/vibrator0` and input name `SC2720 vibrator`. The selected
+[target's documentation](../../targets/README.md) states its physical support.
+A standalone archive carries that status in `README.txt`. Applications should
+locate the device by its name and physical path rather than assuming a fixed
+`/dev/input/eventN` number. An accepted effect does not by itself establish
+that the motor vibrates on the selected phone.
 
 ## Interface
 

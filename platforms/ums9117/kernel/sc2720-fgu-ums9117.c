@@ -87,7 +87,6 @@
 
 struct sc2720_fgu {
 	struct device *dev;
-	struct power_supply_desc description;
 	u32 codes_per_1000mv;
 	u32 codes_per_1000ma;
 	bool pclk_owned;
@@ -984,6 +983,7 @@ static enum power_supply_property sc2720_fgu_properties[] = {
 };
 
 static const struct power_supply_desc sc2720_fgu_description = {
+	.name = "sc2720-battery",
 	.type = POWER_SUPPLY_TYPE_BATTERY,
 	.properties = sc2720_fgu_properties,
 	.num_properties = ARRAY_SIZE(sc2720_fgu_properties),
@@ -1006,11 +1006,6 @@ static int sc2720_fgu_probe(struct platform_device *pdev)
 	if (!fgu)
 		return -ENOMEM;
 	fgu->dev = &pdev->dev;
-	fgu->description = sc2720_fgu_description;
-	ret = device_property_read_string(&pdev->dev, "label",
-					  &fgu->description.name);
-	if (ret)
-		return dev_err_probe(&pdev->dev, ret, "missing supply label\n");
 	ret = device_property_read_u32_array(&pdev->dev,
 					     "fplinux,current-calibration",
 					     current_calibration,
@@ -1058,7 +1053,7 @@ static int sc2720_fgu_probe(struct platform_device *pdev)
 
 	config.drv_data = fgu;
 	config.fwnode = dev_fwnode(&pdev->dev);
-	supply = devm_power_supply_register(&pdev->dev, &fgu->description,
+	supply = devm_power_supply_register(&pdev->dev, &sc2720_fgu_description,
 					    &config);
 	return PTR_ERR_OR_ZERO(supply);
 }

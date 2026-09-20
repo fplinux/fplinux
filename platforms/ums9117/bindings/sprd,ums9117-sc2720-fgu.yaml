@@ -17,9 +17,6 @@ properties:
   compatible:
     const: sprd,ums9117-sc2720-fgu
 
-  label:
-    description: Power supply name for battery telemetry
-
   fplinux,current-calibration:
     $ref: /schemas/types.yaml#/definitions/uint32-array
     description: |
@@ -34,7 +31,6 @@ properties:
 
 required:
   - compatible
-  - label
   - fplinux,current-calibration
 
 additionalProperties: false
@@ -43,6 +39,5 @@ examples:
   - |
     fuel-gauge {
         compatible = "sprd,ums9117-sc2720-fgu";
-        label = "ta1618-battery";
         fplinux,current-calibration = <10 20>;
     };

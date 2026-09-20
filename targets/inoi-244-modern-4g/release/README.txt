@@ -45,9 +45,9 @@ The shared interfaces and storage safety rules are described in:
   - docs/guides/MICROSD_ROOT.md
 
 This phone uses backlight device inoi244-backlight, with configured levels
-0 through 31 and default 31; power-supply devices inoi244-battery and
-inoi244-charger; IIO name inoi244-sc2720-auxadc; thermal-zone type inoi244-soc;
-and input name INOI 244 Modern 4G vibrator. IIO, thermal and input-device
+0 through 31 and default 31; power-supply devices sc2720-battery and
+sc2720-charger; IIO name sc2720-auxadc; thermal-zone type ums9117-thm1;
+and input name SC2720 vibrator. IIO, thermal and input-device
 numbers are assigned at boot. These identifiers do not qualify the physical
 effects or measurements noted above.
 

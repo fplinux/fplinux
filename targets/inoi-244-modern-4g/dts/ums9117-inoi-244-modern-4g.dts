@@ -39,7 +39,6 @@
 		vibrator@40608e00 {
 			compatible = "sprd,ums9117-sc2720-vibrator";
 			reg = <0x40608e00 0x00000004>;
-			label = "INOI 244 Modern 4G vibrator";
 			fplinux,voltage-code = <2>;
 		};
 
@@ -104,22 +103,12 @@
 
 #include "ums9117-ram-session.dtsi"
 
-&sc2720_charger {
-	label = "inoi244-charger";
-};
-
 &sc2720_fgu {
-	label = "inoi244-battery";
 	fplinux,current-calibration = <10 20>;
-};
-
-&sc2720_auxadc {
-	label = "inoi244-sc2720-auxadc";
 };
 
 &thm1 {
 	status = "okay";
-	label = "inoi244-soc";
 };
 
 &ap_dma {

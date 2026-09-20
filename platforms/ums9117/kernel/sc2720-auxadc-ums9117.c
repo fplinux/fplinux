@@ -8,7 +8,6 @@
 #include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
-#include <linux/property.h>
 #include <linux/soc/sprd/ums9117-adi.h>
 
 #define SC2720_CHIP_ID_LOW 0xc00U
@@ -724,12 +723,8 @@ static int sc2720_auxadc_probe(struct platform_device *pdev)
 {
 	struct iio_dev *indio_dev;
 	struct sc2720_auxadc *adc;
-	const char *label;
 	int ret;
 
-	ret = device_property_read_string(&pdev->dev, "label", &label);
-	if (ret)
-		return dev_err_probe(&pdev->dev, ret, "missing ADC label\n");
 	ret = sc2720_auxadc_check_identity();
 	if (ret)
 		return dev_err_probe(&pdev->dev, ret,
@@ -742,7 +737,7 @@ static int sc2720_auxadc_probe(struct platform_device *pdev)
 	adc = iio_priv(indio_dev);
 	adc->dev = &pdev->dev;
 	mutex_init(&adc->lock);
-	indio_dev->name = label;
+	indio_dev->name = "sc2720-auxadc";
 	indio_dev->info = &sc2720_auxadc_info;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->channels = sc2720_auxadc_channels;

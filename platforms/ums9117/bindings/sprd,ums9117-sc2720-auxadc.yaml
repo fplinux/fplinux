@@ -18,12 +18,8 @@ properties:
   compatible:
     const: sprd,ums9117-sc2720-auxadc
 
-  label:
-    description: IIO device name for the raw ADC provider
-
 required:
   - compatible
-  - label
 
 additionalProperties: false
 
@@ -31,5 +27,4 @@ examples:
   - |
     auxadc {
         compatible = "sprd,ums9117-sc2720-auxadc";
-        label = "ta1618-sc2720-auxadc";
     };

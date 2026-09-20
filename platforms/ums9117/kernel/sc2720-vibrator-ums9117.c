@@ -441,7 +441,6 @@ static int sc2720_vibrator_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct sc2720_vibrator *vibrator;
 	struct resource *resource;
-	const char *label;
 	u32 voltage_code;
 	int ret;
 
@@ -460,10 +459,6 @@ static int sc2720_vibrator_probe(struct platform_device *pdev)
 		return dev_err_probe(
 			dev, -EINVAL,
 			"voltage code must be in the range 0..7\n");
-	ret = device_property_read_string(dev, "label", &label);
-	if (ret)
-		return dev_err_probe(dev, ret, "missing input label\n");
-
 	vibrator = devm_kzalloc(dev, sizeof(*vibrator), GFP_KERNEL);
 	if (!vibrator)
 		return -ENOMEM;
@@ -487,7 +482,7 @@ static int sc2720_vibrator_probe(struct platform_device *pdev)
 	vibrator->input = devm_input_allocate_device(dev);
 	if (!vibrator->input)
 		return -ENOMEM;
-	vibrator->input->name = label;
+	vibrator->input->name = "SC2720 vibrator";
 	vibrator->input->phys = "fplinux/vibrator0";
 	vibrator->input->id.bustype = BUS_HOST;
 	vibrator->input->close = sc2720_vibrator_close;

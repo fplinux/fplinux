@@ -2,14 +2,14 @@
 
 FPLinux exposes battery voltage, signed current and a relative charge counter
 through the standard Linux power-supply class. The selected
-[target's documentation](../../targets/README.md) states its device name and
-measurement limits. A standalone archive carries that status in `README.txt`.
+[target's documentation](../../targets/README.md) states its measurement
+limits. A standalone archive carries that status in `README.txt`.
 
 ## Interface
 
-Find the battery under `/sys/class/power_supply/` by its target-specific name
-and `type` value `Battery`. Read its `voltage_now`, `current_now` and
-`charge_counter` attributes.
+The battery is `/sys/class/power_supply/sc2720-battery` and has the `type`
+value `Battery`. Read its `voltage_now`, `current_now` and `charge_counter`
+attributes.
 
 `voltage_now` is reported in microvolts and `current_now` in microamps, as
 defined by the power-supply ABI. The current value is signed: negative means
