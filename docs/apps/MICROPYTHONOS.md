@@ -129,18 +129,18 @@ persists across boots with the `microsd-uboot` ext4 root.
 See the selected phone's instructions for its current screen and storage
 support.
 
-The optional storage package can use a supported FAT32 microSD card at `/mnt/card`.
-It stores state under `/mnt/card/.fplinux/micropythonos` and falls back to
-`/var/lib/micropythonos` without a usable declared card. MicroPythonOS skips
-the boot partition labelled `FPLBOOT` during automatic mounting. In
-`microsd-uboot`, state stays under `/var/lib/micropythonos` on the active ext4
-root; the root is not automatically mounted at `/mnt/card`.
+The optional storage package can use a supported FAT32 microSD card that is
+already mounted at `/mnt/card`. It stores state under
+`/mnt/card/.fplinux/micropythonos` and falls back to `/var/lib/micropythonos`
+otherwise. In `microsd-uboot`, state stays under `/var/lib/micropythonos` on the
+active ext4 root; the root is not automatically mounted at `/mnt/card`.
 
-MicroPythonOS mounts a declared data card only when `/mnt/card` is not already
-mounted. It unmounts only a card that it mounted itself when the application
-exits. Never remove a mounted card; follow the
-selected phone's microSD instructions for safe unmount and hot-swap of a data
-card. For a system card, follow
+MicroPythonOS never mounts or unmounts a card itself. Mount the data card first
+with the [microSD instructions](../features/MICROSD.md); the application then
+uses `/mnt/card` only when that mount is the declared card filesystem, and keeps
+its state on the system root in every other case. Never remove a mounted card;
+follow the selected phone's microSD instructions for safe unmount and hot-swap
+of a data card. For a system card, follow
 [microSD root shutdown](../guides/MICROSD_ROOT.md#persistence-and-shutdown);
 it cannot be hot-swapped while Linux is running.
 

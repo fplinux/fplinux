@@ -50,43 +50,16 @@ storage_is_declared_mount() {
 	' "$mpos_mountinfo_path"
 }
 
-cleanup_storage() {
-	if [ "$storage_owned" -eq 1 ]; then
-		cd /
-		if ! umount "$storage_mountpoint"; then
-			echo "micropythonos: cannot unmount $storage_mountpoint" >&2
-		fi
-		storage_owned=0
-	fi
-}
-
-mount_storage() {
+select_storage() {
 	storage_path_is_valid || return 1
 
+	storage_path_is_mounted || return 1
+
 	if [ -z "$MPOS_STORAGE_DEVICES" ] || [ -z "$MPOS_STORAGE_FSTYPE" ]; then
-		storage_path_is_mounted
-		return
+		return 0
 	fi
 
-	if storage_path_is_mounted; then
-		storage_is_declared_mount
-		return
-	fi
-
-	# shellcheck disable=SC2086
-	for storage_device in $MPOS_STORAGE_DEVICES; do
-		[ -e "$storage_device" ] || continue
-		# Keep the system card's boot partition out of automatic data mounts.
-		case " $(blkid "$storage_device" 2>/dev/null) " in
-		*' LABEL="FPLBOOT" '*) return 1 ;;
-		esac
-		mkdir -p "$MPOS_STORAGE" || return 1
-		if mount -t "$MPOS_STORAGE_FSTYPE" "$storage_device" "$MPOS_STORAGE"; then
-			storage_owned=1
-			return 0
-		fi
-	done
-	return 1
+	storage_is_declared_mount
 }
 
 micropythonos_main() {
@@ -102,8 +75,6 @@ micropythonos_main() {
 	: "${MPOS_ROOT:=/var/lib/micropythonos}"
 	: "${MPOS_PACKAGED_APPS:=/usr/share/micropythonos/apps}"
 
-	storage_owned=0
-	storage_mountpoint=$MPOS_STORAGE
 	fallback_root=$MPOS_ROOT
 
 	case "$MPOS_HEAP_SIZE" in
@@ -126,19 +97,17 @@ micropythonos_main() {
 		exit 1
 	}
 
-	if mount_storage && storage_state_dir_is_valid; then
+	if select_storage && storage_state_dir_is_valid; then
 		if [ -n "$MPOS_STORAGE_STATE_DIR" ]; then
 			MPOS_ROOT="$MPOS_STORAGE/$MPOS_STORAGE_STATE_DIR"
 		fi
 	else
-		cleanup_storage
 		MPOS_STORAGE=
 		MPOS_ROOT=$fallback_root
 	fi
 
 	if ! mkdir -p "$MPOS_ROOT/apps" "$MPOS_ROOT/cache" "$MPOS_ROOT/data" \
 		"$MPOS_ROOT/lib" "$MPOS_ROOT/prefs"; then
-		cleanup_storage
 		MPOS_STORAGE=
 		MPOS_ROOT=$fallback_root
 		mkdir -p "$MPOS_ROOT/apps" "$MPOS_ROOT/cache" "$MPOS_ROOT/data" \
@@ -147,7 +116,6 @@ micropythonos_main() {
 
 	export MPOS_STORAGE MPOS_HEAP_SIZE MPOS_ROOT MPOS_PACKAGED_APPS
 	if ! cd "$MPOS_ROOT"; then
-		cleanup_storage
 		echo "micropythonos: cannot enter $MPOS_ROOT" >&2
 		exit 1
 	fi
@@ -170,7 +138,6 @@ micropythonos_main() {
 		else
 			status=$?
 		fi
-		cleanup_storage
 		exit "$status"
 	}
 
@@ -182,6 +149,5 @@ micropythonos_main() {
 	else
 		status=$?
 	fi
-	cleanup_storage
 	exit "$status"
 }

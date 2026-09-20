@@ -1,0 +1,13 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+# The host-process harness supplies the FPLINUX_TEST_* command contract.
+# shellcheck disable=SC2154
+printf 'umount' >>"$FPLINUX_TEST_EVENTS"
+for argument in "$@"; do
+	printf '\t%s' "$argument" >>"$FPLINUX_TEST_EVENTS"
+done
+printf '\tcwd=%s\n' "$PWD" >>"$FPLINUX_TEST_EVENTS"
+case "$PWD/" in
+"$FPLINUX_TEST_CARD"/*) exit 32 ;;
+esac
+exit 0
