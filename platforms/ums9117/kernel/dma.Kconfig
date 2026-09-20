@@ -13,5 +13,5 @@ config UMS9117_DMA_TEST
 	bool "UMS9117 AP DMA alignment fault injection"
 	depends on UMS9117_DMA=y
 	help
-	  Enable a controlled alignment-error descriptor for DMA qualification.
+	  Enable a controlled alignment-error descriptor for phone testing.
 	  Leave disabled in normal images.

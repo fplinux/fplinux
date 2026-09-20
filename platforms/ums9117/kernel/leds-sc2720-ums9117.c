@@ -185,8 +185,7 @@ restore:
 	if (!restore_ret)
 		cancel_delayed_work(&kpled->cutoff_work);
 	else
-		dev_emerg(
-			kpled->dev,
+		dev_err(kpled->dev,
 			"failed to restore keypad backlight after ON error: %d\n",
 			restore_ret);
 	return ret;
@@ -341,8 +340,7 @@ static void sc2720_kpled_teardown(struct sc2720_kpled *kpled)
 	ret = sc2720_kpled_restore_locked(kpled);
 	mutex_unlock(&kpled->lock);
 	if (ret)
-		dev_emerg(
-			kpled->dev,
+		dev_err(kpled->dev,
 			"failed to restore keypad backlight during teardown: %d\n",
 			ret);
 }

@@ -9,5 +9,5 @@ config GPIO_SC2720_EIC_UMS9117
 	  Expose the SC2720 EICA inputs as a sleeping GPIO and nested interrupt
 	  controller through the UMS9117 ADI transport. The shared SC2720 analog
 	  aggregate is owned by the platform INTA irqchip; this driver consumes
-	  its EICA child source. Boards describe qualified input lines and key
+	  its EICA child source. Boards describe fitted input lines and key
 	  mappings in Device Tree.

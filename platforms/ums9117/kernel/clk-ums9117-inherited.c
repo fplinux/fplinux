@@ -154,7 +154,7 @@ static bool ums9117_decode_mpll(const struct ums9117_clock_snapshot *snapshot,
 {
 	u64 pre_postdiv_rate;
 
-	/* Only the clear POSTDIV state has a qualified output relationship. */
+	/* Only the clear POSTDIV state has a verified output relationship. */
 	if (snapshot->mpll_ctrl2 & UMS9117_MPLL_POSTDIV)
 		return false;
 	if (!ums9117_decode_mpll_pre_postdiv(snapshot, &pre_postdiv_rate) ||

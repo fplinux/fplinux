@@ -4,7 +4,7 @@
 
 #include <linux/dmaengine.h>
 
-/* Qualification only: all addresses must still refer to owned DMA buffers. */
+/* Test only: all addresses must still refer to owned DMA buffers. */
 struct dma_async_tx_descriptor *
 ums9117_dma_prep_alignment_fault(struct dma_chan *chan, dma_addr_t destination,
 				 dma_addr_t source, size_t length,

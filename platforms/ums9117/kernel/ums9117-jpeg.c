@@ -51,7 +51,7 @@ static const struct jpeg_scale_profile
 	},
 };
 
-/* Keep this first-tier proposal isolated until physical qualification trims it. */
+/* The fixed encoder configuration supports only these frame geometries. */
 static const struct jpeg_geometry jpeg_encoder_geometries[] = {
 	{ 1200, 32 },
 	{ 320, 240 },
