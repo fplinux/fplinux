@@ -10,10 +10,8 @@ maintainers:
   - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
 
 description:
-  The AP controller has 32 full channels with a shared completion interrupt.
-  Software-requested memory copies use 32-bit addresses. The AP AHB clock
-  enable word and its atomic SET/CLEAR aliases are shared with other devices;
-  this controller owns only bit 5 and does not change the other bits.
+  The AP DMA controller provides 32 channels. Request 0 selects
+  software-triggered memory copies and request 1 is connected to ROTA.
 
 allOf:
   - $ref: dma-controller.yaml#
@@ -23,45 +21,53 @@ properties:
     const: sprd,ums9117-dma
 
   reg:
-    items:
-      - description: AP DMA controller registers
-      - description: Shared AP AHB clock enable state
-      - description: Shared AP AHB clock enable SET alias
-      - description: Shared AP AHB clock enable CLEAR alias
-
-  reg-names:
-    items:
-      - const: dma
-      - const: ap-ahb-state
-      - const: ap-ahb-set
-      - const: ap-ahb-clear
+    maxItems: 1
 
   interrupts:
     maxItems: 1
 
-  "#dma-cells":
+  clocks:
+    maxItems: 1
+
+  clock-names:
+    items:
+      - const: enable
+
+  '#dma-cells':
     const: 1
-    description: Peripheral DMA request number.
+    description: DMA request number, either 0 for memcpy or 1 for ROTA.
+
+  dma-channels:
+    const: 32
+
+  dma-requests:
+    const: 2
 
 required:
   - compatible
   - reg
-  - reg-names
   - interrupts
-  - "#dma-cells"
+  - clocks
+  - clock-names
+  - '#dma-cells'
+  - dma-channels
+  - dma-requests
 
-additionalProperties: false
+unevaluatedProperties: false
 
 examples:
   - |
+    #include <dt-bindings/clock/sprd,ums9117-clk.h>
     #include <dt-bindings/interrupt-controller/arm-gic.h>
+
     dma-controller@20100000 {
         compatible = "sprd,ums9117-dma";
-        reg = <0x20100000 0x2100>,
-              <0x20e00000 0x4>,
-              <0x20e01000 0x4>,
-              <0x20e02000 0x4>;
-        reg-names = "dma", "ap-ahb-state", "ap-ahb-set", "ap-ahb-clear";
+        reg = <0x20100000 0x2100>;
         interrupts = <GIC_SPI 50 IRQ_TYPE_LEVEL_HIGH>;
+        clocks = <&apahb_gate CLK_DMA_EB>;
+        clock-names = "enable";
         #dma-cells = <1>;
+        dma-channels = <32>;
+        dma-requests = <2>;
     };
+...

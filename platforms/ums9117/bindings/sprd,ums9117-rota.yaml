@@ -42,11 +42,19 @@ properties:
     maxItems: 1
     description: Reusable DMA pool shared by the frame-moving engines.
 
+  dmas:
+    maxItems: 1
+
+  dma-names:
+    const: rotation
+
 required:
   - compatible
   - reg
   - reg-names
   - memory-region
+  - dmas
+  - dma-names
 
 additionalProperties: false
 
@@ -64,4 +72,6 @@ examples:
                     "ap-ahb-gate-clear", "ap-ahb-reset-set",
                     "ap-ahb-reset-clear";
         memory-region = <&codec_dma>;
+        dmas = <&ap_dma 1>;
+        dma-names = "rotation";
     };

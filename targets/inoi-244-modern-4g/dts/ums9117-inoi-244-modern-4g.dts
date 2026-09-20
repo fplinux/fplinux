@@ -48,6 +48,8 @@
 				    "pinmux-data", "pinconf-data";
 			sprd,aon-apb = <&aon_apb>;
 			sprd,pmic = <&sc2720_pmic>;
+			dmas = <&ap_dma 0>;
+			dma-names = "copy";
 			/* fpdoom cmd3001_inoi MCU timing at the 128 MHz AHB clock. */
 			sprd,dbi-timing-ns = <5 150 150 30 80 120>;
 			/* LCM control pins. */

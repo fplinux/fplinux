@@ -17,7 +17,7 @@ config MACH_NOKIA_TA1618
 
 config FB_TA1618_DMA_MEMCPY
 	bool "AP DMA framebuffer copy on Nokia TA-1618"
-	depends on FB_TA1618 && UMS9117_DMA
+	depends on FB_TA1618 && SPRD_DMA
 	help
 	  Copy completed framebuffer pages into the LCDC transfer buffer with
 	  one AP DMAengine memory-copy channel. DMA completion is awaited

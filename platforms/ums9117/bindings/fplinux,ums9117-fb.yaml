@@ -69,6 +69,12 @@ properties:
     $ref: /schemas/types.yaml#/definitions/phandle
     description: SC2720 PMIC containing the display backlight registers.
 
+  dmas:
+    maxItems: 1
+
+  dma-names:
+    const: copy
+
   sprd,pinmux-values:
     $ref: /schemas/types.yaml#/definitions/uint32-array
     minItems: 1
@@ -142,6 +148,8 @@ required:
   - reg-names
   - sprd,aon-apb
   - sprd,pmic
+  - dmas
+  - dma-names
   - sprd,pinmux-values
   - sprd,pinmux-offsets
   - sprd,pinconf-values

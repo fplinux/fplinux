@@ -260,16 +260,18 @@
 		ap_dma: dma-controller@20100000 {
 			compatible = "sprd,ums9117-dma";
 			#dma-cells = <1>;
-			reg = <0x20100000 0x2100>,
-			      <0x20e00000 0x4>,
-			      <0x20e01000 0x4>,
-			      <0x20e02000 0x4>;
-			reg-names = "dma", "ap-ahb-state", "ap-ahb-set", "ap-ahb-clear";
+			reg = <0x20100000 0x2100>;
 			interrupts = <GIC_SPI 50 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&apahb_gate CLK_DMA_EB>;
+			clock-names = "enable";
+			dma-channels = <32>;
+			dma-requests = <2>;
 			status = "disabled";
 		};
 
 		rota: rotate@20900000 {
+			dmas = <&ap_dma 1>;
+			dma-names = "rotation";
 			compatible = "sprd,ums9117-rota";
 			reg = <0x20900000 0x450>,
 			      <0x20e00000 0x4>,
