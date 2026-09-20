@@ -57,10 +57,6 @@
 #define UMS9117_LCDC_CTRL_RUN BIT(3)
 #define UMS9117_LCDC_CTRL_RGB_MODE_MASK (7U << 5)
 
-#define UMS9117_ADI_PHYS 0x40600000U
-#define UMS9117_ADI_SLAVE_PHYS 0x40608000U
-#define UMS9117_FB_ADI_CONTROLLER_MIN_MMIO_BYTES 0x228U
-
 #define SC2720_BLTC_CTRL 0x180
 #define SC2720_BLTC_CURRENT0 0x1b8
 #define SC2720_BLTC_CURRENT1 0x1bc
@@ -276,39 +272,32 @@ static int ums9117_fb_wled_set(struct ums9117_fb *ufb, bool on,
 		SC2720_BLTC_CURRENT2,
 		SC2720_BLTC_CURRENT3,
 	};
-	struct ums9117_adi_transaction transaction = {};
-	u16 value;
+	unsigned int value;
 	u16 active_mask = 0;
 	unsigned int i;
 	int ret;
-	int end_ret;
 
 	if (on && ufb->backlight_max_brightness &&
 	    (!brightness || brightness > ufb->backlight_max_brightness))
 		return -EINVAL;
-	ret = ums9117_adi_begin(&transaction);
-	if (ret)
-		goto out;
-	ret = ums9117_adi_update_bits(&transaction, SC2720_MODULE_EN0,
-				      SC2720_MODULE_EN0_WLED_MODULE_ENABLE,
-				      SC2720_MODULE_EN0_WLED_MODULE_ENABLE);
+	ret = regmap_update_bits(ufb->pmic, SC2720_MODULE_EN0,
+				 SC2720_MODULE_EN0_WLED_MODULE_ENABLE,
+				 SC2720_MODULE_EN0_WLED_MODULE_ENABLE);
 	if (!ret)
-		ret = ums9117_adi_update_bits(
-			&transaction, SC2720_RTC_CLK_EN0,
-			SC2720_RTC_CLK_EN0_WLED_CLOCK_ENABLE,
-			SC2720_RTC_CLK_EN0_WLED_CLOCK_ENABLE);
+		ret = regmap_update_bits(ufb->pmic, SC2720_RTC_CLK_EN0,
+					 SC2720_RTC_CLK_EN0_WLED_CLOCK_ENABLE,
+					 SC2720_RTC_CLK_EN0_WLED_CLOCK_ENABLE);
 	if (!ret)
-		ret = ums9117_adi_update_bits(
-			&transaction, SC2720_LDO_PD_CTRL,
+		ret = regmap_update_bits(
+			ufb->pmic, SC2720_LDO_PD_CTRL,
 			SC2720_LDO_PD_CTRL_WLED_POWER_DOWN_MASK, 0);
 	if (!ret && !on)
-		ret = ums9117_adi_write(&transaction, SC2720_BLTC_CTRL, 0);
+		ret = regmap_write(ufb->pmic, SC2720_BLTC_CTRL, 0);
 	if (!ret && !on) {
-		ret = ums9117_adi_read(&transaction, SC2720_BLTC_PD_CTRL,
-				       &value);
+		ret = regmap_read(ufb->pmic, SC2720_BLTC_PD_CTRL, &value);
 		if (!ret)
-			ret = ums9117_adi_write(
-				&transaction, SC2720_BLTC_PD_CTRL,
+			ret = regmap_write(
+				ufb->pmic, SC2720_BLTC_PD_CTRL,
 				value | SC2720_BLTC_PD_CTRL_SOFTWARE_POWER_DOWN);
 	}
 	if (!ret && on) {
@@ -320,36 +309,29 @@ static int ums9117_fb_wled_set(struct ums9117_fb *ufb, bool on,
 			if (ufb->backlight_max_brightness &&
 			    ufb->wled_levels[i])
 				current_level = brightness;
-			ret = ums9117_adi_read(&transaction, current_regs[i],
-					       &value);
+			ret = regmap_read(ufb->pmic, current_regs[i], &value);
 			if (!ret)
-				ret = ums9117_adi_write(
-					&transaction, current_regs[i],
+				ret = regmap_write(
+					ufb->pmic, current_regs[i],
 					(value &
 					 ~SC2720_BLTC_CURRENT_LEVEL_MASK) |
 						current_level);
 		}
 	}
 	if (!ret && on)
-		ret = ums9117_adi_update_bits(
-			&transaction, SC2720_BLTC_WLED_PRESCALER, 0xff, 0);
+		ret = regmap_update_bits(ufb->pmic, SC2720_BLTC_WLED_PRESCALER,
+					 0xff, 0);
 	if (!ret && on)
-		ret = ums9117_adi_write(&transaction, SC2720_BLTC_WLED_DUTY, 0);
+		ret = regmap_write(ufb->pmic, SC2720_BLTC_WLED_DUTY, 0);
 	if (!ret && on) {
-		ret = ums9117_adi_read(&transaction, SC2720_BLTC_PD_CTRL,
-				       &value);
+		ret = regmap_read(ufb->pmic, SC2720_BLTC_PD_CTRL, &value);
 		if (!ret)
-			ret = ums9117_adi_write(
-				&transaction, SC2720_BLTC_PD_CTRL,
+			ret = regmap_write(
+				ufb->pmic, SC2720_BLTC_PD_CTRL,
 				value & ~SC2720_BLTC_PD_CTRL_SOFTWARE_POWER_DOWN);
 	}
 	if (!ret && on)
-		ret = ums9117_adi_write(&transaction, SC2720_BLTC_CTRL,
-					active_mask);
-	end_ret = ums9117_adi_end(&transaction);
-	if (!ret)
-		ret = end_ret;
-out:
+		ret = regmap_write(ufb->pmic, SC2720_BLTC_CTRL, active_mask);
 	if (ret)
 		ufb->stats.wled_errors++;
 	ums9117_fb_set_wled_state(ufb, !ret, on, on ? brightness : 0);
@@ -1354,7 +1336,6 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		"damage_pending=%u\n"
 		"shown_yoffset=%u\n"
 		"wled_state=%s\n"
-		"adi_poisoned=%u\n"
 		"transport_faulted=%u\n"
 		"frames_started=%llu\n"
 		"frames_done_irq=%llu\n"
@@ -1388,7 +1369,6 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		!ufb->wled_known ? "unknown" :
 		ufb->wled_on	 ? "on" :
 				   "off",
-		ums9117_adi_is_poisoned() ? 1U : 0U,
 		ufb->transport_faulted ? 1U : 0U, stats.frames_started,
 		stats.frames_done_irq, stats.frames_done_poll,
 		stats.frame_timeouts, stats.irq_spurious, stats.irq_missed,
@@ -1566,8 +1546,6 @@ static int ums9117_fb_map_common_resources(struct ums9117_fb *ufb,
 {
 	struct device *dev = &pdev->dev;
 	struct resource *fbres;
-	struct resource *adires;
-	struct resource *analogres;
 	unsigned int i;
 	u32 frame_bytes = ums9117_fb_size_bytes(ufb);
 	u32 required_bytes = 3 * frame_bytes;
@@ -1608,15 +1586,12 @@ static int ums9117_fb_map_common_resources(struct ums9117_fb *ufb,
 		syscon_regmap_lookup_by_phandle(dev->of_node, "sprd,aon-apb");
 	if (IS_ERR(ufb->aon_apb))
 		return PTR_ERR(ufb->aon_apb);
-	adires = platform_get_resource_byname(pdev, IORESOURCE_MEM,
-					      "adi-controller");
-	analogres = platform_get_resource_byname(pdev, IORESOURCE_MEM,
-						 "analog-slave");
-	if (!adires || !analogres || adires->start != UMS9117_ADI_PHYS ||
-	    analogres->start != UMS9117_ADI_SLAVE_PHYS ||
-	    resource_size(adires) < UMS9117_FB_ADI_CONTROLLER_MIN_MMIO_BYTES ||
-	    resource_size(analogres) < SC2720_LDO_PD_CTRL + sizeof(u32))
-		return -EINVAL;
+	ufb->pmic = syscon_regmap_lookup_by_phandle(dev->of_node, "sprd,pmic");
+	if (IS_ERR(ufb->pmic)) {
+		/* The SPI PMIC publishes its regmap after probing, not via MMIO. */
+		ret = PTR_ERR(ufb->pmic);
+		return ret == -EINVAL ? -EPROBE_DEFER : ret;
+	}
 	ret = of_property_read_u32_array(dev->of_node,
 					 "sprd,wled-current-levels",
 					 ufb->wled_levels,

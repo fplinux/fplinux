@@ -60,7 +60,7 @@ The shared hardware interfaces and their limits are described in:
 
 This phone uses backlight device inoi240-backlight, with configured levels
 0 through 31 and default 31. Shared interface names are sc2720-battery,
-sc2720-charger, sc2720-auxadc, ums9117-thm1, SC2720 vibrator and UMS9117
+sc2720-charger, sc2720-auxadc, ums9117-thermal, sc27xx:vibrator and UMS9117
 Headphones. IIO, thermal and input-device numbers are assigned at boot. These
 identifiers do not demonstrate the physical effects or measurements noted above.
 

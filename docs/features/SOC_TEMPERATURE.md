@@ -7,7 +7,7 @@ its physical accuracy limits. A standalone archive carries that status in
 
 ## Interface
 
-Find the zone whose `type` is `ums9117-thm1` under `/sys/class/thermal/`. The
+Find the zone whose `type` is `ums9117-thermal` under `/sys/class/thermal/`. The
 adjacent `temp` file reports temperature in millidegrees Celsius. The numeric
 `thermal_zoneN` index is assigned at boot and is not part of the interface.
 

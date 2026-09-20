@@ -1,0 +1,1063 @@
+diff --git a/drivers/iio/adc/sc27xx_adc.c b/drivers/iio/adc/sc27xx_adc.c
+index 2535c2c..7ae1f37 100644
+--- a/drivers/iio/adc/sc27xx_adc.c
++++ b/drivers/iio/adc/sc27xx_adc.c
+@@ -1,8 +1,11 @@
+ // SPDX-License-Identifier: GPL-2.0
+ // Copyright (C) 2018 Spreadtrum Communications Inc.
+
++#include <linux/clk.h>
++#include <linux/delay.h>
+ #include <linux/hwspinlock.h>
+ #include <linux/iio/iio.h>
++#include <linux/ktime.h>
+ #include <linux/module.h>
+ #include <linux/mutex.h>
+ #include <linux/nvmem-consumer.h>
+@@ -21,6 +24,7 @@
+ #define SC2731_ARM_CLK_EN		0xc10
+ #define SC27XX_CLK_ADC_EN		BIT(5)
+ #define SC27XX_CLK_ADC_CLK_EN		BIT(6)
++#define SC27XX_CLK_ADC_MASK (SC27XX_CLK_ADC_EN | SC27XX_CLK_ADC_CLK_EN)
+
+ /* ADC controller registers definition */
+ #define SC27XX_ADC_CTL			0x0
+@@ -30,6 +34,7 @@
+ #define SC27XX_ADC_INT_CLR		0x54
+ #define SC27XX_ADC_INT_STS		0x58
+ #define SC27XX_ADC_INT_RAW		0x5c
++#define SC27XX_ADC_DEBUG 0x60
+
+ /* Bits and mask definition for SC27XX_ADC_CTL register */
+ #define SC27XX_ADC_EN			BIT(0)
+@@ -37,9 +42,12 @@
+ #define SC27XX_ADC_12BIT_MODE		BIT(2)
+ #define SC27XX_ADC_RUN_NUM_MASK		GENMASK(7, 4)
+ #define SC27XX_ADC_RUN_NUM_SHIFT	4
++#define SC2720_ADC_AVERAGE_MASK GENMASK(10, 8)
++#define SC2720_ADC_OFFSET_CAL BIT(12)
+
+ /* Bits and mask definition for SC27XX_ADC_CH_CFG register */
+ #define SC27XX_ADC_CHN_ID_MASK		GENMASK(4, 0)
++#define SC2720_ADC_SLOW_MODE BIT(6)
+ #define SC27XX_ADC_SCALE_MASK		GENMASK(10, 9)
+ #define SC2721_ADC_SCALE_MASK		BIT(5)
+ #define SC27XX_ADC_SCALE_SHIFT		9
+@@ -63,6 +71,16 @@
+ /* Timeout (us) for ADC data conversion according to ADC datasheet */
+ #define SC27XX_ADC_RDY_TIMEOUT		1000000
+ #define SC27XX_ADC_POLL_RAW_STATUS	500
++#define SC2720_ADC_RDY_TIMEOUT 10000
++#define SC2720_ADC_SETTLE_MIN_US 100
++#define SC2720_ADC_SETTLE_MAX_US 200
++#define SC2720_ADC_POLL_MIN_US 100
++#define SC2720_ADC_POLL_MAX_US 200
++#define SC2720_ADC_DATA_SETTLE_MIN_US 10
++#define SC2720_ADC_DATA_SETTLE_MAX_US 20
++
++#define SC2720_ADC_DEBUG_STATE_MASK GENMASK(10, 8)
++#define SC2720_ADC_DEBUG_COUNTER_MASK GENMASK(7, 0)
+
+ /* Maximum ADC channel number */
+ #define SC27XX_ADC_CHANNEL_MAX		32
+@@ -81,6 +99,7 @@
+
+ struct sc27xx_adc_data {
+ 	struct device *dev;
++	struct clk *xtal;
+ 	struct regulator *volref;
+ 	struct regmap *regmap;
+ 	/* lock to protect against multiple access to the device */
+@@ -93,6 +112,7 @@ struct sc27xx_adc_data {
+ 	int channel_scale[SC27XX_ADC_CHANNEL_MAX];
+ 	u32 base;
+ 	int irq;
++	bool faulted;
+ 	const struct sc27xx_adc_variant_data *var_data;
+ };
+
+@@ -104,15 +124,40 @@ struct sc27xx_adc_data {
+ struct sc27xx_adc_variant_data {
+ 	u32 module_en;
+ 	u32 clk_en;
++	u32 register_offset;
+ 	u32 scale_shift;
+ 	u32 scale_mask;
++	u32 control_mask;
++	u32 control_value;
+ 	const struct sc27xx_adc_linear_graph *bscale_cal;
+ 	const struct sc27xx_adc_linear_graph *sscale_cal;
++	const struct iio_chan_spec *channels;
++	unsigned int num_channels;
++	const struct iio_info *info;
++	const char *name;
+ 	void (*init_scale)(struct sc27xx_adc_data *data);
+ 	int (*get_ratio)(int channel, int scale);
++	bool transient_power;
+ 	bool set_volref;
+ };
+
++struct sc2720_adc_session {
++	u32 control;
++	u32 channel_config;
++	u32 interrupt_enable;
++	u32 module_enable;
++	u32 clock_enable;
++	bool power_valid;
++	bool registers_valid;
++};
++
++struct sc2720_adc_status {
++	u32 control;
++	u32 debug;
++	u32 interrupt_status;
++	u32 interrupt_raw;
++};
++
+ struct sc27xx_adc_linear_graph {
+ 	int volt0;
+ 	int adc0;
+@@ -120,6 +165,11 @@ struct sc27xx_adc_linear_graph {
+ 	int adc1;
+ };
+
++static u32 sc27xx_adc_reg(struct sc27xx_adc_data *data, u32 reg)
++{
++	return data->base + data->var_data->register_offset + reg;
++}
++
+ /*
+  * According to the datasheet, we can convert one ADC value to one voltage value
+  * through 2 points in the linear graph. If the voltage is less than 1.2v, we
+@@ -195,7 +245,7 @@ static int sc27xx_adc_scale_calibration(struct sc27xx_adc_data *data,
+ 	const struct sc27xx_adc_linear_graph *calib_graph;
+ 	struct sc27xx_adc_linear_graph *graph;
+ 	const char *cell_name;
+-	u32 calib_data = 0;
++	int calib_data;
+
+ 	if (big_scale) {
+ 		calib_graph = data->var_data->bscale_cal;
+@@ -208,6 +258,8 @@ static int sc27xx_adc_scale_calibration(struct sc27xx_adc_data *data,
+ 	}
+
+ 	calib_data = adc_nvmem_cell_calib_data(data, cell_name);
++	if (calib_data < 0)
++		return calib_data;
+
+ 	/* Only need to calibrate the adc values in the linear graph. */
+ 	graph->adc0 = sc27xx_adc_get_calib_data(calib_data, calib_graph->adc0);
+@@ -481,16 +533,255 @@ static void sc2731_adc_scale_init(struct sc27xx_adc_data *data)
+ 	}
+ }
+
++static void sc27xx_adc_set_cleanup_error(int *ret, int cleanup_ret)
++{
++	if (!*ret && cleanup_ret)
++		*ret = cleanup_ret;
++}
++
++static int sc2720_adc_read_status(struct sc27xx_adc_data *data,
++				  struct sc2720_adc_status *status)
++{
++	int ret;
++
++	ret = regmap_read(data->regmap, sc27xx_adc_reg(data, SC27XX_ADC_CTL),
++			  &status->control);
++	if (ret)
++		return ret;
++	ret = regmap_read(data->regmap, sc27xx_adc_reg(data, SC27XX_ADC_DEBUG),
++			  &status->debug);
++	if (ret)
++		return ret;
++	ret = regmap_read(data->regmap,
++			  sc27xx_adc_reg(data, SC27XX_ADC_INT_STS),
++			  &status->interrupt_status);
++	if (ret)
++		return ret;
++
++	return regmap_read(data->regmap,
++			   sc27xx_adc_reg(data, SC27XX_ADC_INT_RAW),
++			   &status->interrupt_raw);
++}
++
++static bool
++sc2720_adc_conversion_complete(const struct sc2720_adc_status *status)
++{
++	return !(status->control & SC27XX_ADC_CHN_RUN) &&
++	       !(status->debug & (SC2720_ADC_DEBUG_STATE_MASK |
++				  SC2720_ADC_DEBUG_COUNTER_MASK)) &&
++	       (status->interrupt_raw & SC27XX_ADC_IRQ_RAW);
++}
++
++static int sc2720_adc_read_conversion(struct sc27xx_adc_data *data, u32 *value)
++{
++	struct sc2720_adc_status status;
++	ktime_t deadline = ktime_add_us(ktime_get(), SC2720_ADC_RDY_TIMEOUT);
++	int ret;
++
++	for (;;) {
++		ret = sc2720_adc_read_status(data, &status);
++		if (ret)
++			return ret;
++		if (sc2720_adc_conversion_complete(&status))
++			break;
++		if (ktime_compare(ktime_get(), deadline) >= 0)
++			return -ETIMEDOUT;
++		usleep_range(SC2720_ADC_POLL_MIN_US, SC2720_ADC_POLL_MAX_US);
++	}
++
++	usleep_range(SC2720_ADC_DATA_SETTLE_MIN_US,
++		     SC2720_ADC_DATA_SETTLE_MAX_US);
++	ret = sc2720_adc_read_status(data, &status);
++	if (ret)
++		return ret;
++	if (!sc2720_adc_conversion_complete(&status))
++		return -EIO;
++
++	return regmap_read(data->regmap, sc27xx_adc_reg(data, SC27XX_ADC_DATA),
++			   value);
++}
++
++static int sc2720_adc_end(struct sc27xx_adc_data *data,
++			  struct sc2720_adc_session *session)
++{
++	struct sc2720_adc_status status;
++	u32 control_mask = SC27XX_ADC_EN | SC27XX_ADC_CHN_RUN |
++			   data->var_data->control_mask;
++	u32 channel_mask = SC27XX_ADC_CHN_ID_MASK | SC2720_ADC_SLOW_MODE |
++			   data->var_data->scale_mask;
++	u32 channel_config, clock_enable, interrupt_enable, module_enable;
++	int cleanup_ret;
++	int ret = 0;
++
++	if (session->registers_valid) {
++		ret = regmap_clear_bits(data->regmap,
++					sc27xx_adc_reg(data, SC27XX_ADC_CTL),
++					SC27XX_ADC_EN | SC27XX_ADC_CHN_RUN);
++		cleanup_ret = regmap_set_bits(
++			data->regmap, sc27xx_adc_reg(data, SC27XX_ADC_INT_CLR),
++			SC27XX_ADC_IRQ_CLR);
++		sc27xx_adc_set_cleanup_error(&ret, cleanup_ret);
++		cleanup_ret = regmap_update_bits(
++			data->regmap, sc27xx_adc_reg(data, SC27XX_ADC_CH_CFG),
++			channel_mask, session->channel_config);
++		sc27xx_adc_set_cleanup_error(&ret, cleanup_ret);
++		cleanup_ret = regmap_update_bits(
++			data->regmap, sc27xx_adc_reg(data, SC27XX_ADC_CTL),
++			control_mask, session->control);
++		sc27xx_adc_set_cleanup_error(&ret, cleanup_ret);
++
++		cleanup_ret = sc2720_adc_read_status(data, &status);
++		sc27xx_adc_set_cleanup_error(&ret, cleanup_ret);
++		if (!cleanup_ret &&
++		    (((status.control ^ session->control) & control_mask) ||
++		     (status.interrupt_status & SC27XX_ADC_IRQ_RAW) ||
++		     (status.interrupt_raw & SC27XX_ADC_IRQ_RAW) ||
++		     (status.debug & (SC2720_ADC_DEBUG_STATE_MASK |
++				      SC2720_ADC_DEBUG_COUNTER_MASK))))
++			sc27xx_adc_set_cleanup_error(&ret, -EIO);
++
++		cleanup_ret = regmap_read(
++			data->regmap, sc27xx_adc_reg(data, SC27XX_ADC_CH_CFG),
++			&channel_config);
++		sc27xx_adc_set_cleanup_error(&ret, cleanup_ret);
++		if (!cleanup_ret &&
++		    ((channel_config ^ session->channel_config) & channel_mask))
++			sc27xx_adc_set_cleanup_error(&ret, -EIO);
++
++		cleanup_ret = regmap_read(
++			data->regmap, sc27xx_adc_reg(data, SC27XX_ADC_INT_EN),
++			&interrupt_enable);
++		sc27xx_adc_set_cleanup_error(&ret, cleanup_ret);
++		if (!cleanup_ret &&
++		    ((interrupt_enable ^ session->interrupt_enable) &
++		     SC27XX_ADC_IRQ_EN))
++			sc27xx_adc_set_cleanup_error(&ret, -EIO);
++	}
++
++	if (session->power_valid) {
++		cleanup_ret = regmap_update_bits(data->regmap,
++						 data->var_data->clk_en,
++						 SC27XX_CLK_ADC_MASK,
++						 session->clock_enable);
++		sc27xx_adc_set_cleanup_error(&ret, cleanup_ret);
++		cleanup_ret = regmap_update_bits(data->regmap,
++						 data->var_data->module_en,
++						 SC27XX_MODULE_ADC_EN,
++						 session->module_enable);
++		sc27xx_adc_set_cleanup_error(&ret, cleanup_ret);
++
++		cleanup_ret = regmap_read(data->regmap, data->var_data->clk_en,
++					  &clock_enable);
++		sc27xx_adc_set_cleanup_error(&ret, cleanup_ret);
++		if (!cleanup_ret && ((clock_enable ^ session->clock_enable) &
++				     SC27XX_CLK_ADC_MASK))
++			sc27xx_adc_set_cleanup_error(&ret, -EIO);
++
++		cleanup_ret = regmap_read(data->regmap,
++					  data->var_data->module_en,
++					  &module_enable);
++		sc27xx_adc_set_cleanup_error(&ret, cleanup_ret);
++		if (!cleanup_ret && ((module_enable ^ session->module_enable) &
++				     SC27XX_MODULE_ADC_EN))
++			sc27xx_adc_set_cleanup_error(&ret, -EIO);
++	}
++
++	return ret;
++}
++
++static int sc2720_adc_begin(struct sc27xx_adc_data *data,
++			    struct sc2720_adc_session *session)
++{
++	struct sc2720_adc_status status;
++	int cleanup_ret;
++	int ret;
++
++	ret = regmap_read(data->regmap, data->var_data->module_en,
++			  &session->module_enable);
++	if (ret)
++		return ret;
++	ret = regmap_read(data->regmap, data->var_data->clk_en,
++			  &session->clock_enable);
++	if (ret)
++		return ret;
++	session->power_valid = true;
++
++	ret = regmap_set_bits(data->regmap, data->var_data->module_en,
++			      SC27XX_MODULE_ADC_EN);
++	if (ret)
++		goto restore_state;
++	ret = regmap_set_bits(data->regmap, data->var_data->clk_en,
++			      SC27XX_CLK_ADC_MASK);
++	if (ret)
++		goto restore_state;
++
++	usleep_range(SC2720_ADC_SETTLE_MIN_US, SC2720_ADC_SETTLE_MAX_US);
++
++	ret = sc2720_adc_read_status(data, &status);
++	if (ret)
++		goto restore_state;
++	session->control = status.control;
++	ret = regmap_read(data->regmap, sc27xx_adc_reg(data, SC27XX_ADC_CH_CFG),
++			  &session->channel_config);
++	if (ret)
++		goto restore_state;
++	ret = regmap_read(data->regmap, sc27xx_adc_reg(data, SC27XX_ADC_INT_EN),
++			  &session->interrupt_enable);
++	if (ret)
++		goto restore_state;
++
++	if ((session->control & SC27XX_ADC_CHN_RUN) ||
++	    (session->interrupt_enable & SC27XX_ADC_IRQ_EN) ||
++	    (status.interrupt_status & SC27XX_ADC_IRQ_RAW) ||
++	    (status.interrupt_raw & SC27XX_ADC_IRQ_RAW) ||
++	    (status.debug &
++	     (SC2720_ADC_DEBUG_STATE_MASK | SC2720_ADC_DEBUG_COUNTER_MASK))) {
++		ret = -EBUSY;
++		goto restore_state;
++	}
++
++	session->registers_valid = true;
++	return 0;
++
++restore_state:
++	cleanup_ret = sc2720_adc_end(data, session);
++	if (cleanup_ret) {
++		data->faulted = true;
++		dev_err(data->dev,
++			"SC2720 ADC cleanup failed; reads disabled: %d\n",
++			cleanup_ret);
++		ret = cleanup_ret;
++	}
++	return ret;
++}
++
+ static int sc27xx_adc_read(struct sc27xx_adc_data *data, int channel,
+ 			   int scale, int *val)
+ {
+-	int ret, ret_volref;
+-	u32 tmp, value, status;
++	struct sc2720_adc_session session = {};
++	u32 channel_mask, control_mask, control_value;
++	int cleanup_ret, ret, ret_volref;
++	u32 tmp, value = 0, status;
++
++	if (data->var_data->transient_power && data->faulted)
++		return -EIO;
++
++	if (data->var_data->transient_power) {
++		ret = clk_prepare_enable(data->xtal);
++		if (ret)
++			return ret;
++	}
+
+ 	ret = hwspin_lock_timeout_raw(data->hwlock, SC27XX_ADC_HWLOCK_TIMEOUT);
+ 	if (ret) {
+ 		dev_err(data->dev, "timeout to get the hwspinlock\n");
+-		return ret;
++		goto disable_xtal;
++	}
++
++	if (data->var_data->transient_power) {
++		ret = sc2720_adc_begin(data, &session);
++		if (ret)
++			goto unlock_adc;
+ 	}
+
+ 	/*
+@@ -508,12 +799,14 @@ static int sc27xx_adc_read(struct sc27xx_adc_data *data, int channel,
+ 		}
+ 	}
+
+-	ret = regmap_set_bits(data->regmap, data->base + SC27XX_ADC_CTL,
++	ret = regmap_set_bits(data->regmap,
++			      sc27xx_adc_reg(data, SC27XX_ADC_CTL),
+ 			      SC27XX_ADC_EN);
+ 	if (ret)
+-		goto regulator_restore;
++		goto disable_adc;
+
+-	ret = regmap_set_bits(data->regmap, data->base + SC27XX_ADC_INT_CLR,
++	ret = regmap_set_bits(data->regmap,
++			      sc27xx_adc_reg(data, SC27XX_ADC_INT_CLR),
+ 			      SC27XX_ADC_IRQ_CLR);
+ 	if (ret)
+ 		goto disable_adc;
+@@ -521,47 +814,76 @@ static int sc27xx_adc_read(struct sc27xx_adc_data *data, int channel,
+ 	/* Configure the channel id and scale */
+ 	tmp = (scale << data->var_data->scale_shift) & data->var_data->scale_mask;
+ 	tmp |= channel & SC27XX_ADC_CHN_ID_MASK;
+-	ret = regmap_update_bits(data->regmap, data->base + SC27XX_ADC_CH_CFG,
+-				 SC27XX_ADC_CHN_ID_MASK |
+-				 data->var_data->scale_mask,
+-				 tmp);
++	channel_mask = SC27XX_ADC_CHN_ID_MASK | data->var_data->scale_mask;
++	if (data->var_data->transient_power)
++		channel_mask |= SC2720_ADC_SLOW_MODE;
++	ret = regmap_update_bits(data->regmap,
++				 sc27xx_adc_reg(data, SC27XX_ADC_CH_CFG),
++				 channel_mask, tmp);
+ 	if (ret)
+ 		goto disable_adc;
+
+-	/* Select 12bit conversion mode, and only sample 1 time */
+-	tmp = SC27XX_ADC_12BIT_MODE;
+-	tmp |= (0 << SC27XX_ADC_RUN_NUM_SHIFT) & SC27XX_ADC_RUN_NUM_MASK;
+-	ret = regmap_update_bits(data->regmap, data->base + SC27XX_ADC_CTL,
+-				 SC27XX_ADC_RUN_NUM_MASK | SC27XX_ADC_12BIT_MODE,
+-				 tmp);
++	control_mask = data->var_data->control_mask;
++	control_value = data->var_data->control_value;
++	if (!control_mask) {
++		control_mask = SC27XX_ADC_RUN_NUM_MASK | SC27XX_ADC_12BIT_MODE;
++		control_value = SC27XX_ADC_12BIT_MODE;
++	}
++
++	ret = regmap_update_bits(data->regmap,
++				 sc27xx_adc_reg(data, SC27XX_ADC_CTL),
++				 control_mask, control_value);
+ 	if (ret)
+ 		goto disable_adc;
+
+-	ret = regmap_set_bits(data->regmap, data->base + SC27XX_ADC_CTL,
++	ret = regmap_set_bits(data->regmap,
++			      sc27xx_adc_reg(data, SC27XX_ADC_CTL),
+ 			      SC27XX_ADC_CHN_RUN);
+ 	if (ret)
+ 		goto disable_adc;
+
+-	ret = regmap_read_poll_timeout(data->regmap,
+-				       data->base + SC27XX_ADC_INT_RAW,
+-				       status, (status & SC27XX_ADC_IRQ_RAW),
+-				       SC27XX_ADC_POLL_RAW_STATUS,
+-				       SC27XX_ADC_RDY_TIMEOUT);
+-	if (ret) {
+-		dev_err(data->dev, "read adc timeout, status = 0x%x\n", status);
+-		goto disable_adc;
+-	}
++	if (data->var_data->transient_power) {
++		ret = sc2720_adc_read_conversion(data, &value);
++		if (ret) {
++			dev_err(data->dev, "read adc failed: %d\n", ret);
++			goto disable_adc;
++		}
++	} else {
++		ret = regmap_read_poll_timeout(
++			data->regmap, sc27xx_adc_reg(data, SC27XX_ADC_INT_RAW),
++			status, (status & SC27XX_ADC_IRQ_RAW),
++			SC27XX_ADC_POLL_RAW_STATUS, SC27XX_ADC_RDY_TIMEOUT);
++		if (ret) {
++			dev_err(data->dev, "read adc timeout, status = 0x%x\n",
++				status);
++			goto disable_adc;
++		}
+
+-	ret = regmap_read(data->regmap, data->base + SC27XX_ADC_DATA, &value);
+-	if (ret)
+-		goto disable_adc;
++		ret = regmap_read(data->regmap,
++				  sc27xx_adc_reg(data, SC27XX_ADC_DATA),
++				  &value);
++		if (ret)
++			goto disable_adc;
++	}
+
+ 	value &= SC27XX_ADC_DATA_MASK;
+
+ disable_adc:
+-	regmap_clear_bits(data->regmap, data->base + SC27XX_ADC_CTL,
+-			  SC27XX_ADC_EN);
+-regulator_restore:
++	if (data->var_data->transient_power) {
++		cleanup_ret = sc2720_adc_end(data, &session);
++		if (cleanup_ret) {
++			data->faulted = true;
++			dev_err(data->dev,
++				"SC2720 ADC cleanup failed; reads disabled: %d\n",
++				cleanup_ret);
++			ret = cleanup_ret;
++		}
++	} else {
++		cleanup_ret = regmap_clear_bits(
++			data->regmap, sc27xx_adc_reg(data, SC27XX_ADC_CTL),
++			SC27XX_ADC_EN);
++		sc27xx_adc_set_cleanup_error(&ret, cleanup_ret);
++	}
+ 	if ((data->var_data->set_volref) && (channel == 30 || channel == 31)) {
+ 		ret_volref = regulator_set_voltage(data->volref,
+ 					    SC27XX_ADC_REFVOL_VDD28,
+@@ -569,11 +891,14 @@ regulator_restore:
+ 		if (ret_volref) {
+ 			dev_err(data->dev, "failed to set the volref 2.8v,ret_volref = 0x%x\n",
+ 					 ret_volref);
+-			ret = ret || ret_volref;
++			sc27xx_adc_set_cleanup_error(&ret, ret_volref);
+ 		}
+ 	}
+ unlock_adc:
+ 	hwspin_unlock_raw(data->hwlock);
++disable_xtal:
++	if (data->var_data->transient_power)
++		clk_disable_unprepare(data->xtal);
+
+ 	if (!ret)
+ 		*val = value;
+@@ -718,6 +1043,26 @@ static const struct iio_info sc27xx_info = {
+ 	.write_raw = &sc27xx_adc_write_raw,
+ };
+
++static int sc2720_adc_fwnode_xlate(struct iio_dev *indio_dev,
++				   const struct fwnode_reference_args *iiospec)
++{
++	unsigned int i;
++
++	if (iiospec->nargs != 1)
++		return -EINVAL;
++
++	for (i = 0; i < indio_dev->num_channels; i++)
++		if (indio_dev->channels[i].channel == iiospec->args[0])
++			return i;
++
++	return -EINVAL;
++}
++
++static const struct iio_info sc2720_info = {
++	.read_raw = &sc27xx_adc_read_raw,
++	.fwnode_xlate = sc2720_adc_fwnode_xlate,
++};
++
+ #define SC27XX_ADC_CHANNEL(index, mask) {			\
+ 	.type = IIO_VOLTAGE,					\
+ 	.channel = index,					\
+@@ -726,6 +1071,20 @@ static const struct iio_info sc27xx_info = {
+ 	.indexed = 1,						\
+ }
+
++#define SC2720_ADC_CHANNEL(index)                             \
++	{                                                     \
++		.type = IIO_VOLTAGE,                          \
++		.channel = index,                             \
++		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW), \
++		.indexed = 1,                                 \
++	}
++
++/* Keep the established SC2720 channel interface raw-only and read-only. */
++static const struct iio_chan_spec sc2720_channels[] = {
++	SC2720_ADC_CHANNEL(0), SC2720_ADC_CHANNEL(1),  SC2720_ADC_CHANNEL(2),
++	SC2720_ADC_CHANNEL(4), SC2720_ADC_CHANNEL(14),
++};
++
+ static const struct iio_chan_spec sc27xx_channels[] = {
+ 	SC27XX_ADC_CHANNEL(0, BIT(IIO_CHAN_INFO_PROCESSED)),
+ 	SC27XX_ADC_CHANNEL(1, BIT(IIO_CHAN_INFO_PROCESSED)),
+@@ -761,6 +1120,17 @@ static const struct iio_chan_spec sc27xx_channels[] = {
+ 	SC27XX_ADC_CHANNEL(31, BIT(IIO_CHAN_INFO_PROCESSED)),
+ };
+
++static int sc27xx_adc_calibrate(struct sc27xx_adc_data *data)
++{
++	int ret;
++
++	ret = sc27xx_adc_scale_calibration(data, true);
++	if (ret)
++		return ret;
++
++	return sc27xx_adc_scale_calibration(data, false);
++}
++
+ static int sc27xx_adc_enable(struct sc27xx_adc_data *data)
+ {
+ 	int ret;
+@@ -772,16 +1142,12 @@ static int sc27xx_adc_enable(struct sc27xx_adc_data *data)
+
+ 	/* Enable ADC work clock and controller clock */
+ 	ret = regmap_set_bits(data->regmap, data->var_data->clk_en,
+-			      SC27XX_CLK_ADC_EN | SC27XX_CLK_ADC_CLK_EN);
++			      SC27XX_CLK_ADC_MASK);
+ 	if (ret)
+ 		goto disable_adc;
+
+ 	/* ADC channel scales' calibration from nvmem device */
+-	ret = sc27xx_adc_scale_calibration(data, true);
+-	if (ret)
+-		goto disable_clk;
+-
+-	ret = sc27xx_adc_scale_calibration(data, false);
++	ret = sc27xx_adc_calibrate(data);
+ 	if (ret)
+ 		goto disable_clk;
+
+@@ -789,7 +1155,7 @@ static int sc27xx_adc_enable(struct sc27xx_adc_data *data)
+
+ disable_clk:
+ 	regmap_clear_bits(data->regmap, data->var_data->clk_en,
+-			  SC27XX_CLK_ADC_EN | SC27XX_CLK_ADC_CLK_EN);
++			  SC27XX_CLK_ADC_MASK);
+ disable_adc:
+ 	regmap_clear_bits(data->regmap, data->var_data->module_en,
+ 			  SC27XX_MODULE_ADC_EN);
+@@ -803,7 +1169,7 @@ static void sc27xx_adc_disable(void *_data)
+
+ 	/* Disable ADC work clock and controller clock */
+ 	regmap_clear_bits(data->regmap, data->var_data->clk_en,
+-			  SC27XX_CLK_ADC_EN | SC27XX_CLK_ADC_CLK_EN);
++			  SC27XX_CLK_ADC_MASK);
+
+ 	regmap_clear_bits(data->regmap, data->var_data->module_en,
+ 			  SC27XX_MODULE_ADC_EN);
+@@ -848,12 +1214,22 @@ static const struct sc27xx_adc_variant_data sc2721_data = {
+ static const struct sc27xx_adc_variant_data sc2720_data = {
+ 	.module_en = SC2731_MODULE_EN,
+ 	.clk_en = SC2721_ARM_CLK_EN,
++	/* SC2720 places AUXADC_VERSION before the common register layout. */
++	.register_offset = 0x4,
+ 	.scale_shift = SC27XX_ADC_SCALE_SHIFT,
+ 	.scale_mask = SC27XX_ADC_SCALE_MASK,
++	.control_mask = SC27XX_ADC_RUN_NUM_MASK | SC2720_ADC_AVERAGE_MASK |
++			SC2720_ADC_OFFSET_CAL,
++	.control_value = SC2720_ADC_OFFSET_CAL,
+ 	.bscale_cal = &big_scale_graph_calib,
+ 	.sscale_cal = &small_scale_graph_calib,
++	.channels = sc2720_channels,
++	.num_channels = ARRAY_SIZE(sc2720_channels),
++	.info = &sc2720_info,
++	.name = "sc2720-auxadc",
+ 	.init_scale = sc2720_adc_scale_init,
+ 	.get_ratio = sc2720_adc_get_ratio,
++	.transient_power = true,
+ 	.set_volref = false,
+ };
+
+@@ -877,6 +1253,8 @@ static int sc27xx_adc_probe(struct platform_device *pdev)
+ 		return -ENOMEM;
+
+ 	sc27xx_data = iio_priv(indio_dev);
++	sc27xx_data->dev = dev;
++	sc27xx_data->var_data = pdata;
+
+ 	sc27xx_data->regmap = dev_get_regmap(dev->parent, NULL);
+ 	if (!sc27xx_data->regmap) {
+@@ -906,7 +1284,15 @@ static int sc27xx_adc_probe(struct platform_device *pdev)
+ 		return -ENXIO;
+ 	}
+
+-	sc27xx_data->dev = dev;
++	if (pdata->transient_power) {
++		sc27xx_data->xtal = devm_clk_get(dev, "xtal");
++		if (IS_ERR(sc27xx_data->xtal)) {
++			ret = PTR_ERR(sc27xx_data->xtal);
++			return dev_err_probe(dev, ret,
++					     "failed to get ADC xtal clock\n");
++		}
++	}
++
+ 	if (pdata->set_volref) {
+ 		sc27xx_data->volref = devm_regulator_get(dev, "vref");
+ 		if (IS_ERR(sc27xx_data->volref)) {
+@@ -915,26 +1301,31 @@ static int sc27xx_adc_probe(struct platform_device *pdev)
+ 		}
+ 	}
+
+-	sc27xx_data->var_data = pdata;
+ 	sc27xx_data->var_data->init_scale(sc27xx_data);
+
+-	ret = sc27xx_adc_enable(sc27xx_data);
+-	if (ret) {
+-		dev_err(dev, "failed to enable ADC module\n");
+-		return ret;
+-	}
+-
+-	ret = devm_add_action_or_reset(dev, sc27xx_adc_disable, sc27xx_data);
+-	if (ret) {
+-		dev_err(dev, "failed to add ADC disable action\n");
+-		return ret;
++	if (!pdata->transient_power) {
++		ret = sc27xx_adc_enable(sc27xx_data);
++		if (ret)
++			return dev_err_probe(dev, ret,
++					     "failed to initialize ADC\n");
++		ret = devm_add_action_or_reset(dev, sc27xx_adc_disable,
++					       sc27xx_data);
++		if (ret) {
++			dev_err(dev, "failed to add ADC disable action\n");
++			return ret;
++		}
+ 	}
+
+-	indio_dev->name = dev_name(dev);
++	indio_dev->name = pdata->name ? pdata->name : dev_name(dev);
+ 	indio_dev->modes = INDIO_DIRECT_MODE;
+-	indio_dev->info = &sc27xx_info;
+-	indio_dev->channels = sc27xx_channels;
+-	indio_dev->num_channels = ARRAY_SIZE(sc27xx_channels);
++	indio_dev->info = pdata->info ? pdata->info : &sc27xx_info;
++	if (pdata->channels) {
++		indio_dev->channels = pdata->channels;
++		indio_dev->num_channels = pdata->num_channels;
++	} else {
++		indio_dev->channels = sc27xx_channels;
++		indio_dev->num_channels = ARRAY_SIZE(sc27xx_channels);
++	}
+
+ 	mutex_init(&sc27xx_data->lock);
+
+diff --git a/drivers/nvmem/sc27xx-efuse.c b/drivers/nvmem/sc27xx-efuse.c
+index 4e2ffef..57e4f73 100644
+--- a/drivers/nvmem/sc27xx-efuse.c
++++ b/drivers/nvmem/sc27xx-efuse.c
+@@ -56,6 +56,16 @@
+  */
+ struct sc27xx_efuse_variant_data {
+ 	u32 module_en;
++	bool root_only;
++	bool guard_state;
++};
++
++struct sc2720_efuse_session {
++	u32 module_enable;
++	u32 block_index;
++	bool module_valid;
++	bool block_valid;
++	bool unsafe_controller;
+ };
+
+ struct sc27xx_efuse {
+@@ -75,6 +85,12 @@ static const struct sc27xx_efuse_variant_data sc2730_edata = {
+ 	.module_en = SC2730_MODULE_EN,
+ };
+
++static const struct sc27xx_efuse_variant_data sc2720_edata = {
++	.module_en = SC27XX_MODULE_EN,
++	.root_only = true,
++	.guard_state = true,
++};
++
+ /*
+  * On Spreadtrum platform, we have multi-subsystems will access the unique
+  * efuse controller, so we need one hardware spinlock to synchronize between
+@@ -103,16 +119,16 @@ static void sc27xx_efuse_unlock(struct sc27xx_efuse *efuse)
+ 	mutex_unlock(&efuse->mutex);
+ }
+
+-static int sc27xx_efuse_poll_status(struct sc27xx_efuse *efuse, u32 bits)
++static int sc27xx_efuse_poll_status(struct sc27xx_efuse *efuse, u32 required,
++				    u32 forbidden)
+ {
+ 	int ret;
+ 	u32 val;
+
+-	ret = regmap_read_poll_timeout(efuse->regmap,
+-				       efuse->base + SC27XX_EFUSE_STATUS,
+-				       val, (val & bits),
+-				       SC27XX_EFUSE_POLL_DELAY_US,
+-				       SC27XX_EFUSE_POLL_TIMEOUT);
++	ret = regmap_read_poll_timeout(
++		efuse->regmap, efuse->base + SC27XX_EFUSE_STATUS, val,
++		(val & required) == required && !(val & forbidden),
++		SC27XX_EFUSE_POLL_DELAY_US, SC27XX_EFUSE_POLL_TIMEOUT);
+ 	if (ret) {
+ 		dev_err(efuse->dev, "timeout to update the efuse status\n");
+ 		return ret;
+@@ -121,12 +137,110 @@ static int sc27xx_efuse_poll_status(struct sc27xx_efuse *efuse, u32 bits)
+ 	return 0;
+ }
+
++static int sc2720_efuse_guard(struct sc27xx_efuse *efuse,
++			      struct sc2720_efuse_session *session)
++{
++	u32 global_control, status;
++	int ret;
++
++	ret = regmap_read(efuse->regmap, efuse->base + SC27XX_EFUSE_GLB_CTRL,
++			  &global_control);
++	if (ret)
++		return ret;
++	ret = regmap_read(efuse->regmap, efuse->base + SC27XX_EFUSE_STATUS,
++			  &status);
++	if (ret)
++		return ret;
++
++	if (status & SC27XX_EFUSE_PGM_BUSY) {
++		session->unsafe_controller = true;
++		return -EBUSY;
++	}
++	if (global_control) {
++		session->unsafe_controller = true;
++		return -EPERM;
++	}
++
++	return 0;
++}
++
++static int sc2720_efuse_restore(struct sc27xx_efuse *efuse,
++				struct sc2720_efuse_session *session)
++{
++	u32 block_index, module_enable;
++	int cleanup_ret;
++	int ret;
++
++	if (session->unsafe_controller)
++		return -EPERM;
++
++	ret = sc2720_efuse_guard(efuse, session);
++	if (ret)
++		return ret;
++	ret = sc27xx_efuse_poll_status(efuse, SC27XX_EFUSE_STANDBY,
++				       SC27XX_EFUSE_PGM_BUSY |
++					       SC27XX_EFUSE_READ_BUSY);
++	if (ret)
++		return ret;
++
++	ret = regmap_set_bits(efuse->regmap,
++			      efuse->base + SC27XX_EFUSE_MODE_CTRL,
++			      SC27XX_EFUSE_CLR_RDDONE);
++	if (ret)
++		return ret;
++	ret = sc27xx_efuse_poll_status(efuse, SC27XX_EFUSE_STANDBY,
++				       SC27XX_EFUSE_PGM_BUSY |
++					       SC27XX_EFUSE_READ_BUSY |
++					       SC27XX_EFUSE_RD_DONE);
++	if (ret)
++		return ret;
++
++	if (session->block_valid) {
++		ret = regmap_update_bits(efuse->regmap,
++					 efuse->base + SC27XX_EFUSE_BLOCK_INDEX,
++					 SC27XX_EFUSE_BLOCK_MASK,
++					 session->block_index);
++		if (ret)
++			return ret;
++		ret = regmap_read(efuse->regmap,
++				  efuse->base + SC27XX_EFUSE_BLOCK_INDEX,
++				  &block_index);
++		if (ret)
++			return ret;
++		if ((block_index ^ session->block_index) &
++		    SC27XX_EFUSE_BLOCK_MASK)
++			return -EIO;
++	}
++
++	ret = sc2720_efuse_guard(efuse, session);
++	if (ret)
++		return ret;
++
++	if (!session->module_valid)
++		return 0;
++	ret = regmap_update_bits(efuse->regmap, efuse->var_data->module_en,
++				 SC27XX_EFUSE_EN, session->module_enable);
++	if (ret)
++		return ret;
++	cleanup_ret = regmap_read(efuse->regmap, efuse->var_data->module_en,
++				  &module_enable);
++	if (cleanup_ret)
++		return cleanup_ret;
++	if ((module_enable ^ session->module_enable) & SC27XX_EFUSE_EN)
++		return -EIO;
++
++	return 0;
++}
++
+ static int sc27xx_efuse_read(void *context, u32 offset, void *val, size_t bytes)
+ {
++	struct sc2720_efuse_session session = {};
+ 	struct sc27xx_efuse *efuse = context;
+ 	u32 buf, blk_index = offset / SC27XX_EFUSE_BLOCK_WIDTH;
+ 	u32 blk_offset = (offset % SC27XX_EFUSE_BLOCK_WIDTH) * BITS_PER_BYTE;
+-	int ret;
++	u32 module_en;
++	bool module_owned = false;
++	int cleanup_ret, ret;
+
+ 	if (blk_index > SC27XX_EFUSE_BLOCK_MAX ||
+ 	    bytes > SC27XX_EFUSE_BLOCK_WIDTH)
+@@ -136,24 +250,75 @@ static int sc27xx_efuse_read(void *context, u32 offset, void *val, size_t bytes)
+ 	if (ret)
+ 		return ret;
+
+-	/* Enable the efuse controller. */
+-	ret = regmap_update_bits(efuse->regmap, efuse->var_data->module_en,
+-				 SC27XX_EFUSE_EN, SC27XX_EFUSE_EN);
++	ret = regmap_read(efuse->regmap, efuse->var_data->module_en,
++			  &module_en);
+ 	if (ret)
+ 		goto unlock_efuse;
++	if (efuse->var_data->guard_state) {
++		session.module_enable = module_en;
++		session.module_valid = true;
++	}
+
+-	/*
+-	 * Before reading, we should ensure the efuse controller is in
+-	 * standby state.
+-	 */
+-	ret = sc27xx_efuse_poll_status(efuse, SC27XX_EFUSE_STANDBY);
+-	if (ret)
+-		goto disable_efuse;
++	/* Enable the efuse controller only when this read owns the gate. */
++	module_owned = !(module_en & SC27XX_EFUSE_EN);
++	if (module_owned) {
++		ret = regmap_set_bits(efuse->regmap, efuse->var_data->module_en,
++				      SC27XX_EFUSE_EN);
++		if (ret)
++			goto disable_efuse;
++	}
++
++	if (efuse->var_data->guard_state) {
++		ret = sc2720_efuse_guard(efuse, &session);
++		if (ret) {
++			if (session.unsafe_controller)
++				goto unsafe_efuse;
++			goto disable_efuse;
++		}
++
++		ret = sc27xx_efuse_poll_status(efuse, SC27XX_EFUSE_STANDBY,
++					       SC27XX_EFUSE_PGM_BUSY |
++						       SC27XX_EFUSE_READ_BUSY);
++		if (ret)
++			goto disable_efuse;
++		ret = regmap_set_bits(efuse->regmap,
++				      efuse->base + SC27XX_EFUSE_MODE_CTRL,
++				      SC27XX_EFUSE_CLR_RDDONE);
++		if (ret)
++			goto disable_efuse;
++		ret = sc27xx_efuse_poll_status(efuse, SC27XX_EFUSE_STANDBY,
++					       SC27XX_EFUSE_PGM_BUSY |
++						       SC27XX_EFUSE_READ_BUSY |
++						       SC27XX_EFUSE_RD_DONE);
++		if (ret)
++			goto disable_efuse;
++
++		ret = regmap_read(efuse->regmap,
++				  efuse->base + SC27XX_EFUSE_BLOCK_INDEX,
++				  &session.block_index);
++		if (ret)
++			goto disable_efuse;
++		if (session.block_index & ~SC27XX_EFUSE_BLOCK_MASK) {
++			ret = -EIO;
++			goto disable_efuse;
++		}
++		session.block_valid = true;
++	} else {
++		/* Ensure the efuse controller is in standby state. */
++		ret = sc27xx_efuse_poll_status(efuse, SC27XX_EFUSE_STANDBY, 0);
++		if (ret)
++			goto disable_efuse;
++	}
+
+ 	/* Set the block address to be read. */
+-	ret = regmap_write(efuse->regmap,
+-			   efuse->base + SC27XX_EFUSE_BLOCK_INDEX,
+-			   blk_index & SC27XX_EFUSE_BLOCK_MASK);
++	if (efuse->var_data->guard_state)
++		ret = regmap_update_bits(efuse->regmap,
++					 efuse->base + SC27XX_EFUSE_BLOCK_INDEX,
++					 SC27XX_EFUSE_BLOCK_MASK, blk_index);
++	else
++		ret = regmap_write(efuse->regmap,
++				   efuse->base + SC27XX_EFUSE_BLOCK_INDEX,
++				   blk_index & SC27XX_EFUSE_BLOCK_MASK);
+ 	if (ret)
+ 		goto disable_efuse;
+
+@@ -169,7 +334,9 @@ static int sc27xx_efuse_read(void *context, u32 offset, void *val, size_t bytes)
+ 	 * Polling the read done status to make sure the reading process
+ 	 * is completed, that means the data can be read out now.
+ 	 */
+-	ret = sc27xx_efuse_poll_status(efuse, SC27XX_EFUSE_RD_DONE);
++	ret = sc27xx_efuse_poll_status(
++		efuse, SC27XX_EFUSE_RD_DONE,
++		efuse->var_data->guard_state ? SC27XX_EFUSE_PGM_BUSY : 0);
+ 	if (ret)
+ 		goto disable_efuse;
+
+@@ -186,8 +353,25 @@ static int sc27xx_efuse_read(void *context, u32 offset, void *val, size_t bytes)
+ 				 SC27XX_EFUSE_CLR_RDDONE);
+
+ disable_efuse:
+-	/* Disable the efuse controller after reading. */
+-	regmap_update_bits(efuse->regmap, efuse->var_data->module_en, SC27XX_EFUSE_EN, 0);
++	if (efuse->var_data->guard_state) {
++		cleanup_ret = sc2720_efuse_restore(efuse, &session);
++		if (cleanup_ret) {
++			dev_err(efuse->dev, "SC2720 efuse cleanup failed: %d\n",
++				cleanup_ret);
++			ret = cleanup_ret;
++		}
++	} else if (module_owned) {
++		cleanup_ret = regmap_clear_bits(efuse->regmap,
++						efuse->var_data->module_en,
++						SC27XX_EFUSE_EN);
++		if (!ret)
++			ret = cleanup_ret;
++	}
++	goto unlock_efuse;
++
++unsafe_efuse:
++	dev_err(efuse->dev,
++		"SC2720 efuse programming state is active; gate left enabled\n");
+ unlock_efuse:
+ 	sc27xx_efuse_unlock(efuse);
+
+@@ -242,6 +426,7 @@ static int sc27xx_efuse_probe(struct platform_device *pdev)
+ 	econfig.stride = 1;
+ 	econfig.word_size = 1;
+ 	econfig.read_only = true;
++	econfig.root_only = efuse->var_data->root_only;
+ 	econfig.name = "sc27xx-efuse";
+ 	econfig.size = SC27XX_EFUSE_BLOCK_MAX * SC27XX_EFUSE_BLOCK_WIDTH;
+ 	econfig.reg_read = sc27xx_efuse_read;
+@@ -258,9 +443,10 @@ static int sc27xx_efuse_probe(struct platform_device *pdev)
+ }
+
+ static const struct of_device_id sc27xx_efuse_of_match[] = {
+-	{ .compatible = "sprd,sc2731-efuse", .data = &sc2731_edata},
+-	{ .compatible = "sprd,sc2730-efuse", .data = &sc2730_edata},
+-	{ }
++	{ .compatible = "sprd,sc2720-efuse", .data = &sc2720_edata },
++	{ .compatible = "sprd,sc2731-efuse", .data = &sc2731_edata },
++	{ .compatible = "sprd,sc2730-efuse", .data = &sc2730_edata },
++	{}
+ };
+ MODULE_DEVICE_TABLE(of, sc27xx_efuse_of_match);
+

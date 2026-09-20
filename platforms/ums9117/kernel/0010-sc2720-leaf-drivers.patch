@@ -1,0 +1,1256 @@
+diff --git a/drivers/input/misc/sc27xx-vibra.c b/drivers/input/misc/sc27xx-vibra.c
+index 1478017..f3b4792 100644
+--- a/drivers/input/misc/sc27xx-vibra.c
++++ b/drivers/input/misc/sc27xx-vibra.c
+@@ -5,34 +5,60 @@
+
+ #include <linux/device.h>
+ #include <linux/input.h>
++#include <linux/jiffies.h>
+ #include <linux/mod_devicetable.h>
+ #include <linux/module.h>
+ #include <linux/platform_device.h>
++#include <linux/pm.h>
+ #include <linux/property.h>
+ #include <linux/regmap.h>
++#include <linux/spinlock.h>
+ #include <linux/workqueue.h>
+
+ #define CUR_DRV_CAL_SEL			GENMASK(13, 12)
+ #define SLP_LDOVIBR_PD_EN		BIT(9)
+ #define LDO_VIBR_PD			BIT(8)
++#define SC2720_LDO_VIBR_V GENMASK(2, 0)
++#define SC2720_MAX_ON_MS 5000
+ #define SC2730_CUR_DRV_CAL_SEL		0
+ #define SC2730_SLP_LDOVIBR_PD_EN	BIT(14)
+ #define SC2730_LDO_VIBR_PD		BIT(13)
+
+ struct sc27xx_vibra_data {
+ 	u32 cur_drv_cal_sel;
++	u32 voltage_mask;
+ 	u32 slp_pd_en;
+ 	u32 ldo_pd;
++	u32 max_on_ms;
++	const char *phys;
+ };
+
+ struct vibra_info {
++	struct device *dev;
+ 	struct input_dev	*input_dev;
+ 	struct work_struct	play_work;
++	struct delayed_work stop_work;
+ 	struct regmap		*regmap;
+ 	const struct sc27xx_vibra_data *data;
++	/* Protects requested strength, deadlines and lifecycle flags. */
++	spinlock_t state_lock;
++	unsigned long stop_deadline;
+ 	u32			base;
+ 	u32			strength;
+ 	bool			enabled;
++	bool suspended;
++	bool stopping;
++	bool cutoff_latched;
++	bool off_pending;
++	bool faulted;
++};
++
++static const struct sc27xx_vibra_data sc2720_data = {
++	.voltage_mask = SC2720_LDO_VIBR_V,
++	.slp_pd_en = SLP_LDOVIBR_PD_EN,
++	.ldo_pd = LDO_VIBR_PD,
++	.max_on_ms = SC2720_MAX_ON_MS,
++	.phys = "fplinux/vibrator0",
+ };
+
+ static const struct sc27xx_vibra_data sc2731_data = {
+@@ -53,63 +79,285 @@ static const struct sc27xx_vibra_data sc2721_data = {
+ 	.ldo_pd = LDO_VIBR_PD,
+ };
+
+-static void sc27xx_vibra_set(struct vibra_info *info, bool on)
++static int sc27xx_vibra_set(struct vibra_info *info, bool on)
+ {
+ 	const struct sc27xx_vibra_data *data = info->data;
++	int ret, stop_ret;
++
+ 	if (on) {
+-		regmap_update_bits(info->regmap, info->base, data->ldo_pd, 0);
+-		regmap_update_bits(info->regmap, info->base,
+-				   data->slp_pd_en, 0);
++		ret = regmap_update_bits(info->regmap, info->base, data->ldo_pd,
++					 0);
++		if (ret)
++			return ret;
++
++		ret = regmap_update_bits(info->regmap, info->base,
++					 data->slp_pd_en, 0);
++		if (ret) {
++			stop_ret = regmap_update_bits(info->regmap, info->base,
++						      data->ldo_pd,
++						      data->ldo_pd);
++			if (stop_ret)
++				dev_err(info->dev,
++					"failed to stop vibrator after enable error: %d\n",
++					stop_ret);
++			return ret;
++		}
+ 		info->enabled = true;
+ 	} else {
+-		regmap_update_bits(info->regmap, info->base, data->ldo_pd,
+-				   data->ldo_pd);
+-		regmap_update_bits(info->regmap, info->base,
+-				   data->slp_pd_en, data->slp_pd_en);
+-		info->enabled = false;
++		ret = regmap_update_bits(info->regmap, info->base, data->ldo_pd,
++					 data->ldo_pd);
++		stop_ret = regmap_update_bits(info->regmap, info->base,
++					      data->slp_pd_en, data->slp_pd_en);
++		if (!ret && !stop_ret)
++			info->enabled = false;
++		if (ret)
++			return ret;
++		if (stop_ret)
++			return stop_ret;
+ 	}
++
++	return 0;
+ }
+
+ static int sc27xx_vibra_hw_init(struct vibra_info *info)
+ {
+ 	const struct sc27xx_vibra_data *data = info->data;
++	u32 mask = data->cur_drv_cal_sel;
++	u32 val = 0;
++	int ret;
++
++	if (data->voltage_mask) {
++		ret = device_property_read_u32(info->dev, "sprd,voltage-code",
++					       &val);
++		if (ret)
++			return ret;
++		if (val > data->voltage_mask)
++			return -EINVAL;
++		mask |= data->voltage_mask;
++	}
+
+-	if (!data->cur_drv_cal_sel)
+-		return 0;
++	if (mask) {
++		ret = regmap_update_bits(info->regmap, info->base, mask, val);
++		if (ret)
++			return ret;
++	}
+
+-	return regmap_update_bits(info->regmap, info->base,
+-				  data->cur_drv_cal_sel, 0);
++	return sc27xx_vibra_set(info, false);
+ }
+
+ static void sc27xx_vibra_play_work(struct work_struct *work)
+ {
+ 	struct vibra_info *info = container_of(work, struct vibra_info,
+ 					       play_work);
++	unsigned long flags;
++	bool on;
++	bool force_off;
++	int ret;
++
++	spin_lock_irqsave(&info->state_lock, flags);
++	on = info->strength && !info->suspended && !info->stopping;
++	force_off = info->off_pending;
++	spin_unlock_irqrestore(&info->state_lock, flags);
++
++	if (on == info->enabled && !force_off)
++		return;
++
++	ret = sc27xx_vibra_set(info, on);
++	if (ret) {
++		spin_lock_irqsave(&info->state_lock, flags);
++		info->strength = 0;
++		info->cutoff_latched = true;
++		info->off_pending = true;
++		info->faulted = true;
++		spin_unlock_irqrestore(&info->state_lock, flags);
++		dev_err(info->dev, "failed to %s vibrator: %d\n",
++			on ? "start" : "stop", ret);
++	} else if (!on) {
++		spin_lock_irqsave(&info->state_lock, flags);
++		info->cutoff_latched = false;
++		info->off_pending = false;
++		info->faulted = false;
++		spin_unlock_irqrestore(&info->state_lock, flags);
++		cancel_delayed_work(&info->stop_work);
++	}
++}
++
++static void sc27xx_vibra_stop_work(struct work_struct *work)
++{
++	struct vibra_info *info = container_of(to_delayed_work(work),
++					       struct vibra_info, stop_work);
++	unsigned long flags;
++	unsigned long delay = 0;
++	bool stop = false;
++
++	spin_lock_irqsave(&info->state_lock, flags);
++	if (info->off_pending) {
++		stop = true;
++	} else if (info->strength && !info->suspended && !info->stopping) {
++		if (time_before(jiffies, info->stop_deadline)) {
++			delay = info->stop_deadline - jiffies;
++		} else {
++			info->strength = 0;
++			info->cutoff_latched = true;
++			info->off_pending = true;
++			stop = true;
++		}
++	}
++	spin_unlock_irqrestore(&info->state_lock, flags);
+
+-	if (info->strength && !info->enabled)
+-		sc27xx_vibra_set(info, true);
+-	else if (info->strength == 0 && info->enabled)
+-		sc27xx_vibra_set(info, false);
++	if (delay)
++		mod_delayed_work(system_wq, &info->stop_work, delay);
++	else if (stop)
++		schedule_work(&info->play_work);
+ }
+
+ static int sc27xx_vibra_play(struct input_dev *input, void *data,
+ 			     struct ff_effect *effect)
+ {
+-	struct vibra_info *info = input_get_drvdata(input);
++	struct vibra_info *info = data;
++	unsigned long flags;
++	unsigned long delay = 0;
++	u32 strength;
++	bool force_stop = false;
++	int ret = 0;
++
++	(void)input;
++	strength = effect->u.rumble.strong_magnitude ||
++		   effect->u.rumble.weak_magnitude;
++	spin_lock_irqsave(&info->state_lock, flags);
++	if (info->suspended || info->stopping) {
++		ret = -ESHUTDOWN;
++	} else if (strength && info->faulted) {
++		ret = -EIO;
++	} else if (strength && (info->cutoff_latched || info->off_pending)) {
++		ret = -EBUSY;
++	} else {
++		if (strength && info->data->max_on_ms) {
++			if (!info->strength)
++				info->stop_deadline =
++					jiffies +
++					msecs_to_jiffies(info->data->max_on_ms);
++			if (time_before(jiffies, info->stop_deadline)) {
++				delay = info->stop_deadline - jiffies;
++			} else {
++				strength = 0;
++				info->cutoff_latched = true;
++				info->off_pending = true;
++				force_stop = true;
++				ret = -EBUSY;
++			}
++		}
++		info->strength = strength;
++		if (!strength)
++			info->off_pending = true;
++	}
++	spin_unlock_irqrestore(&info->state_lock, flags);
++	if (ret && !force_stop)
++		return ret;
+
+-	info->strength = effect->u.rumble.weak_magnitude;
++	if (info->data->max_on_ms) {
++		if (strength)
++			mod_delayed_work(system_wq, &info->stop_work, delay);
++	}
+ 	schedule_work(&info->play_work);
+
+-	return 0;
++	return ret;
++}
++
++static int sc27xx_vibra_stop(struct vibra_info *info)
++{
++	unsigned long flags;
++	int ret;
++
++	spin_lock_irqsave(&info->state_lock, flags);
++	info->strength = 0;
++	info->off_pending = true;
++	spin_unlock_irqrestore(&info->state_lock, flags);
++	cancel_delayed_work_sync(&info->stop_work);
++	cancel_work_sync(&info->play_work);
++
++	ret = sc27xx_vibra_set(info, false);
++	spin_lock_irqsave(&info->state_lock, flags);
++	if (ret) {
++		info->cutoff_latched = true;
++		info->faulted = true;
++	} else {
++		info->cutoff_latched = false;
++		info->off_pending = false;
++		info->faulted = false;
++	}
++	spin_unlock_irqrestore(&info->state_lock, flags);
++
++	return ret;
+ }
+
+ static void sc27xx_vibra_close(struct input_dev *input)
+ {
+ 	struct vibra_info *info = input_get_drvdata(input);
++	int ret;
+
+-	cancel_work_sync(&info->play_work);
+-	if (info->enabled)
+-		sc27xx_vibra_set(info, false);
++	ret = sc27xx_vibra_stop(info);
++	if (ret)
++		dev_err(info->dev, "failed to stop vibrator on close: %d\n",
++			ret);
++}
++
++static int sc27xx_vibra_suspend(struct device *dev)
++{
++	struct vibra_info *info = dev_get_drvdata(dev);
++	unsigned long flags;
++	int ret;
++
++	spin_lock_irqsave(&info->state_lock, flags);
++	info->suspended = true;
++	spin_unlock_irqrestore(&info->state_lock, flags);
++
++	ret = sc27xx_vibra_stop(info);
++	if (ret)
++		dev_err(dev, "failed to stop vibrator for suspend: %d\n", ret);
++	return ret;
++}
++
++static int sc27xx_vibra_resume(struct device *dev)
++{
++	struct vibra_info *info = dev_get_drvdata(dev);
++	unsigned long flags;
++
++	spin_lock_irqsave(&info->state_lock, flags);
++	if (!info->stopping && !info->faulted)
++		info->suspended = false;
++	spin_unlock_irqrestore(&info->state_lock, flags);
++
++	return 0;
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(sc27xx_vibra_pm_ops, sc27xx_vibra_suspend,
++				sc27xx_vibra_resume);
++
++static void sc27xx_vibra_teardown(struct platform_device *pdev)
++{
++	struct vibra_info *info = platform_get_drvdata(pdev);
++	unsigned long flags;
++	int ret;
++
++	spin_lock_irqsave(&info->state_lock, flags);
++	info->stopping = true;
++	spin_unlock_irqrestore(&info->state_lock, flags);
++
++	ret = sc27xx_vibra_stop(info);
++	if (ret)
++		dev_err(&pdev->dev,
++			"failed to stop vibrator during teardown: %d\n", ret);
++}
++
++static void sc27xx_vibra_remove(struct platform_device *pdev)
++{
++	sc27xx_vibra_teardown(pdev);
++}
++
++static void sc27xx_vibra_shutdown(struct platform_device *pdev)
++{
++	sc27xx_vibra_teardown(pdev);
+ }
+
+ static int sc27xx_vibra_probe(struct platform_device *pdev)
+@@ -147,14 +395,19 @@ static int sc27xx_vibra_probe(struct platform_device *pdev)
+ 	}
+
+ 	info->input_dev->name = "sc27xx:vibrator";
++	info->input_dev->phys = data->phys;
+ 	info->input_dev->id.version = 0;
+ 	info->input_dev->close = sc27xx_vibra_close;
++	info->dev = &pdev->dev;
+ 	info->data = data;
+
+ 	input_set_drvdata(info->input_dev, info);
+ 	input_set_capability(info->input_dev, EV_FF, FF_RUMBLE);
+ 	INIT_WORK(&info->play_work, sc27xx_vibra_play_work);
++	INIT_DELAYED_WORK(&info->stop_work, sc27xx_vibra_stop_work);
++	spin_lock_init(&info->state_lock);
+ 	info->enabled = false;
++	platform_set_drvdata(pdev, info);
+
+ 	error = sc27xx_vibra_hw_init(info);
+ 	if (error) {
+@@ -162,7 +415,7 @@ static int sc27xx_vibra_probe(struct platform_device *pdev)
+ 		return error;
+ 	}
+
+-	error = input_ff_create_memless(info->input_dev, NULL,
++	error = input_ff_create_memless(info->input_dev, info,
+ 					sc27xx_vibra_play);
+ 	if (error) {
+ 		dev_err(&pdev->dev, "failed to register vibrator to FF.\n");
+@@ -179,6 +432,7 @@ static int sc27xx_vibra_probe(struct platform_device *pdev)
+ }
+
+ static const struct of_device_id sc27xx_vibra_of_match[] = {
++	{ .compatible = "sprd,sc2720-vibrator", .data = &sc2720_data },
+ 	{ .compatible = "sprd,sc2721-vibrator", .data = &sc2721_data },
+ 	{ .compatible = "sprd,sc2730-vibrator", .data = &sc2730_data },
+ 	{ .compatible = "sprd,sc2731-vibrator", .data = &sc2731_data },
+@@ -190,8 +444,11 @@ static struct platform_driver sc27xx_vibra_driver = {
+ 	.driver = {
+ 		.name = "sc27xx-vibrator",
+ 		.of_match_table = sc27xx_vibra_of_match,
++		.pm = pm_sleep_ptr(&sc27xx_vibra_pm_ops),
+ 	},
+ 	.probe = sc27xx_vibra_probe,
++	.remove = sc27xx_vibra_remove,
++	.shutdown = sc27xx_vibra_shutdown,
+ };
+
+ module_platform_driver(sc27xx_vibra_driver);
+diff --git a/drivers/regulator/Kconfig b/drivers/regulator/Kconfig
+index d84f3d0..f26d3d3 100644
+--- a/drivers/regulator/Kconfig
++++ b/drivers/regulator/Kconfig
+@@ -1426,11 +1426,11 @@ config REGULATOR_S5M8767
+ 	 supports DVS mode with 8bits of output voltage control.
+
+ config REGULATOR_SC2731
+-	tristate "Spreadtrum SC2731 power regulator driver"
++	tristate "Spreadtrum SC27xx power regulator driver"
+ 	depends on MFD_SC27XX_PMIC || COMPILE_TEST
+ 	help
+ 	  This driver provides support for the voltage regulators on the
+-	  SC2731 PMIC.
++	  SC2720 and SC2731 PMICs.
+
+ config REGULATOR_SKY81452
+ 	tristate "Skyworks Solutions SKY81452 voltage regulator"
+diff --git a/drivers/regulator/sc2731-regulator.c b/drivers/regulator/sc2731-regulator.c
+index 5447e1a..b7d9982 100644
+--- a/drivers/regulator/sc2731-regulator.c
++++ b/drivers/regulator/sc2731-regulator.c
+@@ -10,6 +10,24 @@
+ #include <linux/regulator/driver.h>
+ #include <linux/regulator/of_regulator.h>
+
++/*
++ * SC2720 fixed-voltage regulator registers
++ */
++#define SC2720_LDO_SDCORE_PD 0xd00
++#define SC2720_LDO_SDCORE_VOL 0xd04
++#define SC2720_LDO_SDIO_PD 0xd0c
++#define SC2720_LDO_SDIO_VOL 0xd10
++#define SC2720_LDO_USB33_PD 0xd30
++#define SC2720_LDO_USB33_VOL 0xd34
++
++#define SC2720_LDO_PD_MASK BIT(0)
++#define SC2720_LDO_VOL_MASK GENMASK(6, 0)
++#define SC2720_LDO_SDCORE_3000MV 0x50
++#define SC2720_LDO_SDIO_3000MV 0x6f
++#define SC2720_LDO_USB33_3300MV 0x60
++/* vmmc is enabled first; wait once after the final vqmmc transition. */
++#define SC2720_SD_RAIL_ENABLE_TIME_US 300000
++
+ /*
+  * SC2731 regulator lock register
+  */
+@@ -118,6 +136,24 @@ enum sc2731_regulator_id {
+ 	SC2731_LDO_SRAM,
+ };
+
++enum sc2720_regulator_id {
++	SC2720_LDO_SDCORE,
++	SC2720_LDO_SDIO,
++	SC2720_LDO_USB33,
++};
++
++struct sc27xx_regulator_desc {
++	struct regulator_desc desc;
++	u32 fixed_vsel;
++};
++
++struct sc27xx_regulator_data {
++	const struct sc27xx_regulator_desc *regulators;
++	unsigned int num_regulators;
++	u32 unlock_reg;
++	u32 unlock_value;
++};
++
+ static const struct regulator_ops sc2731_regu_linear_ops = {
+ 	.enable = regulator_enable_regmap,
+ 	.disable = regulator_disable_regmap,
+@@ -127,8 +163,72 @@ static const struct regulator_ops sc2731_regu_linear_ops = {
+ 	.set_voltage_sel = regulator_set_voltage_sel_regmap,
+ };
+
+-#define SC2731_REGU_LINEAR(_id, en_reg, en_mask, vreg, vmask,	\
+-			  vstep, vmin, vmax) {			\
++static int sc2720_regulator_enable(struct regulator_dev *rdev)
++{
++	const struct sc27xx_regulator_desc *regulator =
++		container_of(rdev->desc, struct sc27xx_regulator_desc, desc);
++	int ret;
++
++	ret = regmap_update_bits(rdev_get_regmap(rdev), rdev->desc->vsel_reg,
++				 rdev->desc->vsel_mask, regulator->fixed_vsel);
++	if (ret)
++		return ret;
++
++	return regulator_enable_regmap(rdev);
++}
++
++static int sc2720_regulator_is_enabled(struct regulator_dev *rdev)
++{
++	const struct sc27xx_regulator_desc *regulator =
++		container_of(rdev->desc, struct sc27xx_regulator_desc, desc);
++	u32 val;
++	int ret;
++
++	ret = regulator_is_enabled_regmap(rdev);
++	if (ret <= 0)
++		return ret;
++
++	ret = regmap_read(rdev_get_regmap(rdev), rdev->desc->vsel_reg, &val);
++	if (ret)
++		return ret;
++
++	if ((val & rdev->desc->vsel_mask) != regulator->fixed_vsel)
++		return -ERANGE;
++
++	return 1;
++}
++
++static const struct regulator_ops sc2720_regu_fixed_ops = {
++	.enable = sc2720_regulator_enable,
++	.disable = regulator_disable_regmap,
++	.is_enabled = sc2720_regulator_is_enabled,
++};
++
++#define SC2720_REGU_FIXED(_id, en_reg, vreg, vsel, voltage, enable_delay) \
++	{ \
++	.desc = {							\
++		.name			= #_id,				\
++		.of_match		= of_match_ptr(#_id),		\
++		.ops			= &sc2720_regu_fixed_ops,	\
++		.type			= REGULATOR_VOLTAGE,		\
++		.id			= SC2720_##_id,			\
++		.owner			= THIS_MODULE,			\
++		.n_voltages		= 1,				\
++		.fixed_uV		= voltage,			\
++		.enable_time		= enable_delay,			\
++		.enable_is_inverted	= true,				\
++		.enable_reg		= en_reg,			\
++		.enable_mask		= SC2720_LDO_PD_MASK,		\
++		.vsel_reg		= vreg,				\
++		.vsel_mask		= SC2720_LDO_VOL_MASK,		\
++	},							\
++	.fixed_vsel = vsel,						\
++}
++
++#define SC2731_REGU_LINEAR(_id, en_reg, en_mask, vreg, vmask, vstep, vmin, \
++			   vmax)                                           \
++	{			\
++	.desc = {						\
+ 	.name			= #_id,				\
+ 	.of_match		= of_match_ptr(#_id),		\
+ 	.ops			= &sc2731_regu_linear_ops,	\
+@@ -144,9 +244,10 @@ static const struct regulator_ops sc2731_regu_linear_ops = {
+ 	.enable_mask		= en_mask,			\
+ 	.vsel_reg		= vreg,				\
+ 	.vsel_mask		= vmask,			\
++	},							\
+ }
+
+-static const struct regulator_desc regulators[] = {
++static const struct sc27xx_regulator_desc sc2731_regulators[] = {
+ 	SC2731_REGU_LINEAR(BUCK_CPU0, SC2731_POWER_PD_SW,
+ 			   SC2731_DCDC_CPU0_PD_MASK, SC2731_DCDC_CPU0_VOL,
+ 			   SC2731_DCDC_CPU0_VOL_MASK, 3125, 400000, 1996875),
+@@ -154,8 +255,8 @@ static const struct regulator_desc regulators[] = {
+ 			   SC2731_DCDC_CPU1_PD_MASK, SC2731_DCDC_CPU1_VOL,
+ 			   SC2731_DCDC_CPU1_VOL_MASK, 3125, 400000, 1996875),
+ 	SC2731_REGU_LINEAR(BUCK_RF, SC2731_POWER_PD_SW, SC2731_DCDC_RF_PD_MASK,
+-			   SC2731_DCDC_RF_VOL, SC2731_DCDC_RF_VOL_MASK,
+-			   3125, 600000, 2196875),
++			   SC2731_DCDC_RF_VOL, SC2731_DCDC_RF_VOL_MASK, 3125,
++			   600000, 2196875),
+ 	SC2731_REGU_LINEAR(LDO_CAMA0, SC2731_LDO_CAMA0_PD,
+ 			   SC2731_LDO_CAMA0_PD_MASK, SC2731_LDO_CAMA0_VOL,
+ 			   SC2731_LDO_CAMA0_VOL_MASK, 10000, 1200000, 3750000),
+@@ -190,9 +291,9 @@ static const struct regulator_desc regulators[] = {
+ 	SC2731_REGU_LINEAR(LDO_CAMD1, SC2731_LDO_CAMD1_PD,
+ 			   SC2731_LDO_CAMD1_PD_MASK, SC2731_LDO_CAMD1_VOL,
+ 			   SC2731_LDO_CAMD1_VOL_MASK, 6250, 1000000, 1793750),
+-	SC2731_REGU_LINEAR(LDO_CON, SC2731_LDO_CON_PD,
+-			   SC2731_LDO_CON_PD_MASK, SC2731_LDO_CON_VOL,
+-			   SC2731_LDO_CON_VOL_MASK, 6250, 1000000, 1793750),
++	SC2731_REGU_LINEAR(LDO_CON, SC2731_LDO_CON_PD, SC2731_LDO_CON_PD_MASK,
++			   SC2731_LDO_CON_VOL, SC2731_LDO_CON_VOL_MASK, 6250,
++			   1000000, 1793750),
+ 	SC2731_REGU_LINEAR(LDO_CAMIO, SC2731_LDO_CAMIO_PD,
+ 			   SC2731_LDO_CAMIO_PD_MASK, SC2731_LDO_CAMIO_VOL,
+ 			   SC2731_LDO_CAMIO_VOL_MASK, 6250, 1000000, 1793750),
+@@ -201,57 +302,95 @@ static const struct regulator_desc regulators[] = {
+ 			   SC2731_LDO_SRAM_VOL_MASK, 6250, 1000000, 1793750),
+ };
+
+-static int sc2731_regulator_unlock(struct regmap *regmap)
+-{
+-	return regmap_write(regmap, SC2731_PWR_WR_PROT,
+-			    SC2731_WR_UNLOCK_VALUE);
+-}
++static const struct sc27xx_regulator_desc sc2720_regulators[] = {
++	SC2720_REGU_FIXED(LDO_SDCORE, SC2720_LDO_SDCORE_PD,
++			  SC2720_LDO_SDCORE_VOL, SC2720_LDO_SDCORE_3000MV,
++			  3000000, 0),
++	SC2720_REGU_FIXED(LDO_SDIO, SC2720_LDO_SDIO_PD, SC2720_LDO_SDIO_VOL,
++			  SC2720_LDO_SDIO_3000MV, 3000000,
++			  SC2720_SD_RAIL_ENABLE_TIME_US),
++	SC2720_REGU_FIXED(LDO_USB33, SC2720_LDO_USB33_PD, SC2720_LDO_USB33_VOL,
++			  SC2720_LDO_USB33_3300MV, 3300000, 0),
++};
++
++static const struct sc27xx_regulator_data sc2720_regulator_data = {
++	.regulators = sc2720_regulators,
++	.num_regulators = ARRAY_SIZE(sc2720_regulators),
++};
++
++static const struct sc27xx_regulator_data sc2731_regulator_data = {
++	.regulators = sc2731_regulators,
++	.num_regulators = ARRAY_SIZE(sc2731_regulators),
++	.unlock_reg = SC2731_PWR_WR_PROT,
++	.unlock_value = SC2731_WR_UNLOCK_VALUE,
++};
+
+-static int sc2731_regulator_probe(struct platform_device *pdev)
++static int sc27xx_regulator_probe(struct platform_device *pdev)
+ {
+-	int i, ret;
++	const struct sc27xx_regulator_data *data;
++	const struct regulator_desc *desc;
++	unsigned int i;
++	int ret;
+ 	struct regmap *regmap;
+ 	struct regulator_config config = { };
+ 	struct regulator_dev *rdev;
+
++	data = of_device_get_match_data(&pdev->dev);
++	if (!data)
++		return -EINVAL;
++
+ 	regmap = dev_get_regmap(pdev->dev.parent, NULL);
+ 	if (!regmap) {
+ 		dev_err(&pdev->dev, "failed to get regmap.\n");
+ 		return -ENODEV;
+ 	}
+
+-	ret = sc2731_regulator_unlock(regmap);
+-	if (ret) {
+-		dev_err(&pdev->dev, "failed to release regulator lock\n");
+-		return ret;
++	if (data->unlock_reg) {
++		ret = regmap_write(regmap, data->unlock_reg,
++				   data->unlock_value);
++		if (ret)
++			return dev_err_probe(
++				&pdev->dev, ret,
++				"failed to release regulator lock\n");
+ 	}
+
+ 	config.dev = &pdev->dev;
+ 	config.regmap = regmap;
+
+-	for (i = 0; i < ARRAY_SIZE(regulators); i++) {
+-		rdev = devm_regulator_register(&pdev->dev, &regulators[i],
+-					       &config);
++	for (i = 0; i < data->num_regulators; i++) {
++		desc = &data->regulators[i].desc;
++		rdev = devm_regulator_register(&pdev->dev, desc, &config);
+ 		if (IS_ERR(rdev)) {
+-			dev_err(&pdev->dev, "failed to register regulator %s\n",
+-				regulators[i].name);
+-			return PTR_ERR(rdev);
++			return dev_err_probe(
++				&pdev->dev, PTR_ERR(rdev),
++				"failed to register regulator %s\n",
++				desc->name);
+ 		}
+ 	}
+
+ 	return 0;
+ }
+
+-static struct platform_driver sc2731_regulator_driver = {
++static const struct of_device_id sc27xx_regulator_of_match[] = {
++	{ .compatible = "sprd,sc2720-regulator",
++	  .data = &sc2720_regulator_data },
++	{ .compatible = "sprd,sc2731-regulator",
++	  .data = &sc2731_regulator_data },
++	{}
++};
++MODULE_DEVICE_TABLE(of, sc27xx_regulator_of_match);
++
++static struct platform_driver sc27xx_regulator_driver = {
+ 	.driver = {
+ 		.name = "sc27xx-regulator",
+ 		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
++		.of_match_table = sc27xx_regulator_of_match,
+ 	},
+-	.probe = sc2731_regulator_probe,
++	.probe = sc27xx_regulator_probe,
+ };
+
+-module_platform_driver(sc2731_regulator_driver);
++module_platform_driver(sc27xx_regulator_driver);
+
+ MODULE_AUTHOR("Chen Junhui <erick.chen@spreadtrum.com>");
+-MODULE_DESCRIPTION("Spreadtrum SC2731 regulator driver");
++MODULE_DESCRIPTION("Spreadtrum SC27xx regulator driver");
+ MODULE_LICENSE("GPL v2");
+diff --git a/drivers/rtc/rtc-sc27xx.c b/drivers/rtc/rtc-sc27xx.c
+index 2b83561..ba14e9f 100644
+--- a/drivers/rtc/rtc-sc27xx.c
++++ b/drivers/rtc/rtc-sc27xx.c
+@@ -8,6 +8,7 @@
+ #include <linux/delay.h>
+ #include <linux/err.h>
+ #include <linux/module.h>
++#include <linux/mutex.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
+ #include <linux/regmap.h>
+@@ -99,16 +100,57 @@
+ /* timeout of synchronizing time and alarm registers (us) */
+ #define SPRD_RTC_POLL_TIMEOUT		200000
+ #define SPRD_RTC_POLL_DELAY_US		20000
++#define SPRD_RTC_READ_RETRIES 3
++
++#define SPRD_RTC_EPOCH_1980 315532800LL
++
++struct sprd_rtc_data {
++	time64_t epoch;
++	time64_t range_min;
++	timeu64_t range_max;
++	u32 alarm_enable_mask;
++	u32 alarm_clear_mask;
++	bool coherent_read;
++	bool use_aux_alarm;
++	bool poweroff_alarm;
++	bool one_shot_alarm;
++	bool preserve_alarm_lock;
++};
+
+ struct sprd_rtc {
+ 	struct rtc_device	*rtc;
+ 	struct regmap		*regmap;
+ 	struct device		*dev;
++	const struct sprd_rtc_data *data;
++	/* Serializes multi-register operations with the IRQ thread. */
++	struct mutex lock;
+ 	u32			base;
++	u8 initial_alarm_lock;
+ 	int			irq;
+ 	bool			valid;
+ };
+
++static const struct sprd_rtc_data sc2720_rtc_data = {
++	.epoch = SPRD_RTC_EPOCH_1980,
++	.range_min = SPRD_RTC_EPOCH_1980,
++	.range_max = RTC_TIMESTAMP_END_2099,
++	.alarm_enable_mask = SPRD_RTC_ALARM_EN,
++	.alarm_clear_mask = SPRD_RTC_ALARM_EN,
++	.coherent_read = true,
++	.poweroff_alarm = false,
++	.one_shot_alarm = true,
++	.preserve_alarm_lock = true,
++};
++
++static const struct sprd_rtc_data sc2731_rtc_data = {
++	.range_min = 0,
++	.range_max = 5662310399LL,
++	.alarm_enable_mask = SPRD_RTC_ALARM_EN | SPRD_RTC_AUXALM_EN,
++	.alarm_clear_mask = SPRD_RTC_ALM_INT_MASK,
++	.use_aux_alarm = true,
++	.poweroff_alarm = true,
++};
++
+ /*
+  * The Spreadtrum RTC controller has 3 groups registers, including time, normal
+  * alarm and auxiliary alarm. The time group registers are used to set RTC time,
+@@ -126,7 +168,7 @@ enum sprd_rtc_reg_types {
+ static int sprd_rtc_clear_alarm_ints(struct sprd_rtc *rtc)
+ {
+ 	return regmap_write(rtc->regmap, rtc->base + SPRD_RTC_INT_CLR,
+-			    SPRD_RTC_ALM_INT_MASK);
++			    rtc->data->alarm_clear_mask);
+ }
+
+ static int sprd_rtc_lock_alarm(struct sprd_rtc *rtc, bool lock)
+@@ -139,10 +181,15 @@ static int sprd_rtc_lock_alarm(struct sprd_rtc *rtc, bool lock)
+ 		return ret;
+
+ 	val &= ~SPRD_RTC_ALMLOCK_MASK;
+-	if (lock)
+-		val |= SPRD_RTC_ALM_LOCK;
++	if (!lock)
++		val |= SPRD_RTC_ALM_UNLOCK;
++	else if (rtc->data->preserve_alarm_lock)
++		val |= rtc->initial_alarm_lock;
+ 	else
+-		val |= SPRD_RTC_ALM_UNLOCK | SPRD_RTC_POWEROFF_ALM_FLAG;
++		val |= SPRD_RTC_ALM_LOCK;
++
++	if (rtc->data->poweroff_alarm && !lock)
++		val |= SPRD_RTC_POWEROFF_ALM_FLAG;
+
+ 	ret = regmap_write(rtc->regmap, rtc->base + SPRD_RTC_SPG_UPD, val);
+ 	if (ret)
+@@ -167,7 +214,8 @@ static int sprd_rtc_get_secs(struct sprd_rtc *rtc, enum sprd_rtc_reg_types type,
+ 			     time64_t *secs)
+ {
+ 	u32 sec_reg, min_reg, hour_reg, day_reg;
+-	u32 val, sec, min, hour, day;
++	u32 sec, sec_after, min, hour, day;
++	unsigned int attempt;
+ 	int ret;
+
+ 	switch (type) {
+@@ -193,30 +241,48 @@ static int sprd_rtc_get_secs(struct sprd_rtc *rtc, enum sprd_rtc_reg_types type,
+ 		return -EINVAL;
+ 	}
+
+-	ret = regmap_read(rtc->regmap, rtc->base + sec_reg, &val);
+-	if (ret)
+-		return ret;
++	for (attempt = 0; attempt < SPRD_RTC_READ_RETRIES; attempt++) {
++		ret = regmap_read(rtc->regmap, rtc->base + sec_reg, &sec);
++		if (ret)
++			return ret;
+
+-	sec = val & SPRD_RTC_SEC_MASK;
++		ret = regmap_read(rtc->regmap, rtc->base + min_reg, &min);
++		if (ret)
++			return ret;
+
+-	ret = regmap_read(rtc->regmap, rtc->base + min_reg, &val);
+-	if (ret)
+-		return ret;
++		ret = regmap_read(rtc->regmap, rtc->base + hour_reg, &hour);
++		if (ret)
++			return ret;
+
+-	min = val & SPRD_RTC_MIN_MASK;
++		ret = regmap_read(rtc->regmap, rtc->base + day_reg, &day);
++		if (ret)
++			return ret;
+
+-	ret = regmap_read(rtc->regmap, rtc->base + hour_reg, &val);
+-	if (ret)
+-		return ret;
++		sec &= SPRD_RTC_SEC_MASK;
++		min &= SPRD_RTC_MIN_MASK;
++		hour &= SPRD_RTC_HOUR_MASK;
++		day &= SPRD_RTC_DAY_MASK;
++		if (sec > 59 || min > 59 || hour > 23)
++			return -ERANGE;
+
+-	hour = val & SPRD_RTC_HOUR_MASK;
++		if (type != SPRD_RTC_TIME || !rtc->data->coherent_read)
++			break;
+
+-	ret = regmap_read(rtc->regmap, rtc->base + day_reg, &val);
+-	if (ret)
+-		return ret;
++		ret = regmap_read(rtc->regmap, rtc->base + sec_reg, &sec_after);
++		if (ret)
++			return ret;
++		if (sec == (sec_after & SPRD_RTC_SEC_MASK))
++			break;
++	}
++
++	if (attempt == SPRD_RTC_READ_RETRIES)
++		return -EAGAIN;
++
++	*secs = rtc->data->epoch +
++		(((time64_t)(day * 24) + hour) * 60 + min) * 60 + sec;
++	if (*secs < rtc->data->range_min || *secs > rtc->data->range_max)
++		return -ERANGE;
+
+-	day = val & SPRD_RTC_DAY_MASK;
+-	*secs = (((time64_t)(day * 24) + hour) * 60 + min) * 60 + sec;
+ 	return 0;
+ }
+
+@@ -227,6 +293,13 @@ static int sprd_rtc_set_secs(struct sprd_rtc *rtc, enum sprd_rtc_reg_types type,
+ 	u32 sec, min, hour, day, val;
+ 	int ret, rem;
+
++	if (secs < rtc->data->range_min || secs > rtc->data->range_max)
++		return -ERANGE;
++
++	secs -= rtc->data->epoch;
++	if (secs < 0)
++		return -ERANGE;
++
+ 	/* convert seconds to RTC time format */
+ 	day = div_s64_rem(secs, 86400, &rem);
+ 	hour = rem / 3600;
+@@ -340,7 +413,9 @@ static int sprd_rtc_read_time(struct device *dev, struct rtc_time *tm)
+ 		return -EINVAL;
+ 	}
+
++	mutex_lock(&rtc->lock);
+ 	ret = sprd_rtc_get_secs(rtc, SPRD_RTC_TIME, &secs);
++	mutex_unlock(&rtc->lock);
+ 	if (ret)
+ 		return ret;
+
+@@ -352,18 +427,41 @@ static int sprd_rtc_set_time(struct device *dev, struct rtc_time *tm)
+ {
+ 	struct sprd_rtc *rtc = dev_get_drvdata(dev);
+ 	time64_t secs = rtc_tm_to_time64(tm);
++	u32 alarm_enabled;
+ 	int ret;
+
++	mutex_lock(&rtc->lock);
++	if (rtc->data->one_shot_alarm) {
++		/* The RTC core keeps and rearms its absolute alarm deadline. */
++		ret = regmap_read(rtc->regmap, rtc->base + SPRD_RTC_INT_EN,
++				  &alarm_enabled);
++		if (ret)
++			goto out;
++
++		if (alarm_enabled & SPRD_RTC_ALARM_EN) {
++			ret = regmap_update_bits(rtc->regmap,
++						 rtc->base + SPRD_RTC_INT_EN,
++						 SPRD_RTC_ALARM_EN, 0);
++			if (ret)
++				goto out;
++		}
++
++		ret = regmap_write(rtc->regmap, rtc->base + SPRD_RTC_INT_CLR,
++				   SPRD_RTC_ALARM_EN);
++		if (ret)
++			goto out;
++	}
++
+ 	ret = sprd_rtc_set_secs(rtc, SPRD_RTC_TIME, secs);
+ 	if (ret)
+-		return ret;
++		goto out;
+
+ 	if (!rtc->valid) {
+ 		/* Clear RTC power status firstly */
+ 		ret = regmap_write(rtc->regmap, rtc->base + SPRD_RTC_PWR_CTRL,
+ 				   SPRD_RTC_POWER_STS_CLEAR);
+ 		if (ret)
+-			return ret;
++			goto out;
+
+ 		/*
+ 		 * Set RTC power status to indicate now RTC has valid time
+@@ -372,12 +470,14 @@ static int sprd_rtc_set_time(struct device *dev, struct rtc_time *tm)
+ 		ret = regmap_write(rtc->regmap, rtc->base + SPRD_RTC_PWR_CTRL,
+ 				   SPRD_RTC_POWER_STS_VALID);
+ 		if (ret)
+-			return ret;
++			goto out;
+
+ 		rtc->valid = true;
+ 	}
+
+-	return 0;
++out:
++	mutex_unlock(&rtc->lock);
++	return ret;
+ }
+
+ static int sprd_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alrm)
+@@ -391,24 +491,27 @@ static int sprd_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alrm)
+ 	 * The RTC core checks to see if there is an alarm already set in RTC
+ 	 * hardware, and we always read the normal alarm at this time.
+ 	 */
++	mutex_lock(&rtc->lock);
+ 	ret = sprd_rtc_get_secs(rtc, SPRD_RTC_ALARM, &secs);
+ 	if (ret)
+-		return ret;
++		goto out;
+
+ 	rtc_time64_to_tm(secs, &alrm->time);
+
+ 	ret = regmap_read(rtc->regmap, rtc->base + SPRD_RTC_INT_EN, &val);
+ 	if (ret)
+-		return ret;
++		goto out;
+
+ 	alrm->enabled = !!(val & SPRD_RTC_ALARM_EN);
+
+ 	ret = regmap_read(rtc->regmap, rtc->base + SPRD_RTC_INT_RAW_STS, &val);
+ 	if (ret)
+-		return ret;
++		goto out;
+
+ 	alrm->pending = !!(val & SPRD_RTC_ALARM_EN);
+-	return 0;
++out:
++	mutex_unlock(&rtc->lock);
++	return ret;
+ }
+
+ static int sprd_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
+@@ -432,18 +535,22 @@ static int sprd_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
+ 	 * should set normal alarm, if not, we should set auxiliary alarm which
+ 	 * means it is just a wake event.
+ 	 */
+-	if (!rtc->rtc->aie_timer.enabled || rtc_tm_sub(&aie_time, &alrm->time))
+-		return sprd_rtc_set_aux_alarm(dev, alrm);
++	mutex_lock(&rtc->lock);
++	if (rtc->data->use_aux_alarm && (!rtc->rtc->aie_timer.enabled ||
++					 rtc_tm_sub(&aie_time, &alrm->time))) {
++		ret = sprd_rtc_set_aux_alarm(dev, alrm);
++		goto out;
++	}
+
+ 	/* clear the alarm interrupt status firstly */
+ 	ret = regmap_write(rtc->regmap, rtc->base + SPRD_RTC_INT_CLR,
+ 			   SPRD_RTC_ALARM_EN);
+ 	if (ret)
+-		return ret;
++		goto out;
+
+ 	ret = sprd_rtc_set_secs(rtc, SPRD_RTC_ALARM, secs);
+ 	if (ret)
+-		return ret;
++		goto out;
+
+ 	if (alrm->enabled) {
+ 		ret = regmap_update_bits(rtc->regmap,
+@@ -451,14 +558,16 @@ static int sprd_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
+ 					 SPRD_RTC_ALARM_EN,
+ 					 SPRD_RTC_ALARM_EN);
+ 		if (ret)
+-			return ret;
++			goto out;
+
+ 		/* unlock the alarm to enable the alarm function. */
+ 		ret = sprd_rtc_lock_alarm(rtc, false);
+ 	} else {
+-		regmap_update_bits(rtc->regmap,
+-				   rtc->base + SPRD_RTC_INT_EN,
+-				   SPRD_RTC_ALARM_EN, 0);
++		ret = regmap_update_bits(rtc->regmap,
++					 rtc->base + SPRD_RTC_INT_EN,
++					 SPRD_RTC_ALARM_EN, 0);
++		if (ret)
++			goto out;
+
+ 		/*
+ 		 * Lock the alarm function in case fake alarm event will power
+@@ -467,6 +576,8 @@ static int sprd_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
+ 		ret = sprd_rtc_lock_alarm(rtc, true);
+ 	}
+
++out:
++	mutex_unlock(&rtc->lock);
+ 	return ret;
+ }
+
+@@ -475,22 +586,28 @@ static int sprd_rtc_alarm_irq_enable(struct device *dev, unsigned int enabled)
+ 	struct sprd_rtc *rtc = dev_get_drvdata(dev);
+ 	int ret;
+
++	mutex_lock(&rtc->lock);
+ 	if (enabled) {
+ 		ret = regmap_update_bits(rtc->regmap,
+ 					 rtc->base + SPRD_RTC_INT_EN,
+-					 SPRD_RTC_ALARM_EN | SPRD_RTC_AUXALM_EN,
+-					 SPRD_RTC_ALARM_EN | SPRD_RTC_AUXALM_EN);
++					 rtc->data->alarm_enable_mask,
++					 rtc->data->alarm_enable_mask);
+ 		if (ret)
+-			return ret;
++			goto out;
+
+ 		ret = sprd_rtc_lock_alarm(rtc, false);
+ 	} else {
+-		regmap_update_bits(rtc->regmap, rtc->base + SPRD_RTC_INT_EN,
+-				   SPRD_RTC_ALARM_EN | SPRD_RTC_AUXALM_EN, 0);
++		ret = regmap_update_bits(rtc->regmap,
++					 rtc->base + SPRD_RTC_INT_EN,
++					 rtc->data->alarm_enable_mask, 0);
++		if (ret)
++			goto out;
+
+ 		ret = sprd_rtc_lock_alarm(rtc, true);
+ 	}
+
++out:
++	mutex_unlock(&rtc->lock);
+ 	return ret;
+ }
+
+@@ -507,9 +624,22 @@ static irqreturn_t sprd_rtc_handler(int irq, void *dev_id)
+ 	struct sprd_rtc *rtc = dev_id;
+ 	int ret;
+
+-	ret = sprd_rtc_clear_alarm_ints(rtc);
+-	if (ret)
+-		return IRQ_RETVAL(ret);
++	mutex_lock(&rtc->lock);
++	if (rtc->data->one_shot_alarm)
++		ret = regmap_update_bits(rtc->regmap,
++					 rtc->base + SPRD_RTC_INT_EN,
++					 SPRD_RTC_ALARM_EN, 0);
++	else
++		ret = 0;
++	if (!ret)
++		ret = sprd_rtc_clear_alarm_ints(rtc);
++	mutex_unlock(&rtc->lock);
++	if (ret) {
++		dev_err_ratelimited(rtc->dev,
++				    "failed to clear RTC alarm interrupt: %d\n",
++				    ret);
++		return IRQ_HANDLED;
++	}
+
+ 	rtc_update_irq(rtc->rtc, 1, RTC_AF | RTC_IRQF);
+ 	return IRQ_HANDLED;
+@@ -533,11 +663,30 @@ static int sprd_rtc_check_power_down(struct sprd_rtc *rtc)
+ 	return 0;
+ }
+
++static int sprd_rtc_snapshot_alarm_lock(struct sprd_rtc *rtc)
++{
++	u32 val;
++	int ret;
++
++	if (!rtc->data->preserve_alarm_lock)
++		return 0;
++
++	ret = regmap_read(rtc->regmap, rtc->base + SPRD_RTC_SPG_VALUE, &val);
++	if (ret)
++		return ret;
++
++	rtc->initial_alarm_lock = val & SPRD_RTC_ALMLOCK_MASK;
++	return 0;
++}
++
+ static int sprd_rtc_check_alarm_int(struct sprd_rtc *rtc)
+ {
+ 	u32 val;
+ 	int ret;
+
++	if (!rtc->data->poweroff_alarm)
++		return 0;
++
+ 	ret = regmap_read(rtc->regmap, rtc->base + SPRD_RTC_SPG_VALUE, &val);
+ 	if (ret)
+ 		return ret;
+@@ -559,6 +708,35 @@ static int sprd_rtc_check_alarm_int(struct sprd_rtc *rtc)
+ 				  SPRD_RTC_ALARM_EN, SPRD_RTC_ALARM_EN);
+ }
+
++static void sprd_rtc_shutdown(struct platform_device *pdev)
++{
++	struct sprd_rtc *rtc = platform_get_drvdata(pdev);
++	int first_error = 0;
++	int ret;
++
++	if (!rtc->data->one_shot_alarm)
++		return;
++
++	mutex_lock(&rtc->lock);
++	ret = regmap_update_bits(rtc->regmap, rtc->base + SPRD_RTC_INT_EN,
++				 rtc->data->alarm_enable_mask, 0);
++	if (ret)
++		first_error = ret;
++
++	ret = sprd_rtc_clear_alarm_ints(rtc);
++	if (ret && !first_error)
++		first_error = ret;
++
++	ret = sprd_rtc_lock_alarm(rtc, true);
++	if (ret && !first_error)
++		first_error = ret;
++	mutex_unlock(&rtc->lock);
++
++	if (first_error)
++		dev_err(rtc->dev, "failed to shut down RTC alarm: %d\n",
++			first_error);
++}
++
+ static int sprd_rtc_probe(struct platform_device *pdev)
+ {
+ 	struct device_node *node = pdev->dev.of_node;
+@@ -568,10 +746,14 @@ static int sprd_rtc_probe(struct platform_device *pdev)
+ 	rtc = devm_kzalloc(&pdev->dev, sizeof(*rtc), GFP_KERNEL);
+ 	if (!rtc)
+ 		return -ENOMEM;
++	rtc->data = of_device_get_match_data(&pdev->dev);
++	if (!rtc->data)
++		return -EINVAL;
+
+ 	rtc->regmap = dev_get_regmap(pdev->dev.parent, NULL);
+ 	if (!rtc->regmap)
+ 		return -ENODEV;
++	mutex_init(&rtc->lock);
+
+ 	ret = of_property_read_u32(node, "reg", &rtc->base);
+ 	if (ret) {
+@@ -589,6 +771,11 @@ static int sprd_rtc_probe(struct platform_device *pdev)
+
+ 	rtc->dev = &pdev->dev;
+ 	platform_set_drvdata(pdev, rtc);
++	ret = sprd_rtc_snapshot_alarm_lock(rtc);
++	if (ret) {
++		dev_err(&pdev->dev, "failed to read RTC alarm lock\n");
++		return ret;
++	}
+
+ 	/* check if we need set the alarm interrupt */
+ 	ret = sprd_rtc_check_alarm_int(rtc);
+@@ -616,8 +803,8 @@ static int sprd_rtc_probe(struct platform_device *pdev)
+ 	device_init_wakeup(&pdev->dev, true);
+
+ 	rtc->rtc->ops = &sprd_rtc_ops;
+-	rtc->rtc->range_min = 0;
+-	rtc->rtc->range_max = 5662310399LL;
++	rtc->rtc->range_min = rtc->data->range_min;
++	rtc->rtc->range_max = rtc->data->range_max;
+ 	ret = devm_rtc_register_device(rtc->rtc);
+ 	if (ret) {
+ 		device_init_wakeup(&pdev->dev, false);
+@@ -628,8 +815,9 @@ static int sprd_rtc_probe(struct platform_device *pdev)
+ }
+
+ static const struct of_device_id sprd_rtc_of_match[] = {
+-	{ .compatible = "sprd,sc2731-rtc", },
+-	{ },
++	{ .compatible = "sprd,sc2720-rtc", .data = &sc2720_rtc_data },
++	{ .compatible = "sprd,sc2731-rtc", .data = &sc2731_rtc_data },
++	{},
+ };
+ MODULE_DEVICE_TABLE(of, sprd_rtc_of_match);
+
+@@ -639,6 +827,7 @@ static struct platform_driver sprd_rtc_driver = {
+ 		.of_match_table = sprd_rtc_of_match,
+ 	},
+ 	.probe	= sprd_rtc_probe,
++	.shutdown = sprd_rtc_shutdown,
+ };
+ module_platform_driver(sprd_rtc_driver);
+

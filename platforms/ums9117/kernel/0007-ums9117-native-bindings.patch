@@ -1,0 +1,518 @@
+diff --git a/Documentation/devicetree/bindings/gpio/sprd,gpio-eic.yaml b/Documentation/devicetree/bindings/gpio/sprd,gpio-eic.yaml
+index 99fcf97..780a9cf 100644
+--- a/Documentation/devicetree/bindings/gpio/sprd,gpio-eic.yaml
++++ b/Documentation/devicetree/bindings/gpio/sprd,gpio-eic.yaml
+@@ -20,10 +20,10 @@ description: |
+   EIC-sync. But the PMIC EIC controller contains only one EIC-debounce sub-
+   module.
+
+-  The EIC-debounce sub-module provides up to 8 source input signal
+-  connections. A debounce mechanism is used to capture the input signals'
+-  stable status (millisecond resolution) and a single-trigger mechanism
+-  is introduced into this sub-module to enhance the input event detection
++  The EIC-debounce sub-module provides a variant-specific number of source
++  input signal connections. A debounce mechanism is used to capture the input
++  signals' stable status (millisecond resolution), and a single-trigger
++  mechanism is introduced into this sub-module to enhance input event detection
+   reliability. In addition, this sub-module's clock can be shut off
+   automatically to reduce power dissipation. Moreover the debounce range
+   is from 1ms to 4s with a step size of 1ms. The input signal will be
+@@ -48,6 +48,7 @@ properties:
+           - sprd,sc9860-eic-latch
+           - sprd,sc9860-eic-async
+           - sprd,sc9860-eic-sync
++          - sprd,sc2720-eic
+           - sprd,sc2731-eic
+       - items:
+           - enum:
+diff --git a/Documentation/devicetree/bindings/hwlock/sprd,hwspinlock-r3p0.yaml b/Documentation/devicetree/bindings/hwlock/sprd,hwspinlock-r3p0.yaml
+index abe11df..b442a4e 100644
+--- a/Documentation/devicetree/bindings/hwlock/sprd,hwspinlock-r3p0.yaml
++++ b/Documentation/devicetree/bindings/hwlock/sprd,hwspinlock-r3p0.yaml
+@@ -13,7 +13,11 @@ maintainers:
+
+ properties:
+   compatible:
+-    const: sprd,hwspinlock-r3p0
++    oneOf:
++      - const: sprd,hwspinlock-r3p0
++      - items:
++          - const: sprd,ums9117-hwspinlock
++          - const: sprd,hwspinlock-r3p0
+
+   reg:
+     maxItems: 1
+diff --git a/Documentation/devicetree/bindings/iio/adc/sprd,sc2720-adc.yaml b/Documentation/devicetree/bindings/iio/adc/sprd,sc2720-adc.yaml
+index a678323..193174d 100644
+--- a/Documentation/devicetree/bindings/iio/adc/sprd,sc2720-adc.yaml
++++ b/Documentation/devicetree/bindings/iio/adc/sprd,sc2720-adc.yaml
+@@ -34,11 +34,37 @@ properties:
+   hwlocks:
+     maxItems: 1
+
++  clocks:
++    maxItems: 1
++
++  clock-names:
++    const: xtal
++
+   nvmem-cells: true
+
+   nvmem-cell-names: true
+
+ allOf:
++  - if:
++      properties:
++        compatible:
++          contains:
++            const: sprd,sc2720-adc
++    then:
++      properties:
++        nvmem-cells: false
++        nvmem-cell-names: false
++      required:
++        - clocks
++        - clock-names
++    else:
++      properties:
++        clocks: false
++        clock-names: false
++      required:
++        - nvmem-cells
++        - nvmem-cell-names
++
+   - if:
+       not:
+         properties:
+@@ -74,8 +100,6 @@ required:
+   - interrupts
+   - "#io-channel-cells"
+   - hwlocks
+-  - nvmem-cells
+-  - nvmem-cell-names
+
+ additionalProperties: false
+
+diff --git a/Documentation/devicetree/bindings/input/sprd,sc27xx-vibrator.yaml b/Documentation/devicetree/bindings/input/sprd,sc27xx-vibrator.yaml
+index 4c8d303..7b2ae55 100644
+--- a/Documentation/devicetree/bindings/input/sprd,sc27xx-vibrator.yaml
++++ b/Documentation/devicetree/bindings/input/sprd,sc27xx-vibrator.yaml
+@@ -15,6 +15,7 @@ maintainers:
+ properties:
+   compatible:
+     enum:
++      - sprd,sc2720-vibrator
+       - sprd,sc2721-vibrator
+       - sprd,sc2730-vibrator
+       - sprd,sc2731-vibrator
+@@ -22,6 +23,28 @@ properties:
+   reg:
+     maxItems: 1
+
++  sprd,voltage-code:
++    $ref: /schemas/types.yaml#/definitions/uint32
++    maximum: 7
++    description:
++      SC2720 LDO_VIBR_V selector. The board supplies the fitted motor's
++      validated selector; the driver does not infer it from rumble magnitude.
++
++allOf:
++  - if:
++      properties:
++        compatible:
++          const: sprd,sc2720-vibrator
++    then:
++      properties:
++        reg:
++          const: 0xe00
++      required:
++        - sprd,voltage-code
++    else:
++      properties:
++        sprd,voltage-code: false
++
+ required:
+   - compatible
+   - reg
+diff --git a/Documentation/devicetree/bindings/leds/common.yaml b/Documentation/devicetree/bindings/leds/common.yaml
+index 274f832..87f94c0 100644
+--- a/Documentation/devicetree/bindings/leds/common.yaml
++++ b/Documentation/devicetree/bindings/leds/common.yaml
+@@ -106,6 +106,8 @@ properties:
+           - bluetooth-power
+             # LED indicates camera flash state
+           - flash
++            # LED follows input activity with a configurable idle timeout
++          - input-events
+             # LED indicated keyboard capslock
+           - kbd-capslock
+             # LED indicates MTD memory activity
+diff --git a/Documentation/devicetree/bindings/mfd/sprd,sc2731.yaml b/Documentation/devicetree/bindings/mfd/sprd,sc2731.yaml
+index b023e1e..921449c 100644
+--- a/Documentation/devicetree/bindings/mfd/sprd,sc2731.yaml
++++ b/Documentation/devicetree/bindings/mfd/sprd,sc2731.yaml
+@@ -56,6 +56,26 @@ properties:
+     type: object
+     $ref: /schemas/regulator/sprd,sc2731-regulator.yaml#
+
++  clock-controller:
++    type: object
++    $ref: /schemas/clock/sprd,sc2720-clk.yaml#
++
++  charger:
++    type: object
++    $ref: /schemas/power/supply/sprd,ums9117-sc2720-charger.yaml#
++
++  fuel-gauge:
++    type: object
++    $ref: /schemas/power/supply/sprd,ums9117-sc2720-fgu.yaml#
++
++  poweroff:
++    type: object
++    $ref: /schemas/power/reset/sprd,ums9117-sc2720-poweroff.yaml#
++
++  keypad-backlight@df8:
++    type: object
++    $ref: /schemas/leds/sprd,ums9117-sc2720-kpled.yaml#
++
+ patternProperties:
+   "^adc@[0-9a-f]+$":
+     type: object
+diff --git a/Documentation/devicetree/bindings/nvmem/sprd,ums312-efuse.yaml b/Documentation/devicetree/bindings/nvmem/sprd,ums312-efuse.yaml
+index 00e0fd1..01afbe9 100644
+--- a/Documentation/devicetree/bindings/nvmem/sprd,ums312-efuse.yaml
++++ b/Documentation/devicetree/bindings/nvmem/sprd,ums312-efuse.yaml
+@@ -4,7 +4,11 @@
+ $id: http://devicetree.org/schemas/nvmem/sprd,ums312-efuse.yaml#
+ $schema: http://devicetree.org/meta-schemas/core.yaml#
+
+-title: Spreadtrum UMS312 eFuse
++title: Spreadtrum SoC eFuse
++
++description:
++  UMS9117 exposes its double-bit normal eFuse blocks below the secure boundary
++  as a read-only NVMEM provider.
+
+ maintainers:
+   - Orson Zhai <orsonzhai@gmail.com>
+@@ -13,7 +17,9 @@ maintainers:
+
+ properties:
+   compatible:
+-    const: sprd,ums312-efuse
++    enum:
++      - sprd,ums312-efuse
++      - sprd,ums9117-efuse
+
+   reg:
+     maxItems: 1
+@@ -37,6 +43,13 @@ required:
+ allOf:
+   - $ref: nvmem.yaml#
+   - $ref: nvmem-deprecated-cells.yaml#
++  - if:
++      properties:
++        compatible:
++          const: sprd,ums9117-efuse
++    then:
++      required:
++        - read-only
+
+ unevaluatedProperties: false
+
+@@ -58,4 +71,20 @@ examples:
+         reg = <0x10 0x2>;
+       };
+     };
++  - |
++    efuse@40240000 {
++      compatible = "sprd,ums9117-efuse";
++      reg = <0x40240000 0x10000>;
++      /* CLK_EFUSE_EB from sprd,ums9117-clk.h */
++      clocks = <&aonapb_gate 2>;
++      clock-names = "enable";
++      hwlocks = <&hwlock 8>;
++      read-only;
++      #address-cells = <1>;
++      #size-cells = <1>;
++
++      thm_cal: thermal-calibration@64 {
++        reg = <0x64 0x4>;
++      };
++    };
+ ...
+diff --git a/Documentation/devicetree/bindings/regulator/sprd,sc2731-regulator.yaml b/Documentation/devicetree/bindings/regulator/sprd,sc2731-regulator.yaml
+index 9bd752b..4869342 100644
+--- a/Documentation/devicetree/bindings/regulator/sprd,sc2731-regulator.yaml
++++ b/Documentation/devicetree/bindings/regulator/sprd,sc2731-regulator.yaml
+@@ -4,7 +4,7 @@
+ $id: http://devicetree.org/schemas/regulator/sprd,sc2731-regulator.yaml#
+ $schema: http://devicetree.org/meta-schemas/core.yaml#
+
+-title: Spreadtrum SC2731 Power Management IC regulators
++title: Spreadtrum SC27xx Power Management IC regulators
+
+ maintainers:
+   - Orson Zhai <orsonzhai@gmail.com>
+@@ -12,35 +12,49 @@ maintainers:
+   - Chunyan Zhang <zhang.lyra@gmail.com>
+
+ description: |
+-  The SC2731 integrates low-voltage and low quiescent current DCDC/LDO.
+-  14 LDO and 3 DCDCs are designed for external use. All DCDCs/LDOs have
+-  their own bypass (power-down) control signals. It is recommended to use
+-  external tantalum or MLCC ceramic capacitors with these LDOs.
+-  Valid names for the regulators are:
++  The SC27xx PMICs integrate low-voltage and low quiescent current DCDC/LDO
++  supplies with individual power-down controls. The SC2731 exposes the
++  following regulators:
+     BUCK:
+       BUCK_CPU0, BUCK_CPU1, BUCK_RF
+     LDO:
+       LDO_CAMA0, LDO_CAMA1, LDO_CAMD0, LDO_CAMD1, LDO_CAMIO, LDO_CAMMOT,
+       LDO_CON, LDO_EMMCCORE, LDO_SDCORE, LDO_SDIO, LDO_SRAM, LDO_USB33,
+       LDO_VLDO, LDO_WIFIPA
++  The SC2720 binding exposes only the fixed-voltage LDO_SDCORE, LDO_SDIO and
++  LDO_USB33 supplies whose register settings are known.
+
+ properties:
+   compatible:
+-    const: sprd,sc2731-regulator
+-
+-patternProperties:
+-  "^BUCK_(CPU[0-1]|RF)$":
+-    type: object
+-    $ref: regulator.yaml#
+-    unevaluatedProperties: false
+-
+-  "^LDO_(CAM(A0|A1|D0|D1|IO|MOT)|CON|EMMCCORE|SD(CORE|IO)|SRAM|USB33|VLDO|WIFIPA)$":
+-    type: object
+-    $ref: regulator.yaml#
+-    unevaluatedProperties: false
++    enum:
++      - sprd,sc2720-regulator
++      - sprd,sc2731-regulator
++
++allOf:
++  - if:
++      properties:
++        compatible:
++          const: sprd,sc2720-regulator
++    then:
++      patternProperties:
++        "^LDO_(SDCORE|SDIO|USB33)$":
++          type: object
++          $ref: regulator.yaml#
++          unevaluatedProperties: false
++    else:
++      patternProperties:
++        "^BUCK_(CPU[0-1]|RF)$":
++          type: object
++          $ref: regulator.yaml#
++          unevaluatedProperties: false
++
++        "^LDO_(CAM(A0|A1|D0|D1|IO|MOT)|CON|EMMCCORE|SD(CORE|IO)|SRAM|USB33|VLDO|WIFIPA)$":
++          type: object
++          $ref: regulator.yaml#
++          unevaluatedProperties: false
+
+ required:
+   - compatible
+
+-additionalProperties: false
++unevaluatedProperties: false
+ ...
+diff --git a/Documentation/devicetree/bindings/rtc/sprd,sc2731-rtc.yaml b/Documentation/devicetree/bindings/rtc/sprd,sc2731-rtc.yaml
+index 5756f61..2924995 100644
+--- a/Documentation/devicetree/bindings/rtc/sprd,sc2731-rtc.yaml
++++ b/Documentation/devicetree/bindings/rtc/sprd,sc2731-rtc.yaml
+@@ -4,7 +4,7 @@
+ $id: http://devicetree.org/schemas/rtc/sprd,sc2731-rtc.yaml#
+ $schema: http://devicetree.org/meta-schemas/core.yaml#
+
+-title: Spreadtrum SC2731 Real Time Clock
++title: Spreadtrum SC27xx Real Time Clock
+
+ maintainers:
+   - Orson Zhai <orsonzhai@gmail.com>
+@@ -13,7 +13,9 @@ maintainers:
+
+ properties:
+   compatible:
+-    const: sprd,sc2731-rtc
++    enum:
++      - sprd,sc2720-rtc
++      - sprd,sc2731-rtc
+
+   reg:
+     maxItems: 1
+@@ -28,6 +30,15 @@ required:
+
+ allOf:
+   - $ref: rtc.yaml#
++  - if:
++      properties:
++        compatible:
++          const: sprd,sc2720-rtc
++    then:
++      properties:
++        reg:
++          const: 0x200
++        start-year: false
+
+ unevaluatedProperties: false
+ ...
+diff --git a/Documentation/devicetree/bindings/spi/sprd,spi-adi.yaml b/Documentation/devicetree/bindings/spi/sprd,spi-adi.yaml
+index 903b06f..ecbad36 100644
+--- a/Documentation/devicetree/bindings/spi/sprd,spi-adi.yaml
++++ b/Documentation/devicetree/bindings/spi/sprd,spi-adi.yaml
+@@ -51,10 +51,17 @@ properties:
+       - sprd,sc9860-adi
+       - sprd,sc9863-adi
+       - sprd,ums512-adi
++      - sprd,ums9117-adi
+
+   reg:
+     maxItems: 1
+
++  clocks:
++    maxItems: 1
++
++  clock-names:
++    const: enable
++
+   hwlocks:
+     maxItems: 1
+
+diff --git a/Documentation/devicetree/bindings/thermal/sprd-thermal.yaml b/Documentation/devicetree/bindings/thermal/sprd-thermal.yaml
+index afa551f..2ca6470 100644
+--- a/Documentation/devicetree/bindings/thermal/sprd-thermal.yaml
++++ b/Documentation/devicetree/bindings/thermal/sprd-thermal.yaml
+@@ -15,27 +15,37 @@ $ref: thermal-sensor.yaml#
+
+ properties:
+   compatible:
+-    const: sprd,ums512-thermal
++    enum:
++      - sprd,ums512-thermal
++      - sprd,ums9117-thermal
+
+   reg:
+     maxItems: 1
+
+   clocks:
+-    maxItems: 1
++    minItems: 1
++    maxItems: 2
+
+   clock-names:
++    minItems: 1
+     items:
+       - const: enable
++      - const: rtc
+
+   nvmem-cells:
++    minItems: 1
+     maxItems: 2
+     description:
+       Reference to nvmem nodes for the calibration data.
+
+   nvmem-cell-names:
++    minItems: 1
++    maxItems: 2
+     items:
+-      - const: thm_sign_cal
+-      - const: thm_ratio_cal
++      enum:
++        - thm_sign_cal
++        - thm_ratio_cal
++        - thm_cal
+
+   "#thermal-sensor-cells":
+     const: 1
+@@ -67,11 +77,59 @@ patternProperties:
+
+     required:
+       - reg
+-      - nvmem-cells
+-      - nvmem-cell-names
+
+     additionalProperties: false
+
++allOf:
++  - if:
++      properties:
++        compatible:
++          const: sprd,ums512-thermal
++    then:
++      properties:
++        clocks:
++          maxItems: 1
++        clock-names:
++          items:
++            - const: enable
++        nvmem-cells:
++          minItems: 2
++          maxItems: 2
++        nvmem-cell-names:
++          items:
++            - const: thm_sign_cal
++            - const: thm_ratio_cal
++      patternProperties:
++        "^([a-z]*-)?sensor(-section)?@[0-9]+$":
++          required:
++            - nvmem-cells
++            - nvmem-cell-names
++  - if:
++      properties:
++        compatible:
++          const: sprd,ums9117-thermal
++    then:
++      properties:
++        clocks:
++          minItems: 2
++          maxItems: 2
++        clock-names:
++          items:
++            - const: enable
++            - const: rtc
++        nvmem-cells:
++          maxItems: 1
++        nvmem-cell-names:
++          items:
++            - const: thm_cal
++      patternProperties:
++        "^([a-z]*-)?sensor(-section)?@[0-9]+$":
++          properties:
++            reg:
++              const: 0
++      required:
++        - "#thermal-sensor-cells"
++
+ required:
+   - compatible
+   - reg
+@@ -109,4 +167,23 @@ examples:
+             nvmem-cell-names = "sen_delta_cal";
+         };
+     };
++  - |
++    #include <dt-bindings/clock/sprd,ums9117-clk.h>
++
++    thermal@40300000 {
++        compatible = "sprd,ums9117-thermal";
++        reg = <0x40300000 0x100>;
++        clocks = <&aonapb_gate CLK_THM1_EB>,
++                 <&aonapb_gate CLK_THM_RTC_EB>;
++        clock-names = "enable", "rtc";
++        #thermal-sensor-cells = <1>;
++        nvmem-cells = <&thm_cal>;
++        nvmem-cell-names = "thm_cal";
++        #address-cells = <1>;
++        #size-cells = <0>;
++
++        sensor@0 {
++            reg = <0>;
++        };
++    };
+ ...

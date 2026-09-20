@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include <linux/bitops.h>
+#include <linux/clk.h>
+#include <linux/mfd/syscon.h>
+#include <linux/regmap.h>
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/err.h>
 #include <linux/slab.h>
-#include <linux/soc/sprd/ums9117-adi.h>
 
 #include "ums9117-sc2720-codec.h"
 
@@ -214,7 +216,9 @@ static const u8 sc2720_hp_gain[] = { 0xf, 0x9, 0x8, 0x7, 0x6, 0x5, 0x4 };
 
 struct ums9117_sc2720_codec {
 	struct device *dev;
-	u16 saved[UMS9117_SC2720_CODEC_REGISTER_COUNT];
+	struct regmap *regmap;
+	struct clk *xtal;
+	unsigned int saved[UMS9117_SC2720_CODEC_REGISTER_COUNT];
 	unsigned int volume_left;
 	unsigned int volume_right;
 	bool dirty;
@@ -224,34 +228,23 @@ struct ums9117_sc2720_codec {
 	bool xtal_held;
 };
 
-static int ums9117_sc2720_codec_sts2_update(u16 mask, u16 value)
+static int ums9117_sc2720_codec_sts2_update(struct ums9117_sc2720_codec *codec,
+					    u16 mask, unsigned int value)
 {
-	struct ums9117_adi_transaction transaction = {};
-	u16 old_value;
-	int end_ret;
-	int ret;
-
-	ret = ums9117_adi_begin(&transaction);
-	if (ret)
-		return ret;
-	ret = ums9117_adi_read(&transaction, SC2720_ANA_STS2, &old_value);
-	if (!ret)
-		ret = ums9117_adi_write_final(&transaction, SC2720_ANA_STS2,
-					      (old_value & ~mask) |
-						      (value & mask));
-	end_ret = ums9117_adi_end(&transaction);
-	return ret ? ret : end_ret;
+	return regmap_write_bits(codec->regmap, SC2720_ANA_STS2, mask, value);
 }
 
-static int ums9117_sc2720_codec_sts2_restore(u16 saved)
+static int ums9117_sc2720_codec_sts2_restore(struct ums9117_sc2720_codec *codec,
+					     u16 saved)
 {
-	u16 value;
+	unsigned int value;
 	int ret;
 
-	ret = ums9117_sc2720_codec_sts2_update(SC2720_STS2_RESTORE_MASK, saved);
+	ret = ums9117_sc2720_codec_sts2_update(codec, SC2720_STS2_RESTORE_MASK,
+					       saved);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_read_once(SC2720_ANA_STS2, &value);
+	ret = regmap_read(codec->regmap, SC2720_ANA_STS2, &value);
 	if (ret)
 		return ret;
 	if ((value & SC2720_STS2_RESTORE_MASK) !=
@@ -260,15 +253,16 @@ static int ums9117_sc2720_codec_sts2_restore(u16 saved)
 	return 0;
 }
 
-static int ums9117_sc2720_codec_check_identity(void)
+static int
+ums9117_sc2720_codec_check_identity(struct ums9117_sc2720_codec *codec)
 {
-	u16 high;
-	u16 low;
+	unsigned int high;
+	unsigned int low;
 	int ret;
 
-	ret = ums9117_adi_read_once(SC2720_CHIP_ID_LOW, &low);
+	ret = regmap_read(codec->regmap, SC2720_CHIP_ID_LOW, &low);
 	if (!ret)
-		ret = ums9117_adi_read_once(SC2720_CHIP_ID_HIGH, &high);
+		ret = regmap_read(codec->regmap, SC2720_CHIP_ID_HIGH, &high);
 	if (ret)
 		return ret;
 	if (low != SC2720_ID_LOW || high != SC2720_ID_HIGH)
@@ -285,7 +279,7 @@ static int ums9117_sc2720_codec_snapshot(struct ums9117_sc2720_codec *codec)
 		const struct ums9117_sc2720_codec_register_desc *reg =
 			&ums9117_sc2720_codec_registers[i];
 
-		ret = ums9117_adi_read_once(reg->offset, &codec->saved[i]);
+		ret = regmap_read(codec->regmap, reg->offset, &codec->saved[i]);
 		if (ret)
 			return ret;
 	}
@@ -306,39 +300,42 @@ ums9117_sc2720_codec_validate_idle(const struct ums9117_sc2720_codec *codec)
 	return 0;
 }
 
-static int ums9117_sc2720_codec_close_headphones(void)
+static int
+ums9117_sc2720_codec_close_headphones(struct ums9117_sc2720_codec *codec)
 {
 	int first_error = 0;
 	int ret;
 
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC4, SC2720_HP_GAIN_MASK,
-					   SC2720_HP_GAIN_MUTE);
-	ums9117_adi_record_first_error(&first_error, ret);
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC3, SC2720_DACL_TO_HPL,
-					   0);
-	ums9117_adi_record_first_error(&first_error, ret);
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC3, SC2720_DACR_TO_HPR,
-					   0);
-	ums9117_adi_record_first_error(&first_error, ret);
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC2,
-					   SC2720_HPL_DUMMY_LOOP_END, 0);
-	ums9117_adi_record_first_error(&first_error, ret);
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC2,
-					   SC2720_HPR_DUMMY_LOOP_END, 0);
-	ums9117_adi_record_first_error(&first_error, ret);
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC2, SC2720_HPL_EN, 0);
-	ums9117_adi_record_first_error(&first_error, ret);
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC2, SC2720_HPR_EN, 0);
-	ums9117_adi_record_first_error(&first_error, ret);
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC2, SC2720_HP_BUFFER_EN,
-					   0);
-	ums9117_adi_record_first_error(&first_error, ret);
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC2,
-					   SC2720_DAC_EN_L_ANALOG, 0);
-	ums9117_adi_record_first_error(&first_error, ret);
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC2,
-					   SC2720_DAC_EN_R_ANALOG, 0);
-	ums9117_adi_record_first_error(&first_error, ret);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC4,
+				 SC2720_HP_GAIN_MASK, SC2720_HP_GAIN_MUTE);
+	first_error = first_error ?: ret;
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC3,
+				 SC2720_DACL_TO_HPL, 0);
+	first_error = first_error ?: ret;
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC3,
+				 SC2720_DACR_TO_HPR, 0);
+	first_error = first_error ?: ret;
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2,
+				 SC2720_HPL_DUMMY_LOOP_END, 0);
+	first_error = first_error ?: ret;
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2,
+				 SC2720_HPR_DUMMY_LOOP_END, 0);
+	first_error = first_error ?: ret;
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2, SC2720_HPL_EN,
+				 0);
+	first_error = first_error ?: ret;
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2, SC2720_HPR_EN,
+				 0);
+	first_error = first_error ?: ret;
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2,
+				 SC2720_HP_BUFFER_EN, 0);
+	first_error = first_error ?: ret;
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2,
+				 SC2720_DAC_EN_L_ANALOG, 0);
+	first_error = first_error ?: ret;
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2,
+				 SC2720_DAC_EN_R_ANALOG, 0);
+	first_error = first_error ?: ret;
 	return first_error;
 }
 
@@ -349,15 +346,14 @@ static int ums9117_sc2720_codec_restore(struct ums9117_sc2720_codec *codec)
 	int ret;
 
 	if (!codec->dirty)
-		return codec->xtal_held ?
-			       ums9117_adi_xtal_release(&codec->xtal_held) :
-			       0;
-	ret = ums9117_sc2720_codec_close_headphones();
-	ums9117_adi_record_first_error(&first_error, ret);
-	ret = ums9117_sc2720_codec_sts2_update(SC2720_CALDC_START, 0);
-	ums9117_adi_record_first_error(&first_error, ret);
-	ret = ums9117_sc2720_codec_sts2_update(SC2720_DEPOP_CHARGE_START, 0);
-	ums9117_adi_record_first_error(&first_error, ret);
+		goto release_xtal;
+	ret = ums9117_sc2720_codec_close_headphones(codec);
+	first_error = first_error ?: ret;
+	ret = ums9117_sc2720_codec_sts2_update(codec, SC2720_CALDC_START, 0);
+	first_error = first_error ?: ret;
+	ret = ums9117_sc2720_codec_sts2_update(codec, SC2720_DEPOP_CHARGE_START,
+					       0);
+	first_error = first_error ?: ret;
 
 	for (i = ARRAY_SIZE(ums9117_sc2720_codec_registers); i-- > 0;) {
 		const struct ums9117_sc2720_codec_register_desc *reg =
@@ -365,11 +361,11 @@ static int ums9117_sc2720_codec_restore(struct ums9117_sc2720_codec *codec)
 
 		if (reg->offset == SC2720_ANA_STS2)
 			ret = ums9117_sc2720_codec_sts2_restore(
-				codec->saved[i]);
+				codec, codec->saved[i]);
 		else
-			ret = ums9117_adi_update_bits_once(
-				reg->offset, reg->mask, codec->saved[i]);
-		ums9117_adi_record_first_error(&first_error, ret);
+			ret = regmap_update_bits(codec->regmap, reg->offset,
+						 reg->mask, codec->saved[i]);
+		first_error = first_error ?: ret;
 	}
 	if (first_error)
 		return first_error;
@@ -377,156 +373,165 @@ static int ums9117_sc2720_codec_restore(struct ums9117_sc2720_codec *codec)
 	codec->enabled = false;
 	codec->prepared = false;
 	codec->dirty = false;
-	return ums9117_adi_xtal_release(&codec->xtal_held);
+
+release_xtal:
+	if (codec->xtal_held) {
+		clk_disable_unprepare(codec->xtal);
+		codec->xtal_held = false;
+	}
+	return 0;
 }
 
-static int ums9117_sc2720_codec_pulse(u32 offset, u16 mask, u16 inactive)
+static int ums9117_sc2720_codec_pulse(struct ums9117_sc2720_codec *codec,
+				      u32 offset, u16 mask, u16 inactive)
 {
 	int ret;
 
-	ret = ums9117_adi_update_bits_once(offset, mask, mask);
+	ret = regmap_update_bits(codec->regmap, offset, mask, mask);
 	if (ret)
 		return ret;
 	udelay(1);
-	return ums9117_adi_update_bits_once(offset, mask, inactive);
+	return regmap_update_bits(codec->regmap, offset, mask, inactive);
 }
 
-static int ums9117_sc2720_codec_power_up(void)
+static int ums9117_sc2720_codec_power_up(struct ums9117_sc2720_codec *codec)
 {
 	int ret;
 
-	ret = ums9117_adi_update_bits_once(
-		SC2720_MODULE_EN0, SC2720_AUD_MODULE_EN, SC2720_AUD_MODULE_EN);
+	ret = regmap_update_bits(codec->regmap, SC2720_MODULE_EN0,
+				 SC2720_AUD_MODULE_EN, SC2720_AUD_MODULE_EN);
 	if (ret)
 		return ret;
-	ret = ums9117_sc2720_codec_pulse(SC2720_SOFT_RST0, SC2720_AUD_RESETS,
-					 0);
+	ret = ums9117_sc2720_codec_pulse(codec, SC2720_SOFT_RST0,
+					 SC2720_AUD_RESETS, 0);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(
-		SC2720_ARM_CLK_EN0, SC2720_AUD_IF_CLOCKS, SC2720_AUD_IF_CLOCKS);
+	ret = regmap_update_bits(codec->regmap, SC2720_ARM_CLK_EN0,
+				 SC2720_AUD_IF_CLOCKS, SC2720_AUD_IF_CLOCKS);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_AUD_CFGA_CLK_EN,
-					   SC2720_CLK_AUD_HID_EN,
-					   SC2720_CLK_AUD_HID_EN);
+	ret = regmap_update_bits(codec->regmap, SC2720_AUD_CFGA_CLK_EN,
+				 SC2720_CLK_AUD_HID_EN, SC2720_CLK_AUD_HID_EN);
 	if (ret)
 		return ret;
 	/* Configure the soft driver before its VB supply is enabled. */
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_DCL0, SC2720_DRV_SOFT_EN,
-					   SC2720_DRV_SOFT_EN);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_DCL0,
+				 SC2720_DRV_SOFT_EN, SC2720_DRV_SOFT_EN);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_DCL0, SC2720_DCL_EN,
-					   SC2720_DCL_EN);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_DCL0, SC2720_DCL_EN,
+				 SC2720_DCL_EN);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(
-		SC2720_ANA_PMU0, SC2720_VBG_CONFIG_MASK,
+	ret = regmap_update_bits(
+		codec->regmap, SC2720_ANA_PMU0, SC2720_VBG_CONFIG_MASK,
 		SC2720_VBG_SEL_1P50_V |
 			FIELD_PREP(SC2720_VBG_TEMP_TUNE_MASK, 1));
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_PMU0,
-					   SC2720_AUD_VB_SLEEP_PD, 0);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_PMU0,
+				 SC2720_AUD_VB_SLEEP_PD, 0);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_PMU0, SC2720_AUD_VB_EN,
-					   SC2720_AUD_VB_EN);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_PMU0,
+				 SC2720_AUD_VB_EN, SC2720_AUD_VB_EN);
 	if (ret)
 		return ret;
 	usleep_range(1000, 2000);
-	ret = ums9117_adi_update_bits_once(
-		SC2720_ANA_CLK0, SC2720_DIG_CLK_6P5M_EN | SC2720_ANA_CLK_EN,
-		SC2720_DIG_CLK_6P5M_EN | SC2720_ANA_CLK_EN);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CLK0,
+				 SC2720_DIG_CLK_6P5M_EN | SC2720_ANA_CLK_EN,
+				 SC2720_DIG_CLK_6P5M_EN | SC2720_ANA_CLK_EN);
 	if (ret)
 		return ret;
-	ret = ums9117_sc2720_codec_pulse(SC2720_ANA_CLK0, SC2720_AD_CLK_RST, 0);
+	ret = ums9117_sc2720_codec_pulse(codec, SC2720_ANA_CLK0,
+					 SC2720_AD_CLK_RST, 0);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(
-		SC2720_ANA_CLK0, SC2720_DA_CLK_EN | SC2720_DRV_CLK_EN,
-		SC2720_DA_CLK_EN | SC2720_DRV_CLK_EN);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CLK0,
+				 SC2720_DA_CLK_EN | SC2720_DRV_CLK_EN,
+				 SC2720_DA_CLK_EN | SC2720_DRV_CLK_EN);
 	if (ret)
 		return ret;
-	ret = ums9117_sc2720_codec_pulse(SC2720_ANA_DCL0, SC2720_DCL_RST, 0);
-	if (ret)
-		return ret;
-	ret = ums9117_sc2720_codec_pulse(SC2720_ANA_DCL0, SC2720_DPOP_AUTO_RST,
+	ret = ums9117_sc2720_codec_pulse(codec, SC2720_ANA_DCL0, SC2720_DCL_RST,
 					 0);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CLK1,
-					   SC2720_AUD_CLK_PN_MASK,
-					   SC2720_AUD_CLK_PN_VALUE);
+	ret = ums9117_sc2720_codec_pulse(codec, SC2720_ANA_DCL0,
+					 SC2720_DPOP_AUTO_RST, 0);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_AUD_CFGA_CLK_EN,
-					   SC2720_CODEC_CLOCKS,
-					   SC2720_CODEC_CLOCKS);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CLK1,
+				 SC2720_AUD_CLK_PN_MASK,
+				 SC2720_AUD_CLK_PN_VALUE);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(
-		SC2720_ANA_PMU0, SC2720_AUD_BG_EN | SC2720_AUD_BIAS_EN,
-		SC2720_AUD_BG_EN | SC2720_AUD_BIAS_EN);
+	ret = regmap_update_bits(codec->regmap, SC2720_AUD_CFGA_CLK_EN,
+				 SC2720_CODEC_CLOCKS, SC2720_CODEC_CLOCKS);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_PMU0,
-					   SC2720_AUD_VB_SLEEP_PD,
-					   SC2720_AUD_VB_SLEEP_PD);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_PMU0,
+				 SC2720_AUD_BG_EN | SC2720_AUD_BIAS_EN,
+				 SC2720_AUD_BG_EN | SC2720_AUD_BIAS_EN);
+	if (ret)
+		return ret;
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_PMU0,
+				 SC2720_AUD_VB_SLEEP_PD,
+				 SC2720_AUD_VB_SLEEP_PD);
 	if (ret)
 		return ret;
 	usleep_range(5000, 6000);
 
-	ret = ums9117_adi_update_bits_once(SC2720_AUDIO_CTRL0,
-					   SC2720_AUD_IF_TX_INVERT,
-					   SC2720_AUD_IF_TX_INVERT);
+	ret = regmap_update_bits(codec->regmap, SC2720_AUDIO_CTRL0,
+				 SC2720_AUD_IF_TX_INVERT,
+				 SC2720_AUD_IF_TX_INVERT);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_AUD_CFGA_ANA_ET2,
-					   SC2720_DALR_MIX_MASK, 0);
+	ret = regmap_update_bits(codec->regmap, SC2720_AUD_CFGA_ANA_ET2,
+				 SC2720_DALR_MIX_MASK, 0);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC1,
-					   SC2720_ADVCMI_INT_SEL_MASK, 0);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC1,
+				 SC2720_ADVCMI_INT_SEL_MASK, 0);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(
-		SC2720_ANA_CDC1, SC2720_DALR_OFFSET_MASK, SC2720_DALR_OFFSET_2);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC1,
+				 SC2720_DALR_OFFSET_MASK, SC2720_DALR_OFFSET_2);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(
-		SC2720_ANA_CDC3, SC2720_DALR_OFFSET_EN, SC2720_DALR_OFFSET_EN);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC3,
+				 SC2720_DALR_OFFSET_EN, SC2720_DALR_OFFSET_EN);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_AUD_CFGA_LP_MODULE_CTRL,
-					   SC2720_DAC_ENABLE,
-					   SC2720_DAC_ENABLE);
+	ret = regmap_update_bits(codec->regmap, SC2720_AUD_CFGA_LP_MODULE_CTRL,
+				 SC2720_DAC_ENABLE, SC2720_DAC_ENABLE);
 	if (ret)
 		return ret;
 	return 0;
 }
 
-static int ums9117_sc2720_codec_fast_charge(void)
+static int ums9117_sc2720_codec_fast_charge(struct ums9117_sc2720_codec *codec)
 {
 	unsigned int i;
 	int ret;
 
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC2, SC2720_DAS_EN, 0);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2, SC2720_DAS_EN,
+				 0);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC2, SC2720_PA_EN, 0);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2, SC2720_PA_EN,
+				 0);
 	if (ret)
 		return ret;
-	ret = ums9117_sc2720_codec_sts2_update(SC2720_CALDC_ENO,
+	ret = ums9117_sc2720_codec_sts2_update(codec, SC2720_CALDC_ENO,
 					       SC2720_CALDC_ENO);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_STS0, BIT(0), BIT(0));
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_STS0, BIT(0),
+				 BIT(0));
 	if (ret)
 		return ret;
 	usleep_range(1000, 2000);
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_STS0, BIT(0), 0);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_STS0, BIT(0), 0);
 	if (ret)
 		return ret;
 	for (i = 0; i < SC2720_FAST_CHARGE_STEPS; i++)
@@ -538,16 +543,17 @@ static int
 ums9117_sc2720_codec_wait_dc_calibration(struct ums9117_sc2720_codec *codec)
 {
 	unsigned int attempt;
-	u16 value = 0;
+	unsigned int value = 0;
 	int ret;
 
 	for (attempt = 0; attempt < SC2720_DCCAL_ATTEMPTS; attempt++) {
-		ret = ums9117_adi_read_once(SC2720_ANA_STS2, &value);
+		ret = regmap_read(codec->regmap, SC2720_ANA_STS2, &value);
 		if (ret)
 			return ret;
 		if ((value & SC2720_DCCAL_DONE) == SC2720_DCCAL_DONE) {
 			usleep_range(5000, 6000);
-			ret = ums9117_adi_read_once(SC2720_ANA_STS2, &value);
+			ret = regmap_read(codec->regmap, SC2720_ANA_STS2,
+					  &value);
 			if (ret)
 				return ret;
 			if ((value & SC2720_DCCAL_DONE) == SC2720_DCCAL_DONE)
@@ -564,11 +570,11 @@ static int
 ums9117_sc2720_codec_wait_depop_valid(struct ums9117_sc2720_codec *codec)
 {
 	unsigned int attempt;
-	u16 value = 0;
+	unsigned int value = 0;
 	int ret;
 
 	for (attempt = 0; attempt < SC2720_DEPOP_VALID_ATTEMPTS; attempt++) {
-		ret = ums9117_adi_read_once(SC2720_ANA_STS2, &value);
+		ret = regmap_read(codec->regmap, SC2720_ANA_STS2, &value);
 		if (ret)
 			return ret;
 		if (value & SC2720_HP_DPOP_VALID)
@@ -585,11 +591,11 @@ static int
 ums9117_sc2720_codec_wait_depop_charge(struct ums9117_sc2720_codec *codec)
 {
 	unsigned int attempt;
-	u16 value = 0;
+	unsigned int value = 0;
 	int ret;
 
 	for (attempt = 0; attempt < SC2720_DEPOP_CHARGE_ATTEMPTS; attempt++) {
-		ret = ums9117_adi_read_once(SC2720_ANA_STS2, &value);
+		ret = regmap_read(codec->regmap, SC2720_ANA_STS2, &value);
 		if (ret)
 			return ret;
 		if ((value & SC2720_DEPOP_CHARGE_DONE) ==
@@ -606,126 +612,127 @@ static int
 ums9117_sc2720_codec_calibrate_headphones(struct ums9117_sc2720_codec *codec)
 {
 	int restore_error = 0;
-	u16 saved_cdc2;
-	u16 saved_cdc3;
+	unsigned int saved_cdc2;
+	unsigned int saved_cdc3;
 	int restore_ret;
 	int ret;
 
-	ret = ums9117_adi_read_once(SC2720_ANA_CDC2, &saved_cdc2);
+	ret = regmap_read(codec->regmap, SC2720_ANA_CDC2, &saved_cdc2);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_read_once(SC2720_ANA_CDC3, &saved_cdc3);
+	ret = regmap_read(codec->regmap, SC2720_ANA_CDC3, &saved_cdc3);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC4, SC2720_HP_GAIN_MASK,
-					   SC2720_HP_GAIN_MUTE);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC4,
+				 SC2720_HP_GAIN_MASK, SC2720_HP_GAIN_MUTE);
 	if (ret)
 		goto restore_routes;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_PMU0, SC2720_AUD_BG_EN,
-					   SC2720_AUD_BG_EN);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_PMU0,
+				 SC2720_AUD_BG_EN, SC2720_AUD_BG_EN);
 	if (ret)
 		goto restore_routes;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_PMU0, SC2720_AUD_BIAS_EN,
-					   SC2720_AUD_BIAS_EN);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_PMU0,
+				 SC2720_AUD_BIAS_EN, SC2720_AUD_BIAS_EN);
 	if (ret)
 		goto restore_routes;
-	ret = ums9117_adi_write_once(SC2720_ANA_CDC2, 0);
+	ret = regmap_write(codec->regmap, SC2720_ANA_CDC2, 0);
 	if (ret)
 		goto restore_routes;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC3,
-					   SC2720_DALR_OFFSET_EN, 0);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC3,
+				 SC2720_DALR_OFFSET_EN, 0);
 	if (ret)
 		goto restore_routes;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC3, SC2720_DACL_TO_HPL,
-					   0);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC3,
+				 SC2720_DACL_TO_HPL, 0);
 	if (ret)
 		goto restore_routes;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC3, SC2720_DACR_TO_HPR,
-					   0);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC3,
+				 SC2720_DACR_TO_HPR, 0);
 	if (ret)
 		goto restore_routes;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC3, SC2720_DACL_TO_RCV,
-					   0);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC3,
+				 SC2720_DACL_TO_RCV, 0);
 	if (ret)
 		goto restore_routes;
-	ret = ums9117_adi_write_final_once(SC2720_ANA_STS2, 0);
+	ret = regmap_write(codec->regmap, SC2720_ANA_STS2, 0);
 	if (ret)
 		goto restore_routes;
 
-	ret = ums9117_sc2720_codec_fast_charge();
+	ret = ums9117_sc2720_codec_fast_charge(codec);
 	if (ret)
 		goto restore_routes;
 	usleep_range(5000, 6000);
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC2, SC2720_HP_BUFFER_EN,
-					   SC2720_HP_BUFFER_EN);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2,
+				 SC2720_HP_BUFFER_EN, SC2720_HP_BUFFER_EN);
 	if (ret)
 		goto restore_routes;
-	ret = ums9117_sc2720_codec_sts2_update(SC2720_CALDC_ENO,
+	ret = ums9117_sc2720_codec_sts2_update(codec, SC2720_CALDC_ENO,
 					       SC2720_CALDC_ENO);
 	if (ret)
 		goto restore_routes;
-	ret = ums9117_sc2720_codec_sts2_update(SC2720_CALDC_EN,
+	ret = ums9117_sc2720_codec_sts2_update(codec, SC2720_CALDC_EN,
 					       SC2720_CALDC_EN);
 	if (ret)
 		goto restore_routes;
-	ret = ums9117_adi_write_once(SC2720_ANA_DCL4, 0xffffU);
+	ret = regmap_write(codec->regmap, SC2720_ANA_DCL4, 0xffffU);
 	if (ret)
 		goto restore_routes;
-	ret = ums9117_adi_write_once(SC2720_ANA_DCL6, 0x4cd8U);
+	ret = regmap_write(codec->regmap, SC2720_ANA_DCL6, 0x4cd8U);
 	if (ret)
 		goto restore_routes;
-	ret = ums9117_adi_write_once(SC2720_ANA_DCL7, 0x2e6cU);
+	ret = regmap_write(codec->regmap, SC2720_ANA_DCL7, 0x2e6cU);
 	if (ret)
 		goto restore_routes;
-	ret = ums9117_adi_write_once(SC2720_ANA_STS0, 0xa820U);
+	ret = regmap_write(codec->regmap, SC2720_ANA_STS0, 0xa820U);
 	if (ret)
 		goto restore_routes;
 	usleep_range(2000, 3000);
-	ret = ums9117_sc2720_codec_sts2_update(SC2720_CALDC_START, 0);
+	ret = ums9117_sc2720_codec_sts2_update(codec, SC2720_CALDC_START, 0);
 	if (ret)
 		goto restore_routes;
-	ret = ums9117_sc2720_codec_sts2_update(SC2720_CALDC_START,
+	ret = ums9117_sc2720_codec_sts2_update(codec, SC2720_CALDC_START,
 					       SC2720_CALDC_START);
 	if (ret)
 		goto restore_routes;
-	ret = ums9117_adi_write_final_once(
-		SC2720_ANA_STS2,
-		SC2720_CALDC_START | SC2720_CALDC_EN | SC2720_CALDC_ENO);
+	ret = regmap_write(codec->regmap, SC2720_ANA_STS2,
+			   SC2720_CALDC_START | SC2720_CALDC_EN |
+				   SC2720_CALDC_ENO);
 	if (ret)
 		goto restore_routes;
 	ret = ums9117_sc2720_codec_wait_dc_calibration(codec);
 	if (ret)
 		goto restore_routes;
 
-	ret = ums9117_adi_write_once(SC2720_ANA_CDC2, 0);
+	ret = regmap_write(codec->regmap, SC2720_ANA_CDC2, 0);
 	if (ret)
 		goto restore_routes;
 	ret = ums9117_sc2720_codec_wait_depop_valid(codec);
 	if (ret)
 		goto restore_routes;
-	ret = ums9117_sc2720_codec_sts2_update(SC2720_DEPOP_CHARGE_EN,
+	ret = ums9117_sc2720_codec_sts2_update(codec, SC2720_DEPOP_CHARGE_EN,
 					       SC2720_DEPOP_CHARGE_EN);
 	if (ret)
 		goto restore_routes;
-	ret = ums9117_sc2720_codec_sts2_update(SC2720_PLUGIN, SC2720_PLUGIN);
+	ret = ums9117_sc2720_codec_sts2_update(codec, SC2720_PLUGIN,
+					       SC2720_PLUGIN);
 	if (ret)
 		goto restore_routes;
-	ret = ums9117_sc2720_codec_sts2_update(SC2720_DEPOP_EN,
+	ret = ums9117_sc2720_codec_sts2_update(codec, SC2720_DEPOP_EN,
 					       SC2720_DEPOP_EN);
 	if (ret)
 		goto restore_routes;
 	usleep_range(2000, 3000);
-	ret = ums9117_sc2720_codec_sts2_update(SC2720_DEPOP_CHARGE_START,
+	ret = ums9117_sc2720_codec_sts2_update(codec, SC2720_DEPOP_CHARGE_START,
 					       SC2720_DEPOP_CHARGE_START);
 	if (ret)
 		goto restore_routes;
 	ret = ums9117_sc2720_codec_wait_depop_charge(codec);
 
 restore_routes:
-	restore_ret = ums9117_adi_write_once(SC2720_ANA_CDC2, saved_cdc2);
-	ums9117_adi_record_first_error(&restore_error, restore_ret);
-	restore_ret = ums9117_adi_write_once(SC2720_ANA_CDC3, saved_cdc3);
-	ums9117_adi_record_first_error(&restore_error, restore_ret);
+	restore_ret = regmap_write(codec->regmap, SC2720_ANA_CDC2, saved_cdc2);
+	restore_error = restore_error ?: restore_ret;
+	restore_ret = regmap_write(codec->regmap, SC2720_ANA_CDC3, saved_cdc3);
+	restore_error = restore_error ?: restore_ret;
 	if (!restore_error)
 		return ret;
 	if (ret) {
@@ -737,14 +744,15 @@ restore_routes:
 	return restore_error;
 }
 
-static int ums9117_sc2720_codec_apply_volume(unsigned int left,
+static int ums9117_sc2720_codec_apply_volume(struct ums9117_sc2720_codec *codec,
+					     unsigned int left,
 					     unsigned int right)
 {
 	u16 gain = (sc2720_hp_gain[left] << SC2720_HPL_GAIN_SHIFT) |
 		   sc2720_hp_gain[right];
 
-	return ums9117_adi_update_bits_once(SC2720_ANA_CDC4,
-					    SC2720_HP_GAIN_MASK, gain);
+	return regmap_update_bits(codec->regmap, SC2720_ANA_CDC4,
+				  SC2720_HP_GAIN_MASK, gain);
 }
 
 void ums9117_sc2720_codec_get_volume(struct ums9117_sc2720_codec *codec,
@@ -762,7 +770,7 @@ int ums9117_sc2720_codec_set_volume(struct ums9117_sc2720_codec *codec,
 	if (left == codec->volume_left && right == codec->volume_right)
 		return 0;
 	if (codec->enabled) {
-		ret = ums9117_sc2720_codec_apply_volume(left, right);
+		ret = ums9117_sc2720_codec_apply_volume(codec, left, right);
 		if (ret)
 			return ret;
 	}
@@ -777,72 +785,72 @@ ums9117_sc2720_codec_open_headphones(struct ums9117_sc2720_codec *codec)
 	int ret;
 
 	msleep(80);
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC2, SC2720_HPL_EN,
-					   SC2720_HPL_EN);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2, SC2720_HPL_EN,
+				 SC2720_HPL_EN);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC2, SC2720_HPR_EN,
-					   SC2720_HPR_EN);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2, SC2720_HPR_EN,
+				 SC2720_HPR_EN);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC2, SC2720_HP_BUFFER_EN,
-					   SC2720_HP_BUFFER_EN);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2,
+				 SC2720_HP_BUFFER_EN, SC2720_HP_BUFFER_EN);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(
-		SC2720_ANA_CDC2, SC2720_HPL_DUMMY_LOOP, SC2720_HPL_DUMMY_LOOP);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2,
+				 SC2720_HPL_DUMMY_LOOP, SC2720_HPL_DUMMY_LOOP);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(
-		SC2720_ANA_CDC2, SC2720_HPR_DUMMY_LOOP, SC2720_HPR_DUMMY_LOOP);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2,
+				 SC2720_HPR_DUMMY_LOOP, SC2720_HPR_DUMMY_LOOP);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC2,
-					   SC2720_HPL_DUMMY_LOOP_END, 0);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2,
+				 SC2720_HPL_DUMMY_LOOP_END, 0);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC2,
-					   SC2720_HPR_DUMMY_LOOP_END, 0);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2,
+				 SC2720_HPR_DUMMY_LOOP_END, 0);
 	if (ret)
 		return ret;
 	usleep_range(1000, 2000);
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC2,
-					   SC2720_HPL_DUMMY_LOOP, 0);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2,
+				 SC2720_HPL_DUMMY_LOOP, 0);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC2,
-					   SC2720_HPR_DUMMY_LOOP, 0);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2,
+				 SC2720_HPR_DUMMY_LOOP, 0);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC2,
-					   SC2720_HPL_DUMMY_LOOP_END,
-					   SC2720_HPL_DUMMY_LOOP_END);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2,
+				 SC2720_HPL_DUMMY_LOOP_END,
+				 SC2720_HPL_DUMMY_LOOP_END);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC2,
-					   SC2720_HPR_DUMMY_LOOP_END,
-					   SC2720_HPR_DUMMY_LOOP_END);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2,
+				 SC2720_HPR_DUMMY_LOOP_END,
+				 SC2720_HPR_DUMMY_LOOP_END);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC2,
-					   SC2720_DAC_EN_L_ANALOG,
-					   SC2720_DAC_EN_L_ANALOG);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2,
+				 SC2720_DAC_EN_L_ANALOG,
+				 SC2720_DAC_EN_L_ANALOG);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC2,
-					   SC2720_DAC_EN_R_ANALOG,
-					   SC2720_DAC_EN_R_ANALOG);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2,
+				 SC2720_DAC_EN_R_ANALOG,
+				 SC2720_DAC_EN_R_ANALOG);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC3, SC2720_DACL_TO_HPL,
-					   SC2720_DACL_TO_HPL);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC3,
+				 SC2720_DACL_TO_HPL, SC2720_DACL_TO_HPL);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC3, SC2720_DACR_TO_HPR,
-					   SC2720_DACR_TO_HPR);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC3,
+				 SC2720_DACR_TO_HPR, SC2720_DACR_TO_HPR);
 	if (ret)
 		return ret;
-	return ums9117_sc2720_codec_apply_volume(codec->volume_left,
+	return ums9117_sc2720_codec_apply_volume(codec, codec->volume_left,
 						 codec->volume_right);
 }
 
@@ -858,9 +866,7 @@ int ums9117_sc2720_codec_prepare(struct ums9117_sc2720_codec *codec)
 		if (ret)
 			return ret;
 	}
-	if (ums9117_adi_is_poisoned())
-		return -EIO;
-	ret = ums9117_sc2720_codec_check_identity();
+	ret = ums9117_sc2720_codec_check_identity(codec);
 	if (ret)
 		return ret;
 	ret = ums9117_sc2720_codec_snapshot(codec);
@@ -871,11 +877,12 @@ int ums9117_sc2720_codec_prepare(struct ums9117_sc2720_codec *codec)
 		return ret;
 
 	/* The analog audio clocks also require the shared 26 MHz output. */
-	ret = ums9117_adi_xtal_acquire(&codec->xtal_held);
+	ret = clk_prepare_enable(codec->xtal);
 	if (ret)
-		goto release_xtal;
+		return ret;
+	codec->xtal_held = true;
 	codec->dirty = true;
-	ret = ums9117_sc2720_codec_power_up();
+	ret = ums9117_sc2720_codec_power_up(codec);
 	if (!ret)
 		ret = ums9117_sc2720_codec_calibrate_headphones(codec);
 	if (ret) {
@@ -888,16 +895,6 @@ int ums9117_sc2720_codec_prepare(struct ums9117_sc2720_codec *codec)
 	}
 	codec->prepared = true;
 	return 0;
-
-release_xtal:
-	if (codec->xtal_held) {
-		restore_ret = ums9117_adi_xtal_release(&codec->xtal_held);
-		if (restore_ret)
-			dev_err(codec->dev,
-				"cannot release audio clock after prepare error: %d\n",
-				restore_ret);
-	}
-	return ret;
 }
 
 int ums9117_sc2720_codec_enable(struct ums9117_sc2720_codec *codec)
@@ -911,24 +908,23 @@ int ums9117_sc2720_codec_enable(struct ums9117_sc2720_codec *codec)
 		return -EINVAL;
 
 	/* Reopen only the playback pieces; the calibrated base stays powered. */
-	ret = ums9117_adi_update_bits_once(
-		SC2720_ANA_PMU0, SC2720_AUD_BG_EN | SC2720_AUD_VB_SLEEP_PD,
-		SC2720_AUD_BG_EN | SC2720_AUD_VB_SLEEP_PD);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_PMU0,
+				 SC2720_AUD_BG_EN | SC2720_AUD_VB_SLEEP_PD,
+				 SC2720_AUD_BG_EN | SC2720_AUD_VB_SLEEP_PD);
 	if (ret)
 		goto failed;
 	usleep_range(5000, 6000);
-	ret = ums9117_adi_update_bits_once(
-		SC2720_ANA_CLK0, SC2720_DA_CLK_EN | SC2720_DRV_CLK_EN,
-		SC2720_DA_CLK_EN | SC2720_DRV_CLK_EN);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CLK0,
+				 SC2720_DA_CLK_EN | SC2720_DRV_CLK_EN,
+				 SC2720_DA_CLK_EN | SC2720_DRV_CLK_EN);
 	if (ret)
 		goto failed;
-	ret = ums9117_adi_update_bits_once(SC2720_AUD_CFGA_LP_MODULE_CTRL,
-					   SC2720_DAC_ENABLE,
-					   SC2720_DAC_ENABLE);
+	ret = regmap_update_bits(codec->regmap, SC2720_AUD_CFGA_LP_MODULE_CTRL,
+				 SC2720_DAC_ENABLE, SC2720_DAC_ENABLE);
 	if (ret)
 		goto failed;
-	ret = ums9117_adi_update_bits_once(
-		SC2720_ANA_CDC3, SC2720_DALR_OFFSET_EN, SC2720_DALR_OFFSET_EN);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC3,
+				 SC2720_DALR_OFFSET_EN, SC2720_DALR_OFFSET_EN);
 	if (ret)
 		goto failed;
 	ret = ums9117_sc2720_codec_open_headphones(codec);
@@ -938,7 +934,7 @@ int ums9117_sc2720_codec_enable(struct ums9117_sc2720_codec *codec)
 	return 0;
 
 failed:
-	close_ret = ums9117_sc2720_codec_close_headphones();
+	close_ret = ums9117_sc2720_codec_close_headphones(codec);
 	if (close_ret)
 		dev_err(codec->dev,
 			"cannot close headphones after enable error: %d\n",
@@ -953,23 +949,23 @@ int ums9117_sc2720_codec_stop(struct ums9117_sc2720_codec *codec)
 	if (!codec->prepared)
 		return 0;
 
-	ret = ums9117_sc2720_codec_close_headphones();
+	ret = ums9117_sc2720_codec_close_headphones(codec);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_AUD_CFGA_LP_MODULE_CTRL,
-					   SC2720_DAC_ENABLE, 0);
+	ret = regmap_update_bits(codec->regmap, SC2720_AUD_CFGA_LP_MODULE_CTRL,
+				 SC2720_DAC_ENABLE, 0);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(SC2720_ANA_CDC3,
-					   SC2720_DALR_OFFSET_EN, 0);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC3,
+				 SC2720_DALR_OFFSET_EN, 0);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(
-		SC2720_ANA_CLK0, SC2720_DA_CLK_EN | SC2720_DRV_CLK_EN, 0);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CLK0,
+				 SC2720_DA_CLK_EN | SC2720_DRV_CLK_EN, 0);
 	if (ret)
 		return ret;
-	ret = ums9117_adi_update_bits_once(
-		SC2720_ANA_PMU0, SC2720_AUD_BG_EN | SC2720_AUD_VB_SLEEP_PD, 0);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_PMU0,
+				 SC2720_AUD_BG_EN | SC2720_AUD_VB_SLEEP_PD, 0);
 	if (ret)
 		return ret;
 	codec->enabled = false;
@@ -1001,6 +997,16 @@ struct ums9117_sc2720_codec *ums9117_sc2720_codec_create(struct device *dev)
 	if (!codec)
 		return ERR_PTR(-ENOMEM);
 	codec->dev = dev;
+	codec->regmap =
+		syscon_regmap_lookup_by_phandle(dev->of_node, "sprd,pmic");
+	if (IS_ERR(codec->regmap)) {
+		/* The SPI PMIC publishes its regmap after probing, not via MMIO. */
+		ret = PTR_ERR(codec->regmap);
+		return ERR_PTR(ret == -EINVAL ? -EPROBE_DEFER : ret);
+	}
+	codec->xtal = devm_clk_get(dev, "xtal");
+	if (IS_ERR(codec->xtal))
+		return ERR_CAST(codec->xtal);
 	codec->volume_left = SC2720_HP_VOLUME_DEFAULT;
 	codec->volume_right = SC2720_HP_VOLUME_DEFAULT;
 	ret = devm_add_action_or_reset(dev, ums9117_sc2720_codec_release,

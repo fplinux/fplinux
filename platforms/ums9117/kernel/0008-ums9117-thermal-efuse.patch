@@ -1,0 +1,948 @@
+diff --git a/drivers/nvmem/Kconfig b/drivers/nvmem/Kconfig
+index 11b0987..baf7268 100644
+--- a/drivers/nvmem/Kconfig
++++ b/drivers/nvmem/Kconfig
+@@ -366,7 +366,7 @@ config NVMEM_SPMI_SDAM
+
+ config NVMEM_SPRD_EFUSE
+ 	tristate "Spreadtrum SoC eFuse Support"
+-	depends on ARCH_SPRD || COMPILE_TEST
++	depends on ARCH_SPRD || ARCH_UMS9117 || COMPILE_TEST
+ 	depends on HAS_IOMEM
+ 	help
+ 	  This is a simple driver to dump specified values of Spreadtrum
+diff --git a/drivers/nvmem/sprd-efuse.c b/drivers/nvmem/sprd-efuse.c
+index 1a7e4e5..c2698ab 100644
+--- a/drivers/nvmem/sprd-efuse.c
++++ b/drivers/nvmem/sprd-efuse.c
+@@ -10,6 +10,7 @@
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
+
++#define SPRD_EFUSE_IP_VER 0x14
+ #define SPRD_EFUSE_ENABLE		0x20
+ #define SPRD_EFUSE_ERR_FLAG		0x24
+ #define SPRD_EFUSE_ERR_CLR		0x28
+@@ -42,6 +43,15 @@
+  */
+ #define SPRD_EFUSE_NORMAL_BLOCK_NUMS	24
+ #define SPRD_EFUSE_NORMAL_BLOCK_OFFSET	72
++#define UMS9117_EFUSE_NORMAL_BLOCK_NUMS 0x48
++#define UMS9117_EFUSE_IP_VERSION 0x0800
++#define UMS9117_EFUSE_IP_TYPE_MASK GENMASK(17, 16)
++#define UMS9117_EFUSE_READ_MODE_MASK (SPRD_EFUSE_VDD_EN | SPRD_EFUSE_DOUBLE_EN)
++#define UMS9117_EFUSE_POWER_MODE_MASK \
++	(SPRD_EFUSE_ENK1_ON | SPRD_EFUSE_ENK2_ON | SPRD_EFUSE_PROG_EN)
++#define UMS9117_EFUSE_POWER_READ_MODE SPRD_EFUSE_ENK2_ON
++#define UMS9117_EFUSE_SETTLE_MIN_US 2000
++#define UMS9117_EFUSE_SETTLE_MAX_US 2500
+
+ /* Timeout (ms) for the trylock of hardware spinlocks */
+ #define SPRD_EFUSE_HWLOCK_TIMEOUT	5000
+@@ -58,6 +68,16 @@ struct sprd_efuse_variant_data {
+ 	u32 blk_nums;
+ 	u32 blk_offset;
+ 	bool blk_double;
++	bool guarded_read;
++	bool read_only;
++	bool root_only;
++};
++
++struct sprd_efuse_read_state {
++	u32 enable;
++	u32 error;
++	u32 magic;
++	u32 power;
+ };
+
+ struct sprd_efuse {
+@@ -75,6 +95,15 @@ static const struct sprd_efuse_variant_data ums312_data = {
+ 	.blk_double = false,
+ };
+
++static const struct sprd_efuse_variant_data ums9117_data = {
++	.blk_nums = UMS9117_EFUSE_NORMAL_BLOCK_NUMS,
++	.blk_offset = 0,
++	.blk_double = true,
++	.guarded_read = true,
++	.read_only = true,
++	.root_only = true,
++};
++
+ /*
+  * On Spreadtrum platform, we have multi-subsystems will access the unique
+  * efuse controller, so we need one hardware spinlock to synchronize between
+@@ -291,6 +320,124 @@ static int sprd_efuse_raw_read(struct sprd_efuse *efuse, int blk, u32 *val,
+ 	return 0;
+ }
+
++static int sprd_efuse_ums9117_snapshot(struct sprd_efuse *efuse,
++				       struct sprd_efuse_read_state *state)
++{
++	u32 version;
++
++	version = readl(efuse->base + SPRD_EFUSE_IP_VER);
++	if ((version & GENMASK(15, 0)) != UMS9117_EFUSE_IP_VERSION ||
++	    (version & UMS9117_EFUSE_IP_TYPE_MASK))
++		return -ENODEV;
++
++	state->enable = readl(efuse->base + SPRD_EFUSE_ENABLE);
++	state->error = readl(efuse->base + SPRD_EFUSE_ERR_FLAG);
++	state->magic = readl(efuse->base + SPRD_EFUSE_MAGIC_NUM);
++	state->power = readl(efuse->base + SPRD_EFUSE_PW_SWT);
++
++	if (state->enable || state->magic ||
++	    (state->power & UMS9117_EFUSE_POWER_MODE_MASK) !=
++		    UMS9117_EFUSE_POWER_READ_MODE)
++		return -EBUSY;
++	if (state->error & SPRD_EFUSE_ERR_CLR_MASK)
++		return -EUCLEAN;
++
++	return 0;
++}
++
++static int sprd_efuse_ums9117_restore(struct sprd_efuse *efuse,
++				      const struct sprd_efuse_read_state *state)
++{
++	u32 enable;
++	u32 restored;
++	int ret = 0;
++
++	enable = readl(efuse->base + SPRD_EFUSE_ENABLE);
++	/* Never clear modes that this read path did not enable. */
++	restored = (enable & ~UMS9117_EFUSE_READ_MODE_MASK) |
++		   (state->enable & UMS9117_EFUSE_READ_MODE_MASK);
++	writel(restored, efuse->base + SPRD_EFUSE_ENABLE);
++	/* Complete mode restoration before its confirming register read. */
++	wmb();
++	enable = readl(efuse->base + SPRD_EFUSE_ENABLE);
++	if ((enable & UMS9117_EFUSE_READ_MODE_MASK) !=
++	    (state->enable & UMS9117_EFUSE_READ_MODE_MASK))
++		ret = -EIO;
++
++	usleep_range(UMS9117_EFUSE_SETTLE_MIN_US, UMS9117_EFUSE_SETTLE_MAX_US);
++	enable = readl(efuse->base + SPRD_EFUSE_ENABLE);
++	if ((enable & UMS9117_EFUSE_READ_MODE_MASK) !=
++	    (state->enable & UMS9117_EFUSE_READ_MODE_MASK))
++		ret = -EIO;
++	else if ((enable & ~UMS9117_EFUSE_READ_MODE_MASK) !=
++		 (state->enable & ~UMS9117_EFUSE_READ_MODE_MASK))
++		ret = -EBUSY;
++	if (readl(efuse->base + SPRD_EFUSE_MAGIC_NUM) != state->magic ||
++	    (readl(efuse->base + SPRD_EFUSE_PW_SWT) &
++	     UMS9117_EFUSE_POWER_MODE_MASK) !=
++		    (state->power & UMS9117_EFUSE_POWER_MODE_MASK)) {
++		if (!ret)
++			ret = -EBUSY;
++	}
++
++	return ret;
++}
++
++static int sprd_efuse_ums9117_raw_read(struct sprd_efuse *efuse, int blk,
++				       u32 *val, bool double_read)
++{
++	struct sprd_efuse_read_state state;
++	u32 enable;
++	u32 status;
++	int cleanup_ret;
++	int ret;
++
++	ret = sprd_efuse_ums9117_snapshot(efuse, &state);
++	if (ret)
++		return ret;
++
++	enable = (state.enable & ~UMS9117_EFUSE_READ_MODE_MASK) |
++		 SPRD_EFUSE_VDD_EN;
++	if (double_read)
++		enable |= SPRD_EFUSE_DOUBLE_EN;
++	writel(enable, efuse->base + SPRD_EFUSE_ENABLE);
++	/* Complete mode setup before reading the fuse array. */
++	wmb();
++	if (readl(efuse->base + SPRD_EFUSE_ENABLE) != enable) {
++		ret = -EIO;
++		goto restore;
++	}
++
++	usleep_range(UMS9117_EFUSE_SETTLE_MIN_US, UMS9117_EFUSE_SETTLE_MAX_US);
++	if (readl(efuse->base + SPRD_EFUSE_ENABLE) != enable) {
++		ret = -EIO;
++		goto restore;
++	}
++
++	*val = readl(efuse->base + SPRD_EFUSE_MEM(blk));
++	status = readl(efuse->base + SPRD_EFUSE_ERR_FLAG);
++	if ((status & SPRD_EFUSE_ERR_CLR_MASK) !=
++	    (state.error & SPRD_EFUSE_ERR_CLR_MASK)) {
++		/* Preserve the error flags for explicit recovery and diagnosis. */
++		dev_err(efuse->dev, "read error status %#x of block %d\n",
++			status, blk);
++		ret = -EUCLEAN;
++	} else {
++		ret = 0;
++	}
++
++restore:
++	cleanup_ret = sprd_efuse_ums9117_restore(efuse, &state);
++	if (cleanup_ret) {
++		dev_err(efuse->dev, "failed to restore read state: %d\n",
++			cleanup_ret);
++		if (!ret)
++			ret = cleanup_ret;
++	}
++
++	return ret;
++}
++
+ static int sprd_efuse_read(void *context, u32 offset, void *val, size_t bytes)
+ {
+ 	struct sprd_efuse *efuse = context;
+@@ -308,7 +455,11 @@ static int sprd_efuse_read(void *context, u32 offset, void *val, size_t bytes)
+ 	if (ret)
+ 		goto unlock;
+
+-	ret = sprd_efuse_raw_read(efuse, index, &data, blk_double);
++	if (efuse->data->guarded_read)
++		ret = sprd_efuse_ums9117_raw_read(efuse, index, &data,
++						  blk_double);
++	else
++		ret = sprd_efuse_raw_read(efuse, index, &data, blk_double);
+ 	if (!ret) {
+ 		data >>= blk_offset;
+ 		memcpy(val, &data, bytes);
+@@ -405,12 +556,13 @@ static int sprd_efuse_probe(struct platform_device *pdev)
+
+ 	econfig.stride = 1;
+ 	econfig.word_size = 1;
+-	econfig.read_only = false;
++	econfig.read_only = efuse->data->read_only;
++	econfig.root_only = efuse->data->root_only;
+ 	econfig.name = "sprd-efuse";
+ 	econfig.size = efuse->data->blk_nums * SPRD_EFUSE_BLOCK_WIDTH;
+ 	econfig.add_legacy_fixed_of_cells = true;
+ 	econfig.reg_read = sprd_efuse_read;
+-	econfig.reg_write = sprd_efuse_write;
++	econfig.reg_write = efuse->data->read_only ? NULL : sprd_efuse_write;
+ 	econfig.priv = efuse;
+ 	econfig.dev = &pdev->dev;
+ 	nvmem = devm_nvmem_register(&pdev->dev, &econfig);
+@@ -423,8 +575,9 @@ static int sprd_efuse_probe(struct platform_device *pdev)
+ }
+
+ static const struct of_device_id sprd_efuse_of_match[] = {
++	{ .compatible = "sprd,ums9117-efuse", .data = &ums9117_data },
+ 	{ .compatible = "sprd,ums312-efuse", .data = &ums312_data },
+-	{ }
++	{}
+ };
+ MODULE_DEVICE_TABLE(of, sprd_efuse_of_match);
+
+diff --git a/drivers/thermal/Kconfig b/drivers/thermal/Kconfig
+index a09c188..d74d85f 100644
+--- a/drivers/thermal/Kconfig
++++ b/drivers/thermal/Kconfig
+@@ -490,7 +490,8 @@ config UNIPHIER_THERMAL
+
+ config SPRD_THERMAL
+ 	tristate "Temperature sensor on Spreadtrum SoCs"
+-	depends on ARCH_SPRD || COMPILE_TEST
++	depends on ARCH_SPRD || ARCH_UMS9117 || COMPILE_TEST
++	depends on THERMAL_OF
+ 	help
+ 	  Support for the Spreadtrum thermal sensor driver in the Linux thermal
+ 	  framework.
+diff --git a/drivers/thermal/sprd_thermal.c b/drivers/thermal/sprd_thermal.c
+index 44fa45f..1eab825 100644
+--- a/drivers/thermal/sprd_thermal.c
++++ b/drivers/thermal/sprd_thermal.c
+@@ -1,14 +1,17 @@
+ // SPDX-License-Identifier: GPL-2.0
+ // Copyright (C) 2020 Spreadtrum Communications Inc.
+
++#include <linux/bitfield.h>
+ #include <linux/clk.h>
+ #include <linux/io.h>
+ #include <linux/iopoll.h>
++#include <linux/math64.h>
+ #include <linux/module.h>
+ #include <linux/nvmem-consumer.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
+ #include <linux/slab.h>
++#include <linux/suspend.h>
+ #include <linux/thermal.h>
+
+ #define SPRD_THM_CTL			0x0
+@@ -45,6 +48,29 @@
+ /* bits definitions for register SPRD_THM_INTERNAL_STS1 */
+ #define SPRD_THM_TEMPER_RDY		BIT(0)
+
++/* UMS9117 controller state inherited from the firmware handoff. */
++#define UMS9117_THM_VERSION 0xfc
++#define UMS9117_THM_EXPECTED_VERSION 0x400
++#define UMS9117_THM_CTL_SENSOR_MASK GENMASK(9, 2)
++#define UMS9117_THM_CTL_UNNORMAL_INT_MODE BIT(10)
++#define UMS9117_THM_CTL_SOFT_RESET BIT(11)
++#define UMS9117_THM_CTL_RESET_ST GENMASK(15, 14)
++#define UMS9117_THM_CTL_CONFIG_MASK GENMASK(11, 0)
++#define UMS9117_THM_CTL_GUARD_MASK                                        \
++	(SPRD_THM_EN | SPRD_THM_MON_EN | UMS9117_THM_CTL_SENSOR_MASK |    \
++	 UMS9117_THM_CTL_UNNORMAL_INT_MODE | UMS9117_THM_CTL_SOFT_RESET | \
++	 SPRD_THM_SET_RDY | SPRD_THM_SET_RDY_ST | UMS9117_THM_CTL_RESET_ST)
++#define UMS9117_THM_CTL_ACTIVE (SPRD_THM_EN | SPRD_THM_MON_EN | SPRD_THM_SEN(0))
++#define UMS9117_THM_CAL_MASK GENMASK(30, 16)
++#define UMS9117_THM_CAL_RATIO_MASK GENMASK(23, 17)
++#define UMS9117_THM_CAL_RATIO_SIGN BIT(16)
++#define UMS9117_THM_CAL_DELTA_MASK GENMASK(30, 24)
++#define UMS9117_THM_CAL_RATIO_BASE 1000
++#define UMS9117_THM_CAL_DELTA_BASE 64
++#define UMS9117_THM_CAL_DELTA_STEP 500
++#define UMS9117_THM_TEMP_LOW -20000
++#define UMS9117_THM_TEMP_HIGH 125000
++
+ #define SPRD_THM_DET_PERIOD_DATA	0x800
+ #define SPRD_THM_DET_PERIOD_MASK	GENMASK(19, 0)
+ #define SPRD_THM_MON_MODE		0x7
+@@ -78,17 +104,26 @@ struct sprd_thermal_sensor {
+ 	struct device *dev;
+ 	int cal_slope;
+ 	int cal_offset;
++	u32 cal_ratio;
+ 	int id;
+ };
+
+ struct sprd_thermal_data {
+ 	const struct sprd_thm_variant_data *var_data;
+ 	struct sprd_thermal_sensor *sensor[SPRD_THM_MAX_SENSOR];
++	struct device *dev;
+ 	struct clk *clk;
++	struct clk *rtc_clk;
+ 	void __iomem *base;
+ 	u32 ratio_off;
+ 	int ratio_sign;
+ 	int nr_sensors;
++	u32 initial_ctl;
++	u32 initial_mon_ctl;
++	u32 expected_ctl;
++	u32 expected_mon_ctl;
++	bool initial_state_saved;
++	bool hw_suspended;
+ };
+
+ /*
+@@ -101,11 +136,41 @@ struct sprd_thermal_data {
+ struct sprd_thm_variant_data {
+ 	u32 ideal_k;
+ 	u32 ideal_b;
++	u32 raw_data_high;
++	u32 temp_ready_timeout_us;
++	u8 max_sensors;
++	bool ready_active_high;
++	bool combined_calibration;
++	bool has_rtc_clock;
++	bool observer_only;
++	bool preserve_initial_state;
++	bool keep_active_in_s2idle;
++	bool validate_temp_range;
++	bool wait_set_ready;
+ };
+
+ static const struct sprd_thm_variant_data ums512_data = {
+ 	.ideal_k = 262,
+ 	.ideal_b = 66400,
++	.raw_data_high = SPRD_THM_RAW_DATA_HIGH,
++	.temp_ready_timeout_us = SPRD_THM_TEMP_READY_TIMEOUT,
++	.max_sensors = SPRD_THM_MAX_SENSOR,
++};
++
++static const struct sprd_thm_variant_data ums9117_data = {
++	.ideal_k = 912,
++	.ideal_b = 72396,
++	.raw_data_high = SPRD_THM_RAW_READ_MSK,
++	.temp_ready_timeout_us = 2000000,
++	.max_sensors = 1,
++	.ready_active_high = true,
++	.combined_calibration = true,
++	.has_rtc_clock = true,
++	.observer_only = true,
++	.preserve_initial_state = true,
++	.keep_active_in_s2idle = true,
++	.validate_temp_range = true,
++	.wait_set_ready = true,
+ };
+
+ static inline void sprd_thm_update_bits(void __iomem *reg, u32 mask, u32 val)
+@@ -118,6 +183,105 @@ static inline void sprd_thm_update_bits(void __iomem *reg, u32 mask, u32 val)
+ 	writel(tmp, reg);
+ }
+
++static void sprd_thm_update_ctl_bits(struct sprd_thermal_data *thm, u32 mask,
++				     u32 val)
++{
++	sprd_thm_update_bits(thm->base + SPRD_THM_CTL, mask, val);
++	if (thm->initial_state_saved)
++		thm->expected_ctl = (thm->expected_ctl & ~mask) | (val & mask);
++}
++
++static void sprd_thm_update_mon_bits(struct sprd_thermal_data *thm, u32 mask,
++				     u32 val)
++{
++	sprd_thm_update_bits(thm->base + SPRD_THM_MON_CTL, mask, val);
++	if (thm->initial_state_saved)
++		thm->expected_mon_ctl = (thm->expected_mon_ctl & ~mask) |
++					(val & mask);
++}
++
++static int sprd_thm_save_initial_state(struct sprd_thermal_data *thm)
++{
++	const struct sprd_thm_variant_data *data = thm->var_data;
++	u32 version;
++
++	if (!data->preserve_initial_state)
++		return 0;
++
++	version = readl(thm->base + UMS9117_THM_VERSION);
++	if (version != UMS9117_THM_EXPECTED_VERSION)
++		return -ENODEV;
++
++	thm->initial_ctl = readl(thm->base + SPRD_THM_CTL);
++	thm->initial_mon_ctl = readl(thm->base + SPRD_THM_MON_CTL);
++	if ((thm->initial_ctl & UMS9117_THM_CTL_GUARD_MASK) !=
++		    SPRD_THM_SEN(0) ||
++	    readl(thm->base + SPRD_THM_INT_EN) ||
++	    (thm->initial_mon_ctl & SPRD_THM_MON_MODE_MASK))
++		return -EBUSY;
++
++	thm->expected_ctl = thm->initial_ctl;
++	thm->expected_mon_ctl = thm->initial_mon_ctl;
++	thm->initial_state_saved = true;
++
++	return 0;
++}
++
++static int sprd_thm_restore_initial_state(struct sprd_thermal_data *thm)
++{
++	u32 ctl;
++	u32 mon_ctl;
++	int ret;
++
++	if (!thm->initial_state_saved)
++		return 0;
++
++	ctl = readl(thm->base + SPRD_THM_CTL);
++	mon_ctl = readl(thm->base + SPRD_THM_MON_CTL);
++	if ((ctl & UMS9117_THM_CTL_GUARD_MASK) !=
++		    (thm->expected_ctl & UMS9117_THM_CTL_CONFIG_MASK) ||
++	    (mon_ctl & SPRD_THM_MON_MODE_MASK) !=
++		    (thm->expected_mon_ctl & SPRD_THM_MON_MODE_MASK))
++		return -EBUSY;
++
++	sprd_thm_update_bits(thm->base + SPRD_THM_CTL, SPRD_THM_EN, 0);
++	sprd_thm_update_bits(thm->base + SPRD_THM_MON_CTL,
++			     SPRD_THM_MON_MODE_MASK, thm->initial_mon_ctl);
++	sprd_thm_update_bits(thm->base + SPRD_THM_CTL,
++			     UMS9117_THM_CTL_CONFIG_MASK, thm->initial_ctl);
++	sprd_thm_update_bits(thm->base + SPRD_THM_CTL, SPRD_THM_SET_RDY,
++			     SPRD_THM_SET_RDY);
++
++	ret = readl_poll_timeout(thm->base + SPRD_THM_CTL, ctl,
++				 !(ctl & SPRD_THM_SET_RDY_ST),
++				 SPRD_THM_RDYST_POLLING_TIME,
++				 SPRD_THM_RDYST_TIMEOUT);
++	if (ret)
++		return ret;
++
++	ctl = readl(thm->base + SPRD_THM_CTL);
++	mon_ctl = readl(thm->base + SPRD_THM_MON_CTL);
++	if ((ctl & UMS9117_THM_CTL_CONFIG_MASK) !=
++		    (thm->initial_ctl & UMS9117_THM_CTL_CONFIG_MASK) ||
++	    (mon_ctl & SPRD_THM_MON_MODE_MASK) !=
++		    (thm->initial_mon_ctl & SPRD_THM_MON_MODE_MASK))
++		return -EIO;
++
++	thm->initial_state_saved = false;
++	return 0;
++}
++
++static void sprd_thm_restore_initial_state_action(void *data)
++{
++	struct sprd_thermal_data *thm = data;
++	int ret;
++
++	ret = sprd_thm_restore_initial_state(thm);
++	if (ret)
++		dev_err(thm->dev,
++			"failed to restore inherited thermal state: %d\n", ret);
++}
++
+ static int sprd_thm_cal_read(struct device_node *np, const char *cell_id,
+ 			     u32 *val)
+ {
+@@ -149,6 +313,11 @@ static int sprd_thm_sensor_calibration(struct device_node *np,
+ 				       struct sprd_thermal_data *thm,
+ 				       struct sprd_thermal_sensor *sen)
+ {
++	const struct sprd_thm_variant_data *data = thm->var_data;
++	u32 calibration;
++	u32 delta;
++	u32 ratio_offset;
++	u32 cal_ratio;
+ 	int ret;
+ 	/*
+ 	 * According to thermal datasheet, the default calibration offset is 64,
+@@ -156,6 +325,37 @@ static int sprd_thm_sensor_calibration(struct device_node *np,
+ 	 */
+ 	int dt_offset = 64, ratio = 1000;
+
++	if (data->combined_calibration) {
++		calibration = 0;
++		ret = sprd_thm_cal_read(sen->dev->of_node, "thm_cal",
++					&calibration);
++		if (ret)
++			return ret;
++
++		cal_ratio = UMS9117_THM_CAL_RATIO_BASE;
++		delta = UMS9117_THM_CAL_DELTA_BASE;
++		if (calibration & UMS9117_THM_CAL_MASK) {
++			ratio_offset = FIELD_GET(UMS9117_THM_CAL_RATIO_MASK,
++						 calibration);
++			if (calibration & UMS9117_THM_CAL_RATIO_SIGN)
++				cal_ratio += ratio_offset;
++			else
++				cal_ratio -= ratio_offset;
++			delta = FIELD_GET(UMS9117_THM_CAL_DELTA_MASK,
++					  calibration);
++		}
++
++		sen->cal_ratio = cal_ratio;
++		sen->cal_slope = (data->ideal_k * cal_ratio) /
++				 UMS9117_THM_CAL_RATIO_BASE;
++		sen->cal_offset =
++			(int)data->ideal_b +
++			((int)delta - (int)UMS9117_THM_CAL_DELTA_BASE) *
++				UMS9117_THM_CAL_DELTA_STEP;
++
++		return 0;
++	}
++
+ 	ret = sprd_thm_cal_read(np, "sen_delta_cal", &dt_offset);
+ 	if (ret)
+ 		return ret;
+@@ -169,8 +369,9 @@ static int sprd_thm_sensor_calibration(struct device_node *np,
+ 	 * k_cal = (k * ratio) / 1000.
+ 	 * b_cal = b + (dt_offset - 64) * 500.
+ 	 */
+-	sen->cal_slope = (thm->var_data->ideal_k * ratio) / 1000;
+-	sen->cal_offset = thm->var_data->ideal_b + (dt_offset - 128) * 250;
++	sen->cal_ratio = 1000;
++	sen->cal_slope = (data->ideal_k * ratio) / 1000;
++	sen->cal_offset = data->ideal_b + (dt_offset - 128) * 250;
+
+ 	return 0;
+ }
+@@ -178,13 +379,20 @@ static int sprd_thm_sensor_calibration(struct device_node *np,
+ static int sprd_thm_rawdata_to_temp(struct sprd_thermal_sensor *sen,
+ 				    u32 rawdata)
+ {
+-	rawdata = clamp(rawdata, SPRD_THM_RAW_DATA_LOW, SPRD_THM_RAW_DATA_HIGH);
++	const struct sprd_thm_variant_data *data = sen->data->var_data;
++
++	rawdata = clamp(rawdata, SPRD_THM_RAW_DATA_LOW, data->raw_data_high);
+
+ 	/*
+ 	 * According to the thermal datasheet, the formula of converting
+ 	 * adc value to the temperature value should be:
+ 	 * T_final = k_cal * x - b_cal.
+ 	 */
++	if (data->combined_calibration)
++		return div_s64((s64)data->ideal_k * sen->cal_ratio * rawdata,
++			       UMS9117_THM_CAL_RATIO_BASE) -
++		       sen->cal_offset;
++
+ 	return sen->cal_slope * rawdata - sen->cal_offset;
+ }
+
+@@ -201,18 +409,49 @@ static int sprd_thm_temp_to_rawdata(int temp, struct sprd_thermal_sensor *sen)
+ 	 */
+ 	val = (temp + sen->cal_offset) / sen->cal_slope;
+
+-	return clamp(val, val, (u32)(SPRD_THM_RAW_DATA_HIGH - 1));
++	return clamp(val, val, sen->data->var_data->raw_data_high - 1);
++}
++
++static int sprd_thm_check_observer_state(struct sprd_thermal_data *thm)
++{
++	u32 ctl;
++	u32 mon_ctl;
++
++	if (!thm->var_data->observer_only)
++		return 0;
++
++	ctl = readl(thm->base + SPRD_THM_CTL);
++	if ((ctl & UMS9117_THM_CTL_GUARD_MASK) != UMS9117_THM_CTL_ACTIVE ||
++	    readl(thm->base + SPRD_THM_INT_EN))
++		return -EIO;
++
++	mon_ctl = readl(thm->base + SPRD_THM_MON_CTL);
++	if ((mon_ctl & SPRD_THM_MON_MODE_MASK) != SPRD_THM_MON_MODE)
++		return -EIO;
++
++	if (!(readl(thm->base + SPRD_THM_INTERNAL_STS1) & SPRD_THM_TEMPER_RDY))
++		return -EAGAIN;
++
++	return 0;
+ }
+
+ static int sprd_thm_read_temp(struct thermal_zone_device *tz, int *temp)
+ {
+ 	struct sprd_thermal_sensor *sen = thermal_zone_device_priv(tz);
+ 	u32 data;
++	int ret;
++
++	ret = sprd_thm_check_observer_state(sen->data);
++	if (ret)
++		return ret;
+
+ 	data = readl(sen->data->base + SPRD_THM_TEMP(sen->id)) &
+ 		SPRD_THM_RAW_READ_MSK;
+
+ 	*temp = sprd_thm_rawdata_to_temp(sen, data);
++	if (sen->data->var_data->validate_temp_range &&
++	    (*temp < UMS9117_THM_TEMP_LOW || *temp > UMS9117_THM_TEMP_HIGH))
++		return -ERANGE;
+
+ 	return 0;
+ }
+@@ -236,10 +475,15 @@ static int sprd_thm_poll_ready_status(struct sprd_thermal_data *thm)
+ 	if (ret)
+ 		return ret;
+
+-	sprd_thm_update_bits(thm->base + SPRD_THM_CTL, SPRD_THM_MON_EN,
+-			     SPRD_THM_MON_EN);
++	sprd_thm_update_ctl_bits(thm, SPRD_THM_MON_EN, SPRD_THM_MON_EN);
+ 	sprd_thm_update_bits(thm->base + SPRD_THM_CTL, SPRD_THM_SET_RDY,
+ 			     SPRD_THM_SET_RDY);
++	if (thm->var_data->wait_set_ready)
++		return readl_poll_timeout(thm->base + SPRD_THM_CTL, val,
++					  !(val & SPRD_THM_SET_RDY_ST),
++					  SPRD_THM_RDYST_POLLING_TIME,
++					  SPRD_THM_RDYST_TIMEOUT);
++
+ 	return 0;
+ }
+
+@@ -249,9 +493,11 @@ static int sprd_thm_wait_temp_ready(struct sprd_thermal_data *thm)
+
+ 	/* Wait for first temperature data ready before reading temperature */
+ 	return readl_poll_timeout(thm->base + SPRD_THM_INTERNAL_STS1, val,
+-				  !(val & SPRD_THM_TEMPER_RDY),
++				  thm->var_data->ready_active_high ?
++					  val & SPRD_THM_TEMPER_RDY :
++					  !(val & SPRD_THM_TEMPER_RDY),
+ 				  SPRD_THM_TEMP_READY_POLL_TIME,
+-				  SPRD_THM_TEMP_READY_TIMEOUT);
++				  thm->var_data->temp_ready_timeout_us);
+ }
+
+ static int sprd_thm_set_ready(struct sprd_thermal_data *thm)
+@@ -271,11 +517,12 @@ static int sprd_thm_set_ready(struct sprd_thermal_data *thm)
+ 	 * system. So here we should enable the interrupt bits, though we have
+ 	 * not registered an irq handler.
+ 	 */
+-	writel(SPRD_THM_INT_CLR_MASK, thm->base + SPRD_THM_INT_CLR);
+-	sprd_thm_update_bits(thm->base + SPRD_THM_INT_EN,
+-			     SPRD_THM_BIT_INT_EN, SPRD_THM_BIT_INT_EN);
+-	sprd_thm_update_bits(thm->base + SPRD_THM_CTL,
+-			     SPRD_THM_EN, SPRD_THM_EN);
++	if (!thm->var_data->observer_only) {
++		writel(SPRD_THM_INT_CLR_MASK, thm->base + SPRD_THM_INT_CLR);
++		sprd_thm_update_bits(thm->base + SPRD_THM_INT_EN,
++				     SPRD_THM_BIT_INT_EN, SPRD_THM_BIT_INT_EN);
++	}
++	sprd_thm_update_ctl_bits(thm, SPRD_THM_EN, SPRD_THM_EN);
+ 	return 0;
+ }
+
+@@ -284,34 +531,42 @@ static void sprd_thm_sensor_init(struct sprd_thermal_data *thm,
+ {
+ 	u32 otp_rawdata, hot_rawdata;
+
+-	otp_rawdata = sprd_thm_temp_to_rawdata(SPRD_THM_OTP_TEMP, sen);
+-	hot_rawdata = sprd_thm_temp_to_rawdata(SPRD_THM_HOT_TEMP, sen);
++	if (!thm->var_data->observer_only) {
++		otp_rawdata = sprd_thm_temp_to_rawdata(SPRD_THM_OTP_TEMP, sen);
++		hot_rawdata = sprd_thm_temp_to_rawdata(SPRD_THM_HOT_TEMP, sen);
+
+-	/* Enable the sensor' overheat temperature protection interrupt */
+-	sprd_thm_update_bits(thm->base + SPRD_THM_INT_EN,
+-			     SPRD_THM_SEN_OVERHEAT_ALARM_EN(sen->id),
+-			     SPRD_THM_SEN_OVERHEAT_ALARM_EN(sen->id));
++		/* Enable the sensor' overheat temperature protection interrupt */
++		sprd_thm_update_bits(thm->base + SPRD_THM_INT_EN,
++				     SPRD_THM_SEN_OVERHEAT_ALARM_EN(sen->id),
++				     SPRD_THM_SEN_OVERHEAT_ALARM_EN(sen->id));
+
+-	/* Set the sensor' overheat and hot threshold temperature */
+-	sprd_thm_update_bits(thm->base + SPRD_THM_THRES(sen->id),
+-			     SPRD_THM_THRES_MASK,
+-			     (otp_rawdata << SPRD_THM_OTP_TRIP_SHIFT) |
+-			     hot_rawdata);
++		/* Set the sensor' overheat and hot threshold temperature */
++		sprd_thm_update_bits(thm->base + SPRD_THM_THRES(sen->id),
++				     SPRD_THM_THRES_MASK,
++				     (otp_rawdata << SPRD_THM_OTP_TRIP_SHIFT) |
++					     hot_rawdata);
++	}
+
+ 	/* Enable the corresponding sensor */
+-	sprd_thm_update_bits(thm->base + SPRD_THM_CTL, SPRD_THM_SEN(sen->id),
+-			     SPRD_THM_SEN(sen->id));
++	sprd_thm_update_ctl_bits(thm, SPRD_THM_SEN(sen->id),
++				 SPRD_THM_SEN(sen->id));
+ }
+
+ static void sprd_thm_para_config(struct sprd_thermal_data *thm)
+ {
++	if (thm->var_data->has_rtc_clock) {
++		sprd_thm_update_mon_bits(thm, SPRD_THM_MON_MODE_MASK,
++					 SPRD_THM_MON_MODE);
++		return;
++	}
++
+ 	/* Set the period of two valid temperature detection action */
+ 	sprd_thm_update_bits(thm->base + SPRD_THM_DET_PERIOD,
+ 			     SPRD_THM_DET_PERIOD_MASK, SPRD_THM_DET_PERIOD);
+
+ 	/* Set the sensors' monitor mode */
+-	sprd_thm_update_bits(thm->base + SPRD_THM_MON_CTL,
+-			     SPRD_THM_MON_MODE_MASK, SPRD_THM_MON_MODE);
++	sprd_thm_update_mon_bits(thm, SPRD_THM_MON_MODE_MASK,
++				 SPRD_THM_MON_MODE);
+
+ 	/* Set the sensors' monitor period */
+ 	sprd_thm_update_bits(thm->base + SPRD_THM_MON_PERIOD,
+@@ -348,13 +603,15 @@ static int sprd_thm_probe(struct platform_device *pdev)
+ 	if (!thm)
+ 		return -ENOMEM;
+
++	thm->dev = &pdev->dev;
+ 	thm->var_data = pdata;
+ 	thm->base = devm_platform_ioremap_resource(pdev, 0);
+ 	if (IS_ERR(thm->base))
+ 		return PTR_ERR(thm->base);
+
+ 	thm->nr_sensors = of_get_child_count(np);
+-	if (thm->nr_sensors == 0 || thm->nr_sensors > SPRD_THM_MAX_SENSOR) {
++	if (thm->nr_sensors == 0 ||
++	    thm->nr_sensors > thm->var_data->max_sensors) {
+ 		dev_err(&pdev->dev, "incorrect sensor count\n");
+ 		return -EINVAL;
+ 	}
+@@ -364,21 +621,41 @@ static int sprd_thm_probe(struct platform_device *pdev)
+ 		dev_err(&pdev->dev, "failed to get enable clock\n");
+ 		return PTR_ERR(thm->clk);
+ 	}
++	if (thm->var_data->observer_only) {
++		thm->rtc_clk = devm_clk_get_enabled(&pdev->dev, "rtc");
++		if (IS_ERR(thm->rtc_clk)) {
++			dev_err(&pdev->dev, "failed to get rtc clock\n");
++			return PTR_ERR(thm->rtc_clk);
++		}
++	}
++
++	ret = sprd_thm_save_initial_state(thm);
++	if (ret)
++		return dev_err_probe(&pdev->dev, ret,
++				     "thermal state is unsuitable\n");
++	if (thm->initial_state_saved) {
++		ret = devm_add_action_or_reset(
++			&pdev->dev, sprd_thm_restore_initial_state_action, thm);
++		if (ret)
++			return ret;
++	}
+
+ 	sprd_thm_para_config(thm);
+
+-	ret = sprd_thm_cal_read(np, "thm_sign_cal", &val);
+-	if (ret)
+-		return ret;
++	if (!thm->var_data->combined_calibration) {
++		ret = sprd_thm_cal_read(np, "thm_sign_cal", &val);
++		if (ret)
++			return ret;
+
+-	if (val > 0)
+-		thm->ratio_sign = -1;
+-	else
+-		thm->ratio_sign = 1;
++		if (val > 0)
++			thm->ratio_sign = -1;
++		else
++			thm->ratio_sign = 1;
+
+-	ret = sprd_thm_cal_read(np, "thm_ratio_cal", &thm->ratio_off);
+-	if (ret)
+-		return ret;
++		ret = sprd_thm_cal_read(np, "thm_ratio_cal", &thm->ratio_off);
++		if (ret)
++			return ret;
++	}
+
+ 	for_each_child_of_node(np, sen_child) {
+ 		sen = devm_kzalloc(&pdev->dev, sizeof(*sen), GFP_KERNEL);
+@@ -395,6 +672,12 @@ static int sprd_thm_probe(struct platform_device *pdev)
+ 			dev_err(&pdev->dev, "get sensor reg failed");
+ 			goto of_put;
+ 		}
++		if (sen->id >= thm->var_data->max_sensors ||
++		    thm->sensor[sen->id]) {
++			dev_err(&pdev->dev, "invalid sensor id %d\n", sen->id);
++			ret = -EINVAL;
++			goto of_put;
++		}
+
+ 		ret = sprd_thm_sensor_calibration(sen_child, thm, sen);
+ 		if (ret) {
+@@ -403,18 +686,6 @@ static int sprd_thm_probe(struct platform_device *pdev)
+ 		}
+
+ 		sprd_thm_sensor_init(thm, sen);
+-
+-		sen->tzd = devm_thermal_of_zone_register(sen->dev,
+-							 sen->id,
+-							 sen,
+-							 &sprd_thm_ops);
+-		if (IS_ERR(sen->tzd)) {
+-			dev_err(&pdev->dev, "register thermal zone failed %d\n",
+-				sen->id);
+-			ret = PTR_ERR(sen->tzd);
+-			goto of_put;
+-		}
+-
+ 		thm->sensor[sen->id] = sen;
+ 	}
+ 	/* sen_child set to NULL at this point */
+@@ -427,8 +698,18 @@ static int sprd_thm_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		goto of_put;
+
+-	for (i = 0; i < thm->nr_sensors; i++)
+-		sprd_thm_toggle_sensor(thm->sensor[i], true);
++	for (i = 0; i < thm->nr_sensors; i++) {
++		sen = thm->sensor[i];
++		sen->tzd = devm_thermal_of_zone_register(sen->dev, sen->id, sen,
++							 &sprd_thm_ops);
++		if (IS_ERR(sen->tzd)) {
++			dev_err(&pdev->dev, "register thermal zone failed %d\n",
++				sen->id);
++			ret = PTR_ERR(sen->tzd);
++			goto of_put;
++		}
++		sprd_thm_toggle_sensor(sen, true);
++	}
+
+ 	platform_set_drvdata(pdev, thm);
+ 	return 0;
+@@ -444,12 +725,11 @@ static void sprd_thm_hw_suspend(struct sprd_thermal_data *thm)
+ 	int i;
+
+ 	for (i = 0; i < thm->nr_sensors; i++) {
+-		sprd_thm_update_bits(thm->base + SPRD_THM_CTL,
+-				     SPRD_THM_SEN(thm->sensor[i]->id), 0);
++		sprd_thm_update_ctl_bits(thm, SPRD_THM_SEN(thm->sensor[i]->id),
++					 0);
+ 	}
+
+-	sprd_thm_update_bits(thm->base + SPRD_THM_CTL,
+-			     SPRD_THM_EN, 0x0);
++	sprd_thm_update_ctl_bits(thm, SPRD_THM_EN, 0);
+ }
+
+ static int sprd_thm_suspend(struct device *dev)
+@@ -457,11 +737,18 @@ static int sprd_thm_suspend(struct device *dev)
+ 	struct sprd_thermal_data *thm = dev_get_drvdata(dev);
+ 	int i;
+
++	if (thm->var_data->keep_active_in_s2idle &&
++	    pm_suspend_target_state == PM_SUSPEND_TO_IDLE)
++		return 0;
++
+ 	for (i = 0; i < thm->nr_sensors; i++)
+ 		sprd_thm_toggle_sensor(thm->sensor[i], false);
+
+ 	sprd_thm_hw_suspend(thm);
++	if (thm->rtc_clk)
++		clk_disable_unprepare(thm->rtc_clk);
+ 	clk_disable_unprepare(thm->clk);
++	thm->hw_suspended = true;
+
+ 	return 0;
+ }
+@@ -471,18 +758,17 @@ static int sprd_thm_hw_resume(struct sprd_thermal_data *thm)
+ 	int ret, i;
+
+ 	for (i = 0; i < thm->nr_sensors; i++) {
+-		sprd_thm_update_bits(thm->base + SPRD_THM_CTL,
+-				     SPRD_THM_SEN(thm->sensor[i]->id),
+-				     SPRD_THM_SEN(thm->sensor[i]->id));
++		sprd_thm_update_ctl_bits(thm, SPRD_THM_SEN(thm->sensor[i]->id),
++					 SPRD_THM_SEN(thm->sensor[i]->id));
+ 	}
+
+ 	ret = sprd_thm_poll_ready_status(thm);
+ 	if (ret)
+ 		return ret;
+
+-	writel(SPRD_THM_INT_CLR_MASK, thm->base + SPRD_THM_INT_CLR);
+-	sprd_thm_update_bits(thm->base + SPRD_THM_CTL,
+-			     SPRD_THM_EN, SPRD_THM_EN);
++	if (!thm->var_data->observer_only)
++		writel(SPRD_THM_INT_CLR_MASK, thm->base + SPRD_THM_INT_CLR);
++	sprd_thm_update_ctl_bits(thm, SPRD_THM_EN, SPRD_THM_EN);
+ 	return sprd_thm_wait_temp_ready(thm);
+ }
+
+@@ -491,19 +777,31 @@ static int sprd_thm_resume(struct device *dev)
+ 	struct sprd_thermal_data *thm = dev_get_drvdata(dev);
+ 	int ret, i;
+
++	if (!thm->hw_suspended)
++		return 0;
++
+ 	ret = clk_prepare_enable(thm->clk);
+ 	if (ret)
+ 		return ret;
++	if (thm->rtc_clk) {
++		ret = clk_prepare_enable(thm->rtc_clk);
++		if (ret)
++			goto disable_clk;
++	}
+
+ 	ret = sprd_thm_hw_resume(thm);
+ 	if (ret)
+-		goto disable_clk;
++		goto disable_clks;
+
+ 	for (i = 0; i < thm->nr_sensors; i++)
+ 		sprd_thm_toggle_sensor(thm->sensor[i], true);
+
++	thm->hw_suspended = false;
+ 	return 0;
+
++disable_clks:
++	if (thm->rtc_clk)
++		clk_disable_unprepare(thm->rtc_clk);
+ disable_clk:
+ 	clk_disable_unprepare(thm->clk);
+ 	return ret;
+@@ -523,8 +821,9 @@ static void sprd_thm_remove(struct platform_device *pdev)
+ }
+
+ static const struct of_device_id sprd_thermal_of_match[] = {
++	{ .compatible = "sprd,ums9117-thermal", .data = &ums9117_data },
+ 	{ .compatible = "sprd,ums512-thermal", .data = &ums512_data },
+-	{ },
++	{},
+ };
+ MODULE_DEVICE_TABLE(of, sprd_thermal_of_match);
+

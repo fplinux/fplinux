@@ -1,7 +1,7 @@
 # Vibration
 
 The vibrator is exposed as a Linux input force-feedback device with physical
-path `fplinux/vibrator0` and input name `SC2720 vibrator`. The selected
+path `fplinux/vibrator0` and input name `sc27xx:vibrator`. The selected
 [target's documentation](../../targets/README.md) states its physical support.
 A standalone archive carries that status in `README.txt`. Applications should
 locate the device by its name and physical path rather than assuming a fixed

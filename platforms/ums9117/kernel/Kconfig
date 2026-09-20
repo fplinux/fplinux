@@ -3,6 +3,7 @@ menuconfig ARCH_UMS9117
 	bool "Unisoc UMS9117"
 	depends on ARCH_MULTI_V7
 	select ARM_GIC
+	select ARCH_HAS_RESET_CONTROLLER
 	select CLKSRC_MMIO
 	select SPRD_TIMER
 	help

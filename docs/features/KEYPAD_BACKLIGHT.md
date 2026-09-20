@@ -7,15 +7,22 @@ light works. A standalone archive carries that status in `README.txt`.
 
 ## Interface
 
-A physical key press requests the backlight for about five seconds. The same
-bounded light can be requested or cancelled through the standard brightness
-attribute:
+The default `input-events` trigger turns the backlight on during input activity
+and off about five seconds after the last event. It includes local keys and
+forwarded keyboard input.
+
+To control the light manually, select the `none` trigger, then use brightness:
 
 ```sh
+echo none > /sys/class/leds/:kbd_backlight/trigger
 echo 1 > /sys/class/leds/:kbd_backlight/brightness
 echo 0 > /sys/class/leds/:kbd_backlight/brightness
 ```
 
 The interface supports only off and on; it does not provide user-selectable
-brightness levels. An on request is temporary rather than a persistent lighting
-mode.
+brightness levels. Manual lighting remains on until it is switched off. Restore
+automatic lighting with:
+
+```sh
+echo input-events > /sys/class/leds/:kbd_backlight/trigger
+```

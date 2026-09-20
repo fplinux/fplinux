@@ -1,0 +1,110 @@
+diff --git a/drivers/clk/sprd/Kconfig b/drivers/clk/sprd/Kconfig
+index 2f19c8d..49f484b 100644
+--- a/drivers/clk/sprd/Kconfig
++++ b/drivers/clk/sprd/Kconfig
+@@ -1,8 +1,8 @@
+ # SPDX-License-Identifier: GPL-2.0-only
+ config SPRD_COMMON_CLK
+ 	tristate "Clock support for Spreadtrum SoCs"
+-	depends on ARCH_SPRD || COMPILE_TEST
+-	default ARCH_SPRD
++	depends on ARCH_SPRD || ARCH_UMS9117 || COMPILE_TEST
++	default ARCH_SPRD || ARCH_UMS9117
+ 	select REGMAP_MMIO
+
+ if SPRD_COMMON_CLK
+@@ -29,4 +29,15 @@ config SPRD_UMS512_CLK
+ 	help
+ 	  Support for the global clock controller on ums512 devices.
+ 	  Say Y if you want to use peripheral devices on ums512 SoC.
++
++config SPRD_UMS9117_CLK
++	tristate "Support for the Unisoc UMS9117 clocks"
++	depends on ARCH_UMS9117 || COMPILE_TEST
++	default ARCH_UMS9117
++	select MFD_SYSCON
++	help
++	  Support for the AP functional clock and the AP AHB and always-on
++	  APB peripheral gate clocks on UMS9117 devices.
++	  The SDIO functional source is prepared without changing its PLL.
++	  Inherited enabled gates remain held for firmware consumers.
+ endif
+diff --git a/drivers/clk/sprd/Makefile b/drivers/clk/sprd/Makefile
+index f25b2c3..e841bc0 100644
+--- a/drivers/clk/sprd/Makefile
++++ b/drivers/clk/sprd/Makefile
+@@ -12,3 +12,4 @@ clk-sprd-y	+= pll.o
+ obj-$(CONFIG_SPRD_SC9860_CLK)	+= sc9860-clk.o
+ obj-$(CONFIG_SPRD_SC9863A_CLK)	+= sc9863a-clk.o
+ obj-$(CONFIG_SPRD_UMS512_CLK)	+= ums512-clk.o
++obj-$(CONFIG_SPRD_UMS9117_CLK)	+= ums9117-gates.o
+diff --git a/drivers/clk/sprd/gate.h b/drivers/clk/sprd/gate.h
+index 775519e..5e30d44 100644
+--- a/drivers/clk/sprd/gate.h
++++ b/drivers/clk/sprd/gate.h
+@@ -63,6 +63,19 @@ struct sprd_gate {
+ 			     _enable_mask, _flags, _gate_flags,		\
+ 			     &sprd_sc_gate_ops)
+
++#define SPRD_SC_GATE_CLK_NO_PARENT(_struct, _name, _reg, _sc_offset,  \
++				   _enable_mask, _flags, _gate_flags) \
++	struct sprd_gate _struct = { \
++		.enable_mask = _enable_mask, \
++		.sc_offset = _sc_offset, \
++		.flags = _gate_flags, \
++		.common = { \
++			.reg = _reg, \
++			.hw.init = CLK_HW_INIT_NO_PARENT(_name, \
++					&sprd_sc_gate_ops, _flags), \
++		}, \
++	}
++
+ #define SPRD_GATE_CLK(_struct, _name, _parent, _reg,			\
+ 		      _enable_mask, _flags, _gate_flags)		\
+ 	SPRD_SC_GATE_CLK_OPS(_struct, _name, _parent, _reg, 0,		\
+diff --git a/drivers/hwspinlock/Kconfig b/drivers/hwspinlock/Kconfig
+index 3874d15..bd67845 100644
+--- a/drivers/hwspinlock/Kconfig
++++ b/drivers/hwspinlock/Kconfig
+@@ -30,7 +30,7 @@ config HWSPINLOCK_QCOM
+
+ config HWSPINLOCK_SPRD
+ 	tristate "SPRD Hardware Spinlock device"
+-	depends on ARCH_SPRD || COMPILE_TEST
++	depends on ARCH_SPRD || ARCH_UMS9117 || COMPILE_TEST
+ 	help
+ 	  Say y here to support the SPRD Hardware Spinlock device.
+
+diff --git a/drivers/reset/Kconfig b/drivers/reset/Kconfig
+index b3b9e0f..5e60570 100644
+--- a/drivers/reset/Kconfig
++++ b/drivers/reset/Kconfig
+@@ -380,6 +380,17 @@ config RESET_UNIPHIER_GLUE
+ 	  on UniPhier SoCs. Say Y if you want to control reset signals
+ 	  provided by the glue layer.
+
++config RESET_UMS9117
++	tristate "Unisoc UMS9117 reset controller"
++	depends on ARCH_UMS9117 || COMPILE_TEST
++	default ARCH_UMS9117
++	select MFD_SYSCON
++	help
++	  Support for peripheral resets in the UMS9117 application AHB
++	  system controller. The controller uses separate SET and CLEAR
++	  aliases and shares its syscon register map with clock consumers.
++	  The SDIO host uses this provider during slot activation and release.
++
+ config RESET_ZYNQ
+ 	bool "ZYNQ Reset Driver" if COMPILE_TEST
+ 	default ARCH_ZYNQ
+diff --git a/drivers/reset/Makefile b/drivers/reset/Makefile
+index f7934f9..764f741 100644
+--- a/drivers/reset/Makefile
++++ b/drivers/reset/Makefile
+@@ -47,5 +47,6 @@ obj-$(CONFIG_RESET_TI_TPS380X) += reset-tps380x.o
+ obj-$(CONFIG_RESET_TN48M_CPLD) += reset-tn48m.o
+ obj-$(CONFIG_RESET_UNIPHIER) += reset-uniphier.o
+ obj-$(CONFIG_RESET_UNIPHIER_GLUE) += reset-uniphier-glue.o
++obj-$(CONFIG_RESET_UMS9117) += reset-ums9117.o
+ obj-$(CONFIG_RESET_ZYNQ) += reset-zynq.o
+ obj-$(CONFIG_RESET_ZYNQMP) += reset-zynqmp.o

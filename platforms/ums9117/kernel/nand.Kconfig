@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0-only
 config UMS9117_NANDC_RO
 	bool "UMS9117 read-only internal NAND"
-	depends on ARCH_UMS9117 && HAS_DMA && !MTD && !SPI
+	depends on ARCH_UMS9117 && HAS_DMA && !MTD
 	help
 	  Expose a physical stream containing every NAND page's main and OOB
 	  bytes. Hardware is activated only for explicit reads, which check the
 	  supported NAND identity and feature state before returning data. No MTD,
-	  generic SPI, ioctl, mmap, feature-write, program or erase operation is
-	  provided.
+	  generic SPI NAND, ioctl, mmap, feature-write, program or erase operation
+	  is provided. The separate ADI SPI controller can coexist with this reader.

@@ -13,15 +13,15 @@
 #include <linux/reboot.h>
 #include <linux/slab.h>
 #include <linux/workqueue.h>
-#include <linux/soc/sprd/ums9117-adi.h>
+#include <linux/regmap.h>
+#include <linux/spi/spi.h>
+#include <linux/spi/sprd-adi.h>
 
 #define SC2720_CHIP_ID_LOW 0xc00U
 #define SC2720_CHIP_ID_HIGH 0xc04U
-#define SC2720_POWER_PD_HW 0xc20U
 #define SC2720_CHGR_STATUS 0xe14U
 #define SC2720_EXPECTED_ID_LOW 0xa003U
 #define SC2720_EXPECTED_ID_HIGH 0x2720U
-#define SC2720_POWER_PD_HW_POWER_OFF_SEQUENCE_ENABLE BIT(0)
 #define SC2720_CHGR_STATUS_CHARGER_ON BIT(3)
 #define SC2720_POWER_OFF_WAIT_MS 50U
 #define SC2720_POWER_KEY_HOLD_MS 5000U
@@ -33,6 +33,8 @@ struct sc2720_power_key {
 };
 
 struct sc2720_poweroff {
+	struct regmap *regmap;
+	struct spi_device *spi;
 	struct input_handler input_handler;
 	struct device_node *keypad_node;
 };
@@ -43,36 +45,37 @@ static void __noreturn sc2720_halt(void)
 		cpu_relax();
 }
 
-static int sc2720_read_pmic_state(u16 *id_low, u16 *id_high, u16 *charger)
+static int sc2720_read_pmic_state(struct sc2720_poweroff *poweroff,
+				  unsigned int *id_low, unsigned int *id_high,
+				  unsigned int *charger)
 {
-	struct ums9117_adi_transaction transaction = {};
-	int end_ret;
+	static const unsigned int regs[] = {
+		SC2720_CHIP_ID_LOW,
+		SC2720_CHIP_ID_HIGH,
+		SC2720_CHGR_STATUS,
+	};
+	unsigned int values[ARRAY_SIZE(regs)];
 	int ret;
 
-	ret = ums9117_adi_begin(&transaction);
+	ret = regmap_multi_reg_read(poweroff->regmap, regs, values,
+				    ARRAY_SIZE(regs));
 	if (ret)
 		return ret;
-	ret = ums9117_adi_read(&transaction, SC2720_CHIP_ID_LOW, id_low);
-	if (!ret)
-		ret = ums9117_adi_read(&transaction, SC2720_CHIP_ID_HIGH,
-				       id_high);
-	if (!ret && charger)
-		ret = ums9117_adi_read(&transaction, SC2720_CHGR_STATUS,
-				       charger);
-	end_ret = ums9117_adi_end(&transaction);
-	if (!ret)
-		ret = end_ret;
-	return ret;
+	*id_low = values[0];
+	*id_high = values[1];
+	if (charger)
+		*charger = values[2];
+	return 0;
 }
 
-static int sc2720_power_key_preflight(void)
+static int sc2720_power_key_preflight(struct sc2720_poweroff *poweroff)
 {
-	u16 id_low;
-	u16 id_high;
-	u16 charger;
+	unsigned int id_low;
+	unsigned int id_high;
+	unsigned int charger;
 	int ret;
 
-	ret = sc2720_read_pmic_state(&id_low, &id_high, &charger);
+	ret = sc2720_read_pmic_state(poweroff, &id_low, &id_high, &charger);
 	if (ret)
 		return ret;
 	if (id_low != SC2720_EXPECTED_ID_LOW ||
@@ -91,7 +94,9 @@ static void sc2720_power_key_hold_work(struct work_struct *work)
 	    READ_ONCE(system_state) != SYSTEM_RUNNING)
 		return;
 
-	ret = sc2720_power_key_preflight();
+	ret = sc2720_power_key_preflight(container_of(power_key->handle.handler,
+						      struct sc2720_poweroff,
+						      input_handler));
 	if (ret == -EBUSY) {
 		pr_warn("SC2720 five-second power-key shutdown refused: charger input active\n");
 		return;
@@ -192,50 +197,18 @@ MODULE_DEVICE_TABLE(input, sc2720_power_key_ids);
 
 static int sc2720_power_off(struct sys_off_data *data)
 {
-	struct ums9117_adi_transaction transaction = {};
-	u16 id_low;
-	u16 id_high;
-	u16 charger;
-	u16 power;
-	int end_ret;
+	struct sc2720_poweroff *poweroff = data->cb_data;
 	int ret;
 
-	(void)data;
-	ret = ums9117_adi_begin(&transaction);
+	/* The transport owns this atomic transaction after device shutdown. */
+	ret = sprd_adi_sc2720_power_off(poweroff->spi);
 	if (ret)
-		goto fail;
-	ret = ums9117_adi_read(&transaction, SC2720_CHIP_ID_LOW, &id_low);
-	if (!ret)
-		ret = ums9117_adi_read(&transaction, SC2720_CHIP_ID_HIGH,
-				       &id_high);
-	if (!ret && (id_low != SC2720_EXPECTED_ID_LOW ||
-		     id_high != SC2720_EXPECTED_ID_HIGH))
-		ret = -ENODEV;
-	if (!ret)
-		ret = ums9117_adi_read(&transaction, SC2720_CHGR_STATUS,
-				       &charger);
-	if (!ret && (charger & SC2720_CHGR_STATUS_CHARGER_ON))
-		ret = -EBUSY;
-	if (!ret)
-		ret = ums9117_adi_read(&transaction, SC2720_POWER_PD_HW,
-				       &power);
-	if (!ret)
-		ret = ums9117_adi_write_final(
-			&transaction, SC2720_POWER_PD_HW,
-			power | SC2720_POWER_PD_HW_POWER_OFF_SEQUENCE_ENABLE);
-	if (ret)
-		goto fail_locked;
-
-	mdelay(SC2720_POWER_OFF_WAIT_MS);
-	pr_emerg("SC2720 power-off write completed but CPU still runs\n");
-	sc2720_halt();
-
-fail_locked:
-	end_ret = ums9117_adi_end(&transaction);
-	if (end_ret)
-		pr_emerg("SC2720 power-off ADI release failed: %d\n", end_ret);
-fail:
-	pr_emerg("SC2720 power-off refused: %d\n", ret);
+		pr_emerg("SC2720 power-off refused: %d\n", ret);
+	else {
+		mdelay(SC2720_POWER_OFF_WAIT_MS);
+		pr_emerg(
+			"SC2720 power-off write completed but CPU still runs\n");
+	}
 	sc2720_halt();
 }
 
@@ -252,13 +225,17 @@ static void sc2720_poweroff_put_keypad(void *data)
 static int sc2720_poweroff_probe(struct platform_device *pdev)
 {
 	struct sc2720_poweroff *poweroff;
-	u16 id_low;
-	u16 id_high;
+	unsigned int id_low;
+	unsigned int id_high;
 	int ret;
 
 	poweroff = devm_kzalloc(&pdev->dev, sizeof(*poweroff), GFP_KERNEL);
 	if (!poweroff)
 		return -ENOMEM;
+	poweroff->regmap = dev_get_regmap(pdev->dev.parent, NULL);
+	if (!poweroff->regmap)
+		return -EPROBE_DEFER;
+	poweroff->spi = to_spi_device(pdev->dev.parent);
 	poweroff->keypad_node =
 		of_parse_phandle(pdev->dev.of_node, "fplinux,keypad", 0);
 	if (!poweroff->keypad_node)
@@ -268,7 +245,7 @@ static int sc2720_poweroff_probe(struct platform_device *pdev)
 				       poweroff->keypad_node);
 	if (ret)
 		return ret;
-	ret = sc2720_read_pmic_state(&id_low, &id_high, NULL);
+	ret = sc2720_read_pmic_state(poweroff, &id_low, &id_high, NULL);
 	if (ret)
 		return ret;
 	if (id_low != SC2720_EXPECTED_ID_LOW ||

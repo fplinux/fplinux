@@ -28,26 +28,10 @@
 	};
 
 	soc {
-		keypad-backlight@40608df8 {
-			compatible = "sprd,ums9117-sc2720-kpled";
-			reg = <0x40608df8 0x00000004>;
-			function = LED_FUNCTION_KBD_BACKLIGHT;
-			fplinux,keypad = <&keypad>;
-			fplinux,current-code = <1>;
-		};
-
-		vibrator@40608e00 {
-			compatible = "sprd,ums9117-sc2720-vibrator";
-			reg = <0x40608e00 0x00000004>;
-			fplinux,voltage-code = <2>;
-		};
-
 		display@83f00000 {
 			compatible = "fplinux,ums9117-nv3030-lcm-fb";
 			reg = <0x83f00000 0x00100000>,
 			      <0x20800000 0x00001000>,
-			      <0x40600000 0x00000400>,
-			      <0x40608000 0x00001000>,
 			      <0x20a00000 0x00001000>,
 			      <0x60000000 0x00000002>,
 			      <0x60020000 0x00000002>,
@@ -58,12 +42,12 @@
 			      <0x402a04b0 0x0000001c>,
 			      <0x402a01f8 0x00000028>,
 			      <0x402a05f8 0x00000028>;
-			reg-names = "framebuffer", "lcdc", "adi-controller",
-				    "analog-slave", "lcm", "lcm-command", "lcm-data",
+			reg-names = "framebuffer", "lcdc", "lcm", "lcm-command", "lcm-data",
 				    "ap-ahb-gate-set", "ap-ahb-reset-set",
 				    "ap-ahb-reset-clear", "pinmux", "pinconf",
 				    "pinmux-data", "pinconf-data";
 			sprd,aon-apb = <&aon_apb>;
+			sprd,pmic = <&sc2720_pmic>;
 			/* fpdoom cmd3001_inoi MCU timing at the 128 MHz AHB clock. */
 			sprd,dbi-timing-ns = <5 150 150 30 80 120>;
 			/* LCM control pins. */
@@ -114,6 +98,14 @@
 	fplinux,card-longname = "INOI 244 Modern 4G headphone output";
 	fplinux,idle-silence;
 	status = "okay";
+};
+
+&sc2720_kpled {
+	fplinux,current-code = <1>;
+};
+
+&sc2720_vibrator {
+	sprd,voltage-code = <2>;
 };
 
 &sc2720_fgu {

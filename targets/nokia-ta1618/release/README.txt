@@ -63,7 +63,7 @@ Interfaces, limits and safety procedures are bundled at:
 
 This phone uses backlight device ta1618-backlight, with levels 0 through 10
 and default 10. Shared interface names are sc2720-battery, sc2720-charger,
-sc2720-auxadc, ums9117-thm1, SC2720 vibrator and UMS9117 Headphones. IIO,
+sc2720-auxadc, ums9117-thermal, sc27xx:vibrator and UMS9117 Headphones. IIO,
 thermal and input-device numbers are assigned at boot.
 
 Install and run the optional showcase by following:
