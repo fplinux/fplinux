@@ -1340,13 +1340,7 @@ def verified_runtime_digest(target: str) -> str | None:
     digest = lock.get("verified", {}).get(target)
     if digest is None:
         return None
-    if (
-        not isinstance(digest, str)
-        or len(digest) != 64
-        or any(character not in "0123456789abcdef" for character in digest)
-    ):
-        fail(f"invalid verified runtime SHA256 for {target}: {path}")
-    return digest
+    return _sha256(digest, f"verified runtime SHA256 for {target} in {path}")
 
 
 def validate_source_policy() -> None:
@@ -1399,9 +1393,7 @@ def load_container_lock() -> dict[str, Any]:
     if not isinstance(archive_url, str) or not archive_url.startswith("https://"):
         fail(f"Kern release URL must use HTTPS: {path}")
     for field in ("archive_sha256", "binary_sha256"):
-        value = kern.get(field)
-        if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
-            fail(f"Kern {field} must be a lowercase SHA-256: {path}")
+        _sha256(kern.get(field), f"Kern {field} in {path}")
 
     oci = lock.get("oci")
     if not isinstance(oci, dict) or set(oci) != {
@@ -1426,8 +1418,7 @@ def load_container_lock() -> dict[str, Any]:
         fail(f"container base release is invalid: {path}")
     if not isinstance(rootfs_url, str) or not rootfs_url.startswith("https://"):
         fail(f"container base rootfs URL must use HTTPS: {path}")
-    if not isinstance(rootfs_sha256, str) or re.fullmatch(r"[0-9a-f]{64}", rootfs_sha256) is None:
-        fail(f"container base rootfs SHA-256 is invalid: {path}")
+    _sha256(rootfs_sha256, f"container base rootfs SHA-256 in {path}")
     return lock
 
 
@@ -1513,16 +1504,6 @@ def container_image_recipe_digest(lock: dict[str, Any] | None = None) -> str:
 
 def container_runtime_recipe_digest(image_recipe: str, image_generation: str) -> str:
     """Derive the exact runnable-image recipe from its static recipe and generation."""
-    for value, name in (
-        (image_recipe, "container image recipe"),
-        (image_generation, "container image generation"),
-    ):
-        if (
-            not isinstance(value, str)
-            or len(value) != 64
-            or any(character not in "0123456789abcdef" for character in value)
-        ):
-            fail(f"{name} must be a lowercase SHA-256")
     digest = hashlib.sha256()
     digest.update(b"fplinux.container-runtime-recipe\0")
     for item in (image_recipe, image_generation):
@@ -1538,8 +1519,6 @@ def container_image_reference(
         lock = load_container_lock()
     if recipe is None:
         recipe = container_image_recipe_digest(lock)
-    if len(recipe) != 64 or any(character not in "0123456789abcdef" for character in recipe):
-        fail("container image recipe must be a lowercase SHA-256")
     return f"{lock['oci']['repository']}:{recipe}"
 
 
@@ -1558,8 +1537,4 @@ def check_orchestration_recipe_digest(image_recipe: str | None = None) -> str:
     ]
     if image_recipe is None:
         image_recipe = container_image_recipe_digest()
-    if len(image_recipe) != 64 or any(
-        character not in "0123456789abcdef" for character in image_recipe
-    ):
-        fail("container image recipe must be a lowercase SHA-256")
     return _exact_file_recipe(fixed, prefix=bytes.fromhex(image_recipe))
