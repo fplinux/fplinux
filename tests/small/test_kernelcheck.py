@@ -7,6 +7,7 @@ Clang, checkpatch, Kbuild, dtbs_check, Sparse, or a cross-compiler.
 
 from __future__ import annotations
 
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,6 +16,14 @@ from unittest import mock
 
 from fplinux_cli import kernelcheck
 from fplinux_cli.linux_state import PreparedLinuxState
+
+
+def skip_linux_source_tools(
+    _inputs: object, _archive: Path, _version: str, output: Path
+) -> tuple[Path, ...]:
+    """Replace patch/LLVM subprocesses in analyzer work-isolation scenarios."""
+    output.write_text("")
+    return ()
 
 
 class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
@@ -59,6 +68,9 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
                 "config_script": "scripts/config",
                 "dtb_output_directory": "arch/arm/boot/dts",
                 "patches": [],
+                "copies": [],
+                "appends": [],
+                "source_lock": "linux",
             },
         }
 
@@ -83,7 +95,9 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
 
         with (
             mock.patch.object(kernelcheck, "CACHE", self.cache),
-            mock.patch.object(kernelcheck, "load_sources", return_value={}),
+            mock.patch.object(
+                kernelcheck, "load_sources", return_value={"linux": {"version": "fixture"}}
+            ),
             mock.patch.object(kernelcheck, "discover_targets", return_value=(self.target,)),
             mock.patch.object(
                 kernelcheck,
@@ -106,6 +120,11 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
             ),
             mock.patch.object(kernelcheck, "run", side_effect=run_command),
             mock.patch.object(kernelcheck, "run_checkpatch"),
+            mock.patch.object(
+                kernelcheck,
+                "check_linux_changes",
+                side_effect=skip_linux_source_tools,
+            ),
             mock.patch.object(kernelcheck, "run_dtbs_check", side_effect=run_dtbs_check),
             mock.patch.object(kernelcheck, "verify_target_identity"),
         ):
@@ -163,7 +182,9 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
 
         with (
             mock.patch.object(kernelcheck, "CACHE", self.cache),
-            mock.patch.object(kernelcheck, "load_sources", return_value={}),
+            mock.patch.object(
+                kernelcheck, "load_sources", return_value={"linux": {"version": "fixture"}}
+            ),
             mock.patch.object(kernelcheck, "discover_targets", return_value=(self.target,)),
             mock.patch.object(
                 kernelcheck,
@@ -182,6 +203,11 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
             ),
             mock.patch.object(kernelcheck, "run", side_effect=run_command),
             mock.patch.object(kernelcheck, "run_checkpatch"),
+            mock.patch.object(
+                kernelcheck,
+                "check_linux_changes",
+                side_effect=skip_linux_source_tools,
+            ),
             mock.patch.object(kernelcheck, "run_dtbs_check", return_value=""),
             mock.patch.object(kernelcheck, "verify_target_identity"),
         ):
@@ -235,6 +261,38 @@ class KernelContextDispatchTests(unittest.TestCase):
             self.assertRaisesRegex(SystemExit, "jobs must be positive"),
         ):
             kernelcheck.check_contexts(None, jobs=0)
+
+
+class KernelBindingDiagnosticsTests(unittest.TestCase):
+    """Check policy over controlled external-validator and Kbuild reports."""
+
+    def test_diagnostic_output_cannot_pass_even_with_zero_tool_status(self) -> None:
+        """Schema references and compiled example failures must remain visible failures."""
+        cases = (
+            (0, "", "", "make: done\n", False),
+            (1, "", "", "", True),
+            (0, "fixture.yaml: properties: Unresolvable reference\n", "", "", True),
+            (0, "", "fixture.yaml: Missing additionalProperties\n", "", True),
+            (0, "", "", "fixture.example.dtb: example@0: reg: invalid\n", True),
+            (0, "", "", "fixture.example.dts:7.3: Warning (unit_address_vs_reg): node@0\n", True),
+        )
+        for status, stdout, stderr, examples, fails in cases:
+            with self.subTest(status=status, stdout=stdout, stderr=stderr, examples=examples):
+                result = subprocess.CompletedProcess(["dt-doc-validate"], status, stdout, stderr)
+                with (
+                    mock.patch.object(kernelcheck, "run"),
+                    mock.patch.object(kernelcheck, "capture_text", return_value=result),
+                    mock.patch.object(kernelcheck, "run_dtbs_check", return_value=examples),
+                ):
+                    if fails:
+                        with self.assertRaisesRegex(SystemExit, "binding .* findings"):
+                            kernelcheck.check_bindings(
+                                Path("linux"), ["make"], ("fixture.yaml",), "fixture"
+                            )
+                    else:
+                        kernelcheck.check_bindings(
+                            Path("linux"), ["make"], ("fixture.yaml",), "fixture"
+                        )
 
 
 if __name__ == "__main__":
