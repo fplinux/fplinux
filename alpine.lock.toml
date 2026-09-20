@@ -28,6 +28,8 @@ packages = [
 ]
 
 [runtime.additions]
+fplinux-apk-tools = ["mbedtls3-3.6.7-r0.apk"]
+
 fplinux-bluetooth = [
   "bluez-5.86-r2.apk",
   "bluez-obexd-5.86-r2.apk",
@@ -90,6 +92,8 @@ packages = [
   "libpcre2-32-10.48-r0.apk",
   "libstdc++-15.2.0-r5.apk",
   "linux-headers-7.0.0-r1.apk",
+  "mbedtls3-3.6.7-r0.apk",
+  "mbedtls3-dev-3.6.7-r0.apk",
   "mpc1-1.3.1-r1.apk",
   "mpfr4-4.2.2-r0.apk",
   "musl-1.2.6-r2.apk",
@@ -518,3 +522,15 @@ repository = "main"
 file = "musl-libintl-1.2.6-r2.apk"
 sha256 = "79bf3e2d9fc3ea46c8b50b9d5d60241dcc5cb9d7b29e64466a905b9a358758e4"
 bytes = 1806
+
+[[package]]
+repository = "community"
+file = "mbedtls3-3.6.7-r0.apk"
+sha256 = "b027782696a0727d9fad881f107d333ef9e5d217961dcd1beab7f46786e9ef87"
+bytes = 370035
+
+[[package]]
+repository = "community"
+file = "mbedtls3-dev-3.6.7-r0.apk"
+sha256 = "610925061e46888c4f624e0dafa48caeee41382e7f97aa2e310f05fae0a6aba0"
+bytes = 439819

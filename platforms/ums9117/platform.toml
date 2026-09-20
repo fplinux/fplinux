@@ -7,6 +7,7 @@ compatible = "sprd,ums9117"
 
 [rootfs]
 packages = [
+  "fplinux-apk-tools",
   "fplinux-cpuclock",
   "fplinux-ssh",
   "fplinux-usb-gadget",
