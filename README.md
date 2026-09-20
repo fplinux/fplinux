@@ -72,7 +72,7 @@ support status, boot key, storage rules and limitations.
 
 ### Reference
 
-- [C code](docs/reference/C_STYLE.md)
+- [Code style](docs/reference/CODE_STYLE.md)
 - [Target and platform identity](docs/reference/IDENTITY.md)
 - [Logging contract](docs/reference/LOGGING.md)
 

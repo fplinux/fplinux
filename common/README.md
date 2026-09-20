@@ -20,5 +20,6 @@ runner or adding a target-specific launcher.
 
 See the [porting overview](../docs/porting/README.md) for the complete ownership
 model and the project [documentation index](../README.md#documentation) for
-supported user workflows. Project-owned host C follows the
-[host-tool rules](../docs/reference/C_STYLE.md#host-tools).
+supported user workflows. Project-owned sources follow the
+[code style](../docs/reference/CODE_STYLE.md). Host C also follows the
+[host-tool rules](../docs/reference/style/C.md#host-tools).

@@ -45,6 +45,7 @@ checks, [TyrQuake](../docs/apps/TYRQUAKE.md) and
 [MicroPythonOS](../docs/apps/MICROPYTHONOS.md) for the published APKs, and the
 project [documentation index](../README.md#documentation) for the remaining user
 and contributor guides. Project-owned sources follow the
-[phone-userspace](../docs/reference/C_STYLE.md#phone-userspace) and
-[embedded-adapter](../docs/reference/C_STYLE.md#code-embedded-into-another-project)
-C rules.
+[code style](../docs/reference/CODE_STYLE.md). C sources use the
+[phone-userspace](../docs/reference/style/C.md#phone-userspace) or
+[embedded-adapter](../docs/reference/style/C.md#code-embedded-into-another-project)
+rules for their runtime.
