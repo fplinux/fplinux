@@ -233,6 +233,38 @@ source = "platforms/ums9117/bindings/sprd,ums9117-dma.yaml"
 destination = "Documentation/devicetree/bindings/dma/sprd,ums9117-dma.yaml"
 
 [[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-audio.c"
+destination = "sound/drivers/ums9117-audio.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-audio.h"
+destination = "sound/drivers/ums9117-audio.h"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-pcm.c"
+destination = "sound/drivers/ums9117-pcm.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-sc2720-codec.c"
+destination = "sound/drivers/ums9117-sc2720-codec.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/kernel/ums9117-sc2720-codec.h"
+destination = "sound/drivers/ums9117-sc2720-codec.h"
+
+[[linux.copies]]
+source = "platforms/ums9117/bindings/fplinux,ums9117-audio.yaml"
+destination = "Documentation/devicetree/bindings/sound/fplinux,ums9117-audio.yaml"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/sound.Kconfig"
+destination = "sound/drivers/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/kernel/sound.Makefile"
+destination = "sound/drivers/Makefile"
+
+[[linux.copies]]
 source = "platforms/ums9117/kernel/sc2720-charger-ums9117.c"
 destination = "drivers/power/supply/sc2720-charger-ums9117.c"
 

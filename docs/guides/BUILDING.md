@@ -194,10 +194,11 @@ physical phone. Bluetooth firmware is delivered through the root filesystem.
 The fitted headphone gain profile is built into the kernel image. FPLinux does
 not download or supply either group.
 
-Each group is independently optional. A missing group contributes no fitted
-data to the build. Bluetooth requires its group to operate. If any part of a
-group is present, the complete group must pass its declared size and digest
-checks; a partial, damaged, or mismatched group fails the build.
+Each group is independently optional. When a complete group is absent, the
+build keeps that feature's generic behavior: Bluetooth remains unavailable,
+and headphone audio uses the generic volume levels. If any part of a group
+is present, the complete group must pass its declared size and digest checks; a
+partial, damaged, or mismatched group fails the build.
 
 Normal `build` and `run` commands consume only already prepared local data.
 They do not read the phone's NAND.

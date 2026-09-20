@@ -30,6 +30,8 @@ packages = [
 [runtime.additions]
 fplinux-apk-tools = ["mbedtls3-3.6.7-r0.apk"]
 
+fplinux-audio = ["alsa-lib-1.2.15.3-r0.apk"]
+
 fplinux-bluetooth = [
   "bluez-5.86-r2.apk",
   "bluez-obexd-5.86-r2.apk",
@@ -67,6 +69,8 @@ fplinux-microsd-root = [
 
 [sysroot]
 packages = [
+  "alsa-lib-1.2.15.3-r0.apk",
+  "alsa-lib-dev-1.2.15.3-r0.apk",
   "binutils-2.45.1-r1.apk",
   "bsd-compat-headers-0.7.2-r6.apk",
   "dbus-dev-1.16.2-r2.apk",
@@ -108,6 +112,18 @@ packages = [
   "zlib-dev-1.3.2-r0.apk",
   "zstd-libs-1.5.7-r2.apk",
 ]
+
+[[package]]
+repository = "main"
+file = "alsa-lib-1.2.15.3-r0.apk"
+sha256 = "7c0c51faf235efa523621a8e2b86acc432574b729d5faeb243f42688e5e395dc"
+bytes = 428206
+
+[[package]]
+repository = "main"
+file = "alsa-lib-dev-1.2.15.3-r0.apk"
+sha256 = "6cb537244a71ebef5ae1056c25164a8fbd5a876f00dd7801c1142ea011c6b560"
+bytes = 102810
 
 [[package]]
 repository = "main"

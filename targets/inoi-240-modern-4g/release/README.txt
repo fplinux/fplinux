@@ -14,19 +14,35 @@ Current target support:
     the default RAM and microsd-uboot profiles;
   - RTC time and alarms, repeated RTC-woken s2idle and peripheral recovery in
     both profiles, including mounted ext4 storage and card-backed swap;
+  - stereo S16_LE WAV playback through the 3.5 mm headphones;
   - brightness, force-feedback and read-only power telemetry interfaces.
 
 The optional MicroPythonOS APK launches on this target. Support is partial:
 its UI is not fully adapted to the 128x160 screen. See docs/apps/MICROPYTHONOS.md
 for installation and use.
 
-FAT32 data storage and card hot-swap remain unqualified. Internal phone storage
-writes, audio, modem, Wi-Fi and Linux reboot are not supported. Battery-only
-power-off, physical-key wake, battery measurements and charging are unqualified.
-Physical display, keypad and brightness effects remain unqualified on this
+FAT32 data storage and card hot-swap have not been tested. Internal phone storage
+writes, modem, Wi-Fi and Linux reboot are not supported. Battery-only power-off,
+physical-key wake, battery measurements and charging have not been tested.
+Physical display, keypad and brightness effects have not been tested on this
 configuration. No physical vibration was observed under Linux without a battery.
 Stock firmware can drive the motor, but the cause of the Linux limitation is
-unknown; Linux vibration with a battery is unqualified.
+unknown; Linux vibration with a battery has not been tested.
+
+Headphone playback uses the `aplay` and `amixer` tools already included in this
+image. From the extracted archive, upload a known two-channel, signed 16-bit
+little-endian WAV file and use the default ALSA device:
+
+  ./runner/run.py --reconnect --upload ./audio.wav /tmp/audio.wav
+  ./runner/run.py --reconnect --exec "amixer -c 0 cset name='Headphone Playback Volume' 3,3"
+  ./runner/run.py --reconnect --exec 'aplay /tmp/audio.wav'
+
+The default device converts input to the 48 kHz hardware rate. Use
+`amixer -c 0 cget name='Headphone Playback Volume'` to inspect the active volume
+control. See docs/features/HEADPHONE_AUDIO.md for fitted volume levels,
+direct-device limits, EQ bypass, on-device calibration, idle silence and its
+power trade-off. Phone microphone, FM radio and speaker audio remain outside
+this feature's support boundary.
 
 TyrQuake game data can use RAM or ext4 microSD storage. Applications, files and
 Bluetooth pairing records persist on the ext4 system root across cold boots.
@@ -43,11 +59,10 @@ The shared hardware interfaces and their limits are described in:
   - docs/features/VIBRATION.md
 
 This phone uses backlight device inoi240-backlight, with configured levels
-0 through 31 and default 31; power-supply devices sc2720-battery and
-sc2720-charger; IIO name sc2720-auxadc; thermal-zone type ums9117-thm1;
-and input name SC2720 vibrator. IIO, thermal and input-device
-numbers are assigned at boot. These identifiers do not qualify the physical
-effects or measurements noted above.
+0 through 31 and default 31. Shared interface names are sc2720-battery,
+sc2720-charger, sc2720-auxadc, ums9117-thm1, SC2720 vibrator and UMS9117
+Headphones. IIO, thermal and input-device numbers are assigned at boot. These
+identifiers do not demonstrate the physical effects or measurements noted above.
 
 Before ending a RAM session, stop applications using microSD, disable any
 card-backed swap and unmount card filesystems as described in

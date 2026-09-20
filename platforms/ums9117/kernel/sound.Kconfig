@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config SND_UMS9117
+	bool "UMS9117 headphone audio"
+	depends on SND && ARCH_UMS9117
+	select SND_PCM
+	help
+	  Enable the 24 kHz and 48 kHz stereo S16_LE ALSA headphone PCM device
+	  for supported UMS9117 boards.

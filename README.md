@@ -42,24 +42,36 @@ support status, boot key, storage rules and limitations.
 
 ### Features
 
-- [Local console](docs/features/LOCAL_CONSOLE.md)
-- [LCD backlight](docs/features/DISPLAY_BACKLIGHT.md)
-- [Keypad backlight](docs/features/KEYPAD_BACKLIGHT.md)
+#### Access and file transfer
+
 - [USB networking](docs/features/USB_NETWORKING.md)
 - [SSH access](docs/features/SSH.md)
 - [File transfer](docs/features/FILE_TRANSFER.md)
-- [Host keyboard forwarding](docs/features/HOST_KEYBOARD.md)
-- [CPU clock reporting](docs/features/CPU_CLOCK.md)
-- [Removable microSD storage](docs/features/MICROSD.md)
 - [Bluetooth](docs/features/BLUETOOTH.md)
+
+#### Local interface
+
+- [Local console](docs/features/LOCAL_CONSOLE.md)
+- [Host keyboard forwarding](docs/features/HOST_KEYBOARD.md)
+- [Headphone audio](docs/features/HEADPHONE_AUDIO.md)
+- [LCD backlight](docs/features/DISPLAY_BACKLIGHT.md)
+- [Keypad backlight](docs/features/KEYPAD_BACKLIGHT.md)
+- [Vibration](docs/features/VIBRATION.md)
+
+#### Storage and power
+
+- [Removable microSD storage](docs/features/MICROSD.md)
+- [Real-time clock](docs/features/RTC.md)
+- [Power-off](docs/features/POWER_OFF.md)
+- [Suspend](docs/features/SUSPEND.md)
+
+#### Hardware telemetry
+
+- [CPU clock reporting](docs/features/CPU_CLOCK.md)
 - [Charger status](docs/features/CHARGER_STATUS.md)
 - [Battery telemetry](docs/features/BATTERY_TELEMETRY.md)
 - [SoC temperature](docs/features/SOC_TEMPERATURE.md)
 - [Auxiliary ADC](docs/features/AUXADC.md)
-- [Vibration](docs/features/VIBRATION.md)
-- [Real-time clock](docs/features/RTC.md)
-- [Power-off](docs/features/POWER_OFF.md)
-- [Suspend](docs/features/SUSPEND.md)
 
 ### Applications
 

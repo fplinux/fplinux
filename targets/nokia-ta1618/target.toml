@@ -13,7 +13,7 @@ id = 0xb1a1
 raw_page_bytes = 2176
 
 [rootfs]
-packages = []
+packages = ["fplinux-audio"]
 
 [bundle]
 packages = []
