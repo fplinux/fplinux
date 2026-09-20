@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
+from .builder import fetch
 from .common import ROOT, fail, relative_name, replace_file_atomically
 from .config import (
     container_image_recipe_digest,
@@ -22,6 +23,7 @@ from .container import (
     require_kern,
     setup,
 )
+from .kernel_patches import linux_contexts
 from .output import RunReporter
 from .source_formats import SourceFormats, classify_source_formats
 from .workspace import (
@@ -98,7 +100,7 @@ def resolve_format_paths(
     formats = classify_source_formats([path for _relative, path in files], root=root)
     supported = formats.supported()
     for relative in requested:
-        if relative not in supported:
+        if relative not in supported and Path(relative).suffix != ".patch":
             fail(f"no project formatter is defined for: {relative}")
     selected = tuple(requested)
     return selected, files, _select_groups(formats, frozenset(selected))
@@ -210,6 +212,7 @@ def _container_command(
     image: str,
     workspace: Path,
     formatter: list[str],
+    archives: Path | None = None,
 ) -> list[str]:
     return [
         kern,
@@ -233,6 +236,11 @@ def _container_command(
         "HOME=/tmp",
         "--env",
         "RUFF_CACHE_DIR=/tmp/ruff",
+        "--env",
+        "PYTHONPATH=/workspace/scripts",
+        "--env",
+        "PYTHONDONTWRITEBYTECODE=1",
+        *(["--volume", f"{archives}:/linux-archives:ro"] if archives is not None else []),
         "--init",
         "--quiet",
         "--",
@@ -322,7 +330,16 @@ def format_snapshot(
 def format_sources(values: Sequence[str]) -> None:
     """Format explicit sources in a private projection, then publish verified bytes."""
     selected, inventory, groups = resolve_format_paths(values)
+    patches = frozenset(path for path in selected if Path(path).suffix == ".patch")
+    contexts = linux_contexts(patches) if patches else ()
     snapshot = workspace_snapshot(inventory)
+    archives = ROOT / ".cache/downloads/linux"
+    fetched: set[str] = set()
+    for context in contexts:
+        source = context.source
+        if source["sha256"] not in fetched:
+            fetch(source["url"], source["sha256"], archives, f"linux-{source['version']}.tar.xz")
+            fetched.add(source["sha256"])
     container_lock = load_container_lock()
     image_recipe = container_image_recipe_digest(container_lock)
     image = container_image_reference(container_lock, image_recipe)
@@ -333,7 +350,11 @@ def format_sources(values: Sequence[str]) -> None:
         setup(lock=container_lock, image_recipe=image_recipe)
 
     reporter = RunReporter.create("format", target=None, verbose=False)
-    with reporter.stage("sources", passthrough=True, show_tail=True) as stage:
+    if patches:
+        print(
+            "format: Linux patches: C/H only; other file types retain their contents", flush=True
+        )
+    with reporter.stage("sources", passthrough=not patches, show_tail=True) as stage:
 
         def run_formatters(projection: Path) -> None:
             for _name, command in formatter_commands(groups):
@@ -343,6 +364,25 @@ def format_sources(values: Sequence[str]) -> None:
                         image=image,
                         workspace=projection,
                         formatter=command,
+                    ),
+                    env=kern_environment(),
+                    timeout=_FORMAT_TIMEOUT_SECONDS,
+                )
+            if patches:
+                stage.run(
+                    _container_command(
+                        kern,
+                        image=image,
+                        workspace=projection,
+                        archives=archives,
+                        formatter=[
+                            "python3",
+                            "-m",
+                            "fplinux_cli.kernel_patches",
+                            "--archives",
+                            "/linux-archives",
+                            *sorted(patches),
+                        ],
                     ),
                     env=kern_environment(),
                     timeout=_FORMAT_TIMEOUT_SECONDS,

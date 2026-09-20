@@ -62,8 +62,16 @@ Formatting uses the same pinned tools and classification as the quality gate:
 
 The npm-owned `package-lock.json` is excluded from formatting.
 
-Files without a project formatter, including Devicetree sources and bindings,
-Kconfig, Makefiles, patches, APKBUILDs, Containerfiles and plain text, are
+Declared Linux patches are also accepted. Their affected C/H regions are
+formatted with the pinned Linux `.clang-format` and LLVM's `clang-format-diff`
+tool. The command reconstructs the source context, regenerates each selected
+patch and checks that the remaining integration steps still apply. It retains
+non-C contents without claiming to format Kconfig, Makefile or Devicetree syntax.
+Patch inputs require the pinned Linux source archive; it is downloaded when
+missing. Other patch series are not accepted by this formatter.
+
+Files without a project formatter, including standalone Devicetree sources and
+bindings, Kconfig, Makefiles, APKBUILDs, Containerfiles and plain text, are
 rejected instead of being passed to a guessed tool. The checkout is never
 mounted writable in the container. All selected files are formatted in a
 private projection. Only after every formatter succeeds and the checkout is
