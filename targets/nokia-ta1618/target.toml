@@ -87,13 +87,20 @@ backlight_level = 0x14
 session_name = "ta1618-linux"
 boot_instructions = "Power the phone off, hold *, then connect USB while keeping * pressed."
 
+[device_data]
+parser = "ta1618_device_data.py"
+
 [bluetooth]
-parser = "bluetooth_firmware.py"
 firmware = [
   { source = "ta1618-cm4.bin", destination = "ums9117/ta1618-cm4.bin", size = 463468, sha256 = "2288d4979f056b200bbcf341921730a600cd94ff3d1afb14ee1e76d505539535" },
   { source = "ta1618-bt-config.bin", destination = "ums9117/ta1618-bt-config.bin", size = 8 },
   { source = "ta1618-bt-sprd.bin", destination = "ums9117/ta1618-bt-sprd.bin", size = 176 },
   { source = "ta1618-bt-rf-config.bin", destination = "ums9117/ta1618-bt-rf-config.bin", size = 252 },
+]
+
+[audio_profile]
+firmware = [
+  { source = "ta1618-audio-profile.bin", destination = "fplinux/ta1618-audio-profile.bin", size = 43 },
 ]
 
 [microsd]

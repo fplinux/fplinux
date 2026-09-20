@@ -9,7 +9,6 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .bluetooth_prepare import prepare_bluetooth
 from .cachelock import cache_lock
 from .commands import (
     PUBLIC_BOOT_MODES,
@@ -24,6 +23,7 @@ from .commands import (
 from .common import ROOT
 from .config import GLOBAL_PROFILES, TARGET_NAME, discover_targets, normalize_profile
 from .container import CHECK_SCOPES, check, check_commit_message, doctor, setup
+from .device_data_prepare import prepare_device_data
 from .format import format_sources
 from .nand_backup import backup_target_nand
 from .output import run_entrypoint
@@ -39,12 +39,12 @@ if TYPE_CHECKING:
 
 
 _EXCLUSIVE_CACHE_COMMANDS = frozenset(
-    {"bluetooth", "build", "check", "checksum", "format", "nand", "setup"}
+    {"build", "check", "checksum", "device-data", "format", "nand", "setup"}
 )
 _SHARED_CACHE_COMMANDS = frozenset({"console", "package", "run", "verify"})
 _CHECK_SCOPE_METAVAR = "{" + ",".join(CHECK_SCOPES) + "}"
 _PUBLIC_COMMAND_METAVAR = (
-    "{doctor,check,format,setup,build,checksum,package,prune,run,console,nand,bluetooth,verify}"
+    "{doctor,check,format,setup,build,checksum,package,prune,run,console,nand,device-data,verify}"
 )
 
 
@@ -233,11 +233,11 @@ def _command_action(
         )
     elif args.command == "nand":
         action = partial(_nand_backup_action, args.target, args.output, profile=args.profile)
-    elif args.command == "bluetooth":
-        if args.bluetooth_command != "prepare":
-            raise AssertionError(f"unhandled Bluetooth command: {args.bluetooth_command}")
+    elif args.command == "device-data":
+        if args.device_data_command != "prepare":
+            raise AssertionError(f"unhandled device-data command: {args.device_data_command}")
         action = partial(
-            prepare_bluetooth,
+            prepare_device_data,
             args.target,
             from_dump=args.from_dump,
             jobs=args.jobs,
@@ -262,6 +262,41 @@ def _add_boot_profile_options(parser: argparse.ArgumentParser, verb: str) -> Non
         type=_profile_name,
         metavar="NAME",
         help=f"{verb} the selected global profile",
+    )
+
+
+def _add_device_data_prepare_command(
+    parser: argparse.ArgumentParser,
+    targets: tuple[str, ...],
+) -> None:
+    """Add the canonical fitted-data preparation command."""
+    commands = parser.add_subparsers(
+        dest="device_data_command",
+        required=True,
+        metavar="{prepare}",
+    )
+    prepare = commands.add_parser(
+        "prepare",
+        help="extract all declared device data from one physical NAND backup",
+    )
+    prepare.add_argument("target", choices=targets)
+    prepare.add_argument(
+        "--from-dump",
+        type=Path,
+        metavar="PATH",
+        help="use an existing physical NAND backup without connecting the phone",
+    )
+    prepare.add_argument(
+        "--jobs",
+        type=_positive_jobs,
+        default=max(1, os.cpu_count() or 1),
+        metavar="N",
+        help="limit jobs when the read-only NAND loader must be built",
+    )
+    prepare.add_argument(
+        "--offline",
+        action="store_true",
+        help="build the read-only NAND loader without network access",
     )
 
 
@@ -408,36 +443,10 @@ def main() -> None:
     nand_backup_parser.add_argument("output", type=Path)
     nand_backup_parser.add_argument("--profile", type=_profile_name, metavar="NAME")
 
-    bluetooth_parser = commands.add_parser(
-        "bluetooth", help="prepare target-owned Bluetooth firmware inputs"
+    device_data_parser = commands.add_parser(
+        "device-data", help="prepare target-owned fitted data from one NAND image"
     )
-    bluetooth_commands = bluetooth_parser.add_subparsers(
-        dest="bluetooth_command",
-        required=True,
-        metavar="{prepare}",
-    )
-    bluetooth_prepare_parser = bluetooth_commands.add_parser(
-        "prepare", help="extract fitted firmware from a read-only NAND backup"
-    )
-    bluetooth_prepare_parser.add_argument("target", choices=targets)
-    bluetooth_prepare_parser.add_argument(
-        "--from-dump",
-        type=Path,
-        metavar="PATH",
-        help="use an existing physical NAND backup without connecting the phone",
-    )
-    bluetooth_prepare_parser.add_argument(
-        "--jobs",
-        type=_positive_jobs,
-        default=max(1, os.cpu_count() or 1),
-        metavar="N",
-        help="limit jobs when the read-only NAND loader must be built",
-    )
-    bluetooth_prepare_parser.add_argument(
-        "--offline",
-        action="store_true",
-        help="build the read-only NAND loader without network access",
-    )
+    _add_device_data_prepare_command(device_data_parser, targets)
 
     verify_parser = commands.add_parser(
         "verify", help="check that the booted phone runs the current build"

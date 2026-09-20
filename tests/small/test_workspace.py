@@ -38,7 +38,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                 mock.patch.object(
                     workspace_module,
                     "load_target",
-                    return_value={"rootfs": {"firmware": []}},
+                    return_value={"device_data": {"groups": {}}},
                 ),
             ):
                 snapshot = workspace_module.target_workspace_snapshot("demo")
@@ -95,7 +95,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
 
             target: dict[str, Any] = {
                 "platform": "demo",
-                "rootfs": {"firmware": []},
+                "device_data": {"groups": {}},
                 "bundle": {"packages": ["package-b"]},
                 "linux": {
                     "config_fragment": "kernel/config.fragment",

@@ -100,7 +100,7 @@ class CliCacheLockTests(unittest.TestCase):
             ),
             (
                 [
-                    "bluetooth",
+                    "device-data",
                     "prepare",
                     "nokia-ta1618",
                     "--from-dump",
@@ -109,7 +109,7 @@ class CliCacheLockTests(unittest.TestCase):
                     "2",
                     "--offline",
                 ],
-                "prepare_bluetooth",
+                "prepare_device_data",
                 True,
                 "nokia-ta1618",
                 None,
@@ -129,7 +129,7 @@ class CliCacheLockTests(unittest.TestCase):
                     callback.assert_called_once_with(
                         "nokia-ta1618", Path("backup.bin"), profile=profile
                     )
-                elif callback_name == "prepare_bluetooth":
+                elif callback_name == "prepare_device_data":
                     callback.assert_called_once_with(
                         "nokia-ta1618",
                         from_dump=Path("saved-nand.bin"),
@@ -162,13 +162,13 @@ class CliCacheLockTests(unittest.TestCase):
         self.assertTrue(build.call_args.kwargs["offline"])
         self.assertFalse(build.call_args.kwargs["verbose"])
 
-    def test_bluetooth_prepare_rejects_a_nonpositive_job_limit_before_locking(self) -> None:
+    def test_device_data_prepare_rejects_a_nonpositive_job_limit_before_locking(self) -> None:
         """Invalid worker limits cannot create cache state or start preparation."""
         with (
             mock.patch.object(
                 sys,
                 "argv",
-                ["fplinux", "bluetooth", "prepare", "nokia-ta1618", "--jobs", "0"],
+                ["fplinux", "device-data", "prepare", "nokia-ta1618", "--jobs", "0"],
             ),
             mock.patch.object(cli, "ROOT", self.root),
             mock.patch.object(cli, "discover_targets", return_value=("nokia-ta1618",)),

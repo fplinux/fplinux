@@ -261,18 +261,24 @@ def target_workspace_snapshot(target: str, profile: str | None = None) -> Worksp
             target_config=target_config,
         )
     )
-    captured = firmware_inputs.capture_external_firmware_inputs(
+    device_data_groups = target_config["device_data"]["groups"]
+    captured_groups = firmware_inputs.capture_external_device_data(
         target,
-        target_config["rootfs"]["firmware"],
+        device_data_groups,
         ROOT / ".cache",
     )
     firmware_files = tuple(
         WorkspaceFile(
-            firmware_inputs.snapshot_firmware_path(target, firmware.source),
+            firmware_inputs.snapshot_device_data_path(
+                target,
+                group_name,
+                firmware.destination,
+            ),
             firmware.contents,
             0o600,
         )
-        for firmware in captured
+        for group_name, group in captured_groups.items()
+        for firmware in group
     )
     if not firmware_files:
         return source_snapshot

@@ -13,6 +13,8 @@ from unittest import mock
 from fplinux_cli import builder, config
 from fplinux_cli.common import ROOT
 
+PROFILE_FIXTURES = ROOT / "tests/fixtures/profile_config"
+
 
 class GlobalProfileTests(unittest.TestCase):
     """Keep target features common while changing the system root."""
@@ -70,62 +72,19 @@ class GlobalProfileTests(unittest.TestCase):
             (target_root / "bootstrap-microsd").mkdir()
             (target_root / "uboot").mkdir()
             (target_root / "uboot/defconfig").write_text("CONFIG_ARM=y\n")
-            (target_root / "target.toml").write_text(
-                f"""platform = "demo"
-[identity]
-brand = "Demo"
-product = "{target}"
-hardware_codes = []
-compatible = "demo,{target}"
-[rootfs]
-packages = []
-[bundle]
-packages = []
-[linux]
-config_fragment = "kernel/config.fragment"
-memory = {{ base = 0x80200000, size = 0x03c00000 }}
-dtb = "{target}.dtb"
-debug_dtb = "{target}.dtb"
-patches = []
-copies = []
-appends = []
-forbidden_config = ["CONFIG_FORBIDDEN=y"]
-forbidden_dtb_markers = ["forbidden"]
-[bootstrap]
-image = "bootstrap.bin"
-map = "bootstrap.map"
-dtb_destination = "{target}.dtb"
-record_prefix = "DEMO"
-[adapter]
-spi_mode = 0
-lcd_id = 0
-exec_distance = 0
-backlight_channels = "mono"
-backlight_level = 0
-session_name = "{target}"
-boot_instructions = "Power off and connect."
-[microsd]
-linux_patches = []
-[microsd.bootstrap]
-source = "bootstrap-microsd"
-image = "sd-stage0.bin"
-map = "sd-stage0.map"
-[microsd.uboot]
-defconfig = "uboot/defconfig"
-patches = []
-copies = []
-[bluetooth]
-parser = "radio_parser.py"
-[[bluetooth.firmware]]
-source = "radio.bin"
-destination = "demo/radio.bin"
-size = 4
-"""
-            )
+            self.write_target_manifest(target)
         self.addCleanup(mock.patch.stopall)
         mock.patch.object(config, "ROOT", self.root).start()
         mock.patch.object(config, "load_platform", return_value=self.platform).start()
         mock.patch.object(config, "asset_bundle_paths", return_value={}).start()
+
+    def write_target_manifest(self, target: str, fixture: str = "target.toml") -> None:
+        """Write one named board configuration with its target identity filled in."""
+        template = (PROFILE_FIXTURES / fixture).read_text(encoding="utf-8")
+        (self.root / "targets" / target / "target.toml").write_text(
+            template % {"target": target},
+            encoding="utf-8",
+        )
 
     def test_default_alias_has_the_same_identity_and_configuration(self) -> None:
         """Spelling default explicitly does not create a second build context."""
@@ -159,7 +118,7 @@ size = 4
                 self.assertEqual(ram["rootfs"]["packages"], [])
                 self.assertEqual(card["rootfs"]["base_packages"], ram["rootfs"]["base_packages"])
                 self.assertEqual(
-                    card["rootfs"]["firmware"],
+                    card["device_data"]["groups"]["bluetooth"],
                     [
                         {
                             "source": "radio.bin",
@@ -168,7 +127,7 @@ size = 4
                         }
                     ],
                 )
-                self.assertEqual(card["rootfs"]["firmware"], ram["rootfs"]["firmware"])
+                self.assertEqual(card["device_data"], ram["device_data"])
                 self.assertEqual(card["linux"]["memory"], {"base": 0x80200000, "size": 0x03C00000})
                 self.assertEqual(card["linux"]["config_fragment"], ram["linux"]["config_fragment"])
                 self.assertEqual(card["bootstrap"]["source"], "bootstrap-microsd")
@@ -188,17 +147,19 @@ size = 4
     def test_boot_profile_cannot_exclude_shared_features(self) -> None:
         """Feature-package ownership is rejected at the boot-policy boundary."""
         path = self.root / "profiles/default/profile.toml"
-        path.write_text(path.read_text().replace("packages = []", 'packages = ["feature"]'))
+        shutil.copyfile(PROFILE_FIXTURES / "default-with-feature-package.toml", path)
         with self.assertRaisesRegex(SystemExit, "boot maintenance"):
             config.load_target("first")
 
     def test_missing_bluetooth_declaration_does_not_require_private_inputs(self) -> None:
         """A board without a Bluetooth declaration has no firmware input group."""
-        path = self.root / "targets/first/target.toml"
-        path.write_text(path.read_text().split("[bluetooth]")[0])
+        self.write_target_manifest("first", "target-without-bluetooth.toml")
         for profile in ("default", "microsd-uboot"):
             with self.subTest(profile=profile):
-                self.assertEqual(config.load_target("first", profile)["rootfs"]["firmware"], [])
+                self.assertEqual(
+                    config.load_target("first", profile)["device_data"]["groups"],
+                    {},
+                )
 
     def test_missing_board_boot_sources_fail_only_when_microsd_is_selected(self) -> None:
         """RAM operation does not read unused U-Boot sources or fall back to another board."""
@@ -220,16 +181,7 @@ size = 4
             target_root = self.root / "targets" / target
             (target_root / "uboot/slot.c").write_text(f"{target} slot\n")
             (target_root / "uboot/board.patch").write_text(f"{target} integration patch\n")
-            manifest = target_root / "target.toml"
-            manifest.write_text(
-                manifest.read_text().replace(
-                    'defconfig = "uboot/defconfig"\npatches = []\ncopies = []',
-                    'defconfig = "uboot/defconfig"\npatches = ["uboot/board.patch"]\n'
-                    'copies = [{ source = "targets/'
-                    + target
-                    + '/uboot/slot.c", destination = "board/demo/slot.c" }]',
-                )
-            )
+            self.write_target_manifest(target, "target-with-uboot-sources.toml")
 
             with self.subTest(target=target):
                 uboot = config.load_target(target, "microsd-uboot")["uboot"]

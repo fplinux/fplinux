@@ -10,10 +10,11 @@ controller.
 Keep the USB-NCM connection available for local management while using
 Bluetooth. It is independent of Bluetooth traffic.
 
-Firmware must be prepared from the exact phone before building its image.
-Preparation requires a source checkout; a standalone archive's runner does not
-provide firmware preparation. Use an image built with the inputs fitted to that
-phone, not firmware copied from another device.
+To use Bluetooth, prepare firmware from the exact phone before building its
+image. In a source checkout, run
+`./fplinux device-data prepare <target>` and follow the printed build commands.
+A standalone archive's runner cannot prepare fitted data. Use an image built
+with the inputs fitted to that phone, not firmware copied from another device.
 
 `fplinux-bluetooth -h` or `fplinux-bluetooth --help` lists the available
 commands. Place `-h` or `--help` after `enable`, `send`, `receive`, or `network`

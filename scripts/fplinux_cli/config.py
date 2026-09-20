@@ -159,7 +159,7 @@ def _sha256(value: object, name: str) -> str:
 
 
 def firmware_array(value: object, name: str) -> list[dict[str, Any]]:
-    """Validate explicitly named files installed below /lib/firmware."""
+    """Validate explicitly named inputs and their firmware lookup destinations."""
     if not isinstance(value, list) or not value:
         fail(f"{name} must be a non-empty array")
     result: list[dict[str, Any]] = []
@@ -178,7 +178,7 @@ def firmware_array(value: object, name: str) -> list[dict[str, Any]]:
         sources.add(source)
         destination = relative_value(raw.get("destination"), f"{item_name} destination")
         if not PurePosixPath(destination).name:
-            fail(f"{item_name} destination must name a file below /lib/firmware")
+            fail(f"{item_name} destination must name a file in the firmware namespace")
         if destination in destinations:
             fail(f"{name} must not contain duplicate destinations: {destination}")
         destinations.add(destination)
@@ -853,7 +853,9 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
         {
             "identity",
             "microsd",
+            *({"device_data"} if "device_data" in raw else set()),
             *({"bluetooth"} if "bluetooth" in raw else set()),
+            *({"audio_profile"} if "audio_profile" in raw else set()),
             *({"nand"} if "nand" in raw else set()),
             "platform",
             "rootfs",
@@ -985,18 +987,41 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
         "patches": [*linux["patches"], *profile_linux["patches"]],
         "root": profile_linux["root"],
     }
-    firmware: list[dict[str, Any]] = []
+    device_data_groups: dict[str, list[dict[str, Any]]] = {}
     if "bluetooth" in config:
-        bluetooth = exact_table(config["bluetooth"], {"parser", "firmware"}, "target bluetooth")
-        parser = basename_value(bluetooth["parser"], "target bluetooth parser")
+        bluetooth = exact_table(config.pop("bluetooth"), {"firmware"}, "target bluetooth")
+        device_data_groups["bluetooth"] = firmware_array(
+            bluetooth["firmware"],
+            "target bluetooth firmware",
+        )
+    if "audio_profile" in config:
+        audio_profile = exact_table(
+            config.pop("audio_profile"),
+            {"firmware"},
+            "target audio-profile",
+        )
+        device_data_groups["audio-profile"] = firmware_array(
+            audio_profile["firmware"],
+            "target audio-profile firmware",
+        )
+    if device_data_groups:
+        device_data = exact_table(
+            config.get("device_data"),
+            {"parser"},
+            "target device_data",
+        )
+        parser = basename_value(device_data["parser"], "target device_data parser")
         if not parser.endswith(".py"):
-            fail("target bluetooth parser must be a Python filename")
-        firmware = firmware_array(bluetooth["firmware"], "target bluetooth firmware")
+            fail("target device_data parser must be a Python filename")
+        config["device_data"] = {"parser": parser, "groups": device_data_groups}
+    elif "device_data" in config:
+        fail("target device_data requires a bluetooth or audio-profile group")
+    else:
+        config["device_data"] = {"groups": {}}
     config["rootfs"] = {
         "base_packages": target_rootfs_packages,
         "packages": selected_profile["rootfs"]["packages"],
         "exclude_packages": [],
-        "firmware": firmware,
     }
     config["profile"] = profile
     platform_bootstrap = platform["bootstrap"]
