@@ -17,6 +17,12 @@ properties:
   compatible:
     const: sprd,ums9117-sc2720-fgu
 
+  nvmem-cells:
+    maxItems: 1
+
+  nvmem-cell-names:
+    const: fgu_calib
+
   fplinux,current-calibration:
     $ref: /schemas/types.yaml#/definitions/uint32-array
     description: |
@@ -32,6 +38,8 @@ properties:
 required:
   - compatible
   - fplinux,current-calibration
+  - nvmem-cells
+  - nvmem-cell-names
 
 additionalProperties: false
 
@@ -40,4 +48,6 @@ examples:
     fuel-gauge {
         compatible = "sprd,ums9117-sc2720-fgu";
         fplinux,current-calibration = <10 20>;
+        nvmem-cells = <&fgu_calib>;
+        nvmem-cell-names = "fgu_calib";
     };

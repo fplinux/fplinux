@@ -38,6 +38,16 @@ properties:
     $ref: /schemas/types.yaml#/definitions/phandle
     description: Always-on APB syscon used by the audio device.
 
+  sprd,pmic:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: SC2720 PMIC containing the headphone codec registers.
+
+  clocks:
+    maxItems: 1
+
+  clock-names:
+    const: xtal
+
   firmware-name:
     $ref: /schemas/types.yaml#/definitions/string
     description: |
@@ -69,6 +79,9 @@ required:
   - reg
   - reg-names
   - fplinux,aon-apb
+  - sprd,pmic
+  - clocks
+  - clock-names
 
 allOf:
   - if:
@@ -93,6 +106,9 @@ examples:
               <0x402a04f0 0x20>;
         reg-names = "aud", "vbc", "clk1", "pinmux", "pinconf";
         fplinux,aon-apb = <&aon_apb>;
+        sprd,pmic = <&sc2720_pmic>;
+        clocks = <&sc2720_xtal>;
+        clock-names = "xtal";
         fplinux,pad-settings = <
             0x00 0 0x0008e001
             0x08 0 0x0008e001

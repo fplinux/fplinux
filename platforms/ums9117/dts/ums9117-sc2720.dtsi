@@ -1,46 +1,106 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
-/ {
-	sc2720_charger: charger {
-		compatible = "sprd,ums9117-sc2720-charger";
-	};
-
-	sc2720_fgu: fuel-gauge {
-		compatible = "sprd,ums9117-sc2720-fgu";
-	};
-
-	sc2720_auxadc: auxadc {
-		compatible = "sprd,ums9117-sc2720-auxadc";
-	};
-
-	poweroff {
-		compatible = "sprd,ums9117-sc2720-poweroff";
-		fplinux,keypad = <&keypad>;
-	};
-
-	sc2720_inta: sc2720-inta {
-		compatible = "sprd,ums9117-sc2720-inta";
+&adi {
+	sc2720_pmic: pmic@0 {
+		compatible = "sprd,sc2720";
+		reg = <0>;
+		spi-max-frequency = <26000000>;
 		interrupt-parent = <&gic>;
 		interrupts = <GIC_SPI 38 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-controller;
-		#interrupt-cells = <2>;
-	};
+		#interrupt-cells = <1>;
+		#address-cells = <1>;
+		#size-cells = <0>;
 
-	rtc {
-		compatible = "sprd,ums9117-sc2720-rtc";
-		interrupt-parent = <&sc2720_inta>;
-		interrupts = <1 IRQ_TYPE_LEVEL_HIGH>;
-		interrupt-names = "alarm";
-		wakeup-source;
-	};
+		sc2720_xtal: clock-controller {
+			compatible = "sprd,sc2720-clk";
+			#clock-cells = <0>;
+		};
 
-	sc2720_eic: sc2720-eic {
-		compatible = "sprd,ums9117-sc2720-eic";
-		interrupt-parent = <&sc2720_inta>;
-		interrupts = <4 IRQ_TYPE_LEVEL_HIGH>;
-		gpio-controller;
-		#gpio-cells = <2>;
-		interrupt-controller;
-		#interrupt-cells = <2>;
+		sc2720_charger: charger {
+			compatible = "sprd,ums9117-sc2720-charger";
+		};
+
+		sc2720_fgu: fuel-gauge {
+			compatible = "sprd,ums9117-sc2720-fgu";
+			nvmem-cells = <&fgu_calib>;
+			nvmem-cell-names = "fgu_calib";
+		};
+
+		poweroff {
+			compatible = "sprd,ums9117-sc2720-poweroff";
+			fplinux,keypad = <&keypad>;
+		};
+
+		rtc@200 {
+			compatible = "sprd,sc2720-rtc";
+			reg = <0x200>;
+			interrupt-parent = <&sc2720_pmic>;
+			interrupts = <1>;
+			wakeup-source;
+		};
+
+		sc2720_eic: gpio@280 {
+			compatible = "sprd,sc2720-eic";
+			reg = <0x280>;
+			interrupt-parent = <&sc2720_pmic>;
+			interrupts = <4>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			interrupt-controller;
+			#interrupt-cells = <2>;
+		};
+
+		efuse@300 {
+			compatible = "sprd,sc2720-efuse";
+			reg = <0x300>;
+			hwlocks = <&hwlock 12>;
+			read-only;
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			fgu_calib: calibration@6 {
+				reg = <0x6 0x2>;
+			};
+		};
+
+		sc2720_auxadc: adc@400 {
+			compatible = "sprd,sc2720-adc";
+			reg = <0x400>;
+			interrupt-parent = <&sc2720_pmic>;
+			interrupts = <0>;
+			#io-channel-cells = <1>;
+			hwlocks = <&hwlock 4>;
+			clocks = <&sc2720_xtal>;
+			clock-names = "xtal";
+		};
+
+		sc2720_kpled: keypad-backlight@df8 {
+			compatible = "sprd,ums9117-sc2720-kpled";
+			reg = <0xdf8>;
+			function = LED_FUNCTION_KBD_BACKLIGHT;
+			linux,default-trigger = "input-events";
+		};
+
+		sc2720_vibrator: vibrator@e00 {
+			compatible = "sprd,sc2720-vibrator";
+			reg = <0xe00>;
+		};
+
+		sc2720_regulators: regulators {
+			compatible = "sprd,sc2720-regulator";
+
+			vmmc: LDO_SDCORE {
+				regulator-name = "sc2720-sdcore";
+				regulator-min-microvolt = <3000000>;
+				regulator-max-microvolt = <3000000>;
+			};
+
+			vqmmc: LDO_SDIO {
+				regulator-name = "sc2720-sdio";
+				regulator-min-microvolt = <3000000>;
+				regulator-max-microvolt = <3000000>;
+			};
+		};
 	};
 };

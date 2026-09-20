@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config COMMON_CLK_SC2720
+	bool "SC2720 26 MHz clock request"
+	depends on MFD_SC27XX_PMIC
+	select REGMAP
+	help
+	  Share the SC2720 crystal request between Linux consumers without
+	  clearing an enable inherited from the boot firmware.
+	  The headphone codec and auxiliary ADC use this shared request.
+	  It does not change the oscillator rate or other PMIC clock gates.

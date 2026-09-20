@@ -1,0 +1,124 @@
+# SPDX-License-Identifier: GPL-2.0-only
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/mmc/sprd,ums9117-sdhci.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Unisoc UMS9117 SDHCI controller
+
+maintainers:
+  - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+
+description:
+  The UMS9117 SDIO0 controller implements the SDHCI 4.10 register layout in
+  version 4 mode. Its register interface requires 32-bit accesses. The
+  removable slot uses two fixed-voltage supplies and polling card detection.
+  The second register window is the polling-only EIC2 DATA and DMSK pair.
+
+allOf:
+  - $ref: sdhci-common.yaml#
+
+properties:
+  compatible:
+    const: sprd,ums9117-sdhci
+
+  reg:
+    items:
+      - description: SDHCI registers through Host Controller Version
+      - description: EIC2 card-detect DATA and DMSK registers
+
+  reg-names:
+    items:
+      - const: host
+      - const: card-detect
+
+  interrupts:
+    maxItems: 1
+
+  clocks:
+    items:
+      - description: 195 MHz SDIO functional source clock
+      - description: AP AHB SDIO0 gate clock
+
+  clock-names:
+    items:
+      - const: sdio
+      - const: enable
+
+  resets:
+    maxItems: 1
+
+  reset-names:
+    const: sdio
+
+  pinctrl-0: true
+
+  pinctrl-names:
+    const: default
+
+  bus-width:
+    const: 4
+
+  max-frequency:
+    const: 48750000
+
+  no-1-8-v: true
+  no-sdio: true
+  no-mmc: true
+  disable-wp: true
+
+  cd-gpios: false
+
+  sdhci-caps: false
+  sdhci-caps-mask: false
+
+required:
+  - compatible
+  - reg
+  - reg-names
+  - interrupts
+  - clocks
+  - clock-names
+  - resets
+  - reset-names
+  - pinctrl-0
+  - pinctrl-names
+  - vmmc-supply
+  - vqmmc-supply
+  - bus-width
+  - max-frequency
+  - no-1-8-v
+  - no-sdio
+  - no-mmc
+  - disable-wp
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/clock/sprd,ums9117-clk.h>
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+    #include <dt-bindings/interrupt-controller/irq.h>
+    #include <dt-bindings/reset/sprd,ums9117-reset.h>
+
+    mmc@20300000 {
+        compatible = "sprd,ums9117-sdhci";
+        reg = <0x20300000 0x100>, <0x402c0000 0x8>;
+        reg-names = "host", "card-detect";
+        interrupts = <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
+        clocks = <&sdio0_clk>, <&apahb_gate CLK_SDIO0_EB>;
+        clock-names = "sdio", "enable";
+        resets = <&apahb_reset RESET_SDIO0>;
+        reset-names = "sdio";
+        pinctrl-0 = <&sdio0_pins>;
+        pinctrl-names = "default";
+        vmmc-supply = <&vddsdcore>;
+        vqmmc-supply = <&vddsdio>;
+        bus-width = <4>;
+        max-frequency = <48750000>;
+        no-1-8-v;
+        no-sdio;
+        no-mmc;
+        disable-wp;
+    };
+...

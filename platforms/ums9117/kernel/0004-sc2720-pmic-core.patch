@@ -1,0 +1,491 @@
+diff --git a/drivers/gpio/gpio-pmic-eic-sprd.c b/drivers/gpio/gpio-pmic-eic-sprd.c
+index cb015fb..f6779f7 100644
+--- a/drivers/gpio/gpio-pmic-eic-sprd.c
++++ b/drivers/gpio/gpio-pmic-eic-sprd.c
+@@ -24,15 +24,17 @@
+ #define SPRD_PMIC_EIC_CTRL0		0x40
+
+ /*
+- * The PMIC EIC controller only has one bank, and each bank now can contain
+- * 16 EICs.
++ * The PMIC EIC controller only has one bank, with up to 16 EICs.
+  */
+ #define SPRD_PMIC_EIC_PER_BANK_NR	16
+-#define SPRD_PMIC_EIC_NR		SPRD_PMIC_EIC_PER_BANK_NR
+-#define SPRD_PMIC_EIC_DATA_MASK		GENMASK(15, 0)
+ #define SPRD_PMIC_EIC_BIT(x)		((x) & (SPRD_PMIC_EIC_PER_BANK_NR - 1))
+ #define SPRD_PMIC_EIC_DBNC_MASK		GENMASK(11, 0)
+
++struct sprd_pmic_eic_data {
++	u32 num_eics;
++	bool wake_parent;
++};
++
+ /*
+  * These registers are modified under the irq bus lock and cached to avoid
+  * unnecessary writes in bus_sync_unlock.
+@@ -52,24 +54,26 @@ enum {
+  * @reg: the array to cache the EIC registers.
+  * @buslock: for bus lock/sync and unlock.
+  * @irq: the interrupt number of the PMIC EIC conteroller.
++ * @data: PMIC-specific controller data.
+  */
+ struct sprd_pmic_eic {
+ 	struct gpio_chip chip;
+ 	struct regmap *map;
+ 	u32 offset;
+-	u8 reg[CACHE_NR_REGS];
++	u16 reg[CACHE_NR_REGS];
+ 	struct mutex buslock;
+ 	int irq;
++	const struct sprd_pmic_eic_data *data;
+ };
+
+-static void sprd_pmic_eic_update(struct gpio_chip *chip, unsigned int offset,
+-				 u16 reg, unsigned int val)
++static int sprd_pmic_eic_update(struct gpio_chip *chip, unsigned int offset,
++				u16 reg, unsigned int val)
+ {
+ 	struct sprd_pmic_eic *pmic_eic = gpiochip_get_data(chip);
+ 	u32 shift = SPRD_PMIC_EIC_BIT(offset);
+
+-	regmap_update_bits(pmic_eic->map, pmic_eic->offset + reg,
+-			   BIT(shift), val << shift);
++	return regmap_update_bits(pmic_eic->map, pmic_eic->offset + reg,
++				  BIT(shift), val << shift);
+ }
+
+ static int sprd_pmic_eic_read(struct gpio_chip *chip, unsigned int offset,
+@@ -88,13 +92,18 @@ static int sprd_pmic_eic_read(struct gpio_chip *chip, unsigned int offset,
+
+ static int sprd_pmic_eic_request(struct gpio_chip *chip, unsigned int offset)
+ {
+-	sprd_pmic_eic_update(chip, offset, SPRD_PMIC_EIC_DMSK, 1);
+-	return 0;
++	return sprd_pmic_eic_update(chip, offset, SPRD_PMIC_EIC_DMSK, 1);
+ }
+
+ static void sprd_pmic_eic_free(struct gpio_chip *chip, unsigned int offset)
+ {
+-	sprd_pmic_eic_update(chip, offset, SPRD_PMIC_EIC_DMSK, 0);
++	int ret;
++
++	ret = sprd_pmic_eic_update(chip, offset, SPRD_PMIC_EIC_DMSK, 0);
++	if (ret)
++		dev_err_ratelimited(chip->parent,
++				    "failed to release PMIC EIC %u: %d\n",
++				    offset, ret);
+ }
+
+ static int sprd_pmic_eic_get(struct gpio_chip *chip, unsigned int offset)
+@@ -206,47 +215,70 @@ static void sprd_pmic_eic_bus_sync_unlock(struct irq_data *data)
+ 	struct sprd_pmic_eic *pmic_eic = gpiochip_get_data(chip);
+ 	u32 trigger = irqd_get_trigger_type(data);
+ 	u32 offset = irqd_to_hwirq(data);
+-	int state;
++	int state, ret;
+
+ 	/* Set irq type */
+ 	if (trigger & IRQ_TYPE_EDGE_BOTH) {
+ 		state = sprd_pmic_eic_get(chip, offset);
++		if (state < 0) {
++			ret = state;
++			goto out;
++		}
+ 		if (state)
+-			sprd_pmic_eic_update(chip, offset, SPRD_PMIC_EIC_IEV, 0);
++			ret = sprd_pmic_eic_update(chip, offset,
++						   SPRD_PMIC_EIC_IEV, 0);
+ 		else
+-			sprd_pmic_eic_update(chip, offset, SPRD_PMIC_EIC_IEV, 1);
++			ret = sprd_pmic_eic_update(chip, offset,
++						   SPRD_PMIC_EIC_IEV, 1);
+ 	} else {
+-		sprd_pmic_eic_update(chip, offset, SPRD_PMIC_EIC_IEV,
+-				     !!(pmic_eic->reg[REG_IEV] & BIT(offset)));
++		ret = sprd_pmic_eic_update(chip, offset, SPRD_PMIC_EIC_IEV,
++					   !!(pmic_eic->reg[REG_IEV] &
++					      BIT(offset)));
+ 	}
++	if (ret)
++		goto out;
+
+ 	/* Set irq unmask */
+-	sprd_pmic_eic_update(chip, offset, SPRD_PMIC_EIC_IE,
+-			     !!(pmic_eic->reg[REG_IE] & BIT(offset)));
++	ret = sprd_pmic_eic_update(chip, offset, SPRD_PMIC_EIC_IE,
++				   !!(pmic_eic->reg[REG_IE] & BIT(offset)));
++	if (ret)
++		goto out;
+ 	/* Generate trigger start pulse for debounce EIC */
+-	sprd_pmic_eic_update(chip, offset, SPRD_PMIC_EIC_TRIG,
+-			     !!(pmic_eic->reg[REG_TRIG] & BIT(offset)));
++	ret = sprd_pmic_eic_update(chip, offset, SPRD_PMIC_EIC_TRIG,
++				   !!(pmic_eic->reg[REG_TRIG] & BIT(offset)));
++
++out:
++	if (ret)
++		dev_err_ratelimited(chip->parent,
++				    "failed to update PMIC EIC IRQ %u: %d\n",
++				    offset, ret);
+
+ 	mutex_unlock(&pmic_eic->buslock);
+ }
+
+-static void sprd_pmic_eic_toggle_trigger(struct gpio_chip *chip,
+-					 unsigned int irq, unsigned int offset)
++static int sprd_pmic_eic_toggle_trigger(struct gpio_chip *chip,
++					unsigned int irq, unsigned int offset)
+ {
+ 	u32 trigger = irq_get_trigger_type(irq);
+-	int state, post_state;
++	int state, post_state, ret;
+
+ 	if (!(trigger & IRQ_TYPE_EDGE_BOTH))
+-		return;
++		return 0;
+
+ 	state = sprd_pmic_eic_get(chip, offset);
++	if (state < 0)
++		return state;
+ retry:
+ 	if (state)
+-		sprd_pmic_eic_update(chip, offset, SPRD_PMIC_EIC_IEV, 0);
++		ret = sprd_pmic_eic_update(chip, offset, SPRD_PMIC_EIC_IEV, 0);
+ 	else
+-		sprd_pmic_eic_update(chip, offset, SPRD_PMIC_EIC_IEV, 1);
++		ret = sprd_pmic_eic_update(chip, offset, SPRD_PMIC_EIC_IEV, 1);
++	if (ret)
++		return ret;
+
+ 	post_state = sprd_pmic_eic_get(chip, offset);
++	if (post_state < 0)
++		return post_state;
+ 	if (state != post_state) {
+ 		dev_warn(chip->parent, "PMIC EIC level was changed.\n");
+ 		state = post_state;
+@@ -254,9 +286,11 @@ retry:
+ 	}
+
+ 	/* Set irq unmask */
+-	sprd_pmic_eic_update(chip, offset, SPRD_PMIC_EIC_IE, 1);
++	ret = sprd_pmic_eic_update(chip, offset, SPRD_PMIC_EIC_IE, 1);
++	if (ret)
++		return ret;
+ 	/* Generate trigger start pulse for debounce EIC */
+-	sprd_pmic_eic_update(chip, offset, SPRD_PMIC_EIC_TRIG, 1);
++	return sprd_pmic_eic_update(chip, offset, SPRD_PMIC_EIC_TRIG, 1);
+ }
+
+ static irqreturn_t sprd_pmic_eic_irq_handler(int irq, void *data)
+@@ -269,14 +303,25 @@ static irqreturn_t sprd_pmic_eic_irq_handler(int irq, void *data)
+
+ 	ret = regmap_read(pmic_eic->map, pmic_eic->offset + SPRD_PMIC_EIC_MIS,
+ 			  &val);
+-	if (ret)
+-		return IRQ_RETVAL(ret);
++	if (ret) {
++		dev_err_ratelimited(chip->parent,
++				    "failed to read PMIC EIC IRQ status: %d\n",
++				    ret);
++		return IRQ_HANDLED;
++	}
+
+-	status = val & SPRD_PMIC_EIC_DATA_MASK;
++	status = val & GENMASK(chip->ngpio - 1, 0);
+
+ 	for_each_set_bit(n, &status, chip->ngpio) {
+ 		/* Clear the interrupt */
+-		sprd_pmic_eic_update(chip, n, SPRD_PMIC_EIC_IC, 1);
++		ret = sprd_pmic_eic_update(chip, n, SPRD_PMIC_EIC_IC, 1);
++		if (ret) {
++			dev_err_ratelimited(
++				chip->parent,
++				"failed to clear PMIC EIC IRQ %u: %d\n", n,
++				ret);
++			continue;
++		}
+
+ 		girq = irq_find_mapping(chip->irq.domain, n);
+ 		handle_nested_irq(girq);
+@@ -285,25 +330,43 @@ static irqreturn_t sprd_pmic_eic_irq_handler(int irq, void *data)
+ 		 * The PMIC EIC can only support level trigger, so we can
+ 		 * toggle the level trigger to emulate the edge trigger.
+ 		 */
+-		sprd_pmic_eic_toggle_trigger(chip, girq, n);
++		ret = sprd_pmic_eic_toggle_trigger(chip, girq, n);
++		if (ret)
++			dev_err_ratelimited(
++				chip->parent,
++				"failed to rearm PMIC EIC IRQ %u: %d\n", n,
++				ret);
+ 	}
+
+ 	return IRQ_HANDLED;
+ }
+
++static int sprd_pmic_eic_irq_set_wake(struct irq_data *data, unsigned int on)
++{
++	struct gpio_chip *chip = irq_data_get_irq_chip_data(data);
++	struct sprd_pmic_eic *pmic_eic = gpiochip_get_data(chip);
++
++	if (!pmic_eic->data->wake_parent)
++		return 0;
++
++	return irq_set_irq_wake(pmic_eic->irq, on);
++}
++
+ static const struct irq_chip pmic_eic_irq_chip = {
+-	.name			= "sprd-pmic-eic",
+-	.irq_mask		= sprd_pmic_eic_irq_mask,
+-	.irq_unmask		= sprd_pmic_eic_irq_unmask,
+-	.irq_set_type		= sprd_pmic_eic_irq_set_type,
+-	.irq_bus_lock		= sprd_pmic_eic_bus_lock,
+-	.irq_bus_sync_unlock	= sprd_pmic_eic_bus_sync_unlock,
+-	.flags			= IRQCHIP_SKIP_SET_WAKE | IRQCHIP_IMMUTABLE,
++	.name = "sprd-pmic-eic",
++	.irq_mask = sprd_pmic_eic_irq_mask,
++	.irq_unmask = sprd_pmic_eic_irq_unmask,
++	.irq_set_type = sprd_pmic_eic_irq_set_type,
++	.irq_set_wake = sprd_pmic_eic_irq_set_wake,
++	.irq_bus_lock = sprd_pmic_eic_bus_lock,
++	.irq_bus_sync_unlock = sprd_pmic_eic_bus_sync_unlock,
++	.flags = IRQCHIP_IMMUTABLE,
+ 	GPIOCHIP_IRQ_RESOURCE_HELPERS,
+ };
+
+ static int sprd_pmic_eic_probe(struct platform_device *pdev)
+ {
++	const struct sprd_pmic_eic_data *data;
+ 	struct gpio_irq_chip *irq;
+ 	struct sprd_pmic_eic *pmic_eic;
+ 	int ret;
+@@ -312,7 +375,12 @@ static int sprd_pmic_eic_probe(struct platform_device *pdev)
+ 	if (!pmic_eic)
+ 		return -ENOMEM;
+
++	data = of_device_get_match_data(&pdev->dev);
++	if (!data)
++		return -ENODEV;
++
+ 	mutex_init(&pmic_eic->buslock);
++	pmic_eic->data = data;
+
+ 	pmic_eic->irq = platform_get_irq(pdev, 0);
+ 	if (pmic_eic->irq < 0)
+@@ -338,7 +406,7 @@ static int sprd_pmic_eic_probe(struct platform_device *pdev)
+ 	}
+
+ 	pmic_eic->chip.label = dev_name(&pdev->dev);
+-	pmic_eic->chip.ngpio = SPRD_PMIC_EIC_NR;
++	pmic_eic->chip.ngpio = data->num_eics;
+ 	pmic_eic->chip.base = -1;
+ 	pmic_eic->chip.parent = &pdev->dev;
+ 	pmic_eic->chip.direction_input = sprd_pmic_eic_direction_input;
+@@ -361,8 +429,18 @@ static int sprd_pmic_eic_probe(struct platform_device *pdev)
+ 	return 0;
+ }
+
++static const struct sprd_pmic_eic_data sc2720_eic_data = {
++	.num_eics = 13,
++	.wake_parent = true,
++};
++
++static const struct sprd_pmic_eic_data sc2731_eic_data = {
++	.num_eics = 16,
++};
++
+ static const struct of_device_id sprd_pmic_eic_of_match[] = {
+-	{ .compatible = "sprd,sc2731-eic", },
++	{ .compatible = "sprd,sc2720-eic", .data = &sc2720_eic_data },
++	{ .compatible = "sprd,sc2731-eic", .data = &sc2731_eic_data },
+ 	{ /* end of list */ }
+ };
+ MODULE_DEVICE_TABLE(of, sprd_pmic_eic_of_match);
+diff --git a/drivers/mfd/Kconfig b/drivers/mfd/Kconfig
+index 55a9fea..5f6fc2d 100644
+--- a/drivers/mfd/Kconfig
++++ b/drivers/mfd/Kconfig
+@@ -1520,9 +1520,10 @@ config MFD_SKY81452
+
+ config MFD_SC27XX_PMIC
+ 	tristate "Spreadtrum SC27xx PMICs"
+-	depends on ARCH_SPRD || COMPILE_TEST
++	depends on ARCH_SPRD || ARCH_UMS9117 || COMPILE_TEST
+ 	depends on SPI_MASTER
+ 	select MFD_CORE
++	select MFD_SYSCON
+ 	select REGMAP_SPI
+ 	select REGMAP_IRQ
+ 	help
+diff --git a/drivers/mfd/sprd-sc27xx-spi.c b/drivers/mfd/sprd-sc27xx-spi.c
+index d6b4350..4f9e4f1 100644
+--- a/drivers/mfd/sprd-sc27xx-spi.c
++++ b/drivers/mfd/sprd-sc27xx-spi.c
+@@ -8,6 +8,7 @@
+ #include <linux/module.h>
+ #include <linux/mfd/core.h>
+ #include <linux/mfd/sc27xx-pmic.h>
++#include <linux/mfd/syscon.h>
+ #include <linux/of.h>
+ #include <linux/of_platform.h>
+ #include <linux/regmap.h>
+@@ -18,6 +19,13 @@
+ #define SPRD_PMIC_INT_RAW_STATUS	0x4
+ #define SPRD_PMIC_INT_EN		0x8
+
++#define SPRD_SC2720_IRQ_BASE 0xc0
++#define SPRD_SC2720_IRQ_NUMS 9
++#define SPRD_SC2720_CHG_DET 0xe14
++#define SPRD_SC2720_CHIP_ID_LOW_REG 0xc00
++#define SPRD_SC2720_CHIP_ID_HIGH_REG 0xc04
++#define SPRD_SC2720_CHIP_ID_LOW 0xa003
++#define SPRD_SC2720_CHIP_ID_HIGH 0x2720
+ #define SPRD_SC2730_IRQ_BASE		0x80
+ #define SPRD_SC2730_IRQ_NUMS		10
+ #define SPRD_SC2730_CHG_DET		0x1b9c
+@@ -48,6 +56,12 @@ struct sprd_pmic_data {
+ 	u32 irq_base;
+ 	u32 num_irqs;
+ 	u32 charger_det;
++	u32 chip_id_low_reg;
++	u32 chip_id_high_reg;
++	u32 chip_id_low;
++	u32 chip_id_high;
++	bool register_syscon;
++	bool mask_irqs_on_shutdown;
+ };
+
+ /*
+@@ -55,6 +69,18 @@ struct sprd_pmic_data {
+  * base address and irq number, we should save irq number and irq base
+  * in the device data structure.
+  */
++static const struct sprd_pmic_data sc2720_data = {
++	.irq_base = SPRD_SC2720_IRQ_BASE,
++	.num_irqs = SPRD_SC2720_IRQ_NUMS,
++	.charger_det = SPRD_SC2720_CHG_DET,
++	.chip_id_low_reg = SPRD_SC2720_CHIP_ID_LOW_REG,
++	.chip_id_high_reg = SPRD_SC2720_CHIP_ID_HIGH_REG,
++	.chip_id_low = SPRD_SC2720_CHIP_ID_LOW,
++	.chip_id_high = SPRD_SC2720_CHIP_ID_HIGH,
++	.register_syscon = true,
++	.mask_irqs_on_shutdown = true,
++};
++
+ static const struct sprd_pmic_data sc2730_data = {
+ 	.irq_base = SPRD_SC2730_IRQ_BASE,
+ 	.num_irqs = SPRD_SC2730_IRQ_NUMS,
+@@ -149,6 +175,37 @@ static const struct regmap_config sprd_pmic_config = {
+ 	.max_register = 0xffff,
+ };
+
++static int sprd_pmic_check_chip_id(struct sprd_pmic *ddata)
++{
++	const struct sprd_pmic_data *pdata = ddata->pdata;
++	u32 chip_id_low, chip_id_high;
++	int ret;
++
++	if (!pdata->chip_id_high_reg)
++		return 0;
++
++	ret = regmap_read(ddata->regmap, pdata->chip_id_low_reg, &chip_id_low);
++	if (ret)
++		return dev_err_probe(ddata->dev, ret,
++				     "failed to read PMIC low ID\n");
++
++	ret = regmap_read(ddata->regmap, pdata->chip_id_high_reg,
++			  &chip_id_high);
++	if (ret)
++		return dev_err_probe(ddata->dev, ret,
++				     "failed to read PMIC high ID\n");
++
++	if (chip_id_low != pdata->chip_id_low ||
++	    chip_id_high != pdata->chip_id_high)
++		return dev_err_probe(
++			ddata->dev, -ENODEV,
++			"unexpected PMIC ID %04x/%04x, expected %04x/%04x\n",
++			chip_id_low, chip_id_high, pdata->chip_id_low,
++			pdata->chip_id_high);
++
++	return 0;
++}
++
+ static int sprd_pmic_probe(struct spi_device *spi)
+ {
+ 	struct sprd_pmic *ddata;
+@@ -178,6 +235,10 @@ static int sprd_pmic_probe(struct spi_device *spi)
+ 	ddata->irq = spi->irq;
+ 	ddata->pdata = pdata;
+
++	ret = sprd_pmic_check_chip_id(ddata);
++	if (ret)
++		return ret;
++
+ 	ddata->irq_chip.name = dev_name(&spi->dev);
+ 	ddata->irq_chip.status_base =
+ 		pdata->irq_base + SPRD_PMIC_INT_MASK_STATUS;
+@@ -214,9 +275,35 @@ static int sprd_pmic_probe(struct spi_device *spi)
+ 	if (ret)
+ 		return dev_err_probe(&spi->dev, ret, "Failed to init wakeup\n");
+
++	if (pdata->register_syscon) {
++		ret = of_syscon_register_regmap(spi->dev.of_node,
++						ddata->regmap);
++		if (ret)
++			return dev_err_probe(
++				&spi->dev, ret,
++				"Failed to register PMIC syscon\n");
++
++		/* Keep the SPI regmap bus callbacks resident with the syscon. */
++		__module_get(THIS_MODULE);
++	}
++
+ 	return 0;
+ }
+
++static void sprd_pmic_shutdown(struct spi_device *spi)
++{
++	struct sprd_pmic *ddata = spi_get_drvdata(spi);
++	int ret;
++
++	if (!ddata->pdata->mask_irqs_on_shutdown)
++		return;
++
++	ret = regmap_write(ddata->regmap,
++			   ddata->pdata->irq_base + SPRD_PMIC_INT_EN, 0);
++	if (ret)
++		dev_err(&spi->dev, "Failed to mask PMIC interrupts: %d\n", ret);
++}
++
+ static int sprd_pmic_suspend(struct device *dev)
+ {
+ 	struct sprd_pmic *ddata = dev_get_drvdata(dev);
+@@ -241,6 +328,7 @@ static DEFINE_SIMPLE_DEV_PM_OPS(sprd_pmic_pm_ops,
+ 				sprd_pmic_suspend, sprd_pmic_resume);
+
+ static const struct of_device_id sprd_pmic_match[] = {
++	{ .compatible = "sprd,sc2720", .data = &sc2720_data },
+ 	{ .compatible = "sprd,sc2730", .data = &sc2730_data },
+ 	{ .compatible = "sprd,sc2731", .data = &sc2731_data },
+ 	{},
+@@ -248,6 +336,7 @@ static const struct of_device_id sprd_pmic_match[] = {
+ MODULE_DEVICE_TABLE(of, sprd_pmic_match);
+
+ static const struct spi_device_id sprd_pmic_spi_ids[] = {
++	{ .name = "sc2720", .driver_data = (unsigned long)&sc2720_data },
+ 	{ .name = "sc2730", .driver_data = (unsigned long)&sc2730_data },
+ 	{ .name = "sc2731", .driver_data = (unsigned long)&sc2731_data },
+ 	{},
+@@ -259,8 +348,11 @@ static struct spi_driver sprd_pmic_driver = {
+ 		.name = "sc27xx-pmic",
+ 		.of_match_table = sprd_pmic_match,
+ 		.pm = pm_sleep_ptr(&sprd_pmic_pm_ops),
++		/* A published syscon regmap has no unregister operation. */
++		.suppress_bind_attrs = true,
+ 	},
+ 	.probe = sprd_pmic_probe,
++	.shutdown = sprd_pmic_shutdown,
+ 	.id_table = sprd_pmic_spi_ids,
+ };
+

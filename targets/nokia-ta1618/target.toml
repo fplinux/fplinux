@@ -23,13 +23,10 @@ config_fragment = "kernel/config.fragment"
 memory = { base = 0x80200000, size = 0x03c00000 }
 dtb = "unisoc/ums9117-nokia-ta1618.dtb"
 debug_dtb = "ums9117-nokia-ta1618.dtb"
-patches = [
-  "kernel/0001-nokia-ta1618-board.patch",
-  "kernel/0004-nokia-ta1618-usb-regulator.patch",
-]
+patches = ["kernel/0001-nokia-ta1618-board.patch"]
 # Only the removable microSD is writable. Internal NAND has a fixed-command
 # read-only interface, without an MTD or generic SPI controller.
-forbidden_dtb_markers = ["sdhci", "spi-nand", "mtd", "ubi", "emmc"]
+forbidden_dtb_markers = ["spi-nand", "mtd", "ubi", "emmc"]
 forbidden_config = [
   "CONFIG_MTD=y",
   "CONFIG_UBI=y",
@@ -37,7 +34,6 @@ forbidden_config = [
   "CONFIG_ATA=y",
   "CONFIG_NVME_CORE=y",
   "CONFIG_DEVMEM=y",
-  "CONFIG_MMC_SDHCI=y",
 ]
 
 [[linux.copies]]
@@ -51,14 +47,6 @@ destination = "arch/arm/boot/dts/unisoc/nokia-ta1618-bluetooth.dtsi"
 [[linux.copies]]
 source = "kernel/ta1618-fb.c"
 destination = "drivers/video/fbdev/ta1618-fb.c"
-
-[[linux.copies]]
-source = "kernel/sc2720-usb33-regulator.c"
-destination = "drivers/regulator/sc2720-usb33.c"
-
-[[linux.copies]]
-source = "bindings/fplinux,sc2720-usb33-regulator.yaml"
-destination = "Documentation/devicetree/bindings/regulator/fplinux,sc2720-usb33-regulator.yaml"
 
 [[linux.copies]]
 source = "dts/ums9117-nokia-ta1618.dts"

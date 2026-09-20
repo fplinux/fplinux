@@ -24,7 +24,7 @@ memory = { base = 0x80200000, size = 0x03c00000 }
 dtb = "unisoc/ums9117-inoi-244-modern-4g.dtb"
 debug_dtb = "ums9117-inoi-244-modern-4g.dtb"
 patches = ["kernel/0001-inoi-244-modern-4g-dtb.patch"]
-forbidden_dtb_markers = ["sdhci", "spi-nand", "mtd", "ubi", "emmc"]
+forbidden_dtb_markers = ["spi-nand", "mtd", "ubi", "emmc"]
 forbidden_config = [
   "CONFIG_MTD=y",
   "CONFIG_UBI=y",

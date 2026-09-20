@@ -28,20 +28,11 @@
 		};
 	};
 
-	vddusb: regulator-usb33 {
-		compatible = "fplinux,sc2720-usb33-regulator";
-		regulator-name = "sc2720-usb33";
-		regulator-min-microvolt = <3300000>;
-		regulator-max-microvolt = <3300000>;
-	};
-
 	soc {
 		display@83f00000 {
 			compatible = "fplinux,ums9117-st7789p3-spi-fb";
 			reg = <0x83f00000 0x00100000>,
 			      <0x20800000 0x00001000>,
-			      <0x40600000 0x00000400>,
-			      <0x40608000 0x00001000>,
 			      <0x20a00000 0x00001000>,
 			      <0x70b00000 0x00001000>,
 			      <0x21500054 0x00000004>,
@@ -52,14 +43,14 @@
 			      <0x20e02004 0x00000004>,
 			      <0x402a00b0 0x0000001c>,
 			      <0x402a04b0 0x0000001c>;
-			reg-names = "framebuffer", "lcdc", "adi-controller",
-				    "analog-slave", "lcm", "spi", "spi-clock-selector",
+			reg-names = "framebuffer", "lcdc", "lcm", "spi", "spi-clock-selector",
 				    "spi-reset-set", "spi-reset-clear", "ap-ahb-gate-set",
 				    "ap-ahb-reset-set", "ap-ahb-reset-clear", "pinmux",
 				    "pinconf";
 			interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL_HIGH>;
 			interrupt-names = "lcdc-done";
 			sprd,aon-apb = <&aon_apb>;
+			sprd,pmic = <&sc2720_pmic>;
 			sprd,pinmux-offsets = <0 4 8 12 16 20 24>;
 			sprd,pinmux-values = <0 0 0 0 0 0 0>;
 			sprd,pinconf-offsets = <0 4 8 12 16 20 24>;
@@ -68,20 +59,6 @@
 				0x00082004 0x00102004 0x00082004
 			>;
 			sprd,wled-current-levels = <10 10 10 10>;
-		};
-
-		keypad-backlight@40608df8 {
-			compatible = "sprd,ums9117-sc2720-kpled";
-			reg = <0x40608df8 0x00000004>;
-			function = LED_FUNCTION_KBD_BACKLIGHT;
-			fplinux,keypad = <&keypad>;
-			fplinux,current-code = <1>;
-		};
-
-		vibrator@40608e00 {
-			compatible = "sprd,ums9117-sc2720-vibrator";
-			reg = <0x40608e00 0x00000004>;
-			fplinux,voltage-code = <0>;
 		};
 
 	};
@@ -102,8 +79,24 @@
 	status = "okay";
 };
 
+&sc2720_kpled {
+	fplinux,current-code = <1>;
+};
+
+&sc2720_vibrator {
+	sprd,voltage-code = <0>;
+};
+
 &sc2720_fgu {
 	fplinux,current-calibration = <10 20>;
+};
+
+&sc2720_regulators {
+	vddusb: LDO_USB33 {
+		regulator-name = "sc2720-usb33";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+	};
 };
 
 &thm1 {

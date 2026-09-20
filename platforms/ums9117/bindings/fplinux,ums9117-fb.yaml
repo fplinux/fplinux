@@ -23,16 +23,14 @@ properties:
       - fplinux,ums9117-nv3023-lcm-fb
 
   reg:
-    minItems: 14
-    maxItems: 14
+    minItems: 12
+    maxItems: 12
 
   reg-names:
     oneOf:
       - items:
           - const: framebuffer
           - const: lcdc
-          - const: adi-controller
-          - const: analog-slave
           - const: lcm
           - const: spi
           - const: spi-clock-selector
@@ -46,8 +44,6 @@ properties:
       - items:
           - const: framebuffer
           - const: lcdc
-          - const: adi-controller
-          - const: analog-slave
           - const: lcm
           - const: lcm-command
           - const: lcm-data
@@ -68,6 +64,10 @@ properties:
   sprd,aon-apb:
     $ref: /schemas/types.yaml#/definitions/phandle
     description: Always-on APB syscon used for reset and inherited SPI gates.
+
+  sprd,pmic:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: SC2720 PMIC containing the display backlight registers.
 
   sprd,pinmux-values:
     $ref: /schemas/types.yaml#/definitions/uint32-array
@@ -141,6 +141,7 @@ required:
   - reg
   - reg-names
   - sprd,aon-apb
+  - sprd,pmic
   - sprd,pinmux-values
   - sprd,pinmux-offsets
   - sprd,pinconf-values

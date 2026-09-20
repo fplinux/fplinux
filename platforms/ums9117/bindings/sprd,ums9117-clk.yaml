@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: GPL-2.0-only
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/clock/sprd,ums9117-clk.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Unisoc UMS9117 clock controller
+
+maintainers:
+  - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+
+description: |
+  Clock providers for the UMS9117 application clock, always-on APB and
+  application AHB register banks. While prepared, the AP clock provider owns
+  the three-bit SDIO0 selector, selects its 195 MHz source and
+  restores the previous selector value when unprepared. It does not change the
+  source PLL. The clock indices are defined in
+  dt-bindings/clock/sprd,ums9117-clk.h.
+
+properties:
+  compatible:
+    enum:
+      - sprd,ums9117-ap-clk
+      - sprd,ums9117-aonapb-gate
+      - sprd,ums9117-apahb-gate
+
+  reg:
+    maxItems: 1
+
+  sprd,syscon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: Phandle to the syscon containing the gate registers.
+
+  '#clock-cells':
+    const: 1
+
+required:
+  - compatible
+  - '#clock-cells'
+
+allOf:
+  - if:
+      properties:
+        compatible:
+          const: sprd,ums9117-ap-clk
+    then:
+      required:
+        - reg
+      properties:
+        sprd,syscon: false
+    else:
+      required:
+        - sprd,syscon
+      properties:
+        reg: false
+
+additionalProperties: false
+
+examples:
+  - |
+    clock-controller@2150006c {
+        compatible = "sprd,ums9117-ap-clk";
+        reg = <0x2150006c 0x4>;
+        #clock-cells = <1>;
+    };
+
+    aon_apb: syscon@402e0000 {
+        compatible = "sprd,ums9117-aon-apb", "syscon";
+        reg = <0x402e0000 0x3000>;
+    };
+
+    aonapb-gate {
+        compatible = "sprd,ums9117-aonapb-gate";
+        sprd,syscon = <&aon_apb>;
+        #clock-cells = <1>;
+    };

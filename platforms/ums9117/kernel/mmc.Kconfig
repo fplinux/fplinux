@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0-only
-config MMC_UMS9117
+config MMC_SDHCI_UMS9117
 	tristate "UMS9117 SDIO0 removable microSD host"
-	depends on MMC && ARCH_UMS9117 && HAS_DMA
+	depends on MMC_SDHCI_PLTFM && ARCH_UMS9117
+	select MMC_SDHCI_IO_ACCESSORS
 	help
-	  Drive the removable microSD slot through UMS9117 SDIO0 with the
-	  shared gate, clock, pin, analog rail and active-low EIC policy.
-	  This is not an SDHCI driver. Unmount the card before removing it;
-	  the internal NAND is on a different controller.
+	  Use the SDHCI core with UMS9117 word-wide register access and
+	  removable-slot clock, regulator, pinctrl and card-detect resources.
+	  Support SD memory cards with ADMA; SDIO and MMC devices are excluded.
+	  Unmount the card before removing it. Internal NAND is separate.

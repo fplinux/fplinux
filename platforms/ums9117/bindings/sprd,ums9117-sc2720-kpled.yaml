@@ -11,8 +11,8 @@ maintainers:
 
 description:
   LED class device for the keypad current-sink output in the SC2720
-  analog die. The driver accesses the register through the shared UMS9117 ADI
-  provider and owns only the current and power-down fields in KPLED_CTRL0.
+  analog die. This child of the SC2720 PMIC uses its register map and owns
+  only the current and power-down fields in KPLED_CTRL0.
 
 allOf:
   - $ref: /schemas/leds/common.yaml#
@@ -27,9 +27,8 @@ properties:
   function:
     const: kbd_backlight
 
-  fplinux,keypad:
-    $ref: /schemas/types.yaml#/definitions/phandle
-    description: Physical keypad whose key presses turn on this backlight
+  linux,default-trigger:
+    const: input-events
 
   fplinux,current-code:
     $ref: /schemas/types.yaml#/definitions/uint32
@@ -41,7 +40,7 @@ required:
   - compatible
   - reg
   - function
-  - fplinux,keypad
+  - linux,default-trigger
   - fplinux,current-code
 
 unevaluatedProperties: false
@@ -50,10 +49,15 @@ examples:
   - |
     #include <dt-bindings/leds/common.h>
 
-    keypad-backlight@40608df8 {
-        compatible = "sprd,ums9117-sc2720-kpled";
-        reg = <0x40608df8 0x4>;
-        function = LED_FUNCTION_KBD_BACKLIGHT;
-        fplinux,keypad = <&keypad>;
-        fplinux,current-code = <1>;
+    pmic {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        keypad-backlight@df8 {
+            compatible = "sprd,ums9117-sc2720-kpled";
+            reg = <0xdf8>;
+            function = LED_FUNCTION_KBD_BACKLIGHT;
+            linux,default-trigger = "input-events";
+            fplinux,current-code = <1>;
+        };
     };

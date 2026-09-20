@@ -13,8 +13,6 @@
 #include <linux/spinlock.h>
 #include <linux/workqueue.h>
 
-#include <linux/soc/sprd/ums9117-adi.h>
-
 #include "ums9117-fb.h"
 
 #define UMS9117_FB_WLED_CHANNEL_COUNT 4
@@ -80,7 +78,7 @@ struct ums9117_fb {
 	phys_addr_t present_phys;
 	phys_addr_t stream_phys;
 	struct regmap *aon_apb;
-	struct ums9117_adi_transaction adi_transaction;
+	struct regmap *pmic;
 	u32 lcm_timing;
 	struct work_struct refresh_work;
 	struct work_struct wake_work;

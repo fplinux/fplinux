@@ -2,9 +2,9 @@
 config LEDS_SC2720_KPLED_UMS9117
 	bool "SC2720 keypad backlight on UMS9117"
 	depends on ARCH_UMS9117
-	depends on LEDS_CLASS && INPUT && OF
+	depends on LEDS_CLASS && MFD_SC27XX_PMIC && OF
 	help
-	  Control the SC2720 keypad current-sink output through the shared
-	  UMS9117 analog-die interface. The board selects the current code
-	  and physical keypad. Key presses light the binary LED class device
-	  for about five seconds.
+	  Control the SC2720 keypad current-sink output through the PMIC regmap.
+	  The board selects the current code and default LED trigger.
+	  Expose binary brightness through the standard LED class interface.
+	  LED triggers handle input activity and the automatic idle timeout.

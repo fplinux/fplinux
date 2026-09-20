@@ -1,0 +1,246 @@
+diff --git a/drivers/spi/Kconfig b/drivers/spi/Kconfig
+index 1872f9d..f486189 100644
+--- a/drivers/spi/Kconfig
++++ b/drivers/spi/Kconfig
+@@ -1080,7 +1080,7 @@ config SPI_SPRD
+
+ config SPI_SPRD_ADI
+ 	tristate "Spreadtrum ADI controller"
+-	depends on ARCH_SPRD || COMPILE_TEST
++	depends on ARCH_SPRD || ARCH_UMS9117 || COMPILE_TEST
+ 	depends on HWSPINLOCK || (COMPILE_TEST && !HWSPINLOCK)
+ 	help
+ 	  ADI driver based on SPI for Spreadtrum SoCs.
+diff --git a/drivers/spi/spi-sprd-adi.c b/drivers/spi/spi-sprd-adi.c
+index f25b34a..22bff74 100644
+--- a/drivers/spi/spi-sprd-adi.c
++++ b/drivers/spi/spi-sprd-adi.c
+@@ -5,15 +5,18 @@
+  */
+
+ #include <linux/delay.h>
++#include <linux/clk.h>
+ #include <linux/hwspinlock.h>
+ #include <linux/init.h>
+ #include <linux/io.h>
++#include <linux/iopoll.h>
+ #include <linux/kernel.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
+ #include <linux/reboot.h>
+ #include <linux/spi/spi.h>
++#include <linux/spi/sprd-adi.h>
+ #include <linux/sizes.h>
+
+ /* Registers definitions for ADI controller */
+@@ -34,7 +37,12 @@
+ #define REG_ADI_ARM_CMD_STS		0x3c
+ #define REG_ADI_CHN_EN			0x40
+ #define REG_ADI_CHN_ADDR(id)		(0x44 + (id - 2) * 4)
+-#define REG_ADI_CHN_EN1			0x20c
++#define REG_ADI_CHN_EN1 0x20c
++#define REG_ADI_USER_LOCK 0x224
++#define ADI_USER_UNLOCK 0x5348554c
++#define ADI_USER_TIMEOUT_US 3000
++#define BIT_GSSI_2WIRE_MODE BIT(31)
++#define BIT_ARM_FIFO_OVERFLOW BIT(3)
+
+ /* Bits definitions for register REG_ADI_GSSI_CFG0 */
+ #define BIT_CLK_ALL_ON			BIT(30)
+@@ -140,6 +148,7 @@ struct sprd_adi_data {
+ 	int (*read_check)(u32 val, u32 reg);
+ 	int (*restart)(struct sys_off_data *data);
+ 	void (*wdg_rst)(void *p);
++	bool user_lock;
+ };
+
+ struct sprd_adi {
+@@ -150,8 +159,62 @@ struct sprd_adi {
+ 	unsigned long		slave_vbase;
+ 	unsigned long		slave_pbase;
+ 	const struct sprd_adi_data *data;
++	raw_spinlock_t lock;
++	bool faulted;
+ };
+
++/* UMS9117's semaphore is acquired by reading zero, not by writing a token. */
++static int sprd_adi_user_lock(struct sprd_adi *sadi, unsigned long *flags)
++{
++	u32 value;
++	int ret;
++
++	raw_spin_lock_irqsave(&sadi->lock, *flags);
++	if (sadi->faulted) {
++		ret = -EIO;
++		goto unlock;
++	}
++	ret = readl_poll_timeout_atomic(sadi->base + REG_ADI_USER_LOCK, value,
++					!value, 1, ADI_USER_TIMEOUT_US);
++	if (!ret) {
++		__release(&sadi->lock);
++		return 0;
++	}
++unlock:
++	raw_spin_unlock_irqrestore(&sadi->lock, *flags);
++	return ret == -ETIMEDOUT ? -EBUSY : ret;
++}
++
++static int sprd_adi_user_unlock(struct sprd_adi *sadi, unsigned long flags)
++{
++	u32 value;
++	int ret;
++
++	__acquire(&sadi->lock);
++	ret = readl_poll_timeout_atomic(sadi->base + REG_ADI_ARM_FIFO_STS,
++					value, value & BIT_FIFO_EMPTY, 1,
++					ADI_USER_TIMEOUT_US);
++	if (!ret)
++		ret = readl_poll_timeout_atomic(sadi->base + REG_ADI_RD_DATA,
++						value,
++						!(value & BIT_RD_CMD_BUSY), 1,
++						ADI_USER_TIMEOUT_US);
++	if (ret) {
++		/* An unfinished transaction must not be handed to another master. */
++		sadi->faulted = true;
++	} else {
++		if (readl(sadi->base + REG_ADI_INT_RAW) &
++		    BIT_ARM_FIFO_OVERFLOW) {
++			writel(BIT_ARM_FIFO_OVERFLOW,
++			       sadi->base + REG_ADI_INT_CLR);
++			ret = -EOVERFLOW;
++		}
++		writel(ADI_USER_UNLOCK, sadi->base + REG_ADI_USER_LOCK);
++	}
++	raw_spin_unlock_irqrestore(&sadi->lock, flags);
++	return ret;
++}
++
+ static int sprd_adi_check_addr(struct sprd_adi *sadi, u32 reg)
+ {
+ 	if (reg >= sadi->data->slave_addr_size) {
+@@ -335,8 +398,16 @@ static int sprd_adi_transfer_one(struct spi_controller *ctlr,
+ 				 struct spi_transfer *t)
+ {
+ 	struct sprd_adi *sadi = spi_controller_get_devdata(ctlr);
++	unsigned long flags = 0;
+ 	u32 reg, val;
+ 	int ret;
++	int end_ret;
++
++	if (sadi->data->user_lock) {
++		ret = sprd_adi_user_lock(sadi, &flags);
++		if (ret)
++			return ret;
++	}
+
+ 	if (t->rx_buf) {
+ 		reg = *(u32 *)t->rx_buf;
+@@ -352,9 +423,48 @@ static int sprd_adi_transfer_one(struct spi_controller *ctlr,
+ 		ret = -EINVAL;
+ 	}
+
++	if (sadi->data->user_lock) {
++		end_ret = sprd_adi_user_unlock(sadi, flags);
++		if (!ret)
++			ret = end_ret;
++	}
+ 	return ret;
+ }
+
++/* The final sys-off notifier cannot sleep in the SPI message queue. */
++int sprd_adi_sc2720_power_off(struct spi_device *spi)
++{
++	struct sprd_adi *sadi = spi_controller_get_devdata(spi->controller);
++	unsigned long flags;
++	u32 value;
++	int ret;
++	int end_ret;
++
++	if (!sadi->data->user_lock)
++		return -EOPNOTSUPP;
++	ret = sprd_adi_user_lock(sadi, &flags);
++	if (ret)
++		return ret;
++	ret = sprd_adi_read(sadi, 0xc00, &value);
++	if (!ret && value != 0xa003)
++		ret = -ENODEV;
++	if (!ret)
++		ret = sprd_adi_read(sadi, 0xc04, &value);
++	if (!ret && value != 0x2720)
++		ret = -ENODEV;
++	if (!ret)
++		ret = sprd_adi_read(sadi, 0xe14, &value);
++	if (!ret && (value & BIT(3)))
++		ret = -EBUSY;
++	if (!ret)
++		ret = sprd_adi_read(sadi, 0xc20, &value);
++	if (!ret)
++		ret = sprd_adi_write(sadi, 0xc20, value | BIT(0));
++	end_ret = sprd_adi_user_unlock(sadi, flags);
++	return ret ? ret : end_ret;
++}
++EXPORT_SYMBOL_GPL(sprd_adi_sc2720_power_off);
++
+ static void sprd_adi_set_wdt_rst_mode(void *p)
+ {
+ #if IS_ENABLED(CONFIG_SPRD_WATCHDOG)
+@@ -545,6 +655,24 @@ static int sprd_adi_probe(struct platform_device *pdev)
+ 	sadi->ctlr = ctlr;
+ 	sadi->dev = &pdev->dev;
+ 	sadi->data = data;
++	raw_spin_lock_init(&sadi->lock);
++	if (data->user_lock) {
++		struct clk *clk;
++		u32 value;
++
++		clk = devm_clk_get_enabled(&pdev->dev, "enable");
++		if (IS_ERR(clk))
++			return dev_err_probe(&pdev->dev, PTR_ERR(clk),
++					     "cannot enable ADI clock\n");
++		if (readl(sadi->base) != 0x400 ||
++		    readl(sadi->base + REG_ADI_CTRL0))
++			return dev_err_probe(
++				&pdev->dev, -ENODEV,
++				"unsupported ADI controller mode\n");
++		value = readl(sadi->base + REG_ADI_GSSI_CFG1);
++		writel(value | BIT_GSSI_2WIRE_MODE,
++		       sadi->base + REG_ADI_GSSI_CFG1);
++	}
+ 	ret = of_hwspin_lock_get_id(np, 0);
+ 	if (ret > 0 || (IS_ENABLED(CONFIG_HWSPINLOCK) && ret == 0)) {
+ 		sadi->hwlock =
+@@ -596,6 +724,13 @@ static struct sprd_adi_data sc9860_data = {
+ 	.wdg_rst = sprd_adi_set_wdt_rst_mode,
+ };
+
++static const struct sprd_adi_data ums9117_data = {
++	.slave_offset = ADI_10BIT_SLAVE_OFFSET,
++	.slave_addr_size = ADI_10BIT_SLAVE_ADDR_SIZE,
++	.read_check = sprd_adi_read_check_r3,
++	.user_lock = true,
++};
++
+ static struct sprd_adi_data sc9863_data = {
+ 	.slave_offset = ADI_12BIT_SLAVE_OFFSET,
+ 	.slave_addr_size = ADI_12BIT_SLAVE_ADDR_SIZE,
+@@ -609,6 +744,10 @@ static struct sprd_adi_data ums512_data = {
+ };
+
+ static const struct of_device_id sprd_adi_of_match[] = {
++	{
++		.compatible = "sprd,ums9117-adi",
++		.data = &ums9117_data,
++	},
+ 	{
+ 		.compatible = "sprd,sc9860-adi",
+ 		.data = &sc9860_data,
+@@ -621,7 +760,7 @@ static const struct of_device_id sprd_adi_of_match[] = {
+ 		.compatible = "sprd,ums512-adi",
+ 		.data = &ums512_data,
+ 	},
+-	{ },
++	{},
+ };
+ MODULE_DEVICE_TABLE(of, sprd_adi_of_match);
+
