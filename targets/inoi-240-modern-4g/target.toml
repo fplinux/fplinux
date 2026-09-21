@@ -19,11 +19,11 @@ packages = ["fplinux-audio"]
 packages = []
 
 [linux]
-config_fragment = "kernel/config.fragment"
+config_fragment = "linux/config.fragment"
 memory = { base = 0x80200000, size = 0x03c00000 }
 dtb = "unisoc/ums9117-inoi-240-modern-4g.dtb"
 debug_dtb = "ums9117-inoi-240-modern-4g.dtb"
-patches = ["kernel/0001-inoi-240-modern-4g-dtb.patch"]
+patches = ["linux/patches/0001-inoi-240-modern-4g-dtb.patch"]
 forbidden_dtb_markers = ["spi-nand", "mtd", "ubi", "emmc"]
 forbidden_config = [
   "CONFIG_MTD=y",
@@ -35,31 +35,31 @@ forbidden_config = [
 ]
 
 [[linux.copies]]
-source = "dts/ums9117-inoi-240-modern-4g.dts"
+source = "linux/dts/ums9117-inoi-240-modern-4g.dts"
 destination = "arch/arm/boot/dts/unisoc/ums9117-inoi-240-modern-4g.dts"
 
 [[linux.copies]]
-source = "dts/nand-readonly.dtsi"
+source = "linux/dts/nand-readonly.dtsi"
 destination = "arch/arm/boot/dts/unisoc/inoi-240-modern-4g-nand-readonly.dtsi"
 
 [[linux.copies]]
-source = "dts/bluetooth.dtsi"
+source = "linux/dts/bluetooth.dtsi"
 destination = "arch/arm/boot/dts/unisoc/inoi-240-modern-4g-bluetooth.dtsi"
 
 [[linux.copies]]
-source = "kernel/inoi240-fb.c"
+source = "linux/drivers/video/fbdev/inoi240-fb.c"
 destination = "drivers/video/fbdev/inoi240-fb.c"
 
 [[linux.appends]]
-source = "kernel/Kconfig"
+source = "linux/arch/arm/mach-ums9117/Kconfig"
 destination = "arch/arm/mach-ums9117/Kconfig"
 
 [[linux.appends]]
-source = "kernel/fbdev.Kconfig"
+source = "linux/drivers/video/fbdev/fbdev.Kconfig"
 destination = "drivers/video/fbdev/Kconfig"
 
 [[linux.appends]]
-source = "kernel/fbdev.Makefile"
+source = "linux/drivers/video/fbdev/fbdev.Makefile"
 destination = "drivers/video/fbdev/Makefile"
 
 [bootstrap]

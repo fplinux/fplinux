@@ -59,7 +59,7 @@ class ImageToolCliTests(unittest.TestCase):
                     "-Wextra",
                     "-Werror",
                     f"-I{SHARED}",
-                    f"-I{ROOT / 'platforms/ums9117/common'}",
+                    f"-I{ROOT / 'platforms/ums9117/linux/include/uapi/fplinux'}",
                     *(str(source) for source in tool_sources),
                     str(ROOT / "lib/fplinux/fplinux-cli.c"),
                     *libraries,

@@ -10,7 +10,7 @@ from pathlib import Path
 from tests.process import run_process
 
 ROOT = Path(__file__).resolve().parents[2]
-KERNEL = ROOT / "platforms/ums9117/kernel"
+KERNEL = ROOT / "platforms/ums9117/linux/drivers/media/platform"
 HARNESS = ROOT / "tests/host_tool/jpeg-codec.c"
 STANDARD_TABLES = ROOT / "tests/host_tool/jpeg-codec-standard-tables.c"
 COMPAT = ROOT / "tests/host_tool/jpeg-codec-compat"

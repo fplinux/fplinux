@@ -106,7 +106,7 @@ source = "platforms/ums9117/common/ums9117-sdio-slot.c"
 destination = "board/fplinux/ums9117/ums9117-sdio-slot.c"
 
 [linux]
-defconfig = "platforms/ums9117/kernel/defconfig"
+defconfig = "platforms/ums9117/linux/defconfig"
 source_lock = "linux"
 arch = "arm"
 cross_compile = "arm-none-eabi-"
@@ -116,345 +116,345 @@ image_output = "arch/arm/boot/zImage"
 dtb_output_directory = "arch/arm/boot/dts"
 targets = ["zImage", "dtbs"]
 patches = [
-  "platforms/ums9117/kernel/0001-ums9117-platform.patch",
-  "platforms/ums9117/kernel/0002-ums9117-dt-bindings.patch",
-  "platforms/ums9117/kernel/0003-ums9117-clock-providers.patch",
-  "platforms/ums9117/kernel/0004-sc2720-pmic-core.patch",
-  "platforms/ums9117/kernel/0005-ums9117-adi.patch",
-  "platforms/ums9117/kernel/0006-ums9117-dma.patch",
-  "platforms/ums9117/kernel/0007-ums9117-native-bindings.patch",
-  "platforms/ums9117/kernel/0008-ums9117-thermal-efuse.patch",
-  "platforms/ums9117/kernel/0009-sc2720-adc-efuse.patch",
-  "platforms/ums9117/kernel/0010-sc2720-leaf-drivers.patch",
-  "platforms/ums9117/kernel/0011-ums9117-mailbox.patch",
+  "platforms/ums9117/linux/patches/0001-ums9117-platform.patch",
+  "platforms/ums9117/linux/patches/0002-ums9117-dt-bindings.patch",
+  "platforms/ums9117/linux/patches/0003-ums9117-clock-providers.patch",
+  "platforms/ums9117/linux/patches/0004-sc2720-pmic-core.patch",
+  "platforms/ums9117/linux/patches/0005-ums9117-adi.patch",
+  "platforms/ums9117/linux/patches/0006-ums9117-dma.patch",
+  "platforms/ums9117/linux/patches/0007-ums9117-native-bindings.patch",
+  "platforms/ums9117/linux/patches/0008-ums9117-thermal-efuse.patch",
+  "platforms/ums9117/linux/patches/0009-sc2720-adc-efuse.patch",
+  "platforms/ums9117/linux/patches/0010-sc2720-leaf-drivers.patch",
+  "platforms/ums9117/linux/patches/0011-ums9117-mailbox.patch",
 ]
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/Kconfig"
+source = "platforms/ums9117/linux/arch/arm/mach-ums9117/Kconfig"
 destination = "arch/arm/mach-ums9117/Kconfig"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/Makefile"
+source = "platforms/ums9117/linux/arch/arm/mach-ums9117/Makefile"
 destination = "arch/arm/mach-ums9117/Makefile"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-machine.c"
+source = "platforms/ums9117/linux/arch/arm/mach-ums9117/ums9117-machine.c"
 destination = "arch/arm/mach-ums9117/ums9117.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-timer.c"
+source = "platforms/ums9117/linux/arch/arm/mach-ums9117/ums9117-timer.c"
 destination = "arch/arm/mach-ums9117/ums9117-timer.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-nandc-ro.c"
+source = "platforms/ums9117/linux/arch/arm/mach-ums9117/ums9117-nandc-ro.c"
 destination = "arch/arm/mach-ums9117/ums9117-nandc-ro.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/fplinux,ums9117-nandc-ro.yaml"
+source = "platforms/ums9117/linux/bindings/memory-controllers/fplinux,ums9117-nandc-ro.yaml"
 destination = "Documentation/devicetree/bindings/memory-controllers/fplinux,ums9117-nandc-ro.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-musb.c"
+source = "platforms/ums9117/linux/drivers/usb/musb/ums9117-musb.c"
 destination = "drivers/usb/musb/ums9117.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-rota.c"
+source = "platforms/ums9117/linux/drivers/media/platform/ums9117-rota.c"
 destination = "drivers/media/platform/ums9117-rota.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-jpeg.c"
+source = "platforms/ums9117/linux/drivers/media/platform/ums9117-jpeg.c"
 destination = "drivers/media/platform/ums9117-jpeg.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-jpeg-codec.c"
+source = "platforms/ums9117/linux/drivers/media/platform/ums9117-jpeg-codec.c"
 destination = "drivers/media/platform/ums9117-jpeg-codec.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-jpeg-codec.h"
+source = "platforms/ums9117/linux/drivers/media/platform/ums9117-jpeg-codec.h"
 destination = "drivers/media/platform/ums9117-jpeg-codec.h"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-jpeg-hw.c"
+source = "platforms/ums9117/linux/drivers/media/platform/ums9117-jpeg-hw.c"
 destination = "drivers/media/platform/ums9117-jpeg-hw.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-jpeg-hw.h"
+source = "platforms/ums9117/linux/drivers/media/platform/ums9117-jpeg-hw.h"
 destination = "drivers/media/platform/ums9117-jpeg-hw.h"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/sprd,ums9117-jpeg.yaml"
+source = "platforms/ums9117/linux/bindings/media/sprd,ums9117-jpeg.yaml"
 destination = "Documentation/devicetree/bindings/media/sprd,ums9117-jpeg.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/sprd,ums9117-rota.yaml"
+source = "platforms/ums9117/linux/bindings/media/sprd,ums9117-rota.yaml"
 destination = "Documentation/devicetree/bindings/media/sprd,ums9117-rota.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-audio.c"
+source = "platforms/ums9117/linux/sound/drivers/ums9117-audio.c"
 destination = "sound/drivers/ums9117-audio.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-audio.h"
+source = "platforms/ums9117/linux/sound/drivers/ums9117-audio.h"
 destination = "sound/drivers/ums9117-audio.h"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-pcm.c"
+source = "platforms/ums9117/linux/sound/drivers/ums9117-pcm.c"
 destination = "sound/drivers/ums9117-pcm.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-sc2720-codec.c"
+source = "platforms/ums9117/linux/sound/drivers/ums9117-sc2720-codec.c"
 destination = "sound/drivers/ums9117-sc2720-codec.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-sc2720-codec.h"
+source = "platforms/ums9117/linux/sound/drivers/ums9117-sc2720-codec.h"
 destination = "sound/drivers/ums9117-sc2720-codec.h"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/fplinux,ums9117-audio.yaml"
+source = "platforms/ums9117/linux/bindings/sound/fplinux,ums9117-audio.yaml"
 destination = "Documentation/devicetree/bindings/sound/fplinux,ums9117-audio.yaml"
 
 [[linux.appends]]
-source = "platforms/ums9117/kernel/sound.Kconfig"
+source = "platforms/ums9117/linux/sound/drivers/sound.Kconfig"
 destination = "sound/drivers/Kconfig"
 
 [[linux.appends]]
-source = "platforms/ums9117/kernel/sound.Makefile"
+source = "platforms/ums9117/linux/sound/drivers/sound.Makefile"
 destination = "sound/drivers/Makefile"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/sc2720-charger-ums9117.c"
+source = "platforms/ums9117/linux/drivers/power/supply/sc2720-charger-ums9117.c"
 destination = "drivers/power/supply/sc2720-charger-ums9117.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/sc2720-fgu-ums9117.c"
+source = "platforms/ums9117/linux/drivers/power/supply/sc2720-fgu-ums9117.c"
 destination = "drivers/power/supply/sc2720-fgu-ums9117.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/sprd,ums9117-sc2720-charger.yaml"
+source = "platforms/ums9117/linux/bindings/power/supply/sprd,ums9117-sc2720-charger.yaml"
 destination = "Documentation/devicetree/bindings/power/supply/sprd,ums9117-sc2720-charger.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/sprd,ums9117-sc2720-fgu.yaml"
+source = "platforms/ums9117/linux/bindings/power/supply/sprd,ums9117-sc2720-fgu.yaml"
 destination = "Documentation/devicetree/bindings/power/supply/sprd,ums9117-sc2720-fgu.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/font-fplinux.c"
+source = "platforms/ums9117/linux/lib/fonts/font-fplinux.c"
 destination = "lib/fonts/font_6x8.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-keypad.c"
+source = "platforms/ums9117/linux/drivers/input/keyboard/ums9117-keypad.c"
 destination = "drivers/input/keyboard/ums9117-keypad.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/sc2720-poweroff-ums9117.c"
+source = "platforms/ums9117/linux/drivers/power/reset/sc2720-poweroff-ums9117.c"
 destination = "drivers/power/reset/sc2720-poweroff-ums9117.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/sprd,ums9117-sc2720-poweroff.yaml"
+source = "platforms/ums9117/linux/bindings/power/reset/sprd,ums9117-sc2720-poweroff.yaml"
 destination = "Documentation/devicetree/bindings/power/reset/sprd,ums9117-sc2720-poweroff.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/leds-sc2720-ums9117.c"
+source = "platforms/ums9117/linux/drivers/leds/leds-sc2720-ums9117.c"
 destination = "drivers/leds/leds-sc2720-ums9117.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/sprd,ums9117-sc2720-kpled.yaml"
+source = "platforms/ums9117/linux/bindings/leds/sprd,ums9117-sc2720-kpled.yaml"
 destination = "Documentation/devicetree/bindings/leds/sprd,ums9117-sc2720-kpled.yaml"
 
 [[linux.appends]]
-source = "platforms/ums9117/kernel/sc2720-kpled.Kconfig"
+source = "platforms/ums9117/linux/drivers/leds/sc2720-kpled.Kconfig"
 destination = "drivers/leds/Kconfig"
 
 [[linux.appends]]
-source = "platforms/ums9117/kernel/sc2720-kpled.Makefile"
+source = "platforms/ums9117/linux/drivers/leds/sc2720-kpled.Makefile"
 destination = "drivers/leds/Makefile"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-fb.h"
+source = "platforms/ums9117/linux/drivers/video/fbdev/ums9117-fb.h"
 destination = "drivers/video/fbdev/ums9117-fb.h"
 
 [[linux.copies]]
-source = "platforms/ums9117/common/ums9117-present.h"
+source = "platforms/ums9117/linux/include/uapi/fplinux/ums9117-present.h"
 destination = "drivers/video/fbdev/ums9117-present.h"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-fb-internal.h"
+source = "platforms/ums9117/linux/drivers/video/fbdev/ums9117-fb-internal.h"
 destination = "drivers/video/fbdev/ums9117-fb-internal.h"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-fb-core.c"
+source = "platforms/ums9117/linux/drivers/video/fbdev/ums9117-fb-core.c"
 destination = "drivers/video/fbdev/ums9117-fb-core.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-fb-spi.c"
+source = "platforms/ums9117/linux/drivers/video/fbdev/ums9117-fb-spi.c"
 destination = "drivers/video/fbdev/ums9117-fb-spi.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-fb-lcm.c"
+source = "platforms/ums9117/linux/drivers/video/fbdev/ums9117-fb-lcm.c"
 destination = "drivers/video/fbdev/ums9117-fb-lcm.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/clk-ums9117-inherited.c"
+source = "platforms/ums9117/linux/drivers/clk/sprd/clk-ums9117-inherited.c"
 destination = "drivers/clk/sprd/clk-ums9117-inherited.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/dts/ums9117.dtsi"
+source = "platforms/ums9117/linux/dts/ums9117.dtsi"
 destination = "arch/arm/boot/dts/unisoc/ums9117.dtsi"
 
 [[linux.copies]]
-source = "platforms/ums9117/dts/ums9117-bluetooth.dtsi"
+source = "platforms/ums9117/linux/dts/ums9117-bluetooth.dtsi"
 destination = "arch/arm/boot/dts/unisoc/ums9117-bluetooth.dtsi"
 
 [[linux.copies]]
-source = "platforms/ums9117/dts/ums9117-sc2720.dtsi"
+source = "platforms/ums9117/linux/dts/ums9117-sc2720.dtsi"
 destination = "arch/arm/boot/dts/unisoc/ums9117-sc2720.dtsi"
 
 [[linux.copies]]
-source = "platforms/ums9117/dts/ums9117-ram-session.dtsi"
+source = "platforms/ums9117/linux/dts/ums9117-ram-session.dtsi"
 destination = "arch/arm/boot/dts/unisoc/ums9117-ram-session.dtsi"
 
 [[linux.copies]]
-source = "platforms/ums9117/dts/ums9117-musb-cold.dtsi"
+source = "platforms/ums9117/linux/dts/ums9117-musb-cold.dtsi"
 destination = "arch/arm/boot/dts/unisoc/ums9117-musb-cold.dtsi"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/fplinux,ram-session.yaml"
+source = "platforms/ums9117/linux/bindings/firmware/fplinux,ram-session.yaml"
 destination = "Documentation/devicetree/bindings/firmware/fplinux,ram-session.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/sprd,ums9117-syscounter.yaml"
+source = "platforms/ums9117/linux/bindings/timer/sprd,ums9117-syscounter.yaml"
 destination = "Documentation/devicetree/bindings/timer/sprd,ums9117-syscounter.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/sprd,ums9117-musb.yaml"
+source = "platforms/ums9117/linux/bindings/usb/sprd,ums9117-musb.yaml"
 destination = "Documentation/devicetree/bindings/usb/sprd,ums9117-musb.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/sprd,ums9117-syscon.yaml"
+source = "platforms/ums9117/linux/bindings/mfd/sprd,ums9117-syscon.yaml"
 destination = "Documentation/devicetree/bindings/mfd/sprd,ums9117-syscon.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/sprd,ums9117-keypad.yaml"
+source = "platforms/ums9117/linux/bindings/input/sprd,ums9117-keypad.yaml"
 destination = "Documentation/devicetree/bindings/input/sprd,ums9117-keypad.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/fplinux,ums9117-fb.yaml"
+source = "platforms/ums9117/linux/bindings/display/fplinux,ums9117-fb.yaml"
 destination = "Documentation/devicetree/bindings/display/fplinux,ums9117-fb.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/fplinux,ums9117-inherited-clocks.yaml"
+source = "platforms/ums9117/linux/bindings/clock/fplinux,ums9117-inherited-clocks.yaml"
 destination = "Documentation/devicetree/bindings/clock/fplinux,ums9117-inherited-clocks.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/fplinux,ums9117-inherited-clk.h"
+source = "platforms/ums9117/linux/include/dt-bindings/clock/fplinux,ums9117-inherited-clk.h"
 destination = "include/dt-bindings/clock/fplinux,ums9117-inherited-clk.h"
 
 [[linux.appends]]
-source = "platforms/ums9117/kernel/nand.Kconfig"
+source = "platforms/ums9117/linux/arch/arm/mach-ums9117/nand.Kconfig"
 destination = "arch/arm/mach-ums9117/Kconfig"
 
 [[linux.appends]]
-source = "platforms/ums9117/kernel/nand.Makefile"
+source = "platforms/ums9117/linux/arch/arm/mach-ums9117/nand.Makefile"
 destination = "arch/arm/mach-ums9117/Makefile"
 
 [[linux.appends]]
-source = "platforms/ums9117/kernel/mmc.Kconfig"
+source = "platforms/ums9117/linux/drivers/mmc/host/mmc.Kconfig"
 destination = "drivers/mmc/host/Kconfig"
 
 [[linux.appends]]
-source = "platforms/ums9117/kernel/mmc.Makefile"
+source = "platforms/ums9117/linux/drivers/mmc/host/mmc.Makefile"
 destination = "drivers/mmc/host/Makefile"
 
 [[linux.appends]]
-source = "platforms/ums9117/kernel/inherited-clk.Kconfig"
+source = "platforms/ums9117/linux/drivers/clk/sprd/inherited-clk.Kconfig"
 destination = "drivers/clk/sprd/Kconfig"
 
 [[linux.appends]]
-source = "platforms/ums9117/kernel/inherited-clk.Makefile"
+source = "platforms/ums9117/linux/drivers/clk/sprd/inherited-clk.Makefile"
 destination = "drivers/clk/sprd/Makefile"
 
 [[linux.appends]]
-source = "platforms/ums9117/kernel/media.Kconfig"
+source = "platforms/ums9117/linux/drivers/media/platform/media.Kconfig"
 destination = "drivers/media/platform/Kconfig"
 
 [[linux.appends]]
-source = "platforms/ums9117/kernel/media.Makefile"
+source = "platforms/ums9117/linux/drivers/media/platform/media.Makefile"
 destination = "drivers/media/platform/Makefile"
 
 [[linux.appends]]
-source = "platforms/ums9117/kernel/fbdev.Kconfig"
+source = "platforms/ums9117/linux/drivers/video/fbdev/fbdev.Kconfig"
 destination = "drivers/video/fbdev/Kconfig"
 
 [[linux.appends]]
-source = "platforms/ums9117/kernel/fbdev.Makefile"
+source = "platforms/ums9117/linux/drivers/video/fbdev/fbdev.Makefile"
 destination = "drivers/video/fbdev/Makefile"
 
 [[linux.appends]]
-source = "platforms/ums9117/kernel/sc2720-power-supply.Kconfig"
+source = "platforms/ums9117/linux/drivers/power/supply/sc2720-power-supply.Kconfig"
 destination = "drivers/power/supply/Kconfig"
 
 [[linux.appends]]
-source = "platforms/ums9117/kernel/sc2720-power-supply.Makefile"
+source = "platforms/ums9117/linux/drivers/power/supply/sc2720-power-supply.Makefile"
 destination = "drivers/power/supply/Makefile"
 
 [[linux.appends]]
-source = "platforms/ums9117/kernel/sc2720-poweroff.Kconfig"
+source = "platforms/ums9117/linux/drivers/power/reset/sc2720-poweroff.Kconfig"
 destination = "drivers/power/reset/Kconfig"
 
 [[linux.appends]]
-source = "platforms/ums9117/kernel/sc2720-poweroff.Makefile"
+source = "platforms/ums9117/linux/drivers/power/reset/sc2720-poweroff.Makefile"
 destination = "drivers/power/reset/Makefile"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-bluetooth.c"
+source = "platforms/ums9117/linux/drivers/bluetooth/ums9117/ums9117-bluetooth.c"
 destination = "drivers/bluetooth/ums9117/ums9117-bluetooth.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/cm4-mailbox.c"
+source = "platforms/ums9117/linux/drivers/bluetooth/ums9117/cm4-mailbox.c"
 destination = "drivers/bluetooth/ums9117/cm4-mailbox.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/cm4-mailbox.h"
+source = "platforms/ums9117/linux/drivers/bluetooth/ums9117/cm4-mailbox.h"
 destination = "drivers/bluetooth/ums9117/cm4-mailbox.h"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/cm4-setup.c"
+source = "platforms/ums9117/linux/drivers/bluetooth/ums9117/cm4-setup.c"
 destination = "drivers/bluetooth/ums9117/cm4-setup.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/cm4-setup.h"
+source = "platforms/ums9117/linux/drivers/bluetooth/ums9117/cm4-setup.h"
 destination = "drivers/bluetooth/ums9117/cm4-setup.h"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/cm4-hci.c"
+source = "platforms/ums9117/linux/drivers/bluetooth/ums9117/cm4-hci.c"
 destination = "drivers/bluetooth/ums9117/cm4-hci.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/cm4-hci.h"
+source = "platforms/ums9117/linux/drivers/bluetooth/ums9117/cm4-hci.h"
 destination = "drivers/bluetooth/ums9117/cm4-hci.h"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/bluetooth.Kconfig"
+source = "platforms/ums9117/linux/drivers/bluetooth/ums9117/bluetooth.Kconfig"
 destination = "drivers/bluetooth/ums9117/Kconfig"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/bluetooth.Makefile"
+source = "platforms/ums9117/linux/drivers/bluetooth/ums9117/bluetooth.Makefile"
 destination = "drivers/bluetooth/ums9117/Makefile"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/fplinux,ums9117-bluetooth.yaml"
+source = "platforms/ums9117/linux/bindings/net/bluetooth/fplinux,ums9117-bluetooth.yaml"
 destination = "Documentation/devicetree/bindings/net/bluetooth/fplinux,ums9117-bluetooth.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/sprd,ums9117-pmu-apb.yaml"
+source = "platforms/ums9117/linux/bindings/mfd/sprd,ums9117-pmu-apb.yaml"
 destination = "Documentation/devicetree/bindings/mfd/sprd,ums9117-pmu-apb.yaml"
 
 [[linux.appends]]
-source = "platforms/ums9117/kernel/bluetooth-parent.Kconfig"
+source = "platforms/ums9117/linux/drivers/bluetooth/bluetooth-parent.Kconfig"
 destination = "drivers/bluetooth/Kconfig"
 
 [[linux.appends]]
-source = "platforms/ums9117/kernel/bluetooth-parent.Makefile"
+source = "platforms/ums9117/linux/drivers/bluetooth/bluetooth-parent.Makefile"
 destination = "drivers/bluetooth/Makefile"
 
 [bootstrap]
@@ -609,57 +609,57 @@ source = "common/host/fplinux-usb-keyboard.c"
 self_test = true
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/clk-ums9117-gates.c"
+source = "platforms/ums9117/linux/drivers/clk/sprd/clk-ums9117-gates.c"
 destination = "drivers/clk/sprd/ums9117-gates.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/reset-ums9117.c"
+source = "platforms/ums9117/linux/drivers/reset/reset-ums9117.c"
 destination = "drivers/reset/reset-ums9117.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/sprd,ums9117-clk.h"
+source = "platforms/ums9117/linux/include/dt-bindings/clock/sprd,ums9117-clk.h"
 destination = "include/dt-bindings/clock/sprd,ums9117-clk.h"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/sprd,ums9117-reset.h"
+source = "platforms/ums9117/linux/include/dt-bindings/reset/sprd,ums9117-reset.h"
 destination = "include/dt-bindings/reset/sprd,ums9117-reset.h"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/sprd,ums9117-clk.yaml"
+source = "platforms/ums9117/linux/bindings/clock/sprd,ums9117-clk.yaml"
 destination = "Documentation/devicetree/bindings/clock/sprd,ums9117-clk.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/sprd,ums9117-reset.yaml"
+source = "platforms/ums9117/linux/bindings/reset/sprd,ums9117-reset.yaml"
 destination = "Documentation/devicetree/bindings/reset/sprd,ums9117-reset.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/clk-sc2720.c"
+source = "platforms/ums9117/linux/drivers/clk/clk-sc2720.c"
 destination = "drivers/clk/clk-sc2720.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/sprd,sc2720-clk.yaml"
+source = "platforms/ums9117/linux/bindings/clock/sprd,sc2720-clk.yaml"
 destination = "Documentation/devicetree/bindings/clock/sprd,sc2720-clk.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/sprd-adi.h"
+source = "platforms/ums9117/linux/include/linux/spi/sprd-adi.h"
 destination = "include/linux/spi/sprd-adi.h"
 
 [[linux.copies]]
-source = "platforms/ums9117/kernel/ums9117-sdhci.c"
+source = "platforms/ums9117/linux/drivers/mmc/host/ums9117-sdhci.c"
 destination = "drivers/mmc/host/ums9117-sdhci.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/sprd,ums9117-dma.yaml"
+source = "platforms/ums9117/linux/bindings/dma/sprd,ums9117-dma.yaml"
 destination = "Documentation/devicetree/bindings/dma/sprd,ums9117-dma.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/bindings/sprd,ums9117-sdhci.yaml"
+source = "platforms/ums9117/linux/bindings/mmc/sprd,ums9117-sdhci.yaml"
 destination = "Documentation/devicetree/bindings/mmc/sprd,ums9117-sdhci.yaml"
 
 [[linux.appends]]
-source = "platforms/ums9117/kernel/sc2720-clk.Kconfig"
+source = "platforms/ums9117/linux/drivers/clk/sc2720-clk.Kconfig"
 destination = "drivers/clk/Kconfig"
 
 [[linux.appends]]
-source = "platforms/ums9117/kernel/sc2720-clk.Makefile"
+source = "platforms/ums9117/linux/drivers/clk/sc2720-clk.Makefile"
 destination = "drivers/clk/Makefile"
