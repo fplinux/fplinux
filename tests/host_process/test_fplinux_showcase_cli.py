@@ -12,7 +12,7 @@ from tests.process import run_process
 
 ROOT = Path(__file__).resolve().parents[2]
 APORT = ROOT / "alpine/aports/fplinux-showcase"
-SHARED = ROOT / "alpine/shared"
+SHARED = ROOT / "include/fplinux"
 SOURCE = APORT / "fplinux-showcase.c"
 
 
@@ -40,8 +40,8 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
                 f"-I{SHARED}",
                 str(SOURCE),
                 str(APORT / "armada-scene.c"),
-                str(SHARED / "fplinux-fb-session.c"),
-                str(SHARED / "fplinux-cli.c"),
+                str(ROOT / "lib/fplinux/fplinux-fb-session.c"),
+                str(ROOT / "lib/fplinux/fplinux-cli.c"),
                 "-o",
                 str(cls.executable),
             ],
@@ -170,8 +170,8 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
                 f'-DFPLINUX_SHOWCASE_LCD_BACKLIGHT_GLOB="{backlights}"',
                 str(SOURCE),
                 str(APORT / "armada-scene.c"),
-                str(SHARED / "fplinux-fb-session.c"),
-                str(SHARED / "fplinux-cli.c"),
+                str(ROOT / "lib/fplinux/fplinux-fb-session.c"),
+                str(ROOT / "lib/fplinux/fplinux-cli.c"),
                 "-o",
                 str(executable),
             ],

@@ -10,7 +10,7 @@ from pathlib import Path
 from tests.process import run_process
 
 ROOT = Path(__file__).resolve().parents[2]
-SHARED = ROOT / "alpine/shared"
+SHARED = ROOT / "include/fplinux"
 HARNESS = ROOT / "tests/host_tool/fplinux-parse-unsigned.c"
 
 
@@ -30,7 +30,7 @@ class ParseUnsignedTests(unittest.TestCase):
                     "-Werror",
                     f"-I{SHARED}",
                     str(HARNESS),
-                    str(SHARED / "fplinux-cli.c"),
+                    str(ROOT / "lib/fplinux/fplinux-cli.c"),
                     "-o",
                     str(executable),
                 ],

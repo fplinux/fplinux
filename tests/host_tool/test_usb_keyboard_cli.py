@@ -14,7 +14,7 @@ from tests.process import run_process
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "common/host/fplinux-usb-keyboard.c"
-SHARED = ROOT / "alpine/shared"
+SHARED = ROOT / "include/fplinux"
 
 
 class FPLinuxUsbKeyboardCliTests(unittest.TestCase):
@@ -53,7 +53,7 @@ class FPLinuxUsbKeyboardCliTests(unittest.TestCase):
                 str(SHARED),
                 str(SOURCE),
                 *libusb_flags,
-                str(SHARED / "fplinux-cli.c"),
+                str(ROOT / "lib/fplinux/fplinux-cli.c"),
                 "-pthread",
                 "-o",
                 str(cls.executable),

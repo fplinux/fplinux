@@ -10,9 +10,9 @@ from pathlib import Path
 from tests.process import run_process
 
 ROOT = Path(__file__).resolve().parents[2]
-CORE = ROOT / "alpine/shared/fplinux-multitap.c"
+CORE = ROOT / "lib/fplinux/fplinux-multitap.c"
 HARNESS = ROOT / "tests/host_tool/fplinux-multitap-core.c"
-INCLUDE = ROOT / "alpine/shared"
+INCLUDE = ROOT / "include/fplinux"
 
 
 class MultiTapCoreTests(unittest.TestCase):

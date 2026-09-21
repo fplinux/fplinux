@@ -11,7 +11,7 @@ from tests.process import run_process
 
 ROOT = Path(__file__).resolve().parents[2]
 APORT = ROOT / "alpine/aports/fplinux-rotate"
-SHARED = ROOT / "alpine/shared"
+SHARED = ROOT / "include/fplinux"
 HARNESS = ROOT / "tests/host_tool/fplinux-rotate-core.c"
 
 
@@ -60,8 +60,8 @@ class FplinuxRotateHostToolTests(unittest.TestCase):
                 executable,
                 APORT / "fplinux-rotate.c",
                 APORT / "fplinux-rotate-core.c",
-                SHARED / "fplinux-fb-session.c",
-                SHARED / "fplinux-cli.c",
+                ROOT / "lib/fplinux/fplinux-fb-session.c",
+                ROOT / "lib/fplinux/fplinux-cli.c",
             )
             result = run_process(
                 [

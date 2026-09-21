@@ -11,7 +11,7 @@ from typing import ClassVar
 from tests.process import run_process
 
 ROOT = Path(__file__).resolve().parents[2]
-SHARED = ROOT / "alpine/shared"
+SHARED = ROOT / "include/fplinux"
 
 
 class FPLinuxCliTests(unittest.TestCase):
@@ -36,7 +36,7 @@ class FPLinuxCliTests(unittest.TestCase):
                 "-Werror",
                 f"-I{SHARED}",
                 str(ROOT / "tests/host_tool/fplinux-cli.c"),
-                str(SHARED / "fplinux-cli.c"),
+                str(ROOT / "lib/fplinux/fplinux-cli.c"),
                 "-o",
                 str(cls.executable),
             ],

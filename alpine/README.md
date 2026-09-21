@@ -19,7 +19,8 @@ Target-neutral host and runtime tools and their contracts belong in
   Use `[rootfs].packages` for packages installed in the standard root filesystem
   and `[bundle].packages` for installable APKs published beside the image. Do not
   select packages from target names in code.
-- Keep reusable source consumed by project aports under `shared/` and map each
+- Keep shared C sources under `lib/fplinux/` and headers under `include/fplinux/`
+  at the repository root. Map each aport
   consumer explicitly in `scripts/fplinux_cli/alpine_state.py`; do not copy the
   same implementation into multiple aports.
 - Do not add rootfs overlays, duplicate package recipes, target-local copies, or

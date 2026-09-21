@@ -12,7 +12,7 @@ from tests.process import run_process
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "alpine/aports/fplinux-cpuclock/fplinux-cpuclock.c"
-SHARED_INCLUDE = ROOT / "alpine/shared"
+SHARED_INCLUDE = ROOT / "include/fplinux"
 
 
 class FplinuxCpuclockCliTests(unittest.TestCase):
@@ -36,7 +36,7 @@ class FplinuxCpuclockCliTests(unittest.TestCase):
                 "-Werror",
                 f"-I{SHARED_INCLUDE}",
                 str(SOURCE),
-                str(SHARED_INCLUDE / "fplinux-cli.c"),
+                str(ROOT / "lib/fplinux/fplinux-cli.c"),
                 "-o",
                 str(cls.executable),
             ],
