@@ -59,6 +59,35 @@ def _wait_until_not_running(process_id: int, deadline: float) -> None:
 class StageProcessTests(unittest.TestCase):
     """Exercise Stage against real isolated child processes."""
 
+    def test_entrypoint_reports_io_errors_and_sigint_without_tracebacks(self) -> None:
+        """Expected failures retain their status and diagnostics without Python stacks."""
+        for mode, status in (("io", 1), ("io-stage", 1), ("interrupt", 130)):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                result = run_process(
+                    [
+                        sys.executable,
+                        str(_PROCESS_FIXTURES / "reporter_failure.py"),
+                        mode,
+                        str(root),
+                    ],
+                    name="run entrypoint failure fixture",
+                    env=python_environment(),
+                    timeout=_PROCESS_TIMEOUT,
+                )
+                self.assertEqual(result.returncode, status, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertNotIn("Traceback", result.stderr)
+                if mode.startswith("io"):
+                    self.assertIn("fplinux:", result.stderr)
+                    self.assertIn("missing-input", result.stderr)
+                if mode == "io-stage":
+                    log = (root / "run/01-read-input.log").read_text()
+                    self.assertIn("missing-input", log)
+                    self.assertNotIn("Traceback", log)
+                    receipt = json.loads((root / "run/run.json").read_text())
+                    self.assertEqual(receipt["status"], "failed")
+
     def test_quiet_stage_keeps_high_volume_output_in_log(self) -> None:
         """Drain both large child streams without printing their contents."""
         with tempfile.TemporaryDirectory() as temporary:

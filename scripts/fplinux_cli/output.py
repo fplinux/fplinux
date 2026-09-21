@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, NoReturn, Self
 
-from .common import ROOT, display_text, replace_file_atomically
+from .common import ROOT, display_text, error_message, fail, replace_file_atomically
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -113,8 +113,19 @@ def current_stage() -> Stage | None:
     return _ACTIVE_STAGE.get()
 
 
+def _expected_error_text(error: BaseException | None) -> str | None:
+    """Return a concise cause for normal failures, not programming exceptions."""
+    if isinstance(error, SystemExit) and isinstance(error.code, str):
+        return error.code
+    if isinstance(error, KeyboardInterrupt):
+        return "interrupted"
+    if isinstance(error, (OSError, subprocess.SubprocessError)):
+        return error_message(error)
+    return None
+
+
 def run_entrypoint(entrypoint: Callable[[], None]) -> None:
-    """Suppress a second traceback after a stage already reported an error."""
+    """Report expected failures once and retain unexpected exception diagnostics."""
     _REPORTED_EXCEPTION.set(None)
     reporter_token = _ACTIVE_REPORTER.set(None)
     try:
@@ -126,19 +137,19 @@ def run_entrypoint(entrypoint: Callable[[], None]) -> None:
         if isinstance(error.code, str) and _REPORTED_EXCEPTION.get() is error:
             raise SystemExit(1) from None
         raise
-    except KeyboardInterrupt as error:
+    except KeyboardInterrupt:
         reporter = _ACTIVE_REPORTER.get()
         if reporter is not None:
             reporter._finish_interrupted()  # noqa: SLF001 -- module-level lifecycle owner.
-        if _REPORTED_EXCEPTION.get() is error:
-            raise SystemExit(130) from None
-        raise
+        raise SystemExit(130) from None
     except BaseException as error:
         reporter = _ACTIVE_REPORTER.get()
         if reporter is not None:
             reporter._finish_failure()  # noqa: SLF001 -- module-level lifecycle owner.
         if _REPORTED_EXCEPTION.get() is error:
             raise SystemExit(1) from None
+        if isinstance(error, (OSError, subprocess.SubprocessError)):
+            fail(str(error))
         raise
     else:
         reporter = _ACTIVE_REPORTER.get()
@@ -368,6 +379,7 @@ class Stage:
         self.show_tail = show_tail
         self._stream: IO[bytes] | None = None
         self._token: contextvars.Token[Stage | None] | None = None
+        self._reporter_token: contextvars.Token[RunReporter | None] | None = None
         self._metadata_index: int | None = None
         self._interrupted_exit: int | None = None
 
@@ -376,6 +388,7 @@ class Stage:
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self._stream = self.log_path.open("wb")
         self._token = _ACTIVE_STAGE.set(self)
+        self._reporter_token = _ACTIVE_REPORTER.set(self.reporter)
         self._metadata_index = self.reporter._start_stage(self)  # noqa: SLF001
         print(f"{self.reporter.label}: {self.name} ...", file=sys.stderr, flush=True)
         return self
@@ -387,16 +400,18 @@ class Stage:
         traceback: TracebackType | None,
     ) -> None:
         """Close the stage, report its status and preserve exceptions."""
-        if exception is not None and not isinstance(exception, SystemExit):
+        already_reported = exception is not None and _REPORTED_EXCEPTION.get() is exception
+        cause = _expected_error_text(exception)
+        if cause is not None:
+            self.write((cause + "\n").encode())
+            _REPORTED_EXCEPTION.set(exception)
+        elif exception is not None and not isinstance(exception, SystemExit):
             formatted = traceback_module.format_exception(
                 exception_type,
                 exception,
                 traceback,
             )
             self.write("".join(formatted).encode())
-            _REPORTED_EXCEPTION.set(exception)
-        elif isinstance(exception, SystemExit) and isinstance(exception.code, str):
-            self.write((exception.code + "\n").encode())
             _REPORTED_EXCEPTION.set(exception)
         if self._stream is not None:
             self._stream.flush()
@@ -405,6 +420,9 @@ class Stage:
         if self._token is not None:
             _ACTIVE_STAGE.reset(self._token)
             self._token = None
+        if self._reporter_token is not None:
+            _ACTIVE_REPORTER.reset(self._reporter_token)
+            self._reporter_token = None
         status, exit_code = self._outcome(exception)
         if self._metadata_index is not None:
             self.reporter._finish_stage(  # noqa: SLF001 -- reporter owns its stage records.
@@ -427,6 +445,12 @@ class Stage:
         print(f"{self.reporter.label}: {self.name} {detail}", file=sys.stderr, flush=True)
         if self.show_tail:
             self._show_tail()
+        elif (
+            cause is not None
+            and not already_reported
+            and not isinstance(exception, KeyboardInterrupt)
+        ):
+            print(cause, file=sys.stderr, flush=True)
         print(f"full log: {self.display_path}", file=sys.stderr, flush=True)
 
     def _outcome(self, exception: BaseException | None) -> tuple[str, int | None]:

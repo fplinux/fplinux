@@ -29,8 +29,13 @@ def display_text(value: object) -> str:
     return text.replace(f"{root}/", "<source-root>/")
 
 
+def error_message(message: object) -> str:
+    """Format a repository command failure without exposing the checkout path."""
+    return f"fplinux: {display_text(message)}"
+
+
 def fail(message: str) -> NoReturn:
-    raise SystemExit(f"fplinux: {display_text(message)}")
+    raise SystemExit(error_message(message))
 
 
 def sha256_bytes(data: bytes) -> str:
