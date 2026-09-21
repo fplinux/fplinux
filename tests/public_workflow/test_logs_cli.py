@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 import os
 import selectors
-import shutil
 import signal
 import tempfile
 import time
@@ -16,13 +15,12 @@ from typing import TYPE_CHECKING
 
 from fplinux_cli.cachelock import cache_lock
 
+from tests.cli_support import prepare_cli_checkout
 from tests.process import run_process
 
 if TYPE_CHECKING:
     import subprocess
     from collections.abc import Callable
-
-ROOT = Path(__file__).resolve().parents[2]
 
 
 class LogsCliTests(unittest.TestCase):
@@ -33,11 +31,7 @@ class LogsCliTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
-        shutil.copy(ROOT / "fplinux", self.root / "fplinux")
-        shutil.copytree(ROOT / "scripts/fplinux_cli", self.root / "scripts/fplinux_cli")
-        target = self.root / "targets/example"
-        target.mkdir(parents=True)
-        (target / "target.toml").touch()
+        prepare_cli_checkout(self.root)
         self.logs = self.root / ".cache/logs"
 
     def run_logs(
