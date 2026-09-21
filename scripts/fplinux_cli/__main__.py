@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from fplinux_cli.cli.build import build
 from fplinux_cli.cli.bundles import PUBLIC_BOOT_MODES, selected_context_profile
 from fplinux_cli.cli.checksum import checksum_aport
+from fplinux_cli.cli.logs import add_log_arguments, read_logs
 from fplinux_cli.cli.package import package_target
 from fplinux_cli.cli.runtime import console_target, run_target, verify_booted
 from fplinux_cli.manifests.paths import GLOBAL_PROFILES, discover_targets, normalize_profile
@@ -44,7 +45,7 @@ _EXCLUSIVE_CACHE_COMMANDS = frozenset(
 _SHARED_CACHE_COMMANDS = frozenset({"console", "package", "run", "verify"})
 _CHECK_SCOPE_METAVAR = "{" + ",".join(CHECK_SCOPES) + "}"
 _PUBLIC_COMMAND_METAVAR = (
-    "{doctor,check,test,format,setup,build,checksum,package,prune,"
+    "{doctor,check,test,logs,format,setup,build,checksum,package,prune,"
     "run,console,nand,device-data,verify}"
 )
 
@@ -165,6 +166,8 @@ def _command_action(
     """Bind parsed command arguments to one deferred command invocation."""
     if args.command == "doctor":
         action = doctor
+    elif args.command == "logs":
+        action = partial(read_logs, args)
     elif args.command == "check":
         if args.list_scopes:
             if args.profile is not None:
@@ -354,6 +357,8 @@ def main() -> None:
         "test", help="run selected unittest tests in the pinned environment"
     )
     add_test_arguments(test_parser)
+    logs_parser = commands.add_parser("logs", help="list, inspect or follow recorded command logs")
+    add_log_arguments(logs_parser)
     format_parser = commands.add_parser(
         "format", help="format explicit project sources in the pinned environment"
     )

@@ -21,6 +21,7 @@ PUBLIC_COMMANDS = (
     "doctor",
     "check",
     "test",
+    "logs",
     "format",
     "setup",
     "build",
