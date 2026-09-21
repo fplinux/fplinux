@@ -921,8 +921,8 @@ static int ums9117_nandc_fail(struct ums9117_nandc *nandc, int error,
 	ums9117_nandc_abort_command(nandc);
 	reset_error = ums9117_nandc_assert_reset(nandc);
 	dev_err(nandc->dev,
-		"%s failed: %d page=%u operation=%u feature_address=0x%02x completed=%u\n",
-		stage, error, nandc->last_page, nandc->last_operation,
+		"%s failed: %pe page=%u operation=%u feature_address=0x%02x completed=%u\n",
+		stage, ERR_PTR(error), nandc->last_page, nandc->last_operation,
 		nandc->last_feature_address, nandc->completed_operations);
 	dev_dbg(nandc->dev,
 		"observed_int=0x%08x observed_axim=0x%08x observed_spi=0x%08x\n",
@@ -1438,8 +1438,7 @@ static int ums9117_nandc_probe(struct platform_device *pdev)
 		goto out_release_page;
 	}
 	nandc->raw_registered = true;
-	dev_notice(
-		&pdev->dev,
+	dev_dbg(&pdev->dev,
 		"read-only NAND device registered; identification deferred until read\n");
 	return 0;
 
@@ -1465,8 +1464,8 @@ static void ums9117_nandc_remove(struct platform_device *pdev)
 	if (ret) {
 		mutex_unlock(&nandc->io_mutex);
 		dev_err(&pdev->dev,
-			"NANDC baseline restore failed: %d; retaining coherent buffer\n",
-			ret);
+			"NANDC baseline restore failed: %pe; retaining coherent buffer\n",
+			ERR_PTR(ret));
 		return;
 	}
 	ums9117_nandc_release_buffers(nandc);

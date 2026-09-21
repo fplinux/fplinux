@@ -389,8 +389,8 @@ static void ums9117_pcm_disable_codec(struct ums9117_pcm *audio)
 		return;
 	ret = ums9117_sc2720_codec_disable(audio->codec);
 	if (ret) {
-		dev_err(audio->dev, "cannot disable headphone codec: %d\n",
-			ret);
+		dev_err(audio->dev, "cannot disable headphone codec: %pe\n",
+			ERR_PTR(ret));
 		return;
 	}
 	audio->codec_prepared = false;
@@ -437,8 +437,9 @@ static int ums9117_pcm_stop_locked(struct ums9117_pcm *audio)
 	if (audio->codec_prepared) {
 		ret = ums9117_sc2720_codec_stop(audio->codec);
 		if (ret) {
-			dev_err(audio->dev, "cannot stop headphone codec: %d\n",
-				ret);
+			dev_err(audio->dev,
+				"cannot stop headphone codec: %pe\n",
+				ERR_PTR(ret));
 			ums9117_pcm_shutdown_locked(audio);
 			return ret;
 		}
@@ -517,14 +518,15 @@ static int ums9117_pcm_prepare_hardware_locked(struct ums9117_pcm *audio,
 		goto failed;
 	ret = ums9117_audio_prepare(audio->digital, rate);
 	if (ret) {
-		dev_err(audio->dev, "cannot prepare digital audio: %d\n", ret);
+		dev_err(audio->dev, "cannot prepare digital audio: %pe\n",
+			ERR_PTR(ret));
 		goto failed;
 	}
 	audio->digital_prepared = true;
 	ret = ums9117_sc2720_codec_prepare(audio->codec);
 	if (ret) {
-		dev_err(audio->dev, "cannot prepare headphone codec: %d\n",
-			ret);
+		dev_err(audio->dev, "cannot prepare headphone codec: %pe\n",
+			ERR_PTR(ret));
 		goto failed;
 	}
 	audio->codec_prepared = true;
@@ -580,7 +582,8 @@ static int ums9117_pcm_start_idle_locked(struct ums9117_pcm *audio)
 	return 0;
 
 failed:
-	dev_err(audio->dev, "cannot start headphone idle silence: %d\n", ret);
+	dev_err(audio->dev, "cannot start headphone idle silence: %pe\n",
+		ERR_PTR(ret));
 	ums9117_pcm_shutdown_locked(audio);
 	return ret;
 }
@@ -721,8 +724,9 @@ ums9117_pcm_service_locked(struct ums9117_pcm *audio,
 
 	queued = ums9117_audio_queued(audio->digital);
 	if (queued < 0) {
-		dev_err(audio->dev, "cannot read playback FIFO occupancy: %d\n",
-			queued);
+		dev_err(audio->dev,
+			"cannot read playback FIFO occupancy: %pe\n",
+			ERR_PTR(queued));
 		return UMS9117_PCM_SERVICE_XRUN;
 	}
 	if ((u64)queued > audio->submitted_frames - audio->consumed_frames) {
@@ -760,7 +764,8 @@ ums9117_pcm_service_locked(struct ums9117_pcm *audio,
 	ret = ums9117_pcm_pending_frames(audio, runtime, &pending);
 	if (ret) {
 		dev_err(audio->dev,
-			"invalid playback application pointer: %d\n", ret);
+			"invalid playback application pointer: %pe\n",
+			ERR_PTR(ret));
 		return UMS9117_PCM_SERVICE_XRUN;
 	}
 	if (!queued) {
@@ -773,8 +778,8 @@ ums9117_pcm_service_locked(struct ums9117_pcm *audio,
 	ret = ums9117_pcm_fill(audio, runtime, queued, &written, &pending);
 	if (ret) {
 		dev_err(audio->dev,
-			"invalid playback application pointer or FIFO state: %d\n",
-			ret);
+			"invalid playback application pointer or FIFO state: %pe\n",
+			ERR_PTR(ret));
 		return UMS9117_PCM_SERVICE_XRUN;
 	}
 	if ((queued || written) && !advanced &&
@@ -866,8 +871,8 @@ static void ums9117_pcm_shutdown_failed_idle(struct ums9117_pcm *audio)
 	audio->idle_error = 0;
 	spin_unlock_irqrestore(&audio->fifo_lock, flags);
 	if (error) {
-		dev_err(audio->dev, "cannot feed headphone idle silence: %d\n",
-			error);
+		dev_err(audio->dev, "cannot feed headphone idle silence: %pe\n",
+			ERR_PTR(error));
 		/* The hardware may have been restarted meanwhile. */
 		if (!audio->running && !audio->idle_running)
 			ums9117_pcm_shutdown_locked(audio);
@@ -1092,14 +1097,16 @@ static int ums9117_pcm_trigger(struct snd_pcm_substream *substream, int command)
 			if (!ret)
 				ret = -EPIPE;
 			dev_err(audio->dev,
-				"cannot prefill playback FIFO: %d\n", ret);
+				"cannot prefill playback FIFO: %pe\n",
+				ERR_PTR(ret));
 			ums9117_pcm_shutdown_locked(audio);
 			break;
 		}
 		ret = ums9117_sc2720_codec_enable(audio->codec);
 		if (ret) {
 			dev_err(audio->dev,
-				"cannot enable headphone codec: %d\n", ret);
+				"cannot enable headphone codec: %pe\n",
+				ERR_PTR(ret));
 			ums9117_pcm_shutdown_locked(audio);
 			break;
 		}
@@ -1286,13 +1293,12 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 		}
 	}
 	if (audio->profile.fitted && audio->profile.source_eq_omitted)
-		dev_info(
-			audio->dev,
+		dev_dbg(audio->dev,
 			"headphone volume source: fitted gain profile; source EQ omitted\n");
 	else
-		dev_info(audio->dev, "headphone volume source: %s\n",
-			 audio->profile.fitted ? "fitted gain profile" :
-						 "generic defaults");
+		dev_dbg(audio->dev, "headphone volume source: %s\n",
+			audio->profile.fitted ? "fitted gain profile" :
+						"generic defaults");
 	return 0;
 }
 

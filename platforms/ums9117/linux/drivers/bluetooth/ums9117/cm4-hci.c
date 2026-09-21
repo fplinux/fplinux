@@ -90,7 +90,7 @@ static void fail_transport(int error)
 	kfree_skb(runtime.rx_skb);
 	runtime.rx_skb = NULL;
 	runtime.rx_callback_error = 0;
-	bt_dev_err(runtime.hdev, "CM4 transport stopped: %d", error);
+	bt_dev_err(runtime.hdev, "transport stopped: %pe", ERR_PTR(error));
 }
 
 static void observe_pm_reply(const struct sk_buff *skb)

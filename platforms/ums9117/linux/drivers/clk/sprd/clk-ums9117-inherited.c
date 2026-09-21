@@ -330,8 +330,7 @@ ums9117_log_initial_snapshot(struct ums9117_inherited_clks *provider)
 	bool pre_postdiv_valid;
 
 	if (!ums9117_take_clock_snapshot(provider, &first, &second)) {
-		dev_info(
-			provider->dev,
+		dev_dbg(provider->dev,
 			"initial snapshot unstable: first=%08x/%08x/%08x/%08x/%08x second=%08x/%08x/%08x/%08x/%08x\n",
 			first.ca7_source, first.ca7_divider, first.mpll_ctrl0,
 			first.mpll_ctrl1, first.mpll_ctrl2, second.ca7_source,
@@ -349,8 +348,7 @@ ums9117_log_initial_snapshot(struct ums9117_inherited_clks *provider)
 	if (!ca7_rate && source == UMS9117_CA7_SOURCE_MPLL && mpll_rate)
 		ca7_rate = mpll_rate / divisor;
 
-	dev_info(
-		provider->dev,
+	dev_dbg(provider->dev,
 		"initial snapshot source=%u divisor=%u raw=%08x/%08x/%08x/%08x/%08x pre-postdiv=%llu%s MPLL=%lu%s CA7=%lu%s\n",
 		source, divisor, first.ca7_source, first.ca7_divider,
 		first.mpll_ctrl0, first.mpll_ctrl1, first.mpll_ctrl2,

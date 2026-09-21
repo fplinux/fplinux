@@ -152,7 +152,7 @@ static void sc2720_fgu_release_pclk(void *data)
 		return;
 	ret = sc2720_fgu_clear_pclk(fgu, &cleared);
 	if (ret) {
-		dev_err(fgu->dev, "failed to release FGU clock: %d\\n", ret);
+		dev_err(fgu->dev, "cannot release clock: %pe\n", ERR_PTR(ret));
 		return;
 	}
 	fgu->pclk_owned = false;
@@ -508,12 +508,12 @@ static int sc2720_fgu_probe(struct platform_device *pdev)
 	ret = nvmem_cell_read_u16(&pdev->dev, "fgu_calib", &efuse3);
 	if (ret)
 		return dev_err_probe(&pdev->dev, ret,
-				     "SC2720 efuse calibration unavailable\n");
+				     "efuse calibration unavailable\n");
 	ret = sc2720_fgu_calibrate(fgu, efuse3, current_calibration[0],
 				   current_calibration[1]);
 	if (ret)
 		return dev_err_probe(&pdev->dev, ret,
-				     "SC2720 efuse calibration invalid\n");
+				     "efuse calibration invalid\n");
 
 	ret = sc2720_fgu_enable_pclk(fgu, &pclk_attempted);
 	if (ret) {
@@ -521,11 +521,11 @@ static int sc2720_fgu_probe(struct platform_device *pdev)
 			cleanup_ret = sc2720_fgu_clear_pclk(fgu, &pclk_cleared);
 			if (cleanup_ret || !pclk_cleared)
 				dev_err(&pdev->dev,
-					"FGU clock cleanup after %d failed: %d\n",
-					ret, cleanup_ret);
+					"clock cleanup after %pe: status=%d cleared=%u\n",
+					ERR_PTR(ret), cleanup_ret,
+					pclk_cleared);
 		}
-		return dev_err_probe(&pdev->dev, ret,
-				     "SC2720 FGU clock unavailable\n");
+		return dev_err_probe(&pdev->dev, ret, "clock unavailable\n");
 	}
 	fgu->pclk_owned = true;
 	ret = devm_add_action_or_reset(&pdev->dev, sc2720_fgu_release_pclk,
@@ -535,7 +535,7 @@ static int sc2720_fgu_probe(struct platform_device *pdev)
 	ret = sc2720_fgu_wait_usable(fgu);
 	if (ret)
 		return dev_err_probe(&pdev->dev, ret,
-				     "SC2720 voltage sample unavailable\n");
+				     "voltage sample unavailable\n");
 
 	config.drv_data = fgu;
 	config.fwnode = dev_fwnode(&pdev->dev);

@@ -368,8 +368,8 @@ static void stop_controller(struct ums9117_bluetooth *bt)
 	ret = hold_reset(bt);
 	local_irq_restore(flags);
 	if (ret) {
-		dev_err(bt->dev,
-			"CM4 reset hold failed: %d; cold boot required\n", ret);
+		dev_err(bt->dev, "reset hold failed: %pe; cold boot required\n",
+			ERR_PTR(ret));
 		return;
 	}
 	if (bt->idle_poll_owned) {
@@ -426,12 +426,12 @@ static ssize_t start_store(struct device *dev, struct device_attribute *attr,
 			bt->startup_error = ret;
 			stop_controller(bt);
 			dev_err(dev,
-				"CM4 startup failed: %d; cold boot required\n",
-				ret);
+				"startup failed: %pe; cold boot required\n",
+				ERR_PTR(ret));
 		}
 	} else {
 		bt->started = true;
-		dev_info(dev, "CM4 HCI transport registered\n");
+		dev_dbg(dev, "HCI transport registered\n");
 	}
 out:
 	mutex_unlock(&bt->lock);
@@ -472,7 +472,8 @@ static int bluetooth_pm_notify(struct notifier_block *notifier,
 		bt->suspend_prepared = false;
 		mutex_unlock(&bt->lock);
 		if (ret)
-			dev_err(bt->dev, "CM4 HCI resume failed: %d\n", ret);
+			dev_err(bt->dev, "HCI resume failed: %pe\n",
+				ERR_PTR(ret));
 		break;
 	default:
 		return NOTIFY_DONE;
@@ -544,7 +545,7 @@ static int ums9117_bluetooth_probe(struct platform_device *pdev)
 			      IORESOURCE_SYSTEM_RAM,
 			      IORES_DESC_NONE) != REGION_DISJOINT)
 		return dev_err_probe(dev, -EBUSY,
-				     "CM4 memory overlaps System RAM\n");
+				     "memory overlaps System RAM\n");
 	bt = devm_kzalloc(dev, sizeof(*bt), GFP_KERNEL);
 	if (!bt)
 		return -ENOMEM;
@@ -585,7 +586,7 @@ static int ums9117_bluetooth_probe(struct platform_device *pdev)
 		    UMS9117_CM4_MAP_BYTES - UMS9117_CM4_IMAGE_OFFSET)
 		return dev_err_probe(
 			dev, -EINVAL,
-			"CM4 firmware size exceeds its memory window\n");
+			"firmware size exceeds its memory window\n");
 	bt->aon = syscon_regmap_lookup_by_phandle(dev->of_node, "sprd,aon-apb");
 	if (IS_ERR(bt->aon))
 		return dev_err_probe(dev, PTR_ERR(bt->aon),
@@ -598,16 +599,17 @@ static int ums9117_bluetooth_probe(struct platform_device *pdev)
 			     UMS9117_CM4_MAP_BYTES);
 	if (IS_ERR(bt->low))
 		return dev_err_probe(dev, PTR_ERR(bt->low),
-				     "CM4 memory unavailable\n");
+				     "memory unavailable\n");
 	bt->iram = map_memory(pdev, "boot-vector", UMS9117_CM4_IRAM_PHYS,
 			      UMS9117_CM4_IRAM_BYTES);
 	if (IS_ERR(bt->iram))
 		return dev_err_probe(dev, PTR_ERR(bt->iram),
-				     "CM4 boot vector unavailable\n");
+				     "boot vector unavailable\n");
 	/* Binding a mailbox channel resets its FIFO; the CM4 must be stopped. */
 	ret = check_cold_state(bt);
 	if (ret)
-		return dev_err_probe(dev, ret, "CM4 is not in cold state\n");
+		return dev_err_probe(dev, ret,
+				     "transport is not in cold state\n");
 	ret = ums9117_cm4_mailbox_init(dev);
 	if (ret)
 		return dev_err_probe(dev, ret,
@@ -621,7 +623,7 @@ static int ums9117_bluetooth_probe(struct platform_device *pdev)
 	ret = devm_add_action_or_reset(dev, unregister_bluetooth_pm, bt);
 	if (ret)
 		return ret;
-	dev_info(dev, "CM4 transport ready for firmware start\n");
+	dev_dbg(dev, "transport ready for firmware start\n");
 	return 0;
 }
 

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include <linux/err.h>
 #include <linux/bitfield.h>
 #include <linux/delay.h>
 #include <linux/dma-buf.h>
@@ -995,8 +996,8 @@ static void ums9117_rota_retain_pins(struct ums9117_rota_ctx *ctx, int error)
 		if (THIS_MODULE)
 			__module_get(THIS_MODULE);
 		dev_err(rota->dev,
-			"DMA did not stop (%d); active image memory retained until cold boot\n",
-			error);
+			"DMA did not stop : %pe; active image memory retained until cold boot\n",
+			ERR_PTR(error));
 	}
 	/* Deliberately leak the dma-buf references: hardware may still write. */
 	ctx->num_pins = 0;
@@ -1395,7 +1396,7 @@ static int ums9117_rota_probe(struct platform_device *pdev)
 	if (ret)
 		goto release_m2m;
 	platform_set_drvdata(pdev, rota);
-	dev_info(&pdev->dev, "registered as /dev/video%d\n", rota->video.num);
+	dev_dbg(&pdev->dev, "registered as /dev/video%d\n", rota->video.num);
 	return 0;
 
 release_m2m:
@@ -1423,8 +1424,8 @@ static void ums9117_rota_remove(struct platform_device *pdev)
 	ret = dmaengine_terminate_sync(rota->dma);
 	if (ret) {
 		dev_err(rota->dev,
-			"DMA still active; channel and clock retained: %d\n",
-			ret);
+			"DMA still active; channel and clock retained: %pe\n",
+			ERR_PTR(ret));
 		return;
 	}
 	dma_release_channel(rota->dma);

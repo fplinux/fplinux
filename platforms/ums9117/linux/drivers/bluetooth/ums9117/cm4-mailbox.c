@@ -103,7 +103,8 @@ static int mailbox_fail(const char *reason, int error)
 {
 	if (!mailbox.error) {
 		mailbox.error = error;
-		dev_err(mailbox.dev, "mailbox %s: %d\n", reason, error);
+		dev_err(mailbox.dev, "mailbox %s: %pe\n", reason,
+			ERR_PTR(error));
 	}
 	return mailbox.error;
 }

@@ -88,6 +88,7 @@ static void sc2720_power_key_hold_work(struct work_struct *work)
 {
 	struct sc2720_power_key *power_key = container_of(
 		to_delayed_work(work), struct sc2720_power_key, hold_work);
+	struct device *dev = &power_key->handle.dev->dev;
 	int ret;
 
 	if (atomic_cmpxchg(&power_key->down, 1, 0) != 1 ||
@@ -98,16 +99,16 @@ static void sc2720_power_key_hold_work(struct work_struct *work)
 						      struct sc2720_poweroff,
 						      input_handler));
 	if (ret == -EBUSY) {
-		pr_warn("SC2720 five-second power-key shutdown refused: charger input active\n");
+		dev_warn(dev,
+			 "power-key shutdown refused: charger input active\n");
 		return;
 	}
 	if (ret) {
-		pr_err("SC2720 five-second power-key shutdown refused: %d\n",
-		       ret);
+		dev_err(dev, "power-key shutdown refused: %pe\n", ERR_PTR(ret));
 		return;
 	}
 
-	pr_info("SC2720 five-second power-key orderly shutdown requested\n");
+	dev_dbg(dev, "power-key orderly shutdown requested\n");
 	if (READ_ONCE(system_state) != SYSTEM_RUNNING)
 		return;
 	/* Never force power off if userspace cannot make storage safe. */
@@ -164,7 +165,7 @@ static int sc2720_power_key_connect(struct input_handler *handler,
 	ret = input_open_device(&power_key->handle);
 	if (ret)
 		goto unregister;
-	pr_info("SC2720 five-second power-key handler attached\n");
+	dev_dbg(&dev->dev, "power-key handler attached\n");
 	return 0;
 
 unregister:
@@ -203,11 +204,12 @@ static int sc2720_power_off(struct sys_off_data *data)
 	/* The transport owns this atomic transaction after device shutdown. */
 	ret = sprd_adi_sc2720_power_off(poweroff->spi);
 	if (ret)
-		pr_emerg("SC2720 power-off refused: %d\n", ret);
+		dev_emerg(&poweroff->spi->dev, "power-off refused: %pe\n",
+			  ERR_PTR(ret));
 	else {
 		mdelay(SC2720_POWER_OFF_WAIT_MS);
-		pr_emerg(
-			"SC2720 power-off write completed but CPU still runs\n");
+		dev_emerg(&poweroff->spi->dev,
+			  "power-off write completed but CPU still runs\n");
 	}
 	sc2720_halt();
 }
@@ -274,7 +276,7 @@ static int sc2720_poweroff_probe(struct platform_device *pdev)
 				       &poweroff->input_handler);
 	if (ret)
 		return ret;
-	dev_info(&pdev->dev, "guarded SC2720 power-off handler ready\n");
+	dev_dbg(&pdev->dev, "power-off handler ready\n");
 	return 0;
 }
 
