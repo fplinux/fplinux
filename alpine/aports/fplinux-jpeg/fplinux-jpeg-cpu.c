@@ -1556,7 +1556,8 @@ int main(int argc, char **argv)
 	    !read_file_bounded(options.input_path, MAX_RAW_BYTES, &input,
 			       &input_size, error, sizeof(error)) ||
 	    !metric_stop(&input_metric, &start)) {
-		fprintf(stderr, "%s\n", error[0] ? error : "cannot read input");
+		fprintf(stderr, "fplinux-jpeg-cpu: %s\n",
+			error[0] ? error : "cannot read input");
 		free(input);
 		return EXIT_FAILURE;
 	}
@@ -1565,7 +1566,7 @@ int main(int argc, char **argv)
 				 &expected_size) ||
 	     input_size != expected_size)) {
 		fprintf(stderr,
-			"NV16 input must be exactly %zu tight Y+UV bytes\n",
+			"fplinux-jpeg-cpu: NV16 input must be exactly %zu tight Y+UV bytes\n",
 			expected_size);
 		free(input);
 		return EXIT_FAILURE;
@@ -1574,7 +1575,7 @@ int main(int argc, char **argv)
 	    (!read_file_bounded(options.dqt_path, DQT_BYTES, &dqt, &dqt_size,
 				error, sizeof(error)) ||
 	     dqt_size != DQT_BYTES || !valid_dqt(dqt))) {
-		fprintf(stderr, "%s\n",
+		fprintf(stderr, "fplinux-jpeg-cpu: %s\n",
 			error[0] ?
 				error :
 				"DQT must contain exactly 128 nonzero bytes");
@@ -1592,7 +1593,7 @@ int main(int argc, char **argv)
 		ok = run_decode(&options, input, input_size, &input_metric,
 				error, sizeof(error));
 	if (!ok)
-		fprintf(stderr, "%s\n",
+		fprintf(stderr, "fplinux-jpeg-cpu: %s\n",
 			error[0] ? error : "JPEG operation failed");
 	free(input);
 	free(dqt);

@@ -20,10 +20,12 @@ created=0
 runtime_created=0
 
 report() {
+	priority=$1
+	shift
 	line="fplinux-usb-gadget: $*"
 	printf '%s\n' "$line" >>"$log"
 	if [ -c /dev/kmsg ]; then
-		printf '<6>%s\n' "$line" >/dev/kmsg || :
+		printf '<%s>%s\n' "$priority" "$line" >/dev/kmsg || :
 	fi
 	if [ -c /dev/tty1 ]; then
 		printf '%s\r\n' "$line" >/dev/tty1 || :
@@ -285,10 +287,10 @@ on_exit() {
 	trap - EXIT HUP INT TERM
 	remove_temporary_files
 	if [ "$status" -ne 0 ]; then
-		report "FAIL stage=$stage status=$status"
+		report 3 "FAIL stage=$stage status=$status"
 		if [ "$created" -eq 1 ]; then
 			if ! cleanup; then
-				report "ROLLBACK_FAIL path=$gadget"
+				report 3 "ROLLBACK_FAIL path=$gadget"
 			fi
 		elif [ "$runtime_created" -eq 1 ]; then
 			remove_runtime_files
@@ -301,7 +303,7 @@ start_gadget() {
 	mkdir -p /run
 	: >"$log"
 	exec >>"$log" 2>&1
-	report "START functions=gser,ncm kernel=$(uname -r)"
+	report 6 "START functions=gser,ncm kernel=$(uname -r)"
 	trap on_exit EXIT
 	trap 'exit 1' HUP INT TERM
 
@@ -406,7 +408,7 @@ start_gadget() {
 		/sbin/ifconfig usb0
 		/sbin/route -n
 	} >>"$log"
-	report "READY udc=$udc keyboard=/dev/ttyGS0 network=usb0"
+	report 6 "READY udc=$udc keyboard=/dev/ttyGS0 network=usb0"
 	created=0
 	runtime_created=0
 	trap - EXIT HUP INT TERM
@@ -415,13 +417,13 @@ start_gadget() {
 stop_gadget() {
 	mkdir -p /run
 	: >>"$log"
-	report "STOP"
+	report 6 "STOP"
 	remove_temporary_files
 	if ! cleanup; then
-		report "STOP_FAIL path=$gadget"
+		report 3 "STOP_FAIL path=$gadget"
 		return 1
 	fi
-	report "STOP_PASS"
+	report 6 "STOP_PASS"
 }
 
 case "${1:-}" in

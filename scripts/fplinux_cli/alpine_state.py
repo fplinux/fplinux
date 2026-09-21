@@ -36,6 +36,7 @@ CLI_SOURCES = (
     "include/fplinux/fplinux-cli.h",
 )
 SHARED_APORT_SOURCES = {
+    "fplinux-base": CLI_SOURCES,
     "fplinux-bluetooth": CLI_SOURCES,
     "fplinux-charge": CLI_SOURCES,
     "fplinux-console": MULTITAP_SOURCES,

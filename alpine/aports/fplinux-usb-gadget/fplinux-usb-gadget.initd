@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # shellcheck shell=sh disable=SC2034
 
-description="FPLinux ConfigFS USB gadget"
+name="FPLinux USB gadget"
+description="Configure the session-bound USB gadget"
 
 depend() {
 	need devfs procfs sysfs

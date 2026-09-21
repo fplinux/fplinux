@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # shellcheck shell=sh disable=SC2034
 
+name="FPLinux microSD root expansion"
 description="Expand the FPLinux microSD root filesystem"
 
 depend() {

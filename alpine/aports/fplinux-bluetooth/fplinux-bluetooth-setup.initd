@@ -15,14 +15,14 @@ start() {
 
 	if ! getent group messagebus >/dev/null 2>&1; then
 		addgroup -S messagebus || {
-			eend 1 "Could not create the messagebus group"
+			eend 1 "cannot create the messagebus group"
 			return 1
 		}
 	fi
 	if ! getent passwd messagebus >/dev/null 2>&1; then
 		adduser -S -D -H -h /dev/null -s /sbin/nologin \
 			-G messagebus -g messagebus messagebus || {
-			eend 1 "Could not create the messagebus user"
+			eend 1 "cannot create the messagebus user"
 			return 1
 		}
 	fi
@@ -46,6 +46,6 @@ start() {
 	ebegin "Starting fitted Bluetooth firmware"
 	fplinux-bluetooth enable --if-present
 	result=$?
-	eend "$result" "Could not start fitted Bluetooth firmware"
+	eend "$result" "cannot start fitted Bluetooth firmware"
 	return "$result"
 }

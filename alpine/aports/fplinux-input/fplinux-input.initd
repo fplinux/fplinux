@@ -2,12 +2,13 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # shellcheck shell=sh disable=SC2034
 
-description="FPLinux host keyboard bridge"
+name="FPLinux host keyboard bridge"
+description="Forward USB host keyboard input"
 supervisor=supervise-daemon
 command=/usr/bin/fplinux-input
 input_file=/dev/null
-output_log=/dev/kmsg
-error_log=/dev/kmsg
+output_logger="/usr/libexec/fplinux/kmsg --level 6 --tag fplinux-input"
+error_logger="/usr/libexec/fplinux/kmsg --level 3 --tag fplinux-input"
 respawn_delay=1
 respawn_max=0
 retry="TERM/2/KILL/2"
