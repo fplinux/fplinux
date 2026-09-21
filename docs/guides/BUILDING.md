@@ -330,6 +330,8 @@ Treat this file as private device data.
 Build, check, test and format print compact stage status. Add `--verbose` to
 build, check or test to stream their tool output. Complete logs are retained under
 `.cache/logs/`, and each command reports their location on failure.
+Use [`logs list`, `logs show` and `logs follow`](DEBUGGING.md#build-and-command-logs)
+to find and read command output without looking up stage filenames.
 
 Public commands serialize writes to shared build state. Target output is kept
 under `.cache/out/<target>/`; treat it as generated data, not as a user-managed
