@@ -152,6 +152,7 @@ class ImageToolCliTests(unittest.TestCase):
             with self.subTest(tool=tool):
                 result = self.run_tool(tool, *arguments)
                 self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertTrue(result.stderr.startswith(f"{tool}: "), result.stderr)
                 self.assertNotIn("--help' for more information", result.stderr)
 
     def test_complete_arguments_reject_positionals_after_a_separator(self) -> None:
@@ -346,7 +347,10 @@ class ImageToolCliTests(unittest.TestCase):
         """The final decode operation accepts missing geometry and uses the last input."""
         for tool, error in (
             ("fplinux-jpeg", "fplinux-jpeg: input: No such file or directory\n"),
-            ("fplinux-jpeg-cpu", "cannot read bounded regular input: missing-jpeg\n"),
+            (
+                "fplinux-jpeg-cpu",
+                "fplinux-jpeg-cpu: cannot read bounded regular input: missing-jpeg\n",
+            ),
         ):
             with self.subTest(tool=tool):
                 result = self.run_tool(

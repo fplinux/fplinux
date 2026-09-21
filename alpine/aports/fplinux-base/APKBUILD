@@ -4,15 +4,26 @@ pkgver=1
 pkgrel=0
 pkgdesc="Base userspace policy for FPLinux phones"
 url="https://github.com/fplinux/fplinux"
-arch="noarch"
+arch="armv7"
 license="GPL-2.0-only"
 depends="openrc fplinux-console"
+makedepends_build="clang22 lld22"
+makedepends_host="musl-dev"
 replaces="alpine-baselayout-data alpine-release"
 replaces_priority=100
 options="!check"
-source="fstab inittab hostname issue os-release fplinux-zram.initd"
+source="fstab inittab hostname issue os-release fplinux-zram.initd
+	fplinux-kmsg.c fplinux-cli.c fplinux-cli.h"
+builddir="$srcdir"
+
+build() {
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		-I"$srcdir" "$srcdir/fplinux-kmsg.c" "$srcdir/fplinux-cli.c" \
+		$LDFLAGS -Wl,--gc-sections -o fplinux-kmsg
+}
 
 package() {
+	install -Dm755 "$builddir/fplinux-kmsg" "$pkgdir/usr/libexec/fplinux/kmsg"
 	install -Dm644 "$srcdir/fstab" "$pkgdir/etc/fstab"
 	install -Dm644 "$srcdir/inittab" "$pkgdir/etc/inittab"
 	install -Dm644 "$srcdir/hostname" "$pkgdir/etc/hostname"
@@ -43,5 +54,8 @@ d0814f22cabb82c9dce842e5d20e56a2b8d035129eed55042fb0a6564b093cee123059bc6d95c9a4
 0d3253622d9bb758ab32dd1695f29afe97863b219b987652b74763818bcb576dccb5db1e08308f728893495c6abd002b79254fd2c38773ae38079f19e166ab70  hostname
 49021c0bcdfe0034ccafc330ca63886aa0a00a8e9100e2ecae21678178e4df98775932be6195067e944a79b8620a420484b9d70e1b41e095696a9358f3cbc4f9  issue
 c78d6b9b4995a018827d2a36fec591310cc90fe3e1e31d9ac9ca3c1dbac7d10445e46f19cce2c312ec6d19135d3009388d75ff405c16180ebb70ce29cc001b1b  os-release
-9597e6bc4e84af64ac808cd72cb32e32a1ba829aaac3789457df3a53c857008c6e0d1cbd3b57b17f00e0dd7b8c15d9419ebf7e566c29564bad95b791dffaa993  fplinux-zram.initd
+16130cfd79c17d372d18f4a47a27d1355a387e73b67e6bfe1f925131dbc6dd4ce66e394409265ccde74ad7fe001a1f5fcfc82a8db3b23428138111d477edfb59  fplinux-zram.initd
+61ac67c34c4879c58956b59ca4ba3806b11bb04be2200c9010f1c8772b223a947678c2450611a69ea23d4eb0afa2508a6ca75c8eee5842dd5b1ae3dbbd25a596  fplinux-kmsg.c
+60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
+9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
 "

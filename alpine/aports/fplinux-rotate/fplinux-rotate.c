@@ -1028,7 +1028,7 @@ static bool present_image(const struct fplinux_rotate_image *image,
 
 	if (!fplinux_fb_session_open(&session, "/dev/fb0", "/dev/tty0", error,
 				     sizeof(error))) {
-		fprintf(stderr, "%s\n", error);
+		fprintf(stderr, "fplinux-rotate: %s\n", error);
 		return false;
 	}
 	if (session.width != image->width || session.height != image->height ||
@@ -1036,11 +1036,11 @@ static bool present_image(const struct fplinux_rotate_image *image,
 		if (session.width != image->width ||
 		    session.height != image->height)
 			fprintf(stderr,
-				"preview is %ux%u, framebuffer is %ux%u\n",
+				"fplinux-rotate: preview is %ux%u, framebuffer is %ux%u\n",
 				image->width, image->height, session.width,
 				session.height);
 		else
-			fprintf(stderr, "%s\n", error);
+			fprintf(stderr, "fplinux-rotate: %s\n", error);
 		fplinux_fb_session_close(&session);
 		return false;
 	}
@@ -1161,14 +1161,14 @@ int main(int argc, char **argv)
 	    (options.verify &&
 	     !allocate_image(&reference, options.format, destination_width,
 			     destination_height, NULL))) {
-		fprintf(stderr, "cannot allocate images\n");
+		fprintf(stderr, "fplinux-rotate: cannot allocate images\n");
 		goto out;
 	}
 	if (!read_image(options.input, &source) ||
 	    !fplinux_rotate_validate(&source, &destination,
 				     &options.transform)) {
 		fprintf(stderr,
-			"invalid image, crop, stride, or unsupported transform: %s\n",
+			"fplinux-rotate: invalid image, crop, stride, or unsupported transform: %s\n",
 			strerror(errno));
 		goto out;
 	}
@@ -1196,7 +1196,7 @@ int main(int argc, char **argv)
 				     !compare_active(&destination,
 						     &reference))) {
 					fprintf(stderr,
-						"benchmark %s failed at iteration %u: %s\n",
+						"fplinux-rotate: benchmark %s failed at iteration %u: %s\n",
 						stages[sequence], iteration,
 						strerror(errno));
 					goto out;
@@ -1216,7 +1216,7 @@ int main(int argc, char **argv)
 			    (options.verify &&
 			     !compare_active(&destination, &reference))) {
 				fprintf(stderr,
-					"%s rotation or verification failed at iteration %u: %s\n",
+					"fplinux-rotate: %s rotation or verification failed at iteration %u: %s\n",
 					options.engine == ENGINE_CPU ? "CPU" :
 								       "ROTA",
 					iteration, strerror(errno));
@@ -1227,8 +1227,8 @@ int main(int argc, char **argv)
 			     options.engine, options.iterations, &timing);
 	}
 	if (!write_image(options.output, &destination)) {
-		fprintf(stderr, "cannot write %s: %s\n", options.output,
-			strerror(errno));
+		fprintf(stderr, "fplinux-rotate: cannot write %s: %s\n",
+			options.output, strerror(errno));
 		goto out;
 	}
 	printf("result format=%s width=%u height=%u path=%s verified=%s\n",

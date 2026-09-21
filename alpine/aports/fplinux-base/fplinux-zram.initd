@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # shellcheck shell=sh disable=SC2034
 
+name="FPLinux compressed RAM swap"
 description="Enable compressed RAM swap"
 
 depend() {
@@ -21,21 +22,21 @@ start() {
 	fi
 
 	zram_initstate=$(cat /sys/block/zram0/initstate) || {
-		eend 1 "Could not read /dev/zram0 state"
+		eend 1 "cannot read /dev/zram0 state"
 		return 1
 	}
 	if [ "$zram_initstate" -eq 0 ]; then
 		printf '64M\n' >/sys/block/zram0/disksize || {
-			eend 1 "Could not size /dev/zram0"
+			eend 1 "cannot size /dev/zram0"
 			return 1
 		}
 	fi
 	mkswap /dev/zram0 || {
-		eend 1 "Could not format /dev/zram0"
+		eend 1 "cannot format /dev/zram0"
 		return 1
 	}
 	swapon /dev/zram0 || {
-		eend 1 "Could not enable /dev/zram0"
+		eend 1 "cannot enable /dev/zram0"
 		return 1
 	}
 

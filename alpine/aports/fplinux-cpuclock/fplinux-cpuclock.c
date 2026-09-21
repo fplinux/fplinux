@@ -145,12 +145,12 @@ int main(int argc, char **argv)
 		double hz;
 
 		if (clock_gettime(CLOCK_MONOTONIC, &start)) {
-			perror("clock_gettime");
+			perror("fplinux-cpuclock: clock_gettime");
 			return 1;
 		}
 		(void)dependent_chain(round, 1U, (uint32_t)options.iterations);
 		if (clock_gettime(CLOCK_MONOTONIC, &end)) {
-			perror("clock_gettime");
+			perror("fplinux-cpuclock: clock_gettime");
 			return 1;
 		}
 

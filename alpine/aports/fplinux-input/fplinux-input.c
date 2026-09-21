@@ -18,15 +18,32 @@
 #define FPLINUX_INPUT_VENDOR_ID 0x1d6b
 #define FPLINUX_INPUT_PRODUCT_ID 0x0104
 
+struct channel_error {
+	const char *operation;
+	int code;
+};
+
+static void report_channel_error(struct channel_error *last,
+				 const char *operation)
+{
+	int error = errno;
+
+	if (last->operation && last->code == error &&
+	    !strcmp(last->operation, operation))
+		return;
+	fprintf(stderr, "fplinux-input: cannot %s %s: %s\n", operation,
+		FPLINUX_INPUT_DEFAULT_CHANNEL, strerror(error));
+	last->operation = operation;
+	last->code = error;
+}
+
 static int open_channel(const char *path)
 {
 	struct termios raw;
 	int fd = open(path, O_RDONLY | O_NOCTTY);
 
-	if (fd < 0) {
-		perror(path);
+	if (fd < 0)
 		return -1;
-	}
 	if (tcgetattr(fd, &raw) == 0) {
 		raw.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR |
 				 IGNCR | ICRNL | IXON);
@@ -47,18 +64,18 @@ static int open_device(void)
 	int fd = open("/dev/uinput", O_WRONLY);
 
 	if (fd < 0) {
-		perror("/dev/uinput");
+		perror("fplinux-input: cannot open /dev/uinput");
 		return -1;
 	}
 	if (ioctl(fd, UI_SET_EVBIT, EV_KEY) != 0 ||
 	    ioctl(fd, UI_SET_EVBIT, EV_REP) != 0) {
-		perror("UI_SET_EVBIT");
+		perror("fplinux-input: cannot set uinput event types");
 		close(fd);
 		return -1;
 	}
 	for (code = KEY_ESC; code < KEY_CNT; code++) {
 		if (ioctl(fd, UI_SET_KEYBIT, code) != 0) {
-			perror("UI_SET_KEYBIT");
+			perror("fplinux-input: cannot set uinput keys");
 			close(fd);
 			return -1;
 		}
@@ -71,7 +88,7 @@ static int open_device(void)
 	strncpy(setup.name, "FPLinux host keyboard", UINPUT_MAX_NAME_SIZE - 1);
 	if (ioctl(fd, UI_DEV_SETUP, &setup) != 0 ||
 	    ioctl(fd, UI_DEV_CREATE) != 0) {
-		perror("UI_DEV_CREATE");
+		perror("fplinux-input: cannot create uinput device");
 		close(fd);
 		return -1;
 	}
@@ -87,7 +104,7 @@ static bool inject(int device, unsigned int type, unsigned int code, int value)
 	event.code = (unsigned short)code;
 	event.value = value;
 	if (write(device, &event, sizeof(event)) != (ssize_t)sizeof(event)) {
-		perror("uinput write");
+		perror("fplinux-input: cannot write uinput event");
 		return false;
 	}
 	return true;
@@ -112,6 +129,7 @@ static void release_keys(int device, bool pressed[KEY_CNT])
 int main(void)
 {
 	const char *path = FPLINUX_INPUT_DEFAULT_CHANNEL;
+	struct channel_error channel_error = {};
 	bool pressed[KEY_CNT] = { false };
 	char line[FPLINUX_INPUT_LINE_BYTES];
 	size_t filled = 0;
@@ -128,6 +146,7 @@ int main(void)
 	for (;;) {
 		channel = open_channel(path);
 		if (channel < 0) {
+			report_channel_error(&channel_error, "open");
 			sleep(1);
 			continue;
 		}
@@ -146,7 +165,7 @@ int main(void)
 					     FPLINUX_INPUT_KEYBOARD_LEASE_MS);
 			} while (ready < 0 && errno == EINTR);
 			if (ready < 0) {
-				perror("poll");
+				report_channel_error(&channel_error, "poll");
 				break;
 			}
 			if (ready == 0) {
@@ -162,8 +181,13 @@ int main(void)
 			if (got == 0)
 				break;
 			if (got < 0) {
-				perror("read");
+				report_channel_error(&channel_error, "read");
 				break;
+			}
+			if (channel_error.operation) {
+				printf("fplinux-input: input channel readable\n");
+				fflush(stdout);
+				channel_error.operation = NULL;
 			}
 			if (byte != '\n' && byte != '\r') {
 				if (filled + 1 < sizeof(line))

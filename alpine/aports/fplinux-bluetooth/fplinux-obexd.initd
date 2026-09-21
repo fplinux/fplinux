@@ -3,6 +3,7 @@
 # shellcheck shell=sh disable=SC2034
 
 name="FPLinux Bluetooth OBEX"
+description="Provide Bluetooth file transfers"
 command="/usr/lib/bluetooth/obexd"
 command_args="--system-bus --root=/ --plugin=opp,filesystem,bluetooth"
 command_background=true

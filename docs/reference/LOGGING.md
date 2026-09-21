@@ -59,6 +59,12 @@ state transitions instead of repeating the same unavailable-device error on
 every retry. The local VT may use a compact visual format when it is not parsed
 as a protocol.
 
+Supervised services use OpenRC's `output_logger` and `error_logger` hooks with
+the shared kernel-log forwarder. It writes bounded records and splits long
+lines into fragments. Do not use `/dev/kmsg` as an ordinary stream log file.
+Choose stream priorities from the producer's meaning: stderr from an external
+daemon can contain ordinary diagnostics, not only errors.
+
 Use [Hardware debugging](../guides/DEBUGGING.md) for diagnostic logs and
 tracing. The [code style](CODE_STYLE.md) covers implementation and identifiers,
 while the [porting overview](../porting/README.md) defines which layer owns a

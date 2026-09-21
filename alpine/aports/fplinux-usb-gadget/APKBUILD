@@ -6,7 +6,7 @@ pkgdesc="ConfigFS USB gadget for FPLinux"
 url="https://github.com/fplinux/fplinux"
 arch="noarch"
 license="GPL-2.0-only"
-depends="busybox-extras openrc"
+depends="busybox-extras fplinux-base openrc"
 subpackages="$pkgname-openrc"
 options="!check"
 source="fplinux-usb-gadget fplinux-usb-gadget.initd fplinux-usb-dhcp.initd"
@@ -31,7 +31,7 @@ openrc() {
 }
 
 sha512sums="
-03f307c07f4fa2c4a6cfa3872d2695a68a6dca96e88485a31b77258c2e9d4c0ecf89998572e2e388a92cb2ce0dbda710a5deb26643044a41715949ae4c00d4b0  fplinux-usb-gadget
-3e926b616f3b0a960080e347736495754c62bb620e06d518abd27644607d4e53d9772befa12739a6c5c949b6064e7293243ce7bf1139e0cd0ca3fd8bce48e879  fplinux-usb-gadget.initd
-0d3984aba0c0402bfad5b013c42618876ba78741bac2e550987a4ac01876ae33dc69c68a2d7b04916746d446899e8b4efc660e4df1db3975bffa7259a070ccee  fplinux-usb-dhcp.initd
+ec94cfea792a13e7908db9749654d6227269798f0d60bcfab91f46021ae52ad8822a590498e5c2a6ddd95ce11230a7c124e9479f89a4d321fecfd6e7992dc3ba  fplinux-usb-gadget
+ca6f336a173a9defb5e6685a7878762209f5986515719bc94bd49403b99134ea7843209c2235c7af4537b953ab08f30e06155e94897f392be33620d72a3395f0  fplinux-usb-gadget.initd
+2dcc539de4719c68bb11a13ac5935f3c7d86257beceaf614c1fcc1410e5bf21ebb9ed8c07f7896882c00ce543e3b2182f5fb6e89f9a9b88065b8464a231543ab  fplinux-usb-dhcp.initd
 "

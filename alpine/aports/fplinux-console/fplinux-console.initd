@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # shellcheck shell=sh disable=SC2034
 
-description="FPLinux physical keypad console"
+name="FPLinux physical keypad console"
+description="Provide the local keypad and display console"
 supervisor=supervise-daemon
 command=/usr/bin/fplinux-console
 input_file=/dev/tty1
