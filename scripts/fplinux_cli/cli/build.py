@@ -143,15 +143,17 @@ def _print_build_result(
         silence_broken_pipe(sys.stdout)
 
 
-def build(
+def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain explicit.
     target: str,
     jobs: int,
     *,
     profile: str | None = None,
     verbose: bool = False,
     offline: bool = False,
+    reporter: RunReporter | None = None,
 ) -> None:
-    """Build or reuse a bundle and report the command result."""
+    """Build or reuse a bundle, leaving a supplied reporter to its caller."""
+    own_reporter = reporter is None
     if jobs < 1:
         fail("--jobs must be positive")
     release = releases.load_release(target)
@@ -177,13 +179,15 @@ def build(
         )
         cache_prune.discard_obsolete_rootfs(cache)
         cache_prune.discard_obsolete_apks(cache)
-        reporter = RunReporter.create(
-            "build",
-            target=bundles_commands.profile_log_target(target, profile),
-            verbose=verbose,
-        )
+        if reporter is None:
+            reporter = RunReporter.create(
+                "build",
+                target=bundles_commands.profile_log_target(target, profile),
+                verbose=verbose,
+            )
         _print_build_result(target, bundle, release, cached=True, profile=profile)
-        reporter.finish()
+        if own_reporter:
+            reporter.finish()
         if profile is not None:
             cache_prune.discard_superseded_profile_logs(
                 cache,
@@ -193,11 +197,12 @@ def build(
             )
         return
 
-    reporter = RunReporter.create(
-        "build",
-        target=bundles_commands.profile_log_target(target, profile),
-        verbose=verbose,
-    )
+    if reporter is None:
+        reporter = RunReporter.create(
+            "build",
+            target=bundles_commands.profile_log_target(target, profile),
+            verbose=verbose,
+        )
     image = images.container_image_reference(container_lock, image_recipe)
     if not kern_env.kern_available(container_lock):
         if offline:
@@ -285,7 +290,8 @@ def build(
         cache_prune.discard_obsolete_rootfs(cache)
         cache_prune.discard_obsolete_apks(cache)
         _print_build_result(target, bundle, release, cached=False, profile=profile)
-        reporter.finish()
+        if own_reporter:
+            reporter.finish()
         if profile is not None:
             cache_prune.discard_superseded_profile_logs(
                 cache,

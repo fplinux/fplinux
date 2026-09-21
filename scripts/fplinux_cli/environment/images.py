@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-import tomllib
 from typing import TYPE_CHECKING, Any, Protocol
 
 from fplinux_cli import common
@@ -21,8 +20,7 @@ def load_container_lock() -> dict[str, Any]:
     """Load the pinned project-local Kern and OCI build-environment lock."""
     validate_source_policy()
     path = common.ROOT / "container.lock.toml"
-    with (path).open("rb") as stream:
-        lock = tomllib.load(stream)
+    lock = common.load_toml(path)
     if set(lock) != {"kern", "oci"}:
         fail(f"container lock must contain exactly kern and oci: {path}")
 

@@ -180,7 +180,7 @@ class KernelContextSchedulerTests(unittest.TestCase):
         pids: dict[str, int] = {}
         result = self._run_scheduler(self._fail_second_worker(pids))
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("sparse failed: context second exited 23", result.stderr)
+        self.assertIn("fplinux: kernel check failed: context second exited 23", result.stderr)
         self._assert_process_reaped(pids["first"])
 
     def _fail_second_worker(
@@ -207,7 +207,7 @@ class KernelContextSchedulerTests(unittest.TestCase):
                 with contextlib.suppress(ProcessLookupError):
                     os.killpg(int(tool_pid_path.read_text()), signal.SIGKILL)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("sparse failed: context second exited 23", result.stderr)
+        self.assertIn("fplinux: kernel check failed: context second exited 23", result.stderr)
         self.assertTrue((self.root / "tool.term").exists())
         self.assertTrue((self.root / "grandchild.term").exists())
         process_ids = (

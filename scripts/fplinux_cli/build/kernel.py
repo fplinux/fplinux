@@ -11,7 +11,7 @@ from typing import Any
 from fplinux_cli import alpine_state, common, firmware_inputs, kbuild_state, linux_state
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import process as process_build
-from fplinux_cli.build.inputs import fail
+from fplinux_cli.common import fail
 from fplinux_cli.device_state import DeviceStateError, device_kernel_identity, localversion
 from fplinux_cli.device_tree import (
     DeviceTreeError,

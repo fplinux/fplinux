@@ -35,10 +35,8 @@ def check_git_diff(reporter: RunReporter) -> None:
             check=False,
             timeout=_CHECK_GIT_TIMEOUT,
         )
-    except subprocess.TimeoutExpired as error:
-        raise SystemExit(
-            f"check failed: Git HEAD lookup timed out after {_CHECK_GIT_TIMEOUT}s"
-        ) from error
+    except subprocess.TimeoutExpired:
+        fail(f"Git HEAD lookup timed out after {_CHECK_GIT_TIMEOUT}s")
     if head.returncode == 0:
         with reporter.stage("git-diff") as stage:
             stage.run(

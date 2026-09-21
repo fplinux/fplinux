@@ -26,6 +26,7 @@ class NandBackupSshStreamTests(unittest.TestCase):
         """Create one valid session and a fake SSH executable per test."""
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
+        self.enterContext(mock.patch("fplinux_cli.output.ROOT", Path(self.temporary.name)))
         self.root = Path(self.temporary.name) / "runtime"
         self.root.mkdir(mode=0o700)
         self.session = create_ready_session(self.root)

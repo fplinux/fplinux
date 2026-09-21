@@ -62,11 +62,11 @@ class AlpineArchiveTests(unittest.TestCase):
 
                 self.assertFalse((root.parent / "outside").exists())
 
-    def test_invalid_absolute_links_keep_each_consumers_error_prefix(self) -> None:
-        """The host CLI and in-container builder retain their distinct diagnostics."""
+    def test_invalid_absolute_links_use_the_shared_error_prefix(self) -> None:
+        """Both extraction callers report invalid links through the shared formatter."""
         cases = (
             (kern._alpine_tar_filter, "fplinux: "),
-            (alpine_builder._alpine_tar_filter, "build failed: "),
+            (alpine_builder._alpine_tar_filter, "fplinux: "),
         )
         for archive_filter, prefix in cases:
             with self.subTest(prefix=prefix), tempfile.TemporaryDirectory() as temporary:

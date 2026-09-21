@@ -9,9 +9,9 @@ import re
 import tomllib
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import TYPE_CHECKING, Any
 
-from .common import ROOT, replace_file_atomically, sha256_file
+from .common import ROOT, fail, replace_file_atomically, sha256_file
 
 if TYPE_CHECKING:
     from .firmware_inputs import FirmwareInput
@@ -62,10 +62,6 @@ COMMON_PACKAGES = (
 PACKAGE_ID = re.compile(r"[a-z0-9][a-z0-9+._-]*")
 
 
-def _fail(message: str) -> NoReturn:
-    raise SystemExit(f"invalid Alpine rootfs state: {message}")
-
-
 def _is_sha256(value: object) -> bool:
     return (
         isinstance(value, str)
@@ -76,26 +72,26 @@ def _is_sha256(value: object) -> bool:
 
 def _sha256(value: object, name: str) -> str:
     if not _is_sha256(value):
-        _fail(f"{name} must be a lowercase SHA-256 digest")
+        fail(f"{name} must be a lowercase SHA-256 digest")
     return str(value)
 
 
 def _nonempty(value: object, name: str) -> str:
     if not isinstance(value, str) or not value:
-        _fail(f"{name} must be a non-empty string")
+        fail(f"{name} must be a non-empty string")
     return value
 
 
 def _https(value: object, name: str) -> str:
     result = _nonempty(value, name)
     if not result.startswith("https://"):
-        _fail(f"{name} must use HTTPS")
+        fail(f"{name} must use HTTPS")
     return result
 
 
 def _positive_integer(value: object, name: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-        _fail(f"{name} must be a positive integer")
+        fail(f"{name} must be a positive integer")
     return value
 
 
@@ -103,30 +99,30 @@ def _package_name(value: object, name: str) -> str:
     result = _nonempty(value, name)
     path = PurePosixPath(result)
     if path.name != result or not result.endswith(".apk"):
-        _fail(f"{name} must be one APK filename")
+        fail(f"{name} must be one APK filename")
     return result
 
 
 def _package_id(value: object, name: str) -> str:
     result = _nonempty(value, name)
     if PACKAGE_ID.fullmatch(result) is None:
-        _fail(f"{name} must be one package identifier")
+        fail(f"{name} must be one package identifier")
     return result
 
 
 def _declared_packages(config: Mapping[str, object], owner: str, layer: str) -> tuple[str, ...]:
     table = config.get(layer)
     if not isinstance(table, Mapping) or set(table) != {"packages"}:
-        _fail(f"{owner} {layer} must contain exactly packages")
+        fail(f"{owner} {layer} must contain exactly packages")
     raw = table.get("packages")
     if not isinstance(raw, list):
-        _fail(f"{owner} {layer} packages must be an array")
+        fail(f"{owner} {layer} packages must be an array")
     result = tuple(
         _package_id(package, f"{owner} {layer} packages[{index}]")
         for index, package in enumerate(raw)
     )
     if len(set(result)) != len(result):
-        _fail(f"{owner} {layer} packages must not contain duplicates")
+        fail(f"{owner} {layer} packages must not contain duplicates")
     return result
 
 
@@ -141,7 +137,7 @@ def _target_rootfs(
         "exclude_packages",
     }
     if not isinstance(table, Mapping) or set(table) != package_fields:
-        _fail(
+        fail(
             "normalized target rootfs must contain exactly base_packages, packages and "
             "exclude_packages"
         )
@@ -149,13 +145,13 @@ def _target_rootfs(
     def read(field: str) -> tuple[str, ...]:
         raw = table.get(field)
         if not isinstance(raw, list):
-            _fail(f"normalized target rootfs {field} must be an array")
+            fail(f"normalized target rootfs {field} must be an array")
         result = tuple(
             _package_id(package, f"normalized target rootfs {field}[{index}]")
             for index, package in enumerate(raw)
         )
         if len(set(result)) != len(result):
-            _fail(f"normalized target rootfs {field} must not contain duplicates")
+            fail(f"normalized target rootfs {field} must not contain duplicates")
         return result
 
     base_packages = read("base_packages")
@@ -163,7 +159,7 @@ def _target_rootfs(
     exclude_packages = read("exclude_packages")
     overlap = set(packages) & set(exclude_packages)
     if overlap:
-        _fail(
+        fail(
             "normalized target rootfs packages/exclude_packages conflict: "
             + ", ".join(sorted(overlap))
         )
@@ -173,14 +169,14 @@ def _target_rootfs(
 def _canonical_packages(packages: Sequence[str], root: Path) -> tuple[str, ...]:
     result = tuple(sorted(_package_id(package, "FPLinux package") for package in packages))
     if len(set(result)) != len(result):
-        _fail("FPLinux package set must not contain duplicates")
+        fail("FPLinux package set must not contain duplicates")
     for package in result:
         aport = root / "alpine/aports" / package
         if aport.is_symlink() or not aport.is_dir():
-            _fail(f"selected aport is missing or invalid: {package}")
+            fail(f"selected aport is missing or invalid: {package}")
         apkbuild = aport / "APKBUILD"
         if apkbuild.is_symlink() or not apkbuild.is_file():
-            _fail(f"selected aport has no regular APKBUILD: {package}")
+            fail(f"selected aport has no regular APKBUILD: {package}")
     return result
 
 
@@ -198,12 +194,12 @@ def selected_packages(
         for package in packages:
             previous = owners.get(package)
             if previous is not None:
-                _fail(f"package {package} is owned by both {previous} and {owner}")
+                fail(f"package {package} is owned by both {previous} and {owner}")
             owners[package] = owner
     base_packages, packages, exclude_packages = _target_rootfs(target_config)
     duplicate_additions = set(base_packages) & set(owners)
     if duplicate_additions:
-        _fail(
+        fail(
             "target rootfs base_packages duplicate common/platform ownership: "
             + ", ".join(sorted(duplicate_additions))
         )
@@ -211,7 +207,7 @@ def selected_packages(
         owners[package] = "target"
     duplicate_additions = set(packages) & set(owners)
     if duplicate_additions:
-        _fail(
+        fail(
             "target profile rootfs packages duplicate base ownership: "
             + ", ".join(sorted(duplicate_additions))
         )
@@ -219,7 +215,7 @@ def selected_packages(
         owners[package] = "profile"
     unknown_excludes = set(exclude_packages) - set(owners)
     if unknown_excludes:
-        _fail(
+        fail(
             "target profile rootfs excludes a package not owned by the base rootfs: "
             + ", ".join(sorted(unknown_excludes))
         )
@@ -243,12 +239,12 @@ def bundle_packages(
         for package in packages:
             previous = owners.get(package)
             if previous is not None:
-                _fail(f"bundle package {package} is owned by both {previous} and {owner}")
+                fail(f"bundle package {package} is owned by both {previous} and {owner}")
             owners[package] = owner
     result = _canonical_packages(tuple(owners), root)
     overlap = set(result) & set(rootfs_packages)
     if overlap:
-        _fail(
+        fail(
             "packages cannot be both rootfs-selected and bundle-published: "
             + ", ".join(sorted(overlap))
         )
@@ -262,7 +258,7 @@ def load_alpine_lock(root: Path = ROOT) -> dict[str, Any]:
         with path.open("rb") as stream:
             raw = tomllib.load(stream)
     except (OSError, tomllib.TOMLDecodeError) as error:
-        _fail(f"cannot load {path}: {error}")
+        fail(f"cannot load {path}: {error}")
     if set(raw) != {
         "release",
         "branch",
@@ -274,27 +270,27 @@ def load_alpine_lock(root: Path = ROOT) -> dict[str, Any]:
         "sysroot",
         "package",
     }:
-        _fail(f"invalid Alpine lock: {path}")
+        fail(f"invalid Alpine lock: {path}")
     if raw.get("arch") != "armv7" or raw.get("triplet") != "armv7-alpine-linux-musleabihf":
-        _fail("only the FPLinux armv7 ABI is supported")
+        fail("only the FPLinux armv7 ABI is supported")
     _nonempty(raw.get("release"), "release")
     _nonempty(raw.get("branch"), "branch")
     repositories = raw.get("repositories")
     if not isinstance(repositories, dict) or set(repositories) != {"main", "community"}:
-        _fail("repositories must contain exactly main and community")
+        fail("repositories must contain exactly main and community")
     for name, url in repositories.items():
         _https(url, f"{name} repository")
 
     minirootfs = raw.get("minirootfs")
     if not isinstance(minirootfs, dict) or set(minirootfs) != {"url", "sha256", "bytes"}:
-        _fail("minirootfs must contain exactly url, sha256 and bytes")
+        fail("minirootfs must contain exactly url, sha256 and bytes")
     _https(minirootfs.get("url"), "minirootfs URL")
     _sha256(minirootfs.get("sha256"), "minirootfs")
     _positive_integer(minirootfs.get("bytes"), "minirootfs bytes")
 
     packages = raw.get("package")
     if not isinstance(packages, list) or not packages:
-        _fail("package lock must be a non-empty array")
+        fail("package lock must be a non-empty array")
     records: dict[str, dict[str, object]] = {}
     for index, value in enumerate(packages):
         if not isinstance(value, dict) or set(value) != {
@@ -303,13 +299,13 @@ def load_alpine_lock(root: Path = ROOT) -> dict[str, Any]:
             "sha256",
             "bytes",
         }:
-            _fail(f"package[{index}] must contain repository, file, sha256 and bytes")
+            fail(f"package[{index}] must contain repository, file, sha256 and bytes")
         repository = value.get("repository")
         if repository not in repositories:
-            _fail(f"package[{index}] references an unknown repository")
+            fail(f"package[{index}] references an unknown repository")
         filename = _package_name(value.get("file"), f"package[{index}] file")
         if filename in records:
-            _fail(f"duplicate package lock entry: {filename}")
+            fail(f"duplicate package lock entry: {filename}")
         _sha256(value.get("sha256"), f"package {filename}")
         _positive_integer(value.get("bytes"), f"package {filename} bytes")
         records[filename] = value
@@ -318,40 +314,40 @@ def load_alpine_lock(root: Path = ROOT) -> dict[str, Any]:
 
     def locked_names(value: object, name: str) -> list[str]:
         if not isinstance(value, list) or not value:
-            _fail(f"{name} must be a non-empty array")
+            fail(f"{name} must be a non-empty array")
         result = [_package_name(item, f"{name}[{index}]") for index, item in enumerate(value)]
         if len(result) != len(set(result)):
-            _fail(f"duplicate {name} package")
+            fail(f"duplicate {name} package")
         for filename in result:
             if filename not in records:
-                _fail(f"{name} package has no locked artifact: {filename}")
+                fail(f"{name} package has no locked artifact: {filename}")
         return result
 
     runtime = raw.get("runtime")
     if not isinstance(runtime, dict) or set(runtime) != {"packages", "additions"}:
-        _fail("runtime must contain exactly packages and additions")
+        fail("runtime must contain exactly packages and additions")
     runtime_names = locked_names(runtime.get("packages"), "runtime packages")
     selected.update(runtime_names)
     additions = runtime.get("additions")
     if not isinstance(additions, dict):
-        _fail("runtime additions must be a table")
+        fail("runtime additions must be a table")
     for package, values in additions.items():
         package_name = _package_id(package, "runtime addition")
         addition_names = locked_names(values, f"runtime addition {package_name}")
         overlap = set(runtime_names) & set(addition_names)
         if overlap:
-            _fail(f"runtime addition {package_name} repeats a common runtime package")
+            fail(f"runtime addition {package_name} repeats a common runtime package")
         selected.update(addition_names)
 
     for group in ("sysroot",):
         table = raw.get(group)
         if not isinstance(table, dict) or set(table) != {"packages"}:
-            _fail(f"{group} must contain exactly packages")
+            fail(f"{group} must contain exactly packages")
         values = table.get("packages")
         selected.update(locked_names(values, f"{group} packages"))
     if selected != set(records):
         unused = ", ".join(sorted(set(records) - selected))
-        _fail(f"package lock contains unused artifacts: {unused}")
+        fail(f"package lock contains unused artifacts: {unused}")
     return raw
 
 
@@ -376,7 +372,7 @@ def _canonical_digest(value: object) -> str:
 
 def _source_file(path: Path, root: Path) -> dict[str, object]:
     if path.is_symlink() or not path.is_file():
-        _fail(f"recipe input is missing or invalid: {path}")
+        fail(f"recipe input is missing or invalid: {path}")
     return {
         "path": path.relative_to(root).as_posix(),
         "sha256": sha256_file(path),
@@ -386,11 +382,11 @@ def _source_file(path: Path, root: Path) -> dict[str, object]:
 
 def _source_tree(path: Path, root: Path) -> list[dict[str, object]]:
     if path.is_symlink() or not path.is_dir():
-        _fail(f"recipe tree is missing or invalid: {path}")
+        fail(f"recipe tree is missing or invalid: {path}")
     entries: list[dict[str, object]] = []
     for child in sorted(path.rglob("*")):
         if child.is_symlink():
-            _fail(f"recipe tree must not contain symlinks: {child}")
+            fail(f"recipe tree must not contain symlinks: {child}")
         if child.is_dir():
             continue
         entries.append(_source_file(child, root))
@@ -420,7 +416,7 @@ def signing_key_identity(cache: Path) -> str:
     """Return the SHA-256 identity of the persistent local abuild key."""
     path = signing_public_key(cache)
     if path.is_symlink() or not path.is_file():
-        _fail(f"package signing public key is missing or invalid: {path}")
+        fail(f"package signing public key is missing or invalid: {path}")
     return sha256_file(path)
 
 
@@ -492,7 +488,7 @@ def rootfs_output(cache: Path, recipe: str) -> Path:
 
 def _rootfs_record(path: Path) -> dict[str, int | str]:
     if path.is_symlink() or not path.is_file():
-        _fail(f"rootfs output is missing or invalid: {path}")
+        fail(f"rootfs output is missing or invalid: {path}")
     return {"sha256": sha256_file(path), "size": path.stat().st_size}
 
 
@@ -539,7 +535,7 @@ def receipt_matches(output: Path, recipe: str) -> bool:
 def write_receipt(output: Path, recipe: str) -> None:
     """Atomically publish a successful rootfs receipt after the cpio exists."""
     if output.is_symlink() or not output.is_dir():
-        _fail(f"rootfs output directory is invalid: {output}")
+        fail(f"rootfs output directory is invalid: {output}")
     encoded = (json.dumps(_receipt_data(output, recipe), sort_keys=True) + "\n").encode()
     replace_file_atomically(output / RECEIPT_NAME, encoded, 0o600, sync=False)
 
@@ -547,6 +543,6 @@ def write_receipt(output: Path, recipe: str) -> None:
 def trusted_receipt_identity(output: Path, recipe: str) -> dict[str, str]:
     """Return the identity of an exact receipt whose rootfs still verifies."""
     if not receipt_matches(output, recipe):
-        _fail("rootfs causal receipt is missing, stale or invalid")
+        fail("rootfs causal receipt is missing, stale or invalid")
     receipt = output / RECEIPT_NAME
     return {"recipe": recipe, "sha256": sha256_file(receipt)}

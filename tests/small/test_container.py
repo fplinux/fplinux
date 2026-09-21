@@ -3,8 +3,11 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
+import platform
 import shutil
 import subprocess
 import tempfile
@@ -399,6 +402,32 @@ class GitHookPathTests(unittest.TestCase):
             ):
                 git_hooks.install_git_hooks()
             self.assertEqual(len(commands), 2)
+
+
+class DoctorDiagnosticsTests(unittest.TestCase):
+    """Keep environment diagnostics aggregated and consistently formatted."""
+
+    def test_missing_runtime_and_unsupported_host_are_both_reported(self) -> None:
+        """A host with two problems reports both through stderr and exits once."""
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(platform, "system", return_value="Linux"),
+            mock.patch.object(platform, "machine", return_value="aarch64"),
+            mock.patch.object(kern, "load_container_lock", return_value={}),
+            mock.patch.object(kern, "kern_available", return_value=False),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            kern.doctor()
+        self.assertEqual(raised.exception.code, 1)
+        self.assertIn("linux/amd64", stderr.getvalue())
+        self.assertIn("Kern is not ready", stderr.getvalue())
+        self.assertTrue(
+            all(line.startswith("fplinux: ") for line in stderr.getvalue().splitlines())
+        )
+        self.assertNotIn("doctor: OK", stdout.getvalue())
 
 
 if __name__ == "__main__":

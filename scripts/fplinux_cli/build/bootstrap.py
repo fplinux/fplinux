@@ -11,8 +11,7 @@ from fplinux_cli import profile_layout
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import process as process_build
 from fplinux_cli.build import sources as sources_build
-from fplinux_cli.build.inputs import fail
-from fplinux_cli.common import canonical_json_bytes, sha256_bytes, sha256_file
+from fplinux_cli.common import canonical_json_bytes, fail, sha256_bytes, sha256_file
 from fplinux_cli.device_tree import DeviceTreeError, exact_path_properties
 from fplinux_cli.identity import IdentityError
 from fplinux_cli.identity_codegen import BOOTSTRAP_IDENTITY_HEADER, bootstrap_identity_header

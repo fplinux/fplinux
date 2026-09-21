@@ -16,14 +16,14 @@ import tempfile
 import urllib.request
 from functools import partial
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any, BinaryIO, NoReturn
+from typing import TYPE_CHECKING, Any, BinaryIO
 
 from fplinux_cli.manifests.values import relative_value
 
 from . import alpine_state, firmware_inputs
 from .build_env import SOURCE_DATE_EPOCH
 from .build_env import build_environment as _build_environment
-from .common import ROOT, alpine_tar_filter, sha256_file
+from .common import ROOT, alpine_tar_filter, fail, sha256_file
 from .output import current_stage
 
 if TYPE_CHECKING:
@@ -31,11 +31,6 @@ if TYPE_CHECKING:
 
 CACHE = Path("/cache")
 _ROOTFS_BUILD_LOCK = ".build.lock"
-
-
-def fail(message: str) -> NoReturn:
-    """Stop an Alpine rootfs build without publishing a receipt."""
-    raise SystemExit(f"build failed: {message}")
 
 
 def require_file(path: Path) -> Path:
@@ -688,10 +683,10 @@ def _alpine_package_installed(root: Path, package: str) -> bool:
         check=False,
         env=_build_environment(),
     )
-    if result.returncode in {0, 1}:
-        return result.returncode == 0
-    detail = result.stderr.strip() or result.stdout.strip() or "no APK diagnostic"
-    fail(f"cannot verify whether Alpine package is installed: {package}: {detail}")
+    if result.returncode not in {0, 1}:
+        detail = result.stderr.strip() or result.stdout.strip() or "no APK diagnostic"
+        fail(f"cannot verify whether Alpine package is installed: {package}: {detail}")
+    return result.returncode == 0
 
 
 def _require_bundle_package_absent(root: Path, package: str) -> None:

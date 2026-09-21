@@ -14,10 +14,11 @@ import tempfile
 import tomllib
 from contextlib import contextmanager, suppress
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING
 from urllib.parse import unquote
 
 from fplinux_cli import alpine_state
+from fplinux_cli.common import fail
 from fplinux_cli.manifests.paths import discover_targets
 from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.targets import load_target
@@ -61,10 +62,6 @@ _PYTHON_TEST_TIERS = (
     ("artifact", 300),
     ("public_workflow", 90),
 )
-
-
-def fail(message: str) -> NoReturn:
-    raise SystemExit(f"check failed: {message}")
 
 
 def _run_direct(

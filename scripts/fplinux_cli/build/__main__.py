@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import tomllib
 
 from fplinux_cli import alpine_builder, alpine_state, common, firmware_inputs
 from fplinux_cli.build import assets as assets_build
@@ -18,7 +17,7 @@ from fplinux_cli.build import process as process_build
 from fplinux_cli.build import publish as publish_build
 from fplinux_cli.build import sources as sources_build
 from fplinux_cli.build import storage as storage_build
-from fplinux_cli.build.inputs import fail
+from fplinux_cli.common import fail
 from fplinux_cli.environment.images import container_runtime_recipe_digest
 from fplinux_cli.manifests.paths import target_asset_lock_path
 from fplinux_cli.manifests.platforms import load_platform
@@ -55,8 +54,7 @@ def main() -> None:
         )
         firmware = device_data.get("bluetooth", ())
         audio_profile_firmware = device_data.get("audio-profile")
-        with (common.ROOT / "sources.lock.toml").open("rb") as stream:
-            sources = tomllib.load(stream)
+        sources = common.load_toml(common.ROOT / "sources.lock.toml")
         linux_base = inputs_build.require_sha256(
             sources_build.source_lock_entry(sources, platform["linux"]["source_lock"]).get(
                 "sha256"

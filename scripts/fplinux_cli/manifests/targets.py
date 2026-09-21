@@ -4,10 +4,9 @@
 from __future__ import annotations
 
 import re
-import tomllib
 from typing import Any
 
-from fplinux_cli.common import fail
+from fplinux_cli.common import fail, load_toml
 from fplinux_cli.identity import IdentityError, validate_target_identity
 from fplinux_cli.identity_codegen import validate_record_prefix
 from fplinux_cli.manifests.assets import asset_bundle_paths
@@ -35,8 +34,7 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
     path = target_directory(target) / "target.toml"
     if path.is_symlink() or not path.is_file():
         fail(f"unknown target: {target}")
-    with (path).open("rb") as stream:
-        raw = tomllib.load(stream)
+    raw = load_toml(path)
     config = exact_table(
         raw,
         {

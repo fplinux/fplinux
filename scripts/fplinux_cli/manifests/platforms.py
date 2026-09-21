@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import tomllib
 from typing import Any
 
 from fplinux_cli import common
@@ -131,8 +130,7 @@ def load_platform(platform: str) -> dict[str, Any]:
     path = common.ROOT / "platforms" / platform / "platform.toml"
     if path.is_symlink() or not path.is_file():
         fail(f"unknown platform: {platform}")
-    with (path).open("rb") as stream:
-        raw = tomllib.load(stream)
+    raw = common.load_toml(path)
     config = exact_table(
         raw,
         {
