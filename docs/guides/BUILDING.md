@@ -112,6 +112,33 @@ Kernel, bootstrap, host and phone-userspace messages follow the shared
 [logging contract](../reference/LOGGING.md). Project-owned source and tests
 follow the [code style](../reference/CODE_STYLE.md).
 
+## Run selected tests
+
+Use `test` to run unittest tests in the same pinned Kern image as `check python`:
+
+```sh
+./fplinux test tests.small.test_common
+./fplinux test tests.small.test_common.FileDigestTests
+./fplinux test tests.small.test_common.FileDigestTests.test_empty_short_and_multibuffer_files_match_sha256_vectors
+./fplinux test --tier host_tool
+```
+
+Supply one or more dotted test names, or select one tier with `--tier`.
+The tiers are `small`, `host_process`, `host_tool`, `artifact` and
+`public_workflow`. With neither selector, all five tiers run in that order.
+`--verbose` shows individual test names and streams output; `--failfast` stops
+on the first failure or error. Complete output is saved with the command's logs.
+
+The command uses a read-only snapshot of project sources, without network access
+inside the test container. It prepares the pinned environment when needed, just
+as `check` does. Tests retain their tier time limits; a selection spanning tiers
+has their combined time budget.
+
+Exit status is 0 for success, 1 for test failures or unresolved names, 2 for
+invalid command arguments, and 5 when unittest finds no tests. Ctrl+C returns 130. A selected test run always executes and never creates or refreshes a
+successful `check` receipt. It does not run linters or replace `check python`
+or the complete quality gate.
+
 ## Regenerate Alpine checksums
 
 When an Alpine aport source file changes, regenerate its `sha512sums` with the
@@ -300,8 +327,8 @@ Treat this file as private device data.
 
 ## Logs, cache, and parallel commands
 
-Build, check and format print compact stage status. Add `--verbose` to build or
-check to stream their tool output. Complete logs are retained under
+Build, check, test and format print compact stage status. Add `--verbose` to
+build, check or test to stream their tool output. Complete logs are retained under
 `.cache/logs/`, and each command reports their location on failure.
 
 Public commands serialize writes to shared build state. Target output is kept

@@ -19,6 +19,7 @@ from fplinux_cli.checkreceipts import (
 from fplinux_cli.environment import kern
 from fplinux_cli.image_state import ImageState
 from fplinux_cli.quality import checks
+from fplinux_cli.quality import runtime as quality_runtime
 from fplinux_cli.quality.checks import (
     check_scope_closure_digest,
     check_scope_receipt_recipe,
@@ -608,7 +609,7 @@ class RepositoryFastPathTests(unittest.TestCase):
             mock.patch("fplinux_cli.output.RunReporter.create", return_value=reporter),
             mock.patch.object(checks, "check_git_diff") as git_diff,
             mock.patch.object(
-                checks,
+                quality_runtime,
                 "kern_available",
                 side_effect=AssertionError("repository check must not inspect Kern"),
             ),
@@ -626,8 +627,10 @@ class RepositoryFastPathTests(unittest.TestCase):
 class _RecordingStage:
     """Collect fake container argv without starting a subprocess."""
 
-    def __init__(self, commands: list[list[str]]) -> None:
+    def __init__(self, commands: list[list[str]], reporter: _RecordingReporter, name: str) -> None:
         self.commands = commands
+        self.reporter = reporter
+        self.name = name
 
     def __enter__(self) -> Self:
         return self
@@ -654,9 +657,10 @@ class _RecordingReporter:
     def __init__(self, root: Path, commands: list[list[str]]) -> None:
         self.root = root
         self.commands = commands
+        self.label = "check"
 
-    def stage(self, *_args: object, **_kwargs: object) -> _RecordingStage:
-        return _RecordingStage(self.commands)
+    def stage(self, name: str, **_kwargs: object) -> _RecordingStage:
+        return _RecordingStage(self.commands, self, name)
 
     def container_environment(self, mounted_root: str) -> dict[str, str]:
         return {
@@ -669,8 +673,8 @@ class _RecordingReporter:
 
 
 class _FailingReporter(_RecordingReporter):
-    def stage(self, *_args: object, **_kwargs: object) -> _RecordingStage:
-        return _FailingStage(self.commands)
+    def stage(self, name: str, **_kwargs: object) -> _RecordingStage:
+        return _FailingStage(self.commands, self, name)
 
 
 class KernelExecutionLimitTests(unittest.TestCase):
@@ -803,7 +807,7 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
             mock.patch.object(kern, "ROOT", root),
             mock.patch("fplinux_cli.output.RunReporter.create", return_value=reporter),
             mock.patch.object(
-                checks,
+                quality_runtime,
                 "kern_available",
                 new=self._guarded_boundary(
                     "inspect Kern",
@@ -812,7 +816,7 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
                 ),
             ),
             mock.patch.object(
-                checks,
+                quality_runtime,
                 "require_kern",
                 new=self._guarded_boundary(
                     "require Kern",
@@ -831,7 +835,7 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
                 },
             ),
             mock.patch.object(
-                checks,
+                quality_runtime,
                 "current_image_state",
                 new=self._guarded_boundary(
                     "inspect an image",
@@ -840,6 +844,7 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
                 ),
             ),
             mock.patch.object(checks, "kern_environment", return_value={}),
+            mock.patch.object(quality_runtime, "kern_environment", return_value={}),
             mock.patch.object(
                 checks,
                 "container_image_recipe_digest",
@@ -874,7 +879,7 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
                 new=discard_workspace,
             ),
             mock.patch.object(
-                checks,
+                quality_runtime,
                 "setup",
                 new=self._guarded_boundary(
                     "set up an image",

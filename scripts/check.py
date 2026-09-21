@@ -23,6 +23,7 @@ from fplinux_cli.manifests.paths import discover_targets
 from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.targets import load_target
 from fplinux_cli.output import RunReporter, current_stage, run_entrypoint
+from fplinux_cli.quality.testing import unittest_commands
 from fplinux_cli.source_formats import classify_source_formats
 
 if TYPE_CHECKING:
@@ -55,13 +56,6 @@ SOURCE_SCOPES = (
 )
 _CHECK_COMMAND_TIMEOUT = 15 * 60
 _PACKAGE_CONFIG_TIMEOUT = 30
-_PYTHON_TEST_TIERS = (
-    ("small", 90),
-    ("host_process", 180),
-    ("host_tool", 240),
-    ("artifact", 300),
-    ("public_workflow", 90),
-)
 
 
 def _run_direct(
@@ -638,20 +632,8 @@ def main() -> None:
             run(["ruff", "format", "--check", *python_files])
             run(["mypy", *python_files])
             if (ROOT / "tests").is_dir():
-                for tier, timeout in _PYTHON_TEST_TIERS:
-                    run(
-                        [
-                            "python3",
-                            "-m",
-                            "unittest",
-                            "discover",
-                            "-s",
-                            f"tests/{tier}",
-                            "-t",
-                            ".",
-                        ],
-                        timeout=timeout,
-                    )
+                for _tier, command, timeout in unittest_commands([]):
+                    run(command, timeout=timeout)
     if "shell" in selected:
         with report_stage(reporter, "shell"):
             check_shell_sources(formats)
