@@ -10,7 +10,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from fplinux_cli import alpine_builder, container
+from fplinux_cli import alpine_builder
+from fplinux_cli.environment import kern
 
 
 class AlpineArchiveTests(unittest.TestCase):
@@ -18,7 +19,7 @@ class AlpineArchiveTests(unittest.TestCase):
 
     def test_files_and_absolute_symlinks_survive_extraction(self) -> None:
         """An Alpine-rooted symlink keeps its target while regular data is extracted."""
-        for archive_filter in (container._alpine_tar_filter, alpine_builder._alpine_tar_filter):
+        for archive_filter in (kern._alpine_tar_filter, alpine_builder._alpine_tar_filter):
             with self.subTest(consumer=archive_filter), tempfile.TemporaryDirectory() as temporary:
                 archive_bytes = io.BytesIO()
                 with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
@@ -42,7 +43,7 @@ class AlpineArchiveTests(unittest.TestCase):
 
     def test_parent_traversal_cannot_write_outside_the_extraction_root(self) -> None:
         """Both consumers retain the standard data filter's path containment."""
-        for archive_filter in (container._alpine_tar_filter, alpine_builder._alpine_tar_filter):
+        for archive_filter in (kern._alpine_tar_filter, alpine_builder._alpine_tar_filter):
             with self.subTest(consumer=archive_filter), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary) / "root"
                 root.mkdir()
@@ -64,7 +65,7 @@ class AlpineArchiveTests(unittest.TestCase):
     def test_invalid_absolute_links_keep_each_consumers_error_prefix(self) -> None:
         """The host CLI and in-container builder retain their distinct diagnostics."""
         cases = (
-            (container._alpine_tar_filter, "fplinux: "),
+            (kern._alpine_tar_filter, "fplinux: "),
             (alpine_builder._alpine_tar_filter, "build failed: "),
         )
         for archive_filter, prefix in cases:

@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from fplinux_cli import builder
+from fplinux_cli.build import kernel as kernel_build
 
 
 class ProfileKconfigTests(unittest.TestCase):
@@ -20,7 +20,7 @@ class ProfileKconfigTests(unittest.TestCase):
             config.write_text("CONFIG_PROFILE_ENABLED=y\n# CONFIG_PROFILE_DISABLED is not set\n")
 
             self.assertEqual(
-                builder.profile_kconfig_arguments(
+                kernel_build.profile_kconfig_arguments(
                     ["CONFIG_PROFILE_ENABLED"], ["CONFIG_PROFILE_DISABLED"]
                 ),
                 [
@@ -30,7 +30,7 @@ class ProfileKconfigTests(unittest.TestCase):
                     "PROFILE_DISABLED",
                 ],
             )
-            builder.assert_profile_kconfig(
+            kernel_build.assert_profile_kconfig(
                 config,
                 ["CONFIG_PROFILE_ENABLED"],
                 ["CONFIG_PROFILE_DISABLED"],
@@ -38,13 +38,13 @@ class ProfileKconfigTests(unittest.TestCase):
 
             config.write_text("# CONFIG_PROFILE_ENABLED is not set\n")
             with self.assertRaisesRegex(SystemExit, "profile did not enable"):
-                builder.assert_profile_kconfig(config, ["CONFIG_PROFILE_ENABLED"], [])
+                kernel_build.assert_profile_kconfig(config, ["CONFIG_PROFILE_ENABLED"], [])
 
             for value in ("y", "m"):
                 with self.subTest(disabled_value=value):
                     config.write_text(f"CONFIG_PROFILE_DISABLED={value}\n")
                     with self.assertRaisesRegex(SystemExit, "profile did not disable"):
-                        builder.assert_profile_kconfig(
+                        kernel_build.assert_profile_kconfig(
                             config,
                             [],
                             ["CONFIG_PROFILE_DISABLED"],
@@ -60,7 +60,7 @@ class ProfileKconfigTests(unittest.TestCase):
                 "CONFIG_ZRAM_DEF_COMP_ZSTD=y\n"
             )
 
-            builder.assert_profile_kconfig(
+            kernel_build.assert_profile_kconfig(
                 config,
                 ["CONFIG_ZRAM_BACKEND_ZSTD", "CONFIG_ZRAM_DEF_COMP_ZSTD"],
                 ["CONFIG_ZRAM_BACKEND_LZO", "CONFIG_ZRAM_DEF_COMP_LZORLE"],

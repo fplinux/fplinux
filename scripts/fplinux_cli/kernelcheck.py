@@ -19,30 +19,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from fplinux_cli.build.inputs import CACHE, require_file, root_source, target_source
+from fplinux_cli.build.kernel import profile_kconfig_actions, profile_kconfig_arguments
+from fplinux_cli.build.linux import prepare_linux
+from fplinux_cli.build.process import report_stage, run
+from fplinux_cli.build.sources import fetch, source_lock_entry
+from fplinux_cli.manifests.kernel import compose_kernel_config, kconfig_values, kernel_config_paths
+from fplinux_cli.manifests.paths import discover_targets, normalize_profile
+from fplinux_cli.manifests.platforms import load_platform
+from fplinux_cli.manifests.targets import load_target
+
 from . import linux_state
-from .builder import (
-    CACHE,
-    fetch,
-    prepare_linux,
-    profile_kconfig_actions,
-    profile_kconfig_arguments,
-    report_stage,
-    require_file,
-    root_source,
-    run,
-    source_lock_entry,
-    target_source,
-)
 from .common import ROOT
-from .config import (
-    compose_kernel_config,
-    discover_targets,
-    kconfig_values,
-    kernel_config_paths,
-    load_platform,
-    load_target,
-    normalize_profile,
-)
 from .device_tree import (
     DeviceTreeError,
     verify_profile_dtb_layout,

@@ -18,11 +18,12 @@ from functools import partial
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, BinaryIO, NoReturn
 
+from fplinux_cli.manifests.values import relative_value
+
 from . import alpine_state, firmware_inputs
 from .build_env import SOURCE_DATE_EPOCH
 from .build_env import build_environment as _build_environment
 from .common import ROOT, alpine_tar_filter, sha256_file
-from .config import relative_value
 from .output import current_stage
 
 if TYPE_CHECKING:

@@ -9,21 +9,18 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from fplinux_cli.cli.build import build
+from fplinux_cli.cli.bundles import PUBLIC_BOOT_MODES, selected_context_profile
+from fplinux_cli.cli.checksum import checksum_aport
+from fplinux_cli.cli.package import package_target
+from fplinux_cli.cli.runtime import console_target, run_target, verify_booted
+from fplinux_cli.manifests.paths import GLOBAL_PROFILES, discover_targets, normalize_profile
+from fplinux_cli.manifests.values import TARGET_NAME
+
 from .cachelock import cache_lock
-from .commands import (
-    PUBLIC_BOOT_MODES,
-    build,
-    checksum_aport,
-    console_target,
-    package_target,
-    run_target,
-    selected_context_profile,
-    verify_booted,
-)
 from .common import ROOT
-from .config import GLOBAL_PROFILES, TARGET_NAME, discover_targets, normalize_profile
-from .container import CHECK_SCOPES, check, check_commit_message, doctor, setup
 from .device_data_prepare import prepare_device_data
+from .environment.kern import doctor, setup
 from .format import format_sources
 from .nand_backup import backup_target_nand
 from .output import run_entrypoint
@@ -33,6 +30,8 @@ from .prune import (
     discard_superseded_profile_logs,
     prune,
 )
+from .quality.checks import CHECK_SCOPES, check
+from .quality.git import check_commit_message
 
 if TYPE_CHECKING:
     from collections.abc import Callable

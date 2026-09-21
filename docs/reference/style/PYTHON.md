@@ -12,6 +12,22 @@ next to the exceptional boundary, and explain why the normal rule is unsuitable.
 
 ## Interfaces and flow
 
+Group modules by the operation or data they own. Keep CLI dispatch, manifest
+validation, environment setup, build stages and artifact publication distinct.
+The build entry point shows the order of stages; each stage owns its inputs,
+effects and result. Import an operation from its owner instead of maintaining
+alias modules or package-wide re-export lists for old internal import paths.
+
+Import directly from the module that owns the behavior. Use absolute imports
+across package boundaries; relative imports are limited to sibling modules.
+Keep a dependency used only in annotations behind `TYPE_CHECKING`;
+an optional build backend must not become a runtime import for unrelated modes.
+
+Module boundaries also affect delivery. Keep the selected build workspace and
+check recipes aware of the code they execute, and preserve the independence of
+files delivered in standalone bundles. Test actual imports and artifacts rather
+than freezing a list of module filenames.
+
 Use type annotations for maintained interfaces and dataclasses for records with
 named fields and useful value semantics. Prefer `pathlib.Path` for filesystem
 paths and the most specific collection or callable type that describes the

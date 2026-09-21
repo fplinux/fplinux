@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from fplinux_cli import builder
+from fplinux_cli import common
+from fplinux_cli.build import bootstrap as bootstrap_build
 
 
 class BootstrapRecipeTests(unittest.TestCase):
@@ -25,7 +26,7 @@ class BootstrapRecipeTests(unittest.TestCase):
         self._write("bootstrap/fplinux-boot-screen/screen.c", b"int screen;\n")
         self._write("patches/vendor.patch", b"vendor patch\n")
         self._write("scripts/fplinux_cli/build_env.py", b"build environment\n")
-        self._write("scripts/fplinux_cli/builder.py", b"builder implementation\n")
+        self._write("scripts/fplinux_cli/build/bootstrap.py", b"builder implementation\n")
         self.target_config: dict[str, Any] = {
             "identity": {
                 "brand": "Demo",
@@ -102,8 +103,8 @@ class BootstrapRecipeTests(unittest.TestCase):
 
     def _digest(self) -> str:
         """Compute the bootstrap recipe against the temporary repository."""
-        with mock.patch.object(builder, "ROOT", self.root):
-            return builder.bootstrap_recipe_digest(
+        with mock.patch.object(common, "ROOT", self.root):
+            return bootstrap_build.bootstrap_recipe_digest(
                 self.sources,
                 "demo",
                 self.target_config,

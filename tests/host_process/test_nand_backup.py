@@ -139,7 +139,7 @@ esac
             with (
                 self.subTest(target=target, profile=profile),
                 mock.patch(
-                    "fplinux_cli.commands.current_target_ssh_session",
+                    "fplinux_cli.cli.runtime.current_target_ssh_session",
                     return_value=(ssh_transport, self.session),
                 ) as acquire,
                 mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
@@ -165,7 +165,7 @@ esac
         destination.write_bytes(b"previous complete image")
         with (
             mock.patch(
-                "fplinux_cli.commands.current_target_ssh_session",
+                "fplinux_cli.cli.runtime.current_target_ssh_session",
                 return_value=(ssh_transport, self.session),
             ),
             mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),

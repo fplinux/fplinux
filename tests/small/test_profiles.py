@@ -10,8 +10,10 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from fplinux_cli import builder, config
+from fplinux_cli import common
+from fplinux_cli.build import kernel as kernel_build
 from fplinux_cli.common import ROOT
+from fplinux_cli.manifests import kernel, paths, targets
 
 PROFILE_FIXTURES = ROOT / "tests/fixtures/profile_config"
 
@@ -74,9 +76,9 @@ class GlobalProfileTests(unittest.TestCase):
             (target_root / "uboot/defconfig").write_text("CONFIG_ARM=y\n")
             self.write_target_manifest(target)
         self.addCleanup(mock.patch.stopall)
-        mock.patch.object(config, "ROOT", self.root).start()
-        mock.patch.object(config, "load_platform", return_value=self.platform).start()
-        mock.patch.object(config, "asset_bundle_paths", return_value={}).start()
+        mock.patch.object(common, "ROOT", self.root).start()
+        mock.patch.object(targets, "load_platform", return_value=self.platform).start()
+        mock.patch.object(targets, "asset_bundle_paths", return_value={}).start()
 
     def write_target_manifest(self, target: str, fixture: str = "target.toml") -> None:
         """Write one named board configuration with its target identity filled in."""
@@ -90,8 +92,8 @@ class GlobalProfileTests(unittest.TestCase):
         """Spelling default explicitly does not create a second build context."""
         for target in ("first", "second"):
             with self.subTest(target=target):
-                implicit = config.load_target(target)
-                explicit = config.load_target(target, "default")
+                implicit = targets.load_target(target)
+                explicit = targets.load_target(target, "default")
                 self.assertEqual(implicit, explicit)
                 self.assertIsNone(explicit["profile"])
                 self.assertEqual(explicit["linux"]["root"], {"kind": "initramfs"})
@@ -101,9 +103,9 @@ class GlobalProfileTests(unittest.TestCase):
         """MicroSD changes root placement but keeps feature and firmware inputs."""
         for target in ("first", "second"):
             with self.subTest(target=target):
-                ram = config.load_target(target)
-                card = config.load_target(target, "microsd-uboot")
-                self.assertEqual(config.discover_profiles(target), ("default", "microsd-uboot"))
+                ram = targets.load_target(target)
+                card = targets.load_target(target, "microsd-uboot")
+                self.assertEqual(paths.discover_profiles(target), ("default", "microsd-uboot"))
                 self.assertEqual(card["profile"], "microsd-uboot")
                 self.assertEqual(
                     card["linux"]["root"],
@@ -139,17 +141,17 @@ class GlobalProfileTests(unittest.TestCase):
         previous = self.root / "targets/first/profiles/bt-qual"
         previous.mkdir(parents=True)
         (previous / "profile.toml").write_text("invalid = true\n")
-        self.assertEqual(config.discover_profiles("first"), ("default", "microsd-uboot"))
+        self.assertEqual(paths.discover_profiles("first"), ("default", "microsd-uboot"))
         with self.assertRaisesRegex(SystemExit, "unknown profile"):
-            config.load_target("first", "bt-qual")
-        self.assertEqual(config.load_target("first")["linux"]["root"], {"kind": "initramfs"})
+            targets.load_target("first", "bt-qual")
+        self.assertEqual(targets.load_target("first")["linux"]["root"], {"kind": "initramfs"})
 
     def test_boot_profile_cannot_exclude_shared_features(self) -> None:
         """Feature-package ownership is rejected at the boot-policy boundary."""
         path = self.root / "profiles/default/profile.toml"
         shutil.copyfile(PROFILE_FIXTURES / "default-with-feature-package.toml", path)
         with self.assertRaisesRegex(SystemExit, "boot maintenance"):
-            config.load_target("first")
+            targets.load_target("first")
 
     def test_missing_bluetooth_declaration_does_not_require_private_inputs(self) -> None:
         """A board without a Bluetooth declaration has no firmware input group."""
@@ -157,16 +159,16 @@ class GlobalProfileTests(unittest.TestCase):
         for profile in ("default", "microsd-uboot"):
             with self.subTest(profile=profile):
                 self.assertEqual(
-                    config.load_target("first", profile)["device_data"]["groups"],
+                    targets.load_target("first", profile)["device_data"]["groups"],
                     {},
                 )
 
     def test_missing_board_boot_sources_fail_only_when_microsd_is_selected(self) -> None:
         """RAM operation does not read unused U-Boot sources or fall back to another board."""
         (self.root / "targets/second/uboot/defconfig").unlink()
-        self.assertEqual(config.load_target("second")["bootstrap"]["kind"], "linux")
+        self.assertEqual(targets.load_target("second")["bootstrap"]["kind"], "linux")
         with self.assertRaisesRegex(SystemExit, "U-Boot source is missing"):
-            config.load_target("second", "microsd-uboot")
+            targets.load_target("second", "microsd-uboot")
 
     def test_uboot_combines_shared_sources_with_the_selected_board(self) -> None:
         """Shared boot logic and the chosen slot descriptor reach one projection."""
@@ -184,7 +186,7 @@ class GlobalProfileTests(unittest.TestCase):
             self.write_target_manifest(target, "target-with-uboot-sources.toml")
 
             with self.subTest(target=target):
-                uboot = config.load_target(target, "microsd-uboot")["uboot"]
+                uboot = targets.load_target(target, "microsd-uboot")["uboot"]
                 self.assertEqual(
                     [(self.root / path).read_text() for path in uboot["patches"]],
                     ["shared integration patch\n", f"{target} integration patch\n"],
@@ -211,10 +213,10 @@ class GlobalProfileTests(unittest.TestCase):
         for profile in ("default", "microsd-uboot"):
             with self.subTest(profile=profile):
                 self.assertEqual(
-                    config.load_target("first", profile)["nand"],
+                    targets.load_target("first", profile)["nand"],
                     {"raw_device": "/dev/first-nand-raw", "id": 0xB1A1, "raw_page_bytes": 2176},
                 )
-                self.assertNotIn("nand", config.load_target("second", profile))
+                self.assertNotIn("nand", targets.load_target("second", profile))
 
     def test_nand_reader_requires_a_device_path(self) -> None:
         """A board cannot accidentally point a physical NAND backup at a regular file."""
@@ -224,7 +226,7 @@ class GlobalProfileTests(unittest.TestCase):
             + '\n[nand]\nraw_device = "/tmp/nand.raw"\nid = 0xb1a1\nraw_page_bytes = 2176\n'
         )
         with self.assertRaisesRegex(SystemExit, "device directly under /dev"):
-            config.load_target("first")
+            targets.load_target("first")
 
 
 class KernelConfigCompositionTests(unittest.TestCase):
@@ -238,7 +240,7 @@ class KernelConfigCompositionTests(unittest.TestCase):
             base.write_text("CONFIG_SHARED=y\nCONFIG_BOARD=1\nCONFIG_UNUSED=y\n")
             fragment.write_text("CONFIG_BOARD=2\n# CONFIG_UNUSED is not set\nCONFIG_DEVICE=y\n")
             self.assertEqual(
-                config.compose_kernel_config(base, fragment),
+                kernel.compose_kernel_config(base, fragment),
                 (
                     b"CONFIG_SHARED=y\nCONFIG_BOARD=2\n"
                     b"# CONFIG_UNUSED is not set\nCONFIG_DEVICE=y\n"
@@ -288,12 +290,12 @@ class RepositoryProfileCompressionTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temporary:
             prepared = Path(temporary) / ".config"
-            for target in config.discover_targets():
+            for target in paths.discover_targets():
                 for profile, contents in prepared_configs.items():
                     with self.subTest(target=target, profile=profile):
-                        linux = config.load_target(target, profile)["linux"]
+                        linux = targets.load_target(target, profile)["linux"]
                         prepared.write_text(contents["correct"])
-                        builder.assert_profile_kconfig(
+                        kernel_build.assert_profile_kconfig(
                             prepared,
                             linux["config_enable"],
                             linux["config_disable"],
@@ -303,7 +305,7 @@ class RepositoryProfileCompressionTests(unittest.TestCase):
                         with self.assertRaisesRegex(
                             SystemExit, "profile did not (enable|disable)"
                         ):
-                            builder.assert_profile_kconfig(
+                            kernel_build.assert_profile_kconfig(
                                 prepared,
                                 linux["config_enable"],
                                 linux["config_disable"],

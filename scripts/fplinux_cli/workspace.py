@@ -16,16 +16,17 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-from . import alpine_state, firmware_inputs
-from .common import ROOT, fail, relative_name
-from .config import (
-    kernel_config_paths,
-    load_platform,
-    load_target,
+from fplinux_cli.manifests.kernel import kernel_config_paths
+from fplinux_cli.manifests.paths import (
     profile_manifest_path,
     target_asset_lock_path,
     target_release_manifest_path,
 )
+from fplinux_cli.manifests.platforms import load_platform
+from fplinux_cli.manifests.targets import load_target
+
+from . import alpine_state, firmware_inputs
+from .common import ROOT, fail, relative_name
 
 STAGED_BUILD_SOURCES = (
     "Containerfile",
@@ -38,10 +39,14 @@ STAGED_BUILD_SOURCES = (
     "scripts/fplinux_cli/alpine_builder.py",
     "scripts/fplinux_cli/alpine_state.py",
     "scripts/fplinux_cli/build_env.py",
-    "scripts/fplinux_cli/builder.py",
+    "scripts/fplinux_cli/build",
     "scripts/fplinux_cli/bundle_state.py",
     "scripts/fplinux_cli/common.py",
-    "scripts/fplinux_cli/config.py",
+    "scripts/fplinux_cli/manifests",
+    "scripts/fplinux_cli/environment/__init__.py",
+    "scripts/fplinux_cli/environment/images.py",
+    "scripts/fplinux_cli/quality/__init__.py",
+    "scripts/fplinux_cli/quality/source_policy.py",
     "scripts/fplinux_cli/device_state.py",
     "scripts/fplinux_cli/device_tree.py",
     "scripts/fplinux_cli/firmware_inputs.py",

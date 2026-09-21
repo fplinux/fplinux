@@ -8,14 +8,15 @@ import tempfile
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
-from .builder import fetch
-from .common import ROOT, fail, relative_name, replace_file_atomically
-from .config import (
+from fplinux_cli.build.sources import fetch
+from fplinux_cli.environment.images import (
     container_image_recipe_digest,
     container_image_reference,
     load_container_lock,
 )
-from .container import (
+
+from .common import ROOT, fail, relative_name, replace_file_atomically
+from .environment.kern import (
     current_image_state,
     kern_available,
     kern_box_name,

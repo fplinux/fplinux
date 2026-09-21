@@ -10,9 +10,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, BinaryIO, Protocol, cast
 
-from . import commands
+from fplinux_cli.cli import runtime as runtime_commands
+from fplinux_cli.manifests.targets import load_target
+
 from .common import fail, sha256_file
-from .config import load_target
 from .device_data import PHYSICAL_PAGE_COUNT
 
 BACKUP_TIMEOUT_SECONDS = 15 * 60
@@ -103,7 +104,7 @@ def backup_target_nand(
         fail(f"NAND backup is not supported for target {target}")
 
     def connect() -> tuple[SshTransport, dict[str, Any]]:
-        ssh, session = commands.current_target_ssh_session(target, profile=profile)
+        ssh, session = runtime_commands.current_target_ssh_session(target, profile=profile)
         return cast("SshTransport", ssh), session
 
     return backup_nand(

@@ -7,7 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from fplinux_cli import builder, kbuild_state
+from fplinux_cli import kbuild_state
+from fplinux_cli.build import kernel as kernel_build
 
 
 class KernelOutputStateTests(unittest.TestCase):
@@ -72,7 +73,7 @@ class KernelOutputStateTests(unittest.TestCase):
             initramfs_receipt=(None if external else {"recipe": "d" * 64, "sha256": "e" * 64}),
             arch="arm",
             cross_compile=self.cross,
-            commands=builder.kernel_build_commands(
+            commands=kernel_build.kernel_build_commands(
                 kbuild,
                 [
                     "scripts/config",

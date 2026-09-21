@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import unittest
 
-from fplinux_cli import builder
+from fplinux_cli.build import linux as linux_build
 from fplinux_cli.identity import (
     IdentityError,
     validate_platform_identity,
@@ -123,7 +123,7 @@ class IdentityTests(unittest.TestCase):
             "identity": validate_platform_identity(self.platform()),
             "linux": {"patches": [], "copies": [], "appends": []},
         }
-        baseline = builder.linux_recipe_digest(source, "phone", target, platform)
+        baseline = linux_build.linux_recipe_digest(source, "phone", target, platform)
 
         changed_target = {
             **target,
@@ -136,11 +136,11 @@ class IdentityTests(unittest.TestCase):
 
         self.assertNotEqual(
             baseline,
-            builder.linux_recipe_digest(source, "phone", changed_target, platform),
+            linux_build.linux_recipe_digest(source, "phone", changed_target, platform),
         )
         self.assertEqual(
             baseline,
-            builder.linux_recipe_digest(source, "phone", target, changed_alias),
+            linux_build.linux_recipe_digest(source, "phone", target, changed_alias),
         )
 
 
