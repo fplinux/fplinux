@@ -3,6 +3,7 @@
 # mypy: ignore-errors
 """Generic FPLinux framebuffer and keypad board adaptation."""
 
+import logging
 import time
 
 import lvgl as lv
@@ -12,6 +13,14 @@ from mpos.ui import focus_direction
 
 import fplinux_keypad
 from mpos import fplinux_storage
+
+_logger = logging.getLogger(__name__)
+
+
+def _lvgl_log(level, message):
+    """Report LVGL failures without enabling its continuous performance output."""
+    if level == lv.LOG_LEVEL.ERROR:
+        _logger.error("%s", message.rstrip())
 
 
 KEY_1 = 2
@@ -72,6 +81,7 @@ class FPLinuxDisplay:
     """LVGL display backed by the active Linux framebuffer geometry."""
 
     def __init__(self, path="/dev/fb0"):
+        lv.log_register_print_cb(_lvgl_log)
         self._display = lv.linux_fbdev_create()
         lv.linux_fbdev_set_file(self._display, path)
         width = self._display.get_horizontal_resolution()
