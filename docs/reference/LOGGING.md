@@ -30,6 +30,12 @@ transfer results on standard output; retries and SSH connection diagnostics
 belong on standard error. An unreadable bundle file reports its I/O error
 without a Python traceback.
 
+Report expected file and process failures with their cause, without a Python
+traceback. Ctrl+C terminates with shell status 130. Unexpected exceptions retain
+their traceback; a stage records it in its log. Do not hide a later error merely
+because an earlier one was reported. Nested stages restore the caller's reporting
+context, and a failed run cannot become successful when logs are closed.
+
 ## Phone userspace
 
 Messages written to `/dev/kmsg` use a component prefix and a severity matching

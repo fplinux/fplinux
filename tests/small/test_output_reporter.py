@@ -284,6 +284,53 @@ class RunReporterTests(unittest.TestCase):
             ):
                 run_entrypoint(catch_then_fail)
 
+    def test_nested_run_does_not_take_ownership_of_a_later_parent_failure(self) -> None:
+        """A completed child stays successful while its caller's later error is recorded."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+
+            def nested_command() -> None:
+                parent = RunReporter("prepare", root / "parent", "parent", verbose=False)
+                with parent.stage("build"):
+                    child = RunReporter("build", root / "child", "child", verbose=False)
+                    with child.stage("compile"):
+                        pass
+                    child.finish()
+                message = "parent cannot publish"
+                raise SystemExit(message)
+
+            with (
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaisesRegex(SystemExit, "parent cannot publish"),
+            ):
+                run_entrypoint(nested_command)
+            parent = json.loads((root / "parent/run.json").read_text())
+            child = json.loads((root / "child/run.json").read_text())
+            self.assertEqual(parent["status"], "failed")
+            self.assertEqual(child["status"], "success")
+
+    def test_nested_expected_failure_prints_its_cause_once_without_outer_tail(self) -> None:
+        """The cause stays visible once whether the inner stage shows its log tail or not."""
+        for inner_tail in (False, True):
+            with self.subTest(inner_tail=inner_tail), tempfile.TemporaryDirectory() as temporary:
+                terminal = io.StringIO()
+
+                def fail_in_child_stage(*, show_inner_tail: bool = inner_tail) -> None:
+                    reporter = RunReporter(
+                        "prepare", Path(temporary) / "run", "test", verbose=False
+                    )
+                    with (
+                        reporter.stage("outer", show_tail=False),
+                        reporter.stage("inner", show_tail=show_inner_tail),
+                    ):
+                        message = "cannot read the requested source"
+                        raise SystemExit(message)
+
+                with contextlib.redirect_stderr(terminal), self.assertRaises(SystemExit) as raised:
+                    run_entrypoint(fail_in_child_stage)
+                self.assertEqual(raised.exception.code, 1)
+                self.assertEqual(terminal.getvalue().count("cannot read the requested source"), 1)
+
     def test_container_environment_preserves_display_path(self) -> None:
         """Separate the mounted log path from its host-facing location."""
         with tempfile.TemporaryDirectory() as temporary:
