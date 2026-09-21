@@ -24,6 +24,7 @@ class NandBackupTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.directory = Path(self.temporary.name)
+        self.enterContext(mock.patch("fplinux_cli.output.ROOT", self.directory))
         self.destination = self.directory / "nand.raw"
 
     def test_complete_stream_is_atomically_published_with_private_mode(self) -> None:
@@ -57,6 +58,8 @@ class NandBackupTests(unittest.TestCase):
         self.assertEqual(self.destination.read_bytes(), payload)
         self.assertEqual(self.destination.stat().st_mode & 0o777, 0o600)
         self.assertIn(hashlib.sha256(payload).hexdigest(), stdout.getvalue())
+        self.assertIn("NAND backup saved:", stdout.getvalue())
+        self.assertNotIn("verified", stdout.getvalue())
         self.assertEqual(list(self.directory.glob(".nand.raw.*")), [])
         connect.assert_called_once_with()
 

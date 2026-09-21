@@ -13,8 +13,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from fplinux_cli import device_data_prepare
+from fplinux_cli import common, device_data_prepare, workspace
 from fplinux_cli.device_data import DeviceDataPreparation, PhysicalNand, PreparedGroup
+from fplinux_cli.environment import images, kern
+from fplinux_cli.manifests import releases
+from fplinux_cli.output import run_entrypoint
 
 TARGET = "demo-phone"
 RAW_PAGE_BYTES = 2112
@@ -39,6 +42,7 @@ class DeviceDataPrepareTests(unittest.TestCase):
         self.root = Path(self.temporary.name) / "source"
         self.cache = self.root / ".cache"
         self.cache.mkdir(parents=True)
+        self.enterContext(mock.patch("fplinux_cli.output.ROOT", self.root))
         self.saved_dump = self.root / "saved-nand.bin"
         self.saved_dump.write_bytes(RAW_DUMP)
 
@@ -200,7 +204,7 @@ class DeviceDataPrepareTests(unittest.TestCase):
         events: list[object] = []
         admitted = PhysicalNand(RAW_DUMP, RAW_PAGE_BYTES)
 
-        def backup(target: str, destination: Path) -> Path:
+        def backup(target: str, destination: Path, **_logging: object) -> Path:
             events.append(("backup", target))
             destination.write_bytes(RAW_DUMP)
             destination.chmod(0o600)
@@ -294,6 +298,48 @@ class DeviceDataPrepareTests(unittest.TestCase):
             )
         build.assert_not_called()
         self.assertFalse((self.cache / "device-data").exists())
+
+    def test_offline_nested_build_failure_leaves_no_running_receipt(self) -> None:
+        """A real build rejection finishes its enclosing preparation without loading a phone."""
+        terminal = io.StringIO()
+        with (
+            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(device_data_prepare, "ROOT", self.root),
+            mock.patch.object(device_data_prepare, "load_target", return_value=self._config()),
+            mock.patch.object(
+                releases, "load_release", return_value={"image": "image/ramboot.bin"}
+            ),
+            mock.patch.object(
+                workspace,
+                "target_workspace_snapshot",
+                return_value=workspace.WorkspaceSnapshot((), "a" * 64),
+            ),
+            mock.patch.object(
+                images,
+                "load_container_lock",
+                return_value={"oci": {"repository": "localhost/fplinux-build"}},
+            ),
+            mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
+            mock.patch.object(kern, "kern_available", return_value=False),
+            mock.patch.object(
+                device_data_prepare,
+                "run_target_noninteractive",
+                side_effect=AssertionError("failed preparation must not load a phone"),
+            ),
+            contextlib.redirect_stderr(terminal),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            run_entrypoint(
+                lambda: device_data_prepare.prepare_device_data(
+                    TARGET, from_dump=None, jobs=1, offline=True
+                )
+            )
+        self.assertEqual(raised.exception.code, 1)
+        self.assertEqual(terminal.getvalue().count("offline build requires"), 1)
+        receipts = list((self.cache / "logs").rglob("run.json"))
+        self.assertTrue(receipts)
+        for receipt in receipts:
+            self.assertEqual(json.loads(receipt.read_text())["status"], "failed")
 
 
 if __name__ == "__main__":

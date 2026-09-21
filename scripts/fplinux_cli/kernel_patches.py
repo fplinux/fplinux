@@ -12,7 +12,6 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -24,7 +23,7 @@ from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.targets import load_target
 from fplinux_cli.manifests.values import relative_value
 
-from .common import ROOT, fail
+from .common import ROOT, fail, load_toml
 from .workspace import WorkspaceFile
 
 if TYPE_CHECKING:
@@ -67,8 +66,7 @@ def context_inputs(
 
 def linux_contexts(selected: frozenset[str]) -> tuple[LinuxContext, ...]:
     """Find every declared Linux context consuming the selected patch paths."""
-    with (ROOT / "sources.lock.toml").open("rb") as stream:
-        sources = tomllib.load(stream)
+    sources = load_toml(ROOT / "sources.lock.toml")
     contexts = []
     found: set[str] = set()
     for target in discover_targets():

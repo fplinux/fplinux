@@ -283,6 +283,21 @@ and disconnect USB. For the prepared RAM load, start `run` with the phone
 again powered off and disconnected; wait for its loader invitation before
 holding its boot key and connecting it.
 
+#### Save a NAND backup
+
+For a phone already running the selected build, save its complete physical-page
+stream with:
+
+```sh
+./fplinux nand backup <target> PATH [--profile NAME]
+```
+
+The command checks the expected size, computes a SHA-256 digest and atomically
+publishes the file with mode `0600`. An incomplete transfer leaves an existing
+destination unchanged. The digest identifies the saved bytes; the command does
+not compare them with a second device read. Restoring NAND is unsupported.
+Treat this file as private device data.
+
 ## Logs, cache, and parallel commands
 
 Build, check and format print compact stage status. Add `--verbose` to build or

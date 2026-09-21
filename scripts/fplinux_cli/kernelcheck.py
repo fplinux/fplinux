@@ -13,7 +13,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import tomllib
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,7 +29,7 @@ from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.targets import load_target
 
 from . import linux_state
-from .common import ROOT
+from .common import ROOT, fail, load_toml
 from .device_tree import (
     DeviceTreeError,
     verify_profile_dtb_layout,
@@ -53,8 +52,7 @@ _CONTEXT_KILL_TIMEOUT = 5.0
 
 def load_sources() -> dict[str, Any]:
     """Load the pinned source lock used by the shared Linux preparer."""
-    with (ROOT / "sources.lock.toml").open("rb") as stream:
-        return tomllib.load(stream)
+    return load_toml(ROOT / "sources.lock.toml")
 
 
 def patch_c_destinations(path: Path) -> list[str]:
@@ -86,7 +84,7 @@ def sparse_targets(
 
     objects = list(dict.fromkeys(str(Path(path).with_suffix(".o")) for path in destinations))
     if not objects:
-        raise SystemExit(f"sparse failed: target has no projected kernel C: {target}")
+        fail(f"kernel check failed: target has no projected kernel C: {target}")
     return objects
 
 
@@ -101,7 +99,7 @@ def projected_sources(
         for step in [*target_config["linux"]["copies"], *target_config["linux"]["appends"]]
     )
     if not result:
-        raise SystemExit(f"sparse failed: target projects no kernel sources: {target}")
+        fail(f"kernel check failed: target projects no kernel sources: {target}")
     return result
 
 
@@ -128,14 +126,14 @@ def capture_text(command: list[str]) -> subprocess.CompletedProcess[str]:
         )
         try:
             stdout, stderr = process.communicate(timeout=_KERNEL_CAPTURE_TIMEOUT)
-        except subprocess.TimeoutExpired as error:
+        except subprocess.TimeoutExpired:
             with suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
             process.communicate()
-            raise SystemExit(
-                f"sparse failed: command timed out after {_KERNEL_CAPTURE_TIMEOUT}s: "
+            fail(
+                f"kernel check failed: command timed out after {_KERNEL_CAPTURE_TIMEOUT}s: "
                 f"{shlex.join(command)}"
-            ) from error
+            )
         except BaseException:
             with suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
@@ -160,8 +158,8 @@ def run_checkpatch(command: list[str]) -> None:
         record_text(f"checkpatch exited {report.returncode}\n")
         raise SystemExit(exit_status(report.returncode))
     if "WARNING:" in report.stdout or "ERROR:" in report.stdout:
-        message = "sparse failed: checkpatch reported findings"
-        raise SystemExit(message)
+        message = "kernel check failed: checkpatch reported findings"
+        fail(message)
 
 
 def run_dtbs_check(command: list[str], target: str) -> str:
@@ -183,12 +181,12 @@ def check_bindings(
     report = capture_text(["dt-doc-validate", "-u", str(schema_root), *paths])
     # Reference diagnostics can be printed even when dt-doc-validate returns zero.
     if report.returncode or report.stdout.strip() or report.stderr.strip():
-        raise SystemExit(f"sparse failed: binding schema findings: {target}")
+        fail(f"kernel check failed: binding schema findings: {target}")
     combined = run_dtbs_check(
         [*kbuild, "W=1", "dt_binding_check", "DT_SCHEMA_FILES=" + ":".join(bindings)], target
     )
     if re.search(r"(?im)\b(?:warning|error)(?:\s*\([^\n)]*\))?:|\.example\.dtb:", combined):
-        raise SystemExit(f"sparse failed: binding example findings: {target}")
+        fail(f"kernel check failed: binding example findings: {target}")
 
 
 def target_profiles(profile: str | None = None) -> tuple[tuple[str, str | None], ...]:
@@ -337,8 +335,8 @@ def check_one_context(
         actual = kconfig_values(require_file(output / ".config").read_text())
         for symbol, value in requested.items():
             if actual.get(symbol, "n") != value:
-                raise SystemExit(
-                    f"sparse failed: kernel configuration did not preserve {symbol}={value}"
+                fail(
+                    f"kernel check failed: kernel configuration did not preserve {symbol}={value}"
                 )
     if bindings:
         with report_stage(reporter, f"bindings-{label}"):
@@ -346,7 +344,7 @@ def check_one_context(
     with report_stage(reporter, f"device-tree-{label}"):
         combined = run_dtbs_check(dtbs_command, target)
         if "Warning" in combined or re.search(r"\.dtb: ", combined):
-            raise SystemExit(f"sparse failed: device tree findings: {target}")
+            fail(f"kernel check failed: device tree findings: {target}")
         identity = target_config["identity"]
         platform_identity = platform["identity"]
         dtb = output / platform["linux"]["dtb_output_directory"] / target_config["linux"]["dtb"]
@@ -362,7 +360,7 @@ def check_one_context(
             if isinstance(layout, dict):
                 verify_profile_dtb_layout(dtb, layout, target_config["linux"]["memory"])
         except DeviceTreeError as error:
-            raise SystemExit(f"sparse failed: {error}") from error
+            fail(f"kernel check failed: {error}")
     with report_stage(reporter, f"sparse-{label}"):
         run(sparse_command)
     print(f"sparse: OK ({label}, {len(objects)} kernel C objects)")
@@ -577,7 +575,7 @@ def _run_context_processes(
     failed_index, returncode = failure
     target, profile = contexts[failed_index]
     label = context_label(target, profile)
-    raise SystemExit(f"sparse failed: context {label} exited {exit_status(returncode)}")
+    fail(f"kernel check failed: context {label} exited {exit_status(returncode)}")
 
 
 def check_contexts(
@@ -588,12 +586,12 @@ def check_contexts(
 ) -> None:
     """Run sparse through Kbuild for default or explicitly selected contexts."""
     if jobs < 1:
-        message = "sparse failed: jobs must be positive"
-        raise SystemExit(message)
+        message = "kernel check failed: jobs must be positive"
+        fail(message)
     contexts = target_profiles(profile)
     if reporter is not None and reporter.verbose and jobs > 1:
-        message = "sparse failed: --verbose cannot use more than one job"
-        raise SystemExit(message)
+        message = "kernel check failed: --verbose cannot use more than one job"
+        fail(message)
     if len(contexts) == 1 or (jobs == 1 and (reporter is None or reporter.verbose)):
         sources = load_sources()
         checked = sum(

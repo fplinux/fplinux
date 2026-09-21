@@ -10,8 +10,7 @@ from typing import TYPE_CHECKING
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import process as process_build
 from fplinux_cli.build import sources as sources_build
-from fplinux_cli.build.inputs import fail
-from fplinux_cli.common import replace_file_atomically, sha256_bytes
+from fplinux_cli.common import fail, replace_file_atomically, sha256_bytes
 from fplinux_cli.manifests.assets import load_asset_lock
 
 if TYPE_CHECKING:

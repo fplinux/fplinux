@@ -22,6 +22,7 @@ from .firmware_inputs import (
     device_data_cache_directory,
 )
 from .nand_backup import backup_target_nand
+from .output import RunReporter
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -245,66 +246,68 @@ def prepare_device_data(
     parser_filename: str = device_data["parser"]
     raw_page_bytes: int = target_config["nand"]["raw_page_bytes"]
     cache = ROOT / ".cache"
+    reporter = RunReporter.create("device-data", target=target, verbose=False)
 
     if from_dump is None:
-        print("Device-data preparation: build the default RAM system.", flush=True)
-        build(target, jobs, offline=offline)
-        print("Device-data preparation: load the default RAM system.", flush=True)
+        with reporter.stage("build", show_tail=False):
+            build(target, jobs, offline=offline, reporter=reporter)
         print(
-            "Device-data preparation: connect the powered-off phone only when the loader asks.",
+            "Connect the powered-off phone only when the loader asks.",
+            file=sys.stderr,
             flush=True,
         )
-        run_target_noninteractive(target, profile=None)
+        with reporter.stage("load", show_tail=False):
+            run_target_noninteractive(target, profile=None)
         source_kind = "live-nand"
     else:
-        print(f"Device-data preparation: use saved NAND dump {from_dump}.", flush=True)
         source_kind = "saved-dump"
 
     staging = _create_staging_generation(cache, target)
     selected = False
     try:
-        source_directory = _require_directory(
-            staging / "source",
-            "device-data source directory",
-        )
+        with reporter.stage("prepare"):
+            source_directory = _require_directory(
+                staging / "source",
+                "device-data source directory",
+            )
         source = source_directory / "nand.bin"
         if from_dump is None:
-            print(
-                "Device-data preparation: dump the complete NAND through the read-only reader.",
-                flush=True,
-            )
-            backup_target_nand(target, source)
-            raw = _read_dump(source)
+            backup_target_nand(target, source, reporter=reporter)
+            with reporter.stage("read-dump"):
+                raw = _read_dump(source)
         else:
-            raw = _read_dump(from_dump)
-            replace_file_atomically(source, raw, 0o600)
+            with reporter.stage("read-dump"):
+                raw = _read_dump(from_dump)
+                replace_file_atomically(source, raw, 0o600)
 
-        print("Device-data preparation: extract and validate all declared groups.", flush=True)
-        try:
-            nand = PhysicalNand.from_dump(raw, page_bytes=raw_page_bytes)
-        except ValueError as error:
-            fail(f"device-data extraction failed: {error}")
-        extracted = _extract_groups(target, parser_filename, declarations, nand)
-        _materialize_groups(staging, extracted)
-        admitted = capture_device_data_generation(
-            declarations,
-            staging,
-            path_field="source",
-            require_all=True,
-        )
-        _write_receipt(
-            staging,
-            source_kind=source_kind,
-            raw=raw,
-            groups=extracted,
-            admitted=admitted,
-        )
-        generation = _select_generation(cache, target, staging)
-        selected = True
+        with reporter.stage("extract"):
+            try:
+                nand = PhysicalNand.from_dump(raw, page_bytes=raw_page_bytes)
+            except ValueError as error:
+                fail(f"device-data extraction failed: {error}")
+            extracted = _extract_groups(target, parser_filename, declarations, nand)
+            _materialize_groups(staging, extracted)
+            admitted = capture_device_data_generation(
+                declarations,
+                staging,
+                path_field="source",
+                require_all=True,
+            )
+        with reporter.stage("publish"):
+            _write_receipt(
+                staging,
+                source_kind=source_kind,
+                raw=raw,
+                groups=extracted,
+                admitted=admitted,
+            )
+            generation = _select_generation(cache, target, staging)
+            selected = True
     finally:
         if not selected and staging.exists():
             shutil.rmtree(staging)
 
+    reporter.finish()
     print(f"Device data is ready in {generation}.")
     print("Next:")
     print(f"  ./fplinux build {target}")

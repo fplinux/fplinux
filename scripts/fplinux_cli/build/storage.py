@@ -14,7 +14,7 @@ from fplinux_cli import alpine_state, common, profile_layout
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import process as process_build
 from fplinux_cli.build import sources as sources_build
-from fplinux_cli.build.inputs import fail
+from fplinux_cli.common import fail
 from fplinux_cli.device_tree import DeviceTreeError
 
 if TYPE_CHECKING:

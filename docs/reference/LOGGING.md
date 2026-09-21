@@ -34,17 +34,22 @@ Public commands report progress through the shared stage reporter. New command
 paths add meaningful stages instead of printing an independent progress format.
 Keep documented machine-readable output stable.
 
-Standalone runner and SSH errors use `fplinux run:` and `fplinux ssh:`
-without depending on the repository package. Keep loader invitations and
-transfer results on standard output; retries and SSH connection diagnostics
-belong on standard error. An unreadable bundle file reports its I/O error
-without a Python traceback.
+Diagnostics and progress go to standard error; results and machine-readable
+output go to standard output. Keep child-command streams and loader prompts in
+their established channels. Repository diagnostics use the shared error formatter
+and the `fplinux:` prefix; `common.fail()` ends an operation on a single error.
+Standalone runner and SSH errors use `fplinux run:` and
+`fplinux ssh:` without depending on the repository package.
 
 Report expected file and process failures with their cause, without a Python
 traceback. Ctrl+C terminates with shell status 130. Unexpected exceptions retain
 their traceback; a stage records it in its log. Do not hide a later error merely
 because an earlier one was reported. Nested stages restore the caller's reporting
 context, and a failed run cannot become successful when logs are closed.
+
+Describe the operation actually completed. A saved file and its computed digest
+are not a byte-for-byte comparison with an independent source. Use `verified`
+only when the named comparison has actually succeeded.
 
 ## Phone userspace
 

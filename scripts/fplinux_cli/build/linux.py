@@ -11,8 +11,7 @@ from typing import TYPE_CHECKING, Any
 from fplinux_cli import linux_state, profile_layout
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import sources as sources_build
-from fplinux_cli.build.inputs import fail
-from fplinux_cli.common import sha256_bytes, sha256_file
+from fplinux_cli.common import fail, sha256_bytes, sha256_file
 from fplinux_cli.identity_codegen import (
     LINUX_IDENTITY_DTSI,
     LINUX_PLATFORM_IDENTITY_HEADER,

@@ -18,7 +18,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fplinux_cli.common import ROOT, alpine_tar_filter, fail, sha256_file
+from fplinux_cli.common import ROOT, alpine_tar_filter, error_message, fail, sha256_file
 from fplinux_cli.environment.images import (
     container_base_image_reference,
     container_image_build_arguments,
@@ -701,6 +701,6 @@ def doctor() -> None:
             )
     if problems:
         for problem in problems:
-            print(f"error: {problem}", file=sys.stderr)
+            print(error_message(problem), file=sys.stderr)
         raise SystemExit(1)
     print("doctor: OK")

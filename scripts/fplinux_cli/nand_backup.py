@@ -15,6 +15,7 @@ from fplinux_cli.manifests.targets import load_target
 
 from .common import fail, sha256_file
 from .device_data import PHYSICAL_PAGE_COUNT
+from .output import RunReporter
 
 BACKUP_TIMEOUT_SECONDS = 15 * 60
 
@@ -86,7 +87,7 @@ def backup_nand(
             temporary.unlink(missing_ok=True)
 
     print(
-        f"NAND backup verified: {output} ({raw_bytes} bytes, sha256={digest})",
+        f"NAND backup saved: {output} ({raw_bytes} bytes, sha256={digest})",
         flush=True,
     )
     return output
@@ -97,6 +98,7 @@ def backup_target_nand(
     output: Path,
     *,
     profile: str | None = None,
+    reporter: RunReporter | None = None,
 ) -> Path:
     """Back up one supported target through its exact current-profile session."""
     nand = load_target(target, profile=profile).get("nand")
@@ -107,6 +109,13 @@ def backup_target_nand(
         ssh, session = runtime_commands.current_target_ssh_session(target, profile=profile)
         return cast("SshTransport", ssh), session
 
-    return backup_nand(
-        connect, output, raw_device=nand["raw_device"], raw_page_bytes=nand["raw_page_bytes"]
-    )
+    own_reporter = reporter is None
+    if reporter is None:
+        reporter = RunReporter.create("nand", target=target, verbose=False)
+    with reporter.stage("read-nand"):
+        result = backup_nand(
+            connect, output, raw_device=nand["raw_device"], raw_page_bytes=nand["raw_page_bytes"]
+        )
+    if own_reporter:
+        reporter.finish()
+    return result

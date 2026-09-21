@@ -17,9 +17,8 @@ from fplinux_cli import common
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import process as process_build
 from fplinux_cli.build import sources as sources_build
-from fplinux_cli.build.inputs import fail
 from fplinux_cli.build_env import build_environment
-from fplinux_cli.common import sha256_file
+from fplinux_cli.common import fail, sha256_file
 from fplinux_cli.manifests.values import relative_value
 
 

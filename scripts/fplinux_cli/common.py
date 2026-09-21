@@ -10,6 +10,7 @@ import shlex
 import subprocess
 import tarfile
 import tempfile
+import tomllib
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, NoReturn
 
@@ -36,6 +37,15 @@ def error_message(message: object) -> str:
 
 def fail(message: str) -> NoReturn:
     raise SystemExit(error_message(message))
+
+
+def load_toml(path: Path) -> dict[str, Any]:
+    """Read a TOML input and attach its path to a syntax error."""
+    try:
+        with path.open("rb") as stream:
+            return tomllib.load(stream)
+    except tomllib.TOMLDecodeError as error:
+        fail(f"invalid TOML in {path}: {error}")
 
 
 def sha256_bytes(data: bytes) -> str:

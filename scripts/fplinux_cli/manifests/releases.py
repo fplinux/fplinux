@@ -3,11 +3,10 @@
 
 from __future__ import annotations
 
-import tomllib
 from typing import Any
 
 from fplinux_cli import common
-from fplinux_cli.common import fail
+from fplinux_cli.common import fail, load_toml
 from fplinux_cli.manifests.paths import target_release_manifest_path
 from fplinux_cli.manifests.values import exact_table, path_array, relative_value, sha256_value
 
@@ -17,8 +16,7 @@ def load_release(target: str) -> dict[str, Any]:
     path = target_release_manifest_path(target)
     if path.is_symlink() or not path.is_file():
         fail(f"target release manifest is missing or invalid: {path}")
-    with (path).open("rb") as stream:
-        raw = tomllib.load(stream)
+    raw = load_toml(path)
     manifest = exact_table(
         raw,
         {"image", "bundle_files", "runtime_files", "documents"},
@@ -45,8 +43,7 @@ def verified_runtime_digest(target: str) -> str | None:
     path = common.ROOT / "releases.lock.toml"
     if not path.is_file():
         fail(f"release verification lock is missing: {path}")
-    with (path).open("rb") as stream:
-        lock = tomllib.load(stream)
+    lock = load_toml(path)
     digest = lock.get("verified", {}).get(target)
     if digest is None:
         return None

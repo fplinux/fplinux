@@ -5,18 +5,14 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any
 
 from fplinux_cli import common
+from fplinux_cli.common import fail
 from fplinux_cli.manifests.values import relative_value
 
 CACHE = Path("/cache")
 OUTPUT = Path("/out")
-
-
-def fail(message: str) -> NoReturn:
-    """Stop a build without publishing a successful receipt."""
-    raise SystemExit(f"build failed: {message}")
 
 
 def require_file(path: Path) -> Path:

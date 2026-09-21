@@ -12,8 +12,7 @@ from typing import Any
 
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import process as process_build
-from fplinux_cli.build.inputs import fail
-from fplinux_cli.common import sha256_file
+from fplinux_cli.common import fail, sha256_file
 from fplinux_cli.manifests.values import relative_value
 
 
