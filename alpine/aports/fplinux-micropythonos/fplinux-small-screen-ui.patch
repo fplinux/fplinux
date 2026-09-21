@@ -108,11 +108,11 @@ index 45864b9..6862a6a 100644
 +                gc.collect()
 +                with open(name, "rb") as stream:
 +                    image_data = stream.read()
-+                print(f"loaded {len(image_data)} bytes from .raw file")
-+                print(
-+                    f"Raw image has width: {width}, Height: {height}, "
-+                    f"Color Format: {color_format}"
-+                )
++                if __debug__:
++                    logger.debug(
++                        "loaded %s raw bytes: %sx%s, color format %s",
++                        len(image_data), width, height, color_format,
++                    )
 @@ -285,0 +310,2 @@ class ImageView(Activity):
 +            else:
 +                self.image.set_src(f"M:{name}")

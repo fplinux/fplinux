@@ -32,7 +32,7 @@
 +       dsc->vinfo.blue.msb_right != 0U || dsc->vinfo.transp.length != 0U ||
 +       dsc->finfo.line_length < dsc->vinfo.xres * sizeof(uint16_t) ||
 +       dsc->vinfo.yres > SIZE_MAX / dsc->finfo.line_length) {
-+        fprintf(stderr, "Unsupported FPLinux framebuffer mode\n");
++        LV_LOG_ERROR("unsupported framebuffer mode");
 +        return;
 +    }
 +    page_bytes = (size_t)dsc->finfo.line_length * dsc->vinfo.yres;
@@ -41,7 +41,7 @@
 +       dsc->finfo.ypanstep == 0U ||
 +       dsc->finfo.smem_len < page_bytes * 2U ||
 +       LV_LINUX_FBDEV_RENDER_MODE != LV_DISPLAY_RENDER_MODE_FULL) {
-+        fprintf(stderr, "FPLinux framebuffer requires RGB565 double buffering\n");
++        LV_LOG_ERROR("framebuffer requires RGB565 double buffering");
 +        return;
 +    }
 +    fplinux_vinfo = dsc->vinfo;
@@ -94,6 +94,13 @@
 
 --- a/lvgl_micropython/lib/lv_conf.h
 +++ b/lvgl_micropython/lib/lv_conf.h
+@@ -311,5 +311,5 @@ extern void *mp_lv_roots;
+     // trace is useful but logs a LOT for every screen draw...
+     //#define LV_LOG_LEVEL LV_LOG_LEVEL_WARN
+-    #define LV_LOG_LEVEL LV_LOG_LEVEL_USER
++    #define LV_LOG_LEVEL LV_LOG_LEVEL_ERROR
+
+     /*1: Print the log with 'printf';
 @@ -1014,10 +1014,18 @@ extern void *mp_lv_roots;
  /*Driver for /dev/fb*/
  #define LV_USE_LINUX_FBDEV      MICROPY_FB

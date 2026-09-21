@@ -67,8 +67,12 @@ daemon can contain ordinary diagnostics, not only errors.
 
 ## Embedded projects
 
-Use U-Boot's `log_*` interface with an explicit category. Keep boot failures
-visible and routine controller-release messages at debug level.
+Use the embedding project's logging interface: U-Boot `log_*` with an explicit
+category, LVGL's levelled logger, and TyrQuake's console/error functions. Check
+both the configured level and the output callback before replacing a visible
+diagnostic. The FPLinux MicroPythonOS adapter forwards LVGL errors through its
+application logger without enabling continuous performance output. Python
+application diagnostics use that logger and deferred `%s` formatting.
 
 Use [Hardware debugging](../guides/DEBUGGING.md) for diagnostic logs and
 tracing. The [code style](CODE_STYLE.md) covers implementation and identifiers,
