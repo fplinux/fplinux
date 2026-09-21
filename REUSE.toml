@@ -29,6 +29,8 @@ path = [
   "container.lock.toml",
   "docs/**",
   "fplinux",
+  "include/**",
+  "lib/**",
   "package-lock.json",
   "package.json",
   "platforms/**",

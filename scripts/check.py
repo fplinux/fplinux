@@ -474,8 +474,8 @@ def userspace_c_include_flags(source: str) -> list[str]:
             }
         )
         flags.extend(flag for directory in directories for flag in ("-I", directory))
-    elif source == "common/host/fplinux-usb-keyboard.c":
-        flags.extend(("-I", "alpine/shared"))
+    elif path.parts[:2] == ("lib", "fplinux") or source == "common/host/fplinux-usb-keyboard.c":
+        flags.extend(("-I", "include/fplinux"))
     return flags
 
 

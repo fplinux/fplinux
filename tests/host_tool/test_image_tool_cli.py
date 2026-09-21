@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 ROOT = Path(__file__).resolve().parents[2]
 APORTS = ROOT / "alpine/aports"
-SHARED = ROOT / "alpine/shared"
+SHARED = ROOT / "include/fplinux"
 TOOLS = ("fplinux-rotate", "fplinux-jpeg", "fplinux-jpeg-cpu", "fplinux-present")
 
 
@@ -34,13 +34,13 @@ class ImageToolCliTests(unittest.TestCase):
             "fplinux-rotate": [
                 APORTS / "fplinux-rotate/fplinux-rotate.c",
                 APORTS / "fplinux-rotate/fplinux-rotate-core.c",
-                SHARED / "fplinux-fb-session.c",
+                ROOT / "lib/fplinux/fplinux-fb-session.c",
             ],
             "fplinux-jpeg": [APORTS / "fplinux-jpeg/fplinux-jpeg.c"],
             "fplinux-jpeg-cpu": [APORTS / "fplinux-jpeg/fplinux-jpeg-cpu.c"],
             "fplinux-present": [
                 APORTS / "fplinux-present/fplinux-present.c",
-                SHARED / "fplinux-fb-session.c",
+                ROOT / "lib/fplinux/fplinux-fb-session.c",
             ],
             "fplinux-rotate-display": [
                 APORTS / "fplinux-rotate/fplinux-rotate.c",
@@ -61,7 +61,7 @@ class ImageToolCliTests(unittest.TestCase):
                     f"-I{SHARED}",
                     f"-I{ROOT / 'platforms/ums9117/common'}",
                     *(str(source) for source in tool_sources),
-                    str(SHARED / "fplinux-cli.c"),
+                    str(ROOT / "lib/fplinux/fplinux-cli.c"),
                     *libraries,
                     "-o",
                     str(cls.directory / tool),

@@ -18,6 +18,10 @@ remain [target-owned](../targets/README.md).
 A target uses the shared runner through its manifest rather than copying a
 runner or adding a target-specific launcher.
 
+C libraries shared by host tools and phone packages live in `lib/fplinux/`,
+with their headers in `include/fplinux/` at the repository root. Their runtime
+requirements belong to each component, not to the package that consumes it.
+
 See the [porting overview](../docs/porting/README.md) for the complete ownership
 model and the project [documentation index](../README.md#documentation) for
 supported user workflows. Project-owned sources follow the

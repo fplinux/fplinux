@@ -1,7 +1,7 @@
 # C
 
 This guide applies to project-owned C in `bootstrap/`, `platforms/`, `targets/`,
-`alpine/`, `common/host/` and the C test harnesses.
+`alpine/`, `common/host/`, `lib/fplinux/`, `include/fplinux/` and the C test harnesses.
 
 All project-owned C uses the same Linux kernel formatting rules. Non-kernel code
 reads the repository `.clang-format`; kernel checks read the copy in the pinned
@@ -22,7 +22,8 @@ an upstream tree follows the boundary described below.
 | -------------------------------------------------------------- | ---------------------------------- | --------------------------------------------------------------------- |
 | `platforms/*/kernel/`, `targets/*/kernel/`                     | Linux kernel                       | Kernel GNU C, kernel types and subsystem APIs                         |
 | `bootstrap/`, `platforms/*/bootstrap/`, `targets/*/bootstrap/` | Fixed vendor runtime before Linux  | C99 with the facilities supplied by the bootstrap closure             |
-| `alpine/aports/`, `alpine/shared/`                             | musl/Linux on the phone            | C11 or the GNU dialect selected by the APKBUILD, POSIX and Linux UAPI |
+| `alpine/aports/`                                               | musl/Linux on the phone            | C11 or the GNU dialect selected by the APKBUILD, POSIX and Linux UAPI |
+| `lib/fplinux/`, `include/fplinux/`                             | shared host and phone components   | The component's declared C dialect and runtime interfaces             |
 | `common/host/`                                                 | Linux x86-64 host                  | C11, POSIX, Linux UAPI and libusb                                     |
 | Sources marked `fplinux-check: package-embedded`               | TyrQuake or MicroPython build tree | Destination project's dialect and external ABI                        |
 | `tests/host_tool/*.c`                                          | Host-only harness                  | The dialect selected by the test that compiles it                     |
@@ -180,7 +181,7 @@ exposes instead of depending on include order in one consumer.
 
 ### Keep command-line parsing consistent
 
-Public C commands use the [shared CLI library](../../../alpine/shared/fplinux-cli.h).
+Public C commands use the [shared CLI library](../../../include/fplinux/fplinux-cli.h).
 Declare named flags, options with values and positional arguments in one table,
 then call `fplinux_cli_parse()`. `-h` and `--help` print generated
 syntax and option help to standard output and return zero before the command

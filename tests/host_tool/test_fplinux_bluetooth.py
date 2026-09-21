@@ -19,7 +19,7 @@ from tests.process import run_process
 
 ROOT = Path(__file__).resolve().parents[2]
 CLIENT_SOURCE = ROOT / "alpine/aports/fplinux-bluetooth/fplinux-bluetooth.c"
-SHARED_INCLUDE = ROOT / "alpine/shared"
+SHARED_INCLUDE = ROOT / "include/fplinux"
 SERVICE_SOURCE = ROOT / "tests/host_tool/fplinux-bluetooth-service.c"
 PEER = "01:23:45:67:89:AB"
 CONNECTED = "connected 01:23:45:67:89:AB via bnep0; configure IP, DHCP and NAT separately\n"
@@ -72,7 +72,7 @@ class FplinuxBluetoothHostToolTests(unittest.TestCase):
                 CLIENT_SOURCE,
                 cls.client,
                 "compile FPLinux Bluetooth client",
-                [str(SHARED_INCLUDE / "fplinux-cli.c")],
+                [str(ROOT / "lib/fplinux/fplinux-cli.c")],
             ),
             (SERVICE_SOURCE, cls.service, "compile FPLinux Bluetooth test service", []),
         ):

@@ -8,7 +8,7 @@
 #include <unistd.h>
 
 #include "../../alpine/aports/fplinux-micropythonos/fplinux-micropythonos-launcher-internal.h"
-#include "../../alpine/shared/fplinux-fb-session.h"
+#include "../../include/fplinux/fplinux-fb-session.h"
 
 static int test_framebuffer_helpers(void)
 {

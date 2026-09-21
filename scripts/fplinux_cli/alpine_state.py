@@ -24,16 +24,16 @@ SIGNING_PUBLIC_KEY = "fplinux-build.rsa.pub"
 PACKAGE_CACHE_DIRECTORY = "apks"
 PACKAGE_RECEIPT_NAME = ".fplinux-package-receipt.json"
 MULTITAP_SOURCES = (
-    "alpine/shared/fplinux-multitap.c",
-    "alpine/shared/fplinux-multitap.h",
+    "lib/fplinux/fplinux-multitap.c",
+    "include/fplinux/fplinux-multitap.h",
 )
 FB_SESSION_SOURCES = (
-    "alpine/shared/fplinux-fb-session.c",
-    "alpine/shared/fplinux-fb-session.h",
+    "lib/fplinux/fplinux-fb-session.c",
+    "include/fplinux/fplinux-fb-session.h",
 )
 CLI_SOURCES = (
-    "alpine/shared/fplinux-cli.c",
-    "alpine/shared/fplinux-cli.h",
+    "lib/fplinux/fplinux-cli.c",
+    "include/fplinux/fplinux-cli.h",
 )
 SHARED_APORT_SOURCES = {
     "fplinux-bluetooth": CLI_SOURCES,
