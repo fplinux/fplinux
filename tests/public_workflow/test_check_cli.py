@@ -22,6 +22,7 @@ PUBLIC_COMMANDS = (
     "check",
     "test",
     "logs",
+    "inspect",
     "format",
     "setup",
     "build",

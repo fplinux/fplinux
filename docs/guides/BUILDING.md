@@ -325,6 +325,36 @@ destination unchanged. The digest identifies the saved bytes; the command does
 not compare them with a second device read. Restoring NAND is unsupported.
 Treat this file as private device data.
 
+## Inspect built artifacts
+
+```sh
+./fplinux inspect bundle nokia-ta1618
+./fplinux inspect bundle nokia-ta1618 --profile microsd-uboot
+./fplinux inspect archive path/to/FPLinux.zip
+./fplinux inspect apk path/to/package.apk
+```
+
+`bundle` reads the published current generation for the selected target and
+profile, prints its identity and file sizes and SHA-256 hashes, and checks the
+files against their build manifest. It does not rebuild or check whether the
+source checkout has changed since that build. APKs and debug files are included
+in the file listing.
+
+`archive` reads a FPLinux candidate or release ZIP, reports its recorded identity
+and file listing, and checks every payload against the enclosed `SHA256SUMS`.
+Missing, extra or mismatched files cause failure. The checks establish internal
+byte consistency, not authenticity or phone support.
+
+`apk` displays `.PKGINFO` and the file list of an APK v2 package, including link
+destinations. It does not install the package, run its scripts or verify its
+signature. Neither archive command extracts files.
+
+Inspection needs no Kern environment or phone connection. Bundle inspection
+holds the shared cache lock while reading the selected generation; inspecting
+a ZIP or APK does not take that lock or create cache state. Output is text;
+exit status is 0 on success, 1 on an inspection or checksum error, 2 for invalid
+arguments and 130 after Ctrl+C.
+
 ## Logs, cache, and parallel commands
 
 Build, check, test and format print compact stage status. Add `--verbose` to

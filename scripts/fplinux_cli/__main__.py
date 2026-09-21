@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from fplinux_cli.cli.build import build
 from fplinux_cli.cli.bundles import PUBLIC_BOOT_MODES, selected_context_profile
 from fplinux_cli.cli.checksum import checksum_aport
+from fplinux_cli.cli.inspect import inspect_apk, inspect_archive, inspect_bundle
 from fplinux_cli.cli.logs import add_log_arguments, read_logs
 from fplinux_cli.cli.package import package_target
 from fplinux_cli.cli.runtime import console_target, run_target, verify_booted
@@ -45,7 +46,7 @@ _EXCLUSIVE_CACHE_COMMANDS = frozenset(
 _SHARED_CACHE_COMMANDS = frozenset({"console", "package", "run", "verify"})
 _CHECK_SCOPE_METAVAR = "{" + ",".join(CHECK_SCOPES) + "}"
 _PUBLIC_COMMAND_METAVAR = (
-    "{doctor,check,test,logs,format,setup,build,checksum,package,prune,"
+    "{doctor,check,test,logs,inspect,format,setup,build,checksum,package,prune,"
     "run,console,nand,device-data,verify}"
 )
 
@@ -88,6 +89,8 @@ def _cache_lock_exclusive(args: argparse.Namespace) -> bool | None:
         return None
     if args.command == "prune":
         return True if args.prune_apply else None
+    if args.command == "inspect":
+        return False if args.inspect_kind == "bundle" else None
     if args.command in _EXCLUSIVE_CACHE_COMMANDS:
         return True
     if args.command in _SHARED_CACHE_COMMANDS:
@@ -168,6 +171,13 @@ def _command_action(
         action = doctor
     elif args.command == "logs":
         action = partial(read_logs, args)
+    elif args.command == "inspect":
+        if args.inspect_kind == "bundle":
+            action = partial(inspect_bundle, args.target, profile=args.profile)
+        elif args.inspect_kind == "archive":
+            action = partial(inspect_archive, args.path)
+        else:
+            action = partial(inspect_apk, args.path)
     elif args.command == "check":
         if args.list_scopes:
             if args.profile is not None:
@@ -359,6 +369,17 @@ def main() -> None:
     add_test_arguments(test_parser)
     logs_parser = commands.add_parser("logs", help="list, inspect or follow recorded command logs")
     add_log_arguments(logs_parser)
+    inspect_parser = commands.add_parser("inspect", help="inspect a built bundle, ZIP or APK")
+    inspections = inspect_parser.add_subparsers(dest="inspect_kind", required=True)
+    bundle_parser = inspections.add_parser("bundle", help="inspect the current target bundle")
+    bundle_parser.add_argument("target", choices=targets)
+    bundle_parser.add_argument("--profile", type=_profile_name, metavar="NAME")
+    for kind, help_text in (
+        ("archive", "check and inspect a FPLinux ZIP"),
+        ("apk", "read APK metadata and file list"),
+    ):
+        item_parser = inspections.add_parser(kind, help=help_text)
+        item_parser.add_argument("path", type=Path, metavar="PATH")
     format_parser = commands.add_parser(
         "format", help="format explicit project sources in the pinned environment"
     )
