@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any, NoReturn
@@ -18,7 +19,7 @@ SESSION_ID = re.compile(r"[0-9a-f]{64}\Z")
 
 
 def fail(message: str) -> NoReturn:
-    raise SystemExit(f"RAM adapter failed: {message}")
+    raise SystemExit(f"fplinux run: {message}")
 
 
 class BootromDisconnectedError(Exception):
@@ -339,6 +340,7 @@ def run(
                 f"RAM loader attempt {attempt}/{max_loader_attempts} exited with "
                 f"status {result.returncode}. Disconnect and power off the phone, "
                 "then reconnect it in BootROM mode; waiting for a fresh USB device.",
+                file=sys.stderr,
                 flush=True,
             )
             while bootrom_device.exists():
