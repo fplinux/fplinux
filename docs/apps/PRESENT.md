@@ -123,7 +123,7 @@ completion durations, not optical latency.
 
 The shared `ums9117-present.h` header defines `UMS9117_FBIO_PRESENT` and
 `struct ums9117_present` for native-size userspace presentation. In a source
-checkout it is maintained at `platforms/ums9117/common/ums9117-present.h`.
+checkout it is maintained at `platforms/ums9117/linux/include/uapi/fplinux/ums9117-present.h`.
 `pixels` points to one native-size frame, `format` is
 `UMS9117_PRESENT_NV16` or `UMS9117_PRESENT_RGB565`, and `bytes` must equal the
 framebuffer width multiplied by its height and by two.

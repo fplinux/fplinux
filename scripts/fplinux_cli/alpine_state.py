@@ -45,7 +45,7 @@ SHARED_APORT_SOURCES = {
     "fplinux-present": (
         *FB_SESSION_SOURCES,
         *CLI_SOURCES,
-        "platforms/ums9117/common/ums9117-present.h",
+        "platforms/ums9117/linux/include/uapi/fplinux/ums9117-present.h",
     ),
     "fplinux-rotate": (*FB_SESSION_SOURCES, *CLI_SOURCES),
     "fplinux-showcase": (*FB_SESSION_SOURCES, *CLI_SOURCES),

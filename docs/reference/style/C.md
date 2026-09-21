@@ -20,7 +20,7 @@ an upstream tree follows the boundary described below.
 
 | Code                                                           | Environment                        | Language and API                                                      |
 | -------------------------------------------------------------- | ---------------------------------- | --------------------------------------------------------------------- |
-| `platforms/*/kernel/`, `targets/*/kernel/`                     | Linux kernel                       | Kernel GNU C, kernel types and subsystem APIs                         |
+| `platforms/*/linux/`, `targets/*/linux/`                       | Linux kernel                       | Kernel GNU C, kernel types and subsystem APIs                         |
 | `bootstrap/`, `platforms/*/bootstrap/`, `targets/*/bootstrap/` | Fixed vendor runtime before Linux  | C99 with the facilities supplied by the bootstrap closure             |
 | `alpine/aports/`                                               | musl/Linux on the phone            | C11 or the GNU dialect selected by the APKBUILD, POSIX and Linux UAPI |
 | `lib/fplinux/`, `include/fplinux/`                             | shared host and phone components   | The component's declared C dialect and runtime interfaces             |

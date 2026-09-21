@@ -54,7 +54,7 @@ SPDX-License-Identifier = "GPL-2.0-or-later"
 
 # SPDX comments in diff context describe upstream files, not the patch itself.
 [[annotations]]
-path = ["platforms/*/kernel/*.patch", "targets/*/kernel/*.patch"]
+path = ["platforms/*/linux/patches/*.patch", "targets/*/linux/patches/*.patch"]
 precedence = "override"
 SPDX-FileCopyrightText = "2026 FPLinux contributors"
 SPDX-License-Identifier = "GPL-2.0-only"

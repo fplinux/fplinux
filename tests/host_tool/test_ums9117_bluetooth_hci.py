@@ -10,7 +10,7 @@ from pathlib import Path
 from tests.process import run_process
 
 ROOT = Path(__file__).resolve().parents[2]
-KERNEL = ROOT / "platforms/ums9117/kernel"
+KERNEL = ROOT / "platforms/ums9117/linux/drivers/bluetooth/ums9117"
 FIXTURES = ROOT / "tests/host_tool"
 COMPAT = FIXTURES / "bluetooth-compat"
 

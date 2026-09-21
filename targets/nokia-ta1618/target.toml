@@ -19,11 +19,11 @@ packages = ["fplinux-audio"]
 packages = []
 
 [linux]
-config_fragment = "kernel/config.fragment"
+config_fragment = "linux/config.fragment"
 memory = { base = 0x80200000, size = 0x03c00000 }
 dtb = "unisoc/ums9117-nokia-ta1618.dtb"
 debug_dtb = "ums9117-nokia-ta1618.dtb"
-patches = ["kernel/0001-nokia-ta1618-board.patch"]
+patches = ["linux/patches/0001-nokia-ta1618-board.patch"]
 # Only the removable microSD is writable. Internal NAND has a fixed-command
 # read-only interface, without an MTD or generic SPI controller.
 forbidden_dtb_markers = ["spi-nand", "mtd", "ubi", "emmc"]
@@ -37,27 +37,27 @@ forbidden_config = [
 ]
 
 [[linux.copies]]
-source = "dts/nand-readonly.dtsi"
+source = "linux/dts/nand-readonly.dtsi"
 destination = "arch/arm/boot/dts/unisoc/nokia-ta1618-nand-readonly.dtsi"
 
 [[linux.copies]]
-source = "dts/bluetooth.dtsi"
+source = "linux/dts/bluetooth.dtsi"
 destination = "arch/arm/boot/dts/unisoc/nokia-ta1618-bluetooth.dtsi"
 
 [[linux.copies]]
-source = "kernel/ta1618-fb.c"
+source = "linux/drivers/video/fbdev/ta1618-fb.c"
 destination = "drivers/video/fbdev/ta1618-fb.c"
 
 [[linux.copies]]
-source = "dts/ums9117-nokia-ta1618.dts"
+source = "linux/dts/ums9117-nokia-ta1618.dts"
 destination = "arch/arm/boot/dts/unisoc/ums9117-nokia-ta1618.dts"
 
 [[linux.appends]]
-source = "kernel/Kconfig"
+source = "linux/arch/arm/mach-ums9117/Kconfig"
 destination = "arch/arm/mach-ums9117/Kconfig"
 
 [[linux.appends]]
-source = "kernel/fbdev.Makefile"
+source = "linux/drivers/video/fbdev/fbdev.Makefile"
 destination = "drivers/video/fbdev/Makefile"
 
 [bootstrap]
