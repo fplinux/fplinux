@@ -16,7 +16,7 @@ Kernel, bootstrap, host and phone-userspace messages follow the shared
 ```sh
 ./fplinux logs list
 ./fplinux logs list --command build --target nokia-ta1618 --profile default
-./fplinux logs list --status failed --json
+./fplinux logs list --status failed
 ```
 
 Runs are ordered by their recorded start time, newest first. The listing shows
@@ -26,10 +26,8 @@ Statuses are `running`, `success`, `failed` and `interrupted`; they describe the
 recorded command result, not phone health. Profiles apply to build and check
 runs. An empty listing succeeds.
 
-`--json` returns an array with `id`, `command`, `target`, `profile`, `status`,
-`started_at`, `finished_at`, `duration_seconds`, `pid` and `path`. Times use UTC;
-duration is elapsed time for an unfinished run. Missing target, profile or
-finish time is `null`. `path` is the repository-relative run directory.
+Times use UTC; duration is elapsed time for an unfinished run. Missing target
+or profile is shown as `-`.
 
 ### Read stage output
 

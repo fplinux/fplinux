@@ -912,27 +912,6 @@ class PruneTests(unittest.TestCase):
             self.assertEqual(result.removed, expected)
             self.assertTrue(all(not generation.exists() for generation in generations))
 
-    def test_prune_function_prints_exact_empty_json_dry_run(self) -> None:
-        """The JSON mode writes the exact empty dry-run document."""
-        with tempfile.TemporaryDirectory() as temporary:
-            cache = Path(temporary) / ".cache"
-            output = io.StringIO()
-            with redirect_stdout(output):
-                prune(cache=cache, json_output=True)
-
-            self.assertEqual(
-                output.getvalue(),
-                "{\n"
-                '  "candidate_allocated_bytes": 0,\n'
-                '  "candidate_count": 0,\n'
-                '  "candidate_logical_bytes": 0,\n'
-                '  "entries": [],\n'
-                '  "mode": "dry-run",\n'
-                '  "unsafe": []\n'
-                "}\n",
-            )
-            self.assertFalse(cache.exists())
-
     def test_prune_function_prints_exact_empty_text_dry_run(self) -> None:
         """The text mode writes the exact empty dry-run report."""
         with tempfile.TemporaryDirectory() as temporary:

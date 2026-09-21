@@ -377,7 +377,6 @@ Inspect cache cleanup candidates before deleting generated data:
 
 ```sh
 ./fplinux prune
-./fplinux prune --json
 ./fplinux prune --apply
 ```
 
