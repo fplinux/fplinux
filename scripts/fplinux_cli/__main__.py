@@ -231,7 +231,7 @@ def _command_action(
             candidate=args.candidate,
         )
     elif args.command == "prune":
-        action = partial(prune, json_output=args.prune_json, apply=args.prune_apply)
+        action = partial(prune, apply=args.prune_apply)
     elif args.command == "run":
         action = partial(
             run_target,
@@ -438,12 +438,6 @@ def main() -> None:
     )
     prune_parser = commands.add_parser(
         "prune", help="show a safe cache-prune inventory or apply it"
-    )
-    prune_parser.add_argument(
-        "--json",
-        dest="prune_json",
-        action="store_true",
-        help="emit the inventory or apply result as JSON",
     )
     prune_parser.add_argument(
         "--apply",

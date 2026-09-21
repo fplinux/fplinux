@@ -456,8 +456,7 @@ class CliCacheLockTests(unittest.TestCase):
         """The two no-work paths neither lock nor create a cache directory."""
         cases = (
             (["check", "--list"], None),
-            (["prune"], (False, False)),
-            (["prune", "--json"], (True, False)),
+            (["prune"], False),
         )
         for arguments, prune_arguments in cases:
             with self.subTest(arguments=arguments):
@@ -476,8 +475,7 @@ class CliCacheLockTests(unittest.TestCase):
                     cli.main()
                 lock.assert_not_called()
                 if prune_arguments is not None:
-                    json_output, apply = prune_arguments
-                    prune.assert_called_once_with(json_output=json_output, apply=apply)
+                    prune.assert_called_once_with(apply=prune_arguments)
                 self.assertFalse((self.root / ".cache").exists())
 
 

@@ -205,6 +205,22 @@ class InspectCliTests(unittest.TestCase):
                     self.assertNotIn("Traceback", result.stderr)
         self.assertFalse((self.root / ".cache").exists())
 
+    def test_json_is_not_a_public_output_mode(self) -> None:
+        """Unsupported output flags fail at argument parsing, before actions can begin."""
+        for arguments in (
+            ("prune",),
+            ("logs", "list"),
+            ("inspect", "bundle", "example"),
+            ("inspect", "archive", "example.zip"),
+            ("inspect", "apk", "example.apk"),
+        ):
+            with self.subTest(arguments=arguments):
+                result = self.run_cli(*arguments, "--json")
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("unrecognized arguments: --json", result.stderr)
+                self.assertEqual(result.stdout, "")
+        self.assertFalse((self.root / ".cache").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -103,12 +103,9 @@ def run_details(run: LogRun, root: Path) -> dict[str, object]:
         "profile": profile,
         "status": run.status,
         "started_at": run.started.isoformat(),
-        "finished_at": run.finished.isoformat() if run.finished is not None else None,
         "duration_seconds": round(
             ((run.finished or datetime.now(UTC)) - run.started).total_seconds(), 3
         ),
-        "pid": run.pid,
-        "path": (Path(".cache/logs") / relative).as_posix(),
     }
 
 
@@ -141,9 +138,7 @@ def add_log_arguments(parser: argparse.ArgumentParser) -> None:
             "--profile", dest="logs_profile", metavar="NAME", help="filter by build/check profile"
         )
         child.add_argument("--status", choices=_STATUSES, help="filter by recorded run status")
-        if action == "list":
-            child.add_argument("--json", action="store_true", help="print run records as JSON")
-        else:
+        if action != "list":
             child.add_argument(
                 "run", nargs="?", default="latest", help="run ID or latest (default)"
             )
@@ -266,25 +261,22 @@ def read_logs(args: argparse.Namespace) -> None:
     runs.sort(key=lambda item: (item[0].started, str(item[0].path)), reverse=True)
     try:
         if args.logs_action == "list":
-            if args.json:
-                print(json.dumps([details for _run, details in runs], indent=2))
-            else:
-                print("RUN COMMAND TARGET PROFILE STATUS STARTED DURATION")
-                for _run, details in runs:
-                    print(
-                        " ".join(
-                            str(details[key]) if details[key] is not None else "-"
-                            for key in (
-                                "id",
-                                "command",
-                                "target",
-                                "profile",
-                                "status",
-                                "started_at",
-                                "duration_seconds",
-                            )
+            print("RUN COMMAND TARGET PROFILE STATUS STARTED DURATION")
+            for _run, details in runs:
+                print(
+                    " ".join(
+                        str(details[key]) if details[key] is not None else "-"
+                        for key in (
+                            "id",
+                            "command",
+                            "target",
+                            "profile",
+                            "status",
+                            "started_at",
+                            "duration_seconds",
                         )
                     )
+                )
             return
         selected = (
             runs[:1]

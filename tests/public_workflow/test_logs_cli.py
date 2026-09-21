@@ -106,16 +106,19 @@ class LogsCliTests(unittest.TestCase):
         (unrelated / "run.json").write_text("{}")
         os.utime(first / "run.json", None)
 
-        result = self.run_logs("list", "--json")
+        result = self.run_logs("list")
         self.assertEqual(result.returncode, 0, result.stderr)
-        records = json.loads(result.stdout)
+        records = result.stdout.splitlines()[1:]
         self.assertEqual(
-            [record["id"] for record in records],
-            ["check/new", "build/example/profiles/microsd-uboot/old"],
+            records,
+            [
+                "check/new check - default failed 2026-01-02T10:00:05+00:00 7.0",
+                (
+                    "build/example/profiles/microsd-uboot/old build example microsd-uboot "
+                    "success 2026-01-02T10:00:00+00:00 12.0"
+                ),
+            ],
         )
-        self.assertEqual(records[0]["duration_seconds"], 7)
-        self.assertEqual(records[0]["profile"], "default")
-        self.assertEqual(records[0]["path"], ".cache/logs/check/new")
         self.assertNotIn(str(self.root), result.stdout)
         filtered = self.run_logs(
             "list",
@@ -127,11 +130,10 @@ class LogsCliTests(unittest.TestCase):
             "microsd-uboot",
             "--status",
             "success",
-            "--json",
         )
         self.assertEqual(filtered.returncode, 0, filtered.stderr)
         self.assertEqual(
-            [record["id"] for record in json.loads(filtered.stdout)],
+            [row.split()[0] for row in filtered.stdout.splitlines()[1:]],
             ["build/example/profiles/microsd-uboot/old"],
         )
         shown = self.run_logs("show")
@@ -168,10 +170,10 @@ class LogsCliTests(unittest.TestCase):
         """Default selection excludes named profiles on list and on an explicit run ID."""
         self.journal("build/example/base")
         self.journal("build/example/profiles/microsd-uboot/card")
-        result = self.run_logs("list", "--profile", "default", "--json")
+        result = self.run_logs("list", "--profile", "default")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
-            [record["id"] for record in json.loads(result.stdout)], ["build/example/base"]
+            [row.split()[0] for row in result.stdout.splitlines()[1:]], ["build/example/base"]
         )
         rejected = self.run_logs(
             "show", "build/example/profiles/microsd-uboot/card", "--profile", "default"
@@ -184,18 +186,18 @@ class LogsCliTests(unittest.TestCase):
         self.journal("build/example/run")
         before = sorted(path.relative_to(self.logs) for path in self.logs.rglob("*"))
         with cache_lock(self.root / ".cache", exclusive=True, command="build", target="example"):
-            result = self.run_logs("list", "--json")
+            result = self.run_logs("list")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(json.loads(result.stdout)), 1)
+        self.assertEqual(len(result.stdout.splitlines()[1:]), 1)
         self.assertEqual(
             sorted(path.relative_to(self.logs) for path in self.logs.rglob("*")), before
         )
 
     def test_empty_unknown_ambiguous_and_invalid_requests_have_clear_outcomes(self) -> None:
         """Empty listing succeeds, missing/ambiguous selections fail and invalid flags return 2."""
-        empty = self.run_logs("list", "--json")
+        empty = self.run_logs("list")
         self.assertEqual(empty.returncode, 0, empty.stderr)
-        self.assertEqual(json.loads(empty.stdout), [])
+        self.assertEqual(empty.stdout, "RUN COMMAND TARGET PROFILE STATUS STARTED DURATION\n")
         self.assertFalse(self.logs.exists())
         self.journal("check/same")
         self.journal("test/same")

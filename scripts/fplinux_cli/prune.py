@@ -48,7 +48,6 @@ class PrunePlan:
     """A read-only workspace prune plan."""
 
     entries: tuple[InventoryEntry, ...]
-    unsafe: tuple[str, ...] = ()
 
     @property
     def candidates(self) -> tuple[InventoryEntry, ...]:
@@ -64,24 +63,6 @@ class PrunePlan:
     def candidate_allocated_bytes(self) -> int:
         """Return the allocated size of all candidates."""
         return sum(entry.allocated_bytes or 0 for entry in self.candidates)
-
-    def as_json(self) -> str:
-        """Render a stable JSON dry-run report."""
-        return (
-            json.dumps(
-                {
-                    "candidate_allocated_bytes": self.candidate_allocated_bytes,
-                    "candidate_count": len(self.candidates),
-                    "candidate_logical_bytes": self.candidate_logical_bytes,
-                    "entries": [entry.__dict__ for entry in self.entries],
-                    "mode": "dry-run",
-                    "unsafe": list(self.unsafe),
-                },
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n"
-        )
 
     def as_text(self) -> str:
         """Render a human-readable dry-run report."""
@@ -105,25 +86,6 @@ class PruneApplyResult:
     removed: tuple[str, ...]
     reclaimed_logical_bytes: int
     reclaimed_allocated_bytes: int
-    unsafe: tuple[str, ...] = ()
-
-    def as_json(self) -> str:
-        """Render a stable JSON apply report."""
-        return (
-            json.dumps(
-                {
-                    "mode": "apply",
-                    "reclaimed_allocated_bytes": self.reclaimed_allocated_bytes,
-                    "reclaimed_logical_bytes": self.reclaimed_logical_bytes,
-                    "removed": list(self.removed),
-                    "removed_count": len(self.removed),
-                    "unsafe": list(self.unsafe),
-                },
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n"
-        )
 
     def as_text(self) -> str:
         """Render a human-readable apply report."""
@@ -145,13 +107,12 @@ class PruneSafetyError(RuntimeError):
 def prune(
     *,
     cache: Path | None = None,
-    json_output: bool = False,
     apply: bool = False,
 ) -> None:
     """Print a dry run or remove its freshly recomputed candidates."""
     cache_path = cache or ROOT / ".cache"
     result = apply_prune(cache_path) if apply else plan_prune(cache_path)
-    print(result.as_json() if json_output else result.as_text(), end="")
+    print(result.as_text(), end="")
 
 
 def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
