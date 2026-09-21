@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#define LOG_CATEGORY LOGC_BOARD
 #include <asm/unaligned.h>
 #include <bootm.h>
 #include <command.h>
@@ -7,6 +8,7 @@
 #include <image.h>
 #include <linux/libfdt.h>
 #include <linux/types.h>
+#include <log.h>
 #include <mmc.h>
 #include <stdio.h>
 #include <string.h>
@@ -320,7 +322,7 @@ fail_release:
 fail:
 	if (ops)
 		ops->fail(FPLINUX_STAGE0_FAILURE_SDBOOT, stage);
-	printf("sdboot: stage %u failed\n", (unsigned int)stage);
+	log_err("microSD boot stage %u failed\n", (unsigned int)stage);
 	return CMD_RET_FAILURE;
 }
 
