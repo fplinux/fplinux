@@ -24,6 +24,12 @@ Public commands report progress through the shared stage reporter. New command
 paths add meaningful stages instead of printing an independent progress format.
 Keep documented machine-readable output stable.
 
+Standalone runner and SSH errors use `fplinux run:` and `fplinux ssh:`
+without depending on the repository package. Keep loader invitations and
+transfer results on standard output; retries and SSH connection diagnostics
+belong on standard error. An unreadable bundle file reports its I/O error
+without a Python traceback.
+
 ## Phone userspace
 
 Messages written to `/dev/kmsg` use a component prefix and a severity matching

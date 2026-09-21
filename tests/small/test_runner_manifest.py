@@ -35,6 +35,22 @@ def load_runner() -> ModuleType:
 RUNNER = load_runner()
 
 
+class BundleReadErrorTests(unittest.TestCase):
+    """Report an unreadable payload before any adapter is loaded."""
+
+    def test_unreadable_payload_reports_the_path_without_exposing_an_os_exception(self) -> None:
+        """Filesystem access denial is a normal command failure, including when run as root."""
+        path = Path("image/ramboot.bin")
+        # Replace only the OS read boundary; permission bits are ineffective under root.
+        with (
+            mock.patch.object(
+                Path, "open", side_effect=PermissionError(13, "Permission denied", path)
+            ),
+            self.assertRaisesRegex(SystemExit, r"fplinux run: .*Permission denied.*ramboot.bin"),
+        ):
+            RUNNER.digest(path)
+
+
 class PythonRuntimeTests(unittest.TestCase):
     """Keep the standalone runner on its single supported Python series."""
 
@@ -435,7 +451,7 @@ class NoTransportRunnerTests(unittest.TestCase):
         ssh.load_current_session.return_value = session
         ssh.reacquire_bound_session.return_value = ready
         ssh.require_device_identity.side_effect = SystemExit(
-            "SSH transport failed: current SSH session exposes a different kernel identity"
+            "fplinux ssh: current SSH session exposes a different kernel identity"
         )
 
         with (

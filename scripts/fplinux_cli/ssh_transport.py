@@ -18,6 +18,7 @@ import signal
 import stat
 import struct
 import subprocess
+import sys
 import tempfile
 import time
 import zlib
@@ -60,7 +61,7 @@ RFC1918_NETWORKS = tuple(
 
 def fail(message: str) -> NoReturn:
     """Stop without falling back to a less-bound transport."""
-    raise SystemExit(f"SSH transport failed: {message}")
+    raise SystemExit(f"fplinux ssh: {message}")
 
 
 def _require_tool(name: str) -> str:
@@ -1008,7 +1009,11 @@ def _wait_for_authenticated_endpoint(
                 _retry_pause(deadline)
                 continue
             if not announced_key:
-                print("SSH host key observed; validating the private RAM session identity.")
+                print(
+                    "SSH host key observed; validating the private RAM session identity.",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 announced_key = True
         remaining = deadline - time.monotonic()
         if remaining <= 0:

@@ -27,7 +27,7 @@ _identity_module: ModuleType | None = None
 
 def fail(message: str) -> NoReturn:
     """Stop before invoking the platform adapter."""
-    raise SystemExit(f"RAM runner failed: {message}")
+    raise SystemExit(f"fplinux run: {message}")
 
 
 def identity_module() -> ModuleType:
@@ -66,8 +66,11 @@ def validate_runtime_identity(runtime: dict[str, Any]) -> dict[str, Any]:
 
 def digest(path: Path) -> str:
     """Return a file SHA-256 digest."""
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+    try:
+        with path.open("rb") as stream:
+            return hashlib.file_digest(stream, "sha256").hexdigest()
+    except OSError as error:
+        fail(str(error))
 
 
 def require_object(value: object, keys: set[str], name: str) -> dict[str, Any]:
