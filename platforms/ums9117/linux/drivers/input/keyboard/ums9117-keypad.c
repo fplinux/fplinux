@@ -9,6 +9,7 @@
  * This driver consumes their events; it does not configure the analog EIC
  * controller directly.
  */
+#include <linux/err.h>
 #include <linux/bitops.h>
 #include <linux/delay.h>
 #include <linux/gpio/consumer.h>
@@ -224,8 +225,8 @@ static irqreturn_t ums9117_keypad_eic_irq_thread(int irq, void *data)
 	if (ret < 0)
 		dev_warn_ratelimited(
 			key->keypad->dev,
-			"EIC GPIO read failed for input code %u: %d\n",
-			key->keycode, ret);
+			"EIC GPIO read failed for input code %u: %pe\n",
+			key->keycode, ERR_PTR(ret));
 	else if (ret)
 		input_sync(key->keypad->input);
 
@@ -483,8 +484,8 @@ static int ums9117_keypad_suspend(struct device *dev)
 			enable_irq(controller->eic9.irq);
 			controller->eic9.suspend_disabled = false;
 		}
-		dev_err(dev, "could not enable EIC1 power-key wake IRQ: %d\n",
-			ret);
+		dev_err(dev, "could not enable EIC1 power-key wake IRQ: %pe\n",
+			ERR_PTR(ret));
 		return ret;
 	}
 
@@ -501,8 +502,8 @@ static int ums9117_keypad_resume(struct device *dev)
 		ret = disable_irq_wake(controller->eic1.irq);
 		if (ret) {
 			dev_err(dev,
-				"could not disable EIC1 power-key wake IRQ: %d\n",
-				ret);
+				"could not disable EIC1 power-key wake IRQ: %pe\n",
+				ERR_PTR(ret));
 			return ret;
 		}
 
@@ -514,8 +515,8 @@ static int ums9117_keypad_resume(struct device *dev)
 		controller->eic9.suspend_disabled = false;
 		if (ret < 0) {
 			dev_err(dev,
-				"could not resample EIC9 after system sleep: %d\n",
-				ret);
+				"could not resample EIC9 after system sleep: %pe\n",
+				ERR_PTR(ret));
 			return ret;
 		}
 		if (ret)
@@ -656,23 +657,19 @@ static int ums9117_keypad_probe(struct platform_device *pdev)
 
 	if (keypad->matrix_irq_mode &&
 	    (keypad->eic1.gpiod || keypad->eic9.gpiod))
-		dev_info(
-			dev,
-			"UMS9117 keypad: matrix IRQ SPI%u/hwirq%u; EIC GPIO IRQs\n",
+		dev_dbg(dev, "matrix IRQ SPI%u/hwirq%u; EIC GPIO IRQs\n",
 			UMS9117_KPD_MATRIX_IRQ_SPI,
 			UMS9117_KPD_MATRIX_IRQ_HWIRQ);
 	else if (keypad->matrix_irq_mode)
-		dev_info(
-			dev,
-			"UMS9117 keypad registered with matrix IRQ SPI%u/hwirq%u\n",
+		dev_dbg(dev,
+			"keypad registered with matrix IRQ SPI%u/hwirq%u\n",
 			UMS9117_KPD_MATRIX_IRQ_SPI,
 			UMS9117_KPD_MATRIX_IRQ_HWIRQ);
 	else if (keypad->eic1.gpiod || keypad->eic9.gpiod)
-		dev_info(
-			dev,
-			"polled UMS9117 matrix keypad registered with EIC GPIO IRQs\n");
+		dev_dbg(dev,
+			"polled matrix keypad registered with EIC GPIO IRQs\n");
 	else
-		dev_info(dev, "polled UMS9117 matrix keypad registered\n");
+		dev_dbg(dev, "polled matrix keypad registered\n");
 	return 0;
 
 err_mask_matrix:
@@ -694,7 +691,8 @@ static void ums9117_keypad_stop(struct ums9117_keypad *controller)
 	ret = ums9117_keypad_disarm_eic1_wake(controller);
 	if (ret)
 		dev_err(controller->dev,
-			"could not disable EIC1 power-key wake IRQ: %d\n", ret);
+			"could not disable EIC1 power-key wake IRQ: %pe\n",
+			ERR_PTR(ret));
 	if (controller->eic9.suspend_disabled) {
 		enable_irq(controller->eic9.irq);
 		controller->eic9.suspend_disabled = false;

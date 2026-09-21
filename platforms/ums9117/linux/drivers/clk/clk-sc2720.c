@@ -47,8 +47,8 @@ static void sc2720_clk_unprepare(struct clk_hw *hw)
 	ret = regmap_update_bits(clock->regmap, SC2720_XTL_WAIT_CTRL0,
 				 SC2720_XTL_WAIT_CTRL0_EN, 0);
 	if (ret)
-		dev_err(clock->dev, "cannot release crystal request: %d\n",
-			ret);
+		dev_err(clock->dev, "cannot release crystal request: %pe\n",
+			ERR_PTR(ret));
 	else
 		clock->owned = false;
 }

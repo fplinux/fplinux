@@ -7,6 +7,7 @@
  * configuration, WLED levels and DBI timings); it never supplies panel command
  * bytes or detects a panel.
  */
+#include <linux/err.h>
 #include <linux/bitops.h>
 #include <linux/console.h>
 #include <linux/delay.h>
@@ -1812,8 +1813,8 @@ int ums9117_fb_probe(struct platform_device *pdev)
 	ret = ums9117_fb_register_backlight(ufb, pdev);
 	if (ret)
 		goto unregister;
-	dev_info(dev, "%s framebuffer registered as fb%d\n", profile->name,
-		 info->node);
+	dev_dbg(dev, "%s framebuffer registered as fb%d\n", profile->name,
+		info->node);
 	return 0;
 unregister:
 	if (ufb->audit_file_created) {
@@ -1879,12 +1880,12 @@ void ums9117_fb_remove(struct platform_device *pdev)
 	mutex_unlock(&ufb->transition_lock);
 	if (quiesce_ret)
 		dev_err(&pdev->dev,
-			"could not quiesce display during remove: %d\n",
-			quiesce_ret);
+			"could not quiesce display during remove: %pe\n",
+			ERR_PTR(quiesce_ret));
 	if (cleanup_ret)
 		dev_err(&pdev->dev,
-			"could not fail display dark during remove: %d\n",
-			cleanup_ret);
+			"could not fail display dark during remove: %pe\n",
+			ERR_PTR(cleanup_ret));
 	if (ufb->profile->completion == UMS9117_FB_COMPLETION_IRQ)
 		devm_free_irq(&pdev->dev, ufb->irq, ufb);
 	platform_set_drvdata(pdev, NULL);

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include <linux/err.h>
 #include <linux/bitfield.h>
 #include <linux/leds.h>
 #include <linux/module.h>
@@ -42,8 +43,8 @@ static void sc2720_kpled_restore(void *data)
 	ret = regmap_update_bits(kpled->regmap, SC2720_KPLED_CTRL0,
 				 SC2720_KPLED_MASK, kpled->initial);
 	if (ret)
-		dev_err(kpled->dev, "cannot restore keypad backlight: %d\n",
-			ret);
+		dev_err(kpled->dev, "cannot restore keypad backlight: %pe\n",
+			ERR_PTR(ret));
 }
 
 static int sc2720_kpled_probe(struct platform_device *pdev)

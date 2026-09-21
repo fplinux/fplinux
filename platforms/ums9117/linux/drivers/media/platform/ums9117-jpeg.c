@@ -1263,8 +1263,8 @@ static int jpeg_probe(struct platform_device *pdev)
 		ret = video_register_device(&node->video, VFL_TYPE_VIDEO, -1);
 		if (ret)
 			goto unregister_nodes;
-		dev_info(&pdev->dev, "%s registered as /dev/video%d\n",
-			 node->card, node->video.num);
+		dev_dbg(&pdev->dev, "%s registered as /dev/video%d\n",
+			node->card, node->video.num);
 	}
 	platform_set_drvdata(pdev, jpeg);
 	return 0;

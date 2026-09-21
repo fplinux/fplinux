@@ -579,7 +579,7 @@ static int ums9117_musb_cold_start(struct musb *musb)
 		goto fail;
 	}
 
-	dev_info(musb->controller, "cold USB initialized\n");
+	dev_dbg(musb->controller, "cold USB initialized\n");
 	return 0;
 
 fail:
@@ -679,9 +679,9 @@ static irqreturn_t ums9117_musb_irq(int irq, void *data)
 
 	count = atomic_inc_return(&glue->irq_count);
 	if (count == 1)
-		dev_info(musb->controller,
-			 "first SPI 55: usb=%02x tx=%04x rx=%04x dma=%08x\n",
-			 musb->int_usb, musb->int_tx, musb->int_rx, legacy_dma);
+		dev_dbg(musb->controller,
+			"first SPI 55: usb=%02x tx=%04x rx=%04x dma=%08x\n",
+			musb->int_usb, musb->int_tx, musb->int_rx, legacy_dma);
 	return result;
 }
 

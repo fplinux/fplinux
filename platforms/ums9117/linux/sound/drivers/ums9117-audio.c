@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include <linux/err.h>
 #include <linux/bitfield.h>
 #include <linux/delay.h>
 #include <linux/io.h>
@@ -195,7 +196,8 @@ void ums9117_audio_release(struct ums9117_audio *audio)
 	ret = regmap_write(audio->aon, UMS9117_AON_EB0 + UMS9117_AON_CLEAR,
 			   audio->acquired_gates);
 	if (ret)
-		dev_err(audio->dev, "cannot release audio clocks: %d\n", ret);
+		dev_err(audio->dev, "cannot release audio clocks: %pe\n",
+			ERR_PTR(ret));
 	else
 		audio->acquired_gates = 0;
 }

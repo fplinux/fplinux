@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
+#include <linux/err.h>
 #include <dt-bindings/clock/sprd,ums9117-clk.h>
 #include <linux/bits.h>
 #include <linux/clk-provider.h>
@@ -136,8 +137,8 @@ static int ums9117_sdio0_clk_prepare(struct clk_hw *hw)
 	restore_ret = ums9117_sdio0_clk_restore_selector(sdio);
 	if (restore_ret)
 		dev_err(sdio->dev,
-			"failed to restore SDIO0 selector after prepare error: %d\n",
-			restore_ret);
+			"failed to restore SDIO0 selector after prepare error: %pe\n",
+			ERR_PTR(restore_ret));
 	return ret;
 }
 
@@ -148,8 +149,8 @@ static void ums9117_sdio0_clk_unprepare(struct clk_hw *hw)
 
 	ret = ums9117_sdio0_clk_restore_selector(sdio);
 	if (ret)
-		dev_err(sdio->dev, "failed to restore SDIO0 selector: %d\n",
-			ret);
+		dev_err(sdio->dev, "failed to restore SDIO0 selector: %pe\n",
+			ERR_PTR(ret));
 }
 
 static unsigned long ums9117_sdio0_clk_recalc_rate(struct clk_hw *hw,

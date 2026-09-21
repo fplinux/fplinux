@@ -11,6 +11,12 @@ normally stay quiet: rate-limit recurring faults and put raw register snapshots
 in `dev_dbg`, debugfs or tracepoints. Reserve `dev_emerg` and `pr_emerg` for a
 system-wide unusable state, not a local peripheral failure.
 
+Use `%pe` with `ERR_PTR(error)` for a negative errno outside probe. Counts,
+register values and statuses that can represent success remain numeric. Keep
+messages concise and avoid repeating the device or chip name supplied by the
+logging helper. Preserve errors that explain lost functionality, such as an
+audio underrun or a failed shutdown, at a visible severity.
+
 ## Bootstrap
 
 Records such as `*_LINUX_BOOTSTRAP stage=... message=...` are diagnostics, not

@@ -411,8 +411,8 @@ out_restore_signal:
 		sdhci_writew(host, 0, SDHCI_CLOCK_CONTROL);
 	if (ret && width_set)
 		dev_err(mmc_dev(host->mmc),
-			"4-bit transition failed after changing host width: %d\n",
-			ret);
+			"4-bit transition failed after changing host width: %pe\n",
+			ERR_PTR(ret));
 	return ret;
 }
 
@@ -478,7 +478,8 @@ static void ums9117_sdhci_set_bus_width(struct sdhci_host *host, int width)
 	spin_unlock_irqrestore(&ums_host->policy_lock, flags);
 	if (ret)
 		dev_err(mmc_dev(host->mmc),
-			"failed to apply 4-bit operational clock: %d\n", ret);
+			"failed to apply 4-bit operational clock: %pe\n",
+			ERR_PTR(ret));
 }
 
 static void ums9117_sdhci_set_power(struct sdhci_host *host, unsigned char mode,
@@ -495,7 +496,8 @@ static void ums9117_sdhci_set_power(struct sdhci_host *host, unsigned char mode,
 		mmc_regulator_disable_vqmmc(mmc);
 		if (ret)
 			dev_err(mmc_dev(mmc),
-				"failed to disable the card supply: %d\n", ret);
+				"failed to disable the card supply: %pe\n",
+				ERR_PTR(ret));
 		spin_lock_irqsave(&ums_host->policy_lock, flags);
 		if (!ret) {
 			ums_host->deferred_clock_hz = 0;
@@ -520,8 +522,8 @@ static void ums9117_sdhci_set_power(struct sdhci_host *host, unsigned char mode,
 			mmc_regulator_disable_vqmmc(mmc);
 			mmc_regulator_set_ocr(mmc, mmc->supply.vmmc, 0);
 			dev_err(mmc_dev(mmc),
-				"failed to enable the slot supplies: %d\n",
-				ret);
+				"failed to enable the slot supplies: %pe\n",
+				ERR_PTR(ret));
 		}
 		break;
 	case MMC_POWER_ON:
@@ -672,8 +674,8 @@ static void ums9117_sdhci_reject_request(struct mmc_host *mmc,
 	}
 	dev_warn_ratelimited(
 		mmc_dev(mmc),
-		"request rejected before MMIO: opcode=%u error=%d\n",
-		mrq->cmd->opcode, error);
+		"request rejected before MMIO: opcode=%u error=%pe\n",
+		mrq->cmd->opcode, ERR_PTR(error));
 	mmc_request_done(mmc, mrq);
 }
 

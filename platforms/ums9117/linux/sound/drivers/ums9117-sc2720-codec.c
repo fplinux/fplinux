@@ -737,8 +737,8 @@ restore_routes:
 		return ret;
 	if (ret) {
 		dev_err(codec->dev,
-			"cannot restore codec routes after headphone calibration error: %d\n",
-			restore_error);
+			"cannot restore codec routes after headphone calibration error: %pe\n",
+			ERR_PTR(restore_error));
 		return ret;
 	}
 	return restore_error;
@@ -889,8 +889,8 @@ int ums9117_sc2720_codec_prepare(struct ums9117_sc2720_codec *codec)
 		restore_ret = ums9117_sc2720_codec_restore(codec);
 		if (restore_ret)
 			dev_err(codec->dev,
-				"cannot restore codec after prepare error: %d\n",
-				restore_ret);
+				"cannot restore codec after prepare error: %pe\n",
+				ERR_PTR(restore_ret));
 		return ret;
 	}
 	codec->prepared = true;
@@ -937,8 +937,8 @@ failed:
 	close_ret = ums9117_sc2720_codec_close_headphones(codec);
 	if (close_ret)
 		dev_err(codec->dev,
-			"cannot close headphones after enable error: %d\n",
-			close_ret);
+			"cannot close headphones after enable error: %pe\n",
+			ERR_PTR(close_ret));
 	return ret;
 }
 
@@ -984,8 +984,9 @@ static void ums9117_sc2720_codec_release(void *data)
 
 	ret = ums9117_sc2720_codec_disable(codec);
 	if (ret)
-		dev_err(codec->dev, "cannot restore codec during removal: %d\n",
-			ret);
+		dev_err(codec->dev,
+			"cannot restore codec during removal: %pe\n",
+			ERR_PTR(ret));
 }
 
 struct ums9117_sc2720_codec *ums9117_sc2720_codec_create(struct device *dev)

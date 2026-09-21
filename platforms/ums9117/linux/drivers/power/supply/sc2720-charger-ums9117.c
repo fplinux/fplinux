@@ -53,7 +53,7 @@ static int sc2720_charger_probe(struct platform_device *pdev)
 	ret = regmap_read(regmap, SC2720_CHGR_STATUS, &status);
 	if (ret)
 		return dev_err_probe(&pdev->dev, ret,
-				     "SC2720 charger status unavailable\n");
+				     "charger status unavailable\n");
 
 	config.fwnode = dev_fwnode(&pdev->dev);
 	config.drv_data = regmap;
