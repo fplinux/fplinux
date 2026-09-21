@@ -18,17 +18,11 @@ from fplinux_cli.checkreceipts import (
 from fplinux_cli.common import ROOT, fail
 from fplinux_cli.environment.images import (
     container_image_recipe_digest,
-    container_image_reference,
     load_container_lock,
 )
 from fplinux_cli.environment.kern import (
-    current_image_state,
-    kern_available,
     kern_box_name,
     kern_environment,
-    publish_current_image_state,
-    require_kern,
-    setup,
 )
 from fplinux_cli.image_state import load_image_state
 from fplinux_cli.manifests.paths import normalize_profile
@@ -49,6 +43,7 @@ from fplinux_cli.workspace import (
 )
 
 from .git import check_git_diff
+from .runtime import prepare_quality_image, run_quality_command
 
 CHECK_SCOPES = (
     "repository",
@@ -68,9 +63,6 @@ CHECK_SCOPES = (
 
 
 SOURCE_CHECK_SCOPES = CHECK_SCOPES[1:-1]
-
-
-_SOURCE_CHECK_TIMEOUT = 2 * 60 * 60
 
 
 _KERNEL_PREPARE_TIMEOUT = 90 * 60
@@ -123,6 +115,8 @@ _CHECK_IMPLEMENTATION = frozenset(
         "scripts/fplinux_cli/environment/images.py",
         "scripts/fplinux_cli/quality/__init__.py",
         "scripts/fplinux_cli/quality/source_policy.py",
+        "scripts/fplinux_cli/quality/testing.py",
+        "scripts/fplinux_cli/quality/runtime.py",
         "scripts/fplinux_cli/identity.py",
         "scripts/fplinux_cli/identity_codegen.py",
         "scripts/fplinux_cli/output.py",
@@ -458,63 +452,23 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
     if container_logs.is_symlink() or (container_logs.exists() and not container_logs.is_dir()):
         fail(f"invalid checker container log directory: {container_logs}")
     container_logs.mkdir(parents=True, exist_ok=True)
-    environment = kern_environment()
-    log_mount = ["--volume", f"{container_logs}:/logs"]
     source_scopes = [scope for scope in missing if scope in SOURCE_CHECK_SCOPES]
     if source_scopes:
-        log_environment = reporter.container_environment("/logs/source")
-        log_environment["FPLINUX_LOG_DISPLAY_ROOT"] = (
-            f"{log_environment['FPLINUX_LOG_DISPLAY_ROOT']}/containers/source"
-        )
-        log_arguments = [
-            argument
-            for key, value in log_environment.items()
-            for argument in ("--env", f"{key}={value}")
-        ]
         with reporter.stage("source", passthrough=True, show_tail=False) as stage:
-            stage.run(
-                [
-                    kern,
-                    "box",
-                    kern_box_name("check-source"),
-                    "--image",
-                    image,
-                    "--pull",
-                    "never",
-                    "--read-only",
-                    "--network",
-                    "none",
-                    "--tmpfs",
-                    "/tmp:1g",  # noqa: S108 -- container tmpfs.
-                    "--volume",
-                    f"{workspace}:/workspace:ro",
-                    *log_mount,
-                    *log_arguments,
-                    "--env",
-                    "HOME=/tmp",
-                    "--env",
-                    "PYTHONPATH=/workspace/scripts",
-                    "--env",
-                    "RUFF_CACHE_DIR=/tmp/ruff",
-                    "--env",
-                    "PYTHONDONTWRITEBYTECODE=1",
-                    "--workdir",
-                    "/workspace",
-                    "--init",
-                    "--quiet",
-                    "--",
-                    "python3",
-                    "/workspace/scripts/check.py",
-                    *source_scopes,
-                ],
-                env=environment,
-                timeout=_SOURCE_CHECK_TIMEOUT,
+            run_quality_command(
+                stage,
+                workspace,
+                ["python3", "/workspace/scripts/check.py", *source_scopes],
+                kern=kern,
+                image=image,
             )
         for scope in source_scopes:
             publish_success_receipt(cache, recipes[scope])
 
     if "kernel" not in missing:
         return
+    environment = kern_environment()
+    log_mount = ["--volume", f"{container_logs}:/logs"]
     log_environment = reporter.container_environment("/logs/kernel")
     log_environment["FPLINUX_LOG_DISPLAY_ROOT"] = (
         f"{log_environment['FPLINUX_LOG_DISPLAY_ROOT']}/containers/kernel"
@@ -664,30 +618,7 @@ def check(
             reporter.finish()
             return
 
-    image = container_image_reference(container_lock, image_recipe)
-    if kern_available(container_lock):
-        kern = require_kern(container_lock)
-        inspected_image = current_image_state(kern, image, image_recipe)
-        if inspected_image is not None:
-            current_image = publish_current_image_state(
-                kern,
-                image,
-                image_recipe,
-                state=inspected_image,
-            )
-        else:
-            current_image = setup(
-                reporter=reporter,
-                lock=container_lock,
-                image_recipe=image_recipe,
-            )
-    else:
-        current_image = setup(
-            reporter=reporter,
-            lock=container_lock,
-            image_recipe=image_recipe,
-        )
-        kern = require_kern(container_lock)
+    kern, image, current_image = prepare_quality_image(reporter, container_lock, image_recipe)
 
     recipes = receipt_recipes(current_image.image_generation)
     missing = tuple(

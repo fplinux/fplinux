@@ -32,18 +32,20 @@ from .prune import (
 )
 from .quality.checks import CHECK_SCOPES, check
 from .quality.git import check_commit_message
+from .quality.testing import add_test_arguments, run_tests
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 
 _EXCLUSIVE_CACHE_COMMANDS = frozenset(
-    {"build", "check", "checksum", "device-data", "format", "nand", "setup"}
+    {"build", "check", "checksum", "device-data", "format", "nand", "setup", "test"}
 )
 _SHARED_CACHE_COMMANDS = frozenset({"console", "package", "run", "verify"})
 _CHECK_SCOPE_METAVAR = "{" + ",".join(CHECK_SCOPES) + "}"
 _PUBLIC_COMMAND_METAVAR = (
-    "{doctor,check,format,setup,build,checksum,package,prune,run,console,nand,device-data,verify}"
+    "{doctor,check,test,format,setup,build,checksum,package,prune,"
+    "run,console,nand,device-data,verify}"
 )
 
 
@@ -188,6 +190,10 @@ def _command_action(
             )
     elif args.command == "setup":
         action = partial(_setup_action, force=args.force)
+    elif args.command == "test":
+        action = partial(
+            run_tests, args.names, tier=args.tier, verbose=args.verbose, failfast=args.failfast
+        )
     elif args.command == "format":
         action = partial(format_sources, args.paths)
     elif args.command == "_commit-msg":
@@ -344,6 +350,10 @@ def main() -> None:
         metavar="NAME",
         help="check the selected global profile (default: default)",
     )
+    test_parser = commands.add_parser(
+        "test", help="run selected unittest tests in the pinned environment"
+    )
+    add_test_arguments(test_parser)
     format_parser = commands.add_parser(
         "format", help="format explicit project sources in the pinned environment"
     )

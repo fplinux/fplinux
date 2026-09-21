@@ -73,6 +73,7 @@ class CliCacheLockTests(unittest.TestCase):
         cases: tuple[tuple[list[str], str, bool, str | None, str | None], ...] = (
             (["build", "target", "--jobs", "1"], "build", True, "target", None),
             (["check"], "check", True, None, None),
+            (["test", "tests.small.test_common"], "run_tests", True, None, None),
             (["checksum", "demo-aport"], "checksum_aport", True, None, None),
             (["format", "scripts/demo.py"], "format_sources", True, None, None),
             (["setup"], "setup", True, None, None),

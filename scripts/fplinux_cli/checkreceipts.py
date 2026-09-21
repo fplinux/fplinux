@@ -99,6 +99,7 @@ def check_orchestration_recipe_digest(image_recipe: str | None = None) -> str:
         common.ROOT / "scripts/fplinux_cli/environment/git_hooks.py",
         common.ROOT / "scripts/fplinux_cli/quality/__init__.py",
         common.ROOT / "scripts/fplinux_cli/quality/checks.py",
+        common.ROOT / "scripts/fplinux_cli/quality/runtime.py",
         common.ROOT / "scripts/fplinux_cli/quality/git.py",
         common.ROOT / "scripts/fplinux_cli/image_state.py",
         common.ROOT / "scripts/fplinux_cli/identity.py",
