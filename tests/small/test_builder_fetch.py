@@ -11,7 +11,7 @@ import urllib.error
 from pathlib import Path
 from unittest import mock
 
-from fplinux_cli import builder
+from fplinux_cli.build import sources as sources_build
 
 
 class BuilderFetchTests(unittest.TestCase):
@@ -31,12 +31,12 @@ class BuilderFetchTests(unittest.TestCase):
         expected = hashlib.sha256(b"new bytes\n").hexdigest()
         with (
             mock.patch(
-                "fplinux_cli.builder.urllib.request.urlopen",
+                "fplinux_cli.build.sources.urllib.request.urlopen",
                 side_effect=urllib.error.URLError("offline"),
             ),
             self.assertRaises(urllib.error.URLError),
         ):
-            builder.fetch(
+            sources_build.fetch(
                 "https://example.invalid/linux.tar.xz", expected, self.cache, "linux.tar.xz"
             )
 
@@ -47,10 +47,10 @@ class BuilderFetchTests(unittest.TestCase):
         expected = hashlib.sha256(b"new bytes\n").hexdigest()
         response = io.BytesIO(b"wrong bytes\n")
         with (
-            mock.patch("fplinux_cli.builder.urllib.request.urlopen", return_value=response),
+            mock.patch("fplinux_cli.build.sources.urllib.request.urlopen", return_value=response),
             self.assertRaises(SystemExit),
         ):
-            builder.fetch(
+            sources_build.fetch(
                 "https://example.invalid/linux.tar.xz", expected, self.cache, "linux.tar.xz"
             )
 
@@ -61,8 +61,8 @@ class BuilderFetchTests(unittest.TestCase):
         expected_bytes = b"new bytes\n"
         expected = hashlib.sha256(expected_bytes).hexdigest()
         response = io.BytesIO(expected_bytes)
-        with mock.patch("fplinux_cli.builder.urllib.request.urlopen", return_value=response):
-            result = builder.fetch(
+        with mock.patch("fplinux_cli.build.sources.urllib.request.urlopen", return_value=response):
+            result = sources_build.fetch(
                 "https://example.invalid/linux.tar.xz", expected, self.cache, "linux.tar.xz"
             )
 

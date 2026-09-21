@@ -10,8 +10,9 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from fplinux_cli import alpine_state, config
+from fplinux_cli import alpine_state, common
 from fplinux_cli import workspace as workspace_module
+from fplinux_cli.manifests import targets
 
 
 class WorkspaceSnapshotTests(unittest.TestCase):
@@ -144,7 +145,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
 
             with (
                 mock.patch.object(workspace_module, "ROOT", root),
-                mock.patch.object(config, "ROOT", root),
+                mock.patch.object(common, "ROOT", root),
                 mock.patch.object(workspace_module, "STAGED_BUILD_SOURCES", ("always.txt",)),
                 mock.patch.object(workspace_module, "load_target", return_value=target),
                 mock.patch.object(workspace_module, "load_platform", return_value=platform),
@@ -211,9 +212,9 @@ class WorkspaceSnapshotTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             with mock.patch.object(workspace_module, "ROOT", Path(temporary)):
                 staged = workspace_module.stage_workspace_snapshot(snapshot)
-            with mock.patch.object(config, "ROOT", staged):
-                card = config.load_target("nokia-ta1618", "microsd-uboot")
-                ram = config.load_target("nokia-ta1618")
+            with mock.patch.object(common, "ROOT", staged):
+                card = targets.load_target("nokia-ta1618", "microsd-uboot")
+                ram = targets.load_target("nokia-ta1618")
 
             self.assertEqual(card["linux"]["root"]["kind"], "external")
             self.assertEqual(ram["linux"]["root"], {"kind": "initramfs"})

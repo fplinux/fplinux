@@ -67,7 +67,7 @@ class AlpineStateTests(unittest.TestCase):
         self.aport = self.root / "alpine/aports/fplinux-package-a/APKBUILD"
         self._write("alpine/aports/not-production/APKBUILD", b"pkgname=not-production\n")
         self._write("scripts/fplinux_cli/alpine_state.py", b"state implementation\n")
-        self._write("scripts/fplinux_cli/builder.py", b"builder implementation\n")
+        self._write("scripts/fplinux_cli/build/kernel.py", b"builder implementation\n")
         self._write("scripts/fplinux_cli/alpine_builder.py", b"Alpine builder implementation\n")
         self._write("scripts/fplinux_cli/common.py", b"shared archive and file operations\n")
         self._write("scripts/fplinux_cli/build_env.py", b"build environment\n")
@@ -283,7 +283,7 @@ class AlpineStateTests(unittest.TestCase):
         package_before = alpine_state.alpine_package_recipe(
             self.packages[0], "1" * 64, self.signing_key, self.root
         )
-        self._write("scripts/fplinux_cli/builder.py", b"kernel implementation changed\n")
+        self._write("scripts/fplinux_cli/build/kernel.py", b"kernel implementation changed\n")
         self.assertEqual(rootfs_before, self._recipe())
         self.assertEqual(
             package_before,

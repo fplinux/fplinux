@@ -14,7 +14,9 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from fplinux_cli import builder, uboot_tools
+from fplinux_cli import common, uboot_tools
+from fplinux_cli.build import sources as sources_build
+from fplinux_cli.build import storage as storage_build
 
 ROOT = Path(__file__).resolve().parents[2]
 UBOOT_FIXTURES = ROOT / "tests/fixtures/uboot_tools"
@@ -247,11 +249,11 @@ class UbootToolsTests(unittest.TestCase):
             }
             with (
                 self.subTest(target=target),
-                mock.patch.object(builder, "ROOT", self.root),
-                mock.patch.object(builder, "fetch", return_value=self.archive),
+                mock.patch.object(common, "ROOT", self.root),
+                mock.patch.object(sources_build, "fetch", return_value=self.archive),
                 mock.patch.dict(os.environ, {"FPLINUX_CONTAINER_IMAGE_RECIPE": "a" * 64}),
             ):
-                built = builder.build_profile_uboot(target, target_config, self.work, 1)
+                built = storage_build.build_profile_uboot(target, target_config, self.work, 1)
                 if built is None:
                     self.fail("configured U-Boot build did not produce an artifact")
                 self.assertEqual(built.dtb.read_bytes().strip(), f'"{target}"'.encode("ascii"))

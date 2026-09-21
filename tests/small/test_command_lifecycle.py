@@ -16,16 +16,24 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
 
-from fplinux_cli import commands, output
-from fplinux_cli import workspace as workspace_module
+from fplinux_cli import common, output
+from fplinux_cli import prune as cache_prune
+from fplinux_cli import workspace as workspaces
 from fplinux_cli.bundle_state import (
     BUILD_MANIFEST_NAME,
     bundle_pointer,
     publish_current_bundle,
     published_file_records,
 )
+from fplinux_cli.cli import build as build_commands
+from fplinux_cli.cli import bundles as bundles_commands
+from fplinux_cli.cli import checksum as checksum_commands
+from fplinux_cli.cli import runtime as runtime_commands
 from fplinux_cli.common import canonical_json_bytes
+from fplinux_cli.environment import images
+from fplinux_cli.environment import kern as kern_env
 from fplinux_cli.image_state import ImageState, publish_image_state
+from fplinux_cli.manifests import releases, targets
 from fplinux_cli.workspace import WorkspaceSnapshot
 
 if TYPE_CHECKING:
@@ -125,34 +133,34 @@ class CommandLifecycleTests(unittest.TestCase):
     def test_exact_build_hit_ignores_jobs_and_avoids_runtime_or_staging(self) -> None:
         """Both job counts reuse the same valid generation without starting build work."""
         with (
-            mock.patch.object(commands, "ROOT", self.root),
+            mock.patch.object(common, "ROOT", self.root),
             mock.patch.object(output, "ROOT", self.root),
-            mock.patch.object(commands, "load_target", return_value=self.target_config),
-            mock.patch.object(commands, "load_release", return_value=self.release),
+            mock.patch.object(targets, "load_target", return_value=self.target_config),
+            mock.patch.object(releases, "load_release", return_value=self.release),
             mock.patch.object(
-                commands,
+                workspaces,
                 "target_workspace_snapshot",
                 return_value=self.snapshot,
             ),
-            mock.patch.object(commands, "load_container_lock", return_value=self.lock),
-            mock.patch.object(commands, "container_image_recipe_digest", return_value="e" * 64),
+            mock.patch.object(images, "load_container_lock", return_value=self.lock),
+            mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
             mock.patch.object(
-                commands,
+                kern_env,
                 "kern_available",
                 side_effect=AssertionError("cache hit must not inspect Kern"),
             ),
             mock.patch.object(
-                commands,
+                workspaces,
                 "stage_workspace_snapshot",
                 side_effect=AssertionError("cache hit must not stage a workspace"),
             ),
             mock.patch.object(
-                commands,
+                workspaces,
                 "discard_staged_workspace_snapshot",
                 side_effect=AssertionError("cache hit must not discard an unstaged workspace"),
             ),
-            mock.patch.object(commands, "discard_obsolete_rootfs") as rootfs_gc,
-            mock.patch.object(commands, "discard_obsolete_apks") as apks_gc,
+            mock.patch.object(cache_prune, "discard_obsolete_rootfs") as rootfs_gc,
+            mock.patch.object(cache_prune, "discard_obsolete_apks") as apks_gc,
         ):
             for jobs in (1, 8):
                 with self.subTest(jobs=jobs):
@@ -161,7 +169,7 @@ class CommandLifecycleTests(unittest.TestCase):
                     with contextlib.redirect_stdout(stdout):
                         output.run_entrypoint(
                             functools.partial(
-                                commands.build,
+                                build_commands.build,
                                 "phone",
                                 jobs,
                                 verbose=True,
@@ -188,10 +196,10 @@ class CommandLifecycleTests(unittest.TestCase):
                 raise BrokenPipeError
 
         with (
-            mock.patch.object(commands, "ROOT", self.root),
+            mock.patch.object(common, "ROOT", self.root),
             contextlib.redirect_stdout(BrokenPipeStream()),
         ):
-            commands._print_build_result(  # noqa: SLF001
+            build_commands._print_build_result(  # noqa: SLF001
                 "phone",
                 self.bundle,
                 {"image": "image/ramboot.bin"},
@@ -201,12 +209,12 @@ class CommandLifecycleTests(unittest.TestCase):
     def test_corrupted_bundle_image_is_not_an_exact_hit(self) -> None:
         """A bundle whose image bytes drifted from the manifest is rebuilt."""
         (self.bundle_path / "image/ramboot.bin").write_bytes(b"corrupt\n")
-        identity = commands.BuildIdentity(
+        identity = bundles_commands.BuildIdentity(
             self.snapshot.recipe, "e" * 64, "a" * 64, self.signing_key
         )
-        with mock.patch.object(commands, "ROOT", self.root):
+        with mock.patch.object(common, "ROOT", self.root):
             self.assertIsNone(
-                commands._matching_target_bundle(  # noqa: SLF001
+                bundles_commands.matching_target_bundle(
                     "phone",
                     identity,
                     "image/ramboot.bin",
@@ -215,11 +223,11 @@ class CommandLifecycleTests(unittest.TestCase):
 
     def test_exact_bundle_identity_and_image_are_a_reusable_hit(self) -> None:
         """Reuse a resolved generation only when its identity and image bytes match."""
-        identity = commands.BuildIdentity(
+        identity = bundles_commands.BuildIdentity(
             self.snapshot.recipe, "e" * 64, "a" * 64, self.signing_key
         )
-        with mock.patch.object(commands, "ROOT", self.root):
-            matched = commands._matching_target_bundle(  # noqa: SLF001
+        with mock.patch.object(common, "ROOT", self.root):
+            matched = bundles_commands.matching_target_bundle(
                 "phone",
                 identity,
                 "image/ramboot.bin",
@@ -234,16 +242,16 @@ class CommandLifecycleTests(unittest.TestCase):
     def test_each_build_identity_mismatch_is_a_cache_miss(self) -> None:
         """Reject a generation when any host-visible causal identity changed."""
         mismatches = (
-            commands.BuildIdentity("d" * 64, "e" * 64, "a" * 64, self.signing_key),
-            commands.BuildIdentity("c" * 64, "f" * 64, "a" * 64, self.signing_key),
-            commands.BuildIdentity("c" * 64, "e" * 64, "b" * 64, self.signing_key),
-            commands.BuildIdentity("c" * 64, "e" * 64, "a" * 64, "8" * 64),
+            bundles_commands.BuildIdentity("d" * 64, "e" * 64, "a" * 64, self.signing_key),
+            bundles_commands.BuildIdentity("c" * 64, "f" * 64, "a" * 64, self.signing_key),
+            bundles_commands.BuildIdentity("c" * 64, "e" * 64, "b" * 64, self.signing_key),
+            bundles_commands.BuildIdentity("c" * 64, "e" * 64, "a" * 64, "8" * 64),
         )
-        with mock.patch.object(commands, "ROOT", self.root):
+        with mock.patch.object(common, "ROOT", self.root):
             for identity in mismatches:
                 with self.subTest(identity=identity):
                     self.assertIsNone(
-                        commands._matching_target_bundle(  # noqa: SLF001
+                        bundles_commands.matching_target_bundle(
                             "phone",
                             identity,
                             "image/ramboot.bin",
@@ -257,45 +265,45 @@ class CommandLifecycleTests(unittest.TestCase):
         old = self._create_generation("b" * 64)
         self._clear_current_bundle()
         with (
-            mock.patch.object(commands, "ROOT", self.root),
+            mock.patch.object(common, "ROOT", self.root),
             mock.patch.object(output, "ROOT", self.root),
-            mock.patch.object(commands, "load_target", return_value=self.target_config),
-            mock.patch.object(commands, "load_release", return_value=self.release),
+            mock.patch.object(targets, "load_target", return_value=self.target_config),
+            mock.patch.object(releases, "load_release", return_value=self.release),
             mock.patch.object(
-                commands,
+                workspaces,
                 "target_workspace_snapshot",
                 return_value=self.snapshot,
             ),
-            mock.patch.object(commands, "load_container_lock", return_value=self.lock),
-            mock.patch.object(commands, "container_image_recipe_digest", return_value="e" * 64),
-            mock.patch.object(commands, "kern_available", return_value=True),
-            mock.patch.object(commands, "require_kern", return_value="kern"),
+            mock.patch.object(images, "load_container_lock", return_value=self.lock),
+            mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
+            mock.patch.object(kern_env, "kern_available", return_value=True),
+            mock.patch.object(kern_env, "require_kern", return_value="kern"),
             mock.patch.object(
-                commands,
+                kern_env,
                 "current_image_state",
                 return_value=ImageState("e" * 64, "a" * 64),
             ),
             mock.patch.object(
-                commands,
+                kern_env,
                 "publish_current_image_state",
                 return_value=ImageState("e" * 64, "a" * 64),
             ),
-            mock.patch.object(commands, "kern_environment", return_value={}),
+            mock.patch.object(kern_env, "kern_environment", return_value={}),
             mock.patch.object(
-                commands,
+                workspaces,
                 "stage_workspace_snapshot",
                 return_value=workspace,
             ),
-            mock.patch.object(commands, "discard_staged_workspace_snapshot") as discard,
-            mock.patch.object(commands, "discard_obsolete_rootfs") as rootfs_gc,
-            mock.patch.object(commands, "discard_obsolete_apks") as apks_gc,
+            mock.patch.object(workspaces, "discard_staged_workspace_snapshot") as discard,
+            mock.patch.object(cache_prune, "discard_obsolete_rootfs") as rootfs_gc,
+            mock.patch.object(cache_prune, "discard_obsolete_apks") as apks_gc,
             mock.patch.object(output.Stage, "run", autospec=True),
             self.assertRaisesRegex(
                 SystemExit,
                 "without publishing an exact valid current bundle",
             ),
         ):
-            output.run_entrypoint(lambda: commands.build("phone", 4))
+            output.run_entrypoint(lambda: build_commands.build("phone", 4))
 
         self.assertFalse(bundle_pointer(self.output, "phone").exists())
         self.assertTrue(old.exists())
@@ -316,43 +324,43 @@ class CommandLifecycleTests(unittest.TestCase):
             publish_current_bundle(self.output, "phone", self.bundle_path)
 
         with (
-            mock.patch.object(commands, "ROOT", self.root),
+            mock.patch.object(common, "ROOT", self.root),
             mock.patch.object(output, "ROOT", self.root),
-            mock.patch.object(commands, "load_target", return_value=self.target_config),
-            mock.patch.object(commands, "load_release", return_value=self.release),
+            mock.patch.object(targets, "load_target", return_value=self.target_config),
+            mock.patch.object(releases, "load_release", return_value=self.release),
             mock.patch.object(
-                commands,
+                workspaces,
                 "target_workspace_snapshot",
                 return_value=self.snapshot,
             ),
-            mock.patch.object(commands, "load_container_lock", return_value=self.lock),
-            mock.patch.object(commands, "container_image_recipe_digest", return_value="e" * 64),
-            mock.patch.object(commands, "kern_available", return_value=True),
-            mock.patch.object(commands, "require_kern", return_value="kern"),
+            mock.patch.object(images, "load_container_lock", return_value=self.lock),
+            mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
+            mock.patch.object(kern_env, "kern_available", return_value=True),
+            mock.patch.object(kern_env, "require_kern", return_value="kern"),
             mock.patch.object(
-                commands,
+                kern_env,
                 "current_image_state",
                 return_value=ImageState("e" * 64, "a" * 64),
             ),
             mock.patch.object(
-                commands,
+                kern_env,
                 "publish_current_image_state",
                 return_value=ImageState("e" * 64, "a" * 64),
             ),
-            mock.patch.object(commands, "kern_environment", return_value={}),
+            mock.patch.object(kern_env, "kern_environment", return_value={}),
             mock.patch.object(
-                commands,
+                workspaces,
                 "stage_workspace_snapshot",
                 return_value=workspace,
             ),
-            mock.patch.object(commands, "discard_staged_workspace_snapshot") as discard,
-            mock.patch.object(commands, "discard_obsolete_rootfs") as rootfs_gc,
-            mock.patch.object(commands, "discard_obsolete_apks") as apks_gc,
+            mock.patch.object(workspaces, "discard_staged_workspace_snapshot") as discard,
+            mock.patch.object(cache_prune, "discard_obsolete_rootfs") as rootfs_gc,
+            mock.patch.object(cache_prune, "discard_obsolete_apks") as apks_gc,
             mock.patch.object(output.Stage, "run", autospec=True, side_effect=publish_result),
         ):
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
-                output.run_entrypoint(lambda: commands.build("phone", 4))
+                output.run_entrypoint(lambda: build_commands.build("phone", 4))
 
         self.assertIn("build phone: OK", stdout.getvalue())
         self.assertNotIn("build phone: OK (cached)", stdout.getvalue())
@@ -367,27 +375,27 @@ class CommandLifecycleTests(unittest.TestCase):
         """Do not silently rebuild the OCI environment when offline was requested."""
         self._clear_current_bundle()
         with (
-            mock.patch.object(commands, "ROOT", self.root),
+            mock.patch.object(common, "ROOT", self.root),
             mock.patch.object(output, "ROOT", self.root),
-            mock.patch.object(commands, "load_target", return_value=self.target_config),
-            mock.patch.object(commands, "load_release", return_value=self.release),
+            mock.patch.object(targets, "load_target", return_value=self.target_config),
+            mock.patch.object(releases, "load_release", return_value=self.release),
             mock.patch.object(
-                commands,
+                workspaces,
                 "target_workspace_snapshot",
                 return_value=self.snapshot,
             ),
-            mock.patch.object(commands, "load_container_lock", return_value=self.lock),
-            mock.patch.object(commands, "container_image_recipe_digest", return_value="e" * 64),
-            mock.patch.object(commands, "kern_available", return_value=True),
-            mock.patch.object(commands, "require_kern", return_value="kern"),
-            mock.patch.object(commands, "current_image_state", return_value=None),
+            mock.patch.object(images, "load_container_lock", return_value=self.lock),
+            mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
+            mock.patch.object(kern_env, "kern_available", return_value=True),
+            mock.patch.object(kern_env, "require_kern", return_value="kern"),
+            mock.patch.object(kern_env, "current_image_state", return_value=None),
             mock.patch.object(
-                commands,
+                kern_env,
                 "setup",
                 side_effect=AssertionError("offline build must not set up an image"),
             ),
             mock.patch.object(
-                commands,
+                workspaces,
                 "stage_workspace_snapshot",
                 side_effect=AssertionError("offline image failure must not stage a workspace"),
             ),
@@ -396,7 +404,7 @@ class CommandLifecycleTests(unittest.TestCase):
                 "offline build requires the current pinned OCI image",
             ),
         ):
-            output.run_entrypoint(lambda: commands.build("phone", 4, offline=True))
+            output.run_entrypoint(lambda: build_commands.build("phone", 4, offline=True))
 
         self.assertFalse(bundle_pointer(self.output, "phone").exists())
 
@@ -404,18 +412,18 @@ class CommandLifecycleTests(unittest.TestCase):
         """Resolve current once and preserve that immutable generation path."""
         runner = self.bundle_path / "runner/run.py"
         with (
-            mock.patch.object(commands, "ROOT", self.root),
-            mock.patch.object(commands, "load_target", return_value={}),
-            mock.patch("fplinux_cli.commands.os.execv") as execute,
+            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(targets, "load_target", return_value={}),
+            mock.patch("fplinux_cli.cli.runtime.os.execv") as execute,
         ):
-            commands.run_target("phone")
+            runtime_commands.run_target("phone")
 
         execute.assert_called_once_with(os.fsencode(runner), [os.fsencode(runner)])
 
     def test_microsd_context_selection_has_no_fallback(self) -> None:
         """Resolve the Nokia microSD context without making the profile an alias."""
         self.assertEqual(
-            commands.selected_context_profile(
+            bundles_commands.selected_context_profile(
                 "nokia-ta1618",
                 profile=None,
                 boot="microsd",
@@ -423,10 +431,10 @@ class CommandLifecycleTests(unittest.TestCase):
             "microsd-uboot",
         )
         self.assertIsNone(
-            commands.selected_context_profile("nokia-ta1618", profile=None, boot=None)
+            bundles_commands.selected_context_profile("nokia-ta1618", profile=None, boot=None)
         )
         self.assertEqual(
-            commands.selected_context_profile(
+            bundles_commands.selected_context_profile(
                 "nokia-ta1618",
                 profile="microsd-uboot",
                 boot=None,
@@ -434,11 +442,13 @@ class CommandLifecycleTests(unittest.TestCase):
             "microsd-uboot",
         )
         self.assertEqual(
-            commands.selected_context_profile("inoi-240-modern-4g", profile=None, boot="microsd"),
+            bundles_commands.selected_context_profile(
+                "inoi-240-modern-4g", profile=None, boot="microsd"
+            ),
             "microsd-uboot",
         )
         with self.assertRaisesRegex(SystemExit, "cannot be used together"):
-            commands.selected_context_profile(
+            bundles_commands.selected_context_profile(
                 "nokia-ta1618",
                 profile="microsd-uboot",
                 boot="microsd",
@@ -457,18 +467,18 @@ class CommandLifecycleTests(unittest.TestCase):
         manifest = self._manifest("b" * 64, profile_bundle.path, profile)
         with (
             mock.patch.object(
-                commands,
+                targets,
                 "load_target",
                 return_value={"runtime": {"runnable": True}},
             ) as load_target,
             mock.patch.object(
-                commands,
-                "_resolve_target_bundle",
+                bundles_commands,
+                "resolve_target_bundle",
                 return_value=(profile_bundle, manifest),
             ) as resolve,
-            mock.patch("fplinux_cli.commands.os.execv") as execute,
+            mock.patch("fplinux_cli.cli.runtime.os.execv") as execute,
         ):
-            commands.run_target("nokia-ta1618", boot="microsd")
+            runtime_commands.run_target("nokia-ta1618", boot="microsd")
 
         load_target.assert_called_once_with("nokia-ta1618", profile)
         resolve.assert_called_once_with("nokia-ta1618", profile)
@@ -488,15 +498,15 @@ class CommandLifecycleTests(unittest.TestCase):
         runner = profile_bundle.path / "runner/run.py"
 
         with (
-            mock.patch.object(commands, "ROOT", self.root),
+            mock.patch.object(common, "ROOT", self.root),
             mock.patch.object(
-                commands,
+                targets,
                 "load_target",
                 return_value={"runtime": {"runnable": True}},
             ),
-            mock.patch("fplinux_cli.commands.os.execv") as execute,
+            mock.patch("fplinux_cli.cli.runtime.os.execv") as execute,
         ):
-            commands.run_target("phone", profile=profile)
+            runtime_commands.run_target("phone", profile=profile)
 
         execute.assert_called_once_with(os.fsencode(runner), [os.fsencode(runner)])
 
@@ -504,19 +514,19 @@ class CommandLifecycleTests(unittest.TestCase):
         """A profile without a complete boot path cannot start the RAM loader."""
         with (
             mock.patch.object(
-                commands,
+                targets,
                 "load_target",
                 return_value={"runtime": {"runnable": False}},
             ),
             mock.patch.object(
-                commands,
-                "_resolve_target_bundle",
+                bundles_commands,
+                "resolve_target_bundle",
                 side_effect=AssertionError("build-only profile must not resolve a bundle"),
             ),
-            mock.patch("fplinux_cli.commands.os.execv") as execute,
+            mock.patch("fplinux_cli.cli.runtime.os.execv") as execute,
             self.assertRaisesRegex(SystemExit, "profile is build-only"),
         ):
-            commands.run_target("phone", profile="microsd-uboot")
+            runtime_commands.run_target("phone", profile="microsd-uboot")
 
         execute.assert_not_called()
 
@@ -526,16 +536,16 @@ class CommandLifecycleTests(unittest.TestCase):
         profile_path = self._create_generation("c" * 64, profile=profile, runnable=False)
         publish_current_bundle(self.output, "phone", profile_path, profile)
         with (
-            mock.patch.object(commands, "ROOT", self.root),
+            mock.patch.object(common, "ROOT", self.root),
             mock.patch.object(
-                commands,
+                targets,
                 "load_target",
                 return_value={"runtime": {"runnable": True}},
             ),
-            mock.patch("fplinux_cli.commands.os.execv") as execute,
+            mock.patch("fplinux_cli.cli.runtime.os.execv") as execute,
             self.assertRaisesRegex(SystemExit, "profile bundle is build-only"),
         ):
-            commands.run_target("phone", profile=profile)
+            runtime_commands.run_target("phone", profile=profile)
 
         execute.assert_not_called()
 
@@ -543,28 +553,28 @@ class CommandLifecycleTests(unittest.TestCase):
         """Do not report success when reconnect cannot identify the running kernel."""
         target_config: dict[str, object] = {}
         with (
-            mock.patch.object(commands, "ROOT", self.root),
-            mock.patch.object(commands, "load_target", return_value=target_config),
+            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(targets, "load_target", return_value=target_config),
             mock.patch.object(
-                commands,
+                workspaces,
                 "target_workspace_snapshot",
                 return_value=self.snapshot,
             ),
             mock.patch.object(
-                commands,
+                images,
                 "container_image_recipe_digest",
                 return_value="e" * 64,
             ),
             mock.patch.object(
-                commands,
+                runtime_commands,
                 "_current_ssh_session",
                 side_effect=SystemExit(
-                    "SSH transport failed: cannot read the running kernel identity (exit 7)"
+                    "fplinux ssh: cannot read the running kernel identity (exit 7)"
                 ),
             ),
             self.assertRaisesRegex(SystemExit, r"running kernel identity \(exit 7\)"),
         ):
-            commands.verify_booted("phone")
+            runtime_commands.verify_booted("phone")
 
     def test_reconnect_accepts_an_older_session_generation_for_the_same_device_runtime(
         self,
@@ -581,8 +591,8 @@ class CommandLifecycleTests(unittest.TestCase):
         ssh.reacquire_bound_session.return_value = session
         ssh.require_device_identity.return_value = "6.12-fplinux-9999999999999999"
 
-        with mock.patch.object(commands, "_load_bundle_ssh_helper", return_value=ssh):
-            resolved_ssh, resolved_session = commands._current_ssh_session(  # noqa: SLF001
+        with mock.patch.object(runtime_commands, "_load_bundle_ssh_helper", return_value=ssh):
+            resolved_ssh, resolved_session = runtime_commands._current_ssh_session(  # noqa: SLF001
                 self.bundle,
                 manifest,
                 "phone",
@@ -608,14 +618,14 @@ class CommandLifecycleTests(unittest.TestCase):
         ssh.load_current_session.return_value = session
         ssh.reacquire_bound_session.return_value = session
         ssh.require_device_identity.side_effect = SystemExit(
-            "SSH transport failed: current SSH session exposes a different kernel identity"
+            "fplinux ssh: current SSH session exposes a different kernel identity"
         )
 
         with (
-            mock.patch.object(commands, "_load_bundle_ssh_helper", return_value=ssh),
+            mock.patch.object(runtime_commands, "_load_bundle_ssh_helper", return_value=ssh),
             self.assertRaisesRegex(SystemExit, "different kernel identity"),
         ):
-            commands._current_ssh_session(self.bundle, manifest, "phone")  # noqa: SLF001
+            runtime_commands._current_ssh_session(self.bundle, manifest, "phone")  # noqa: SLF001
 
         ssh.require_device_identity.assert_called_once_with(session, "9" * 64)
 
@@ -625,17 +635,17 @@ class CommandLifecycleTests(unittest.TestCase):
         path = self._create_generation("b" * 64, profile=profile)
         selected = publish_current_bundle(self.output, "phone", path, profile)
         with (
-            mock.patch.object(commands, "ROOT", self.root),
+            mock.patch.object(common, "ROOT", self.root),
             mock.patch.object(
-                commands, "target_workspace_snapshot", return_value=self.snapshot
+                workspaces, "target_workspace_snapshot", return_value=self.snapshot
             ) as snapshot,
-            mock.patch.object(commands, "container_image_recipe_digest", return_value="e" * 64),
+            mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
             mock.patch.object(
-                commands, "_current_ssh_session", return_value=(mock.Mock(), {})
+                runtime_commands, "_current_ssh_session", return_value=(mock.Mock(), {})
             ) as session,
             contextlib.redirect_stdout(io.StringIO()),
         ):
-            commands.verify_booted("phone", profile=profile)
+            runtime_commands.verify_booted("phone", profile=profile)
         snapshot.assert_called_once_with("phone", profile)
         self.assertEqual(session.call_args.args[0], selected)
         self.assertEqual(session.call_args.args[1]["profile"], profile)
@@ -645,22 +655,22 @@ class CommandLifecycleTests(unittest.TestCase):
         target_config: dict[str, object] = {}
         stdout = io.StringIO()
         with (
-            mock.patch.object(commands, "ROOT", self.root),
-            mock.patch.object(commands, "load_target", return_value=target_config),
+            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(targets, "load_target", return_value=target_config),
             mock.patch.object(
-                commands,
+                workspaces,
                 "target_workspace_snapshot",
                 return_value=self.snapshot,
             ),
-            mock.patch.object(commands, "container_image_recipe_digest", return_value="e" * 64),
+            mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
             mock.patch.object(
-                commands,
+                runtime_commands,
                 "_current_ssh_session",
                 return_value=(mock.Mock(), {}),
             ) as current_session,
             contextlib.redirect_stdout(stdout),
         ):
-            commands.verify_booted("phone")
+            runtime_commands.verify_booted("phone")
 
         self.assertEqual(
             stdout.getvalue(),
@@ -685,11 +695,11 @@ class CommandLifecycleTests(unittest.TestCase):
         result = subprocess.CompletedProcess([], 0, stdout="", stderr="")
         ssh = mock.Mock(run_remote=mock.Mock(return_value=result))
         with (
-            mock.patch.object(commands, "ROOT", self.root),
-            mock.patch.object(commands, "load_target", return_value=target_config),
-            mock.patch.object(commands, "_current_ssh_session", return_value=(ssh, {})),
+            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(targets, "load_target", return_value=target_config),
+            mock.patch.object(runtime_commands, "_current_ssh_session", return_value=(ssh, {})),
         ):
-            commands.console_target(
+            runtime_commands.console_target(
                 "phone",
                 keyboard=None,
                 exec_command="id",
@@ -700,11 +710,11 @@ class CommandLifecycleTests(unittest.TestCase):
 
         client = self.bundle_path / "host/fplinux-usb-keyboard"
         with (
-            mock.patch.object(commands, "ROOT", self.root),
-            mock.patch.object(commands, "load_target", return_value=target_config),
-            mock.patch("fplinux_cli.commands.os.execv") as execute,
+            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(targets, "load_target", return_value=target_config),
+            mock.patch("fplinux_cli.cli.runtime.os.execv") as execute,
         ):
-            commands.console_target(
+            runtime_commands.console_target(
                 "phone",
                 keyboard="UP",
                 exec_command=None,
@@ -753,15 +763,15 @@ class CommandLifecycleTests(unittest.TestCase):
         result = subprocess.CompletedProcess([], 0, stdout="", stderr="")
         ssh = mock.Mock(run_remote=mock.Mock(return_value=result))
         with (
-            mock.patch.object(commands, "ROOT", self.root),
-            mock.patch.object(commands, "load_target", return_value=target_config) as load_target,
+            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(targets, "load_target", return_value=target_config) as load_target,
             mock.patch.object(
-                commands,
+                runtime_commands,
                 "_current_ssh_session",
                 return_value=(ssh, {}),
             ) as current_session,
         ):
-            commands.console_target(
+            runtime_commands.console_target(
                 "phone",
                 profile=profile,
                 keyboard=None,
@@ -790,7 +800,7 @@ class CommandLifecycleTests(unittest.TestCase):
             "logs": self.root / "cache/logs/build/run",
         }
         with mock.patch.dict(os.environ, {}, clear=True):
-            command = commands._build_container_command(  # noqa: SLF001
+            command = build_commands._build_container_command(  # noqa: SLF001
                 "/usr/bin/kern",
                 target="phone",
                 jobs=6,
@@ -831,7 +841,7 @@ class CommandLifecycleTests(unittest.TestCase):
                 "--",
                 "python3",
                 "-m",
-                "fplinux_cli.builder",
+                "fplinux_cli.build",
                 "--target",
                 "phone",
                 "--jobs",
@@ -854,7 +864,7 @@ class CommandLifecycleTests(unittest.TestCase):
             "output": self.root / "cache/out",
             "logs": self.root / "cache/logs/build/run",
         }
-        command = commands._build_container_command(  # noqa: SLF001
+        command = build_commands._build_container_command(  # noqa: SLF001
             "/usr/bin/kern",
             target="phone",
             jobs=6,
@@ -905,24 +915,32 @@ class ChecksumAportTests(unittest.TestCase):
         (self.aport / "local.c").write_bytes(b"int local_source;\n")
 
     def _run(self, container_run: Callable[..., None]) -> None:
-        """Invoke the real checksum workflow with only its OCI execution replaced."""
+        """Invoke the checksum workflow with a controlled image and OCI execution."""
         with (
-            mock.patch.object(commands, "ROOT", self.root),
-            mock.patch.object(workspace_module, "ROOT", self.root),
+            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(workspaces, "ROOT", self.root),
             mock.patch.object(output, "ROOT", self.root),
-            mock.patch.object(commands, "kern_available", return_value=True),
-            mock.patch.object(commands, "require_kern", return_value="/usr/bin/kern"),
             mock.patch.object(
-                commands,
+                images,
+                "load_container_lock",
+                return_value={"oci": {"repository": "localhost/fplinux-build"}},
+            ),
+            mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
+            mock.patch.object(kern_env, "kern_available", return_value=True),
+            mock.patch.object(kern_env, "require_kern", return_value="/usr/bin/kern"),
+            mock.patch.object(
+                kern_env,
                 "current_image_state",
                 return_value=ImageState("e" * 64, "a" * 64),
             ),
-            mock.patch.object(commands, "kern_environment", return_value={}),
+            mock.patch.object(kern_env, "kern_environment", return_value={}),
             mock.patch.object(output.Stage, "run", autospec=True, side_effect=container_run),
             contextlib.redirect_stdout(io.StringIO()),
             contextlib.redirect_stderr(io.StringIO()),
         ):
-            output.run_entrypoint(lambda: commands.checksum_aport(self.PACKAGE, offline=True))
+            output.run_entrypoint(
+                lambda: checksum_commands.checksum_aport(self.PACKAGE, offline=True)
+            )
 
     def _staged_apkbuild(self, command: list[str]) -> Path:
         """Resolve the private aport through the OCI workspace mount boundary."""

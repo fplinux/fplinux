@@ -8,7 +8,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from fplinux_cli import commands
+from fplinux_cli import common
+from fplinux_cli.cli import package as package_commands
+from fplinux_cli.manifests import platforms, releases
 
 
 class ReleaseManifestPolicyTests(unittest.TestCase):
@@ -60,12 +62,16 @@ class ReleaseManifestPolicyTests(unittest.TestCase):
 
     def test_target_document_paths_are_safe_and_collision_free(self) -> None:
         """Direct feature pages map once while invalid or escaping inputs are rejected."""
-        with mock.patch.object(commands, "ROOT", self.root):
-            readme_name, readme = commands.target_archive_file(self.target, "release/README.txt")
+        with mock.patch.object(common, "ROOT", self.root):
+            readme_name, readme = package_commands.target_archive_file(
+                self.target, "release/README.txt"
+            )
             self.assertEqual(readme_name, "README.txt")
             self.assertEqual(readme.read_bytes(), b"phone instructions\n")
 
-            archive_name, source = commands.target_archive_file(self.target, "features/MICROSD.md")
+            archive_name, source = package_commands.target_archive_file(
+                self.target, "features/MICROSD.md"
+            )
             self.assertEqual(archive_name, "docs/target/MICROSD.md")
             self.assertEqual(source.read_bytes(), b"phone microSD procedures\n")
 
@@ -79,15 +85,15 @@ class ReleaseManifestPolicyTests(unittest.TestCase):
                     self.subTest(relative=relative),
                     self.assertRaisesRegex(SystemExit, "target package file"),
                 ):
-                    commands.target_archive_file(self.target, relative)
+                    package_commands.target_archive_file(self.target, relative)
 
             with self.assertRaisesRegex(SystemExit, "invalid target package name"):
-                commands.target_archive_file("../phone", "features/MICROSD.md")
+                package_commands.target_archive_file("../phone", "features/MICROSD.md")
 
             link = self.root / "targets" / self.target / "features/LINK.md"
             link.symlink_to("MICROSD.md")
             with self.assertRaisesRegex(SystemExit, "must not traverse a symlink"):
-                commands.target_archive_file(self.target, "features/LINK.md")
+                package_commands.target_archive_file(self.target, "features/LINK.md")
 
     def test_duplicate_target_document_paths_are_rejected(self) -> None:
         """Two declared documents cannot silently publish the same archive member."""
@@ -103,12 +109,12 @@ class ReleaseManifestPolicyTests(unittest.TestCase):
             ],
         }
         with (
-            mock.patch.object(commands, "ROOT", self.root),
-            mock.patch.object(commands, "load_release", return_value=manifest),
-            mock.patch.object(commands, "load_platform", return_value=self.platform),
+            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(releases, "load_release", return_value=manifest),
+            mock.patch.object(platforms, "load_platform", return_value=self.platform),
             self.assertRaisesRegex(SystemExit, "duplicate release archive path"),
         ):
-            commands.load_release_manifest(self.target, self.target_config)
+            package_commands.load_release_manifest(self.target, self.target_config)
 
     def test_runtime_closure_requires_the_identity_helper(self) -> None:
         """A standalone runner without its identity helper is rejected before packaging."""
@@ -121,12 +127,12 @@ class ReleaseManifestPolicyTests(unittest.TestCase):
             ],
         }
         with (
-            mock.patch.object(commands, "ROOT", self.root),
-            mock.patch.object(commands, "load_release", return_value=broken),
-            mock.patch.object(commands, "load_platform", return_value=self.platform),
+            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(releases, "load_release", return_value=broken),
+            mock.patch.object(platforms, "load_platform", return_value=self.platform),
             self.assertRaisesRegex(SystemExit, "omit required runtime inputs"),
         ):
-            commands.load_release_manifest(self.target, self.target_config)
+            package_commands.load_release_manifest(self.target, self.target_config)
 
 
 if __name__ == "__main__":

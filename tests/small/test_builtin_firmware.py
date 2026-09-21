@@ -9,7 +9,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from fplinux_cli import builder, firmware_inputs, kbuild_state
+from fplinux_cli import common, firmware_inputs, kbuild_state
+from fplinux_cli.build import kernel as kernel_build
 
 
 class BuiltinFirmwareTests(unittest.TestCase):
@@ -43,12 +44,12 @@ class BuiltinFirmwareTests(unittest.TestCase):
         self,
     ) -> None:
         """The admitted profile, not adjacent files, is a causal Kbuild input."""
-        with mock.patch.object(builder, "ROOT", self.root):
-            arguments = builder.audio_profile_kconfig_arguments(
+        with mock.patch.object(common, "ROOT", self.root):
+            arguments = kernel_build.audio_profile_kconfig_arguments(
                 "inoi-240-modern-4g",
                 self.firmware,
             )
-            implementation = builder.audio_profile_implementation(
+            implementation = kernel_build.audio_profile_implementation(
                 "inoi-240-modern-4g",
                 self.firmware,
             )
@@ -84,8 +85,8 @@ class BuiltinFirmwareTests(unittest.TestCase):
         vmlinux = self.root / "vmlinux"
         vmlinux.write_bytes(b"prefix" + self.profile + b"suffix")
 
-        with mock.patch.object(builder, "ROOT", self.root):
-            builder.verify_builtin_audio_profile(
+        with mock.patch.object(common, "ROOT", self.root):
+            kernel_build.verify_builtin_audio_profile(
                 "inoi-240-modern-4g",
                 config_path,
                 vmlinux,
@@ -93,7 +94,7 @@ class BuiltinFirmwareTests(unittest.TestCase):
             )
             vmlinux.write_bytes(b"profile missing")
             with self.assertRaisesRegex(SystemExit, "does not embed audio-profile"):
-                builder.verify_builtin_audio_profile(
+                kernel_build.verify_builtin_audio_profile(
                     "inoi-240-modern-4g",
                     config_path,
                     vmlinux,
@@ -102,13 +103,13 @@ class BuiltinFirmwareTests(unittest.TestCase):
 
     def test_absent_group_leaves_the_generic_kconfig_path_unchanged(self) -> None:
         """A whole missing optional profile does not add fitted-firmware arguments."""
-        with mock.patch.object(builder, "ROOT", self.root):
+        with mock.patch.object(common, "ROOT", self.root):
             self.assertEqual(
-                builder.audio_profile_kconfig_arguments("inoi-240-modern-4g", None),
+                kernel_build.audio_profile_kconfig_arguments("inoi-240-modern-4g", None),
                 [],
             )
             self.assertEqual(
-                builder.audio_profile_implementation("inoi-240-modern-4g", None),
+                kernel_build.audio_profile_implementation("inoi-240-modern-4g", None),
                 [],
             )
 

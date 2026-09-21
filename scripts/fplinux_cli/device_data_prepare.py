@@ -10,9 +10,11 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .commands import build, run_target_noninteractive
+from fplinux_cli.cli.build import build
+from fplinux_cli.cli.runtime import run_target_noninteractive
+from fplinux_cli.manifests.targets import load_target
+
 from .common import ROOT, canonical_json_bytes, fail, replace_file_atomically, sha256_bytes
-from .config import load_target
 from .device_data import DeviceDataPreparation, PhysicalNand, PreparedGroup
 from .firmware_inputs import (
     FirmwareInput,

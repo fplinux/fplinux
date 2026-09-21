@@ -13,7 +13,10 @@ from pathlib import Path
 from typing import Any, cast
 from unittest import mock
 
-from fplinux_cli import alpine_state, builder
+from fplinux_cli import alpine_state, common
+from fplinux_cli.build import bootstrap as bootstrap_build
+from fplinux_cli.build import inputs as inputs_build
+from fplinux_cli.build import publish as publish_build
 from fplinux_cli.bundle_state import (
     BUILD_MANIFEST_NAME,
     bundle_generations,
@@ -94,7 +97,7 @@ class RamSessionImageTests(unittest.TestCase):
         """Describe the exact slot without personalizing the built artifact."""
         ramboot, zimage, dtb, map_file, load_address, offset = self.image_fixture()
 
-        descriptor = builder.verify_images(
+        descriptor = bootstrap_build.verify_images(
             ramboot,
             zimage=zimage,
             dtb=dtb,
@@ -122,7 +125,7 @@ class RamSessionImageTests(unittest.TestCase):
         ramboot.write_bytes(image)
 
         with self.assertRaisesRegex(SystemExit, "not all zero"):
-            builder.verify_images(
+            bootstrap_build.verify_images(
                 ramboot,
                 zimage=zimage,
                 dtb=dtb,
@@ -232,8 +235,8 @@ class BuilderPublicationTests(unittest.TestCase):
             "FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE": "b" * 64,
             "FPLINUX_CONTAINER_IMAGE_GENERATION": "c" * 64,
         }
-        self.root_patch = mock.patch.object(builder, "ROOT", self.root)
-        self.output_patch = mock.patch.object(builder, "OUTPUT", self.output)
+        self.root_patch = mock.patch.object(common, "ROOT", self.root)
+        self.output_patch = mock.patch.object(inputs_build, "OUTPUT", self.output)
         self.root_patch.start()
         self.output_patch.start()
         self.receipt_patch = mock.patch.object(
@@ -270,7 +273,7 @@ class BuilderPublicationTests(unittest.TestCase):
     ) -> Path:
         """Publish the configured fixture through the builder entry point."""
         with mock.patch.dict(os.environ, self.environment, clear=False):
-            return builder.publish_bundle(
+            return publish_build.publish_bundle(
                 target="demo",
                 target_config=self.target_config,
                 platform=self.platform,
@@ -508,7 +511,7 @@ class BuilderPublicationTests(unittest.TestCase):
     def test_manifest_failure_preserves_the_current_bundle_and_cleans_staging(self) -> None:
         """Retain the current bundle when writing its new manifest fails."""
         first = self.publish()
-        real_write_json = builder.write_json
+        real_write_json = publish_build.write_json
         message = "manifest write failed"
 
         def write_json(path: Path, value: dict[str, object]) -> None:
@@ -517,7 +520,7 @@ class BuilderPublicationTests(unittest.TestCase):
             real_write_json(path, value)
 
         with (
-            mock.patch.object(builder, "write_json", side_effect=write_json),
+            mock.patch.object(publish_build, "write_json", side_effect=write_json),
             self.assertRaisesRegex(OSError, message),
         ):
             self.publish()

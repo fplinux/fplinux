@@ -9,7 +9,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from fplinux_cli import builder, linux_state
+from fplinux_cli import linux_state
+from fplinux_cli.build import inputs as inputs_build
+from fplinux_cli.build import linux as linux_build
+from fplinux_cli.build import sources as sources_build
 
 
 class PreparedLinuxTests(unittest.TestCase):
@@ -97,18 +100,18 @@ class PreparedLinuxTests(unittest.TestCase):
         }
 
         with (
-            mock.patch.object(builder, "CACHE", cache),
+            mock.patch.object(inputs_build, "CACHE", cache),
             mock.patch.object(
-                builder,
+                inputs_build,
                 "target_source",
                 side_effect=lambda _target, relative: project / relative,
             ),
-            mock.patch.object(builder, "fetch", return_value=archive),
+            mock.patch.object(sources_build, "fetch", return_value=archive),
         ):
-            source, first = builder.prepare_linux(sources, "demo", target_config, platform)
+            source, first = linux_build.prepare_linux(sources, "demo", target_config, platform)
             (source / "untracked").write_text("old tree only\n", encoding="utf-8")
             copied.write_text("second\n", encoding="utf-8")
-            rebuilt, second = builder.prepare_linux(sources, "demo", target_config, platform)
+            rebuilt, second = linux_build.prepare_linux(sources, "demo", target_config, platform)
 
         self.assertEqual(rebuilt, source)
         self.assertNotEqual(second.linux_recipe, first.linux_recipe)
@@ -134,7 +137,7 @@ class PreparedLinuxTests(unittest.TestCase):
         parent = self.root / "cache/linux/sources"
         parent.mkdir(parents=True)
 
-        source = builder.profile_linux_source_path(parent, "phone", "host")
+        source = linux_build.profile_linux_source_path(parent, "phone", "host")
 
         self.assertEqual(source, self.root / "cache/linux/profiles/phone/host")
         self.assertFalse((parent / "phone/profiles").exists())
@@ -182,16 +185,18 @@ class PreparedLinuxTests(unittest.TestCase):
         }
 
         with (
-            mock.patch.object(builder, "CACHE", cache),
-            mock.patch.object(builder, "load_target", return_value={"linux": target["linux"]}),
-            mock.patch.object(builder, "linux_recipe_digest", return_value=recipe),
+            mock.patch.object(inputs_build, "CACHE", cache),
+            mock.patch.object(linux_build, "load_target", return_value={"linux": target["linux"]}),
+            mock.patch.object(linux_build, "linux_recipe_digest", return_value=recipe),
             mock.patch.object(
                 linux_state,
                 "inspect_prepared_linux",
                 return_value=linux_state.PreparedLinuxState(recipe),
             ),
         ):
-            source, prepared = builder.prepare_linux({"linux": linux}, "phone", target, platform)
+            source, prepared = linux_build.prepare_linux(
+                {"linux": linux}, "phone", target, platform
+            )
 
         self.assertEqual(source, parent / "phone")
         self.assertEqual(prepared.linux_recipe, recipe)
@@ -205,11 +210,11 @@ class PreparedLinuxTests(unittest.TestCase):
         stale.mkdir(parents=True)
         (stale / "partial").write_text("partial\n", encoding="utf-8")
 
-        staging = builder.prepared_linux_staging_path(parent, "phone", "host")
+        staging = linux_build.prepared_linux_staging_path(parent, "phone", "host")
 
         self.assertEqual(staging, stale)
         self.assertEqual(tuple(staging.iterdir()), ())
-        builder.discard_prepared_linux_staging(staging)
+        linux_build.discard_prepared_linux_staging(staging)
         self.assertFalse(staging.exists())
 
     def test_profile_source_cleanup_rejects_each_intermediate_symlink(self) -> None:
@@ -224,14 +229,14 @@ class PreparedLinuxTests(unittest.TestCase):
         profiles.symlink_to(external, target_is_directory=True)
 
         with self.assertRaisesRegex(SystemExit, "source root must not be a symlink"):
-            builder.discard_profile_linux_source(parent, "phone", "host")
+            linux_build.discard_profile_linux_source(parent, "phone", "host")
         self.assertTrue(sentinel.exists())
 
         profiles.unlink()
         profiles.mkdir()
         (profiles / "phone").symlink_to(external, target_is_directory=True)
         with self.assertRaisesRegex(SystemExit, "target slot must not be a symlink"):
-            builder.discard_profile_linux_source(parent, "phone", "host")
+            linux_build.discard_profile_linux_source(parent, "phone", "host")
         self.assertTrue(sentinel.exists())
 
     def test_prepared_linux_cache_refuses_a_symlinked_sources_component(self) -> None:

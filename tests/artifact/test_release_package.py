@@ -16,15 +16,20 @@ from pathlib import Path
 from unittest import mock
 from urllib.parse import urlsplit
 
-from fplinux_cli import alpine_state, commands
+from fplinux_cli import alpine_state, common
+from fplinux_cli import image_state as image_states
+from fplinux_cli import workspace as workspaces
 from fplinux_cli.bundle_state import (
     BUILD_MANIFEST_NAME,
     publish_current_bundle,
     published_file_records,
 )
+from fplinux_cli.cli import package as package_commands
 from fplinux_cli.common import canonical_json_bytes
-from fplinux_cli.config import load_release
+from fplinux_cli.environment import images
 from fplinux_cli.image_state import ImageState
+from fplinux_cli.manifests import platforms, releases, targets
+from fplinux_cli.manifests.releases import load_release
 from fplinux_cli.workspace import WorkspaceSnapshot
 
 
@@ -165,7 +170,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
         """Create an archive and return its archive and phone-test payload digests."""
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
-            commands.package_target(self.target, candidate=candidate)
+            package_commands.package_target(self.target, candidate=candidate)
         values: dict[str, str] = {}
         for line in stdout.getvalue().splitlines():
             for label in ("Archive SHA256", "Phone-test payload SHA256"):
@@ -179,23 +184,23 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
     def package_patches(self) -> tuple[contextlib.AbstractContextManager[object], ...]:
         """Isolate package creation from host identity and repository files."""
         return (
-            mock.patch.object(commands, "ROOT", self.root),
-            mock.patch.object(commands, "PACKAGE_DOCUMENTS", self.package_documents),
-            mock.patch.object(commands, "load_target", return_value=self.target_config),
-            mock.patch.object(commands, "load_release", return_value=self.release_manifest),
-            mock.patch.object(commands, "load_platform", return_value=self.platform),
+            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(package_commands, "PACKAGE_DOCUMENTS", self.package_documents),
+            mock.patch.object(targets, "load_target", return_value=self.target_config),
+            mock.patch.object(releases, "load_release", return_value=self.release_manifest),
+            mock.patch.object(platforms, "load_platform", return_value=self.platform),
             mock.patch.object(
-                commands,
+                workspaces,
                 "target_workspace_snapshot",
                 return_value=self.snapshot,
             ),
             mock.patch.object(
-                commands,
+                images,
                 "container_image_recipe_digest",
                 return_value=self.image_recipe,
             ),
             mock.patch.object(
-                commands,
+                image_states,
                 "load_image_state",
                 return_value=ImageState(self.image_recipe, "c" * 64),
             ),
@@ -301,23 +306,23 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
                 stack.enter_context(patch)
             workspace = stack.enter_context(
                 mock.patch.object(
-                    commands,
+                    workspaces,
                     "target_workspace_snapshot",
                     return_value=profile_snapshot,
                 )
             )
             with self.assertRaisesRegex(SystemExit, "only be packaged with --candidate"):
-                commands.package_target(
+                package_commands.package_target(
                     self.target,
                     profile=profile,
                     candidate=False,
                 )
-            commands.package_target(
+            package_commands.package_target(
                 self.target,
                 profile=profile,
                 candidate=True,
             )
-            commands.package_target(
+            package_commands.package_target(
                 self.target,
                 boot="microsd",
                 candidate=True,
@@ -391,7 +396,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, destination)
         self.package_documents = {}
-        for relative, source in commands.PACKAGE_DOCUMENTS.items():
+        for relative, source in package_commands.PACKAGE_DOCUMENTS.items():
             destination = self.root / source.relative_to(source_root)
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, destination)
@@ -429,7 +434,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             candidate_files = list((self.cache / "out/candidates").glob("*.zip"))
             self.assertEqual(len(candidate_files), 1)
             self.assertTrue(candidate_files[0].name.startswith("FPLinux-nokia-ta1618-candidate-"))
-            with mock.patch.object(commands, "verified_runtime_digest", return_value=original):
+            with mock.patch.object(releases, "verified_runtime_digest", return_value=original):
                 release_archive, release_payload = self.package(candidate=False)
             self.assertEqual(release_payload, original)
             self.assertNotEqual(release_archive, candidate_archive)
@@ -442,7 +447,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             metadata_archive, after_metadata = self.package(candidate=True)
             self.assertEqual(after_metadata, original)
             self.assertNotEqual(metadata_archive, candidate_archive)
-            with mock.patch.object(commands, "verified_runtime_digest", return_value=original):
+            with mock.patch.object(releases, "verified_runtime_digest", return_value=original):
                 self.package(candidate=False)
 
             self.publish_bundle(
@@ -454,13 +459,13 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             self.assertNotEqual(after_apk, original)
             with (
                 mock.patch.object(
-                    commands,
+                    releases,
                     "verified_runtime_digest",
                     return_value=original,
                 ),
                 self.assertRaisesRegex(SystemExit, "not phone-tested"),
             ):
-                commands.package_target(self.target)
+                package_commands.package_target(self.target)
 
 
 if __name__ == "__main__":

@@ -10,7 +10,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from fplinux_cli import builder, config
+from fplinux_cli import common
+from fplinux_cli.build import host as host_build
+from fplinux_cli.build import process as process_build
+from fplinux_cli.build import sources as sources_build
+from fplinux_cli.manifests import platforms
 
 
 class HostRecipeTests(unittest.TestCase):
@@ -38,7 +42,7 @@ class HostRecipeTests(unittest.TestCase):
         """A host binary cannot silently omit a project-owned source input or self-test."""
         recipe = self.make_archive_recipe()
 
-        self.assertEqual(config.validate_host_tool(recipe, 0), recipe)
+        self.assertEqual(platforms.validate_host_tool(recipe, 0), recipe)
         for field in ("copies", "patches", "self_test"):
             incomplete = dict(recipe)
             del incomplete[field]
@@ -46,7 +50,7 @@ class HostRecipeTests(unittest.TestCase):
                 self.subTest(field=field),
                 self.assertRaisesRegex(SystemExit, "must contain exactly"),
             ):
-                config.validate_host_tool(incomplete, 0)
+                platforms.validate_host_tool(incomplete, 0)
 
     def test_project_copy_cannot_replace_a_verified_member(self) -> None:
         """An archive projection rejects replacing bytes already verified against the lock."""
@@ -58,14 +62,14 @@ class HostRecipeTests(unittest.TestCase):
             local_input.parent.mkdir(parents=True)
             local_input.write_bytes(b"local input\n")
 
-            with mock.patch.object(builder, "ROOT", root):
-                builder.copy_host_project_files(
+            with mock.patch.object(common, "ROOT", root):
+                host_build.copy_host_project_files(
                     source,
                     [{"source": "platforms/demo/local-input.h", "destination": "local-input.h"}],
                 )
                 self.assertEqual((source / "local-input.h").read_bytes(), b"local input\n")
                 with self.assertRaisesRegex(SystemExit, "collides with verified source"):
-                    builder.copy_host_project_files(
+                    host_build.copy_host_project_files(
                         source,
                         [
                             {
@@ -115,12 +119,12 @@ class HostRecipeTests(unittest.TestCase):
                 self.assertTrue(Path(command[0]).is_file())
 
             with (
-                mock.patch.object(builder, "ROOT", root),
-                mock.patch.object(builder, "fetch", return_value=archive),
-                mock.patch.object(builder, "run", side_effect=build_binary) as run,
+                mock.patch.object(common, "ROOT", root),
+                mock.patch.object(sources_build, "fetch", return_value=archive),
+                mock.patch.object(process_build, "run", side_effect=build_binary) as run,
             ):
-                first = builder.build_make_host_tool(sources, recipe, work, output)
-                second = builder.build_make_host_tool(sources, recipe, work, output)
+                first = host_build.build_make_host_tool(sources, recipe, work, output)
+                second = host_build.build_make_host_tool(sources, recipe, work, output)
 
             self.assertEqual(first, second)
             self.assertEqual(second.read_bytes(), b"upstream\nlocal input\n")

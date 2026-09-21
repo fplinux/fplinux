@@ -17,9 +17,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from .builder import append_steps, apply_patches, copy_steps, integration_inputs
+from fplinux_cli.build.linux import integration_inputs
+from fplinux_cli.build.sources import append_steps, apply_patches, copy_steps
+from fplinux_cli.manifests.paths import discover_profiles, discover_targets
+from fplinux_cli.manifests.platforms import load_platform
+from fplinux_cli.manifests.targets import load_target
+from fplinux_cli.manifests.values import relative_value
+
 from .common import ROOT, fail
-from .config import discover_profiles, discover_targets, load_platform, load_target, relative_value
 from .workspace import WorkspaceFile
 
 if TYPE_CHECKING:

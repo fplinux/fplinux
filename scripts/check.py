@@ -18,7 +18,9 @@ from typing import TYPE_CHECKING, NoReturn
 from urllib.parse import unquote
 
 from fplinux_cli import alpine_state
-from fplinux_cli.config import discover_targets, load_platform, load_target
+from fplinux_cli.manifests.paths import discover_targets
+from fplinux_cli.manifests.platforms import load_platform
+from fplinux_cli.manifests.targets import load_target
 from fplinux_cli.output import RunReporter, current_stage, run_entrypoint
 from fplinux_cli.source_formats import classify_source_formats
 

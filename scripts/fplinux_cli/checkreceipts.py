@@ -8,8 +8,11 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from fplinux_cli import common
+from fplinux_cli.environment.images import container_image_recipe_digest, file_recipe_digest
+
 from .common import canonical_json_bytes, replace_file_atomically
-from .config import TARGET_NAME
+from .manifests.values import TARGET_NAME
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -81,3 +84,28 @@ def publish_success_receipt(cache_root: Path, recipe: CheckReceiptRecipe) -> Non
     destination = receipt_path(cache_root, recipe)
     destination.parent.mkdir(parents=True, exist_ok=True)
     replace_file_atomically(destination, canonical_json_bytes(recipe.payload()), 0o600)
+
+
+def check_orchestration_recipe_digest(image_recipe: str | None = None) -> str:
+    """Hash only the implementation that can change cached check results."""
+    fixed = [
+        common.ROOT / "scripts/fplinux_cli/checkreceipts.py",
+        common.ROOT / "scripts/fplinux_cli/common.py",
+        *sorted((common.ROOT / "scripts/fplinux_cli/manifests").glob("*.py")),
+        common.ROOT / "scripts/fplinux_cli/environment/images.py",
+        common.ROOT / "scripts/fplinux_cli/quality/source_policy.py",
+        common.ROOT / "scripts/fplinux_cli/environment/__init__.py",
+        common.ROOT / "scripts/fplinux_cli/environment/kern.py",
+        common.ROOT / "scripts/fplinux_cli/environment/git_hooks.py",
+        common.ROOT / "scripts/fplinux_cli/quality/__init__.py",
+        common.ROOT / "scripts/fplinux_cli/quality/checks.py",
+        common.ROOT / "scripts/fplinux_cli/quality/git.py",
+        common.ROOT / "scripts/fplinux_cli/image_state.py",
+        common.ROOT / "scripts/fplinux_cli/identity.py",
+        common.ROOT / "scripts/fplinux_cli/identity_codegen.py",
+        common.ROOT / "scripts/fplinux_cli/output.py",
+        common.ROOT / "scripts/fplinux_cli/workspace.py",
+    ]
+    if image_recipe is None:
+        image_recipe = container_image_recipe_digest()
+    return file_recipe_digest(fixed, prefix=bytes.fromhex(image_recipe))

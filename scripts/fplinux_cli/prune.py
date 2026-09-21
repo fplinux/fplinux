@@ -10,17 +10,17 @@ import stat
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from . import alpine_state, firmware_inputs
-from .common import ROOT
-from .config import (
-    TARGET_NAME,
+from fplinux_cli.environment.images import (
     container_image_recipe_digest,
     container_runtime_recipe_digest,
-    discover_profiles,
-    discover_targets,
-    load_platform,
-    load_target,
 )
+from fplinux_cli.manifests.paths import discover_profiles, discover_targets
+from fplinux_cli.manifests.platforms import load_platform
+from fplinux_cli.manifests.targets import load_target
+from fplinux_cli.manifests.values import TARGET_NAME
+
+from . import alpine_state, firmware_inputs
+from .common import ROOT
 from .image_state import load_image_state
 
 if TYPE_CHECKING:

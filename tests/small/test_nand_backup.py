@@ -116,7 +116,7 @@ class NandBackupTests(unittest.TestCase):
 
         with (
             mock.patch(
-                "fplinux_cli.commands.current_target_ssh_session",
+                "fplinux_cli.cli.runtime.current_target_ssh_session",
                 return_value=(SimpleNamespace(stream_remote=stream_remote), {}),
             ) as acquire,
             self.assertRaisesRegex(SystemExit, "expected 142606336 bytes, got 8"),
@@ -160,7 +160,7 @@ class NandBackupTests(unittest.TestCase):
         """A missing board declaration cannot fall back to another board's reader."""
         with (
             mock.patch.object(nand_backup, "load_target", return_value={}),
-            mock.patch("fplinux_cli.commands.current_target_ssh_session") as acquire,
+            mock.patch("fplinux_cli.cli.runtime.current_target_ssh_session") as acquire,
             self.assertRaisesRegex(SystemExit, "not supported for target no-reader"),
         ):
             nand_backup.backup_target_nand("no-reader", self.destination)

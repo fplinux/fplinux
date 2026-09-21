@@ -12,8 +12,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from fplinux_cli import config, container, output
+from fplinux_cli import checkreceipts, common, output
 from fplinux_cli.common import ROOT as SOURCE_ROOT
+from fplinux_cli.environment import git_hooks, images, kern
 from fplinux_cli.image_state import ImageState, load_image_state
 
 
@@ -59,14 +60,14 @@ class ContainerImageRecipeTests(unittest.TestCase):
             _copy_checkout(first)
             _copy_checkout(second)
 
-            with mock.patch.object(config, "ROOT", first):
-                first_arguments = config.container_image_build_arguments(lock)
-                first_image = config.container_image_recipe_digest(lock)
-                first_check = config.check_orchestration_recipe_digest(first_image)
-            with mock.patch.object(config, "ROOT", second):
-                second_arguments = config.container_image_build_arguments(lock)
-                second_image = config.container_image_recipe_digest(lock)
-                second_check = config.check_orchestration_recipe_digest(second_image)
+            with mock.patch.object(common, "ROOT", first):
+                first_arguments = images.container_image_build_arguments(lock)
+                first_image = images.container_image_recipe_digest(lock)
+                first_check = checkreceipts.check_orchestration_recipe_digest(first_image)
+            with mock.patch.object(common, "ROOT", second):
+                second_arguments = images.container_image_build_arguments(lock)
+                second_image = images.container_image_recipe_digest(lock)
+                second_check = checkreceipts.check_orchestration_recipe_digest(second_image)
 
         expected_arguments = (
             "-f",
@@ -83,11 +84,11 @@ class ContainerImageRecipeTests(unittest.TestCase):
         """Both local tags change only when their exact causal input changes."""
         lock = _container_lock()
         self.assertEqual(
-            config.container_base_image_reference(lock),
+            images.container_base_image_reference(lock),
             f"localhost/fplinux-alpine-base:3.24.1-{'e' * 64}",
         )
         self.assertEqual(
-            config.container_image_reference(lock, "a" * 64),
+            images.container_image_reference(lock, "a" * 64),
             f"localhost/fplinux-build:{'a' * 64}",
         )
 
@@ -104,13 +105,13 @@ class ContainerImageRecipeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "checkout"
             _copy_checkout(root)
-            with mock.patch.object(config, "ROOT", root):
-                recipe = config.container_image_recipe_digest(lock)
-                runtime_changed = config.container_image_recipe_digest(changed_runtime)
+            with mock.patch.object(common, "ROOT", root):
+                recipe = images.container_image_recipe_digest(lock)
+                runtime_changed = images.container_image_recipe_digest(changed_runtime)
         self.assertNotEqual(recipe, runtime_changed)
         self.assertNotEqual(
-            config.container_runtime_recipe_digest(recipe, "a" * 64),
-            config.container_runtime_recipe_digest(recipe, "b" * 64),
+            images.container_runtime_recipe_digest(recipe, "a" * 64),
+            images.container_runtime_recipe_digest(recipe, "b" * 64),
         )
 
 
@@ -123,25 +124,25 @@ class SetupLifecycleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             with (
-                mock.patch.object(container, "ROOT", root),
+                mock.patch.object(kern, "ROOT", root),
                 mock.patch.object(output, "ROOT", root),
-                mock.patch.object(container, "_install_kern", return_value="/cache/kern"),
+                mock.patch.object(kern, "_install_kern", return_value="/cache/kern"),
                 mock.patch.object(
-                    container,
+                    kern,
                     "container_image_recipe_digest",
                     return_value="a" * 64,
                 ),
                 mock.patch.object(
-                    container,
+                    kern,
                     "current_image_state",
                     return_value=ImageState("a" * 64, "b" * 64),
                 ),
-                mock.patch.object(container, "_prune_kern_build_history"),
-                mock.patch.object(container, "_discard_transient_kern_images"),
-                mock.patch.object(container, "_discard_obsolete_kern_images"),
-                mock.patch.object(container, "install_git_hooks"),
+                mock.patch.object(kern, "_prune_kern_build_history"),
+                mock.patch.object(kern, "_discard_transient_kern_images"),
+                mock.patch.object(kern, "_discard_obsolete_kern_images"),
+                mock.patch.object(kern, "install_git_hooks"),
             ):
-                state = container.setup(lock=lock)
+                state = kern.setup(lock=lock)
             self.assertEqual(
                 state,
                 ImageState("a" * 64, "b" * 64),
@@ -167,32 +168,34 @@ class SetupLifecycleTests(unittest.TestCase):
             for relative in (".kernignore", "Containerfile", "package.json", "package-lock.json"):
                 (root / relative).write_text(relative, encoding="utf-8")
             with (
-                mock.patch.object(container, "ROOT", root),
-                mock.patch.object(container, "_install_kern", return_value="/cache/kern"),
+                mock.patch.object(kern, "ROOT", root),
+                mock.patch.object(kern, "_install_kern", return_value="/cache/kern"),
                 mock.patch.object(
-                    container,
+                    kern,
                     "container_image_recipe_digest",
                     return_value="a" * 64,
                 ),
                 mock.patch.object(
-                    container,
+                    kern,
                     "current_image_state",
                     side_effect=(None, ImageState("a" * 64, "b" * 64)),
                 ),
-                mock.patch.object(container, "_base_image_ready", return_value=True),
-                mock.patch.object(container, "_prune_kern_build_history"),
-                mock.patch.object(container, "_discard_transient_kern_images"),
-                mock.patch.object(container, "_discard_obsolete_kern_images"),
+                mock.patch.object(kern, "_base_image_ready", return_value=True),
+                mock.patch.object(kern, "_prune_kern_build_history"),
+                mock.patch.object(kern, "_discard_transient_kern_images"),
+                mock.patch.object(kern, "_discard_obsolete_kern_images"),
                 mock.patch.object(
-                    container,
+                    kern,
                     "_image_metadata",
                     return_value=("a" * 64, "b" * 64),
                 ),
-                mock.patch.object(container, "_publish_staged_kern_image"),
-                mock.patch("fplinux_cli.container.secrets.token_hex", return_value="b" * 64),
-                mock.patch.object(container, "install_git_hooks"),
+                mock.patch.object(kern, "_publish_staged_kern_image"),
+                mock.patch(
+                    "fplinux_cli.environment.kern.secrets.token_hex", return_value="b" * 64
+                ),
+                mock.patch.object(kern, "install_git_hooks"),
             ):
-                container.setup(reporter=reporter, lock=lock)
+                kern.setup(reporter=reporter, lock=lock)
 
         call = stage.run.call_args
         self.assertIsNotNone(call)
@@ -227,22 +230,22 @@ class SetupLifecycleTests(unittest.TestCase):
     def test_kern_image_probe_timeout_is_reported(self) -> None:
         """A stuck runtime lookup fails with its named boundary instead of hanging."""
         with (
-            mock.patch.object(container, "kern_environment", return_value={}),
+            mock.patch.object(kern, "kern_environment", return_value={}),
             mock.patch(
-                "fplinux_cli.container.subprocess.run",
+                "fplinux_cli.environment.kern.subprocess.run",
                 side_effect=subprocess.TimeoutExpired(["kern", "box"], 60),
             ),
             self.assertRaisesRegex(SystemExit, "Kern image lookup timed out"),
         ):
-            container.image_generation("kern", "localhost/fplinux:locked")
+            kern.image_generation("kern", "localhost/fplinux:locked")
 
     def test_image_generation_is_read_from_the_built_image_marker(self) -> None:
         """Use the build-published generation rather than Kern's private store layout."""
         generation = "b" * 64
         with (
-            mock.patch.object(container, "kern_environment", return_value={}),
+            mock.patch.object(kern, "kern_environment", return_value={}),
             mock.patch(
-                "fplinux_cli.container.subprocess.run",
+                "fplinux_cli.environment.kern.subprocess.run",
                 return_value=subprocess.CompletedProcess(
                     ["kern", "box"],
                     0,
@@ -252,7 +255,7 @@ class SetupLifecycleTests(unittest.TestCase):
             ),
         ):
             self.assertEqual(
-                container.image_generation("kern", "localhost/fplinux:locked"),
+                kern.image_generation("kern", "localhost/fplinux:locked"),
                 generation,
             )
 
@@ -264,21 +267,21 @@ class KernRetentionTests(unittest.TestCase):
         """Remove only superseded FPLinux tags through Kern's image API."""
         lock = _container_lock()
         recipe = "a" * 64
-        current_base = config.container_base_image_reference(lock)
-        current_build = config.container_image_reference(lock, recipe)
+        current_base = images.container_base_image_reference(lock)
+        current_build = images.container_image_reference(lock, recipe)
         stale = "localhost/fplinux-build:" + "b" * 64
         remove = mock.Mock()
         with (
             mock.patch.object(
-                container,
+                kern,
                 "_kern_image_references",
                 return_value=frozenset(
                     {current_base, current_build, stale, "localhost/unrelated:keep"}
                 ),
             ),
-            mock.patch.object(container, "_remove_kern_images", new=remove),
+            mock.patch.object(kern, "_remove_kern_images", new=remove),
         ):
-            container._discard_obsolete_kern_images("kern", lock, recipe)  # noqa: SLF001
+            kern._discard_obsolete_kern_images("kern", lock, recipe)  # noqa: SLF001
 
         remove.assert_called_once_with("kern", {stale})
 
@@ -304,17 +307,17 @@ class KernRetentionTests(unittest.TestCase):
                 images.pop(reference)
 
         with (
-            mock.patch.object(container, "_kern_image_references", side_effect=references),
+            mock.patch.object(kern, "_kern_image_references", side_effect=references),
             mock.patch.object(
-                container,
+                kern,
                 "_temporary_image_reference",
                 return_value=backup,
             ),
-            mock.patch.object(container, "_tag_kern_image", side_effect=tag),
-            mock.patch.object(container, "_remove_kern_images", side_effect=remove),
+            mock.patch.object(kern, "_tag_kern_image", side_effect=tag),
+            mock.patch.object(kern, "_remove_kern_images", side_effect=remove),
             self.assertRaisesRegex(SystemExit, "tag failed"),
         ):
-            container._publish_staged_kern_image(  # noqa: SLF001
+            kern._publish_staged_kern_image(  # noqa: SLF001
                 "kern",
                 staging,
                 destination,
@@ -330,14 +333,14 @@ class GitHookPathTests(unittest.TestCase):
     def test_git_hook_timeout_is_reported_without_mutation(self) -> None:
         """A stuck Git query fails before writing repository configuration."""
         with (
-            mock.patch("fplinux_cli.container.shutil.which", return_value="git"),
+            mock.patch("fplinux_cli.environment.git_hooks.shutil.which", return_value="git"),
             mock.patch(
-                "fplinux_cli.container.subprocess.run",
+                "fplinux_cli.environment.git_hooks.subprocess.run",
                 side_effect=subprocess.TimeoutExpired(["git", "rev-parse"], 60),
             ),
             self.assertRaisesRegex(SystemExit, "Git hook configuration timed out"),
         ):
-            container.install_git_hooks()
+            git_hooks.install_git_hooks()
 
     def test_absolute_repository_hook_path_is_equivalent(self) -> None:
         """Accept the absolute spelling of this checkout's hook directory."""
@@ -362,11 +365,13 @@ class GitHookPathTests(unittest.TestCase):
                 raise AssertionError(f"unexpected Git mutation: {command}")
 
             with (
-                mock.patch.object(container, "ROOT", root),
-                mock.patch("fplinux_cli.container.shutil.which", return_value="git"),
-                mock.patch("fplinux_cli.container.subprocess.run", side_effect=fake_run),
+                mock.patch.object(git_hooks, "ROOT", root),
+                mock.patch("fplinux_cli.environment.git_hooks.shutil.which", return_value="git"),
+                mock.patch(
+                    "fplinux_cli.environment.git_hooks.subprocess.run", side_effect=fake_run
+                ),
             ):
-                container.install_git_hooks()
+                git_hooks.install_git_hooks()
             self.assertEqual(len(commands), 2)
 
     def test_different_absolute_hook_path_is_rejected_without_mutation(self) -> None:
@@ -385,12 +390,14 @@ class GitHookPathTests(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 0, f"{foreign}\n", "")
 
             with (
-                mock.patch.object(container, "ROOT", root),
-                mock.patch("fplinux_cli.container.shutil.which", return_value="git"),
-                mock.patch("fplinux_cli.container.subprocess.run", side_effect=fake_run),
+                mock.patch.object(git_hooks, "ROOT", root),
+                mock.patch("fplinux_cli.environment.git_hooks.shutil.which", return_value="git"),
+                mock.patch(
+                    "fplinux_cli.environment.git_hooks.subprocess.run", side_effect=fake_run
+                ),
                 self.assertRaisesRegex(SystemExit, "core.hooksPath is already set"),
             ):
-                container.install_git_hooks()
+                git_hooks.install_git_hooks()
             self.assertEqual(len(commands), 2)
 
 

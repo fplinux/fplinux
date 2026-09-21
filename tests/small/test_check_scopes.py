@@ -10,19 +10,20 @@ from pathlib import Path
 from typing import Any, Literal, Self
 from unittest import mock
 
-from fplinux_cli import container
 from fplinux_cli.checkreceipts import (
     CheckReceiptRecipe,
     publish_success_receipt,
     receipt_matches,
     receipt_path,
 )
-from fplinux_cli.container import (
+from fplinux_cli.environment import kern
+from fplinux_cli.image_state import ImageState
+from fplinux_cli.quality import checks
+from fplinux_cli.quality.checks import (
     check_scope_closure_digest,
     check_scope_receipt_recipe,
     resolve_check_scopes,
 )
-from fplinux_cli.image_state import ImageState
 from fplinux_cli.workspace import WorkspaceFile, WorkspaceSnapshot
 
 
@@ -42,7 +43,7 @@ class CheckScopeTests(unittest.TestCase):
         first_orchestration = "b" * 64
         generation = "c" * 64
         with mock.patch.object(
-            container,
+            checks,
             "check_orchestration_recipe_digest",
             return_value=first_orchestration,
         ):
@@ -51,7 +52,7 @@ class CheckScopeTests(unittest.TestCase):
                 "python", closure, image_generation="d" * 64
             )
         with mock.patch.object(
-            container,
+            checks,
             "check_orchestration_recipe_digest",
             return_value="e" * 64,
         ):
@@ -605,19 +606,19 @@ class RepositoryFastPathTests(unittest.TestCase):
         reporter = mock.Mock()
         with (
             mock.patch("fplinux_cli.output.RunReporter.create", return_value=reporter),
-            mock.patch.object(container, "check_git_diff") as git_diff,
+            mock.patch.object(checks, "check_git_diff") as git_diff,
             mock.patch.object(
-                container,
+                checks,
                 "kern_available",
                 side_effect=AssertionError("repository check must not inspect Kern"),
             ),
             mock.patch.object(
-                container,
+                checks,
                 "quality_workspace_snapshot",
                 side_effect=AssertionError("repository check must not snapshot a workspace"),
             ),
         ):
-            container.check(["repository"], profile="microsd-uboot")
+            checks.check(["repository"], profile="microsd-uboot")
         git_diff.assert_called_once_with(reporter)
         reporter.finish.assert_called_once_with()
 
@@ -696,8 +697,8 @@ class KernelExecutionLimitTests(unittest.TestCase):
             )
 
             def run_with_jobs(jobs: int) -> None:
-                with mock.patch.object(container, "kern_environment", return_value={}):
-                    container._run_missing_checks(  # noqa: SLF001 -- execution boundary.
+                with mock.patch.object(checks, "kern_environment", return_value={}):
+                    checks._run_missing_checks(  # noqa: SLF001 -- execution boundary.
                         reporter=_RecordingReporter(  # type: ignore[arg-type]
                             root / f"logs-{jobs}", commands
                         ),
@@ -798,10 +799,11 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
     ) -> tuple[Any, ...]:
         """Describe the controlled OCI, image, and workspace boundaries for a scenario."""
         return (
-            mock.patch.object(container, "ROOT", root),
+            mock.patch.object(checks, "ROOT", root),
+            mock.patch.object(kern, "ROOT", root),
             mock.patch("fplinux_cli.output.RunReporter.create", return_value=reporter),
             mock.patch.object(
-                container,
+                checks,
                 "kern_available",
                 new=self._guarded_boundary(
                     "inspect Kern",
@@ -810,7 +812,7 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
                 ),
             ),
             mock.patch.object(
-                container,
+                checks,
                 "require_kern",
                 new=self._guarded_boundary(
                     "require Kern",
@@ -819,7 +821,7 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
                 ),
             ),
             mock.patch.object(
-                container,
+                checks,
                 "load_container_lock",
                 return_value={
                     "oci": {
@@ -829,7 +831,7 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
                 },
             ),
             mock.patch.object(
-                container,
+                checks,
                 "current_image_state",
                 new=self._guarded_boundary(
                     "inspect an image",
@@ -837,24 +839,24 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
                     exact_hit_guard=exact_hit_guard,
                 ),
             ),
-            mock.patch.object(container, "kern_environment", return_value={}),
+            mock.patch.object(checks, "kern_environment", return_value={}),
             mock.patch.object(
-                container,
+                checks,
                 "container_image_recipe_digest",
                 return_value="b" * 64,
             ),
             mock.patch.object(
-                container,
+                checks,
                 "check_orchestration_recipe_digest",
                 return_value="d" * 64,
             ),
             mock.patch.object(
-                container,
+                checks,
                 "quality_workspace_snapshot",
                 return_value=snapshot,
             ),
             mock.patch.object(
-                container,
+                checks,
                 "stage_quality_workspace_snapshot",
                 new=(
                     self._guarded_boundary(
@@ -867,12 +869,12 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
                 ),
             ),
             mock.patch.object(
-                container,
+                checks,
                 "discard_staged_quality_workspace_snapshot",
                 new=discard_workspace,
             ),
             mock.patch.object(
-                container,
+                checks,
                 "setup",
                 new=self._guarded_boundary(
                     "set up an image",
@@ -893,7 +895,7 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
         with ExitStack() as stack:
             for boundary in patches:
                 stack.enter_context(boundary)
-            container.check(scopes, no_cache=no_cache)
+            checks.check(scopes, no_cache=no_cache)
 
     def _run(  # noqa: PLR0913
         self,

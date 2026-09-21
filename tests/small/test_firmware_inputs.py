@@ -9,8 +9,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from fplinux_cli import alpine_state, config, firmware_inputs
+from fplinux_cli import alpine_state, firmware_inputs
 from fplinux_cli import workspace as workspace_module
+from fplinux_cli.manifests import values
 
 
 class FirmwareInputTests(unittest.TestCase):
@@ -79,7 +80,7 @@ class FirmwareInputTests(unittest.TestCase):
         """Each group declaration names one source and one firmware destination."""
         contents = b"firmware"
         digest = hashlib.sha256(contents).hexdigest()
-        normalized = config.firmware_array(
+        normalized = values.firmware_array(
             [self._declaration("controller.bin", "chip/controller.bin", 8, digest)],
             "target bluetooth firmware",
         )
@@ -108,7 +109,7 @@ class FirmwareInputTests(unittest.TestCase):
         }
         for name, declarations in invalid_cases.items():
             with self.subTest(name=name), self.assertRaises(SystemExit):
-                config.firmware_array(declarations, "target bluetooth firmware")
+                values.firmware_array(declarations, "target bluetooth firmware")
 
     def test_absent_groups_are_independent_and_partial_group_names_its_error(self) -> None:
         """Whole optional groups may be absent, but a present group is all-or-nothing."""
