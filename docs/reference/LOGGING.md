@@ -19,10 +19,14 @@ audio underrun or a failed shutdown, at a visible severity.
 
 ## Bootstrap
 
-Records such as `*_LINUX_BOOTSTRAP stage=... message=...` are diagnostics, not
+Records such as `*_LINUX_BOOTSTRAP event=stage stage=... message=...` are diagnostics, not
 the handoff control channel. Do not parse them to authorize a transition. The
 session-bound binary exchange owns that decision. Human-facing boot-screen text
 is a separate interface.
+
+Records identify their event before numeric fields; free-form `message` text
+comes last. Errors use an `error` field rather than a reserved stage number.
+Keep these diagnostics separate from the binary handoff protocol.
 
 ## Host CLI
 
