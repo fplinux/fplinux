@@ -61,13 +61,13 @@ void ums9117_boot_checkpoint(const char *message,
 
 static void record_stage(uint32_t stage, const char *message)
 {
-	fprintf(stderr, "%s_LINUX_BOOTSTRAP stage=%lu message=%s\n",
+	fprintf(stderr, "%s_LINUX_BOOTSTRAP event=stage stage=%lu message=%s\n",
 		FPLINUX_BOOTSTRAP_RECORD_PREFIX, (unsigned long)stage, message);
 }
 
 void ums9117_boot_fail(uint32_t code, const char *message)
 {
-	fprintf(stderr, "%s_LINUX_BOOTSTRAP stage=238 error=%lu message=%s\n",
+	fprintf(stderr, "%s_LINUX_BOOTSTRAP event=error error=%lu message=%s\n",
 		FPLINUX_BOOTSTRAP_RECORD_PREFIX, (unsigned long)code, message);
 	fplinux_boot_screen_fail(&boot_screen, code, message);
 	for (;;)
@@ -83,8 +83,8 @@ static int enable_and_probe_sprd_timer(void)
 	timer_ok = ums9117_bootstrap_probe_timer(&timer);
 
 	fprintf(stderr,
-		"%s_SPRD_TIMER syscnt=%lu->%lu polls=%lu "
-		"ctl=0x%08lx->0x%08lx value=%lu shadow=%lu int=0x%08lx\n",
+		"%s_SPRD_TIMER event=sample syscnt_before=%lu syscnt=%lu polls=%lu "
+		"ctl_before=0x%08lx ctl=0x%08lx value=%lu shadow=%lu int=0x%08lx\n",
 		FPLINUX_BOOTSTRAP_RECORD_PREFIX,
 		(unsigned long)timer.syscnt_before,
 		(unsigned long)timer.syscnt_after, timer.polls,
@@ -125,8 +125,8 @@ void ums9117_boot_main(const struct ums9117_boot_board *board)
 	char note[48];
 
 	fprintf(stderr,
-		"%s_LINUX_BOOTSTRAP stage=0 message=ENTRY "
-		"ram=0x%08lx zimage=%lu dtb=%lu\n",
+		"%s_LINUX_BOOTSTRAP event=stage stage=0 "
+		"ram=0x%08lx zimage=%lu dtb=%lu message=ENTRY\n",
 		FPLINUX_BOOTSTRAP_RECORD_PREFIX, (unsigned long)ram_bytes,
 		(unsigned long)zimage_bytes, (unsigned long)dtb_bytes);
 

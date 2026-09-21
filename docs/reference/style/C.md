@@ -255,7 +255,7 @@ typed accessors such as `reg_read()` and `reg_write()`. Use `uintptr_t` for the
 integer-to-pointer boundary. Ordinary memory and synchronization do not become
 safe merely by adding `volatile`.
 
-Machine-facing records such as `*_LINUX_BOOTSTRAP stage=...` are diagnostics,
+Machine-facing records such as `*_LINUX_BOOTSTRAP event=stage stage=...` are diagnostics,
 not the handoff control channel. Do not parse their text to authorize a state
 transition. The session-bound binary exchange controls the Linux handoff. A
 fatal bootstrap path presents the failure when possible and stops; it must not

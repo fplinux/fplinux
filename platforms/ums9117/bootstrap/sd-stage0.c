@@ -108,7 +108,7 @@ static const char *stage0_failure_detail(uint32_t code, uint32_t detail)
 
 static void stage0_fail(uint32_t code, uint32_t detail)
 {
-	fprintf(stderr, "%s_UBOOT_STAGE0 error=%lu detail=%lu\n",
+	fprintf(stderr, "%s_UBOOT_STAGE0 event=error error=%lu detail=%lu\n",
 		FPLINUX_BOOTSTRAP_RECORD_PREFIX, (unsigned long)code,
 		(unsigned long)detail);
 	fplinux_boot_screen_fail(&boot_screen, code,
@@ -171,7 +171,8 @@ static int stage0_checkpoint(uint32_t code, uint32_t value)
 	}
 	(void)fplinux_boot_screen_set_checkpoint(&boot_screen, message,
 						 FPLINUX_BOOT_SCREEN_ACTIVE);
-	fprintf(stderr, "%s_UBOOT_STAGE0 checkpoint=%lu value=0x%08lx\n",
+	fprintf(stderr,
+		"%s_UBOOT_STAGE0 event=checkpoint checkpoint=%lu detail=0x%08lx\n",
 		FPLINUX_BOOTSTRAP_RECORD_PREFIX, (unsigned long)code,
 		(unsigned long)value);
 	return 0;
