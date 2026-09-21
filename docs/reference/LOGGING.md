@@ -65,6 +65,11 @@ lines into fragments. Do not use `/dev/kmsg` as an ordinary stream log file.
 Choose stream priorities from the producer's meaning: stderr from an external
 daemon can contain ordinary diagnostics, not only errors.
 
+## Embedded projects
+
+Use U-Boot's `log_*` interface with an explicit category. Keep boot failures
+visible and routine controller-release messages at debug level.
+
 Use [Hardware debugging](../guides/DEBUGGING.md) for diagnostic logs and
 tracing. The [code style](CODE_STYLE.md) covers implementation and identifiers,
 while the [porting overview](../porting/README.md) defines which layer owns a

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#define LOG_CATEGORY UCLASS_MMC
 #include <asm/io.h>
 #include <command.h>
 #include <dm.h>
@@ -6,6 +7,7 @@
 #include <linux/delay.h>
 #include <linux/errno.h>
 #include <linux/kernel.h>
+#include <log.h>
 #include <mmc.h>
 #include <time.h>
 
@@ -478,8 +480,7 @@ static int ums9117_mmc_send_cmd(struct udevice *dev, struct mmc_cmd *cmd,
 	if (!ret)
 		ret = ums9117_mmc_response_error(cmd);
 	if (ret) {
-		printf("ums9117-mmc: command %u failed: %d\n", cmd->cmdidx,
-		       ret);
+		log_err("MMC command %u failed: %d\n", cmd->cmdidx, ret);
 		ums9117_mmc_cleanup(priv);
 		return ret;
 	}
@@ -716,7 +717,7 @@ static int do_ums9117_sdrelease(struct cmd_tbl *cmdtp, int flag, int argc,
 	(void)argv;
 
 	ums9117_mmc_release();
-	puts("sdrelease: controller and slot state restored\n");
+	log_debug("controller and slot state restored\n");
 	return CMD_RET_SUCCESS;
 }
 
