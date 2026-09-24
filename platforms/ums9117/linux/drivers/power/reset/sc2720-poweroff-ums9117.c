@@ -3,15 +3,15 @@
 #include <linux/bitops.h>
 #include <linux/delay.h>
 #include <linux/err.h>
-#include <linux/input.h>
+#include <linux/input/ums9117-keypad.h>
 #include <linux/module.h>
+#include <linux/notifier.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/jiffies.h>
 #include <linux/kernel.h>
 #include <linux/processor.h>
 #include <linux/reboot.h>
-#include <linux/slab.h>
 #include <linux/workqueue.h>
 #include <linux/regmap.h>
 #include <linux/spi/spi.h>
@@ -26,16 +26,13 @@
 #define SC2720_POWER_OFF_WAIT_MS 50U
 #define SC2720_POWER_KEY_HOLD_MS 5000U
 
-struct sc2720_power_key {
-	struct input_handle handle;
-	struct delayed_work hold_work;
-	atomic_t down;
-};
-
 struct sc2720_poweroff {
+	struct device *dev;
 	struct regmap *regmap;
 	struct spi_device *spi;
-	struct input_handler input_handler;
+	struct notifier_block power_key_notifier;
+	struct delayed_work hold_work;
+	atomic_t power_key_down;
 	struct device_node *keypad_node;
 };
 
@@ -86,115 +83,53 @@ static int sc2720_power_key_preflight(struct sc2720_poweroff *poweroff)
 
 static void sc2720_power_key_hold_work(struct work_struct *work)
 {
-	struct sc2720_power_key *power_key = container_of(
-		to_delayed_work(work), struct sc2720_power_key, hold_work);
-	struct device *dev = &power_key->handle.dev->dev;
+	struct sc2720_poweroff *poweroff = container_of(
+		to_delayed_work(work), struct sc2720_poweroff, hold_work);
 	int ret;
 
-	if (atomic_cmpxchg(&power_key->down, 1, 0) != 1 ||
+	if (atomic_cmpxchg(&poweroff->power_key_down, 1, 0) != 1 ||
 	    READ_ONCE(system_state) != SYSTEM_RUNNING)
 		return;
 
-	ret = sc2720_power_key_preflight(container_of(power_key->handle.handler,
-						      struct sc2720_poweroff,
-						      input_handler));
+	ret = sc2720_power_key_preflight(poweroff);
 	if (ret == -EBUSY) {
-		dev_warn(dev,
+		dev_warn(poweroff->dev,
 			 "power-key shutdown refused: charger input active\n");
 		return;
 	}
 	if (ret) {
-		dev_err(dev, "power-key shutdown refused: %pe\n", ERR_PTR(ret));
+		dev_err(poweroff->dev, "power-key shutdown refused: %pe\n",
+			ERR_PTR(ret));
 		return;
 	}
 
-	dev_dbg(dev, "power-key orderly shutdown requested\n");
+	dev_dbg(poweroff->dev, "power-key orderly shutdown requested\n");
 	if (READ_ONCE(system_state) != SYSTEM_RUNNING)
 		return;
 	/* Never force power off if userspace cannot make storage safe. */
 	orderly_poweroff(false);
 }
 
-static void sc2720_power_key_event(struct input_handle *handle,
-				   unsigned int type, unsigned int code,
-				   int value)
+static int sc2720_power_key_event(struct notifier_block *notifier,
+				  unsigned long state, void *data)
 {
-	struct sc2720_power_key *power_key =
-		container_of(handle, struct sc2720_power_key, handle);
+	struct sc2720_poweroff *poweroff = container_of(
+		notifier, struct sc2720_poweroff, power_key_notifier);
+	const struct ums9117_keypad_power_event *event = data;
 
-	if (type != EV_KEY || code != KEY_POWER || value == 2)
-		return;
-	if (!value) {
-		atomic_set(&power_key->down, 0);
-		cancel_delayed_work(&power_key->hold_work);
-		return;
-	}
-	if (value == 1 && atomic_cmpxchg(&power_key->down, 0, 1) == 0)
+	if (event->keypad_node != poweroff->keypad_node)
+		return NOTIFY_DONE;
+	if (state == UMS9117_KEYPAD_POWER_RELEASE) {
+		atomic_set(&poweroff->power_key_down, 0);
+		cancel_delayed_work(&poweroff->hold_work);
+	} else if (state == UMS9117_KEYPAD_POWER_PRESS &&
+		   atomic_cmpxchg(&poweroff->power_key_down, 0, 1) == 0) {
 		schedule_delayed_work(
-			&power_key->hold_work,
+			&poweroff->hold_work,
 			msecs_to_jiffies(SC2720_POWER_KEY_HOLD_MS));
+	}
+	return NOTIFY_OK;
 }
-
-static int sc2720_power_key_connect(struct input_handler *handler,
-				    struct input_dev *dev,
-				    const struct input_device_id *id)
-{
-	struct sc2720_poweroff *poweroff =
-		container_of(handler, struct sc2720_poweroff, input_handler);
-	struct sc2720_power_key *power_key;
-	int ret;
-
-	(void)id;
-	if (!dev->dev.parent ||
-	    dev->dev.parent->of_node != poweroff->keypad_node ||
-	    !test_bit(KEY_POWER, dev->keybit))
-		return -ENODEV;
-
-	power_key = kzalloc(sizeof(*power_key), GFP_KERNEL);
-	if (!power_key)
-		return -ENOMEM;
-	INIT_DELAYED_WORK(&power_key->hold_work, sc2720_power_key_hold_work);
-	atomic_set(&power_key->down, 0);
-	power_key->handle.dev = dev;
-	power_key->handle.handler = handler;
-	power_key->handle.name = "sc2720-power-key";
-
-	ret = input_register_handle(&power_key->handle);
-	if (ret)
-		goto free;
-	ret = input_open_device(&power_key->handle);
-	if (ret)
-		goto unregister;
-	dev_dbg(&dev->dev, "power-key handler attached\n");
-	return 0;
-
-unregister:
-	input_unregister_handle(&power_key->handle);
-free:
-	kfree(power_key);
-	return ret;
-}
-
-static void sc2720_power_key_disconnect(struct input_handle *handle)
-{
-	struct sc2720_power_key *power_key =
-		container_of(handle, struct sc2720_power_key, handle);
-
-	atomic_set(&power_key->down, 0);
-	cancel_delayed_work_sync(&power_key->hold_work);
-	input_close_device(handle);
-	input_unregister_handle(handle);
-	kfree(power_key);
-}
-
-static const struct input_device_id sc2720_power_key_ids[] = {
-	{
-		.flags = INPUT_DEVICE_ID_MATCH_EVBIT,
-		.evbit = { BIT_MASK(EV_KEY) },
-	},
-	{}
-};
-MODULE_DEVICE_TABLE(input, sc2720_power_key_ids);
 
 static int sc2720_power_off(struct sys_off_data *data)
 {
@@ -214,9 +149,13 @@ static int sc2720_power_off(struct sys_off_data *data)
 	sc2720_halt();
 }
 
-static void sc2720_poweroff_unregister_input(void *data)
+static void sc2720_poweroff_unregister_keypad(void *data)
 {
-	input_unregister_handler(data);
+	struct sc2720_poweroff *poweroff = data;
+
+	ums9117_keypad_unregister_power_notifier(&poweroff->power_key_notifier);
+	atomic_set(&poweroff->power_key_down, 0);
+	cancel_delayed_work_sync(&poweroff->hold_work);
 }
 
 static void sc2720_poweroff_put_keypad(void *data)
@@ -234,6 +173,7 @@ static int sc2720_poweroff_probe(struct platform_device *pdev)
 	poweroff = devm_kzalloc(&pdev->dev, sizeof(*poweroff), GFP_KERNEL);
 	if (!poweroff)
 		return -ENOMEM;
+	poweroff->dev = &pdev->dev;
 	poweroff->regmap = dev_get_regmap(pdev->dev.parent, NULL);
 	if (!poweroff->regmap)
 		return -EPROBE_DEFER;
@@ -261,19 +201,14 @@ static int sc2720_poweroff_probe(struct platform_device *pdev)
 					    sc2720_power_off, poweroff);
 	if (ret)
 		return ret;
-	poweroff->input_handler = (struct input_handler){
-		.event = sc2720_power_key_event,
-		.connect = sc2720_power_key_connect,
-		.disconnect = sc2720_power_key_disconnect,
-		.name = "sc2720-power-key",
-		.id_table = sc2720_power_key_ids,
-	};
-	ret = input_register_handler(&poweroff->input_handler);
+	INIT_DELAYED_WORK(&poweroff->hold_work, sc2720_power_key_hold_work);
+	poweroff->power_key_notifier.notifier_call = sc2720_power_key_event;
+	ret = ums9117_keypad_register_power_notifier(
+		&poweroff->power_key_notifier);
 	if (ret)
 		return ret;
-	ret = devm_add_action_or_reset(&pdev->dev,
-				       sc2720_poweroff_unregister_input,
-				       &poweroff->input_handler);
+	ret = devm_add_action_or_reset(
+		&pdev->dev, sc2720_poweroff_unregister_keypad, poweroff);
 	if (ret)
 		return ret;
 	dev_dbg(&pdev->dev, "power-off handler ready\n");

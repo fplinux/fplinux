@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0-only
 config POWER_RESET_SC2720_UMS9117
 	bool "Guarded SC2720 power-off on UMS9117"
-	depends on ARCH_UMS9117 && INPUT && MFD_SC27XX_PMIC && SPI_SPRD_ADI
+	depends on ARCH_UMS9117 && INPUT && KEYBOARD_UMS9117
+	depends on MFD_SC27XX_PMIC && SPI_SPRD_ADI
 	help
 	  Request SC2720 power-off after an orderly system shutdown. Refuse
 	  the final power-off sequence while the charger input is active.
