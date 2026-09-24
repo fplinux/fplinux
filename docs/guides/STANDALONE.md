@@ -98,6 +98,9 @@ For details, use the bundled pages:
 - [local console](../features/LOCAL_CONSOLE.md);
 - [host keyboard forwarding](../features/HOST_KEYBOARD.md);
 - [headphone audio](../features/HEADPHONE_AUDIO.md), on supported phones;
+- [speaker audio](../features/SPEAKER_AUDIO.md), on supported phones;
+- [phone microphone](../features/MICROPHONE_AUDIO.md), on supported phones;
+- [FM radio](../features/FM_RADIO.md), on the three current targets with fitted settings;
 - [LCD backlight](../features/DISPLAY_BACKLIGHT.md) and
   [keypad backlight](../features/KEYPAD_BACKLIGHT.md);
 - [vibration](../features/VIBRATION.md), subject to the phone's physical limits;

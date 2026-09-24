@@ -46,48 +46,60 @@ row order below in every target. When a target gains a capability that is not
 listed, add it to this template and to every target table in the same change;
 unsupported targets retain an explicit `Unknown` or `Not supported` entry.
 
-| Feature                                                      | Hardware     | FPLinux     | This phone                     |
-| ------------------------------------------------------------ | ------------ | ----------- | ------------------------------ |
-| RAM boot                                                     | **N/A**      | `{support}` | `{target-specific limitation}` |
-| Persistent boot                                              | **N/A**      | `{support}` | `{target-specific limitation}` |
-| [Local console](../../docs/features/LOCAL_CONSOLE.md)        | `{presence}` | `{support}` | `{resolution or other delta}`  |
-| LCD backlight                                                | `{presence}` | `{support}` | `{range or control limit}`     |
-| Keypad backlight                                             | `{presence}` | `{support}` | `{control or limitation}`      |
-| [USB networking](../../docs/features/USB_NETWORKING.md)      | `{presence}` | `{support}` | `{target-specific delta or —}` |
-| [SSH access](../../docs/features/SSH.md)                     | **N/A**      | `{support}` | `{target-specific delta or —}` |
-| [File transfer](../../docs/features/FILE_TRANSFER.md)        | **N/A**      | `{support}` | `{target-specific delta or —}` |
-| [Host keyboard bridge](../../docs/features/HOST_KEYBOARD.md) | **N/A**      | `{support}` | `{target-specific delta or —}` |
-| [CPU clock reporting](../../docs/features/CPU_CLOCK.md)      | **N/A**      | `{support}` | `{target-specific delta or —}` |
-| USB host mode                                                | `{presence}` | `{support}` | `{available role or limit}`    |
-| Removable storage                                            | `{presence}` | `{support}` | `{mounting or limitation}`     |
-| Removable system root                                        | `{presence}` | `{support}` | `{boot or mounting limit}`     |
-| Internal phone storage                                       | `{presence}` | `{support}` | `{access policy}`              |
-| Audio                                                        | `{presence}` | `{support}` | `{available path or limit}`    |
-| Modem and mobile service                                     | `{presence}` | `{support}` | `{calls, SMS and data}`        |
-| Bluetooth                                                    | `{presence}` | `{support}` | `{connectivity}`               |
-| Wi-Fi                                                        | `{presence}` | `{support}` | `{connectivity}`               |
-| Camera                                                       | `{presence}` | `{support}` | `{capture path or limit}`      |
-| Charger status                                               | `{presence}` | `{support}` | `{external-input reporting}`   |
-| Battery telemetry                                            | `{presence}` | `{support}` | `{voltage/current limits}`     |
-| SoC temperature                                              | `{presence}` | `{support}` | `{accuracy or policy limit}`   |
-| Auxiliary ADC                                                | `{presence}` | `{support}` | `{channels or unit limit}`     |
-| Real-time clock                                              | `{presence}` | `{support}` | `{read/write/alarm limit}`     |
-| Other battery functions                                      | `{presence}` | `{support}` | `{reporting or control}`       |
-| Vibration                                                    | `{presence}` | `{support}` | `{control or limitation}`      |
-| Indicator LEDs                                               | `{presence}` | `{support}` | `{control or limitation}`      |
-| Power-off                                                    | **N/A**      | `{support}` | `{safe end-of-session path}`   |
-| Suspend                                                      | **N/A**      | `{support}` | `{wake source or limitation}`  |
-| Reboot                                                       | **N/A**      | `{support}` | `{supported behavior}`         |
+| Feature                                                            | Hardware     | FPLinux     | This phone                     |
+| ------------------------------------------------------------------ | ------------ | ----------- | ------------------------------ |
+| RAM boot                                                           | **N/A**      | `{support}` | `{target-specific limitation}` |
+| Persistent boot                                                    | **N/A**      | `{support}` | `{target-specific limitation}` |
+| [Local console](../../docs/features/LOCAL_CONSOLE.md)              | `{presence}` | `{support}` | `{resolution or other delta}`  |
+| LCD backlight                                                      | `{presence}` | `{support}` | `{range or control limit}`     |
+| Keypad backlight                                                   | `{presence}` | `{support}` | `{control or limitation}`      |
+| [USB networking](../../docs/features/USB_NETWORKING.md)            | `{presence}` | `{support}` | `{target-specific delta or —}` |
+| [SSH access](../../docs/features/SSH.md)                           | **N/A**      | `{support}` | `{target-specific delta or —}` |
+| [File transfer](../../docs/features/FILE_TRANSFER.md)              | **N/A**      | `{support}` | `{target-specific delta or —}` |
+| [Host keyboard bridge](../../docs/features/HOST_KEYBOARD.md)       | **N/A**      | `{support}` | `{target-specific delta or —}` |
+| [CPU clock reporting](../../docs/features/CPU_CLOCK.md)            | **N/A**      | `{support}` | `{target-specific delta or —}` |
+| [Manual CPU frequency selection](../../docs/features/CPU_CLOCK.md) | **N/A**      | `{support}` | `{target-specific delta or —}` |
+| AP DMAengine                                                       | `{presence}` | `{support}` | `{enabled clients or limit}`   |
+| [Image rotation](../../docs/apps/ROTATE.md)                        | `{presence}` | `{support}` | `{formats or limit}`           |
+| [JPEG codec and scaling](../../docs/apps/JPEG.md)                  | `{presence}` | `{support}` | `{codec or scaler limit}`      |
+| [Native image presentation](../../docs/apps/PRESENT.md)            | `{presence}` | `{support}` | `{formats or visible limit}`   |
+| USB host mode                                                      | `{presence}` | `{support}` | `{available role or limit}`    |
+| Removable storage                                                  | `{presence}` | `{support}` | `{mounting or limitation}`     |
+| Removable system root                                              | `{presence}` | `{support}` | `{boot or mounting limit}`     |
+| Internal phone storage                                             | `{presence}` | `{support}` | `{access policy}`              |
+| [Headphone audio](../../docs/features/HEADPHONE_AUDIO.md)          | `{presence}` | `{support}` | `{playback or profile limit}`  |
+| [Speaker audio](../../docs/features/SPEAKER_AUDIO.md)              | `{presence}` | `{support}` | `{output or level limit}`      |
+| [Phone microphone](../../docs/features/MICROPHONE_AUDIO.md)        | `{presence}` | `{support}` | `{capture source or limit}`    |
+| [FM radio](../../docs/features/FM_RADIO.md)                        | `{presence}` | `{support}` | `{antenna or output limit}`    |
+| Modem and mobile service                                           | `{presence}` | `{support}` | `{calls, SMS and data}`        |
+| Bluetooth                                                          | `{presence}` | `{support}` | `{connectivity}`               |
+| Wi-Fi                                                              | `{presence}` | `{support}` | `{connectivity}`               |
+| Camera                                                             | `{presence}` | `{support}` | `{capture path or limit}`      |
+| Charger status                                                     | `{presence}` | `{support}` | `{external-input reporting}`   |
+| Battery telemetry                                                  | `{presence}` | `{support}` | `{voltage/current limits}`     |
+| SoC temperature                                                    | `{presence}` | `{support}` | `{accuracy or policy limit}`   |
+| Auxiliary ADC                                                      | `{presence}` | `{support}` | `{channels or unit limit}`     |
+| Real-time clock                                                    | `{presence}` | `{support}` | `{read/write/alarm limit}`     |
+| Other battery functions                                            | `{presence}` | `{support}` | `{reporting or control}`       |
+| Vibration                                                          | `{presence}` | `{support}` | `{control or limitation}`      |
+| Indicator LEDs                                                     | `{presence}` | `{support}` | `{control or limitation}`      |
+| Power-off                                                          | **N/A**      | `{support}` | `{safe end-of-session path}`   |
+| Suspend                                                            | **N/A**      | `{support}` | `{wake source or limitation}`  |
+| Reboot                                                             | **N/A**      | `{support}` | `{supported behavior}`         |
 
 ## Applications
 
 Application behavior and controls belong in the shared page. Keep only the
 exact phone's support status and its storage or display difference here.
 
-| Application                                       | FPLinux     | This phone                   |
-| ------------------------------------------------- | ----------- | ---------------------------- |
-| [TyrQuake](../../docs/apps/TYRQUAKE.md)           | `{support}` | `{storage or display delta}` |
-| [MicroPythonOS](../../docs/apps/MICROPYTHONOS.md) | `{support}` | `{storage or display delta}` |
+| Application                                             | FPLinux     | This phone                   |
+| ------------------------------------------------------- | ----------- | ---------------------------- |
+| [FPLinux: ARMADA](../../docs/apps/SHOWCASE.md)          | `{support}` | `{display or effect delta}`  |
+| [TyrQuake](../../docs/apps/TYRQUAKE.md)                 | `{support}` | `{storage or display delta}` |
+| [MicroPythonOS](../../docs/apps/MICROPYTHONOS.md)       | `{support}` | `{storage or display delta}` |
+| [Image rotation](../../docs/apps/ROTATE.md)             | `{support}` | `{format or preview delta}`  |
+| [JPEG codec and scaling](../../docs/apps/JPEG.md)       | `{support}` | `{codec or scaler delta}`    |
+| [Native image presentation](../../docs/apps/PRESENT.md) | `{support}` | `{format or display delta}`  |
 
 ## Load into RAM
 

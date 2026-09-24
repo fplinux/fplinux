@@ -250,16 +250,17 @@ shutdown rules.
 
 ### Local fitted device data
 
-Some targets declare fitted device-data groups that must come from the exact
-physical phone. Bluetooth firmware is delivered through the root filesystem.
-The fitted headphone gain profile is built into the kernel image. FPLinux does
-not download or supply either group.
+The current targets declare fitted device-data groups that must come from the
+exact physical phone. Bluetooth firmware and FM settings are delivered through
+the root filesystem. The fitted audio profile is built into the kernel image;
+it holds the headphone and speaker gains. FPLinux does not download or supply these phone-specific inputs.
 
 Each group is independently optional. When a complete group is absent, the
-build keeps that feature's generic behavior: Bluetooth remains unavailable,
-and headphone audio uses the generic volume levels. If any part of a group
-is present, the complete group must pass its declared size and digest checks; a
-partial, damaged, or mismatched group fails the build.
+build keeps that feature's generic behavior: Bluetooth and FM remain
+unavailable, headphone audio uses the generic volume levels, and no speaker
+output is created. If any part of a group is present, the complete group must
+pass its declared size and digest checks; a partial, damaged or mismatched
+group fails the build.
 
 Normal `build` and `run` commands consume only already prepared local data.
 They do not read the phone's NAND.
@@ -270,11 +271,11 @@ the host, load the selected image, reconnect and verify the running context.
 #### Prepare device data
 
 Prepare every group declared by `<target>` from one complete physical NAND
-backup. One acquisition prepares the Bluetooth group and the independent
-headphone gain group. The fitted profile must come from the exact phone
-selected by `<target>`; do not reuse data from another handset or model. No
-manual extraction, renaming or patching is needed. Preparation requires this
-source checkout, not a standalone archive.
+backup. This prepares Bluetooth, FM and the independent audio gain group.
+The fitted data must come from the exact phone selected by `<target>`; do not
+reuse data from another handset or model. No manual extraction, renaming or
+patching is needed. Preparation requires this source checkout, not a standalone
+archive.
 
 The complete command syntax is:
 

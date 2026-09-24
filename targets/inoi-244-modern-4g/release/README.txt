@@ -16,14 +16,17 @@ Current target support:
   - installable ARMADA and TyrQuake in both profiles;
   - installable MicroPythonOS launcher, navigation and keypad text input,
     with persistent state on the ext4 system root;
-  - image rotation, JPEG codec/scaling and native presentation transfers.
-  - stereo S16_LE playback through the 3.5 mm headphones.
+  - image rotation, JPEG codec/scaling and native presentation transfers;
+  - stereo S16_LE playback through the 3.5 mm headphones;
+  - selectable 48 kHz PCM playback through the built-in speaker output;
+  - mono 48 kHz recording from the built-in microphone;
+  - FM scan and headphone output through the 3.5 mm jack.
 
 The shared brightness, keypad-light, vibrator, telemetry and power-off
 interfaces are enabled. Physical brightness, keypad light and native image
-fidelity have not been tested. No physical vibration was observed under Linux
-without a battery. Stock firmware can drive the motor, but the cause of the
-Linux limitation is unknown; Linux vibration with a battery has not been tested.
+fidelity have not been tested. This phone has no separate vibration motor;
+stock firmware vibrates it through the speaker. FPLinux provides no vibration
+control on this phone.
 Telemetry has been read with the battery absent; battery measurements, charging,
 battery-only shutdown and physical-key wake have not been tested.
 
@@ -40,20 +43,28 @@ little-endian WAV file and use the default ALSA device:
 
 The default device converts input to the 48 kHz hardware rate. See
 docs/features/HEADPHONE_AUDIO.md for fitted volume levels, direct-device limits,
-idle silence and its power trade-off. Phone microphone, FM radio and speaker
-audio remain outside this feature's support boundary.
+idle silence and its power trade-off. Select the built-in speaker with
+`PCM Playback Output` and start at `Speaker Playback Volume` level 1; see
+docs/features/SPEAKER_AUDIO.md. Select `Capture Source` before microphone
+recording; see docs/features/MICROPHONE_AUDIO.md. FM needs a wired 3.5 mm
+cable as its antenna; see docs/features/FM_RADIO.md for scan and playback
+commands and the tested profile.
 
 The shared interfaces and storage safety rules are described in:
   - docs/features/AUXADC.md
   - docs/features/BATTERY_TELEMETRY.md
+  - docs/features/BLUETOOTH.md
   - docs/features/CHARGER_STATUS.md
   - docs/features/DISPLAY_BACKLIGHT.md
-  - docs/features/KEYPAD_BACKLIGHT.md
-  - docs/features/MICROSD.md
+  - docs/features/FM_RADIO.md
   - docs/features/HEADPHONE_AUDIO.md
-  - docs/features/RTC.md
+  - docs/features/KEYPAD_BACKLIGHT.md
+  - docs/features/MICROPHONE_AUDIO.md
+  - docs/features/MICROSD.md
   - docs/features/POWER_OFF.md
+  - docs/features/RTC.md
   - docs/features/SOC_TEMPERATURE.md
+  - docs/features/SPEAKER_AUDIO.md
   - docs/features/SUSPEND.md
   - docs/features/VIBRATION.md
   - docs/guides/MICROSD_ROOT.md
