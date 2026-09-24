@@ -49,7 +49,7 @@ RUN set -eux; \
         openssh-client-default=10.3_p1-r1 \
         openssh-server=10.3_p1-r1 \
         patch=2.8-r0 \
-        perl=5.42.2-r0 \
+        perl=5.42.2-r1 \
         pkgconf=2.5.1-r0 \
         rsync=3.5.0-r0 \
         sed=4.9-r2 \
