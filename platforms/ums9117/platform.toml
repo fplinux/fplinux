@@ -444,6 +444,14 @@ source = "platforms/ums9117/linux/drivers/bluetooth/ums9117/cm4-hci.h"
 destination = "drivers/bluetooth/ums9117/cm4-hci.h"
 
 [[linux.copies]]
+source = "platforms/ums9117/linux/drivers/bluetooth/ums9117/cm4-fm.c"
+destination = "drivers/bluetooth/ums9117/cm4-fm.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/linux/drivers/bluetooth/ums9117/cm4-fm.h"
+destination = "drivers/bluetooth/ums9117/cm4-fm.h"
+
+[[linux.copies]]
 source = "platforms/ums9117/linux/drivers/bluetooth/ums9117/bluetooth.Kconfig"
 destination = "drivers/bluetooth/ums9117/Kconfig"
 

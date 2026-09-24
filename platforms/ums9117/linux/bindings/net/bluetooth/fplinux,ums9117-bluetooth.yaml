@@ -69,6 +69,12 @@ properties:
     maxItems: 6
     description: Six firmware-version bytes returned by the FCA0 setup command.
 
+  fplinux,fm-config-name:
+    $ref: /schemas/types.yaml#/definitions/string
+    description: |
+      Firmware-loader name of this board's normalized 128-byte FM configuration.
+      Its presence enables the V4L2 FM receiver for compatible fitted firmware.
+
 required:
   - compatible
   - reg

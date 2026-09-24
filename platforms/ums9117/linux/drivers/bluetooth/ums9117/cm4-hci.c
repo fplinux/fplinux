@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include <linux/completion.h>
 #include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/errno.h>
@@ -13,6 +14,7 @@
 
 #include <hci_uart.h>
 
+#include "cm4-fm.h"
 #include "cm4-hci.h"
 #include "cm4-mailbox.h"
 
@@ -20,6 +22,29 @@
 #define UMS9117_HCI_RX_CHUNK 256
 #define UMS9117_HCI_TX_BYTES ALIGN(HCI_MAX_FRAME_SIZE + 1, 8)
 #define UMS9117_HCI_QUIESCE_TIMEOUT_NS (2ULL * NSEC_PER_SEC)
+#define UMS9117_FM_REPLY_TIMEOUT_MS 1000
+#define UMS9117_FM_SEEK_TIMEOUT_MS 15000
+#define UMS9117_FM_EVENT_BYTES (3 + 255)
+#define UMS9117_FM_COMMAND_BYTES (4 + 255)
+
+struct fm_transaction {
+	struct completion done;
+	u8 command[UMS9117_FM_COMMAND_BYTES];
+	u8 event[UMS9117_FM_EVENT_BYTES];
+	u8 reply[UMS9117_FM_EVENT_BYTES];
+	size_t command_bytes;
+	size_t event_bytes;
+	size_t reply_bytes;
+	size_t expected_bytes;
+	bool active;
+	bool held;
+	bool pending;
+	bool sent;
+	bool seek;
+	bool acknowledged;
+	int result;
+	int error;
+};
 
 static struct {
 	struct hci_dev *hdev;
@@ -42,6 +67,8 @@ static struct {
 	bool pm_activity;
 	bool checking_pm_commands;
 	int pm_command_error;
+	struct fm_transaction fm;
+	struct ums9117_fm *radio;
 } runtime;
 
 static int receive_frame(struct hci_dev *hdev, struct sk_buff *skb);
@@ -60,6 +87,187 @@ static const struct h4_recv_pkt cm4_recv_pkts[] = {
  * hdev->lock before io_lock; never hold either across a synchronous HCI call.
  */
 static DEFINE_MUTEX(io_lock);
+/* One command owns both its completion and any following seek event. */
+static DEFINE_MUTEX(fm_command_lock);
+
+static void finish_fm_command(int error)
+{
+	struct fm_transaction *fm = &runtime.fm;
+
+	if (error) {
+		fm->error = error;
+		fm->event_bytes = 0;
+	}
+	if (!fm->pending)
+		return;
+	fm->result = error;
+	fm->pending = false;
+	complete(&fm->done);
+}
+
+static int receive_fm_bytes(const u8 *input, size_t length)
+{
+	struct fm_transaction *fm = &runtime.fm;
+	size_t index;
+
+	for (index = 0; index < length; index++) {
+		if (!fm->event_bytes && input[index] != HCI_EVENT_PKT)
+			return -EPROTO;
+		fm->event[fm->event_bytes++] = input[index];
+		if (fm->event_bytes < 3 || fm->event_bytes < 3U + fm->event[2])
+			continue;
+		/* Complete events may be split across reads or share one read. */
+		if (fm->pending && fm->sent &&
+		    fm->event[1] == HCI_EV_CMD_COMPLETE &&
+		    fm->event_bytes >= 7 && fm->event[4] == 0x8c &&
+		    fm->event[5] == 0xfc) {
+			if (fm->seek && !fm->event[6]) {
+				if (fm->event_bytes != 7 || fm->acknowledged)
+					return -EPROTO;
+				fm->acknowledged = true;
+			} else {
+				/* A firmware error may omit the success payload. */
+				if (fm->event_bytes != fm->expected_bytes &&
+				    !(fm->event_bytes == 7 && fm->event[6]))
+					return -EPROTO;
+				memcpy(fm->reply, fm->event, fm->event_bytes);
+				fm->reply_bytes = fm->event_bytes;
+				finish_fm_command(0);
+			}
+		} else if (fm->pending && fm->sent && fm->seek &&
+			   fm->event[1] == 0xff && fm->event_bytes >= 4 &&
+			   fm->event[3] == 0x30) {
+			if (!fm->acknowledged || fm->event_bytes != 9)
+				return -EPROTO;
+			memcpy(fm->reply, fm->event, fm->event_bytes);
+			fm->reply_bytes = fm->event_bytes;
+			finish_fm_command(0);
+		}
+		fm->event_bytes = 0;
+	}
+	return 0;
+}
+
+/* Called only by the existing CM4 worker, with io_lock held. */
+static int service_fm(void)
+{
+	struct fm_transaction *fm = &runtime.fm;
+	u8 input[UMS9117_HCI_RX_CHUNK];
+	size_t received;
+	int ret;
+
+	if (!fm->active)
+		return 0;
+	ret = ums9117_cm4_mailbox_fm_read(input, sizeof(input), &received);
+	/* Quarantine late replies after failure; only a cold start permits TX. */
+	if (ret || fm->error)
+		return ret;
+	ret = receive_fm_bytes(input, received);
+	if (ret) {
+		finish_fm_command(ret);
+		return 0;
+	}
+	/* Drain earlier events before publishing a request they could not answer. */
+	if (!fm->pending || fm->sent || received || fm->event_bytes)
+		return 0;
+	ret = ums9117_cm4_mailbox_fm_write(fm->command, fm->command_bytes);
+	if (ret == -EAGAIN)
+		return 0;
+	if (ret)
+		return ret;
+	fm->sent = true;
+	return 0;
+}
+
+static int fm_admission_error(void)
+{
+	if (runtime.error)
+		return runtime.error;
+	if (!runtime.running)
+		return -ESHUTDOWN;
+	if (runtime.suspending || runtime.transport_suspended)
+		return -EBUSY;
+	return runtime.fm.error;
+}
+
+int ums9117_hci_fm_hold(void)
+{
+	int ret;
+
+	mutex_lock(&io_lock);
+	ret = fm_admission_error();
+	if (!ret)
+		runtime.fm.held = true;
+	mutex_unlock(&io_lock);
+	return ret;
+}
+
+void ums9117_hci_fm_release(void)
+{
+	mutex_lock(&io_lock);
+	runtime.fm.held = false;
+	mutex_unlock(&io_lock);
+}
+
+void ums9117_hci_fm_quarantine(int error)
+{
+	mutex_lock(&io_lock);
+	finish_fm_command(error);
+	mutex_unlock(&io_lock);
+}
+
+int ums9117_hci_fm_command(u8 subcommand, const u8 *payload,
+			   size_t payload_bytes, u8 *reply, size_t reply_bytes,
+			   bool seek)
+{
+	struct fm_transaction *fm = &runtime.fm;
+	unsigned int timeout_ms = seek ? UMS9117_FM_SEEK_TIMEOUT_MS :
+					 UMS9117_FM_REPLY_TIMEOUT_MS;
+	int ret;
+
+	if (payload_bytes > 254 || (!payload && payload_bytes) || !reply ||
+	    reply_bytes < 7 || reply_bytes > sizeof(fm->reply) ||
+	    (seek && reply_bytes != 9))
+		return -EINVAL;
+	mutex_lock(&fm_command_lock);
+	mutex_lock(&io_lock);
+	ret = fm_admission_error();
+	if (ret)
+		goto unlock_io;
+	fm->command[0] = HCI_COMMAND_PKT;
+	fm->command[1] = 0x8c;
+	fm->command[2] = 0xfc;
+	fm->command[3] = payload_bytes + 1;
+	fm->command[4] = subcommand;
+	if (payload_bytes)
+		memcpy(fm->command + 5, payload, payload_bytes);
+	fm->command_bytes = 5 + payload_bytes;
+	fm->expected_bytes = reply_bytes;
+	fm->seek = seek;
+	fm->acknowledged = false;
+	reinit_completion(&fm->done);
+	fm->active = true;
+	fm->pending = true;
+	fm->sent = false;
+	fm->result = -EINPROGRESS;
+	fm->reply_bytes = 0;
+	mutex_unlock(&io_lock);
+
+	wait_for_completion_timeout(&fm->done, msecs_to_jiffies(timeout_ms));
+	mutex_lock(&io_lock);
+	/* A late reply must never be mistaken for a later command's response. */
+	if (fm->pending)
+		finish_fm_command(-ETIMEDOUT);
+	ret = fm->error ? fm->error : fm->result;
+	if (!ret) {
+		memcpy(reply, fm->reply, fm->reply_bytes);
+		ret = fm->reply_bytes;
+	}
+unlock_io:
+	mutex_unlock(&io_lock);
+	mutex_unlock(&fm_command_lock);
+	return ret;
+}
 
 static void release_tx(void)
 {
@@ -81,6 +289,7 @@ static void fail_transport(int error)
 {
 	unsigned long flags;
 
+	finish_fm_command(error);
 	spin_lock_irqsave(&runtime.tx_queue.lock, flags);
 	runtime.error = error;
 	runtime.running = false;
@@ -258,6 +467,9 @@ static void runtime_work(struct work_struct *work)
 		if (!received && !written)
 			break;
 	}
+	ret = service_fm();
+	if (ret)
+		goto fault;
 	/* Publish notifications caused by the last read/write before sleeping. */
 	ret = ums9117_cm4_mailbox_poll();
 	if (ret && ret != -EINPROGRESS)
@@ -397,6 +609,7 @@ int ums9117_hci_runtime_register(struct device *dev, const u8 *rx_prefix,
 		return -EALREADY;
 	}
 	memset(&runtime, 0, sizeof(runtime));
+	init_completion(&runtime.fm.done);
 	skb_queue_head_init(&runtime.tx_queue);
 	INIT_DELAYED_WORK(&runtime.work, runtime_work);
 	hdev = hci_alloc_dev();
@@ -441,6 +654,11 @@ int ums9117_hci_runtime_register(struct device *dev, const u8 *rx_prefix,
 		return ret;
 	}
 	schedule_delayed_work(&runtime.work, 0);
+	runtime.radio = ums9117_fm_register(dev);
+	if (IS_ERR(runtime.radio)) {
+		bt_dev_err(hdev, "FM registration failed: %pe", runtime.radio);
+		runtime.radio = NULL;
+	}
 	return 0;
 }
 
@@ -472,7 +690,8 @@ int ums9117_hci_suspend_prepare(void)
 		ret = runtime.error;
 	else if (!runtime.running)
 		ret = -ESHUTDOWN;
-	else if (runtime.suspending || hci_busy(hdev) || runtime.tx_skb ||
+	else if (runtime.suspending || runtime.fm.held || runtime.fm.pending ||
+		 runtime.fm.event_bytes || hci_busy(hdev) || runtime.tx_skb ||
 		 runtime.rx_skb || !skb_queue_empty(&runtime.tx_queue))
 		ret = -EBUSY;
 	else {
@@ -613,12 +832,15 @@ void ums9117_hci_runtime_unregister(void)
 	struct hci_dev *hdev;
 	unsigned long flags;
 
+	ums9117_fm_unregister(runtime.radio);
+	runtime.radio = NULL;
 	mutex_lock(&io_lock);
 	hdev = runtime.hdev;
 	if (!hdev) {
 		mutex_unlock(&io_lock);
 		return;
 	}
+	finish_fm_command(-ESHUTDOWN);
 	spin_lock_irqsave(&runtime.tx_queue.lock, flags);
 	runtime.running = false;
 	runtime.opened = false;

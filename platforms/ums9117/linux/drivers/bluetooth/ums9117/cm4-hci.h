@@ -6,6 +6,15 @@
 
 struct device;
 
+/* Ring1 uses the existing worker. Replies include the H4 event header. */
+int ums9117_hci_fm_command(u8 subcommand, const u8 *payload,
+			   size_t payload_bytes, u8 *reply, size_t reply_bytes,
+			   bool seek);
+/* Hold off system sleep from the first enable until a confirmed disable. */
+int ums9117_hci_fm_hold(void);
+void ums9117_hci_fm_release(void);
+void ums9117_hci_fm_quarantine(int error);
+
 /*
  * Sleepable, externally serialized lifecycle. The caller has completed the
  * vendor prologue and handed the attached mailbox stream to this component.

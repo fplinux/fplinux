@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* UMS9117 CM4 channel-4 handshake and ring0 H4 stream. */
+/* UMS9117 CM4 channel-4 handshake and Bluetooth/FM streams. */
 
 #include <linux/bitops.h>
 #include <linux/err.h>
@@ -69,7 +69,7 @@ struct sbuf_snapshot {
 struct sbuf_stream {
 	bool enabled;
 	bool attached;
-	/* One delivery in flight, plus one pending DATA and one pending SPACE. */
+	/* One delivery in flight; pending DATA/SPACE notifications per ring. */
 	u32 pending;
 	u32 active_event;
 	struct mailbox_send notify;
@@ -94,7 +94,7 @@ static struct {
 	bool continuous;
 	struct mailbox_send open;
 	struct mailbox_send done;
-	struct sbuf_stream h4;
+	struct sbuf_stream stream;
 	int error;
 } mailbox;
 
@@ -112,7 +112,7 @@ static int mailbox_fail(const char *reason, int error)
 /* The ring counters own progress; no reply is needed for these notifications. */
 static bool sbuf_accept_event(const struct mailbox_message *message)
 {
-	return mailbox.h4.enabled &&
+	return mailbox.stream.enabled &&
 	       (message->low == UMS9117_MBOX_EVENT_DATA ||
 		message->low == UMS9117_MBOX_EVENT_SPACE) &&
 	       message->high < UMS9117_SBUF_RING_COUNT;
@@ -162,8 +162,8 @@ static void mailbox_transmitted(struct mbox_client *client, void *data,
 		send = &mailbox.open;
 	else if (data == mailbox.done.data)
 		send = &mailbox.done;
-	else if (data == mailbox.h4.notify.data)
-		send = &mailbox.h4.notify;
+	else if (data == mailbox.stream.notify.data)
+		send = &mailbox.stream.notify;
 	else {
 		mailbox_fail("UNEXPECTED_TX_DONE", -EPROTO);
 		return;
@@ -393,7 +393,7 @@ out:
 
 static int sbuf_poll_notifications(void)
 {
-	struct sbuf_stream *stream = &mailbox.h4;
+	struct sbuf_stream *stream = &mailbox.stream;
 	unsigned long flags;
 	bool pending;
 
@@ -408,9 +408,12 @@ static int sbuf_poll_notifications(void)
 		stream->pending &= ~BIT(stream->active_event);
 		memset(&stream->notify, 0, sizeof(stream->notify));
 		stream->notify.data[0] =
-			stream->active_event == UMS9117_SBUF_DATA_READY ?
+			stream->active_event % UMS9117_SBUF_EVENT_COUNT ==
+					UMS9117_SBUF_DATA_READY ?
 				UMS9117_MBOX_EVENT_DATA :
 				UMS9117_MBOX_EVENT_SPACE;
+		stream->notify.data[1] =
+			stream->active_event / UMS9117_SBUF_EVENT_COUNT;
 	}
 	pending = stream->notify.data[0] && !stream->notify.triggered;
 	local_irq_restore(flags);
@@ -439,7 +442,7 @@ int ums9117_cm4_mailbox_poll(void)
 	if (mailbox.error)
 		return mailbox.error;
 	if (mailbox.done.delivered) {
-		if (mailbox.h4.enabled)
+		if (mailbox.stream.enabled)
 			return sbuf_poll_notifications();
 		return 0;
 	}
@@ -469,13 +472,13 @@ int ums9117_cm4_mailbox_poll(void)
 }
 
 /* Local IRQs excluded; the calling loop is the sole AP producer/consumer. */
-static int sbuf_read_live_ring(u32 *ring)
+static int sbuf_read_live_ring(u32 index, u32 *ring)
 {
 	struct sbuf_snapshot snapshot;
 
 	if (!sbuf_read_snapshot(&snapshot, UMS9117_SBUF_COUNTERS_STREAM))
 		return mailbox_fail("SBUF_STREAM_CHANGED", -EUCLEAN);
-	memcpy(ring, snapshot.rings[0], sizeof(snapshot.rings[0]));
+	memcpy(ring, snapshot.rings[index], sizeof(snapshot.rings[index]));
 	return 0;
 }
 
@@ -496,14 +499,14 @@ int ums9117_cm4_mailbox_h4_begin(void)
 		ret = -EINVAL;
 		goto out;
 	}
-	if (mailbox.h4.enabled) {
+	if (mailbox.stream.enabled) {
 		ret = 0;
 		goto out;
 	}
 	ret = -EINPROGRESS;
 	if (!mailbox.done.delivered)
 		goto out;
-	ret = sbuf_read_live_ring(ring);
+	ret = sbuf_read_live_ring(0, ring);
 	if (ret)
 		goto out;
 	if (ring[UMS9117_SBUF_TX_WRITE] ||
@@ -516,8 +519,8 @@ int ums9117_cm4_mailbox_h4_begin(void)
 		ret = -EINPROGRESS;
 		goto out;
 	}
-	mailbox.h4.attached = true;
-	mailbox.h4.enabled = true;
+	mailbox.stream.attached = true;
+	mailbox.stream.enabled = true;
 out:
 	local_irq_restore(flags);
 	return ret;
@@ -539,7 +542,7 @@ int ums9117_cm4_mailbox_h4_continue(void)
 		goto out;
 	}
 	if (!mailbox.prepared || mailbox.stopped || !mailbox.done.delivered ||
-	    !mailbox.h4.enabled || !mailbox.h4.attached) {
+	    !mailbox.stream.enabled || !mailbox.stream.attached) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -554,18 +557,18 @@ out:
 	return ret;
 }
 
-static void sbuf_queue_event(enum sbuf_event event)
+static void sbuf_queue_event(u32 index, enum sbuf_event event)
 {
-	struct sbuf_stream *stream = &mailbox.h4;
+	struct sbuf_stream *stream = &mailbox.stream;
 
-	stream->pending |= BIT(event);
+	stream->pending |= BIT(index * UMS9117_SBUF_EVENT_COUNT + event);
 }
 
 static int sbuf_stream_ready(void)
 {
 	if (mailbox.error)
 		return mailbox.error;
-	if (!mailbox.h4.enabled || mailbox.stopped)
+	if (!mailbox.stream.enabled || mailbox.stopped)
 		return -ESHUTDOWN;
 	if (mailbox.suspended)
 		return -EHOSTDOWN;
@@ -573,9 +576,11 @@ static int sbuf_stream_ready(void)
 	return mailbox.error;
 }
 
-int ums9117_cm4_mailbox_h4_write(const u8 *data, size_t bytes, size_t *written)
+static int sbuf_write(u32 index, const u8 *data, size_t bytes, size_t *written,
+		      bool whole_command)
 {
 	void __iomem *buffer;
+	void __iomem *descriptor;
 	u32 ring[UMS9117_SBUF_RING_WORDS];
 	u32 occupied;
 	u32 count;
@@ -589,17 +594,24 @@ int ums9117_cm4_mailbox_h4_write(const u8 *data, size_t bytes, size_t *written)
 	if (!written || (!data && bytes))
 		return -EINVAL;
 	*written = 0;
+	if (whole_command && bytes > UMS9117_SBUF_RING_BYTES)
+		return -EMSGSIZE;
 	if (irqs_disabled())
 		return mailbox_fail("AP_IRQS_DISABLED", -EINVAL);
 	local_irq_save(flags);
 	ret = sbuf_stream_ready();
 	if (ret || !bytes)
 		goto out;
-	ret = sbuf_read_live_ring(ring);
+	ret = sbuf_read_live_ring(index, ring);
 	if (ret)
 		goto out;
 	wr = ring[UMS9117_SBUF_TX_WRITE];
 	occupied = wr - ring[UMS9117_SBUF_TX_READ];
+	/* FM consumes one command per read; do not fragment or coalesce commands. */
+	if (whole_command && occupied) {
+		ret = -EAGAIN;
+		goto out;
+	}
 	count = min_t(size_t, bytes, UMS9117_SBUF_RING_BYTES - occupied);
 	if (!count)
 		goto out;
@@ -612,26 +624,28 @@ int ums9117_cm4_mailbox_h4_write(const u8 *data, size_t bytes, size_t *written)
 		memcpy_toio(buffer, data + first, count - first);
 	/* Publish completed payload before tx_wr, then sample the peer consumer. */
 	mb();
-	writel(wr + count, mailbox.sipc + 8 + UMS9117_SBUF_TX_WRITE * 4);
+	descriptor = mailbox.sipc + 8 + index * 32;
+	writel(wr + count, descriptor + UMS9117_SBUF_TX_WRITE * 4);
 	/* Complete the index publication before deciding whether to wake the peer. */
 	mb();
 	*written = count;
-	rd = readl(mailbox.sipc + 8 + UMS9117_SBUF_TX_READ * 4);
+	rd = readl(descriptor + UMS9117_SBUF_TX_READ * 4);
 	if ((u32)(wr + count - rd) > UMS9117_SBUF_RING_BYTES) {
 		ret = mailbox_fail("SBUF_STREAM_CHANGED", -EUCLEAN);
 		goto out;
 	}
 	/* Recheck after publication: the peer may have drained while we copied. */
 	if (rd == wr)
-		sbuf_queue_event(UMS9117_SBUF_DATA_READY);
+		sbuf_queue_event(index, UMS9117_SBUF_DATA_READY);
 out:
 	local_irq_restore(flags);
 	return ret;
 }
 
-int ums9117_cm4_mailbox_h4_read(u8 *data, size_t capacity, size_t *received)
+static int sbuf_read(u32 index, u8 *data, size_t capacity, size_t *received)
 {
 	void __iomem *buffer;
+	void __iomem *descriptor;
 	u32 ring[UMS9117_SBUF_RING_WORDS];
 	u32 occupied;
 	u32 count;
@@ -651,7 +665,7 @@ int ums9117_cm4_mailbox_h4_read(u8 *data, size_t capacity, size_t *received)
 	ret = sbuf_stream_ready();
 	if (ret || !capacity)
 		goto out;
-	ret = sbuf_read_live_ring(ring);
+	ret = sbuf_read_live_ring(index, ring);
 	if (ret)
 		goto out;
 	rd = ring[UMS9117_SBUF_RX_READ];
@@ -668,21 +682,44 @@ int ums9117_cm4_mailbox_h4_read(u8 *data, size_t capacity, size_t *received)
 		memcpy_fromio(data + first, buffer, count - first);
 	/* Finish copying before releasing this space to the peer producer. */
 	mb();
-	writel(rd + count, mailbox.sipc + 8 + UMS9117_SBUF_RX_READ * 4);
+	descriptor = mailbox.sipc + 8 + index * 32;
+	writel(rd + count, descriptor + UMS9117_SBUF_RX_READ * 4);
 	/* Complete the space release before checking the producer for a wake. */
 	mb();
 	*received = count;
-	wr = readl(mailbox.sipc + 8 + UMS9117_SBUF_RX_WRITE * 4);
+	wr = readl(descriptor + UMS9117_SBUF_RX_WRITE * 4);
 	if ((u32)(wr - rd - count) > UMS9117_SBUF_RING_BYTES) {
 		ret = mailbox_fail("SBUF_STREAM_CHANGED", -EUCLEAN);
 		goto out;
 	}
 	/* The producer can reach full while this copy is in progress. */
 	if ((u32)(wr - rd) == UMS9117_SBUF_RING_BYTES)
-		sbuf_queue_event(UMS9117_SBUF_SPACE_READY);
+		sbuf_queue_event(index, UMS9117_SBUF_SPACE_READY);
 out:
 	local_irq_restore(flags);
 	return ret;
+}
+
+int ums9117_cm4_mailbox_h4_write(const u8 *data, size_t bytes, size_t *written)
+{
+	return sbuf_write(0, data, bytes, written, false);
+}
+
+int ums9117_cm4_mailbox_h4_read(u8 *data, size_t capacity, size_t *received)
+{
+	return sbuf_read(0, data, capacity, received);
+}
+
+int ums9117_cm4_mailbox_fm_write(const u8 *data, size_t bytes)
+{
+	size_t written;
+
+	return sbuf_write(1, data, bytes, &written, true);
+}
+
+int ums9117_cm4_mailbox_fm_read(u8 *data, size_t capacity, size_t *received)
+{
+	return sbuf_read(1, data, capacity, received);
 }
 
 int ums9117_cm4_mailbox_suspend(void)
@@ -701,17 +738,25 @@ int ums9117_cm4_mailbox_suspend(void)
 		ret = -ESHUTDOWN;
 		goto out;
 	}
-	ret = sbuf_read_live_ring(ring);
+	ret = sbuf_read_live_ring(0, ring);
 	if (ret)
 		goto out;
 	ret = -EBUSY;
 	if (ring[UMS9117_SBUF_TX_WRITE] != ring[UMS9117_SBUF_TX_READ] ||
 	    ring[UMS9117_SBUF_RX_WRITE] != ring[UMS9117_SBUF_RX_READ] ||
-	    mailbox.consumed != mailbox.queued || mailbox.h4.pending ||
+	    mailbox.consumed != mailbox.queued || mailbox.stream.pending ||
 	    (mailbox.open.triggered && !mailbox.open.delivered) ||
 	    (mailbox.done.triggered && !mailbox.done.delivered) ||
-	    (mailbox.h4.notify.data[0] && !mailbox.h4.notify.delivered))
+	    (mailbox.stream.notify.data[0] && !mailbox.stream.notify.delivered))
 		goto out;
+	ret = sbuf_read_live_ring(1, ring);
+	if (ret)
+		goto out;
+	if (ring[UMS9117_SBUF_TX_WRITE] != ring[UMS9117_SBUF_TX_READ] ||
+	    ring[UMS9117_SBUF_RX_WRITE] != ring[UMS9117_SBUF_RX_READ]) {
+		ret = -EBUSY;
+		goto out;
+	}
 	/* Keep the native channel claimed so its no-suspend IRQ can drain notices. */
 	mailbox.suspended = true;
 	ret = 0;
@@ -736,7 +781,7 @@ int ums9117_cm4_mailbox_resume(void)
 		ret = -ESHUTDOWN;
 		goto out;
 	}
-	ret = sbuf_read_live_ring(ring);
+	ret = sbuf_read_live_ring(0, ring);
 	if (ret)
 		goto out;
 	mailbox.suspended = false;
