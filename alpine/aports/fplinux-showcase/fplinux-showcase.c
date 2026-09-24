@@ -4,6 +4,7 @@
 #include "armada-scene.h"
 #include "fplinux-cli.h"
 #include "fplinux-fb-session.h"
+#include "fplinux-keypad.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -504,9 +505,10 @@ static bool open_hardware(struct hardware_state *state,
 	if (ioctl(state->keypad, EVIOCGBIT(0, sizeof(event_bits)), event_bits) <
 		    0 ||
 	    !bit_is_set(event_bits, EV_KEY) ||
-	    !input_supports(state->keypad, EV_KEY, KEY_BACKSPACE, KEY_MAX)) {
+	    !input_supports(state->keypad, EV_KEY, FPLINUX_KEY_SOFT_RIGHT,
+			    KEY_MAX)) {
 		snprintf(error, error_size,
-			 "keypad does not expose KEY_BACKSPACE");
+			 "keypad does not expose the right soft key");
 		return false;
 	}
 	if (ioctl(state->keypad, EVIOCGRAB, 1) < 0) {
@@ -651,7 +653,7 @@ static int exit_key_pressed(int keypad)
 		for (index = 0; index < (size_t)count / sizeof(events[0]);
 		     ++index)
 			if (events[index].type == EV_KEY &&
-			    events[index].code == KEY_BACKSPACE &&
+			    events[index].code == FPLINUX_KEY_SOFT_RIGHT &&
 			    events[index].value != 0)
 				return 1;
 	}

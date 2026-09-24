@@ -10,7 +10,15 @@ makedepends_build="clang22 lld22"
 makedepends_host="musl-dev linux-headers gcc"
 subpackages="$pkgname-openrc"
 options="!check"
-source="fplinux-console.c fplinux-multitap.c fplinux-multitap.h fplinux-console.initd"
+source="
+	fplinux-console.c
+	fplinux-console-internal.h
+	fplinux-input-device.h
+	fplinux-keypad.h
+	fplinux-multitap.c
+	fplinux-multitap.h
+	fplinux-console.initd
+"
 builddir="$srcdir"
 
 build() {
@@ -30,7 +38,10 @@ openrc() {
 }
 
 sha512sums="
-0b51f5d3eae4ba3d0052f165d70d6a4f56846fe0512101169325824916f117d848651820de9e321cf4e98b1a4243ac58207026c61598b8877d28a4f8f04f8ef8  fplinux-console.c
+3d58878af1300dfcfd2bbcfab1c9b520163b32331d4d2e52c541a8b5fdb56ef470d79b007b0782e8a104cd9adc2e9989b3cd868f71863a65694a98dd1288196b  fplinux-console.c
+f89ed91af06c060a923f2b497f991b7f9be01732100a12eb04b4f60c8c43824b65e8a99c9c73d016b12ff37a3ebf84d04e7b6c194878974b8a8984dfeb37e2ce  fplinux-console-internal.h
+defa0078d5b788c6180813f46b42042fd401555cce70fc7ae40550b7c27b65a04972678b5beb8c65e41dbcfe36ba6b926154d94c2700e345bb8d3d2ba251e4ef  fplinux-input-device.h
+0113e3bb8a795cbdb063092642a8418158d0c034dc31b907caf4252ef53441631ba2a6499b42a450da97ecfcce30ce3b30cb9de0fd895614d5e37436bfeb8b97  fplinux-keypad.h
 51d3626cc1b3107605d8f07423dc69bea22b008115abcde44314b285af27c1487a9c6c116b35c632adac71694d2fce73aa91bb4285f85faccc4f3482dde57fdc  fplinux-multitap.c
 a74c9221d3184802c885ea24296c7d13a3624d65d77a6c030f13e94898ce707d27b89da76084fa309016b96150676e5c2d00e0fd4f519883a5866efa666f3927  fplinux-multitap.h
 255348ff6f408b6be06ebd0d844376bcb39822044f8854228dd2a2ce358f382251429177979cc07903779475d3096726367fa6ce40487e95e14fea8a32c5b302  fplinux-console.initd

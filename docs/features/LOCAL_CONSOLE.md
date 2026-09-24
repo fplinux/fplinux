@@ -5,34 +5,37 @@ does not need the USB cable after Linux has started. Screen size, panel
 orientation and the physical labels on a particular phone remain in that
 phone's target document.
 
-The console accepts the same normalized keypad controls on every current
-target.
+The console accepts the same phone keypad controls on every current target.
+A keyboard, including the [host keyboard bridge](HOST_KEYBOARD.md), types at
+the same time through the Linux console keymap; its keys, `*` and `#` included,
+are ordinary keyboard input.
 
-## Text entry
+## Phone keypad
 
-The console starts in T9 multi-tap mode. This is character cycling, not
-dictionary prediction: press a digit repeatedly to choose its character. `1`
-selects punctuation and `0` selects a space. Pause briefly or press another key
-to commit the current character.
+The phone keypad enters text with multi-tap: press a digit repeatedly to choose
+its character. It does not predict words. `1` selects punctuation and `0`
+selects a space. Pause briefly or press another key to commit the current
+character.
 
-- Digits `0` through `9` enter text with T9 multi-tap.
-- Tapping `*` in T9 cycles Ctrl, Alt, Shift or no modifier for the next key.
-- Tapping `*` in QWERTY types `*`.
-- Holding `*` switches between T9 and QWERTY input.
+- Digits `0` through `9` enter text with multi-tap.
+- `*` cycles Ctrl, Alt, Shift or no modifier for the next key.
+- `#` opens the scrollback view.
 - The left soft key sends Tab.
 - The right soft key cancels the pending character or sends Backspace.
 - The centre or dial key sends Enter.
 - The D-pad moves through shell input and programs.
+- The power key is not console input; see [power-off](POWER_OFF.md).
 
-In QWERTY mode the Linux console keymap translates keyboard input. This is the
-mode to use with the [host keyboard bridge](HOST_KEYBOARD.md). The status row
-shows the active input mode and an armed one-shot modifier.
+The pending character is shown at the cursor. When no character is pending, an
+armed one-shot modifier appears there as `C`, `A` or `S`.
 
 ## Scrollback
 
-Press `#` to enter or leave the console's scrollback view. It does not stop the
-shell. In that view, Up and Down move one line at a time; Left and Right move a
-screen at a time. Press `#` or the right soft key to return to the live prompt.
+Press `#` to enter the console's scrollback view. It does not stop the shell.
+In that view, Up and Down move one line at a time; Left and Right move a screen
+at a time, and the centre or dial key returns to the newest line. Press `#` or
+the right soft key to return to the live prompt. Keyboard input is ignored
+while the view is open.
 
 ## What the console is not
 
