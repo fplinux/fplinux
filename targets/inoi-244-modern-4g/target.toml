@@ -90,7 +90,7 @@ firmware = [
 
 [audio_profile]
 firmware = [
-  { source = "inoi244-audio-profile.bin", destination = "fplinux/inoi244-audio-profile.bin", size = 43 },
+  { source = "inoi244-audio-profile.bin", destination = "fplinux/inoi244-audio-profile.bin", size = 54 },
 ]
 
 [microsd]

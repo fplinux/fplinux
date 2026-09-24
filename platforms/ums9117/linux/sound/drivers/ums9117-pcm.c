@@ -17,6 +17,7 @@
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/string.h>
+#include <linux/unaligned.h>
 #include <linux/wait.h>
 
 #include <sound/control.h>
@@ -49,15 +50,20 @@
  */
 #define UMS9117_PCM_SERVICE_PERIOD_NS NSEC_PER_MSEC
 #define UMS9117_PCM_STALL_MS 100U
+/* Keep the analog input's power-up transient outside the ALSA stream. */
+#define UMS9117_PCM_CAPTURE_WARMUP_FRAMES 14400U
 #define UMS9117_PCM_IDLE_RATE 48000U
 #define UMS9117_PCM_THREAD_NAME "ums9117-pcm"
 #define UMS9117_PCM_NAME "UMS9117 Headphones"
 #define UMS9117_AUDIO_PAD_COUNT 4U
+#define UMS9117_CAPTURE_PAD_COUNT 2U
 #define UMS9117_AUDIO_PAD_CELLS 3U
 
 #define UMS9117_AUDIO_PROFILE_MAGIC_SIZE 8U
 #define UMS9117_AUDIO_PROFILE_COMPATIBLE_SIZE 24U
 #define UMS9117_AUDIO_PROFILE_LEVEL_COUNT 9U
+#define UMS9117_AUDIO_PROFILE_SPEAKER_BYTES \
+	(sizeof(u16) + UMS9117_AUDIO_PROFILE_LEVEL_COUNT)
 #define UMS9117_AUDIO_PROFILE_HEADPHONE_PGA_MIN 2U
 #define UMS9117_AUDIO_PROFILE_HEADPHONE_PGA_MAX 7U
 #define UMS9117_AUDIO_PROFILE_SOURCE_EQ_BYPASS 0U
@@ -88,11 +94,28 @@ static const char *const ums9117_audio_pad_names[UMS9117_AUDIO_PAD_COUNT] = {
 	"DAD1",
 };
 
+static const char *const ums9117_capture_pad_names[UMS9117_CAPTURE_PAD_COUNT] = {
+	"ADSYNC",
+	"ADD0",
+};
+
 struct ums9117_audio_profile {
 	u8 dac_gain[UMS9117_AUDIO_PROFILE_LEVEL_COUNT];
+	u8 speaker_dac_gain[UMS9117_AUDIO_PROFILE_LEVEL_COUNT];
+	u16 speaker_pa_word;
 	u8 codec_volume;
 	bool source_eq_omitted;
 	bool fitted;
+};
+
+struct ums9117_pcm_stream {
+	struct snd_pcm_substream *substream;
+	snd_pcm_uframes_t hw_pos;
+	snd_pcm_uframes_t period_frames;
+	unsigned long last_progress;
+	bool running;
+	bool period_pending;
+	bool xrun_pending;
 };
 
 struct ums9117_pcm {
@@ -110,12 +133,20 @@ struct ums9117_pcm {
 	struct mutex lock;
 	unsigned int rate;
 	struct ums9117_audio_pad pads[UMS9117_AUDIO_PAD_COUNT];
+	struct ums9117_audio_pad capture_pads[UMS9117_CAPTURE_PAD_COUNT];
 	struct ums9117_audio_profile profile;
 	unsigned int volume_left;
 	unsigned int volume_right;
+	unsigned int speaker_volume;
+	enum ums9117_sc2720_capture_source capture_source;
+	enum ums9117_sc2720_playback_output output;
+	enum ums9117_sc2720_playback_output prepared_output;
 	bool codec_prepared;
 	bool digital_prepared;
+	bool capture_supported;
+	bool capture_prepared;
 	bool idle_silence;
+	bool fm_enabled;
 	bool suspended;
 	bool removing;
 	/*
@@ -125,20 +156,18 @@ struct ums9117_pcm {
 	 * these fields with the mutex held as well.
 	 */
 	spinlock_t fifo_lock;
-	struct snd_pcm_substream *substream;
+	struct ums9117_pcm_stream playback;
+	struct ums9117_pcm_stream capture;
 	snd_pcm_uframes_t submit_ptr;
+	snd_pcm_uframes_t capture_ptr;
 	u64 submitted_frames;
 	u64 consumed_frames;
 	u64 leading_silence_frames;
-	snd_pcm_uframes_t hw_pos;
-	snd_pcm_uframes_t period_frames;
-	unsigned long last_progress;
-	bool running;
 	bool idle_running;
+	bool capture_starting;
+	unsigned int capture_warmup_frames;
 	/* Results the timer leaves for the notification thread. */
-	bool period_pending;
 	bool drained_pending;
-	bool xrun_pending;
 	int idle_error;
 };
 
@@ -168,6 +197,39 @@ static const struct snd_pcm_hardware ums9117_pcm_hardware = {
 	.fifo_size = UMS9117_AUDIO_FIFO_FRAMES,
 };
 
+static const struct snd_pcm_hardware ums9117_capture_hardware = {
+	.info = SNDRV_PCM_INFO_INTERLEAVED | SNDRV_PCM_INFO_BLOCK_TRANSFER |
+		SNDRV_PCM_INFO_MMAP | SNDRV_PCM_INFO_MMAP_VALID |
+		SNDRV_PCM_INFO_FIFO_IN_FRAMES | SNDRV_PCM_INFO_NO_REWINDS,
+	.formats = SNDRV_PCM_FMTBIT_S16_LE,
+	.rates = SNDRV_PCM_RATE_48000,
+	.rate_min = 48000,
+	.rate_max = 48000,
+	.channels_min = 1,
+	.channels_max = 1,
+	.buffer_bytes_max = UMS9117_PCM_BUFFER_BYTES_MAX,
+	.period_bytes_min = UMS9117_PCM_PERIOD_BYTES_MIN,
+	.period_bytes_max = UMS9117_PCM_PERIOD_BYTES_MAX,
+	.periods_min = 2,
+	.periods_max =
+		UMS9117_PCM_BUFFER_BYTES_MAX / UMS9117_PCM_PERIOD_BYTES_MIN,
+	.fifo_size = UMS9117_AUDIO_FIFO_FRAMES,
+};
+
+/* The hardware lifecycle mutex is held when inspecting the stream lease. */
+static bool ums9117_pcm_capture_open(struct ums9117_pcm *audio)
+{
+	return audio->capture.substream != NULL;
+}
+
+static struct ums9117_pcm_stream *
+ums9117_pcm_stream(struct ums9117_pcm *audio,
+		   const struct snd_pcm_substream *substream)
+{
+	return substream->stream == SNDRV_PCM_STREAM_CAPTURE ? &audio->capture :
+							       &audio->playback;
+}
+
 static int
 ums9117_pcm_parse_audio_profile(const char *machine_compatible,
 				const struct firmware *firmware,
@@ -175,12 +237,14 @@ ums9117_pcm_parse_audio_profile(const char *machine_compatible,
 {
 	u8 compatible[UMS9117_AUDIO_PROFILE_COMPATIBLE_SIZE] = {};
 	const struct ums9117_audio_profile_data *data;
+	const u8 *speaker;
 	size_t compatible_length;
 	u8 headphone_pga;
 	u8 source_eq;
 	unsigned int i;
 
-	if (firmware->size != sizeof(*data))
+	if (firmware->size !=
+	    sizeof(*data) + UMS9117_AUDIO_PROFILE_SPEAKER_BYTES)
 		return -EINVAL;
 	data = (const struct ums9117_audio_profile_data *)firmware->data;
 	if (memcmp(data->magic, ums9117_audio_profile_magic,
@@ -213,6 +277,19 @@ ums9117_pcm_parse_audio_profile(const char *machine_compatible,
 	profile->codec_volume = headphone_pga - 1U;
 	profile->source_eq_omitted =
 		source_eq == UMS9117_AUDIO_PROFILE_SOURCE_EQ_ACTIVE_OMITTED;
+	speaker = firmware->data + sizeof(*data);
+	profile->speaker_pa_word = get_unaligned_le16(speaker);
+	if (profile->speaker_pa_word & ~0xffU)
+		return -EINVAL;
+	speaker += sizeof(u16);
+	for (i = 0; i < UMS9117_AUDIO_PROFILE_LEVEL_COUNT; i++) {
+		u8 gain = speaker[i];
+
+		if (gain > 127U ||
+		    (i && profile->speaker_dac_gain[i - 1] < gain))
+			return -EINVAL;
+		profile->speaker_dac_gain[i] = gain;
+	}
 	profile->fitted = true;
 	return 0;
 }
@@ -236,7 +313,7 @@ static int ums9117_pcm_load_audio_profile(struct ums9117_pcm *audio)
 		return 0;
 	if (ret)
 		return dev_err_probe(audio->dev, ret,
-				     "cannot load headphone audio profile\n");
+				     "cannot load audio profile\n");
 
 	ret = of_property_read_string_index(of_root, "compatible", 0,
 					    &machine_compatible);
@@ -250,7 +327,7 @@ static int ums9117_pcm_load_audio_profile(struct ums9117_pcm *audio)
 	release_firmware(firmware);
 	if (ret)
 		return dev_err_probe(audio->dev, ret,
-				     "invalid headphone audio profile\n");
+				     "invalid audio profile\n");
 	return 0;
 }
 
@@ -281,12 +358,34 @@ static void ums9117_pcm_apply_profile_dac_gain(struct ums9117_pcm *audio,
 	ums9117_audio_set_dac_gain(audio->digital, left_gain, right_gain);
 }
 
+static void
+ums9117_pcm_apply_output_gain(struct ums9117_pcm *audio,
+			      enum ums9117_sc2720_playback_output output)
+{
+	u8 gain;
+
+	if (output == UMS9117_SC2720_OUTPUT_SPEAKER) {
+		gain = audio->profile
+			       .speaker_dac_gain[audio->speaker_volume ?
+							 audio->speaker_volume -
+								 1 :
+							 0];
+		ums9117_audio_set_dac_gain(audio->digital, gain, gain);
+	} else if (audio->profile.fitted) {
+		ums9117_pcm_apply_profile_dac_gain(audio, audio->volume_left,
+						   audio->volume_right);
+	}
+}
+
 static int ums9117_pcm_set_profile_volume_locked(struct ums9117_pcm *audio,
 						 unsigned int left,
 						 unsigned int right)
 {
 	unsigned int old_left = audio->volume_left;
 	unsigned int old_right = audio->volume_right;
+	bool headphone_digital = audio->output ==
+					 UMS9117_SC2720_OUTPUT_HEADPHONES ||
+				 audio->fm_enabled;
 	unsigned int codec_left;
 	unsigned int codec_right;
 	int ret;
@@ -296,11 +395,14 @@ static int ums9117_pcm_set_profile_volume_locked(struct ums9117_pcm *audio,
 	codec_left = left ? audio->profile.codec_volume : 0;
 	codec_right = right ? audio->profile.codec_volume : 0;
 	/* Program DG before an analog unmute can expose the selected level. */
-	ums9117_pcm_apply_profile_dac_gain(audio, left, right);
+	if (headphone_digital)
+		ums9117_pcm_apply_profile_dac_gain(audio, left, right);
 	ret = ums9117_sc2720_codec_set_volume(audio->codec, codec_left,
 					      codec_right);
 	if (ret < 0) {
-		ums9117_pcm_apply_profile_dac_gain(audio, old_left, old_right);
+		if (headphone_digital)
+			ums9117_pcm_apply_profile_dac_gain(audio, old_left,
+							   old_right);
 		return ret;
 	}
 	audio->volume_left = left;
@@ -381,66 +483,108 @@ static const struct snd_kcontrol_new ums9117_headphone_profile_volume_control = 
 	.put = ums9117_headphone_volume_put,
 };
 
-static void ums9117_pcm_disable_codec(struct ums9117_pcm *audio)
+static int ums9117_pcm_disable_codec(struct ums9117_pcm *audio)
 {
 	int ret;
 
 	if (!audio->codec_prepared)
-		return;
+		return 0;
 	ret = ums9117_sc2720_codec_disable(audio->codec);
 	if (ret) {
-		dev_err(audio->dev, "cannot disable headphone codec: %pe\n",
+		dev_err(audio->dev, "cannot disable audio codec: %pe\n",
 			ERR_PTR(ret));
-		return;
+		return ret;
 	}
 	audio->codec_prepared = false;
+	return 0;
 }
 
-static void ums9117_pcm_clear_events_locked(struct ums9117_pcm *audio)
+static void ums9117_pcm_clear_events_locked(struct ums9117_pcm_stream *stream)
 {
-	audio->period_pending = false;
-	audio->drained_pending = false;
-	audio->xrun_pending = false;
+	stream->period_pending = false;
+	stream->xrun_pending = false;
 }
 
-/* Ends both refill modes and leaves no timer armed; the mutex is held. */
-static void ums9117_pcm_stop_refill_locked(struct ums9117_pcm *audio)
+/* The lifecycle mutex is held; the timer never takes it. */
+static void ums9117_pcm_stop_playback_refill_locked(struct ums9117_pcm *audio)
 {
 	unsigned long flags;
+	bool cancel;
 
 	spin_lock_irqsave(&audio->fifo_lock, flags);
-	audio->running = false;
+	audio->playback.running = false;
 	audio->idle_running = false;
-	ums9117_pcm_clear_events_locked(audio);
+	ums9117_pcm_clear_events_locked(&audio->playback);
+	audio->drained_pending = false;
+	cancel = !audio->capture.running;
 	spin_unlock_irqrestore(&audio->fifo_lock, flags);
-	hrtimer_cancel(&audio->timer);
+	if (cancel)
+		hrtimer_cancel(&audio->timer);
 }
 
-static void ums9117_pcm_shutdown_locked(struct ums9117_pcm *audio)
+static void ums9117_pcm_stop_capture_refill_locked(struct ums9117_pcm *audio)
 {
-	ums9117_pcm_stop_refill_locked(audio);
-	if (audio->digital_prepared)
-		ums9117_audio_stop(audio->digital);
-	ums9117_pcm_disable_codec(audio);
-	if (audio->digital_prepared)
-		ums9117_audio_release(audio->digital);
-	audio->digital_prepared = false;
+	unsigned long flags;
+	bool cancel;
+
+	spin_lock_irqsave(&audio->fifo_lock, flags);
+	audio->capture.running = false;
+	audio->capture_starting = false;
+	audio->capture_warmup_frames = 0;
+	ums9117_pcm_clear_events_locked(&audio->capture);
+	cancel = !audio->playback.running && !audio->idle_running;
+	spin_unlock_irqrestore(&audio->fifo_lock, flags);
+	if (cancel)
+		hrtimer_cancel(&audio->timer);
 }
 
-static int ums9117_pcm_stop_locked(struct ums9117_pcm *audio)
+static int ums9117_pcm_shutdown_playback_locked(struct ums9117_pcm *audio)
 {
 	int ret;
 
-	ums9117_pcm_stop_refill_locked(audio);
+	ums9117_pcm_stop_playback_refill_locked(audio);
+	if (audio->digital_prepared)
+		ums9117_audio_stop(audio->digital);
+	ret = ums9117_pcm_disable_codec(audio);
+	if (audio->digital_prepared)
+		ums9117_audio_release(audio->digital);
+	audio->digital_prepared = false;
+	return ret;
+}
+
+static int ums9117_pcm_shutdown_capture_locked(struct ums9117_pcm *audio)
+{
+	int ret;
+
+	ums9117_pcm_stop_capture_refill_locked(audio);
+	if (!audio->capture_prepared)
+		return 0;
+	/* The analog producer stops while the digital receiver still has clocks. */
+	ret = ums9117_sc2720_codec_stop_capture(audio->codec);
+	if (ret)
+		return ret;
+	ret = ums9117_sc2720_codec_disable_capture(audio->codec);
+	if (ret)
+		return ret;
+	ums9117_audio_stop_capture(audio->digital);
+	ums9117_audio_release_capture(audio->digital);
+	audio->capture_prepared = false;
+	return 0;
+}
+
+static int ums9117_pcm_stop_playback_locked(struct ums9117_pcm *audio)
+{
+	int ret;
+
+	ums9117_pcm_stop_playback_refill_locked(audio);
 	if (audio->digital_prepared)
 		ums9117_audio_stop(audio->digital);
 	if (audio->codec_prepared) {
 		ret = ums9117_sc2720_codec_stop(audio->codec);
 		if (ret) {
-			dev_err(audio->dev,
-				"cannot stop headphone codec: %pe\n",
+			dev_err(audio->dev, "cannot stop playback codec: %pe\n",
 				ERR_PTR(ret));
-			ums9117_pcm_shutdown_locked(audio);
+			ums9117_pcm_shutdown_playback_locked(audio);
 			return ret;
 		}
 	}
@@ -450,12 +594,15 @@ static int ums9117_pcm_stop_locked(struct ums9117_pcm *audio)
 	return 0;
 }
 
-static int ums9117_pcm_validate_pads(struct ums9117_pcm *audio)
+static int ums9117_pcm_validate_pads(struct ums9117_pcm *audio,
+				     const struct ums9117_audio_pad *pads,
+				     const char *const *names,
+				     unsigned int count)
 {
 	unsigned int i;
 
-	for (i = 0; i < ARRAY_SIZE(audio->pads); i++) {
-		const struct ums9117_audio_pad *pad = &audio->pads[i];
+	for (i = 0; i < count; i++) {
+		const struct ums9117_audio_pad *pad = &pads[i];
 		u32 mux = readl(audio->pinmux + pad->offset);
 		u32 config = readl(audio->pinconf + pad->offset);
 
@@ -463,7 +610,7 @@ static int ums9117_pcm_validate_pads(struct ums9117_pcm *audio)
 			continue;
 		dev_err(audio->dev,
 			"audio pad %s unavailable: mux=%#x config=%#x\n",
-			ums9117_audio_pad_names[i], mux, config);
+			names[i], mux, config);
 		return -EBUSY;
 	}
 	return 0;
@@ -471,6 +618,8 @@ static int ums9117_pcm_validate_pads(struct ums9117_pcm *audio)
 
 static int ums9117_pcm_read_pads(struct device *dev,
 				 struct ums9117_audio_pad *pads,
+				 const char *property, const char *const *names,
+				 unsigned int count,
 				 resource_size_t pinmux_size,
 				 resource_size_t pinconf_size)
 {
@@ -478,11 +627,11 @@ static int ums9117_pcm_read_pads(struct device *dev,
 	unsigned int i;
 	int ret;
 
-	ret = device_property_read_u32_array(dev, "fplinux,pad-settings",
-					     settings, ARRAY_SIZE(settings));
+	ret = device_property_read_u32_array(dev, property, settings,
+					     count * UMS9117_AUDIO_PAD_CELLS);
 	if (ret)
 		return dev_err_probe(dev, ret, "invalid audio pad settings\n");
-	for (i = 0; i < UMS9117_AUDIO_PAD_COUNT; i++) {
+	for (i = 0; i < count; i++) {
 		unsigned int base = i * UMS9117_AUDIO_PAD_CELLS;
 
 		pads[i].offset = settings[base];
@@ -494,47 +643,109 @@ static int ums9117_pcm_read_pads(struct device *dev,
 			return dev_err_probe(
 				dev, -EINVAL,
 				"audio pad %s offset %#x is outside its resources\n",
-				ums9117_audio_pad_names[i], pads[i].offset);
+				names[i], pads[i].offset);
 	}
 	return 0;
 }
 
 static int ums9117_pcm_prepare_hardware_locked(struct ums9117_pcm *audio,
-					       unsigned int rate)
+					       unsigned int rate, bool fm)
 {
+	enum ums9117_sc2720_playback_output output =
+		fm ? UMS9117_SC2720_OUTPUT_HEADPHONES : audio->output;
 	int ret;
 
-	if (audio->idle_silence && rate != UMS9117_PCM_IDLE_RATE)
+	if (!fm && output == UMS9117_SC2720_OUTPUT_HEADPHONES &&
+	    audio->idle_silence && rate != UMS9117_PCM_IDLE_RATE)
+		return -EINVAL;
+	if (output == UMS9117_SC2720_OUTPUT_SPEAKER &&
+	    rate != UMS9117_PCM_IDLE_RATE)
 		return -EINVAL;
 	if (audio->digital_prepared) {
-		if (audio->rate == rate)
+		if (audio->rate == rate && audio->prepared_output == output)
 			return 0;
-		ret = ums9117_pcm_stop_locked(audio);
+		ret = ums9117_pcm_stop_playback_locked(audio);
 		if (ret)
 			return ret;
 	}
-	ret = ums9117_pcm_validate_pads(audio);
+	if (audio->codec_prepared && audio->prepared_output != output) {
+		ret = ums9117_pcm_disable_codec(audio);
+		if (ret)
+			return ret;
+	}
+	if (output == UMS9117_SC2720_OUTPUT_SPEAKER && !audio->profile.fitted)
+		return -ENODEV;
+	ret = ums9117_pcm_validate_pads(audio, audio->pads,
+					ums9117_audio_pad_names,
+					ARRAY_SIZE(audio->pads));
 	if (ret)
 		goto failed;
-	ret = ums9117_audio_prepare(audio->digital, rate);
+	if (fm)
+		ret = ums9117_audio_prepare_fm(audio->digital);
+	else
+		ret = ums9117_audio_prepare(audio->digital, rate);
 	if (ret) {
 		dev_err(audio->dev, "cannot prepare digital audio: %pe\n",
 			ERR_PTR(ret));
 		goto failed;
 	}
 	audio->digital_prepared = true;
-	ret = ums9117_sc2720_codec_prepare(audio->codec);
+	ums9117_pcm_apply_output_gain(audio, output);
+	ret = ums9117_sc2720_codec_prepare(
+		audio->codec, output,
+		output == UMS9117_SC2720_OUTPUT_SPEAKER ?
+			audio->profile.speaker_pa_word :
+			0);
 	if (ret) {
-		dev_err(audio->dev, "cannot prepare headphone codec: %pe\n",
+		dev_err(audio->dev, "cannot prepare playback codec: %pe\n",
 			ERR_PTR(ret));
 		goto failed;
 	}
 	audio->codec_prepared = true;
+	audio->prepared_output = output;
+	if (output == UMS9117_SC2720_OUTPUT_SPEAKER) {
+		ret = ums9117_sc2720_codec_set_speaker_mute(
+			audio->codec, !audio->speaker_volume);
+		if (ret < 0)
+			goto failed;
+	}
 	audio->rate = rate;
 	return 0;
 
 failed:
-	ums9117_pcm_shutdown_locked(audio);
+	ums9117_pcm_shutdown_playback_locked(audio);
+	return ret;
+}
+
+static int ums9117_pcm_prepare_capture_locked(struct ums9117_pcm *audio)
+{
+	int ret;
+
+	ret = ums9117_pcm_shutdown_capture_locked(audio);
+	if (ret)
+		return ret;
+	ret = ums9117_pcm_validate_pads(audio, audio->pads,
+					ums9117_audio_pad_names,
+					ARRAY_SIZE(audio->pads));
+	if (ret)
+		return ret;
+	ret = ums9117_pcm_validate_pads(audio, audio->capture_pads,
+					ums9117_capture_pad_names,
+					ARRAY_SIZE(audio->capture_pads));
+	if (ret)
+		return ret;
+	ret = ums9117_audio_prepare_capture(audio->digital);
+	if (ret)
+		return ret;
+	/* Retain the cleanup obligation if a partial codec setup cannot unwind. */
+	audio->capture_prepared = true;
+	ret = ums9117_sc2720_codec_prepare_capture(audio->codec,
+						   audio->capture_source);
+	if (ret) {
+		dev_err(audio->dev, "cannot prepare microphone codec: %pe\n",
+			ERR_PTR(ret));
+		ums9117_pcm_shutdown_capture_locked(audio);
+	}
 	return ret;
 }
 
@@ -553,11 +764,15 @@ static int ums9117_pcm_fill_silence_locked(struct ums9117_pcm *audio)
 static int ums9117_pcm_start_idle_locked(struct ums9117_pcm *audio)
 {
 	unsigned long flags;
+	bool timer_active;
 	int ret;
 
-	if (audio->removing || audio->suspended || audio->idle_running)
+	if (audio->removing || audio->suspended || audio->idle_running ||
+	    audio->fm_enabled ||
+	    audio->output != UMS9117_SC2720_OUTPUT_HEADPHONES)
 		return 0;
-	ret = ums9117_pcm_prepare_hardware_locked(audio, UMS9117_PCM_IDLE_RATE);
+	ret = ums9117_pcm_prepare_hardware_locked(audio, UMS9117_PCM_IDLE_RATE,
+						  false);
 	if (ret)
 		return ret;
 	/*
@@ -566,9 +781,12 @@ static int ums9117_pcm_start_idle_locked(struct ums9117_pcm *audio)
 	 * never services a mixture of the two.
 	 */
 	spin_lock_irqsave(&audio->fifo_lock, flags);
-	audio->running = false;
+	timer_active = audio->playback.running || audio->idle_running ||
+		       audio->capture.running;
+	audio->playback.running = false;
 	audio->idle_running = true;
-	ums9117_pcm_clear_events_locked(audio);
+	ums9117_pcm_clear_events_locked(&audio->playback);
+	audio->drained_pending = false;
 	ret = ums9117_pcm_fill_silence_locked(audio);
 	spin_unlock_irqrestore(&audio->fifo_lock, flags);
 	if (ret)
@@ -577,24 +795,185 @@ static int ums9117_pcm_start_idle_locked(struct ums9117_pcm *audio)
 	if (ret)
 		goto failed;
 	ums9117_audio_start(audio->digital);
-	hrtimer_start(&audio->timer, ns_to_ktime(UMS9117_PCM_SERVICE_PERIOD_NS),
-		      HRTIMER_MODE_REL);
+	if (!timer_active)
+		hrtimer_start(&audio->timer,
+			      ns_to_ktime(UMS9117_PCM_SERVICE_PERIOD_NS),
+			      HRTIMER_MODE_REL);
 	return 0;
 
 failed:
 	dev_err(audio->dev, "cannot start headphone idle silence: %pe\n",
 		ERR_PTR(ret));
-	ums9117_pcm_shutdown_locked(audio);
+	ums9117_pcm_shutdown_playback_locked(audio);
 	return ret;
 }
 
 static int ums9117_pcm_finish_locked(struct ums9117_pcm *audio)
 {
-	if (!audio->idle_silence || audio->suspended || audio->removing)
-		return ums9117_pcm_stop_locked(audio);
+	if (!audio->idle_silence || audio->suspended || audio->removing ||
+	    audio->output != UMS9117_SC2720_OUTPUT_HEADPHONES)
+		return ums9117_pcm_stop_playback_locked(audio);
 	/* Only the already submitted FIFO tail precedes silence after STOP. */
 	return ums9117_pcm_start_idle_locked(audio);
 }
+
+static int ums9117_pcm_start_fm_locked(struct ums9117_pcm *audio)
+{
+	int ret;
+
+	if (audio->output == UMS9117_SC2720_OUTPUT_SPEAKER)
+		ret = ums9117_pcm_shutdown_playback_locked(audio);
+	else
+		ret = ums9117_pcm_stop_playback_locked(audio);
+	if (ret)
+		return ret;
+	ret = ums9117_pcm_prepare_hardware_locked(audio, 32000, true);
+	if (ret)
+		return ret;
+	ret = ums9117_sc2720_codec_enable(audio->codec);
+	if (ret) {
+		ums9117_pcm_shutdown_playback_locked(audio);
+		return ret;
+	}
+	/* The internal IIS source supplies FM samples without a refill timer. */
+	ums9117_audio_start(audio->digital);
+	return 0;
+}
+
+static int ums9117_fm_playback_get(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_value *value)
+{
+	struct ums9117_pcm *audio = snd_kcontrol_chip(kcontrol);
+
+	mutex_lock(&audio->lock);
+	value->value.integer.value[0] = audio->fm_enabled;
+	mutex_unlock(&audio->lock);
+	return 0;
+}
+
+static int ums9117_fm_playback_put(struct snd_kcontrol *kcontrol,
+				   struct snd_ctl_elem_value *value)
+{
+	struct ums9117_pcm *audio = snd_kcontrol_chip(kcontrol);
+	long enabled = value->value.integer.value[0];
+	int restore_ret;
+	int ret = 0;
+
+	if (enabled != 0 && enabled != 1)
+		return -EINVAL;
+	mutex_lock(&audio->lock);
+	if (audio->removing || audio->suspended) {
+		ret = audio->removing ? -ENODEV : -ESTRPIPE;
+		goto out;
+	}
+	if (audio->fm_enabled == enabled)
+		goto out;
+	/* An open PCM owns the path even before prepare or after STOP. */
+	if (audio->playback.substream || audio->capture.substream) {
+		ret = -EBUSY;
+		goto out;
+	}
+	if (enabled) {
+		ret = ums9117_pcm_start_fm_locked(audio);
+		if (ret) {
+			if (audio->idle_silence &&
+			    audio->output == UMS9117_SC2720_OUTPUT_HEADPHONES) {
+				restore_ret =
+					ums9117_pcm_start_idle_locked(audio);
+				if (restore_ret)
+					dev_err(audio->dev,
+						"cannot restore headphone idle silence: %pe\n",
+						ERR_PTR(restore_ret));
+			}
+			goto failed;
+		}
+		audio->fm_enabled = true;
+	} else {
+		if (audio->output == UMS9117_SC2720_OUTPUT_SPEAKER)
+			ret = ums9117_pcm_shutdown_playback_locked(audio);
+		else
+			ret = ums9117_pcm_stop_playback_locked(audio);
+		audio->fm_enabled = false;
+		if (ret)
+			goto failed;
+		if (audio->idle_silence &&
+		    audio->output == UMS9117_SC2720_OUTPUT_HEADPHONES) {
+			ret = ums9117_pcm_start_idle_locked(audio);
+			if (ret)
+				goto failed;
+		}
+	}
+	ret = 1;
+	goto out;
+
+failed:
+	dev_err_ratelimited(audio->dev,
+			    "cannot set FM playback route=%ld: %pe\n", enabled,
+			    ERR_PTR(ret));
+out:
+	mutex_unlock(&audio->lock);
+	return ret;
+}
+
+static const struct snd_kcontrol_new ums9117_fm_playback_control = {
+	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+	.name = "FM Playback Switch",
+	.info = snd_ctl_boolean_mono_info,
+	.get = ums9117_fm_playback_get,
+	.put = ums9117_fm_playback_put,
+};
+
+static int ums9117_capture_source_info(struct snd_kcontrol *kcontrol,
+				       struct snd_ctl_elem_info *info)
+{
+	static const char *const names[] = { "Internal", "Headset" };
+
+	return snd_ctl_enum_info(info, 1, ARRAY_SIZE(names), names);
+}
+
+static int ums9117_capture_source_get(struct snd_kcontrol *kcontrol,
+				      struct snd_ctl_elem_value *value)
+{
+	struct ums9117_pcm *audio = snd_kcontrol_chip(kcontrol);
+
+	mutex_lock(&audio->lock);
+	value->value.enumerated.item[0] = audio->capture_source;
+	mutex_unlock(&audio->lock);
+	return 0;
+}
+
+static int ums9117_capture_source_put(struct snd_kcontrol *kcontrol,
+				      struct snd_ctl_elem_value *value)
+{
+	struct ums9117_pcm *audio = snd_kcontrol_chip(kcontrol);
+	unsigned int source = value->value.enumerated.item[0];
+	int ret = 0;
+
+	if (source > UMS9117_SC2720_CAPTURE_HEADSET)
+		return -EINVAL;
+	mutex_lock(&audio->lock);
+	if (audio->removing)
+		ret = -ENODEV;
+	else if (audio->capture_source != source) {
+		/* The selected route belongs to the next capture session. */
+		if (ums9117_pcm_capture_open(audio) || audio->capture_prepared)
+			ret = -EBUSY;
+		else {
+			audio->capture_source = source;
+			ret = 1;
+		}
+	}
+	mutex_unlock(&audio->lock);
+	return ret;
+}
+
+static const struct snd_kcontrol_new ums9117_capture_source_control = {
+	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+	.name = "Capture Source",
+	.info = ums9117_capture_source_info,
+	.get = ums9117_capture_source_get,
+	.put = ums9117_capture_source_put,
+};
 
 static int ums9117_headphone_idle_get(struct snd_kcontrol *kcontrol,
 				      struct snd_ctl_elem_value *value)
@@ -624,13 +1003,18 @@ static int ums9117_headphone_idle_put(struct snd_kcontrol *kcontrol,
 	}
 	if (audio->idle_silence == enabled)
 		goto out;
-	if (!audio->running) {
+	if (audio->fm_enabled) {
+		ret = -EBUSY;
+		goto out;
+	}
+	if (!audio->playback.running &&
+	    audio->output == UMS9117_SC2720_OUTPUT_HEADPHONES) {
 		if (enabled) {
 			ret = ums9117_pcm_start_idle_locked(audio);
 			if (ret)
 				goto out;
 		} else if (audio->idle_running) {
-			ret = ums9117_pcm_stop_locked(audio);
+			ret = ums9117_pcm_stop_playback_locked(audio);
 			if (ret)
 				goto out;
 		}
@@ -648,6 +1032,154 @@ static const struct snd_kcontrol_new ums9117_headphone_idle_control = {
 	.info = snd_ctl_boolean_mono_info,
 	.get = ums9117_headphone_idle_get,
 	.put = ums9117_headphone_idle_put,
+};
+
+static int ums9117_playback_output_info(struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_info *info)
+{
+	static const char *const names[] = { "Headphones", "Speaker" };
+
+	return snd_ctl_enum_info(info, 1, ARRAY_SIZE(names), names);
+}
+
+static int ums9117_playback_output_get(struct snd_kcontrol *kcontrol,
+				       struct snd_ctl_elem_value *value)
+{
+	struct ums9117_pcm *audio = snd_kcontrol_chip(kcontrol);
+
+	mutex_lock(&audio->lock);
+	value->value.enumerated.item[0] = audio->output;
+	mutex_unlock(&audio->lock);
+	return 0;
+}
+
+static int ums9117_playback_output_put(struct snd_kcontrol *kcontrol,
+				       struct snd_ctl_elem_value *value)
+{
+	struct ums9117_pcm *audio = snd_kcontrol_chip(kcontrol);
+	unsigned int output = value->value.enumerated.item[0];
+	enum ums9117_sc2720_playback_output old_output;
+	int ret = 0;
+
+	if (output > UMS9117_SC2720_OUTPUT_SPEAKER)
+		return -EINVAL;
+	mutex_lock(&audio->lock);
+	if (audio->removing || audio->suspended) {
+		ret = audio->removing ? -ENODEV : -ESTRPIPE;
+		goto out;
+	}
+	if (audio->output == output)
+		goto out;
+	if (audio->playback.substream || audio->capture.substream ||
+	    audio->fm_enabled) {
+		ret = -EBUSY;
+		goto out;
+	}
+	ret = ums9117_pcm_shutdown_playback_locked(audio);
+	if (ret)
+		goto out;
+	old_output = audio->output;
+	audio->output = output;
+	ums9117_pcm_apply_output_gain(audio, output);
+	if (output == UMS9117_SC2720_OUTPUT_HEADPHONES && audio->idle_silence) {
+		ret = ums9117_pcm_start_idle_locked(audio);
+		if (ret) {
+			audio->output = old_output;
+			ums9117_pcm_apply_output_gain(audio, old_output);
+			goto out;
+		}
+	}
+	ret = 1;
+out:
+	mutex_unlock(&audio->lock);
+	return ret;
+}
+
+static const struct snd_kcontrol_new ums9117_playback_output_control = {
+	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+	.name = "PCM Playback Output",
+	.info = ums9117_playback_output_info,
+	.get = ums9117_playback_output_get,
+	.put = ums9117_playback_output_put,
+};
+
+static int ums9117_speaker_volume_info(struct snd_kcontrol *kcontrol,
+				       struct snd_ctl_elem_info *info)
+{
+	info->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+	info->count = 1;
+	info->value.integer.min = 0;
+	info->value.integer.max = UMS9117_AUDIO_PROFILE_LEVEL_COUNT;
+	return 0;
+}
+
+static int ums9117_speaker_volume_get(struct snd_kcontrol *kcontrol,
+				      struct snd_ctl_elem_value *value)
+{
+	struct ums9117_pcm *audio = snd_kcontrol_chip(kcontrol);
+
+	mutex_lock(&audio->lock);
+	value->value.integer.value[0] = audio->speaker_volume;
+	mutex_unlock(&audio->lock);
+	return 0;
+}
+
+static int ums9117_speaker_volume_put(struct snd_kcontrol *kcontrol,
+				      struct snd_ctl_elem_value *value)
+{
+	struct ums9117_pcm *audio = snd_kcontrol_chip(kcontrol);
+	long level = value->value.integer.value[0];
+	unsigned int old_level;
+	u8 old_gain;
+	u8 gain;
+	int ret = 0;
+
+	if (level < 0 || level > UMS9117_AUDIO_PROFILE_LEVEL_COUNT)
+		return -EINVAL;
+	mutex_lock(&audio->lock);
+	if (audio->removing) {
+		ret = -ENODEV;
+		goto out;
+	}
+	old_level = audio->speaker_volume;
+	if (old_level == level)
+		goto out;
+	if (audio->output == UMS9117_SC2720_OUTPUT_SPEAKER &&
+	    !audio->fm_enabled) {
+		old_gain =
+			audio->profile
+				.speaker_dac_gain[old_level ? old_level - 1 : 0];
+		gain = audio->profile.speaker_dac_gain[level ? level - 1 : 0];
+		if (!level) {
+			ret = ums9117_sc2720_codec_set_speaker_mute(
+				audio->codec, true);
+			if (ret < 0)
+				goto out;
+		}
+		ums9117_audio_set_dac_gain(audio->digital, gain, gain);
+		if (level) {
+			ret = ums9117_sc2720_codec_set_speaker_mute(
+				audio->codec, false);
+			if (ret < 0) {
+				ums9117_audio_set_dac_gain(audio->digital,
+							   old_gain, old_gain);
+				goto out;
+			}
+		}
+	}
+	audio->speaker_volume = level;
+	ret = 1;
+out:
+	mutex_unlock(&audio->lock);
+	return ret;
+}
+
+static const struct snd_kcontrol_new ums9117_speaker_volume_control = {
+	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+	.name = "Speaker Playback Volume",
+	.info = ums9117_speaker_volume_info,
+	.get = ums9117_speaker_volume_get,
+	.put = ums9117_speaker_volume_put,
 };
 
 static int ums9117_pcm_pending_frames(struct ums9117_pcm *audio,
@@ -670,6 +1202,7 @@ static void ums9117_pcm_write_frames(struct ums9117_pcm *audio,
 				     snd_pcm_uframes_t frames)
 {
 	const __le16 *samples = (const __le16 *)runtime->dma_area;
+	bool speaker = audio->prepared_output == UMS9117_SC2720_OUTPUT_SPEAKER;
 	snd_pcm_uframes_t i;
 
 	for (i = 0; i < frames; i++) {
@@ -677,9 +1210,18 @@ static void ums9117_pcm_write_frames(struct ums9117_pcm *audio,
 			audio->submit_ptr % runtime->buffer_size;
 		snd_pcm_uframes_t sample = frame * UMS9117_PCM_CHANNELS;
 
-		ums9117_audio_write(audio->digital,
-				    le16_to_cpu(samples[sample]),
-				    le16_to_cpu(samples[sample + 1]));
+		if (speaker) {
+			s16 left = (s16)le16_to_cpu(samples[sample]);
+			s16 right = (s16)le16_to_cpu(samples[sample + 1]);
+
+			/* DACS adds both lanes; halve each before that sum. */
+			ums9117_audio_write(audio->digital, left / 2,
+					    right / 2);
+		} else {
+			ums9117_audio_write(audio->digital,
+					    le16_to_cpu(samples[sample]),
+					    le16_to_cpu(samples[sample + 1]));
+		}
 		audio->submit_ptr++;
 		if (audio->submit_ptr >= runtime->boundary)
 			audio->submit_ptr -= runtime->boundary;
@@ -715,6 +1257,7 @@ static enum ums9117_pcm_service_result
 ums9117_pcm_service_locked(struct ums9117_pcm *audio,
 			   struct snd_pcm_runtime *runtime)
 {
+	struct ums9117_pcm_stream *playback = &audio->playback;
 	snd_pcm_uframes_t pending;
 	snd_pcm_uframes_t written;
 	u64 consumed;
@@ -746,7 +1289,7 @@ ums9117_pcm_service_locked(struct ums9117_pcm *audio,
 	advanced = consumed - audio->consumed_frames;
 	audio->consumed_frames = consumed;
 	if (advanced)
-		audio->last_progress = jiffies;
+		playback->last_progress = jiffies;
 	/* Idle frames ahead of playback are not part of the ALSA buffer. */
 	if (audio->leading_silence_frames) {
 		u64 silence = min(advanced, audio->leading_silence_frames);
@@ -755,10 +1298,10 @@ ums9117_pcm_service_locked(struct ums9117_pcm *audio,
 		advanced -= silence;
 	}
 	if (advanced) {
-		audio->hw_pos += (snd_pcm_uframes_t)advanced;
-		if (audio->hw_pos >= runtime->buffer_size)
-			audio->hw_pos %= runtime->buffer_size;
-		audio->period_frames += (snd_pcm_uframes_t)advanced;
+		playback->hw_pos += (snd_pcm_uframes_t)advanced;
+		if (playback->hw_pos >= runtime->buffer_size)
+			playback->hw_pos %= runtime->buffer_size;
+		playback->period_frames += (snd_pcm_uframes_t)advanced;
 	}
 
 	ret = ums9117_pcm_pending_frames(audio, runtime, &pending);
@@ -784,18 +1327,90 @@ ums9117_pcm_service_locked(struct ums9117_pcm *audio,
 	}
 	if ((queued || written) && !advanced &&
 	    time_after(jiffies,
-		       audio->last_progress +
+		       playback->last_progress +
 			       msecs_to_jiffies(UMS9117_PCM_STALL_MS))) {
 		dev_err(audio->dev,
 			"playback FIFO stalled for %u ms (queued=%d)\n",
 			UMS9117_PCM_STALL_MS, queued);
 		return UMS9117_PCM_SERVICE_XRUN;
 	}
-	if (audio->period_frames >= runtime->period_size) {
-		audio->period_frames %= runtime->period_size;
+	if (playback->period_frames >= runtime->period_size) {
+		playback->period_frames %= runtime->period_size;
 		return UMS9117_PCM_SERVICE_PERIOD;
 	}
 	return UMS9117_PCM_SERVICE_IDLE;
+}
+
+/* The producer pointer belongs to this driver, not ALSA's notification thread. */
+static enum ums9117_pcm_service_result
+ums9117_pcm_capture_locked(struct ums9117_pcm *audio,
+			   struct snd_pcm_runtime *runtime)
+{
+	struct ums9117_pcm_stream *capture = &audio->capture;
+	snd_pcm_uframes_t appl_ptr = READ_ONCE(runtime->control->appl_ptr);
+	snd_pcm_sframes_t unread = audio->capture_ptr - appl_ptr;
+	__le16 *samples = (__le16 *)runtime->dma_area;
+	const char *error;
+	int available;
+	int i;
+
+	if (unread < -(snd_pcm_sframes_t)(runtime->boundary / 2))
+		unread += runtime->boundary;
+	if (unread < 0 || unread > runtime->buffer_size) {
+		error = "application pointer invalid";
+		goto xrun;
+	}
+	available = ums9117_audio_capture_available(audio->digital);
+	if (available < 0) {
+		error = available == -EPIPE ? "FIFO overrun" :
+					      "FIFO state invalid";
+		goto xrun;
+	}
+	if (!audio->capture_starting &&
+	    available > runtime->buffer_size - unread) {
+		error = "buffer overrun";
+		goto xrun;
+	}
+	/* One sampled occupancy bounds the interrupt work to less than one FIFO. */
+	for (i = 0; i < available; i++) {
+		u16 sample = ums9117_audio_read_capture(audio->digital);
+
+		if (audio->capture_starting)
+			continue;
+		samples[capture->hw_pos] = cpu_to_le16(sample);
+		if (++capture->hw_pos == runtime->buffer_size)
+			capture->hw_pos = 0;
+		if (++audio->capture_ptr == runtime->boundary)
+			audio->capture_ptr = 0;
+	}
+	if (available)
+		capture->last_progress = jiffies;
+	else if (time_after(jiffies,
+			    capture->last_progress +
+				    msecs_to_jiffies(UMS9117_PCM_STALL_MS))) {
+		error = "FIFO stalled";
+		goto xrun;
+	}
+	if (audio->capture_starting) {
+		unsigned int remaining = audio->capture_warmup_frames;
+
+		audio->capture_warmup_frames -=
+			min_t(unsigned int, remaining, available);
+		if (remaining && !audio->capture_warmup_frames)
+			audio->capture_starting = false;
+		/* The entire batch remains outside ALSA at the handover. */
+		return UMS9117_PCM_SERVICE_IDLE;
+	}
+	capture->period_frames += available;
+	if (capture->period_frames >= runtime->period_size) {
+		capture->period_frames %= runtime->period_size;
+		return UMS9117_PCM_SERVICE_PERIOD;
+	}
+	return UMS9117_PCM_SERVICE_IDLE;
+
+xrun:
+	ums9117_audio_report_capture(audio->digital, error);
+	return UMS9117_PCM_SERVICE_XRUN;
 }
 
 /*
@@ -821,15 +1436,16 @@ static enum hrtimer_restart ums9117_pcm_timer(struct hrtimer *timer)
 			audio->idle_error = ret;
 			notify = true;
 		}
-	} else if (audio->running && !audio->xrun_pending && audio->substream) {
+	} else if (audio->playback.running && !audio->playback.xrun_pending &&
+		   audio->playback.substream) {
 		/* A reported underrun stops the refill until STOP arrives. */
-		runtime = audio->substream->runtime;
+		runtime = audio->playback.substream->runtime;
 		if (runtime)
 			result = ums9117_pcm_service_locked(audio, runtime);
 	}
 	switch (result) {
 	case UMS9117_PCM_SERVICE_PERIOD:
-		audio->period_pending = true;
+		audio->playback.period_pending = true;
 		notify = true;
 		break;
 	case UMS9117_PCM_SERVICE_DRAINED:
@@ -837,13 +1453,34 @@ static enum hrtimer_restart ums9117_pcm_timer(struct hrtimer *timer)
 		notify = true;
 		break;
 	case UMS9117_PCM_SERVICE_XRUN:
-		audio->xrun_pending = true;
+		audio->playback.xrun_pending = true;
 		notify = true;
 		break;
 	case UMS9117_PCM_SERVICE_IDLE:
 		break;
 	}
-	restart = audio->running || audio->idle_running;
+	result = UMS9117_PCM_SERVICE_IDLE;
+	if (audio->capture.running && !audio->capture.xrun_pending &&
+	    audio->capture.substream) {
+		runtime = audio->capture.substream->runtime;
+		if (runtime)
+			result = ums9117_pcm_capture_locked(audio, runtime);
+	}
+	switch (result) {
+	case UMS9117_PCM_SERVICE_PERIOD:
+		audio->capture.period_pending = true;
+		notify = true;
+		break;
+	case UMS9117_PCM_SERVICE_XRUN:
+		audio->capture.xrun_pending = true;
+		notify = true;
+		break;
+	case UMS9117_PCM_SERVICE_DRAINED:
+	case UMS9117_PCM_SERVICE_IDLE:
+		break;
+	}
+	restart = audio->playback.running || audio->capture.running ||
+		  audio->idle_running;
 	spin_unlock(&audio->fifo_lock);
 	if (notify)
 		wake_up(&audio->thread_wait);
@@ -855,9 +1492,12 @@ static enum hrtimer_restart ums9117_pcm_timer(struct hrtimer *timer)
 
 static bool ums9117_pcm_has_event(struct ums9117_pcm *audio)
 {
-	return READ_ONCE(audio->period_pending) ||
+	return READ_ONCE(audio->playback.period_pending) ||
 	       READ_ONCE(audio->drained_pending) ||
-	       READ_ONCE(audio->xrun_pending) || READ_ONCE(audio->idle_error);
+	       READ_ONCE(audio->playback.xrun_pending) ||
+	       READ_ONCE(audio->capture.period_pending) ||
+	       READ_ONCE(audio->capture.xrun_pending) ||
+	       READ_ONCE(audio->idle_error);
 }
 
 static void ums9117_pcm_shutdown_failed_idle(struct ums9117_pcm *audio)
@@ -874,40 +1514,48 @@ static void ums9117_pcm_shutdown_failed_idle(struct ums9117_pcm *audio)
 		dev_err(audio->dev, "cannot feed headphone idle silence: %pe\n",
 			ERR_PTR(error));
 		/* The hardware may have been restarted meanwhile. */
-		if (!audio->running && !audio->idle_running)
-			ums9117_pcm_shutdown_locked(audio);
+		if (!audio->playback.running && !audio->idle_running &&
+		    !audio->fm_enabled)
+			ums9117_pcm_shutdown_playback_locked(audio);
 	}
 	mutex_unlock(&audio->lock);
 }
 
-/* Delivers the timer's results to ALSA under the stream lock. */
-static void ums9117_pcm_notify(struct ums9117_pcm *audio)
+/* Delivers one direction's results under only that ALSA stream lock. */
+static void ums9117_pcm_notify_stream(struct ums9117_pcm *audio,
+				      struct ums9117_pcm_stream *stream)
 {
 	struct snd_pcm_substream *substream;
-	struct snd_pcm_runtime *runtime;
+	struct snd_pcm_runtime *runtime = NULL;
 	unsigned long flags;
 	bool period = false;
 	bool drained = false;
 	bool xrun = false;
+	bool pending;
 
 	spin_lock_irqsave(&audio->fifo_lock, flags);
-	substream = audio->substream;
+	pending = stream->period_pending || stream->xrun_pending ||
+		  (stream == &audio->playback && audio->drained_pending);
+	substream = stream->substream;
 	spin_unlock_irqrestore(&audio->fifo_lock, flags);
-	if (!substream)
+	if (!pending || !substream)
 		return;
 	snd_pcm_stream_lock(substream);
-	runtime = substream->runtime;
 	spin_lock_irqsave(&audio->fifo_lock, flags);
-	if (audio->substream == substream && runtime && audio->running) {
-		period = audio->period_pending;
-		drained = audio->drained_pending;
-		xrun = audio->xrun_pending;
+	if (stream->substream == substream && substream->runtime &&
+	    stream->running) {
+		runtime = substream->runtime;
+		period = stream->period_pending;
+		if (stream == &audio->playback)
+			drained = audio->drained_pending;
+		xrun = stream->xrun_pending;
 	} else {
 		/* The stream that produced the events has already stopped. */
-		audio->xrun_pending = false;
+		stream->xrun_pending = false;
 	}
-	audio->period_pending = false;
-	audio->drained_pending = false;
+	stream->period_pending = false;
+	if (stream == &audio->playback)
+		audio->drained_pending = false;
 	spin_unlock_irqrestore(&audio->fifo_lock, flags);
 	if (xrun) {
 		/* The resulting STOP clears xrun_pending and the refill. */
@@ -919,6 +1567,12 @@ static void ums9117_pcm_notify(struct ums9117_pcm *audio)
 			snd_pcm_drain_done(substream);
 	}
 	snd_pcm_stream_unlock(substream);
+}
+
+static void ums9117_pcm_notify(struct ums9117_pcm *audio)
+{
+	ums9117_pcm_notify_stream(audio, &audio->playback);
+	ums9117_pcm_notify_stream(audio, &audio->capture);
 }
 
 static int ums9117_pcm_thread(void *data)
@@ -953,74 +1607,105 @@ static int ums9117_pcm_constrain_sizes(struct snd_pcm_runtime *runtime)
 }
 
 static void ums9117_pcm_set_stream_locked(struct ums9117_pcm *audio,
+					  struct ums9117_pcm_stream *stream,
 					  struct snd_pcm_substream *substream)
 {
 	unsigned long flags;
 
 	spin_lock_irqsave(&audio->fifo_lock, flags);
-	audio->substream = substream;
+	stream->substream = substream;
 	spin_unlock_irqrestore(&audio->fifo_lock, flags);
 }
 
 static int ums9117_pcm_open(struct snd_pcm_substream *substream)
 {
 	struct ums9117_pcm *audio = snd_pcm_substream_chip(substream);
+	struct ums9117_pcm_stream *stream =
+		ums9117_pcm_stream(audio, substream);
 	int ret = 0;
 
 	mutex_lock(&audio->lock);
 	if (audio->removing)
 		ret = -ENODEV;
-	else if (audio->substream)
+	else if (stream->substream || audio->fm_enabled)
 		ret = -EBUSY;
-	else
-		ums9117_pcm_set_stream_locked(audio, substream);
-	mutex_unlock(&audio->lock);
-	if (ret)
-		return ret;
-	substream->runtime->hw = ums9117_pcm_hardware;
-	ret = ums9117_pcm_constrain_sizes(substream->runtime);
-	if (ret < 0) {
-		mutex_lock(&audio->lock);
-		if (audio->substream == substream)
-			ums9117_pcm_set_stream_locked(audio, NULL);
-		mutex_unlock(&audio->lock);
-		return ret;
+	else {
+		substream->runtime->hw =
+			substream->stream == SNDRV_PCM_STREAM_CAPTURE ?
+				ums9117_capture_hardware :
+				ums9117_pcm_hardware;
+		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK &&
+		    audio->output == UMS9117_SC2720_OUTPUT_SPEAKER) {
+			substream->runtime->hw.rates = SNDRV_PCM_RATE_48000;
+			substream->runtime->hw.rate_min = 48000;
+			substream->runtime->hw.rate_max = 48000;
+		}
+		ret = ums9117_pcm_constrain_sizes(substream->runtime);
+		if (ret >= 0)
+			ums9117_pcm_set_stream_locked(audio, stream, substream);
 	}
-	return 0;
+	mutex_unlock(&audio->lock);
+	return ret;
 }
 
 static int ums9117_pcm_close(struct snd_pcm_substream *substream)
 {
 	struct ums9117_pcm *audio = snd_pcm_substream_chip(substream);
+	struct ums9117_pcm_stream *stream =
+		ums9117_pcm_stream(audio, substream);
 	int ret;
 
 	mutex_lock(&audio->lock);
-	/* Playback refill ends here, before the runtime goes away. */
-	ret = ums9117_pcm_finish_locked(audio);
-	if (audio->substream == substream)
-		ums9117_pcm_set_stream_locked(audio, NULL);
+	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
+		ret = ums9117_pcm_shutdown_capture_locked(audio);
+	else
+		ret = ums9117_pcm_finish_locked(audio);
+	if (stream->substream == substream)
+		ums9117_pcm_set_stream_locked(audio, stream, NULL);
 	mutex_unlock(&audio->lock);
+	/* A pending notification must finish before ALSA can free this runtime. */
+	snd_pcm_stream_lock(substream);
+	snd_pcm_stream_unlock(substream);
 	return ret;
 }
 
 static int ums9117_pcm_prepare(struct snd_pcm_substream *substream)
 {
 	struct ums9117_pcm *audio = snd_pcm_substream_chip(substream);
+	struct ums9117_pcm_stream *stream =
+		ums9117_pcm_stream(audio, substream);
 	unsigned long flags;
 	int ret;
 
 	mutex_lock(&audio->lock);
 	if (audio->removing || audio->suspended) {
 		ret = audio->removing ? -ENODEV : -ESTRPIPE;
-		goto failed;
+		goto out;
+	}
+	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
+		struct snd_pcm_runtime *runtime = substream->runtime;
+		long ordinary_wait_ms;
+
+		ret = ums9117_pcm_prepare_capture_locked(audio);
+		if (ret)
+			goto out;
+		/* ALSA must wait through pre-roll and its normal buffer budget. */
+		ordinary_wait_ms = max_t(
+			long, 100, runtime->buffer_size * 1100 / runtime->rate);
+		substream->wait_time =
+			DIV_ROUND_UP(UMS9117_PCM_CAPTURE_WARMUP_FRAMES *
+					     MSEC_PER_SEC,
+				     runtime->rate) +
+			ordinary_wait_ms;
+		goto reset_pointers;
 	}
 	if (!audio->idle_running) {
-		ret = ums9117_pcm_stop_locked(audio);
+		ret = ums9117_pcm_stop_playback_locked(audio);
 		if (ret)
 			goto out;
 	}
-	ret = ums9117_pcm_prepare_hardware_locked(audio,
-						  substream->runtime->rate);
+	ret = ums9117_pcm_prepare_hardware_locked(
+		audio, substream->runtime->rate, false);
 	if (ret)
 		goto out;
 	if (audio->idle_silence) {
@@ -1028,22 +1713,53 @@ static int ums9117_pcm_prepare(struct snd_pcm_substream *substream)
 		if (ret)
 			goto out;
 	}
+reset_pointers:
 	spin_lock_irqsave(&audio->fifo_lock, flags);
-	audio->submit_ptr = 0;
-	audio->submitted_frames = 0;
-	audio->consumed_frames = 0;
-	audio->leading_silence_frames = 0;
-	audio->hw_pos = 0;
-	audio->period_frames = 0;
-	audio->last_progress = jiffies;
+	if (stream == &audio->playback) {
+		audio->submit_ptr = 0;
+		audio->submitted_frames = 0;
+		audio->consumed_frames = 0;
+		audio->leading_silence_frames = 0;
+		audio->drained_pending = false;
+	} else {
+		audio->capture_ptr = 0;
+	}
+	stream->hw_pos = 0;
+	stream->period_frames = 0;
+	stream->last_progress = jiffies;
+	ums9117_pcm_clear_events_locked(stream);
 	spin_unlock_irqrestore(&audio->fifo_lock, flags);
-	goto out;
-
-failed:
-	ums9117_pcm_shutdown_locked(audio);
 out:
 	mutex_unlock(&audio->lock);
 	return ret;
+}
+
+static int ums9117_pcm_start_capture_locked(struct ums9117_pcm *audio)
+{
+	unsigned long flags;
+	bool timer_active;
+	int ret;
+
+	if (!audio->capture_prepared)
+		return -EBADFD;
+	ums9117_audio_start_capture(audio->digital);
+	ret = ums9117_sc2720_codec_enable_capture(audio->codec);
+	if (ret) {
+		ums9117_pcm_shutdown_capture_locked(audio);
+		return ret;
+	}
+	spin_lock_irqsave(&audio->fifo_lock, flags);
+	timer_active = audio->playback.running || audio->idle_running;
+	audio->capture.last_progress = jiffies;
+	audio->capture_starting = true;
+	audio->capture_warmup_frames = UMS9117_PCM_CAPTURE_WARMUP_FRAMES;
+	audio->capture.running = true;
+	spin_unlock_irqrestore(&audio->fifo_lock, flags);
+	if (!timer_active)
+		hrtimer_start(&audio->timer,
+			      ns_to_ktime(UMS9117_PCM_SERVICE_PERIOD_NS),
+			      HRTIMER_MODE_REL);
+	return 0;
 }
 
 static int ums9117_pcm_trigger(struct snd_pcm_substream *substream, int command)
@@ -1053,6 +1769,7 @@ static int ums9117_pcm_trigger(struct snd_pcm_substream *substream, int command)
 	snd_pcm_uframes_t pending;
 	snd_pcm_uframes_t written;
 	unsigned long flags;
+	bool timer_active;
 	int queued;
 	int ret = 0;
 
@@ -1061,11 +1778,19 @@ static int ums9117_pcm_trigger(struct snd_pcm_substream *substream, int command)
 	case SNDRV_PCM_TRIGGER_START:
 		if (audio->removing || audio->suspended) {
 			ret = audio->removing ? -ENODEV : -ESTRPIPE;
-			ums9117_pcm_shutdown_locked(audio);
+			if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
+				ums9117_pcm_shutdown_capture_locked(audio);
+			else
+				ums9117_pcm_shutdown_playback_locked(audio);
+			break;
+		}
+		if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
+			ret = ums9117_pcm_start_capture_locked(audio);
 			break;
 		}
 		/* A control change may have released hardware after prepare. */
-		ret = ums9117_pcm_prepare_hardware_locked(audio, runtime->rate);
+		ret = ums9117_pcm_prepare_hardware_locked(audio, runtime->rate,
+							  false);
 		if (ret)
 			break;
 		/*
@@ -1082,7 +1807,7 @@ static int ums9117_pcm_trigger(struct snd_pcm_substream *substream, int command)
 			dev_err(audio->dev,
 				"playback FIFO is not empty before start: %d\n",
 				queued);
-			ums9117_pcm_shutdown_locked(audio);
+			ums9117_pcm_shutdown_playback_locked(audio);
 			break;
 		}
 		/* Keep the existing idle FIFO; never clear newly written samples. */
@@ -1099,31 +1824,40 @@ static int ums9117_pcm_trigger(struct snd_pcm_substream *substream, int command)
 			dev_err(audio->dev,
 				"cannot prefill playback FIFO: %pe\n",
 				ERR_PTR(ret));
-			ums9117_pcm_shutdown_locked(audio);
+			ums9117_pcm_shutdown_playback_locked(audio);
 			break;
 		}
 		ret = ums9117_sc2720_codec_enable(audio->codec);
 		if (ret) {
 			dev_err(audio->dev,
-				"cannot enable headphone codec: %pe\n",
+				"cannot enable playback codec: %pe\n",
 				ERR_PTR(ret));
-			ums9117_pcm_shutdown_locked(audio);
+			ums9117_pcm_shutdown_playback_locked(audio);
 			break;
 		}
 		ums9117_audio_start(audio->digital);
 		spin_lock_irqsave(&audio->fifo_lock, flags);
-		audio->last_progress = jiffies;
-		audio->running = true;
+		timer_active = audio->capture.running;
+		audio->playback.last_progress = jiffies;
+		audio->playback.running = true;
 		spin_unlock_irqrestore(&audio->fifo_lock, flags);
-		hrtimer_start(&audio->timer,
-			      ns_to_ktime(UMS9117_PCM_SERVICE_PERIOD_NS),
-			      HRTIMER_MODE_REL);
+		if (!timer_active)
+			hrtimer_start(
+				&audio->timer,
+				ns_to_ktime(UMS9117_PCM_SERVICE_PERIOD_NS),
+				HRTIMER_MODE_REL);
 		break;
 	case SNDRV_PCM_TRIGGER_STOP:
-		ret = ums9117_pcm_finish_locked(audio);
+		if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
+			ret = ums9117_pcm_shutdown_capture_locked(audio);
+		else
+			ret = ums9117_pcm_finish_locked(audio);
 		break;
 	case SNDRV_PCM_TRIGGER_SUSPEND:
-		ums9117_pcm_shutdown_locked(audio);
+		if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
+			ret = ums9117_pcm_shutdown_capture_locked(audio);
+		else
+			ret = ums9117_pcm_shutdown_playback_locked(audio);
 		break;
 	default:
 		ret = -EINVAL;
@@ -1137,11 +1871,13 @@ static snd_pcm_uframes_t
 ums9117_pcm_pointer(struct snd_pcm_substream *substream)
 {
 	struct ums9117_pcm *audio = snd_pcm_substream_chip(substream);
+	struct ums9117_pcm_stream *stream =
+		ums9117_pcm_stream(audio, substream);
 	snd_pcm_uframes_t position;
 	unsigned long flags;
 
 	spin_lock_irqsave(&audio->fifo_lock, flags);
-	position = audio->hw_pos;
+	position = stream->hw_pos;
 	spin_unlock_irqrestore(&audio->fifo_lock, flags);
 	return position;
 }
@@ -1171,8 +1907,10 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	audio->dev = &pdev->dev;
 	audio->rate = UMS9117_PCM_IDLE_RATE;
-	audio->idle_silence =
-		device_property_read_bool(&pdev->dev, "fplinux,idle-silence");
+	audio->capture_source = UMS9117_SC2720_CAPTURE_INTERNAL;
+	audio->output = UMS9117_SC2720_OUTPUT_HEADPHONES;
+	audio->prepared_output = UMS9117_SC2720_OUTPUT_HEADPHONES;
+	audio->idle_silence = true;
 	mutex_init(&audio->lock);
 	spin_lock_init(&audio->fifo_lock);
 	init_waitqueue_head(&audio->thread_wait);
@@ -1193,10 +1931,25 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 		return dev_err_probe(&pdev->dev, -EINVAL,
 				     "invalid audio pad resources\n");
 	ret = ums9117_pcm_read_pads(&pdev->dev, audio->pads,
+				    "fplinux,pad-settings",
+				    ums9117_audio_pad_names,
+				    ARRAY_SIZE(audio->pads),
 				    resource_size(pinmux_resource),
 				    resource_size(pinconf_resource));
 	if (ret)
 		return ret;
+	audio->capture_supported = device_property_present(
+		&pdev->dev, "fplinux,capture-pad-settings");
+	if (audio->capture_supported) {
+		ret = ums9117_pcm_read_pads(&pdev->dev, audio->capture_pads,
+					    "fplinux,capture-pad-settings",
+					    ums9117_capture_pad_names,
+					    ARRAY_SIZE(audio->capture_pads),
+					    resource_size(pinmux_resource),
+					    resource_size(pinconf_resource));
+		if (ret)
+			return ret;
+	}
 	ret = ums9117_pcm_load_audio_profile(audio);
 	if (ret)
 		return ret;
@@ -1235,7 +1988,31 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 			  snd_ctl_new1(&ums9117_headphone_idle_control, audio));
 	if (ret)
 		return snd_card_free_on_error(&pdev->dev, ret);
-	ret = snd_pcm_new(card, UMS9117_PCM_NAME, 0, 1, 0, &pcm);
+	ret = snd_ctl_add(card,
+			  snd_ctl_new1(&ums9117_fm_playback_control, audio));
+	if (ret)
+		return snd_card_free_on_error(&pdev->dev, ret);
+	if (audio->profile.fitted) {
+		ret = snd_ctl_add(card,
+				  snd_ctl_new1(&ums9117_playback_output_control,
+					       audio));
+		if (ret)
+			return snd_card_free_on_error(&pdev->dev, ret);
+		ret = snd_ctl_add(card,
+				  snd_ctl_new1(&ums9117_speaker_volume_control,
+					       audio));
+		if (ret)
+			return snd_card_free_on_error(&pdev->dev, ret);
+	}
+	if (audio->capture_supported) {
+		ret = snd_ctl_add(card,
+				  snd_ctl_new1(&ums9117_capture_source_control,
+					       audio));
+		if (ret)
+			return snd_card_free_on_error(&pdev->dev, ret);
+	}
+	ret = snd_pcm_new(card, UMS9117_PCM_NAME, 0, 1,
+			  audio->capture_supported, &pcm);
 	if (ret)
 		return snd_card_free_on_error(&pdev->dev, ret);
 	audio->pcm = pcm;
@@ -1243,6 +2020,9 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 	pcm->nonatomic = true;
 	strscpy(pcm->name, UMS9117_PCM_NAME);
 	snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_PLAYBACK, &ums9117_pcm_ops);
+	if (audio->capture_supported)
+		snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_CAPTURE,
+				&ums9117_pcm_ops);
 	/*
 	 * Applications can only use as much buffer as is reserved here. On this
 	 * single-processor phone an ordinary concurrent command delays the
@@ -1305,22 +2085,30 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 static void ums9117_pcm_remove(struct platform_device *pdev)
 {
 	struct ums9117_pcm *audio = platform_get_drvdata(pdev);
-	struct snd_pcm_substream *substream;
+	struct snd_pcm_substream *playback;
+	struct snd_pcm_substream *capture;
 
 	mutex_lock(&audio->lock);
 	audio->removing = true;
-	ums9117_pcm_stop_refill_locked(audio);
-	substream = audio->substream;
+	ums9117_pcm_stop_playback_refill_locked(audio);
+	ums9117_pcm_stop_capture_refill_locked(audio);
+	playback = audio->playback.substream;
+	capture = audio->capture.substream;
 	mutex_unlock(&audio->lock);
 	snd_card_disconnect(audio->card);
 	kthread_stop(audio->thread);
-	if (substream)
-		snd_pcm_stream_lock(substream);
+	if (playback) {
+		snd_pcm_stream_lock(playback);
+		snd_pcm_stream_unlock(playback);
+	}
+	if (capture) {
+		snd_pcm_stream_lock(capture);
+		snd_pcm_stream_unlock(capture);
+	}
 	mutex_lock(&audio->lock);
-	ums9117_pcm_shutdown_locked(audio);
+	ums9117_pcm_shutdown_capture_locked(audio);
+	ums9117_pcm_shutdown_playback_locked(audio);
 	mutex_unlock(&audio->lock);
-	if (substream)
-		snd_pcm_stream_unlock(substream);
 }
 
 static int ums9117_pcm_suspend(struct device *dev)
@@ -1333,7 +2121,8 @@ static int ums9117_pcm_suspend(struct device *dev)
 	mutex_unlock(&audio->lock);
 	ret = snd_pcm_suspend_all(audio->pcm);
 	mutex_lock(&audio->lock);
-	ums9117_pcm_shutdown_locked(audio);
+	ums9117_pcm_shutdown_capture_locked(audio);
+	ums9117_pcm_shutdown_playback_locked(audio);
 	mutex_unlock(&audio->lock);
 	return ret;
 }
@@ -1345,7 +2134,9 @@ static int ums9117_pcm_resume(struct device *dev)
 
 	mutex_lock(&audio->lock);
 	audio->suspended = false;
-	if (audio->idle_silence)
+	if (audio->fm_enabled)
+		ret = ums9117_pcm_start_fm_locked(audio);
+	else if (audio->idle_silence)
 		ret = ums9117_pcm_start_idle_locked(audio);
 	mutex_unlock(&audio->lock);
 	return ret;
@@ -1372,5 +2163,5 @@ static struct platform_driver ums9117_pcm_driver = {
 };
 module_platform_driver(ums9117_pcm_driver);
 
-MODULE_DESCRIPTION("UMS9117 PIO headphone driver");
+MODULE_DESCRIPTION("UMS9117 PIO audio driver");
 MODULE_LICENSE("GPL");

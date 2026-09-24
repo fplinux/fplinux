@@ -4,15 +4,18 @@
 $id: http://devicetree.org/schemas/sound/fplinux,ums9117-audio.yaml#
 $schema: http://devicetree.org/meta-schemas/core.yaml#
 
-title: FPLinux UMS9117 headphone audio device
+title: FPLinux UMS9117 audio device
 
 maintainers:
   - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
 
 description: |
   24 kHz and 48 kHz stereo S16_LE ALSA PCM device using the UMS9117 AUD and
-  VBC register blocks and the SC2720 headphone output. Enabled boards provide
+  VBC register blocks and the SC2720 codec. Enabled boards provide
   their fitted audio-pad expectations in SCLK, DASYNC, DAD0 and DAD1 order.
+  Boards with a handset microphone on SC2720 MIC1 can also provide ADSYNC and
+  ADD0 pad expectations to expose 48 kHz mono S16_LE capture. Playback and
+  capture can run together at 48 kHz.
 
 properties:
   compatible:
@@ -25,6 +28,7 @@ properties:
       - description: Inherited audio clock registers
       - description: Audio pin mux registers
       - description: Audio pin configuration registers
+      - description: IIS matrix routing register
 
   reg-names:
     items:
@@ -33,6 +37,7 @@ properties:
       - const: clk1
       - const: pinmux
       - const: pinconf
+      - const: iis-matrix
 
   fplinux,aon-apb:
     $ref: /schemas/types.yaml#/definitions/phandle
@@ -40,7 +45,7 @@ properties:
 
   sprd,pmic:
     $ref: /schemas/types.yaml#/definitions/phandle
-    description: SC2720 PMIC containing the headphone codec registers.
+    description: SC2720 PMIC containing the audio codec registers.
 
   clocks:
     maxItems: 1
@@ -51,20 +56,13 @@ properties:
   firmware-name:
     $ref: /schemas/types.yaml#/definitions/string
     description: |
-      Optional fitted headphone profile. The profile's machine identity must
-      match the first compatible string of the root Devicetree node.
+      Optional fitted audio profile with headphone and speaker gains. The
+      profile's machine identity must match the first compatible string of the
+      root Devicetree node. Without it the speaker output is not exposed.
 
   fplinux,card-longname:
     $ref: /schemas/types.yaml#/definitions/string
     description: ALSA card long name for the fitted phone.
-
-  fplinux,idle-silence:
-    type: boolean
-    description: |
-      Start the headphone path at 48 kHz with zero PCM and keep it
-      active between playback streams. While enabled, the PCM hardware rate is
-      fixed at 48 kHz so application-side conversion does not require an
-      audible hardware rate transition.
 
   fplinux,pad-settings:
     $ref: /schemas/types.yaml#/definitions/uint32-array
@@ -73,6 +71,15 @@ properties:
     description: |
       Four board-owned triples containing register offset, mux value and pad
       configuration for SCLK, DASYNC, DAD0 and DAD1, in that order.
+
+  fplinux,capture-pad-settings:
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    minItems: 6
+    maxItems: 6
+    description: |
+      Two board-owned triples containing register offset, mux value and pad
+      configuration for ADSYNC and ADD0, in that order. Their presence enables
+      handset microphone capture; the driver verifies inherited pad settings.
 
 required:
   - compatible
@@ -103,8 +110,9 @@ examples:
         compatible = "fplinux,ums9117-audio";
         reg = <0x40000000 0x1000>, <0x40020000 0x2000>,
               <0x402d0258 0x18>, <0x402a00f0 0x20>,
-              <0x402a04f0 0x20>;
-        reg-names = "aud", "vbc", "clk1", "pinmux", "pinconf";
+              <0x402a04f0 0x20>, <0x402a0004 0x4>;
+        reg-names = "aud", "vbc", "clk1", "pinmux", "pinconf",
+                    "iis-matrix";
         fplinux,aon-apb = <&aon_apb>;
         sprd,pmic = <&sc2720_pmic>;
         clocks = <&sc2720_xtal>;

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Prepare the compact headphone gain profile from fitted fixed-NV records."""
+"""Prepare compact playback gains from fitted fixed-NV records."""
 
 from __future__ import annotations
 
@@ -15,8 +15,58 @@ if TYPE_CHECKING:
 AUDIO_RECORD_SIZES = {425: 2, 426: 5360, 440: 8160}
 _ARM_MODE_SIZE = 1072
 _HEADSET_EQ_SIZE = 544
+_SPEAKER_MODE_NAME = b"Handsfree".ljust(16, b"\0")
+_SPEAKER_PLAY_DEV_SET_OFFSET = 20
+_SPEAKER_APP_COUNT_OFFSET = 36
+_SPEAKER_LEVEL_COUNT_OFFSET = 62
+_SPEAKER_LEVELS_OFFSET = 68
+_SPEAKER_PA_WORD_OFFSET = 466
+_SPEAKER_PLAY_ROUTE_MASK = 0x30
+_SPEAKER_PLAY_ONLY = 0x20
 _SOURCE_PASS_EQ_BYPASS = 0
 _SOURCE_PASS_EQ_ACTIVE_OMITTED = 1
+
+
+def _handsfree_speaker_fields(arm_modes: bytes, protected_arm_modes: bytes) -> bytes:
+    """Admit the speaker-only Handsfree mode and pack its PA and app-0 gains."""
+    matching_offsets = [
+        offset
+        for offset in range(0, len(arm_modes), _ARM_MODE_SIZE)
+        if arm_modes[offset : offset + 16] == _SPEAKER_MODE_NAME
+    ]
+    if len(matching_offsets) != 1:
+        message = "audio-profile NV426 requires exactly one Handsfree mode"
+        raise ValueError(message)
+    offset = matching_offsets[0]
+    mode = arm_modes[offset : offset + _ARM_MODE_SIZE]
+    if mode != protected_arm_modes[offset : offset + _ARM_MODE_SIZE]:
+        message = "audio-profile Handsfree NV426 differs between DownloadedNV and ProtectNV"
+        raise ValueError(message)
+
+    play_dev_set = struct.unpack_from("<H", mode, _SPEAKER_PLAY_DEV_SET_OFFSET)[0]
+    if play_dev_set & _SPEAKER_PLAY_ROUTE_MASK != _SPEAKER_PLAY_ONLY:
+        message = "audio-profile Handsfree does not select speaker-only playback"
+        raise ValueError(message)
+    if struct.unpack_from("<H", mode, _SPEAKER_APP_COUNT_OFFSET)[0] < 1:
+        message = "audio-profile Handsfree has no app 0"
+        raise ValueError(message)
+    level_count = struct.unpack_from("<H", mode, _SPEAKER_LEVEL_COUNT_OFFSET)[0]
+    if level_count != 9:
+        raise ValueError(f"audio-profile Handsfree app 0 has {level_count} levels; expected 9")
+    levels = struct.unpack_from("<9I", mode, _SPEAKER_LEVELS_OFFSET)
+    if any(level & 0xFFFF for level in levels):
+        message = "audio-profile Handsfree PA gain is not the supported zero setting"
+        raise ValueError(message)
+    digital_gain = [level >> 16 for level in levels]
+    if any(gain > 127 for gain in digital_gain):
+        message = "audio-profile Handsfree digital gain exceeds 127"
+        raise ValueError(message)
+    if any(first < second for first, second in pairwise(digital_gain)):
+        message = "audio-profile Handsfree digital gain is not monotonically decreasing"
+        raise ValueError(message)
+
+    pa_word = struct.unpack_from("<H", mode, _SPEAKER_PA_WORD_OFFSET)[0]
+    return struct.pack("<H9B", pa_word, *digital_gain)
 
 
 def prepare_headset_gain_profile(
@@ -26,7 +76,7 @@ def prepare_headset_gain_profile(
     prefix: str,
     machine_compatible: bytes,
 ) -> PreparedGroup:
-    """Normalize fitted Headset app-0 gains into the compact kernel input."""
+    """Normalize fitted playback gains into the compact kernel input."""
     mode_count_record = downloaded[425]
     protected_mode_count = protected[425]
     arm_modes = downloaded[426]
@@ -89,6 +139,7 @@ def prepare_headset_gain_profile(
         source_eq,
         *digital_gain,
     )
+    profile += _handsfree_speaker_fields(arm_modes, protected_arm_modes)
     originals = {
         f"{prefix}-nv425.bin": mode_count_record,
         f"{prefix}-nv426.bin": arm_modes,

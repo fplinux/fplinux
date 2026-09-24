@@ -1,10 +1,14 @@
 # SPDX-License-Identifier: GPL-2.0-only
 config SND_UMS9117
-	bool "UMS9117 headphone audio"
+	bool "UMS9117 audio"
 	depends on SND && ARCH_UMS9117 && MFD_SC27XX_PMIC && COMMON_CLK_SC2720
 	select SND_PCM
 	help
 	  Enable the 24 kHz and 48 kHz stereo S16_LE ALSA headphone PCM device
 	  for supported UMS9117 boards.
-	  Provide stereo mixer controls and optional idle zero-PCM playback.
-	  Microphone capture is not supported by this driver.
+	  Provide stereo mixer controls and idle zero-PCM playback that is on
+	  by default. A fitted audio profile enables the speaker for 48 kHz
+	  playback. Boards with microphone capture pads also
+	  provide 48 kHz mono S16_LE capture, which can run at the same time as
+	  48 kHz playback.
+	  The FM mixer switch routes the internal 32 kHz IIS source to headphones.

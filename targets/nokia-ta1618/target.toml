@@ -88,7 +88,7 @@ firmware = [
 
 [audio_profile]
 firmware = [
-  { source = "ta1618-audio-profile.bin", destination = "fplinux/ta1618-audio-profile.bin", size = 43 },
+  { source = "ta1618-audio-profile.bin", destination = "fplinux/ta1618-audio-profile.bin", size = 54 },
 ]
 
 [microsd]

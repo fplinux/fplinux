@@ -203,8 +203,8 @@ def _headset_audio_records(
 
 
 def _inoi_audio_records() -> tuple[dict[int, bytes], dict[int, bytes]]:
-    """Use the literal packed values observed in both fitted INOI phones."""
-    return _headset_audio_records(
+    """Use the literal Headset and Handsfree values observed in both fitted INOI phones."""
+    downloaded, protected = _headset_audio_records(
         (
             0x006C0007,
             0x00610007,
@@ -218,11 +218,33 @@ def _inoi_audio_records() -> tuple[dict[int, bytes], dict[int, bytes]]:
         ),
         pass_band_control=0,
     )
+    handsfree_levels = (
+        0x00390000,
+        0x00350000,
+        0x00310000,
+        0x002D0000,
+        0x00290000,
+        0x00210000,
+        0x001D0000,
+        0x00190000,
+        0x00170000,
+    )
+    for records in (downloaded, protected):
+        arm = bytearray(records[426])
+        offset = 3 * 1072
+        arm[offset : offset + 16] = b"Handsfree".ljust(16, b"\0")
+        struct.pack_into("<H", arm, offset + 20, 0x0022)
+        struct.pack_into("<H", arm, offset + 36, 1)
+        struct.pack_into("<H", arm, offset + 62, 9)
+        struct.pack_into("<9I", arm, offset + 68, *handsfree_levels)
+        struct.pack_into("<H", arm, offset + 466, 0x001A)
+        records[426] = bytes(arm)
+    return downloaded, protected
 
 
 def _nokia_audio_records() -> tuple[dict[int, bytes], dict[int, bytes]]:
-    """Use the literal packed values observed in the fitted Nokia TA-1618."""
-    return _headset_audio_records(
+    """Use the fitted Nokia Headset and speaker-only Handsfree app-0 values."""
+    downloaded, protected = _headset_audio_records(
         (
             0x00470006,
             0x00420006,
@@ -236,6 +258,30 @@ def _nokia_audio_records() -> tuple[dict[int, bytes], dict[int, bytes]]:
         ),
         pass_band_control=1,
     )
+    handsfree_levels = (
+        0x00380000,
+        0x00340000,
+        0x00300000,
+        0x002C0000,
+        0x00280000,
+        0x00240000,
+        0x00200000,
+        0x001C0000,
+        0x001B0000,
+    )
+    for records in (downloaded, protected):
+        arm = bytearray(records[426])
+        arm[1072 : 1072 + 16] = b"Headfree".ljust(16, b"\0")
+        struct.pack_into("<H", arm, 1072 + 20, 0x0032)
+        struct.pack_into("<H", arm, 1072 + 466, 0x001A)
+        arm[3 * 1072 : 3 * 1072 + 16] = b"Handsfree".ljust(16, b"\0")
+        struct.pack_into("<H", arm, 3 * 1072 + 20, 0x0022)
+        struct.pack_into("<H", arm, 3 * 1072 + 36, 1)
+        struct.pack_into("<H", arm, 3 * 1072 + 62, 9)
+        struct.pack_into("<9I", arm, 3 * 1072 + 68, *handsfree_levels)
+        struct.pack_into("<H", arm, 3 * 1072 + 466, 0x001A)
+        records[426] = bytes(arm)
+    return downloaded, protected
 
 
 class PhysicalPageFormatTests(unittest.TestCase):
@@ -615,10 +661,10 @@ class BluetoothRunningNvFormatTests(unittest.TestCase):
 
 
 class HeadsetGainProfileTests(unittest.TestCase):
-    """Protect the compact kernel input and admitted Headset source boundaries."""
+    """Protect the compact kernel input and admitted fitted playback gains."""
 
-    def test_headset_app0_becomes_each_exact_profile(self) -> None:
-        """Identity, source-processing status, PGA and DG enter the exact compact format."""
+    def test_fitted_playback_modes_become_each_exact_profile(self) -> None:
+        """Target capabilities select the literal compact playback payload."""
         cases = (
             (
                 "inoi240",
@@ -628,6 +674,7 @@ class HeadsetGainProfileTests(unittest.TestCase):
                     b"FPAUDIO\0"
                     b"inoi,240-modern-4g\0\0\0\0\0\0"
                     b"\x07\x00\x6c\x61\x56\x4b\x41\x37\x2d\x23\x1b"
+                    b"\x1a\x00\x39\x35\x31\x2d\x29\x21\x1d\x19\x17"
                 ),
             ),
             (
@@ -638,6 +685,7 @@ class HeadsetGainProfileTests(unittest.TestCase):
                     b"FPAUDIO\0"
                     b"inoi,244-modern-4g\0\0\0\0\0\0"
                     b"\x07\x00\x6c\x61\x56\x4b\x41\x37\x2d\x23\x1b"
+                    b"\x1a\x00\x39\x35\x31\x2d\x29\x21\x1d\x19\x17"
                 ),
             ),
             (
@@ -648,6 +696,7 @@ class HeadsetGainProfileTests(unittest.TestCase):
                     b"FPAUDIO\0"
                     b"nokia,ta-1618\0\0\0\0\0\0\0\0\0\0\0"
                     b"\x06\x01\x47\x42\x3d\x37\x32\x2c\x26\x20\x1a"
+                    b"\x1a\x00\x38\x34\x30\x2c\x28\x24\x20\x1c\x1b"
                 ),
             ),
         )
@@ -663,10 +712,58 @@ class HeadsetGainProfileTests(unittest.TestCase):
                 )
 
                 self.assertEqual(result.prepared, {f"{prefix}-audio-profile.bin": expected})
-                self.assertEqual(len(expected), 43)
                 self.assertEqual(result.originals[f"{prefix}-nv425.bin"], downloaded[425])
                 self.assertEqual(result.originals[f"{prefix}-nv426.bin"], downloaded[426])
                 self.assertEqual(result.originals[f"{prefix}-nv440.bin"], downloaded[440])
+
+    def test_speaker_profile_selects_handsfree_by_name_after_reordering(self) -> None:
+        """The combined speaker/headphone mode must not supply speaker-only PA policy."""
+        downloaded, protected = _nokia_audio_records()
+        for records in (downloaded, protected):
+            arm = bytearray(records[426])
+            struct.pack_into("<H", arm, 1072 + 466, 0x0006)
+            headfree = bytes(arm[1072 : 2 * 1072])
+            handsfree = bytes(arm[3 * 1072 : 4 * 1072])
+            arm[1072 : 2 * 1072] = handsfree
+            arm[3 * 1072 : 4 * 1072] = headfree
+            records[426] = bytes(arm)
+
+        result = audio_profile.prepare_headset_gain_profile(
+            downloaded,
+            protected,
+            prefix="ta1618",
+            machine_compatible=b"nokia,ta-1618",
+        )
+
+        self.assertEqual(
+            result.prepared["ta1618-audio-profile.bin"][-11:],
+            b"\x1a\x00\x38\x34\x30\x2c\x28\x24\x20\x1c\x1b",
+        )
+
+    def test_speaker_profile_rejects_wrong_route_or_gain_or_disagreeing_copies(self) -> None:
+        """Only matching speaker-only Handsfree calibration can enable its output."""
+        cases = (
+            ("different copy", 3 * 1072 + 466, b"\x1b\x00", False, "Handsfree NV426 differs"),
+            ("combined route", 3 * 1072 + 20, b"\x32\x00", True, "speaker-only"),
+            ("wrong level count", 3 * 1072 + 62, b"\x08\x00", True, "expected 9"),
+            ("analog gain", 3 * 1072 + 68, b"\x01\x00", True, "PA gain"),
+            ("oversized digital gain", 3 * 1072 + 70, b"\x80\x00", True, "exceeds 127"),
+            ("increasing digital gain", 3 * 1072 + 74, b"\x39\x00", True, "not monotonically"),
+        )
+        for name, offset, replacement, change_both, error in cases:
+            downloaded, protected = _nokia_audio_records()
+            copies = (downloaded, protected) if change_both else (protected,)
+            for records in copies:
+                arm = bytearray(records[426])
+                arm[offset : offset + len(replacement)] = replacement
+                records[426] = bytes(arm)
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, error):
+                audio_profile.prepare_headset_gain_profile(
+                    downloaded,
+                    protected,
+                    prefix="ta1618",
+                    machine_compatible=b"nokia,ta-1618",
+                )
 
     def test_profile_rejects_unsafe_headset_values(self) -> None:
         """A fitted profile is emitted only from matching, bounded Headset data."""
