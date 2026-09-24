@@ -52,6 +52,12 @@ precedence = "override"
 SPDX-FileCopyrightText = "2026 FPLinux contributors"
 SPDX-License-Identifier = "GPL-2.0-or-later"
 
+[[annotations]]
+path = "alpine/aports/fplinux-libudev/*.patch"
+precedence = "override"
+SPDX-FileCopyrightText = "2026 FPLinux contributors"
+SPDX-License-Identifier = "ISC"
+
 # SPDX comments in diff context describe upstream files, not the patch itself.
 [[annotations]]
 path = ["platforms/*/linux/patches/*.patch", "targets/*/linux/patches/*.patch"]
