@@ -139,6 +139,26 @@ invalid command arguments, and 5 when unittest finds no tests. Ctrl+C returns 13
 successful `check` receipt. It does not run linters or replace `check python`
 or the complete quality gate.
 
+## Build an ARM diagnostic program
+
+For a single C source file in this checkout, build a static ARMv7 hard-float
+musl executable for the phone:
+
+```sh
+./fplinux probe-build .cache/tools/diag.c --output .cache/tools/diag-arm
+```
+
+Create the source file first. Both paths must be repository-relative and free
+of symlinks. The source must be a regular file, and the output must be inside
+`.cache/tools`. The command
+uses the pinned Kern image, project headers and locked Alpine packages. It
+prepares the ARM sysroot when needed, downloading missing locked inputs on the
+first run. If the build image is not prepared, run `./fplinux setup` first.
+
+`probe-build` only compiles the program. It does not add it to a phone image,
+upload it or run it on a phone. A failed compile leaves any existing output
+unchanged.
+
 ## Regenerate Alpine checksums
 
 When an Alpine aport source file changes, regenerate its `sha512sums` with the

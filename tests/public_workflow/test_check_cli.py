@@ -26,6 +26,7 @@ PUBLIC_COMMANDS = (
     "format",
     "setup",
     "build",
+    "probe-build",
     "checksum",
     "package",
     "prune",
