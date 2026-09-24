@@ -149,11 +149,38 @@ causes the sleep request to fail rather than tearing down the link. Use the
 phone's supported key or RTC alarm to wake it; wake over Bluetooth has not been
 tested.
 
+## Keyboards and mice
+
+Bluetooth keyboards and mice use the kernel HID drivers and appear to
+applications as ordinary input devices. [TyrQuake](../apps/TYRQUAKE.md) and
+[MicroPythonOS](../apps/MICROPYTHONOS.md) accept them. Bluetooth LE keyboard
+and mouse input has been exercised on Nokia TA-1618 in the default RAM profile.
+Bluetooth Classic HID input and the other target and profile combinations are
+unqualified.
+
+Put the device into pairing mode, then pair it from the phone:
+
+```text
+bluetoothctl --agent KeyboardDisplay
+default-agent
+power on
+scan le
+pair <DEVICE-MAC>
+trust <DEVICE-MAC>
+connect <DEVICE-MAC>
+scan off
+```
+
+Use `scan on` instead of `scan le` for a Bluetooth Classic device. Pair the
+address shown by the current scan: some keyboards use a new address each time
+they enter pairing mode. Follow any passkey prompt that `bluetoothctl` shows.
+
 ## Limits and persistence
 
 - Pairing records, keys, and files left in RAM disappear after power loss or a
   fresh RAM load. The microSD system root stores pairing records persistently;
   temporary RAM files still disappear. Save needed files to persistent storage.
 - Bluetooth use does not write the phone's NAND or NV storage.
-- Warm controller restart, BLE, Bluetooth audio, HID, range, wake over
-  Bluetooth and deep suspend have not been tested.
+- Warm controller restart, Bluetooth LE devices other than keyboards and mice,
+  Bluetooth audio, range, wake over Bluetooth and deep suspend have not been
+  tested.
