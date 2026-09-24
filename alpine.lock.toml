@@ -48,6 +48,8 @@ fplinux-bluetooth = [
   "readline-8.3.3-r1.apk",
 ]
 
+fplinux-fm = ["alsa-lib-1.2.15.3-r0.apk"]
+
 fplinux-input = [
   "libevdev-1.13.6-r0.apk",
   "libinput-libs-1.31.3-r0.apk",

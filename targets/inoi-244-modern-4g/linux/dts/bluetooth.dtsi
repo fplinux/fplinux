@@ -12,4 +12,5 @@
 	];
 	fplinux,cm4-size = <463296>;
 	fplinux,cm4-version = [65 10 06 09 15 20];
+	fplinux,fm-config-name = "fplinux/inoi244-fm-config.bin";
 };

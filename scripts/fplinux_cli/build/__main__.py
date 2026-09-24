@@ -52,7 +52,10 @@ def main() -> None:
             target_config["device_data"]["groups"],
             common.ROOT,
         )
-        firmware = device_data.get("bluetooth", ())
+        firmware = (
+            *device_data.get("bluetooth", ()),
+            *device_data.get("fm-radio", ()),
+        )
         audio_profile_firmware = device_data.get("audio-profile")
         sources = common.load_toml(common.ROOT / "sources.lock.toml")
         linux_base = inputs_build.require_sha256(

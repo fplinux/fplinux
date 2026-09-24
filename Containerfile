@@ -84,6 +84,7 @@ RUN set -eux; \
 
 RUN set -eux; \
     apk add --no-cache \
+        alsa-lib-dev=1.2.15.3-r0 \
         autoconf=2.73-r0 \
         automake=1.18.1-r1 \
         bc=1.08.2-r1 \

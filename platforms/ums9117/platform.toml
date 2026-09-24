@@ -9,6 +9,7 @@ compatible = "sprd,ums9117"
 packages = [
   "fplinux-apk-tools",
   "fplinux-cpuclock",
+  "fplinux-fm",
   "fplinux-ssh",
   "fplinux-usb-gadget",
   "fplinux-rotate",

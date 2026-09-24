@@ -93,6 +93,11 @@ firmware = [
   { source = "inoi244-audio-profile.bin", destination = "fplinux/inoi244-audio-profile.bin", size = 54 },
 ]
 
+[fm_radio]
+firmware = [
+  { source = "inoi244-fm-config.bin", destination = "fplinux/inoi244-fm-config.bin", size = 128 },
+]
+
 [microsd]
 linux_patches = []
 

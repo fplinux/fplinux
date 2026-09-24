@@ -30,7 +30,7 @@ CM4 = Cm4Revision(
 
 
 def prepare_device_data(nand: PhysicalNand) -> DeviceDataPreparation:
-    """Prepare both declared groups from one NAND object and one fixed-NV parse per copy."""
+    """Prepare declared groups from one NAND object and one fixed-NV parse per copy."""
     return prepare_from_partitions(
         nand,
         redundant_vbm_partitions(
