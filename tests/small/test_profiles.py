@@ -163,6 +163,24 @@ class GlobalProfileTests(unittest.TestCase):
                     {},
                 )
 
+    def test_fm_declaration_adds_only_the_declared_device_data_group(self) -> None:
+        """An FM firmware declaration has the same group contract in both boot profiles."""
+        path = self.root / "targets/first/target.toml"
+        path.write_text(
+            path.read_text(encoding="utf-8") + '\n[fm_radio]\nfirmware = [{ source = "radio.bin", '
+            'destination = "fplinux/radio.bin", size = 128 }]\n',
+            encoding="utf-8",
+        )
+        for profile in ("default", "microsd-uboot"):
+            with self.subTest(profile=profile):
+                groups = targets.load_target("first", profile)["device_data"]["groups"]
+                self.assertEqual(
+                    groups["fm-radio"],
+                    [{"source": "radio.bin", "destination": "fplinux/radio.bin", "size": 128}],
+                )
+                self.assertEqual(set(groups), {"bluetooth", "fm-radio"})
+        self.assertNotIn("fm-radio", targets.load_target("second")["device_data"]["groups"])
+
     def test_missing_board_boot_sources_fail_only_when_microsd_is_selected(self) -> None:
         """RAM operation does not read unused U-Boot sources or fall back to another board."""
         (self.root / "targets/second/uboot/defconfig").unlink()

@@ -12,4 +12,5 @@
 	];
 	fplinux,cm4-size = <463468>;
 	fplinux,cm4-version = [42 16 05 12 15 20];
+	fplinux,fm-config-name = "fplinux/ta1618-fm-config.bin";
 };

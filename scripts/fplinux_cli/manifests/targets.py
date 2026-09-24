@@ -43,6 +43,7 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
             *({"device_data"} if "device_data" in raw else set()),
             *({"bluetooth"} if "bluetooth" in raw else set()),
             *({"audio_profile"} if "audio_profile" in raw else set()),
+            *({"fm_radio"} if "fm_radio" in raw else set()),
             *({"nand"} if "nand" in raw else set()),
             "platform",
             "rootfs",
@@ -191,6 +192,12 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
             audio_profile["firmware"],
             "target audio-profile firmware",
         )
+    if "fm_radio" in config:
+        fm_radio = exact_table(config.pop("fm_radio"), {"firmware"}, "target FM radio")
+        device_data_groups["fm-radio"] = firmware_array(
+            fm_radio["firmware"],
+            "target FM radio firmware",
+        )
     if device_data_groups:
         device_data = exact_table(
             config.get("device_data"),
@@ -202,7 +209,7 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
             fail("target device_data parser must be a Python filename")
         config["device_data"] = {"parser": parser, "groups": device_data_groups}
     elif "device_data" in config:
-        fail("target device_data requires a bluetooth or audio-profile group")
+        fail("target device_data requires a bluetooth, audio-profile or FM radio group")
     else:
         config["device_data"] = {"groups": {}}
     config["rootfs"] = {

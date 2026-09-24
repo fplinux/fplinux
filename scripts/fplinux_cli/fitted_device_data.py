@@ -19,6 +19,7 @@ from fplinux_cli.device_data import (
     PhysicalNand,
     fixed_nv_records,
 )
+from fplinux_cli.fm_radio import FM_RECORD_SIZES, prepare_fm_config
 
 
 def prepare_from_partitions(
@@ -29,10 +30,11 @@ def prepare_from_partitions(
     revision: Cm4Revision,
     machine_compatible: bytes,
 ) -> DeviceDataPreparation:
-    """Prepare Bluetooth and headphone gains from one parse of each fixed-NV copy."""
+    """Prepare shared fitted groups from one parse of each fixed-NV copy."""
     required_sizes = {
         **{identifier: size for identifier, (_filename, size) in NV_FILES.items()},
         **AUDIO_RECORD_SIZES,
+        **FM_RECORD_SIZES,
     }
     downloaded = fixed_nv_records(
         nand.partition_bytes(partitions[DOWNLOADED_NV_PARTITION_ID]),
@@ -56,9 +58,7 @@ def prepare_from_partitions(
         prefix=prefix,
         machine_compatible=machine_compatible,
     )
+    fm_radio = prepare_fm_config(downloaded, protected, prefix=prefix)
     return DeviceDataPreparation(
-        groups={
-            "bluetooth": bluetooth,
-            "audio-profile": audio_profile,
-        }
+        groups={"bluetooth": bluetooth, "audio-profile": audio_profile, "fm-radio": fm_radio}
     )

@@ -47,6 +47,7 @@ SHARED_APORT_SOURCES = {
     "fplinux-charge": CLI_SOURCES,
     "fplinux-console": (*MULTITAP_SOURCES, *INPUT_DEVICE_SOURCES, *KEYPAD_CODE_SOURCES),
     "fplinux-cpuclock": CLI_SOURCES,
+    "fplinux-fm": CLI_SOURCES,
     "fplinux-jpeg": CLI_SOURCES,
     "fplinux-micropythonos": (
         *MULTITAP_SOURCES,

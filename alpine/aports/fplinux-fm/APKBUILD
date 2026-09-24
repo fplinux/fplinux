@@ -1,0 +1,34 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-fm
+pkgver=1
+pkgrel=0
+pkgdesc="FM radio tuning and playback for FPLinux"
+url="https://github.com/fplinux/fplinux"
+arch="armv7"
+license="GPL-2.0-only"
+depends="alsa-lib"
+makedepends_build="clang22 lld22"
+makedepends_host="alsa-lib-dev musl-dev linux-headers"
+options="!check"
+source="
+	fplinux-fm.c
+	fplinux-cli.c
+	fplinux-cli.h
+"
+builddir="$srcdir"
+
+build() {
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		-I"$srcdir" "$srcdir/fplinux-fm.c" "$srcdir/fplinux-cli.c" \
+		$LDFLAGS -Wl,--gc-sections -lasound -o fplinux-fm
+}
+
+package() {
+	install -Dm755 "$builddir/fplinux-fm" "$pkgdir/usr/bin/fplinux-fm"
+}
+
+sha512sums="
+88dbb4cfd284121eddda9bddab86aa8e465ea67e41f098e6a6480ad34f1d8ee52d36f1736ff8a81b4be10f35d277e02d5156c70777ca332aae41f29bbb647665  fplinux-fm.c
+60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
+9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
+"

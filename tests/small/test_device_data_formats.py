@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
-from fplinux_cli import audio_profile, device_data
+from fplinux_cli import audio_profile, device_data, fitted_device_data, fm_radio
 from fplinux_cli import bluetooth_firmware as bluetooth
 
 if TYPE_CHECKING:
@@ -623,6 +623,54 @@ class FixedNvFormatTests(unittest.TestCase):
                 device_data.fixed_nv_records(stream, FIXED_RECORD_SIZES)
 
 
+class FmRadioConfigTests(unittest.TestCase):
+    """Protect the fitted FM payload consumed by the radio ENABLE operation."""
+
+    def test_matching_nv419_becomes_the_exact_normalized_fm_payload(self) -> None:
+        """ENABLE zeros the first word and duplicates th1 while preserving other bytes."""
+        original = bytes(range(128))
+        stream = _nv1(((419, original),))
+        downloaded = device_data.fixed_nv_records(stream, {419: 128})
+        protected = device_data.fixed_nv_records(stream, {419: 128})
+
+        result = fm_radio.prepare_fm_config(downloaded, protected, prefix="phone")
+
+        expected = bytes.fromhex(
+            "00 00 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f "
+            "0e 0f 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f "
+            "20 21 22 23 24 25 26 27 28 29 2a 2b 2c 2d 2e 2f "
+            "30 31 32 33 34 35 36 37 38 39 3a 3b 3c 3d 3e 3f "
+            "40 41 42 43 44 45 46 47 48 49 4a 4b 4c 4d 4e 4f "
+            "50 51 52 53 54 55 56 57 58 59 5a 5b 5c 5d 5e 5f "
+            "60 61 62 63 64 65 66 67 68 69 6a 6b 6c 6d 6e 6f "
+            "70 71 72 73 74 75 76 77 78 79 7a 7b 7c 7d 7e 7f"
+        )
+        self.assertEqual(result.originals, {"phone-nv419.bin": original})
+        self.assertEqual(result.prepared, {"phone-fm-config.bin": expected})
+        self.assertEqual(len(expected), 128)
+
+    def test_missing_wrong_size_or_conflicting_fm_record_cannot_produce_a_payload(self) -> None:
+        """Incomplete or disagreeing fixed copies cannot become fitted FM input."""
+        for records in ((), ((419, bytes(127)),)):
+            with (
+                self.subTest(records=records),
+                self.assertRaisesRegex(
+                    ValueError, "fixed NV record 419 is missing or has the wrong size"
+                ),
+            ):
+                device_data.fixed_nv_records(_nv1(records), {419: 128})
+
+        original = bytes(range(128))
+        different = bytearray(original)
+        different[64] ^= 1
+        with self.assertRaisesRegex(ValueError, "NV419 differs"):
+            fm_radio.prepare_fm_config(
+                {419: original},
+                {419: bytes(different)},
+                prefix="phone",
+            )
+
+
 class BluetoothRunningNvFormatTests(unittest.TestCase):
     """Protect refusal to guess among conflicting Bluetooth values."""
 
@@ -883,6 +931,7 @@ class PartitionPreparationTests(unittest.TestCase):
     @staticmethod
     def _inputs(
         protected_address: bytes = b"A" * 8,
+        protected_fm: bytes = bytes(range(128)),
     ) -> tuple[
         device_data.PhysicalNand,
         dict[int, tuple[int, int]],
@@ -890,10 +939,18 @@ class PartitionPreparationTests(unittest.TestCase):
     ]:
         original = b"prefix\x2d\x4cmiddle\xe0\x6dsuffix"
         prepared = b"prefix\x08\xe0middle\x2b\xe0suffix"
+        downloaded_audio, protected_audio = _inoi_audio_records()
+        downloaded_records = _fixed_records() | {419: bytes(range(128))} | downloaded_audio
+        protected_records = {
+            401: protected_address,
+            402: b"B" * 176,
+            404: b"C" * 252,
+            419: protected_fm,
+        } | protected_audio
         payloads = (
             original,
-            _nv1(tuple(_fixed_records().items())),
-            _nv1(((401, protected_address), (402, b"B" * 176), (404, b"C" * 252))),
+            _nv1(tuple(downloaded_records.items())),
+            _nv1(tuple(protected_records.items())),
             _running_nv(),
         )
         main = b"".join(payload.ljust(131072, b"\xff") for payload in payloads)
@@ -913,6 +970,38 @@ class PartitionPreparationTests(unittest.TestCase):
             pub_policy_offsets=(6, 14),
         )
         return device_data.PhysicalNand(raw, 2112), partitions, revision
+
+    def test_shared_fitted_extraction_includes_fm_and_rejects_conflicting_copies(self) -> None:
+        """Every fitted target needs the same admitted FM group from matching NV419 copies."""
+        nand, partitions, revision = self._inputs()
+
+        result = fitted_device_data.prepare_from_partitions(
+            nand,
+            partitions,
+            prefix="phone",
+            revision=revision,
+            machine_compatible=b"vendor,phone",
+        )
+
+        self.assertEqual(set(result.groups), {"bluetooth", "audio-profile", "fm-radio"})
+        self.assertEqual(
+            result.groups["fm-radio"].originals, {"phone-nv419.bin": bytes(range(128))}
+        )
+        self.assertEqual(
+            result.groups["fm-radio"].prepared["phone-fm-config.bin"][:18],
+            bytes.fromhex("00 00 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f 0e 0f"),
+        )
+
+        conflicting = bytes(range(127)) + b"\0"
+        nand, partitions, revision = self._inputs(protected_fm=conflicting)
+        with self.assertRaisesRegex(ValueError, "NV419 differs"):
+            fitted_device_data.prepare_from_partitions(
+                nand,
+                partitions,
+                prefix="phone",
+                revision=revision,
+                machine_compatible=b"vendor,phone",
+            )
 
     def test_complete_set_keeps_original_image_and_individual_nv_bytes(self) -> None:
         """Only the prepared CM4 changes; every original remains byte-exact."""
