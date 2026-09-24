@@ -104,7 +104,7 @@ For details, use the bundled pages:
 
 ### Hardware telemetry
 
-- [CPU clock reporting](../features/CPU_CLOCK.md);
+- [CPU clock and frequency selection](../features/CPU_CLOCK.md);
 - [charger status](../features/CHARGER_STATUS.md),
   [battery telemetry](../features/BATTERY_TELEMETRY.md),
   [SoC temperature](../features/SOC_TEMPERATURE.md) and

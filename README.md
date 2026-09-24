@@ -67,7 +67,7 @@ support status, boot key, storage rules and limitations.
 
 #### Hardware telemetry
 
-- [CPU clock reporting](docs/features/CPU_CLOCK.md)
+- [CPU clock and frequency selection](docs/features/CPU_CLOCK.md)
 - [Charger status](docs/features/CHARGER_STATUS.md)
 - [Battery telemetry](docs/features/BATTERY_TELEMETRY.md)
 - [SoC temperature](docs/features/SOC_TEMPERATURE.md)
