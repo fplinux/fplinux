@@ -17,6 +17,7 @@ packages = [
   "fplinux-bluetooth",
   "fplinux-glib",
   "fplinux-libical",
+  "fplinux-xkb",
 ]
 
 [bundle]
@@ -26,6 +27,7 @@ packages = [
   "fplinux-micropythonos-storage",
   "fplinux-showcase",
   "fplinux-tyrquake",
+  "fplinux-xkb-ru",
 ]
 
 [uboot]

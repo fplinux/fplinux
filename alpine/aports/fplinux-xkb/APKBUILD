@@ -1,0 +1,35 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-xkb
+pkgver=2.47
+pkgrel=0
+pkgdesc="US keyboard layout data for FPLinux applications"
+url="https://gitlab.freedesktop.org/xkeyboard-config/xkeyboard-config"
+arch="noarch"
+license="HPND AND HPND-sell-variant AND X11 AND X11-distribute-modifications-variant AND MIT AND MIT-open-group AND xkeyboard-config-Zinoviev"
+options="!check"
+source="https://www.x.org/releases/individual/data/xkeyboard-config/xkeyboard-config-$pkgver.tar.xz"
+builddir="$srcdir/xkeyboard-config-$pkgver"
+
+# Every file included by keycodes "evdev+aliases(qwerty)", types and compat
+# "complete", and symbols "pc+us+group(alt_shift_toggle)" when the data root is
+# the only include path, plus symbols/kpdl, which many locale layouts include,
+# so that locale packages never ship the same file.
+package() {
+	local file
+	for file in \
+		keycodes/aliases keycodes/evdev \
+		types/basic types/complete types/extra types/iso9995 types/level5 \
+		types/mousekeys types/numpad types/pc \
+		compat/accessx compat/basic compat/caps compat/complete \
+		compat/iso9995 compat/ledcaps compat/lednum compat/ledscroll \
+		compat/level5 compat/misc compat/mousekeys compat/xfree86 \
+		symbols/group symbols/keypad symbols/kpdl symbols/pc \
+		symbols/srvr_ctrl symbols/us; do
+		install -Dm644 "$builddir/$file" "$pkgdir/usr/share/fplinux/xkb/$file"
+	done
+	install -Dm644 "$builddir/COPYING" \
+		"$pkgdir/usr/share/licenses/$pkgname/COPYING"
+}
+sha512sums="
+bd9b70ec5c8957e087f6c12272725044e6e124c15c7cbbfffb7f3c231944984d3302adda604da05464b7be6c91b5461e74fbec8544ac21b06e3bd8c748fd04e3  xkeyboard-config-2.47.tar.xz
+"
