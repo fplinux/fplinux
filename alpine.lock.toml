@@ -21,7 +21,7 @@ packages = [
   "libcap2-2.78-r0.apk",
   "openrc-0.63.2-r0.apk",
   "openrc-user-0.63.2-r0.apk",
-  "openssh-sftp-server-10.3_p1-r0.apk",
+  "openssh-sftp-server-10.3_p1-r1.apk",
   "skalibs-libs-2.15.0.0-r0.apk",
   "utmps-libs-0.1.3.3-r0.apk",
   "zlib-1.3.2-r0.apk",
@@ -62,17 +62,17 @@ fplinux-microsd-root = [
   "e2fsprogs-1.47.4-r0.apk",
   "e2fsprogs-extra-1.47.4-r0.apk",
   "e2fsprogs-libs-1.47.4-r0.apk",
-  "libblkid-2.42.1-r0.apk",
+  "libblkid-2.42.3-r1.apk",
   "libcom_err-1.47.4-r0.apk",
   "libeconf-0.8.3-r0.apk",
-  "libfdisk-2.42.1-r0.apk",
+  "libfdisk-2.42.3-r1.apk",
   "libgcc-15.2.0-r5.apk",
   "libncursesw-6.6_p20260516-r0.apk",
-  "libsmartcols-2.42.1-r0.apk",
-  "libuuid-2.42.1-r0.apk",
+  "libsmartcols-2.42.3-r1.apk",
+  "libuuid-2.42.3-r1.apk",
   "ncurses-terminfo-base-6.6_p20260516-r0.apk",
-  "partx-2.42.1-r0.apk",
-  "sfdisk-2.42.1-r0.apk",
+  "partx-2.42.3-r1.apk",
+  "sfdisk-2.42.3-r1.apk",
 ]
 
 [sysroot]
@@ -184,9 +184,9 @@ bytes = 5817
 
 [[package]]
 repository = "main"
-file = "openssh-sftp-server-10.3_p1-r0.apk"
-sha256 = "5c3d359348636934c30dcb86e99a0652db196241c0a4f7f14785ce878a9f9698"
-bytes = 56330
+file = "openssh-sftp-server-10.3_p1-r1.apk"
+sha256 = "ece9cdb6d116665a7a6e8a2c29163b4f20099dce62cbb38853b1f13cd7b9f2e2"
+bytes = 56329
 
 [[package]]
 repository = "main"
@@ -328,9 +328,9 @@ bytes = 196530
 
 [[package]]
 repository = "main"
-file = "libblkid-2.42.1-r0.apk"
-sha256 = "68afc2c9b79b688d8a54aeda0a03fce89ee03925243c7ebc1c480e2a753cd98a"
-bytes = 95566
+file = "libblkid-2.42.3-r1.apk"
+sha256 = "48a6d0a7415a1d0094ba136243d5b0472f815cf95193c66f00d8a521ae651eae"
+bytes = 95637
 
 [[package]]
 repository = "main"
@@ -346,9 +346,9 @@ bytes = 23664
 
 [[package]]
 repository = "main"
-file = "libfdisk-2.42.1-r0.apk"
-sha256 = "01421d9c123eccb77cbafb50361341ac41898a8b053451e82eb46c24bd109503"
-bytes = 125848
+file = "libfdisk-2.42.3-r1.apk"
+sha256 = "f6d46e8258a6625ca7bfa61264997c3329b3c4ebd35e6421c5838c3ce306c993"
+bytes = 125946
 
 [[package]]
 repository = "main"
@@ -358,15 +358,15 @@ bytes = 140842
 
 [[package]]
 repository = "main"
-file = "libsmartcols-2.42.1-r0.apk"
-sha256 = "54671380f8e187885ead8ecc08bfe2d40d279744a72986428f26bc30dbb7b58c"
-bytes = 50759
+file = "libsmartcols-2.42.3-r1.apk"
+sha256 = "5d8fa888b972b6374064df338091f9d54827d8b6c3a626031a9cd5bce8707306"
+bytes = 50771
 
 [[package]]
 repository = "main"
-file = "libuuid-2.42.1-r0.apk"
-sha256 = "e8f91383cfa6d19d032a363f736c292cf17e52bb66b01957bf95195f47b032f3"
-bytes = 14086
+file = "libuuid-2.42.3-r1.apk"
+sha256 = "dcd20edf5772169a38fb6d18321e7e979a46b750a46c7019280ef314a9bebb2e"
+bytes = 14091
 
 [[package]]
 repository = "main"
@@ -376,15 +376,15 @@ bytes = 22170
 
 [[package]]
 repository = "main"
-file = "partx-2.42.1-r0.apk"
-sha256 = "edd78f5e668836213efdf0941a50f8158b8b3f3c265d2b362c08d5d8120a32d3"
-bytes = 21977
+file = "partx-2.42.3-r1.apk"
+sha256 = "490e13b6d61689e1e079c3f736c9228d0473bad252611273a9457c0d94ac5d1b"
+bytes = 22039
 
 [[package]]
 repository = "main"
-file = "sfdisk-2.42.1-r0.apk"
-sha256 = "97f92e72a5d27c7fbc06621562b35cc2c0f4da2c27386b7d7136db5ff9eaf780"
-bytes = 35381
+file = "sfdisk-2.42.3-r1.apk"
+sha256 = "f8b9bfba88611f444179a205f4aae15f4feb2a6bee9c737d7024e1b7f8d98483"
+bytes = 35403
 
 [[package]]
 repository = "main"
