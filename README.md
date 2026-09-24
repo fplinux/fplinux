@@ -86,6 +86,7 @@ support status, boot key, storage rules and limitations.
 
 - [Code style](docs/reference/CODE_STYLE.md)
 - [Target and platform identity](docs/reference/IDENTITY.md)
+- [Input contract](docs/reference/INPUT.md)
 - [Logging contract](docs/reference/LOGGING.md)
 
 Before submitting source changes, run the complete uncached quality gate from
