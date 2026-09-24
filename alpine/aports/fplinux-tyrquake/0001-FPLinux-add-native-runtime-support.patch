@@ -3,19 +3,19 @@ From: FPLinux maintainers <fplinux@example.invalid>
 Date: Mon, 17 Aug 2026 00:00:00 +0000
 Subject: [PATCH] FPLinux: add the native runtime hooks
 
-Add the FPLinux fbdev and evdev targets without SDL or X11, keep the heap
+Add the FPLinux fbdev and libinput targets without SDL or X11, keep the heap
 bounded for phone RAM, make quit confirmation keypad-accessible, disable stdin
 ownership, and stop sound initialization cleanly when the null backend is used.
 The distribution supplies the native backend sources before compilation.
 
 Signed-off-by: FPLinux maintainers <fplinux@example.invalid>
 ---
- Makefile          |  8 ++++++--
+ Makefile          |  9 +++++++--
  common/menu.c     |  2 ++
  common/snd_dma.c  |  6 ++++++
  common/sys_unix.c | 10 ++++++++++
  common/zone.c     |  5 +++++
- 5 files changed, 29 insertions(+), 2 deletions(-)
+ 5 files changed, 30 insertions(+), 2 deletions(-)
 
 diff --git a/Makefile b/Makefile
 index 5709a79f88ff1002e496301e0fe0def2b0cee001..f337a9196d4fb4a71606b41de81eb077284a63b9 100644
@@ -32,13 +32,14 @@ index 5709a79f88ff1002e496301e0fe0def2b0cee001..f337a9196d4fb4a71606b41de81eb077
  SW_OBJS += vid_null.o
  GL_OBJS += vid_null.o
  endif
-@@ -979,7 +981,9 @@ endif
+@@ -979,7 +981,10 @@ endif
  ifeq ($(IN_TARGET),sdl)
  CL_OBJS += in_sdl.o sdl_common.o
  endif
 -ifeq ($(IN_TARGET),null)
 +ifeq ($(IN_TARGET),fplinux)
-+CL_OBJS += in_fplinux.o
++CL_OBJS += in_fplinux.o fplinux-input-session.o
++CL_LIBS += input udev
 +else ifeq ($(IN_TARGET),null)
  CL_OBJS += in_null.o
  endif

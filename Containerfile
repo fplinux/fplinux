@@ -220,6 +220,7 @@ RUN apk add --no-cache \
     cmake=4.2.3-r0 \
     dbus=1.16.2-r2 \
     dbus-dev=1.16.2-r2 \
+    libinput-dev=1.31.3-r0 \
     libjpeg-turbo-dev=3.1.3-r0 \
     meson=1.11.1-r0 \
     samurai=1.2-r8

@@ -1,55 +1,27 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-/* Native evdev input backend for FPLinux. */
+/* Native libinput backend for FPLinux. */
 /* fplinux-check: package-embedded */
 
-#include <errno.h>
-#include <fcntl.h>
 #include <linux/input.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/ioctl.h>
-#include <unistd.h>
 
+#include "client.h"
 #include "common.h"
 #include "console.h"
-#include "fplinux-device.h"
+#include "fplinux-input-session.h"
+#include "fplinux-keypad.h"
 #include "input.h"
 #include "keys.h"
 #include "quakedef.h"
 #include "sys.h"
 
-#define FPLINUX_QUAKE_INPUT_EVENT_COUNT 32
-#define FPLINUX_QUAKE_INPUT_PATH_BYTES 32
-#define FPLINUX_QUAKE_INPUT_NAME_BYTES 128
-#define FPLINUX_QUAKE_INPUT_PHYS_BYTES 128
-#define BITS_PER_LONG (8U * sizeof(unsigned long))
-#define NBITS(max) (((max) + BITS_PER_LONG) / BITS_PER_LONG)
+#define FPLINUX_QUAKE_INPUT_ERROR_BYTES 128
+#define FPLINUX_QUAKE_INPUT_WHEEL_LIMIT 16
 
-enum input_role {
-	FPLINUX_QUAKE_INPUT_ROLE_PHONE,
-	FPLINUX_QUAKE_INPUT_ROLE_HOST,
-};
+static struct fplinux_input_session input_session;
+static qboolean input_session_open;
 
-enum input_mode {
-	FPLINUX_QUAKE_INPUT_MODE_PHONE,
-	FPLINUX_QUAKE_INPUT_MODE_HOST,
-};
-
-struct input_device {
-	int fd;
-	enum input_role role;
-	qboolean active;
-	qboolean grabbed;
-	qboolean sync_lost;
-	unsigned long key_state[NBITS(KEY_MAX)];
-	char path[FPLINUX_QUAKE_INPUT_PATH_BYTES];
-	char name[FPLINUX_QUAKE_INPUT_NAME_BYTES];
-};
-
-static struct input_device input_devices[FPLINUX_QUAKE_INPUT_EVENT_COUNT];
-static unsigned int input_device_count;
-static enum input_mode input_mode;
+static float mouse_dx, mouse_dy;
+static float old_mouse_dx, old_mouse_dy;
 
 static cvar_t m_filter = {
 	.name = "m_filter",
@@ -63,328 +35,12 @@ cvar_t _windowed_mouse = {
 	.flags = CVAR_CONFIG,
 };
 
-static qboolean bit_is_set(unsigned int bit, const unsigned long *bits)
+static void clear_mouse_motion(void)
 {
-	return !!(bits[bit / BITS_PER_LONG] & (1UL << (bit % BITS_PER_LONG)));
-}
-
-static void set_bit_value(unsigned int bit, unsigned long *bits, qboolean value)
-{
-	unsigned long mask = 1UL << (bit % BITS_PER_LONG);
-	unsigned long *word = &bits[bit / BITS_PER_LONG];
-
-	if (value)
-		*word |= mask;
-	else
-		*word &= ~mask;
-}
-
-static const char *role_name(enum input_role role)
-{
-	return role == FPLINUX_QUAKE_INPUT_ROLE_PHONE ? "phone" : "keyboard";
-}
-
-static void parse_input_mode(void)
-{
-	const char *value = NULL;
-	int matches = 0;
-	int i;
-
-	for (i = 1; i < com_argc; ++i) {
-		if (strcmp(com_argv[i], "-input"))
-			continue;
-		++matches;
-		if (i + 1 < com_argc)
-			value = com_argv[i + 1];
-	}
-
-	if (matches != 1 || !value)
-		Sys_Error(
-			"FPLinux input: require exactly one -input phone|keyboard");
-	if (!strcmp(value, "phone"))
-		input_mode = FPLINUX_QUAKE_INPUT_MODE_PHONE;
-	else if (!strcmp(value, "keyboard"))
-		input_mode = FPLINUX_QUAKE_INPUT_MODE_HOST;
-	else
-		Sys_Error("FPLinux input: unsupported mode '%s'", value);
-}
-
-static qboolean read_capabilities(int fd, const char *path,
-				  unsigned long *event_bits,
-				  unsigned long *key_bits)
-{
-	if (ioctl(fd, EVIOCGBIT(0, NBITS(EV_MAX) * sizeof(unsigned long)),
-		  event_bits) < 0) {
-		Con_Printf("FPLinux input: EVIOCGBIT(%s): %s\n", path,
-			   strerror(errno));
-		return false;
-	}
-	if (!bit_is_set(EV_KEY, event_bits) ||
-	    ioctl(fd, EVIOCGBIT(EV_KEY, NBITS(KEY_MAX) * sizeof(unsigned long)),
-		  key_bits) < 0) {
-		Con_Printf("FPLinux input: EV_KEY capabilities (%s): %s\n",
-			   path, strerror(errno));
-		return false;
-	}
-	return true;
-}
-
-static qboolean has_required_keys(const unsigned long *key_bits,
-				  const unsigned int *keys, size_t key_count)
-{
-	size_t i;
-
-	for (i = 0; i < key_count; ++i)
-		if (!bit_is_set(keys[i], key_bits))
-			return false;
-	return true;
-}
-
-static qboolean validate_phone(int fd, const char *path)
-{
-	static const unsigned int required_keys[] = {
-		KEY_0,	   KEY_1,	  KEY_2,	  KEY_3,     KEY_4,
-		KEY_5,	   KEY_6,	  KEY_7,	  KEY_8,     KEY_9,
-		KEY_ENTER, KEY_BACKSPACE, KEY_TAB,	  KEY_UP,    KEY_DOWN,
-		KEY_LEFT,  KEY_RIGHT,	  KEY_KPASTERISK, KEY_KPDOT,
-	};
-	unsigned long event_bits[NBITS(EV_MAX)] = { 0 };
-	unsigned long key_bits[NBITS(KEY_MAX)] = { 0 };
-
-	if (!read_capabilities(fd, path, event_bits, key_bits))
-		return false;
-	return has_required_keys(key_bits, required_keys,
-				 sizeof(required_keys) /
-					 sizeof(required_keys[0]));
-}
-
-static qboolean validate_host_keyboard(int fd, const char *path)
-{
-	static const unsigned int required_keys[] = {
-		KEY_A,	KEY_Z,	  KEY_ENTER, KEY_SPACE, KEY_ESC,
-		KEY_UP, KEY_DOWN, KEY_LEFT,  KEY_RIGHT,
-	};
-	unsigned long event_bits[NBITS(EV_MAX)] = { 0 };
-	unsigned long key_bits[NBITS(KEY_MAX)] = { 0 };
-
-	if (!read_capabilities(fd, path, event_bits, key_bits))
-		return false;
-	return has_required_keys(key_bits, required_keys,
-				 sizeof(required_keys) /
-					 sizeof(required_keys[0]));
-}
-
-static qboolean is_fplinux_host_keyboard(const struct input_id *id)
-{
-	return id->bustype == BUS_VIRTUAL &&
-	       id->vendor == FPLINUX_INPUT_HOST_VENDOR_ID &&
-	       id->product == FPLINUX_INPUT_HOST_PRODUCT_ID;
-}
-
-static qboolean is_fplinux_phone_keypad(int fd)
-{
-	char phys[FPLINUX_QUAKE_INPUT_PHYS_BYTES];
-
-	if (ioctl(fd, EVIOCGPHYS(sizeof(phys)), phys) < 0)
-		return false;
-	phys[sizeof(phys) - 1] = '\0';
-	return strcmp(phys, FPLINUX_INPUT_PHONE_PHYS) == 0;
-}
-
-static qboolean grab_device(int fd, const char *path, const char *name)
-{
-	int attempts = 20;
-
-	while (ioctl(fd, EVIOCGRAB, 1) < 0) {
-		int saved_errno = errno;
-
-		if (saved_errno != EBUSY || --attempts == 0) {
-			Con_Printf("FPLinux input: cannot grab %s (%s): %s\n",
-				   path, name, strerror(saved_errno));
-			return false;
-		}
-		usleep(50000);
-	}
-	return true;
-}
-
-static void register_input_device(const char *path)
-{
-	struct input_device *device;
-	struct input_id id;
-	enum input_role role;
-	char name[FPLINUX_QUAKE_INPUT_NAME_BYTES];
-	int fd;
-
-	if (input_device_count >= FPLINUX_QUAKE_INPUT_EVENT_COUNT)
-		return;
-
-	fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-	if (fd < 0)
-		return;
-	if (ioctl(fd, EVIOCGID, &id) < 0 ||
-	    ioctl(fd, EVIOCGNAME(sizeof(name)), name) < 0) {
-		close(fd);
-		return;
-	}
-	name[sizeof(name) - 1] = '\0';
-
-	if (is_fplinux_host_keyboard(&id)) {
-		role = FPLINUX_QUAKE_INPUT_ROLE_HOST;
-		if (!validate_host_keyboard(fd, path)) {
-			close(fd);
-			Sys_Error("FPLinux input: invalid host keyboard at %s",
-				  path);
-		}
-	} else if (is_fplinux_phone_keypad(fd)) {
-		role = FPLINUX_QUAKE_INPUT_ROLE_PHONE;
-		if (!validate_phone(fd, path)) {
-			close(fd);
-			Sys_Error("FPLinux input: invalid phone keypad at %s",
-				  path);
-		}
-	} else {
-		close(fd);
-		return;
-	}
-
-	if (!grab_device(fd, path, name)) {
-		close(fd);
-		Sys_Error("FPLinux input: %s is not available", name);
-	}
-
-	device = &input_devices[input_device_count++];
-	memset(device, 0, sizeof(*device));
-	device->fd = fd;
-	device->role = role;
-	device->grabbed = true;
-	snprintf(device->path, sizeof(device->path), "%s", path);
-	snprintf(device->name, sizeof(device->name), "%s", name);
-}
-
-static unsigned int count_role(enum input_role role)
-{
-	unsigned int count = 0;
-	unsigned int i;
-
-	for (i = 0; i < input_device_count; ++i)
-		if (input_devices[i].fd >= 0 && input_devices[i].role == role)
-			++count;
-	return count;
-}
-
-static void close_input_device(struct input_device *device)
-{
-	if (device->fd < 0)
-		return;
-	if (device->grabbed && ioctl(device->fd, EVIOCGRAB, 0) < 0 &&
-	    errno != ENODEV)
-		Con_Printf("FPLinux input: release %s failed: %s\n",
-			   device->path, strerror(errno));
-	close(device->fd);
-	device->fd = -1;
-	device->grabbed = false;
-	device->active = false;
-	memset(device->key_state, 0, sizeof(device->key_state));
-}
-
-static void close_input_devices(void)
-{
-	unsigned int i;
-
-	for (i = 0; i < input_device_count; ++i)
-		close_input_device(&input_devices[i]);
-	input_device_count = 0;
-}
-
-static void scan_input_devices(void)
-{
-	enum input_role selected_role;
-	unsigned int phone_count;
-	unsigned int host_count;
-	unsigned int i;
-
-	for (i = 0; i < FPLINUX_QUAKE_INPUT_EVENT_COUNT; ++i) {
-		char path[FPLINUX_QUAKE_INPUT_PATH_BYTES];
-
-		snprintf(path, sizeof(path), "/dev/input/event%u", i);
-		register_input_device(path);
-	}
-
-	phone_count = count_role(FPLINUX_QUAKE_INPUT_ROLE_PHONE);
-	host_count = count_role(FPLINUX_QUAKE_INPUT_ROLE_HOST);
-	if (phone_count > 1 || host_count > 1) {
-		close_input_devices();
-		Sys_Error(
-			"FPLinux input: ambiguous devices: phone=%u keyboard=%u",
-			phone_count, host_count);
-	}
-
-	selected_role = input_mode == FPLINUX_QUAKE_INPUT_MODE_PHONE ?
-				FPLINUX_QUAKE_INPUT_ROLE_PHONE :
-				FPLINUX_QUAKE_INPUT_ROLE_HOST;
-	if (count_role(selected_role) != 1) {
-		const char *selected_name = role_name(selected_role);
-
-		close_input_devices();
-		Sys_Error("FPLinux input: selected %s device is unavailable",
-			  selected_name);
-	}
-
-	for (i = 0; i < input_device_count; ++i) {
-		struct input_device *device = &input_devices[i];
-
-		device->active = device->role == selected_role;
-		Con_Printf("FPLinux input: grabbed %s (%s) as %s\n",
-			   device->path, device->name,
-			   device->active ? "active" : "quarantined");
-	}
-}
-
-static knum_t translate_phone(unsigned int code)
-{
-	switch (code) {
-	case KEY_1:
-		return K_1;
-	case KEY_2:
-		return K_2;
-	case KEY_3:
-		return K_3;
-	case KEY_4:
-		return K_4;
-	case KEY_5:
-		return K_5;
-	case KEY_6:
-		return K_6;
-	case KEY_7:
-		return K_7;
-	case KEY_8:
-		return K_8;
-	case KEY_9:
-		return K_9;
-	case KEY_0:
-		return K_LCTRL;
-	case KEY_KPASTERISK:
-		return K_SPACE;
-	case KEY_KPDOT:
-		return K_HASH;
-	case KEY_ENTER:
-		return K_ENTER;
-	case KEY_BACKSPACE:
-		return K_ESCAPE;
-	case KEY_TAB:
-		return K_TAB;
-	case KEY_UP:
-		return K_LEFTARROW;
-	case KEY_DOWN:
-		return K_RIGHTARROW;
-	case KEY_LEFT:
-		return K_DOWNARROW;
-	case KEY_RIGHT:
-		return K_UPARROW;
-	default:
-		return K_UNKNOWN;
-	}
+	mouse_dx = 0.0f;
+	mouse_dy = 0.0f;
+	old_mouse_dx = 0.0f;
+	old_mouse_dy = 0.0f;
 }
 
 static knum_t translate_keyboard(unsigned int code)
@@ -537,124 +193,116 @@ static knum_t translate_keyboard(unsigned int code)
 	}
 }
 
-static knum_t translate_key(const struct input_device *device,
-			    unsigned int code)
+static knum_t translate_keypad(unsigned int code)
 {
-	if (device->role == FPLINUX_QUAKE_INPUT_ROLE_PHONE)
-		return translate_phone(code);
-	return translate_keyboard(code);
-}
-
-static void release_device_keys(struct input_device *device)
-{
-	unsigned int code;
-
-	if (!device->active)
-		return;
-	for (code = 0; code <= KEY_MAX; ++code) {
-		knum_t key;
-
-		if (!bit_is_set(code, device->key_state))
-			continue;
-		key = translate_key(device, code);
-		if (key != K_UNKNOWN)
-			Key_Event(key, false);
-	}
-	memset(device->key_state, 0, sizeof(device->key_state));
-}
-
-static void handle_key_event(struct input_device *device, unsigned int code,
-			     int value)
-{
-	knum_t key;
-
-	if (!device->active || code > KEY_MAX)
-		return;
-	key = translate_key(device, code);
-	if (key == K_UNKNOWN)
-		return;
-	set_bit_value(code, device->key_state, value != 0);
-	Key_Event(key, value != 0);
-}
-
-static void resync_keys(struct input_device *device)
-{
-	unsigned long current[NBITS(KEY_MAX)] = { 0 };
-	unsigned int code;
-
-	if (!device->active)
-		return;
-	if (ioctl(device->fd, EVIOCGKEY(sizeof(current)), current) < 0) {
-		release_device_keys(device);
-		Sys_Error("FPLinux input: cannot resync %s: %s", device->path,
-			  strerror(errno));
-	}
-
-	for (code = 0; code <= KEY_MAX; ++code) {
-		qboolean was_down = bit_is_set(code, device->key_state);
-		qboolean is_down = bit_is_set(code, current);
-		knum_t key;
-
-		if (was_down == is_down)
-			continue;
-		key = translate_key(device, code);
-		set_bit_value(code, device->key_state, is_down);
-		if (key != K_UNKNOWN)
-			Key_Event(key, is_down);
+	switch (code) {
+	case FPLINUX_KEY_0:
+		return K_LCTRL;
+	case FPLINUX_KEY_1:
+		return K_a;
+	case FPLINUX_KEY_2:
+		return K_LEFTARROW;
+	case FPLINUX_KEY_3:
+		return K_d;
+	case FPLINUX_KEY_4:
+		return K_s;
+	case FPLINUX_KEY_5:
+		return K_RIGHTARROW;
+	case FPLINUX_KEY_6:
+		return K_w;
+	case FPLINUX_KEY_7:
+		return K_LEFTBRACKET;
+	case FPLINUX_KEY_8:
+		return K_TAB;
+	case FPLINUX_KEY_9:
+		return K_RIGHTBRACKET;
+	case FPLINUX_KEY_STAR:
+	case FPLINUX_KEY_SOFT_LEFT:
+		return K_SPACE;
+	case FPLINUX_KEY_POUND:
+		return K_KP_PERIOD;
+	case FPLINUX_KEY_UP:
+		return K_LEFTARROW;
+	case FPLINUX_KEY_DOWN:
+		return K_RIGHTARROW;
+	case FPLINUX_KEY_LEFT:
+		return K_DOWNARROW;
+	case FPLINUX_KEY_RIGHT:
+		return K_UPARROW;
+	case FPLINUX_KEY_OK:
+	case FPLINUX_KEY_CALL:
+		return K_ENTER;
+	case FPLINUX_KEY_SOFT_RIGHT:
+		return K_ESCAPE;
+	default:
+		return K_UNKNOWN;
 	}
 }
 
-static void handle_input_event(struct input_device *device,
-			       const struct input_event *event)
+/* K_MOUSE4 and K_MOUSE5 spell the wheel, so side buttons stay unmapped. */
+static knum_t translate_mouse(unsigned int code)
 {
-	if (device->sync_lost) {
-		if (event->type == EV_SYN && event->code == SYN_REPORT) {
-			device->sync_lost = false;
-			resync_keys(device);
-		}
-		return;
+	switch (code) {
+	case BTN_LEFT:
+		return K_MOUSE1;
+	case BTN_RIGHT:
+		return K_MOUSE2;
+	case BTN_MIDDLE:
+		return K_MOUSE3;
+	default:
+		return K_UNKNOWN;
 	}
-	if (event->type == EV_SYN && event->code == SYN_DROPPED) {
-		device->sync_lost = true;
-		return;
-	}
-	if (event->type == EV_KEY)
-		handle_key_event(device, event->code, event->value);
 }
 
-static void read_input_device(struct input_device *device)
+static void handle_key(unsigned int code, qboolean pressed,
+		       knum_t (*translate)(unsigned int code))
 {
-	struct input_event events[16];
-	ssize_t size;
+	knum_t key = translate(code);
 
-	while ((size = read(device->fd, events, sizeof(events))) > 0) {
-		size_t count;
-		size_t i;
+	if (key != K_UNKNOWN)
+		Key_Event(key, pressed);
+}
 
-		if ((size_t)size % sizeof(events[0])) {
-			release_device_keys(device);
-			Sys_Error("FPLinux input: short event record from %s",
-				  device->path);
-		}
-		count = (size_t)size / sizeof(events[0]);
-		for (i = 0; i < count; ++i)
-			handle_input_event(device, &events[i]);
+static void handle_wheel(int clicks)
+{
+	knum_t key = clicks > 0 ? K_MWHEELUP : K_MWHEELDOWN;
+	int count = clicks > 0 ? clicks : -clicks;
+
+	if (count > FPLINUX_QUAKE_INPUT_WHEEL_LIMIT)
+		count = FPLINUX_QUAKE_INPUT_WHEEL_LIMIT;
+	while (count-- > 0) {
+		Key_Event(key, true);
+		Key_Event(key, false);
 	}
+}
 
-	if (size == 0 || (size < 0 && errno != EAGAIN && errno != EWOULDBLOCK &&
-			  errno != EINTR)) {
-		qboolean was_active = device->active;
-		char name[FPLINUX_QUAKE_INPUT_NAME_BYTES];
-
-		snprintf(name, sizeof(name), "%s", device->name);
-		release_device_keys(device);
-		close_input_device(device);
-		if (was_active)
-			Sys_Error(
-				"FPLinux input: active %s device disconnected",
-				name);
-		Con_Printf("FPLinux input: quarantined %s disconnected\n",
-			   name);
+static void handle_event(const struct fplinux_input_event *event)
+{
+	switch (event->type) {
+	case FPLINUX_INPUT_EVENT_KEY:
+		handle_key(event->code, event->pressed,
+			   event->source == FPLINUX_INPUT_SOURCE_KEYPAD ?
+				   translate_keypad :
+				   translate_keyboard);
+		break;
+	case FPLINUX_INPUT_EVENT_BUTTON:
+		handle_key(event->code, event->pressed, translate_mouse);
+		break;
+	case FPLINUX_INPUT_EVENT_MOTION:
+		mouse_dx += (float)event->dx;
+		mouse_dy += (float)event->dy;
+		break;
+	case FPLINUX_INPUT_EVENT_WHEEL:
+		handle_wheel(event->wheel_clicks);
+		break;
+	case FPLINUX_INPUT_EVENT_DEVICE_ADDED:
+		Con_Printf("FPLinux input: %s connected\n", event->name);
+		break;
+	case FPLINUX_INPUT_EVENT_DEVICE_REMOVED:
+		if (event->source == FPLINUX_INPUT_SOURCE_POINTER)
+			clear_mouse_motion();
+		Con_Printf("FPLinux input: %s disconnected\n", event->name);
+		break;
 	}
 }
 
@@ -670,28 +318,76 @@ void IN_RegisterVariables(void)
 
 void IN_Init(void)
 {
-	parse_input_mode();
-	scan_input_devices();
+	char error[FPLINUX_QUAKE_INPUT_ERROR_BYTES];
+
+	if (!fplinux_input_session_open(
+		    &input_session,
+		    FPLINUX_INPUT_SOURCE_MASK(FPLINUX_INPUT_SOURCE_KEYPAD) |
+			    FPLINUX_INPUT_SOURCE_MASK(
+				    FPLINUX_INPUT_SOURCE_KEYBOARD) |
+			    FPLINUX_INPUT_SOURCE_MASK(
+				    FPLINUX_INPUT_SOURCE_POINTER),
+		    error, sizeof(error)))
+		Sys_Error("FPLinux input: %s", error);
+	input_session_open = true;
 }
 
 void IN_Shutdown(void)
 {
 	Key_ClearAllStates();
-	close_input_devices();
+	if (input_session_open)
+		fplinux_input_session_close(&input_session);
+	input_session_open = false;
 }
 
 void IN_Commands(void)
 {
-	unsigned int i;
+	struct fplinux_input_event event;
 
-	for (i = 0; i < input_device_count; ++i)
-		if (input_devices[i].fd >= 0)
-			read_input_device(&input_devices[i]);
+	if (!input_session_open)
+		return;
+	while (fplinux_input_session_next(&input_session, &event))
+		handle_event(&event);
 }
 
 void IN_Move(usercmd_t *cmd)
 {
-	(void)cmd;
+	float x;
+	float y;
+
+	x = mouse_dx;
+	y = mouse_dy;
+	mouse_dx = 0;
+	mouse_dy = 0;
+	if (m_filter.value) {
+		x = (x + old_mouse_dx) * 0.5f;
+		y = (y + old_mouse_dy) * 0.5f;
+	}
+	old_mouse_dx = x;
+	old_mouse_dy = y;
+	if (x == 0.0f && y == 0.0f)
+		return;
+
+	x *= sensitivity.value;
+	y *= sensitivity.value;
+
+	/*
+	 * The mouse always looks.  The engine's own free-look state is a
+	 * toggle meant for a mouse that also drives forward motion.
+	 */
+	if (in_strafe.state & 1) {
+		cmd->sidemove += m_side.value * x;
+		cmd->forwardmove -= m_forward.value * y;
+		return;
+	}
+
+	cl.viewangles[YAW] -= m_yaw.value * x;
+	V_StopPitchDrift();
+	cl.viewangles[PITCH] += m_pitch.value * y;
+	if (cl.viewangles[PITCH] > cl_maxpitch.value)
+		cl.viewangles[PITCH] = cl_maxpitch.value;
+	if (cl.viewangles[PITCH] < cl_minpitch.value)
+		cl.viewangles[PITCH] = cl_minpitch.value;
 }
 
 void IN_Accumulate(void)
@@ -704,12 +400,8 @@ void IN_ModeChanged(void)
 
 void IN_ClearStates(void)
 {
-	unsigned int i;
-
 	Key_ClearAllStates();
-	for (i = 0; i < input_device_count; ++i)
-		memset(input_devices[i].key_state, 0,
-		       sizeof(input_devices[i].key_state));
+	clear_mouse_motion();
 }
 
 void IN_SetFocus(qboolean focus)

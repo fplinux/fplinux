@@ -455,6 +455,8 @@ def userspace_c_include_flags(source: str) -> list[str]:
     flags: list[str] = []
     if path.parts[:3] == (*APORT_ROOT, "fplinux-bluetooth"):
         flags.extend(pkg_config_cflags("dbus-1"))
+    if source == "lib/fplinux/fplinux-input-session.c":
+        flags.extend(pkg_config_cflags("libinput"))
     if (
         len(path.parts) >= 3
         and path.parts[:2] == APORT_ROOT

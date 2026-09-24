@@ -34,7 +34,7 @@ Run an installed command through the helper:
 
 ```sh
 fplinux-charge -- sleep 60
-fplinux-charge -- quake --input phone
+fplinux-charge -- quake
 fplinux-charge -- micropythonos
 ```
 

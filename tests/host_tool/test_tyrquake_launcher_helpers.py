@@ -32,7 +32,7 @@ class TyrQuakeLauncherHelperTests(unittest.TestCase):
             pak = root / "pak0.pak"
             pak.write_bytes(b"pak\n")
             (game / "pak0.pak").symlink_to(pak)
-            (game / "config.cfg").write_text("phone controls\n", encoding="utf-8")
+            (game / "config.cfg").write_text("game controls\n", encoding="utf-8")
             (user_game / "config.cfg").write_text("engine config\n", encoding="utf-8")
             (user_game / "video.cfg").write_text("video config\n", encoding="utf-8")
             (user_game / "save-game.dat").write_text("save game\n", encoding="utf-8")
@@ -120,14 +120,13 @@ class TyrQuakeLauncherCliTests(unittest.TestCase):
         )
 
     def test_help_exits_without_game_data_or_display(self) -> None:
-        """Parsed help takes priority over missing, invalid or extra options."""
+        """Parsed help takes priority over invalid or extra arguments."""
         for arguments in (
             ("-h",),
             ("--help",),
-            ("--input", "phone", "--help"),
-            ("--input=keyboard", "-h"),
-            ("--input=invalid", "--help"),
+            ("--heapsize=invalid", "--help"),
             ("--unknown", "--help"),
+            ("extra", "-h"),
         ):
             with self.subTest(arguments=arguments):
                 result = run_process(
@@ -138,17 +137,16 @@ class TyrQuakeLauncherCliTests(unittest.TestCase):
 
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("Usage:", result.stdout)
-                self.assertIn("--input", result.stdout)
                 self.assertEqual(result.stderr, "")
 
     def test_invalid_syntax_has_no_game_output(self) -> None:
-        """Missing, repeated or extra arguments return the CLI error status."""
+        """Unknown options, missing values and extra arguments are refused."""
         for arguments in (
-            (),
-            ("--input",),
             ("--unknown",),
-            ("--input", "phone", "extra"),
-            ("--input=phone", "--input=keyboard"),
+            ("--input", "phone"),
+            ("--heapsize",),
+            ("extra",),
+            ("--heapsize=16384", "extra"),
             ("--", "--help"),
         ):
             with self.subTest(arguments=arguments):
@@ -162,31 +160,12 @@ class TyrQuakeLauncherCliTests(unittest.TestCase):
                 self.assertEqual(result.stdout, "")
                 self.assertIn("--help", result.stderr)
 
-    def test_input_spellings_reach_control_validation(self) -> None:
-        """Separate, equal and abbreviated option forms share value validation."""
-        for arguments in (
-            ("--input", "invalid"),
-            ("--input=invalid",),
-            ("--in=invalid",),
-            ("--input", "--help"),
-        ):
-            with self.subTest(arguments=arguments):
-                result = run_process(
-                    [str(self.executable), *arguments],
-                    name="run TyrQuake launcher input error",
-                    timeout=5,
-                )
-
-                self.assertEqual(result.returncode, 2, result.stderr)
-                self.assertEqual(result.stdout, "")
-                self.assertIn("--input must be phone or keyboard", result.stderr)
-
     def test_heap_size_outside_the_supported_range_is_refused(self) -> None:
         """A size the engine cannot use is rejected before any device is touched."""
         for value in ("0", "8191", "262145", "32768x", "-1", "", "1e5"):
             with self.subTest(value=value):
                 result = run_process(
-                    [str(self.executable), "--input", "phone", f"--heapsize={value}"],
+                    [str(self.executable), f"--heapsize={value}"],
                     name="run TyrQuake launcher heap error",
                     timeout=5,
                 )

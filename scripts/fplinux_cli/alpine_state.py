@@ -37,6 +37,10 @@ CLI_SOURCES = (
 )
 INPUT_DEVICE_SOURCES = ("include/fplinux/fplinux-input-device.h",)
 KEYPAD_CODE_SOURCES = ("include/fplinux/fplinux-keypad.h",)
+INPUT_SESSION_SOURCES = (
+    "lib/fplinux/fplinux-input-session.c",
+    "include/fplinux/fplinux-input-session.h",
+)
 SHARED_APORT_SOURCES = {
     "fplinux-base": CLI_SOURCES,
     "fplinux-bluetooth": CLI_SOURCES,
@@ -52,7 +56,13 @@ SHARED_APORT_SOURCES = {
     ),
     "fplinux-rotate": (*FB_SESSION_SOURCES, *CLI_SOURCES),
     "fplinux-showcase": (*FB_SESSION_SOURCES, *CLI_SOURCES, *KEYPAD_CODE_SOURCES),
-    "fplinux-tyrquake": (*FB_SESSION_SOURCES, *CLI_SOURCES),
+    "fplinux-tyrquake": (
+        *FB_SESSION_SOURCES,
+        *CLI_SOURCES,
+        *INPUT_DEVICE_SOURCES,
+        *KEYPAD_CODE_SOURCES,
+        *INPUT_SESSION_SOURCES,
+    ),
 }
 SHARED_APORT_SOURCE_PATHS = frozenset(
     path for paths in SHARED_APORT_SOURCES.values() for path in paths

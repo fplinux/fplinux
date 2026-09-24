@@ -35,6 +35,7 @@
 #define FPLINUX_QUAKE_HEAP_MAXIMUM_KIB 262144UL
 
 static volatile sig_atomic_t pending_signal;
+static const int forwarded_signals[] = { SIGHUP, SIGINT, SIGQUIT, SIGTERM };
 
 static _Noreturn void die(const char *message)
 {
@@ -55,29 +56,27 @@ static void catch_signal(int signal_number)
 
 static void install_signal_handlers(void)
 {
-	static const int signals[] = { SIGHUP, SIGINT, SIGQUIT, SIGTERM };
 	struct sigaction action = {
 		.sa_handler = catch_signal,
 	};
 	size_t i;
 
 	sigemptyset(&action.sa_mask);
-	for (i = 0; i < ARRAY_SIZE(signals); ++i)
-		if (sigaction(signals[i], &action, NULL) < 0)
+	for (i = 0; i < ARRAY_SIZE(forwarded_signals); ++i)
+		if (sigaction(forwarded_signals[i], &action, NULL) < 0)
 			die_errno("cannot install signal handler");
 }
 
 static void reset_signal_handlers(void)
 {
-	static const int signals[] = { SIGHUP, SIGINT, SIGQUIT, SIGTERM };
 	struct sigaction action = {
 		.sa_handler = SIG_DFL,
 	};
 	size_t i;
 
 	sigemptyset(&action.sa_mask);
-	for (i = 0; i < ARRAY_SIZE(signals); ++i)
-		if (sigaction(signals[i], &action, NULL) < 0)
+	for (i = 0; i < ARRAY_SIZE(forwarded_signals); ++i)
+		if (sigaction(forwarded_signals[i], &action, NULL) < 0)
 			_exit(126);
 }
 
@@ -164,25 +163,9 @@ static void require_pak(const char *path)
 		    "/pak0.pak");
 }
 
-static void write_phone_config(const char *directory)
+static void write_control_config(const char *directory, const char *config,
+				 size_t length)
 {
-	static const char config[] = "bind \"UPARROW\" \"+forward\"\n"
-				     "bind \"DOWNARROW\" \"+back\"\n"
-				     "bind \"LEFTARROW\" \"+left\"\n"
-				     "bind \"RIGHTARROW\" \"+right\"\n"
-				     "bind \"ENTER\" \"+attack\"\n"
-				     "bind \"CTRL\" \"+attack\"\n"
-				     "bind \"SPACE\" \"+jump\"\n"
-				     "bind \"TAB\" \"+jump\"\n"
-				     "bind \"1\" \"+moveleft\"\n"
-				     "bind \"2\" \"+left\"\n"
-				     "bind \"3\" \"+moveright\"\n"
-				     "bind \"4\" \"+back\"\n"
-				     "bind \"5\" \"+right\"\n"
-				     "bind \"6\" \"+forward\"\n"
-				     "bind \"7\" \"impulse 12\"\n"
-				     "bind \"8\" \"+speed\"\n"
-				     "bind \"9\" \"impulse 10\"\n";
 	char path[256];
 	ssize_t written;
 	int descriptor;
@@ -192,21 +175,50 @@ static void write_phone_config(const char *directory)
 		die("runtime path is too long");
 	descriptor = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
 	if (descriptor < 0)
-		die_errno("cannot create phone control configuration");
-	written = write(descriptor, config, sizeof(config) - 1);
-	if (written != (ssize_t)(sizeof(config) - 1)) {
+		die_errno("cannot create control configuration");
+	written = write(descriptor, config, length);
+	if (written != (ssize_t)length) {
 		int saved_errno = errno;
 
 		close(descriptor);
 		errno = written < 0 ? saved_errno : EIO;
-		die_errno("cannot write phone control configuration");
+		die_errno("cannot write control configuration");
 	}
 	if (close(descriptor) < 0)
-		die_errno("cannot close phone control configuration");
+		die_errno("cannot close control configuration");
 }
 
-static void prepare_runtime(char *runtime, size_t runtime_size,
-			    const char *input_mode)
+/*
+ * The shipped defaults move on the arrow keys, strafe on comma and period, and
+ * spend A and D on looking up and swimming.  They also put forward motion on
+ * the right mouse button.  These controls add the movement keyboards and mice
+ * are normally used with; the arrow keys keep their defaults.  Forward and back
+ * speeds are doubled to run by default, and the side and up speeds are doubled
+ * with them so that diagonal movement keeps its direction.  Free look already
+ * comes from the engine's +mlook argument. The phone keypad is translated
+ * directly by the native input backend to the same game bindings.
+ */
+static void write_game_controls(const char *directory)
+{
+	static const char config[] = "bind \"w\" \"+forward\"\n"
+				     "bind \"s\" \"+back\"\n"
+				     "bind \"a\" \"+moveleft\"\n"
+				     "bind \"d\" \"+moveright\"\n"
+				     "bind \"ENTER\" \"+attack\"\n"
+				     "bind \"[\" \"impulse 12\"\n"
+				     "bind \"]\" \"impulse 10\"\n"
+				     "bind \"MOUSE2\" \"+jump\"\n"
+				     "bind \"MWHEELUP\" \"impulse 10\"\n"
+				     "bind \"MWHEELDOWN\" \"impulse 12\"\n"
+				     "cl_forwardspeed \"400\"\n"
+				     "cl_backspeed \"400\"\n"
+				     "cl_sidespeed \"700\"\n"
+				     "cl_upspeed \"400\"\n";
+
+	write_control_config(directory, config, sizeof(config) - 1);
+}
+
+static void prepare_runtime(char *runtime, size_t runtime_size)
 {
 	char id1[256];
 	unsigned int index;
@@ -247,8 +259,7 @@ static void prepare_runtime(char *runtime, size_t runtime_size,
 	if (!found_pak0)
 		die("game data is missing: " FPLINUX_QUAKE_GAME_DATA
 		    "/pak0.pak");
-	if (strcmp(input_mode, "phone") == 0)
-		write_phone_config(id1);
+	write_game_controls(id1);
 }
 
 static int remove_runtime_entry(const char *path, const struct stat *status,
@@ -277,8 +288,7 @@ static void save_display(struct fplinux_fb_session *session)
 		die(error);
 }
 
-static pid_t start_engine(const char *runtime, const char *input_mode,
-			  unsigned long heap_kib)
+static pid_t start_engine(const char *runtime, unsigned long heap_kib)
 {
 	char heap[32];
 	pid_t child;
@@ -293,8 +303,6 @@ static pid_t start_engine(const char *runtime, const char *input_mode,
 		(char *)runtime,
 		"-heapsize",
 		heap,
-		"-input",
-		(char *)input_mode,
 		"+mlook",
 		NULL,
 	};
@@ -342,12 +350,10 @@ static int wait_for_engine(pid_t child)
 }
 
 enum quake_option {
-	QUAKE_OPTION_INPUT,
 	QUAKE_OPTION_HEAPSIZE,
 };
 
 struct quake_options {
-	const char *input_mode;
 	unsigned long heap_kib;
 };
 
@@ -388,11 +394,6 @@ static const char *parse_quake_option(size_t option, const char *value,
 	const char *argument_error;
 
 	switch (option) {
-	case QUAKE_OPTION_INPUT:
-		if (strcmp(value, "phone") && strcmp(value, "keyboard"))
-			return "--input must be phone or keyboard";
-		options->input_mode = value;
-		return NULL;
 	case QUAKE_OPTION_HEAPSIZE:
 		if (!parse_heap_kib(value, &options->heap_kib, &argument_error))
 			return argument_error;
@@ -406,12 +407,6 @@ static enum fplinux_cli_result parse_arguments(int argc, char **argv,
 					       struct quake_options *options)
 {
 	struct fplinux_cli_option entries[] = {
-		[QUAKE_OPTION_INPUT] = {
-			.name = "input",
-			.metavar = "phone|keyboard",
-			.help = "select the game controls",
-			.flags = FPLINUX_CLI_REQUIRED,
-		},
 		[QUAKE_OPTION_HEAPSIZE] = {
 			.name = "heapsize",
 			.metavar = "KIBIBYTES",
@@ -420,14 +415,14 @@ static enum fplinux_cli_result parse_arguments(int argc, char **argv,
 	};
 	struct fplinux_cli cli = {
 		.program = argv[0],
-		.description = "Run Quake with the selected controls.",
+		.description =
+			"Run Quake with the phone keypad, keyboards and mice.",
 		.options = entries,
 		.option_count = ARRAY_SIZE(entries),
 		.parse_option = parse_quake_option,
 		.data = options,
 	};
 
-	options->input_mode = NULL;
 	options->heap_kib = FPLINUX_QUAKE_HEAP_DEFAULT_KIB;
 	return fplinux_cli_parse(&cli, argc, argv);
 }
@@ -453,10 +448,10 @@ int main(int argc, char **argv)
 	    (int)sizeof(pak0))
 		die("game-data path is too long");
 	require_pak(pak0);
-	prepare_runtime(runtime, sizeof(runtime), options.input_mode);
+	prepare_runtime(runtime, sizeof(runtime));
 	save_display(&display);
 	install_signal_handlers();
-	child = start_engine(runtime, options.input_mode, options.heap_kib);
+	child = start_engine(runtime, options.heap_kib);
 	child_status = wait_for_engine(child);
 	restored = fplinux_fb_session_close(&display);
 	fplinux_quake_remove_runtime(runtime);

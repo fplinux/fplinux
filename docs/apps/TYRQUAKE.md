@@ -86,27 +86,25 @@ less room for the game.
 
 ## Run
 
-Choose one input mode. `phone` uses the physical keypad. `keyboard` uses the
-host keyboard forwarded through the USB keyboard bridge; it does not combine
-with the phone keypad. Start forwarding first as described in
-[Host keyboard forwarding](../features/HOST_KEYBOARD.md).
+TyrQuake reads the phone keypad, keyboards and mice together: the keyboard
+forwarded through the [USB keyboard bridge](../features/HOST_KEYBOARD.md), and
+Bluetooth keyboards and mice paired with the phone following
+[Keyboards and mice](../features/BLUETOOTH.md#keyboards-and-mice). The
+target's documentation states whether it supports Bluetooth. A device that
+connects while the game runs is picked up, and one that disconnects does not
+end the game.
 
 ```sh
 # Source checkout
-./fplinux console inoi-244-modern-4g --profile default --exec \
-  'quake --input phone'
-./fplinux console inoi-244-modern-4g --profile default --exec \
-  'quake --input keyboard'
+./fplinux console inoi-244-modern-4g --profile default --exec quake
 
 # Standalone archive
-./runner/run.py --reconnect --exec 'quake --input phone'
-./runner/run.py --reconnect --exec 'quake --input keyboard'
+./runner/run.py --reconnect --exec quake
 ```
 
-The command keeps the phone display in game mode until TyrQuake exits.
-
-The launcher requires exactly one `--input` option. A duplicate or an extra
-argument is rejected before game data is mounted or TyrQuake starts.
+The command keeps the phone display in game mode until TyrQuake exits. An
+unknown option or an extra argument is rejected before game data is mounted or
+TyrQuake starts.
 
 `--heapsize` sets the memory TyrQuake reserves for itself, in kibibytes,
 between 8192 and 262144; the default is 32768. The reservation is separate from
@@ -115,7 +113,7 @@ room and may need a smaller figure:
 
 ```sh
 ./fplinux console inoi-244-modern-4g --profile default --exec \
-  'quake --input phone --heapsize 16384'
+  'quake --heapsize 16384'
 ```
 
 A size below what the selected game data needs makes TyrQuake stop during
@@ -123,9 +121,13 @@ startup rather than run with less.
 
 ## Controls
 
-In phone mode, turn the phone counter-clockwise: the display is on the left
-and the keypad is on the right. This mapping is the same on every current
-target.
+The phone keypad, keyboards and mice work at the same time. TyrQuake reads the
+phone key codes directly.
+
+### Phone keypad
+
+Turn the phone counter-clockwise: the display is on the left and the keypad is
+on the right. This mapping is the same on every current target.
 
 | Key                    | Menu                 | Game                        |
 | ---------------------- | -------------------- | --------------------------- |
@@ -139,8 +141,32 @@ target.
 | `2` / `5`              | —                    | Turn left / right           |
 | `4` / `6`              | —                    | Walk backward / forward     |
 | `7` / `9`              | —                    | Previous / next weapon      |
-| `8`                    | —                    | Run while held              |
+| `8`                    | —                    | Show scores while held      |
 | `#`                    | Available for a bind | Available for a custom bind |
+
+Questions such as starting a new game during a game accept only `Y`, `N` or
+`Escape`, so the keypad can only cancel them with the right soft key.
+
+### Keyboard and mouse
+
+The game's own defaults move on the arrow keys, strafe on `,` and `.`, and use
+`A` and `D` for looking up and swimming upward. TyrQuake adds the movement a
+keyboard and mouse are normally used with, and runs by default:
+
+| Control                      | Game                |
+| ---------------------------- | ------------------- |
+| `W` / `S`                    | Forward / back      |
+| `A` / `D`                    | Strafe left / right |
+| Mouse                        | Turn and look       |
+| Left button, `Ctrl`, `Enter` | Fire                |
+| Right button, `Space`        | Jump                |
+| Wheel up or `]`              | Next weapon         |
+| Wheel down or `[`            | Previous weapon     |
+| `1` to `8`                   | Select weapon       |
+
+Every other key keeps the game's default binding, including the arrow keys.
+The mouse turns and looks, including up and down; holding the game's strafe
+modifier makes it move instead. Side buttons are not reported.
 
 ## Limits and storage
 
