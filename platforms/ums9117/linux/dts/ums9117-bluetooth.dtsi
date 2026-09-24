@@ -2,11 +2,6 @@
 
 / {
 	soc {
-		bt_pmu: syscon@402b0000 {
-			compatible = "sprd,ums9117-pmu-apb", "syscon";
-			reg = <0x402b0000 0x3000>;
-		};
-
 		mailbox: mailbox@400a0000 {
 			compatible = "sprd,sc9860-mailbox";
 			reg = <0x400a0000 0x1000>, <0x400a8000 0x1000>;
@@ -25,7 +20,7 @@
 			mboxes = <&mailbox 1>;
 			mbox-names = "cm4";
 			sprd,aon-apb = <&aon_apb>;
-			sprd,pmu-apb = <&bt_pmu>;
+			sprd,pmu-apb = <&pmu_apb>;
 		};
 	};
 };

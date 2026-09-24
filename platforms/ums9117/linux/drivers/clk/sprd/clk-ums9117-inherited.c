@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Read-only observer for clocks inherited from the UMS9117 boot firmware. */
+/* Inherited UMS9117 clocks and fixed-voltage Cortex-A7 source selection. */
 #include <dt-bindings/clock/fplinux,ums9117-inherited-clk.h>
 
 #include <linux/bitfield.h>
 #include <linux/clk-provider.h>
+#include <linux/err.h>
 #include <linux/io.h>
 #include <linux/math64.h>
+#include <linux/mfd/syscon.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/overflow.h>
 #include <linux/platform_device.h>
+#include <linux/regmap.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 
@@ -19,6 +22,8 @@
 #define UMS9117_CA7_SOURCE_BYTES 0x4ULL
 #define UMS9117_MPLL_PHYS 0x403f0000ULL
 #define UMS9117_MPLL_BYTES 0xcULL
+#define UMS9117_ANALOG_TOP_PHYS 0x403e0000ULL
+#define UMS9117_ANALOG_TOP_BYTES 0x10ULL
 
 #define UMS9117_CA7_DIVIDER_MASK GENMASK(6, 4)
 #define UMS9117_CA7_SOURCE_MASK GENMASK(1, 0)
@@ -32,9 +37,26 @@
 #define UMS9117_MPLL_KINT_MASK GENMASK(22, 0)
 #define UMS9117_MPLL_POSTDIV BIT(0)
 
+#define UMS9117_ANALOG_TOP_SEL0 0x0
+#define UMS9117_ANALOG_TOP_SEL1 0x4
+#define UMS9117_ANALOG_TOP_CTRL0 0x8
+#define UMS9117_ANALOG_TOP_CTRL1 0xc
+#define UMS9117_ANALOG_TOP_SEL0_TWPLL_REF BIT(18)
+#define UMS9117_ANALOG_TOP_SEL0_TWPLL_PD BIT(17)
+#define UMS9117_ANALOG_TOP_SEL0_TWPLL_RST BIT(13)
+#define UMS9117_ANALOG_TOP_SEL0_TWPLL_DIV2 BIT(9)
+#define UMS9117_ANALOG_TOP_CTRL0_TWPLL_LOCK_DONE BIT(6)
+
+#define UMS9117_PMU_TWPLL_REL 0xa0
+#define UMS9117_PMU_TWPLL_REL_REF_MASK GENMASK(9, 8)
+#define UMS9117_PMU_TWPLL_REL_REF_RPLL 1
+#define UMS9117_PMU_TWPLL_REL_FORCE_OFF BIT(7)
+#define UMS9117_PMU_TWPLL_REL_AP_SEL BIT(0)
+
 #define UMS9117_XTL_HZ 26000000ULL
 #define UMS9117_TWPLL_512M_HZ 512000000UL
 #define UMS9117_TWPLL_768M_HZ 768000000UL
+#define UMS9117_MPLL_1G_HZ 1000000000UL
 #define UMS9117_MPLL_KINT_SCALE BIT_ULL(23)
 
 enum ums9117_ca7_source {
@@ -64,6 +86,8 @@ struct ums9117_inherited_clks {
 	void __iomem *ca7_divider;
 	void __iomem *ca7_source;
 	void __iomem *mpll;
+	void __iomem *analog_top;
+	struct regmap *pmu;
 	struct ums9117_observed_clk mpll_clk;
 	struct ums9117_observed_clk ca7_clk;
 	struct clk_hw_onecell_data *hw_data;
@@ -282,12 +306,142 @@ static unsigned long ums9117_ca7_recalc_rate(struct clk_hw *hw,
 	return 0;
 }
 
+static int ums9117_ca7_dfs_snapshot(struct ums9117_inherited_clks *provider,
+				    struct ums9117_clock_snapshot *snapshot,
+				    unsigned long *mpll_rate)
+{
+	struct ums9117_clock_snapshot second;
+	u32 source;
+
+	if (!ums9117_take_clock_snapshot(provider, snapshot, &second))
+		return -EBUSY;
+
+	source = FIELD_GET(UMS9117_CA7_SOURCE_MASK, snapshot->ca7_source);
+	if ((source != UMS9117_CA7_SOURCE_MPLL &&
+	     source != UMS9117_CA7_SOURCE_TWPLL_768M) ||
+	    FIELD_GET(UMS9117_CA7_DIVIDER_MASK, snapshot->ca7_divider) ||
+	    !ums9117_decode_mpll(snapshot, mpll_rate))
+		return -EINVAL;
+
+	/* Fractional PLL quantization puts the inherited 1 GHz one Hz below. */
+	if (*mpll_rate != UMS9117_MPLL_1G_HZ - 1 &&
+	    *mpll_rate != UMS9117_MPLL_1G_HZ)
+		return -EINVAL;
+
+	return 0;
+}
+
+static bool ums9117_twpll_ready(struct ums9117_inherited_clks *provider)
+{
+	u32 debug_mask = UMS9117_ANALOG_TOP_SEL0_TWPLL_REF |
+			 UMS9117_ANALOG_TOP_SEL0_TWPLL_PD |
+			 UMS9117_ANALOG_TOP_SEL0_TWPLL_RST |
+			 UMS9117_ANALOG_TOP_SEL0_TWPLL_DIV2;
+	u32 relation_mask = UMS9117_PMU_TWPLL_REL_REF_MASK |
+			    UMS9117_PMU_TWPLL_REL_FORCE_OFF |
+			    UMS9117_PMU_TWPLL_REL_AP_SEL;
+	u32 required_relation = FIELD_PREP(UMS9117_PMU_TWPLL_REL_REF_MASK,
+					   UMS9117_PMU_TWPLL_REL_REF_RPLL) |
+				UMS9117_PMU_TWPLL_REL_AP_SEL;
+	u32 select = readl(provider->analog_top + UMS9117_ANALOG_TOP_SEL0);
+	u32 control = readl(provider->analog_top + UMS9117_ANALOG_TOP_CTRL0);
+	unsigned int relation;
+	int ret;
+
+	ret = regmap_read(provider->pmu, UMS9117_PMU_TWPLL_REL, &relation);
+	if (ret) {
+		dev_warn_ratelimited(provider->dev,
+				     "could not read TWPLL PMU state: %pe\n",
+				     ERR_PTR(ret));
+		return false;
+	}
+
+	/* Without debug overrides, CTRL0 PD/RST/DIV2 are not live state. */
+	if (!(select & debug_mask) &&
+	    (relation & relation_mask) == required_relation &&
+	    (control & UMS9117_ANALOG_TOP_CTRL0_TWPLL_LOCK_DONE))
+		return true;
+
+	dev_warn_ratelimited(provider->dev,
+			     "TWPLL 768 MHz output is not ready\n");
+	dev_dbg(provider->dev,
+		"TWPLL state: sel0=%08x sel1=%08x ctrl0=%08x ctrl1=%08x relation=%08x\n",
+		select, readl(provider->analog_top + UMS9117_ANALOG_TOP_SEL1),
+		control, readl(provider->analog_top + UMS9117_ANALOG_TOP_CTRL1),
+		relation);
+	return false;
+}
+
+static long ums9117_ca7_round_rate(struct clk_hw *hw, unsigned long rate,
+				   unsigned long *parent_rate)
+{
+	struct ums9117_inherited_clks *provider =
+		to_ums9117_observed_clk(hw)->provider;
+	struct ums9117_clock_snapshot snapshot;
+	unsigned long mpll_rate;
+	int ret;
+
+	ret = ums9117_ca7_dfs_snapshot(provider, &snapshot, &mpll_rate);
+	if (ret)
+		return ret;
+
+	if (rate >= mpll_rate)
+		return mpll_rate;
+	if (rate < UMS9117_TWPLL_768M_HZ)
+		return -EINVAL;
+	if (!ums9117_twpll_ready(provider))
+		return -EBUSY;
+
+	return UMS9117_TWPLL_768M_HZ;
+}
+
+static int ums9117_ca7_set_rate(struct clk_hw *hw, unsigned long rate,
+				unsigned long parent_rate)
+{
+	struct ums9117_inherited_clks *provider =
+		to_ums9117_observed_clk(hw)->provider;
+	struct ums9117_clock_snapshot snapshot;
+	unsigned long mpll_rate;
+	u32 source;
+	u32 value;
+	int ret;
+
+	ret = ums9117_ca7_dfs_snapshot(provider, &snapshot, &mpll_rate);
+	if (ret)
+		return ret;
+
+	if (rate == mpll_rate)
+		source = UMS9117_CA7_SOURCE_MPLL;
+	else if (rate == UMS9117_TWPLL_768M_HZ)
+		source = UMS9117_CA7_SOURCE_TWPLL_768M;
+	else
+		return -EINVAL;
+
+	/* The default performance policy must leave the boot mux untouched. */
+	if (FIELD_GET(UMS9117_CA7_SOURCE_MASK, snapshot.ca7_source) == source)
+		return 0;
+	if (source == UMS9117_CA7_SOURCE_TWPLL_768M &&
+	    !ums9117_twpll_ready(provider))
+		return -EBUSY;
+
+	/* CCF serializes rate changes; all PLL and divider state is retained. */
+	value = (snapshot.ca7_source & ~UMS9117_CA7_SOURCE_MASK) |
+		FIELD_PREP(UMS9117_CA7_SOURCE_MASK, source);
+	writel(value, provider->ca7_source);
+	if (readl(provider->ca7_source) != value)
+		return -EIO;
+
+	return 0;
+}
+
 static const struct clk_ops ums9117_mpll_ops = {
 	.recalc_rate = ums9117_mpll_recalc_rate,
 };
 
 static const struct clk_ops ums9117_ca7_ops = {
 	.recalc_rate = ums9117_ca7_recalc_rate,
+	.round_rate = ums9117_ca7_round_rate,
+	.set_rate = ums9117_ca7_set_rate,
 };
 
 static const struct clk_init_data ums9117_mpll_init = {
@@ -368,6 +522,12 @@ static int ums9117_inherited_clks_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	provider->dev = dev;
 
+	provider->pmu =
+		syscon_regmap_lookup_by_phandle(dev->of_node, "sprd,pmu-apb");
+	if (IS_ERR(provider->pmu))
+		return dev_err_probe(dev, PTR_ERR(provider->pmu),
+				     "PMU syscon unavailable\n");
+
 	ret = ums9117_validate_and_map_resource(pdev, 0, "ca7-divider",
 						UMS9117_CA7_DIVIDER_PHYS,
 						UMS9117_CA7_DIVIDER_BYTES,
@@ -391,10 +551,18 @@ static int ums9117_inherited_clks_probe(struct platform_device *pdev)
 	if (ret)
 		return dev_err_probe(
 			dev, ret, "MPLL DT resource does not match UMS9117\n");
-	if (platform_get_resource(pdev, IORESOURCE_MEM, 3))
+	ret = ums9117_validate_and_map_resource(pdev, 3, "analog-top",
+						UMS9117_ANALOG_TOP_PHYS,
+						UMS9117_ANALOG_TOP_BYTES,
+						&provider->analog_top);
+	if (ret)
+		return dev_err_probe(
+			dev, ret,
+			"Analog TOP DT resource does not match UMS9117\n");
+	if (platform_get_resource(pdev, IORESOURCE_MEM, 4))
 		return dev_err_probe(
 			dev, -EINVAL,
-			"exactly three DT resources are required\n");
+			"exactly four DT resources are required\n");
 
 	provider->mpll_clk.provider = provider;
 	provider->mpll_clk.hw.init = &ums9117_mpll_init;
@@ -450,5 +618,5 @@ static struct platform_driver ums9117_inherited_clks_driver = {
 };
 module_platform_driver(ums9117_inherited_clks_driver);
 
-MODULE_DESCRIPTION("Read-only UMS9117 inherited clock observer");
+MODULE_DESCRIPTION("UMS9117 inherited clocks and fixed-voltage CPU scaling");
 MODULE_LICENSE("GPL");

@@ -1,12 +1,29 @@
-# CPU clock reporting
+# CPU clock and frequency selection
 
-FPLinux observes the UMS9117 clock state inherited from boot firmware. It does
-not select a parent clock, change a divider, program the MPLL, install a
-governor or otherwise control CPU frequency.
+FPLinux starts the UMS9117 Cortex-A7 at the 1 GHz clock inherited from boot
+firmware. The default `performance` governor keeps that frequency. Manual
+selection through standard Linux cpufreq supports only 768 MHz and 1 GHz. It
+switches the CPU clock source while retaining the inherited voltage, MPLL and
+divider settings. Automatic frequency scaling and undervolting are not provided.
 
-The built-in observer exposes the current Cortex-A7 and MPLL rates to Linux
-only when it can decode a stable, supported register snapshot. It returns no
-invented rate for an unstable or unsupported clock state.
+To select a frequency from a shell on the phone, change to the `userspace`
+governor and write the desired rate in kHz. Restore the default governor when
+finished:
+
+```sh
+cd /sys/devices/system/cpu/cpu0/cpufreq
+echo userspace > scaling_governor
+echo 768000 > scaling_setspeed
+cat scaling_cur_freq
+echo 1000000 > scaling_setspeed
+echo performance > scaling_governor
+```
+
+The clock observer reports the current Cortex-A7 and MPLL rates to Linux when
+it can decode a stable, supported register snapshot. It returns no invented
+rate for an unstable or unsupported clock state. Frequency switching has been
+exercised on the Nokia TA-1618 and INOI 240 Modern 4G; it has not been
+physically tested on the INOI 244 Modern 4G.
 
 `fplinux-cpuclock` is a separate phone-side measurement helper. It runs a
 dependent integer-addition chain, times it with the monotonic clock and prints
@@ -37,5 +54,4 @@ arguments are rejected. Use `fplinux-cpuclock -h` or
 This is a diagnostic workload, not a performance guarantee, thermal test or
 clock-control interface. Its result describes the machine on which that
 workload ran; a host run is not evidence of the phone's clock. The selected
-target document states whether the observer and helper have been exercised on
-that exact phone.
+target document states the support boundary for that exact phone.

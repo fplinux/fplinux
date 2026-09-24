@@ -74,7 +74,7 @@ Feature and application documents own behavior shared by the current targets:
 
 ### Hardware, storage and power
 
-- [CPU clock reporting](../docs/features/CPU_CLOCK.md)
+- [CPU clock and frequency selection](../docs/features/CPU_CLOCK.md)
 - [Removable microSD storage](../docs/features/MICROSD.md)
 - [Real-time clock](../docs/features/RTC.md)
 - [Power-off](../docs/features/POWER_OFF.md)

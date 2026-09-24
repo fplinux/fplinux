@@ -4,15 +4,15 @@
 $id: http://devicetree.org/schemas/clock/fplinux,ums9117-inherited-clocks.yaml#
 $schema: http://devicetree.org/meta-schemas/core.yaml#
 
-title: Unisoc UMS9117 inherited clock observer
+title: Unisoc UMS9117 inherited clocks and CPU source selection
 
 maintainers:
   - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
 
 description:
-  Read-only observation of the MPLL and current Cortex-A7 core clock state left
-  active by the UMS9117 boot firmware. The provider does not control clock
-  parents, dividers, PLLs or gates.
+  Reports the MPLL and Cortex-A7 clock state inherited from boot firmware.
+  The Cortex-A7 clock can select the inherited 1 GHz MPLL or TWPLL's 768 MHz
+  output at fixed voltage. PLLs, dividers and gates remain unchanged.
 
 properties:
   compatible:
@@ -23,12 +23,18 @@ properties:
       - description: Cortex-A7 core clock divider register
       - description: Cortex-A7 core clock source register
       - description: MPLL control registers 0 through 2
+      - description: Analog PLL select and control registers, read only
 
   reg-names:
     items:
       - const: ca7-divider
       - const: ca7-source
       - const: mpll
+      - const: analog-top
+
+  sprd,pmu-apb:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: PMU APB syscon for read-only PLL reference and client state
 
   '#clock-cells':
     const: 1
@@ -40,6 +46,7 @@ required:
   - compatible
   - reg
   - reg-names
+  - sprd,pmu-apb
   - '#clock-cells'
 
 additionalProperties: false
@@ -49,7 +56,8 @@ examples:
     clock-controller@20e00038 {
         compatible = "fplinux,ums9117-inherited-clocks";
         reg = <0x20e00038 0x4>, <0x20e00054 0x4>,
-              <0x403f0000 0xc>;
-        reg-names = "ca7-divider", "ca7-source", "mpll";
+              <0x403f0000 0xc>, <0x403e0000 0x10>;
+        reg-names = "ca7-divider", "ca7-source", "mpll", "analog-top";
+        sprd,pmu-apb = <&pmu_apb>;
         #clock-cells = <1>;
     };

@@ -72,6 +72,19 @@
 			clock-frequency = <1000000000>;
 			clocks = <&ums9117_inherited_clocks
 				  FPLINUX_UMS9117_CLK_CA7_CORE>;
+			operating-points-v2 = <&cpu_opp_table>;
+		};
+	};
+
+	cpu_opp_table: opp-table {
+		compatible = "operating-points-v2";
+
+		opp-768000000 {
+			opp-hz = /bits/ 64 <768000000>;
+		};
+
+		opp-1000000000 {
+			opp-hz = /bits/ 64 <1000000000>;
 		};
 	};
 
@@ -111,6 +124,11 @@
 		aon_apb: syscon@402e0000 {
 			compatible = "sprd,ums9117-aon-apb", "syscon";
 			reg = <0x402e0000 0x00003000>;
+		};
+
+		pmu_apb: syscon@402b0000 {
+			compatible = "sprd,ums9117-pmu-apb", "syscon";
+			reg = <0x402b0000 0x3000>;
 		};
 
 		ap_ahb: syscon@20e00000 {
@@ -191,8 +209,11 @@
 			compatible = "fplinux,ums9117-inherited-clocks";
 			reg = <0x20e00038 0x4>,
 			      <0x20e00054 0x4>,
-			      <0x403f0000 0xc>;
-			reg-names = "ca7-divider", "ca7-source", "mpll";
+			      <0x403f0000 0xc>,
+			      <0x403e0000 0x10>;
+			reg-names = "ca7-divider", "ca7-source", "mpll",
+				    "analog-top";
+			sprd,pmu-apb = <&pmu_apb>;
 			#clock-cells = <1>;
 		};
 
