@@ -84,6 +84,7 @@ unevaluatedProperties: false
 examples:
   - |
     #include <dt-bindings/input/input.h>
+    #include <dt-bindings/input/fplinux-keypad.h>
 
     keypad@40250000 {
         compatible = "sprd,ums9117-keypad";
@@ -92,10 +93,10 @@ examples:
         keypad,num-rows = <5>;
         keypad,num-columns = <4>;
         linux,keymap = <
-            MATRIX_KEY(0, 0, KEY_KPASTERISK)
-            MATRIX_KEY(0, 1, KEY_0)
-            MATRIX_KEY(0, 2, KEY_KPDOT)
-            MATRIX_KEY(0, 3, KEY_ENTER)
+            MATRIX_KEY(0, 0, FPLINUX_KEY_STAR)
+            MATRIX_KEY(0, 1, FPLINUX_KEY_0)
+            MATRIX_KEY(0, 2, FPLINUX_KEY_POUND)
+            MATRIX_KEY(0, 3, FPLINUX_KEY_OK)
         >;
         sprd,aon-apb = <&aon_apb>;
     };

@@ -2,6 +2,7 @@
 /dts-v1/;
 
 #include <dt-bindings/input/input.h>
+#include <dt-bindings/input/fplinux-keypad.h>
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/leds/common.h>
 #include "ums9117.dtsi"
@@ -141,29 +142,29 @@
 	keypad,num-rows = <5>;
 	keypad,num-columns = <4>;
 	linux,keymap = <
-		MATRIX_KEY(0, 0, KEY_KPASTERISK) /* * */
-		MATRIX_KEY(0, 1, KEY_0)
-		MATRIX_KEY(0, 2, KEY_KPDOT) /* # */
-		MATRIX_KEY(0, 3, KEY_ENTER) /* centre */
-		MATRIX_KEY(1, 0, KEY_7)
-		MATRIX_KEY(1, 1, KEY_8)
-		MATRIX_KEY(1, 2, KEY_9)
-		MATRIX_KEY(1, 3, KEY_LEFT)
-		MATRIX_KEY(2, 0, KEY_4)
-		MATRIX_KEY(2, 1, KEY_5)
-		MATRIX_KEY(2, 2, KEY_6)
-		MATRIX_KEY(2, 3, KEY_RIGHT)
-		MATRIX_KEY(3, 0, KEY_1)
-		MATRIX_KEY(3, 1, KEY_2)
-		MATRIX_KEY(3, 2, KEY_3)
-		MATRIX_KEY(3, 3, KEY_DOWN)
-		MATRIX_KEY(4, 0, KEY_TAB) /* left soft */
-		MATRIX_KEY(4, 1, KEY_ENTER) /* dial */
-		MATRIX_KEY(4, 2, KEY_BACKSPACE) /* right soft */
-		MATRIX_KEY(4, 3, KEY_UP)
+		MATRIX_KEY(0, 0, FPLINUX_KEY_STAR)
+		MATRIX_KEY(0, 1, FPLINUX_KEY_0)
+		MATRIX_KEY(0, 2, FPLINUX_KEY_POUND)
+		MATRIX_KEY(0, 3, FPLINUX_KEY_OK)
+		MATRIX_KEY(1, 0, FPLINUX_KEY_7)
+		MATRIX_KEY(1, 1, FPLINUX_KEY_8)
+		MATRIX_KEY(1, 2, FPLINUX_KEY_9)
+		MATRIX_KEY(1, 3, FPLINUX_KEY_LEFT)
+		MATRIX_KEY(2, 0, FPLINUX_KEY_4)
+		MATRIX_KEY(2, 1, FPLINUX_KEY_5)
+		MATRIX_KEY(2, 2, FPLINUX_KEY_6)
+		MATRIX_KEY(2, 3, FPLINUX_KEY_RIGHT)
+		MATRIX_KEY(3, 0, FPLINUX_KEY_1)
+		MATRIX_KEY(3, 1, FPLINUX_KEY_2)
+		MATRIX_KEY(3, 2, FPLINUX_KEY_3)
+		MATRIX_KEY(3, 3, FPLINUX_KEY_DOWN)
+		MATRIX_KEY(4, 0, FPLINUX_KEY_SOFT_LEFT)
+		MATRIX_KEY(4, 1, FPLINUX_KEY_CALL)
+		MATRIX_KEY(4, 2, FPLINUX_KEY_SOFT_RIGHT)
+		MATRIX_KEY(4, 3, FPLINUX_KEY_UP)
 	>;
 	eic1-gpios = <&sc2720_eic 1 GPIO_ACTIVE_LOW>;
-	sprd,eic1-keycode = <KEY_POWER>;
+	sprd,eic1-keycode = <FPLINUX_KEY_POWER>;
 	wakeup-source;
 };
 

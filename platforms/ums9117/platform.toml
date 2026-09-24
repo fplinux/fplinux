@@ -355,6 +355,10 @@ destination = "Documentation/devicetree/bindings/clock/fplinux,ums9117-inherited
 source = "platforms/ums9117/linux/include/dt-bindings/clock/fplinux,ums9117-inherited-clk.h"
 destination = "include/dt-bindings/clock/fplinux,ums9117-inherited-clk.h"
 
+[[linux.copies]]
+source = "include/fplinux/fplinux-keypad.h"
+destination = "include/dt-bindings/input/fplinux-keypad.h"
+
 [[linux.appends]]
 source = "platforms/ums9117/linux/arch/arm/mach-ums9117/nand.Kconfig"
 destination = "arch/arm/mach-ums9117/Kconfig"

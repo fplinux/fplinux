@@ -35,11 +35,13 @@ CLI_SOURCES = (
     "lib/fplinux/fplinux-cli.c",
     "include/fplinux/fplinux-cli.h",
 )
+INPUT_DEVICE_SOURCES = ("include/fplinux/fplinux-input-device.h",)
+KEYPAD_CODE_SOURCES = ("include/fplinux/fplinux-keypad.h",)
 SHARED_APORT_SOURCES = {
     "fplinux-base": CLI_SOURCES,
     "fplinux-bluetooth": CLI_SOURCES,
     "fplinux-charge": CLI_SOURCES,
-    "fplinux-console": MULTITAP_SOURCES,
+    "fplinux-console": (*MULTITAP_SOURCES, *INPUT_DEVICE_SOURCES, *KEYPAD_CODE_SOURCES),
     "fplinux-cpuclock": CLI_SOURCES,
     "fplinux-jpeg": CLI_SOURCES,
     "fplinux-micropythonos": (*MULTITAP_SOURCES, *FB_SESSION_SOURCES),
@@ -49,7 +51,7 @@ SHARED_APORT_SOURCES = {
         "platforms/ums9117/linux/include/uapi/fplinux/ums9117-present.h",
     ),
     "fplinux-rotate": (*FB_SESSION_SOURCES, *CLI_SOURCES),
-    "fplinux-showcase": (*FB_SESSION_SOURCES, *CLI_SOURCES),
+    "fplinux-showcase": (*FB_SESSION_SOURCES, *CLI_SOURCES, *KEYPAD_CODE_SOURCES),
     "fplinux-tyrquake": (*FB_SESSION_SOURCES, *CLI_SOURCES),
 }
 SHARED_APORT_SOURCE_PATHS = frozenset(
