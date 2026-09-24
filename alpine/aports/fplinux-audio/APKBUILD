@@ -2,7 +2,7 @@
 pkgname=fplinux-audio
 pkgver=1.2.15.2
 pkgrel=0
-pkgdesc="ALSA playback and mixer tools for FPLinux"
+pkgdesc="ALSA playback, capture and mixer tools for FPLinux"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="GPL-2.0-or-later AND GPL-2.0-only"
@@ -33,6 +33,7 @@ build() {
 
 package() {
 	install -Dm755 "$builddir/aplay/aplay" "$pkgdir/usr/bin/aplay"
+	ln -s aplay "$pkgdir/usr/bin/arecord"
 	install -Dm755 "$builddir/amixer/amixer" "$pkgdir/usr/bin/amixer"
 	install -Dm644 "$srcdir/asound.conf" "$pkgdir/etc/asound.conf"
 }

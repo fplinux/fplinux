@@ -98,8 +98,11 @@
 		0x0c 0 0x0008e001
 		0x1c 0 0x0008e001
 	>;
-	fplinux,card-longname = "INOI 240 Modern 4G headphone output";
-	fplinux,idle-silence;
+	fplinux,capture-pad-settings = <
+		0x14 0 0x0008e000
+		0x18 0 0x0008e000
+	>;
+	fplinux,card-longname = "INOI 240 Modern 4G audio";
 	status = "okay";
 };
 
