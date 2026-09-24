@@ -246,6 +246,10 @@ source = "platforms/ums9117/linux/drivers/input/keyboard/ums9117-keypad.c"
 destination = "drivers/input/keyboard/ums9117-keypad.c"
 
 [[linux.copies]]
+source = "platforms/ums9117/linux/include/linux/input/ums9117-keypad.h"
+destination = "include/linux/input/ums9117-keypad.h"
+
+[[linux.copies]]
 source = "platforms/ums9117/linux/drivers/power/reset/sc2720-poweroff-ums9117.c"
 destination = "drivers/power/reset/sc2720-poweroff-ums9117.c"
 

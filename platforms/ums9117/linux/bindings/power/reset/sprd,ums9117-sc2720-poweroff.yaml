@@ -11,9 +11,10 @@ maintainers:
 
 description:
   Power-off through the shared UMS9117 ADI provider. The final SC2720
-  sequence is refused while the charger input is active. Holding KEY_POWER
-  on the referenced physical keypad for five seconds requests an orderly
-  userspace shutdown; failure does not force power loss.
+  sequence is refused while the charger input is active. Holding
+  the physical EIC1 power key on the referenced keypad for five seconds
+  requests an orderly userspace shutdown, regardless of its input keycode;
+  failure does not force power loss.
 
 properties:
   compatible:
@@ -21,7 +22,8 @@ properties:
 
   fplinux,keypad:
     $ref: /schemas/types.yaml#/definitions/phandle
-    description: Physical keypad whose KEY_POWER can request orderly shutdown
+    description:
+      Physical keypad whose EIC1 power key can request orderly shutdown
 
 required:
   - compatible

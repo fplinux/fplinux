@@ -9,11 +9,11 @@ and physical power key.
 ## Safe shutdown
 
 1. In the default RAM profile, flush and unmount removable filesystems as
-   described in [microSD](MICROSD.md). With a microSD system root, stop
-   applications but do not try to unmount `/`; orderly shutdown handles it.
-2. Exit the host shell and disconnect USB.
-3. Make sure charger power is absent.
-4. Hold the phone's power key continuously for five seconds.
+   described in [microSD](MICROSD.md). With a microSD system root, do not try
+   to unmount `/`; orderly shutdown stops applications and handles the root.
+2. Disconnect USB and make sure charger power is absent.
+3. Hold the phone's power key continuously for five seconds. The key works
+   while the local console, TyrQuake or MicroPythonOS owns keypad input.
 
 A short press remains an ordinary input event. Releasing the key before five
 seconds cancels the request. If external charger input is detected, shutdown is
