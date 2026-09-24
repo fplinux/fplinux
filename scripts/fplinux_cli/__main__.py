@@ -15,6 +15,7 @@ from fplinux_cli.cli.checksum import checksum_aport
 from fplinux_cli.cli.inspect import inspect_apk, inspect_archive, inspect_bundle
 from fplinux_cli.cli.logs import add_log_arguments, read_logs
 from fplinux_cli.cli.package import package_target
+from fplinux_cli.cli.probe import build_probe
 from fplinux_cli.cli.runtime import console_target, run_target, verify_booted
 from fplinux_cli.manifests.paths import GLOBAL_PROFILES, discover_targets, normalize_profile
 from fplinux_cli.manifests.values import TARGET_NAME
@@ -41,12 +42,12 @@ if TYPE_CHECKING:
 
 
 _EXCLUSIVE_CACHE_COMMANDS = frozenset(
-    {"build", "check", "checksum", "device-data", "format", "nand", "setup", "test"}
+    {"build", "check", "checksum", "device-data", "format", "nand", "probe-build", "setup", "test"}
 )
 _SHARED_CACHE_COMMANDS = frozenset({"console", "package", "run", "verify"})
 _CHECK_SCOPE_METAVAR = "{" + ",".join(CHECK_SCOPES) + "}"
 _PUBLIC_COMMAND_METAVAR = (
-    "{doctor,check,test,logs,inspect,format,setup,build,checksum,package,prune,"
+    "{doctor,check,test,logs,inspect,format,setup,build,probe-build,checksum,package,prune,"
     "run,console,nand,device-data,verify}"
 )
 
@@ -222,6 +223,8 @@ def _command_action(
         )
     elif args.command == "checksum":
         action = partial(checksum_aport, args.aport, offline=args.offline)
+    elif args.command == "probe-build":
+        action = partial(build_probe, args.source, output=args.output)
     elif args.command == "package":
         action = partial(
             package_target,
@@ -415,6 +418,18 @@ def main() -> None:
         "--offline",
         action="store_true",
         help="on a build miss, run the prepared build image without network access",
+    )
+    probe_parser = commands.add_parser(
+        "probe-build", help="build one static ARMv7 hard-float musl C probe"
+    )
+    probe_parser.add_argument(
+        "source", metavar="SOURCE.c", help="normalized repository-relative C source path"
+    )
+    probe_parser.add_argument(
+        "--output",
+        required=True,
+        metavar=".cache/tools/NAME",
+        help="normalized repository-relative output path inside .cache/tools",
     )
     checksum_parser = commands.add_parser(
         "checksum",

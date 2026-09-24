@@ -169,7 +169,11 @@ def _fetch(url: object, expected: object, cache: Path, name: object) -> Path:
 
 
 def _locked_alpine_artifact(
-    lock: dict[str, Any], records: dict[str, dict[str, object]], filename: str
+    lock: dict[str, Any],
+    records: dict[str, dict[str, object]],
+    filename: str,
+    *,
+    cache: Path = CACHE,
 ) -> Path:
     record = records.get(filename)
     if record is None:
@@ -180,7 +184,7 @@ def _locked_alpine_artifact(
     package = _fetch(
         f"{lock['repositories'][repository]}/{filename}",
         record.get("sha256"),
-        CACHE / "downloads/alpine/packages",
+        cache / "downloads/alpine/packages",
         filename,
     )
     expected_size = record.get("bytes")
@@ -193,10 +197,15 @@ def _locked_alpine_artifact(
 
 
 def _alpine_group_packages(
-    lock: dict[str, Any], records: dict[str, dict[str, object]], group: str
+    lock: dict[str, Any],
+    records: dict[str, dict[str, object]],
+    group: str,
+    *,
+    cache: Path = CACHE,
 ) -> list[Path]:
     return [
-        _locked_alpine_artifact(lock, records, filename) for filename in lock[group]["packages"]
+        _locked_alpine_artifact(lock, records, filename, cache=cache)
+        for filename in lock[group]["packages"]
     ]
 
 
@@ -424,26 +433,31 @@ def _ensure_apk_signing_key() -> tuple[Path, Path, str]:
     return private_key, public_key, sha256_file(public_key)
 
 
+def alpine_sysroot_command(
+    lock: dict[str, Any], packages: list[Path], sysroot: Path, keys: Path
+) -> list[str]:
+    """Install the exact locked package closure without networking or ARM scripts."""
+    return [
+        "apk",
+        "--root",
+        str(sysroot),
+        "--arch",
+        lock["arch"],
+        "--initdb",
+        "--no-network",
+        "--no-scripts",
+        "--no-logfile",
+        "--keys-dir",
+        str(keys),
+        "add",
+        *(str(package) for package in packages),
+    ]
+
+
 def _prepare_alpine_sysroot(
     lock: dict[str, Any], packages: list[Path], sysroot: Path, keys: Path
 ) -> None:
-    _run(
-        [
-            "apk",
-            "--root",
-            str(sysroot),
-            "--arch",
-            lock["arch"],
-            "--initdb",
-            "--no-network",
-            "--no-scripts",
-            "--no-logfile",
-            "--keys-dir",
-            str(keys),
-            "add",
-            *(str(package) for package in packages),
-        ]
-    )
+    _run(alpine_sysroot_command(lock, packages, sysroot, keys))
 
 
 def _copy_shared_aport_sources(
