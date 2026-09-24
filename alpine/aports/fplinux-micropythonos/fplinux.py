@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: MIT
 # ruff: noqa: ANN001, ANN002, ANN003, ANN201, ANN202, ANN204, ANN205, D102, D107, EM101, FBT003, I001, INP001, PLC0415
 # mypy: ignore-errors
-"""Generic FPLinux framebuffer and keypad board adaptation."""
+"""Generic FPLinux framebuffer, keypad and keyboard board adaptation."""
 
 import logging
+import sys
 import time
 
 import lvgl as lv
@@ -23,39 +24,52 @@ def _lvgl_log(level, message):
         _logger.error("%s", message.rstrip())
 
 
-KEY_1 = 2
-KEY_2 = 3
-KEY_3 = 4
-KEY_4 = 5
-KEY_5 = 6
-KEY_6 = 7
-KEY_7 = 8
-KEY_8 = 9
-KEY_9 = 10
-KEY_0 = 11
+# Linux key codes of the keyboard keys that the adapter handles itself.
+KEY_ESC = 1
 KEY_BACKSPACE = 14
 KEY_TAB = 15
 KEY_ENTER = 28
-KEY_KPASTERISK = 55
-KEY_KPDOT = 83
+KEY_KPENTER = 96
 KEY_UP = 103
 KEY_LEFT = 105
 KEY_RIGHT = 106
 KEY_DOWN = 108
 
+# Phone keypad keys that enter the character printed on them.
 _DIGITS = {
-    KEY_0: ord("0"),
-    KEY_1: ord("1"),
-    KEY_2: ord("2"),
-    KEY_3: ord("3"),
-    KEY_4: ord("4"),
-    KEY_5: ord("5"),
-    KEY_6: ord("6"),
-    KEY_7: ord("7"),
-    KEY_8: ord("8"),
-    KEY_9: ord("9"),
-    KEY_KPASTERISK: ord("*"),
-    KEY_KPDOT: ord("#"),
+    fplinux_keypad.KEY_0: ord("0"),
+    fplinux_keypad.KEY_1: ord("1"),
+    fplinux_keypad.KEY_2: ord("2"),
+    fplinux_keypad.KEY_3: ord("3"),
+    fplinux_keypad.KEY_4: ord("4"),
+    fplinux_keypad.KEY_5: ord("5"),
+    fplinux_keypad.KEY_6: ord("6"),
+    fplinux_keypad.KEY_7: ord("7"),
+    fplinux_keypad.KEY_8: ord("8"),
+    fplinux_keypad.KEY_9: ord("9"),
+    fplinux_keypad.KEY_STAR: ord("*"),
+    fplinux_keypad.KEY_POUND: ord("#"),
+}
+
+# Phone D-pad keys and the LVGL key that an open widget receives from each.
+_DIRECTIONS = {
+    fplinux_keypad.KEY_UP: lv.KEY.UP,
+    fplinux_keypad.KEY_RIGHT: lv.KEY.RIGHT,
+    fplinux_keypad.KEY_DOWN: lv.KEY.DOWN,
+    fplinux_keypad.KEY_LEFT: lv.KEY.LEFT,
+}
+
+# Keyboard keys that act as a phone key: Tab is the left and Esc the right soft key.
+_KEYBOARD_PHONE_KEYS = {
+    KEY_UP: fplinux_keypad.KEY_UP,
+    KEY_RIGHT: fplinux_keypad.KEY_RIGHT,
+    KEY_DOWN: fplinux_keypad.KEY_DOWN,
+    KEY_LEFT: fplinux_keypad.KEY_LEFT,
+    KEY_ENTER: fplinux_keypad.KEY_OK,
+    KEY_KPENTER: fplinux_keypad.KEY_OK,
+    KEY_TAB: fplinux_keypad.KEY_SOFT_LEFT,
+    KEY_ESC: fplinux_keypad.KEY_SOFT_RIGHT,
+    KEY_BACKSPACE: fplinux_keypad.KEY_SOFT_RIGHT,
 }
 
 _DEVICE_MODEL_PATHS = (
@@ -110,11 +124,11 @@ class FPLinuxDisplay:
 
 
 class FPLinuxKeypad:
-    """Map FPLinux's normalized evdev keypad contract onto LVGL."""
+    """Map the phone keypad and physical keyboards onto LVGL."""
 
     def __init__(self, display):
         self._last_key = lv.KEY.ENTER
-        self.device = fplinux_keypad.open(True)
+        fplinux_keypad.open()
         self._indev = lv.indev_create()
         self._indev.set_type(lv.INDEV_TYPE.KEYPAD)
         self._indev.set_read_cb(self._read)
@@ -132,12 +146,7 @@ class FPLinuxKeypad:
     def _focused_widget_navigation_key(code):
         group = lv.group_get_default()
         focused = group.get_focused() if group else None
-        navigation_key = {
-            KEY_UP: lv.KEY.UP,
-            KEY_RIGHT: lv.KEY.RIGHT,
-            KEY_DOWN: lv.KEY.DOWN,
-            KEY_LEFT: lv.KEY.LEFT,
-        }.get(code)
+        navigation_key = _DIRECTIONS.get(code)
         if navigation_key is None or focused is None:
             return None
         if isinstance(focused, lv.keyboard):
@@ -153,36 +162,87 @@ class FPLinuxKeypad:
 
     @staticmethod
     def _dispatch_navigation(code):
-        if code == KEY_UP:
+        if code == fplinux_keypad.KEY_UP:
             focus_direction.move_focus_direction(0)
-        elif code == KEY_RIGHT:
+        elif code == fplinux_keypad.KEY_RIGHT:
             focus_direction.move_focus_direction(90)
-        elif code == KEY_DOWN:
+        elif code == fplinux_keypad.KEY_DOWN:
             focus_direction.move_focus_direction(180)
-        elif code == KEY_LEFT:
+        elif code == fplinux_keypad.KEY_LEFT:
             focus_direction.move_focus_direction(270)
-        elif code == KEY_TAB:
+        elif code == fplinux_keypad.KEY_SOFT_LEFT:
             from mpos.ui import topmenu
 
             topmenu.toggle_drawer()
-        elif code == KEY_BACKSPACE:
+        elif code == fplinux_keypad.KEY_SOFT_RIGHT:
             mpos.ui.back_screen()
         else:
             return False
         return True
 
-    def _read(self, indev, data):  # noqa: PLR0911
+    @staticmethod
+    def _is_editing_text():
+        if fplinux_multitap.is_active():
+            return True
+        group = lv.group_get_default()
+        return group is not None and isinstance(group.get_focused(), lv.textarea)
+
+    @staticmethod
+    def _insert_text(text):
+        if fplinux_multitap.is_active():
+            fplinux_multitap.insert_active(text)
+            return
+        group = lv.group_get_default()
+        if group is None:
+            return
+        for character in text:
+            # LVGL key data holds one UTF-8 character in native byte order.
+            group.send_data(int.from_bytes(character.encode(), sys.byteorder))
+
+    @staticmethod
+    def _erase_character():
+        if fplinux_multitap.is_active():
+            fplinux_multitap.erase_active(time.ticks_ms())
+            return
+        group = lv.group_get_default()
+        if group is not None:
+            group.send_data(lv.KEY.BACKSPACE)
+
+    def _read(self, indev, data):
         del indev
-        data.continue_reading = False
         event = fplinux_keypad.read()
         if event is None:
+            data.continue_reading = False
             data.key = self._last_key
             data.state = lv.INDEV_STATE.RELEASED
             return
 
-        code, value = event
+        source, code, value, text = event
+        if source == fplinux_keypad.KEYBOARD:
+            self._read_keyboard(code, value, text, data)
+        else:
+            self._read_phone_key(code, value, data)
+        data.continue_reading = fplinux_keypad.pending()
+
+    def _read_keyboard(self, code, value, text, data):
+        """Insert text literally and let other keys act as their phone key."""
+        if text:
+            if self._is_editing_text():
+                self._insert_text(text)
+        elif code == KEY_BACKSPACE and self._is_editing_text():
+            if value == 1:
+                self._erase_character()
+        else:
+            phone_code = _KEYBOARD_PHONE_KEYS.get(code)
+            if phone_code is not None:
+                self._read_phone_key(phone_code, value, data)
+                return
+        data.key = self._last_key
+        data.state = lv.INDEV_STATE.RELEASED
+
+    def _read_phone_key(self, code, value, data):  # noqa: PLR0911
         pressed = value != 0
-        if code in (KEY_UP, KEY_RIGHT, KEY_DOWN, KEY_LEFT):
+        if code in _DIRECTIONS:
             widget_key = self._focused_widget_navigation_key(code)
             if widget_key is not None:
                 self._last_key = widget_key
@@ -194,15 +254,15 @@ class FPLinuxKeypad:
             data.key = self._last_key
             data.state = lv.INDEV_STATE.RELEASED
             return
-        if code == KEY_BACKSPACE and fplinux_multitap.is_active():
+        if code == fplinux_keypad.KEY_SOFT_RIGHT and fplinux_multitap.is_active():
             if value == 1:
                 fplinux_multitap.dismiss_active()
             data.key = self._last_key
             data.state = lv.INDEV_STATE.RELEASED
             return
-        if code in (KEY_TAB, KEY_BACKSPACE):
+        if code in (fplinux_keypad.KEY_SOFT_LEFT, fplinux_keypad.KEY_SOFT_RIGHT):
             if pressed:
-                if code == KEY_TAB:
+                if code == fplinux_keypad.KEY_SOFT_LEFT:
                     fplinux_multitap.dismiss_active()
                 self._dispatch_navigation(code)
             data.key = self._last_key
@@ -217,7 +277,8 @@ class FPLinuxKeypad:
             data.state = lv.INDEV_STATE.RELEASED
             return
 
-        if code == KEY_ENTER:
+        # The green call key selects like the centre key.
+        if code in (fplinux_keypad.KEY_OK, fplinux_keypad.KEY_CALL):
             if fplinux_multitap.is_active():
                 if value == 1:
                     fplinux_multitap.submit_active()

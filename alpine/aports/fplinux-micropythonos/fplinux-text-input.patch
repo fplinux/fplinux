@@ -53,7 +53,7 @@ index c29eddc..6148868 100644
 -            WidgetAnimator.smooth_hide(self.keyboard)
 +            self.keyboard.hide_keyboard()
 diff --git a/internal_filesystem/lib/mpos/ui/keyboard.py b/internal_filesystem/lib/mpos/ui/keyboard.py
-index a938cef..426b29b 100644
+index a938cef..78f485e 100644
 --- a/internal_filesystem/lib/mpos/ui/keyboard.py
 +++ b/internal_filesystem/lib/mpos/ui/keyboard.py
 @@ -18,0 +19 @@ import logging
@@ -66,7 +66,7 @@ index a938cef..426b29b 100644
 +        self._multitap = fplinux_multitap.MultiTapEngine(elapsed=time.ticks_diff)
 +        self._multitap_timer = None
 +
-@@ -139,0 +144,54 @@ class MposKeyboard:
+@@ -139,0 +144,61 @@ class MposKeyboard:
 +        self._keyboard.add_flag(lv.obj.FLAG.HIDDEN)
 +
 +        self._multitap_timer = lv.timer_create(self._expire_multitap, 50, None)
@@ -81,6 +81,13 @@ index a938cef..426b29b 100644
 +    def handle_physical_key(self, key, now_ms):
 +        if self._textarea is None or not self._multitap.handle(key, now_ms):
 +            return False
++        self._render_multitap()
++        return True
++
++    def insert_physical_text(self, text):
++        if self._textarea is None:
++            return False
++        self._multitap.insert(text)
 +        self._render_multitap()
 +        return True
 +
@@ -121,23 +128,23 @@ index a938cef..426b29b 100644
 +            return
 +        self.commit_physical_input()
 +        fplinux_multitap.deactivate(self)
-@@ -143,0 +202,6 @@ class MposKeyboard:
+@@ -143,0 +209,6 @@ class MposKeyboard:
 +        if code == lv.EVENT.DELETE:
 +            fplinux_multitap.deactivate(self)
 +            if self._multitap_timer is not None:
 +                self._multitap_timer.delete()
 +                self._multitap_timer = None
 +            return
-@@ -150,0 +215 @@ class MposKeyboard:
+@@ -150,0 +222 @@ class MposKeyboard:
 +        self.commit_physical_input()
-@@ -213,0 +279 @@ class MposKeyboard:
+@@ -213,0 +286 @@ class MposKeyboard:
 +        self._multitap.reset(new_text)
-@@ -251,0 +318,2 @@ class MposKeyboard:
+@@ -251,0 +325,2 @@ class MposKeyboard:
 +        self._deactivate_multitap()
 +
-@@ -351,0 +420 @@ class MposKeyboard:
+@@ -351,0 +427 @@ class MposKeyboard:
 +        self._activate_multitap()
-@@ -354,11 +423 @@ class MposKeyboard:
+@@ -354,11 +430 @@ class MposKeyboard:
 -        self._saved_scroll_y = self._parent.get_scroll_y()
 -        WidgetAnimator.smooth_show(self._keyboard, duration=500)
 -        # Scroll to view on a timer because it will be hidden initially
@@ -150,7 +157,7 @@ index a938cef..426b29b 100644
 -        self._keyboard.remove_flag(lv.obj.FLAG.HIDDEN)
 -        self.focus_on_keyboard()
 +        self._keyboard.add_flag(lv.obj.FLAG.HIDDEN)
-@@ -367,3 +426,4 @@ class MposKeyboard:
+@@ -367,3 +433,4 @@ class MposKeyboard:
 -        WidgetAnimator.smooth_hide(self._keyboard, duration=500)
 -        # Do this after the hide so the scrollbars disappear automatically if not needed
 -        scroll_timer = lv.timer_create(self.scroll_back_after_hide,550,None).set_repeat_count(1)

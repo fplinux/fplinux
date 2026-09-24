@@ -1,278 +1,233 @@
 // SPDX-License-Identifier: MIT
-/* FPLinux normalized evdev keypad module for MicroPython. */
+/* FPLinux phone keypad and keyboard input module for MicroPython. */
 /* fplinux-check: package-embedded */
 
-#include <dirent.h>
 #include <errno.h>
-#include <fcntl.h>
-#include <limits.h>
-#include <linux/input.h>
 #include <stdbool.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/ioctl.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#include <xkbcommon/xkbcommon.h>
 
+#include "fplinux-input-session.h"
+#include "fplinux-keyboard-text.h"
+#include "fplinux-keypad.h"
 #include "py/obj.h"
 #include "py/runtime.h"
 
-#define FPLINUX_KEYPAD_PHYS "fplinux/keypad0"
-#define FPLINUX_KEYPAD_INPUT_DIRECTORY "/dev/input"
-#define FPLINUX_KEYPAD_PATH_BYTES 64U
-#define FPLINUX_KEYPAD_PHYS_BYTES 128U
-#define FPLINUX_KEYPAD_WORD_BITS (sizeof(unsigned long) * CHAR_BIT)
-#define FPLINUX_KEYPAD_BIT_WORDS ((KEY_MAX / FPLINUX_KEYPAD_WORD_BITS) + 1U)
+/* XKB keycodes are evdev codes offset by 8, as in the X11 protocol. */
+#define FPLINUX_KEYPAD_XKB_KEYCODE_OFFSET 8U
+#define FPLINUX_KEYPAD_TEXT_BYTES 64U
+#define FPLINUX_KEYPAD_ERROR_BYTES 256U
 
-static int keypad_fd = -1;
-static bool keypad_grabbed;
-static bool sync_dropped;
-static uint16_t last_code;
-static char opened_path[FPLINUX_KEYPAD_PATH_BYTES];
+struct keypad_event {
+	enum fplinux_input_source source;
+	unsigned int code;
+	bool pressed;
+	char text[FPLINUX_KEYPAD_TEXT_BYTES];
+};
 
-static bool is_event_name(const char *name)
+static struct fplinux_input_session input_session;
+static bool input_open;
+static struct xkb_context *text_context;
+static struct xkb_keymap *text_keymap;
+static struct xkb_state *text_state;
+static struct keypad_event queued_event;
+static bool event_queued;
+
+static void close_keyboard_text(void)
 {
-	const char *character;
+	xkb_state_unref(text_state);
+	xkb_keymap_unref(text_keymap);
+	xkb_context_unref(text_context);
+	text_state = NULL;
+	text_keymap = NULL;
+	text_context = NULL;
+}
 
-	if (strncmp(name, "event", 5) != 0 || name[5] == '\0')
+static bool open_keyboard_text(char *error, size_t error_size)
+{
+	struct fplinux_keyboard_text_layouts layouts;
+	char keymap[FPLINUX_KEYBOARD_TEXT_KEYMAP_BYTES];
+
+	if (!fplinux_keyboard_text_find_layouts(FPLINUX_KEYBOARD_TEXT_DATA_ROOT,
+						&layouts, error, error_size))
 		return false;
-	for (character = name + 5; *character != '\0'; character++) {
-		if (*character < '0' || *character > '9')
-			return false;
+	if (!fplinux_keyboard_text_keymap(&layouts, keymap, sizeof(keymap))) {
+		snprintf(error, error_size, "keyboard keymap is too long");
+		return false;
+	}
+	/* The packaged data root is the only source of layout data. */
+	text_context = xkb_context_new(XKB_CONTEXT_NO_DEFAULT_INCLUDES |
+				       XKB_CONTEXT_NO_ENVIRONMENT_NAMES);
+	if (text_context == NULL ||
+	    !xkb_context_include_path_append(text_context,
+					     FPLINUX_KEYBOARD_TEXT_DATA_ROOT)) {
+		snprintf(error, error_size,
+			 "keyboard layout data %s is unavailable",
+			 FPLINUX_KEYBOARD_TEXT_DATA_ROOT);
+		close_keyboard_text();
+		return false;
+	}
+	text_keymap = xkb_keymap_new_from_string(text_context, keymap,
+						 XKB_KEYMAP_FORMAT_TEXT_V1,
+						 XKB_KEYMAP_COMPILE_NO_FLAGS);
+	if (text_keymap != NULL)
+		text_state = xkb_state_new(text_keymap);
+	if (text_state == NULL) {
+		snprintf(error, error_size,
+			 "cannot compile the keyboard keymap");
+		close_keyboard_text();
+		return false;
 	}
 	return true;
 }
 
-static bool bit_is_set(const unsigned long *bits, unsigned int bit)
+static void close_input(void)
 {
-	return (bits[bit / FPLINUX_KEYPAD_WORD_BITS] &
-		(1UL << (bit % FPLINUX_KEYPAD_WORD_BITS))) != 0;
+	if (input_open)
+		fplinux_input_session_close(&input_session);
+	input_open = false;
+	event_queued = false;
+	close_keyboard_text();
 }
 
-static bool is_normalized_key(unsigned int code)
+/*
+ * The text is looked up before the key updates the state, so a modifier
+ * applies to the following keys but not to itself.
+ */
+static void translate_keyboard_key(struct keypad_event *event)
 {
-	switch (code) {
-	case KEY_0:
-	case KEY_1:
-	case KEY_2:
-	case KEY_3:
-	case KEY_4:
-	case KEY_5:
-	case KEY_6:
-	case KEY_7:
-	case KEY_8:
-	case KEY_9:
-	case KEY_KPASTERISK:
-	case KEY_KPDOT:
-	case KEY_TAB:
-	case KEY_BACKSPACE:
-	case KEY_ENTER:
-	case KEY_UP:
-	case KEY_DOWN:
-	case KEY_LEFT:
-	case KEY_RIGHT:
+	xkb_keycode_t keycode = event->code + FPLINUX_KEYPAD_XKB_KEYCODE_OFFSET;
+
+	if (event->pressed) {
+		int length = xkb_state_key_get_utf8(
+			text_state, keycode, event->text, sizeof(event->text));
+
+		if (length <= 0 || (size_t)length >= sizeof(event->text) ||
+		    !fplinux_keyboard_text_is_printable(event->text))
+			event->text[0] = '\0';
+	}
+	xkb_state_update_key(text_state, keycode,
+			     event->pressed ? XKB_KEY_DOWN : XKB_KEY_UP);
+}
+
+static bool fetch_event(struct keypad_event *event)
+{
+	struct fplinux_input_event input;
+
+	while (fplinux_input_session_next(&input_session, &input)) {
+		if (input.type != FPLINUX_INPUT_EVENT_KEY)
+			continue;
+		event->source = input.source;
+		event->code = input.code;
+		event->pressed = input.pressed;
+		event->text[0] = '\0';
+		if (input.source == FPLINUX_INPUT_SOURCE_KEYBOARD)
+			translate_keyboard_key(event);
 		return true;
-	default:
-		return false;
 	}
+	return false;
 }
 
-static bool has_normalized_keys(int fd)
+static mp_obj_t keypad_open(void)
 {
-	unsigned long keys[FPLINUX_KEYPAD_BIT_WORDS] = {};
-	static const unsigned int required[] = {
-		KEY_0,		KEY_1,	   KEY_2,    KEY_3,	    KEY_4,
-		KEY_5,		KEY_6,	   KEY_7,    KEY_8,	    KEY_9,
-		KEY_KPASTERISK, KEY_KPDOT, KEY_TAB,  KEY_BACKSPACE, KEY_ENTER,
-		KEY_UP,		KEY_DOWN,  KEY_LEFT, KEY_RIGHT,
-	};
-	size_t index;
+	char error[FPLINUX_KEYPAD_ERROR_BYTES];
 
-	if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(keys)), keys) < 0)
-		return false;
-	for (index = 0; index < sizeof(required) / sizeof(required[0]);
-	     index++) {
-		if (!bit_is_set(keys, required[index]))
-			return false;
+	close_input();
+	if (!open_keyboard_text(error, sizeof(error)))
+		mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("%s"), error);
+	if (!fplinux_input_session_open(
+		    &input_session,
+		    FPLINUX_INPUT_SOURCE_MASK(FPLINUX_INPUT_SOURCE_KEYPAD) |
+			    FPLINUX_INPUT_SOURCE_MASK(
+				    FPLINUX_INPUT_SOURCE_KEYBOARD),
+		    error, sizeof(error))) {
+		close_keyboard_text();
+		mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("%s"), error);
 	}
-	return true;
+	input_open = true;
+	return mp_const_none;
 }
-
-static int discover_keypad(char *path, size_t path_length)
-{
-	DIR *directory;
-	struct dirent *entry;
-	int found = -1;
-	int saved_errno = ENODEV;
-
-	directory = opendir(FPLINUX_KEYPAD_INPUT_DIRECTORY);
-	if (directory == NULL)
-		return -1;
-	while ((entry = readdir(directory)) != NULL) {
-		char candidate[FPLINUX_KEYPAD_PATH_BYTES];
-		char phys[FPLINUX_KEYPAD_PHYS_BYTES] = {};
-		struct stat status;
-		int fd;
-		int length;
-
-		if (!is_event_name(entry->d_name))
-			continue;
-		length = snprintf(candidate, sizeof(candidate), "%s/%s",
-				  FPLINUX_KEYPAD_INPUT_DIRECTORY,
-				  entry->d_name);
-		if (length < 0 || (size_t)length >= sizeof(candidate))
-			continue;
-		fd = open(candidate,
-			  O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
-		if (fd < 0) {
-			saved_errno = errno;
-			continue;
-		}
-		if (fstat(fd, &status) == 0 && S_ISCHR(status.st_mode) &&
-		    ioctl(fd, EVIOCGPHYS(sizeof(phys)), phys) >= 0 &&
-		    strcmp(phys, FPLINUX_KEYPAD_PHYS) == 0 &&
-		    has_normalized_keys(fd)) {
-			if (strlen(candidate) + 1U <= path_length) {
-				strcpy(path, candidate);
-				found = fd;
-				break;
-			}
-			saved_errno = ENAMETOOLONG;
-		}
-		close(fd);
-	}
-	closedir(directory);
-	if (found < 0)
-		errno = saved_errno;
-	return found;
-}
-
-static void close_keypad(void)
-{
-	if (keypad_fd >= 0) {
-		if (keypad_grabbed)
-			(void)ioctl(keypad_fd, EVIOCGRAB, 0);
-		close(keypad_fd);
-	}
-	keypad_fd = -1;
-	keypad_grabbed = false;
-	sync_dropped = false;
-	last_code = 0;
-	opened_path[0] = '\0';
-}
-
-static mp_obj_t keypad_open(size_t n_args, const mp_obj_t *args)
-{
-	bool grab = n_args == 0 || mp_obj_is_true(args[0]);
-
-	close_keypad();
-	keypad_fd = discover_keypad(opened_path, sizeof(opened_path));
-	if (keypad_fd < 0)
-		mp_raise_OSError(errno);
-	if (grab && ioctl(keypad_fd, EVIOCGRAB, 1) < 0) {
-		int error = errno;
-
-		close_keypad();
-		mp_raise_OSError(error);
-	}
-	keypad_grabbed = grab;
-	return mp_obj_new_str(opened_path, strlen(opened_path));
-}
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(keypad_open_obj, 0, 1, keypad_open);
+static MP_DEFINE_CONST_FUN_OBJ_0(keypad_open_obj, keypad_open);
 
 static mp_obj_t keypad_close(void)
 {
-	close_keypad();
+	close_input();
 	return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(keypad_close_obj, keypad_close);
 
-static mp_obj_t keypad_device(void)
+static mp_obj_t event_tuple(const struct keypad_event *event)
 {
-	if (keypad_fd < 0)
-		return mp_const_none;
-	return mp_obj_new_str(opened_path, strlen(opened_path));
-}
-static MP_DEFINE_CONST_FUN_OBJ_0(keypad_device_obj, keypad_device);
-
-static mp_obj_t event_tuple(uint16_t code, int32_t value)
-{
-	mp_obj_t values[2] = {
-		mp_obj_new_int_from_uint(code),
-		mp_obj_new_int(value),
+	mp_obj_t values[4] = {
+		MP_OBJ_NEW_SMALL_INT(event->source),
+		mp_obj_new_int_from_uint(event->code),
+		MP_OBJ_NEW_SMALL_INT(event->pressed ? 1 : 0),
+		mp_obj_new_str(event->text, strlen(event->text)),
 	};
 
-	return mp_obj_new_tuple(2, values);
-}
-
-static mp_obj_t resync_state(void)
-{
-	unsigned long keys[FPLINUX_KEYPAD_BIT_WORDS] = {};
-	unsigned int code;
-
-	if (ioctl(keypad_fd, EVIOCGKEY(sizeof(keys)), keys) < 0)
-		mp_raise_OSError(errno);
-	for (code = 0; code <= KEY_MAX; code++) {
-		if (is_normalized_key(code) && bit_is_set(keys, code)) {
-			last_code = (uint16_t)code;
-			return event_tuple((uint16_t)code, 1);
-		}
-	}
-	if (last_code != 0) {
-		uint16_t released = last_code;
-
-		last_code = 0;
-		return event_tuple(released, 0);
-	}
-	return mp_const_none;
+	return mp_obj_new_tuple(4, values);
 }
 
 static mp_obj_t keypad_read(void)
 {
-	if (keypad_fd < 0)
-		mp_raise_OSError(ENODEV);
-	for (;;) {
-		struct input_event event;
-		ssize_t count = read(keypad_fd, &event, sizeof(event));
+	struct keypad_event event;
 
-		if (count < 0) {
-			if (errno == EAGAIN || errno == EWOULDBLOCK)
-				return mp_const_none;
-			if (errno == EINTR)
-				continue;
-			mp_raise_OSError(errno);
-		}
-		if (count != (ssize_t)sizeof(event))
-			mp_raise_OSError(EIO);
-		if (event.type == EV_SYN && event.code == SYN_DROPPED) {
-			sync_dropped = true;
-			continue;
-		}
-		if (sync_dropped) {
-			if (event.type == EV_SYN && event.code == SYN_REPORT) {
-				sync_dropped = false;
-				return resync_state();
-			}
-			continue;
-		}
-		if (event.type != EV_KEY || !is_normalized_key(event.code))
-			continue;
-		if (event.value != 0)
-			last_code = event.code;
-		else if (last_code == event.code)
-			last_code = 0;
-		return event_tuple(event.code, event.value);
+	if (!input_open)
+		mp_raise_OSError(ENODEV);
+	if (event_queued) {
+		event = queued_event;
+		event_queued = false;
+	} else if (!fetch_event(&event)) {
+		return mp_const_none;
 	}
+	return event_tuple(&event);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(keypad_read_obj, keypad_read);
 
+static mp_obj_t keypad_pending(void)
+{
+	if (!input_open)
+		mp_raise_OSError(ENODEV);
+	if (!event_queued)
+		event_queued = fetch_event(&queued_event);
+	return mp_obj_new_bool(event_queued);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(keypad_pending_obj, keypad_pending);
+
 static const mp_rom_map_elem_t keypad_module_globals_table[] = {
 	{ MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_fplinux_keypad) },
+	{ MP_ROM_QSTR(MP_QSTR_KEYPAD),
+	  MP_ROM_INT(FPLINUX_INPUT_SOURCE_KEYPAD) },
+	{ MP_ROM_QSTR(MP_QSTR_KEYBOARD),
+	  MP_ROM_INT(FPLINUX_INPUT_SOURCE_KEYBOARD) },
+	/* Phone key codes; keyboard events keep their Linux key codes. */
+	{ MP_ROM_QSTR(MP_QSTR_KEY_0), MP_ROM_INT(FPLINUX_KEY_0) },
+	{ MP_ROM_QSTR(MP_QSTR_KEY_1), MP_ROM_INT(FPLINUX_KEY_1) },
+	{ MP_ROM_QSTR(MP_QSTR_KEY_2), MP_ROM_INT(FPLINUX_KEY_2) },
+	{ MP_ROM_QSTR(MP_QSTR_KEY_3), MP_ROM_INT(FPLINUX_KEY_3) },
+	{ MP_ROM_QSTR(MP_QSTR_KEY_4), MP_ROM_INT(FPLINUX_KEY_4) },
+	{ MP_ROM_QSTR(MP_QSTR_KEY_5), MP_ROM_INT(FPLINUX_KEY_5) },
+	{ MP_ROM_QSTR(MP_QSTR_KEY_6), MP_ROM_INT(FPLINUX_KEY_6) },
+	{ MP_ROM_QSTR(MP_QSTR_KEY_7), MP_ROM_INT(FPLINUX_KEY_7) },
+	{ MP_ROM_QSTR(MP_QSTR_KEY_8), MP_ROM_INT(FPLINUX_KEY_8) },
+	{ MP_ROM_QSTR(MP_QSTR_KEY_9), MP_ROM_INT(FPLINUX_KEY_9) },
+	{ MP_ROM_QSTR(MP_QSTR_KEY_STAR), MP_ROM_INT(FPLINUX_KEY_STAR) },
+	{ MP_ROM_QSTR(MP_QSTR_KEY_POUND), MP_ROM_INT(FPLINUX_KEY_POUND) },
+	{ MP_ROM_QSTR(MP_QSTR_KEY_UP), MP_ROM_INT(FPLINUX_KEY_UP) },
+	{ MP_ROM_QSTR(MP_QSTR_KEY_DOWN), MP_ROM_INT(FPLINUX_KEY_DOWN) },
+	{ MP_ROM_QSTR(MP_QSTR_KEY_LEFT), MP_ROM_INT(FPLINUX_KEY_LEFT) },
+	{ MP_ROM_QSTR(MP_QSTR_KEY_RIGHT), MP_ROM_INT(FPLINUX_KEY_RIGHT) },
+	{ MP_ROM_QSTR(MP_QSTR_KEY_OK), MP_ROM_INT(FPLINUX_KEY_OK) },
+	{ MP_ROM_QSTR(MP_QSTR_KEY_SOFT_LEFT),
+	  MP_ROM_INT(FPLINUX_KEY_SOFT_LEFT) },
+	{ MP_ROM_QSTR(MP_QSTR_KEY_SOFT_RIGHT),
+	  MP_ROM_INT(FPLINUX_KEY_SOFT_RIGHT) },
+	{ MP_ROM_QSTR(MP_QSTR_KEY_CALL), MP_ROM_INT(FPLINUX_KEY_CALL) },
 	{ MP_ROM_QSTR(MP_QSTR_open), MP_ROM_PTR(&keypad_open_obj) },
 	{ MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&keypad_close_obj) },
-	{ MP_ROM_QSTR(MP_QSTR_device), MP_ROM_PTR(&keypad_device_obj) },
 	{ MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&keypad_read_obj) },
+	{ MP_ROM_QSTR(MP_QSTR_pending), MP_ROM_PTR(&keypad_pending_obj) },
 };
 static MP_DEFINE_CONST_DICT(keypad_module_globals, keypad_module_globals_table);
 

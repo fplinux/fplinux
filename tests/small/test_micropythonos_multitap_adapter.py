@@ -63,6 +63,10 @@ class MultiTapAdapter(Protocol):
         """Commit the candidate and flip alphabetic case."""
         ...
 
+    def insert(self, text: str) -> None:
+        """Commit the candidate and append literal keyboard text."""
+        ...
+
 
 class FakeNativeEngine:
     """Record adapter calls without reimplementing multi-tap behavior."""
@@ -255,6 +259,54 @@ class MicroPythonOsMultitapAdapterTests(unittest.TestCase):
         self.assertEqual(second.dismissals, 1)
         module.deactivate(second)
         self.assertFalse(module.dispatch("3", 20))
+
+    def test_keyboard_text_commits_the_candidate_and_is_appended_literally(self) -> None:
+        """A pending candidate keeps its case; keyboard text and digits are not changed."""
+        adapter, native = make_adapter()
+        adapter.text = "ab"
+        adapter.uppercase = True
+        native.candidate_value = "c"
+        native.pending_key_value = "2"
+        native.commit_value = "c"
+
+        adapter.insert("x1")
+
+        self.assertEqual(adapter.text, "abCx1")
+        self.assertEqual(adapter.candidate, "")
+        self.assertEqual(adapter.display_text, "abCx1")
+
+        native.commit_value = None
+        adapter.insert("\u0444")
+        self.assertEqual(adapter.text, "abCx1\u0444")
+
+    def test_keyboard_text_and_erase_reach_only_an_active_owner(self) -> None:
+        """Keyboard text edits the active session and is refused without one."""
+        module = load_engine_module(FakeNativeModule())
+        engine = module.MultiTapEngine(elapsed=lambda later, earlier: later - earlier)
+
+        class InputTarget:
+            """Forward to one adapter, as the MicroPythonOS keyboard owner does."""
+
+            def insert_physical_text(self, text: str) -> bool:
+                """Append keyboard text to the session."""
+                engine.insert(text)
+                return True
+
+            def handle_physical_key(self, key: str, now_ms: int) -> bool:
+                """Apply one physical key to the session."""
+                return bool(engine.handle(key, now_ms))
+
+        self.assertFalse(module.insert_active("a"))
+        self.assertFalse(module.erase_active(5))
+
+        target = InputTarget()
+        module.activate(target)
+        self.assertTrue(module.insert_active("ab"))
+        self.assertTrue(module.erase_active(10))
+        self.assertEqual(engine.text, "a")
+        module.deactivate(target)
+        self.assertFalse(module.insert_active("c"))
+        self.assertEqual(engine.text, "a")
 
     def test_adapter_passes_elapsed_time_without_resetting_it_during_polling(self) -> None:
         """Repeated polls pass time since the original press to the fake engine."""

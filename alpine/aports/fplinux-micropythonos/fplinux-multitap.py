@@ -116,6 +116,11 @@ class MultiTapEngine:
         self.commit()
         self.uppercase = not self.uppercase
 
+    def insert(self, text):
+        """Commit the current candidate, then append keyboard ``text`` unchanged."""
+        self.commit()
+        self.text += text
+
 
 def activate(input_target):
     """Route physical text keys to ``input_target`` until deactivated."""
@@ -140,6 +145,18 @@ def dispatch(key, now_ms):
     if _active_input[0] is None:
         return False
     return _active_input[0].handle_physical_key(key, now_ms)
+
+
+def insert_active(text):
+    """Send literal keyboard text to the active input owner."""
+    if _active_input[0] is None:
+        return False
+    return _active_input[0].insert_physical_text(text)
+
+
+def erase_active(now_ms):
+    """Erase the pending or previous character of the active input owner."""
+    return dispatch("*", now_ms)
 
 
 def submit_active():

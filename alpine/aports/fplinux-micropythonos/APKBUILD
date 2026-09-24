@@ -5,9 +5,10 @@ pkgrel=0
 pkgdesc="MicroPythonOS runtime for FPLinux framebuffer phones"
 url="https://github.com/MicroPythonOS/MicroPythonOS"
 arch="armv7"
-license="GPL-2.0-only AND MIT AND OFL-1.1 AND Zlib AND custom"
-makedepends_build="bash clang22 lld22 make patch python3"
-makedepends_host="musl-dev linux-headers gcc"
+license="GPL-2.0-only AND MIT AND MIT-open-group AND HPND AND HPND-sell-variant AND OFL-1.1 AND Zlib AND custom"
+depends="fplinux-input fplinux-xkb"
+makedepends_build="bash bison clang22 lld22 make meson patch python3 samurai"
+makedepends_host="musl-dev linux-headers gcc libinput-dev"
 options="!check !spdx"
 
 _mpos_commit=e532b885eca1d7f50ef65846824b075f88579774
@@ -17,6 +18,7 @@ _micropython_lib_commit=6ae440a8a144233e6e703f6759b7e7a0afaa37a4
 _lvgl_commit=c016f72d4c125098287be5e83c0f1abed4706ee5
 _freezefs_commit=5f211e3ef1f189e271e9614e7a93f784aea243c0
 _pycparser_commit=3cf6bf5eb16f5eadd4a058e41596145c407a79ad
+_xkbcommon_ver=1.13.1
 
 source="
 	MicroPythonOS-$_mpos_commit.tar.gz::https://github.com/MicroPythonOS/MicroPythonOS/archive/$_mpos_commit.tar.gz
@@ -26,6 +28,7 @@ source="
 	lvgl-$_lvgl_commit.tar.gz::https://github.com/lvgl/lvgl/archive/$_lvgl_commit.tar.gz
 	freezeFS-$_freezefs_commit.tar.gz::https://github.com/MicroPythonOS/freezeFS/archive/$_freezefs_commit.tar.gz
 	pycparser-$_pycparser_commit.tar.gz::https://github.com/eliben/pycparser/archive/$_pycparser_commit.tar.gz
+	libxkbcommon-$_xkbcommon_ver.tar.gz::https://github.com/xkbcommon/libxkbcommon/archive/refs/tags/xkbcommon-$_xkbcommon_ver.tar.gz
 	fplinux-unix-build.patch
 	fplinux-lvgl-fbdev.patch
 	fplinux-freezefs-reproducible.patch
@@ -57,6 +60,12 @@ source="
 	fplinux-micropythonos-launcher-internal.h
 	fplinux-fb-session.c
 	fplinux-fb-session.h
+	fplinux-input-device.h
+	fplinux-input-session.c
+	fplinux-input-session.h
+	fplinux-keyboard-text.c
+	fplinux-keyboard-text.h
+	fplinux-keypad.h
 	fplinux_keypad.c
 	micropython.mk
 	fplinux.py
@@ -65,6 +74,8 @@ source="
 builddir="$srcdir/MicroPythonOS-$_mpos_commit"
 
 prepare() {
+	local file
+
 	install -d \
 		"$builddir/freezeFS" \
 		"$builddir/lvgl_micropython/lib/lvgl" \
@@ -120,6 +131,13 @@ prepare() {
 		"$builddir/lvgl_micropython/lib/micropython/ports/unix/variants/fplinux/mpconfigvariant.mk"
 	install -Dm644 "$srcdir/fplinux_keypad.c" \
 		"$builddir/lvgl_micropython/ext_mod/fplinux_keypad/fplinux_keypad.c"
+	for file in \
+		fplinux-input-device.h fplinux-input-session.c \
+		fplinux-input-session.h fplinux-keyboard-text.c \
+		fplinux-keyboard-text.h fplinux-keypad.h; do
+		install -Dm644 "$srcdir/$file" \
+			"$builddir/lvgl_micropython/ext_mod/fplinux_keypad/$file"
+	done
 	install -Dm644 "$srcdir/fplinux-multitap.c" \
 		"$builddir/lvgl_micropython/ext_mod/fplinux_keypad/fplinux-multitap.c"
 	install -Dm644 "$srcdir/fplinux-multitap.h" \
@@ -143,7 +161,44 @@ prepare() {
 		"$builddir/internal_filesystem/apps/com.micropythonos.showfonts/Rancourt-SmallCaps.ttf"
 }
 
+# The keyboard module links a static libxkbcommon without X11, Wayland, the
+# layout registry or tools. Its configured data root only matters for
+# default include paths, which the module disables.
+_build_xkbcommon() {
+	local source="$srcdir/libxkbcommon-xkbcommon-$_xkbcommon_ver"
+	local staged="$builddir/lvgl_micropython/ext_mod/fplinux_keypad/xkbcommon"
+
+	: "${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
+	(
+		cd "$source"
+		# abuild-meson describes the target machine; this file adds the
+		# archiver and keeps pkg-config inside the sysroot.
+		cat >fplinux-cross.meson <<-EOF
+			[binaries]
+			ar = '$CHOST-ar'
+			[properties]
+			pkg_config_libdir = ['$CBUILDROOT/usr/lib/pkgconfig', '$CBUILDROOT/usr/share/pkgconfig']
+		EOF
+		abuild-meson \
+			--cross-file fplinux-cross.meson \
+			-Ddefault_library=static \
+			-Denable-bash-completion=false \
+			-Denable-docs=false \
+			-Denable-tools=false \
+			-Denable-wayland=false \
+			-Denable-x11=false \
+			-Denable-xkbregistry=false \
+			-Dxkb-config-root=/usr/share/fplinux/xkb \
+			output
+		ninja -C output libxkbcommon.a
+	)
+	install -Dm644 "$source/output/libxkbcommon.a" "$staged/libxkbcommon.a"
+	install -d "$staged/include/xkbcommon"
+	install -m644 "$source"/include/xkbcommon/*.h "$staged/include/xkbcommon/"
+}
+
 build() {
+	_build_xkbcommon
 	env -u CPPFLAGS -u CFLAGS -u LDFLAGS \
 		make -j"${JOBS:-1}" \
 		-C "$builddir/lvgl_micropython/lib/micropython/mpy-cross" \
@@ -220,6 +275,8 @@ package() {
 		"$pkgdir/usr/share/licenses/$pkgname/LVGL-MIT.txt"
 	install -Dm644 "$builddir/freezeFS/LICENSE" \
 		"$pkgdir/usr/share/licenses/$pkgname/freezeFS-MIT.txt"
+	install -Dm644 "$srcdir/libxkbcommon-xkbcommon-$_xkbcommon_ver/LICENSE" \
+		"$pkgdir/usr/share/licenses/$pkgname/libxkbcommon-LICENSE.txt"
 	install -Dm644 "$builddir/lvgl_micropython/lib/lvgl/scripts/built_in_font/font_license/Montserrat/OFL.txt" \
 		"$pkgdir/usr/share/licenses/$pkgname/Montserrat-OFL-1.1.txt"
 	install -Dm644 "$builddir/lvgl_micropython/lib/lvgl/scripts/built_in_font/font_license/FontAwesome5/LICENSE.txt" \
@@ -250,13 +307,14 @@ cb5ff7978b32afa4537d5833d3d9ed5f2398ef4f552ca78fe42993c2dca1241eec1f5f9e803a4eb2
 0fe9ceb0591d83fef327ad3a5d5cb639881bd89836af613a3a817bcda4efd3d9d20aec458a3c4dce4fa4bb175552984c10835e5ff6aa860672d69bd44bce58d0  lvgl-c016f72d4c125098287be5e83c0f1abed4706ee5.tar.gz
 d541b1574e4fedcab812f9ebedd8b8a5e29ff071102324400cf608bd996f427690c8873711bc02b5aa5cab0ee3530f331b223c1948f630aed33a1022cfbec036  freezeFS-5f211e3ef1f189e271e9614e7a93f784aea243c0.tar.gz
 924588d0228f4243a2b16baabdb03e24fe77c8316d83dc32d0a466c410ccfad6cb4e1100a6690d3a82486e1cda4b8c8fdf603a8c404e537745354e5d2bc731ee  pycparser-3cf6bf5eb16f5eadd4a058e41596145c407a79ad.tar.gz
+450c33fe26af6b847cf7516685d0df63c2ba0126887e27595c40fe80e4d0487009aa6cdf38ff1270d595c7900cbf3c11e7aa4f9cff80fa361742b5ebb10d83bd  libxkbcommon-1.13.1.tar.gz
 8ce51885848f1ba652ca2ed1a7dcdd5dcbc506f3b55c3bf7abf03a8e8d5f5746cd5b4ecb51c481a3f08cde2c56379a059fdef36c4b35ddc27e2e8607501320c8  fplinux-unix-build.patch
 114a8deb550beb8ad761b9665bb1a07e2321db68448bc273f4dae67b402c54346772a054772ef4acb025b1c76b0d6d155b966d11247f3fa619059ff9374f9e2e  fplinux-lvgl-fbdev.patch
 19fac6997cd60c66c69a83956e2d2fcd487e27c7fbf42deaf7bc7085843988f0cc6b84d204a30e0bcd02c69d562193ce65032804d33ef964bb984078a2612066  fplinux-freezefs-reproducible.patch
 2c7f1ec5d0a9353717b9e7cf98524efb3c4525c489f7b8e3502d21b0f098f990a94fe921dc3c5454833515dde633fd1c3f840f31b1b056996850ed0b6671ed49  fplinux-app-filter.patch
 81b5e6146a82387e41773e6637e9335ad7d013f4449e22df7531c2ae9b10572d18e11ef890d01c5c9292f6c2db435bf20d0ceed067c3a45fc3034b2592708b3a  fplinux-showfonts.patch
 3250ebf21199bd5bd58cd2d8172e4d669585b371c0d78588d1d6afa4784781b0c607c73b869440bff6930e7b00703bc1e605ba408b1c1f308e6b68ca99dd4376  fplinux-small-screen-ui.patch
-8d2e44f5383b72d1b938a25fa84bc5638c7f42d8cc522d584682f749723e3aafdc3f676d40a13bc15adf3da6d604abe7e7ece70a4c7f1596ec8197130aadb40b  fplinux-text-input.patch
+c70c80f487b16553da30d0702e1e2a778a1a3a0b1adea1864ba00fad36fe62c93f231e2cb1b3f1ba115d106b225ecb0bb571ea9c98bbbb357d1df1d457dd3784  fplinux-text-input.patch
 bd50accc04ccd874e6e2ffd64fbdfdb06870562396adefcf636b4b58760c3b33550ea6c7f07b762d120e3fdc43839178470bd7b710f495d11009ad853b433978  fplinux-small-screen-layout.py
 2434c1ba66def1d0e92abf330547c7e5805354e94cddea7920e92454b625867b3327c13480cae3d1e939199779706acdf0e2e8bc917e19d0c5ae770c5fc68e86  fplinux-verify-app-imports.py
 95c8420f2b2af2317dd4486d0bc704618cf7b3c5d5907f49f529270c0d841c54179c315d4ab9f00ceff4fff754cad8d67ece8cfb271736373d5df93ff9b9318d  fplinux-builtin-apps.list
@@ -265,7 +323,7 @@ f7d9548dc2af958ba92d8706c3da177cb0aa075bb1d565a7923ebc112af2426a985981aeee168d82
 27ce7d0e57ca00acf864fa3903954b24853346397f8f75ac634b614e4171f99ed192b9fd728a0d68df6d150f13a22309c65390dd2178b718b7d3993a71ce27b7  fplinux-packaged-apps.list
 e89e14d86a8ffd92cbb596170eb1b220d2b4ae034c12dd57088ce6ac9fb362c46ca3144482bab7a27de5483e9b49ff02f47164d844b52400c06feeb9a86673b9  fplinux-keypad-test.MANIFEST.JSON
 af657ff18b7ed8635df09d291f025111d11d0edc9d1b478c84bef0c9d3c5852c4eb945d3767e3b5eba0fa108f54ec61692a288b477cda5624b2c35d6b4d5db3b  fplinux-keypad-test.py
-e568c11a2e387081f0de232c080fa92438863f2648d6ff5aa5fd41ce50f3f4c045db9333c3e6c50a8fdd78dce5a35fce929bae617150bfb502e1143c11740cf0  fplinux-multitap.py
+8f7b399c4ab484f15281f4516b12260b28ca8279dbff87eeec12854cb89804de929ac5bbbc4fd07dbba2f46515bb0162a8363df60e21382b837cf3969f37a8eb  fplinux-multitap.py
 51d3626cc1b3107605d8f07423dc69bea22b008115abcde44314b285af27c1487a9c6c116b35c632adac71694d2fce73aa91bb4285f85faccc4f3482dde57fdc  fplinux-multitap.c
 a74c9221d3184802c885ea24296c7d13a3624d65d77a6c030f13e94898ce707d27b89da76084fa309016b96150676e5c2d00e0fd4f519883a5866efa666f3927  fplinux-multitap.h
 b8612972ef08193360a662ec0e8de696c518d1272be9ff275630ae45cff3ba4dffc0a75472c7bff4e03126b997772a592d8bab26b6d1a52a9135c37999dac4aa  fplinux_multitap_native.c
@@ -281,8 +339,14 @@ d34d262658267b08ebe7664c5d817959d654fb767cee71a3973518d1be178ec70b1e8f4daee63390
 cb622df6f61b5a32fdd248de523cc5a0f728fdfe810ae9a9a517f71da7f39e20eea0a0169c66ba9697d46ee0d7698231101c5edd5e97c7ba24fd5e7d6a4748b5  fplinux-micropythonos-launcher-internal.h
 cbf7e3cb0a9fe2fda9d387e72ab49d13b3d7828e282f0ce2f528183f1fce0c337b29e8c62775671fe424548c0526027d3d50bc57ef7fe5a69c92af79da56598d  fplinux-fb-session.c
 38f849284be27b63ae553dc66c1427b885ef0e332a89b035f9465659e3a080435bd7fde0c788c1a97129cd0b252bd151268f568bab3065029a7874a2740b6279  fplinux-fb-session.h
-41788ba72597555234da8b52a7ca508dd07a439b8c62fe10d001c069f4137a27d843db24fd28db07319515cd317e1baa38ed7d6fc2b64ce6699e05742090742b  fplinux_keypad.c
-7263b8be8fab7df16e0d651b8a75eb24b7066e5b32655a92d8848142a6ea1c341235582d4986b2eb9879569f0781e03b8127606edda4fb5e6c880e8e96be5d68  micropython.mk
-e3c7f238fe3b424e725696fed39b493ca0b58694be1ca8a16187faf7086d9f5c5734a0cd14daf414b56c7f84a495347a06ba51d375de90f3f1c7212ef9651a83  fplinux.py
+defa0078d5b788c6180813f46b42042fd401555cce70fc7ae40550b7c27b65a04972678b5beb8c65e41dbcfe36ba6b926154d94c2700e345bb8d3d2ba251e4ef  fplinux-input-device.h
+18453f33af8f6a701b9a8a2ea0a6057f789749bc85d40f53513adb030ee85f2aa9df42e4732bb899715af31959cd779777589d2710dc20681bcca2b3a11d37eb  fplinux-input-session.c
+43404656ffe2b487dae329063b60356906b3e864120c6caef8061969ea502bf68bd921d7dfd1397d418fbc03e7e23cfd4a59e3144f87bcc3f6af086189fe55ab  fplinux-input-session.h
+432a98111425d8c83bd0facdd1cb0d33af9f943b5ee3404a2aa23054949a1a27425460120939421aa80993343698804f324ee3e673850c748592dba3662e5ced  fplinux-keyboard-text.c
+84f7ab13ec94154034a18b3db7f80bbcd516de11b93e431ca00cc4a6b61098f321ba8ec30bbd75faafab2593cc0d6c4b722214120ff250d3329f63abd6e7315c  fplinux-keyboard-text.h
+0113e3bb8a795cbdb063092642a8418158d0c034dc31b907caf4252ef53441631ba2a6499b42a450da97ecfcce30ce3b30cb9de0fd895614d5e37436bfeb8b97  fplinux-keypad.h
+07278803bc5b2f3c19109805a0dbda9b5bdd49e124614d735ac83e4ea7dfb330e7343bfdf3e61043e57f32f33765961097419970cc510a03295a48c62f4d8a84  fplinux_keypad.c
+7b23784a01f7462295d1c1de0798e5002fe8b0c11932ecd4d9dd21a1eb3ea810d8278a2895a1558c010f180046a4a2e0b3dfa7273a2329734bd4cb4467d450ba  micropython.mk
+8a3fc5e2ff3d1f689749da65d70056ad5dbc486f1bfd2a28ea49b0a78456d141c499911d1d9b5a703955389a888445d12e2f379e482d1b6ca81dc1cb18460f7f  fplinux.py
 31e57c137e718c0062ec7b0a844bb1b208a60e43ca42a8d6210ea80edf932191862448ea0334e14806f353b5159d4a9e354750dec7395e14bad62401ce4ffa82  fplinux_storage.py
 "

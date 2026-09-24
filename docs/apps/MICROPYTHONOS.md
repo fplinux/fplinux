@@ -68,8 +68,9 @@ to the terminal.
 
 ## Use the keypad
 
-MicroPythonOS uses the normalized physical phone keypad on each supported
-target. The host-keyboard bridge does not control MicroPythonOS.
+MicroPythonOS uses the physical phone keypad on each supported target.
+Keyboards can be used at the same time; see
+[Use a keyboard](#use-a-keyboard).
 
 | Key            | Action                                                        |
 | -------------- | ------------------------------------------------------------- |
@@ -85,6 +86,41 @@ For multi-tap, press the same number repeatedly to cycle its characters. A
 character is committed after a short pause, when another number is pressed, or
 when `Centre` or dial is pressed. The Keypad Test application shows the active
 case mode and current candidate.
+
+## Use a keyboard
+
+MicroPythonOS reads keyboards together with the phone keypad: the keyboard
+forwarded through the [host keyboard bridge](../features/HOST_KEYBOARD.md), and
+Bluetooth keyboards paired with the phone following
+[Keyboards and mice](../features/BLUETOOTH.md#keyboards-and-mice). The
+target's documentation states whether it supports Bluetooth. A keyboard can
+connect before or while MicroPythonOS runs. While it runs, MicroPythonOS has
+exclusive use of the phone keypad and every keyboard, so their keys do not
+reach the local console.
+
+Letters, digits, punctuation and space are typed literally into the focused
+text field; keyboard digits never start multi-tap there. A pending multi-tap
+character is committed before the typed text. Other keys act like phone keys:
+
+| Key         | Action                                                             |
+| ----------- | ------------------------------------------------------------------ |
+| Arrow keys  | Same as the D-pad                                                  |
+| `Enter`     | Same as `Centre` or dial                                           |
+| `Tab`       | Same as Left soft                                                  |
+| `Esc`       | Same as Right soft                                                 |
+| `Backspace` | Erase the previous character in a text field; otherwise Right soft |
+
+Keys do not repeat while held.
+
+The US layout is always available. Each optional layout package adds another
+layout, and `Alt+Shift` switches to the next one. The Russian layout is in
+`fplinux-xkb-ru.apk`, with the installed package name `fplinux-xkb-ru`; install
+or remove it with the shared [APK package instructions](../guides/APK_PACKAGES.md)
+and then restart MicroPythonOS. At most three optional layouts can be installed;
+with more, MicroPythonOS stops at startup and reports the error.
+
+The bundled MicroPythonOS fonts do not contain Cyrillic glyphs. Russian text is
+entered into the field, but it is not shown on the screen.
 
 ## Storage
 
