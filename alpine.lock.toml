@@ -48,6 +48,13 @@ fplinux-bluetooth = [
   "readline-8.3.3-r1.apk",
 ]
 
+fplinux-input = [
+  "libevdev-1.13.6-r0.apk",
+  "libinput-libs-1.31.3-r0.apk",
+  "mdevd-0.1.8.2-r0.apk",
+  "mtdev-1.1.7-r0.apk",
+]
+
 fplinux-microsd-root = [
   "cloud-utils-growpart-0.33-r1.apk",
   "e2fsprogs-1.47.4-r0.apk",
@@ -74,6 +81,8 @@ packages = [
   "bsd-compat-headers-0.7.2-r6.apk",
   "dbus-dev-1.16.2-r2.apk",
   "dbus-libs-1.16.2-r2.apk",
+  "eudev-dev-3.2.14-r6.apk",
+  "eudev-libs-3.2.14-r6.apk",
   "gcc-15.2.0-r5.apk",
   "gmp-6.3.0-r4.apk",
   "isl26-0.26-r2.apk",
@@ -81,12 +90,15 @@ packages = [
   "libatomic-15.2.0-r5.apk",
   "libedit-20260508.3.1-r1.apk",
   "libedit-dev-20260508.3.1-r1.apk",
+  "libevdev-1.13.6-r0.apk",
   "libffi-3.5.2-r1.apk",
   "libffi-dev-3.5.2-r1.apk",
   "libformw-6.6_p20260516-r0.apk",
   "libgcc-15.2.0-r5.apk",
   "libgcc-static-15.2.0-r5.apk",
   "libgomp-15.2.0-r5.apk",
+  "libinput-dev-1.31.3-r0.apk",
+  "libinput-libs-1.31.3-r0.apk",
   "libmenuw-6.6_p20260516-r0.apk",
   "libncurses++-6.6_p20260516-r0.apk",
   "libncursesw-6.6_p20260516-r0.apk",
@@ -99,6 +111,8 @@ packages = [
   "mbedtls3-dev-3.6.7-r0.apk",
   "mpc1-1.3.1-r1.apk",
   "mpfr4-4.2.2-r0.apk",
+  "mtdev-1.1.7-r0.apk",
+  "mtdev-dev-1.1.7-r0.apk",
   "musl-1.2.6-r2.apk",
   "musl-dev-1.2.6-r2.apk",
   "musl-libintl-1.2.6-r2.apk",
@@ -543,3 +557,51 @@ repository = "community"
 file = "mbedtls3-dev-3.6.7-r0.apk"
 sha256 = "610925061e46888c4f624e0dafa48caeee41382e7f97aa2e310f05fae0a6aba0"
 bytes = 439819
+
+[[package]]
+repository = "main"
+file = "eudev-dev-3.2.14-r6.apk"
+sha256 = "ea7f66deb900b93a5b280492b819b25b6b305cbc849eb916241338b100b934fa"
+bytes = 886042
+
+[[package]]
+repository = "main"
+file = "eudev-libs-3.2.14-r6.apk"
+sha256 = "d3318584962ac04321075e61c0fe3d1ca2991cf801ee3d8b1568ab8edb27d5a0"
+bytes = 22616
+
+[[package]]
+repository = "community"
+file = "libevdev-1.13.6-r0.apk"
+sha256 = "017c137a549ca1aa9b943011cf7f1d32c4efe1ef9cef4ce1e9c46bc7bb2efddf"
+bytes = 26707
+
+[[package]]
+repository = "community"
+file = "libinput-dev-1.31.3-r0.apk"
+sha256 = "d7b58b1d0bd68f78d3f8ff49f4fc7e0923c0d42494c8fc0842de6a817f08add3"
+bytes = 41611
+
+[[package]]
+repository = "community"
+file = "libinput-libs-1.31.3-r0.apk"
+sha256 = "1d376999129ded5af84ab3a060525bceeca0db9e5d1ee9d872d734194efc2a6b"
+bytes = 129215
+
+[[package]]
+repository = "main"
+file = "mdevd-0.1.8.2-r0.apk"
+sha256 = "86a35db79efb6c6c93271f57eeeec84eb0bcdb2f0e2a869190eaae275767d9cc"
+bytes = 19004
+
+[[package]]
+repository = "community"
+file = "mtdev-1.1.7-r0.apk"
+sha256 = "7b954e9e0c5ccee2f00011b2238b43978c2a2eac42c644e1b3b71f67ff3463b0"
+bytes = 8968
+
+[[package]]
+repository = "community"
+file = "mtdev-dev-1.1.7-r0.apk"
+sha256 = "a4bb33c68ab15427702a8fdcca69055cbfffe9109b954cd120fccab96f19e698"
+bytes = 8734

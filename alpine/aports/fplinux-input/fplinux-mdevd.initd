@@ -1,0 +1,21 @@
+#!/sbin/openrc-run
+# SPDX-License-Identifier: GPL-2.0-only
+# shellcheck shell=sh disable=SC2034
+
+name="FPLinux uevent rebroadcast"
+description="Rebroadcast kernel uevents to libudev-zero clients"
+supervisor=supervise-daemon
+command=/usr/bin/mdevd
+# Netlink group mask 4 is the libudev-zero monitor group. File descriptor 3
+# reports readiness once mdevd listens for kernel uevents.
+command_args="-O 4 -D 3 -f /etc/fplinux/mdevd.conf"
+notify="fd:3"
+input_file=/dev/null
+error_logger="/usr/libexec/fplinux/kmsg --level 4 --tag fplinux-mdevd"
+respawn_delay=1
+respawn_max=0
+retry="TERM/2/KILL/2"
+
+depend() {
+	need devfs sysfs
+}

@@ -2,16 +2,21 @@
 pkgname=fplinux-input
 pkgver=1
 pkgrel=0
-pkgdesc="USB host-keyboard input bridge for FPLinux"
+pkgdesc="Input device runtime and USB host-keyboard bridge for FPLinux"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="GPL-2.0-only"
-depends="fplinux-base fplinux-usb-gadget"
+depends="fplinux-base fplinux-libudev fplinux-usb-gadget libinput-libs mdevd"
 makedepends_build="clang22 lld22"
 makedepends_host="musl-dev linux-headers gcc"
 subpackages="$pkgname-openrc"
 options="!check"
-source="fplinux-input.c fplinux-input.initd"
+source="
+	fplinux-input.c
+	fplinux-input.initd
+	fplinux-mdevd.initd
+	mdevd.conf
+"
 builddir="$srcdir"
 
 build() {
@@ -23,6 +28,12 @@ package() {
 	install -Dm755 "$builddir/fplinux-input" "$pkgdir/usr/bin/fplinux-input"
 	install -Dm755 "$srcdir/fplinux-input.initd" \
 		"$pkgdir/etc/init.d/fplinux-input"
+	install -Dm755 "$srcdir/fplinux-mdevd.initd" \
+		"$pkgdir/etc/init.d/fplinux-mdevd"
+	install -Dm644 "$srcdir/mdevd.conf" "$pkgdir/etc/fplinux/mdevd.conf"
+	mkdir -p "$pkgdir/etc/runlevels/sysinit"
+	ln -s /etc/init.d/fplinux-mdevd \
+		"$pkgdir/etc/runlevels/sysinit/fplinux-mdevd"
 	mkdir -p "$pkgdir/etc/runlevels/default"
 	ln -s /etc/init.d/fplinux-input \
 		"$pkgdir/etc/runlevels/default/fplinux-input"
@@ -35,4 +46,6 @@ openrc() {
 sha512sums="
 7651c4643026c16225ecc66f36c7bb090fe1cc9205f26c19e7c50f2d4f1e392d749f5d7df2fab224de042ea24105f5b2d35eda8d4286e8fc5dae07b11cb2b1b4  fplinux-input.c
 5d569a2ca46a85b020aeaef62a6de17df3949de51aefb3bbc75b8b0c378d4a19b00ff11a6193003298b26c9fe004f2314c196073f69aa4e77f480b11debb0a81  fplinux-input.initd
+b733f718f56a86fe2cbffddcc548074e93d50fa19c72efc37b10113f0bad6474bb5a3fc995c5daad5b1bd8fc26e3f279310a947b9e9faeef134b9446d8a82788  fplinux-mdevd.initd
+36e018b86713d1a68931037b2a0042051ba2cb7693aec75cad666d9012a73a9ad1b2f380450259895be2e912c4adb762c2bb8f3516fcab00ac3be4e1d53fb044  mdevd.conf
 "
