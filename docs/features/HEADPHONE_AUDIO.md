@@ -20,6 +20,8 @@ successive files use different source rates. The direct `hw:0,0` boundary
 supports stereo S16_LE at 24 kHz or 48 kHz while idle silence is disabled. With
 idle silence enabled, direct playback is fixed at 48 kHz; applications use the
 default device when conversion is required.
+Simultaneous [microphone capture](MICROPHONE_AUDIO.md) also requires 48 kHz
+headphone playback.
 
 ## Fitted profile and volume
 
@@ -86,6 +88,9 @@ transition.
 
 ## Limits
 
-Phone microphone, FM radio and speaker audio are outside this feature's support
-boundary. Nokia playback support is partial because its stock VBC EQ is not
+[Phone microphone recording](MICROPHONE_AUDIO.md) uses the capture side of the
+same ALSA card. Every current target also has a selectable
+[speaker output](SPEAKER_AUDIO.md).
+[FM radio](FM_RADIO.md) uses the headphone jack but has a separate playback
+path. Nokia PCM playback support is partial because its stock VBC EQ is not
 implemented; the fitted gain steps do not provide stock tonal parity.

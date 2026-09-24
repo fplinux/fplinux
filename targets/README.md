@@ -28,10 +28,15 @@ All current targets share these limits:
 - Internal phone storage is not writable. A supported target may expose a
   fixed-command read-only physical NAND backup, not a mounted filesystem.
 - USB operates as a peripheral; USB host and OTG are not supported.
-- Calls, SMS, mobile data, Wi-Fi, camera, indicator LEDs, phone microphone, FM
-  radio and speaker audio have no supported FPLinux path. [Headphone audio](../docs/features/HEADPHONE_AUDIO.md)
-  is supported on both INOI targets and has a flat-output implementation on
-  Nokia without its stock VBC EQ.
+- Calls, SMS, mobile data, Wi-Fi, camera and indicator LEDs have no supported
+  FPLinux path.
+- Audio support is target-specific: the phone document states its
+  [headphone](../docs/features/HEADPHONE_AUDIO.md),
+  [speaker](../docs/features/SPEAKER_AUDIO.md),
+  [microphone](../docs/features/MICROPHONE_AUDIO.md) and
+  [FM radio](../docs/features/FM_RADIO.md) support. FPLinux does not apply the
+  stock VBC EQ, so a path that uses it in stock firmware does not have stock
+  tonal parity.
 - Bluetooth support is target-specific and uses the same interfaces in both
   global profiles; follow the phone document for support and limitations.
 - Linux reboot is not supported. Suspend and vibration support are
@@ -71,6 +76,9 @@ Feature and application documents own behavior shared by the current targets:
 - [Local console](../docs/features/LOCAL_CONSOLE.md)
 - [Host keyboard forwarding](../docs/features/HOST_KEYBOARD.md)
 - [Headphone audio](../docs/features/HEADPHONE_AUDIO.md)
+- [Speaker audio](../docs/features/SPEAKER_AUDIO.md)
+- [Phone microphone](../docs/features/MICROPHONE_AUDIO.md)
+- [FM radio](../docs/features/FM_RADIO.md)
 
 ### Hardware, storage and power
 

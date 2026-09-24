@@ -9,25 +9,31 @@ Current target support:
   - 128x160 terminal interface;
   - USB SSH/SFTP and host-keyboard forwarding;
   - ARMADA, TyrQuake, image rotation, JPEG codec/scaling and presentation;
-  - microSD ext4 read/write, card-backed swap and a writable microSD system root;
+  - microSD FAT32 and ext4 read/write, card-backed swap and a writable microSD
+    system root;
   - Bluetooth pairing, bidirectional file transfer and PAN Internet in both
     the default RAM and microsd-uboot profiles;
   - RTC time and alarms, repeated RTC-woken s2idle and peripheral recovery in
     both profiles, including mounted ext4 storage and card-backed swap;
   - stereo S16_LE WAV playback through the 3.5 mm headphones;
-  - brightness, force-feedback and read-only power telemetry interfaces.
+  - selectable 48 kHz PCM playback through the built-in speaker output;
+  - mono 48 kHz recording from the built-in or wired-headset microphone;
+  - FM scan and headphone output through the 3.5 mm jack;
+  - keypad backlight on and off;
+  - manual CPU frequency selection between 768 MHz and 1 GHz;
+  - brightness and read-only power telemetry interfaces.
 
 The optional MicroPythonOS APK launches on this target. Support is partial:
 its UI is not fully adapted to the 128x160 screen. See docs/apps/MICROPYTHONOS.md
 for installation and use.
 
-FAT32 data storage and card hot-swap have not been tested. Internal phone storage
-writes, modem, Wi-Fi and Linux reboot are not supported. Battery-only power-off,
-physical-key wake, battery measurements and charging have not been tested.
-Physical display, keypad and brightness effects have not been tested on this
-configuration. No physical vibration was observed under Linux without a battery.
-Stock firmware can drive the motor, but the cause of the Linux limitation is
-unknown; Linux vibration with a battery has not been tested.
+The microSD slot is under the battery, so card hot-swap does not apply.
+Internal phone storage writes, modem, Wi-Fi and Linux reboot are not supported.
+Battery-only power-off, physical-key wake, battery measurements and charging
+have not been tested. Physical display, key and LCD brightness effects have not
+been tested on this configuration. This phone has no separate vibration motor;
+stock firmware vibrates it through the speaker. FPLinux provides no vibration
+control on this phone.
 
 Headphone playback uses the `aplay` and `amixer` tools already included in this
 image. From the extracted archive, upload a known two-channel, signed 16-bit
@@ -41,22 +47,36 @@ The default device converts input to the 48 kHz hardware rate. Use
 `amixer -c 0 cget name='Headphone Playback Volume'` to inspect the active volume
 control. See docs/features/HEADPHONE_AUDIO.md for fitted volume levels,
 direct-device limits, EQ bypass, on-device calibration, idle silence and its
-power trade-off. Phone microphone, FM radio and speaker audio remain outside
-this feature's support boundary.
+power trade-off. Select the built-in speaker with `PCM Playback Output` and
+start at `Speaker Playback Volume` level 1; see docs/features/SPEAKER_AUDIO.md.
+Select `Capture Source` before microphone recording; see
+docs/features/MICROPHONE_AUDIO.md. FM needs a wired 3.5 mm cable as its antenna;
+see docs/features/FM_RADIO.md for scan and playback commands.
 
 TyrQuake game data can use RAM or ext4 microSD storage. Applications, files and
 Bluetooth pairing records persist on the ext4 system root across cold boots.
 Bluetooth requires firmware and configuration prepared from this exact phone;
 see docs/features/BLUETOOTH.md for its shared use and limits.
 
-The shared hardware interfaces and their limits are described in:
+The shared interfaces, limits and safety procedures are described in:
   - docs/features/AUXADC.md
   - docs/features/BATTERY_TELEMETRY.md
+  - docs/features/BLUETOOTH.md
   - docs/features/CHARGER_STATUS.md
+  - docs/features/CPU_CLOCK.md
   - docs/features/DISPLAY_BACKLIGHT.md
+  - docs/features/FM_RADIO.md
+  - docs/features/HEADPHONE_AUDIO.md
   - docs/features/KEYPAD_BACKLIGHT.md
+  - docs/features/MICROPHONE_AUDIO.md
+  - docs/features/MICROSD.md
+  - docs/features/POWER_OFF.md
+  - docs/features/RTC.md
   - docs/features/SOC_TEMPERATURE.md
+  - docs/features/SPEAKER_AUDIO.md
+  - docs/features/SUSPEND.md
   - docs/features/VIBRATION.md
+  - docs/guides/MICROSD_ROOT.md
 
 This phone uses backlight device inoi240-backlight, with configured levels
 0 through 31 and default 31. Shared interface names are sc2720-battery,
