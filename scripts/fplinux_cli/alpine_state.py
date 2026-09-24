@@ -48,7 +48,13 @@ SHARED_APORT_SOURCES = {
     "fplinux-console": (*MULTITAP_SOURCES, *INPUT_DEVICE_SOURCES, *KEYPAD_CODE_SOURCES),
     "fplinux-cpuclock": CLI_SOURCES,
     "fplinux-jpeg": CLI_SOURCES,
-    "fplinux-micropythonos": (*MULTITAP_SOURCES, *FB_SESSION_SOURCES),
+    "fplinux-micropythonos": (
+        *MULTITAP_SOURCES,
+        *FB_SESSION_SOURCES,
+        *INPUT_DEVICE_SOURCES,
+        *KEYPAD_CODE_SOURCES,
+        *INPUT_SESSION_SOURCES,
+    ),
     "fplinux-present": (
         *FB_SESSION_SOURCES,
         *CLI_SOURCES,

@@ -30,6 +30,7 @@ unless an individual file carries a different SPDX identifier.
 | libudev-zero 1.0.4              | Device enumeration for libinput and BlueZ      | ISC; upstream release archive patched to tag keypads with only high key codes              |
 | mdevd                           | Uevent rebroadcast for hotplug                 | ISC; supplied by the pinned Alpine package set                                             |
 | xkeyboard-config 2.47           | Keyboard layout data for applications          | MIT, X11, HPND and xkeyboard-config-Zinoviev notices; `COPYING` shipped in each layout APK |
+| libxkbcommon 1.13.1             | Keyboard text translation in MicroPythonOS     | MIT, MIT-open-group, HPND and HPND-sell-variant; linked statically into MicroPythonOS      |
 | TyrQuake 0.71                   | Quake engine for FPLinux                       | GPL-2.0-or-later; bundled decoders use MIT-0, CC0-1.0 and MIT                              |
 | MicroPythonOS 0.16.2 stack      | Optional graphical runtime and applications    | GPL-2.0-only, MIT, OFL-1.1, Zlib and bundled custom notices                                |
 | BusyBox                         | Shell and base userspace applets               | GPL-2.0-only; supplied by the pinned Alpine package set                                    |
@@ -49,7 +50,8 @@ of the source tree, root filesystem, RAM image, source companion or release
 archive.
 
 The MicroPythonOS APKBUILD pins the MicroPythonOS, `lvgl_micropython`,
-MicroPython, `micropython-lib`, LVGL, freezeFS and pycparser source commits. It
+MicroPython, `micropython-lib`, LVGL, freezeFS and pycparser source commits and
+the libxkbcommon release archive. It
 verifies those archives and every local source or patch with checked-in SHA-512
 sums. The resulting APK installs the applicable runtime, font, image-decoder and
 FPLinux adapter license texts under

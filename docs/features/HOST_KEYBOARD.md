@@ -35,9 +35,10 @@ If the USB connection or keyboard disappears, the phone releases forwarded keys
 instead of leaving a modifier held. Stopping the client also releases the host
 keyboard grab.
 
-[TyrQuake](../apps/TYRQUAKE.md) accepts the forwarded device in its keyboard
-input mode. [MicroPythonOS](../apps/MICROPYTHONOS.md) reads the normalized phone
-keypad instead and does not accept the host keyboard bridge.
+[TyrQuake](../apps/TYRQUAKE.md) accepts the forwarded device alongside the
+phone keypad and other keyboards and mice.
+[MicroPythonOS](../apps/MICROPYTHONOS.md#use-a-keyboard) accepts it alongside
+the phone keypad and types its keys as text.
 
 This feature forwards a host keyboard over the phone's USB peripheral link; it
 does not make the phone a USB host. Check the selected phone page for its
