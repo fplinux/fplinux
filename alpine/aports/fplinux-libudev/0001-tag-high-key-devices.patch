@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FPLinux maintainers <fplinux@example.invalid>
+Date: Wed, 23 Sep 2026 00:00:00 +0000
+Subject: [PATCH] Tag devices that have only high key codes as keys
+
+udev's input_id builtin sets ID_INPUT_KEY for a device whose keys all lie in
+the blocks above the button codes. libinput ignores a device without an
+input tag, so a keypad that reports only such codes was unusable. Test the
+same blocks when no key below the buttons is present.
+
+Signed-off-by: FPLinux maintainers <fplinux@example.invalid>
+---
+ udev_device.c | 27 +++++++++++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+
+diff --git a/udev_device.c b/udev_device.c
+index 58fe059..25a7c92 100644
+--- a/udev_device.c
++++ b/udev_device.c
+@@ -406,6 +406,29 @@ static int test_bit(unsigned long *arr, unsigned long bit)
+     return !!(arr[BIT_WORD(bit)] & BIT_MASK(bit));
+ }
+
++// keys above the button block, as the udev input_id builtin tests them
++static int has_high_key(unsigned long *key_bits)
++{
++    static const struct {
++        unsigned long start;
++        unsigned long end;
++    } blocks[] = {
++        { KEY_OK, BTN_DPAD_UP },
++        { KEY_ALS_TOGGLE, BTN_TRIGGER_HAPPY },
++    };
++    unsigned long block, bit;
++
++    for (block = 0; block < sizeof(blocks) / sizeof(blocks[0]); block++) {
++        for (bit = blocks[block].start; bit < blocks[block].end; bit++) {
++            if (test_bit(key_bits, bit)) {
++                return 1;
++            }
++        }
++    }
++
++    return 0;
++}
++
+ static void set_properties_from_evdev(struct udev_device *udev_device)
+ {
+     // https://kernel.org/doc/html/latest/driver-api/input.html#c.input_dev
+@@ -515,6 +538,10 @@ static void set_properties_from_evdev(struct udev_device *udev_device)
+
+         return;
+     }
++
++    if (has_high_key(key_bits)) {
++        udev_list_entry_add(&udev_device->properties, "ID_INPUT_KEY", "1", 0);
++    }
+ }
+
+ static void set_properties_from_props(struct udev_device *udev_device)

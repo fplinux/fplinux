@@ -43,7 +43,6 @@ fplinux-bluetooth = [
   "libexpat-2.8.4-r0.apk",
   "libgcc-15.2.0-r5.apk",
   "libncursesw-6.6_p20260516-r0.apk",
-  "libudev-zero-1.0.4-r0.apk",
   "ncurses-terminfo-base-6.6_p20260516-r0.apk",
   "pcre2-10.48-r0.apk",
   "readline-8.3.3-r1.apk",
@@ -430,12 +429,6 @@ repository = "main"
 file = "libffi-3.5.2-r1.apk"
 sha256 = "cf9343ce68d6c54f1112c5328c8a39ea3a3c289c1020ddec164f0f5e5e19aaf4"
 bytes = 15149
-
-[[package]]
-repository = "community"
-file = "libudev-zero-1.0.4-r0.apk"
-sha256 = "6b5298e7f54ae8db9dcaee10200a54c4dc00a20dd06cd3c165224efde9db904e"
-bytes = 10337
 
 [[package]]
 repository = "main"

@@ -1,0 +1,27 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-libudev
+pkgver=1.0.4
+pkgrel=0
+pkgdesc="libudev-zero device library that also tags keypads with high key codes"
+url="https://github.com/illiliti/libudev-zero"
+arch="armv7"
+license="ISC"
+makedepends_build="clang22 lld22"
+makedepends_host="musl-dev linux-headers"
+options="!check"
+source="libudev-zero-$pkgver.tar.gz::https://github.com/illiliti/libudev-zero/archive/$pkgver.tar.gz
+	0001-tag-high-key-devices.patch
+"
+builddir="$srcdir/libudev-zero-$pkgver"
+
+build() {
+	make CC="$CC" PREFIX=/usr libudev.so.1
+}
+
+package() {
+	install -Dm755 "$builddir/libudev.so.1" "$pkgdir/usr/lib/libudev.so.1"
+}
+sha512sums="
+1c8289ce404a5d0f0596303297f596481e8f319ab69cda4c97cf51baf1b2d0efc54c7156a67eb56e0b1bb7ed33191d2a85a44ab4718d8595955e3c3b38c3b922  libudev-zero-1.0.4.tar.gz
+55620d7fdb97b78341d9bb6130a79aa09aaf417b46cc35e1dc4a76dc09ceda47bb9236ea67347c1fe2eb10e11d97d0d8d347456200bc64f2d3896d53c03eb8de  0001-tag-high-key-devices.patch
+"

@@ -59,6 +59,7 @@ COMMON_PACKAGES = (
     "fplinux-base",
     "fplinux-console",
     "fplinux-input",
+    "fplinux-libudev",
 )
 PACKAGE_ID = re.compile(r"[a-z0-9][a-z0-9+._-]*")
 
