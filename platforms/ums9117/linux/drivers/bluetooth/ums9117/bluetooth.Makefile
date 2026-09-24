@@ -2,3 +2,4 @@
 obj-$(CONFIG_BT_UMS9117_CM4) += ums9117-bt.o
 ccflags-y += -I$(srctree)/drivers/bluetooth
 ums9117-bt-y := ums9117-bluetooth.o cm4-mailbox.o cm4-setup.o cm4-hci.o
+ums9117-bt-$(CONFIG_RADIO_UMS9117_CM4) += cm4-fm.o

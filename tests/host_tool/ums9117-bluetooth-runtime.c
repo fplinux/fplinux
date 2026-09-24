@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <linux/completion.h>
 #include <linux/err.h>
 #include <linux/ktime.h>
 #include <linux/workqueue.h>
@@ -39,6 +40,14 @@ static struct {
 	bool race_connection;
 	bool reject_scan;
 	int suspend_error;
+	u8 fm_output[512];
+	size_t fm_output_bytes;
+	u8 fm_input[512];
+	size_t fm_input_bytes;
+	size_t fm_chunk;
+	bool fm_sent;
+	unsigned int fm_writes;
+	unsigned long fm_wait_ms;
 } fake;
 
 static void pump(void)
@@ -47,6 +56,17 @@ static void pump(void)
 		return;
 	fake.work->pending = false;
 	fake.work->work.function(&fake.work->work);
+}
+
+unsigned long wait_for_completion_timeout(struct completion *completion,
+					  unsigned long timeout)
+{
+	unsigned long elapsed;
+
+	fake.fm_wait_ms = timeout;
+	for (elapsed = 0; elapsed < timeout && !completion->done; elapsed++)
+		pump();
+	return completion->done;
 }
 
 bool schedule_delayed_work(struct delayed_work *work, unsigned long delay)
@@ -262,6 +282,32 @@ int ums9117_cm4_mailbox_h4_read(u8 *data, size_t capacity, size_t *received)
 	return 0;
 }
 
+int ums9117_cm4_mailbox_fm_write(const u8 *data, size_t bytes)
+{
+	assert(bytes <= sizeof(fake.fm_output));
+	memcpy(fake.fm_output, data, bytes);
+	fake.fm_output_bytes = bytes;
+	fake.fm_sent = true;
+	fake.fm_writes++;
+	return 0;
+}
+
+int ums9117_cm4_mailbox_fm_read(u8 *data, size_t capacity, size_t *received)
+{
+	size_t bytes = fake.fm_sent ? fake.fm_input_bytes : 0;
+
+	if (bytes > capacity)
+		bytes = capacity;
+	if (fake.fm_chunk && bytes > fake.fm_chunk)
+		bytes = fake.fm_chunk;
+	memcpy(data, fake.fm_input, bytes);
+	memmove(fake.fm_input, fake.fm_input + bytes,
+		fake.fm_input_bytes - bytes);
+	fake.fm_input_bytes -= bytes;
+	*received = bytes;
+	return 0;
+}
+
 int ums9117_cm4_mailbox_suspend(void)
 {
 	if (fake.peer_busy || fake.input_bytes)
@@ -459,6 +505,109 @@ static void undrained_peer_veto_is_retryable(void)
 	stop();
 }
 
+static void fm_split_completion_and_seek_event_preserve_bluetooth(void)
+{
+	const u8 seek_request[] = { 0x01, 0x8c, 0xfc, 0x04,
+				    0x04, 0x2e, 0x22, 0x01 };
+	const u8 seek_replies[] = { 0x04, 0x0e, 0x04, 0x01, 0x8c, 0xfc,
+				    0x00, 0x04, 0xff, 0x06, 0x30, 0x00,
+				    0x48, 0x1c, 0x10, 0x27 };
+	const u8 seek_event[] = { 0x04, 0xff, 0x06, 0x30, 0x00,
+				  0x48, 0x1c, 0x10, 0x27 };
+	const u8 payload[] = { 0x2e, 0x22, 0x01 };
+	u8 reply[9];
+	size_t chunk;
+
+	/* Exercise both byte-split events and two events sharing one ring read. */
+	for (chunk = 1; chunk <= sizeof(seek_replies); chunk++) {
+		start();
+		memcpy(fake.fm_input, seek_replies, sizeof(seek_replies));
+		fake.fm_input_bytes = sizeof(seek_replies);
+		fake.fm_chunk = chunk;
+		assert(ums9117_hci_fm_command(0x04, payload, sizeof(payload),
+					      reply, sizeof(reply), true) == 9);
+		assert(fake.fm_writes == 1);
+		assert(fake.fm_wait_ms == 15000);
+		assert(fake.fm_output_bytes == sizeof(seek_request));
+		assert(!memcmp(fake.fm_output, seek_request,
+			       sizeof(seek_request)));
+		assert(!memcmp(reply, seek_event, sizeof(seek_event)));
+		data_still_flows();
+		stop();
+	}
+}
+
+static void fm_timeout_quarantines_late_replies_without_stopping_bluetooth(void)
+{
+	const u8 late_reply[] = { 0x04, 0x0e, 0x04, 0x01, 0x8c, 0xfc, 0x01 };
+	const u8 frequency[] = { 0x2e, 0x22 };
+	u8 reply[11];
+
+	start();
+	assert(!ums9117_hci_fm_hold());
+	assert(ums9117_hci_fm_command(0x01, frequency, sizeof(frequency), reply,
+				      sizeof(reply), false) == -ETIMEDOUT);
+	assert(fake.fm_wait_ms == 1000);
+	memcpy(fake.fm_input, late_reply, sizeof(late_reply));
+	fake.fm_input_bytes = sizeof(late_reply);
+	pump();
+	assert(!fake.fm_input_bytes);
+	assert(ums9117_hci_fm_command(0x01, frequency, sizeof(frequency), reply,
+				      sizeof(reply), false) == -ETIMEDOUT);
+	assert(fake.fm_writes == 1);
+	data_still_flows();
+	assert(ums9117_hci_suspend_prepare() == -EBUSY);
+	stop();
+}
+
+static void fm_commands_preserve_config_bytes_and_short_error_responses(void)
+{
+	const u8 enable_reply[] = { 0x04, 0x0e, 0x04, 0x01, 0x8c, 0xfc, 0x00 };
+	const u8 tune_error[] = { 0x04, 0x0e, 0x04, 0x01, 0x8c, 0xfc, 0x01 };
+	const u8 expected_header[] = {
+		0x01, 0x8c, 0xfc, 0x83, 0x00, 0x2e, 0x22
+	};
+	u8 payload[130] = { 0x2e, 0x22 };
+	u8 reply[11];
+	size_t index;
+
+	/* Synthetic calibration bytes, including embedded H4-looking values. */
+	for (index = 2; index < sizeof(payload); index++)
+		payload[index] = index - 2;
+	start();
+	memcpy(fake.fm_input, enable_reply, sizeof(enable_reply));
+	fake.fm_input_bytes = sizeof(enable_reply);
+	assert(ums9117_hci_fm_command(0, payload, sizeof(payload), reply, 7,
+				      false) == 7);
+	assert(fake.fm_output_bytes == 135);
+	assert(!memcmp(fake.fm_output, expected_header,
+		       sizeof(expected_header)));
+	assert(!memcmp(fake.fm_output + 7, payload + 2, 128));
+	assert(!memcmp(reply, enable_reply, sizeof(enable_reply)));
+	fake.fm_sent = false;
+	memcpy(fake.fm_input, tune_error, sizeof(tune_error));
+	fake.fm_input_bytes = sizeof(tune_error);
+	assert(ums9117_hci_fm_command(1, payload, 2, reply, sizeof(reply),
+				      false) == 7);
+	assert(!memcmp(reply, tune_error, sizeof(tune_error)));
+	assert(fake.fm_writes == 2);
+	data_still_flows();
+	stop();
+}
+
+static void enabled_fm_vetoes_suspend_until_disable(void)
+{
+	start();
+	assert(!ums9117_hci_fm_hold());
+	assert(ums9117_hci_suspend_prepare() == -EBUSY);
+	data_still_flows();
+	ums9117_hci_fm_release();
+	assert(!ums9117_hci_suspend_prepare());
+	assert(!ums9117_hci_suspend());
+	assert(!ums9117_hci_post_suspend());
+	stop();
+}
+
 int main(void)
 {
 	active_connection_is_preserved();
@@ -473,6 +622,10 @@ int main(void)
 	close_discards_a_frame_reassembled_after_reopening();
 	receive_callback_failure_stops_following_delivery();
 	native_receiver_error_stops_following_delivery();
+	fm_split_completion_and_seek_event_preserve_bluetooth();
+	fm_timeout_quarantines_late_replies_without_stopping_bluetooth();
+	fm_commands_preserve_config_bytes_and_short_error_responses();
+	enabled_fm_vetoes_suspend_until_disable();
 	puts("HCI retained transport component checks passed");
 	return 0;
 }

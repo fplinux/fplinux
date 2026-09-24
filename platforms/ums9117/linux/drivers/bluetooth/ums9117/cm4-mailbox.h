@@ -24,9 +24,17 @@ int ums9117_cm4_mailbox_h4_continue(void);
 int ums9117_cm4_mailbox_h4_write(const u8 *data, size_t bytes, size_t *written);
 int ums9117_cm4_mailbox_h4_read(u8 *data, size_t capacity, size_t *received);
 /*
- * The stream owner has stopped new I/O. Suspend succeeds only after both ring0
- * directions and queued notifications drain; the native channel remains
- * claimed to service its no-suspend IRQ. Resume preserves peer state.
+ * Ring1 has no H4 TX padding. Write publishes the entire command once, or
+ * returns -EAGAIN without publication. The same stream worker owns both rings;
+ * it must allow only one FM command in flight and frame the RX event stream.
+ */
+int ums9117_cm4_mailbox_fm_write(const u8 *data, size_t bytes);
+int ums9117_cm4_mailbox_fm_read(u8 *data, size_t capacity, size_t *received);
+/*
+ * The stream owner has stopped new I/O and refuses suspend while FM may be
+ * enabled. Both rings and queued notifications must drain. CM4 and shared
+ * memory remain retained. The native channel stays claimed to service its
+ * no-suspend IRQ. Resume preserves peer state.
  */
 int ums9117_cm4_mailbox_suspend(void);
 int ums9117_cm4_mailbox_resume(void);

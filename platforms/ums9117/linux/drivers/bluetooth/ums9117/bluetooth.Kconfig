@@ -15,3 +15,12 @@ config BT_UMS9117_CM4
 	  System RAM. Firmware is loaded on an explicit start after the root
 	  filesystem is mounted. System sleep retains the controller and is
 	  refused while a Bluetooth connection or initialization is active.
+
+config RADIO_UMS9117_CM4
+	bool "UMS9117 CM4 FM receiver"
+	depends on BT_UMS9117_CM4 && VIDEO_DEV=y && MEDIA_RADIO_SUPPORT
+	help
+	  Expose the CM4 FM receiver through V4L2 on boards supplying fitted
+	  FM configuration in the device tree. The receiver shares the Bluetooth
+	  transport and starts only when userspace sets a frequency. Headphone
+	  audio is routed separately through the ALSA FM Playback Switch.

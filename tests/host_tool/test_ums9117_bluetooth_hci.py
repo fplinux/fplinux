@@ -61,7 +61,7 @@ class Ums9117BluetoothHciHostTests(unittest.TestCase):
         self.run_component("mailbox")
 
     def test_retained_transport_admission_rollback_and_stream(self) -> None:
-        """Fake peer/core boundaries exercise real suspend gating and stream retention."""
+        """Fake peers exercise suspend, FM framing, timeout isolation and BT retention."""
         self.run_component("runtime")
 
 
