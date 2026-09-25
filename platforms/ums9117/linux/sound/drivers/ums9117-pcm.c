@@ -68,14 +68,27 @@
 #define UMS9117_AUDIO_PROFILE_LEVEL_COUNT 9U
 /*
  * The header is followed by the speaker section, the combined headphone and
- * speaker section and, on boards with speaker vibration, the vibrate tone.
- * Each output section starts with its PA word; the combined section then adds
- * its headphone PGA level before the gains.
+ * speaker section, the playback processing and, on boards with speaker
+ * vibration, the vibrate tone. Each output section starts with its PA word;
+ * the combined section then adds its headphone PGA level before the gains.
  */
 #define UMS9117_AUDIO_PROFILE_SPEAKER_BYTES \
 	(sizeof(u16) + UMS9117_AUDIO_PROFILE_LEVEL_COUNT)
 #define UMS9117_AUDIO_PROFILE_COMBINED_BYTES \
 	(sizeof(u16) + sizeof(u8) + UMS9117_AUDIO_PROFILE_LEVEL_COUNT)
+/*
+ * The processing holds the headphone, speaker and combined routes in that
+ * order. Each has S6, the ALC enable and its ALC words, then for each DAC rate
+ * six EQ6 sections of scale, B0, B1, -A1, B2 and -A2, all little-endian.
+ */
+#define UMS9117_AUDIO_PROFILE_EQ_SECTION_BYTES (6 * sizeof(u16))
+#define UMS9117_AUDIO_PROFILE_ROUTE_PROCESSING_BYTES                     \
+	(sizeof(u16) + sizeof(u8) +                                      \
+	 UMS9117_AUDIO_ALC_WORD_COUNT * sizeof(u16) +                    \
+	 UMS9117_AUDIO_DAC_RATE_COUNT * UMS9117_AUDIO_EQ_SECTION_COUNT * \
+		 UMS9117_AUDIO_PROFILE_EQ_SECTION_BYTES)
+#define UMS9117_AUDIO_PROFILE_PROCESSING_BYTES \
+	(3 * UMS9117_AUDIO_PROFILE_ROUTE_PROCESSING_BYTES)
 /* Oscillator pairs for each DAC rate, then level, fall, rise and hold. */
 #define UMS9117_AUDIO_PROFILE_VIBRATE_TONE_BYTES \
 	(2 * UMS9117_AUDIO_DAC_RATE_COUNT * sizeof(u32) + 5 * sizeof(u16))
@@ -86,8 +99,6 @@
 #define UMS9117_AUDIO_PROFILE_HEADPHONE_PGA_MAX 7U
 #define UMS9117_AUDIO_PROFILE_PA_WORD_MAX 0xffU
 #define UMS9117_AUDIO_PROFILE_DAC_GAIN_MAX 127U
-#define UMS9117_AUDIO_PROFILE_SOURCE_EQ_BYPASS 0U
-#define UMS9117_AUDIO_PROFILE_SOURCE_EQ_ACTIVE_OMITTED 1U
 
 #define UMS9117_VIBRATOR_NAME "UMS9117 speaker vibrator"
 #define UMS9117_VIBRATOR_PHYS "fplinux/vibrator0"
@@ -107,7 +118,6 @@ struct ums9117_audio_profile_data {
 	u8 magic[UMS9117_AUDIO_PROFILE_MAGIC_SIZE];
 	u8 compatible[UMS9117_AUDIO_PROFILE_COMPATIBLE_SIZE];
 	u8 headphone_pga;
-	u8 source_eq;
 	u8 dac_gain[UMS9117_AUDIO_PROFILE_LEVEL_COUNT];
 };
 
@@ -137,12 +147,14 @@ struct ums9117_audio_profile {
 	 * halved PCM samples make the headphones 6 dB quieter in this mode.
 	 */
 	u8 combined_dac_gain[UMS9117_AUDIO_PROFILE_LEVEL_COUNT];
+	struct ums9117_audio_dac_processing headphone_processing;
+	struct ums9117_audio_dac_processing speaker_processing;
+	struct ums9117_audio_dac_processing combined_processing;
 	struct ums9117_audio_vibrate_tone vibrate_tone;
 	u16 speaker_pa_word;
 	u16 combined_pa_word;
 	u8 codec_volume;
 	u8 combined_codec_volume;
-	bool source_eq_omitted;
 	bool fitted;
 };
 
@@ -351,22 +363,80 @@ static bool ums9117_pcm_headphone_pga_valid(u8 pga)
 	       pga <= UMS9117_AUDIO_PROFILE_HEADPHONE_PGA_MAX;
 }
 
+static s16 ums9117_pcm_read_s16(const u8 **data)
+{
+	s16 value = (s16)get_unaligned_le16(*data);
+
+	*data += sizeof(u16);
+	return value;
+}
+
+/*
+ * An unstable section drives a full-scale DC or fs/2 square wave into the
+ * speaker amplifier. With A0 as unity the quantized poles lie inside the unit
+ * circle when |a2| < 1 and |a1| < 1 + a2.
+ */
+static bool
+ums9117_pcm_eq_section_valid(const struct ums9117_audio_eq_section *section)
+{
+	int minus_a1 = section->minus_a1;
+	int minus_a2 = section->minus_a2;
+
+	return section->scale > 0 && abs(minus_a2) < UMS9117_AUDIO_EQ_A0 &&
+	       abs(minus_a1) < UMS9117_AUDIO_EQ_A0 - minus_a2;
+}
+
+static int ums9117_pcm_parse_dac_processing(
+	const u8 *data, struct ums9117_audio_dac_processing *processing)
+{
+	struct ums9117_audio_eq_section *section;
+	unsigned int rate;
+	unsigned int i;
+	u8 alc_enabled;
+
+	processing->output_scale = get_unaligned_le16(data);
+	if (!processing->output_scale || processing->output_scale > S16_MAX)
+		return -EINVAL;
+	data += sizeof(u16);
+	alc_enabled = *data++;
+	if (alc_enabled > 1)
+		return -EINVAL;
+	processing->alc_enabled = alc_enabled;
+	for (i = 0; i < UMS9117_AUDIO_ALC_WORD_COUNT; i++)
+		processing->alc[i] = ums9117_pcm_read_s16(&data);
+	for (rate = 0; rate < UMS9117_AUDIO_DAC_RATE_COUNT; rate++) {
+		for (i = 0; i < UMS9117_AUDIO_EQ_SECTION_COUNT; i++) {
+			section = &processing->section[rate][i];
+			section->scale = ums9117_pcm_read_s16(&data);
+			section->b0 = ums9117_pcm_read_s16(&data);
+			section->b1 = ums9117_pcm_read_s16(&data);
+			section->minus_a1 = ums9117_pcm_read_s16(&data);
+			section->b2 = ums9117_pcm_read_s16(&data);
+			section->minus_a2 = ums9117_pcm_read_s16(&data);
+			if (!ums9117_pcm_eq_section_valid(section))
+				return -EINVAL;
+		}
+	}
+	return 0;
+}
+
 static int ums9117_pcm_parse_audio_profile(
 	const char *machine_compatible, const struct firmware *firmware,
 	bool speaker_vibration, struct ums9117_audio_profile *profile)
 {
 	u8 compatible[UMS9117_AUDIO_PROFILE_COMPATIBLE_SIZE] = {};
 	const struct ums9117_audio_profile_data *data;
+	const u8 *processing;
 	const u8 *combined;
 	const u8 *speaker;
 	size_t compatible_length;
 	size_t size;
 	u8 combined_pga;
-	u8 source_eq;
 	int ret;
 
 	size = sizeof(*data) + UMS9117_AUDIO_PROFILE_SPEAKER_BYTES +
-	       UMS9117_AUDIO_PROFILE_COMBINED_BYTES;
+	       UMS9117_AUDIO_PROFILE_COMBINED_BYTES +
+	       UMS9117_AUDIO_PROFILE_PROCESSING_BYTES;
 	if (speaker_vibration)
 		size += UMS9117_AUDIO_PROFILE_VIBRATE_TONE_BYTES;
 	if (firmware->size != size)
@@ -383,16 +453,10 @@ static int ums9117_pcm_parse_audio_profile(
 		return -EINVAL;
 	if (!ums9117_pcm_headphone_pga_valid(data->headphone_pga))
 		return -EINVAL;
-	source_eq = data->source_eq;
-	if (source_eq != UMS9117_AUDIO_PROFILE_SOURCE_EQ_BYPASS &&
-	    source_eq != UMS9117_AUDIO_PROFILE_SOURCE_EQ_ACTIVE_OMITTED)
-		return -EINVAL;
 	ret = ums9117_pcm_parse_dac_gains(data->dac_gain, profile->dac_gain);
 	if (ret)
 		return ret;
 	profile->codec_volume = data->headphone_pga - 1U;
-	profile->source_eq_omitted =
-		source_eq == UMS9117_AUDIO_PROFILE_SOURCE_EQ_ACTIVE_OMITTED;
 
 	speaker = firmware->data + sizeof(*data);
 	profile->speaker_pa_word = get_unaligned_le16(speaker);
@@ -416,9 +480,25 @@ static int ums9117_pcm_parse_audio_profile(
 	if (ret)
 		return ret;
 
+	processing = combined + UMS9117_AUDIO_PROFILE_COMBINED_BYTES;
+	ret = ums9117_pcm_parse_dac_processing(processing,
+					       &profile->headphone_processing);
+	if (ret)
+		return ret;
+	ret = ums9117_pcm_parse_dac_processing(
+		processing + UMS9117_AUDIO_PROFILE_ROUTE_PROCESSING_BYTES,
+		&profile->speaker_processing);
+	if (ret)
+		return ret;
+	ret = ums9117_pcm_parse_dac_processing(
+		processing + 2 * UMS9117_AUDIO_PROFILE_ROUTE_PROCESSING_BYTES,
+		&profile->combined_processing);
+	if (ret)
+		return ret;
+
 	if (speaker_vibration) {
 		ret = ums9117_pcm_parse_vibrate_tone(
-			combined + UMS9117_AUDIO_PROFILE_COMBINED_BYTES,
+			processing + UMS9117_AUDIO_PROFILE_PROCESSING_BYTES,
 			&profile->vibrate_tone);
 		if (ret)
 			return ret;
@@ -2566,13 +2646,9 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 			return ret;
 		}
 	}
-	if (audio->profile.fitted && audio->profile.source_eq_omitted)
-		dev_dbg(audio->dev,
-			"headphone volume source: fitted gain profile; source EQ omitted\n");
-	else
-		dev_dbg(audio->dev, "headphone volume source: %s\n",
-			audio->profile.fitted ? "fitted gain profile" :
-						"generic defaults");
+	dev_dbg(audio->dev, "headphone volume source: %s\n",
+		audio->profile.fitted ? "fitted gain profile" :
+					"generic defaults");
 	return 0;
 }
 

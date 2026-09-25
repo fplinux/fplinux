@@ -30,6 +30,195 @@ INOI_VIBRATE_TONE_SECTION = bytes.fromhex(
 # The Headfree section shared by all three fitted phones: PA word 0x001a,
 # headphone PGA 7, then the digital gains of volume levels 1..9.
 FITTED_HEADFREE_SECTION = bytes.fromhex("1a00 07 4e 47 3b 35 2f 2a 24 1f 1a")
+# The processing section follows the 42-byte header and the 11-byte speaker and
+# 12-byte combined sections; each playback route in it has the same size.
+PROCESSING_OFFSET = 65
+PROCESSING_ROUTE_SIZE = 241
+# An EQ6 section as the signed register words S, B0, B1, -A1, B2, -A2; this one
+# passes audio unchanged.
+PASS_THROUGH = (4096, 16384, 0, 0, 0, 0)
+# Expected register words of the fitted pass-mode sections at 24, 32 and 48 kHz,
+# computed independently of the production generator. Section 0 is the low-cut
+# filter; sections 1..5 are bands 0..4.
+NOKIA_HEADSET_SECTIONS = (
+    # 24 kHz: the 15.5 kHz band is not below half the rate and passes through.
+    (
+        PASS_THROUGH,
+        (4096, 16309, -32259, 32259, 15961, -15887),
+        (4096, 16640, -28170, 28170, 11880, -12136),
+        (4096, 16459, -30424, 30424, 15037, -15113),
+        (4096, 16696, -19509, 19509, 10894, -11206),
+        PASS_THROUGH,
+    ),
+    # 32 kHz
+    (
+        PASS_THROUGH,
+        (4096, 16330, -32411, 32411, 16088, -16035),
+        (4096, 16579, -29287, 29287, 12911, -13107),
+        (4096, 16441, -31195, 31195, 15365, -15423),
+        (4096, 16625, -23899, 23899, 12119, -12361),
+        (4096, 10893, 3025, -3025, -7855, 13344),
+    ),
+    # 48 kHz
+    (
+        PASS_THROUGH,
+        (4096, 16345, -32528, 32528, 16185, -16147),
+        (4096, 16520, -30421, 30421, 13996, -14132),
+        (4096, 16421, -31849, 31849, 15701, -15739),
+        (4096, 16549, -27698, 27698, 13433, -13598),
+        (4096, 11541, 2893, -2893, -4997, 9838),
+    ),
+)
+NOKIA_HANDSFREE_SECTIONS = (
+    # 24 kHz: the 0 dB bands and the 22 kHz band pass through.
+    (
+        (4096, 16074, -22532, 22349, 6577, -6447),
+        (4096, 16253, -31199, 31199, 15271, -15140),
+        PASS_THROUGH,
+        PASS_THROUGH,
+        PASS_THROUGH,
+        PASS_THROUGH,
+    ),
+    # 32 kHz
+    (
+        (4096, 16154, -24642, 24534, 8557, -8433),
+        (4096, 16282, -31633, 31633, 15534, -15433),
+        PASS_THROUGH,
+        PASS_THROUGH,
+        PASS_THROUGH,
+        PASS_THROUGH,
+    ),
+    # 48 kHz
+    (
+        (4096, 16228, -26972, 26919, 10779, -10673),
+        (4096, 16316, -32051, 32051, 15818, -15750),
+        PASS_THROUGH,
+        PASS_THROUGH,
+        PASS_THROUGH,
+        (4096, 8373, 14455, -14455, 6595, 1415),
+    ),
+)
+NOKIA_HEADFREE_SECTIONS = (
+    # 24 kHz: the 15 kHz band is not below half the rate and passes through.
+    (
+        (4096, 15772, -22139, 21780, 6466, -6212),
+        (4096, 16217, -32293, 32293, 16109, -15942),
+        (4096, 16265, -32473, 32473, 16219, -16101),
+        (4096, 16822, -29088, 29088, 12516, -12955),
+        (4096, 15460, -11250, 11250, 450, 473),
+        PASS_THROUGH,
+    ),
+    # 32 kHz
+    (
+        (4096, 15926, -24316, 24102, 8449, -8202),
+        (4096, 16258, -32416, 32416, 16178, -16052),
+        (4096, 16288, -32533, 32533, 16252, -16157),
+        (4096, 16722, -29980, 29980, 13402, -13741),
+        (4096, 15642, -15953, 15953, 3546, -2804),
+        (4096, 11455, 3026, -3026, -8371, 13298),
+    ),
+    # 48 kHz
+    (
+        (4096, 16071, -26727, 26623, 10685, -10476),
+        (4096, 16310, -32567, 32567, 16266, -16193),
+        (4096, 16335, -32650, 32650, 16319, -16270),
+        (4096, 16614, -30902, 30902, 14354, -14584),
+        (4096, 15835, -21041, 21041, 6941, -6392),
+        (4096, 11615, 1550, -1550, -7563, 12330),
+    ),
+)
+INOI_HEADSET_SECTIONS = ((PASS_THROUGH,) * 6,) * 3
+INOI_HANDSFREE_SECTIONS = (
+    # 24 kHz: the 22 kHz band and the 0 dB band pass through.
+    (
+        (4096, 15676, -24535, 24235, 8943, -8533),
+        (4096, 15138, -30241, 30241, 15134, -13888),
+        PASS_THROUGH,
+        (4096, 17622, -23169, 23169, 9124, -10362),
+        PASS_THROUGH,
+        PASS_THROUGH,
+    ),
+    # 32 kHz
+    (
+        (4096, 15848, -26286, 26107, 10490, -10130),
+        (4096, 15371, -30724, 30724, 15369, -14357),
+        PASS_THROUGH,
+        (4096, 17349, -25935, 25935, 10723, -11689),
+        PASS_THROUGH,
+        PASS_THROUGH,
+    ),
+    # 48 kHz
+    (
+        (4096, 16024, -28232, 28148, 12232, -11953),
+        (4096, 15861, -31712, 31712, 15861, -15338),
+        (4096, 18695, 25902, -25902, 8125, -10437),
+        (4096, 17052, -28507, 28507, 12460, -13128),
+        PASS_THROUGH,
+        PASS_THROUGH,
+    ),
+)
+INOI_HEADFREE_SECTIONS = (
+    # 24 kHz: only the low-cut filter and the 150 Hz band are enabled.
+    (
+        (4096, 15676, -24535, 24235, 8943, -8533),
+        (4096, 16293, -32504, 32504, 16237, -16146),
+        PASS_THROUGH,
+        PASS_THROUGH,
+        PASS_THROUGH,
+        PASS_THROUGH,
+    ),
+    # 32 kHz
+    (
+        (4096, 15848, -26286, 26107, 10490, -10130),
+        (4096, 16328, -32610, 32610, 16296, -16240),
+        PASS_THROUGH,
+        PASS_THROUGH,
+        PASS_THROUGH,
+        PASS_THROUGH,
+    ),
+    # 48 kHz
+    (
+        (4096, 16024, -28232, 28148, 12232, -11953),
+        (4096, 16346, -32664, 32664, 16326, -16288),
+        PASS_THROUGH,
+        PASS_THROUGH,
+        PASS_THROUGH,
+        PASS_THROUGH,
+    ),
+)
+
+
+def _processing_route(
+    output_scale: int,
+    alc_ratio: int,
+    sections_by_rate: tuple[tuple[tuple[int, ...], ...], ...],
+) -> bytes:
+    """Pack one fitted playback route of the processing section.
+
+    A route holds S6, the ALC enable and its eleven words, then six sections
+    for each of 24, 32 and 48 kHz. Every fitted route enables ALC with the same
+    words apart from the ratio.
+    """
+    route = struct.pack(
+        "<HB11h", output_scale, 1, 480, 8192, 1278, 0, -30, alc_ratio, 652, 16, 1245, 0, 98
+    )
+    for sections in sections_by_rate:
+        for section in sections:
+            route += struct.pack("<6h", *section)
+    return route
+
+
+# Headset, Handsfree and Headfree routes with their fitted S6 output scales.
+FITTED_NOKIA_PROCESSING_SECTION = (
+    _processing_route(0x05A6, 26398, NOKIA_HEADSET_SECTIONS)
+    + _processing_route(0x0A0C, 26398, NOKIA_HANDSFREE_SECTIONS)
+    + _processing_route(0x071D, 26398, NOKIA_HEADFREE_SECTIONS)
+)
+FITTED_INOI_PROCESSING_SECTION = (
+    _processing_route(0x071D, 26398, INOI_HEADSET_SECTIONS)
+    + _processing_route(0x0CA6, 26398, INOI_HANDSFREE_SECTIONS)
+    + _processing_route(0x0400, 26214, INOI_HEADFREE_SECTIONS)
+)
 
 
 class FakeNandPartitionReader:
@@ -185,23 +374,140 @@ def _running_nv() -> bytes:
     )
 
 
+def _eq_set(
+    name: bytes,
+    *,
+    band_control: int,
+    bands: tuple[tuple[int, int, int, int], ...],
+    alc_ratio: int = 26398,
+) -> bytes:
+    """Serialize one NV440 EQ set from its literal pass-mode fields.
+
+    ``bands`` are the raw pass-mode records {centre Hz, Q * 512, boost, base
+    gain in 0.1 dB}; records 5 and 6 hold the low-cut shelves. As in the fitted
+    music sets, the control word enables ALC with the full-scale output limit
+    and five bands, and the pass-mode input gain is unity.
+    """
+    eq_set = bytearray(544)
+    eq_set[:16] = name.ljust(16, b"\0")
+    struct.pack_into("<HhH", eq_set, 16, 0x017F, 0x1000, band_control)
+    for index, band in enumerate(bands):
+        struct.pack_into("<4h", eq_set, 22 + 8 * index, *band)
+    # Hold, rise, fall, limit, threshold, ratio, gain variation, release, attack,
+    # extended release and extended attack.
+    struct.pack_into("<11h", eq_set, 522, 480, 8192, 1278, 0, -30, alc_ratio, 652, 16, 1245, 0, 98)
+    return bytes(eq_set)
+
+
+UNUSED_BAND = (0, 0, 0, 0)
+# The fitted EQ sets at the NV440 positions that the playback modes select.
+NOKIA_EQ_SETS = {
+    1: _eq_set(
+        b"EQ_Headset",
+        band_control=0xF800,
+        bands=(
+            (100, 512, -30, 0),
+            (600, 256, 10, 0),
+            (1000, 1536, 10, 0),
+            (3000, 1024, 10, 0),
+            (15500, 410, -40, 0),
+            (-360, 0, 30, 0),
+            (0, 3000, 0, 0),
+        ),
+    ),
+    2: _eq_set(
+        b"EQ_Headfree",
+        band_control=0xF880,
+        bands=(
+            (175, 1536, -120, 0),
+            (100, 1536, -150, 0),
+            (500, 256, 20, 0),
+            (3000, 256, -10, 0),
+            (15000, 359, -35, 0),
+            (-180, 0, 340, 0),
+            (0, 3000, 300, 0),
+        ),
+    ),
+    4: _eq_set(
+        b"EQ_Handsfree",
+        band_control=0xF880,
+        bands=(
+            (550, 1024, -20, 0),
+            (850, 1024, 0, 0),
+            (2600, 1024, 0, 0),
+            (3500, 1024, 0, 0),
+            (22000, 2048, -200, 0),
+            (-120, 0, 200, 0),
+            (0, 3000, 300, 0),
+        ),
+    ),
+}
+INOI_EQ_SETS = {
+    1: _eq_set(
+        b"EQ_Headset",
+        band_control=0x0000,
+        bands=(*(UNUSED_BAND,) * 5, (-360, 0, 30, 0), (0, 3000, 0, 0)),
+    ),
+    2: _eq_set(
+        b"EQ_Headfree",
+        band_control=0x8080,
+        bands=(
+            (150, 2560, -120, 0),
+            *(UNUSED_BAND,) * 4,
+            (-180, 0, 400, 0),
+            (0, 2000, 300, 0),
+        ),
+        alc_ratio=26214,
+    ),
+    4: _eq_set(
+        b"EQ_Handsfree",
+        band_control=0xF080,
+        bands=(
+            (170, 2560, -540, 0),
+            (22000, 2560, 50, 0),
+            (2000, 512, 30, 0),
+            (3000, 512, 0, 0),
+            UNUSED_BAND,
+            (-180, 0, 400, 0),
+            (0, 2000, 300, 0),
+        ),
+    ),
+}
+
+
+def _store_music_processing(arm: bytearray, offset: int, *, control: int, input_gain: int) -> None:
+    """Store a mode's processing-control word, player-selected EQ switch and input gain.
+
+    Bits 14:10 of the fitted control words select the music EQ set; the lower
+    fields select the MIDI and AMR sets.
+    """
+    struct.pack_into("<H", arm, offset + 40, control)
+    struct.pack_into("<Hh", arm, offset + 44, 0x000F, input_gain)
+
+
 def _headset_audio_records(
     levels: tuple[int, ...],
     *,
-    pass_band_control: int,
+    input_gain: int,
+    eq_sets: dict[int, bytes],
 ) -> tuple[dict[int, bytes], dict[int, bytes]]:
-    """Build matching fitted Headset records from explicit packed NV level values."""
+    """Build matching fitted Headset records from explicit packed NV level values.
+
+    ``eq_sets`` maps one-based NV440 positions to serialized sets. The copies
+    differ only in a mode and an EQ set that playback does not use.
+    """
     if len(levels) != 9:
         message = "the synthetic Headset fixture requires nine levels"
         raise ValueError(message)
     arm = bytearray(5360)
     arm[:16] = b"Headset".ljust(16, b"\0")
     struct.pack_into("<H", arm, 36, 1)
+    _store_music_processing(arm, 0, control=0x04CB, input_gain=input_gain)
     struct.pack_into("<H", arm, 62, 9)
     struct.pack_into("<9I", arm, 68, *levels)
     eq = bytearray(8160)
-    eq[:16] = b"EQ_Headset".ljust(16, b"\0")
-    struct.pack_into("<H", eq, 20, pass_band_control)
+    for position, eq_set in eq_sets.items():
+        eq[(position - 1) * 544 : position * 544] = eq_set
     downloaded = {425: b"\x05\x02", 426: bytes(arm), 440: bytes(eq)}
     protected_arm = bytearray(arm)
     protected_arm[2 * 1072] = 1
@@ -211,13 +517,14 @@ def _headset_audio_records(
     return downloaded, protected
 
 
-def _add_fitted_headfree_mode(records: dict[int, bytes]) -> None:
+def _add_fitted_headfree_mode(records: dict[int, bytes], *, input_gain: int) -> None:
     """Store the literal Headfree mode that all three fitted phones keep at index 1."""
     arm = bytearray(records[426])
     offset = 1072
     arm[offset : offset + 16] = b"Headfree".ljust(16, b"\0")
     struct.pack_into("<H", arm, offset + 20, 0x0032)
     struct.pack_into("<H", arm, offset + 36, 1)
+    _store_music_processing(arm, offset, control=0x08EC, input_gain=input_gain)
     struct.pack_into("<H", arm, offset + 62, 9)
     # The fitted level-0 word precedes volume levels 1..9 and is not a volume step.
     struct.pack_into(
@@ -240,7 +547,7 @@ def _add_fitted_headfree_mode(records: dict[int, bytes]) -> None:
 
 
 def _inoi_audio_records() -> tuple[dict[int, bytes], dict[int, bytes]]:
-    """Use the literal playback-mode and vibrate-tone values of both fitted INOI phones."""
+    """Use the literal playback-mode, EQ-set and vibrate-tone values of both fitted INOI phones."""
     downloaded, protected = _headset_audio_records(
         (
             0x006C0007,
@@ -253,7 +560,8 @@ def _inoi_audio_records() -> tuple[dict[int, bytes], dict[int, bytes]]:
             0x00230007,
             0x001B0007,
         ),
-        pass_band_control=0,
+        input_gain=0x071D,
+        eq_sets=INOI_EQ_SETS,
     )
     handsfree_levels = (
         0x00390000,
@@ -272,6 +580,7 @@ def _inoi_audio_records() -> tuple[dict[int, bytes], dict[int, bytes]]:
         arm[offset : offset + 16] = b"Handsfree".ljust(16, b"\0")
         struct.pack_into("<H", arm, offset + 20, 0x0022)
         struct.pack_into("<H", arm, offset + 36, 1)
+        _store_music_processing(arm, offset, control=0x112E, input_gain=0x0CA6)
         struct.pack_into("<H", arm, offset + 62, 9)
         struct.pack_into("<9I", arm, offset + 68, *handsfree_levels)
         struct.pack_into(
@@ -282,12 +591,12 @@ def _inoi_audio_records() -> tuple[dict[int, bytes], dict[int, bytes]]:
         )
         struct.pack_into("<H", arm, offset + 466, 0x001A)
         records[426] = bytes(arm)
-        _add_fitted_headfree_mode(records)
+        _add_fitted_headfree_mode(records, input_gain=0x0400)
     return downloaded, protected
 
 
 def _nokia_audio_records() -> tuple[dict[int, bytes], dict[int, bytes]]:
-    """Use the fitted Nokia Headset, Headfree and speaker-only Handsfree app-0 values."""
+    """Use the fitted Nokia Headset, Headfree and speaker-only Handsfree values and EQ sets."""
     downloaded, protected = _headset_audio_records(
         (
             0x00470006,
@@ -300,7 +609,8 @@ def _nokia_audio_records() -> tuple[dict[int, bytes], dict[int, bytes]]:
             0x00200006,
             0x001A0006,
         ),
-        pass_band_control=1,
+        input_gain=0x05A6,
+        eq_sets=NOKIA_EQ_SETS,
     )
     handsfree_levels = (
         0x00380000,
@@ -318,11 +628,14 @@ def _nokia_audio_records() -> tuple[dict[int, bytes], dict[int, bytes]]:
         arm[3 * 1072 : 3 * 1072 + 16] = b"Handsfree".ljust(16, b"\0")
         struct.pack_into("<H", arm, 3 * 1072 + 20, 0x0022)
         struct.pack_into("<H", arm, 3 * 1072 + 36, 1)
+        # Its AMR field selects EQ set 1, and its MIDI and AMR input gains differ.
+        _store_music_processing(arm, 3 * 1072, control=0x1121, input_gain=0x0A0C)
+        struct.pack_into("<2h", arm, 3 * 1072 + 48, 0x2800, 0x08DA)
         struct.pack_into("<H", arm, 3 * 1072 + 62, 9)
         struct.pack_into("<9I", arm, 3 * 1072 + 68, *handsfree_levels)
         struct.pack_into("<H", arm, 3 * 1072 + 466, 0x001A)
         records[426] = bytes(arm)
-        _add_fitted_headfree_mode(records)
+        _add_fitted_headfree_mode(records, input_gain=0x071D)
     return downloaded, protected
 
 
@@ -754,7 +1067,7 @@ class HeadsetGainProfileTests(unittest.TestCase):
     """Protect the compact kernel input and admitted fitted playback gains."""
 
     def test_fitted_playback_modes_become_each_exact_profile(self) -> None:
-        """Target capabilities select the literal compact playback payload."""
+        """Target capabilities select the literal compact playback payload of the target size."""
         cases = (
             (
                 "inoi240",
@@ -764,11 +1077,13 @@ class HeadsetGainProfileTests(unittest.TestCase):
                 (
                     b"FPAUDIO\0"
                     b"inoi,240-modern-4g\0\0\0\0\0\0"
-                    b"\x07\x00\x6c\x61\x56\x4b\x41\x37\x2d\x23\x1b"
+                    b"\x07\x6c\x61\x56\x4b\x41\x37\x2d\x23\x1b"
                     b"\x1a\x00\x39\x35\x31\x2d\x29\x21\x1d\x19\x17"
                     b"\x1a\x00\x07\x4e\x47\x3b\x35\x2f\x2a\x24\x1f\x1a"
                 )
+                + FITTED_INOI_PROCESSING_SECTION
                 + INOI_VIBRATE_TONE_SECTION,
+                822,
             ),
             (
                 "inoi244",
@@ -778,11 +1093,13 @@ class HeadsetGainProfileTests(unittest.TestCase):
                 (
                     b"FPAUDIO\0"
                     b"inoi,244-modern-4g\0\0\0\0\0\0"
-                    b"\x07\x00\x6c\x61\x56\x4b\x41\x37\x2d\x23\x1b"
+                    b"\x07\x6c\x61\x56\x4b\x41\x37\x2d\x23\x1b"
                     b"\x1a\x00\x39\x35\x31\x2d\x29\x21\x1d\x19\x17"
                     b"\x1a\x00\x07\x4e\x47\x3b\x35\x2f\x2a\x24\x1f\x1a"
                 )
+                + FITTED_INOI_PROCESSING_SECTION
                 + INOI_VIBRATE_TONE_SECTION,
+                822,
             ),
             (
                 "ta1618",
@@ -792,13 +1109,15 @@ class HeadsetGainProfileTests(unittest.TestCase):
                 (
                     b"FPAUDIO\0"
                     b"nokia,ta-1618\0\0\0\0\0\0\0\0\0\0\0"
-                    b"\x06\x01\x47\x42\x3d\x37\x32\x2c\x26\x20\x1a"
+                    b"\x06\x47\x42\x3d\x37\x32\x2c\x26\x20\x1a"
                     b"\x1a\x00\x38\x34\x30\x2c\x28\x24\x20\x1c\x1b"
                     b"\x1a\x00\x07\x4e\x47\x3b\x35\x2f\x2a\x24\x1f\x1a"
-                ),
+                )
+                + FITTED_NOKIA_PROCESSING_SECTION,
+                788,
             ),
         )
-        for prefix, compatible, records, speaker_vibration, expected in cases:
+        for prefix, compatible, records, speaker_vibration, expected, size in cases:
             with self.subTest(prefix=prefix):
                 downloaded, protected = records()
 
@@ -811,6 +1130,7 @@ class HeadsetGainProfileTests(unittest.TestCase):
                 )
 
                 self.assertEqual(result.prepared, {f"{prefix}-audio-profile.bin": expected})
+                self.assertEqual(len(expected), size)
                 self.assertEqual(result.originals[f"{prefix}-nv425.bin"], downloaded[425])
                 self.assertEqual(result.originals[f"{prefix}-nv426.bin"], downloaded[426])
                 self.assertEqual(result.originals[f"{prefix}-nv440.bin"], downloaded[440])
@@ -818,7 +1138,7 @@ class HeadsetGainProfileTests(unittest.TestCase):
     def test_speaker_profiles_select_handsfree_and_headfree_by_name_after_reordering(
         self,
     ) -> None:
-        """Each speaker section comes from its named mode, not from a fixed mode index."""
+        """Speaker and processing sections come from named modes, not fixed mode indexes."""
         downloaded, protected = _nokia_audio_records()
         for records in (downloaded, protected):
             arm = bytearray(records[426])
@@ -837,9 +1157,9 @@ class HeadsetGainProfileTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            result.prepared["ta1618-audio-profile.bin"][43:],
+            result.prepared["ta1618-audio-profile.bin"][42:],
             b"\x1a\x00\x38\x34\x30\x2c\x28\x24\x20\x1c\x1b"
-            b"\x06\x00\x07\x4e\x47\x3b\x35\x2f\x2a\x24\x1f\x1a",
+            b"\x06\x00\x07\x4e\x47\x3b\x35\x2f\x2a\x24\x1f\x1a" + FITTED_NOKIA_PROCESSING_SECTION,
         )
 
     def test_speaker_profile_rejects_wrong_route_or_gain_or_disagreeing_copies(self) -> None:
@@ -940,7 +1260,8 @@ class HeadsetGainProfileTests(unittest.TestCase):
                 0x00230008,
                 0x001B0008,
             ),
-            pass_band_control=0,
+            input_gain=0x071D,
+            eq_sets=INOI_EQ_SETS,
         )
         with self.assertRaisesRegex(ValueError, "outside supported range 2..7"):
             audio_profile.prepare_headset_gain_profile(
@@ -950,12 +1271,13 @@ class HeadsetGainProfileTests(unittest.TestCase):
                 machine_compatible=b"vendor,phone",
             )
 
-    def test_profile_rejects_mismatched_pga_dg_and_source_processing_slices(self) -> None:
+    def test_profile_rejects_nv_copies_that_disagree_on_carried_values(self) -> None:
         """DownloadedNV and ProtectNV must agree on every value carried into the profile."""
         cases = (
             (426, 68, b"\x06\x00", "Headset NV426 differs"),
             (426, 70, b"\x6b\x00", "Headset NV426 differs"),
-            (440, 20, b"\x01\x00", "Headset NV440 differs"),
+            (440, 20, b"\x01\x00", "EQ_Headset NV440 differs"),
+            (440, 3 * 544 + 22, b"\xab\x00", "EQ_Handsfree NV440 differs"),
         )
         for identifier, offset, replacement, error in cases:
             downloaded, protected = _inoi_audio_records()
@@ -972,6 +1294,222 @@ class HeadsetGainProfileTests(unittest.TestCase):
                     prefix="phone",
                     machine_compatible=b"vendor,phone",
                 )
+
+
+class PlaybackProcessingTests(unittest.TestCase):
+    """Protect the stock EQ6, output scale and ALC settings designed from fitted EQ sets."""
+
+    @staticmethod
+    def _profile(
+        records: tuple[dict[int, bytes], dict[int, bytes]], *, speaker_vibration: bool = False
+    ) -> bytes:
+        """Prepare a profile from DownloadedNV and ProtectNV audio records."""
+        downloaded, protected = records
+        result = audio_profile.prepare_headset_gain_profile(
+            downloaded,
+            protected,
+            prefix="phone",
+            machine_compatible=b"vendor,phone",
+            speaker_vibration=speaker_vibration,
+        )
+        return result.prepared["phone-audio-profile.bin"]
+
+    def test_design_tables_reproduce_stock_filter_tables(self) -> None:
+        """The generated gain and cosine tables equal entries of the stock firmware tables."""
+        gain_entries = {
+            0: 1,
+            720: 64,
+            1080: 515,
+            1439: 4072,
+            1440: 4096,
+            1441: 4119,
+            1620: 11544,
+            1800: 32535,
+        }
+        cosine_entries = {0: 16384, 1: 16383, 683: 14186, 1024: 11585, 2047: 12, 2048: 0}
+
+        self.assertEqual(len(audio_profile.LINEAR_GAIN_TABLE), 1801)
+        self.assertEqual(len(audio_profile.COSINE_TABLE), 2049)
+        for index, value in gain_entries.items():
+            with self.subTest(table="gain", index=index):
+                self.assertEqual(audio_profile.LINEAR_GAIN_TABLE[index], value)
+        for index, value in cosine_entries.items():
+            with self.subTest(table="cosine", index=index):
+                self.assertEqual(audio_profile.COSINE_TABLE[index], value)
+
+    def test_fitted_route_words_match_independent_stock_values(self) -> None:
+        """S6, ALC and coefficient words sit at their wire offsets with the stock values."""
+        profiles = {
+            "Nokia": self._profile(_nokia_audio_records()),
+            "INOI": self._profile(_inoi_audio_records(), speaker_vibration=True),
+        }
+        route_values = (
+            ("Nokia", 0, 0x05A6, 26398),
+            ("Nokia", 1, 0x0A0C, 26398),
+            ("Nokia", 2, 0x071D, 26398),
+            ("INOI", 0, 0x071D, 26398),
+            ("INOI", 1, 0x0CA6, 26398),
+            ("INOI", 2, 0x0400, 26214),
+        )
+        for phone, route, output_scale, alc_ratio in route_values:
+            offset = PROCESSING_OFFSET + route * PROCESSING_ROUTE_SIZE
+            with self.subTest(phone=phone, route=route):
+                self.assertEqual(
+                    struct.unpack_from("<HB", profiles[phone], offset), (output_scale, 1)
+                )
+                self.assertEqual(
+                    struct.unpack_from("<h", profiles[phone], offset + 13)[0], alc_ratio
+                )
+
+        # The stock register image of INOI Handsfree at 48 kHz, sections 0..3,
+        # and of the Nokia Headset 100 Hz band at 48 kHz.
+        section_values = (
+            ("INOI", 1, 0, (4096, 16024, -28232, 28148, 12232, -11953)),
+            ("INOI", 1, 1, (4096, 15861, -31712, 31712, 15861, -15338)),
+            ("INOI", 1, 2, (4096, 18695, 25902, -25902, 8125, -10437)),
+            ("INOI", 1, 3, (4096, 17052, -28507, 28507, 12460, -13128)),
+            ("Nokia", 0, 1, (4096, 16345, -32528, 32528, 16185, -16147)),
+        )
+        for phone, route, section, words in section_values:
+            rate_48k = PROCESSING_OFFSET + route * PROCESSING_ROUTE_SIZE + 25 + 2 * 72
+            with self.subTest(phone=phone, route=route, section=section):
+                self.assertEqual(
+                    struct.unpack_from("<6h", profiles[phone], rate_48k + 12 * section), words
+                )
+
+    def test_eq_sets_are_selected_by_mode_index_not_by_position(self) -> None:
+        """Moving sets in NV440 changes nothing when the modes select their new positions."""
+        downloaded, protected = _nokia_audio_records()
+        for records in (downloaded, protected):
+            eq = bytearray(records[440])
+            headfree_set = eq[544 : 2 * 544]
+            eq[544 : 2 * 544] = eq[3 * 544 : 4 * 544]
+            eq[3 * 544 : 4 * 544] = headfree_set
+            records[440] = bytes(eq)
+            arm = bytearray(records[426])
+            struct.pack_into("<H", arm, 1072 + 40, 0x10EC)
+            struct.pack_into("<H", arm, 3 * 1072 + 40, 0x0921)
+            records[426] = bytes(arm)
+
+        profile = self._profile((downloaded, protected))
+
+        self.assertEqual(profile[PROCESSING_OFFSET:], FITTED_NOKIA_PROCESSING_SECTION)
+
+    def test_shelves_and_other_low_cut_types_pass_through_like_stock(self) -> None:
+        """Stock designs no shelf or third low-cut type; those sections pass audio unchanged."""
+        downloaded, protected = _nokia_audio_records()
+        for records in (downloaded, protected):
+            eq = bytearray(records[440])
+            # Headset marks band 0 as a low shelf and band 4 as a high shelf.
+            struct.pack_into("<H", eq, 20, 0xF803)
+            # Headfree selects low-cut type 2 instead of the two-shelf design.
+            struct.pack_into("<H", eq, 544 + 20, 0xFA80)
+            records[440] = bytes(eq)
+        headset = tuple(
+            (rate[0], PASS_THROUGH, *rate[2:5], PASS_THROUGH) for rate in NOKIA_HEADSET_SECTIONS
+        )
+        headfree = tuple((PASS_THROUGH, *rate[1:]) for rate in NOKIA_HEADFREE_SECTIONS)
+
+        profile = self._profile((downloaded, protected))
+
+        self.assertEqual(
+            profile[PROCESSING_OFFSET:],
+            _processing_route(0x05A6, 26398, headset)
+            + _processing_route(0x0A0C, 26398, NOKIA_HANDSFREE_SECTIONS)
+            + _processing_route(0x071D, 26398, headfree),
+        )
+
+    def test_route_alc_enable_and_output_scale_follow_the_selected_set(self) -> None:
+        """A set without ALC clears only its route's enable; S6 saturates at 32767."""
+        downloaded, protected = _nokia_audio_records()
+        for records in (downloaded, protected):
+            eq = bytearray(records[440])
+            struct.pack_into("<H", eq, 3 * 544 + 16, 0x007F)
+            struct.pack_into("<h", eq, 544 + 18, 0x2000)
+            records[440] = bytes(eq)
+            arm = bytearray(records[426])
+            struct.pack_into("<h", arm, 1072 + 46, 0x7FFF)
+            records[426] = bytes(arm)
+        expected = bytearray(FITTED_NOKIA_PROCESSING_SECTION)
+        expected[PROCESSING_ROUTE_SIZE + 2] = 0
+        expected[2 * PROCESSING_ROUTE_SIZE : 2 * PROCESSING_ROUTE_SIZE + 2] = b"\xff\x7f"
+
+        profile = self._profile((downloaded, protected))
+
+        self.assertEqual(profile[PROCESSING_OFFSET:], bytes(expected))
+
+    def test_profile_rejects_unsupported_or_unsafe_processing(self) -> None:
+        """Only a supported, stable EQ set within the datapath headroom produces a profile."""
+        handsfree = 3 * 1072
+        handsfree_set = 3 * 544
+        cases: tuple[tuple[str, int, int, str, tuple[int, ...], str], ...] = (
+            ("bypass", 426, handsfree + 44, "<H", (0x001F,), "Handsfree bypasses playback"),
+            (
+                "fixed EQ mode",
+                426,
+                handsfree + 44,
+                "<H",
+                (0x0001,),
+                "Handsfree equalizer mode is not selected by the player",
+            ),
+            ("set index 0", 426, handsfree + 40, "<H", (0x0021,), "EQ set 0; expected 1..15"),
+            ("set index 16", 426, handsfree + 40, "<H", (0x4021,), "EQ set 16; expected 1..15"),
+            (
+                "other mode's set",
+                426,
+                1072 + 40,
+                "<H",
+                (0x10EC,),
+                "set 4, which is not EQ_Headfree",
+            ),
+            ("zero S6", 426, handsfree + 46, "<h", (0,), "Handsfree output scale 0 is not"),
+            ("negative S6", 426, handsfree + 46, "<h", (-1,), "Handsfree output scale -1 is not"),
+            ("output limit", 440, handsfree_set + 16, "<H", (0x017E,), "output limit is not"),
+            ("eight bands", 440, handsfree_set + 16, "<H", (0x817F,), "uses eight bands"),
+            (
+                "Butterworth low-cut",
+                440,
+                handsfree_set + 20,
+                "<H",
+                (0xF980,),
+                "EQ_Handsfree Butterworth low-cut filter is not supported",
+            ),
+            ("negative corner", 440, handsfree_set + 66, "<h", (-200,), "corner frequency is neg"),
+            (
+                "zero low-cut corners",
+                440,
+                handsfree_set + 66,
+                "<4h",
+                (0, 0, 0, 0),
+                "EQ_Handsfree section 0 is unstable at 24000 Hz",
+            ),
+            (
+                "two +5 dB bands at 1 kHz",
+                440,
+                handsfree_set + 22,
+                "<8h",
+                (1000, 512, 50, 0, 1000, 512, 50, 0),
+                r"EQ_Handsfree boosts 24000 Hz playback by [0-9.]+ dB, above the 6 dB",
+            ),
+            # A dense scan of the running response puts the peak of this
+            # narrowest possible +7 dB band at 6.41 dB.
+            (
+                "narrow +7 dB band at 2.5 kHz",
+                440,
+                handsfree_set + 38,
+                "<4h",
+                (2500, 32767, 70, 0),
+                "EQ_Handsfree boosts 24000 Hz playback by 6.4 dB, above the 6 dB",
+            ),
+        )
+        for name, identifier, offset, value_format, values, error in cases:
+            downloaded, protected = _nokia_audio_records()
+            for records in (downloaded, protected):
+                changed = bytearray(records[identifier])
+                struct.pack_into(value_format, changed, offset, *values)
+                records[identifier] = bytes(changed)
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, error):
+                self._profile((downloaded, protected))
 
 
 class SpeakerVibrateToneTests(unittest.TestCase):
@@ -1180,7 +1718,7 @@ class PartitionPreparationTests(unittest.TestCase):
             )
 
     def test_speaker_vibration_target_receives_the_vibrate_tone_section(self) -> None:
-        """Only a target that vibrates through its speaker gets the tone after Headfree."""
+        """Only a target that vibrates through its speaker gets the tone after processing."""
         for speaker_vibration, expected_tail in ((False, b""), (True, INOI_VIBRATE_TONE_SECTION)):
             nand, partitions, revision = self._inputs()
 
@@ -1195,7 +1733,10 @@ class PartitionPreparationTests(unittest.TestCase):
 
             profile = result.groups["audio-profile"].prepared["phone-audio-profile.bin"]
             with self.subTest(speaker_vibration=speaker_vibration):
-                self.assertEqual(profile[54:], FITTED_HEADFREE_SECTION + expected_tail)
+                self.assertEqual(
+                    profile[53:],
+                    FITTED_HEADFREE_SECTION + FITTED_INOI_PROCESSING_SECTION + expected_tail,
+                )
 
     def test_complete_set_keeps_original_image_and_individual_nv_bytes(self) -> None:
         """Only the prepared CM4 changes; every original remains byte-exact."""
