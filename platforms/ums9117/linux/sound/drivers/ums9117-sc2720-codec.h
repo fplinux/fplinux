@@ -2,6 +2,7 @@
 #ifndef FPLINUX_UMS9117_SC2720_CODEC_H
 #define FPLINUX_UMS9117_SC2720_CODEC_H
 
+#include <linux/bits.h>
 #include <linux/types.h>
 
 struct device;
@@ -14,10 +15,10 @@ enum ums9117_sc2720_capture_source {
 	UMS9117_SC2720_CAPTURE_HEADSET,
 };
 
-enum ums9117_sc2720_playback_output {
-	UMS9117_SC2720_OUTPUT_HEADPHONES,
-	UMS9117_SC2720_OUTPUT_SPEAKER,
-};
+#define UMS9117_SC2720_OUTPUT_HEADPHONES BIT(0)
+#define UMS9117_SC2720_OUTPUT_SPEAKER BIT(1)
+#define UMS9117_SC2720_OUTPUT_MASK \
+	(UMS9117_SC2720_OUTPUT_HEADPHONES | UMS9117_SC2720_OUTPUT_SPEAKER)
 
 /* The PCM owner serializes every operation and quiesces before devm release. */
 struct ums9117_sc2720_codec *ums9117_sc2720_codec_create(struct device *dev);
@@ -25,15 +26,25 @@ void ums9117_sc2720_codec_get_volume(struct ums9117_sc2720_codec *codec,
 				     unsigned int *left, unsigned int *right);
 int ums9117_sc2720_codec_set_volume(struct ums9117_sc2720_codec *codec,
 				    unsigned int left, unsigned int right);
+/*
+ * Playback opens the requested outputs, and the PA word configures the
+ * speaker amplifier. An empty set runs the DAC without an output. A prepared
+ * codec takes a changed set or word as set_outputs does.
+ */
 int ums9117_sc2720_codec_prepare(struct ums9117_sc2720_codec *codec,
-				 enum ums9117_sc2720_playback_output output,
-				 u16 speaker_pa_word);
+				 unsigned int outputs, u16 pa_word);
+/*
+ * Enabled playback closes outputs that left the set and opens those that
+ * joined it; an open PA reopens with a changed word.
+ */
+int ums9117_sc2720_codec_set_outputs(struct ums9117_sc2720_codec *codec,
+				     unsigned int outputs, u16 pa_word);
 /* A muted speaker has its PA disabled; transitions may sleep for 30 ms. */
 int ums9117_sc2720_codec_set_speaker_mute(struct ums9117_sc2720_codec *codec,
 					  bool mute);
 /*
- * Keep the PA open for the vibrate tone. With headphones the PA opens beside
- * them and their volume stays muted until vibration ends.
+ * Keep the PA open for the vibrate tone, with or without the speaker output.
+ * Open headphones stay muted until vibration ends.
  */
 int ums9117_sc2720_codec_set_vibration(struct ums9117_sc2720_codec *codec,
 				       bool vibration);

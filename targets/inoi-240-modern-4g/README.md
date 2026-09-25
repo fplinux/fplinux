@@ -24,9 +24,9 @@ after wake.
 
 Physical display, key and LCD brightness effects have not been tested on this
 configuration. This phone has no separate vibration motor; FPLinux vibrates it
-through the rear speaker, as stock firmware does, and mutes headphone and FM
-audio meanwhile. Telemetry read without a battery does not demonstrate battery operation,
-measurement accuracy or charging.
+through the rear speaker, as stock firmware does, and mutes headphone audio
+meanwhile. Telemetry read without a battery does not demonstrate battery
+operation, measurement accuracy or charging.
 
 Status terms and limits shared by every phone are defined in the
 [target index](../README.md#status-and-common-limits).
@@ -57,7 +57,7 @@ Status terms and limits shared by every phone are defined in the
 | [Headphone audio](../../docs/features/HEADPHONE_AUDIO.md)          | Present  | Supported     | Stereo S16_LE playback; the default device converts input to 48 kHz, and the fitted profile supplies stock-derived volume levels.                  |
 | [Speaker audio](../../docs/features/SPEAKER_AUDIO.md)              | Present  | Partial       | Rear loudspeaker with fitted gains; bass below about 300 Hz vibrates the phone because the stock EQ is not applied.                                |
 | [Phone microphone](../../docs/features/MICROPHONE_AUDIO.md)        | Present  | Supported     | Built-in and four-contact wired-headset microphones record mono 48-kHz PCM.                                                                        |
-| [FM radio](../../docs/features/FM_RADIO.md)                        | Present  | Supported     | Frequency scan and headphone output through the 3.5 mm cable; candidates need listening to confirm.                                                |
+| [FM radio](../../docs/features/FM_RADIO.md)                        | Present  | Supported     | Frequency scan with the 3.5 mm cable as antenna and playback through the enabled outputs; candidates need listening to confirm.                    |
 | Modem and mobile service                                           | Present  | Not supported | —                                                                                                                                                  |
 | [Bluetooth](../../docs/features/BLUETOOTH.md)                      | Present  | Partial       | Pairing, bidirectional OPP, PAN Internet and recovery after RTC-woken s2idle work in both profiles.                                                |
 | Wi-Fi                                                              | Unknown  | Not supported | —                                                                                                                                                  |
@@ -68,7 +68,7 @@ Status terms and limits shared by every phone are defined in the
 | [Auxiliary ADC](../../docs/features/AUXADC.md)                     | Present  | Partial       | Raw-channel interface enabled; physical inputs and accuracy have not been checked.                                                                 |
 | [Real-time clock](../../docs/features/RTC.md)                      | Present  | Partial       | Read/set time, one-shot alarms and RTC wake work in both profiles.                                                                                 |
 | Other battery functions                                            | Unknown  | Not supported | No battery level, temperature or charge control is provided.                                                                                       |
-| [Vibration](../../docs/features/VIBRATION.md)                      | Present  | Partial       | Rear speaker vibration; headphone and FM audio is muted meanwhile, and one continuous pulse lasts at most about three seconds.                     |
+| [Vibration](../../docs/features/VIBRATION.md)                      | Present  | Partial       | Rear speaker vibration; headphone audio is muted meanwhile, and one continuous pulse lasts at most about three seconds.                            |
 | Indicator LEDs                                                     | Unknown  | Not supported | —                                                                                                                                                  |
 | [Power-off](../../docs/features/POWER_OFF.md)                      | N/A      | Partial       | Establish card safety before disconnecting USB power; battery-only power-off has not been tested.                                                  |
 | [Suspend](../../docs/features/SUSPEND.md)                          | N/A      | Partial       | Repeated RTC-woken s2idle works in both profiles, including mounted ext4 data storage and card-backed swap; physical-key wake has not been tested. |

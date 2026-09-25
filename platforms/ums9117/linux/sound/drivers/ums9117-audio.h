@@ -27,6 +27,7 @@ struct ums9117_audio_vibrate_tone {
 };
 
 struct ums9117_audio *ums9117_audio_create(struct platform_device *pdev);
+/* FM playback follows the same left and right gain codes. */
 void ums9117_audio_set_dac_gain(struct ums9117_audio *audio, u8 left_gain,
 				u8 right_gain);
 /* Set once before the first prepare; every DAC prepare programs the tone. */
@@ -35,7 +36,7 @@ void ums9117_audio_set_vibrate_tone(
 	const struct ums9117_audio_vibrate_tone *tone);
 /* The tone follows the DAC: a later prepare restores the requested state. */
 void ums9117_audio_set_vibration(struct ums9117_audio *audio, bool on);
-/* Hold the DAC gain at its minimum and mute FM without changing the tone. */
+/* Hold the DAC and FM gains at their minimum and mute FM, but not the tone. */
 void ums9117_audio_set_music_mute(struct ums9117_audio *audio, bool mute);
 int ums9117_audio_prepare(struct ums9117_audio *audio, unsigned int rate);
 int ums9117_audio_prepare_fm(struct ums9117_audio *audio);

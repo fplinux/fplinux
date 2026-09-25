@@ -64,6 +64,8 @@
 #define UMS9117_VBC_IIS 0x3c
 #define UMS9117_VBC_DAC_PATH 0x40
 #define UMS9117_VBC_DAC_DG_CTRL 0x44
+#define UMS9117_VBC_DAC_ST_CTL0 0x78
+#define UMS9117_VBC_DAC_ST_CTL1 0x7c
 #define UMS9117_VBC_ADC_PATH 0x80
 #define UMS9117_VBC_ADC_SRC 0x90
 #define UMS9117_VBC_INT_ENABLE 0xa0
@@ -96,6 +98,8 @@
 #define UMS9117_VBC_DAC0_DG_ENABLE BIT(14)
 #define UMS9117_VBC_DAC1_DG_ENABLE BIT(15)
 #define UMS9117_VBC_DAC_DG_MASK GENMASK(15, 0)
+#define UMS9117_VBC_ST_DG_GAIN GENMASK(10, 4)
+#define UMS9117_VBC_ST_DG_ENABLE BIT(12)
 /* The largest DG code is the strongest attenuation, about -77.5 dB. */
 #define UMS9117_VBC_DAC_DG_MINIMUM 0x7f
 #define UMS9117_VBC_IIS_ADC01_SELECT GENMASK(2, 0)
@@ -170,6 +174,21 @@ static void apply_dac_gain(struct ums9117_audio *audio)
 		UMS9117_VBC_DAC1_DG_ENABLE | UMS9117_VBC_DAC0_DG_ENABLE;
 	update_bits(audio->vbc, UMS9117_VBC_DAC_DG_CTRL,
 		    UMS9117_VBC_DAC_DG_MASK, value);
+	/*
+	 * FM enters the DAC path after DAC DG and is attenuated by the side-tone
+	 * gain, which has the same code scale but acts only while its enable bit
+	 * is set. The side-tone output is not mixed into PCM playback, whose
+	 * DAC path leaves the add-ST fields clear, so PCM is unaffected. Pair
+	 * ST1 with DAC1 (left) and ST0 with DAC0 (right).
+	 */
+	update_bits(audio->vbc, UMS9117_VBC_DAC_ST_CTL1,
+		    UMS9117_VBC_ST_DG_ENABLE | UMS9117_VBC_ST_DG_GAIN,
+		    UMS9117_VBC_ST_DG_ENABLE |
+			    FIELD_PREP(UMS9117_VBC_ST_DG_GAIN, left_gain));
+	update_bits(audio->vbc, UMS9117_VBC_DAC_ST_CTL0,
+		    UMS9117_VBC_ST_DG_ENABLE | UMS9117_VBC_ST_DG_GAIN,
+		    UMS9117_VBC_ST_DG_ENABLE |
+			    FIELD_PREP(UMS9117_VBC_ST_DG_GAIN, right_gain));
 }
 
 void ums9117_audio_set_dac_gain(struct ums9117_audio *audio, u8 left_gain,

@@ -18,14 +18,15 @@ Current target support:
     with persistent state on the ext4 system root;
   - image rotation, JPEG codec/scaling and native presentation transfers;
   - stereo S16_LE playback through the 3.5 mm headphones;
-  - selectable 48 kHz PCM playback through the built-in speaker output;
+  - PCM playback through the built-in speaker, alone or with the headphones;
   - mono 48 kHz recording from the built-in microphone;
-  - FM scan and headphone output through the 3.5 mm jack.
+  - FM scan through the 3.5 mm jack and playback through the enabled audio
+    outputs.
 
 The shared brightness, keypad-light, vibrator, telemetry and power-off
 interfaces are enabled. Physical brightness, keypad light and native image
 fidelity have not been tested. This phone has no separate vibration motor;
-FPLinux vibrates it through the speaker and mutes headphone and FM audio
+FPLinux vibrates it through the speaker and mutes headphone audio
 meanwhile, as described in docs/features/VIBRATION.md.
 Telemetry has been read with the battery absent; battery measurements, charging,
 battery-only shutdown and physical-key wake have not been tested.
@@ -43,12 +44,12 @@ little-endian WAV file and use the default ALSA device:
 
 The default device converts input to the 48 kHz hardware rate. See
 docs/features/HEADPHONE_AUDIO.md for fitted volume levels, direct-device limits,
-idle silence and its power trade-off. Select the built-in speaker with
-`PCM Playback Output` and start at `Speaker Playback Volume` level 1; see
-docs/features/SPEAKER_AUDIO.md. Select `Capture Source` before microphone
-recording; see docs/features/MICROPHONE_AUDIO.md. FM needs a wired 3.5 mm
-cable as its antenna; see docs/features/FM_RADIO.md for scan and playback
-commands and the tested profile.
+idle silence and its power trade-off. Enable the built-in speaker with
+`Speaker Playback Switch`; see docs/features/SPEAKER_AUDIO.md. Select
+`Capture Source` before microphone recording; see
+docs/features/MICROPHONE_AUDIO.md. FM needs a wired 3.5 mm cable as its
+antenna; see docs/features/FM_RADIO.md for scan and playback commands and the
+tested profile.
 
 The shared interfaces and storage safety rules are described in:
   - docs/features/AUXADC.md
