@@ -97,6 +97,7 @@ Feature and application documents own behavior shared by the current targets:
 
 ## Adding a target
 
+For a new UMS9117 phone, follow [the new phone route](../docs/porting/NEW_PHONE.md).
 New target documentation starts from the [phone target template](../docs/porting/TARGET.md).
 Keep target documents focused on exact-phone support and differences.
 Put reusable SoC behavior in the [platform documentation](../platforms/README.md),

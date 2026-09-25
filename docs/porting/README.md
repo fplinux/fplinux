@@ -23,6 +23,7 @@ support or the platform loader sequence.
 1. Define the target and platform fields according to the shared
    [identity contract](../reference/IDENTITY.md), then start from the
    [target template](TARGET.md) and select an existing platform.
+   For a new UMS9117 phone, follow [the new phone route](NEW_PHONE.md).
 2. Keep board-specific data in the target. Move code to a platform only after
    more than one current target uses the same behaviour.
 3. Give the target a clear support table: hardware presence, FPLinux support,
