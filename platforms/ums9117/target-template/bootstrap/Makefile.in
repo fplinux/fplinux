@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-only
+override NAME := @FILE_STEM@_linux_bootstrap
+override FPLINUX_BOOTSTRAP_DTB := @FILE_STEM@.dtb
+
+include ums9117-bootstrap/bootstrap.make

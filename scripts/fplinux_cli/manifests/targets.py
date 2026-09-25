@@ -39,7 +39,7 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
         raw,
         {
             "identity",
-            "microsd",
+            *({"microsd"} if "microsd" in raw else set()),
             *({"device_data"} if "device_data" in raw else set()),
             *({"bluetooth"} if "bluetooth" in raw else set()),
             *({"audio_profile"} if "audio_profile" in raw else set()),
@@ -162,10 +162,15 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
         nonempty_string(adapter.get(key), f"target adapter {key}")
 
     platform = load_platform(str(config["platform"]))
-    microsd = exact_table(
-        config.get("microsd"), {"linux_patches", "bootstrap", "uboot"}, "target microsd"
-    )
-    path_array(microsd.get("linux_patches"), "target microsd linux_patches", allow_empty=True)
+    # Only the default RAM profile is available without the microSD boot inputs.
+    microsd: dict[str, Any] = {}
+    if "microsd" in config:
+        microsd = exact_table(
+            config["microsd"], {"linux_patches", "bootstrap", "uboot"}, "target microsd"
+        )
+        path_array(microsd.get("linux_patches"), "target microsd linux_patches", allow_empty=True)
+    elif profile is not None:
+        fail(f"target {target} does not support profile {profile}")
     selected_profile = load_profile(target, profile or "default", platform, microsd)
     physical = platform["bootstrap"]["layout"]
     if not (

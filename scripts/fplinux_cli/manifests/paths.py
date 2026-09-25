@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Discover declared targets and global boot profiles."""
+"""Discover declared targets, platforms and global boot profiles."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 from fplinux_cli import common
-from fplinux_cli.common import fail
+from fplinux_cli.common import fail, load_toml
 from fplinux_cli.manifests.values import TARGET_NAME
 
 if TYPE_CHECKING:
@@ -24,21 +24,34 @@ def normalize_profile(profile: str | None) -> str | None:
     return profile
 
 
-def discover_targets() -> tuple[str, ...]:
-    """Discover data-only target manifests without a central registry."""
-    root = common.ROOT / "targets"
-    targets = tuple(
+def _manifest_directories(directory: str, manifest: str) -> tuple[str, ...]:
+    """Return the validly named subdirectories that hold one regular manifest file."""
+    root = common.ROOT / directory
+    return tuple(
         path.name
         for path in sorted(root.iterdir())
         if path.is_dir()
         and not path.is_symlink()
         and TARGET_NAME.fullmatch(path.name) is not None
-        and (path / "target.toml").is_file()
-        and not (path / "target.toml").is_symlink()
+        and (path / manifest).is_file()
+        and not (path / manifest).is_symlink()
     )
+
+
+def discover_targets() -> tuple[str, ...]:
+    """Discover data-only target manifests without a central registry."""
+    targets = _manifest_directories("targets", "target.toml")
     if not targets:
         fail("no targets are defined")
     return targets
+
+
+def discover_platforms() -> tuple[str, ...]:
+    """Discover platform manifests without a central registry."""
+    platforms = _manifest_directories("platforms", "platform.toml")
+    if not platforms:
+        fail("no platforms are defined")
+    return platforms
 
 
 def target_directory(target: str) -> Path:
@@ -89,7 +102,9 @@ def profile_manifest_path(target: str, profile: str) -> Path:
 
 
 def discover_profiles(target: str) -> tuple[str, ...]:
-    """Expose the same two boot policies for every configured target."""
+    """Expose both boot policies, or only the default one for a target without microSD inputs."""
     for profile in GLOBAL_PROFILES:
         profile_manifest_path(target, profile)
+    if "microsd" not in load_toml(target_directory(target) / "target.toml"):
+        return ("default",)
     return GLOBAL_PROFILES

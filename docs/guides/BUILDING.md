@@ -182,6 +182,45 @@ can run without network access:
 checksums. Do not run `abuild checksum` directly in the checkout or manually
 replace individual digest lines.
 
+## Create a new target
+
+For a UMS9117 phone that has no target yet, create a headless target:
+
+```sh
+./fplinux target new TARGET --brand BRAND --product PRODUCT [--compatible VENDOR,DEVICE]
+```
+
+`TARGET` names the new `targets/TARGET` directory and is the target name for
+every other command. It consists of lowercase letters and digits separated by
+single hyphens. `--brand` and `--product` are the public names defined by the
+[identity contract](../reference/IDENTITY.md); the hardware-code list starts
+empty. Without `--compatible`, the board compatible is formed from the lowercase
+brand and product, for example `hammer,horizon-lte`.
+
+The target uses the only platform, `ums9117`, by default. `--platform NAME`
+selects the platform in `platforms/NAME` and is required only when more than
+one platform exists.
+
+The new target loads
+[headless](../../platforms/ums9117/README.md#target-requirements): the phone
+shows no boot screen, and the loader applies no board pin settings. Linux
+provides the USB session and read-only internal NAND access; it has no display,
+keypad, audio, Bluetooth or microSD support, and only the default profile is
+available. In the `[adapter]` table of its `target.toml`, `boot_instructions`
+names `*` as the boot key and `exec_distance` is `0`. Its `README.md` records
+the FPLinux support of every feature and application as **Unknown**.
+
+The command refuses an existing target directory and leaves nothing behind
+when a name or identity field is invalid. It lists the created files and ends
+with the next step:
+
+```sh
+./fplinux build TARGET && ./fplinux run TARGET
+```
+
+The command does not add the new target to the
+[target index](../../targets/README.md).
+
 ## Build a target
 
 ```sh
@@ -217,10 +256,12 @@ FPLinux has two global profiles, declared once under `profiles/`:
   microSD card as its persistent ext4 root. zram uses LZO-RLE compression.
 
 Both profiles use the shared platform configuration and the selected target's
-board configuration. A profile selects boot and storage policy, not individual
-peripheral features. Board initialization, panel geometry, keys and fitted
-firmware declarations remain target-owned. Separate feature profiles are not
-accepted.
+board configuration. A target without microSD boot inputs offers only
+`default`: selecting `microsd-uboot` for it fails, and a `microsd-uboot` kernel
+check covers only the targets that offer that profile. A profile selects boot
+and storage policy, not individual peripheral features. Board initialization,
+panel geometry, keys and fitted firmware declarations remain target-owned.
+Separate feature profiles are not accepted.
 
 Build, check, load and inspect the selected context explicitly:
 

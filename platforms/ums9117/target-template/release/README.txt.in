@@ -1,0 +1,14 @@
+FPLinux for @DEVICE@
+
+Read docs/guides/STANDALONE.md before connecting the phone. It contains the
+host requirements, USB setup, checksum, loader-first and reconnect procedures.
+Hold * (asterisk) when the loader asks for the powered-off phone. The BootROM
+key of this phone has not been confirmed.
+
+This target starts Linux in RAM without a boot screen; the loader reports its
+progress on the host. The phone is used through the USB SSH session. Display,
+keypad, audio and Bluetooth support are not provided, and no feature has been
+tested on this phone.
+
+To end the session, disconnect USB. If a battery is installed, remove and
+reinsert it before booting the phone normally.

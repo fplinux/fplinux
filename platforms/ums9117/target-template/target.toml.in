@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: GPL-2.0-only
+platform = "ums9117"
+
+[identity]
+brand = "@BRAND@"
+product = "@PRODUCT@"
+hardware_codes = []
+compatible = "@COMPATIBLE@"
+
+[nand]
+raw_device = "/dev/ums9117-nand-raw"
+
+[rootfs]
+packages = []
+
+[bundle]
+packages = []
+
+[linux]
+config_fragment = "linux/config.fragment"
+memory = { base = 0x80200000, size = 0x03c00000 }
+dtb = "unisoc/ums9117-@TARGET@.dtb"
+debug_dtb = "ums9117-@TARGET@.dtb"
+patches = []
+forbidden_dtb_markers = ["spi-nand", "mtd", "ubi", "emmc"]
+forbidden_config = [
+  "CONFIG_MTD=y",
+  "CONFIG_UBI=y",
+  "CONFIG_SCSI=y",
+  "CONFIG_ATA=y",
+  "CONFIG_NVME_CORE=y",
+  "CONFIG_DEVMEM=y",
+]
+
+[[linux.copies]]
+source = "linux/dts/ums9117-@TARGET@.dts"
+destination = "arch/arm/boot/dts/unisoc/ums9117-@TARGET@.dts"
+
+[[linux.appends]]
+source = "linux/arch/arm/mach-ums9117/Kconfig"
+destination = "arch/arm/mach-ums9117/Kconfig"
+
+[[linux.appends]]
+source = "linux/dts/unisoc.Makefile"
+destination = "arch/arm/boot/dts/unisoc/Makefile"
+
+[bootstrap]
+image = "@FILE_STEM@_linux_bootstrap.bin"
+map = "obj/@FILE_STEM@_linux_bootstrap_map.txt"
+dtb_destination = "@FILE_STEM@.dtb"
+record_prefix = "@SYMBOL@"
+
+[adapter]
+exec_distance = 0
+session_name = "@TARGET@-linux"
+# Replace * if this phone uses another BootROM key.
+boot_instructions = "Power the phone off, hold *, then connect USB while keeping * pressed."

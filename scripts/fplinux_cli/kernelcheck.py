@@ -24,7 +24,7 @@ from fplinux_cli.build.linux import prepare_linux
 from fplinux_cli.build.process import report_stage, run
 from fplinux_cli.build.sources import fetch, source_lock_entry
 from fplinux_cli.manifests.kernel import compose_kernel_config, kconfig_values, kernel_config_paths
-from fplinux_cli.manifests.paths import discover_targets, normalize_profile
+from fplinux_cli.manifests.paths import discover_profiles, discover_targets, normalize_profile
 from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.targets import load_target
 
@@ -190,9 +190,13 @@ def check_bindings(
 
 
 def target_profiles(profile: str | None = None) -> tuple[tuple[str, str | None], ...]:
-    """Select the same global boot policy for every configured board."""
+    """Select one global boot policy for every configured board that supports it."""
     profile = normalize_profile(profile)
-    return tuple((target, profile) for target in discover_targets())
+    return tuple(
+        (target, profile)
+        for target in discover_targets()
+        if (profile or "default") in discover_profiles(target)
+    )
 
 
 def context_label(target: str, profile: str | None) -> str:

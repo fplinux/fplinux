@@ -35,9 +35,8 @@ def runtime_identity(
     }
 
 
-def bootstrap_identity_header(target_identity: dict[str, Any], prefix: str) -> bytes:
-    """Generate the only C representation of target/bootstrap identity."""
-    display_name = target_identity["display_name"]
+def validate_bootstrap_display_name(display_name: str) -> str:
+    """Validate a display name for the bootstrap's fixed NUL-terminated screen field."""
     try:
         encoded_name = display_name.encode("ascii")
     except UnicodeEncodeError as error:
@@ -46,6 +45,12 @@ def bootstrap_identity_header(target_identity: dict[str, Any], prefix: str) -> b
         raise IdentityError(
             f"bootstrap display name must fit in {BOOT_SCREEN_IDENTITY_BYTES - 1} bytes"
         )
+    return display_name
+
+
+def bootstrap_identity_header(target_identity: dict[str, Any], prefix: str) -> bytes:
+    """Generate the only C representation of target/bootstrap identity."""
+    display_name = validate_bootstrap_display_name(target_identity["display_name"])
     prefix = validate_record_prefix(prefix)
     return (
         f"/* {_SPDX_TAG}: GPL-2.0-only */\n"

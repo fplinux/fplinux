@@ -36,6 +36,7 @@ from .prune import (
 from .quality.checks import CHECK_SCOPES, check
 from .quality.git import check_commit_message
 from .quality.testing import add_test_arguments, run_tests
+from .target_new import create_target
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -48,7 +49,7 @@ _SHARED_CACHE_COMMANDS = frozenset({"console", "package", "run", "verify"})
 _CHECK_SCOPE_METAVAR = "{" + ",".join(CHECK_SCOPES) + "}"
 _PUBLIC_COMMAND_METAVAR = (
     "{doctor,check,test,logs,inspect,format,setup,build,probe-build,checksum,package,prune,"
-    "run,console,nand,device-data,verify}"
+    "run,console,nand,device-data,target,verify}"
 )
 
 
@@ -268,6 +269,17 @@ def _command_action(
             from_dump=args.from_dump,
             jobs=args.jobs,
             offline=args.offline,
+        )
+    elif args.command == "target":
+        if args.target_command != "new":
+            raise AssertionError(f"unhandled target command: {args.target_command}")
+        action = partial(
+            create_target,
+            args.name,
+            platform=args.platform,
+            brand=args.brand,
+            product=args.product,
+            compatible=args.compatible,
         )
     elif args.command == "verify":
         action = partial(verify_booted, args.target, profile=args.profile)
@@ -501,6 +513,31 @@ def main() -> None:
         "device-data", help="prepare target-owned fitted data from one NAND image"
     )
     _add_device_data_prepare_command(device_data_parser, targets)
+
+    target_parser = commands.add_parser("target", help="create a phone target")
+    target_commands = target_parser.add_subparsers(
+        dest="target_command",
+        required=True,
+        metavar="{new}",
+    )
+    new_target_parser = target_commands.add_parser(
+        "new", help="create a headless target for a phone without one"
+    )
+    new_target_parser.add_argument(
+        "name", metavar="TARGET", help="lowercase target name, for example brand-model"
+    )
+    new_target_parser.add_argument(
+        "--platform",
+        metavar="NAME",
+        help="SoC platform under platforms/ (default: the only one; required when several exist)",
+    )
+    new_target_parser.add_argument("--brand", required=True, help="public brand name")
+    new_target_parser.add_argument("--product", required=True, help="public product name")
+    new_target_parser.add_argument(
+        "--compatible",
+        metavar="VENDOR,DEVICE",
+        help="exact board compatible (default: derived from the brand and product)",
+    )
 
     verify_parser = commands.add_parser(
         "verify", help="check that the booted phone runs the current build"

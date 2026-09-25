@@ -1,0 +1,7 @@
+CONFIG_MACH_@SYMBOL@=y
+CONFIG_UMS9117_NANDC_RO=y
+# The shared microSD host driver is built; its slot stays disabled in the DTS.
+CONFIG_MMC=y
+CONFIG_MMC_SDHCI=y
+CONFIG_MMC_SDHCI_PLTFM=y
+CONFIG_MMC_SDHCI_UMS9117=y

@@ -91,6 +91,14 @@ initialization; consult its support status for physical brightness limits.
 Targets enable only the SoC nodes their board can use. Board devices and USB
 setup remain target-owned.
 
+A target without the loader display settings (`spi_mode`, `lcd_id`,
+`backlight_channels` and `backlight_level` in `[adapter]`) and with a 0x0
+bootstrap display loads headless: the panel and backlight stay untouched and
+boot progress is reported only to the host. Without pin map and keymap loader
+assets, the loader applies no board pin settings and leaves the keypad
+uninitialized. Headless targets created by `./fplinux target new` reach the
+USB session on the INOI 244 Modern 4G and the Nokia 3210 4G (TA-1618).
+
 ## Targets using this platform
 
 | Target                                                             | Phone                   |
