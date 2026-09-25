@@ -16,15 +16,16 @@ if TYPE_CHECKING:
 AUDIO_RECORD_SIZES = {425: 2, 426: 5360, 440: 8160}
 _ARM_MODE_SIZE = 1072
 _HEADSET_EQ_SIZE = 544
-_SPEAKER_MODE_NAME = b"Handsfree".ljust(16, b"\0")
-_SPEAKER_PLAY_DEV_SET_OFFSET = 20
-_SPEAKER_APP_COUNT_OFFSET = 36
-_SPEAKER_LEVEL_COUNT_OFFSET = 62
-_SPEAKER_LEVELS_OFFSET = 68
-_SPEAKER_VIBRATE_TONE_OFFSET = 188
-_SPEAKER_PA_WORD_OFFSET = 466
-_SPEAKER_PLAY_ROUTE_MASK = 0x30
-_SPEAKER_PLAY_ONLY = 0x20
+_MODE_NAME_SIZE = 16
+_MODE_PLAY_DEV_SET_OFFSET = 20
+_MODE_APP_COUNT_OFFSET = 36
+_MODE_LEVEL_COUNT_OFFSET = 62
+_MODE_LEVELS_OFFSET = 68
+_MODE_VIBRATE_TONE_OFFSET = 188
+_MODE_PA_WORD_OFFSET = 466
+_PLAY_ROUTE_MASK = 0x30
+_PLAY_SPEAKER_ONLY = 0x20
+_PLAY_HEADPHONE_AND_SPEAKER = 0x30
 _SOURCE_PASS_EQ_BYPASS = 0
 _SOURCE_PASS_EQ_ACTIVE_OMITTED = 1
 _VIBRATE_TONE_UNIT = 1 << 30
@@ -50,56 +51,94 @@ def _signed32(word: int) -> int:
     return word - (1 << 32) if word & 0x80000000 else word
 
 
-def _admitted_handsfree_mode(arm_modes: bytes, protected_arm_modes: bytes) -> bytes:
-    """Return the single Handsfree mode when both fixed-NV copies agree on it."""
+def _admitted_mode(arm_modes: bytes, protected_arm_modes: bytes, name: str) -> bytes:
+    """Return the single named mode when both fixed-NV copies agree on it."""
+    mode_name = name.encode().ljust(_MODE_NAME_SIZE, b"\0")
     matching_offsets = [
         offset
         for offset in range(0, len(arm_modes), _ARM_MODE_SIZE)
-        if arm_modes[offset : offset + 16] == _SPEAKER_MODE_NAME
+        if arm_modes[offset : offset + _MODE_NAME_SIZE] == mode_name
     ]
     if len(matching_offsets) != 1:
-        message = "audio-profile NV426 requires exactly one Handsfree mode"
-        raise ValueError(message)
+        raise ValueError(f"audio-profile NV426 requires exactly one {name} mode")
     offset = matching_offsets[0]
     mode = arm_modes[offset : offset + _ARM_MODE_SIZE]
     if mode != protected_arm_modes[offset : offset + _ARM_MODE_SIZE]:
-        message = "audio-profile Handsfree NV426 differs between DownloadedNV and ProtectNV"
-        raise ValueError(message)
+        raise ValueError(f"audio-profile {name} NV426 differs between DownloadedNV and ProtectNV")
     return mode
+
+
+def _app0_volume_levels(mode: bytes, name: str) -> tuple[list[int], list[int]]:
+    """Return app-0 digital gains and analog words for volume levels 1..9.
+
+    Each level word carries the digital gain in its high half and the mode's
+    analog gain levels in its low half.
+    """
+    if struct.unpack_from("<H", mode, _MODE_APP_COUNT_OFFSET)[0] < 1:
+        raise ValueError(f"audio-profile {name} has no app 0")
+    level_count = struct.unpack_from("<H", mode, _MODE_LEVEL_COUNT_OFFSET)[0]
+    if level_count != 9:
+        raise ValueError(f"audio-profile {name} app 0 has {level_count} levels; expected 9")
+    levels = struct.unpack_from("<9I", mode, _MODE_LEVELS_OFFSET)
+    digital_gain = [level >> 16 for level in levels]
+    if any(gain > 127 for gain in digital_gain):
+        raise ValueError(f"audio-profile {name} digital gain exceeds 127")
+    if any(first < second for first, second in pairwise(digital_gain)):
+        raise ValueError(f"audio-profile {name} digital gain is not monotonically decreasing")
+    analog_levels = [level & 0xFFFF for level in levels]
+    return digital_gain, analog_levels
 
 
 def _handsfree_speaker_fields(mode: bytes) -> bytes:
     """Admit speaker-only Handsfree playback and pack its PA and app-0 gains."""
-    play_dev_set = struct.unpack_from("<H", mode, _SPEAKER_PLAY_DEV_SET_OFFSET)[0]
-    if play_dev_set & _SPEAKER_PLAY_ROUTE_MASK != _SPEAKER_PLAY_ONLY:
+    play_dev_set = struct.unpack_from("<H", mode, _MODE_PLAY_DEV_SET_OFFSET)[0]
+    if play_dev_set & _PLAY_ROUTE_MASK != _PLAY_SPEAKER_ONLY:
         message = "audio-profile Handsfree does not select speaker-only playback"
         raise ValueError(message)
-    if struct.unpack_from("<H", mode, _SPEAKER_APP_COUNT_OFFSET)[0] < 1:
-        message = "audio-profile Handsfree has no app 0"
-        raise ValueError(message)
-    level_count = struct.unpack_from("<H", mode, _SPEAKER_LEVEL_COUNT_OFFSET)[0]
-    if level_count != 9:
-        raise ValueError(f"audio-profile Handsfree app 0 has {level_count} levels; expected 9")
-    levels = struct.unpack_from("<9I", mode, _SPEAKER_LEVELS_OFFSET)
-    if any(level & 0xFFFF for level in levels):
+    digital_gain, analog_levels = _app0_volume_levels(mode, "Handsfree")
+    if any(analog_levels):
         message = "audio-profile Handsfree PA gain is not the supported zero setting"
         raise ValueError(message)
-    digital_gain = [level >> 16 for level in levels]
-    if any(gain > 127 for gain in digital_gain):
-        message = "audio-profile Handsfree digital gain exceeds 127"
+
+    pa_word = struct.unpack_from("<H", mode, _MODE_PA_WORD_OFFSET)[0]
+    return struct.pack("<H9B", pa_word, *digital_gain)
+
+
+def _headfree_combined_fields(mode: bytes) -> bytes:
+    """Admit headphone-and-speaker Headfree playback and pack its PA, PGA and gains.
+
+    The analog word of every level holds the headphone PGA level in bits 7:4
+    and the speaker PA gain level in bits 3:0. Only a fixed PGA level and the
+    zero PA gain setting are admitted, matching the Headset and Handsfree data.
+    """
+    play_dev_set = struct.unpack_from("<H", mode, _MODE_PLAY_DEV_SET_OFFSET)[0]
+    if play_dev_set & _PLAY_ROUTE_MASK != _PLAY_HEADPHONE_AND_SPEAKER:
+        message = "audio-profile Headfree does not select headphone-and-speaker playback"
         raise ValueError(message)
-    if any(first < second for first, second in pairwise(digital_gain)):
-        message = "audio-profile Handsfree digital gain is not monotonically decreasing"
+    digital_gain, analog_levels = _app0_volume_levels(mode, "Headfree")
+    if len(set(analog_levels)) != 1:
+        message = "audio-profile Headfree analog levels 1..9 differ"
+        raise ValueError(message)
+    analog_level = analog_levels[0]
+    if analog_level >> 8:
+        message = "audio-profile Headfree analog level sets bits above the headphone PGA"
+        raise ValueError(message)
+    if analog_level & 0x0F:
+        message = "audio-profile Headfree PA gain is not the supported zero setting"
+        raise ValueError(message)
+    headphone_pga = analog_level >> 4
+    if not 2 <= headphone_pga <= 7:
+        message = "audio-profile Headfree headphone PGA level is outside supported range 2..7"
         raise ValueError(message)
 
-    pa_word = struct.unpack_from("<H", mode, _SPEAKER_PA_WORD_OFFSET)[0]
-    return struct.pack("<H9B", pa_word, *digital_gain)
+    pa_word = struct.unpack_from("<H", mode, _MODE_PA_WORD_OFFSET)[0]
+    return struct.pack("<HB9B", pa_word, headphone_pga, *digital_gain)
 
 
 def _handsfree_vibrate_tone_fields(mode: bytes) -> bytes:
     """Convert the fitted 32 kHz Handsfree vibrate tone for each DAC sample rate."""
     (sin_hi, sin_lo, cos_hi, cos_lo, gain_0, gain_1, gain_down, gain_up, hold) = (
-        struct.unpack_from("<9H", mode, _SPEAKER_VIBRATE_TONE_OFFSET)
+        struct.unpack_from("<9H", mode, _MODE_VIBRATE_TONE_OFFSET)
     )
     if gain_0 == 0 or gain_1 == 0:
         message = "audio-profile Handsfree vibrate tone gain is zero"
@@ -206,8 +245,10 @@ def prepare_headset_gain_profile(
         source_eq,
         *digital_gain,
     )
-    handsfree = _admitted_handsfree_mode(arm_modes, protected_arm_modes)
+    handsfree = _admitted_mode(arm_modes, protected_arm_modes, "Handsfree")
+    headfree = _admitted_mode(arm_modes, protected_arm_modes, "Headfree")
     profile += _handsfree_speaker_fields(handsfree)
+    profile += _headfree_combined_fields(headfree)
     if speaker_vibration:
         profile += _handsfree_vibrate_tone_fields(handsfree)
     originals = {
