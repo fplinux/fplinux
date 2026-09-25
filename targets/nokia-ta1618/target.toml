@@ -88,7 +88,7 @@ firmware = [
 
 [audio_profile]
 firmware = [
-  { source = "ta1618-audio-profile.bin", destination = "fplinux/ta1618-audio-profile.bin", size = 66 },
+  { source = "ta1618-audio-profile.bin", destination = "fplinux/ta1618-audio-profile.bin", size = 788 },
 ]
 
 [fm_radio]

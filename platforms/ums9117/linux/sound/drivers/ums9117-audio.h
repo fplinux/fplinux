@@ -26,6 +26,33 @@ struct ums9117_audio_vibrate_tone {
 	u16 hold;
 };
 
+#define UMS9117_AUDIO_EQ_SECTION_COUNT 6U
+#define UMS9117_AUDIO_ALC_WORD_COUNT 11U
+/* Q14 unity: the leading denominator coefficient of every EQ6 section. */
+#define UMS9117_AUDIO_EQ_A0 16384
+
+/*
+ * One EQ6 biquad: Q12 input scale and Q14 coefficients. The denominator
+ * coefficients are stored negated, as the VBC registers take them.
+ */
+struct ums9117_audio_eq_section {
+	s16 scale;
+	s16 b0;
+	s16 b1;
+	s16 minus_a1;
+	s16 b2;
+	s16 minus_a2;
+};
+
+/* Stock DAC processing of one output route: EQ6 per DAC rate, S6 and ALC. */
+struct ums9117_audio_dac_processing {
+	struct ums9117_audio_eq_section section[UMS9117_AUDIO_DAC_RATE_COUNT]
+					       [UMS9117_AUDIO_EQ_SECTION_COUNT];
+	s16 alc[UMS9117_AUDIO_ALC_WORD_COUNT];
+	u16 output_scale;
+	bool alc_enabled;
+};
+
 struct ums9117_audio *ums9117_audio_create(struct platform_device *pdev);
 /* FM playback follows the same left and right gain codes. */
 void ums9117_audio_set_dac_gain(struct ums9117_audio *audio, u8 left_gain,
