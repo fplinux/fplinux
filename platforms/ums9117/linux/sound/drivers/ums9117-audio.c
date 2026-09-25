@@ -64,6 +64,8 @@
 #define UMS9117_VBC_IIS 0x3c
 #define UMS9117_VBC_DAC_PATH 0x40
 #define UMS9117_VBC_DAC_DG_CTRL 0x44
+#define UMS9117_VBC_DAC_HP_CTRL 0x48
+#define UMS9117_VBC_DAC_ALC_CTRL(n) (0x4c + 4 * (n))
 #define UMS9117_VBC_DAC_ST_CTL0 0x78
 #define UMS9117_VBC_DAC_ST_CTL1 0x7c
 #define UMS9117_VBC_ADC_PATH 0x80
@@ -77,6 +79,8 @@
 #define UMS9117_VBC_DAC_LEVEL 0xe4
 #define UMS9117_VBC_ADC_LEVEL 0xec
 #define UMS9117_VBC_FM_MUTE 0xf8
+#define UMS9117_VBC_DAC_EQ6_COEF_H(n) (0x100 + 8 * (n))
+#define UMS9117_VBC_DAC_EQ6_COEF_L(n) (0x104 + 8 * (n))
 #define UMS9117_VBC_TONE_CTRL 0x900
 #define UMS9117_VBC_VT_SIN 0x918
 #define UMS9117_VBC_VT_COS 0x91c
@@ -119,6 +123,26 @@
 #define UMS9117_VBC_VT_LEVEL0 GENMASK(15, 0)
 #define UMS9117_VBC_VT_RISE GENMASK(31, 16)
 #define UMS9117_VBC_VT_FALL GENMASK(15, 0)
+#define UMS9117_VBC_CLEAR_DAC_EQ6 BIT(10)
+#define UMS9117_VBC_CLEAR_DAC_ALC BIT(11)
+#define UMS9117_VBC_DAC_HP_EQ6_ENABLE BIT(9)
+#define UMS9117_VBC_DAC_HP_ALC_ENABLE BIT(11)
+/* Write-one clears of the EQ6 and EQ4 accumulators, which stock never sets. */
+#define UMS9117_VBC_DAC_HP_ACCUMULATOR_CLEAR GENMASK(15, 14)
+#define UMS9117_VBC_DAC_EQ6_COEF_H_VALUE GENMASK(15, 0)
+/*
+ * Section k occupies COEF 7k to 7k + 6: its scale, then the six filter words
+ * in register order. COEF42 is the output scale S6. Stock writes the 16-bit
+ * value to COEF_H and zero to COEF_L.
+ */
+#define UMS9117_VBC_DAC_EQ6_SECTION_COEFS 7U
+#define UMS9117_VBC_DAC_EQ6_FILTER_WORDS 6U
+#define UMS9117_VBC_DAC_EQ6_OUTPUT_SCALE 42U
+/* Stock fades S0..S5 in ten 1 ms steps and waits 2 ms after zeroing filters. */
+#define UMS9117_VBC_DAC_EQ6_RAMP_STEPS 10
+#define UMS9117_VBC_DAC_EQ6_RAMP_STEP_US 1000U
+#define UMS9117_VBC_DAC_EQ6_FLUSH_US 2000U
+#define UMS9117_VBC_DAC_EQ6_SLEEP_SLACK_US 500U
 
 struct ums9117_audio {
 	struct device *dev;
@@ -130,6 +154,14 @@ struct ums9117_audio {
 	u32 acquired_gates;
 	u32 saved_iis_matrix;
 	struct ums9117_audio_vibrate_tone vibrate_tone;
+	/* Selected route and switches; applied while prepared. */
+	const struct ums9117_audio_dac_processing *dac_processing;
+	bool dac_eq_enabled;
+	bool dac_alc_enabled;
+	/* Routes whose EQ6 image and ALC words the VBC registers hold. */
+	const struct ums9117_audio_dac_processing *loaded_eq6;
+	const struct ums9117_audio_dac_processing *loaded_alc_words;
+	bool alc_on;
 	u8 dac_left_gain;
 	u8 dac_right_gain;
 	unsigned int playback_rate;
@@ -140,6 +172,8 @@ struct ums9117_audio {
 	bool music_muted;
 	bool prepared;
 	bool playback_prepared;
+	/* The DAC lanes run between start and stop; EQ6 changes then fade. */
+	bool dac_running;
 	bool fm_prepared;
 	bool capture_prepared;
 };
@@ -284,6 +318,274 @@ void ums9117_audio_set_vibration(struct ums9117_audio *audio, bool on)
 	write_vibrate_tone_on(audio, on);
 }
 
+static unsigned int eq6_scale_coef(unsigned int section)
+{
+	return section * UMS9117_VBC_DAC_EQ6_SECTION_COEFS;
+}
+
+static unsigned int eq6_filter_coef(unsigned int section, unsigned int word)
+{
+	return eq6_scale_coef(section) + 1 + word;
+}
+
+static void write_eq6_coef(struct ums9117_audio *audio, unsigned int coef,
+			   s16 value)
+{
+	writel((u16)value, audio->vbc + UMS9117_VBC_DAC_EQ6_COEF_H(coef));
+	writel(0, audio->vbc + UMS9117_VBC_DAC_EQ6_COEF_L(coef));
+}
+
+static void eq6_filter_words(const struct ums9117_audio_eq_section *section,
+			     s16 words[UMS9117_VBC_DAC_EQ6_FILTER_WORDS])
+{
+	words[0] = section->b0;
+	words[1] = UMS9117_AUDIO_EQ_A0;
+	words[2] = section->b1;
+	words[3] = section->minus_a1;
+	words[4] = section->b2;
+	words[5] = section->minus_a2;
+}
+
+static int write_eq6_filters(struct ums9117_audio *audio,
+			     const struct ums9117_audio_eq_section *sections)
+{
+	s16 words[UMS9117_VBC_DAC_EQ6_FILTER_WORDS];
+	unsigned int section;
+	unsigned int word;
+	unsigned int coef;
+	u32 value;
+
+	for (section = 0; section < UMS9117_AUDIO_EQ_SECTION_COUNT; section++) {
+		eq6_filter_words(&sections[section], words);
+		for (word = 0; word < ARRAY_SIZE(words); word++)
+			write_eq6_coef(audio, eq6_filter_coef(section, word),
+				       words[word]);
+	}
+	/* A filter word that did not land can leave a section unstable. */
+	for (section = 0; section < UMS9117_AUDIO_EQ_SECTION_COUNT; section++) {
+		eq6_filter_words(&sections[section], words);
+		for (word = 0; word < ARRAY_SIZE(words); word++) {
+			coef = eq6_filter_coef(section, word);
+			value = readl(audio->vbc +
+				      UMS9117_VBC_DAC_EQ6_COEF_H(coef)) &
+				UMS9117_VBC_DAC_EQ6_COEF_H_VALUE;
+			if (value == (u16)words[word])
+				continue;
+			dev_err(audio->dev,
+				"EQ6 coefficient %u reads %#x, expected %#x\n",
+				coef, value, (u16)words[word]);
+			return -EIO;
+		}
+	}
+	return 0;
+}
+
+static void clear_eq6_filters(struct ums9117_audio *audio)
+{
+	unsigned int section;
+	unsigned int word;
+
+	for (section = 0; section < UMS9117_AUDIO_EQ_SECTION_COUNT; section++)
+		for (word = 0; word < UMS9117_VBC_DAC_EQ6_FILTER_WORDS; word++)
+			write_eq6_coef(audio, eq6_filter_coef(section, word),
+				       0);
+}
+
+/* Writes S0..S5 at step tenths of their targets; any zero scale is silent. */
+static void write_eq6_scales(struct ums9117_audio *audio,
+			     const struct ums9117_audio_eq_section *sections,
+			     int step)
+{
+	unsigned int section;
+
+	for (section = 0; section < UMS9117_AUDIO_EQ_SECTION_COUNT; section++)
+		write_eq6_coef(audio, eq6_scale_coef(section),
+			       sections[section].scale * step /
+				       UMS9117_VBC_DAC_EQ6_RAMP_STEPS);
+}
+
+static void ramp_eq6_scales(struct ums9117_audio *audio,
+			    const struct ums9117_audio_eq_section *sections,
+			    bool up)
+{
+	int step;
+
+	for (step = 1; step <= UMS9117_VBC_DAC_EQ6_RAMP_STEPS; step++) {
+		if (step > 1)
+			usleep_range(
+				UMS9117_VBC_DAC_EQ6_RAMP_STEP_US,
+				UMS9117_VBC_DAC_EQ6_RAMP_STEP_US +
+					UMS9117_VBC_DAC_EQ6_SLEEP_SLACK_US);
+		write_eq6_scales(audio, sections,
+				 up ? step :
+				      UMS9117_VBC_DAC_EQ6_RAMP_STEPS - step);
+	}
+}
+
+static void clear_eq6_scales(struct ums9117_audio *audio)
+{
+	unsigned int section;
+
+	for (section = 0; section < UMS9117_AUDIO_EQ_SECTION_COUNT; section++)
+		write_eq6_coef(audio, eq6_scale_coef(section), 0);
+	write_eq6_coef(audio, UMS9117_VBC_DAC_EQ6_OUTPUT_SCALE, 0);
+}
+
+/*
+ * The VBC has no coefficient latch, so a running EQ6 is silenced before its
+ * filters change: S0..S5 fade to zero, the filters are zeroed and their state
+ * flushes, as in the stock reload.
+ */
+static void fade_out_eq6(struct ums9117_audio *audio)
+{
+	const struct ums9117_audio_dac_processing *loaded = audio->loaded_eq6;
+
+	ramp_eq6_scales(audio, loaded->section[audio->dac_rate], false);
+	clear_eq6_filters(audio);
+	usleep_range(UMS9117_VBC_DAC_EQ6_FLUSH_US,
+		     UMS9117_VBC_DAC_EQ6_FLUSH_US +
+			     UMS9117_VBC_DAC_EQ6_SLEEP_SLACK_US);
+}
+
+/* Stock switches set or clear the enable, then clear that module's state. */
+static void switch_dac_module(struct ums9117_audio *audio, u32 enable,
+			      u32 clear, bool on)
+{
+	update_bits(audio->vbc, UMS9117_VBC_DAC_HP_CTRL,
+		    enable | UMS9117_VBC_DAC_HP_ACCUMULATOR_CLEAR,
+		    on ? enable : 0);
+	writel(clear, audio->vbc + UMS9117_VBC_CLEAR);
+}
+
+static void switch_eq6(struct ums9117_audio *audio, bool on)
+{
+	switch_dac_module(audio, UMS9117_VBC_DAC_HP_EQ6_ENABLE,
+			  UMS9117_VBC_CLEAR_DAC_EQ6, on);
+}
+
+static void switch_alc(struct ums9117_audio *audio, bool on)
+{
+	switch_dac_module(audio, UMS9117_VBC_DAC_HP_ALC_ENABLE,
+			  UMS9117_VBC_CLEAR_DAC_ALC, on);
+	audio->alc_on = on;
+}
+
+static void write_alc(struct ums9117_audio *audio,
+		      const struct ums9117_audio_dac_processing *processing)
+{
+	unsigned int i;
+
+	for (i = 0; i < UMS9117_AUDIO_ALC_WORD_COUNT; i++)
+		writel((u16)processing->alc[i],
+		       audio->vbc + UMS9117_VBC_DAC_ALC_CTRL(i));
+	audio->loaded_alc_words = processing;
+}
+
+static bool alc_wanted(const struct ums9117_audio *audio)
+{
+	return audio->dac_processing && audio->dac_processing->alc_enabled &&
+	       audio->dac_alc_enabled;
+}
+
+static void disable_eq6(struct ums9117_audio *audio)
+{
+	clear_eq6_scales(audio);
+	switch_eq6(audio, false);
+	audio->loaded_eq6 = NULL;
+}
+
+/*
+ * Stock order: scales at zero and EQ6 enabled and cleared, then the filters
+ * for the DAC rate, the route's ALC words and enable, S6 and S0..S5. A running
+ * DAC keeps EQ6 enabled, fades the loaded image out and ramps the new scales
+ * in, so ALC also changes while EQ6 is silent.
+ */
+static int load_eq6(struct ums9117_audio *audio,
+		    const struct ums9117_audio_dac_processing *processing)
+{
+	const struct ums9117_audio_eq_section *sections =
+		processing->section[audio->dac_rate];
+	bool live = audio->dac_running;
+	int ret;
+
+	if (live && audio->loaded_eq6) {
+		fade_out_eq6(audio);
+	} else {
+		clear_eq6_scales(audio);
+		switch_eq6(audio, true);
+	}
+	/* S0..S5 keep EQ6 silent until the filters read back intact. */
+	ret = write_eq6_filters(audio, sections);
+	if (ret) {
+		disable_eq6(audio);
+		return ret;
+	}
+	write_alc(audio, processing);
+	switch_alc(audio, alc_wanted(audio));
+	write_eq6_coef(audio, UMS9117_VBC_DAC_EQ6_OUTPUT_SCALE,
+		       processing->output_scale);
+	if (live)
+		ramp_eq6_scales(audio, sections, true);
+	else
+		write_eq6_scales(audio, sections,
+				 UMS9117_VBC_DAC_EQ6_RAMP_STEPS);
+	audio->loaded_eq6 = processing;
+	return 0;
+}
+
+/* Stock switches ALC without a fade; another route's words come first. */
+static void apply_alc(struct ums9117_audio *audio)
+{
+	bool on = alc_wanted(audio);
+
+	if (on && audio->loaded_alc_words != audio->dac_processing) {
+		write_alc(audio, audio->dac_processing);
+		switch_alc(audio, true);
+	} else if (on != audio->alc_on) {
+		switch_alc(audio, on);
+	}
+}
+
+static int apply_dac_processing(struct ums9117_audio *audio)
+{
+	const struct ums9117_audio_dac_processing *eq6 =
+		audio->dac_eq_enabled ? audio->dac_processing : NULL;
+
+	if (!audio->playback_prepared)
+		return 0;
+	if (eq6 != audio->loaded_eq6) {
+		if (eq6)
+			return load_eq6(audio, eq6);
+		if (audio->dac_running)
+			fade_out_eq6(audio);
+		disable_eq6(audio);
+	}
+	apply_alc(audio);
+	return 0;
+}
+
+/* Stock end of stream: scales to zero, then EQ6 and ALC off and cleared. */
+static void disable_dac_processing(struct ums9117_audio *audio)
+{
+	if (audio->loaded_eq6)
+		disable_eq6(audio);
+	if (audio->alc_on)
+		switch_alc(audio, false);
+	/* A later prepare may follow a VBC reset. */
+	audio->loaded_alc_words = NULL;
+}
+
+int ums9117_audio_set_dac_processing(
+	struct ums9117_audio *audio,
+	const struct ums9117_audio_dac_processing *processing, bool eq,
+	bool alc)
+{
+	audio->dac_processing = processing;
+	audio->dac_eq_enabled = eq;
+	audio->dac_alc_enabled = alc;
+	return apply_dac_processing(audio);
+}
+
 static int fifo_frames(u32 status)
 {
 	unsigned int read_ptr = FIELD_GET(UMS9117_VBC_FIFO_READ, status);
@@ -379,6 +681,7 @@ void ums9117_audio_start(struct ums9117_audio *audio)
 		    UMS9117_AUD_DAC_CHANNELS);
 	update_bits(audio->aud, UMS9117_AUD_DAC, UMS9117_AUD_DAC_MUTE, 0);
 	readl(audio->aud + UMS9117_AUD_DAC);
+	audio->dac_running = true;
 }
 
 void ums9117_audio_stop(struct ums9117_audio *audio)
@@ -403,6 +706,9 @@ void ums9117_audio_stop(struct ums9117_audio *audio)
 				 status);
 	}
 	update_bits(audio->aud, UMS9117_AUD_TOP, UMS9117_AUD_DAC_CHANNELS, 0);
+	audio->dac_running = false;
+	/* A capture session keeps the clocks, and with them EQ6 and ALC. */
+	disable_dac_processing(audio);
 	if (audio->vibrate_tone_fitted) {
 		write_vibrate_tone_on(audio, false);
 		update_bits(audio->vbc, UMS9117_VBC_TONE_ENABLE,
@@ -524,7 +830,7 @@ static int prepare_clocks(struct ums9117_audio *audio)
 	ret = pulse_reset(audio, BIT(20));
 	if (ret)
 		goto failed;
-	/* VBC reset leaves EQ6, EQ4 and ALC disabled; profiles supply gain only. */
+	/* VBC reset disables EQ6, EQ4 and ALC and zeroes their coefficients. */
 	ret = pulse_reset(audio, GENMASK(19, 18));
 	if (ret)
 		goto failed;
@@ -627,6 +933,10 @@ int ums9117_audio_prepare(struct ums9117_audio *audio, unsigned int rate)
 	update_bits(audio->vbc, UMS9117_VBC_IIS, UMS9117_VBC_IIS_DAC_SELECT, 0);
 	writel(0, audio->vbc + UMS9117_VBC_DAC_PATH);
 	apply_dac_gain(audio);
+	/* FM joins the DAC path before EQ6 and takes the 32 kHz processing. */
+	ret = apply_dac_processing(audio);
+	if (ret)
+		goto failed;
 	/* A capture session keeps the clocks, so VBC may not have been reset. */
 	program_vibrate_tone(audio);
 	writel(0xa0a0, audio->vbc + UMS9117_VBC_DAC_LEVEL);
@@ -642,6 +952,7 @@ int ums9117_audio_prepare(struct ums9117_audio *audio, unsigned int rate)
 	if (ret > 0)
 		ret = -EIO;
 
+failed:
 	ums9117_audio_release(audio);
 	return ret;
 }

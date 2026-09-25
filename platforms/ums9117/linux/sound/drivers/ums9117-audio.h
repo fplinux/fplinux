@@ -65,6 +65,18 @@ void ums9117_audio_set_vibrate_tone(
 void ums9117_audio_set_vibration(struct ums9117_audio *audio, bool on);
 /* Hold the DAC and FM gains at their minimum and mute FM, but not the tone. */
 void ums9117_audio_set_music_mute(struct ums9117_audio *audio, bool mute);
+/*
+ * Select the route processing for PCM and FM playback, or NULL for none. eq
+ * runs its EQ6 and output scale; alc runs its ALC when the route enables ALC.
+ * Each block is bypassed otherwise. The caller keeps the processing alive
+ * while it is selected. A prepared DAC changes at once, fading EQ6 while it
+ * runs, and the next prepare programs the selection otherwise. On error EQ6
+ * is off.
+ */
+int ums9117_audio_set_dac_processing(
+	struct ums9117_audio *audio,
+	const struct ums9117_audio_dac_processing *processing, bool eq,
+	bool alc);
 int ums9117_audio_prepare(struct ums9117_audio *audio, unsigned int rate);
 int ums9117_audio_prepare_fm(struct ums9117_audio *audio);
 int ums9117_audio_prepare_capture(struct ums9117_audio *audio);

@@ -16,7 +16,7 @@ Current target support:
   - bounded vibration through the Linux force-feedback interface;
   - USB SSH/SFTP and host-keyboard forwarding;
   - stereo S16_LE playback through the 3.5 mm headphones, with fitted gain
-    levels and a flat VBC path;
+    levels and the stock equalizer and ALC;
   - PCM playback through the single front speaker above the display, alone or
     together with the headphones;
   - mono 48 kHz recording from the built-in or original wired-headset microphone,
@@ -48,9 +48,9 @@ ALSA device:
   ./runner/run.py --reconnect --exec 'aplay /tmp/audio.wav'
 
 The default device converts input to the 48 kHz hardware rate. The fitted gain
-levels come from this phone, but its stock VBC EQ is not implemented; Nokia
-output therefore does not have stock tonal parity. See
-docs/features/HEADPHONE_AUDIO.md for direct-device limits and idle silence.
+levels, equalizer and ALC come from this phone. See
+docs/features/HEADPHONE_AUDIO.md for direct-device limits, the equalizer and
+ALC switches and idle silence.
 Enable the front speaker with `Speaker Playback Switch`; see
 docs/features/SPEAKER_AUDIO.md. Set the microphone source explicitly before
 recording; see docs/features/MICROPHONE_AUDIO.md. FM needs a wired 3.5 mm cable

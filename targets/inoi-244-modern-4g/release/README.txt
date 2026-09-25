@@ -44,12 +44,12 @@ little-endian WAV file and use the default ALSA device:
 
 The default device converts input to the 48 kHz hardware rate. See
 docs/features/HEADPHONE_AUDIO.md for fitted volume levels, direct-device limits,
-idle silence and its power trade-off. Enable the built-in speaker with
-`Speaker Playback Switch`; see docs/features/SPEAKER_AUDIO.md. Select
-`Capture Source` before microphone recording; see
-docs/features/MICROPHONE_AUDIO.md. FM needs a wired 3.5 mm cable as its
-antenna; see docs/features/FM_RADIO.md for scan and playback commands and the
-tested profile.
+the equalizer and ALC switches, idle silence and its power trade-off. Enable
+the built-in speaker with `Speaker Playback Switch`; see
+docs/features/SPEAKER_AUDIO.md. Select `Capture Source` before microphone
+recording; see docs/features/MICROPHONE_AUDIO.md. FM needs a wired 3.5 mm
+cable as its antenna; see docs/features/FM_RADIO.md for scan and playback
+commands and the tested profile.
 
 The shared interfaces and storage safety rules are described in:
   - docs/features/AUXADC.md

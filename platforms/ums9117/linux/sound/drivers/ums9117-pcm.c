@@ -215,6 +215,9 @@ struct ums9117_pcm {
 	enum ums9117_sc2720_capture_source capture_source;
 	/* Requested UMS9117_SC2720_OUTPUT_* set; running hardware follows it. */
 	unsigned int outputs;
+	/* Fitted EQ6 and ALC switches, each controlling its own block. */
+	bool eq_enabled;
+	bool alc_enabled;
 	bool codec_prepared;
 	bool digital_prepared;
 	bool capture_supported;
@@ -893,9 +896,37 @@ static u16 ums9117_pcm_route_pa_word(const struct ums9117_pcm *audio)
 	return audio->profile.speaker_pa_word;
 }
 
+/* The stock Headset, Handsfree and Headfree processing of the outputs. */
+static const struct ums9117_audio_dac_processing *
+ums9117_pcm_route_processing(const struct ums9117_pcm *audio)
+{
+	const struct ums9117_audio_profile *profile = &audio->profile;
+
+	if (!profile->fitted)
+		return NULL;
+	switch (audio->outputs) {
+	case UMS9117_SC2720_OUTPUT_HEADPHONES:
+		return &profile->headphone_processing;
+	case UMS9117_SC2720_OUTPUT_SPEAKER:
+		return &profile->speaker_processing;
+	case UMS9117_PCM_OUTPUTS_BOTH:
+		return &profile->combined_processing;
+	default:
+		return NULL;
+	}
+}
+
+static int ums9117_pcm_apply_processing_locked(struct ums9117_pcm *audio)
+{
+	return ums9117_audio_set_dac_processing(
+		audio->digital, ums9117_pcm_route_processing(audio),
+		audio->eq_enabled, audio->alc_enabled);
+}
+
 /*
- * Programs the digital gain, headphone level, speaker mute and sample scaling
- * of the requested outputs before the codec opens or closes them.
+ * Programs the digital gain, processing, headphone level, speaker mute and
+ * sample scaling of the requested outputs before the codec opens or closes
+ * them.
  */
 static int ums9117_pcm_apply_output_levels_locked(struct ums9117_pcm *audio)
 {
@@ -903,6 +934,9 @@ static int ums9117_pcm_apply_output_levels_locked(struct ums9117_pcm *audio)
 	int ret;
 
 	ums9117_pcm_apply_output_gain(audio);
+	ret = ums9117_pcm_apply_processing_locked(audio);
+	if (ret)
+		return ret;
 	if (audio->profile.fitted) {
 		ret = ums9117_pcm_set_codec_volume_locked(
 			audio, audio->volume_left, audio->volume_right);
@@ -1555,6 +1589,86 @@ static const struct snd_kcontrol_new ums9117_speaker_volume_control = {
 	.info = ums9117_speaker_volume_info,
 	.get = ums9117_speaker_volume_get,
 	.put = ums9117_speaker_volume_put,
+};
+
+enum ums9117_processing_switch {
+	UMS9117_PROCESSING_SWITCH_EQ,
+	UMS9117_PROCESSING_SWITCH_ALC,
+};
+
+static bool *
+ums9117_processing_switch_state(struct ums9117_pcm *audio,
+				const struct snd_kcontrol *kcontrol)
+{
+	if (kcontrol->private_value == UMS9117_PROCESSING_SWITCH_ALC)
+		return &audio->alc_enabled;
+	return &audio->eq_enabled;
+}
+
+static int ums9117_processing_switch_get(struct snd_kcontrol *kcontrol,
+					 struct snd_ctl_elem_value *value)
+{
+	struct ums9117_pcm *audio = snd_kcontrol_chip(kcontrol);
+
+	mutex_lock(&audio->lock);
+	value->value.integer.value[0] =
+		*ums9117_processing_switch_state(audio, kcontrol);
+	mutex_unlock(&audio->lock);
+	return 0;
+}
+
+/* Streams, idle silence and FM keep running; EQ6 fades across the change. */
+static int ums9117_processing_switch_put(struct snd_kcontrol *kcontrol,
+					 struct snd_ctl_elem_value *value)
+{
+	struct ums9117_pcm *audio = snd_kcontrol_chip(kcontrol);
+	long enabled = value->value.integer.value[0];
+	int restore_ret;
+	bool *state;
+	int ret = 0;
+
+	if (enabled != 0 && enabled != 1)
+		return -EINVAL;
+	mutex_lock(&audio->lock);
+	if (audio->removing || audio->suspended) {
+		ret = audio->removing ? -ENODEV : -ESTRPIPE;
+		goto out;
+	}
+	state = ums9117_processing_switch_state(audio, kcontrol);
+	if (*state == enabled)
+		goto out;
+	*state = enabled;
+	ret = ums9117_pcm_apply_processing_locked(audio);
+	if (!ret) {
+		ret = 1;
+		goto out;
+	}
+	*state = !enabled;
+	restore_ret = ums9117_pcm_apply_processing_locked(audio);
+	if (restore_ret)
+		dev_err(audio->dev, "cannot restore playback processing: %pe\n",
+			ERR_PTR(restore_ret));
+out:
+	mutex_unlock(&audio->lock);
+	return ret;
+}
+
+static const struct snd_kcontrol_new ums9117_eq_switch_control = {
+	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+	.name = "EQ Playback Switch",
+	.info = snd_ctl_boolean_mono_info,
+	.get = ums9117_processing_switch_get,
+	.put = ums9117_processing_switch_put,
+	.private_value = UMS9117_PROCESSING_SWITCH_EQ,
+};
+
+static const struct snd_kcontrol_new ums9117_alc_switch_control = {
+	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+	.name = "ALC Playback Switch",
+	.info = snd_ctl_boolean_mono_info,
+	.get = ums9117_processing_switch_get,
+	.put = ums9117_processing_switch_put,
+	.private_value = UMS9117_PROCESSING_SWITCH_ALC,
 };
 
 static int ums9117_pcm_pending_frames(struct ums9117_pcm *audio,
@@ -2462,6 +2576,8 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 	audio->outputs = UMS9117_SC2720_OUTPUT_HEADPHONES;
 	audio->speaker_volume = 1;
 	audio->idle_silence = true;
+	audio->eq_enabled = true;
+	audio->alc_enabled = true;
 	mutex_init(&audio->lock);
 	spin_lock_init(&audio->fifo_lock);
 	spin_lock_init(&audio->vibrator.state_lock);
@@ -2530,6 +2646,9 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 	if (audio->profile.fitted) {
 		mutex_lock(&audio->lock);
 		ret = ums9117_pcm_set_profile_volume_locked(audio, 1, 1);
+		/* The first prepare programs the selected processing. */
+		if (ret >= 0)
+			ret = ums9117_pcm_apply_processing_locked(audio);
 		mutex_unlock(&audio->lock);
 		if (ret < 0)
 			return ret;
@@ -2567,6 +2686,14 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 		ret = snd_ctl_add(card,
 				  snd_ctl_new1(&ums9117_speaker_volume_control,
 					       audio));
+		if (ret)
+			return snd_card_free_on_error(&pdev->dev, ret);
+		ret = snd_ctl_add(card, snd_ctl_new1(&ums9117_eq_switch_control,
+						     audio));
+		if (ret)
+			return snd_card_free_on_error(&pdev->dev, ret);
+		ret = snd_ctl_add(
+			card, snd_ctl_new1(&ums9117_alc_switch_control, audio));
 		if (ret)
 			return snd_card_free_on_error(&pdev->dev, ret);
 	}

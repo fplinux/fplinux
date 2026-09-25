@@ -50,10 +50,8 @@ amixer -c 0 cget name='Headphone Playback Volume'
 ```
 
 A setting persists across playbacks and resets on a new boot. The fitted profile
-provides the stock PGA level and digital-gain steps, not a complete stock audio
-pipeline. Both INOI phones use source data with EQ bypassed. Nokia source data
-enables a VBC EQ that FPLinux does not implement; Linux deliberately uses a flat
-VBC path, so its Nokia tonal response is not stock-equivalent.
+provides the stock PGA level and digital-gain steps and the phone's stock
+[playback processing](#playback-processing).
 
 Headphone DC and depop calibration still runs on the phone when the codec is
 prepared. The fitted NAND-derived profile neither supplies nor replaces that
@@ -97,6 +95,43 @@ the headphones to the speaker alone without the click, turn the speaker on
 first and then turn the headphones off. Plugging in or removing wired
 headphones does not change either switch. The switches persist across
 playbacks and reset on a new boot.
+
+## Playback processing
+
+With the fitted profile, PCM and [FM radio](FM_RADIO.md) pass through the
+phone's stock playback processing: a six-section equalizer with its output
+gain, followed by an automatic level control (ALC). The profile carries a
+separate set for headphones alone, the speaker alone and both outputs, prepared
+from the phone's stock tuning data for every playback and FM sample rate. The
+driver applies the set of the enabled [playback outputs](#playback-outputs) and
+changes it with them, including while a stream or FM radio plays. The
+processing does not change the [vibrate tone](VIBRATION.md#speaker-vibration).
+
+`EQ Playback Switch` and `ALC Playback Switch` turn the two stages on and off
+independently. Both exist only with the fitted profile and are `on` by default.
+With both `off`, playback uses the plain fitted digital-gain path:
+
+```sh
+amixer -c 0 cset name='EQ Playback Switch' off
+amixer -c 0 cset name='ALC Playback Switch' off
+amixer -c 0 cget name='EQ Playback Switch'
+```
+
+The switches can change at any time, including while a playback stream runs
+and while FM radio plays. A change takes effect immediately on running audio,
+so where the equalizer changes the level, turning it on or off during playback
+is heard as a step in level. Between streams, while
+[idle silence](#idle-silence) keeps the outputs open, the switches change
+without a click. They persist across playbacks and reset on a new boot.
+
+With the equalizer on, levels and tonal balance follow the phone's own fitted
+processing data; loudness and dynamics have not been matched to stock
+playback. The equalizer's output gain makes playback louder than with the
+equalizer off, most on the speaker; on the INOI phones, both outputs together
+keep the same level. The INOI headphone set changes only the level, and the
+Nokia TA-1618 headphone set carries that phone's own multi-band tuning.
+[Speaker audio](SPEAKER_AUDIO.md) describes the speaker sets. The ALC acts as a
+limiter near full scale and does not compress ordinary levels.
 
 ## Idle silence
 
@@ -142,5 +177,3 @@ same ALSA card; the output switches do not affect it. [FM radio](FM_RADIO.md)
 needs a cable in the headphone jack as its antenna and cannot run alongside PCM
 playback. On a phone that vibrates through its speaker,
 [vibration](VIBRATION.md#speaker-vibration) briefly mutes headphone audio.
-Nokia PCM playback support is partial because its stock VBC EQ is not
-implemented; the fitted gain steps do not provide stock tonal parity.
