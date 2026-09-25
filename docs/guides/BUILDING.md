@@ -310,10 +310,17 @@ parallel work when the read-only loader is built, and `--offline` requests that
 build without network access.
 
 The backup must contain the selected phone's complete physical NAND, with each
-page's main bytes followed by its OOB bytes. Page size and accepted layouts are
-target-specific. The command rejects an unsupported target, another layout or
-length, damaged required data, and ambiguous selected-block mappings. A saved
-input remains unchanged at its original path.
+page's main bytes followed by its OOB bytes. Its page layout comes from the
+geometry receipt `PATH.json` that [`nand backup`](#save-a-nand-backup) writes
+beside it. The receipt must describe exactly the bytes at `PATH`. A target that
+declares its NAND chip also accepts a backup without a receipt; when both are
+present, they must report the same chip and page size. Without either, the
+command refuses the backup instead of inferring a layout from its length.
+Preparation interprets only 2048 main bytes per page, 64 pages per block and
+65536 pages in total. The command also rejects an unsupported target, a length
+that does not match the layout, damaged required data, and ambiguous
+selected-block mappings. A saved input and its receipt remain unchanged at their
+original paths.
 
 The dump, extracted originals, prepared groups, and any image containing them
 are private and non-redistributable unless you have the necessary rights. They
@@ -343,11 +350,46 @@ stream with:
 ./fplinux nand backup <target> PATH [--profile NAME]
 ```
 
-The command checks the expected size, computes a SHA-256 digest and atomically
-publishes the file with mode `0600`. An incomplete transfer leaves an existing
-destination unchanged. The digest identifies the saved bytes; the command does
-not compare them with a second device read. Restoring NAND is unsupported.
-Treat this file as private device data.
+The command first opens the phone's raw NAND reader, which identifies the
+fitted chip, and reads the geometry the reader reports. It stops before reading
+any NAND page when the running kernel does not identify the chip, or when the
+chip or its page size differs from the one the target declares. The expected
+image size comes from the reported geometry, not from the target.
+
+The command checks that the complete stream has that size, computes a SHA-256
+digest and atomically publishes the file with mode `0600`. It then atomically
+writes the geometry receipt `PATH.json` beside it, also with mode `0600`. The
+receipt is a JSON object with these fields:
+
+| Field                            | Value                                                 |
+| -------------------------------- | ----------------------------------------------------- |
+| `id_bytes`                       | chip ID bytes as hexadecimal, manufacturer byte first |
+| `chip`                           | chip name reported by the reader                      |
+| `page_main_bytes`, `oob_bytes`   | main and OOB bytes per page                           |
+| `pages_per_block`, `block_count` | pages per erase block and number of blocks            |
+| `raw_bytes`                      | size of the saved image                               |
+| `sha256`                         | SHA-256 digest of the saved image                     |
+| `target`                         | target used for the backup                            |
+
+An incomplete transfer leaves an existing destination and its receipt
+unchanged. The digest identifies the saved bytes; the command does not compare
+them with a second device read. Restoring NAND is unsupported. Treat the backup
+as private device data. The receipt holds only the fields above and no NAND
+contents; it can be shared, for example attached to an issue report.
+
+To see what the reader reports without saving a backup, run:
+
+```sh
+./fplinux nand identify <target> [--profile NAME]
+```
+
+It opens the reader the same way and prints the reader's report unchanged, one
+`key=value` line each for `id_bytes`, `chip`, `page_main_bytes`, `oob_bytes`,
+`pages_per_block`, `block_count`, `raw_bytes`, `geometry_source`, `feature_a0`,
+`feature_b0` and `feature_c0`. For a chip that the running kernel does not
+identify, the report shows `chip=unknown`, zero geometry values and
+`geometry_source=unknown`, together with the chip's ID bytes and feature
+register values.
 
 ## Inspect built artifacts
 

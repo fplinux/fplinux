@@ -105,6 +105,13 @@ class CliCacheLockTests(unittest.TestCase):
                 "microsd-uboot",
             ),
             (
+                ["nand", "identify", "nokia-ta1618"],
+                "identify_target_nand",
+                True,
+                "nokia-ta1618",
+                None,
+            ),
+            (
                 [
                     "device-data",
                     "prepare",
@@ -136,6 +143,8 @@ class CliCacheLockTests(unittest.TestCase):
                         callback.call_args,
                         mock.call("nokia-ta1618", Path("backup.bin"), profile=profile),
                     )
+                elif callback_name == "identify_target_nand":
+                    self.assertEqual(callback.call_args, mock.call("nokia-ta1618", profile=None))
                 elif callback_name == "prepare_device_data":
                     self.assertEqual(
                         callback.call_args,

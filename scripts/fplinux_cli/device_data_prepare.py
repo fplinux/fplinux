@@ -15,13 +15,19 @@ from fplinux_cli.cli.runtime import run_target_noninteractive
 from fplinux_cli.manifests.targets import load_target
 
 from .common import ROOT, canonical_json_bytes, fail, replace_file_atomically, sha256_bytes
-from .device_data import DeviceDataPreparation, PhysicalNand, PreparedGroup
+from .device_data import (
+    DeviceDataPreparation,
+    NandGeometry,
+    PhysicalNand,
+    PreparedGroup,
+    family_page_bytes,
+)
 from .firmware_inputs import (
     FirmwareInput,
     capture_device_data_generation,
     device_data_cache_directory,
 )
-from .nand_backup import backup_target_nand
+from .nand_backup import backup_target_nand, read_backup_geometry, require_declared_chip
 from .output import RunReporter
 
 if TYPE_CHECKING:
@@ -73,6 +79,35 @@ def _read_dump(path: Path) -> bytes:
         return path.read_bytes()
     except OSError as error:
         fail(f"NAND backup cannot be read: {path}: {error}")
+
+
+def dump_page_bytes(
+    target: str,
+    nand: Mapping[str, Any] | None,
+    receipt: NandGeometry | None,
+) -> int:
+    """Take the physical page size from the backup receipt or the target's declared chip."""
+    declared_id = None if nand is None else nand.get("id")
+    declared_raw_page_bytes = None if nand is None else nand.get("raw_page_bytes")
+    if receipt is None:
+        if declared_raw_page_bytes is None:
+            fail(
+                f"target {target} declares no NAND chip and the backup has no geometry "
+                "receipt; save it with ./fplinux nand backup, which writes PATH.json beside it"
+            )
+        return int(declared_raw_page_bytes)
+    try:
+        page_bytes = family_page_bytes(receipt)
+    except ValueError as error:
+        fail(f"device-data extraction failed: {error}")
+    require_declared_chip(
+        receipt,
+        target=target,
+        declared_id=declared_id,
+        declared_raw_page_bytes=declared_raw_page_bytes,
+        source="NAND backup receipt",
+    )
+    return page_bytes
 
 
 def _load_device_data_parser(target: str, filename: str) -> ModuleType:
@@ -244,7 +279,7 @@ def prepare_device_data(
     if not declarations:
         fail(f"device-data preparation is not supported for target {target}")
     parser_filename: str = device_data["parser"]
-    raw_page_bytes: int = target_config["nand"]["raw_page_bytes"]
+    nand_declaration: dict[str, Any] | None = target_config.get("nand")
     cache = ROOT / ".cache"
     reporter = RunReporter.create("device-data", target=target, verbose=False)
 
@@ -273,16 +308,23 @@ def prepare_device_data(
         source = source_directory / "nand.bin"
         if from_dump is None:
             backup_target_nand(target, source, reporter=reporter)
+            dump = source
             with reporter.stage("read-dump"):
                 raw = _read_dump(source)
         else:
+            dump = from_dump
             with reporter.stage("read-dump"):
                 raw = _read_dump(from_dump)
                 replace_file_atomically(source, raw, 0o600)
 
         with reporter.stage("extract"):
+            page_bytes = dump_page_bytes(
+                target,
+                nand_declaration,
+                read_backup_geometry(dump, raw),
+            )
             try:
-                nand = PhysicalNand.from_dump(raw, page_bytes=raw_page_bytes)
+                nand = PhysicalNand.from_dump(raw, page_bytes=page_bytes)
             except ValueError as error:
                 fail(f"device-data extraction failed: {error}")
             extracted = _extract_groups(target, parser_filename, declarations, nand)

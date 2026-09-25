@@ -25,7 +25,7 @@ from .common import ROOT
 from .device_data_prepare import prepare_device_data
 from .environment.kern import doctor, setup
 from .format import format_sources
-from .nand_backup import backup_target_nand
+from .nand_backup import backup_target_nand, identify_target_nand
 from .output import run_entrypoint
 from .prune import (
     discard_obsolete_apks,
@@ -253,7 +253,12 @@ def _command_action(
             pull=args.pull,
         )
     elif args.command == "nand":
-        action = partial(_nand_backup_action, args.target, args.output, profile=args.profile)
+        if args.nand_command == "backup":
+            action = partial(_nand_backup_action, args.target, args.output, profile=args.profile)
+        elif args.nand_command == "identify":
+            action = partial(identify_target_nand, args.target, profile=args.profile)
+        else:
+            raise AssertionError(f"unhandled nand command: {args.nand_command}")
     elif args.command == "device-data":
         if args.device_data_command != "prepare":
             raise AssertionError(f"unhandled device-data command: {args.device_data_command}")
@@ -486,6 +491,11 @@ def main() -> None:
     nand_backup_parser.add_argument("target", choices=targets)
     nand_backup_parser.add_argument("output", type=Path)
     nand_backup_parser.add_argument("--profile", type=_profile_name, metavar="NAME")
+    nand_identify_parser = nand_commands.add_parser(
+        "identify", help="print the NAND chip identity and geometry reported by the phone"
+    )
+    nand_identify_parser.add_argument("target", choices=targets)
+    nand_identify_parser.add_argument("--profile", type=_profile_name, metavar="NAME")
 
     device_data_parser = commands.add_parser(
         "device-data", help="prepare target-owned fitted data from one NAND image"

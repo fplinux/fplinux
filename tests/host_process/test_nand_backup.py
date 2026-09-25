@@ -18,6 +18,18 @@ from fplinux_cli import nand_backup, ssh_transport
 
 from tests.ssh_transport_support import create_ready_session
 
+# Reader reports for the two fitted chips, in the kernel's key=value format.
+GEOMETRY_128_OOB = (
+    "id_bytes=a1b1\nchip=demo-128\npage_main_bytes=2048\noob_bytes=128\n"
+    "pages_per_block=64\nblock_count=1024\nraw_bytes=142606336\ngeometry_source=table\n"
+    "feature_a0=0x00000000\nfeature_b0=0x00000000\nfeature_c0=0x00000000\n"
+)
+GEOMETRY_64_OOB = (
+    "id_bytes=e521\nchip=demo-64\npage_main_bytes=2048\noob_bytes=64\n"
+    "pages_per_block=64\nblock_count=1024\nraw_bytes=138412032\ngeometry_source=table\n"
+    "feature_a0=0x00000000\nfeature_b0=0x00000010\nfeature_c0=0x00000000\n"
+)
+
 
 class NandBackupSshStreamTests(unittest.TestCase):
     """Exercise the real SSH process boundary with a controlled local ssh executable."""
@@ -35,8 +47,14 @@ class NandBackupSshStreamTests(unittest.TestCase):
         self.ssh = self.tools / "ssh"
         self.ssh.write_text(
             """#!/bin/sh
+for argument do remote_command=$argument; done
+case "$remote_command" in
+'cat /sys/class/misc/ums9117-nand-raw/device/geometry 3</dev/ums9117-nand-raw')
+  printf '%s' "${FPLINUX_GEOMETRY:?}"
+  exit 0
+  ;;
+esac
 if [ -n "${FPLINUX_EXPECTED_READ:-}" ]; then
-  for argument do remote_command=$argument; done
   [ "$remote_command" = "$FPLINUX_EXPECTED_READ" ] || exit 64
 fi
 case "${FPLINUX_STREAM_MODE:?}" in
@@ -101,15 +119,19 @@ esac
             mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
             mock.patch.dict(
                 os.environ,
-                {"PATH": f"{self.tools}:{os.environ['PATH']}", "FPLINUX_STREAM_MODE": "short"},
+                {
+                    "PATH": f"{self.tools}:{os.environ['PATH']}",
+                    "FPLINUX_STREAM_MODE": "short",
+                    "FPLINUX_GEOMETRY": GEOMETRY_128_OOB,
+                },
             ),
             self.assertRaisesRegex(SystemExit, "incomplete raw NAND image"),
         ):
             nand_backup.backup_nand(
                 lambda: (ssh_transport, self.session),
                 destination,
+                target="nokia-ta1618",
                 raw_device="/dev/ums9117-nand-raw",
-                raw_page_bytes=2176,
             )
 
         self.assertEqual(destination.read_bytes(), b"previous raw image")
@@ -117,22 +139,25 @@ esac
 
     def test_target_backup_streams_only_its_declared_read_device(self) -> None:
         """Board selection reaches the real SSH process with only a read command."""
-        for target, profile, expected_read, expected_size in (
+        for target, profile, geometry, expected_read, expected_size in (
             (
                 "nokia-ta1618",
                 "microsd-uboot",
+                GEOMETRY_128_OOB,
                 "exec dd if=/dev/ums9117-nand-raw bs=65280",
                 142606336,
             ),
             (
                 "inoi-240-modern-4g",
                 None,
+                GEOMETRY_64_OOB,
                 "exec dd if=/dev/ums9117-nand-raw bs=63360",
                 138412032,
             ),
             (
                 "inoi-244-modern-4g",
                 None,
+                GEOMETRY_64_OOB,
                 "exec dd if=/dev/ums9117-nand-raw bs=63360",
                 138412032,
             ),
@@ -150,6 +175,7 @@ esac
                         "PATH": f"{self.tools}:{os.environ['PATH']}",
                         "FPLINUX_STREAM_MODE": "success",
                         "FPLINUX_EXPECTED_READ": expected_read,
+                        "FPLINUX_GEOMETRY": geometry,
                     },
                 ),
             ):
@@ -176,6 +202,7 @@ esac
                     "PATH": f"{self.tools}:{os.environ['PATH']}",
                     "FPLINUX_STREAM_MODE": "nonzero",
                     "FPLINUX_EXPECTED_READ": "exec dd if=/dev/ums9117-nand-raw bs=63360",
+                    "FPLINUX_GEOMETRY": GEOMETRY_64_OOB,
                 },
             ),
             self.assertRaisesRegex(SystemExit, "exit status 8: NAND read failed"),
