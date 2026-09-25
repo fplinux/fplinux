@@ -10,32 +10,54 @@ maintainers:
   - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
 
 description: |
-  This node describes the board resources needed for fixed-command read-only
-  access through the UMS9117 NANDC SPI path. Reads require the declared NAND
-  ID; a mismatched ID is rejected before a page-read command. The physical
-  stream contains 65536 pages of 2048 main bytes followed by the chip's OOB:
-  128 bytes for ID 0x0000b1a1, 64 bytes for DS35M1GA ID 0x000021e5. It applies
-  no ECC correction or OOB interpretation and registers no MTD, SPI, spi-mem,
-  IRQ, ioctl, mmap or arbitrary-command endpoint. For ID 0x000021e5, a B0 value
-  of 0x10 is temporarily changed to 0x00 to disable internal ECC for raw reads,
-  then restored and read back before bytes reach userspace. No array, OTP or
-  block-lock programming is exposed. Other nonzero B0 states are rejected.
-  The controller and its owned platform state are also restored. Hardware is
-  activated only for explicit reads. A compatible selects the board resource
-  contract, not the identity of the fitted flash. The driver registers
-  /dev/ums9117-nand-raw for every compatible.
+  This node describes the platform resources needed for fixed-command read-only
+  access through the UMS9117 NANDC SPI path. The driver registers
+  /dev/ums9117-nand-raw. Its first open identifies the fitted SPI NAND from
+  the manufacturer and device bytes of READ ID and keeps the result until the
+  device is removed. Supported chips have 2048-byte pages, 64 pages per block,
+  1024 blocks and one plane:
+
+    ID     Chip           OOB bytes
+    A1 B1  FM25LG01B      128
+    E5 21  DS35M1GA       64
+    C8 C1  GD5F1GQ4RExxG  128
+    C8 41  GD5F1GQ5RExxG  128
+    C8 81  GD5F1GM7RExxG  128
+    C8 21  GD5F1GQ5RExxH  64
+    C8 11  F50D1G41LB     64
+    C2 90  MX35UF1G14AC   64
+
+  The device still opens for another ID, or for one that differs from
+  fplinux,nand-id, but every read is refused before a page-read command. The
+  physical stream contains every page's 2048 main bytes followed by the chip's
+  OOB bytes. Each read repeats the ID check. It applies no ECC correction or
+  OOB interpretation and registers no MTD, SPI, spi-mem, IRQ, ioctl, mmap or
+  arbitrary-command endpoint. Reads are refused while feature B0 has OTP_EN
+  (bit 6) set or feature C0 is nonzero. When B0 has ECC_EN (bit 4) set, only
+  that bit is cleared to disable internal ECC for raw reads; the original B0
+  value is then restored and read back before bytes reach userspace. No
+  array, OTP, A0 or block-lock programming is exposed. The controller and its
+  owned platform state are also restored. Hardware is activated only for
+  explicit opens and reads.
 
 properties:
   compatible:
-    enum:
-      - fplinux,ta1618-nandc-ro
-      - fplinux,inoi240-nandc-ro
-      - fplinux,inoi244-nandc-ro
+    const: fplinux,ums9117-nandc-ro
 
   fplinux,nand-id:
     $ref: /schemas/types.yaml#/definitions/uint32
-    enum: [45473, 8677]
-    description: Expected read-ID value, manufacturer in the least significant byte.
+    enum:
+      - 0x0000b1a1
+      - 0x000021e5
+      - 0x0000c1c8
+      - 0x000041c8
+      - 0x000081c8
+      - 0x000021c8
+      - 0x000011c8
+      - 0x000090c2
+    description:
+      Expected READ ID value of the fitted chip, manufacturer in the least
+      significant byte. When present, any other identified chip is refused.
 
   "#address-cells":
     const: 1
@@ -113,7 +135,6 @@ properties:
 
 required:
   - compatible
-  - fplinux,nand-id
   - "#address-cells"
   - "#size-cells"
   - reg
@@ -127,7 +148,7 @@ additionalProperties: false
 examples:
   - |
     nand-controller@21a00000 {
-        compatible = "fplinux,ta1618-nandc-ro";
+        compatible = "fplinux,ums9117-nandc-ro";
         fplinux,nand-id = <0x0000b1a1>;
         #address-cells = <1>;
         #size-cells = <0>;

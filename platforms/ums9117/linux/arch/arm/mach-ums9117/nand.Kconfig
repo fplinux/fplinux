@@ -4,7 +4,13 @@ config UMS9117_NANDC_RO
 	depends on ARCH_UMS9117 && HAS_DMA && !MTD
 	help
 	  Expose a physical stream containing every NAND page's main and OOB
-	  bytes. Hardware is activated only for explicit reads, which check the
-	  supported NAND identity and feature state before returning data. No MTD,
-	  generic SPI NAND, ioctl, mmap, feature-write, program or erase operation
-	  is provided. The separate ADI SPI controller can coexist with this reader.
+	  bytes. The first open identifies the fitted SPI NAND from its ID
+	  bytes. Supported chips have 2048-byte pages, 64 pages per block, 1024
+	  blocks and one plane: FM25LG01B, DS35M1GA, GD5F1GQ4RExxG,
+	  GD5F1GQ5RExxG, GD5F1GM7RExxG, GD5F1GQ5RExxH, F50D1G41LB and
+	  MX35UF1G14AC. Reads from other chips are refused. Hardware is
+	  activated only for explicit opens and reads; each read checks the
+	  identity and feature state before returning data. No MTD, generic SPI
+	  NAND, ioctl, mmap, feature-write, program or erase operation is
+	  provided. The separate ADI SPI controller can coexist with this
+	  reader.

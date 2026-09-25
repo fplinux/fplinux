@@ -3,8 +3,10 @@
  * UMS9117 fixed-command read-only NANDC driver.
  *
  * The driver deliberately exposes no MTD, SPI, arbitrary-command, program or
- * erase path.  Each explicit read checks the NAND identity and feature state
- * before returning bytes, then restores the controller's owned platform state.
+ * erase path.  The first open identifies the fitted chip from its READ_ID
+ * bytes through a fixed table and keeps the result for the device lifetime.
+ * Each explicit read checks the NAND identity and feature state before
+ * returning bytes, then restores the controller's owned platform state.
  * Registering the device does not activate or identify the NAND.
  */
 #include <linux/bitops.h>
@@ -99,9 +101,18 @@
 #define UMS9117_NANDC_INSTRUCTION_WORDS 8U
 #define UMS9117_NANDC_PINMUX_COUNT 17U
 #define UMS9117_NANDC_PINCONF_COUNT 16U
-#define UMS9117_NANDC_PAGE_BYTES 2048U
-#define UMS9117_NANDC_PAGE_COUNT 65536U
-#define UMS9117_NANDC_BATCH_BYTES (32U * UMS9117_NANDC_PAGE_BYTES)
+/*
+ * Supported geometry.  The data job transfers the main area as two 1 KiB
+ * sectors; larger OOB areas, other block sizes, larger chips and multiple
+ * planes are refused.
+ */
+#define UMS9117_NANDC_PAGE_MAIN_BYTES 2048U
+#define UMS9117_NANDC_PAGES_PER_BLOCK 64U
+#define UMS9117_NANDC_OOB_MAX_BYTES 128U
+#define UMS9117_NANDC_PAGE_COUNT_MAX 65536U
+#define UMS9117_NANDC_BATCH_BYTES (32U * UMS9117_NANDC_PAGE_MAIN_BYTES)
+#define UMS9117_NANDC_FEATURE_B0_ECC_EN BIT(4)
+#define UMS9117_NANDC_FEATURE_B0_OTP_EN BIT(6)
 #define UMS9117_NANDC_FEATURE_STATUS_OIP BIT(0)
 /* One 2 KiB page is two apart 1 KiB sectors in the NANDC ping-pong RAM. */
 #define UMS9117_NANDC_DATA_CFG0 0x01000058U
@@ -158,6 +169,132 @@ struct ums9117_nandc_pin {
 	u32 snapshot;
 };
 
+/* Physical geometry of one chip, keyed by its two READ_ID bytes. */
+struct ums9117_nandc_chip {
+	const char *name;
+	u8 manufacturer_id;
+	u8 device_id;
+	u16 page_main_bytes;
+	u16 oob_bytes;
+	u16 pages_per_block;
+	u16 block_count;
+	u8 plane_count;
+};
+
+/*
+ * Add a chip only when a source states its physical OOB size.  The phone
+ * firmware's NAND ID table does not state it, so IDs known from that table
+ * alone are absent.
+ */
+static const struct ums9117_nandc_chip ums9117_nandc_chips[] = {
+	/* Source: hardware, complete raw dumps of the fitted Nokia TA-1618 chip. */
+	{
+		.name = "FM25LG01B",
+		.manufacturer_id = 0xa1,
+		.device_id = 0xb1,
+		.page_main_bytes = 2048,
+		.oob_bytes = 128,
+		.pages_per_block = 64,
+		.block_count = 1024,
+		.plane_count = 1,
+	},
+	/* Source: hardware, complete raw dumps of the fitted INOI 240/244 chips. */
+	{
+		.name = "DS35M1GA",
+		.manufacturer_id = 0xe5,
+		.device_id = 0x21,
+		.page_main_bytes = 2048,
+		.oob_bytes = 64,
+		.pages_per_block = 64,
+		.block_count = 1024,
+		.plane_count = 1,
+	},
+	/*
+	 * Source: the phone firmware's NAND ID table;
+	 * Linux 6.18.42 drivers/mtd/nand/spi/gigadevice.c:427.
+	 */
+	{
+		.name = "GD5F1GQ4RExxG",
+		.manufacturer_id = 0xc8,
+		.device_id = 0xc1,
+		.page_main_bytes = 2048,
+		.oob_bytes = 128,
+		.pages_per_block = 64,
+		.block_count = 1024,
+		.plane_count = 1,
+	},
+	/*
+	 * Source: the phone firmware's NAND ID table;
+	 * Linux 6.18.42 drivers/mtd/nand/spi/gigadevice.c:477.
+	 */
+	{
+		.name = "GD5F1GQ5RExxG",
+		.manufacturer_id = 0xc8,
+		.device_id = 0x41,
+		.page_main_bytes = 2048,
+		.oob_bytes = 128,
+		.pages_per_block = 64,
+		.block_count = 1024,
+		.plane_count = 1,
+	},
+	/*
+	 * Source: the phone firmware's NAND ID table;
+	 * Linux 6.18.42 drivers/mtd/nand/spi/gigadevice.c:537.
+	 */
+	{
+		.name = "GD5F1GM7RExxG",
+		.manufacturer_id = 0xc8,
+		.device_id = 0x81,
+		.page_main_bytes = 2048,
+		.oob_bytes = 128,
+		.pages_per_block = 64,
+		.block_count = 1024,
+		.plane_count = 1,
+	},
+	/*
+	 * Source: the phone firmware's NAND ID table;
+	 * Linux 6.18.42 drivers/mtd/nand/spi/gigadevice.c:597.
+	 */
+	{
+		.name = "GD5F1GQ5RExxH",
+		.manufacturer_id = 0xc8,
+		.device_id = 0x21,
+		.page_main_bytes = 2048,
+		.oob_bytes = 64,
+		.pages_per_block = 64,
+		.block_count = 1024,
+		.plane_count = 1,
+	},
+	/*
+	 * Source: the phone firmware's NAND ID table;
+	 * Linux 6.18.42 drivers/mtd/nand/spi/esmt.c:200.
+	 */
+	{
+		.name = "F50D1G41LB",
+		.manufacturer_id = 0xc8,
+		.device_id = 0x11,
+		.page_main_bytes = 2048,
+		.oob_bytes = 64,
+		.pages_per_block = 64,
+		.block_count = 1024,
+		.plane_count = 1,
+	},
+	/*
+	 * Source: the phone firmware's NAND ID table;
+	 * Linux 6.18.42 drivers/mtd/nand/spi/macronix.c:395.
+	 */
+	{
+		.name = "MX35UF1G14AC",
+		.manufacturer_id = 0xc2,
+		.device_id = 0x90,
+		.page_main_bytes = 2048,
+		.oob_bytes = 64,
+		.pages_per_block = 64,
+		.block_count = 1024,
+		.plane_count = 1,
+	},
+};
+
 struct ums9117_nandc {
 	struct device *dev;
 	struct miscdevice raw_misc;
@@ -176,9 +313,13 @@ struct ums9117_nandc {
 	u32 last_spi_status;
 	u32 last_axim_status;
 	u32 id_raw;
-	u32 expected_id;
-	u32 oob_bytes;
+	u32 declared_id;
+	/* Identification result, written once under io_mutex by the first open. */
+	const struct ums9117_nandc_chip *chip;
+	u32 identity_id_raw;
+	u32 identity_features[3];
 	u32 physical_page_bytes;
+	u32 page_count;
 	u64 raw_bytes;
 	u32 feature_raw[3];
 	u32 raw_feature_b0;
@@ -204,7 +345,9 @@ struct ums9117_nandc {
 	bool gate_touched;
 	bool gate_enabled;
 	bool failed;
-	bool audit_file_created;
+	bool attributes_created;
+	bool has_declared_id;
+	bool identity_valid;
 	bool lifecycle_restored;
 	bool raw_registered;
 	bool io_faulted;
@@ -226,6 +369,40 @@ static const u32 ums9117_nandc_pinconf_offsets[] = {
 	0x40U, 0x0cU, 0x08U, 0x30U, 0x10U, 0x00U, 0x2cU, 0x38U,
 	0x3cU, 0x34U, 0x28U, 0x14U, 0x18U, 0x1cU, 0x20U, 0x04U,
 };
+
+static bool ums9117_nandc_chip_supported(const struct ums9117_nandc_chip *chip)
+{
+	return chip->page_main_bytes == UMS9117_NANDC_PAGE_MAIN_BYTES &&
+	       chip->oob_bytes <= UMS9117_NANDC_OOB_MAX_BYTES &&
+	       chip->pages_per_block == UMS9117_NANDC_PAGES_PER_BLOCK &&
+	       chip->plane_count == 1 &&
+	       (u32)chip->block_count * chip->pages_per_block <=
+		       UMS9117_NANDC_PAGE_COUNT_MAX;
+}
+
+/*
+ * READ_ID stores its first byte, the manufacturer, in SNFC_FEATURE[7:0] and
+ * the device byte in [15:8].  Any other register value is unknown.
+ */
+static const struct ums9117_nandc_chip *ums9117_nandc_find_chip(u32 id_raw)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(ums9117_nandc_chips); i++) {
+		const struct ums9117_nandc_chip *chip = &ums9117_nandc_chips[i];
+		u32 chip_id = (u32)chip->device_id << 8 | chip->manufacturer_id;
+
+		if (id_raw == chip_id)
+			return ums9117_nandc_chip_supported(chip) ? chip : NULL;
+	}
+	return NULL;
+}
+
+static bool ums9117_nandc_b0_has_owned_ecc(u32 b0)
+{
+	return b0 <= U8_MAX && !(b0 & UMS9117_NANDC_FEATURE_B0_OTP_EN) &&
+	       (b0 & UMS9117_NANDC_FEATURE_B0_ECC_EN);
+}
 
 static void __iomem *ums9117_nandc_map_shared(struct platform_device *pdev,
 					      const char *name,
@@ -586,16 +763,12 @@ ums9117_nandc_execute_fixed(struct ums9117_nandc *nandc,
 	static const u16 read_id[] = {
 		0x009f, 0x0000, 0x1000, 0x1000, 0xe000, 0xf000,
 	};
-	static const u16 disable_ecc[] = {
-		0x001f, 0x00b0, 0x0000, 0xe000, 0xf000,
-	};
-	static const u16 restore_ecc[] = {
-		0x001f, 0x00b0, 0x0010, 0xe000, 0xf000,
-	};
 	u16 get_feature[] = { 0x000f, 0x0000, 0x1000, 0xe000, 0xf000 };
+	u16 set_feature_b0[] = { 0x001f, 0x00b0, 0x0000, 0xe000, 0xf000 };
 	const u16 *instructions;
 	unsigned int instruction_count;
 	void __iomem *regs = nandc->regs[UMS9117_NANDC_RES_NANDC];
+	u32 original_b0 = nandc->feature_raw[1];
 
 	if (nandc->failed)
 		return -EINVAL;
@@ -617,14 +790,19 @@ ums9117_nandc_execute_fixed(struct ums9117_nandc *nandc,
 		break;
 	case UMS9117_NANDC_FIXED_DISABLE_ECC:
 	case UMS9117_NANDC_FIXED_RESTORE_ECC:
-		/* Only this fitted chip's exact volatile ECC-only state is owned. */
-		if (nandc->id_raw != 0x000021e5U || !nandc->features_valid ||
-		    nandc->feature_raw[1] != 0x10U)
+		/*
+		 * Only the volatile ECC_EN bit of this session's B0 value is
+		 * owned: clear it alone, then write back the exact value read.
+		 */
+		if (!nandc->chip || !nandc->features_valid ||
+		    !ums9117_nandc_b0_has_owned_ecc(original_b0))
 			return -EOPNOTSUPP;
-		instructions = operation == UMS9117_NANDC_FIXED_DISABLE_ECC ?
-				       disable_ecc :
-				       restore_ecc;
-		instruction_count = ARRAY_SIZE(disable_ecc);
+		set_feature_b0[2] = original_b0;
+		if (operation == UMS9117_NANDC_FIXED_DISABLE_ECC)
+			set_feature_b0[2] = original_b0 &
+					    ~UMS9117_NANDC_FEATURE_B0_ECC_EN;
+		instructions = set_feature_b0;
+		instruction_count = ARRAY_SIZE(set_feature_b0);
 		break;
 	default:
 		return -EOPNOTSUPP;
@@ -642,9 +820,10 @@ ums9117_nandc_execute_fixed(struct ums9117_nandc *nandc,
 static int ums9117_nandc_prepare_raw_mode(struct ums9117_nandc *nandc)
 {
 	void __iomem *regs = nandc->regs[UMS9117_NANDC_RES_NANDC];
+	u32 original_b0 = nandc->feature_raw[1];
 	int ret;
 
-	if (nandc->feature_raw[1]) {
+	if (original_b0 & UMS9117_NANDC_FEATURE_B0_ECC_EN) {
 		/* A short command can still change B0, so restore on every exit. */
 		nandc->feature_restore_required = true;
 		nandc->nand_feature_restored = false;
@@ -657,7 +836,8 @@ static int ums9117_nandc_prepare_raw_mode(struct ums9117_nandc *nandc)
 		if (ret)
 			return ret;
 		nandc->raw_feature_b0 = readl(regs + UMS9117_NANDC_SPI_FEATURE);
-		if (nandc->raw_feature_b0)
+		if (nandc->raw_feature_b0 !=
+		    (original_b0 & ~UMS9117_NANDC_FEATURE_B0_ECC_EN))
 			return -EUCLEAN;
 	}
 	nandc->read_ecc_disabled = true;
@@ -698,8 +878,9 @@ static int ums9117_nandc_page_to_cache(struct ums9117_nandc *nandc, u32 page)
 	};
 	void __iomem *regs = nandc->regs[UMS9117_NANDC_RES_NANDC];
 
-	if (page >= UMS9117_NANDC_PAGE_COUNT)
+	if (page >= nandc->page_count)
 		return -ERANGE;
+	instructions[1] = (page >> 16) & 0xffU;
 	instructions[2] = (page >> 8) & 0xffU;
 	instructions[3] = page & 0xffU;
 	nandc->last_operation = UMS9117_NANDC_FIXED_PAGE_TO_CACHE;
@@ -753,7 +934,7 @@ static int ums9117_nandc_read_page_x1(struct ums9117_nandc *nandc)
 
 	if (upper_32_bits(nandc->page_dma) || !IS_ALIGNED(nandc->page_dma, 64U))
 		return -ERANGE;
-	memset(nandc->page_buffer, 0xa5, UMS9117_NANDC_PAGE_BYTES);
+	memset(nandc->page_buffer, 0xa5, nandc->chip->page_main_bytes);
 	writel(0, regs + UMS9117_NANDC_MAIN_ADDR_HIGH);
 	writel(lower_32_bits(nandc->page_dma),
 	       regs + UMS9117_NANDC_MAIN_ADDR_LOW);
@@ -785,15 +966,19 @@ static int ums9117_nandc_read_page_x1(struct ums9117_nandc *nandc)
 
 static int ums9117_nandc_read_oob_cache(struct ums9117_nandc *nandc)
 {
-	static const u16 instructions[] = {
-		0x000b, 0x0008, 0x0000, 0x6000, 0x3000, 0xe000, 0xf000,
+	u16 instructions[] = {
+		0x000b, 0x0000, 0x0000, 0x6000, 0x3000, 0xe000, 0xf000,
 	};
+	const struct ums9117_nandc_chip *chip = nandc->chip;
 	void __iomem *regs = nandc->regs[UMS9117_NANDC_RES_NANDC];
 	int ret;
 
 	if (upper_32_bits(nandc->page_dma) || !IS_ALIGNED(nandc->page_dma, 64U))
 		return -ERANGE;
-	memset(nandc->page_buffer, 0xa5, nandc->oob_bytes);
+	/* The OOB area starts at the column after the main area. */
+	instructions[1] = (chip->page_main_bytes >> 8) & 0xffU;
+	instructions[2] = chip->page_main_bytes & 0xffU;
+	memset(nandc->page_buffer, 0xa5, chip->oob_bytes);
 	writel(0, regs + UMS9117_NANDC_MAIN_ADDR_HIGH);
 	writel(lower_32_bits(nandc->page_dma),
 	       regs + UMS9117_NANDC_MAIN_ADDR_LOW);
@@ -808,7 +993,7 @@ static int ums9117_nandc_read_oob_cache(struct ums9117_nandc *nandc)
 	writel(UMS9117_NANDC_OOB_CFG0, regs + UMS9117_NANDC_CFG0);
 	writel(0, regs + UMS9117_NANDC_CFG2);
 	/* CFG1 MAIN_SIZE is the transfer length minus one. */
-	writel(UMS9117_NANDC_CFG1_SPI | (nandc->oob_bytes - 1),
+	writel(UMS9117_NANDC_CFG1_SPI | (chip->oob_bytes - 1),
 	       regs + UMS9117_NANDC_CFG1);
 	writel(UMS9117_NANDC_DATA_CFG4, regs + UMS9117_NANDC_CFG4);
 	writel(0, regs + UMS9117_NANDC_START);
@@ -827,13 +1012,13 @@ static int ums9117_nandc_read_raw_slice(struct ums9117_nandc *nandc, u32 page,
 					size_t offset, size_t length,
 					u8 *destination)
 {
+	size_t page_main_bytes = nandc->chip->page_main_bytes;
 	size_t end;
 	size_t main_end;
 	size_t oob_start;
 	int ret;
 
-	if (page >= UMS9117_NANDC_PAGE_COUNT ||
-	    offset >= nandc->physical_page_bytes ||
+	if (page >= nandc->page_count || offset >= nandc->physical_page_bytes ||
 	    length > nandc->physical_page_bytes - offset)
 		return -ERANGE;
 	end = offset + length;
@@ -848,7 +1033,7 @@ static int ums9117_nandc_read_raw_slice(struct ums9117_nandc *nandc, u32 page,
 	if (ret)
 		return ret;
 
-	main_end = min_t(size_t, end, UMS9117_NANDC_PAGE_BYTES);
+	main_end = min(end, page_main_bytes);
 	if (offset < main_end)
 		memcpy(destination, nandc->page_buffer + offset,
 		       main_end - offset);
@@ -856,11 +1041,10 @@ static int ums9117_nandc_read_raw_slice(struct ums9117_nandc *nandc, u32 page,
 	ret = ums9117_nandc_read_oob_cache(nandc);
 	if (ret)
 		return ret;
-	oob_start = max_t(size_t, offset, UMS9117_NANDC_PAGE_BYTES);
+	oob_start = max(offset, page_main_bytes);
 	if (oob_start < end)
 		memcpy(destination + oob_start - offset,
-		       nandc->page_buffer + oob_start -
-			       UMS9117_NANDC_PAGE_BYTES,
+		       nandc->page_buffer + oob_start - page_main_bytes,
 		       end - oob_start);
 	return 0;
 }
@@ -941,11 +1125,9 @@ static int ums9117_nandc_fail(struct ums9117_nandc *nandc, int error,
 	return error;
 }
 
-static int ums9117_nandc_run_diagnostics(struct ums9117_nandc *nandc)
+static int ums9117_nandc_read_id(struct ums9117_nandc *nandc)
 {
-	static const u8 feature_addresses[] = { 0xa0, 0xb0, 0xc0 };
 	void __iomem *regs = nandc->regs[UMS9117_NANDC_RES_NANDC];
-	unsigned int i;
 	int ret;
 
 	ret = ums9117_nandc_execute_fixed(nandc, UMS9117_NANDC_FIXED_RESET, 0);
@@ -957,8 +1139,15 @@ static int ums9117_nandc_run_diagnostics(struct ums9117_nandc *nandc)
 	if (ret)
 		return ums9117_nandc_fail(nandc, ret, "fixed NAND read-id");
 	nandc->id_raw = readl(regs + UMS9117_NANDC_SPI_FEATURE);
-	if (nandc->id_raw != nandc->expected_id)
-		return ums9117_nandc_fail(nandc, -ENODEV, "unexpected NAND id");
+	return 0;
+}
+
+static int ums9117_nandc_read_features(struct ums9117_nandc *nandc)
+{
+	static const u8 feature_addresses[] = { 0xa0, 0xb0, 0xc0 };
+	void __iomem *regs = nandc->regs[UMS9117_NANDC_RES_NANDC];
+	unsigned int i;
+	int ret;
 
 	for (i = 0; i < ARRAY_SIZE(feature_addresses); i++) {
 		ret = ums9117_nandc_execute_fixed(
@@ -970,8 +1159,25 @@ static int ums9117_nandc_run_diagnostics(struct ums9117_nandc *nandc)
 		nandc->feature_raw[i] = readl(regs + UMS9117_NANDC_SPI_FEATURE);
 	}
 	nandc->features_valid = true;
-	if ((nandc->feature_raw[1] != 0 && !(nandc->id_raw == 0x000021e5U &&
-					     nandc->feature_raw[1] == 0x10U)) ||
+	return 0;
+}
+
+static int ums9117_nandc_run_diagnostics(struct ums9117_nandc *nandc)
+{
+	u32 b0;
+	int ret;
+
+	ret = ums9117_nandc_read_id(nandc);
+	if (ret)
+		return ret;
+	if (nandc->id_raw != nandc->identity_id_raw)
+		return ums9117_nandc_fail(nandc, -ENODEV, "unexpected NAND id");
+
+	ret = ums9117_nandc_read_features(nandc);
+	if (ret)
+		return ret;
+	b0 = nandc->feature_raw[1];
+	if (b0 > U8_MAX || (b0 & UMS9117_NANDC_FEATURE_B0_OTP_EN) ||
 	    nandc->feature_raw[2] != 0)
 		return ums9117_nandc_fail(nandc, -EUCLEAN,
 					  "unexpected NAND feature state");
@@ -1031,7 +1237,7 @@ static int ums9117_nandc_activate(struct ums9117_nandc *nandc)
 	ret = ums9117_nandc_apply_fdl_recipe(nandc);
 	if (ret)
 		return ums9117_nandc_fail(nandc, ret, "NANDC recipe");
-	return ums9117_nandc_run_diagnostics(nandc);
+	return 0;
 }
 
 static int ums9117_nandc_restore_lifecycle(struct ums9117_nandc *nandc)
@@ -1148,10 +1354,97 @@ static int ums9117_nandc_restore_lifecycle(struct ums9117_nandc *nandc)
 	return ret;
 }
 
+/*
+ * Restore B0 and the owned platform state after an activated session.  A
+ * hardware or restore error faults the device for the rest of its lifetime.
+ */
+static int ums9117_nandc_end_session(struct ums9117_nandc *nandc, int ret,
+				     bool hardware_error)
+{
+	int feature_ret;
+	int cleanup_ret;
+
+	feature_ret = ums9117_nandc_restore_raw_mode(nandc);
+	if (feature_ret) {
+		hardware_error = true;
+		ret = feature_ret;
+	}
+	if (hardware_error && !nandc->failed && nandc->gate_enabled)
+		ret = ums9117_nandc_fail(nandc, ret, "NAND raw session");
+	cleanup_ret = ums9117_nandc_restore_lifecycle(nandc);
+	if (feature_ret) {
+		nandc->lifecycle_restored = false;
+		nandc->lifecycle_restore_error = feature_ret;
+		cleanup_ret = feature_ret;
+	}
+	if (cleanup_ret) {
+		nandc->io_faulted = true;
+		ret = cleanup_ret;
+	}
+	if (hardware_error)
+		nandc->io_faulted = true;
+	return ret;
+}
+
+static const struct ums9117_nandc_chip *
+ums9117_nandc_select_chip(struct ums9117_nandc *nandc, u32 id_raw)
+{
+	const struct ums9117_nandc_chip *chip = ums9117_nandc_find_chip(id_raw);
+
+	if (!chip) {
+		dev_err(nandc->dev, "unsupported NAND id 0x%08x\n", id_raw);
+		return NULL;
+	}
+	if (nandc->has_declared_id && id_raw != nandc->declared_id) {
+		dev_err(nandc->dev,
+			"NAND id 0x%08x differs from declared 0x%08x\n", id_raw,
+			nandc->declared_id);
+		return NULL;
+	}
+	return chip;
+}
+
+/*
+ * Identify the fitted chip in one session of RESET, READ_ID and the A0, B0
+ * and C0 reads, without writing a feature.  The result is kept for the device
+ * lifetime.  A chip outside the table, or one that differs from the declared
+ * ID, gets no geometry, so every read is refused.
+ */
+static int ums9117_nandc_identify(struct ums9117_nandc *nandc)
+{
+	const struct ums9117_nandc_chip *chip;
+	int ret;
+
+	ret = ums9117_nandc_activate(nandc);
+	if (!ret)
+		ret = ums9117_nandc_read_id(nandc);
+	if (!ret)
+		ret = ums9117_nandc_read_features(nandc);
+	ret = ums9117_nandc_end_session(nandc, ret, ret != 0);
+	if (ret)
+		return ret;
+
+	nandc->identity_id_raw = nandc->id_raw;
+	memcpy(nandc->identity_features, nandc->feature_raw,
+	       sizeof(nandc->identity_features));
+	nandc->identity_valid = true;
+	chip = ums9117_nandc_select_chip(nandc, nandc->id_raw);
+	if (chip) {
+		nandc->physical_page_bytes =
+			chip->page_main_bytes + chip->oob_bytes;
+		nandc->page_count =
+			(u32)chip->block_count * chip->pages_per_block;
+		nandc->raw_bytes =
+			(u64)nandc->page_count * nandc->physical_page_bytes;
+		nandc->chip = chip;
+	}
+	return 0;
+}
+
 static void ums9117_nandc_release_buffers(struct ums9117_nandc *nandc)
 {
 	if (nandc->page_buffer) {
-		dma_free_coherent(nandc->dev, UMS9117_NANDC_PAGE_BYTES,
+		dma_free_coherent(nandc->dev, UMS9117_NANDC_PAGE_MAIN_BYTES,
 				  nandc->page_buffer, nandc->page_dma);
 		nandc->page_buffer = NULL;
 	}
@@ -1191,26 +1484,99 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		nandc->features_valid, nandc->read_ecc_disabled,
 		nandc->raw_feature_b0, nandc->restored_feature_b0,
 		nandc->nand_feature_restored, nandc->feature_restore_error,
-		nandc->physical_page_bytes, UMS9117_NANDC_PAGE_COUNT,
-		nandc->raw_bytes, nandc->raw_registered, nandc->io_faulted,
+		nandc->physical_page_bytes, nandc->page_count, nandc->raw_bytes,
+		nandc->raw_registered, nandc->io_faulted,
 		nandc->runtime_sessions_completed,
 		nandc->runtime_pages_completed, nandc->lifecycle_restored,
 		nandc->lifecycle_restore_error);
 }
 static DEVICE_ATTR_RO(audit);
 
+/*
+ * Host tools parse these key=value lines.  A chip outside the table, or one
+ * that differs from the declared ID, keeps its ID bytes and features with zero
+ * geometry.  The attribute has no value until an open has read both.
+ */
+static ssize_t geometry_show(struct device *dev, struct device_attribute *attr,
+			     char *buf)
+{
+	static const struct ums9117_nandc_chip unknown_chip = {
+		.name = "unknown",
+	};
+	struct ums9117_nandc *nandc = dev_get_drvdata(dev);
+	const struct ums9117_nandc_chip *chip;
+	const char *source;
+	ssize_t ret;
+
+	if (mutex_lock_interruptible(&nandc->io_mutex))
+		return -ERESTARTSYS;
+	if (!nandc->identity_valid) {
+		ret = -ENODATA;
+		goto out_unlock;
+	}
+	chip = nandc->chip ? nandc->chip : &unknown_chip;
+	if (!nandc->chip)
+		source = "unknown";
+	else if (nandc->has_declared_id)
+		source = "dt";
+	else
+		source = "table";
+	ret = sysfs_emit(buf,
+			 "id_bytes=%02x%02x\n"
+			 "chip=%s\n"
+			 "page_main_bytes=%u\n"
+			 "oob_bytes=%u\n"
+			 "pages_per_block=%u\n"
+			 "block_count=%u\n"
+			 "raw_bytes=%llu\n"
+			 "geometry_source=%s\n"
+			 "feature_a0=0x%02x\n"
+			 "feature_b0=0x%02x\n"
+			 "feature_c0=0x%02x\n",
+			 nandc->identity_id_raw & 0xffU,
+			 (nandc->identity_id_raw >> 8) & 0xffU, chip->name,
+			 chip->page_main_bytes, chip->oob_bytes,
+			 chip->pages_per_block, chip->block_count,
+			 nandc->raw_bytes, source, nandc->identity_features[0],
+			 nandc->identity_features[1],
+			 nandc->identity_features[2]);
+out_unlock:
+	mutex_unlock(&nandc->io_mutex);
+	return ret;
+}
+static DEVICE_ATTR_RO(geometry);
+
+static struct attribute *ums9117_nandc_attrs[] = {
+	&dev_attr_audit.attr,
+	&dev_attr_geometry.attr,
+	NULL,
+};
+
+static const struct attribute_group ums9117_nandc_attr_group = {
+	.attrs = ums9117_nandc_attrs,
+};
+
 static int ums9117_nandc_raw_open(struct inode *inode, struct file *file)
 {
 	struct miscdevice *misc = file->private_data;
 	struct ums9117_nandc *nandc =
 		container_of(misc, struct ums9117_nandc, raw_misc);
+	int ret = 0;
 
 	if (file->f_mode & FMODE_WRITE)
 		return -EROFS;
-	if (READ_ONCE(nandc->shutting_down))
-		return -ENODEV;
-	if (READ_ONCE(nandc->io_faulted))
-		return -EIO;
+	if (mutex_lock_interruptible(&nandc->io_mutex))
+		return -ERESTARTSYS;
+	/* An unsupported chip still opens, so its identity can be inspected. */
+	if (nandc->shutting_down)
+		ret = -ENODEV;
+	else if (nandc->io_faulted)
+		ret = -EIO;
+	else if (!nandc->identity_valid)
+		ret = ums9117_nandc_identify(nandc);
+	mutex_unlock(&nandc->io_mutex);
+	if (ret)
+		return ret;
 	file->private_data = nandc;
 	return 0;
 }
@@ -1234,15 +1600,15 @@ static ssize_t ums9117_nandc_raw_read_iter(struct kiocb *iocb,
 	size_t copied;
 	u32 pages = 0;
 	bool hardware_error = false;
-	bool session_active = false;
-	int cleanup_ret;
-	int feature_ret;
 	int ret = 0;
 
 	if (!iov_iter_count(to))
 		return 0;
 	if (position < 0)
 		return -EINVAL;
+	/* Identification at open left no geometry for an unsupported chip. */
+	if (!nandc->chip)
+		return -ENODEV;
 	if (position >= nandc->raw_bytes)
 		return 0;
 	requested =
@@ -1265,7 +1631,8 @@ static ssize_t ums9117_nandc_raw_read_iter(struct kiocb *iocb,
 	}
 
 	ret = ums9117_nandc_activate(nandc);
-	session_active = true;
+	if (!ret)
+		ret = ums9117_nandc_run_diagnostics(nandc);
 	if (ret) {
 		hardware_error = true;
 		goto out_cleanup;
@@ -1301,28 +1668,8 @@ static ssize_t ums9117_nandc_raw_read_iter(struct kiocb *iocb,
 	}
 
 out_cleanup:
-	feature_ret = session_active ? ums9117_nandc_restore_raw_mode(nandc) :
-				       0;
-	if (feature_ret) {
-		hardware_error = true;
-		ret = feature_ret;
-	}
-	if (hardware_error && !nandc->failed && nandc->gate_enabled)
-		ret = ums9117_nandc_fail(nandc, ret, "NAND raw session");
-	cleanup_ret = session_active ? ums9117_nandc_restore_lifecycle(nandc) :
-				       0;
-	if (feature_ret) {
-		nandc->lifecycle_restored = false;
-		nandc->lifecycle_restore_error = feature_ret;
-		cleanup_ret = feature_ret;
-	}
-	if (cleanup_ret) {
-		nandc->io_faulted = true;
-		ret = cleanup_ret;
-	}
-	if (hardware_error)
-		nandc->io_faulted = true;
-	if (session_active && !hardware_error && !cleanup_ret && pages) {
+	ret = ums9117_nandc_end_session(nandc, ret, hardware_error);
+	if (!nandc->io_faulted && pages) {
 		nandc->runtime_sessions_completed++;
 		nandc->runtime_pages_completed += pages;
 	}
@@ -1358,26 +1705,16 @@ static int ums9117_nandc_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	nandc->dev = &pdev->dev;
 	ret = of_property_read_u32(pdev->dev.of_node, "fplinux,nand-id",
-				   &nandc->expected_id);
-	if (ret)
+				   &nandc->declared_id);
+	if (!ret) {
+		if (!ums9117_nandc_find_chip(nandc->declared_id))
+			return dev_err_probe(&pdev->dev, -ENODEV,
+					     "unsupported NAND identity\n");
+		nandc->has_declared_id = true;
+	} else if (ret != -EINVAL) {
 		return dev_err_probe(&pdev->dev, ret,
-				     "missing NAND identity\n");
-	switch (nandc->expected_id) {
-	case 0x0000b1a1U:
-		nandc->oob_bytes = 128;
-		break;
-	case 0x000021e5U:
-		/* DS35M1GA: 2048+64 bytes, 64 pages/block, 1024 blocks. */
-		nandc->oob_bytes = 64;
-		break;
-	default:
-		return dev_err_probe(&pdev->dev, -ENODEV,
-				     "unsupported NAND identity\n");
+				     "invalid NAND identity\n");
 	}
-	nandc->physical_page_bytes =
-		UMS9117_NANDC_PAGE_BYTES + nandc->oob_bytes;
-	nandc->raw_bytes =
-		(u64)UMS9117_NANDC_PAGE_COUNT * nandc->physical_page_bytes;
 	nandc->lifecycle_restored = true;
 	mutex_init(&nandc->io_mutex);
 	platform_set_drvdata(pdev, nandc);
@@ -1399,7 +1736,7 @@ static int ums9117_nandc_probe(struct platform_device *pdev)
 		return dev_err_probe(&pdev->dev, ret,
 				     "NANDC requires 32-bit coherent DMA\n");
 	nandc->page_buffer = dma_alloc_coherent(&pdev->dev,
-						UMS9117_NANDC_PAGE_BYTES,
+						UMS9117_NANDC_PAGE_MAIN_BYTES,
 						&nandc->page_dma, GFP_KERNEL);
 	if (!nandc->page_buffer)
 		return -ENOMEM;
@@ -1413,15 +1750,15 @@ static int ums9117_nandc_probe(struct platform_device *pdev)
 		ret = -ENOMEM;
 		goto out_release_page;
 	}
-	ret = device_create_file(&pdev->dev, &dev_attr_audit);
+	ret = device_add_group(&pdev->dev, &ums9117_nandc_attr_group);
 	if (ret) {
 		nandc->failed = true;
 		nandc->last_error = ret;
 		dev_err_probe(&pdev->dev, ret,
-			      "could not create NANDC audit file\n");
+			      "could not create NANDC sysfs attributes\n");
 		goto out_release_page;
 	}
-	nandc->audit_file_created = true;
+	nandc->attributes_created = true;
 	nandc->raw_misc.minor = MISC_DYNAMIC_MINOR;
 	nandc->raw_misc.name = "ums9117-nand-raw";
 	nandc->raw_misc.fops = &ums9117_nandc_raw_fops;
@@ -1429,8 +1766,8 @@ static int ums9117_nandc_probe(struct platform_device *pdev)
 	nandc->raw_misc.mode = 0444;
 	ret = misc_register(&nandc->raw_misc);
 	if (ret) {
-		device_remove_file(&pdev->dev, &dev_attr_audit);
-		nandc->audit_file_created = false;
+		device_remove_group(&pdev->dev, &ums9117_nandc_attr_group);
+		nandc->attributes_created = false;
 		nandc->failed = true;
 		nandc->last_error = ret;
 		dev_err_probe(&pdev->dev, ret,
@@ -1439,7 +1776,7 @@ static int ums9117_nandc_probe(struct platform_device *pdev)
 	}
 	nandc->raw_registered = true;
 	dev_dbg(&pdev->dev,
-		"read-only NAND device registered; identification deferred until read\n");
+		"read-only NAND device registered; identification deferred until open\n");
 	return 0;
 
 out_release_page:
@@ -1457,8 +1794,8 @@ static void ums9117_nandc_remove(struct platform_device *pdev)
 		misc_deregister(&nandc->raw_misc);
 		nandc->raw_registered = false;
 	}
-	if (nandc->audit_file_created)
-		device_remove_file(&pdev->dev, &dev_attr_audit);
+	if (nandc->attributes_created)
+		device_remove_group(&pdev->dev, &ums9117_nandc_attr_group);
 	mutex_lock(&nandc->io_mutex);
 	ret = ums9117_nandc_restore_lifecycle(nandc);
 	if (ret) {
@@ -1478,9 +1815,7 @@ static void ums9117_nandc_shutdown(struct platform_device *pdev)
 }
 
 static const struct of_device_id ums9117_nandc_of_match[] = {
-	{ .compatible = "fplinux,ta1618-nandc-ro" },
-	{ .compatible = "fplinux,inoi240-nandc-ro" },
-	{ .compatible = "fplinux,inoi244-nandc-ro" },
+	{ .compatible = "fplinux,ums9117-nandc-ro" },
 	{}
 };
 MODULE_DEVICE_TABLE(of, ums9117_nandc_of_match);

@@ -325,6 +325,10 @@ source = "platforms/ums9117/linux/dts/ums9117-musb-cold.dtsi"
 destination = "arch/arm/boot/dts/unisoc/ums9117-musb-cold.dtsi"
 
 [[linux.copies]]
+source = "platforms/ums9117/linux/dts/ums9117-nand-readonly.dtsi"
+destination = "arch/arm/boot/dts/unisoc/ums9117-nand-readonly.dtsi"
+
+[[linux.copies]]
 source = "platforms/ums9117/linux/bindings/firmware/fplinux,ram-session.yaml"
 destination = "Documentation/devicetree/bindings/firmware/fplinux,ram-session.yaml"
 
