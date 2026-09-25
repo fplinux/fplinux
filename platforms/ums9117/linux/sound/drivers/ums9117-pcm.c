@@ -845,14 +845,15 @@ static int ums9117_pcm_fill_silence_locked(struct ums9117_pcm *audio)
 	return 0;
 }
 
-/* Zero PCM keeps the DAC running between streams for these consumers. */
+/*
+ * Zero PCM keeps the selected output open between streams, so stream starts
+ * and stops do not reopen the headphone amplifiers or the speaker PA.
+ */
 static bool ums9117_pcm_idle_wanted(const struct ums9117_pcm *audio)
 {
 	if (audio->fm_enabled)
 		return false;
-	return audio->vibrator.session ||
-	       (audio->idle_silence &&
-		audio->output == UMS9117_SC2720_OUTPUT_HEADPHONES);
+	return audio->vibrator.session || audio->idle_silence;
 }
 
 static int ums9117_pcm_start_idle_locked(struct ums9117_pcm *audio)
@@ -1159,8 +1160,8 @@ static const struct snd_kcontrol_new ums9117_capture_source_control = {
 	.put = ums9117_capture_source_put,
 };
 
-static int ums9117_headphone_idle_get(struct snd_kcontrol *kcontrol,
-				      struct snd_ctl_elem_value *value)
+static int ums9117_idle_silence_get(struct snd_kcontrol *kcontrol,
+				    struct snd_ctl_elem_value *value)
 {
 	struct ums9117_pcm *audio = snd_kcontrol_chip(kcontrol);
 
@@ -1170,8 +1171,8 @@ static int ums9117_headphone_idle_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static int ums9117_headphone_idle_put(struct snd_kcontrol *kcontrol,
-				      struct snd_ctl_elem_value *value)
+static int ums9117_idle_silence_put(struct snd_kcontrol *kcontrol,
+				    struct snd_ctl_elem_value *value)
 {
 	struct ums9117_pcm *audio = snd_kcontrol_chip(kcontrol);
 	long enabled = value->value.integer.value[0];
@@ -1208,12 +1209,12 @@ out:
 	return ret;
 }
 
-static const struct snd_kcontrol_new ums9117_headphone_idle_control = {
+static const struct snd_kcontrol_new ums9117_idle_silence_control = {
 	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
-	.name = "Headphone Idle Silence Switch",
+	.name = "Idle Silence Playback Switch",
 	.info = snd_ctl_boolean_mono_info,
-	.get = ums9117_headphone_idle_get,
-	.put = ums9117_headphone_idle_put,
+	.get = ums9117_idle_silence_get,
+	.put = ums9117_idle_silence_put,
 };
 
 static int ums9117_playback_output_info(struct snd_kcontrol *kcontrol,
@@ -1698,7 +1699,7 @@ static void ums9117_pcm_shutdown_failed_idle(struct ums9117_pcm *audio)
 	audio->idle_error = 0;
 	spin_unlock_irqrestore(&audio->fifo_lock, flags);
 	if (error) {
-		dev_err(audio->dev, "cannot feed headphone idle silence: %pe\n",
+		dev_err(audio->dev, "cannot feed idle silence: %pe\n",
 			ERR_PTR(error));
 		/* The hardware may have been restarted meanwhile. */
 		if (!audio->playback.running && !audio->idle_running &&
@@ -2365,7 +2366,7 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 	if (ret)
 		return snd_card_free_on_error(&pdev->dev, ret);
 	ret = snd_ctl_add(card,
-			  snd_ctl_new1(&ums9117_headphone_idle_control, audio));
+			  snd_ctl_new1(&ums9117_idle_silence_control, audio));
 	if (ret)
 		return snd_card_free_on_error(&pdev->dev, ret);
 	ret = snd_ctl_add(card,
