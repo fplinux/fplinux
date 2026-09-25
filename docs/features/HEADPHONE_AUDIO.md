@@ -146,23 +146,8 @@ amixer -c 0 cset name='Idle Silence Playback Switch' on
 amixer -c 0 cget name='Idle Silence Playback Switch'
 ```
 
-The enabled idle path on headphones alone has this measured USB-input power
-cost compared with `off`:
-
-- INOI 240 Modern 4G: about `0.024–0.026 W`, or `8–9%`;
-- INOI 244 Modern 4G: `0.34907 W` instead of `0.32519 W`, a difference of
-  `0.02387 W`, or `7.34%`.
-- Nokia 3210 4G (TA-1618): `0.32569 W` instead of `0.30202 W`, a difference of
-  `0.02367 W`, or `7.84%`.
-
-On the speaker alone at level `1`, the enabled idle path has this cost:
-
-- INOI 240 Modern 4G: `0.73244 W` instead of `0.68682 W`, a difference of
-  `0.04562 W`, or `6.64%`;
-- INOI 244 Modern 4G: `0.75741 W` instead of `0.71380 W`, a difference of
-  `0.04361 W`, or `6.11%`;
-- Nokia 3210 4G (TA-1618): `0.51243 W` instead of `0.47482 W`, a difference of
-  `0.03761 W`, or `7.92%`.
+The enabled idle path draws roughly 6–9% more USB input power than `off`, on
+headphones and on the speaker alike.
 
 The switch does not alter PCM that is already playing. The enabled path keeps
 the outputs quiet between streams and avoids reopening them for normal playback.
