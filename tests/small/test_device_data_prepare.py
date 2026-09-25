@@ -14,13 +14,19 @@ from types import SimpleNamespace
 from unittest import mock
 
 from fplinux_cli import common, device_data_prepare, workspace
-from fplinux_cli.device_data import DeviceDataPreparation, PhysicalNand, PreparedGroup
+from fplinux_cli.device_data import (
+    DeviceDataPreparation,
+    NandGeometry,
+    PhysicalNand,
+    PreparedGroup,
+)
 from fplinux_cli.environment import images, kern
 from fplinux_cli.manifests import releases
 from fplinux_cli.output import run_entrypoint
 
 TARGET = "demo-phone"
 RAW_PAGE_BYTES = 2112
+DECLARED_NAND = {"raw_device": "/dev/demo-nand-raw", "id": 0x21E5, "raw_page_bytes": 2112}
 RAW_DUMP = b"controlled physical NAND backup"
 BLUETOOTH = PreparedGroup(
     originals={"radio-original.bin": b"fitted radio"},
@@ -59,6 +65,8 @@ class DeviceDataPrepareTests(unittest.TestCase):
     def _config(
         self,
         group_names: tuple[str, ...] = ("bluetooth", "audio-profile"),
+        *,
+        nand: dict[str, object] = DECLARED_NAND,
     ) -> dict[str, object]:
         groups: dict[str, list[dict[str, object]]] = {}
         if "bluetooth" in group_names:
@@ -71,7 +79,7 @@ class DeviceDataPrepareTests(unittest.TestCase):
             )
         return {
             "device_data": {"parser": "device_data.py", "groups": groups},
-            "nand": {"raw_page_bytes": RAW_PAGE_BYTES},
+            "nand": nand,
         }
 
     @staticmethod
@@ -278,6 +286,39 @@ class DeviceDataPrepareTests(unittest.TestCase):
                     set(group_names),
                 )
 
+    def test_saved_dump_without_declared_chip_or_receipt_publishes_nothing(self) -> None:
+        """A backup's page layout is never inferred from its length."""
+        with (
+            mock.patch.object(device_data_prepare, "ROOT", self.root),
+            mock.patch.object(
+                device_data_prepare,
+                "load_target",
+                return_value=self._config(nand={"raw_device": "/dev/demo-nand-raw"}),
+            ),
+            mock.patch.object(
+                PhysicalNand,
+                "from_dump",
+                side_effect=AssertionError("an unknown layout must not be admitted"),
+            ),
+            mock.patch.object(
+                device_data_prepare,
+                "_load_device_data_parser",
+                side_effect=AssertionError("an unknown layout must not reach a parser"),
+            ),
+            self.assertRaisesRegex(SystemExit, "declares no NAND chip and the backup has no"),
+        ):
+            device_data_prepare.prepare_device_data(
+                TARGET,
+                from_dump=self.saved_dump,
+                jobs=1,
+                offline=True,
+            )
+
+        target_root = self.cache / "device-data" / TARGET
+        self.assertFalse((target_root / "current").exists())
+        self.assertEqual(list((target_root / "generations").iterdir()), [])
+        self.assertEqual(self.saved_dump.read_bytes(), RAW_DUMP)
+
     def test_target_without_declared_groups_stops_before_source_or_phone_access(self) -> None:
         """Unsupported preparation cannot acquire a source or create a generation."""
         with (
@@ -340,6 +381,84 @@ class DeviceDataPrepareTests(unittest.TestCase):
         self.assertTrue(receipts)
         for receipt in receipts:
             self.assertEqual(json.loads(receipt.read_text())["status"], "failed")
+
+
+def _reported(  # noqa: PLR0913 -- each reported value stays visible at the call site.
+    *,
+    id_bytes: str,
+    page_main_bytes: int = 2048,
+    oob_bytes: int,
+    pages_per_block: int = 64,
+    block_count: int = 1024,
+    raw_bytes: int,
+) -> NandGeometry:
+    return NandGeometry(
+        id_bytes=id_bytes,
+        chip="demo",
+        page_main_bytes=page_main_bytes,
+        oob_bytes=oob_bytes,
+        pages_per_block=pages_per_block,
+        block_count=block_count,
+        raw_bytes=raw_bytes,
+    )
+
+
+class DumpGeometryTests(unittest.TestCase):
+    """Select a saved backup's page layout without guessing it from the backup length."""
+
+    def test_page_size_comes_from_the_receipt_or_the_declared_chip(self) -> None:
+        """Either source is sufficient, and agreeing sources give the same page size."""
+        receipt_2112 = _reported(id_bytes="e521", oob_bytes=64, raw_bytes=138412032)
+        cases = (
+            ("declared chip only", DECLARED_NAND, None, 2112),
+            (
+                "declared 128-byte OOB chip only",
+                {"raw_device": "/dev/demo-nand-raw", "id": 0xB1A1, "raw_page_bytes": 2176},
+                None,
+                2176,
+            ),
+            ("receipt only", {"raw_device": "/dev/demo-nand-raw"}, receipt_2112, 2112),
+            ("receipt without a NAND table", None, receipt_2112, 2112),
+            ("receipt and declared chip agree", DECLARED_NAND, receipt_2112, 2112),
+        )
+        for name, nand, receipt, expected in cases:
+            with self.subTest(name):
+                self.assertEqual(
+                    device_data_prepare.dump_page_bytes(TARGET, nand, receipt),
+                    expected,
+                )
+
+    def test_missing_contradicting_or_unsupported_geometry_is_refused(self) -> None:
+        """A receipt from another chip or outside the interpreted layout cannot be used."""
+        cases = (
+            ("neither source", {"raw_device": "/dev/demo-nand-raw"}, None, "declares no NAND"),
+            (
+                "receipt from another chip",
+                DECLARED_NAND,
+                _reported(id_bytes="a1b1", oob_bytes=128, raw_bytes=142606336),
+                "reported id_bytes=a1b1 with 2176-byte pages; target declares id_bytes=e521",
+            ),
+            (
+                "4 KiB main pages",
+                None,
+                _reported(
+                    id_bytes="c8b4",
+                    page_main_bytes=4096,
+                    oob_bytes=256,
+                    raw_bytes=285212672,
+                ),
+                "4096-byte main pages",
+            ),
+            (
+                "half the pages",
+                None,
+                _reported(id_bytes="c8f1", oob_bytes=64, block_count=512, raw_bytes=69206016),
+                "512 blocks",
+            ),
+        )
+        for name, nand, receipt, message in cases:
+            with self.subTest(name), self.assertRaisesRegex(SystemExit, message):
+                device_data_prepare.dump_page_bytes(TARGET, nand, receipt)
 
 
 if __name__ == "__main__":

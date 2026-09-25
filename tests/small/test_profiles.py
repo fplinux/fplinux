@@ -236,6 +236,34 @@ class GlobalProfileTests(unittest.TestCase):
                 )
                 self.assertNotIn("nand", targets.load_target("second", profile))
 
+    def test_nand_chip_declaration_is_optional_and_not_limited_to_known_chips(self) -> None:
+        """A board can name only its reader, or expect a chip the host has not seen before."""
+        path = self.root / "targets/first/target.toml"
+        base = path.read_text()
+        cases = (
+            ('raw_device = "/dev/first-nand-raw"\n', {"raw_device": "/dev/first-nand-raw"}),
+            (
+                'raw_device = "/dev/first-nand-raw"\nid = 0xc1c8\nraw_page_bytes = 2176\n',
+                {"raw_device": "/dev/first-nand-raw", "id": 0xC1C8, "raw_page_bytes": 2176},
+            ),
+        )
+        for table, expected in cases:
+            with self.subTest(table=table):
+                path.write_text(base + "\n[nand]\n" + table)
+                self.assertEqual(targets.load_target("first")["nand"], expected)
+
+    def test_nand_chip_declaration_requires_both_id_and_page_size(self) -> None:
+        """Half a chip declaration cannot silently disable the device comparison."""
+        path = self.root / "targets/first/target.toml"
+        base = path.read_text()
+        for declaration in ("id = 0xb1a1\n", "raw_page_bytes = 2176\n"):
+            path.write_text(base + '\n[nand]\nraw_device = "/dev/first-nand-raw"\n' + declaration)
+            with (
+                self.subTest(declaration=declaration),
+                self.assertRaisesRegex(SystemExit, "optionally both id and raw_page_bytes"),
+            ):
+                targets.load_target("first")
+
     def test_nand_reader_requires_a_device_path(self) -> None:
         """A board cannot accidentally point a physical NAND backup at a regular file."""
         path = self.root / "targets/first/target.toml"

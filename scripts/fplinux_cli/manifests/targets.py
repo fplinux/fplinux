@@ -60,12 +60,20 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
         fail(str(error))
     config["identity"] = identity
     if "nand" in config:
-        nand = exact_table(config["nand"], {"raw_device", "raw_page_bytes", "id"}, "target nand")
+        nand = config["nand"]
+        if not isinstance(nand, dict) or set(nand) not in (
+            {"raw_device"},
+            {"raw_device", "id", "raw_page_bytes"},
+        ):
+            fail("target nand must contain raw_device and optionally both id and raw_page_bytes")
         raw_device = nonempty_string(nand["raw_device"], "target nand raw_device")
         if re.fullmatch(r"/dev/[A-Za-z0-9][A-Za-z0-9._-]*", raw_device) is None:
             fail("target nand raw_device must name one device directly under /dev")
-        if (nand["id"], nand["raw_page_bytes"]) not in {(0xB1A1, 2176), (0x21E5, 2112)}:
-            fail("target nand must declare a supported chip identity and physical page size")
+        if "id" in nand:
+            integer_value(nand["id"], "target nand id", bounds=(0, 0xFFFF))
+            integer_value(
+                nand["raw_page_bytes"], "target nand raw_page_bytes", bounds=(1, 0xFFFFFFFF)
+            )
     platform_name = nonempty_string(config.get("platform"), f"target {target} platform")
     if VALUE_NAME.fullmatch(platform_name) is None:
         fail(f"target {target} has invalid platform: {path}")
