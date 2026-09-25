@@ -8,6 +8,7 @@
 #include "fplinux-boot-screen/boot-screen.h"
 
 struct ums9117_boot_board {
+	/* A 0x0 display selects a board without a boot screen. */
 	uint32_t display_width;
 	uint32_t display_height;
 };

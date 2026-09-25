@@ -163,6 +163,37 @@ class GlobalProfileTests(unittest.TestCase):
                     {},
                 )
 
+    def test_loader_display_settings_are_declared_together_or_omitted(self) -> None:
+        """A board without the LCD settings loads headless; a partial set is refused."""
+        path = self.root / "targets/first/target.toml"
+        manifest = path.read_text(encoding="utf-8")
+        display_lines = (
+            "spi_mode = 0\n",
+            "lcd_id = 0\n",
+            'backlight_channels = "mono"\n',
+            "backlight_level = 0\n",
+        )
+        headless = manifest
+        for line in display_lines:
+            headless = headless.replace(line, "")
+        path.write_text(headless, encoding="utf-8")
+        self.assertEqual(
+            targets.load_target("first")["runtime"]["adapter"],
+            {
+                "exec_distance": 0,
+                "session_name": "first",
+                "boot_instructions": "Power off and connect.",
+            },
+        )
+
+        for line in display_lines:
+            path.write_text(manifest.replace(line, ""), encoding="utf-8")
+            with (
+                self.subTest(missing=line.strip()),
+                self.assertRaisesRegex(SystemExit, "target adapter must contain exactly"),
+            ):
+                targets.load_target("first")
+
     def test_fm_declaration_adds_only_the_declared_device_data_group(self) -> None:
         """An FM firmware declaration has the same group contract in both boot profiles."""
         path = self.root / "targets/first/target.toml"

@@ -130,31 +130,33 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
     except IdentityError as error:
         fail(str(error))
 
+    # Without the loader display settings the RAM loader runs headless.
+    display_keys = {"spi_mode", "lcd_id", "backlight_channels", "backlight_level"}
+    raw_adapter = config.get("adapter")
+    has_display = isinstance(raw_adapter, dict) and not display_keys.isdisjoint(raw_adapter)
     adapter = exact_table(
-        config.get("adapter"),
+        raw_adapter,
         {
-            "spi_mode",
-            "lcd_id",
+            *(display_keys if has_display else set()),
             "exec_distance",
-            "backlight_channels",
-            "backlight_level",
             "session_name",
             "boot_instructions",
         },
         "target adapter",
     )
-    integer_value(adapter.get("spi_mode"), "target adapter spi_mode", bounds=(0, 3))
-    integer_value(adapter.get("lcd_id"), "target adapter lcd_id", bounds=(0, 0xFFFFFFFF))
+    if has_display:
+        integer_value(adapter.get("spi_mode"), "target adapter spi_mode", bounds=(0, 3))
+        integer_value(adapter.get("lcd_id"), "target adapter lcd_id", bounds=(0, 0xFFFFFFFF))
+        nonempty_string(adapter.get("backlight_channels"), "target adapter backlight_channels")
+        integer_value(
+            adapter.get("backlight_level"),
+            "target adapter backlight_level",
+            bounds=(0, 0x3F),
+        )
     integer_value(
         adapter.get("exec_distance"),
         "target adapter exec_distance",
         bounds=(0, 0xFFFF),
-    )
-    nonempty_string(adapter.get("backlight_channels"), "target adapter backlight_channels")
-    integer_value(
-        adapter.get("backlight_level"),
-        "target adapter backlight_level",
-        bounds=(0, 0x3F),
     )
     for key in ("session_name", "boot_instructions"):
         nonempty_string(adapter.get(key), f"target adapter {key}")
