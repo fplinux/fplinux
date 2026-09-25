@@ -57,6 +57,8 @@
 #define UMS9117_PCM_IDLE_RATE 48000U
 #define UMS9117_PCM_THREAD_NAME "ums9117-pcm"
 #define UMS9117_PCM_NAME "UMS9117 Headphones"
+#define UMS9117_PCM_OUTPUTS_BOTH \
+	(UMS9117_SC2720_OUTPUT_HEADPHONES | UMS9117_SC2720_OUTPUT_SPEAKER)
 #define UMS9117_AUDIO_PAD_COUNT 4U
 #define UMS9117_CAPTURE_PAD_COUNT 2U
 #define UMS9117_AUDIO_PAD_CELLS 3U
@@ -146,8 +148,9 @@ struct ums9117_audio_profile {
 
 /*
  * A speaker that also vibrates the phone plays the VBC vibrate tone. A
- * vibration session holds the DAC and the PA for the tone; the music shares
- * the PA only on an unmuted speaker, while headphone and FM audio is muted.
+ * vibration session holds the DAC and the PA for the tone and mutes the
+ * headphones; music and FM continue only on an enabled, unmuted speaker,
+ * which shares the PA with the tone.
  */
 struct ums9117_vibrator {
 	struct work_struct play_work;
@@ -198,8 +201,8 @@ struct ums9117_pcm {
 	unsigned int volume_right;
 	unsigned int speaker_volume;
 	enum ums9117_sc2720_capture_source capture_source;
-	enum ums9117_sc2720_playback_output output;
-	enum ums9117_sc2720_playback_output prepared_output;
+	/* Requested UMS9117_SC2720_OUTPUT_* set; running hardware follows it. */
+	unsigned int outputs;
 	bool codec_prepared;
 	bool digital_prepared;
 	bool capture_supported;
@@ -223,6 +226,12 @@ struct ums9117_pcm {
 	u64 submitted_frames;
 	u64 consumed_frames;
 	u64 leading_silence_frames;
+	/*
+	 * DACS adds both lanes, so PCM samples are halved whenever the speaker
+	 * is a requested output, with or without the headphones. FM samples
+	 * are not halved.
+	 */
+	bool halve_samples;
 	bool idle_running;
 	bool capture_starting;
 	unsigned int capture_warmup_frames;
@@ -466,11 +475,16 @@ ums9117_headphone_volume_max(const struct ums9117_pcm *audio)
 	return UMS9117_SC2720_HEADPHONE_VOLUME_MAX;
 }
 
+/* Logical mute is analog; retain the lowest fitted digital level. */
+static unsigned int ums9117_profile_level_index(unsigned int volume)
+{
+	return volume ? volume - 1 : 0;
+}
+
 static u8 ums9117_profile_dac_gain(const struct ums9117_audio_profile *profile,
 				   unsigned int volume)
 {
-	/* Logical mute is analog; retain the lowest fitted digital level. */
-	return profile->dac_gain[volume ? volume - 1 : 0];
+	return profile->dac_gain[ums9117_profile_level_index(volume)];
 }
 
 static void ums9117_pcm_apply_profile_dac_gain(struct ums9117_pcm *audio,
@@ -483,23 +497,46 @@ static void ums9117_pcm_apply_profile_dac_gain(struct ums9117_pcm *audio,
 	ums9117_audio_set_dac_gain(audio->digital, left_gain, right_gain);
 }
 
-static void
-ums9117_pcm_apply_output_gain(struct ums9117_pcm *audio,
-			      enum ums9117_sc2720_playback_output output)
+/*
+ * Headphones alone follow their own left and right levels. The speaker, alone
+ * or with the headphones, sets one gain for both lanes from its level.
+ */
+static void ums9117_pcm_apply_output_gain(struct ums9117_pcm *audio)
 {
+	const struct ums9117_audio_profile *profile = &audio->profile;
+	unsigned int index = ums9117_profile_level_index(audio->speaker_volume);
 	u8 gain;
 
-	if (output == UMS9117_SC2720_OUTPUT_SPEAKER) {
-		gain = audio->profile
-			       .speaker_dac_gain[audio->speaker_volume ?
-							 audio->speaker_volume -
-								 1 :
-							 0];
-		ums9117_audio_set_dac_gain(audio->digital, gain, gain);
-	} else if (audio->profile.fitted) {
+	if (!profile->fitted)
+		return;
+	switch (audio->outputs) {
+	case UMS9117_SC2720_OUTPUT_HEADPHONES:
 		ums9117_pcm_apply_profile_dac_gain(audio, audio->volume_left,
 						   audio->volume_right);
+		return;
+	case UMS9117_SC2720_OUTPUT_SPEAKER:
+		gain = profile->speaker_dac_gain[index];
+		break;
+	case UMS9117_PCM_OUTPUTS_BOTH:
+		gain = profile->combined_dac_gain[index];
+		break;
+	default:
+		return;
 	}
+	ums9117_audio_set_dac_gain(audio->digital, gain, gain);
+}
+
+/* With both outputs a nonzero headphone level only unmutes its channel. */
+static int ums9117_pcm_set_codec_volume_locked(struct ums9117_pcm *audio,
+					       unsigned int left,
+					       unsigned int right)
+{
+	unsigned int level = audio->outputs == UMS9117_PCM_OUTPUTS_BOTH ?
+				     audio->profile.combined_codec_volume :
+				     audio->profile.codec_volume;
+
+	return ums9117_sc2720_codec_set_volume(audio->codec, left ? level : 0,
+					       right ? level : 0);
 }
 
 static int ums9117_pcm_set_profile_volume_locked(struct ums9117_pcm *audio,
@@ -508,22 +545,17 @@ static int ums9117_pcm_set_profile_volume_locked(struct ums9117_pcm *audio,
 {
 	unsigned int old_left = audio->volume_left;
 	unsigned int old_right = audio->volume_right;
-	bool headphone_digital = audio->output ==
-					 UMS9117_SC2720_OUTPUT_HEADPHONES ||
-				 audio->fm_enabled;
-	unsigned int codec_left;
-	unsigned int codec_right;
+	/* FM follows the same digital gain as PCM. */
+	bool headphone_digital = audio->outputs ==
+				 UMS9117_SC2720_OUTPUT_HEADPHONES;
 	int ret;
 
 	if (left == old_left && right == old_right)
 		return 0;
-	codec_left = left ? audio->profile.codec_volume : 0;
-	codec_right = right ? audio->profile.codec_volume : 0;
 	/* Program DG before an analog unmute can expose the selected level. */
 	if (headphone_digital)
 		ums9117_pcm_apply_profile_dac_gain(audio, left, right);
-	ret = ums9117_sc2720_codec_set_volume(audio->codec, codec_left,
-					      codec_right);
+	ret = ums9117_pcm_set_codec_volume_locked(audio, left, right);
 	if (ret < 0) {
 		if (headphone_digital)
 			ums9117_pcm_apply_profile_dac_gain(audio, old_left,
@@ -773,32 +805,58 @@ static int ums9117_pcm_read_pads(struct device *dev,
 	return 0;
 }
 
+static u16 ums9117_pcm_route_pa_word(const struct ums9117_pcm *audio)
+{
+	if (audio->outputs == UMS9117_PCM_OUTPUTS_BOTH)
+		return audio->profile.combined_pa_word;
+	/* Without the speaker the PA opens only for the vibrate tone. */
+	return audio->profile.speaker_pa_word;
+}
+
+/*
+ * Programs the digital gain, headphone level, speaker mute and sample scaling
+ * of the requested outputs before the codec opens or closes them.
+ */
+static int ums9117_pcm_apply_output_levels_locked(struct ums9117_pcm *audio)
+{
+	unsigned long flags;
+	int ret;
+
+	ums9117_pcm_apply_output_gain(audio);
+	if (audio->profile.fitted) {
+		ret = ums9117_pcm_set_codec_volume_locked(
+			audio, audio->volume_left, audio->volume_right);
+		if (ret < 0)
+			return ret;
+	}
+	if (audio->outputs & UMS9117_SC2720_OUTPUT_SPEAKER) {
+		ret = ums9117_sc2720_codec_set_speaker_mute(
+			audio->codec, !audio->speaker_volume);
+		if (ret < 0)
+			return ret;
+	}
+	spin_lock_irqsave(&audio->fifo_lock, flags);
+	audio->halve_samples = audio->outputs & UMS9117_SC2720_OUTPUT_SPEAKER;
+	spin_unlock_irqrestore(&audio->fifo_lock, flags);
+	return 0;
+}
+
 static int ums9117_pcm_prepare_hardware_locked(struct ums9117_pcm *audio,
 					       unsigned int rate, bool fm)
 {
-	enum ums9117_sc2720_playback_output output =
-		fm ? UMS9117_SC2720_OUTPUT_HEADPHONES : audio->output;
 	int ret;
 
-	if (!fm && output == UMS9117_SC2720_OUTPUT_HEADPHONES &&
-	    audio->idle_silence && rate != UMS9117_PCM_IDLE_RATE)
-		return -EINVAL;
-	if (output == UMS9117_SC2720_OUTPUT_SPEAKER &&
-	    rate != UMS9117_PCM_IDLE_RATE)
+	if (!fm && audio->idle_silence && rate != UMS9117_PCM_IDLE_RATE)
 		return -EINVAL;
 	if (audio->digital_prepared) {
-		if (audio->rate == rate && audio->prepared_output == output)
+		if (audio->rate == rate)
 			return 0;
 		ret = ums9117_pcm_stop_playback_locked(audio);
 		if (ret)
 			return ret;
 	}
-	if (audio->codec_prepared && audio->prepared_output != output) {
-		ret = ums9117_pcm_disable_codec(audio);
-		if (ret)
-			return ret;
-	}
-	if (output == UMS9117_SC2720_OUTPUT_SPEAKER && !audio->profile.fitted)
+	if ((audio->outputs & UMS9117_SC2720_OUTPUT_SPEAKER) &&
+	    !audio->profile.fitted)
 		return -ENODEV;
 	ret = ums9117_pcm_validate_pads(audio, audio->pads,
 					ums9117_audio_pad_names,
@@ -815,23 +873,17 @@ static int ums9117_pcm_prepare_hardware_locked(struct ums9117_pcm *audio,
 		goto failed;
 	}
 	audio->digital_prepared = true;
-	ums9117_pcm_apply_output_gain(audio, output);
-	/* Headphone playback also needs the PA word for the vibrate tone. */
-	ret = ums9117_sc2720_codec_prepare(audio->codec, output,
-					   audio->profile.speaker_pa_word);
+	ret = ums9117_pcm_apply_output_levels_locked(audio);
+	if (ret)
+		goto failed;
+	ret = ums9117_sc2720_codec_prepare(audio->codec, audio->outputs,
+					   ums9117_pcm_route_pa_word(audio));
 	if (ret) {
 		dev_err(audio->dev, "cannot prepare playback codec: %pe\n",
 			ERR_PTR(ret));
 		goto failed;
 	}
 	audio->codec_prepared = true;
-	audio->prepared_output = output;
-	if (output == UMS9117_SC2720_OUTPUT_SPEAKER) {
-		ret = ums9117_sc2720_codec_set_speaker_mute(
-			audio->codec, !audio->speaker_volume);
-		if (ret < 0)
-			goto failed;
-	}
 	audio->rate = rate;
 	return 0;
 
@@ -885,14 +937,15 @@ static int ums9117_pcm_fill_silence_locked(struct ums9117_pcm *audio)
 }
 
 /*
- * Zero PCM keeps the selected output open between streams, so stream starts
+ * Zero PCM keeps the enabled outputs open between streams, so stream starts
  * and stops do not reopen the headphone amplifiers or the speaker PA.
  */
 static bool ums9117_pcm_idle_wanted(const struct ums9117_pcm *audio)
 {
 	if (audio->fm_enabled)
 		return false;
-	return audio->vibrator.session || audio->idle_silence;
+	return audio->vibrator.session ||
+	       (audio->idle_silence && audio->outputs);
 }
 
 static int ums9117_pcm_start_idle_locked(struct ums9117_pcm *audio)
@@ -949,14 +1002,23 @@ static int ums9117_pcm_finish_locked(struct ums9117_pcm *audio)
 	return ums9117_pcm_start_idle_locked(audio);
 }
 
+/* Starts or stops idle silence when no stream or FM owns the DAC. */
+static int ums9117_pcm_update_idle_locked(struct ums9117_pcm *audio)
+{
+	if (audio->playback.running || audio->fm_enabled)
+		return 0;
+	if (ums9117_pcm_idle_wanted(audio))
+		return ums9117_pcm_start_idle_locked(audio);
+	if (audio->idle_running)
+		return ums9117_pcm_stop_playback_locked(audio);
+	return 0;
+}
+
 static int ums9117_pcm_start_fm_locked(struct ums9117_pcm *audio)
 {
 	int ret;
 
-	if (audio->output == UMS9117_SC2720_OUTPUT_SPEAKER)
-		ret = ums9117_pcm_shutdown_playback_locked(audio);
-	else
-		ret = ums9117_pcm_stop_playback_locked(audio);
+	ret = ums9117_pcm_stop_playback_locked(audio);
 	if (ret)
 		return ret;
 	ret = ums9117_pcm_prepare_hardware_locked(audio, 32000, true);
@@ -973,16 +1035,17 @@ static int ums9117_pcm_start_fm_locked(struct ums9117_pcm *audio)
 }
 
 /*
- * Applies the vibration session to the current route. The PA carries the
- * tone together with the music only on an unmuted speaker; otherwise the music
- * or FM is muted so that the PA carries the tone alone. Lower layers keep
- * these settings across later prepares of the same route.
+ * Applies the vibration session to the current outputs. The PA carries the
+ * tone together with music or FM only on an enabled, unmuted speaker;
+ * otherwise they are muted so that the PA carries the tone alone. Open
+ * headphones stay silent during the session. Lower layers keep these settings
+ * across later prepares and output changes.
  */
 static int ums9117_pcm_apply_vibration_locked(struct ums9117_pcm *audio)
 {
 	bool session = audio->vibrator.session;
-	bool shared = audio->output == UMS9117_SC2720_OUTPUT_SPEAKER &&
-		      audio->speaker_volume && !audio->fm_enabled;
+	bool shared = (audio->outputs & UMS9117_SC2720_OUTPUT_SPEAKER) &&
+		      audio->speaker_volume;
 	int ret;
 
 	ums9117_audio_set_music_mute(audio->digital, session && !shared);
@@ -990,13 +1053,7 @@ static int ums9117_pcm_apply_vibration_locked(struct ums9117_pcm *audio)
 	if (ret)
 		return ret;
 	/* A stream or FM already runs the DAC; idle only fills the gaps. */
-	if (audio->playback.running || audio->fm_enabled)
-		return 0;
-	if (ums9117_pcm_idle_wanted(audio))
-		return ums9117_pcm_start_idle_locked(audio);
-	if (audio->idle_running)
-		return ums9117_pcm_stop_playback_locked(audio);
-	return 0;
+	return ums9117_pcm_update_idle_locked(audio);
 }
 
 static void ums9117_pcm_set_tone_locked(struct ums9117_pcm *audio, bool on)
@@ -1113,10 +1170,7 @@ static int ums9117_fm_playback_put(struct snd_kcontrol *kcontrol,
 		}
 		audio->fm_enabled = true;
 	} else {
-		if (audio->output == UMS9117_SC2720_OUTPUT_SPEAKER)
-			ret = ums9117_pcm_shutdown_playback_locked(audio);
-		else
-			ret = ums9117_pcm_stop_playback_locked(audio);
+		ret = ums9117_pcm_stop_playback_locked(audio);
 		audio->fm_enabled = false;
 		if (ret)
 			goto failed;
@@ -1232,15 +1286,10 @@ static int ums9117_idle_silence_put(struct snd_kcontrol *kcontrol,
 		goto out;
 	}
 	audio->idle_silence = enabled;
-	if (!audio->playback.running) {
-		if (ums9117_pcm_idle_wanted(audio))
-			ret = ums9117_pcm_start_idle_locked(audio);
-		else if (audio->idle_running)
-			ret = ums9117_pcm_stop_playback_locked(audio);
-		if (ret) {
-			audio->idle_silence = !enabled;
-			goto out;
-		}
+	ret = ums9117_pcm_update_idle_locked(audio);
+	if (ret) {
+		audio->idle_silence = !enabled;
+		goto out;
 	}
 	ret = 1;
 out:
@@ -1256,74 +1305,97 @@ static const struct snd_kcontrol_new ums9117_idle_silence_control = {
 	.put = ums9117_idle_silence_put,
 };
 
-static int ums9117_playback_output_info(struct snd_kcontrol *kcontrol,
-					struct snd_ctl_elem_info *info)
+/* Applies the requested outputs to gains, codec, idle silence and vibration. */
+static int ums9117_pcm_route_outputs_locked(struct ums9117_pcm *audio)
 {
-	static const char *const names[] = { "Headphones", "Speaker" };
+	int ret;
 
-	return snd_ctl_enum_info(info, 1, ARRAY_SIZE(names), names);
+	ret = ums9117_pcm_apply_output_levels_locked(audio);
+	if (ret)
+		return ret;
+	ret = ums9117_sc2720_codec_set_outputs(
+		audio->codec, audio->outputs, ums9117_pcm_route_pa_word(audio));
+	if (ret)
+		return ret;
+	ret = ums9117_pcm_update_idle_locked(audio);
+	if (ret)
+		return ret;
+	return ums9117_pcm_update_vibration_locked(audio);
 }
 
-static int ums9117_playback_output_get(struct snd_kcontrol *kcontrol,
-				       struct snd_ctl_elem_value *value)
+/*
+ * Streams, idle silence and FM keep running across an output change; the
+ * codec opens and closes the outputs under them.
+ */
+static int ums9117_pcm_set_outputs_locked(struct ums9117_pcm *audio,
+					  unsigned int outputs)
+{
+	unsigned int old_outputs = audio->outputs;
+	int restore_ret;
+	int ret;
+
+	if (audio->removing || audio->suspended)
+		return audio->removing ? -ENODEV : -ESTRPIPE;
+	if (audio->outputs == outputs)
+		return 0;
+	audio->outputs = outputs;
+	ret = ums9117_pcm_route_outputs_locked(audio);
+	if (!ret)
+		return 1;
+	audio->outputs = old_outputs;
+	restore_ret = ums9117_pcm_route_outputs_locked(audio);
+	if (restore_ret)
+		dev_err(audio->dev, "cannot restore playback outputs: %pe\n",
+			ERR_PTR(restore_ret));
+	return ret;
+}
+
+static int ums9117_output_switch_get(struct snd_kcontrol *kcontrol,
+				     struct snd_ctl_elem_value *value)
 {
 	struct ums9117_pcm *audio = snd_kcontrol_chip(kcontrol);
+	unsigned int output = kcontrol->private_value;
 
 	mutex_lock(&audio->lock);
-	value->value.enumerated.item[0] = audio->output;
+	value->value.integer.value[0] = !!(audio->outputs & output);
 	mutex_unlock(&audio->lock);
 	return 0;
 }
 
-static int ums9117_playback_output_put(struct snd_kcontrol *kcontrol,
-				       struct snd_ctl_elem_value *value)
+static int ums9117_output_switch_put(struct snd_kcontrol *kcontrol,
+				     struct snd_ctl_elem_value *value)
 {
 	struct ums9117_pcm *audio = snd_kcontrol_chip(kcontrol);
-	unsigned int output = value->value.enumerated.item[0];
-	enum ums9117_sc2720_playback_output old_output;
-	int ret = 0;
+	unsigned int output = kcontrol->private_value;
+	long enabled = value->value.integer.value[0];
+	unsigned int outputs;
+	int ret;
 
-	if (output > UMS9117_SC2720_OUTPUT_SPEAKER)
+	if (enabled != 0 && enabled != 1)
 		return -EINVAL;
 	mutex_lock(&audio->lock);
-	if (audio->removing || audio->suspended) {
-		ret = audio->removing ? -ENODEV : -ESTRPIPE;
-		goto out;
-	}
-	if (audio->output == output)
-		goto out;
-	if (audio->playback.substream || audio->capture.substream ||
-	    audio->fm_enabled) {
-		ret = -EBUSY;
-		goto out;
-	}
-	ret = ums9117_pcm_shutdown_playback_locked(audio);
-	if (ret)
-		goto out;
-	old_output = audio->output;
-	audio->output = output;
-	ums9117_pcm_apply_output_gain(audio, output);
-	ret = ums9117_pcm_start_idle_locked(audio);
-	if (!ret)
-		ret = ums9117_pcm_update_vibration_locked(audio);
-	if (ret) {
-		ums9117_pcm_shutdown_playback_locked(audio);
-		audio->output = old_output;
-		ums9117_pcm_apply_output_gain(audio, old_output);
-		goto out;
-	}
-	ret = 1;
-out:
+	outputs = enabled ? audio->outputs | output : audio->outputs & ~output;
+	ret = ums9117_pcm_set_outputs_locked(audio, outputs);
 	mutex_unlock(&audio->lock);
 	return ret;
 }
 
-static const struct snd_kcontrol_new ums9117_playback_output_control = {
+static const struct snd_kcontrol_new ums9117_headphone_switch_control = {
 	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
-	.name = "PCM Playback Output",
-	.info = ums9117_playback_output_info,
-	.get = ums9117_playback_output_get,
-	.put = ums9117_playback_output_put,
+	.name = "Headphone Playback Switch",
+	.info = snd_ctl_boolean_mono_info,
+	.get = ums9117_output_switch_get,
+	.put = ums9117_output_switch_put,
+	.private_value = UMS9117_SC2720_OUTPUT_HEADPHONES,
+};
+
+static const struct snd_kcontrol_new ums9117_speaker_switch_control = {
+	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+	.name = "Speaker Playback Switch",
+	.info = snd_ctl_boolean_mono_info,
+	.get = ums9117_output_switch_get,
+	.put = ums9117_output_switch_put,
+	.private_value = UMS9117_SC2720_OUTPUT_SPEAKER,
 };
 
 static int ums9117_speaker_volume_info(struct snd_kcontrol *kcontrol,
@@ -1353,8 +1425,6 @@ static int ums9117_speaker_volume_put(struct snd_kcontrol *kcontrol,
 	struct ums9117_pcm *audio = snd_kcontrol_chip(kcontrol);
 	long level = value->value.integer.value[0];
 	unsigned int old_level;
-	u8 old_gain;
-	u8 gain;
 	int ret = 0;
 
 	if (level < 0 || level > UMS9117_AUDIO_PROFILE_LEVEL_COUNT)
@@ -1367,25 +1437,23 @@ static int ums9117_speaker_volume_put(struct snd_kcontrol *kcontrol,
 	old_level = audio->speaker_volume;
 	if (old_level == level)
 		goto out;
-	if (audio->output == UMS9117_SC2720_OUTPUT_SPEAKER &&
-	    !audio->fm_enabled) {
-		old_gain =
-			audio->profile
-				.speaker_dac_gain[old_level ? old_level - 1 : 0];
-		gain = audio->profile.speaker_dac_gain[level ? level - 1 : 0];
+	/* FM follows the same digital gain as PCM. */
+	if ((audio->outputs & UMS9117_SC2720_OUTPUT_SPEAKER) &&
+	    audio->digital_prepared) {
 		if (!level) {
 			ret = ums9117_sc2720_codec_set_speaker_mute(
 				audio->codec, true);
 			if (ret < 0)
 				goto out;
 		}
-		ums9117_audio_set_dac_gain(audio->digital, gain, gain);
+		audio->speaker_volume = level;
+		ums9117_pcm_apply_output_gain(audio);
 		if (level) {
 			ret = ums9117_sc2720_codec_set_speaker_mute(
 				audio->codec, false);
 			if (ret < 0) {
-				ums9117_audio_set_dac_gain(audio->digital,
-							   old_gain, old_gain);
+				audio->speaker_volume = old_level;
+				ums9117_pcm_apply_output_gain(audio);
 				goto out;
 			}
 		}
@@ -1429,7 +1497,7 @@ static void ums9117_pcm_write_frames(struct ums9117_pcm *audio,
 				     snd_pcm_uframes_t frames)
 {
 	const __le16 *samples = (const __le16 *)runtime->dma_area;
-	bool speaker = audio->prepared_output == UMS9117_SC2720_OUTPUT_SPEAKER;
+	bool halve = audio->halve_samples;
 	snd_pcm_uframes_t i;
 
 	for (i = 0; i < frames; i++) {
@@ -1437,7 +1505,7 @@ static void ums9117_pcm_write_frames(struct ums9117_pcm *audio,
 			audio->submit_ptr % runtime->buffer_size;
 		snd_pcm_uframes_t sample = frame * UMS9117_PCM_CHANNELS;
 
-		if (speaker) {
+		if (halve) {
 			s16 left = (s16)le16_to_cpu(samples[sample]);
 			s16 right = (s16)le16_to_cpu(samples[sample + 1]);
 
@@ -1861,12 +1929,6 @@ static int ums9117_pcm_open(struct snd_pcm_substream *substream)
 			substream->stream == SNDRV_PCM_STREAM_CAPTURE ?
 				ums9117_capture_hardware :
 				ums9117_pcm_hardware;
-		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK &&
-		    audio->output == UMS9117_SC2720_OUTPUT_SPEAKER) {
-			substream->runtime->hw.rates = SNDRV_PCM_RATE_48000;
-			substream->runtime->hw.rate_min = 48000;
-			substream->runtime->hw.rate_max = 48000;
-		}
 		ret = ums9117_pcm_constrain_sizes(substream->runtime);
 		if (ret >= 0)
 			ums9117_pcm_set_stream_locked(audio, stream, substream);
@@ -2317,8 +2379,8 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 	audio->dev = &pdev->dev;
 	audio->rate = UMS9117_PCM_IDLE_RATE;
 	audio->capture_source = UMS9117_SC2720_CAPTURE_INTERNAL;
-	audio->output = UMS9117_SC2720_OUTPUT_HEADPHONES;
-	audio->prepared_output = UMS9117_SC2720_OUTPUT_HEADPHONES;
+	audio->outputs = UMS9117_SC2720_OUTPUT_HEADPHONES;
+	audio->speaker_volume = 1;
 	audio->idle_silence = true;
 	mutex_init(&audio->lock);
 	spin_lock_init(&audio->fifo_lock);
@@ -2404,6 +2466,10 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 	ret = snd_ctl_add(card, snd_ctl_new1(volume_control, audio));
 	if (ret)
 		return snd_card_free_on_error(&pdev->dev, ret);
+	ret = snd_ctl_add(card, snd_ctl_new1(&ums9117_headphone_switch_control,
+					     audio));
+	if (ret)
+		return snd_card_free_on_error(&pdev->dev, ret);
 	ret = snd_ctl_add(card,
 			  snd_ctl_new1(&ums9117_idle_silence_control, audio));
 	if (ret)
@@ -2414,7 +2480,7 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 		return snd_card_free_on_error(&pdev->dev, ret);
 	if (audio->profile.fitted) {
 		ret = snd_ctl_add(card,
-				  snd_ctl_new1(&ums9117_playback_output_control,
+				  snd_ctl_new1(&ums9117_speaker_switch_control,
 					       audio));
 		if (ret)
 			return snd_card_free_on_error(&pdev->dev, ret);

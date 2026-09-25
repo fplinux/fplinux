@@ -6,13 +6,14 @@ config SND_UMS9117
 	select INPUT_FF_MEMLESS
 	select SND_PCM
 	help
-	  Enable the 24 kHz and 48 kHz stereo S16_LE ALSA headphone PCM device
+	  Enable the 24 kHz and 48 kHz stereo S16_LE ALSA playback PCM device
 	  for supported UMS9117 boards.
-	  Provide stereo mixer controls and idle zero-PCM playback that is on
-	  by default. A fitted audio profile enables the speaker for 48 kHz
-	  playback. Boards with microphone capture pads also
-	  provide 48 kHz mono S16_LE capture, which can run at the same time as
-	  48 kHz playback.
-	  The FM mixer switch routes the internal 32 kHz IIS source to headphones.
+	  Provide stereo mixer controls, output switches and idle zero-PCM
+	  playback that is on by default. A fitted audio profile enables the
+	  speaker, alone or together with the headphones. Boards with
+	  microphone capture pads also provide 48 kHz mono S16_LE capture,
+	  which can run at the same time as 48 kHz playback.
+	  The FM mixer switch routes the internal 32 kHz IIS source to the
+	  enabled outputs.
 	  Boards whose speaker also vibrates the phone get a force-feedback
 	  vibrator that plays the fitted vibrate tone through the speaker.

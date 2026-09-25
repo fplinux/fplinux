@@ -42,12 +42,15 @@ prepared audio profile the device is still present, but it does not vibrate.
 A single continuous pulse stops after about three seconds because of the fitted
 duration limit, before the driver cutoff; a new activation starts it again.
 
-Vibration shares the audio output:
+Vibration shares the audio outputs:
 
-- Speaker playback keeps playing together with the vibration.
-- Headphone and FM audio is muted while the phone vibrates and for about one
-  second after the last pulse, then returns. Playback streams keep running
-  without errors, and the sound of that interval is lost. The mixer controls
-  do not change.
-- With the speaker muted, the speaker plays only the vibration.
+- Speaker playback and FM keep playing together with the vibration while the
+  speaker is enabled at a level above `0`.
+- Headphone audio, including FM, is muted while the phone vibrates and for
+  about one second after the last pulse, then returns. This also applies when
+  both outputs are enabled. Playback streams keep running without errors, and
+  the headphone sound of that interval is lost. The mixer controls do not
+  change.
+- With the speaker disabled or at level `0`, the speaker plays only the
+  vibration.
 - Microphone recording captures the vibration tone.

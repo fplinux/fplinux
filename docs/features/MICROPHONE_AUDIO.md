@@ -21,10 +21,11 @@ Plugging or unplugging the headset does not change this control automatically.
 It cannot be changed while a capture stream is open. Use [file transfer](FILE_TRANSFER.md)
 to copy the recording from the phone; files in `/tmp` disappear on reboot.
 
-Capture can run alongside 48-kHz PCM playback through headphones or the
-[speaker](SPEAKER_AUDIO.md). Headphone playback at 24 kHz remains available only
-without capture. FM radio cannot run alongside either PCM direction. This audio
-duplex does not provide live microphone monitoring or cellular calling.
+Capture can run alongside 48-kHz PCM playback through the enabled
+[playback outputs](HEADPHONE_AUDIO.md#playback-outputs). Playback at 24 kHz
+remains available only without capture. FM radio cannot run alongside either
+PCM direction. This audio duplex does not provide live microphone monitoring or
+cellular calling.
 
 The newly opened headset input can have a settling transient during roughly
 the first second of recorded audio; start recording before the sound you want

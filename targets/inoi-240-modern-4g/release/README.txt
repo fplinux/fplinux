@@ -16,9 +16,10 @@ Current target support:
   - RTC time and alarms, repeated RTC-woken s2idle and peripheral recovery in
     both profiles, including mounted ext4 storage and card-backed swap;
   - stereo S16_LE WAV playback through the 3.5 mm headphones;
-  - selectable 48 kHz PCM playback through the built-in speaker output;
+  - PCM playback through the built-in speaker, alone or with the headphones;
   - mono 48 kHz recording from the built-in or wired-headset microphone;
-  - FM scan and headphone output through the 3.5 mm jack;
+  - FM scan through the 3.5 mm jack and playback through the enabled audio
+    outputs;
   - keypad backlight on and off;
   - manual CPU frequency selection between 768 MHz and 1 GHz;
   - brightness and read-only power telemetry interfaces.
@@ -32,7 +33,7 @@ Internal phone storage writes, modem, Wi-Fi and Linux reboot are not supported.
 Battery-only power-off, physical-key wake, battery measurements and charging
 have not been tested. Physical display, key and LCD brightness effects have not
 been tested on this configuration. This phone has no separate vibration motor;
-FPLinux vibrates it through the speaker and mutes headphone and FM audio
+FPLinux vibrates it through the speaker and mutes headphone audio
 meanwhile, as described in docs/features/VIBRATION.md.
 
 Headphone playback uses the `aplay` and `amixer` tools already included in this
@@ -47,8 +48,8 @@ The default device converts input to the 48 kHz hardware rate. Use
 `amixer -c 0 cget name='Headphone Playback Volume'` to inspect the active volume
 control. See docs/features/HEADPHONE_AUDIO.md for fitted volume levels,
 direct-device limits, EQ bypass, on-device calibration, idle silence and its
-power trade-off. Select the built-in speaker with `PCM Playback Output` and
-start at `Speaker Playback Volume` level 1; see docs/features/SPEAKER_AUDIO.md.
+power trade-off. Enable the built-in speaker with `Speaker Playback Switch`;
+see docs/features/SPEAKER_AUDIO.md.
 Select `Capture Source` before microphone recording; see
 docs/features/MICROPHONE_AUDIO.md. FM needs a wired 3.5 mm cable as its antenna;
 see docs/features/FM_RADIO.md for scan and playback commands.

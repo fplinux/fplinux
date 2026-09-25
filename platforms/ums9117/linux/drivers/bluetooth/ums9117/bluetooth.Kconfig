@@ -22,5 +22,5 @@ config RADIO_UMS9117_CM4
 	help
 	  Expose the CM4 FM receiver through V4L2 on boards supplying fitted
 	  FM configuration in the device tree. The receiver shares the Bluetooth
-	  transport and starts only when userspace sets a frequency. Headphone
-	  audio is routed separately through the ALSA FM Playback Switch.
+	  transport and starts only when userspace sets a frequency. Its audio
+	  is routed separately through the ALSA FM Playback Switch.

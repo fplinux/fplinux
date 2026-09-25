@@ -17,7 +17,7 @@
 UMS9117 provides reusable CPU, interrupt, timer, USB gadget, memory-copy DMA,
 ROTA, JPEG codec/scaler, analog-die, audio, Bluetooth, FM radio, framebuffer
 and matrix-keypad support for the listed phones. Audio covers headphone and
-speaker playback, microphone capture and the FM headphone route. Linux reports
+speaker playback, microphone capture and FM playback. Linux reports
 the MPLL and Cortex-A7 rates and offers manual selection between 768 MHz and
 1 GHz. The platform owns the SoC integration and shared loader support. A
 target owns board memory, panel profile and wiring, keypad map, bootstrap
@@ -40,7 +40,7 @@ inputs, payload assembly and the values supplied to the loader.
 | [Matrix keypad](../../docs/features/LOCAL_CONSOLE.md)          | Supported     | Targets provide matrix wiring and EIC keys; the [phone key codes](../../docs/reference/INPUT.md) are shared.                                                 |
 | [Audio](../../docs/features/HEADPHONE_AUDIO.md)                | Partial       | Stereo headphones, microphones and [speaker audio](../../docs/features/SPEAKER_AUDIO.md) work on all targets. The stock VBC EQ is not applied on any target. |
 | [Bluetooth](../../docs/features/BLUETOOTH.md)                  | Partial       | Shared CM4 HCI driver; each target needs firmware prepared from its own phone.                                                                               |
-| [FM radio](../../docs/features/FM_RADIO.md)                    | Supported     | V4L2 receiver on the CM4 Bluetooth link with a headphone route; it needs the phone's Bluetooth firmware and the target's fitted FM configuration.            |
+| [FM radio](../../docs/features/FM_RADIO.md)                    | Supported     | V4L2 receiver on the CM4 Bluetooth link, heard on the enabled outputs; it needs the phone's Bluetooth firmware and the target's fitted FM configuration.     |
 | UART, GPIO/pin control, SPI/I2C, watchdog/reset                | Not supported | No generic platform framework or driver for these functions.                                                                                                 |
 
 ## Memory-copy DMA

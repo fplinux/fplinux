@@ -17,10 +17,12 @@ Current target support:
   - USB SSH/SFTP and host-keyboard forwarding;
   - stereo S16_LE playback through the 3.5 mm headphones, with fitted gain
     levels and a flat VBC path;
-  - selectable PCM playback through the single front speaker above the display;
+  - PCM playback through the single front speaker above the display, alone or
+    together with the headphones;
   - mono 48 kHz recording from the built-in or original wired-headset microphone,
-    including simultaneous 48 kHz headphone playback;
-  - FM radio tuning, scan and headphone output through the 3.5 mm jack;
+    including simultaneous 48 kHz playback;
+  - FM radio tuning and scan through the 3.5 mm jack, with playback through the
+    enabled audio outputs;
   - microSD FAT32 read/write and unmounted hot-swap;
   - external charger connection status;
   - battery voltage, current and relative charge counter reporting with the
@@ -49,7 +51,7 @@ The default device converts input to the 48 kHz hardware rate. The fitted gain
 levels come from this phone, but its stock VBC EQ is not implemented; Nokia
 output therefore does not have stock tonal parity. See
 docs/features/HEADPHONE_AUDIO.md for direct-device limits and idle silence.
-Set the front-speaker output and its volume explicitly before playback; see
+Enable the front speaker with `Speaker Playback Switch`; see
 docs/features/SPEAKER_AUDIO.md. Set the microphone source explicitly before
 recording; see docs/features/MICROPHONE_AUDIO.md. FM needs a wired 3.5 mm cable
 as its antenna and is exclusive of PCM capture and playback; see

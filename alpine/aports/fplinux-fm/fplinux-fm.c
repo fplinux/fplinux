@@ -114,7 +114,7 @@ static int parse_arguments(int argc, char **argv, struct arguments *arguments)
 		[COMMAND_PLAY] = {
 			.command = "play",
 			.description =
-				"Tune FM and play through the selected audio output.",
+				"Tune FM and play through the enabled audio outputs.",
 			.options = play_options,
 			.option_count = sizeof(play_options) /
 					sizeof(play_options[0]),
