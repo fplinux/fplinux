@@ -27,6 +27,9 @@ INOI_HANDSFREE_VIBRATE_TONE_OFFSET = 3 * 1072 + 188
 INOI_VIBRATE_TONE_SECTION = bytes.fromhex(
     "a1a111fd 2b23cdfd 9cb788fe d7ceee3f 2854f63f 91b3fb3f 8200 8200 0200 0800 0502"
 )
+# The Headfree section shared by all three fitted phones: PA word 0x001a,
+# headphone PGA 7, then the digital gains of volume levels 1..9.
+FITTED_HEADFREE_SECTION = bytes.fromhex("1a00 07 4e 47 3b 35 2f 2a 24 1f 1a")
 
 
 class FakeNandPartitionReader:
@@ -208,8 +211,36 @@ def _headset_audio_records(
     return downloaded, protected
 
 
+def _add_fitted_headfree_mode(records: dict[int, bytes]) -> None:
+    """Store the literal Headfree mode that all three fitted phones keep at index 1."""
+    arm = bytearray(records[426])
+    offset = 1072
+    arm[offset : offset + 16] = b"Headfree".ljust(16, b"\0")
+    struct.pack_into("<H", arm, offset + 20, 0x0032)
+    struct.pack_into("<H", arm, offset + 36, 1)
+    struct.pack_into("<H", arm, offset + 62, 9)
+    # The fitted level-0 word precedes volume levels 1..9 and is not a volume step.
+    struct.pack_into(
+        "<10I",
+        arm,
+        offset + 64,
+        0x0018009F,
+        0x004E0070,
+        0x00470070,
+        0x003B0070,
+        0x00350070,
+        0x002F0070,
+        0x002A0070,
+        0x00240070,
+        0x001F0070,
+        0x001A0070,
+    )
+    struct.pack_into("<H", arm, offset + 466, 0x001A)
+    records[426] = bytes(arm)
+
+
 def _inoi_audio_records() -> tuple[dict[int, bytes], dict[int, bytes]]:
-    """Use the literal Headset, Handsfree and vibrate-tone values of both fitted INOI phones."""
+    """Use the literal playback-mode and vibrate-tone values of both fitted INOI phones."""
     downloaded, protected = _headset_audio_records(
         (
             0x006C0007,
@@ -251,11 +282,12 @@ def _inoi_audio_records() -> tuple[dict[int, bytes], dict[int, bytes]]:
         )
         struct.pack_into("<H", arm, offset + 466, 0x001A)
         records[426] = bytes(arm)
+        _add_fitted_headfree_mode(records)
     return downloaded, protected
 
 
 def _nokia_audio_records() -> tuple[dict[int, bytes], dict[int, bytes]]:
-    """Use the fitted Nokia Headset and speaker-only Handsfree app-0 values."""
+    """Use the fitted Nokia Headset, Headfree and speaker-only Handsfree app-0 values."""
     downloaded, protected = _headset_audio_records(
         (
             0x00470006,
@@ -283,9 +315,6 @@ def _nokia_audio_records() -> tuple[dict[int, bytes], dict[int, bytes]]:
     )
     for records in (downloaded, protected):
         arm = bytearray(records[426])
-        arm[1072 : 1072 + 16] = b"Headfree".ljust(16, b"\0")
-        struct.pack_into("<H", arm, 1072 + 20, 0x0032)
-        struct.pack_into("<H", arm, 1072 + 466, 0x001A)
         arm[3 * 1072 : 3 * 1072 + 16] = b"Handsfree".ljust(16, b"\0")
         struct.pack_into("<H", arm, 3 * 1072 + 20, 0x0022)
         struct.pack_into("<H", arm, 3 * 1072 + 36, 1)
@@ -293,6 +322,7 @@ def _nokia_audio_records() -> tuple[dict[int, bytes], dict[int, bytes]]:
         struct.pack_into("<9I", arm, 3 * 1072 + 68, *handsfree_levels)
         struct.pack_into("<H", arm, 3 * 1072 + 466, 0x001A)
         records[426] = bytes(arm)
+        _add_fitted_headfree_mode(records)
     return downloaded, protected
 
 
@@ -736,6 +766,7 @@ class HeadsetGainProfileTests(unittest.TestCase):
                     b"inoi,240-modern-4g\0\0\0\0\0\0"
                     b"\x07\x00\x6c\x61\x56\x4b\x41\x37\x2d\x23\x1b"
                     b"\x1a\x00\x39\x35\x31\x2d\x29\x21\x1d\x19\x17"
+                    b"\x1a\x00\x07\x4e\x47\x3b\x35\x2f\x2a\x24\x1f\x1a"
                 )
                 + INOI_VIBRATE_TONE_SECTION,
             ),
@@ -749,6 +780,7 @@ class HeadsetGainProfileTests(unittest.TestCase):
                     b"inoi,244-modern-4g\0\0\0\0\0\0"
                     b"\x07\x00\x6c\x61\x56\x4b\x41\x37\x2d\x23\x1b"
                     b"\x1a\x00\x39\x35\x31\x2d\x29\x21\x1d\x19\x17"
+                    b"\x1a\x00\x07\x4e\x47\x3b\x35\x2f\x2a\x24\x1f\x1a"
                 )
                 + INOI_VIBRATE_TONE_SECTION,
             ),
@@ -762,6 +794,7 @@ class HeadsetGainProfileTests(unittest.TestCase):
                     b"nokia,ta-1618\0\0\0\0\0\0\0\0\0\0\0"
                     b"\x06\x01\x47\x42\x3d\x37\x32\x2c\x26\x20\x1a"
                     b"\x1a\x00\x38\x34\x30\x2c\x28\x24\x20\x1c\x1b"
+                    b"\x1a\x00\x07\x4e\x47\x3b\x35\x2f\x2a\x24\x1f\x1a"
                 ),
             ),
         )
@@ -782,8 +815,10 @@ class HeadsetGainProfileTests(unittest.TestCase):
                 self.assertEqual(result.originals[f"{prefix}-nv426.bin"], downloaded[426])
                 self.assertEqual(result.originals[f"{prefix}-nv440.bin"], downloaded[440])
 
-    def test_speaker_profile_selects_handsfree_by_name_after_reordering(self) -> None:
-        """The combined speaker/headphone mode must not supply speaker-only PA policy."""
+    def test_speaker_profiles_select_handsfree_and_headfree_by_name_after_reordering(
+        self,
+    ) -> None:
+        """Each speaker section comes from its named mode, not from a fixed mode index."""
         downloaded, protected = _nokia_audio_records()
         for records in (downloaded, protected):
             arm = bytearray(records[426])
@@ -802,8 +837,9 @@ class HeadsetGainProfileTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            result.prepared["ta1618-audio-profile.bin"][-11:],
-            b"\x1a\x00\x38\x34\x30\x2c\x28\x24\x20\x1c\x1b",
+            result.prepared["ta1618-audio-profile.bin"][43:],
+            b"\x1a\x00\x38\x34\x30\x2c\x28\x24\x20\x1c\x1b"
+            b"\x06\x00\x07\x4e\x47\x3b\x35\x2f\x2a\x24\x1f\x1a",
         )
 
     def test_speaker_profile_rejects_wrong_route_or_gain_or_disagreeing_copies(self) -> None:
@@ -822,6 +858,42 @@ class HeadsetGainProfileTests(unittest.TestCase):
             for records in copies:
                 arm = bytearray(records[426])
                 arm[offset : offset + len(replacement)] = replacement
+                records[426] = bytes(arm)
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, error):
+                audio_profile.prepare_headset_gain_profile(
+                    downloaded,
+                    protected,
+                    prefix="ta1618",
+                    machine_compatible=b"nokia,ta-1618",
+                )
+
+    def test_combined_profile_rejects_wrong_route_or_gain_or_disagreeing_copies(self) -> None:
+        """Only one matching headphone-and-speaker Headfree calibration can drive both outputs."""
+
+        def every_level(analog: bytes) -> dict[int, bytes]:
+            """Replace the analog half of all nine Headfree volume-level words."""
+            return {1072 + 68 + 4 * level: analog for level in range(9)}
+
+        cases: tuple[tuple[str, dict[int, bytes], bool, str], ...] = (
+            ("different copy", {1072 + 466: b"\x1b\x00"}, False, "Headfree NV426 differs"),
+            ("absent mode", {1072: b"Headphone"}, True, "exactly one Headfree mode"),
+            ("duplicate mode", {4 * 1072: b"Headfree"}, True, "exactly one Headfree mode"),
+            ("speaker-only route", {1072 + 20: b"\x22\x00"}, True, "Headfree does not select"),
+            ("wrong level count", {1072 + 62: b"\x08\x00"}, True, "Headfree app 0 has 8"),
+            ("increasing digital gain", {1072 + 74: b"\x4f\x00"}, True, "Headfree digital"),
+            ("one analog level differs", {1072 + 100: b"\x60\x00"}, True, "analog levels 1..9"),
+            ("nonzero PA gain", every_level(b"\x71\x00"), True, "Headfree PA gain"),
+            ("headphone PGA 1", every_level(b"\x10\x00"), True, "Headfree headphone PGA"),
+            ("headphone PGA 8", every_level(b"\x80\x00"), True, "Headfree headphone PGA"),
+            ("bits above PGA", every_level(b"\x70\x01"), True, "Headfree analog level sets"),
+        )
+        for name, replacements, change_both, error in cases:
+            downloaded, protected = _nokia_audio_records()
+            copies = (downloaded, protected) if change_both else (protected,)
+            for records in copies:
+                arm = bytearray(records[426])
+                for offset, replacement in replacements.items():
+                    arm[offset : offset + len(replacement)] = replacement
                 records[426] = bytes(arm)
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, error):
                 audio_profile.prepare_headset_gain_profile(
@@ -1108,7 +1180,7 @@ class PartitionPreparationTests(unittest.TestCase):
             )
 
     def test_speaker_vibration_target_receives_the_vibrate_tone_section(self) -> None:
-        """Only a target that vibrates through its speaker gets the appended tone."""
+        """Only a target that vibrates through its speaker gets the tone after Headfree."""
         for speaker_vibration, expected_tail in ((False, b""), (True, INOI_VIBRATE_TONE_SECTION)):
             nand, partitions, revision = self._inputs()
 
@@ -1123,7 +1195,7 @@ class PartitionPreparationTests(unittest.TestCase):
 
             profile = result.groups["audio-profile"].prepared["phone-audio-profile.bin"]
             with self.subTest(speaker_vibration=speaker_vibration):
-                self.assertEqual(profile[54:], expected_tail)
+                self.assertEqual(profile[54:], FITTED_HEADFREE_SECTION + expected_tail)
 
     def test_complete_set_keeps_original_image_and_individual_nv_bytes(self) -> None:
         """Only the prepared CM4 changes; every original remains byte-exact."""

@@ -56,10 +56,11 @@ properties:
   firmware-name:
     $ref: /schemas/types.yaml#/definitions/string
     description: |
-      Optional fitted audio profile with headphone and speaker gains, and the
-      vibrate tone on boards with fplinux,speaker-vibration. The profile's
-      machine identity must match the first compatible string of the root
-      Devicetree node. Without it the speaker output is not exposed.
+      Optional fitted audio profile with the headphone, speaker and combined
+      headphone-and-speaker gains, and the vibrate tone on boards with
+      fplinux,speaker-vibration. The profile's machine identity must match
+      the first compatible string of the root Devicetree node. Without it
+      the speaker output is not exposed.
 
   fplinux,card-longname:
     $ref: /schemas/types.yaml#/definitions/string
