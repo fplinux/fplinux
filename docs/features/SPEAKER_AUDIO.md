@@ -16,7 +16,9 @@ aplay /tmp/audio.wav
 
 Level `0` disconnects the speaker and is the default. Levels `1` through `9`
 use the selected phone's fitted gains. On Nokia TA-1618, only level `1` has been
-checked acoustically; higher levels may be louder. The direct `hw:0,0` playback
+checked acoustically; higher levels may be louder.
+[Idle silence](HEADPHONE_AUDIO.md#idle-silence) keeps the selected speaker open
+between streams, so stream starts and stops do not click. The direct `hw:0,0` playback
 device accepts stereo S16_LE at 48 kHz on this route. The default ALSA device
 converts other input formats.
 

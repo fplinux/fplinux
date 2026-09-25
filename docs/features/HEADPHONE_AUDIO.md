@@ -60,19 +60,20 @@ hardware calibration.
 
 ## Idle silence
 
-`Headphone Idle Silence Switch` controls whether the driver keeps the headphone
-path active with zero PCM while no playback stream is running. It is `on` by
-default on the supported targets. Disable it when lower idle power is more
-important than silent playback transitions:
+`Idle Silence Playback Switch` controls whether the driver keeps the selected
+playback output, wired headphones or the [speaker](SPEAKER_AUDIO.md), active
+with zero PCM while no playback stream is running. It is `on` by default on the
+supported targets. Disable it when lower idle power is more important than
+silent playback transitions:
 
 ```sh
-amixer -c 0 cset name='Headphone Idle Silence Switch' off
-amixer -c 0 cset name='Headphone Idle Silence Switch' on
-amixer -c 0 cget name='Headphone Idle Silence Switch'
+amixer -c 0 cset name='Idle Silence Playback Switch' off
+amixer -c 0 cset name='Idle Silence Playback Switch' on
+amixer -c 0 cget name='Idle Silence Playback Switch'
 ```
 
-The enabled idle path has this measured USB-input power cost compared with
-`off`:
+The enabled idle path on headphones has this measured USB-input power cost
+compared with `off`:
 
 - INOI 240 Modern 4G: about `0.024–0.026 W`, or `8–9%`;
 - INOI 244 Modern 4G: `0.34907 W` instead of `0.32519 W`, a difference of
@@ -80,11 +81,20 @@ The enabled idle path has this measured USB-input power cost compared with
 - Nokia 3210 4G (TA-1618): `0.32569 W` instead of `0.30202 W`, a difference of
   `0.02367 W`, or `7.84%`.
 
+On the speaker at level `1`, the enabled idle path has this cost:
+
+- INOI 240 Modern 4G: `0.73244 W` instead of `0.68682 W`, a difference of
+  `0.04562 W`, or `6.64%`;
+- INOI 244 Modern 4G: `0.75741 W` instead of `0.71380 W`, a difference of
+  `0.04361 W`, or `6.11%`;
+- Nokia 3210 4G (TA-1618): `0.51243 W` instead of `0.47482 W`, a difference of
+  `0.03761 W`, or `7.92%`.
+
 The switch does not alter PCM that is already playing. The enabled path keeps
 the output quiet between streams and avoids reopening it for normal playback.
 Disabling the switch allows the hardware path to stop after playback; starting
 it again or changing the direct hardware rate can produce one audible
-transition.
+transition. On the speaker, each stream start and stop then clicks.
 
 ## Limits
 
