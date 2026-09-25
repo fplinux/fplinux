@@ -114,21 +114,16 @@ static void prepare_usb_handoff(void)
 						    "USB DMA21 QUIESCE FAIL");
 }
 
-void ums9117_boot_main(const struct ums9117_boot_board *board)
+/*
+ * Paint on the display that the vendor runtime initialized. Until this runs,
+ * every boot-screen update is a no-op, so a board without a display reports
+ * its stages only through the host records.
+ */
+static void start_boot_screen(uint32_t ram_bytes, size_t zimage_bytes,
+			      size_t dtb_bytes)
 {
-	enum ums9117_bootstrap_session_status session_status;
-	uint32_t ram_bytes = ums9117_bootstrap_ram_bytes();
-	size_t zimage_bytes = ums9117_bootstrap_zimage_size();
-	size_t dtb_bytes = ums9117_bootstrap_dtb_size();
 	struct fplinux_boot_screen_canvas canvas;
-	uint8_t session_id[FPLINUX_HANDOFF_SESSION_ID_BYTES];
 	char note[48];
-
-	fprintf(stderr,
-		"%s_LINUX_BOOTSTRAP event=stage stage=0 "
-		"ram=0x%08lx zimage=%lu dtb=%lu message=ENTRY\n",
-		FPLINUX_BOOTSTRAP_RECORD_PREFIX, (unsigned long)ram_bytes,
-		(unsigned long)zimage_bytes, (unsigned long)dtb_bytes);
 
 	/* Fresh RAM is noise; clear the whole region the LCDC may scan. */
 	memset(framebuffer, 0, FPLINUX_BOOT_LAYOUT_FRAMEBUFFER_BYTES);
@@ -160,11 +155,35 @@ void ums9117_boot_main(const struct ums9117_boot_board *board)
 		(unsigned long)(dtb_bytes >> 10));
 	(void)fplinux_boot_screen_set_note(&boot_screen, note);
 	set_stage(UMS9117_BOOT_STAGE_DISPLAY, FPLINUX_BOOT_SCREEN_ACTIVE);
-	if (boot_canvas.width != board->display_width ||
-	    boot_canvas.height != board->display_height)
+}
+
+void ums9117_boot_main(const struct ums9117_boot_board *board)
+{
+	enum ums9117_bootstrap_session_status session_status;
+	uint32_t ram_bytes = ums9117_bootstrap_ram_bytes();
+	size_t zimage_bytes = ums9117_bootstrap_zimage_size();
+	size_t dtb_bytes = ums9117_bootstrap_dtb_size();
+	uint8_t session_id[FPLINUX_HANDOFF_SESSION_ID_BYTES];
+	int has_display = board->display_width != 0;
+
+	fprintf(stderr,
+		"%s_LINUX_BOOTSTRAP event=stage stage=0 "
+		"ram=0x%08lx zimage=%lu dtb=%lu message=ENTRY\n",
+		FPLINUX_BOOTSTRAP_RECORD_PREFIX, (unsigned long)ram_bytes,
+		(unsigned long)zimage_bytes, (unsigned long)dtb_bytes);
+
+	if (has_display) {
+		start_boot_screen(ram_bytes, zimage_bytes, dtb_bytes);
+	} else {
+		/* Loads the board pin map over the host libc channel. */
+		scan_firmware(0);
+	}
+	/* The loader must have initialized exactly the board display, or none. */
+	if (sys_data.display.w1 != board->display_width ||
+	    sys_data.display.h1 != board->display_height)
 		ums9117_boot_fail(1, "BAD DISPLAY SIZE");
 	set_stage(UMS9117_BOOT_STAGE_DISPLAY, FPLINUX_BOOT_SCREEN_DONE);
-	record_stage(1, "DISPLAY OK");
+	record_stage(1, has_display ? "DISPLAY OK" : "NO DISPLAY");
 
 	set_stage(UMS9117_BOOT_STAGE_TIMER, FPLINUX_BOOT_SCREEN_ACTIVE);
 	if (!enable_and_probe_sprd_timer())

@@ -490,7 +490,10 @@ output_destination = "out"
 pack_reloc = "pack_reloc"
 safety_target = "fplinux-safety-check"
 build_targets = ["clean", "all", "map"]
-patches = ["platforms/ums9117/bootstrap/0001-preserve-ram-probe-contents.patch"]
+patches = [
+  "platforms/ums9117/bootstrap/0001-preserve-ram-probe-contents.patch",
+  "platforms/ums9117/bootstrap/0002-headless.patch",
+]
 files = [
   "build_t117.make",
   "fpdoom/cmd_def.h",

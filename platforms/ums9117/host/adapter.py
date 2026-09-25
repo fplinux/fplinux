@@ -10,12 +10,20 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 BACKLIGHT_CHANNELS = "rgbw"
 SESSION_ID = re.compile(r"[0-9a-f]{64}\Z")
+DISPLAY_KEYS = frozenset({"spi_mode", "lcd_id", "backlight_channels", "backlight_level"})
+# A pin map holding only its all-ones terminator; fpdoom applies no board pin entry.
+NEUTRAL_PINMAP = b"\xff" * 8
 
 
 def fail(message: str) -> NoReturn:
@@ -86,21 +94,29 @@ def runtime_target_display_name(runtime: dict[str, Any]) -> str:
 
 
 def adapter_config(value: object) -> dict[str, Any]:
+    """Validate adapter data; without the display settings the loader runs headless."""
     keys = {
         "brightness",
         "rotation",
-        "spi_mode",
-        "lcd_id",
         "exec_distance",
-        "backlight_channels",
-        "backlight_level",
         "session_name",
         "handoff_wait_seconds",
         "usb_release_wait_seconds",
         "boot_instructions",
     }
-    if not isinstance(value, dict) or set(value) != keys:
-        fail(f"adapter data must contain exactly: {', '.join(sorted(keys))}")
+    if not isinstance(value, dict) or set(value) not in (keys, keys | DISPLAY_KEYS):
+        fail(
+            f"adapter data must contain exactly: {', '.join(sorted(keys))}; "
+            f"plus either all or none of: {', '.join(sorted(DISPLAY_KEYS))}"
+        )
+    display: dict[str, Any] = {}
+    if DISPLAY_KEYS.issubset(value):
+        display = {
+            "spi_mode": integer(value, "spi_mode", bounds=(0, 3)),
+            "lcd_id": integer(value, "lcd_id", bounds=(0, 0xFFFFFFFF)),
+            "backlight_channels": backlight_channels(value, "backlight_channels"),
+            "backlight_level": integer(value, "backlight_level", bounds=(0, 0x3F)),
+        }
     return {
         "brightness": integer(value, "brightness", bounds=(0, 100)),
         "rotation": integer(
@@ -109,11 +125,8 @@ def adapter_config(value: object) -> dict[str, Any]:
             bounds=(0, 270),
             allowed={0, 90, 180, 270},
         ),
-        "spi_mode": integer(value, "spi_mode", bounds=(0, 3)),
-        "lcd_id": integer(value, "lcd_id", bounds=(0, 0xFFFFFFFF)),
+        **display,
         "exec_distance": integer(value, "exec_distance", bounds=(0, 0xFFFF)),
-        "backlight_channels": backlight_channels(value, "backlight_channels"),
-        "backlight_level": integer(value, "backlight_level", bounds=(0, 0x3F)),
         "session_name": text(value, "session_name"),
         "handoff_wait_seconds": integer(
             value,
@@ -156,6 +169,41 @@ def loader_arguments(
 def backlight_argument(config: dict[str, Any]) -> str:
     """Return the validated libc_server backlight setting."""
     return f"{config['backlight_channels']}=0x{config['backlight_level']:x}"
+
+
+def is_headless(config: dict[str, Any]) -> bool:
+    """Report whether the validated adapter data omits the loader display settings."""
+    return "lcd_id" not in config
+
+
+def fpdoom_options(config: dict[str, Any]) -> list[str]:
+    """Return the fpdoom runtime options that select the display or headless mode."""
+    if is_headless(config):
+        return ["--headless"]
+    return [
+        "--bright",
+        str(config["brightness"]),
+        "--rotate",
+        str(config["rotation"]),
+        "--spi_mode",
+        str(config["spi_mode"]),
+        "--lcd",
+        f"0x{config['lcd_id']:x}",
+        "--bl_extra",
+        backlight_argument(config),
+    ]
+
+
+@contextmanager
+def map_directory(bundle: Path, assets: dict[str, str]) -> Iterator[Path]:
+    """Yield the bridge directory serving pinmap.bin and the optional keymap.bin."""
+    if "pinmap" in assets:
+        yield bundle / Path(assets["pinmap"]).parent
+        return
+    with tempfile.TemporaryDirectory(prefix="fplinux-pinmap-") as temporary:
+        directory = Path(temporary)
+        (directory / "pinmap.bin").write_bytes(NEUTRAL_PINMAP)
+        yield directory
 
 
 def usb_device_path(vendor: int, product: int) -> Path | None:
@@ -252,16 +300,17 @@ def run(
     display_name = runtime_target_display_name(runtime)
     session_token = prepared_session_token(session)
     assets = runtime["assets"]
-    if set(assets) != {"fdl1", "pinmap", "keymap"}:
+    if set(assets) not in ({"fdl1"}, {"fdl1", "pinmap", "keymap"}):
         fail("runtime assets do not match the UMS9117 platform contract")
-    pinmap = Path(assets["pinmap"])
-    keymap = Path(assets["keymap"])
-    if (
-        pinmap.name != "pinmap.bin"
-        or keymap.name != "keymap.bin"
-        or pinmap.parent != keymap.parent
-    ):
-        fail("platform map assets must share a directory and fixed protocol names")
+    if "pinmap" in assets:
+        pinmap = Path(assets["pinmap"])
+        keymap = Path(assets["keymap"])
+        if (
+            pinmap.name != "pinmap.bin"
+            or keymap.name != "keymap.bin"
+            or pinmap.parent != keymap.parent
+        ):
+            fail("platform map assets must share a directory and fixed protocol names")
     tools = runtime["host_tools"]
     if set(tools) != {"loader", "bridge", "keyboard"}:
         fail("runtime host tools do not match the UMS9117 platform contract")
@@ -292,6 +341,11 @@ def run(
         operations.insert(0, "exec-distance setup")
     print(f"Operations: {', '.join(operations)}.")
     print("There are no flash, erase, partition, or NV commands.")
+    if is_headless(config):
+        print(
+            "Headless target: the phone shows no boot screen or backlight; "
+            "progress is reported here."
+        )
     print()
     print(config["boot_instructions"])
     print(
@@ -364,33 +418,22 @@ def run(
             "--fplinux-handoff",
             session_token,
             "--",
-            "--bright",
-            str(config["brightness"]),
-            "--rotate",
-            str(config["rotation"]),
-            "--spi_mode",
-            str(config["spi_mode"]),
-            "--lcd",
-            f"0x{config['lcd_id']:x}",
-            "--bl_extra",
-            backlight_argument(config),
+            *fpdoom_options(config),
             config["session_name"],
         ]
     )
-    bridge_process: subprocess.Popen[Any] | None = None
-    try:
-        bridge_process = subprocess.Popen(
-            bridge_argv,
-            cwd=bundle / Path(assets["pinmap"]).parent,
-        )
+    with map_directory(bundle, assets) as maps:
+        bridge_process: subprocess.Popen[Any] | None = None
         try:
-            status = bridge_process.wait(timeout=config["handoff_wait_seconds"])
-        except subprocess.TimeoutExpired:
-            fail("bridge did not acknowledge the Linux transition before the deadline")
-        if status:
-            fail(f"bridge did not acknowledge the Linux transition (status {status})")
-    finally:
-        stop(bridge_process)
+            bridge_process = subprocess.Popen(bridge_argv, cwd=maps)
+            try:
+                status = bridge_process.wait(timeout=config["handoff_wait_seconds"])
+            except subprocess.TimeoutExpired:
+                fail("bridge did not acknowledge the Linux transition before the deadline")
+            if status:
+                fail(f"bridge did not acknowledge the Linux transition (status {status})")
+        finally:
+            stop(bridge_process)
 
     wait_for_bootrom_disconnect(
         successful_bootrom_device,

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from unittest import mock
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from types import ModuleType
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -129,6 +130,14 @@ def adapter_data(**overrides: object) -> dict[str, object]:
         "boot_instructions": "Hold the boot key and connect USB.",
     }
     data.update(overrides)
+    return data
+
+
+def headless_adapter_data() -> dict[str, object]:
+    """Return one valid adapter table without the loader display settings."""
+    data = adapter_data()
+    for key in ("spi_mode", "lcd_id", "backlight_channels", "backlight_level"):
+        del data[key]
     return data
 
 
@@ -248,6 +257,24 @@ class BacklightConfigurationTests(unittest.TestCase):
         """Keep the level within the six-bit libc_server field."""
         with self.assertRaisesRegex(SystemExit, "backlight_level"):
             ADAPTER.adapter_config(adapter_data(backlight_level=0x40))
+
+
+class DisplaySettingsTests(unittest.TestCase):
+    """Accept the loader display settings as one complete set or not at all."""
+
+    def test_incomplete_display_settings_are_rejected(self) -> None:
+        """A partial LCD description is neither a display nor a headless loader."""
+        for missing in ("spi_mode", "lcd_id", "backlight_channels", "backlight_level"):
+            data = adapter_data()
+            del data[missing]
+            with (
+                self.subTest(missing=missing),
+                self.assertRaisesRegex(SystemExit, "adapter data must contain exactly"),
+            ):
+                ADAPTER.adapter_config(data)
+
+        with self.assertRaisesRegex(SystemExit, "adapter data must contain exactly"):
+            ADAPTER.adapter_config({**headless_adapter_data(), "lcd_id": 0x8888B6})
 
 
 class HandoffTransportTests(unittest.TestCase):
@@ -418,11 +445,14 @@ class BridgeAcknowledgementTests(unittest.TestCase):
         """Return the prepared session selected by the current runner invocation."""
         return {"session_id": self.session_id, "image": str(ROOT / "ramboot.bin")}
 
-    def run_bridge(
+    def run_bridge(  # noqa: PLR0913 -- each keyword replaces one external boundary.
         self,
         bridge: BridgeProcess,
         *,
         transport: str = "none",
+        runtime: dict[str, Any] | None = None,
+        start_bridge: Callable[..., BridgeProcess] | None = None,
+        output: io.StringIO | None = None,
         bootrom_states: list[bool] | None = None,
         monotonic_values: list[int] | None = None,
     ) -> tuple[mock.Mock, mock.Mock, Path, mock.Mock]:
@@ -432,7 +462,11 @@ class BridgeAcknowledgementTests(unittest.TestCase):
             bootrom = mock.Mock(spec=Path)
             bootrom.exists.side_effect = bootrom_states or [False]
             transport_module = mock.Mock()
-            popen = mock.Mock(return_value=bridge)
+            popen = (
+                mock.Mock(return_value=bridge)
+                if start_bridge is None
+                else mock.Mock(side_effect=start_bridge)
+            )
             patches = [
                 mock.patch.object(ADAPTER, "usb_device_path", return_value=bootrom),
                 mock.patch.object(ADAPTER, "require_usb_device_access"),
@@ -455,12 +489,12 @@ class BridgeAcknowledgementTests(unittest.TestCase):
                     mock.patch.object(ADAPTER.time, "monotonic", side_effect=monotonic_values)
                 )
             with contextlib.ExitStack() as stack:
-                stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+                stack.enter_context(contextlib.redirect_stdout(output or io.StringIO()))
                 for patch in patches:
                     stack.enter_context(patch)
                 ADAPTER.run(
                     bundle,
-                    self.runtime(transport),
+                    runtime or self.runtime(transport),
                     self.session(),
                 )
         return popen, transport_module, bundle, bootrom
@@ -747,6 +781,64 @@ class BridgeAcknowledgementTests(unittest.TestCase):
         self.assertEqual(bridge.wait_timeouts, [60])
         self.assertEqual(bootrom.exists.call_count, 2)
         transport_module.remove_personalized_image.assert_called_once()
+
+    def test_headless_target_serves_only_a_neutral_pinmap(self) -> None:
+        """Without maps or display settings, fpdoom starts headless on an empty pin map."""
+        runtime = self.runtime()
+        runtime["assets"] = {"fdl1": "assets/fdl1.bin"}
+        runtime["adapter"] = headless_adapter_data()
+        bridge = BridgeProcess(0)
+        output = io.StringIO()
+        served: dict[str, bytes] = {}
+        directories: list[Path] = []
+
+        def start_bridge(_argv: list[str], *, cwd: Path) -> BridgeProcess:
+            directories.append(cwd)
+            served.update({path.name: path.read_bytes() for path in cwd.iterdir()})
+            return bridge
+
+        popen, _transport, bundle, _bootrom = self.run_bridge(
+            bridge,
+            runtime=runtime,
+            start_bridge=start_bridge,
+            output=output,
+            bootrom_states=[True, False],
+        )
+
+        self.assertEqual(
+            popen.call_args.args[0],
+            [
+                "/usr/bin/stdbuf",
+                "-oL",
+                "-eL",
+                str(bundle / "host/libc_server"),
+                "--fplinux-handoff",
+                self.session_id,
+                "--",
+                "--headless",
+                "test-linux",
+            ],
+        )
+        self.assertEqual(served, {"pinmap.bin": b"\xff\xff\xff\xff\xff\xff\xff\xff"})
+        self.assertEqual(len(directories), 1)
+        self.assertFalse(directories[0].exists())
+        self.assertIn("Headless target: the phone shows no boot screen", output.getvalue())
+
+    def test_incomplete_map_assets_are_rejected(self) -> None:
+        """Pin map and keymap are declared together, and FDL1 is always required."""
+        incomplete = (
+            {"fdl1": "assets/fdl1.bin", "pinmap": "assets/pinmap.bin"},
+            {"fdl1": "assets/fdl1.bin", "keymap": "assets/keymap.bin"},
+            {"pinmap": "assets/pinmap.bin", "keymap": "assets/keymap.bin"},
+        )
+        for assets in incomplete:
+            runtime = self.runtime()
+            runtime["assets"] = assets
+            with (
+                self.subTest(assets=sorted(assets)),
+                self.assertRaisesRegex(SystemExit, "platform contract"),
+            ):
+                ADAPTER.run(Path("bundle"), runtime, self.session())
 
     def test_marker_like_text_cannot_replace_a_nonzero_bridge_ack(self) -> None:
         """A bridge diagnostic cannot authorize Linux when the bridge exits unsuccessfully."""
