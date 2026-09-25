@@ -21,6 +21,12 @@ ROOT = Path(__file__).resolve().parents[2]
 FIXED_RECORD_SIZES = {401: 8, 402: 176, 404: 252}
 VBM_COPY_OFFSETS = (0x20000, 0x40000)
 NOKIA_PARTI_OFFSET = 0x63DE0
+INOI_HANDSFREE_VIBRATE_TONE_OFFSET = 3 * 1072 + 188
+# The fitted INOI 175 Hz tone: -sin words for 24, 32 and 48 kHz, cos words for
+# the same rates, then gain 0, gain 1, gain down, gain up and hold.
+INOI_VIBRATE_TONE_SECTION = bytes.fromhex(
+    "a1a111fd 2b23cdfd 9cb788fe d7ceee3f 2854f63f 91b3fb3f 8200 8200 0200 0800 0502"
+)
 
 
 class FakeNandPartitionReader:
@@ -203,7 +209,7 @@ def _headset_audio_records(
 
 
 def _inoi_audio_records() -> tuple[dict[int, bytes], dict[int, bytes]]:
-    """Use the literal Headset and Handsfree values observed in both fitted INOI phones."""
+    """Use the literal Headset, Handsfree and vibrate-tone values of both fitted INOI phones."""
     downloaded, protected = _headset_audio_records(
         (
             0x006C0007,
@@ -237,6 +243,12 @@ def _inoi_audio_records() -> tuple[dict[int, bytes], dict[int, bytes]]:
         struct.pack_into("<H", arm, offset + 36, 1)
         struct.pack_into("<H", arm, offset + 62, 9)
         struct.pack_into("<9I", arm, offset + 68, *handsfree_levels)
+        struct.pack_into(
+            "<9H",
+            arm,
+            INOI_HANDSFREE_VIBRATE_TONE_OFFSET,
+            *(0xFDCD, 0x232B, 0x3FF6, 0x5428, 0x0082, 0x0082, 0x0002, 0x0008, 0x0205),
+        )
         struct.pack_into("<H", arm, offset + 466, 0x001A)
         records[426] = bytes(arm)
     return downloaded, protected
@@ -718,28 +730,33 @@ class HeadsetGainProfileTests(unittest.TestCase):
                 "inoi240",
                 b"inoi,240-modern-4g",
                 _inoi_audio_records,
+                True,
                 (
                     b"FPAUDIO\0"
                     b"inoi,240-modern-4g\0\0\0\0\0\0"
                     b"\x07\x00\x6c\x61\x56\x4b\x41\x37\x2d\x23\x1b"
                     b"\x1a\x00\x39\x35\x31\x2d\x29\x21\x1d\x19\x17"
-                ),
+                )
+                + INOI_VIBRATE_TONE_SECTION,
             ),
             (
                 "inoi244",
                 b"inoi,244-modern-4g",
                 _inoi_audio_records,
+                True,
                 (
                     b"FPAUDIO\0"
                     b"inoi,244-modern-4g\0\0\0\0\0\0"
                     b"\x07\x00\x6c\x61\x56\x4b\x41\x37\x2d\x23\x1b"
                     b"\x1a\x00\x39\x35\x31\x2d\x29\x21\x1d\x19\x17"
-                ),
+                )
+                + INOI_VIBRATE_TONE_SECTION,
             ),
             (
                 "ta1618",
                 b"nokia,ta-1618",
                 _nokia_audio_records,
+                False,
                 (
                     b"FPAUDIO\0"
                     b"nokia,ta-1618\0\0\0\0\0\0\0\0\0\0\0"
@@ -748,7 +765,7 @@ class HeadsetGainProfileTests(unittest.TestCase):
                 ),
             ),
         )
-        for prefix, compatible, records, expected in cases:
+        for prefix, compatible, records, speaker_vibration, expected in cases:
             with self.subTest(prefix=prefix):
                 downloaded, protected = records()
 
@@ -757,6 +774,7 @@ class HeadsetGainProfileTests(unittest.TestCase):
                     protected,
                     prefix=prefix,
                     machine_compatible=compatible,
+                    speaker_vibration=speaker_vibration,
                 )
 
                 self.assertEqual(result.prepared, {f"{prefix}-audio-profile.bin": expected})
@@ -884,6 +902,92 @@ class HeadsetGainProfileTests(unittest.TestCase):
                 )
 
 
+class SpeakerVibrateToneTests(unittest.TestCase):
+    """Protect the vibrate-tone words derived from fitted Handsfree NV data."""
+
+    def test_tone_words_reproduce_stock_firmware_coefficient_tables(self) -> None:
+        """Stock AP tables and fitted NV pairs are the words for their tone and rate."""
+        cases = (
+            ("AP table 32 kHz", 157, 32000, 0xFE07032E, 0x3FF8373E),
+            ("AP table 44.1 kHz", 175, 44100, 0xFE67891A, 0x3FFAE856),
+            ("AP table 48 kHz", 180, 48000, 0xFE7DFF2F, 0x3FFB73CA),
+            ("NV Handsfree", 175, 32000, 0xFDCD232B, 0x3FF65428),
+            ("NV Headfree", 150, 32000, 0xFE1D8569, 0x3FF8E4F7),
+        )
+        for name, frequency, sample_rate, sine, cosine in cases:
+            with self.subTest(name=name):
+                self.assertEqual(
+                    audio_profile.vibrate_tone_words(frequency, sample_rate), (sine, cosine)
+                )
+
+    def test_profile_rejects_silent_out_of_band_or_inexact_tone(self) -> None:
+        """Only an audible, exactly reproducible fitted tone can drive the speaker."""
+        cases = (
+            (
+                "zero gain 0",
+                (0xFDCD, 0x232B, 0x3FF6, 0x5428, 0, 0x82, 2, 8, 0x205),
+                "gain is zero",
+            ),
+            (
+                "zero gain 1",
+                (0xFDCD, 0x232B, 0x3FF6, 0x5428, 0x82, 0, 2, 8, 0x205),
+                "gain is zero",
+            ),
+            ("zero hold", (0xFDCD, 0x232B, 0x3FF6, 0x5428, 0x82, 0x82, 2, 8, 0), "hold is zero"),
+            ("unprogrammed pair", (0, 0, 0, 0, 0x82, 0x82, 2, 8, 0x205), "not a unit rotation"),
+            (
+                "half-scale pair",
+                (0xFEE6, 0x9195, 0x1FFB, 0x2A14, 0x82, 0x82, 2, 8, 0x205),
+                "not a unit rotation",
+            ),
+            (
+                "zero frequency",
+                (0, 0, 0x4000, 0, 0x82, 0x82, 2, 8, 0x205),
+                "0.00 Hz is not between 0 and 16000 Hz",
+            ),
+            (
+                "negative frequency",
+                (0x0232, 0xDCD5, 0x3FF6, 0x5428, 0x82, 0x82, 2, 8, 0x205),
+                "-175.00 Hz is not between 0 and 16000 Hz",
+            ),
+            (
+                "cosine off by 16",
+                (0xFDCD, 0x232B, 0x3FF6, 0x5438, 0x82, 0x82, 2, 8, 0x205),
+                "not reproducible at 32000 Hz",
+            ),
+        )
+        for name, words, error in cases:
+            downloaded, protected = _inoi_audio_records()
+            for records in (downloaded, protected):
+                arm = bytearray(records[426])
+                struct.pack_into("<9H", arm, INOI_HANDSFREE_VIBRATE_TONE_OFFSET, *words)
+                records[426] = bytes(arm)
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, error):
+                audio_profile.prepare_headset_gain_profile(
+                    downloaded,
+                    protected,
+                    prefix="inoi240",
+                    machine_compatible=b"inoi,240-modern-4g",
+                    speaker_vibration=True,
+                )
+
+    def test_profile_rejects_tone_that_differs_between_nv_copies(self) -> None:
+        """ProtectNV must confirm the tone words, not only the playback gains."""
+        downloaded, protected = _inoi_audio_records()
+        arm = bytearray(protected[426])
+        struct.pack_into("<H", arm, INOI_HANDSFREE_VIBRATE_TONE_OFFSET + 16, 0x0206)
+        protected[426] = bytes(arm)
+
+        with self.assertRaisesRegex(ValueError, "Handsfree NV426 differs"):
+            audio_profile.prepare_headset_gain_profile(
+                downloaded,
+                protected,
+                prefix="inoi240",
+                machine_compatible=b"inoi,240-modern-4g",
+                speaker_vibration=True,
+            )
+
+
 class Cm4CompatibilityOperationTests(unittest.TestCase):
     """Check exact image admission and copy semantics with synthetic instructions."""
 
@@ -1002,6 +1106,24 @@ class PartitionPreparationTests(unittest.TestCase):
                 revision=revision,
                 machine_compatible=b"vendor,phone",
             )
+
+    def test_speaker_vibration_target_receives_the_vibrate_tone_section(self) -> None:
+        """Only a target that vibrates through its speaker gets the appended tone."""
+        for speaker_vibration, expected_tail in ((False, b""), (True, INOI_VIBRATE_TONE_SECTION)):
+            nand, partitions, revision = self._inputs()
+
+            result = fitted_device_data.prepare_from_partitions(
+                nand,
+                partitions,
+                prefix="phone",
+                revision=revision,
+                machine_compatible=b"vendor,phone",
+                speaker_vibration=speaker_vibration,
+            )
+
+            profile = result.groups["audio-profile"].prepared["phone-audio-profile.bin"]
+            with self.subTest(speaker_vibration=speaker_vibration):
+                self.assertEqual(profile[54:], expected_tail)
 
     def test_complete_set_keeps_original_image_and_individual_nv_bytes(self) -> None:
         """Only the prepared CM4 changes; every original remains byte-exact."""

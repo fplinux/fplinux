@@ -41,4 +41,5 @@ def prepare_device_data(nand: PhysicalNand) -> DeviceDataPreparation:
         prefix="inoi244",
         revision=CM4,
         machine_compatible=b"inoi,244-modern-4g",
+        speaker_vibration=True,
     )

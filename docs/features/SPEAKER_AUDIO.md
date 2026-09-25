@@ -30,6 +30,8 @@ The output cannot be changed while a playback or microphone capture stream or
 FM radio is open. Plugging in wired headphones does not switch it automatically.
 Microphone capture can run alongside 48-kHz speaker playback. FM radio always
 uses wired headphones, not this output. The INOI phones have no separate
-earpiece output. On INOI 240, speaker playback below about 300 Hz makes the
-phone vibrate because FPLinux does not apply the stock speaker equalizer that
-removes this range.
+earpiece output, and their speaker also carries
+[vibration](VIBRATION.md#speaker-vibration), which plays together with speaker
+playback. On INOI 240, speaker playback below about 300 Hz makes the phone
+vibrate because FPLinux does not apply the stock speaker equalizer that removes
+this range.

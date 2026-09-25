@@ -24,11 +24,15 @@ PCM playback or phone microphone capture.
 
 The receiver is also exposed as `/dev/radio0` through the standard V4L2 radio
 interface. FM audio reaches the headphone codec internally; `/dev/radio0` does
-not supply PCM samples. If a tuner operation times out, stop using FM and cold
-boot the phone before trying again. FM audio remains on wired headphones; it
-does not use the [speaker output](SPEAKER_AUDIO.md). The radio interface does
-not capture audio; [phone microphone recording](MICROPHONE_AUDIO.md) uses ALSA
-instead.
+not supply PCM samples and does not capture audio.
+[Phone microphone recording](MICROPHONE_AUDIO.md) uses ALSA instead. If a tuner
+operation times out, stop using FM and cold boot the phone before trying again.
+
+FM audio plays only on wired headphones; it does not use the
+[speaker output](SPEAKER_AUDIO.md). On a phone that vibrates through its
+speaker, headphone FM audio is muted during
+[vibration](VIBRATION.md#speaker-vibration) and returns about one second after
+it.
 
 Scan and headphone playback have been exercised in the default RAM profile on
 all three phones. FM use with a microSD system root has not been qualified.

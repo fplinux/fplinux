@@ -328,6 +328,11 @@ struct ums9117_sc2720_codec {
 	enum ums9117_sc2720_playback_output output;
 	u16 speaker_pa_word;
 	bool speaker_muted;
+	/* The vibrate tone keeps the PA open; beside headphones it is an overlay. */
+	bool vibration;
+	bool pa_overlay;
+	/* A headphone session opened the PA and must restore its fields. */
+	bool pa_overlay_used;
 	bool dirty;
 	/* Successful DC/depop calibration survives ordinary playback stops. */
 	bool prepared;
@@ -468,14 +473,12 @@ static int ums9117_sc2720_codec_snapshot(struct ums9117_sc2720_codec *codec)
 		if (ret)
 			return ret;
 	}
-	if (codec->output == UMS9117_SC2720_OUTPUT_SPEAKER) {
-		for (i = 0; i < ARRAY_SIZE(speaker_registers); i++) {
-			ret = regmap_read(codec->regmap,
-					  speaker_registers[i].offset,
-					  &codec->speaker_saved[i]);
-			if (ret)
-				return ret;
-		}
+	/* Headphone playback may also open the PA for the vibrate tone. */
+	for (i = 0; i < ARRAY_SIZE(speaker_registers); i++) {
+		ret = regmap_read(codec->regmap, speaker_registers[i].offset,
+				  &codec->speaker_saved[i]);
+		if (ret)
+			return ret;
 	}
 	return 0;
 }
@@ -552,9 +555,18 @@ static int close_speaker(struct ums9117_sc2720_codec *codec)
 
 static int close_output(struct ums9117_sc2720_codec *codec)
 {
+	int first_error = 0;
+	int ret;
+
 	if (codec->output == UMS9117_SC2720_OUTPUT_SPEAKER)
 		return close_speaker(codec);
-	return ums9117_sc2720_codec_close_headphones(codec);
+	if (codec->pa_overlay) {
+		first_error = close_speaker(codec);
+		if (!first_error)
+			codec->pa_overlay = false;
+	}
+	ret = ums9117_sc2720_codec_close_headphones(codec);
+	return first_error ?: ret;
 }
 
 static int ums9117_sc2720_codec_restore(struct ums9117_sc2720_codec *codec)
@@ -573,7 +585,8 @@ static int ums9117_sc2720_codec_restore(struct ums9117_sc2720_codec *codec)
 					       0);
 	first_error = first_error ?: ret;
 
-	if (codec->output == UMS9117_SC2720_OUTPUT_SPEAKER) {
+	if (codec->output == UMS9117_SC2720_OUTPUT_SPEAKER ||
+	    codec->pa_overlay_used) {
 		for (i = ARRAY_SIZE(speaker_registers); i-- > 0;) {
 			ret = regmap_update_bits(codec->regmap,
 						 speaker_registers[i].offset,
@@ -604,6 +617,7 @@ static int ums9117_sc2720_codec_restore(struct ums9117_sc2720_codec *codec)
 	codec->enabled = false;
 	codec->prepared = false;
 	codec->dirty = false;
+	codec->pa_overlay_used = false;
 	return release_shared(codec);
 }
 
@@ -1011,8 +1025,10 @@ int ums9117_sc2720_codec_set_volume(struct ums9117_sc2720_codec *codec,
 
 	if (left == codec->volume_left && right == codec->volume_right)
 		return 0;
+	/* A PA overlay keeps the headphones muted until it closes. */
 	if (codec->enabled &&
-	    codec->output == UMS9117_SC2720_OUTPUT_HEADPHONES) {
+	    codec->output == UMS9117_SC2720_OUTPUT_HEADPHONES &&
+	    !codec->pa_overlay) {
 		ret = ums9117_sc2720_codec_apply_volume(codec, left, right);
 		if (ret)
 			return ret;
@@ -1097,20 +1113,16 @@ ums9117_sc2720_codec_open_headphones(struct ums9117_sc2720_codec *codec)
 						 codec->volume_right);
 }
 
-static int open_speaker(struct ums9117_sc2720_codec *codec)
+/* Opens DACS to the PA without changing the headphone routes. */
+static int open_pa(struct ums9117_sc2720_codec *codec)
 {
 	u16 pa_word = codec->speaker_pa_word;
 	unsigned int value;
 	int ret;
 
 	/* The direct HEADMIC-to-PA path bypasses SDAPA; keep it closed. */
-	ret = regmap_update_bits(
-		codec->regmap, SC2720_ANA_CDC3,
-		SC2720_CDC3_OUTPUT_MIXERS | SC2720_HEADMIC_TO_PA_DEBUG, 0);
-	if (ret)
-		return ret;
-	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2,
-				 SC2720_CDC2_OUTPUT_MASK, 0);
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC3,
+				 SC2720_HEADMIC_TO_PA_DEBUG, 0);
 	if (ret)
 		return ret;
 	/* DACS sums L + R; PCM supplies the attenuated stereo mix. */
@@ -1176,6 +1188,87 @@ static int open_speaker(struct ums9117_sc2720_codec *codec)
 				  SC2720_DACS_TO_PA, SC2720_DACS_TO_PA);
 }
 
+static int open_speaker(struct ums9117_sc2720_codec *codec)
+{
+	int ret;
+
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC3,
+				 SC2720_CDC3_OUTPUT_MIXERS, 0);
+	if (ret)
+		return ret;
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2,
+				 SC2720_CDC2_OUTPUT_MASK, 0);
+	if (ret)
+		return ret;
+	return open_pa(codec);
+}
+
+/* The headphone amplifiers stay powered and silent beside the PA. */
+static int open_pa_overlay(struct ums9117_sc2720_codec *codec)
+{
+	int ret;
+
+	codec->pa_overlay = true;
+	codec->pa_overlay_used = true;
+	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC4,
+				 SC2720_HP_GAIN_MASK, SC2720_HP_GAIN_MUTE);
+	if (ret)
+		return ret;
+	return open_pa(codec);
+}
+
+static int close_pa_overlay(struct ums9117_sc2720_codec *codec)
+{
+	int ret;
+
+	ret = close_speaker(codec);
+	if (ret)
+		return ret;
+	codec->pa_overlay = false;
+	return ums9117_sc2720_codec_apply_volume(codec, codec->volume_left,
+						 codec->volume_right);
+}
+
+static int open_vibration_pa(struct ums9117_sc2720_codec *codec)
+{
+	if (codec->output == UMS9117_SC2720_OUTPUT_HEADPHONES)
+		return open_pa_overlay(codec);
+	/* An unmuted speaker already carries the tone with the music. */
+	return codec->speaker_muted ? open_speaker(codec) : 0;
+}
+
+static int close_vibration_pa(struct ums9117_sc2720_codec *codec)
+{
+	if (codec->output == UMS9117_SC2720_OUTPUT_HEADPHONES)
+		return close_pa_overlay(codec);
+	return codec->speaker_muted ? close_speaker(codec) : 0;
+}
+
+int ums9117_sc2720_codec_set_vibration(struct ums9117_sc2720_codec *codec,
+				       bool vibration)
+{
+	int close_ret;
+	int ret;
+
+	if (codec->vibration == vibration)
+		return 0;
+	if (codec->enabled) {
+		ret = vibration ? open_vibration_pa(codec) :
+				  close_vibration_pa(codec);
+		if (ret) {
+			/* Leave the PA as the playback output alone needs it. */
+			close_ret = close_vibration_pa(codec);
+			if (close_ret)
+				dev_err(codec->dev,
+					"cannot close PA after vibration error: %pe\n",
+					ERR_PTR(close_ret));
+			return ret;
+		}
+	}
+	codec->vibration = vibration;
+	return 0;
+}
+
 int ums9117_sc2720_codec_set_speaker_mute(struct ums9117_sc2720_codec *codec,
 					  bool mute)
 {
@@ -1184,7 +1277,9 @@ int ums9117_sc2720_codec_set_speaker_mute(struct ums9117_sc2720_codec *codec,
 
 	if (codec->speaker_muted == mute)
 		return 0;
-	if (codec->enabled && codec->output == UMS9117_SC2720_OUTPUT_SPEAKER) {
+	/* The vibrate tone keeps the PA open; the mute applies afterwards. */
+	if (codec->enabled && codec->output == UMS9117_SC2720_OUTPUT_SPEAKER &&
+	    !codec->vibration) {
 		ret = mute ? close_speaker(codec) : open_speaker(codec);
 		if (ret) {
 			close_ret = close_speaker(codec);
@@ -1562,10 +1657,15 @@ int ums9117_sc2720_codec_enable(struct ums9117_sc2720_codec *codec)
 				 SC2720_DALR_OFFSET_EN, SC2720_DALR_OFFSET_EN);
 	if (ret)
 		goto failed;
-	if (codec->output == UMS9117_SC2720_OUTPUT_SPEAKER)
-		ret = codec->speaker_muted ? 0 : open_speaker(codec);
-	else
+	if (codec->output == UMS9117_SC2720_OUTPUT_SPEAKER) {
+		ret = codec->speaker_muted && !codec->vibration ?
+			      0 :
+			      open_speaker(codec);
+	} else {
 		ret = ums9117_sc2720_codec_open_headphones(codec);
+		if (!ret && codec->vibration)
+			ret = open_pa_overlay(codec);
+	}
 	if (ret)
 		goto failed;
 	codec->enabled = true;

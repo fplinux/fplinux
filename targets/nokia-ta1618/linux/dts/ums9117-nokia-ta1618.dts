@@ -91,6 +91,7 @@
 
 &sc2720_vibrator {
 	sprd,voltage-code = <0>;
+	status = "okay";
 };
 
 &sc2720_fgu {

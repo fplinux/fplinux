@@ -22,13 +22,14 @@ from fplinux_cli.device_data import (
 from fplinux_cli.fm_radio import FM_RECORD_SIZES, prepare_fm_config
 
 
-def prepare_from_partitions(
+def prepare_from_partitions(  # noqa: PLR0913 -- target identity and policy stay explicit.
     nand: PhysicalNand,
     partitions: dict[int, tuple[int, int]],
     *,
     prefix: str,
     revision: Cm4Revision,
     machine_compatible: bytes,
+    speaker_vibration: bool = False,
 ) -> DeviceDataPreparation:
     """Prepare shared fitted groups from one parse of each fixed-NV copy."""
     required_sizes = {
@@ -57,6 +58,7 @@ def prepare_from_partitions(
         protected,
         prefix=prefix,
         machine_compatible=machine_compatible,
+        speaker_vibration=speaker_vibration,
     )
     fm_radio = prepare_fm_config(downloaded, protected, prefix=prefix)
     return DeviceDataPreparation(

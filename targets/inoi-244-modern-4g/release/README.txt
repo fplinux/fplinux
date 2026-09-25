@@ -25,8 +25,8 @@ Current target support:
 The shared brightness, keypad-light, vibrator, telemetry and power-off
 interfaces are enabled. Physical brightness, keypad light and native image
 fidelity have not been tested. This phone has no separate vibration motor;
-stock firmware vibrates it through the speaker. FPLinux provides no vibration
-control on this phone.
+FPLinux vibrates it through the speaker and mutes headphone and FM audio
+meanwhile, as described in docs/features/VIBRATION.md.
 Telemetry has been read with the battery absent; battery measurements, charging,
 battery-only shutdown and physical-key wake have not been tested.
 
@@ -71,8 +71,8 @@ The shared interfaces and storage safety rules are described in:
 
 This phone uses backlight device inoi244-backlight, with configured levels
 0 through 31 and default 31. Shared interface names are sc2720-battery,
-sc2720-charger, sc2720-auxadc, ums9117-thermal, sc27xx:vibrator and UMS9117
-Headphones. IIO, thermal and input-device numbers are assigned at boot. These
+sc2720-charger, sc2720-auxadc, ums9117-thermal, UMS9117 speaker vibrator and
+UMS9117 Headphones. IIO, thermal and input-device numbers are assigned at boot. These
 identifiers do not demonstrate the physical effects or measurements noted above.
 
 TyrQuake game data can use RAM or ext4 microSD storage. Applications, files,

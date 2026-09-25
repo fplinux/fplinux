@@ -32,8 +32,8 @@ Internal phone storage writes, modem, Wi-Fi and Linux reboot are not supported.
 Battery-only power-off, physical-key wake, battery measurements and charging
 have not been tested. Physical display, key and LCD brightness effects have not
 been tested on this configuration. This phone has no separate vibration motor;
-stock firmware vibrates it through the speaker. FPLinux provides no vibration
-control on this phone.
+FPLinux vibrates it through the speaker and mutes headphone and FM audio
+meanwhile, as described in docs/features/VIBRATION.md.
 
 Headphone playback uses the `aplay` and `amixer` tools already included in this
 image. From the extracted archive, upload a known two-channel, signed 16-bit
@@ -80,8 +80,8 @@ The shared interfaces, limits and safety procedures are described in:
 
 This phone uses backlight device inoi240-backlight, with configured levels
 0 through 31 and default 31. Shared interface names are sc2720-battery,
-sc2720-charger, sc2720-auxadc, ums9117-thermal, sc27xx:vibrator and UMS9117
-Headphones. IIO, thermal and input-device numbers are assigned at boot. These
+sc2720-charger, sc2720-auxadc, ums9117-thermal, UMS9117 speaker vibrator and
+UMS9117 Headphones. IIO, thermal and input-device numbers are assigned at boot. These
 identifiers do not demonstrate the physical effects or measurements noted above.
 
 Before ending a RAM session, stop applications using microSD, disable any

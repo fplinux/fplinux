@@ -102,16 +102,13 @@
 		0x14 0 0x0008e000
 		0x18 0 0x0008e000
 	>;
+	fplinux,speaker-vibration;
 	fplinux,card-longname = "INOI 240 Modern 4G audio";
 	status = "okay";
 };
 
 &sc2720_kpled {
 	fplinux,current-code = <13>;
-};
-
-&sc2720_vibrator {
-	sprd,voltage-code = <2>;
 };
 
 &sc2720_fgu {

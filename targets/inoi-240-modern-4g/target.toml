@@ -90,7 +90,7 @@ firmware = [
 
 [audio_profile]
 firmware = [
-  { source = "inoi240-audio-profile.bin", destination = "fplinux/inoi240-audio-profile.bin", size = 54 },
+  { source = "inoi240-audio-profile.bin", destination = "fplinux/inoi240-audio-profile.bin", size = 88 },
 ]
 
 [fm_radio]

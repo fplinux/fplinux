@@ -31,6 +31,12 @@ int ums9117_sc2720_codec_prepare(struct ums9117_sc2720_codec *codec,
 /* A muted speaker has its PA disabled; transitions may sleep for 30 ms. */
 int ums9117_sc2720_codec_set_speaker_mute(struct ums9117_sc2720_codec *codec,
 					  bool mute);
+/*
+ * Keep the PA open for the vibrate tone. With headphones the PA opens beside
+ * them and their volume stays muted until vibration ends.
+ */
+int ums9117_sc2720_codec_set_vibration(struct ums9117_sc2720_codec *codec,
+				       bool vibration);
 int ums9117_sc2720_codec_enable(struct ums9117_sc2720_codec *codec);
 int ums9117_sc2720_codec_prepare_capture(
 	struct ums9117_sc2720_codec *codec,

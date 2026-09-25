@@ -23,9 +23,9 @@ storage and card-backed swap; applications, Bluetooth and graphics work again
 after wake.
 
 Physical display, key and LCD brightness effects have not been tested on this
-configuration. This phone has no separate vibration motor; stock firmware
-vibrates it through the speaker, and FPLinux provides no vibration control on
-it. Telemetry read without a battery does not demonstrate battery operation,
+configuration. This phone has no separate vibration motor; FPLinux vibrates it
+through the rear speaker, as stock firmware does, and mutes headphone and FM
+audio meanwhile. Telemetry read without a battery does not demonstrate battery operation,
 measurement accuracy or charging.
 
 Status terms and limits shared by every phone are defined in the
@@ -68,7 +68,7 @@ Status terms and limits shared by every phone are defined in the
 | [Auxiliary ADC](../../docs/features/AUXADC.md)                     | Present  | Partial       | Raw-channel interface enabled; physical inputs and accuracy have not been checked.                                                                 |
 | [Real-time clock](../../docs/features/RTC.md)                      | Present  | Partial       | Read/set time, one-shot alarms and RTC wake work in both profiles.                                                                                 |
 | Other battery functions                                            | Unknown  | Not supported | No battery level, temperature or charge control is provided.                                                                                       |
-| [Vibration](../../docs/features/VIBRATION.md)                      | Present  | Not supported | No separate motor; stock firmware vibrates the phone through the speaker. The force-feedback device produces no vibration.                         |
+| [Vibration](../../docs/features/VIBRATION.md)                      | Present  | Partial       | Rear speaker vibration; headphone and FM audio is muted meanwhile, and one continuous pulse lasts at most about three seconds.                     |
 | Indicator LEDs                                                     | Unknown  | Not supported | —                                                                                                                                                  |
 | [Power-off](../../docs/features/POWER_OFF.md)                      | N/A      | Partial       | Establish card safety before disconnecting USB power; battery-only power-off has not been tested.                                                  |
 | [Suspend](../../docs/features/SUSPEND.md)                          | N/A      | Partial       | Repeated RTC-woken s2idle works in both profiles, including mounted ext4 data storage and card-backed swap; physical-key wake has not been tested. |
@@ -76,14 +76,14 @@ Status terms and limits shared by every phone are defined in the
 
 ## Applications
 
-| Application                                             | FPLinux   | This phone                                                                                                                  |
-| ------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------- |
-| [FPLinux: ARMADA](../../docs/apps/SHOWCASE.md)          | Supported | Runs in both profiles; physical display and light effects have not been tested, and it produces no vibration on this phone. |
-| [TyrQuake](../../docs/apps/TYRQUAKE.md)                 | Supported | Game data can use RAM or ext4 microSD storage, including the system root.                                                   |
-| [MicroPythonOS](../../docs/apps/MICROPYTHONOS.md)       | Partial   | Launches on this phone; the UI is not fully adapted to its 128×160 screen.                                                  |
-| [Image rotation](../../docs/apps/ROTATE.md)             | Supported | Explicit CPU/ROTA selection and framebuffer preview.                                                                        |
-| [JPEG codec and scaling](../../docs/apps/JPEG.md)       | Supported | Hardware decode, fixed encode and fixed half-scaling.                                                                       |
-| [Native image presentation](../../docs/apps/PRESENT.md) | Supported | Direct NV16 or CPU-converted RGB565 presentation.                                                                           |
+| Application                                             | FPLinux   | This phone                                                                      |
+| ------------------------------------------------------- | --------- | ------------------------------------------------------------------------------- |
+| [FPLinux: ARMADA](../../docs/apps/SHOWCASE.md)          | Supported | Runs in both profiles; physical display and light effects have not been tested. |
+| [TyrQuake](../../docs/apps/TYRQUAKE.md)                 | Supported | Game data can use RAM or ext4 microSD storage, including the system root.       |
+| [MicroPythonOS](../../docs/apps/MICROPYTHONOS.md)       | Partial   | Launches on this phone; the UI is not fully adapted to its 128×160 screen.      |
+| [Image rotation](../../docs/apps/ROTATE.md)             | Supported | Explicit CPU/ROTA selection and framebuffer preview.                            |
+| [JPEG codec and scaling](../../docs/apps/JPEG.md)       | Supported | Hardware decode, fixed encode and fixed half-scaling.                           |
+| [Native image presentation](../../docs/apps/PRESENT.md) | Supported | Direct NV16 or CPU-converted RGB565 presentation.                               |
 
 ## Hardware interfaces
 
