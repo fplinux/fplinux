@@ -75,6 +75,13 @@
 #define UMS9117_VBC_DAC_LEVEL 0xe4
 #define UMS9117_VBC_ADC_LEVEL 0xec
 #define UMS9117_VBC_FM_MUTE 0xf8
+#define UMS9117_VBC_TONE_CTRL 0x900
+#define UMS9117_VBC_VT_SIN 0x918
+#define UMS9117_VBC_VT_COS 0x91c
+#define UMS9117_VBC_VT_LEVEL 0x920
+#define UMS9117_VBC_VT_RAMP 0x924
+#define UMS9117_VBC_VT_HOLD 0x928
+#define UMS9117_VBC_TONE_ENABLE 0x92c
 #define UMS9117_VBC_DAC0_DATA 0x1000
 #define UMS9117_VBC_DAC1_DATA 0x1004
 #define UMS9117_VBC_ADC1_DATA 0x1014
@@ -89,6 +96,8 @@
 #define UMS9117_VBC_DAC0_DG_ENABLE BIT(14)
 #define UMS9117_VBC_DAC1_DG_ENABLE BIT(15)
 #define UMS9117_VBC_DAC_DG_MASK GENMASK(15, 0)
+/* The largest DG code is the strongest attenuation, about -77.5 dB. */
+#define UMS9117_VBC_DAC_DG_MINIMUM 0x7f
 #define UMS9117_VBC_IIS_ADC01_SELECT GENMASK(2, 0)
 #define UMS9117_VBC_IIS_DAC_SELECT GENMASK(8, 6)
 #define UMS9117_VBC_IIS_ADC01_FM 1
@@ -100,6 +109,12 @@
 #define UMS9117_VBC_FM_MUTE_UNMUTE BIT(16)
 #define UMS9117_VBC_FM_MUTE_STEP 0x1e
 #define UMS9117_VBC_FM_PREFILL_FRAMES 64U
+#define UMS9117_VBC_VT_ON BIT(1)
+#define UMS9117_VBC_VT_ENABLE BIT(2)
+#define UMS9117_VBC_VT_LEVEL1 GENMASK(31, 16)
+#define UMS9117_VBC_VT_LEVEL0 GENMASK(15, 0)
+#define UMS9117_VBC_VT_RISE GENMASK(31, 16)
+#define UMS9117_VBC_VT_FALL GENMASK(15, 0)
 
 struct ums9117_audio {
 	struct device *dev;
@@ -110,10 +125,15 @@ struct ums9117_audio {
 	void __iomem *iis_matrix;
 	u32 acquired_gates;
 	u32 saved_iis_matrix;
+	struct ums9117_audio_vibrate_tone vibrate_tone;
 	u8 dac_left_gain;
 	u8 dac_right_gain;
 	unsigned int playback_rate;
+	enum ums9117_audio_dac_rate dac_rate;
 	bool dac_gain_configured;
+	bool vibrate_tone_fitted;
+	bool vibration;
+	bool music_muted;
 	bool prepared;
 	bool playback_prepared;
 	bool fm_prepared;
@@ -134,13 +154,19 @@ static void clear_fifos(struct ums9117_audio *audio)
 
 static void apply_dac_gain(struct ums9117_audio *audio)
 {
+	u8 left_gain = audio->dac_left_gain;
+	u8 right_gain = audio->dac_right_gain;
 	u32 value;
 
 	if (!audio->dac_gain_configured)
 		return;
+	if (audio->music_muted) {
+		left_gain = UMS9117_VBC_DAC_DG_MINIMUM;
+		right_gain = UMS9117_VBC_DAC_DG_MINIMUM;
+	}
 	/* The serial path maps DAC1 to left and DAC0 to right. */
-	value = FIELD_PREP(UMS9117_VBC_DAC1_DG_GAIN, audio->dac_left_gain) |
-		FIELD_PREP(UMS9117_VBC_DAC0_DG_GAIN, audio->dac_right_gain) |
+	value = FIELD_PREP(UMS9117_VBC_DAC1_DG_GAIN, left_gain) |
+		FIELD_PREP(UMS9117_VBC_DAC0_DG_GAIN, right_gain) |
 		UMS9117_VBC_DAC1_DG_ENABLE | UMS9117_VBC_DAC0_DG_ENABLE;
 	update_bits(audio->vbc, UMS9117_VBC_DAC_DG_CTRL,
 		    UMS9117_VBC_DAC_DG_MASK, value);
@@ -154,6 +180,89 @@ void ums9117_audio_set_dac_gain(struct ums9117_audio *audio, u8 left_gain,
 	audio->dac_gain_configured = true;
 	if (audio->playback_prepared)
 		apply_dac_gain(audio);
+}
+
+static u32 fm_mute_control(const struct ums9117_audio *audio)
+{
+	u32 value = UMS9117_VBC_FM_MUTE_ENABLE | UMS9117_VBC_FM_MUTE_STEP;
+
+	return audio->music_muted ? value : value | UMS9117_VBC_FM_MUTE_UNMUTE;
+}
+
+void ums9117_audio_set_music_mute(struct ums9117_audio *audio, bool mute)
+{
+	if (audio->music_muted == mute)
+		return;
+	audio->music_muted = mute;
+	if (audio->playback_prepared)
+		apply_dac_gain(audio);
+	/* FM joins the DAC path after DG and ramps on its own mute control. */
+	if (audio->fm_prepared)
+		writel(fm_mute_control(audio),
+		       audio->vbc + UMS9117_VBC_FM_MUTE);
+}
+
+void ums9117_audio_set_vibrate_tone(
+	struct ums9117_audio *audio,
+	const struct ums9117_audio_vibrate_tone *tone)
+{
+	audio->vibrate_tone = *tone;
+	audio->vibrate_tone_fitted = true;
+}
+
+static void write_vibrate_tone_on(struct ums9117_audio *audio, bool on)
+{
+	update_bits(audio->vbc, UMS9117_VBC_TONE_CTRL, UMS9117_VBC_VT_ON,
+		    on ? UMS9117_VBC_VT_ON : 0);
+}
+
+/*
+ * The generator latches off when its hold time expires until the enable is
+ * cycled, so each pulse re-arms it. The caller only does this while the tone
+ * is off; the enable must not change during a tone.
+ */
+static void arm_vibrate_tone(struct ums9117_audio *audio)
+{
+	update_bits(audio->vbc, UMS9117_VBC_TONE_ENABLE, UMS9117_VBC_VT_ENABLE,
+		    0);
+	update_bits(audio->vbc, UMS9117_VBC_TONE_ENABLE, UMS9117_VBC_VT_ENABLE,
+		    UMS9117_VBC_VT_ENABLE);
+}
+
+/* Called while the DAC is muted, before the requested tone state is set. */
+static void program_vibrate_tone(struct ums9117_audio *audio)
+{
+	const struct ums9117_audio_vibrate_tone *tone = &audio->vibrate_tone;
+
+	if (!audio->vibrate_tone_fitted)
+		return;
+	write_vibrate_tone_on(audio, false);
+	update_bits(audio->vbc, UMS9117_VBC_TONE_ENABLE, UMS9117_VBC_VT_ENABLE,
+		    0);
+	writel(tone->sin[audio->dac_rate], audio->vbc + UMS9117_VBC_VT_SIN);
+	writel(tone->cos[audio->dac_rate], audio->vbc + UMS9117_VBC_VT_COS);
+	writel(FIELD_PREP(UMS9117_VBC_VT_LEVEL0, tone->level[0]) |
+		       FIELD_PREP(UMS9117_VBC_VT_LEVEL1, tone->level[1]),
+	       audio->vbc + UMS9117_VBC_VT_LEVEL);
+	writel(FIELD_PREP(UMS9117_VBC_VT_FALL, tone->fall) |
+		       FIELD_PREP(UMS9117_VBC_VT_RISE, tone->rise),
+	       audio->vbc + UMS9117_VBC_VT_RAMP);
+	writel(tone->hold, audio->vbc + UMS9117_VBC_VT_HOLD);
+	update_bits(audio->vbc, UMS9117_VBC_TONE_ENABLE, UMS9117_VBC_VT_ENABLE,
+		    UMS9117_VBC_VT_ENABLE);
+	write_vibrate_tone_on(audio, audio->vibration);
+}
+
+void ums9117_audio_set_vibration(struct ums9117_audio *audio, bool on)
+{
+	if (audio->vibration == on)
+		return;
+	audio->vibration = on;
+	if (!audio->playback_prepared || !audio->vibrate_tone_fitted)
+		return;
+	if (on)
+		arm_vibrate_tone(audio);
+	write_vibrate_tone_on(audio, on);
 }
 
 static int fifo_frames(u32 status)
@@ -275,6 +384,11 @@ void ums9117_audio_stop(struct ums9117_audio *audio)
 				 status);
 	}
 	update_bits(audio->aud, UMS9117_AUD_TOP, UMS9117_AUD_DAC_CHANNELS, 0);
+	if (audio->vibrate_tone_fitted) {
+		write_vibrate_tone_on(audio, false);
+		update_bits(audio->vbc, UMS9117_VBC_TONE_ENABLE,
+			    UMS9117_VBC_VT_ENABLE, 0);
+	}
 	if (audio->fm_prepared) {
 		update_bits(audio->vbc, UMS9117_VBC_FM_MUTE,
 			    UMS9117_VBC_FM_MUTE_UNMUTE, 0);
@@ -449,18 +563,22 @@ int ums9117_audio_prepare_capture(struct ums9117_audio *audio)
 
 int ums9117_audio_prepare(struct ums9117_audio *audio, unsigned int rate)
 {
+	enum ums9117_audio_dac_rate dac_rate;
 	u32 dac;
 	int ret;
 
 	switch (rate) {
 	case 24000:
 		dac = UMS9117_AUD_DAC_24K;
+		dac_rate = UMS9117_AUDIO_DAC_24K;
 		break;
 	case 32000:
 		dac = UMS9117_AUD_DAC_32K;
+		dac_rate = UMS9117_AUDIO_DAC_32K;
 		break;
 	case 48000:
 		dac = UMS9117_AUD_DAC_48K;
+		dac_rate = UMS9117_AUDIO_DAC_48K;
 		break;
 	default:
 		return -EINVAL;
@@ -476,6 +594,7 @@ int ums9117_audio_prepare(struct ums9117_audio *audio, unsigned int rate)
 		return ret;
 	audio->playback_prepared = true;
 	audio->playback_rate = rate;
+	audio->dac_rate = dac_rate;
 	update_bits(audio->aud, UMS9117_AUD_TOP, UMS9117_AUD_DAC_CHANNELS, 0);
 	writel(0x100, audio->aud + UMS9117_AUD_SDM0);
 	writel(0x8, audio->aud + UMS9117_AUD_SDM1);
@@ -489,6 +608,8 @@ int ums9117_audio_prepare(struct ums9117_audio *audio, unsigned int rate)
 	update_bits(audio->vbc, UMS9117_VBC_IIS, UMS9117_VBC_IIS_DAC_SELECT, 0);
 	writel(0, audio->vbc + UMS9117_VBC_DAC_PATH);
 	apply_dac_gain(audio);
+	/* A capture session keeps the clocks, so VBC may not have been reset. */
+	program_vibrate_tone(audio);
 	writel(0xa0a0, audio->vbc + UMS9117_VBC_DAC_LEVEL);
 	clear_fifos(audio);
 	update_bits(audio->vbc, UMS9117_VBC_CHANNELS, UMS9117_VBC_DAC_CHANNELS,
@@ -524,9 +645,7 @@ int ums9117_audio_prepare_fm(struct ums9117_audio *audio)
 			       UMS9117_VBC_IIS_ADC01_FM));
 	update_bits(audio->vbc, UMS9117_VBC_CHANNELS,
 		    UMS9117_VBC_ADC01_CHANNELS, UMS9117_VBC_ADC01_CHANNELS);
-	writel(UMS9117_VBC_FM_MUTE_ENABLE | UMS9117_VBC_FM_MUTE_UNMUTE |
-		       UMS9117_VBC_FM_MUTE_STEP,
-	       audio->vbc + UMS9117_VBC_FM_MUTE);
+	writel(fm_mute_control(audio), audio->vbc + UMS9117_VBC_FM_MUTE);
 	writel(UMS9117_VBC_DAC_PATH_FM |
 		       FIELD_PREP(UMS9117_VBC_DAC0_ADD_FM, 1) |
 		       FIELD_PREP(UMS9117_VBC_DAC1_ADD_FM, 1),

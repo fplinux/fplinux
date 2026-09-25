@@ -82,9 +82,11 @@
 			linux,default-trigger = "input-events";
 		};
 
+		/* Only boards with a vibration motor on LDO_VIBR enable this. */
 		sc2720_vibrator: vibrator@e00 {
 			compatible = "sprd,sc2720-vibrator";
 			reg = <0xe00>;
+			status = "disabled";
 		};
 
 		sc2720_regulators: regulators {

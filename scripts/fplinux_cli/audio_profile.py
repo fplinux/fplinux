@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import math
 import struct
 from itertools import pairwise
 from typing import TYPE_CHECKING
@@ -20,15 +21,37 @@ _SPEAKER_PLAY_DEV_SET_OFFSET = 20
 _SPEAKER_APP_COUNT_OFFSET = 36
 _SPEAKER_LEVEL_COUNT_OFFSET = 62
 _SPEAKER_LEVELS_OFFSET = 68
+_SPEAKER_VIBRATE_TONE_OFFSET = 188
 _SPEAKER_PA_WORD_OFFSET = 466
 _SPEAKER_PLAY_ROUTE_MASK = 0x30
 _SPEAKER_PLAY_ONLY = 0x20
 _SOURCE_PASS_EQ_BYPASS = 0
 _SOURCE_PASS_EQ_ACTIVE_OMITTED = 1
+_VIBRATE_TONE_UNIT = 1 << 30
+_VIBRATE_TONE_NORM_TOLERANCE = 1e-6
+_VIBRATE_TONE_NV_SAMPLE_RATE = 32000
+_VIBRATE_TONE_SAMPLE_RATES = (24000, 32000, 48000)
 
 
-def _handsfree_speaker_fields(arm_modes: bytes, protected_arm_modes: bytes) -> bytes:
-    """Admit the speaker-only Handsfree mode and pack its PA and app-0 gains."""
+def vibrate_tone_words(frequency: float, sample_rate: int) -> tuple[int, int]:
+    """Return the VBC vibrate-tone sine and cosine register words.
+
+    The generator rotates a Q30 unit vector by one step per DAC sample. Stock
+    firmware stores -sin and cos of that step rounded to nearest as 32-bit
+    two's-complement words; truncation does not reproduce its tables.
+    """
+    step = 2 * math.pi * frequency / sample_rate
+    sine = round(-math.sin(step) * _VIBRATE_TONE_UNIT)
+    cosine = round(math.cos(step) * _VIBRATE_TONE_UNIT)
+    return sine & 0xFFFFFFFF, cosine & 0xFFFFFFFF
+
+
+def _signed32(word: int) -> int:
+    return word - (1 << 32) if word & 0x80000000 else word
+
+
+def _admitted_handsfree_mode(arm_modes: bytes, protected_arm_modes: bytes) -> bytes:
+    """Return the single Handsfree mode when both fixed-NV copies agree on it."""
     matching_offsets = [
         offset
         for offset in range(0, len(arm_modes), _ARM_MODE_SIZE)
@@ -42,7 +65,11 @@ def _handsfree_speaker_fields(arm_modes: bytes, protected_arm_modes: bytes) -> b
     if mode != protected_arm_modes[offset : offset + _ARM_MODE_SIZE]:
         message = "audio-profile Handsfree NV426 differs between DownloadedNV and ProtectNV"
         raise ValueError(message)
+    return mode
 
+
+def _handsfree_speaker_fields(mode: bytes) -> bytes:
+    """Admit speaker-only Handsfree playback and pack its PA and app-0 gains."""
     play_dev_set = struct.unpack_from("<H", mode, _SPEAKER_PLAY_DEV_SET_OFFSET)[0]
     if play_dev_set & _SPEAKER_PLAY_ROUTE_MASK != _SPEAKER_PLAY_ONLY:
         message = "audio-profile Handsfree does not select speaker-only playback"
@@ -69,14 +96,54 @@ def _handsfree_speaker_fields(arm_modes: bytes, protected_arm_modes: bytes) -> b
     return struct.pack("<H9B", pa_word, *digital_gain)
 
 
+def _handsfree_vibrate_tone_fields(mode: bytes) -> bytes:
+    """Convert the fitted 32 kHz Handsfree vibrate tone for each DAC sample rate."""
+    (sin_hi, sin_lo, cos_hi, cos_lo, gain_0, gain_1, gain_down, gain_up, hold) = (
+        struct.unpack_from("<9H", mode, _SPEAKER_VIBRATE_TONE_OFFSET)
+    )
+    if gain_0 == 0 or gain_1 == 0:
+        message = "audio-profile Handsfree vibrate tone gain is zero"
+        raise ValueError(message)
+    if hold == 0:
+        message = "audio-profile Handsfree vibrate tone hold is zero"
+        raise ValueError(message)
+
+    fitted_words = (sin_hi << 16 | sin_lo, cos_hi << 16 | cos_lo)
+    sine = _signed32(fitted_words[0])
+    cosine = _signed32(fitted_words[1])
+    norm = math.hypot(sine, cosine)
+    if not math.isclose(norm, _VIBRATE_TONE_UNIT, rel_tol=_VIBRATE_TONE_NORM_TOLERANCE):
+        message = "audio-profile Handsfree vibrate tone sine and cosine are not a unit rotation"
+        raise ValueError(message)
+    frequency = math.atan2(-sine, cosine) * _VIBRATE_TONE_NV_SAMPLE_RATE / (2 * math.pi)
+    if not 0 < frequency < _VIBRATE_TONE_NV_SAMPLE_RATE / 2:
+        raise ValueError(
+            f"audio-profile Handsfree vibrate tone {frequency:.2f} Hz is not between 0 and "
+            f"{_VIBRATE_TONE_NV_SAMPLE_RATE // 2} Hz"
+        )
+    if vibrate_tone_words(frequency, _VIBRATE_TONE_NV_SAMPLE_RATE) != fitted_words:
+        message = "audio-profile Handsfree vibrate tone is not reproducible at 32000 Hz"
+        raise ValueError(message)
+
+    rate_words = [vibrate_tone_words(frequency, rate) for rate in _VIBRATE_TONE_SAMPLE_RATES]
+    sines = [sine_word for sine_word, _cosine_word in rate_words]
+    cosines = [cosine_word for _sine_word, cosine_word in rate_words]
+    return struct.pack("<3I3I5H", *sines, *cosines, gain_0, gain_1, gain_down, gain_up, hold)
+
+
 def prepare_headset_gain_profile(
     downloaded: Mapping[int, bytes],
     protected: Mapping[int, bytes],
     *,
     prefix: str,
     machine_compatible: bytes,
+    speaker_vibration: bool = False,
 ) -> PreparedGroup:
-    """Normalize fitted playback gains into the compact kernel input."""
+    """Normalize fitted playback gains into the compact kernel input.
+
+    ``speaker_vibration`` appends the Handsfree vibrate tone for phones whose
+    speaker is also the vibration actuator.
+    """
     mode_count_record = downloaded[425]
     protected_mode_count = protected[425]
     arm_modes = downloaded[426]
@@ -139,7 +206,10 @@ def prepare_headset_gain_profile(
         source_eq,
         *digital_gain,
     )
-    profile += _handsfree_speaker_fields(arm_modes, protected_arm_modes)
+    handsfree = _admitted_handsfree_mode(arm_modes, protected_arm_modes)
+    profile += _handsfree_speaker_fields(handsfree)
+    if speaker_vibration:
+        profile += _handsfree_vibrate_tone_fields(handsfree)
     originals = {
         f"{prefix}-nv425.bin": mode_count_record,
         f"{prefix}-nv426.bin": arm_modes,

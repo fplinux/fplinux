@@ -253,7 +253,9 @@ shutdown rules.
 The current targets declare fitted device-data groups that must come from the
 exact physical phone. Bluetooth firmware and FM settings are delivered through
 the root filesystem. The fitted audio profile is built into the kernel image;
-it holds the headphone and speaker gains. FPLinux does not download or supply these phone-specific inputs.
+it holds the headphone and speaker gains and, on phones that vibrate through
+their speaker, the vibrate tone. FPLinux does not download or supply these
+phone-specific inputs.
 
 Each group is independently optional. When a complete group is absent, the
 build keeps that feature's generic behavior: Bluetooth and FM remain

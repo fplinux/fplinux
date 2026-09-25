@@ -2,6 +2,8 @@
 config SND_UMS9117
 	bool "UMS9117 audio"
 	depends on SND && ARCH_UMS9117 && MFD_SC27XX_PMIC && COMMON_CLK_SC2720
+	depends on INPUT
+	select INPUT_FF_MEMLESS
 	select SND_PCM
 	help
 	  Enable the 24 kHz and 48 kHz stereo S16_LE ALSA headphone PCM device
@@ -12,3 +14,5 @@ config SND_UMS9117
 	  provide 48 kHz mono S16_LE capture, which can run at the same time as
 	  48 kHz playback.
 	  The FM mixer switch routes the internal 32 kHz IIS source to headphones.
+	  Boards whose speaker also vibrates the phone get a force-feedback
+	  vibrator that plays the fitted vibrate tone through the speaker.

@@ -92,5 +92,7 @@ transition.
 same ALSA card. Every current target also has a selectable
 [speaker output](SPEAKER_AUDIO.md).
 [FM radio](FM_RADIO.md) uses the headphone jack but has a separate playback
-path. Nokia PCM playback support is partial because its stock VBC EQ is not
+path. On a phone that vibrates through its speaker,
+[vibration](VIBRATION.md#speaker-vibration) briefly mutes headphone audio.
+Nokia PCM playback support is partial because its stock VBC EQ is not
 implemented; the fitted gain steps do not provide stock tonal parity.
