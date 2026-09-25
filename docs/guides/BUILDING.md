@@ -219,7 +219,8 @@ with the next step:
 ```
 
 The command does not add the new target to the
-[target index](../../targets/README.md).
+[target index](../../targets/README.md). To boot the new target and back up
+its NAND, follow [Bring up a new UMS9117 phone](../porting/NEW_PHONE.md).
 
 ## Build a target
 

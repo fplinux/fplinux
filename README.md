@@ -98,6 +98,7 @@ Before submitting source changes, run the complete uncached quality gate from
 ### Porting
 
 - [Porting overview](docs/porting/README.md)
+- [Bring up a new UMS9117 phone](docs/porting/NEW_PHONE.md)
 - [Phone target contract](docs/porting/TARGET.md)
 - [Platform contract](docs/porting/PLATFORM.md)
 - [Console contract](docs/porting/CONSOLE.md)
