@@ -15,10 +15,14 @@ aplay /tmp/audio.wav
 ```
 
 Level `0` disconnects the speaker and is the default. Levels `1` through `9`
-use the selected phone's fitted gains. On Nokia TA-1618, only level `1` has been
-checked acoustically; higher levels may be louder.
-[Idle silence](HEADPHONE_AUDIO.md#idle-silence) keeps the selected speaker open
-between streams, so stream starts and stops do not click. The direct `hw:0,0` playback
+use the selected phone's fitted stock gains, so each step follows the stock
+volume table. FPLinux does not apply the stock speaker limiter or equalizer.
+Nokia TA-1618 plays a near full-scale 1 kHz tone at levels `7` through `9` with
+about 2% harmonic distortion. The INOI speakers reach 4–7% with that tone, and
+INOI 240 already reaches about 3% from level `6` at an ordinary level.
+[Idle silence](HEADPHONE_AUDIO.md#idle-silence) keeps the
+selected speaker open between streams, so stream starts and stops do not
+click. The direct `hw:0,0` playback
 device accepts stereo S16_LE at 48 kHz on this route. The default ALSA device
 converts other input formats.
 
