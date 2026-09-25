@@ -100,6 +100,9 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
             ),
             mock.patch.object(kernelcheck, "discover_targets", return_value=(self.target,)),
             mock.patch.object(
+                kernelcheck, "discover_profiles", return_value=("default", "microsd-uboot")
+            ),
+            mock.patch.object(
                 kernelcheck,
                 "target_context",
                 return_value=(self.target_config, self.platform, self.source, state),
@@ -187,6 +190,9 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
             ),
             mock.patch.object(kernelcheck, "discover_targets", return_value=(self.target,)),
             mock.patch.object(
+                kernelcheck, "discover_profiles", return_value=("default", "microsd-uboot")
+            ),
+            mock.patch.object(
                 kernelcheck,
                 "target_context",
                 return_value=(target_config, self.platform, self.source, self.prepared_linux),
@@ -229,12 +235,24 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
 class KernelProfileSelectionTests(unittest.TestCase):
     """Keep default and explicitly named kernel contexts separate."""
 
-    def test_each_global_profile_selects_every_board(self) -> None:
-        """The default alias preserves identity and microSD never drops a board."""
-        with mock.patch.object(kernelcheck, "discover_targets", return_value=("first", "second")):
-            self.assertEqual(kernelcheck.target_profiles(), (("first", None), ("second", None)))
+    def test_each_global_profile_selects_every_board_offering_it(self) -> None:
+        """The default alias preserves identity; microSD drops only a RAM-only board."""
+        offered = {
+            "first": ("default", "microsd-uboot"),
+            "ram-only": ("default",),
+            "second": ("default", "microsd-uboot"),
+        }
+        with (
+            mock.patch.object(kernelcheck, "discover_targets", return_value=tuple(offered)),
+            mock.patch.object(kernelcheck, "discover_profiles", side_effect=offered.__getitem__),
+        ):
             self.assertEqual(
-                kernelcheck.target_profiles("default"), (("first", None), ("second", None))
+                kernelcheck.target_profiles(),
+                (("first", None), ("ram-only", None), ("second", None)),
+            )
+            self.assertEqual(
+                kernelcheck.target_profiles("default"),
+                (("first", None), ("ram-only", None), ("second", None)),
             )
             self.assertEqual(
                 kernelcheck.target_profiles("microsd-uboot"),

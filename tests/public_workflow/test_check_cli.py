@@ -34,6 +34,7 @@ PUBLIC_COMMANDS = (
     "console",
     "nand",
     "device-data",
+    "target",
     "verify",
 )
 PUBLIC_CHECK_SCOPES = (

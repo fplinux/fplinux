@@ -219,6 +219,33 @@ class GlobalProfileTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "U-Boot source is missing"):
             targets.load_target("second", "microsd-uboot")
 
+    def test_board_without_microsd_inputs_offers_only_the_ram_profile(self) -> None:
+        """Omitting the microSD tables removes that profile instead of borrowing inputs."""
+        self.write_target_manifest("first", "target-without-microsd.toml")
+
+        self.assertEqual(paths.discover_profiles("first"), ("default",))
+        self.assertEqual(targets.load_target("first")["bootstrap"]["kind"], "linux")
+        with self.assertRaisesRegex(
+            SystemExit, "target first does not support profile microsd-uboot"
+        ):
+            targets.load_target("first", "microsd-uboot")
+        self.assertEqual(paths.discover_profiles("second"), ("default", "microsd-uboot"))
+
+    def test_declared_microsd_inputs_must_stay_complete(self) -> None:
+        """A partial microSD declaration is still refused, even for the RAM profile."""
+        path = self.root / "targets/first/target.toml"
+        manifest = path.read_text(encoding="utf-8")
+        uboot = '[microsd.uboot]\ndefconfig = "uboot/defconfig"\npatches = []\ncopies = []\n'
+        self.assertIn(uboot, manifest)
+        path.write_text(manifest.replace(uboot, ""), encoding="utf-8")
+
+        for profile in ("default", "microsd-uboot"):
+            with (
+                self.subTest(profile=profile),
+                self.assertRaisesRegex(SystemExit, "target microsd must contain exactly"),
+            ):
+                targets.load_target("first", profile)
+
     def test_uboot_combines_shared_sources_with_the_selected_board(self) -> None:
         """Shared boot logic and the chosen slot descriptor reach one projection."""
         shared = self.root / "platforms/demo"
@@ -329,7 +356,7 @@ class RepositoryProfileCompressionTests(unittest.TestCase):
     """Admit prepared Kconfig files only for the selected compressor policy."""
 
     def test_each_profile_rejects_the_opposite_prepared_compressor(self) -> None:
-        """RAM admits ZSTD and microSD admits LZO-RLE for every target."""
+        """RAM admits ZSTD and microSD admits LZO-RLE for every target offering them."""
         prepared_configs = {
             "default": {
                 "correct": (
@@ -368,7 +395,8 @@ class RepositoryProfileCompressionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             prepared = Path(temporary) / ".config"
             for target in paths.discover_targets():
-                for profile, contents in prepared_configs.items():
+                for profile in paths.discover_profiles(target):
+                    contents = prepared_configs[profile]
                     with self.subTest(target=target, profile=profile):
                         linux = targets.load_target(target, profile)["linux"]
                         prepared.write_text(contents["correct"])

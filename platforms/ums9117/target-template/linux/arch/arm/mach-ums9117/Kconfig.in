@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-only
+if ARCH_UMS9117
+
+config MACH_@SYMBOL@
+	bool "@DEVICE@"
+	select GPIOLIB
+	select GPIO_PMIC_EIC_SPRD
+	select MFD_SYSCON
+	help
+	  Board support for a UMS9117 feature phone that is loaded into RAM
+	  over USB and started without a boot screen. The board provides the
+	  USB session and read-only internal NAND access; it has no display,
+	  keypad, audio or Bluetooth support.
+
+endif

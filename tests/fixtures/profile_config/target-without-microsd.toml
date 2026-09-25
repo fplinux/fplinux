@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: GPL-2.0-only
+platform = "demo"
+
+[identity]
+brand = "Demo"
+product = "%(target)s"
+hardware_codes = []
+compatible = "demo,%(target)s"
+
+[rootfs]
+packages = []
+
+[bundle]
+packages = []
+
+[linux]
+config_fragment = "kernel/config.fragment"
+memory = { base = 0x80200000, size = 0x03c00000 }
+dtb = "%(target)s.dtb"
+debug_dtb = "%(target)s.dtb"
+patches = []
+copies = []
+appends = []
+forbidden_config = ["CONFIG_FORBIDDEN=y"]
+forbidden_dtb_markers = ["forbidden"]
+
+[bootstrap]
+image = "bootstrap.bin"
+map = "bootstrap.map"
+dtb_destination = "%(target)s.dtb"
+record_prefix = "DEMO"
+
+[adapter]
+spi_mode = 0
+lcd_id = 0
+exec_distance = 0
+backlight_channels = "mono"
+backlight_level = 0
+session_name = "%(target)s"
+boot_instructions = "Power off and connect."
+
+[device_data]
+parser = "radio_parser.py"
+
+[bluetooth]
+
+[[bluetooth.firmware]]
+source = "radio.bin"
+destination = "demo/radio.bin"
+size = 4

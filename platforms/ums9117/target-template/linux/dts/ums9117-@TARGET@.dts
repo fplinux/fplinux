@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/dts-v1/;
+
+#include <dt-bindings/leds/common.h>
+#include "ums9117.dtsi"
+#include "ums9117-sc2720.dtsi"
+#include "fplinux-target-identity.dtsi"
+#include "ums9117-nand-readonly.dtsi"
+
+/ {
+	memory@80200000 {
+		device_type = "memory";
+		reg = <0x80200000 0x03c00000>;
+	};
+};
+
+#include "ums9117-ram-session.dtsi"
+
+/* The fuel gauge and keypad light need board calibration values. */
+&sc2720_fgu {
+	status = "disabled";
+};
+
+&sc2720_kpled {
+	status = "disabled";
+};
+
+&usb {
+	dr_mode = "peripheral";
+	status = "okay";
+};

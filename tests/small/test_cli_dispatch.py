@@ -179,6 +179,33 @@ class CliCacheLockTests(unittest.TestCase):
         self.assertTrue(build.call_args.kwargs["offline"])
         self.assertFalse(build.call_args.kwargs["verbose"])
 
+    def test_target_new_forwards_the_requested_name_platform_and_identity(self) -> None:
+        """The new-target command passes the platform and identity options to target creation."""
+        cases: tuple[tuple[list[str], str | None, str | None], ...] = (
+            ([], None, None),
+            (["--platform", "ums9117"], "ums9117", None),
+            (["--compatible", "hammer,lte"], None, "hammer,lte"),
+        )
+        for extra, platform, compatible in cases:
+            callback = mock.Mock()
+            arguments = ["target", "new", "hammer-lte", "--brand", "HAMMER", "--product", "LTE"]
+            with (
+                self.subTest(extra=extra),
+                mock.patch.object(sys, "argv", ["fplinux", *arguments, *extra]),
+                mock.patch.object(cli, "ROOT", self.root),
+                mock.patch.object(cli, "discover_targets", return_value=("nokia-ta1618",)),
+                mock.patch.object(cli, "create_target", callback),
+            ):
+                cli.main()
+
+            callback.assert_called_once_with(
+                "hammer-lte",
+                platform=platform,
+                brand="HAMMER",
+                product="LTE",
+                compatible=compatible,
+            )
+
     def test_device_data_prepare_rejects_a_nonpositive_job_limit_before_locking(self) -> None:
         """Invalid worker limits cannot create cache state or start preparation."""
         with (
