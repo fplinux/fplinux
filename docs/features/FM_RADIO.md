@@ -32,10 +32,15 @@ operation times out, stop using FM and cold boot the phone before trying again.
 
 FM follows the same volume controls as PCM playback,
 `Headphone Playback Volume` and `Speaker Playback Volume`, so it is quiet at
-low levels, as on the stock firmware. On a phone that vibrates through its
-speaker, [vibration](VIBRATION.md#speaker-vibration) mutes headphone FM audio
-and keeps it playing on the speaker above level `0`.
+low levels, as on the stock firmware. FM also passes through the same
+[equalizer and ALC](HEADPHONE_AUDIO.md#playback-processing) as PCM playback.
+On a phone that vibrates through its speaker,
+[vibration](VIBRATION.md#speaker-vibration) mutes headphone FM audio and keeps
+it playing on the speaker above level `0`.
 
 Scan and FM playback through the headphones, the speaker and both outputs have
-been exercised in the default RAM profile on all three phones. FM use with a
-microSD system root has not been qualified.
+been exercised in the default RAM profile on all three phones with the
+equalizer and ALC off. FM playback with the equalizer on has been exercised on
+INOI 244 Modern 4G and Nokia TA-1618 through the headphones only; it has not
+been exercised on INOI 240 Modern 4G or through the speaker on any phone. FM
+use with a microSD system root has not been qualified.

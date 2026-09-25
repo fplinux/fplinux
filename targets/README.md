@@ -34,9 +34,7 @@ All current targets share these limits:
   [headphone](../docs/features/HEADPHONE_AUDIO.md),
   [speaker](../docs/features/SPEAKER_AUDIO.md),
   [microphone](../docs/features/MICROPHONE_AUDIO.md) and
-  [FM radio](../docs/features/FM_RADIO.md) support. FPLinux does not apply the
-  stock VBC EQ, so a path that uses it in stock firmware does not have stock
-  tonal parity.
+  [FM radio](../docs/features/FM_RADIO.md) support.
 - Bluetooth support is target-specific and uses the same interfaces in both
   global profiles; follow the phone document for support and limitations.
 - Linux reboot is not supported. Suspend and vibration support are

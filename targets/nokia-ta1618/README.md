@@ -46,8 +46,8 @@ Status terms and limits shared by every phone are defined in the
 | [Removable storage](../../docs/features/MICROSD.md)                | Present  | Supported     | microSD FAT32 read/write and unmounted hot-swap are exercised.                                                                                    |
 | [Removable system root](../../docs/guides/MICROSD_ROOT.md)         | Present  | Supported     | microSD FAT32 FIT plus writable ext4; the system card stays installed.                                                                            |
 | Internal phone storage                                             | Present  | Not supported | Normal builds and runs do not read or expose NAND; fitted-data preparation is separate and read-only.                                             |
-| [Headphone audio](../../docs/features/HEADPHONE_AUDIO.md)          | Present  | Partial       | Stereo S16_LE playback and fitted gain levels; stock VBC EQ is not implemented, so output uses the flat Linux path.                               |
-| [Speaker audio](../../docs/features/SPEAKER_AUDIO.md)              | Present  | Partial       | One speaker above the display, alone or with the headphones; fitted gains at all nine levels.                                                     |
+| [Headphone audio](../../docs/features/HEADPHONE_AUDIO.md)          | Present  | Supported     | Stereo S16_LE playback with fitted gain levels and the stock equalizer and ALC.                                                                   |
+| [Speaker audio](../../docs/features/SPEAKER_AUDIO.md)              | Present  | Supported     | One speaker above the display, alone or with the headphones, with fitted gains, stock equalizer and ALC.                                          |
 | [Phone microphone](../../docs/features/MICROPHONE_AUDIO.md)        | Present  | Supported     | Built-in and original wired-headset microphones; 48-kHz mono capture can run alongside 48-kHz stereo playback.                                    |
 | [FM radio](../../docs/features/FM_RADIO.md)                        | Present  | Supported     | Frequency scan with the 3.5 mm cable as antenna and playback through the enabled outputs; candidates need listening to confirm.                   |
 | Modem and mobile service                                           | Present  | Not supported | —                                                                                                                                                 |
@@ -93,7 +93,7 @@ common power, sensor, audio and vibration identifiers.
 Both profiles use the shared
 [device-data preparation procedure](../../docs/guides/BUILDING.md#prepare-device-data)
 with a NAND backup from this exact phone. It prepares Bluetooth firmware, FM
-settings and the fitted headphone and speaker gain profile.
+settings and the fitted audio profile.
 
 ## Load into RAM
 

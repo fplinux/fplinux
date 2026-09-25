@@ -10,7 +10,8 @@ config SND_UMS9117
 	  for supported UMS9117 boards.
 	  Provide stereo mixer controls, output switches and idle zero-PCM
 	  playback that is on by default. A fitted audio profile enables the
-	  speaker, alone or together with the headphones. Boards with
+	  speaker, alone or together with the headphones, and switchable stock
+	  equalizer and ALC processing for each output selection. Boards with
 	  microphone capture pads also provide 48 kHz mono S16_LE capture,
 	  which can run at the same time as 48 kHz playback.
 	  The FM mixer switch routes the internal 32 kHz IIS source to the

@@ -47,9 +47,9 @@ little-endian WAV file and use the default ALSA device:
 The default device converts input to the 48 kHz hardware rate. Use
 `amixer -c 0 cget name='Headphone Playback Volume'` to inspect the active volume
 control. See docs/features/HEADPHONE_AUDIO.md for fitted volume levels,
-direct-device limits, EQ bypass, on-device calibration, idle silence and its
-power trade-off. Enable the built-in speaker with `Speaker Playback Switch`;
-see docs/features/SPEAKER_AUDIO.md.
+direct-device limits, the equalizer and ALC switches, on-device calibration,
+idle silence and its power trade-off. Enable the built-in speaker with
+`Speaker Playback Switch`; see docs/features/SPEAKER_AUDIO.md.
 Select `Capture Source` before microphone recording; see
 docs/features/MICROPHONE_AUDIO.md. FM needs a wired 3.5 mm cable as its antenna;
 see docs/features/FM_RADIO.md for scan and playback commands.
