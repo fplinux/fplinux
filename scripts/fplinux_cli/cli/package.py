@@ -130,9 +130,10 @@ def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]
         archive_names.add(archive_name)
 
     platform = platforms.load_platform(config["platform"])
+    # Archives carry the host tools the runner uses; build-only tools stay in the checkout.
     executables = {
         "runner/run.py",
-        *(f"host/{tool['name']}" for tool in platform["host"]["tools"]),
+        *(f"host/{name}" for name in platform["host"]["runtime_tools"].values()),
     }
     required_runtime = {
         image,
