@@ -129,8 +129,6 @@
 
 &keypad {
 	compatible = "sprd,ums9117-keypad";
-	interrupts = <GIC_SPI 36 IRQ_TYPE_LEVEL_HIGH>;
-	interrupt-names = "matrix";
 	status = "okay";
 	label = "TA-1618 keypad";
 	keypad,num-rows = <5>;
