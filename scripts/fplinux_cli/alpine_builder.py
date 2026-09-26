@@ -816,6 +816,7 @@ def _verify_alpine_rootfs(
             {
                 "/usr/libexec/fplinux/ssh-server": "fplinux-ssh",
                 "/usr/bin/fplinux-session-id": "fplinux-ssh",
+                "/usr/bin/fplinux-clock": "fplinux-ssh",
                 "/etc/init.d/fplinux-ssh": "fplinux-ssh-openrc",
             }
         )

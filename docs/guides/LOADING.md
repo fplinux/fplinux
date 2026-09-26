@@ -95,10 +95,12 @@ writes to removable media through its documented mounted-filesystem workflow.
 
 ## After boot
 
-From an interactive terminal, `run` opens the new SSH session. Without an input
-terminal, it returns successfully as soon as that exact session is ready. To
-open a shell or run one command later, use the `./fplinux console` form for the
-session's profile in [SSH access](../features/SSH.md).
+Once the new SSH session is authenticated, `run` sets the phone clock from the
+host as described in [Real-time clock](../features/RTC.md). From an interactive
+terminal, it then opens the session. Without an input terminal, it returns
+successfully as soon as that exact session is ready. To open a shell or run one
+command later, use the `./fplinux console` form for the session's profile in
+[SSH access](../features/SSH.md).
 
 Exiting the shell does not end Linux. Do not start another RAM load merely to
 reopen the shell. Disconnecting USB leaves Linux running only if the phone has

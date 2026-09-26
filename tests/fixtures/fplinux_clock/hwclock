@@ -1,0 +1,32 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+# Replaces BusyBox hwclock and the RTC device. The RTC time is readable only
+# while the test-owned FPLINUX_TEST_RTC file exists. FPLINUX_TEST_RTC_WRITE
+# selects whether a write is stored, rejected, or accepted without becoming
+# readable.
+# The host-process harness supplies the FPLINUX_TEST_* command contract.
+# shellcheck disable=SC2154
+printf 'hwclock %s\n' "$*" >>"$FPLINUX_TEST_EVENTS"
+case "$*" in
+"-u -r -f /dev/rtc0")
+	if [ ! -f "$FPLINUX_TEST_RTC" ]; then
+		printf 'hwclock: RTC_RD_TIME: Invalid argument\n' >&2
+		exit 1
+	fi
+	cat "$FPLINUX_TEST_RTC"
+	;;
+"-u -w -f /dev/rtc0")
+	case "${FPLINUX_TEST_RTC_WRITE:-stored}" in
+	stored) cp "$FPLINUX_TEST_SYSTEM_CLOCK" "$FPLINUX_TEST_RTC" ;;
+	rejected)
+		printf 'hwclock: RTC_SET_TIME: Invalid argument\n' >&2
+		exit 1
+		;;
+	unreadable) ;;
+	*) exit 2 ;;
+	esac
+	;;
+*)
+	exit 2
+	;;
+esac

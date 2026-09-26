@@ -37,6 +37,7 @@ SSH_PORT = 22
 REMOTE_PATH = re.compile(r"/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+")
 TARGET_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
 SHA256 = re.compile(r"[0-9a-f]{64}")
+CLOCK_STATUS = re.compile(r"system=(?P<system>[0-9]+) rtc=(?P<rtc>kept|written|failed)")
 BUILD_MANIFEST_FIELDS = frozenset(
     {
         "rootfs_receipt",
@@ -1209,6 +1210,32 @@ def require_device_identity(session: dict[str, Any], device_identity: str) -> st
             f"  bundle: kernel *{expected_suffix}"
         )
     return releases[0]
+
+
+def sync_clock(session: dict[str, Any]) -> None:
+    """Set the phone clock from host UTC; a failure warns and leaves the session usable."""
+    host_seconds = int(time.time())
+    result = run_remote(
+        session,
+        f"fplinux-clock {host_seconds}",
+        capture_output=True,
+        shared=True,
+    )
+    status = CLOCK_STATUS.fullmatch(result.stdout.strip())
+    detail = result.stderr.strip().splitlines()
+    reason = detail[-1] if detail else f"unexpected clock status (exit {result.returncode})"
+    if status is None:
+        print(f"fplinux ssh: phone clock was not set: {reason}", file=sys.stderr, flush=True)
+        return
+    phone_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(int(status["system"])))
+    if status["rtc"] == "failed":
+        print(
+            f"fplinux ssh: phone clock set to {phone_time}, but its RTC was not written: {reason}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return
+    print(f"Phone clock set to {phone_time} (RTC {status['rtc']}).", flush=True)
 
 
 def _stream_stderr_detail(stream: BinaryIO) -> str:

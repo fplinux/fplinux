@@ -283,6 +283,7 @@ def complete_linux_handoff(
     )
     transport_module = importlib.import_module("ssh_transport")
     ready = transport_module.wait_for_bound_session(session)
+    transport_module.sync_clock(ready)
     print("Private USB-NCM SSH session is ready.", flush=True)
     if not os.isatty(0):
         print("No interactive terminal is attached; the loader is complete.", flush=True)
