@@ -2,11 +2,11 @@
 
 The corresponding source snapshot records exact versions, URLs, commits and
 hashes in `sources.lock.toml`, `container.lock.toml`, `alpine.lock.toml`,
-`Containerfile`, `package-lock.json`, target asset locks and profile-owned source
-locks. Binary archives carry the target asset lock as `assets.lock.toml`, plus
-content receipts and `SHA256SUMS`. Aport `APKBUILD` files pin their own upstream
-archives or commits and verify remote and local source members with SHA-512
-sums.
+`Containerfile`, `package-lock.json`, target asset locks and the platform U-Boot
+source lock. Binary archives carry the target asset lock as `assets.lock.toml`,
+plus content receipts and `SHA256SUMS`. Aport `APKBUILD` files pin their own
+upstream archives or commits and verify remote and local source members with
+SHA-512 sums.
 
 Original FPLinux code and documentation are licensed under `GPL-2.0-only`
 unless an individual file carries a different SPDX identifier.
@@ -20,10 +20,13 @@ unless an individual file carries a different SPDX identifier.
 | OpenSSH SFTP server             | SSH file-transfer subsystem                    | SSH-OpenSSH; supplied by the pinned Alpine package set                                     |
 | skalibs / utmps                 | Dropbear runtime libraries                     | ISC; supplied by the pinned Alpine package set                                             |
 | zlib                            | Dropbear compression library                   | Zlib; supplied by the pinned Alpine package set                                            |
+| BlueZ 5.86                      | Bluetooth daemons and `bluetoothctl`           | GPL-2.0-or-later, BSD-2-Clause and MIT; supplied by the pinned Alpine package set          |
+| D-Bus 1.16.2                    | Message bus for the Bluetooth services         | AFL-2.1 OR GPL-2.0-or-later; supplied by the pinned Alpine package set                     |
 | libical 3.0.20                  | vCard parser for the BlueZ OBEX daemon         | LGPL-2.1-only OR MPL-2.0; upstream release archive built without ICU or glib               |
 | GLib 2.88.1                     | Core library for the BlueZ daemons             | LGPL-2.1-or-later; upstream release archive built without GIO, GObject or introspection    |
 | apk-tools 3.0.6                 | Package manager for optional APKs              | GPL-2.0-only; upstream release archive built with Mbed TLS instead of OpenSSL              |
 | Mbed TLS 3.6                    | apk-tools digest and signature library         | Apache-2.0 OR GPL-2.0-or-later; supplied by the pinned Alpine package set                  |
+| libjpeg-turbo 3.1.3             | Software JPEG reference in `fplinux-jpeg-cpu`  | IJG, with Zlib-licensed SIMD code; upstream release archive linked statically              |
 | ALSA utils 1.2.15.2             | Playback, recording and mixer tools            | GPL-2.0-or-later; upstream aplay, arecord and amixer built by the audio aport              |
 | ALSA library 1.2.15.3           | PCM conversion and mixer interface             | LGPL-2.1-or-later; supplied by the pinned Alpine package set                               |
 | libinput / libevdev / mtdev     | Input device event libraries                   | MIT; supplied by the pinned Alpine package set                                             |
@@ -39,7 +42,7 @@ unless an individual file carries a different SPDX identifier.
 | U-Boot 2026.07                  | RAM second stage and FIT tooling               | GPL-2.0-only; official DENX archive; target binary is embedded in `ramboot.bin`            |
 | libusb                          | Host USB access                                | LGPL-2.1-or-later; linked into the static bundled host tools at build time                 |
 | `spreadtrum_flash` / `spd_dump` | Spreadtrum loader transport                    | The Unlicense; pinned upstream source                                                      |
-| fpdoom `t117_maps.7z`           | Firmware-derived TA-1618 register-map data     | Pinned fpdoom release mirror (`NOASSERTION`)                                               |
+| fpdoom `t117_maps.7z`           | Firmware-derived T117 phone register-map data  | Pinned fpdoom release mirror (`NOASSERTION`)                                               |
 | `t117_fdl1.bin`                 | T117 first-stage RAM loader                    | The Unlicense; pinned spreadtrum_flash release asset                                       |
 
 The TyrQuake APKBUILD verifies the upstream 0.71 source archive and each local

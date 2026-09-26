@@ -14,11 +14,13 @@ Names and machine identifiers follow the shared
 
 ## Status and common limits
 
-In a phone table, **Hardware** is **Present**, **Absent**, **Unknown** or **N/A**.
-**Unknown** does not mean absent. **FPLinux** is **Supported** only after the
-feature has been exercised on that exact phone, **Partial** when a stated limit
-or untested physical boundary remains, and **Not supported** when the current target has
-no supported path.
+In a phone table, **Hardware** is **Present**, **Absent**, **Unknown**, or
+**N/A** for a software-only capability. **Unknown** does not mean absent.
+In both the feature and application tables, **FPLinux** is **Supported** only
+after the capability has been exercised on that exact phone, **Partial** when a
+stated limit or untested physical boundary remains, **Not supported** when the
+current target has no supported path, and **Unknown** when support on that
+phone has not been established.
 
 All current targets share these limits:
 
@@ -43,57 +45,14 @@ All current targets share these limits:
 Hardware presence still belongs to each phone table. For example, a missing
 camera driver does not prove that a camera is physically absent.
 
-## Building and loading
+## Shared documentation
 
-Shared guides own workflows that do not change between phones:
-
-- [Building FPLinux](../docs/guides/BUILDING.md) covers source setup, checks and builds.
-- [Loading from a source checkout](../docs/guides/LOADING.md) covers USB access, RAM loading,
-  reconnecting and verification. Read the selected target document for its boot
-  key and safe way to end the session.
-- [Using a standalone archive](../docs/guides/STANDALONE.md) covers the bundled
-  runner and offline documentation shipped with a package.
-- [Release archives](../docs/guides/RELEASES.md) defines candidates, phone testing and
-  releases. Target support does not by itself make an executable payload release-ready.
-- [microSD system root](../docs/guides/MICROSD_ROOT.md) covers card preparation,
-  persistent boot and system-card safety.
-
-## Features and applications
-
-Feature and application documents own behavior shared by the current targets:
-
-### Access and file transfer
-
-- [USB networking](../docs/features/USB_NETWORKING.md)
-- [SSH access](../docs/features/SSH.md)
-- [File transfer](../docs/features/FILE_TRANSFER.md)
-- [Bluetooth](../docs/features/BLUETOOTH.md)
-
-### Local console and input
-
-- [Local console](../docs/features/LOCAL_CONSOLE.md)
-- [Host keyboard forwarding](../docs/features/HOST_KEYBOARD.md)
-- [Headphone audio](../docs/features/HEADPHONE_AUDIO.md)
-- [Speaker audio](../docs/features/SPEAKER_AUDIO.md)
-- [Phone microphone](../docs/features/MICROPHONE_AUDIO.md)
-- [FM radio](../docs/features/FM_RADIO.md)
-
-### Hardware, storage and power
-
-- [CPU clock and frequency selection](../docs/features/CPU_CLOCK.md)
-- [Removable microSD storage](../docs/features/MICROSD.md)
-- [Real-time clock](../docs/features/RTC.md)
-- [Power-off](../docs/features/POWER_OFF.md)
-- [Suspend](../docs/features/SUSPEND.md)
-
-### Applications
-
-- [FPLinux: ARMADA](../docs/apps/SHOWCASE.md)
-- [TyrQuake](../docs/apps/TYRQUAKE.md)
-- [MicroPythonOS](../docs/apps/MICROPYTHONOS.md)
-- [Image rotation](../docs/apps/ROTATE.md)
-- [JPEG codec and scaling](../docs/apps/JPEG.md)
-- [Native image presentation](../docs/apps/PRESENT.md)
+Shared guides, feature pages and application pages own behavior that does not
+change between phones; the project
+[documentation index](../README.md#documentation) lists them. Read the selected
+target document for its boot key and safe way to end the session. Target support
+does not by itself make an executable payload release-ready; see
+[Release archives](../docs/guides/RELEASES.md).
 
 ## Adding a target
 

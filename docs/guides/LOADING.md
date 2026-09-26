@@ -96,11 +96,9 @@ writes to removable media through its documented mounted-filesystem workflow.
 ## After boot
 
 From an interactive terminal, `run` opens the new SSH session. Without an input
-terminal, it returns successfully as soon as that exact session is ready. For a
-default source-checkout session, use `./fplinux console <target>` later to open
-a shell, or `./fplinux console <target> --exec '<command>'` to run one command.
-Use the matching profile or standalone reconnect workflow when that is how the
-session was started.
+terminal, it returns successfully as soon as that exact session is ready. To
+open a shell or run one command later, use the `./fplinux console` form for the
+session's profile in [SSH access](../features/SSH.md).
 
 Exiting the shell does not end Linux. Do not start another RAM load merely to
 reopen the shell. Disconnecting USB leaves Linux running only if the phone has
@@ -115,10 +113,11 @@ RAM load by following
 
 ## Verify a source-checkout session
 
-With the default target bundle loaded and its console ready, run:
+With the session ready, run `verify` with the profile that started it:
 
 ```sh
 ./fplinux verify <target>
+./fplinux verify <target> --profile microsd-uboot
 ```
 
 `verify` compares the running device identity with the selected local runtime.

@@ -100,10 +100,18 @@ For details, use the bundled pages:
 - [headphone audio](../features/HEADPHONE_AUDIO.md), on supported phones;
 - [speaker audio](../features/SPEAKER_AUDIO.md), on supported phones;
 - [phone microphone](../features/MICROPHONE_AUDIO.md), on supported phones;
-- [FM radio](../features/FM_RADIO.md), on the three current targets with fitted settings;
+- [FM radio](../features/FM_RADIO.md), on supported phones with fitted settings;
 - [LCD backlight](../features/DISPLAY_BACKLIGHT.md) and
   [keypad backlight](../features/KEYPAD_BACKLIGHT.md);
 - [vibration](../features/VIBRATION.md), subject to the phone's physical limits;
+
+### Storage and power
+
+- [removable microSD storage](../features/MICROSD.md), including safe removal;
+- [microSD system root](MICROSD_ROOT.md);
+- [real-time clock](../features/RTC.md);
+- [power-off](../features/POWER_OFF.md);
+- [suspend](../features/SUSPEND.md);
 
 ### Hardware telemetry
 
@@ -118,7 +126,10 @@ For details, use the bundled pages:
 - [installing and removing optional APK packages](APK_PACKAGES.md);
 - [FPLinux: ARMADA](../apps/SHOWCASE.md);
 - [TyrQuake](../apps/TYRQUAKE.md);
-- [MicroPythonOS](../apps/MICROPYTHONOS.md).
+- [MicroPythonOS](../apps/MICROPYTHONOS.md);
+- [image rotation](../apps/ROTATE.md);
+- [JPEG codec and scaling](../apps/JPEG.md);
+- [native image presentation](../apps/PRESENT.md).
 
 ## End the session
 

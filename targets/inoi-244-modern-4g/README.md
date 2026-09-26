@@ -52,20 +52,20 @@ Status terms and limits shared by every phone are defined in the
 | USB host mode                                                      | Unknown  | Not supported | —                                                                                                                                                  |
 | [Removable storage](../../docs/features/MICROSD.md)                | Present  | Partial       | ext4 read/write and card-backed swap work in the RAM profile; FAT32 data storage and hot-swap have not been tested.                                |
 | [Removable system root](../../docs/guides/MICROSD_ROOT.md)         | Present  | Supported     | FAT32 boot files plus writable ext4 root; applications, files and Bluetooth pairing records persist across cold boots.                             |
-| Internal phone storage                                             | Present  | Not supported | Normal builds and runs do not read or expose NAND; fitted-data preparation is separate and read-only.                                              |
+| Internal phone storage                                             | Present  | Partial       | Read-only raw [NAND backup](../../docs/guides/BUILDING.md#save-a-nand-backup); no filesystem, writes or restore.                                   |
 | [Headphone audio](../../docs/features/HEADPHONE_AUDIO.md)          | Present  | Supported     | Stereo S16_LE playback; the default device converts input to 48 kHz, and the fitted profile supplies stock-derived levels, equalizer and ALC.      |
 | [Speaker audio](../../docs/features/SPEAKER_AUDIO.md)              | Present  | Supported     | Rear loudspeaker with fitted gains, stock equalizer and ALC.                                                                                       |
 | [Phone microphone](../../docs/features/MICROPHONE_AUDIO.md)        | Present  | Partial       | The built-in microphone records mono 48-kHz PCM; the wired-headset microphone has not been tested on this phone.                                   |
 | [FM radio](../../docs/features/FM_RADIO.md)                        | Present  | Supported     | Frequency scan with the 3.5 mm cable as antenna and playback through the enabled outputs; candidates need listening to confirm.                    |
 | Modem and mobile service                                           | Present  | Not supported | —                                                                                                                                                  |
-| [Bluetooth](../../docs/features/BLUETOOTH.md)                      | Present  | Partial       | Pairing, bidirectional OPP, PAN Internet and recovery after RTC-woken s2idle work in both profiles.                                                |
+| [Bluetooth](../../docs/features/BLUETOOTH.md)                      | Present  | Partial       | Pairing, bidirectional OPP, PAN Internet and recovery after RTC-woken s2idle work in both profiles; keyboards and mice have not been tested.       |
 | Wi-Fi                                                              | Unknown  | Not supported | —                                                                                                                                                  |
 | Camera                                                             | Unknown  | Not supported | —                                                                                                                                                  |
 | [Charger status](../../docs/features/CHARGER_STATUS.md)            | Present  | Partial       | Read-only status is available; battery charging has not been tested.                                                                               |
 | [Battery telemetry](../../docs/features/BATTERY_TELEMETRY.md)      | Present  | Partial       | Interface responds without a battery; battery voltage/current accuracy has not been checked.                                                       |
 | [SoC temperature](../../docs/features/SOC_TEMPERATURE.md)          | Present  | Partial       | Shared temperature interface enabled; physical accuracy has not been checked.                                                                      |
 | [Auxiliary ADC](../../docs/features/AUXADC.md)                     | Present  | Partial       | Shared raw-channel interface enabled; physical inputs and accuracy have not been checked.                                                          |
-| [Real-time clock](../../docs/features/RTC.md)                      | Present  | Partial       | Read/set time, one-shot alarms and RTC wake work in both profiles.                                                                                 |
+| [Real-time clock](../../docs/features/RTC.md)                      | Present  | Partial       | Read/set time, one-shot alarms and RTC wake work in both profiles; no update interrupts or alarm power-on.                                         |
 | Other battery functions                                            | Unknown  | Not supported | No battery level, temperature or charge control is provided.                                                                                       |
 | [Vibration](../../docs/features/VIBRATION.md)                      | Present  | Partial       | Rear speaker vibration; headphone audio is muted meanwhile, and one continuous pulse lasts at most about three seconds.                            |
 | Indicator LEDs                                                     | Unknown  | Not supported | —                                                                                                                                                  |
@@ -77,12 +77,12 @@ Status terms and limits shared by every phone are defined in the
 
 | Application                                             | FPLinux   | This phone                                                                                    |
 | ------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------- |
-| [FPLinux: ARMADA](../../docs/apps/SHOWCASE.md)          | Supported | Runs in both profiles; physical light effects have not been tested.                           |
+| [FPLinux: ARMADA](../../docs/apps/SHOWCASE.md)          | Partial   | Runs in both profiles; physical light effects have not been tested.                           |
 | [TyrQuake](../../docs/apps/TYRQUAKE.md)                 | Supported | Game data can use RAM or ext4 microSD storage, including the system root.                     |
-| [MicroPythonOS](../../docs/apps/MICROPYTHONOS.md)       | Supported | State persists on the ext4 system root; optional FAT32 data-card storage has not been tested. |
+| [MicroPythonOS](../../docs/apps/MICROPYTHONOS.md)       | Partial   | State persists on the ext4 system root; optional FAT32 data-card storage has not been tested. |
 | [Image rotation](../../docs/apps/ROTATE.md)             | Supported | Explicit CPU/ROTA selection and framebuffer preview.                                          |
 | [JPEG codec and scaling](../../docs/apps/JPEG.md)       | Supported | Hardware decode, fixed encode and fixed half-scaling.                                         |
-| [Native image presentation](../../docs/apps/PRESENT.md) | Supported | Direct NV16 or CPU-converted RGB565 transfers; visible image fidelity has not been checked.   |
+| [Native image presentation](../../docs/apps/PRESENT.md) | Partial   | Direct NV16 or CPU-converted RGB565 transfers; visible image fidelity has not been checked.   |
 
 ## Hardware interfaces
 

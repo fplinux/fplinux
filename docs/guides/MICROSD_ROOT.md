@@ -32,7 +32,8 @@ before the next microSD boot.
 
 From a source checkout, follow the target's loading instructions, selecting
 `--profile microsd-uboot` or `--boot microsd`. Insert the prepared card before
-starting the phone and keep it installed.
+starting the phone and keep it installed. Reconnect with
+`--profile microsd-uboot` as described in [SSH sessions](../features/SSH.md).
 
 For a standalone archive containing `FPLINUX.img.xz`, prepare the card first,
 then follow [the archive instructions](STANDALONE.md). Its runner already
@@ -57,8 +58,9 @@ before removing or rewriting the card.
 
 ### Shutdown with USB power
 
-On INOI, battery-only power-off has not been tested. A `poweroff` request or a lost
-USB connection alone does not establish that the card is safe to remove.
+Use this procedure on a phone whose documentation does not list battery-only
+power-off as supported. A `poweroff` request or a lost USB connection alone
+does not establish that the card is safe to remove.
 Keep USB connected while stopping applications and services that write to the
 card. Disable all card-backed swap and unmount every card filesystem except
 the system root, following [safe removal](../features/MICROSD.md#safe-removal).

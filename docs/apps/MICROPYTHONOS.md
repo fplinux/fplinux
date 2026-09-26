@@ -1,9 +1,9 @@
 # MicroPythonOS
 
 MicroPythonOS is an optional graphical MicroPython environment for the local
-FPLinux framebuffer and physical keypad. It runs on Nokia TA-1618 and INOI 244
-Modern 4G. It also launches on INOI 240 Modern 4G, with partial support because
-the UI is not fully adapted to its `128×160` screen.
+FPLinux framebuffer and physical keypad. See the
+[target documentation](../../targets/README.md) for its support and display
+limits on the selected phone.
 
 The package is installed separately into the active system root; it is not
 preinstalled in the normal root filesystem. Installation lasts until shutdown
@@ -76,7 +76,7 @@ Keyboards can be used at the same time; see
 | -------------- | ------------------------------------------------------------- |
 | D-pad          | Move focus; operate open lists, drop-downs, and text controls |
 | Centre or dial | Select a focused item or confirm text input                   |
-| Left soft      | Open or close the application drawer                          |
+| Left soft      | Open or close the top settings and notification drawer        |
 | Right soft     | Return to the previous screen or finish active text entry     |
 | `0` to `9`     | Enter text with multi-tap when a text field is active         |
 | `*`            | Cancel the pending character or erase the previous character  |

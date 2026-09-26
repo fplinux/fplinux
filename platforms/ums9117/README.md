@@ -15,11 +15,11 @@
 ## Scope
 
 UMS9117 provides reusable CPU, interrupt, timer, USB gadget, memory-copy DMA,
-ROTA, JPEG codec/scaler, analog-die, audio, Bluetooth, FM radio, framebuffer
-and matrix-keypad support for the listed phones. Audio covers headphone and
-speaker playback, microphone capture and FM playback. Linux reports
-the MPLL and Cortex-A7 rates and offers manual selection between 768 MHz and
-1 GHz. The platform owns the SoC integration and shared loader support. A
+ROTA, JPEG codec/scaler, analog-die, audio, Bluetooth, FM radio, framebuffer,
+matrix-keypad, microSD and read-only NAND support for the listed phones. Audio
+covers headphone and speaker playback, microphone capture and FM playback. Linux
+reports the MPLL and Cortex-A7 rates and offers manual selection between 768 MHz
+and 1 GHz. The platform owns the SoC integration and shared loader support. A
 target owns board memory, panel profile and wiring, keypad map, bootstrap
 inputs, payload assembly and the values supplied to the loader.
 
@@ -28,20 +28,24 @@ inputs, payload assembly and the values supplied to the loader.
 | Capability                                                     | Status        | Target-facing requirement or limitation                                                                                                                  |
 | -------------------------------------------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | CPU / GIC / timers                                             | Supported     | The SoC has one Cortex-A7 CPU; targets use the shared interrupt and timer nodes.                                                                         |
-| [CPU clock](../../docs/features/CPU_CLOCK.md)                  | Partial       | Manual 768 MHz or 1 GHz selection retains the inherited voltage and MPLL; switching is physically tested on Nokia and INOI 240.                          |
+| [CPU clock](../../docs/features/CPU_CLOCK.md)                  | Partial       | Manual 768 MHz or 1 GHz selection retains the inherited voltage and MPLL; each target states whether switching has been tested.                          |
 | [USB device controller](../../docs/features/USB_NETWORKING.md) | Supported     | USB peripheral support is shared; board USB setup remains target-owned.                                                                                  |
 | USB host mode                                                  | Not supported | The shared MUSB integration is peripheral-only and provides no host-mode initialization.                                                                 |
 | [AP DMAengine](#memory-copy-dma)                               | Partial       | 32 shared channels for memory copies and the fixed ROTA request; client availability depends on the target.                                              |
 | [Image rotation](../../docs/apps/ROTATE.md)                    | Supported     | V4L2 mem2mem ROTA with a shared userspace interface.                                                                                                     |
 | [JPEG codec and scaling](../../docs/apps/JPEG.md)              | Supported     | Baseline JPEG decode, fixed quality-85 JPEG encode, and two fixed half-size NV16 scaler pairs.                                                           |
 | [Native image presentation](../../docs/apps/PRESENT.md)        | Supported     | Native-size NV16 or RGB565 presentation through the target framebuffer.                                                                                  |
-| Analog-die interface                                           | Supported     | Linux initializes the shared transport; feature clients and their board wiring remain target-owned.                                                      |
+| Analog-die interface                                           | Supported     | Linux initializes the transport and shared SC2720 charger, fuel-gauge, RTC, ADC, keypad-light and power-off clients; the vibrator is enabled per target. |
 | [LCDC framebuffer core](../../docs/features/LOCAL_CONSOLE.md)  | Supported     | Targets provide a panel profile and the board-specific panel transport setup.                                                                            |
 | [Matrix keypad](../../docs/features/LOCAL_CONSOLE.md)          | Supported     | Targets provide matrix wiring and EIC keys; the [phone key codes](../../docs/reference/INPUT.md) are shared.                                             |
 | [Audio](../../docs/features/HEADPHONE_AUDIO.md)                | Partial       | Headphones, microphones and [speaker audio](../../docs/features/SPEAKER_AUDIO.md) work on all targets; each target states its microphone limits.         |
 | [Bluetooth](../../docs/features/BLUETOOTH.md)                  | Partial       | Shared CM4 HCI driver; each target needs firmware prepared from its own phone.                                                                           |
 | [FM radio](../../docs/features/FM_RADIO.md)                    | Supported     | V4L2 receiver on the CM4 Bluetooth link, heard on the enabled outputs; it needs the phone's Bluetooth firmware and the target's fitted FM configuration. |
-| UART, GPIO/pin control, SPI/I2C, watchdog/reset                | Not supported | No generic platform framework or driver for these functions.                                                                                             |
+| [microSD host](../../docs/features/MICROSD.md)                 | Supported     | SD cards on a 4-bit bus with fixed pin settings; each target enables the slot.                                                                           |
+| Internal NAND reader                                           | Partial       | Read-only raw page stream for [NAND backup](../../docs/guides/BUILDING.md#save-a-nand-backup); no filesystem, writes or erase.                           |
+| SC2720 EIC GPIO                                                | Supported     | PMIC external-interrupt lines as GPIO; targets use them for keys.                                                                                        |
+| Pin control and reset                                          | Partial       | Fixed microSD pin settings and the microSD controller reset line only.                                                                                   |
+| UART, AP GPIO, I2C, general SPI, watchdog, system reset        | Not supported | No platform driver for these functions.                                                                                                                  |
 
 ## Memory-copy DMA
 

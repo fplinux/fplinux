@@ -75,8 +75,10 @@ source-plane strides, each a multiple of four bytes. Capture rows are packed.
 
 Supported controls are rotation by 90, 180 or 270 degrees, or horizontal
 mirroring with rotation set to zero. Set rotation and HFLIP together when
-switching between these modes. Vertical flipping and rotation-plus-flip
-combinations are rejected by both CLI engines.
+switching between these modes. In the CLI, `--rotate 90`, `180` or `270`
+selects rotation, with `90` as the default, and `--hflip` with `--rotate 0`
+selects mirroring. `--vflip` and rotation-plus-flip combinations are rejected
+by both CLI engines.
 
 Each selected source plane's first byte must be four-byte aligned, including
 its crop offset, and every packed capture row must contain a multiple of four

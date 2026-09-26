@@ -30,8 +30,8 @@ and target bootstrap inputs out of the platform.
 
 ## Shared hardware support
 
-Use **Supported**, **Partial**, **Not supported** and **Unknown** with the same
-meaning as the [target template](../../docs/porting/TARGET.md). This table
+Use **Supported**, **Partial**, **Not supported** and **Unknown** as defined in
+the [target index](../../targets/README.md#status-and-common-limits). This table
 describes shared implementation and hardware evidence; it does not demonstrate
 a complete phone runtime. Bundled installable APKs join that runtime in the
 executable payload used for release testing on the phone.

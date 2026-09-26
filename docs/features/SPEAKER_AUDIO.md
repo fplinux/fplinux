@@ -1,10 +1,10 @@
 # Speaker audio
 
-Nokia TA-1618 plays PCM through its single front speaker. INOI 240 and INOI 244
-Modern 4G play through their rear loudspeaker. Each phone requires its own
-fitted audio profile; without it, `Speaker Playback Switch` and
-`Speaker Playback Volume` are absent. The speaker plays alone or together with
-wired headphones, as described in
+The Nokia 3210 4G (TA-1618) plays PCM through its single front speaker. The
+INOI 240 Modern 4G and INOI 244 Modern 4G play through their rear loudspeaker.
+Each phone requires its own fitted audio profile; without it,
+`Speaker Playback Switch` and `Speaker Playback Volume` are absent. The speaker
+plays alone or together with wired headphones, as described in
 [Playback outputs](HEADPHONE_AUDIO.md#playback-outputs).
 
 To play through the speaker alone without the
