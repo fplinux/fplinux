@@ -11,6 +11,7 @@
 #include "cm4-mailbox.h"
 
 #define UMS9117_MBOX_EVENT_LIMIT 256U
+#define UMS9117_MBOX_STOP_TIMEOUT_MS 2000U
 #define UMS9117_MBOX_OPEN 0xbeee0104U
 #define UMS9117_MBOX_CMD 0x00010504U
 #define UMS9117_MBOX_DONE 0x00020604U
@@ -75,7 +76,7 @@ struct sbuf_stream {
 	struct mailbox_send notify;
 };
 
-/* One controller, one cold start; bind/unbind and CM4 restart are unsupported. */
+/* One controller; the platform owner serializes starts and stops. */
 static struct {
 	void __iomem *sipc;
 	struct device *dev;
@@ -96,6 +97,7 @@ static struct {
 	struct mailbox_send done;
 	struct sbuf_stream stream;
 	int error;
+	int stop_error;
 } mailbox;
 
 /* Called with local IRQs excluded or from an atomic mailbox callback. */
@@ -181,11 +183,11 @@ static void mailbox_transmitted(struct mbox_client *client, void *data,
 
 static void mailbox_release_channel(void *data)
 {
-	mbox_free_channel(data);
+	mbox_free_channel(mailbox.channel);
 	mailbox.channel = NULL;
 }
 
-int ums9117_cm4_mailbox_init(struct device *dev)
+static int mailbox_request_channel(struct device *dev)
 {
 	int ret;
 
@@ -199,9 +201,17 @@ int ums9117_cm4_mailbox_init(struct device *dev)
 		mailbox.channel = NULL;
 		return ret;
 	}
-	ret = devm_add_action_or_reset(dev, mailbox_release_channel,
-				       mailbox.channel);
-	return ret;
+	return 0;
+}
+
+int ums9117_cm4_mailbox_init(struct device *dev)
+{
+	int ret;
+
+	ret = mailbox_request_channel(dev);
+	if (ret)
+		return ret;
+	return devm_add_action_or_reset(dev, mailbox_release_channel, NULL);
 }
 
 static bool sbuf_layout_valid(const struct sbuf_snapshot *snapshot,
@@ -295,10 +305,29 @@ static int sbuf_prepare(void)
 
 int ums9117_cm4_mailbox_prepare(void __iomem *sipc)
 {
+	struct device *dev = mailbox.dev;
 	unsigned long flags;
 	int ret;
 
-	if (!mailbox.channel || mailbox.prepared || mailbox.stopped)
+	if (!dev || !sipc || irqs_disabled() ||
+	    (mailbox.prepared && !mailbox.stopped))
+		return -EINVAL;
+	if (mailbox.stopped) {
+		if (mailbox.stop_error)
+			return mailbox.stop_error;
+		/*
+		 * CM4 is held in reset. Retire the old provider queue and reset
+		 * its receive FIFO before accepting a new startup handshake.
+		 */
+		mailbox_release_channel(NULL);
+		memset(&mailbox, 0, sizeof(mailbox));
+		mailbox.stopped = true;
+		ret = mailbox_request_channel(dev);
+		if (ret)
+			return ret;
+		mailbox.stopped = false;
+	}
+	if (!mailbox.channel)
 		return -EINVAL;
 	mailbox.sipc = sipc;
 	mailbox.open.data[0] = UMS9117_MBOX_OPEN;
@@ -790,17 +819,29 @@ out:
 	return ret;
 }
 
-void ums9117_cm4_mailbox_stop(void)
+int ums9117_cm4_mailbox_stop(void)
 {
 	unsigned long flags;
+	bool pending;
 
+	if (irqs_disabled())
+		return -EINVAL;
 	local_irq_save(flags);
-	if (mailbox.stopped)
-		goto out;
-	/* The provider keeps hardware ownership until the device resource releases. */
+	if (mailbox.stopped) {
+		local_irq_restore(flags);
+		return mailbox.stop_error;
+	}
 	if (mailbox.prepared)
 		mailbox_consume_queue();
 	mailbox.stopped = true;
-out:
+	pending = (mailbox.open.triggered && !mailbox.open.delivered) ||
+		  (mailbox.done.triggered && !mailbox.done.delivered) ||
+		  (mailbox.stream.notify.triggered &&
+		   !mailbox.stream.notify.delivered);
 	local_irq_restore(flags);
+	/* Finish the provider-owned TX while CM4 can still consume its inbox. */
+	if (pending)
+		mailbox.stop_error = mbox_flush(mailbox.channel,
+						UMS9117_MBOX_STOP_TIMEOUT_MS);
+	return mailbox.stop_error;
 }

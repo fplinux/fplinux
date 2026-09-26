@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Link the production HCI runtime. The external HCI core, H4 receiver,
- * workqueue, clock and mailbox are deterministic single-threaded fakes.
- * This checks retained transport behavior, not H4 reassembly, kernel
- * concurrency or CM4 MMIO.
+ * workqueue, clock, CM4 owner and mailbox are deterministic single-threaded
+ * fakes. FM registration is a fake consumer. This checks transport lifecycle,
+ * not H4 reassembly, V4L2 ioctls, kernel concurrency or CM4 MMIO.
  */
 #include <assert.h>
 #include <errno.h>
@@ -18,10 +18,18 @@
 #include <net/bluetooth/hci_core.h>
 
 #include "cm4-hci.h"
+#include "cm4-fm.h"
 #include "cm4-mailbox.h"
+#include "cm4-power.h"
+
+struct ums9117_fm {
+	struct device *dev;
+};
 
 static struct {
+	struct device *dev;
 	struct hci_dev *hdev;
+	struct ums9117_fm *radio;
 	struct delayed_work *work;
 	u64 now;
 	u8 input[256];
@@ -30,6 +38,15 @@ static struct {
 	size_t output_bytes;
 	unsigned int register_count;
 	unsigned int unregister_count;
+	unsigned int radio_register_count;
+	unsigned int radio_unregister_count;
+	unsigned int owners;
+	unsigned int start_count;
+	unsigned int stop_count;
+	bool powered;
+	int owner_error;
+	const u8 *restart_prefix;
+	size_t restart_prefix_bytes;
 	unsigned int suspend_count;
 	unsigned int resume_count;
 	unsigned int sentinel_events;
@@ -49,6 +66,61 @@ static struct {
 	unsigned int fm_writes;
 	unsigned long fm_wait_ms;
 } fake;
+
+int ums9117_cm4_get(struct device *dev, enum ums9117_cm4_user user)
+{
+	int ret;
+
+	assert(dev == fake.dev);
+	assert(!(fake.owners & (1U << user)));
+	if (fake.owner_error)
+		return fake.owner_error;
+	if (!fake.powered) {
+		ret = ums9117_hci_transport_start(fake.restart_prefix,
+						  fake.restart_prefix_bytes);
+		if (ret)
+			return ret;
+		fake.powered = true;
+		fake.start_count++;
+	}
+	fake.owners |= 1U << user;
+	return 0;
+}
+
+void ums9117_cm4_put(struct device *dev, enum ums9117_cm4_user user)
+{
+	assert(dev == fake.dev);
+	assert(fake.owners & (1U << user));
+	fake.owners &= ~(1U << user);
+	if (!fake.owners) {
+		ums9117_hci_transport_stop();
+		fake.powered = false;
+		fake.stop_count++;
+		fake.input_bytes = 0;
+		fake.fm_input_bytes = 0;
+		fake.fm_sent = false;
+	}
+}
+
+struct ums9117_fm *ums9117_fm_register(struct device *dev)
+{
+	assert(dev == fake.dev && !fake.radio);
+	fake.radio = calloc(1, sizeof(*fake.radio));
+	assert(fake.radio);
+	fake.radio->dev = dev;
+	fake.radio_register_count++;
+	return fake.radio;
+}
+
+void ums9117_fm_unregister(struct ums9117_fm *radio)
+{
+	if (!radio)
+		return;
+	assert(radio == fake.radio);
+	fake.radio_unregister_count++;
+	fake.radio = NULL;
+	free(radio);
+}
 
 static void pump(void)
 {
@@ -254,13 +326,13 @@ int hci_resume_dev(struct hci_dev *hdev)
 
 int ums9117_cm4_mailbox_poll(void)
 {
-	assert(!fake.paused);
+	assert(fake.powered && !fake.paused);
 	return 0;
 }
 
 int ums9117_cm4_mailbox_h4_write(const u8 *data, size_t bytes, size_t *written)
 {
-	assert(!fake.paused);
+	assert(fake.powered && !fake.paused);
 	assert(bytes <= sizeof(fake.output) - fake.output_bytes);
 	memcpy(fake.output + fake.output_bytes, data, bytes);
 	fake.output_bytes += bytes;
@@ -273,7 +345,7 @@ int ums9117_cm4_mailbox_h4_read(u8 *data, size_t capacity, size_t *received)
 	size_t bytes = fake.input_bytes < capacity ? fake.input_bytes :
 						     capacity;
 
-	assert(!fake.paused);
+	assert(fake.powered && !fake.paused);
 	fake.read_count++;
 	memcpy(data, fake.input, bytes);
 	memmove(fake.input, fake.input + bytes, fake.input_bytes - bytes);
@@ -284,6 +356,7 @@ int ums9117_cm4_mailbox_h4_read(u8 *data, size_t capacity, size_t *received)
 
 int ums9117_cm4_mailbox_fm_write(const u8 *data, size_t bytes)
 {
+	assert(fake.powered && !fake.paused);
 	assert(bytes <= sizeof(fake.fm_output));
 	memcpy(fake.fm_output, data, bytes);
 	fake.fm_output_bytes = bytes;
@@ -296,6 +369,7 @@ int ums9117_cm4_mailbox_fm_read(u8 *data, size_t capacity, size_t *received)
 {
 	size_t bytes = fake.fm_sent ? fake.fm_input_bytes : 0;
 
+	assert(fake.powered && !fake.paused);
 	if (bytes > capacity)
 		bytes = capacity;
 	if (fake.fm_chunk && bytes > fake.fm_chunk)
@@ -310,6 +384,7 @@ int ums9117_cm4_mailbox_fm_read(u8 *data, size_t capacity, size_t *received)
 
 int ums9117_cm4_mailbox_suspend(void)
 {
+	assert(fake.powered);
 	if (fake.peer_busy || fake.input_bytes)
 		return -EBUSY;
 	fake.paused = true;
@@ -318,6 +393,7 @@ int ums9117_cm4_mailbox_suspend(void)
 
 int ums9117_cm4_mailbox_resume(void)
 {
+	assert(fake.powered);
 	fake.paused = false;
 	return 0;
 }
@@ -327,6 +403,9 @@ static void start(void)
 	static struct device device;
 
 	memset(&fake, 0, sizeof(fake));
+	fake.dev = &device;
+	fake.powered = true;
+	fake.start_count = 1;
 	assert(ums9117_hci_runtime_register(&device, NULL, 0) == 0);
 	pump();
 }
@@ -336,6 +415,9 @@ static void stop(void)
 	assert(fake.register_count == 1 && !fake.unregister_count);
 	ums9117_hci_runtime_unregister();
 	assert(fake.unregister_count == 1);
+	assert(fake.radio_register_count == 1 &&
+	       fake.radio_unregister_count == 1);
+	assert(!(fake.owners & (1U << UMS9117_CM4_BLUETOOTH)));
 }
 
 static void data_still_flows(void)
@@ -426,6 +508,7 @@ static void closed_controller_frames_are_discarded_until_reopened(void)
 	const u8 sentinel[] = { HCI_EVENT_PKT, 0xff, 0x01, 0x42 };
 
 	start();
+	assert(ums9117_hci_fm_hold() == 0);
 	assert(fake.hdev->close(fake.hdev) == 0);
 	controller_input(sentinel, sizeof(sentinel));
 	pump();
@@ -434,6 +517,7 @@ static void closed_controller_frames_are_discarded_until_reopened(void)
 	controller_input(sentinel, sizeof(sentinel));
 	pump();
 	assert(fake.sentinel_events == 1);
+	ums9117_hci_fm_release();
 	stop();
 }
 
@@ -444,6 +528,7 @@ static void close_discards_a_frame_reassembled_after_reopening(void)
 	const u8 sentinel[] = { HCI_EVENT_PKT, 0xff, 0x01, 0x42 };
 
 	start();
+	assert(ums9117_hci_fm_hold() == 0);
 	assert(fake.hdev->close(fake.hdev) == 0);
 	controller_input(event_prefix, sizeof(event_prefix));
 	pump();
@@ -454,6 +539,7 @@ static void close_discards_a_frame_reassembled_after_reopening(void)
 	controller_input(sentinel, sizeof(sentinel));
 	pump();
 	assert(fake.sentinel_events == 1);
+	ums9117_hci_fm_release();
 	stop();
 }
 
@@ -608,6 +694,154 @@ static void enabled_fm_vetoes_suspend_until_disable(void)
 	stop();
 }
 
+static void power_cycles_keep_devices_and_allow_stopped_suspend(void)
+{
+	const u8 command[] = { 0x01, 0x10, 0x00 };
+	struct ums9117_fm *radio;
+	struct hci_dev *hdev;
+	unsigned int reads;
+	unsigned int cycle;
+
+	start();
+	hdev = fake.hdev;
+	radio = fake.radio;
+	for (cycle = 0; cycle < 3; cycle++) {
+		assert(hdev->close(hdev) == 0);
+		assert(!fake.owners && !fake.powered && !fake.work->pending);
+		reads = fake.read_count;
+		pump();
+		assert(fake.read_count == reads);
+		assert(send_packet(HCI_COMMAND_PKT, command, sizeof(command)) ==
+		       -ESHUTDOWN);
+		assert(ums9117_hci_suspend_prepare() == 0);
+		assert(ums9117_hci_suspend() == 0);
+		assert(ums9117_hci_resume() == 0);
+		assert(ums9117_hci_post_suspend() == 0);
+		assert(!fake.suspend_count && !fake.resume_count);
+		assert(!fake.powered && fake.read_count == reads);
+		assert(hdev->open(hdev) == 0);
+		assert(fake.owners == (1U << UMS9117_CM4_BLUETOOTH));
+		assert(fake.hdev == hdev && fake.radio == radio);
+		assert(fake.register_count == 1 &&
+		       fake.radio_register_count == 1);
+		assert(!fake.unregister_count && !fake.radio_unregister_count);
+		data_still_flows();
+	}
+	assert(fake.start_count == 4 && fake.stop_count == 3);
+	stop();
+	assert(!fake.owners && !fake.powered && !fake.work->pending);
+}
+
+static void fm_and_bluetooth_hold_power_independently(void)
+{
+	const u8 command_reply[] = { 0x04, 0x0e, 0x04, 0x01, 0x8c, 0xfc, 0x00 };
+	u8 reply[7];
+
+	start();
+	assert(ums9117_hci_fm_hold() == 0);
+	assert(fake.hdev->close(fake.hdev) == 0);
+	assert(fake.owners == (1U << UMS9117_CM4_FM));
+	assert(fake.powered && !fake.stop_count);
+	memcpy(fake.fm_input, command_reply, sizeof(command_reply));
+	fake.fm_input_bytes = sizeof(command_reply);
+	assert(ums9117_hci_fm_command(0, NULL, 0, reply, sizeof(reply),
+				      false) == 7);
+	assert(!memcmp(reply, command_reply, sizeof(reply)));
+	assert(ums9117_hci_suspend_prepare() == -EBUSY);
+	assert(fake.hdev->open(fake.hdev) == 0);
+	ums9117_hci_fm_release();
+	assert(fake.owners == (1U << UMS9117_CM4_BLUETOOTH));
+	assert(fake.powered && !fake.stop_count);
+	data_still_flows();
+	assert(fake.hdev->close(fake.hdev) == 0);
+	assert(!fake.powered && fake.stop_count == 1);
+	assert(ums9117_hci_fm_hold() == 0);
+	assert(fake.owners == (1U << UMS9117_CM4_FM));
+	assert(fake.powered && fake.start_count == 2);
+	memcpy(fake.fm_input, command_reply, sizeof(command_reply));
+	fake.fm_input_bytes = sizeof(command_reply);
+	assert(ums9117_hci_fm_command(0, NULL, 0, reply, sizeof(reply),
+				      false) == 7);
+	ums9117_hci_fm_release();
+	assert(!fake.owners && !fake.powered && fake.stop_count == 2);
+	stop();
+	assert(fake.stop_count == 2);
+}
+
+static void failed_start_leaves_both_users_unclaimed(void)
+{
+	start();
+	assert(fake.hdev->close(fake.hdev) == 0);
+	fake.owner_error = -EIO;
+	assert(fake.hdev->open(fake.hdev) == -EIO);
+	assert(ums9117_hci_fm_hold() == -EIO);
+	assert(!fake.owners && !fake.powered);
+	assert(fake.start_count == 1 && fake.stop_count == 1);
+	fake.owner_error = 0;
+	assert(fake.hdev->open(fake.hdev) == 0);
+	data_still_flows();
+	stop();
+}
+
+static void failed_admission_releases_only_the_new_owner(void)
+{
+	const u8 invalid_type[] = { 0 };
+
+	start();
+	assert(ums9117_hci_fm_hold() == 0);
+	assert(fake.hdev->close(fake.hdev) == 0);
+	controller_input(invalid_type, sizeof(invalid_type));
+	pump();
+	assert(fake.hdev->open(fake.hdev) == -EILSEQ);
+	assert(fake.owners == (1U << UMS9117_CM4_FM));
+	assert(fake.powered && !fake.stop_count);
+	stop();
+
+	start();
+	controller_input(invalid_type, sizeof(invalid_type));
+	pump();
+	assert(ums9117_hci_fm_hold() == -EILSEQ);
+	assert(fake.owners == (1U << UMS9117_CM4_BLUETOOTH));
+	assert(fake.powered && !fake.stop_count);
+	stop();
+}
+
+static void physical_restart_discards_the_old_partial_frame(void)
+{
+	const u8 event_prefix[] = { HCI_EVENT_PKT };
+	const u8 sentinel[] = { HCI_EVENT_PKT, 0xff, 0x01, 0x42 };
+
+	start();
+	controller_input(event_prefix, sizeof(event_prefix));
+	pump();
+	assert(fake.hdev->close(fake.hdev) == 0);
+	assert(fake.hdev->open(fake.hdev) == 0);
+	controller_input(sentinel, sizeof(sentinel));
+	pump();
+	assert(fake.sentinel_events == 1);
+	stop();
+}
+
+static void restarted_transport_discards_a_partial_prologue_event(void)
+{
+	const u8 event_prefix[] = { HCI_EVENT_PKT };
+	const u8 event_remainder[] = { 0xff, 0x01, 0x42 };
+	const u8 sentinel[] = { HCI_EVENT_PKT, 0xff, 0x01, 0x42 };
+
+	start();
+	assert(fake.hdev->close(fake.hdev) == 0);
+	fake.restart_prefix = event_prefix;
+	fake.restart_prefix_bytes = sizeof(event_prefix);
+	assert(fake.hdev->open(fake.hdev) == 0);
+	controller_input(event_remainder, sizeof(event_remainder));
+	pump();
+	assert(!fake.sentinel_events);
+	controller_input(sentinel, sizeof(sentinel));
+	pump();
+	assert(fake.sentinel_events == 1);
+	stop();
+}
+
 int main(void)
 {
 	active_connection_is_preserved();
@@ -626,6 +860,12 @@ int main(void)
 	fm_timeout_quarantines_late_replies_without_stopping_bluetooth();
 	fm_commands_preserve_config_bytes_and_short_error_responses();
 	enabled_fm_vetoes_suspend_until_disable();
-	puts("HCI retained transport component checks passed");
+	power_cycles_keep_devices_and_allow_stopped_suspend();
+	fm_and_bluetooth_hold_power_independently();
+	failed_start_leaves_both_users_unclaimed();
+	failed_admission_releases_only_the_new_owner();
+	physical_restart_discards_the_old_partial_frame();
+	restarted_transport_discards_a_partial_prologue_event();
+	puts("HCI transport lifecycle component checks passed");
 	return 0;
 }

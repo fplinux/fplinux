@@ -22,6 +22,7 @@ struct mbox_client {
 struct mbox_chan *mbox_request_channel_byname(struct mbox_client *client,
 					      const char *name);
 int mbox_send_message(struct mbox_chan *channel, void *message);
+int mbox_flush(struct mbox_chan *channel, unsigned long timeout);
 void mbox_free_channel(struct mbox_chan *channel);
 
 #endif

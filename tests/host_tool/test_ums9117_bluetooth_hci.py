@@ -22,6 +22,7 @@ class Ums9117BluetoothHciHostTests(unittest.TestCase):
         """Compile and execute an isolated, self-checking C fixture."""
         source = KERNEL / "cm4-hci.c" if component == "runtime" else KERNEL / f"cm4-{component}.c"
         sources = [source]
+        flags = ["-DCONFIG_RADIO_UMS9117_CM4=1"] if component == "runtime" else []
         with tempfile.TemporaryDirectory() as temporary:
             executable = Path(temporary) / component
             run_process(
@@ -34,6 +35,7 @@ class Ums9117BluetoothHciHostTests(unittest.TestCase):
                     "-Werror",
                     "-Wno-unused-parameter",
                     "-UNDEBUG",
+                    *flags,
                     f"-I{COMPAT}",
                     f"-I{KERNEL}",
                     str(FIXTURES / f"ums9117-bluetooth-{component}.c"),

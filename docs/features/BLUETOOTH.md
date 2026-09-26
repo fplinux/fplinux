@@ -21,6 +21,16 @@ commands. Place `-h` or `--help` after `enable`, `send`, `receive`, or `network`
 for that command's syntax. Help is shown without contacting D-Bus or changing
 the controller state.
 
+## Power
+
+Use `bluetoothctl power on` to enable Bluetooth and `bluetoothctl power off`
+to disable it. The adapter stays available and retains its pairing records
+across these changes.
+
+Bluetooth and [FM radio](FM_RADIO.md) share a controller. It stops when
+Bluetooth is off and the FM receiver is closed. Turning Bluetooth off leaves
+an active FM receiver running; closing FM leaves powered Bluetooth available.
+
 ## Pair and trust a peer
 
 Use `bluetoothctl` on both peers and identify each controller by its exact MAC
@@ -181,5 +191,8 @@ they enter pairing mode. Follow any passkey prompt that `bluetoothctl` shows.
   fresh RAM load. The microSD system root stores pairing records persistently;
   temporary RAM files still disappear. Save needed files to persistent storage.
 - Bluetooth use does not write the phone's NAND or NV storage.
-- Warm controller restart, Bluetooth LE devices other than keyboards and mice,
-  Bluetooth audio, range and wake over Bluetooth have not been tested.
+- Controller power cycling is qualified in the Nokia TA-1618, INOI 240 Modern 4G
+  and INOI 244 Modern 4G RAM profiles. Other target and profile combinations remain
+  unqualified.
+- Bluetooth LE devices other than keyboards and mice, Bluetooth audio, range
+  and wake over Bluetooth have not been tested.

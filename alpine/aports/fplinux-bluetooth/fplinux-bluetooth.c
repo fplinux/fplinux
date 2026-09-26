@@ -152,7 +152,7 @@ static int command_enable(bool optional)
 	saved_error = errno;
 	close(start_fd);
 	if (written == 2) {
-		puts("CM4 transport started; use bluetoothctl for adapter power");
+		puts("Bluetooth interfaces ready; use bluetoothctl for adapter power");
 		return 0;
 	}
 	if (written >= 0)
