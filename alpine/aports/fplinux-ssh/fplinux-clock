@@ -1,0 +1,48 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+# Set the system clock from host UTC seconds. Write the RTC only when its time
+# cannot be read, so a readable RTC keeps the time it already holds.
+
+set -u
+
+rtc_device=/dev/rtc0
+readback_tolerance_seconds=2
+
+usage() {
+	printf 'usage: fplinux-clock UTC_SECONDS\n' >&2
+	exit 2
+}
+
+fail() {
+	printf 'fplinux-clock: %s\n' "$*" >&2
+	exit 1
+}
+
+rtc_readable() {
+	hwclock -u -r -f "$rtc_device" >/dev/null
+}
+
+[ "$#" -eq 1 ] || usage
+utc_seconds=$1
+case "$utc_seconds" in
+'' | *[!0-9]*) usage ;;
+esac
+
+date -u -s "@$utc_seconds" >/dev/null || fail "cannot set the system clock"
+# BusyBox date exits 0 even when the kernel rejects the new time.
+system_seconds=$(date -u +%s) || fail "cannot read the system clock"
+drift=$((system_seconds - utc_seconds))
+if [ "$drift" -lt 0 ] || [ "$drift" -gt "$readback_tolerance_seconds" ]; then
+	fail "system clock reads $system_seconds after setting $utc_seconds"
+fi
+
+if rtc_readable 2>/dev/null; then
+	printf 'system=%s rtc=kept\n' "$system_seconds"
+	exit 0
+fi
+if hwclock -u -w -f "$rtc_device" && rtc_readable; then
+	printf 'system=%s rtc=written\n' "$system_seconds"
+	exit 0
+fi
+printf 'system=%s rtc=failed\n' "$system_seconds"
+fail "cannot store a readable time in $rtc_device"

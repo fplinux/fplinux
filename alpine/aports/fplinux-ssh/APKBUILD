@@ -9,13 +9,15 @@ license="GPL-2.0-only"
 depends="dropbear fplinux-base fplinux-usb-gadget openssh-sftp-server openrc"
 subpackages="$pkgname-openrc"
 options="!check"
-source="fplinux-ssh fplinux-session-id fplinux-ssh.initd"
+source="fplinux-ssh fplinux-session-id fplinux-clock fplinux-ssh.initd"
 
 package() {
 	install -Dm755 "$srcdir/fplinux-ssh" \
 		"$pkgdir/usr/libexec/fplinux/ssh-server"
 	install -Dm755 "$srcdir/fplinux-session-id" \
 		"$pkgdir/usr/bin/fplinux-session-id"
+	install -Dm755 "$srcdir/fplinux-clock" \
+		"$pkgdir/usr/bin/fplinux-clock"
 	install -Dm755 "$srcdir/fplinux-ssh.initd" \
 		"$pkgdir/etc/init.d/fplinux-ssh"
 	mkdir -p "$pkgdir/etc/runlevels/default"
@@ -30,5 +32,6 @@ openrc() {
 sha512sums="
 5b5f0a852fdc973984f0e622ff0e8291ee75735065602affed46abfa9701adb6924d59a214cb017d7e8beaa5965ca65221d9e6790d4f8490ba9e187eb84539f6  fplinux-ssh
 46dfcce3b94be3737342a31aa40eb689b1d2c49bf667d8ea3d041f3b6104d6285cc4768978ccbc7586980f607264822137d0511ea74f4612753bc8cd3a1ab69d  fplinux-session-id
+d902b0d8c6abe886f8775abb753075590121fa870c2163efe448be5336ef82cb813273887e08b1b8dde9c8835ef822576dfedcf9de9fcbecd8a766d1cc87288e  fplinux-clock
 07a20d7c785463504430a1d0dff2b8d131ec4122dc5b89e1b2df320c747c42617696db974752da46e27562cda19d77020bd748a4588c7a283cf323886caa30b1  fplinux-ssh.initd
 "

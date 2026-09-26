@@ -437,6 +437,8 @@ class NoTransportRunnerTests(unittest.TestCase):
         ssh.reacquire_bound_session.assert_called_once_with(session)
         ssh.require_device_identity.assert_called_once_with(ready, "e" * 64)
         ssh.run_remote.assert_called_once_with(ready, "true")
+        # Only a fresh run sets the phone clock; reconnecting leaves it running.
+        ssh.sync_clock.assert_not_called()
 
     def test_standalone_reconnect_rejects_another_device_before_remote_action(self) -> None:
         """A mismatched kernel identity prevents the requested standalone command."""

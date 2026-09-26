@@ -1,0 +1,23 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+# Replaces BusyBox date for the two forms fplinux-clock uses. The system clock
+# is a test-owned file; FPLINUX_TEST_CLOCK_SET=ignored reproduces BusyBox
+# reporting a rejected clock_settime() while still exiting 0.
+# The host-process harness supplies the FPLINUX_TEST_* command contract.
+# shellcheck disable=SC2154
+printf 'date %s\n' "$*" >>"$FPLINUX_TEST_EVENTS"
+case "$*" in
+"-u -s @"*)
+	if [ "${FPLINUX_TEST_CLOCK_SET:-stored}" = ignored ]; then
+		printf '%s\n' "date: can't set date: Operation not permitted" >&2
+	else
+		printf '%s\n' "${3#@}" >"$FPLINUX_TEST_SYSTEM_CLOCK"
+	fi
+	;;
+"-u +%s")
+	cat "$FPLINUX_TEST_SYSTEM_CLOCK"
+	;;
+*)
+	exit 2
+	;;
+esac

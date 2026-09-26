@@ -304,7 +304,7 @@ class HandoffTransportTests(unittest.TestCase):
         )
 
     def test_interactive_usb_ncm_opens_the_prepared_session(self) -> None:
-        """A terminal enters exactly the session that the bridge acknowledged."""
+        """A terminal enters the acknowledged session after its phone clock is set."""
         session = {"session_id": "a" * 64}
         transport = mock.Mock()
         ready = {"session_id": "a" * 64, "status": "ready"}
@@ -322,11 +322,18 @@ class HandoffTransportTests(unittest.TestCase):
                 {"vendor_id": 0x0525, "product_id": 0xA4A6, "wait_seconds": 30},
             )
 
-        transport.wait_for_bound_session.assert_called_once_with(session)
-        transport.open_shell.assert_called_once_with(ready)
+        # The shell replaces the runner, so the clock must be set before it opens.
+        self.assertEqual(
+            transport.mock_calls,
+            [
+                mock.call.wait_for_bound_session(session),
+                mock.call.sync_clock(ready),
+                mock.call.open_shell(ready),
+            ],
+        )
 
     def test_noninteractive_usb_ncm_returns_after_the_session_is_ready(self) -> None:
-        """A loader without a terminal succeeds after exact SSH authentication."""
+        """A loader without a terminal sets the phone clock and then reports readiness."""
         rendered = io.StringIO()
         session = {"session_id": "a" * 64}
         transport = mock.Mock()
@@ -344,8 +351,10 @@ class HandoffTransportTests(unittest.TestCase):
                 {"vendor_id": 0x0525, "product_id": 0xA4A6, "wait_seconds": 30},
             )
 
-        transport.wait_for_bound_session.assert_called_once_with(session)
-        transport.open_shell.assert_not_called()
+        self.assertEqual(
+            transport.mock_calls,
+            [mock.call.wait_for_bound_session(session), mock.call.sync_clock(ready)],
+        )
         self.assertEqual(
             rendered.getvalue(),
             "Bridge acknowledged the Linux transition; waiting up to 30 seconds for "

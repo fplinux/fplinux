@@ -603,6 +603,8 @@ class CommandLifecycleTests(unittest.TestCase):
         ssh.load_current_session.assert_called_once_with("phone")
         ssh.reacquire_bound_session.assert_called_once_with(session)
         ssh.require_device_identity.assert_called_once_with(session, "9" * 64)
+        # Only a fresh run sets the phone clock; reconnecting leaves it running.
+        ssh.sync_clock.assert_not_called()
 
     def test_reconnect_rejects_an_authenticated_session_with_another_device_runtime(
         self,

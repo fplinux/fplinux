@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import ipaddress
 import json
 import shlex
@@ -235,6 +237,73 @@ class SshTransportSmallTests(unittest.TestCase):
             self.assertRaisesRegex(SystemExit, r"running kernel identity \(exit 7\)"),
         ):
             ssh_transport.require_device_identity(session, "9" * 64)
+
+    def test_clock_sync_sends_host_utc_seconds_and_reports_the_phone_clock(self) -> None:
+        """One phone command carries whole host UTC seconds; its RTC outcome is shown."""
+        session = self._session()
+        for rtc in ("kept", "written"):
+            with self.subTest(rtc=rtc):
+                result = subprocess.CompletedProcess(
+                    [], 0, stdout=f"system=1788739201 rtc={rtc}\n", stderr=""
+                )
+                output = io.StringIO()
+                with (
+                    mock.patch("fplinux_cli.ssh_transport.time.time", return_value=1788739200.75),
+                    mock.patch.object(ssh_transport, "run_remote", return_value=result) as remote,
+                    contextlib.redirect_stdout(output),
+                ):
+                    ssh_transport.sync_clock(session)
+
+                self.assertEqual(remote.call_count, 1)
+                self.assertEqual(remote.call_args.args[:2], (session, "fplinux-clock 1788739200"))
+                self.assertEqual(
+                    output.getvalue(), f"Phone clock set to 2026-09-07T00:00:01Z (RTC {rtc}).\n"
+                )
+
+    def test_clock_sync_failure_warns_and_returns(self) -> None:
+        """A clock failure is a warning, so the caller can still report a ready session."""
+        cases = (
+            (
+                "rtc-not-written",
+                subprocess.CompletedProcess(
+                    [],
+                    1,
+                    stdout="system=1788739200 rtc=failed\n",
+                    stderr="fplinux-clock: cannot store a readable time in /dev/rtc0\n",
+                ),
+                (
+                    "fplinux ssh: phone clock set to 2026-09-07T00:00:00Z, but its RTC was not "
+                    "written: fplinux-clock: cannot store a readable time in /dev/rtc0\n"
+                ),
+            ),
+            (
+                "transport-lost",
+                subprocess.CompletedProcess(
+                    [], 255, stdout="", stderr="Connection closed by 10.23.45.2 port 22\n"
+                ),
+                "fplinux ssh: phone clock was not set: Connection closed by 10.23.45.2 port 22\n",
+            ),
+            (
+                "unexpected-status",
+                subprocess.CompletedProcess([], 0, stdout="done\n", stderr=""),
+                "fplinux ssh: phone clock was not set: unexpected clock status (exit 0)\n",
+            ),
+        )
+        session = self._session()
+        for name, result, warning in cases:
+            with self.subTest(name=name):
+                output = io.StringIO()
+                errors = io.StringIO()
+                with (
+                    mock.patch("fplinux_cli.ssh_transport.time.time", return_value=1788739200.0),
+                    mock.patch.object(ssh_transport, "run_remote", return_value=result),
+                    contextlib.redirect_stdout(output),
+                    contextlib.redirect_stderr(errors),
+                ):
+                    ssh_transport.sync_clock(session)
+
+                self.assertEqual(output.getvalue(), "")
+                self.assertEqual(errors.getvalue(), warning)
 
     def test_current_session_rejects_an_unknown_field(self) -> None:
         """An unrecognized host-state record is not a reconnect session."""
