@@ -207,6 +207,14 @@ source = "platforms/ums9117/linux/sound/drivers/ums9117-audio.h"
 destination = "sound/drivers/ums9117-audio.h"
 
 [[linux.copies]]
+source = "platforms/ums9117/linux/sound/drivers/ums9117-jack.c"
+destination = "sound/drivers/ums9117-jack.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/linux/sound/drivers/ums9117-jack.h"
+destination = "sound/drivers/ums9117-jack.h"
+
+[[linux.copies]]
 source = "platforms/ums9117/linux/sound/drivers/ums9117-pcm.c"
 destination = "sound/drivers/ums9117-pcm.c"
 

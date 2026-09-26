@@ -96,6 +96,24 @@ first and then turn the headphones off. Plugging in or removing wired
 headphones does not change either switch. The switches persist across
 playbacks and reset on a new boot.
 
+## Jack detection
+
+The read-only card control `Headphone Jack` is `on` while a plug is inserted in
+the 3.5 mm socket. It belongs to the card interface rather than the mixer, so
+simple-mixer commands such as `amixer sget` do not see it; read it by
+interface and name:
+
+```sh
+amixer -c 0 cget iface=CARD,name='Headphone Jack'
+```
+
+The input device `UMS9117 Headphones Headphone` reports the same state as the
+`SW_HEADPHONE_INSERT` switch. A change is reported once the plug has settled.
+Plugging in or removing headphones does not wake a sleeping phone; the state
+is updated when it wakes. The control reports a plug in the socket without
+telling headphones from a headset or another cable, and it does not select the
+[headset microphone](MICROPHONE_AUDIO.md).
+
 ## Playback processing
 
 With the fitted profile, PCM and [FM radio](FM_RADIO.md) pass through the

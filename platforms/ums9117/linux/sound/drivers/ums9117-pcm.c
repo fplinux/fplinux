@@ -30,6 +30,7 @@
 
 #include "ums9117-sc2720-codec.h"
 #include "ums9117-audio.h"
+#include "ums9117-jack.h"
 
 #define UMS9117_PCM_CHANNELS 2U
 #define UMS9117_PCM_BUFFER_BYTES_MAX (256U * 1024U)
@@ -197,6 +198,7 @@ struct ums9117_pcm {
 	struct snd_pcm *pcm;
 	struct ums9117_audio *digital;
 	struct ums9117_sc2720_codec *codec;
+	struct ums9117_jack *jack;
 	void __iomem *pinmux;
 	void __iomem *pinconf;
 	struct task_struct *thread;
@@ -2729,6 +2731,10 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 					     UMS9117_PCM_BUFFER_BYTES_MAX);
 	if (ret)
 		return snd_card_free_on_error(&pdev->dev, ret);
+	/* Jack reports start after the last failure that frees the card. */
+	audio->jack = ums9117_jack_create(&pdev->dev, card, audio->codec);
+	if (IS_ERR(audio->jack))
+		return snd_card_free_on_error(&pdev->dev, PTR_ERR(audio->jack));
 
 	strscpy(card->driver, dev_driver_string(&pdev->dev));
 	strscpy(card->shortname, UMS9117_PCM_NAME);
@@ -2773,6 +2779,7 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 			return ret;
 		}
 	}
+	ums9117_jack_start(audio->jack);
 	dev_dbg(audio->dev, "headphone volume source: %s\n",
 		audio->profile.fitted ? "fitted gain profile" :
 					"generic defaults");
@@ -2785,6 +2792,8 @@ static void ums9117_pcm_remove(struct platform_device *pdev)
 	struct snd_pcm_substream *playback;
 	struct snd_pcm_substream *capture;
 
+	/* A jack report during card disconnection is unsafe. */
+	ums9117_jack_stop(audio->jack);
 	ums9117_vibrator_set_lifecycle(audio, &audio->vibrator.stopping, true);
 	ums9117_vibrator_stop(audio);
 	mutex_lock(&audio->lock);
@@ -2815,6 +2824,9 @@ static int ums9117_pcm_suspend(struct device *dev)
 	struct ums9117_pcm *audio = dev_get_drvdata(dev);
 	int ret;
 
+	ret = ums9117_jack_suspend(audio->jack);
+	if (ret)
+		return ret;
 	ums9117_vibrator_set_lifecycle(audio, &audio->vibrator.suspended, true);
 	ums9117_vibrator_stop(audio);
 	mutex_lock(&audio->lock);
@@ -2843,6 +2855,7 @@ static int ums9117_pcm_resume(struct device *dev)
 	/* An interrupted pulse is not resumed; new requests are accepted. */
 	ums9117_vibrator_set_lifecycle(audio, &audio->vibrator.suspended,
 				       false);
+	ums9117_jack_resume(audio->jack);
 	return ret;
 }
 

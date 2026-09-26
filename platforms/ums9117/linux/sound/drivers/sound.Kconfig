@@ -4,6 +4,7 @@ config SND_UMS9117
 	depends on SND && ARCH_UMS9117 && MFD_SC27XX_PMIC && COMMON_CLK_SC2720
 	depends on INPUT
 	select INPUT_FF_MEMLESS
+	select SND_JACK
 	select SND_PCM
 	help
 	  Enable the 24 kHz and 48 kHz stereo S16_LE ALSA playback PCM device
@@ -18,3 +19,6 @@ config SND_UMS9117
 	  enabled outputs.
 	  Boards whose speaker also vibrates the phone get a force-feedback
 	  vibrator that plays the fitted vibrate tone through the speaker.
+	  Boards with a headphone jack detect line report the wired headphone
+	  jack as the Headphone Jack control and a headphone switch input
+	  device.

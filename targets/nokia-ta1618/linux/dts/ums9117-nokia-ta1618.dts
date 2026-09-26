@@ -81,6 +81,7 @@
 		0x14 0 0x0008e000
 		0x18 0 0x0008e000
 	>;
+	hp-det-gpios = <&sc2720_eic 12 GPIO_ACTIVE_HIGH>;
 	fplinux,card-longname = "Nokia TA-1618 audio";
 	status = "okay";
 };
