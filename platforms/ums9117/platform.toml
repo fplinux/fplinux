@@ -648,6 +648,29 @@ name = "fplinux-usb-keyboard"
 source = "common/host/fplinux-usb-keyboard.c"
 self_test = true
 
+# Reads the stock firmware tables for the board-maps device-data group. It
+# uses no libusb symbols; the static link keeps the binary self-contained.
+[[host.tools]]
+type = "make-archive"
+name = "fphelper_t117"
+source_lock = "spreadtrum_flash"
+cache_name = "spreadtrum_flash.tar.gz"
+archive_prefix = "spreadtrum_flash-{commit}/fphelper_t117/"
+source_directory = "fphelper_t117"
+binary = "fphelper_t117"
+link = "static-libusb"
+copies = []
+patches = []
+self_test = false
+
+[[host.tools.members]]
+path = "Makefile"
+digest_key = "fphelper_t117_makefile_sha256"
+
+[[host.tools.members]]
+path = "main.c"
+digest_key = "fphelper_t117_main_c_sha256"
+
 [[linux.copies]]
 source = "platforms/ums9117/linux/drivers/clk/sprd/clk-ums9117-gates.c"
 destination = "drivers/clk/sprd/ums9117-gates.c"

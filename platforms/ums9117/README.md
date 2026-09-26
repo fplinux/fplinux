@@ -103,6 +103,37 @@ assets, the loader applies no board pin settings and leaves the keypad
 uninitialized. Headless targets created by `./fplinux target new` reach the
 USB session on the INOI 244 Modern 4G and the Nokia 3210 4G (TA-1618).
 
+## Board data from the stock firmware
+
+For a target that declares the `board-maps` device-data group, preparation
+extracts a loader pin map, a keymap and a board report from the phone's own
+stock firmware. It finds the stock application image through the partition
+table in the NAND backup, using two agreeing VBM copies or else one PartI table,
+and reads the image with the pinned `fphelper_t117` host tool. The pin map and
+keymap are the tool's output unchanged. The board report contains:
+
+- the keypad matrix with the [phone key codes](../../docs/reference/INPUT.md),
+  the boot key, and the EIC9 candidate when exactly one standard phone key is
+  absent from the matrix;
+- every panel in the firmware's LCD list: its 16-bit ID, the controller name
+  when the firmware names it, size, SPI or LCM interface, SPI clock or DBI
+  timing, and the initialization commands and delays when the decoder can follow
+  its init function;
+- the pin settings of the display control, display data and audio pads;
+- the white LED backlight level and the fuel-gauge current calibration;
+- the NAND chip configurations listed by the firmware.
+
+Every value names the firmware address or tool output it came from. A value
+whose firmware structure is not found is listed as unresolved rather than
+guessed. Preparation stops when the partition table, the signed application
+image, the pin map or the keymap is missing, or when the VBM copies disagree.
+
+The stock firmware does not record which panel is fitted, the keypad light
+current, whether a vibration motor is fitted, or the CM4 firmware revision; a
+person decides these. Keys wired to EIC lines other than the EIC9 candidate,
+the candidate itself and the decoded panel commands must also be confirmed on
+the phone.
+
 ## Targets using this platform
 
 | Target                                                             | Phone                   |

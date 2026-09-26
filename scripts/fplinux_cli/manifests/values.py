@@ -149,20 +149,31 @@ def sha256_value(value: object, name: str) -> str:
     return value
 
 
-def firmware_array(value: object, name: str) -> list[dict[str, Any]]:
-    """Validate explicitly named inputs and their firmware lookup destinations."""
+def firmware_array(
+    value: object, name: str, *, size_required: bool = True
+) -> list[dict[str, Any]]:
+    """Validate explicitly named inputs and their firmware lookup destinations.
+
+    Without `size_required`, an input may omit its size; its extraction then
+    decides it.
+    """
     if not isinstance(value, list) or not value:
         fail(f"{name} must be a non-empty array")
+    allowed_keys = [{"source", "destination", "size"}, {"source", "destination", "size", "sha256"}]
+    size_rule = "size"
+    if not size_required:
+        allowed_keys += [{"source", "destination"}, {"source", "destination", "sha256"}]
+        size_rule = "optional size"
     result: list[dict[str, Any]] = []
     sources: set[str] = set()
     destinations: set[str] = set()
     for index, raw in enumerate(value):
         item_name = f"{name}[{index}]"
-        if not isinstance(raw, dict) or set(raw) not in (
-            {"source", "destination", "size"},
-            {"source", "destination", "size", "sha256"},
-        ):
-            fail(f"{item_name} must contain exactly source, destination, size and optional sha256")
+        if not isinstance(raw, dict) or set(raw) not in allowed_keys:
+            fail(
+                f"{item_name} must contain exactly source, destination, {size_rule} "
+                "and optional sha256"
+            )
         source = basename_value(raw.get("source"), f"{item_name} source")
         if source in sources:
             fail(f"{name} must not contain duplicate sources: {source}")
@@ -173,11 +184,11 @@ def firmware_array(value: object, name: str) -> list[dict[str, Any]]:
         if destination in destinations:
             fail(f"{name} must not contain duplicate destinations: {destination}")
         destinations.add(destination)
-        normalized: dict[str, Any] = {
-            "source": source,
-            "destination": destination,
-            "size": integer_value(raw.get("size"), f"{item_name} size", bounds=(1, 0xFFFFFFFF)),
-        }
+        normalized: dict[str, Any] = {"source": source, "destination": destination}
+        if "size" in raw:
+            normalized["size"] = integer_value(
+                raw.get("size"), f"{item_name} size", bounds=(1, 0xFFFFFFFF)
+            )
         if "sha256" in raw:
             normalized["sha256"] = sha256_value(raw.get("sha256"), f"{item_name} sha256")
         result.append(normalized)

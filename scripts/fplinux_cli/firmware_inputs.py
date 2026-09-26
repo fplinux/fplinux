@@ -175,8 +175,8 @@ def _capture_group_firmware(
         except OSError as error:
             fail(f"{prefix}declared file cannot be read: {source}: {error}")
 
-        declared_size = int(declaration["size"])
-        if len(contents) != declared_size:
+        declared_size = declaration.get("size")
+        if declared_size is not None and len(contents) != int(declared_size):
             fail(f"{prefix}{source_name} has {len(contents)} bytes; expected {declared_size}")
         actual_sha256 = sha256_bytes(contents)
         expected_sha256 = declaration.get("sha256")

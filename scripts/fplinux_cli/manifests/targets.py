@@ -44,6 +44,7 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
             *({"bluetooth"} if "bluetooth" in raw else set()),
             *({"audio_profile"} if "audio_profile" in raw else set()),
             *({"fm_radio"} if "fm_radio" in raw else set()),
+            *({"board_maps"} if "board_maps" in raw else set()),
             *({"nand"} if "nand" in raw else set()),
             "platform",
             "rootfs",
@@ -213,7 +214,17 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
             fm_radio["firmware"],
             "target FM radio firmware",
         )
-    if device_data_groups:
+    has_parser_groups = bool(device_data_groups)
+    # The platform, not the target parser, extracts the board maps. Their sizes
+    # differ between phones, so a declaration may leave them to the extraction.
+    if "board_maps" in config:
+        board_maps = exact_table(config.pop("board_maps"), {"firmware"}, "target board-maps")
+        device_data_groups["board-maps"] = firmware_array(
+            board_maps["firmware"],
+            "target board-maps firmware",
+            size_required=False,
+        )
+    if has_parser_groups:
         device_data = exact_table(
             config.get("device_data"),
             {"parser"},
@@ -226,7 +237,7 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
     elif "device_data" in config:
         fail("target device_data requires a bluetooth, audio-profile or FM radio group")
     else:
-        config["device_data"] = {"groups": {}}
+        config["device_data"] = {"groups": device_data_groups}
     config["rootfs"] = {
         "base_packages": target_rootfs_packages,
         "packages": selected_profile["rootfs"]["packages"],

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import pairwise
 from typing import TYPE_CHECKING, Protocol
 
@@ -262,10 +262,14 @@ def fixed_nv_records(partition: bytes, required_sizes: Mapping[int, int]) -> dic
 
 @dataclass(frozen=True)
 class PreparedGroup:
-    """Original fitted records and the complete normalized output for one group."""
+    """Original fitted records, the complete normalized output and review reports for one group.
+
+    Reports describe the extraction for a person; builds never read them.
+    """
 
     originals: dict[str, bytes]
     prepared: dict[str, bytes]
+    reports: dict[str, bytes] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

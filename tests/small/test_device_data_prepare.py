@@ -36,6 +36,12 @@ AUDIO_PROFILE = PreparedGroup(
     originals={"nv425.bin": b"mode", "nv426.bin": b"headset", "nv440.bin": b"eq"},
     prepared={"audio.bin": b"profile"},
 )
+BOARD_REPORT = b'{"keypad": {"rows": 5}}\n'
+BOARD_MAPS = PreparedGroup(
+    originals={"stock-image.bin": b"stock image"},
+    prepared={"pinmap.bin": b"pins", "keymap.bin": b"keys"},
+    reports={"board-report.json": BOARD_REPORT},
+)
 
 
 class DeviceDataPrepareTests(unittest.TestCase):
@@ -285,6 +291,157 @@ class DeviceDataPrepareTests(unittest.TestCase):
                     {path.name for path in published.iterdir()},
                     set(group_names),
                 )
+
+    def _run_board_maps_from_dump(
+        self,
+        *,
+        with_bluetooth: bool,
+        extract: object,
+    ) -> str:
+        """Prepare board maps with a stub platform extraction and a stub current build."""
+        groups: dict[str, list[dict[str, object]]] = {
+            "board-maps": [
+                # Board maps are declared without sizes; each phone's own maps are admitted.
+                {"source": "pinmap.bin", "destination": "pinmap.bin"},
+                {"source": "keymap.bin", "destination": "keymap.bin"},
+            ]
+        }
+        device_data: dict[str, object] = {"groups": groups}
+        if with_bluetooth:
+            groups["bluetooth"] = self._group("radio.bin", "chip/radio.bin", 5)
+            device_data["parser"] = "device_data.py"
+        parser = SimpleNamespace(
+            prepare_device_data=lambda _nand: DeviceDataPreparation(
+                groups={"bluetooth": BLUETOOTH}
+            )
+        )
+        with (
+            mock.patch.object(device_data_prepare, "ROOT", self.root),
+            mock.patch.object(
+                device_data_prepare,
+                "load_target",
+                return_value={
+                    "platform": "demo-platform",
+                    "device_data": device_data,
+                    "nand": DECLARED_NAND,
+                },
+            ),
+            mock.patch.object(
+                device_data_prepare,
+                "_load_device_data_parser",
+                return_value=parser,
+                side_effect=None if with_bluetooth else AssertionError("no parser group"),
+            ),
+            mock.patch.object(
+                device_data_prepare,
+                "_load_board_maps_provider",
+                return_value=SimpleNamespace(prepare_board_maps=extract),
+            ),
+            mock.patch.object(
+                device_data_prepare,
+                "resolve_target_bundle",
+                return_value=(SimpleNamespace(path=self.root / "current-bundle"), {}),
+            ),
+            mock.patch.object(
+                PhysicalNand,
+                "from_dump",
+                return_value=PhysicalNand(RAW_DUMP, RAW_PAGE_BYTES),
+            ),
+            contextlib.redirect_stdout(io.StringIO()) as stdout,
+        ):
+            device_data_prepare.prepare_device_data(
+                TARGET,
+                from_dump=self.saved_dump,
+                jobs=1,
+                offline=True,
+            )
+        return stdout.getvalue()
+
+    def test_board_maps_come_from_the_platform_with_current_build_tools_and_a_report(
+        self,
+    ) -> None:
+        """Platform output is published beside parser groups; its report is not a build input."""
+        received: list[Path] = []
+
+        def extract(nand: PhysicalNand, *, host_tools: Path) -> PreparedGroup:
+            self.assertEqual(nand.raw, RAW_DUMP)
+            received.append(host_tools)
+            return BOARD_MAPS
+
+        output = self._run_board_maps_from_dump(with_bluetooth=True, extract=extract)
+
+        generation = self._current_generation()
+        self.assertEqual(received, [self.root / "current-bundle/host"])
+        self.assertEqual((generation / "groups/board-maps/pinmap.bin").read_bytes(), b"pins")
+        self.assertEqual((generation / "groups/board-maps/keymap.bin").read_bytes(), b"keys")
+        self.assertEqual((generation / "groups/bluetooth/radio.bin").read_bytes(), b"radio")
+        self.assertEqual(
+            (generation / "originals/board-maps/stock-image.bin").read_bytes(), b"stock image"
+        )
+        report = generation / "reports/board-maps/board-report.json"
+        self.assertEqual(report.read_bytes(), BOARD_REPORT)
+        self.assertEqual(report.stat().st_mode & 0o777, 0o600)
+        self.assertFalse((generation / "groups/board-maps/board-report.json").exists())
+        receipt = json.loads((generation / "receipt.json").read_text(encoding="utf-8"))
+        groups = {group["name"]: group for group in receipt["groups"]}
+        self.assertEqual(
+            groups["board-maps"]["reports"],
+            [
+                {
+                    "name": "board-report.json",
+                    "size": len(BOARD_REPORT),
+                    "sha256": hashlib.sha256(BOARD_REPORT).hexdigest(),
+                }
+            ],
+        )
+        self.assertNotIn("reports", groups["bluetooth"])
+        self.assertIn(f"Review {report}.", output)
+
+    def test_board_maps_without_a_current_build_or_extraction_publish_nothing(self) -> None:
+        """A missing host-tool build or a failed extraction leaves no generation."""
+
+        def unavailable(_nand: PhysicalNand, *, host_tools: Path) -> PreparedGroup:
+            del host_tools
+            message = "board maps not found in the stock image"
+            raise ValueError(message)
+
+        with (
+            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(device_data_prepare, "ROOT", self.root),
+            mock.patch.object(
+                device_data_prepare,
+                "load_target",
+                return_value={
+                    "platform": "demo-platform",
+                    "device_data": {"groups": {"board-maps": []}},
+                    "nand": DECLARED_NAND,
+                },
+            ),
+            mock.patch.object(
+                device_data_prepare,
+                "_load_board_maps_provider",
+                return_value=SimpleNamespace(prepare_board_maps=unavailable),
+            ),
+            self.assertRaisesRegex(
+                SystemExit,
+                "current build is missing or invalid; rebuild it: ./fplinux build demo-phone",
+            ),
+        ):
+            device_data_prepare.prepare_device_data(
+                TARGET,
+                from_dump=self.saved_dump,
+                jobs=1,
+                offline=True,
+            )
+        self.assertFalse((self.cache / "device-data").exists())
+
+        with self.assertRaisesRegex(
+            SystemExit, "device-data extraction failed: board maps not found in the stock image"
+        ):
+            self._run_board_maps_from_dump(with_bluetooth=False, extract=unavailable)
+        target_root = self.cache / "device-data" / TARGET
+        self.assertFalse((target_root / "current").exists())
+        self.assertEqual(list((target_root / "generations").iterdir()), [])
 
     def test_saved_dump_without_declared_chip_or_receipt_publishes_nothing(self) -> None:
         """A backup's page layout is never inferred from its length."""

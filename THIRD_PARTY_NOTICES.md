@@ -42,6 +42,7 @@ unless an individual file carries a different SPDX identifier.
 | U-Boot 2026.07                  | RAM second stage and FIT tooling               | GPL-2.0-only; official DENX archive; target binary is embedded in `ramboot.bin`            |
 | libusb                          | Host USB access                                | LGPL-2.1-or-later; linked into the static bundled host tools at build time                 |
 | `spreadtrum_flash` / `spd_dump` | Spreadtrum loader transport                    | The Unlicense; pinned upstream source                                                      |
+| `fphelper_t117`                 | Stock firmware table reader for board maps     | The Unlicense; pinned spreadtrum_flash source                                              |
 | fpdoom `t117_maps.7z`           | Firmware-derived T117 phone register-map data  | Pinned fpdoom release mirror (`NOASSERTION`)                                               |
 | `t117_fdl1.bin`                 | T117 first-stage RAM loader                    | The Unlicense; pinned spreadtrum_flash release asset                                       |
 
@@ -60,9 +61,10 @@ sums. The resulting APK installs the applicable runtime, font, image-decoder and
 FPLinux adapter license texts under
 `/usr/share/licenses/fplinux-micropythonos/`.
 
-The Git tree does not contain `spreadtrum_flash` source, `spd_dump`, the board
-map archive, extracted map files, or `t117_fdl1.bin`. The local build downloads
-exact pinned inputs, verifies their hashes, and writes them only below `.cache/`.
+The Git tree does not contain `spreadtrum_flash` source, `spd_dump`,
+`fphelper_t117`, the board map archive, extracted map files, or `t117_fdl1.bin`.
+The local build downloads exact pinned inputs, verifies their hashes, and writes
+them only below `.cache/`.
 
 The `pinmap.bin` and `keymap.bin` members originate as model-specific register
 initialization data extracted from phone firmware and mirrored by fpdoom.

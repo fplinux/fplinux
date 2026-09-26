@@ -330,13 +330,28 @@ group fails the build.
 Normal `build` and `run` commands consume only already prepared local data.
 They do not read the phone's NAND.
 
+A target may also declare the `board-maps` group, which its platform extracts
+from the phone's stock firmware in the same NAND backup. The group holds the
+loader pin map `pinmap.bin` and keymap `keymap.bin`. Their declarations omit the
+size, because each phone's maps have their own. The loader does not read them
+and takes its maps only from the target's asset lock. Preparing the group
+also writes the board report `reports/board-maps/board-report.json` into the new
+generation and prints its path. The report lists the board values found in the
+stock firmware, where each came from, the values that were not found and the
+decisions left to a person; builds never read it. The extraction runs a host
+tool from the target's current build, so build the target before preparing its
+device data from a saved backup. Each platform describes what its report
+contains; see
+[UMS9117 board data](../../platforms/ums9117/README.md#board-data-from-the-stock-firmware).
+
 After building, follow [Loading from a source checkout](LOADING.md) to configure
 the host, load the selected image, reconnect and verify the running context.
 
 #### Prepare device data
 
 Prepare every group declared by `<target>` from one complete physical NAND
-backup. This prepares Bluetooth, FM and the independent audio gain group.
+backup. This prepares Bluetooth, FM, the independent audio gain group and, when
+declared, the board maps.
 The fitted data must come from the exact phone selected by `<target>`; do not
 reuse data from another handset or model. No manual extraction, renaming or
 patching is needed. Preparation requires this source checkout, not a standalone
