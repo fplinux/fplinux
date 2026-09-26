@@ -77,7 +77,9 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             ],
             "documents": ["release/README.txt", "features/MICROSD.md"],
         }
-        self.platform = {"host": {"tools": [{"name": "keyboard"}]}}
+        self.platform = {
+            "host": {"runtime_tools": {"keyboard": "keyboard"}, "tools": [{"name": "keyboard"}]}
+        }
         target_readme = self.root / "targets" / self.target / "release/README.txt"
         target_readme.parent.mkdir(parents=True)
         target_readme.write_text("phone instructions\n", encoding="utf-8")

@@ -26,7 +26,13 @@ class ReleaseManifestPolicyTests(unittest.TestCase):
             "platform": "demo",
             "runtime": {"assets": {"pinmap": "assets/pinmap.bin"}},
         }
-        self.platform = {"host": {"tools": [{"name": "keyboard"}]}}
+        # The runner uses "keyboard"; "extractor" is built for the checkout only.
+        self.platform = {
+            "host": {
+                "runtime_tools": {"keyboard": "keyboard"},
+                "tools": [{"name": "keyboard"}, {"name": "extractor"}],
+            }
+        }
         self.release_manifest = {
             "image": "image/ramboot.bin",
             "bundle_files": [
@@ -129,6 +135,31 @@ class ReleaseManifestPolicyTests(unittest.TestCase):
         with (
             mock.patch.object(common, "ROOT", self.root),
             mock.patch.object(releases, "load_release", return_value=broken),
+            mock.patch.object(platforms, "load_platform", return_value=self.platform),
+            self.assertRaisesRegex(SystemExit, "omit required runtime inputs"),
+        ):
+            package_commands.load_release_manifest(self.target, self.target_config)
+
+    def test_archives_carry_runner_tools_but_not_build_only_tools(self) -> None:
+        """A release needs every host tool the runner uses and none that only builds use."""
+        with (
+            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(releases, "load_release", return_value=self.release_manifest),
+            mock.patch.object(platforms, "load_platform", return_value=self.platform),
+        ):
+            release = package_commands.load_release_manifest(self.target, self.target_config)
+        self.assertIn("host/keyboard", release["executables"])
+        self.assertNotIn("host/extractor", release["executables"])
+
+        without_runner_tool = {
+            **self.release_manifest,
+            "runtime_files": [
+                path for path in self.release_manifest["runtime_files"] if path != "host/keyboard"
+            ],
+        }
+        with (
+            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(releases, "load_release", return_value=without_runner_tool),
             mock.patch.object(platforms, "load_platform", return_value=self.platform),
             self.assertRaisesRegex(SystemExit, "omit required runtime inputs"),
         ):
