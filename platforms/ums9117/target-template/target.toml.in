@@ -10,6 +10,13 @@ compatible = "@COMPATIBLE@"
 [nand]
 raw_device = "/dev/ums9117-nand-raw"
 
+# Extracted from the stock firmware in a NAND backup together with a board report.
+[board_maps]
+firmware = [
+  { source = "pinmap.bin", destination = "pinmap.bin" },
+  { source = "keymap.bin", destination = "keymap.bin" },
+]
+
 [rootfs]
 packages = []
 

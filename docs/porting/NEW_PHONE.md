@@ -1,10 +1,11 @@
 # Bring up a new UMS9117 phone
 
 This route takes a Unisoc UMS9117 (T117) phone that has no FPLinux target to a
-Linux session in RAM and a complete read-only backup of its internal NAND. The
-new target has no display, keypad, audio or Bluetooth support: the phone shows
-no boot screen or backlight, and you use it through the USB session from the
-host. The route ends with what to report about the phone.
+Linux session in RAM, a complete read-only backup of its internal NAND and a
+board report extracted from the stock firmware in that backup. The new target
+has no display, keypad, audio or Bluetooth support: the phone shows no boot
+screen or backlight, and you use it through the USB session from the host. The
+route ends with what to report about the phone.
 
 Run every command from the root of the source checkout.
 
@@ -282,6 +283,26 @@ fplinux: incomplete raw NAND image: expected ... bytes, got ...
 Run `nand backup` again. If the phone no longer runs the session, start again
 from a powered-off phone with `run`.
 
+## Prepare the board report
+
+The new target declares the board maps, which the platform extracts from the
+stock firmware in the backup. Prepare them from the saved backup; the phone does
+not need to be connected, but the target must have a current build:
+
+```sh
+./fplinux device-data prepare <target> --from-dump nand.bin
+```
+
+The command reads `nand.bin` with its receipt `nand.bin.json` and prints the
+path of the board report:
+
+```text
+Review <checkout>/.cache/device-data/<target>/generations/<generation>/reports/board-maps/board-report.json.
+```
+
+[UMS9117 board data](../../platforms/ums9117/README.md#board-data-from-the-stock-firmware)
+describes what the report contains and which decisions it leaves to a person.
+
 ## Report a new phone
 
 Open an issue in the
@@ -294,6 +315,7 @@ Open an issue in the
 - the complete `run` output, including any error;
 - the complete `nand identify` output;
 - the geometry receipt `nand.bin.json`, which contains no NAND data;
+- the board report `board-report.json`;
 - photos of the markings on the SoC and the flash chip.
 
 Do not attach the NAND backup or any stock firmware image publicly. They
@@ -301,5 +323,5 @@ contain the phone's own data and the vendor's firmware.
 
 ## Complete the target
 
-The target is completed by hand from the backup; see the
+The target is completed by hand from the backup and the board report; see the
 [phone target template](TARGET.md).

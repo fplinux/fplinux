@@ -73,7 +73,7 @@ class NewTargetTests(unittest.TestCase):
         return platform
 
     def test_new_target_loads_as_a_headless_ram_only_phone(self) -> None:
-        """The manifest boundary accepts the skeleton with only FDL1 and no display."""
+        """The manifest boundary accepts the skeleton with only FDL1, no display and board maps."""
         printed = self.create("hammer-horizon-lte")
 
         config = targets.load_target("hammer-horizon-lte")
@@ -91,7 +91,18 @@ class NewTargetTests(unittest.TestCase):
         self.assertEqual(config["runtime"]["assets"], {"fdl1": "assets/t117_fdl1.bin"})
         self.assertTrue(DISPLAY_KEYS.isdisjoint(config["runtime"]["adapter"]))
         self.assertEqual(config["runtime"]["adapter"]["exec_distance"], 0)
-        self.assertEqual(config["device_data"], {"groups": {}})
+        # A new phone can prepare its board maps from a backup without a target parser.
+        self.assertEqual(
+            config["device_data"],
+            {
+                "groups": {
+                    "board-maps": [
+                        {"source": "pinmap.bin", "destination": "pinmap.bin"},
+                        {"source": "keymap.bin", "destination": "keymap.bin"},
+                    ]
+                }
+            },
+        )
         self.assertEqual(paths.discover_profiles("hammer-horizon-lte"), ("default",))
         with self.assertRaisesRegex(SystemExit, "does not support profile microsd-uboot"):
             targets.load_target("hammer-horizon-lte", "microsd-uboot")
