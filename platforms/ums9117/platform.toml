@@ -35,6 +35,10 @@ packages = [
 source = "platforms/ums9117/uboot/u-boot.lock.toml"
 archive_prefix = "u-boot-2026.07"
 patches = ["platforms/ums9117/uboot/integration.patch"]
+required_config = [
+  "CONFIG_TARGET_FPLINUX_UMS9117=y",
+  'CONFIG_BOOTCOMMAND="sdboot"',
+]
 
 [[uboot.copies]]
 source = "platforms/ums9117/uboot/board.Kconfig"
@@ -117,6 +121,8 @@ analysis_cross_compile = "arm-none-eabi-"
 config_script = "scripts/config"
 image_output = "arch/arm/boot/zImage"
 dtb_output_directory = "arch/arm/boot/dts"
+dts_directory = "arch/arm/boot/dts/unisoc"
+platform_identity_header = "arch/arm/mach-ums9117/fplinux-platform-identity.h"
 targets = ["zImage", "dtbs"]
 patches = [
   "platforms/ums9117/linux/patches/0001-ums9117-platform.patch",

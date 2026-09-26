@@ -35,6 +35,7 @@ class GlobalProfileTests(unittest.TestCase):
                 "source": "platforms/demo/uboot.lock.toml",
                 "archive_prefix": "u-boot-2026.07",
                 "patches": [],
+                "required_config": ["CONFIG_TARGET_DEMO=y"],
                 "copies": [],
             },
             "bootstrap": {
@@ -247,11 +248,15 @@ class GlobalProfileTests(unittest.TestCase):
                 targets.load_target("first", profile)
 
     def test_uboot_combines_shared_sources_with_the_selected_board(self) -> None:
-        """Shared boot logic and the chosen slot descriptor reach one projection."""
+        """Shared boot logic, its required config and the board slot reach one U-Boot build."""
         shared = self.root / "platforms/demo"
         (shared / "boot.c").write_text("shared boot flow\n")
         (shared / "boot.patch").write_text("shared integration patch\n")
         self.platform["uboot"]["patches"] = ["platforms/demo/boot.patch"]
+        self.platform["uboot"]["required_config"] = [
+            "CONFIG_TARGET_DEMO=y",
+            'CONFIG_BOOTCOMMAND="demoboot"',
+        ]
         self.platform["uboot"]["copies"] = [
             {"source": "platforms/demo/boot.c", "destination": "board/demo/boot.c"}
         ]
@@ -277,6 +282,10 @@ class GlobalProfileTests(unittest.TestCase):
                         "board/demo/boot.c": "shared boot flow\n",
                         "board/demo/slot.c": f"{target} slot\n",
                     },
+                )
+                self.assertEqual(
+                    uboot["required_config"],
+                    ["CONFIG_TARGET_DEMO=y", 'CONFIG_BOOTCOMMAND="demoboot"'],
                 )
 
     def test_nand_reader_stays_board_owned_across_boot_profiles(self) -> None:

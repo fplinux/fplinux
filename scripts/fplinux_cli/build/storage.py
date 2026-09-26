@@ -86,6 +86,7 @@ def build_profile_uboot(
                 container_recipe=container_recipe,
                 cross_compile="arm-none-eabi-",
                 layout=target_config["layout"],
+                required_config=config["required_config"],
             )
     except (
         OSError,

@@ -62,11 +62,12 @@ class UbootToolsTests(unittest.TestCase):
 
     @staticmethod
     def full_uboot_config(archive: Path) -> dict[str, Any]:
-        """Bind the synthetic archive to the full U-Boot source contract."""
+        """Bind the synthetic archive and a demo platform's required lines to the build."""
         return {
             "kind": "full",
             "source": "u-boot.lock.toml",
             "archive_prefix": "u-boot-2026.07",
+            "required_config": ["CONFIG_TARGET_DEMO_BOARD=y", 'CONFIG_BOOTCOMMAND="demoboot"'],
             "lock": {
                 "version": "2026.07",
                 "repository": "https://source.denx.de/u-boot/u-boot.git",
@@ -111,6 +112,7 @@ class UbootToolsTests(unittest.TestCase):
             container_recipe="a" * 64,
             cross_compile="arm-linux-gnueabi-",
             layout=self.layout,
+            required_config=self.config["required_config"],
         )
 
     def _build_log_lines(self) -> list[str]:
@@ -193,6 +195,8 @@ class UbootToolsTests(unittest.TestCase):
             ("# CONFIG_MMC_WRITE is not set", "CONFIG_MMC_WRITE=y"),
             ("CONFIG_ENV_IS_NOWHERE=y", "CONFIG_ENV_IS_IN_FAT=y"),
             ("CONFIG_FIT_FULL_CHECK=y", "# CONFIG_FIT_FULL_CHECK is not set"),
+            ("CONFIG_TARGET_DEMO_BOARD=y", "CONFIG_TARGET_OTHER_BOARD=y"),
+            ('CONFIG_BOOTCOMMAND="demoboot"', 'CONFIG_BOOTCOMMAND="otherboot"'),
         ):
             with self.subTest(config=unsafe):
                 self.defconfig.write_text(self.required_config.replace(previous, unsafe))

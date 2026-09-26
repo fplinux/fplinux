@@ -14,7 +14,6 @@ from fplinux_cli.build import sources as sources_build
 from fplinux_cli.common import fail, sha256_bytes, sha256_file
 from fplinux_cli.identity_codegen import (
     LINUX_IDENTITY_DTSI,
-    LINUX_PLATFORM_IDENTITY_HEADER,
     linux_identity_dtsi,
     linux_machine_binding,
     linux_machine_binding_path,
@@ -72,7 +71,7 @@ def integration_inputs(
     return result
 
 
-PROFILE_ROOT_DTSI = "arch/arm/boot/dts/unisoc/fplinux-root.dtsi"
+PROFILE_ROOT_DTSI = "fplinux-root.dtsi"
 
 
 def generated_linux_files(
@@ -81,15 +80,21 @@ def generated_linux_files(
     """Return exact generated Linux files keyed by destination."""
     target_identity = target_config["identity"]
     platform_identity = platform["identity"]
+    platform_linux = platform["linux"]
+    dts_directory = platform_linux["dts_directory"]
     files = {
-        LINUX_IDENTITY_DTSI: linux_identity_dtsi(target_identity, platform_identity),
-        LINUX_PLATFORM_IDENTITY_HEADER: linux_platform_identity_header(platform_identity),
+        f"{dts_directory}/{LINUX_IDENTITY_DTSI}": linux_identity_dtsi(
+            target_identity, platform_identity
+        ),
+        platform_linux["platform_identity_header"]: linux_platform_identity_header(
+            platform_identity
+        ),
         linux_machine_binding_path(target_identity): linux_machine_binding(
             target_identity, platform_identity
         ),
     }
     root = target_config["linux"]["root"]
-    files[PROFILE_ROOT_DTSI] = profile_layout.root_bootargs_dtsi(root)
+    files[f"{dts_directory}/{PROFILE_ROOT_DTSI}"] = profile_layout.root_bootargs_dtsi(root)
     return files
 
 

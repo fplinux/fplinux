@@ -121,7 +121,13 @@ class IdentityTests(unittest.TestCase):
         }
         platform = {
             "identity": validate_platform_identity(self.platform()),
-            "linux": {"patches": [], "copies": [], "appends": []},
+            "linux": {
+                "dts_directory": "arch/arm/boot/dts/unisoc",
+                "platform_identity_header": "arch/arm/mach-ums9117/fplinux-platform-identity.h",
+                "patches": [],
+                "copies": [],
+                "appends": [],
+            },
         }
         baseline = linux_build.linux_recipe_digest(source, "phone", target, platform)
 

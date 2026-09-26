@@ -37,6 +37,16 @@ class PreparedLinuxTests(unittest.TestCase):
     def _seal(self, source: Path, recipe: str) -> linux_state.PreparedLinuxState:
         return linux_state.seal_prepared_linux(source, recipe)
 
+    def _linux_archive(self) -> Path:
+        """Create the smallest Linux source archive that preparation accepts."""
+        archive_root = self.root / "archive/linux-test"
+        archive_root.mkdir(parents=True)
+        (archive_root / "Makefile").write_text("VERSION = test\n", encoding="utf-8")
+        archive = self.root / "linux-test.tar.xz"
+        with tarfile.open(archive, "w:xz") as output:
+            output.add(archive_root, arcname="linux-test")
+        return archive
+
     def test_matching_marker_and_receipt_are_a_hit(self) -> None:
         """Accept matching marker and receipt identities."""
         source = self._tree("linux")
@@ -49,12 +59,7 @@ class PreparedLinuxTests(unittest.TestCase):
     def test_recipe_change_reprepares_and_replaces_the_source_tree(self) -> None:
         """Replace a prepared tree when its recipe changes."""
         cache = self.root / "cache"
-        archive_root = self.root / "archive/linux-test"
-        archive_root.mkdir(parents=True)
-        (archive_root / "Makefile").write_text("VERSION = test\n", encoding="utf-8")
-        archive = self.root / "linux-test.tar.xz"
-        with tarfile.open(archive, "w:xz") as output:
-            output.add(archive_root, arcname="linux-test")
+        archive = self._linux_archive()
 
         project = self.root / "project"
         project.mkdir()
@@ -92,6 +97,8 @@ class PreparedLinuxTests(unittest.TestCase):
             },
             "linux": {
                 "source_lock": "linux",
+                "dts_directory": "arch/demo/boot/dts",
+                "platform_identity_header": "arch/demo/mach-soc1/fplinux-platform-identity.h",
                 "patches": [],
                 "copies": [],
                 "appends": [],
@@ -117,6 +124,61 @@ class PreparedLinuxTests(unittest.TestCase):
         self.assertNotEqual(second.linux_recipe, first.linux_recipe)
         self.assertEqual((source / "generated").read_text(encoding="utf-8"), "second\n")
         self.assertFalse((source / "untracked").exists())
+
+    def test_generated_files_are_written_where_the_platform_declares(self) -> None:
+        """Identity and root includes follow the platform manifest, not a fixed SoC directory."""
+        sources = {
+            "linux": {
+                "version": "test",
+                "url": "https://example.invalid/linux-test.tar.xz",
+                "sha256": self.archive,
+            }
+        }
+        target_config = {
+            "identity": {
+                "brand": "Demo",
+                "product": "Phone",
+                "hardware_codes": [],
+                "compatible": "demo,phone",
+                "display_name": "Demo Phone",
+            },
+            "linux": {"patches": [], "copies": [], "appends": [], "root": {"kind": "initramfs"}},
+        }
+        platform = {
+            "identity": {
+                "vendor": "Demo",
+                "soc": "SOC1",
+                "aliases": [],
+                "compatible": "demo,soc1",
+                "display_name": "Demo SOC1",
+            },
+            "linux": {
+                "source_lock": "linux",
+                "dts_directory": "arch/demo/boot/dts/vendor",
+                "platform_identity_header": "arch/demo/mach-soc1/soc1-identity.h",
+                "patches": [],
+                "copies": [],
+                "appends": [],
+            },
+        }
+
+        with (
+            mock.patch.object(inputs_build, "CACHE", self.root / "cache"),
+            mock.patch.object(sources_build, "fetch", return_value=self._linux_archive()),
+        ):
+            source, _prepared = linux_build.prepare_linux(sources, "demo", target_config, platform)
+
+        dts = source / "arch/demo/boot/dts/vendor"
+        self.assertIn(
+            b'model = "Demo Phone";',
+            (dts / "fplinux-target-identity.dtsi").read_bytes(),
+        )
+        self.assertIn(b"rdinit=/init", (dts / "fplinux-root.dtsi").read_bytes())
+        self.assertIn(
+            b'FPLINUX_PLATFORM_COMPATIBLE "demo,soc1"',
+            (source / "arch/demo/mach-soc1/soc1-identity.h").read_bytes(),
+        )
+        self.assertFalse((source / "arch/arm").exists())
 
     def test_tampered_receipt_is_rejected_before_a_consumer_uses_the_tree(self) -> None:
         """Reject a prepared tree if its sealed recipe receipt changes."""
@@ -178,6 +240,8 @@ class PreparedLinuxTests(unittest.TestCase):
             },
             "linux": {
                 "source_lock": "linux",
+                "dts_directory": "arch/demo/boot/dts",
+                "platform_identity_header": "arch/demo/mach-soc1/fplinux-platform-identity.h",
                 "patches": [],
                 "copies": [],
                 "appends": [],

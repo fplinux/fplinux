@@ -12,6 +12,7 @@ from fplinux_cli.common import fail, relative_name
 TARGET_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
 VALUE_NAME = re.compile(r"[A-Za-z0-9._-]+")
 KCONFIG_SYMBOL = re.compile(r"CONFIG_[A-Z0-9_]+")
+KCONFIG_LINE = re.compile(r"CONFIG_[A-Z0-9_]+=\S.*|# CONFIG_[A-Z0-9_]+ is not set")
 GIT_COMMIT = re.compile(r"[0-9a-f]{40}")
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
@@ -76,6 +77,15 @@ def kconfig_symbol_array(value: object, name: str) -> list[str]:
     for symbol in result:
         if KCONFIG_SYMBOL.fullmatch(symbol) is None:
             fail(f"{name} must contain only CONFIG_* symbols")
+    return result
+
+
+def kconfig_line_array(value: object, name: str) -> list[str]:
+    """Require unique complete .config lines, each an assignment or an unset comment."""
+    result = string_array(value, name)
+    for line in result:
+        if KCONFIG_LINE.fullmatch(line) is None:
+            fail(f"{name} must contain only CONFIG_*=value or '# CONFIG_* is not set' lines")
     return result
 
 

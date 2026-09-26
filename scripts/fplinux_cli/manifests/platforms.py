@@ -12,6 +12,7 @@ from fplinux_cli.manifests.values import (
     TARGET_NAME,
     exact_table,
     integer_value,
+    kconfig_line_array,
     nonempty_string,
     package_array,
     path_array,
@@ -168,6 +169,8 @@ def load_platform(platform: str) -> dict[str, Any]:
             "config_script",
             "image_output",
             "dtb_output_directory",
+            "dts_directory",
+            "platform_identity_header",
             "targets",
             "patches",
             "copies",
@@ -177,7 +180,14 @@ def load_platform(platform: str) -> dict[str, Any]:
     )
     for key in ("source_lock", "arch", "cross_compile", "analysis_cross_compile"):
         nonempty_string(linux.get(key), f"platform linux {key}")
-    for key in ("defconfig", "config_script", "image_output", "dtb_output_directory"):
+    for key in (
+        "defconfig",
+        "config_script",
+        "image_output",
+        "dtb_output_directory",
+        "dts_directory",
+        "platform_identity_header",
+    ):
         relative_value(linux.get(key), f"platform linux {key}")
     string_array(linux.get("targets"), "platform linux targets")
     path_array(linux.get("patches"), "platform linux patches", allow_empty=True)
@@ -185,11 +195,14 @@ def load_platform(platform: str) -> dict[str, Any]:
     path_steps(linux.get("appends"), "platform linux appends")
 
     uboot = exact_table(
-        config.get("uboot"), {"source", "archive_prefix", "patches", "copies"}, "platform uboot"
+        config.get("uboot"),
+        {"source", "archive_prefix", "patches", "required_config", "copies"},
+        "platform uboot",
     )
     for key in ("source", "archive_prefix"):
         relative_value(uboot[key], f"platform uboot {key}")
     path_array(uboot.get("patches"), "platform uboot patches", allow_empty=True)
+    kconfig_line_array(uboot.get("required_config"), "platform uboot required_config")
     path_steps(uboot.get("copies"), "platform uboot copies")
 
     bootstrap = exact_table(

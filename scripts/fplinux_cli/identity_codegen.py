@@ -10,8 +10,7 @@ from typing import Any
 from .identity import IdentityError, validate_platform_name
 
 BOOTSTRAP_IDENTITY_HEADER = "generated/fplinux-bootstrap-identity.h"
-LINUX_IDENTITY_DTSI = "arch/arm/boot/dts/unisoc/fplinux-target-identity.dtsi"
-LINUX_PLATFORM_IDENTITY_HEADER = "arch/arm/mach-ums9117/fplinux-platform-identity.h"
+LINUX_IDENTITY_DTSI = "fplinux-target-identity.dtsi"
 BOOT_SCREEN_IDENTITY_BYTES = 32
 _RECORD_PREFIX = re.compile(r"[A-Z0-9][A-Z0-9_]*\Z")
 _SPDX_TAG = "SPDX" + "-License-Identifier"
