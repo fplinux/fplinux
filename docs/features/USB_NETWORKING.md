@@ -19,9 +19,9 @@ phone page states whether any board-specific USB capability is available.
 
 The runner sets up this private link while loading the selected image. A source
 checkout uses `./fplinux run <target>`; a standalone archive uses
-`./runner/run.py`. Follow the source checkout's loading guide or the standalone
-archive's top-level `README.txt` for the loader-first procedure and host USB
-permissions.
+`./runner/run.py`. Follow [Loading from a source checkout](../guides/LOADING.md)
+or [Using a standalone archive](../guides/STANDALONE.md) for the loader-first
+procedure and host USB permissions.
 
 Linux keeps running after USB disconnection only while another power source
 is available. Without a battery, USB disconnection cuts power: follow the

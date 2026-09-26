@@ -4,7 +4,8 @@ FPLinux transfers ordinary files over the current session's SFTP channel. Use
 these commands instead of an ad-hoc SFTP invocation when the result matters:
 they verify the complete file with SHA-256 and publish it only after that check.
 
-Start or reconnect first with [SSH sessions](SSH.md).
+Start or reconnect first with [SSH sessions](SSH.md). The source-checkout
+commands below take the session's `--profile` as described there.
 
 ## Upload
 

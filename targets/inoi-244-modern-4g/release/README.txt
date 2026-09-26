@@ -56,6 +56,7 @@ The shared interfaces and storage safety rules are described in:
   - docs/features/BATTERY_TELEMETRY.md
   - docs/features/BLUETOOTH.md
   - docs/features/CHARGER_STATUS.md
+  - docs/features/CPU_CLOCK.md
   - docs/features/DISPLAY_BACKLIGHT.md
   - docs/features/FM_RADIO.md
   - docs/features/HEADPHONE_AUDIO.md

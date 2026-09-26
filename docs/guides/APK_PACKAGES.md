@@ -22,13 +22,14 @@ and profile of that running session. Find the build directory printed after
 application's APK.
 
 This example installs `fplinux-showcase.apk` into a default
-`inoi-244-modern-4g` session. Substitute the selected target, profile, build
-output path and APK filename as one consistent set:
+`inoi-244-modern-4g` session. Run it from the checkout root, because the
+`output:` path is relative to it. Replace `<output>` with that path and
+substitute the selected target, profile, output path and APK filename as one
+consistent set:
 
 ```sh
 ./fplinux console inoi-244-modern-4g --profile default --upload \
-  /absolute/path/printed-by-fplinux-build/apks/fplinux-showcase.apk \
-  /tmp/fplinux-showcase.apk
+  <output>/apks/fplinux-showcase.apk /tmp/fplinux-showcase.apk
 ./fplinux console inoi-244-modern-4g --profile default --exec \
   'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-showcase.apk'
 ```

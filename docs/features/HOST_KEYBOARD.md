@@ -24,8 +24,9 @@ sudo timeout 60s ./host/fplinux-usb-keyboard \
 `/dev/input/eventN` must be the evdev node of the keyboard to forward. Elevated
 privileges are normally needed to open that input node and the USB interface.
 The source-checkout command gets the gadget identity and interface from the
-selected target; the current standalone archives use generic-serial interface
-`0`.
+selected target and takes the session's `--profile` as described in
+[SSH sessions](SSH.md); the current standalone archives use generic-serial
+interface `0`.
 
 Scalar value options may be repeated. Every occurrence must be valid, and the
 last one selects the effective value.

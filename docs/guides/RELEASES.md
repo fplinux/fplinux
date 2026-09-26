@@ -84,6 +84,6 @@ by `./fplinux package` protects the ZIP as a whole when that digest is retained
 or published. Neither integrity check demonstrates working phone hardware.
 
 After validation, follow [Using a standalone archive](STANDALONE.md). That guide
-is the source of truth for host runtime requirements, USB access, loader order
-and troubleshooting. The archive's bundled feature documents cover the running
+is the source of truth for host runtime requirements, USB access and loader
+order. The archive's bundled feature documents cover the running
 session without depending on a source checkout.

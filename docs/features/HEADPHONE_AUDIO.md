@@ -26,7 +26,7 @@ playback.
 
 ## Fitted profile and volume
 
-Each supported target has an optional fitted gain profile extracted from the
+Each supported target has an optional fitted audio profile extracted from the
 exact phone's stock data. In a source checkout, prepare it before building:
 
 ```sh
@@ -129,7 +129,8 @@ processing data; loudness and dynamics have not been matched to stock
 playback. The equalizer's output gain makes playback louder than with the
 equalizer off, most on the speaker; on the INOI phones, both outputs together
 keep the same level. The INOI headphone set changes only the level, and the
-Nokia TA-1618 headphone set carries that phone's own multi-band tuning.
+Nokia 3210 4G (TA-1618) headphone set carries that phone's own multi-band
+tuning.
 [Speaker audio](SPEAKER_AUDIO.md) describes the speaker sets. The ALC acts as a
 limiter near full scale and does not compress ordinary levels.
 

@@ -42,10 +42,11 @@ APKs are built and published under `apks/`, but are not installed in that root
 filesystem. Contributors do not need a separate target-local packaging workflow.
 
 See [Building FPLinux](../docs/guides/BUILDING.md) for host setup and source
-checks, [TyrQuake](../docs/apps/TYRQUAKE.md) and
-[MicroPythonOS](../docs/apps/MICROPYTHONOS.md) for the published APKs, and the
-project [documentation index](../README.md#documentation) for the remaining user
-and contributor guides. Project-owned sources follow the
+checks,
+[Installing and removing optional APK packages](../docs/guides/APK_PACKAGES.md)
+for the published APKs, and the project
+[documentation index](../README.md#documentation) for the remaining user and
+contributor guides. Project-owned sources follow the
 [code style](../docs/reference/CODE_STYLE.md). C sources use the
 [phone-userspace](../docs/reference/style/C.md#phone-userspace) or
 [embedded-adapter](../docs/reference/style/C.md#code-embedded-into-another-project)

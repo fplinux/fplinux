@@ -1,8 +1,8 @@
 # Phone microphone
 
-Nokia TA-1618, INOI 240 Modern 4G and INOI 244 Modern 4G record from their
-built-in microphones or
-the microphone of a connected four-contact wired headset. ALSA capture supports
+The Nokia 3210 4G (TA-1618), INOI 240 Modern 4G and INOI 244 Modern 4G record
+from their built-in microphones or the microphone of a connected four-contact
+wired headset. ALSA capture supports
 mono signed 16-bit PCM at 48 kHz. `Capture Source` defaults to `Internal`;
 select `Headset` before opening a recording stream to use the wired microphone:
 

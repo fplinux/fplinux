@@ -15,8 +15,12 @@ Current target support:
   - physical keypad and keypad backlight;
   - bounded vibration through the Linux force-feedback interface;
   - USB SSH/SFTP and host-keyboard forwarding;
+  - Bluetooth BR/EDR pairing, bidirectional file transfer and PAN Internet in
+    both profiles, and LE keyboards and mice in the RAM profile, with firmware
+    prepared from this exact phone;
+  - manual CPU frequency selection between 768 MHz and 1 GHz;
   - stereo S16_LE playback through the 3.5 mm headphones, with fitted gain
-    levels and the stock equalizer and ALC;
+    levels and the stock equalizer and automatic level control (ALC);
   - PCM playback through the single front speaker above the display, alone or
     together with the headphones;
   - mono 48 kHz recording from the built-in or original wired-headset microphone,
@@ -29,6 +33,8 @@ Current target support:
     documented accuracy limits;
   - optional per-command charge measurement through the bundled APK;
   - optional FPLinux: ARMADA display, keypad-light and vibration showcase;
+  - optional TyrQuake and MicroPythonOS;
+  - hardware image rotation of RGB, grayscale and two-plane YUV images;
   - hardware baseline JPEG decoding, fixed quality-85 JPEG encoding at
     1200x32, 320x240 and 640x480, and fixed half-size NV16 scaling;
   - native 240x320 NV16 or CPU-converted RGB565 image presentation;
@@ -60,7 +66,9 @@ docs/features/FM_RADIO.md for scan and playback commands and the tested profile.
 Interfaces, limits and safety procedures are bundled at:
   - docs/features/AUXADC.md
   - docs/features/BATTERY_TELEMETRY.md
+  - docs/features/BLUETOOTH.md
   - docs/features/CHARGER_STATUS.md
+  - docs/features/CPU_CLOCK.md
   - docs/features/DISPLAY_BACKLIGHT.md
   - docs/features/FM_RADIO.md
   - docs/features/HEADPHONE_AUDIO.md
@@ -80,9 +88,13 @@ and default 10. Shared interface names are sc2720-battery, sc2720-charger,
 sc2720-auxadc, ums9117-thermal, sc27xx:vibrator and UMS9117 Headphones. IIO,
 thermal and input-device numbers are assigned at boot.
 
-Install and run the optional showcase by following:
+Install and run the optional applications by following:
+  - docs/apps/MICROPYTHONOS.md
   - docs/apps/SHOWCASE.md
+  - docs/apps/TYRQUAKE.md
 
+Included image rotation formats and limits are described in:
+  - docs/apps/ROTATE.md
 The included JPEG codec and scaler limits are described in:
   - docs/apps/JPEG.md
 Native image presentation formats and completion boundaries are described in:

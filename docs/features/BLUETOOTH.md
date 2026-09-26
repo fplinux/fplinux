@@ -153,10 +153,10 @@ tested.
 
 Bluetooth keyboards and mice use the kernel HID drivers and appear to
 applications as ordinary input devices. [TyrQuake](../apps/TYRQUAKE.md) and
-[MicroPythonOS](../apps/MICROPYTHONOS.md) accept them. Bluetooth LE keyboard
-and mouse input has been exercised on Nokia TA-1618 in the default RAM profile.
-Bluetooth Classic HID input and the other target and profile combinations are
-unqualified.
+[MicroPythonOS](../apps/MICROPYTHONOS.md) accept them. The selected target's
+documentation states whether keyboards and mice have been tested on that phone
+and in which profile. Bluetooth Classic keyboard and mouse input has not been
+tested.
 
 Put the device into pairing mode, then pair it from the phone:
 
@@ -182,5 +182,4 @@ they enter pairing mode. Follow any passkey prompt that `bluetoothctl` shows.
   temporary RAM files still disappear. Save needed files to persistent storage.
 - Bluetooth use does not write the phone's NAND or NV storage.
 - Warm controller restart, Bluetooth LE devices other than keyboards and mice,
-  Bluetooth audio, range, wake over Bluetooth and deep suspend have not been
-  tested.
+  Bluetooth audio, range and wake over Bluetooth have not been tested.

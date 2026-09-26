@@ -25,17 +25,11 @@ what remains unavailable.
 
 ## Features
 
-Keep hardware presence separate from FPLinux support:
-
-- **Hardware:** **Present**, **Absent**, **Unknown**, or **N/A** for a
-  software-only capability. Absence requires evidence for this exact variant;
-  a missing driver or DTS node does not prove it.
-- **FPLinux:** **Supported** when implemented and exercised on this exact phone,
-  **Partial** when an exercised limitation remains or relevant physical behavior
-  has not been checked,
-  **Not supported** when the current target provides no supported path,
-  **Unknown** when current support or validation has not been established, or
-  **N/A** when the capability does not apply.
+Keep hardware presence separate from FPLinux support. Use the **Hardware** and
+**FPLinux** values defined in the
+[target index](../../targets/README.md#status-and-common-limits). Absence
+requires evidence for this exact variant; a missing driver or DTS node does not
+prove it.
 
 Keep an explicit status for this exact phone even when it uses shared code.
 Link a shared feature or application page instead of copying its commands,

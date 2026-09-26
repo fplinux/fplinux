@@ -18,16 +18,21 @@ selects a space. Pause briefly or press another key to commit the current
 character.
 
 - Digits `0` through `9` enter text with multi-tap.
-- `*` cycles Ctrl, Alt, Shift or no modifier for the next key.
+- `*` cycles Ctrl, Alt, Shift or no modifier for the next multi-tap character.
+  Ctrl applies to letters, `@`, `^`, `_` and `?`; other characters are
+  refused. Enter, Backspace and the D-pad ignore the modifier and leave it
+  armed.
 - `#` opens the scrollback view.
-- The left soft key sends Tab.
+- The left soft key sends Tab, or Esc followed by Tab with Shift; Ctrl and Alt
+  are refused.
 - The right soft key cancels the pending character or sends Backspace.
 - The centre or dial key sends Enter.
 - The D-pad moves through shell input and programs.
 - The power key is not console input; see [power-off](POWER_OFF.md).
 
 The pending character is shown at the cursor. When no character is pending, an
-armed one-shot modifier appears there as `C`, `A` or `S`.
+armed one-shot modifier appears there as `C`, `A` or `S`. A refused key shows
+`!` there briefly.
 
 ## Scrollback
 

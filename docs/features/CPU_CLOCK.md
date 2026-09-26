@@ -21,16 +21,16 @@ echo performance > scaling_governor
 
 The clock observer reports the current Cortex-A7 and MPLL rates to Linux when
 it can decode a stable, supported register snapshot. It returns no invented
-rate for an unstable or unsupported clock state. Frequency switching has been
-exercised on the Nokia TA-1618 and INOI 240 Modern 4G; it has not been
-physically tested on the INOI 244 Modern 4G.
+rate for an unstable or unsupported clock state. The selected target document
+states whether frequency switching has been tested on that phone.
 
 `fplinux-cpuclock` is a separate phone-side measurement helper. It runs a
 dependent integer-addition chain, times it with the monotonic clock and prints
 each round plus the best result. The loop overhead is deliberately excluded, so
 the reported result is a lower bound rather than an optimistic frequency claim.
 
-Run it through the active session:
+Run it through the active session, adding the session's `--profile` to the
+source-checkout command as described in [SSH sessions](SSH.md):
 
 ```sh
 # Source checkout

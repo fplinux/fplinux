@@ -36,7 +36,7 @@ overlay for `fbcon`. The user-visible keypad behavior belongs to the
 
 ## Target responsibilities
 
-A console target owns:
+A console target provides, itself or through its platform:
 
 - its framebuffer or DRM driver and the mode exposed through `fbcon`;
 - keypad scan, wiring and the keymap to the phone key codes;

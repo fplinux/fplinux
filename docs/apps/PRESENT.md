@@ -1,12 +1,11 @@
 # Native image presentation
 
-`fplinux-present` accepts native-size NV16 frames for Nokia TA-1618, INOI 240
-Modern 4G, and INOI 244 Modern 4G. It can send NV16 directly to the LCD
-controller or convert the same input on the CPU and send little-endian RGB565.
-It is included in the normal root filesystem and does not run as a service.
-Both presentation modes complete LCD-controller transfers on all three
-targets. Visible image fidelity remains a separate, target-specific limit;
-see the [target documentation](../../targets/README.md).
+`fplinux-present` accepts NV16 frames at the native size of the phone's
+display. It can send NV16 directly to the LCD controller or convert the same
+input on the CPU and send little-endian RGB565. It is included in the normal
+root filesystem and does not run as a service. See the
+[target documentation](../../targets/README.md) for its support and
+visible-result limits on the selected phone.
 
 First load the normal image using the target's instructions. A standalone
 archive includes this page; start with its top-level `README.txt` and the shared
@@ -42,6 +41,8 @@ last one selects the effective value.
 
 The complete options are:
 
+- `--input NV16`: the NV16 input frame; required;
+- `--mode nv16|cpu-rgb565`: presentation path; default `nv16`;
 - `--repeat N`: completed presentations from 1 through 4096; default 1;
 - `--fps N`: absolute-deadline pacing from 1 through 30 frames per second;
   default 10;
@@ -66,10 +67,9 @@ geometry. It is headerless, tight, full-range BT.601 NV16:
 1. a Y plane with one byte per pixel;
 2. an equally sized interleaved Cb,Cr plane with the same row count and stride.
 
-| Target                            | Geometry | Bytes per plane | Input or RGB565 output bytes |
-| --------------------------------- | -------- | --------------- | ---------------------------- |
-| Nokia TA-1618, INOI 244 Modern 4G | 240×320  | 76800           | 153600                       |
-| INOI 240 Modern 4G                | 128×160  | 20480           | 40960                        |
+Each plane holds width × height bytes, so the input file and the optional
+RGB565 output are both twice that size. For example, a `240×320` display takes
+`76800`-byte planes and a `153600`-byte file.
 
 Each Cb,Cr pair applies to two adjacent horizontal luma samples. There are no
 dimensions, strides, metadata, or row padding in the file.

@@ -94,10 +94,11 @@ an exact successful result when their current inputs match; otherwise they run
 again. `--no-cache` reruns selected cacheable scopes. An ordinary build or RAM
 run without source changes does not need to repeat the gate.
 
-The complete gate checks up to three independent default kernel contexts at once.
-Use `--jobs 1` to force serial kernel analysis on a memory-constrained host.
-Source-only checks and named profiles do not gain extra work from a larger
-limit. `--verbose` uses serial analysis so tool output can remain live.
+The kernel check analyzes one context per target that offers the selected
+profile, by default up to three at once. Use `--jobs 1` to force serial kernel
+analysis on a memory-constrained host. A `--jobs` value above 1 requires the
+`kernel` scope when scopes are named and cannot be combined with `--verbose`,
+which uses serial analysis so tool output can remain live.
 
 The `docs` scope also rejects repository-local Markdown links whose file or
 heading anchor does not exist.

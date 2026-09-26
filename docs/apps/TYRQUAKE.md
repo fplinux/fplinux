@@ -32,8 +32,8 @@ The game data is never copied into the APK or its temporary runtime directory.
 
 ### Data card in the RAM profile
 
-Use a filesystem supported by the selected phone: FAT32 on Nokia TA-1618,
-or ext4 on either INOI target. Follow the shared
+Use a data-card filesystem that the selected phone's documentation lists as
+supported. Follow the shared
 [microSD instructions](../features/MICROSD.md) to mount it at `/mnt/card`,
 make `fplinux/quake/id1`, and upload the PAK using
 [file transfer](../features/FILE_TRANSFER.md). Follow the shared safe-removal
