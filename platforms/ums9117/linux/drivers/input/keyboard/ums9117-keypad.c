@@ -480,6 +480,13 @@ static int ums9117_keypad_suspend(struct device *dev)
 	int ret;
 
 	/*
+	 * The matrix is not a wake source. Stop scanning so that keys pressed
+	 * during sleep are not latched and reported after wake.
+	 */
+	ums9117_keypad_mask_matrix_irq(controller);
+	synchronize_irq(controller->matrix_irq);
+
+	/*
 	 * Nested EIC child IRQs are not masked by suspend_device_irqs(). EIC9
 	 * therefore has to be disabled explicitly before the shared parent gets
 	 * wake permission for EIC1.
@@ -499,6 +506,7 @@ static int ums9117_keypad_suspend(struct device *dev)
 			enable_irq(controller->eic9.irq);
 			controller->eic9.suspend_disabled = false;
 		}
+		ums9117_keypad_start_matrix_irq(controller);
 		dev_err(dev, "could not enable EIC1 power-key wake IRQ: %pe\n",
 			ERR_PTR(ret));
 		return ret;
@@ -513,6 +521,7 @@ static int ums9117_keypad_resume(struct device *dev)
 	struct ums9117_keypad *controller = dev_get_drvdata(dev);
 	int ret;
 
+	ums9117_keypad_start_matrix_irq(controller);
 	if (controller->eic1.wake_enabled) {
 		ret = disable_irq_wake(controller->eic1.irq);
 		if (ret) {
