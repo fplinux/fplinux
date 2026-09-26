@@ -213,6 +213,30 @@ class GlobalProfileTests(unittest.TestCase):
                 self.assertEqual(set(groups), {"bluetooth", "fm-radio"})
         self.assertNotIn("fm-radio", targets.load_target("second")["device_data"]["groups"])
 
+    def test_board_maps_declaration_alone_needs_no_target_parser_or_sizes(self) -> None:
+        """The platform extracts board maps of each phone's own size without a target parser."""
+        self.write_target_manifest("first", "target-without-bluetooth.toml")
+        path = self.root / "targets/first/target.toml"
+        declaration = (
+            '\n[board_maps]\nfirmware = [{ source = "pinmap.bin", destination = "pinmap.bin" }]\n'
+        )
+        path.write_text(path.read_text(encoding="utf-8") + declaration, encoding="utf-8")
+        self.assertEqual(
+            targets.load_target("first")["device_data"],
+            {"groups": {"board-maps": [{"source": "pinmap.bin", "destination": "pinmap.bin"}]}},
+        )
+
+    def test_parser_firmware_must_declare_its_exact_size(self) -> None:
+        """Bluetooth, FM and audio inputs keep the exact size that builds verify."""
+        self.write_target_manifest("first")
+        path = self.root / "targets/first/target.toml"
+        sized = 'destination = "demo/radio.bin"\nsize = 4\n'
+        text = path.read_text(encoding="utf-8")
+        self.assertIn(sized, text)
+        path.write_text(text.replace(sized, 'destination = "demo/radio.bin"\n'), encoding="utf-8")
+        with self.assertRaisesRegex(SystemExit, r"source, destination, size and optional sha256"):
+            targets.load_target("first")
+
     def test_missing_board_boot_sources_fail_only_when_microsd_is_selected(self) -> None:
         """RAM operation does not read unused U-Boot sources or fall back to another board."""
         (self.root / "targets/second/uboot/defconfig").unlink()

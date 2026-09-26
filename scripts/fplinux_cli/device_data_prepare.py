@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import functools
 import importlib.util
 import shutil
 import sys
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli.cli.build import build
+from fplinux_cli.cli.bundles import resolve_target_bundle
 from fplinux_cli.cli.runtime import run_target_noninteractive
 from fplinux_cli.manifests.targets import load_target
 
@@ -31,8 +33,13 @@ from .nand_backup import backup_target_nand, read_backup_geometry, require_decla
 from .output import RunReporter
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
     from types import ModuleType
+
+# The device-data group that the target's platform extracts from the phone's
+# stock firmware, and the platform-owned module that does so.
+BOARD_MAPS_GROUP = "board-maps"
+BOARD_MAPS_MODULE = "host/stock_image.py"
 
 
 def _require_directory(path: Path, name: str) -> Path:
@@ -110,15 +117,13 @@ def dump_page_bytes(
     return page_bytes
 
 
-def _load_device_data_parser(target: str, filename: str) -> ModuleType:
-    """Load one target-owned parser through its normal source module boundary."""
-    path = ROOT / "targets" / target / filename
+def _load_source_module(path: Path, name: str, description: str) -> ModuleType:
+    """Load one project-owned Python source through its normal module boundary."""
     if path.is_symlink() or not path.is_file():
-        fail(f"device-data parser is missing or invalid: {path}")
-    name = f"fplinux_{target.replace('-', '_')}_device_data"
+        fail(f"{description} is missing or invalid: {path}")
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
-        fail(f"device-data parser cannot be loaded: {path}")
+        fail(f"{description} cannot be loaded: {path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     try:
@@ -126,9 +131,44 @@ def _load_device_data_parser(target: str, filename: str) -> ModuleType:
     except BaseException:
         sys.modules.pop(name, None)
         raise
+    return module
+
+
+def _load_device_data_parser(target: str, filename: str) -> ModuleType:
+    """Load one target-owned parser through its normal source module boundary."""
+    module = _load_source_module(
+        ROOT / "targets" / target / filename,
+        f"fplinux_{target.replace('-', '_')}_device_data",
+        "device-data parser",
+    )
     if not callable(getattr(module, "prepare_device_data", None)):
         fail("device-data parser does not expose prepare_device_data(nand)")
     return module
+
+
+def _load_board_maps_provider(platform: str) -> ModuleType:
+    """Load the platform module that extracts board maps from the stock firmware."""
+    module = _load_source_module(
+        ROOT / "platforms" / platform / BOARD_MAPS_MODULE,
+        f"fplinux_{platform.replace('-', '_')}_stock_image",
+        f"platform {platform} {BOARD_MAPS_GROUP} module",
+    )
+    if not callable(getattr(module, "prepare_board_maps", None)):
+        fail(
+            f"platform {platform} {BOARD_MAPS_GROUP} module does not expose "
+            "prepare_board_maps(nand, host_tools=...)"
+        )
+    return module
+
+
+def _board_maps_extractor(target: str, platform: str) -> Callable[[PhysicalNand], object]:
+    """Bind the platform extraction to the host tools of the target's current build."""
+    provider = _load_board_maps_provider(platform)
+    bundle, _manifest = resolve_target_bundle(target)
+    extract: Callable[[PhysicalNand], object] = functools.partial(
+        provider.prepare_board_maps, host_tools=bundle.path / "host"
+    )
+    return extract
 
 
 def _canonical_files(
@@ -156,23 +196,37 @@ def _canonical_files(
 
 def _extract_groups(
     target: str,
-    parser_filename: str,
+    parser_filename: str | None,
     groups: Mapping[str, list[dict[str, Any]]],
     nand: PhysicalNand,
+    *,
+    board_maps: Callable[[PhysicalNand], object] | None,
 ) -> dict[str, PreparedGroup]:
-    """Run the target parser once and normalize every requested group."""
-    parser = _load_device_data_parser(target, parser_filename)
-    try:
-        result = parser.prepare_device_data(nand)
-    except ValueError as error:
-        fail(f"device-data extraction failed: {error}")
-    if not isinstance(result, DeviceDataPreparation) or set(result.groups) != set(groups):
-        expected = ", ".join(sorted(groups))
-        fail(f"device-data parser returned an invalid group set; expected: {expected}")
+    """Run the target parser and the platform board-map extraction once each.
+
+    Every requested group is then normalized.
+    """
+    produced: dict[str, object] = {}
+    parser_groups = set(groups) - {BOARD_MAPS_GROUP}
+    if parser_groups:
+        parser = _load_device_data_parser(target, str(parser_filename))
+        try:
+            result = parser.prepare_device_data(nand)
+        except ValueError as error:
+            fail(f"device-data extraction failed: {error}")
+        if not isinstance(result, DeviceDataPreparation) or set(result.groups) != parser_groups:
+            expected = ", ".join(sorted(parser_groups))
+            fail(f"device-data parser returned an invalid group set; expected: {expected}")
+        produced.update(result.groups)
+    if board_maps is not None:
+        try:
+            produced[BOARD_MAPS_GROUP] = board_maps(nand)
+        except ValueError as error:
+            fail(f"device-data extraction failed: {error}")
 
     normalized: dict[str, PreparedGroup] = {}
     for group_name in sorted(groups):
-        prepared_group = result.groups[group_name]
+        prepared_group = produced[group_name]
         if not isinstance(prepared_group, PreparedGroup):
             fail(f"device-data group {group_name} returned an invalid result")
         expected_names = tuple(str(declaration["source"]) for declaration in groups[group_name])
@@ -188,7 +242,19 @@ def _extract_groups(
             label="prepared",
             expected_names=expected_names,
         )
-        normalized[group_name] = PreparedGroup(originals=originals, prepared=prepared)
+        reports = (
+            _canonical_files(
+                prepared_group.reports,
+                group=group_name,
+                label="report",
+                expected_names=None,
+            )
+            if prepared_group.reports
+            else {}
+        )
+        normalized[group_name] = PreparedGroup(
+            originals=originals, prepared=prepared, reports=reports
+        )
     return normalized
 
 
@@ -200,7 +266,7 @@ def _publish_files(directory: Path, files: Mapping[str, bytes], name: str) -> No
 
 
 def _materialize_groups(staging: Path, groups: Mapping[str, PreparedGroup]) -> None:
-    """Save each group's originals and prepared bytes in a new generation."""
+    """Save each group's originals, prepared bytes and reports in a new generation."""
     originals = _require_directory(staging / "originals", "device-data originals directory")
     prepared = _require_directory(staging / "groups", "device-data group directory")
     for group_name, group in groups.items():
@@ -214,6 +280,11 @@ def _materialize_groups(staging: Path, groups: Mapping[str, PreparedGroup]) -> N
             group.prepared,
             f"device-data prepared files for {group_name}",
         )
+    reported = {name: group.reports for name, group in groups.items() if group.reports}
+    if reported:
+        reports = _require_directory(staging / "reports", "device-data report directory")
+        for group_name, files in reported.items():
+            _publish_files(reports / group_name, files, f"device-data reports for {group_name}")
 
 
 def _write_receipt(
@@ -225,27 +296,34 @@ def _write_receipt(
     admitted: Mapping[str, tuple[FirmwareInput, ...]],
 ) -> None:
     """Record hashes and sizes without exposing source paths or private contents."""
+    group_records: list[dict[str, Any]] = []
+    for group_name in sorted(groups):
+        group = groups[group_name]
+        group_record: dict[str, Any] = {
+            "name": group_name,
+            "originals": [
+                {
+                    "source": name,
+                    "size": len(contents),
+                    "sha256": sha256_bytes(contents),
+                }
+                for name, contents in group.originals.items()
+            ],
+            "prepared": [firmware.recipe_record() for firmware in admitted[group_name]],
+        }
+        if group.reports:
+            group_record["reports"] = [
+                {"name": name, "size": len(contents), "sha256": sha256_bytes(contents)}
+                for name, contents in group.reports.items()
+            ]
+        group_records.append(group_record)
     record = {
         "source": {
             "kind": source_kind,
             "size": len(raw),
             "sha256": sha256_bytes(raw),
         },
-        "groups": [
-            {
-                "name": group_name,
-                "originals": [
-                    {
-                        "source": name,
-                        "size": len(contents),
-                        "sha256": sha256_bytes(contents),
-                    }
-                    for name, contents in groups[group_name].originals.items()
-                ],
-                "prepared": [firmware.recipe_record() for firmware in admitted[group_name]],
-            }
-            for group_name in sorted(groups)
-        ],
+        "groups": group_records,
     }
     replace_file_atomically(staging / "receipt.json", canonical_json_bytes(record), 0o600)
 
@@ -278,7 +356,7 @@ def prepare_device_data(
     declarations: dict[str, list[dict[str, Any]]] = device_data["groups"]
     if not declarations:
         fail(f"device-data preparation is not supported for target {target}")
-    parser_filename: str = device_data["parser"]
+    parser_filename: str | None = device_data.get("parser")
     nand_declaration: dict[str, Any] | None = target_config.get("nand")
     cache = ROOT / ".cache"
     reporter = RunReporter.create("device-data", target=target, verbose=False)
@@ -286,6 +364,13 @@ def prepare_device_data(
     if from_dump is None:
         with reporter.stage("build", show_tail=False):
             build(target, jobs, offline=offline, reporter=reporter)
+    # Board maps are extracted with a host tool from the target's current build.
+    board_maps = (
+        _board_maps_extractor(target, str(target_config["platform"]))
+        if BOARD_MAPS_GROUP in declarations
+        else None
+    )
+    if from_dump is None:
         print(
             "Connect the powered-off phone only when the loader asks.",
             file=sys.stderr,
@@ -327,7 +412,13 @@ def prepare_device_data(
                 nand = PhysicalNand.from_dump(raw, page_bytes=page_bytes)
             except ValueError as error:
                 fail(f"device-data extraction failed: {error}")
-            extracted = _extract_groups(target, parser_filename, declarations, nand)
+            extracted = _extract_groups(
+                target,
+                parser_filename,
+                declarations,
+                nand,
+                board_maps=board_maps,
+            )
             _materialize_groups(staging, extracted)
             admitted = capture_device_data_generation(
                 declarations,
@@ -351,6 +442,9 @@ def prepare_device_data(
 
     reporter.finish()
     print(f"Device data is ready in {generation}.")
+    for group_name in sorted(extracted):
+        for report_name in extracted[group_name].reports:
+            print(f"Review {generation / 'reports' / group_name / report_name}.")
     print("Next:")
     print(f"  ./fplinux build {target}")
     print(f"  ./fplinux run {target}")
