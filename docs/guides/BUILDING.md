@@ -331,10 +331,11 @@ Normal `build` and `run` commands consume only already prepared local data.
 They do not read the phone's NAND.
 
 A target may also declare the `board-maps` group, which its platform extracts
-from the phone's stock firmware in the same NAND backup. The group holds the
-loader pin map `pinmap.bin` and keymap `keymap.bin`. Their declarations omit the
-size, because each phone's maps have their own. The loader does not read them
-and takes its maps only from the target's asset lock. Preparing the group
+from the phone's stock firmware in the same NAND backup; a target created by
+`./fplinux target new` declares it. The group holds the loader pin map
+`pinmap.bin` and keymap `keymap.bin`. Their declarations omit the size, because
+each phone's maps have their own. The loader does not read them and takes its
+maps only from the target's asset lock. Preparing the group
 also writes the board report `reports/board-maps/board-report.json` into the new
 generation and prints its path. The report lists the board values found in the
 stock firmware, where each came from, the values that were not found and the
