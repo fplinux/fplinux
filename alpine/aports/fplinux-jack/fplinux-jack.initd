@@ -1,0 +1,18 @@
+#!/sbin/openrc-run
+# SPDX-License-Identifier: GPL-2.0-only
+# shellcheck shell=sh disable=SC2034
+
+name="FPLinux headphone jack"
+description="Play through the headphones while they are plugged in"
+supervisor=supervise-daemon
+command=/usr/bin/fplinux-jack
+input_file=/dev/null
+output_logger="/usr/libexec/fplinux/kmsg --level 6 --tag fplinux-jack"
+error_logger="/usr/libexec/fplinux/kmsg --level 3 --tag fplinux-jack"
+respawn_delay=1
+respawn_max=0
+retry="TERM/2/KILL/2"
+
+depend() {
+	need devfs
+}

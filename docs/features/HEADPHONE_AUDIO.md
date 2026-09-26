@@ -61,9 +61,11 @@ hardware calibration.
 
 `Headphone Playback Switch` and `Speaker Playback Switch` choose the outputs
 that play PCM and [FM radio](FM_RADIO.md). The headphone switch is always
-present and is `on` by default. The speaker switch exists only with the fitted
-profile, like `Speaker Playback Volume`, and is `off` by default. To add the
-[speaker](SPEAKER_AUDIO.md) to the headphones:
+present. The speaker switch exists only with the fitted profile, like
+`Speaker Playback Volume`. The driver starts with the headphones `on` and the
+speaker `off`; [jack detection](#jack-detection) then selects the output that
+matches the headphone socket. To add the [speaker](SPEAKER_AUDIO.md) to the
+headphones:
 
 ```sh
 amixer -c 0 cset name='Speaker Playback Switch' on
@@ -92,9 +94,9 @@ stream is open or running and while FM radio plays; the change applies to the
 running stream. Turning the speaker on while no other output is enabled
 produces one audible click; every other switch change is silent. To move from
 the headphones to the speaker alone without the click, turn the speaker on
-first and then turn the headphones off. Plugging in or removing wired
-headphones does not change either switch. The switches persist across
-playbacks and reset on a new boot.
+first and then turn the headphones off. [Jack detection](#jack-detection)
+changes the switches when headphones are plugged in or removed. The switches
+persist across playbacks and reset on a new boot.
 
 ## Jack detection
 
@@ -113,6 +115,24 @@ Plugging in or removing headphones does not wake a sleeping phone; the state
 is updated when it wakes. The control reports a plug in the socket without
 telling headphones from a headset or another cable, and it does not select the
 [headset microphone](MICROPHONE_AUDIO.md).
+
+The `fplinux-jack` service, started at boot, moves playback with the plug.
+When it starts and whenever a plug is inserted, it turns
+`Headphone Playback Switch` on and then `Speaker Playback Switch` off. When the
+plug is removed, it turns the speaker on and then the headphones off. Enabling
+the new output first keeps the change silent. PCM, capture and FM radio keep
+running, and FM follows the new output. Without the fitted profile there is no
+speaker switch, and the service leaves the outputs unchanged.
+
+The service changes the switches only when the plug changes, so a manual
+setting lasts until the next insertion or removal. To choose the outputs only
+by hand until the next boot, stop the service; starting it again applies the
+current socket state:
+
+```sh
+rc-service fplinux-jack stop
+rc-service fplinux-jack start
+```
 
 ## Playback processing
 

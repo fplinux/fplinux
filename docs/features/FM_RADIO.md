@@ -5,7 +5,10 @@ FM radio through their 3.5 mm headphone sockets. Plug in wired headphones or
 another 3.5 mm cable before tuning: the cable acts as the FM antenna, even when
 only the speaker plays. FM audio plays through the enabled
 [playback outputs](HEADPHONE_AUDIO.md#playback-outputs): wired headphones, the
-[speaker](SPEAKER_AUDIO.md) or both. The receiver uses FM settings
+[speaker](SPEAKER_AUDIO.md) or both. Plugging in the cable selects the
+headphones through [jack detection](HEADPHONE_AUDIO.md#jack-detection); enable
+the speaker afterwards to hear FM from it. Removing the cable moves playback to
+the speaker and removes the antenna. The receiver uses FM settings
 prepared from a read-only NAND backup of that same phone before the image is
 built.
 
