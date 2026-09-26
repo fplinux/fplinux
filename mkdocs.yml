@@ -1,4 +1,5 @@
 site_name: FPLinux
+site_description: "Linux for feature phones: Nokia 3210 4G and INOI 240/244 (Unisoc UMS9117)"
 site_url: https://fplinux.github.io/fplinux/
 repo_url: https://github.com/fplinux/fplinux
 edit_uri: edit/main/
@@ -19,14 +20,47 @@ validation:
 
 theme:
   name: material
+  # System fonts: the site loads nothing from Google Fonts.
+  font: false
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: white
+      accent: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
   features:
     - content.action.edit
+    - content.action.view
     - content.code.copy
+    - navigation.footer
     - navigation.indexes
     - navigation.sections
+    - navigation.tabs
     - navigation.top
+    - navigation.tracking
+    - search.highlight
+    - search.share
     - search.suggest
     - toc.follow
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/fplinux/fplinux
+      name: FPLinux on GitHub
 
 markdown_extensions:
   - tables
@@ -35,7 +69,10 @@ markdown_extensions:
   - pymdownx.superfences
 
 plugins:
-  - search
+  - search:
+      # Also split words at hyphens, underscores, slashes and case changes, so
+      # parts of names such as fplinux-jack or SW_HEADPHONE_INSERT are found.
+      separator: '[\s\u200b\-_,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
 
 # Entries without a title use the page's own heading.
 nav:
