@@ -305,18 +305,13 @@ describes what the report contains and which decisions it leaves to a person.
 
 ## Report a new phone
 
-Open an issue in the
-[project issue tracker](https://github.com/fplinux/fplinux/issues) with:
-
-- the phone's brand, product name and any model code printed on it;
-- the boot key that started BootROM mode;
-- the `lsusb` line for the phone, taken in a second terminal while the phone
-  is connected with the boot key held;
-- the complete `run` output, including any error;
-- the complete `nand identify` output;
-- the geometry receipt `nand.bin.json`, which contains no NAND data;
-- the board report `board-report.json`;
-- photos of the markings on the SoC and the flash chip.
+Open a
+[new phone report](https://github.com/fplinux/fplinux/issues/new?template=new-phone.yml)
+in the project issue tracker. The form asks for the phone's name and boot key,
+its `lsusb` line taken in a second terminal while the phone is connected with
+the boot key held, the complete `run` and `nand identify` output, the geometry
+receipt, the board report and photos of the markings on the SoC and the flash
+chip.
 
 Do not attach the NAND backup or any stock firmware image publicly. They
 contain the phone's own data and the vendor's firmware.

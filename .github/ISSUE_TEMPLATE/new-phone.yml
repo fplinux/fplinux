@@ -1,0 +1,81 @@
+name: New phone report
+description: Report a UMS9117 phone that has no FPLinux target yet.
+title: "New phone: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Follow [Bring up a new UMS9117 phone](https://fplinux.github.io/fplinux/docs/porting/NEW_PHONE/)
+        first; this form asks for what that route prints. Do not attach the NAND
+        backup `nand.bin` or any stock firmware image: they contain the phone's own
+        data and the vendor's firmware.
+  - type: input
+    id: phone
+    attributes:
+      label: Phone
+      description: Brand, product name and any model code printed on the phone or under its battery.
+      placeholder: "Brand Product 4G, model code ..."
+    validations:
+      required: true
+  - type: input
+    id: boot-key
+    attributes:
+      label: Boot key
+      description: The key held while connecting USB that started BootROM mode.
+      placeholder: "*"
+    validations:
+      required: true
+  - type: input
+    id: lsusb
+    attributes:
+      label: lsusb line
+      description: Taken in a second terminal while the phone is connected with the boot key held.
+      placeholder: "ID 1782:4d00 Spreadtrum Communications Inc."
+    validations:
+      required: true
+  - type: textarea
+    id: run
+    attributes:
+      label: Output of ./fplinux run
+      description: The complete output of `./fplinux run <target>`, including any error.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: nand-identify
+    attributes:
+      label: Output of ./fplinux nand identify
+      description: The complete output of `./fplinux nand identify <target>`. Leave it empty if Linux did not start.
+      render: text
+  - type: textarea
+    id: geometry-receipt
+    attributes:
+      label: Geometry receipt
+      description: The contents of `nand.bin.json` written by `./fplinux nand backup`. It contains no NAND data.
+      render: json
+  - type: upload
+    id: board-report
+    attributes:
+      label: Board report
+      description: The `board-report.json` file whose path `./fplinux device-data prepare <target> --from-dump nand.bin` prints.
+    validations:
+      accept: ".json"
+  - type: upload
+    id: photos
+    attributes:
+      label: Photos of the chip markings
+      description: The markings on the SoC and on the flash chip.
+    validations:
+      accept: ".png,.jpg,.jpeg,.webp"
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: What you tried, where it stopped, or other details about the phone.
+  - type: checkboxes
+    id: private-data
+    attributes:
+      label: Private data
+      options:
+        - label: I did not attach the NAND backup or any stock firmware image.
+          required: true
