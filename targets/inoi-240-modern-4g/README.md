@@ -21,6 +21,7 @@ Bluetooth pairing, bidirectional file transfer and PAN Internet work in both
 profiles. The red handset key and RTC alarms wake the phone from s2idle,
 including with mounted ext4 storage and card-backed swap; applications,
 Bluetooth and graphics work again after wake.
+In the RAM profile, mounted FAT32 data storage also works across sleep.
 
 Physical display, key and LCD brightness effects have not been tested on this
 configuration. This phone has no separate vibration motor; FPLinux vibrates it
