@@ -17,7 +17,8 @@ wake-capable power key or an armed normal [RTC alarm](RTC.md) to wake it. The US
 reconnects after wake, and a display that was active before sleep turns on
 again. A display that was already blank stays blank.
 
-The matrix keypad is not a supported wake source.
+The matrix keypad is not a supported wake source. Keypad keys pressed and
+released during sleep are not reported after wake.
 
 On phones with the shared vibrator interface, an active vibration is stopped
 before sleep and is not resumed after wake.
