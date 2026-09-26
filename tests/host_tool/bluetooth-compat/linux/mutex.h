@@ -10,6 +10,10 @@ struct mutex {
 	bool held;
 };
 #define DEFINE_MUTEX(name) struct mutex name
+static inline void mutex_init(struct mutex *lock)
+{
+	lock->held = false;
+}
 static inline void mutex_lock(struct mutex *lock)
 {
 	assert(!lock->held);

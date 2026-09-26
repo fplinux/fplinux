@@ -12,6 +12,8 @@ struct firmware {
 
 struct device;
 
+int request_firmware(const struct firmware **fw, const char *name,
+		     struct device *device);
 int request_firmware_direct(const struct firmware **fw, const char *name,
 			    struct device *device);
 void release_firmware(const struct firmware *fw);
