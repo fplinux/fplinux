@@ -101,7 +101,8 @@ analysis on a memory-constrained host. A `--jobs` value above 1 requires the
 which uses serial analysis so tool output can remain live.
 
 The `docs` scope also rejects repository-local Markdown links whose file or
-heading anchor does not exist.
+heading anchor does not exist, and documentation site pages that are neither in
+the `nav` of `mkdocs.yml` nor matched by its `not_in_nav`.
 
 The `kernel` scope checks formatting inside Linux patches as well as standalone
 C/H sources. Kconfig and Kbuild fragments are checked as changes to their Linux
@@ -139,6 +140,24 @@ Exit status is 0 for success, 1 for test failures or unresolved names, 2 for
 invalid command arguments, and 5 when unittest finds no tests. Ctrl+C returns 130. A selected test run always executes and never creates or refreshes a
 successful `check` receipt. It does not run linters or replace `check python`
 or the complete quality gate.
+
+## Preview the documentation site
+
+MkDocs builds the documentation site from a copy of the documentation pages
+kept at their repository paths. Install the pinned site tools once, then
+collect the pages and start the local preview from the repository root:
+
+```sh
+python3 -m venv .cache/site/venv
+.cache/site/venv/bin/pip install --require-hashes -r site/requirements.txt
+python3 scripts/site_collect.py
+.cache/site/venv/bin/mkdocs serve
+```
+
+`site_collect.py` replaces `.cache/site/src` with the current pages; run it
+again after editing a page. `mkdocs serve` prints the local address and reloads
+when the collected pages or `mkdocs.yml` change. A page missing from the site
+navigation, a broken link or a missing anchor stops the build.
 
 ## Build an ARM diagnostic program
 

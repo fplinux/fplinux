@@ -121,6 +121,7 @@ _CHECK_IMPLEMENTATION = frozenset(
         "scripts/fplinux_cli/identity_codegen.py",
         "scripts/fplinux_cli/output.py",
         "scripts/fplinux_cli/source_formats.py",
+        "scripts/site_collect.py",
     }
 )
 
