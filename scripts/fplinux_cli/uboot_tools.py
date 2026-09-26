@@ -207,7 +207,7 @@ def _config_integer(config: str, symbol: str) -> int:
         raise UbootToolsError(f"full U-Boot config has an invalid {symbol} value") from error
 
 
-def _verify_full_output(output: Path, layout: dict[str, int]) -> int:
+def _verify_full_output(output: Path, layout: dict[str, int], required_config: list[str]) -> int:
     elf = output / "u-boot"
     regular_file_record(elf, "U-Boot tools file", UbootToolsError)
     with elf.open("rb") as stream:
@@ -231,12 +231,11 @@ def _verify_full_output(output: Path, layout: dict[str, int]) -> int:
         raise UbootToolsError("full U-Boot ELF entry lies outside its loaded binary")
     config = (output / ".config").read_text(encoding="utf-8")
     required = (
-        "CONFIG_TARGET_FPLINUX_UMS9117=y\n",
+        *(f"{line}\n" for line in required_config),
         "CONFIG_ENV_IS_NOWHERE=y\n",
         "CONFIG_AUTOBOOT=y\n",
         "CONFIG_BOOTDELAY=-2\n",
         "CONFIG_USE_BOOTCOMMAND=y\n",
-        'CONFIG_BOOTCOMMAND="sdboot"\n',
         "# CONFIG_BOOTSTD is not set\n",
         "CONFIG_SYS_DCACHE_OFF=y\n",
         "CONFIG_FIT=y\n",
@@ -297,8 +296,10 @@ def _verify_full_output(output: Path, layout: dict[str, int]) -> int:
     return entry
 
 
-def _full_result(output: Path, recipe: str, layout: dict[str, int]) -> UbootBuild:
-    entry = _verify_full_output(output, layout)
+def _full_result(
+    output: Path, recipe: str, layout: dict[str, int], required_config: list[str]
+) -> UbootBuild:
+    entry = _verify_full_output(output, layout, required_config)
     return UbootBuild(
         output / "mkimage",
         output / "dumpimage",
@@ -324,8 +325,14 @@ def build_full(  # noqa: PLR0913 -- build inputs stay explicit.
     container_recipe: str,
     cross_compile: str,
     layout: dict[str, int],
+    required_config: list[str],
 ) -> UbootBuild:
-    """Build or exactly reuse the read-only MMC UMS9117 full U-Boot."""
+    """Build or exactly reuse a read-only MMC full U-Boot.
+
+    `required_config` lists the platform's exact `.config` lines, such as its board
+    selection and boot command, in addition to the generic read-only MMC and FIT
+    contract.
+    """
     if jobs < 1:
         raise UbootToolsError("full U-Boot jobs must be positive")
     recipe = _full_recipe(
@@ -340,8 +347,8 @@ def build_full(  # noqa: PLR0913 -- build inputs stay explicit.
     version = str(config["lock"]["version"])
     output = work / "uboot"
     if _full_cache_hit(recipe, output):
-        _verify_full_output(output, layout)
-        return _full_result(output, recipe, layout)
+        _verify_full_output(output, layout, required_config)
+        return _full_result(output, recipe, layout, required_config)
 
     work.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=work, prefix=".uboot.") as temporary_name:
@@ -383,7 +390,7 @@ def build_full(  # noqa: PLR0913 -- build inputs stay explicit.
             (staging / name).chmod(0o755 if name in {"mkimage", "dumpimage"} else 0o644)
         _tool_version(staging / "mkimage", version)
         _tool_version(staging / "dumpimage", version)
-        _verify_full_output(staging, layout)
+        _verify_full_output(staging, layout, required_config)
         write_canonical_json(staging / RECEIPT_NAME, _full_receipt(recipe, staging))
         if output.exists():
             if output.is_symlink() or not output.is_dir():
@@ -393,5 +400,5 @@ def build_full(  # noqa: PLR0913 -- build inputs stay explicit.
 
     if not _full_cache_hit(recipe, output):
         raise UbootToolsError("published full U-Boot receipt is not reusable")
-    _verify_full_output(output, layout)
-    return _full_result(output, recipe, layout)
+    _verify_full_output(output, layout, required_config)
+    return _full_result(output, recipe, layout, required_config)

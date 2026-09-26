@@ -16,6 +16,7 @@ from fplinux_cli.manifests.values import (
     basename_value,
     exact_table,
     integer_value,
+    kconfig_line_array,
     nonempty_string,
     package_array,
     path_array,
@@ -120,10 +121,15 @@ def _profile_uboot(
         fail("profile uboot kind must be none or full")
     uboot = exact_table(board, {"defconfig", "patches", "copies"}, "target microsd uboot")
     base = exact_table(
-        platform.get("uboot"), {"source", "archive_prefix", "patches", "copies"}, "platform uboot"
+        platform.get("uboot"),
+        {"source", "archive_prefix", "patches", "required_config", "copies"},
+        "platform uboot",
     )
     source = relative_value(base.get("source"), "platform uboot source")
     archive_prefix = relative_value(base.get("archive_prefix"), "platform uboot archive_prefix")
+    required_config = kconfig_line_array(
+        base.get("required_config"), "platform uboot required_config"
+    )
     defconfig = relative_value(uboot.get("defconfig"), "target microsd uboot defconfig")
     patches = path_array(uboot.get("patches"), "target microsd uboot patches", allow_empty=True)
     patches = [
@@ -149,6 +155,7 @@ def _profile_uboot(
         "defconfig": defconfig,
         "patches": patches,
         "copies": copies,
+        "required_config": required_config,
     }
 
 
