@@ -2,8 +2,9 @@
 
 FPLinux provides Bluetooth Classic BR/EDR on targets that name it as supported.
 The default RAM and `microsd-uboot` profiles use the same Bluetooth interfaces.
-With prepared firmware, the controller, D-Bus, Bluetooth and OBEX services
-start after the system root is mounted; no manual service start is required.
+With prepared firmware, D-Bus, Bluetooth and OBEX services start after the
+system root is mounted; no manual service start is required. The adapter is
+available but powered off by default.
 Without firmware, the system can boot for preparation but has no Bluetooth
 controller.
 
