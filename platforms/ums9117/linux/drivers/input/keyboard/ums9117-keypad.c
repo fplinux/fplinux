@@ -435,14 +435,29 @@ static int ums9117_keypad_parse_eic(struct ums9117_keypad *keypad)
 
 static int ums9117_keypad_request_eic_irq(struct ums9117_keypad_eic_key *key)
 {
+	int ret;
+
 	if (!key->gpiod)
 		return 0;
 
-	return devm_request_threaded_irq(
+	ret = devm_request_threaded_irq(
 		key->keypad->dev, key->irq, NULL, ums9117_keypad_eic_irq_thread,
 		IRQF_ONESHOT | IRQF_NO_AUTOEN | IRQF_TRIGGER_RISING |
 			IRQF_TRIGGER_FALLING,
 		dev_name(key->keypad->dev), key);
+	if (ret)
+		return ret;
+	/*
+	 * A lazily disabled EIC stays unmasked in the PMIC, whose interrupt
+	 * wakes the system whenever an unmasked source fires. disable_irq()
+	 * has to mask EIC9 over sleep so that only the power key wakes the
+	 * phone. The power key stays lazy: the core disables it while a wake
+	 * is handled, and a masked line would lose the key release.
+	 * free_irq() clears the flag.
+	 */
+	if (key == &key->keypad->eic9)
+		irq_set_status_flags(key->irq, IRQ_DISABLE_UNLAZY);
+	return 0;
 }
 
 static int ums9117_keypad_start_eic_irqs(struct ums9117_keypad *keypad)
