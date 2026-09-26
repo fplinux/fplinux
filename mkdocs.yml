@@ -1,0 +1,119 @@
+site_name: FPLinux
+site_url: https://fplinux.github.io/fplinux/
+repo_url: https://github.com/fplinux/fplinux
+edit_uri: edit/main/
+
+# scripts/site_collect.py copies the documentation into docs_dir with the
+# repository paths unchanged, so "Edit" links open the original source file.
+docs_dir: .cache/site/src
+site_dir: .cache/site/out
+strict: true
+
+validation:
+  nav:
+    omitted_files: warn
+  links:
+    anchors: warn
+    absolute_links: relative_to_docs
+    unrecognized_links: warn
+
+theme:
+  name: material
+  features:
+    - content.action.edit
+    - content.code.copy
+    - navigation.indexes
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - toc.follow
+
+markdown_extensions:
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+
+plugins:
+  - search
+
+# Entries without a title use the page's own heading.
+nav:
+  - Home: README.md
+  - Getting started:
+      - docs/guides/BUILDING.md
+      - docs/guides/LOADING.md
+      - docs/guides/STANDALONE.md
+      - docs/guides/RELEASES.md
+      - docs/guides/MICROSD_ROOT.md
+      - docs/guides/APK_PACKAGES.md
+      - docs/guides/DEBUGGING.md
+  - Phones:
+      - targets/README.md
+      - targets/inoi-240-modern-4g/README.md
+      - targets/inoi-244-modern-4g/README.md
+      - targets/nokia-ta1618/README.md
+  - Platforms:
+      - platforms/README.md
+      - platforms/ums9117/README.md
+  - Features:
+      - Access and transfer:
+          - docs/features/USB_NETWORKING.md
+          - docs/features/SSH.md
+          - docs/features/FILE_TRANSFER.md
+          - docs/features/BLUETOOTH.md
+      - Console and input:
+          - docs/features/LOCAL_CONSOLE.md
+          - docs/features/HOST_KEYBOARD.md
+      - Audio:
+          - docs/features/HEADPHONE_AUDIO.md
+          - docs/features/SPEAKER_AUDIO.md
+          - docs/features/MICROPHONE_AUDIO.md
+          - docs/features/FM_RADIO.md
+      - Display and haptics:
+          - docs/features/DISPLAY_BACKLIGHT.md
+          - docs/features/KEYPAD_BACKLIGHT.md
+          - docs/features/VIBRATION.md
+      - Storage and power:
+          - docs/features/MICROSD.md
+          - docs/features/RTC.md
+          - docs/features/POWER_OFF.md
+          - docs/features/SUSPEND.md
+      - Telemetry:
+          - docs/features/CPU_CLOCK.md
+          - docs/features/CHARGER_STATUS.md
+          - docs/features/BATTERY_TELEMETRY.md
+          - docs/features/SOC_TEMPERATURE.md
+          - docs/features/AUXADC.md
+  - Applications:
+      - docs/apps/SHOWCASE.md
+      - docs/apps/TYRQUAKE.md
+      - docs/apps/MICROPYTHONOS.md
+      - docs/apps/ROTATE.md
+      - docs/apps/JPEG.md
+      - docs/apps/PRESENT.md
+  - Contributing:
+      - Code style:
+          - docs/reference/CODE_STYLE.md
+          - docs/reference/style/C.md
+          - docs/reference/style/PYTHON.md
+          - docs/reference/style/SHELL.md
+      - docs/reference/IDENTITY.md
+      - docs/reference/INPUT.md
+      - docs/reference/LOGGING.md
+      # With navigation.indexes, a README.md in a section becomes that
+      # section's landing page, so the layer pages follow the porting overview
+      # instead of forming a section of their own.
+      - Porting:
+          - docs/porting/README.md
+          - docs/porting/NEW_PHONE.md
+          # These two pages are templates whose headings are placeholders.
+          - Phone target contract: docs/porting/TARGET.md
+          - Platform contract: docs/porting/PLATFORM.md
+          - docs/porting/CONSOLE.md
+          - alpine/README.md
+          - bootstrap/README.md
+          - common/README.md
+  - About:
+      - THIRD_PARTY_NOTICES.md
+      - License: LICENSE

@@ -17,6 +17,8 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 from urllib.parse import unquote
 
+# PyYAML ships no type information and the quality image installs no stubs.
+import yaml  # type: ignore[import-untyped]
 from fplinux_cli import alpine_state
 from fplinux_cli.common import fail
 from fplinux_cli.manifests.paths import discover_targets
@@ -25,6 +27,8 @@ from fplinux_cli.manifests.targets import load_target
 from fplinux_cli.output import RunReporter, current_stage, run_entrypoint
 from fplinux_cli.quality.testing import unittest_commands
 from fplinux_cli.source_formats import classify_source_formats
+from pathspec import GitIgnoreSpec
+from site_collect import corpus_files
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -302,6 +306,33 @@ def check_markdown_links(files: list[Path]) -> None:
                             f"Markdown link anchor is missing: "
                             f"{source.relative_to(ROOT)}:{number}: {destination}"
                         )
+
+
+def mkdocs_nav_entries(node: object) -> set[str]:
+    """Return every page path or URL named anywhere in an MkDocs `nav` tree."""
+    if isinstance(node, str):
+        return {node}
+    if isinstance(node, list):
+        return {entry for item in node for entry in mkdocs_nav_entries(item)}
+    if isinstance(node, dict):
+        return {entry for value in node.values() for entry in mkdocs_nav_entries(value)}
+    return set()
+
+
+def check_site_navigation(root: Path) -> None:
+    """Require every site page to be in the MkDocs nav or matched by `not_in_nav`."""
+    with (root / "mkdocs.yml").open(encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)
+    listed = mkdocs_nav_entries(config.get("nav"))
+    # MkDocs matches not_in_nav with the same gitignore-style patterns.
+    not_in_nav = GitIgnoreSpec.from_lines(config.get("not_in_nav", "").splitlines())
+    missing: list[str] = []
+    for relative in corpus_files(root):
+        page = relative.as_posix()
+        if relative.suffix == ".md" and page not in listed and not not_in_nav.match_file(page):
+            missing.append(page)
+    if missing:
+        fail(f"documentation pages are missing from the mkdocs.yml nav: {', '.join(missing)}")
 
 
 def check_container_policy(files: list[Path]) -> None:
@@ -605,6 +636,7 @@ def main() -> None:
         ]
         with report_stage(reporter, "documentation"):
             check_markdown_links(markdown_paths)
+            check_site_navigation(ROOT)
             run(["markdownlint-cli2"])
             run(["vale", "--config", ".vale.ini", *markdown_files, *text_files])
     if "spelling" in selected:
