@@ -10,10 +10,9 @@ maintainers:
   - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
 
 description: |
-  Matrix keypad controller found in UMS9117 feature phones. The matrix may use
-  an optional direct controller interrupt described by the board; otherwise it
-  is polled. Target-owned analog EIC keys may be supplied as GPIO inputs by a
-  separate SC2720 EIC provider.
+  Matrix keypad controller found in UMS9117 feature phones. The controller
+  interrupt reports matrix key changes. Target-owned analog EIC keys may be
+  supplied as GPIO inputs by a separate SC2720 EIC provider.
 
 allOf:
   - $ref: matrix-keymap.yaml#
@@ -27,7 +26,7 @@ properties:
 
   interrupts:
     maxItems: 1
-    description: Optional direct matrix controller interrupt.
+    description: Matrix controller interrupt.
 
   interrupt-names:
     const: matrix
@@ -65,14 +64,14 @@ properties:
 required:
   - compatible
   - reg
+  - interrupts
+  - interrupt-names
   - label
   - keypad,num-rows
   - keypad,num-columns
   - linux,keymap
   - sprd,aon-apb
 dependencies:
-  interrupts: [interrupt-names]
-  interrupt-names: [interrupts]
   eic1-gpios: ["sprd,eic1-keycode"]
   "sprd,eic1-keycode": [eic1-gpios]
   wakeup-source: [eic1-gpios]
@@ -85,10 +84,13 @@ examples:
   - |
     #include <dt-bindings/input/input.h>
     #include <dt-bindings/input/fplinux-keypad.h>
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
 
     keypad@40250000 {
         compatible = "sprd,ums9117-keypad";
         reg = <0x40250000 0x100>;
+        interrupts = <GIC_SPI 36 IRQ_TYPE_LEVEL_HIGH>;
+        interrupt-names = "matrix";
         label = "UMS9117 keypad";
         keypad,num-rows = <5>;
         keypad,num-columns = <4>;

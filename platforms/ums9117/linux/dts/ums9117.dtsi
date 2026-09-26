@@ -258,6 +258,8 @@
 
 		keypad: keypad@40250000 {
 			reg = <0x40250000 0x00000100>;
+			interrupts = <GIC_SPI 36 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "matrix";
 			sprd,aon-apb = <&aon_apb>;
 			status = "disabled";
 		};
