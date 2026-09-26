@@ -16,6 +16,8 @@ source="
 	fplinux-cli.h
 	fplinux-obexd.initd
 	fplinux-bluetooth-setup.initd
+	bluetooth-options.sh
+	fplinux-bluetooth.conf
 "
 builddir="$srcdir"
 
@@ -34,6 +36,10 @@ package() {
 		"$pkgdir/etc/init.d/fplinux-obexd"
 	install -Dm755 "$srcdir/fplinux-bluetooth-setup.initd" \
 		"$pkgdir/etc/init.d/fplinux-bluetooth-setup"
+	install -Dm644 "$srcdir/bluetooth-options.sh" \
+		"$pkgdir/etc/conf.d/bluetooth"
+	install -Dm644 "$srcdir/fplinux-bluetooth.conf" \
+		"$pkgdir/etc/bluetooth/fplinux.conf"
 	mkdir -p "$pkgdir/etc/runlevels/default"
 	ln -s /etc/init.d/fplinux-obexd \
 		"$pkgdir/etc/runlevels/default/fplinux-obexd"
@@ -45,4 +51,6 @@ dd901b76a4096b126cc4499801425fbeefc6725ae5c09dbbd49d5174467b89d38b1d25d3087c42e4
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
 1c2780d9218c945ea6faf1d3ee2747e1dfa30a63a38c59346f503df3627e6a6d1fd9aa64fa58417ed6a4af3c311ffc934d17b4cd38da7260d1fa337dcbd2f149  fplinux-obexd.initd
 2a3ab146b7e0cf38fae4674e416e7314f234db103388694834b5afc7cd1c167517d9cad6cf660661ba4f06c5d1182a4f5c6c76d042240c02b6e6f8930f58ce86  fplinux-bluetooth-setup.initd
+4e4a3c9cd2c8c97aa7037bd245898815ef4631c4323ee4b7e5033df3c8d29a2c8a75a30952369e7aa07827985d972299f4056a71bc35d1773271c2944c51631d  bluetooth-options.sh
+f10d387993a1481815a2f749a6dff7ca8e57c5c444dc31178c7584c84166a90b43d7700bb16ae3ba90ffbd094d97c1d76e22d5dd3f7085370abb00495e38b254  fplinux-bluetooth.conf
 "
