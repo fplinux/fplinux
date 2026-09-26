@@ -1,0 +1,41 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-jack
+pkgver=1
+pkgrel=0
+pkgdesc="Headphone jack output switching for FPLinux"
+url="https://github.com/fplinux/fplinux"
+arch="armv7"
+license="GPL-2.0-only"
+depends="alsa-lib fplinux-base"
+makedepends_build="clang22 lld22"
+makedepends_host="alsa-lib-dev musl-dev"
+options="!check"
+source="
+	fplinux-jack.c
+	fplinux-cli.c
+	fplinux-cli.h
+	fplinux-jack.initd
+"
+builddir="$srcdir"
+
+build() {
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		-I"$srcdir" "$srcdir/fplinux-jack.c" "$srcdir/fplinux-cli.c" \
+		$LDFLAGS -Wl,--gc-sections -lasound -o fplinux-jack
+}
+
+package() {
+	install -Dm755 "$builddir/fplinux-jack" "$pkgdir/usr/bin/fplinux-jack"
+	install -Dm755 "$srcdir/fplinux-jack.initd" \
+		"$pkgdir/etc/init.d/fplinux-jack"
+	mkdir -p "$pkgdir/etc/runlevels/default"
+	ln -s /etc/init.d/fplinux-jack \
+		"$pkgdir/etc/runlevels/default/fplinux-jack"
+}
+
+sha512sums="
+2ea1a67080889c153c787a014cad366dc8fe56e321985e581a52f0bc7e9b487d45366ed2b5fe88a4901370a79e1382d6e271d0cdfe82ab338f26de61b7a9e0cb  fplinux-jack.c
+60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
+9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
+be3ce49e0e93e0cd040cd3b0be0b6091a9420d24d822b5b4921c63c2dd1b9e76a392854ee0b22d15581f0e913d41252599a571cb9dfb63114d7242d8bf9f198c  fplinux-jack.initd
+"

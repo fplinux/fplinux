@@ -7,7 +7,9 @@ Each phone requires its own fitted audio profile; without it,
 plays alone or together with wired headphones, as described in
 [Playback outputs](HEADPHONE_AUDIO.md#playback-outputs).
 
-To play through the speaker alone without the
+With no headphones plugged in,
+[jack detection](HEADPHONE_AUDIO.md#jack-detection) selects the speaker alone.
+To choose it by hand without the
 [switching click](HEADPHONE_AUDIO.md#playback-outputs), enable the speaker
 before disabling the headphones and start at volume level `1`:
 
@@ -29,7 +31,8 @@ The Nokia TA-1618 speaker set carries that phone's own multi-band tuning.
 enabled speaker open between streams, so stream starts and stops do not
 click.
 
-To return to wired headphones, reverse the switches:
+Plugging in headphones returns playback to them. To return by hand, reverse
+the switches:
 
 ```sh
 amixer -c 0 cset name='Speaker Playback Switch' off
