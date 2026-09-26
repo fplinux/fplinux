@@ -29,7 +29,7 @@ fidelity have not been tested. This phone has no separate vibration motor;
 FPLinux vibrates it through the speaker and mutes headphone audio
 meanwhile, as described in docs/features/VIBRATION.md.
 Telemetry has been read with the battery absent; battery measurements, charging,
-battery-only shutdown and physical-key wake have not been tested.
+and battery-only shutdown have not been tested.
 
 Unmounted card hot-swap and FAT32 data storage have not been tested on this phone.
 Internal phone storage writes, modem, Wi-Fi and Linux reboot are not supported.

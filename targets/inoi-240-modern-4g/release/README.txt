@@ -30,9 +30,9 @@ for installation and use.
 
 The microSD slot is under the battery, so card hot-swap does not apply.
 Internal phone storage writes, modem, Wi-Fi and Linux reboot are not supported.
-Battery-only power-off, physical-key wake, battery measurements and charging
-have not been tested. Physical display, key and LCD brightness effects have not
-been tested on this configuration. This phone has no separate vibration motor;
+Battery-only power-off, battery measurements and charging have not been
+tested. Physical display and LCD brightness effects have not been tested on
+this configuration. This phone has no separate vibration motor;
 FPLinux vibrates it through the speaker and mutes headphone audio
 meanwhile, as described in docs/features/VIBRATION.md.
 
