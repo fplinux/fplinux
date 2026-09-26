@@ -17,6 +17,7 @@
 #include "cm4-fm.h"
 #include "cm4-hci.h"
 #include "cm4-mailbox.h"
+#include "cm4-power.h"
 
 #define UMS9117_HCI_IO_ROUNDS 8
 #define UMS9117_HCI_RX_CHUNK 256
@@ -47,6 +48,7 @@ struct fm_transaction {
 };
 
 static struct {
+	struct device *dev;
 	struct hci_dev *hdev;
 	struct delayed_work work;
 	struct sk_buff_head tx_queue;
@@ -85,6 +87,8 @@ static const struct h4_recv_pkt cm4_recv_pkts[] = {
  * send cannot sleep. Lock order is io_lock followed by tx_queue.lock. Mailbox
  * calls run with local IRQs enabled and no spinlock held. Admission takes
  * hdev->lock before io_lock; never hold either across a synchronous HCI call.
+ * CM4 owner transitions take the platform lock before io_lock and must run
+ * outside io_lock. The worker never acquires or releases a CM4 owner.
  */
 static DEFINE_MUTEX(io_lock);
 /* One command owns both its completion and any following seek event. */
@@ -194,19 +198,29 @@ int ums9117_hci_fm_hold(void)
 {
 	int ret;
 
+	ret = ums9117_cm4_get(runtime.dev, UMS9117_CM4_FM);
+	if (ret)
+		return ret;
 	mutex_lock(&io_lock);
 	ret = fm_admission_error();
 	if (!ret)
 		runtime.fm.held = true;
 	mutex_unlock(&io_lock);
+	if (ret)
+		ums9117_cm4_put(runtime.dev, UMS9117_CM4_FM);
 	return ret;
 }
 
 void ums9117_hci_fm_release(void)
 {
+	bool held;
+
 	mutex_lock(&io_lock);
+	held = runtime.fm.held;
 	runtime.fm.held = false;
 	mutex_unlock(&io_lock);
+	if (held)
+		ums9117_cm4_put(runtime.dev, UMS9117_CM4_FM);
 }
 
 void ums9117_hci_fm_quarantine(int error)
@@ -490,8 +504,11 @@ out:
 static int runtime_open(struct hci_dev *hdev)
 {
 	unsigned long flags;
-	int ret = 0;
+	int ret;
 
+	ret = ums9117_cm4_get(runtime.dev, UMS9117_CM4_BLUETOOTH);
+	if (ret)
+		return ret;
 	mutex_lock(&io_lock);
 	spin_lock_irqsave(&runtime.tx_queue.lock, flags);
 	if (runtime.error)
@@ -504,15 +521,19 @@ static int runtime_open(struct hci_dev *hdev)
 		runtime.opened = true;
 	spin_unlock_irqrestore(&runtime.tx_queue.lock, flags);
 	mutex_unlock(&io_lock);
+	if (ret)
+		ums9117_cm4_put(runtime.dev, UMS9117_CM4_BLUETOOTH);
 	return ret;
 }
 
-static void flush_tx(bool close)
+static bool flush_tx(bool close)
 {
 	unsigned long flags;
+	bool opened;
 
 	mutex_lock(&io_lock);
 	spin_lock_irqsave(&runtime.tx_queue.lock, flags);
+	opened = runtime.opened;
 	if (close) {
 		runtime.opened = false;
 		/* Keep a partial RX boundary but never deliver it after reopening. */
@@ -524,11 +545,13 @@ static void flush_tx(bool close)
 	if (runtime.tx_skb && !runtime.tx_sent)
 		release_tx();
 	mutex_unlock(&io_lock);
+	return opened;
 }
 
 static int runtime_close(struct hci_dev *hdev)
 {
-	flush_tx(true);
+	if (flush_tx(true))
+		ums9117_cm4_put(runtime.dev, UMS9117_CM4_BLUETOOTH);
 	return 0;
 }
 
@@ -595,6 +618,73 @@ static int runtime_send(struct hci_dev *hdev, struct sk_buff *skb)
 	return ret;
 }
 
+int ums9117_hci_transport_start(const u8 *rx_prefix, size_t prefix_bytes)
+{
+	unsigned long flags;
+	int ret;
+
+	if (!rx_prefix && prefix_bytes)
+		return -EINVAL;
+	mutex_lock(&io_lock);
+	if (!runtime.hdev) {
+		ret = -ENODEV;
+		goto out;
+	}
+	if (runtime.running || runtime.suspending) {
+		ret = -EBUSY;
+		goto out;
+	}
+	/* A stopped stream has no queued work or partial TX/RX buffers. */
+	runtime.rx_discard = true;
+	runtime.rx_callback_error = 0;
+	runtime.fm.active = false;
+	runtime.fm.event_bytes = 0;
+	ret = receive_bytes(rx_prefix, prefix_bytes);
+	if (ret) {
+		kfree_skb(runtime.rx_skb);
+		runtime.rx_skb = NULL;
+		goto out;
+	}
+	spin_lock_irqsave(&runtime.tx_queue.lock, flags);
+	runtime.error = 0;
+	runtime.running = true;
+	runtime.transport_suspended = false;
+	schedule_delayed_work(&runtime.work, 0);
+	spin_unlock_irqrestore(&runtime.tx_queue.lock, flags);
+out:
+	mutex_unlock(&io_lock);
+	return ret;
+}
+
+void ums9117_hci_transport_stop(void)
+{
+	unsigned long flags;
+
+	mutex_lock(&io_lock);
+	if (!runtime.hdev) {
+		mutex_unlock(&io_lock);
+		return;
+	}
+	if (runtime.fm.pending)
+		finish_fm_command(-ESHUTDOWN);
+	spin_lock_irqsave(&runtime.tx_queue.lock, flags);
+	runtime.running = false;
+	runtime.transport_suspended = false;
+	purge_queued_tx();
+	spin_unlock_irqrestore(&runtime.tx_queue.lock, flags);
+	mutex_unlock(&io_lock);
+	cancel_delayed_work_sync(&runtime.work);
+	mutex_lock(&io_lock);
+	release_tx();
+	kfree_skb(runtime.rx_skb);
+	runtime.rx_skb = NULL;
+	runtime.rx_discard = true;
+	runtime.rx_callback_error = 0;
+	runtime.fm.active = false;
+	runtime.fm.event_bytes = 0;
+	mutex_unlock(&io_lock);
+}
+
 int ums9117_hci_runtime_register(struct device *dev, const u8 *rx_prefix,
 				 size_t prefix_bytes)
 {
@@ -618,19 +708,10 @@ int ums9117_hci_runtime_register(struct device *dev, const u8 *rx_prefix,
 		mutex_unlock(&io_lock);
 		return -ENOMEM;
 	}
+	runtime.dev = dev;
 	runtime.hdev = hdev;
 	runtime.rx_hu.hdev = hdev;
 	runtime.rx_hu.alignment = 1;
-	/* The prologue owns these byte counters; preserve its partial RX boundary. */
-	ret = receive_bytes(rx_prefix, prefix_bytes);
-	if (ret) {
-		runtime.error = ret;
-		runtime.hdev = NULL;
-		mutex_unlock(&io_lock);
-		hci_free_dev(hdev);
-		return ret;
-	}
-	runtime.running = true;
 	hdev->bus = HCI_IPC;
 	SET_HCIDEV_DEV(hdev, dev);
 	hdev->open = runtime_open;
@@ -641,25 +722,30 @@ int ums9117_hci_runtime_register(struct device *dev, const u8 *rx_prefix,
 	hci_set_quirk(hdev, HCI_QUIRK_NO_SUSPEND_NOTIFIER);
 	mutex_unlock(&io_lock);
 
+	ret = ums9117_hci_transport_start(rx_prefix, prefix_bytes);
+	if (ret)
+		goto free_device;
 	/* hci_register_dev queues initial power-on and may call open immediately. */
 	ret = hci_register_dev(hdev);
 	if (ret < 0) {
-		mutex_lock(&io_lock);
-		runtime.running = false;
-		runtime.error = ret;
-		runtime.hdev = NULL;
-		mutex_unlock(&io_lock);
-		cancel_delayed_work_sync(&runtime.work);
-		hci_free_dev(hdev);
-		return ret;
+		ums9117_hci_transport_stop();
+		goto free_device;
 	}
-	schedule_delayed_work(&runtime.work, 0);
 	runtime.radio = ums9117_fm_register(dev);
 	if (IS_ERR(runtime.radio)) {
 		bt_dev_err(hdev, "FM registration failed: %pe", runtime.radio);
 		runtime.radio = NULL;
 	}
 	return 0;
+
+free_device:
+	mutex_lock(&io_lock);
+	runtime.error = ret;
+	runtime.hdev = NULL;
+	runtime.dev = NULL;
+	mutex_unlock(&io_lock);
+	hci_free_dev(hdev);
+	return ret;
 }
 
 static bool hci_busy(struct hci_dev *hdev)
@@ -678,6 +764,7 @@ int ums9117_hci_suspend_prepare(void)
 {
 	struct hci_dev *hdev = runtime.hdev;
 	unsigned long flags;
+	bool running;
 	int ret = 0;
 
 	if (!hdev)
@@ -688,8 +775,6 @@ int ums9117_hci_suspend_prepare(void)
 	spin_lock_irqsave(&runtime.tx_queue.lock, flags);
 	if (runtime.error)
 		ret = runtime.error;
-	else if (!runtime.running)
-		ret = -ESHUTDOWN;
 	else if (runtime.suspending || runtime.fm.held || runtime.fm.pending ||
 		 runtime.fm.event_bytes || hci_busy(hdev) || runtime.tx_skb ||
 		 runtime.rx_skb || !skb_queue_empty(&runtime.tx_queue))
@@ -700,11 +785,14 @@ int ums9117_hci_suspend_prepare(void)
 		runtime.pm_command_error = 0;
 		runtime.checking_pm_commands = true;
 	}
+	running = runtime.running;
 	spin_unlock_irqrestore(&runtime.tx_queue.lock, flags);
 	mutex_unlock(&io_lock);
 	hci_dev_unlock(hdev);
 	if (ret)
 		return ret;
+	if (!running)
+		return 0;
 
 	ret = hci_suspend_dev(hdev);
 	mutex_lock(&io_lock);
@@ -739,8 +827,10 @@ int ums9117_hci_suspend(void)
 		spin_lock_irqsave(&runtime.tx_queue.lock, flags);
 		if (runtime.error)
 			ret = runtime.error;
-		else if (!runtime.suspending || !runtime.running)
+		else if (!runtime.suspending)
 			ret = -ESHUTDOWN;
+		else if (!runtime.running)
+			ret = 0;
 		else if (runtime.pm_activity || hci_busy(hdev) ||
 			 runtime.tx_skb || runtime.rx_skb ||
 			 !skb_queue_empty(&runtime.tx_queue))
@@ -751,7 +841,7 @@ int ums9117_hci_suspend(void)
 			ret = 0;
 		}
 		spin_unlock_irqrestore(&runtime.tx_queue.lock, flags);
-		if (!ret) {
+		if (!ret && runtime.running) {
 			ret = ums9117_cm4_mailbox_suspend();
 			if (ret) {
 				spin_lock_irqsave(&runtime.tx_queue.lock,
@@ -830,7 +920,6 @@ int ums9117_hci_post_suspend(void)
 void ums9117_hci_runtime_unregister(void)
 {
 	struct hci_dev *hdev;
-	unsigned long flags;
 
 	ums9117_fm_unregister(runtime.radio);
 	runtime.radio = NULL;
@@ -840,21 +929,13 @@ void ums9117_hci_runtime_unregister(void)
 		mutex_unlock(&io_lock);
 		return;
 	}
-	finish_fm_command(-ESHUTDOWN);
-	spin_lock_irqsave(&runtime.tx_queue.lock, flags);
-	runtime.running = false;
-	runtime.opened = false;
-	purge_queued_tx();
-	spin_unlock_irqrestore(&runtime.tx_queue.lock, flags);
 	mutex_unlock(&io_lock);
-	cancel_delayed_work_sync(&runtime.work);
+	ums9117_hci_transport_stop();
 	/* Core close/flush take io_lock, so unregister must run without it. */
 	hci_unregister_dev(hdev);
 	mutex_lock(&io_lock);
-	release_tx();
-	kfree_skb(runtime.rx_skb);
-	runtime.rx_skb = NULL;
 	runtime.hdev = NULL;
+	runtime.dev = NULL;
 	mutex_unlock(&io_lock);
 	hci_free_dev(hdev);
 }

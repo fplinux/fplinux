@@ -27,6 +27,10 @@ keeps the receiver and audio outputs active until Ctrl-C or the optional
 deadline, then mutes and closes them. FM playback cannot run alongside ordinary
 PCM playback or phone microphone capture.
 
+FM can be used while Bluetooth is powered off. Closing the receiver releases
+its use of the [shared controller](BLUETOOTH.md#power); powered Bluetooth
+remains available.
+
 The receiver is also exposed as `/dev/radio0` through the standard V4L2 radio
 interface. FM audio reaches the audio codec internally; `/dev/radio0` does
 not supply PCM samples and does not capture audio.

@@ -27,6 +27,7 @@
 
 #include "cm4-hci.h"
 #include "cm4-mailbox.h"
+#include "cm4-power.h"
 #include "cm4-setup.h"
 
 #define UMS9117_CM4_FIRMWARE_FILES 4U
@@ -44,13 +45,17 @@
 #define UMS9117_PMU_SLEEP_CONTROL 0x00ccU
 #define UMS9117_PMU_BT_DOMAIN_CONFIG 0x0104U
 #define UMS9117_PMU_SET_CP_RESET 0x10b0U
+#define UMS9117_PMU_SET_SLEEP_CONTROL 0x10ccU
+#define UMS9117_PMU_SET_BT_DOMAIN_CONFIG 0x1104U
 #define UMS9117_PMU_CLEAR_CP_RESET 0x20b0U
 #define UMS9117_PMU_CLEAR_SLEEP_CONTROL 0x20ccU
 #define UMS9117_PMU_CLEAR_BT_DOMAIN_CONFIG 0x2104U
 #define UMS9117_AON_CM4_RESET 0x0114U
+#define UMS9117_AON_CM4_BUS 0x0124U
 #define UMS9117_AON_CM4_STATUS 0x0588U
 #define UMS9117_AON_SET_CM4_RESET 0x1114U
 #define UMS9117_AON_CLEAR_CM4_RESET 0x2114U
+#define UMS9117_AON_CLEAR_CM4_BUS 0x2124U
 
 #define UMS9117_BT_DOMAIN_STATE_SHIFT 15U
 #define UMS9117_BT_DOMAIN_STATE_MASK 0x1fU
@@ -58,6 +63,7 @@
 #define UMS9117_BT_DOMAIN_ON 0U
 #define UMS9117_BT_DOMAIN_RESET_CONFIG 0x0a208804U
 #define UMS9117_BT_FORCE_SHUTDOWN BIT(25)
+#define UMS9117_BT_AUTO_SHUTDOWN BIT(24)
 #define UMS9117_BT_FORCE_DEEP_SLEEP BIT(21)
 #define UMS9117_BT_SYSTEM_RESET BIT(8)
 #define UMS9117_CM4_SYSTEM_RESET BIT(4)
@@ -65,6 +71,7 @@
 #define UMS9117_CM4_RESET_MASK \
 	(UMS9117_CM4_SYSTEM_RESET | UMS9117_CM4_CORE_RESET)
 #define UMS9117_CM4_LOCKUP BIT(0)
+#define UMS9117_CM4_BUS_PAUSE BIT(0)
 
 #define UMS9117_BT_POWER_TIMEOUT_NS (100ULL * NSEC_PER_MSEC)
 #define UMS9117_CM4_SETUP_TIMEOUT_NS (5ULL * NSEC_PER_SEC)
@@ -82,6 +89,9 @@ struct ums9117_bluetooth {
 	u8 firmware_sha256[SHA256_DIGEST_SIZE];
 	u8 firmware_version[UMS9117_CM4_VERSION_SIZE];
 	bool started;
+	bool registered;
+	bool shutting_down;
+	unsigned long users;
 	bool suspend_prepared;
 	bool poll_released;
 	bool power_changed;
@@ -161,6 +171,74 @@ static int hold_reset(struct ums9117_bluetooth *bt)
 		       -EUCLEAN;
 }
 
+static int check_stopped_state(struct ums9117_bluetooth *bt)
+{
+	u32 config, sleep, cp, cm4;
+	int state, ret;
+
+	ret = regmap_read(bt->pmu, UMS9117_PMU_BT_DOMAIN_CONFIG, &config);
+	if (!ret)
+		ret = regmap_read(bt->pmu, UMS9117_PMU_SLEEP_CONTROL, &sleep);
+	if (!ret)
+		ret = read_reset(bt, &cp, &cm4);
+	if (ret)
+		return ret;
+	state = bt_domain_state(bt);
+	if (state < 0)
+		return state;
+	if (!(config & UMS9117_BT_FORCE_SHUTDOWN) ||
+	    (config & UMS9117_BT_AUTO_SHUTDOWN) ||
+	    !(sleep & UMS9117_BT_FORCE_DEEP_SLEEP) ||
+	    !(cp & UMS9117_BT_SYSTEM_RESET) ||
+	    (cm4 & UMS9117_CM4_RESET_MASK) != UMS9117_CM4_RESET_MASK ||
+	    state != UMS9117_BT_DOMAIN_OFF) {
+		dev_err(bt->dev,
+			"stopped state invalid: domain=%d config=%#x sleep=%#x cp_reset=%#x cm4_reset=%#x\n",
+			state, config, sleep, cp, cm4);
+		return -EUCLEAN;
+	}
+	return 0;
+}
+
+/* The CM4 resets are held before changing its shared radio power requests. */
+static int power_off(struct ums9117_bluetooth *bt)
+{
+	u64 deadline;
+	u32 config;
+	unsigned int stable = 0;
+	int ret;
+
+	ret = regmap_read(bt->pmu, UMS9117_PMU_BT_DOMAIN_CONFIG, &config);
+	if (ret)
+		return ret;
+	if (config & UMS9117_BT_AUTO_SHUTDOWN)
+		return -EBUSY;
+	ret = regmap_write(bt->pmu, UMS9117_PMU_SET_BT_DOMAIN_CONFIG,
+			   UMS9117_BT_FORCE_SHUTDOWN);
+	cm4_barrier();
+	if (!ret)
+		ret = regmap_write(bt->pmu, UMS9117_PMU_SET_SLEEP_CONTROL,
+				   UMS9117_BT_FORCE_DEEP_SLEEP);
+	cm4_barrier();
+	if (ret)
+		return ret;
+	deadline = ktime_get_ns() + UMS9117_BT_POWER_TIMEOUT_NS;
+	do {
+		ret = bt_domain_state(bt);
+		if (ret < 0)
+			return ret;
+		if (ret == UMS9117_BT_DOMAIN_OFF) {
+			if (++stable == 2)
+				return check_stopped_state(bt);
+		} else {
+			stable = 0;
+		}
+		cpu_relax();
+	} while (ktime_get_ns() < deadline);
+	dev_err(bt->dev, "power-off timeout: domain=%d\n", ret);
+	return -ETIMEDOUT;
+}
+
 static int release_reset(struct ums9117_bluetooth *bt)
 {
 	int ret;
@@ -180,7 +258,7 @@ static int release_reset(struct ums9117_bluetooth *bt)
 static int power_on(struct ums9117_bluetooth *bt)
 {
 	u64 started;
-	u32 cp, cm4;
+	u32 cp, cm4, bus;
 	unsigned int stable = 0;
 	int ret;
 
@@ -216,6 +294,24 @@ static int power_on(struct ums9117_bluetooth *bt)
 	if (!(cp & UMS9117_BT_SYSTEM_RESET) ||
 	    (cm4 & UMS9117_CM4_RESET_MASK) != UMS9117_CM4_RESET_MASK)
 		return -EUCLEAN;
+	/* The firmware's sleep request can remain latched across CM4 reset. */
+	ret = regmap_read(bt->aon, UMS9117_AON_CM4_BUS, &bus);
+	if (ret)
+		return ret;
+	if (bus & UMS9117_CM4_BUS_PAUSE) {
+		dev_info(bt->dev, "restoring paused CM4 bus: before=%#x\n",
+			 bus);
+		ret = regmap_write(bt->aon, UMS9117_AON_CLEAR_CM4_BUS,
+				   UMS9117_CM4_BUS_PAUSE);
+		cm4_barrier();
+		if (!ret)
+			ret = regmap_read(bt->aon, UMS9117_AON_CM4_BUS, &bus);
+		if (ret)
+			return ret;
+		dev_info(bt->dev, "CM4 bus restored: after=%#x\n", bus);
+		if (bus & UMS9117_CM4_BUS_PAUSE)
+			return -EUCLEAN;
+	}
 
 	writel_relaxed(UMS9117_CM4_BOOT_STACK, bt->iram);
 	writel_relaxed(UMS9117_CM4_BOOT_ENTRY, bt->iram + 4);
@@ -354,28 +450,129 @@ static int start_controller(struct ums9117_bluetooth *bt)
 	if (ret)
 		return ret;
 	prefix = ums9117_cm4_setup_rx_prefix(&prefix_bytes);
+	if (bt->registered)
+		return ums9117_hci_transport_start(prefix, prefix_bytes);
 	return ums9117_hci_runtime_register(bt->dev, prefix, prefix_bytes);
 }
 
-static void stop_controller(struct ums9117_bluetooth *bt)
+static int stop_controller(struct ums9117_bluetooth *bt)
 {
 	unsigned long flags;
-	int ret;
+	int ret, drain;
 
-	ums9117_hci_runtime_unregister();
-	ums9117_cm4_mailbox_stop();
+	ums9117_hci_transport_stop();
+	drain = ums9117_cm4_mailbox_stop();
 	local_irq_save(flags);
 	ret = hold_reset(bt);
 	local_irq_restore(flags);
 	if (ret) {
 		dev_err(bt->dev, "reset hold failed: %pe; cold boot required\n",
 			ERR_PTR(ret));
-		return;
+		return ret;
 	}
+	ret = power_off(bt);
+	if (ret)
+		return ret;
 	if (bt->idle_poll_owned) {
 		cpu_idle_poll_ctrl(false);
 		bt->idle_poll_owned = false;
 	}
+	return drain;
+}
+
+/* The controller lock serializes every physical power transition. */
+static int start_locked(struct ums9117_bluetooth *bt)
+{
+	int ret, stopped;
+
+	if (bt->started)
+		return 0;
+	ret = bt->power_changed ? check_stopped_state(bt) :
+				  check_cold_state(bt);
+	if (!ret)
+		ret = load_firmware(bt);
+	if (!ret)
+		ret = power_on(bt);
+	if (!ret)
+		ret = start_controller(bt);
+	if (ret) {
+		/* Missing inputs remain retryable before the first power request. */
+		if (bt->power_changed) {
+			bt->startup_error = ret;
+			stopped = stop_controller(bt);
+			if (stopped)
+				dev_err(bt->dev,
+					"startup cleanup failed: %pe\n",
+					ERR_PTR(stopped));
+			dev_err(bt->dev,
+				"startup failed: %pe; cold boot required\n",
+				ERR_PTR(ret));
+		}
+		return ret;
+	}
+	bt->started = true;
+	bt->registered = true;
+	return 0;
+}
+
+static int stop_locked(struct ums9117_bluetooth *bt)
+{
+	int ret;
+
+	if (bt->startup_error)
+		return bt->startup_error;
+	if (!bt->started)
+		return 0;
+	ret = stop_controller(bt);
+	if (ret) {
+		bt->startup_error = ret;
+		dev_err(bt->dev,
+			"controller stop failed: %pe; cold boot required\n",
+			ERR_PTR(ret));
+	} else {
+		bt->started = false;
+	}
+	return ret;
+}
+
+int ums9117_cm4_get(struct device *dev, enum ums9117_cm4_user user)
+{
+	struct ums9117_bluetooth *bt = dev_get_drvdata(dev);
+	unsigned long mask = BIT(user);
+	int ret;
+
+	mutex_lock(&bt->lock);
+	if (bt->shutting_down || !bt->registered)
+		ret = -ESHUTDOWN;
+	else if (bt->suspend_prepared)
+		ret = -EBUSY;
+	else if (bt->startup_error)
+		ret = bt->startup_error;
+	else if (bt->users & mask)
+		ret = -EALREADY;
+	else {
+		ret = start_locked(bt);
+		if (!ret)
+			bt->users |= mask;
+	}
+	mutex_unlock(&bt->lock);
+	return ret;
+}
+
+void ums9117_cm4_put(struct device *dev, enum ums9117_cm4_user user)
+{
+	struct ums9117_bluetooth *bt = dev_get_drvdata(dev);
+	unsigned long mask = BIT(user);
+
+	mutex_lock(&bt->lock);
+	if (!(bt->users & mask))
+		goto out;
+	bt->users &= ~mask;
+	/* PM and shutdown finish their use before releasing the last hold. */
+	if (!bt->users && !bt->suspend_prepared && !bt->shutting_down)
+		stop_locked(bt);
+out:
+	mutex_unlock(&bt->lock);
 }
 
 static void __iomem *map_memory(struct platform_device *pdev, const char *name,
@@ -398,10 +595,10 @@ static ssize_t start_store(struct device *dev, struct device_attribute *attr,
 	int ret;
 
 	ret = kstrtobool(buffer, &start);
-	if (ret || !start)
-		return -EINVAL;
+	if (ret)
+		return ret;
 	mutex_lock(&bt->lock);
-	if (bt->suspend_prepared) {
+	if (bt->suspend_prepared || bt->shutting_down) {
 		ret = -EBUSY;
 		goto out;
 	}
@@ -409,38 +606,42 @@ static ssize_t start_store(struct device *dev, struct device_attribute *attr,
 		ret = bt->startup_error;
 		goto out;
 	}
-	if (bt->started) {
+	if (!start) {
+		ret = bt->users ? -EBUSY : stop_locked(bt);
+		goto out;
+	}
+	if (bt->registered) {
 		ret = 0;
 		goto out;
 	}
-	ret = check_cold_state(bt);
-	if (!ret)
-		ret = load_firmware(bt);
-	if (!ret)
-		ret = power_on(bt);
-	if (!ret)
-		ret = start_controller(bt);
-	if (ret) {
-		/* Missing inputs remain retryable while no controller state changed. */
-		if (bt->power_changed) {
-			bt->startup_error = ret;
-			stop_controller(bt);
-			dev_err(dev,
-				"startup failed: %pe; cold boot required\n",
-				ERR_PTR(ret));
-		}
-	} else {
-		bt->started = true;
-		dev_dbg(dev, "HCI transport registered\n");
-	}
+	/* Initial preparation still reports firmware errors synchronously. */
+	ret = start_locked(bt);
 out:
 	mutex_unlock(&bt->lock);
 	return ret ? ret : count;
 }
 static DEVICE_ATTR_WO(start);
 
+static ssize_t state_show(struct device *dev, struct device_attribute *attr,
+			  char *buffer)
+{
+	struct ums9117_bluetooth *bt = dev_get_drvdata(dev);
+	const char *state;
+	ssize_t bytes;
+
+	mutex_lock(&bt->lock);
+	state = bt->startup_error ? "error" :
+		bt->started	  ? "running" :
+				    "stopped";
+	bytes = sysfs_emit(buffer, "%s\n", state);
+	mutex_unlock(&bt->lock);
+	return bytes;
+}
+static DEVICE_ATTR_RO(state);
+
 static struct attribute *ums9117_bluetooth_attrs[] = {
 	&dev_attr_start.attr,
+	&dev_attr_state.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(ums9117_bluetooth);
@@ -450,6 +651,7 @@ static int bluetooth_pm_notify(struct notifier_block *notifier,
 {
 	struct ums9117_bluetooth *bt =
 		container_of(notifier, struct ums9117_bluetooth, pm_notifier);
+	bool prepared, registered;
 	int ret = 0;
 
 	switch (action) {
@@ -459,17 +661,38 @@ static int bluetooth_pm_notify(struct notifier_block *notifier,
 			return notifier_from_errno(-EBUSY);
 		if (bt->startup_error)
 			ret = bt->startup_error;
-		else if (bt->started)
-			ret = ums9117_hci_suspend_prepare();
-		if (!ret)
+		else if (bt->shutting_down)
+			ret = -ESHUTDOWN;
+		else
 			bt->suspend_prepared = true;
+		registered = bt->registered;
 		mutex_unlock(&bt->lock);
+		/* HCI core waits may call open/close and acquire the owner lock. */
+		if (!ret && registered)
+			ret = ums9117_hci_suspend_prepare();
+		if (ret) {
+			mutex_lock(&bt->lock);
+			bt->suspend_prepared = false;
+			if (!bt->users)
+				stop_locked(bt);
+			mutex_unlock(&bt->lock);
+		}
 		break;
 	case PM_POST_SUSPEND:
 		mutex_lock(&bt->lock);
-		if (bt->suspend_prepared && bt->started)
+		prepared = bt->suspend_prepared;
+		registered = bt->registered;
+		mutex_unlock(&bt->lock);
+		if (prepared && registered)
 			ret = ums9117_hci_post_suspend();
+		mutex_lock(&bt->lock);
 		bt->suspend_prepared = false;
+		if (!bt->users) {
+			int stopped = stop_locked(bt);
+
+			if (!ret)
+				ret = stopped;
+		}
 		mutex_unlock(&bt->lock);
 		if (ret)
 			dev_err(bt->dev, "HCI resume failed: %pe\n",
@@ -630,8 +853,17 @@ static int ums9117_bluetooth_probe(struct platform_device *pdev)
 static void ums9117_bluetooth_shutdown(struct platform_device *pdev)
 {
 	struct ums9117_bluetooth *bt = platform_get_drvdata(pdev);
+	bool registered;
 
 	mutex_lock(&bt->lock);
+	bt->shutting_down = true;
+	registered = bt->registered;
+	mutex_unlock(&bt->lock);
+	/* Device teardown invokes client close callbacks, including owner put. */
+	if (registered)
+		ums9117_hci_runtime_unregister();
+	mutex_lock(&bt->lock);
+	bt->registered = false;
 	if (bt->power_changed)
 		stop_controller(bt);
 	mutex_unlock(&bt->lock);

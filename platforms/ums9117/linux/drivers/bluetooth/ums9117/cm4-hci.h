@@ -10,7 +10,7 @@ struct device;
 int ums9117_hci_fm_command(u8 subcommand, const u8 *payload,
 			   size_t payload_bytes, u8 *reply, size_t reply_bytes,
 			   bool seek);
-/* Hold off system sleep from the first enable until a confirmed disable. */
+/* Hold CM4 and veto system sleep until a confirmed disable. */
 int ums9117_hci_fm_hold(void);
 void ums9117_hci_fm_release(void);
 void ums9117_hci_fm_quarantine(int error);
@@ -19,7 +19,7 @@ void ums9117_hci_fm_quarantine(int error);
  * Sleepable, externally serialized lifecycle. The caller has completed the
  * vendor prologue and handed the attached mailbox stream to this component.
  * It owns firmware, the live CM4, and the idle policy, including retained
- * system sleep. Register returns zero or
+ * system sleep. Register allocates HCI/FM devices once and returns zero or
  * a negative errno; registration is not completion of HCI core initialization.
  * rx_prefix contains already-read prologue RX bytes, starting with an H4 type.
  * A partial frame is seeded before registration and discarded when completed;
@@ -27,8 +27,17 @@ void ums9117_hci_fm_quarantine(int error);
  */
 int ums9117_hci_runtime_register(struct device *dev, const u8 *rx_prefix,
 				 size_t prefix_bytes);
-/* Never call from this component's worker. No mailbox I/O survives return. */
+/* Call without the platform owner lock: core close can release a CM4 user. */
 void ums9117_hci_runtime_unregister(void);
+
+/*
+ * Start follows a fresh firmware prologue and preserves the HCI/FM devices.
+ * Stop ends all mailbox I/O before physical reset; the caller serializes both
+ * transitions and stops only after releasing the last user or during teardown.
+ * Never call stop from this component's worker.
+ */
+int ums9117_hci_transport_start(const u8 *rx_prefix, size_t prefix_bytes);
+void ums9117_hci_transport_stop(void);
 
 /*
  * Prepare runs before the process freezer and refuses active links or setup.

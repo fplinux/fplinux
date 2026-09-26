@@ -188,7 +188,10 @@ class FplinuxBluetoothHostToolTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(start.read_bytes(), b"1\n")
-        self.assertIn("CM4 transport started", result.stdout)
+        self.assertEqual(
+            result.stdout,
+            "Bluetooth interfaces ready; use bluetoothctl for adapter power\n",
+        )
 
     def test_help_leaves_a_bound_controller_stopped(self) -> None:
         """Root and subcommand help cannot write the synthetic start control."""

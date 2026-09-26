@@ -28,8 +28,8 @@ A mounted data card, active card-backed swap in the RAM profile, and the
 where the target documentation lists that storage condition as supported. Keep the card installed
 throughout sleep and wake. Suspend is not a safe-removal or shutdown procedure.
 
-[Bluetooth](BLUETOOTH.md#suspend) can remain powered
-with pairings retained; follow its connection and wake limits before sleeping.
+[Bluetooth](BLUETOOTH.md#suspend) can be off or remain powered, with pairings
+retained; follow its connection and wake limits before sleeping.
 
 A sleep request fails while the [FM radio](FM_RADIO.md) receiver is on, from
 its first tune until `/dev/radio0` is closed; this includes `fplinux-fm scan`

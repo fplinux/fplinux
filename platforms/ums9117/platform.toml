@@ -463,6 +463,10 @@ source = "platforms/ums9117/linux/drivers/bluetooth/ums9117/cm4-hci.h"
 destination = "drivers/bluetooth/ums9117/cm4-hci.h"
 
 [[linux.copies]]
+source = "platforms/ums9117/linux/drivers/bluetooth/ums9117/cm4-power.h"
+destination = "drivers/bluetooth/ums9117/cm4-power.h"
+
+[[linux.copies]]
 source = "platforms/ums9117/linux/drivers/bluetooth/ums9117/cm4-fm.c"
 destination = "drivers/bluetooth/ums9117/cm4-fm.c"
 
