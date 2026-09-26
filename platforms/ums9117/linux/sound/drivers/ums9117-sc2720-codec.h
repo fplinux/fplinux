@@ -22,6 +22,12 @@ enum ums9117_sc2720_capture_source {
 
 /* The PCM owner serializes every operation and quiesces before devm release. */
 struct ums9117_sc2720_codec *ums9117_sc2720_codec_create(struct device *dev);
+/*
+ * Power the headset detector that drives the jack insert EIC. Call it before
+ * the first prepare: playback and capture then save and restore its supply
+ * as they find it. It stays powered until the PMIC powers off.
+ */
+int ums9117_sc2720_codec_enable_jack_detect(struct ums9117_sc2720_codec *codec);
 void ums9117_sc2720_codec_get_volume(struct ums9117_sc2720_codec *codec,
 				     unsigned int *left, unsigned int *right);
 int ums9117_sc2720_codec_set_volume(struct ums9117_sc2720_codec *codec,

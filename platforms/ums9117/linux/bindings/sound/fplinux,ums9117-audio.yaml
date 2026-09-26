@@ -91,6 +91,20 @@ properties:
       configuration for ADSYNC and ADD0, in that order. Their presence enables
       handset microphone capture; the driver verifies inherited pad settings.
 
+  hp-det-gpios:
+    maxItems: 1
+    description: |
+      Board-owned headphone jack detect input. The GPIO flags give the level
+      that means headphones are inserted. Its presence adds the Headphone Jack
+      control and a headphone switch input device.
+
+  wakeup-source:
+    type: boolean
+    description: A headphone jack change can wake system sleep.
+
+dependencies:
+  wakeup-source: [hp-det-gpios]
+
 required:
   - compatible
   - reg

@@ -102,6 +102,7 @@
 		0x14 0 0x0008e000
 		0x18 0 0x0008e000
 	>;
+	hp-det-gpios = <&sc2720_eic 12 GPIO_ACTIVE_HIGH>;
 	fplinux,speaker-vibration;
 	fplinux,card-longname = "INOI 244 Modern 4G audio";
 	status = "okay";

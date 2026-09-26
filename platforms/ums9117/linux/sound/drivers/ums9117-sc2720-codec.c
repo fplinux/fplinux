@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include <linux/bitfield.h>
 #include <linux/bitops.h>
 #include <linux/clk.h>
 #include <linux/mfd/syscon.h>
@@ -30,6 +31,9 @@
 #define SC2720_ANA_CDC2 0x0724U
 #define SC2720_ANA_CDC3 0x0728U
 #define SC2720_ANA_CDC4 0x072cU
+#define SC2720_ANA_HDT0 0x0730U
+#define SC2720_ANA_HDT1 0x0734U
+#define SC2720_ANA_HDT2 0x0738U
 #define SC2720_ANA_DCL0 0x073cU
 #define SC2720_ANA_DCL4 0x074cU
 #define SC2720_ANA_DCL6 0x0754U
@@ -166,6 +170,29 @@
 #define SC2720_HP_VOLUME_DEFAULT 1U
 #define SC2720_PA_GAIN_MASK GENMASK(15, 12)
 #define SC2720_PA_GAIN_MINIMUM 0U
+
+#define SC2720_HEDET_VREF_EN BIT(11)
+#define SC2720_HEDET_V2AD_SCALE BIT(9)
+#define SC2720_HEDET_V2I_SEL_MASK GENMASK(3, 0)
+#define SC2720_HEDET_V2I_SEL_1_UA 2U
+#define SC2720_HEDET_MICDET_REF_SEL_MASK GENMASK(15, 13)
+#define SC2720_HEDET_MICDET_REF_SEL_2P6_V 6U
+#define SC2720_HEDET_MICDET_HYS_SEL_MASK GENMASK(12, 11)
+#define SC2720_HEDET_LDET_REFL_SEL_MASK GENMASK(10, 8)
+#define SC2720_HEDET_LDET_REFL_SEL_300_MV 6U
+#define SC2720_HEDET_LDET_REFH_SEL_MASK GENMASK(7, 6)
+#define SC2720_HEDET_LDET_REFH_SEL_1P7_V 0U
+#define SC2720_HEDET_LDET_PU_PD_MASK GENMASK(5, 4)
+#define SC2720_HEDET_LDET_PULL_UP 0U
+#define SC2720_HEDET_LDET_L_HYS_SEL_MASK GENMASK(3, 2)
+#define SC2720_HEDET_LDET_H_HYS_SEL_MASK GENMASK(1, 0)
+#define SC2720_HEDET_HYS_SEL_20_MV 1U
+#define SC2720_HEDET_BDET_REF_SEL_MASK GENMASK(10, 7)
+/* The stock button-detect threshold code. */
+#define SC2720_HEDET_BDET_REF_SEL_STOCK 0xaU
+#define SC2720_HEDET_BDET_HYS_SEL_MASK GENMASK(6, 5)
+#define SC2720_PLGPD_EN BIT(4)
+#define SC2720_HPL_EN_D2HDT_EN BIT(2)
 
 #define SC2720_CALDC_START BIT(15)
 #define SC2720_CALDC_EN BIT(14)
@@ -309,6 +336,62 @@ static const struct ums9117_sc2720_codec_register_desc shared_registers[] = {
 					  SC2720_CLK_AUD_1K_EN |
 					  SC2720_CLK_AUD_32K_EN },
 	{ SC2720_ANA_CDC1, SC2720_ADVCMI_INT_SEL_MASK },
+};
+
+struct ums9117_sc2720_codec_field {
+	u32 offset;
+	u16 mask;
+	u16 value;
+};
+
+/*
+ * The stock headset detector setup, in stock order. Stock firmware enables
+ * the microphone and button detectors and the headset microphone bias only
+ * after an insertion; they are not part of this setup.
+ */
+static const struct ums9117_sc2720_codec_field jack_detect_fields[] = {
+	{ SC2720_MODULE_EN0, SC2720_AUD_MODULE_EN, SC2720_AUD_MODULE_EN },
+	{ SC2720_AUD_CFGA_CLK_EN, SC2720_CLK_AUD_HID_EN,
+	  SC2720_CLK_AUD_HID_EN },
+	{ SC2720_ANA_HDT0,
+	  SC2720_HEDET_VREF_EN | SC2720_HEDET_V2AD_SCALE |
+		  SC2720_HEDET_V2I_SEL_MASK,
+	  SC2720_HEDET_VREF_EN | SC2720_HEDET_V2AD_SCALE |
+		  FIELD_PREP_CONST(SC2720_HEDET_V2I_SEL_MASK,
+				   SC2720_HEDET_V2I_SEL_1_UA) },
+	{ SC2720_ANA_HDT1,
+	  SC2720_HEDET_MICDET_REF_SEL_MASK | SC2720_HEDET_MICDET_HYS_SEL_MASK |
+		  SC2720_HEDET_LDET_REFL_SEL_MASK |
+		  SC2720_HEDET_LDET_REFH_SEL_MASK |
+		  SC2720_HEDET_LDET_PU_PD_MASK |
+		  SC2720_HEDET_LDET_L_HYS_SEL_MASK |
+		  SC2720_HEDET_LDET_H_HYS_SEL_MASK,
+	  FIELD_PREP_CONST(SC2720_HEDET_MICDET_REF_SEL_MASK,
+			   SC2720_HEDET_MICDET_REF_SEL_2P6_V) |
+		  FIELD_PREP_CONST(SC2720_HEDET_MICDET_HYS_SEL_MASK,
+				   SC2720_HEDET_HYS_SEL_20_MV) |
+		  FIELD_PREP_CONST(SC2720_HEDET_LDET_REFL_SEL_MASK,
+				   SC2720_HEDET_LDET_REFL_SEL_300_MV) |
+		  FIELD_PREP_CONST(SC2720_HEDET_LDET_REFH_SEL_MASK,
+				   SC2720_HEDET_LDET_REFH_SEL_1P7_V) |
+		  FIELD_PREP_CONST(SC2720_HEDET_LDET_PU_PD_MASK,
+				   SC2720_HEDET_LDET_PULL_UP) |
+		  FIELD_PREP_CONST(SC2720_HEDET_LDET_L_HYS_SEL_MASK,
+				   SC2720_HEDET_HYS_SEL_20_MV) |
+		  FIELD_PREP_CONST(SC2720_HEDET_LDET_H_HYS_SEL_MASK,
+				   SC2720_HEDET_HYS_SEL_20_MV) },
+	{ SC2720_ANA_HDT2,
+	  SC2720_HEDET_BDET_REF_SEL_MASK | SC2720_HEDET_BDET_HYS_SEL_MASK |
+		  SC2720_PLGPD_EN | SC2720_HPL_EN_D2HDT_EN,
+	  FIELD_PREP_CONST(SC2720_HEDET_BDET_REF_SEL_MASK,
+			   SC2720_HEDET_BDET_REF_SEL_STOCK) |
+		  FIELD_PREP_CONST(SC2720_HEDET_BDET_HYS_SEL_MASK,
+				   SC2720_HEDET_HYS_SEL_20_MV) |
+		  SC2720_PLGPD_EN | SC2720_HPL_EN_D2HDT_EN },
+	{ SC2720_ANA_PMU0, SC2720_VBG_SEL_1P50_V | SC2720_MICBIAS_POWER_DOWN,
+	  SC2720_VBG_SEL_1P50_V },
+	{ SC2720_ANA_PMU0, SC2720_AUD_VB_EN, SC2720_AUD_VB_EN },
+	{ SC2720_ANA_PMU0, SC2720_HEADMIC_FILTER_EN, SC2720_HEADMIC_FILTER_EN },
 };
 
 /* Mute, -15, -12, -9, -6, -3 and 0 dB, in increasing volume order. */
@@ -1726,6 +1809,25 @@ int ums9117_sc2720_codec_stop(struct ums9117_sc2720_codec *codec)
 int ums9117_sc2720_codec_disable(struct ums9117_sc2720_codec *codec)
 {
 	return ums9117_sc2720_codec_restore(codec);
+}
+
+int ums9117_sc2720_codec_enable_jack_detect(struct ums9117_sc2720_codec *codec)
+{
+	unsigned int i;
+	int ret;
+
+	ret = ums9117_sc2720_codec_check_identity(codec);
+	if (ret)
+		return ret;
+	for (i = 0; i < ARRAY_SIZE(jack_detect_fields); i++) {
+		ret = regmap_update_bits(codec->regmap,
+					 jack_detect_fields[i].offset,
+					 jack_detect_fields[i].mask,
+					 jack_detect_fields[i].value);
+		if (ret)
+			return ret;
+	}
+	return 0;
 }
 
 static void ums9117_sc2720_codec_release(void *data)
