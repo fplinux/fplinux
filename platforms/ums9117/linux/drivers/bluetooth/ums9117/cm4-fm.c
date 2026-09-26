@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include <linux/bits.h>
 #include <linux/firmware.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
@@ -18,6 +19,8 @@
 #define UMS9117_FM_MAX_10KHZ 10800
 /* V4L2_TUNER_CAP_LOW uses 62.5 Hz, while CM4 uses 10 kHz. */
 #define UMS9117_FM_FREQ_SCALE 160
+#define UMS9117_FM_RF_CLOCK 0x4194
+#define UMS9117_FM_RF_CLOCK_26M BIT(8)
 
 enum fm_state {
 	FM_OFF,
@@ -118,6 +121,43 @@ static int enable(struct ums9117_fm *radio)
 	return ret;
 }
 
+static int clock_register(struct ums9117_fm *radio, u32 *value, bool write)
+{
+	u8 payload[10] = { 0 };
+	u8 reply[17];
+	int ret;
+
+	put_unaligned_le32(UMS9117_FM_RF_CLOCK, payload + 1);
+	put_unaligned_le32(*value, payload + 5);
+	payload[9] = !write;
+	ret = command(radio, 0x22, payload, sizeof(payload), reply,
+		      sizeof(reply));
+	if (ret)
+		return ret;
+	if (reply[7])
+		return unknown_state(radio, 0x22, -EREMOTEIO);
+	if (get_unaligned_le32(reply + 8) != UMS9117_FM_RF_CLOCK ||
+	    reply[16] != (write ? 2 : 3))
+		return unknown_state(radio, 0x22, -EPROTO);
+	if (write && get_unaligned_le32(reply + 12) != *value)
+		return unknown_state(radio, 0x22, -EPROTO);
+	*value = get_unaligned_le32(reply + 12);
+	return 0;
+}
+
+static int restore_clock(struct ums9117_fm *radio)
+{
+	u32 value = 0;
+	int ret;
+
+	/* Restore the retained RF clock selection before the next CM4 startup. */
+	ret = clock_register(radio, &value, false);
+	if (ret || !(value & UMS9117_FM_RF_CLOCK_26M))
+		return ret;
+	value &= ~UMS9117_FM_RF_CLOCK_26M;
+	return clock_register(radio, &value, true);
+}
+
 static int disable(struct ums9117_fm *radio)
 {
 	u8 payload = 0;
@@ -130,6 +170,8 @@ static int disable(struct ums9117_fm *radio)
 	if (radio->state == FM_UNKNOWN)
 		return -EIO;
 	ret = set_byte(radio, 0x02, 1);
+	if (!ret)
+		ret = restore_clock(radio);
 	if (!ret)
 		ret = command(radio, 0x12, &payload, 1, reply, sizeof(reply));
 	if (!ret) {
