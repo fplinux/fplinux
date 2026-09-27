@@ -105,7 +105,7 @@ For a persistent system, follow the shared
 
 ## Development diagnostics
 
-The default build includes inactive kprobe and `irqsoff` diagnostics. Enabling
+The debug build includes inactive kprobe and `irqsoff` diagnostics. Enabling
 them can destabilize the kernel and consume RAM; follow
 [Hardware debugging](../../docs/guides/DEBUGGING.md).
 

@@ -16,6 +16,7 @@ from unittest import mock
 
 from fplinux_cli import kernelcheck
 from fplinux_cli.linux_state import PreparedLinuxState
+from fplinux_cli.manifests.kernel import kconfig_values
 
 
 def skip_linux_source_tools(
@@ -84,8 +85,19 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
         state = self.prepared_linux
 
         def run_command(command: list[str]) -> None:
-            if command[-1:] == ["savedefconfig"]:
-                (output / "defconfig").write_text(self.defconfig.read_text())
+            if "olddefconfig" not in command:
+                return
+            config = output / ".config"
+            values = kconfig_values(config.read_text())
+            # Model the external Kconfig choice: compression requires a source.
+            source = values.get("CONFIG_INITRAMFS_SOURCE", '""').strip('"')
+            if not source:
+                config.write_text(
+                    config.read_text().replace(
+                        "CONFIG_INITRAMFS_COMPRESSION_XZ=y\n",
+                        "CONFIG_INITRAMFS_COMPRESSION_GZIP=y\n",
+                    )
+                )
 
         def run_dtbs_check(_command: list[str], _target: str) -> str:
             return ""
@@ -135,7 +147,7 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
 
     def _cache_path(self, name: str) -> Path:
         """Return one path inside this test's fixed Sparse cache directory."""
-        return self.cache / "analysis" / "sparse" / self.target / name
+        return self.cache / "analysis" / "sparse" / self.target / "builds" / "release" / name
 
     def test_each_invocation_discards_stale_analyzer_work(self) -> None:
         """A new check cannot inherit object files from an earlier analyzer run."""
@@ -147,10 +159,26 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
         self._run_check()
         self.assertFalse(stale.exists())
 
+    def test_initramfs_analysis_preserves_the_requested_conditional_compressor(self) -> None:
+        """The analyzer resolves compression with a controlled source, as the build does."""
+        self.defconfig.write_text(
+            'CONFIG_TEST=y\nCONFIG_INITRAMFS_SOURCE=""\nCONFIG_INITRAMFS_COMPRESSION_XZ=y\n'
+        )
+
+        self._run_check()
+
+        config = kconfig_values((self._cache_path("work") / ".config").read_text())
+        self.assertEqual(config["CONFIG_INITRAMFS_COMPRESSION_XZ"], "y")
+        source = Path(config["CONFIG_INITRAMFS_SOURCE"].strip('"'))
+        self.assertTrue(source.is_dir())
+        self.assertEqual(list(source.iterdir()), [])
+
     def test_profile_applies_actions_without_comparing_the_base_defconfig(self) -> None:
         """A profile check uses its own effective .config, not the default canonical file."""
         profile = "microsd-uboot"
-        output = self.cache / "analysis/sparse/test-target/profiles/microsd-uboot/work"
+        output = (
+            self.cache / "analysis/sparse/test-target/profiles/microsd-uboot/builds/release/work"
+        )
         config_script = self.source / "scripts/config"
         config_script.write_text("#!/bin/sh\n")
         target_config = {
@@ -173,10 +201,10 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
         def run_command(command: list[str]) -> None:
             calls.append(command)
             if command[0] == str(config_script):
-                (output / ".config").write_text(
-                    "CONFIG_TEST=y\nCONFIG_BOARD=y\nCONFIG_PROFILE_ENABLED=y\n"
-                    "# CONFIG_PROFILE_DISABLED is not set\n"
-                )
+                with (output / ".config").open("a") as config:
+                    config.write(
+                        "CONFIG_PROFILE_ENABLED=y\n# CONFIG_PROFILE_DISABLED is not set\n"
+                    )
             if command[-1:] == ["savedefconfig"]:
                 self.fail("profile configuration must not be compared with base defconfig")
 

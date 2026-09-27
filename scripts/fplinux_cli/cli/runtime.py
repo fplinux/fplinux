@@ -122,14 +122,17 @@ def console_target(  # noqa: PLR0913 -- public CLI modes remain explicit.
     target: str,
     *,
     profile: str | None = None,
+    build_type: str = "release",
     keyboard: str | None,
     exec_command: str | None,
     upload: list[str] | None,
     pull: list[str] | None,
 ) -> None:
     """Open the SSH session, or forward one evdev keyboard over USB."""
-    config = targets.load_target(target, profile)
-    bundle, manifest = bundles_commands.resolve_target_bundle(target, profile)
+    config = targets.load_target(target, profile, build_type=build_type)
+    bundle, manifest = bundles_commands.resolve_target_bundle(
+        target, profile, build_type=build_type
+    )
     if keyboard is None:
         ssh_transport, session = _current_ssh_session(bundle, manifest, target)
         if exec_command is not None:
@@ -157,29 +160,33 @@ def console_target(  # noqa: PLR0913 -- public CLI modes remain explicit.
     os.execv(client, arguments)
 
 
-def verify_booted(target: str, *, profile: str | None = None) -> None:
+def verify_booted(target: str, *, profile: str | None = None, build_type: str = "release") -> None:
     """Compare the running kernel identity with the current bundle."""
     profile = normalize_profile(profile)
-    bundle, manifest = bundles_commands.resolve_target_bundle(target, profile)
-    snapshot = workspaces.target_workspace_snapshot(target, profile)
+    bundle, manifest = bundles_commands.resolve_target_bundle(
+        target, profile, build_type=build_type
+    )
+    snapshot = workspaces.target_workspace_snapshot(target, profile, build_type=build_type)
     image_recipe = images.container_image_recipe_digest()
     image_state = image_states.load_image_state(common.ROOT / ".cache", image_recipe)
     identity = bundles_commands.build_identity(snapshot, image_state, common.ROOT / ".cache")
     if not bundles_commands.manifest_matches_identity(manifest, identity):
         fail(
             "build output is stale; rebuild it: "
-            f"{bundles_commands.profile_command('build', target, profile)}"
+            f"{bundles_commands.profile_command('build', target, profile, build_type=build_type)}"
         )
     device_identity = _manifest_device_identity(manifest)
     _current_ssh_session(bundle, manifest, target)
-    print(f"verify: the phone runs the current build ({device_identity[:16]})")
+    print(f"verify: the phone runs the current {build_type} build ({device_identity[:16]})")
 
 
 def current_target_ssh_session(
-    target: str, *, profile: str | None = None
+    target: str, *, profile: str | None = None, build_type: str = "release"
 ) -> tuple[ModuleType, dict[str, Any]]:
     """Resolve the authenticated session for one exact target and build profile."""
-    bundle, manifest = bundles_commands.resolve_target_bundle(target, normalize_profile(profile))
+    bundle, manifest = bundles_commands.resolve_target_bundle(
+        target, normalize_profile(profile), build_type=build_type
+    )
     return _current_ssh_session(bundle, manifest, target)
 
 
@@ -187,6 +194,7 @@ def _runnable_target_runner(
     target: str,
     *,
     profile: str | None = None,
+    build_type: str = "release",
     boot: str | None = None,
 ) -> Path:
     """Resolve the fixed shared runner for one runnable bundle."""
@@ -194,10 +202,12 @@ def _runnable_target_runner(
         target, profile=profile, boot=boot
     )
     if selected_profile is not None:
-        target_config = targets.load_target(target, selected_profile)
+        target_config = targets.load_target(target, selected_profile, build_type=build_type)
         if not target_config["runtime"]["runnable"]:
             fail(f"profile is build-only and cannot be run: {target}/{selected_profile}")
-    bundle, manifest = bundles_commands.resolve_target_bundle(target, selected_profile)
+    bundle, manifest = bundles_commands.resolve_target_bundle(
+        target, selected_profile, build_type=build_type
+    )
     if selected_profile is not None:
         boot_artifacts = manifest.get("boot_artifacts")
         if not isinstance(boot_artifacts, dict) or boot_artifacts.get("runnable") is not True:
@@ -212,16 +222,22 @@ def run_target(
     target: str,
     *,
     profile: str | None = None,
+    build_type: str = "release",
     boot: str | None = None,
 ) -> None:
     """Run the fixed shared runner from a successful target bundle."""
-    runner = _runnable_target_runner(target, profile=profile, boot=boot)
+    runner = _runnable_target_runner(target, profile=profile, boot=boot, build_type=build_type)
     os.execv(os.fsencode(runner), [os.fsencode(runner)])
 
 
-def run_target_noninteractive(target: str, *, profile: str | None = None) -> None:
+def run_target_noninteractive(
+    target: str,
+    *,
+    profile: str | None = None,
+    build_type: str = "release",
+) -> None:
     """Run a loader to its authenticated handoff without taking over this CLI process."""
-    runner = _runnable_target_runner(target, profile=profile)
+    runner = _runnable_target_runner(target, profile=profile, build_type=build_type)
     result = subprocess.run(
         [os.fsencode(runner)],
         stdin=subprocess.DEVNULL,

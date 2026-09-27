@@ -17,8 +17,10 @@ from fplinux_cli.build import process as process_build
 from fplinux_cli.build import publish as publish_build
 from fplinux_cli.build import sources as sources_build
 from fplinux_cli.build import storage as storage_build
+from fplinux_cli.bundle_state import bundle_slot
 from fplinux_cli.common import fail
 from fplinux_cli.environment.images import container_runtime_recipe_digest
+from fplinux_cli.identity import BUILD_TYPES
 from fplinux_cli.manifests.paths import target_asset_lock_path
 from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.releases import load_release
@@ -31,6 +33,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target", required=True)
     parser.add_argument("--profile")
+    parser.add_argument("--build-type", choices=BUILD_TYPES, default="release")
     parser.add_argument("--jobs", type=int, required=True)
     args = parser.parse_args()
     if args.jobs < 1:
@@ -43,7 +46,7 @@ def main() -> None:
 
     reporter = RunReporter.from_environment(f"build {args.target}", "build")
     with process_build.report_stage(reporter, "configuration"):
-        target_config = load_target(args.target, args.profile)
+        target_config = load_target(args.target, args.profile, build_type=args.build_type)
         platform = load_platform(target_config["platform"])
         rootfs_packages = alpine_state.selected_packages(platform, target_config)
         bundle_packages = alpine_state.bundle_packages(platform, target_config, rootfs_packages)
@@ -68,9 +71,10 @@ def main() -> None:
         release_manifest = load_release(args.target)
 
         profile = inputs_build.selected_profile(target_config)
-        work = inputs_build.OUTPUT / args.target / "work"
-        if profile is not None:
-            work = inputs_build.OUTPUT / args.target / "profiles" / profile / "work"
+        work = (
+            bundle_slot(inputs_build.OUTPUT, args.target, profile, build_type=args.build_type)
+            / "work"
+        )
         work.mkdir(parents=True, exist_ok=True)
         inputs_build.CACHE.mkdir(parents=True, exist_ok=True)
 

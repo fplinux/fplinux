@@ -288,7 +288,9 @@ class NandBackupTests(unittest.TestCase):
             )
 
         self.assertFalse(self.destination.exists())
-        acquire.assert_called_once_with("nokia-ta1618", profile="microsd-uboot")
+        acquire.assert_called_once_with(
+            "nokia-ta1618", profile="microsd-uboot", build_type="release"
+        )
 
     def test_target_without_a_reader_is_rejected_before_connecting(self) -> None:
         """A missing board declaration cannot fall back to another board's reader."""
@@ -324,7 +326,7 @@ class NandIdentifyTests(unittest.TestCase):
         self.assertEqual(phone.raw_reads(), [])
         self.assertEqual(len(phone.commands), 1)
         self.assertIn("/dev/ums9117-nand-raw", phone.commands[0])
-        acquire.assert_called_once_with("inoi-244-modern-4g", profile=None)
+        acquire.assert_called_once_with("inoi-244-modern-4g", profile=None, build_type="release")
 
 
 class BackupReceiptTests(unittest.TestCase):

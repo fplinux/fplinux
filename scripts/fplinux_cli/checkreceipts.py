@@ -29,6 +29,7 @@ class CheckReceiptRecipe:
     orchestration_recipe: str
     image_generation: str
     profile: str | None = None
+    build_type: str | None = None
 
     def payload(self) -> dict[str, object]:
         """Return the exact persisted payload for one successful check."""
@@ -39,6 +40,7 @@ class CheckReceiptRecipe:
             "orchestration_recipe": self.orchestration_recipe,
             "image_generation": self.image_generation,
             "profile": self.profile,
+            "build_type": self.build_type,
         }
 
 
@@ -55,11 +57,16 @@ def check_closure_entries_digest(entries: list[tuple[str, bytes, int]]) -> str:
 
 def receipt_path(cache_root: Path, recipe: CheckReceiptRecipe) -> Path:
     """Return the one default or named-profile receipt path for a scope."""
-    if recipe.profile is None:
-        return cache_root / _SCOPE_ROOT / recipe.scope / "success.json"
-    if TARGET_NAME.fullmatch(recipe.profile) is None:
-        raise ValueError(f"invalid receipt profile: {recipe.profile!r}")
-    return cache_root / _SCOPE_ROOT / "profiles" / recipe.profile / recipe.scope / "success.json"
+    root = cache_root / _SCOPE_ROOT
+    if recipe.profile is not None:
+        if TARGET_NAME.fullmatch(recipe.profile) is None:
+            raise ValueError(f"invalid receipt profile: {recipe.profile!r}")
+        root = root / "profiles" / recipe.profile
+    if recipe.build_type is not None:
+        if recipe.build_type not in ("release", "debug"):
+            raise ValueError(f"invalid receipt build type: {recipe.build_type!r}")
+        root = root / "builds" / recipe.build_type
+    return root / recipe.scope / "success.json"
 
 
 def receipt_matches(cache_root: Path, recipe: CheckReceiptRecipe) -> bool:

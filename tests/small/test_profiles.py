@@ -10,10 +10,11 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from fplinux_cli import common
+from fplinux_cli import alpine_state, common
 from fplinux_cli.build import kernel as kernel_build
+from fplinux_cli.build import linux as linux_build
 from fplinux_cli.common import ROOT
-from fplinux_cli.manifests import kernel, paths, targets
+from fplinux_cli.manifests import kernel, paths, platforms, targets
 
 PROFILE_FIXTURES = ROOT / "tests/fixtures/profile_config"
 
@@ -369,6 +370,41 @@ class GlobalProfileTests(unittest.TestCase):
 class KernelConfigCompositionTests(unittest.TestCase):
     """The shared base and board fragment produce one unambiguous Kconfig input."""
 
+    def test_build_type_policy_overrides_board_values_and_checks_resolved_capabilities(
+        self,
+    ) -> None:
+        """A lost enabled diagnostic or unexpectedly enabled release feature fails validation."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = root / "base"
+            board = root / "board"
+            policy = root / "release"
+            actual = root / ".config"
+            base.write_text("CONFIG_KALLSYMS=y\nCONFIG_MODULES=y\n")
+            board.write_text("CONFIG_DEVMEM=y\nCONFIG_LOG_BUF_SHIFT=17\n")
+            policy.write_text(
+                "# CONFIG_MODULES is not set\n"
+                "# CONFIG_DEVMEM is not set\nCONFIG_LOG_BUF_SHIFT=16\n"
+            )
+            composed = kernel.compose_kernel_config(base, board, policy)
+            self.assertEqual(
+                composed,
+                b"CONFIG_KALLSYMS=y\n# CONFIG_MODULES is not set\n"
+                b"# CONFIG_DEVMEM is not set\nCONFIG_LOG_BUF_SHIFT=16\n",
+            )
+            actual.write_bytes(composed)
+            kernel_build.assert_build_type_kconfig(actual, policy, "release")
+            actual.write_text("CONFIG_MODULES=y\nCONFIG_LOG_BUF_SHIFT=16\n")
+            with self.assertRaisesRegex(
+                SystemExit, "release build did not preserve CONFIG_MODULES=n"
+            ):
+                kernel_build.assert_build_type_kconfig(actual, policy, "release")
+            policy.write_text("CONFIG_MODULES=y\nCONFIG_DEVMEM=y\nCONFIG_LOG_BUF_SHIFT=17\n")
+            with self.assertRaisesRegex(
+                SystemExit, "debug build did not preserve CONFIG_DEVMEM=y"
+            ):
+                kernel_build.assert_build_type_kconfig(actual, policy, "debug")
+
     def test_board_values_override_the_base_without_losing_shared_features(self) -> None:
         """Both enabled and explicitly disabled board settings replace base values."""
         with tempfile.TemporaryDirectory() as temporary:
@@ -383,6 +419,36 @@ class KernelConfigCompositionTests(unittest.TestCase):
                     b"# CONFIG_UNUSED is not set\nCONFIG_DEVICE=y\n"
                 ),
             )
+
+
+class BuildTypeSelectionTests(unittest.TestCase):
+    """Kernel type selection preserves current rootfs and prepared-source consumers."""
+
+    def test_build_type_does_not_change_packages_root_or_linux_source_recipe(self) -> None:
+        """Both types reuse each boot profile's unchanged packages and source projection."""
+        sources = common.load_toml(ROOT / "sources.lock.toml")
+        for target in paths.discover_targets():
+            for profile in paths.discover_profiles(target):
+                with self.subTest(target=target, profile=profile):
+                    release = targets.load_target(target, profile)
+                    debug = targets.load_target(target, profile, build_type="debug")
+                    platform = platforms.load_platform(release["platform"])
+                    self.assertEqual(release["build_type"], "release")
+                    self.assertEqual(debug["build_type"], "debug")
+                    self.assertEqual(release["linux"]["root"], debug["linux"]["root"])
+                    self.assertEqual(release["profile"], debug["profile"])
+                    release_packages = alpine_state.selected_packages(platform, release)
+                    debug_packages = alpine_state.selected_packages(platform, debug)
+                    self.assertEqual(release_packages, debug_packages)
+                    self.assertEqual(
+                        alpine_state.bundle_packages(platform, release, release_packages),
+                        alpine_state.bundle_packages(platform, debug, debug_packages),
+                    )
+                    linux = sources[platform["linux"]["source_lock"]]
+                    self.assertEqual(
+                        linux_build.linux_recipe_digest(linux, target, release, platform),
+                        linux_build.linux_recipe_digest(linux, target, debug, platform),
+                    )
 
 
 class RepositoryProfileCompressionTests(unittest.TestCase):

@@ -31,6 +31,47 @@ from fplinux_cli.workspace import WorkspaceFile, WorkspaceSnapshot
 class CheckScopeTests(unittest.TestCase):
     """Keep scope selection stable and independent of argument order."""
 
+    def test_kernel_receipt_tracks_only_the_selected_build_type_fragment(self) -> None:
+        """Editing release policy invalidates release checks while preserving debug reuse."""
+        files = (
+            WorkspaceFile("targets/phone/target.toml", b'platform = "demo"\n', 0o644),
+            WorkspaceFile(
+                "platforms/demo/platform.toml",
+                b'[linux.build_types]\nrelease = "release.config"\ndebug = "debug.config"\n',
+                0o644,
+            ),
+            WorkspaceFile("release.config", b"CONFIG_LOG_BUF_SHIFT=16\n", 0o644),
+            WorkspaceFile("debug.config", b"CONFIG_LOG_BUF_SHIFT=17\n", 0o644),
+        )
+        before = WorkspaceSnapshot(files, "a" * 64)
+        after = WorkspaceSnapshot(
+            (
+                *files[:2],
+                WorkspaceFile("release.config", b"CONFIG_LOG_BUF_SHIFT=15\n", 0o644),
+                files[3],
+            ),
+            "b" * 64,
+        )
+        self.assertNotEqual(
+            check_scope_closure_digest("kernel", before),
+            check_scope_closure_digest("kernel", after),
+        )
+        self.assertEqual(
+            check_scope_closure_digest("kernel", before, build_type="debug"),
+            check_scope_closure_digest("kernel", after, build_type="debug"),
+        )
+        release = check_scope_receipt_recipe(
+            "python", "a" * 64, image_generation="b" * 64, orchestration_recipe="c" * 64
+        )
+        debug = check_scope_receipt_recipe(
+            "python",
+            "a" * 64,
+            image_generation="b" * 64,
+            orchestration_recipe="c" * 64,
+            build_type="debug",
+        )
+        self.assertEqual(release, debug)
+
     def test_selection_is_deduplicated_in_canonical_order(self) -> None:
         """Deduplicate selections and ignore their command-line order."""
         self.assertEqual(
@@ -714,6 +755,7 @@ class KernelExecutionLimitTests(unittest.TestCase):
                         image="localhost/fplinux-build:locked",
                         recipes={"kernel": recipe},
                         profile="microsd-uboot",
+                        build_type="release",
                         jobs=jobs,
                     )
 
@@ -730,20 +772,20 @@ class KernelExecutionLimitTests(unittest.TestCase):
             self.assertIn(f"{analyzer_cache['analysis']}:/cache/analysis", first_analysis)
             self.assertIn(f"{analyzer_cache['linux']}:/cache/linux:ro", first_analysis)
             self.assertEqual(
-                first_prepare[-3:],
-                ["prepare", "--profile", "microsd-uboot"],
+                first_prepare[-5:],
+                ["prepare", "--profile", "microsd-uboot", "--build-type", "release"],
             )
             self.assertEqual(
-                first_analysis[-5:],
-                ["check", "--jobs", "1", "--profile", "microsd-uboot"],
+                first_analysis[-7:],
+                ["check", "--jobs", "1", "--profile", "microsd-uboot", "--build-type", "release"],
             )
             self.assertEqual(
-                second_prepare[-3:],
-                ["prepare", "--profile", "microsd-uboot"],
+                second_prepare[-5:],
+                ["prepare", "--profile", "microsd-uboot", "--build-type", "release"],
             )
             self.assertEqual(
-                second_analysis[-5:],
-                ["check", "--jobs", "2", "--profile", "microsd-uboot"],
+                second_analysis[-7:],
+                ["check", "--jobs", "2", "--profile", "microsd-uboot", "--build-type", "release"],
             )
             self.assertEqual(first_receipt, second_receipt)
             self.assertTrue(

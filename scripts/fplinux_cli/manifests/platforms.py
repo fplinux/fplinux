@@ -7,7 +7,7 @@ from typing import Any
 
 from fplinux_cli import common
 from fplinux_cli.common import fail
-from fplinux_cli.identity import IdentityError, validate_platform_identity
+from fplinux_cli.identity import BUILD_TYPES, IdentityError, validate_platform_identity
 from fplinux_cli.manifests.values import (
     TARGET_NAME,
     exact_table,
@@ -163,6 +163,7 @@ def load_platform(platform: str) -> dict[str, Any]:
         {
             "source_lock",
             "defconfig",
+            "build_types",
             "arch",
             "cross_compile",
             "analysis_cross_compile",
@@ -190,6 +191,11 @@ def load_platform(platform: str) -> dict[str, Any]:
     ):
         relative_value(linux.get(key), f"platform linux {key}")
     string_array(linux.get("targets"), "platform linux targets")
+    build_types = exact_table(
+        linux.get("build_types"), set(BUILD_TYPES), "platform linux build_types"
+    )
+    for build_type, fragment in build_types.items():
+        relative_value(fragment, f"platform linux build_types {build_type}")
     path_array(linux.get("patches"), "platform linux patches", allow_empty=True)
     path_steps(linux.get("copies"), "platform linux copies")
     path_steps(linux.get("appends"), "platform linux appends")

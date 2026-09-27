@@ -141,10 +141,18 @@ class CliCacheLockTests(unittest.TestCase):
                 if callback_name == "backup_target_nand":
                     self.assertEqual(
                         callback.call_args,
-                        mock.call("nokia-ta1618", Path("backup.bin"), profile=profile),
+                        mock.call(
+                            "nokia-ta1618",
+                            Path("backup.bin"),
+                            profile=profile,
+                            build_type="release",
+                        ),
                     )
                 elif callback_name == "identify_target_nand":
-                    self.assertEqual(callback.call_args, mock.call("nokia-ta1618", profile=None))
+                    self.assertEqual(
+                        callback.call_args,
+                        mock.call("nokia-ta1618", profile=None, build_type="release"),
+                    )
                 elif callback_name == "prepare_device_data":
                     self.assertEqual(
                         callback.call_args,
@@ -178,6 +186,49 @@ class CliCacheLockTests(unittest.TestCase):
         )
         self.assertTrue(build.call_args.kwargs["offline"])
         self.assertFalse(build.call_args.kwargs["verbose"])
+
+    def test_build_type_defaults_and_explicit_selection_reach_every_consumer(self) -> None:
+        """The same enum is independent of a boot profile at every selected-bundle boundary."""
+        commands = (
+            (["build", "target"], "build"),
+            (["check", "kernel"], "check"),
+            (["inspect", "bundle", "target"], "inspect_bundle"),
+            (["package", "target"], "package_target"),
+            (["run", "target"], "run_target"),
+            (["console", "target"], "console_target"),
+            (["verify", "target"], "verify_booted"),
+            (["nand", "identify", "target"], "identify_target_nand"),
+            (["nand", "backup", "target", "nand.bin"], "backup_target_nand"),
+        )
+        for arguments, callback_name in commands:
+            for build_type in ("release", "debug"):
+                with self.subTest(arguments=arguments, build_type=build_type):
+                    explicit = [
+                        *arguments,
+                        "--profile",
+                        "microsd-uboot",
+                        "--build-type",
+                        build_type,
+                    ]
+                    _events, callback = self._run(explicit, callback_name)
+                    self.assertEqual(callback.call_args.kwargs["build_type"], build_type)
+                    self.assertEqual(callback.call_args.kwargs["profile"], "microsd-uboot")
+            _events, callback = self._run(arguments, callback_name)
+            self.assertEqual(callback.call_args.kwargs["build_type"], "release")
+
+    def test_unknown_build_type_is_rejected_before_locking(self) -> None:
+        """An unsupported kernel type cannot reach build or device actions."""
+        with (
+            mock.patch.object(sys, "argv", ["fplinux", "run", "target", "--build-type", "other"]),
+            mock.patch.object(cli, "discover_targets", return_value=("target",)),
+            mock.patch.object(
+                cli, "cache_lock", side_effect=AssertionError("invalid type must not lock")
+            ),
+            contextlib.redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit) as stopped,
+        ):
+            cli.main()
+        self.assertEqual(stopped.exception.code, 2)
 
     def test_target_new_forwards_the_requested_name_platform_and_identity(self) -> None:
         """The new-target command passes the platform and identity options to target creation."""
@@ -246,6 +297,7 @@ class CliCacheLockTests(unittest.TestCase):
             mock.call(
                 ["kernel"],
                 profile=None,
+                build_type="release",
                 verbose=False,
                 no_cache=False,
                 jobs=2,
@@ -265,6 +317,7 @@ class CliCacheLockTests(unittest.TestCase):
                 check.assert_called_once_with(
                     scopes,
                     profile=None,
+                    build_type="release",
                     verbose=verbose,
                     no_cache=False,
                     jobs=jobs,
@@ -331,7 +384,7 @@ class CliCacheLockTests(unittest.TestCase):
             (
                 ["run", "nokia-ta1618", "--boot", "microsd"],
                 "run_target",
-                mock.call("nokia-ta1618", profile=None, boot="microsd"),
+                mock.call("nokia-ta1618", profile=None, boot="microsd", build_type="release"),
             ),
             (
                 ["package", "nokia-ta1618", "--boot", "microsd", "--candidate"],
@@ -341,12 +394,13 @@ class CliCacheLockTests(unittest.TestCase):
                     profile=None,
                     boot="microsd",
                     candidate=True,
+                    build_type="release",
                 ),
             ),
             (
                 ["run", "target", "--boot", "microsd"],
                 "run_target",
-                mock.call("target", profile=None, boot="microsd"),
+                mock.call("target", profile=None, boot="microsd", build_type="release"),
             ),
         )
         for arguments, callback_name, expected_call in cases:
@@ -391,7 +445,12 @@ class CliCacheLockTests(unittest.TestCase):
             ["check", "python", "source", "--profile", "microsd-uboot"], "check"
         )
         check.assert_called_once_with(
-            ["python", "source"], profile="microsd-uboot", verbose=False, no_cache=False, jobs=1
+            ["python", "source"],
+            profile="microsd-uboot",
+            build_type="release",
+            verbose=False,
+            no_cache=False,
+            jobs=1,
         )
 
     def test_verify_forwards_the_selected_profile(self) -> None:
@@ -405,7 +464,7 @@ class CliCacheLockTests(unittest.TestCase):
         )
         self.assertEqual(
             verify.call_args,
-            mock.call("target", profile="microsd-uboot"),
+            mock.call("target", profile="microsd-uboot", build_type="release"),
         )
 
     def test_invalid_profile_is_rejected_before_any_cache_or_retention_action(self) -> None:

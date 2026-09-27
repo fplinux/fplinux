@@ -76,6 +76,7 @@ class WorkspaceSnapshot:
 
     files: tuple[WorkspaceFile, ...]
     recipe: str
+    build_type: str | None = None
 
 
 def is_python_cache(path: Path) -> bool:
@@ -111,11 +112,12 @@ def target_build_source_files(
     target: str,
     profile: str | None = None,
     *,
+    build_type: str = "release",
     target_config: dict[str, Any] | None = None,
 ) -> list[tuple[str, Path]]:
     """Resolve only the selected target/platform build closure."""
     if target_config is None:
-        target_config = load_target(target, profile)
+        target_config = load_target(target, profile, build_type=build_type)
     platform = load_platform(target_config["platform"])
     target_root = ROOT / "targets" / target
     files: dict[str, Path] = {}
@@ -256,9 +258,11 @@ def quality_files(*, enforce_source_policy: bool) -> list[tuple[str, Path]]:
     return files
 
 
-def target_workspace_snapshot(target: str, profile: str | None = None) -> WorkspaceSnapshot:
+def target_workspace_snapshot(
+    target: str, profile: str | None = None, *, build_type: str = "release"
+) -> WorkspaceSnapshot:
     """Read the selected build closure before deciding whether staging is needed."""
-    target_config = load_target(target, profile)
+    target_config = load_target(target, profile, build_type=build_type)
     source_snapshot = _snapshot_from_inventory(
         lambda: target_build_source_files(
             target,
@@ -285,14 +289,14 @@ def target_workspace_snapshot(target: str, profile: str | None = None) -> Worksp
         for group_name, group in captured_groups.items()
         for firmware in group
     )
-    if not firmware_files:
-        return source_snapshot
     snapshot_files = tuple(
         sorted((*source_snapshot.files, *firmware_files), key=lambda item: item.path)
     )
     if len({source.path for source in snapshot_files}) != len(snapshot_files):
         fail("firmware input collides with a build workspace source path")
-    return WorkspaceSnapshot(snapshot_files, _snapshot_recipe(snapshot_files))
+    return WorkspaceSnapshot(
+        snapshot_files, _snapshot_recipe(snapshot_files, build_type), build_type
+    )
 
 
 def quality_workspace_snapshot(*, enforce_source_policy: bool) -> WorkspaceSnapshot:
@@ -393,9 +397,11 @@ def _read_source_file(relative: str, source: Path) -> WorkspaceFile:
     return WorkspaceFile(relative, contents, mode)
 
 
-def _snapshot_recipe(files: tuple[WorkspaceFile, ...]) -> str:
+def _snapshot_recipe(files: tuple[WorkspaceFile, ...], build_type: str | None = None) -> str:
     """Hash exact source paths, bytes, and permissions from an immutable snapshot."""
     value = hashlib.sha256()
+    if build_type is not None:
+        value.update(f"build_type={build_type}\0".encode())
     for source in files:
         value.update(source.path.encode())
         value.update(b"\0")
@@ -510,7 +516,7 @@ def _remove_managed_workspace(workspaces: Path, workspace: Path, name: str) -> N
 
 def _validate_snapshot(snapshot: WorkspaceSnapshot, marker_relative: PurePosixPath) -> None:
     """Reject forged snapshots before they can create cache paths outside the namespace."""
-    expected_recipe = _snapshot_recipe(snapshot.files)
+    expected_recipe = _snapshot_recipe(snapshot.files, snapshot.build_type)
     if snapshot.recipe != expected_recipe:
         fail("workspace snapshot recipe does not match its files")
     marker = _workspace_relative_path(marker_relative.as_posix())

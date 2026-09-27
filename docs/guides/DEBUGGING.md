@@ -1,6 +1,9 @@
 # Debugging FPLinux
 
-This guide covers diagnostics available in source-built development images.
+This guide covers diagnostics available in source-built images. Select
+`--build-type debug` for kernel tracing, loadable diagnostic modules, DMATEST
+and `/dev/mem`; the default `release` build omits those facilities. See
+[build types](BUILDING.md#build-types) for the complete selection rules.
 Debug output and tracing help investigate a running RAM session; they do not
 prove hardware support or make a payload release-ready.
 
@@ -65,8 +68,8 @@ invalid arguments; and 130 after Ctrl+C.
 
 ## Kernel tracing
 
-The shared UMS9117 kernel configuration includes debugfs, tracefs, kprobe
-events and the `irqsoff` tracer. No tracer or dynamic probe is active after
+The UMS9117 `debug` kernel includes debugfs, tracefs, kprobe events and the
+`irqsoff` tracer. No tracer or dynamic probe is active after
 boot. Inspect the current state from the phone shell as root:
 
 ```sh

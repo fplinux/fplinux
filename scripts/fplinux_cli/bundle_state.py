@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .common import canonical_json_bytes, sha256_file
+from .identity import BUILD_TYPES
 
 BUILD_MANIFEST_NAME = "build-manifest.json"
 BUILD_MANIFEST_FIELDS = frozenset(
@@ -27,6 +28,7 @@ BUILD_MANIFEST_FIELDS = frozenset(
         "kbuild_receipt",
         "linux_recipe",
         "profile",
+        "build_type",
         "target",
         "workspace_digest",
     }
@@ -47,23 +49,32 @@ class CurrentBundle:
     manifest_bytes: bytes
 
 
-def bundle_slot(output: Path, target: str, profile: str | None = None) -> Path:
+def bundle_slot(
+    output: Path, target: str, profile: str | None = None, *, build_type: str = "release"
+) -> Path:
     """Return the one managed bundle slot for a target and optional profile."""
     _component(target, "target")
-    if profile is None:
-        return output / target
-    _component(profile, "profile")
-    return output / target / "profiles" / profile
+    if build_type not in BUILD_TYPES:
+        raise BundleStateError(f"invalid build type: {build_type!r}")
+    slot = output / target
+    if profile is not None:
+        _component(profile, "profile")
+        slot = slot / "profiles" / profile
+    return slot / "builds" / build_type
 
 
-def bundle_generations(output: Path, target: str, profile: str | None = None) -> Path:
+def bundle_generations(
+    output: Path, target: str, profile: str | None = None, *, build_type: str = "release"
+) -> Path:
     """Return the immutable bundle-generation directory."""
-    return bundle_slot(output, target, profile) / "bundles"
+    return bundle_slot(output, target, profile, build_type=build_type) / "bundles"
 
 
-def bundle_pointer(output: Path, target: str, profile: str | None = None) -> Path:
+def bundle_pointer(
+    output: Path, target: str, profile: str | None = None, *, build_type: str = "release"
+) -> Path:
     """Return the current-generation pointer path."""
-    return bundle_slot(output, target, profile) / "current.json"
+    return bundle_slot(output, target, profile, build_type=build_type) / "current.json"
 
 
 def published_file_records(directory: Path) -> dict[str, dict[str, int | str]]:
@@ -81,9 +92,13 @@ def published_file_records(directory: Path) -> dict[str, dict[str, int | str]]:
     return records
 
 
-def create_bundle_staging(output: Path, target: str, profile: str | None = None) -> Path:
+def create_bundle_staging(
+    output: Path, target: str, profile: str | None = None, *, build_type: str = "release"
+) -> Path:
     """Create one private staging directory beside its future generations."""
-    generations = _bundle_generations_directory(output, target, profile, create=True)
+    generations = _bundle_generations_directory(
+        output, target, profile, build_type=build_type, create=True
+    )
     _discard_stale_bundle_staging(generations)
     return Path(tempfile.mkdtemp(dir=generations, prefix=".stage-"))
 
@@ -93,9 +108,13 @@ def discard_bundle_staging(
     target: str,
     staging: Path,
     profile: str | None = None,
+    *,
+    build_type: str = "release",
 ) -> None:
     """Discard only the private staging directory created for this bundle."""
-    generations = _bundle_generations_directory(output, target, profile, create=False)
+    generations = _bundle_generations_directory(
+        output, target, profile, build_type=build_type, create=False
+    )
     if (
         staging.parent != generations
         or not staging.name.startswith(".stage-")
@@ -107,18 +126,22 @@ def discard_bundle_staging(
         shutil.rmtree(staging)
 
 
-def publish_bundle_generation(
+def publish_bundle_generation(  # noqa: PLR0913 -- generation and selected slot stay explicit.
     output: Path,
     target: str,
     staging: Path,
     generation: str,
     profile: str | None = None,
+    *,
+    build_type: str = "release",
 ) -> Path:
     """Rename a complete private staging directory to its immutable identity."""
     if not _is_sha256(generation):
         message = "bundle generation is not a SHA-256 digest"
         raise BundleStateError(message)
-    generations = _bundle_generations_directory(output, target, profile, create=False)
+    generations = _bundle_generations_directory(
+        output, target, profile, build_type=build_type, create=False
+    )
     if (
         staging.parent != generations
         or not staging.name.startswith(".stage-")
@@ -130,7 +153,7 @@ def publish_bundle_generation(
     if manifest.is_symlink() or not manifest.is_file():
         message = "bundle staging directory has no build manifest"
         raise BundleStateError(message)
-    _validate_manifest(manifest.read_bytes(), target, generation, profile)
+    _validate_manifest(manifest.read_bytes(), target, generation, profile, build_type)
     destination = generations / generation
     if destination.is_symlink():
         message = "bundle generation path is not a real directory"
@@ -165,9 +188,13 @@ def publish_current_bundle(
     target: str,
     generation_path: Path,
     profile: str | None = None,
+    *,
+    build_type: str = "release",
 ) -> CurrentBundle:
     """Atomically select one already-published complete generation."""
-    generations = _bundle_generations_directory(output, target, profile, create=False)
+    generations = _bundle_generations_directory(
+        output, target, profile, build_type=build_type, create=False
+    )
     if (
         generation_path.parent != generations
         or not _is_sha256(generation_path.name)
@@ -181,9 +208,9 @@ def publish_current_bundle(
         message = "bundle generation has no build manifest"
         raise BundleStateError(message)
     manifest_bytes = manifest_path.read_bytes()
-    _validate_manifest(manifest_bytes, target, generation_path.name, profile)
+    _validate_manifest(manifest_bytes, target, generation_path.name, profile, build_type)
     manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
-    pointer = bundle_pointer(output, target, profile)
+    pointer = bundle_pointer(output, target, profile, build_type=build_type)
     if pointer.is_symlink() or (pointer.exists() and not pointer.is_file()):
         message = "current bundle pointer is not a regular file"
         raise BundleStateError(message)
@@ -213,9 +240,13 @@ def discard_superseded_bundle_generations(
     target: str,
     current: CurrentBundle,
     profile: str | None = None,
+    *,
+    build_type: str = "release",
 ) -> None:
     """Bound one managed slot to its selected generation and non-directory cache files."""
-    generations = _bundle_generations_directory(output, target, profile, create=False)
+    generations = _bundle_generations_directory(
+        output, target, profile, build_type=build_type, create=False
+    )
     selected = generations / current.generation
     if (
         current.path != selected
@@ -235,10 +266,12 @@ def resolve_current_bundle(
     output: Path,
     target: str,
     profile: str | None = None,
+    *,
+    build_type: str = "release",
 ) -> CurrentBundle:
     """Resolve one pointer once; any mismatch is a cache miss to the caller."""
-    _bundle_generations_directory(output, target, profile, create=False)
-    pointer = bundle_pointer(output, target, profile)
+    _bundle_generations_directory(output, target, profile, build_type=build_type, create=False)
+    pointer = bundle_pointer(output, target, profile, build_type=build_type)
     if pointer.is_symlink() or not pointer.is_file():
         message = "current bundle pointer is missing or invalid"
         raise BundleStateError(message)
@@ -252,7 +285,7 @@ def resolve_current_bundle(
     if not _is_sha256(generation) or not _is_sha256(expected_manifest):
         message = "current bundle pointer contains an invalid digest"
         raise BundleStateError(message)
-    path = bundle_generations(output, target, profile) / generation
+    path = bundle_generations(output, target, profile, build_type=build_type) / generation
     manifest_path = path / BUILD_MANIFEST_NAME
     if path.is_symlink() or not path.is_dir():
         message = "current bundle generation is incomplete"
@@ -269,7 +302,7 @@ def resolve_current_bundle(
     if actual_manifest != expected_manifest:
         message = "current bundle manifest differs from its pointer"
         raise BundleStateError(message)
-    _validate_manifest(manifest_bytes, target, generation, profile)
+    _validate_manifest(manifest_bytes, target, generation, profile, build_type)
     return CurrentBundle(path, generation, actual_manifest, manifest_bytes)
 
 
@@ -289,10 +322,11 @@ def _bundle_generations_directory(
     target: str,
     profile: str | None,
     *,
+    build_type: str,
     create: bool,
 ) -> Path:
     """Return a real slot-local generations directory without following cache links."""
-    slot = bundle_slot(output, target, profile)
+    slot = bundle_slot(output, target, profile, build_type=build_type)
     _require_real_directory(output, create=create)
     relative = slot.relative_to(output)
     current = output
@@ -335,6 +369,7 @@ def _validate_manifest(
     target: str,
     generation: str,
     profile: str | None,
+    build_type: str,
 ) -> None:
     """Require a manifest whose exact slot identity matches its containing generation."""
     try:
@@ -348,6 +383,7 @@ def _validate_manifest(
         or manifest.get("generation") != generation
         or manifest.get("target") != target
         or manifest.get("profile") != profile
+        or manifest.get("build_type") != build_type
     ):
         message = "current bundle manifest has the wrong slot identity"
         raise BundleStateError(message)

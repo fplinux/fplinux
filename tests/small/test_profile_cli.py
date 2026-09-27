@@ -52,6 +52,7 @@ class ProfileParserDispatchTests(unittest.TestCase):
         check.assert_called_once_with(
             [],
             profile="microsd-uboot",
+            build_type="release",
             verbose=False,
             no_cache=False,
             jobs=3,
@@ -66,6 +67,7 @@ class ProfileParserDispatchTests(unittest.TestCase):
         check.assert_called_once_with(
             ["kernel"],
             profile="microsd-uboot",
+            build_type="release",
             verbose=False,
             no_cache=False,
             jobs=3,
@@ -84,6 +86,7 @@ class ProfileParserDispatchTests(unittest.TestCase):
         check.assert_called_once_with(
             [],
             profile="microsd-uboot",
+            build_type="release",
             verbose=False,
             no_cache=False,
             jobs=2,
@@ -108,6 +111,7 @@ class ProfileParserDispatchTests(unittest.TestCase):
             "demo",
             3,
             profile="microsd-uboot",
+            build_type="release",
             verbose=False,
             offline=False,
         )
@@ -115,7 +119,9 @@ class ProfileParserDispatchTests(unittest.TestCase):
         _check, _build, run, _package, _console = self.invoke(
             "run", "demo", "--profile", "microsd-uboot"
         )
-        run.assert_called_once_with("demo", profile="microsd-uboot", boot=None)
+        run.assert_called_once_with(
+            "demo", profile="microsd-uboot", build_type="release", boot=None
+        )
 
     def test_package_and_console_forward_the_same_named_profile(self) -> None:
         """Phone-test archives and reconnects select the profile generation explicitly."""
@@ -129,6 +135,7 @@ class ProfileParserDispatchTests(unittest.TestCase):
         package.assert_called_once_with(
             "demo",
             profile="microsd-uboot",
+            build_type="release",
             boot=None,
             candidate=True,
         )
@@ -144,6 +151,7 @@ class ProfileParserDispatchTests(unittest.TestCase):
         console.assert_called_once_with(
             "demo",
             profile="microsd-uboot",
+            build_type="release",
             keyboard=None,
             exec_command="id",
             upload=None,
@@ -161,6 +169,7 @@ class ProfileParserDispatchTests(unittest.TestCase):
         run.assert_called_once_with(
             "nokia-ta1618",
             profile=None,
+            build_type="release",
             boot="microsd",
         )
 
@@ -174,6 +183,7 @@ class ProfileParserDispatchTests(unittest.TestCase):
         package.assert_called_once_with(
             "nokia-ta1618",
             profile=None,
+            build_type="release",
             boot="microsd",
             candidate=True,
         )

@@ -87,6 +87,7 @@ class SshTransportSmallTests(unittest.TestCase):
         runtime = {
             "target": "phone",
             "profile": None,
+            "build_type": "release",
             "image": "image/ramboot.bin",
             "sha256": {"image/ramboot.bin": hashlib.sha256(image.read_bytes()).hexdigest()},
         }
@@ -107,6 +108,7 @@ class SshTransportSmallTests(unittest.TestCase):
             "kbuild_receipt": {"recipe": "a" * 64, "sha256": "b" * 64},
             "linux_recipe": "c" * 64,
             "profile": None,
+            "build_type": "release",
             "target": "phone",
             "workspace_digest": "d" * 64,
         }
@@ -138,6 +140,7 @@ class SshTransportSmallTests(unittest.TestCase):
         runtime = {
             "target": "phone",
             "profile": None,
+            "build_type": "release",
             "image": "image/ramboot.bin",
             "sha256": {"image/ramboot.bin": hashlib.sha256(image.read_bytes()).hexdigest()},
         }
@@ -158,6 +161,7 @@ class SshTransportSmallTests(unittest.TestCase):
             "kbuild_receipt": {"recipe": "a" * 64, "sha256": "b" * 64},
             "linux_recipe": "c" * 64,
             "profile": None,
+            "build_type": "release",
             "target": "phone",
             "workspace_digest": "d" * 64,
         }
@@ -176,8 +180,12 @@ class SshTransportSmallTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        with self.assertRaisesRegex(SystemExit, "runtime target or profile"):
-            ssh_transport.bundle_identity(bundle, {**runtime, "profile": "usb-host-lab"})
+        for changed in ({"profile": "usb-host-lab"}, {"build_type": "debug"}):
+            with (
+                self.subTest(changed=changed),
+                self.assertRaisesRegex(SystemExit, "runtime target, profile or build type"),
+            ):
+                ssh_transport.bundle_identity(bundle, {**runtime, **changed})
 
     def test_current_session_loads_ready_bound_session(self) -> None:
         """A ready RAM session remains usable through its private binding."""

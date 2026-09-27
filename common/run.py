@@ -188,6 +188,7 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
         {
             "target",
             "profile",
+            "build_type",
             "identity",
             "transport",
             "image",
@@ -203,6 +204,8 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
     )
     root["target"] = require_string(root.get("target"), "runtime target")
     root["profile"] = require_optional_profile(root.get("profile"))
+    if root.get("build_type") not in ("release", "debug"):
+        fail("runtime build type must be release or debug")
     if not isinstance(root.get("identity"), dict):
         fail("runtime identity must be an object")
     root["transport"] = require_transport(root.get("transport"))

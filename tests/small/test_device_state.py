@@ -35,7 +35,7 @@ class DeviceStateTests(unittest.TestCase):
         self.arch = "arm"
         self.dtb = "vendor/demo-device.dtb"
 
-    def _identity(self) -> str:
+    def _identity(self, *, build_type: str = "release") -> str:
         return device_state.device_kernel_identity(
             target=self.target,
             linux_recipe=self.linux_recipe,
@@ -47,7 +47,15 @@ class DeviceStateTests(unittest.TestCase):
             arch=self.arch,
             defconfig=self.defconfig,
             dtb=self.dtb,
+            build_type=build_type,
         )
+
+    def test_build_type_changes_the_kernel_identity_without_changing_rootfs(self) -> None:
+        """Type selection is visible to device verification even for identical config bytes."""
+        release = self._identity()
+        debug = self._identity(build_type="debug")
+        self.assertNotEqual(release, debug)
+        self.assertEqual(release, self._identity(build_type="release"))
 
     def test_identity_is_deterministic_and_formats_a_kernel_localversion(self) -> None:
         """One unchanged target closure has one stable full identity and suffix."""

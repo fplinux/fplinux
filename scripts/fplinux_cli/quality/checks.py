@@ -323,7 +323,9 @@ def _linux_manifest_sources(linux: object, *, base: PurePath) -> set[str]:
     return selected
 
 
-def _kernel_scope_paths(snapshot: WorkspaceSnapshot, profile: str | None = None) -> set[str]:
+def _kernel_scope_paths(
+    snapshot: WorkspaceSnapshot, profile: str | None = None, *, build_type: str = "release"
+) -> set[str]:
     """Resolve the selected global profile and every board's Linux inputs."""
     profile = normalize_profile(profile)
     by_path = {file.path: file for file in snapshot.files}
@@ -373,16 +375,25 @@ def _kernel_scope_paths(snapshot: WorkspaceSnapshot, profile: str | None = None)
             platform_data = tomllib.loads(platform_manifest.contents.decode("utf-8"))
         except UnicodeDecodeError, tomllib.TOMLDecodeError:
             continue
-        selected.update(_linux_manifest_sources(platform_data.get("linux"), base=PurePath()))
+        linux = platform_data.get("linux")
+        selected.update(_linux_manifest_sources(linux, base=PurePath()))
+        if isinstance(linux, dict) and isinstance(linux.get("build_types"), dict):
+            fragment = linux["build_types"].get(build_type)
+            if isinstance(fragment, str):
+                selected.add(fragment)
     return selected
 
 
 def check_scope_closure_digest(
-    scope: str, snapshot: WorkspaceSnapshot, *, profile: str | None = None
+    scope: str,
+    snapshot: WorkspaceSnapshot,
+    *,
+    profile: str | None = None,
+    build_type: str = "release",
 ) -> str:
     """Hash only captured files that can affect one exact check scope."""
     if scope == "kernel":
-        paths = _kernel_scope_paths(snapshot, profile)
+        paths = _kernel_scope_paths(snapshot, profile, build_type=build_type)
         selected = [file for file in snapshot.files if file.path in paths]
     elif scope == "c":
         paths = _c_scope_paths(snapshot)
@@ -413,13 +424,14 @@ def check_scope_closure_digest(
     )
 
 
-def check_scope_receipt_recipe(
+def check_scope_receipt_recipe(  # noqa: PLR0913 -- source, image and kernel type stay explicit.
     scope: str,
     closure_digest: str,
     *,
     image_generation: str,
     orchestration_recipe: str | None = None,
     profile: str | None = None,
+    build_type: str = "release",
 ) -> CheckReceiptRecipe:
     """Bind one cacheable source scope to its exact closure and OCI identities."""
     if scope not in (*SOURCE_CHECK_SCOPES, "kernel"):
@@ -432,6 +444,7 @@ def check_scope_receipt_recipe(
         orchestration_recipe=orchestration_recipe,
         image_generation=image_generation,
         profile=profile,
+        build_type=build_type if scope == "kernel" else None,
     )
 
 
@@ -446,6 +459,7 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
     image: str,
     recipes: dict[str, CheckReceiptRecipe],
     profile: str | None,
+    build_type: str,
     jobs: int,
 ) -> None:
     """Run cache-missing source and kernel checks against one disposable workspace."""
@@ -522,6 +536,8 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
                 "fplinux_cli.kernelcheck",
                 "prepare",
                 *([] if profile is None else ["--profile", profile]),
+                "--build-type",
+                build_type,
             ],
             env=environment,
             timeout=_KERNEL_PREPARE_TIMEOUT,
@@ -549,6 +565,8 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
                 "--jobs",
                 str(jobs),
                 *([] if profile is None else ["--profile", profile]),
+                "--build-type",
+                build_type,
             ],
             env=environment,
             timeout=_KERNEL_ANALYSIS_TIMEOUT,
@@ -556,12 +574,13 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
     publish_success_receipt(cache, recipes["kernel"])
 
 
-def check(
+def check(  # noqa: PLR0913 -- public check options stay explicit.
     scopes: list[str],
     *,
     verbose: bool = False,
     no_cache: bool = False,
     profile: str | None = None,
+    build_type: str = "release",
     jobs: int = 1,
 ) -> None:
     if not isinstance(jobs, int) or isinstance(jobs, bool) or jobs < 1:
@@ -596,10 +615,13 @@ def check(
         return {
             scope: check_scope_receipt_recipe(
                 scope,
-                check_scope_closure_digest(scope, snapshot, profile=profile),
+                check_scope_closure_digest(
+                    scope, snapshot, profile=profile, build_type=build_type
+                ),
                 image_generation=image_generation,
                 orchestration_recipe=orchestration_recipe,
                 profile=profile,
+                build_type=build_type,
             )
             for scope in cacheable_scopes
         }
@@ -657,6 +679,7 @@ def check(
             image=image,
             recipes=recipes,
             profile=profile,
+            build_type=build_type,
             jobs=jobs,
         )
     finally:

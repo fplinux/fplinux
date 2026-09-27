@@ -120,6 +120,7 @@ def runtime_manifest(  # noqa: PLR0913 -- each published artifact role stays exp
     return {
         "target": target,
         "profile": inputs_build.selected_profile(target_config),
+        "build_type": target_config["build_type"],
         "transport": runtime.get("transport", "usb-ncm"),
         "identity": runtime_identity(
             target_config["identity"],
@@ -250,6 +251,7 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
     payload = {
         "target": target,
         "profile": inputs_build.selected_profile(target_config),
+        "build_type": target_config["build_type"],
         "workspace_digest": workspace_digest,
         "container_image_recipe": container_image_recipe,
         "container_image_generation": container_image_generation,
@@ -271,8 +273,15 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
         release,
         generation,
         profile,
+        build_type=target_config["build_type"],
     )
-    publish_current_bundle(inputs_build.OUTPUT, target, generation_path, profile)
+    publish_current_bundle(
+        inputs_build.OUTPUT,
+        target,
+        generation_path,
+        profile,
+        build_type=target_config["build_type"],
+    )
     return generation_path
 
 
@@ -305,7 +314,9 @@ def publish_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay explicit
 ) -> Path:
     """Publish a complete immutable bundle and select it as current."""
     profile = inputs_build.selected_profile(target_config)
-    release = create_bundle_staging(inputs_build.OUTPUT, target, profile)
+    release = create_bundle_staging(
+        inputs_build.OUTPUT, target, profile, build_type=target_config["build_type"]
+    )
     if boot_files is None:
         boot_files = {}
     if boot_artifacts is None:
@@ -339,4 +350,6 @@ def publish_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay explicit
             boot_artifacts=boot_artifacts,
         )
     finally:
-        discard_bundle_staging(inputs_build.OUTPUT, target, release, profile)
+        discard_bundle_staging(
+            inputs_build.OUTPUT, target, release, profile, build_type=target_config["build_type"]
+        )

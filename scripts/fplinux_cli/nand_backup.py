@@ -291,14 +291,18 @@ def backup_nand(  # noqa: PLR0913 -- the reader and the declared chip are distin
     return output
 
 
-def _target_reader(target: str, profile: str | None) -> tuple[dict[str, Any], SessionFactory]:
+def _target_reader(
+    target: str, profile: str | None, build_type: str
+) -> tuple[dict[str, Any], SessionFactory]:
     """Return the target's declared NAND reader and its exact current-profile session."""
-    nand = load_target(target, profile=profile).get("nand")
+    nand = load_target(target, profile=profile, build_type=build_type).get("nand")
     if nand is None:
         fail(f"NAND access is not supported for target {target}")
 
     def connect() -> tuple[SshTransport, dict[str, Any]]:
-        ssh, session = runtime_commands.current_target_ssh_session(target, profile=profile)
+        ssh, session = runtime_commands.current_target_ssh_session(
+            target, profile=profile, build_type=build_type
+        )
         return cast("SshTransport", ssh), session
 
     return nand, connect
@@ -309,10 +313,11 @@ def backup_target_nand(
     output: Path,
     *,
     profile: str | None = None,
+    build_type: str = "release",
     reporter: RunReporter | None = None,
 ) -> Path:
     """Back up one supported target through its exact current-profile session."""
-    nand, connect = _target_reader(target, profile)
+    nand, connect = _target_reader(target, profile, build_type)
     own_reporter = reporter is None
     if reporter is None:
         reporter = RunReporter.create("nand", target=target, verbose=False)
@@ -330,9 +335,11 @@ def backup_target_nand(
     return result
 
 
-def identify_target_nand(target: str, *, profile: str | None = None) -> None:
+def identify_target_nand(
+    target: str, *, profile: str | None = None, build_type: str = "release"
+) -> None:
     """Print the chip identity and geometry that the target's running NAND reader reports."""
-    nand, connect = _target_reader(target, profile)
+    nand, connect = _target_reader(target, profile, build_type)
     reporter = RunReporter.create("nand", target=target, verbose=False)
     with reporter.stage("identify-nand") as stage:
         ssh, session = connect()

@@ -15,6 +15,29 @@ _PUBLIC_HELP_TIMEOUT_SECONDS = 10
 class ProfileAndToolCliHelpWorkflowTests(unittest.TestCase):
     """Exercise the repository CLI without resolving a bundle or touching USB."""
 
+    def test_help_exposes_the_build_type_enum_for_bundle_consumers(self) -> None:
+        """The documented selector is available at every public type-sensitive entry point."""
+        for command in (
+            ("build",),
+            ("check",),
+            ("run",),
+            ("package",),
+            ("console",),
+            ("verify",),
+            ("inspect", "bundle"),
+            ("nand", "identify"),
+            ("nand", "backup"),
+        ):
+            with self.subTest(command=command):
+                result = run_process(
+                    [str(ROOT / "fplinux"), *command, "--help"],
+                    name="build type help",
+                    timeout=_PUBLIC_HELP_TIMEOUT_SECONDS,
+                    cwd=ROOT,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("--build-type {release,debug}", result.stdout)
+
     def test_help_exposes_the_microsd_boot_alias_and_global_profile_selector(self) -> None:
         """Run and package expose both supported ways to select the microSD profile."""
         for command in ("run", "package"):

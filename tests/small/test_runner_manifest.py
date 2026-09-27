@@ -87,6 +87,7 @@ def runtime_manifest() -> dict[str, Any]:
     return {
         "target": "demo",
         "profile": None,
+        "build_type": "release",
         "identity": {
             "target": {
                 "brand": "Demo",
@@ -160,6 +161,21 @@ class RuntimeManifestTests(unittest.TestCase):
             loaded["identity"]["target"]["display_name"],
             "Demo Phone (D-1, D-2)",
         )
+
+    def test_build_type_is_explicit_and_has_no_missing_or_unknown_fallback(self) -> None:
+        """A standalone runner cannot reinterpret a bundle's kernel capabilities."""
+        for build_type in ("release", "debug"):
+            manifest = runtime_manifest()
+            manifest["build_type"] = build_type
+            self.assertEqual(self.load(manifest)["build_type"], build_type)
+        for invalid_type in (None, "other"):
+            manifest = runtime_manifest()
+            if invalid_type is None:
+                del manifest["build_type"]
+            else:
+                manifest["build_type"] = invalid_type
+            with self.subTest(build_type=invalid_type), self.assertRaises(SystemExit):
+                self.load(manifest)
 
     def test_manifest_shape_does_not_execute_identity_code_before_hash_verification(self) -> None:
         """Keep bundled Python execution behind the runner's declared-file hash loop."""
@@ -361,6 +377,7 @@ class NoTransportRunnerTests(unittest.TestCase):
             "kbuild_receipt": {"recipe": "f" * 64, "sha256": "0" * 64},
             "linux_recipe": "1" * 64,
             "profile": None,
+            "build_type": "release",
             "target": "demo",
             "workspace_digest": "2" * 64,
         }
