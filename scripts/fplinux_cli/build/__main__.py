@@ -38,6 +38,7 @@ def main() -> None:
     args = parser.parse_args()
     if args.jobs < 1:
         fail("jobs must be positive")
+    process_build.lower_build_priority()
 
     image_recipe, image_generation = inputs_build.container_image_environment()
     os.environ["FPLINUX_CONTAINER_IMAGE_RECIPE"] = container_runtime_recipe_digest(
@@ -55,10 +56,7 @@ def main() -> None:
             target_config["device_data"]["groups"],
             common.ROOT,
         )
-        firmware = (
-            *device_data.get("bluetooth", ()),
-            *device_data.get("fm-radio", ()),
-        )
+        firmware = firmware_inputs.rootfs_firmware_inputs(device_data)
         audio_profile_firmware = device_data.get("audio-profile")
         sources = common.load_toml(common.ROOT / "sources.lock.toml")
         linux_base = inputs_build.require_sha256(

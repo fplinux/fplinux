@@ -250,7 +250,10 @@ its NAND, follow [Bring up a new UMS9117 phone](../porting/NEW_PHONE.md).
 ```
 
 Each build container starts with a 2 GiB memory budget.
-`--jobs` limits parallel compilation. A matching selected bundle is reused;
+Builds use up to eight available CPUs by default; `--jobs` selects an explicit
+parallel compilation limit. Build processes run at nice level 10, preserving
+an already lower scheduling priority so that foreground work can take precedence.
+A matching selected bundle is reused;
 otherwise the command rebuilds it from the current inputs. Target names are
 discovered from `targets/`; use the [target index](../../targets/README.md) to
 choose one.
@@ -542,6 +545,18 @@ to find and read command output without looking up stage filenames.
 Public commands serialize writes to shared build state. Target output is kept
 under `.cache/out/<target>/`; treat it as generated data, not as a user-managed
 workspace.
+
+### Clean generated state
+
+Kernel compilation uses a shared local ccache under `.cache/ccache/`. Its
+automatic cleanup limits the cache to 1 GiB. It can reuse compilations across
+targets and profiles when their inputs match; the first fill can take longer
+than an uncached compilation. It does not change the selected kernel features
+or the phone's package set.
+
+Host tools are reused from `.cache/host-tools/` when their source inputs and
+pinned build environment match. A driver change does not rebuild unchanged host
+tools. Cached tools still pass their binary checks and declared self-tests.
 
 Prepared Linux, Sparse, rootfs, staged workspaces, profile logs and locally
 built APKs use bounded managed slots. Successful commands discard superseded

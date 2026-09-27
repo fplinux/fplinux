@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import shlex
 import subprocess
 from contextlib import contextmanager
@@ -14,6 +15,12 @@ from fplinux_cli.output import RunReporter, current_stage
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
+
+
+def lower_build_priority() -> None:
+    """Let foreground work take priority without raising an existing nice value."""
+    priority = max(10, os.getpriority(os.PRIO_PROCESS, 0))
+    os.setpriority(os.PRIO_PROCESS, 0, priority)
 
 
 def run(

@@ -14,22 +14,23 @@ from fplinux_cli.environment.images import (
     container_image_recipe_digest,
     container_runtime_recipe_digest,
 )
-from fplinux_cli.manifests.paths import discover_profiles, discover_targets
+from fplinux_cli.manifests.paths import discover_platforms, discover_profiles, discover_targets
 from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.targets import load_target
-from fplinux_cli.manifests.values import TARGET_NAME
+from fplinux_cli.manifests.values import TARGET_NAME, nonempty_string
 
 from . import alpine_state, firmware_inputs
-from .common import ROOT
+from .common import ROOT, load_toml, read_json_object
 from .image_state import load_image_state
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 _WORKSPACE_NAMESPACES = frozenset({"quality-workspaces", "workspaces"})
-_MANAGED_NAMESPACES = _WORKSPACE_NAMESPACES | {"apks", "rootfs"}
+_MANAGED_NAMESPACES = _WORKSPACE_NAMESPACES | {"apks", "host-tools", "rootfs"}
 _LOG_RUN_LIMIT = 10
 _RUN_ID = re.compile(r"^\d{8}T\d{6}Z-p\d+(?:-\d+)?$")
+_SOURCE_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 @dataclass(frozen=True)
@@ -139,7 +140,7 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
                     device_data_groups,
                     cache,
                 )
-                firmware = device_data.get("bluetooth", ())
+                firmware = firmware_inputs.rootfs_firmware_inputs(device_data)
                 recipes.add(
                     alpine_state.alpine_rootfs_recipe(
                         image_recipe,
@@ -231,6 +232,60 @@ def _current_apk_packages() -> frozenset[str] | None:
     except KeyError, OSError, TypeError, ValueError, SystemExit:
         return None
     return frozenset(packages)
+
+
+def _current_host_tools() -> frozenset[str] | None:
+    """Retain tools declared by any platform without reading target-owned inputs."""
+    try:
+        names: set[str] = set()
+        for platform in discover_platforms():
+            config = load_toml(ROOT / "platforms" / platform / "platform.toml")
+            for tool in config["host"]["tools"]:
+                names.add(nonempty_string(tool["name"], "host tool name"))
+    except KeyError, OSError, TypeError, ValueError, SystemExit:
+        return None
+    return frozenset(names)
+
+
+def _host_tool_entries(cache: Path) -> list[InventoryEntry]:
+    """Protect active tool slots and unknown data; retire only recognized tool receipts."""
+    root = cache / "host-tools"
+    if not root.is_dir() or root.is_symlink():
+        return []
+    current = _current_host_tools()
+    entries: list[InventoryEntry] = []
+    for path in sorted(root.iterdir()):
+        disposable = False
+        if not path.is_dir() or path.is_symlink():
+            reason = "not a managed host tool cache directory"
+        elif current is None:
+            reason = "current host tool declarations are unavailable"
+        elif path.name in current:
+            reason = "current host tool cache"
+        else:
+            receipt = path / "receipt.json"
+            record = None if receipt.is_symlink() else read_json_object(receipt)
+            owned = (
+                record is not None
+                and set(record) == {"recipe", "sha256"}
+                and all(
+                    isinstance(value, str) and _SOURCE_SHA256.fullmatch(value)
+                    for value in record.values()
+                )
+            )
+            disposable = bool(owned)
+            reason = "retired host tool cache" if owned else "unrecognized host tool cache"
+        logical, allocated = _tree_size(path) if disposable else (None, None)
+        entries.append(
+            InventoryEntry(
+                f"host-tools/{path.name}",
+                "candidate" if disposable else "protected",
+                reason,
+                logical,
+                allocated,
+            )
+        )
+    return entries
 
 
 def _apk_entries(cache: Path) -> list[InventoryEntry]:
@@ -726,6 +781,7 @@ def plan_prune(cache: Path) -> PrunePlan:
     """List disposable snapshots and bounded CLI logs in managed cache namespaces."""
     entries: list[InventoryEntry] = []
     entries.extend(_apk_entries(cache))
+    entries.extend(_host_tool_entries(cache))
     entries.extend(_rootfs_entries(cache))
     entries.extend(_profile_cache_entries(cache))
     entries.extend(_profile_check_receipt_entries(cache))

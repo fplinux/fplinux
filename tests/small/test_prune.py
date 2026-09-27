@@ -14,6 +14,7 @@ from unittest import mock
 
 from fplinux_cli import alpine_state, firmware_inputs
 from fplinux_cli import prune as prune_module
+from fplinux_cli.environment.images import container_runtime_recipe_digest
 from fplinux_cli.image_state import ImageState, publish_image_state
 from fplinux_cli.prune import PruneSafetyError, apply_prune, plan_prune, prune
 
@@ -345,6 +346,75 @@ class PruneTests(unittest.TestCase):
             self.assertEqual(removed, (f"rootfs/{stale}",))
             self.assertTrue((cache / "rootfs" / current).exists())
             self.assertFalse((cache / "rootfs" / stale).exists())
+
+    def test_automatic_rootfs_cleanup_retains_bluetooth_and_fm_recipe(self) -> None:
+        """Cleanup retains the built rootfs and drops recipes with wrong firmware groups."""
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary) / ".cache"
+            public_key = alpine_state.signing_public_key(cache)
+            public_key.parent.mkdir(parents=True)
+            public_key.write_bytes(b"public-key\n")
+            publish_image_state(cache, ImageState("a" * 64, "b" * 64))
+            groups = {
+                "bluetooth": [
+                    {"source": "bluetooth.bin", "destination": "chip/bluetooth.bin", "size": 9}
+                ],
+                "fm-radio": [{"source": "radio.bin", "destination": "chip/radio.bin", "size": 5}],
+                "audio-profile": [
+                    {"source": "audio.bin", "destination": "chip/audio.bin", "size": 5}
+                ],
+            }
+            device_data = cache / "device-data/phone"
+            for group, filename, contents in (
+                ("bluetooth", "bluetooth.bin", b"bluetooth"),
+                ("fm-radio", "radio.bin", b"radio"),
+                ("audio-profile", "audio.bin", b"audio"),
+            ):
+                directory = device_data / "generations/generation-test/groups" / group
+                directory.mkdir(parents=True)
+                (directory / filename).write_bytes(contents)
+            (device_data / "current").write_text("generation-test\n", encoding="ascii")
+            captured = firmware_inputs.capture_external_device_data("phone", groups, cache)
+            image_recipe = container_runtime_recipe_digest("a" * 64, "b" * 64)
+            signing_key = alpine_state.signing_key_identity(cache)
+
+            def recipe_for(*selected_groups: str) -> str:
+                selected = tuple(item for group in selected_groups for item in captured[group])
+                return alpine_state.alpine_rootfs_recipe(
+                    image_recipe, signing_key, (), firmware_inputs=selected
+                )
+
+            current = recipe_for("bluetooth", "fm-radio")
+            bluetooth_only = recipe_for("bluetooth")
+            with_audio_profile = recipe_for("bluetooth", "fm-radio", "audio-profile")
+            for recipe in (current, bluetooth_only, with_audio_profile):
+                directory = cache / "rootfs" / recipe
+                directory.mkdir(parents=True)
+                (directory / "rootfs.cpio").write_bytes(b"rootfs")
+
+            with (
+                mock.patch.object(prune_module, "discover_targets", return_value=("phone",)),
+                mock.patch.object(prune_module, "discover_profiles", return_value=()),
+                mock.patch.object(
+                    prune_module,
+                    "load_target",
+                    return_value={"platform": "platform", "device_data": {"groups": groups}},
+                ),
+                mock.patch.object(prune_module, "load_platform", return_value={}),
+                mock.patch.object(alpine_state, "selected_packages", return_value=()),
+                mock.patch.object(
+                    prune_module, "container_image_recipe_digest", return_value="a" * 64
+                ),
+            ):
+                removed = prune_module.discard_obsolete_rootfs(cache)
+
+            self.assertEqual(
+                set(removed),
+                {f"rootfs/{bluetooth_only}", f"rootfs/{with_audio_profile}"},
+            )
+            self.assertTrue((cache / "rootfs" / current / "rootfs.cpio").is_file())
+            self.assertFalse((cache / "rootfs" / bluetooth_only).exists())
+            self.assertFalse((cache / "rootfs" / with_audio_profile).exists())
 
     def test_automatic_rootfs_cleanup_leaves_a_symlinked_entry_untouched(self) -> None:
         """Automatic retention never follows or removes an unsafe rootfs cache link."""

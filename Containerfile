@@ -34,6 +34,7 @@ RUN set -eux; \
         bash=5.3.9-r1 \
         bzip2=1.0.8-r6 \
         ca-certificates=20260909-r0 \
+        ccache=4.13.6-r0 \
         cpio=2.15-r0 \
         curl=8.22.0-r0 \
         diffutils=3.12-r0 \
@@ -260,7 +261,8 @@ RUN set -eux; \
     rm -rf /tmp/libtsm; \
     pkg-config --modversion libtsm
 
-RUN mkdir -p /cache/analysis /cache/downloads /cache/linux /cache/rootfs \
+RUN mkdir -p /cache/analysis /cache/ccache /cache/downloads /cache/host-tools \
+    /cache/linux /cache/rootfs \
     /tmp/fplinux-home /workspace /work \
     && chmod 1777 /cache /tmp/fplinux-home /work
 

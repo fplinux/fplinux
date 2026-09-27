@@ -41,6 +41,13 @@ class FirmwareInput:
         }
 
 
+def rootfs_firmware_inputs(
+    device_data: Mapping[str, Sequence[FirmwareInput]],
+) -> tuple[FirmwareInput, ...]:
+    """Select the captured groups installed in the Alpine root filesystem."""
+    return (*device_data.get("bluetooth", ()), *device_data.get("fm-radio", ()))
+
+
 def device_data_cache_directory(cache: Path, target: str) -> Path:
     """Return the private generation root used by one target."""
     return cache / "device-data" / target
