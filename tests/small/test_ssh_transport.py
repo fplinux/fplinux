@@ -12,6 +12,7 @@ import shlex
 import subprocess
 import tempfile
 import unittest
+from functools import partial
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -393,6 +394,65 @@ class SshTransportSmallTests(unittest.TestCase):
         self.assertEqual(ready["interface"], "usb1")
         self.assertEqual(ready["session_id"], state["session_id"])
         self.assertTrue(Path(state["private_key"]).is_file())
+
+    def test_fresh_session_reports_usb_once_before_network_and_ssh_are_ready(self) -> None:
+        """A matched USB device is observable even while network and SSH retry."""
+        state = self._session()
+        observations: list[tuple[str, int, int]] = []
+        responses = [
+            subprocess.CompletedProcess([], 255, stdout="", stderr="not ready"),
+            subprocess.CompletedProcess([], 0, stdout=f"{state['session_id']}\n", stderr=""),
+        ]
+        phone = Path("/usb/phone")
+        with (
+            mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
+            mock.patch.object(
+                ssh_transport, "_usb_devices", side_effect=[[], [phone], [phone], [phone]]
+            ),
+            mock.patch.object(ssh_transport, "_ncm_interface", return_value="usb1"),
+            mock.patch.object(
+                ssh_transport, "_network_ready", side_effect=[False, True, True]
+            ) as network,
+            mock.patch.object(ssh_transport, "_retry_pause"),
+            mock.patch.object(ssh_transport, "_scan_host_key", return_value=True),
+            mock.patch.object(ssh_transport, "_ssh_argv", return_value=["ssh"]),
+            mock.patch(
+                "fplinux_cli.ssh_transport.subprocess.run", side_effect=responses
+            ) as remote,
+        ):
+            ready = ssh_transport.wait_for_bound_session(
+                state,
+                on_linux_usb=lambda: observations.append(
+                    ("linux-usb", network.call_count, remote.call_count)
+                ),
+            )
+            ssh_transport.finish_session(state)
+
+        self.assertEqual(observations, [("linux-usb", 0, 0)])
+        self.assertEqual(ready["interface"], "usb1")
+        self.assertEqual(ready["session_id"], state["session_id"])
+
+    def test_absent_or_ambiguous_session_usb_is_not_reported(self) -> None:
+        """Only one USB device matching the selected session can report arrival."""
+        state = {**self._session(), "wait_seconds": 1}
+        for devices, diagnostic in (
+            ([], "did not become ready"),
+            ([Path("/usb/one"), Path("/usb/two")], "more than one USB device"),
+        ):
+            with self.subTest(devices=devices):
+                observations: list[str] = []
+                with (
+                    mock.patch.object(ssh_transport, "_usb_devices", return_value=devices),
+                    mock.patch.object(ssh_transport, "_retry_pause"),
+                    mock.patch(
+                        "fplinux_cli.ssh_transport.time.monotonic", side_effect=[0, 0.5, 2]
+                    ),
+                    self.assertRaisesRegex(SystemExit, diagnostic),
+                ):
+                    ssh_transport.wait_for_bound_session(
+                        state, on_linux_usb=partial(observations.append, "linux-usb")
+                    )
+                self.assertEqual(observations, [])
 
     def test_failed_current_config_publication_removes_the_ready_pointer_and_session(self) -> None:
         """Never leave a direct config pointing at an incomplete ready session."""

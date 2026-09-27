@@ -115,6 +115,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
             host_cli_header = write("include/fplinux/fplinux-cli.h")
             host_input = write("tools/local-input.h")
             host_patch = write("tools/local.patch")
+            loader_events = write("common/loader_events.py")
             unrelated = write("unselected.txt")
 
             for relative in (
@@ -228,6 +229,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                     host_cli_header,
                     host_input,
                     host_patch,
+                    loader_events,
                 ):
                     original = causal.read_bytes()
                     causal.write_bytes(original + b"changed\n")

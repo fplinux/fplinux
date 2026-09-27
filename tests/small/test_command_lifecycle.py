@@ -214,6 +214,24 @@ class CommandLifecycleTests(unittest.TestCase):
         ):
             runtime_commands.run_target("phone", build_type="debug")
 
+    def test_loader_event_path_is_resolved_from_the_invoking_directory(self) -> None:
+        """Both runner entry points receive an absolute event destination owned by the caller."""
+        runner = self.bundle_path / "runner/run.py"
+        with (
+            contextlib.chdir(self.root),
+            mock.patch.object(common, "ROOT", self.root),
+            mock.patch("fplinux_cli.cli.runtime.os.execv") as execute,
+            mock.patch(
+                "fplinux_cli.cli.runtime.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0),
+            ) as child,
+        ):
+            runtime_commands.run_target("phone", events=Path("events/load.jsonl"))
+            runtime_commands.run_target_noninteractive("phone", events=Path("events/load.jsonl"))
+        expected = [os.fsencode(runner), b"--events", os.fsencode(self.root / "events/load.jsonl")]
+        self.assertEqual(execute.call_args.args[1], expected)
+        self.assertEqual(child.call_args.args[0], expected)
+
     def test_build_result_ignores_closed_stdout_pipe(self) -> None:
         """A closed output consumer must not turn a valid build result into failure."""
 

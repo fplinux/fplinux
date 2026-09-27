@@ -140,6 +140,7 @@ def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]
         image,
         "runtime-manifest.json",
         "runner/platform_adapter.py",
+        "runner/loader_events.py",
         *config["runtime"]["assets"].values(),
         *executables,
     }

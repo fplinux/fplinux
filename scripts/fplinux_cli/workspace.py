@@ -223,6 +223,7 @@ def target_build_source_files(
             for relative in recipe["patches"]:
                 add_source_path(files, ROOT / relative)
     add_source_path(files, ROOT / "common/run.py")
+    add_source_path(files, ROOT / "common/loader_events.py")
     add_source_path(files, platform_root / "host/adapter.py")
     return sorted(files.items())
 

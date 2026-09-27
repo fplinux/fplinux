@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from unittest import mock
 
+from common import loader_events
 from tests.bundle_support import file_record
 
 if TYPE_CHECKING:
@@ -130,6 +131,7 @@ def runtime_manifest() -> dict[str, Any]:
             adapter: "b" * 64,
             identity_helper: "1" * 64,
             ssh_helper: "c" * 64,
+            "runner/loader_events.py": "2" * 64,
             fdl1: "d" * 64,
             loader: "f" * 64,
         },
@@ -345,6 +347,7 @@ class NoTransportRunnerTests(unittest.TestCase):
             "runner/identity.py": (ROOT / "scripts/fplinux_cli/identity.py").read_bytes(),
             "runner/platform_adapter.py": b"adapter\n",
             "runner/ssh_transport.py": b"unused but hashed helper\n",
+            "runner/loader_events.py": (ROOT / "common/loader_events.py").read_bytes(),
             "assets/fdl1.bin": b"fdl1\n",
             "host/loader": b"loader\n",
         }
@@ -399,15 +402,23 @@ class NoTransportRunnerTests(unittest.TestCase):
     def test_none_transport_personalizes_without_waiting_for_usb_ncm(self) -> None:
         """A host-only run still creates its required RAM session image before handoff."""
         adapter = mock.Mock()
+        adapter.run.return_value = None
         session = {"image": str(self.bundle / "image/ramboot.bin")}
         ssh = mock.Mock()
+        ssh.build_manifest_device_identity.return_value = "e" * 64
         ssh.prepare_session.return_value = session
         with (
             mock.patch.object(RUNNER, "__file__", str(self.runner)),
             mock.patch.object(RUNNER, "_identity_module", None),
             mock.patch.object(RUNNER, "host_preflight"),
             mock.patch.object(RUNNER, "load_adapter", return_value=adapter),
-            mock.patch.object(RUNNER, "load_module", return_value=ssh),
+            mock.patch.object(
+                RUNNER,
+                "load_module",
+                side_effect=lambda _path, name: (
+                    loader_events if name == "fplinux_loader_events" else ssh
+                ),
+            ),
             mock.patch.object(sys, "argv", [str(self.runner)]),
         ):
             RUNNER.main()
@@ -415,6 +426,7 @@ class NoTransportRunnerTests(unittest.TestCase):
         runtime = adapter.run.call_args.args[1]
         self.assertEqual(runtime["transport"], "none")
         self.assertIs(adapter.run.call_args.args[2], session)
+        self.assertEqual(adapter.run.call_args.kwargs["expected_device_identity"], "e" * 64)
         ssh.prepare_session.assert_called_once()
         ssh.wait_for_bound_session.assert_not_called()
         ssh.open_shell.assert_not_called()
@@ -439,7 +451,13 @@ class NoTransportRunnerTests(unittest.TestCase):
             mock.patch.object(RUNNER, "__file__", str(self.runner)),
             mock.patch.object(RUNNER, "_identity_module", None),
             mock.patch.object(RUNNER, "host_preflight"),
-            mock.patch.object(RUNNER, "load_module", return_value=ssh),
+            mock.patch.object(
+                RUNNER,
+                "load_module",
+                side_effect=lambda _path, name: (
+                    loader_events if name == "fplinux_loader_events" else ssh
+                ),
+            ),
             mock.patch.object(
                 sys,
                 "argv",
@@ -477,7 +495,13 @@ class NoTransportRunnerTests(unittest.TestCase):
             mock.patch.object(RUNNER, "__file__", str(self.runner)),
             mock.patch.object(RUNNER, "_identity_module", None),
             mock.patch.object(RUNNER, "host_preflight"),
-            mock.patch.object(RUNNER, "load_module", return_value=ssh),
+            mock.patch.object(
+                RUNNER,
+                "load_module",
+                side_effect=lambda _path, name: (
+                    loader_events if name == "fplinux_loader_events" else ssh
+                ),
+            ),
             mock.patch.object(
                 sys,
                 "argv",

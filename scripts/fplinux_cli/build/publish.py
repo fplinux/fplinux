@@ -98,6 +98,9 @@ def runtime_manifest(  # noqa: PLR0913 -- each published artifact role stays exp
     hashes["runner/ssh_transport.py"] = sha256_file(
         inputs_build.require_file(release / "runner/ssh_transport.py")
     )
+    hashes["runner/loader_events.py"] = sha256_file(
+        inputs_build.require_file(release / "runner/loader_events.py")
+    )
     hashes[RUNTIME_IDENTITY_PATH] = sha256_file(
         inputs_build.require_file(release / RUNTIME_IDENTITY_PATH)
     )
@@ -199,6 +202,7 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
     for name, source in host_tools.items():
         copy_file(source, release / "host" / name, executable=True)
     copy_file(runner_source(), release / "runner/run.py", executable=True)
+    copy_file(common.ROOT / "common/loader_events.py", release / "runner/loader_events.py")
     copy_file(ssh_transport_source(), release / "runner/ssh_transport.py")
     copy_file(identity_source(), release / RUNTIME_IDENTITY_PATH)
     copy_file(

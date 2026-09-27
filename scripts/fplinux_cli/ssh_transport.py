@@ -26,6 +26,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, NoReturn
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from types import FrameType
     from typing import BinaryIO
 
@@ -993,14 +994,20 @@ def _wait_for_authenticated_endpoint(
     session: dict[str, Any],
     *,
     scan_host_key: bool,
+    on_linux_usb: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Wait for the exact USB path and an authenticated session-id response."""
     deadline = time.monotonic() + session["wait_seconds"]
     announced_key = False
+    announced_usb = False
     while time.monotonic() < deadline:
         devices = _usb_devices(session)
         if len(devices) > 1:
             fail("more than one USB device matches this RAM session")
+        if devices and not announced_usb:
+            if on_linux_usb is not None:
+                on_linux_usb()
+            announced_usb = True
         interface = _ncm_interface(devices[0], session["host_mac"]) if devices else None
         if interface is None or not _network_ready(interface, session):
             _retry_pause(deadline)
@@ -1047,9 +1054,11 @@ def _wait_for_authenticated_endpoint(
     fail("the current USB-NCM SSH session did not reconnect before the deadline")
 
 
-def wait_for_bound_session(session: dict[str, Any]) -> dict[str, Any]:
+def wait_for_bound_session(
+    session: dict[str, Any], *, on_linux_usb: Callable[[], None] | None = None
+) -> dict[str, Any]:
     """Wait for exact USB/NCM state, then bind the observed host key to this RAM run."""
-    return _wait_for_authenticated_endpoint(session, scan_host_key=True)
+    return _wait_for_authenticated_endpoint(session, scan_host_key=True, on_linux_usb=on_linux_usb)
 
 
 def _validate_session(

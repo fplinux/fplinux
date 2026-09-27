@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import importlib.util
 import io
 import json
 import posixpath
@@ -42,6 +43,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+        self.event_helper = (common.ROOT / "common/loader_events.py").read_bytes()
         self.cache = self.root / ".cache"
         self.target = "nokia-ta1618"
         self.snapshot = WorkspaceSnapshot((), "a" * 64)
@@ -59,6 +61,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
                 "assets/pinmap.bin",
                 "host/keyboard",
                 "runner/run.py",
+                "runner/loader_events.py",
                 "runner/identity.py",
                 "runner/ssh_transport.py",
                 "runner/platform_adapter.py",
@@ -71,6 +74,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
                 "assets/pinmap.bin",
                 "host/keyboard",
                 "runner/run.py",
+                "runner/loader_events.py",
                 "runner/identity.py",
                 "runner/ssh_transport.py",
                 "runner/platform_adapter.py",
@@ -141,6 +145,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             "assets/pinmap.bin": b"pinmap\n",
             "host/keyboard": b"keyboard\n",
             "runner/run.py": b"#!/usr/bin/env python3\n",
+            "runner/loader_events.py": self.event_helper,
             "runner/identity.py": b"identity helper\n",
             "runner/ssh_transport.py": b"ssh helper\n",
             "runner/platform_adapter.py": b"adapter\n",
@@ -278,6 +283,44 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
         for relative, digest in checksums.items():
             with self.subTest(checksum=relative):
                 self.assertEqual(digest, hashlib.sha256(payloads[relative]).hexdigest())
+
+    def test_archived_loader_events_work_without_the_source_checkout(self) -> None:
+        """The packaged helper writes a flushed record using only archive bytes."""
+        with contextlib.ExitStack() as stack:
+            for patch in self.package_patches():
+                stack.enter_context(patch)
+            self.package(candidate=True)
+        archive_path = next((self.cache / "out/candidates").glob("*.zip"))
+        with zipfile.ZipFile(archive_path) as archive:
+            helper_name = next(
+                name for name in archive.namelist() if name.endswith("/runner/loader_events.py")
+            )
+            helper_bytes = archive.read(helper_name)
+        extracted = self.root / "standalone"
+        extracted.mkdir()
+        helper = extracted / "loader_events.py"
+        helper.write_bytes(helper_bytes)
+        spec = importlib.util.spec_from_file_location("archived_loader_events", helper)
+        if spec is None or spec.loader is None:
+            self.fail("archived loader events cannot be imported")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        output = extracted / "events.jsonl"
+        with module.record_events(
+            output, target="nokia-ta1618", profile=None, build_type="release"
+        ) as events:
+            events.emit("waiting-for-device")
+            record = json.loads(output.read_text(encoding="utf-8"))
+        record.pop("time")
+        self.assertEqual(
+            record,
+            {
+                "event": "waiting-for-device",
+                "target": "nokia-ta1618",
+                "profile": None,
+                "build_type": "release",
+            },
+        )
 
     def test_profile_and_microsd_boot_candidates_use_one_generation(self) -> None:
         """Both selectors package the same image with distinct archive context names."""

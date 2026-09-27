@@ -150,6 +150,9 @@ class BuilderPublicationTests(unittest.TestCase):
         self.output.mkdir()
         self.work.mkdir()
         self.write("common/run.py", b"#!/usr/bin/env python3\n")
+        self.write(
+            "common/loader_events.py", (common.ROOT / "common/loader_events.py").read_bytes()
+        )
         self.write("scripts/fplinux_cli/identity.py", b"# identity contract\n")
         self.write("scripts/fplinux_cli/ssh_transport.py", b"# bundled SSH helper\n")
         self.write("platforms/demo/host/adapter.py", b"ADAPTER = 'demo'\n")
@@ -221,6 +224,7 @@ class BuilderPublicationTests(unittest.TestCase):
                 "assets/pin.bin",
                 "host/keyboard",
                 "runner/run.py",
+                "runner/loader_events.py",
                 "runner/identity.py",
                 "runner/ssh_transport.py",
                 "runner/platform_adapter.py",
@@ -431,6 +435,11 @@ class BuilderPublicationTests(unittest.TestCase):
         self.assertEqual(
             runtime["sha256"]["runner/ssh_transport.py"],
             hashlib.sha256(helper.read_bytes()).hexdigest(),
+        )
+        event_source = (self.root / "common/loader_events.py").read_bytes()
+        self.assertEqual((published / "runner/loader_events.py").read_bytes(), event_source)
+        self.assertEqual(
+            runtime["sha256"]["runner/loader_events.py"], hashlib.sha256(event_source).hexdigest()
         )
 
     def test_publication_requires_the_hashed_ssh_helper(self) -> None:
