@@ -6,13 +6,13 @@ pkgdesc="Base userspace policy for FPLinux phones"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="GPL-2.0-only"
-depends="openrc fplinux-terminal"
+depends="openrc ifupdown-ng fplinux-terminal"
 makedepends_build="clang22 lld22"
 makedepends_host="musl-dev"
 replaces="alpine-baselayout-data alpine-release"
 replaces_priority=100
 options="!check"
-source="fstab inittab hostname issue os-release fplinux-zram.initd
+source="fstab inittab interfaces hostname issue os-release fplinux-zram.initd
 	fplinux-kmsg.c fplinux-cli.c fplinux-cli.h"
 builddir="$srcdir"
 
@@ -26,6 +26,7 @@ package() {
 	install -Dm755 "$builddir/fplinux-kmsg" "$pkgdir/usr/libexec/fplinux/kmsg"
 	install -Dm644 "$srcdir/fstab" "$pkgdir/etc/fstab"
 	install -Dm644 "$srcdir/inittab" "$pkgdir/etc/inittab"
+	install -Dm644 "$srcdir/interfaces" "$pkgdir/etc/network/interfaces"
 	install -Dm644 "$srcdir/hostname" "$pkgdir/etc/hostname"
 	install -Dm644 "$srcdir/issue" "$pkgdir/etc/issue"
 	install -Dm644 "$srcdir/os-release" "$pkgdir/etc/os-release"
@@ -39,7 +40,7 @@ package() {
 	done
 	ln -s /etc/init.d/fplinux-zram \
 		"$pkgdir/etc/runlevels/sysinit/fplinux-zram"
-	for service in bootmisc hostname; do
+	for service in bootmisc hostname networking; do
 		ln -s "/etc/init.d/$service" "$pkgdir/etc/runlevels/boot/$service"
 	done
 
@@ -49,6 +50,7 @@ package() {
 sha512sums="
 5db7adf8b739973dcfc024c5df0230b57a71ee780aa931f8ebf95c5a3f27b6d394e1a9f5ba008be0f24bfd1b6a098a9344fb5eec280130df510f91d02e88b0c2  fstab
 d0814f22cabb82c9dce842e5d20e56a2b8d035129eed55042fb0a6564b093cee123059bc6d95c9a4a78c93ece13c95cdfcc9fa02429725e3d5ce9d8608dc4142  inittab
+d4f32b008bfadf39d86f04cd29e3d39a2124d3c3cd59481f61f573caee2be2ff5b074e9959a02543ed3db5879e537cb3afc6ffbb60ee4c06fed56cc953fc95a2  interfaces
 0d3253622d9bb758ab32dd1695f29afe97863b219b987652b74763818bcb576dccb5db1e08308f728893495c6abd002b79254fd2c38773ae38079f19e166ab70  hostname
 49021c0bcdfe0034ccafc330ca63886aa0a00a8e9100e2ecae21678178e4df98775932be6195067e944a79b8620a420484b9d70e1b41e095696a9358f3cbc4f9  issue
 c78d6b9b4995a018827d2a36fec591310cc90fe3e1e31d9ac9ca3c1dbac7d10445e46f19cce2c312ec6d19135d3009388d75ff405c16180ebb70ce29cc001b1b  os-release

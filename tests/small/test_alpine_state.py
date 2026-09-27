@@ -823,6 +823,8 @@ class AlpineStateTests(unittest.TestCase):
         root = Path(self.temporary.name) / "verified-rootfs"
         (root / "etc/init.d").mkdir(parents=True)
         (root / "etc/runlevels/default").mkdir(parents=True)
+        (root / "etc/runlevels/boot").mkdir(parents=True)
+        (root / "etc/network").mkdir(parents=True)
         (root / "usr/bin").mkdir(parents=True)
         (root / "etc/fstab").write_text(
             "tmpfs\t/tmp\ttmpfs\trw,nosuid,nodev,mode=1777\t0 0\n",
@@ -830,6 +832,11 @@ class AlpineStateTests(unittest.TestCase):
         )
         (root / "etc/inittab").write_text("::sysinit:/sbin/openrc sysinit\n", encoding="utf-8")
         (root / "etc/os-release").write_text("NAME=FPLinux\n", encoding="utf-8")
+        (root / "etc/network/interfaces").write_text(
+            "auto lo\niface lo inet loopback\n", encoding="utf-8"
+        )
+        (root / "etc/init.d/networking").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "etc/runlevels/boot/networking").symlink_to("/etc/init.d/networking")
         (root / "etc/init.d/fplinux-terminal").write_text("#!/bin/sh\n", encoding="utf-8")
         (root / "usr/bin/fplinux-terminal").write_text("terminal\n", encoding="utf-8")
         (root / "etc/runlevels/default/fplinux-terminal").symlink_to(
@@ -862,6 +869,17 @@ class AlpineStateTests(unittest.TestCase):
             self.assertRaisesRegex(SystemExit, "fplinux-input"),
         ):
             alpine_builder._verify_alpine_rootfs(root, with_input)  # noqa: SLF001
+
+    def test_rootfs_verifier_rejects_disabled_boot_networking(self) -> None:
+        """A root lacking network startup must be rejected before publication."""
+        root = self._verified_rootfs()
+        packages = ("fplinux-base", "fplinux-terminal")
+        self._write_world(root, packages)
+        with mock.patch.object(alpine_builder, "_require_apk_owner"):
+            alpine_builder._verify_alpine_rootfs(root, packages)  # noqa: SLF001
+            (root / "etc/runlevels/boot/networking").unlink()
+            with self.assertRaisesRegex(SystemExit, "boot runlevel is missing networking"):
+                alpine_builder._verify_alpine_rootfs(root, packages)  # noqa: SLF001
 
     @staticmethod
     def _fake_apk_owner(owners: dict[str, str]) -> Callable[[Path, str, str], None]:

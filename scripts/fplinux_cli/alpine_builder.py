@@ -788,6 +788,8 @@ def _verify_alpine_rootfs(
     owners = {
         "/etc/fstab": "fplinux-base",
         "/etc/inittab": "fplinux-base",
+        "/etc/network/interfaces": "fplinux-base",
+        "/etc/init.d/networking": "openrc",
         "/etc/os-release": "fplinux-base",
         "/etc/init.d/fplinux-terminal": "fplinux-terminal-openrc",
         "/usr/bin/fplinux-terminal": "fplinux-terminal",
@@ -838,6 +840,7 @@ def _verify_alpine_rootfs(
             if _alpine_package_installed(root, package):
                 fail(f"replaced Alpine package remains in the rootfs: {package}")
 
+    _require_openrc_service(root, "boot", "networking")
     _require_openrc_service(root, "default", "fplinux-terminal")
     if "fplinux-input" in packages:
         _require_openrc_service(root, "default", "fplinux-input")
