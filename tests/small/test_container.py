@@ -117,6 +117,22 @@ class ContainerImageRecipeTests(unittest.TestCase):
             images.container_runtime_recipe_digest(recipe, "b" * 64),
         )
 
+    def test_host_terminal_patch_invalidates_image_but_target_aport_does_not(self) -> None:
+        """Host tests must use the patched terminal engine matching the target build."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "checkout"
+            _copy_checkout(root)
+            with mock.patch.object(common, "ROOT", root):
+                before = images.container_image_recipe_digest(_container_lock())
+                aport = root / "alpine/aports/fplinux-terminal/APKBUILD"
+                aport.write_text(aport.read_text() + "\n# Target-only package change\n")
+                self.assertEqual(images.container_image_recipe_digest(_container_lock()), before)
+                patch = root / "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch"
+                patch.write_text(patch.read_text() + "\n")
+                self.assertNotEqual(
+                    images.container_image_recipe_digest(_container_lock()), before
+                )
+
 
 class SetupLifecycleTests(unittest.TestCase):
     """Keep direct setup inside the unified run metadata lifecycle."""
@@ -168,8 +184,16 @@ class SetupLifecycleTests(unittest.TestCase):
         lock = _container_lock()
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            for relative in (".kernignore", "Containerfile", "package.json", "package-lock.json"):
-                (root / relative).write_text(relative, encoding="utf-8")
+            for relative in (
+                ".kernignore",
+                "Containerfile",
+                "package.json",
+                "package-lock.json",
+                "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch",
+            ):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(relative, encoding="utf-8")
             with (
                 mock.patch.object(kern, "ROOT", root),
                 mock.patch.object(kern, "_install_kern", return_value="/cache/kern"),

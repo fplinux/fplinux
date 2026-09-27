@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config DRM_INOI244
+	bool "INOI 244 Modern 4G LCDC display"
+	depends on DRM && MACH_INOI_244_MODERN_4G
+	select DRM_UMS9117
+	help
+	  Drive the INOI 244 Modern 4G NV3030 panel through the UMS9117
+	  parallel LCM/DBI interface with atomic RGB565 and NV16 modesetting,
+	  bounded transfer completion and LCD backlight control.
+	  The in-kernel console uses DRM fbdev emulation.

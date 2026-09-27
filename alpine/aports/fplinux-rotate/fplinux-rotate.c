@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _GNU_SOURCE
 #include "fplinux-rotate.h"
-#include "fplinux-fb-session.h"
+#include "fplinux-drm-session.h"
 #include "fplinux-cli.h"
 
 #include <ctype.h>
@@ -1018,7 +1018,7 @@ static bool compare_active(const struct fplinux_rotate_image *left,
 static bool present_image(const struct fplinux_rotate_image *image,
 			  uint32_t display_ms, struct timing *timing)
 {
-	struct fplinux_fb_session session;
+	struct fplinux_drm_session session;
 	char error[160];
 	uint64_t full_started = monotonic_us();
 	uint64_t convert_started;
@@ -1026,22 +1026,18 @@ static bool present_image(const struct fplinux_rotate_image *image,
 	uint16_t *pixels;
 	bool ok;
 
-	if (!fplinux_fb_session_open(&session, "/dev/fb0", "/dev/tty0", error,
-				     sizeof(error))) {
+	if (!fplinux_drm_session_open(&session, "/dev/dri/card0", NULL,
+				      DRM_FORMAT_RGB565, error,
+				      sizeof(error))) {
 		fprintf(stderr, "fplinux-rotate: %s\n", error);
 		return false;
 	}
-	if (session.width != image->width || session.height != image->height ||
-	    !fplinux_fb_session_set_graphics(&session, error, sizeof(error))) {
-		if (session.width != image->width ||
-		    session.height != image->height)
-			fprintf(stderr,
-				"fplinux-rotate: preview is %ux%u, framebuffer is %ux%u\n",
-				image->width, image->height, session.width,
-				session.height);
-		else
-			fprintf(stderr, "fplinux-rotate: %s\n", error);
-		fplinux_fb_session_close(&session);
+	if (session.width != image->width || session.height != image->height) {
+		fprintf(stderr,
+			"fplinux-rotate: preview is %ux%u, framebuffer is %ux%u\n",
+			image->width, image->height, session.width,
+			session.height);
+		fplinux_drm_session_close(&session);
 		return false;
 	}
 	page = session.pages == 2U ? 1U - session.shown_page : 0U;
@@ -1052,15 +1048,21 @@ static bool present_image(const struct fplinux_rotate_image *image,
 	timing->convert_us += monotonic_us() - convert_started;
 	if (ok) {
 		__sync_synchronize();
-		ok = fplinux_fb_session_present(&session, page);
+		ok = fplinux_drm_session_present(&session, page);
 	}
 	if (ok && display_ms) {
 		uint64_t hold_started = monotonic_us();
 
-		usleep(display_ms * 1000U);
+		struct timespec deadline;
+		uint64_t deadline_us =
+			hold_started + (uint64_t)display_ms * 1000U;
+
+		deadline.tv_sec = deadline_us / 1000000U;
+		deadline.tv_nsec = (deadline_us % 1000000U) * 1000U;
+		ok = fplinux_drm_session_wait_until(&session, &deadline);
 		full_started += monotonic_us() - hold_started;
 	}
-	ok = fplinux_fb_session_close(&session) && ok;
+	ok = fplinux_drm_session_close(&session) && ok;
 	timing->framebuffer_us += monotonic_us() - full_started;
 	return ok;
 }

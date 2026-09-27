@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
+default xkb_types "complete" {
+    type "ONE_LEVEL" {
+        modifiers = None;
+        map[None] = Level1;
+    };
+    type "TWO_LEVEL" {
+        modifiers = Shift;
+        map[None] = Level1;
+        map[Shift] = Level2;
+    };
+};

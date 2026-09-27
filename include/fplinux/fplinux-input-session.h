@@ -6,12 +6,14 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #define FPLINUX_INPUT_SESSION_DEVICE_COUNT 32U
 #define FPLINUX_INPUT_SESSION_PATH_BYTES 32U
 #define FPLINUX_INPUT_SESSION_NAME_BYTES 128U
 
 struct libinput;
+struct libinput_device;
 struct udev;
 
 enum fplinux_input_source {
@@ -34,13 +36,19 @@ enum fplinux_input_event_type {
 /*
  * One translated event. Key and button codes are Linux input codes; a device
  * that disappears has all of its pressed keys released before its removal is
- * reported. The name is valid only until the next call on the session.
+ * reported. device_id identifies one device lifetime within the session and
+ * changes on reconnect or resume. The name is valid only until the next call
+ * on the session. Key events retain their CLOCK_MONOTONIC time in milliseconds;
+ * delivery may be delayed and timestamps across devices need not be ordered.
+ * Key repeat and text composition belong to the caller.
  */
 struct fplinux_input_event {
 	enum fplinux_input_event_type type;
 	enum fplinux_input_source source;
+	uint64_t device_id;
 	unsigned int code;
 	bool pressed;
+	uint64_t time_ms;
 	double dx;
 	double dy;
 	int wheel_clicks;
@@ -51,12 +59,16 @@ struct fplinux_input_session_device {
 	char path[FPLINUX_INPUT_SESSION_PATH_BYTES];
 	int fd;
 	enum fplinux_input_source source;
+	uint64_t id;
+	struct libinput_device *device;
 };
 
 struct fplinux_input_session {
 	struct udev *udev;
 	struct libinput *libinput;
 	unsigned int accepted_sources;
+	uint64_t next_device_id;
+	bool suspended;
 	int wheel_remainder;
 	char name[FPLINUX_INPUT_SESSION_NAME_BYTES];
 	struct fplinux_input_session_device
@@ -72,6 +84,15 @@ bool fplinux_input_session_open(struct fplinux_input_session *session,
 				size_t error_size);
 bool fplinux_input_session_next(struct fplinux_input_session *session,
 				struct fplinux_input_event *event);
+int fplinux_input_session_get_fd(const struct fplinux_input_session *session);
+/*
+ * Releases all grabs and queues releases/removals. Drain next() before handing
+ * input ownership to another application or VT. Resume scans and grabs current
+ * devices again; their added events start new device lifetimes.
+ */
+void fplinux_input_session_suspend(struct fplinux_input_session *session);
+bool fplinux_input_session_resume(struct fplinux_input_session *session,
+				  char *error, size_t error_size);
 void fplinux_input_session_close(struct fplinux_input_session *session);
 
 #endif

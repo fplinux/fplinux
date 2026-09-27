@@ -1,53 +1,42 @@
 # Console port contract
 
-FPLinux's local terminal is shared post-kernel userspace packaged through the
+FPLinux's local terminal is shared userspace packaged through the
 [Alpine layer](../../alpine/README.md). A phone port supplies standard Linux
-display and input interfaces; the terminal does not contain panel-register or
-scan-code knowledge.
+display and input interfaces; the terminal has no panel-register or scan-code
+knowledge. User controls belong to the [local console guide](../features/LOCAL_CONSOLE.md).
 
 ## Required interfaces
 
-The local terminal needs:
+The graphical terminal needs:
 
-- a usable text virtual terminal backed by `fbcon`;
-- `/dev/ptmx` and `devpts` for the interactive shell;
-- the phone keypad described below.
+- a DRM/KMS card with an atomic RGB565 scanout plane and dumb buffers;
+- Linux virtual terminals, including `VT_PROCESS` switching;
+- `/dev/ptmx` and `devpts` for the interactive Bash shell;
+- evdev input following the [input contract](../reference/INPUT.md).
 
-A target with the host-keyboard bridge also provides its designated
-generic-serial input path and a persistent uinput keyboard device.
+The OpenRC service starts only when `/dev/dri/card0` exists. It runs a separate
+terminal process and shell, using `TERM=xterm-256color`. Keyboard text uses
+libxkbcommon; terminal escape sequences and scrollback use libtsm.
 
-## Phone keypad interface
-
-The keypad driver publishes the phone keypad and its phone key codes as
-defined in the [input contract](../reference/INPUT.md). The terminal finds the
-keypad by its evdev `phys` string rather than its event number, and opens it
-again after it disappears. It uses the digits, `*`, `#`, the D-pad, the centre
-key, both soft keys and the dial key; it ignores the power key. The target
-keymap chooses which physical keys provide these codes.
-
-The Linux VT keyboard handler does not bind the phone keypad, so phone keys
-reach the shell only through the terminal. Keyboards type through the VT and
-its keymap and need no console support.
-
-The terminal uses `TERM=linux`. It keeps shell output and console input on the
-primary virtual terminal, so a port must not substitute an escape-sequence
-overlay for `fbcon`. The user-visible keypad behavior belongs to the
-[local console feature](../features/LOCAL_CONSOLE.md), not to each target port.
+The display session acquires its own virtual terminal and DRM master. On a VT
+switch it releases display and input ownership, then reacquires them on return.
+Graphical applications use the same session contract, so the terminal can resume
+after an application exits. Kernel `fbcon` remains available for diagnostics;
+it is not the graphical terminal renderer.
 
 ## Target responsibilities
 
-A console target provides, itself or through its platform:
+A target provides, itself or through its platform:
 
-- its framebuffer or DRM driver and the mode exposed through `fbcon`;
-- keypad scan, wiring and the keymap to the phone key codes;
-- DTS and built-in kernel configuration required for evdev, framebuffer console,
-  virtual terminals and the shell's PTY support;
-- when used, the host-keyboard bridge's uinput and generic-serial dependencies.
+- its DRM driver, panel geometry and board-specific display sequencing;
+- keypad scan, wiring and the standard Linux phone-key mapping;
+- built-in configuration and device nodes for DRM, virtual terminals, evdev and PTYs;
+- when supported, the host-keyboard bridge's uinput and generic-serial dependencies.
 
-The target's support document states which of these interfaces has been
-exercised on its physical hardware. See the [target template](TARGET.md) and
-the selected platform document for board-specific requirements.
+Applications identify the phone keypad by `phys=fplinux/keypad0`, not by its
+event number or by a key code shared with external keyboards. Input ownership
+must follow the active graphical session.
 
-See the [porting overview](README.md) for the complete layer boundary and the
-project [documentation index](../../README.md#documentation) for shared guides,
-features and applications.
+The target's support document states which interfaces have been exercised on
+physical hardware. See the [target template](TARGET.md) and the
+[porting overview](README.md) for the complete layer boundary.

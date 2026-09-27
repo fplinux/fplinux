@@ -5,10 +5,18 @@ host requirements, USB setup, checksum, loader-first and reconnect procedures.
 This target's BootROM key is * (asterisk); hold it when the loader asks for the
 powered-off phone.
 
+The 128x160 DRM/KMS terminal supports basic use with the phone keypad.
+Image presentation and rotation return to the same terminal and shell;
+RTC-woken s2idle preserves them in USB-powered RAM sessions. Native image
+color fidelity and full optional-application behavior remain unqualified.
+Terminal use with a microSD system root, operation without USB power and
+physical external keyboards have not been qualified on this phone.
+See docs/features/LOCAL_CONSOLE.md for terminal controls and the application
+pages under docs/apps/ for their commands and limitations.
+
 Current target support:
-  - 128x160 terminal interface;
   - USB SSH/SFTP and host-keyboard forwarding;
-  - ARMADA, TyrQuake, image rotation, JPEG codec/scaling and presentation;
+  - image rotation and JPEG codec/scaling;
   - microSD FAT32 and ext4 read/write, card-backed swap and a writable microSD
     system root;
   - Bluetooth pairing, bidirectional file transfer and PAN Internet in both
@@ -24,15 +32,14 @@ Current target support:
   - manual CPU frequency selection between 768 MHz and 1 GHz;
   - brightness and read-only power telemetry interfaces.
 
-The optional MicroPythonOS APK launches on this target. Support is partial:
-its UI is not fully adapted to the 128x160 screen. See docs/apps/MICROPYTHONOS.md
+The optional MicroPythonOS UI is not fully adapted to the 128x160 screen. See docs/apps/MICROPYTHONOS.md
 for installation and use.
 
 The microSD slot is under the battery, so card hot-swap does not apply.
 Internal phone storage writes, modem, Wi-Fi and Linux reboot are not supported.
 Battery-only power-off, battery measurements and charging have not been
-tested. Physical display and LCD brightness effects have not been tested on
-this configuration. This phone has no separate vibration motor;
+tested. Physical LCD brightness levels have not been tested.
+This phone has no separate vibration motor;
 FPLinux vibrates it through the speaker and mutes headphone audio
 meanwhile, as described in docs/features/VIBRATION.md.
 

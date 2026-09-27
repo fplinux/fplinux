@@ -1,7 +1,7 @@
 # MicroPythonOS
 
 MicroPythonOS is an optional graphical MicroPython environment for the local
-FPLinux framebuffer and physical keypad. See the
+FPLinux DRM/KMS display and physical keypad. See the
 [target documentation](../../targets/README.md) for its support and display
 limits on the selected phone.
 
@@ -94,9 +94,10 @@ forwarded through the [host keyboard bridge](../features/HOST_KEYBOARD.md), and
 Bluetooth keyboards paired with the phone following
 [Keyboards and mice](../features/BLUETOOTH.md#keyboards-and-mice). The
 target's documentation states whether it supports Bluetooth. A keyboard can
-connect before or while MicroPythonOS runs. While it runs, MicroPythonOS has
-exclusive use of the phone keypad and every keyboard, so their keys do not
-reach the local console.
+connect before or while MicroPythonOS runs. While its virtual terminal is
+active, MicroPythonOS has exclusive use of the phone keypad and every keyboard,
+so their keys do not reach the local console. Switching to another virtual
+terminal releases input; returning to MicroPythonOS reacquires it.
 
 Letters, digits, punctuation and space are typed literally into the focused
 text field; keyboard digits never start multi-tap there. A pending multi-tap

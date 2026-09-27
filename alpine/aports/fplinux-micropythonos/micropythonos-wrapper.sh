@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
 mpos_config_path=/etc/fplinux/micropythonos.conf
-mpos_framebuffer_path=/dev/fb0
 mpos_input_path=/dev/input
 mpos_mountinfo_path=/proc/self/mountinfo
 mpos_runtime_path=/usr/libexec/fplinux-micropythonos/micropythonos
@@ -84,10 +83,6 @@ micropythonos_main() {
 		;;
 	esac
 
-	[ -c "$mpos_framebuffer_path" ] || {
-		echo "micropythonos: $mpos_framebuffer_path is unavailable" >&2
-		exit 1
-	}
 	[ -d "$mpos_input_path" ] || {
 		echo "micropythonos: $mpos_input_path is unavailable" >&2
 		exit 1

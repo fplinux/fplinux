@@ -10,7 +10,7 @@ from pathlib import Path
 from tests.process import run_process
 
 ROOT = Path(__file__).resolve().parents[2]
-KERNEL = ROOT / "platforms/ums9117/linux/drivers/video/fbdev"
+KERNEL = ROOT / "platforms/ums9117/linux/drivers/gpu/drm/ums9117"
 FIXTURES = ROOT / "tests/host_tool"
 
 
@@ -35,7 +35,7 @@ class Ums9117LcmHostTests(unittest.TestCase):
                     f"-I{FIXTURES / 'bluetooth-compat'}",
                     f"-I{KERNEL}",
                     str(FIXTURES / "ums9117-lcm.c"),
-                    str(KERNEL / "ums9117-fb-lcm.c"),
+                    str(KERNEL / "ums9117-drm-lcm.c"),
                     "-Wl,--gc-sections",
                     "-o",
                     str(executable),

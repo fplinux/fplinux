@@ -1,0 +1,44 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-libdrm
+pkgver=2.4.134
+pkgrel=0
+pkgdesc="DRM modesetting library for FPLinux applications"
+url="https://dri.freedesktop.org"
+arch="armv7"
+license="MIT"
+makedepends_build="clang22 lld22 meson samurai"
+makedepends_host="musl-dev linux-headers"
+subpackages="$pkgname-dev"
+options="!check"
+source="https://dri.freedesktop.org/libdrm/libdrm-$pkgver.tar.xz"
+builddir="$srcdir/libdrm-$pkgver"
+
+build() {
+	: "${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
+	cat >fplinux-cross.meson <<-EOF
+		[binaries]
+		ar = '$CHOST-ar'
+		[properties]
+		pkg_config_libdir = ['$CBUILDROOT/usr/lib/pkgconfig', '$CBUILDROOT/usr/share/pkgconfig']
+	EOF
+	abuild-meson \
+		--cross-file fplinux-cross.meson \
+		-Ddefault_library=shared \
+		--auto-features=disabled \
+		-Dtests=false \
+		-Dinstall-test-programs=false \
+		-Dudev=false \
+		output
+	meson compile -C output
+}
+
+package() {
+	DESTDIR="$pkgdir" meson install --no-rebuild -C output
+	# Upstream keeps its license notices in the source headers.
+	mkdir -p "$pkgdir/usr/share/licenses/$pkgname"
+	sed -n '/Copyright/,/\*\//p' xf86drm.c xf86drmMode.c \
+		>"$pkgdir/usr/share/licenses/$pkgname/COPYING"
+}
+sha512sums="
+ef2abddea59d1e93c83a48de920431b839ab50d6071ef4da3cf126e7d64ba7b235f2e34e1169d49ad9de2937a0a18acd66bb8d324b067239b1136e0ddbe792a1  libdrm-2.4.134.tar.xz
+"

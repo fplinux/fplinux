@@ -14,12 +14,12 @@ struct multitap_engine {
 };
 
 struct emitted_character {
-	unsigned char character;
+	uint32_t character;
 	bool present;
 };
 
 static enum fplinux_multitap_emit_result emit_character(void *context,
-							unsigned char character)
+							uint32_t character)
 {
 	struct emitted_character *emitted = context;
 
@@ -54,20 +54,29 @@ static unsigned char key_from_obj(mp_obj_t key_in)
 	return (unsigned char)key[0];
 }
 
+static mp_obj_t unicode_to_obj(uint32_t character)
+{
+	vstr_t text;
+
+	vstr_init(&text, 4);
+	vstr_add_char(&text, character);
+	return mp_obj_new_str_from_vstr(&text);
+}
+
 static mp_obj_t emitted_to_obj(const struct emitted_character *emitted)
 {
 	if (!emitted->present)
 		return mp_const_none;
-	return mp_obj_new_str((const char *)&emitted->character, 1);
+	return unicode_to_obj(emitted->character);
 }
 
 static mp_obj_t candidate_to_obj(const struct multitap_engine *engine)
 {
-	unsigned char character = fplinux_multitap_candidate(&engine->state);
+	uint32_t character = fplinux_multitap_candidate(&engine->state);
 
 	if (character == '\0')
 		return mp_obj_new_str("", 0);
-	return mp_obj_new_str((const char *)&character, 1);
+	return unicode_to_obj(character);
 }
 
 static mp_obj_t multitap_engine_make_new(const mp_obj_type_t *type,

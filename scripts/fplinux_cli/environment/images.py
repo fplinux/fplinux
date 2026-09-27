@@ -138,6 +138,7 @@ def container_image_recipe_digest(lock: dict[str, Any] | None = None) -> str:
             common.ROOT / "Containerfile",
             common.ROOT / "package.json",
             common.ROOT / "package-lock.json",
+            common.ROOT / "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch",
         ],
         prefix=(
             b"fplinux.container-image-recipe\0"

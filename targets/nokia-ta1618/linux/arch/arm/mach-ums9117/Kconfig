@@ -3,7 +3,6 @@ if ARCH_UMS9117
 
 config MACH_NOKIA_TA1618
 	bool "Nokia 3210 4G (TA-1618)"
-	select FB_IOMEM_HELPERS if FB
 	select GPIOLIB
 	select GPIO_PMIC_EIC_SPRD
 	select MFD_SYSCON
@@ -14,14 +13,5 @@ config MACH_NOKIA_TA1618
 	  with a microSD system root. Internal NAND remains read-only. The
 	  low 2 MiB of DRAM belong to CM4; the top 2 MiB stay reserved for
 	  DTB staging and the display buffer.
-
-config FB_TA1618_DMA_MEMCPY
-	bool "AP DMA framebuffer copy on Nokia TA-1618"
-	depends on FB_TA1618 && SPRD_DMA
-	help
-	  Copy completed framebuffer pages into the LCDC transfer buffer with
-	  one AP DMAengine memory-copy channel. DMA completion is awaited
-	  before the LCDC scans the copied frame. Disable to use CPU copies and
-	  leave every AP DMA channel available to other clients.
 
 endif

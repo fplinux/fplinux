@@ -1,0 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+default xkb_symbols "us" {
+    key <AC01> { type = "TWO_LEVEL", [ a, A ] };
+    key <AE03> { type = "TWO_LEVEL", [ 3, numbersign ] };
+    key <AE08> { type = "TWO_LEVEL", [ 8, asterisk ] };
+};

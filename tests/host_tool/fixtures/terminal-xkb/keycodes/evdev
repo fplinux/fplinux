@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
+default xkb_keycodes "evdev" {
+    minimum = 8;
+    maximum = 255;
+    <AC01> = 38;
+    <AE03> = 12;
+    <AE08> = 17;
+    <LFSH> = 50;
+    <RTSH> = 62;
+    <LCTL> = 37;
+    <FK13> = 191;
+};

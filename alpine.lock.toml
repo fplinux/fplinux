@@ -30,6 +30,13 @@ packages = [
 [runtime.additions]
 fplinux-apk-tools = ["mbedtls3-3.6.7-r0.apk"]
 
+fplinux-terminal = [
+  "bash-5.3.9-r1.apk",
+  "libncursesw-6.6_p20260516-r0.apk",
+  "ncurses-terminfo-base-6.6_p20260516-r0.apk",
+  "readline-8.3.3-r1.apk",
+]
+
 fplinux-audio = ["alsa-lib-1.2.15.3-r0.apk"]
 
 fplinux-bluetooth = [
@@ -127,6 +134,12 @@ packages = [
   "zlib-dev-1.3.2-r0.apk",
   "zstd-libs-1.5.7-r2.apk",
 ]
+
+[[package]]
+repository = "main"
+file = "bash-5.3.9-r1.apk"
+sha256 = "da3e6956ac0ec1b92d32994f0cfe3f2ba8cee72dc0a4d2381c89d844b833002e"
+bytes = 445555
 
 [[package]]
 repository = "main"

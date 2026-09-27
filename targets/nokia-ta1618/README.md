@@ -12,13 +12,19 @@
 
 ## Status
 
-This exact phone runs a local `240×320` console with adjustable LCD backlight,
-its physical keypad and backlight, the private USB session, removable microSD
+This phone has a `240×320` display, adjustable LCD backlight and a physical
+keypad with backlight. Its supported interfaces include the private USB session, removable microSD
 storage, a USB-loaded microSD system root, charger status, partial telemetry,
 RTC time reading and setting, one-shot alarms, stereo headphone PCM, front
 speaker playback, microphone capture, FM radio and battery-only power-off. Its
 vibrator is available through the standard Linux
 force-feedback interface.
+
+The graphical terminal supports basic use with the phone keypad at native
+resolution. Image presentation and rotation return to the same terminal and
+shell. RTC-woken s2idle preserves them in USB-powered RAM sessions. Native
+image color fidelity and full optional-application behavior remain unqualified.
+Terminal operation without USB power has not been qualified.
 
 Status terms and limits shared by every phone are defined in the
 [target index](../README.md#status-and-common-limits).
@@ -29,7 +35,7 @@ Status terms and limits shared by every phone are defined in the
 | ------------------------------------------------------------------ | -------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | RAM boot                                                           | N/A      | Supported     | —                                                                                                                                                 |
 | Persistent boot                                                    | N/A      | Not supported | The RAM bootstrap must be loaded over USB for every Linux boot.                                                                                   |
-| [Local console](../../docs/features/LOCAL_CONSOLE.md)              | Present  | Supported     | `240×320`; AP DMA framebuffer copies.                                                                                                             |
+| [Local console](../../docs/features/LOCAL_CONSOLE.md)              | Present  | Supported     | `240×320`; graphical terminal with phone-keypad input.                                                                                            |
 | [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)          | Present  | Supported     | Eleven levels from off through the tested maximum.                                                                                                |
 | [Keypad backlight](../../docs/features/KEYPAD_BACKLIGHT.md)        | Present  | Supported     | Binary LED control plus a bounded key-press light.                                                                                                |
 | [USB networking](../../docs/features/USB_NETWORKING.md)            | Present  | Supported     | —                                                                                                                                                 |
@@ -38,10 +44,10 @@ Status terms and limits shared by every phone are defined in the
 | [Host keyboard bridge](../../docs/features/HOST_KEYBOARD.md)       | N/A      | Supported     | —                                                                                                                                                 |
 | [CPU clock reporting](../../docs/features/CPU_CLOCK.md)            | N/A      | Supported     | —                                                                                                                                                 |
 | [Manual CPU frequency selection](../../docs/features/CPU_CLOCK.md) | N/A      | Supported     | Switching between 768 MHz and 1 GHz works on this phone.                                                                                          |
-| [AP DMAengine](../../platforms/ums9117/README.md#memory-copy-dma)  | Present  | Partial       | Framebuffer copies and the fixed ROTA request share one controller; see platform limits.                                                          |
+| [AP DMAengine](../../platforms/ums9117/README.md#memory-copy-dma)  | Present  | Partial       | ROTA uses its fixed peripheral request; see platform limits.                                                                                      |
 | [Image rotation](../../docs/apps/ROTATE.md)                        | Present  | Supported     | Hardware rotation through V4L2 mem2mem, including RGB, grayscale and two-plane YUV.                                                               |
 | [JPEG codec and scaling](../../docs/apps/JPEG.md)                  | Present  | Supported     | Baseline JPEG decode, three fixed JPEG encode geometries, and two fixed half-size NV16 scaler pairs.                                              |
-| [Native image presentation](../../docs/apps/PRESENT.md)            | Present  | Supported     | Native `240×320` NV16 or CPU-converted RGB565 presentation through LCDC.                                                                          |
+| [Native image presentation](../../docs/apps/PRESENT.md)            | Present  | Partial       | Native `240×320` NV16 or CPU-converted RGB565 presentation through LCDC.                                                                          |
 | USB host mode                                                      | Unknown  | Not supported | —                                                                                                                                                 |
 | [Removable storage](../../docs/features/MICROSD.md)                | Present  | Supported     | microSD FAT32 read/write and unmounted hot-swap are exercised.                                                                                    |
 | [Removable system root](../../docs/guides/MICROSD_ROOT.md)         | Present  | Supported     | microSD FAT32 FIT plus writable ext4; the system card stays installed.                                                                            |
@@ -68,14 +74,14 @@ Status terms and limits shared by every phone are defined in the
 
 ## Applications
 
-| Application                                             | FPLinux   | This phone                                                                                     |
-| ------------------------------------------------------- | --------- | ---------------------------------------------------------------------------------------------- |
-| [FPLinux: ARMADA](../../docs/apps/SHOWCASE.md)          | Supported | Synchronizes the display, keypad light and vibrator.                                           |
-| [TyrQuake](../../docs/apps/TYRQUAKE.md)                 | Supported | Game data can use the supported microSD path.                                                  |
-| [MicroPythonOS](../../docs/apps/MICROPYTHONOS.md)       | Supported | State can use FAT32 microSD with the shared optional storage package.                          |
-| [Image rotation](../../docs/apps/ROTATE.md)             | Supported | Included in the normal root filesystem; explicit CPU/ROTA selection and framebuffer preview.   |
-| [JPEG codec and scaling](../../docs/apps/JPEG.md)       | Supported | Included in the normal root filesystem; hardware decode, fixed encode, and fixed half-scaling. |
-| [Native image presentation](../../docs/apps/PRESENT.md) | Supported | Included in the normal root filesystem; direct NV16 or CPU-converted RGB565 presentation.      |
+| Application                                             | FPLinux   | This phone                                                                                                                    |
+| ------------------------------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| [FPLinux: ARMADA](../../docs/apps/SHOWCASE.md)          | Partial   | Synchronizes the display, keypad light and vibrator.                                                                          |
+| [TyrQuake](../../docs/apps/TYRQUAKE.md)                 | Partial   | Game data can use the supported microSD path.                                                                                 |
+| [MicroPythonOS](../../docs/apps/MICROPYTHONOS.md)       | Partial   | State can use FAT32 microSD with the shared optional storage package.                                                         |
+| [Image rotation](../../docs/apps/ROTATE.md)             | Supported | Included in the normal root filesystem; explicit CPU/ROTA selection and DRM preview; visible preview fidelity is unqualified. |
+| [JPEG codec and scaling](../../docs/apps/JPEG.md)       | Supported | Included in the normal root filesystem; hardware decode, fixed encode, and fixed half-scaling.                                |
+| [Native image presentation](../../docs/apps/PRESENT.md) | Partial   | Included in the normal root filesystem; direct NV16 or CPU-converted RGB565 presentation.                                     |
 
 ## Hardware interfaces
 

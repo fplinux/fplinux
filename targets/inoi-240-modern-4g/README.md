@@ -11,23 +11,29 @@
 
 ## Status
 
-This exact phone runs the `128×160` console interface, the private USB session,
+This phone has a `128×160` display and supports the private USB session,
 headphone and speaker PCM playback, microphone capture, FM radio, keypad
-backlight, manual CPU frequency selection, ARMADA, TyrQuake and the shared
-graphics applications.
-MicroPythonOS launches, but its UI is not fully adapted to this phone's screen.
+backlight and manual CPU frequency selection.
+MicroPythonOS UI is not fully adapted to this phone's screen.
 microSD FAT32 and ext4 storage and a writable microSD system root work.
 Bluetooth pairing, bidirectional file transfer and PAN Internet work in both
 profiles. The red handset key and RTC alarms wake the phone from s2idle,
-including with mounted ext4 storage and card-backed swap; applications,
-Bluetooth and graphics work again after wake.
+including with mounted ext4 storage and card-backed swap; Bluetooth resumes
+after wake.
 In the RAM profile, mounted FAT32 data storage also works across sleep.
 
-Physical display, key and LCD brightness effects have not been tested on this
-configuration. This phone has no separate vibration motor; FPLinux vibrates it
-through the rear speaker, as stock firmware does, and mutes headphone audio
-meanwhile. Telemetry read without a battery does not demonstrate battery
-operation, measurement accuracy or charging.
+Physical LCD brightness levels have not been tested. This phone has no
+separate vibration motor; FPLinux vibrates it through the rear speaker, as
+stock firmware does, and mutes headphone audio meanwhile. Telemetry read
+without a battery does not demonstrate battery operation, measurement accuracy
+or charging.
+
+The graphical terminal supports basic use with the phone keypad at native
+resolution. Image presentation and rotation return to the same terminal and
+shell. RTC-woken s2idle preserves them in USB-powered RAM sessions. Native
+image color fidelity and full optional-application behavior remain unqualified.
+Terminal use with a microSD system root, operation without USB power and
+physical external keyboards have not been qualified on this phone.
 
 Status terms and limits shared by every phone are defined in the
 [target index](../README.md#status-and-common-limits).
@@ -38,7 +44,7 @@ Status terms and limits shared by every phone are defined in the
 | ------------------------------------------------------------------ | -------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | RAM boot                                                           | N/A      | Supported     | —                                                                                                                                             |
 | Persistent boot                                                    | N/A      | Not supported | A USB-loaded RAM bootstrap is required for every Linux boot.                                                                                  |
-| [Local console](../../docs/features/LOCAL_CONSOLE.md)              | Present  | Partial       | `128×160`; physical display and keys have not been tested.                                                                                    |
+| [Local console](../../docs/features/LOCAL_CONSOLE.md)              | Present  | Supported     | `128×160`; graphical terminal with phone-keypad input.                                                                                        |
 | [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)          | Present  | Partial       | Brightness interface enabled; visible brightness levels have not been tested.                                                                 |
 | [Keypad backlight](../../docs/features/KEYPAD_BACKLIGHT.md)        | Present  | Supported     | Binary LED control; on and off are visible.                                                                                                   |
 | [USB networking](../../docs/features/USB_NETWORKING.md)            | Present  | Supported     | —                                                                                                                                             |
@@ -50,7 +56,7 @@ Status terms and limits shared by every phone are defined in the
 | [AP DMAengine](../../platforms/ums9117/README.md#memory-copy-dma)  | Present  | Partial       | Memory copies and the fixed ROTA request; see platform limits.                                                                                |
 | [Image rotation](../../docs/apps/ROTATE.md)                        | Present  | Supported     | RGB, grayscale and two-plane YUV through V4L2 mem2mem.                                                                                        |
 | [JPEG codec and scaling](../../docs/apps/JPEG.md)                  | Present  | Supported     | Baseline decode, fixed encode geometries and fixed NV16 scaler pairs.                                                                         |
-| [Native image presentation](../../docs/apps/PRESENT.md)            | Present  | Partial       | Native `128×160` NV16 or RGB565; the visible result has not been checked.                                                                     |
+| [Native image presentation](../../docs/apps/PRESENT.md)            | Present  | Partial       | Native `128×160` NV16 or RGB565; visible image fidelity has not been checked.                                                                 |
 | USB host mode                                                      | Unknown  | Not supported | —                                                                                                                                             |
 | [Removable storage](../../docs/features/MICROSD.md)                | Present  | Supported     | FAT32 and ext4 read/write and card-backed swap work in the RAM profile; the slot is under the battery, so hot-swap does not apply.            |
 | [Removable system root](../../docs/guides/MICROSD_ROOT.md)         | Present  | Supported     | FAT32 boot files plus writable ext4 root; applications, files and Bluetooth pairing records persist across cold boots.                        |
@@ -77,14 +83,14 @@ Status terms and limits shared by every phone are defined in the
 
 ## Applications
 
-| Application                                             | FPLinux   | This phone                                                                      |
-| ------------------------------------------------------- | --------- | ------------------------------------------------------------------------------- |
-| [FPLinux: ARMADA](../../docs/apps/SHOWCASE.md)          | Partial   | Runs in both profiles; physical display and light effects have not been tested. |
-| [TyrQuake](../../docs/apps/TYRQUAKE.md)                 | Supported | Game data can use RAM or ext4 microSD storage, including the system root.       |
-| [MicroPythonOS](../../docs/apps/MICROPYTHONOS.md)       | Partial   | Launches on this phone; the UI is not fully adapted to its 128×160 screen.      |
-| [Image rotation](../../docs/apps/ROTATE.md)             | Supported | Explicit CPU/ROTA selection and framebuffer preview.                            |
-| [JPEG codec and scaling](../../docs/apps/JPEG.md)       | Supported | Hardware decode, fixed encode and fixed half-scaling.                           |
-| [Native image presentation](../../docs/apps/PRESENT.md) | Partial   | Direct NV16 or CPU-converted RGB565 presentation.                               |
+| Application                                             | FPLinux   | This phone                                                                            |
+| ------------------------------------------------------- | --------- | ------------------------------------------------------------------------------------- |
+| [FPLinux: ARMADA](../../docs/apps/SHOWCASE.md)          | Partial   | Runs in both profiles; physical display and light effects have not been tested.       |
+| [TyrQuake](../../docs/apps/TYRQUAKE.md)                 | Partial   | Game data can use RAM or ext4 microSD storage, including the system root.             |
+| [MicroPythonOS](../../docs/apps/MICROPYTHONOS.md)       | Partial   | Launches on this phone; the UI is not fully adapted to its 128×160 screen.            |
+| [Image rotation](../../docs/apps/ROTATE.md)             | Supported | Explicit CPU/ROTA selection and DRM preview; visible preview fidelity is unqualified. |
+| [JPEG codec and scaling](../../docs/apps/JPEG.md)       | Supported | Hardware decode, fixed encode and fixed half-scaling.                                 |
+| [Native image presentation](../../docs/apps/PRESENT.md) | Partial   | Direct NV16 or CPU-converted RGB565 presentation.                                     |
 
 ## Hardware interfaces
 

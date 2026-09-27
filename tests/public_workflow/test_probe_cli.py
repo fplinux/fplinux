@@ -96,8 +96,11 @@ class ProbeCliTests(unittest.TestCase):
             ".kernignore",
             "package.json",
             "package-lock.json",
+            "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch",
         ):
-            shutil.copy(ROOT / relative, self.root / relative)
+            destination = self.root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(ROOT / relative, destination)
         tools = self.root / ".cache/tools"
         tools.mkdir(parents=True)
         source = tools / "local.c"

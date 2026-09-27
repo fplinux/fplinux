@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import shlex
 import tempfile
 import unittest
 from pathlib import Path
@@ -34,13 +35,13 @@ class ImageToolCliTests(unittest.TestCase):
             "fplinux-rotate": [
                 APORTS / "fplinux-rotate/fplinux-rotate.c",
                 APORTS / "fplinux-rotate/fplinux-rotate-core.c",
-                ROOT / "lib/fplinux/fplinux-fb-session.c",
+                ROOT / "lib/fplinux/fplinux-drm-session.c",
             ],
             "fplinux-jpeg": [APORTS / "fplinux-jpeg/fplinux-jpeg.c"],
             "fplinux-jpeg-cpu": [APORTS / "fplinux-jpeg/fplinux-jpeg-cpu.c"],
             "fplinux-present": [
                 APORTS / "fplinux-present/fplinux-present.c",
-                ROOT / "lib/fplinux/fplinux-fb-session.c",
+                ROOT / "lib/fplinux/fplinux-drm-session.c",
             ],
             "fplinux-rotate-display": [
                 APORTS / "fplinux-rotate/fplinux-rotate.c",
@@ -48,6 +49,14 @@ class ImageToolCliTests(unittest.TestCase):
                 ROOT / "tests/host_tool/fixtures/rotation-display.c",
             ],
         }
+        drm_flags = shlex.split(
+            run_process(
+                ["pkg-config", "--cflags", "--libs", "libdrm"],
+                name="read DRM compiler and linker flags",
+                timeout=10,
+                check=True,
+            ).stdout
+        )
         for tool, tool_sources in sources.items():
             libraries = ["-ljpeg"] if tool == "fplinux-jpeg-cpu" else []
             run_process(
@@ -63,6 +72,7 @@ class ImageToolCliTests(unittest.TestCase):
                     *(str(source) for source in tool_sources),
                     str(ROOT / "lib/fplinux/fplinux-cli.c"),
                     *libraries,
+                    *drm_flags,
                     "-o",
                     str(cls.directory / tool),
                 ],
@@ -74,9 +84,7 @@ class ImageToolCliTests(unittest.TestCase):
     def run_tool(self, tool: str, *arguments: str) -> subprocess.CompletedProcess[str]:
         """Run a bounded command in a private directory with a fixed locale."""
         device_paths = (
-            ["--tty", "missing-tty", "--framebuffer", "missing-framebuffer"]
-            if tool == "fplinux-present"
-            else []
+            ["--tty", "missing-tty", "--drm", "missing-drm"] if tool == "fplinux-present" else []
         )
         return run_process(
             [str(self.directory / tool), *device_paths, *arguments],
@@ -370,8 +378,8 @@ class ImageToolCliTests(unittest.TestCase):
                 self.assertEqual(result.stdout, "")
                 self.assertEqual(result.stderr, error)
 
-    def test_present_last_mode_and_missing_tty_report_local_error(self) -> None:
-        """The last mode controls output eligibility; a missing local tty stops execution."""
+    def test_present_last_mode_and_missing_drm_report_local_error(self) -> None:
+        """The last mode controls output eligibility; a missing DRM device stops execution."""
         base = (
             "--input",
             "missing-input",
@@ -381,14 +389,14 @@ class ImageToolCliTests(unittest.TestCase):
             str(self.directory),
             "--tty",
             "missing-tty",
-            "--framebuffer",
-            "missing-framebuffer",
+            "--drm",
+            "missing-drm",
         )
         result = self.run_tool("fplinux-present", *base, "--mode", "nv16", "--mode", "cpu-rgb565")
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stdout, "")
         self.assertEqual(
-            result.stderr, "fplinux-present: cannot open console: No such file or directory\n"
+            result.stderr, "fplinux-present: cannot open DRM display: No such file or directory\n"
         )
         self.assert_usage(
             "fplinux-present", *base, "--mode", "cpu-rgb565", "--mode", "nv16", success=False

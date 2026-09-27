@@ -108,7 +108,7 @@ def classify_source_formats(files: Sequence[Path], *, root: Path) -> SourceForma
         if is_posix_shell_fragment(relative):
             posix_shell_fragments.append(relative)
             continue
-        if path.suffix not in {"", ".initd", ".sh"}:
+        if path.suffix not in {"", ".initd", ".sh", ".bashrc"}:
             continue
         with path.open("rb") as stream:
             raw_first_line = stream.readline()

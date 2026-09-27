@@ -8,49 +8,6 @@
 #include <unistd.h>
 
 #include "../../alpine/aports/fplinux-micropythonos/fplinux-micropythonos-launcher-internal.h"
-#include "../../include/fplinux/fplinux-fb-session.h"
-
-static int test_framebuffer_helpers(void)
-{
-	struct fb_fix_screeninfo fixed = {
-		.type = FB_TYPE_PACKED_PIXELS,
-		.visual = FB_VISUAL_TRUECOLOR,
-		.line_length = 256,
-		.smem_len = 256 * 160,
-	};
-	struct fb_var_screeninfo variable = {
-		.xres = 128,
-		.yres = 160,
-		.xres_virtual = 128,
-		.yres_virtual = 160,
-		.bits_per_pixel = 16,
-		.red = { .offset = 11, .length = 5 },
-		.green = { .offset = 5, .length = 6 },
-		.blue = { .offset = 0, .length = 5 },
-	};
-	size_t page_bytes;
-	unsigned int pages;
-
-	if (!fplinux_fb_session_layout_valid(&fixed, &variable, &page_bytes,
-					     &pages) ||
-	    page_bytes != 256U * 160U || pages != 1U)
-		return EXIT_FAILURE;
-
-	variable.yres_virtual = 320;
-	variable.yoffset = 160;
-	fixed.ypanstep = 1;
-	fixed.smem_len *= 2;
-	if (!fplinux_fb_session_layout_valid(&fixed, &variable, &page_bytes,
-					     &pages) ||
-	    page_bytes != 256U * 160U || pages != 2U)
-		return EXIT_FAILURE;
-
-	variable.yres_virtual = 480;
-	fixed.smem_len *= 3;
-	if (fplinux_fb_session_layout_valid(&fixed, &variable, NULL, NULL))
-		return EXIT_FAILURE;
-	return EXIT_SUCCESS;
-}
 
 static int test_command_helpers(void)
 {
@@ -99,8 +56,6 @@ int main(int argc, char **argv)
 {
 	if (argc != 2)
 		return EXIT_FAILURE;
-	if (strcmp(argv[1], "framebuffer") == 0)
-		return test_framebuffer_helpers();
 	if (strcmp(argv[1], "command") == 0)
 		return test_command_helpers();
 	if (strcmp(argv[1], "lock") == 0)

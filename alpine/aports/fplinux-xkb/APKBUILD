@@ -7,11 +7,14 @@ url="https://gitlab.freedesktop.org/xkeyboard-config/xkeyboard-config"
 arch="noarch"
 license="HPND AND HPND-sell-variant AND X11 AND X11-distribute-modifications-variant AND MIT AND MIT-open-group AND xkeyboard-config-Zinoviev"
 options="!check"
-source="https://www.x.org/releases/individual/data/xkeyboard-config/xkeyboard-config-$pkgver.tar.xz"
+source="
+	https://www.x.org/releases/individual/data/xkeyboard-config/xkeyboard-config-$pkgver.tar.xz
+	fplinux
+"
 builddir="$srcdir/xkeyboard-config-$pkgver"
 
 # Every file included by keycodes "evdev+aliases(qwerty)", types and compat
-# "complete", and symbols "pc+us+group(alt_shift_toggle)" when the data root is
+# "complete", and symbols "pc+us+fplinux(function_keys)+group(alt_shift_toggle)" when the data root is
 # the only include path, plus symbols/kpdl, which many locale layouts include,
 # so that locale packages never ship the same file.
 package() {
@@ -27,9 +30,11 @@ package() {
 		symbols/srvr_ctrl symbols/us; do
 		install -Dm644 "$builddir/$file" "$pkgdir/usr/share/fplinux/xkb/$file"
 	done
+	install -Dm644 "$srcdir/fplinux" "$pkgdir/usr/share/fplinux/xkb/symbols/fplinux"
 	install -Dm644 "$builddir/COPYING" \
 		"$pkgdir/usr/share/licenses/$pkgname/COPYING"
 }
 sha512sums="
 bd9b70ec5c8957e087f6c12272725044e6e124c15c7cbbfffb7f3c231944984d3302adda604da05464b7be6c91b5461e74fbec8544ac21b06e3bd8c748fd04e3  xkeyboard-config-2.47.tar.xz
+82facea83a5f6b6b6fccb9c42b5e7eff92c26689456f5d53d95171092c6874d2f32ea3f5fcda35d162f937e1e503afe468016efa86a9927d0f1430802d010294  fplinux
 "

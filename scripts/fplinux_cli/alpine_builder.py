@@ -436,7 +436,7 @@ def _ensure_apk_signing_key() -> tuple[Path, Path, str]:
 def alpine_sysroot_command(
     lock: dict[str, Any], packages: list[Path], sysroot: Path, keys: Path
 ) -> list[str]:
-    """Install the exact locked package closure without networking or ARM scripts."""
+    """Install exact APK files without networking or target scripts."""
     return [
         "apk",
         "--root",
@@ -518,6 +518,8 @@ def _build_fplinux_apks(  # noqa: PLR0913 -- package, signing and build inputs s
 ) -> tuple[dict[str, Path], Path, Path]:
     if os.geteuid() != 0:
         fail("Alpine package builds require container root; rebuild the current build image")
+    libraries = alpine_state.local_build_dependencies(build_packages)
+    build_packages = alpine_state.aport_build_order(build_packages)
     aports = work / "aports"
     home = work / "home"
     aports.mkdir()
@@ -589,34 +591,33 @@ def _build_fplinux_apks(  # noqa: PLR0913 -- package, signing and build inputs s
         cached = _cached_aport_packages(name, image_recipe, signing_key_identity)
         if cached is not None and {path.name for path in cached.values()} == listed:
             _log_message(f"Alpine package cache hit: {name} {recipe[:16]}")
-            overlap = set(package_outputs) & set(cached)
-            if overlap:
-                fail(f"abuild package identities are duplicated: {', '.join(sorted(overlap))}")
-            package_outputs.update(cached)
-            continue
-
-        build_repository = work / "packages" / name
-        build_repository.mkdir(parents=True)
-        _chown_tree(build_repository, "builder")
-        build_environment = {**environment, "REPODEST": str(build_repository)}
-        _run_as_builder(["abuild", "-d", "-r"], cwd=directory, environment=build_environment)
-        built = _cached_package_files(build_repository, listed)
-        if built is None:
-            fail(f"abuild repository output differs from listpkg for {name}")
-        if repository.exists():
-            shutil.rmtree(repository)
-        shutil.copytree(build_repository, repository)
-        cached_files = _cached_package_files(repository, listed)
-        if cached_files is None:
-            fail(f"cached abuild output differs from listpkg for {name}")
-        _write_package_receipt(repository, recipe, cached_files)
-        outputs = _cached_aport_packages(name, image_recipe, signing_key_identity)
-        if outputs is None or {path.name for path in outputs.values()} != listed:
-            fail(f"cached abuild receipt differs from listpkg for {name}")
+            outputs = cached
+        else:
+            build_repository = work / "packages" / name
+            build_repository.mkdir(parents=True)
+            _chown_tree(build_repository, "builder")
+            build_environment = {**environment, "REPODEST": str(build_repository)}
+            _run_as_builder(["abuild", "-d", "-r"], cwd=directory, environment=build_environment)
+            built = _cached_package_files(build_repository, listed)
+            if built is None:
+                fail(f"abuild repository output differs from listpkg for {name}")
+            if repository.exists():
+                shutil.rmtree(repository)
+            shutil.copytree(build_repository, repository)
+            cached_files = _cached_package_files(repository, listed)
+            if cached_files is None:
+                fail(f"cached abuild output differs from listpkg for {name}")
+            _write_package_receipt(repository, recipe, cached_files)
+            built_outputs = _cached_aport_packages(name, image_recipe, signing_key_identity)
+            if built_outputs is None or {path.name for path in built_outputs.values()} != listed:
+                fail(f"cached abuild receipt differs from listpkg for {name}")
+            outputs = built_outputs
         overlap = set(package_outputs) & set(outputs)
         if overlap:
             fail(f"abuild package identities are duplicated: {', '.join(sorted(overlap))}")
         package_outputs.update(outputs)
+        if name in libraries:
+            _prepare_alpine_sysroot(lock, sorted(outputs.values()), sysroot, key_directory)
 
     return package_outputs, local_private_key, local_public_key
 
@@ -788,8 +789,8 @@ def _verify_alpine_rootfs(
         "/etc/fstab": "fplinux-base",
         "/etc/inittab": "fplinux-base",
         "/etc/os-release": "fplinux-base",
-        "/etc/init.d/fplinux-console": "fplinux-console-openrc",
-        "/usr/bin/fplinux-console": "fplinux-console",
+        "/etc/init.d/fplinux-terminal": "fplinux-terminal-openrc",
+        "/usr/bin/fplinux-terminal": "fplinux-terminal",
     }
     if "fplinux-input" in packages:
         owners.update(
@@ -837,7 +838,7 @@ def _verify_alpine_rootfs(
             if _alpine_package_installed(root, package):
                 fail(f"replaced Alpine package remains in the rootfs: {package}")
 
-    _require_openrc_service(root, "default", "fplinux-console")
+    _require_openrc_service(root, "default", "fplinux-terminal")
     if "fplinux-input" in packages:
         _require_openrc_service(root, "default", "fplinux-input")
     if "fplinux-usb-gadget" in packages:
@@ -971,7 +972,7 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
             "packages cannot be both rootfs-selected and bundle-published: "
             + ", ".join(sorted(overlap))
         )
-    build_packages = tuple(sorted((*packages, *bundle_packages)))
+    build_packages = alpine_state.aport_build_order((*packages, *bundle_packages))
     rootfs_directory = _ensure_rootfs_directory(CACHE)
     output = alpine_state.rootfs_output(CACHE, recipe)
     ext4_root: Any | None = None

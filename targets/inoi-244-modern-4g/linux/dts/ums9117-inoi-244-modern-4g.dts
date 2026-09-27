@@ -29,10 +29,9 @@
 	};
 
 	soc {
-		display@83f00000 {
+		display@20800000 {
 			compatible = "fplinux,ums9117-nv3030-lcm-fb";
-			reg = <0x83f00000 0x00100000>,
-			      <0x20800000 0x00001000>,
+			reg = <0x20800000 0x00001000>,
 			      <0x20a00000 0x00001000>,
 			      <0x60000000 0x00000002>,
 			      <0x60020000 0x00000002>,
@@ -43,14 +42,13 @@
 			      <0x402a04b0 0x0000001c>,
 			      <0x402a01f8 0x00000028>,
 			      <0x402a05f8 0x00000028>;
-			reg-names = "framebuffer", "lcdc", "lcm", "lcm-command", "lcm-data",
+			reg-names = "lcdc", "lcm", "lcm-command", "lcm-data",
 				    "ap-ahb-gate-set", "ap-ahb-reset-set",
 				    "ap-ahb-reset-clear", "pinmux", "pinconf",
 				    "pinmux-data", "pinconf-data";
 			sprd,aon-apb = <&aon_apb>;
 			sprd,pmic = <&sc2720_pmic>;
-			dmas = <&ap_dma 0>;
-			dma-names = "copy";
+			memory-region = <&codec_dma>;
 			/* INOI 244 MCU timing at the 128 MHz AHB clock. */
 			sprd,dbi-timing-ns = <5 150 150 30 80 120>;
 			/* LCM control pins. */

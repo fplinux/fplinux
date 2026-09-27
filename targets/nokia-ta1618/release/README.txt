@@ -10,8 +10,16 @@ Prepare the system card first as described in docs/guides/MICROSD_ROOT.md.
 An archive without that image uses the volatile RAM root. Both use the same
 USB loader-first sequence and require a fresh USB load after power-off.
 
+The 240x320 DRM/KMS terminal supports basic use with the phone keypad.
+Image presentation and rotation return to the same terminal and shell;
+RTC-woken s2idle preserves them in USB-powered RAM sessions. Native image
+color fidelity and full optional-application behavior remain unqualified.
+Terminal operation without USB power has not been qualified.
+See docs/features/LOCAL_CONSOLE.md for terminal controls and the application
+pages under docs/apps/ for their commands and limitations.
+
 Current target support:
-  - local 240x320 terminal with 11 LCD backlight levels;
+  - 11 LCD backlight levels;
   - physical keypad and keypad backlight;
   - bounded vibration through the Linux force-feedback interface;
   - USB SSH/SFTP and host-keyboard forwarding;
@@ -32,12 +40,9 @@ Current target support:
   - battery voltage, current and relative charge counter reporting with the
     documented accuracy limits;
   - optional per-command charge measurement through the bundled APK;
-  - optional FPLinux: ARMADA display, keypad-light and vibration showcase;
-  - optional TyrQuake and MicroPythonOS;
   - hardware image rotation of RGB, grayscale and two-plane YUV images;
   - hardware baseline JPEG decoding, fixed quality-85 JPEG encoding at
     1200x32, 320x240 and 640x480, and fixed half-size NV16 scaling;
-  - native 240x320 NV16 or CPU-converted RGB565 image presentation;
   - calibrated SoC temperature reporting without a thermal-control policy;
   - raw auxiliary ADC readings without unit conversion;
   - real-time clock reading, setting and one-shot alarms;

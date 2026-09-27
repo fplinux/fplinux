@@ -1,0 +1,210 @@
+--- a/src/tsm/tsm-vte.c
++++ b/src/tsm/tsm-vte.c
+@@ -2820,6 +2820,8 @@
+ 	int modifier = csi_modifier_from_mask(mods);
+ 	if (modifier) {
++		/* Alt is already encoded in the CSI modifier parameter. */
++		vte->flags &= ~TSM_VTE_FLAG_PREPEND_ESCAPE;
+ 		code_with_modifier[4] = modifier;
+ 		code_with_modifier[5] = direction;
+ 		vte_write(vte, code_with_modifier, 6);
+ 	} else {
+@@ -2834,6 +2834,42 @@
+ 	}
+ }
+
++static bool vte_write_function(struct tsm_vte *vte, uint32_t keysym,
++			       unsigned int mods)
++{
++	static const unsigned int numbers[] = { 15, 17, 18, 19, 20, 21, 23, 24 };
++	char sequence[16];
++	char modifier;
++	int length;
++
++	if (keysym >= XKB_KEY_KP_F1 && keysym <= XKB_KEY_KP_F4)
++		keysym -= XKB_KEY_KP_F1 - XKB_KEY_F1;
++	if (keysym >= XKB_KEY_F13 && keysym <= XKB_KEY_F24) {
++		keysym -= XKB_KEY_F13 - XKB_KEY_F1;
++		mods |= TSM_SHIFT_MASK;
++	}
++	if (keysym < XKB_KEY_F1 || keysym > XKB_KEY_F12)
++		return false;
++	modifier = csi_modifier_from_mask(mods);
++	if (keysym <= XKB_KEY_F4) {
++		char final = 'P' + keysym - XKB_KEY_F1;
++
++		if (modifier)
++			length = snprintf(sequence, sizeof(sequence), "\e[1;%c%c", modifier, final);
++		else
++			length = snprintf(sequence, sizeof(sequence), "\eO%c", final);
++	} else {
++		unsigned int number = numbers[keysym - XKB_KEY_F5];
++
++		if (modifier)
++			length = snprintf(sequence, sizeof(sequence), "\e[%u;%c~", number, modifier);
++		else
++			length = snprintf(sequence, sizeof(sequence), "\e[%u~", number);
++	}
++	vte_write(vte, sequence, length);
++	return true;
++}
++
+ SHL_EXPORT
+ bool tsm_vte_handle_keyboard(struct tsm_vte *vte, uint32_t keysym,
+ 			     uint32_t ascii, unsigned int mods,
+@@ -2846,6 +2882,9 @@
+ 	if (!vte) {
+ 		return false;
+ 	}
++
++	if (vte_write_function(vte, keysym, mods))
++		return true;
+
+ 	/* MOD1 (mostly labeled 'Alt') prepends an escape character to every
+ 	 * input that is sent by a key.
+@@ -3238,144 +3277,7 @@
+ 		case XKB_KEY_KP_Space:
+ 			vte_write(vte, " ", 1);
+ 			return true;
+-		/* TODO: check what to transmit for functions keys when
+-		 * shift/ctrl etc. are pressed. Every terminal behaves
+-		 * differently here which is really weird.
+-		 * We now map F4 to F14 if shift is pressed and so on for all
+-		 * keys. However, such mappings should rather be done via
+-		 * xkb-configurations and we should instead add a flags argument
+-		 * to the CSIs as some of the keys here already do. */
+-		case XKB_KEY_F1:
+-		case XKB_KEY_KP_F1:
+-			if (mods & TSM_SHIFT_MASK)
+-				vte_write(vte, "\e[23~", 5);
+-			else
+-				vte_write(vte, "\eOP", 3);
+-			return true;
+-		case XKB_KEY_F2:
+-		case XKB_KEY_KP_F2:
+-			if (mods & TSM_SHIFT_MASK)
+-				vte_write(vte, "\e[24~", 5);
+-			else
+-				vte_write(vte, "\eOQ", 3);
+-			return true;
+-		case XKB_KEY_F3:
+-		case XKB_KEY_KP_F3:
+-			if (mods & TSM_SHIFT_MASK)
+-				vte_write(vte, "\e[25~", 5);
+-			else
+-				vte_write(vte, "\eOR", 3);
+-			return true;
+-		case XKB_KEY_F4:
+-		case XKB_KEY_KP_F4:
+-			if (mods & TSM_SHIFT_MASK)
+-				//vte_write(vte, "\e[1;2S", 6);
+-				vte_write(vte, "\e[26~", 5);
+-			else
+-				vte_write(vte, "\eOS", 3);
+-			return true;
+-		case XKB_KEY_F5:
+-			if (mods & TSM_SHIFT_MASK)
+-				//vte_write(vte, "\e[15;2~", 7);
+-				vte_write(vte, "\e[28~", 5);
+-			else
+-				vte_write(vte, "\e[15~", 5);
+-			return true;
+-		case XKB_KEY_F6:
+-			if (mods & TSM_SHIFT_MASK)
+-				//vte_write(vte, "\e[17;2~", 7);
+-				vte_write(vte, "\e[29~", 5);
+-			else
+-				vte_write(vte, "\e[17~", 5);
+-			return true;
+-		case XKB_KEY_F7:
+-			if (mods & TSM_SHIFT_MASK)
+-				//vte_write(vte, "\e[18;2~", 7);
+-				vte_write(vte, "\e[31~", 5);
+-			else
+-				vte_write(vte, "\e[18~", 5);
+-			return true;
+-		case XKB_KEY_F8:
+-			if (mods & TSM_SHIFT_MASK)
+-				//vte_write(vte, "\e[19;2~", 7);
+-				vte_write(vte, "\e[32~", 5);
+-			else
+-				vte_write(vte, "\e[19~", 5);
+-			return true;
+-		case XKB_KEY_F9:
+-			if (mods & TSM_SHIFT_MASK)
+-				//vte_write(vte, "\e[20;2~", 7);
+-				vte_write(vte, "\e[33~", 5);
+-			else
+-				vte_write(vte, "\e[20~", 5);
+-			return true;
+-		case XKB_KEY_F10:
+-			if (mods & TSM_SHIFT_MASK)
+-				//vte_write(vte, "\e[21;2~", 7);
+-				vte_write(vte, "\e[34~", 5);
+-			else
+-				vte_write(vte, "\e[21~", 5);
+-			return true;
+-		case XKB_KEY_F11:
+-			if (mods & TSM_SHIFT_MASK)
+-				vte_write(vte, "\e[23;2~", 7);
+-			else
+-				vte_write(vte, "\e[23~", 5);
+-			return true;
+-		case XKB_KEY_F12:
+-			if (mods & TSM_SHIFT_MASK)
+-				vte_write(vte, "\e[24;2~", 7);
+-			else
+-				vte_write(vte, "\e[24~", 5);
+-			return true;
+-		case XKB_KEY_F13:
+-			if (mods & TSM_SHIFT_MASK)
+-				vte_write(vte, "\e[25;2~", 7);
+-			else
+-				vte_write(vte, "\e[25~", 5);
+-			return true;
+-		case XKB_KEY_F14:
+-			if (mods & TSM_SHIFT_MASK)
+-				vte_write(vte, "\e[26;2~", 7);
+-			else
+-				vte_write(vte, "\e[26~", 5);
+-			return true;
+-		case XKB_KEY_F15:
+-			if (mods & TSM_SHIFT_MASK)
+-				vte_write(vte, "\e[28;2~", 7);
+-			else
+-				vte_write(vte, "\e[28~", 5);
+-			return true;
+-		case XKB_KEY_F16:
+-			if (mods & TSM_SHIFT_MASK)
+-				vte_write(vte, "\e[29;2~", 7);
+-			else
+-				vte_write(vte, "\e[29~", 5);
+-			return true;
+-		case XKB_KEY_F17:
+-			if (mods & TSM_SHIFT_MASK)
+-				vte_write(vte, "\e[31;2~", 7);
+-			else
+-				vte_write(vte, "\e[31~", 5);
+-			return true;
+-		case XKB_KEY_F18:
+-			if (mods & TSM_SHIFT_MASK)
+-				vte_write(vte, "\e[32;2~", 7);
+-			else
+-				vte_write(vte, "\e[32~", 5);
+-			return true;
+-		case XKB_KEY_F19:
+-			if (mods & TSM_SHIFT_MASK)
+-				vte_write(vte, "\e[33;2~", 7);
+-			else
+-				vte_write(vte, "\e[33~", 5);
+-			return true;
+-		case XKB_KEY_F20:
+-			if (mods & TSM_SHIFT_MASK)
+-				vte_write(vte, "\e[34;2~", 7);
+-			else
+-				vte_write(vte, "\e[34~", 5);
+-			return true;
++
+ 	}
+
+ 	if (unicode != TSM_VTE_INVALID) {

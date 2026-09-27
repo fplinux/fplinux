@@ -10,24 +10,44 @@ import fplinux_multitap_native
 _active_input = [None]
 
 
+def _device_focus_state():
+    import fplinux_keypad  # noqa: PLC0415 -- Only the device focus provider needs this module.
+
+    return fplinux_keypad.focus_state()
+
+
 class MultiTapEngine:
     """Compose text from a physical numeric keypad."""
 
-    def __init__(self, elapsed=None):
+    def __init__(self, elapsed=None, focus_state=None):
         self._engine = fplinux_multitap_native.Engine()
         self._elapsed = elapsed or time.ticks_diff
         self.text = ""
         self.uppercase = False
         self._last_press_ms = None
+        self._focus_state = focus_state or _device_focus_state
+        self._focus_generation, self._focused = self._focus_state()
+
+    def _sync_focus(self):
+        generation, self._focused = self._focus_state()
+        if generation == self._focus_generation:
+            return False
+        changed = bool(self._engine.candidate())
+        self._engine.cancel()
+        self._last_press_ms = None
+        self._focus_generation = generation
+        return changed
 
     @property
     def candidate(self):
         """Return the visible, not-yet-committed character."""
+        self._sync_focus()
         return self._apply_case(self._engine.candidate())
 
     @property
     def pending_key(self):
         """Return the numeric key that owns the pending character."""
+        self._sync_focus()
         return self._engine.pending_key()
 
     @property
@@ -66,7 +86,8 @@ class MultiTapEngine:
 
     def press(self, key, now_ms):
         """Start or cycle a numeric key at ``now_ms``."""
-        if not fplinux_multitap_native.handles(key):
+        self._sync_focus()
+        if not self._focused or not fplinux_multitap_native.handles(key):
             return False
         self._commit_character(self._engine.press(key, self._elapsed_ms(now_ms)))
         self._sync_last_press(now_ms)
@@ -74,6 +95,9 @@ class MultiTapEngine:
 
     def handle(self, key, now_ms):
         """Apply the canonical digit, erase, and case key policy."""
+        self._sync_focus()
+        if not self._focused:
+            return False
         if fplinux_multitap_native.handles(key):
             return self.press(key, now_ms)
         if key == "*":
@@ -85,8 +109,9 @@ class MultiTapEngine:
 
     def expire(self, now_ms):
         """Commit a candidate that has waited at least ``timeout_ms``."""
-        if self._last_press_ms is None:
-            return False
+        changed = self._sync_focus()
+        if not self._focused or self._last_press_ms is None:
+            return changed
         character = self._commit_character(self._engine.expire(self._elapsed_ms(now_ms)))
         if character:
             self._last_press_ms = None
@@ -94,13 +119,18 @@ class MultiTapEngine:
 
     def commit(self):
         """Commit the candidate immediately and return it."""
+        self._sync_focus()
+        if not self._focused:
+            return ""
         character = self._commit_character(self._engine.commit())
         self._sync_last_press(None)
         return character
 
     def erase(self, now_ms):
         """Cancel a candidate, or erase the last committed character."""
-        self.expire(now_ms)
+        changed = self.expire(now_ms)
+        if not self._focused:
+            return changed
         if self._engine.candidate():
             self._engine.cancel()
             self._last_press_ms = None
@@ -113,11 +143,16 @@ class MultiTapEngine:
     def toggle_case(self, now_ms):
         """Commit the current candidate and toggle lower/upper case."""
         self.expire(now_ms)
+        if not self._focused:
+            return
         self.commit()
         self.uppercase = not self.uppercase
 
     def insert(self, text):
         """Commit the current candidate, then append keyboard ``text`` unchanged."""
+        self._sync_focus()
+        if not self._focused:
+            return
         self.commit()
         self.text += text
 

@@ -292,28 +292,28 @@ source = "platforms/ums9117/linux/drivers/leds/sc2720-kpled.Makefile"
 destination = "drivers/leds/Makefile"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/drivers/video/fbdev/ums9117-fb.h"
-destination = "drivers/video/fbdev/ums9117-fb.h"
+source = "platforms/ums9117/linux/drivers/gpu/drm/ums9117/Makefile"
+destination = "drivers/gpu/drm/ums9117/Makefile"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/include/uapi/fplinux/ums9117-present.h"
-destination = "drivers/video/fbdev/ums9117-present.h"
+source = "platforms/ums9117/linux/drivers/gpu/drm/ums9117/ums9117-drm.h"
+destination = "drivers/gpu/drm/ums9117/ums9117-drm.h"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/drivers/video/fbdev/ums9117-fb-internal.h"
-destination = "drivers/video/fbdev/ums9117-fb-internal.h"
+source = "platforms/ums9117/linux/drivers/gpu/drm/ums9117/ums9117-drm-internal.h"
+destination = "drivers/gpu/drm/ums9117/ums9117-drm-internal.h"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/drivers/video/fbdev/ums9117-fb-core.c"
-destination = "drivers/video/fbdev/ums9117-fb-core.c"
+source = "platforms/ums9117/linux/drivers/gpu/drm/ums9117/ums9117-drm-core.c"
+destination = "drivers/gpu/drm/ums9117/ums9117-drm-core.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/drivers/video/fbdev/ums9117-fb-spi.c"
-destination = "drivers/video/fbdev/ums9117-fb-spi.c"
+source = "platforms/ums9117/linux/drivers/gpu/drm/ums9117/ums9117-drm-spi.c"
+destination = "drivers/gpu/drm/ums9117/ums9117-drm-spi.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/drivers/video/fbdev/ums9117-fb-lcm.c"
-destination = "drivers/video/fbdev/ums9117-fb-lcm.c"
+source = "platforms/ums9117/linux/drivers/gpu/drm/ums9117/ums9117-drm-lcm.c"
+destination = "drivers/gpu/drm/ums9117/ums9117-drm-lcm.c"
 
 [[linux.copies]]
 source = "platforms/ums9117/linux/drivers/clk/sprd/clk-ums9117-inherited.c"
@@ -412,12 +412,12 @@ source = "platforms/ums9117/linux/drivers/media/platform/media.Makefile"
 destination = "drivers/media/platform/Makefile"
 
 [[linux.appends]]
-source = "platforms/ums9117/linux/drivers/video/fbdev/fbdev.Kconfig"
-destination = "drivers/video/fbdev/Kconfig"
+source = "platforms/ums9117/linux/drivers/gpu/drm/ums9117/drm.Kconfig"
+destination = "drivers/gpu/drm/Kconfig"
 
 [[linux.appends]]
-source = "platforms/ums9117/linux/drivers/video/fbdev/fbdev.Makefile"
-destination = "drivers/video/fbdev/Makefile"
+source = "platforms/ums9117/linux/drivers/gpu/drm/ums9117/drm-parent.Makefile"
+destination = "drivers/gpu/drm/Makefile"
 
 [[linux.appends]]
 source = "platforms/ums9117/linux/drivers/power/supply/sc2720-power-supply.Kconfig"

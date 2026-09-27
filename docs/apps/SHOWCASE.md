@@ -4,7 +4,7 @@ FPLinux: ARMADA is an optional UMS9117 showcase. Its native software renderer
 presents a 3D scene with LCD brightness, keypad light and vibration following
 the same timeline where the selected phone supports those physical effects.
 
-The application requires a compatible framebuffer, keypad, LCD backlight,
+The application requires a compatible DRM/KMS display, keypad, LCD backlight,
 keypad light and vibrator. See the [target documentation](../../targets/README.md)
 for hardware support and physical-effect limitations on the selected phone.
 
@@ -69,14 +69,14 @@ reported by Linux. Neither value describes total system memory.
 Press the phone's right soft key to exit at any time. The application then
 returns the display to the local console, restores the LCD brightness it found
 at startup, restores the keypad-light level it found at startup, switches off
-its vibration request, and releases the input and framebuffer devices. The same
+its vibration request, and releases the input and DRM devices. The same
 cleanup runs after a handled termination signal or startup failure.
 
 ## Display and physical effects
 
-The application accepts a two-page RGB565 framebuffer at `240x320` or
+The application accepts an RGB565 DRM mode at `240x320` or
 `128x160`. The renderer derives its projection and scene layout from the active
-framebuffer geometry.
+display geometry.
 
 LCD brightness and keypad light use Linux backlight and LED interfaces. The
 application discovers them automatically and refuses to start if either is

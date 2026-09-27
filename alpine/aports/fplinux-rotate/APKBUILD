@@ -6,27 +6,30 @@ pkgdesc="V4L2 ROTA image rotation and verification tool for FPLinux"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="GPL-2.0-only"
-makedepends_build="clang22 lld22"
-makedepends_host="musl-dev linux-headers"
+makedepends_build="clang22 lld22 pkgconf"
+makedepends_host="musl-dev linux-headers fplinux-libdrm-dev"
 options="!check"
 source="
 	fplinux-rotate.c
 	fplinux-rotate-core.c
 	fplinux-rotate.h
-	fplinux-fb-session.c
-	fplinux-fb-session.h
+	fplinux-drm-session.c
+	fplinux-drm-session.h
 	fplinux-cli.c
 	fplinux-cli.h
 "
 builddir="$srcdir"
 
 build() {
+	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
+	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
+
 	"$CC" $CPPFLAGS $CFLAGS -O2 -std=c11 -Wall -Wextra -Werror \
-		-I"$srcdir" \
+		-I"$srcdir" $(pkg-config --cflags libdrm) \
 		"$srcdir/fplinux-rotate.c" \
 		"$srcdir/fplinux-rotate-core.c" \
-		"$srcdir/fplinux-fb-session.c" \
-		"$srcdir/fplinux-cli.c" $LDFLAGS -Wl,--gc-sections -o fplinux-rotate
+		"$srcdir/fplinux-drm-session.c" \
+		"$srcdir/fplinux-cli.c" $(pkg-config --libs libdrm) $LDFLAGS -Wl,--gc-sections -o fplinux-rotate
 }
 
 package() {
@@ -35,11 +38,11 @@ package() {
 }
 
 sha512sums="
-4fedbc9320ee418df2655e68030ab2942435042488b43d418e5b8a8f6cd04bd62b944a5b233203f9cf66c2d7960611899b835e3efd8a7a497d443ce569d4645a  fplinux-rotate.c
+cc626d7fb484eea1cb4714d30ed24666d7bb6a9469f81bce3bcf8bc6bd591afe651a9f756e4c588a2d2c8c937978e2a1f8e450640b5c89452b9a665376da53e2  fplinux-rotate.c
 da2b76b4b6491c0693a4bbc65f97a7abd2c4e1ba0ca42eb1b93be77afab11c0b247b03e97afb5857ded7bb0848b14e1af21127843848be7d381779e0eb10514a  fplinux-rotate-core.c
 1acd761bea4de0b377f569ed887bbd5bf635cd0ca8bb6746fa1b1ab62d06050b97d546debca38bf165e7a2a4efde68d981615abd6eb0fbbec264ea0d9b67eb6b  fplinux-rotate.h
-cbf7e3cb0a9fe2fda9d387e72ab49d13b3d7828e282f0ce2f528183f1fce0c337b29e8c62775671fe424548c0526027d3d50bc57ef7fe5a69c92af79da56598d  fplinux-fb-session.c
-38f849284be27b63ae553dc66c1427b885ef0e332a89b035f9465659e3a080435bd7fde0c788c1a97129cd0b252bd151268f568bab3065029a7874a2740b6279  fplinux-fb-session.h
+68cb5a85d6a51b69c7bc87a1077e607cff30a8eed17220ba8c812445baa416a0d1c18f3e79776ee184a0b3c4ad94dec48b81728e1f6c943d0580010ba659eae9  fplinux-drm-session.c
+5b63a683e9aac0a4b1faef31c0a09b9ec4131992d5cb69f858c6276855a8d92404c4cf23a1b4c8927d802311e9634b354502745ef15e00a4209744acf51131a7  fplinux-drm-session.h
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
 "

@@ -1,17 +1,18 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Test-owned framebuffer and delay boundary; no physical display is exercised. */
+/* Test-owned display and delay boundary; no physical display is exercised. */
 #define _DEFAULT_SOURCE
-#include "fplinux-fb-session.h"
+#include "fplinux-drm-session.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
-bool fplinux_fb_session_open(struct fplinux_fb_session *session,
-			     const char *framebuffer, const char *tty,
-			     char *error, size_t size)
+bool fplinux_drm_session_open(struct fplinux_drm_session *session,
+			      const char *drm, const char *tty, uint32_t format,
+			      char *error, size_t size)
 {
 	static uint16_t pixels[6];
-	(void)framebuffer;
+	(void)drm;
+	(void)format;
 	(void)tty;
 	(void)error;
 	(void)size;
@@ -22,21 +23,12 @@ bool fplinux_fb_session_open(struct fplinux_fb_session *session,
 	session->stride = 4;
 	session->pages = 1;
 	session->page_bytes = sizeof(pixels);
-	puts("stub framebuffer opened");
+	puts("stub display opened");
 	return true;
 }
 
-bool fplinux_fb_session_set_graphics(struct fplinux_fb_session *session,
-				     char *error, size_t size)
-{
-	(void)session;
-	(void)error;
-	(void)size;
-	return true;
-}
-
-bool fplinux_fb_session_present(struct fplinux_fb_session *session,
-				unsigned int page)
+bool fplinux_drm_session_present(struct fplinux_drm_session *session,
+				 unsigned int page)
 {
 	(void)session;
 	(void)page;
@@ -44,14 +36,28 @@ bool fplinux_fb_session_present(struct fplinux_fb_session *session,
 	return true;
 }
 
-bool fplinux_fb_session_close(struct fplinux_fb_session *session)
+bool fplinux_drm_session_close(struct fplinux_drm_session *session)
 {
 	(void)session;
 	return true;
 }
 
-int usleep(useconds_t usec)
+/* A fixed clock makes the application's requested hold duration observable. */
+int clock_gettime(clockid_t clock_id, struct timespec *value)
 {
-	printf("stub hold_us=%u\n", usec);
+	(void)clock_id;
+	value->tv_sec = 1;
+	value->tv_nsec = 0;
 	return 0;
+}
+
+bool fplinux_drm_session_wait_until(struct fplinux_drm_session *session,
+				    const struct timespec *deadline)
+{
+	uint64_t microseconds = (uint64_t)(deadline->tv_sec - 1) * 1000000U +
+				deadline->tv_nsec / 1000U;
+
+	(void)session;
+	printf("stub hold_us=%llu\n", (unsigned long long)microseconds);
+	return true;
 }

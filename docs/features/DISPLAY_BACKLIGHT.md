@@ -22,10 +22,10 @@ screen. FPLinux does not provide automatic brightness control.
 ## Power and display lifecycle
 
 The standard `bl_power` attribute accepts `0` for on and `4` for off. Turning
-the backlight off does not stop the framebuffer or put the panel to sleep.
+the backlight off does not stop scanout or put the panel to sleep.
 
-Framebuffer blanking and s2idle remain authoritative for the complete display
-lifecycle. While the framebuffer is blank, a brightness write updates the
-requested value without lighting the screen. Unblank or wake applies that value
+DRM display disable and s2idle remain authoritative for the complete display
+lifecycle. While the display is disabled, a brightness write updates the
+requested value without lighting the screen. Display enable or wake applies that value
 only after the first completed frame. Display errors, shutdown and driver
 removal leave the WLED off.

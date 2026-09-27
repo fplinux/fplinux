@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Run MicroPythonOS in a temporary FPLinux framebuffer session. */
+/* Supervise MicroPythonOS and forward termination signals. */
 
 #define _GNU_SOURCE
 
@@ -15,15 +15,12 @@
 #include <unistd.h>
 
 #include "fplinux-micropythonos-launcher-internal.h"
-#include "fplinux-fb-session.h"
 
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
-#define FPLINUX_MICROPYTHONOS_LAUNCHER_FRAMEBUFFER_DEVICE "/dev/fb0"
 #ifndef FPLINUX_MICROPYTHONOS_LAUNCHER_LOCK_PATH
 #define FPLINUX_MICROPYTHONOS_LAUNCHER_LOCK_PATH \
 	"/tmp/fplinux-micropythonos.lock"
 #endif
-#define FPLINUX_MICROPYTHONOS_LAUNCHER_TTY_DEVICE "/dev/tty0"
 
 static volatile sig_atomic_t pending_signal;
 
@@ -66,18 +63,6 @@ int fplinux_micropythonos_launcher_acquire_session_lock(void)
 		fplinux_micropythonos_launcher_die_errno("cannot lock session");
 	}
 	return descriptor;
-}
-
-static void
-fplinux_micropythonos_launcher_save_display(struct fplinux_fb_session *session)
-{
-	char error[128];
-
-	if (!fplinux_fb_session_open(
-		    session, FPLINUX_MICROPYTHONOS_LAUNCHER_FRAMEBUFFER_DEVICE,
-		    FPLINUX_MICROPYTHONOS_LAUNCHER_TTY_DEVICE, error,
-		    sizeof(error)))
-		fplinux_micropythonos_launcher_die(error);
 }
 
 static void fplinux_micropythonos_launcher_catch_signal(int signal_number)
@@ -162,11 +147,9 @@ int fplinux_micropythonos_launcher_wait_for_command(pid_t child)
 
 int main(int argc, char **argv)
 {
-	struct fplinux_fb_session display;
 	pid_t child;
 	int command_status;
 	int lock;
-	bool restored;
 
 	if (argc < 2) {
 		fprintf(stderr,
@@ -174,15 +157,7 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 	lock = fplinux_micropythonos_launcher_acquire_session_lock();
-	fplinux_micropythonos_launcher_save_display(&display);
 	fplinux_micropythonos_launcher_install_signal_handlers();
-	{
-		char error[128];
-
-		if (!fplinux_fb_session_set_graphics(&display, error,
-						     sizeof(error)))
-			fplinux_micropythonos_launcher_die(error);
-	}
 	child = fplinux_micropythonos_launcher_start_command(argv + 1);
 	if (child < 0) {
 		fprintf(stderr, "micropythonos: cannot start command: %s\n",
@@ -192,7 +167,6 @@ int main(int argc, char **argv)
 		command_status =
 			fplinux_micropythonos_launcher_wait_for_command(child);
 	}
-	restored = fplinux_fb_session_close(&display);
 	close(lock);
-	return restored ? command_status : EXIT_FAILURE;
+	return command_status;
 }

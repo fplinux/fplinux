@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import shlex
 import tempfile
 import unittest
 from pathlib import Path
@@ -28,6 +29,14 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
         cls.temporary = tempfile.TemporaryDirectory()
         cls.addClassCleanup(cls.temporary.cleanup)
         cls.executable = Path(cls.temporary.name) / "fplinux-showcase"
+        drm_flags = shlex.split(
+            run_process(
+                ["pkg-config", "--cflags", "--libs", "libdrm"],
+                name="read DRM compiler and linker flags",
+                timeout=10,
+                check=True,
+            ).stdout
+        )
         run_process(
             [
                 "cc",
@@ -40,8 +49,9 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
                 f"-I{SHARED}",
                 str(SOURCE),
                 str(APORT / "armada-scene.c"),
-                str(ROOT / "lib/fplinux/fplinux-fb-session.c"),
+                str(ROOT / "lib/fplinux/fplinux-drm-session.c"),
                 str(ROOT / "lib/fplinux/fplinux-cli.c"),
+                *drm_flags,
                 "-o",
                 str(cls.executable),
             ],
@@ -156,6 +166,14 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
         executable = class_root / "fplinux-showcase"
         leds = class_root / "leds" / "*" / "brightness"
         backlights = class_root / "backlights" / "*" / "brightness"
+        drm_flags = shlex.split(
+            run_process(
+                ["pkg-config", "--cflags", "--libs", "libdrm"],
+                name="read DRM compiler and linker flags",
+                timeout=10,
+                check=True,
+            ).stdout
+        )
         run_process(
             [
                 "cc",
@@ -170,8 +188,9 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
                 f'-DFPLINUX_SHOWCASE_LCD_BACKLIGHT_GLOB="{backlights}"',
                 str(SOURCE),
                 str(APORT / "armada-scene.c"),
-                str(ROOT / "lib/fplinux/fplinux-fb-session.c"),
+                str(ROOT / "lib/fplinux/fplinux-drm-session.c"),
                 str(ROOT / "lib/fplinux/fplinux-cli.c"),
+                *drm_flags,
                 "-o",
                 str(executable),
             ],

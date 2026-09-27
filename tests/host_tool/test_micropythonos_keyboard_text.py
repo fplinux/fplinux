@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Host component tests for MicroPythonOS keyboard layout selection.
+"""Host component tests for keyboard layout selection.
 
-The C driver links the packaged layout and text-filter source. It does not
+The C driver links the shared layout and text-filter source. It does not
 compile a keymap with xkbcommon, run MicroPython or open an input device.
 """
 
@@ -15,8 +15,8 @@ from typing import ClassVar
 from tests.process import run_process
 
 ROOT = Path(__file__).resolve().parents[2]
-APORT = ROOT / "alpine/aports/fplinux-micropythonos"
-SOURCE = APORT / "fplinux-keyboard-text.c"
+SHARED_INCLUDE = ROOT / "include/fplinux"
+SOURCE = ROOT / "lib/fplinux/fplinux-keyboard-text.c"
 HARNESS = ROOT / "tests/host_tool/fplinux-micropythonos-keyboard-text.c"
 
 
@@ -39,7 +39,7 @@ class MicroPythonOsKeyboardTextTests(unittest.TestCase):
                 "-Wextra",
                 "-Werror",
                 "-I",
-                str(APORT),
+                str(SHARED_INCLUDE),
                 str(HARNESS),
                 str(SOURCE),
                 "-o",
@@ -76,12 +76,15 @@ class MicroPythonOsKeyboardTextTests(unittest.TestCase):
     def test_optional_layouts_follow_us_in_name_order(self) -> None:
         """Each registered layout takes the next group after US, sorted by name."""
         cases = (
-            (None, "pc+us+group(alt_shift_toggle)"),
-            ((), "pc+us+group(alt_shift_toggle)"),
-            ((".apk.8f2c",), "pc+us+group(alt_shift_toggle)"),
-            (("ru",), "pc+us+ru:2+group(alt_shift_toggle)"),
-            (("ua", "ru", "by"), "pc+us+by:2+ru:3+ua:4+group(alt_shift_toggle)"),
-            (("de_ch1",), "pc+us+de_ch1:2+group(alt_shift_toggle)"),
+            (None, "pc+us+fplinux(function_keys)+group(alt_shift_toggle)"),
+            ((), "pc+us+fplinux(function_keys)+group(alt_shift_toggle)"),
+            ((".apk.8f2c",), "pc+us+fplinux(function_keys)+group(alt_shift_toggle)"),
+            (("ru",), "pc+us+fplinux(function_keys)+ru:2+group(alt_shift_toggle)"),
+            (
+                ("ua", "ru", "by"),
+                "pc+us+fplinux(function_keys)+by:2+ru:3+ua:4+group(alt_shift_toggle)",
+            ),
+            (("de_ch1",), "pc+us+fplinux(function_keys)+de_ch1:2+group(alt_shift_toggle)"),
         )
         for layouts, expected in cases:
             with self.subTest(layouts=layouts):

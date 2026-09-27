@@ -2,3 +2,4 @@
 !package.json
 !package-lock.json
 !Containerfile
+!alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch
