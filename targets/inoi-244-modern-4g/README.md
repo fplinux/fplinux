@@ -92,7 +92,7 @@ Status terms and limits shared by every phone are defined in the
 
 ## Hardware interfaces
 
-The `240×320` `NV3030` panel uses LCM/DBI with polled transfer completion.
+The `240×320` `NV3030` panel uses LCM/DBI with interrupt-driven transfer completion.
 The configured LCD brightness range is `0` through `31`, with `31` as the
 default. Physical brightness levels and keypad-light effects have not been tested.
 

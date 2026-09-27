@@ -74,7 +74,6 @@ static const struct ums9117_drm_command inoi240_panel_init[] = {
 static const struct ums9117_drm_profile inoi240_drm_profile = {
 	.name = "inoi240-rgb565",
 	.transport = UMS9117_DRM_TRANSPORT_LCM_DBI,
-	.completion = UMS9117_DRM_COMPLETION_POLL,
 	.init = inoi240_panel_init,
 	.init_count = ARRAY_SIZE(inoi240_panel_init),
 	.width = 128,

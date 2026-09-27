@@ -42,7 +42,6 @@ static const struct ums9117_drm_command ta1618_panel_init[] = {
 static const struct ums9117_drm_profile ta1618_drm_profile = {
 	.name = "ta1618-rgb565",
 	.transport = UMS9117_DRM_TRANSPORT_SPI1_3WIRE,
-	.completion = UMS9117_DRM_COMPLETION_IRQ,
 	.init = ta1618_panel_init,
 	.init_count = ARRAY_SIZE(ta1618_panel_init),
 	.width = 240,

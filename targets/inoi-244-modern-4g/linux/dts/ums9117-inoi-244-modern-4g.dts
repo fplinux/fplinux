@@ -46,6 +46,8 @@
 				    "ap-ahb-gate-set", "ap-ahb-reset-set",
 				    "ap-ahb-reset-clear", "pinmux", "pinconf",
 				    "pinmux-data", "pinconf-data";
+			interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "lcdc-done";
 			sprd,aon-apb = <&aon_apb>;
 			sprd,pmic = <&sc2720_pmic>;
 			memory-region = <&codec_dma>;

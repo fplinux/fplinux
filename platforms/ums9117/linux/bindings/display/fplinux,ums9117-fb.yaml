@@ -143,6 +143,8 @@ required:
   - compatible
   - reg
   - reg-names
+  - interrupts
+  - interrupt-names
   - sprd,aon-apb
   - sprd,pmic
   - memory-region
@@ -153,18 +155,6 @@ required:
   - sprd,wled-current-levels
 
 allOf:
-  - if:
-      properties:
-        compatible:
-          const: fplinux,ums9117-st7789p3-spi-fb
-    then:
-      required:
-        - interrupts
-        - interrupt-names
-    else:
-      properties:
-        interrupts: false
-        interrupt-names: false
   - if:
       properties:
         compatible:

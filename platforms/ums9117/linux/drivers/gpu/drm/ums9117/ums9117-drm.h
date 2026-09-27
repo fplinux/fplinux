@@ -20,12 +20,6 @@ enum ums9117_drm_transport_kind {
 	UMS9117_DRM_TRANSPORT_LCM_DBI,
 };
 
-/* Completion delivery is a fixed property of the board profile. */
-enum ums9117_drm_completion_kind {
-	UMS9117_DRM_COMPLETION_IRQ,
-	UMS9117_DRM_COMPLETION_POLL,
-};
-
 /*
  * A DCS command followed by zero or more byte parameters and an optional
  * delay. command == 0 with length == 0 is a delay-only script step.
@@ -44,7 +38,6 @@ struct ums9117_drm_command {
 struct ums9117_drm_profile {
 	const char *name;
 	enum ums9117_drm_transport_kind transport;
-	enum ums9117_drm_completion_kind completion;
 	const struct ums9117_drm_command *init;
 	unsigned int init_count;
 	/* Optional cold-start suffix after the shared initialization commands. */
@@ -65,7 +58,7 @@ struct ums9117_drm_profile {
 	 * maximum is derived from equal non-zero board WLED current levels.
 	 */
 	const char *wled_backlight_name;
-	/* Enable native-size presentation with this profile's frame completion. */
+	/* Enable native-size NV16 presentation. */
 	bool native_nv16;
 	/* LCDC CTRL bits required by this panel's transport. */
 	u32 lcdc_ctrl_set;
