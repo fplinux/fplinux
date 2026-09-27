@@ -94,6 +94,33 @@ The supported loader path writes only volatile RAM. It does not flash, erase,
 partition, or write internal phone storage. A target may separately support
 writes to removable media through its documented mounted-filesystem workflow.
 
+## Loader progress events
+
+For machine-readable progress during a fresh load, add `--events PATH`:
+
+```sh
+./fplinux run <target> --events loader.jsonl
+```
+
+The destination is overwritten. Each flushed JSON line includes `event`,
+`target`, `profile`, `build_type` and a UTC `time`. Events are
+`waiting-for-device`, `ram-loader-complete`, `linux-transition`, `linux-usb`,
+`ssh-ready` and `complete`. `linux-usb` reports the first observation of the
+exact Linux USB device bound to this load, before waiting for its network and
+SSH connection. A `failure` event additionally records the last `stage`, a
+bounded `cause` and `exit_status`. `ssh-ready` means that the selected Linux
+session authenticated; it is not a hardware support test. Event records do not
+contain SSH credentials.
+
+`complete` marks the successful end of loading, including the selected
+transport handoff. It is written before an interactive SSH shell starts;
+closing that shell does not add a loader failure.
+
+The same option is available for live `device-data prepare` and a standalone
+runner's fresh load. It is incompatible with `--from-dump` preparation and
+standalone `--reconnect`. The normal loader-first connection sequence still
+applies.
+
 ## After boot
 
 Once the new SSH session is authenticated, `run` sets the phone clock from the

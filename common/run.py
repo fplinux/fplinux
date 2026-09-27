@@ -15,11 +15,13 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, NoReturn
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from types import FrameType, ModuleType
 
 ADAPTER_PATH = "runner/platform_adapter.py"
 IDENTITY_PATH = "runner/identity.py"
 SSH_HELPER_PATH = "runner/ssh_transport.py"
+EVENTS_HELPER_PATH = "runner/loader_events.py"
 REQUIRED_PYTHON = (3, 14)
 TRANSPORTS = frozenset({"usb-ncm", "none"})
 _identity_module: ModuleType | None = None
@@ -278,6 +280,7 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
         *root["assets"].values(),
         *root["host_tools"].values(),
         SSH_HELPER_PATH,
+        EVENTS_HELPER_PATH,
     }
     hashes = require_object(root.get("sha256"), expected_paths, "runtime hashes")
     for relative, value in hashes.items():
@@ -329,6 +332,9 @@ def arguments() -> argparse.Namespace:
     """Parse either a fresh RAM load or an authenticated reconnect action."""
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--events", type=Path, metavar="PATH", help="write flushed JSONL loader events"
+    )
+    parser.add_argument(
         "--reconnect",
         action="store_true",
         help="reconnect to a ready SSH session with this device identity",
@@ -338,6 +344,8 @@ def arguments() -> argparse.Namespace:
     action.add_argument("--upload", nargs=2, metavar=("LOCAL", "REMOTE"))
     action.add_argument("--pull", nargs=2, metavar=("REMOTE", "LOCAL"))
     result = parser.parse_args()
+    if result.reconnect and result.events is not None:
+        parser.error("--events is available only for a fresh RAM load")
     if not result.reconnect and any(
         value is not None for value in (result.exec_command, result.upload, result.pull)
     ):
@@ -357,6 +365,32 @@ def main() -> None:
         if actual != expected:
             fail(f"{relative} SHA256 mismatch: expected {expected}, got {actual}")
     runtime = validate_runtime_identity(runtime)
+    event_module = load_module(bundle / EVENTS_HELPER_PATH, "fplinux_loader_events")
+    with event_module.record_events(
+        options.events,
+        target=runtime["target"],
+        profile=runtime["profile"],
+        build_type=runtime["build_type"],
+    ) as events:
+        handoff = run_bundle(bundle, runtime, options, events.emit)
+    if handoff is not None:
+        ssh, session = handoff
+        if not os.isatty(0):
+            print("No interactive terminal is attached; the loader is complete.", flush=True)
+            return
+        ssh.open_shell(session)
+        fail("SSH client returned without replacing the runner")
+
+
+def run_bundle(
+    bundle: Path,
+    runtime: dict[str, Any],
+    options: argparse.Namespace,
+    emit: Callable[[str], None],
+) -> tuple[ModuleType, dict[str, Any]] | None:
+    """Enter the verified runner and keep its observable stages in one stream."""
+    if not options.reconnect:
+        print(f"bundle build type: {runtime['build_type']}", flush=True)
     image = bundle / runtime["image"]
     if image.read_bytes()[:4] != b"DHTB":
         fail("RAM payload does not have a DHTB header")
@@ -374,13 +408,13 @@ def main() -> None:
             result = ssh.run_remote(session, options.exec_command)
             if result.returncode:
                 raise SystemExit(result.returncode)
-            return
+            return None
         if options.upload is not None:
             ssh.upload(session, options.upload[0], options.upload[1])
-            return
+            return None
         if options.pull is not None:
             ssh.pull(session, options.pull[0], options.pull[1])
-            return
+            return None
         ssh.open_shell(session)
         fail("SSH client returned without replacing the runner")
 
@@ -396,18 +430,27 @@ def main() -> None:
     try:
         ssh = load_module(bundle / SSH_HELPER_PATH, "ssh_transport")
         ssh.bundle_identity(bundle, runtime)
+        device_identity = ssh.build_manifest_device_identity(bundle)
         session = ssh.prepare_session(
             image,
             runtime["personalization"],
             runtime["target"],
             runtime["usb"]["linux_gadget"],
         )
-        adapter.run(bundle, runtime, session)
+        ready: dict[str, Any] | None = adapter.run(
+            bundle,
+            runtime,
+            session,
+            expected_device_identity=device_identity,
+            events=emit,
+        )
     finally:
         if session is not None:
             ssh.finish_session(session)
         for signum, handler in previous_handlers.items():
             signal.signal(signum, handler)
+    emit("complete")
+    return (ssh, ready) if ready is not None else None
 
 
 if __name__ == "__main__":

@@ -396,7 +396,7 @@ archive.
 The complete command syntax is:
 
 ```sh
-./fplinux device-data prepare TARGET [--from-dump PATH] [--jobs N] [--offline]
+./fplinux device-data prepare TARGET [--from-dump PATH] [--jobs N] [--offline] [--events PATH]
 ```
 
 Start with the phone powered off and USB disconnected, then run:
@@ -418,7 +418,9 @@ For a backup already saved from this exact physical NAND, use:
 ./fplinux device-data prepare <target> --from-dump PATH
 ```
 
-This form does not build a loader or connect to the phone. `--jobs N` limits
+This form does not build a loader or connect to the phone. `--events PATH` is
+only available for live preparation and cannot be combined with `--from-dump`;
+its [loader events](LOADING.md#loader-progress-events) describe the RAM load. `--jobs N` limits
 parallel work when the read-only loader is built, and `--offline` requests that
 build without network access.
 

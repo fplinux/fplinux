@@ -274,6 +274,7 @@ def _command_action(
             profile=args.profile,
             build_type=args.build_type,
             boot=args.boot,
+            events=args.events,
         )
     elif args.command == "console":
         action = partial(
@@ -308,6 +309,7 @@ def _command_action(
             prepare_device_data,
             args.target,
             from_dump=args.from_dump,
+            events=args.events,
             jobs=args.jobs,
             offline=args.offline,
         )
@@ -371,6 +373,9 @@ def _add_device_data_prepare_command(
         help="extract all declared device data from one physical NAND backup",
     )
     prepare.add_argument("target", choices=targets)
+    prepare.add_argument(
+        "--events", type=Path, metavar="PATH", help="write loader events as JSON lines"
+    )
     prepare.add_argument(
         "--from-dump",
         type=Path,
@@ -555,6 +560,9 @@ def main() -> None:
     run_parser = commands.add_parser("run", help="run a target's volatile-RAM loader")
     _add_build_type_option(run_parser)
     run_parser.add_argument("target", choices=targets)
+    run_parser.add_argument(
+        "--events", type=Path, metavar="PATH", help="write loader events as JSON lines"
+    )
     _add_boot_profile_options(run_parser, "run")
 
     console_parser = commands.add_parser("console", help="connect to a running target over USB")

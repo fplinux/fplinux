@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
 BACKLIGHT_CHANNELS = "rgbw"
 SESSION_ID = re.compile(r"[0-9a-f]{64}\Z")
@@ -269,11 +269,14 @@ def complete_linux_handoff(
     runtime: dict[str, Any],
     session: dict[str, Any],
     linux_usb: dict[str, int],
-) -> None:
-    """Finish one bridge-acknowledged transition through its declared transport."""
+    *,
+    expected_device_identity: str,
+    events: Callable[[str], None] | None = None,
+) -> dict[str, Any] | None:
+    """Return the verified SSH session, or None for a no-transport handoff."""
     if runtime["transport"] == "none":
         print("Bridge acknowledged the Linux transition; no host-side transport is selected.")
-        return
+        return None
 
     linux_id = f"{linux_usb['vendor_id']:04x}:{linux_usb['product_id']:04x}"
     print(
@@ -282,21 +285,30 @@ def complete_linux_handoff(
         flush=True,
     )
     transport_module = importlib.import_module("ssh_transport")
-    ready = transport_module.wait_for_bound_session(session)
+
+    def linux_usb_observed() -> None:
+        if events is not None:
+            events("linux-usb")
+
+    ready: dict[str, Any] = transport_module.wait_for_bound_session(
+        session, on_linux_usb=linux_usb_observed
+    )
+    transport_module.require_device_identity(ready, expected_device_identity)
     transport_module.sync_clock(ready)
+    if events is not None:
+        events("ssh-ready")
     print("Private USB-NCM SSH session is ready.", flush=True)
-    if not os.isatty(0):
-        print("No interactive terminal is attached; the loader is complete.", flush=True)
-        return
-    transport_module.open_shell(ready)
-    fail("SSH client returned without replacing the runner")
+    return ready
 
 
 def run(
     bundle: Path,
     runtime: dict[str, Any],
     session: dict[str, Any],
-) -> None:
+    *,
+    expected_device_identity: str,
+    events: Callable[[str], None] | None = None,
+) -> dict[str, Any] | None:
     """Execute the fixed RAM-only UMS9117 sequence for one declared transport."""
     display_name = runtime_target_display_name(runtime)
     session_token = prepared_session_token(session)
@@ -354,6 +366,8 @@ def run(
         flush=True,
     )
     deadline = time.monotonic() + bootrom_usb["wait_seconds"]
+    if events is not None:
+        events("waiting-for-device")
     max_loader_attempts = 3
     successful_bootrom_device: Path | None = None
     try:
@@ -385,6 +399,8 @@ def run(
             result = subprocess.run(loader_argv, check=False)
             if result.returncode == 0:
                 successful_bootrom_device = bootrom_device
+                if events is not None:
+                    events("ram-loader-complete")
                 break
             if attempt == max_loader_attempts:
                 fail(
@@ -440,4 +456,12 @@ def run(
         successful_bootrom_device,
         config["usb_release_wait_seconds"],
     )
-    complete_linux_handoff(runtime, session, linux_usb)
+    if events is not None:
+        events("linux-transition")
+    return complete_linux_handoff(
+        runtime,
+        session,
+        linux_usb,
+        expected_device_identity=expected_device_identity,
+        events=events,
+    )

@@ -349,8 +349,11 @@ def prepare_device_data(
     from_dump: Path | None,
     jobs: int,
     offline: bool,
+    events: Path | None = None,
 ) -> None:
     """Prepare every declared group from one live or previously saved physical NAND."""
+    if from_dump is not None and events is not None:
+        fail("--events requires a live device-data load and cannot be used with --from-dump")
     target_config = load_target(target)
     device_data = target_config["device_data"]
     declarations: dict[str, list[dict[str, Any]]] = device_data["groups"]
@@ -377,7 +380,7 @@ def prepare_device_data(
             flush=True,
         )
         with reporter.stage("load", show_tail=False):
-            run_target_noninteractive(target, profile=None)
+            run_target_noninteractive(target, profile=None, events=events)
         source_kind = "live-nand"
     else:
         source_kind = "saved-dump"

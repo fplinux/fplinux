@@ -166,6 +166,7 @@ class CliCacheLockTests(unittest.TestCase):
                         mock.call(
                             "nokia-ta1618",
                             from_dump=Path("saved-nand.bin"),
+                            events=None,
                             jobs=2,
                             offline=True,
                         ),
@@ -179,6 +180,18 @@ class CliCacheLockTests(unittest.TestCase):
         )
 
         formatter.assert_called_once_with(["scripts/tool.py", "README.md"])
+
+    def test_loader_events_path_reaches_each_live_loader_command(self) -> None:
+        """The output destination reaches the loader boundary as a filesystem path."""
+        for arguments, callback_name in (
+            (["run", "target"], "run_target"),
+            (["device-data", "prepare", "target"], "prepare_device_data"),
+        ):
+            with self.subTest(arguments=arguments):
+                _events, callback = self._run(
+                    [*arguments, "--events", "loader-events.jsonl"], callback_name
+                )
+                self.assertEqual(callback.call_args.kwargs["events"], Path("loader-events.jsonl"))
 
     def test_build_forwards_offline_to_the_dispatcher(self) -> None:
         """The parsed build switch reaches its callback without changing lock mode."""
@@ -391,7 +404,9 @@ class CliCacheLockTests(unittest.TestCase):
             (
                 ["run", "nokia-ta1618", "--boot", "microsd"],
                 "run_target",
-                mock.call("nokia-ta1618", profile=None, boot="microsd", build_type="release"),
+                mock.call(
+                    "nokia-ta1618", profile=None, boot="microsd", build_type="release", events=None
+                ),
             ),
             (
                 ["package", "nokia-ta1618", "--boot", "microsd", "--candidate"],
@@ -407,7 +422,9 @@ class CliCacheLockTests(unittest.TestCase):
             (
                 ["run", "target", "--boot", "microsd"],
                 "run_target",
-                mock.call("target", profile=None, boot="microsd", build_type="release"),
+                mock.call(
+                    "target", profile=None, boot="microsd", build_type="release", events=None
+                ),
             ),
         )
         for arguments, callback_name, expected_call in cases:

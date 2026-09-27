@@ -224,10 +224,14 @@ def run_target(
     profile: str | None = None,
     build_type: str = "release",
     boot: str | None = None,
+    events: Path | None = None,
 ) -> None:
     """Run the fixed shared runner from a successful target bundle."""
     runner = _runnable_target_runner(target, profile=profile, boot=boot, build_type=build_type)
-    os.execv(os.fsencode(runner), [os.fsencode(runner)])
+    argv = [os.fsencode(runner)]
+    if events is not None:
+        argv.extend([b"--events", os.fsencode(events.resolve())])
+    os.execv(os.fsencode(runner), argv)
 
 
 def run_target_noninteractive(
@@ -235,11 +239,15 @@ def run_target_noninteractive(
     *,
     profile: str | None = None,
     build_type: str = "release",
+    events: Path | None = None,
 ) -> None:
     """Run a loader to its authenticated handoff without taking over this CLI process."""
     runner = _runnable_target_runner(target, profile=profile, build_type=build_type)
+    argv = [os.fsencode(runner)]
+    if events is not None:
+        argv.extend([b"--events", os.fsencode(events.resolve())])
     result = subprocess.run(
-        [os.fsencode(runner)],
+        argv,
         stdin=subprocess.DEVNULL,
         check=False,
     )

@@ -172,6 +172,26 @@ class FootprintCliTests(unittest.TestCase):
                 self.assertNotIn("Traceback", result.stderr)
         self.assertFalse((self.root / ".cache").exists())
 
+    def test_events_help_and_saved_dump_rejection_are_available_without_phone(self) -> None:
+        """Both loader commands expose event output and offline extraction rejects it."""
+        for arguments in (("run",), ("device-data", "prepare")):
+            with self.subTest(arguments=arguments):
+                result = self.run_cli(*arguments, "--help")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("--events PATH", result.stdout)
+        result = self.run_cli(
+            "device-data",
+            "prepare",
+            "example",
+            "--from-dump",
+            "saved.bin",
+            "--events",
+            "events.jsonl",
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("cannot be used with --from-dump", result.stderr)
+        self.assertFalse((self.root / "events.jsonl").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

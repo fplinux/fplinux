@@ -120,7 +120,7 @@ class ProfileParserDispatchTests(unittest.TestCase):
             "run", "demo", "--profile", "microsd-uboot"
         )
         run.assert_called_once_with(
-            "demo", profile="microsd-uboot", build_type="release", boot=None
+            "demo", profile="microsd-uboot", build_type="release", boot=None, events=None
         )
 
     def test_package_and_console_forward_the_same_named_profile(self) -> None:
@@ -171,6 +171,7 @@ class ProfileParserDispatchTests(unittest.TestCase):
             profile=None,
             build_type="release",
             boot="microsd",
+            events=None,
         )
 
         _check, _build, _run, package, _console = self.invoke(
