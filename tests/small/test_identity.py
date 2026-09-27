@@ -15,6 +15,7 @@ from fplinux_cli.identity_codegen import (
     bootstrap_identity_header,
     linux_identity_dtsi,
     linux_machine_binding,
+    linux_machine_binding_path,
     linux_platform_identity_header,
     runtime_identity,
 )
@@ -87,7 +88,7 @@ class IdentityTests(unittest.TestCase):
         runtime = runtime_identity(target, "ums9117", platform)
         header = bootstrap_identity_header(target, "TA1618")
         dtsi = linux_identity_dtsi(target, platform)
-        binding = linux_machine_binding(target, platform)
+        binding = linux_machine_binding(target, platform, arch="arm")
         platform_header = linux_platform_identity_header(platform)
 
         self.assertEqual(runtime["target"]["display_name"], target["display_name"])
@@ -98,6 +99,22 @@ class IdentityTests(unittest.TestCase):
         self.assertIn(b'compatible = "nokia,ta-1618", "sprd,ums9117";', dtsi)
         self.assertIn(b"const: Nokia 3210 4G (TA-1618)", binding)
         self.assertIn(b'FPLINUX_PLATFORM_COMPATIBLE "sprd,ums9117"', platform_header)
+
+    def test_machine_schema_id_matches_its_architecture_directory(self) -> None:
+        """Place generated machine bindings in the architecture's schema namespace."""
+        target = validate_target_identity(self.target())
+        platform = validate_platform_identity(self.platform())
+        for arch, directory in (("arm", "arm"), ("arm64", "arm"), ("riscv", "riscv")):
+            with self.subTest(arch=arch):
+                self.assertEqual(
+                    linux_machine_binding_path(target, arch=arch),
+                    f"Documentation/devicetree/bindings/{directory}/nokia,ta-1618.yaml",
+                )
+                binding = linux_machine_binding(target, platform, arch=arch)
+                self.assertIn(
+                    f"$id: http://devicetree.org/schemas/{directory}/nokia,ta-1618.yaml#\n".encode(),
+                    binding,
+                )
 
     def test_bootstrap_name_must_fit_the_fixed_screen_buffer(self) -> None:
         """Fail before compiling a name that the freestanding screen truncates."""
@@ -122,6 +139,7 @@ class IdentityTests(unittest.TestCase):
         platform = {
             "identity": validate_platform_identity(self.platform()),
             "linux": {
+                "arch": "arm",
                 "dts_directory": "arch/arm/boot/dts/unisoc",
                 "platform_identity_header": "arch/arm/mach-ums9117/fplinux-platform-identity.h",
                 "patches": [],

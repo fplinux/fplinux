@@ -139,6 +139,10 @@ patches = [
   "platforms/ums9117/linux/patches/0011-ums9117-mailbox.patch",
 ]
 
+[[linux.appends]]
+source = "platforms/ums9117/linux/dts/unisoc.Makefile"
+destination = "arch/arm/boot/dts/unisoc/Makefile"
+
 [[linux.copies]]
 source = "platforms/ums9117/linux/arch/arm/mach-ums9117/Kconfig"
 destination = "arch/arm/mach-ums9117/Kconfig"

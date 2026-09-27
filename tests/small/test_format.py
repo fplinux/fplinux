@@ -79,6 +79,27 @@ class FormatContainerBoundaryTests(unittest.TestCase):
         self.assertEqual(command[network + 1], "none")
         self.assertEqual(command[-4:], ["--", "ruff", "format", "scripts/tool.py"])
 
+    def test_patch_formatter_reuses_linux_cache_without_writable_archive_access(self) -> None:
+        """Allow bounded source preparation while keeping downloaded archives read-only."""
+        command = format_module._container_command(  # noqa: SLF001 -- command boundary.
+            "/usr/bin/kern",
+            image="localhost/fplinux-build:locked",
+            workspace=Path("/projection"),
+            formatter=["python3", "-m", "fplinux_cli.kernel_patches"],
+            archives=Path("/downloads"),
+            linux_cache=Path("/linux-cache"),
+        )
+        mounts = [command[index + 1] for index, arg in enumerate(command) if arg == "--volume"]
+        self.assertEqual(
+            mounts,
+            [
+                "/projection:/workspace",
+                "/downloads:/linux-archives:ro",
+                "/linux-cache:/cache/linux",
+            ],
+        )
+        self.assertIn("--read-only", command)
+
 
 class FormatPublicationTests(unittest.TestCase):
     """Publish only after formatter and concurrency gates succeed."""

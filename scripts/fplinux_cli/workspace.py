@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 from fplinux_cli.manifests.kernel import kernel_config_paths
+from fplinux_cli.manifests.linux import discover_linux_targets, is_shared_linux_operation
 from fplinux_cli.manifests.paths import (
     profile_manifest_path,
     target_asset_lock_path,
@@ -24,9 +25,10 @@ from fplinux_cli.manifests.paths import (
 )
 from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.targets import load_target
+from fplinux_cli.manifests.values import sha256_value
 
 from . import alpine_state, firmware_inputs
-from .common import ROOT, fail, relative_name
+from .common import ROOT, canonical_json_bytes, fail, load_toml, relative_name
 
 STAGED_BUILD_SOURCES = (
     "Containerfile",
@@ -53,10 +55,12 @@ STAGED_BUILD_SOURCES = (
     "scripts/fplinux_cli/identity.py",
     "scripts/fplinux_cli/identity_codegen.py",
     "scripts/fplinux_cli/kbuild_state.py",
+    "scripts/fplinux_cli/linux_projection.py",
     "scripts/fplinux_cli/linux_state.py",
     "scripts/fplinux_cli/output.py",
     "scripts/fplinux_cli/profile_layout.py",
     "scripts/fplinux_cli/ssh_transport.py",
+    "scripts/fplinux_cli/workspace.py",
 )
 _GIT_INVENTORY_TIMEOUT = 60
 
@@ -72,11 +76,32 @@ class WorkspaceFile:
 
 @dataclass(frozen=True)
 class WorkspaceSnapshot:
-    """The exact causal input used to validate or materialize a workspace."""
+    """A causal build recipe and the additional sources needed by shared Linux."""
 
     files: tuple[WorkspaceFile, ...]
     recipe: str
     build_type: str | None = None
+    auxiliary_files: tuple[WorkspaceFile, ...] = ()
+    linux_operations: tuple[tuple[str, str, str], ...] = ()
+
+    @property
+    def materialization_recipe(self) -> str:
+        """Bind the disposable workspace slot to every file it contains."""
+        return _snapshot_recipe(self.materialized_files, self.build_type, self.linux_operations)
+
+    @property
+    def materialized_files(self) -> tuple[WorkspaceFile, ...]:
+        """Combine causal and auxiliary inputs in one deterministic projection."""
+        return tuple(sorted((*self.files, *self.auxiliary_files), key=lambda item: item.path))
+
+
+@dataclass(frozen=True)
+class SharedLinuxSources:
+    """The staged Linux closure, with its causal files and ordered source operations."""
+
+    files: tuple[tuple[str, Path], ...] = ()
+    causal_paths: frozenset[str] = frozenset()
+    operations: tuple[tuple[str, str, str], ...] = ()
 
 
 def is_python_cache(path: Path) -> bool:
@@ -202,6 +227,47 @@ def target_build_source_files(
     return sorted(files.items())
 
 
+def shared_linux_source_files(target_config: dict[str, Any]) -> SharedLinuxSources:
+    """Separate board-owned copies from source operations shared by compatible builds."""
+    sources = load_toml(ROOT / "sources.lock.toml")
+    platform = load_platform(target_config["platform"])
+    source_lock = platform["linux"]["source_lock"]
+    source = sources.get(source_lock)
+    if not isinstance(source, dict):
+        fail(f"unknown Linux source lock: {source_lock}")
+    source_sha256 = sha256_value(source.get("sha256"), f"source {source_lock} sha256")
+    files: dict[str, Path] = {}
+    causal_paths: set[str] = set()
+    operations: list[tuple[str, str, str]] = []
+
+    def add_operation(operation: str, source: Path, destination: str) -> None:
+        relative = source.relative_to(ROOT).as_posix()
+        add_source_path(files, source)
+        operations.append((operation, relative, destination))
+        if is_shared_linux_operation(operation):
+            causal_paths.add(relative)
+
+    for target in discover_linux_targets(ROOT, sources, source_sha256):
+        target_root = ROOT / "targets" / target.name
+        add_source_path(files, target_root / "target.toml")
+        add_source_path(files, ROOT / "platforms" / target.config["platform"] / "platform.toml")
+        for owner, source_root, config in (
+            ("platform", ROOT, target.platform),
+            ("target", target_root, target.config),
+        ):
+            for relative in config["linux"]["patches"]:
+                add_operation(f"{owner}-patch", source_root / relative, "")
+            for key in ("copies", "appends"):
+                operation = f"{owner}-{'copy' if key == 'copies' else 'append'}"
+                for step in config["linux"][key]:
+                    add_operation(operation, source_root / step["source"], step["destination"])
+        for relative in target.config.get("microsd", {}).get("linux_patches", []):
+            add_operation("target-patch", target_root / relative, "")
+    return SharedLinuxSources(
+        tuple(sorted(files.items())), frozenset(causal_paths), tuple(dict.fromkeys(operations))
+    )
+
+
 def quality_files(*, enforce_source_policy: bool) -> list[tuple[str, Path]]:
     """Return tracked and non-ignored untracked files used by quality checks."""
     command = [
@@ -270,6 +336,17 @@ def target_workspace_snapshot(
             target_config=target_config,
         )
     )
+    linux_sources = shared_linux_source_files(target_config)
+    causal_files = {source.path: source for source in source_snapshot.files}
+    auxiliary_files: list[WorkspaceFile] = []
+    for relative, source in linux_sources.files:
+        if relative in causal_files:
+            continue
+        captured = _read_source_file(relative, source)
+        if relative in linux_sources.causal_paths:
+            causal_files[relative] = captured
+        else:
+            auxiliary_files.append(captured)
     device_data_groups = target_config["device_data"]["groups"]
     captured_groups = firmware_inputs.capture_external_device_data(
         target,
@@ -290,12 +367,16 @@ def target_workspace_snapshot(
         for firmware in group
     )
     snapshot_files = tuple(
-        sorted((*source_snapshot.files, *firmware_files), key=lambda item: item.path)
+        sorted((*causal_files.values(), *firmware_files), key=lambda item: item.path)
     )
     if len({source.path for source in snapshot_files}) != len(snapshot_files):
         fail("firmware input collides with a build workspace source path")
     return WorkspaceSnapshot(
-        snapshot_files, _snapshot_recipe(snapshot_files, build_type), build_type
+        snapshot_files,
+        _snapshot_recipe(snapshot_files, build_type, linux_sources.operations),
+        build_type,
+        tuple(auxiliary_files),
+        linux_sources.operations,
     )
 
 
@@ -397,11 +478,19 @@ def _read_source_file(relative: str, source: Path) -> WorkspaceFile:
     return WorkspaceFile(relative, contents, mode)
 
 
-def _snapshot_recipe(files: tuple[WorkspaceFile, ...], build_type: str | None = None) -> str:
+def _snapshot_recipe(
+    files: tuple[WorkspaceFile, ...],
+    build_type: str | None = None,
+    linux_operations: tuple[tuple[str, str, str], ...] = (),
+) -> str:
     """Hash exact source paths, bytes, and permissions from an immutable snapshot."""
     value = hashlib.sha256()
     if build_type is not None:
         value.update(f"build_type={build_type}\0".encode())
+    if linux_operations:
+        value.update(b"linux_operations\0")
+        value.update(canonical_json_bytes(linux_operations))
+        value.update(b"\0")
     for source in files:
         value.update(source.path.encode())
         value.update(b"\0")
@@ -419,14 +508,15 @@ def _stage_snapshot(
     """Publish one captured snapshot; a mismatched cache entry is a plain miss."""
     _validate_snapshot(snapshot, marker_relative)
     _managed_workspace_namespace(workspaces, create=True)
-    workspace = workspaces / snapshot.recipe
+    recipe = snapshot.materialization_recipe
+    workspace = workspaces / recipe
     marker = workspace / marker_relative
     try:
         if (
             not workspace.is_symlink()
             and workspace.is_dir()
             and not marker.is_symlink()
-            and marker.read_text(encoding="utf-8").strip() == snapshot.recipe
+            and marker.read_text(encoding="utf-8").strip() == recipe
         ):
             return workspace
     except OSError:
@@ -435,13 +525,13 @@ def _stage_snapshot(
     if workspace.exists() or workspace.is_symlink():
         _remove_managed_workspace(workspaces, workspace, "stale workspace")
 
-    staging = Path(tempfile.mkdtemp(dir=workspaces, prefix=f".stage-{snapshot.recipe[:12]}-"))
+    staging = Path(tempfile.mkdtemp(dir=workspaces, prefix=f".stage-{recipe[:12]}-"))
     try:
-        for source in snapshot.files:
+        for source in snapshot.materialized_files:
             _write_snapshot_file(staging / source.path, source)
         staged_marker = staging / marker_relative
         staged_marker.parent.mkdir(parents=True, exist_ok=True)
-        staged_marker.write_bytes((snapshot.recipe + "\n").encode())
+        staged_marker.write_bytes((recipe + "\n").encode())
         staging.replace(workspace)
         return workspace
     finally:
@@ -458,11 +548,12 @@ def _discard_staged_snapshot(
     """Discard one validated disposable workspace without accepting alternate paths."""
     _validate_snapshot(snapshot, marker_relative)
     _managed_workspace_namespace(workspaces, create=False)
-    expected = workspaces / snapshot.recipe
+    recipe = snapshot.materialization_recipe
+    expected = workspaces / recipe
     if workspace != expected:
         fail(f"workspace discard path is outside its managed cache slot: {workspace}")
     marker = workspace / marker_relative
-    expected_marker = (snapshot.recipe + "\n").encode()
+    expected_marker = (recipe + "\n").encode()
     try:
         if workspace.is_symlink() or not workspace.is_dir():
             fail(f"workspace discard path is missing or invalid: {workspace}")
@@ -516,14 +607,16 @@ def _remove_managed_workspace(workspaces: Path, workspace: Path, name: str) -> N
 
 def _validate_snapshot(snapshot: WorkspaceSnapshot, marker_relative: PurePosixPath) -> None:
     """Reject forged snapshots before they can create cache paths outside the namespace."""
-    expected_recipe = _snapshot_recipe(snapshot.files, snapshot.build_type)
+    expected_recipe = _snapshot_recipe(
+        snapshot.files, snapshot.build_type, snapshot.linux_operations
+    )
     if snapshot.recipe != expected_recipe:
         fail("workspace snapshot recipe does not match its files")
     marker = _workspace_relative_path(marker_relative.as_posix())
-    paths = [source.path for source in snapshot.files]
+    paths = [source.path for source in snapshot.materialized_files]
     if len(paths) != len(set(paths)):
         fail("workspace snapshot contains duplicate paths")
-    for source in snapshot.files:
+    for source in snapshot.materialized_files:
         if _workspace_relative_path(source.path) != source.path:
             fail(f"workspace snapshot has invalid path: {source.path}")
         if not isinstance(source.contents, bytes):

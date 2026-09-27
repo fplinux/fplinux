@@ -23,7 +23,7 @@ from fplinux_cli.build.inputs import CACHE, require_file, root_source, target_so
 from fplinux_cli.build.kernel import profile_kconfig_actions, profile_kconfig_arguments
 from fplinux_cli.build.linux import prepare_linux
 from fplinux_cli.build.process import report_stage, run
-from fplinux_cli.build.sources import fetch, source_lock_entry
+from fplinux_cli.build.sources import source_lock_entry
 from fplinux_cli.identity import BUILD_TYPES
 from fplinux_cli.manifests.kernel import compose_kernel_config, kconfig_values, kernel_config_paths
 from fplinux_cli.manifests.paths import discover_profiles, discover_targets, normalize_profile
@@ -38,7 +38,8 @@ from .device_tree import (
     verify_root_bootargs,
     verify_target_identity,
 )
-from .kernel_patches import binding_paths, check_linux_changes, context_inputs, patch_destinations
+from .kernel_patches import binding_paths, check_linux_changes, context_inputs
+from .linux_projection import patch_destinations
 from .output import RunReporter, current_stage, exit_status, run_entrypoint
 
 if TYPE_CHECKING:
@@ -237,7 +238,7 @@ def target_context(
     *,
     build_type: str = "release",
 ) -> tuple[dict[str, Any], dict[str, Any], Path, PreparedLinuxState]:
-    """Load one target/profile and prepare its exact Linux integration tree."""
+    """Load one target/profile and prepare the shared Linux integration tree."""
     target_config = load_target(target, profile, build_type=build_type)
     platform = load_platform(target_config["platform"])
     source, prepared_linux = prepare_linux(sources, target, target_config, platform)
@@ -254,13 +255,6 @@ def prepare_contexts(
         with report_stage(reporter, f"prepare-{label}"):
             _config, _platform, _source, prepared_linux = target_context(
                 sources, target, selected, build_type=build_type
-            )
-            linux = source_lock_entry(sources, _platform["linux"]["source_lock"])
-            fetch(
-                linux["url"],
-                linux["sha256"],
-                CACHE / "downloads/linux",
-                f"linux-{linux['version']}.tar.xz",
             )
             record_text(f"sparse context: ready ({label}, {prepared_linux.linux_recipe[:16]})\n")
 
@@ -338,10 +332,11 @@ def check_one_context(
         linux_state.require_prepared_linux(source, prepared_linux)
 
     output = reset_sparse_output(target, profile, build_type=build_type)
+    linux_state.write_profile_root(output, target_config)
     config_diff = output / "integration-kbuild.patch"
     with report_stage(reporter, f"format-{label}"):
         run(format_command)
-        patch_files = check_linux_changes(inputs, archive, linux["version"], config_diff)
+        patch_files = check_linux_changes(inputs, archive, linux, config_diff)
     with report_stage(reporter, f"checkpatch-{label}"):
         # --root resolves the fplinux compatibles against projected bindings.
         run_checkpatch(checkpatch_sources)

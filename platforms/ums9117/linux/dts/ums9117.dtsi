@@ -41,7 +41,7 @@
 	};
 
 	chosen {
-#include "fplinux-root.dtsi"
+		/include/ "fplinux-root.dtsi"
 	};
 
 	reserved-memory {

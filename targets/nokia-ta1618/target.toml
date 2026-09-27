@@ -23,7 +23,7 @@ config_fragment = "linux/config.fragment"
 memory = { base = 0x80200000, size = 0x03c00000 }
 dtb = "unisoc/ums9117-nokia-ta1618.dtb"
 debug_dtb = "ums9117-nokia-ta1618.dtb"
-patches = ["linux/patches/0001-nokia-ta1618-board.patch"]
+patches = []
 # Only the removable microSD is writable. Internal NAND has a fixed-command
 # read-only interface, without an MTD or generic SPI controller.
 forbidden_dtb_markers = ["spi-nand", "mtd", "ubi", "emmc"]
@@ -50,6 +50,10 @@ destination = "drivers/gpu/drm/ums9117/ta1618-drm.c"
 [[linux.copies]]
 source = "linux/dts/ums9117-nokia-ta1618.dts"
 destination = "arch/arm/boot/dts/unisoc/ums9117-nokia-ta1618.dts"
+
+[[linux.appends]]
+source = "linux/dts/unisoc.Makefile"
+destination = "arch/arm/boot/dts/unisoc/Makefile"
 
 [[linux.appends]]
 source = "linux/arch/arm/mach-ums9117/Kconfig"

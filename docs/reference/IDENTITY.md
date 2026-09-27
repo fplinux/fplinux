@@ -85,7 +85,7 @@ The build derives the following values from the manifest identity:
 - the exact root-node Devicetree binding;
 - user-facing target names emitted by the host tools.
 
-A target DTS includes `fplinux-target-identity.dtsi` and must not repeat its
+A target DTS includes `fplinux-<target>-identity.dtsi` and must not repeat its
 root `model` or `compatible`. The generated `compatible` list orders the exact
 board compatible first and the platform fallback second.
 

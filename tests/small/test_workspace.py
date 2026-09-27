@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,6 +14,9 @@ from unittest import mock
 from fplinux_cli import alpine_state, common
 from fplinux_cli import workspace as workspace_module
 from fplinux_cli.manifests import targets
+from fplinux_cli.manifests.linux import discover_linux_targets
+
+from tests.fixtures import linux_inputs
 
 
 class WorkspaceSnapshotTests(unittest.TestCase):
@@ -31,6 +35,11 @@ class WorkspaceSnapshotTests(unittest.TestCase):
             source = self._source(root)
             with (
                 mock.patch.object(workspace_module, "ROOT", root),
+                mock.patch.object(
+                    workspace_module,
+                    "shared_linux_source_files",
+                    return_value=workspace_module.SharedLinuxSources(),
+                ),
                 mock.patch.object(
                     workspace_module,
                     "target_build_source_files",
@@ -58,6 +67,11 @@ class WorkspaceSnapshotTests(unittest.TestCase):
             source = self._source(root, contents=b"first", mode=0o751)
             with (
                 mock.patch.object(workspace_module, "ROOT", root),
+                mock.patch.object(
+                    workspace_module,
+                    "shared_linux_source_files",
+                    return_value=workspace_module.SharedLinuxSources(),
+                ),
                 mock.patch.object(
                     workspace_module,
                     "target_build_source_files",
@@ -175,6 +189,11 @@ class WorkspaceSnapshotTests(unittest.TestCase):
 
             with (
                 mock.patch.object(workspace_module, "ROOT", root),
+                mock.patch.object(
+                    workspace_module,
+                    "shared_linux_source_files",
+                    return_value=workspace_module.SharedLinuxSources(),
+                ),
                 mock.patch.object(common, "ROOT", root),
                 mock.patch.object(workspace_module, "STAGED_BUILD_SOURCES", ("always.txt",)),
                 mock.patch.object(workspace_module, "load_target", return_value=target),
@@ -235,13 +254,152 @@ class WorkspaceSnapshotTests(unittest.TestCase):
 
             self.assertNotEqual(first.recipe, second.recipe)
 
-    def test_microsd_source_snapshot_loads_selected_and_default_configuration(self) -> None:
-        """The staged source supports the Linux consumer's comparison with RAM policy."""
+    def test_peer_linux_edits_update_staging_without_invalidating_selected_recipe(self) -> None:
+        """Peer C/DTS changes stay auxiliary while a shared driver remains causal."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            linux_inputs.write(root, "sources.lock.toml", f'[linux]\nsha256 = "{"1" * 64}"\n')
+            platform = linux_inputs.platform(root, "demo", source_lock="linux", arch="arm")
+            linux_inputs.platform(root, "other", source_lock="linux", arch="riscv")
+            selected = linux_inputs.target(root, "phone-a", platform_name="demo")
+            peer_manifest = linux_inputs.target(
+                root, "phone-b", platform_name="other", arch="riscv"
+            )
+            peer_manifest.write_text(
+                peer_manifest.read_text(encoding="utf-8")
+                .replace("patches = []", 'patches = ["linux/shared.patch"]', 1)
+                .replace(
+                    "appends = []",
+                    'appends = [{source = "linux/shared.Kconfig", '
+                    'destination = "drivers/Kconfig"}]',
+                ),
+                encoding="utf-8",
+            )
+            peer_patch = linux_inputs.write(
+                root,
+                "targets/phone-b/linux/shared.patch",
+                "--- a/drivers/shared.c\n+++ b/drivers/shared.c\n@@ -1 +1 @@\n-old\n+new\n",
+            )
+            peer_append = linux_inputs.write(
+                root, "targets/phone-b/linux/shared.Kconfig", "config BOARD_B\n\tbool\n"
+            )
+            common_driver = root / "platforms/demo/common.c"
+            causal_sources = [
+                (path.relative_to(root).as_posix(), path)
+                for path in (
+                    root / "sources.lock.toml",
+                    platform,
+                    selected,
+                    common_driver,
+                    root / "targets/phone-a/linux/board.c",
+                    root / "targets/phone-a/linux/board.dts",
+                )
+            ]
+            target_config = {"platform": "demo", "device_data": {"groups": {}}}
+            with (
+                mock.patch.object(workspace_module, "ROOT", root),
+                mock.patch.object(workspace_module, "load_target", return_value=target_config),
+                mock.patch.object(
+                    workspace_module, "load_platform", return_value=common.load_toml(platform)
+                ),
+                mock.patch.object(
+                    workspace_module, "target_build_source_files", return_value=causal_sources
+                ),
+            ):
+                before = workspace_module.target_workspace_snapshot("phone-a")
+                before_path = workspace_module.stage_workspace_snapshot(before)
+                peer_driver = root / "targets/phone-b/linux/board.c"
+                peer_dts = root / "targets/phone-b/linux/board.dts"
+                peer_driver.write_bytes(b"changed peer driver\n")
+                peer_driver.chmod(0o640)
+                peer_dts.write_bytes(b"changed peer device tree\n")
+                changed = workspace_module.target_workspace_snapshot("phone-a")
+                changed_path = workspace_module.stage_workspace_snapshot(changed)
+                self.assertEqual(before.recipe, changed.recipe)
+                self.assertNotEqual(before_path, changed_path)
+                self.assertEqual(
+                    (before_path / "targets/phone-b/linux/board.c").read_bytes(),
+                    b"phone-b driver\n",
+                )
+                staged_peer = changed_path / "targets/phone-b/linux/board.c"
+                self.assertEqual(staged_peer.read_bytes(), b"changed peer driver\n")
+                self.assertEqual(staged_peer.stat().st_mode & 0o777, 0o640)
+                self.assertEqual(
+                    (changed_path / "targets/phone-b/linux/board.dts").read_bytes(),
+                    b"changed peer device tree\n",
+                )
+                staged_targets = discover_linux_targets(
+                    changed_path, {"linux": {"sha256": "1" * 64}}, "1" * 64
+                )
+                self.assertEqual(
+                    [target.name for target in staged_targets], ["phone-a", "phone-b"]
+                )
+
+                for relative in ("bootstrap/main.c", "firmware/private.bin", "rootfs/config"):
+                    linux_inputs.write(root, f"targets/phone-b/{relative}", "unrelated\n")
+                unrelated = workspace_module.target_workspace_snapshot("phone-a")
+                self.assertEqual(changed.recipe, unrelated.recipe)
+                self.assertEqual(changed.materialization_recipe, unrelated.materialization_recipe)
+                with peer_manifest.open("a", encoding="utf-8") as output:
+                    output.write(
+                        '\n[rootfs]\npackages = ["unrelated"]\n[bootstrap]\nsource = "missing"\n'
+                    )
+                self.assertEqual(
+                    workspace_module.target_workspace_snapshot("phone-a").recipe, changed.recipe
+                )
+
+                common_driver.write_bytes(b"changed shared driver\n")
+                shared_change = workspace_module.target_workspace_snapshot("phone-a")
+                self.assertNotEqual(changed.recipe, shared_change.recipe)
+                common_driver.write_bytes(b"common driver\n")
+                for shared in (peer_patch, peer_append, root / "platforms/other/common.c"):
+                    original = shared.read_bytes()
+                    shared.write_bytes(original + b"changed\n")
+                    self.assertNotEqual(
+                        workspace_module.target_workspace_snapshot("phone-a").recipe,
+                        changed.recipe,
+                        shared,
+                    )
+                    shared.write_bytes(original)
+                peer_manifest.write_text(
+                    peer_manifest.read_text(encoding="utf-8").replace(
+                        'destination = "drivers/Kconfig"', 'destination = "arch/arm/Kconfig"'
+                    ),
+                    encoding="utf-8",
+                )
+                redirected = workspace_module.target_workspace_snapshot("phone-a")
+                self.assertNotEqual(redirected.recipe, changed.recipe)
+                peer_manifest.write_text(
+                    peer_manifest.read_text(encoding="utf-8").replace(
+                        'destination = "drivers/other/phone-b.c"',
+                        'destination = "drivers/shared.c"',
+                    ),
+                    encoding="utf-8",
+                )
+                self.assertNotEqual(
+                    workspace_module.target_workspace_snapshot("phone-a").recipe,
+                    redirected.recipe,
+                )
+                workspace_module.discard_staged_workspace_snapshot(changed, changed_path)
+                self.assertFalse(changed_path.exists())
+                self.assertTrue(before_path.is_dir())
+
+    def test_microsd_source_snapshot_supports_build_imports_and_both_configurations(self) -> None:
+        """The staged source loads the build consumer and selected/default boot policies."""
         sources = workspace_module.target_build_source_files("nokia-ta1618", "microsd-uboot")
         snapshot = workspace_module.workspace_snapshot(sources)
         with tempfile.TemporaryDirectory() as temporary:
             with mock.patch.object(workspace_module, "ROOT", Path(temporary)):
                 staged = workspace_module.stage_workspace_snapshot(snapshot)
+            imported = subprocess.run(
+                [sys.executable, "-B", "-c", "import fplinux_cli.build.__main__"],
+                cwd=staged,
+                env={"PYTHONPATH": str(staged / "scripts")},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(imported.returncode, 0, imported.stderr)
             with mock.patch.object(common, "ROOT", staged):
                 card = targets.load_target("nokia-ta1618", "microsd-uboot")
                 ram = targets.load_target("nokia-ta1618")

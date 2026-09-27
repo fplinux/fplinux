@@ -150,6 +150,11 @@ class FirmwareInputTests(unittest.TestCase):
             mock.patch.object(workspace_module, "load_target", return_value=target_config),
             mock.patch.object(
                 workspace_module,
+                "shared_linux_source_files",
+                return_value=workspace_module.SharedLinuxSources(),
+            ),
+            mock.patch.object(
+                workspace_module,
                 "target_build_source_files",
                 return_value=[("base-source", base)],
             ),
