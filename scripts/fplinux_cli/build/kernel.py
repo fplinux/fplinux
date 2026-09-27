@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import mmap
+import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -212,6 +213,7 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
             f"O={output}",
             f"ARCH={platform['linux']['arch']}",
             f"CROSS_COMPILE={cross}",
+            f"CC=ccache {cross}gcc",
         ]
         config_script = inputs_build.require_file(
             linux_source / platform["linux"]["config_script"]
@@ -295,13 +297,19 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
             if initramfs_record is not None:
                 kbuild_state.materialize_initramfs_input(work, rootfs, plan)
             shutil.copyfile(defconfig, output / ".config")
+            ccache_environment = {
+                "CCACHE_DIR": str(inputs_build.CACHE / "ccache"),
+                "CCACHE_MAXSIZE": "1GiB",
+                "CCACHE_BASEDIR": str(inputs_build.OUTPUT),
+                "CCACHE_NAMESPACE": os.environ["FPLINUX_CONTAINER_IMAGE_RECIPE"],
+            }
             for command in commands[:-1]:
-                process_build.run(command)
+                process_build.run(command, environment=ccache_environment)
             assert_profile_kconfig(output / ".config", config_enable, config_disable)
             assert_build_type_kconfig(
                 output / ".config", config_paths[-1], target_config["build_type"]
             )
-            process_build.run(commands[-1])
+            process_build.run(commands[-1], environment=ccache_environment)
 
         zimage = inputs_build.require_file(output / platform["linux"]["image_output"])
         vmlinux = inputs_build.require_file(output / "vmlinux")

@@ -44,6 +44,8 @@ def _build_container_command(  # noqa: PLR0913
     snapshot: WorkspaceSnapshot,
     workspace: Path,
     downloads: Path,
+    ccache: Path,
+    host_tools: Path,
     apk_signing: Path,
     apks: Path,
     rootfs: Path,
@@ -80,6 +82,10 @@ def _build_container_command(  # noqa: PLR0913
         "/tmp:8g",  # noqa: S108 -- container tmpfs.
         "--volume",
         f"{downloads}:/cache/downloads",
+        "--volume",
+        f"{ccache}:/cache/ccache",
+        "--volume",
+        f"{host_tools}:/cache/host-tools",
         "--volume",
         f"{apk_signing}:/cache/apk-signing",
         "--volume",
@@ -244,6 +250,8 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
         )
     apk_signing = ensure_build_directory(cache / "apk-signing")
     downloads = ensure_build_directory(cache / "downloads")
+    ccache = ensure_build_directory(cache / "ccache")
+    host_tools = ensure_build_directory(cache / "host-tools")
     apks = ensure_build_directory(cache / "apks")
     rootfs = ensure_build_directory(cache / "rootfs")
     linux = ensure_build_directory(cache / "linux")
@@ -269,6 +277,8 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
                     snapshot=snapshot,
                     workspace=workspace,
                     downloads=downloads,
+                    ccache=ccache,
+                    host_tools=host_tools,
                     apk_signing=apk_signing,
                     apks=apks,
                     rootfs=rootfs,

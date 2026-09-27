@@ -75,6 +75,11 @@ def _positive_jobs(value: str) -> int:
     return jobs
 
 
+def _default_build_jobs() -> int:
+    """Respect available CPUs while leaving a busy workstation usable."""
+    return min(8, os.process_cpu_count() or 1)
+
+
 def _profile_name(value: str) -> str:
     """Accept one of the two public build profiles."""
     if TARGET_NAME.fullmatch(value) is None:
@@ -357,7 +362,7 @@ def _add_device_data_prepare_command(
     prepare.add_argument(
         "--jobs",
         type=_positive_jobs,
-        default=max(1, os.cpu_count() or 1),
+        default=_default_build_jobs(),
         metavar="N",
         help="limit jobs when the read-only NAND loader must be built",
     )
@@ -458,7 +463,12 @@ def main() -> None:
         metavar="NAME",
         help="build one global profile (default: default)",
     )
-    build_parser.add_argument("--jobs", type=int, default=max(1, os.cpu_count() or 1))
+    build_parser.add_argument(
+        "--jobs",
+        type=int,
+        default=_default_build_jobs(),
+        help="limit parallel compilation (default: available CPUs, up to 8)",
+    )
     build_parser.add_argument(
         "--verbose",
         action="store_true",

@@ -820,6 +820,8 @@ class CommandLifecycleTests(unittest.TestCase):
         roots = {
             "workspace": self.root / "workspace",
             "downloads": self.root / "cache/downloads",
+            "ccache": self.root / "cache/ccache",
+            "host_tools": self.root / "cache/host-tools",
             "apk_signing": self.root / "cache/apk-signing",
             "apks": self.root / "cache/apks",
             "rootfs": self.root / "cache/rootfs",
@@ -848,6 +850,8 @@ class CommandLifecycleTests(unittest.TestCase):
             mounts,
             [
                 f"{roots['downloads']}:/cache/downloads",
+                f"{roots['ccache']}:/cache/ccache",
+                f"{roots['host_tools']}:/cache/host-tools",
                 f"{roots['apk_signing']}:/cache/apk-signing",
                 f"{roots['apks']}:/cache/apks",
                 f"{roots['rootfs']}:/cache/rootfs",
@@ -888,6 +892,8 @@ class CommandLifecycleTests(unittest.TestCase):
         roots = {
             "workspace": self.root / "workspace",
             "downloads": self.root / "cache/downloads",
+            "ccache": self.root / "cache/ccache",
+            "host_tools": self.root / "cache/host-tools",
             "apk_signing": self.root / "cache/apk-signing",
             "apks": self.root / "cache/apks",
             "rootfs": self.root / "cache/rootfs",
