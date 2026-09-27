@@ -12,7 +12,10 @@ session with the `default` RAM profile and persists across boots with the
 cutting power to a persistent root.
 
 The supported workflow installs the bundled APKs locally with `--no-network`;
-no HTTPS download helper is included for APK repositories.
+that remains the package installation and trust policy. The system also includes
+`uclient-fetch` and its `wget` command with a CA certificate bundle for HTTP and
+HTTPS downloads. HTTPS transport does not make an APK trusted or configure a
+package repository.
 
 ## Source checkout
 

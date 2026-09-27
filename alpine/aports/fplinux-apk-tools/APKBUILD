@@ -1,11 +1,12 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-apk-tools
 pkgver=3.0.6
-pkgrel=0
+pkgrel=1
 pkgdesc="Alpine Package Keeper for FPLinux built with Mbed TLS instead of OpenSSL"
 url="https://gitlab.alpinelinux.org/alpine/apk-tools"
 arch="armv7"
 license="GPL-2.0-only"
+depends="fplinux-uclient"
 makedepends_build="clang22 lld22 meson samurai"
 makedepends_host="linux-headers mbedtls3-dev musl-dev zlib-dev"
 options="!check"
@@ -24,7 +25,7 @@ build() {
 		pkg_config_libdir = ['$CBUILDROOT/usr/lib/pkgconfig', '$CBUILDROOT/usr/share/pkgconfig']
 	EOF
 	# Mbed TLS provides the digests and signatures; downloads go through
-	# BusyBox wget, so no TLS library is linked. Help text needs Lua and is
+	# uclient-fetch with its Mbed TLS backend. Help text needs Lua and is
 	# left out. Thumb-2 keeps the binaries smaller than the ARM instruction
 	# set, as in the Alpine build.
 	CFLAGS="$CFLAGS -mthumb" VERSION="$pkgver-r$pkgrel" abuild-meson \

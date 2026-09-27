@@ -30,6 +30,11 @@ packages = [
 [runtime.additions]
 fplinux-apk-tools = ["mbedtls3-3.6.7-r0.apk"]
 
+fplinux-uclient = [
+  "ca-certificates-bundle-20260909-r0.apk",
+  "mbedtls3-3.6.7-r0.apk",
+]
+
 fplinux-terminal = [
   "bash-5.3.9-r1.apk",
   "libncursesw-6.6_p20260516-r0.apk",
@@ -96,6 +101,8 @@ packages = [
   "gmp-6.3.0-r4.apk",
   "isl26-0.26-r2.apk",
   "jansson-2.15.0-r0.apk",
+  "json-c-0.18-r1.apk",
+  "json-c-dev-0.18-r1.apk",
   "libatomic-15.2.0-r5.apk",
   "libedit-20260508.3.1-r1.apk",
   "libedit-dev-20260508.3.1-r1.apk",
@@ -140,6 +147,18 @@ repository = "main"
 file = "bash-5.3.9-r1.apk"
 sha256 = "da3e6956ac0ec1b92d32994f0cfe3f2ba8cee72dc0a4d2381c89d844b833002e"
 bytes = 445555
+
+[[package]]
+repository = "main"
+file = "ca-certificates-bundle-20260909-r0.apk"
+sha256 = "a7940ce710d590e3f840aa9303a03d981d23f33cb11c2d9710d409a3f5a555a8"
+bytes = 108525
+
+[[package]]
+repository = "main"
+file = "json-c-dev-0.18-r1.apk"
+sha256 = "8ccf5545dc30cb7188e38657f66aa67f57f12947456c3b0d96ff237c50d31833"
+bytes = 63447
 
 [[package]]
 repository = "main"
