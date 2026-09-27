@@ -64,7 +64,6 @@ static const struct ums9117_drm_command inoi244_panel_wake_finish[] = {
 static const struct ums9117_drm_profile inoi244_drm_profile = {
 	.name = "inoi244-rgb565",
 	.transport = UMS9117_DRM_TRANSPORT_LCM_DBI,
-	.completion = UMS9117_DRM_COMPLETION_POLL,
 	.init = inoi244_panel_init,
 	.init_count = ARRAY_SIZE(inoi244_panel_init),
 	.init_finish = inoi244_panel_init_finish,

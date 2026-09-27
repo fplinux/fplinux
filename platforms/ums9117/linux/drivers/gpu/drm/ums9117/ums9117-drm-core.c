@@ -5,7 +5,6 @@
 #include <linux/dma-fence.h>
 #include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
-#include <linux/iopoll.h>
 #include <linux/ktime.h>
 #include <linux/mfd/syscon.h>
 #include <linux/module.h>
@@ -84,7 +83,6 @@
 #define UMS9117_AP_AHB_LCDC_RESET BIT(1)
 
 #define UMS9117_DRM_FRAME_TIMEOUT_MS 250U
-#define UMS9117_DRM_FRAME_TIMEOUT_US (UMS9117_DRM_FRAME_TIMEOUT_MS * 1000U)
 #define UMS9117_DRM_WLED_DISABLE_ATTEMPTS 3U
 #define UMS9117_DRM_WLED_DISABLE_RETRY_US 5000U
 static struct ums9117_drm *to_ums9117_drm(struct drm_device *drm)
@@ -546,28 +544,12 @@ static irqreturn_t ums9117_drm_lcdc_irq(int irq, void *data)
 static int ums9117_drm_wait_frame(struct ums9117_drm *udrm)
 {
 	unsigned long flags;
-	u32 raw;
 	int ret = 0;
 
-	if (udrm->profile->completion == UMS9117_DRM_COMPLETION_IRQ) {
-		if (!wait_for_completion_timeout(
-			    &udrm->frame_done,
-			    msecs_to_jiffies(UMS9117_DRM_FRAME_TIMEOUT_MS)))
-			ret = -ETIMEDOUT;
-	} else {
-		ret = readl_poll_timeout(udrm->lcdc + UMS9117_LCDC_IRQ_RAW, raw,
-					 raw & UMS9117_LCDC_IRQ_DONE, 1000,
-					 UMS9117_DRM_FRAME_TIMEOUT_US);
-		if (!ret) {
-			writel(UMS9117_LCDC_IRQ_DONE,
-			       udrm->lcdc + UMS9117_LCDC_IRQ_CLR);
-			readl(udrm->lcdc + UMS9117_LCDC_IRQ_RAW);
-			spin_lock_irqsave(&udrm->lock, flags);
-			udrm->in_flight = false;
-			udrm->stats.frames_done_poll++;
-			spin_unlock_irqrestore(&udrm->lock, flags);
-		}
-	}
+	if (!wait_for_completion_timeout(
+		    &udrm->frame_done,
+		    msecs_to_jiffies(UMS9117_DRM_FRAME_TIMEOUT_MS)))
+		ret = -ETIMEDOUT;
 	if (ret) {
 		spin_lock_irqsave(&udrm->lock, flags);
 		udrm->stats.frame_timeouts++;
@@ -586,8 +568,7 @@ static int ums9117_drm_wait_frame(struct ums9117_drm *udrm)
 		writel(readl(udrm->lcdc + UMS9117_LCDC_IRQ_EN) &
 			       ~UMS9117_LCDC_IRQ_DONE,
 		       udrm->lcdc + UMS9117_LCDC_IRQ_EN);
-	if (udrm->irq >= 0)
-		synchronize_irq(udrm->irq);
+	synchronize_irq(udrm->irq);
 	return ret;
 }
 
@@ -645,8 +626,7 @@ static int ums9117_drm_send_frame(struct ums9117_drm *udrm,
 	wmb();
 	reinit_completion(&udrm->frame_done);
 	writel(UMS9117_LCDC_IRQ_DONE, udrm->lcdc + UMS9117_LCDC_IRQ_CLR);
-	writel(udrm->irq >= 0 ? UMS9117_LCDC_IRQ_DONE : 0,
-	       udrm->lcdc + UMS9117_LCDC_IRQ_EN);
+	writel(UMS9117_LCDC_IRQ_DONE, udrm->lcdc + UMS9117_LCDC_IRQ_EN);
 	value = readl(udrm->lcdc + UMS9117_LCDC_CTRL);
 	value &= ~UMS9117_LCDC_CTRL_RGB_MODE_MASK;
 	value &= ~udrm->profile->lcdc_ctrl_clear;
@@ -829,8 +809,7 @@ static void ums9117_drm_pipe_disable(struct drm_simple_display_pipe *pipe)
 
 	mutex_lock(&udrm->panel_lock);
 	ums9117_drm_stop_lcdc(udrm);
-	if (udrm->irq >= 0)
-		synchronize_irq(udrm->irq);
+	synchronize_irq(udrm->irq);
 	if (udrm->state == UMS9117_DRM_PANEL_STATE_ERROR) {
 		ums9117_drm_fail_dark(udrm);
 		goto out;
@@ -1009,7 +988,7 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 	len = sysfs_emit(
 		buf,
 		"init_mode=cold-reset\n"
-		"completion_mode=%s\n"
+		"completion_mode=irq\n"
 		"timeout_mode=finite-to-error\n"
 		"damage_mode=full-frame-atomic\n"
 		"lifecycle_mode=wled+dcs-display+sleep\n"
@@ -1021,7 +1000,6 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		"transport_faulted=%u\n"
 		"frames_started=%llu\n"
 		"frames_done_irq=%llu\n"
-		"frames_done_poll=%llu\n"
 		"frame_timeouts=%llu\n"
 		"irq_spurious=%llu\n"
 		"irq_missed=%llu\n"
@@ -1041,9 +1019,6 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		"last_error_dcs_command=0x%02x\n"
 		"last_error_irq_status=0x%08x\n"
 		"last_error_irq_raw=0x%08x\n",
-		udrm->profile->completion == UMS9117_DRM_COMPLETION_IRQ ?
-			"irq" :
-			"poll-raw-done",
 		udrm->profile->name,
 		udrm->profile->transport == UMS9117_DRM_TRANSPORT_SPI1_3WIRE ?
 			"spi1-3wire" :
@@ -1053,11 +1028,10 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		udrm->wled_on	  ? "on" :
 				    "off",
 		udrm->transport_faulted ? 1U : 0U, stats.frames_started,
-		stats.frames_done_irq, stats.frames_done_poll,
-		stats.frame_timeouts, stats.irq_spurious, stats.irq_missed,
-		stats.blank_count, stats.blank_completed, stats.wake_count,
-		stats.dcs_errors, stats.dcs_timeouts, stats.wled_errors,
-		stats.fail_dark_failures, stats.present_nv16,
+		stats.frames_done_irq, stats.frame_timeouts, stats.irq_spurious,
+		stats.irq_missed, stats.blank_count, stats.blank_completed,
+		stats.wake_count, stats.dcs_errors, stats.dcs_timeouts,
+		stats.wled_errors, stats.fail_dark_failures, stats.present_nv16,
 		stats.present_rgb565, udrm->last_transfer_ns,
 		&udrm->last_y_address, &udrm->last_uv_address,
 		udrm->last_error_errno, udrm->last_dcs_command,
@@ -1094,8 +1068,7 @@ int ums9117_drm_probe(struct platform_device *pdev)
 	int ret;
 
 	if (!profile || !profile->name || !profile->width || !profile->height ||
-	    !profile->init || !profile->init_count ||
-	    profile->completion > UMS9117_DRM_COMPLETION_POLL)
+	    !profile->init || !profile->init_count)
 		return -EINVAL;
 	udrm = devm_drm_dev_alloc(dev, &ums9117_drm_driver, struct ums9117_drm,
 				  drm);
@@ -1104,7 +1077,6 @@ int ums9117_drm_probe(struct platform_device *pdev)
 	drm = &udrm->drm;
 	udrm->profile = profile;
 	udrm->state = UMS9117_DRM_PANEL_STATE_COLD_INIT;
-	udrm->irq = -1;
 	spin_lock_init(&udrm->lock);
 	mutex_init(&udrm->panel_lock);
 	init_completion(&udrm->frame_done);
@@ -1128,11 +1100,9 @@ int ums9117_drm_probe(struct platform_device *pdev)
 		ret = ums9117_drm_lcm_init_transport(udrm, pdev);
 	if (ret)
 		return ret;
-	if (profile->completion == UMS9117_DRM_COMPLETION_IRQ) {
-		udrm->irq = platform_get_irq(pdev, 0);
-		if (udrm->irq < 0)
-			return udrm->irq;
-	}
+	udrm->irq = platform_get_irq(pdev, 0);
+	if (udrm->irq < 0)
+		return udrm->irq;
 	writel(UMS9117_AP_AHB_LCDC_GATE | UMS9117_AP_AHB_LCM_GATE,
 	       udrm->ap_ahb_gate_set);
 	usleep_range(1000, 2000);
@@ -1155,12 +1125,10 @@ int ums9117_drm_probe(struct platform_device *pdev)
 		readl(udrm->lcdc + UMS9117_LCDC_Y2R_SATURATION);
 	udrm->rgb_y2r_brightness =
 		readl(udrm->lcdc + UMS9117_LCDC_Y2R_BRIGHTNESS);
-	if (udrm->irq >= 0) {
-		ret = devm_request_irq(dev, udrm->irq, ums9117_drm_lcdc_irq, 0,
-				       dev_name(dev), udrm);
-		if (ret)
-			return ret;
-	}
+	ret = devm_request_irq(dev, udrm->irq, ums9117_drm_lcdc_irq, 0,
+			       dev_name(dev), udrm);
+	if (ret)
+		return ret;
 	ret = ums9117_drm_wled_off_bounded(udrm);
 	if (ret)
 		return ret;
@@ -1226,8 +1194,7 @@ void ums9117_drm_shutdown(struct platform_device *pdev)
 	udrm->stopping = true;
 	spin_unlock_irqrestore(&udrm->lock, flags);
 	ums9117_drm_stop_lcdc(udrm);
-	if (udrm->irq >= 0)
-		synchronize_irq(udrm->irq);
+	synchronize_irq(udrm->irq);
 	ums9117_drm_fail_dark(udrm);
 	mutex_unlock(&udrm->panel_lock);
 }

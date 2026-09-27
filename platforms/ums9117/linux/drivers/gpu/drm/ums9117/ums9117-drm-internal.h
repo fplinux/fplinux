@@ -30,7 +30,6 @@ enum ums9117_drm_panel_state {
 struct ums9117_drm_stats {
 	u64 frames_started;
 	u64 frames_done_irq;
-	u64 frames_done_poll;
 	u64 frame_timeouts;
 	u64 irq_spurious;
 	u64 irq_missed;

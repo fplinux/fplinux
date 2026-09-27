@@ -94,7 +94,7 @@ Status terms and limits shared by every phone are defined in the
 
 ## Hardware interfaces
 
-The `128×160` `NV3023` panel uses LCM/DBI with polled transfer completion.
+The `128×160` `NV3023` panel uses LCM/DBI with interrupt-driven transfer completion.
 The configured LCD brightness range is `0` through `31`, with `31` as the
 default. Physical LCD brightness levels have not been tested.
 
