@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config DRM_TA1618
+	bool "Nokia TA-1618 LCDC display"
+	depends on DRM && MACH_NOKIA_TA1618
+	select DRM_UMS9117
+	help
+	  Drive the TA-1618 ST7789P3 panel through SPI1 and the LCDC with
+	  atomic RGB565 and NV16 modesetting. LCDC_DONE completes each
+	  transfer before its buffers are released. Blanking turns off WLED
+	  and enters panel sleep; waking restores WLED after a complete frame.

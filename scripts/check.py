@@ -488,6 +488,13 @@ def userspace_c_include_flags(source: str) -> list[str]:
         flags.extend(pkg_config_cflags("dbus-1"))
     if source == "lib/fplinux/fplinux-input-session.c":
         flags.extend(pkg_config_cflags("libinput"))
+    shared = alpine_state.SHARED_APORT_SOURCES.get(path.parent.name, ())
+    if source == "lib/fplinux/fplinux-drm-session.c" or (
+        "include/fplinux/fplinux-drm-session.h" in shared
+    ):
+        flags.extend(pkg_config_cflags("libdrm"))
+    if source == "lib/fplinux/fplinux-keyboard-text.c":
+        flags.extend(pkg_config_cflags("xkbcommon"))
     if (
         len(path.parts) >= 3
         and path.parts[:2] == APORT_ROOT

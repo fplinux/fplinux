@@ -195,9 +195,9 @@ class AlpineStateTests(unittest.TestCase):
             )
         self.assertEqual(selected, (self.packages[0], extra))
 
-    def test_profile_can_exclude_gadget_input_stack_and_retain_console(self) -> None:
-        """A host-only rootfs removes gadget-only input without losing the console."""
-        common = ("fplinux-base", "fplinux-console", "fplinux-input")
+    def test_profile_can_exclude_gadget_input_stack_and_retain_terminal(self) -> None:
+        """A host-only rootfs removes gadget-only input without losing the terminal."""
+        common = ("fplinux-base", "fplinux-terminal", "fplinux-input")
         platform = ("fplinux-usb-gadget", "fplinux-ssh")
         for package in (*common, *platform):
             self._write(f"alpine/aports/{package}/APKBUILD", f"pkgname={package}\n".encode())
@@ -219,7 +219,7 @@ class AlpineStateTests(unittest.TestCase):
                 self.root,
             )
 
-        self.assertEqual(selected, ("fplinux-base", "fplinux-console"))
+        self.assertEqual(selected, ("fplinux-base", "fplinux-terminal"))
 
     def test_profile_rootfs_rejects_unknown_excludes_and_duplicate_additions(self) -> None:
         """A profile cannot silently remove or repeat an unowned rootfs package."""
@@ -377,6 +377,45 @@ class AlpineStateTests(unittest.TestCase):
         self.assertNotEqual(before[self.packages[0]], after[self.packages[0]])
         self.assertEqual(before[self.packages[1]], after[self.packages[1]])
 
+    def test_library_changes_invalidate_consumer_recipes_only(self) -> None:
+        """Library source and configuration changes invalidate linked APKs and rootfs inputs."""
+        packages = (
+            "fplinux-libdrm",
+            "fplinux-libtsm",
+            "fplinux-libxkbcommon",
+            "fplinux-present",
+            "fplinux-terminal",
+        )
+        for name in packages:
+            self._write(f"alpine/aports/{name}/APKBUILD", f"pkgname={name}\n".encode())
+            for source in alpine_state.shared_aport_sources(name, self.root):
+                self._write(source.relative_to(self.root).as_posix(), b"shared source\n")
+
+        cases = (
+            ("fplinux-libdrm", "library.c", {"fplinux-present", "fplinux-terminal"}),
+            ("fplinux-libtsm", "APKBUILD", {"fplinux-terminal"}),
+            ("fplinux-libxkbcommon", "APKBUILD", {"fplinux-terminal"}),
+        )
+        for library, filename, consumers in cases:
+            with self.subTest(library=library):
+                before = {
+                    name: alpine_state.alpine_package_recipe(
+                        name, "1" * 64, self.signing_key, self.root
+                    )
+                    for name in packages
+                }
+                rootfs_before = self._recipe(packages=("fplinux-terminal",))
+                self._write(f"alpine/aports/{library}/{filename}", b"changed library input\n")
+                for name in packages:
+                    after = alpine_state.alpine_package_recipe(
+                        name, "1" * 64, self.signing_key, self.root
+                    )
+                    if name in {library, *consumers}:
+                        self.assertNotEqual(before[name], after, name)
+                    else:
+                        self.assertEqual(before[name], after, name)
+                self.assertNotEqual(rootfs_before, self._recipe(packages=("fplinux-terminal",)))
+
     def test_unselected_aport_is_not_causal(self) -> None:
         """Files outside the selected package set cannot invalidate its rootfs."""
         first = self._recipe()
@@ -488,6 +527,111 @@ class AlpineStateTests(unittest.TestCase):
 
         self.assertEqual(receipt.read_bytes(), previous_receipt)
         self.assertEqual(package.read_bytes(), previous_package)
+
+    def test_local_library_apks_populate_fresh_sysroots_on_builds_and_cache_hits(self) -> None:
+        """Fake abuild/APK processes exercise dependency files and causal cache decisions."""
+        consumer = "fplinux-present"
+        library = "fplinux-libdrm"
+        unrelated = self.packages[0]
+        for name in (consumer, library):
+            self._write(f"alpine/aports/{name}/APKBUILD", f"pkgname={name}\n".encode())
+            for source in alpine_state.shared_aport_sources(name, self.root):
+                self._write(source.relative_to(self.root).as_posix(), b"shared source\n")
+        library_source = self._write(f"alpine/aports/{library}/library.c", b"library version 1\n")
+        cache = Path(self.temporary.name) / "cache"
+        sources = cache / "downloads/alpine/sources"
+        sources.mkdir(parents=True)
+        private_key = self._write("keys/fplinux-build.rsa", b"private key\n")
+        public_key = self._write("keys/fplinux-build.rsa.pub", b"public key\n")
+        builds: list[str] = []
+        original_recipe = alpine_state.alpine_package_recipe
+
+        def package_recipe(name: str, image: str, signing_key: str) -> str:
+            return original_recipe(name, image, signing_key, root=self.root)
+
+        def list_packages(command: list[str], cwd: Path, environment: dict[str, str]) -> str:
+            del command, environment
+            names = (library, f"{library}-dev") if cwd.name == library else (cwd.name,)
+            return "\n".join(f"{name}-1.0-r0.apk" for name in names)
+
+        def run_as_builder(command: list[str], cwd: Path, environment: dict[str, str]) -> None:
+            if command == ["apkbuild-lint", "APKBUILD"]:
+                return
+            sysroot = Path(environment["CBUILDROOT"])
+            if cwd.name == consumer:
+                for installed in (library, f"{library}-dev"):
+                    self.assertEqual(
+                        (sysroot / installed).read_bytes(), library_source.read_bytes()
+                    )
+            builds.append(cwd.name)
+            repository = Path(environment["REPODEST"])
+            for filename in list_packages(command, cwd, environment).splitlines():
+                (repository / filename).write_bytes(library_source.read_bytes())
+
+        def install_apks(command: list[str]) -> None:
+            """Replace APK installation with file markers; signature checks remain untested."""
+            self.assertEqual(command[0], "apk")
+            self.assertIn("--no-network", command)
+            self.assertIn("--no-scripts", command)
+            self.assertNotIn("--allow-untrusted", command)
+            keys = Path(command[command.index("--keys-dir") + 1])
+            self.assertEqual((keys / public_key.name).read_bytes(), public_key.read_bytes())
+            sysroot = Path(command[command.index("--root") + 1])
+            for filename in command[command.index("add") + 1 :]:
+                apk = Path(filename)
+                name = apk.name.removesuffix("-1.0-r0.apk")
+                (sysroot / name).write_bytes(apk.read_bytes())
+
+        invocation = 0
+
+        def build_apks() -> None:
+            nonlocal invocation
+            work = Path(self.temporary.name) / f"library-work-{invocation}"
+            invocation += 1
+            sysroot = work / "sysroot"
+            sysroot.mkdir(parents=True)
+            alpine_builder._build_fplinux_apks(  # noqa: SLF001
+                {"arch": "armv7", "triplet": "armv7-alpine-linux-musleabihf"},
+                sysroot=sysroot,
+                work=work,
+                jobs=1,
+                private_key=private_key,
+                public_key=public_key,
+                build_packages=(consumer, unrelated),
+            )
+            for installed in (library, f"{library}-dev"):
+                self.assertEqual((sysroot / installed).read_bytes(), library_source.read_bytes())
+
+        with (
+            mock.patch.object(alpine_builder, "CACHE", cache),
+            mock.patch.object(alpine_builder, "ROOT", self.root),
+            mock.patch.object(os, "geteuid", return_value=0),
+            mock.patch.dict(os.environ, {"FPLINUX_CONTAINER_IMAGE_RECIPE": "1" * 64}),
+            mock.patch.object(alpine_builder, "_alpine_source_cache", return_value=sources),
+            mock.patch.object(alpine_builder, "_chown_tree"),
+            mock.patch.object(alpine_builder, "_builder_output", side_effect=list_packages),
+            mock.patch.object(alpine_builder, "_run_as_builder", side_effect=run_as_builder),
+            mock.patch.object(alpine_builder, "_run", side_effect=install_apks),
+            mock.patch.object(
+                alpine_builder,
+                "_apk_package_name",
+                side_effect=lambda path: path.name.removesuffix("-1.0-r0.apk"),
+            ),
+            mock.patch.object(alpine_builder, "_log_message"),
+            mock.patch.object(alpine_state, "alpine_package_recipe", side_effect=package_recipe),
+        ):
+            build_apks()
+            self.assertEqual(set(builds), {library, consumer, unrelated})
+            builds.clear()
+            build_apks()
+            self.assertEqual(builds, [])
+            self._write(f"alpine/aports/{consumer}/program.c", b"changed consumer\n")
+            build_apks()
+            self.assertEqual(builds, [consumer])
+            builds.clear()
+            library_source.write_bytes(b"library version 2\n")
+            build_apks()
+            self.assertEqual(set(builds), {library, consumer})
 
     def test_cached_rootfs_reuse_honors_mocked_bundle_solver_results(self) -> None:
         """Stub APK builds and CPIO/solver processes; reuse must honor installation errors."""
@@ -644,7 +788,7 @@ class AlpineStateTests(unittest.TestCase):
     def test_bundle_install_check_interprets_mocked_apk_simulation(self) -> None:
         """A mocked offline ``apk add --simulate`` result accepts or rejects the bundle APKs."""
         root = self._verified_rootfs()
-        base = ("fplinux-base", "fplinux-console")
+        base = ("fplinux-base", "fplinux-terminal")
         bundle_apk = self._write("built/fplinux-package-b.apk", b"bundle\n")
         unresolved = (
             "ERROR: unable to select packages:\n"
@@ -686,9 +830,11 @@ class AlpineStateTests(unittest.TestCase):
         )
         (root / "etc/inittab").write_text("::sysinit:/sbin/openrc sysinit\n", encoding="utf-8")
         (root / "etc/os-release").write_text("NAME=FPLinux\n", encoding="utf-8")
-        (root / "etc/init.d/fplinux-console").write_text("#!/bin/sh\n", encoding="utf-8")
-        (root / "usr/bin/fplinux-console").write_text("console\n", encoding="utf-8")
-        (root / "etc/runlevels/default/fplinux-console").symlink_to("/etc/init.d/fplinux-console")
+        (root / "etc/init.d/fplinux-terminal").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "usr/bin/fplinux-terminal").write_text("terminal\n", encoding="utf-8")
+        (root / "etc/runlevels/default/fplinux-terminal").symlink_to(
+            "/etc/init.d/fplinux-terminal"
+        )
         (root / "init").symlink_to("/sbin/init")
         return root
 
@@ -704,7 +850,7 @@ class AlpineStateTests(unittest.TestCase):
     def test_rootfs_verifier_requires_input_files_only_when_selected(self) -> None:
         """A gadgetless root accepts no input bridge, while the selected bridge is required."""
         root = self._verified_rootfs()
-        without_input = ("fplinux-base", "fplinux-console")
+        without_input = ("fplinux-base", "fplinux-terminal")
         self._write_world(root, without_input)
         with mock.patch.object(alpine_builder, "_require_apk_owner"):
             alpine_builder._verify_alpine_rootfs(root, without_input)  # noqa: SLF001
@@ -731,7 +877,7 @@ class AlpineStateTests(unittest.TestCase):
     def test_bluetooth_root_requires_project_built_daemon_libraries(self) -> None:
         """Bluetooth roots take the BlueZ daemons' vCard and GLib sonames from project builds."""
         root = self._verified_rootfs()
-        base = ("fplinux-base", "fplinux-console")
+        base = ("fplinux-base", "fplinux-terminal")
         with_bluetooth = (*base, "fplinux-bluetooth")
         replaced = {
             "/usr/lib/libicalvcal.so.3": ("libical", "fplinux-libical"),
@@ -766,7 +912,7 @@ class AlpineStateTests(unittest.TestCase):
     def test_replaced_package_manager_root_rejects_openssl_leftovers(self) -> None:
         """A root with the Mbed TLS apk must own /sbin/apk and hold no OpenSSL packages."""
         root = self._verified_rootfs()
-        base = ("fplinux-base", "fplinux-console")
+        base = ("fplinux-base", "fplinux-terminal")
         with_apk_tools = (*base, "fplinux-apk-tools")
         installed: set[str] = {"apk-tools", "libapk", "libcrypto3", "libssl3", "ssl_client"}
         minirootfs_owner = self._fake_apk_owner({"/sbin/apk": "apk-tools"})
@@ -811,7 +957,7 @@ class AlpineStateTests(unittest.TestCase):
     def test_persistent_root_requires_orderly_shutdown_services(self) -> None:
         """A persistent root rejects a shutdown runlevel missing data-safety services."""
         root = self._verified_rootfs()
-        without_input = ("fplinux-base", "fplinux-console")
+        without_input = ("fplinux-base", "fplinux-terminal")
         microsd_root = (*without_input, "fplinux-microsd-root")
         self._write_world(root, microsd_root)
         with (

@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-/* Native fbdev video backend for FPLinux. */
+/* Native DRM video backend for FPLinux. */
 /* fplinux-check: package-embedded */
 
+#include "fplinux-drm-session.h"
+#include "fplinux-quake-internal.h"
+
 #include <errno.h>
-#include <fcntl.h>
-#include <linux/fb.h>
-#include <linux/kd.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
 #include <unistd.h>
 
 #undef K_SCROLLLOCK
@@ -34,23 +32,15 @@
 #include "client.h"
 #endif
 
-#define FPLINUX_QUAKE_VIDEO_FRAMEBUFFER_DEVICE "/dev/fb0"
-#define FPLINUX_QUAKE_VIDEO_TTY_DEVICE "/dev/tty0"
 #define FPLINUX_QUAKE_VIDEO_BITS_PER_PIXEL 16
-#define FPLINUX_QUAKE_VIDEO_MAX_PAGES 2
 #define FPLINUX_QUAKE_VIDEO_CACHE_GUARD_BYTES 16
 
 viddef_t vid;
 unsigned short d_8to16table[256];
 unsigned d_8to24table[256];
 
-static int fb_fd = -1;
-static int tty_fd = -1;
-static int tty_saved_mode;
-static qboolean tty_mode_changed;
+static struct fplinux_drm_session display;
 static uint8_t *framebuffer;
-static uint8_t *framebuffer_backup;
-static size_t framebuffer_size;
 static size_t framebuffer_page_bytes;
 static unsigned int framebuffer_width;
 static unsigned int framebuffer_height;
@@ -62,12 +52,7 @@ static unsigned int output_height;
 static unsigned int render_scale;
 static unsigned int render_width;
 static unsigned int render_height;
-static unsigned int original_page;
-static unsigned int shown_page;
 static unsigned int next_page;
-static struct fb_var_screeninfo framebuffer_var;
-static struct fb_var_screeninfo saved_framebuffer_var;
-static qboolean framebuffer_mode_changed;
 static int video_hunk_mark = -1;
 static volatile sig_atomic_t exit_signal;
 static struct sigaction previous_sigint;
@@ -133,64 +118,9 @@ static void restore_signal_handlers(void)
 	exit_signal = 0;
 }
 
-static void validate_rgb565(const struct fb_var_screeninfo *var)
+struct fplinux_drm_session *fplinux_quake_display_session(void)
 {
-	if (var->bits_per_pixel != FPLINUX_QUAKE_VIDEO_BITS_PER_PIXEL ||
-	    var->red.offset != 11 || var->red.length != 5 ||
-	    var->red.msb_right != 0 || var->green.offset != 5 ||
-	    var->green.length != 6 || var->green.msb_right != 0 ||
-	    var->blue.offset != 0 || var->blue.length != 5 ||
-	    var->blue.msb_right != 0 || var->transp.length != 0)
-		Sys_Error("FPLinux video: expected RGB565, got bpp=%u "
-			  "rgb=%u:%u:%u/%u:%u:%u/%u:%u:%u alpha=%u",
-			  var->bits_per_pixel, var->red.offset, var->red.length,
-			  var->red.msb_right, var->green.offset,
-			  var->green.length, var->green.msb_right,
-			  var->blue.offset, var->blue.length,
-			  var->blue.msb_right, var->transp.length);
-}
-
-static void validate_framebuffer(const struct fb_fix_screeninfo *fix,
-				 const struct fb_var_screeninfo *var)
-{
-	size_t page_bytes;
-
-	if (fix->type != FB_TYPE_PACKED_PIXELS ||
-	    fix->visual != FB_VISUAL_TRUECOLOR)
-		Sys_Error("FPLinux video: unsupported fb type=%u visual=%u",
-			  fix->type, fix->visual);
-	if (var->xres == 0 || var->yres == 0 ||
-	    var->xres_virtual != var->xres || var->xoffset != 0)
-		Sys_Error(
-			"FPLinux video: unsupported geometry %ux%u virtual=%ux%u "
-			"offset=%ux%u",
-			var->xres, var->yres, var->xres_virtual,
-			var->yres_virtual, var->xoffset, var->yoffset);
-	if (var->yres_virtual != var->yres &&
-	    var->yres_virtual != var->yres * FPLINUX_QUAKE_VIDEO_MAX_PAGES)
-		Sys_Error(
-			"FPLinux video: unsupported virtual height %u for %u rows",
-			var->yres_virtual, var->yres);
-	if (var->yoffset != 0 &&
-	    (var->yres_virtual != var->yres * FPLINUX_QUAKE_VIDEO_MAX_PAGES ||
-	     var->yoffset != var->yres))
-		Sys_Error("FPLinux video: unsupported yoffset %u",
-			  var->yoffset);
-	validate_rgb565(var);
-	if (fix->line_length < var->xres * sizeof(uint16_t))
-		Sys_Error("FPLinux video: stride %u is shorter than %u pixels",
-			  fix->line_length, var->xres);
-
-	page_bytes = (size_t)fix->line_length * var->yres;
-	if (fix->smem_len < page_bytes)
-		Sys_Error(
-			"FPLinux video: framebuffer memory %u is shorter than "
-			"%zu-byte page",
-			fix->smem_len, page_bytes);
-	if (var->yres_virtual == var->yres * FPLINUX_QUAKE_VIDEO_MAX_PAGES &&
-	    (fix->ypanstep == 0 || fix->smem_len < page_bytes * 2))
-		Sys_Error(
-			"FPLinux video: virtual double buffer is not pannable");
+	return &display;
 }
 
 static uint8_t *framebuffer_page(unsigned int page)
@@ -200,24 +130,9 @@ static uint8_t *framebuffer_page(unsigned int page)
 
 static int pan_to_page(unsigned int page)
 {
-	struct fb_var_screeninfo pan;
-
-	if (framebuffer_pages == 1) {
-		shown_page = 0;
-		next_page = 0;
-		return 0;
-	}
-	if (page >= framebuffer_pages)
+	if (!fplinux_drm_session_present(&display, page))
 		return -1;
-
-	pan = framebuffer_var;
-	pan.xoffset = 0;
-	pan.yoffset = page * framebuffer_height;
-	pan.activate = FB_ACTIVATE_NOW;
-	if (ioctl(fb_fd, FBIOPAN_DISPLAY, &pan) < 0)
-		return -1;
-	shown_page = page;
-	next_page = page == 0 ? 1 : 0;
+	next_page = 1U - page;
 	return 0;
 }
 
@@ -242,88 +157,21 @@ static void choose_render_geometry(void)
 	render_height = output_height * render_scale;
 }
 
-static void open_framebuffer(void)
+static void open_display(void)
 {
-	struct fb_fix_screeninfo fix;
+	char error[160];
 
-	fb_fd = open(FPLINUX_QUAKE_VIDEO_FRAMEBUFFER_DEVICE,
-		     O_RDWR | O_CLOEXEC);
-	if (fb_fd < 0)
-		Sys_Error("FPLinux video: open(%s): %s",
-			  FPLINUX_QUAKE_VIDEO_FRAMEBUFFER_DEVICE,
-			  strerror(errno));
-	if (ioctl(fb_fd, FBIOGET_FSCREENINFO, &fix) < 0 ||
-	    ioctl(fb_fd, FBIOGET_VSCREENINFO, &framebuffer_var) < 0)
-		Sys_Error("FPLinux video: framebuffer ioctl: %s",
-			  strerror(errno));
-
-	validate_framebuffer(&fix, &framebuffer_var);
-	saved_framebuffer_var = framebuffer_var;
-	framebuffer_width = framebuffer_var.xres;
-	framebuffer_height = framebuffer_var.yres;
-	framebuffer_stride = fix.line_length;
-	framebuffer_page_bytes =
-		(size_t)framebuffer_stride * framebuffer_height;
-
-	if (framebuffer_var.yres_virtual == framebuffer_height &&
-	    fix.ypanstep != 0 &&
-	    fix.smem_len >=
-		    framebuffer_page_bytes * FPLINUX_QUAKE_VIDEO_MAX_PAGES) {
-		struct fb_var_screeninfo requested = framebuffer_var;
-
-		requested.yres_virtual =
-			framebuffer_height * FPLINUX_QUAKE_VIDEO_MAX_PAGES;
-		requested.yoffset = 0;
-		requested.activate = FB_ACTIVATE_NOW;
-		if (ioctl(fb_fd, FBIOPUT_VSCREENINFO, &requested) == 0) {
-			framebuffer_mode_changed = true;
-			if (ioctl(fb_fd, FBIOGET_FSCREENINFO, &fix) < 0 ||
-			    ioctl(fb_fd, FBIOGET_VSCREENINFO,
-				  &framebuffer_var) < 0)
-				Sys_Error(
-					"FPLinux video: read double-buffered mode: %s",
-					strerror(errno));
-			validate_framebuffer(&fix, &framebuffer_var);
-			framebuffer_stride = fix.line_length;
-			framebuffer_page_bytes =
-				(size_t)framebuffer_stride * framebuffer_height;
-		} else {
-			Con_Printf(
-				"FPLinux video: double buffering unavailable: %s\n",
-				strerror(errno));
-		}
-	}
-
-	framebuffer_pages =
-		framebuffer_var.yres_virtual >= framebuffer_height * 2 ? 2 : 1;
-	framebuffer_size = framebuffer_page_bytes * framebuffer_pages;
-	framebuffer = mmap(NULL, framebuffer_size, PROT_READ | PROT_WRITE,
-			   MAP_SHARED, fb_fd, 0);
-	if (framebuffer == MAP_FAILED) {
-		framebuffer = NULL;
-		Sys_Error("FPLinux video: mmap: %s", strerror(errno));
-	}
-
-	framebuffer_backup = malloc(framebuffer_size);
-	if (!framebuffer_backup)
-		Sys_Error("FPLinux video: cannot allocate framebuffer backup");
-	memcpy(framebuffer_backup, framebuffer, framebuffer_size);
-
-	original_page = framebuffer_var.yoffset / framebuffer_height;
-	shown_page = original_page;
-	next_page = framebuffer_pages == 2 ? 1U - shown_page : shown_page;
+	if (!fplinux_drm_session_open(&display, NULL, NULL, DRM_FORMAT_RGB565,
+				      error, sizeof(error)))
+		Sys_Error("FPLinux video: %s", error);
+	framebuffer_width = display.width;
+	framebuffer_height = display.height;
+	framebuffer_stride = display.stride;
+	framebuffer_page_bytes = display.page_bytes;
+	framebuffer_pages = display.pages;
+	framebuffer = display.mapping;
+	next_page = 1U - display.shown_page;
 	choose_render_geometry();
-
-	tty_fd = open(FPLINUX_QUAKE_VIDEO_TTY_DEVICE, O_RDWR | O_CLOEXEC);
-	if (tty_fd < 0)
-		Sys_Error("FPLinux video: open(%s): %s",
-			  FPLINUX_QUAKE_VIDEO_TTY_DEVICE, strerror(errno));
-	if (ioctl(tty_fd, KDGETMODE, &tty_saved_mode) < 0)
-		Sys_Error("FPLinux video: KDGETMODE: %s", strerror(errno));
-	if (ioctl(tty_fd, KDSETMODE, KD_GRAPHICS) < 0)
-		Sys_Error("FPLinux video: KDSETMODE(KD_GRAPHICS): %s",
-			  strerror(errno));
-	tty_mode_changed = true;
 }
 
 static void allocate_renderer_buffers(void)
@@ -427,14 +275,17 @@ static void publish_frame(int x, int y, const byte *overlay, int width,
 	if (!framebuffer || !vid.buffer)
 		return;
 
+	if (!fplinux_drm_session_dispatch(&display))
+		Sys_Error("FPLinux video: VT dispatch: %s", strerror(errno));
+	if (!display.active)
+		return;
 	page = next_page;
 	destination = framebuffer_page(page);
 	render_frame(destination);
 	render_overlay(destination, x, y, overlay, width, height);
 	__sync_synchronize();
 	if (pan_to_page(page) < 0)
-		Sys_Error("FPLinux video: FBIOPAN_DISPLAY: %s",
-			  strerror(errno));
+		Sys_Error("FPLinux video: DRM present: %s", strerror(errno));
 }
 
 void VID_GetDesktopRect(vrect_t *rect)
@@ -476,7 +327,7 @@ void VID_InitColormap(const byte *palette)
 void VID_Init(const byte *palette)
 {
 	install_signal_handlers();
-	open_framebuffer();
+	open_display();
 
 	fixed_mode.width = render_width;
 	fixed_mode.height = render_height;
@@ -513,7 +364,7 @@ void VID_Init(const byte *palette)
 	Cvar_SetValue("vid_bpp", FPLINUX_QUAKE_VIDEO_BITS_PER_PIXEL);
 	Cvar_SetValue("vid_refreshrate", fixed_mode.refresh);
 
-	Con_Printf("FPLinux video: render %ux%u -> fb %ux%u RGB565, %s, "
+	Con_Printf("FPLinux video: render %ux%u -> DRM %ux%u RGB565, %s, "
 		   "%ux downscale, %u page%s\n",
 		   render_width, render_height, framebuffer_width,
 		   framebuffer_height,
@@ -525,53 +376,9 @@ void VID_Init(const byte *palette)
 void VID_Shutdown(void)
 {
 	restore_signal_handlers();
-	if (framebuffer && framebuffer_backup) {
-		if (framebuffer_pages == 1) {
-			memcpy(framebuffer, framebuffer_backup,
-			       framebuffer_page_bytes);
-			__sync_synchronize();
-		} else {
-			unsigned int old_shown = shown_page;
-			unsigned int hidden = 1U - old_shown;
-
-			memcpy(framebuffer_page(hidden),
-			       framebuffer_backup +
-				       hidden * framebuffer_page_bytes,
-			       framebuffer_page_bytes);
-			__sync_synchronize();
-			if (pan_to_page(hidden) == 0) {
-				memcpy(framebuffer_page(old_shown),
-				       framebuffer_backup +
-					       old_shown *
-						       framebuffer_page_bytes,
-				       framebuffer_page_bytes);
-				__sync_synchronize();
-				if (shown_page != original_page)
-					pan_to_page(original_page);
-			}
-		}
-	}
-	if (tty_mode_changed)
-		ioctl(tty_fd, KDSETMODE, tty_saved_mode);
-	tty_mode_changed = false;
-	if (framebuffer_mode_changed && fb_fd >= 0 &&
-	    ioctl(fb_fd, FBIOPUT_VSCREENINFO, &saved_framebuffer_var) < 0)
-		Con_Printf("FPLinux video: restore framebuffer mode: %s\n",
-			   strerror(errno));
-	framebuffer_mode_changed = false;
-	if (tty_fd >= 0)
-		close(tty_fd);
-	tty_fd = -1;
-
-	free(framebuffer_backup);
-	framebuffer_backup = NULL;
-	if (framebuffer)
-		munmap(framebuffer, framebuffer_size);
+	if (framebuffer && !fplinux_drm_session_close(&display))
+		Con_Printf("FPLinux video: DRM close: %s\n", strerror(errno));
 	framebuffer = NULL;
-	framebuffer_size = 0;
-	if (fb_fd >= 0)
-		close(fb_fd);
-	fb_fd = -1;
 
 	if (video_hunk_mark >= 0) {
 		Hunk_FreeToHighMark(video_hunk_mark);
@@ -635,6 +442,8 @@ void VID_ProcessEvents(void)
 			   signal_number);
 		Sys_Quit();
 	}
+	if (framebuffer && !fplinux_drm_session_dispatch(&display))
+		Sys_Error("FPLinux video: VT dispatch: %s", strerror(errno));
 	IN_Commands();
 }
 

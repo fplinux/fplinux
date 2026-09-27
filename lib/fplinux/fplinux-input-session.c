@@ -105,6 +105,23 @@ find_device_by_fd(struct fplinux_input_session *session, int fd)
 	return NULL;
 }
 
+static void forget_device(struct fplinux_input_session_device *slot)
+{
+	memset(slot, 0, sizeof(*slot));
+	slot->fd = -1;
+}
+
+static struct fplinux_input_session_device *
+find_free_device(struct fplinux_input_session *session)
+{
+	size_t i;
+
+	for (i = 0; i < FPLINUX_INPUT_SESSION_DEVICE_COUNT; ++i)
+		if (!session->devices[i].path[0])
+			return &session->devices[i];
+	return NULL;
+}
+
 static int open_restricted(const char *path, int flags, void *user_data)
 {
 	struct fplinux_input_session *session = user_data;
@@ -114,7 +131,7 @@ static int open_restricted(const char *path, int flags, void *user_data)
 	int result;
 	int fd;
 
-	slot = find_device_by_fd(session, -1);
+	slot = find_free_device(session);
 	if (!slot)
 		return -EMFILE;
 	if (path_bytes > sizeof(slot->path))
@@ -135,6 +152,7 @@ static int open_restricted(const char *path, int flags, void *user_data)
 	memcpy(slot->path, path, path_bytes);
 	slot->fd = fd;
 	slot->source = source;
+	slot->id = ++session->next_device_id;
 	return fd;
 }
 
@@ -147,10 +165,9 @@ static void close_restricted(int fd, void *user_data)
 	/* A device that has disappeared cannot be released; ENODEV is fine. */
 	ioctl(fd, EVIOCGRAB, 0);
 	close(fd);
-	if (slot) {
-		slot->path[0] = '\0';
+	/* Queued events still need the source and identity after this close. */
+	if (slot)
 		slot->fd = -1;
-	}
 }
 
 static const struct libinput_interface session_interface = {
@@ -189,33 +206,26 @@ bool fplinux_input_session_open(struct fplinux_input_session *session,
 	return true;
 }
 
-static enum fplinux_input_source
-source_for_sysname(const struct fplinux_input_session *session,
-		   const char *sysname)
+static struct fplinux_input_session_device *
+device_for_sysname(struct fplinux_input_session *session, const char *sysname)
 {
+	struct fplinux_input_session_device *found = NULL;
 	size_t sysname_length = strlen(sysname);
 	size_t i;
 
 	for (i = 0; i < FPLINUX_INPUT_SESSION_DEVICE_COUNT; ++i) {
-		const struct fplinux_input_session_device *slot =
+		struct fplinux_input_session_device *slot =
 			&session->devices[i];
 		size_t path_length = strlen(slot->path);
 
-		if (slot->fd >= 0 && path_length > sysname_length &&
+		if (!slot->device && path_length > sysname_length &&
 		    slot->path[path_length - sysname_length - 1] == '/' &&
-		    !strcmp(slot->path + path_length - sysname_length, sysname))
-			return slot->source;
+		    !strcmp(slot->path + path_length - sysname_length,
+			    sysname) &&
+		    (!found || slot->id < found->id))
+			found = slot;
 	}
-	return FPLINUX_INPUT_SOURCE_KEYBOARD;
-}
-
-/* The source is stored off by one so that an unknown device reads as NULL. */
-static enum fplinux_input_source device_source(struct libinput_device *device)
-{
-	uintptr_t stored = (uintptr_t)libinput_device_get_user_data(device);
-
-	return stored ? (enum fplinux_input_source)(stored - 1U) :
-			FPLINUX_INPUT_SOURCE_KEYBOARD;
+	return found;
 }
 
 static void describe_device(struct fplinux_input_session *session,
@@ -225,7 +235,6 @@ static void describe_device(struct fplinux_input_session *session,
 	snprintf(session->name, sizeof(session->name), "%s",
 		 libinput_device_get_name(device));
 	event->name = session->name;
-	event->source = device_source(device);
 }
 
 static bool translate_wheel(struct fplinux_input_session *session,
@@ -257,30 +266,41 @@ static bool translate_event(struct fplinux_input_session *session,
 			    struct fplinux_input_event *event)
 {
 	struct libinput_device *device = libinput_event_get_device(raw);
+	struct fplinux_input_session_device *slot =
+		libinput_device_get_user_data(device);
+	enum libinput_event_type type = libinput_event_get_type(raw);
 	struct libinput_event_keyboard *keyboard;
 	struct libinput_event_pointer *pointer;
 
 	memset(event, 0, sizeof(*event));
-	switch (libinput_event_get_type(raw)) {
+	if (type == LIBINPUT_EVENT_DEVICE_ADDED) {
+		slot = device_for_sysname(session,
+					  libinput_device_get_sysname(device));
+		if (!slot)
+			return false;
+		slot->device = device;
+		libinput_device_set_user_data(device, slot);
+	}
+	if (!slot)
+		return false;
+	event->source = slot->source;
+	event->device_id = slot->id;
+	switch (type) {
 	case LIBINPUT_EVENT_DEVICE_ADDED:
-		libinput_device_set_user_data(
-			device,
-			(void *)(uintptr_t)(source_for_sysname(
-						    session,
-						    libinput_device_get_sysname(
-							    device)) +
-					    1U));
 		event->type = FPLINUX_INPUT_EVENT_DEVICE_ADDED;
 		describe_device(session, device, event);
 		return true;
 	case LIBINPUT_EVENT_DEVICE_REMOVED:
 		event->type = FPLINUX_INPUT_EVENT_DEVICE_REMOVED;
 		describe_device(session, device, event);
+		libinput_device_set_user_data(device, NULL);
+		forget_device(slot);
 		return true;
 	case LIBINPUT_EVENT_KEYBOARD_KEY:
 		keyboard = libinput_event_get_keyboard_event(raw);
 		event->type = FPLINUX_INPUT_EVENT_KEY;
-		event->source = device_source(device);
+		event->time_ms =
+			libinput_event_keyboard_get_time_usec(keyboard) / 1000U;
 		event->code = libinput_event_keyboard_get_key(keyboard);
 		event->pressed =
 			libinput_event_keyboard_get_key_state(keyboard) ==
@@ -289,7 +309,6 @@ static bool translate_event(struct fplinux_input_session *session,
 	case LIBINPUT_EVENT_POINTER_BUTTON:
 		pointer = libinput_event_get_pointer_event(raw);
 		event->type = FPLINUX_INPUT_EVENT_BUTTON;
-		event->source = device_source(device);
 		event->code = libinput_event_pointer_get_button(pointer);
 		event->pressed =
 			libinput_event_pointer_get_button_state(pointer) ==
@@ -298,14 +317,12 @@ static bool translate_event(struct fplinux_input_session *session,
 	case LIBINPUT_EVENT_POINTER_MOTION:
 		pointer = libinput_event_get_pointer_event(raw);
 		event->type = FPLINUX_INPUT_EVENT_MOTION;
-		event->source = device_source(device);
 		event->dx =
 			libinput_event_pointer_get_dx_unaccelerated(pointer);
 		event->dy =
 			libinput_event_pointer_get_dy_unaccelerated(pointer);
 		return true;
 	case LIBINPUT_EVENT_POINTER_SCROLL_WHEEL:
-		event->source = device_source(device);
 		return translate_wheel(
 			session, libinput_event_get_pointer_event(raw), event);
 	default:
@@ -317,16 +334,62 @@ bool fplinux_input_session_next(struct fplinux_input_session *session,
 				struct fplinux_input_event *event)
 {
 	struct libinput_event *raw;
+	bool dispatched = false;
+	size_t i;
 
-	libinput_dispatch(session->libinput);
-	while ((raw = libinput_get_event(session->libinput))) {
-		bool translated = translate_event(session, raw, event);
+	if (!session->libinput)
+		return false;
+	for (;;) {
+		while ((raw = libinput_get_event(session->libinput))) {
+			bool translated = translate_event(session, raw, event);
 
-		libinput_event_destroy(raw);
-		if (translated)
-			return true;
+			libinput_event_destroy(raw);
+			if (translated)
+				return true;
+		}
+		/* libinput may reject a device after opening it, without ADDED. */
+		for (i = 0; i < FPLINUX_INPUT_SESSION_DEVICE_COUNT; ++i) {
+			struct fplinux_input_session_device *slot =
+				&session->devices[i];
+
+			if (slot->fd < 0 && !slot->device)
+				forget_device(slot);
+		}
+		if (dispatched)
+			return false;
+		libinput_dispatch(session->libinput);
+		dispatched = true;
 	}
-	return false;
+}
+
+int fplinux_input_session_get_fd(const struct fplinux_input_session *session)
+{
+	return session->libinput ? libinput_get_fd(session->libinput) : -1;
+}
+
+void fplinux_input_session_suspend(struct fplinux_input_session *session)
+{
+	if (session->libinput && !session->suspended) {
+		libinput_suspend(session->libinput);
+		session->suspended = true;
+	}
+}
+
+bool fplinux_input_session_resume(struct fplinux_input_session *session,
+				  char *error, size_t error_size)
+{
+	if (!session->libinput) {
+		set_message(error, error_size, "input session is closed");
+		return false;
+	}
+	if (!session->suspended)
+		return true;
+	if (libinput_resume(session->libinput) < 0) {
+		set_message(error, error_size, "cannot resume input devices");
+		return false;
+	}
+	session->suspended = false;
+	return true;
 }
 
 void fplinux_input_session_close(struct fplinux_input_session *session)

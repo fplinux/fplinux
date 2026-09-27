@@ -11,14 +11,13 @@
 
 ## Status
 
-This exact phone runs a local `240×320` console, its physical keypad, the
-private USB session, headphone and speaker PCM playback, microphone capture, FM
-radio, ARMADA, TyrQuake, MicroPythonOS
-and the shared graphics applications. microSD ext4 storage and a writable
+This phone has a `240×320` display and a physical keypad. It supports the
+private USB session, headphone and speaker PCM playback, microphone capture and
+FM radio. microSD ext4 storage and a writable
 microSD system root work. Bluetooth pairing, bidirectional file transfer and PAN
 Internet work in both profiles. The red handset key and RTC alarms wake the
 phone from s2idle, including with mounted ext4 storage and card-backed swap;
-applications, Bluetooth and graphics work again after wake.
+Bluetooth works again after wake.
 
 Physical LCD brightness and keypad-light effects have not been tested. This
 phone has no separate vibration motor; FPLinux vibrates it through the rear
@@ -26,6 +25,13 @@ speaker, as stock firmware does, and mutes headphone audio meanwhile.
 Telemetry has been
 read with the battery absent; that does not demonstrate battery measurements or
 charging. Battery-only power-off has not been tested.
+
+The graphical terminal supports basic use with the phone keypad at native
+resolution. Image presentation and rotation return to the same terminal and
+shell. RTC-woken s2idle preserves them in USB-powered RAM sessions. Native
+image color fidelity and full optional-application behavior remain unqualified.
+Terminal use with a microSD system root, operation without USB power and
+physical external keyboards have not been qualified on this phone.
 
 Status terms and limits shared by every phone are defined in the
 [target index](../README.md#status-and-common-limits).
@@ -36,7 +42,7 @@ Status terms and limits shared by every phone are defined in the
 | ------------------------------------------------------------------ | -------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | RAM boot                                                           | N/A      | Supported     | —                                                                                                                                             |
 | Persistent boot                                                    | N/A      | Not supported | A USB-loaded RAM bootstrap is required for every Linux boot.                                                                                  |
-| [Local console](../../docs/features/LOCAL_CONSOLE.md)              | Present  | Supported     | `240×320`.                                                                                                                                    |
+| [Local console](../../docs/features/LOCAL_CONSOLE.md)              | Present  | Supported     | `240×320`; graphical terminal with phone-keypad input.                                                                                        |
 | [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)          | Present  | Partial       | Brightness interface enabled; visible brightness levels have not been tested.                                                                 |
 | [Keypad backlight](../../docs/features/KEYPAD_BACKLIGHT.md)        | Unknown  | Partial       | Shared LED control enabled; its physical effect has not been tested.                                                                          |
 | [USB networking](../../docs/features/USB_NETWORKING.md)            | Present  | Supported     | —                                                                                                                                             |
@@ -77,10 +83,10 @@ Status terms and limits shared by every phone are defined in the
 
 | Application                                             | FPLinux   | This phone                                                                                    |
 | ------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------- |
-| [FPLinux: ARMADA](../../docs/apps/SHOWCASE.md)          | Partial   | Runs in both profiles; physical light effects have not been tested.                           |
-| [TyrQuake](../../docs/apps/TYRQUAKE.md)                 | Supported | Game data can use RAM or ext4 microSD storage, including the system root.                     |
+| [FPLinux: ARMADA](../../docs/apps/SHOWCASE.md)          | Partial   | Physical light effects have not been tested.                                                  |
+| [TyrQuake](../../docs/apps/TYRQUAKE.md)                 | Partial   | Game data can use RAM or ext4 microSD storage, including the system root.                     |
 | [MicroPythonOS](../../docs/apps/MICROPYTHONOS.md)       | Partial   | State persists on the ext4 system root; optional FAT32 data-card storage has not been tested. |
-| [Image rotation](../../docs/apps/ROTATE.md)             | Supported | Explicit CPU/ROTA selection and framebuffer preview.                                          |
+| [Image rotation](../../docs/apps/ROTATE.md)             | Supported | Explicit CPU/ROTA selection and DRM preview; visible preview fidelity is unqualified.         |
 | [JPEG codec and scaling](../../docs/apps/JPEG.md)       | Supported | Hardware decode, fixed encode and fixed half-scaling.                                         |
 | [Native image presentation](../../docs/apps/PRESENT.md) | Partial   | Direct NV16 or CPU-converted RGB565 transfers; visible image fidelity has not been checked.   |
 

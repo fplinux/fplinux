@@ -1,26 +1,3 @@
-diff --git a/drivers/video/fbdev/Kconfig b/drivers/video/fbdev/Kconfig
---- a/drivers/video/fbdev/Kconfig
-+++ b/drivers/video/fbdev/Kconfig
-@@ -1781,6 +1781,19 @@ config FB_HYPERV
- 	  This driver is deprecated, please use the Hyper-V DRM driver at
- 	  drivers/gpu/drm/hyperv (CONFIG_DRM_HYPERV) instead.
-
-+config FB_TA1618
-+	bool "Nokia TA-1618 LCDC framebuffer"
-+	depends on FB && MACH_NOKIA_TA1618
-+	select FB_UMS9117
-+	select BACKLIGHT_CLASS_DEVICE
-+	help
-+	  Cold-initialize and drive the TA-1618 ST7789P3 panel through SPI1
-+	  and the LCDC. Damage submits full RGB565 frames through a private
-+	  staging buffer, and LCDC_DONE completes each transfer. Blanking
-+	  quiesces the pipeline, turns off WLED and enters panel sleep;
-+	  unblank exits sleep, sends a full frame and restores WLED after
-+	  the matching completion interrupt.
-+
- config FB_SIMPLE
- 	tristate "Simple framebuffer support"
- 	depends on FB
 diff --git a/arch/arm/boot/dts/unisoc/Makefile b/arch/arm/boot/dts/unisoc/Makefile
 --- a/arch/arm/boot/dts/unisoc/Makefile
 +++ b/arch/arm/boot/dts/unisoc/Makefile

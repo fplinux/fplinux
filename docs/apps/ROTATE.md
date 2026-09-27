@@ -29,8 +29,8 @@ Without `--input`, the application generates a deterministic image. Without
 `--output`, it writes `/run/fplinux-rotate.raw`.
 
 `--verify` compares the result with the CPU reference. `--display` converts the
-result to RGB565 and presents it through the existing framebuffer. The result
-must match the active framebuffer dimensions: preview does not scale the image
+result to RGB565 and presents it through DRM/KMS. The result
+must match the active DRM mode dimensions: preview does not scale the image
 or change console orientation. For a 128x160 display, use a 160x128 input with
 `--rotate 90`. `--display-ms N` enables the preview and sets its hold time.
 `--display` enables it with a 2000 ms hold, including when it follows an earlier
@@ -115,9 +115,9 @@ input copying, queue submission, waiting, output copying, teardown, CPU rotation
 and preview conversion/presentation. `total_us` measures the application engine
 call, including an optional preview, but excludes the separately reported
 guard-check time; input-file reading and final output-file writing are outside
-that call. Preview conversion is included within framebuffer time, so those
+that call. Preview conversion is included within `full_framebuffer_us`, so those
 two fields must not be added together. Benchmark mode suppresses preview holds.
 
 `process_user_us` and `process_system_us` are process CPU time, not total system
-CPU load. The framebuffer path includes conversion and page publication; its
-timings are not a display-completion fence or an optical latency/FPS measurement.
+CPU load. The DRM preview includes conversion and atomic presentation; its aggregate
+timing is not an optical latency or FPS measurement.

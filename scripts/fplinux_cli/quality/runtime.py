@@ -67,6 +67,8 @@ def run_quality_command(
             "--read-only",
             "--network",
             "none",
+            # Kern creates private devpts for real PTY component tests with -t.
+            "-t",
             "--tmpfs",
             "/tmp:1g",  # noqa: S108 -- container tmpfs.
             "--volume",

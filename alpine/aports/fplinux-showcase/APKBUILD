@@ -6,15 +6,15 @@ pkgdesc="FPLinux ARMADA synchronized hardware showcase"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="GPL-2.0-only"
-makedepends_build="clang22 lld22"
-makedepends_host="musl-dev linux-headers"
+makedepends_build="clang22 lld22 pkgconf"
+makedepends_host="musl-dev linux-headers fplinux-libdrm-dev"
 options="!check"
 source="
 	armada-scene.c
 	armada-scene.h
 	fplinux-showcase.c
-	fplinux-fb-session.c
-	fplinux-fb-session.h
+	fplinux-drm-session.c
+	fplinux-drm-session.h
 	fplinux-cli.c
 	fplinux-cli.h
 	fplinux-keypad.h
@@ -22,12 +22,15 @@ source="
 builddir="$srcdir"
 
 build() {
+	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
+	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
+
 	"$CC" $CPPFLAGS $CFLAGS -O2 -std=c11 -Wall -Wextra -Werror \
-		-I"$srcdir" \
+		-I"$srcdir" $(pkg-config --cflags libdrm) \
 		"$srcdir/armada-scene.c" \
 		"$srcdir/fplinux-showcase.c" \
-		"$srcdir/fplinux-fb-session.c" \
-		"$srcdir/fplinux-cli.c" $LDFLAGS -Wl,--gc-sections -o fplinux-showcase
+		"$srcdir/fplinux-drm-session.c" \
+		"$srcdir/fplinux-cli.c" $(pkg-config --libs libdrm) $LDFLAGS -Wl,--gc-sections -o fplinux-showcase
 }
 
 package() {
@@ -38,10 +41,10 @@ package() {
 sha512sums="
 cb7c0dbabbfab1113d61c74cf820ec26e20c9d1e56869704c6c59309a435c6cb47bf26fc122aef7e5ddc108706da63b4d00f0440507d366ec7a973cdb3b114ea  armada-scene.c
 f9849712bb86e7211089acb8e78b8ed6ce20cf65adcd5419c860b05d7da800820da8d2afbf614649fd8c95095f04631612d1758fd32fc9657ed08f83998fc2d6  armada-scene.h
-a6258831ed710e4bb0630e57c5f6d141c110d514a6eae4eae8d57946551073712d27721710d55e7ddcecca36d12a4973a4bcc26fc6759d1a5a6e65ce6a4ab616  fplinux-showcase.c
-cbf7e3cb0a9fe2fda9d387e72ab49d13b3d7828e282f0ce2f528183f1fce0c337b29e8c62775671fe424548c0526027d3d50bc57ef7fe5a69c92af79da56598d  fplinux-fb-session.c
-38f849284be27b63ae553dc66c1427b885ef0e332a89b035f9465659e3a080435bd7fde0c788c1a97129cd0b252bd151268f568bab3065029a7874a2740b6279  fplinux-fb-session.h
+6a1a4dd988b14531ec1609faa41ef4322d8b88e78905649e909c7f33761bfbd50e146ca1046211aa662002898dbdd4b4a0849d6c2d8616ba365dcb7bf346b2b0  fplinux-showcase.c
+68cb5a85d6a51b69c7bc87a1077e607cff30a8eed17220ba8c812445baa416a0d1c18f3e79776ee184a0b3c4ad94dec48b81728e1f6c943d0580010ba659eae9  fplinux-drm-session.c
+5b63a683e9aac0a4b1faef31c0a09b9ec4131992d5cb69f858c6276855a8d92404c4cf23a1b4c8927d802311e9634b354502745ef15e00a4209744acf51131a7  fplinux-drm-session.h
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
-0113e3bb8a795cbdb063092642a8418158d0c034dc31b907caf4252ef53441631ba2a6499b42a450da97ecfcce30ce3b30cb9de0fd895614d5e37436bfeb8b97  fplinux-keypad.h
+0a6d41b98223953b0b890be3041fba31e7878e6752094ed439b1e1e7e9240b2c7bf175ae671d05485ee25fa9ae74e45ddc63e9592768bd5d19e6e4ae6765a978  fplinux-keypad.h
 "

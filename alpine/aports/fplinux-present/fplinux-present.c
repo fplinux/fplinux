@@ -2,14 +2,13 @@
 #define _GNU_SOURCE
 
 #include "fplinux-cli.h"
-#include "fplinux-fb-session.h"
-#include "ums9117-present.h"
+#include "fplinux-drm-session.h"
 
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
-#include <linux/fb.h>
 #include <signal.h>
+#include <poll.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -22,26 +21,13 @@
 #include <time.h>
 #include <unistd.h>
 
-#define DEFAULT_FRAMEBUFFER "/dev/fb0"
+#define DEFAULT_DRM "/dev/dri/card0"
 #define DEFAULT_TTY "/dev/tty0"
 #define DEFAULT_FPS 10U
 #define DEFAULT_REPEAT 1U
 #define MAX_REPEAT 4096U
 #define MAX_FPS 30U
 #define MAX_HOLD_MS 60000U
-
-_Static_assert(sizeof(struct ums9117_present) == 32,
-	       "unexpected UMS9117 present ABI size");
-_Static_assert(offsetof(struct ums9117_present, pixels) == 0,
-	       "unexpected UMS9117 present pixels offset");
-_Static_assert(offsetof(struct ums9117_present, format) == 8,
-	       "unexpected UMS9117 present format offset");
-_Static_assert(offsetof(struct ums9117_present, bytes) == 12,
-	       "unexpected UMS9117 present bytes offset");
-_Static_assert(offsetof(struct ums9117_present, sequence) == 16,
-	       "unexpected UMS9117 present sequence offset");
-_Static_assert(offsetof(struct ums9117_present, transfer_ns) == 24,
-	       "unexpected UMS9117 present transfer offset");
 
 enum present_mode {
 	PRESENT_MODE_NV16,
@@ -51,7 +37,7 @@ enum present_mode {
 struct options {
 	const char *input_path;
 	const char *output_path;
-	const char *framebuffer_path;
+	const char *drm_path;
 	const char *tty_path;
 	enum present_mode mode;
 	unsigned int repeat;
@@ -82,11 +68,6 @@ struct run_stats {
 	struct timing_total conversion;
 	struct timing_total present;
 	struct timing_total whole;
-	uint64_t transfer_total_ns;
-	uint64_t transfer_min_ns;
-	uint64_t transfer_max_ns;
-	uint64_t first_sequence;
-	uint64_t last_sequence;
 	unsigned int completed;
 };
 
@@ -96,7 +77,7 @@ enum present_option {
 	OPTION_REPEAT,
 	OPTION_FPS,
 	OPTION_HOLD_MS,
-	OPTION_FRAMEBUFFER,
+	OPTION_DRM,
 	OPTION_TTY,
 	OPTION_OUTPUT,
 };
@@ -156,8 +137,8 @@ static const char *parse_option(size_t option, const char *value, void *data)
 					  &options->hold_ms))
 			return "--hold-ms must be an integer from 0 to 60000";
 		break;
-	case OPTION_FRAMEBUFFER:
-		options->framebuffer_path = value;
+	case OPTION_DRM:
+		options->drm_path = value;
 		break;
 	case OPTION_TTY:
 		options->tty_path = value;
@@ -194,10 +175,10 @@ static enum fplinux_cli_result parse_options(int argc, char **argv,
 				     .metavar = "N",
 				     .help = "hold final frame, 0..60000 (default: 0)",
 				     .flags = FPLINUX_CLI_REPEAT },
-		[OPTION_FRAMEBUFFER] = { .name = "framebuffer",
-					 .metavar = "PATH",
-					 .help = "framebuffer (default: /dev/fb0)",
-					 .flags = FPLINUX_CLI_REPEAT },
+		[OPTION_DRM] = { .name = "drm",
+				 .metavar = "PATH",
+				 .help = "DRM device (default: /dev/dri/card0)",
+				 .flags = FPLINUX_CLI_REPEAT },
 		[OPTION_TTY] = { .name = "tty",
 				 .metavar = "PATH",
 				 .help = "console tty (default: /dev/tty0)",
@@ -209,7 +190,8 @@ static enum fplinux_cli_result parse_options(int argc, char **argv,
 	};
 	struct fplinux_cli cli = {
 		.program = argv[0],
-		.description = "Present NV16 frames through the framebuffer.",
+		.description =
+			"Present NV16 frames through DRM atomic commits.",
 		.options = arguments,
 		.option_count = sizeof(arguments) / sizeof(arguments[0]),
 		.parse_option = parse_option,
@@ -218,7 +200,7 @@ static enum fplinux_cli_result parse_options(int argc, char **argv,
 	enum fplinux_cli_result result;
 
 	*options = (struct options){
-		.framebuffer_path = DEFAULT_FRAMEBUFFER,
+		.drm_path = DEFAULT_DRM,
 		.tty_path = DEFAULT_TTY,
 		.mode = PRESENT_MODE_NV16,
 		.repeat = DEFAULT_REPEAT,
@@ -371,36 +353,6 @@ fail:
 	return -1;
 }
 
-static int validate_native_framebuffer(struct fplinux_fb_session *session,
-				       char *error, size_t error_size)
-{
-	struct fb_fix_screeninfo fixed;
-	bool native_geometry;
-
-	memset(&fixed, 0, sizeof(fixed));
-	if (ioctl(session->framebuffer, FBIOGET_FSCREENINFO, &fixed) < 0) {
-		set_errno_error(error, error_size,
-				"cannot read native framebuffer identity");
-		return -1;
-	}
-	native_geometry =
-		((!strncmp(fixed.id, "ta1618-rgb565", sizeof(fixed.id)) ||
-		  !strncmp(fixed.id, "inoi244-rgb565", sizeof(fixed.id))) &&
-		 session->width == 240 && session->height == 320) ||
-		(!strncmp(fixed.id, "inoi240-rgb565", sizeof(fixed.id)) &&
-		 session->width == 128 && session->height == 160);
-	if (!native_geometry ||
-	    session->stride != session->width * sizeof(uint16_t) ||
-	    session->page_bytes != session->stride * session->height) {
-		errno = EINVAL;
-		set_message(
-			error, error_size,
-			"framebuffer must be a native-size Nokia or INOI RGB565 display without row padding");
-		return -1;
-	}
-	return 0;
-}
-
 static uint64_t timespec_ns(const struct timespec *value)
 {
 	return (uint64_t)value->tv_sec * 1000000000ULL +
@@ -528,7 +480,8 @@ static void convert_nv16_to_rgb565(const uint8_t *input, uint8_t *output,
 	}
 }
 
-static int sleep_until(uint64_t deadline_ns)
+static int sleep_until(struct fplinux_drm_session *session,
+		       uint64_t deadline_ns)
 {
 	struct timespec deadline = {
 		.tv_sec = (time_t)(deadline_ns / 1000000000ULL),
@@ -537,8 +490,9 @@ static int sleep_until(uint64_t deadline_ns)
 	int result;
 
 	do {
-		result = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME,
-					 &deadline, NULL);
+		result = fplinux_drm_session_wait_until(session, &deadline) ?
+				 0 :
+				 errno;
 	} while (result == EINTR && !stop_signal);
 	if (result) {
 		errno = result;
@@ -547,7 +501,8 @@ static int sleep_until(uint64_t deadline_ns)
 	return 0;
 }
 
-static int hold_last_frame(unsigned int hold_ms)
+static int hold_last_frame(struct fplinux_drm_session *session,
+			   unsigned int hold_ms)
 {
 	struct timespec now;
 	uint64_t deadline;
@@ -557,33 +512,10 @@ static int hold_last_frame(unsigned int hold_ms)
 	if (clock_gettime(CLOCK_MONOTONIC, &now) < 0)
 		return -1;
 	deadline = timespec_ns(&now) + (uint64_t)hold_ms * 1000000ULL;
-	return sleep_until(deadline);
+	return sleep_until(session, deadline);
 }
 
-static int record_completion(struct run_stats *stats,
-			     const struct ums9117_present *request)
-{
-	if (!request->sequence || request->sequence <= stats->last_sequence ||
-	    !request->transfer_ns) {
-		errno = EIO;
-		return -1;
-	}
-	if (add_u64(&stats->transfer_total_ns, request->transfer_ns) < 0)
-		return -1;
-	if (!stats->completed) {
-		stats->first_sequence = request->sequence;
-		stats->transfer_min_ns = request->transfer_ns;
-	} else if (request->transfer_ns < stats->transfer_min_ns) {
-		stats->transfer_min_ns = request->transfer_ns;
-	}
-	if (request->transfer_ns > stats->transfer_max_ns)
-		stats->transfer_max_ns = request->transfer_ns;
-	stats->last_sequence = request->sequence;
-	++stats->completed;
-	return 0;
-}
-
-static int run_series(struct fplinux_fb_session *session,
+static int run_series(struct fplinux_drm_session *session,
 		      const struct options *options, const uint8_t *nv16,
 		      uint8_t *rgb565, struct run_stats *stats)
 {
@@ -596,7 +528,7 @@ static int run_series(struct fplinux_fb_session *session,
 	if (timing_start(&loop_start) < 0)
 		return -1;
 	for (iteration = 0; iteration < options->repeat; ++iteration) {
-		struct ums9117_present request;
+		unsigned int page = 1U - session->shown_page;
 		struct timing_sample start;
 		struct timing_sample stop;
 		const uint8_t *pixels;
@@ -612,7 +544,7 @@ static int run_series(struct fplinux_fb_session *session,
 				((uint64_t)iteration * 1000000000ULL) /
 					options->fps;
 
-			sleep_status = sleep_until(deadline);
+			sleep_status = sleep_until(session, deadline);
 			if (sleep_status) {
 				status = sleep_status;
 				break;
@@ -634,16 +566,31 @@ static int run_series(struct fplinux_fb_session *session,
 			status = 1;
 			break;
 		}
-		memset(&request, 0, sizeof(request));
-		request.pixels = (uint64_t)(uintptr_t)pixels;
-		request.format = options->mode == PRESENT_MODE_CPU_RGB565 ?
-					 UMS9117_PRESENT_RGB565 :
-					 UMS9117_PRESENT_NV16;
-		request.bytes = (uint32_t)session->page_bytes;
+		if (!fplinux_drm_session_dispatch(session))
+			return -1;
+		while (!session->active && !stop_signal) {
+			struct pollfd event = {
+				.fd = fplinux_drm_session_fd(session),
+				.events = POLLIN,
+			};
+
+			if (poll(&event, 1, -1) < 0) {
+				if (errno == EINTR)
+					continue;
+				return -1;
+			}
+			if (!fplinux_drm_session_dispatch(session))
+				return -1;
+		}
+		if (stop_signal) {
+			status = 1;
+			break;
+		}
+		memcpy(session->mapping + page * session->page_bytes, pixels,
+		       session->page_bytes);
 		if (timing_start(&start) < 0)
 			return -1;
-		if (ioctl(session->framebuffer, UMS9117_FBIO_PRESENT,
-			  &request) < 0) {
+		if (!fplinux_drm_session_present(session, page)) {
 			if (errno == EINTR && stop_signal) {
 				status = 1;
 				break;
@@ -651,9 +598,9 @@ static int run_series(struct fplinux_fb_session *session,
 			return -1;
 		}
 		if (timing_stop(&stop) < 0 ||
-		    timing_add(&stats->present, &start, &stop) < 0 ||
-		    record_completion(stats, &request) < 0)
+		    timing_add(&stats->present, &start, &stop) < 0)
 			return -1;
+		++stats->completed;
 	}
 	if (timing_stop(&loop_stop) < 0 ||
 	    timing_add(&stats->whole, &loop_start, &loop_stop) < 0)
@@ -684,24 +631,13 @@ static void print_stats(const struct options *options,
 	       mode_name(options->mode), stats->completed, options->repeat,
 	       options->fps, options->hold_ms, interrupted ? "yes" : "no");
 	print_timing("codec_convert", &stats->conversion);
-	print_timing("present_ioctl", &stats->present);
+	print_timing("atomic_commit", &stats->present);
 	print_timing("whole_loop", &stats->whole);
-	printf("lcdc_transfer completions=%u total_ns=%" PRIu64
-	       " min_ns=%" PRIu64 " max_ns=%" PRIu64 "\n",
-	       stats->completed, stats->transfer_total_ns,
-	       stats->completed ? stats->transfer_min_ns : 0,
-	       stats->transfer_max_ns);
-	printf("lcdc_sequence first=%" PRIu64 " last=%" PRIu64 " delta=%" PRIu64
-	       " strict_monotonic=%s\n",
-	       stats->first_sequence, stats->last_sequence,
-	       stats->completed ? stats->last_sequence - stats->first_sequence :
-				  0,
-	       stats->completed ? "yes" : "n/a");
 }
 
 int main(int argc, char **argv)
 {
-	struct fplinux_fb_session session;
+	struct fplinux_drm_session session;
 	struct options options;
 	struct run_stats stats;
 	uint8_t *nv16 = NULL;
@@ -726,18 +662,16 @@ int main(int argc, char **argv)
 		interrupted = true;
 		goto cleanup;
 	}
-	if (!fplinux_fb_session_open(&session, options.framebuffer_path,
-				     options.tty_path, error, sizeof(error))) {
+	if (!fplinux_drm_session_open(
+		    &session, options.drm_path, options.tty_path,
+		    options.mode == PRESENT_MODE_NV16 ? DRM_FORMAT_NV16 :
+							DRM_FORMAT_RGB565,
+		    error, sizeof(error))) {
 		fprintf(stderr, "fplinux-present: %s\n", error);
 		failed = true;
 		goto cleanup;
 	}
 	session_open = true;
-	if (validate_native_framebuffer(&session, error, sizeof(error)) < 0) {
-		fprintf(stderr, "fplinux-present: %s\n", error);
-		failed = true;
-		goto cleanup;
-	}
 	frame_bytes = session.page_bytes;
 	if (read_exact_frame(options.input_path, frame_bytes, &nv16, error,
 			     sizeof(error)) < 0) {
@@ -757,11 +691,6 @@ int main(int argc, char **argv)
 		interrupted = true;
 		goto cleanup;
 	}
-	if (!fplinux_fb_session_set_graphics(&session, error, sizeof(error))) {
-		fprintf(stderr, "fplinux-present: %s\n", error);
-		failed = true;
-		goto cleanup;
-	}
 	run_status = run_series(&session, &options, nv16, rgb565, &stats);
 	if (run_status < 0) {
 		fprintf(stderr, "fplinux-present: presentation loop: %s\n",
@@ -772,7 +701,7 @@ int main(int argc, char **argv)
 	have_stats = true;
 	interrupted = run_status > 0 || stop_signal;
 	if (!interrupted) {
-		run_status = hold_last_frame(options.hold_ms);
+		run_status = hold_last_frame(&session, options.hold_ms);
 		if (run_status < 0) {
 			fprintf(stderr, "fplinux-present: final hold: %s\n",
 				strerror(errno));
@@ -783,9 +712,9 @@ int main(int argc, char **argv)
 	}
 
 cleanup:
-	if (session_open && !fplinux_fb_session_close(&session)) {
+	if (session_open && !fplinux_drm_session_close(&session)) {
 		fprintf(stderr,
-			"fplinux-present: framebuffer/console restore failed\n");
+			"fplinux-present: DRM/console restore failed\n");
 		failed = true;
 	}
 	if (!failed && !interrupted && options.output_path &&

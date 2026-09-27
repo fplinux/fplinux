@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import shlex
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +20,14 @@ class FplinuxRotateHostToolTests(unittest.TestCase):
     """Exercise real production objects without claiming V4L2 hardware coverage."""
 
     def _compile(self, output: Path, *sources: Path) -> None:
+        drm_flags = shlex.split(
+            run_process(
+                ["pkg-config", "--cflags", "--libs", "libdrm"],
+                name="read DRM compiler and linker flags",
+                timeout=10,
+                check=True,
+            ).stdout
+        )
         run_process(
             [
                 "cc",
@@ -30,6 +39,7 @@ class FplinuxRotateHostToolTests(unittest.TestCase):
                 f"-I{APORT}",
                 f"-I{SHARED}",
                 *(str(source) for source in sources),
+                *drm_flags,
                 "-o",
                 str(output),
             ],
@@ -60,7 +70,7 @@ class FplinuxRotateHostToolTests(unittest.TestCase):
                 executable,
                 APORT / "fplinux-rotate.c",
                 APORT / "fplinux-rotate-core.c",
-                ROOT / "lib/fplinux/fplinux-fb-session.c",
+                ROOT / "lib/fplinux/fplinux-drm-session.c",
                 ROOT / "lib/fplinux/fplinux-cli.c",
             )
             result = run_process(

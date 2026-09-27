@@ -59,6 +59,7 @@ PACKAGE_DOCUMENTS = {
     "docs/guides/APK_PACKAGES.md": common.ROOT / "docs/guides/APK_PACKAGES.md",
     "docs/guides/STANDALONE.md": common.ROOT / "docs/guides/STANDALONE.md",
     "docs/guides/MICROSD_ROOT.md": common.ROOT / "docs/guides/MICROSD_ROOT.md",
+    "docs/reference/INPUT.md": common.ROOT / "docs/reference/INPUT.md",
     "licenses/musl/COPYRIGHT": common.ROOT / "THIRD_PARTY_LICENSES/musl/COPYRIGHT",
 }
 

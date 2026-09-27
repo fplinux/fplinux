@@ -23,35 +23,37 @@ from tests.fdt import binary_tree
 
 
 def _binary_profile_layout_tree(
-    layout: dict[str, int],
     *,
-    memory_base: int | None = None,
-    memory_size: int | None = None,
-    reserved_range: tuple[int, int] | None = None,
-    display_range: tuple[int, int] | None = None,
+    memory_base: int = 0x80000000,
+    memory_size: int = 0x03E00000,
+    reserved_range: tuple[int, int] = (0x83F00000, 0x00100000),
+    reserved_no_map: bool = True,
 ) -> bytes:
-    """Construct one binary FDT fixture with the named volatile-memory ranges."""
-    ram_base = memory_base if memory_base is not None else layout["ram_base"]
-    framebuffer = layout["framebuffer"]
-    resolved_memory_size = (
-        memory_size if memory_size is not None else layout["fdt_load"] - ram_base
-    )
-    reserved_base, reserved_size = reserved_range or (
-        framebuffer,
-        layout["framebuffer_size"],
-    )
-    display_base, display_size = display_range or (
-        framebuffer,
-        layout["framebuffer_size"],
-    )
+    """Construct boot-memory properties with an independent display DMA pool."""
+    reserved_properties = [("reg", struct.pack(">II", *reserved_range))]
+    if reserved_no_map:
+        reserved_properties.append(("no-map", b""))
     return binary_tree(
         [],
         [
             (
-                f"memory@{ram_base:x}",
+                "chosen",
+                [
+                    (
+                        "bootargs",
+                        (
+                            b"root=PARTUUID=46504c58-02 rootfstype=ext4 "
+                            b"rootwait=10 rw init=/sbin/init\0"
+                        ),
+                    ),
+                ],
+                [],
+            ),
+            (
+                f"memory@{memory_base:x}",
                 [
                     ("device_type", b"memory\0"),
-                    ("reg", struct.pack(">II", ram_base, resolved_memory_size)),
+                    ("reg", struct.pack(">II", memory_base, memory_size)),
                 ],
                 [],
             ),
@@ -64,13 +66,20 @@ def _binary_profile_layout_tree(
                 ],
                 [
                     (
-                        f"framebuffer@{framebuffer:x}",
+                        "framebuffer@83f00000",
+                        reserved_properties,
+                        [],
+                    ),
+                    (
+                        "codec-dma-pool",
                         [
-                            ("reg", struct.pack(">II", reserved_base, reserved_size)),
-                            ("no-map", b""),
+                            ("compatible", b"shared-dma-pool\0"),
+                            ("reusable", b""),
+                            ("size", struct.pack(">I", 0x00400000)),
+                            ("phandle", struct.pack(">I", 1)),
                         ],
                         [],
-                    )
+                    ),
                 ],
             ),
             (
@@ -78,15 +87,11 @@ def _binary_profile_layout_tree(
                 [],
                 [
                     (
-                        f"display@{framebuffer:x}",
+                        "display@20800000",
                         [
-                            (
-                                "reg",
-                                struct.pack(
-                                    ">IIII", display_base, display_size, 0x20800000, 0x1000
-                                ),
-                            ),
-                            ("reg-names", b"framebuffer\0lcdc\0"),
+                            ("reg", struct.pack(">II", 0x20800000, 0x1000)),
+                            ("reg-names", b"lcdc\0"),
+                            ("memory-region", struct.pack(">I", 1)),
                         ],
                         [],
                     )
@@ -254,54 +259,45 @@ class ProfileLayoutDtbTests(unittest.TestCase):
     }
     linux_memory: ClassVar[dict[str, int]] = {"base": 0x80000000, "size": 0x03E00000}
 
-    def test_binary_fdt_matches_the_fixed_fdt_and_display_arenas(self) -> None:
-        """Accept the fixed profile ranges when the binary fixture owns each exactly."""
-        verify_profile_dtb_layout(
-            _binary_profile_layout_tree(self.layout), self.layout, self.linux_memory
+    def test_boot_layout_accepts_a_display_with_separate_dma_memory(self) -> None:
+        """Native display buffers do not change the boot or external-root contract."""
+        tree = _binary_profile_layout_tree()
+        verify_profile_dtb_layout(tree, self.layout, self.linux_memory)
+        verify_root_bootargs(
+            tree,
+            {
+                "kind": "external",
+                "filesystem": "ext4",
+                "partuuid": "46504c58-02",
+                "wait_seconds": 10,
+            },
         )
 
     def test_linux_can_start_after_a_coprocessor_reservation(self) -> None:
         """A board's exact Linux range can exclude the first two MiB of physical RAM."""
-        tree = _binary_profile_layout_tree(
-            self.layout, memory_base=0x80200000, memory_size=0x03C00000
-        )
+        tree = _binary_profile_layout_tree(memory_base=0x80200000, memory_size=0x03C00000)
         verify_profile_dtb_layout(tree, self.layout, {"base": 0x80200000, "size": 0x03C00000})
         with self.assertRaisesRegex(DeviceTreeError, "lacks node /memory@80000000"):
             verify_profile_dtb_layout(tree, self.layout, self.linux_memory)
 
     def test_linux_cannot_claim_the_fixed_fdt_arena(self) -> None:
         """Even a matching target declaration cannot overlap the loaded DTB."""
-        tree = _binary_profile_layout_tree(self.layout, memory_size=0x03F00000)
+        tree = _binary_profile_layout_tree(memory_size=0x03F00000)
         with self.assertRaisesRegex(DeviceTreeError, "overlaps"):
             verify_profile_dtb_layout(tree, self.layout, {"base": 0x80000000, "size": 0x03F00000})
 
-    def test_memory_display_and_padded_fdt_mismatches_are_rejected(self) -> None:
-        """Reject each range error before the loader can hand it to U-Boot."""
-        memory = _binary_profile_layout_tree(
-            self.layout,
-            memory_size=self.layout["fdt_load"] - self.layout["ram_base"] - 0x1000,
-        )
-        reserved = _binary_profile_layout_tree(
-            self.layout,
-            reserved_range=(
-                self.layout["framebuffer"],
-                self.layout["framebuffer_size"] - 0x1000,
-            ),
-        )
-        display = _binary_profile_layout_tree(
-            self.layout,
-            display_range=(
-                self.layout["framebuffer"] + 0x1000,
-                self.layout["framebuffer_size"],
-            ),
-        )
-        padded = _binary_profile_layout_tree(self.layout)
+    def test_memory_reservation_and_padded_fdt_mismatches_are_rejected(self) -> None:
+        """Reject changed RAM ownership or an oversized DTB before the U-Boot handoff."""
+        memory = _binary_profile_layout_tree(memory_size=0x03DFF000)
+        reserved = _binary_profile_layout_tree(reserved_range=(0x83F00000, 0x000FF000))
+        mapped = _binary_profile_layout_tree(reserved_no_map=False)
+        padded = _binary_profile_layout_tree()
         too_small = dict(self.layout)
-        too_small["fdt_size"] = len(padded) + self.layout["fdt_pad"] - 1
+        too_small["fdt_size"] = len(padded) + 0x3000 - 1
         cases = (
             (memory, self.layout, "memory range"),
             (reserved, self.layout, "framebuffer reservation"),
-            (display, self.layout, "display framebuffer range"),
+            (mapped, self.layout, "must be no-map"),
             (padded, too_small, "padding exceeds"),
         )
         for tree, layout, message in cases:

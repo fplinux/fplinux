@@ -1,0 +1,43 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-libtsm
+pkgver=4.7.1
+pkgrel=0
+pkgdesc="Terminal screen and escape sequence engine for FPLinux"
+url="https://github.com/kmscon/libtsm"
+arch="armv7"
+license="MIT AND LGPL-2.1-or-later"
+makedepends_build="clang22 lld22"
+makedepends_host="musl-dev"
+subpackages="$pkgname-dev"
+options="!check"
+source="
+	libtsm-$pkgver.tar.gz::https://github.com/kmscon/libtsm/archive/refs/tags/v$pkgver.tar.gz
+	0001-xterm-function-keys.patch
+"
+builddir="$srcdir/libtsm-$pkgver"
+
+build() {
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=gnu99 -D_GNU_SOURCE \
+		-fPIC -shared -Wl,-soname,libtsm.so.4 \
+		-Wl,--version-script=src/tsm/libtsm.sym \
+		-Isrc/tsm -Isrc/shared -Iexternal -Iexternal/wcwidth \
+		src/tsm/tsm-render.c src/tsm/tsm-screen.c \
+		src/tsm/tsm-selection.c src/tsm/tsm-unicode.c \
+		src/tsm/tsm-vte-charsets.c src/tsm/tsm-vte.c \
+		src/shared/shl-htable.c external/wcwidth/wcwidth.c \
+		$LDFLAGS -o libtsm.so.4
+}
+
+package() {
+	install -Dm755 libtsm.so.4 "$pkgdir/usr/lib/libtsm.so.4"
+	ln -s libtsm.so.4 "$pkgdir/usr/lib/libtsm.so"
+	install -Dm644 src/tsm/libtsm.h "$pkgdir/usr/include/libtsm.h"
+	install -Dm644 COPYING "$pkgdir/usr/share/licenses/$pkgname/COPYING"
+	install -Dm644 LICENSE_htable "$pkgdir/usr/share/licenses/$pkgname/LICENSE_htable"
+	install -Dm644 external/wcwidth/LICENSE.txt \
+		"$pkgdir/usr/share/licenses/$pkgname/LICENSE_wcwidth"
+}
+sha512sums="
+3a7d033d7b3d939492d5bbf124f80f7c80f69b21633e6095836e4320ae9c9c1df69b5bbea101a71f932f2fdf0f66126ececfbd6d8f370b5e5c8a2f9b019dcdf5  libtsm-4.7.1.tar.gz
+aa672c484fbddf6bcf46bc53821407e028ee880fbc2e6e498b10999a5b650a3ebe09a3060d150c9b4558bf4ad41b8a94171c4976dbc16dadcf7d7b890e3f7234  0001-xterm-function-keys.patch
+"

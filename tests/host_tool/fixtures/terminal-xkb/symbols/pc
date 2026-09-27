@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
+default xkb_symbols "pc" {
+    key <LFSH> { [ Shift_L ], repeat = no };
+    key <RTSH> { [ Shift_R ], repeat = no };
+    key <LCTL> { [ Control_L ], repeat = no };
+    key <FK13> { [ F13 ] };
+    modifier_map Shift { <LFSH>, <RTSH> };
+    modifier_map Control { <LCTL> };
+};

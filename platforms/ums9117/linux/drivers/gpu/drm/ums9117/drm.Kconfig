@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config DRM_UMS9117
+	bool
+	depends on DRM && ARCH_UMS9117
+	select DRM_CLIENT_SELECTION
+	select DRM_GEM_DMA_HELPER
+	select DRM_KMS_HELPER
+	select BACKLIGHT_CLASS_DEVICE
+	help
+	  Atomic modesetting for fixed UMS9117 command-mode panels. The LCDC
+	  reads RGB565 or NV16 GEM buffers and transfers pixels through the
+	  board's SPI or LCM/DBI transport. Transfer completion is separate
+	  from panel refresh timing. In-kernel console support uses DRM's
+	  fbdev emulation.

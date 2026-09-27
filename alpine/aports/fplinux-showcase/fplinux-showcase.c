@@ -3,7 +3,7 @@
 
 #include "armada-scene.h"
 #include "fplinux-cli.h"
-#include "fplinux-fb-session.h"
+#include "fplinux-drm-session.h"
 #include "fplinux-keypad.h"
 
 #include <errno.h>
@@ -23,7 +23,7 @@
 #include <unistd.h>
 
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
-#define SHOWCASE_FRAMEBUFFER "/dev/fb0"
+#define SHOWCASE_DRM "/dev/dri/card0"
 #define SHOWCASE_TTY "/dev/tty0"
 #define SHOWCASE_KEYPAD_PHYS "fplinux/keypad0"
 #define SHOWCASE_VIBRATOR_PHYS "fplinux/vibrator0"
@@ -511,12 +511,6 @@ static bool open_hardware(struct hardware_state *state,
 			 "keypad does not expose the right soft key");
 		return false;
 	}
-	if (ioctl(state->keypad, EVIOCGRAB, 1) < 0) {
-		snprintf(error, error_size,
-			 "cannot exclusively acquire keypad");
-		return false;
-	}
-	state->keypad_grabbed = true;
 
 	state->vibrator = open_input(NULL, SHOWCASE_VIBRATOR_PHYS, O_RDWR);
 	if (state->vibrator < 0) {
@@ -720,7 +714,34 @@ static void print_result(uint64_t runs,
 	       cpu_percent_tenths % 10U, peak_rss_kib);
 }
 
-static void copy_frame(struct fplinux_fb_session *display,
+static bool set_display_active(struct fplinux_drm_session *display, bool active,
+			       void *data)
+{
+	struct hardware_state *hardware = data;
+	struct input_event events[32];
+	struct armada_outputs idle = { .lcd_level = -1 };
+	ssize_t count;
+
+	(void)display;
+	if (!active && !apply_outputs(hardware, &idle))
+		return false;
+	if (hardware->keypad_grabbed) {
+		if (ioctl(hardware->keypad, EVIOCGRAB, 0) < 0)
+			return false;
+		hardware->keypad_grabbed = false;
+	}
+	do {
+		count = read(hardware->keypad, events, sizeof(events));
+	} while (count > 0 || (count < 0 && errno == EINTR));
+	if (active) {
+		if (ioctl(hardware->keypad, EVIOCGRAB, 1) < 0)
+			return false;
+		hardware->keypad_grabbed = true;
+	}
+	return true;
+}
+
+static void copy_frame(struct fplinux_drm_session *display,
 		       const uint16_t *pixels, unsigned int page)
 {
 	uint8_t *destination = display->mapping + page * display->page_bytes;
@@ -734,7 +755,7 @@ static void copy_frame(struct fplinux_fb_session *display,
 
 int main(int argc, char **argv)
 {
-	struct fplinux_fb_session display;
+	struct fplinux_drm_session display;
 	struct hardware_state hardware;
 	struct showcase_options options;
 	struct frame_statistics statistics = { 0 };
@@ -777,21 +798,23 @@ int main(int argc, char **argv)
 		goto cleanup;
 	}
 	hardware_open = true;
-	if (!fplinux_fb_session_open(&display, SHOWCASE_FRAMEBUFFER,
-				     SHOWCASE_TTY, error, sizeof(error))) {
+	if (!fplinux_drm_session_open(&display, SHOWCASE_DRM, SHOWCASE_TTY,
+				      DRM_FORMAT_RGB565, error,
+				      sizeof(error))) {
 		fprintf(stderr, "fplinux-showcase: %s\n", error);
 		goto cleanup;
 	}
 	display_open = true;
+	if (!fplinux_drm_session_set_active_handler(
+		    &display, set_display_active, &hardware)) {
+		perror("fplinux-showcase: keypad activation");
+		goto cleanup;
+	}
 	if (display.pages != 2U ||
 	    !((display.width == 240U && display.height == 320U) ||
 	      (display.width == 128U && display.height == 160U))) {
 		fprintf(stderr,
 			"fplinux-showcase: expected two-page RGB565 240x320 or 128x160 framebuffer\n");
-		goto cleanup;
-	}
-	if (!fplinux_fb_session_set_graphics(&display, error, sizeof(error))) {
-		fprintf(stderr, "fplinux-showcase: %s\n", error);
 		goto cleanup;
 	}
 	pixels =
@@ -838,6 +861,12 @@ int main(int argc, char **argv)
 				"fplinux-showcase: cannot read CLOCK_MONOTONIC\n");
 			goto cleanup;
 		}
+		if (!fplinux_drm_session_dispatch(&display))
+			goto cleanup;
+		if (!display.active) {
+			usleep(20000);
+			continue;
+		}
 		key_result = exit_key_pressed(hardware.keypad);
 		if (key_result < 0) {
 			fprintf(stderr,
@@ -876,7 +905,7 @@ int main(int argc, char **argv)
 			goto cleanup;
 		}
 		__sync_synchronize();
-		if (!fplinux_fb_session_present(&display, page)) {
+		if (!fplinux_drm_session_present(&display, page)) {
 			fprintf(stderr,
 				"fplinux-showcase: cannot present frame: %s\n",
 				strerror(errno));
@@ -938,12 +967,14 @@ int main(int argc, char **argv)
 cleanup:
 	armada_scene_destroy(scene);
 	free(pixels);
+	if (display_open)
+		fplinux_drm_session_set_active_handler(&display, NULL, NULL);
 	if (hardware_open && !close_hardware(&hardware)) {
 		fprintf(stderr,
 			"fplinux-showcase: hardware restore was incomplete\n");
 		success = false;
 	}
-	if (display_open && !fplinux_fb_session_close(&display)) {
+	if (display_open && !fplinux_drm_session_close(&display)) {
 		fprintf(stderr,
 			"fplinux-showcase: display restore was incomplete\n");
 		success = false;

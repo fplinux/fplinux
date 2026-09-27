@@ -33,14 +33,23 @@ class ProbeHeaderTests(unittest.TestCase):
             shutil.copytree(ROOT / "include", root / "include")
             source = root / "probe.c"
             destination = root / ".cache/tools/preprocessed.c"
+            sysroot = root / "header-sysroot"
+            linux_headers = sysroot / "usr/include/linux"
+            linux_headers.mkdir(parents=True)
+            # Only the toolchain's architecture-independent key-code header is
+            # needed here; this remains preprocessing, not an ARM link test.
+            shutil.copyfile(
+                Path("/usr/include/linux/input-event-codes.h"),
+                linux_headers / "input-event-codes.h",
+            )
 
             def preprocess_instead_of_kern(command: Sequence[str], **_kwargs: object) -> None:
                 """Translate the container paths and run its compiler in preprocess-only mode."""
                 compiler = list(command[command.index("--") + 1 :])
                 compiler = [
-                    argument.replace("/workspace/", f"{root}/").replace(
-                        "/output/", f"{destination.parent}/"
-                    )
+                    argument.replace("/workspace/", f"{root}/")
+                    .replace("/output/", f"{destination.parent}/")
+                    .replace("=/sysroot", f"={sysroot}")
                     for argument in compiler
                 ]
                 run_process(
@@ -66,7 +75,7 @@ class ProbeHeaderTests(unittest.TestCase):
                         probe._compile_probe(  # noqa: SLF001 -- real compiler command boundary.
                             source,
                             destination,
-                            root / "unused-sysroot",
+                            sysroot,
                             kern="stubbed-kern",
                             image="stubbed-image",
                             reporter=reporter,

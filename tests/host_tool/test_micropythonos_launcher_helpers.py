@@ -13,7 +13,6 @@ from tests.process import run_process
 ROOT = Path(__file__).resolve().parents[2]
 HARNESS = ROOT / "tests/host_tool/fplinux-micropythonos-launcher-helpers.c"
 LAUNCHER = ROOT / "alpine/aports/fplinux-micropythonos/fplinux-micropythonos-launcher.c"
-SHARED = ROOT / "lib/fplinux/fplinux-fb-session.c"
 SHARED_INCLUDE = ROOT / "include/fplinux"
 
 
@@ -60,7 +59,6 @@ class MicroPythonOsLauncherHostHelperTests(unittest.TestCase):
                 str(HARNESS),
                 f"-I{SHARED_INCLUDE}",
                 str(launcher_object),
-                str(SHARED),
                 "-o",
                 str(cls.executable),
             ],
@@ -87,10 +85,6 @@ class MicroPythonOsLauncherHostHelperTests(unittest.TestCase):
             0,
             msg=f"{case} failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
         )
-
-    def test_host_display_metadata_predicates(self) -> None:
-        """Host-only: accept supported metadata and reject three pages."""
-        self.run_harness_case("framebuffer")
 
     def test_host_child_launch_helpers(self) -> None:
         """Host-only: preserve a child argument and its exit status."""

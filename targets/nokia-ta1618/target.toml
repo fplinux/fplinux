@@ -44,8 +44,8 @@ source = "linux/dts/bluetooth.dtsi"
 destination = "arch/arm/boot/dts/unisoc/nokia-ta1618-bluetooth.dtsi"
 
 [[linux.copies]]
-source = "linux/drivers/video/fbdev/ta1618-fb.c"
-destination = "drivers/video/fbdev/ta1618-fb.c"
+source = "linux/drivers/gpu/drm/ums9117/ta1618-drm.c"
+destination = "drivers/gpu/drm/ums9117/ta1618-drm.c"
 
 [[linux.copies]]
 source = "linux/dts/ums9117-nokia-ta1618.dts"
@@ -56,8 +56,12 @@ source = "linux/arch/arm/mach-ums9117/Kconfig"
 destination = "arch/arm/mach-ums9117/Kconfig"
 
 [[linux.appends]]
-source = "linux/drivers/video/fbdev/fbdev.Makefile"
-destination = "drivers/video/fbdev/Makefile"
+source = "linux/drivers/gpu/drm/ums9117/drm.Kconfig"
+destination = "drivers/gpu/drm/Kconfig"
+
+[[linux.appends]]
+source = "linux/drivers/gpu/drm/ums9117/drm.Makefile"
+destination = "drivers/gpu/drm/ums9117/Makefile"
 
 [bootstrap]
 image = "ta1618_linux_bootstrap.bin"

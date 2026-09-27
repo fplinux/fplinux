@@ -254,7 +254,7 @@ def verify_profile_dtb_layout(
     layout: Mapping[str, int],
     linux_memory: Mapping[str, int],
 ) -> None:
-    """Verify the selected profile's volatile layout against its compiled DTB."""
+    """Verify Linux RAM, the fixed FDT arena and the bootstrap display reservation."""
     ram_base = _layout_u32(layout, "ram_base")
     fdt_load = _layout_u32(layout, "fdt_load")
     fdt_limit = _layout_u32(layout, "fdt_size")
@@ -277,9 +277,8 @@ def verify_profile_dtb_layout(
 
     memory_path = f"/memory@{linux_base:x}"
     reserved_path = f"/reserved-memory/framebuffer@{framebuffer:x}"
-    display_path = f"/soc/display@{framebuffer:x}"
     tree_bytes = _read_tree(tree)
-    properties = exact_path_properties(tree_bytes, (memory_path, reserved_path, display_path))
+    properties = exact_path_properties(tree_bytes, (memory_path, reserved_path))
     memory = properties[memory_path]
     if parse_nul_string(memory.get("device_type", b""), f"{memory_path} device_type") != "memory":
         raise DeviceTreeError("profile DTB memory node is not memory")
@@ -290,23 +289,13 @@ def verify_profile_dtb_layout(
     if len(tree_bytes) + fdt_pad_bytes > fdt_limit:
         raise DeviceTreeError("profile DTB plus U-Boot padding exceeds the fixed FDT arena")
 
+    # The bootstrap scanout remains reserved while Linux allocates its own DMA buffers.
     reserved = properties[reserved_path]
     reserved_base, reserved_size = _u32_pair(reserved.get("reg", b""), f"{reserved_path} reg")
     if (reserved_base, reserved_size) != (framebuffer, framebuffer_size):
         raise DeviceTreeError("profile DTB framebuffer reservation differs from the layout")
     if reserved.get("no-map") != b"":
         raise DeviceTreeError("profile DTB framebuffer reservation must be no-map")
-
-    display = properties[display_path]
-    display_reg = display.get("reg", b"")
-    if len(display_reg) < 8 or len(display_reg) % 8:
-        raise DeviceTreeError("profile DTB display reg has no complete 32-bit ranges")
-    display_base, display_size = _u32_pair(display_reg[:8], f"{display_path} first reg")
-    names = parse_nul_string_list(display.get("reg-names", b""), f"{display_path} reg-names")
-    if not names or names[0] != "framebuffer":
-        raise DeviceTreeError("profile DTB display does not name its first range framebuffer")
-    if (display_base, display_size) != (framebuffer, framebuffer_size):
-        raise DeviceTreeError("profile DTB display framebuffer range differs from the layout")
 
 
 def verify_target_identity(

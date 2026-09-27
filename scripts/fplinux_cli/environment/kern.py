@@ -597,7 +597,13 @@ def setup(
 
     generation = secrets.token_hex(32)
     staging_image = _temporary_image_reference(image, "staging")
-    for relative in (".kernignore", "Containerfile", "package.json", "package-lock.json"):
+    for relative in (
+        ".kernignore",
+        "Containerfile",
+        "package.json",
+        "package-lock.json",
+        "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch",
+    ):
         source = ROOT / relative
         if source.is_symlink() or not source.is_file():
             fail(f"container image input is missing or invalid: {source}")

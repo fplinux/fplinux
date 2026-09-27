@@ -1,53 +1,102 @@
 # Local console
 
-Every current target starts an interactive root shell on the phone itself. It
-does not need the USB cable after Linux has started. Screen size, panel
-orientation and the physical labels on a particular phone remain in that
-phone's target document.
+The phone starts `fplinux-terminal`, a graphical terminal with an interactive
+root Bash shell, when a DRM display is available. It runs under OpenRC and does
+not need USB after Linux starts. The selected [target document](../../targets/README.md)
+states the display's hardware support and limitations.
 
-The console accepts the same phone keypad controls on every current target.
-A keyboard, including the [host keyboard bridge](HOST_KEYBOARD.md), types at
-the same time through the Linux console keymap; its keys, `*` and `#` included,
-are ordinary keyboard input.
+The terminal uses `TERM=xterm-256color`. Bash provides command editing,
+completion, history and reverse search. The terminal keeps scrollback and
+renders Unicode text with a Terminus font. The system root and its persistence
+follow the selected boot profile.
 
 ## Phone keypad
 
-The phone keypad enters text with multi-tap: press a digit repeatedly to choose
-its character. It does not predict words. `1` selects punctuation and `0`
-selects a space. Pause briefly or press another key to commit the current
-character.
+Digits enter text with multi-tap: press a digit repeatedly to choose a
+character, then pause or press another digit to commit it. `1` selects
+punctuation and `0` selects a space. The pending character appears at the
+cursor; the bottom line shows the language, input mode and soft-key actions.
 
-- Digits `0` through `9` enter text with multi-tap.
-- `*` cycles Ctrl, Alt, Shift or no modifier for the next multi-tap character.
-  Ctrl applies to letters, `@`, `^`, `_` and `?`; other characters are
-  refused. Enter, Backspace and the D-pad ignore the modifier and leave it
-  armed.
-- `#` opens the scrollback view.
-- The left soft key sends Tab, or Esc followed by Tab with Shift; Ctrl and Alt
-  are refused.
-- The right soft key cancels the pending character or sends Backspace.
-- The centre or dial key sends Enter.
-- The D-pad moves through shell input and programs.
-- The power key is not console input; see [power-off](POWER_OFF.md).
+| Key            | Action                                                             |
+| -------------- | ------------------------------------------------------------------ |
+| Digits         | Multi-tap text, or digits in `123` mode                            |
+| `*`            | Switch between `abc` and `ABC`                                     |
+| Hold `*`       | Switch between `123` and the remembered letter case                |
+| `#`            | Cancel a pending character, otherwise Backspace                    |
+| Hold `#`       | Clear the entire command line while Bash is editing its prompt     |
+| Left soft      | Open the menu, or select its highlighted item                      |
+| Hold left soft | Open the modifier strip                                            |
+| Right soft     | Back in menus; otherwise clear modifiers or enter/leave scrollback |
+| Centre         | Enter, or select a menu item                                       |
+| Dial           | Tab completion                                                     |
+| D-pad          | Arrow keys; navigate the menu or scrollback when open              |
 
-The pending character is shown at the cursor. When no character is pending, an
-armed one-shot modifier appears there as `C`, `A` or `S`. A refused key shows
-`!` there briefly.
+Holding `#` does not clear a foreground application's input. The power key is
+reserved for [power-off](POWER_OFF.md).
 
-## Scrollback
+A short `*` changes the pending character's case without sending it. In `123`
+mode it returns to letters with the opposite of the remembered case. Hold `*`
+for about 650 ms to change between digits and letters without changing that
+remembered case.
 
-Press `#` to enter the console's scrollback view. It does not stop the shell.
-In that view, Up and Down move one line at a time; Left and Right move a screen
-at a time, and the centre or dial key returns to the newest line. Press `#` or
-the right soft key to return to the live prompt. Keyboard input is ignored
-while the view is open.
+The menu opens with **Modifiers** selected. Up and Down move between actions.
+**Symbols...**, **Special keys...** and **Language: EN/RU...** open choosers
+for literal symbols, Escape and F1–F12, or English and Russian multi-tap.
+The language item shows the current selection. Right soft (**Back**) returns
+to the parent menu or closes the main menu.
 
-## What the console is not
+**Interrupt Ctrl+C**, **End input Ctrl+D** and **Search Ctrl+R** send their
+named shortcuts. **Help** has three sections: Typing, Modifiers and History.
+Left and Right switch sections and return to the top of their text. Text wraps
+automatically to the display and selected font, including the space used by
+armed modifiers. Up and Down scroll one line when a section does not fit; the
+toolbar shows the visible line range. Scrolling stops at the start and end of
+the section. Right soft returns to the menu. An external keyboard can use the
+arrow keys and Escape. While Help is open,
+other keys do not type into the shell or switch to the diagnostic console.
+Pending text and armed modifiers remain intact.
 
-The local console is a normal Linux virtual terminal with `TERM=linux`, not a
-phone-specific menu system. It has no separate application launcher, network
-configuration screen or persistent user account. The RAM session, storage and
-hardware limits still come from the selected target document.
+## Modifiers
 
-For commands from the host, see [SSH sessions](SSH.md). The selected phone page
-lists its display and keypad support.
+Hold the left soft key for about 500 ms, then release it, to open the strip
+above the toolbar. Two short left-soft presses also open **Modifiers**, the
+first menu item. Left and Right select Ctrl, Alt or Shift; Centre toggles the
+selection. The `1`, `2` and `3` keys toggle Ctrl, Alt and Shift directly.
+Multiple modifiers may be selected together.
+
+The left soft key (**Done**) arms the selected combination for one phone key.
+The strip stays visible until that key is sent. The right soft key is **Cancel**
+while choosing and **Clear** when armed outside a menu; both clear the whole
+combination without opening scrollback. In a menu it is **Back**, which leaves
+the armed combination intact.
+
+Modifiers apply when a multi-tap character is committed, or to the next phone
+digit, arrow, Enter, Backspace, Tab or menu-selected key such as F1–F12. Menu
+navigation and case changes leave them armed. A pending character waits while
+the menu or modifier strip is being used. The input row remains visible above
+the strip. An external keyboard uses its own modifiers; typing on it does not
+consume an armed phone combination unless it first commits a pending phone
+character. Leaving the graphical terminal clears pending input and modifiers.
+
+## Scrollback and keyboards
+
+In scrollback, Up and Down move one line and Left and Right move one page.
+The right soft key returns to live output. Typing resumes live input.
+An external keyboard uses Shift+PageUp and Shift+PageDown for scrollback.
+
+Keyboards, including the [host keyboard bridge](HOST_KEYBOARD.md), type
+alongside the phone keypad through the [shared XKB layouts](../reference/INPUT.md#keyboard-layouts).
+Keyboard F13 and F14 remain function keys; they do not invoke phone soft-key
+actions. Alt+Shift switches installed keyboard layouts. Phone multi-tap language
+is selected separately in the menu.
+
+## Diagnostic console
+
+The menu's **Diagnostic console** action, or Ctrl+Alt+F1 on an external keyboard,
+switches to the kernel's diagnostic virtual terminal. Press and release the
+phone's right soft key to return to the same graphical shell, with its command
+line preserved. The diagnostic console also shows this return shortcut.
+From a host [SSH session](SSH.md), `chvt 2` returns to the terminal when it
+occupies VT 2, as in the normal startup configuration.
+
+For host shell access and commands, use [SSH sessions](SSH.md).

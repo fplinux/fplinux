@@ -12,7 +12,7 @@ struct output {
 };
 
 static enum fplinux_multitap_emit_result emit_character(void *opaque,
-							unsigned char character)
+							uint32_t character)
 {
 	struct output *output = opaque;
 
@@ -21,16 +21,16 @@ static enum fplinux_multitap_emit_result emit_character(void *opaque,
 	return FPLINUX_MULTITAP_EMIT_ACCEPTED;
 }
 
-static enum fplinux_multitap_emit_result
-block_character(void *opaque, unsigned char character)
+static enum fplinux_multitap_emit_result block_character(void *opaque,
+							 uint32_t character)
 {
 	(void)opaque;
 	(void)character;
 	return FPLINUX_MULTITAP_EMIT_BLOCKED;
 }
 
-static enum fplinux_multitap_emit_result
-reject_character(void *opaque, unsigned char character)
+static enum fplinux_multitap_emit_result reject_character(void *opaque,
+							  uint32_t character)
 {
 	(void)opaque;
 	(void)character;
@@ -150,6 +150,36 @@ static void assert_delivery_outcomes(void)
 	assert(fplinux_multitap_candidate(&state) == '\0');
 }
 
+static enum fplinux_multitap_emit_result emit_unicode(void *context,
+						      uint32_t character)
+{
+	uint32_t *output = context;
+
+	*output = character;
+	return FPLINUX_MULTITAP_EMIT_ACCEPTED;
+}
+
+static void assert_russian_composition(void)
+{
+	struct fplinux_multitap state;
+	uint32_t emitted = 0;
+
+	fplinux_multitap_init(&state);
+	fplinux_multitap_set_language(&state, FPLINUX_MULTITAP_RUSSIAN);
+	fplinux_multitap_press(&state, '3', 0, emit_unicode, &emitted);
+	fplinux_multitap_press(&state, '3', 1, emit_unicode, &emitted);
+	fplinux_multitap_press(&state, '3', 1, emit_unicode, &emitted);
+	assert(fplinux_multitap_candidate(&state) == 0x451);
+	fplinux_multitap_commit(&state, emit_unicode, &emitted);
+	assert(emitted == 0x451);
+	fplinux_multitap_press(&state, '2', 0, emit_unicode, &emitted);
+	assert(fplinux_multitap_candidate(&state) == 0x430);
+	fplinux_multitap_set_language(&state, FPLINUX_MULTITAP_ENGLISH);
+	assert(!fplinux_multitap_pending(&state));
+	fplinux_multitap_press(&state, '2', 0, emit_unicode, &emitted);
+	assert(fplinux_multitap_candidate(&state) == 'a');
+}
+
 int main(void)
 {
 	assert_groups();
@@ -157,5 +187,6 @@ int main(void)
 	assert_cycle_and_change_key_commit();
 	assert_cancel();
 	assert_delivery_outcomes();
+	assert_russian_composition();
 	return 0;
 }

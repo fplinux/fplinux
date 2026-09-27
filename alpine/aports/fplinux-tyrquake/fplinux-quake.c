@@ -17,15 +17,12 @@
 
 #include "fplinux-cli.h"
 #include "fplinux-quake-internal.h"
-#include "fplinux-fb-session.h"
 
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
 #define FPLINUX_QUAKE_CARD_MOUNT "/mnt/card"
 #define FPLINUX_QUAKE_GAME_DATA FPLINUX_QUAKE_CARD_MOUNT "/fplinux/quake/id1"
 #define FPLINUX_QUAKE_ENGINE "/usr/bin/tyr-quake"
-#define FPLINUX_QUAKE_FRAMEBUFFER_DEVICE "/dev/fb0"
 #define FPLINUX_QUAKE_LOCK_PATH "/tmp/fplinux-quake.lock"
-#define FPLINUX_QUAKE_TTY_DEVICE "/dev/tty0"
 /* Kibibytes the engine reserves for its own allocator. The default suits a
  * phone that keeps its game data on a card; a phone holding that data in RAM
  * has less room and can ask for less. Below the classic minimum the engine
@@ -278,16 +275,6 @@ void fplinux_quake_remove_runtime(const char *runtime)
 			strerror(errno));
 }
 
-static void save_display(struct fplinux_fb_session *session)
-{
-	char error[128];
-
-	if (!fplinux_fb_session_open(session, FPLINUX_QUAKE_FRAMEBUFFER_DEVICE,
-				     FPLINUX_QUAKE_TTY_DEVICE, error,
-				     sizeof(error)))
-		die(error);
-}
-
 static pid_t start_engine(const char *runtime, unsigned long heap_kib)
 {
 	char heap[32];
@@ -429,7 +416,6 @@ static enum fplinux_cli_result parse_arguments(int argc, char **argv,
 
 int main(int argc, char **argv)
 {
-	struct fplinux_fb_session display;
 	struct quake_options options;
 	char pak0[256];
 	char runtime[128];
@@ -437,7 +423,6 @@ int main(int argc, char **argv)
 	int child_status;
 	int lock;
 	enum fplinux_cli_result parse_result;
-	bool restored;
 
 	parse_result = parse_arguments(argc, argv, &options);
 	if (parse_result != FPLINUX_CLI_READY)
@@ -449,12 +434,10 @@ int main(int argc, char **argv)
 		die("game-data path is too long");
 	require_pak(pak0);
 	prepare_runtime(runtime, sizeof(runtime));
-	save_display(&display);
 	install_signal_handlers();
 	child = start_engine(runtime, options.heap_kib);
 	child_status = wait_for_engine(child);
-	restored = fplinux_fb_session_close(&display);
 	fplinux_quake_remove_runtime(runtime);
 	close(lock);
-	return restored ? child_status : EXIT_FAILURE;
+	return child_status;
 }

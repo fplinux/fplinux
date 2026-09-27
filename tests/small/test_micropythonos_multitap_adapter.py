@@ -161,12 +161,40 @@ def make_adapter() -> tuple[MultiTapAdapter, FakeNativeEngine]:
     native = FakeNativeModule()
     module = load_engine_module(native)
     adapter_type = cast("Callable[..., MultiTapAdapter]", module.__dict__["MultiTapEngine"])
-    adapter = adapter_type(elapsed=lambda later, earlier: later - earlier)
+    adapter = adapter_type(
+        elapsed=lambda later, earlier: later - earlier,
+        focus_state=lambda: (0, True),
+    )
     return adapter, native.engines[0]
 
 
 class MicroPythonOsMultitapAdapterTests(unittest.TestCase):
     """Exercise Python adapter policy while replacing only its native dependency."""
+
+    def test_focus_change_cancels_preedit_without_committing_hidden_text(self) -> None:
+        """A suspended or quickly returned VT never expires its old candidate."""
+        native = FakeNativeModule()
+        module = load_engine_module(native)
+        adapter_type = cast("Callable[..., MultiTapAdapter]", module.__dict__["MultiTapEngine"])
+        focus = [0, True]
+        adapter = adapter_type(
+            elapsed=lambda later, earlier: later - earlier,
+            focus_state=lambda: tuple(focus),
+        )
+        engine = native.engines[0]
+        adapter.text = "kept"
+        engine.candidate_value = "a"
+        engine.pending_key_value = "2"
+        focus[:] = [1, False]
+        self.assertTrue(adapter.expire(1000))
+        self.assertEqual(adapter.display_text, "kept")
+        self.assertFalse(adapter.press("2", 1100))
+        focus[:] = [2, True]
+        self.assertFalse(adapter.expire(1200))
+        engine.candidate_value = "b"
+        focus[:] = [4, True]
+        self.assertTrue(adapter.expire(2000))
+        self.assertEqual(adapter.display_text, "kept")
 
     def test_fake_native_emissions_drive_text_case_and_erase_policy(self) -> None:
         """Apply adapter policy to explicitly scripted native-engine emissions."""
@@ -282,7 +310,10 @@ class MicroPythonOsMultitapAdapterTests(unittest.TestCase):
     def test_keyboard_text_and_erase_reach_only_an_active_owner(self) -> None:
         """Keyboard text edits the active session and is refused without one."""
         module = load_engine_module(FakeNativeModule())
-        engine = module.MultiTapEngine(elapsed=lambda later, earlier: later - earlier)
+        engine = module.MultiTapEngine(
+            elapsed=lambda later, earlier: later - earlier,
+            focus_state=lambda: (0, True),
+        )
 
         class InputTarget:
             """Forward to one adapter, as the MicroPythonOS keyboard owner does."""

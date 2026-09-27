@@ -15,7 +15,7 @@
 ## Scope
 
 UMS9117 provides reusable CPU, interrupt, timer, USB gadget, memory-copy DMA,
-ROTA, JPEG codec/scaler, analog-die, audio, Bluetooth, FM radio, framebuffer,
+ROTA, JPEG codec/scaler, analog-die, audio, Bluetooth, FM radio, DRM/KMS display,
 matrix-keypad, microSD and read-only NAND support for the listed phones. Audio
 covers headphone and speaker playback, microphone capture and FM playback. Linux
 reports the MPLL and Cortex-A7 rates and offers manual selection between 768 MHz
@@ -34,9 +34,9 @@ inputs, payload assembly and the values supplied to the loader.
 | [AP DMAengine](#memory-copy-dma)                               | Partial       | 32 shared channels for memory copies and the fixed ROTA request; client availability depends on the target.                                              |
 | [Image rotation](../../docs/apps/ROTATE.md)                    | Supported     | V4L2 mem2mem ROTA with a shared userspace interface.                                                                                                     |
 | [JPEG codec and scaling](../../docs/apps/JPEG.md)              | Supported     | Baseline JPEG decode, fixed quality-85 JPEG encode, and two fixed half-size NV16 scaler pairs.                                                           |
-| [Native image presentation](../../docs/apps/PRESENT.md)        | Supported     | Native-size NV16 or RGB565 presentation through the target framebuffer.                                                                                  |
+| [Native image presentation](../../docs/apps/PRESENT.md)        | Partial       | Native-size NV16 or RGB565 presentation through DRM/KMS; consult the target's display support status.                                                    |
 | Analog-die interface                                           | Supported     | Linux initializes the transport and shared SC2720 charger, fuel-gauge, RTC, ADC, keypad-light and power-off clients; the vibrator is enabled per target. |
-| [LCDC framebuffer core](../../docs/features/LOCAL_CONSOLE.md)  | Supported     | Targets provide a panel profile and the board-specific panel transport setup.                                                                            |
+| LCDC DRM/KMS                                                   | Partial       | Targets provide the panel profile and transport; fbdev emulation supplies the kernel diagnostic console.                                                 |
 | [Matrix keypad](../../docs/features/LOCAL_CONSOLE.md)          | Supported     | Targets provide matrix wiring and EIC keys; the [phone key codes](../../docs/reference/INPUT.md) are shared.                                             |
 | [Audio](../../docs/features/HEADPHONE_AUDIO.md)                | Partial       | Headphones, microphones and [speaker audio](../../docs/features/SPEAKER_AUDIO.md) work on all targets; each target states its microphone limits.         |
 | [Bluetooth](../../docs/features/BLUETOOTH.md)                  | Partial       | Shared CM4 HCI driver; each target needs firmware prepared from its own phone.                                                                           |
@@ -61,10 +61,6 @@ If the controller cannot be stopped, termination returns an error; the client
 must retain its DMA buffers until a cold boot. Recovery from a source-alignment
 fault has been tested; other hardware fault conditions have not.
 
-Framebuffer DMA copies, when enabled by the target, and ROTA use one channel
-each. They share the same DMA controller owner. This does not change the
-framebuffer publication or page-flip contract.
-
 ROTA uses its fixed peripheral request and hardware-generated external linked
 lists through this controller. Generic peripheral requests, cyclic transfers,
 caller-supplied hardware linked lists and a userspace memory-copy API are not
@@ -72,19 +68,13 @@ provided. Controller-private DMA
 remains owned by its controller or target. See the target documentation for
 the enabled clients and hardware support status of each phone.
 
-## Shared framebuffer interface
+## Shared display interface
 
-The framebuffer exposes two pages. Framebuffer drawing paths publish their own
-damage. An application writing through `mmap()` must stop changing a completed
-batch, execute an architecture-appropriate full memory barrier, then issue
-`FBIOPAN_DISPLAY` to publish that damage. It must do so even when selecting the
-same page again.
-
-`FBIOPAN_DISPLAY` selects a page and reports damage; it is not a completion
-fence. Updates may be coalesced, so an application that needs stable animation
-frames keeps a submitted page unchanged while the display pipeline can snapshot
-it and uses fully populated alternate pages. A mapped write without publication
-is intentionally silent.
+Applications use atomic DRM/KMS to present RGB565 or NV16 buffers. One
+application owns the display at a time; leaving it restores the previous
+virtual terminal. The DRM fbdev emulation provides the kernel's diagnostic
+console. See [native image presentation](../../docs/apps/PRESENT.md)
+for a DRM/KMS application and its completion boundary.
 
 All three phones expose the shared [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)
 interface. The target selects the brightness range, panel transport and

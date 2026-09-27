@@ -3,12 +3,15 @@
 /* fplinux-check: package-embedded */
 
 #include <linux/input.h>
+#include <string.h>
 
 #include "client.h"
 #include "common.h"
 #include "console.h"
+#include "fplinux-drm-session.h"
 #include "fplinux-input-session.h"
 #include "fplinux-keypad.h"
+#include "fplinux-quake-internal.h"
 #include "input.h"
 #include "keys.h"
 #include "quakedef.h"
@@ -16,9 +19,18 @@
 
 #define FPLINUX_QUAKE_INPUT_ERROR_BYTES 128
 #define FPLINUX_QUAKE_INPUT_WHEEL_LIMIT 16
+#define FPLINUX_QUAKE_INPUT_KEY_BYTES ((KEY_CNT + 7U) / 8U)
+
+struct held_device {
+	uint64_t id;
+	unsigned char keys[FPLINUX_QUAKE_INPUT_KEY_BYTES];
+};
 
 static struct fplinux_input_session input_session;
 static qboolean input_session_open;
+static qboolean input_active;
+static struct held_device held_devices[FPLINUX_INPUT_SESSION_DEVICE_COUNT];
+static unsigned int held_actions[K_LAST];
 
 static float mouse_dx, mouse_dy;
 static float old_mouse_dx, old_mouse_dy;
@@ -254,13 +266,49 @@ static knum_t translate_mouse(unsigned int code)
 	}
 }
 
-static void handle_key(unsigned int code, qboolean pressed,
+static struct held_device *find_held_device(uint64_t id)
+{
+	size_t i;
+
+	for (i = 0; i < FPLINUX_INPUT_SESSION_DEVICE_COUNT; ++i)
+		if (held_devices[i].id == id)
+			return &held_devices[i];
+	return NULL;
+}
+
+static void clear_key_states(void)
+{
+	size_t i;
+
+	Key_ClearAllStates();
+	memset(held_actions, 0, sizeof(held_actions));
+	for (i = 0; i < FPLINUX_INPUT_SESSION_DEVICE_COUNT; ++i)
+		memset(held_devices[i].keys, 0, sizeof(held_devices[i].keys));
+}
+
+static void handle_key(const struct fplinux_input_event *event,
 		       knum_t (*translate)(unsigned int code))
 {
-	knum_t key = translate(code);
+	struct held_device *device = find_held_device(event->device_id);
+	knum_t key = translate(event->code);
+	unsigned char *byte;
+	unsigned int mask;
 
-	if (key != K_UNKNOWN)
-		Key_Event(key, pressed);
+	if (!device || key == K_UNKNOWN || event->code >= KEY_CNT)
+		return;
+	byte = &device->keys[event->code / 8U];
+	mask = 1U << (event->code % 8U);
+	if (!!(*byte & mask) == event->pressed)
+		return;
+	if (event->pressed) {
+		*byte |= mask;
+		if (++held_actions[key] == 1U)
+			Key_Event(key, true);
+	} else {
+		*byte &= ~mask;
+		if (--held_actions[key] == 0U)
+			Key_Event(key, false);
+	}
 }
 
 static void handle_wheel(int clicks)
@@ -278,15 +326,16 @@ static void handle_wheel(int clicks)
 
 static void handle_event(const struct fplinux_input_event *event)
 {
+	struct held_device *device;
+
 	switch (event->type) {
 	case FPLINUX_INPUT_EVENT_KEY:
-		handle_key(event->code, event->pressed,
-			   event->source == FPLINUX_INPUT_SOURCE_KEYPAD ?
-				   translate_keypad :
-				   translate_keyboard);
+		handle_key(event, event->source == FPLINUX_INPUT_SOURCE_KEYPAD ?
+					  translate_keypad :
+					  translate_keyboard);
 		break;
 	case FPLINUX_INPUT_EVENT_BUTTON:
-		handle_key(event->code, event->pressed, translate_mouse);
+		handle_key(event, translate_mouse);
 		break;
 	case FPLINUX_INPUT_EVENT_MOTION:
 		mouse_dx += (float)event->dx;
@@ -296,9 +345,15 @@ static void handle_event(const struct fplinux_input_event *event)
 		handle_wheel(event->wheel_clicks);
 		break;
 	case FPLINUX_INPUT_EVENT_DEVICE_ADDED:
+		device = find_held_device(0);
+		if (device)
+			device->id = event->device_id;
 		Con_Printf("FPLinux input: %s connected\n", event->name);
 		break;
 	case FPLINUX_INPUT_EVENT_DEVICE_REMOVED:
+		device = find_held_device(event->device_id);
+		if (device)
+			memset(device, 0, sizeof(*device));
 		if (event->source == FPLINUX_INPUT_SOURCE_POINTER)
 			clear_mouse_motion();
 		Con_Printf("FPLinux input: %s disconnected\n", event->name);
@@ -316,6 +371,35 @@ void IN_RegisterVariables(void)
 	Cvar_RegisterVariable(&_windowed_mouse);
 }
 
+static bool input_active_changed(struct fplinux_drm_session *display,
+				 bool active, void *data)
+{
+	struct fplinux_input_event event;
+	char error[FPLINUX_QUAKE_INPUT_ERROR_BYTES];
+
+	(void)display;
+	(void)data;
+	input_active = active;
+	if (!input_session_open)
+		return true;
+	if (!active) {
+		fplinux_input_session_suspend(&input_session);
+		while (fplinux_input_session_next(&input_session, &event))
+			if (event.type == FPLINUX_INPUT_EVENT_DEVICE_ADDED ||
+			    event.type == FPLINUX_INPUT_EVENT_DEVICE_REMOVED)
+				handle_event(&event);
+		clear_key_states();
+		clear_mouse_motion();
+		return true;
+	}
+	if (!fplinux_input_session_resume(&input_session, error,
+					  sizeof(error))) {
+		Con_Printf("FPLinux input: %s\n", error);
+		return false;
+	}
+	return true;
+}
+
 void IN_Init(void)
 {
 	char error[FPLINUX_QUAKE_INPUT_ERROR_BYTES];
@@ -330,14 +414,22 @@ void IN_Init(void)
 		    error, sizeof(error)))
 		Sys_Error("FPLinux input: %s", error);
 	input_session_open = true;
+	if (!fplinux_drm_session_set_active_handler(
+		    fplinux_quake_display_session(), input_active_changed,
+		    NULL))
+		Sys_Error("FPLinux input: cannot claim active display input");
 }
 
 void IN_Shutdown(void)
 {
-	Key_ClearAllStates();
-	if (input_session_open)
+	clear_key_states();
+	if (input_session_open) {
+		fplinux_drm_session_set_active_handler(
+			fplinux_quake_display_session(), NULL, NULL);
 		fplinux_input_session_close(&input_session);
+	}
 	input_session_open = false;
+	memset(held_devices, 0, sizeof(held_devices));
 }
 
 void IN_Commands(void)
@@ -400,17 +492,17 @@ void IN_ModeChanged(void)
 
 void IN_ClearStates(void)
 {
-	Key_ClearAllStates();
+	clear_key_states();
 	clear_mouse_motion();
 }
 
 void IN_SetFocus(qboolean focus)
 {
-	if (!focus)
-		IN_ClearStates();
+	if (!input_active_changed(fplinux_quake_display_session(), focus, NULL))
+		Sys_Error("FPLinux input: cannot regain input focus");
 }
 
 qboolean IN_HaveFocus(void)
 {
-	return true;
+	return input_active;
 }

@@ -33,7 +33,7 @@ fplinux-present --input /run/frame.nv16 --mode cpu-rgb565 \
 ```
 
 `--output` is accepted only with `--mode cpu-rgb565`. It is written after an
-uninterrupted presentation, final hold, and successful framebuffer and console
+uninterrupted presentation, final hold, and successful DRM and virtual-terminal
 restore. The direct NV16 mode does not write a converted output.
 
 Scalar value options may be repeated. Every occurrence must be valid, and the
@@ -48,7 +48,7 @@ The complete options are:
   default 10;
 - `--hold-ms N`: keep the final frame for 0 through 60000 milliseconds after
   the repeated presentations; default 0;
-- `--framebuffer PATH`: framebuffer device; default `/dev/fb0`;
+- `--drm PATH`: DRM device; default `/dev/dri/card0`;
 - `--tty PATH`: console TTY; default `/dev/tty0`;
 - `--output FILE`: optional CPU-converted RGB565 output;
 - `--help`: print the command synopsis.
@@ -61,7 +61,7 @@ every deadline. The same input frame is used for every iteration.
 
 ## Input and output formats
 
-The input must be one regular file matching the active framebuffer's native
+The input must be one regular file matching the active DRM mode's native
 geometry. It is headerless, tight, full-range BT.601 NV16:
 
 1. a Y plane with one byte per pixel;
@@ -78,59 +78,35 @@ In `nv16` mode the LCD controller performs native YCbCr-to-RGB conversion. In
 `cpu-rgb565` mode the application uses its fixed full-range BT.601 conversion,
 clamps each channel, and packs the high bits as little-endian RGB565. The
 optional RGB565 output has two bytes per pixel, no row padding, and no header.
-The command reads the geometry from the framebuffer; it has no size override.
+The command reads the geometry from the DRM mode; it has no size override.
 
 The command does not resize, crop, rotate, decode, or capture an image. Prepare
 the exact native geometry first with the appropriate image tool.
 
-## Console and completion boundary
+## Display session and completion boundary
 
-The command requires the target's native RGB565 framebuffer without row padding
-and an active console in text mode. It saves all framebuffer
-pages, the framebuffer mode and selected page, the console mode, and the active
-virtual terminal before switching to graphics mode. Normal exit and handled
-`SIGINT` or `SIGTERM` restore that state. Restore failure makes an otherwise
-completed command fail.
+The command uses atomic DRM/KMS with an RGB565 or NV16 plane at the native
+panel size. It acquires a graphics virtual terminal and DRM master, and returns
+to the previous virtual terminal on normal exit or handled `SIGINT` or
+`SIGTERM`. VT switching suspends presentation until the session becomes active
+again. A failed session restore makes an otherwise completed command fail.
 
-Each presentation blocks until the driver reports LCDC DONE and returns a
-strictly increasing sequence number and a nonzero LCDC transfer duration. A
-successful call confirms that the controller completed the transfer and that
-the guarded staging buffer remained intact. It is not an optical measurement
-or independent confirmation of what was visible on the panel.
-
-The native path has no pixel readback. Pixel-for-pixel equivalence between
-LCDC conversion, CPU conversion, and the visible panel output is not guaranteed.
+A completed atomic commit is a kernel display result, not an optical
+measurement. The native path has no pixel readback, and pixel-for-pixel
+equivalence between LCDC conversion, CPU conversion and visible output is not
+guaranteed. See the selected target's support status before relying on a
+physical display result.
 
 ## Reported measurements
 
-The command always prints a result line, stage timings, LCDC transfer totals,
-and the first and last completion sequences. The timing stages are:
+After the presentation series, the command prints its completed frame count
+and these timing stages:
 
-- `codec_convert`: CPU NV16-to-RGB565 conversion; it has zero calls in direct
-  NV16 mode;
-- `present_ioctl`: the blocking presentation ioctl, including the userspace
-  copy and wait for LCDC DONE;
-- `whole_loop`: the complete repeated series, including pacing, conversions,
-  and presentation ioctls.
+- `codec_convert`: CPU NV16-to-RGB565 conversion; zero calls in direct NV16 mode;
+- `atomic_commit`: submission and completion of the DRM atomic presentation;
+- `whole_loop`: the repeated series, including pacing and conversions.
 
-The final hold, input read, framebuffer and console setup or restore, and
-optional RGB565 output write are outside `whole_loop`. Wall and process user and
-system time are reported in nanoseconds together with process peak resident
-memory and page-fault counters. The LCDC transfer values are controller
-completion durations, not optical latency.
-
-## Framebuffer ioctl
-
-The shared `ums9117-present.h` header defines `UMS9117_FBIO_PRESENT` and
-`struct ums9117_present` for native-size userspace presentation. In a source
-checkout it is maintained at `platforms/ums9117/linux/include/uapi/fplinux/ums9117-present.h`.
-`pixels` points to one native-size frame, `format` is
-`UMS9117_PRESENT_NV16` or `UMS9117_PRESENT_RGB565`, and `bytes` must equal the
-framebuffer width multiplied by its height and by two.
-On success the driver returns the nonzero completion `sequence` and
-`transfer_ns` measured from LCDC start through LCDC DONE.
-
-The ioctl is enabled for the three target framebuffers listed above. Callers
-using the ioctl directly must manage their own console and framebuffer session.
-The `fplinux-present` command is the supported owner of backup, graphics-mode
-switching, pacing, interruption, and restoration for ordinary use.
+The final hold, input read, display-session setup or restore and optional output
+write are outside `whole_loop`. Wall and process user and system time are
+reported in nanoseconds, alongside peak resident memory and page-fault counters.
+These measurements do not establish panel latency or refresh rate.

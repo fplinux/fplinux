@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # ruff: noqa: ANN001, ANN002, ANN003, ANN201, ANN202, ANN204, ANN205, D102, D107, EM101, FBT003, I001, INP001, PLC0415
 # mypy: ignore-errors
-"""Generic FPLinux framebuffer, keypad and keyboard board adaptation."""
+"""Generic FPLinux DRM display, keypad and keyboard board adaptation."""
 
 import logging
 import sys
@@ -92,16 +92,16 @@ def _device_model():
 
 
 class FPLinuxDisplay:
-    """LVGL display backed by the active Linux framebuffer geometry."""
+    """LVGL display backed by the native DRM panel mode."""
 
-    def __init__(self, path="/dev/fb0"):
+    def __init__(self, path="/dev/dri/card0"):
         lv.log_register_print_cb(_lvgl_log)
-        self._display = lv.linux_fbdev_create()
-        lv.linux_fbdev_set_file(self._display, path)
+        self._display = lv.linux_drm_create()
+        lv.linux_drm_set_file(self._display, path, -1)
         width = self._display.get_horizontal_resolution()
         height = self._display.get_vertical_resolution()
         if width <= 0 or height <= 0:
-            raise RuntimeError("framebuffer has no valid geometry")
+            raise RuntimeError("DRM display has no valid geometry")
         self._display.set_dpi(130)
 
     def init(self, *args, **kwargs):

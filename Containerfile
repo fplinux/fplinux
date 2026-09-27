@@ -13,6 +13,8 @@ ARG TYPOS_VERSION=1.48.0
 ARG TYPOS_SHA256=72a930c9a94fc3914aa56835c5b859c892a797d40c1c42638b98d93f16ff519c
 ARG VALE_GOOGLE_VERSION=0.7.0
 ARG VALE_GOOGLE_SHA256=a4d6458fef518d51e5e7e84445a066ce73075ca5b8bb71f0feabb344258a4059
+ARG LIBTSM_VERSION=4.7.1
+ARG LIBTSM_SHA256=40d7f11698f0ce87af8da67a3142ee9f02e2b5d914f8ad83aa080e052fe1ae2b
 
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
@@ -221,10 +223,42 @@ RUN apk add --no-cache \
     cmake=4.2.3-r0 \
     dbus=1.16.2-r2 \
     dbus-dev=1.16.2-r2 \
+    libdrm-dev=2.4.134-r0 \
     libinput-dev=1.31.3-r0 \
     libjpeg-turbo-dev=3.1.3-r0 \
+    libxkbcommon-dev=1.13.1-r0 \
     meson=1.11.1-r0 \
     samurai=1.2-r8
+
+COPY alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch /tmp/libtsm/function-keys.patch
+RUN set -eux; \
+    mkdir -p /tmp/libtsm; \
+    curl -fsSL --retry 3 \
+        --output /tmp/libtsm/source.tar.gz \
+        "https://github.com/kmscon/libtsm/archive/refs/tags/v${LIBTSM_VERSION}.tar.gz"; \
+    printf '%s  %s\n' "${LIBTSM_SHA256}" /tmp/libtsm/source.tar.gz | sha256sum -c -; \
+    tar -xzf /tmp/libtsm/source.tar.gz -C /tmp/libtsm; \
+    tsm_source="/tmp/libtsm/libtsm-${LIBTSM_VERSION}"; \
+    patch -d "${tsm_source}" -p1 < /tmp/libtsm/function-keys.patch; \
+    cc -Os -std=gnu99 -D_GNU_SOURCE -fPIC -shared \
+        -Wl,-soname,libtsm.so.4 -Wl,--version-script="${tsm_source}/src/tsm/libtsm.sym" \
+        -I"${tsm_source}/src/tsm" -I"${tsm_source}/src/shared" \
+        -I"${tsm_source}/external" -I"${tsm_source}/external/wcwidth" \
+        "${tsm_source}/src/tsm/tsm-render.c" "${tsm_source}/src/tsm/tsm-screen.c" \
+        "${tsm_source}/src/tsm/tsm-selection.c" "${tsm_source}/src/tsm/tsm-unicode.c" \
+        "${tsm_source}/src/tsm/tsm-vte-charsets.c" "${tsm_source}/src/tsm/tsm-vte.c" \
+        "${tsm_source}/src/shared/shl-htable.c" "${tsm_source}/external/wcwidth/wcwidth.c" \
+        -o /tmp/libtsm/libtsm.so.4; \
+    install -m 0755 /tmp/libtsm/libtsm.so.4 /usr/lib/libtsm.so.4; \
+    ln -s libtsm.so.4 /usr/lib/libtsm.so; \
+    install -m 0644 "${tsm_source}/src/tsm/libtsm.h" /usr/include/libtsm.h; \
+    { printf '%s\n' 'prefix=/usr' 'libdir=/usr/lib' 'includedir=/usr/include' \
+        'Name: libtsm' 'Description: Terminal state machine'; \
+      printf 'Version: %s\n' "${LIBTSM_VERSION}"; \
+      printf '%s\n' 'Libs: -L/usr/lib -ltsm' 'Cflags: -I/usr/include'; } \
+        > /usr/lib/pkgconfig/libtsm.pc; \
+    rm -rf /tmp/libtsm; \
+    pkg-config --modversion libtsm
 
 RUN mkdir -p /cache/analysis /cache/downloads /cache/linux /cache/rootfs \
     /tmp/fplinux-home /workspace /work \

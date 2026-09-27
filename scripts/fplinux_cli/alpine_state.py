@@ -27,9 +27,13 @@ MULTITAP_SOURCES = (
     "lib/fplinux/fplinux-multitap.c",
     "include/fplinux/fplinux-multitap.h",
 )
-FB_SESSION_SOURCES = (
-    "lib/fplinux/fplinux-fb-session.c",
-    "include/fplinux/fplinux-fb-session.h",
+DRM_SESSION_SOURCES = (
+    "lib/fplinux/fplinux-drm-session.c",
+    "include/fplinux/fplinux-drm-session.h",
+)
+KEYBOARD_TEXT_SOURCES = (
+    "lib/fplinux/fplinux-keyboard-text.c",
+    "include/fplinux/fplinux-keyboard-text.h",
 )
 CLI_SOURCES = (
     "lib/fplinux/fplinux-cli.c",
@@ -45,27 +49,35 @@ SHARED_APORT_SOURCES = {
     "fplinux-base": CLI_SOURCES,
     "fplinux-bluetooth": CLI_SOURCES,
     "fplinux-charge": CLI_SOURCES,
-    "fplinux-console": (*MULTITAP_SOURCES, *INPUT_DEVICE_SOURCES, *KEYPAD_CODE_SOURCES),
     "fplinux-cpuclock": CLI_SOURCES,
     "fplinux-fm": CLI_SOURCES,
     "fplinux-jack": CLI_SOURCES,
     "fplinux-jpeg": CLI_SOURCES,
     "fplinux-micropythonos": (
         *MULTITAP_SOURCES,
-        *FB_SESSION_SOURCES,
+        *DRM_SESSION_SOURCES,
+        *KEYBOARD_TEXT_SOURCES,
         *INPUT_DEVICE_SOURCES,
         *KEYPAD_CODE_SOURCES,
         *INPUT_SESSION_SOURCES,
     ),
     "fplinux-present": (
-        *FB_SESSION_SOURCES,
+        *DRM_SESSION_SOURCES,
         *CLI_SOURCES,
-        "platforms/ums9117/linux/include/uapi/fplinux/ums9117-present.h",
     ),
-    "fplinux-rotate": (*FB_SESSION_SOURCES, *CLI_SOURCES),
-    "fplinux-showcase": (*FB_SESSION_SOURCES, *CLI_SOURCES, *KEYPAD_CODE_SOURCES),
+    "fplinux-rotate": (*DRM_SESSION_SOURCES, *CLI_SOURCES),
+    "fplinux-showcase": (*DRM_SESSION_SOURCES, *CLI_SOURCES, *KEYPAD_CODE_SOURCES),
+    "fplinux-terminal": (
+        *CLI_SOURCES,
+        *DRM_SESSION_SOURCES,
+        *INPUT_DEVICE_SOURCES,
+        *KEYPAD_CODE_SOURCES,
+        *INPUT_SESSION_SOURCES,
+        *KEYBOARD_TEXT_SOURCES,
+        *MULTITAP_SOURCES,
+    ),
     "fplinux-tyrquake": (
-        *FB_SESSION_SOURCES,
+        *DRM_SESSION_SOURCES,
         *CLI_SOURCES,
         *INPUT_DEVICE_SOURCES,
         *KEYPAD_CODE_SOURCES,
@@ -77,10 +89,21 @@ SHARED_APORT_SOURCE_PATHS = frozenset(
 )
 COMMON_PACKAGES = (
     "fplinux-base",
-    "fplinux-console",
+    "fplinux-terminal",
     "fplinux-input",
+    "fplinux-libdrm",
+    "fplinux-libtsm",
+    "fplinux-libxkbcommon",
     "fplinux-libudev",
 )
+LOCAL_BUILD_DEPENDENCIES = {
+    "fplinux-micropythonos": ("fplinux-libdrm", "fplinux-libxkbcommon"),
+    "fplinux-present": ("fplinux-libdrm",),
+    "fplinux-rotate": ("fplinux-libdrm",),
+    "fplinux-showcase": ("fplinux-libdrm",),
+    "fplinux-terminal": ("fplinux-libdrm", "fplinux-libtsm", "fplinux-libxkbcommon"),
+    "fplinux-tyrquake": ("fplinux-libdrm",),
+}
 PACKAGE_ID = re.compile(r"[a-z0-9][a-z0-9+._-]*")
 
 
@@ -421,6 +444,21 @@ def shared_aport_sources(package: str, root: Path = ROOT) -> tuple[Path, ...]:
     return tuple(root / relative for relative in SHARED_APORT_SOURCES.get(name, ()))
 
 
+def local_build_dependencies(packages: Sequence[str]) -> tuple[str, ...]:
+    """Select the project libraries required by the current aport consumers."""
+    return tuple(
+        sorted(
+            {library for name in packages for library in LOCAL_BUILD_DEPENDENCIES.get(name, ())}
+        )
+    )
+
+
+def aport_build_order(packages: Sequence[str]) -> tuple[str, ...]:
+    """Build the independent local libraries before their consuming packages."""
+    libraries = local_build_dependencies(packages)
+    return (*libraries, *sorted(set(packages) - set(libraries)))
+
+
 def shared_aport_source_records(
     packages: Sequence[str], root: Path = ROOT
 ) -> list[dict[str, object]]:
@@ -454,14 +492,17 @@ def alpine_rootfs_recipe(
     _sha256(container_image_recipe, "container image recipe")
     _sha256(signing_key_sha256, "package signing public key")
     selected = _canonical_packages(packages, root)
+    build_packages = _canonical_packages(aport_build_order(selected), root)
     payload = {
         "container_image_recipe": container_image_recipe,
         "package_signing_key": signing_key_sha256,
         "packages": list(selected),
         "lock": _source_file(root / "alpine.lock.toml", root),
         "abuild": _source_file(root / "alpine/abuild.conf", root),
-        "aports": {name: _source_tree(root / "alpine/aports" / name, root) for name in selected},
-        "shared_aport_sources": shared_aport_source_records(selected, root),
+        "aports": {
+            name: _source_tree(root / "alpine/aports" / name, root) for name in build_packages
+        },
+        "shared_aport_sources": shared_aport_source_records(build_packages, root),
         "firmware": [firmware.recipe_record() for firmware in firmware_inputs],
         "implementation": [
             _source_file(root / "scripts/fplinux_cli/alpine_state.py", root),
@@ -482,6 +523,7 @@ def alpine_package_recipe(
 ) -> str:
     """Hash the inputs that can affect one current FPLinux APK."""
     name = _canonical_packages((name,), root)[0]
+    dependencies = _canonical_packages(local_build_dependencies((name,)), root)
     _sha256(container_image_recipe, "container image recipe")
     _sha256(signing_key_sha256, "package signing public key")
     return _canonical_digest(
@@ -491,7 +533,11 @@ def alpine_package_recipe(
             "lock": _source_file(root / "alpine.lock.toml", root),
             "abuild": _source_file(root / "alpine/abuild.conf", root),
             "aport": _source_tree(root / "alpine/aports" / name, root),
-            "shared_aport_sources": shared_aport_source_records((name,), root),
+            "local_build_dependencies": {
+                library: _source_tree(root / "alpine/aports" / library, root)
+                for library in dependencies
+            },
+            "shared_aport_sources": shared_aport_source_records((name, *dependencies), root),
             "implementation": [
                 _source_file(root / "scripts/fplinux_cli/alpine_state.py", root),
                 _source_file(root / "scripts/fplinux_cli/alpine_builder.py", root),

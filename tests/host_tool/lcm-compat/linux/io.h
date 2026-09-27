@@ -6,6 +6,7 @@
 
 #define __iomem
 typedef u64 phys_addr_t;
+typedef u64 dma_addr_t;
 u32 readl(const void *address);
 void writel(u32 value, void *address);
 void writew(u16 value, void *address);

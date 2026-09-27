@@ -2,31 +2,40 @@
 
 #include "fplinux-multitap.h"
 
-#include <string.h>
+#include <stddef.h>
+#include <uchar.h>
 
-static const char *characters_for(unsigned char key)
+static const char32_t *characters_for(unsigned char key,
+				      enum fplinux_multitap_language language)
 {
+	static const char32_t *const russian[] = {
+		U"абвг2", U"деёжз3", U"ийкл4", U"мноп5",
+		U"рсту6", U"фхцч7",  U"шщъы8", U"ьэюя9",
+	};
+
+	if (language == FPLINUX_MULTITAP_RUSSIAN && key >= '2' && key <= '9')
+		return russian[key - '2'];
 	switch (key) {
 	case '0':
-		return " 0";
+		return U" 0";
 	case '1':
-		return ".,!?@$/+-=%^_:;'*#1";
+		return U".,!?@$/+-=%^_:;'*#1";
 	case '2':
-		return "abc2";
+		return U"abc2";
 	case '3':
-		return "def3";
+		return U"def3";
 	case '4':
-		return "ghi4";
+		return U"ghi4";
 	case '5':
-		return "jkl5";
+		return U"jkl5";
 	case '6':
-		return "mno6";
+		return U"mno6";
 	case '7':
-		return "pqrs7";
+		return U"pqrs7";
 	case '8':
-		return "tuv8";
+		return U"tuv8";
 	case '9':
-		return "wxyz9";
+		return U"wxyz9";
 	default:
 		return NULL;
 	}
@@ -37,11 +46,12 @@ void fplinux_multitap_init(struct fplinux_multitap *state)
 	state->key = '\0';
 	state->index = 0;
 	state->pending = false;
+	state->language = FPLINUX_MULTITAP_ENGLISH;
 }
 
 bool fplinux_multitap_handles(unsigned char key)
 {
-	return characters_for(key) != NULL;
+	return characters_for(key, FPLINUX_MULTITAP_ENGLISH) != NULL;
 }
 
 bool fplinux_multitap_pending(const struct fplinux_multitap *state)
@@ -54,21 +64,30 @@ unsigned char fplinux_multitap_pending_key(const struct fplinux_multitap *state)
 	return state->pending ? state->key : '\0';
 }
 
-unsigned char fplinux_multitap_candidate(const struct fplinux_multitap *state)
+uint32_t fplinux_multitap_candidate(const struct fplinux_multitap *state)
 {
-	const char *characters;
+	const char32_t *characters;
 
 	if (!fplinux_multitap_pending(state))
 		return '\0';
-	characters = characters_for(state->key);
+	characters = characters_for(state->key, state->language);
 	if (!characters)
 		return '\0';
-	return (unsigned char)characters[state->index];
+	return characters[state->index];
 }
 
 void fplinux_multitap_cancel(struct fplinux_multitap *state)
 {
-	fplinux_multitap_init(state);
+	state->key = '\0';
+	state->index = 0;
+	state->pending = false;
+}
+
+void fplinux_multitap_set_language(struct fplinux_multitap *state,
+				   enum fplinux_multitap_language language)
+{
+	fplinux_multitap_cancel(state);
+	state->language = language;
 }
 
 static enum fplinux_multitap_result emit_pending(struct fplinux_multitap *state,
@@ -117,16 +136,17 @@ fplinux_multitap_press(struct fplinux_multitap *state, unsigned char key,
 		       uint32_t elapsed_ms, fplinux_multitap_emit_fn emit,
 		       void *context)
 {
-	const char *characters;
+	const char32_t *characters;
 	enum fplinux_multitap_result result = FPLINUX_MULTITAP_PENDING;
 
-	characters = characters_for(key);
+	characters = characters_for(key, state->language);
 	if (!characters)
 		return FPLINUX_MULTITAP_IGNORED;
 	if (fplinux_multitap_pending(state) && state->key == key &&
 	    elapsed_ms < FPLINUX_MULTITAP_TIMEOUT_MS) {
-		state->index = (unsigned char)((state->index + 1U) %
-					       strlen(characters));
+		++state->index;
+		if (!characters[state->index])
+			state->index = 0;
 		return FPLINUX_MULTITAP_PENDING;
 	}
 	if (fplinux_multitap_pending(state)) {

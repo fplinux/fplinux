@@ -5,18 +5,24 @@ host requirements, USB setup, checksum, loader-first and reconnect procedures.
 This target's BootROM key is * (asterisk); hold it when the loader asks for the
 powered-off phone.
 
+The 240x320 DRM/KMS terminal supports basic use with the phone keypad.
+Image presentation and rotation return to the same terminal and shell;
+RTC-woken s2idle preserves them in USB-powered RAM sessions. Native image
+color fidelity and full optional-application behavior remain unqualified.
+Terminal use with a microSD system root, operation without USB power and
+physical external keyboards have not been qualified on this phone.
+See docs/features/LOCAL_CONSOLE.md for terminal controls and the application
+pages under docs/apps/ for their commands and limitations.
+
 Current target support:
-  - local 240x320 terminal and physical keypad;
+  - physical keypad;
   - USB SSH/SFTP and host-keyboard forwarding;
   - microSD ext4 read/write, card-backed swap and a writable microSD system root;
   - RTC reading, setting, one-shot alarms and RTC-woken s2idle in both profiles,
     including mounted ext4 storage and card-backed swap;
   - Bluetooth pairing, bidirectional file transfer, PAN Internet and recovery
     after wake, with firmware prepared from this exact phone;
-  - installable ARMADA and TyrQuake in both profiles;
-  - installable MicroPythonOS launcher, navigation and keypad text input,
-    with persistent state on the ext4 system root;
-  - image rotation, JPEG codec/scaling and native presentation transfers;
+  - image rotation and JPEG codec/scaling;
   - stereo S16_LE playback through the 3.5 mm headphones;
   - PCM playback through the built-in speaker, alone or with the headphones;
   - mono 48 kHz recording from the built-in microphone;

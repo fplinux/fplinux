@@ -102,7 +102,8 @@ end the game.
 ./runner/run.py --reconnect --exec quake
 ```
 
-The command keeps the phone display in game mode until TyrQuake exits. An
+The command acquires a DRM/KMS display session until TyrQuake exits, then
+returns to the previous virtual terminal. An
 unknown option or an extra argument is rejected before game data is mounted or
 TyrQuake starts.
 
@@ -122,7 +123,8 @@ startup rather than run with less.
 ## Controls
 
 The phone keypad, keyboards and mice work at the same time. TyrQuake reads the
-phone key codes directly.
+standard Linux key codes with their device source. External F13 and F14
+remain keyboard keys.
 
 ### Phone keypad
 

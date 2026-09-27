@@ -9,10 +9,16 @@
 
 #define FPLINUX_MULTITAP_TIMEOUT_MS 700U
 
+enum fplinux_multitap_language {
+	FPLINUX_MULTITAP_ENGLISH,
+	FPLINUX_MULTITAP_RUSSIAN,
+};
+
 struct fplinux_multitap {
 	unsigned char key;
 	unsigned char index;
 	bool pending;
+	enum fplinux_multitap_language language;
 };
 
 enum fplinux_multitap_emit_result {
@@ -30,15 +36,18 @@ enum fplinux_multitap_result {
 };
 
 typedef enum fplinux_multitap_emit_result (*fplinux_multitap_emit_fn)(
-	void *context, unsigned char character);
+	void *context, uint32_t character);
 
 void fplinux_multitap_init(struct fplinux_multitap *state);
 bool fplinux_multitap_handles(unsigned char key);
 bool fplinux_multitap_pending(const struct fplinux_multitap *state);
 unsigned char
 fplinux_multitap_pending_key(const struct fplinux_multitap *state);
-unsigned char fplinux_multitap_candidate(const struct fplinux_multitap *state);
+uint32_t fplinux_multitap_candidate(const struct fplinux_multitap *state);
 void fplinux_multitap_cancel(struct fplinux_multitap *state);
+/* Commit or cancel pending input before selecting a different language. */
+void fplinux_multitap_set_language(struct fplinux_multitap *state,
+				   enum fplinux_multitap_language language);
 
 enum fplinux_multitap_result
 fplinux_multitap_commit(struct fplinux_multitap *state,

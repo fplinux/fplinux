@@ -29,31 +29,30 @@ ADAPTER = ROOT / "alpine/aports/fplinux-micropythonos/fplinux.py"
 KEYPAD = 1
 KEYBOARD = 2
 
-# Phone key codes from include/fplinux/fplinux-keypad.h, under the names that the
-# native module exports.
+# Standard Linux codes, written independently under the native module's names.
 PHONE_KEY_CODES = {
-    "KEY_0": 0x1C4,
-    "KEY_1": 0x1C5,
-    "KEY_2": 0x1C6,
-    "KEY_3": 0x1C7,
-    "KEY_4": 0x1C8,
-    "KEY_5": 0x1C9,
-    "KEY_6": 0x1CA,
-    "KEY_7": 0x1CB,
-    "KEY_8": 0x1CC,
-    "KEY_9": 0x1CD,
-    "KEY_STAR": 0x1CE,
-    "KEY_POUND": 0x1CF,
-    "KEY_UP": 0x233,
-    "KEY_DOWN": 0x234,
-    "KEY_LEFT": 0x235,
-    "KEY_RIGHT": 0x236,
-    "KEY_OK": 0x237,
-    "KEY_SOFT_LEFT": 0x238,
-    "KEY_SOFT_RIGHT": 0x239,
-    "KEY_CALL": 0x23A,
+    "KEY_0": 0x200,
+    "KEY_1": 0x201,
+    "KEY_2": 0x202,
+    "KEY_3": 0x203,
+    "KEY_4": 0x204,
+    "KEY_5": 0x205,
+    "KEY_6": 0x206,
+    "KEY_7": 0x207,
+    "KEY_8": 0x208,
+    "KEY_9": 0x209,
+    "KEY_STAR": 0x20A,
+    "KEY_POUND": 0x20B,
+    "KEY_UP": 103,
+    "KEY_DOWN": 108,
+    "KEY_LEFT": 105,
+    "KEY_RIGHT": 106,
+    "KEY_OK": 0x160,
+    "KEY_SOFT_LEFT": 183,
+    "KEY_SOFT_RIGHT": 184,
+    "KEY_CALL": 0x1BD,
 }
-PHONE_POWER = 0x23B
+PHONE_POWER = 116
 
 # Linux input-event-codes.h values of keyboard keys.
 KEY_ESC = 1
@@ -91,7 +90,7 @@ class FakeIndev:
 
 
 class FakeDisplay:
-    """Report a valid framebuffer geometry to the adapter."""
+    """Report a valid display geometry to the adapter."""
 
     @staticmethod
     def get_horizontal_resolution() -> int:
@@ -217,8 +216,8 @@ def fake_lvgl(indev: FakeIndev, group: FakeGroup) -> ModuleType:
             "INDEV_TYPE": SimpleNamespace(KEYPAD="keypad"),
             "LOG_LEVEL": SimpleNamespace(ERROR="error"),
             "log_register_print_cb": lambda _callback: None,
-            "linux_fbdev_create": FakeDisplay,
-            "linux_fbdev_set_file": lambda _display, _path: None,
+            "linux_drm_create": FakeDisplay,
+            "linux_drm_set_file": lambda _display, _path, _connector: None,
             "indev_create": lambda: indev,
             "group_get_default": lambda: group,
             "keyboard": type("keyboard", (), {}),
@@ -320,12 +319,12 @@ class MicroPythonOsKeypadAdapterTests(unittest.TestCase):
     def test_phone_digit_star_and_pound_press_their_characters(self) -> None:
         """The phone keypad's text keys reach LVGL as the character printed on the key."""
         cases = (
-            (0x1C4, "0"),
-            (0x1C6, "2"),
-            (0x1C9, "5"),
-            (0x1CD, "9"),
-            (0x1CE, "*"),
-            (0x1CF, "#"),
+            (0x200, "0"),
+            (0x202, "2"),
+            (0x205, "5"),
+            (0x209, "9"),
+            (0x20A, "*"),
+            (0x20B, "#"),
         )
         for code, character in cases:
             with self.subTest(code=hex(code)):
@@ -338,7 +337,7 @@ class MicroPythonOsKeypadAdapterTests(unittest.TestCase):
         """A phone digit in a text field goes to multi-tap instead of LVGL."""
         self.text_entry.active = True
 
-        pressed, _released = self.tap(KEYPAD, 0x1CB)
+        pressed, _released = self.tap(KEYPAD, 0x207)
 
         self.assertEqual(self.text_entry.dispatched, ["7"])
         self.assertEqual(pressed.state, RELEASED)
@@ -366,17 +365,17 @@ class MicroPythonOsKeypadAdapterTests(unittest.TestCase):
     def test_phone_and_keyboard_navigation_keys_share_their_actions(self) -> None:
         """The D-pad and soft keys navigate, and their keyboard counterparts do the same."""
         cases = (
-            ("phone up", KEYPAD, 0x233, "focus 0"),
+            ("phone up", KEYPAD, 103, "focus 0"),
             ("keyboard up", KEYBOARD, KEY_UP, "focus 0"),
-            ("phone right", KEYPAD, 0x236, "focus 90"),
+            ("phone right", KEYPAD, 106, "focus 90"),
             ("keyboard right", KEYBOARD, KEY_RIGHT, "focus 90"),
-            ("phone down", KEYPAD, 0x234, "focus 180"),
+            ("phone down", KEYPAD, 108, "focus 180"),
             ("keyboard down", KEYBOARD, KEY_DOWN, "focus 180"),
-            ("phone left", KEYPAD, 0x235, "focus 270"),
+            ("phone left", KEYPAD, 105, "focus 270"),
             ("keyboard left", KEYBOARD, KEY_LEFT, "focus 270"),
-            ("phone left soft", KEYPAD, 0x238, "drawer"),
+            ("phone left soft", KEYPAD, 183, "drawer"),
             ("keyboard Tab", KEYBOARD, KEY_TAB, "drawer"),
-            ("phone right soft", KEYPAD, 0x239, "back"),
+            ("phone right soft", KEYPAD, 184, "back"),
             ("keyboard Esc", KEYBOARD, KEY_ESC, "back"),
             ("keyboard Backspace outside a text field", KEYBOARD, KEY_BACKSPACE, "back"),
         )
@@ -392,8 +391,8 @@ class MicroPythonOsKeypadAdapterTests(unittest.TestCase):
     def test_phone_ok_call_and_keyboard_enter_press_lvgl_enter(self) -> None:
         """The centre key, the green call key and keyboard Enter all select."""
         cases = (
-            ("phone centre", KEYPAD, 0x237),
-            ("phone call", KEYPAD, 0x23A),
+            ("phone centre", KEYPAD, 0x160),
+            ("phone call", KEYPAD, 0x1BD),
             ("keyboard Enter", KEYBOARD, KEY_ENTER),
             ("keyboard keypad Enter", KEYBOARD, KEY_KPENTER),
         )
@@ -404,13 +403,24 @@ class MicroPythonOsKeypadAdapterTests(unittest.TestCase):
                 self.assertEqual((pressed.key, pressed.state), ("enter", PRESSED))
                 self.assertEqual((released.key, released.state), ("enter", RELEASED))
 
+    def test_keyboard_f13_and_f14_do_not_become_phone_softkeys(self) -> None:
+        """Only the keypad source assigns softkey roles to these Linux codes."""
+        for code in (183, 184):
+            with self.subTest(code=code):
+                self.navigation.actions.clear()
+
+                pressed, _released = self.tap(KEYBOARD, code)
+
+                self.assertEqual(pressed.state, RELEASED)
+                self.assertEqual(self.navigation.actions, [])
+
     def test_phone_keys_submit_or_leave_active_text_entry(self) -> None:
         """Centre and call submit the text entry; the right soft key leaves it."""
         self.text_entry.active = True
 
-        self.tap(KEYPAD, 0x237)
-        self.tap(KEYPAD, 0x23A)
-        self.tap(KEYPAD, 0x239)
+        self.tap(KEYPAD, 0x160)
+        self.tap(KEYPAD, 0x1BD)
+        self.tap(KEYPAD, 184)
 
         self.assertEqual(self.text_entry.submissions, 2)
         self.assertEqual(self.text_entry.dismissals, 1)

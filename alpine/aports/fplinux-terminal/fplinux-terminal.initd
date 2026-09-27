@@ -1,0 +1,27 @@
+#!/sbin/openrc-run
+# SPDX-License-Identifier: GPL-2.0-only
+# shellcheck shell=sh disable=SC2034
+
+name="FPLinux terminal"
+description="Interactive terminal on the phone display"
+supervisor=supervise-daemon
+command=/usr/bin/fplinux-terminal
+input_file=/dev/null
+output_logger="/usr/libexec/fplinux/kmsg --level 6 --tag fplinux-terminal"
+error_logger="/usr/libexec/fplinux/kmsg --level 3 --tag fplinux-terminal"
+respawn_delay=1
+respawn_max=0
+retry="TERM/3/KILL/2"
+
+depend() {
+	need devfs fplinux-mdevd
+	after bootmisc
+}
+
+start() {
+	if [ ! -c /dev/dri/card0 ]; then
+		einfo "No DRM display; terminal remains stopped"
+		return 0
+	fi
+	default_start
+}

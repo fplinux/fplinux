@@ -6,7 +6,7 @@ pkgdesc="Base userspace policy for FPLinux phones"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="GPL-2.0-only"
-depends="openrc fplinux-console"
+depends="openrc fplinux-terminal"
 makedepends_build="clang22 lld22"
 makedepends_host="musl-dev"
 replaces="alpine-baselayout-data alpine-release"
@@ -42,8 +42,6 @@ package() {
 	for service in bootmisc hostname; do
 		ln -s "/etc/init.d/$service" "$pkgdir/etc/runlevels/boot/$service"
 	done
-	ln -s /etc/init.d/fplinux-console \
-		"$pkgdir/etc/runlevels/default/fplinux-console"
 
 	ln -s /sbin/init "$pkgdir/init"
 }

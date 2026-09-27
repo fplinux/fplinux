@@ -29,6 +29,7 @@ class SourceFormatClassificationTests(unittest.TestCase):
                 "script.sh": "#!/bin/sh\necho ok\n",
                 "service.initd": "#!/sbin/openrc-run\n",
                 "helper": "#!/usr/bin/env bash\necho ok\n",
+                "terminal.bashrc": "#!/usr/bin/env bash\nbind 'set bell-style none'\n",
                 "binding.yaml": "---\n",
                 "notes.txt": "plain\n",
                 "other.conf": "setting=value\n",
@@ -48,7 +49,7 @@ class SourceFormatClassificationTests(unittest.TestCase):
         self.assertEqual(formats.json, ("data.json", "settings.jsonc"))
         self.assertEqual(formats.toml, ("target.toml",))
         self.assertEqual(formats.posix_shell, ("script.sh", "service.initd"))
-        self.assertEqual(formats.bash, ("helper",))
+        self.assertEqual(formats.bash, ("helper", "terminal.bashrc"))
         self.assertEqual(formats.c, ("driver.c", "driver.h"))
         self.assertNotIn("package-lock.json", formats.supported())
         self.assertNotIn("binding.yaml", formats.supported())
