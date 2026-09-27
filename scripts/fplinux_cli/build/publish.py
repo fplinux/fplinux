@@ -190,9 +190,8 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
         (kernel_output / "System.map", "System.map"),
         (kernel_output / ".config", "kernel.config"),
         (ramboot_map, "ramboot.map"),
+        (rootfs, "rootfs.cpio"),
     ]
-    if target_config["linux"]["root"]["kind"] == "initramfs":
-        debug_outputs.append((rootfs, "rootfs.cpio"))
     for source, name in debug_outputs:
         copy_file(source, release / "debug" / name)
     for relative, _digest in asset_outputs.values():

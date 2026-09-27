@@ -479,8 +479,8 @@ class BuilderPublicationTests(unittest.TestCase):
             manifest = json.loads((debug / name).read_text())
             self.assertEqual(manifest["build_type"], "debug")
 
-    def test_external_root_bundle_does_not_copy_an_unused_initramfs(self) -> None:
-        """A profile whose kernel boots ext4 omits the unrelated cpio debug copy."""
+    def test_external_root_keeps_the_exact_composition_input_for_host_inspection(self) -> None:
+        """The external root's local composition input is bound to the bundle manifest."""
         self.target_config["profile"] = "microsd"
         self.target_config["linux"]["root"] = {
             "kind": "external",
@@ -491,9 +491,9 @@ class BuilderPublicationTests(unittest.TestCase):
 
         published = self.publish()
 
-        self.assertFalse((published / "debug/rootfs.cpio").exists())
+        self.assertEqual((published / "debug/rootfs.cpio").read_bytes(), self.rootfs.read_bytes())
         manifest = json.loads((published / BUILD_MANIFEST_NAME).read_text())
-        self.assertNotIn("debug/rootfs.cpio", manifest["files"])
+        self.assertIn("debug/rootfs.cpio", manifest["files"])
 
     def test_publish_rejects_apks_outside_the_declared_bundle_package_set(self) -> None:
         """A bundle cannot silently add or omit one of its declared packages."""

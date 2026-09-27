@@ -530,9 +530,34 @@ signature. Neither archive command extracts files.
 
 Inspection needs no Kern environment or phone connection. Bundle inspection
 holds the shared cache lock while reading the selected generation; inspecting
-a ZIP or APK does not take that lock or create cache state. Output is text;
+a ZIP or APK does not take that lock or create cache state. The commands above produce text;
 exit status is 0 on success, 1 on an inspection or checksum error, 2 for invalid
 arguments and 130 after Ctrl+C.
+
+### Measure image footprint
+
+Measure the current verified bundle without building or connecting a phone:
+
+```sh
+./fplinux inspect footprint nokia-ta1618 --profile default --build-type release
+./fplinux inspect footprint nokia-ta1618 --json > before.json
+./fplinux inspect footprint nokia-ta1618 --json > after.json
+./fplinux inspect footprint-diff before.json after.json
+./fplinux inspect footprint-diff before.json after.json --json
+```
+
+Save `before.json` before rebuilding and `after.json` after rebuilding the
+context being compared. `--json` produces a machine-readable report. The
+measurement separates boot artifacts, kernel zImage, compressed embedded
+initramfs, unpacked root filesystem, optional APK archives and host debug files.
+These layers overlap; adding them does not produce a meaningful total.
+
+Package sizes count their owned regular-file and symlink payload, excluding
+dependencies. They are not installed disk usage or runtime RAM consumption.
+`footprint-diff` compares two saved reports and lists artifact byte deltas and
+added, removed or changed packages, files and optional APKs. It also reports
+whether root filesystem content is identical. Compression savings alone do not
+establish a userspace or memory reduction.
 
 ## Logs, cache, and parallel commands
 

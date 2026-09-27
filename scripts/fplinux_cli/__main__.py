@@ -12,7 +12,13 @@ from typing import TYPE_CHECKING
 from fplinux_cli.cli.build import build
 from fplinux_cli.cli.bundles import PUBLIC_BOOT_MODES, selected_context_profile
 from fplinux_cli.cli.checksum import checksum_aport
-from fplinux_cli.cli.inspect import inspect_apk, inspect_archive, inspect_bundle
+from fplinux_cli.cli.inspect import (
+    inspect_apk,
+    inspect_archive,
+    inspect_bundle,
+    inspect_footprint_diff,
+    inspect_target_footprint,
+)
 from fplinux_cli.cli.logs import add_log_arguments, read_logs
 from fplinux_cli.cli.package import package_target
 from fplinux_cli.cli.probe import build_probe
@@ -98,7 +104,7 @@ def _cache_lock_exclusive(args: argparse.Namespace) -> bool | None:
     if args.command == "prune":
         return True if args.prune_apply else None
     if args.command == "inspect":
-        return False if args.inspect_kind == "bundle" else None
+        return False if args.inspect_kind in {"bundle", "footprint"} else None
     if args.command in _EXCLUSIVE_CACHE_COMMANDS:
         return True
     if args.command in _SHARED_CACHE_COMMANDS:
@@ -188,6 +194,18 @@ def _command_action(
             )
         elif args.inspect_kind == "archive":
             action = partial(inspect_archive, args.path)
+        elif args.inspect_kind == "footprint":
+            action = partial(
+                inspect_target_footprint,
+                args.target,
+                profile=args.profile,
+                build_type=args.build_type,
+                json_output=args.json,
+            )
+        elif args.inspect_kind == "footprint-diff":
+            action = partial(
+                inspect_footprint_diff, args.before, args.after, json_output=args.json
+            )
         else:
             action = partial(inspect_apk, args.path)
     elif args.command == "check":
@@ -431,6 +449,19 @@ def main() -> None:
     _add_build_type_option(bundle_parser)
     bundle_parser.add_argument("target", choices=targets)
     bundle_parser.add_argument("--profile", type=_profile_name, metavar="NAME")
+    footprint_parser = inspections.add_parser(
+        "footprint", help="measure the current bundle's size and package composition"
+    )
+    _add_build_type_option(footprint_parser)
+    footprint_parser.add_argument("target", choices=targets)
+    footprint_parser.add_argument("--profile", type=_profile_name, metavar="NAME")
+    footprint_parser.add_argument("--json", action="store_true", help="print the full size report")
+    diff_parser = inspections.add_parser(
+        "footprint-diff", help="compare two saved footprint JSON reports"
+    )
+    diff_parser.add_argument("before", type=Path, metavar="BEFORE.json")
+    diff_parser.add_argument("after", type=Path, metavar="AFTER.json")
+    diff_parser.add_argument("--json", action="store_true", help="print the full comparison")
     for kind, help_text in (
         ("archive", "check and inspect a FPLinux ZIP"),
         ("apk", "read APK metadata and file list"),
