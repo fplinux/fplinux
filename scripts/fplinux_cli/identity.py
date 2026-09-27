@@ -13,10 +13,18 @@ _COMPATIBLE = re.compile(r"[a-z0-9][a-z0-9.-]*,[a-z0-9][a-z0-9+._-]*\Z")
 _PLATFORM_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*\Z")
 
 RUNTIME_IDENTITY_PATH = "runner/identity.py"
+BUILD_TYPES = ("release", "debug")
 
 
 class IdentityError(ValueError):
     """Reject an ambiguous or non-canonical identity declaration."""
+
+
+def validate_build_type(value: object) -> str:
+    """Require one explicit supported kernel build type."""
+    if not isinstance(value, str) or value not in BUILD_TYPES:
+        raise IdentityError("build type must be release or debug")
+    return value
 
 
 def _exact_table(value: object, keys: set[str], name: str) -> dict[str, Any]:

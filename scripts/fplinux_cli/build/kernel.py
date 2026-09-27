@@ -62,6 +62,15 @@ def assert_profile_kconfig(
             fail(f"profile did not disable {symbol}")
 
 
+def assert_build_type_kconfig(config: Path, fragment: Path, build_type: str) -> None:
+    """Require the selected type's capabilities after Kconfig dependency resolution."""
+    requested = kconfig_values(inputs_build.require_file(fragment).read_text())
+    actual = kconfig_values(inputs_build.require_file(config).read_text())
+    for symbol, value in requested.items():
+        if actual.get(symbol, "n") != value:
+            fail(f"{build_type} build did not preserve {symbol}={value}")
+
+
 def kernel_build_commands(
     kbuild: list[str],
     config_command: list[str],
@@ -72,7 +81,6 @@ def kernel_build_commands(
     if jobs < 1:
         fail("Kbuild jobs must be positive")
     return [
-        [*kbuild, "olddefconfig"],
         config_command,
         [*kbuild, "olddefconfig"],
         [*kbuild, f"-j{jobs}", *targets],
@@ -176,10 +184,10 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
     """Build or exactly reuse zImage and the declared target DTB in ``work/kernel``."""
     try:
         work = output.parent
-        base, fragment = kernel_config_paths(target, target_config, platform)
+        config_paths = kernel_config_paths(target, target_config, platform)
         work.mkdir(parents=True, exist_ok=True)
         defconfig = work / "kernel.defconfig"
-        defconfig.write_bytes(compose_kernel_config(base, fragment))
+        defconfig.write_bytes(compose_kernel_config(*config_paths))
         root_contract = target_config["linux"]["root"]
         initramfs_record: dict[str, int | str] | None = None
         initramfs_input: Path | None = None
@@ -233,6 +241,7 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
             defconfig=defconfig,
             dtb=target_config["linux"]["dtb"],
             profile=inputs_build.selected_profile(target_config),
+            build_type=target_config["build_type"],
             config_enable=config_enable,
             config_disable=config_disable,
         )
@@ -286,10 +295,13 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
             if initramfs_record is not None:
                 kbuild_state.materialize_initramfs_input(work, rootfs, plan)
             shutil.copyfile(defconfig, output / ".config")
-            for command in commands[:3]:
+            for command in commands[:-1]:
                 process_build.run(command)
             assert_profile_kconfig(output / ".config", config_enable, config_disable)
-            process_build.run(commands[3])
+            assert_build_type_kconfig(
+                output / ".config", config_paths[-1], target_config["build_type"]
+            )
+            process_build.run(commands[-1])
 
         zimage = inputs_build.require_file(output / platform["linux"]["image_output"])
         vmlinux = inputs_build.require_file(output / "vmlinux")
@@ -314,6 +326,9 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
             fail(str(error))
         config_text = inputs_build.require_file(output / ".config").read_text()
         assert_profile_kconfig(output / ".config", config_enable, config_disable)
+        assert_build_type_kconfig(
+            output / ".config", config_paths[-1], target_config["build_type"]
+        )
         verify_builtin_audio_profile(
             target,
             output / ".config",

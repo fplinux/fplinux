@@ -10,6 +10,8 @@ from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
+from .identity import IdentityError, validate_build_type
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -155,10 +157,15 @@ def device_kernel_identity(  # noqa: PLR0913
     defconfig: Path,
     dtb: str,
     profile: str | None = None,
+    build_type: str = "release",
     config_enable: Sequence[object] = (),
     config_disable: Sequence[object] = (),
 ) -> str:
     """Hash the exact pre-Kbuild device inputs, excluding workspace orchestration."""
+    try:
+        build_type = validate_build_type(build_type)
+    except IdentityError as error:
+        raise DeviceStateError(str(error)) from error
     payload = {
         "target": _require_target(target),
         "linux_recipe": _require_digest(linux_recipe, "prepared Linux recipe"),
@@ -170,6 +177,7 @@ def device_kernel_identity(  # noqa: PLR0913
             "defconfig": _defconfig_identity(Path(defconfig)),
             "dtb": _require_relative(dtb, "target DTB"),
             "profile": _require_profile(profile),
+            "build_type": build_type,
             "config_enable": _require_kconfig_symbols(config_enable, "config_enable"),
             "config_disable": _require_kconfig_symbols(config_disable, "config_disable"),
         },

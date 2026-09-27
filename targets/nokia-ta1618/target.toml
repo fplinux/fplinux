@@ -33,7 +33,6 @@ forbidden_config = [
   "CONFIG_SCSI=y",
   "CONFIG_ATA=y",
   "CONFIG_NVME_CORE=y",
-  "CONFIG_DEVMEM=y",
 ]
 
 [[linux.copies]]

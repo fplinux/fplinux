@@ -114,6 +114,7 @@ destination = "board/fplinux/ums9117/ums9117-sdio-slot.c"
 
 [linux]
 defconfig = "platforms/ums9117/linux/defconfig"
+build_types = { release = "platforms/ums9117/linux/release.config", debug = "platforms/ums9117/linux/debug.config" }
 source_lock = "linux"
 arch = "arm"
 cross_compile = "arm-none-eabi-"

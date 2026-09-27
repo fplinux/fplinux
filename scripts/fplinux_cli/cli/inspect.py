@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 def _print_identity(manifest: Mapping[str, object]) -> None:
     """Show the identity recorded in the inspected build, not the current source checkout."""
-    for key in ("target", "profile", "generation"):
+    for key in ("target", "profile", "build_type", "generation"):
         value = manifest.get(key)
         if key == "profile" and value is None:
             value = "default"
@@ -30,9 +30,11 @@ def _print_identity(manifest: Mapping[str, object]) -> None:
         print(f"{key}: {value}")
 
 
-def inspect_bundle(target: str, *, profile: str | None = None) -> None:
+def inspect_bundle(
+    target: str, *, profile: str | None = None, build_type: str = "release"
+) -> None:
     """Read the selected current generation and compare its files to its build manifest."""
-    bundle, manifest = resolve_target_bundle(target, profile)
+    bundle, manifest = resolve_target_bundle(target, profile, build_type=build_type)
     files = manifest.get("files")
     if not isinstance(files, dict) or not files:
         fail("build manifest has no file records")

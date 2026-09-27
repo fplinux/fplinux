@@ -182,6 +182,7 @@ class BuilderPublicationTests(unittest.TestCase):
             ),
         }
         self.target_config: dict[str, Any] = {
+            "build_type": "release",
             "identity": {
                 "brand": "Demo",
                 "product": "Phone",
@@ -347,7 +348,7 @@ class BuilderPublicationTests(unittest.TestCase):
         self.assertEqual(current.path, published)
         self.assertEqual(
             published.parent,
-            self.output / "demo/bundles",
+            self.output / "demo/builds/release/bundles",
         )
         self.assertEqual(
             set(manifest),
@@ -363,12 +364,14 @@ class BuilderPublicationTests(unittest.TestCase):
                 "kbuild_receipt",
                 "linux_recipe",
                 "profile",
+                "build_type",
                 "target",
                 "workspace_digest",
             },
         )
         self.assertEqual(manifest["generation"], published.name)
         self.assertIsNone(manifest["profile"])
+        self.assertEqual(manifest["build_type"], "release")
         self.assertEqual(manifest["container_image_recipe"], "b" * 64)
         self.assertEqual(manifest["container_image_generation"], "c" * 64)
         self.assertEqual(manifest["apk_signing_key"], "7" * 64)
@@ -404,6 +407,7 @@ class BuilderPublicationTests(unittest.TestCase):
             {
                 "target",
                 "profile",
+                "build_type",
                 "identity",
                 "transport",
                 "image",
@@ -417,6 +421,7 @@ class BuilderPublicationTests(unittest.TestCase):
             },
         )
         self.assertIsNone(runtime["profile"])
+        self.assertEqual(runtime["build_type"], "release")
         self.assertEqual(runtime["identity"]["target"]["display_name"], "Demo Phone")
         self.assertEqual(runtime["identity"]["platform"]["name"], "demo")
         self.assertEqual(runtime["transport"], "usb-ncm")
@@ -451,11 +456,28 @@ class BuilderPublicationTests(unittest.TestCase):
         manifest = json.loads((published / BUILD_MANIFEST_NAME).read_text())
         runtime = json.loads((published / "runtime-manifest.json").read_text())
 
-        self.assertEqual(published.parent, self.output / "demo/profiles/usb-host-lab/bundles")
+        self.assertEqual(
+            published.parent, self.output / "demo/profiles/usb-host-lab/builds/release/bundles"
+        )
         self.assertEqual(current.path, published)
         self.assertEqual(manifest["profile"], "usb-host-lab")
         self.assertEqual(runtime["profile"], "usb-host-lab")
         self.assertEqual(runtime["transport"], "none")
+
+    def test_publishing_debug_retains_release_and_records_its_type_in_both_manifests(self) -> None:
+        """Publication binds the new type without moving the release current pointer."""
+        release = self.publish()
+        self.target_config["build_type"] = "debug"
+        debug = self.publish()
+
+        self.assertEqual(resolve_current_bundle(self.output, "demo").path, release)
+        self.assertEqual(
+            resolve_current_bundle(self.output, "demo", build_type="debug").path, debug
+        )
+        self.assertNotEqual(release.name, debug.name)
+        for name in ("build-manifest.json", "runtime-manifest.json"):
+            manifest = json.loads((debug / name).read_text())
+            self.assertEqual(manifest["build_type"], "debug")
 
     def test_external_root_bundle_does_not_copy_an_unused_initramfs(self) -> None:
         """A profile whose kernel boots ext4 omits the unrelated cpio debug copy."""

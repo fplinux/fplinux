@@ -187,6 +187,7 @@ def package_target(
     target: str,
     *,
     profile: str | None = None,
+    build_type: str = "release",
     boot: str | None = None,
     candidate: bool = False,
 ) -> None:
@@ -195,10 +196,14 @@ def package_target(
     )
     if selected_profile is not None and not candidate:
         fail("non-default boot contexts can only be packaged with --candidate")
-    config = targets.load_target(target, selected_profile)
+    config = targets.load_target(target, selected_profile, build_type=build_type)
     release = load_release_manifest(target, config)
-    bundle, manifest = bundles_commands.resolve_target_bundle(target, selected_profile)
-    snapshot = workspaces.target_workspace_snapshot(target, selected_profile)
+    bundle, manifest = bundles_commands.resolve_target_bundle(
+        target, selected_profile, build_type=build_type
+    )
+    snapshot = workspaces.target_workspace_snapshot(
+        target, selected_profile, build_type=build_type
+    )
     image_recipe = images.container_image_recipe_digest()
     image_state = image_states.load_image_state(common.ROOT / ".cache", image_recipe)
     identity = bundles_commands.build_identity(snapshot, image_state, common.ROOT / ".cache")
@@ -225,10 +230,10 @@ def package_target(
         or not isinstance(files_table, dict)
         or not set(bundle_files).issubset(files_table)
     ):
-        fail(
-            "build output is stale; rebuild it: "
-            f"{bundles_commands.profile_command('build', target, selected_profile)}"
+        command = bundles_commands.profile_command(
+            "build", target, selected_profile, build_type=build_type
         )
+        fail(f"build output is stale; rebuild it: {command}")
     files: dict[str, bytes] = {}
     for relative in bundle_files:
         source = bundle.path / relative
@@ -271,7 +276,7 @@ def package_target(
     files["SHA256SUMS"] = checksums.encode()
     content_digest = payload_digest(files, release["executables"])
 
-    qualifier = "candidate" if candidate else "release"
+    qualifier = f"{build_type}-candidate" if candidate else build_type
     context = boot if boot is not None else selected_profile
     context_component = "" if context is None else f"-{context}"
     stem = f"FPLinux-{target}{context_component}-{qualifier}-linux-x86_64-{content_digest[:16]}"

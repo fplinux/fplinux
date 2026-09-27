@@ -62,8 +62,9 @@ Build the target as described in [Building FPLinux](BUILDING.md), then run:
 ./fplinux run <target>
 ```
 
-Use the same global profile that selected the build. Omitting the selector is
-equivalent to `--profile default` and loads the RAM-only system.
+Use the same global profile and [build type](BUILDING.md#build-types) that
+selected the build. Omitting the profile selects `--profile default`, the
+RAM-only system; omitting the build type selects `release`.
 
 ```sh
 ./fplinux run <target> --profile <profile>
@@ -99,7 +100,8 @@ Once the new SSH session is authenticated, `run` sets the phone clock from the
 host as described in [Real-time clock](../features/RTC.md). From an interactive
 terminal, it then opens the session. Without an input terminal, it returns
 successfully as soon as that exact session is ready. To open a shell or run one
-command later, use the `./fplinux console` form for the session's profile in
+command later, use the `./fplinux console` form for the session's profile and
+build type in
 [SSH access](../features/SSH.md).
 
 Exiting the shell does not end Linux. Do not start another RAM load merely to
@@ -115,7 +117,8 @@ RAM load by following
 
 ## Verify a source-checkout session
 
-With the session ready, run `verify` with the profile that started it:
+With the session ready, run `verify` with the same profile and
+[build type](BUILDING.md#build-types) that started it:
 
 ```sh
 ./fplinux verify <target>
@@ -165,6 +168,8 @@ the complete loader or reconnect output for diagnosis.
 
 ### Verification reports a different build
 
-Rebuild the selected target and begin a fresh RAM session with that output.
+First check that the selected profile and build type match the running session.
+If the loaded image is outdated, rebuild the selected target and begin a fresh
+RAM session with that output.
 `verify` deliberately refuses to equate a running image with stale local build
 state.

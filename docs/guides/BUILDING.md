@@ -266,6 +266,38 @@ If the required pinned environment is missing or stale, an offline build
 asks for an online `./fplinux setup` first. A matching bundle remains usable
 offline.
 
+### Build types
+
+`--build-type release` is the default. `--build-type debug` selects kernel
+diagnostics without changing the userspace package set or peripheral support.
+Build type and boot profile are independent selectors.
+
+| Kernel facility                         | `release` | `debug`  |
+| --------------------------------------- | --------- | -------- |
+| Symbol names (`kallsyms`)               | Included  | Included |
+| Kernel log buffer                       | 64 KiB    | 128 KiB  |
+| Loadable modules                        | Disabled  | Enabled  |
+| ftrace, kprobes, DMATEST and `/dev/mem` | Disabled  | Enabled  |
+
+Use the same build type when building, loading, reconnecting, verifying,
+packaging or inspecting a session:
+
+```sh
+./fplinux build <target> --build-type debug
+./fplinux run <target> --build-type debug
+./fplinux console <target> --build-type debug
+./fplinux verify <target> --build-type debug
+./fplinux check kernel --build-type debug
+```
+
+The UMS9117 kernel and embedded initramfs use XZ compression. The unpacked
+userspace package selection is the same for both build types.
+
+Each target, profile and build type has its own current bundle. Selecting one
+does not replace another. Host debug files are separate from the phone payload;
+see [artifact inspection](#inspect-built-artifacts). A debug image is not a
+hardware qualification.
+
 ### Two global profiles
 
 FPLinux has two global profiles, declared once under `profiles/`:
@@ -479,7 +511,7 @@ register values.
 ```
 
 `bundle` reads the published current generation for the selected target and
-profile, prints its identity and file sizes and SHA-256 hashes, and checks the
+profile and build type, prints its identity and file sizes and SHA-256 hashes, and checks the
 files against their build manifest. It does not rebuild or check whether the
 source checkout has changed since that build. APKs and debug files are included
 in the file listing.

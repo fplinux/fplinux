@@ -31,6 +31,18 @@ def recipe(profile: str | None = None) -> CheckReceiptRecipe:
 class CheckReceiptTests(unittest.TestCase):
     """Only an exact successful check may be reused."""
 
+    def test_kernel_types_retain_separate_success_receipts(self) -> None:
+        """A debug check must miss before it runs without discarding a release success."""
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary)
+            release = replace(recipe(), scope="kernel", build_type="release")
+            debug = replace(release, build_type="debug")
+            publish_success_receipt(cache, release)
+            self.assertFalse(receipt_matches(cache, debug))
+            publish_success_receipt(cache, debug)
+            self.assertTrue(receipt_matches(cache, release))
+            self.assertTrue(receipt_matches(cache, debug))
+
     def test_published_success_is_an_exact_hit(self) -> None:
         """Accept the receipt published for its exact recipe."""
         with tempfile.TemporaryDirectory() as temporary:

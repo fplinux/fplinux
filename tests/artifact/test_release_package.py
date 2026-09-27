@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import io
+import json
 import posixpath
 import re
 import shutil
@@ -130,9 +131,11 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             metadata=b"asset provenance version one\n",
         )
 
-    def publish_bundle(self, generation: str, *, apk: bytes, metadata: bytes) -> None:
+    def publish_bundle(
+        self, generation: str, *, apk: bytes, metadata: bytes, build_type: str = "release"
+    ) -> None:
         """Publish one valid immutable generation with the requested APK bytes."""
-        bundle = self.cache / "out" / self.target / "bundles" / generation
+        bundle = self.cache / "out" / self.target / "builds" / build_type / "bundles" / generation
         payloads = {
             "image/ramboot.bin": b"ramboot\n",
             "assets/pinmap.bin": b"pinmap\n",
@@ -162,17 +165,20 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             "kbuild_receipt": {"recipe": "0" * 64, "sha256": "1" * 64},
             "linux_recipe": "2" * 64,
             "profile": None,
+            "build_type": build_type,
             "target": self.target,
             "workspace_digest": self.snapshot.recipe,
         }
         (bundle / BUILD_MANIFEST_NAME).write_bytes(canonical_json_bytes(manifest))
-        publish_current_bundle(self.cache / "out", self.target, bundle)
+        publish_current_bundle(self.cache / "out", self.target, bundle, build_type=build_type)
 
-    def package(self, *, candidate: bool) -> tuple[str, str]:
+    def package(self, *, candidate: bool, build_type: str = "release") -> tuple[str, str]:
         """Create an archive and return its archive and phone-test payload digests."""
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
-            package_commands.package_target(self.target, candidate=candidate)
+            package_commands.package_target(
+                self.target, candidate=candidate, build_type=build_type
+            )
         values: dict[str, str] = {}
         for line in stdout.getvalue().splitlines():
             for label in ("Archive SHA256", "Phone-test payload SHA256"):
@@ -207,6 +213,28 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
                 return_value=ImageState(self.image_recipe, "c" * 64),
             ),
         )
+
+    def test_debug_package_requires_its_own_build_and_names_the_selected_type(self) -> None:
+        """Packaging never substitutes release bytes for an absent debug build."""
+        with contextlib.ExitStack() as stack:
+            for patch in self.package_patches():
+                stack.enter_context(patch)
+            with self.assertRaisesRegex(SystemExit, "--build-type debug"):
+                self.package(candidate=True, build_type="debug")
+            self.assertFalse((self.cache / "out/candidates").exists())
+            self.publish_bundle(
+                "d" * 64, apk=b"debug apk\n", metadata=b"debug assets\n", build_type="debug"
+            )
+            self.package(candidate=True, build_type="debug")
+
+        archives = list((self.cache / "out/candidates").glob("*.zip"))
+        self.assertEqual(len(archives), 1)
+        self.assertTrue(archives[0].name.startswith("FPLinux-nokia-ta1618-debug-candidate-"))
+        with zipfile.ZipFile(archives[0]) as archive:
+            name = next(
+                name for name in archive.namelist() if name.endswith("/build-manifest.json")
+            )
+            self.assertEqual(json.loads(archive.read(name))["build_type"], "debug")
 
     def test_candidate_contains_shared_documents_with_complete_checksums(self) -> None:
         """Publish bundled procedures and cover every archive member by SHA-256."""
@@ -258,9 +286,11 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
         self.addCleanup(self.target_config.pop, "profile", None)
         generation = "3" * 64
         profile_snapshot = WorkspaceSnapshot((), "4" * 64)
-        default_bundle = next((self.cache / "out" / self.target / "bundles").iterdir())
+        default_bundle = next(
+            (self.cache / "out" / self.target / "builds" / "release" / "bundles").iterdir()
+        )
         profile_bundle = self.cache.joinpath(
-            "out", self.target, "profiles", profile, "bundles", generation
+            "out", self.target, "profiles", profile, "builds", "release", "bundles", generation
         )
         for source in default_bundle.rglob("*"):
             if not source.is_file() or source.name == BUILD_MANIFEST_NAME:
@@ -292,6 +322,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             "kbuild_receipt": {"recipe": "0" * 64, "sha256": "1" * 64},
             "linux_recipe": "2" * 64,
             "profile": profile,
+            "build_type": "release",
             "target": self.target,
             "workspace_digest": profile_snapshot.recipe,
         }
@@ -333,18 +364,24 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
         self.assertEqual(
             workspace.call_args_list,
             [
-                mock.call(self.target, profile),
-                mock.call(self.target, profile),
+                mock.call(self.target, profile, build_type="release"),
+                mock.call(self.target, profile, build_type="release"),
             ],
         )
         archives = list((self.cache / "out/candidates").glob("*.zip"))
         self.assertEqual(len(archives), 2)
         names = {archive.name for archive in archives}
         self.assertTrue(
-            any(name.startswith(f"FPLinux-{self.target}-{profile}-candidate-") for name in names)
+            any(
+                name.startswith(f"FPLinux-{self.target}-{profile}-release-candidate-")
+                for name in names
+            )
         )
         self.assertTrue(
-            any(name.startswith(f"FPLinux-{self.target}-microsd-candidate-") for name in names)
+            any(
+                name.startswith(f"FPLinux-{self.target}-microsd-release-candidate-")
+                for name in names
+            )
         )
         for archive_path in archives:
             with zipfile.ZipFile(archive_path) as archive:
@@ -435,7 +472,9 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             candidate_archive, original = self.package(candidate=True)
             candidate_files = list((self.cache / "out/candidates").glob("*.zip"))
             self.assertEqual(len(candidate_files), 1)
-            self.assertTrue(candidate_files[0].name.startswith("FPLinux-nokia-ta1618-candidate-"))
+            self.assertTrue(
+                candidate_files[0].name.startswith("FPLinux-nokia-ta1618-release-candidate-")
+            )
             with mock.patch.object(releases, "verified_runtime_digest", return_value=original):
                 release_archive, release_payload = self.package(candidate=False)
             self.assertEqual(release_payload, original)

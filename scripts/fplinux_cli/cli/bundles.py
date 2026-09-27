@@ -37,9 +37,11 @@ class BuildIdentity:
     apk_signing_key: str
 
 
-def profile_command(command: str, target: str, profile: str | None) -> str:
+def profile_command(
+    command: str, target: str, profile: str | None, *, build_type: str = "release"
+) -> str:
     """Render the exact public command for one default or named profile."""
-    rendered = f"./fplinux {command} {target}"
+    rendered = f"./fplinux {command} {target} --build-type {build_type}"
     if profile is not None:
         rendered += f" --profile {profile}"
     return rendered
@@ -83,6 +85,8 @@ def bundle_manifest(bundle: CurrentBundle) -> dict[str, Any]:
 def resolve_target_bundle(
     target: str,
     profile: str | None = None,
+    *,
+    build_type: str = "release",
 ) -> tuple[CurrentBundle, dict[str, Any]]:
     """Resolve the current bundle pointer exactly once."""
     try:
@@ -90,12 +94,13 @@ def resolve_target_bundle(
             common.ROOT / ".cache/out",
             target,
             profile,
+            build_type=build_type,
         )
         return bundle, bundle_manifest(bundle)
     except (BundleStateError, OSError, UnicodeDecodeError, ValueError) as error:
         fail(
             "current build is missing or invalid; rebuild it: "
-            f"{profile_command('build', target, profile)} ({error})"
+            f"{profile_command('build', target, profile, build_type=build_type)} ({error})"
         )
 
 
@@ -138,6 +143,8 @@ def matching_target_bundle(
     identity: BuildIdentity | None,
     image_relative: str,
     profile: str | None = None,
+    *,
+    build_type: str = "release",
 ) -> tuple[CurrentBundle, dict[str, Any]] | None:
     """Return only a fully valid current generation for the exact causal inputs."""
     try:
@@ -145,6 +152,7 @@ def matching_target_bundle(
             common.ROOT / ".cache/out",
             target,
             profile,
+            build_type=build_type,
         )
         manifest = bundle_manifest(bundle)
     except BundleStateError, OSError, UnicodeDecodeError, ValueError:

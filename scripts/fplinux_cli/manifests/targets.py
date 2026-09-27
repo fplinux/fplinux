@@ -7,7 +7,7 @@ import re
 from typing import Any
 
 from fplinux_cli.common import fail, load_toml
-from fplinux_cli.identity import IdentityError, validate_target_identity
+from fplinux_cli.identity import IdentityError, validate_build_type, validate_target_identity
 from fplinux_cli.identity_codegen import validate_record_prefix
 from fplinux_cli.manifests.assets import asset_bundle_paths
 from fplinux_cli.manifests.paths import normalize_profile, target_asset_lock_path, target_directory
@@ -28,9 +28,15 @@ from fplinux_cli.manifests.values import (
 )
 
 
-def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
+def load_target(
+    target: str, profile: str | None = None, *, build_type: str = "release"
+) -> dict[str, Any]:
     """Combine shared boot policy with one board and platform configuration."""
     profile = normalize_profile(profile)
+    try:
+        build_type = validate_build_type(build_type)
+    except IdentityError as error:
+        fail(str(error))
     path = target_directory(target) / "target.toml"
     if path.is_symlink() or not path.is_file():
         fail(f"unknown target: {target}")
@@ -244,6 +250,7 @@ def load_target(target: str, profile: str | None = None) -> dict[str, Any]:
         "exclude_packages": [],
     }
     config["profile"] = profile
+    config["build_type"] = build_type
     platform_bootstrap = platform["bootstrap"]
     platform_runtime = platform["runtime"]
     profile_bootstrap = selected_profile["bootstrap"]

@@ -15,11 +15,12 @@ if TYPE_CHECKING:
 
 def kernel_config_paths(
     target: str, target_config: dict[str, Any], platform: dict[str, Any]
-) -> tuple[Path, Path]:
-    """Return the shared Linux base and the selected board's hardware fragment."""
+) -> tuple[Path, Path, Path]:
+    """Return the shared base, board fragment and selected build-type policy."""
     return (
         common.ROOT / platform["linux"]["defconfig"],
         target_directory(target) / target_config["linux"]["config_fragment"],
+        common.ROOT / platform["linux"]["build_types"][target_config["build_type"]],
     )
 
 
@@ -37,10 +38,10 @@ def kconfig_values(contents: str) -> dict[str, str]:
     return values
 
 
-def compose_kernel_config(base: Path, fragment: Path) -> bytes:
-    """Apply board assignments over the shared base for both Kbuild consumers."""
+def compose_kernel_config(*paths: Path) -> bytes:
+    """Apply ordered configuration inputs for both Kbuild consumers."""
     values: dict[str, str] = {}
-    for path in (base, fragment):
+    for path in paths:
         if path.is_symlink() or not path.is_file():
             fail(f"kernel configuration input is missing or invalid: {path}")
         values.update(kconfig_values(path.read_text()))

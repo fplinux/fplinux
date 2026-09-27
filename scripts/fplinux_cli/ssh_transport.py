@@ -51,6 +51,7 @@ BUILD_MANIFEST_FIELDS = frozenset(
         "kbuild_receipt",
         "linux_recipe",
         "profile",
+        "build_type",
         "target",
         "workspace_digest",
     }
@@ -182,6 +183,7 @@ def bundle_identity(bundle: Path, runtime: dict[str, Any]) -> dict[str, str]:
     runtime_bytes = _regular_file_bytes(runtime_path, "runtime manifest")
     target = runtime.get("target")
     profile = runtime.get("profile")
+    build_type = runtime.get("build_type")
     image_relative = runtime.get("image")
     hashes = runtime.get("sha256")
     if (
@@ -191,6 +193,7 @@ def bundle_identity(bundle: Path, runtime: dict[str, Any]) -> dict[str, str]:
             profile is not None
             and (not isinstance(profile, str) or TARGET_NAME.fullmatch(profile) is None)
         )
+        or build_type not in ("release", "debug")
         or not isinstance(image_relative, str)
         or not isinstance(hashes, dict)
     ):
@@ -214,8 +217,9 @@ def bundle_identity(bundle: Path, runtime: dict[str, Any]) -> dict[str, str]:
         or set(manifest) != BUILD_MANIFEST_FIELDS
         or manifest.get("target") != target
         or manifest.get("profile") != profile
+        or manifest.get("build_type") != build_type
     ):
-        fail("build manifest does not match the runtime target or profile")
+        fail("build manifest does not match the runtime target, profile or build type")
     generation = manifest.get("generation")
     if not isinstance(generation, str) or SHA256.fullmatch(generation) is None:
         fail("build manifest generation is invalid")

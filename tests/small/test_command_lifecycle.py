@@ -74,6 +74,7 @@ class CommandLifecycleTests(unittest.TestCase):
         profile: str | None = None,
         *,
         runnable: bool = True,
+        build_type: str = "release",
     ) -> dict[str, object]:
         """Describe one complete synthetic bundle independently of its resolver."""
         return {
@@ -89,6 +90,7 @@ class CommandLifecycleTests(unittest.TestCase):
             "kbuild_receipt": {"recipe": "1" * 64, "sha256": "3" * 64},
             "linux_recipe": "2" * 64,
             "profile": profile,
+            "build_type": build_type,
             "target": "phone",
         }
 
@@ -99,12 +101,13 @@ class CommandLifecycleTests(unittest.TestCase):
         *,
         profile: str | None = None,
         runnable: bool = True,
+        build_type: str = "release",
     ) -> Path:
         """Write one complete immutable generation without selecting it."""
         slot = self.output / "phone"
         if profile is not None:
             slot = slot / "profiles" / profile
-        path = slot / "bundles" / generation
+        path = slot / "builds" / build_type / "bundles" / generation
         path.mkdir(parents=True)
         payload = path / self.release["image"]
         payload.parent.mkdir(parents=True)
@@ -122,7 +125,9 @@ class CommandLifecycleTests(unittest.TestCase):
         ssh_helper.write_text("# bundled SSH helper\n", encoding="utf-8")
         ssh_helper.chmod(0o644)
         (path / BUILD_MANIFEST_NAME).write_bytes(
-            canonical_json_bytes(self._manifest(generation, path, profile, runnable=runnable))
+            canonical_json_bytes(
+                self._manifest(generation, path, profile, runnable=runnable, build_type=build_type)
+            )
         )
         return path
 
@@ -130,8 +135,10 @@ class CommandLifecycleTests(unittest.TestCase):
         """Leave complete generations present while making the current receipt miss."""
         bundle_pointer(self.output, "phone").unlink()
 
-    def test_exact_build_hit_ignores_jobs_and_avoids_runtime_or_staging(self) -> None:
-        """Both job counts reuse the same valid generation without starting build work."""
+    def test_release_debug_release_hits_keep_both_types_and_ignore_jobs(self) -> None:
+        """Switching type reuses its own generation without starting build work."""
+        debug = self._create_generation("d" * 64, build_type="debug")
+        publish_current_bundle(self.output, "phone", debug, build_type="debug")
         with (
             mock.patch.object(common, "ROOT", self.root),
             mock.patch.object(output, "ROOT", self.root),
@@ -162,9 +169,9 @@ class CommandLifecycleTests(unittest.TestCase):
             mock.patch.object(cache_prune, "discard_obsolete_rootfs") as rootfs_gc,
             mock.patch.object(cache_prune, "discard_obsolete_apks") as apks_gc,
         ):
-            for jobs in (1, 8):
-                with self.subTest(jobs=jobs):
-                    old = self._create_generation("b" * 64)
+            for build_type, jobs in (("release", 1), ("debug", 8), ("release", 8)):
+                with self.subTest(build_type=build_type, jobs=jobs):
+                    old = self._create_generation("b" * 64, build_type=build_type)
                     stdout = io.StringIO()
                     with contextlib.redirect_stdout(stdout):
                         output.run_entrypoint(
@@ -174,19 +181,38 @@ class CommandLifecycleTests(unittest.TestCase):
                                 jobs,
                                 verbose=True,
                                 offline=True,
+                                build_type=build_type,
                             )
                         )
 
-                    self.assertIn("build phone: OK (cached)", stdout.getvalue())
+                    self.assertIn(
+                        f"build phone --build-type {build_type}: OK (cached)", stdout.getvalue()
+                    )
+                    expected = self.bundle_path if build_type == "release" else debug
+                    self.assertIn(str(expected.relative_to(self.root)), stdout.getvalue())
                     self.assertFalse(old.exists())
+                    self.assertTrue(self.bundle_path.is_dir())
+                    self.assertTrue(debug.is_dir())
             self.assertEqual(
                 rootfs_gc.call_args_list,
-                [mock.call(self.cache), mock.call(self.cache)],
+                [mock.call(self.cache)] * 3,
             )
             self.assertEqual(
                 apks_gc.call_args_list,
-                [mock.call(self.cache), mock.call(self.cache)],
+                [mock.call(self.cache)] * 3,
             )
+
+    def test_run_refuses_an_unbuilt_type_before_starting_the_loader(self) -> None:
+        """A release bundle cannot satisfy an explicit debug run."""
+        with (
+            mock.patch.object(common, "ROOT", self.root),
+            mock.patch(
+                "fplinux_cli.cli.runtime.os.execv",
+                side_effect=AssertionError("missing bundle must not run"),
+            ),
+            self.assertRaisesRegex(SystemExit, "build phone --build-type debug"),
+        ):
+            runtime_commands.run_target("phone", build_type="debug")
 
     def test_build_result_ignores_closed_stdout_pipe(self) -> None:
         """A closed output consumer must not turn a valid build result into failure."""
@@ -362,8 +388,8 @@ class CommandLifecycleTests(unittest.TestCase):
             with contextlib.redirect_stdout(stdout):
                 output.run_entrypoint(lambda: build_commands.build("phone", 4))
 
-        self.assertIn("build phone: OK", stdout.getvalue())
-        self.assertNotIn("build phone: OK (cached)", stdout.getvalue())
+        self.assertIn("build phone --build-type release: OK", stdout.getvalue())
+        self.assertNotIn("build phone --build-type release: OK (cached)", stdout.getvalue())
         self.assertFalse(old.exists())
         discard.assert_called_once_with(self.snapshot, workspace)
         rootfs_gc.assert_called_once_with(self.cache)
@@ -480,8 +506,8 @@ class CommandLifecycleTests(unittest.TestCase):
         ):
             runtime_commands.run_target("nokia-ta1618", boot="microsd")
 
-        load_target.assert_called_once_with("nokia-ta1618", profile)
-        resolve.assert_called_once_with("nokia-ta1618", profile)
+        load_target.assert_called_once_with("nokia-ta1618", profile, build_type="release")
+        resolve.assert_called_once_with("nokia-ta1618", profile, build_type="release")
         runner = profile_bundle.path / "runner/run.py"
         execute.assert_called_once_with(os.fsencode(runner), [os.fsencode(runner)])
 
@@ -648,7 +674,7 @@ class CommandLifecycleTests(unittest.TestCase):
             contextlib.redirect_stdout(io.StringIO()),
         ):
             runtime_commands.verify_booted("phone", profile=profile)
-        snapshot.assert_called_once_with("phone", profile)
+        snapshot.assert_called_once_with("phone", profile, build_type="release")
         self.assertEqual(session.call_args.args[0], selected)
         self.assertEqual(session.call_args.args[1]["profile"], profile)
 
@@ -676,7 +702,7 @@ class CommandLifecycleTests(unittest.TestCase):
 
         self.assertEqual(
             stdout.getvalue(),
-            "verify: the phone runs the current build (9999999999999999)\n",
+            "verify: the phone runs the current release build (9999999999999999)\n",
         )
         current_session.assert_called_once_with(self.bundle, mock.ANY, "phone")
 
@@ -782,7 +808,7 @@ class CommandLifecycleTests(unittest.TestCase):
                 pull=None,
             )
 
-        load_target.assert_called_once_with("phone", profile)
+        load_target.assert_called_once_with("phone", profile, build_type="release")
         selected_bundle, selected_manifest, selected_target = current_session.call_args.args
         self.assertEqual(selected_bundle, profile_bundle)
         self.assertEqual(selected_manifest["profile"], profile)
@@ -811,6 +837,7 @@ class CommandLifecycleTests(unittest.TestCase):
                 snapshot=self.snapshot,
                 **roots,
                 profile=None,
+                build_type="release",
                 log_environment={"FPLINUX_LOG_ROOT": "/logs"},
                 image_recipe="e" * 64,
                 image_generation="a" * 64,
@@ -838,7 +865,7 @@ class CommandLifecycleTests(unittest.TestCase):
         self.assertIn("FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE=" + "e" * 64, command)
         self.assertIn("FPLINUX_CONTAINER_IMAGE_GENERATION=" + "a" * 64, command)
         self.assertEqual(
-            command[-8:],
+            command[-10:],
             [
                 "--",
                 "python3",
@@ -846,6 +873,8 @@ class CommandLifecycleTests(unittest.TestCase):
                 "fplinux_cli.build",
                 "--target",
                 "phone",
+                "--build-type",
+                "release",
                 "--jobs",
                 "6",
             ],
@@ -875,6 +904,7 @@ class CommandLifecycleTests(unittest.TestCase):
             snapshot=self.snapshot,
             **roots,
             profile=None,
+            build_type="release",
             log_environment={"FPLINUX_LOG_ROOT": "/logs"},
             image_recipe="e" * 64,
             image_generation="a" * 64,

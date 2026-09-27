@@ -184,7 +184,7 @@ esac
                     nand_backup.backup_target_nand(target, destination, profile=profile)
 
                 self.assertFalse(destination.exists())
-                acquire.assert_called_once_with(target, profile=profile)
+                acquire.assert_called_once_with(target, profile=profile, build_type="release")
 
     def test_rejected_device_read_cannot_publish_or_replace_an_image(self) -> None:
         """A remote reader error leaves an existing INOI backup intact."""

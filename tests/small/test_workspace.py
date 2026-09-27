@@ -24,6 +24,33 @@ class WorkspaceSnapshotTests(unittest.TestCase):
         source.chmod(mode)
         return source
 
+    def test_type_separates_identical_source_snapshots_and_survives_materialization(self) -> None:
+        """Even identical fragment bytes cannot give two selected types one workspace identity."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self._source(root)
+            with (
+                mock.patch.object(workspace_module, "ROOT", root),
+                mock.patch.object(
+                    workspace_module,
+                    "target_build_source_files",
+                    return_value=[("source", source)],
+                ),
+                mock.patch.object(
+                    workspace_module, "load_target", return_value={"device_data": {"groups": {}}}
+                ),
+            ):
+                release = workspace_module.target_workspace_snapshot("demo", build_type="release")
+                debug = workspace_module.target_workspace_snapshot("demo", build_type="debug")
+                self.assertEqual(release.files, debug.files)
+                self.assertNotEqual(release.recipe, debug.recipe)
+                release_path = workspace_module.stage_workspace_snapshot(release)
+                debug_path = workspace_module.stage_workspace_snapshot(debug)
+                self.assertNotEqual(release_path, debug_path)
+                self.assertEqual((release_path / "source").read_bytes(), b"source")
+                self.assertEqual((debug_path / "source").read_bytes(), b"source")
+                self.assertEqual(workspace_module.stage_workspace_snapshot(release), release_path)
+
     def test_target_snapshot_reads_path_bytes_and_mode_without_creating_cache(self) -> None:
         """A target recipe is available before any workspace directory is materialized."""
         with tempfile.TemporaryDirectory() as temporary:
@@ -82,6 +109,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                 "targets/phone/loader/assets.lock.toml",
                 "targets/phone/kernel/config.fragment",
                 "platforms/demo/kernel/defconfig",
+                "platforms/demo/kernel/release.config",
                 "profiles/default/profile.toml",
                 "targets/phone/bootstrap/main.c",
                 "targets/phone/kernel/append.cfg",
@@ -95,6 +123,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                 write(relative)
 
             target: dict[str, Any] = {
+                "build_type": "release",
                 "platform": "demo",
                 "device_data": {"groups": {}},
                 "bundle": {"packages": ["package-b"]},
@@ -114,6 +143,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                 "bundle": {"packages": []},
                 "linux": {
                     "defconfig": "platforms/demo/kernel/defconfig",
+                    "build_types": {"release": "platforms/demo/kernel/release.config"},
                     "patches": ["shared/platform.patch"],
                     "copies": [{"source": "shared/platform-copy.c"}],
                     "appends": [{"source": "shared/platform-append.cfg"}],

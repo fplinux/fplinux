@@ -15,6 +15,7 @@ import tempfile
 import time
 from contextlib import suppress
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -23,6 +24,7 @@ from fplinux_cli.build.kernel import profile_kconfig_actions, profile_kconfig_ar
 from fplinux_cli.build.linux import prepare_linux
 from fplinux_cli.build.process import report_stage, run
 from fplinux_cli.build.sources import fetch, source_lock_entry
+from fplinux_cli.identity import BUILD_TYPES
 from fplinux_cli.manifests.kernel import compose_kernel_config, kconfig_values, kernel_config_paths
 from fplinux_cli.manifests.paths import discover_profiles, discover_targets, normalize_profile
 from fplinux_cli.manifests.platforms import load_platform
@@ -204,42 +206,55 @@ def context_label(target: str, profile: str | None) -> str:
     return target if profile is None else f"{target}-profile-{profile}"
 
 
-def sparse_cache_directory(target: str, profile: str | None = None) -> Path:
+def sparse_cache_directory(
+    target: str, profile: str | None = None, *, build_type: str = "release"
+) -> Path:
     """Return the fixed Sparse output directory for one target/profile."""
     root = CACHE / "analysis" / "sparse" / target
-    return root if profile is None else root / "profiles" / profile
+    slot = root if profile is None else root / "profiles" / profile
+    return slot / "builds" / build_type
 
 
-def sparse_output(target: str, profile: str | None = None) -> Path:
+def sparse_output(target: str, profile: str | None = None, *, build_type: str = "release") -> Path:
     """Return the one fixed Kbuild output path for one target/profile."""
-    return sparse_cache_directory(target, profile) / "work"
+    return sparse_cache_directory(target, profile, build_type=build_type) / "work"
 
 
-def reset_sparse_output(target: str, profile: str | None = None) -> Path:
+def reset_sparse_output(
+    target: str, profile: str | None = None, *, build_type: str = "release"
+) -> Path:
     """Cold-reset the one generated Kbuild output before each analysis."""
-    output = sparse_output(target, profile)
+    output = sparse_output(target, profile, build_type=build_type)
     shutil.rmtree(output, ignore_errors=True)
     output.mkdir(parents=True, exist_ok=True)
     return output
 
 
 def target_context(
-    sources: dict[str, Any], target: str, profile: str | None = None
+    sources: dict[str, Any],
+    target: str,
+    profile: str | None = None,
+    *,
+    build_type: str = "release",
 ) -> tuple[dict[str, Any], dict[str, Any], Path, PreparedLinuxState]:
     """Load one target/profile and prepare its exact Linux integration tree."""
-    target_config = load_target(target, profile)
+    target_config = load_target(target, profile, build_type=build_type)
     platform = load_platform(target_config["platform"])
     source, prepared_linux = prepare_linux(sources, target, target_config, platform)
     return target_config, platform, source, prepared_linux
 
 
-def prepare_contexts(reporter: RunReporter | None, profile: str | None = None) -> None:
+def prepare_contexts(
+    reporter: RunReporter | None, profile: str | None = None, *, build_type: str = "release"
+) -> None:
     """Populate default contexts or one explicitly selected profile."""
     sources = load_sources()
     for target, selected in target_profiles(profile):
         label = context_label(target, selected)
         with report_stage(reporter, f"prepare-{label}"):
-            _config, _platform, _source, prepared_linux = target_context(sources, target, selected)
+            _config, _platform, _source, prepared_linux = target_context(
+                sources, target, selected, build_type=build_type
+            )
             linux = source_lock_entry(sources, _platform["linux"]["source_lock"])
             fetch(
                 linux["url"],
@@ -255,11 +270,15 @@ def check_one_context(
     sources: dict[str, Any],
     target: str,
     profile: str | None,
+    *,
+    build_type: str = "release",
 ) -> int:
     """Run the complete analyzer sequence for one target-owned context."""
     label = context_label(target, profile)
     with report_stage(reporter, f"context-{label}"):
-        target_config, platform, source, prepared_linux = target_context(sources, target, profile)
+        target_config, platform, source, prepared_linux = target_context(
+            sources, target, profile, build_type=build_type
+        )
         projected = projected_sources(target, target_config, platform)
         style_files = [str(path) for path in projected if path.suffix in {".c", ".h"}]
         checkpatch = [
@@ -272,10 +291,13 @@ def check_one_context(
         bindings = binding_paths(inputs, source)
         linux = source_lock_entry(sources, platform["linux"]["source_lock"])
         archive = CACHE / "downloads/linux" / f"linux-{linux['version']}.tar.xz"
-        base, fragment = kernel_config_paths(target, target_config, platform)
-        defconfig = compose_kernel_config(base, fragment).decode()
+        config_paths = kernel_config_paths(target, target_config, platform)
+        defconfig = compose_kernel_config(*config_paths).decode()
         objects = sparse_targets(target, target_config, platform)
-        output = sparse_output(target, profile)
+        output = sparse_output(target, profile, build_type=build_type)
+        initramfs = output / "initramfs"
+        if target_config["linux"]["root"]["kind"] == "initramfs":
+            defconfig += f'CONFIG_INITRAMFS_SOURCE="{initramfs}"\n'
         config_enable, config_disable = profile_kconfig_actions(target_config)
         kbuild = [
             "make",
@@ -315,7 +337,7 @@ def check_one_context(
         ]
         linux_state.require_prepared_linux(source, prepared_linux)
 
-    output = reset_sparse_output(target, profile)
+    output = reset_sparse_output(target, profile, build_type=build_type)
     config_diff = output / "integration-kbuild.patch"
     with report_stage(reporter, f"format-{label}"):
         run(format_command)
@@ -328,6 +350,8 @@ def check_one_context(
         if config_diff.stat().st_size:
             run_checkpatch([*checkpatch, str(config_diff)])
     with report_stage(reporter, f"kconfig-{label}"):
+        if target_config["linux"]["root"]["kind"] == "initramfs":
+            initramfs.mkdir()
         (output / ".config").write_text(defconfig)
         if profile_config_command is not None:
             run(first_kconfig_command)
@@ -336,6 +360,13 @@ def check_one_context(
         requested = kconfig_values(defconfig)
         requested.update(dict.fromkeys(config_enable, "y"))
         requested.update(dict.fromkeys(config_disable, "n"))
+        if target_config["linux"]["root"]["kind"] != "initramfs":
+            # An external-root kernel has no embedded archive to compress.
+            requested = {
+                symbol: value
+                for symbol, value in requested.items()
+                if not symbol.startswith("CONFIG_INITRAMFS_COMPRESSION_")
+            }
         actual = kconfig_values(require_file(output / ".config").read_text())
         for symbol, value in requested.items():
             if actual.get(symbol, "n") != value:
@@ -391,7 +422,9 @@ class _ContextWorker:
     stderr: BinaryIO
 
 
-def _context_worker_command(target: str, profile: str | None) -> list[str]:
+def _context_worker_command(
+    target: str, profile: str | None, *, build_type: str = "release"
+) -> list[str]:
     """Return the internal command that checks exactly one context."""
     command = [
         sys.executable,
@@ -402,6 +435,8 @@ def _context_worker_command(target: str, profile: str | None) -> list[str]:
         "1",
         "--context-target",
         target,
+        "--build-type",
+        build_type,
     ]
     if profile is not None:
         command.extend(("--profile", profile))
@@ -587,6 +622,7 @@ def check_contexts(
     profile: str | None = None,
     *,
     jobs: int = 1,
+    build_type: str = "release",
 ) -> None:
     """Run sparse through Kbuild for default or explicitly selected contexts."""
     if jobs < 1:
@@ -599,12 +635,15 @@ def check_contexts(
     if len(contexts) == 1 or (jobs == 1 and (reporter is None or reporter.verbose)):
         sources = load_sources()
         checked = sum(
-            check_one_context(reporter, sources, target, selected) for target, selected in contexts
+            check_one_context(reporter, sources, target, selected, build_type=build_type)
+            for target, selected in contexts
         )
         print(f"sparse: OK ({checked} kernel C objects total)")
         return
 
-    _run_context_processes(contexts, jobs)
+    _run_context_processes(
+        contexts, jobs, command_for=partial(_context_worker_command, build_type=build_type)
+    )
     checked = sum(context_object_count(target, selected) for target, selected in contexts)
     print(f"sparse: OK ({checked} kernel C objects total)")
 
@@ -614,6 +653,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("phase", choices=("prepare", "check"))
     parser.add_argument("--profile")
+    parser.add_argument("--build-type", choices=BUILD_TYPES, default="release")
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--context-target", help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -627,16 +667,16 @@ def main() -> None:
             parser.error(f"invalid kernel context: {context_label(*context)}")
         label = context_label(*context)
         reporter = RunReporter.from_environment("check", f"kernel-context-{label}")
-        check_one_context(reporter, load_sources(), *context)
+        check_one_context(reporter, load_sources(), *context, build_type=args.build_type)
         return
 
     reporter = RunReporter.from_environment("check", f"kernel-{args.phase}")
     if args.phase == "prepare":
         if args.jobs != 1:
             parser.error("--jobs is supported only by the check phase")
-        prepare_contexts(reporter, args.profile)
+        prepare_contexts(reporter, args.profile, build_type=args.build_type)
     else:
-        check_contexts(reporter, args.profile, jobs=args.jobs)
+        check_contexts(reporter, args.profile, jobs=args.jobs, build_type=args.build_type)
 
 
 if __name__ == "__main__":

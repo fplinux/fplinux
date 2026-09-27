@@ -41,10 +41,14 @@ class BundleStateTests(unittest.TestCase):
         profile: str | None = None,
         *,
         manifest_profile: object = ...,
+        build_type: str = "release",
+        manifest_build_type: object = ...,
     ) -> tuple[Path, str]:
         if manifest_profile is ...:
             manifest_profile = profile
-        staging = create_bundle_staging(self.output, "demo", profile)
+        if manifest_build_type is ...:
+            manifest_build_type = build_type
+        staging = create_bundle_staging(self.output, "demo", profile, build_type=build_type)
         (staging / "payload").write_text(marker)
         payload = {
             "target": "demo",
@@ -58,12 +62,45 @@ class BundleStateTests(unittest.TestCase):
             "boot_artifacts": {"required": []},
             "kbuild_receipt": {"recipe": "0" * 64, "sha256": "1" * 64},
             "profile": manifest_profile,
+            "build_type": manifest_build_type,
             "files": published_file_records(staging),
         }
         generation = hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
         manifest = {**payload, "generation": generation}
         (staging / BUILD_MANIFEST_NAME).write_bytes(canonical_json_bytes(manifest))
         return staging, generation
+
+    def test_build_types_retain_independent_current_generations(self) -> None:
+        """Switching type and pruning one slot cannot replace the other type's payload."""
+        selected: dict[str, Path] = {}
+        for build_type in ("release", "debug"):
+            staging, generation = self._staging(build_type, build_type=build_type)
+            selected[build_type] = publish_bundle_generation(
+                self.output, "demo", staging, generation, build_type=build_type
+            )
+            current = publish_current_bundle(
+                self.output, "demo", selected[build_type], build_type=build_type
+            )
+            discard_superseded_bundle_generations(
+                self.output, "demo", current, build_type=build_type
+            )
+
+        for build_type in ("release", "debug", "release"):
+            current = resolve_current_bundle(self.output, "demo", build_type=build_type)
+            self.assertEqual(current.path, selected[build_type])
+            self.assertEqual((current.path / "payload").read_text(), build_type)
+
+    def test_wrong_or_missing_type_cannot_be_published_into_a_selected_slot(self) -> None:
+        """A manifest from another build type cannot authorize a release payload."""
+        for manifest_type in ("debug", None):
+            with self.subTest(manifest_type=manifest_type):
+                staging, generation = self._staging("payload", manifest_build_type=manifest_type)
+                if manifest_type is None:
+                    manifest = json.loads((staging / BUILD_MANIFEST_NAME).read_text())
+                    del manifest["build_type"]
+                    (staging / BUILD_MANIFEST_NAME).write_bytes(canonical_json_bytes(manifest))
+                with self.assertRaisesRegex(BundleStateError, "wrong slot identity"):
+                    publish_bundle_generation(self.output, "demo", staging, generation)
 
     def test_publish_and_resolve_current_generation(self) -> None:
         """Publish and resolve the selected generation."""
@@ -250,10 +287,10 @@ class BundleStateTests(unittest.TestCase):
         )
         publish_current_bundle(self.output, "demo", profiled, profile)
 
-        self.assertEqual(default.parent, self.output / "demo/bundles")
+        self.assertEqual(default.parent, self.output / "demo/builds/release/bundles")
         self.assertEqual(
             profiled.parent,
-            self.output / "demo/profiles/usb-host-lab/bundles",
+            self.output / "demo/profiles/usb-host-lab/builds/release/bundles",
         )
         self.assertNotEqual(
             bundle_pointer(self.output, "demo"),

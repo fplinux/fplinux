@@ -49,16 +49,19 @@ class InspectCliTests(unittest.TestCase):
             timeout=10,
         )
 
-    def make_bundle(self, generation: str, profile: str | None = None) -> Path:
+    def make_bundle(
+        self, generation: str, profile: str | None = None, *, build_type: str = "release"
+    ) -> Path:
         """Publish a normal fixture generation with independently described payload bytes."""
         output = self.root / ".cache/out"
         output.mkdir(parents=True, exist_ok=True)
-        staging = create_bundle_staging(output, "example", profile)
+        staging = create_bundle_staging(output, "example", profile, build_type=build_type)
         payload = staging / "payload.bin"
         payload.write_bytes(b"abc")
         manifest: dict[str, object] = {
             "target": "example",
             "profile": profile,
+            "build_type": build_type,
             "generation": generation,
             "files": {"payload.bin": file_record(payload)},
             "workspace_digest": "a" * 64,
@@ -72,7 +75,31 @@ class InspectCliTests(unittest.TestCase):
             "boot_artifacts": {"required": []},
         }
         (staging / "build-manifest.json").write_text(json.dumps(manifest))
-        return publish_bundle_generation(output, "example", staging, generation, profile)
+        return publish_bundle_generation(
+            output, "example", staging, generation, profile, build_type=build_type
+        )
+
+    def test_build_type_selection_is_explicit_and_never_falls_back(self) -> None:
+        """The public inspector reports only the requested type's current generation."""
+        output = self.root / ".cache/out"
+        release = self.make_bundle("1" * 64)
+        publish_current_bundle(output, "example", release)
+        missing = self.run_cli("inspect", "bundle", "example", "--build-type", "debug")
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("build example --build-type debug", missing.stderr)
+        debug = self.make_bundle("2" * 64, build_type="debug")
+        publish_current_bundle(output, "example", debug, build_type="debug")
+
+        for build_type, generation in (
+            ("release", "1" * 64),
+            ("debug", "2" * 64),
+            ("release", "1" * 64),
+        ):
+            with self.subTest(build_type=build_type):
+                result = self.run_cli("inspect", "bundle", "example", "--build-type", build_type)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f"build_type: {build_type}", result.stdout)
+                self.assertIn(f"generation: {generation}", result.stdout)
 
     def test_bundle_uses_current_pointer_and_requested_profile(self) -> None:
         """A newer unselected generation must not replace the published selection."""
@@ -101,7 +128,12 @@ class InspectCliTests(unittest.TestCase):
         """Write an independently checksummed ZIP without calling the production packager."""
         contents = {
             "build-manifest.json": json.dumps(
-                {"target": "example", "profile": None, "generation": "1" * 64}
+                {
+                    "target": "example",
+                    "profile": None,
+                    "build_type": "release",
+                    "generation": "1" * 64,
+                }
             ).encode(),
             "payload.bin": b"abc",
         }

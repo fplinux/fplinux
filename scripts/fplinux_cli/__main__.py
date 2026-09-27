@@ -25,6 +25,7 @@ from .common import ROOT
 from .device_data_prepare import prepare_device_data
 from .environment.kern import doctor, setup
 from .format import format_sources
+from .identity import BUILD_TYPES
 from .nand_backup import backup_target_nand, identify_target_nand
 from .output import run_entrypoint
 from .prune import (
@@ -159,9 +160,11 @@ def _setup_action(*, force: bool) -> None:
     setup(force=force)
 
 
-def _nand_backup_action(target: str, output: Path, *, profile: str | None) -> None:
+def _nand_backup_action(
+    target: str, output: Path, *, profile: str | None, build_type: str
+) -> None:
     """Save a complete NAND image through the selected running system."""
-    backup_target_nand(target, output, profile=profile)
+    backup_target_nand(target, output, profile=profile, build_type=build_type)
 
 
 def _command_action(
@@ -175,7 +178,9 @@ def _command_action(
         action = partial(read_logs, args)
     elif args.command == "inspect":
         if args.inspect_kind == "bundle":
-            action = partial(inspect_bundle, args.target, profile=args.profile)
+            action = partial(
+                inspect_bundle, args.target, profile=args.profile, build_type=args.build_type
+            )
         elif args.inspect_kind == "archive":
             action = partial(inspect_archive, args.path)
         else:
@@ -199,6 +204,7 @@ def _command_action(
                 check,
                 args.scopes,
                 profile=args.profile,
+                build_type=args.build_type,
                 verbose=args.verbose,
                 no_cache=args.no_cache,
                 jobs=jobs,
@@ -219,6 +225,7 @@ def _command_action(
             args.target,
             args.jobs,
             profile=args.profile,
+            build_type=args.build_type,
             verbose=args.verbose,
             offline=args.offline,
         )
@@ -231,6 +238,7 @@ def _command_action(
             package_target,
             args.target,
             profile=args.profile,
+            build_type=args.build_type,
             boot=args.boot,
             candidate=args.candidate,
         )
@@ -241,6 +249,7 @@ def _command_action(
             run_target,
             args.target,
             profile=args.profile,
+            build_type=args.build_type,
             boot=args.boot,
         )
     elif args.command == "console":
@@ -248,6 +257,7 @@ def _command_action(
             console_target,
             args.target,
             profile=args.profile,
+            build_type=args.build_type,
             keyboard=args.keyboard,
             exec_command=args.exec_command,
             upload=args.upload,
@@ -255,9 +265,17 @@ def _command_action(
         )
     elif args.command == "nand":
         if args.nand_command == "backup":
-            action = partial(_nand_backup_action, args.target, args.output, profile=args.profile)
+            action = partial(
+                _nand_backup_action,
+                args.target,
+                args.output,
+                profile=args.profile,
+                build_type=args.build_type,
+            )
         elif args.nand_command == "identify":
-            action = partial(identify_target_nand, args.target, profile=args.profile)
+            action = partial(
+                identify_target_nand, args.target, profile=args.profile, build_type=args.build_type
+            )
         else:
             raise AssertionError(f"unhandled nand command: {args.nand_command}")
     elif args.command == "device-data":
@@ -282,10 +300,22 @@ def _command_action(
             compatible=args.compatible,
         )
     elif args.command == "verify":
-        action = partial(verify_booted, args.target, profile=args.profile)
+        action = partial(
+            verify_booted, args.target, profile=args.profile, build_type=args.build_type
+        )
     else:
         raise AssertionError(f"unhandled command: {args.command}")
     return action
+
+
+def _add_build_type_option(parser: argparse.ArgumentParser) -> None:
+    """Use the same explicit kernel type selector for every bundle consumer."""
+    parser.add_argument(
+        "--build-type",
+        choices=BUILD_TYPES,
+        default="release",
+        help="select the kernel build type (default: release)",
+    )
 
 
 def _add_boot_profile_options(parser: argparse.ArgumentParser, verb: str) -> None:
@@ -348,6 +378,7 @@ def main() -> None:
     )
     commands.add_parser("doctor", help="check the project-local build runtime")
     check_parser = commands.add_parser("check", help="run the source quality gate")
+    _add_build_type_option(check_parser)
     check_parser.add_argument(
         "scopes",
         nargs="*",
@@ -392,6 +423,7 @@ def main() -> None:
     inspect_parser = commands.add_parser("inspect", help="inspect a built bundle, ZIP or APK")
     inspections = inspect_parser.add_subparsers(dest="inspect_kind", required=True)
     bundle_parser = inspections.add_parser("bundle", help="inspect the current target bundle")
+    _add_build_type_option(bundle_parser)
     bundle_parser.add_argument("target", choices=targets)
     bundle_parser.add_argument("--profile", type=_profile_name, metavar="NAME")
     for kind, help_text in (
@@ -418,6 +450,7 @@ def main() -> None:
     commit_message_parser = commands.add_parser("_commit-msg")
     commit_message_parser.add_argument("message_file")
     build_parser = commands.add_parser("build", help="build a target in .cache/out")
+    _add_build_type_option(build_parser)
     build_parser.add_argument("target", choices=targets)
     build_parser.add_argument(
         "--profile",
@@ -461,6 +494,7 @@ def main() -> None:
     package_parser = commands.add_parser(
         "package", help="package an existing build for Linux x86-64"
     )
+    _add_build_type_option(package_parser)
     package_parser.add_argument("target", choices=targets)
     _add_boot_profile_options(package_parser, "package")
     package_parser.add_argument(
@@ -478,10 +512,12 @@ def main() -> None:
         help="under the global cache lock, remove disposable staged workspaces",
     )
     run_parser = commands.add_parser("run", help="run a target's volatile-RAM loader")
+    _add_build_type_option(run_parser)
     run_parser.add_argument("target", choices=targets)
     _add_boot_profile_options(run_parser, "run")
 
     console_parser = commands.add_parser("console", help="connect to a running target over USB")
+    _add_build_type_option(console_parser)
     console_parser.add_argument("target", choices=targets)
     console_parser.add_argument(
         "--profile",
@@ -500,12 +536,14 @@ def main() -> None:
     nand_backup_parser = nand_commands.add_parser(
         "backup", help="save a complete read-only NAND image"
     )
+    _add_build_type_option(nand_backup_parser)
     nand_backup_parser.add_argument("target", choices=targets)
     nand_backup_parser.add_argument("output", type=Path)
     nand_backup_parser.add_argument("--profile", type=_profile_name, metavar="NAME")
     nand_identify_parser = nand_commands.add_parser(
         "identify", help="print the NAND chip identity and geometry reported by the phone"
     )
+    _add_build_type_option(nand_identify_parser)
     nand_identify_parser.add_argument("target", choices=targets)
     nand_identify_parser.add_argument("--profile", type=_profile_name, metavar="NAME")
 
@@ -542,6 +580,7 @@ def main() -> None:
     verify_parser = commands.add_parser(
         "verify", help="check that the booted phone runs the current build"
     )
+    _add_build_type_option(verify_parser)
     verify_parser.add_argument("target", choices=targets)
     verify_parser.add_argument("--profile", type=_profile_name, metavar="NAME")
     args = parser.parse_args()
