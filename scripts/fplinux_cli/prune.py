@@ -17,7 +17,7 @@ from fplinux_cli.environment.images import (
 from fplinux_cli.manifests.paths import discover_platforms, discover_profiles, discover_targets
 from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.targets import load_target
-from fplinux_cli.manifests.values import TARGET_NAME, nonempty_string
+from fplinux_cli.manifests.values import TARGET_NAME, nonempty_string, sha256_value
 
 from . import alpine_state, firmware_inputs
 from .common import ROOT, load_toml, read_json_object
@@ -367,9 +367,6 @@ def _profile_slot_entries(
     root: Path,
     identity_root: str,
     declared: dict[str, frozenset[str]] | None,
-    *,
-    direct_profile: bool = False,
-    source_projection: bool = False,
 ) -> list[InventoryEntry]:
     """Classify managed target/profile slots without touching default target state."""
     if not root.is_dir() or root.is_symlink():
@@ -382,15 +379,11 @@ def _profile_slot_entries(
             or TARGET_NAME.fullmatch(target.name) is None
         ):
             continue
-        profiles = target if direct_profile else target / "profiles"
+        profiles = target / "profiles"
         if not profiles.is_dir() or profiles.is_symlink():
             continue
         for path in sorted(profiles.iterdir(), key=lambda item: item.name):
-            identity = (
-                f"{identity_root}/{target.name}/{path.name}"
-                if direct_profile
-                else f"{identity_root}/{target.name}/profiles/{path.name}"
-            )
+            identity = f"{identity_root}/{target.name}/profiles/{path.name}"
             if path.is_symlink() or not path.is_dir() or TARGET_NAME.fullmatch(path.name) is None:
                 entries.append(
                     InventoryEntry(
@@ -412,42 +405,15 @@ def _profile_slot_entries(
                     )
                 )
             elif path.name in declared.get(target.name, frozenset()):
-                separate = (
-                    _profile_uses_separate_linux_source(target.name, path.name)
-                    if source_projection
-                    else True
+                entries.append(
+                    InventoryEntry(
+                        identity,
+                        "protected",
+                        "declared profile cache",
+                        None,
+                        None,
+                    )
                 )
-                if separate is None:
-                    entries.append(
-                        InventoryEntry(
-                            identity,
-                            "protected",
-                            "profile source integration is unavailable",
-                            None,
-                            None,
-                        )
-                    )
-                elif separate:
-                    entries.append(
-                        InventoryEntry(
-                            identity,
-                            "protected",
-                            "declared profile cache",
-                            None,
-                            None,
-                        )
-                    )
-                else:
-                    logical, allocated = _tree_size(path)
-                    entries.append(
-                        InventoryEntry(
-                            identity,
-                            "candidate",
-                            "profile now reuses the default Linux source",
-                            logical,
-                            allocated,
-                        )
-                    )
             else:
                 logical, allocated = _tree_size(path)
                 entries.append(
@@ -462,33 +428,11 @@ def _profile_slot_entries(
     return entries
 
 
-def _profile_uses_separate_linux_source(target: str, profile: str) -> bool | None:
-    """Return whether a profile still needs a dedicated prepared Linux tree."""
-    try:
-        default = load_target(target)
-        selected = load_target(target, profile)
-        return any(
-            default["linux"][field] != selected["linux"][field]
-            for field in ("patches", "copies", "appends", "root")
-        )
-    except OSError, ValueError, SystemExit, KeyError, TypeError:
-        return None
-
-
 def _profile_cache_entries(cache: Path) -> list[InventoryEntry]:
     """Remove only orphaned profile-only cache slots in explicit CLI namespaces."""
     declared = _declared_profiles()
     return [
         *_profile_slot_entries(cache / "out", "out", declared),
-        *(
-            _profile_slot_entries(
-                cache / "linux" / "profiles",
-                "linux/profiles",
-                declared,
-                direct_profile=True,
-                source_projection=True,
-            )
-        ),
         *_profile_slot_entries(cache / "analysis" / "sparse", "analysis/sparse", declared),
     ]
 
@@ -550,50 +494,74 @@ def _profile_check_receipt_entries(cache: Path) -> list[InventoryEntry]:
     return entries
 
 
-def _linux_staging_entries(cache: Path) -> list[InventoryEntry]:
-    """Classify the fixed, always-disposable prepared-Linux extraction slots."""
-    root = cache / "linux" / "staging"
-    if not root.is_dir() or root.is_symlink():
+def _current_linux_sources() -> frozenset[str] | None:
+    """Read pinned Linux archives without requiring unrelated firmware or build inputs."""
+    try:
+        sources = load_toml(ROOT / "sources.lock.toml")
+        current: set[str] = set()
+        for platform in discover_platforms():
+            config = load_toml(ROOT / "platforms" / platform / "platform.toml")
+            source_lock = nonempty_string(
+                config["linux"]["source_lock"], f"platform {platform} Linux source lock"
+            )
+            current.add(sha256_value(sources[source_lock]["sha256"], source_lock))
+    except KeyError, OSError, TypeError, ValueError, SystemExit:
+        return None
+    return frozenset(current)
+
+
+def _linux_source_marker_matches(path: Path) -> bool:
+    """Recognize a managed archive slot before considering it disposable."""
+    marker = path / ".fplinux-base"
+    if marker.is_symlink() or not marker.is_file():
+        return False
+    try:
+        return marker.read_text().strip() == path.name
+    except OSError, UnicodeDecodeError:
+        return False
+
+
+def _linux_cache_entries(cache: Path) -> list[InventoryEntry]:
+    """Retain current shared Linux sources and remove managed retired or staging slots."""
+    linux = cache / "linux"
+    if not linux.is_dir() or linux.is_symlink():
         return []
+    current = _current_linux_sources()
     entries: list[InventoryEntry] = []
-    for target in sorted(root.iterdir(), key=lambda item: item.name):
-        if (
-            target.is_symlink()
-            or not target.is_dir()
-            or TARGET_NAME.fullmatch(target.name) is None
-        ):
+    for namespace in ("sources", "originals", "staging"):
+        root = linux / namespace
+        if not root.is_dir() or root.is_symlink():
             continue
-        default = target / "default"
-        if default.is_dir() and not default.is_symlink():
-            logical, allocated = _tree_size(default)
+        for path in sorted(root.iterdir(), key=lambda item: item.name):
+            identity = f"linux/{namespace}/{path.name}"
+            disposable = False
+            if (
+                path.is_symlink()
+                or not path.is_dir()
+                or _SOURCE_SHA256.fullmatch(path.name) is None
+                or (namespace != "staging" and not _linux_source_marker_matches(path))
+            ):
+                reason = "not a managed Linux source cache directory"
+            elif namespace == "staging":
+                reason = "disposable prepared Linux staging slot"
+                disposable = True
+            elif current is None:
+                reason = "current Linux source declarations are unavailable"
+            elif path.name in current:
+                reason = "current shared Linux source archive"
+            else:
+                reason = "retired shared Linux source archive"
+                disposable = True
+            logical, allocated = _tree_size(path) if disposable else (None, None)
             entries.append(
                 InventoryEntry(
-                    f"linux/staging/{target.name}/default",
-                    "candidate",
-                    "disposable prepared Linux staging slot",
+                    identity,
+                    "candidate" if disposable else "protected",
+                    reason,
                     logical,
                     allocated,
                 )
             )
-        profiles = target / "profiles"
-        if not profiles.is_dir() or profiles.is_symlink():
-            continue
-        for profile in sorted(profiles.iterdir(), key=lambda item: item.name):
-            if (
-                profile.is_dir()
-                and not profile.is_symlink()
-                and TARGET_NAME.fullmatch(profile.name)
-            ):
-                logical, allocated = _tree_size(profile)
-                entries.append(
-                    InventoryEntry(
-                        f"linux/staging/{target.name}/profiles/{profile.name}",
-                        "candidate",
-                        "disposable prepared Linux staging slot",
-                        logical,
-                        allocated,
-                    )
-                )
     return entries
 
 
@@ -785,7 +753,7 @@ def plan_prune(cache: Path) -> PrunePlan:
     entries.extend(_rootfs_entries(cache))
     entries.extend(_profile_cache_entries(cache))
     entries.extend(_profile_check_receipt_entries(cache))
-    entries.extend(_linux_staging_entries(cache))
+    entries.extend(_linux_cache_entries(cache))
     entries.extend(_log_retention_entries(cache))
     for namespace in sorted(_WORKSPACE_NAMESPACES):
         root = cache / namespace
@@ -844,11 +812,6 @@ def _candidate_destination(cache: Path, identity: str) -> Path:  # noqa: PLR0911
     ):
         return cache.joinpath(*parts)
     if (
-        len(parts) == 4
-        and parts[:2] == ["linux", "profiles"]
-        and TARGET_NAME.fullmatch(parts[2]) is not None
-        and TARGET_NAME.fullmatch(parts[3]) is not None
-    ) or (
         len(parts) == 5
         and parts[:2] == ["analysis", "sparse"]
         and TARGET_NAME.fullmatch(parts[2]) is not None
@@ -857,18 +820,10 @@ def _candidate_destination(cache: Path, identity: str) -> Path:  # noqa: PLR0911
     ):
         return cache.joinpath(*parts)
     if (
-        len(parts) == 4
-        and parts[:2] == ["linux", "staging"]
-        and TARGET_NAME.fullmatch(parts[2]) is not None
-        and parts[3] == "default"
-    ):
-        return cache.joinpath(*parts)
-    if (
-        len(parts) == 5
-        and parts[:2] == ["linux", "staging"]
-        and TARGET_NAME.fullmatch(parts[2]) is not None
-        and parts[3] == "profiles"
-        and TARGET_NAME.fullmatch(parts[4]) is not None
+        len(parts) == 3
+        and parts[0] == "linux"
+        and parts[1] in {"sources", "originals", "staging"}
+        and _SOURCE_SHA256.fullmatch(parts[2]) is not None
     ):
         return cache.joinpath(*parts)
     if (

@@ -20,7 +20,7 @@ from fplinux_cli.manifests.kernel import kconfig_values
 
 
 def skip_linux_source_tools(
-    _inputs: object, _archive: Path, _version: str, output: Path
+    _inputs: object, _archive: Path, _source: dict[str, Any], output: Path
 ) -> tuple[Path, ...]:
     """Replace patch/LLVM subprocesses in analyzer work-isolation scenarios."""
     output.write_text("")
@@ -47,7 +47,7 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
         self.fragment.write_text("CONFIG_BOARD=y\n")
         self.projected = self.root / "driver.c"
         self.projected.write_text("int test_driver;\n")
-        self.prepared_linux = PreparedLinuxState("a" * 64)
+        self.prepared_linux = PreparedLinuxState("a" * 64, "b" * 64)
         self.target_config: dict[str, Any] = {
             "identity": {
                 "display_name": "Test target",
@@ -100,6 +100,8 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
                 )
 
         def run_dtbs_check(_command: list[str], _target: str) -> str:
+            profile_root = output / "include/generated/fplinux/fplinux-root.dtsi"
+            self.assertIn("init=/init rdinit=/init", profile_root.read_text())
             return ""
 
         def target_source(_target: str, _relative: str) -> Path:

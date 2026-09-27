@@ -12,7 +12,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from fplinux_cli import alpine_state, firmware_inputs
+from fplinux_cli import alpine_state, common, firmware_inputs
 from fplinux_cli import prune as prune_module
 from fplinux_cli.environment.images import container_runtime_recipe_digest
 from fplinux_cli.image_state import ImageState, publish_image_state
@@ -53,6 +53,33 @@ def _cli_log(cache: Path, command: str, sequence: int, *, target: str | None = N
     )
     (path / "stage.log").write_text("log\n")
     return path
+
+
+def _linux_declarations(root: Path) -> None:
+    """Declare two independent platform archives and an unused source lock."""
+    (root / "sources.lock.toml").write_text(
+        f'[linux_a]\nsha256 = "{"a" * 64}"\n'
+        f'[linux_b]\nsha256 = "{"b" * 64}"\n'
+        f'[retired]\nsha256 = "{"c" * 64}"\n'
+    )
+    for platform, source in (("first", "linux_a"), ("second", "linux_b")):
+        directory = root / "platforms" / platform
+        directory.mkdir(parents=True)
+        (directory / "platform.toml").write_text(f'[linux]\nsource_lock = "{source}"\n')
+
+
+def _linux_archive_slots(cache: Path, digest: str) -> tuple[Path, Path]:
+    """Create the source tree and sparse originals owned by one archive."""
+    source = cache / "linux/sources" / digest
+    originals = cache / "linux/originals" / digest
+    for path in (source, originals):
+        path.mkdir(parents=True)
+        (path / ".fplinux-base").write_text(digest + "\n")
+    (source / "Makefile").write_text("upstream tree\n")
+    (originals / "files").mkdir()
+    (originals / "files/Makefile").write_text("upstream tree\n")
+    (originals / "index.json").write_text('{"Makefile": true}\n')
+    return source, originals
 
 
 class PruneTests(unittest.TestCase):
@@ -671,7 +698,6 @@ class PruneTests(unittest.TestCase):
             cache = Path(temporary) / ".cache"
             paths = (
                 cache / "out/deleted/profiles/host",
-                cache / "linux/profiles/deleted/host",
                 cache / "analysis/sparse/deleted/profiles/host",
             )
             for path in paths:
@@ -688,108 +714,107 @@ class PruneTests(unittest.TestCase):
                 result.removed,
                 (
                     "analysis/sparse/deleted/profiles/host",
-                    "linux/profiles/deleted/host",
                     "out/deleted/profiles/host",
                 ),
             )
             self.assertTrue(all(not path.exists() for path in paths))
 
-    def test_profile_linux_slot_is_disposable_after_it_reuses_the_default_source(self) -> None:
-        """Removing a profile patch cannot leave its former prepared Linux tree behind."""
+    def test_linux_archive_prune_preserves_every_current_platform_base(self) -> None:
+        """Only an archive no longer selected by any platform becomes disposable."""
         with tempfile.TemporaryDirectory() as temporary:
-            cache = Path(temporary) / ".cache"
-            slot = cache / "linux/profiles/phone/host"
-            slot.mkdir(parents=True)
-            (slot / "prepared").write_text("generated\n")
-            default: dict[str, object] = {
-                "linux": {
-                    "patches": [],
-                    "copies": [],
-                    "appends": [],
-                    "root": {"kind": "initramfs"},
-                }
-            }
-            profile: dict[str, object] = {
-                "linux": {
-                    "patches": [],
-                    "copies": [],
-                    "appends": [],
-                    "root": {"kind": "initramfs"},
-                }
-            }
-
-            def load_target(_target: str, selected: str | None = None) -> dict[str, object]:
-                return profile if selected is not None else default
-
+            root = Path(temporary)
+            cache = root / ".cache"
+            _linux_declarations(root)
+            current = (
+                *_linux_archive_slots(cache, "a" * 64),
+                *_linux_archive_slots(cache, "b" * 64),
+            )
+            retired = _linux_archive_slots(cache, "c" * 64)
             with (
-                mock.patch.object(prune_module, "discover_targets", return_value=("phone",)),
-                mock.patch.object(prune_module, "discover_profiles", return_value=("host",)),
-                mock.patch.object(prune_module, "load_target", side_effect=load_target),
+                mock.patch.object(prune_module, "ROOT", root),
+                mock.patch.object(common, "ROOT", root),
+            ):
+                plan = plan_prune(cache)
+                result = apply_prune(cache)
+
+            decisions = {entry.path: entry.action for entry in plan.entries}
+            for path in current:
+                self.assertEqual(decisions[path.relative_to(cache).as_posix()], "protected")
+                self.assertTrue(path.is_dir())
+            self.assertEqual(
+                result.removed,
+                (f"linux/originals/{'c' * 64}", f"linux/sources/{'c' * 64}"),
+            )
+            self.assertTrue(all(not path.exists() for path in retired))
+
+    def test_unavailable_linux_source_declarations_protect_existing_bases(self) -> None:
+        """An unresolved source lock cannot make a managed Linux archive disposable."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cache = root / ".cache"
+            _linux_declarations(root)
+            (root / "platforms/second/platform.toml").write_text(
+                '[linux]\nsource_lock = "missing"\n'
+            )
+            paths = _linux_archive_slots(cache, "c" * 64)
+            with (
+                mock.patch.object(prune_module, "ROOT", root),
+                mock.patch.object(common, "ROOT", root),
+            ):
+                plan = plan_prune(cache)
+                result = apply_prune(cache)
+
+            self.assertEqual(result.removed, ())
+            self.assertTrue(all(entry.action == "protected" for entry in plan.entries))
+            self.assertTrue(all(path.is_dir() for path in paths))
+
+    def test_linux_prune_preserves_unowned_directories(self) -> None:
+        """A SHA-shaped name alone does not claim source trees or originals."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cache = root / ".cache"
+            _linux_declarations(root)
+            paths = (
+                cache / "linux/sources" / ("d" * 64),
+                cache / "linux/originals" / ("d" * 64),
+                cache / "linux/sources/manual",
+                cache / "linux/staging/manual",
+            )
+            for path in paths:
+                path.mkdir(parents=True)
+                (path / "notes").write_text("keep\n")
+            with (
+                mock.patch.object(prune_module, "ROOT", root),
+                mock.patch.object(common, "ROOT", root),
             ):
                 result = apply_prune(cache)
 
-            self.assertEqual(result.removed, ("linux/profiles/phone/host",))
-            self.assertFalse(slot.exists())
-
-    def test_external_root_profile_keeps_its_generated_linux_tree(self) -> None:
-        """Generated external-root bootargs require a dedicated prepared source."""
-        with tempfile.TemporaryDirectory() as temporary:
-            cache = Path(temporary) / ".cache"
-            slot = cache / "linux/profiles/phone/microsd"
-            slot.mkdir(parents=True)
-            (slot / "prepared").write_text("generated\n")
-            base_linux: dict[str, object] = {"patches": [], "copies": [], "appends": []}
-            default: dict[str, object] = {"linux": {**base_linux, "root": {"kind": "initramfs"}}}
-            profile: dict[str, object] = {
-                "linux": {
-                    **base_linux,
-                    "root": {
-                        "kind": "external",
-                        "filesystem": "ext4",
-                        "partuuid": "46504c58-02",
-                        "wait_seconds": 10,
-                    },
-                }
-            }
-
-            def load_target(_target: str, selected: str | None = None) -> dict[str, object]:
-                return profile if selected is not None else default
-
-            with (
-                mock.patch.object(prune_module, "discover_targets", return_value=("phone",)),
-                mock.patch.object(prune_module, "discover_profiles", return_value=("microsd",)),
-                mock.patch.object(prune_module, "load_target", side_effect=load_target),
-            ):
-                plan = plan_prune(cache)
-
-            entry = next(
-                item for item in plan.entries if item.path == "linux/profiles/phone/microsd"
-            )
-            self.assertEqual(entry.action, "protected")
-            self.assertEqual(entry.reason, "declared profile cache")
-            self.assertTrue(slot.exists())
+            self.assertEqual(result.removed, ())
+            self.assertTrue(all((path / "notes").read_text() == "keep\n" for path in paths))
 
     def test_fixed_linux_staging_slots_are_disposable(self) -> None:
-        """Interrupted preparation leaves only exact staging paths that prune may remove."""
+        """An extraction slot is disposable even while its archive remains current."""
         with tempfile.TemporaryDirectory() as temporary:
-            cache = Path(temporary) / ".cache"
-            default = cache / "linux/staging/phone/default"
-            profile = cache / "linux/staging/phone/profiles/host"
-            for path in (default, profile):
+            root = Path(temporary)
+            cache = root / ".cache"
+            _linux_declarations(root)
+            current = cache / "linux/staging" / ("a" * 64)
+            retired = cache / "linux/staging" / ("c" * 64)
+            for path in (current, retired):
                 path.mkdir(parents=True)
                 (path / "partial").write_text("partial\n")
-
-            result = apply_prune(cache)
+            with (
+                mock.patch.object(prune_module, "ROOT", root),
+                mock.patch.object(common, "ROOT", root),
+            ):
+                result = apply_prune(cache)
 
             self.assertEqual(
                 result.removed,
-                (
-                    "linux/staging/phone/default",
-                    "linux/staging/phone/profiles/host",
-                ),
+                (f"linux/staging/{'a' * 64}", f"linux/staging/{'c' * 64}"),
             )
-            self.assertFalse(default.exists())
-            self.assertFalse(profile.exists())
+            self.assertFalse(current.exists())
+            self.assertFalse(retired.exists())
 
     def test_old_workspace_directory_is_disposable_without_format_support(self) -> None:
         """Delete an old directory without reading or adopting its marker format."""

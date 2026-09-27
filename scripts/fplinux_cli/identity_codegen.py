@@ -10,7 +10,6 @@ from typing import Any
 from .identity import IdentityError, validate_platform_name
 
 BOOTSTRAP_IDENTITY_HEADER = "generated/fplinux-bootstrap-identity.h"
-LINUX_IDENTITY_DTSI = "fplinux-target-identity.dtsi"
 BOOT_SCREEN_IDENTITY_BYTES = 32
 _RECORD_PREFIX = re.compile(r"[A-Z0-9][A-Z0-9_]*\Z")
 _SPDX_TAG = "SPDX" + "-License-Identifier"
@@ -63,6 +62,11 @@ def bootstrap_identity_header(target_identity: dict[str, Any], prefix: str) -> b
     ).encode("ascii")
 
 
+def linux_identity_dtsi_name(target: str) -> str:
+    """Keep each board's generated DT identity distinct in a shared source tree."""
+    return f"fplinux-{target}-identity.dtsi"
+
+
 def linux_identity_dtsi(
     target_identity: dict[str, Any], platform_identity: dict[str, Any]
 ) -> bytes:
@@ -91,28 +95,40 @@ def linux_platform_identity_header(platform_identity: dict[str, Any]) -> bytes:
     ).encode("ascii")
 
 
-def linux_machine_binding_path(target_identity: dict[str, Any]) -> str:
+def linux_machine_binding_path(target_identity: dict[str, Any], *, arch: str) -> str:
     """Return the generated binding path owned by the exact machine compatible."""
-    return f"Documentation/devicetree/bindings/arm/{target_identity['compatible']}.yaml"
+    arch = validate_platform_name(arch, "Linux architecture")
+    directory = "arm" if arch == "arm64" else arch
+    return f"Documentation/devicetree/bindings/{directory}/{target_identity['compatible']}.yaml"
 
 
 def linux_machine_binding(
-    target_identity: dict[str, Any], platform_identity: dict[str, Any]
+    target_identity: dict[str, Any], platform_identity: dict[str, Any], *, arch: str
 ) -> bytes:
     """Generate the exact root-node binding for one target/platform pair."""
     display_name = target_identity["display_name"]
     platform_name = platform_identity["display_name"]
     compatible = target_identity["compatible"]
     fallback = platform_identity["compatible"]
+    binding = linux_machine_binding_path(target_identity, arch=arch).removeprefix(
+        "Documentation/devicetree/bindings/"
+    )
     return (
         f"# {_SPDX_TAG}: (GPL-2.0-only OR BSD-2-Clause)\n"
         "%YAML 1.2\n"
         "---\n"
-        f"$id: http://devicetree.org/schemas/arm/{compatible}.yaml#\n"
+        f"$id: http://devicetree.org/schemas/{binding}#\n"
         "$schema: http://devicetree.org/meta-schemas/core.yaml#\n\n"
         f"title: {display_name} on {platform_name}\n\n"
         "maintainers:\n"
         "  - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>\n\n"
+        "select:\n"
+        "  properties:\n"
+        "    compatible:\n"
+        "      contains:\n"
+        f"        const: {compatible}\n"
+        "  required:\n"
+        "    - compatible\n\n"
         "properties:\n"
         "  $nodename:\n"
         "    const: '/'\n"

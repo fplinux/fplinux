@@ -8,7 +8,7 @@
 #include "ums9117.dtsi"
 #include "ums9117-sc2720.dtsi"
 #include "ums9117-musb-cold.dtsi"
-#include "fplinux-target-identity.dtsi"
+#include "fplinux-nokia-ta1618-identity.dtsi"
 #include "nokia-ta1618-nand-readonly.dtsi"
 #include "nokia-ta1618-bluetooth.dtsi"
 

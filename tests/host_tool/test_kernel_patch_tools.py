@@ -9,17 +9,17 @@ import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from fplinux_cli.common import ROOT
+from fplinux_cli.build import inputs as inputs_build
+from fplinux_cli.common import ROOT, sha256_file
 from fplinux_cli.kernel_patches import (
-    LinuxInput,
     binding_paths,
     check_linux_changes,
-    file_contents,
     format_context,
-    project_changes,
     source_diff,
 )
+from fplinux_cli.linux_projection import LinuxInput, file_contents, project_changes
 from fplinux_cli.workspace import WorkspaceFile
 
 
@@ -31,7 +31,9 @@ class KernelPatchToolTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+        self.enterContext(mock.patch.object(inputs_build, "CACHE", self.root / "cache"))
         self.base = {
+            "Makefile": WorkspaceFile("Makefile", b"VERSION = fixture\n", 0o644),
             ".clang-format": WorkspaceFile(
                 ".clang-format", (ROOT / ".clang-format").read_bytes(), 0o644
             ),
@@ -143,8 +145,10 @@ class KernelPatchToolTests(unittest.TestCase):
         """The check path catches the same C formatting defect as the formatter."""
         step = self.patch("bad.patch", self.base, self.changed_source(b" return  7;"))
         original = step.source.read_bytes()
+        archive = self.archive()
+        source = {"version": "fixture", "sha256": sha256_file(archive)}
         with self.assertRaisesRegex(SystemExit, "Linux patch needs formatting: bad.patch"):
-            check_linux_changes([step], self.archive(), "fixture", self.root / "config.patch")
+            check_linux_changes([step], archive, source, self.root / "config.patch")
         self.assertEqual(step.source.read_bytes(), original)
 
     def test_append_is_checked_as_a_change_to_destination_kconfig(self) -> None:
@@ -153,7 +157,9 @@ class KernelPatchToolTests(unittest.TestCase):
         fragment.write_bytes(b'config APPENDED\n\tbool "Appended"\n')
         step = LinuxInput("platform-append", "feature.fragment", "drivers/Kconfig", fragment)
         delta = self.root / "config.patch"
-        check_linux_changes([step], self.archive(), "fixture", delta)
+        archive = self.archive()
+        source = {"version": "fixture", "sha256": sha256_file(archive)}
+        check_linux_changes([step], archive, source, delta)
         generated = LinuxInput("platform-patch", "config.patch", "", delta)
         destination = self.root / "result"
         list(project_changes(self.base, [generated], destination))

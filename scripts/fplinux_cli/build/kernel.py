@@ -294,6 +294,7 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
         else:
             kbuild_state.discard_success_receipt(work)
             kbuild_state.prepare_output(work, output)
+            linux_state.write_profile_root(output, target_config)
             if initramfs_record is not None:
                 kbuild_state.materialize_initramfs_input(work, rootfs, plan)
             shutil.copyfile(defconfig, output / ".config")

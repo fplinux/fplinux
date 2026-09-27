@@ -1,29 +1,32 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Prepare the selected target Linux source tree."""
+"""Prepare compatible Linux integrations in one shared upstream source tree."""
 
 from __future__ import annotations
 
 import json
-import shutil
-import tarfile
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fplinux_cli import linux_state, profile_layout
+from fplinux_cli import common, linux_state, profile_layout
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import sources as sources_build
 from fplinux_cli.common import fail, sha256_bytes, sha256_file
 from fplinux_cli.identity_codegen import (
-    LINUX_IDENTITY_DTSI,
     linux_identity_dtsi,
+    linux_identity_dtsi_name,
     linux_machine_binding,
     linux_machine_binding_path,
     linux_platform_identity_header,
 )
+from fplinux_cli.linux_projection import LinuxInput, file_contents, project_changes
 from fplinux_cli.linux_state import LinuxStateError, PreparedLinuxState
-from fplinux_cli.manifests.targets import load_target
+from fplinux_cli.manifests.linux import discover_linux_targets, is_shared_linux_operation
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Sequence
+
+    from fplinux_cli.manifests.linux import LinuxTarget
 
 
 def integration_inputs(
@@ -71,31 +74,25 @@ def integration_inputs(
     return result
 
 
-PROFILE_ROOT_DTSI = "fplinux-root.dtsi"
-
-
 def generated_linux_files(
-    target_config: dict[str, Any], platform: dict[str, Any]
+    target: str, target_config: dict[str, Any], platform: dict[str, Any]
 ) -> dict[str, bytes]:
     """Return exact generated Linux files keyed by destination."""
     target_identity = target_config["identity"]
     platform_identity = platform["identity"]
     platform_linux = platform["linux"]
     dts_directory = platform_linux["dts_directory"]
-    files = {
-        f"{dts_directory}/{LINUX_IDENTITY_DTSI}": linux_identity_dtsi(
+    return {
+        f"{dts_directory}/{linux_identity_dtsi_name(target)}": linux_identity_dtsi(
             target_identity, platform_identity
         ),
         platform_linux["platform_identity_header"]: linux_platform_identity_header(
             platform_identity
         ),
-        linux_machine_binding_path(target_identity): linux_machine_binding(
-            target_identity, platform_identity
-        ),
+        linux_machine_binding_path(
+            target_identity, arch=platform_linux["arch"]
+        ): linux_machine_binding(target_identity, platform_identity, arch=platform_linux["arch"]),
     }
-    root = target_config["linux"]["root"]
-    files[f"{dts_directory}/{PROFILE_ROOT_DTSI}"] = profile_layout.root_bootargs_dtsi(root)
-    return files
 
 
 def linux_recipe_digest(
@@ -123,10 +120,13 @@ def linux_recipe_digest(
                 target, target_config, platform
             )
         ],
+        "root_bootargs": sha256_bytes(
+            profile_layout.root_bootargs_dtsi(target_config["linux"]["root"])
+        ),
         "generated": [
             {"destination": destination, "sha256": sha256_bytes(contents)}
             for destination, contents in sorted(
-                generated_linux_files(target_config, platform).items()
+                generated_linux_files(target, target_config, platform).items()
             )
         ],
     }
@@ -134,78 +134,118 @@ def linux_recipe_digest(
     return sha256_bytes(encoded)
 
 
-def profile_linux_source_path(parent: Path, target: str, profile: str) -> Path:
-    """Create a profile-only prepared-Linux slot beside, never inside, the default tree."""
-    root = inputs_build.require_directory(parent.parent)
-    source = root
-    for component in ("profiles", target, profile):
-        source /= component
-        if source.exists():
-            inputs_build.require_directory(source)
-        else:
-            source.mkdir()
-    return inputs_build.require_directory(source)
+def shared_integration(
+    targets: tuple[LinuxTarget, ...],
+) -> tuple[tuple[LinuxInput, ...], dict[str, bytes]]:
+    """Merge ordered integrations, rejecting ambiguous file owners."""
+    inputs = []
+    seen: set[LinuxInput] = set()
+    copies: dict[str, LinuxInput] = {}
+    generated: dict[str, bytes] = {}
+    for target in targets:
+        if target.config.get("microsd", {}).get("linux_patches"):
+            fail(f"target {target.name}: profile-specific Linux patches cannot share source")
+        for values in integration_inputs(target.name, target.config, target.platform):
+            step = LinuxInput(*values)
+            if step in seen:
+                continue
+            seen.add(step)
+            if step.operation.endswith("copy"):
+                previous = copies.get(step.destination)
+                if previous is not None:
+                    fail(
+                        f"Linux copy destination has multiple owners: {step.destination} "
+                        f"({previous.identity}, {step.identity})"
+                    )
+                copies[step.destination] = step
+            inputs.append(step)
+        files = generated_linux_files(target.name, target.config, target.platform)
+        for name, contents in files.items():
+            if name in generated and generated[name] != contents:
+                fail(f"Linux generated destination has conflicting owners: {name}")
+            generated[name] = contents
+    # Every platform patch/copy precedes board patches; all append fragments apply once.
+    order = {
+        "platform-patch": 0,
+        "platform-copy": 1,
+        "target-copy": 2,
+        "target-patch": 3,
+        "platform-append": 4,
+        "target-append": 5,
+    }
+    inputs.sort(key=lambda step: order[step.operation])
+    return tuple(inputs), generated
 
 
-def discard_profile_linux_source(parent: Path, target: str, profile: str) -> None:
-    """Discard a stale dedicated source tree after a profile now shares default sources."""
-    root = inputs_build.require_directory(parent.parent)
-    profiles = root / "profiles"
-    if profiles.is_symlink():
-        fail(f"profile Linux source root must not be a symlink: {profiles}")
-    if not profiles.exists():
-        return
-    inputs_build.require_directory(profiles)
-    target_slot = profiles / target
-    if target_slot.is_symlink():
-        fail(f"profile Linux target slot must not be a symlink: {target_slot}")
-    if not target_slot.exists():
-        return
-    inputs_build.require_directory(target_slot)
-    source = target_slot / profile
-    if source.is_symlink():
-        fail(f"profile Linux source slot must not be a symlink: {source}")
-    if not source.exists():
-        return
-    if not source.is_dir():
-        fail(f"profile Linux source slot is invalid: {source}")
-    shutil.rmtree(source)
+def shared_recipe_digest(
+    source_sha256: str, inputs: Sequence[LinuxInput], generated: dict[str, bytes]
+) -> str:
+    """Hash the bounded aggregate projection, independently of a selected build profile."""
+    payload = {
+        "source_sha256": source_sha256,
+        "integration": [
+            {
+                "operation": step.operation,
+                "source": step.identity,
+                "destination": step.destination,
+                "sha256": sha256_file(step.source),
+            }
+            for step in inputs
+        ],
+        "generated": [
+            {"destination": name, "sha256": sha256_bytes(contents)}
+            for name, contents in sorted(generated.items())
+        ],
+    }
+    return sha256_bytes(common.canonical_json_bytes(payload))
 
 
-def prepared_linux_staging_path(parent: Path, target: str, profile: str | None) -> Path:
-    """Create one empty, bounded staging slot for a default or named profile source tree."""
-    root = inputs_build.require_directory(parent.parent)
-    staging = root
-    components: tuple[str, ...]
-    if profile is None:
-        components = ("staging", target, "default")
-    else:
-        components = ("staging", target, "profiles", profile)
-    for component in components:
-        staging /= component
-        if staging.is_symlink():
-            fail(f"prepared Linux staging slot must not be a symlink: {staging}")
-        if staging.exists():
-            if not staging.is_dir():
-                fail(f"prepared Linux staging slot is invalid: {staging}")
-        else:
-            staging.mkdir()
-    if staging.is_symlink() or not staging.is_dir():
-        fail(f"prepared Linux staging slot is invalid: {staging}")
-    shutil.rmtree(staging)
-    staging.mkdir()
-    return staging
+def selected_recipe_digest(
+    recipe: str,
+    selected: Sequence[LinuxInput],
+    inputs: Sequence[LinuxInput],
+) -> str:
+    """Use the same declared shared-input contract as the early workspace receipt."""
+    shared = []
+    for step in inputs:
+        if step in selected:
+            continue
+        entry = {
+            "operation": step.operation,
+            "source": step.identity,
+            "destination": step.destination,
+        }
+        if is_shared_linux_operation(step.operation):
+            entry["sha256"] = sha256_file(step.source)
+        shared.append(entry)
+    return sha256_bytes(common.canonical_json_bytes({"selected": recipe, "shared": shared}))
 
 
-def discard_prepared_linux_staging(staging: Path) -> None:
-    """Discard only one real staging slot after publish or a failed preparation."""
-    if staging.is_symlink():
-        fail(f"prepared Linux staging slot must not be a symlink: {staging}")
-    if not staging.exists():
-        return
-    if not staging.is_dir():
-        fail(f"prepared Linux staging slot is invalid: {staging}")
-    shutil.rmtree(staging)
+def publish_projection(
+    base: linux_state.LinuxBase,
+    inputs: Sequence[LinuxInput],
+    generated: dict[str, bytes],
+    state: PreparedLinuxState,
+) -> None:
+    """Compute a complete small projection before updating its changed source files."""
+    destinations = {name for step in inputs for name in step.destinations()} | generated.keys()
+    # Retained originals restore paths that a removed integration no longer owns.
+    names = destinations | linux_state.original_paths(base).keys() | {".clang-format"}
+    originals = linux_state.read_originals(base, names)
+    with tempfile.TemporaryDirectory(prefix="fplinux-linux-projection-") as temporary:
+        projection = Path(temporary)
+        for _step, _before, _after in project_changes(originals, inputs, projection):
+            pass
+        sources_build.write_generated_files(projection, generated, owner="shared Linux")
+        projected = file_contents(projection, sorted(names))
+        linux_state.invalidate_prepared_linux(base.source)
+        for name in sorted(names):
+            source = projected.get(name)
+            if source is None:
+                (base.source / name).unlink(missing_ok=True)
+            else:
+                linux_state.write_changed_file(base.source / name, source.contents, source.mode)
+        linux_state.seal_prepared_linux(base.source, state)
 
 
 def prepare_linux(
@@ -214,76 +254,39 @@ def prepare_linux(
     target_config: dict[str, Any],
     platform: dict[str, Any],
 ) -> tuple[Path, PreparedLinuxState]:
-    """Create or exactly reuse the one receipt-validated Linux tree for a target."""
-    platform_linux = platform["linux"]
-    linux = sources_build.source_lock_entry(sources, platform_linux["source_lock"])
-    recipe = linux_recipe_digest(linux, target, target_config, platform)
-    version = linux["version"]
-    source_digest = inputs_build.require_sha256(linux.get("sha256"), "Linux source")
-    platform_patches = [
-        inputs_build.require_file(inputs_build.root_source(relative))
-        for relative in platform_linux["patches"]
-    ]
-    target_patches = [
-        inputs_build.require_file(inputs_build.target_source(target, relative))
-        for relative in target_config["linux"]["patches"]
-    ]
-    copies = [
-        *sources_build.resolve_steps(target, platform_linux["copies"], platform_owned=True),
-        *sources_build.resolve_steps(
-            target, target_config["linux"]["copies"], platform_owned=False
-        ),
-    ]
-    appends = [
-        *sources_build.resolve_steps(target, platform_linux["appends"], platform_owned=True),
-        *sources_build.resolve_steps(
-            target, target_config["linux"]["appends"], platform_owned=False
-        ),
-    ]
-    generated_files = generated_linux_files(target_config, platform)
+    """Prepare all compatible boards in one upstream source slot before its consumers run."""
+    source_lock = sources_build.source_lock_entry(sources, platform["linux"]["source_lock"])
+    digest = inputs_build.require_sha256(source_lock.get("sha256"), "Linux source")
+    targets = discover_linux_targets(common.ROOT, sources, digest)
+    selected = next((item for item in targets if item.name == target), None)
+    if selected is None:
+        fail(f"selected target has no shared Linux integration: {target}")
+    selected_inputs = integration_inputs(target, target_config, platform)
+    if selected_inputs != integration_inputs(target, selected.config, selected.platform):
+        fail(f"target {target}: profile-specific Linux integration cannot share source")
+    inputs, generated = shared_integration(targets)
     try:
-        parent = linux_state.ensure_sources_directory(inputs_build.CACHE)
+        base = linux_state.ensure_linux_base(inputs_build.CACHE, source_lock)
+        original_paths = linux_state.original_paths(base)
+        names = {name for step in inputs for name in step.destinations()} | generated.keys()
+        missing = (names | {".clang-format"}) - original_paths.keys()
+        if missing:
+            linux_state.read_originals(base, missing)
+            original_paths = linux_state.original_paths(base)
+        for step in inputs:
+            if step.operation == "target-copy" and original_paths[step.destination]:
+                fail(
+                    f"target Linux copy must add a new board file: {step.destination}; "
+                    "use a patch or platform copy to change upstream source"
+                )
+        recipe = selected_recipe_digest(
+            linux_recipe_digest(source_lock, target, target_config, platform),
+            tuple(LinuxInput(*step) for step in selected_inputs),
+            inputs,
+        )
+        state = PreparedLinuxState(recipe, shared_recipe_digest(digest, inputs, generated))
+        if linux_state.inspect_prepared_linux(base.source, state) is None:
+            publish_projection(base, inputs, generated, state)
     except LinuxStateError as error:
         fail(str(error))
-    source = parent / target
-    profile = inputs_build.selected_profile(target_config)
-    if profile is not None:
-        default_config = load_target(target)
-        default_recipe = linux_recipe_digest(linux, target, default_config, platform)
-        if default_recipe != recipe:
-            source = profile_linux_source_path(parent, target, profile)
-        else:
-            discard_profile_linux_source(parent, target, profile)
-
-    def apply_projection(destination: Path) -> None:
-        sources_build.apply_patches(destination, platform_patches)
-        sources_build.copy_steps(destination, copies)
-        sources_build.apply_patches(destination, target_patches)
-        sources_build.append_steps(destination, appends)
-        sources_build.write_generated_files(destination, generated_files, owner="Linux projection")
-
-    prepared = linux_state.inspect_prepared_linux(source, recipe)
-    if prepared is not None:
-        return source, prepared
-
-    archive = sources_build.fetch(
-        linux.get("url"),
-        source_digest,
-        inputs_build.CACHE / "downloads/linux",
-        f"linux-{version}.tar.xz",
-    )
-    staging = prepared_linux_staging_path(parent, target, profile)
-    try:
-        with tarfile.open(archive, "r:xz") as tar:
-            tar.extractall(staging, filter="data")
-        extracted = staging / f"linux-{version}"
-        inputs_build.require_file(extracted / "Makefile")
-        try:
-            apply_projection(extracted)
-            state = linux_state.seal_prepared_linux(extracted, recipe)
-            linux_state.publish_prepared_linux(source, extracted)
-        except LinuxStateError as error:
-            fail(str(error))
-    finally:
-        discard_prepared_linux_staging(staging)
-    return source, state
+    return base.source, state

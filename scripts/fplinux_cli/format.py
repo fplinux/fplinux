@@ -25,6 +25,7 @@ from .environment.kern import (
     setup,
 )
 from .kernel_patches import linux_contexts
+from .linux_state import inspect_linux_base
 from .output import RunReporter
 from .source_formats import SourceFormats, classify_source_formats
 from .workspace import (
@@ -207,13 +208,14 @@ def formatter_commands(
     return tuple(commands)
 
 
-def _container_command(
+def _container_command(  # noqa: PLR0913 -- projection and optional cache mounts stay explicit.
     kern: str,
     *,
     image: str,
     workspace: Path,
     formatter: list[str],
     archives: Path | None = None,
+    linux_cache: Path | None = None,
 ) -> list[str]:
     return [
         kern,
@@ -242,6 +244,7 @@ def _container_command(
         "--env",
         "PYTHONDONTWRITEBYTECODE=1",
         *(["--volume", f"{archives}:/linux-archives:ro"] if archives is not None else []),
+        *(["--volume", f"{linux_cache}:/cache/linux"] if linux_cache is not None else []),
         "--init",
         "--quiet",
         "--",
@@ -335,12 +338,20 @@ def format_sources(values: Sequence[str]) -> None:
     contexts = linux_contexts(patches) if patches else ()
     snapshot = workspace_snapshot(inventory)
     archives = ROOT / ".cache/downloads/linux"
+    linux_cache = ROOT / ".cache/linux"
     fetched: set[str] = set()
     for context in contexts:
         source = context.source
-        if source["sha256"] not in fetched:
+        if (
+            source["sha256"] not in fetched
+            and inspect_linux_base(ROOT / ".cache", source["sha256"]) is None
+        ):
             fetch(source["url"], source["sha256"], archives, f"linux-{source['version']}.tar.xz")
             fetched.add(source["sha256"])
+    if patches:
+        if linux_cache.is_symlink() or (linux_cache.exists() and not linux_cache.is_dir()):
+            fail(f"invalid Linux cache directory: {linux_cache}")
+        linux_cache.mkdir(parents=True, exist_ok=True)
     container_lock = load_container_lock()
     image_recipe = container_image_recipe_digest(container_lock)
     image = container_image_reference(container_lock, image_recipe)
@@ -376,6 +387,7 @@ def format_sources(values: Sequence[str]) -> None:
                         image=image,
                         workspace=projection,
                         archives=archives,
+                        linux_cache=linux_cache,
                         formatter=[
                             "python3",
                             "-m",

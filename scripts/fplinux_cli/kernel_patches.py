@@ -7,44 +7,33 @@ import argparse
 import difflib
 import re
 import shutil
-import stat
 import subprocess
 import sys
-import tarfile
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
+from fplinux_cli import linux_state
+from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build.linux import integration_inputs
-from fplinux_cli.build.sources import append_steps, apply_patches, copy_steps
+from fplinux_cli.build.sources import apply_patches
+from fplinux_cli.linux_projection import (
+    LinuxInput,
+    file_contents,
+    project_changes,
+    write_files,
+)
 from fplinux_cli.manifests.paths import discover_profiles, discover_targets
 from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.targets import load_target
-from fplinux_cli.manifests.values import relative_value
 
 from .common import ROOT, fail, load_toml
-from .workspace import WorkspaceFile
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
-    from typing import BinaryIO
+    from collections.abc import Sequence
 
-
-@dataclass(frozen=True)
-class LinuxInput:
-    """One existing build integration operation, in its declared order."""
-
-    operation: str
-    identity: str
-    destination: str
-    source: Path
-
-    def destinations(self) -> tuple[str, ...]:
-        """Resolve patch paths or the explicit copy/append destination."""
-        if self.operation.endswith("patch"):
-            return patch_destinations(self.source)
-        return (self.destination,)
+    from .workspace import WorkspaceFile
 
 
 @dataclass(frozen=True)
@@ -89,84 +78,18 @@ def linux_contexts(selected: frozenset[str]) -> tuple[LinuxContext, ...]:
     return tuple(contexts)
 
 
-def patch_destinations(path: Path, *, include_deleted: bool = True) -> tuple[str, ...]:
-    """Read paths from a text patch, accounting for complete hunk boundaries."""
-    result: list[str] = []
-    old_remaining = new_remaining = 0
-    old_path = ""
-    hunk = re.compile(r"^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
-    for line in path.read_text().splitlines():
-        if old_remaining or new_remaining:
-            if line.startswith("\\"):
-                continue
-            marker = line[:1] or " "
-            if marker in {" ", "-"}:
-                old_remaining -= 1
-            if marker in {" ", "+"}:
-                new_remaining -= 1
-            if marker not in {" ", "-", "+"} or min(old_remaining, new_remaining) < 0:
-                fail(f"malformed Linux patch hunk: {path}")
-            continue
-        match = hunk.match(line)
-        if match:
-            old_remaining = int(match.group(1) or "1")
-            new_remaining = int(match.group(2) or "1")
-        elif line.startswith("--- "):
-            old_path = line[4:].split("\t", 1)[0]
-        elif line.startswith("+++ ") and old_path:
-            new_path = line[4:].split("\t", 1)[0]
-            if new_path == "/dev/null" and not include_deleted:
-                old_path = ""
-                continue
-            name = old_path if new_path == "/dev/null" else new_path
-            prefix, separator, destination = name.partition("/")
-            if not separator or prefix in {"", ".."}:
-                fail(f"Linux patch destination has no relative -p1 prefix: {path}")
-            result.append(relative_value(destination, "Linux patch destination"))
-            old_path = ""
-    if old_remaining or new_remaining:
-        fail(f"incomplete Linux patch hunk: {path}")
-    return tuple(dict.fromkeys(result))
-
-
-def read_base(archive: Path, version: str, paths: set[str]) -> dict[str, WorkspaceFile]:
-    """Read only affected regular files and the pinned kernel style configuration."""
-    wanted = paths | {".clang-format"}
-    prefix = f"linux-{version}/"
-    result = {}
-    with tarfile.open(archive, "r|*") as source:
-        for member in source:
-            name = member.name.removeprefix(prefix)
-            if not member.name.startswith(prefix) or name not in wanted:
-                continue
-            if not member.isfile():
-                fail(f"Linux formatter input is not a regular file: {name}")
-            stream = cast("BinaryIO", source.extractfile(member))
-            with stream:
-                result[name] = WorkspaceFile(name, stream.read(), stat.S_IMODE(member.mode))
+def read_base(
+    archive: Path, source_lock: dict[str, Any], paths: set[str]
+) -> dict[str, WorkspaceFile]:
+    """Read affected upstream originals from the shared extracted source slot."""
+    try:
+        base = linux_state.ensure_linux_base(inputs_build.CACHE, source_lock, archive=archive)
+        result = linux_state.read_originals(base, paths | {".clang-format"})
+    except linux_state.LinuxStateError as error:
+        fail(str(error))
     if ".clang-format" not in result:
-        fail("pinned Linux archive has no .clang-format")
+        fail("pinned Linux source has no .clang-format")
     return result
-
-
-def write_files(root: Path, files: dict[str, WorkspaceFile]) -> None:
-    """Materialize a small source projection, not an additional Linux checkout."""
-    for name, source in files.items():
-        path = root / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(source.contents)
-        path.chmod(source.mode)
-
-
-def file_contents(root: Path, names: Sequence[str]) -> dict[str, WorkspaceFile]:
-    """Capture existing files, preserving absence for additions and deletions."""
-    return {
-        name: WorkspaceFile(
-            name, (root / name).read_bytes(), stat.S_IMODE((root / name).stat().st_mode)
-        )
-        for name in names
-        if (root / name).is_file()
-    }
 
 
 def source_diff(
@@ -293,25 +216,6 @@ def regenerate_patch(
     return patch
 
 
-def project_changes(
-    base: dict[str, WorkspaceFile],
-    inputs: Sequence[LinuxInput],
-    root: Path,
-) -> Iterator[tuple[LinuxInput, dict[str, WorkspaceFile], dict[str, WorkspaceFile]]]:
-    """Replay the same patch/copy/append sequence used by the public build."""
-    write_files(root, base)
-    for step in inputs:
-        names = step.destinations()
-        before = file_contents(root, names)
-        if step.operation.endswith("patch"):
-            apply_patches(root, [step.source])
-        elif step.operation.endswith("copy"):
-            copy_steps(root, [(step.source, step.destination)])
-        else:
-            append_steps(root, [(step.source, step.destination)])
-        yield step, before, file_contents(root, names)
-
-
 def format_context(
     base: dict[str, WorkspaceFile],
     inputs: Sequence[LinuxInput],
@@ -347,12 +251,14 @@ def format_linux_patches(selected: frozenset[str], archives: Path) -> None:
     """Update only selected patches after every consuming context succeeds."""
     contexts = linux_contexts(selected)
     outputs: dict[str, bytes] = {}
-    for source_name in {context.source["version"] for context in contexts}:
-        matching = [context for context in contexts if context.source["version"] == source_name]
+    for digest in sorted({context.source["sha256"] for context in contexts}):
+        matching = [context for context in contexts if context.source["sha256"] == digest]
+        source = matching[0].source
+        source_name = source["version"]
         paths = {
             name for context in matching for step in context.inputs for name in step.destinations()
         }
-        base = read_base(archives / f"linux-{source_name}.tar.xz", source_name, paths)
+        base = read_base(archives / f"linux-{source_name}.tar.xz", source, paths)
         for context in matching:
             print(f"Linux patch context: {context.target}/{context.profile}")
             for name, contents in format_context(base, context.inputs, selected).items():
@@ -366,12 +272,12 @@ def format_linux_patches(selected: frozenset[str], archives: Path) -> None:
 def check_linux_changes(
     inputs: Sequence[LinuxInput],
     archive: Path,
-    version: str,
+    source_lock: dict[str, Any],
     config_diff: Path,
 ) -> tuple[Path, ...]:
     """Check patch C/H and expose copy/append Kbuild edits in destination context."""
     paths = {name for step in inputs for name in step.destinations()}
-    base = read_base(archive, version, paths)
+    base = read_base(archive, source_lock, paths)
     config_changes = []
     lint_patches = []
     with tempfile.TemporaryDirectory(prefix="fplinux-kernel-style-") as temporary:

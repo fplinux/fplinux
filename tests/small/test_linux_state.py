@@ -1,322 +1,422 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Behavior tests for prepared Linux recipe receipts."""
+"""Exercise shared Linux preparation with real small archives and projections."""
 
 from __future__ import annotations
 
+import copy
+import subprocess
 import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
-from fplinux_cli import linux_state
+from fplinux_cli import common, linux_state
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import linux as linux_build
 from fplinux_cli.build import sources as sources_build
+from fplinux_cli.kernel_patches import read_base
+from fplinux_cli.manifests.linux import discover_linux_targets
 
 
-class PreparedLinuxTests(unittest.TestCase):
-    """A prepared tree is reusable only for its exact preparation recipe."""
-
-    archive = "b" * 64
-    recipe_a = "a" * 64
-    recipe_b = "c" * 64
+class SharedLinuxTests(unittest.TestCase):
+    """Source switches reuse one tree while causal image inputs remain independent."""
 
     def setUp(self) -> None:
-        """Create an isolated Linux source fixture."""
+        """Create a two-board source fixture; only remote archive fetching is replaced."""
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-
-    def _tree(self, name: str) -> Path:
-        source = self.root / name
-        (source / "drivers").mkdir(parents=True)
-        (source / "drivers/config").write_text("upstream\n", encoding="utf-8")
-        return source
-
-    def _seal(self, source: Path, recipe: str) -> linux_state.PreparedLinuxState:
-        return linux_state.seal_prepared_linux(source, recipe)
-
-    def _linux_archive(self) -> Path:
-        """Create the smallest Linux source archive that preparation accepts."""
-        archive_root = self.root / "archive/linux-test"
-        archive_root.mkdir(parents=True)
-        (archive_root / "Makefile").write_text("VERSION = test\n", encoding="utf-8")
-        archive = self.root / "linux-test.tar.xz"
-        with tarfile.open(archive, "w:xz") as output:
+        self.cache = self.root / "cache"
+        archive_root = self.root / "upstream/linux-test"
+        (archive_root / "drivers").mkdir(parents=True)
+        for name, contents in {
+            "Makefile": "VERSION = test\n",
+            ".clang-format": "BasedOnStyle: LLVM\n",
+            "README": "untouched upstream\n",
+            "drivers/Kconfig": 'menu "Drivers"\nendmenu\n',
+            "drivers/common.c": "int common = 1;\n",
+            "drivers/replaced.c": "upstream original\n",
+        }.items():
+            (archive_root / name).write_text(contents)
+        self.archive = self.root / "linux-test.tar.xz"
+        with tarfile.open(self.archive, "w:xz") as output:
             output.add(archive_root, arcname="linux-test")
-        return archive
-
-    def test_matching_marker_and_receipt_are_a_hit(self) -> None:
-        """Accept matching marker and receipt identities."""
-        source = self._tree("linux")
-        state = self._seal(source, self.recipe_a)
-
-        hit = linux_state.inspect_prepared_linux(source, self.recipe_a)
-
-        self.assertEqual(hit, state)
-
-    def test_recipe_change_reprepares_and_replaces_the_source_tree(self) -> None:
-        """Replace a prepared tree when its recipe changes."""
-        cache = self.root / "cache"
-        archive = self._linux_archive()
-
-        project = self.root / "project"
-        project.mkdir()
-        copied = project / "copied"
-        copied.write_text("first\n", encoding="utf-8")
-        sources = {
+        self.sources: dict[str, Any] = {
             "linux": {
                 "version": "test",
+                "sha256": common.sha256_file(self.archive),
                 "url": "https://example.invalid/linux-test.tar.xz",
-                "sha256": self.archive,
             }
         }
-        target_config = {
-            "identity": {
-                "brand": "Demo",
-                "product": "Phone",
-                "hardware_codes": [],
-                "compatible": "demo,phone",
-                "display_name": "Demo Phone",
-            },
-            "linux": {
-                "patches": [],
-                "copies": [{"source": "copied", "destination": "generated"}],
-                "appends": [],
-                "root": {"kind": "initramfs"},
-            },
-        }
-        platform = {
-            "identity": {
-                "vendor": "Demo",
-                "soc": "SOC1",
-                "aliases": [],
-                "compatible": "demo,soc1",
-                "display_name": "Demo SOC1",
-            },
-            "linux": {
-                "source_lock": "linux",
-                "dts_directory": "arch/demo/boot/dts",
-                "platform_identity_header": "arch/demo/mach-soc1/fplinux-platform-identity.h",
-                "patches": [],
-                "copies": [],
-                "appends": [],
-                "root": {"kind": "initramfs"},
-            },
-        }
+        self.platform("soc")
+        self.target("alpha")
+        self.target("beta")
+        self.enterContext(mock.patch.object(common, "ROOT", self.root))
+        self.enterContext(mock.patch.object(inputs_build, "CACHE", self.cache))
+        self.fetch = self.enterContext(
+            mock.patch.object(sources_build, "fetch", return_value=self.archive)
+        )
 
-        with (
-            mock.patch.object(inputs_build, "CACHE", cache),
-            mock.patch.object(
-                inputs_build,
-                "target_source",
-                side_effect=lambda _target, relative: project / relative,
-            ),
-            mock.patch.object(sources_build, "fetch", return_value=archive),
-        ):
-            source, first = linux_build.prepare_linux(sources, "demo", target_config, platform)
-            (source / "untracked").write_text("old tree only\n", encoding="utf-8")
-            copied.write_text("second\n", encoding="utf-8")
-            rebuilt, second = linux_build.prepare_linux(sources, "demo", target_config, platform)
+    def platform(self, name: str, *, source_lock: str = "linux") -> None:
+        """Write the Linux-only platform manifest consumed by real discovery."""
+        directory = self.root / "platforms" / name
+        directory.mkdir(parents=True)
+        (directory / "platform.toml").write_text(
+            f"""[identity]
+vendor = "Example"
+soc = "{name.upper()}"
+aliases = []
+compatible = "example,{name}"
+[linux]
+arch = "arm"
+source_lock = "{source_lock}"
+dts_directory = "arch/{name}/boot/dts"
+platform_identity_header = "include/{name}-identity.h"
+patches = []
+copies = []
+appends = []
+"""
+        )
 
-        self.assertEqual(rebuilt, source)
-        self.assertNotEqual(second.linux_recipe, first.linux_recipe)
-        self.assertEqual((source / "generated").read_text(encoding="utf-8"), "second\n")
-        self.assertFalse((source / "untracked").exists())
+    def target(self, name: str, *, platform: str = "soc", extra: str = "") -> None:
+        """Add a board with one independent driver and one guarded Kconfig fragment."""
+        directory = self.root / "targets" / name
+        directory.mkdir(parents=True)
+        (directory / "driver.c").write_text(f"int {name} = 1;\n")
+        (directory / "fragment").write_text(f'config {name.upper()}\n\tbool "{name}"\n')
+        (directory / "target.toml").write_text(
+            f"""platform = "{platform}"
+[identity]
+brand = "Example"
+product = "{name}"
+hardware_codes = []
+compatible = "example,{name}"
+[linux]
+patches = []
+[[linux.copies]]
+source = "driver.c"
+destination = "drivers/{name}.c"
+[[linux.appends]]
+source = "fragment"
+destination = "drivers/Kconfig"
+{extra}"""
+        )
 
-    def test_generated_files_are_written_where_the_platform_declares(self) -> None:
-        """Identity and root includes follow the platform manifest, not a fixed SoC directory."""
-        sources = {
-            "linux": {
-                "version": "test",
-                "url": "https://example.invalid/linux-test.tar.xz",
-                "sha256": self.archive,
+    def prepare(
+        self, name: str, *, external: bool = False
+    ) -> tuple[Path, linux_state.PreparedLinuxState]:
+        """Load a selected Linux context and run the production preparer."""
+        digest = self.sources["linux"]["sha256"]
+        selected = next(
+            target
+            for target in discover_linux_targets(self.root, self.sources, digest)
+            if target.name == name
+        )
+        config = copy.deepcopy(selected.config)
+        config["linux"]["root"] = (
+            {
+                "kind": "external",
+                "partuuid": "12345678-02",
+                "filesystem": "ext4",
+                "wait_seconds": 5,
             }
-        }
-        target_config = {
-            "identity": {
-                "brand": "Demo",
-                "product": "Phone",
-                "hardware_codes": [],
-                "compatible": "demo,phone",
-                "display_name": "Demo Phone",
-            },
-            "linux": {"patches": [], "copies": [], "appends": [], "root": {"kind": "initramfs"}},
-        }
-        platform = {
-            "identity": {
-                "vendor": "Demo",
-                "soc": "SOC1",
-                "aliases": [],
-                "compatible": "demo,soc1",
-                "display_name": "Demo SOC1",
-            },
-            "linux": {
-                "source_lock": "linux",
-                "dts_directory": "arch/demo/boot/dts/vendor",
-                "platform_identity_header": "arch/demo/mach-soc1/soc1-identity.h",
-                "patches": [],
-                "copies": [],
-                "appends": [],
-            },
-        }
-
-        with (
-            mock.patch.object(inputs_build, "CACHE", self.root / "cache"),
-            mock.patch.object(sources_build, "fetch", return_value=self._linux_archive()),
-        ):
-            source, _prepared = linux_build.prepare_linux(sources, "demo", target_config, platform)
-
-        dts = source / "arch/demo/boot/dts/vendor"
-        self.assertIn(
-            b'model = "Demo Phone";',
-            (dts / "fplinux-target-identity.dtsi").read_bytes(),
+            if external
+            else {"kind": "initramfs"}
         )
-        self.assertIn(b"rdinit=/init", (dts / "fplinux-root.dtsi").read_bytes())
-        self.assertIn(
-            b'FPLINUX_PLATFORM_COMPATIBLE "demo,soc1"',
-            (source / "arch/demo/mach-soc1/soc1-identity.h").read_bytes(),
-        )
-        self.assertFalse((source / "arch/arm").exists())
+        config["profile"] = "sd" if external else "default"
+        return linux_build.prepare_linux(self.sources, name, config, selected.platform)
 
-    def test_tampered_receipt_is_rejected_before_a_consumer_uses_the_tree(self) -> None:
-        """Reject a prepared tree if its sealed recipe receipt changes."""
-        source = self._tree("linux")
-        state = self._seal(source, self.recipe_a)
-        (source / linux_state.RECEIPT_NAME).write_text(
-            '{"linux_recipe":"' + self.recipe_b + '"}\n', encoding="utf-8"
-        )
-
-        self.assertIsNone(linux_state.inspect_prepared_linux(source, self.recipe_a))
-        with self.assertRaisesRegex(
-            linux_state.LinuxStateError, "prepared Linux tree changed after preparation"
-        ):
-            linux_state.require_prepared_linux(source, state)
-
-    def test_source_changing_profile_uses_a_sibling_not_the_default_tree(self) -> None:
-        """A profile projection never creates state inside the sealed default source tree."""
-        parent = self.root / "cache/linux/sources"
-        parent.mkdir(parents=True)
-
-        source = linux_build.profile_linux_source_path(parent, "phone", "host")
-
-        self.assertEqual(source, self.root / "cache/linux/profiles/phone/host")
-        self.assertFalse((parent / "phone/profiles").exists())
-
-    def test_profile_reusing_default_sources_discards_its_old_dedicated_tree(self) -> None:
-        """A patch-profile transition to Kconfig-only self-heals before a source hit."""
-        cache = self.root / "cache"
-        parent = cache / "linux/sources"
-        parent.mkdir(parents=True)
-        stale = cache / "linux/profiles/phone/host"
-        stale.mkdir(parents=True)
-        (stale / "old-projection").write_text("old\n", encoding="utf-8")
-        recipe = "a" * 64
-        linux = {"version": "test", "sha256": "b" * 64}
-        target = {
-            "profile": "host",
-            "identity": {
-                "brand": "Demo",
-                "product": "Phone",
-                "hardware_codes": [],
-                "compatible": "demo,phone",
-                "display_name": "Demo Phone",
-            },
-            "linux": {
-                "patches": [],
-                "copies": [],
-                "appends": [],
-                "root": {"kind": "initramfs"},
-            },
-        }
-        platform = {
-            "identity": {
-                "vendor": "Demo",
-                "soc": "SOC1",
-                "aliases": [],
-                "compatible": "demo,soc1",
-                "display_name": "Demo SOC1",
-            },
-            "linux": {
-                "source_lock": "linux",
-                "dts_directory": "arch/demo/boot/dts",
-                "platform_identity_header": "arch/demo/mach-soc1/fplinux-platform-identity.h",
-                "patches": [],
-                "copies": [],
-                "appends": [],
-            },
-        }
-
-        with (
-            mock.patch.object(inputs_build, "CACHE", cache),
-            mock.patch.object(linux_build, "load_target", return_value={"linux": target["linux"]}),
-            mock.patch.object(linux_build, "linux_recipe_digest", return_value=recipe),
-            mock.patch.object(
-                linux_state,
-                "inspect_prepared_linux",
-                return_value=linux_state.PreparedLinuxState(recipe),
-            ),
-        ):
-            source, prepared = linux_build.prepare_linux(
-                {"linux": linux}, "phone", target, platform
+    @staticmethod
+    def snapshot(source: Path) -> dict[str, tuple[bytes, int, int]]:
+        """Observe all files in this small fixture, including source inode and mtime."""
+        return {
+            path.relative_to(source).as_posix(): (
+                path.read_bytes(),
+                path.stat().st_ino,
+                path.stat().st_mtime_ns,
             )
+            for path in source.rglob("*")
+            if path.is_file()
+        }
 
-        self.assertEqual(source, parent / "phone")
-        self.assertEqual(prepared.linux_recipe, recipe)
-        self.assertFalse(stale.exists())
+    def test_board_and_profile_switches_leave_shared_source_unchanged(self) -> None:
+        """A/B/A and profile switches need neither another archive nor source writes."""
+        source, first = self.prepare("alpha")
+        before = self.snapshot(source)
+        self.archive.unlink()
+        for name, external in (("beta", False), ("alpha", True), ("alpha", False)):
+            with self.subTest(name=name, external=external):
+                current, state = self.prepare(name, external=external)
+                self.assertEqual(current, source)
+                self.assertEqual(self.snapshot(source), before)
+                linux_state.require_prepared_linux(source, state)
+                if name == "alpha" and external:
+                    self.assertNotEqual(state.linux_recipe, first.linux_recipe)
+        self.assertEqual(self.fetch.call_count, 1)
+        self.assertEqual(len(tuple((self.cache / "linux/sources").iterdir())), 1)
+        self.assertEqual((source / "drivers/alpha.c").read_text(), "int alpha = 1;\n")
+        self.assertEqual((source / "drivers/beta.c").read_text(), "int beta = 1;\n")
+        self.assertEqual(
+            (source / "drivers/Kconfig").read_text(),
+            'menu "Drivers"\nendmenu\n\nconfig ALPHA\n\tbool "alpha"\n'
+            '\nconfig BETA\n\tbool "beta"\n',
+        )
+        self.assertIn(
+            b"Example alpha",
+            (source / "arch/soc/boot/dts/fplinux-alpha-identity.dtsi").read_bytes(),
+        )
+        self.assertIn(
+            b"Example beta", (source / "arch/soc/boot/dts/fplinux-beta-identity.dtsi").read_bytes()
+        )
+        self.assertFalse((source / "arch/soc/boot/dts/fplinux-root.dtsi").exists())
 
-    def test_staging_slot_self_heals_one_old_directory_and_is_discardable(self) -> None:
-        """One fixed extraction slot replaces random prepare generations after interruption."""
-        parent = self.root / "cache/linux/sources"
-        parent.mkdir(parents=True)
-        stale = self.root / "cache/linux/staging/phone/profiles/host"
-        stale.mkdir(parents=True)
-        (stale / "partial").write_text("partial\n", encoding="utf-8")
+    def test_peer_driver_edit_changes_only_its_destination_and_own_recipe(self) -> None:
+        """An independent board edit preserves other boards' build identities and source mtimes."""
+        source, alpha_before = self.prepare("alpha")
+        _, beta_before = self.prepare("beta")
+        before = self.snapshot(source)
+        (self.root / "targets/beta/driver.c").write_text("int beta = 2;\n")
+        _, alpha_after = self.prepare("alpha")
+        _, beta_after = self.prepare("beta")
+        after = self.snapshot(source)
+        changes = {
+            name
+            for name in before
+            if before[name] != after[name] and not name.startswith(".fplinux-")
+        }
+        self.assertEqual(changes, {"drivers/beta.c"})
+        self.assertEqual(alpha_after.linux_recipe, alpha_before.linux_recipe)
+        self.assertNotEqual(beta_after.linux_recipe, beta_before.linux_recipe)
+        self.assertNotEqual(alpha_after.tree_recipe, alpha_before.tree_recipe)
+        self.assertEqual(self.fetch.call_count, 1)
+        with self.assertRaisesRegex(linux_state.LinuxStateError, "changed after preparation"):
+            linux_state.require_prepared_linux(source, alpha_before)
 
-        staging = linux_build.prepared_linux_staging_path(parent, "phone", "host")
+    def test_added_and_removed_board_updates_fragments_and_restores_originals(self) -> None:
+        """New boards add small files; removing their integration restores upstream bytes."""
+        source, _ = self.prepare("alpha")
+        untouched = (source / "README").stat()
+        self.target("gamma")
+        directory = self.root / "targets/gamma"
+        manifest = directory / "target.toml"
+        manifest.write_text(
+            manifest.read_text().replace("patches = []", 'patches = ["replace.patch"]')
+        )
+        (directory / "replace.patch").write_text(
+            "--- a/drivers/replaced.c\n+++ b/drivers/replaced.c\n@@ -1 +1 @@\n"
+            "-upstream original\n+int gamma = 1;\n"
+        )
+        added, _ = self.prepare("gamma")
+        self.assertEqual(added, source)
+        self.assertEqual((source / "drivers/replaced.c").read_text(), "int gamma = 1;\n")
+        (self.root / "targets/gamma/target.toml").unlink()
+        restored, _ = self.prepare("alpha")
+        self.assertEqual(restored, source)
+        self.assertFalse((source / "drivers/gamma.c").exists())
+        self.assertFalse((source / "arch/soc/boot/dts/fplinux-gamma-identity.dtsi").exists())
+        self.assertNotIn("GAMMA", (source / "drivers/Kconfig").read_text())
+        self.assertEqual((source / "drivers/replaced.c").read_text(), "upstream original\n")
+        self.assertEqual((source / "README").stat().st_ino, untouched.st_ino)
+        self.assertEqual((source / "README").stat().st_mtime_ns, untouched.st_mtime_ns)
+        self.assertEqual(self.fetch.call_count, 1)
 
-        self.assertEqual(staging, stale)
-        self.assertEqual(tuple(staging.iterdir()), ())
-        linux_build.discard_prepared_linux_staging(staging)
-        self.assertFalse(staging.exists())
+    def test_two_platforms_share_source_and_another_base_uses_its_own_slot(self) -> None:
+        """Source identity, not platform identity, chooses the complete Linux tree."""
+        self.platform("other")
+        self.target("delta", platform="other")
+        source, _ = self.prepare("alpha")
+        other, _ = self.prepare("delta")
+        self.assertEqual(other, source)
+        self.assertTrue((source / "arch/other/boot/dts/fplinux-delta-identity.dtsi").is_file())
+        with self.archive.open("ab") as archive:
+            archive.write(b"\0")
+        self.sources["linux"]["sha256"] = common.sha256_file(self.archive)
+        changed, _ = self.prepare("alpha")
+        self.assertNotEqual(changed, source)
+        self.assertTrue((source / "drivers/alpha.c").is_file())
+        self.assertEqual(self.fetch.call_count, 2)
 
-    def test_profile_source_cleanup_rejects_each_intermediate_symlink(self) -> None:
-        """Profile source self-healing cannot traverse external cache path components."""
-        parent = self.root / "cache/linux/sources"
-        parent.mkdir(parents=True)
-        external = self.root / "external"
-        external.mkdir()
-        sentinel = external / "sentinel"
-        sentinel.write_text("keep\n", encoding="utf-8")
-        profiles = self.root / "cache/linux/profiles"
-        profiles.symlink_to(external, target_is_directory=True)
+    def test_peer_patch_to_upstream_code_changes_selected_recipe(self) -> None:
+        """Shared upstream code stays causal even when its patch is owned by another board."""
+        source, before = self.prepare("alpha")
+        target = self.root / "targets/beta"
+        (target / "target.toml").write_text(
+            (target / "target.toml")
+            .read_text()
+            .replace("patches = []", 'patches = ["common.patch"]')
+        )
+        (target / "common.patch").write_text(
+            "--- a/drivers/common.c\n+++ b/drivers/common.c\n@@ -1 +1 @@\n"
+            "-int common = 1;\n+int common = 2;\n"
+        )
+        _, after = self.prepare("alpha")
+        self.assertEqual((source / "drivers/common.c").read_text(), "int common = 2;\n")
+        self.assertNotEqual(after.linux_recipe, before.linux_recipe)
 
-        with self.assertRaisesRegex(SystemExit, "source root must not be a symlink"):
-            linux_build.discard_profile_linux_source(parent, "phone", "host")
-        self.assertTrue(sentinel.exists())
+    def test_other_platform_append_to_common_code_changes_selected_recipe(self) -> None:
+        """Platform appends to shared upstream code remain causal for every consumer."""
+        self.platform("other")
+        self.target("delta", platform="other")
+        directory = self.root / "platforms/other"
+        manifest = directory / "platform.toml"
+        manifest.write_text(
+            manifest.read_text().replace("appends = []\n", "")
+            + '\n[[linux.appends]]\nsource = "platforms/other/common.fragment"\n'
+            'destination = "drivers/common.c"\n'
+        )
+        fragment = directory / "common.fragment"
+        fragment.write_text("int other = 1;\n")
+        source, before = self.prepare("alpha")
+        fragment.write_text("int other = 2;\n")
+        _, after = self.prepare("alpha")
+        self.assertEqual(
+            (source / "drivers/common.c").read_text(), "int common = 1;\n\nint other = 2;\n"
+        )
+        self.assertNotEqual(after.linux_recipe, before.linux_recipe)
 
-        profiles.unlink()
-        profiles.mkdir()
-        (profiles / "phone").symlink_to(external, target_is_directory=True)
-        with self.assertRaisesRegex(SystemExit, "target slot must not be a symlink"):
-            linux_build.discard_profile_linux_source(parent, "phone", "host")
-        self.assertTrue(sentinel.exists())
+    def test_peer_board_fragment_change_invalidates_shared_config_recipe(self) -> None:
+        """The shared Kconfig input cannot hide a peer fragment's changed defaults."""
+        source, before = self.prepare("alpha")
+        (self.root / "targets/beta/fragment").write_text(
+            'config BETA\n\tbool "beta"\n\tdefault y\n'
+        )
+        _, after = self.prepare("alpha")
+        self.assertIn("\tdefault y\n", (source / "drivers/Kconfig").read_text())
+        self.assertNotEqual(after.linux_recipe, before.linux_recipe)
 
-    def test_prepared_linux_cache_refuses_a_symlinked_sources_component(self) -> None:
-        """The common preparer cannot publish through an external sources symlink."""
-        cache = self.root / "cache"
-        linux = cache / "linux"
-        linux.mkdir(parents=True)
-        external = self.root / "external"
-        external.mkdir()
-        sentinel = external / "sentinel"
-        sentinel.write_text("keep\n", encoding="utf-8")
-        (linux / "sources").symlink_to(external, target_is_directory=True)
+    def test_formatter_originals_and_preparation_share_one_extraction(self) -> None:
+        """Formatting before a build primes its source; warm original reads write nothing."""
+        source_lock = self.sources["linux"]
+        original = read_base(self.archive, source_lock, {"drivers/common.c"})
+        self.assertEqual(original["drivers/common.c"].contents, b"int common = 1;\n")
+        self.archive.unlink()
+        target = self.root / "targets/beta"
+        manifest = target / "target.toml"
+        manifest.write_text(
+            manifest.read_text().replace("patches = []", 'patches = ["common.patch"]')
+        )
+        (target / "common.patch").write_text(
+            "--- a/drivers/common.c\n+++ b/drivers/common.c\n@@ -1 +1 @@\n"
+            "-int common = 1;\n+int common = 2;\n"
+        )
+        source, _ = self.prepare("alpha")
+        self.assertEqual((source / "drivers/common.c").read_text(), "int common = 2;\n")
+        before = self.snapshot(self.cache)
+        original = read_base(self.archive, source_lock, {"drivers/common.c", "drivers/alpha.c"})
+        self.assertEqual(original["drivers/common.c"].contents, b"int common = 1;\n")
+        self.assertNotIn("drivers/alpha.c", original)
+        self.assertEqual(self.snapshot(self.cache), before)
+        self.assertEqual(self.fetch.call_count, 0)
 
-        with self.assertRaisesRegex(linux_state.LinuxStateError, "cache directory"):
-            linux_state.ensure_sources_directory(cache)
-        self.assertTrue(sentinel.exists())
+    def test_failed_patch_keeps_completed_source_and_can_be_retried(self) -> None:
+        """A normal patch error never publishes partial source or a successful new receipt."""
+        source, before = self.prepare("alpha")
+        snapshot = self.snapshot(source)
+        target = self.root / "targets/beta"
+        original = (target / "target.toml").read_text()
+        (target / "target.toml").write_text(
+            original.replace("patches = []", 'patches = ["bad.patch"]')
+        )
+        patch = target / "bad.patch"
+        patch.write_text(
+            "--- a/drivers/common.c\n+++ b/drivers/common.c\n@@ -1 +1 @@\n"
+            "-int nonexistent = 1;\n+int common = 2;\n"
+        )
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.prepare("alpha")
+        self.assertEqual(self.snapshot(source), snapshot)
+        linux_state.require_prepared_linux(source, before)
+        patch.write_text(
+            "--- a/drivers/common.c\n+++ b/drivers/common.c\n@@ -1 +1 @@\n"
+            "-int common = 1;\n+int common = 2;\n"
+        )
+        retried, after = self.prepare("alpha")
+        self.assertEqual(retried, source)
+        self.assertEqual((source / "drivers/common.c").read_text(), "int common = 2;\n")
+        linux_state.require_prepared_linux(source, after)
+        self.assertEqual(self.fetch.call_count, 1)
+
+    def test_conflicting_copy_owners_fail_before_source_publication(self) -> None:
+        """Discovery order cannot silently choose between different board source owners."""
+        path = self.root / "targets/beta/target.toml"
+        path.write_text(path.read_text().replace("drivers/beta.c", "drivers/alpha.c"))
+        with self.assertRaisesRegex(SystemExit, "multiple owners: drivers/alpha.c"):
+            self.prepare("alpha")
+        self.assertFalse((self.cache / "linux/sources").exists())
+
+    def test_board_copy_cannot_replace_an_upstream_file(self) -> None:
+        """An independent board copy cannot bypass shared-code causal tracking."""
+        source, prepared = self.prepare("alpha")
+        before = self.snapshot(source)
+        manifest = self.root / "targets/beta/target.toml"
+        manifest.write_text(manifest.read_text().replace("drivers/beta.c", "drivers/common.c"))
+        with self.assertRaisesRegex(SystemExit, "target Linux copy must add a new board file"):
+            self.prepare("alpha")
+        self.assertEqual(self.snapshot(source), before)
+        self.assertEqual((source / "drivers/common.c").read_text(), "int common = 1;\n")
+        linux_state.require_prepared_linux(source, prepared)
+
+    def test_peer_platform_new_header_contents_and_destination_are_causal(self) -> None:
+        """Shared copied headers invalidate consumers even when upstream had no such path."""
+        self.platform("other")
+        self.target("delta", platform="other")
+        directory = self.root / "platforms/other"
+        manifest = directory / "platform.toml"
+        manifest.write_text(
+            manifest.read_text().replace("copies = []\n", "")
+            + '\n[[linux.copies]]\nsource = "platforms/other/shared.h"\n'
+            'destination = "include/shared.h"\n'
+        )
+        header = directory / "shared.h"
+        header.write_text("#define SHARED_VALUE 1\n")
+        (self.root / "targets/alpha/driver.c").write_text(
+            "#include <shared.h>\nint alpha = SHARED_VALUE;\n"
+        )
+        source, before = self.prepare("alpha")
+        header.write_text("#define SHARED_VALUE 2\n")
+        _, changed = self.prepare("alpha")
+        self.assertEqual((source / "include/shared.h").read_text(), "#define SHARED_VALUE 2\n")
+        self.assertNotEqual(changed.linux_recipe, before.linux_recipe)
+        manifest.write_text(
+            manifest.read_text().replace("include/shared.h", "include/moved-shared.h")
+        )
+        _, moved = self.prepare("alpha")
+        self.assertFalse((source / "include/shared.h").exists())
+        self.assertEqual(
+            (source / "include/moved-shared.h").read_text(), "#define SHARED_VALUE 2\n"
+        )
+        self.assertNotEqual(moved.linux_recipe, changed.linux_recipe)
+
+    def test_profile_root_is_written_only_to_build_output_and_keeps_mtime_on_reuse(self) -> None:
+        """Separate build directories retain their own root arguments without source mutation."""
+        source, _ = self.prepare("alpha")
+        before = self.snapshot(source)
+        config = {"linux": {"root": {"kind": "initramfs"}}}
+        output = self.root / "out/default"
+        path = linux_state.write_profile_root(output, config)
+        first = path.stat()
+        self.assertIn(b"rdinit=/init", path.read_bytes())
+        self.assertEqual(
+            linux_state.write_profile_root(output, config).stat().st_mtime_ns, first.st_mtime_ns
+        )
+        external = {
+            "linux": {
+                "root": {
+                    "kind": "external",
+                    "partuuid": "12345678-02",
+                    "filesystem": "ext4",
+                    "wait_seconds": 5,
+                }
+            }
+        }
+        second = linux_state.write_profile_root(self.root / "out/sd", external)
+        self.assertIn(
+            b"root=PARTUUID=12345678-02 rootfstype=ext4 rootwait=5 rw", second.read_bytes()
+        )
+        self.assertIn(b"rdinit=/init", path.read_bytes())
+        self.assertEqual(self.snapshot(source), before)
 
 
 if __name__ == "__main__":
