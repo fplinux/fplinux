@@ -11,6 +11,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, cast
 
+from fplinux_cli.artifact_footprint import FootprintError, compare_footprints, inspect_footprint
 from fplinux_cli.common import display_text, fail, sha256_file
 
 from .bundles import resolve_target_bundle
@@ -53,6 +54,91 @@ def inspect_bundle(
             fail(f"bundle file differs from its build manifest: {relative}")
         print(f"{size} {digest} {relative}")
     print(f"files: {len(files)}; build-manifest checksums: OK")
+
+
+def _byte_size(value: int) -> str:
+    """Keep exact byte counts alongside a compact binary size for larger artifacts."""
+    if abs(value) < 1024:
+        return f"{value} B"
+    return f"{value:,} B ({value / 1024:.1f} KiB)"
+
+
+def inspect_target_footprint(
+    target: str,
+    *,
+    profile: str | None = None,
+    build_type: str = "release",
+    json_output: bool = False,
+) -> None:
+    """Measure verified artifacts from the exact selected current bundle."""
+    bundle, _manifest = resolve_target_bundle(target, profile, build_type=build_type)
+    try:
+        report = inspect_footprint(bundle)
+    except FootprintError as error:
+        fail(str(error))
+    if json_output:
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return
+    _print_identity(report["identity"])
+    layers = report["layers"]
+    print(layers["description"])
+    print("Boot artifacts:")
+    for name, size in sorted(layers["boot_artifact_bytes"].items()):
+        print(f"  {_byte_size(size)}  {name}")
+    print(f"Kernel zImage: {_byte_size(layers['kernel_zimage_bytes'])}")
+    embedded = layers["embedded_initramfs"]
+    if embedded is not None:
+        print(
+            f"Embedded initramfs ({embedded['compression']}): "
+            f"{_byte_size(embedded['compressed_bytes'])}"
+        )
+    rootfs = report["rootfs"]
+    print(f"Root filesystem ({rootfs['source']}):")
+    print(f"  cpio: {_byte_size(rootfs['cpio_bytes'])}")
+    print(f"  regular payload: {_byte_size(rootfs['regular_payload_bytes'])}")
+    print(f"  symlink payload: {_byte_size(rootfs['symlink_payload_bytes'])}")
+    print("Packages (owned regular and symlink payload; dependencies excluded):")
+    for name, package in sorted(rootfs["packages"].items()):
+        size = package["regular_payload_bytes"] + package["symlink_payload_bytes"]
+        print(f"  {_byte_size(size)}  {name} {package['version']}")
+    print("Optional APK archives:")
+    for name, package in sorted(report["optional_apks"].items()):
+        print(f"  {_byte_size(package['archive_bytes'])}  {name}")
+    print("Host debug files:")
+    for name, size in sorted(layers["host_debug_file_bytes"].items()):
+        print(f"  {_byte_size(size)}  {name}")
+
+
+def inspect_footprint_diff(before: Path, after: Path, *, json_output: bool = False) -> None:
+    """Compare saved measurements without resolving a bundle or touching the cache."""
+    try:
+        old = json.loads(before.read_text(encoding="utf-8"))
+        new = json.loads(after.read_text(encoding="utf-8"))
+        if not isinstance(old, dict) or not isinstance(new, dict):
+            fail("footprint reports must be JSON objects")
+        report = compare_footprints(old, new)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        fail(
+            f"cannot compare footprint reports {display_text(before)} and "
+            f"{display_text(after)}: {error}"
+        )
+    if json_output:
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return
+    print(f"before: {display_text(before)}")
+    print(f"after: {display_text(after)}")
+    print(f"same rootfs content: {'yes' if report['same_rootfs_content'] else 'no'}")
+    print(f"Kernel zImage delta: {_byte_size(report['kernel_zimage_byte_delta'])}")
+    print("Boot artifact deltas:")
+    for name, delta in report["boot_artifact_byte_delta"].items():
+        print(f"  {_byte_size(delta)}  {name}")
+    print("Root filesystem deltas:")
+    for name, delta in report["rootfs_byte_delta"].items():
+        print(f"  {_byte_size(delta)}  {name}")
+    for kind in ("packages", "files", "optional_apks"):
+        print(f"{kind}:")
+        for change, entries in report[kind].items():
+            print(f"  {change}: {', '.join(entries) or 'none'}")
 
 
 def _archive_checksums(archive: zipfile.ZipFile) -> tuple[str, dict[str, str]]:

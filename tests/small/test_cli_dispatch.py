@@ -75,6 +75,13 @@ class CliCacheLockTests(unittest.TestCase):
             (["check"], "check", True, None, None),
             (["test", "tests.small.test_common"], "run_tests", True, None, None),
             (["inspect", "bundle", "target"], "inspect_bundle", False, "target", None),
+            (
+                ["inspect", "footprint", "target"],
+                "inspect_target_footprint",
+                False,
+                "target",
+                None,
+            ),
             (["checksum", "demo-aport"], "checksum_aport", True, None, None),
             (["format", "scripts/demo.py"], "format_sources", True, None, None),
             (
