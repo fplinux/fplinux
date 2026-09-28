@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 
 #include "armada-scene.h"
+#include "fplinux-brightness-client.h"
 #include "fplinux-cli.h"
 #include "fplinux-drm-session.h"
 #include "fplinux-keypad.h"
@@ -30,9 +31,6 @@
 #ifndef FPLINUX_SHOWCASE_KEYPAD_LED_GLOB
 #define FPLINUX_SHOWCASE_KEYPAD_LED_GLOB "/sys/class/leds/*/brightness"
 #endif
-#ifndef FPLINUX_SHOWCASE_LCD_BACKLIGHT_GLOB
-#define FPLINUX_SHOWCASE_LCD_BACKLIGHT_GLOB "/sys/class/backlight/*/brightness"
-#endif
 #define SHOWCASE_MAX_INPUT_DEVICES 64
 #define SHOWCASE_CLASS_PATH_BYTES 512U
 #define SHOWCASE_EFFECT_LENGTH_MS 5000U
@@ -51,7 +49,6 @@ struct class_output {
 struct showcase_options {
 	uint64_t runs;
 	const char *keypad_led;
-	const char *lcd_backlight;
 };
 
 struct hardware_state {
@@ -59,16 +56,16 @@ struct hardware_state {
 	int vibrator;
 	int effect_id;
 	int keypad_original;
-	int lcd_original;
+	struct fplinux_brightness_client brightness;
 	bool keypad_grabbed;
 	bool keypad_interface;
 	bool effect_uploaded;
 	bool keypad_on;
 	bool rumble_on;
+	bool brightness_claimed;
 	uint16_t rumble_cue_id;
 	int lcd_level;
 	struct class_output keypad_led;
-	struct class_output lcd_backlight;
 };
 
 struct frame_statistics {
@@ -81,7 +78,6 @@ struct frame_statistics {
 enum showcase_option {
 	SHOWCASE_OPTION_RUNS,
 	SHOWCASE_OPTION_KEYPAD_LED,
-	SHOWCASE_OPTION_LCD_BACKLIGHT,
 };
 
 static volatile sig_atomic_t stop_requested;
@@ -128,9 +124,6 @@ static const char *parse_showcase_option(size_t option, const char *value,
 	case SHOWCASE_OPTION_KEYPAD_LED:
 		options->keypad_led = value;
 		break;
-	case SHOWCASE_OPTION_LCD_BACKLIGHT:
-		options->lcd_backlight = value;
-		break;
 	}
 	return NULL;
 }
@@ -148,11 +141,6 @@ static enum fplinux_cli_result parse_options(int argc, char **argv,
 			.name = "keypad-led",
 			.metavar = "DIR",
 			.help = "use the keypad LED brightness directory",
-		},
-		{
-			.name = "lcd-backlight",
-			.metavar = "DIR",
-			.help = "use the LCD backlight brightness directory",
 		},
 	};
 	struct fplinux_cli cli = {
@@ -318,9 +306,8 @@ static bool keyboard_led_path(const char *brightness_path)
 			function, sizeof(function) - 1U));
 }
 
-static bool select_class_output(const char *pattern, bool keypad_led,
-				struct class_output *output, char *error,
-				size_t error_size)
+static bool select_keypad_led(struct class_output *output, char *error,
+			      size_t error_size)
 {
 	char directory[SHOWCASE_CLASS_PATH_BYTES];
 	const char *attribute;
@@ -329,48 +316,44 @@ static bool select_class_output(const char *pattern, bool keypad_led,
 	int result;
 	size_t index;
 
-	result = glob(pattern, 0, NULL, &matches);
+	result = glob(FPLINUX_SHOWCASE_KEYPAD_LED_GLOB, 0, NULL, &matches);
 	if (result == GLOB_NOMATCH) {
-		snprintf(error, error_size, "required %s is unavailable",
-			 keypad_led ? "keypad LED" : "LCD backlight");
+		snprintf(error, error_size,
+			 "required keypad LED is unavailable");
 		errno = ENODEV;
 		return false;
 	}
 	if (result != 0) {
-		snprintf(error, error_size, "cannot enumerate %s",
-			 keypad_led ? "keypad LEDs" : "LCD backlights");
+		snprintf(error, error_size, "cannot enumerate keypad LEDs");
 		errno = EIO;
 		return false;
 	}
 	for (index = 0; index < matches.gl_pathc; ++index) {
-		if (keypad_led && !keyboard_led_path(matches.gl_pathv[index]))
+		if (!keyboard_led_path(matches.gl_pathv[index]))
 			continue;
 		if (selected) {
-			snprintf(error, error_size, "ambiguous %s",
-				 keypad_led ? "keypad LEDs" : "LCD backlights");
+			snprintf(error, error_size, "ambiguous keypad LEDs");
 			errno = ENOTUNIQ;
 			goto fail;
 		}
 		selected = matches.gl_pathv[index];
 	}
 	if (!selected) {
-		snprintf(error, error_size, "required %s is unavailable",
-			 keypad_led ? "keypad LED" : "LCD backlight");
+		snprintf(error, error_size,
+			 "required keypad LED is unavailable");
 		errno = ENODEV;
 		goto fail;
 	}
 	attribute = strrchr(selected, '/');
 	if (!attribute || (size_t)(attribute - selected) >= sizeof(directory)) {
-		snprintf(error, error_size, "%s path is too long",
-			 keypad_led ? "keypad LED" : "LCD backlight");
+		snprintf(error, error_size, "keypad LED path is too long");
 		errno = ENAMETOOLONG;
 		goto fail;
 	}
 	memcpy(directory, selected, (size_t)(attribute - selected));
 	directory[attribute - selected] = '\0';
 	if (!set_class_output(output, directory)) {
-		snprintf(error, error_size, "%s path is too long",
-			 keypad_led ? "keypad LED" : "LCD backlight");
+		snprintf(error, error_size, "keypad LED path is too long");
 		goto fail;
 	}
 	globfree(&matches);
@@ -469,7 +452,7 @@ static bool open_hardware(struct hardware_state *state,
 	state->vibrator = -1;
 	state->effect_id = -1;
 	state->keypad_original = -1;
-	state->lcd_original = -1;
+	state->brightness.fd = -1;
 	state->lcd_level = -1;
 	if (options->keypad_led) {
 		if (!set_class_output(&state->keypad_led,
@@ -478,21 +461,7 @@ static bool open_hardware(struct hardware_state *state,
 				 "keypad LED path is too long");
 			return false;
 		}
-	} else if (!select_class_output(FPLINUX_SHOWCASE_KEYPAD_LED_GLOB, true,
-					&state->keypad_led, error,
-					error_size)) {
-		return false;
-	}
-	if (options->lcd_backlight) {
-		if (!set_class_output(&state->lcd_backlight,
-				      options->lcd_backlight)) {
-			snprintf(error, error_size,
-				 "LCD backlight path is too long");
-			return false;
-		}
-	} else if (!select_class_output(FPLINUX_SHOWCASE_LCD_BACKLIGHT_GLOB,
-					false, &state->lcd_backlight, error,
-					error_size)) {
+	} else if (!select_keypad_led(&state->keypad_led, error, error_size)) {
 		return false;
 	}
 	state->keypad =
@@ -552,21 +521,59 @@ static bool open_hardware(struct hardware_state *state,
 		snprintf(error, error_size, "cannot switch keypad LED off");
 		return false;
 	}
-	if (!read_number(state->lcd_backlight.max_brightness, &maximum) ||
-	    maximum < 10 ||
-	    !read_number(state->lcd_backlight.brightness,
-			 &state->lcd_original)) {
-		snprintf(error, error_size,
-			 "required LCD backlight interface is unavailable");
+	return true;
+}
+
+static bool claim_brightness(struct hardware_state *state)
+{
+	if (state->brightness_claimed)
+		return true;
+	if (state->brightness.fd < 0 &&
+	    fplinux_brightness_connect(&state->brightness, NULL) < 0)
 		return false;
-	}
-	state->lcd_level = state->lcd_original;
+	if (fplinux_brightness_claim(&state->brightness) < 0)
+		return false;
+	state->brightness_claimed = true;
+	state->lcd_level = -1;
+	return true;
+}
+
+static bool release_brightness(struct hardware_state *state)
+{
+	if (!state->brightness_claimed)
+		return true;
+	if (fplinux_brightness_release(&state->brightness) < 0)
+		return false;
+	state->brightness_claimed = false;
+	state->lcd_level = -1;
+	return true;
+}
+
+static bool apply_lcd_level(struct hardware_state *state, int level)
+{
+	if (level < 0)
+		return release_brightness(state);
+	if (!claim_brightness(state))
+		return false;
+	if (level == state->lcd_level)
+		return true;
+	if (fplinux_brightness_show(&state->brightness, (unsigned int)level) <
+	    0)
+		return false;
+	state->lcd_level = level;
 	return true;
 }
 
 static bool close_hardware(struct hardware_state *state)
 {
 	bool ok = true;
+	int saved_errno = 0;
+
+	if (!release_brightness(state)) {
+		saved_errno = errno;
+		ok = false;
+	}
+	fplinux_brightness_close(&state->brightness);
 
 	if (state->keypad_interface && state->keypad_original >= 0 &&
 	    !write_number(state->keypad_led.brightness, state->keypad_original))
@@ -580,9 +587,6 @@ static bool close_hardware(struct hardware_state *state)
 		if (ioctl(state->vibrator, EVIOCRMFF, state->effect_id) < 0)
 			ok = false;
 	}
-	if (state->lcd_original >= 0 &&
-	    !write_number(state->lcd_backlight.brightness, state->lcd_original))
-		ok = false;
 	if (state->keypad_grabbed && ioctl(state->keypad, EVIOCGRAB, 0) < 0)
 		ok = false;
 	if (state->vibrator >= 0 && close(state->vibrator) < 0)
@@ -591,15 +595,14 @@ static bool close_hardware(struct hardware_state *state)
 		ok = false;
 	state->vibrator = -1;
 	state->keypad = -1;
+	if (saved_errno)
+		errno = saved_errno;
 	return ok;
 }
 
 static bool apply_outputs(struct hardware_state *state,
 			  const struct armada_outputs *outputs)
 {
-	int lcd = outputs->lcd_level >= 0 ? outputs->lcd_level :
-					    state->lcd_original;
-
 	if (outputs->keypad != state->keypad_on) {
 		if (!write_number(state->keypad_led.brightness,
 				  outputs->keypad ? 1 : 0))
@@ -619,12 +622,7 @@ static bool apply_outputs(struct hardware_state *state,
 		state->rumble_on = outputs->rumble;
 		state->rumble_cue_id = outputs->rumble ? outputs->cue_id : 0;
 	}
-	if (lcd != state->lcd_level) {
-		if (!write_number(state->lcd_backlight.brightness, lcd))
-			return false;
-		state->lcd_level = lcd;
-	}
-	return true;
+	return apply_lcd_level(state, outputs->lcd_level);
 }
 
 static int exit_key_pressed(int keypad)
@@ -737,6 +735,8 @@ static bool set_display_active(struct fplinux_drm_session *display, bool active,
 		if (ioctl(hardware->keypad, EVIOCGRAB, 1) < 0)
 			return false;
 		hardware->keypad_grabbed = true;
+		if (!claim_brightness(hardware))
+			return false;
 	}
 	return true;
 }
@@ -780,7 +780,7 @@ int main(int argc, char **argv)
 	memset(&hardware, 0, sizeof(hardware));
 	hardware.keypad = -1;
 	hardware.vibrator = -1;
-	hardware.lcd_original = -1;
+	hardware.brightness.fd = -1;
 	parse_result = parse_options(argc, argv, &options);
 	if (parse_result != FPLINUX_CLI_READY)
 		return parse_result;
@@ -807,7 +807,7 @@ int main(int argc, char **argv)
 	display_open = true;
 	if (!fplinux_drm_session_set_active_handler(
 		    &display, set_display_active, &hardware)) {
-		perror("fplinux-showcase: keypad activation");
+		perror("fplinux-showcase: display activation");
 		goto cleanup;
 	}
 	if (display.pages != 2U ||
