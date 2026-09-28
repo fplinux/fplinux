@@ -16,7 +16,8 @@ source="fstab inittab interfaces hostname issue os-release fplinux-zram.initd
 	fplinux-brightness.initd
 	fplinux-kmsg.c fplinux-cli.c fplinux-cli.h
 	fplinux-brightness.c fplinux-brightnessd.c
-	fplinux-brightness-client.c fplinux-brightness-client.h"
+	fplinux-brightness-client.c fplinux-brightness-client.h
+	fplinux-vt-guardian.c"
 builddir="$srcdir"
 
 build() {
@@ -30,6 +31,9 @@ build() {
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
 		-I"$srcdir" "$srcdir/fplinux-brightnessd.c" \
 		"$srcdir/fplinux-cli.c" $LDFLAGS -o fplinux-brightnessd
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		"$srcdir/fplinux-vt-guardian.c" $LDFLAGS \
+		-o fplinux-vt-guardian
 }
 
 package() {
@@ -37,6 +41,8 @@ package() {
 	install -Dm755 "$builddir/fplinux-brightness" "$pkgdir/usr/bin/fplinux-brightness"
 	install -Dm755 "$builddir/fplinux-brightnessd" \
 		"$pkgdir/usr/libexec/fplinux/brightnessd"
+	install -Dm755 "$builddir/fplinux-vt-guardian" \
+		"$pkgdir/usr/libexec/fplinux/vt-guardian"
 	install -Dm644 "$srcdir/fstab" "$pkgdir/etc/fstab"
 	install -Dm644 "$srcdir/inittab" "$pkgdir/etc/inittab"
 	install -Dm644 "$srcdir/interfaces" "$pkgdir/etc/network/interfaces"
@@ -80,4 +86,5 @@ cba8e45db60923c30ed93cd2fca674447d256c00ac6068c5182cf0b4134a264e9c81ad42c092471a
 7d93b1d3fbaf02c1d91c4cfb81fb46b46591b081c954f56fd0d354380a97c8ccf0b033c714d10b8cd6a530443dc806af9f8afe1b920cf4fab5958f27113717d9  fplinux-brightnessd.c
 a16c1b2b84831be3da5bbf1d198c827a4bfde8bb435e4ac6d52777ca8472cedc700be5007a4320e6ffcafcf3ff3183a0de4e7068a94576e0016ca9b09c650bcf  fplinux-brightness-client.c
 031e8a9a9fed64c19b947d6d1b7510f2bf0dd76ae7712cd23f8fbf838a28e29eefec2adaa772070f75c930a42bf0e77290825ea88fd545800dbca30bdd61f0ee  fplinux-brightness-client.h
+724c6b464ca56d711b60530e85277e3f006c8042e48b1220b2e4dcc9a0f1e6892f362a8847420d5edaafce9f4b31d4831c5982bfde7f30514e4a533a30943fef  fplinux-vt-guardian.c
 "

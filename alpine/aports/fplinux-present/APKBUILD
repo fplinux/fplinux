@@ -6,6 +6,7 @@ pkgdesc="Native DRM presentation tool for FPLinux"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="GPL-2.0-only"
+depends="fplinux-base"
 makedepends_build="clang22 lld22 pkgconf"
 makedepends_host="musl-dev linux-headers fplinux-libdrm-dev"
 options="!check"
@@ -36,7 +37,7 @@ package() {
 
 sha512sums="
 6fa772ebf96e9d64330c3c42252311822df6bbdcba06a4ce8cc25c92ddfc0d92725708d87c7f60e5b67e1215c1122b3d3b6938d62ea3f8fec277bd54959835d0  fplinux-present.c
-68cb5a85d6a51b69c7bc87a1077e607cff30a8eed17220ba8c812445baa416a0d1c18f3e79776ee184a0b3c4ad94dec48b81728e1f6c943d0580010ba659eae9  fplinux-drm-session.c
+24d96f52eeb3adb9b37e34967199a0efea630af580782fe2f29000862b678d5ae96b4516e291b61ca70a8d9242af43fc720d801e158c7933e957cda0aaf5afdd  fplinux-drm-session.c
 5b63a683e9aac0a4b1faef31c0a09b9ec4131992d5cb69f858c6276855a8d92404c4cf23a1b4c8927d802311e9634b354502745ef15e00a4209744acf51131a7  fplinux-drm-session.h
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
