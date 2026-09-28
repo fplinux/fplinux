@@ -1,7 +1,7 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-apk-tools
 pkgver=3.0.6
-pkgrel=1
+pkgrel=0
 pkgdesc="Alpine Package Keeper for FPLinux built with Mbed TLS instead of OpenSSL"
 url="https://gitlab.alpinelinux.org/alpine/apk-tools"
 arch="armv7"
