@@ -85,6 +85,7 @@ Status terms and limits shared by every phone are defined in the
 | Application                                             | FPLinux   | This phone                                                                                  |
 | ------------------------------------------------------- | --------- | ------------------------------------------------------------------------------------------- |
 | [FPLinux: ARMADA](../../docs/apps/SHOWCASE.md)          | Partial   | Physical light effects have not been tested.                                                |
+| [Brightness control](../../docs/apps/BRIGHTNESS.md)     | Supported | Phone-keypad control of levels `0…10`; level `0` turns the backlight off.                   |
 | [TyrQuake](../../docs/apps/TYRQUAKE.md)                 | Partial   | Game data can use RAM or ext4 microSD storage, including the system root.                   |
 | [Image rotation](../../docs/apps/ROTATE.md)             | Supported | Explicit CPU/ROTA selection and DRM preview; visible preview fidelity is unqualified.       |
 | [JPEG codec and scaling](../../docs/apps/JPEG.md)       | Supported | Hardware decode, fixed encode and fixed half-scaling.                                       |

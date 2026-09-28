@@ -77,6 +77,7 @@ Status terms and limits shared by every phone are defined in the
 | Application                                             | FPLinux   | This phone                                                                                                                    |
 | ------------------------------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | [FPLinux: ARMADA](../../docs/apps/SHOWCASE.md)          | Partial   | Synchronizes the display, keypad light and vibrator.                                                                          |
+| [Brightness control](../../docs/apps/BRIGHTNESS.md)     | Supported | Phone-keypad control of levels `0…10`; level `0` turns the backlight off.                                                     |
 | [TyrQuake](../../docs/apps/TYRQUAKE.md)                 | Partial   | Game data can use the supported microSD path.                                                                                 |
 | [Image rotation](../../docs/apps/ROTATE.md)             | Supported | Included in the normal root filesystem; explicit CPU/ROTA selection and DRM preview; visible preview fidelity is unqualified. |
 | [JPEG codec and scaling](../../docs/apps/JPEG.md)       | Supported | Included in the normal root filesystem; hardware decode, fixed encode, and fixed half-scaling.                                |
