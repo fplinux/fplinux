@@ -15,7 +15,7 @@ retry="TERM/3/KILL/2"
 
 depend() {
 	need devfs fplinux-mdevd
-	after bootmisc
+	after bootmisc fplinux-brightness
 }
 
 start() {

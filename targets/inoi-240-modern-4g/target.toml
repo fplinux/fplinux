@@ -15,6 +15,10 @@ raw_page_bytes = 2112
 [rootfs]
 packages = ["fplinux-audio", "fplinux-jack"]
 
+[display_brightness]
+backlight = "inoi240-backlight"
+levels = [0, 2, 5, 8, 10, 12, 15, 18, 20, 21, 24]
+
 [bundle]
 packages = []
 
@@ -76,7 +80,7 @@ spi_mode = 3
 lcd_id = 0x333025
 exec_distance = 0
 backlight_channels = "rgb"
-backlight_level = 0x1f
+backlight_level = 0x12
 session_name = "inoi240-linux"
 boot_instructions = "Power the phone off, hold *, then connect USB while keeping * pressed."
 

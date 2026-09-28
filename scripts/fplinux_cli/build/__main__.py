@@ -91,6 +91,7 @@ def main() -> None:
                 rootfs_packages,
                 bundle_packages,
                 firmware=firmware,
+                display_brightness=target_config.get("display_brightness"),
                 external_image=target_config["image"],
                 external_output=work / "rootfs-image",
             )
@@ -100,6 +101,7 @@ def main() -> None:
                 rootfs_packages,
                 bundle_packages,
                 firmware=firmware,
+                display_brightness=target_config.get("display_brightness"),
             )
         ext4_artifact = storage_build.profile_ext4_artifact(
             target_config,

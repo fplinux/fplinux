@@ -1,23 +1,35 @@
 # LCD backlight
 
-The LCD backlight is exposed through the standard Linux backlight class under
-`/sys/class/backlight/`. The selected
-[target's documentation](../../targets/README.md) states its device name,
-brightness range and physical support. A standalone archive carries that status
-in `README.txt`.
+The system brightness control uses the same `0` through `10` scale on phones
+with a configured LCD backlight. Run `fplinux-brightness get` to read the
+selected level, or `fplinux-brightness set LEVEL` to change it. Level `0`
+switches the backlight off; level `7` is selected on a fresh boot. The setting
+survives a restart of the brightness service during the same boot, but is not
+saved across phone boots.
 
-## Brightness
+The brightness service translates each level to the selected phone's current
+code. The levels are not percentages or calibrated optical units; equal numbers
+on different phones do not establish equal visible brightness.
 
-Read `brightness`, `actual_brightness` and `max_brightness` from the selected
-backlight device. Write an integer from `0` through `max_brightness` to
-`brightness` to request a level. Level `0` switches the WLED off.
+The selected [target's documentation](../../targets/README.md) states its
+physical support and raw hardware range. A standalone archive carries that
+status in `README.txt`.
+
+## Raw hardware interface
+
+The standard Linux backlight class remains available under
+`/sys/class/backlight/` for diagnostics. Read `brightness`,
+`actual_brightness` and `max_brightness` from the selected backlight device.
+Writing an integer from `0` through `max_brightness` directly to `brightness`
+bypasses the system's `0…10` mapping; a later managed change may replace it.
+Raw level `0` switches the WLED off.
 `actual_brightness` reports the applied driver level, not a measurement of
 visible light.
 
-The levels are raw board-specific current steps, not percentages or calibrated
-optical units. The range and physical effect differ by phone; an available
-brightness interface does not demonstrate that its levels visibly change the
-screen. FPLinux does not provide automatic brightness control.
+The raw values are board-specific current steps. Their range and physical
+effect differ by phone; an available interface does not demonstrate that its
+levels visibly change the screen. FPLinux does not provide automatic brightness
+control.
 
 ## Power and display lifecycle
 

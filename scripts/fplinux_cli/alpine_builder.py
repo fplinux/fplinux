@@ -773,13 +773,14 @@ def _require_openrc_service(root: Path, runlevel: str, service: str) -> None:
         fail(f"Alpine rootfs {runlevel} runlevel is missing {service}")
 
 
-def _verify_alpine_rootfs(
+def _verify_alpine_rootfs(  # noqa: PLR0913 -- verify each independently selected rootfs input.
     root: Path,
     packages: tuple[str, ...],
     bundle_packages: tuple[str, ...] = (),
     firmware: Sequence[firmware_inputs.FirmwareInput] = (),
     *,
     bundle_apks: Sequence[Path] = (),
+    display_brightness: dict[str, Any] | None = None,
 ) -> None:
     init = root / "init"
     if not init.is_symlink() or init.readlink() != Path("/sbin/init"):
@@ -791,6 +792,9 @@ def _verify_alpine_rootfs(
         "/etc/network/interfaces": "fplinux-base",
         "/etc/init.d/networking": "openrc",
         "/etc/os-release": "fplinux-base",
+        "/etc/init.d/fplinux-brightness": "fplinux-base",
+        "/usr/bin/fplinux-brightness": "fplinux-base",
+        "/usr/libexec/fplinux/brightnessd": "fplinux-base",
         "/etc/init.d/fplinux-terminal": "fplinux-terminal-openrc",
         "/usr/bin/fplinux-terminal": "fplinux-terminal",
     }
@@ -841,6 +845,7 @@ def _verify_alpine_rootfs(
                 fail(f"replaced Alpine package remains in the rootfs: {package}")
 
     _require_openrc_service(root, "boot", "networking")
+    _require_openrc_service(root, "default", "fplinux-brightness")
     _require_openrc_service(root, "default", "fplinux-terminal")
     if "fplinux-input" in packages:
         _require_openrc_service(root, "default", "fplinux-input")
@@ -884,6 +889,30 @@ def _verify_alpine_rootfs(
         if (root / obsolete).exists() or (root / obsolete).is_symlink():
             fail(f"obsolete pre-Alpine runtime path is present: /{obsolete}")
     firmware_inputs.verify_installed_firmware_inputs(root, firmware)
+    brightness_path = root / "etc/fplinux/brightness.conf"
+    if display_brightness is None:
+        if brightness_path.exists() or brightness_path.is_symlink():
+            fail("Alpine rootfs has brightness configuration without a target table")
+    elif require_file(brightness_path).read_text(encoding="utf-8") != _brightness_config_text(
+        display_brightness
+    ):
+        fail("Alpine rootfs brightness configuration does not match the target table")
+
+
+def _brightness_config_text(display_brightness: dict[str, Any]) -> str:
+    """Render the target's validated brightness table for the phone runtime."""
+    levels = ",".join(str(level) for level in display_brightness["levels"])
+    return f"backlight={display_brightness['backlight']}\nlevels={levels}\n"
+
+
+def _install_display_brightness(root: Path, display_brightness: dict[str, Any] | None) -> None:
+    if display_brightness is None:
+        return
+    directory = root / "etc/fplinux"
+    directory.mkdir(parents=True, exist_ok=True)
+    destination = directory / "brightness.conf"
+    destination.write_text(_brightness_config_text(display_brightness), encoding="utf-8")
+    destination.chmod(0o644)
 
 
 def _normalize_rootfs(root: Path) -> None:
@@ -957,6 +986,7 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
     bundle_packages: tuple[str, ...] = (),
     *,
     firmware: Sequence[firmware_inputs.FirmwareInput] = (),
+    display_brightness: dict[str, Any] | None = None,
     external_image: dict[str, Any] | None = None,
     external_output: Path | None = None,
 ) -> tuple[Path, Path, str, dict[str, Path]]:
@@ -968,6 +998,7 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
         signing_key_identity,
         packages,
         firmware_inputs=firmware,
+        display_brightness=display_brightness,
     )
     overlap = set(packages) & set(bundle_packages)
     if overlap:
@@ -1111,12 +1142,14 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
             )
 
             firmware_inputs.install_firmware_inputs(root, firmware)
+            _install_display_brightness(root, display_brightness)
             _verify_alpine_rootfs(
                 root,
                 packages,
                 bundle_packages,
                 firmware,
                 bundle_apks=tuple(bundle_outputs[name] for name in bundle_packages),
+                display_brightness=display_brightness,
             )
             _normalize_rootfs(root)
             if not rootfs_hit:

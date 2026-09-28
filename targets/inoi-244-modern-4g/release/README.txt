@@ -30,10 +30,11 @@ Current target support:
     outputs.
 
 The shared brightness, keypad-light, vibrator, telemetry and power-off
-interfaces are enabled. Physical brightness, keypad light and native image
-fidelity have not been tested. This phone has no separate vibration motor;
-FPLinux vibrates it through the speaker and mutes headphone audio
-meanwhile, as described in docs/features/VIBRATION.md.
+interfaces are enabled. System LCD brightness levels 0 through 10 work;
+level 0 turns the backlight off. Their visible spacing is not calibrated.
+Keypad light and native image fidelity have not been tested. This phone has no
+separate vibration motor; FPLinux vibrates it through the speaker and mutes
+headphone audio meanwhile, as described in docs/features/VIBRATION.md.
 Telemetry has been read with the battery absent; battery measurements, charging,
 and battery-only shutdown have not been tested.
 
@@ -77,8 +78,9 @@ The shared interfaces and storage safety rules are described in:
   - docs/features/VIBRATION.md
   - docs/guides/MICROSD_ROOT.md
 
-This phone uses backlight device inoi244-backlight, with configured levels
-0 through 31 and default 31. Shared interface names are sc2720-battery,
+This phone uses backlight device inoi244-backlight, with raw levels 0 through 31
+and initial raw level 18. Use fplinux-brightness get/set for the system scale
+0 through 10; its initial level is 7. Shared interface names are sc2720-battery,
 sc2720-charger, sc2720-auxadc, ums9117-thermal, UMS9117 speaker vibrator and
 UMS9117 Headphones. IIO, thermal and input-device numbers are assigned at boot. These
 identifiers do not demonstrate the physical effects or measurements noted above.

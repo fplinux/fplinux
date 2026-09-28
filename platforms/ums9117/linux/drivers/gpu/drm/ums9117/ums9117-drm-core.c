@@ -945,6 +945,16 @@ static int ums9117_drm_map_common_resources(struct ums9117_drm *udrm,
 	    !udrm->backlight_max_brightness)
 		return -EINVAL;
 	udrm->backlight_effective = udrm->backlight_max_brightness;
+	if (of_find_property(dev->of_node, "sprd,wled-default-level", NULL)) {
+		ret = of_property_read_u32(dev->of_node,
+					   "sprd,wled-default-level",
+					   &udrm->backlight_effective);
+		if (ret)
+			return ret;
+		if (!udrm->backlight_effective ||
+		    udrm->backlight_effective > udrm->backlight_max_brightness)
+			return -EINVAL;
+	}
 	return ums9117_drm_configure_pins(udrm, pdev);
 }
 static int ums9117_drm_register_backlight(struct ums9117_drm *udrm,
@@ -960,9 +970,8 @@ static int ums9117_drm_register_backlight(struct ums9117_drm *udrm,
 	if (!udrm->backlight_max_brightness)
 		return -EINVAL;
 	properties.max_brightness = udrm->backlight_max_brightness;
-	properties.brightness = properties.max_brightness;
+	properties.brightness = udrm->backlight_effective;
 	properties.power = BACKLIGHT_POWER_ON;
-	udrm->backlight_effective = properties.brightness;
 	udrm->backlight = devm_backlight_device_register(
 		&pdev->dev, udrm->profile->wled_backlight_name, &pdev->dev,
 		udrm, &ums9117_drm_backlight_ops, &properties);

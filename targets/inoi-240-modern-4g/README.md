@@ -21,7 +21,8 @@ including with mounted ext4 storage and card-backed swap; Bluetooth resumes
 after wake.
 In the RAM profile, mounted FAT32 data storage also works across sleep.
 
-Physical LCD brightness levels have not been tested. This phone has no
+LCD brightness responds to the system scale, and level `0` turns the backlight
+off. The visible spacing between levels is not calibrated. This phone has no
 separate vibration motor; FPLinux vibrates it through the rear speaker, as
 stock firmware does, and mutes headphone audio meanwhile. Telemetry read
 without a battery does not demonstrate battery operation, measurement accuracy
@@ -44,7 +45,7 @@ Status terms and limits shared by every phone are defined in the
 | RAM boot                                                           | N/A      | Supported     | —                                                                                                                                             |
 | Persistent boot                                                    | N/A      | Not supported | A USB-loaded RAM bootstrap is required for every Linux boot.                                                                                  |
 | [Local console](../../docs/features/LOCAL_CONSOLE.md)              | Present  | Supported     | `128×160`; graphical terminal with phone-keypad input.                                                                                        |
-| [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)          | Present  | Partial       | Brightness interface enabled; visible brightness levels have not been tested.                                                                 |
+| [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)          | Present  | Supported     | System scale `0…10` works; level `0` turns the backlight off.                                                                                 |
 | [Keypad backlight](../../docs/features/KEYPAD_BACKLIGHT.md)        | Present  | Supported     | Binary LED control; on and off are visible.                                                                                                   |
 | [USB networking](../../docs/features/USB_NETWORKING.md)            | Present  | Supported     | —                                                                                                                                             |
 | [SSH access](../../docs/features/SSH.md)                           | N/A      | Supported     | —                                                                                                                                             |
@@ -93,8 +94,9 @@ Status terms and limits shared by every phone are defined in the
 ## Hardware interfaces
 
 The `128×160` `NV3023` panel uses LCM/DBI with interrupt-driven transfer completion.
-The configured LCD brightness range is `0` through `31`, with `31` as the
-default. Physical LCD brightness levels have not been tested.
+The raw LCD brightness range is `0…31`, with initial raw level `18`. The
+system brightness scale is `0…10`, with initial level `7`. All system levels
+apply; their visible spacing is not calibrated.
 
 The target-specific [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)
 is `/sys/class/backlight/inoi240-backlight`. Shared feature pages document the

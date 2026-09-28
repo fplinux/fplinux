@@ -149,6 +149,7 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
                             load_platform(target_config["platform"]), target_config
                         ),
                         firmware_inputs=firmware,
+                        display_brightness=target_config.get("display_brightness"),
                     )
                 )
     except OSError, ValueError, SystemExit:

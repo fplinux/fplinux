@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+from itertools import pairwise
 from typing import Any
 
 from fplinux_cli.common import fail, load_toml
@@ -52,6 +53,7 @@ def load_target(
             *({"fm_radio"} if "fm_radio" in raw else set()),
             *({"board_maps"} if "board_maps" in raw else set()),
             *({"nand"} if "nand" in raw else set()),
+            *({"display_brightness"} if "display_brightness" in raw else set()),
             "platform",
             "rootfs",
             "bundle",
@@ -66,6 +68,22 @@ def load_target(
     except IdentityError as error:
         fail(str(error))
     config["identity"] = identity
+    if "display_brightness" in config:
+        display_brightness = exact_table(
+            config["display_brightness"], {"backlight", "levels"}, "target display_brightness"
+        )
+        backlight = nonempty_string(
+            display_brightness["backlight"], "target display_brightness backlight"
+        )
+        if backlight in {".", ".."} or VALUE_NAME.fullmatch(backlight) is None:
+            fail("target display_brightness backlight must be a device name")
+        levels = display_brightness["levels"]
+        if not isinstance(levels, list) or len(levels) != 11:
+            fail("target display_brightness levels must contain exactly 11 raw values")
+        for index, value in enumerate(levels):
+            integer_value(value, f"target display_brightness levels[{index}]", bounds=(0, 63))
+        if levels[0] != 0 or any(a >= b for a, b in pairwise(levels)):
+            fail("target display_brightness levels must start at 0 and strictly ascend")
     if "nand" in config:
         nand = config["nand"]
         if not isinstance(nand, dict) or set(nand) not in (

@@ -106,7 +106,14 @@ class PruneTests(unittest.TestCase):
 
             target_configs = {
                 "first": {"platform": "platform-a", "device_data": {"groups": {}}},
-                "second": {"platform": "platform-b", "device_data": {"groups": {}}},
+                "second": {
+                    "platform": "platform-b",
+                    "device_data": {"groups": {}},
+                    "display_brightness": {
+                        "backlight": "second-backlight",
+                        "levels": [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20],
+                    },
+                },
             }
             platform_configs: dict[str, dict[str, object]] = {
                 "platform-a": {},
@@ -123,8 +130,15 @@ class PruneTests(unittest.TestCase):
                 packages: tuple[str, ...],
                 *,
                 firmware_inputs: tuple[firmware_inputs.FirmwareInput, ...],
+                display_brightness: dict[str, object] | None,
             ) -> str:
                 self.assertEqual(firmware_inputs, ())
+                self.assertEqual(
+                    display_brightness,
+                    target_configs["first" if packages == first_packages else "second"].get(
+                        "display_brightness"
+                    ),
+                )
                 return {
                     first_packages: first_recipe,
                     second_packages: second_recipe,
@@ -299,7 +313,9 @@ class PruneTests(unittest.TestCase):
                 packages: tuple[str, ...],
                 *,
                 firmware_inputs: tuple[firmware_inputs.FirmwareInput, ...],
+                display_brightness: dict[str, object] | None,
             ) -> str:
+                self.assertIsNone(display_brightness)
                 recipes: dict[tuple[str, ...], str] = {
                     ("package-base",): default_recipe,
                     ("package-host",): profile_recipe,

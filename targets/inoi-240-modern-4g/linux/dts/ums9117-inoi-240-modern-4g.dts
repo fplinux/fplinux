@@ -84,6 +84,7 @@
 			>;
 			/* INOI uses RGB WLED channels only; the W channel stays dark. */
 			sprd,wled-current-levels = <31 31 31 0>;
+			sprd,wled-default-level = <18>;
 		};
 	};
 };

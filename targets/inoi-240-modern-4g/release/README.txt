@@ -30,12 +30,12 @@ Current target support:
     outputs;
   - keypad backlight on and off;
   - manual CPU frequency selection between 768 MHz and 1 GHz;
-  - brightness and read-only power telemetry interfaces.
+  - system LCD brightness levels 0 through 10 and read-only power telemetry.
 
 The microSD slot is under the battery, so card hot-swap does not apply.
 Internal phone storage writes, modem, Wi-Fi and Linux reboot are not supported.
 Battery-only power-off, battery measurements and charging have not been
-tested. Physical LCD brightness levels have not been tested.
+tested. The visible spacing between LCD brightness levels is not calibrated.
 This phone has no separate vibration motor;
 FPLinux vibrates it through the speaker and mutes headphone audio
 meanwhile, as described in docs/features/VIBRATION.md.
@@ -83,8 +83,9 @@ The shared interfaces, limits and safety procedures are described in:
   - docs/features/VIBRATION.md
   - docs/guides/MICROSD_ROOT.md
 
-This phone uses backlight device inoi240-backlight, with configured levels
-0 through 31 and default 31. Shared interface names are sc2720-battery,
+This phone uses backlight device inoi240-backlight, with raw levels 0 through 31
+and initial raw level 18. Use fplinux-brightness get/set for the system scale
+0 through 10; its initial level is 7. Shared interface names are sc2720-battery,
 sc2720-charger, sc2720-auxadc, ums9117-thermal, UMS9117 speaker vibrator and
 UMS9117 Headphones. IIO, thermal and input-device numbers are assigned at boot. These
 identifiers do not demonstrate the physical effects or measurements noted above.

@@ -12,7 +12,7 @@ import tarfile
 import tempfile
 import unittest
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest import mock
 
 from fplinux_cli import alpine_builder, alpine_state
@@ -86,12 +86,14 @@ class AlpineStateTests(unittest.TestCase):
         image: str = "1" * 64,
         signing_key: str | None = None,
         packages: tuple[str, ...] | None = None,
+        display_brightness: dict[str, Any] | None = None,
     ) -> str:
         return alpine_state.alpine_rootfs_recipe(
             image,
             self.signing_key if signing_key is None else signing_key,
             self.packages if packages is None else packages,
             self.root,
+            display_brightness=display_brightness,
         )
 
     def test_selection_combines_common_and_platform_ownership(self) -> None:
@@ -429,6 +431,16 @@ class AlpineStateTests(unittest.TestCase):
     def test_container_runtime_recipe_is_causal(self) -> None:
         """Changing the build environment invalidates the rootfs recipe."""
         self.assertNotEqual(self._recipe("1" * 64), self._recipe("2" * 64))
+
+    def test_display_brightness_table_changes_rootfs_recipe(self) -> None:
+        """A target brightness table change selects another rootfs generation."""
+        original = {"backlight": "screen-backlight", "levels": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
+        changed = {"backlight": "screen-backlight", "levels": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11]}
+        self.assertNotEqual(self._recipe(), self._recipe(display_brightness=original))
+        self.assertNotEqual(
+            self._recipe(display_brightness=original),
+            self._recipe(display_brightness=changed),
+        )
 
     def test_package_signing_key_is_causal(self) -> None:
         """A different persistent abuild key must produce a different recipe."""
@@ -838,9 +850,16 @@ class AlpineStateTests(unittest.TestCase):
         (root / "etc/init.d/networking").write_text("#!/bin/sh\n", encoding="utf-8")
         (root / "etc/runlevels/boot/networking").symlink_to("/etc/init.d/networking")
         (root / "etc/init.d/fplinux-terminal").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "etc/init.d/fplinux-brightness").write_text("#!/bin/sh\n", encoding="utf-8")
         (root / "usr/bin/fplinux-terminal").write_text("terminal\n", encoding="utf-8")
+        (root / "usr/bin/fplinux-brightness").write_text("brightness\n", encoding="utf-8")
+        (root / "usr/libexec/fplinux").mkdir(parents=True)
+        (root / "usr/libexec/fplinux/brightnessd").write_text("brightnessd\n", encoding="utf-8")
         (root / "etc/runlevels/default/fplinux-terminal").symlink_to(
             "/etc/init.d/fplinux-terminal"
+        )
+        (root / "etc/runlevels/default/fplinux-brightness").symlink_to(
+            "/etc/init.d/fplinux-brightness"
         )
         (root / "init").symlink_to("/sbin/init")
         return root
@@ -853,6 +872,67 @@ class AlpineStateTests(unittest.TestCase):
             "\n".join(packages) + "\n",
             encoding="utf-8",
         )
+
+    def test_brightness_config_has_exact_runtime_bytes_and_is_verified(self) -> None:
+        """Composition writes the target table and rejects changed installed bytes."""
+        root = self._verified_rootfs()
+        packages = ("fplinux-base", "fplinux-terminal")
+        self._write_world(root, packages)
+        table = {"backlight": "screen-backlight", "levels": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
+        config = root / "etc/fplinux/brightness.conf"
+
+        alpine_builder._install_display_brightness(root, table)  # noqa: SLF001
+        self.assertEqual(
+            config.read_bytes(),
+            b"backlight=screen-backlight\nlevels=0,1,2,3,4,5,6,7,8,9,10\n",
+        )
+        self.assertEqual(config.stat().st_mode & 0o777, 0o644)
+        with mock.patch.object(alpine_builder, "_require_apk_owner"):
+            alpine_builder._verify_alpine_rootfs(  # noqa: SLF001
+                root, packages, display_brightness=table
+            )
+            config.write_text("backlight=other-backlight\nlevels=0,1,2,3,4,5,6,7,8,9,10\n")
+            with self.assertRaisesRegex(SystemExit, "brightness configuration does not match"):
+                alpine_builder._verify_alpine_rootfs(  # noqa: SLF001
+                    root, packages, display_brightness=table
+                )
+
+    def test_rootfs_without_brightness_table_has_no_brightness_config(self) -> None:
+        """A headless target does not receive display configuration."""
+        root = self._verified_rootfs()
+        packages = ("fplinux-base", "fplinux-terminal")
+        self._write_world(root, packages)
+        alpine_builder._install_display_brightness(root, None)  # noqa: SLF001
+        config = root / "etc/fplinux/brightness.conf"
+        self.assertFalse(config.exists())
+        with mock.patch.object(alpine_builder, "_require_apk_owner"):
+            alpine_builder._verify_alpine_rootfs(root, packages)  # noqa: SLF001
+            config.parent.mkdir(parents=True)
+            config.write_text("backlight=unexpected\nlevels=0,1,2,3,4,5,6,7,8,9,10\n")
+            with self.assertRaisesRegex(SystemExit, "without a target table"):
+                alpine_builder._verify_alpine_rootfs(root, packages)  # noqa: SLF001
+
+    def test_rootfs_requires_brightness_command_and_startup_service(self) -> None:
+        """The composed base rootfs must provide the command and its default runlevel."""
+        root = self._verified_rootfs()
+        packages = ("fplinux-base", "fplinux-terminal")
+        self._write_world(root, packages)
+        command = root / "usr/bin/fplinux-brightness"
+        daemon = root / "usr/libexec/fplinux/brightnessd"
+        service = root / "etc/runlevels/default/fplinux-brightness"
+
+        with mock.patch.object(alpine_builder, "_require_apk_owner"):
+            command.unlink()
+            with self.assertRaisesRegex(SystemExit, "fplinux-brightness"):
+                alpine_builder._verify_alpine_rootfs(root, packages)  # noqa: SLF001
+            command.write_text("brightness\n", encoding="utf-8")
+            daemon.unlink()
+            with self.assertRaisesRegex(SystemExit, "brightnessd"):
+                alpine_builder._verify_alpine_rootfs(root, packages)  # noqa: SLF001
+            daemon.write_text("brightnessd\n", encoding="utf-8")
+            service.unlink()
+            with self.assertRaisesRegex(SystemExit, "fplinux-brightness"):
+                alpine_builder._verify_alpine_rootfs(root, packages)  # noqa: SLF001
 
     def test_rootfs_verifier_requires_input_files_only_when_selected(self) -> None:
         """A gadgetless root accepts no input bridge, while the selected bridge is required."""

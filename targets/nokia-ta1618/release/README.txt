@@ -19,7 +19,7 @@ See docs/features/LOCAL_CONSOLE.md for terminal controls and the application
 pages under docs/apps/ for their commands and limitations.
 
 Current target support:
-  - 11 LCD backlight levels;
+  - system LCD brightness levels 0 through 10;
   - physical keypad and keypad backlight;
   - bounded vibration through the Linux force-feedback interface;
   - USB SSH/SFTP and host-keyboard forwarding;
@@ -88,10 +88,12 @@ Interfaces, limits and safety procedures are bundled at:
   - docs/features/VIBRATION.md
   - docs/guides/MICROSD_ROOT.md
 
-This phone uses backlight device ta1618-backlight, with levels 0 through 10
-and default 10. Shared interface names are sc2720-battery, sc2720-charger,
-sc2720-auxadc, ums9117-thermal, sc27xx:vibrator and UMS9117 Headphones. IIO,
-thermal and input-device numbers are assigned at boot.
+This phone uses backlight device ta1618-backlight, with raw levels 0 through 20
+and initial raw level 15. Use fplinux-brightness get/set for the system scale
+0 through 10; its initial level is 7. The visible spacing of intermediate
+levels is not fully qualified. Shared interface names are sc2720-battery,
+sc2720-charger, sc2720-auxadc, ums9117-thermal, sc27xx:vibrator and UMS9117
+Headphones. IIO, thermal and input-device numbers are assigned at boot.
 
 Install and run the optional applications by following:
   - docs/apps/SHOWCASE.md
