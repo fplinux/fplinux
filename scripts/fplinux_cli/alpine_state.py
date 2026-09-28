@@ -56,6 +56,14 @@ SHARED_APORT_SOURCES = {
         "lib/fplinux/fplinux-vt-guardian.c",
     ),
     "fplinux-bluetooth": CLI_SOURCES,
+    "fplinux-brightness-ui": (
+        *DRM_SESSION_SOURCES,
+        *BRIGHTNESS_CLIENT_SOURCES,
+        *INPUT_SESSION_SOURCES,
+        *INPUT_DEVICE_SOURCES,
+        *KEYPAD_CODE_SOURCES,
+        *CLI_SOURCES,
+    ),
     "fplinux-charge": CLI_SOURCES,
     "fplinux-cpuclock": CLI_SOURCES,
     "fplinux-fm": CLI_SOURCES,
@@ -102,6 +110,7 @@ COMMON_PACKAGES = (
     "fplinux-libudev",
 )
 LOCAL_BUILD_DEPENDENCIES = {
+    "fplinux-brightness-ui": ("fplinux-libdrm",),
     "fplinux-present": ("fplinux-libdrm",),
     "fplinux-rotate": ("fplinux-libdrm",),
     "fplinux-showcase": ("fplinux-libdrm",),

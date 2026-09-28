@@ -14,6 +14,9 @@ made with `set` during the temporary effect is applied when the application
 releases it. The levels are not percentages or calibrated optical units;
 equal numbers on different phones do not establish equal visible brightness.
 
+To change the level with the phone keypad, install the optional
+[brightness application](../apps/BRIGHTNESS.md).
+
 The selected [target's documentation](../../targets/README.md) states its
 physical support and raw hardware range. A standalone archive carries that
 status in `README.txt`.

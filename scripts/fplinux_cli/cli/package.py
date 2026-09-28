@@ -28,6 +28,7 @@ Candidate packaging does not make it release-ready.
 PACKAGE_DOCUMENTS = {
     "60-fplinux.rules": common.ROOT / "common/60-fplinux.rules",
     "LICENSE": common.ROOT / "LICENSE",
+    "docs/apps/BRIGHTNESS.md": common.ROOT / "docs/apps/BRIGHTNESS.md",
     "docs/apps/JPEG.md": common.ROOT / "docs/apps/JPEG.md",
     "docs/apps/PRESENT.md": common.ROOT / "docs/apps/PRESENT.md",
     "docs/apps/ROTATE.md": common.ROOT / "docs/apps/ROTATE.md",

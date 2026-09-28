@@ -24,6 +24,7 @@ packages = [
 
 [bundle]
 packages = [
+  "fplinux-brightness-ui",
   "fplinux-charge",
   "fplinux-showcase",
   "fplinux-tyrquake",

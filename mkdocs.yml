@@ -123,6 +123,7 @@ nav:
           - docs/features/SOC_TEMPERATURE.md
           - docs/features/AUXADC.md
   - Applications:
+      - docs/apps/BRIGHTNESS.md
       - docs/apps/SHOWCASE.md
       - docs/apps/TYRQUAKE.md
       - docs/apps/ROTATE.md

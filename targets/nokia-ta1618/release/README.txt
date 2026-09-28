@@ -96,6 +96,7 @@ sc2720-charger, sc2720-auxadc, ums9117-thermal, sc27xx:vibrator and UMS9117
 Headphones. IIO, thermal and input-device numbers are assigned at boot.
 
 Install and run the optional applications by following:
+  - docs/apps/BRIGHTNESS.md
   - docs/apps/SHOWCASE.md
   - docs/apps/TYRQUAKE.md
 
