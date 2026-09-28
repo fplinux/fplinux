@@ -1,0 +1,11 @@
+diff --git a/Documentation/devicetree/bindings/gpio/sprd,gpio-eic.yaml b/Documentation/devicetree/bindings/gpio/sprd,gpio-eic.yaml
+--- a/Documentation/devicetree/bindings/gpio/sprd,gpio-eic.yaml
++++ b/Documentation/devicetree/bindings/gpio/sprd,gpio-eic.yaml
+@@ -52,6 +52,7 @@
+           - sprd,sc2731-eic
+       - items:
+           - enum:
++              - sprd,ums9117-eic-debounce
+               - sprd,ums512-eic-debounce
+           - const: sprd,sc9860-eic-debounce
+       - items:

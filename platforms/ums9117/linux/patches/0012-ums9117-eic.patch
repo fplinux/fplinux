@@ -1,0 +1,12 @@
+diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
+--- a/drivers/gpio/Kconfig
++++ b/drivers/gpio/Kconfig
+@@ -279,7 +279,7 @@
+
+ config GPIO_EIC_SPRD
+ 	tristate "Spreadtrum EIC support"
+-	depends on ARCH_SPRD || COMPILE_TEST
++	depends on ARCH_SPRD || ARCH_UMS9117 || COMPILE_TEST
+ 	depends on OF_GPIO
+ 	select GPIOLIB_IRQCHIP
+ 	help

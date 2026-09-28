@@ -4,8 +4,8 @@
  *
  * The controller implements the SDHCI 4.10 register layout in v4 mode, but
  * its register interface is 32-bit only.  Board resources are owned by their
- * normal kernel providers; this driver owns only the SDHCI window and the
- * fitted polling-only card-detect window.
+ * normal kernel providers; this driver owns only the SDHCI window. Card
+ * detection uses the EIC GPIO provider and the MMC GPIO interrupt helper.
  */
 #include <linux/bitops.h>
 #include <linux/clk.h>
@@ -21,6 +21,7 @@
 #include <linux/mmc/host.h>
 #include <linux/mmc/mmc.h>
 #include <linux/mmc/sd.h>
+#include <linux/mmc/slot-gpio.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/reset.h>
@@ -42,10 +43,6 @@
 #define UMS9117_SDHCI_MAX_REQUEST_BYTES SZ_128K
 #define UMS9117_SDHCI_ADMA_TABLE_COUNT (UMS9117_SDHCI_MAX_SEGS * 2U + 1U)
 
-#define UMS9117_SDHCI_CD_DATA 0x0
-#define UMS9117_SDHCI_CD_MASK 0x4
-#define UMS9117_SDHCI_CD_MMIO_BYTES 0x8
-#define UMS9117_SDHCI_CD_BIT BIT(0)
 #define UMS9117_SDHCI_CD_SETTLE_MIN_US 3000U
 #define UMS9117_SDHCI_CD_SETTLE_MAX_US 4000U
 
@@ -56,13 +53,11 @@ struct ums9117_sdhci_host {
 	struct clk *sdio_clk;
 	struct clk *enable_clk;
 	struct reset_control *reset;
-	void __iomem *card_detect;
 	spinlock_t policy_lock;
 	u16 transfer_mode;
 	u32 deferred_clock_hz;
 	u32 applied_clock_hz;
 	u32 app_cmd_arg;
-	bool raw_card_detect_owned;
 	bool app_cmd_armed;
 	bool active_width_acmd6;
 	bool width_acmd6_clean;
@@ -741,85 +736,6 @@ static void ums9117_sdhci_request_done(struct sdhci_host *host,
 	mmc_request_done(host->mmc, mrq);
 }
 
-static int ums9117_sdhci_get_cd(struct mmc_host *mmc)
-{
-	struct sdhci_host *host = mmc_priv(mmc);
-	struct ums9117_sdhci_host *ums_host = ums9117_sdhci_priv(host);
-
-	if (host->flags & SDHCI_DEVICE_DEAD)
-		return 0;
-	if (!ums_host->raw_card_detect_owned ||
-	    !(readl(ums_host->card_detect + UMS9117_SDHCI_CD_MASK) &
-	      UMS9117_SDHCI_CD_BIT)) {
-		dev_err_ratelimited(mmc_dev(mmc),
-				    "card-detect ownership is unavailable\n");
-		return 0;
-	}
-	return !(readl(ums_host->card_detect + UMS9117_SDHCI_CD_DATA) &
-		 UMS9117_SDHCI_CD_BIT);
-}
-
-static void ums9117_sdhci_release_raw_card_detect(void *data)
-{
-	struct ums9117_sdhci_host *ums_host = data;
-	u32 mask;
-
-	if (!ums_host->raw_card_detect_owned)
-		return;
-	mask = readl(ums_host->card_detect + UMS9117_SDHCI_CD_MASK);
-	writel(mask & ~UMS9117_SDHCI_CD_BIT,
-	       ums_host->card_detect + UMS9117_SDHCI_CD_MASK);
-	ums_host->raw_card_detect_owned = false;
-}
-
-static int ums9117_sdhci_init_raw_card_detect(struct platform_device *pdev,
-					      struct sdhci_host *host)
-{
-	struct ums9117_sdhci_host *ums_host = ums9117_sdhci_priv(host);
-	struct resource *resource;
-	u32 mask;
-	u32 data;
-	int ret;
-
-	resource = platform_get_resource_byname(pdev, IORESOURCE_MEM,
-						"card-detect");
-	if (!resource || resource_size(resource) != UMS9117_SDHCI_CD_MMIO_BYTES)
-		return dev_err_probe(
-			&pdev->dev, -EINVAL,
-			"card-detect must be an 8-byte resource\n");
-	ums_host->card_detect = devm_ioremap_resource(&pdev->dev, resource);
-	if (IS_ERR(ums_host->card_detect))
-		return PTR_ERR(ums_host->card_detect);
-
-	mask = readl(ums_host->card_detect + UMS9117_SDHCI_CD_MASK);
-	if (mask ||
-	    readl(ums_host->card_detect + UMS9117_SDHCI_CD_MASK) != mask)
-		return dev_err_probe(&pdev->dev, -EBUSY,
-				     "card-detect mask is already owned\n");
-	writel(UMS9117_SDHCI_CD_BIT,
-	       ums_host->card_detect + UMS9117_SDHCI_CD_MASK);
-	if (readl(ums_host->card_detect + UMS9117_SDHCI_CD_MASK) !=
-	    UMS9117_SDHCI_CD_BIT) {
-		writel(0, ums_host->card_detect + UMS9117_SDHCI_CD_MASK);
-		return dev_err_probe(&pdev->dev, -EIO,
-				     "failed to enable card-detect input\n");
-	}
-	ums_host->raw_card_detect_owned = true;
-	ret = devm_add_action_or_reset(
-		&pdev->dev, ums9117_sdhci_release_raw_card_detect, ums_host);
-	if (ret)
-		return ret;
-
-	usleep_range(UMS9117_SDHCI_CD_SETTLE_MIN_US,
-		     UMS9117_SDHCI_CD_SETTLE_MAX_US);
-	data = readl(ums_host->card_detect + UMS9117_SDHCI_CD_DATA);
-	if (data & ~UMS9117_SDHCI_CD_BIT)
-		return dev_err_probe(
-			&pdev->dev, -EUCLEAN,
-			"unexpected card-detect inputs are active\n");
-	return 0;
-}
-
 static int ums9117_sdhci_enable_resources(struct platform_device *pdev,
 					  struct sdhci_host *host)
 {
@@ -885,7 +801,6 @@ static void ums9117_sdhci_apply_limits(struct sdhci_host *host)
 	struct mmc_host *mmc = host->mmc;
 
 	mmc->caps &= MMC_CAP_4_BIT_DATA | MMC_CAP_SD_HIGHSPEED;
-	mmc->caps |= MMC_CAP_NEEDS_POLL;
 	mmc->caps2 = MMC_CAP2_NO_SDIO | MMC_CAP2_NO_MMC |
 		     MMC_CAP2_NO_WRITE_PROTECT;
 	mmc->f_min = UMS9117_SDHCI_IDENT_CLOCK_HZ;
@@ -922,10 +837,13 @@ static int ums9117_sdhci_probe(struct platform_device *pdev)
 	ret = mmc_of_parse(host->mmc);
 	if (ret)
 		return ret;
+	if (!mmc_host_can_gpio_cd(host->mmc))
+		return dev_err_probe(&pdev->dev, -EINVAL,
+				     "card-detect GPIO is required\n");
+	/* GPIO acquisition enables the EIC input; allow its data to settle. */
+	usleep_range(UMS9117_SDHCI_CD_SETTLE_MIN_US,
+		     UMS9117_SDHCI_CD_SETTLE_MAX_US);
 	ret = ums9117_sdhci_get_supplies(host);
-	if (ret)
-		return ret;
-	ret = ums9117_sdhci_init_raw_card_detect(pdev, host);
 	if (ret)
 		return ret;
 	ret = ums9117_sdhci_enable_resources(pdev, host);
@@ -950,7 +868,6 @@ static int ums9117_sdhci_probe(struct platform_device *pdev)
 	host->mmc->caps2 |= MMC_CAP2_NO_SDIO | MMC_CAP2_NO_MMC |
 			    MMC_CAP2_NO_WRITE_PROTECT;
 	host->mmc_host_ops.request = ums9117_sdhci_request;
-	host->mmc_host_ops.get_cd = ums9117_sdhci_get_cd;
 
 	ret = sdhci_setup_host(host);
 	if (ret)
@@ -971,6 +888,16 @@ static int ums9117_sdhci_probe(struct platform_device *pdev)
 	ret = __sdhci_add_host(host);
 	if (ret)
 		goto out_cleanup;
+	/* MMC falls back to polling when its GPIO IRQ request fails. */
+	if (host->mmc->slot.cd_irq < 0 ||
+	    host->mmc->caps & MMC_CAP_NEEDS_POLL) {
+		ret = host->mmc->slot.cd_irq;
+		if (ret >= 0)
+			ret = -ENXIO;
+		sdhci_remove_host(host, false);
+		return dev_err_probe(&pdev->dev, ret,
+				     "card-detect GPIO IRQ is required\n");
+	}
 	return 0;
 
 out_cleanup:

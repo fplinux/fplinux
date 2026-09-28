@@ -217,10 +217,22 @@
 			#clock-cells = <1>;
 		};
 
+		eic2: gpio@402c0000 {
+			compatible = "sprd,ums9117-eic-debounce",
+				     "sprd,sc9860-eic-debounce";
+			reg = <0x402c0000 0x80>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			interrupt-controller;
+			#interrupt-cells = <2>;
+			interrupts = <GIC_SPI 37 IRQ_TYPE_LEVEL_HIGH>;
+			status = "disabled";
+		};
+
 		sdio0_mmc: mmc@20300000 {
 			compatible = "sprd,ums9117-sdhci";
-			reg = <0x20300000 0x100>, <0x402c0000 0x8>;
-			reg-names = "host", "card-detect";
+			reg = <0x20300000 0x100>;
+			reg-names = "host";
 			interrupts = <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&ap_clk CLK_SDIO0>, <&apahb_gate CLK_SDIO0_EB>;
 			clock-names = "sdio", "enable";
