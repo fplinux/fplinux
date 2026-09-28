@@ -1,7 +1,7 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-jpeg
 pkgver=1
-pkgrel=1
+pkgrel=0
 pkgdesc="V4L2 and software JPEG tools for FPLinux"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
