@@ -50,6 +50,7 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
                 str(SOURCE),
                 str(APORT / "armada-scene.c"),
                 str(ROOT / "lib/fplinux/fplinux-drm-session.c"),
+                str(ROOT / "lib/fplinux/fplinux-brightness-client.c"),
                 str(ROOT / "lib/fplinux/fplinux-cli.c"),
                 *drm_flags,
                 "-o",
@@ -81,7 +82,7 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
                 self.assertIn("Usage:", result.stdout)
                 self.assertIn("--runs", result.stdout)
                 self.assertIn("--keypad-led", result.stdout)
-                self.assertIn("--lcd-backlight", result.stdout)
+                self.assertNotIn("--lcd-backlight", result.stdout)
                 self.assertEqual(result.stderr, "")
 
     def test_invalid_arguments_fail_before_opening_phone_hardware(self) -> None:
@@ -97,7 +98,7 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
             ("--runs", "--help"),
             ("--runs", "1", "--runs", "2"),
             ("--keypad-led", "one", "--keypad-led", "two"),
-            ("--lcd-backlight", "one", "--lcd-backlight", "two"),
+            ("--lcd-backlight", "one"),
             ("--keypad-led=",),
             ("--lcd-backlight=",),
             ("--unknown",),
@@ -126,8 +127,6 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
                 "1",
                 "--keypad-led",
                 str(Path(self.temporary.name) / "keypad-led"),
-                "--lcd-backlight",
-                str(Path(self.temporary.name) / "lcd-backlight"),
             ],
             name="accept FPLinux Showcase options before phone hardware startup",
             timeout=5,
@@ -141,7 +140,6 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
     def test_native_long_options_reach_the_real_hardware_boundary(self) -> None:
         """Equals-delimited options and an unambiguous native prefix are accepted."""
         keypad_led = Path(self.temporary.name) / "keypad-led"
-        lcd_backlight = Path(self.temporary.name) / "lcd-backlight"
 
         for runs_option in ("--runs=1", "--r=1"):
             with self.subTest(runs_option=runs_option):
@@ -150,7 +148,6 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
                         str(self.executable),
                         runs_option,
                         f"--keypad-led={keypad_led}",
-                        f"--lcd-backlight={lcd_backlight}",
                     ],
                     name="accept native FPLinux Showcase long options",
                     timeout=5,
@@ -165,7 +162,6 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
         """Compile the real application against a test-owned class tree."""
         executable = class_root / "fplinux-showcase"
         leds = class_root / "leds" / "*" / "brightness"
-        backlights = class_root / "backlights" / "*" / "brightness"
         drm_flags = shlex.split(
             run_process(
                 ["pkg-config", "--cflags", "--libs", "libdrm"],
@@ -185,10 +181,10 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
                 f"-I{APORT}",
                 f"-I{SHARED}",
                 f'-DFPLINUX_SHOWCASE_KEYPAD_LED_GLOB="{leds}"',
-                f'-DFPLINUX_SHOWCASE_LCD_BACKLIGHT_GLOB="{backlights}"',
                 str(SOURCE),
                 str(APORT / "armada-scene.c"),
                 str(ROOT / "lib/fplinux/fplinux-drm-session.c"),
+                str(ROOT / "lib/fplinux/fplinux-brightness-client.c"),
                 str(ROOT / "lib/fplinux/fplinux-cli.c"),
                 *drm_flags,
                 "-o",
@@ -212,7 +208,6 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
         class_root = Path(self.temporary.name) / "class-selected"
         self.add_class_device(class_root / "leds", "status")
         self.add_class_device(class_root / "leds", "panel:kbd_backlight")
-        self.add_class_device(class_root / "backlights", "lcd")
         executable = self.compile_with_class_roots(class_root)
 
         result = run_process(
@@ -240,24 +235,6 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("ambiguous keypad LEDs", result.stderr)
-        self.assertNotIn("required keypad fplinux/keypad0", result.stderr)
-
-    def test_default_class_discovery_rejects_ambiguous_lcd_backlights(self) -> None:
-        """Multiple display backlights stop before any phone input opens."""
-        class_root = Path(self.temporary.name) / "backlight-ambiguous"
-        self.add_class_device(class_root / "leds", "kbd_backlight")
-        self.add_class_device(class_root / "backlights", "lcd0")
-        self.add_class_device(class_root / "backlights", "lcd1")
-        executable = self.compile_with_class_roots(class_root)
-
-        result = run_process(
-            [str(executable), "--runs", "1"],
-            name="reject ambiguous FPLinux Showcase LCD backlights",
-            timeout=5,
-        )
-
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("ambiguous LCD backlights", result.stderr)
         self.assertNotIn("required keypad fplinux/keypad0", result.stderr)
 
 

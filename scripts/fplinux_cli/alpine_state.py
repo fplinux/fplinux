@@ -66,7 +66,12 @@ SHARED_APORT_SOURCES = {
         *CLI_SOURCES,
     ),
     "fplinux-rotate": (*DRM_SESSION_SOURCES, *CLI_SOURCES),
-    "fplinux-showcase": (*DRM_SESSION_SOURCES, *CLI_SOURCES, *KEYPAD_CODE_SOURCES),
+    "fplinux-showcase": (
+        *DRM_SESSION_SOURCES,
+        *CLI_SOURCES,
+        *KEYPAD_CODE_SOURCES,
+        *BRIGHTNESS_CLIENT_SOURCES,
+    ),
     "fplinux-terminal": (
         *CLI_SOURCES,
         *DRM_SESSION_SOURCES,

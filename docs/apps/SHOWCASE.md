@@ -67,10 +67,13 @@ average CPU use over the run; `peak_rss_kib` is its peak resident memory as
 reported by Linux. Neither value describes total system memory.
 
 Press the phone's right soft key to exit at any time. The application then
-returns the display to the local console, restores the LCD brightness it found
-at startup, restores the keypad-light level it found at startup, switches off
-its vibration request, and releases the input and DRM devices. The same
-cleanup runs after a handled termination signal or startup failure.
+returns the display to the local console, releases its temporary LCD brightness
+control, restores the keypad-light level it found at startup, switches off its
+vibration request, and releases the input and DRM devices. The brightness
+service applies the latest user-selected level, including a change made while
+the presentation was running. It also releases the temporary level if the
+application exits unexpectedly. Other cleanup runs after a handled termination
+signal or startup failure.
 
 ## Display and physical effects
 
@@ -78,17 +81,18 @@ The application accepts an RGB565 DRM mode at `240x320` or
 `128x160`. The renderer derives its projection and scene layout from the active
 display geometry.
 
-LCD brightness and keypad light use Linux backlight and LED interfaces. The
-application discovers them automatically and refuses to start if either is
-missing or ambiguous. `--lcd-backlight DIR` and `--keypad-led DIR` select the
-respective sysfs device directory explicitly; each directory must provide
-`brightness` and `max_brightness`. LCD `max_brightness` must be at least 10.
+LCD brightness uses the shared [system brightness control](../features/DISPLAY_BACKLIGHT.md).
+The presentation temporarily selects logical levels `6` through `10`; it
+requires the brightness service to be available. The keypad light uses the
+Linux LED interface. The application discovers it automatically and refuses
+to start if it is missing or ambiguous. `--keypad-led DIR` selects its sysfs
+device directory explicitly; it must provide `brightness` and `max_brightness`.
 The keypad must provide the right soft key, and the vibrator must support
 `FF_RUMBLE`. Missing required controls prevent the presentation from starting.
 
 The presentation switches the keypad light and vibrator on and off; it varies
 their pulse timing, not their intensity. Daylight and LCD brightness change
-continuously throughout the complete presentation. During the hardware act the
+throughout the complete presentation. During the hardware act the
 keypad light and vibrator
 transmit `FPLINUX` in Morse code while the corresponding letter pulses on
 screen. The final two seconds hold on the water after the letters submerge.

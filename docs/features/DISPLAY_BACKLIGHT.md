@@ -8,8 +8,11 @@ survives a restart of the brightness service during the same boot, but is not
 saved across phone boots.
 
 The brightness service translates each level to the selected phone's current
-code. The levels are not percentages or calibrated optical units; equal numbers
-on different phones do not establish equal visible brightness.
+code. An application can temporarily change the visible level while it owns
+the display. `get` continues to report the user's selected level, and a change
+made with `set` during the temporary effect is applied when the application
+releases it. The levels are not percentages or calibrated optical units;
+equal numbers on different phones do not establish equal visible brightness.
 
 The selected [target's documentation](../../targets/README.md) states its
 physical support and raw hardware range. A standalone archive carries that
