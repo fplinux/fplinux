@@ -13,17 +13,30 @@ replaces="alpine-baselayout-data alpine-release"
 replaces_priority=100
 options="!check"
 source="fstab inittab interfaces hostname issue os-release fplinux-zram.initd
-	fplinux-kmsg.c fplinux-cli.c fplinux-cli.h"
+	fplinux-brightness.initd
+	fplinux-kmsg.c fplinux-cli.c fplinux-cli.h
+	fplinux-brightness.c fplinux-brightnessd.c
+	fplinux-brightness-client.c fplinux-brightness-client.h"
 builddir="$srcdir"
 
 build() {
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
 		-I"$srcdir" "$srcdir/fplinux-kmsg.c" "$srcdir/fplinux-cli.c" \
 		$LDFLAGS -Wl,--gc-sections -o fplinux-kmsg
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		-I"$srcdir" "$srcdir/fplinux-brightness.c" \
+		"$srcdir/fplinux-brightness-client.c" "$srcdir/fplinux-cli.c" \
+		$LDFLAGS -o fplinux-brightness
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		-I"$srcdir" "$srcdir/fplinux-brightnessd.c" \
+		"$srcdir/fplinux-cli.c" $LDFLAGS -o fplinux-brightnessd
 }
 
 package() {
 	install -Dm755 "$builddir/fplinux-kmsg" "$pkgdir/usr/libexec/fplinux/kmsg"
+	install -Dm755 "$builddir/fplinux-brightness" "$pkgdir/usr/bin/fplinux-brightness"
+	install -Dm755 "$builddir/fplinux-brightnessd" \
+		"$pkgdir/usr/libexec/fplinux/brightnessd"
 	install -Dm644 "$srcdir/fstab" "$pkgdir/etc/fstab"
 	install -Dm644 "$srcdir/inittab" "$pkgdir/etc/inittab"
 	install -Dm644 "$srcdir/interfaces" "$pkgdir/etc/network/interfaces"
@@ -32,6 +45,8 @@ package() {
 	install -Dm644 "$srcdir/os-release" "$pkgdir/etc/os-release"
 	install -Dm755 "$srcdir/fplinux-zram.initd" \
 		"$pkgdir/etc/init.d/fplinux-zram"
+	install -Dm755 "$srcdir/fplinux-brightness.initd" \
+		"$pkgdir/etc/init.d/fplinux-brightness"
 
 	mkdir -p "$pkgdir/etc/runlevels/sysinit" "$pkgdir/etc/runlevels/boot" \
 		"$pkgdir/etc/runlevels/default"
@@ -40,6 +55,8 @@ package() {
 	done
 	ln -s /etc/init.d/fplinux-zram \
 		"$pkgdir/etc/runlevels/sysinit/fplinux-zram"
+	ln -s /etc/init.d/fplinux-brightness \
+		"$pkgdir/etc/runlevels/default/fplinux-brightness"
 	for service in bootmisc hostname networking; do
 		ln -s "/etc/init.d/$service" "$pkgdir/etc/runlevels/boot/$service"
 	done
@@ -55,7 +72,12 @@ d4f32b008bfadf39d86f04cd29e3d39a2124d3c3cd59481f61f573caee2be2ff5b074e9959a02543
 49021c0bcdfe0034ccafc330ca63886aa0a00a8e9100e2ecae21678178e4df98775932be6195067e944a79b8620a420484b9d70e1b41e095696a9358f3cbc4f9  issue
 c78d6b9b4995a018827d2a36fec591310cc90fe3e1e31d9ac9ca3c1dbac7d10445e46f19cce2c312ec6d19135d3009388d75ff405c16180ebb70ce29cc001b1b  os-release
 16130cfd79c17d372d18f4a47a27d1355a387e73b67e6bfe1f925131dbc6dd4ce66e394409265ccde74ad7fe001a1f5fcfc82a8db3b23428138111d477edfb59  fplinux-zram.initd
+f3f23a26c1d295fbb5ba236954ac3fb517e0563ddc5efe89eab2c2ed1009360e4077ed28483d0f7c8016854cdf90695d139f71df99cc0181cd5f72f695a110ba  fplinux-brightness.initd
 61ac67c34c4879c58956b59ca4ba3806b11bb04be2200c9010f1c8772b223a947678c2450611a69ea23d4eb0afa2508a6ca75c8eee5842dd5b1ae3dbbd25a596  fplinux-kmsg.c
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
+cba8e45db60923c30ed93cd2fca674447d256c00ac6068c5182cf0b4134a264e9c81ad42c092471ad6f72c24a9ea43188f157f562f33a5ff2335c565f570a0dc  fplinux-brightness.c
+7d93b1d3fbaf02c1d91c4cfb81fb46b46591b081c954f56fd0d354380a97c8ccf0b033c714d10b8cd6a530443dc806af9f8afe1b920cf4fab5958f27113717d9  fplinux-brightnessd.c
+a16c1b2b84831be3da5bbf1d198c827a4bfde8bb435e4ac6d52777ca8472cedc700be5007a4320e6ffcafcf3ff3183a0de4e7068a94576e0016ca9b09c650bcf  fplinux-brightness-client.c
+031e8a9a9fed64c19b947d6d1b7510f2bf0dd76ae7712cd23f8fbf838a28e29eefec2adaa772070f75c930a42bf0e77290825ea88fd545800dbca30bdd61f0ee  fplinux-brightness-client.h
 "

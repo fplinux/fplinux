@@ -36,7 +36,7 @@ Status terms and limits shared by every phone are defined in the
 | RAM boot                                                           | N/A      | Supported     | —                                                                                                                                                 |
 | Persistent boot                                                    | N/A      | Not supported | The RAM bootstrap must be loaded over USB for every Linux boot.                                                                                   |
 | [Local console](../../docs/features/LOCAL_CONSOLE.md)              | Present  | Supported     | `240×320`; graphical terminal with phone-keypad input.                                                                                            |
-| [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)          | Present  | Supported     | Eleven levels from off through the tested maximum.                                                                                                |
+| [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)          | Present  | Partial       | System scale `0…10`, raw range `0…20`; visible spacing of the new intermediate levels is not fully qualified.                                     |
 | [Keypad backlight](../../docs/features/KEYPAD_BACKLIGHT.md)        | Present  | Supported     | Binary LED control plus a bounded key-press light.                                                                                                |
 | [USB networking](../../docs/features/USB_NETWORKING.md)            | Present  | Supported     | —                                                                                                                                                 |
 | [SSH access](../../docs/features/SSH.md)                           | N/A      | Supported     | —                                                                                                                                                 |
@@ -85,9 +85,10 @@ Status terms and limits shared by every phone are defined in the
 ## Hardware interfaces
 
 The `240×320` `ST7789P3` panel uses SPI with interrupt-driven transfer completion.
-LCD levels `1` through `10` increase monotonically up to the tested maximum;
-`10` is the default. They are raw current steps rather than percentages or
-calibrated optical units.
+The raw LCD backlight range is `0…20`, with initial raw level `15`. The system
+brightness scale is `0…10`, with initial level `7`; all system levels apply and
+raw current steps draw increasing power. Their visible spacing is not
+calibrated, and the full intermediate progression has not been inspected.
 
 The target-specific [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)
 is `/sys/class/backlight/ta1618-backlight`. Shared feature pages document the

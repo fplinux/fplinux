@@ -15,6 +15,10 @@ raw_page_bytes = 2176
 [rootfs]
 packages = ["fplinux-audio", "fplinux-jack"]
 
+[display_brightness]
+backlight = "ta1618-backlight"
+levels = [0, 4, 6, 7, 10, 12, 13, 15, 17, 18, 20]
+
 [bundle]
 packages = []
 
@@ -78,7 +82,7 @@ spi_mode = 1
 lcd_id = 0x8888b6
 exec_distance = 0x314d
 backlight_channels = "rgbw"
-backlight_level = 0x14
+backlight_level = 0x0f
 session_name = "ta1618-linux"
 boot_instructions = "Power the phone off, hold *, then connect USB while keeping * pressed."
 

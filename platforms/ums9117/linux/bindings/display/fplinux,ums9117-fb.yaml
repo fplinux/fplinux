@@ -126,6 +126,14 @@ properties:
     maxItems: 4
     description: Four BLTC current codes, one per WLED channel, each 0 through 63.
 
+  sprd,wled-default-level:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    minimum: 1
+    maximum: 63
+    description: |
+      Initial raw WLED current code, no higher than the nonzero code in
+      sprd,wled-current-levels. Defaults to that code when absent.
+
   sprd,dbi-timing-ns:
     items:
       - description: Read CS setup

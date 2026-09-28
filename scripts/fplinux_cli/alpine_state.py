@@ -39,6 +39,10 @@ CLI_SOURCES = (
     "lib/fplinux/fplinux-cli.c",
     "include/fplinux/fplinux-cli.h",
 )
+BRIGHTNESS_CLIENT_SOURCES = (
+    "lib/fplinux/fplinux-brightness-client.c",
+    "include/fplinux/fplinux-brightness-client.h",
+)
 INPUT_DEVICE_SOURCES = ("include/fplinux/fplinux-input-device.h",)
 KEYPAD_CODE_SOURCES = ("include/fplinux/fplinux-keypad.h",)
 INPUT_SESSION_SOURCES = (
@@ -46,7 +50,7 @@ INPUT_SESSION_SOURCES = (
     "include/fplinux/fplinux-input-session.h",
 )
 SHARED_APORT_SOURCES = {
-    "fplinux-base": CLI_SOURCES,
+    "fplinux-base": (*CLI_SOURCES, *BRIGHTNESS_CLIENT_SOURCES),
     "fplinux-bluetooth": CLI_SOURCES,
     "fplinux-charge": CLI_SOURCES,
     "fplinux-cpuclock": CLI_SOURCES,
@@ -471,13 +475,14 @@ def signing_key_identity(cache: Path) -> str:
     return sha256_file(path)
 
 
-def alpine_rootfs_recipe(
+def alpine_rootfs_recipe(  # noqa: PLR0913 -- each selected rootfs input is causal.
     container_image_recipe: str,
     signing_key_sha256: str,
     packages: Sequence[str],
     root: Path = ROOT,
     *,
     firmware_inputs: Sequence[FirmwareInput] = (),
+    display_brightness: dict[str, Any] | None = None,
 ) -> str:
     """Hash every input that can affect one selected Alpine root filesystem."""
     _sha256(container_image_recipe, "container image recipe")
@@ -495,6 +500,7 @@ def alpine_rootfs_recipe(
         },
         "shared_aport_sources": shared_aport_source_records(build_packages, root),
         "firmware": [firmware.recipe_record() for firmware in firmware_inputs],
+        "display_brightness": display_brightness,
         "implementation": [
             _source_file(root / "scripts/fplinux_cli/alpine_state.py", root),
             _source_file(root / "scripts/fplinux_cli/alpine_builder.py", root),

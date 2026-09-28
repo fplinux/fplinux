@@ -1,0 +1,37 @@
+#!/sbin/openrc-run
+# SPDX-License-Identifier: GPL-2.0-only
+# shellcheck shell=sh disable=SC2034
+
+name="FPLinux LCD brightness"
+description="Own LCD brightness and preview leases"
+supervisor=supervise-daemon
+command=/usr/libexec/fplinux/brightnessd
+input_file=/dev/null
+output_logger="/usr/libexec/fplinux/kmsg --level 6 --tag fplinux-brightnessd"
+error_logger="/usr/libexec/fplinux/kmsg --level 3 --tag fplinux-brightnessd"
+respawn_delay=1
+respawn_max=0
+retry="TERM/3/KILL/2"
+
+depend() {
+	need sysfs
+	before fplinux-terminal
+}
+
+start() {
+	if [ ! -f /etc/fplinux/brightness.conf ]; then
+		einfo "No configured backlight; brightness service remains stopped"
+		return 0
+	fi
+	default_start
+}
+
+start_post() {
+	[ -f /etc/fplinux/brightness.conf ] || return 0
+	for attempt in 1 2 3 4 5; do
+		timeout 1 /usr/bin/fplinux-brightness get >/dev/null 2>&1 && return 0
+		sleep 0.1
+	done
+	eerror "Brightness service did not become ready"
+	return 1
+}
