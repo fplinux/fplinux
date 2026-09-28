@@ -50,7 +50,11 @@ INPUT_SESSION_SOURCES = (
     "include/fplinux/fplinux-input-session.h",
 )
 SHARED_APORT_SOURCES = {
-    "fplinux-base": (*CLI_SOURCES, *BRIGHTNESS_CLIENT_SOURCES),
+    "fplinux-base": (
+        *CLI_SOURCES,
+        *BRIGHTNESS_CLIENT_SOURCES,
+        "lib/fplinux/fplinux-vt-guardian.c",
+    ),
     "fplinux-bluetooth": CLI_SOURCES,
     "fplinux-charge": CLI_SOURCES,
     "fplinux-cpuclock": CLI_SOURCES,

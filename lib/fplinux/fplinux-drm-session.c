@@ -21,6 +21,8 @@
 #include <unistd.h>
 #include <xf86drm.h>
 
+#define FPLINUX_DRM_VT_GUARDIAN_PATH "/usr/libexec/fplinux/vt-guardian"
+
 static void initialize(struct fplinux_drm_session *session)
 {
 	memset(session, 0, sizeof(*session));
@@ -271,6 +273,9 @@ static bool start_guardian(struct fplinux_drm_session *session)
 {
 	int channel[2];
 	int process = (int)syscall(SYS_pidfd_open, getpid(), 0);
+	int values[6];
+	char fields[6][16];
+	char *arguments[8] = { "fplinux-vtguard" };
 	pid_t child;
 
 	if (process < 0)
@@ -279,29 +284,31 @@ static bool start_guardian(struct fplinux_drm_session *session)
 		close(process);
 		return false;
 	}
+	values[0] = channel[0];
+	values[1] = process;
+	values[2] = session->tty;
+	values[3] = session->control;
+	values[4] = session->vt;
+	values[5] = session->previous_vt;
+	for (unsigned int i = 0; i < 6; ++i) {
+		snprintf(fields[i], sizeof(fields[i]), "%d", values[i]);
+		arguments[i + 1] = fields[i];
+	}
 	child = fork();
 	if (child == 0) {
-		char command;
-		ssize_t count;
-		struct pollfd parent = { .fd = process, .events = POLLIN };
-
 		setsid();
 		signal(SIGHUP, SIG_IGN);
 		signal(SIGINT, SIG_IGN);
 		signal(SIGQUIT, SIG_IGN);
 		signal(SIGTERM, SIG_IGN);
+		for (unsigned int i = 0; i < 4; ++i)
+			if (fcntl(values[i], F_SETFD, 0) < 0)
+				_exit(1);
 		close_inherited_fds(channel[0], process, session->tty,
 				    session->control);
-		if (send(channel[0], "R", 1, MSG_NOSIGNAL) != 1)
-			_exit(1);
-		do {
-			count = read(channel[0], &command, 1);
-		} while (count < 0 && errno == EINTR);
-		/* EOF can precede the owner's final DRM close during exit. */
-		if (count == 0)
-			while (poll(&parent, 1, -1) < 0 && errno == EINTR)
-				;
-		_exit(restore_vt(session) ? 0 : 1);
+		/* A separate executable identity survives name-based app termination. */
+		execv(FPLINUX_DRM_VT_GUARDIAN_PATH, arguments);
+		_exit(1);
 	}
 	close(channel[0]);
 	close(process);
@@ -319,6 +326,15 @@ static bool start_guardian(struct fplinux_drm_session *session)
 			count = read(channel[1], &ready, 1);
 		} while (count < 0 && errno == EINTR);
 		if (count != 1 || ready != 'R') {
+			int status;
+
+			kill(child, SIGKILL);
+			close(session->guardian_fd);
+			session->guardian_fd = -1;
+			do {
+				status = waitpid(child, NULL, 0);
+			} while (status < 0 && errno == EINTR);
+			session->guardian = 0;
 			errno = EIO;
 			return false;
 		}
@@ -619,8 +635,10 @@ bool fplinux_drm_session_close(struct fplinux_drm_session *session)
 		do {
 			child = waitpid(session->guardian, &status, 0);
 		} while (child < 0 && errno == EINTR);
-		if (child < 0 || !WIFEXITED(status) || WEXITSTATUS(status))
+		if (child < 0 || !WIFEXITED(status) || WEXITSTATUS(status)) {
+			restore_vt(session);
 			ok = false;
+		}
 	} else if (session->vt_owned) {
 		ok = restore_vt(session) && ok;
 	}
