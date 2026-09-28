@@ -6,13 +6,12 @@ shebang selects the formatter and checker dialect:
 - `#!/bin/sh`, `#!/usr/bin/env sh` and `#!/sbin/openrc-run` select POSIX shell;
 - `#!/usr/bin/env bash` selects Bash.
 
-The sourced configurations `alpine/abuild.conf` and
-`alpine/aports/fplinux-micropythonos-storage/micropythonos.conf` also declare a
-POSIX dialect without a shebang. Other `.conf` files are not assumed to be shell.
+The sourced configuration `alpine/abuild.conf` also declares a POSIX dialect
+without a shebang. Other `.conf` files are not assumed to be shell.
 
 Recognized scripts and configurations are formatted with `shfmt` and checked by
-ShellCheck with all checks enabled at warning severity. Only the two sourced
-configurations omit the unused-variable check, since their assignments are read
+ShellCheck with all checks enabled at warning severity. The sourced
+configuration omits the unused-variable check, since its assignments are read
 by the sourcing program. Alpine `APKBUILD` files are a separate DSL: follow Alpine
 packaging conventions and the repository's `apkbuild-lint` gate rather than
 treating them as ordinary standalone scripts.

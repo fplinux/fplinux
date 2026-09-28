@@ -62,6 +62,5 @@ No exact detection delay is part of the supported interface.
 
 This writable-storage support covers removable microSD only; it does not
 provide a write or restore path for internal phone storage.
-[TyrQuake](../apps/TYRQUAKE.md) and
-[MicroPythonOS](../apps/MICROPYTHONOS.md) describe their application storage
-interfaces and limits.
+[TyrQuake](../apps/TYRQUAKE.md) describes its application storage interface
+and limits.

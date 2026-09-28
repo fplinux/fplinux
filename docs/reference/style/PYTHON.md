@@ -1,10 +1,6 @@
 # Python
 
-Project host tooling and tests run on Python 3.14. Ruff checks Python files in
-the MicroPythonOS aport using its `py311` syntax target, while the phone runtime
-is the pinned MicroPython implementation and supports its own Python subset.
-Do not carry CPython standard-library assumptions into that embedded boundary;
-verify them against its actual package build and runtime.
+Project host tooling and tests run on Python 3.14.
 
 The repository configuration is authoritative: Ruff formats and lints Python
 with a 99-column limit, and mypy runs in strict mode. Keep suppressions narrow,

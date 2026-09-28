@@ -64,6 +64,6 @@ and `+group(alt_shift_toggle)`. The data root is the only include path.
 Alt+Shift switches between the layouts. XKB allows four layouts, so at most
 three can be registered beside US; with more, or with a registration name other
 than lowercase letters, digits and `_`, the application refuses to start and
-names the problem. The [local terminal](../features/LOCAL_CONSOLE.md) and
-[MicroPythonOS](../apps/MICROPYTHONOS.md) use these installed layouts for
-physical-keyboard text through the shared libxkbcommon library.
+names the problem. The [local terminal](../features/LOCAL_CONSOLE.md) uses these
+installed layouts for physical-keyboard text through the shared libxkbcommon
+library.

@@ -29,7 +29,6 @@ from fplinux_cli.manifests.paths import normalize_profile
 from fplinux_cli.output import RunReporter
 from fplinux_cli.prune import discard_superseded_profile_logs
 from fplinux_cli.source_formats import (
-    is_explicit_json_source,
     is_javascript_source,
     is_posix_shell_fragment,
     shell_dialect,
@@ -218,7 +217,6 @@ def _source_scope_uses_file(  # noqa: PLR0911
             suffix == ".toml"
             or (suffix in {".json", ".jsonc"} and name != "package-lock.json")
             or is_javascript_source(file.path)
-            or is_explicit_json_source(file.path)
             or name == ".editorconfig"
             or _is_prettier_configuration(file.path)
         )

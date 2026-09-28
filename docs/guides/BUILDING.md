@@ -57,8 +57,7 @@ Formatting uses the same pinned tools and classification as the quality gate:
   JSON manifest: Prettier;
 - TOML: Taplo;
 - POSIX and Bash scripts recognized by their shebang, plus the POSIX sourced
-  configurations `alpine/abuild.conf` and
-  `alpine/aports/fplinux-micropythonos-storage/micropythonos.conf`: `shfmt`.
+  configuration `alpine/abuild.conf`: `shfmt`.
 
 The npm-owned `package-lock.json` is excluded from formatting.
 

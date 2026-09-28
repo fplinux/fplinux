@@ -1,7 +1,0 @@
-#!/bin/sh
-# SPDX-License-Identifier: GPL-2.0-only
-set -eu
-set -f
-
-. /usr/libexec/fplinux-micropythonos/micropythonos-wrapper.sh
-micropythonos_main "$@"

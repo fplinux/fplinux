@@ -31,7 +31,6 @@ PACKAGE_DOCUMENTS = {
     "docs/apps/JPEG.md": common.ROOT / "docs/apps/JPEG.md",
     "docs/apps/PRESENT.md": common.ROOT / "docs/apps/PRESENT.md",
     "docs/apps/ROTATE.md": common.ROOT / "docs/apps/ROTATE.md",
-    "docs/apps/MICROPYTHONOS.md": common.ROOT / "docs/apps/MICROPYTHONOS.md",
     "docs/apps/SHOWCASE.md": common.ROOT / "docs/apps/SHOWCASE.md",
     "docs/apps/TYRQUAKE.md": common.ROOT / "docs/apps/TYRQUAKE.md",
     "docs/features/AUXADC.md": common.ROOT / "docs/features/AUXADC.md",

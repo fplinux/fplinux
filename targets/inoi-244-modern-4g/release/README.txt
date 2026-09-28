@@ -83,10 +83,8 @@ sc2720-charger, sc2720-auxadc, ums9117-thermal, UMS9117 speaker vibrator and
 UMS9117 Headphones. IIO, thermal and input-device numbers are assigned at boot. These
 identifiers do not demonstrate the physical effects or measurements noted above.
 
-TyrQuake game data can use RAM or ext4 microSD storage. Applications, files,
-MicroPythonOS state and Bluetooth pairing records persist on the ext4 system
-root across cold boots. Optional MicroPythonOS FAT32 data-card storage has not
-been tested.
+TyrQuake game data can use RAM or ext4 microSD storage. Applications, files and
+Bluetooth pairing records persist on the ext4 system root across cold boots.
 
 Before ending a RAM-only session, stop applications using the card and follow
 the safe-removal procedure in docs/features/MICROSD.md, including disabling

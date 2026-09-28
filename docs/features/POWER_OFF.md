@@ -13,7 +13,7 @@ and physical power key.
    to unmount `/`; orderly shutdown stops applications and handles the root.
 2. Disconnect USB and make sure charger power is absent.
 3. Hold the phone's power key continuously for five seconds. The key works
-   while the local console, TyrQuake or MicroPythonOS owns keypad input.
+   while the local console or TyrQuake owns keypad input.
 
 A short press remains an ordinary input event. Releasing the key before five
 seconds cancels the request. If external charger input is detected, shutdown is

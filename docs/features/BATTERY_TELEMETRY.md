@@ -35,7 +35,6 @@ Run an installed command through the helper:
 ```sh
 fplinux-charge -- sleep 60
 fplinux-charge -- quake
-fplinux-charge -- micropythonos
 ```
 
 Use `fplinux-charge -h` or `fplinux-charge --help` to list options without

@@ -126,7 +126,6 @@ For details, use the bundled pages:
 - [installing and removing optional APK packages](APK_PACKAGES.md);
 - [FPLinux: ARMADA](../apps/SHOWCASE.md);
 - [TyrQuake](../apps/TYRQUAKE.md);
-- [MicroPythonOS](../apps/MICROPYTHONOS.md);
 - [image rotation](../apps/ROTATE.md);
 - [JPEG codec and scaling](../apps/JPEG.md);
 - [native image presentation](../apps/PRESENT.md).

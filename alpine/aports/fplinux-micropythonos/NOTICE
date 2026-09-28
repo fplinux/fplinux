@@ -1,3 +1,0 @@
-This package combines MicroPythonOS, lvgl_micropython, MicroPython,
-micropython-lib, LVGL and freezeFS. Their license texts, including the packaged
-font notices, are installed in this directory.

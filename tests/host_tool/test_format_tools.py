@@ -33,13 +33,7 @@ class PinnedFormatterToolTests(unittest.TestCase):
                 "data.json": '{"value":1}\n',
                 "package-lock.json": '{"untouched":1}\n',
                 "commitlint.config.mjs": "export default {value:1};\n",
-                "alpine/aports/fplinux-micropythonos/fplinux-keypad-test.MANIFEST.JSON": (
-                    '{"name":"Keypad"}\n'
-                ),
                 "alpine/abuild.conf": 'CFLAGS="-Os"\nCXXFLAGS="$CFLAGS"\n',
-                "alpine/aports/fplinux-micropythonos-storage/micropythonos.conf": (
-                    "if true;then\n MPOS_STORAGE=/mnt/card\nfi\n"
-                ),
                 "target.toml": 'name="demo"\n',
                 "script.sh": "#!/bin/sh\nif true;then\n echo ok\nfi\n",
                 "helper": "#!/usr/bin/env bash\nif true;then\n echo ok\nfi\n",
@@ -89,20 +83,8 @@ class PinnedFormatterToolTests(unittest.TestCase):
                 "export default { value: 1 };\n",
             )
             self.assertEqual(
-                (
-                    root / "alpine/aports/fplinux-micropythonos/fplinux-keypad-test.MANIFEST.JSON"
-                ).read_text(encoding="utf-8"),
-                '{ "name": "Keypad" }\n',
-            )
-            self.assertEqual(
                 (root / "alpine/abuild.conf").read_text(encoding="utf-8"),
                 'CFLAGS="-Os"\nCXXFLAGS="$CFLAGS"\n',
-            )
-            self.assertEqual(
-                (
-                    root / "alpine/aports/fplinux-micropythonos-storage/micropythonos.conf"
-                ).read_text(encoding="utf-8"),
-                "if true; then\n\tMPOS_STORAGE=/mnt/card\nfi\n",
             )
             self.assertEqual(
                 (root / "target.toml").read_text(encoding="utf-8"),
@@ -119,13 +101,10 @@ class PinnedFormatterToolTests(unittest.TestCase):
                 "int main(void)\n{\n\treturn 0;\n}\n",
             )
 
-    def test_metadata_checker_rejects_invalid_javascript_and_uppercase_json(self) -> None:
-        """Neither explicitly supported metadata format may be silently ignored."""
+    def test_metadata_checker_rejects_invalid_javascript(self) -> None:
+        """Explicitly supported JavaScript metadata may not be silently ignored."""
         cases = {
             "commitlint.config.mjs": "export default {;\n",
-            "alpine/aports/fplinux-micropythonos/fplinux-keypad-test.MANIFEST.JSON": (
-                "{invalid\n"
-            ),
         }
         for relative, contents in cases.items():
             with self.subTest(path=relative), tempfile.TemporaryDirectory() as temporary:
@@ -146,9 +125,6 @@ class PinnedFormatterToolTests(unittest.TestCase):
         """Sourced settings may export assignments but may not use Bash syntax."""
         cases = {
             "alpine/abuild.conf": "source /dev/null\n",
-            "alpine/aports/fplinux-micropythonos-storage/micropythonos.conf": (
-                "source /dev/null\n"
-            ),
             "script.sh": "#!/bin/sh\nunused=1\n",
         }
         for relative, contents in cases.items():

@@ -78,7 +78,6 @@ Status terms and limits shared by every phone are defined in the
 | ------------------------------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | [FPLinux: ARMADA](../../docs/apps/SHOWCASE.md)          | Partial   | Synchronizes the display, keypad light and vibrator.                                                                          |
 | [TyrQuake](../../docs/apps/TYRQUAKE.md)                 | Partial   | Game data can use the supported microSD path.                                                                                 |
-| [MicroPythonOS](../../docs/apps/MICROPYTHONOS.md)       | Partial   | State can use FAT32 microSD with the shared optional storage package.                                                         |
 | [Image rotation](../../docs/apps/ROTATE.md)             | Supported | Included in the normal root filesystem; explicit CPU/ROTA selection and DRM preview; visible preview fidelity is unqualified. |
 | [JPEG codec and scaling](../../docs/apps/JPEG.md)       | Supported | Included in the normal root filesystem; hardware decode, fixed encode, and fixed half-scaling.                                |
 | [Native image presentation](../../docs/apps/PRESENT.md) | Partial   | Included in the normal root filesystem; direct NV16 or CPU-converted RGB565 presentation.                                     |

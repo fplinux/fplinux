@@ -104,7 +104,6 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
         musl_notice.parent.mkdir(parents=True)
         musl_notice.write_text("musl notice\n", encoding="utf-8")
         self.shared_documents = {
-            "docs/apps/MICROPYTHONOS.md": b"MicroPythonOS procedures\n",
             "docs/apps/SHOWCASE.md": b"FPLinux showcase procedures\n",
             "docs/apps/TYRQUAKE.md": b"TyrQuake procedures\n",
             "docs/features/CPU_CLOCK.md": b"CPU clock reporting\n",
