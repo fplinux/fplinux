@@ -593,9 +593,6 @@ class CheckScopeTests(unittest.TestCase):
                 "metadata",
                 {
                     "commitlint.config.mjs": b"export default {};\n",
-                    "alpine/aports/fplinux-micropythonos/fplinux-keypad-test.MANIFEST.JSON": (
-                        b'{"name": "Keypad"}\n'
-                    ),
                 },
                 {"other.mjs": b"export default {};\n", "other.JSON": b"{}\n"},
             ),
@@ -603,9 +600,6 @@ class CheckScopeTests(unittest.TestCase):
                 "shell",
                 {
                     "alpine/abuild.conf": b"CFLAGS=-Os\n",
-                    "alpine/aports/fplinux-micropythonos-storage/micropythonos.conf": (
-                        b"MPOS_STORAGE=/mnt/card\n"
-                    ),
                 },
                 {"other.conf": b"setting=value\n"},
             ),

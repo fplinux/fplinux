@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Host driver for MicroPythonOS keyboard layout selection. It prints what the
+ * Host driver for shared keyboard layout selection. It prints what the
  * production functions compose so that the Python test owns the expectations;
- * it does not load xkbcommon, MicroPython or an input device.
+ * it does not load xkbcommon or an input device.
  */
 
 #include <stdio.h>

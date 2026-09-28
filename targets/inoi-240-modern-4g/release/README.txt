@@ -32,9 +32,6 @@ Current target support:
   - manual CPU frequency selection between 768 MHz and 1 GHz;
   - brightness and read-only power telemetry interfaces.
 
-The optional MicroPythonOS UI is not fully adapted to the 128x160 screen. See docs/apps/MICROPYTHONOS.md
-for installation and use.
-
 The microSD slot is under the battery, so card hot-swap does not apply.
 Internal phone storage writes, modem, Wi-Fi and Linux reboot are not supported.
 Battery-only power-off, battery measurements and charging have not been

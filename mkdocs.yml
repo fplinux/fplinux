@@ -125,7 +125,6 @@ nav:
   - Applications:
       - docs/apps/SHOWCASE.md
       - docs/apps/TYRQUAKE.md
-      - docs/apps/MICROPYTHONOS.md
       - docs/apps/ROTATE.md
       - docs/apps/JPEG.md
       - docs/apps/PRESENT.md

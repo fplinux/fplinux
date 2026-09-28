@@ -80,7 +80,6 @@ support status, boot key, storage rules and limitations.
 
 - [FPLinux: ARMADA](docs/apps/SHOWCASE.md)
 - [TyrQuake](docs/apps/TYRQUAKE.md)
-- [MicroPythonOS](docs/apps/MICROPYTHONOS.md)
 - [Image rotation](docs/apps/ROTATE.md)
 - [JPEG codec and scaling](docs/apps/JPEG.md)
 - [Native image presentation](docs/apps/PRESENT.md)

@@ -81,14 +81,13 @@ Status terms and limits shared by every phone are defined in the
 
 ## Applications
 
-| Application                                             | FPLinux   | This phone                                                                                    |
-| ------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------- |
-| [FPLinux: ARMADA](../../docs/apps/SHOWCASE.md)          | Partial   | Physical light effects have not been tested.                                                  |
-| [TyrQuake](../../docs/apps/TYRQUAKE.md)                 | Partial   | Game data can use RAM or ext4 microSD storage, including the system root.                     |
-| [MicroPythonOS](../../docs/apps/MICROPYTHONOS.md)       | Partial   | State persists on the ext4 system root; optional FAT32 data-card storage has not been tested. |
-| [Image rotation](../../docs/apps/ROTATE.md)             | Supported | Explicit CPU/ROTA selection and DRM preview; visible preview fidelity is unqualified.         |
-| [JPEG codec and scaling](../../docs/apps/JPEG.md)       | Supported | Hardware decode, fixed encode and fixed half-scaling.                                         |
-| [Native image presentation](../../docs/apps/PRESENT.md) | Partial   | Direct NV16 or CPU-converted RGB565 transfers; visible image fidelity has not been checked.   |
+| Application                                             | FPLinux   | This phone                                                                                  |
+| ------------------------------------------------------- | --------- | ------------------------------------------------------------------------------------------- |
+| [FPLinux: ARMADA](../../docs/apps/SHOWCASE.md)          | Partial   | Physical light effects have not been tested.                                                |
+| [TyrQuake](../../docs/apps/TYRQUAKE.md)                 | Partial   | Game data can use RAM or ext4 microSD storage, including the system root.                   |
+| [Image rotation](../../docs/apps/ROTATE.md)             | Supported | Explicit CPU/ROTA selection and DRM preview; visible preview fidelity is unqualified.       |
+| [JPEG codec and scaling](../../docs/apps/JPEG.md)       | Supported | Hardware decode, fixed encode and fixed half-scaling.                                       |
+| [Native image presentation](../../docs/apps/PRESENT.md) | Partial   | Direct NV16 or CPU-converted RGB565 transfers; visible image fidelity has not been checked. |
 
 ## Hardware interfaces
 

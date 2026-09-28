@@ -90,7 +90,6 @@ exact phone's support status and its storage or display difference here.
 | ------------------------------------------------------- | ----------- | ---------------------------- |
 | [FPLinux: ARMADA](../../docs/apps/SHOWCASE.md)          | `{support}` | `{display or effect delta}`  |
 | [TyrQuake](../../docs/apps/TYRQUAKE.md)                 | `{support}` | `{storage or display delta}` |
-| [MicroPythonOS](../../docs/apps/MICROPYTHONOS.md)       | `{support}` | `{storage or display delta}` |
 | [Image rotation](../../docs/apps/ROTATE.md)             | `{support}` | `{format or preview delta}`  |
 | [JPEG codec and scaling](../../docs/apps/JPEG.md)       | `{support}` | `{codec or scaler delta}`    |
 | [Native image presentation](../../docs/apps/PRESENT.md) | `{support}` | `{format or display delta}`  |

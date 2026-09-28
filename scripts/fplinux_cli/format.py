@@ -66,7 +66,6 @@ def _select_groups(formats: SourceFormats, selected: frozenset[str]) -> SourceFo
         keep(formats.bash),
         keep(formats.c),
         keep(formats.javascript),
-        keep(formats.explicit_json),
         keep(formats.posix_shell_fragments),
     )
 
@@ -142,20 +141,6 @@ def formatter_commands(
                     "--ignore-unknown",
                     "--",
                     *_formatter_paths(tuple(prettier), workspace),
-                ],
-            )
-        )
-    if groups.explicit_json:
-        commands.append(
-            (
-                "prettier-json",
-                [
-                    "prettier",
-                    "--write",
-                    "--parser",
-                    "json",
-                    "--",
-                    *_formatter_paths(groups.explicit_json, workspace),
                 ],
             )
         )

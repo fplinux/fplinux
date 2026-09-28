@@ -23,7 +23,6 @@ class SourceFormats:
     bash: tuple[str, ...]
     c: tuple[str, ...]
     javascript: tuple[str, ...]
-    explicit_json: tuple[str, ...]
     posix_shell_fragments: tuple[str, ...]
 
     def supported(self) -> frozenset[str]:
@@ -38,7 +37,6 @@ class SourceFormats:
                 *self.bash,
                 *self.c,
                 *self.javascript,
-                *self.explicit_json,
                 *self.posix_shell_fragments,
             )
         )
@@ -62,17 +60,9 @@ def is_javascript_source(relative: str) -> bool:
     return relative == "commitlint.config.mjs"
 
 
-def is_explicit_json_source(relative: str) -> bool:
-    """Identify JSON whose filename is not recognized by Prettier."""
-    return relative == "alpine/aports/fplinux-micropythonos/fplinux-keypad-test.MANIFEST.JSON"
-
-
 def is_posix_shell_fragment(relative: str) -> bool:
     """Identify sourced configuration files with a declared POSIX dialect."""
-    return relative in {
-        "alpine/abuild.conf",
-        "alpine/aports/fplinux-micropythonos-storage/micropythonos.conf",
-    }
+    return relative == "alpine/abuild.conf"
 
 
 def classify_source_formats(files: Sequence[Path], *, root: Path) -> SourceFormats:
@@ -85,7 +75,6 @@ def classify_source_formats(files: Sequence[Path], *, root: Path) -> SourceForma
     bash: list[str] = []
     c: list[str] = []
     javascript: list[str] = []
-    explicit_json: list[str] = []
     posix_shell_fragments: list[str] = []
 
     for path in files:
@@ -102,9 +91,6 @@ def classify_source_formats(files: Sequence[Path], *, root: Path) -> SourceForma
             c.append(relative)
         elif is_javascript_source(relative):
             javascript.append(relative)
-        elif is_explicit_json_source(relative):
-            explicit_json.append(relative)
-
         if is_posix_shell_fragment(relative):
             posix_shell_fragments.append(relative)
             continue
@@ -127,6 +113,5 @@ def classify_source_formats(files: Sequence[Path], *, root: Path) -> SourceForma
         tuple(sorted(bash)),
         tuple(sorted(c)),
         tuple(sorted(javascript)),
-        tuple(sorted(explicit_json)),
         tuple(sorted(posix_shell_fragments)),
     )

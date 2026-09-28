@@ -163,9 +163,9 @@ tested.
 ## Keyboards and mice
 
 Bluetooth keyboards and mice use the kernel HID drivers and appear to
-applications as ordinary input devices. [TyrQuake](../apps/TYRQUAKE.md) and
-[MicroPythonOS](../apps/MICROPYTHONOS.md) accept them. The selected target's
-documentation states whether keyboards and mice have been tested on that phone
+applications as ordinary input devices. [TyrQuake](../apps/TYRQUAKE.md)
+accepts them. The selected target's documentation states whether keyboards and
+mice have been tested on that phone
 and in which profile. Bluetooth Classic keyboard and mouse input has not been
 tested.
 

@@ -4,9 +4,6 @@ line-length = 99
 cache-dir = ".cache/ruff"
 extend-exclude = [".cache", "node_modules"]
 
-[tool.ruff.per-file-target-version]
-"alpine/aports/fplinux-micropythonos/*.py" = "py311"
-
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [

@@ -578,8 +578,6 @@ def check_prettier_sources(formats: SourceFormats, selected: tuple[str, ...]) ->
     ]
     if inferred:
         run(["prettier", "--check", "--ignore-unknown", *inferred])
-    if "metadata" in selected and formats.explicit_json:
-        run(["prettier", "--check", "--parser", "json", *formats.explicit_json])
 
 
 def check_shell_sources(formats: SourceFormats) -> None:

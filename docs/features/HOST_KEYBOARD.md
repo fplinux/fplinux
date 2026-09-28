@@ -38,8 +38,6 @@ keyboard grab.
 
 [TyrQuake](../apps/TYRQUAKE.md) accepts the forwarded device alongside the
 phone keypad and other keyboards and mice.
-[MicroPythonOS](../apps/MICROPYTHONOS.md#use-a-keyboard) accepts it alongside
-the phone keypad and types its keys as text.
 
 This feature forwards a host keyboard over the phone's USB peripheral link; it
 does not make the phone a USB host. Check the selected phone page for its

@@ -18,15 +18,15 @@ an upstream tree follows the boundary described below.
 
 ## Where the code runs
 
-| Code                                                           | Environment                        | Language and API                                                      |
-| -------------------------------------------------------------- | ---------------------------------- | --------------------------------------------------------------------- |
-| `platforms/*/linux/`, `targets/*/linux/`                       | Linux kernel                       | Kernel GNU C, kernel types and subsystem APIs                         |
-| `bootstrap/`, `platforms/*/bootstrap/`, `targets/*/bootstrap/` | Fixed vendor runtime before Linux  | C99 with the facilities supplied by the bootstrap closure             |
-| `alpine/aports/`                                               | musl/Linux on the phone            | C11 or the GNU dialect selected by the APKBUILD, POSIX and Linux UAPI |
-| `lib/fplinux/`, `include/fplinux/`                             | shared host and phone components   | The component's declared C dialect and runtime interfaces             |
-| `common/host/`                                                 | Linux x86-64 host                  | C11, POSIX, Linux UAPI and libusb                                     |
-| Sources marked `fplinux-check: package-embedded`               | TyrQuake or MicroPython build tree | Destination project's dialect and external ABI                        |
-| `tests/host_tool/*.c`                                          | Host-only harness                  | The dialect selected by the test that compiles it                     |
+| Code                                                           | Environment                       | Language and API                                                      |
+| -------------------------------------------------------------- | --------------------------------- | --------------------------------------------------------------------- |
+| `platforms/*/linux/`, `targets/*/linux/`                       | Linux kernel                      | Kernel GNU C, kernel types and subsystem APIs                         |
+| `bootstrap/`, `platforms/*/bootstrap/`, `targets/*/bootstrap/` | Fixed vendor runtime before Linux | C99 with the facilities supplied by the bootstrap closure             |
+| `alpine/aports/`                                               | musl/Linux on the phone           | C11 or the GNU dialect selected by the APKBUILD, POSIX and Linux UAPI |
+| `lib/fplinux/`, `include/fplinux/`                             | shared host and phone components  | The component's declared C dialect and runtime interfaces             |
+| `common/host/`                                                 | Linux x86-64 host                 | C11, POSIX, Linux UAPI and libusb                                     |
+| Sources marked `fplinux-check: package-embedded`               | TyrQuake build tree               | Destination project's dialect and external ABI                        |
+| `tests/host_tool/*.c`                                          | Host-only harness                 | The dialect selected by the test that compiles it                     |
 
 Do not move an API or language assumption from one row to another. `errno`, file
 descriptors and signals do not belong in the bootstrap. Kernel code does not use
@@ -43,8 +43,8 @@ The relevant commands establish different things:
   compilable phone userspace and host translation units only.
 - Bootstrap file formatting is checked by `check c`, but their real compile
   proof is an affected target build.
-- Embedded TyrQuake and MicroPython file formatting is checked by `check c`, but
-  they are compiled only in their pinned upstream package builds. C fragments
+- Embedded TyrQuake file formatting is checked by `check c`, but it is compiled
+  only in its pinned upstream package build. C fragments
   inside patch files are judged by that destination build, not by standalone
   analysis.
 - `check kernel` projects code into the pinned Linux tree and runs its formatter,
@@ -77,19 +77,18 @@ preserve a history of old implementations.
 
 ### Pick the owner before the prefix
 
-| Owner                    | Typical code                                       | Symbol prefix          | Macro prefix           |
-| ------------------------ | -------------------------------------------------- | ---------------------- | ---------------------- |
-| Shared FPLinux component | boot screen, multitap core, common protocol        | `fplinux_<component>_` | `FPLINUX_<COMPONENT>_` |
-| Unisoc UMS9117 platform  | bootstrap flow, timers, MUSB, ADI, LCDC, keypad    | `ums9117_`             | `UMS9117_`             |
-| INOI 240 Modern 4G       | board wiring and phone-only policy                 | `inoi240_`             | `INOI240_`             |
-| INOI 244 Modern 4G       | board wiring and phone-only policy                 | `inoi244_`             | `INOI244_`             |
-| Nokia 3210 4G (TA-1618)  | board wiring and phone-only policy                 | `ta1618_`              | `TA1618_`              |
-| Separate chip            | SC2720 registers and fields                        | chip-specific          | `SC2720_`              |
-| External ABI             | vendor, TyrQuake, MicroPython or Linux entry point | required spelling      | required spelling      |
+| Owner                    | Typical code                                    | Symbol prefix          | Macro prefix           |
+| ------------------------ | ----------------------------------------------- | ---------------------- | ---------------------- |
+| Shared FPLinux component | boot screen, multitap core, common protocol     | `fplinux_<component>_` | `FPLINUX_<COMPONENT>_` |
+| Unisoc UMS9117 platform  | bootstrap flow, timers, MUSB, ADI, LCDC, keypad | `ums9117_`             | `UMS9117_`             |
+| INOI 240 Modern 4G       | board wiring and phone-only policy              | `inoi240_`             | `INOI240_`             |
+| INOI 244 Modern 4G       | board wiring and phone-only policy              | `inoi244_`             | `INOI244_`             |
+| Nokia 3210 4G (TA-1618)  | board wiring and phone-only policy              | `ta1618_`              | `TA1618_`              |
+| Separate chip            | SC2720 registers and fields                     | chip-specific          | `SC2720_`              |
+| External ABI             | vendor, TyrQuake or Linux entry point           | required spelling      | required spelling      |
 
-The directory does not decide ownership. A portable text composer remains
-`fplinux_multitap_*` when the console and MicroPythonOS both use it. A UMS9117
-bootstrap helper remains `ums9117_*` when called by a Nokia target. Board values
+The directory does not decide ownership. A UMS9117 bootstrap helper remains
+`ums9117_*` when called by a Nokia target. Board values
 do not become platform data merely because all current phones happen to share a
 number.
 
@@ -315,9 +314,9 @@ recipes without that declaration are not claimed to self-test.
 
 ## Code embedded into another project
 
-An adapter compiled inside TyrQuake, MicroPython or vendor bootstrap keeps the
+An adapter compiled inside TyrQuake or the bootstrap closure keeps the
 names and types required by that external ABI. Current examples include
-`VID_*`, `IN_*`, `Sys_*`, `MP_*`, `mp_obj_t`, `lcd_appinit()` and
+`VID_*`, `IN_*`, `Sys_*`, `lcd_appinit()` and
 `keytrn_init()`.
 
 Keep required names at the boundary. Use normal project-style `static` helpers

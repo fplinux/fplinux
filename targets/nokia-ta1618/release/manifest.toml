@@ -18,8 +18,6 @@ bundle_files = [
   "apks/fplinux-charge.apk",
   "apks/fplinux-showcase.apk",
   "apks/fplinux-tyrquake.apk",
-  "apks/fplinux-micropythonos.apk",
-  "apks/fplinux-micropythonos-storage.apk",
   "apks/fplinux-xkb-ru.apk",
   "assets.lock.toml",
   "THIRD_PARTY_NOTICES.md",

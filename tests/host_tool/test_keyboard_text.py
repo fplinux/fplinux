@@ -2,7 +2,7 @@
 """Host component tests for keyboard layout selection.
 
 The C driver links the shared layout and text-filter source. It does not
-compile a keymap with xkbcommon, run MicroPython or open an input device.
+compile a keymap with xkbcommon or open an input device.
 """
 
 from __future__ import annotations
@@ -17,10 +17,10 @@ from tests.process import run_process
 ROOT = Path(__file__).resolve().parents[2]
 SHARED_INCLUDE = ROOT / "include/fplinux"
 SOURCE = ROOT / "lib/fplinux/fplinux-keyboard-text.c"
-HARNESS = ROOT / "tests/host_tool/fplinux-micropythonos-keyboard-text.c"
+HARNESS = ROOT / "tests/host_tool/fplinux-keyboard-text.c"
 
 
-class MicroPythonOsKeyboardTextTests(unittest.TestCase):
+class KeyboardTextTests(unittest.TestCase):
     """Compose layouts from temporary data roots with literal layout files."""
 
     temporary: ClassVar[tempfile.TemporaryDirectory[str]]
@@ -30,7 +30,7 @@ class MicroPythonOsKeyboardTextTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         """Compile the host driver once for this test class."""
         cls.temporary = tempfile.TemporaryDirectory()
-        cls.executable = Path(cls.temporary.name) / "fplinux-micropythonos-keyboard-text"
+        cls.executable = Path(cls.temporary.name) / "fplinux-keyboard-text"
         run_process(
             [
                 "cc",
@@ -45,7 +45,7 @@ class MicroPythonOsKeyboardTextTests(unittest.TestCase):
                 "-o",
                 str(cls.executable),
             ],
-            name="compile MicroPythonOS keyboard text driver",
+            name="compile shared keyboard text driver",
             timeout=30,
             check=True,
         )
@@ -68,7 +68,7 @@ class MicroPythonOsKeyboardTextTests(unittest.TestCase):
         """Run the driver for one data root and return status, stdout and stderr."""
         result = run_process(
             [str(self.executable), mode, str(self.data_root(layouts))],
-            name=f"compose MicroPythonOS keyboard {mode}",
+            name=f"compose keyboard {mode}",
             timeout=10,
         )
         return result.returncode, result.stdout, result.stderr
@@ -129,7 +129,7 @@ class MicroPythonOsKeyboardTextTests(unittest.TestCase):
             with self.subTest(text=text):
                 result = run_process(
                     [str(self.executable), "printable", text],
-                    name="classify MicroPythonOS keyboard text",
+                    name="classify keyboard text",
                     timeout=10,
                 )
 

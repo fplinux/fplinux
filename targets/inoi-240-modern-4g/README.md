@@ -14,7 +14,6 @@
 This phone has a `128×160` display and supports the private USB session,
 headphone and speaker PCM playback, microphone capture, FM radio, keypad
 backlight and manual CPU frequency selection.
-MicroPythonOS UI is not fully adapted to this phone's screen.
 microSD FAT32 and ext4 storage and a writable microSD system root work.
 Bluetooth pairing, bidirectional file transfer and PAN Internet work in both
 profiles. The red handset key and RTC alarms wake the phone from s2idle,
@@ -87,7 +86,6 @@ Status terms and limits shared by every phone are defined in the
 | ------------------------------------------------------- | --------- | ------------------------------------------------------------------------------------- |
 | [FPLinux: ARMADA](../../docs/apps/SHOWCASE.md)          | Partial   | Runs in both profiles; physical display and light effects have not been tested.       |
 | [TyrQuake](../../docs/apps/TYRQUAKE.md)                 | Partial   | Game data can use RAM or ext4 microSD storage, including the system root.             |
-| [MicroPythonOS](../../docs/apps/MICROPYTHONOS.md)       | Partial   | Launches on this phone; the UI is not fully adapted to its 128×160 screen.            |
 | [Image rotation](../../docs/apps/ROTATE.md)             | Supported | Explicit CPU/ROTA selection and DRM preview; visible preview fidelity is unqualified. |
 | [JPEG codec and scaling](../../docs/apps/JPEG.md)       | Supported | Hardware decode, fixed encode and fixed half-scaling.                                 |
 | [Native image presentation](../../docs/apps/PRESENT.md) | Partial   | Direct NV16 or CPU-converted RGB565 presentation.                                     |
