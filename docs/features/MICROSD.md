@@ -57,8 +57,8 @@ removal and reinsertion without restarting Linux. Never remove a mounted card
 or a card with active swap. Removal during a write, filesystem repair, erase or
 discard is not a supported workflow.
 
-Card detection is polled. Wait for the block node to appear or disappear; no
-exact detection delay is part of the supported interface.
+After insertion or removal, wait for the block node to appear or disappear.
+No exact detection delay is part of the supported interface.
 
 This writable-storage support covers removable microSD only; it does not
 provide a write or restore path for internal phone storage.

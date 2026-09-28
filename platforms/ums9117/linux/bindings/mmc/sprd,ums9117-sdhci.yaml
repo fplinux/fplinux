@@ -12,8 +12,8 @@ maintainers:
 description:
   The UMS9117 SDIO0 controller implements the SDHCI 4.10 register layout in
   version 4 mode. Its register interface requires 32-bit accesses. The
-  removable slot uses two fixed-voltage supplies and polling card detection.
-  The second register window is the polling-only EIC2 DATA and DMSK pair.
+  removable slot uses two fixed-voltage supplies and GPIO card-detect
+  interrupts. The EIC GPIO provider owns the card-detect registers.
 
 allOf:
   - $ref: sdhci-common.yaml#
@@ -25,12 +25,10 @@ properties:
   reg:
     items:
       - description: SDHCI registers through Host Controller Version
-      - description: EIC2 card-detect DATA and DMSK registers
 
   reg-names:
     items:
       - const: host
-      - const: card-detect
 
   interrupts:
     maxItems: 1
@@ -67,7 +65,11 @@ properties:
   no-mmc: true
   disable-wp: true
 
-  cd-gpios: false
+  cd-gpios:
+    maxItems: 1
+
+  broken-cd: false
+  non-removable: false
 
   sdhci-caps: false
   sdhci-caps-mask: false
@@ -91,20 +93,22 @@ required:
   - no-sdio
   - no-mmc
   - disable-wp
+  - cd-gpios
 
 unevaluatedProperties: false
 
 examples:
   - |
     #include <dt-bindings/clock/sprd,ums9117-clk.h>
+    #include <dt-bindings/gpio/gpio.h>
     #include <dt-bindings/interrupt-controller/arm-gic.h>
     #include <dt-bindings/interrupt-controller/irq.h>
     #include <dt-bindings/reset/sprd,ums9117-reset.h>
 
     mmc@20300000 {
         compatible = "sprd,ums9117-sdhci";
-        reg = <0x20300000 0x100>, <0x402c0000 0x8>;
-        reg-names = "host", "card-detect";
+        reg = <0x20300000 0x100>;
+        reg-names = "host";
         interrupts = <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
         clocks = <&sdio0_clk>, <&apahb_gate CLK_SDIO0_EB>;
         clock-names = "sdio", "enable";
@@ -120,5 +124,6 @@ examples:
         no-sdio;
         no-mmc;
         disable-wp;
+        cd-gpios = <&eic2 0 GPIO_ACTIVE_LOW>;
     };
 ...

@@ -138,6 +138,8 @@ patches = [
   "platforms/ums9117/linux/patches/0009-sc2720-adc-efuse.patch",
   "platforms/ums9117/linux/patches/0010-sc2720-leaf-drivers.patch",
   "platforms/ums9117/linux/patches/0011-ums9117-mailbox.patch",
+  "platforms/ums9117/linux/patches/0012-ums9117-eic.patch",
+  "platforms/ums9117/linux/patches/0013-ums9117-eic-binding.patch",
 ]
 
 [[linux.appends]]

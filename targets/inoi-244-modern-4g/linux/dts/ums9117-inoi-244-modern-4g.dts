@@ -132,7 +132,12 @@
 	status = "okay";
 };
 
+&eic2 {
+	status = "okay";
+};
+
 &sdio0_mmc {
+	cd-gpios = <&eic2 0 GPIO_ACTIVE_LOW>;
 	status = "okay";
 };
 
