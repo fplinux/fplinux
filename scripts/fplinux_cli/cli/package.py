@@ -37,6 +37,7 @@ PACKAGE_DOCUMENTS = {
     "docs/features/AUXADC.md": common.ROOT / "docs/features/AUXADC.md",
     "docs/features/BATTERY_TELEMETRY.md": common.ROOT / "docs/features/BATTERY_TELEMETRY.md",
     "docs/features/BLUETOOTH.md": common.ROOT / "docs/features/BLUETOOTH.md",
+    "docs/features/CAMERA.md": common.ROOT / "docs/features/CAMERA.md",
     "docs/features/CHARGER_STATUS.md": common.ROOT / "docs/features/CHARGER_STATUS.md",
     "docs/features/CPU_CLOCK.md": common.ROOT / "docs/features/CPU_CLOCK.md",
     "docs/features/DISPLAY_BACKLIGHT.md": common.ROOT / "docs/features/DISPLAY_BACKLIGHT.md",

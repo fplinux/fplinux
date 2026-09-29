@@ -1,0 +1,81 @@
+diff --git a/Documentation/devicetree/bindings/media/i2c/galaxycore,gc2145.yaml b/Documentation/devicetree/bindings/media/i2c/galaxycore,gc2145.yaml
+--- a/Documentation/devicetree/bindings/media/i2c/galaxycore,gc2145.yaml
++++ b/Documentation/devicetree/bindings/media/i2c/galaxycore,gc2145.yaml
+@@ -17,9 +17,6 @@
+   gamma correction. Bayer RGB, RGB565 and YCbCr 4:2:2 can be provided by the
+   sensor. It is programmable through an I2C interface. Image data is sent
+   either through a parallel interface or through MIPI CSI-2.
+-
+-allOf:
+-  - $ref: /schemas/media/video-interface-devices.yaml#
+
+ properties:
+   compatible:
+@@ -46,6 +43,11 @@
+   dvdd-supply:
+     description: Power for digital core (1.7 - 1.9V).
+
++  camera-core-supply:
++    description: |
++      Additional board camera-core power domain used with the parallel
++      interface. This supply is separate from the sensor's DVDD pin.
++
+   orientation: true
+
+   rotation: true
+@@ -59,10 +61,28 @@
+         unevaluatedProperties: false
+
+         properties:
++          bus-type:
++            enum: [4, 5]
++
+           link-frequencies: true
+
+-        required:
+-          - link-frequencies
++        allOf:
++          - if:
++              properties:
++                bus-type:
++                  const: 5
++              required: [bus-type]
++            then:
++              properties:
++                bus-width:
++                  const: 8
++                data-lanes: false
++                link-frequencies: false
++              required: [bus-width]
++            else:
++              properties:
++                bus-width: false
++              required: [data-lanes, link-frequencies]
+
+     required:
+       - endpoint
+@@ -77,8 +97,23 @@
+   - reset-gpios
+   - iovdd-supply
+   - avdd-supply
+-  - dvdd-supply
+   - port
++
++allOf:
++  - $ref: /schemas/media/video-interface-devices.yaml#
++  - if:
++      properties:
++        port:
++          properties:
++            endpoint:
++              properties:
++                bus-type:
++                  const: 5
++              required: [bus-type]
++    then:
++      required: [camera-core-supply]
++    else:
++      required: [dvdd-supply]
+
+ additionalProperties: false
+

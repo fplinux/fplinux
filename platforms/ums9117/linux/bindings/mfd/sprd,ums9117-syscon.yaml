@@ -10,7 +10,7 @@ maintainers:
   - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
 
 description:
-  Shared always-on APB and application AHB register banks, accessed through
+  Shared always-on APB, application APB and application AHB register banks, accessed through
   syscon regmaps by peripheral, clock and reset drivers.
 
 properties:
@@ -19,6 +19,7 @@ properties:
       - enum:
           - sprd,ums9117-aon-apb
           - sprd,ums9117-ap-ahb
+          - sprd,ums9117-ap-apb
       - const: syscon
 
   reg:

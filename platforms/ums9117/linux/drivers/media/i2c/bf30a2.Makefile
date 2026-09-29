@@ -1,0 +1,1 @@
+obj-$(CONFIG_VIDEO_BF30A2) += bf30a2.o

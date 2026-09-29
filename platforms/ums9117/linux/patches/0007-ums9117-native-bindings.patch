@@ -272,8 +272,8 @@ index 9bd752b..4869342 100644
        LDO_CAMA0, LDO_CAMA1, LDO_CAMD0, LDO_CAMD1, LDO_CAMIO, LDO_CAMMOT,
        LDO_CON, LDO_EMMCCORE, LDO_SDCORE, LDO_SDIO, LDO_SRAM, LDO_USB33,
        LDO_VLDO, LDO_WIFIPA
-+  The SC2720 binding exposes only the fixed-voltage LDO_SDCORE, LDO_SDIO and
-+  LDO_USB33 supplies whose register settings are known.
++  The SC2720 binding exposes LDO_CAMA, LDO_CAMIO and LDO_CAMD for camera
++  supplies, and LDO_SDCORE, LDO_SDIO and LDO_USB33 for storage and USB.
 
  properties:
    compatible:
@@ -300,7 +300,7 @@ index 9bd752b..4869342 100644
 +          const: sprd,sc2720-regulator
 +    then:
 +      patternProperties:
-+        "^LDO_(SDCORE|SDIO|USB33)$":
++        "^LDO_(CAMA|CAMIO|CAMD|SDCORE|SDIO|USB33)$":
 +          type: object
 +          $ref: regulator.yaml#
 +          unevaluatedProperties: false

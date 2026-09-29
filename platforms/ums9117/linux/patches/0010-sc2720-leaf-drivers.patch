@@ -440,16 +440,22 @@ index d84f3d0..f26d3d3 100644
  config REGULATOR_SKY81452
  	tristate "Skyworks Solutions SKY81452 voltage regulator"
 diff --git a/drivers/regulator/sc2731-regulator.c b/drivers/regulator/sc2731-regulator.c
-index 5447e1a..b7d9982 100644
+index 5447e1a..49bb712 100644
 --- a/drivers/regulator/sc2731-regulator.c
 +++ b/drivers/regulator/sc2731-regulator.c
-@@ -10,6 +10,24 @@
+@@ -10,6 +10,34 @@
  #include <linux/regulator/driver.h>
  #include <linux/regulator/of_regulator.h>
 
 +/*
-+ * SC2720 fixed-voltage regulator registers
++ * SC2720 regulator registers
 + */
++#define SC2720_LDO_CAMIO_PD 0xc8c
++#define SC2720_LDO_CAMIO_VOL 0xc90
++#define SC2720_LDO_CAMD_PD 0xca4
++#define SC2720_LDO_CAMD_VOL 0xca8
++#define SC2720_LDO_CAMA_PD 0xce0
++#define SC2720_LDO_CAMA_VOL 0xce4
 +#define SC2720_LDO_SDCORE_PD 0xd00
 +#define SC2720_LDO_SDCORE_VOL 0xd04
 +#define SC2720_LDO_SDIO_PD 0xd0c
@@ -459,6 +465,10 @@ index 5447e1a..b7d9982 100644
 +
 +#define SC2720_LDO_PD_MASK BIT(0)
 +#define SC2720_LDO_VOL_MASK GENMASK(6, 0)
++#define SC2720_LDO_CAMA_VOL_MASK GENMASK(6, 0)
++#define SC2720_LDO_CAMIO_VOL_MASK GENMASK(5, 0)
++#define SC2720_LDO_CAMD_VOL_MASK GENMASK(5, 0)
++#define SC2720_CAM_LDO_STEP_UV 12500
 +#define SC2720_LDO_SDCORE_3000MV 0x50
 +#define SC2720_LDO_SDIO_3000MV 0x6f
 +#define SC2720_LDO_USB33_3300MV 0x60
@@ -468,11 +478,15 @@ index 5447e1a..b7d9982 100644
  /*
   * SC2731 regulator lock register
   */
-@@ -118,6 +136,24 @@ enum sc2731_regulator_id {
+@@ -118,7 +146,28 @@ enum sc2731_regulator_id {
  	SC2731_LDO_SRAM,
  };
 
+-static const struct regulator_ops sc2731_regu_linear_ops = {
 +enum sc2720_regulator_id {
++	SC2720_LDO_CAMA,
++	SC2720_LDO_CAMIO,
++	SC2720_LDO_CAMD,
 +	SC2720_LDO_SDCORE,
 +	SC2720_LDO_SDIO,
 +	SC2720_LDO_USB33,
@@ -490,10 +504,11 @@ index 5447e1a..b7d9982 100644
 +	u32 unlock_value;
 +};
 +
- static const struct regulator_ops sc2731_regu_linear_ops = {
++static const struct regulator_ops sc27xx_regu_linear_ops = {
  	.enable = regulator_enable_regmap,
  	.disable = regulator_disable_regmap,
-@@ -127,8 +163,72 @@ static const struct regulator_ops sc2731_regu_linear_ops = {
+ 	.is_enabled = regulator_is_enabled_regmap,
+@@ -127,11 +176,95 @@ static const struct regulator_ops sc2731_regu_linear_ops = {
  	.set_voltage_sel = regulator_set_voltage_sel_regmap,
  };
 
@@ -561,14 +576,38 @@ index 5447e1a..b7d9982 100644
 +	.fixed_vsel = vsel,						\
 +}
 +
++#define SC2720_REGU_LINEAR(_id, en_reg, vreg, vmask, vmin) \
++	{ \
++	.desc = {							\
++		.name			= #_id,				\
++		.of_match		= of_match_ptr(#_id),		\
++		.ops			= &sc27xx_regu_linear_ops, \
++		.type			= REGULATOR_VOLTAGE,		\
++		.id			= SC2720_##_id,			\
++		.owner			= THIS_MODULE,			\
++		.min_uV			= vmin,				\
++		.n_voltages		= (vmask) + 1,			\
++		.uV_step		= SC2720_CAM_LDO_STEP_UV,	\
++		.enable_is_inverted	= true,				\
++		.enable_reg		= en_reg,			\
++		.enable_mask		= SC2720_LDO_PD_MASK,	\
++		.vsel_reg		= vreg,				\
++		.vsel_mask		= vmask,			\
++	},							\
++}
++
 +#define SC2731_REGU_LINEAR(_id, en_reg, en_mask, vreg, vmask, vstep, vmin, \
 +			   vmax)                                           \
 +	{			\
 +	.desc = {						\
  	.name			= #_id,				\
  	.of_match		= of_match_ptr(#_id),		\
- 	.ops			= &sc2731_regu_linear_ops,	\
-@@ -144,9 +244,10 @@ static const struct regulator_ops sc2731_regu_linear_ops = {
+-	.ops			= &sc2731_regu_linear_ops,	\
++	.ops			= &sc27xx_regu_linear_ops,	\
+ 	.type			= REGULATOR_VOLTAGE,		\
+ 	.id			= SC2731_##_id,			\
+ 	.owner			= THIS_MODULE,			\
+@@ -144,9 +277,10 @@ static const struct regulator_ops sc2731_regu_linear_ops = {
  	.enable_mask		= en_mask,			\
  	.vsel_reg		= vreg,				\
  	.vsel_mask		= vmask,			\
@@ -580,7 +619,7 @@ index 5447e1a..b7d9982 100644
  	SC2731_REGU_LINEAR(BUCK_CPU0, SC2731_POWER_PD_SW,
  			   SC2731_DCDC_CPU0_PD_MASK, SC2731_DCDC_CPU0_VOL,
  			   SC2731_DCDC_CPU0_VOL_MASK, 3125, 400000, 1996875),
-@@ -154,8 +255,8 @@ static const struct regulator_desc regulators[] = {
+@@ -154,8 +288,8 @@ static const struct regulator_desc regulators[] = {
  			   SC2731_DCDC_CPU1_PD_MASK, SC2731_DCDC_CPU1_VOL,
  			   SC2731_DCDC_CPU1_VOL_MASK, 3125, 400000, 1996875),
  	SC2731_REGU_LINEAR(BUCK_RF, SC2731_POWER_PD_SW, SC2731_DCDC_RF_PD_MASK,
@@ -591,7 +630,7 @@ index 5447e1a..b7d9982 100644
  	SC2731_REGU_LINEAR(LDO_CAMA0, SC2731_LDO_CAMA0_PD,
  			   SC2731_LDO_CAMA0_PD_MASK, SC2731_LDO_CAMA0_VOL,
  			   SC2731_LDO_CAMA0_VOL_MASK, 10000, 1200000, 3750000),
-@@ -190,9 +291,9 @@ static const struct regulator_desc regulators[] = {
+@@ -190,9 +324,9 @@ static const struct regulator_desc regulators[] = {
  	SC2731_REGU_LINEAR(LDO_CAMD1, SC2731_LDO_CAMD1_PD,
  			   SC2731_LDO_CAMD1_PD_MASK, SC2731_LDO_CAMD1_VOL,
  			   SC2731_LDO_CAMD1_VOL_MASK, 6250, 1000000, 1793750),
@@ -604,7 +643,7 @@ index 5447e1a..b7d9982 100644
  	SC2731_REGU_LINEAR(LDO_CAMIO, SC2731_LDO_CAMIO_PD,
  			   SC2731_LDO_CAMIO_PD_MASK, SC2731_LDO_CAMIO_VOL,
  			   SC2731_LDO_CAMIO_VOL_MASK, 6250, 1000000, 1793750),
-@@ -201,57 +302,95 @@ static const struct regulator_desc regulators[] = {
+@@ -201,57 +335,101 @@ static const struct regulator_desc regulators[] = {
  			   SC2731_LDO_SRAM_VOL_MASK, 6250, 1000000, 1793750),
  };
 
@@ -614,6 +653,12 @@ index 5447e1a..b7d9982 100644
 -			    SC2731_WR_UNLOCK_VALUE);
 -}
 +static const struct sc27xx_regulator_desc sc2720_regulators[] = {
++	SC2720_REGU_LINEAR(LDO_CAMA, SC2720_LDO_CAMA_PD, SC2720_LDO_CAMA_VOL,
++			   SC2720_LDO_CAMA_VOL_MASK, 1612500),
++	SC2720_REGU_LINEAR(LDO_CAMIO, SC2720_LDO_CAMIO_PD, SC2720_LDO_CAMIO_VOL,
++			   SC2720_LDO_CAMIO_VOL_MASK, 1400000),
++	SC2720_REGU_LINEAR(LDO_CAMD, SC2720_LDO_CAMD_PD, SC2720_LDO_CAMD_VOL,
++			   SC2720_LDO_CAMD_VOL_MASK, 800000),
 +	SC2720_REGU_FIXED(LDO_SDCORE, SC2720_LDO_SDCORE_PD,
 +			  SC2720_LDO_SDCORE_VOL, SC2720_LDO_SDCORE_3000MV,
 +			  3000000, 0),

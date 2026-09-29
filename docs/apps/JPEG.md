@@ -165,11 +165,17 @@ The supported input geometries and exact file sizes are:
 | `1200×32`      |      76,800 |
 | `320×240`      |     153,600 |
 | `640×480`      |     614,400 |
+| `1600×1200`    |   3,840,000 |
+| `1200×1600`    |   3,840,000 |
 
 The input is headerless, tight, full-range BT.601 NV16: first `W × H` Y bytes,
 then `W × H` interleaved Cb,Cr bytes. Each chroma pair belongs to two adjacent
-horizontal luma samples. Other geometries and camera capture are outside this
-command's supported interface.
+horizontal luma samples. The [camera](../features/CAMERA.md) on Nokia offers
+`800×600` and `1600×1200` NV16 capture. Only the latter matches an encoder
+geometry. The `1200×1600` geometry accepts portrait-oriented NV16 prepared by
+rotating that raw frame. INOI 240 and INOI 244 offer `240×320` NV16 capture,
+which does not match a hardware encoder geometry. This command accepts
+prepared NV16 frames and uses fixed quality-85 encoding.
 
 The output is a self-contained, baseline Huffman YCbCr 4:2:2 JPEG using fixed
 quality-85 quantization and restart markers. The command reserves at most 1 MiB
@@ -276,7 +282,7 @@ The decoder contract is:
   available only for MCU-aligned horizontal 4:2:2 input.
 
 The encoder accepts two-plane `NV16M` OUTPUT and produces one-plane `JPEG`
-CAPTURE for the three listed geometries. The scaler accepts two-plane `NV16M`
+CAPTURE for the five listed geometries. The scaler accepts two-plane `NV16M`
 OUTPUT and produces two-plane `NV16M` CAPTURE for the two listed fixed pairs.
 Both raw interfaces use full-range BT.601 colour metadata and tight plane
 strides.

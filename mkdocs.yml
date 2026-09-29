@@ -111,6 +111,7 @@ nav:
           - docs/features/DISPLAY_BACKLIGHT.md
           - docs/features/KEYPAD_BACKLIGHT.md
           - docs/features/VIBRATION.md
+      - docs/features/CAMERA.md
       - Storage and power:
           - docs/features/MICROSD.md
           - docs/features/RTC.md

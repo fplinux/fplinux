@@ -10,9 +10,12 @@
 #include <linux/iopoll.h>
 #include <linux/jiffies.h>
 #include <linux/ktime.h>
+#include <linux/mfd/syscon.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/overflow.h>
 #include <linux/platform_device.h>
+#include <linux/regmap.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
@@ -25,9 +28,13 @@
 #define JPEG_GATE BIT(10)
 #define JPEG_DCAM_RESET BIT(0)
 #define JPEG_RESET BIT(8)
+#define JPEG_CCIR_RESET BIT(13)
 #define JPEG_CLOCK_MASK (GENMASK(9, 8) | GENMASK(1, 0))
+#define DCAM_CCIR_ROUTE 0x5d0U
+#define DCAM_CCIR_ROUTE_PARALLEL BIT(0)
 
 #define JPEG_CFG 0x00000U
+#define DCAM_AUTO_COPY 0x00004U
 #define JPEG_SC_FORMAT 0x00008U
 #define JPEG_SOURCE_SIZE 0x0000cU
 #define JPEG_DEST_SIZE 0x00010U
@@ -46,6 +53,12 @@
 #define JPEG_BURST_GAP 0x00060U
 #define JPEG_ENDIAN 0x00064U
 #define JPEG_AHB_STATUS 0x00068U
+#define DCAM_CAP_CTRL 0x00100U
+#define DCAM_CAP_FRM_CNT 0x00104U
+#define DCAM_CAP_START 0x00108U
+#define DCAM_CAP_END 0x0010cU
+#define DCAM_CAP_DECIMATION 0x00110U
+#define DCAM_SPI_WIDTH 0x00124U
 #define JPEG_QUANT_TABLE 0x00300U
 #define JPEG_SCALER_H_TABLE 0x00200U
 #define JPEG_SCALER_V_TABLE 0x00300U
@@ -84,6 +97,13 @@
 #define JPEG_CFG_CPU_TABLES BIT(4)
 #define JPEG_CFG_CPU_ACK BIT(7)
 #define JPEG_AHB_BUSY BIT(0)
+#define DCAM_CAP_ENABLE BIT(5)
+#define DCAM_CAP_FRAME_CLEAR BIT(22)
+#define DCAM_CAP_CCIR656 BIT(0)
+#define DCAM_CAP_ONE_BIT GENMASK(10, 9)
+#define DCAM_CAPTURE_DONE BIT(4)
+#define DCAM_CAPTURE_ERRORS (BIT(5) | BIT(6) | BIT(10))
+#define DCAM_CAPTURE_IRQS (DCAM_CAPTURE_DONE | DCAM_CAPTURE_ERRORS)
 #define JPEG_BSM_BUFFER0 BIT(31)
 #define JPEG_BSM_BUFFERS GENMASK(31, 30)
 #define JPEG_BSM_READY BIT(31)
@@ -240,10 +260,19 @@ struct ums9117_jpeg_hw {
 	void __iomem *reset_set;
 	void __iomem *reset_clear;
 	void __iomem *clock;
+	struct regmap *aon_apb;
 	u32 saved_gate;
 	u32 saved_clock;
 	int irq;
 	spinlock_t lock;
+	struct mutex owner_lock;
+	enum ums9117_dcam_owner owner;
+	unsigned int codec_users;
+	bool owner_active;
+	u32 capture_saved_clock;
+	u32 capture_saved_route;
+	void (*capture_irq)(void *data, u32 status);
+	void *capture_irq_data;
 	struct completion completion;
 	atomic_t cancelled;
 	enum ums9117_jpeg_hw_operation operation;
@@ -357,6 +386,8 @@ static irqreturn_t jpeg_irq(int irq, void *data)
 	u32 mask = READ_ONCE(hw->active_irq_mask);
 	u32 status = jpeg_read(hw, JPEG_INT_STATUS) & mask;
 	u32 raw;
+	void (*capture_irq)(void *data, u32 status);
+	void *capture_data;
 	unsigned long flags;
 
 	if (!status)
@@ -390,11 +421,236 @@ static irqreturn_t jpeg_irq(int irq, void *data)
 			hw->stats.error_irqs++;
 	}
 	spin_unlock_irqrestore(&hw->lock, flags);
+	capture_irq = READ_ONCE(hw->capture_irq);
+	capture_data = READ_ONCE(hw->capture_irq_data);
+	if (capture_irq && operation == JPEG_OPERATION_NONE) {
+		jpeg_write(hw, JPEG_CFG,
+			   jpeg_read(hw, JPEG_CFG) & ~DCAM_CAP_ENABLE);
+		jpeg_write(hw, JPEG_INT_MASK, 0);
+		jpeg_read(hw, JPEG_INT_MASK);
+		WRITE_ONCE(hw->active_irq_mask, 0);
+		capture_irq(capture_data, status);
+		return IRQ_HANDLED;
+	}
 
 	if (operation != JPEG_OPERATION_DECODE ||
 	    status & (JPEG_IRQ_DONE | JPEG_DECODE_IRQ_ERRORS))
 		complete(&hw->completion);
 	return IRQ_HANDLED;
+}
+
+int ums9117_dcam_claim(struct ums9117_jpeg_hw *hw,
+		       enum ums9117_dcam_owner owner,
+		       void (*capture_irq)(void *data, u32 status), void *data)
+{
+	u32 clock;
+	int ret = 0;
+
+	mutex_lock(&hw->owner_lock);
+	if (ums9117_jpeg_hw_failed(hw)) {
+		ret = -EIO;
+		goto unlock;
+	}
+	if (hw->owner_active && hw->owner != owner) {
+		ret = -EBUSY;
+		goto unlock;
+	}
+	if (owner == UMS9117_DCAM_CODEC) {
+		hw->codec_users++;
+		hw->owner = owner;
+		hw->owner_active = true;
+		goto unlock;
+	}
+	if (hw->owner_active || !capture_irq) {
+		ret = -EBUSY;
+		goto unlock;
+	}
+	ret = regmap_read(hw->aon_apb, DCAM_CCIR_ROUTE,
+			  &hw->capture_saved_route);
+	if (ret)
+		goto unlock;
+	ret = regmap_update_bits(hw->aon_apb, DCAM_CCIR_ROUTE,
+				 DCAM_CCIR_ROUTE_PARALLEL,
+				 DCAM_CCIR_ROUTE_PARALLEL);
+	if (ret)
+		goto unlock;
+	hw->capture_irq_data = data;
+	WRITE_ONCE(hw->capture_irq, capture_irq);
+	clock = readl(hw->clock);
+	hw->capture_saved_clock = clock & JPEG_CLOCK_MASK;
+	writel((clock & ~GENMASK(1, 0)) | 1, hw->clock);
+	hw->owner = owner;
+	hw->owner_active = true;
+unlock:
+	mutex_unlock(&hw->owner_lock);
+	return ret;
+}
+
+int ums9117_dcam_capture_route_serial_g0(struct ums9117_jpeg_hw *hw)
+{
+	if (WARN_ON(!hw->owner_active || hw->owner != UMS9117_DCAM_CAPTURE))
+		return -EINVAL;
+	return regmap_update_bits(hw->aon_apb, DCAM_CCIR_ROUTE,
+				  DCAM_CCIR_ROUTE_PARALLEL, 0);
+}
+
+void ums9117_dcam_release(struct ums9117_jpeg_hw *hw,
+			  enum ums9117_dcam_owner owner)
+{
+	u32 clock;
+
+	mutex_lock(&hw->owner_lock);
+	if (WARN_ON(!hw->owner_active || hw->owner != owner))
+		goto unlock;
+	if (owner == UMS9117_DCAM_CODEC) {
+		if (--hw->codec_users)
+			goto unlock;
+	} else {
+		jpeg_write(hw, JPEG_INT_MASK, 0);
+		jpeg_read(hw, JPEG_INT_MASK);
+		synchronize_irq(hw->irq);
+		WRITE_ONCE(hw->capture_irq, NULL);
+		hw->capture_irq_data = NULL;
+		clock = readl(hw->clock);
+		writel((clock & ~JPEG_CLOCK_MASK) | hw->capture_saved_clock,
+		       hw->clock);
+		regmap_update_bits(hw->aon_apb, DCAM_CCIR_ROUTE,
+				   DCAM_CCIR_ROUTE_PARALLEL,
+				   hw->capture_saved_route);
+	}
+	hw->owner_active = false;
+unlock:
+	mutex_unlock(&hw->owner_lock);
+}
+
+int ums9117_dcam_capture_start(struct ums9117_jpeg_hw *hw, dma_addr_t dma,
+			       u32 width, u32 height, unsigned int skip_frames,
+			       bool serial_g0)
+{
+	u32 y_bytes;
+	u32 source_size;
+	u32 capture_end;
+	u32 status;
+	int ret;
+
+	if (WARN_ON(!hw->owner_active || hw->owner != UMS9117_DCAM_CAPTURE))
+		return -EINVAL;
+	if (!(serial_g0 ? (width == 240 && height == 320) :
+			  ((width == 800 && height == 600) ||
+			   (width == 1600 && height == 1200))) ||
+	    skip_frames > 15)
+		return -EINVAL;
+	y_bytes = width * height;
+	if (dma & 3 || dma > U32_MAX - 2 * y_bytes)
+		return -EINVAL;
+	source_size = (height << 16) | width;
+	capture_end = ((height - 1) << 16) | (2 * width - 1);
+	ret = jpeg_wait_idle(hw, &status);
+	if (ret)
+		return ret;
+
+	jpeg_write(hw, JPEG_INT_MASK, 0);
+	jpeg_write(hw, JPEG_CFG, 0);
+	writel(JPEG_DCAM_RESET | JPEG_CCIR_RESET, hw->reset_set);
+	writel(JPEG_DCAM_RESET | JPEG_CCIR_RESET, hw->reset_clear);
+	jpeg_write(hw, JPEG_INT_CLEAR, JPEG_IRQ_KNOWN);
+	spin_lock_irq(&hw->lock);
+	hw->events = 0;
+	hw->irq_raw = 0;
+	spin_unlock_irq(&hw->lock);
+
+	jpeg_write(hw, DCAM_CAP_CTRL,
+		   serial_g0 ? DCAM_CAP_CCIR656 | DCAM_CAP_ONE_BIT : BIT(3));
+	jpeg_write(hw, DCAM_CAP_FRM_CNT, DCAM_CAP_FRAME_CLEAR | skip_frames);
+	jpeg_write(hw, JPEG_SOURCE_SIZE, source_size);
+	jpeg_write(hw, DCAM_CAP_START, 0);
+	jpeg_write(hw, DCAM_CAP_END, capture_end);
+	jpeg_write(hw, DCAM_CAP_DECIMATION, 0);
+	jpeg_write(hw, DCAM_SPI_WIDTH, 2 * width - 1);
+	jpeg_write(hw, JPEG_SC_FORMAT, 0);
+	jpeg_write(hw, JPEG_DEST_SIZE, source_size);
+	jpeg_write(hw, JPEG_SCALING_CONFIG, BIT(1));
+	jpeg_write(hw, JPEG_ENDIAN, BIT(2));
+	jpeg_write(hw, JPEG_FRAME0_Y, lower_32_bits(dma));
+	jpeg_write(hw, JPEG_FRAME0_UV, lower_32_bits(dma + y_bytes));
+	jpeg_write(hw, JPEG_FRAME1_Y, 0);
+	jpeg_write(hw, JPEG_FRAME1_UV, 0);
+	jpeg_write(hw, JPEG_INT_CLEAR, JPEG_IRQ_KNOWN);
+	jpeg_write(hw, JPEG_INT_MASK, DCAM_CAPTURE_IRQS);
+	WRITE_ONCE(hw->active_irq_mask, DCAM_CAPTURE_IRQS);
+	dma_wmb();
+	jpeg_write(hw, DCAM_AUTO_COPY, 1);
+	jpeg_write(hw, DCAM_AUTO_COPY, 1);
+	jpeg_write(hw, DCAM_AUTO_COPY, 0);
+	jpeg_write(hw, DCAM_AUTO_COPY, BIT(1));
+	jpeg_write(hw, JPEG_CFG, DCAM_CAP_ENABLE);
+	return 0;
+}
+
+int ums9117_dcam_capture_stop(struct ums9117_jpeg_hw *hw)
+{
+	u32 status;
+	int ret, reset_ret;
+
+	jpeg_write(hw, JPEG_CFG, jpeg_read(hw, JPEG_CFG) & ~DCAM_CAP_ENABLE);
+	jpeg_write(hw, JPEG_INT_MASK, 0);
+	jpeg_read(hw, JPEG_INT_MASK);
+	synchronize_irq(hw->irq);
+	WRITE_ONCE(hw->active_irq_mask, 0);
+	ret = jpeg_wait_idle(hw, &status);
+	if (ret) {
+		writel(JPEG_DCAM_RESET | JPEG_CCIR_RESET, hw->reset_set);
+		writel(JPEG_DCAM_RESET | JPEG_CCIR_RESET, hw->reset_clear);
+		reset_ret = jpeg_wait_idle(hw, &status);
+		if (reset_ret) {
+			WRITE_ONCE(hw->failed, true);
+			ret = reset_ret;
+		}
+	}
+	jpeg_write(hw, JPEG_INT_CLEAR, JPEG_IRQ_KNOWN);
+	return ret;
+}
+
+int ums9117_dcam_capture_finish(struct ums9117_jpeg_hw *hw)
+{
+	u32 events, raw, ahb, cfg, cap, frames;
+	int ret, result;
+
+	ahb = jpeg_read(hw, JPEG_AHB_STATUS);
+	cfg = jpeg_read(hw, JPEG_CFG);
+	cap = jpeg_read(hw, DCAM_CAP_CTRL);
+	frames = jpeg_read(hw, DCAM_CAP_FRM_CNT);
+	ret = ums9117_dcam_capture_stop(hw);
+	spin_lock_irq(&hw->lock);
+	events = hw->events;
+	raw = hw->irq_raw;
+	spin_unlock_irq(&hw->lock);
+	if (!ret && (events & DCAM_CAPTURE_IRQS) == DCAM_CAPTURE_DONE)
+		return 0;
+	result = ret ?: -EIO;
+	dev_err_ratelimited(hw->dev, "capture failed: %pe\n", ERR_PTR(result));
+	dev_dbg(hw->dev,
+		"capture status: events=%08x raw=%08x ahb=%08x cfg=%08x cap=%08x frames=%08x stop=%d\n",
+		events, raw, ahb, cfg, cap, frames, ret);
+	return result;
+}
+
+int ums9117_dcam_capture_timeout(struct ums9117_jpeg_hw *hw)
+{
+	u32 status = jpeg_read(hw, JPEG_INT_STATUS);
+	u32 raw = jpeg_read(hw, JPEG_INT_RAW);
+	u32 ahb = jpeg_read(hw, JPEG_AHB_STATUS);
+	u32 cap = jpeg_read(hw, DCAM_CAP_CTRL);
+	u32 frames = jpeg_read(hw, DCAM_CAP_FRM_CNT);
+	int ret = ums9117_dcam_capture_stop(hw);
+	int result = ret ?: -ETIMEDOUT;
+
+	dev_err_ratelimited(hw->dev, "capture timed out: %pe\n",
+			    ERR_PTR(result));
+	dev_dbg(hw->dev,
+		"capture timeout status: status=%08x raw=%08x ahb=%08x cap=%08x frames=%08x stop=%d\n",
+		status, raw, ahb, cap, frames, ret);
+	return result;
 }
 
 static void *jpeg_buffer_data(struct ums9117_jpeg_dma_buffer *buffer)
@@ -1909,6 +2165,10 @@ struct ums9117_jpeg_hw *ums9117_jpeg_hw_create(struct platform_device *pdev)
 		return ERR_CAST(hw->reset_clear);
 	if (IS_ERR(hw->clock))
 		return ERR_CAST(hw->clock);
+	hw->aon_apb =
+		syscon_regmap_lookup_by_phandle(dev->of_node, "sprd,aon-apb");
+	if (IS_ERR(hw->aon_apb))
+		return ERR_CAST(hw->aon_apb);
 	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
 	if (ret)
 		return ERR_PTR(ret);
@@ -1916,6 +2176,7 @@ struct ums9117_jpeg_hw *ums9117_jpeg_hw_create(struct platform_device *pdev)
 	if (hw->irq < 0)
 		return ERR_PTR(hw->irq);
 	spin_lock_init(&hw->lock);
+	mutex_init(&hw->owner_lock);
 	init_completion(&hw->completion);
 	atomic_set(&hw->cancelled, 0);
 	hw->stats.operation[JPEG_OPERATION_DECODE].last_result = -ENODATA;

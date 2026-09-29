@@ -1,0 +1,69 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/media/i2c/byd,bf30a2.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: BF30A2 CMOS image sensor
+
+maintainers:
+  - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+
+properties:
+  compatible:
+    const: byd,bf30a2
+
+  reg:
+    const: 0x6e
+
+  clocks:
+    maxItems: 1
+
+  clock-names:
+    const: xclk
+
+  camera-core-supply: true
+  avdd-supply: true
+  iovdd-supply: true
+
+  reset-gpios:
+    maxItems: 1
+
+  powerdown-gpios:
+    maxItems: 1
+
+  pinctrl-names:
+    const: default
+
+  pinctrl-0: true
+
+  port:
+    $ref: /schemas/graph.yaml#/$defs/port-base
+    additionalProperties: false
+    properties:
+      endpoint:
+        $ref: /schemas/graph.yaml#/$defs/endpoint-base
+        unevaluatedProperties: false
+        properties:
+          sprd,serial-g0-data-width:
+            const: 1
+            description: One data line on the UMS9117 serial G0 camera input.
+        required:
+          - remote-endpoint
+          - sprd,serial-g0-data-width
+    required:
+      - endpoint
+
+required:
+  - compatible
+  - reg
+  - clocks
+  - clock-names
+  - camera-core-supply
+  - avdd-supply
+  - iovdd-supply
+  - reset-gpios
+  - powerdown-gpios
+  - port
+
+additionalProperties: false

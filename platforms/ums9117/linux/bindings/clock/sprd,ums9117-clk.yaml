@@ -10,18 +10,25 @@ maintainers:
   - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
 
 description: |
-  Clock providers for the UMS9117 application clock, always-on APB and
-  application AHB register banks. While prepared, the AP clock provider owns
-  the three-bit SDIO0 selector, selects its 195 MHz source and
+  Clock providers for the UMS9117 application clocks, always-on APB,
+  application APB and application AHB register banks. The I2C0 clock provider
+  selects the 26 MHz source with divider one. While prepared, the AP clock
+  provider owns the three-bit SDIO0 selector, selects its 195 MHz source and
   restores the previous selector value when unprepared. It does not change the
-  source PLL. The clock indices are defined in
+  source PLL. The sensor provider selects and divides an inherited 48 MHz
+  source, enables the sensor gate while prepared, and restores the prior
+  selector, divider and gate state when unprepared. It does not control the
+  inherited source. The clock indices are defined in
   dt-bindings/clock/sprd,ums9117-clk.h.
 
 properties:
   compatible:
     enum:
       - sprd,ums9117-ap-clk
+      - sprd,ums9117-ap-i2c0-clk
+      - sprd,ums9117-aon-sensor-clk
       - sprd,ums9117-aonapb-gate
+      - sprd,ums9117-apapb-gate
       - sprd,ums9117-apahb-gate
 
   reg:
@@ -30,6 +37,16 @@ properties:
   sprd,syscon:
     $ref: /schemas/types.yaml#/definitions/phandle
     description: Phandle to the syscon containing the gate registers.
+
+  sprd,aon-apb:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: Phandle to the always-on APB syscon containing the sensor gate.
+
+  clocks:
+    maxItems: 1
+
+  clock-names:
+    const: source
 
   '#clock-cells':
     const: 1
@@ -42,7 +59,10 @@ allOf:
   - if:
       properties:
         compatible:
-          const: sprd,ums9117-ap-clk
+          enum:
+            - sprd,ums9117-ap-clk
+            - sprd,ums9117-ap-i2c0-clk
+            - sprd,ums9117-aon-sensor-clk
     then:
       required:
         - reg
@@ -53,6 +73,21 @@ allOf:
         - sprd,syscon
       properties:
         reg: false
+
+  - if:
+      properties:
+        compatible:
+          const: sprd,ums9117-aon-sensor-clk
+    then:
+      required:
+        - sprd,aon-apb
+        - clocks
+        - clock-names
+    else:
+      properties:
+        sprd,aon-apb: false
+        clocks: false
+        clock-names: false
 
 additionalProperties: false
 

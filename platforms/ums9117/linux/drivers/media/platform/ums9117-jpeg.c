@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/of_graph.h>
+#include <linux/property.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/workqueue.h>
 
 #include <media/v4l2-device.h>
+#include <media/media-device.h>
 #include <media/v4l2-event.h>
 #include <media/v4l2-ioctl.h>
 #include <media/v4l2-mem2mem.h>
@@ -15,6 +18,7 @@
 
 #include "ums9117-jpeg-codec.h"
 #include "ums9117-jpeg-hw.h"
+#include "ums9117-dcam-capture.h"
 
 #define JPEG_NAME "ums9117-jpeg"
 #define JPEG_ENCODER_NAME "ums9117-jpeg-enc"
@@ -53,9 +57,8 @@ static const struct jpeg_scale_profile
 
 /* The fixed encoder configuration supports only these frame geometries. */
 static const struct jpeg_geometry jpeg_encoder_geometries[] = {
-	{ 1200, 32 },
-	{ 320, 240 },
-	{ 640, 480 },
+	{ 1200, 32 },	{ 320, 240 },	{ 640, 480 },
+	{ 1600, 1200 }, { 1200, 1600 },
 };
 
 struct jpeg_buffer {
@@ -92,10 +95,15 @@ struct jpeg_context {
 	struct ums9117_jpeg_encode_config encode_config;
 	u32 output_sequence;
 	u32 capture_sequence;
+	unsigned int streaming_queues;
 };
 
 struct jpeg_device {
 	struct v4l2_device v4l2;
+	struct media_device media;
+	struct ums9117_dcam_capture *capture;
+	bool has_capture;
+	bool media_registered;
 	struct jpeg_video_node nodes[JPEG_OPERATION_COUNT];
 	struct v4l2_m2m_dev *m2m;
 	struct ums9117_jpeg_hw *hw;
@@ -809,6 +817,7 @@ static void jpeg_return_buffers(struct vb2_queue *queue,
 static int jpeg_start_streaming(struct vb2_queue *queue, unsigned int count)
 {
 	struct jpeg_context *ctx = vb2_get_drv_priv(queue);
+	int ret;
 
 	if (ums9117_jpeg_hw_failed(ctx->jpeg->hw) ||
 	    (ctx->operation == JPEG_OPERATION_DECODE &&
@@ -816,6 +825,15 @@ static int jpeg_start_streaming(struct vb2_queue *queue, unsigned int count)
 		jpeg_return_buffers(queue, VB2_BUF_STATE_QUEUED);
 		return -EIO;
 	}
+	if (!ctx->streaming_queues) {
+		ret = ums9117_dcam_claim(ctx->jpeg->hw, UMS9117_DCAM_CODEC,
+					 NULL, NULL);
+		if (ret) {
+			jpeg_return_buffers(queue, VB2_BUF_STATE_QUEUED);
+			return ret;
+		}
+	}
+	ctx->streaming_queues++;
 	if (V4L2_TYPE_IS_CAPTURE(queue->type)) {
 		if (ctx->operation == JPEG_OPERATION_DECODE)
 			ctx->source_change = false;
@@ -828,7 +846,13 @@ static int jpeg_start_streaming(struct vb2_queue *queue, unsigned int count)
 
 static void jpeg_stop_streaming(struct vb2_queue *queue)
 {
+	struct jpeg_context *ctx = vb2_get_drv_priv(queue);
+
 	jpeg_return_buffers(queue, VB2_BUF_STATE_ERROR);
+	if (WARN_ON(!ctx->streaming_queues))
+		return;
+	if (!--ctx->streaming_queues)
+		ums9117_dcam_release(ctx->jpeg->hw, UMS9117_DCAM_CODEC);
 }
 
 static const struct vb2_ops jpeg_queue_ops = {
@@ -1168,6 +1192,38 @@ static const struct v4l2_file_operations jpeg_file_ops = {
 	.mmap = v4l2_m2m_fop_mmap,
 };
 
+static int jpeg_reqbufs(struct file *file, void *priv,
+			struct v4l2_requestbuffers *request)
+{
+	struct jpeg_context *ctx = jpeg_file_context(file);
+	int ret;
+
+	if (!request->count)
+		return v4l2_m2m_ioctl_reqbufs(file, priv, request);
+	ret = ums9117_dcam_claim(ctx->jpeg->hw, UMS9117_DCAM_CODEC, NULL, NULL);
+	if (ret)
+		return ret;
+	ret = v4l2_m2m_ioctl_reqbufs(file, priv, request);
+	ums9117_dcam_release(ctx->jpeg->hw, UMS9117_DCAM_CODEC);
+	return ret;
+}
+
+static int jpeg_create_bufs(struct file *file, void *priv,
+			    struct v4l2_create_buffers *create)
+{
+	struct jpeg_context *ctx = jpeg_file_context(file);
+	int ret;
+
+	if (!create->count)
+		return v4l2_m2m_ioctl_create_bufs(file, priv, create);
+	ret = ums9117_dcam_claim(ctx->jpeg->hw, UMS9117_DCAM_CODEC, NULL, NULL);
+	if (ret)
+		return ret;
+	ret = v4l2_m2m_ioctl_create_bufs(file, priv, create);
+	ums9117_dcam_release(ctx->jpeg->hw, UMS9117_DCAM_CODEC);
+	return ret;
+}
+
 static const struct v4l2_ioctl_ops jpeg_ioctl_ops = {
 	.vidioc_querycap = jpeg_querycap,
 	.vidioc_enum_framesizes = jpeg_enum_framesizes,
@@ -1181,12 +1237,12 @@ static const struct v4l2_ioctl_ops jpeg_ioctl_ops = {
 	.vidioc_s_fmt_vid_cap_mplane = jpeg_set_format,
 	.vidioc_g_selection = jpeg_get_selection,
 	.vidioc_s_selection = jpeg_set_selection,
-	.vidioc_reqbufs = v4l2_m2m_ioctl_reqbufs,
+	.vidioc_reqbufs = jpeg_reqbufs,
 	.vidioc_querybuf = v4l2_m2m_ioctl_querybuf,
 	.vidioc_qbuf = v4l2_m2m_ioctl_qbuf,
 	.vidioc_dqbuf = v4l2_m2m_ioctl_dqbuf,
 	.vidioc_prepare_buf = v4l2_m2m_ioctl_prepare_buf,
-	.vidioc_create_bufs = v4l2_m2m_ioctl_create_bufs,
+	.vidioc_create_bufs = jpeg_create_bufs,
 	.vidioc_streamon = v4l2_m2m_ioctl_streamon,
 	.vidioc_streamoff = v4l2_m2m_ioctl_streamoff,
 	.vidioc_subscribe_event = jpeg_subscribe_event,
@@ -1216,6 +1272,8 @@ static const struct jpeg_node_info jpeg_node_info[JPEG_OPERATION_COUNT] = {
 static int jpeg_probe(struct platform_device *pdev)
 {
 	struct jpeg_device *jpeg;
+	struct device_node *endpoint;
+	struct fwnode_handle *remote;
 	unsigned int i;
 	int ret;
 
@@ -1225,10 +1283,24 @@ static int jpeg_probe(struct platform_device *pdev)
 	mutex_init(&jpeg->lock);
 	spin_lock_init(&jpeg->job_lock);
 	INIT_WORK(&jpeg->work, jpeg_work);
+	endpoint = of_graph_get_endpoint_by_regs(pdev->dev.of_node, 0, -1);
+	if (endpoint) {
+		remote = fwnode_graph_get_remote_endpoint(
+			of_fwnode_handle(endpoint));
+		of_node_put(endpoint);
+		jpeg->has_capture = !!remote;
+		fwnode_handle_put(remote);
+	}
+	if (jpeg->has_capture) {
+		jpeg->media.dev = &pdev->dev;
+		strscpy(jpeg->media.model, "UMS9117 DCAM",
+			sizeof(jpeg->media.model));
+		media_device_init(&jpeg->media);
+		jpeg->v4l2.mdev = &jpeg->media;
+	}
 	ret = of_reserved_mem_device_init(&pdev->dev);
 	if (ret)
-		return dev_err_probe(&pdev->dev, ret,
-				     "failed to attach JPEG DMA pool\n");
+		goto cleanup_media;
 	jpeg->hw = ums9117_jpeg_hw_create(pdev);
 	if (IS_ERR(jpeg->hw)) {
 		ret = PTR_ERR(jpeg->hw);
@@ -1237,6 +1309,12 @@ static int jpeg_probe(struct platform_device *pdev)
 	ret = v4l2_device_register(&pdev->dev, &jpeg->v4l2);
 	if (ret)
 		goto destroy_hw;
+	if (jpeg->has_capture) {
+		ret = media_device_register(&jpeg->media);
+		if (ret)
+			goto unregister_v4l2;
+		jpeg->media_registered = true;
+	}
 	jpeg->m2m = v4l2_m2m_init(&jpeg_m2m_ops);
 	if (IS_ERR(jpeg->m2m)) {
 		ret = PTR_ERR(jpeg->m2m);
@@ -1266,6 +1344,12 @@ static int jpeg_probe(struct platform_device *pdev)
 		dev_dbg(&pdev->dev, "%s registered as /dev/video%d\n",
 			node->card, node->video.num);
 	}
+	jpeg->capture = ums9117_dcam_capture_create(&pdev->dev, &jpeg->v4l2,
+						    jpeg->hw, &jpeg->lock);
+	if (IS_ERR(jpeg->capture)) {
+		ret = PTR_ERR(jpeg->capture);
+		goto unregister_nodes;
+	}
 	platform_set_drvdata(pdev, jpeg);
 	return 0;
 
@@ -1278,12 +1362,21 @@ unregister_nodes:
 	flush_work(&jpeg->work);
 	v4l2_m2m_release(jpeg->m2m);
 unregister_v4l2:
+	if (jpeg->media_registered)
+		media_device_unregister(&jpeg->media);
 	v4l2_device_unregister(&jpeg->v4l2);
 destroy_hw:
 	ums9117_jpeg_hw_destroy(jpeg->hw);
 release_memory:
 	of_reserved_mem_device_release(&pdev->dev);
+	if (jpeg->has_capture)
+		media_device_cleanup(&jpeg->media);
 	return ret;
+cleanup_media:
+	if (jpeg->has_capture)
+		media_device_cleanup(&jpeg->media);
+	return dev_err_probe(&pdev->dev, ret,
+			     "failed to attach JPEG DMA pool\n");
 }
 
 static void jpeg_remove(struct platform_device *pdev)
@@ -1291,12 +1384,17 @@ static void jpeg_remove(struct platform_device *pdev)
 	struct jpeg_device *jpeg = platform_get_drvdata(pdev);
 	unsigned int i;
 
+	ums9117_dcam_capture_destroy(jpeg->capture);
 	for (i = JPEG_OPERATION_COUNT; i > 0; i--)
 		video_unregister_device(&jpeg->nodes[i - 1].video);
 	ums9117_jpeg_hw_cancel(jpeg->hw);
 	flush_work(&jpeg->work);
 	v4l2_m2m_release(jpeg->m2m);
+	if (jpeg->media_registered)
+		media_device_unregister(&jpeg->media);
 	v4l2_device_unregister(&jpeg->v4l2);
+	if (jpeg->has_capture)
+		media_device_cleanup(&jpeg->media);
 	ums9117_jpeg_hw_destroy(jpeg->hw);
 	of_reserved_mem_device_release(&pdev->dev);
 }
