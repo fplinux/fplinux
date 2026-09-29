@@ -91,6 +91,51 @@ def sparse_targets(
     return objects
 
 
+def sparse_build_targets(
+    source: Path,
+    output: Path,
+    objects: list[str],
+    *,
+    arch: str,
+    cross_compile: str,
+) -> list[str]:
+    """Ask Kbuild which projected objects belong to the resolved configuration."""
+    selected: set[str] = set()
+    for directory in dict.fromkeys(str(Path(path).parent) for path in objects):
+        result = capture_text(
+            [
+                "make",
+                "--no-print-directory",
+                "-s",
+                "-C",
+                str(output),
+                "-f",
+                str(require_file(source / "scripts/Makefile.build")),
+                f"srctree={source}",
+                f"srcroot={source}",
+                f"objtree={output}",
+                f"obj={directory}",
+                f"ARCH={arch}",
+                f"SRCARCH={arch}",
+                f"CROSS_COMPILE={cross_compile}",
+                f"CC={cross_compile}gcc",
+                "need-builtin=1",
+                "need-modorder=1",
+                "KBUILD_BUILTIN=1",
+                "KBUILD_MODULES=1",
+                (
+                    "--eval=.PHONY: __fplinux_selected\n__fplinux_selected: ; "
+                    "@printf '%s\\n' $(filter %.o,$(real-obj-y) $(real-obj-m) $(lib-y))"
+                ),
+                "__fplinux_selected",
+            ]
+        )
+        if result.returncode:
+            fail(f"kernel check failed: object selection exited {exit_status(result.returncode)}")
+        selected.update(result.stdout.split())
+    return [path for path in objects if path in selected]
+
+
 def projected_sources(
     target: str, target_config: dict[str, Any], platform: dict[str, Any]
 ) -> list[Path]:
@@ -320,15 +365,6 @@ def check_one_context(
             ]
         kconfig_command = [*kbuild, "olddefconfig", "prepare"]
         dtbs_command = [*kbuild, "W=1", "dtbs_check"]
-        sparse_command = [
-            *kbuild,
-            "-j1",
-            "W=1e",
-            "C=2",
-            "CHECK=sparse",
-            "CF=-D__CHECK_ENDIAN__ -Wsparse-error",
-            *objects,
-        ]
         linux_state.require_prepared_linux(source, prepared_linux)
 
     output = reset_sparse_output(target, profile, build_type=build_type)
@@ -392,16 +428,38 @@ def check_one_context(
         except DeviceTreeError as error:
             fail(f"kernel check failed: {error}")
     with report_stage(reporter, f"sparse-{label}"):
-        run(sparse_command)
-    print(f"sparse: OK ({label}, {len(objects)} kernel C objects)")
-    return len(objects)
+        configured_objects = sparse_build_targets(
+            source,
+            output,
+            objects,
+            arch=platform["linux"]["arch"],
+            cross_compile=platform["linux"]["analysis_cross_compile"],
+        )
+        if configured_objects:
+            run(
+                [
+                    *kbuild,
+                    "-j1",
+                    "W=1e",
+                    "C=2",
+                    "CHECK=sparse",
+                    "CF=-D__CHECK_ENDIAN__ -Wsparse-error",
+                    *configured_objects,
+                ]
+            )
+    checked = sum((output / path).is_file() for path in objects)
+    print(f"sparse: OK ({label}, {checked} kernel C objects)")
+    return checked
 
 
-def context_object_count(target: str, profile: str | None) -> int:
-    """Count one context's projected objects for the stable final summary."""
-    target_config = load_target(target, profile)
+def context_object_count(target: str, profile: str | None, *, build_type: str = "release") -> int:
+    """Count projected objects actually compiled in the selected analysis context."""
+    target_config = load_target(target, profile, build_type=build_type)
     platform = load_platform(target_config["platform"])
-    return len(sparse_targets(target, target_config, platform))
+    output = sparse_output(target, profile, build_type=build_type)
+    return sum(
+        (output / path).is_file() for path in sparse_targets(target, target_config, platform)
+    )
 
 
 @dataclass
@@ -639,7 +697,10 @@ def check_contexts(
     _run_context_processes(
         contexts, jobs, command_for=partial(_context_worker_command, build_type=build_type)
     )
-    checked = sum(context_object_count(target, selected) for target, selected in contexts)
+    checked = sum(
+        context_object_count(target, selected, build_type=build_type)
+        for target, selected in contexts
+    )
     print(f"sparse: OK ({checked} kernel C objects total)")
 
 
