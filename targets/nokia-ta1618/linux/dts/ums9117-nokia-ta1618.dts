@@ -30,6 +30,68 @@
 	};
 
 	soc {
+		camera_mux: pinctrl@402a01e8 {
+			compatible = "pinctrl-single";
+			reg = <0x402a01e8 0xc>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,register-width = <32>;
+			pinctrl-single,function-mask = <0x30>;
+
+			camera_mux_pins: camera-pins {
+				pinctrl-single,pins = <0x0 0x0 0x4 0x30 0x8 0x30>;
+			};
+		};
+
+		camera_pads: pinctrl@402a05e8 {
+			compatible = "pinctrl-single";
+			reg = <0x402a05e8 0xc>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,register-width = <32>;
+			pinctrl-single,function-mask = <0xffffffff>;
+
+			camera_pad_pins: camera-pins {
+				pinctrl-single,pins = <
+					0x0 0x00082001 0x4 0x00080001
+					0x8 0x00082001
+				>;
+			};
+		};
+
+		camera_dvp_mux: pinctrl@402a01f4 {
+			compatible = "pinctrl-single";
+			reg = <0x402a01f4 0x2c>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,register-width = <32>;
+			pinctrl-single,function-mask = <0x30>;
+
+			camera_dvp_mux_pins: camera-pins {
+				pinctrl-single,pins = <
+					0x00 0x00 0x04 0x00 0x08 0x00 0x0c 0x00
+					0x10 0x00 0x14 0x00 0x18 0x00 0x1c 0x00
+					0x20 0x00 0x24 0x00 0x28 0x00
+				>;
+			};
+		};
+
+		camera_dvp_pads: pinctrl@402a05f4 {
+			compatible = "pinctrl-single";
+			reg = <0x402a05f4 0x2c>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,register-width = <32>;
+			pinctrl-single,function-mask = <0xffffffff>;
+
+			camera_dvp_pad_pins: camera-pins {
+				pinctrl-single,pins = <
+					0x00 0x00082006 0x04 0x00082046
+					0x08 0x00082000 0x0c 0x00082000
+					0x10 0x00082000 0x14 0x00082000
+					0x18 0x00082040 0x1c 0x00082040
+					0x20 0x00082040 0x24 0x00082040
+					0x28 0x00082000
+				>;
+			};
+		};
+
 		display@20800000 {
 			compatible = "fplinux,ums9117-st7789p3-spi-fb";
 			reg = <0x20800000 0x00001000>,
@@ -114,6 +176,11 @@
 	status = "okay";
 };
 
+&codec_dma {
+	/* One 1600x1200 NV16 capture buffer needs room beside other DMA users. */
+	size = <0x00800000>;
+};
+
 &rota {
 	status = "okay";
 };
@@ -124,6 +191,57 @@
 
 &eic2 {
 	status = "okay";
+};
+
+&ap_gpio {
+	status = "okay";
+};
+
+&ap_i2c0_clk {
+	status = "okay";
+};
+
+&aon_sensor_clk {
+	assigned-clocks = <&aon_sensor_clk CLK_SENSOR0>;
+	assigned-clock-rates = <24000000>;
+	status = "okay";
+};
+
+&i2c0 {
+	status = "okay";
+
+	camera@3c {
+		compatible = "galaxycore,gc2145";
+		reg = <0x3c>;
+		rotation = <270>;
+		clocks = <&aon_sensor_clk CLK_SENSOR0>;
+		camera-core-supply = <&vddcamd>;
+		avdd-supply = <&vddcama>;
+		iovdd-supply = <&vddcamio>;
+		reset-gpios = <&ap_gpio 100 GPIO_ACTIVE_LOW>;
+		powerdown-gpios = <&ap_gpio 101 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&camera_mux_pins &camera_pad_pins
+			     &camera_dvp_mux_pins &camera_dvp_pad_pins>;
+
+		port {
+			gc2145_out: endpoint {
+				bus-type = <5>;
+				bus-width = <8>;
+				hsync-active = <1>;
+				vsync-active = <0>;
+				pclk-sample = <0>;
+			};
+		};
+	};
+};
+
+&gc2145_out {
+	remote-endpoint = <&dcam_in>;
+};
+
+&dcam_in {
+	remote-endpoint = <&gc2145_out>;
 };
 
 &sdio0_mmc {

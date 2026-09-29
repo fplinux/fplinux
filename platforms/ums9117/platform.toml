@@ -139,6 +139,10 @@ patches = [
   "platforms/ums9117/linux/patches/0011-ums9117-mailbox.patch",
   "platforms/ums9117/linux/patches/0012-ums9117-eic.patch",
   "platforms/ums9117/linux/patches/0013-ums9117-eic-binding.patch",
+  "platforms/ums9117/linux/patches/0014-ums9117-gpio-binding.patch",
+  "platforms/ums9117/linux/patches/0015-ums9117-i2c-gpio-drivers.patch",
+  "platforms/ums9117/linux/patches/0016-gc2145-parallel-binding.patch",
+  "platforms/ums9117/linux/patches/0017-gc2145-parallel-dvp.patch",
 ]
 
 [[linux.appends]]
@@ -182,6 +186,26 @@ source = "platforms/ums9117/linux/drivers/media/platform/ums9117-jpeg.c"
 destination = "drivers/media/platform/ums9117-jpeg.c"
 
 [[linux.copies]]
+source = "platforms/ums9117/linux/drivers/media/platform/ums9117-dcam-capture.c"
+destination = "drivers/media/platform/ums9117-dcam-capture.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/linux/drivers/media/platform/ums9117-dcam-capture.h"
+destination = "drivers/media/platform/ums9117-dcam-capture.h"
+
+[[linux.copies]]
+source = "platforms/ums9117/linux/drivers/media/i2c/bf30a2.c"
+destination = "drivers/media/i2c/bf30a2.c"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/media/i2c/bf30a2.Kconfig"
+destination = "drivers/media/i2c/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/media/i2c/bf30a2.Makefile"
+destination = "drivers/media/i2c/Makefile"
+
+[[linux.copies]]
 source = "platforms/ums9117/linux/drivers/media/platform/ums9117-jpeg-codec.c"
 destination = "drivers/media/platform/ums9117-jpeg-codec.c"
 
@@ -200,6 +224,10 @@ destination = "drivers/media/platform/ums9117-jpeg-hw.h"
 [[linux.copies]]
 source = "platforms/ums9117/linux/bindings/media/sprd,ums9117-jpeg.yaml"
 destination = "Documentation/devicetree/bindings/media/sprd,ums9117-jpeg.yaml"
+
+[[linux.copies]]
+source = "platforms/ums9117/linux/bindings/media/i2c/byd,bf30a2.yaml"
+destination = "Documentation/devicetree/bindings/media/i2c/byd,bf30a2.yaml"
 
 [[linux.copies]]
 source = "platforms/ums9117/linux/bindings/media/sprd,ums9117-rota.yaml"

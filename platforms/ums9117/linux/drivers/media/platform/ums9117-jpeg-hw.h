@@ -9,6 +9,11 @@ struct ums9117_jpeg_encode_config;
 struct ums9117_jpeg_frame;
 struct ums9117_jpeg_hw;
 
+enum ums9117_dcam_owner {
+	UMS9117_DCAM_CODEC,
+	UMS9117_DCAM_CAPTURE,
+};
+
 enum ums9117_jpeg_scale_profile {
 	UMS9117_JPEG_SCALE_640X480_TO_320X240,
 	UMS9117_JPEG_SCALE_320X240_TO_160X120,
@@ -32,5 +37,17 @@ int ums9117_jpeg_hw_scale(struct ums9117_jpeg_hw *hw,
 			  const u8 *input[2], const size_t input_size[2],
 			  u8 *output[2], const size_t capacity[2]);
 bool ums9117_jpeg_hw_failed(struct ums9117_jpeg_hw *hw);
+int ums9117_dcam_claim(struct ums9117_jpeg_hw *hw,
+		       enum ums9117_dcam_owner owner,
+		       void (*capture_irq)(void *data, u32 status), void *data);
+int ums9117_dcam_capture_route_serial_g0(struct ums9117_jpeg_hw *hw);
+void ums9117_dcam_release(struct ums9117_jpeg_hw *hw,
+			  enum ums9117_dcam_owner owner);
+int ums9117_dcam_capture_start(struct ums9117_jpeg_hw *hw, dma_addr_t dma,
+			       u32 width, u32 height, unsigned int skip_frames,
+			       bool serial_g0);
+int ums9117_dcam_capture_finish(struct ums9117_jpeg_hw *hw);
+int ums9117_dcam_capture_timeout(struct ums9117_jpeg_hw *hw);
+int ums9117_dcam_capture_stop(struct ums9117_jpeg_hw *hw);
 
 #endif

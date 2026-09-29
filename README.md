@@ -57,6 +57,7 @@ support status, boot key, storage rules and limitations.
 - [Speaker audio](docs/features/SPEAKER_AUDIO.md)
 - [Phone microphone](docs/features/MICROPHONE_AUDIO.md)
 - [FM radio](docs/features/FM_RADIO.md)
+- [Camera capture](docs/features/CAMERA.md)
 - [LCD backlight](docs/features/DISPLAY_BACKLIGHT.md)
 - [Keypad backlight](docs/features/KEYPAD_BACKLIGHT.md)
 - [Vibration](docs/features/VIBRATION.md)

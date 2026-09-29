@@ -92,6 +92,24 @@
 		sc2720_regulators: regulators {
 			compatible = "sprd,sc2720-regulator";
 
+			vddcama: LDO_CAMA {
+				regulator-name = "sc2720-cama";
+				regulator-min-microvolt = <2800000>;
+				regulator-max-microvolt = <2800000>;
+			};
+
+			vddcamio: LDO_CAMIO {
+				regulator-name = "sc2720-camio";
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+			};
+
+			vddcamd: LDO_CAMD {
+				regulator-name = "sc2720-camd";
+				regulator-min-microvolt = <1250000>;
+				regulator-max-microvolt = <1250000>;
+			};
+
 			vmmc: LDO_SDCORE {
 				regulator-name = "sc2720-sdcore";
 				regulator-min-microvolt = <3000000>;

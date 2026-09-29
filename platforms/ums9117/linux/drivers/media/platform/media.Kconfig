@@ -22,8 +22,10 @@ config VIDEO_UMS9117_JPEG
 	depends on OF
 	select V4L2_MEM2MEM_DEV
 	select V4L2_JPEG_HELPER
+	select MEDIA_CONTROLLER
+	select V4L2_FWNODE
+	select VIDEOBUF2_DMA_CONTIG
 	select VIDEOBUF2_VMALLOC
 	help
-	  Decode baseline JPEG images from memory using the UMS9117 VSP.
-	  The V4L2 memory-to-memory interface accepts JPEG and produces
-	  full-range semiplanar YCbCr. No camera or sensor is required.
+	  JPEG decode, encode and scaling through the UMS9117 VSP, and
+	  camera capture through the shared DCAM when a sensor is connected.

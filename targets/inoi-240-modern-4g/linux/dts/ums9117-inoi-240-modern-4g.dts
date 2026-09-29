@@ -29,6 +29,30 @@
 	};
 
 	soc {
+		camera_id_mux: pinctrl@402a01e8 {
+			compatible = "pinctrl-single";
+			reg = <0x402a01e8 0xc>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,register-width = <32>;
+			pinctrl-single,function-mask = <0x30>;
+
+			camera_id_mux_pins: camera-pins {
+				pinctrl-single,pins = <0x0 0x0 0x4 0x30 0x8 0x30>;
+			};
+		};
+
+		camera_front_mux: pinctrl@402a01f4 {
+			compatible = "pinctrl-single";
+			reg = <0x402a01f4 0x4>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,register-width = <32>;
+			pinctrl-single,function-mask = <0x30>;
+
+			camera_front_mux_pins: camera-pins {
+				pinctrl-single,pins = <0x0 0x30>;
+			};
+		};
+
 		display@20800000 {
 			compatible = "fplinux,ums9117-nv3023-lcm-fb";
 			reg = <0x20800000 0x00001000>,
@@ -125,12 +149,61 @@
 	status = "okay";
 };
 
+&ap_gpio {
+	status = "okay";
+};
+
+&ap_i2c0_clk {
+	status = "okay";
+};
+
+&aon_sensor_clk {
+	assigned-clocks = <&aon_sensor_clk CLK_SENSOR0>;
+	assigned-clock-rates = <12000000>;
+	status = "okay";
+};
+
+&i2c0 {
+	status = "okay";
+
+	bf30a2: camera@6e {
+		compatible = "byd,bf30a2";
+		reg = <0x6e>;
+		clocks = <&aon_sensor_clk CLK_SENSOR0>;
+		clock-names = "xclk";
+		camera-core-supply = <&vddcamd>;
+		avdd-supply = <&vddcama>;
+		iovdd-supply = <&vddcamio>;
+		reset-gpios = <&ap_gpio 100 GPIO_ACTIVE_HIGH>;
+		powerdown-gpios = <&ap_gpio 101 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&camera_id_mux_pins &camera_front_mux_pins>;
+
+		port {
+			bf30a2_out: endpoint {
+				remote-endpoint = <&dcam_in>;
+				sprd,serial-g0-data-width = <1>;
+			};
+		};
+	};
+};
+
 &rota {
 	status = "okay";
 };
 
 &jpeg {
 	status = "okay";
+};
+
+&dcam_in {
+	/delete-property/ bus-type;
+	/delete-property/ bus-width;
+	/delete-property/ hsync-active;
+	/delete-property/ vsync-active;
+	/delete-property/ pclk-sample;
+	remote-endpoint = <&bf30a2_out>;
+	sprd,serial-g0-data-width = <1>;
 };
 
 &eic2 {

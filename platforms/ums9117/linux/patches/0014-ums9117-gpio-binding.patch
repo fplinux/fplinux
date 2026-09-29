@@ -1,0 +1,50 @@
+diff --git a/Documentation/devicetree/bindings/gpio/sprd,gpio.yaml b/Documentation/devicetree/bindings/gpio/sprd,gpio.yaml
+--- a/Documentation/devicetree/bindings/gpio/sprd,gpio.yaml
++++ b/Documentation/devicetree/bindings/gpio/sprd,gpio.yaml
+@@ -24,6 +24,7 @@
+       - items:
+           - enum:
+               - sprd,ums512-gpio
++              - sprd,ums9117-gpio
+           - const: sprd,sc9860-gpio
+
+   reg:
+@@ -43,6 +44,16 @@
+     maxItems: 1
+     description: The interrupt shared by all GPIO lines for this controller.
+
++  ngpios:
++    minimum: 1
++    maximum: 256
++
++  clocks:
++    maxItems: 1
++
++  clock-names:
++    const: enable
++
+ required:
+   - compatible
+   - reg
+@@ -51,6 +62,21 @@
+   - interrupt-controller
+   - "#interrupt-cells"
+   - interrupts
++
++allOf:
++  - if:
++      properties:
++        compatible:
++          contains:
++            const: sprd,ums9117-gpio
++    then:
++      properties:
++        ngpios:
++          const: 128
++      required:
++        - ngpios
++        - clocks
++        - clock-names
+
+ additionalProperties: false
+

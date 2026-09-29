@@ -42,7 +42,10 @@ Current target support:
   - optional per-command charge measurement through the bundled APK;
   - hardware image rotation of RGB, grayscale and two-plane YUV images;
   - hardware baseline JPEG decoding, fixed quality-85 JPEG encoding at
-    1200x32, 320x240 and 640x480, and fixed half-size NV16 scaling;
+    1200x32, 320x240, 640x480, 1600x1200 and 1200x1600, and fixed
+    half-size NV16 scaling;
+  - rear GC2145 V4L2 camera capture at 800x600 and 1600x1200 NV16 in the
+    RAM profile; raw frames are sideways relative to portrait orientation;
   - calibrated SoC temperature reporting without a thermal-control policy;
   - raw auxiliary ADC readings without unit conversion;
   - real-time clock reading, setting and one-shot alarms;
@@ -72,6 +75,7 @@ Interfaces, limits and safety procedures are bundled at:
   - docs/features/AUXADC.md
   - docs/features/BATTERY_TELEMETRY.md
   - docs/features/BLUETOOTH.md
+  - docs/features/CAMERA.md
   - docs/features/CHARGER_STATUS.md
   - docs/features/CPU_CLOCK.md
   - docs/features/DISPLAY_BACKLIGHT.md

@@ -30,8 +30,9 @@ All current targets share these limits:
 - Internal phone storage is not writable. A supported target may expose a
   fixed-command read-only physical NAND backup, not a mounted filesystem.
 - USB operates as a peripheral; USB host and OTG are not supported.
-- Calls, SMS, mobile data, Wi-Fi, camera and indicator LEDs have no supported
-  FPLinux path.
+- Calls, SMS, mobile data, Wi-Fi and indicator LEDs have no supported FPLinux
+  path. [V4L2 camera capture](../docs/features/CAMERA.md) is supported on
+  all three phones in the default RAM profile.
 - Audio support is target-specific: the phone document states its
   [headphone](../docs/features/HEADPHONE_AUDIO.md),
   [speaker](../docs/features/SPEAKER_AUDIO.md),
@@ -42,8 +43,8 @@ All current targets share these limits:
 - Linux reboot is not supported. Suspend and vibration support are
   target-specific and documented by the exact phone where available.
 
-Hardware presence still belongs to each phone table. For example, a missing
-camera driver does not prove that a camera is physically absent.
+Hardware presence still belongs to each phone table. A device marked **Not
+supported** on one target is not necessarily physically absent.
 
 ## Shared documentation
 

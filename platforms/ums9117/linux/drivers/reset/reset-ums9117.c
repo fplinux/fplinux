@@ -14,11 +14,7 @@
 #define UMS9117_AP_AHB_RESET_SET 0x1004
 #define UMS9117_AP_AHB_RESET_CLEAR 0x2004
 
-/*
- * UMS9117 glb/ap_ahb.h defines SDIO0_SOFT_RST as AHB_RST bit 11. The
- * global-register contract uses write-one SET and CLEAR aliases at +0x1000
- * and +0x2000, so reset updates never read-modify-write the shared state.
- */
+/* SDIO0 reset is bit 11; write-one aliases avoid RMW of shared reset state. */
 struct ums9117_reset {
 	struct regmap *regmap;
 	struct reset_controller_dev rcdev;

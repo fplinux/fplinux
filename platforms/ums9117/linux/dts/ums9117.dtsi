@@ -11,6 +11,7 @@
 
 	aliases {
 		spi0 = &adi;
+		i2c0 = &i2c0;
 	};
 
 	aonapb_gate: aonapb-gate {
@@ -22,6 +23,12 @@
 	apahb_gate: apahb-gate {
 		compatible = "sprd,ums9117-apahb-gate";
 		sprd,syscon = <&ap_ahb>;
+		#clock-cells = <1>;
+	};
+
+	apapb_gate: apapb-gate {
+		compatible = "sprd,ums9117-apapb-gate";
+		sprd,syscon = <&ap_apb>;
 		#clock-cells = <1>;
 	};
 
@@ -103,6 +110,20 @@
 		clock-frequency = <32768>;
 	};
 
+	ext_26m: clock-26000000 {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <26000000>;
+		clock-output-names = "ext-26m";
+	};
+
+	/* The 48 MHz sensor source is inherited from the boot firmware. */
+	sensor_48m: clock-48000000 {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <48000000>;
+	};
+
 	soc {
 		compatible = "simple-bus";
 		#address-cells = <1>;
@@ -134,6 +155,28 @@
 		ap_ahb: syscon@20e00000 {
 			compatible = "sprd,ums9117-ap-ahb", "syscon";
 			reg = <0x20e00000 0x3000>;
+		};
+
+		ap_apb: syscon@71300000 {
+			compatible = "sprd,ums9117-ap-apb", "syscon";
+			reg = <0x71300000 0x3000>;
+		};
+
+		ap_i2c0_clk: clock-controller@2150003c {
+			compatible = "sprd,ums9117-ap-i2c0-clk";
+			reg = <0x2150003c 0x4>;
+			#clock-cells = <1>;
+			status = "disabled";
+		};
+
+		aon_sensor_clk: clock-controller@402d02b4 {
+			compatible = "sprd,ums9117-aon-sensor-clk";
+			reg = <0x402d02b4 0x4>;
+			sprd,aon-apb = <&aon_apb>;
+			clocks = <&sensor_48m>;
+			clock-names = "source";
+			#clock-cells = <1>;
+			status = "disabled";
 		};
 
 		ap_clk: clock-controller@2150006c {
@@ -205,6 +248,32 @@
 			};
 		};
 
+		i2c0_mux: pinctrl@402a01e0 {
+			compatible = "pinctrl-single";
+			reg = <0x402a01e0 0x8>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,register-width = <32>;
+			pinctrl-single,function-mask = <0x30>;
+
+			i2c0_mux_pins: i2c0-pins {
+				pinctrl-single,pins = <0x0 0x0 0x4 0x0>;
+			};
+		};
+
+		i2c0_pads: pinctrl@402a05e0 {
+			compatible = "pinctrl-single";
+			reg = <0x402a05e0 0x8>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,register-width = <32>;
+			pinctrl-single,function-mask = <0xffffffff>;
+
+			i2c0_pad_pins: i2c0-pins {
+				pinctrl-single,pins = <
+					0x0 0x00083088 0x4 0x00083088
+				>;
+			};
+		};
+
 		ums9117_inherited_clocks: clock-controller@20e00038 {
 			compatible = "fplinux,ums9117-inherited-clocks";
 			reg = <0x20e00038 0x4>,
@@ -226,6 +295,35 @@
 			interrupt-controller;
 			#interrupt-cells = <2>;
 			interrupts = <GIC_SPI 37 IRQ_TYPE_LEVEL_HIGH>;
+			status = "disabled";
+		};
+
+		ap_gpio: gpio@40280000 {
+			compatible = "sprd,ums9117-gpio", "sprd,sc9860-gpio";
+			reg = <0x40280000 0x400>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			interrupt-controller;
+			#interrupt-cells = <2>;
+			interrupts = <GIC_SPI 35 IRQ_TYPE_LEVEL_HIGH>;
+			ngpios = <128>;
+			clocks = <&aonapb_gate CLK_GPIO_EB>;
+			clock-names = "enable";
+			status = "disabled";
+		};
+
+		i2c0: i2c@70500000 {
+			compatible = "sprd,sc9860-i2c";
+			reg = <0x70500000 0x1000>;
+			interrupts = <GIC_SPI 11 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ap_i2c0_clk CLK_AP_I2C0>, <&ext_26m>,
+				 <&apapb_gate CLK_I2C0_EB>;
+			clock-names = "i2c", "source", "enable";
+			clock-frequency = <400000>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&i2c0_mux_pins &i2c0_pad_pins>;
+			#address-cells = <1>;
+			#size-cells = <0>;
 			status = "disabled";
 		};
 
@@ -337,7 +435,17 @@
 				    "ap-ahb-reset-clear", "dcam-clock";
 			interrupts = <GIC_SPI 45 IRQ_TYPE_LEVEL_HIGH>;
 			memory-region = <&codec_dma>;
+			sprd,aon-apb = <&aon_apb>;
 			status = "disabled";
+			port {
+				dcam_in: endpoint {
+					bus-type = <5>;
+					bus-width = <8>;
+					hsync-active = <1>;
+					vsync-active = <0>;
+					pclk-sample = <0>;
+				};
+			};
 		};
 
 		usb: usb@20200000 {
