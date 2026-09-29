@@ -41,6 +41,9 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
         (self.source / "scripts").mkdir(parents=True)
         (self.source / ".clang-format").write_text("BasedOnStyle: LLVM\n")
         (self.source / "scripts/checkpatch.pl").write_text("#!/usr/bin/env perl\n")
+        (self.source / "scripts/Makefile.build").write_text(
+            "# Replaced at the command boundary.\n"
+        )
         self.defconfig = self.root / "defconfig"
         self.defconfig.write_text("CONFIG_TEST=y\n")
         self.fragment = self.root / "fragment"
@@ -136,6 +139,13 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
                 return_value=state,
             ),
             mock.patch.object(kernelcheck, "run", side_effect=run_command),
+            mock.patch.object(
+                kernelcheck,
+                "capture_text",
+                return_value=subprocess.CompletedProcess(
+                    [], 0, "drivers/test-a.o\ndrivers/test-b.o\n", ""
+                ),
+            ),
             mock.patch.object(kernelcheck, "run_checkpatch"),
             mock.patch.object(
                 kernelcheck,
@@ -238,6 +248,11 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
                 return_value=self.prepared_linux,
             ),
             mock.patch.object(kernelcheck, "run", side_effect=run_command),
+            mock.patch.object(
+                kernelcheck,
+                "capture_text",
+                return_value=subprocess.CompletedProcess([], 0, "drivers/test-a.o\n", ""),
+            ),
             mock.patch.object(kernelcheck, "run_checkpatch"),
             mock.patch.object(
                 kernelcheck,
