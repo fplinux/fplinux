@@ -57,8 +57,8 @@ static const struct jpeg_scale_profile
 
 /* The fixed encoder configuration supports only these frame geometries. */
 static const struct jpeg_geometry jpeg_encoder_geometries[] = {
-	{ 1200, 32 },	{ 320, 240 },	{ 640, 480 },
-	{ 1600, 1200 }, { 1200, 1600 },
+	{ 1200, 32 }, { 320, 240 },   { 240, 320 },
+	{ 640, 480 }, { 1600, 1200 }, { 1200, 1600 },
 };
 
 struct jpeg_buffer {

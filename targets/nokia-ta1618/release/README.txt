@@ -42,7 +42,7 @@ Current target support:
   - optional per-command charge measurement through the bundled APK;
   - hardware image rotation of RGB, grayscale and two-plane YUV images;
   - hardware baseline JPEG decoding, fixed quality-85 JPEG encoding at
-    1200x32, 320x240, 640x480, 1600x1200 and 1200x1600, and fixed
+    1200x32, 320x240, 240x320, 640x480, 1600x1200 and 1200x1600, and fixed
     half-size NV16 scaling;
   - rear GC2145 V4L2 camera capture at 800x600 and 1600x1200 NV16 in the
     RAM profile; raw frames are sideways relative to portrait orientation;
