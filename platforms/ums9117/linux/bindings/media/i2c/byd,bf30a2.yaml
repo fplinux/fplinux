@@ -37,6 +37,8 @@ properties:
 
   pinctrl-0: true
 
+  rotation: true
+
   port:
     $ref: /schemas/graph.yaml#/$defs/port-base
     additionalProperties: false
@@ -65,5 +67,8 @@ required:
   - reset-gpios
   - powerdown-gpios
   - port
+
+allOf:
+  - $ref: /schemas/media/video-interface-devices.yaml#
 
 additionalProperties: false

@@ -8,7 +8,9 @@
 #include <linux/regulator/consumer.h>
 
 #include <media/v4l2-async.h>
+#include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
+#include <media/v4l2-fwnode.h>
 #include <media/v4l2-mediabus.h>
 
 #define BF30A2_ID_HIGH_REG 0xfc
@@ -28,6 +30,7 @@ struct bf30a2_reg {
 struct bf30a2 {
 	struct v4l2_subdev sd;
 	struct media_pad pad;
+	struct v4l2_ctrl_handler ctrls;
 	struct clk *xclk;
 	struct regulator *core;
 	struct regulator *avdd;
@@ -278,6 +281,7 @@ static const struct v4l2_subdev_internal_ops bf30a2_internal_ops = {
 static int bf30a2_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
+	struct v4l2_fwnode_device_properties props;
 	struct bf30a2 *sensor;
 	u8 high;
 	u8 low;
@@ -357,12 +361,24 @@ static int bf30a2_probe(struct i2c_client *client)
 	if (clk_get_rate(sensor->xclk) != BF30A2_MODE_XCLK_HZ)
 		return -ERANGE;
 
+	ret = v4l2_fwnode_device_parse(dev, &props);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				     "failed to parse sensor properties\n");
+	ret = v4l2_ctrl_handler_init(&sensor->ctrls, 1);
+	if (ret)
+		return ret;
+	ret = v4l2_ctrl_new_fwnode_properties(&sensor->ctrls, NULL, &props);
+	if (ret)
+		goto ctrls_cleanup;
+	sensor->sd.ctrl_handler = &sensor->ctrls;
+
 	sensor->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	sensor->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
 	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
 	ret = media_entity_pads_init(&sensor->sd.entity, 1, &sensor->pad);
 	if (ret)
-		return ret;
+		goto ctrls_cleanup;
 	ret = v4l2_subdev_init_finalize(&sensor->sd);
 	if (ret)
 		goto entity_cleanup;
@@ -380,6 +396,8 @@ pm_disable:
 	v4l2_subdev_cleanup(&sensor->sd);
 entity_cleanup:
 	media_entity_cleanup(&sensor->sd.entity);
+ctrls_cleanup:
+	v4l2_ctrl_handler_free(&sensor->ctrls);
 	return ret;
 }
 
@@ -394,6 +412,7 @@ static void bf30a2_remove(struct i2c_client *client)
 	pm_runtime_set_suspended(&client->dev);
 	v4l2_subdev_cleanup(sd);
 	media_entity_cleanup(&sd->entity);
+	v4l2_ctrl_handler_free(sd->ctrl_handler);
 }
 
 static const struct of_device_id bf30a2_of_match[] = { { .compatible =
