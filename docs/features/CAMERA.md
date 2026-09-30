@@ -25,9 +25,12 @@ of interleaved Cb,Cr bytes. `bytesperline` is the width and `sizeimage` is
 `2 × width × height`. Consumers must use the returned color metadata and
 monotonic frame timestamps.
 
-Nokia's frames are sideways relative to the phone's portrait orientation;
-the consumer handles rotation when needed. INOI frames are upright. Saved
-image dimensions, compression and microphone recording belong to the
+Sensor mounting orientation is exposed through the read-only
+`V4L2_CID_CAMERA_SENSOR_ROTATION` control: `270` degrees on Nokia and `0`
+degrees on both INOI phones. The value gives the counterclockwise correction
+to apply to a captured image. The capture driver leaves the pixels unchanged.
+
+Saved image dimensions, compression and microphone recording belong to the
 consumer. The [microphone](MICROPHONE_AUDIO.md) is a separate ALSA interface.
 
 ## Resource limits

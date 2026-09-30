@@ -169,6 +169,7 @@
 	bf30a2: camera@6e {
 		compatible = "byd,bf30a2";
 		reg = <0x6e>;
+		rotation = <0>;
 		clocks = <&aon_sensor_clk CLK_SENSOR0>;
 		clock-names = "xclk";
 		camera-core-supply = <&vddcamd>;
