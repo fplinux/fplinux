@@ -12,6 +12,7 @@ packages = [
   "fplinux-cpuclock",
   "fplinux-fm",
   "fplinux-ssh",
+  "fplinux-dropbear",
   "fplinux-usb-gadget",
   "fplinux-rotate",
   "fplinux-jpeg",
@@ -26,6 +27,7 @@ packages = [
 packages = [
   "fplinux-brightness-ui",
   "fplinux-charge",
+  "fplinux-ncurses-curses",
   "fplinux-showcase",
   "fplinux-tyrquake",
   "fplinux-xkb-ru",

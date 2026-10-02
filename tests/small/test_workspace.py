@@ -106,6 +106,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
             always = write("always.txt")
             rootfs_apkbuild = write("alpine/aports/package-a/APKBUILD")
             bundle_apkbuild = write("alpine/aports/package-b/APKBUILD")
+            library_apkbuild = write("alpine/aports/package-c/APKBUILD")
             shared = write("shared/dependency.c")
             target_copy = write("targets/phone/kernel/copy.c")
             platform_patch = write("shared/platform.patch")
@@ -207,7 +208,17 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                 mock.patch.object(
                     alpine_state,
                     "bundle_packages",
-                    return_value=("package-b",),
+                    return_value=("package-b-extra",),
+                ),
+                mock.patch.object(
+                    alpine_state,
+                    "SUBPACKAGE_APORTS",
+                    {"package-b-extra": "package-b"},
+                ),
+                mock.patch.object(
+                    alpine_state,
+                    "LOCAL_BUILD_DEPENDENCIES",
+                    {"package-a": ("package-c",)},
                 ),
                 mock.patch.object(
                     alpine_state,
@@ -220,6 +231,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                     always,
                     rootfs_apkbuild,
                     bundle_apkbuild,
+                    library_apkbuild,
                     shared,
                     target_copy,
                     platform_patch,

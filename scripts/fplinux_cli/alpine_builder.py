@@ -517,6 +517,7 @@ def materialize_aport_sources(package: str, source_root: Path, destination: Path
     """Copy one canonical aport and its mapped shared files into a writable stage."""
     if alpine_state.PACKAGE_ID.fullmatch(package) is None:
         fail(f"invalid Alpine package identifier: {package}")
+    package = alpine_state.aport_producer(package)
     if source_root.is_symlink() or not source_root.is_dir():
         fail(f"Alpine source root is missing or invalid: {source_root}")
     source_aport = source_root / "alpine/aports" / package
@@ -819,7 +820,7 @@ def _verify_alpine_rootfs(  # noqa: PLR0913 -- verify each independently selecte
         "/etc/fstab": "fplinux-base",
         "/etc/inittab": "fplinux-base",
         "/etc/network/interfaces": "fplinux-base",
-        "/etc/init.d/networking": "openrc",
+        "/etc/init.d/networking": "fplinux-openrc",
         "/etc/os-release": "fplinux-base",
         "/etc/init.d/fplinux-brightness": "fplinux-base",
         "/usr/bin/fplinux-brightness": "fplinux-base",

@@ -11,7 +11,11 @@ extend-exclude = [
 ]
 
 [default]
-extend-ignore-re = ["\\b[0-9a-f]{7,}\\b"]
+extend-ignore-re = [
+  "\\b[0-9a-f]{7,}\\b",
+  # The upstream BusyBox patch filename cannot be corrected locally.
+  "0004-Avoid-redefined-warnings-when-buiding-with-utmps\\.patch",
+]
 
 [default.extend-identifiers]
 FPLinux = "FPLinux"

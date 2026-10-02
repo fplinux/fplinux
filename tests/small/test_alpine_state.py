@@ -148,6 +148,57 @@ class AlpineStateTests(unittest.TestCase):
             ("base-1-r0.apk", "feature-dependency-1-r0.apk"),
         )
 
+    def test_bundle_subpackages_use_existing_aports_without_selecting_their_parents(self) -> None:
+        """Optional child APK names remain distinct from the preinstalled producer packages."""
+        for producer in ("fplinux-bash", "fplinux-ncurses"):
+            self._write(f"alpine/aports/{producer}/APKBUILD", f"pkgname={producer}\n".encode())
+        optional = (
+            "fplinux-bash-loadables",
+            "fplinux-ncurses-curses",
+        )
+
+        actual = alpine_state.bundle_packages(
+            {"bundle": {"packages": list(optional)}},
+            {"bundle": {"packages": []}},
+            ("fplinux-bash", "fplinux-ncurses"),
+            self.root,
+        )
+
+        self.assertEqual(actual, optional)
+
+    def test_subpackage_rootfs_receipt_tracks_output_selection_and_producer_changes(self) -> None:
+        """The chosen child is causal, producer edits miss, and unrelated edits still hit."""
+        producer = "fplinux-ncurses"
+        child = "fplinux-ncurses-curses"
+        aport = self._write(f"alpine/aports/{producer}/APKBUILD", b"pkgname=fplinux-ncurses\n")
+        output = self.root / "built-rootfs"
+        output.mkdir()
+        (output / "rootfs.cpio").write_bytes(b"rootfs content\n")
+        recipe = self._recipe(packages=(child,))
+        alpine_state.write_receipt(output, recipe)
+
+        self.assertTrue(alpine_state.receipt_matches(output, self._recipe(packages=(child,))))
+        self.assertNotEqual(recipe, self._recipe(packages=(producer,)))
+        self.assertEqual(
+            alpine_state.alpine_package_recipe(child, "1" * 64, self.signing_key, self.root),
+            alpine_state.alpine_package_recipe(producer, "1" * 64, self.signing_key, self.root),
+        )
+        self._write("alpine/aports/not-production/APKBUILD", b"unrelated changed\n")
+        self.assertTrue(alpine_state.receipt_matches(output, self._recipe(packages=(child,))))
+        aport.write_bytes(b"pkgname=fplinux-ncurses\nchanged=yes\n")
+        self.assertFalse(alpine_state.receipt_matches(output, self._recipe(packages=(child,))))
+
+    def test_materializing_a_subpackage_copies_the_producer_sources(self) -> None:
+        """A child name stages its existing producer instead of requiring a new source tree."""
+        self._write("alpine/aports/fplinux-ncurses/APKBUILD", b"pkgname=fplinux-ncurses\n")
+        self._write("alpine/aports/fplinux-ncurses/adapter.c", b"producer adapter\n")
+        destination = self.root / "stage"
+
+        alpine_builder.materialize_aport_sources("fplinux-ncurses-curses", self.root, destination)
+
+        self.assertEqual((destination / "APKBUILD").read_bytes(), b"pkgname=fplinux-ncurses\n")
+        self.assertEqual((destination / "adapter.c").read_bytes(), b"producer adapter\n")
+
     def test_package_cannot_be_selected_and_bundle_published(self) -> None:
         """One package cannot be both installed and published separately."""
         with self.assertRaisesRegex(SystemExit, "both rootfs-selected and bundle-published"):
@@ -155,6 +206,37 @@ class AlpineStateTests(unittest.TestCase):
                 {"bundle": {"packages": [self.packages[0]]}},
                 {"bundle": {"packages": []}},
                 self.packages,
+                self.root,
+            )
+
+    def test_profile_preinstall_removes_only_its_platform_optional_package(self) -> None:
+        """A profile dependency is installed, while unrelated components remain optional."""
+        profile = {
+            "rootfs": {
+                "base_packages": [],
+                "packages": ["fplinux-package-a"],
+                "exclude_packages": [],
+            },
+            "bundle": {"packages": []},
+        }
+        platform = {"bundle": {"packages": ["fplinux-package-a", "fplinux-package-b"]}}
+
+        self.assertEqual(
+            alpine_state.bundle_packages(platform, profile, ("fplinux-package-a",), self.root),
+            ("fplinux-package-b",),
+        )
+        with self.assertRaisesRegex(SystemExit, "both rootfs-selected and bundle-published"):
+            alpine_state.bundle_packages(
+                {"bundle": {"packages": []}},
+                {**profile, "bundle": {"packages": ["fplinux-package-a"]}},
+                ("fplinux-package-a",),
+                self.root,
+            )
+        with self.assertRaisesRegex(SystemExit, "owned by both platform and target"):
+            alpine_state.bundle_packages(
+                platform,
+                {**profile, "bundle": {"packages": ["fplinux-package-a"]}},
+                ("fplinux-package-a",),
                 self.root,
             )
 
@@ -488,6 +570,7 @@ class AlpineStateTests(unittest.TestCase):
         builds: list[str] = []
         failing_package: str | None = None
         changed_package = self.packages[1]
+        child_package = "fplinux-package-a-extra"
         original_recipe = alpine_state.alpine_package_recipe
 
         def package_recipe(name: str, image: str, signing_key: str) -> str:
@@ -495,7 +578,8 @@ class AlpineStateTests(unittest.TestCase):
 
         def list_packages(command: list[str], cwd: Path, environment: dict[str, str]) -> str:
             del command, environment
-            return f"{cwd.name}-1.0-r0.apk\n"
+            names = (cwd.name, child_package) if cwd.name == self.packages[0] else (cwd.name,)
+            return "".join(f"{name}-1.0-r0.apk\n" for name in names)
 
         def run_as_builder(command: list[str], cwd: Path, environment: dict[str, str]) -> None:
             nonlocal failing_package
@@ -506,7 +590,9 @@ class AlpineStateTests(unittest.TestCase):
             builds.append(cwd.name)
             output = Path(environment["REPODEST"])
             output.mkdir(parents=True, exist_ok=True)
-            (output / f"{cwd.name}-1.0-r0.apk").write_text(f"{cwd.name}\n", encoding="utf-8")
+            names = (cwd.name, child_package) if cwd.name == self.packages[0] else (cwd.name,)
+            for name in names:
+                (output / f"{name}-1.0-r0.apk").write_text(f"{name}\n", encoding="utf-8")
 
         invocation = 0
 
@@ -522,7 +608,7 @@ class AlpineStateTests(unittest.TestCase):
                 jobs=1,
                 private_key=private_key,
                 public_key=public_key,
-                build_packages=self.packages,
+                build_packages=(*self.packages, child_package),
             )
 
         with (
@@ -541,11 +627,20 @@ class AlpineStateTests(unittest.TestCase):
             ),
             mock.patch.object(alpine_builder, "_log_message"),
             mock.patch.object(alpine_state, "alpine_package_recipe", side_effect=package_recipe),
+            mock.patch.object(
+                alpine_state, "SUBPACKAGE_APORTS", {child_package: self.packages[0]}
+            ),
         ):
-            build_apks()
+            outputs, _public, _private = build_apks()
             self.assertEqual(builds, list(self.packages))
+            self.assertEqual(outputs[child_package].read_bytes(), b"fplinux-package-a-extra\n")
 
             builds.clear()
+            outputs, _public, _private = build_apks()
+            self.assertEqual(builds, [])
+            self.assertEqual(outputs[child_package].read_bytes(), b"fplinux-package-a-extra\n")
+
+            self._write("alpine/aports/not-production/APKBUILD", b"unrelated changed\n")
             build_apks()
             self.assertEqual(builds, [])
 

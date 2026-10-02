@@ -6,7 +6,7 @@ pkgdesc="Persistent microSD root filesystem support for FPLinux"
 url="https://github.com/fplinux/fplinux"
 arch="noarch"
 license="GPL-2.0-only"
-depends="cloud-utils-growpart e2fsprogs-extra openrc"
+depends="cloud-utils-growpart fplinux-resize2fs openrc"
 options="!check"
 source="fplinux-microsd-grow fplinux-microsd-grow.initd"
 

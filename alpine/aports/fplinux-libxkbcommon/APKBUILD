@@ -6,9 +6,9 @@ pkgdesc="Keyboard layout library for FPLinux applications"
 url="https://xkbcommon.org"
 arch="armv7"
 license="MIT AND MIT-open-group AND HPND AND HPND-sell-variant"
-makedepends_build="bison clang22 lld22 meson samurai"
+makedepends_build="bison clang22 lld22 llvm22 meson samurai"
 makedepends_host="musl-dev"
-subpackages="$pkgname-dev"
+subpackages="$pkgname-dev $pkgname-static"
 options="!check"
 source="libxkbcommon-$pkgver.tar.gz::https://github.com/xkbcommon/libxkbcommon/archive/refs/tags/xkbcommon-$pkgver.tar.gz"
 builddir="$srcdir/libxkbcommon-xkbcommon-$pkgver"
@@ -17,13 +17,13 @@ build() {
 	: "${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
 	cat >fplinux-cross.meson <<-EOF
 		[binaries]
-		ar = '$CHOST-ar'
+		ar = '/usr/lib/llvm22/bin/llvm-ar'
 		[properties]
 		pkg_config_libdir = ['$CBUILDROOT/usr/lib/pkgconfig', '$CBUILDROOT/usr/share/pkgconfig']
 	EOF
 	abuild-meson \
 		--cross-file fplinux-cross.meson \
-		-Ddefault_library=shared \
+		-Ddefault_library=both \
 		-Denable-bash-completion=false \
 		-Denable-docs=false \
 		-Denable-tools=false \
@@ -32,13 +32,18 @@ build() {
 		-Denable-xkbregistry=false \
 		-Dxkb-config-root=/usr/share/fplinux/xkb \
 		output
-	meson compile -C output
+	meson compile -j "${JOBS:-1}" -C output
 }
 
 package() {
 	DESTDIR="$pkgdir" meson install --no-rebuild -C output
 	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
+static() {
+	pkgdesc="Static keyboard layout library for FPLinux applications"
+	amove usr/lib/libxkbcommon.a
+}
+
 sha512sums="
 450c33fe26af6b847cf7516685d0df63c2ba0126887e27595c40fe80e4d0487009aa6cdf38ff1270d595c7900cbf3c11e7aa4f9cff80fa361742b5ebb10d83bd  libxkbcommon-1.13.1.tar.gz
 "

@@ -1,0 +1,54 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-dropbear
+pkgver=2026.91
+pkgrel=0
+pkgdesc="SSH server and host-key utility for FPLinux"
+url="https://matt.ucc.asn.au/dropbear/dropbear.html"
+arch="armv7"
+license="MIT"
+replaces="dropbear"
+makedepends_build="clang22 lld22 make"
+makedepends_host="musl-dev linux-headers"
+options="!check"
+source="https://matt.ucc.asn.au/dropbear/releases/dropbear-$pkgver.tar.bz2
+	localoptions.h
+"
+builddir="$srcdir/dropbear-$pkgver"
+
+prepare() {
+	default_prepare
+	cp "$srcdir/localoptions.h" "$builddir/localoptions.h"
+}
+
+build() {
+	LTM_CFLAGS="$CFLAGS" ./configure \
+		--build="$CBUILD" \
+		--host="$CHOST" \
+		--prefix=/usr \
+		--sysconfdir=/etc \
+		--localstatedir=/var \
+		--enable-bundled-libtom \
+		--disable-pam \
+		--disable-zlib \
+		--disable-utmp \
+		--disable-utmpx \
+		--disable-wtmp \
+		--disable-wtmpx \
+		--disable-pututline \
+		--disable-pututxline \
+		--disable-loginfunc \
+		--disable-lastlog
+	make PROGRAMS="dropbear dropbearkey" MULTI=1
+}
+
+package() {
+	install -Dm755 "$builddir/dropbearmulti" "$pkgdir/usr/bin/dropbearmulti"
+	mkdir -p "$pkgdir/usr/sbin"
+	ln -s ../bin/dropbearmulti "$pkgdir/usr/sbin/dropbear"
+	ln -s dropbearmulti "$pkgdir/usr/bin/dropbearkey"
+	install -Dm644 "$builddir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
+sha512sums="
+f335bffb18f6e4a261732b80d6887d1b2891a96a0eb5be0cc6bd96a8803eeea337967a2a9196bec78ac3f0d2cdb31e4b64598efb7f7ad97c652d51c458ccc5df  dropbear-2026.91.tar.bz2
+d379cbbf4321d1d68b249cab3280063822503ac50f4c2e97e63758b43b702c359ceda3420c2d727bc1db9e088525f1e0d761a898297d111846a4c08e917b52df  localoptions.h
+"

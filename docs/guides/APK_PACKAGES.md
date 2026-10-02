@@ -5,6 +5,10 @@ Install them into an already running system; another RAM load is not required.
 The application's documentation gives the exact APK filename, installed
 package name, launch command and any data or shutdown requirements.
 
+The `default` RAM bundle also supplies `fplinux-ncurses-curses.apk` through the
+same workflow. It provides the full curses, menu, form and panel libraries.
+The `microsd-uboot` profile preinstalls these libraries for partition maintenance.
+
 Installation affects the active system root. It lasts only for the current
 session with the `default` RAM profile and persists across boots with the
 `microsd-uboot` profile. Follow

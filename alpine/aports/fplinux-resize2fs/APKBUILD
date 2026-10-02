@@ -1,0 +1,49 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-resize2fs
+pkgver=1.47.4
+pkgrel=0
+pkgdesc="Ext2/3/4 filesystem resizer for FPLinux"
+url="https://e2fsprogs.sourceforge.net/"
+arch="armv7"
+license="GPL-2.0-or-later"
+depends="e2fsprogs-libs=$pkgver-r0 libcom_err=$pkgver-r0"
+makedepends_build="clang22 gawk lld22"
+makedepends_host="e2fsprogs-libs libcom_err linux-headers musl-dev"
+options="!check"
+source="https://www.kernel.org/pub/linux/kernel/people/tytso/e2fsprogs/v$pkgver/e2fsprogs-$pkgver.tar.xz"
+builddir="$srcdir/e2fsprogs-$pkgver"
+
+build() {
+	./configure \
+		--build="$CBUILD" \
+		--host="$CHOST" \
+		--prefix=/usr \
+		--sysconfdir=/etc \
+		--localstatedir=/var \
+		--with-udev-rules-dir=no \
+		--enable-elf-shlibs \
+		--enable-libuuid \
+		--enable-libblkid \
+		--disable-debugfs \
+		--disable-imager \
+		--disable-defrag \
+		--disable-fuse2fs \
+		--disable-e2initrd-helper \
+		--disable-fsck \
+		--disable-uuidd \
+		--disable-nls
+	# Generate headers and build the resizer's three libraries without the
+	# unrelated utilities. The installed resizer uses Alpine's shared libraries.
+	make top-deps
+	make -C lib/et
+	make -C lib/e2p
+	make -C lib/ext2fs
+	make -C resize resize2fs
+}
+
+package() {
+	install -Dm755 "$builddir/resize/resize2fs" "$pkgdir/usr/sbin/resize2fs"
+}
+sha512sums="
+c316ce38d73786fb45b3728cd31991fe81b14a1e61dae645f3471c3f35983c4394e4606b47194c3e607897b7ae5a5ef1d376adb204383afa8c4219db8617d970  e2fsprogs-1.47.4.tar.xz
+"
