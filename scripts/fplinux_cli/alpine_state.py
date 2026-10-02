@@ -114,9 +114,12 @@ COMMON_PACKAGES = (
     "fplinux-libudev",
 )
 LOCAL_BUILD_DEPENDENCIES = {
+    "fplinux-audio": ("fplinux-alsa-lib",),
     "fplinux-bash": ("fplinux-ncurses", "fplinux-readline"),
     "fplinux-bluez": ("fplinux-bluez-glib", "fplinux-ncurses", "fplinux-readline"),
     "fplinux-brightness-ui": ("fplinux-libdrm",),
+    "fplinux-fm": ("fplinux-alsa-lib",),
+    "fplinux-jack": ("fplinux-alsa-lib",),
     "fplinux-readline": ("fplinux-ncurses",),
     "fplinux-present": ("fplinux-libdrm",),
     "fplinux-rotate": ("fplinux-libdrm",),
@@ -125,6 +128,7 @@ LOCAL_BUILD_DEPENDENCIES = {
     "fplinux-tyrquake": ("fplinux-libdrm",),
 }
 SUBPACKAGE_APORTS = {
+    "fplinux-alsa-lib-card-profiles": "fplinux-alsa-lib",
     "fplinux-bash-loadables": "fplinux-bash",
     "fplinux-ncurses-curses": "fplinux-ncurses",
 }
