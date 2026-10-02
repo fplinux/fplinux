@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import lzma
 import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -212,8 +213,21 @@ def _require_input_file(path: Path, root: Path, prefix: str) -> None:
         fail(f"{prefix}declared file is missing or invalid: {path}")
 
 
+def _firmware_storage(firmware: FirmwareInput) -> tuple[str, bytes]:
+    """Use the kernel's XZ fallback when it reduces the stored firmware."""
+    compressed = lzma.compress(
+        firmware.contents,
+        format=lzma.FORMAT_XZ,
+        check=lzma.CHECK_CRC32,
+        filters=[{"id": lzma.FILTER_LZMA2, "dict_size": 65536}],
+    )
+    if len(compressed) < firmware.size:
+        return firmware.destination + ".xz", compressed
+    return firmware.destination, firmware.contents
+
+
 def install_firmware_inputs(root: Path, inputs: Sequence[FirmwareInput]) -> None:
-    """Install admitted bytes under /lib/firmware with private file permissions."""
+    """Install admitted firmware in its compact representation with mode 0600."""
     if not inputs:
         return
     if root.is_symlink() or not root.is_dir():
@@ -222,8 +236,9 @@ def install_firmware_inputs(root: Path, inputs: Sequence[FirmwareInput]) -> None
     firmware_root = _require_or_create_directory(root / "lib", "rootfs /lib") / "firmware"
     firmware_root = _require_or_create_directory(firmware_root, "rootfs /lib/firmware")
     for firmware in inputs:
+        stored_name, contents = _firmware_storage(firmware)
         destination = firmware_root
-        parts = PurePosixPath(firmware.destination).parts
+        parts = PurePosixPath(stored_name).parts
         for part in parts[:-1]:
             destination = _require_or_create_directory(
                 destination / part, f"firmware destination parent for {firmware.destination}"
@@ -232,8 +247,8 @@ def install_firmware_inputs(root: Path, inputs: Sequence[FirmwareInput]) -> None
         if destination.exists() or destination.is_symlink():
             fail(f"firmware destination already exists: {destination}")
         try:
-            written = destination.write_bytes(firmware.contents)
-            if written != firmware.size:
+            written = destination.write_bytes(contents)
+            if written != len(contents):
                 fail(f"firmware destination was not written completely: {destination}")
             destination.chmod(0o600)
         except OSError as error:
@@ -241,15 +256,18 @@ def install_firmware_inputs(root: Path, inputs: Sequence[FirmwareInput]) -> None
 
 
 def verify_installed_firmware_inputs(root: Path, inputs: Sequence[FirmwareInput]) -> None:
-    """Require the composed rootfs to contain the exact admitted bytes and mode."""
+    """Require stored firmware to decode to the exact admitted bytes and mode."""
     for firmware in inputs:
-        destination = root / "lib/firmware" / firmware.destination
+        stored_name, _ = _firmware_storage(firmware)
+        destination = root / "lib/firmware" / stored_name
         if destination.is_symlink() or not destination.is_file():
             fail(f"installed firmware is missing or invalid: {destination}")
         try:
             contents = destination.read_bytes()
+            if stored_name != firmware.destination:
+                contents = lzma.decompress(contents, format=lzma.FORMAT_XZ)
             mode = destination.stat().st_mode & 0o777
-        except OSError as error:
+        except (OSError, lzma.LZMAError) as error:
             fail(f"installed firmware cannot be verified: {destination}: {error}")
         if contents != firmware.contents:
             fail(f"installed firmware bytes do not match the captured input: {destination}")

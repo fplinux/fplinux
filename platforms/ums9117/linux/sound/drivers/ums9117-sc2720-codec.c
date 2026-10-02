@@ -245,7 +245,7 @@ enum ums9117_sc2720_codec_register {
 };
 
 struct ums9117_sc2720_codec_register_desc {
-	u32 offset;
+	u16 offset;
 	u16 mask;
 };
 
@@ -339,7 +339,7 @@ static const struct ums9117_sc2720_codec_register_desc shared_registers[] = {
 };
 
 struct ums9117_sc2720_codec_field {
-	u32 offset;
+	u16 offset;
 	u16 mask;
 	u16 value;
 };

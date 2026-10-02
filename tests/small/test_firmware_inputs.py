@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import lzma
 import tempfile
 import unittest
 from pathlib import Path
@@ -244,6 +245,34 @@ class FirmwareInputTests(unittest.TestCase):
                         rootfs,
                         rootfs_firmware,
                     )
+
+    def test_compressed_firmware_roundtrips_with_private_mode(self) -> None:
+        """The kernel XZ fallback supplies admitted bytes without a plain duplicate."""
+        contents = bytes(range(256)) * 32
+        firmware = firmware_inputs.FirmwareInput(
+            source="controller.bin",
+            destination="chip/controller.bin",
+            contents=contents,
+            sha256=hashlib.sha256(contents).hexdigest(),
+        )
+        rootfs = self.root / "compressed-rootfs"
+        rootfs.mkdir()
+
+        firmware_inputs.install_firmware_inputs(rootfs, (firmware,))
+
+        installed = rootfs / "lib/firmware/chip/controller.bin.xz"
+        self.assertFalse(installed.with_suffix("").exists())
+        self.assertLess(installed.stat().st_size, len(contents))
+        self.assertEqual(installed.stat().st_mode & 0o777, 0o600)
+        decoder = lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
+        self.assertEqual(decoder.decompress(installed.read_bytes()), contents)
+        self.assertTrue(decoder.eof)
+        self.assertEqual(decoder.check, lzma.CHECK_CRC32)
+        firmware_inputs.verify_installed_firmware_inputs(rootfs, (firmware,))
+
+        installed.write_bytes(b"invalid compressed firmware")
+        with self.assertRaisesRegex(SystemExit, "installed firmware cannot be verified"):
+            firmware_inputs.verify_installed_firmware_inputs(rootfs, (firmware,))
 
 
 if __name__ == "__main__":
