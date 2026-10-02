@@ -255,8 +255,8 @@ def _cached_package_files(repository: Path, names: set[str]) -> list[Path] | Non
     return packages
 
 
-def _apk_package_name(path: Path) -> str:
-    """Read the exact package identity carried by one Alpine APK."""
+def _apk_metadata_lines(path: Path) -> list[str]:
+    """Read package metadata used by artifact and solver decisions."""
     try:
         with tarfile.open(require_file(path), "r:*") as archive:
             metadata = archive.extractfile(".PKGINFO")
@@ -265,6 +265,12 @@ def _apk_package_name(path: Path) -> str:
             lines = metadata.read().decode("utf-8").splitlines()
     except (OSError, UnicodeDecodeError, tarfile.TarError) as error:
         fail(f"cannot read Alpine package metadata: {path}: {error}")
+    return lines
+
+
+def _apk_package_name(path: Path) -> str:
+    """Read the exact package identity carried by one Alpine APK."""
+    lines = _apk_metadata_lines(path)
     names = [line.removeprefix("pkgname = ") for line in lines if line.startswith("pkgname = ")]
     if len(names) != 1 or alpine_state.PACKAGE_ID.fullmatch(names[0]) is None:
         fail(f"Alpine package has an invalid pkgname: {path}")
@@ -437,6 +443,28 @@ def alpine_sysroot_command(
     lock: dict[str, Any], packages: list[Path], sysroot: Path, keys: Path
 ) -> list[str]:
     """Install exact APK files without networking or target scripts."""
+    # A local APK replaces a locked development package deliberately. Update
+    # that world name in the same transaction, releasing its old file digest
+    # while the new signed APK retains an exact file constraint of its own.
+    try:
+        world = (sysroot / "etc/apk/world").read_text(encoding="utf-8")
+    except FileNotFoundError:
+        world = ""
+    except (OSError, UnicodeError) as error:
+        fail(f"Alpine sysroot world cannot be read: {error}")
+    installed_names = {
+        match.group(0)
+        for entry in world.splitlines()
+        if (match := alpine_state.PACKAGE_ID.match(entry)) is not None
+    }
+    replaced_names: set[str] = set()
+    if installed_names:
+        for package in packages:
+            for line in _apk_metadata_lines(package):
+                if line.startswith("replaces = "):
+                    match = alpine_state.PACKAGE_ID.match(line.removeprefix("replaces = "))
+                    if match is not None and match.group(0) in installed_names:
+                        replaced_names.add(match.group(0))
     return [
         "apk",
         "--root",
@@ -450,6 +478,7 @@ def alpine_sysroot_command(
         "--keys-dir",
         str(keys),
         "add",
+        *sorted(replaced_names),
         *(str(package) for package in packages),
     ]
 
