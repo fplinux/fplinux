@@ -7,8 +7,8 @@ url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="GPL-2.0-only AND OFL-1.1"
 depends="bash fplinux-input fplinux-xkb ncurses-terminfo-base"
-makedepends_build="clang22 lld22 python3"
-makedepends_host="musl-dev linux-headers gcc fplinux-libdrm-dev libinput-dev fplinux-libxkbcommon-dev fplinux-libtsm-dev"
+makedepends_build="clang22 lld22 python3 llvm22"
+makedepends_host="musl-dev linux-headers gcc fplinux-libdrm-dev libinput-dev fplinux-libxkbcommon-dev fplinux-libxkbcommon-static fplinux-libtsm-dev"
 subpackages="$pkgname-openrc"
 options="!check"
 _fontver=4.49.1
@@ -46,14 +46,19 @@ source="
 builddir="$srcdir"
 
 build() {
-	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+	export CFLAGS="$CFLAGS -Oz -flto=thin"
+	export CXXFLAGS="$CXXFLAGS -Oz -flto=thin"
+	export LDFLAGS="$LDFLAGS -flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe"
+	export AR=/usr/lib/llvm22/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
+	"$CC" $CPPFLAGS $CFLAGS -std=c11 -Wall -Wextra -Werror \
 		-I"$srcdir" -I"$CBUILDROOT/usr/include/libdrm" \
 		fplinux-terminal.c terminal-diagnostic.c terminal-engine.c terminal-help.c \
 		terminal-input.c \
 		terminal-keyboard.c terminal-pty.c terminal-render.c \
 		fplinux-cli.c fplinux-drm-session.c fplinux-input-session.c \
 		fplinux-keyboard-text.c fplinux-multitap.c \
-		$LDFLAGS -ltsm -lxkbcommon -linput -ludev -ldrm -o fplinux-terminal
+		$LDFLAGS -ltsm "$CBUILDROOT/usr/lib/libxkbcommon.a" -linput -ludev -ldrm -o fplinux-terminal
 	python3 "terminus-font-$_fontver/bin/bdftopsf.py" -2 \
 		-o ter-u12n.psf "terminus-font-$_fontver/ter-u12n.bdf"
 	python3 "terminus-font-$_fontver/bin/bdftopsf.py" -2 \
@@ -68,6 +73,8 @@ package() {
 	install -Dm644 ter-u16n.psf "$pkgdir/usr/share/fplinux/terminal/ter-u16n.psf"
 	install -Dm644 "terminus-font-$_fontver/OFL.TXT" \
 		"$pkgdir/usr/share/licenses/$pkgname/Terminus-OFL.txt"
+	install -Dm644 "$CBUILDROOT/usr/share/licenses/fplinux-libxkbcommon/LICENSE" \
+		"$pkgdir/usr/share/licenses/$pkgname/libxkbcommon-LICENSE"
 	mkdir -p "$pkgdir/etc/runlevels/default"
 	ln -s /etc/init.d/fplinux-terminal \
 		"$pkgdir/etc/runlevels/default/fplinux-terminal"

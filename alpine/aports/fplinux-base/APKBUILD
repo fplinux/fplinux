@@ -6,7 +6,7 @@ pkgdesc="Base userspace policy for FPLinux phones"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="GPL-2.0-only"
-depends="openrc ifupdown-ng fplinux-terminal"
+depends="openrc busybox-ifupdown fplinux-terminal"
 makedepends_build="clang22 lld22"
 makedepends_host="musl-dev"
 replaces="alpine-baselayout-data alpine-release"
@@ -53,6 +53,10 @@ package() {
 		"$pkgdir/etc/init.d/fplinux-zram"
 	install -Dm755 "$srcdir/fplinux-brightness.initd" \
 		"$pkgdir/etc/init.d/fplinux-brightness"
+
+	mkdir -p "$pkgdir/sbin"
+	ln -s /bin/busybox "$pkgdir/sbin/ifup"
+	ln -s /bin/busybox "$pkgdir/sbin/ifdown"
 
 	mkdir -p "$pkgdir/etc/runlevels/sysinit" "$pkgdir/etc/runlevels/boot" \
 		"$pkgdir/etc/runlevels/default"

@@ -118,7 +118,6 @@ class GlobalProfileTests(unittest.TestCase):
                         "partuuid": "46504c58-02",
                     },
                 )
-                self.assertEqual(card["rootfs"]["packages"], ["fplinux-microsd-root"])
                 self.assertEqual(ram["rootfs"]["packages"], [])
                 self.assertEqual(card["rootfs"]["base_packages"], ram["rootfs"]["base_packages"])
                 self.assertEqual(

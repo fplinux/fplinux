@@ -171,7 +171,7 @@ class BuilderPublicationTests(unittest.TestCase):
         self.ramboot_map = self.write("ramboot.map", b"map\n", root=self.work)
         self.rootfs_output = self.work / "rootfs"
         self.rootfs_recipe = "d" * 64
-        self.rootfs = self.write("rootfs.cpio", b"rootfs\n", root=self.rootfs_output)
+        self.rootfs = self.write("rootfs.cpio", b"logical composition\n", root=self.rootfs_output)
         self.bundle_apks = {
             "fplinux-base-ui": self.write(
                 "packages/fplinux-base-ui-1-r0.apk",
@@ -454,6 +454,27 @@ class BuilderPublicationTests(unittest.TestCase):
         helper.unlink()
         with self.assertRaisesRegex(SystemExit, "expected file is missing or invalid"):
             self.publish(personalization=descriptor)
+
+    def test_optional_subpackage_is_published_under_its_own_name(self) -> None:
+        """A built child APK is copied and recorded without replacing its rootfs producer."""
+        child = "fplinux-ncurses-curses"
+        self.bundle_apks[child] = self.write(
+            "packages/fplinux-ncurses-curses-6.6-r0.apk", b"optional curses apk\n", root=self.work
+        )
+        self.target_config["bundle"]["packages"].append(child)
+        bundle_files = cast("list[str]", self.release_manifest["bundle_files"])
+        bundle_files.append("apks/fplinux-ncurses-curses.apk")
+
+        published = self.publish()
+        manifest = json.loads((published / BUILD_MANIFEST_NAME).read_text())
+
+        self.assertEqual(
+            (published / "apks/fplinux-ncurses-curses.apk").read_bytes(),
+            b"optional curses apk\n",
+        )
+        self.assertIn("apks/fplinux-ncurses-curses.apk", manifest["files"])
+        self.assertFalse((published / "apks/fplinux-ncurses.apk").exists())
+        self.assertEqual((published / "debug/rootfs.cpio").read_bytes(), b"logical composition\n")
 
     def test_named_profile_publishes_to_its_own_current_bundle_slot(self) -> None:
         """A host profile cannot replace the default target bundle pointer."""

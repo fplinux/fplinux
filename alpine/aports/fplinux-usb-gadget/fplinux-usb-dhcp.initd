@@ -5,7 +5,7 @@
 name="FPLinux USB DHCP server"
 description="Configure the host on the USB network"
 supervisor=supervise-daemon
-command=/bin/busybox-extras
+command=/bin/busybox
 command_args="udhcpd -f /run/fplinux-udhcpd.conf"
 input_file=/dev/null
 output_logger="/usr/libexec/fplinux/kmsg --level 6 --tag fplinux-usb-dhcp"

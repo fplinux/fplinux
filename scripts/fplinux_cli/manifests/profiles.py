@@ -366,7 +366,11 @@ def load_profile(
         fail(f"profile {profile} requires {expected_root} root")
     rootfs = exact_table(config["rootfs"], {"packages"}, f"profile {profile} rootfs")
     packages = package_array(rootfs["packages"], f"profile {profile} rootfs packages")
-    expected_packages = ["fplinux-microsd-root"] if profile == "microsd-uboot" else []
+    expected_packages = (
+        ["fplinux-microsd-root", "fplinux-ncurses-curses", "fplinux-resize2fs"]
+        if profile == "microsd-uboot"
+        else []
+    )
     if packages != expected_packages:
         fail(f"profile {profile} rootfs packages must describe only boot maintenance")
     runtime = exact_table(

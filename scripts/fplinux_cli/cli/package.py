@@ -115,7 +115,9 @@ def target_archive_file(
 
 def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]:
     """Resolve release documents and fixed platform executable roles."""
-    manifest = releases.load_release(target)
+    manifest = releases.load_release(
+        target, profile_packages=config.get("rootfs", {}).get("packages", ())
+    )
     image = manifest["image"]
     bundle_files = manifest["bundle_files"]
     runtime_files = manifest["runtime_files"]

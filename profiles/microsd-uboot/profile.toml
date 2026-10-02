@@ -7,7 +7,11 @@ filesystem = "ext4"
 wait_seconds = 10
 
 [rootfs]
-packages = ["fplinux-microsd-root"]
+packages = [
+  "fplinux-microsd-root",
+  "fplinux-ncurses-curses",
+  "fplinux-resize2fs",
+]
 
 [bootstrap]
 kind = "uboot-stage0"

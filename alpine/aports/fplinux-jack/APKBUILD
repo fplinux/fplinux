@@ -7,7 +7,7 @@ url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="GPL-2.0-only"
 depends="alsa-lib fplinux-base"
-makedepends_build="clang22 lld22"
+makedepends_build="clang22 lld22 llvm22"
 makedepends_host="alsa-lib-dev musl-dev"
 options="!check"
 source="
@@ -19,7 +19,12 @@ source="
 builddir="$srcdir"
 
 build() {
-	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+	export CFLAGS="$CFLAGS -Oz -flto=thin"
+	export CXXFLAGS="$CXXFLAGS -Oz -flto=thin"
+	export LDFLAGS="$LDFLAGS -flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe"
+	export AR=/usr/lib/llvm22/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
+	"$CC" $CPPFLAGS $CFLAGS -std=c11 -Wall -Wextra -Werror \
 		-I"$srcdir" "$srcdir/fplinux-jack.c" "$srcdir/fplinux-cli.c" \
 		$LDFLAGS -Wl,--gc-sections -lasound -o fplinux-jack
 }

@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 from fplinux_cli import common
 from fplinux_cli.common import fail, load_toml
@@ -11,8 +14,8 @@ from fplinux_cli.manifests.paths import target_release_manifest_path
 from fplinux_cli.manifests.values import exact_table, path_array, relative_value, sha256_value
 
 
-def load_release(target: str) -> dict[str, Any]:
-    """Load the exact data-only release manifest for one target."""
+def load_release(target: str, *, profile_packages: Sequence[str] = ()) -> dict[str, Any]:
+    """Load release contents, omitting optional APKs preinstalled by the profile."""
     path = target_release_manifest_path(target)
     if path.is_symlink() or not path.is_file():
         fail(f"target release manifest is missing or invalid: {path}")
@@ -30,6 +33,12 @@ def load_release(target: str) -> dict[str, Any]:
         fail("release manifest image must be a runtime file")
     if not set(runtime_files).issubset(bundle_files):
         fail("release runtime files must be bundle files")
+    preinstalled_apks = {f"apks/{package}.apk" for package in profile_packages}
+    bundle_files = [
+        relative
+        for relative in bundle_files
+        if relative not in preinstalled_apks or relative in runtime_files
+    ]
     return {
         "image": image,
         "bundle_files": bundle_files,

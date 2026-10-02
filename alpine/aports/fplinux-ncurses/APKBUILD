@@ -1,0 +1,82 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-ncurses
+pkgver=6.6_p20260516
+pkgrel=0
+_ncursesver=${pkgver/_p/-}
+_aport_commit=dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763
+pkgdesc="Terminfo library for FPLinux"
+url="https://invisible-island.net/ncurses/"
+arch="armv7"
+license="X11"
+depends="ncurses-terminfo-base=$pkgver-r$pkgrel"
+makedepends_build="clang22 lld22 make ncurses llvm22"
+makedepends_host="musl-dev"
+subpackages="$pkgname-dev $pkgname-curses:curses"
+options="!check"
+source="https://distfiles.alpinelinux.org/distfiles/v3.24/ncurses-$_ncursesver.tgz
+	cleanup-pkgconfig-ldflags.patch::https://raw.githubusercontent.com/alpinelinux/aports/$_aport_commit/main/ncurses/cleanup-pkgconfig-ldflags.patch
+"
+builddir="$srcdir/ncurses-$_ncursesver"
+
+build() {
+	export CFLAGS="$CFLAGS -Oz -flto=thin"
+	export CXXFLAGS="$CXXFLAGS -Oz -flto=thin"
+	export LDFLAGS="$LDFLAGS -flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe"
+	export AR=/usr/lib/llvm22/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
+	./configure \
+		--build="$CBUILD" \
+		--host="$CHOST" \
+		--prefix=/usr \
+		--without-ada \
+		--without-tests \
+		--without-progs \
+		--without-cxx-binding \
+		--without-normal \
+		--without-debug \
+		--disable-termcap \
+		--disable-root-access \
+		--disable-rpath-hack \
+		--disable-setuid-environ \
+		--disable-stripping \
+		--with-pkg-config-libdir=/usr/lib/pkgconfig \
+		--with-terminfo-dirs="/etc/terminfo:/usr/share/terminfo:/lib/terminfo:/usr/lib/terminfo" \
+		--enable-pc-files \
+		--enable-widec \
+		--with-shared \
+		--with-termlib=tinfo \
+		--with-ticlib=tic
+	make
+}
+
+package() {
+	make -j1 DESTDIR="$pkgdir" install.libs
+	local library
+	for library in ncurses form menu panel; do
+		ln -s "${library}w.pc" "$pkgdir/usr/lib/pkgconfig/$library.pc"
+		ln -s "lib${library}w.so" "$pkgdir/usr/lib/lib$library.so"
+	done
+	ln -s libncursesw.so "$pkgdir/usr/lib/libcurses.so"
+	ln -s libncursesw.so "$pkgdir/usr/lib/libcursesw.so"
+	install -Dm644 COPYING "$pkgdir/usr/share/licenses/$pkgname/COPYING"
+}
+
+dev() {
+	default_dev
+	depends="$pkgname=$pkgver-r$pkgrel $pkgname-curses=$pkgver-r$pkgrel"
+	provides="ncurses-dev=$pkgver-r$pkgrel"
+	replaces="ncurses-dev"
+}
+
+curses() {
+	pkgdesc="Optional curses libraries for FPLinux"
+	depends="$pkgname=$pkgver-r$pkgrel"
+	provides="libncursesw=$pkgver-r$pkgrel libformw=$pkgver-r$pkgrel libmenuw=$pkgver-r$pkgrel libpanelw=$pkgver-r$pkgrel"
+	replaces="libncursesw libformw libmenuw libpanelw"
+	amove usr/lib/libncursesw.so.* usr/lib/libformw.so.* \
+		usr/lib/libmenuw.so.* usr/lib/libpanelw.so.* usr/lib/libtic.so.*
+}
+sha512sums="
+20ffc27f3266b078b410f712422db00d77f5fd497e398b7be252fd207ab70ebd72a2bdf8fd6c94e2a9e41bd2b64d1c6502240c0b8423c99add073bd1226f5859  ncurses-6.6-20260516.tgz
+201ef1876655101cedabc83a0ce46f75079b08f565ca8de4cf96fd69e41332a2d0597b77fe360dc58b10772586fa39bd52ac9ee670a912fef84840278356065a  cleanup-pkgconfig-ldflags.patch
+"

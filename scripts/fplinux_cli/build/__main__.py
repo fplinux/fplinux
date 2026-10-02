@@ -66,7 +66,9 @@ def main() -> None:
             "Linux source",
         )
         asset_lock_path = inputs_build.require_file(target_asset_lock_path(args.target))
-        release_manifest = load_release(args.target)
+        release_manifest = load_release(
+            args.target, profile_packages=target_config["rootfs"]["packages"]
+        )
 
         profile = inputs_build.selected_profile(target_config)
         work = (

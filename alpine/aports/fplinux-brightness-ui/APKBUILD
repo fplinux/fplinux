@@ -7,7 +7,7 @@ url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="GPL-2.0-only"
 depends="fplinux-base fplinux-input"
-makedepends_build="clang22 lld22 pkgconf"
+makedepends_build="clang22 lld22 pkgconf llvm22"
 makedepends_host="musl-dev linux-headers fplinux-libdrm-dev libinput-dev"
 options="!check"
 source="
@@ -28,10 +28,15 @@ source="
 builddir="$srcdir"
 
 build() {
+	export CFLAGS="$CFLAGS -Oz -flto=thin"
+	export CXXFLAGS="$CXXFLAGS -Oz -flto=thin"
+	export LDFLAGS="$LDFLAGS -flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe"
+	export AR=/usr/lib/llvm22/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
 	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
 	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
 
-	"$CC" $CPPFLAGS $CFLAGS -O2 -std=c11 -Wall -Wextra -Werror \
+	"$CC" $CPPFLAGS $CFLAGS -std=c11 -Wall -Wextra -Werror \
 		-I"$srcdir" $(pkg-config --cflags libdrm libinput) \
 		"$srcdir/fplinux-brightness-ui.c" \
 		"$srcdir/brightness-ui.c" \

@@ -156,7 +156,7 @@ def target_build_source_files(
         rootfs_packages,
         root=ROOT,
     )
-    build_packages = (*rootfs_packages, *bundle_packages)
+    build_packages = alpine_state.aport_build_order((*rootfs_packages, *bundle_packages))
     for package in build_packages:
         add_source_path(files, ROOT / "alpine/aports" / package)
     shared_sources = {

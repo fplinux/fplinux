@@ -102,20 +102,30 @@ SHARED_APORT_SOURCE_PATHS = frozenset(
 )
 COMMON_PACKAGES = (
     "fplinux-base",
+    "fplinux-bash",
+    "fplinux-busybox",
+    "fplinux-ncurses",
+    "fplinux-openrc",
+    "fplinux-readline",
     "fplinux-terminal",
     "fplinux-input",
     "fplinux-libdrm",
     "fplinux-libtsm",
-    "fplinux-libxkbcommon",
     "fplinux-libudev",
 )
 LOCAL_BUILD_DEPENDENCIES = {
+    "fplinux-bash": ("fplinux-ncurses", "fplinux-readline"),
     "fplinux-brightness-ui": ("fplinux-libdrm",),
+    "fplinux-readline": ("fplinux-ncurses",),
     "fplinux-present": ("fplinux-libdrm",),
     "fplinux-rotate": ("fplinux-libdrm",),
     "fplinux-showcase": ("fplinux-libdrm",),
     "fplinux-terminal": ("fplinux-libdrm", "fplinux-libtsm", "fplinux-libxkbcommon"),
     "fplinux-tyrquake": ("fplinux-libdrm",),
+}
+SUBPACKAGE_APORTS = {
+    "fplinux-bash-loadables": "fplinux-bash",
+    "fplinux-ncurses-curses": "fplinux-ncurses",
 }
 PACKAGE_ID = re.compile(r"[a-z0-9][a-z0-9+._-]*")
 
@@ -224,12 +234,18 @@ def _target_rootfs(
     return base_packages, packages, exclude_packages
 
 
+def aport_producer(package: str) -> str:
+    """Resolve the current child APK names to the aport that builds them."""
+    name = _package_id(package, "FPLinux package")
+    return SUBPACKAGE_APORTS.get(name, name)
+
+
 def _canonical_packages(packages: Sequence[str], root: Path) -> tuple[str, ...]:
     result = tuple(sorted(_package_id(package, "FPLinux package") for package in packages))
     if len(set(result)) != len(result):
         fail("FPLinux package set must not contain duplicates")
     for package in result:
-        aport = root / "alpine/aports" / package
+        aport = root / "alpine/aports" / aport_producer(package)
         if aport.is_symlink() or not aport.is_dir():
             fail(f"selected aport is missing or invalid: {package}")
         apkbuild = aport / "APKBUILD"
@@ -299,6 +315,12 @@ def bundle_packages(
             if previous is not None:
                 fail(f"bundle package {package} is owned by both {previous} and {owner}")
             owners[package] = owner
+    profile_packages = (
+        set(_target_rootfs(target_config)[1]) if "rootfs" in target_config else set()
+    )
+    for package in profile_packages & set(rootfs_packages):
+        if owners.get(package) == "platform":
+            del owners[package]
     result = _canonical_packages(tuple(owners), root)
     overlap = set(result) & set(rootfs_packages)
     if overlap:
@@ -464,15 +486,20 @@ def local_build_dependencies(packages: Sequence[str]) -> tuple[str, ...]:
     """Select the project libraries required by the current aport consumers."""
     return tuple(
         sorted(
-            {library for name in packages for library in LOCAL_BUILD_DEPENDENCIES.get(name, ())}
+            {
+                library
+                for name in packages
+                for library in LOCAL_BUILD_DEPENDENCIES.get(aport_producer(name), ())
+            }
         )
     )
 
 
 def aport_build_order(packages: Sequence[str]) -> tuple[str, ...]:
-    """Build the independent local libraries before their consuming packages."""
-    libraries = local_build_dependencies(packages)
-    return (*libraries, *sorted(set(packages) - set(libraries)))
+    """Build each selected producer once, after its independent local libraries."""
+    producers = tuple(sorted({aport_producer(package) for package in packages}))
+    libraries = local_build_dependencies(producers)
+    return (*libraries, *sorted(set(producers) - set(libraries)))
 
 
 def shared_aport_source_records(
@@ -540,7 +567,7 @@ def alpine_package_recipe(
     root: Path = ROOT,
 ) -> str:
     """Hash the inputs that can affect one current FPLinux APK."""
-    name = _canonical_packages((name,), root)[0]
+    name = aport_producer(_canonical_packages((name,), root)[0])
     dependencies = _canonical_packages(local_build_dependencies((name,)), root)
     _sha256(container_image_recipe, "container image recipe")
     _sha256(signing_key_sha256, "package signing public key")

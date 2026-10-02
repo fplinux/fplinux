@@ -7,7 +7,7 @@ url="https://disenchant.net/tyrquake/"
 arch="armv7"
 license="GPL-2.0-or-later AND MIT-0 AND CC0-1.0 AND MIT"
 depends="fplinux-base fplinux-input"
-makedepends_build="clang22 lld22 make patch pkgconf"
+makedepends_build="clang22 lld22 make patch pkgconf llvm22"
 makedepends_host="musl-dev linux-headers gcc libinput-dev fplinux-libdrm-dev"
 options="!check"
 source="
@@ -45,6 +45,11 @@ prepare() {
 }
 
 build() {
+	export CFLAGS="$CFLAGS -Oz -flto=thin"
+	export CXXFLAGS="$CXXFLAGS -Oz -flto=thin"
+	export LDFLAGS="$LDFLAGS -flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe"
+	export AR=/usr/lib/llvm22/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
 	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
 	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
 
