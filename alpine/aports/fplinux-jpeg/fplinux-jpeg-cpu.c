@@ -27,6 +27,13 @@
 
 #include <jpeglib.h>
 
+/* The v6b ABI exposes one size for both axes of each scaled DCT. */
+#if JPEG_LIB_VERSION < 70
+#define DCT_h_scaled_size DCT_scaled_size
+#define DCT_v_scaled_size DCT_scaled_size
+#define min_DCT_v_scaled_size min_DCT_scaled_size
+#endif
+
 enum {
 	COMPONENTS = 3,
 	DQT_BYTES = 128,

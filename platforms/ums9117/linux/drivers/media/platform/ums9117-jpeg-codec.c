@@ -18,13 +18,6 @@
 #define JPEG_HUFF_DC 0U
 #define JPEG_HUFF_AC 2U
 
-static const u8 ums9117_jpeg_zigzag[64] = {
-	0,  1,	8,  16, 9,  2,	3,  10, 17, 24, 32, 25, 18, 11, 4,  5,
-	12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6,	7,  14, 21, 28,
-	35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51,
-	58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63,
-};
-
 static const u8 ums9117_jpeg_asic_dct[64] = {
 	0, 32, 16, 48, 8,  40, 24, 56, 4, 36, 20, 52, 12, 44, 28, 60,
 	2, 34, 18, 50, 10, 42, 26, 58, 6, 38, 22, 54, 14, 46, 30, 62,
@@ -291,7 +284,8 @@ static void ums9117_jpeg_pack_quant(const struct v4l2_jpeg_reference *table,
 	unsigned int index;
 
 	for (index = 0; index < 64; ++index)
-		natural[ums9117_jpeg_zigzag[index]] = table->start[index];
+		natural[v4l2_jpeg_zigzag_scan_index[index]] =
+			table->start[index];
 	for (index = 0; index < 64; index += 2) {
 		u32 low = natural[ums9117_jpeg_asic_dct[index]];
 		u32 high = natural[ums9117_jpeg_asic_dct[index + 1]];
