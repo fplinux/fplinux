@@ -443,6 +443,9 @@ def _source_tree(path: Path, root: Path) -> list[dict[str, object]]:
         fail(f"recipe tree is missing or invalid: {path}")
     entries: list[dict[str, object]] = []
     for child in sorted(path.rglob("*")):
+        relative = child.relative_to(root)
+        if "__pycache__" in relative.parts or child.suffix in {".pyc", ".pyo"}:
+            continue
         if child.is_symlink():
             fail(f"recipe tree must not contain symlinks: {child}")
         if child.is_dir():
