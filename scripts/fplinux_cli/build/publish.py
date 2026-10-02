@@ -195,6 +195,8 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
         (ramboot_map, "ramboot.map"),
         (rootfs, "rootfs.cpio"),
     ]
+    if target_config["linux"]["root"]["kind"] == "initramfs":
+        debug_outputs.append((rootfs_output / alpine_state.INITRAMFS_NAME, "initramfs.cpio"))
     for source, name in debug_outputs:
         copy_file(source, release / "debug" / name)
     for relative, _digest in asset_outputs.values():

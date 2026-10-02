@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import unittest
@@ -17,7 +18,11 @@ from fplinux_cli.bundle_state import (
 
 from tests.cli_support import prepare_cli_checkout
 from tests.process import run_process
-from tests.small.test_artifact_footprint import FootprintFixture
+from tests.small.test_artifact_footprint import (
+    FootprintFixture,
+    kernel_with_initramfs,
+    squashfs_header,
+)
 
 if TYPE_CHECKING:
     import subprocess
@@ -90,6 +95,19 @@ class FootprintCliTests(unittest.TestCase):
                 self.assertEqual(report["identity"]["profile"], profile)
                 self.assertEqual(report["identity"]["build_type"], build_type)
                 self.assertEqual(report["layers"]["kernel_zimage_bytes"], 12)
+                if profile is None:
+                    self.assertEqual(report["rootfs"]["source"], "ram-squashfs-composition")
+                    self.assertEqual(report["layers"]["ram_root"]["compression"], "xz")
+                    self.assertEqual(report["layers"]["ram_root"]["block_bytes"], 65536)
+                    self.assertEqual(report["layers"]["ram_root"]["bytes"], 120)
+                    self.assertEqual(
+                        report["layers"]["ram_root"]["sha256"],
+                        hashlib.sha256(squashfs_header("xz")).hexdigest(),
+                    )
+                    self.assertEqual(report["layers"]["embedded_initramfs"]["compression"], "gzip")
+                else:
+                    self.assertIsNone(report["layers"]["ram_root"])
+                    self.assertIsNone(report["layers"]["embedded_initramfs"])
                 self.assertEqual(
                     report["rootfs"]["packages"]["shared"]["regular_payload_bytes"], 7
                 )
@@ -115,6 +133,52 @@ class FootprintCliTests(unittest.TestCase):
         self.assertEqual(incomplete.returncode, 1, incomplete.stderr)
         self.assertEqual(incomplete.stdout, "")
         self.assertNotIn("Traceback", incomplete.stderr)
+
+    def test_missing_boot_archive_fails_without_partial_report_or_traceback(self) -> None:
+        """A selected RAM bundle must retain its published boot archive."""
+        published = self.publish_bundle()
+        (published / "debug/initramfs.cpio").unlink()
+        result = self.run_cli("inspect", "footprint", "example", "--json")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("debug/initramfs.cpio", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_kernel_embedding_composition_instead_of_boot_archive_is_rejected(self) -> None:
+        """Individually valid artifacts cannot report the wrong embedded boot content."""
+        output = self.root / ".cache/out"
+        output.mkdir(parents=True)
+        staging = create_bundle_staging(output, "example")
+        fixture = FootprintFixture(staging)
+        bundle = fixture.bundle()
+        elf = kernel_with_initramfs(fixture.composition, "gzip")
+        (staging / "debug/vmlinux").write_bytes(elf)
+        manifest = json.loads(bundle.manifest_bytes)
+        manifest.update(
+            target="example",
+            profile=None,
+            build_type="release",
+            workspace_digest="a" * 64,
+            container_image_recipe="b" * 64,
+            container_image_generation="c" * 64,
+            apk_signing_key="d" * 64,
+            device_identity="e" * 64,
+            linux_recipe="f" * 64,
+            rootfs_receipt={},
+            kbuild_receipt={},
+        )
+        manifest["files"]["debug/vmlinux"] = {
+            "size": len(elf),
+            "sha256": hashlib.sha256(elf).hexdigest(),
+        }
+        (staging / "build-manifest.json").write_text(json.dumps(manifest))
+        published = publish_bundle_generation(output, "example", staging, bundle.generation)
+        publish_current_bundle(output, "example", published)
+        result = self.run_cli("inspect", "footprint", "example", "--json")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("embedded initramfs differs", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
     def write_reports(self) -> None:
         """Save small independent measurements with a known kernel and package delta."""

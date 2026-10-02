@@ -62,6 +62,15 @@ def optional_apk(
     return b"".join(streams)
 
 
+def squashfs_header(compression: str) -> bytes:
+    """Provide a literal reader fixture, without claiming a mountable filesystem."""
+    header = bytearray(96)
+    header[:4] = b"hsqs"
+    struct.pack_into("<I", header, 12, 65536)
+    struct.pack_into("<H", header, 20, {"xz": 4, "lz4": 5}[compression])
+    return bytes(header) + b"compressed lower fixture"
+
+
 class FootprintFixture:
     """A temporary complete artifact set, without a kernel build or package solver."""
 
@@ -79,6 +88,7 @@ class FootprintFixture:
         *,
         compression: str = "gzip",
         external: bool = False,
+        lower_compression: str = "xz",
         extra: list[tuple[str, bytes, int, int, int]] | None = None,
         extra_apks: dict[str, bytes] | None = None,
     ) -> CurrentBundle:
@@ -95,20 +105,30 @@ class FootprintFixture:
                 *(extra or []),
             ]
         )
+        self.composition = cpio
+        self.lower = squashfs_header(lower_compression)
+        self.initramfs = newc(
+            [
+                ("init", b"#!/bin/sh\n", 0o100755, 1, 1),
+                ("root.squashfs", self.lower, 0o100644, 2, 1),
+            ]
+        )
         payloads = {
             "debug/rootfs.cpio": cpio,
             "debug/kernel.config": (
                 b"# CONFIG_BLK_DEV_INITRD is not set\n"
                 if external
-                else b'CONFIG_INITRAMFS_SOURCE="rootfs.cpio"\n'
+                else b'CONFIG_INITRAMFS_SOURCE="initramfs.cpio"\n'
             ),
             "debug/zImage": b"kernel-image",
-            "debug/vmlinux": kernel_with_initramfs(cpio, compression),
+            "debug/vmlinux": kernel_with_initramfs(self.initramfs, compression),
             "debug/System.map": b"00001000 D __initramfs_size\n00001004 D __initramfs_start\n",
             "image/ramboot.bin": b"boot-image",
             "apks/optional.apk": optional_apk(),
             **(extra_apks or {}),
         }
+        if not external:
+            payloads["debug/initramfs.cpio"] = self.initramfs
         if external:
             payloads["card.img.gz"] = gzip.compress(b"card-image", mtime=0)
             payloads["debug/System.map"] = b"00002000 T kernel_entry\n"
@@ -138,6 +158,25 @@ class FootprintFixture:
 
 class ArtifactFootprintTests(unittest.TestCase):
     """Protect size attribution and comparisons at the host artifact reader boundary."""
+
+    def test_compressed_lower_reports_its_own_bytes_without_changing_attribution(self) -> None:
+        """Boot backing size and package ownership describe separate archive layers."""
+        for compression in ("xz", "lz4"):
+            with self.subTest(compression=compression), tempfile.TemporaryDirectory() as temporary:
+                fixture = FootprintFixture(Path(temporary))
+                report = inspect_footprint(fixture.bundle(lower_compression=compression))
+            lower = report["layers"]["ram_root"]
+            self.assertEqual(lower["filesystem"], "squashfs")
+            self.assertEqual(lower["compression"], compression)
+            self.assertEqual(lower["block_bytes"], 65536)
+            self.assertEqual(lower["bytes"], 120)
+            self.assertEqual(lower["sha256"], hashlib.sha256(fixture.lower).hexdigest())
+            self.assertEqual(report["rootfs"]["source"], "ram-squashfs-composition")
+            self.assertEqual(report["rootfs"]["packages"]["app-one"]["regular_payload_bytes"], 5)
+            self.assertEqual(
+                report["layers"]["embedded_initramfs"]["cpio_bytes"], len(fixture.initramfs)
+            )
+            self.assertNotEqual(len(fixture.initramfs), len(fixture.composition))
 
     def test_shared_dependency_and_hardlinks_are_counted_once(self) -> None:
         """Consumer chains explain shared bytes without charging them to either app."""
@@ -271,12 +310,12 @@ class ArtifactFootprintTests(unittest.TestCase):
             with self.assertRaisesRegex(FootprintError, "missing or changed: debug/zImage"):
                 inspect_footprint(bundle)
 
-    def test_embedded_payload_must_match_published_composition(self) -> None:
-        """Valid individual file hashes alone do not prove the embedded composition."""
+    def test_embedded_payload_must_match_published_boot_archive(self) -> None:
+        """Valid file hashes alone do not establish which boot archive the ELF embeds."""
         with tempfile.TemporaryDirectory() as temporary:
             fixture = FootprintFixture(Path(temporary))
             bundle = fixture.bundle()
-            elf = kernel_with_initramfs(newc([]), "gzip")
+            elf = kernel_with_initramfs(fixture.composition, "gzip")
             (Path(temporary) / "debug/vmlinux").write_bytes(elf)
             manifest: dict[str, Any] = json.loads(bundle.manifest_bytes)
             manifest["files"]["debug/vmlinux"] = {

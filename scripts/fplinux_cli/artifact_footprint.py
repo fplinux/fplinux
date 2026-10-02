@@ -250,6 +250,27 @@ def _rootfs_report(data: bytes, *, external: bool) -> tuple[dict[str, Any], dict
     }, providers
 
 
+def _ram_root_report(initramfs: bytes) -> dict[str, Any]:
+    """Describe the compressed lower image that is actually embedded."""
+    contents = {entry.name: entry.data for entry in _cpio_entries(initramfs)}
+    lower = contents["root.squashfs"]
+    if len(lower) < 96 or lower[:4] != b"hsqs":
+        raise FootprintError("RAM root lower is not a SquashFS image")
+    block_bytes = struct.unpack_from("<I", lower, 12)[0]
+    compressor = struct.unpack_from("<H", lower, 20)[0]
+    compression = {4: "xz", 5: "lz4"}.get(compressor)
+    if compression is None:
+        raise FootprintError("unsupported RAM root compression")
+    return {
+        "filesystem": "squashfs",
+        "compression": compression,
+        "block_bytes": block_bytes,
+        "bytes": len(lower),
+        "sha256": sha256_bytes(lower),
+        "description": "Compressed RAM backing; file-cache pages are additional and reclaimable",
+    }
+
+
 def _elf_bytes_at(elf: bytes, address: int, size: int) -> bytes:
     if elf[:7] != b"\x7fELF\x01\x01\x01":
         raise FootprintError("kernel is not a little-endian ELF32 file")
@@ -380,11 +401,15 @@ def inspect_footprint(bundle: CurrentBundle) -> dict[str, Any]:
         external = kconfig_values(config).get("CONFIG_INITRAMFS_SOURCE", '""') == '""'
         rootfs, providers = _rootfs_report(cpio, external=external)
         embedded = None
+        ram_root = None
         if not external:
+            initramfs = files["debug/initramfs.cpio"].read_bytes()
+            ram_root = _ram_root_report(initramfs)
+            rootfs["source"] = "ram-squashfs-composition"
             embedded = _embedded_initramfs(
                 files["debug/vmlinux"].read_bytes(),
                 files["debug/System.map"].read_bytes(),
-                cpio,
+                initramfs,
             )
         optional = {
             name: {**_apk_report(path, providers), "sha256": manifest["files"][name]["sha256"]}
@@ -405,6 +430,7 @@ def inspect_footprint(bundle: CurrentBundle) -> dict[str, Any]:
                 "boot_artifact_bytes": boot,
                 "kernel_zimage_bytes": files["debug/zImage"].stat().st_size,
                 "embedded_initramfs": embedded,
+                "ram_root": ram_root,
                 "host_debug_file_bytes": {
                     name: manifest["files"][name]["size"]
                     for name in files

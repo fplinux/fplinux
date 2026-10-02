@@ -967,6 +967,54 @@ def _write_rootfs_cpio(root: Path, destination: Path) -> None:
     require_file(destination)
 
 
+def _write_ramroot_initramfs(root: Path, staging: Path) -> None:
+    """Pack the verified composition behind a small boot-only RAM filesystem."""
+    bootstrap = staging / "bootstrap"
+    bootstrap.mkdir()
+    for directory in ("bin", "lib", "usr", "usr/lib", "dev", "proc", "sys", "run", "newroot"):
+        (bootstrap / directory).mkdir(mode=0o755)
+    # BusyBox and its shared libraries come from the same locked composed runtime.
+    for relative in (
+        "bin/busybox",
+        "lib/ld-musl-armhf.so.1",
+        "lib/libc.musl-armv7.so.1",
+        "usr/lib/libgcc_s.so.1",
+    ):
+        source = root / relative
+        destination = bootstrap / relative
+        if source.is_symlink():
+            destination.symlink_to(source.readlink())
+        else:
+            shutil.copy2(require_file(source), destination)
+    (bootstrap / "bin/sh").symlink_to("busybox")
+    shutil.copyfile(require_file(ROOT / "common/ramroot-init.sh"), bootstrap / "init")
+    (bootstrap / "init").chmod(0o755)
+    _run(
+        [
+            "mksquashfs",
+            str(root),
+            str(bootstrap / "root.squashfs"),
+            "-noappend",
+            "-no-progress",
+            "-exit-on-error",
+            "-processors",
+            "1",
+            "-all-root",
+            "-exports",
+            "-xattrs",
+            "-b",
+            "64K",
+            "-comp",
+            "xz",
+            "-Xdict-size",
+            "64K",
+        ]
+    )
+    _normalize_rootfs(bootstrap)
+    _write_rootfs_cpio(bootstrap, staging / alpine_state.INITRAMFS_NAME)
+    shutil.rmtree(bootstrap)
+
+
 def _rootfs_apk_command(
     lock: dict[str, Any],
     root: Path,
@@ -1035,6 +1083,7 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
         packages,
         firmware_inputs=firmware,
         display_brightness=display_brightness,
+        root_kind="external" if external_image is not None else "initramfs",
     )
     overlap = set(packages) & set(bundle_packages)
     if overlap:
@@ -1190,6 +1239,8 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
             _normalize_rootfs(root)
             if not rootfs_hit:
                 _write_rootfs_cpio(root, staging / alpine_state.ROOTFS_NAME)
+                if external_image is None:
+                    _write_ramroot_initramfs(root, staging)
                 alpine_state.write_receipt(staging, recipe)
                 rootfs_receipt = alpine_state.trusted_receipt_identity(staging, recipe)
             else:

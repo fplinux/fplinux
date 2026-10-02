@@ -149,6 +149,8 @@ def target_build_source_files(
 
     for relative in STAGED_BUILD_SOURCES:
         add_source_path(files, ROOT / relative)
+    if target_config["linux"]["root"]["kind"] == "initramfs":
+        add_source_path(files, ROOT / "common/ramroot-init.sh")
     rootfs_packages = alpine_state.selected_packages(platform, target_config, root=ROOT)
     bundle_packages = alpine_state.bundle_packages(
         platform,

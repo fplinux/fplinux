@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 RECEIPT_NAME = ".fplinux-rootfs-receipt.json"
 ROOTFS_NAME = "rootfs.cpio"
+INITRAMFS_NAME = "initramfs.cpio"
 SIGNING_KEY_DIRECTORY = "apk-signing"
 SIGNING_PRIVATE_KEY = "fplinux-build.rsa"
 SIGNING_PUBLIC_KEY = "fplinux-build.rsa.pub"
@@ -538,8 +539,11 @@ def alpine_rootfs_recipe(  # noqa: PLR0913 -- each selected rootfs input is caus
     *,
     firmware_inputs: Sequence[FirmwareInput] = (),
     display_brightness: dict[str, Any] | None = None,
+    root_kind: str = "initramfs",
 ) -> str:
     """Hash every input that can affect one selected Alpine root filesystem."""
+    if root_kind not in {"initramfs", "external"}:
+        fail("Alpine root kind must be initramfs or external")
     _sha256(container_image_recipe, "container image recipe")
     _sha256(signing_key_sha256, "package signing public key")
     selected = _canonical_packages(packages, root)
@@ -556,6 +560,12 @@ def alpine_rootfs_recipe(  # noqa: PLR0913 -- each selected rootfs input is caus
         "shared_aport_sources": shared_aport_source_records(build_packages, root),
         "firmware": [firmware.recipe_record() for firmware in firmware_inputs],
         "display_brightness": display_brightness,
+        "root_kind": root_kind,
+        "ram_bootstrap": (
+            _source_file(root / "common/ramroot-init.sh", root)
+            if root_kind == "initramfs"
+            else None
+        ),
         "implementation": [
             _source_file(root / "scripts/fplinux_cli/alpine_state.py", root),
             _source_file(root / "scripts/fplinux_cli/alpine_builder.py", root),
@@ -616,6 +626,9 @@ def _receipt_data(output: Path, recipe: str) -> dict[str, object]:
     return {
         "recipe": _sha256(recipe, "Alpine rootfs recipe"),
         "rootfs": _rootfs_record(output / ROOTFS_NAME),
+        "initramfs": (
+            _rootfs_record(output / INITRAMFS_NAME) if (output / INITRAMFS_NAME).exists() else None
+        ),
     }
 
 
@@ -624,7 +637,7 @@ def _read_receipt(output: Path) -> dict[str, object] | None:
         raw = json.loads((output / RECEIPT_NAME).read_text(encoding="utf-8"))
     except OSError, UnicodeDecodeError, json.JSONDecodeError:
         return None
-    if not isinstance(raw, dict) or set(raw) != {"recipe", "rootfs"}:
+    if not isinstance(raw, dict) or set(raw) != {"recipe", "rootfs", "initramfs"}:
         return None
     if not _is_sha256(raw.get("recipe")):
         return None
@@ -638,6 +651,16 @@ def _read_receipt(output: Path) -> dict[str, object] | None:
         or int(rootfs["size"]) < 0
     ):
         return None
+    initramfs = raw.get("initramfs")
+    if initramfs is not None and (
+        not isinstance(initramfs, dict)
+        or set(initramfs) != {"sha256", "size"}
+        or not _is_sha256(initramfs.get("sha256"))
+        or not isinstance(initramfs.get("size"), int)
+        or isinstance(initramfs.get("size"), bool)
+        or int(initramfs["size"]) < 0
+    ):
+        return None
     return raw
 
 
@@ -647,7 +670,7 @@ def receipt_matches(output: Path, recipe: str) -> bool:
     if raw is None or raw.get("recipe") != recipe:
         return False
     try:
-        return raw.get("rootfs") == _rootfs_record(output / ROOTFS_NAME)
+        return raw == _receipt_data(output, recipe)
     except SystemExit:
         return False
 

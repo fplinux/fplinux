@@ -497,11 +497,21 @@ class RepositoryProfileCompressionTests(unittest.TestCase):
                     contents = prepared_configs[profile]
                     with self.subTest(target=target, profile=profile):
                         linux = targets.load_target(target, profile)["linux"]
+                        compressor_enable = [
+                            symbol
+                            for symbol in linux["config_enable"]
+                            if symbol.startswith(("CONFIG_ZRAM_BACKEND_", "CONFIG_ZRAM_DEF_COMP_"))
+                        ]
+                        compressor_disable = [
+                            symbol
+                            for symbol in linux["config_disable"]
+                            if symbol.startswith(("CONFIG_ZRAM_BACKEND_", "CONFIG_ZRAM_DEF_COMP_"))
+                        ]
                         prepared.write_text(contents["correct"])
                         kernel_build.assert_profile_kconfig(
                             prepared,
-                            linux["config_enable"],
-                            linux["config_disable"],
+                            compressor_enable,
+                            compressor_disable,
                         )
 
                         prepared.write_text(contents["opposite"])
@@ -510,8 +520,8 @@ class RepositoryProfileCompressionTests(unittest.TestCase):
                         ):
                             kernel_build.assert_profile_kconfig(
                                 prepared,
-                                linux["config_enable"],
-                                linux["config_disable"],
+                                compressor_enable,
+                                compressor_disable,
                             )
 
 

@@ -428,10 +428,33 @@ def load_profile(
         config_enable = [
             "CONFIG_ZRAM_BACKEND_ZSTD",
             "CONFIG_ZRAM_DEF_COMP_ZSTD",
+            "CONFIG_BLK_DEV_LOOP",
+            "CONFIG_MISC_FILESYSTEMS",
+            "CONFIG_SQUASHFS",
+            "CONFIG_SQUASHFS_XATTR",
+            "CONFIG_SQUASHFS_FILE_DIRECT",
+            "CONFIG_SQUASHFS_COMPILE_DECOMP_SINGLE",
+            "CONFIG_SQUASHFS_XZ",
+            "CONFIG_OVERLAY_FS",
+            "CONFIG_TMPFS_XATTR",
+            "CONFIG_TMPFS_POSIX_ACL",
         ]
         config_disable = [
             "CONFIG_ZRAM_BACKEND_LZO",
             "CONFIG_ZRAM_DEF_COMP_LZORLE",
+            "CONFIG_SQUASHFS_ZLIB",
+            "CONFIG_SQUASHFS_LZO",
+            "CONFIG_SQUASHFS_ZSTD",
+            "CONFIG_SQUASHFS_LZ4",
+            "CONFIG_SQUASHFS_COMP_CACHE_FULL",
+            "CONFIG_SQUASHFS_FILE_CACHE",
+            "CONFIG_SQUASHFS_CHOICE_DECOMP_BY_MOUNT",
+            "CONFIG_SQUASHFS_COMPILE_DECOMP_MULTI",
+            "CONFIG_SQUASHFS_COMPILE_DECOMP_MULTI_PERCPU",
+            "CONFIG_SQUASHFS_MOUNT_DECOMP_THREADS",
+            "CONFIG_OVERLAY_FS_INDEX",
+            "CONFIG_OVERLAY_FS_REDIRECT_DIR",
+            "CONFIG_OVERLAY_FS_XINO_AUTO",
         ]
     return {
         "name": profile,

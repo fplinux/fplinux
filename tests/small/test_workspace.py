@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -117,6 +118,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
             host_input = write("tools/local-input.h")
             host_patch = write("tools/local.patch")
             loader_events = write("common/loader_events.py")
+            write("common/ramroot-init.sh", b"#!/bin/sh\nexit 0\n")
             unrelated = write("unselected.txt")
 
             for relative in (
@@ -144,6 +146,7 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                 "device_data": {"groups": {}},
                 "bundle": {"packages": ["package-b"]},
                 "linux": {
+                    "root": {"kind": "initramfs"},
                     "config_fragment": "kernel/config.fragment",
                     "patches": [],
                     "copies": [{"source": "kernel/copy.c"}],
@@ -420,6 +423,103 @@ class WorkspaceSnapshotTests(unittest.TestCase):
 
             self.assertEqual(card["linux"]["root"]["kind"], "external")
             self.assertEqual(ram["linux"]["root"], {"kind": "initramfs"})
+
+    def test_bootstrap_edit_changes_ram_source_recipe_but_not_microsd(self) -> None:
+        """An edit consumed only by RAM boot leaves the SD source recipe reusable."""
+        files = dict(workspace_module.target_build_source_files("nokia-ta1618"))
+        files.update(workspace_module.target_build_source_files("nokia-ta1618", "microsd-uboot"))
+        snapshot = workspace_module.workspace_snapshot(sorted(files.items()))
+        with tempfile.TemporaryDirectory() as temporary:
+            with mock.patch.object(workspace_module, "ROOT", Path(temporary)):
+                source = workspace_module.stage_workspace_snapshot(snapshot)
+            bootstrap = source / "common/ramroot-init.sh"
+            bootstrap.write_bytes(b"#!/bin/sh\nexit 0\n")
+            with (
+                mock.patch.object(workspace_module, "ROOT", source),
+                mock.patch.object(common, "ROOT", source),
+            ):
+                before_ram = workspace_module.workspace_snapshot(
+                    workspace_module.target_build_source_files("nokia-ta1618")
+                ).recipe
+                before_sd = workspace_module.workspace_snapshot(
+                    workspace_module.target_build_source_files("nokia-ta1618", "microsd-uboot")
+                ).recipe
+                bootstrap.write_bytes(b"#!/bin/sh\nexit 1\n")
+                after_ram = workspace_module.workspace_snapshot(
+                    workspace_module.target_build_source_files("nokia-ta1618")
+                ).recipe
+                after_sd = workspace_module.workspace_snapshot(
+                    workspace_module.target_build_source_files("nokia-ta1618", "microsd-uboot")
+                ).recipe
+            self.assertNotEqual(before_ram, after_ram)
+            self.assertEqual(before_sd, after_sd)
+
+    def test_staged_ram_producer_reads_causal_bootstrap_snapshot(self) -> None:
+        """The normal staged producer reads boot source captured by the target snapshot."""
+        snapshot = workspace_module.target_workspace_snapshot("nokia-ta1618")
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            with mock.patch.object(workspace_module, "ROOT", directory):
+                source = workspace_module.stage_workspace_snapshot(snapshot)
+            bootstrap = source / "common/ramroot-init.sh"
+            bootstrap.write_bytes(b"#!/bin/sh\nexit 0\n")
+            with (
+                mock.patch.object(workspace_module, "ROOT", source),
+                mock.patch.object(common, "ROOT", source),
+            ):
+                before = workspace_module.target_workspace_snapshot("nokia-ta1618")
+                staged = workspace_module.stage_workspace_snapshot(before)
+                (source / "unrelated.txt").write_bytes(b"not a build input\n")
+                unrelated = workspace_module.target_workspace_snapshot("nokia-ta1618")
+                self.assertEqual(before.recipe, unrelated.recipe)
+                bootstrap.write_bytes(b"#!/bin/sh\nexit 1\n")
+                changed = workspace_module.target_workspace_snapshot("nokia-ta1618")
+                self.assertNotEqual(before.recipe, changed.recipe)
+            root = directory / "root"
+            output = directory / "output"
+            for relative in ("bin", "lib", "usr/lib"):
+                (root / relative).mkdir(parents=True)
+            output.mkdir()
+            (root / "bin/busybox").write_bytes(b"runtime\n")
+            (root / "lib/ld-musl-armhf.so.1").write_bytes(b"loader\n")
+            (root / "lib/libc.musl-armv7.so.1").symlink_to("ld-musl-armhf.so.1")
+            (root / "usr/lib/libgcc_s.so.1").write_bytes(b"gcc runtime\n")
+            command = (
+                "from pathlib import Path; import sys; "
+                "from fplinux_cli import alpine_builder; "
+                "alpine_builder._write_ramroot_initramfs("
+                "Path(sys.argv[1]), Path(sys.argv[2]))"
+            )
+            packed = subprocess.run(
+                [
+                    sys.executable,
+                    "-B",
+                    "-c",
+                    command,
+                    str(root),
+                    str(output),
+                ],
+                cwd=staged,
+                env={"PATH": os.environ["PATH"], "PYTHONPATH": str(staged / "scripts")},
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=20,
+            )
+            self.assertEqual(packed.returncode, 0, packed.stdout + packed.stderr)
+            boot = directory / "boot"
+            boot.mkdir()
+            with (output / "initramfs.cpio").open("rb") as archive:
+                extracted = subprocess.run(
+                    ["cpio", "--quiet", "--extract", "--make-directories", "init"],
+                    stdin=archive,
+                    cwd=boot,
+                    capture_output=True,
+                    check=False,
+                    timeout=10,
+                )
+            self.assertEqual(extracted.returncode, 0, extracted.stderr)
+            self.assertEqual((boot / "init").read_bytes(), b"#!/bin/sh\nexit 0\n")
 
     def test_snapshot_rejects_symlinked_input(self) -> None:
         """A snapshot cannot turn a linked source into a regular staged file."""
