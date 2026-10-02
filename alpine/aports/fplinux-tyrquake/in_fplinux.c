@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-/* Native libinput backend for FPLinux. */
+/* Native input backend for FPLinux. */
 /* fplinux-check: package-embedded */
 
 #include <linux/input.h>

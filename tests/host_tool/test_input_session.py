@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Input-session component checks with fake evdev, udev and libinput boundaries.
+"""Input-session components with controlled udev, ioctl and libevdev boundaries.
 
-These checks preserve source and device identity around queued lifecycle events.
-They do not create a kernel input device or prove libinput's event generation.
+Real epoll, pipes and eventfd exercise readiness. Library synchronization is
+stubbed; these checks do not create a kernel input device or prove kernel loss
+recovery, hotplug or grabs.
 """
 
 from __future__ import annotations
@@ -19,8 +20,8 @@ ROOT = Path(__file__).resolve().parents[2]
 class InputSessionTests(unittest.TestCase):
     """Observe the production session's caller-visible event sequence."""
 
-    def test_sources_survive_hotplug_and_suspend(self) -> None:
-        """Equal keycodes stay source-specific, and reconnect creates a new identity."""
+    def test_event_translation_and_device_lifetimes(self) -> None:
+        """Literal traces preserve identity, frames, repeat and synchronized state."""
         with tempfile.TemporaryDirectory() as temporary:
             executable = Path(temporary) / "input-session"
             run_process(
@@ -34,7 +35,7 @@ class InputSessionTests(unittest.TestCase):
                     f"-I{ROOT / 'include/fplinux'}",
                     str(ROOT / "lib/fplinux/fplinux-input-session.c"),
                     str(ROOT / "tests/host_tool/fplinux-input-session.c"),
-                    "-Wl,--wrap=open,--wrap=close,--wrap=ioctl",
+                    "-Wl,--wrap=open,--wrap=close,--wrap=ioctl,--wrap=nanosleep",
                     "-o",
                     str(executable),
                 ],
@@ -42,12 +43,22 @@ class InputSessionTests(unittest.TestCase):
                 timeout=30,
                 check=True,
             )
-            run_process(
-                [str(executable)],
-                name="run input source and device lifecycle scenarios",
-                timeout=5,
-                check=True,
-            )
+            for scenario in (
+                "lifecycle",
+                "classification",
+                "modifiers",
+                "frames",
+                "pointer",
+                "sync",
+                "retry",
+            ):
+                with self.subTest(scenario=scenario):
+                    run_process(
+                        [str(executable), scenario],
+                        name=f"run input-session {scenario} component scenario",
+                        timeout=5,
+                        check=True,
+                    )
 
 
 if __name__ == "__main__":

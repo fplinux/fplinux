@@ -15,7 +15,8 @@ source="libudev-zero-$pkgver.tar.gz::https://github.com/illiliti/libudev-zero/ar
 builddir="$srcdir/libudev-zero-$pkgver"
 
 build() {
-	make CC="$CC" PREFIX=/usr libudev.so.1
+	make CC="$CC" CPPFLAGS="$CPPFLAGS -DUDEV_MONITOR_NLGRP=1" \
+		PREFIX=/usr libudev.so.1
 }
 
 package() {

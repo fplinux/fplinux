@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class QuakeInputTests(unittest.TestCase):
-    """Observe engine key states without running the game, DRM or libinput."""
+    """Observe engine key states without running the game, DRM or evdev devices."""
 
     def test_sources_and_shared_actions_survive_releases_and_focus_reset(self) -> None:
         """Releasing one key cannot stop an action still held by another key."""

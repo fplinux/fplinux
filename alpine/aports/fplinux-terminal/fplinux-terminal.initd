@@ -14,7 +14,7 @@ respawn_max=0
 retry="TERM/3/KILL/2"
 
 depend() {
-	need devfs fplinux-mdevd
+	need devfs
 	after bootmisc fplinux-brightness
 }
 

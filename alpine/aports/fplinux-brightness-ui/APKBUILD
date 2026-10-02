@@ -8,7 +8,7 @@ arch="armv7"
 license="GPL-2.0-only"
 depends="fplinux-base fplinux-input"
 makedepends_build="clang22 lld22 pkgconf llvm22"
-makedepends_host="musl-dev linux-headers fplinux-libdrm-dev libinput-dev"
+makedepends_host="musl-dev linux-headers fplinux-libdrm-dev libevdev-dev eudev-dev"
 options="!check"
 source="
 	fplinux-brightness-ui.c
@@ -37,14 +37,14 @@ build() {
 	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
 
 	"$CC" $CPPFLAGS $CFLAGS -std=c11 -Wall -Wextra -Werror \
-		-I"$srcdir" $(pkg-config --cflags libdrm libinput) \
+		-I"$srcdir" $(pkg-config --cflags libdrm libevdev) \
 		"$srcdir/fplinux-brightness-ui.c" \
 		"$srcdir/brightness-ui.c" \
 		"$srcdir/fplinux-brightness-client.c" \
 		"$srcdir/fplinux-cli.c" \
 		"$srcdir/fplinux-drm-session.c" \
 		"$srcdir/fplinux-input-session.c" \
-		$(pkg-config --libs libdrm libinput) -ludev \
+		$(pkg-config --libs libdrm libevdev) -ludev \
 		$LDFLAGS -Wl,--gc-sections -o fplinux-brightness-ui
 }
 
@@ -63,8 +63,8 @@ a16c1b2b84831be3da5bbf1d198c827a4bfde8bb435e4ac6d52777ca8472cedc700be5007a4320e6
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
 24d96f52eeb3adb9b37e34967199a0efea630af580782fe2f29000862b678d5ae96b4516e291b61ca70a8d9242af43fc720d801e158c7933e957cda0aaf5afdd  fplinux-drm-session.c
 5b63a683e9aac0a4b1faef31c0a09b9ec4131992d5cb69f858c6276855a8d92404c4cf23a1b4c8927d802311e9634b354502745ef15e00a4209744acf51131a7  fplinux-drm-session.h
-6b41d15586239826f8fabfee31b9c9cc4e4816e88e8450002977bc1ad25ec60cb32d668c32a5684db8ac3f678a2daadf7e6ea91e55a251f63ef77fd8438f6d89  fplinux-input-session.c
-ccd360c3ec65140e33fedf1326a3fc3c66744103ec66f9c1eaf4e5a35d0131dfaeb3635fa931083fb55cbc2905a1d78cd0ff3cc2dfee659e7f0e259369f07192  fplinux-input-session.h
+8157caf7642468c98be9d4d03aa4a24cf360714015caa4365f037d10c1528a4e757d614a818e0b3a0a20c48f9b0063f9b2f8e331334af9127a670a130ded40da  fplinux-input-session.c
+2720eb45e6d403009c72ff8025ac28adde8320f4005917afc05e24bd0bcaffb2a90fc23f7213a0c9c9a9af7d7a3f6dcad4f4e44cf6f979a0157bae6c98117fc0  fplinux-input-session.h
 defa0078d5b788c6180813f46b42042fd401555cce70fc7ae40550b7c27b65a04972678b5beb8c65e41dbcfe36ba6b926154d94c2700e345bb8d3d2ba251e4ef  fplinux-input-device.h
 0a6d41b98223953b0b890be3041fba31e7878e6752094ed439b1e1e7e9240b2c7bf175ae671d05485ee25fa9ae74e45ddc63e9592768bd5d19e6e4ae6765a978  fplinux-keypad.h
 "

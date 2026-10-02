@@ -64,7 +64,7 @@ bool fplinux_terminal_diagnostic_begin(
 		if (device->fd < 0 ||
 		    device->source != FPLINUX_INPUT_SOURCE_KEYPAD)
 			continue;
-		/* Suspend releases the grab and closes libinput's original fd. */
+		/* Suspend releases the grab and closes the session's original fd. */
 		fd = fcntl(device->fd, F_DUPFD_CLOEXEC, 0);
 		if (fd < 0)
 			goto fail;

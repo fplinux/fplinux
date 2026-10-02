@@ -1,145 +1,188 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _GNU_SOURCE
-/* Fake evdev, udev and libinput boundaries around the production session. */
+/* Controlled udev/ioctl/libevdev boundaries; epoll and readiness fds are real. */
 #include <assert.h>
+#include <asm/ioctl.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <libinput.h>
+#include <libevdev/libevdev.h>
 #include <libudev.h>
 #include <linux/input.h>
-#include <linux/ioctl.h>
+#include <poll.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "fplinux-input-session.h"
-#include "fplinux-keypad.h"
 
-#define DEVICE_COUNT 4U
-#define EVENT_COUNT 64U
+#define DEVICE_COUNT 6U
+#define EVENT_COUNT 128U
 #define BITS_PER_LONG (8U * sizeof(unsigned long))
 
 struct udev {
 	bool live;
 };
 
-struct libinput_device {
-	const char *sysname;
-	const char *phys;
-	void *data;
-	unsigned int held;
-	int fd;
-	bool grabbed;
+struct udev_device {
+	unsigned int index;
+	const char *action;
 };
 
-struct libinput_event_keyboard {
-	unsigned int code;
-	enum libinput_key_state state;
-	uint64_t time_usec;
-};
-
-struct libinput_event_pointer {
-	int unused;
-};
-
-struct libinput_event {
-	enum libinput_event_type type;
-	struct libinput_device *device;
-	struct libinput_event_keyboard keyboard;
-};
-
-struct libinput {
-	const struct libinput_interface *interface;
-	void *data;
-	struct libinput_event events[EVENT_COUNT];
+struct udev_monitor {
+	int pipe[2];
+	struct udev_device notifications[EVENT_COUNT];
 	size_t head;
 	size_t tail;
 };
 
-static struct udev fake_udev;
-static struct libinput fake_input;
-static struct libinput_device devices[DEVICE_COUNT] = {
-	{ .sysname = "event0", .phys = "fplinux/keypad0", .fd = -1 },
-	{ .sysname = "event1", .phys = "usb/keyboard", .fd = -1 },
-	{ .sysname = "event2", .phys = "bluetooth/keyboard", .fd = -1 },
-	{ .sysname = "event0", .phys = "usb/replacement", .fd = -1 },
+struct udev_list_entry {
+	unsigned int index;
+	struct udev_list_entry *next;
 };
-static unsigned int opening_device;
 
-static void queue_event(struct libinput_device *device,
-			enum libinput_event_type type, unsigned int code,
-			bool pressed)
+struct udev_enumerate {
+	struct udev_list_entry entries[DEVICE_COUNT];
+	size_t count;
+};
+
+struct queued_event {
+	struct input_event event;
+	int result;
+	unsigned int flags;
+};
+
+struct libevdev {
+	unsigned int index;
+	struct queued_event events[EVENT_COUNT];
+	size_t head;
+	size_t tail;
+	bool live;
+	bool pressed[KEY_CNT];
+};
+
+struct fake_device {
+	const char *path;
+	const char *phys;
+	bool keyboard;
+	bool pointer;
+	bool present;
+	bool grabbed;
+	unsigned int busy;
+	int pipe[2];
+	struct udev_device udev;
+	struct libevdev evdev;
+};
+
+static struct udev fake_udev;
+static struct udev_monitor fake_monitor;
+static struct udev_enumerate fake_scan;
+static bool scan_fails;
+static unsigned int sleeps;
+static struct fake_device devices[DEVICE_COUNT] = {
+	{ .path = "/dev/input/event0", .phys = "fplinux/keypad0" },
+	{ .path = "/dev/input/event1",
+	  .phys = "usb/keyboard",
+	  .keyboard = true },
+	{ .path = "/dev/input/event2",
+	  .phys = "bluetooth/combo",
+	  .keyboard = true,
+	  .pointer = true },
+	{ .path = "/dev/input/event3", .phys = "usb/mouse", .pointer = true },
+	{ .path = "/dev/input/event0",
+	  .phys = "usb/replacement",
+	  .keyboard = true },
+	{ .path = "/dev/input/event5", .phys = "usb/key-only" },
+};
+
+int __real_close(int fd);
+
+static void initialize(void)
 {
-	struct libinput_event *event;
+	unsigned int i;
 
-	assert(fake_input.tail < EVENT_COUNT);
-	event = &fake_input.events[fake_input.tail++];
-	event->type = type;
-	event->device = device;
-	event->keyboard.code = code;
-	event->keyboard.state = pressed ? LIBINPUT_KEY_STATE_PRESSED :
-					  LIBINPUT_KEY_STATE_RELEASED;
+	for (i = 0; i < DEVICE_COUNT; ++i) {
+		devices[i].pipe[0] = -1;
+		devices[i].pipe[1] = -1;
+		devices[i].udev.index = i;
+		devices[i].evdev.index = i;
+	}
 }
 
-static void add_device(unsigned int index)
+static struct fake_device *device_by_fd(int fd)
 {
-	struct libinput_device *device = &devices[index];
-	char path[64];
+	unsigned int i;
 
-	opening_device = index;
-	snprintf(path, sizeof(path), "/dev/input/%s", device->sysname);
-	device->fd = fake_input.interface->open_restricted(
-		path, O_RDONLY | O_NONBLOCK, fake_input.data);
-	assert(device->fd >= 0);
-	assert(device->grabbed);
-	queue_event(device, LIBINPUT_EVENT_DEVICE_ADDED, 0, false);
-}
-
-static void key(unsigned int index, unsigned int code, bool pressed)
-{
-	devices[index].held = pressed ? code : 0;
-	queue_event(&devices[index], LIBINPUT_EVENT_KEYBOARD_KEY, code,
-		    pressed);
-}
-
-static void remove_device(unsigned int index)
-{
-	struct libinput_device *device = &devices[index];
-
-	if (device->held)
-		key(index, device->held, false);
-	fake_input.interface->close_restricted(device->fd, fake_input.data);
-	device->fd = -1;
-	assert(!device->grabbed);
-	queue_event(device, LIBINPUT_EVENT_DEVICE_REMOVED, 0, false);
+	for (i = 0; i < DEVICE_COUNT; ++i)
+		if (devices[i].pipe[0] == fd)
+			return &devices[i];
+	assert(false);
+	return NULL;
 }
 
 int __wrap_open(const char *path, int flags, ...)
 {
-	(void)path;
-	assert(flags & O_CLOEXEC);
-	return 100 + (int)opening_device;
+	unsigned int i;
+
+	assert((flags & (O_CLOEXEC | O_NONBLOCK)) == (O_CLOEXEC | O_NONBLOCK));
+	for (i = 0; i < DEVICE_COUNT; ++i) {
+		struct fake_device *device = &devices[i];
+
+		if (device->present && !strcmp(path, device->path)) {
+			assert(device->pipe[0] < 0);
+			assert(pipe2(device->pipe, O_CLOEXEC | O_NONBLOCK) ==
+			       0);
+			return device->pipe[0];
+		}
+	}
+	errno = ENOENT;
+	return -1;
 }
 
 int __wrap_close(int fd)
 {
-	assert(fd >= 100 && fd < 100 + (int)DEVICE_COUNT);
-	return 0;
+	unsigned int i;
+
+	for (i = 0; i < DEVICE_COUNT; ++i) {
+		struct fake_device *device = &devices[i];
+
+		if (device->pipe[0] == fd) {
+			assert(!device->grabbed);
+			device->pipe[0] = -1;
+			assert(__real_close(device->pipe[1]) == 0);
+			device->pipe[1] = -1;
+			break;
+		}
+	}
+	return __real_close(fd);
+}
+
+static void set_bit(unsigned long *bits, unsigned int code)
+{
+	bits[code / BITS_PER_LONG] |= 1UL << (code % BITS_PER_LONG);
 }
 
 int __wrap_ioctl(int fd, unsigned long request, ...)
 {
-	struct libinput_device *device = &devices[fd - 100];
+	struct fake_device *device = device_by_fd(fd);
 	va_list arguments;
 	void *buffer;
 	unsigned long *bits;
 
 	va_start(arguments, request);
 	if (request == EVIOCGRAB) {
-		device->grabbed = va_arg(arguments, int) != 0;
+		int grab = va_arg(arguments, int);
+
 		va_end(arguments);
+		if (grab && device->busy) {
+			--device->busy;
+			errno = EBUSY;
+			return -1;
+		}
+		device->grabbed = grab != 0;
 		return 0;
 	}
 	buffer = va_arg(arguments, void *);
@@ -150,13 +193,32 @@ int __wrap_ioctl(int fd, unsigned long request, ...)
 		return 0;
 	}
 	bits = buffer;
-	if (_IOC_NR(request) == _IOC_NR(EVIOCGBIT(0, 1)))
-		bits[EV_KEY / BITS_PER_LONG] |= 1UL << (EV_KEY % BITS_PER_LONG);
-	else if (_IOC_NR(request) == _IOC_NR(EVIOCGBIT(EV_KEY, 1)))
-		bits[KEY_ENTER / BITS_PER_LONG] |=
-			1UL << (KEY_ENTER % BITS_PER_LONG);
-	else
+	if (_IOC_NR(request) == _IOC_NR(EVIOCGBIT(0, 1))) {
+		set_bit(bits, EV_KEY);
+		if (device->pointer)
+			set_bit(bits, EV_REL);
+	} else if (_IOC_NR(request) == _IOC_NR(EVIOCGBIT(EV_KEY, 1))) {
+		set_bit(bits, KEY_F13);
+		if (device->keyboard)
+			set_bit(bits, KEY_ENTER);
+		if (device->pointer)
+			set_bit(bits, BTN_LEFT);
+	} else if (_IOC_NR(request) == _IOC_NR(EVIOCGBIT(EV_REL, 1))) {
+		assert(device->pointer);
+		set_bit(bits, REL_X);
+		set_bit(bits, REL_Y);
+	} else {
 		assert(false);
+	}
+	return 0;
+}
+
+int __wrap_nanosleep(const struct timespec *requested,
+		     struct timespec *remaining)
+{
+	(void)remaining;
+	assert(requested->tv_sec == 0 && requested->tv_nsec == 50000000L);
+	++sleeps;
 	return 0;
 }
 
@@ -172,176 +234,265 @@ struct udev *udev_unref(struct udev *context)
 	return NULL;
 }
 
-struct libinput *
-libinput_udev_create_context(const struct libinput_interface *interface,
-			     void *data, struct udev *udev)
+struct udev_monitor *udev_monitor_new_from_netlink(struct udev *context,
+						   const char *name)
 {
-	assert(udev->live);
-	memset(&fake_input, 0, sizeof(fake_input));
-	fake_input.interface = interface;
-	fake_input.data = data;
-	return &fake_input;
+	assert(context->live && !strcmp(name, "udev"));
+	memset(&fake_monitor, 0, sizeof(fake_monitor));
+	assert(pipe2(fake_monitor.pipe, O_CLOEXEC | O_NONBLOCK) == 0);
+	return &fake_monitor;
 }
 
-int libinput_udev_assign_seat(struct libinput *context, const char *seat)
+struct udev_monitor *udev_monitor_unref(struct udev_monitor *monitor)
 {
-	assert(context == &fake_input && !strcmp(seat, "seat0"));
+	assert(__real_close(monitor->pipe[0]) == 0);
+	assert(__real_close(monitor->pipe[1]) == 0);
+	return NULL;
+}
+
+int udev_monitor_filter_add_match_subsystem_devtype(struct udev_monitor *monitor,
+						    const char *subsystem,
+						    const char *devtype)
+{
+	assert(monitor == &fake_monitor && !strcmp(subsystem, "input") &&
+	       !devtype);
 	return 0;
 }
 
-void libinput_suspend(struct libinput *context)
+int udev_monitor_enable_receiving(struct udev_monitor *monitor)
+{
+	assert(monitor == &fake_monitor);
+	return 0;
+}
+
+int udev_monitor_get_fd(struct udev_monitor *monitor)
+{
+	return monitor->pipe[0];
+}
+
+struct udev_device *udev_monitor_receive_device(struct udev_monitor *monitor)
+{
+	char ready;
+
+	if (read(monitor->pipe[0], &ready, 1) < 0) {
+		assert(errno == EAGAIN);
+		return NULL;
+	}
+	assert(monitor->head < monitor->tail);
+	return &monitor->notifications[monitor->head++];
+}
+
+struct udev_enumerate *udev_enumerate_new(struct udev *context)
+{
+	assert(context->live);
+	memset(&fake_scan, 0, sizeof(fake_scan));
+	return &fake_scan;
+}
+
+struct udev_enumerate *udev_enumerate_unref(struct udev_enumerate *scan)
+{
+	assert(scan == &fake_scan);
+	return NULL;
+}
+
+int udev_enumerate_add_match_subsystem(struct udev_enumerate *scan,
+				       const char *subsystem)
+{
+	assert(scan == &fake_scan && !strcmp(subsystem, "input"));
+	return 0;
+}
+
+int udev_enumerate_scan_devices(struct udev_enumerate *scan)
 {
 	unsigned int i;
 
-	assert(context == &fake_input);
-	for (i = 0; i < DEVICE_COUNT; ++i)
-		if (devices[i].fd >= 0)
-			remove_device(i);
-}
+	if (scan_fails)
+		return -EIO;
+	for (i = 0; i < DEVICE_COUNT; ++i) {
+		struct udev_list_entry *entry;
 
-int libinput_resume(struct libinput *context)
-{
-	assert(context == &fake_input);
-	add_device(1);
-	return 0;
-}
-
-struct libinput *libinput_unref(struct libinput *context)
-{
-	libinput_suspend(context);
-	return NULL;
-}
-
-int libinput_dispatch(struct libinput *context)
-{
-	assert(context == &fake_input);
-	return 0;
-}
-
-int libinput_get_fd(struct libinput *context)
-{
-	assert(context == &fake_input);
-	return 23;
-}
-
-struct libinput_event *libinput_get_event(struct libinput *context)
-{
-	if (context->head == context->tail) {
-		context->head = 0;
-		context->tail = 0;
-		return NULL;
+		if (!devices[i].present)
+			continue;
+		entry = &scan->entries[scan->count++];
+		entry->index = i;
+		if (scan->count > 1)
+			entry[-1].next = entry;
 	}
-	return &context->events[context->head++];
+	return 0;
 }
 
-void libinput_event_destroy(struct libinput_event *event)
+struct udev_list_entry *
+udev_enumerate_get_list_entry(struct udev_enumerate *scan)
 {
-	(void)event;
+	return scan->count ? scan->entries : NULL;
 }
 
-struct libinput_device *libinput_event_get_device(struct libinput_event *event)
+struct udev_list_entry *udev_list_entry_get_next(struct udev_list_entry *entry)
 {
-	return event->device;
+	return entry->next;
 }
 
-enum libinput_event_type libinput_event_get_type(struct libinput_event *event)
+const char *udev_list_entry_get_name(struct udev_list_entry *entry)
 {
-	return event->type;
+	return devices[entry->index].path;
 }
 
-void *libinput_device_get_user_data(struct libinput_device *device)
+struct udev_device *udev_device_new_from_syspath(struct udev *context,
+						 const char *syspath)
 {
-	return device->data;
-}
+	unsigned int i;
 
-void libinput_device_set_user_data(struct libinput_device *device, void *data)
-{
-	device->data = data;
-}
-
-const char *libinput_device_get_name(struct libinput_device *device)
-{
-	return device->phys;
-}
-
-const char *libinput_device_get_sysname(struct libinput_device *device)
-{
-	return device->sysname;
-}
-
-struct libinput_event_keyboard *
-libinput_event_get_keyboard_event(struct libinput_event *event)
-{
-	return &event->keyboard;
-}
-
-uint32_t libinput_event_keyboard_get_key(struct libinput_event_keyboard *event)
-{
-	return event->code;
-}
-
-uint64_t
-libinput_event_keyboard_get_time_usec(struct libinput_event_keyboard *event)
-{
-	return event->time_usec;
-}
-
-enum libinput_key_state
-libinput_event_keyboard_get_key_state(struct libinput_event_keyboard *event)
-{
-	return event->state;
-}
-
-/* No pointer events are queued in these keyboard lifecycle scenarios. */
-struct libinput_event_pointer *
-libinput_event_get_pointer_event(struct libinput_event *event)
-{
-	(void)event;
-	assert(false);
+	assert(context->live);
+	for (i = 0; i < DEVICE_COUNT; ++i)
+		if (devices[i].present && !strcmp(devices[i].path, syspath))
+			return &devices[i].udev;
 	return NULL;
 }
 
-uint32_t libinput_event_pointer_get_button(struct libinput_event_pointer *event)
+struct udev_device *udev_device_unref(struct udev_device *device)
 {
-	(void)event;
+	(void)device;
+	return NULL;
+}
+
+const char *udev_device_get_devnode(struct udev_device *device)
+{
+	return devices[device->index].path;
+}
+
+const char *udev_device_get_sysname(struct udev_device *device)
+{
+	return strrchr(devices[device->index].path, '/') + 1;
+}
+
+const char *udev_device_get_action(struct udev_device *device)
+{
+	return device->action;
+}
+
+const char *udev_device_get_property_value(struct udev_device *device,
+					   const char *key)
+{
+	(void)device;
+	assert(!strcmp(key, "ID_SEAT"));
+	return NULL;
+}
+
+int libevdev_new_from_fd(int fd, struct libevdev **device)
+{
+	struct fake_device *fake = device_by_fd(fd);
+	unsigned int index = (unsigned int)(fake - devices);
+
+	memset(&fake->evdev, 0, sizeof(fake->evdev));
+	fake->evdev.index = index;
+	fake->evdev.live = true;
+	*device = &fake->evdev;
 	return 0;
 }
 
-enum libinput_button_state
-libinput_event_pointer_get_button_state(struct libinput_event_pointer *event)
+void libevdev_free(struct libevdev *device)
 {
-	(void)event;
-	return LIBINPUT_BUTTON_STATE_RELEASED;
+	assert(device->live);
+	device->live = false;
 }
 
-double libinput_event_pointer_get_dx_unaccelerated(
-	struct libinput_event_pointer *event)
+int libevdev_set_clock_id(struct libevdev *device, int clock_id)
 {
-	(void)event;
+	assert(device->live && clock_id == CLOCK_MONOTONIC);
 	return 0;
 }
 
-double libinput_event_pointer_get_dy_unaccelerated(
-	struct libinput_event_pointer *event)
+const char *libevdev_get_name(const struct libevdev *device)
 {
-	(void)event;
-	return 0;
+	return devices[device->index].phys;
 }
 
-int libinput_event_pointer_has_axis(struct libinput_event_pointer *event,
-				    enum libinput_pointer_axis axis)
+int libevdev_has_event_code(const struct libevdev *device, unsigned int type,
+			    unsigned int code)
 {
-	(void)event;
-	(void)axis;
-	return 0;
+	return devices[device->index].pointer &&
+	       ((type == EV_REL && (code == REL_X || code == REL_Y)) ||
+		(type == EV_KEY && code == BTN_LEFT));
 }
 
-double libinput_event_pointer_get_scroll_value_v120(
-	struct libinput_event_pointer *event, enum libinput_pointer_axis axis)
+int libevdev_next_event(struct libevdev *device, unsigned int flags,
+			struct input_event *event)
 {
-	(void)event;
-	(void)axis;
-	return 0;
+	struct queued_event *queued;
+	char ready[EVENT_COUNT];
+	ssize_t result;
+
+	assert(device->live);
+	/* Model library buffering that leaves the kernel fd no longer readable. */
+	do {
+		result = read(devices[device->index].pipe[0], ready,
+			      sizeof(ready));
+	} while (result > 0);
+	assert(result < 0 && errno == EAGAIN);
+	if (device->head == device->tail)
+		return -EAGAIN;
+	queued = &device->events[device->head++];
+	assert(flags == queued->flags);
+	*event = queued->event;
+	if (event->type == EV_KEY && event->code < KEY_CNT &&
+	    (event->value == 0 || event->value == 1))
+		device->pressed[event->code] = event->value != 0;
+	return queued->result;
+}
+
+int libevdev_get_event_value(const struct libevdev *device, unsigned int type,
+			     unsigned int code)
+{
+	assert(device->live && type == EV_KEY && code < KEY_CNT);
+	return device->pressed[code];
+}
+
+static void hotplug(unsigned int index, bool present)
+{
+	struct udev_device *notification;
+	char ready = 1;
+
+	assert(fake_monitor.tail < EVENT_COUNT);
+	devices[index].present = present;
+	notification = &fake_monitor.notifications[fake_monitor.tail++];
+	notification->index = index;
+	notification->action = present ? "add" : "remove";
+	assert(write(fake_monitor.pipe[1], &ready, 1) == 1);
+}
+
+static void raw_event(unsigned int index, unsigned int type, unsigned int code,
+		      int value, int result, unsigned int flags,
+		      uint64_t time_us)
+{
+	struct libevdev *device = &devices[index].evdev;
+	struct queued_event *queued;
+	char ready = 1;
+
+	assert(device->live);
+	if (device->head == device->tail)
+		device->head = device->tail = 0;
+	assert(device->tail < EVENT_COUNT);
+	queued = &device->events[device->tail++];
+	memset(queued, 0, sizeof(*queued));
+	queued->event.type = type;
+	queued->event.code = code;
+	queued->event.value = value;
+	queued->event.input_event_sec = time_us / 1000000U;
+	queued->event.input_event_usec = time_us % 1000000U;
+	queued->result = result;
+	queued->flags = flags;
+	assert(write(devices[index].pipe[1], &ready, 1) == 1);
+}
+
+static void input(unsigned int index, unsigned int type, unsigned int code,
+		  int value)
+{
+	raw_event(index, type, code, value, 0, 2, 0);
+}
+
+static void frame(unsigned int index)
+{
+	input(index, EV_SYN, SYN_REPORT, 0);
 }
 
 static struct fplinux_input_event next(struct fplinux_input_session *session,
@@ -352,83 +503,391 @@ static struct fplinux_input_event next(struct fplinux_input_session *session,
 	struct fplinux_input_event event;
 
 	assert(fplinux_input_session_next(session, &event));
-	assert(event.type == type);
-	assert(event.source == source);
+	assert(event.type == type && event.source == source);
 	assert(event.code == code && event.pressed == pressed);
 	assert(event.device_id != 0);
 	return event;
 }
 
-int main(void)
+static void empty(struct fplinux_input_session *session)
+{
+	struct fplinux_input_event event;
+	struct pollfd ready = { .fd = fplinux_input_session_get_fd(session),
+				.events = POLLIN };
+
+	assert(!fplinux_input_session_next(session, &event));
+	assert(poll(&ready, 1, 0) == 0);
+}
+
+static void open_session(struct fplinux_input_session *session,
+			 unsigned int mask)
+{
+	char error[128];
+	struct pollfd ready;
+
+	assert(fplinux_input_session_open(session, mask, error, sizeof(error)));
+	ready = (struct pollfd){ .fd = fplinux_input_session_get_fd(session),
+				 .events = POLLIN };
+	assert(ready.fd >= 0);
+	assert(poll(&ready, 1, 0) == 1);
+}
+
+static void closed(struct fplinux_input_session *session)
+{
+	struct fplinux_input_event event;
+	unsigned int i;
+
+	fplinux_input_session_close(session);
+	assert(!fake_udev.live);
+	assert(fplinux_input_session_get_fd(session) == -1);
+	assert(!fplinux_input_session_next(session, &event));
+	for (i = 0; i < DEVICE_COUNT; ++i)
+		assert(!devices[i].grabbed && devices[i].pipe[0] < 0 &&
+		       !devices[i].evdev.live);
+}
+
+static void lifecycle(void)
 {
 	struct fplinux_input_session session;
 	struct fplinux_input_event event;
 	uint64_t phone_id, keyboard_id, replacement_id;
 	char error[128];
 
-	assert(fplinux_input_session_open(&session, 3U, error, sizeof(error)));
-	assert(fplinux_input_session_get_fd(&session) == 23);
-	add_device(0);
-	add_device(1);
-	phone_id = next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED,
-			FPLINUX_INPUT_SOURCE_KEYPAD, 0, false)
+	devices[0].present = devices[1].present = true;
+	open_session(&session, 3U);
+	phone_id = next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 0, 0, false)
 			   .device_id;
-	keyboard_id = next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED,
-			   FPLINUX_INPUT_SOURCE_KEYBOARD, 0, false)
-			      .device_id;
+	keyboard_id =
+		next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 1, 0, false)
+			.device_id;
 	assert(phone_id != keyboard_id);
-	/* Identical Linux codes preserve their independently classified source. */
-	key(0, 183, true);
-	fake_input.events[fake_input.tail - 1].keyboard.time_usec = 1234999;
-	key(1, 183, true);
-	fake_input.events[fake_input.tail - 1].keyboard.time_usec = 923456;
-	event = next(&session, FPLINUX_INPUT_EVENT_KEY,
-		     FPLINUX_INPUT_SOURCE_KEYPAD, FPLINUX_KEY_SOFT_LEFT, true);
+	/* Literal F13 stays source-specific and preserves its monotonic timestamp. */
+	raw_event(0, EV_KEY, 183, 1, 0, 2, 1234999);
+	frame(0);
+	event = next(&session, FPLINUX_INPUT_EVENT_KEY, 0, 183, true);
 	assert(event.device_id == phone_id && event.time_ms == 1234);
-	event = next(&session, FPLINUX_INPUT_EVENT_KEY,
-		     FPLINUX_INPUT_SOURCE_KEYBOARD, 183, true);
+	empty(&session);
+	raw_event(1, EV_KEY, 183, 1, 0, 2, 923456);
+	frame(1);
+	event = next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 183, true);
 	assert(event.device_id == keyboard_id && event.time_ms == 923);
-	/* Closing an fd must not erase the identity of its queued release. */
-	remove_device(0);
-	assert(next(&session, FPLINUX_INPUT_EVENT_KEY,
-		    FPLINUX_INPUT_SOURCE_KEYPAD, 183, false)
+	empty(&session);
+	hotplug(0, false);
+	hotplug(4, true);
+	assert(next(&session, FPLINUX_INPUT_EVENT_KEY, 0, 183, false)
 		       .device_id == phone_id);
-	assert(next(&session, FPLINUX_INPUT_EVENT_DEVICE_REMOVED,
-		    FPLINUX_INPUT_SOURCE_KEYPAD, 0, false)
+	assert(next(&session, FPLINUX_INPUT_EVENT_DEVICE_REMOVED, 0, 0, false)
 		       .device_id == phone_id);
-	/* A node reused before its ADDED event is read remains distinguishable. */
-	add_device(0);
-	remove_device(0);
-	add_device(3);
-	phone_id = next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED,
-			FPLINUX_INPUT_SOURCE_KEYPAD, 0, false)
-			   .device_id;
-	assert(next(&session, FPLINUX_INPUT_EVENT_DEVICE_REMOVED,
-		    FPLINUX_INPUT_SOURCE_KEYPAD, 0, false)
-		       .device_id == phone_id);
-	replacement_id = next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED,
-			      FPLINUX_INPUT_SOURCE_KEYBOARD, 0, false)
-				 .device_id;
-	assert(replacement_id != phone_id);
-	remove_device(3);
-	next(&session, FPLINUX_INPUT_EVENT_DEVICE_REMOVED,
-	     FPLINUX_INPUT_SOURCE_KEYBOARD, 0, false);
-	/* Suspend drains the held keyboard before resume starts a new lifetime. */
+	replacement_id =
+		next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 1, 0, false)
+			.device_id;
+	assert(replacement_id != phone_id && replacement_id != keyboard_id);
+	hotplug(4, false);
+	next(&session, FPLINUX_INPUT_EVENT_DEVICE_REMOVED, 1, 0, false);
 	fplinux_input_session_suspend(&session);
-	assert(next(&session, FPLINUX_INPUT_EVENT_KEY,
-		    FPLINUX_INPUT_SOURCE_KEYBOARD, 183, false)
+	assert(!devices[1].grabbed && devices[1].pipe[0] < 0);
+	assert(next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 183, false)
 		       .device_id == keyboard_id);
-	assert(next(&session, FPLINUX_INPUT_EVENT_DEVICE_REMOVED,
-		    FPLINUX_INPUT_SOURCE_KEYBOARD, 0, false)
-		       .device_id == keyboard_id);
-	assert(!fplinux_input_session_next(&session, &event));
+	next(&session, FPLINUX_INPUT_EVENT_DEVICE_REMOVED, 1, 0, false);
+	empty(&session);
+	/* Resume scans current devices and ignores obsolete queued notifications. */
+	hotplug(2, true);
+	hotplug(2, false);
 	assert(fplinux_input_session_resume(&session, error, sizeof(error)));
-	assert(next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED,
-		    FPLINUX_INPUT_SOURCE_KEYBOARD, 0, false)
+	assert(next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 1, 0, false)
 		       .device_id != keyboard_id);
-	fplinux_input_session_close(&session);
-	assert(!fake_udev.live && !devices[1].grabbed);
+	empty(&session);
+	closed(&session);
+}
+
+static void classification(void)
+{
+	struct fplinux_input_session session;
+	unsigned int i;
+
+	for (i = 0; i < DEVICE_COUNT; ++i)
+		devices[i].present = i != 4;
+	open_session(&session, 7U);
+	next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 0, 0, false);
+	next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 1, 0, false);
+	next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 1, 0, false);
+	next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 2, 0, false);
+	assert(!devices[5].grabbed);
+	empty(&session);
+	input(2, EV_KEY, 183, 1);
+	frame(2);
+	next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 183, true);
+	input(2, EV_REL, REL_X, 2);
+	frame(2);
+	assert(next(&session, FPLINUX_INPUT_EVENT_MOTION, 1, 0, false).dx == 2);
+	empty(&session);
+	closed(&session);
+	open_session(&session, 3U);
+	next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 0, 0, false);
+	next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 1, 0, false);
+	next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 1, 0, false);
+	assert(!devices[3].grabbed);
+	empty(&session);
+	closed(&session);
+}
+
+static void modifiers_and_repeat(void)
+{
+	struct fplinux_input_session session;
+	uint64_t first, second;
+	struct pollfd ready;
+
+	devices[1].present = devices[2].present = true;
+	open_session(&session, 2U);
+	first = next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 1, 0, false)
+			.device_id;
+	second = next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 1, 0, false)
+			 .device_id;
+	input(1, EV_KEY, 42, 1);
+	input(1, EV_KEY, 42, 2);
+	input(1, EV_KEY, 29, 1);
+	frame(1);
+	assert(next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 42, true).device_id ==
+	       first);
+	ready = (struct pollfd){ .fd = fplinux_input_session_get_fd(&session),
+				 .events = POLLIN };
+	assert(poll(&ready, 1, 0) == 1);
+	next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 29, true);
+	empty(&session);
+	input(2, EV_KEY, 42, 1);
+	input(2, EV_KEY, 29, 1);
+	frame(2);
+	assert(next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 42, true).device_id ==
+	       second);
+	next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 29, true);
+	empty(&session);
+	hotplug(1, false);
+	assert(next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 29, false).device_id ==
+	       first);
+	assert(next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 42, false).device_id ==
+	       first);
+	next(&session, FPLINUX_INPUT_EVENT_DEVICE_REMOVED, 1, 0, false);
+	empty(&session);
+	input(2, EV_KEY, 42, 0);
+	input(2, EV_KEY, 29, 0);
+	frame(2);
+	assert(next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 42, false).device_id ==
+	       second);
+	assert(next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 29, false).device_id ==
+	       second);
+	empty(&session);
+	closed(&session);
+}
+
+static void keyboard_frames(void)
+{
+	struct fplinux_input_session session;
+	uint64_t first, second;
+
+	devices[1].present = devices[2].present = true;
+	open_session(&session, 2U);
+	first = next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 1, 0, false)
+			.device_id;
+	second = next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 1, 0, false)
+			 .device_id;
+	/* Partial frames stay attached to their device while another one reports. */
+	input(1, EV_KEY, 30, 1);
+	empty(&session);
+	input(2, EV_KEY, 48, 1);
+	frame(2);
+	assert(next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 48, true).device_id ==
+	       second);
+	empty(&session);
+	frame(1);
+	assert(next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 30, true).device_id ==
+	       first);
+	empty(&session);
+	input(1, EV_KEY, 30, 0);
+	input(1, EV_KEY, 30, 1);
+	frame(1);
+	next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 30, false);
+	next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 30, true);
+	empty(&session);
+	input(1, EV_KEY, 46, 1);
+	empty(&session);
+	input(2, EV_KEY, 48, 0);
+	frame(2);
+	assert(next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 48, false).device_id ==
+	       second);
+	empty(&session);
+	/* C is still held: there is no library delta for its uncommitted press. */
+	raw_event(1, EV_SYN, SYN_DROPPED, 0, 1, 2, 3000000);
+	raw_event(1, EV_KEY, 30, 0, 1, 1, 3000000);
+	raw_event(1, EV_SYN, SYN_REPORT, 0, 1, 1, 3000000);
+	raw_event(1, 0, 0, 0, -EAGAIN, 1, 0);
+	next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 30, false);
+	assert(next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 46, true).time_ms ==
+	       3000);
+	empty(&session);
+	/* A key that pressed and released inside the lost frame never reaches us. */
+	input(1, EV_KEY, 32, 1);
+	raw_event(1, EV_SYN, SYN_DROPPED, 0, 1, 2, 3001000);
+	raw_event(1, EV_KEY, 32, 0, 1, 1, 3001000);
+	raw_event(1, EV_SYN, SYN_REPORT, 0, 1, 1, 3001000);
+	raw_event(1, 0, 0, 0, -EAGAIN, 1, 0);
+	empty(&session);
+	fplinux_input_session_suspend(&session);
+	next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 46, false);
+	next(&session, FPLINUX_INPUT_EVENT_DEVICE_REMOVED, 1, 0, false);
+	next(&session, FPLINUX_INPUT_EVENT_DEVICE_REMOVED, 1, 0, false);
+	empty(&session);
+	closed(&session);
+}
+
+static void wheel(struct fplinux_input_session *session, int legacy, int high,
+		  bool has_high, int expected)
+{
+	if (legacy)
+		input(3, EV_REL, REL_WHEEL, legacy);
+	if (has_high)
+		input(3, EV_REL, REL_WHEEL_HI_RES, high);
+	frame(3);
+	if (expected)
+		assert(next(session, FPLINUX_INPUT_EVENT_WHEEL, 2, 0, false)
+			       .wheel_clicks == expected);
+	empty(session);
+}
+
+static void pointer_frames_and_wheel(void)
+{
+	struct fplinux_input_session session;
+	struct fplinux_input_event event;
+	uint64_t pointer_id;
+
+	devices[3].present = true;
+	open_session(&session, 4U);
+	pointer_id =
+		next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 2, 0, false)
+			.device_id;
+	input(3, EV_REL, REL_X, 2);
+	input(3, EV_REL, REL_X, 3);
+	input(3, EV_REL, REL_Y, -4);
+	empty(&session);
+	frame(3);
+	event = next(&session, FPLINUX_INPUT_EVENT_MOTION, 2, 0, false);
+	assert(event.dx == 5 && event.dy == -4 &&
+	       event.device_id == pointer_id);
+	empty(&session);
+	wheel(&session, 1, 0, false, 1);
+	wheel(&session, -2, 0, false, -2);
+	wheel(&session, 0, 30, true, 0);
+	wheel(&session, 0, 30, true, 0);
+	wheel(&session, 1, 60, true, 1);
+	wheel(&session, -1, -30, true, 0);
+	wheel(&session, -1, -90, true, -1);
+	wheel(&session, 0, 60, true, 0);
+	wheel(&session, -1, -120, true, 0);
+	wheel(&session, 0, -60, true, -1);
+	wheel(&session, 1, 0, true, 0);
+	input(3, EV_KEY, 272, 1);
+	frame(3);
+	next(&session, FPLINUX_INPUT_EVENT_BUTTON, 2, 272, true);
+	empty(&session);
+	hotplug(3, false);
+	assert(next(&session, FPLINUX_INPUT_EVENT_BUTTON, 2, 272, false)
+		       .device_id == pointer_id);
+	next(&session, FPLINUX_INPUT_EVENT_DEVICE_REMOVED, 2, 0, false);
+	empty(&session);
+	closed(&session);
+}
+
+static void synchronization(void)
+{
+	struct fplinux_input_session session;
+	struct fplinux_input_event event;
+
+	devices[2].present = true;
+	open_session(&session, 2U);
+	next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 1, 0, false);
+	input(2, EV_KEY, 42, 1);
+	input(2, EV_KEY, 272, 1);
+	frame(2);
+	next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 42, true);
+	next(&session, FPLINUX_INPUT_EVENT_BUTTON, 1, 272, true);
+	empty(&session);
+	input(2, EV_REL, REL_X, 999);
+	input(2, EV_REL, REL_WHEEL, 8);
+	empty(&session);
+	/* Library-generated deltas release held state and press a newly held Ctrl. */
+	raw_event(2, EV_SYN, SYN_DROPPED, 0, 1, 2, 0);
+	raw_event(2, EV_KEY, 42, 0, 1, 1, 2000000);
+	raw_event(2, EV_KEY, 272, 0, 1, 1, 0);
+	raw_event(2, EV_KEY, 29, 1, 1, 1, 2000000);
+	raw_event(2, EV_KEY, 273, 1, 1, 1, 0);
+	raw_event(2, EV_SYN, SYN_REPORT, 0, 1, 1, 2000000);
+	raw_event(2, 0, 0, 0, -EAGAIN, 1, 0);
+	input(2, EV_REL, REL_X, 4);
+	frame(2);
+	next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 29, true);
+	assert(next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 42, false).time_ms ==
+	       2000);
+	next(&session, FPLINUX_INPUT_EVENT_BUTTON, 1, 272, false);
+	next(&session, FPLINUX_INPUT_EVENT_BUTTON, 1, 273, true);
+	event = next(&session, FPLINUX_INPUT_EVENT_MOTION, 1, 0, false);
+	assert(event.dx == 4 && event.dy == 0);
+	empty(&session);
+	fplinux_input_session_suspend(&session);
+	next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 29, false);
+	next(&session, FPLINUX_INPUT_EVENT_BUTTON, 1, 273, false);
+	next(&session, FPLINUX_INPUT_EVENT_DEVICE_REMOVED, 1, 0, false);
+	empty(&session);
+	closed(&session);
+}
+
+static void grab_retry_and_failed_scan(void)
+{
+	struct fplinux_input_session session = { 0 };
+	struct fplinux_input_event event;
+	char error[128];
+
 	assert(fplinux_input_session_get_fd(&session) == -1);
 	assert(!fplinux_input_session_next(&session, &event));
+	assert(!fplinux_input_session_resume(&session, error, sizeof(error)));
+	assert(!strcmp(error, "input session is closed"));
+	fplinux_input_session_suspend(&session);
+	fplinux_input_session_close(&session);
+	devices[1].present = true;
+	devices[1].busy = 2;
+	open_session(&session, 2U);
+	assert(sleeps == 2 && devices[1].grabbed);
+	next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 1, 0, false);
+	closed(&session);
+	scan_fails = true;
+	assert(!fplinux_input_session_open(&session, 2U, error, sizeof(error)));
+	assert(!strcmp(error, "cannot scan input devices"));
+	closed(&session);
+	scan_fails = false;
+	devices[1].busy = 20;
+	assert(fplinux_input_session_open(&session, 2U, error, sizeof(error)));
+	assert(sleeps == 21 && !devices[1].grabbed);
+	empty(&session);
+	closed(&session);
+}
+
+int main(int argc, char **argv)
+{
+	assert(argc == 2);
+	initialize();
+	if (!strcmp(argv[1], "lifecycle"))
+		lifecycle();
+	else if (!strcmp(argv[1], "classification"))
+		classification();
+	else if (!strcmp(argv[1], "modifiers"))
+		modifiers_and_repeat();
+	else if (!strcmp(argv[1], "frames"))
+		keyboard_frames();
+	else if (!strcmp(argv[1], "pointer"))
+		pointer_frames_and_wheel();
+	else if (!strcmp(argv[1], "sync"))
+		synchronization();
+	else if (!strcmp(argv[1], "retry"))
+		grab_retry_and_failed_scan();
+	else
+		assert(false);
 	return 0;
 }

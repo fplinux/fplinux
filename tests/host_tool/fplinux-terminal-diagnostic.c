@@ -88,7 +88,7 @@ static void return_to_shell(void)
 	assert(strstr(hint, "Right soft: return to terminal"));
 	duplicate = diagnostic.fds[0];
 	assert(fcntl(duplicate, F_GETFD) & FD_CLOEXEC);
-	/* Model libinput closing its original descriptor during suspend. */
+	/* Model the session closing its original descriptor during suspend. */
 	close(keypad[0]);
 	key(keypad[1], KEY_F14, 0);
 	dispatch(&diagnostic, 7);
@@ -171,7 +171,7 @@ static void other_vt_and_close(void)
 	dispatch(&diagnostic, 9);
 	assert(active_vt == 3);
 
-	/* An external VT return closes the watch before libinput resumes. */
+	/* An external VT return closes the watch before the session resumes. */
 	watched = diagnostic.fds[0];
 	fplinux_terminal_diagnostic_close(&diagnostic);
 	assert(fcntl(watched, F_GETFD) == -1 && errno == EBADF);
