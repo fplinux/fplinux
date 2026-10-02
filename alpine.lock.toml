@@ -21,12 +21,9 @@ packages = [
 ]
 
 [runtime.additions]
-fplinux-apk-tools = ["mbedtls3-3.6.7-r0.apk"]
 
-fplinux-uclient = [
-  "ca-certificates-bundle-20260909-r0.apk",
-  "mbedtls3-3.6.7-r0.apk",
-]
+
+fplinux-uclient = ["ca-certificates-bundle-20260909-r0.apk"]
 
 fplinux-terminal = ["ncurses-terminfo-base-6.6_p20260516-r0.apk"]
 

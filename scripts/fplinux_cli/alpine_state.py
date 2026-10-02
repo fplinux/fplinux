@@ -114,6 +114,8 @@ COMMON_PACKAGES = (
     "fplinux-libudev",
 )
 LOCAL_BUILD_DEPENDENCIES = {
+    "fplinux-apk-tools": ("fplinux-mbedtls-static-dev",),
+    "fplinux-uclient": ("fplinux-mbedtls-static-dev",),
     "fplinux-audio": ("fplinux-alsa-lib",),
     "fplinux-bash": ("fplinux-ncurses", "fplinux-readline"),
     "fplinux-bluez": ("fplinux-bluez-glib", "fplinux-ncurses", "fplinux-readline"),

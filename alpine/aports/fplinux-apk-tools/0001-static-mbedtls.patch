@@ -1,0 +1,7 @@
+--- a/meson.build
++++ b/meson.build
+@@ -30,3 +30,3 @@
+ elif get_option('crypto_backend') == 'mbedtls'
+-	crypto_dep = [ dependency('mbedtls'), dependency('mbedcrypto') ]
++	crypto_dep = [ dependency('fplinux-mbedtls', static: true), dependency('fplinux-mbedcrypto', static: true) ]
+ endif

@@ -1,0 +1,67 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-mbedtls-static-dev
+pkgver=3.6.7
+pkgrel=0
+pkgdesc="Static Mbed TLS development files for FPLinux consumers"
+url="https://www.trustedfirmware.org/projects/mbed-tls/"
+arch="armv7"
+license="Apache-2.0 OR GPL-2.0-or-later"
+makedepends_build="clang22 lld22 llvm22 cmake python3 samurai"
+makedepends_host="musl-dev"
+options="!check"
+source="https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-$pkgver/mbedtls-$pkgver.tar.bz2"
+builddir="$srcdir/mbedtls-$pkgver"
+
+prepare() {
+	default_prepare
+	python3 scripts/config.py set MBEDTLS_THREADING_C
+	python3 scripts/config.py set MBEDTLS_THREADING_PTHREAD
+}
+
+build() {
+	: "${CC:?missing target CC}" \
+		"${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
+	cmake -B output -G Ninja \
+		-DCMAKE_BUILD_TYPE=MinSizeRel \
+		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DCMAKE_INSTALL_LIBDIR=lib/fplinux-mbedtls-static \
+		-DCMAKE_INSTALL_INCLUDEDIR=include/fplinux-mbedtls-static \
+		-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=armv7 \
+		-DCMAKE_C_COMPILER="$CC" -DCMAKE_C_COMPILER_TARGET="$CHOST" \
+		-DCMAKE_SYSROOT="$CBUILDROOT" \
+		-DCMAKE_C_FLAGS="$CPPFLAGS $CFLAGS" -DCMAKE_C_FLAGS_MINSIZEREL= \
+		-DCMAKE_AR=/usr/lib/llvm22/bin/llvm-ar \
+		-DCMAKE_RANLIB=/usr/lib/llvm22/bin/llvm-ranlib \
+		-DCMAKE_C_COMPILER_AR=/usr/lib/llvm22/bin/llvm-ar \
+		-DCMAKE_C_COMPILER_RANLIB=/usr/lib/llvm22/bin/llvm-ranlib \
+		-DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+		-DCMAKE_FIND_ROOT_PATH="$CBUILDROOT" \
+		-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+		-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+		-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+		-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
+		-DUSE_STATIC_MBEDTLS_LIBRARY=ON -DUSE_SHARED_MBEDTLS_LIBRARY=OFF \
+		-DENABLE_PROGRAMS=OFF -DENABLE_TESTING=OFF -DGEN_FILES=OFF
+	cmake --build output --parallel "${JOBS:-1}"
+}
+
+package() {
+	DESTDIR="$pkgdir" cmake --install output
+	local name metadata
+	mkdir -p "$pkgdir/usr/lib/pkgconfig"
+	for name in mbedtls mbedx509 mbedcrypto; do
+		metadata="$pkgdir/usr/lib/fplinux-mbedtls-static/pkgconfig/$name.pc"
+		sed -e 's/Requires.private: mbedcrypto mbedx509/Requires.private: fplinux-mbedcrypto fplinux-mbedx509/' \
+			-e 's/Requires.private: mbedcrypto$/Requires.private: fplinux-mbedcrypto/' \
+			"$metadata" >"$pkgdir/usr/lib/pkgconfig/fplinux-$name.pc"
+	done
+	printf '\nLibs.private: -leverest -lp256m -pthread\n' \
+		>>"$pkgdir/usr/lib/pkgconfig/fplinux-mbedcrypto.pc"
+	rm -r "$pkgdir/usr/lib/fplinux-mbedtls-static/pkgconfig" \
+		"$pkgdir/usr/lib/fplinux-mbedtls-static/cmake"
+	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
+
+sha512sums="
+d37e23e804753a7fa51aeb901b45c7255e9618b987ffc680af49760d2a5b5d38998d58ecb29a68ecdf29f49e37b5b681b3046fb775426115f1365cfefae9e273  mbedtls-3.6.7.tar.bz2
+"
