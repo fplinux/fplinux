@@ -2,13 +2,13 @@
 pkgname=fplinux-tyrquake
 pkgver=0.71
 pkgrel=0
-pkgdesc="TyrQuake native DRM/libinput port for FPLinux"
+pkgdesc="TyrQuake native DRM/evdev port for FPLinux"
 url="https://disenchant.net/tyrquake/"
 arch="armv7"
 license="GPL-2.0-or-later AND MIT-0 AND CC0-1.0 AND MIT"
 depends="fplinux-base fplinux-input"
 makedepends_build="clang22 lld22 make patch pkgconf llvm22"
-makedepends_host="musl-dev linux-headers gcc libinput-dev fplinux-libdrm-dev"
+makedepends_host="musl-dev linux-headers gcc libevdev-dev eudev-dev fplinux-libdrm-dev"
 options="!check"
 source="
 	tyrquake-$pkgver.tar.gz::https://disenchant.net/files/engine/tyrquake-$pkgver.tar.gz
@@ -56,7 +56,7 @@ build() {
 	make -j"${JOBS:-1}" \
 		CC="$CC" \
 		STRIP="$CHOST-strip" \
-		CL_CPPFLAGS="$CPPFLAGS $(pkg-config --cflags libdrm)" \
+		CL_CPPFLAGS="$CPPFLAGS $(pkg-config --cflags libdrm libevdev)" \
 		CFLAGS="$CFLAGS -std=gnu99 -Wall -Wno-trigraphs -Wwrite-strings -DFPLINUX_DEFAULT_HEAP_MB=32 -DFPLINUX_NO_STDIN=1" \
 		COMMON_LFLAGS="$LDFLAGS" \
 		TARGET_OS=UNIX \
@@ -84,7 +84,7 @@ package() {
 
 sha512sums="
 ecceeecb43866c10c0669b4362ce2eda7a790c502764b3d644566e7637ffbde0548676c9dcea07963db0d91d83c248e3497603c0a3a2e1a12a1418a82c07179a  tyrquake-0.71.tar.gz
-90ae50c5755a552b2b2c8508059172f5625e25f00fffd9472dc37d3457065ae8e0d977100046a15e22dd1b2521d2b97665ca7b78bfde19e2c60ae6f2c77b309c  0001-FPLinux-add-native-runtime-support.patch
+0d89b932b42a8c96c2db7f8d657f4a4d9070460acd9950093e4f7fe93f1fddd76979c80a505b169235136b35bff22bf44d99e2ffeb24ad6d7ba6c03d8539a37c  0001-FPLinux-add-native-runtime-support.patch
 e705f48e6e8acafafd3da6ebbe93c43b8ff0793bc8e698527ccb204ed47ae089ab4fdccee67e1a0a46bee9f08a78f0f6f1d75ae88cf681f7fd964b3c2bfe93ce  fplinux-quake.c
 618cd0daae7a435962019fd4fb497e0ddf1fa0562ee375d4e8a05c30c726634630d953339565d74f29c175c0dd010b332e5e13a22f6c3a6ac072781d9ab76f3a  fplinux-quake-internal.h
 24d96f52eeb3adb9b37e34967199a0efea630af580782fe2f29000862b678d5ae96b4516e291b61ca70a8d9242af43fc720d801e158c7933e957cda0aaf5afdd  fplinux-drm-session.c
@@ -92,9 +92,9 @@ e705f48e6e8acafafd3da6ebbe93c43b8ff0793bc8e698527ccb204ed47ae089ab4fdccee67e1a0a
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
 defa0078d5b788c6180813f46b42042fd401555cce70fc7ae40550b7c27b65a04972678b5beb8c65e41dbcfe36ba6b926154d94c2700e345bb8d3d2ba251e4ef  fplinux-input-device.h
-6b41d15586239826f8fabfee31b9c9cc4e4816e88e8450002977bc1ad25ec60cb32d668c32a5684db8ac3f678a2daadf7e6ea91e55a251f63ef77fd8438f6d89  fplinux-input-session.c
-ccd360c3ec65140e33fedf1326a3fc3c66744103ec66f9c1eaf4e5a35d0131dfaeb3635fa931083fb55cbc2905a1d78cd0ff3cc2dfee659e7f0e259369f07192  fplinux-input-session.h
+8157caf7642468c98be9d4d03aa4a24cf360714015caa4365f037d10c1528a4e757d614a818e0b3a0a20c48f9b0063f9b2f8e331334af9127a670a130ded40da  fplinux-input-session.c
+2720eb45e6d403009c72ff8025ac28adde8320f4005917afc05e24bd0bcaffb2a90fc23f7213a0c9c9a9af7d7a3f6dcad4f4e44cf6f979a0157bae6c98117fc0  fplinux-input-session.h
 0a6d41b98223953b0b890be3041fba31e7878e6752094ed439b1e1e7e9240b2c7bf175ae671d05485ee25fa9ae74e45ddc63e9592768bd5d19e6e4ae6765a978  fplinux-keypad.h
-3579485091b755420be11e15fc9e1f0c55ee55867cb3d42bc809d84d081e254873ad1369f8efc184cbe83d0374650118c32ba8976820f5a280a336a66ee544a3  in_fplinux.c
+bf69db214f29b09f620ce761793bb4f5ed2e0032305c0e0964562aa9ae784890553e68f88afb2e7406a4d4f69b192c01e5796eb068e70c2a15ec07d9267e0b0e  in_fplinux.c
 d8f01d4fbd5b3ccbf222f0105c0db198d33bf98d373741ea92c5c8d59195d34d05eb8975c96840f7f20cbb3e23a696169799a4524ed05a20a9b0d41d78b1c8d3  vid_fplinux.c
 "

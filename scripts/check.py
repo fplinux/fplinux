@@ -487,7 +487,7 @@ def userspace_c_include_flags(source: str) -> list[str]:
     if path.parts[:3] == (*APORT_ROOT, "fplinux-bluetooth"):
         flags.extend(pkg_config_cflags("dbus-1"))
     if source == "lib/fplinux/fplinux-input-session.c":
-        flags.extend(pkg_config_cflags("libinput"))
+        flags.extend(pkg_config_cflags("libevdev"))
     shared = alpine_state.SHARED_APORT_SOURCES.get(path.parent.name, ())
     if source == "lib/fplinux/fplinux-drm-session.c" or (
         "include/fplinux/fplinux-drm-session.h" in shared

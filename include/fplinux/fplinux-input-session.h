@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Exclusive libinput session over keyboards, pointers and the phone keypad. */
+/* Exclusive evdev session over keyboards, pointers and the phone keypad. */
 
 #ifndef FPLINUX_INPUT_SESSION_H
 #define FPLINUX_INPUT_SESSION_H
@@ -7,14 +7,15 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <linux/input.h>
 
 #define FPLINUX_INPUT_SESSION_DEVICE_COUNT 32U
 #define FPLINUX_INPUT_SESSION_PATH_BYTES 32U
 #define FPLINUX_INPUT_SESSION_NAME_BYTES 128U
 
-struct libinput;
-struct libinput_device;
+struct libevdev;
 struct udev;
+struct udev_monitor;
 
 enum fplinux_input_source {
 	FPLINUX_INPUT_SOURCE_KEYPAD,
@@ -60,12 +61,36 @@ struct fplinux_input_session_device {
 	int fd;
 	enum fplinux_input_source source;
 	uint64_t id;
-	struct libinput_device *device;
+	struct libevdev *device;
+	char name[FPLINUX_INPUT_SESSION_NAME_BYTES];
+	unsigned char pressed[(KEY_CNT + 7U) / 8U];
+	bool added;
+	bool removing;
+	bool syncing;
+	bool sync_pending;
+	unsigned int sync_code;
+	uint64_t sync_time_ms;
+	struct input_event *keys;
+	size_t key_count;
+	size_t key_next;
+	size_t key_capacity;
+	bool frame_ready;
+	bool has_pointer;
+	bool high_resolution_wheel;
+	bool motion_pending;
+	double dx;
+	double dy;
+	int64_t wheel_v120;
+	int64_t wheel_legacy;
+	int wheel_pending;
 };
 
 struct fplinux_input_session {
 	struct udev *udev;
-	struct libinput *libinput;
+	struct udev_monitor *monitor;
+	int epoll_fd;
+	int wake_fd;
+	int active_device;
 	unsigned int accepted_sources;
 	uint64_t next_device_id;
 	bool suspended;

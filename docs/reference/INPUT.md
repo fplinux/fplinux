@@ -29,7 +29,7 @@ never identifies a phone action. Holding the phone power key for five seconds
 requests power-off even while an application grabs the keypad.
 
 Applications open devices through the shared `fplinux-input-session` component
-in `lib/fplinux`. It uses libinput over `fplinux-libudev` and classifies each
+in `lib/fplinux`. It uses libevdev over `fplinux-libudev` and classifies each
 device by its keypad `phys` string and capabilities, never by its bus:
 
 | Source   | Device                                                                |
@@ -43,8 +43,9 @@ as a keyboard if it reports `Enter`. An application chooses the sources it
 accepts; accepted devices are grabbed for the life of its session, so their
 keys do not reach the local console. Devices that connect later are added and
 devices that disconnect are removed, with their pressed keys released first.
-The `fplinux-mdevd` service provides these hotplug notifications; it only
-rebroadcasts kernel device events and leaves `/dev` to devtmpfs. The shared input stack does not deliver kernel autorepeat; consumers such as
+Hotplug notifications come directly from kernel device events; devtmpfs owns
+the device nodes under `/dev`. The shared input stack does not deliver kernel
+autorepeat; consumers such as
 the terminal generate their own repeat behavior. A suspended graphical session
 releases its input grabs and clears pressed-key state before resuming.
 
@@ -65,5 +66,5 @@ Alt+Shift switches between the layouts. XKB allows four layouts, so at most
 three can be registered beside US; with more, or with a registration name other
 than lowercase letters, digits and `_`, the application refuses to start and
 names the problem. The [local terminal](../features/LOCAL_CONSOLE.md) uses these
-installed layouts for physical-keyboard text through the shared libxkbcommon
+installed layouts for physical-keyboard text through libxkbcommon
 library.

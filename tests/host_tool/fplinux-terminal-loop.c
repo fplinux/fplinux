@@ -18,7 +18,7 @@
  * The main loop, renderer and libtsm are real. Device sessions and the shell
  * process are replaced by an in-memory display, scheduled keypad events and a
  * socket peer. A virtual poll clock makes a delayed shell reply deterministic;
- * this does not exercise a kernel PTY, libinput or a DRM device.
+ * this does not exercise a kernel PTY, evdev devices or a DRM device.
  */
 struct scheduled_key {
 	uint64_t time_ms;
