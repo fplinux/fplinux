@@ -28,8 +28,8 @@ Target-neutral host and runtime tools and their contracts belong in
 - Rebuild an upstream component in its own `fplinux-` aport only when the
   locked Alpine build drags a runtime closure the RAM root filesystem cannot
   afford. Install only the runtime files its consumer loads and drop the
-  replaced Alpine artifacts from `alpine.lock.toml`; `fplinux-libical` and
-  `fplinux-glib` replace `libical` and `glib` for the BlueZ daemons this way,
+  replaced Alpine artifacts from `alpine.lock.toml`; `fplinux-bluez-glib` provides
+  the private GLib runtime for the BlueZ daemons this way,
   and `fplinux-apk-tools` replaces the minirootfs `apk-tools` together with its
   OpenSSL libraries.
 - Add a hardware-specific package only when its public interface is genuinely

@@ -1,0 +1,114 @@
+Build the Bluetooth object-push client and server without phonebook profiles.
+
+--- a/Makefile.obexd
++++ b/Makefile.obexd
+@@ -30,36 +30,8 @@
+ obexd_builtin_modules += bluetooth
+ obexd_builtin_sources += obexd/plugins/bluetooth.c
+
+-if EXPERIMENTAL
+-obexd_builtin_modules += pcsuite
+-obexd_builtin_sources += obexd/plugins/pcsuite.c
+-endif
+-
+ obexd_builtin_modules += opp
+ obexd_builtin_sources += obexd/plugins/opp.c
+-
+-obexd_builtin_modules += ftp
+-obexd_builtin_sources += obexd/plugins/ftp.c obexd/plugins/ftp.h
+-
+-obexd_builtin_modules += irmc
+-obexd_builtin_sources += obexd/plugins/irmc.c
+-
+-obexd_builtin_modules += pbap
+-obexd_builtin_sources += obexd/plugins/pbap.c \
+-				obexd/plugins/vcard.h obexd/plugins/vcard.c \
+-				obexd/plugins/phonebook.h \
+-				obexd/plugins/phonebook-@PLUGIN_PHONEBOOK@.c
+-EXTRA_DIST += obexd/plugins/phonebook-dummy.c obexd/plugins/phonebook-ebook.c \
+-				obexd/plugins/phonebook-tracker.c
+-
+-obexd_builtin_modules += mas
+-obexd_builtin_sources += obexd/plugins/mas.c obexd/src/map_ap.h \
+-				obexd/plugins/messages.h \
+-				obexd/plugins/messages-dummy.c
+-
+-obexd_builtin_modules += mns
+-obexd_builtin_sources += obexd/client/mns.c obexd/src/map_ap.h \
+-				obexd/client/map-event.h
+
+ pkglibexec_PROGRAMS += obexd/src/obexd
+
+@@ -78,23 +50,14 @@
+ 			obexd/client/manager.h obexd/client/manager.c \
+ 			obexd/client/session.h obexd/client/session.c \
+ 			obexd/client/bluetooth.h obexd/client/bluetooth.c \
+-			obexd/client/sync.h obexd/client/sync.c \
+-			obexd/client/pbap.h obexd/client/pbap.c \
+-			obexd/client/ftp.h obexd/client/ftp.c \
+ 			obexd/client/opp.h obexd/client/opp.c \
+-			obexd/client/map.h obexd/client/map.c \
+-			obexd/client/bip.h obexd/client/bip.c \
+-			obexd/client/bip-common.h obexd/client/bip-common.c \
+-			obexd/client/map-event.h obexd/client/map-event.c \
+ 			obexd/client/transfer.h obexd/client/transfer.c \
+ 			obexd/client/transport.h obexd/client/transport.c \
+-			obexd/client/driver.h obexd/client/driver.c \
+-			obexd/src/map_ap.h
++			obexd/client/driver.h obexd/client/driver.c
+ obexd_src_obexd_LDADD = lib/libbluetooth-internal.la \
+ 			gdbus/libgdbus-internal.la \
+ 			src/libshared-glib.la \
+-			$(ICAL_LIBS) $(DBUS_LIBS) $(LIBEBOOK_LIBS) \
+-			$(LIBEDATASERVER_LIBS) $(GLIB_LIBS) -ldl
++			$(DBUS_LIBS) $(GLIB_LIBS) -ldl
+
+ if EXTERNAL_PLUGINS
+ obexd_src_obexd_LDFLAGS = $(AM_LDFLAGS) -Wl,--export-dynamic
+@@ -103,7 +66,7 @@
+ endif
+
+ obexd_src_obexd_CPPFLAGS = $(AM_CPPFLAGS) $(GLIB_CFLAGS) $(DBUS_CFLAGS) \
+-				$(ICAL_CFLAGS) -DOBEX_PLUGIN_BUILTIN \
++				-DOBEX_PLUGIN_BUILTIN \
+ 				-DPLUGINDIR=\""$(obex_plugindir)"\" \
+ 				-D_FILE_OFFSET_BITS=64 \
+ 				-I$(builddir)/obexd/src
+--- a/obexd/client/manager.c
++++ b/obexd/client/manager.c
+@@ -28,11 +28,6 @@
+ #include "session.h"
+ #include "bluetooth.h"
+ #include "opp.h"
+-#include "ftp.h"
+-#include "pbap.h"
+-#include "sync.h"
+-#include "map.h"
+-#include "bip.h"
+ #include "manager.h"
+
+ #define CLIENT_INTERFACE	"org.bluez.obex.Client1"
+@@ -255,11 +250,6 @@
+ } modules[] = {
+ 	{ "bluetooth", bluetooth_init, bluetooth_exit },
+ 	{ "opp", opp_init, opp_exit },
+-	{ "ftp", ftp_init, ftp_exit },
+-	{ "pbap", pbap_init, pbap_exit },
+-	{ "sync", sync_init, sync_exit },
+-	{ "map", map_init, map_exit },
+-	{ "bip", bip_init, bip_exit },
+ 	{ }
+ };
+
+--- a/configure.ac
++++ b/configure.ac
+@@ -305,9 +305,6 @@
+
+ AC_ARG_ENABLE(obex, AS_HELP_STRING([--disable-obex],
+ 		[disable OBEX profile support]), [enable_obex=${enableval}])
+-if (test "${enable_obex}" != "no"); then
+-	PKG_CHECK_MODULES(ICAL, libical)
+-fi
+ AM_CONDITIONAL(OBEX, test "${enable_obex}" != "no")
+
+ AC_ARG_ENABLE(btpclient, AS_HELP_STRING([--enable-btpclient],

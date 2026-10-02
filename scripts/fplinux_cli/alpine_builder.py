@@ -861,11 +861,15 @@ def _verify_alpine_rootfs(  # noqa: PLR0913 -- verify each independently selecte
         require_file(root / path.removeprefix("/"))
         _require_apk_owner(root, path, package)
     if "fplinux-bluetooth" in packages:
-        # obexd loads its vCard parser and both BlueZ daemons load GLib through
-        # these sonames; the project builds without ICU, GIO and GObject must
-        # own them rather than the Alpine libical and glib closures.
-        _require_apk_owner(root, "/usr/lib/libicalvcal.so.3", "fplinux-libical")
-        _require_apk_owner(root, "/usr/lib/libglib-2.0.so.0", "fplinux-glib")
+        for path in (
+            "/usr/lib/bluetooth/bluetoothd",
+            "/usr/lib/bluetooth/obexd",
+            "/usr/bin/bluetoothctl",
+            "/usr/share/dbus-1/system.d/bluetooth.conf",
+            "/usr/share/dbus-1/system.d/obex.conf",
+        ):
+            _require_apk_owner(root, path, "fplinux-bluez")
+        _require_apk_owner(root, "/usr/lib/libfplinux-bluez-glib-2.0.so.0", "fplinux-bluez-glib")
     if "fplinux-apk-tools" in packages:
         # The Mbed TLS package manager replaces the minirootfs apk-tools, and
         # the OpenSSL closure that only apk-tools needed must not remain.
