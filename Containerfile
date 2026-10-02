@@ -35,6 +35,7 @@ RUN set -eux; \
         bzip2=1.0.8-r6 \
         ca-certificates=20260909-r0 \
         ccache=4.13.6-r0 \
+        chrpath=0.18-r0 \
         cpio=2.15-r0 \
         curl=8.22.0-r0 \
         diffutils=3.12-r0 \
@@ -56,6 +57,7 @@ RUN set -eux; \
         pkgconf=2.5.1-r0 \
         rsync=3.5.0-r0 \
         sed=4.9-r2 \
+        squashfs-tools=4.7.5-r0 \
         tar=1.35-r5 \
         unzip=6.0-r16 \
         u-boot-tools=2026.04-r1 \
@@ -81,7 +83,8 @@ RUN set -eux; \
         build-base=0.5-r4 \
         clang22=22.1.3-r2 \
         linux-headers=7.0.0-r1 \
-        lld22=22.1.3-r0; \
+        lld22=22.1.3-r0 \
+        llvm22=22.1.3-r0; \
     adduser -D -u 1000 builder; \
     addgroup builder abuild
 
@@ -99,9 +102,10 @@ RUN set -eux; \
         eudev-dev=3.2.14-r6 \
         flex=2.6.4-r8 \
         libffi-dev=3.5.2-r1 \
+        libevdev-dev=1.13.6-r0 \
         libusb-dev=1.0.30-r0 \
         ncurses-dev=6.6_p20260516-r0 \
-        openssl-dev=3.5.8-r0 \
+        openssl-dev=3.5.9-r0 \
         swig=4.4.1-r1 \
         xz-dev=5.8.4-r0 \
         zlib-dev=1.3.2-r0
