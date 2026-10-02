@@ -292,8 +292,8 @@ packaging or inspecting a session:
 ./fplinux check kernel --build-type debug
 ```
 
-The UMS9117 kernel and embedded initramfs use XZ compression. The unpacked
-userspace package selection is the same for both build types.
+The UMS9117 kernel and embedded initramfs use XZ compression. Both build types
+use the same userspace packages.
 
 Each target, profile and build type has its own current bundle. Selecting one
 does not replace another. Host debug files are separate from the phone payload;
@@ -304,7 +304,8 @@ hardware qualification.
 
 FPLinux has two global profiles, declared once under `profiles/`:
 
-- `default`: the system root is in RAM. Omitting `--profile` and explicitly
+- `default`: the system root is a writable RAM OverlayFS over a read-only
+  XZ-compressed SquashFS. Omitting `--profile` and explicitly
   selecting `--profile default` use the same build and runtime identity.
   zram uses ZSTD compression.
 - `microsd-uboot`: the USB loader starts U-Boot in RAM, then Linux uses the
@@ -550,7 +551,8 @@ Measure the current verified bundle without building or connecting a phone:
 Save `before.json` before rebuilding and `after.json` after rebuilding the
 context being compared. `--json` produces a machine-readable report. The
 measurement separates boot artifacts, kernel zImage, compressed embedded
-initramfs, unpacked root filesystem, optional APK archives and host debug files.
+initramfs, compressed RAM backing, unpacked root filesystem, optional APK
+archives and host debug files.
 These layers overlap; adding them does not produce a meaningful total.
 
 Package sizes count their owned regular-file and symlink payload, excluding

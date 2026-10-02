@@ -172,6 +172,7 @@ class BuilderPublicationTests(unittest.TestCase):
         self.rootfs_output = self.work / "rootfs"
         self.rootfs_recipe = "d" * 64
         self.rootfs = self.write("rootfs.cpio", b"logical composition\n", root=self.rootfs_output)
+        self.initramfs = self.write("initramfs.cpio", b"boot archive\n", root=self.rootfs_output)
         self.bundle_apks = {
             "fplinux-base-ui": self.write(
                 "packages/fplinux-base-ui-1-r0.apk",
@@ -398,6 +399,8 @@ class BuilderPublicationTests(unittest.TestCase):
             (published / "apks/fplinux-demo-ui.apk").read_bytes(),
             b"target apk\n",
         )
+        self.assertEqual((published / "debug/rootfs.cpio").read_bytes(), b"logical composition\n")
+        self.assertEqual((published / "debug/initramfs.cpio").read_bytes(), b"boot archive\n")
         self.assertEqual(
             manifest["files"]["debug/rootfs.cpio"]["size"],
             self.rootfs.stat().st_size,
@@ -519,9 +522,11 @@ class BuilderPublicationTests(unittest.TestCase):
             "wait_seconds": 10,
         }
 
+        self.initramfs.unlink()
         published = self.publish()
 
-        self.assertEqual((published / "debug/rootfs.cpio").read_bytes(), self.rootfs.read_bytes())
+        self.assertFalse((published / "debug/initramfs.cpio").exists())
+        self.assertEqual((published / "debug/rootfs.cpio").read_bytes(), b"logical composition\n")
         manifest = json.loads((published / BUILD_MANIFEST_NAME).read_text())
         self.assertIn("debug/rootfs.cpio", manifest["files"])
 

@@ -150,6 +150,7 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
                         ),
                         firmware_inputs=firmware,
                         display_brightness=target_config.get("display_brightness"),
+                        root_kind=target_config["linux"]["root"]["kind"],
                     )
                 )
     except OSError, ValueError, SystemExit:

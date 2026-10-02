@@ -194,7 +194,10 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
         initramfs_input: Path | None = None
         initramfs_receipt: dict[str, str] | None = None
         if root_contract["kind"] == "initramfs":
-            initramfs_record = kbuild_state.initramfs_identity(rootfs)
+            kernel_rootfs = inputs_build.require_file(
+                rootfs.with_name(alpine_state.INITRAMFS_NAME)
+            )
+            initramfs_record = kbuild_state.initramfs_identity(kernel_rootfs)
             initramfs_input = kbuild_state.initramfs_input_path(work, initramfs_record)
             initramfs_receipt = alpine_state.trusted_receipt_identity(rootfs_output, rootfs_recipe)
             device_root: dict[str, object] = {
@@ -296,7 +299,7 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
             kbuild_state.prepare_output(work, output)
             linux_state.write_profile_root(output, target_config)
             if initramfs_record is not None:
-                kbuild_state.materialize_initramfs_input(work, rootfs, plan)
+                kbuild_state.materialize_initramfs_input(work, kernel_rootfs, plan)
             shutil.copyfile(defconfig, output / ".config")
             ccache_environment = {
                 "CCACHE_DIR": str(inputs_build.CACHE / "ccache"),

@@ -74,6 +74,7 @@ class AlpineStateTests(unittest.TestCase):
         self._write("scripts/fplinux_cli/build_env.py", b"build environment\n")
         self._write("scripts/fplinux_cli/firmware_inputs.py", b"firmware inputs\n")
         self.shared_source = self._write("alpine/shared/shared.c", b"int shared;\n")
+        self.bootstrap = self._write("common/ramroot-init.sh", b"#!/bin/sh\nexit 0\n")
 
     def _write(self, relative: str, contents: bytes) -> Path:
         """Write one fixture file below the temporary source root."""
@@ -88,6 +89,8 @@ class AlpineStateTests(unittest.TestCase):
         signing_key: str | None = None,
         packages: tuple[str, ...] | None = None,
         display_brightness: dict[str, Any] | None = None,
+        *,
+        root_kind: str = "initramfs",
     ) -> str:
         return alpine_state.alpine_rootfs_recipe(
             image,
@@ -95,6 +98,7 @@ class AlpineStateTests(unittest.TestCase):
             self.packages if packages is None else packages,
             self.root,
             display_brightness=display_brightness,
+            root_kind=root_kind,
         )
 
     def test_selection_combines_common_and_platform_ownership(self) -> None:
@@ -1211,6 +1215,59 @@ class AlpineStateTests(unittest.TestCase):
             hashlib.sha256(key.read_bytes()).hexdigest(),
         )
 
+    def test_bootstrap_change_invalidates_ram_receipt_but_not_external_root(self) -> None:
+        """RAM reuse follows bootstrap bytes while storage composition stays reusable."""
+        ram_recipe = self._recipe()
+        external_recipe = self._recipe(root_kind="external")
+        cache = Path(self.temporary.name) / "cache"
+        ram_output = alpine_state.rootfs_output(cache, ram_recipe)
+        external_output = alpine_state.rootfs_output(cache, external_recipe)
+        for output in (ram_output, external_output):
+            output.mkdir(parents=True)
+            (output / "rootfs.cpio").write_bytes(b"logical composition\n")
+        (ram_output / "initramfs.cpio").write_bytes(b"boot archive\n")
+        alpine_state.write_receipt(ram_output, ram_recipe)
+        alpine_state.write_receipt(external_output, external_recipe)
+        ram_receipt = json.loads((ram_output / alpine_state.RECEIPT_NAME).read_text())
+        external_receipt = json.loads((external_output / alpine_state.RECEIPT_NAME).read_text())
+        self.assertEqual(
+            ram_receipt,
+            {
+                "recipe": ram_recipe,
+                "rootfs": {
+                    "size": 20,
+                    "sha256": hashlib.sha256(b"logical composition\n").hexdigest(),
+                },
+                "initramfs": {
+                    "size": 13,
+                    "sha256": hashlib.sha256(b"boot archive\n").hexdigest(),
+                },
+            },
+        )
+        self.assertIsNone(external_receipt["initramfs"])
+        self.assertTrue(alpine_state.receipt_matches(ram_output, self._recipe()))
+        self.assertTrue(
+            alpine_state.receipt_matches(external_output, self._recipe(root_kind="external"))
+        )
+        self._write("unrelated.txt", b"unrelated edit\n")
+        self.assertTrue(alpine_state.receipt_matches(ram_output, self._recipe()))
+        self.bootstrap.write_bytes(b"#!/bin/sh\nexit 1\n")
+        changed = self._recipe()
+        self.assertFalse(alpine_state.receipt_matches(ram_output, changed))
+        self.assertTrue(
+            alpine_state.receipt_matches(external_output, self._recipe(root_kind="external"))
+        )
+        rebuilt = alpine_state.rootfs_output(cache, changed)
+        rebuilt.mkdir(parents=True)
+        (rebuilt / "rootfs.cpio").write_bytes(b"logical composition\n")
+        (rebuilt / "initramfs.cpio").write_bytes(b"changed boot archive\n")
+        alpine_state.write_receipt(rebuilt, changed)
+        self.assertTrue(alpine_state.receipt_matches(rebuilt, changed))
+        self.assertNotEqual(
+            alpine_state.trusted_receipt_identity(ram_output, ram_recipe),
+            alpine_state.trusted_receipt_identity(rebuilt, changed),
+        )
+
     def test_receipt_matches_only_exact_rootfs_bytes(self) -> None:
         """A successful receipt is revoked by any rootfs byte change."""
         recipe = self._recipe()
@@ -1219,6 +1276,7 @@ class AlpineStateTests(unittest.TestCase):
         output.mkdir(parents=True)
         rootfs = output / alpine_state.ROOTFS_NAME
         rootfs.write_bytes(b"rootfs\n")
+        (output / "initramfs.cpio").write_bytes(b"boot archive\n")
         alpine_state.write_receipt(output, recipe)
 
         self.assertTrue(alpine_state.receipt_matches(output, recipe))
@@ -1234,6 +1292,7 @@ class AlpineStateTests(unittest.TestCase):
         output = Path(self.temporary.name) / "output"
         output.mkdir()
         (output / alpine_state.ROOTFS_NAME).write_bytes(b"rootfs\n")
+        (output / "initramfs.cpio").write_bytes(b"boot archive\n")
         alpine_state.write_receipt(output, recipe)
         receipt_path = output / alpine_state.RECEIPT_NAME
         receipt = json.loads(receipt_path.read_text())

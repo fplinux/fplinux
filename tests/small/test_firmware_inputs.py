@@ -193,6 +193,7 @@ class FirmwareInputTests(unittest.TestCase):
         output = alpine_state.rootfs_output(self.root / "state", first)
         output.mkdir(parents=True)
         (output / alpine_state.ROOTFS_NAME).write_bytes(b"rootfs")
+        (output / "initramfs.cpio").write_bytes(b"boot archive")
         alpine_state.write_receipt(output, first)
         self.assertTrue(alpine_state.receipt_matches(output, first))
 

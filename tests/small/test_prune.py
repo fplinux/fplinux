@@ -105,9 +105,14 @@ class PruneTests(unittest.TestCase):
                 (cache / "rootfs" / recipe).mkdir(parents=True)
 
             target_configs = {
-                "first": {"platform": "platform-a", "device_data": {"groups": {}}},
+                "first": {
+                    "platform": "platform-a",
+                    "linux": {"root": {"kind": "initramfs"}},
+                    "device_data": {"groups": {}},
+                },
                 "second": {
                     "platform": "platform-b",
+                    "linux": {"root": {"kind": "initramfs"}},
                     "device_data": {"groups": {}},
                     "display_brightness": {
                         "backlight": "second-backlight",
@@ -131,7 +136,9 @@ class PruneTests(unittest.TestCase):
                 *,
                 firmware_inputs: tuple[firmware_inputs.FirmwareInput, ...],
                 display_brightness: dict[str, object] | None,
+                root_kind: str,
             ) -> str:
+                self.assertEqual(root_kind, "initramfs")
                 self.assertEqual(firmware_inputs, ())
                 self.assertEqual(
                     display_brightness,
@@ -291,6 +298,7 @@ class PruneTests(unittest.TestCase):
                 return {
                     "platform": "platform",
                     "profile": profile,
+                    "linux": {"root": {"kind": "external" if profile == "host" else "initramfs"}},
                     "device_data": {
                         "groups": (
                             {
@@ -314,8 +322,12 @@ class PruneTests(unittest.TestCase):
                 *,
                 firmware_inputs: tuple[firmware_inputs.FirmwareInput, ...],
                 display_brightness: dict[str, object] | None,
+                root_kind: str,
             ) -> str:
                 self.assertIsNone(display_brightness)
+                self.assertEqual(
+                    root_kind, "external" if packages == ("package-host",) else "initramfs"
+                )
                 recipes: dict[tuple[str, ...], str] = {
                     ("package-base",): default_recipe,
                     ("package-host",): profile_recipe,
@@ -369,7 +381,11 @@ class PruneTests(unittest.TestCase):
                 mock.patch.object(
                     prune_module,
                     "load_target",
-                    return_value={"platform": "platform", "device_data": {"groups": {}}},
+                    return_value={
+                        "platform": "platform",
+                        "linux": {"root": {"kind": "initramfs"}},
+                        "device_data": {"groups": {}},
+                    },
                 ),
                 mock.patch.object(prune_module, "load_platform", return_value={}),
                 mock.patch.object(
@@ -441,7 +457,11 @@ class PruneTests(unittest.TestCase):
                 mock.patch.object(
                     prune_module,
                     "load_target",
-                    return_value={"platform": "platform", "device_data": {"groups": groups}},
+                    return_value={
+                        "platform": "platform",
+                        "linux": {"root": {"kind": "initramfs"}},
+                        "device_data": {"groups": groups},
+                    },
                 ),
                 mock.patch.object(prune_module, "load_platform", return_value={}),
                 mock.patch.object(alpine_state, "selected_packages", return_value=()),
