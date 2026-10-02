@@ -1099,14 +1099,14 @@ class AlpineStateTests(unittest.TestCase):
 
         return fake_apk_owner
 
-    def test_bluetooth_root_requires_project_built_daemon_libraries(self) -> None:
-        """Bluetooth roots take the BlueZ daemons' vCard and GLib sonames from project builds."""
+    def test_bluetooth_root_requires_project_daemon_and_library_owners(self) -> None:
+        """The selected Bluetooth root rejects stock daemon and GLib replacements."""
         root = self._verified_rootfs()
         base = ("fplinux-base", "fplinux-terminal")
         with_bluetooth = (*base, "fplinux-bluetooth")
         replaced = {
-            "/usr/lib/libicalvcal.so.3": ("libical", "fplinux-libical"),
-            "/usr/lib/libglib-2.0.so.0": ("glib", "fplinux-glib"),
+            "/usr/lib/bluetooth/obexd": ("bluez-obexd", "fplinux-bluez"),
+            "/usr/lib/libfplinux-bluez-glib-2.0.so.0": ("glib", "fplinux-bluez-glib"),
         }
         project_owners = {path: project for path, (_, project) in replaced.items()}
 

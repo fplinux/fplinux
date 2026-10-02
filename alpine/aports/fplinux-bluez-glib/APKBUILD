@@ -1,0 +1,83 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-bluez-glib
+pkgver=2.88.1
+pkgrel=0
+pkgdesc="Private GLib core library for the BlueZ daemons and client"
+url="https://gitlab.gnome.org/GNOME/glib"
+arch="armv7"
+license="LGPL-2.1-or-later"
+makedepends_build="clang22 lld22 meson python3 samurai llvm22"
+makedepends_host="libffi-dev musl-dev musl-libintl zlib-dev"
+subpackages="$pkgname-dev"
+options="!check"
+source="https://download.gnome.org/sources/glib/${pkgver%.*}/glib-$pkgver.tar.xz
+	0001-private-bluez-library.patch
+	bluez-glib.map
+	install-private-dev.py
+"
+builddir="$srcdir/glib-$pkgver"
+_minor="${pkgver#*.}"
+_library="libfplinux-bluez-glib-2.0.so.0.$((${_minor%.*} * 100)).${pkgver##*.}"
+
+build() {
+	export CFLAGS="$CFLAGS -Oz -flto=thin"
+	export CXXFLAGS="$CXXFLAGS -Oz -flto=thin"
+	export LDFLAGS="$LDFLAGS -flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe"
+	export AR=/usr/lib/llvm22/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
+	: "${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
+	cat >fplinux-cross.meson <<-EOF
+		[binaries]
+		ar = '/usr/lib/llvm22/bin/llvm-ar'
+		[properties]
+		pkg_config_libdir = ['$CBUILDROOT/usr/lib/pkgconfig', '$CBUILDROOT/usr/share/pkgconfig']
+		have_c99_vsnprintf = true
+		have_c99_snprintf = true
+		have_unix98_printf = true
+		have_proc_self_cmdline = true
+		growing_stack = false
+	EOF
+	# The export map defines the private consumer boundary. Linker section
+	# collection retains its internal calls, callback tables and constructors.
+	cp "$srcdir/bluez-glib.map" "$builddir/glib/bluez-glib.map"
+	CFLAGS="$CFLAGS -mthumb -ffunction-sections -fdata-sections" \
+	LDFLAGS="$LDFLAGS -Wl,--gc-sections" \
+	env -u CXX abuild-meson \
+		-Db_lto=true -Db_lto_mode=thin -Db_lto_threads=2 \
+		--cross-file fplinux-cross.meson \
+		-Dglib_debug=disabled \
+		-Dintrospection=disabled \
+		-Dlibelf=disabled \
+		-Dlibmount=disabled \
+		-Dman-pages=disabled \
+		-Dnls=disabled \
+		-Dselinux=disabled \
+		-Dsysprof=disabled \
+		-Dtests=false \
+		-Dxattr=false \
+		output
+	ninja -j"${JOBS:-1}" -C output "glib/$_library"
+}
+
+package() {
+	install -Dm755 "$builddir/output/glib/$_library" "$pkgdir/usr/lib/$_library"
+	ln -s "$_library" "$pkgdir/usr/lib/libfplinux-bluez-glib-2.0.so.0"
+	install -Dm644 "$builddir/LICENSES/LGPL-2.1-or-later.txt" \
+		"$pkgdir/usr/share/licenses/$pkgname/LGPL-2.1-or-later.txt"
+}
+
+dev() {
+	pkgdesc="$pkgdesc (private development files)"
+	depends="$pkgname=$pkgver-r$pkgrel"
+	meson introspect --installed "$builddir/output" | \
+		python3 "$srcdir/install-private-dev.py" "$subpkgdir"
+	ln -s libfplinux-bluez-glib-2.0.so.0 \
+		"$subpkgdir/usr/lib/libfplinux-bluez-glib-2.0.so"
+}
+
+sha512sums="
+74e6d6086081e5dfb5b7fd3b74f59171033be0c340ff2dd798fea9cb42e5f680e13b2ac3dde8dd423bceb9c6556103005f9542aeda166e9a3b89da8bacecca23  glib-2.88.1.tar.xz
+1bad10ddd2d0513617010d1e89a24e4dd2a2f1b76c4deacbe67ef6274e1b58551fb59e29d03b1a417f81e31c0f6651a509943748ac4bdedafe578e2e7a40561c  0001-private-bluez-library.patch
+afdf9e6cbcd631a0e20ec34d42c7d114fb7bb9fee141fcd6cdadf8d024dc0d24ac3349c7d50b22ce9515ef3dd11835c7a7bfa3b7ccc125e275a60f0cb7d144d6  bluez-glib.map
+ae7df61562020fc0b71f82520f9133a3705318403eec31be07f91d0ab16ae53152b62752e748f4b909b7fa31972fbe63eee83ce8b258d8b62e196468f36a5815  install-private-dev.py
+"

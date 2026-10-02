@@ -18,8 +18,8 @@ packages = [
   "fplinux-jpeg",
   "fplinux-present",
   "fplinux-bluetooth",
-  "fplinux-glib",
-  "fplinux-libical",
+  "fplinux-bluez",
+  "fplinux-bluez-glib",
   "fplinux-xkb",
 ]
 

@@ -33,19 +33,12 @@ fplinux-terminal = ["ncurses-terminfo-base-6.6_p20260516-r0.apk"]
 fplinux-audio = ["alsa-lib-1.2.15.3-r0.apk"]
 
 fplinux-bluetooth = [
-  "bluez-5.86-r2.apk",
-  "bluez-obexd-5.86-r2.apk",
-  "bluez-openrc-5.86-r2.apk",
   "dbus-1.16.2-r2.apk",
   "dbus-libs-1.16.2-r2.apk",
   "dbus-openrc-1.16.2-r2.apk",
-  "json-c-0.18-r1.apk",
   "libexpat-2.8.4-r0.apk",
   "libgcc-15.2.0-r5.apk",
-  "libncursesw-6.6_p20260516-r0.apk",
   "ncurses-terminfo-base-6.6_p20260516-r0.apk",
-  "pcre2-10.48-r0.apk",
-  "readline-8.3.3-r1.apk",
 ]
 
 fplinux-fm = ["alsa-lib-1.2.15.3-r0.apk"]
@@ -610,21 +603,3 @@ repository = "main"
 file = "alsa-lib-dev-1.2.15.3-r0.apk"
 sha256 = "6cb537244a71ebef5ae1056c25164a8fbd5a876f00dd7801c1142ea011c6b560"
 bytes = 102810
-
-[[package]]
-repository = "main"
-file = "bluez-5.86-r2.apk"
-sha256 = "0441041437f90d75673603cb7d06e23199d19a1857f838729005d6af027914dc"
-bytes = 1001995
-
-[[package]]
-repository = "main"
-file = "bluez-obexd-5.86-r2.apk"
-sha256 = "e9fc863914596ba42526bd728ffbbfca57b4c4c8d2667d063a3c347f6abb16d0"
-bytes = 108807
-
-[[package]]
-repository = "main"
-file = "bluez-openrc-5.86-r2.apk"
-sha256 = "350c32681eb2e60808da4210a9bccba3226912c224f627b8dd5898d97463ca5b"
-bytes = 1739

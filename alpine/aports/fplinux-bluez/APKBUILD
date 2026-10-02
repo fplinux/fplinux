@@ -1,0 +1,125 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-bluez
+pkgver=5.86
+pkgrel=0
+pkgdesc="Bluetooth profiles and object-push transfers for FPLinux"
+url="https://www.bluez.org/"
+arch="armv7"
+license="GPL-2.0-or-later AND BSD-2-Clause AND MIT"
+depends="dbus fplinux-bluez-glib"
+provides="bluez=$pkgver-r$pkgrel bluez-obexd=$pkgver-r$pkgrel bluez-openrc=$pkgver-r$pkgrel obexd"
+replaces="bluez bluez-obexd bluez-openrc"
+makedepends_build="autoconf automake clang22 libtool lld22 pkgconf llvm22"
+makedepends_host="dbus-dev fplinux-bluez-glib-dev linux-headers musl-dev readline-dev"
+options="!check"
+source="https://www.kernel.org/pub/linux/bluetooth/bluez-$pkgver.tar.xz
+	bluetooth.initd
+	org.bluez.obex.service
+	modules-load.conf
+	005-hostname-Use-phone-class-for-handhelds.patch
+	006-Revert-shared-shell-Don-t-init-input-for-non-interac.patch
+	007-a2dp-connect-source-profile-after-sink.patch
+	fix-endianness.patch
+	0001-obex-object-push-only.patch
+	0002-use-private-glib.patch
+	0003-object-push-filesystem.patch
+"
+builddir="$srcdir/bluez-$pkgver"
+
+prepare() {
+	default_prepare
+	autoreconf -fi
+}
+
+build() {
+	export CFLAGS="$CFLAGS -Oz -flto=thin"
+	export CXXFLAGS="$CXXFLAGS -Oz -flto=thin"
+	export LDFLAGS="$LDFLAGS -flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe"
+	export AR=/usr/lib/llvm22/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
+	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
+	CFLAGS="$CFLAGS -mthumb -ffunction-sections -fdata-sections" \
+	LDFLAGS="$LDFLAGS -Wl,--gc-sections" \
+	./configure \
+		--build="$CBUILD" \
+		--host="$CHOST" \
+		--prefix=/usr \
+		--sysconfdir=/etc \
+		--localstatedir=/var \
+		--libexecdir=/usr/lib \
+		--with-dbusconfdir=/usr/share \
+		--with-zsh-completion-dir=no \
+		--enable-client \
+		--enable-obex \
+		--enable-network \
+		--enable-hid \
+		--enable-hog \
+		--enable-a2dp \
+		--enable-avrcp \
+		--enable-hfp \
+		--enable-datafiles \
+		--disable-tools \
+		--disable-monitor \
+		--disable-mesh \
+		--disable-sixaxis \
+		--disable-udev \
+		--disable-cups \
+		--disable-hid2hci \
+		--disable-deprecated \
+		--disable-library \
+		--disable-manpages \
+		--disable-systemd \
+		--disable-test \
+		--disable-testing \
+		--disable-experimental \
+		--disable-nfc \
+		--disable-midi \
+		--disable-btpclient \
+		--disable-logger \
+		--disable-admin \
+		--disable-backtrace \
+		--disable-external-plugins
+	make src/builtin.h obexd/src/builtin.h
+	make src/bluetoothd client/bluetoothctl obexd/src/obexd
+}
+
+package() {
+	install -Dm755 "$builddir/src/bluetoothd" \
+		"$pkgdir/usr/lib/bluetooth/bluetoothd"
+	install -Dm755 "$builddir/client/bluetoothctl" \
+		"$pkgdir/usr/bin/bluetoothctl"
+	install -Dm755 "$builddir/obexd/src/obexd" \
+		"$pkgdir/usr/lib/bluetooth/obexd"
+	install -Dm644 "$builddir/src/main.conf" \
+		"$pkgdir/etc/bluetooth/main.conf"
+	install -Dm644 "$builddir/profiles/input/input.conf" \
+		"$pkgdir/etc/bluetooth/input.conf"
+	install -Dm644 "$builddir/profiles/network/network.conf" \
+		"$pkgdir/etc/bluetooth/network.conf"
+	install -Dm644 "$builddir/src/bluetooth.conf" \
+		"$pkgdir/usr/share/dbus-1/system.d/bluetooth.conf"
+	install -Dm644 "$builddir/obexd/src/obex.conf" \
+		"$pkgdir/usr/share/dbus-1/system.d/obex.conf"
+	install -Dm644 "$builddir/src/org.bluez.service" \
+		"$pkgdir/usr/share/dbus-1/system-services/org.bluez.service"
+	install -Dm644 "$srcdir/org.bluez.obex.service" \
+		"$pkgdir/usr/share/dbus-1/services/org.bluez.obex.service"
+	install -Dm755 "$srcdir/bluetooth.initd" \
+		"$pkgdir/etc/init.d/bluetooth"
+	install -Dm644 "$srcdir/modules-load.conf" \
+		"$pkgdir/usr/lib/modules-load.d/bluez.conf"
+	install -dm700 "$pkgdir/var/lib/bluetooth"
+}
+sha512sums="
+d3268be43ad869dabd9d9eabc7a0da699837bb5432ecf61e1756e03f9b867a1d989299db1493bd349d73b495d736f55d7518fbb9ee664de49e5d1cf7c2156df7  bluez-5.86.tar.xz
+fc03200243e9cdf4fd73f51d199c70cf81e0d39748811e858f3031abf9b9de4b64677d37683b88813bf790fdd1fe88cd4d60bcd1c9725ee8a95ae3ac4fa3701e  bluetooth.initd
+d6766a4992ed4141569d6d82a802a771a5cb4c08873bfb0fdbedeea4d738bf9b56d9e0452ec19b7635418b1af4ab9b1735692043d629cbed3ce0eda6f51e1c6f  org.bluez.obex.service
+e2135385add87b4156caf76edda5d7161d8ef4ba50b898ad7921ed09886e2df7f638eecd1a09604118d7cbd9d915c726c8b4d4064565c7adea6620fb59f9971e  modules-load.conf
+6ff76666bdea7cd4993834a39237f05a2d7def9af6035510e443af7aac67ffed8f5113af39694f830fb36c119d2a5eef2326e23e54c3a2057001c2362617865a  005-hostname-Use-phone-class-for-handhelds.patch
+19b4767f8e859ecd756ab3a7a1dd93e27c7fc3ebe12e5a2a7d2538b8843c7e7391c28b230033b26ba2ad77f9fac9e607af70f70d2df4e79727d0a8472e53c9d5  006-Revert-shared-shell-Don-t-init-input-for-non-interac.patch
+24f9fb60902613670ea9b1ab564cc3f73a401ebafd6ea590d5b28d72f9d83de6d617b35f59e3d200021b9d000dbc6087c93d14d83eb3b98737eb7dde9303675d  007-a2dp-connect-source-profile-after-sink.patch
+9236afd5cb5e08a6289302a1d7dad11cb9c6c9434867ffa6c46adb03050c575097c763fc781e42b547ccf8eb4754079a7ebf58870dd4359f0b5905784a3c37e1  fix-endianness.patch
+9096a37bdbd5b94ff6f19073351f5717bf9e263e20a253b3f957fbfff0d20c6f1c0154452963f91e5a326e3b7e7c100b29e1810136b58d28384a1645e21a3035  0001-obex-object-push-only.patch
+cb4cc008336a03b6b3d6d006c133f53554a4ca6db2f86a6c3e737a221780da364e630f31a6b4138ec2d493d4088797fa717cc94a4d90f528c629082a92c44acb  0002-use-private-glib.patch
+452bf7bf06f58a1d0471d2b15f445c130720f76f3a016e5f082004b12a400f201c953245ba68c1df95e0ce35a5a56dcfefebc3418c9d3d82175cb45c399380df  0003-object-push-filesystem.patch
+"

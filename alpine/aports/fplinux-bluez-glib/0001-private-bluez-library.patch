@@ -1,0 +1,161 @@
+Build an isolated core library with the private BlueZ export boundary.
+
+--- a/meson.build
++++ b/meson.build
+@@ -119,7 +119,7 @@
+ glib_datadir = join_paths(glib_prefix, get_option('datadir'))
+ glib_localedir = join_paths(glib_prefix, get_option('localedir'))
+ glib_pkgdatadir = join_paths(glib_datadir, 'glib-2.0')
+-glib_includedir = join_paths(glib_prefix, get_option('includedir'), 'glib-2.0')
++glib_includedir = join_paths(glib_prefix, get_option('includedir'), 'fplinux-bluez-glib-2.0')
+ if get_option('gio_module_dir') != ''
+   glib_giomodulesdir = join_paths(glib_prefix, get_option('gio_module_dir'))
+ else
+@@ -2249,50 +2249,6 @@
+   libiconv = dependency('iconv')
+ endif
+
+-pcre2_req = '>=10.32'
+-pcre2_options = [
+-  'default_library=static',
+-  'test=false',
+-]
+-
+-# Pick up pcre from the system, or if "--force-fallback-for libpcre2-8" was specified
+-pcre2 = dependency('libpcre2-8', version: pcre2_req, required: false, default_options: pcre2_options)
+-if not pcre2.found()
+-  if cc.get_id() == 'msvc' or cc.get_id() == 'clang-cl'
+-  # MSVC: Search for the PCRE2 library by the configuration, which corresponds
+-  # to the output of CMake builds of PCRE2.  Note that debugoptimized
+-  # is really a Release build with .PDB files.
+-    if vs_crt == 'debug'
+-      pcre2 = cc.find_library('pcre2d-8', required : false)
+-    else
+-      pcre2 = cc.find_library('pcre2-8', required : false)
+-    endif
+-  endif
+-endif
+-
+-# Try again with the fallback
+-if not pcre2.found()
+-  pcre2 = dependency('libpcre2-8', version: pcre2_req, allow_fallback: true, default_options: pcre2_options)
+-  assert(pcre2.type_name() == 'internal')
+-  # static flags are automatically enabled by the subproject if it's built
+-  # with default_library=static
+-  use_pcre2_static_flag = false
+-elif host_system == 'windows' and pcre2.type_name() != 'internal'
+-  pcre2_static = cc.links('''#define PCRE2_STATIC
+-                             #define PCRE2_CODE_UNIT_WIDTH 8
+-                             #include <pcre2.h>
+-                             int main() {
+-                               void *p = NULL;
+-                               pcre2_code_free(p);
+-                               return 0;
+-                             }''',
+-                         dependencies: pcre2,
+-                         name : 'Windows system PCRE2 is a static build')
+-  use_pcre2_static_flag = pcre2_static
+-else
+-  use_pcre2_static_flag = false
+-endif
+-
+ # Import the gvdb sources as a subproject to avoid having the copylib in-tree
+ subproject('gvdb', default_options: {'tests': false})
+ gvdb_dep = dependency('gvdb')
+--- a/glib/meson.build
++++ b/glib/meson.build
+@@ -2,7 +2,7 @@
+ glib_sub_includedir = glib_includedir / 'glib'
+
+ glibconfig_h = configure_file(input : 'glibconfig.h.in', output : 'glibconfig.h',
+-  install_dir : join_paths(get_option('libdir'), 'glib-2.0/include'),
++  install_dir : join_paths(get_option('libdir'), 'fplinux-bluez-glib-2.0/include'),
+   install_tag : 'devel',
+   configuration : glibconfig_conf)
+ glib_sources += glibconfig_h
+@@ -312,7 +312,6 @@
+   'grcbox.c',
+   'grefcount.c',
+   'grefstring.c',
+-  'gregex.c',
+   'gscanner.c',
+   'gsequence.c',
+   'gshell.c',
+@@ -412,14 +411,8 @@
+   glib_dtrace_hdr = []
+ endif
+
+-pcre2_static_args = []
+-
+-if use_pcre2_static_flag
+-  pcre2_static_args = ['-DPCRE2_STATIC']
+-endif
+-
+-glib_c_args = ['-DG_LOG_DOMAIN="GLib"'] + glib_c_args_internal + pcre2_static_args
+-libglib = library('glib-2.0',
++glib_c_args = ['-DG_LOG_DOMAIN="GLib"'] + glib_c_args_internal
++libglib = library('fplinux-bluez-glib-2.0',
+   glib_dtrace_obj, glib_dtrace_hdr,
+   sources : [glib_deprecated_sources, glib_sources],
+   version : library_version,
+@@ -427,7 +420,10 @@
+   darwin_versions : darwin_versions,
+   install : true,
+   # intl.lib is not compatible with SAFESEH
+-  link_args : [noseh_link_args, glib_link_flags, win32_ldflags],
++  link_args : [noseh_link_args, glib_link_flags, win32_ldflags,
++    '-Wl,--version-script=' + meson.current_source_dir() / 'bluez-glib.map',
++    '-Wl,--no-undefined-version'],
++  link_depends : files('bluez-glib.map'),
+   include_directories : configinc,
+   link_with: [charset_lib, gnulib_lib],
+   dependencies : [
+@@ -438,7 +434,6 @@
+     libm,
+     librt,
+     libsysprof_capture_dep,
+-    pcre2,
+     platform_deps,
+     thread_dep,
+   ],
+@@ -465,7 +460,6 @@
+     libm,
+     librt,
+     libsysprof_capture_dep,
+-    pcre2,
+     platform_deps,
+     thread_dep,
+   ],
+@@ -477,27 +471,13 @@
+ pkg.generate(libglib,
+   libraries : [libintl_deps],
+   libraries_private : [win32_ldflags],
+-  subdirs : ['glib-2.0'],
+-  extra_cflags : ['-I${libdir}/glib-2.0/include'] + win32_cflags,
+-  variables : [
+-    'glib_genmarshal=' + '${bindir}' / 'glib-genmarshal',
+-    'gobject_query=' + '${bindir}' / 'gobject-query',
+-    'glib_mkenums=' + '${bindir}' / 'glib-mkenums',
+-    'glib_valgrind_suppressions=' + '${datadir}' /
+-      valgrind_suppression_file_install_subdir /
+-      fs.name(valgrind_suppression_file),
+-  ],
+-  uninstalled_variables : [
+-    'glib_genmarshal=${prefix}/gobject/glib-genmarshal',
+-    'gobject_query=${prefix}/gobject/gobject-query',
+-    'glib_mkenums=${prefix}/gobject/glib-mkenums',
+-    'glib_valgrind_suppressions=' + valgrind_suppression_file.full_path(),
+-  ],
++  subdirs : ['fplinux-bluez-glib-2.0'],
++  extra_cflags : ['-I${libdir}/fplinux-bluez-glib-2.0/include'] + win32_cflags,
+   version : glib_version,
+   install_dir : glib_pkgconfigreldir,
+-  filebase : 'glib-2.0',
+-  name : 'GLib',
+-  description : 'C Utility Library',
++  filebase : 'fplinux-bluez-glib-2.0',
++  name : 'FPLinux BlueZ GLib',
++  description : 'Private core library for the BlueZ daemons and client',
+ )
+ meson.override_dependency('glib-2.0', libglib_dep)
+

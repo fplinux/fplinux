@@ -115,6 +115,7 @@ COMMON_PACKAGES = (
 )
 LOCAL_BUILD_DEPENDENCIES = {
     "fplinux-bash": ("fplinux-ncurses", "fplinux-readline"),
+    "fplinux-bluez": ("fplinux-bluez-glib", "fplinux-ncurses", "fplinux-readline"),
     "fplinux-brightness-ui": ("fplinux-libdrm",),
     "fplinux-readline": ("fplinux-ncurses",),
     "fplinux-present": ("fplinux-libdrm",),

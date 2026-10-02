@@ -1,0 +1,32 @@
+Register the generic file handler used by object-push sessions.
+
+--- a/obexd/plugins/filesystem.c
++++ b/obexd/plugins/filesystem.c
+@@ -692,27 +692,11 @@
+
+ static int filesystem_init(void)
+ {
+-	int err;
+-
+-	err = obex_mime_type_driver_register(&folder);
+-	if (err < 0)
+-		return err;
+-
+-	err = obex_mime_type_driver_register(&capability);
+-	if (err < 0)
+-		return err;
+-
+-	err = obex_mime_type_driver_register(&pcsuite);
+-	if (err < 0)
+-		return err;
+-
+ 	return obex_mime_type_driver_register(&file);
+ }
+
+ static void filesystem_exit(void)
+ {
+-	obex_mime_type_driver_unregister(&folder);
+-	obex_mime_type_driver_unregister(&capability);
+ 	obex_mime_type_driver_unregister(&file);
+ }
+
