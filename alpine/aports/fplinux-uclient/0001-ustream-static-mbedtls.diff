@@ -1,0 +1,7 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -13,3 +13,3 @@
+ IF (NOT APPLE)
+-  SET(CMAKE_SHARED_LINKER_FLAGS "-Wl,--no-undefined")
++  SET(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-undefined -Wl,--exclude-libs,libmbedtls.a:libmbedx509.a:libmbedcrypto.a:libeverest.a:libp256m.a")
+ ENDIF()

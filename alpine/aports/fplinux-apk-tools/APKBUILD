@@ -7,12 +7,13 @@ url="https://gitlab.alpinelinux.org/alpine/apk-tools"
 arch="armv7"
 license="GPL-2.0-only"
 depends="fplinux-uclient"
-makedepends_build="clang22 lld22 meson samurai"
-makedepends_host="linux-headers mbedtls3-dev musl-dev zlib-dev"
+makedepends_build="clang22 lld22 llvm22 meson samurai"
+makedepends_host="linux-headers fplinux-mbedtls-static-dev musl-dev zlib-dev"
 options="!check"
-source="https://gitlab.alpinelinux.org/alpine/apk-tools/-/archive/v$pkgver/apk-tools-v$pkgver.tar.gz"
+source="https://gitlab.alpinelinux.org/alpine/apk-tools/-/archive/v$pkgver/apk-tools-v$pkgver.tar.gz
+	0001-static-mbedtls.patch
+	"
 builddir="$srcdir/apk-tools-v$pkgver"
-_library="libapk.so.3.0.0"
 
 build() {
 	: "${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
@@ -20,7 +21,7 @@ build() {
 	# the archiver and keeps pkg-config inside the sysroot.
 	cat >fplinux-cross.meson <<-EOF
 		[binaries]
-		ar = '$CHOST-ar'
+		ar = '/usr/lib/llvm22/bin/llvm-ar'
 		[properties]
 		pkg_config_libdir = ['$CBUILDROOT/usr/lib/pkgconfig', '$CBUILDROOT/usr/share/pkgconfig']
 	EOF
@@ -32,27 +33,28 @@ build() {
 		--cross-file fplinux-cross.meson \
 		--auto-features=disabled \
 		--bindir=/sbin \
+		-Ddefault_library=static \
 		-Darch=armv7 \
 		-Dcrypto_backend=mbedtls \
 		-Ddocs=disabled \
 		-Dhelp=disabled \
 		-Dlua=disabled \
+		-Dminimal=true \
 		-Dpython=disabled \
 		-Dtests=disabled \
 		-Durl_backend=wget \
 		-Dzstd=disabled \
 		output
-	ninja -C output
+	ninja -j"${JOBS:-1}" -C output
 }
 
 package() {
-	# The runtime tag installs only /sbin/apk and the libapk soname; headers
-	# and pkg-config files stay out of the phone root.
-	DESTDIR="$pkgdir" meson install -C output --no-rebuild --tags runtime
-	test -x "$pkgdir/sbin/apk"
-	test -f "$pkgdir/usr/lib/$_library"
+	install -Dm755 output/src/apk "$pkgdir/sbin/apk"
+	install -Dm644 "$CBUILDROOT/usr/share/licenses/fplinux-mbedtls-static-dev/LICENSE" \
+		"$pkgdir/usr/share/licenses/$pkgname/MbedTLS-LICENSE"
 }
 
 sha512sums="
 86c6ba9aad517d7a39d204373b37a28c143afe1438fa5090df90845f205c7f01e8aaee00ed0b6f7b27206ff745e0f1db160e3b919d17b37639fb19ae78bd13e6  apk-tools-v3.0.6.tar.gz
+6f65fe4b24b120670e512f721a06299d16e4b8d3b3643f0dae72e199d9d9f3913f5321f6ee56b121cd2f8b5bff65d5ab783a3e3a462f226d3028ee116817c8ae  0001-static-mbedtls.patch
 "
