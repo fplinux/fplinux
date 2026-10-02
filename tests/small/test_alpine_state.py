@@ -150,9 +150,10 @@ class AlpineStateTests(unittest.TestCase):
 
     def test_bundle_subpackages_use_existing_aports_without_selecting_their_parents(self) -> None:
         """Optional child APK names remain distinct from the preinstalled producer packages."""
-        for producer in ("fplinux-bash", "fplinux-ncurses"):
+        for producer in ("fplinux-alsa-lib", "fplinux-bash", "fplinux-ncurses"):
             self._write(f"alpine/aports/{producer}/APKBUILD", f"pkgname={producer}\n".encode())
         optional = (
+            "fplinux-alsa-lib-card-profiles",
             "fplinux-bash-loadables",
             "fplinux-ncurses-curses",
         )
@@ -160,7 +161,7 @@ class AlpineStateTests(unittest.TestCase):
         actual = alpine_state.bundle_packages(
             {"bundle": {"packages": list(optional)}},
             {"bundle": {"packages": []}},
-            ("fplinux-bash", "fplinux-ncurses"),
+            ("fplinux-alsa-lib", "fplinux-bash", "fplinux-ncurses"),
             self.root,
         )
 

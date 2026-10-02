@@ -11,6 +11,7 @@ packages = [
   "fplinux-uclient",
   "fplinux-cpuclock",
   "fplinux-fm",
+  "fplinux-alsa-lib",
   "fplinux-ssh",
   "fplinux-dropbear",
   "fplinux-usb-gadget",

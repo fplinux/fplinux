@@ -1,0 +1,66 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-alsa-lib
+pkgver=1.2.15.3
+pkgrel=0
+pkgdesc="ALSA PCM and mixer library for FPLinux applications"
+url="https://www.alsa-project.org"
+arch="armv7"
+license="LGPL-2.1-or-later"
+replaces="alsa-lib"
+makedepends_build="clang22 lld22 make llvm22"
+makedepends_host="musl-dev linux-headers"
+subpackages="$pkgname-dev $pkgname-card-profiles:card_profiles:noarch"
+options="!check"
+source="https://alsa-project.org/files/pub/lib/alsa-lib-$pkgver.tar.bz2"
+builddir="$srcdir/alsa-lib-$pkgver"
+
+build() {
+	export CFLAGS="$CFLAGS -Oz -flto=thin"
+	export CXXFLAGS="$CXXFLAGS -Oz -flto=thin"
+	export LDFLAGS="$LDFLAGS -flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe"
+	export AR=/usr/lib/llvm22/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
+	./configure \
+		--build="$CBUILD" \
+		--host="$CHOST" \
+		--prefix=/usr \
+		--disable-static \
+		--disable-dependency-tracking \
+		--without-versioned \
+		--disable-resmgr \
+		--disable-python \
+		--disable-aload \
+		--disable-rawmidi \
+		--disable-seq \
+		--disable-hwdep \
+		--disable-ucm \
+		--disable-topology \
+		--with-pcm-plugins=copy,linear,plug,rate,route,lfloat,mulaw,alaw,adpcm,iec958 \
+		--with-ctl-plugins=
+	make -j"${JOBS:-1}"
+}
+
+package() {
+	make DESTDIR="$pkgdir" install
+	mkdir -p "$pkgdir/etc/alsa/conf.d"
+	# Upstream installs this even when the topology library is disabled.
+	rm "$pkgdir/usr/lib/pkgconfig/alsa-topology.pc"
+}
+
+dev() {
+	default_dev
+	replaces="alsa-lib-dev"
+}
+card_profiles() {
+	pkgdesc="ALSA configuration profiles for additional sound cards"
+	depends="$pkgname=$pkgver-r$pkgrel"
+	local profile
+	for profile in "$pkgdir"/usr/share/alsa/cards/*.conf; do
+		[ "${profile##*/}" = "aliases.conf" ] && continue
+		amove "usr/share/alsa/cards/${profile##*/}"
+	done
+}
+
+sha512sums="
+7fc0fa8a5ae02d3404d2c262c6a14fcbb8b08e25993eac86b9e89b8419ed4d293b422da77b3eb7a1930f26c316b638e5aa7bdba78b0ada9908b0362d132a0cc0  alsa-lib-1.2.15.3.tar.bz2
+"

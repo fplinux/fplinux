@@ -870,6 +870,8 @@ def _verify_alpine_rootfs(  # noqa: PLR0913 -- verify each independently selecte
         ):
             _require_apk_owner(root, path, "fplinux-bluez")
         _require_apk_owner(root, "/usr/lib/libfplinux-bluez-glib-2.0.so.0", "fplinux-bluez-glib")
+    if "fplinux-alsa-lib" in packages:
+        _require_apk_owner(root, "/usr/lib/libasound.so.2", "fplinux-alsa-lib")
     if "fplinux-apk-tools" in packages:
         # The Mbed TLS package manager replaces the minirootfs apk-tools, and
         # the OpenSSL closure that only apk-tools needed must not remain.
