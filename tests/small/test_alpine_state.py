@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import py_compile
 import re
 import subprocess
 import tarfile
@@ -289,6 +290,37 @@ class AlpineStateTests(unittest.TestCase):
         self.assertEqual(rootfs_before, self._recipe())
         self.assertEqual(
             package_before,
+            alpine_state.alpine_package_recipe(
+                self.packages[0], "1" * 64, self.signing_key, self.root
+            ),
+        )
+
+    def test_aport_python_bytecode_preserves_receipt_and_package_recipe(self) -> None:
+        """Compiling a helper is unrelated; changing its source invalidates its artifacts."""
+        helper = self._write("alpine/aports/fplinux-package-a/helper.py", b"VALUE = 42\n")
+        rootfs_recipe = self._recipe()
+        package_recipe = alpine_state.alpine_package_recipe(
+            self.packages[0], "1" * 64, self.signing_key, self.root
+        )
+        output = self.root / "cached-rootfs"
+        output.mkdir()
+        (output / "rootfs.cpio").write_bytes(b"logical composition\n")
+        alpine_state.write_receipt(output, rootfs_recipe)
+        self.assertTrue(alpine_state.receipt_matches(output, self._recipe()))
+
+        py_compile.compile(str(helper), doraise=True)
+        self.assertTrue(alpine_state.receipt_matches(output, self._recipe()))
+        self.assertEqual(
+            package_recipe,
+            alpine_state.alpine_package_recipe(
+                self.packages[0], "1" * 64, self.signing_key, self.root
+            ),
+        )
+
+        helper.write_bytes(b"VALUE = 43\n")
+        self.assertFalse(alpine_state.receipt_matches(output, self._recipe()))
+        self.assertNotEqual(
+            package_recipe,
             alpine_state.alpine_package_recipe(
                 self.packages[0], "1" * 64, self.signing_key, self.root
             ),
