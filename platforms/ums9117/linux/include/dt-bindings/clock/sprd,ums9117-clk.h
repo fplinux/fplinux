@@ -10,7 +10,10 @@
 #define CLK_THM1_EB 4
 #define CLK_THM_RTC_EB 5
 #define CLK_GPIO_EB 6
-#define CLK_AON_APB_GATE_NUM 7
+#define CLK_EIC_EB 7
+#define CLK_EIC_RTC_EB 8
+#define CLK_EIC_RTCDV5_EB 9
+#define CLK_AON_APB_GATE_NUM 10
 
 /* AP APB gates */
 #define CLK_I2C0_EB 0

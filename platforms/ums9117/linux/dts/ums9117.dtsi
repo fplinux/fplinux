@@ -326,6 +326,10 @@
 			interrupt-controller;
 			#interrupt-cells = <2>;
 			interrupts = <GIC_SPI 37 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&aonapb_gate CLK_EIC_EB>,
+				 <&aonapb_gate CLK_EIC_RTC_EB>,
+				 <&aonapb_gate CLK_EIC_RTCDV5_EB>;
+			clock-names = "enable", "rtc", "rtcdv5";
 			status = "disabled";
 		};
 

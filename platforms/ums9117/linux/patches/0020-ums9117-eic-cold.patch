@@ -1,0 +1,93 @@
+diff --git a/drivers/gpio/gpio-eic-sprd.c b/drivers/gpio/gpio-eic-sprd.c
+index 3b7ebcf..c8e74de 100644
+--- a/drivers/gpio/gpio-eic-sprd.c
++++ b/drivers/gpio/gpio-eic-sprd.c
+@@ -5,6 +5,7 @@
+  */
+
+ #include <linux/bitops.h>
++#include <linux/clk.h>
+ #include <linux/gpio/driver.h>
+ #include <linux/interrupt.h>
+ #include <linux/kernel.h>
+@@ -59,6 +60,7 @@
+ #define SPRD_EIC_DATA_MASK		GENMASK(7, 0)
+ #define SPRD_EIC_BIT(x)			((x) & (SPRD_EIC_PER_BANK_NR - 1))
+ #define SPRD_EIC_DBNC_MASK		GENMASK(11, 0)
++#define UMS9117_EIC_DBNC_EN BIT(14)
+
+ /*
+  * The Spreadtrum EIC (external interrupt controller) can be used only in
+@@ -97,6 +99,7 @@ struct sprd_eic {
+ 	enum sprd_eic_type type;
+ 	raw_spinlock_t lock;
+ 	int irq;
++	bool has_debounce_enable;
+ };
+
+ static ATOMIC_NOTIFIER_HEAD(sprd_eic_irq_notifier);
+@@ -108,13 +111,21 @@ static struct sprd_eic *to_sprd_eic(struct notifier_block *nb)
+
+ struct sprd_eic_variant_data {
+ 	enum sprd_eic_type type;
++	bool has_debounce_enable;
+ };
+
+ static const char *sprd_eic_label_name[SPRD_EIC_MAX] = {
+-	"eic-debounce", "eic-latch", "eic-async",
++	"eic-debounce",
++	"eic-latch",
++	"eic-async",
+ 	"eic-sync",
+ };
+
++static const struct sprd_eic_variant_data ums9117_eic_dbnc_data = {
++	.type = SPRD_EIC_DEBOUNCE,
++	.has_debounce_enable = true,
++};
++
+ static const struct sprd_eic_variant_data sc9860_eic_dbnc_data = {
+ 	.type = SPRD_EIC_DEBOUNCE,
+ };
+@@ -219,6 +230,11 @@ static int sprd_eic_set_debounce(struct gpio_chip *chip, unsigned int offset,
+ 	u32 value = readl_relaxed(base + reg) & ~SPRD_EIC_DBNC_MASK;
+
+ 	value |= (debounce / 1000) & SPRD_EIC_DBNC_MASK;
++	if (sprd_eic->has_debounce_enable) {
++		value &= ~UMS9117_EIC_DBNC_EN;
++		if (debounce)
++			value |= UMS9117_EIC_DBNC_EN;
++	}
+ 	writel_relaxed(value, base + reg);
+
+ 	return 0;
+@@ -630,6 +646,18 @@ static int sprd_eic_probe(struct platform_device *pdev)
+
+ 	raw_spin_lock_init(&sprd_eic->lock);
+ 	sprd_eic->type = pdata->type;
++	sprd_eic->has_debounce_enable = pdata->has_debounce_enable;
++	if (pdata->has_debounce_enable) {
++		struct clk_bulk_data *clks;
++
++		ret = devm_clk_bulk_get_all_enabled(dev, &clks);
++		if (ret < 0)
++			return dev_err_probe(dev, ret,
++					     "failed to enable EIC clocks\n");
++		if (ret != 3)
++			return dev_err_probe(dev, -EINVAL,
++					     "three EIC clocks are required\n");
++	}
+
+ 	sprd_eic->irq = platform_get_irq(pdev, 0);
+ 	if (sprd_eic->irq < 0)
+@@ -701,6 +729,10 @@ static int sprd_eic_probe(struct platform_device *pdev)
+ }
+
+ static const struct of_device_id sprd_eic_of_match[] = {
++	{
++		.compatible = "sprd,ums9117-eic-debounce",
++		.data = &ums9117_eic_dbnc_data,
++	},
+ 	{
+ 		.compatible = "sprd,sc9860-eic-debounce",
+ 		.data = &sc9860_eic_dbnc_data,

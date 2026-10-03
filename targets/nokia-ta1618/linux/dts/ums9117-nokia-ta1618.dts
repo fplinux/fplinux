@@ -30,6 +30,30 @@
 	};
 
 	soc {
+		sdio_cd_mux: pinctrl@402a00dc {
+			compatible = "pinctrl-single";
+			reg = <0x402a00dc 0x4>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,register-width = <32>;
+			pinctrl-single,function-mask = <0x30>;
+
+			sdio_cd_mux_pins: sdio-cd-pins {
+				pinctrl-single,pins = <0x0 0x0>;
+			};
+		};
+
+		sdio_cd_pads: pinctrl@402a04dc {
+			compatible = "pinctrl-single";
+			reg = <0x402a04dc 0x4>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,register-width = <32>;
+			pinctrl-single,function-mask = <0x0033f8cf>;
+
+			sdio_cd_pad_pins: sdio-cd-pins {
+				pinctrl-single,pins = <0x0 0x0000208a>;
+			};
+		};
+
 		camera_mux: pinctrl@402a01e8 {
 			compatible = "pinctrl-single";
 			reg = <0x402a01e8 0xc>;
@@ -284,6 +308,8 @@
 };
 
 &sdio0_mmc {
+	pinctrl-0 = <&sdio0_mux &sdio0_pads
+		     &sdio_cd_mux_pins &sdio_cd_pad_pins>;
 	cd-gpios = <&eic2 0 GPIO_ACTIVE_LOW>;
 	status = "okay";
 };

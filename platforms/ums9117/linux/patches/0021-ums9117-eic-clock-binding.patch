@@ -1,0 +1,43 @@
+diff --git a/Documentation/devicetree/bindings/gpio/sprd,gpio-eic.yaml b/Documentation/devicetree/bindings/gpio/sprd,gpio-eic.yaml
+index ae0000d..8966db4 100644
+--- a/Documentation/devicetree/bindings/gpio/sprd,gpio-eic.yaml
++++ b/Documentation/devicetree/bindings/gpio/sprd,gpio-eic.yaml
+@@ -79,6 +79,16 @@ properties:
+       EIC controller can support maximum 3 banks which has its own
+       address base.
+
++  clocks:
++    minItems: 3
++    maxItems: 3
++
++  clock-names:
++    items:
++      - const: enable
++      - const: rtc
++      - const: rtcdv5
++
+   gpio-controller: true
+
+   "#gpio-cells":
+@@ -103,6 +113,21 @@ required:
+   - "#interrupt-cells"
+   - interrupts
+
++allOf:
++  - if:
++      properties:
++        compatible:
++          contains:
++            const: sprd,ums9117-eic-debounce
++    then:
++      required:
++        - clocks
++        - clock-names
++    else:
++      properties:
++        clocks: false
++        clock-names: false
++
+ additionalProperties: false
+
+ examples:
