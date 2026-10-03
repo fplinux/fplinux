@@ -212,11 +212,9 @@ static int ums9117_drm_dcs_common(struct ums9117_drm *udrm, u8 command,
 
 	if (!force && READ_ONCE(udrm->transport_faulted))
 		return -EIO;
-	if (IS_ENABLED(CONFIG_DRM_UMS9117_SPI) &&
-	    udrm->profile->transport == UMS9117_DRM_TRANSPORT_SPI1_3WIRE)
+	if (ums9117_drm_uses_spi(udrm))
 		ret = ums9117_drm_spi_dcs(udrm, command, data, length);
-	else if (IS_ENABLED(CONFIG_DRM_UMS9117_LCM) &&
-		 udrm->profile->transport == UMS9117_DRM_TRANSPORT_LCM_DBI)
+	else if (ums9117_drm_uses_lcm(udrm))
 		ret = ums9117_drm_lcm_dcs(udrm, command, data, length);
 	else
 		ret = -ENODEV;
@@ -289,11 +287,9 @@ static int ums9117_drm_run_commands(struct ums9117_drm *udrm,
 
 static int ums9117_drm_begin_transport_frame(struct ums9117_drm *udrm)
 {
-	if (IS_ENABLED(CONFIG_DRM_UMS9117_SPI) &&
-	    udrm->profile->transport == UMS9117_DRM_TRANSPORT_SPI1_3WIRE)
+	if (ums9117_drm_uses_spi(udrm))
 		return ums9117_drm_spi_begin_frame(udrm);
-	if (IS_ENABLED(CONFIG_DRM_UMS9117_LCM) &&
-	    udrm->profile->transport == UMS9117_DRM_TRANSPORT_LCM_DBI)
+	if (ums9117_drm_uses_lcm(udrm))
 		return ums9117_drm_lcm_begin_frame(udrm);
 	return -ENODEV;
 }
@@ -401,7 +397,8 @@ static int ums9117_drm_wake_panel(struct ums9117_drm *udrm)
 	const struct ums9117_drm_profile *profile = udrm->profile;
 	int ret;
 
-	if (profile->wake_finish) {
+	if (IS_ENABLED(CONFIG_DRM_UMS9117_WAKE_REINIT) &&
+	    profile->wake_finish) {
 		writel(readl(udrm->lcdc + UMS9117_LCDC_CTRL) | BIT(0),
 		       udrm->lcdc + UMS9117_LCDC_CTRL);
 		ret = ums9117_drm_reset_panel(udrm,
@@ -415,11 +412,15 @@ static int ums9117_drm_wake_panel(struct ums9117_drm *udrm)
 				profile->wake_finish_count);
 		return ret;
 	}
-	ret = ums9117_drm_dcs(udrm, MIPI_DCS_EXIT_SLEEP_MODE, NULL, 0);
-	if (ret)
-		return ret;
-	msleep(profile->sleep_out_ms);
-	return ums9117_drm_dcs(udrm, MIPI_DCS_SET_DISPLAY_ON, NULL, 0);
+	if (IS_ENABLED(CONFIG_DRM_UMS9117_WAKE_SLEEP_OUT) &&
+	    !profile->wake_finish) {
+		ret = ums9117_drm_dcs(udrm, MIPI_DCS_EXIT_SLEEP_MODE, NULL, 0);
+		if (ret)
+			return ret;
+		msleep(profile->sleep_out_ms);
+		return ums9117_drm_dcs(udrm, MIPI_DCS_SET_DISPLAY_ON, NULL, 0);
+	}
+	return -EINVAL;
 }
 
 static void __iomem *ums9117_drm_ioremap_shared(struct platform_device *pdev,
@@ -521,7 +522,7 @@ static int ums9117_drm_configure_pins(struct ums9117_drm *udrm,
 {
 	int ret = ums9117_drm_configure_pin_group(pdev, "pinmux", "pinconf");
 
-	if (ret || udrm->profile->transport != UMS9117_DRM_TRANSPORT_LCM_DBI)
+	if (ret || !ums9117_drm_uses_lcm(udrm))
 		return ret;
 	return ums9117_drm_configure_pin_group(pdev, "pinmux-data",
 					       "pinconf-data");
@@ -624,9 +625,7 @@ static int ums9117_drm_send_frame(struct ums9117_drm *udrm,
 	       udrm->lcdc + UMS9117_LCDC_Y2R_BRIGHTNESS);
 	value = readl(udrm->lcdc + UMS9117_LCDC_CAP_CTRL);
 	value &= ~(3 << 6);
-	value |= udrm->profile->transport == UMS9117_DRM_TRANSPORT_LCM_DBI ?
-			 2 << 6 :
-			 0;
+	value |= ums9117_drm_uses_lcm(udrm) ? 2 << 6 : 0;
 	value |= 0x20;
 	writel(value, udrm->lcdc + UMS9117_LCDC_CAP_CTRL);
 	writel(udrm->stream_phys >> 2, udrm->lcdc + UMS9117_LCDC_CAP_BASE);
@@ -671,13 +670,9 @@ static int ums9117_drm_cold_init(struct ums9117_drm *udrm)
 	if (!ret)
 		msleep(udrm->profile->reset_release_ms);
 	if (!ret) {
-		if (IS_ENABLED(CONFIG_DRM_UMS9117_SPI) &&
-		    udrm->profile->transport ==
-			    UMS9117_DRM_TRANSPORT_SPI1_3WIRE)
+		if (ums9117_drm_uses_spi(udrm))
 			ret = ums9117_drm_spi_post_reset(udrm);
-		else if (IS_ENABLED(CONFIG_DRM_UMS9117_LCM) &&
-			 udrm->profile->transport ==
-				 UMS9117_DRM_TRANSPORT_LCM_DBI)
+		else if (ums9117_drm_uses_lcm(udrm))
 			ret = ums9117_drm_lcm_post_reset(udrm);
 		else
 			ret = -ENODEV;
@@ -1042,9 +1037,7 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		"last_error_irq_status=0x%08x\n"
 		"last_error_irq_raw=0x%08x\n",
 		udrm->profile->name,
-		udrm->profile->transport == UMS9117_DRM_TRANSPORT_SPI1_3WIRE ?
-			"spi1-3wire" :
-			"lcm-dbi",
+		ums9117_drm_uses_spi(udrm) ? "spi1-3wire" : "lcm-dbi",
 		udrm->state, udrm->in_flight ? 1U : 0U,
 		!udrm->wled_known ? "unknown" :
 		udrm->wled_on	  ? "on" :
@@ -1092,6 +1085,18 @@ int ums9117_drm_probe(struct platform_device *pdev)
 	if (!profile || !profile->name || !profile->width || !profile->height ||
 	    !profile->init || !profile->init_count)
 		return -EINVAL;
+	if (!(IS_ENABLED(CONFIG_DRM_UMS9117_SPI) &&
+	      profile->transport == UMS9117_DRM_TRANSPORT_SPI1_3WIRE) &&
+	    !(IS_ENABLED(CONFIG_DRM_UMS9117_LCM) &&
+	      profile->transport == UMS9117_DRM_TRANSPORT_LCM_DBI))
+		return dev_err_probe(dev, -EINVAL,
+				     "panel transport not built\n");
+	if ((profile->wake_finish &&
+	     !IS_ENABLED(CONFIG_DRM_UMS9117_WAKE_REINIT)) ||
+	    (!profile->wake_finish &&
+	     !IS_ENABLED(CONFIG_DRM_UMS9117_WAKE_SLEEP_OUT)))
+		return dev_err_probe(dev, -EINVAL,
+				     "panel wake strategy not built\n");
 	udrm = devm_drm_dev_alloc(dev, &ums9117_drm_driver, struct ums9117_drm,
 				  drm);
 	if (IS_ERR(udrm))
@@ -1116,14 +1121,13 @@ int ums9117_drm_probe(struct platform_device *pdev)
 	ret = ums9117_drm_map_common_resources(udrm, pdev);
 	if (ret)
 		return ret;
-	if (IS_ENABLED(CONFIG_DRM_UMS9117_SPI) &&
-	    profile->transport == UMS9117_DRM_TRANSPORT_SPI1_3WIRE)
+	if (ums9117_drm_uses_spi(udrm))
 		ret = ums9117_drm_spi_init_transport(udrm, pdev);
-	else if (IS_ENABLED(CONFIG_DRM_UMS9117_LCM) &&
-		 profile->transport == UMS9117_DRM_TRANSPORT_LCM_DBI)
+	else if (ums9117_drm_uses_lcm(udrm))
 		ret = ums9117_drm_lcm_init_transport(udrm, pdev);
 	else
-		ret = -ENODEV;
+		ret = dev_err_probe(dev, -EINVAL,
+				    "panel transport not built\n");
 	if (ret)
 		return ret;
 	udrm->irq = platform_get_irq(pdev, 0);
@@ -1132,11 +1136,9 @@ int ums9117_drm_probe(struct platform_device *pdev)
 	writel(UMS9117_AP_AHB_LCDC_GATE | UMS9117_AP_AHB_LCM_GATE,
 	       udrm->ap_ahb_gate_set);
 	usleep_range(1000, 2000);
-	if (IS_ENABLED(CONFIG_DRM_UMS9117_SPI) &&
-	    profile->transport == UMS9117_DRM_TRANSPORT_SPI1_3WIRE)
+	if (ums9117_drm_uses_spi(udrm))
 		ret = ums9117_drm_spi_enable_transport(udrm);
-	else if (IS_ENABLED(CONFIG_DRM_UMS9117_LCM) &&
-		 profile->transport == UMS9117_DRM_TRANSPORT_LCM_DBI)
+	else if (ums9117_drm_uses_lcm(udrm))
 		ret = ums9117_drm_lcm_enable_transport(udrm);
 	else
 		ret = -ENODEV;
@@ -1175,11 +1177,11 @@ int ums9117_drm_probe(struct platform_device *pdev)
 	drm->mode_config.max_height = profile->height;
 	drm_connector_helper_add(&udrm->connector,
 				 &ums9117_drm_connector_helpers);
-	ret = drm_connector_init(
-		drm, &udrm->connector, &ums9117_drm_connector_funcs,
-		profile->transport == UMS9117_DRM_TRANSPORT_SPI1_3WIRE ?
-			DRM_MODE_CONNECTOR_SPI :
-			DRM_MODE_CONNECTOR_Unknown);
+	ret = drm_connector_init(drm, &udrm->connector,
+				 &ums9117_drm_connector_funcs,
+				 ums9117_drm_uses_spi(udrm) ?
+					 DRM_MODE_CONNECTOR_SPI :
+					 DRM_MODE_CONNECTOR_Unknown);
 	if (ret)
 		return ret;
 	ret = drm_simple_display_pipe_init(

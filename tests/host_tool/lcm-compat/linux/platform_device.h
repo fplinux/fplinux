@@ -5,7 +5,7 @@
 #include <linux/io.h>
 #include <linux/kernel.h>
 
-/* Init is compiled but discarded by the linker; these APIs are not faked. */
+/* The harness supplies named MMIO resources and the timing property. */
 struct device_node;
 struct device {
 	struct device_node *of_node;

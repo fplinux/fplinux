@@ -3,14 +3,21 @@
  * Host component: real LCM object and display layouts, fake kernel and MMIO.
  * Register facts are independent literals: CTRL +0, STATUS +8 bit 1 marks
  * writebufferBUSY, CS0 mode +0x10. Command/data writes occupy that buffer.
- * This checks transport admission and packing, not panel or bus timing.
+ * Initialization uses a fake timing property and named MMIO resources.
+ * This checks timing encoding and transport admission, not panel or bus timing.
  */
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
 #include <linux/iopoll.h>
+#include <linux/of.h>
 #include "ums9117-drm-internal.h"
+
+struct device_node {
+	const u32 *timings;
+	size_t timing_count;
+};
 
 static struct {
 	u32 registers[6];
@@ -23,6 +30,7 @@ static struct {
 	unsigned int unsafe_writes;
 } peripheral;
 static unsigned int failures;
+static struct resource data_resource = { .start = 0x60000000 };
 
 #define CHECK(condition, message)                                       \
 	do {                                                            \
@@ -31,6 +39,46 @@ static unsigned int failures;
 			failures++;                                     \
 		}                                                       \
 	} while (0)
+
+int of_property_read_u32_array(const struct device_node *node, const char *name,
+			       u32 *values, size_t count)
+{
+	if (!node || strcmp(name, "sprd,dbi-timing-ns") ||
+	    count != node->timing_count)
+		return -EINVAL;
+	memcpy(values, node->timings, count * sizeof(*values));
+	return 0;
+}
+
+void *devm_platform_ioremap_resource_byname(struct platform_device *pdev,
+					    const char *name)
+{
+	(void)pdev;
+	if (!strcmp(name, "lcm"))
+		return peripheral.registers;
+	if (!strcmp(name, "lcm-command"))
+		return &peripheral.command;
+	if (!strcmp(name, "lcm-data"))
+		return &peripheral.data;
+	return (void *)(intptr_t)-EINVAL;
+}
+
+struct resource *platform_get_resource_byname(struct platform_device *pdev,
+					      unsigned int type,
+					      const char *name)
+{
+	(void)pdev;
+	if (type == IORESOURCE_MEM && !strcmp(name, "lcm-data"))
+		return &data_resource;
+	return NULL;
+}
+
+int dev_err_probe(struct device *dev, int error, const char *format, ...)
+{
+	(void)dev;
+	(void)format;
+	return error;
+}
 
 u64 lcm_fake_time_us(void)
 {
@@ -84,6 +132,37 @@ static struct ums9117_drm reset_peripheral(void)
 		.lcm_command = &peripheral.command,
 		.lcm_data = &peripheral.data,
 	};
+}
+
+static void inoi244_timing_tuple_encodes_firmware_value(void)
+{
+	const u32 timings[] = { 5, 150, 150, 30, 80, 120 };
+	struct device_node node = {
+		.timings = timings,
+		.timing_count = ARRAY_SIZE(timings),
+	};
+	struct platform_device pdev = { .dev.of_node = &node };
+	struct ums9117_drm udrm = reset_peripheral();
+	int result = ums9117_drm_lcm_init_transport(&udrm, &pdev);
+
+	CHECK(result == 0, "valid timing tuple must initialize transport");
+	/* Independent packed word from the phone's stock firmware tables. */
+	CHECK(udrm.lcm_timing == 0x031d0bc1,
+	      "INOI 244 timing must match its firmware value");
+	CHECK(udrm.stream_phys == 0x60000000,
+	      "pixel stream must use the data resource address");
+}
+
+static void missing_timing_tuple_rejects_initialization(void)
+{
+	struct device_node node = {};
+	struct platform_device pdev = { .dev.of_node = &node };
+	struct ums9117_drm udrm = reset_peripheral();
+	int result = ums9117_drm_lcm_init_transport(&udrm, &pdev);
+
+	CHECK(result == -EINVAL, "missing timing tuple must be rejected");
+	CHECK(peripheral.writes == 0,
+	      "invalid timing must leave MMIO untouched");
 }
 
 static void busy_buffer_rejects_command_and_frame(void)
@@ -159,6 +238,8 @@ static void completed_ramwr_accepts_pixel_packing(void)
 
 int main(void)
 {
+	inoi244_timing_tuple_encodes_firmware_value();
+	missing_timing_tuple_rejects_initialization();
 	busy_buffer_rejects_command_and_frame();
 	completing_buffer_accepts_command_parameter();
 	stalled_ramwr_keeps_command_packing();

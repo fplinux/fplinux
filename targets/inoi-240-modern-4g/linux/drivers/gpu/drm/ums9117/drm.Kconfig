@@ -4,6 +4,7 @@ config DRM_INOI240
 	depends on DRM && MACH_INOI_240_MODERN_4G
 	select DRM_UMS9117
 	select DRM_UMS9117_LCM
+	select DRM_UMS9117_WAKE_SLEEP_OUT
 	help
 	  Drive the INOI 240 Modern 4G NV3023 panel through the UMS9117
 	  parallel LCM/DBI interface with atomic RGB565 and NV16 modesetting,

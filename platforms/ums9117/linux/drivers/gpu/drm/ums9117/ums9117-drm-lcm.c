@@ -57,7 +57,6 @@ static int ums9117_drm_lcm_init(struct ums9117_drm *udrm,
 				struct platform_device *pdev)
 {
 	u32 timings[6];
-	u32 packed;
 	int ret;
 
 	udrm->lcm = devm_platform_ioremap_resource_byname(pdev, "lcm");
@@ -77,13 +76,7 @@ static int ums9117_drm_lcm_init(struct ums9117_drm *udrm,
 	if (ret)
 		return dev_err_probe(&pdev->dev, ret,
 				     "six DBI timing values are required\n");
-	packed = ums9117_drm_lcm_dbi_timing(timings);
-	/* INOI 244 Modern 4G's source-backed tuple validates this calculation. */
-	if (timings[0] == 5 && timings[1] == 150 && timings[2] == 150 &&
-	    timings[3] == 30 && timings[4] == 80 && timings[5] == 120 &&
-	    WARN_ON_ONCE(packed != 0x031d0bc1))
-		return -EINVAL;
-	udrm->lcm_timing = packed;
+	udrm->lcm_timing = ums9117_drm_lcm_dbi_timing(timings);
 	udrm->stream_phys =
 		platform_get_resource_byname(pdev, IORESOURCE_MEM, "lcm-data")
 			->start;
