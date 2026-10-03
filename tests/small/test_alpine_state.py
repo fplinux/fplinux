@@ -8,6 +8,7 @@ import json
 import os
 import py_compile
 import re
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -291,13 +292,16 @@ class AlpineStateTests(unittest.TestCase):
         platform = ("fplinux-usb-gadget", "fplinux-ssh")
         for package in (*common, *platform):
             self._write(f"alpine/aports/{package}/APKBUILD", f"pkgname={package}\n".encode())
+        self._write(
+            "alpine/aports/fplinux-font-terminus/APKBUILD", b"pkgname=fplinux-font-terminus\n"
+        )
 
         with mock.patch.object(alpine_state, "COMMON_PACKAGES", common):
             selected = alpine_state.selected_packages(
                 {"rootfs": {"packages": list(platform)}},
                 {
                     "rootfs": {
-                        "base_packages": [],
+                        "base_packages": ["fplinux-font-terminus-6x12"],
                         "packages": [],
                         "exclude_packages": [
                             "fplinux-input",
@@ -309,7 +313,9 @@ class AlpineStateTests(unittest.TestCase):
                 self.root,
             )
 
-        self.assertEqual(selected, ("fplinux-base", "fplinux-terminal"))
+        self.assertEqual(
+            selected, ("fplinux-base", "fplinux-font-terminus-6x12", "fplinux-terminal")
+        )
 
     def test_profile_rootfs_rejects_unknown_excludes_and_duplicate_additions(self) -> None:
         """A profile cannot silently remove or repeat an unowned rootfs package."""
@@ -498,9 +504,105 @@ class AlpineStateTests(unittest.TestCase):
         self.assertNotEqual(before[self.packages[0]], after[self.packages[0]])
         self.assertEqual(before[self.packages[1]], after[self.packages[1]])
 
+    def test_font_source_changes_only_text_consumers_and_is_staged_for_each(self) -> None:
+        """A font-reader edit invalidates its three consumers and reaches their aport stages."""
+        consumers = ("fplinux-terminal", "fplinux-brightness-ui", "fplinux-showcase")
+        unrelated = "fplinux-present"
+        for name in (
+            *consumers,
+            unrelated,
+            "fplinux-font-terminus",
+            "fplinux-libdrm",
+            "fplinux-libtsm",
+            "fplinux-libxkbcommon",
+        ):
+            self._write(f"alpine/aports/{name}/APKBUILD", f"pkgname={name}\n".encode())
+        repository = Path(__file__).resolve().parents[2]
+        for directory in ("lib/fplinux", "include/fplinux"):
+            shutil.copytree(repository / directory, self.root / directory)
+        font_source = self._write("lib/fplinux/fplinux-font.c", b"fixture original font reader\n")
+        self._write("include/fplinux/fplinux-font.h", b"fixture font interface\n")
+        before = {
+            name: alpine_state.alpine_package_recipe(name, "1" * 64, self.signing_key, self.root)
+            for name in (*consumers, unrelated)
+        }
+
+        font_source.write_bytes(b"fixture changed font reader\n")
+
+        for name in consumers:
+            with self.subTest(consumer=name):
+                after = alpine_state.alpine_package_recipe(
+                    name, "1" * 64, self.signing_key, self.root
+                )
+                self.assertNotEqual(before[name], after)
+                stage = self.root / "stages" / name
+                alpine_builder.materialize_aport_sources(name, self.root, stage)
+                self.assertEqual(
+                    (stage / "fplinux-font.c").read_bytes(), b"fixture changed font reader\n"
+                )
+                self.assertEqual(
+                    (stage / "fplinux-font.h").read_bytes(), b"fixture font interface\n"
+                )
+        self.assertEqual(
+            before[unrelated],
+            alpine_state.alpine_package_recipe(unrelated, "1" * 64, self.signing_key, self.root),
+        )
+
+    def test_text_rootfs_requires_one_font_payload(self) -> None:
+        """Text applications cannot start with no default font or competing defaults."""
+        self._write(
+            "alpine/aports/fplinux-font-terminus/APKBUILD", b"pkgname=fplinux-font-terminus\n"
+        )
+        consumers = ("fplinux-terminal", "fplinux-brightness-ui", "fplinux-showcase")
+        for name in consumers:
+            self._write(f"alpine/aports/{name}/APKBUILD", f"pkgname={name}\n".encode())
+        small = "fplinux-font-terminus-6x12"
+        large = "fplinux-font-terminus-8x16"
+        for consumer in consumers:
+            for base, profile, excluded in (
+                ([], [], []),
+                ([small, large], [], []),
+                ([small], [large], []),
+                ([small], [], [small]),
+            ):
+                with (
+                    self.subTest(consumer=consumer, base=base, profile=profile, excluded=excluded),
+                    mock.patch.object(alpine_state, "COMMON_PACKAGES", (consumer,)),
+                    self.assertRaisesRegex(SystemExit, "exactly one Terminus font size"),
+                ):
+                    alpine_state.selected_packages(
+                        {"rootfs": {"packages": []}},
+                        {
+                            "rootfs": {
+                                "base_packages": base,
+                                "packages": profile,
+                                "exclude_packages": excluded,
+                            }
+                        },
+                        self.root,
+                    )
+            for selected_font in (small, large):
+                with (
+                    self.subTest(consumer=consumer, font=selected_font),
+                    mock.patch.object(alpine_state, "COMMON_PACKAGES", (consumer,)),
+                ):
+                    selected = alpine_state.selected_packages(
+                        {"rootfs": {"packages": []}},
+                        {
+                            "rootfs": {
+                                "base_packages": [selected_font],
+                                "packages": [],
+                                "exclude_packages": [],
+                            }
+                        },
+                        self.root,
+                    )
+                    self.assertEqual(set(selected), {consumer, selected_font})
+
     def test_library_changes_invalidate_consumer_recipes_only(self) -> None:
         """Library source and configuration changes invalidate linked APKs and rootfs inputs."""
         packages = (
+            "fplinux-font-terminus",
             "fplinux-libdrm",
             "fplinux-libtsm",
             "fplinux-libxkbcommon",

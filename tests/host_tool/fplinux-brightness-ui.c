@@ -81,8 +81,9 @@ maximum_bright_runs(const struct brightness_ui_surface *surface)
 {
 	unsigned int maximum = 0;
 
-	for (unsigned int row = surface->height / 2U;
-	     row < surface->height * 3U / 4U; ++row) {
+	for (unsigned int row = surface->height * 62U / 100U;
+	     row < surface->height * 62U / 100U + surface->height / 22U;
+	     ++row) {
 		unsigned int runs = 0;
 		bool in_run = false;
 
@@ -102,9 +103,24 @@ maximum_bright_runs(const struct brightness_ui_surface *surface)
 	return maximum;
 }
 
-static int check_render(const char *directory, unsigned int width,
-			unsigned int height)
+static size_t color_count(const struct brightness_ui_surface *surface,
+			  unsigned int first_row, unsigned int last_row,
+			  uint16_t color)
 {
+	size_t count = 0;
+
+	for (unsigned int row = first_row; row < last_row; ++row)
+		for (unsigned int column = 0; column < surface->width; ++column)
+			if (surface->pixels[(size_t)row * surface->width +
+					    column] == color)
+				++count;
+	return count;
+}
+
+static int check_render(const char *directory, unsigned int width,
+			unsigned int height, const char *font_path)
+{
+	struct fplinux_font font = { 0 };
 	uint16_t *pixels = calloc((size_t)width * height, sizeof(*pixels));
 	struct brightness_ui_surface surface = {
 		.pixels = pixels,
@@ -116,30 +132,40 @@ static int check_render(const char *directory, unsigned int width,
 
 	if (!pixels)
 		return 1;
-	if (!brightness_ui_render(&surface, 0U, false))
+	if (!fplinux_font_open(&font, font_path))
+		goto done;
+	if (!brightness_ui_render(&surface, &font, 0U, false))
 		goto done;
 	if (maximum_bright_runs(&surface) != 0U)
 		goto done;
-	if (!brightness_ui_render(&surface, 5U, false))
+	if (!brightness_ui_render(&surface, &font, 5U, false))
 		goto done;
 	if (maximum_bright_runs(&surface) != 5U)
 		goto done;
+	/* Solid fixture glyphs must fit completely, including the exit hint. */
+	if (color_count(&surface, 0U, height / 4U, 0x6b4dU) !=
+		    (width == 128U ? 2880U : 5120U) ||
+	    color_count(&surface, height * 88U / 100U, height, 0x6b4dU) !=
+		    (width == 128U ? 936U : 1664U))
+		goto done;
 	if (write_ppm(directory, width, height, pixels))
 		goto done;
-	if (!brightness_ui_render(&surface, 10U, true))
+	if (!brightness_ui_render(&surface, &font, 10U, true))
 		goto done;
 	if (maximum_bright_runs(&surface) != 10U)
 		goto done;
 	result = 0;
 done:
+	fplinux_font_close(&font);
 	free(pixels);
 	return result;
 }
 
 int main(int argc, char **argv)
 {
-	if (argc != 2 || check_keys() || check_render(argv[1], 128U, 160U) ||
-	    check_render(argv[1], 240U, 320U)) {
+	if (argc != 4 || check_keys() ||
+	    check_render(argv[1], 128U, 160U, argv[2]) ||
+	    check_render(argv[1], 240U, 320U, argv[3])) {
 		fprintf(stderr, "brightness UI host behavior failed\n");
 		return 1;
 	}

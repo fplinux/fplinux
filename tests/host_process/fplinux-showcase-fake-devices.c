@@ -22,10 +22,20 @@ static int vibrator = -1;
 static int dispatches;
 static int frames_presented;
 
+FILE *__real_fopen(const char *path, const char *mode);
 int __real_open(const char *path, int flags, ...);
 ssize_t __real_read(int fd, void *buffer, size_t size);
 ssize_t __real_write(int fd, const void *buffer, size_t size);
 int __real_connect(int fd, const struct sockaddr *address, socklen_t length);
+
+FILE *__wrap_fopen(const char *path, const char *mode)
+{
+	const char *font_path = getenv("SHOWCASE_FONT_PATH");
+
+	if (font_path && !strcmp(path, "/usr/share/fplinux/fonts/default.psf"))
+		path = font_path;
+	return __real_fopen(path, mode);
+}
 
 int __wrap_open(const char *path, int flags, ...)
 {

@@ -54,6 +54,7 @@ class TerminalEngineTests(unittest.TestCase):
                     str(TERMINAL / "terminal-help.c"),
                     str(TERMINAL / "terminal-pty.c"),
                     str(TERMINAL / "terminal-render.c"),
+                    str(ROOT / "lib/fplinux/fplinux-font.c"),
                     str(ROOT / "lib/fplinux/fplinux-multitap.c"),
                     "-ltsm",
                     "-o",

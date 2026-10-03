@@ -27,7 +27,7 @@
 
 struct terminal_app {
 	struct fplinux_terminal terminal;
-	struct fplinux_terminal_font font;
+	struct fplinux_font font;
 	struct fplinux_terminal_pty pty;
 	struct fplinux_terminal_keyboard keyboard;
 	struct fplinux_input_session input;
@@ -379,7 +379,7 @@ static void close_app(struct terminal_app *app)
 						       NULL);
 		fplinux_drm_session_close(&app->display);
 	}
-	fplinux_terminal_font_close(&app->font);
+	fplinux_font_close(&app->font);
 	fplinux_terminal_destroy(&app->terminal);
 }
 
@@ -426,14 +426,13 @@ int main(int argc, char **argv)
 		goto fail;
 	app.display_open = true;
 	font = options[2].value;
-	if (!font)
-		font = app.display.width < 200 ?
-			       "/usr/share/fplinux/terminal/ter-u12n.psf" :
-			       "/usr/share/fplinux/terminal/ter-u16n.psf";
-	if (!fplinux_terminal_font_open(&app.font, font)) {
+	if (font && !fplinux_font_open(&app.font, font)) {
 		snprintf(error, sizeof(error), "cannot load font %s", font);
 		goto fail;
 	}
+	if (!font && !fplinux_font_open_default(&app.font, app.display.width,
+						error, sizeof(error)))
+		goto fail;
 	columns = app.display.width / app.font.width;
 	rows = app.display.height / app.font.height;
 	if (columns < 16 || rows < 4) {

@@ -760,6 +760,7 @@ int main(int argc, char **argv)
 	struct showcase_options options;
 	struct frame_statistics statistics = { 0 };
 	struct armada_scene *scene = NULL;
+	struct fplinux_font font = { 0 };
 	uint16_t *pixels = NULL;
 	uint64_t frame_limit;
 	uint64_t completed_runs = 0;
@@ -817,6 +818,11 @@ int main(int argc, char **argv)
 			"fplinux-showcase: expected two-page RGB565 240x320 or 128x160 framebuffer\n");
 		goto cleanup;
 	}
+	if (!fplinux_font_open_default(&font, display.width, error,
+				       sizeof(error))) {
+		fprintf(stderr, "fplinux-showcase: %s\n", error);
+		goto cleanup;
+	}
 	pixels =
 		calloc((size_t)display.width * display.height, sizeof(*pixels));
 	if (!pixels) {
@@ -824,7 +830,8 @@ int main(int argc, char **argv)
 			"fplinux-showcase: cannot allocate render surface\n");
 		goto cleanup;
 	}
-	scene = armada_scene_create(display.width, display.height, pixels);
+	scene = armada_scene_create(display.width, display.height, pixels,
+				    &font);
 	if (!scene) {
 		fprintf(stderr, "fplinux-showcase: cannot create scene: %s\n",
 			strerror(errno));
@@ -966,6 +973,7 @@ int main(int argc, char **argv)
 
 cleanup:
 	armada_scene_destroy(scene);
+	fplinux_font_close(&font);
 	free(pixels);
 	if (display_open)
 		fplinux_drm_session_set_active_handler(&display, NULL, NULL);

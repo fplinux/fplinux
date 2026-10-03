@@ -6,7 +6,7 @@ pkgdesc="FPLinux ARMADA synchronized hardware showcase"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="GPL-2.0-only"
-depends="fplinux-base"
+depends="fplinux-base fplinux-font-terminus-data"
 makedepends_build="clang22 lld22 pkgconf"
 makedepends_host="musl-dev linux-headers fplinux-libdrm-dev"
 options="!check"
@@ -18,6 +18,8 @@ source="
 	fplinux-drm-session.h
 	fplinux-cli.c
 	fplinux-cli.h
+	fplinux-font.c
+	fplinux-font.h
 	fplinux-brightness-client.c
 	fplinux-brightness-client.h
 	fplinux-keypad.h
@@ -34,6 +36,7 @@ build() {
 		"$srcdir/fplinux-showcase.c" \
 		"$srcdir/fplinux-drm-session.c" \
 		"$srcdir/fplinux-brightness-client.c" \
+		"$srcdir/fplinux-font.c" \
 		"$srcdir/fplinux-cli.c" $(pkg-config --libs libdrm) $LDFLAGS -Wl,--gc-sections -o fplinux-showcase
 }
 
@@ -43,13 +46,15 @@ package() {
 }
 
 sha512sums="
-cb7c0dbabbfab1113d61c74cf820ec26e20c9d1e56869704c6c59309a435c6cb47bf26fc122aef7e5ddc108706da63b4d00f0440507d366ec7a973cdb3b114ea  armada-scene.c
-f9849712bb86e7211089acb8e78b8ed6ce20cf65adcd5419c860b05d7da800820da8d2afbf614649fd8c95095f04631612d1758fd32fc9657ed08f83998fc2d6  armada-scene.h
-a520bcd7ed31a85fc8a336122721a94f942e9ed3c4a06443f5d6a0753db6542a5e195ac6184f8081b2b37efc1ef14d2a8c205f573d2c060d8377902ca41a740a  fplinux-showcase.c
+882dd1ac656f846f98c9e42e9abcf60e4b6d4829035fede809f25d338c14ad8f245ceb0bb643dfa6b5efb96460f723e5f8112d0bd5773b6dbcb09683541a46c4  armada-scene.c
+593896def94ae1843c926eb8bd5c7abb22b884213948f40e63b705efd9de56077f146c4adb42337daae9a9e95ad37a09245e4fbaae48af44140c9e6555e5e437  armada-scene.h
+e2a329de035ba24484f7675dc5ff48eb9a03ddb29836b230e02388f133d347ee18892da931f4776c73147c31108715d980d90524b6aa6f60218e66429acad946  fplinux-showcase.c
 24d96f52eeb3adb9b37e34967199a0efea630af580782fe2f29000862b678d5ae96b4516e291b61ca70a8d9242af43fc720d801e158c7933e957cda0aaf5afdd  fplinux-drm-session.c
 5b63a683e9aac0a4b1faef31c0a09b9ec4131992d5cb69f858c6276855a8d92404c4cf23a1b4c8927d802311e9634b354502745ef15e00a4209744acf51131a7  fplinux-drm-session.h
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
+9372fbc7468837b10e4e944e02a336761bc1ef91792f62403db3e413f1140d5dc7ca9184ab1c41b22cd16d04e908d830ca354e87ed05aa9f8a6d59b0fe220055  fplinux-font.c
+62ed7c5f099fdbc896254fe700e0722e1f1894ca494f4cec368e77866f9ae59f58b3bef727fffd8cff1d6ad66c6956743a4a052efb394c73b0b47f79f8510be7  fplinux-font.h
 a16c1b2b84831be3da5bbf1d198c827a4bfde8bb435e4ac6d52777ca8472cedc700be5007a4320e6ffcafcf3ff3183a0de4e7068a94576e0016ca9b09c650bcf  fplinux-brightness-client.c
 031e8a9a9fed64c19b947d6d1b7510f2bf0dd76ae7712cd23f8fbf838a28e29eefec2adaa772070f75c930a42bf0e77290825ea88fd545800dbca30bdd61f0ee  fplinux-brightness-client.h
 0a6d41b98223953b0b890be3041fba31e7878e6752094ed439b1e1e7e9240b2c7bf175ae671d05485ee25fa9ae74e45ddc63e9592768bd5d19e6e4ae6765a978  fplinux-keypad.h

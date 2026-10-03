@@ -61,6 +61,19 @@ static int frame_has_detail(const uint16_t *pixels, size_t count)
 	return different > count / 16U;
 }
 
+static size_t color_count(const uint16_t *pixels, unsigned int width,
+			  unsigned int first_row, unsigned int rows,
+			  uint16_t color)
+{
+	size_t count = 0;
+
+	for (unsigned int row = first_row; row < first_row + rows; ++row)
+		for (unsigned int column = 0; column < width; ++column)
+			if (pixels[(size_t)row * width + column] == color)
+				++count;
+	return count;
+}
+
 static int output_cases_match(struct armada_scene *scene,
 			      const struct armada_metrics *metrics,
 			      const struct output_expectation *expectations,
@@ -87,7 +100,8 @@ static int output_cases_match(struct armada_scene *scene,
 	return 1;
 }
 
-static int render_case(unsigned int width, unsigned int height)
+static int render_case(unsigned int width, unsigned int height,
+		       const char *font_path)
 {
 	static const uint32_t frames[] = {
 		0U,   42U,   43U,   44U,   45U,	  45U,	 58U,	42U,
@@ -148,6 +162,7 @@ static int render_case(unsigned int width, unsigned int height)
 		malloc((count + 2U * GUARD_PIXELS) * sizeof(*storage));
 	uint16_t *pixels;
 	struct armada_scene *scene;
+	struct fplinux_font font = { 0 };
 	size_t index;
 
 	if (!storage)
@@ -155,10 +170,36 @@ static int render_case(unsigned int width, unsigned int height)
 	for (index = 0; index < count + 2U * GUARD_PIXELS; ++index)
 		storage[index] = GUARD_VALUE;
 	pixels = storage + GUARD_PIXELS;
-	scene = armada_scene_create(width, height, pixels);
-	if (!scene) {
+	if (!fplinux_font_open(&font, font_path)) {
 		free(storage);
 		return EXIT_FAILURE;
+	}
+	scene = armada_scene_create(width, height, pixels, &font);
+	if (!scene) {
+		fplinux_font_close(&font);
+		free(storage);
+		return EXIT_FAILURE;
+	}
+	{
+		struct armada_outputs outputs;
+		unsigned int glyph_height = width == 128U ? 12U : 16U;
+
+		armada_scene_render(scene, 0U, &metrics, &outputs);
+		/* Complete solid glyphs prove both overlay lines fit their surfaces. */
+		if (color_count(pixels, width, height / 12U, glyph_height,
+				0xe7bfU) != (width == 128U ? 936U : 1664U) ||
+		    color_count(pixels, width, height - glyph_height - 2U,
+				glyph_height,
+				0x3f1fU) != (width == 128U ? 1296U : 2304U))
+			goto fail;
+		armada_scene_render(scene, 1020U, &metrics, &outputs);
+		if (color_count(pixels, width, height * 3U / 4U, glyph_height,
+				0x3f1fU) != (width == 128U ? 720U : 1280U) ||
+		    color_count(pixels, width,
+				height * 3U / 4U + glyph_height + 2U,
+				glyph_height,
+				0xe7bfU) != (width == 128U ? 1008U : 1792U))
+			goto fail;
 	}
 	for (index = 0; index < sizeof(frames) / sizeof(frames[0]); ++index) {
 		struct armada_outputs first_outputs;
@@ -175,7 +216,7 @@ static int render_case(unsigned int width, unsigned int height)
 		    !frame_has_detail(pixels, count))
 			goto fail;
 		/* Playback, repeated frames and seeks must produce the same image/cues. */
-		fresh = armada_scene_create(width, height, pixels);
+		fresh = armada_scene_create(width, height, pixels, &font);
 		if (!fresh)
 			goto fail;
 		/* A fresh destination's previous contents are not a scene input. */
@@ -211,19 +252,22 @@ static int render_case(unsigned int width, unsigned int height)
 			goto fail;
 	}
 	armada_scene_destroy(scene);
+	fplinux_font_close(&font);
 	free(storage);
 	return EXIT_SUCCESS;
 
 fail:
 	armada_scene_destroy(scene);
+	fplinux_font_close(&font);
 	free(storage);
 	return EXIT_FAILURE;
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
-	return render_case(240U, 320U) == EXIT_SUCCESS &&
-			       render_case(128U, 160U) == EXIT_SUCCESS ?
+	return argc == 3 && render_case(240U, 320U, argv[2]) == EXIT_SUCCESS &&
+			       render_case(128U, 160U, argv[1]) ==
+				       EXIT_SUCCESS ?
 		       EXIT_SUCCESS :
 		       EXIT_FAILURE;
 }

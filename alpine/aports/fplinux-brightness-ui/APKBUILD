@@ -6,7 +6,7 @@ pkgdesc="Keypad control for the phone LCD level"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="GPL-2.0-only"
-depends="fplinux-base fplinux-input"
+depends="fplinux-base fplinux-input fplinux-font-terminus-data"
 makedepends_build="clang22 lld22 pkgconf llvm22"
 makedepends_host="musl-dev linux-headers fplinux-libdrm-dev libevdev-dev eudev-dev"
 options="!check"
@@ -18,6 +18,8 @@ source="
 	fplinux-brightness-client.h
 	fplinux-cli.c
 	fplinux-cli.h
+	fplinux-font.c
+	fplinux-font.h
 	fplinux-drm-session.c
 	fplinux-drm-session.h
 	fplinux-input-session.c
@@ -42,6 +44,7 @@ build() {
 		"$srcdir/brightness-ui.c" \
 		"$srcdir/fplinux-brightness-client.c" \
 		"$srcdir/fplinux-cli.c" \
+		"$srcdir/fplinux-font.c" \
 		"$srcdir/fplinux-drm-session.c" \
 		"$srcdir/fplinux-input-session.c" \
 		$(pkg-config --libs libdrm libevdev) -ludev \
@@ -54,13 +57,15 @@ package() {
 }
 
 sha512sums="
-1a2011bacfce39a2484a7bba756f79ac8e21d8f71c6cd4585daabb2ae769e7032514df166198948589329a60afd3539671c19f821a2160d99c0da74b950bcf59  fplinux-brightness-ui.c
-e5fbaf73bd64824b198f6ceaec745bf780633a72cd6105fa0a987cf5ca6bc8a457e1fac493fc581a53850b6cc89a90b63acf3f631fcef7c400468b84f439c414  brightness-ui.c
-46fd93addd02349c8d19826a09106bd35d71bdebbac17378a69964cc3690826a40a7c337d27b6b707e7367087e87a815373330e9f9a16da3eafa2566e8be3bcc  brightness-ui.h
+5f060b7a482c7e5733a99b11e1a7b4b2c0fcce000bf5b0badcc9a7d9bafa1e13246e71c28a594e3e76cc2aca603b846b6e414b99602b3cea68559a1df1245341  fplinux-brightness-ui.c
+7cb77fcc3e8514ddab5b386d2f20122b91fccc64c7ee82f9ae23de41d674a2ff411048e002475476fb1ad16e8436a86c71a889f0b0f26ec33753632ce01b22e0  brightness-ui.c
+cc78d7448638216d15ac68589e08218785e72d02c2c8d3f7b09bd42eb0bf2266f40125548f746a2992a80ebf5e91b64583a7f3be8fd4322854d556126f9c9855  brightness-ui.h
 a16c1b2b84831be3da5bbf1d198c827a4bfde8bb435e4ac6d52777ca8472cedc700be5007a4320e6ffcafcf3ff3183a0de4e7068a94576e0016ca9b09c650bcf  fplinux-brightness-client.c
 031e8a9a9fed64c19b947d6d1b7510f2bf0dd76ae7712cd23f8fbf838a28e29eefec2adaa772070f75c930a42bf0e77290825ea88fd545800dbca30bdd61f0ee  fplinux-brightness-client.h
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
+9372fbc7468837b10e4e944e02a336761bc1ef91792f62403db3e413f1140d5dc7ca9184ab1c41b22cd16d04e908d830ca354e87ed05aa9f8a6d59b0fe220055  fplinux-font.c
+62ed7c5f099fdbc896254fe700e0722e1f1894ca494f4cec368e77866f9ae59f58b3bef727fffd8cff1d6ad66c6956743a4a052efb394c73b0b47f79f8510be7  fplinux-font.h
 24d96f52eeb3adb9b37e34967199a0efea630af580782fe2f29000862b678d5ae96b4516e291b61ca70a8d9242af43fc720d801e158c7933e957cda0aaf5afdd  fplinux-drm-session.c
 5b63a683e9aac0a4b1faef31c0a09b9ec4131992d5cb69f858c6276855a8d92404c4cf23a1b4c8927d802311e9634b354502745ef15e00a4209744acf51131a7  fplinux-drm-session.h
 8157caf7642468c98be9d4d03aa4a24cf360714015caa4365f037d10c1528a4e757d614a818e0b3a0a20c48f9b0063f9b2f8e331334af9127a670a130ded40da  fplinux-input-session.c

@@ -13,6 +13,7 @@
 #include <string.h>
 
 struct brightness_app {
+	struct fplinux_font font;
 	struct fplinux_brightness_client brightness;
 	struct fplinux_drm_session display;
 	struct fplinux_input_session input;
@@ -71,7 +72,8 @@ static bool present(struct brightness_app *app)
 		.stride_bytes = app->display.stride,
 	};
 
-	if (!brightness_ui_render(&surface, app->level, app->set_failed)) {
+	if (!brightness_ui_render(&surface, &app->font, app->level,
+				  app->set_failed)) {
 		errno = EINVAL;
 		return false;
 	}
@@ -164,6 +166,7 @@ static bool close_app(struct brightness_app *app)
 {
 	bool restored = true;
 
+	fplinux_font_close(&app->font);
 	if (app->input_open)
 		fplinux_input_session_close(&app->input);
 	if (app->display_open) {
@@ -222,6 +225,12 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	app.display_open = true;
+	if (!fplinux_font_open_default(&app.font, app.display.width, error,
+				       sizeof(error))) {
+		fprintf(stderr, "fplinux-brightness-ui: %s\n", error);
+		close_app(&app);
+		return 1;
+	}
 	if (!fplinux_input_session_open(
 		    &app.input,
 		    FPLINUX_INPUT_SOURCE_MASK(FPLINUX_INPUT_SOURCE_KEYPAD),

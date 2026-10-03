@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests.fixtures.psf_font import write_solid_ascii_font
 from tests.process import run_process
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -22,6 +23,10 @@ class FplinuxShowcaseHostToolTests(unittest.TestCase):
         """Protect bounds, frame-history independence, cues, and loop wrapping."""
         with tempfile.TemporaryDirectory() as temporary:
             executable = Path(temporary) / "fplinux-showcase-test"
+            small_font = Path(temporary) / "small.psf"
+            large_font = Path(temporary) / "large.psf"
+            write_solid_ascii_font(small_font, width=6, height=12)
+            write_solid_ascii_font(large_font, width=8, height=16)
             run_process(
                 [
                     "cc",
@@ -31,8 +36,10 @@ class FplinuxShowcaseHostToolTests(unittest.TestCase):
                     "-Wextra",
                     "-Werror",
                     f"-I{APORT}",
+                    f"-I{ROOT / 'include/fplinux'}",
                     str(HARNESS),
                     str(SCENE),
+                    str(ROOT / "lib/fplinux/fplinux-font.c"),
                     "-o",
                     str(executable),
                 ],
@@ -41,7 +48,7 @@ class FplinuxShowcaseHostToolTests(unittest.TestCase):
                 check=True,
             )
             run_process(
-                [str(executable)],
+                [str(executable), str(small_font), str(large_font)],
                 name="run FPLinux showcase host harness",
                 timeout=30,
                 check=True,

@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests.fixtures.psf_font import write_solid_ascii_font
 from tests.process import run_process
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -21,6 +22,10 @@ class BrightnessUiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)
             executable = temporary / "brightness-ui-host"
+            small_font = temporary / "small.psf"
+            large_font = temporary / "large.psf"
+            write_solid_ascii_font(small_font, width=6, height=12)
+            write_solid_ascii_font(large_font, width=8, height=16)
             run_process(
                 [
                     "cc",
@@ -34,6 +39,7 @@ class BrightnessUiTests(unittest.TestCase):
                     str(APP),
                     str(ROOT / "tests/host_tool/fplinux-brightness-ui.c"),
                     str(APP / "brightness-ui.c"),
+                    str(ROOT / "lib/fplinux/fplinux-font.c"),
                     "-o",
                     str(executable),
                 ],
@@ -42,7 +48,7 @@ class BrightnessUiTests(unittest.TestCase):
                 check=True,
             )
             result = run_process(
-                [str(executable), str(temporary)],
+                [str(executable), str(temporary), str(small_font), str(large_font)],
                 name="run brightness UI host behavior",
                 timeout=10,
                 check=False,

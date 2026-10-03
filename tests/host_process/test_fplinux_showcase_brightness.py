@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 from typing import ClassVar
 
+from tests.fixtures.psf_font import write_solid_ascii_font
 from tests.process import run_process
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -54,10 +55,12 @@ class FplinuxShowcaseBrightnessTests(unittest.TestCase):
                 f"-I{SHARED}",
                 str(APORT / "fplinux-showcase.c"),
                 str(APORT / "armada-scene.c"),
+                str(ROOT / "lib/fplinux/fplinux-font.c"),
                 str(ROOT / "lib/fplinux/fplinux-brightness-client.c"),
                 str(ROOT / "lib/fplinux/fplinux-cli.c"),
                 str(FAKE_DEVICES),
                 "-Wl,--wrap=open",
+                "-Wl,--wrap=fopen",
                 "-Wl,--wrap=ioctl",
                 "-Wl,--wrap=read",
                 "-Wl,--wrap=write",
@@ -71,9 +74,15 @@ class FplinuxShowcaseBrightnessTests(unittest.TestCase):
             check=True,
         )
 
-    def run_showcase(self, *, extra_frame: bool = False, vt_cycle: bool = False) -> list[str]:
+    def run_showcase(
+        self,
+        *,
+        extra_frame: bool = False,
+        vt_cycle: bool = False,
+        font_error: str | None = None,
+    ) -> list[str]:
         """Collect requests sent over a test-owned Unix socket during a scene."""
-        case = self.work / self._testMethodName
+        case = self.work / (self._testMethodName + (f"-{font_error}" if font_error else ""))
         case.mkdir()
         keypad_led = case / "keypad"
         keypad_led.mkdir()
@@ -103,6 +112,14 @@ class FplinuxShowcaseBrightnessTests(unittest.TestCase):
             worker.start()
             environment = os.environ.copy()
             environment["SHOWCASE_BRIGHTNESS_SOCKET"] = str(socket_path)
+            font_path = case / "font.psf"
+            if font_error == "malformed":
+                font_path.write_bytes(b"not a PSF font")
+            elif font_error == "wrong-size":
+                write_solid_ascii_font(font_path, width=8, height=16)
+            elif font_error != "missing":
+                write_solid_ascii_font(font_path, width=6, height=12)
+            environment["SHOWCASE_FONT_PATH"] = str(font_path)
             if extra_frame or vt_cycle:
                 environment["SHOWCASE_EXTRA_FRAME"] = "1"
             if vt_cycle:
@@ -117,12 +134,35 @@ class FplinuxShowcaseBrightnessTests(unittest.TestCase):
 
         self.assertFalse(worker.is_alive(), "brightness service did not stop")
         self.assertEqual(server_errors, [])
-        self.assertEqual(result.returncode, 0, result.stderr)
+        if font_error:
+            self.assertEqual(result.returncode, 1, result.stderr)
+            if font_error == "wrong-size":
+                self.assertIn(
+                    "default font is 8x16; 128-pixel display requires 6x12", result.stderr
+                )
+            else:
+                self.assertIn(
+                    "cannot load font /usr/share/fplinux/fonts/default.psf", result.stderr
+                )
+            self.assertEqual(result.stdout, "")
+        else:
+            self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             (keypad_led / "brightness").read_text(encoding="ascii").splitlines()[0],
             "1",
         )
         return requests
+
+    def test_missing_or_malformed_font_reports_error_and_releases_lease(self) -> None:
+        """Font startup errors restore the LED and the acquired brightness lease."""
+        for font_error in ("missing", "malformed"):
+            with self.subTest(font_error=font_error):
+                requests = self.run_showcase(font_error=font_error)
+                self.assertEqual(requests, ["CLAIM", "RELEASE"])
+
+    def test_wrong_default_font_size_reports_error_and_releases_lease(self) -> None:
+        """An installed 8x16 default cannot silently render on the 128-pixel display."""
+        self.assertEqual(self.run_showcase(font_error="wrong-size"), ["CLAIM", "RELEASE"])
 
     def test_scene_previews_logical_level_and_releases_on_exit(self) -> None:
         """An active scene previews a logical level and gives back its lease."""

@@ -1,0 +1,45 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-font-terminus
+pkgver=4.49.1
+pkgrel=0
+pkgdesc="Terminus bitmap fonts for FPLinux applications"
+url="https://terminus-font.sourceforge.net/"
+arch="noarch"
+license="OFL-1.1"
+makedepends_build="python3"
+subpackages="$pkgname-6x12:font_6x12 $pkgname-8x16:font_8x16"
+options="!check"
+source="terminus-font-$pkgver.tar.gz::https://downloads.sourceforge.net/project/terminus-font/terminus-font-4.49/terminus-font-$pkgver.tar.gz"
+builddir="$srcdir/terminus-font-$pkgver"
+
+build() {
+	python3 bin/bdftopsf.py -2 -o ter-u12n.psf ter-u12n.bdf
+	python3 bin/bdftopsf.py -2 -o ter-u16n.psf ter-u16n.bdf
+}
+
+package() {
+	install -Dm644 ter-u12n.psf "$pkgdir/usr/share/fplinux/fonts/ter-u12n.psf"
+	install -Dm644 ter-u16n.psf "$pkgdir/usr/share/fplinux/fonts/ter-u16n.psf"
+	install -Dm644 OFL.TXT "$pkgdir/usr/share/licenses/$pkgname/Terminus-OFL.txt"
+}
+
+_font() {
+	pkgdesc="Terminus $1 bitmap font for FPLinux applications"
+	depends=""
+	provides="fplinux-font-terminus-data"
+	amove "usr/share/fplinux/fonts/$2"
+	ln -s "$2" "$subpkgdir/usr/share/fplinux/fonts/default.psf"
+	install -Dm644 "$srcdir/terminus-font-$pkgver/OFL.TXT" \
+		"$subpkgdir/usr/share/licenses/$subpkgname/Terminus-OFL.txt"
+}
+
+font_6x12() {
+	_font 6x12 ter-u12n.psf
+}
+
+font_8x16() {
+	_font 8x16 ter-u16n.psf
+}
+sha512sums="
+2e3a99960c459a453b5879bebbebeb653f0a22060177bf75c67bbeb7d32cfe1acce9e74a88fdc42e299b6dc402e0708552487abd26e80e985c7d6059b0d445a8  terminus-font-4.49.1.tar.gz
+"

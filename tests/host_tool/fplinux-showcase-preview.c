@@ -37,12 +37,13 @@ static void indicator(uint16_t *pixels, unsigned int x, uint16_t color,
 			       dx] = enabled ? color : 0x2104;
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
 	uint16_t *pixels =
 		calloc((size_t)PREVIEW_WIDTH * PREVIEW_HEIGHT, sizeof(*pixels));
 	uint8_t *rgb = malloc((size_t)PREVIEW_WIDTH * PREVIEW_HEIGHT * 3U);
 	struct armada_scene *scene;
+	struct fplinux_font font = { 0 };
 	struct armada_metrics metrics = {
 		.average_fps_tenths = 300,
 		.minimum_fps_tenths = 300,
@@ -51,14 +52,24 @@ int main(void)
 	};
 	uint32_t frame;
 
-	if (!pixels || !rgb) {
+	if (argc != 2 || !pixels || !rgb) {
 		fprintf(stderr, "fplinux-showcase-preview: out of memory\n");
 		free(rgb);
 		free(pixels);
 		return EXIT_FAILURE;
 	}
-	scene = armada_scene_create(PREVIEW_WIDTH, PREVIEW_HEIGHT, pixels);
+	if (!fplinux_font_open(&font, argv[1])) {
+		fprintf(stderr,
+			"fplinux-showcase-preview: cannot load font %s\n",
+			argv[1]);
+		free(rgb);
+		free(pixels);
+		return EXIT_FAILURE;
+	}
+	scene = armada_scene_create(PREVIEW_WIDTH, PREVIEW_HEIGHT, pixels,
+				    &font);
 	if (!scene) {
+		fplinux_font_close(&font);
 		fprintf(stderr, "fplinux-showcase-preview: scene: %s\n",
 			strerror(errno));
 		free(rgb);
@@ -88,12 +99,14 @@ int main(void)
 					"fplinux-showcase-preview: write: %s\n",
 					strerror(errno));
 			armada_scene_destroy(scene);
+			fplinux_font_close(&font);
 			free(rgb);
 			free(pixels);
 			return errno == EPIPE ? EXIT_SUCCESS : EXIT_FAILURE;
 		}
 	}
 	armada_scene_destroy(scene);
+	fplinux_font_close(&font);
 	free(rgb);
 	free(pixels);
 	return EXIT_SUCCESS;
