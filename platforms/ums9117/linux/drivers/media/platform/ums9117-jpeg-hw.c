@@ -486,6 +486,7 @@ unlock:
 	return ret;
 }
 
+#if IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0)
 int ums9117_dcam_capture_route_serial_g0(struct ums9117_jpeg_hw *hw)
 {
 	if (WARN_ON(!hw->owner_active || hw->owner != UMS9117_DCAM_CAPTURE))
@@ -493,6 +494,7 @@ int ums9117_dcam_capture_route_serial_g0(struct ums9117_jpeg_hw *hw)
 	return regmap_update_bits(hw->aon_apb, DCAM_CCIR_ROUTE,
 				  DCAM_CCIR_ROUTE_PARALLEL, 0);
 }
+#endif
 
 void ums9117_dcam_release(struct ums9117_jpeg_hw *hw,
 			  enum ums9117_dcam_owner owner)
@@ -533,11 +535,16 @@ int ums9117_dcam_capture_start(struct ums9117_jpeg_hw *hw, dma_addr_t dma,
 	u32 status;
 	int ret;
 
+	serial_g0 =
+		IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0) &&
+		(!IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_PARALLEL) || serial_g0);
 	if (WARN_ON(!hw->owner_active || hw->owner != UMS9117_DCAM_CAPTURE))
 		return -EINVAL;
-	if (!(serial_g0 ? (width == 240 && height == 320) :
-			  ((width == 800 && height == 600) ||
-			   (width == 1600 && height == 1200))) ||
+	if (!((IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0) && serial_g0 &&
+	       width == 240 && height == 320) ||
+	      (IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_PARALLEL) && !serial_g0 &&
+	       ((width == 800 && height == 600) ||
+		(width == 1600 && height == 1200)))) ||
 	    skip_frames > 15)
 		return -EINVAL;
 	y_bytes = width * height;
@@ -635,6 +642,7 @@ int ums9117_dcam_capture_finish(struct ums9117_jpeg_hw *hw)
 	return result;
 }
 
+#if IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0)
 int ums9117_dcam_capture_timeout(struct ums9117_jpeg_hw *hw)
 {
 	u32 status = jpeg_read(hw, JPEG_INT_STATUS);
@@ -652,6 +660,7 @@ int ums9117_dcam_capture_timeout(struct ums9117_jpeg_hw *hw)
 		status, raw, ahb, cap, frames, ret);
 	return result;
 }
+#endif
 
 static void *jpeg_buffer_data(struct ums9117_jpeg_dma_buffer *buffer)
 {

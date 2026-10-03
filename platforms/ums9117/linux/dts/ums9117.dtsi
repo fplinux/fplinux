@@ -64,7 +64,6 @@
 		codec_dma: codec-dma-pool {
 			compatible = "shared-dma-pool";
 			reusable;
-			size = <0x00400000>;
 		};
 	};
 
@@ -437,15 +436,6 @@
 			memory-region = <&codec_dma>;
 			sprd,aon-apb = <&aon_apb>;
 			status = "disabled";
-			port {
-				dcam_in: endpoint {
-					bus-type = <5>;
-					bus-width = <8>;
-					hsync-active = <1>;
-					vsync-active = <0>;
-					pclk-sample = <0>;
-				};
-			};
 		};
 
 		usb: usb@20200000 {

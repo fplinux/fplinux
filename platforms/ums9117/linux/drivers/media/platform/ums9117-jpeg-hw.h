@@ -2,6 +2,8 @@
 #ifndef FPLINUX_UMS9117_JPEG_HW_H
 #define FPLINUX_UMS9117_JPEG_HW_H
 
+#include <linux/errno.h>
+#include <linux/kconfig.h>
 #include <linux/types.h>
 
 struct platform_device;
@@ -40,14 +42,28 @@ bool ums9117_jpeg_hw_failed(struct ums9117_jpeg_hw *hw);
 int ums9117_dcam_claim(struct ums9117_jpeg_hw *hw,
 		       enum ums9117_dcam_owner owner,
 		       void (*capture_irq)(void *data, u32 status), void *data);
-int ums9117_dcam_capture_route_serial_g0(struct ums9117_jpeg_hw *hw);
 void ums9117_dcam_release(struct ums9117_jpeg_hw *hw,
 			  enum ums9117_dcam_owner owner);
 int ums9117_dcam_capture_start(struct ums9117_jpeg_hw *hw, dma_addr_t dma,
 			       u32 width, u32 height, unsigned int skip_frames,
 			       bool serial_g0);
 int ums9117_dcam_capture_finish(struct ums9117_jpeg_hw *hw);
-int ums9117_dcam_capture_timeout(struct ums9117_jpeg_hw *hw);
 int ums9117_dcam_capture_stop(struct ums9117_jpeg_hw *hw);
+
+#if IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0)
+int ums9117_dcam_capture_route_serial_g0(struct ums9117_jpeg_hw *hw);
+int ums9117_dcam_capture_timeout(struct ums9117_jpeg_hw *hw);
+#else
+static inline int
+ums9117_dcam_capture_route_serial_g0(struct ums9117_jpeg_hw *hw)
+{
+	return -EOPNOTSUPP;
+}
+
+static inline int ums9117_dcam_capture_timeout(struct ums9117_jpeg_hw *hw)
+{
+	return -EOPNOTSUPP;
+}
+#endif
 
 #endif

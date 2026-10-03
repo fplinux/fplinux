@@ -23,9 +23,30 @@ config VIDEO_UMS9117_JPEG
 	select V4L2_MEM2MEM_DEV
 	select V4L2_JPEG_HELPER
 	select MEDIA_CONTROLLER
-	select V4L2_FWNODE
+	select V4L2_ASYNC
 	select VIDEOBUF2_DMA_CONTIG
 	select VIDEOBUF2_VMALLOC
 	help
 	  JPEG decode, encode and scaling through the UMS9117 VSP, and
-	  camera capture through the shared DCAM when a sensor is connected.
+	  camera capture through the shared DCAM when a camera input route
+	  is enabled and a sensor is connected.
+	  Select the input route matching the board's DCAM endpoint.
+
+config VIDEO_UMS9117_DCAM_PARALLEL
+	bool "UMS9117 parallel camera input"
+	depends on VIDEO_UMS9117_JPEG
+	select V4L2_FWNODE
+	help
+	  Capture NV16 frames through an 8-bit parallel camera input.
+	  The DCAM endpoint describes the bus width and signal polarities.
+	  Enable this in the board fragment when that route is connected.
+	  The input route is checked before the capture device is registered.
+
+config VIDEO_UMS9117_DCAM_SERIAL_G0
+	bool "UMS9117 serial-G0 camera input"
+	depends on VIDEO_UMS9117_JPEG
+	help
+	  Capture NV16 frames through a one-bit serial-G0 camera input.
+	  The DCAM endpoint declares sprd,serial-g0-data-width for this route.
+	  Enable this in the board fragment when that route is connected.
+	  The input route is checked before the capture device is registered.
