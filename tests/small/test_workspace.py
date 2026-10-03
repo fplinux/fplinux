@@ -14,8 +14,10 @@ from unittest import mock
 
 from fplinux_cli import alpine_state, common
 from fplinux_cli import workspace as workspace_module
+from fplinux_cli.build import bootstrap as bootstrap_build
 from fplinux_cli.manifests import targets
 from fplinux_cli.manifests.linux import discover_linux_targets
+from fplinux_cli.manifests.platforms import load_platform
 
 from tests.fixtures import linux_inputs
 
@@ -453,6 +455,55 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                 ).recipe
             self.assertNotEqual(before_ram, after_ram)
             self.assertEqual(before_sd, after_sd)
+
+    def test_staged_bootstrap_reads_panel_and_font_inputs_for_ram_and_sd(self) -> None:
+        """The staged consumer reads its full recipe and reacts to its font interface."""
+        sources = common.load_toml(common.ROOT / "sources.lock.toml")
+        for profile in (None, "microsd-uboot"):
+            with self.subTest(profile=profile):
+                target = targets.load_target("nokia-ta1618", profile)
+                platform = load_platform(target["platform"])
+                expected = bootstrap_build.bootstrap_recipe_digest(
+                    sources, "nokia-ta1618", target, platform
+                )
+                snapshot = workspace_module.workspace_snapshot(
+                    workspace_module.target_build_source_files("nokia-ta1618", profile)
+                )
+                with tempfile.TemporaryDirectory() as temporary:
+                    with mock.patch.object(workspace_module, "ROOT", Path(temporary)):
+                        staged = workspace_module.stage_workspace_snapshot(snapshot)
+                    command = (
+                        "import sys; from fplinux_cli import common; "
+                        "from fplinux_cli.build.bootstrap import bootstrap_recipe_digest; "
+                        "from fplinux_cli.manifests.targets import load_target; "
+                        "from fplinux_cli.manifests.platforms import load_platform; "
+                        "target = load_target('nokia-ta1618', sys.argv[1] or None); "
+                        "platform = load_platform(target['platform']); "
+                        "sources = common.load_toml(common.ROOT / 'sources.lock.toml'); "
+                        "print(bootstrap_recipe_digest(sources, 'nokia-ta1618', target, platform))"
+                    )
+
+                    def staged_digest(command: str, profile: str | None, staged: Path) -> str:
+                        result = subprocess.run(
+                            [sys.executable, "-B", "-c", command, profile or ""],
+                            cwd=staged,
+                            env={"PYTHONPATH": str(staged / "scripts")},
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                            timeout=20,
+                        )
+                        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                        return result.stdout.strip()
+
+                    self.assertEqual(staged_digest(command, profile, staged), expected)
+                    (staged / "unrelated.c").write_bytes(b"int unrelated;\n")
+                    self.assertEqual(staged_digest(command, profile, staged), expected)
+                    header = staged / "bootstrap/fplinux-boot-screen/linux/font.h"
+                    header.write_bytes(
+                        header.read_bytes() + b"\n/* Changed compile interface. */\n"
+                    )
+                    self.assertNotEqual(staged_digest(command, profile, staged), expected)
 
     def test_staged_ram_producer_reads_causal_bootstrap_snapshot(self) -> None:
         """The normal staged producer reads boot source captured by the target snapshot."""

@@ -85,3 +85,9 @@ path = "platforms/ums9117/bootstrap/ums9117-linux.ld"
 precedence = "override"
 SPDX-FileCopyrightText = "fpdoom contributors"
 SPDX-License-Identifier = "Unlicense"
+
+[[annotations]]
+path = "targets/*/bootstrap/lcd_config.h"
+precedence = "override"
+SPDX-FileCopyrightText = "fpdoom contributors"
+SPDX-License-Identifier = "Unlicense"

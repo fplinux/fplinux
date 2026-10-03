@@ -138,18 +138,26 @@ def load_target(
     string_array(linux.get("forbidden_config"), "target linux forbidden_config")
     string_array(linux.get("forbidden_dtb_markers"), "target linux forbidden_dtb_markers")
 
+    raw_bootstrap = config.get("bootstrap")
+    has_lcd_config = isinstance(raw_bootstrap, dict) and "lcd_config" in raw_bootstrap
     bootstrap = exact_table(
-        config.get("bootstrap"),
+        raw_bootstrap,
         {
             "image",
             "map",
             "dtb_destination",
             "record_prefix",
+            *({"lcd_config"} if has_lcd_config else set()),
         },
         "target bootstrap",
     )
     for key in ("image", "map", "dtb_destination"):
         relative_value(bootstrap.get(key), f"target bootstrap {key}")
+    lcd_config = (
+        relative_value(bootstrap["lcd_config"], "target bootstrap lcd_config")
+        if has_lcd_config
+        else None
+    )
     try:
         record_prefix = validate_record_prefix(bootstrap.get("record_prefix"))
     except IdentityError as error:
@@ -292,6 +300,7 @@ def load_target(
             profile_bootstrap["map"] if bootstrap_kind == "uboot-stage0" else bootstrap["map"]
         ),
         "record_prefix": record_prefix,
+        "lcd_config": lcd_config,
         "kernel_destination": platform_bootstrap["kernel_destination"],
         "dtb_destination": bootstrap["dtb_destination"],
         "load_address": (

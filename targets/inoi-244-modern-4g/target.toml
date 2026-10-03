@@ -70,6 +70,7 @@ source = "linux/drivers/gpu/drm/ums9117/drm.Makefile"
 destination = "drivers/gpu/drm/ums9117/Makefile"
 
 [bootstrap]
+lcd_config = "bootstrap/lcd_config.h"
 image = "inoi244_linux_bootstrap.bin"
 map = "obj/inoi244_linux_bootstrap_map.txt"
 dtb_destination = "inoi244.dtb"

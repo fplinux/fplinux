@@ -128,6 +128,7 @@ def bootstrap_recipe_digest(
         path: sha256_bytes(contents)
         for path, contents in generated_bootstrap_files(target_config, platform).items()
     }
+    lcd_config = target_bootstrap.get("lcd_config")
     manifest = {
         "target": target,
         "target_bootstrap": target_bootstrap,
@@ -136,6 +137,16 @@ def bootstrap_recipe_digest(
             inputs_build.target_source(target, target_bootstrap["source"])
         ),
         "shared_copies": shared_copies,
+        "lcd_config": (
+            {
+                "source": lcd_config,
+                "sha256": sha256_file(
+                    inputs_build.require_file(inputs_build.target_source(target, lcd_config))
+                ),
+            }
+            if lcd_config is not None
+            else None
+        ),
         "patches": [
             {
                 "path": relative,
@@ -461,7 +472,18 @@ def build_bootstrap(  # noqa: PLR0913 -- source selection and payload inputs sta
     if not isinstance(commit, str) or not commit:
         fail("bootstrap vendor commit must be a non-empty string")
     prefix = platform_bootstrap["archive_prefix"].replace("{commit}", commit)
-    sources_build.extract_vendor(archive, prefix, platform_bootstrap["files"], vendor)
+    files = list(platform_bootstrap["files"])
+    lcd_config = target_bootstrap.get("lcd_config")
+    lcd_destination = platform_bootstrap["lcd_config_destination"]
+    if lcd_config is None:
+        files.append(lcd_destination)
+    sources_build.extract_vendor(archive, prefix, files, vendor)
+    if lcd_config is not None:
+        destination = vendor / lcd_destination
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(
+            inputs_build.require_file(inputs_build.target_source(target, lcd_config)), destination
+        )
     sources_build.apply_patches(
         vendor,
         [
