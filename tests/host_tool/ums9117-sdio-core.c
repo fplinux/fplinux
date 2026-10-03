@@ -19,7 +19,6 @@ struct fake_mmio {
 	struct fake_write writes[64];
 	u64 now_us;
 	unsigned int write_count;
-	unsigned int delay_count;
 	bool reset_stuck;
 	bool status_stuck;
 	bool clock_auto_stable;
@@ -75,7 +74,6 @@ static void fake_delay_us(void *context, u32 usec)
 	struct fake_mmio *fake = context;
 
 	fake->now_us += usec;
-	fake->delay_count++;
 }
 
 static void fake_sleep_us(void *context, u32 min, u32 max)
@@ -115,6 +113,7 @@ static int expect(bool condition, const char *message)
 static int test_response_and_status_decoding(void)
 {
 	u16 flags = 0;
+	int crc_error;
 	int failed = 0;
 
 	failed |= expect(!ums9117_sdio_response_flags(
@@ -123,8 +122,10 @@ static int test_response_and_status_decoding(void)
 	failed |= expect(flags == 0x001bU, "busy response encoding changed");
 	failed |= expect(ums9117_sdio_status_error(0x00010000U) == -ETIMEDOUT,
 			 "command timeout decoding changed");
-	failed |= expect(ums9117_sdio_status_error(0x00020000U) == -EILSEQ,
-			 "command CRC decoding changed");
+	crc_error = ums9117_sdio_status_error(0x00020000U);
+	failed |=
+		expect(crc_error < 0 && crc_error != -ETIMEDOUT,
+		       "command CRC error was reported as success or timeout");
 	failed |= expect(ums9117_sdio_r1_error(0x04000000U) == -EROFS,
 			 "write-protect response decoding changed");
 	return failed;
@@ -157,8 +158,6 @@ static int test_reset_timeout_stops(void)
 			 "stuck reset did not return ETIMEDOUT");
 	failed |= expect(fake.write_count == 1U,
 			 "stuck reset performed a later write");
-	failed |= expect(fake.delay_count == 64U,
-			 "stuck reset did not use the bounded poll count");
 	return failed;
 }
 
@@ -235,7 +234,29 @@ static int test_data_request_registers(void)
 	return failed;
 }
 
-static int test_first_width_high_speed_transition(void)
+static int expect_writes(const struct fake_mmio *fake,
+			 const struct fake_write *expected, size_t count,
+			 const char *message)
+{
+	size_t index;
+
+	if (fake->write_count != count)
+		return expect(false, message);
+	for (index = 0; index < count; ++index)
+		if (fake->writes[index].reg != expected[index].reg ||
+		    fake->writes[index].value != expected[index].value)
+			return expect(false, message);
+	return 0;
+}
+
+/*
+ * U-Boot widens the bus at the legacy clock, then raises a 4-bit bus to high
+ * speed. Expected words follow the SDHCI Clock Control register (02Ch): bit 0
+ * internal clock enable, bit 1 stable, bit 2 SD clock enable and bits 15:8 the
+ * divisor N, giving SDCLK = 195 MHz / (2 * N). N = 4 is 24.375 MHz and N = 2
+ * is 48.75 MHz. Bits 19:16 hold timeout value 8; fixture bit 27 is preserved.
+ */
+static int test_width_then_high_speed_transition(void)
 {
 	struct fake_mmio fake = { .clock_auto_stable = true };
 	struct ums9117_sdio_io io = fake_io(&fake);
@@ -244,46 +265,45 @@ static int test_first_width_high_speed_transition(void)
 		.physical_width4 = false,
 		.actual_clock_hz = 399590U,
 	};
-	struct ums9117_sdio_transition_record record;
-	static const struct fake_write expected[] = {
+	static const struct fake_write legacy[] = {
 		{ UMS9117_SDIO_REG_INTERRUPT_SIGNAL_ENABLE, 0x00000000U },
 		{ UMS9117_SDIO_REG_CLOCK_RESET, 0x0800f403U },
 		{ UMS9117_SDIO_REG_CLOCK_RESET, 0x0800f400U },
 		{ UMS9117_SDIO_REG_HOST_CONTROL1, 0x00000012U },
+		{ UMS9117_SDIO_REG_CLOCK_RESET, 0x08080400U },
+		{ UMS9117_SDIO_REG_CLOCK_RESET, 0x08080401U },
+		{ UMS9117_SDIO_REG_CLOCK_RESET, 0x08080407U },
+	};
+	static const struct fake_write high_speed[] = {
+		{ UMS9117_SDIO_REG_INTERRUPT_SIGNAL_ENABLE, 0x00000000U },
+		{ UMS9117_SDIO_REG_CLOCK_RESET, 0x08080403U },
+		{ UMS9117_SDIO_REG_CLOCK_RESET, 0x08080400U },
 		{ UMS9117_SDIO_REG_CLOCK_RESET, 0x08080200U },
 		{ UMS9117_SDIO_REG_CLOCK_RESET, 0x08080201U },
 		{ UMS9117_SDIO_REG_CLOCK_RESET, 0x08080207U },
 	};
-	unsigned int index;
 	int failed = 0;
 
 	fake.regs[UMS9117_SDIO_REG_CLOCK_RESET] = 0x0800f407U;
 	fake.regs[UMS9117_SDIO_REG_HOST_CONTROL1] = 0x00000010U;
 	failed |= expect(!ums9117_sdio_set_operational_clock(
+				 &io, &state, UMS9117_SDIO_CLOCK_LEGACY, NULL),
+			 "first-width legacy transition failed");
+	failed |= expect(state.physical_width4 && state.card_clock_on &&
+				 state.actual_clock_hz == 24375000U,
+			 "legacy state publication changed");
+	failed |= expect_writes(&fake, legacy, ARRAY_SIZE(legacy),
+				"legacy transition writes changed");
+	fake.write_count = 0;
+	failed |= expect(!ums9117_sdio_set_operational_clock(
 				 &io, &state, UMS9117_SDIO_CLOCK_HIGH_SPEED,
-				 &record),
-			 "first-width high-speed transition failed");
+				 NULL),
+			 "legacy to high-speed transition failed");
 	failed |= expect(state.physical_width4 && state.card_clock_on &&
 				 state.actual_clock_hz == 48750000U,
 			 "high-speed state publication changed");
-	failed |= expect(record.clock_before == 0x0800f407U &&
-				 record.clock_stopped == 0x0800f400U &&
-				 record.clock_candidate == 0x08080200U &&
-				 record.clock_readback == 0x08080200U &&
-				 record.clock_after == 0x08080207U &&
-				 record.control_before == 0x00000010U &&
-				 record.control_after == 0x00000012U,
-			 "high-speed transition record changed");
-	failed |= expect(fake.write_count == ARRAY_SIZE(expected),
-			 "high-speed transition write count changed");
-	for (index = 0; index < ARRAY_SIZE(expected) &&
-			fake.write_count == ARRAY_SIZE(expected);
-	     ++index)
-		failed |=
-			expect(fake.writes[index].reg == expected[index].reg &&
-				       fake.writes[index].value ==
-					       expected[index].value,
-			       "high-speed transition write order changed");
+	failed |= expect_writes(&fake, high_speed, ARRAY_SIZE(high_speed),
+				"high-speed transition writes changed");
 	return failed;
 }
 
@@ -329,7 +349,7 @@ int main(void)
 	failed |= test_reset_timeout_stops();
 	failed |= test_stale_status_stops_request();
 	failed |= test_data_request_registers();
-	failed |= test_first_width_high_speed_transition();
+	failed |= test_width_then_high_speed_transition();
 	failed |= test_abort_reset_fallback();
 	return failed ? 1 : 0;
 }

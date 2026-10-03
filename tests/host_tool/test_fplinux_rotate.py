@@ -60,8 +60,8 @@ class FplinuxRotateHostToolTests(unittest.TestCase):
                 check=True,
             )
 
-    def test_cpu_cli_writes_ram_result_and_stable_measurement(self) -> None:
-        """Protect the installable CLI's raw result and benchmark interface."""
+    def test_cpu_cli_rotates_generated_image_and_reports_measurement(self) -> None:
+        """Without --input, a 90-degree CPU rotation swaps the generated image's dimensions."""
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             executable = directory / "fplinux-rotate"
@@ -86,7 +86,6 @@ class FplinuxRotateHostToolTests(unittest.TestCase):
                     "240",
                     "--rotate",
                     "90",
-                    "--verify",
                     "--iterations",
                     "2",
                     "--output",
@@ -99,6 +98,7 @@ class FplinuxRotateHostToolTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("benchmark stage=selected engine=cpu iterations=2", result.stdout)
             self.assertIn("process_user_us=", result.stdout)
+            self.assertIn("result format=rgb565 width=240 height=320 ", result.stdout)
             self.assertEqual(output.stat().st_size, 240 * 320 * 2)
 
 

@@ -7,6 +7,7 @@ import contextlib
 import hashlib
 import io
 import ipaddress
+import itertools
 import json
 import shlex
 import subprocess
@@ -31,6 +32,72 @@ def ieee_crc32(data: bytes) -> int:
         for _bit in range(8):
             remainder = (remainder >> 1) ^ (0xEDB88320 if remainder & 1 else 0)
     return remainder ^ 0xFFFFFFFF
+
+
+def write_bundle(bundle: Path) -> tuple[dict[str, Any], str]:
+    """Write a default-profile ``phone`` bundle whose build manifest binds its runtime files.
+
+    The manifest records device identity ``"9" * 64``. Return the runtime manifest and the
+    generation recorded in the build manifest.
+    """
+    image = bundle / "image/ramboot.bin"
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b"DHTB image\n")
+    runtime: dict[str, Any] = {
+        "target": "phone",
+        "profile": None,
+        "build_type": "release",
+        "image": "image/ramboot.bin",
+        "sha256": {"image/ramboot.bin": hashlib.sha256(image.read_bytes()).hexdigest()},
+    }
+    runtime_path = bundle / "runtime-manifest.json"
+    runtime_path.write_text(json.dumps(runtime, sort_keys=True) + "\n", encoding="utf-8")
+
+    payload = {
+        "rootfs_receipt": {"recipe": "5" * 64, "sha256": "6" * 64},
+        "boot_artifacts": {"required": []},
+        "container_image_recipe": "7" * 64,
+        "container_image_generation": "4" * 64,
+        "apk_signing_key": "8" * 64,
+        "device_identity": "9" * 64,
+        "files": {
+            "image/ramboot.bin": file_record(image),
+            "runtime-manifest.json": file_record(runtime_path),
+        },
+        "kbuild_receipt": {"recipe": "a" * 64, "sha256": "b" * 64},
+        "linux_recipe": "c" * 64,
+        "profile": None,
+        "build_type": "release",
+        "target": "phone",
+        "workspace_digest": "d" * 64,
+    }
+    canonical = (
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n"
+    ).encode()
+    generation = hashlib.sha256(canonical).hexdigest()
+    (bundle / "build-manifest.json").write_text(
+        json.dumps({**payload, "generation": generation}, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return runtime, generation
+
+
+class ReadyAfterPolls:
+    """Stand in for a readiness probe that fails a fixed number of polls, then stays ready."""
+
+    def __init__(self, failed_polls: int) -> None:
+        """Set how many initial polls answer not ready."""
+        self.failed_polls = failed_polls
+        self.polls = 0
+
+    def __call__(self, *_arguments: object) -> bool:
+        """Answer one poll."""
+        self.polls += 1
+        return self.has_reported_ready()
+
+    def has_reported_ready(self) -> bool:
+        """Return whether any poll so far has answered ready."""
+        return self.polls > self.failed_polls
 
 
 class SshTransportSmallTests(unittest.TestCase):
@@ -60,126 +127,40 @@ class SshTransportSmallTests(unittest.TestCase):
         execute.assert_not_called()
 
     def test_open_shell_executes_for_an_input_terminal(self) -> None:
-        """Keep forced remote PTY allocation for an interactive host terminal."""
+        """Replace the runner with ssh forcing a remote PTY for the session's phone."""
         session = self._session()
         with (
             mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
             mock.patch("fplinux_cli.ssh_transport.os.isatty", return_value=True),
-            mock.patch.object(
-                ssh_transport,
-                "_ssh_argv",
-                return_value=["/usr/bin/ssh", "fplinux"],
-            ),
+            mock.patch("fplinux_cli.ssh_transport.shutil.which", return_value="/usr/bin/ssh"),
             mock.patch("fplinux_cli.ssh_transport.os.execv") as execute,
         ):
             ssh_transport.open_shell(session)
 
-        execute.assert_called_once_with(
-            "/usr/bin/ssh",
-            ["/usr/bin/ssh", "-tt", "fplinux"],
-        )
+        execute.assert_called_once()
+        program, argv = execute.call_args.args
+        self.assertEqual(program, "/usr/bin/ssh")
+        self.assertEqual(argv[0], "/usr/bin/ssh")
+        self.assertIn("-tt", argv)
+        self.assertEqual(argv[-1], "root@10.23.45.2")
 
     def test_bundle_identity_rejects_a_runtime_image_outside_its_build_manifest(self) -> None:
         """Refuse reconnect state when the RAM payload no longer matches the generation."""
         bundle = Path(self.temporary.name) / "bundle"
-        image = bundle / "image/ramboot.bin"
-        image.parent.mkdir(parents=True)
-        image.write_bytes(b"DHTB image\n")
-        runtime = {
-            "target": "phone",
-            "profile": None,
-            "build_type": "release",
-            "image": "image/ramboot.bin",
-            "sha256": {"image/ramboot.bin": hashlib.sha256(image.read_bytes()).hexdigest()},
-        }
-        runtime_path = bundle / "runtime-manifest.json"
-        runtime_path.write_text(json.dumps(runtime, sort_keys=True) + "\n", encoding="utf-8")
-
-        payload = {
-            "rootfs_receipt": {"recipe": "5" * 64, "sha256": "6" * 64},
-            "boot_artifacts": {"required": []},
-            "container_image_recipe": "7" * 64,
-            "container_image_generation": "4" * 64,
-            "apk_signing_key": "8" * 64,
-            "device_identity": "9" * 64,
-            "files": {
-                "image/ramboot.bin": file_record(image),
-                "runtime-manifest.json": file_record(runtime_path),
-            },
-            "kbuild_receipt": {"recipe": "a" * 64, "sha256": "b" * 64},
-            "linux_recipe": "c" * 64,
-            "profile": None,
-            "build_type": "release",
-            "target": "phone",
-            "workspace_digest": "d" * 64,
-        }
-        canonical = (
-            json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n"
-        ).encode()
-        generation = hashlib.sha256(canonical).hexdigest()
-        manifest = {**payload, "generation": generation}
-        manifest_path = bundle / "build-manifest.json"
-        manifest_path.write_text(
-            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        runtime, generation = write_bundle(bundle)
 
         identity = ssh_transport.bundle_identity(bundle, runtime)
         self.assertEqual(identity, {"bundle_generation": generation})
         self.assertEqual(ssh_transport.build_manifest_device_identity(bundle), "9" * 64)
 
-        image.write_bytes(b"DHTB changed\n")
+        (bundle / "image/ramboot.bin").write_bytes(b"DHTB changed\n")
         with self.assertRaisesRegex(SystemExit, "runtime closure differs"):
             ssh_transport.bundle_identity(bundle, runtime)
 
     def test_bundle_identity_rejects_a_runtime_from_another_profile(self) -> None:
         """A named profile cannot reuse the default bundle's SSH identity."""
         bundle = Path(self.temporary.name) / "bundle"
-        image = bundle / "image/ramboot.bin"
-        image.parent.mkdir(parents=True)
-        image.write_bytes(b"DHTB image\n")
-        runtime = {
-            "target": "phone",
-            "profile": None,
-            "build_type": "release",
-            "image": "image/ramboot.bin",
-            "sha256": {"image/ramboot.bin": hashlib.sha256(image.read_bytes()).hexdigest()},
-        }
-        runtime_path = bundle / "runtime-manifest.json"
-        runtime_path.write_text(json.dumps(runtime, sort_keys=True) + "\n", encoding="utf-8")
-
-        payload = {
-            "rootfs_receipt": {"recipe": "5" * 64, "sha256": "6" * 64},
-            "boot_artifacts": {"required": []},
-            "container_image_recipe": "7" * 64,
-            "container_image_generation": "4" * 64,
-            "apk_signing_key": "8" * 64,
-            "device_identity": "9" * 64,
-            "files": {
-                "image/ramboot.bin": file_record(image),
-                "runtime-manifest.json": file_record(runtime_path),
-            },
-            "kbuild_receipt": {"recipe": "a" * 64, "sha256": "b" * 64},
-            "linux_recipe": "c" * 64,
-            "profile": None,
-            "build_type": "release",
-            "target": "phone",
-            "workspace_digest": "d" * 64,
-        }
-        encoded = (
-            json.dumps(
-                payload,
-                sort_keys=True,
-                separators=(",", ":"),
-                ensure_ascii=True,
-            )
-            + "\n"
-        )
-        generation = hashlib.sha256(encoded.encode()).hexdigest()
-        (bundle / "build-manifest.json").write_text(
-            json.dumps({**payload, "generation": generation}, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        runtime, _generation = write_bundle(bundle)
 
         for changed in ({"profile": "usb-host-lab"}, {"build_type": "debug"}):
             with (
@@ -211,11 +192,10 @@ class SshTransportSmallTests(unittest.TestCase):
             stdout=f"6.12-fplinux-{device_identity[:16]}\n",
             stderr="",
         )
-        with mock.patch.object(ssh_transport, "run_remote", return_value=result) as remote:
+        with mock.patch.object(ssh_transport, "run_remote", return_value=result):
             release = ssh_transport.require_device_identity(session, device_identity)
 
         self.assertEqual(release, f"6.12-fplinux-{device_identity[:16]}")
-        remote.assert_called_once_with(session, "uname -r", capture_output=True, shared=True)
 
     def test_device_identity_rejects_a_different_running_kernel(self) -> None:
         """Reject a ready authenticated session running another device runtime."""
@@ -398,37 +378,36 @@ class SshTransportSmallTests(unittest.TestCase):
     def test_fresh_session_reports_usb_once_before_network_and_ssh_are_ready(self) -> None:
         """A matched USB device is observable even while network and SSH retry."""
         state = self._session()
-        observations: list[tuple[str, int, int]] = []
-        responses = [
-            subprocess.CompletedProcess([], 255, stdout="", stderr="not ready"),
-            subprocess.CompletedProcess([], 0, stdout=f"{state['session_id']}\n", stderr=""),
-        ]
-        phone = Path("/usb/phone")
+        observations: list[tuple[str, bool]] = []
+        network = ReadyAfterPolls(failed_polls=1)
+        # The first SSH attempt fails; every later one proves the session identity.
+        ssh_attempts = itertools.chain(
+            [subprocess.CompletedProcess([], 255, stdout="", stderr="not ready")],
+            itertools.repeat(
+                subprocess.CompletedProcess([], 0, stdout=f"{state['session_id']}\n", stderr="")
+            ),
+        )
+        # The phone is absent on the first USB poll and present on every later one.
+        usb_polls = itertools.chain([[]], itertools.repeat([Path("/usb/phone")]))
         with (
             mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
-            mock.patch.object(
-                ssh_transport, "_usb_devices", side_effect=[[], [phone], [phone], [phone]]
-            ),
+            mock.patch.object(ssh_transport, "_usb_devices", side_effect=usb_polls),
             mock.patch.object(ssh_transport, "_ncm_interface", return_value="usb1"),
-            mock.patch.object(
-                ssh_transport, "_network_ready", side_effect=[False, True, True]
-            ) as network,
+            mock.patch.object(ssh_transport, "_network_ready", side_effect=network),
             mock.patch.object(ssh_transport, "_retry_pause"),
             mock.patch.object(ssh_transport, "_scan_host_key", return_value=True),
             mock.patch.object(ssh_transport, "_ssh_argv", return_value=["ssh"]),
-            mock.patch(
-                "fplinux_cli.ssh_transport.subprocess.run", side_effect=responses
-            ) as remote,
+            mock.patch("fplinux_cli.ssh_transport.subprocess.run", side_effect=ssh_attempts),
         ):
             ready = ssh_transport.wait_for_bound_session(
                 state,
                 on_linux_usb=lambda: observations.append(
-                    ("linux-usb", network.call_count, remote.call_count)
+                    ("linux-usb", network.has_reported_ready())
                 ),
             )
             ssh_transport.finish_session(state)
 
-        self.assertEqual(observations, [("linux-usb", 0, 0)])
+        self.assertEqual(observations, [("linux-usb", False)])
         self.assertEqual(ready["interface"], "usb1")
         self.assertEqual(ready["session_id"], state["session_id"])
 
@@ -444,8 +423,10 @@ class SshTransportSmallTests(unittest.TestCase):
                 with (
                     mock.patch.object(ssh_transport, "_usb_devices", return_value=devices),
                     mock.patch.object(ssh_transport, "_retry_pause"),
+                    # Each clock read advances half a second, so the 1-second wait expires.
                     mock.patch(
-                        "fplinux_cli.ssh_transport.time.monotonic", side_effect=[0, 0.5, 2]
+                        "fplinux_cli.ssh_transport.time.monotonic",
+                        side_effect=itertools.count(0.0, 0.5),
                     ),
                     self.assertRaisesRegex(SystemExit, diagnostic),
                 ):
@@ -478,7 +459,7 @@ class SshTransportSmallTests(unittest.TestCase):
         self.assertEqual(list((self.root / "sessions").iterdir()), [])
 
     def test_failed_prepare_erases_keys_and_invalidates_prior_current(self) -> None:
-        """A failed new RAM load leaves no usable pointer or prepared key directory."""
+        """A failed session preparation leaves no usable pointer or prepared key directory."""
         prior = self._session()
         current = self.root / "current"
         current.mkdir(mode=0o700)

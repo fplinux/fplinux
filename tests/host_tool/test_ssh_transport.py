@@ -16,7 +16,7 @@ from unittest import mock
 from fplinux_cli import ssh_transport
 
 from tests.host_tool.openssh_server import OpenSshServer
-from tests.process import run_process
+from tests.process import process_state, run_process
 from tests.ssh_transport_support import create_ready_session
 
 if TYPE_CHECKING:
@@ -80,6 +80,41 @@ class SshTransportOpenSshConfigTests(unittest.TestCase):
 
         self.assertFalse(path.exists())
         self.assertFalse((self.root / "current" / "phone.json").exists())
+
+
+class OpenSshServerLifecycleTests(unittest.TestCase):
+    """Observe ownership of the real daemon across a controlled readiness failure."""
+
+    def test_readiness_failure_stops_and_reaps_launched_daemon(self) -> None:
+        """An exception after launching sshd leaves neither a live child nor a zombie."""
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            server = OpenSshServer(base / "server", base / "client_ed25519")
+            self.addCleanup(server.stop)
+            daemon: subprocess.Popen[bytes] | None = None
+            wait_until_listening = server._wait_until_listening  # noqa: SLF001
+
+            def fail_readiness() -> None:
+                nonlocal daemon
+                wait_until_listening()
+                daemon = server.process
+                if daemon is None:
+                    self.fail("OpenSSH fixture did not launch an owned daemon")
+                self.assertIsNone(daemon.poll())
+                message = "controlled OpenSSH readiness failure"
+                raise RuntimeError(message)
+
+            with (
+                mock.patch.object(server, "_wait_until_listening", side_effect=fail_readiness),
+                self.assertRaisesRegex(RuntimeError, "controlled OpenSSH readiness failure"),
+            ):
+                server.start()
+
+            if daemon is None:
+                self.fail("readiness failure did not observe the launched daemon")
+            self.assertIsNotNone(daemon.returncode)
+            self.assertIsNone(process_state(daemon.pid))
+            self.assertIsNone(server.process)
 
 
 class SshTransportOpenSshReuseTests(unittest.TestCase):

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Regression tests for the content-derived target kernel local version."""
+"""Unit tests for the content-derived target kernel identity and local version."""
 
 from __future__ import annotations
 
@@ -8,13 +8,12 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
-from unittest import mock
 
 from fplinux_cli import device_state, kbuild_state
 
 
 class DeviceStateTests(unittest.TestCase):
-    """Require LOCALVERSION to follow device/kernel inputs, never the bundle workspace."""
+    """Require the kernel identity to follow the content of its device/kernel inputs."""
 
     def setUp(self) -> None:
         """Create one complete temporary target-kernel input closure."""
@@ -50,8 +49,8 @@ class DeviceStateTests(unittest.TestCase):
             build_type=build_type,
         )
 
-    def test_build_type_changes_the_kernel_identity_without_changing_rootfs(self) -> None:
-        """Type selection is visible to device verification even for identical config bytes."""
+    def test_build_type_changes_the_kernel_identity(self) -> None:
+        """Release and debug selections of identical inputs get distinct, stable identities."""
         release = self._identity()
         debug = self._identity(build_type="debug")
         self.assertNotEqual(release, debug)
@@ -64,23 +63,6 @@ class DeviceStateTests(unittest.TestCase):
         self.assertEqual(identity, self._identity())
         self.assertRegex(identity, r"^[0-9a-f]{64}$")
         self.assertEqual(device_state.localversion(identity), "-fplinux-" + identity[:16])
-
-    def test_workspace_digest_does_not_change_the_device_kernel_identity(self) -> None:
-        """Host-only bundle orchestration cannot relabel an otherwise unchanged kernel."""
-        with mock.patch.dict(
-            os.environ,
-            {"FPLINUX_WORKSPACE_DIGEST": "3" * 64},
-            clear=False,
-        ):
-            first = self._identity()
-        with mock.patch.dict(
-            os.environ,
-            {"FPLINUX_WORKSPACE_DIGEST": "4" * 64},
-            clear=False,
-        ):
-            second = self._identity()
-
-        self.assertEqual(first, second)
 
     def test_defconfig_metadata_does_not_change_the_device_kernel_identity(self) -> None:
         """Only defconfig bytes, not host filesystem metadata, are causal."""

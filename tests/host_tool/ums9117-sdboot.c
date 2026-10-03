@@ -230,7 +230,7 @@ int bootm_run_states(struct bootm_info *bmi, int states)
 		node = fdt_path_offset(fit, "/images/fdt");
 		fit_image_get_data(fit, node, &data, &size);
 		selected.ft_addr = (void *)(uintptr_t)DTB_ADDRESS;
-		/* Model bootm's external copy boundary; header validation stays real. */
+		/* Like U-Boot fit_image_load(): copy, then refuse a non-FDT subimage. */
 		memcpy(selected.ft_addr, data, size);
 		if (fdt_check_header(selected.ft_addr))
 			return -1;

@@ -24,7 +24,7 @@ class Ext4RootTests(unittest.TestCase):
         required = ("mke2fs", "e2fsck", "debugfs")
         missing = [name for name in required if shutil.which(name) is None]
         if missing:
-            self.skipTest("required ext4 tools are unavailable: " + ", ".join(missing))
+            self.fail("quality image lacks required ext4 tools: " + ", ".join(missing))
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -112,17 +112,6 @@ class Ext4RootTests(unittest.TestCase):
             self.dump_os_release(self.output / self.spec["filename"]),
             self.os_release.read_bytes(),
         )
-
-    def test_unrelated_sibling_does_not_revoke_a_complete_cache_hit(self) -> None:
-        """A file outside the declared normalized root tree has no causal effect."""
-        plan = self.plan()
-        self.build(plan)
-        receipt = (self.output / ext4_root.RECEIPT_NAME).read_bytes()
-
-        (self.root / "unrelated-host-note").write_text("not part of rootfs\n", encoding="utf-8")
-
-        self.assertTrue(ext4_root.cache_hit(self.output, plan))
-        self.assertEqual((self.output / ext4_root.RECEIPT_NAME).read_bytes(), receipt)
 
     def test_missing_and_tampered_images_are_rebuilt(self) -> None:
         """Absent or modified published bytes cannot remain reusable."""

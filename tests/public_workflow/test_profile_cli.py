@@ -52,8 +52,8 @@ class ProfileAndToolCliHelpWorkflowTests(unittest.TestCase):
                 self.assertIn("--boot {microsd}", result.stdout)
                 self.assertIn("--profile NAME", result.stdout)
 
-    def test_nand_backup_help_exposes_the_read_only_tool_without_connecting(self) -> None:
-        """NAND backup is an explicit target command, not a legacy profile plugin."""
+    def test_nand_backup_help_lists_the_target_and_profile_selector(self) -> None:
+        """NAND backup help offers the target choice and the documented profile option."""
         result = run_process(
             [str(ROOT / "fplinux"), "nand", "backup", "--help"],
             name="fplinux nand backup help",
@@ -63,7 +63,6 @@ class ProfileAndToolCliHelpWorkflowTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("nokia-ta1618", result.stdout)
-        self.assertIn("output", result.stdout.lower())
         self.assertIn("--profile NAME", result.stdout)
 
     def test_device_data_help_exposes_every_preparation_input(self) -> None:

@@ -967,8 +967,8 @@ class AlpineStateTests(unittest.TestCase):
                     self.assertEqual(actual[3], {bundle_package: bundle_apk})
                 self.assertEqual(rootfs.read_bytes(), b"rootfs\n")
 
-    def test_rootfs_cache_hits_reuse_cached_outputs(self) -> None:
-        """Rootfs cache hits reuse cached outputs for distinct recipes."""
+    def test_mocked_rootfs_cache_hits_reuse_cached_outputs(self) -> None:
+        """A mocked receipt hit returns cached rootfs paths without bundle outputs."""
         cache = Path(self.temporary.name) / "cache"
         package = self.packages[0]
         recipes = ("3" * 64, "4" * 64)
@@ -1318,7 +1318,7 @@ class AlpineStateTests(unittest.TestCase):
         )
 
     def test_bootstrap_change_invalidates_ram_receipt_but_not_external_root(self) -> None:
-        """RAM reuse follows bootstrap bytes while storage composition stays reusable."""
+        """RAM reuse follows bootstrap and boot archive bytes; external roots stay reusable."""
         ram_recipe = self._recipe()
         external_recipe = self._recipe(root_kind="external")
         cache = Path(self.temporary.name) / "cache"
@@ -1327,30 +1327,18 @@ class AlpineStateTests(unittest.TestCase):
         for output in (ram_output, external_output):
             output.mkdir(parents=True)
             (output / "rootfs.cpio").write_bytes(b"logical composition\n")
-        (ram_output / "initramfs.cpio").write_bytes(b"boot archive\n")
+        initramfs = ram_output / "initramfs.cpio"
+        initramfs.write_bytes(b"boot archive\n")
         alpine_state.write_receipt(ram_output, ram_recipe)
         alpine_state.write_receipt(external_output, external_recipe)
-        ram_receipt = json.loads((ram_output / alpine_state.RECEIPT_NAME).read_text())
-        external_receipt = json.loads((external_output / alpine_state.RECEIPT_NAME).read_text())
-        self.assertEqual(
-            ram_receipt,
-            {
-                "recipe": ram_recipe,
-                "rootfs": {
-                    "size": 20,
-                    "sha256": hashlib.sha256(b"logical composition\n").hexdigest(),
-                },
-                "initramfs": {
-                    "size": 13,
-                    "sha256": hashlib.sha256(b"boot archive\n").hexdigest(),
-                },
-            },
-        )
-        self.assertIsNone(external_receipt["initramfs"])
         self.assertTrue(alpine_state.receipt_matches(ram_output, self._recipe()))
         self.assertTrue(
             alpine_state.receipt_matches(external_output, self._recipe(root_kind="external"))
         )
+        initramfs.write_bytes(b"boot archivf\n")
+        self.assertFalse(alpine_state.receipt_matches(ram_output, ram_recipe))
+        initramfs.write_bytes(b"boot archive\n")
+        self.assertTrue(alpine_state.receipt_matches(ram_output, ram_recipe))
         self._write("unrelated.txt", b"unrelated edit\n")
         self.assertTrue(alpine_state.receipt_matches(ram_output, self._recipe()))
         self.bootstrap.write_bytes(b"#!/bin/sh\nexit 1\n")

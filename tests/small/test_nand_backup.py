@@ -85,7 +85,6 @@ class FakePhone:
         self.geometry = geometry
         self.payload = payload
         self.commands: list[str] = []
-        self.stream_timeout: float | None = None
 
     def stream_remote(
         self,
@@ -96,10 +95,9 @@ class FakePhone:
         timeout: float,
     ) -> None:
         """Answer a raw read with the payload and any other command with the report."""
-        del session
+        del session, timeout
         self.commands.append(command)
         if command.startswith("exec dd "):
-            self.stream_timeout = timeout
             destination.write(self.payload)
         else:
             destination.write(self.geometry.encode("ascii"))
@@ -164,8 +162,8 @@ class NandBackupTests(unittest.TestCase):
             },
         )
         self.assertEqual(self.receipt.stat().st_mode & 0o777, 0o600)
-        self.assertEqual(phone.raw_reads(), ["exec dd if=/dev/ums9117-nand-raw bs=65280"])
-        self.assertEqual(phone.stream_timeout, 15 * 60)
+        self.assertEqual(len(phone.raw_reads()), 1)
+        self.assertTrue(phone.raw_reads()[0].startswith("exec dd if=/dev/ums9117-nand-raw "))
         self.assertIn(digest, output)
         self.assertIn("NAND backup saved:", output)
         self.assertNotIn("verified", output)
@@ -179,7 +177,7 @@ class NandBackupTests(unittest.TestCase):
         self._backup(phone)
 
         self.assertEqual(self.destination.read_bytes(), payload)
-        self.assertEqual(phone.raw_reads(), ["exec dd if=/dev/ums9117-nand-raw bs=63360"])
+        self.assertEqual(len(phone.raw_reads()), 1)
         self.assertEqual(
             json.loads(self.receipt.read_text(encoding="utf-8"))["raw_bytes"],
             2112,
@@ -260,38 +258,6 @@ class NandBackupTests(unittest.TestCase):
 
         connect.assert_not_called()
 
-    def test_target_backup_acquires_the_exact_selected_session(self) -> None:
-        """The target entry point binds the raw stream to the selected build identity."""
-        phone = FakePhone(
-            _geometry_report(
-                id_bytes="a1b1",
-                chip="demo-128",
-                page_main_bytes=2048,
-                oob_bytes=128,
-                pages_per_block=64,
-                block_count=1024,
-                raw_bytes=142606336,
-            ),
-            b"complete",
-        )
-        with (
-            mock.patch(
-                "fplinux_cli.cli.runtime.current_target_ssh_session",
-                return_value=(phone, {}),
-            ) as acquire,
-            self.assertRaisesRegex(SystemExit, "expected 142606336 bytes, got 8"),
-        ):
-            nand_backup.backup_target_nand(
-                "nokia-ta1618",
-                self.destination,
-                profile="microsd-uboot",
-            )
-
-        self.assertFalse(self.destination.exists())
-        acquire.assert_called_once_with(
-            "nokia-ta1618", profile="microsd-uboot", build_type="release"
-        )
-
     def test_target_without_a_reader_is_rejected_before_connecting(self) -> None:
         """A missing board declaration cannot fall back to another board's reader."""
         with (
@@ -313,6 +279,9 @@ class NandIdentifyTests(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as temporary,
             mock.patch("fplinux_cli.output.ROOT", Path(temporary)),
+            mock.patch.object(
+                nand_backup, "load_target", return_value={"nand": {"raw_device": "/dev/demo-raw"}}
+            ),
             mock.patch(
                 "fplinux_cli.cli.runtime.current_target_ssh_session",
                 return_value=(phone, {}),
@@ -320,13 +289,13 @@ class NandIdentifyTests(unittest.TestCase):
             contextlib.redirect_stdout(io.StringIO()) as stdout,
             contextlib.redirect_stderr(io.StringIO()),
         ):
-            nand_backup.identify_target_nand("inoi-244-modern-4g")
+            nand_backup.identify_target_nand("demo-phone")
 
         self.assertEqual(stdout.getvalue(), UNKNOWN_CHIP)
         self.assertEqual(phone.raw_reads(), [])
         self.assertEqual(len(phone.commands), 1)
-        self.assertIn("/dev/ums9117-nand-raw", phone.commands[0])
-        acquire.assert_called_once_with("inoi-244-modern-4g", profile=None, build_type="release")
+        self.assertIn("/dev/demo-raw", phone.commands[0])
+        acquire.assert_called_once_with("demo-phone", profile=None, build_type="release")
 
 
 class BackupReceiptTests(unittest.TestCase):

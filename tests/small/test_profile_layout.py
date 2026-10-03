@@ -58,6 +58,23 @@ class ProfileLayoutRenderTests(unittest.TestCase):
             for name, value in (line.split("=", 1),)
         }
 
+    @staticmethod
+    def _genimage_sections(contents: bytes) -> dict[str, dict[str, str]]:
+        """Map each nested genimage section, in file order, to its option values."""
+        sections: dict[str, dict[str, str]] = {}
+        path: list[str] = []
+        for raw_line in contents.decode("ascii").splitlines():
+            line = raw_line.strip()
+            if line.endswith("{"):
+                path.append(line.removesuffix("{").strip())
+                sections["/".join(path)] = {}
+            elif line == "}":
+                path.pop()
+            elif "=" in line and not line.startswith("#"):
+                name, value = line.split("=", 1)
+                sections["/".join(path)][name.strip()] = value.strip()
+        return sections
+
     def test_bootstrap_and_uboot_inputs_expose_selected_layout_values(self) -> None:
         """Generated C, linker and U-Boot inputs carry the declared RAM placement."""
         header = profile_layout.boot_layout_header(self.layout)
@@ -119,7 +136,7 @@ class ProfileLayoutRenderTests(unittest.TestCase):
         )
 
     def test_external_root_and_image_inputs_reference_declared_storage(self) -> None:
-        """Generated bootargs and genimage input select the intended card partitions."""
+        """Generated bootargs and genimage input give each card partition its own extent."""
         root = {
             "kind": "external",
             "filesystem": "ext4",
@@ -131,9 +148,9 @@ class ProfileLayoutRenderTests(unittest.TestCase):
             "filename": "FPLINUX.img",
             "disk_signature": 0x46504C58,
             "boot_offset": 0x00100000,
-            "boot_size": 0x04000000,
+            "boot_size": 0x02000000,
             "boot_label": "FPLBOOT",
-            "root_offset": 0x04100000,
+            "root_offset": 0x02100000,
             "root_size": 0x04000000,
             "root_filename": "FPLROOT.ext4",
             "root_label": "FPLROOT",
@@ -157,23 +174,34 @@ class ProfileLayoutRenderTests(unittest.TestCase):
         self.assertNotIn("root=", ram_bootargs)
         self.assertNotIn("rootfstype=", ram_bootargs)
 
-        image = profile_layout.genimage_config(fit, storage).decode("ascii")
-        for value in (
-            "image FPLINUX.img {",
-            'partition-table-type = "mbr"',
-            "disk-signature = 0x46504c58",
-            "partition-type = 0x0c",
-            "offset = 1048576",
-            "size = 67108864",
-            "partition-type = 0x83",
-            'image = "FPLROOT.ext4"',
-            "offset = 68157440",
-            "fill = true",
-            'label = "FPLBOOT"',
-            "file FPLINUX.ITB {",
-        ):
-            with self.subTest(value=value):
-                self.assertIn(value, image)
+        sections = self._genimage_sections(profile_layout.genimage_config(fit, storage))
+        disk = sections["image FPLINUX.img/hdimage"]
+        self.assertEqual(disk["partition-table-type"], '"mbr"')
+        self.assertEqual(disk["disk-signature"], "0x46504c58")
+        # The card layout is boot partition 1, root partition 2; MBR entries follow file order.
+        boot, root_partition = (
+            options
+            for name, options in sections.items()
+            if name.startswith("image FPLINUX.img/partition ")
+        )
+        self.assertEqual(
+            {name: boot[name] for name in ("partition-type", "offset", "size")},
+            {"partition-type": "0x0c", "offset": "1048576", "size": "33554432"},
+        )
+        self.assertEqual(
+            root_partition,
+            {
+                "partition-type": "0x83",
+                "image": '"FPLROOT.ext4"',
+                "offset": "34603008",
+                "size": "67108864",
+                "fill": "true",
+            },
+        )
+        boot_image = "image " + boot["image"].strip('"')
+        self.assertEqual(sections[boot_image]["size"], "33554432")
+        self.assertEqual(sections[boot_image + "/vfat"]["label"], '"FPLBOOT"')
+        self.assertEqual(sections[boot_image + "/vfat/file FPLINUX.ITB"]["image"], '"FPLINUX.ITB"')
 
     def test_base_defconfig_cannot_override_generated_profile_placement(self) -> None:
         """Reject a second source of U-Boot text, stack or FDT placement."""

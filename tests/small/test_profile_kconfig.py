@@ -13,7 +13,7 @@ from fplinux_cli.build import kernel as kernel_build
 class ProfileKconfigTests(unittest.TestCase):
     """Check profile actions against the resolved configuration file."""
 
-    def test_actions_are_normalized_and_must_survive_olddefconfig(self) -> None:
+    def test_actions_are_normalized_and_checked_against_the_resolved_file(self) -> None:
         """Only resolved enabled and disabled symbols authorize a profile."""
         with tempfile.TemporaryDirectory() as temporary:
             config = Path(temporary) / ".config"
@@ -50,8 +50,8 @@ class ProfileKconfigTests(unittest.TestCase):
                             ["CONFIG_PROFILE_DISABLED"],
                         )
 
-    def test_olddefconfig_may_omit_an_invisible_disabled_choice(self) -> None:
-        """An omitted bool is disabled in a naturally prepared Kconfig file."""
+    def test_resolved_file_may_omit_a_disabled_symbol(self) -> None:
+        """The validator accepts an omitted symbol requested to stay disabled."""
         with tempfile.TemporaryDirectory() as temporary:
             config = Path(temporary) / ".config"
             config.write_text(

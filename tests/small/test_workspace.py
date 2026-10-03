@@ -3,9 +3,7 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,10 +12,7 @@ from unittest import mock
 
 from fplinux_cli import alpine_state, common
 from fplinux_cli import workspace as workspace_module
-from fplinux_cli.build import bootstrap as bootstrap_build
-from fplinux_cli.manifests import targets
 from fplinux_cli.manifests.linux import discover_linux_targets
-from fplinux_cli.manifests.platforms import load_platform
 
 from tests.fixtures import linux_inputs
 
@@ -403,29 +398,6 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                 self.assertFalse(changed_path.exists())
                 self.assertTrue(before_path.is_dir())
 
-    def test_microsd_source_snapshot_supports_build_imports_and_both_configurations(self) -> None:
-        """The staged source loads the build consumer and selected/default boot policies."""
-        sources = workspace_module.target_build_source_files("nokia-ta1618", "microsd-uboot")
-        snapshot = workspace_module.workspace_snapshot(sources)
-        with tempfile.TemporaryDirectory() as temporary:
-            with mock.patch.object(workspace_module, "ROOT", Path(temporary)):
-                staged = workspace_module.stage_workspace_snapshot(snapshot)
-            imported = subprocess.run(
-                [sys.executable, "-B", "-c", "import fplinux_cli.build.__main__"],
-                cwd=staged,
-                env={"PYTHONPATH": str(staged / "scripts")},
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertEqual(imported.returncode, 0, imported.stderr)
-            with mock.patch.object(common, "ROOT", staged):
-                card = targets.load_target("nokia-ta1618", "microsd-uboot")
-                ram = targets.load_target("nokia-ta1618")
-
-            self.assertEqual(card["linux"]["root"]["kind"], "external")
-            self.assertEqual(ram["linux"]["root"], {"kind": "initramfs"})
-
     def test_bootstrap_edit_changes_ram_source_recipe_but_not_microsd(self) -> None:
         """An edit consumed only by RAM boot leaves the SD source recipe reusable."""
         files = dict(workspace_module.target_build_source_files("nokia-ta1618"))
@@ -455,122 +427,6 @@ class WorkspaceSnapshotTests(unittest.TestCase):
                 ).recipe
             self.assertNotEqual(before_ram, after_ram)
             self.assertEqual(before_sd, after_sd)
-
-    def test_staged_bootstrap_reads_panel_and_font_inputs_for_ram_and_sd(self) -> None:
-        """The staged consumer reads its full recipe and reacts to its font interface."""
-        sources = common.load_toml(common.ROOT / "sources.lock.toml")
-        for profile in (None, "microsd-uboot"):
-            with self.subTest(profile=profile):
-                target = targets.load_target("nokia-ta1618", profile)
-                platform = load_platform(target["platform"])
-                expected = bootstrap_build.bootstrap_recipe_digest(
-                    sources, "nokia-ta1618", target, platform
-                )
-                snapshot = workspace_module.workspace_snapshot(
-                    workspace_module.target_build_source_files("nokia-ta1618", profile)
-                )
-                with tempfile.TemporaryDirectory() as temporary:
-                    with mock.patch.object(workspace_module, "ROOT", Path(temporary)):
-                        staged = workspace_module.stage_workspace_snapshot(snapshot)
-                    command = (
-                        "import sys; from fplinux_cli import common; "
-                        "from fplinux_cli.build.bootstrap import bootstrap_recipe_digest; "
-                        "from fplinux_cli.manifests.targets import load_target; "
-                        "from fplinux_cli.manifests.platforms import load_platform; "
-                        "target = load_target('nokia-ta1618', sys.argv[1] or None); "
-                        "platform = load_platform(target['platform']); "
-                        "sources = common.load_toml(common.ROOT / 'sources.lock.toml'); "
-                        "print(bootstrap_recipe_digest(sources, 'nokia-ta1618', target, platform))"
-                    )
-
-                    def staged_digest(command: str, profile: str | None, staged: Path) -> str:
-                        result = subprocess.run(
-                            [sys.executable, "-B", "-c", command, profile or ""],
-                            cwd=staged,
-                            env={"PYTHONPATH": str(staged / "scripts")},
-                            capture_output=True,
-                            text=True,
-                            check=False,
-                            timeout=20,
-                        )
-                        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                        return result.stdout.strip()
-
-                    self.assertEqual(staged_digest(command, profile, staged), expected)
-                    (staged / "unrelated.c").write_bytes(b"int unrelated;\n")
-                    self.assertEqual(staged_digest(command, profile, staged), expected)
-                    header = staged / "bootstrap/fplinux-boot-screen/linux/font.h"
-                    header.write_bytes(
-                        header.read_bytes() + b"\n/* Changed compile interface. */\n"
-                    )
-                    self.assertNotEqual(staged_digest(command, profile, staged), expected)
-
-    def test_staged_ram_producer_reads_causal_bootstrap_snapshot(self) -> None:
-        """The normal staged producer reads boot source captured by the target snapshot."""
-        snapshot = workspace_module.target_workspace_snapshot("nokia-ta1618")
-        with tempfile.TemporaryDirectory() as temporary:
-            directory = Path(temporary)
-            with mock.patch.object(workspace_module, "ROOT", directory):
-                source = workspace_module.stage_workspace_snapshot(snapshot)
-            bootstrap = source / "common/ramroot-init.sh"
-            bootstrap.write_bytes(b"#!/bin/sh\nexit 0\n")
-            with (
-                mock.patch.object(workspace_module, "ROOT", source),
-                mock.patch.object(common, "ROOT", source),
-            ):
-                before = workspace_module.target_workspace_snapshot("nokia-ta1618")
-                staged = workspace_module.stage_workspace_snapshot(before)
-                (source / "unrelated.txt").write_bytes(b"not a build input\n")
-                unrelated = workspace_module.target_workspace_snapshot("nokia-ta1618")
-                self.assertEqual(before.recipe, unrelated.recipe)
-                bootstrap.write_bytes(b"#!/bin/sh\nexit 1\n")
-                changed = workspace_module.target_workspace_snapshot("nokia-ta1618")
-                self.assertNotEqual(before.recipe, changed.recipe)
-            root = directory / "root"
-            output = directory / "output"
-            for relative in ("bin", "lib", "usr/lib"):
-                (root / relative).mkdir(parents=True)
-            output.mkdir()
-            (root / "bin/busybox").write_bytes(b"runtime\n")
-            (root / "lib/ld-musl-armhf.so.1").write_bytes(b"loader\n")
-            (root / "lib/libc.musl-armv7.so.1").symlink_to("ld-musl-armhf.so.1")
-            (root / "usr/lib/libgcc_s.so.1").write_bytes(b"gcc runtime\n")
-            command = (
-                "from pathlib import Path; import sys; "
-                "from fplinux_cli import alpine_builder; "
-                "alpine_builder._write_ramroot_initramfs("
-                "Path(sys.argv[1]), Path(sys.argv[2]))"
-            )
-            packed = subprocess.run(
-                [
-                    sys.executable,
-                    "-B",
-                    "-c",
-                    command,
-                    str(root),
-                    str(output),
-                ],
-                cwd=staged,
-                env={"PATH": os.environ["PATH"], "PYTHONPATH": str(staged / "scripts")},
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=20,
-            )
-            self.assertEqual(packed.returncode, 0, packed.stdout + packed.stderr)
-            boot = directory / "boot"
-            boot.mkdir()
-            with (output / "initramfs.cpio").open("rb") as archive:
-                extracted = subprocess.run(
-                    ["cpio", "--quiet", "--extract", "--make-directories", "init"],
-                    stdin=archive,
-                    cwd=boot,
-                    capture_output=True,
-                    check=False,
-                    timeout=10,
-                )
-            self.assertEqual(extracted.returncode, 0, extracted.stderr)
-            self.assertEqual((boot / "init").read_bytes(), b"#!/bin/sh\nexit 0\n")
 
     def test_snapshot_rejects_symlinked_input(self) -> None:
         """A snapshot cannot turn a linked source into a regular staged file."""

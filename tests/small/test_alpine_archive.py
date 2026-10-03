@@ -13,14 +13,19 @@ from pathlib import Path
 from fplinux_cli import alpine_builder
 from fplinux_cli.environment import kern
 
+EXTRACTION_FILTERS = (
+    ("environment.kern", kern._alpine_tar_filter),
+    ("alpine_builder", alpine_builder._alpine_tar_filter),
+)
+
 
 class AlpineArchiveTests(unittest.TestCase):
-    """Preserve Alpine links and the rejection behavior of both archive consumers."""
+    """Preserve Alpine links and rejections in each extraction module's tar filter."""
 
     def test_files_and_absolute_symlinks_survive_extraction(self) -> None:
         """An Alpine-rooted symlink keeps its target while regular data is extracted."""
-        for archive_filter in (kern._alpine_tar_filter, alpine_builder._alpine_tar_filter):
-            with self.subTest(consumer=archive_filter), tempfile.TemporaryDirectory() as temporary:
+        for module, archive_filter in EXTRACTION_FILTERS:
+            with self.subTest(module=module), tempfile.TemporaryDirectory() as temporary:
                 archive_bytes = io.BytesIO()
                 with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
                     payload = tarfile.TarInfo("bin/busybox")
@@ -42,9 +47,9 @@ class AlpineArchiveTests(unittest.TestCase):
                 self.assertEqual((root / "bin/sh").readlink(), Path("/bin/busybox"))
 
     def test_parent_traversal_cannot_write_outside_the_extraction_root(self) -> None:
-        """Both consumers retain the standard data filter's path containment."""
-        for archive_filter in (kern._alpine_tar_filter, alpine_builder._alpine_tar_filter):
-            with self.subTest(consumer=archive_filter), tempfile.TemporaryDirectory() as temporary:
+        """Both modules' filters retain the standard data filter's path containment."""
+        for module, archive_filter in EXTRACTION_FILTERS:
+            with self.subTest(module=module), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary) / "root"
                 root.mkdir()
                 archive_bytes = io.BytesIO()
@@ -63,13 +68,9 @@ class AlpineArchiveTests(unittest.TestCase):
                 self.assertFalse((root.parent / "outside").exists())
 
     def test_invalid_absolute_links_use_the_shared_error_prefix(self) -> None:
-        """Both extraction callers report invalid links through the shared formatter."""
-        cases = (
-            (kern._alpine_tar_filter, "fplinux: "),
-            (alpine_builder._alpine_tar_filter, "fplinux: "),
-        )
-        for archive_filter, prefix in cases:
-            with self.subTest(prefix=prefix), tempfile.TemporaryDirectory() as temporary:
+        """Both modules' filters report an escaping link with the CLI error prefix."""
+        for module, archive_filter in EXTRACTION_FILTERS:
+            with self.subTest(module=module), tempfile.TemporaryDirectory() as temporary:
                 link = tarfile.TarInfo("bin/sh")
                 link.type = tarfile.SYMTYPE
                 link.linkname = "/../outside"
@@ -79,7 +80,7 @@ class AlpineArchiveTests(unittest.TestCase):
 
                 self.assertEqual(
                     str(raised.exception),
-                    prefix + "Alpine minirootfs link escapes the root: bin/sh",
+                    "fplinux: Alpine minirootfs link escapes the root: bin/sh",
                 )
 
 

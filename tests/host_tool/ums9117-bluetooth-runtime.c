@@ -64,8 +64,15 @@ static struct {
 	size_t fm_chunk;
 	bool fm_sent;
 	unsigned int fm_writes;
-	unsigned long fm_wait_ms;
+	unsigned long fm_reply_delay_ms;
+	u64 fm_reply_at;
 } fake;
+
+/*
+ * A seek sweeps 87.5-108.0 MHz in 0.1 MHz steps and may answer seconds after
+ * its request. A reply that late to any other FM command counts as lost.
+ */
+#define FM_SECONDS_LATER_MS 5000UL
 
 int ums9117_cm4_get(struct device *dev, enum ums9117_cm4_user user)
 {
@@ -130,14 +137,16 @@ static void pump(void)
 	fake.work->work.function(&fake.work->work);
 }
 
+/* Each waited jiffy is one millisecond on the fake clock and one worker run. */
 unsigned long wait_for_completion_timeout(struct completion *completion,
 					  unsigned long timeout)
 {
 	unsigned long elapsed;
 
-	fake.fm_wait_ms = timeout;
-	for (elapsed = 0; elapsed < timeout && !completion->done; elapsed++)
+	for (elapsed = 0; elapsed < timeout && !completion->done; elapsed++) {
+		fake.now += NSEC_PER_SEC / 1000;
 		pump();
+	}
 	return completion->done;
 }
 
@@ -361,13 +370,17 @@ int ums9117_cm4_mailbox_fm_write(const u8 *data, size_t bytes)
 	memcpy(fake.fm_output, data, bytes);
 	fake.fm_output_bytes = bytes;
 	fake.fm_sent = true;
+	fake.fm_reply_at =
+		fake.now + fake.fm_reply_delay_ms * (NSEC_PER_SEC / 1000);
 	fake.fm_writes++;
 	return 0;
 }
 
 int ums9117_cm4_mailbox_fm_read(u8 *data, size_t capacity, size_t *received)
 {
-	size_t bytes = fake.fm_sent ? fake.fm_input_bytes : 0;
+	size_t bytes = fake.fm_sent && fake.now >= fake.fm_reply_at ?
+			       fake.fm_input_bytes :
+			       0;
 
 	assert(fake.powered && !fake.paused);
 	if (bytes > capacity)
@@ -591,7 +604,7 @@ static void undrained_peer_veto_is_retryable(void)
 	stop();
 }
 
-static void fm_split_completion_and_seek_event_preserve_bluetooth(void)
+static void fm_late_split_seek_reply_completes_and_preserves_bluetooth(void)
 {
 	const u8 seek_request[] = { 0x01, 0x8c, 0xfc, 0x04,
 				    0x04, 0x2e, 0x22, 0x01 };
@@ -610,10 +623,10 @@ static void fm_split_completion_and_seek_event_preserve_bluetooth(void)
 		memcpy(fake.fm_input, seek_replies, sizeof(seek_replies));
 		fake.fm_input_bytes = sizeof(seek_replies);
 		fake.fm_chunk = chunk;
+		fake.fm_reply_delay_ms = FM_SECONDS_LATER_MS;
 		assert(ums9117_hci_fm_command(0x04, payload, sizeof(payload),
 					      reply, sizeof(reply), true) == 9);
 		assert(fake.fm_writes == 1);
-		assert(fake.fm_wait_ms == 15000);
 		assert(fake.fm_output_bytes == sizeof(seek_request));
 		assert(!memcmp(fake.fm_output, seek_request,
 			       sizeof(seek_request)));
@@ -631,11 +644,13 @@ static void fm_timeout_quarantines_late_replies_without_stopping_bluetooth(void)
 
 	start();
 	assert(!ums9117_hci_fm_hold());
-	assert(ums9117_hci_fm_command(0x01, frequency, sizeof(frequency), reply,
-				      sizeof(reply), false) == -ETIMEDOUT);
-	assert(fake.fm_wait_ms == 1000);
 	memcpy(fake.fm_input, late_reply, sizeof(late_reply));
 	fake.fm_input_bytes = sizeof(late_reply);
+	fake.fm_reply_delay_ms = FM_SECONDS_LATER_MS;
+	assert(ums9117_hci_fm_command(0x01, frequency, sizeof(frequency), reply,
+				      sizeof(reply), false) == -ETIMEDOUT);
+	/* The late reply arrives after the timeout and is drained unused. */
+	fake.now = fake.fm_reply_at;
 	pump();
 	assert(!fake.fm_input_bytes);
 	assert(ums9117_hci_fm_command(0x01, frequency, sizeof(frequency), reply,
@@ -856,7 +871,7 @@ int main(void)
 	close_discards_a_frame_reassembled_after_reopening();
 	receive_callback_failure_stops_following_delivery();
 	native_receiver_error_stops_following_delivery();
-	fm_split_completion_and_seek_event_preserve_bluetooth();
+	fm_late_split_seek_reply_completes_and_preserves_bluetooth();
 	fm_timeout_quarantines_late_replies_without_stopping_bluetooth();
 	fm_commands_preserve_config_bytes_and_short_error_responses();
 	enabled_fm_vetoes_suspend_until_disable();

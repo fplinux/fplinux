@@ -14,7 +14,6 @@ from fplinux_cli.checkreceipts import (
     CheckReceiptRecipe,
     publish_success_receipt,
     receipt_matches,
-    receipt_path,
 )
 from fplinux_cli.environment import kern
 from fplinux_cli.image_state import ImageState
@@ -82,25 +81,17 @@ class CheckScopeTests(unittest.TestCase):
     def test_scope_receipt_misses_after_orchestration_or_generation_changes(self) -> None:
         """Do not reuse one scope across checker or image generation changes."""
         closure = "a" * 64
-        first_orchestration = "b" * 64
+        orchestration = "b" * 64
         generation = "c" * 64
-        with mock.patch.object(
-            checks,
-            "check_orchestration_recipe_digest",
-            return_value=first_orchestration,
-        ):
-            first = check_scope_receipt_recipe("python", closure, image_generation=generation)
-            generation_changed = check_scope_receipt_recipe(
-                "python", closure, image_generation="d" * 64
-            )
-        with mock.patch.object(
-            checks,
-            "check_orchestration_recipe_digest",
-            return_value="e" * 64,
-        ):
-            orchestration_changed = check_scope_receipt_recipe(
-                "python", closure, image_generation=generation
-            )
+        first = check_scope_receipt_recipe(
+            "python", closure, image_generation=generation, orchestration_recipe=orchestration
+        )
+        generation_changed = check_scope_receipt_recipe(
+            "python", closure, image_generation="d" * 64, orchestration_recipe=orchestration
+        )
+        orchestration_changed = check_scope_receipt_recipe(
+            "python", closure, image_generation=generation, orchestration_recipe="e" * 64
+        )
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary)
             publish_success_receipt(cache, first)
@@ -108,8 +99,8 @@ class CheckScopeTests(unittest.TestCase):
             self.assertFalse(receipt_matches(cache, generation_changed))
             self.assertFalse(receipt_matches(cache, orchestration_changed))
 
-    def test_named_kernel_profile_has_its_own_receipt_generation(self) -> None:
-        """Profile selection keeps default and named cache slots distinct."""
+    def test_kernel_receipt_recipe_carries_the_selected_profile(self) -> None:
+        """Record a named profile in the kernel recipe and its persisted payload."""
         default = check_scope_receipt_recipe(
             "kernel",
             "a" * 64,
@@ -237,61 +228,49 @@ class CheckScopeTests(unittest.TestCase):
             b'  { source = "platforms/demo/kernel/platform-append", destination = "Makefile" },\n'
             b"]\n"
         )
-        files = (
-            WorkspaceFile("scripts/fplinux_cli/kernelcheck.py", b"checker\n", 0o644),
-            WorkspaceFile("targets/demo/target.toml", target_manifest, 0o644),
-            WorkspaceFile("platforms/demo/platform.toml", platform_manifest, 0o644),
-            WorkspaceFile("targets/demo/kernel/defconfig", b"CONFIG_DEMO=y\n", 0o644),
-            WorkspaceFile("targets/demo/kernel/target.patch", b"target patch\n", 0o644),
-            WorkspaceFile("targets/demo/kernel/target-copy.c", b"int target;\n", 0o644),
-            WorkspaceFile("targets/demo/bootstrap/referenced.h", b"#define DEMO 1\n", 0o644),
-            WorkspaceFile("targets/demo/kernel/target-append", b"obj-y += demo.o\n", 0o644),
-            WorkspaceFile("platforms/demo/kernel/platform.patch", b"platform patch\n", 0o644),
-            WorkspaceFile("platforms/demo/kernel/platform-copy.c", b"int platform;\n", 0o644),
-            WorkspaceFile(
-                "platforms/demo/kernel/platform-append", b"obj-y += platform.o\n", 0o644
-            ),
-            WorkspaceFile("targets/demo/bootstrap/main.c", b"int main;\n", 0o644),
-        )
-        first = WorkspaceSnapshot(files, "a" * 64)
-        header_changed = WorkspaceSnapshot(
-            (
-                *files[:6],
-                WorkspaceFile(files[6].path, b"#define DEMO 2\n", 0o644),
-                *files[7:],
-            ),
-            "b" * 64,
-        )
-        bootstrap_changed = WorkspaceSnapshot(
-            (
-                *files[:-1],
-                WorkspaceFile(files[-1].path, b"int changed;\n", 0o644),
-            ),
-            "c" * 64,
-        )
-        first_digest = check_scope_closure_digest("kernel", first)
-        header_digest = check_scope_closure_digest("kernel", header_changed)
-        self.assertNotEqual(first_digest, header_digest)
-        self.assertEqual(
-            first_digest,
-            check_scope_closure_digest("kernel", bootstrap_changed),
-        )
-        first_recipe = check_scope_receipt_recipe(
-            "kernel",
-            first_digest,
-            image_generation="c" * 64,
-            orchestration_recipe="d" * 64,
-        )
-        header_recipe = check_scope_receipt_recipe(
-            "kernel",
-            header_digest,
-            image_generation="c" * 64,
-            orchestration_recipe="d" * 64,
-        )
+        inputs = {
+            "scripts/fplinux_cli/kernelcheck.py": b"checker\n",
+            "targets/demo/target.toml": target_manifest,
+            "platforms/demo/platform.toml": platform_manifest,
+            "targets/demo/kernel/target.patch": b"target patch\n",
+            "targets/demo/kernel/target-copy.c": b"int target;\n",
+            "targets/demo/bootstrap/referenced.h": b"#define DEMO 1\n",
+            "targets/demo/kernel/target-append": b"obj-y += demo.o\n",
+            "platforms/demo/kernel/platform.patch": b"platform patch\n",
+            "platforms/demo/kernel/platform-copy.c": b"int platform;\n",
+            "platforms/demo/kernel/platform-append": b"obj-y += platform.o\n",
+            "targets/demo/bootstrap/main.c": b"int main;\n",
+        }
+
+        def recipe(contents: dict[str, bytes]) -> CheckReceiptRecipe:
+            snapshot = WorkspaceSnapshot(
+                tuple(WorkspaceFile(path, data, 0o644) for path, data in contents.items()),
+                "a" * 64,
+            )
+            return check_scope_receipt_recipe(
+                "kernel",
+                check_scope_closure_digest("kernel", snapshot),
+                image_generation="c" * 64,
+                orchestration_recipe="d" * 64,
+            )
+
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary)
-            publish_success_receipt(cache, first_recipe)
-            self.assertFalse(receipt_matches(cache, header_recipe))
+            publish_success_receipt(cache, recipe(inputs))
+            for path in (
+                "targets/demo/kernel/target.patch",
+                "targets/demo/kernel/target-copy.c",
+                "targets/demo/bootstrap/referenced.h",
+                "targets/demo/kernel/target-append",
+                "platforms/demo/kernel/platform.patch",
+                "platforms/demo/kernel/platform-copy.c",
+                "platforms/demo/kernel/platform-append",
+            ):
+                with self.subTest(projected=path):
+                    changed = {**inputs, path: inputs[path] + b"changed\n"}
+                    self.assertFalse(receipt_matches(cache, recipe(changed)))
+            bootstrap_only = {**inputs, "targets/demo/bootstrap/main.c": b"int changed;\n"}
+            self.assertTrue(receipt_matches(cache, recipe(bootstrap_only)))
 
     def test_global_kernel_receipt_tracks_shared_and_board_configs(self) -> None:
         """Relevant config changes miss while the other boot mode remains unrelated."""
@@ -713,10 +692,10 @@ class _FailingReporter(_RecordingReporter):
 
 
 class KernelExecutionLimitTests(unittest.TestCase):
-    """Keep kernel worker limits outside prepare and receipt identity."""
+    """Keep kernel worker limits out of the prepare container command."""
 
-    def test_kernel_limit_changes_analysis_only_and_not_receipt_bytes(self) -> None:
-        """Treat worker count as execution policy, not a different kernel result."""
+    def test_kernel_limit_reaches_only_the_analysis_command(self) -> None:
+        """Pass --jobs to kernel analysis while prepare keeps the same arguments."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             cache = root / "cache"
@@ -754,9 +733,7 @@ class KernelExecutionLimitTests(unittest.TestCase):
                     )
 
             run_with_jobs(1)
-            first_receipt = receipt_path(cache, recipe).read_bytes()
             run_with_jobs(2)
-            second_receipt = receipt_path(cache, recipe).read_bytes()
 
             first_prepare, first_analysis, second_prepare, second_analysis = commands
             self.assertIn(f"{root / 'logs-1/containers'}:/logs", first_prepare)
@@ -780,19 +757,6 @@ class KernelExecutionLimitTests(unittest.TestCase):
             self.assertEqual(
                 second_analysis[-7:],
                 ["check", "--jobs", "2", "--profile", "microsd-uboot", "--build-type", "release"],
-            )
-            self.assertEqual(first_receipt, second_receipt)
-            self.assertTrue(
-                receipt_matches(
-                    cache,
-                    check_scope_receipt_recipe(
-                        "kernel",
-                        "a" * 64,
-                        image_generation="b" * 64,
-                        orchestration_recipe="c" * 64,
-                        profile="microsd-uboot",
-                    ),
-                )
             )
 
 
@@ -931,12 +895,13 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
         *,
         no_cache: bool,
         patches: tuple[Any, ...],
+        jobs: int,
     ) -> None:
         """Run the production check entry point with the scenario's controlled boundaries."""
         with ExitStack() as stack:
             for boundary in patches:
                 stack.enter_context(boundary)
-            checks.check(scopes, no_cache=no_cache)
+            checks.check(scopes, no_cache=no_cache, jobs=jobs)
 
     def _run(  # noqa: PLR0913
         self,
@@ -949,7 +914,8 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
         no_cache: bool = False,
         reporter_type: type[_RecordingReporter] = _RecordingReporter,
         exact_hit_guard: bool = False,
-    ) -> mock.Mock:
+        jobs: int = 1,
+    ) -> None:
         logs = root / f"logs-{len(commands)}"
         logs.mkdir(exist_ok=True)
         reporter = reporter_type(logs, commands)
@@ -964,7 +930,7 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
             exact_hit_guard=exact_hit_guard,
         )
         try:
-            self._execute_check(scopes, no_cache=no_cache, patches=patches)
+            self._execute_check(scopes, no_cache=no_cache, patches=patches, jobs=jobs)
         except RuntimeError:
             if not exact_hit_guard:
                 discard_workspace.assert_called_once_with(snapshot, workspace)
@@ -973,7 +939,6 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
             discard_workspace.assert_not_called()
         else:
             discard_workspace.assert_called_once_with(snapshot, workspace)
-        return stage_workspace
 
     def test_exact_success_hit_skips_workspace_and_checker(self) -> None:
         """Return a verified scope hit before workspace materialization."""
@@ -988,7 +953,7 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
             self._run(root, workspace, snapshot, ["c"], commands)
             self.assertEqual(len(commands), 1)
 
-            stage_workspace = self._run(
+            self._run(
                 root,
                 workspace,
                 snapshot,
@@ -996,8 +961,34 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
                 commands,
                 exact_hit_guard=True,
             )
-            stage_workspace.assert_not_called()
             self.assertEqual(len(commands), 1)
+
+    def test_kernel_hit_is_reused_with_a_different_worker_limit(self) -> None:
+        """Reuse a kernel success when only --jobs changes between check runs."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / ".cache").mkdir()
+            workspace = root / "workspace"
+            workspace.mkdir()
+            commands: list[list[str]] = []
+            snapshot = WorkspaceSnapshot(
+                (WorkspaceFile("scripts/fplinux_cli/kernelcheck.py", b"checker\n", 0o644),),
+                "a" * 64,
+            )
+
+            self._run(root, workspace, snapshot, ["kernel"], commands, jobs=1)
+            self.assertEqual(len(commands), 2)
+
+            self._run(
+                root,
+                workspace,
+                snapshot,
+                ["kernel"],
+                commands,
+                exact_hit_guard=True,
+                jobs=2,
+            )
+            self.assertEqual(len(commands), 2)
 
     def test_no_cache_bypasses_an_exact_outer_receipt(self) -> None:
         """Execute the checker when the caller explicitly ignores receipts."""

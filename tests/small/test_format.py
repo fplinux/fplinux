@@ -74,7 +74,9 @@ class FormatContainerBoundaryTests(unittest.TestCase):
             formatter=["ruff", "format", "scripts/tool.py"],
         )
 
-        self.assertIn(f"{workspace}:/workspace", command)
+        mounts = [command[index + 1] for index, arg in enumerate(command) if arg == "--volume"]
+        self.assertEqual(mounts, [f"{workspace}:/workspace"])
+        self.assertIn("--read-only", command)
         network = command.index("--network")
         self.assertEqual(command[network + 1], "none")
         self.assertEqual(command[-4:], ["--", "ruff", "format", "scripts/tool.py"])
@@ -130,7 +132,9 @@ class FormatPublicationTests(unittest.TestCase):
             self.assertEqual(selected.read_bytes(), b"value = 1\n")
             self.assertEqual(neighbor.read_bytes(), b"other=2\n")
             self.assertEqual(selected.stat().st_mode & 0o777, 0o640)
-            self.assertEqual(list(root.glob(".selected.py.*")), [])
+            self.assertEqual(
+                sorted(path.name for path in root.iterdir()), ["neighbor.py", "selected.py"]
+            )
 
     def test_formatter_failure_preserves_every_original(self) -> None:
         """A formatter may damage its projection without touching source bytes."""
@@ -160,7 +164,9 @@ class FormatPublicationTests(unittest.TestCase):
             self.assertEqual(selected.read_bytes(), b"value=1\n")
             self.assertEqual(neighbor.read_bytes(), b"other=2\n")
             self.assertEqual(selected.stat().st_mode & 0o777, 0o640)
-            self.assertEqual(list(root.glob(".selected.py.*")), [])
+            self.assertEqual(
+                sorted(path.name for path in root.iterdir()), ["neighbor.py", "selected.py"]
+            )
 
     def test_concurrent_edit_is_not_overwritten(self) -> None:
         """An editor change during formatting wins and prevents publication."""

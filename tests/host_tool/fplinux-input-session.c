@@ -72,6 +72,7 @@ struct fake_device {
 	bool present;
 	bool grabbed;
 	unsigned int busy;
+	bool permanently_busy;
 	int pipe[2];
 	struct udev_device udev;
 	struct libevdev evdev;
@@ -81,7 +82,6 @@ static struct udev fake_udev;
 static struct udev_monitor fake_monitor;
 static struct udev_enumerate fake_scan;
 static bool scan_fails;
-static unsigned int sleeps;
 static struct fake_device devices[DEVICE_COUNT] = {
 	{ .path = "/dev/input/event0", .phys = "fplinux/keypad0" },
 	{ .path = "/dev/input/event1",
@@ -99,6 +99,8 @@ static struct fake_device devices[DEVICE_COUNT] = {
 };
 
 int __real_close(int fd);
+int __real_nanosleep(const struct timespec *requested,
+		     struct timespec *remaining);
 
 static void initialize(void)
 {
@@ -177,8 +179,9 @@ int __wrap_ioctl(int fd, unsigned long request, ...)
 		int grab = va_arg(arguments, int);
 
 		va_end(arguments);
-		if (grab && device->busy) {
-			--device->busy;
+		if (grab && (device->busy || device->permanently_busy)) {
+			if (device->busy)
+				--device->busy;
 			errno = EBUSY;
 			return -1;
 		}
@@ -216,10 +219,8 @@ int __wrap_ioctl(int fd, unsigned long request, ...)
 int __wrap_nanosleep(const struct timespec *requested,
 		     struct timespec *remaining)
 {
-	(void)remaining;
-	assert(requested->tv_sec == 0 && requested->tv_nsec == 50000000L);
-	++sleeps;
-	return 0;
+	/* The caller's process deadline bounds retries with any sleep strategy. */
+	return __real_nanosleep(requested, remaining);
 }
 
 struct udev *udev_new(void)
@@ -634,8 +635,10 @@ static void classification(void)
 static void modifiers_and_repeat(void)
 {
 	struct fplinux_input_session session;
+	struct fplinux_input_event releases[2];
 	uint64_t first, second;
 	struct pollfd ready;
+	unsigned int i;
 
 	devices[1].present = devices[2].present = true;
 	open_session(&session, 2U);
@@ -662,11 +665,17 @@ static void modifiers_and_repeat(void)
 	next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 29, true);
 	empty(&session);
 	hotplug(1, false);
-	assert(next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 29, false).device_id ==
-	       first);
-	assert(next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 42, false).device_id ==
-	       first);
-	next(&session, FPLINUX_INPUT_EVENT_DEVICE_REMOVED, 1, 0, false);
+	assert(fplinux_input_session_next(&session, &releases[0]));
+	assert(fplinux_input_session_next(&session, &releases[1]));
+	for (i = 0; i < 2; ++i) {
+		assert(releases[i].type == FPLINUX_INPUT_EVENT_KEY &&
+		       releases[i].source == FPLINUX_INPUT_SOURCE_KEYBOARD &&
+		       !releases[i].pressed && releases[i].device_id == first);
+		assert(releases[i].code == 29 || releases[i].code == 42);
+	}
+	assert(releases[0].code != releases[1].code);
+	assert(next(&session, FPLINUX_INPUT_EVENT_DEVICE_REMOVED, 1, 0, false)
+		       .device_id == first);
 	empty(&session);
 	input(2, EV_KEY, 42, 0);
 	input(2, EV_KEY, 29, 0);
@@ -854,17 +863,19 @@ static void grab_retry_and_failed_scan(void)
 	devices[1].present = true;
 	devices[1].busy = 2;
 	open_session(&session, 2U);
-	assert(sleeps == 2 && devices[1].grabbed);
+	assert(devices[1].grabbed);
 	next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 1, 0, false);
+	empty(&session);
 	closed(&session);
 	scan_fails = true;
 	assert(!fplinux_input_session_open(&session, 2U, error, sizeof(error)));
 	assert(!strcmp(error, "cannot scan input devices"));
 	closed(&session);
 	scan_fails = false;
-	devices[1].busy = 20;
+	devices[1].permanently_busy = true;
 	assert(fplinux_input_session_open(&session, 2U, error, sizeof(error)));
-	assert(sleeps == 21 && !devices[1].grabbed);
+	assert(!devices[1].grabbed && devices[1].pipe[0] < 0 &&
+	       !devices[1].evdev.live);
 	empty(&session);
 	closed(&session);
 }

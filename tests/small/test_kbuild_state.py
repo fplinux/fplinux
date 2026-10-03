@@ -24,7 +24,6 @@ class KernelOutputStateTests(unittest.TestCase):
         self.output = self.work / "kernel"
         self.linux = self.root / "linux"
         self.defconfig = self._write("defconfig", b"CONFIG_TEST=y\n")
-        self.rootfs = self._write("rootfs.cpio", b"logical composition\n")
         self.initramfs = self._write("initramfs.cpio", b"boot archive a\n")
         self.cross = "arm-none-eabi-"
 
@@ -113,8 +112,8 @@ class KernelOutputStateTests(unittest.TestCase):
         self.assertTrue(kbuild_state.cache_hit(self.work, self.output, self._plan()))
         self.assertEqual(retained.read_bytes(), b"keep\n")
 
-    def test_changed_boot_archive_invalidates_kernel_with_identical_composition(self) -> None:
-        """Different boot bytes change kernel reuse without a logical composition edit."""
+    def test_changed_boot_archive_invalidates_cache_and_updates_materialized_input(self) -> None:
+        """Different boot bytes change the plan identity and its materialized input."""
         before = self._plan()
         self._complete(before, b"a")
         if before.initramfs_input is None:
@@ -128,7 +127,6 @@ class KernelOutputStateTests(unittest.TestCase):
         if changed.initramfs_input is None:
             self.fail("changed RAM plan has no materialized boot input")
         self.assertEqual(changed.initramfs_input.read_bytes(), b"boot archive b\n")
-        self.assertEqual(self.rootfs.read_bytes(), b"logical composition\n")
 
     def test_parallelism_is_not_a_recipe_input(self) -> None:
         """Scheduling changes do not select a different cache slot."""
@@ -185,13 +183,12 @@ class KernelOutputStateTests(unittest.TestCase):
             kbuild_state.publish_success(self.work, self.output, plan)
 
     def test_external_root_has_no_materialized_initramfs_dependency(self) -> None:
-        """External root reuse depends on boot parameters, not filesystem bytes."""
+        """An external plan stays reusable after boot archive edits and rejects materialization."""
         plan = self._plan(external=True)
         kbuild_state.prepare_output(self.work, self.output)
         self._write_outputs(b"external")
         kbuild_state.publish_success(self.work, self.output, plan)
 
-        self.rootfs.write_bytes(b"unrelated external filesystem bytes\n")
         self.initramfs.write_bytes(b"unrelated boot archive bytes\n")
 
         self.assertTrue(kbuild_state.cache_hit(self.work, self.output, self._plan(external=True)))

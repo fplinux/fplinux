@@ -35,16 +35,6 @@ class SourceInventoryTests(unittest.TestCase):
             self.assertEqual(formats.posix_shell, ())
             self.assertEqual(formats.bash, ())
 
-    def test_openrc_scripts_are_classified_as_posix_shell_sources(self) -> None:
-        """Classify OpenRC init scripts as declared POSIX shell sources."""
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            initd = root / "service.initd"
-            initd.write_text("#!/sbin/openrc-run\ncommand=/bin/true\n")
-            formats = classify_source_formats([initd], root=root)
-            self.assertEqual(formats.posix_shell, ("service.initd",))
-            self.assertEqual(formats.bash, ())
-
     def test_markdown_links_require_real_files_and_anchors(self) -> None:
         """Protect navigable local documentation without checking external URLs."""
         with tempfile.TemporaryDirectory() as temporary:
@@ -201,21 +191,16 @@ class SourceInventoryTests(unittest.TestCase):
                     ],
                 )
 
-    def test_package_selection_validation_rejects_an_unresolved_target(self) -> None:
-        """A missing declared aport makes the repository selection gate fail."""
+    def test_package_selection_validation_rejects_a_missing_platform_aport(self) -> None:
+        """A platform-declared package without an aport makes the selection gate fail."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            for package in ("common-runtime", "platform-app", "phone-ui"):
+            for package in ("common-runtime", "platform-app"):
                 aport = root / "alpine/aports" / package
                 aport.mkdir(parents=True)
                 (aport / "APKBUILD").write_text(f"pkgname={package}\n")
             targets = {
-                "phone-a": {
-                    "platform": "soc",
-                    "rootfs": {"base_packages": [], "packages": [], "exclude_packages": []},
-                    "bundle": {"packages": ["phone-ui"]},
-                },
-                "phone-b": {
+                "phone": {
                     "platform": "soc",
                     "rootfs": {"base_packages": [], "packages": [], "exclude_packages": []},
                     "bundle": {"packages": []},

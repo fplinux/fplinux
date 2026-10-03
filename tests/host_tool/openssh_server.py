@@ -120,7 +120,11 @@ class OpenSshServer:
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-        self._wait_until_listening()
+        try:
+            self._wait_until_listening()
+        except BaseException:
+            self.stop()
+            raise
 
     def _wait_until_listening(self) -> None:
         deadline = time.monotonic() + _SERVER_START_TIMEOUT_SECONDS

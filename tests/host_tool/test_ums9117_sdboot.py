@@ -20,7 +20,7 @@ class SdbootFitAdmissionTests(unittest.TestCase):
     """A valid embedded DTB may be only four-byte aligned inside its FIT."""
 
     def test_embedded_dtb_alignment_and_invalid_payloads(self) -> None:
-        """Accept both FIT alignments; reject bad DTB headers and data lengths."""
+        """Accept both FIT alignments; report DTB refusals as BOOTM failures with MMC released."""
         with tempfile.TemporaryDirectory() as name:
             work = Path(name)
             executable = work / "sdboot"
@@ -60,9 +60,12 @@ class SdbootFitAdmissionTests(unittest.TestCase):
                 with self.subTest(alignment=alignment):
                     self.check_admission(executable, fit, alignment, 0)
             self.assertEqual(alignments, {0, 4})
+            # The stubbed FINDOTHER refuses the bad header, as the pinned U-Boot
+            # fit_image_load() does; sdboot itself rejects the size mismatch.
             bad_magic = b"\0\0\0\0" + dtb[4:]
             bad_size = dtb[:4] + struct.pack(">I", len(dtb) + 4) + dtb[8:]
-            for label, payload in (("bad magic", bad_magic), ("wrong size", bad_size)):
+            refusals = (("FINDOTHER refusal", bad_magic), ("DTB size mismatch", bad_size))
+            for label, payload in refusals:
                 fit, alignment = self.make_fit(work, payload, "padding")
                 with self.subTest(payload=label):
                     self.check_admission(executable, fit, alignment, 4)

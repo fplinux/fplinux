@@ -1,4 +1,23 @@
 // SPDX-License-Identifier: GPL-2.0-only
+/*
+ * One scripted radio and sound card for fplinux-fm host tests. The open(),
+ * close() and ioctl() defined here replace the libc calls of the linked
+ * command: only /dev/radio0 opens, as descriptor 17, other paths fail with
+ * ENOENT, and close() releases nothing. ioctl() answers the V4L2 capability,
+ * tuner, frequency, hardware seek and audio mute requests. A seek must be an
+ * upward, non-wrapping 100 kHz scan of 87.5-108.0 MHz and stops at the first
+ * of 87.5, 88.1, 93.4 and 108.0 MHz not below the current frequency. The
+ * snd_ctl_* functions replace the ALSA control API declared by the local
+ * alsa/asoundlib.h for the FM playback switch.
+ *
+ * Device events are traced to standard error as RADIO_OPEN, RADIO_CLOSE,
+ * V4L2_MUTE, V4L2_UNMUTE, FM_ON and FM_OFF. FM_TEST_FAIL_TUNE,
+ * FM_TEST_NO_CHANNEL, FM_TEST_FAIL_V4L2_MUTE, FM_TEST_FAIL_V4L2_UNMUTE,
+ * FM_TEST_FAIL_FM_ON and FM_TEST_FAIL_FM_OFF make that step fail.
+ * FM_TEST_EXPECT_983 rejects any tuned frequency other than 98.3 MHz,
+ * FM_TEST_ALREADY_ACTIVE reports the FM switch as already on, and
+ * FM_TEST_SIGNAL raises SIGTERM after unmuting.
+ */
 #define _POSIX_C_SOURCE 200809L
 
 #include <alsa/asoundlib.h>

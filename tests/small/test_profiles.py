@@ -137,11 +137,11 @@ class GlobalProfileTests(unittest.TestCase):
                 self.assertEqual(card["uboot"]["defconfig"], "uboot/defconfig")
                 self.assertEqual(card["runtime"], ram["runtime"])
 
-    def test_feature_profiles_are_unavailable_even_if_old_directories_exist(self) -> None:
-        """An obsolete board-local profile cannot change a global selection."""
-        previous = self.root / "targets/first/profiles/bt-qual"
-        previous.mkdir(parents=True)
-        (previous / "profile.toml").write_text("invalid = true\n")
+    def test_board_local_directory_cannot_define_a_global_profile(self) -> None:
+        """A board-local profile directory cannot change the global selection."""
+        board_profile = self.root / "targets/first/profiles/bt-qual"
+        board_profile.mkdir(parents=True)
+        (board_profile / "profile.toml").write_text("invalid = true\n")
         self.assertEqual(paths.discover_profiles("first"), ("default", "microsd-uboot"))
         with self.assertRaisesRegex(SystemExit, "unknown profile"):
             targets.load_target("first", "bt-qual")
@@ -214,7 +214,7 @@ class GlobalProfileTests(unittest.TestCase):
         self.assertNotIn("fm-radio", targets.load_target("second")["device_data"]["groups"])
 
     def test_board_maps_declaration_alone_needs_no_target_parser_or_sizes(self) -> None:
-        """The platform extracts board maps of each phone's own size without a target parser."""
+        """The target loader accepts board-map declarations without a target parser or size."""
         self.write_target_manifest("first", "target-without-bluetooth.toml")
         path = self.root / "targets/first/target.toml"
         declaration = (
@@ -272,7 +272,7 @@ class GlobalProfileTests(unittest.TestCase):
                 targets.load_target("first", profile)
 
     def test_uboot_combines_shared_sources_with_the_selected_board(self) -> None:
-        """Shared boot logic, its required config and the board slot reach one U-Boot build."""
+        """The target loader combines shared and selected board inputs in the U-Boot config."""
         shared = self.root / "platforms/demo"
         (shared / "boot.c").write_text("shared boot flow\n")
         (shared / "boot.patch").write_text("shared integration patch\n")

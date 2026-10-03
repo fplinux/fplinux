@@ -138,9 +138,12 @@ static int test_valid_420(void)
 				 frame.entropy_length == 31,
 			 "4:2:0 entropy description changed");
 	/*
-	 * These sentinels are derived from the fixture DQT/DHT bytes and the
-	 * documented UMS9117 coefficient permutation and Huffman lanes.  They
-	 * must not be regenerated from the codec implementation under test.
+	 * These sentinels are derived by hand from the fixture DQT/DHT bytes
+	 * and the register layout the driver programs: natural-order
+	 * coefficients in 6-bit bit-reversed order and per-length Huffman
+	 * lanes.  They characterize that layout; a host run cannot show that
+	 * the hardware accepts it.  They must not be regenerated from the
+	 * codec implementation under test.
 	 * For example, Y DQT zigzag entries 0/10 are 4/5 and feed ASIC natural
 	 * slots 0/32, giving word 0x00050004.  Y-DC length counts 1,1 and C-DC
 	 * counts 1,1,1 give valid masks 0xc000/0xe000 and maxima 0,2/0,2,6.

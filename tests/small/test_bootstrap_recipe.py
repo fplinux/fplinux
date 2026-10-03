@@ -132,46 +132,52 @@ class BootstrapRecipeTests(unittest.TestCase):
 
     def test_bootstrap_source_shared_vendor_and_config_are_causal(self) -> None:
         """Every declared bootstrap input changes the exact recipe."""
-        baseline = self._digest()
-
-        self._write("targets/demo/bootstrap/main.c", b"int entry(void) { return 2; }\n")
-        self.assertNotEqual(baseline, self._digest())
-        self._write("targets/demo/bootstrap/main.c", b"int entry(void) { return 1; }\n")
-
-        self._write("bootstrap/fplinux-boot-screen/screen.c", b"int changed_screen;\n")
-        self.assertNotEqual(baseline, self._digest())
-        self._write("bootstrap/fplinux-boot-screen/screen.c", b"int screen;\n")
-
-        self._write("patches/vendor.patch", b"changed vendor patch\n")
-        self.assertNotEqual(baseline, self._digest())
-        self._write("patches/vendor.patch", b"vendor patch\n")
-
-        self.sources["vendor"]["archive_sha256"] = "b" * 64
-        self.assertNotEqual(baseline, self._digest())
-        self.sources["vendor"]["archive_sha256"] = "a" * 64
-
-        self.sources["vendor"]["commit"] = "def456"
-        self.assertNotEqual(baseline, self._digest())
-        self.sources["vendor"]["commit"] = "abc123"
-
-        self.platform["bootstrap"]["toolchain"] = "arm-none-eabi-custom"
-        self.assertNotEqual(baseline, self._digest())
-        self.platform["bootstrap"]["toolchain"] = "arm-none-eabi"
-
-        self.platform["bootstrap"]["build_targets"] = ["clean", "all"]
-        self.assertNotEqual(baseline, self._digest())
-
-        self.platform["bootstrap"]["build_targets"] = ["clean", "all", "map"]
-        self._write("scripts/fplinux_cli/build_env.py", b"changed environment\n")
-        self.assertNotEqual(baseline, self._digest())
-        self._write("scripts/fplinux_cli/build_env.py", b"build environment\n")
-
-        self.target_config["identity"]["display_name"] = "Demo Changed Phone"
-        self.assertNotEqual(baseline, self._digest())
-        self.target_config["identity"]["display_name"] = "Demo Phone"
-
-        self.target_config["bootstrap"]["record_prefix"] = "CHANGED"
-        self.assertNotEqual(baseline, self._digest())
+        changes = (
+            (
+                "target source",
+                lambda: self._write(
+                    "targets/demo/bootstrap/main.c", b"int entry(void) { return 2; }\n"
+                ),
+            ),
+            (
+                "shared copy",
+                lambda: self._write(
+                    "bootstrap/fplinux-boot-screen/screen.c", b"int changed_screen;\n"
+                ),
+            ),
+            (
+                "vendor patch",
+                lambda: self._write("patches/vendor.patch", b"changed vendor patch\n"),
+            ),
+            ("vendor archive", lambda: self.sources["vendor"].update(archive_sha256="b" * 64)),
+            ("vendor commit", lambda: self.sources["vendor"].update(commit="def456")),
+            (
+                "toolchain",
+                lambda: self.platform["bootstrap"].update(toolchain="arm-none-eabi-custom"),
+            ),
+            (
+                "build targets",
+                lambda: self.platform["bootstrap"].update(build_targets=["clean", "all"]),
+            ),
+            (
+                "build environment",
+                lambda: self._write("scripts/fplinux_cli/build_env.py", b"changed environment\n"),
+            ),
+            (
+                "display name",
+                lambda: self.target_config["identity"].update(display_name="Demo Changed Phone"),
+            ),
+            (
+                "record prefix",
+                lambda: self.target_config["bootstrap"].update(record_prefix="CHANGED"),
+            ),
+        )
+        for name, change in changes:
+            with self.subTest(input=name):
+                self.setUp()  # Start each change from an unmodified fixture.
+                baseline = self._digest()
+                change()
+                self.assertNotEqual(baseline, self._digest())
 
     def test_host_and_docs_are_outside_the_bootstrap_closure(self) -> None:
         """Unselected host and documentation files must not relabel the phone image."""

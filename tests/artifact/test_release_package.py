@@ -5,12 +5,12 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-import importlib.util
 import io
 import json
 import posixpath
 import re
 import shutil
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -33,6 +33,26 @@ from fplinux_cli.image_state import ImageState
 from fplinux_cli.manifests import platforms, releases, targets
 from fplinux_cli.manifests.releases import load_release
 from fplinux_cli.workspace import WorkspaceSnapshot
+
+from tests.process import run_process
+
+# Load the archived helper by path, as the standalone runner does, then report the
+# record visible before the helper's context closes.
+ARCHIVED_EVENTS_CONSUMER = """\
+import importlib.util
+import sys
+from pathlib import Path
+
+spec = importlib.util.spec_from_file_location("fplinux_loader_events", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+output = Path(sys.argv[2])
+with module.record_events(
+    output, target="nokia-ta1618", profile=None, build_type="release"
+) as events:
+    events.emit("waiting-for-device")
+    sys.stdout.write(output.read_text(encoding="utf-8"))
+"""
 
 
 class ReleaseArchiveArtifactTests(unittest.TestCase):
@@ -193,6 +213,12 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             self.fail("package output omitted an archive or phone-test payload digest")
         return values["Archive SHA256"], values["Phone-test payload SHA256"]
 
+    def record_phone_tested(self, payload: str) -> None:
+        """Record one phone-tested payload in the release verification lock."""
+        (self.root / "releases.lock.toml").write_text(
+            f'[verified]\n{self.target} = "{payload}"\n', encoding="utf-8"
+        )
+
     def package_patches(self) -> tuple[contextlib.AbstractContextManager[object], ...]:
         """Isolate package creation from host identity and repository files."""
         return (
@@ -284,7 +310,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
                 self.assertEqual(digest, hashlib.sha256(payloads[relative]).hexdigest())
 
     def test_archived_loader_events_work_without_the_source_checkout(self) -> None:
-        """The packaged helper writes a flushed record using only archive bytes."""
+        """An isolated interpreter writes a flushed record with only the archived helper."""
         with contextlib.ExitStack() as stack:
             for patch in self.package_patches():
                 stack.enter_context(patch)
@@ -299,17 +325,23 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
         extracted.mkdir()
         helper = extracted / "loader_events.py"
         helper.write_bytes(helper_bytes)
-        spec = importlib.util.spec_from_file_location("archived_loader_events", helper)
-        if spec is None or spec.loader is None:
-            self.fail("archived loader events cannot be imported")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        output = extracted / "events.jsonl"
-        with module.record_events(
-            output, target="nokia-ta1618", profile=None, build_type="release"
-        ) as events:
-            events.emit("waiting-for-device")
-            record = json.loads(output.read_text(encoding="utf-8"))
+        # -I and an empty environment keep the checkout and PYTHONPATH off sys.path.
+        result = run_process(
+            [
+                sys.executable,
+                "-I",
+                "-c",
+                ARCHIVED_EVENTS_CONSUMER,
+                str(helper),
+                str(extracted / "events.jsonl"),
+            ],
+            name="archived loader events",
+            timeout=30,
+            cwd=extracted,
+            env={},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        record = json.loads(result.stdout)
         record.pop("time")
         self.assertEqual(
             record,
@@ -376,15 +408,19 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             profile,
         )
 
+        def profile_workspace(
+            target: str, selected: str | None = None, build_type: str = "release"
+        ) -> WorkspaceSnapshot:
+            """Match the published profile bundle only for its own release context."""
+            if (target, selected, build_type) == (self.target, profile, "release"):
+                return profile_snapshot
+            return WorkspaceSnapshot((), "5" * 64)
+
         with contextlib.ExitStack() as stack:
             for patch in self.package_patches():
                 stack.enter_context(patch)
-            workspace = stack.enter_context(
-                mock.patch.object(
-                    workspaces,
-                    "target_workspace_snapshot",
-                    return_value=profile_snapshot,
-                )
+            stack.enter_context(
+                mock.patch.object(workspaces, "target_workspace_snapshot", profile_workspace)
             )
             with self.assertRaisesRegex(SystemExit, "only be packaged with --candidate"):
                 package_commands.package_target(
@@ -403,13 +439,6 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
                 candidate=True,
             )
 
-        self.assertEqual(
-            workspace.call_args_list,
-            [
-                mock.call(self.target, profile, build_type="release"),
-                mock.call(self.target, profile, build_type="release"),
-            ],
-        )
         archives = list((self.cache / "out/candidates").glob("*.zip"))
         self.assertEqual(len(archives), 2)
         names = {archive.name for archive in archives}
@@ -517,8 +546,8 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             self.assertTrue(
                 candidate_files[0].name.startswith("FPLinux-nokia-ta1618-release-candidate-")
             )
-            with mock.patch.object(releases, "verified_runtime_digest", return_value=original):
-                release_archive, release_payload = self.package(candidate=False)
+            self.record_phone_tested(original)
+            release_archive, release_payload = self.package(candidate=False)
             self.assertEqual(release_payload, original)
             self.assertNotEqual(release_archive, candidate_archive)
 
@@ -530,8 +559,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             metadata_archive, after_metadata = self.package(candidate=True)
             self.assertEqual(after_metadata, original)
             self.assertNotEqual(metadata_archive, candidate_archive)
-            with mock.patch.object(releases, "verified_runtime_digest", return_value=original):
-                self.package(candidate=False)
+            self.package(candidate=False)
 
             self.publish_bundle(
                 "4" * 64,
@@ -540,14 +568,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             )
             _apk_archive, after_apk = self.package(candidate=True)
             self.assertNotEqual(after_apk, original)
-            with (
-                mock.patch.object(
-                    releases,
-                    "verified_runtime_digest",
-                    return_value=original,
-                ),
-                self.assertRaisesRegex(SystemExit, "not phone-tested"),
-            ):
+            with self.assertRaisesRegex(SystemExit, "not phone-tested"):
                 package_commands.package_target(self.target)
 
 

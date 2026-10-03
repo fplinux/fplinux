@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Host checks for native Kbuild delivery of the optional fitted profile."""
+"""Component tests for fitted-profile arguments, input identity, and file validation."""
 
 from __future__ import annotations
 
@@ -14,10 +14,10 @@ from fplinux_cli.build import kernel as kernel_build
 
 
 class BuiltinFirmwareTests(unittest.TestCase):
-    """Bind the exact private bytes to Kconfig, Kbuild identity, and vmlinux."""
+    """Check profile arguments, input identity, and synthetic vmlinux validation."""
 
     def setUp(self) -> None:
-        """Create one immutable-looking workspace profile and its declaration."""
+        """Create a staged profile fixture and its declaration."""
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -29,26 +29,27 @@ class BuiltinFirmwareTests(unittest.TestCase):
             sha256=hashlib.sha256(self.profile).hexdigest(),
         )
         self.firmware = (item,)
-        self.profile_identity = (
-            ".fplinux-inputs/device-data/inoi-240-modern-4g/groups/"
-            "audio-profile/fplinux/inoi240-audio-profile.bin"
+        # Stage the profile where the build workspace places captured device data.
+        self.profile_path = self.root / firmware_inputs.snapshot_device_data_path(
+            "inoi-240-modern-4g", "audio-profile", item.destination
         )
-        self.profile_path = self.root / self.profile_identity
-        self.directory = self.root / (
-            ".fplinux-inputs/device-data/inoi-240-modern-4g/groups/audio-profile"
+        self.directory = firmware_inputs.snapshot_device_data_group_directory(
+            self.root, "inoi-240-modern-4g", "audio-profile"
         )
         self.profile_path.parent.mkdir(parents=True)
         self.profile_path.write_bytes(self.profile)
 
-    def test_present_group_uses_native_kconfig_and_changes_kbuild_identity(
+    def test_present_group_configures_profile_bytes_and_changes_input_identity(
         self,
     ) -> None:
-        """The admitted profile, not adjacent files, is a causal Kbuild input."""
+        """The configured profile changes input identity while adjacent files do not."""
         with mock.patch.object(common, "ROOT", self.root):
             arguments = kernel_build.audio_profile_kconfig_arguments(
                 "inoi-240-modern-4g",
                 self.firmware,
             )
+            # Kbuild reads EXTRA_FIRMWARE relative to EXTRA_FIRMWARE_DIR.
+            configured_bytes = (Path(arguments[5]) / arguments[2]).read_bytes()
             implementation = kernel_build.audio_profile_implementation(
                 "inoi-240-modern-4g",
                 self.firmware,
@@ -60,22 +61,21 @@ class BuiltinFirmwareTests(unittest.TestCase):
             changed = kbuild_state.implementation_identity(implementation)
 
         self.assertEqual(
-            arguments,
+            arguments[:5],
             [
                 "--set-str",
                 "EXTRA_FIRMWARE",
                 "fplinux/inoi240-audio-profile.bin",
                 "--set-str",
                 "EXTRA_FIRMWARE_DIR",
-                str(self.directory),
             ],
         )
-        self.assertEqual(implementation, [(self.profile_identity, self.profile_path)])
+        self.assertEqual(configured_bytes, self.profile)
         self.assertEqual(first, unrelated)
         self.assertNotEqual(first, changed)
 
     def test_vmlinux_must_contain_the_exact_configured_profile(self) -> None:
-        """A fitted build cannot proceed after Kbuild loses the embedded bytes."""
+        """The verifier rejects a synthetic vmlinux file missing the configured profile bytes."""
         config_path = self.root / ".config"
         config_path.write_text(
             'CONFIG_EXTRA_FIRMWARE="fplinux/inoi240-audio-profile.bin"\n'

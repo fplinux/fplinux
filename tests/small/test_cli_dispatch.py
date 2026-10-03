@@ -38,7 +38,7 @@ class CliCacheLockTests(unittest.TestCase):
         arguments: list[str],
         callback_name: str,
     ) -> tuple[list[object], mock.Mock]:
-        """Run one command with a context manager that records dispatcher order."""
+        """Run one command with a fake cache lock that records when it is held and released."""
         events: list[object] = []
 
         @contextmanager
@@ -52,6 +52,7 @@ class CliCacheLockTests(unittest.TestCase):
         ) -> Iterator[None]:
             events.append(("lock", cache_root, exclusive, command, target, profile))
             yield
+            events.append("unlock")
 
         callback = mock.Mock(side_effect=lambda *_args, **_kwargs: events.append("command"))
         with (
@@ -143,6 +144,7 @@ class CliCacheLockTests(unittest.TestCase):
                     [
                         ("lock", self.root / ".cache", exclusive, arguments[0], target, profile),
                         "command",
+                        "unlock",
                     ],
                 )
                 if callback_name == "backup_target_nand":
@@ -202,6 +204,7 @@ class CliCacheLockTests(unittest.TestCase):
             [
                 ("lock", self.root / ".cache", True, "build", "target", None),
                 "command",
+                "unlock",
             ],
         )
         self.assertTrue(build.call_args.kwargs["offline"])
@@ -310,6 +313,7 @@ class CliCacheLockTests(unittest.TestCase):
             [
                 ("lock", self.root / ".cache", True, "check", None, None),
                 "command",
+                "unlock",
             ],
         )
         self.assertEqual(
@@ -328,6 +332,7 @@ class CliCacheLockTests(unittest.TestCase):
         """Use three kernel workers normally and one when no parallel work can run."""
         cases: tuple[tuple[list[str], list[str], bool, int], ...] = (
             (["check"], [], False, 3),
+            (["check", "kernel"], ["kernel"], False, 3),
             (["check", "docs"], ["docs"], False, 1),
             (["check", "--verbose"], [], True, 1),
         )
@@ -362,17 +367,19 @@ class CliCacheLockTests(unittest.TestCase):
                     "microsd-uboot",
                 ),
                 "command",
+                "unlock",
             ],
         )
         self.assertEqual(build.call_args.kwargs["profile"], "microsd-uboot")
 
-    def test_profile_package_and_console_use_the_selected_shared_lock_identity(self) -> None:
-        """Profile consumers retain the named bundle slot under the shared cache lock."""
+    def test_profile_consumers_use_the_selected_shared_lock_identity(self) -> None:
+        """Package, run and console retain the named bundle slot under the shared cache lock."""
         cases = (
             (
                 ["package", "target", "--profile", "microsd-uboot", "--candidate"],
                 "package_target",
             ),
+            (["run", "target", "--profile", "microsd-uboot"], "run_target"),
             (
                 ["console", "target", "--profile", "microsd-uboot", "--exec", "id"],
                 "console_target",
@@ -394,6 +401,7 @@ class CliCacheLockTests(unittest.TestCase):
                             "microsd-uboot",
                         ),
                         "command",
+                        "unlock",
                     ],
                 )
                 self.assertEqual(callback.call_args.kwargs["profile"], "microsd-uboot")
@@ -444,9 +452,44 @@ class CliCacheLockTests(unittest.TestCase):
                             "microsd-uboot",
                         ),
                         "command",
+                        "unlock",
                     ],
                 )
                 self.assertEqual(callback.call_args, expected_call)
+
+    def test_boot_selector_and_profile_are_rejected_together_before_locking(self) -> None:
+        """One run or package invocation selects either a boot mode or a profile, not both."""
+        for command in ("run", "package"):
+            with (
+                self.subTest(command=command),
+                mock.patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "fplinux",
+                        command,
+                        "target",
+                        "--boot",
+                        "microsd",
+                        "--profile",
+                        "microsd-uboot",
+                    ],
+                ),
+                mock.patch.object(cli, "ROOT", self.root),
+                mock.patch.object(cli, "discover_targets", return_value=("target",)),
+                mock.patch.object(
+                    cli,
+                    "cache_lock",
+                    side_effect=AssertionError("conflicting selectors must not lock"),
+                ) as lock,
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit) as stopped,
+            ):
+                cli.main()
+
+            self.assertEqual(stopped.exception.code, 2)
+            lock.assert_not_called()
+            self.assertFalse((self.root / ".cache").exists())
 
     def test_explicit_default_reuses_the_implicit_context(self) -> None:
         """The alias reaches each consumer with the same profile and lock identity."""
@@ -483,8 +526,12 @@ class CliCacheLockTests(unittest.TestCase):
             ["verify", "target", "--profile", "microsd-uboot"], "verify_booted"
         )
         self.assertEqual(
-            events[0],
-            ("lock", self.root / ".cache", False, "verify", "target", "microsd-uboot"),
+            events,
+            [
+                ("lock", self.root / ".cache", False, "verify", "target", "microsd-uboot"),
+                "command",
+                "unlock",
+            ],
         )
         self.assertEqual(
             verify.call_args,
@@ -492,15 +539,20 @@ class CliCacheLockTests(unittest.TestCase):
         )
 
     def test_invalid_profile_is_rejected_before_any_cache_or_retention_action(self) -> None:
-        """Profile names are path components, not cache paths or deferred cleanup inputs."""
+        """Only a public profile name reaches the cache lock or deferred cleanup."""
+        invalid = "argument --profile: invalid profile name: '../../x'"
         cases = (
-            ("check", "--profile", "../../x"),
-            ("build", "target", "--profile", "../../x"),
-            ("package", "target", "--profile", "../../x"),
-            ("run", "target", "--profile", "../../x"),
-            ("console", "target", "--profile", "../../x"),
+            (("check", "--profile", "../../x"), invalid),
+            (("build", "target", "--profile", "../../x"), invalid),
+            (("package", "target", "--profile", "../../x"), invalid),
+            (("run", "target", "--profile", "../../x"), invalid),
+            (("console", "target", "--profile", "../../x"), invalid),
+            (
+                ("check", "source", "--profile", "lab"),
+                "argument --profile: unknown profile: 'lab'",
+            ),
         )
-        for arguments in cases:
+        for arguments, message in cases:
             with self.subTest(arguments=arguments):
                 stderr = io.StringIO()
                 with (
@@ -526,10 +578,7 @@ class CliCacheLockTests(unittest.TestCase):
                     self.assertRaisesRegex(SystemExit, "2"),
                 ):
                     cli.main()
-                self.assertIn(
-                    "argument --profile: invalid profile name: '../../x'",
-                    stderr.getvalue(),
-                )
+                self.assertIn(message, stderr.getvalue())
                 lock.assert_not_called()
                 rootfs_gc.assert_not_called()
                 logs_gc.assert_not_called()
@@ -578,8 +627,13 @@ class CliCacheLockTests(unittest.TestCase):
                     mock.call(cache, command, profile=profile, target=target),
                 )
 
-    def test_check_list_and_dry_prune_do_not_touch_cache(self) -> None:
-        """The two no-work paths neither lock nor create a cache directory."""
+    def test_check_list_and_dry_prune_dispatch_without_the_cache_lock(self) -> None:
+        """The dispatcher neither locks nor creates the cache for the two no-work commands.
+
+        `check --list` runs for real. `prune` is replaced at the dispatcher, so this
+        checks only that the dry-run choice reaches it; prune's own read-only behavior
+        is not exercised here.
+        """
         cases = (
             (["check", "--list"], None),
             (["prune"], False),

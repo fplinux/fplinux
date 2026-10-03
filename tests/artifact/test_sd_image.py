@@ -47,7 +47,7 @@ class SdImageTests(unittest.TestCase):
         required = ("genimage", "mcopy", "mke2fs", "mkdosfs", "xz")
         missing = [name for name in required if shutil.which(name) is None]
         if missing:
-            self.skipTest("required image tools are unavailable: " + ", ".join(missing))
+            self.fail("quality image lacks required image tools: " + ", ".join(missing))
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -132,11 +132,10 @@ class SdImageTests(unittest.TestCase):
         self.build()
         self.assertNotEqual(before, sha256_file(self.output))
 
-    def test_unrelated_temporary_file_does_not_change_output(self) -> None:
-        """Only the declared FIT and ext4 bytes affect the image."""
+    def test_rebuild_from_unchanged_inputs_is_byte_reproducible(self) -> None:
+        """Rebuilding the same FIT and ext4 bytes publishes an identical compressed image."""
         self.build()
         before = sha256_file(self.output)
-        (self.root / "unrelated.tmp").write_bytes(b"unrelated\n")
         self.build()
         self.assertEqual(before, sha256_file(self.output))
 
@@ -168,7 +167,7 @@ class SdImageTests(unittest.TestCase):
         self.assertEqual(self.output.read_bytes(), expected)
 
     def test_failed_build_preserves_prior_published_image(self) -> None:
-        """A real genimage failure cannot replace an already complete image."""
+        """An injected genimage failure cannot replace an already complete image."""
         self.build()
         before = sha256_file(self.output)
         failed = subprocess.CompletedProcess(

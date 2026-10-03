@@ -19,8 +19,8 @@ SHARED_INCLUDE = ROOT / "include/fplinux"
 class TyrQuakeLauncherHelperTests(unittest.TestCase):
     """Exercise cleanup code without claiming launcher or device coverage."""
 
-    def test_remove_runtime_deletes_tree_without_following_pak_symlink(self) -> None:
-        """Cleanup removes volatile files without deleting external game data."""
+    def test_remove_runtime_deletes_tree_and_keeps_linked_game_data(self) -> None:
+        """Cleanup removes the runtime tree and its file links, not their targets."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             runtime = root / "fplinux-quake.123"
@@ -140,7 +140,6 @@ class TyrQuakeLauncherCliTests(unittest.TestCase):
         """Unknown options, missing values and extra arguments are refused."""
         for arguments in (
             ("--unknown",),
-            ("--input", "phone"),
             ("--heapsize",),
             ("extra",),
             ("--heapsize=16384", "extra"),

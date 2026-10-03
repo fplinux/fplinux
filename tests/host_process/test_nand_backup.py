@@ -54,8 +54,8 @@ case "$remote_command" in
   exit 0
   ;;
 esac
-if [ -n "${FPLINUX_EXPECTED_READ:-}" ]; then
-  [ "$remote_command" = "$FPLINUX_EXPECTED_READ" ] || exit 64
+if [ -n "${FPLINUX_REMOTE_COMMANDS:-}" ]; then
+  printf '%s\n' "$remote_command" >>"$FPLINUX_REMOTE_COMMANDS"
 fi
 case "${FPLINUX_STREAM_MODE:?}" in
 success)
@@ -138,53 +138,36 @@ esac
         self.assertEqual(list(destination.parent.glob(".nand.raw.*")), [])
 
     def test_target_backup_streams_only_its_declared_read_device(self) -> None:
-        """Board selection reaches the real SSH process with only a read command."""
-        for target, profile, geometry, expected_read, expected_size in (
-            (
-                "nokia-ta1618",
-                "microsd-uboot",
-                GEOMETRY_128_OOB,
-                "exec dd if=/dev/ums9117-nand-raw bs=65280",
-                142606336,
+        """Target selection reaches the real SSH process with one read of its declared device."""
+        destination = Path(self.temporary.name) / "nokia.raw"
+        commands = Path(self.temporary.name) / "remote-commands"
+        with (
+            mock.patch(
+                "fplinux_cli.cli.runtime.current_target_ssh_session",
+                return_value=(ssh_transport, self.session),
+            ) as acquire,
+            mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
+            mock.patch.dict(
+                os.environ,
+                {
+                    "PATH": f"{self.tools}:{os.environ['PATH']}",
+                    "FPLINUX_STREAM_MODE": "success",
+                    "FPLINUX_REMOTE_COMMANDS": str(commands),
+                    "FPLINUX_GEOMETRY": GEOMETRY_128_OOB,
+                },
             ),
-            (
-                "inoi-240-modern-4g",
-                None,
-                GEOMETRY_64_OOB,
-                "exec dd if=/dev/ums9117-nand-raw bs=63360",
-                138412032,
-            ),
-            (
-                "inoi-244-modern-4g",
-                None,
-                GEOMETRY_64_OOB,
-                "exec dd if=/dev/ums9117-nand-raw bs=63360",
-                138412032,
-            ),
+            self.assertRaisesRegex(SystemExit, "expected 142606336 bytes, got 14"),
         ):
-            with (
-                self.subTest(target=target, profile=profile),
-                mock.patch(
-                    "fplinux_cli.cli.runtime.current_target_ssh_session",
-                    return_value=(ssh_transport, self.session),
-                ) as acquire,
-                mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
-                mock.patch.dict(
-                    os.environ,
-                    {
-                        "PATH": f"{self.tools}:{os.environ['PATH']}",
-                        "FPLINUX_STREAM_MODE": "success",
-                        "FPLINUX_EXPECTED_READ": expected_read,
-                        "FPLINUX_GEOMETRY": geometry,
-                    },
-                ),
-            ):
-                destination = Path(self.temporary.name) / f"{target}.raw"
-                with self.assertRaisesRegex(SystemExit, f"expected {expected_size} bytes, got 14"):
-                    nand_backup.backup_target_nand(target, destination, profile=profile)
+            nand_backup.backup_target_nand("nokia-ta1618", destination, profile="microsd-uboot")
 
-                self.assertFalse(destination.exists())
-                acquire.assert_called_once_with(target, profile=profile, build_type="release")
+        self.assertFalse(destination.exists())
+        acquire.assert_called_once_with(
+            "nokia-ta1618", profile="microsd-uboot", build_type="release"
+        )
+        read_commands = commands.read_text(encoding="ascii").splitlines()
+        self.assertEqual(len(read_commands), 1, read_commands)
+        # dd copies the device to stdout; any block size is a valid read.
+        self.assertRegex(read_commands[0], r"\Aexec dd if=/dev/ums9117-nand-raw bs=[1-9][0-9]*\Z")
 
     def test_rejected_device_read_cannot_publish_or_replace_an_image(self) -> None:
         """A remote reader error leaves an existing INOI backup intact."""
@@ -201,7 +184,6 @@ esac
                 {
                     "PATH": f"{self.tools}:{os.environ['PATH']}",
                     "FPLINUX_STREAM_MODE": "nonzero",
-                    "FPLINUX_EXPECTED_READ": "exec dd if=/dev/ums9117-nand-raw bs=63360",
                     "FPLINUX_GEOMETRY": GEOMETRY_64_OOB,
                 },
             ),

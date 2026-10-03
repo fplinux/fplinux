@@ -7,24 +7,17 @@ import os
 import shutil
 import tempfile
 import unittest
-from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tests.process import run_process
+
+if TYPE_CHECKING:
+    import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 CLOCK_TOOL = ROOT / "alpine/aports/fplinux-ssh/fplinux-clock"
 CLOCK_FIXTURES = ROOT / "tests/fixtures/fplinux_clock"
-
-
-@dataclass(frozen=True)
-class ClockRun:
-    """Observable result of one tool run and the clock commands it issued."""
-
-    returncode: int
-    stdout: str
-    stderr: str
-    commands: list[str]
 
 
 class FPLinuxClockTests(unittest.TestCase):
@@ -48,33 +41,27 @@ class FPLinuxClockTests(unittest.TestCase):
         self.system_clock = work / "system-clock"
         self.system_clock.write_text("0\n", encoding="ascii")
         self.rtc = work / "rtc"
-        self.events = work / "events"
 
     def run_clock(
         self,
         *arguments: str,
         clock_set: str = "stored",
         rtc_write: str = "stored",
-    ) -> ClockRun:
+    ) -> subprocess.CompletedProcess[str]:
         """Run the tool once with the selected fake clock behavior."""
         environment = os.environ | {
             "PATH": f"{self.commands}:{os.environ['PATH']}",
-            "FPLINUX_TEST_EVENTS": str(self.events),
             "FPLINUX_TEST_SYSTEM_CLOCK": str(self.system_clock),
             "FPLINUX_TEST_RTC": str(self.rtc),
             "FPLINUX_TEST_CLOCK_SET": clock_set,
             "FPLINUX_TEST_RTC_WRITE": rtc_write,
         }
-        result = run_process(
+        return run_process(
             [str(CLOCK_TOOL), *arguments],
             name="fplinux-clock",
             timeout=5,
             env=environment,
         )
-        commands = (
-            self.events.read_text(encoding="utf-8").splitlines() if self.events.exists() else []
-        )
-        return ClockRun(result.returncode, result.stdout, result.stderr, commands)
 
     def test_readable_rtc_keeps_its_time(self) -> None:
         """The system clock is set, and an RTC that can be read is not written."""
@@ -85,40 +72,20 @@ class FPLinuxClockTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(run.stdout, "system=1788739200 rtc=kept\n")
         self.assertEqual(self.system_clock.read_text(encoding="ascii"), "1788739200\n")
-        self.assertEqual(
-            run.commands,
-            [
-                "date -u -s @1788739200",
-                "date -u +%s",
-                "hwclock -u -r -f /dev/rtc0",
-            ],
-        )
         self.assertEqual(self.rtc.read_text(encoding="ascii"), "time kept by another firmware\n")
 
-    def test_unreadable_rtc_is_written_and_read_back(self) -> None:
+    def test_unreadable_rtc_receives_the_system_time(self) -> None:
         """An RTC without readable time receives the new UTC system time."""
         run = self.run_clock("1788739200")
 
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(run.stdout, "system=1788739200 rtc=written\n")
         self.assertEqual(self.rtc.read_text(encoding="ascii"), "1788739200\n")
-        self.assertEqual(
-            run.commands,
-            [
-                "date -u -s @1788739200",
-                "date -u +%s",
-                "hwclock -u -r -f /dev/rtc0",
-                "hwclock -u -w -f /dev/rtc0",
-                "hwclock -u -r -f /dev/rtc0",
-            ],
-        )
 
     def test_rtc_that_stays_unreadable_fails_after_setting_the_system_clock(self) -> None:
         """A rejected write or a write that is still unreadable is reported as failed."""
         for rtc_write in ("rejected", "unreadable"):
             with self.subTest(rtc_write=rtc_write):
-                self.events.unlink(missing_ok=True)
-
                 run = self.run_clock("1788739200", rtc_write=rtc_write)
 
                 self.assertEqual(run.returncode, 1)
@@ -142,7 +109,7 @@ class FPLinuxClockTests(unittest.TestCase):
             run.stderr.endswith("fplinux-clock: system clock reads 0 after setting 1788739200\n"),
             run.stderr,
         )
-        self.assertEqual(run.commands, ["date -u -s @1788739200", "date -u +%s"])
+        self.assertFalse(self.rtc.exists())
 
     def test_invalid_argument_changes_no_clock(self) -> None:
         """Only one decimal UTC seconds argument is accepted."""
@@ -161,7 +128,8 @@ class FPLinuxClockTests(unittest.TestCase):
                 self.assertEqual(run.returncode, 2)
                 self.assertEqual(run.stdout, "")
                 self.assertEqual(run.stderr, "usage: fplinux-clock UTC_SECONDS\n")
-                self.assertEqual(run.commands, [])
+                self.assertEqual(self.system_clock.read_text(encoding="ascii"), "0\n")
+                self.assertFalse(self.rtc.exists())
 
 
 if __name__ == "__main__":

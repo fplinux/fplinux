@@ -36,37 +36,6 @@ static int check_keys(void)
 	return 0;
 }
 
-static int write_ppm(const char *directory, unsigned int width,
-		     unsigned int height, const uint16_t *pixels)
-{
-	char path[512];
-	FILE *file;
-
-	if (snprintf(path, sizeof(path), "%s/%ux%u.ppm", directory, width,
-		     height) >= (int)sizeof(path))
-		return 1;
-	file = fopen(path, "wb");
-	if (!file)
-		return 1;
-	if (fprintf(file, "P6\n%u %u\n255\n", width, height) < 0)
-		goto fail;
-	for (size_t index = 0; index < (size_t)width * height; ++index) {
-		uint16_t pixel = pixels[index];
-		unsigned char rgb[3] = {
-			(unsigned char)(((pixel >> 11U) & 31U) * 255U / 31U),
-			(unsigned char)(((pixel >> 5U) & 63U) * 255U / 63U),
-			(unsigned char)((pixel & 31U) * 255U / 31U),
-		};
-
-		if (fwrite(rgb, 1, sizeof(rgb), file) != sizeof(rgb))
-			goto fail;
-	}
-	return fclose(file) == 0 ? 0 : 1;
-fail:
-	fclose(file);
-	return 1;
-}
-
 static bool is_bright(uint16_t pixel)
 {
 	unsigned int red = (pixel >> 11U) & 31U;
@@ -117,8 +86,8 @@ static size_t color_count(const struct brightness_ui_surface *surface,
 	return count;
 }
 
-static int check_render(const char *directory, unsigned int width,
-			unsigned int height, const char *font_path)
+static int check_render(unsigned int width, unsigned int height,
+			const char *font_path)
 {
 	struct fplinux_font font = { 0 };
 	uint16_t *pixels = calloc((size_t)width * height, sizeof(*pixels));
@@ -148,8 +117,6 @@ static int check_render(const char *directory, unsigned int width,
 	    color_count(&surface, height * 88U / 100U, height, 0x6b4dU) !=
 		    (width == 128U ? 936U : 1664U))
 		goto done;
-	if (write_ppm(directory, width, height, pixels))
-		goto done;
 	if (!brightness_ui_render(&surface, &font, 10U, true))
 		goto done;
 	if (maximum_bright_runs(&surface) != 10U)
@@ -163,11 +130,25 @@ done:
 
 int main(int argc, char **argv)
 {
-	if (argc != 4 || check_keys() ||
-	    check_render(argv[1], 128U, 160U, argv[2]) ||
-	    check_render(argv[1], 240U, 320U, argv[3])) {
-		fprintf(stderr, "brightness UI host behavior failed\n");
+	static const unsigned int sizes[][2] = { { 128U, 160U },
+						 { 240U, 320U } };
+
+	if (argc != 3) {
+		fprintf(stderr, "brightness UI host fonts required\n");
 		return 1;
+	}
+	if (check_keys()) {
+		fprintf(stderr, "brightness UI keys failed\n");
+		return 1;
+	}
+	for (size_t index = 0; index < sizeof(sizes) / sizeof(sizes[0]);
+	     ++index) {
+		if (check_render(sizes[index][0], sizes[index][1],
+				 argv[index + 1U])) {
+			fprintf(stderr, "brightness UI render %ux%u failed\n",
+				sizes[index][0], sizes[index][1]);
+			return 1;
+		}
 	}
 	return 0;
 }

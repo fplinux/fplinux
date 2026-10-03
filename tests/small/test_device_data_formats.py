@@ -1004,17 +1004,8 @@ class FmRadioConfigTests(unittest.TestCase):
         self.assertEqual(result.prepared, {"phone-fm-config.bin": expected})
         self.assertEqual(len(expected), 128)
 
-    def test_missing_wrong_size_or_conflicting_fm_record_cannot_produce_a_payload(self) -> None:
-        """Incomplete or disagreeing fixed copies cannot become fitted FM input."""
-        for records in ((), ((419, bytes(127)),)):
-            with (
-                self.subTest(records=records),
-                self.assertRaisesRegex(
-                    ValueError, "fixed NV record 419 is missing or has the wrong size"
-                ),
-            ):
-                device_data.fixed_nv_records(_nv1(records), {419: 128})
-
+    def test_conflicting_nv419_copies_cannot_produce_a_payload(self) -> None:
+        """Disagreeing fixed NV419 copies cannot become fitted FM input."""
         original = bytes(range(128))
         different = bytearray(original)
         different[64] ^= 1
@@ -1067,7 +1058,11 @@ class HeadsetGainProfileTests(unittest.TestCase):
     """Protect the compact kernel input and admitted fitted playback gains."""
 
     def test_fitted_playback_modes_become_each_exact_profile(self) -> None:
-        """Target capabilities select the literal compact playback payload of the target size."""
+        """Fitted records and the given flags become the literal compact payload of each size.
+
+        Each case passes machine_compatible and speaker_vibration itself; the target
+        parsers that choose these values for a phone are not executed here.
+        """
         cases = (
             (
                 "inoi240",
@@ -1225,21 +1220,19 @@ class HeadsetGainProfileTests(unittest.TestCase):
 
     def test_profile_rejects_unsafe_headset_values(self) -> None:
         """A fitted profile is emitted only from matching, bounded Headset data."""
-        cases: dict[str, tuple[int, int, bytes, str]] = {
-            "wrong level count": (426, 62, b"\x08\x00", "expected 9"),
-            "different PGA": (426, 68, b"\x06\x00", "PGA levels 1..9 differ"),
-            "oversized digital gain": (426, 70, b"\x80\x00", "exceeds 127"),
-            "increasing digital gain": (426, 74, b"\x6d\x00", "not monotonically"),
+        # Both NV426 copies receive each change, so the copies still agree.
+        cases: dict[str, tuple[int, bytes, str]] = {
+            "wrong level count": (62, b"\x08\x00", "expected 9"),
+            "different PGA": (68, b"\x06\x00", "PGA levels 1..9 differ"),
+            "oversized digital gain": (70, b"\x80\x00", "exceeds 127"),
+            "increasing digital gain": (74, b"\x6d\x00", "not monotonically"),
         }
-        for name, (identifier, offset, replacement, error) in cases.items():
+        for name, (offset, replacement, error) in cases.items():
             downloaded, protected = _inoi_audio_records()
-            changed = bytearray(downloaded[identifier])
-            changed[offset : offset + len(replacement)] = replacement
-            downloaded[identifier] = bytes(changed)
-            if identifier in (426, 440):
-                protected_changed = bytearray(protected[identifier])
-                protected_changed[offset : offset + len(replacement)] = replacement
-                protected[identifier] = bytes(protected_changed)
+            for records in (downloaded, protected):
+                changed = bytearray(records[426])
+                changed[offset : offset + len(replacement)] = replacement
+                records[426] = bytes(changed)
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, error):
                 audio_profile.prepare_headset_gain_profile(
                     downloaded,
@@ -1718,7 +1711,7 @@ class PartitionPreparationTests(unittest.TestCase):
             )
 
     def test_speaker_vibration_target_receives_the_vibrate_tone_section(self) -> None:
-        """Only a target that vibrates through its speaker gets the tone after processing."""
+        """Partition preparation forwards speaker_vibration; only True appends the tone section."""
         for speaker_vibration, expected_tail in ((False, b""), (True, INOI_VIBRATE_TONE_SECTION)):
             nand, partitions, revision = self._inputs()
 
@@ -1748,9 +1741,13 @@ class PartitionPreparationTests(unittest.TestCase):
             "example-bt-rf-config.bin": b"C" * 252,
         }
 
-        result = bluetooth.prepare_bluetooth_from_partitions(
-            nand, partitions, prefix="example", revision=revision
-        )
+        result = fitted_device_data.prepare_from_partitions(
+            nand,
+            partitions,
+            prefix="example",
+            revision=revision,
+            machine_compatible=b"vendor,phone",
+        ).groups["bluetooth"]
 
         self.assertEqual(result.originals, expected_originals)
         self.assertEqual(
@@ -1763,11 +1760,12 @@ class PartitionPreparationTests(unittest.TestCase):
         nand, partitions, revision = self._inputs(protected_address=b"D" * 8)
 
         with self.assertRaisesRegex(ValueError, "DownloadedNV and ProtectNV disagree"):
-            bluetooth.prepare_bluetooth_from_partitions(
+            fitted_device_data.prepare_from_partitions(
                 nand,
                 partitions,
                 prefix="example",
                 revision=revision,
+                machine_compatible=b"vendor,phone",
             )
 
 

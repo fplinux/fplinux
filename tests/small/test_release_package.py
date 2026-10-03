@@ -72,7 +72,7 @@ class ReleaseManifestPolicyTests(unittest.TestCase):
     def test_supported_release_manifests_keep_curses_and_omit_unused_extensions(
         self,
     ) -> None:
-        """Phone archives keep optional curses and omit unused Bash and sound-card extensions."""
+        """Release manifests include optional curses and omit unused package extensions."""
         optional = {"fplinux-ncurses-curses"}
         omitted = {
             "fplinux-alsa-lib-card-profiles",
@@ -202,8 +202,8 @@ class ReleaseManifestPolicyTests(unittest.TestCase):
         ):
             package_commands.load_release_manifest(self.target, self.target_config)
 
-    def test_archives_carry_runner_tools_but_not_build_only_tools(self) -> None:
-        """A release needs every host tool the runner uses and none that only builds use."""
+    def test_normalized_manifest_includes_runner_tools_but_not_build_only_tools(self) -> None:
+        """Manifest validation requires runner tools and omits build tools from executables."""
         with (
             mock.patch.object(common, "ROOT", self.root),
             mock.patch.object(releases, "load_release", return_value=self.release_manifest),

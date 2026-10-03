@@ -27,6 +27,43 @@ def skip_linux_source_tools(
     return ()
 
 
+def apply_scripts_config(arguments: list[str]) -> None:
+    """Edit a .config as Linux ``scripts/config --file F --enable A --disable B`` does."""
+    option, path, *actions = arguments
+    if option != "--file":
+        message = f"scripts/config stand-in requires --file first: {arguments}"
+        raise AssertionError(message)
+    config = Path(path)
+    lines = config.read_text().splitlines()
+    settings = {"--enable": "CONFIG_{}=y", "--disable": "# CONFIG_{} is not set"}
+    for action, symbol in zip(actions[::2], actions[1::2], strict=True):
+        name = f"CONFIG_{symbol}"
+        lines = [line for line in lines if not line.startswith((f"{name}=", f"# {name} "))]
+        lines.append(settings[action].format(symbol))
+    config.write_text("\n".join(lines) + "\n")
+
+
+def resolve_initramfs_compression(config: Path) -> None:
+    """Model the external Kconfig choice: XZ compression requires an initramfs source."""
+    values = kconfig_values(config.read_text())
+    if not values.get("CONFIG_INITRAMFS_SOURCE", '""').strip('"'):
+        config.write_text(
+            config.read_text().replace(
+                "CONFIG_INITRAMFS_COMPRESSION_XZ=y\n",
+                "CONFIG_INITRAMFS_COMPRESSION_GZIP=y\n",
+            )
+        )
+
+
+def run_kconfig_tool(command: list[str]) -> None:
+    """Apply the .config effects of scripts/config and olddefconfig; ignore other commands."""
+    if Path(command[0]).name == "config":
+        apply_scripts_config(command[1:])
+    elif "olddefconfig" in command:
+        output = next(Path(arg.removeprefix("O=")) for arg in command if arg.startswith("O="))
+        resolve_initramfs_compression(output / ".config")
+
+
 class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
     """Check disposable analyzer work while replacing external commands with stubs."""
 
@@ -82,147 +119,8 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
         """Remove the isolated fake cache and prepared source tree."""
         self.temporary.cleanup()
 
-    def _run_check(self) -> None:
-        """Run the check flow with command stand-ins and a fixed temporary cache."""
-        output = self._cache_path("work")
-        state = self.prepared_linux
-
-        def run_command(command: list[str]) -> None:
-            if "olddefconfig" not in command:
-                return
-            config = output / ".config"
-            values = kconfig_values(config.read_text())
-            # Model the external Kconfig choice: compression requires a source.
-            source = values.get("CONFIG_INITRAMFS_SOURCE", '""').strip('"')
-            if not source:
-                config.write_text(
-                    config.read_text().replace(
-                        "CONFIG_INITRAMFS_COMPRESSION_XZ=y\n",
-                        "CONFIG_INITRAMFS_COMPRESSION_GZIP=y\n",
-                    )
-                )
-
-        def run_dtbs_check(_command: list[str], _target: str) -> str:
-            profile_root = output / "include/generated/fplinux/fplinux-root.dtsi"
-            self.assertIn("init=/init rdinit=/init", profile_root.read_text())
-            return ""
-
-        def target_source(_target: str, _relative: str) -> Path:
-            return self.defconfig
-
-        with (
-            mock.patch.object(kernelcheck, "CACHE", self.cache),
-            mock.patch.object(
-                kernelcheck, "load_sources", return_value={"linux": {"version": "fixture"}}
-            ),
-            mock.patch.object(kernelcheck, "discover_targets", return_value=(self.target,)),
-            mock.patch.object(
-                kernelcheck, "discover_profiles", return_value=("default", "microsd-uboot")
-            ),
-            mock.patch.object(
-                kernelcheck,
-                "target_context",
-                return_value=(self.target_config, self.platform, self.source, state),
-            ),
-            mock.patch.object(kernelcheck, "target_source", side_effect=target_source),
-            mock.patch.object(
-                kernelcheck, "kernel_config_paths", return_value=(self.defconfig, self.fragment)
-            ),
-            mock.patch.object(kernelcheck, "projected_sources", return_value=[self.projected]),
-            mock.patch.object(
-                kernelcheck,
-                "sparse_targets",
-                return_value=["drivers/test-a.o", "drivers/test-b.o"],
-            ),
-            mock.patch(
-                "fplinux_cli.kernelcheck.linux_state.require_prepared_linux",
-                return_value=state,
-            ),
-            mock.patch.object(kernelcheck, "run", side_effect=run_command),
-            mock.patch.object(
-                kernelcheck,
-                "capture_text",
-                return_value=subprocess.CompletedProcess(
-                    [], 0, "drivers/test-a.o\ndrivers/test-b.o\n", ""
-                ),
-            ),
-            mock.patch.object(kernelcheck, "run_checkpatch"),
-            mock.patch.object(
-                kernelcheck,
-                "check_linux_changes",
-                side_effect=skip_linux_source_tools,
-            ),
-            mock.patch.object(kernelcheck, "run_dtbs_check", side_effect=run_dtbs_check),
-            mock.patch.object(kernelcheck, "verify_target_identity"),
-        ):
-            kernelcheck.check_contexts(None)
-
-    def _cache_path(self, name: str) -> Path:
-        """Return one path inside this test's fixed Sparse cache directory."""
-        return self.cache / "analysis" / "sparse" / self.target / "builds" / "release" / name
-
-    def test_each_invocation_discards_stale_analyzer_work(self) -> None:
-        """A new check cannot inherit object files from an earlier analyzer run."""
-        self._run_check()
-        stale = self._cache_path("work") / "drivers" / "test-a.o"
-        stale.parent.mkdir(parents=True)
-        stale.write_text("stale object\n")
-
-        self._run_check()
-        self.assertFalse(stale.exists())
-
-    def test_initramfs_analysis_preserves_the_requested_conditional_compressor(self) -> None:
-        """The analyzer resolves compression with a controlled source, as the build does."""
-        self.defconfig.write_text(
-            'CONFIG_TEST=y\nCONFIG_INITRAMFS_SOURCE=""\nCONFIG_INITRAMFS_COMPRESSION_XZ=y\n'
-        )
-
-        self._run_check()
-
-        config = kconfig_values((self._cache_path("work") / ".config").read_text())
-        self.assertEqual(config["CONFIG_INITRAMFS_COMPRESSION_XZ"], "y")
-        source = Path(config["CONFIG_INITRAMFS_SOURCE"].strip('"'))
-        self.assertTrue(source.is_dir())
-        self.assertEqual(list(source.iterdir()), [])
-
-    def test_profile_applies_actions_without_comparing_the_base_defconfig(self) -> None:
-        """A profile check uses its own effective .config, not the default canonical file."""
-        profile = "microsd-uboot"
-        output = (
-            self.cache / "analysis/sparse/test-target/profiles/microsd-uboot/builds/release/work"
-        )
-        config_script = self.source / "scripts/config"
-        config_script.write_text("#!/bin/sh\n")
-        target_config = {
-            "identity": {
-                "display_name": "Test target",
-                "compatible": "test,target",
-            },
-            "linux": {
-                "dtb": "test-target.dtb",
-                "patches": [],
-                "copies": [],
-                "appends": [],
-                "config_enable": ["CONFIG_PROFILE_ENABLED"],
-                "config_disable": ["CONFIG_PROFILE_DISABLED"],
-                "root": {"kind": "initramfs"},
-            },
-        }
-        calls: list[list[str]] = []
-
-        def run_command(command: list[str]) -> None:
-            calls.append(command)
-            if command[0] == str(config_script):
-                with (output / ".config").open("a") as config:
-                    config.write(
-                        "CONFIG_PROFILE_ENABLED=y\n# CONFIG_PROFILE_DISABLED is not set\n"
-                    )
-            if command[-1:] == ["savedefconfig"]:
-                self.fail("profile configuration must not be compared with base defconfig")
-
-        def target_source(_target: str, _relative: str) -> Path:
-            return self.defconfig
-
+    def _run_check(self, target_config: dict[str, Any], profile: str | None = None) -> None:
+        """Run one context check with Kconfig, analyzer and validator command stand-ins."""
         with (
             mock.patch.object(kernelcheck, "CACHE", self.cache),
             mock.patch.object(
@@ -237,21 +135,26 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
                 "target_context",
                 return_value=(target_config, self.platform, self.source, self.prepared_linux),
             ),
-            mock.patch.object(kernelcheck, "target_source", side_effect=target_source),
             mock.patch.object(
                 kernelcheck, "kernel_config_paths", return_value=(self.defconfig, self.fragment)
             ),
             mock.patch.object(kernelcheck, "projected_sources", return_value=[self.projected]),
-            mock.patch.object(kernelcheck, "sparse_targets", return_value=["drivers/test-a.o"]),
+            mock.patch.object(
+                kernelcheck,
+                "sparse_targets",
+                return_value=["drivers/test-a.o", "drivers/test-b.o"],
+            ),
             mock.patch(
                 "fplinux_cli.kernelcheck.linux_state.require_prepared_linux",
                 return_value=self.prepared_linux,
             ),
-            mock.patch.object(kernelcheck, "run", side_effect=run_command),
+            mock.patch.object(kernelcheck, "run", side_effect=run_kconfig_tool),
             mock.patch.object(
                 kernelcheck,
                 "capture_text",
-                return_value=subprocess.CompletedProcess([], 0, "drivers/test-a.o\n", ""),
+                return_value=subprocess.CompletedProcess(
+                    [], 0, "drivers/test-a.o\ndrivers/test-b.o\n", ""
+                ),
             ),
             mock.patch.object(kernelcheck, "run_checkpatch"),
             mock.patch.object(
@@ -264,17 +167,59 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
         ):
             kernelcheck.check_contexts(None, profile)
 
-        profile_command = [
-            str(config_script),
-            "--file",
-            str(output / ".config"),
-            "--enable",
-            "PROFILE_ENABLED",
-            "--disable",
-            "PROFILE_DISABLED",
-        ]
-        self.assertIn(profile_command, calls)
-        self.assertFalse(any(command[-1:] == ["savedefconfig"] for command in calls))
+    def _cache_path(self, name: str) -> Path:
+        """Return one path inside this test's fixed Sparse cache directory."""
+        return self.cache / "analysis" / "sparse" / self.target / "builds" / "release" / name
+
+    def test_each_invocation_discards_stale_analyzer_work(self) -> None:
+        """A new check cannot inherit object files from an earlier analyzer run."""
+        self._run_check(self.target_config)
+        stale = self._cache_path("work") / "drivers" / "test-a.o"
+        stale.parent.mkdir(parents=True)
+        stale.write_text("stale object\n")
+
+        self._run_check(self.target_config)
+        self.assertFalse(stale.exists())
+
+    def test_initramfs_analysis_preserves_the_requested_conditional_compressor(self) -> None:
+        """The analyzer resolves compression with a controlled source, as the build does."""
+        self.defconfig.write_text(
+            'CONFIG_TEST=y\nCONFIG_INITRAMFS_SOURCE=""\nCONFIG_INITRAMFS_COMPRESSION_XZ=y\n'
+        )
+
+        self._run_check(self.target_config)
+
+        config = kconfig_values((self._cache_path("work") / ".config").read_text())
+        self.assertEqual(config["CONFIG_INITRAMFS_COMPRESSION_XZ"], "y")
+        source = Path(config["CONFIG_INITRAMFS_SOURCE"].strip('"'))
+        self.assertTrue(source.is_dir())
+        self.assertEqual(list(source.iterdir()), [])
+
+    def test_initramfs_analysis_writes_bootargs_for_the_checked_tree(self) -> None:
+        """The prepared analyzer context carries the RAM-root boot arguments."""
+        self._run_check(self.target_config)
+
+        root_include = self._cache_path("work") / "include/generated/fplinux/fplinux-root.dtsi"
+        self.assertIn("init=/init rdinit=/init", root_include.read_text())
+
+    def test_profile_kconfig_actions_reach_the_analyzed_configuration(self) -> None:
+        """A profile check analyzes a .config with its enable and disable actions applied."""
+        (self.source / "scripts/config").write_text("#!/bin/sh\n")
+        self.defconfig.write_text("CONFIG_TEST=y\nCONFIG_PROFILE_DISABLED=y\n")
+        linux = {
+            **self.target_config["linux"],
+            "config_enable": ["CONFIG_PROFILE_ENABLED"],
+            "config_disable": ["CONFIG_PROFILE_DISABLED"],
+        }
+
+        self._run_check({**self.target_config, "linux": linux}, "microsd-uboot")
+
+        output = (
+            self.cache / "analysis/sparse/test-target/profiles/microsd-uboot/builds/release/work"
+        )
+        config = (output / ".config").read_text().splitlines()
+        self.assertIn("CONFIG_PROFILE_ENABLED=y", config)
+        self.assertIn("# CONFIG_PROFILE_DISABLED is not set", config)
 
 
 class KernelProfileSelectionTests(unittest.TestCase):
@@ -304,8 +249,8 @@ class KernelProfileSelectionTests(unittest.TestCase):
                 (("first", "microsd-uboot"), ("second", "microsd-uboot")),
             )
 
-    def test_unknown_profile_fails_before_analyzer_work(self) -> None:
-        """An unknown profile cannot start an analyzer or create its cache slot."""
+    def test_unknown_profile_is_rejected_by_context_selection(self) -> None:
+        """Context selection refuses a name that is not a global boot profile."""
         with self.assertRaisesRegex(SystemExit, "unknown profile"):
             kernelcheck.target_profiles("missing")
 

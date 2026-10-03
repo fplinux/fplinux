@@ -95,6 +95,19 @@ static bool process_matches(pid_t process, const char *name, bool *matches)
 	return true;
 }
 
+/* The harness is a subreaper, so orphaned guardians become its children. */
+static void kill_children(void)
+{
+	pid_t child;
+
+	for (int attempt = 0; attempt < 8 && child_pid(getpid(), &child);
+	     ++attempt) {
+		kill(child, SIGKILL);
+		while (waitpid(child, NULL, 0) < 0 && errno == EINTR)
+			;
+	}
+}
+
 int __real_open(const char *path, int flags, ...);
 int __real_execv(const char *path, char *const argv[]);
 
@@ -144,16 +157,24 @@ int main(int argc, char **argv)
 	int console = -1;
 	int inherited[2] = { -1, -1 };
 	int ready[2] = { -1, -1 };
-	int status;
+	int status = 0;
 	pid_t app = -1;
 	pid_t guardian = -1;
+	const char *step = "subreaper";
 	bool ok = false;
 
-	if (argc != 3 || !mkdtemp(directory))
+	if (argc != 3) {
+		fprintf(stderr, "usage: %s MODE GUARDIAN\n", argv[0]);
 		return EXIT_FAILURE;
+	}
+	if (!mkdtemp(directory)) {
+		perror("mkdtemp");
+		return EXIT_FAILURE;
+	}
 	guardian_path = argv[2];
 	if (prctl(PR_SET_CHILD_SUBREAPER, 1) < 0)
 		goto cleanup;
+	step = "unknown mode";
 	if (!strcmp(argv[1], "segv"))
 		failure_signal = SIGSEGV;
 	else if (!strcmp(argv[1], "kill"))
@@ -164,12 +185,14 @@ int main(int argc, char **argv)
 		exec_failure = true;
 	else if (strcmp(argv[1], "normal"))
 		goto cleanup;
+	step = "console and pipe setup";
 	snprintf(console_path, sizeof(console_path), "%s/console", directory);
 	console = open(console_path, O_RDWR | O_CREAT | O_CLOEXEC, 0600);
 	if (console < 0 ||
 	    write(console, &active, sizeof(active)) != sizeof(active) ||
 	    pipe2(inherited, O_CLOEXEC) < 0 || pipe2(ready, O_CLOEXEC) < 0)
 		goto cleanup;
+	step = "fork";
 	app = fork();
 	if (app < 0)
 		goto cleanup;
@@ -199,6 +222,7 @@ int main(int argc, char **argv)
 		bool app_matches;
 		bool guardian_matches;
 
+		step = "killall process identity";
 		if (read(ready[0], &signal_ready, 1) != 1 ||
 		    signal_ready != 'R' || !child_pid(app, &guardian) ||
 		    !process_matches(app, "fplinux-vttest", &app_matches) ||
@@ -211,9 +235,11 @@ int main(int argc, char **argv)
 		if (kill(app, SIGKILL) < 0)
 			goto cleanup;
 	}
+	step = "wait for application";
 	if (waitpid(app, &status, 0) != app)
 		goto cleanup;
 	app = -1;
+	step = "application exit status";
 	if (failure_signal || killall_mode) {
 		int expected = killall_mode ? SIGKILL : failure_signal;
 
@@ -222,6 +248,7 @@ int main(int argc, char **argv)
 	} else if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
 		goto cleanup;
 	}
+	step = "previous VT restore and guardian exit";
 	for (int attempt = 0; attempt < 300; ++attempt) {
 		struct pollfd lifetime = { .fd = inherited[0],
 					   .events = POLLIN };
@@ -240,13 +267,11 @@ cleanup:
 	if (ok && (failure_signal || killall_mode))
 		while (waitpid(-1, NULL, 0) < 0 && errno == EINTR)
 			;
-	if (!ok && killall_mode) {
-		if (app > 0) {
-			kill(app, SIGKILL);
-			waitpid(app, NULL, 0);
-		}
-		if (guardian > 0)
-			kill(guardian, SIGKILL);
+	if (!ok) {
+		fprintf(stderr,
+			"DRM VT case %s failed at %s (wait status %#x)\n",
+			argv[1], step, (unsigned int)status);
+		kill_children();
 	}
 	if (console >= 0)
 		close(console);

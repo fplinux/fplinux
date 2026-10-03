@@ -2,7 +2,7 @@
 /*
  * Small D-Bus service used only by test_fplinux_bluetooth.py.  It replaces
  * BlueZ and obexd at their public D-Bus boundary; it does not model either
- * daemon beyond the four client-visible cases exercised there.
+ * daemon beyond the client-visible cases exercised there.
  */
 #define _POSIX_C_SOURCE 200809L
 

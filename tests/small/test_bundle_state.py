@@ -257,13 +257,16 @@ class BundleStateTests(unittest.TestCase):
             second_generation,
         )
 
-    def test_invalid_pointer_is_a_miss(self) -> None:
+    def test_malformed_pointer_is_a_miss(self) -> None:
         """Reject a malformed current-generation pointer."""
-        pointer = self.output / "demo/current.json"
-        pointer.parent.mkdir(parents=True)
-        pointer.write_text(json.dumps({"generation": "bad"}))
-        with self.assertRaises(BundleStateError):
+        bundle_generations(self.output, "demo").mkdir(parents=True)
+        pointer = bundle_pointer(self.output, "demo")
+        pointer.write_text("{", encoding="utf-8")
+        with self.assertRaisesRegex(
+            BundleStateError, "current bundle pointer is missing or invalid"
+        ) as raised:
             resolve_current_bundle(self.output, "demo")
+        self.assertIsInstance(raised.exception.__cause__, json.JSONDecodeError)
 
     def test_named_profile_uses_an_isolated_slot_and_manifest_identity(self) -> None:
         """The default and named profile cannot select each other's bundle."""

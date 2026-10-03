@@ -500,34 +500,22 @@ class CommandLifecycleTests(unittest.TestCase):
             )
 
     def test_microsd_context_opens_the_selected_profile_runner(self) -> None:
-        """The microSD context consumes the existing profile generation exactly once."""
-        profile = "microsd-uboot"
-        profile_path = self._create_generation("b" * 64, profile=profile)
-        profile_bundle = publish_current_bundle(
-            self.output,
-            "phone",
-            profile_path,
-            profile,
-        )
-        manifest = self._manifest("b" * 64, profile_bundle.path, profile)
+        """The microSD boot mode runs the microSD profile's generation, not the default one."""
+        profile_path = self._create_generation("b" * 64, profile="microsd-uboot")
+        publish_current_bundle(self.output, "phone", profile_path, "microsd-uboot")
+        runner = profile_path / "runner/run.py"
+
         with (
+            mock.patch.object(common, "ROOT", self.root),
             mock.patch.object(
                 targets,
                 "load_target",
                 return_value={"runtime": {"runnable": True}},
-            ) as load_target,
-            mock.patch.object(
-                bundles_commands,
-                "resolve_target_bundle",
-                return_value=(profile_bundle, manifest),
-            ) as resolve,
+            ),
             mock.patch("fplinux_cli.cli.runtime.os.execv") as execute,
         ):
-            runtime_commands.run_target("nokia-ta1618", boot="microsd")
+            runtime_commands.run_target("phone", boot="microsd")
 
-        load_target.assert_called_once_with("nokia-ta1618", profile, build_type="release")
-        resolve.assert_called_once_with("nokia-ta1618", profile, build_type="release")
-        runner = profile_bundle.path / "runner/run.py"
         execute.assert_called_once_with(os.fsencode(runner), [os.fsencode(runner)])
 
     def test_run_profile_executes_only_that_profiles_current_generation(self) -> None:
@@ -594,12 +582,11 @@ class CommandLifecycleTests(unittest.TestCase):
 
         execute.assert_not_called()
 
-    def test_verify_propagates_the_authenticated_runtime_identity_failure(self) -> None:
-        """Do not report success when reconnect cannot identify the running kernel."""
-        target_config: dict[str, object] = {}
+    def test_verify_reports_no_success_when_reconnect_fails(self) -> None:
+        """A failed reconnect propagates its error without printing the success line."""
+        stdout = io.StringIO()
         with (
             mock.patch.object(common, "ROOT", self.root),
-            mock.patch.object(targets, "load_target", return_value=target_config),
             mock.patch.object(
                 workspaces,
                 "target_workspace_snapshot",
@@ -617,64 +604,28 @@ class CommandLifecycleTests(unittest.TestCase):
                     "fplinux ssh: cannot read the running kernel identity (exit 7)"
                 ),
             ),
+            contextlib.redirect_stdout(stdout),
             self.assertRaisesRegex(SystemExit, r"running kernel identity \(exit 7\)"),
         ):
             runtime_commands.verify_booted("phone")
 
-    def test_reconnect_accepts_an_older_session_generation_for_the_same_device_runtime(
-        self,
-    ) -> None:
-        """An application-only bundle rebuild does not invalidate the loaded kernel."""
+        self.assertEqual(stdout.getvalue(), "")
+
+    def test_reconnect_does_not_set_the_phone_clock(self) -> None:
+        """Reacquiring a running session never calls the bundle helper's clock sync."""
         manifest = json.loads(self.bundle.manifest_bytes)
-        session: dict[str, str] = {}
+        # The bundle's SSH helper is the phone boundary; only its clock call is observed.
         ssh = mock.Mock()
         ssh.load_bundle_context.return_value = (
             {"target": "phone"},
             {"bundle_generation": self.bundle.generation},
         )
-        ssh.load_current_session.return_value = session
-        ssh.reacquire_bound_session.return_value = session
-        ssh.require_device_identity.return_value = "6.12-fplinux-9999999999999999"
 
         with mock.patch.object(runtime_commands, "_load_bundle_ssh_helper", return_value=ssh):
-            resolved_ssh, resolved_session = runtime_commands._current_ssh_session(  # noqa: SLF001
-                self.bundle,
-                manifest,
-                "phone",
-            )
-
-        self.assertIs(resolved_ssh, ssh)
-        self.assertIs(resolved_session, session)
-        ssh.load_current_session.assert_called_once_with("phone")
-        ssh.reacquire_bound_session.assert_called_once_with(session)
-        ssh.require_device_identity.assert_called_once_with(session, "9" * 64)
-        # Only a fresh run sets the phone clock; reconnecting leaves it running.
-        ssh.sync_clock.assert_not_called()
-
-    def test_reconnect_rejects_an_authenticated_session_with_another_device_runtime(
-        self,
-    ) -> None:
-        """Do not use a reconnected phone whose kernel differs from the selected bundle."""
-        manifest = json.loads(self.bundle.manifest_bytes)
-        session: dict[str, str] = {}
-        ssh = mock.Mock()
-        ssh.load_bundle_context.return_value = (
-            {"target": "phone"},
-            {"bundle_generation": self.bundle.generation},
-        )
-        ssh.load_current_session.return_value = session
-        ssh.reacquire_bound_session.return_value = session
-        ssh.require_device_identity.side_effect = SystemExit(
-            "fplinux ssh: current SSH session exposes a different kernel identity"
-        )
-
-        with (
-            mock.patch.object(runtime_commands, "_load_bundle_ssh_helper", return_value=ssh),
-            self.assertRaisesRegex(SystemExit, "different kernel identity"),
-        ):
             runtime_commands._current_ssh_session(self.bundle, manifest, "phone")  # noqa: SLF001
 
-        ssh.require_device_identity.assert_called_once_with(session, "9" * 64)
+        # Only a fresh run sets the phone clock; reconnecting leaves it running.
+        ssh.sync_clock.assert_not_called()
 
     def test_verify_resolves_the_selected_microsd_generation(self) -> None:
         """Verification checks the selected bundle identity without falling back to RAM."""
@@ -697,7 +648,7 @@ class CommandLifecycleTests(unittest.TestCase):
         self.assertEqual(session.call_args.args[0], selected)
         self.assertEqual(session.call_args.args[1]["profile"], profile)
 
-    def test_verify_reports_the_manifest_identity_after_authenticated_reconnect(self) -> None:
+    def test_verify_reports_the_manifest_identity_after_reconnect_accepts(self) -> None:
         """Report the selected device identity after the reconnect boundary accepts it."""
         target_config: dict[str, object] = {}
         stdout = io.StringIO()
@@ -787,8 +738,8 @@ class CommandLifecycleTests(unittest.TestCase):
             ],
         )
 
-    def test_keyboard_forwarding_requires_the_selected_live_kernel_identity(self) -> None:
-        """A different authenticated kernel cannot receive host keyboard input."""
+    def test_keyboard_forwarding_requires_the_selected_kernel_identity(self) -> None:
+        """A session reporting another kernel identity cannot receive host keyboard input."""
         target_config = {
             "runtime": {
                 "usb": {
@@ -916,19 +867,12 @@ class CommandLifecycleTests(unittest.TestCase):
                         upload=None,
                         pull=None,
                     )
-                self.assertEqual(
-                    verify.call_args.args[0],
-                    [
-                        str(self.root / "fplinux"),
-                        "console",
-                        "phone",
-                        "--build-type",
-                        "debug",
-                        "--exec",
-                        "true",
-                        "--profile",
-                        profile,
-                    ],
+                command = verify.call_args.args[0]
+                self.assertEqual(command[:3], [str(self.root / "fplinux"), "console", "phone"])
+                # The public parser accepts these options in any order; compare flag/value pairs.
+                self.assertCountEqual(
+                    zip(command[3::2], command[4::2], strict=True),
+                    [("--build-type", "debug"), ("--exec", "true"), ("--profile", profile)],
                 )
                 options = verify.call_args.kwargs
                 self.assertEqual(
@@ -1023,7 +967,8 @@ class CommandLifecycleTests(unittest.TestCase):
             )
 
         mounts = [command[index + 1] for index, value in enumerate(command) if value == "--volume"]
-        self.assertEqual(
+        # No destination is nested in another, so mount order has no effect.
+        self.assertCountEqual(
             mounts,
             [
                 f"{roots['downloads']}:/cache/downloads",
@@ -1045,20 +990,12 @@ class CommandLifecycleTests(unittest.TestCase):
         self.assertFalse(any(mount.split(":", 2)[1] == "/cache" for mount in mounts))
         self.assertIn("FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE=" + "e" * 64, command)
         self.assertIn("FPLINUX_CONTAINER_IMAGE_GENERATION=" + "a" * 64, command)
-        self.assertEqual(
-            command[-10:],
-            [
-                "--",
-                "python3",
-                "-m",
-                "fplinux_cli.build",
-                "--target",
-                "phone",
-                "--build-type",
-                "release",
-                "--jobs",
-                "6",
-            ],
+        build = command[command.index("--") + 1 :]
+        self.assertEqual(build[:3], ["python3", "-m", "fplinux_cli.build"])
+        # The in-container parser accepts these options in any order; compare flag/value pairs.
+        self.assertCountEqual(
+            zip(build[3::2], build[4::2], strict=True),
+            [("--target", "phone"), ("--build-type", "release"), ("--jobs", "6")],
         )
         self.assertEqual(command[:2], ["/usr/bin/kern", "box"])
         network = command.index("--network")

@@ -111,23 +111,6 @@ exit "${FPLINUX_RESIZE2FS_STATUS:-0}"
             ["growpart:--update=on /dev/mmcblk0 2"],
         )
 
-    def test_repeated_nochange_runs_have_no_persistent_marker(self) -> None:
-        """Repeated complete runs succeed without creating persistent state."""
-        first = self._run(1)
-        second = self._run(1)
-
-        self.assertEqual(first.returncode, 0, first.stderr)
-        self.assertEqual(second.returncode, 0, second.stderr)
-        self.assertEqual(
-            self._calls(),
-            [
-                "growpart:--update=on /dev/mmcblk0 2",
-                "resize2fs:/dev/mmcblk0p2",
-                "growpart:--update=on /dev/mmcblk0 2",
-                "resize2fs:/dev/mmcblk0p2",
-            ],
-        )
-
     def test_resize_failure_is_reported_after_partition_success(self) -> None:
         """A resize2fs failure is visible after successful partition handling."""
         result = self._run(0, resize2fs_status=3)

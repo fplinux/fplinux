@@ -52,8 +52,8 @@ class HostRecipeTests(unittest.TestCase):
             ):
                 platforms.validate_host_tool(incomplete, 0)
 
-    def test_project_copy_cannot_replace_a_verified_member(self) -> None:
-        """An archive projection rejects replacing bytes already verified against the lock."""
+    def test_project_copy_cannot_replace_an_existing_projected_file(self) -> None:
+        """A second project copy cannot replace an existing file in the projection."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "upstream"
@@ -79,8 +79,8 @@ class HostRecipeTests(unittest.TestCase):
                         ],
                     )
 
-    def test_repeated_build_uses_a_fresh_projection_and_runs_self_test(self) -> None:
-        """Each rebuild starts clean and self-tests the resulting binary."""
+    def test_repeated_projection_starts_fresh_and_requests_self_test(self) -> None:
+        """With command stubs, each projection starts clean and requests --self-test."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             archive = root / "bridge.tar.gz"

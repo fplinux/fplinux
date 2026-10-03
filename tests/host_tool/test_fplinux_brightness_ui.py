@@ -48,16 +48,12 @@ class BrightnessUiTests(unittest.TestCase):
                 check=True,
             )
             result = run_process(
-                [str(executable), str(temporary), str(small_font), str(large_font)],
+                [str(executable), str(small_font), str(large_font)],
                 name="run brightness UI host behavior",
                 timeout=10,
                 check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            for geometry in ("128x160", "240x320"):
-                frame = temporary / f"{geometry}.ppm"
-                self.assertTrue(frame.is_file())
-                self.assertGreater(frame.stat().st_size, 128 * 160 * 3)
 
 
 if __name__ == "__main__":

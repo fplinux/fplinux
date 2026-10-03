@@ -59,19 +59,23 @@ class FPLinuxJackHostToolTests(unittest.TestCase):
     def run_jack(
         self, *, initial: str, events: str = "", **scenario: str
     ) -> subprocess.CompletedProcess[str]:
-        """Run the service until the scripted card disappears."""
+        """Run the service until the scripted card disappears and it fails."""
         environment = {
             "LC_ALL": "C",
             "JACK_TEST_INITIAL": initial,
             "JACK_TEST_EVENTS": events,
             **scenario,
         }
-        return run_process(
+        result = run_process(
             [str(self.executable)],
             name="run fplinux-jack",
             timeout=5,
             env=environment,
         )
+        # A lost card ends the service with a diagnostic rather than a crash.
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("fplinux-jack: read ALSA events:", result.stderr)
+        return result
 
     @staticmethod
     def switch_writes(result: subprocess.CompletedProcess[str]) -> list[str]:

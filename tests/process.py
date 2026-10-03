@@ -18,6 +18,22 @@ if TYPE_CHECKING:
     from typing import NoReturn
 
 _TERMINATE_GRACE_SECONDS = 1.0
+_OUTPUT_TAIL_CHARACTERS = 4000
+
+
+def _output_tails(stdout: str, stderr: str) -> str:
+    """Bound captured output so a failure report stays readable."""
+    return (
+        f"\nstdout:\n{stdout[-_OUTPUT_TAIL_CHARACTERS:]}"
+        f"\nstderr:\n{stderr[-_OUTPUT_TAIL_CHARACTERS:]}"
+    )
+
+
+class _CheckedProcessError(subprocess.CalledProcessError):
+    """Report a failed checked process together with its captured output."""
+
+    def __str__(self) -> str:
+        return super().__str__() + _output_tails(self.stdout, self.stderr)
 
 
 def python_environment() -> dict[str, str]:
@@ -93,18 +109,14 @@ def run_process(  # noqa: PLR0913 -- the explicit process boundary stays flat.
         stdout, stderr = process.communicate(timeout=remaining)
     except subprocess.TimeoutExpired as error:
         stdout, stderr = _terminate_and_reap(process)
-        message = (
-            f"{name} timed out after {timeout:g}s"
-            f"\nstdout:\n{stdout[-4000:]}"
-            f"\nstderr:\n{stderr[-4000:]}"
-        )
+        message = f"{name} timed out after {timeout:g}s" + _output_tails(stdout, stderr)
         raise AssertionError(message) from error
     except BaseException:
         _terminate_and_reap(process)
         raise
     result = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
     if check and result.returncode:
-        raise subprocess.CalledProcessError(
+        raise _CheckedProcessError(
             result.returncode,
             command,
             output=stdout,

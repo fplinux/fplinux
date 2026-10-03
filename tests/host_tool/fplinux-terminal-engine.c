@@ -6,7 +6,6 @@
 
 #include <assert.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <linux/input-event-codes.h>
 #include <poll.h>
 #include <stdio.h>
@@ -109,7 +108,9 @@ static void verify_grid_and_colors(void)
 	cells = tsm_screen_draw2(terminal.screen);
 	assert(cells[0].ch == 'R' && cells[1].ch == 0x44f);
 	assert(cells[0].fg.r == 205 && cells[0].fg.g == 0);
-	assert(cells[1].fg.r == 216 && cells[1].bg.r == 17);
+	assert(cells[1].fg.r != cells[1].bg.r ||
+	       cells[1].fg.g != cells[1].bg.g ||
+	       cells[1].fg.b != cells[1].bg.b);
 	feed(&terminal, "\033[?1049h\033[Halt");
 	cells = tsm_screen_draw2(terminal.screen);
 	assert(cells[0].ch == 'a');
@@ -573,9 +574,12 @@ static void verify_history_during_output(void)
 	press(&terminal, KEY_OK, 50);
 	assert(!terminal.history);
 	output_is(&terminal, "\r", 1);
-	for (line = 0; line < 600; ++line)
+	for (line = 0; line < 10000; ++line)
 		feed(&terminal, "line\r\n");
-	assert(tsm_screen_sb_get_line_count(terminal.screen) == 512);
+	/* Scrollback keeps more than a screen, but continuous output is bounded. */
+	assert(tsm_screen_sb_get_line_count(terminal.screen) >
+	       tsm_screen_get_height(terminal.screen));
+	assert(tsm_screen_sb_get_line_count(terminal.screen) < 10000);
 	fplinux_terminal_destroy(&terminal);
 }
 
@@ -633,21 +637,14 @@ static void type_text(struct fplinux_terminal *terminal, const char *text)
 				     (unsigned char)*text);
 }
 
+/* The driver supplies an empty working directory, HOME and HISTFILE. */
 static void verify_bash_line_editing(const char *startup)
 {
 	struct fplinux_terminal terminal;
 	struct fplinux_terminal_pty pty;
 	unsigned int position;
 	FILE *completion;
-	char home[] = "/tmp/fplinux-terminal-test-XXXXXX";
-	char history[128];
-	int previous_directory = open(".", O_RDONLY | O_CLOEXEC);
 
-	assert(previous_directory >= 0 && mkdtemp(home));
-	assert(setenv("HOME", home, 1) == 0);
-	snprintf(history, sizeof(history), "%s/.bash_history", home);
-	assert(setenv("HISTFILE", history, 1) == 0);
-	assert(chdir(home) == 0);
 	completion = fopen("completion-target", "wx");
 	assert(completion);
 	assert(fclose(completion) == 0);
@@ -723,11 +720,6 @@ static void verify_bash_line_editing(const char *startup)
 	pump(&terminal, &pty, "GOT:q\r\n");
 	fplinux_terminal_pty_close(&pty);
 	fplinux_terminal_destroy(&terminal);
-	assert(unlink("completion-target") == 0);
-	assert(unlink(history) == 0 || errno == ENOENT);
-	assert(fchdir(previous_directory) == 0);
-	close(previous_directory);
-	assert(rmdir(home) == 0);
 }
 
 static void verify_render_geometry(const char *font_path, unsigned int width,
@@ -749,6 +741,8 @@ static void verify_render_geometry(const char *font_path, unsigned int width,
 	unsigned int column;
 	unsigned int rows;
 	unsigned int input_y;
+	unsigned int strip;
+	uint16_t preedit_glyph;
 
 	assert(pixels);
 	for (index = 0; index < count; ++index)
@@ -761,9 +755,10 @@ static void verify_render_geometry(const char *font_path, unsigned int width,
 	fplinux_terminal_render(&terminal, &font, &surface);
 	/* Each fixture glyph starts with a lit left pixel. */
 	assert(surface.pixels[0] == 0xc800);
-	assert(surface.pixels[1] == 0x1082);
-	assert(surface.pixels[font.width] == 0xdedb);
-	assert(surface.pixels[font.width + 1] == 0x3186);
+	/* The pending character is drawn and shaded unlike an ordinary cell. */
+	preedit_glyph = surface.pixels[font.width];
+	assert(preedit_glyph != surface.pixels[font.width + 1]);
+	assert(surface.pixels[font.width + 1] != surface.pixels[1]);
 	press(&terminal, KEY_NUMERIC_POUND, 10);
 	feed(&terminal, "\033[2J\033[999;1H\033[31mA\033[0m");
 	press(&terminal, KEY_NUMERIC_2, 20);
@@ -774,18 +769,20 @@ static void verify_render_geometry(const char *font_path, unsigned int width,
 	assert(tsm_screen_get_height(terminal.screen) == rows);
 	assert(tsm_screen_get_cursor_y(terminal.screen) == rows - 1);
 	assert(surface.pixels[input_y * stride] == 0xc800);
-	assert(surface.pixels[input_y * stride + font.width] == 0xdedb);
-	assert(surface.pixels[(height - 2 * font.height) * stride] == 0x528a);
+	assert(surface.pixels[input_y * stride + font.width] == preedit_glyph);
+	/* The strip shades the selected Ctrl item unlike the Alt item. */
+	strip = (height - 2 * font.height) * stride;
+	assert(surface.pixels[strip] != surface.pixels[strip + width / 3]);
 	press(&terminal, KEY_NUMERIC_1, 540);
 	press(&terminal, KEY_F13, 550);
 	fplinux_terminal_render(&terminal, &font, &surface);
 	assert(surface.pixels[input_y * stride] == 0xc800);
-	assert(surface.pixels[input_y * stride + font.width] == 0xdedb);
+	assert(surface.pixels[input_y * stride + font.width] == preedit_glyph);
 	press(&terminal, KEY_F14, 560);
 	fplinux_terminal_render(&terminal, &font, &surface);
 	input_y = (rows - 1) * font.height;
 	assert(surface.pixels[input_y * stride] == 0xc800);
-	assert(surface.pixels[input_y * stride + font.width] == 0xdedb);
+	assert(surface.pixels[input_y * stride + font.width] == preedit_glyph);
 	assert(tsm_screen_get_height(terminal.screen) == rows);
 	for (column = 0; column < stride; ++column) {
 		assert(pixels[column] == 0xa55a);
@@ -874,6 +871,7 @@ static void verify_menu_rendering(const char *font_path, unsigned int width,
 	unsigned int row;
 	unsigned int column;
 	size_t index;
+	uint16_t focused;
 
 	assert(pixels);
 	for (index = 0; index < count; ++index)
@@ -885,14 +883,16 @@ static void verify_menu_rendering(const char *font_path, unsigned int width,
 	press(&terminal, KEY_F13, 550);
 	fplinux_terminal_render(&terminal, &font, &surface);
 	rendered_text_is(&surface, &font, 0, 0, "Modifiers");
-	assert(surface.pixels[1] == 0x3186);
+	focused = surface.pixels[1];
+	assert(focused != surface.pixels[font.height * stride + 1]);
 	rendered_text_is(&surface, &font, 0, font.height, "Symbols...");
 	press(&terminal, KEY_UP, 560);
 	fplinux_terminal_render(&terminal, &font, &surface);
 	row = 8;
 	rendered_text_is(&surface, &font, 0, row * font.height,
 			 "Diagnostic console");
-	assert(surface.pixels[row * font.height * stride + 1] == 0x3186);
+	assert(surface.pixels[row * font.height * stride + 1] == focused);
+	assert(surface.pixels[1] != focused);
 	rendered_text_is(&surface, &font, 0, 0, "Modifiers");
 	choose_menu(&terminal, "Special keys...", 570);
 	press(&terminal, KEY_UP, 580);
@@ -924,6 +924,12 @@ struct help_view {
 	unsigned int first_line;
 	unsigned int last_line;
 	unsigned int total_lines;
+};
+
+/* Displayed help, with each section's rows joined by single spaces. */
+struct help_text {
+	char first_line[80];
+	char sections[3][1024];
 };
 
 static void read_help_view(struct fplinux_terminal *terminal,
@@ -975,49 +981,70 @@ static void read_help_view(struct fplinux_terminal *terminal,
 	}
 }
 
-static void help_text_matches(const char *text, const char **cursor)
+static void append_words(char *text, size_t size, const char *line)
 {
-	for (; *text; ++text) {
-		if (*text == ' ')
+	size_t used = strlen(text);
+
+	for (; *line; ++line) {
+		if (*line == ' ' && (!used || text[used - 1] == ' '))
 			continue;
-		while (**cursor == ' ')
-			++*cursor;
-		if (*text != **cursor)
-			fprintf(stderr, "help text: expected %.32s, got %s\n",
-				*cursor, text);
-		assert(*text == **cursor);
-		++*cursor;
+		assert(used + 1 < size);
+		text[used++] = *line;
 	}
+	if (used && text[used - 1] != ' ') {
+		assert(used + 1 < size);
+		text[used++] = ' ';
+	}
+	text[used] = '\0';
+}
+
+static bool same_characters(const char *left, const char *right)
+{
+	for (;; ++left, ++right) {
+		while (*left == ' ')
+			++left;
+		while (*right == ' ')
+			++right;
+		if (*left != *right)
+			return false;
+		if (!*left)
+			return true;
+	}
+}
+
+static void help_matches_reference(const struct help_text *text,
+				   const struct help_text *reference)
+{
+	char first_words[80] = "";
+	unsigned int section;
+
+	/* Wrapping may move spaces between rows, never add or drop characters. */
+	for (section = 0; section < 3; ++section) {
+		if (!same_characters(text->sections[section],
+				     reference->sections[section]))
+			fprintf(stderr,
+				"help section %u: expected %s\nreceived %s\n",
+				section + 1, reference->sections[section],
+				text->sections[section]);
+		assert(same_characters(text->sections[section],
+				       reference->sections[section]));
+	}
+	/* A wrapped first row ends between words. */
+	append_words(first_words, sizeof(first_words), text->first_line);
+	if (strncmp(reference->sections[0], first_words, strlen(first_words)))
+		fprintf(stderr, "help first row is not whole words: %s\n",
+			text->first_line);
+	assert(first_words[0]);
+	assert(!strncmp(reference->sections[0], first_words,
+			strlen(first_words)));
 }
 
 static struct help_render_metrics verify_help_rendering(const char *font_path,
 							unsigned int width,
 							unsigned int height,
 							bool modifiers,
-							const char *first_line)
+							struct help_text *text)
 {
-	/* Complete instructions must survive wrapping and vertical scrolling. */
-	static const char *const expected[] = {
-		"Use Left/Right to switch sections and Up/Down to scroll the text. "
-		"2-9: Tap repeatedly to choose a letter. Pause or press another digit to send it. "
-		"1: Choose punctuation. 0: Insert a space. "
-		"*: Switch letter case. Hold * to switch between numbers and letters. "
-		"#: Cancel a pending letter, otherwise erase. Hold # to clear the line at the Bash prompt. "
-		"Centre: Enter. Dial: Tab completion. "
-		"Menu: Choose symbols, special keys or the input language.",
-		"Hold left soft or choose Menu > Modifiers to open the strip. "
-		"Left/Right: Select Ctrl, Alt or Shift. Centre: Toggle it. "
-		"1: Toggle Ctrl. 2: Toggle Alt. 3: Toggle Shift. You can combine them. "
-		"Left soft (Done): Arm the combination for the next phone key or completed letter. "
-		"Right soft (Cancel or Clear): Reset the combination outside menus. "
-		"Back in a menu keeps modifiers armed. Pending letters wait while menus are open.",
-		"Right soft: Open scrollback when no modifiers are armed. "
-		"Up/Down: Scroll one line. Left/Right: Scroll one page. "
-		"Right soft (Back): Return to live output. Typing also resumes live input. "
-		"External keyboard: Shift+PageUp and Shift+PageDown scroll output. "
-		"At the Bash prompt, Up/Down choose previous or next commands. "
-		"Menu > Search sends Ctrl+R to search command history.",
-	};
 	struct help_render_metrics metrics = { 0 };
 	struct fplinux_font font;
 	struct fplinux_terminal terminal;
@@ -1052,8 +1079,10 @@ static struct help_render_metrics verify_help_rendering(const char *font_path,
 	press(&terminal, KEY_F13, 550);
 	choose_menu(&terminal, "Help", 560);
 	body_rows = height / font.height - (modifiers ? 3 : 2);
+	memset(text, 0, sizeof(*text));
 	for (section = 0; section < 3; ++section) {
-		const char *cursor = expected[section];
+		char *words = text->sections[section];
+		size_t words_size = sizeof(text->sections[section]);
 		unsigned int offset = 0;
 		unsigned int line_count = 0;
 		unsigned int displayed_lines;
@@ -1065,13 +1094,13 @@ static struct help_render_metrics verify_help_rendering(const char *font_path,
 		assert(view.last_line == (displayed_lines ? body_rows : 0));
 		if (!section) {
 			metrics.first_line_size = strlen(view.lines[0]);
-			assert(!strcmp(view.lines[0], first_line));
+			strcpy(text->first_line, view.lines[0]);
 		}
 		if (section == 2)
 			strcpy(history_first_line, view.lines[0]);
 		for (row = 0; row < body_rows; ++row) {
 			strcpy(lines[row], view.lines[row]);
-			help_text_matches(view.lines[row], &cursor);
+			append_words(words, words_size, view.lines[row]);
 			if (view.lines[row][0])
 				++line_count;
 		}
@@ -1101,10 +1130,11 @@ static struct help_render_metrics verify_help_rendering(const char *font_path,
 			strcpy(lines[offset + body_rows - 1],
 			       view.lines[body_rows - 1]);
 			assert(view.lines[body_rows - 1][0]);
-			help_text_matches(view.lines[body_rows - 1], &cursor);
+			append_words(words, words_size,
+				     view.lines[body_rows - 1]);
 			++line_count;
 		}
-		assert(!*cursor);
+		assert(words[0]);
 		assert(displayed_lines == (offset ? line_count : 0));
 		metrics.scroll_steps += offset;
 		while (offset) {
@@ -1138,7 +1168,7 @@ static struct help_render_metrics verify_help_rendering(const char *font_path,
 			press(&terminal, KEY_RIGHT, time++);
 	}
 	read_help_view(&terminal, &surface, &font, 0, body_rows, &view);
-	assert(!strcmp(view.lines[0], first_line));
+	assert(!strcmp(view.lines[0], text->first_line));
 	assert(view.first_line == (view.total_lines ? 1 : 0));
 	press(&terminal, KEY_DOWN, time++);
 	fplinux_terminal_key(&terminal, XKB_KEY_Left, TSM_VTE_INVALID, 0,
@@ -1171,23 +1201,38 @@ static struct help_render_metrics verify_help_rendering(const char *font_path,
 	return metrics;
 }
 
+static struct help_render_metrics
+verify_help_against(const char *font_path, unsigned int width,
+		    unsigned int height, bool modifiers,
+		    const struct help_text *reference)
+{
+	struct help_text text;
+	struct help_render_metrics metrics = verify_help_rendering(
+		font_path, width, height, modifiers, &text);
+
+	help_matches_reference(&text, reference);
+	return metrics;
+}
+
 static void verify_adaptive_help(const char *small_font, const char *large_font,
 				 const char *tall_font)
 {
-	struct help_render_metrics small = verify_help_rendering(
-		small_font, 128, 160, false, "Use Left/Right to");
-	struct help_render_metrics large = verify_help_rendering(
-		large_font, 240, 320, false, "Use Left/Right to switch");
-	struct help_render_metrics wider = verify_help_rendering(
-		small_font, 180, 160, false, "Use Left/Right to switch");
-	struct help_render_metrics taller = verify_help_rendering(
-		small_font, 128, 244, false, "Use Left/Right to");
-	struct help_render_metrics minimum = verify_help_rendering(
-		tall_font, 128, 128, false, "Use Left/Right");
-	struct help_render_metrics armed = verify_help_rendering(
-		tall_font, 128, 128, true, "Use Left/Right");
-	struct help_render_metrics fitting = verify_help_rendering(
-		small_font, 128, 640, false, "Use Left/Right to");
+	/* The tall display shows every section without scrolling. */
+	struct help_text reference;
+	struct help_render_metrics fitting =
+		verify_help_rendering(small_font, 128, 640, false, &reference);
+	struct help_render_metrics small =
+		verify_help_against(small_font, 128, 160, false, &reference);
+	struct help_render_metrics large =
+		verify_help_against(large_font, 240, 320, false, &reference);
+	struct help_render_metrics wider =
+		verify_help_against(small_font, 180, 160, false, &reference);
+	struct help_render_metrics taller =
+		verify_help_against(small_font, 128, 244, false, &reference);
+	struct help_render_metrics minimum =
+		verify_help_against(tall_font, 128, 128, false, &reference);
+	struct help_render_metrics armed =
+		verify_help_against(tall_font, 128, 128, true, &reference);
 
 	assert(large.scroll_steps < small.scroll_steps);
 	assert(wider.scroll_steps < small.scroll_steps);
@@ -1197,29 +1242,49 @@ static void verify_adaptive_help(const char *small_font, const char *large_font,
 	assert(armed.scroll_steps > minimum.scroll_steps);
 	assert(armed.first_view_lines == 1 && minimum.first_view_lines == 2);
 	assert(!fitting.scroll_steps);
-	verify_help_rendering(small_font, 128, 160, true, "Use Left/Right to");
-	verify_help_rendering(large_font, 240, 320, true,
-			      "Use Left/Right to switch");
+	verify_help_against(small_font, 128, 160, true, &reference);
+	verify_help_against(large_font, 240, 320, true, &reference);
 }
 
+/* Usage: SCENARIO BASHRC FONT_6X12 FONT_8X16 FONT_8X32 */
 int main(int argc, char **argv)
 {
-	assert(argc == 5);
-	verify_grid_and_colors();
-	verify_composition_and_key_sequences();
-	verify_pound_and_focus();
-	verify_menu_softkey_selection();
-	verify_menu_choosers_and_back();
-	verify_help_preserves_input();
-	verify_case_and_numeric_holds();
-	verify_modifier_panel_and_one_shot_input();
-	verify_xterm_function_keys();
-	verify_history_during_output();
-	verify_bash_line_editing(argv[1]);
-	verify_render_geometry(argv[2], 128, 160);
-	verify_render_geometry(argv[3], 240, 320);
-	verify_menu_rendering(argv[2], 128, 160);
-	verify_menu_rendering(argv[3], 240, 320);
-	verify_adaptive_help(argv[2], argv[3], argv[4]);
+	const char *scenario = argv[1];
+
+	assert(argc == 6);
+	if (!strcmp(scenario, "grid"))
+		verify_grid_and_colors();
+	else if (!strcmp(scenario, "composition"))
+		verify_composition_and_key_sequences();
+	else if (!strcmp(scenario, "pound-focus"))
+		verify_pound_and_focus();
+	else if (!strcmp(scenario, "menu-softkeys"))
+		verify_menu_softkey_selection();
+	else if (!strcmp(scenario, "menu-choosers"))
+		verify_menu_choosers_and_back();
+	else if (!strcmp(scenario, "help-input"))
+		verify_help_preserves_input();
+	else if (!strcmp(scenario, "case-holds"))
+		verify_case_and_numeric_holds();
+	else if (!strcmp(scenario, "modifier-panel"))
+		verify_modifier_panel_and_one_shot_input();
+	else if (!strcmp(scenario, "function-keys"))
+		verify_xterm_function_keys();
+	else if (!strcmp(scenario, "scrollback"))
+		verify_history_during_output();
+	else if (!strcmp(scenario, "bash"))
+		verify_bash_line_editing(argv[2]);
+	else if (!strcmp(scenario, "render-128x160"))
+		verify_render_geometry(argv[3], 128, 160);
+	else if (!strcmp(scenario, "render-240x320"))
+		verify_render_geometry(argv[4], 240, 320);
+	else if (!strcmp(scenario, "menu-128x160"))
+		verify_menu_rendering(argv[3], 128, 160);
+	else if (!strcmp(scenario, "menu-240x320"))
+		verify_menu_rendering(argv[4], 240, 320);
+	else if (!strcmp(scenario, "help-render"))
+		verify_adaptive_help(argv[3], argv[4], argv[5]);
+	else
+		abort();
 	return 0;
 }

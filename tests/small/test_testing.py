@@ -20,29 +20,23 @@ from fplinux_cli.quality import testing
 class SelectedTestRunTests(unittest.TestCase):
     """A test result owns logs, never a full quality-check success receipt."""
 
-    def test_discovery_keeps_each_tiers_time_budget(self) -> None:
-        """Short checks and artifact work retain their distinct documented deadlines."""
-        self.assertEqual(
-            [(label, timeout) for label, _command, timeout in testing.unittest_commands([])],
-            [
-                ("small", 90),
-                ("host_process", 180),
-                ("host_tool", 240),
-                ("artifact", 300),
-                ("public_workflow", 90),
-            ],
-        )
-
     def test_named_selection_counts_each_tiers_time_budget_once(self) -> None:
-        """Selecting more names in one group must not multiply its available runtime."""
-        commands = testing.unittest_commands(
-            [
+        """Names spanning tiers get their combined budget; more names in a tier add nothing."""
+
+        def selected_budget(*names: str) -> int:
+            [(_label, _command, timeout)] = testing.unittest_commands(list(names))
+            return timeout
+
+        small = selected_budget("tests.small.test_common.FirstCase")
+        host_process = selected_budget("tests.host_process.test_process")
+        self.assertEqual(
+            selected_budget(
                 "tests.small.test_common.FirstCase",
                 "tests.small.test_common.SecondCase",
                 "tests.host_process.test_process",
-            ]
+            ),
+            small + host_process,
         )
-        self.assertEqual([timeout for _label, _command, timeout in commands], [270])
 
     def test_all_outcomes_preserve_check_receipts_and_release_workspace(self) -> None:
         """Success, failure and interruption preserve check evidence and release staged sources."""

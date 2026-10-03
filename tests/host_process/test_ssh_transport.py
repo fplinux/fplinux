@@ -31,8 +31,8 @@ class SshTransportFakeToolTests(unittest.TestCase):
         self.root = Path(self.temporary.name) / "runtime"
         self.root.mkdir(mode=0o700)
 
-    def test_network_ready_accepts_connected_iproute2_output(self) -> None:
-        """The adapter accepts an exact connected address and route from a fake ip tool."""
+    def test_network_ready_requires_session_address_and_route_on_its_interface(self) -> None:
+        """Only the session's /30 host address and a route through the same link are ready."""
         tool_directory = Path(self.temporary.name) / "bin"
         tool_directory.mkdir()
         ip_tool = tool_directory / "ip"
@@ -40,10 +40,10 @@ class SshTransportFakeToolTests(unittest.TestCase):
             """#!/bin/sh
 case "$*" in
 "-4 -j address show dev usb0")
-  printf '%s\n' '[{"addr_info":[{"family":"inet","local":"10.23.45.1","prefixlen":30}]}]'
+  printf '%s\n' "$FPLINUX_IP_ADDRESS"
   ;;
 "-4 -j route show 10.23.45.0/30")
-  printf '%s\n' '[{"dst":"10.23.45.0/30","dev":"usb0"}]'
+  printf '%s\n' "$FPLINUX_IP_ROUTE"
   ;;
 *) exit 2 ;;
 esac
@@ -52,9 +52,31 @@ esac
         )
         ip_tool.chmod(0o755)
         session = create_ready_session(self.root)
+        address = '[{"addr_info":[{"family":"inet","local":"10.23.45.1","prefixlen":30}]}]'
+        wide_address = '[{"addr_info":[{"family":"inet","local":"10.23.45.1","prefixlen":24}]}]'
+        route = '[{"dst":"10.23.45.0/30","dev":"usb0"}]'
+        other_link_route = '[{"dst":"10.23.45.0/30","dev":"usb1"}]'
 
-        with mock.patch.dict(os.environ, {"PATH": str(tool_directory)}):
-            self.assertTrue(ssh_transport._network_ready("usb0", session))  # noqa: SLF001
+        for case, address_output, route_output, ready in (
+            ("connected", address, route, True),
+            ("route through another link", address, other_link_route, False),
+            ("address in a wider network", wide_address, route, False),
+        ):
+            with (
+                self.subTest(case),
+                mock.patch.dict(
+                    os.environ,
+                    {
+                        "PATH": str(tool_directory),
+                        "FPLINUX_IP_ADDRESS": address_output,
+                        "FPLINUX_IP_ROUTE": route_output,
+                    },
+                ),
+            ):
+                self.assertEqual(
+                    ssh_transport._network_ready("usb0", session),  # noqa: SLF001
+                    ready,
+                )
 
     def test_reacquire_bounds_an_unresponsive_identity_command(self) -> None:
         """A stalled SSH probe cannot outlive the session reconnect deadline."""

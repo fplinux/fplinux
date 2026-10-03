@@ -32,7 +32,6 @@ class Ums9117LcmHostTests(unittest.TestCase):
                     "-ffunction-sections",
                     "-fdata-sections",
                     f"-I{FIXTURES / 'lcm-compat'}",
-                    f"-I{FIXTURES / 'bluetooth-compat'}",
                     f"-I{KERNEL}",
                     str(FIXTURES / "ums9117-lcm.c"),
                     str(KERNEL / "ums9117-drm-lcm.c"),

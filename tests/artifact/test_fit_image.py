@@ -15,6 +15,9 @@ from fplinux_cli.common import sha256_file
 
 from tests.process import run_process
 
+ZIMAGE = b"FPLinux test zImage payload\n"
+DTB = b"FPLinux test DTB payload\n"
+
 
 class FitImageTests(unittest.TestCase):
     """Build and reuse a FIT with the quality image's pinned U-Boot tools."""
@@ -30,8 +33,8 @@ class FitImageTests(unittest.TestCase):
         self.zimage = self.root / "zImage"
         self.dtb = self.root / "linux.dtb"
         self.output = self.root / "output"
-        self.zimage.write_bytes(b"FPLinux test zImage payload\n")
-        self.dtb.write_bytes(b"FPLinux test DTB payload\n")
+        self.zimage.write_bytes(ZIMAGE)
+        self.dtb.write_bytes(DTB)
         self.spec: dict[str, Any] = {
             "kind": "sha256",
             "filename": "FPLINUX.ITB",
@@ -100,16 +103,39 @@ class FitImageTests(unittest.TestCase):
             plan=self.plan() if plan is None else plan,
         )
 
-    def test_builds_a_verified_fit_artifact(self) -> None:
-        """Real mkimage and dumpimage produce the declared reusable FIT artifact."""
+    def read_fit(self, fit: Path, node: str, name: str, value_type: str) -> str:
+        """Read one FIT property with dtc's fdtget, independent of the producer."""
+        try:
+            result = run_process(
+                ["fdtget", "-t", value_type, str(fit), node, name],
+                name=f"fdtget {node} {name}",
+                timeout=30,
+            )
+        except OSError as error:
+            self.fail(f"quality image cannot run fdtget: {error}")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout.strip()
+
+    def fit_payload(self, fit: Path, node: str) -> bytes:
+        """Decode the byte-wise hexadecimal fdtget dump of one embedded image."""
+        dump = self.read_fit(fit, node, "data", "bx")
+        return bytes(int(value, 16) for value in dump.split())
+
+    def test_builds_a_fit_with_the_declared_payloads_and_addresses(self) -> None:
+        """The dtc tools read back the payloads, load addresses and default configuration."""
         plan = self.plan()
         fit = self.build(plan)
 
-        self.assertEqual(fit, self.output / self.spec["filename"])
-        self.assertGreater(
-            fit.stat().st_size,
-            self.zimage.stat().st_size + self.dtb.stat().st_size,
-        )
+        self.assertEqual(fit, self.output / "FPLINUX.ITB")
+        self.assertEqual(self.read_fit(fit, "/images/kernel", "load", "x"), "82000000")
+        self.assertEqual(self.read_fit(fit, "/images/kernel", "entry", "x"), "82000000")
+        self.assertEqual(self.read_fit(fit, "/images/fdt", "load", "x"), "83e00000")
+        self.assertEqual(self.fit_payload(fit, "/images/kernel"), ZIMAGE)
+        self.assertEqual(self.fit_payload(fit, "/images/fdt"), DTB)
+        self.assertEqual(self.read_fit(fit, "/configurations", "default", "s"), "nokia-ta1618")
+        configuration = "/configurations/nokia-ta1618"
+        self.assertEqual(self.read_fit(fit, configuration, "kernel", "s"), "kernel")
+        self.assertEqual(self.read_fit(fit, configuration, "fdt", "s"), "fdt")
         self.assertTrue(fit_image.cache_hit(self.output, plan))
 
     def test_changed_zimage_misses_then_rebuilds_the_fit(self) -> None:
@@ -128,13 +154,14 @@ class FitImageTests(unittest.TestCase):
 
     def test_unrelated_file_keeps_a_complete_cache_hit(self) -> None:
         """A sibling outside the declared kernel and DTB inputs cannot rebuild FIT."""
-        plan = self.plan()
-        self.build(plan)
+        self.build()
         receipt = (self.output / fit_image.RECEIPT_NAME).read_bytes()
         (self.root / "unrelated-host-note").write_text("not a FIT input\n", encoding="utf-8")
 
+        after = self.plan()
+        self.assertTrue(fit_image.cache_hit(self.output, after))
         self.assertEqual(
-            self.build(plan, mkimage=self.root / "must-not-run"),
+            self.build(after, mkimage=self.root / "must-not-run"),
             self.output / self.spec["filename"],
         )
         self.assertEqual((self.output / fit_image.RECEIPT_NAME).read_bytes(), receipt)

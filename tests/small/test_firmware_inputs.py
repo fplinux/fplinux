@@ -186,7 +186,7 @@ class FirmwareInputTests(unittest.TestCase):
                 "1" * 64,
                 "2" * 64,
                 ("fplinux-base",),
-                firmware_inputs=self._capture()["bluetooth"],
+                firmware_inputs=firmware_inputs.rootfs_firmware_inputs(self._capture()),
             )
 
         first = rootfs_recipe()

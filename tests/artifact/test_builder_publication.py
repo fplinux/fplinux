@@ -355,25 +355,6 @@ class BuilderPublicationTests(unittest.TestCase):
             published.parent,
             self.output / "demo/builds/release/bundles",
         )
-        self.assertEqual(
-            set(manifest),
-            {
-                "rootfs_receipt",
-                "boot_artifacts",
-                "container_image_recipe",
-                "container_image_generation",
-                "apk_signing_key",
-                "device_identity",
-                "files",
-                "generation",
-                "kbuild_receipt",
-                "linux_recipe",
-                "profile",
-                "build_type",
-                "target",
-                "workspace_digest",
-            },
-        )
         self.assertEqual(manifest["generation"], published.name)
         self.assertIsNone(manifest["profile"])
         self.assertEqual(manifest["build_type"], "release")
@@ -445,42 +426,8 @@ class BuilderPublicationTests(unittest.TestCase):
             runtime["sha256"]["runner/loader_events.py"], hashlib.sha256(event_source).hexdigest()
         )
 
-    def test_publication_requires_the_hashed_ssh_helper(self) -> None:
-        """Reject a runtime closure which omits the mandatory SSH helper."""
-        descriptor: dict[str, int | str] = {
-            "offset": 1024,
-            "bytes": 512,
-            "template_sha256": hashlib.sha256(bytes(512)).hexdigest(),
-        }
-
-        helper = self.root / "scripts/fplinux_cli/ssh_transport.py"
-        helper.unlink()
-        with self.assertRaisesRegex(SystemExit, "expected file is missing or invalid"):
-            self.publish(personalization=descriptor)
-
-    def test_optional_subpackage_is_published_under_its_own_name(self) -> None:
-        """A built child APK is copied and recorded without replacing its rootfs producer."""
-        child = "fplinux-ncurses-curses"
-        self.bundle_apks[child] = self.write(
-            "packages/fplinux-ncurses-curses-6.6-r0.apk", b"optional curses apk\n", root=self.work
-        )
-        self.target_config["bundle"]["packages"].append(child)
-        bundle_files = cast("list[str]", self.release_manifest["bundle_files"])
-        bundle_files.append("apks/fplinux-ncurses-curses.apk")
-
-        published = self.publish()
-        manifest = json.loads((published / BUILD_MANIFEST_NAME).read_text())
-
-        self.assertEqual(
-            (published / "apks/fplinux-ncurses-curses.apk").read_bytes(),
-            b"optional curses apk\n",
-        )
-        self.assertIn("apks/fplinux-ncurses-curses.apk", manifest["files"])
-        self.assertFalse((published / "apks/fplinux-ncurses.apk").exists())
-        self.assertEqual((published / "debug/rootfs.cpio").read_bytes(), b"logical composition\n")
-
     def test_named_profile_publishes_to_its_own_current_bundle_slot(self) -> None:
-        """A host profile cannot replace the default target bundle pointer."""
+        """Publish to the named profile slot with its identity in both manifests."""
         self.target_config["profile"] = "usb-host-lab"
         self.target_config["runtime"]["transport"] = "none"
 

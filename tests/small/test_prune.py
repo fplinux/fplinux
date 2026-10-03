@@ -200,9 +200,29 @@ class PruneTests(unittest.TestCase):
         """Never prune rootfs generations when their package-signing input is unknown."""
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / ".cache"
+            publish_image_state(cache, ImageState("a" * 64, "b" * 64))
             existing = cache / "rootfs" / ("1" * 64)
             existing.mkdir(parents=True)
-            plan = plan_prune(cache)
+            with (
+                mock.patch.object(prune_module, "discover_targets", return_value=("phone",)),
+                mock.patch.object(prune_module, "discover_profiles", return_value=()),
+                mock.patch.object(
+                    prune_module,
+                    "load_target",
+                    return_value={
+                        "platform": "platform",
+                        "linux": {"root": {"kind": "initramfs"}},
+                        "device_data": {"groups": {}},
+                    },
+                ),
+                mock.patch.object(prune_module, "load_platform", return_value={}),
+                mock.patch.object(alpine_state, "selected_packages", return_value=()),
+                mock.patch.object(alpine_state, "alpine_rootfs_recipe", return_value="0" * 64),
+                mock.patch.object(
+                    prune_module, "container_image_recipe_digest", return_value="a" * 64
+                ),
+            ):
+                plan = plan_prune(cache)
             self.assertEqual(len(plan.entries), 1)
             self.assertEqual(plan.entries[0].action, "protected")
             self.assertIn("rootfs recipes", plan.entries[0].reason)
@@ -225,6 +245,7 @@ class PruneTests(unittest.TestCase):
             current.write_text("generation-test\n", encoding="ascii")
             target_config = {
                 "platform": "platform",
+                "linux": {"root": {"kind": "initramfs"}},
                 "device_data": {
                     "groups": {
                         "bluetooth": [
@@ -247,11 +268,9 @@ class PruneTests(unittest.TestCase):
                 mock.patch.object(prune_module, "discover_targets", return_value=("phone",)),
                 mock.patch.object(prune_module, "discover_profiles", return_value=()),
                 mock.patch.object(prune_module, "load_target", return_value=target_config),
-                mock.patch.object(
-                    prune_module,
-                    "load_platform",
-                    side_effect=AssertionError("partial group must stop before rootfs recipe"),
-                ),
+                mock.patch.object(prune_module, "load_platform", return_value={}),
+                mock.patch.object(alpine_state, "selected_packages", return_value=()),
+                mock.patch.object(alpine_state, "alpine_rootfs_recipe", return_value="0" * 64),
                 mock.patch.object(
                     prune_module,
                     "container_image_recipe_digest",
@@ -486,20 +505,41 @@ class PruneTests(unittest.TestCase):
             public_key = alpine_state.signing_public_key(cache)
             public_key.parent.mkdir(parents=True)
             public_key.write_bytes(b"public-key\n")
+            publish_image_state(cache, ImageState("a" * 64, "b" * 64))
+            stale = cache / "rootfs" / ("6" * 64)
+            stale.mkdir(parents=True)
             outside = Path(temporary) / "outside"
             outside.mkdir()
+            sentinel = outside / "sentinel"
+            sentinel.write_bytes(b"keep")
             linked = cache / "rootfs" / ("7" * 64)
-            linked.parent.mkdir(parents=True)
             linked.symlink_to(outside, target_is_directory=True)
 
-            with mock.patch.object(
-                prune_module,
-                "discover_targets",
-                side_effect=SystemExit("unavailable"),
+            with (
+                mock.patch.object(prune_module, "discover_targets", return_value=("phone",)),
+                mock.patch.object(prune_module, "discover_profiles", return_value=()),
+                mock.patch.object(
+                    prune_module,
+                    "load_target",
+                    return_value={
+                        "platform": "platform",
+                        "linux": {"root": {"kind": "initramfs"}},
+                        "device_data": {"groups": {}},
+                    },
+                ),
+                mock.patch.object(prune_module, "load_platform", return_value={}),
+                mock.patch.object(alpine_state, "selected_packages", return_value=()),
+                mock.patch.object(alpine_state, "alpine_rootfs_recipe", return_value="8" * 64),
+                mock.patch.object(
+                    prune_module, "container_image_recipe_digest", return_value="a" * 64
+                ),
             ):
-                self.assertEqual(prune_module.discard_obsolete_rootfs(cache), ())
+                removed = prune_module.discard_obsolete_rootfs(cache)
+
+            self.assertEqual(removed, (f"rootfs/{stale.name}",))
+            self.assertFalse(stale.exists())
             self.assertTrue(linked.is_symlink())
-            self.assertTrue(outside.exists())
+            self.assertEqual(sentinel.read_bytes(), b"keep")
 
     def test_profile_package_replacement_prunes_only_the_obsolete_aport_slot(self) -> None:
         """Replacing a profile package declaration leaves its former cache slot disposable."""
@@ -699,11 +739,17 @@ class PruneTests(unittest.TestCase):
             public_key = alpine_state.signing_public_key(cache)
             public_key.parent.mkdir(parents=True)
             public_key.write_bytes(b"public-key\n")
+            publish_image_state(cache, ImageState("a" * 64, "b" * 64))
             existing = cache / "rootfs" / ("2" * 64)
             existing.mkdir(parents=True)
 
-            with mock.patch.object(
-                prune_module, "discover_targets", side_effect=SystemExit("bad target manifest")
+            with (
+                mock.patch.object(
+                    prune_module, "discover_targets", side_effect=SystemExit("bad target manifest")
+                ),
+                mock.patch.object(
+                    prune_module, "container_image_recipe_digest", return_value="a" * 64
+                ),
             ):
                 plan = plan_prune(cache)
 
@@ -1102,7 +1148,7 @@ class PruneTests(unittest.TestCase):
             (cache / "unrelated/data").mkdir(parents=True)
             self.assertEqual(plan_prune(cache).entries, ())
 
-    def test_apply_removes_exact_dry_run_candidates(self) -> None:
+    def test_apply_removes_disposable_workspaces(self) -> None:
         """Apply removes exactly the freshly recalculated workspace candidates."""
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / ".cache"

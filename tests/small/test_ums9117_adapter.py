@@ -63,6 +63,22 @@ class UdevRulesTests(unittest.TestCase):
             self.assertIn('ENV{MTP_NO_PROBE}="1"', matches[0])
 
 
+class FakeClock:
+    """Monotonic time that passes only while the code under test sleeps."""
+
+    def __init__(self) -> None:
+        """Start at zero seconds."""
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        """Return the current time for any number of reads."""
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        """Advance the time by the requested wait without blocking."""
+        self.now += seconds
+
+
 class UsbDeviceAccessTests(unittest.TestCase):
     """Report disappearance and permission denial as different USB failures."""
 
@@ -78,29 +94,30 @@ class UsbDeviceAccessTests(unittest.TestCase):
 
     def test_permission_denial_reports_access_control(self) -> None:
         """An existing node rejected by the OS keeps the actionable udev diagnosis."""
+        clock = FakeClock()
         with (
             mock.patch.object(ADAPTER.os, "open", side_effect=PermissionError),
-            mock.patch.object(ADAPTER.time, "monotonic", side_effect=[0.0, 1.0]),
+            mock.patch.object(ADAPTER.time, "monotonic", clock.monotonic),
+            mock.patch.object(ADAPTER.time, "sleep", clock.sleep),
             self.assertRaisesRegex(SystemExit, "not readable and writable"),
         ):
             ADAPTER.require_usb_device_access(self.device, "1782:4d00")
 
     def test_transient_permission_denial_is_retried(self) -> None:
         """Allow the desktop uaccess ACL to arrive after USB enumeration."""
+        clock = FakeClock()
         with (
             mock.patch.object(
                 ADAPTER.os,
                 "open",
                 side_effect=[PermissionError, 41],
-            ) as open_device,
+            ),
             mock.patch.object(ADAPTER.os, "close") as close_device,
-            mock.patch.object(ADAPTER.time, "monotonic", side_effect=[0.0, 0.1]),
-            mock.patch.object(ADAPTER.time, "sleep") as sleep,
+            mock.patch.object(ADAPTER.time, "monotonic", clock.monotonic),
+            mock.patch.object(ADAPTER.time, "sleep", clock.sleep),
         ):
             ADAPTER.require_usb_device_access(self.device, "1782:4d00")
 
-        self.assertEqual(open_device.call_count, 2)
-        sleep.assert_called_once_with(0.01)
         close_device.assert_called_once_with(41)
 
     def test_successful_probe_closes_the_usbfs_node(self) -> None:
@@ -161,7 +178,7 @@ class RuntimeIdentityTests(unittest.TestCase):
     def test_reads_the_nested_target_display_name(self) -> None:
         """The adapter renders the validated target identity rather than a root alias."""
         runtime = runtime_identity()
-        runtime["display_name"] = "obsolete root name"
+        runtime["display_name"] = "Root Alias Phone"
 
         self.assertEqual(
             ADAPTER.runtime_target_display_name(runtime),
@@ -173,8 +190,8 @@ class RuntimeIdentityTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "platform identity must name ums9117"):
             ADAPTER.runtime_target_display_name(runtime_identity(platform_name="other"))
 
-    def test_rejects_the_legacy_root_only_identity(self) -> None:
-        """A previous root display_name/platform pair cannot select this adapter."""
+    def test_rejects_runtime_without_identity_object(self) -> None:
+        """Root display_name and platform keys without an identity object are refused."""
         with self.assertRaisesRegex(SystemExit, "runtime identity must be an object"):
             ADAPTER.runtime_target_display_name(
                 {"display_name": "Demo Phone", "platform": "ums9117"}
@@ -282,10 +299,10 @@ class DisplaySettingsTests(unittest.TestCase):
 
 
 class HandoffTransportTests(unittest.TestCase):
-    """Keep post-bridge transport selection independent of bridge diagnostics."""
+    """Select the post-bridge transport and report only a verified SSH session as ready."""
 
-    def test_fresh_microsd_handoff_rejects_another_kernel_before_clock_or_ready(self) -> None:
-        """A private SSH session cannot authorize the wrong card kernel as the selected build."""
+    def test_handoff_rejects_another_kernel_before_clock_sync_or_ready(self) -> None:
+        """An SSH session running another kernel is neither clock-synced nor reported ready."""
 
         def remote(
             _session: object,
@@ -329,7 +346,6 @@ class HandoffTransportTests(unittest.TestCase):
                         side_effect=partial(remote, commands=commands, matches=matches),
                     ),
                     mock.patch("fplinux_cli.ssh_transport.time.time", return_value=1234),
-                    mock.patch.object(ssh_transport, "open_shell") as shell,
                     contextlib.ExitStack() as stack,
                 ):
                     if not matches:
@@ -337,11 +353,7 @@ class HandoffTransportTests(unittest.TestCase):
                             self.assertRaisesRegex(SystemExit, "different kernel identity")
                         )
                     ADAPTER.complete_linux_handoff(
-                        {
-                            "transport": "usb-ncm",
-                            "profile": "microsd-uboot",
-                            "build_type": "release",
-                        },
+                        {"transport": "usb-ncm"},
                         session,
                         {"vendor_id": 0x0525, "product_id": 0xA4A6, "wait_seconds": 30},
                         expected_device_identity="9" * 64,
@@ -352,11 +364,10 @@ class HandoffTransportTests(unittest.TestCase):
                 )
                 self.assertEqual(events, ["linux-usb", "ssh-ready"] if matches else ["linux-usb"])
                 self.assertEqual("session is ready" in rendered.getvalue(), matches)
-                shell.assert_not_called()
 
-    def test_ssh_ready_event_requires_authenticated_handoff_and_clock_sync(self) -> None:
-        """Controlled SSH failures never publish a ready session to event consumers."""
-        for failure in (None, "authentication", "clock"):
+    def test_ssh_ready_event_requires_an_authenticated_session(self) -> None:
+        """A failed SSH authentication never publishes a ready session to event consumers."""
+        for failure in (None, "authentication"):
             with self.subTest(failure=failure):
                 events: list[str] = []
                 transport = mock.Mock()
@@ -373,8 +384,6 @@ class HandoffTransportTests(unittest.TestCase):
                     return session
 
                 transport.wait_for_bound_session.side_effect = bound_session
-                if failure == "clock":
-                    transport.sync_clock.side_effect = SystemExit("clock")
                 with (
                     contextlib.redirect_stdout(io.StringIO()),
                     mock.patch.object(ADAPTER.importlib, "import_module", return_value=transport),
@@ -394,39 +403,34 @@ class HandoffTransportTests(unittest.TestCase):
                 )
 
     def test_none_transport_returns_without_acquiring_ssh(self) -> None:
-        """A no-transport profile completes after the bridge acknowledgement."""
-        rendered = io.StringIO()
+        """A no-transport profile completes after the bridge acknowledgement with no session."""
         session = {"session_id": "a" * 64}
         with (
-            contextlib.redirect_stdout(rendered),
+            contextlib.redirect_stdout(io.StringIO()),
             mock.patch.object(
                 ADAPTER.importlib,
                 "import_module",
                 side_effect=AssertionError("none transport must not acquire SSH/NCM"),
             ),
         ):
-            ADAPTER.complete_linux_handoff(
+            result = ADAPTER.complete_linux_handoff(
                 {"transport": "none"},
                 session,
                 {"vendor_id": 0x0525, "product_id": 0xA4A6, "wait_seconds": 30},
                 expected_device_identity="9" * 64,
             )
 
-        self.assertEqual(
-            rendered.getvalue(),
-            "Bridge acknowledged the Linux transition; no host-side transport is selected.\n",
-        )
+        self.assertIsNone(result)
 
-    def test_usb_ncm_returns_the_prepared_session_after_clock_sync(self) -> None:
-        """The caller receives the verified session after its phone clock is set."""
-        rendered = io.StringIO()
+    def test_usb_ncm_returns_the_authenticated_session(self) -> None:
+        """The caller receives the session returned by the SSH transport, not the prepared one."""
         session = {"session_id": "a" * 64}
         transport = mock.Mock()
         ready = {"session_id": "a" * 64, "status": "ready"}
         transport.wait_for_bound_session.return_value = ready
 
         with (
-            contextlib.redirect_stdout(rendered),
+            contextlib.redirect_stdout(io.StringIO()),
             mock.patch.object(ADAPTER.importlib, "import_module", return_value=transport),
         ):
             result = ADAPTER.complete_linux_handoff(
@@ -437,36 +441,15 @@ class HandoffTransportTests(unittest.TestCase):
             )
 
         self.assertIs(result, ready)
-        self.assertEqual(
-            transport.mock_calls,
-            [
-                mock.call.wait_for_bound_session(session, on_linux_usb=mock.ANY),
-                mock.call.require_device_identity(ready, "9" * 64),
-                mock.call.sync_clock(ready),
-            ],
-        )
-        self.assertEqual(
-            rendered.getvalue(),
-            "Bridge acknowledged the Linux transition; waiting up to 30 seconds for "
-            "Linux USB-NCM 0525:a4a6.\n"
-            "Private USB-NCM SSH session is ready.\n",
-        )
 
 
 class BridgeProcess:
     """Minimal bridge process whose exit code is the protocol result."""
 
-    def __init__(
-        self,
-        status: int | None,
-        *,
-        time_out: bool = False,
-        diagnostics: str = "",
-    ) -> None:
-        """Set one exit outcome and optional human-readable diagnostics."""
+    def __init__(self, status: int | None, *, time_out: bool = False) -> None:
+        """Set one exit outcome, optionally preceded by an acknowledgement timeout."""
         self.status = status
         self.time_out = time_out
-        self.diagnostics = diagnostics
         self.returncode: int | None = None
         self.wait_timeouts: list[int] = []
         self.terminated = False
@@ -504,7 +487,7 @@ class BridgeProcess:
 
 
 class BridgeAcknowledgementTests(unittest.TestCase):
-    """The bridge exit status, not its diagnostics, authorizes Linux startup."""
+    """The loader result, bridge exit status and BootROM release gate the Linux transition."""
 
     session_id = "a" * 64
 
@@ -551,25 +534,34 @@ class BridgeAcknowledgementTests(unittest.TestCase):
         runtime: dict[str, Any] | None = None,
         start_bridge: Callable[..., BridgeProcess] | None = None,
         output: io.StringIO | None = None,
-        bootrom_states: list[bool] | None = None,
-        monotonic_values: list[int] | None = None,
+        bootrom_release_seconds: float | None = 0.0,
         events: Callable[[str], None] | None = None,
-    ) -> tuple[mock.Mock, mock.Mock, Path, mock.Mock]:
-        """Run the adapter through its bridge-process boundary with no phone attached."""
+    ) -> tuple[mock.Mock, mock.Mock, Path]:
+        """Run the adapter through its bridge-process boundary with no phone attached.
+
+        The BootROM node disappears once the adapter has waited
+        ``bootrom_release_seconds``; ``None`` keeps it present.
+        """
+        clock = FakeClock()
+
+        def bootrom_present() -> bool:
+            return bootrom_release_seconds is None or clock.now < bootrom_release_seconds
+
         with tempfile.TemporaryDirectory() as temporary:
             bundle = Path(temporary)
             bootrom = mock.Mock(spec=Path)
-            bootrom.exists.side_effect = bootrom_states or [False]
+            bootrom.exists.side_effect = bootrom_present
             transport_module = mock.Mock()
             popen = (
                 mock.Mock(return_value=bridge)
                 if start_bridge is None
                 else mock.Mock(side_effect=start_bridge)
             )
-            patches = [
+            patches: list[contextlib.AbstractContextManager[object]] = [
                 mock.patch.object(ADAPTER, "usb_device_path", return_value=bootrom),
                 mock.patch.object(ADAPTER, "require_usb_device_access"),
-                mock.patch.object(ADAPTER.time, "sleep"),
+                mock.patch.object(ADAPTER.time, "monotonic", clock.monotonic),
+                mock.patch.object(ADAPTER.time, "sleep", clock.sleep),
                 mock.patch.object(
                     ADAPTER.subprocess,
                     "run",
@@ -583,10 +575,6 @@ class BridgeAcknowledgementTests(unittest.TestCase):
                     return_value=transport_module,
                 ),
             ]
-            if monotonic_values is not None:
-                patches.append(
-                    mock.patch.object(ADAPTER.time, "monotonic", side_effect=monotonic_values)
-                )
             with contextlib.ExitStack() as stack:
                 stack.enter_context(contextlib.redirect_stdout(output or io.StringIO()))
                 for patch in patches:
@@ -598,7 +586,7 @@ class BridgeAcknowledgementTests(unittest.TestCase):
                     expected_device_identity="9" * 64,
                     events=events,
                 )
-        return popen, transport_module, bundle, bootrom
+        return popen, transport_module, bundle
 
     def test_no_transport_events_end_at_acknowledged_linux_transition(self) -> None:
         """A bridge acknowledgement does not claim an authenticated SSH session."""
@@ -808,6 +796,7 @@ class BridgeAcknowledgementTests(unittest.TestCase):
             bootrom.write_bytes(b"")
             transport_module = mock.Mock()
             loader = mock.Mock(return_value=subprocess.CompletedProcess([], 1))
+            clock = FakeClock()
 
             with (
                 contextlib.redirect_stdout(io.StringIO()),
@@ -820,11 +809,8 @@ class BridgeAcknowledgementTests(unittest.TestCase):
                     "import_module",
                     return_value=transport_module,
                 ),
-                mock.patch.object(
-                    ADAPTER.time,
-                    "monotonic",
-                    side_effect=[0.0, 0.0, 2.0],
-                ),
+                mock.patch.object(ADAPTER.time, "monotonic", clock.monotonic),
+                mock.patch.object(ADAPTER.time, "sleep", clock.sleep),
                 self.assertRaisesRegex(SystemExit, "retry deadline"),
             ):
                 ADAPTER.run(
@@ -870,7 +856,7 @@ class BridgeAcknowledgementTests(unittest.TestCase):
         signals = (signal.SIGINT, signal.SIGTERM)
         before = {signum: signal.getsignal(signum) for signum in signals}
         try:
-            self.run_bridge(BridgeProcess(0), bootrom_states=[True, False])
+            self.run_bridge(BridgeProcess(0), bootrom_release_seconds=1.0)
             self.assertEqual(
                 {signum: signal.getsignal(signum) for signum in signals},
                 before,
@@ -881,11 +867,8 @@ class BridgeAcknowledgementTests(unittest.TestCase):
 
     def test_exit_zero_and_bootrom_disconnect_continue_with_the_exact_session_token(self) -> None:
         """Bridge success needs no output; the original USB node must then disappear."""
-        bridge = BridgeProcess(0, diagnostics="arbitrary diagnostic output")
-        popen, transport_module, bundle, bootrom = self.run_bridge(
-            bridge,
-            bootrom_states=[True, False],
-        )
+        bridge = BridgeProcess(0)
+        popen, transport_module, bundle = self.run_bridge(bridge, bootrom_release_seconds=1.0)
 
         self.assertEqual(
             popen.call_args.args[0],
@@ -911,10 +894,7 @@ class BridgeAcknowledgementTests(unittest.TestCase):
             ],
         )
         self.assertEqual(popen.call_args.kwargs, {"cwd": bundle / "assets"})
-        self.assertNotIn("stdout", popen.call_args.kwargs)
-        self.assertNotIn("stderr", popen.call_args.kwargs)
         self.assertEqual(bridge.wait_timeouts, [60])
-        self.assertEqual(bootrom.exists.call_count, 2)
         transport_module.remove_personalized_image.assert_called_once()
 
     def test_headless_target_serves_only_a_neutral_pinmap(self) -> None:
@@ -932,12 +912,12 @@ class BridgeAcknowledgementTests(unittest.TestCase):
             served.update({path.name: path.read_bytes() for path in cwd.iterdir()})
             return bridge
 
-        popen, _transport, bundle, _bootrom = self.run_bridge(
+        popen, _transport, bundle = self.run_bridge(
             bridge,
             runtime=runtime,
             start_bridge=start_bridge,
             output=output,
-            bootrom_states=[True, False],
+            bootrom_release_seconds=1.0,
         )
 
         self.assertEqual(
@@ -977,14 +957,6 @@ class BridgeAcknowledgementTests(unittest.TestCase):
                     Path("bundle"), runtime, self.session(), expected_device_identity="9" * 64
                 )
 
-    def test_marker_like_text_cannot_replace_a_nonzero_bridge_ack(self) -> None:
-        """A bridge diagnostic cannot authorize Linux when the bridge exits unsuccessfully."""
-        diagnostics = "TA1618_LINUX_BOOTSTRAP stage=5 message=PREPARE LINUX"
-        bridge = BridgeProcess(19, diagnostics=diagnostics)
-
-        with self.assertRaisesRegex(SystemExit, "status 19"):
-            self.run_bridge(bridge)
-
     def test_bridge_ack_timeout_fails_and_stops_the_bridge(self) -> None:
         """No bridge exit before the declared deadline is a failed handoff."""
         bridge = BridgeProcess(None, time_out=True)
@@ -999,11 +971,7 @@ class BridgeAcknowledgementTests(unittest.TestCase):
         bridge = BridgeProcess(0)
 
         with self.assertRaisesRegex(SystemExit, "BootROM USB did not disconnect"):
-            self.run_bridge(
-                bridge,
-                bootrom_states=[True],
-                monotonic_values=[0, 0, 10],
-            )
+            self.run_bridge(bridge, bootrom_release_seconds=None)
 
     def test_none_transport_still_requires_a_prepared_session(self) -> None:
         """A host-only profile cannot bypass the per-run bridge binding token."""

@@ -6,7 +6,6 @@
 # readable.
 # The host-process harness supplies the FPLINUX_TEST_* command contract.
 # shellcheck disable=SC2154
-printf 'hwclock %s\n' "$*" >>"$FPLINUX_TEST_EVENTS"
 case "$*" in
 "-u -r -f /dev/rtc0")
 	if [ ! -f "$FPLINUX_TEST_RTC" ]; then

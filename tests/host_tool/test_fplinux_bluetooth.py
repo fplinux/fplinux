@@ -23,6 +23,21 @@ SHARED_INCLUDE = ROOT / "include/fplinux"
 SERVICE_SOURCE = ROOT / "tests/host_tool/fplinux-bluetooth-service.c"
 PEER = "01:23:45:67:89:AB"
 CONNECTED = "connected 01:23:45:67:89:AB via bnep0; configure IP, DHCP and NAT separately\n"
+# No service directories: a request to an absent name fails instead of
+# activating a BlueZ or obexd service installed on the host.
+BUS_CONFIG = """\
+<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <type>session</type>
+  <listen>unix:dir={directory}</listen>
+  <policy context="default">
+    <allow send_destination="*" eavesdrop="true"/>
+    <allow eavesdrop="true"/>
+    <allow own="*"/>
+  </policy>
+</busconfig>
+"""
 
 
 class FplinuxBluetoothHostToolTests(unittest.TestCase):
@@ -101,8 +116,10 @@ class FplinuxBluetoothHostToolTests(unittest.TestCase):
         """Create one isolated daemon and one fake service per scenario."""
         self.case = tempfile.TemporaryDirectory()
         self.addCleanup(self.case.cleanup)
+        configuration = Path(self.case.name) / "bus.conf"
+        configuration.write_text(BUS_CONFIG.format(directory=self.case.name), encoding="utf-8")
         self.bus = subprocess.Popen(
-            ["dbus-daemon", "--session", "--nofork", "--print-address=1"],
+            ["dbus-daemon", f"--config-file={configuration}", "--nofork", "--print-address=1"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -111,9 +128,13 @@ class FplinuxBluetoothHostToolTests(unittest.TestCase):
         self.addCleanup(self.stop_process, self.bus)
         if self.bus.stdout is None:
             self.fail("private D-Bus daemon stdout is not captured")
-        self.address = self.bus.stdout.readline().strip()
+        readable, _, _ = select.select([self.bus.stdout], [], [], 3)
+        self.address = self.bus.stdout.readline().strip() if readable else ""
         if not self.address:
-            self.fail("private D-Bus daemon did not publish an address")
+            with suppress(ProcessLookupError):
+                os.killpg(self.bus.pid, signal.SIGKILL)
+            _, stderr = self.bus.communicate()
+            self.fail(f"private D-Bus daemon did not publish an address:\n{stderr}")
 
     @staticmethod
     def stop_process(process: subprocess.Popen[str]) -> None:
@@ -220,7 +241,7 @@ class FplinuxBluetoothHostToolTests(unittest.TestCase):
                 self.assertEqual(result.stderr, "")
                 self.assertEqual(start.read_bytes(), b"")
 
-    def test_invalid_command_arguments_exit_before_a_bus_operation(self) -> None:
+    def test_invalid_command_arguments_are_diagnosed_without_bluez(self) -> None:
         """Syntax and value errors are diagnosed with no running BlueZ service."""
         for arguments in (
             (),

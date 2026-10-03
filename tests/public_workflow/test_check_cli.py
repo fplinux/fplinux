@@ -118,8 +118,8 @@ class CheckCommandTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("--jobs cannot be combined with --list", result.stderr)
 
-    def test_help_describes_the_measured_kernel_worker_default(self) -> None:
-        """Expose the default and verbose fallback chosen by the public A/B."""
+    def test_help_text_states_the_kernel_worker_default_and_verbose_fallback(self) -> None:
+        """Help names the default kernel worker count and the serial verbose fallback."""
         result = self.run_check("--help")
 
         self.assertEqual(result.returncode, 0, result.stderr)

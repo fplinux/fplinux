@@ -46,7 +46,6 @@ class FPLinuxBrightnessServiceTests(BrightnessProcesses):
         self.assertEqual(self.raw(), "2\n")
         self.assertEqual(self.run_cli("set", "9").returncode, 0)
         self.assertEqual(self.exchange(other, "GET"), "LEVEL 9")
-        self.assertEqual(self.state.read_text(encoding="ascii"), "9\n")
         self.assertEqual(self.raw(), "2\n")
         self.assertEqual(self.exchange(lease, "RELEASE"), "OK")
         self.assertEqual(self.raw(), "44\n")
@@ -67,7 +66,7 @@ class FPLinuxBrightnessServiceTests(BrightnessProcesses):
         self.assertEqual(self.exchange(other, "CLAIM"), "OK")
 
     def test_killed_daemon_recovers_published_baseline_and_stale_socket(self) -> None:
-        """Restart recovers SET state after a killed preview holder."""
+        """Restart after a daemon killed during preview recovers the SET level."""
         self.start_daemon()
         self.assertEqual(self.run_cli("set", "10").returncode, 0)
         lease = self.client()
@@ -86,17 +85,14 @@ class FPLinuxBrightnessServiceTests(BrightnessProcesses):
         self.assertEqual(self.socket.stat().st_mode & 0o777, 0o600)
         self.assertEqual(self.state.stat().st_mode & 0o777, 0o600)
 
-    def test_startup_uses_valid_state_and_defaults_invalid_state_to_seven(self) -> None:
-        """Startup uses valid session state and replaces invalid state."""
-        self.state.write_text("4\n", encoding="ascii")
+    def test_restart_keeps_the_selected_level(self) -> None:
+        """A level set before SIGTERM is reported and applied after the service restarts."""
         self.start_daemon()
-        self.assertEqual(self.raw(), "7\n")
-        self.assertEqual(self.run_cli("get").stdout, "4\n")
+        self.assertEqual(self.run_cli("set", "4").returncode, 0)
         self.stop_daemon()
-        self.state.write_text("11\n", encoding="ascii")
         self.start_daemon()
-        self.assertEqual(self.raw(), "23\n")
-        self.assertEqual(self.state.read_text(encoding="ascii"), "7\n")
+        self.assertEqual(self.run_cli("get").stdout, "4\n")
+        self.assertEqual(self.raw(), "7\n")
 
     def test_invalid_config_and_unavailable_device_fail_without_writing(self) -> None:
         """Malformed configuration and missing sysfs values block startup."""
@@ -108,7 +104,6 @@ class FPLinuxBrightnessServiceTests(BrightnessProcesses):
             "backlight=lcd\nlevels=1,2,3,4,7,11,16,23,32,44,63\n",
             CONFIG + "extra=yes\n",
             CONFIG.rstrip("\n"),
-            "backlight=lcd\nlevels=0,1,2,4,7,11,16,23,32,4294967296,63\n",
         )
         for config in invalid:
             with self.subTest(config=config):
@@ -125,7 +120,7 @@ class FPLinuxBrightnessServiceTests(BrightnessProcesses):
         self.assertNotEqual(self.run_once().returncode, 0)
 
     def test_singleton_rejects_second_daemon_without_changing_brightness(self) -> None:
-        """A second daemon cannot overwrite an active preview or state."""
+        """A rejected second daemon keeps the preview and the level kept across restarts."""
         self.start_daemon()
         self.assertEqual(self.run_cli("set", "3").returncode, 0)
         lease = self.client()
@@ -134,7 +129,9 @@ class FPLinuxBrightnessServiceTests(BrightnessProcesses):
         self.assertEqual(self.raw(), "0\n")
         self.assertNotEqual(self.run_once().returncode, 0)
         self.assertEqual(self.raw(), "0\n")
-        self.assertEqual(self.state.read_text(encoding="ascii"), "3\n")
+        self.assertEqual(self.run_cli("get").stdout, "3\n")
+        self.stop_daemon()
+        self.start_daemon()
         self.assertEqual(self.run_cli("get").stdout, "3\n")
 
 

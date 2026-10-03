@@ -3,6 +3,7 @@
 #include "fplinux-rotate.h"
 
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -537,13 +538,28 @@ int main(void)
 		     ++transform)
 			if (!run_case(formats[format],
 				      regular_cases[transform].rotation,
-				      regular_cases[transform].mirror))
+				      regular_cases[transform].mirror)) {
+				fprintf(stderr,
+					"rotation case format=%u rotate=%u mirror=%d failed\n",
+					(unsigned int)formats[format],
+					regular_cases[transform].rotation,
+					regular_cases[transform].mirror);
 				return EXIT_FAILURE;
+			}
 	for (transform = 0;
 	     transform < sizeof(regular_cases) / sizeof(regular_cases[0]);
 	     ++transform)
 		if (!run_odd_nv16_case(regular_cases[transform].rotation,
-				       regular_cases[transform].mirror))
+				       regular_cases[transform].mirror)) {
+			fprintf(stderr,
+				"odd NV16 case rotate=%u mirror=%d failed\n",
+				regular_cases[transform].rotation,
+				regular_cases[transform].mirror);
 			return EXIT_FAILURE;
-	return preview_conversion_is_stable() ? EXIT_SUCCESS : EXIT_FAILURE;
+		}
+	if (!preview_conversion_is_stable()) {
+		fprintf(stderr, "RGB565 preview conversion case failed\n");
+		return EXIT_FAILURE;
+	}
+	return EXIT_SUCCESS;
 }

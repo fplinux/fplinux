@@ -16,7 +16,6 @@ STANDARD_TABLES = ROOT / "tests/host_tool/jpeg-codec-standard-tables.c"
 COMPAT = ROOT / "tests/host_tool/jpeg-codec-compat"
 
 # Pillow/libjpeg quality=85, subsampling=1 output, converted to natural DCT order.
-# Source receipt SHA-256: 25bb3739664e47c1cd8aadf2ff486d477738b962bc84a097ae7bab5d88084a12.
 STANDARD_Q85_NATURAL = bytes.fromhex(
     "05 03 03 05 07 0c 0f 12 04 04 04 06 08 11 12 11 "
     "04 04 05 07 0c 11 15 11 04 05 07 09 0f 1a 18 13 "
@@ -250,6 +249,11 @@ class Ums9117JpegCodecHostTests(unittest.TestCase):
         )
         self.assertEqual(sos[-3:], b"\x00\x3f\x00")
 
+        # Characterization of the driver's quantizer register format, not an
+        # independent register specification: each 16-bit half holds
+        # round(2^(11+e) / q) << 4 | e with e = ceil(log2(q)), two natural-order
+        # coefficients per word in 6-bit bit-reversed order. A host run cannot
+        # show that the encoder hardware accepts this layout.
         qbuf = tuple(int(word, 16) for word in fields["qbuf"].split())
         self.assertEqual(len(qbuf), 64)
         self.assertEqual(qbuf[0], 0xCCD3CCD3)
@@ -258,6 +262,7 @@ class Ums9117JpegCodecHostTests(unittest.TestCase):
         self.assertEqual(qbuf[32], 0x8895CCD3)
         self.assertEqual(qbuf[63], 0x88958895)
 
+        # ITU-T T.81 Annex K.5/K.6 AC Huffman codes, left-aligned to 16 bits.
         ac = tuple(int(word, 16) for word in fields["ac"].split())
         self.assertEqual(len(ac), 162)
         expected_ac = {

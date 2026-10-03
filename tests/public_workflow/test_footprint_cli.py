@@ -17,12 +17,12 @@ from fplinux_cli.bundle_state import (
 )
 
 from tests.cli_support import prepare_cli_checkout
-from tests.process import run_process
-from tests.small.test_artifact_footprint import (
+from tests.fixtures.artifact_footprint import (
     FootprintFixture,
     kernel_with_initramfs,
     squashfs_header,
 )
+from tests.process import run_process
 
 if TYPE_CHECKING:
     import subprocess
@@ -119,30 +119,32 @@ class FootprintCliTests(unittest.TestCase):
                 self.assertIn("Nested layers overlap", text.stdout)
                 self.assertNotIn(str(self.root), text.stdout)
 
-    def test_missing_type_and_incomplete_bundle_fail_without_measurements(self) -> None:
-        """A release bundle cannot satisfy debug, and missing artifacts cannot yield a report."""
-        published = self.publish_bundle()
+    def test_missing_build_type_fails_without_measurements(self) -> None:
+        """A release bundle cannot satisfy a request for a debug report."""
+        self.publish_bundle()
         missing = self.run_cli(
             "inspect", "footprint", "example", "--build-type", "debug", "--json"
         )
         self.assertEqual(missing.returncode, 1, missing.stderr)
         self.assertIn("build example --build-type debug", missing.stderr)
         self.assertEqual(missing.stdout, "")
-        (published / "debug/rootfs.cpio").unlink()
-        incomplete = self.run_cli("inspect", "footprint", "example", "--json")
-        self.assertEqual(incomplete.returncode, 1, incomplete.stderr)
-        self.assertEqual(incomplete.stdout, "")
-        self.assertNotIn("Traceback", incomplete.stderr)
 
-    def test_missing_boot_archive_fails_without_partial_report_or_traceback(self) -> None:
-        """A selected RAM bundle must retain its published boot archive."""
+    def test_missing_payload_fails_without_partial_report_or_traceback(self) -> None:
+        """A selected RAM bundle must retain both composition and boot archives."""
         published = self.publish_bundle()
-        (published / "debug/initramfs.cpio").unlink()
-        result = self.run_cli("inspect", "footprint", "example", "--json")
-        self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertEqual(result.stdout, "")
-        self.assertIn("debug/initramfs.cpio", result.stderr)
-        self.assertNotIn("Traceback", result.stderr)
+        for payload in ("debug/rootfs.cpio", "debug/initramfs.cpio"):
+            with self.subTest(payload=payload):
+                path = published / payload
+                original = path.read_bytes()
+                path.unlink()
+                try:
+                    result = self.run_cli("inspect", "footprint", "example", "--json")
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertEqual(result.stdout, "")
+                    self.assertIn(payload, result.stderr)
+                    self.assertNotIn("Traceback", result.stderr)
+                finally:
+                    path.write_bytes(original)
 
     def test_kernel_embedding_composition_instead_of_boot_archive_is_rejected(self) -> None:
         """Individually valid artifacts cannot report the wrong embedded boot content."""

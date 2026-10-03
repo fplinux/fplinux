@@ -331,23 +331,27 @@ class RunReporterTests(unittest.TestCase):
                 self.assertEqual(raised.exception.code, 1)
                 self.assertEqual(terminal.getvalue().count("cannot read the requested source"), 1)
 
-    def test_container_environment_preserves_display_path(self) -> None:
-        """Separate the mounted log path from its host-facing location."""
-        with tempfile.TemporaryDirectory() as temporary:
-            reporter = RunReporter(
-                "build target",
-                Path(temporary) / "run",
-                ".cache/logs/build/target/run",
-                verbose=True,
-            )
-            self.assertEqual(
-                reporter.container_environment("/cache/logs/build/target/run"),
-                {
-                    "FPLINUX_LOG_ROOT": "/cache/logs/build/target/run",
-                    "FPLINUX_LOG_DISPLAY_ROOT": ".cache/logs/build/target/run",
-                    "FPLINUX_VERBOSE": "1",
-                },
-            )
+    def test_container_environment_preserves_display_path_and_verbosity(self) -> None:
+        """A nested reporter writes under the mounted path but names the host-facing one."""
+        for verbose in (True, False):
+            with self.subTest(verbose=verbose), tempfile.TemporaryDirectory() as temporary:
+                host = RunReporter(
+                    "build target",
+                    Path(temporary) / "host",
+                    ".cache/logs/build/target/run",
+                    verbose=verbose,
+                )
+                mounted = Path(temporary) / "mounted"
+                environment = host.container_environment(str(mounted))
+                with mock.patch.dict(os.environ, environment, clear=True):
+                    nested = RunReporter.from_environment("build", "container")
+
+                self.assertIsNotNone(nested)
+                if nested is None:
+                    continue
+                self.assertEqual(nested.root, mounted / "container")
+                self.assertEqual(nested.display_root, ".cache/logs/build/target/run/container")
+                self.assertIs(nested.verbose, verbose)
 
 
 if __name__ == "__main__":

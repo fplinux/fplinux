@@ -93,8 +93,13 @@ class StageProcessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "run"
             reporter = RunReporter("check", root, ".cache/logs/test", verbose=False)
-            terminal = io.StringIO()
-            with contextlib.redirect_stderr(terminal), reporter.stage("volume") as stage:
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with (
+                contextlib.redirect_stdout(stdout),
+                contextlib.redirect_stderr(stderr),
+                reporter.stage("volume") as stage,
+            ):
                 stage.run(
                     [
                         sys.executable,
@@ -110,8 +115,9 @@ class StageProcessTests(unittest.TestCase):
             data = (root / "01-volume.log").read_bytes()
             self.assertIn(b"o" * 1000, data)
             self.assertIn(b"e" * 1000, data)
-            self.assertNotIn("ooo", terminal.getvalue())
-            self.assertIn("check: volume OK", terminal.getvalue())
+            self.assertEqual(stdout.getvalue(), "")
+            self.assertNotIn("eee", stderr.getvalue())
+            self.assertIn("check: volume OK", stderr.getvalue())
 
     def test_verbose_stage_tees_original_streams(self) -> None:
         """Tee verbose child output back to its original terminal stream."""
@@ -141,8 +147,12 @@ class StageProcessTests(unittest.TestCase):
             self.assertIn("stderr marker", stderr.getvalue())
             self.assertIn("build target: verbose OK", stderr.getvalue())
 
-    def test_passthrough_ignores_closed_terminal_pipe(self) -> None:
-        """Keep the child running when a passthrough consumer closes stdout."""
+    def test_passthrough_survives_broken_pipe_from_terminal_stream(self) -> None:
+        """A terminal stream raising BrokenPipeError fails neither the stage nor its log.
+
+        BrokenPipeStream is a stub without a file descriptor; it does not exercise a
+        real closed pipe or the redirection of its descriptor to /dev/null.
+        """
 
         class BrokenPipeBuffer:
             def write(self, data: bytes) -> int:
@@ -202,7 +212,7 @@ class StageProcessTests(unittest.TestCase):
             self.assertIn(b"captured stdout", log)
             self.assertIn(b"captured stderr", log)
 
-    def test_failed_stage_preserves_status_and_prints_bounded_tail(self) -> None:
+    def test_failed_stage_preserves_status_and_prints_log_location(self) -> None:
         """Keep a child exit status and show its diagnostic log location."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "run"
@@ -323,14 +333,15 @@ class StageSignalProcessTests(unittest.TestCase):
                     env=python_environment(),
                     while_running=escalate_ready_wrapper,
                 )
+                self.assertEqual(result.returncode, 128 + signal.SIGTERM, result.stderr)
+                child_pid = int(child_pid_path.read_text())
+                grandchild_pid = int(grandchild_pid_path.read_text())
+                deadline = time.monotonic() + 2
+                _wait_until_not_running(child_pid, deadline)
+                _wait_until_not_running(grandchild_pid, deadline)
             finally:
+                # Cleanup runs only after the assertions so that it cannot satisfy them.
                 _kill_recorded_process_group(child_group)
-            self.assertEqual(result.returncode, 128 + signal.SIGTERM, result.stderr)
-            child_pid = int(child_pid_path.read_text())
-            grandchild_pid = int(grandchild_pid_path.read_text())
-            deadline = time.monotonic() + 2
-            _wait_until_not_running(child_pid, deadline)
-            _wait_until_not_running(grandchild_pid, deadline)
             self.assertIn("FAILED (exit 143)", result.stderr)
 
     def test_signal_is_forwarded_to_every_process_in_the_child_group(self) -> None:
@@ -411,7 +422,11 @@ class StageSignalProcessTests(unittest.TestCase):
             self.assertEqual(child_signal.read_text(), "SIGHUP")
 
     def test_job_control_stops_and_resumes_the_child_group(self) -> None:
-        """Suspend an isolated wrapper and resume the child through SIGCONT."""
+        """SIGTSTP stops the Stage child group and a forwarded SIGCONT resumes it.
+
+        Only the child group's state is observed; this does not show that the
+        isolated wrapper suspends itself and returns control to a shell.
+        """
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             child_pid_path = directory / "child.pid"

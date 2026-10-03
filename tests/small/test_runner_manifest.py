@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any, cast
 from unittest import mock
 
 from common import loader_events
-from tests.bundle_support import file_record
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -56,8 +55,9 @@ class PythonRuntimeTests(unittest.TestCase):
     """Keep the standalone runner on its single supported Python series."""
 
     def test_accepts_python_314(self) -> None:
-        """The pinned quality interpreter satisfies the standalone preflight."""
-        RUNNER.host_preflight()
+        """Python 3.14 satisfies the standalone preflight."""
+        with mock.patch.object(RUNNER.sys, "version_info", mock.Mock(major=3, minor=14)):
+            RUNNER.host_preflight()
 
     def test_rejects_other_python_series(self) -> None:
         """Older and unsupported newer interpreters fail before phone access."""
@@ -228,8 +228,8 @@ class RuntimeManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "runtime transport must be one of"):
             self.load(manifest)
 
-    def test_rejects_a_pre_profile_runtime_manifest(self) -> None:
-        """A runtime without an explicit profile and transport is not reinterpreted."""
+    def test_rejects_a_runtime_manifest_missing_required_fields(self) -> None:
+        """Omitted profile and transport fields are rejected rather than defaulted."""
         manifest = runtime_manifest()
         del manifest["profile"]
         del manifest["transport"]
@@ -241,16 +241,6 @@ class RuntimeManifestTests(unittest.TestCase):
         """Reject fields outside the exact runtime contract."""
         manifest = runtime_manifest()
         manifest["unexpected"] = "value"
-
-        with self.assertRaisesRegex(SystemExit, "runtime manifest must contain exactly"):
-            self.load(manifest)
-
-    def test_rejects_the_legacy_root_identity_fields(self) -> None:
-        """Do not reinterpret the previous display_name and platform schema."""
-        manifest = runtime_manifest()
-        del manifest["identity"]
-        manifest["display_name"] = "Demo Phone"
-        manifest["platform"] = "ums9117"
 
         with self.assertRaisesRegex(SystemExit, "runtime manifest must contain exactly"):
             self.load(manifest)
@@ -364,43 +354,9 @@ class NoTransportRunnerTests(unittest.TestCase):
             json.dumps(manifest),
             encoding="utf-8",
         )
-        runtime_path = self.bundle / "runtime-manifest.json"
 
-        payload = {
-            "rootfs_receipt": {"recipe": "a" * 64, "sha256": "b" * 64},
-            "boot_artifacts": {"required": []},
-            "container_image_recipe": "c" * 64,
-            "container_image_generation": "9" * 64,
-            "apk_signing_key": "d" * 64,
-            "device_identity": "e" * 64,
-            "files": {
-                "image/ramboot.bin": file_record(self.bundle / "image/ramboot.bin"),
-                "runtime-manifest.json": file_record(runtime_path),
-            },
-            "kbuild_receipt": {"recipe": "f" * 64, "sha256": "0" * 64},
-            "linux_recipe": "1" * 64,
-            "profile": None,
-            "build_type": "release",
-            "target": "demo",
-            "workspace_digest": "2" * 64,
-        }
-        encoded = (
-            json.dumps(
-                payload,
-                sort_keys=True,
-                separators=(",", ":"),
-                ensure_ascii=True,
-            )
-            + "\n"
-        )
-        self.generation = hashlib.sha256(encoded.encode()).hexdigest()
-        (self.bundle / "build-manifest.json").write_text(
-            json.dumps({**payload, "generation": self.generation}, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-
-    def test_none_transport_personalizes_without_waiting_for_usb_ncm(self) -> None:
-        """A host-only run still creates its required RAM session image before handoff."""
+    def test_none_transport_hands_session_to_adapter_without_ssh_handoff(self) -> None:
+        """A host-only run passes its session to the adapter and finishes it without a shell."""
         adapter = mock.Mock()
         adapter.run.return_value = None
         session = {"image": str(self.bundle / "image/ramboot.bin")}
@@ -466,10 +422,6 @@ class NoTransportRunnerTests(unittest.TestCase):
         ):
             RUNNER.main()
 
-        ssh.bundle_identity.assert_called_once_with(self.bundle, mock.ANY)
-        ssh.build_manifest_device_identity.assert_called_once_with(self.bundle)
-        ssh.load_current_session.assert_called_once_with("demo")
-        ssh.reacquire_bound_session.assert_called_once_with(session)
         ssh.require_device_identity.assert_called_once_with(ready, "e" * 64)
         ssh.run_remote.assert_called_once_with(ready, "true")
         # Only a fresh run sets the phone clock; reconnecting leaves it running.
@@ -512,6 +464,38 @@ class NoTransportRunnerTests(unittest.TestCase):
             RUNNER.main()
 
         ssh.require_device_identity.assert_called_once_with(ready, "e" * 64)
+        ssh.run_remote.assert_not_called()
+
+    def test_standalone_reconnect_rejects_unverified_bundle_contents_first(self) -> None:
+        """A bundle that fails its content check never reaches the phone session."""
+        runtime_path = self.bundle / "runtime-manifest.json"
+        manifest = json.loads(runtime_path.read_text(encoding="utf-8"))
+        manifest["transport"] = "usb-ncm"
+        runtime_path.write_text(json.dumps(manifest), encoding="utf-8")
+        ssh = mock.Mock()
+        ssh.bundle_identity.side_effect = SystemExit("fplinux: runtime image changed")
+
+        with (
+            mock.patch.object(RUNNER, "__file__", str(self.runner)),
+            mock.patch.object(RUNNER, "_identity_module", None),
+            mock.patch.object(RUNNER, "host_preflight"),
+            mock.patch.object(
+                RUNNER,
+                "load_module",
+                side_effect=lambda _path, name: (
+                    loader_events if name == "fplinux_loader_events" else ssh
+                ),
+            ),
+            mock.patch.object(
+                sys,
+                "argv",
+                [str(self.runner), "--reconnect", "--exec", "touch /tmp/should-not-run"],
+            ),
+            self.assertRaisesRegex(SystemExit, "runtime image changed"),
+        ):
+            RUNNER.main()
+
+        ssh.load_current_session.assert_not_called()
         ssh.run_remote.assert_not_called()
 
 

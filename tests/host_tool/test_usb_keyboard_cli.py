@@ -37,7 +37,7 @@ class FPLinuxUsbKeyboardCliTests(unittest.TestCase):
             )
         except (FileNotFoundError, subprocess.CalledProcessError) as error:
             message = "pkg-config libusb-1.0 development files are required"
-            raise unittest.SkipTest(message) from error
+            raise RuntimeError(message) from error
 
         cls.temporary = tempfile.TemporaryDirectory(prefix="fplinux-usb-keyboard-cli-")
         cls.addClassCleanup(cls.temporary.cleanup)

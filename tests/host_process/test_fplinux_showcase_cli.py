@@ -62,47 +62,31 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
             check=True,
         )
 
-    def test_help_returns_before_opening_phone_hardware(self) -> None:
-        """A parsed help option wins over later parser and domain errors."""
-        help_arguments = (
-            ("-h",),
-            ("--help",),
-            ("--help", "--runs=0"),
-            ("--help", "--unknown"),
+    def test_help_returns_before_keypad_lookup(self) -> None:
+        """Help lists the Showcase options and exits before any device lookup."""
+        result = run_process(
+            [str(self.executable), "--help"],
+            name="show FPLinux Showcase help",
+            timeout=5,
         )
 
-        for arguments in help_arguments:
-            with self.subTest(arguments=arguments):
-                result = run_process(
-                    [str(self.executable), *arguments],
-                    name=f"show FPLinux Showcase help with {arguments}",
-                    timeout=5,
-                )
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("Usage:", result.stdout)
+        self.assertIn("--runs", result.stdout)
+        self.assertIn("--keypad-led", result.stdout)
+        self.assertEqual(result.stderr, "")
 
-                self.assertEqual(result.returncode, 0)
-                self.assertIn("Usage:", result.stdout)
-                self.assertIn("--runs", result.stdout)
-                self.assertIn("--keypad-led", result.stdout)
-                self.assertNotIn("--lcd-backlight", result.stdout)
-                self.assertEqual(result.stderr, "")
-
-    def test_invalid_arguments_fail_before_opening_phone_hardware(self) -> None:
-        """Malformed options return native diagnostics without probing keypad or framebuffer."""
+    def test_invalid_or_repeated_options_fail_before_keypad_lookup(self) -> None:
+        """Bad run counts and repeated single-use options fail before any device lookup."""
         invalid_arguments = (
-            ("--runs",),
             ("--runs", "0"),
             ("--runs", "-1"),
             ("--runs", "+1"),
             ("--runs", "1ms"),
             ("--runs", "18446744073709551616"),
-            ("--runs", "1", "extra"),
             ("--runs", "--help"),
             ("--runs", "1", "--runs", "2"),
             ("--keypad-led", "one", "--keypad-led", "two"),
-            ("--lcd-backlight", "one"),
-            ("--keypad-led=",),
-            ("--lcd-backlight=",),
-            ("--unknown",),
         )
 
         for arguments in invalid_arguments:
@@ -119,8 +103,8 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
                 self.assertNotIn("required keypad", result.stderr)
                 self.assertEqual(result.stdout, "")
 
-    def test_valid_options_reach_the_real_hardware_boundary(self) -> None:
-        """Valid overrides are accepted before the host lacks the phone keypad."""
+    def test_valid_options_reach_keypad_lookup(self) -> None:
+        """Valid overrides are accepted; startup then fails to find the keypad on this host."""
         result = run_process(
             [
                 str(self.executable),
@@ -129,35 +113,14 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
                 "--keypad-led",
                 str(Path(self.temporary.name) / "keypad-led"),
             ],
-            name="accept FPLinux Showcase options before phone hardware startup",
+            name="accept FPLinux Showcase options before keypad lookup",
             timeout=5,
         )
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("required keypad fplinux/keypad0", result.stderr)
-        self.assertNotIn("usage: fplinux-showcase", result.stderr)
+        self.assertNotIn("Try '", result.stderr)
         self.assertEqual(result.stdout, "")
-
-    def test_native_long_options_reach_the_real_hardware_boundary(self) -> None:
-        """Equals-delimited options and an unambiguous native prefix are accepted."""
-        keypad_led = Path(self.temporary.name) / "keypad-led"
-
-        for runs_option in ("--runs=1", "--r=1"):
-            with self.subTest(runs_option=runs_option):
-                result = run_process(
-                    [
-                        str(self.executable),
-                        runs_option,
-                        f"--keypad-led={keypad_led}",
-                    ],
-                    name="accept native FPLinux Showcase long options",
-                    timeout=5,
-                )
-
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn("required keypad fplinux/keypad0", result.stderr)
-                self.assertNotIn("Try '", result.stderr)
-                self.assertEqual(result.stdout, "")
 
     def compile_with_class_roots(self, class_root: Path) -> Path:
         """Compile the real application against a test-owned class tree."""

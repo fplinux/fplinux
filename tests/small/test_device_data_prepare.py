@@ -45,7 +45,16 @@ BOARD_MAPS = PreparedGroup(
 
 
 class DeviceDataPrepareTests(unittest.TestCase):
-    """Replace only phone access while exercising real staging and pointer publication."""
+    """Exercise real staging, receipts and pointer publication under a temporary root.
+
+    Stubbed: the target configuration (load_target); loading of the target parser and
+    platform board-map modules, replaced by in-test callables; PhysicalNand.from_dump
+    admission of the short dump; the current-build lookup where a build must exist;
+    and the loader build, RAM load and NAND backup. One case instead runs the real
+    build up to its offline rejection with stubbed release, workspace, image and Kern
+    inputs. Real target TOML, parser and platform module files, full-size dump
+    admission, real extraction and phone transport are not exercised.
+    """
 
     def setUp(self) -> None:
         """Create an isolated source root and immutable saved dump."""

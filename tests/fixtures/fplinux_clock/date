@@ -5,7 +5,6 @@
 # reporting a rejected clock_settime() while still exiting 0.
 # The host-process harness supplies the FPLINUX_TEST_* command contract.
 # shellcheck disable=SC2154
-printf 'date %s\n' "$*" >>"$FPLINUX_TEST_EVENTS"
 case "$*" in
 "-u -s @"*)
 	if [ "${FPLINUX_TEST_CLOCK_SET:-stored}" = ignored ]; then

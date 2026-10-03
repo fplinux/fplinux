@@ -52,6 +52,7 @@ class TestSelectionProcessTests(unittest.TestCase):
                 "FPLINUX_TEST_TRACE": str(self.trace),
                 "FPLINUX_TEST_FAIL": "1" if failing_fixture else "0",
                 "FPLINUX_LOG_ROOT": str(self.logs),
+                "FPLINUX_LOG_DISPLAY_ROOT": str(self.logs),
                 "FPLINUX_VERBOSE": "1" if "--verbose" in arguments else "0",
             },
             timeout=15,

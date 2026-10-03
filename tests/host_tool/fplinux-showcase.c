@@ -4,6 +4,7 @@
 #include "../../alpine/aports/fplinux-showcase/armada-scene.h"
 
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -94,8 +95,11 @@ static int output_cases_match(struct armada_scene *scene,
 		    ((expected->fields & EXPECT_CUE_ID) &&
 		     actual.cue_id != expected->cue_id) ||
 		    ((expected->fields & EXPECT_LCD_LEVEL) &&
-		     actual.lcd_level != expected->lcd_level))
+		     actual.lcd_level != expected->lcd_level)) {
+			fprintf(stderr, "outputs at frame %u differ\n",
+				(unsigned int)expected->frame);
 			return 0;
+		}
 	}
 	return 1;
 }
@@ -163,19 +167,28 @@ static int render_case(unsigned int width, unsigned int height,
 	uint16_t *pixels;
 	struct armada_scene *scene;
 	struct fplinux_font font = { 0 };
+	const char *check = "scene creation";
+	uint32_t frame = 0U;
 	size_t index;
 
-	if (!storage)
+	if (!storage) {
+		fprintf(stderr, "showcase %ux%u: out of memory\n", width,
+			height);
 		return EXIT_FAILURE;
+	}
 	for (index = 0; index < count + 2U * GUARD_PIXELS; ++index)
 		storage[index] = GUARD_VALUE;
 	pixels = storage + GUARD_PIXELS;
 	if (!fplinux_font_open(&font, font_path)) {
+		fprintf(stderr, "showcase %ux%u: cannot load font %s\n", width,
+			height, font_path);
 		free(storage);
 		return EXIT_FAILURE;
 	}
 	scene = armada_scene_create(width, height, pixels, &font);
 	if (!scene) {
+		fprintf(stderr, "showcase %ux%u: %s failed\n", width, height,
+			check);
 		fplinux_font_close(&font);
 		free(storage);
 		return EXIT_FAILURE;
@@ -186,6 +199,7 @@ static int render_case(unsigned int width, unsigned int height,
 
 		armada_scene_render(scene, 0U, &metrics, &outputs);
 		/* Complete solid glyphs prove both overlay lines fit their surfaces. */
+		check = "opening overlay layout";
 		if (color_count(pixels, width, height / 12U, glyph_height,
 				0xe7bfU) != (width == 128U ? 936U : 1664U) ||
 		    color_count(pixels, width, height - glyph_height - 2U,
@@ -193,6 +207,8 @@ static int render_case(unsigned int width, unsigned int height,
 				0x3f1fU) != (width == 128U ? 1296U : 2304U))
 			goto fail;
 		armada_scene_render(scene, 1020U, &metrics, &outputs);
+		frame = 1020U;
+		check = "closing overlay layout";
 		if (color_count(pixels, width, height * 3U / 4U, glyph_height,
 				0x3f1fU) != (width == 128U ? 720U : 1280U) ||
 		    color_count(pixels, width,
@@ -208,14 +224,17 @@ static int render_case(unsigned int width, unsigned int height,
 		uint64_t second_hash;
 		struct armada_scene *fresh;
 
+		frame = frames[index];
 		memset(pixels, 0, count * sizeof(*pixels));
 		armada_scene_render(scene, frames[index], &metrics,
 				    &first_outputs);
 		first_hash = frame_hash(pixels, count);
+		check = "guarded detailed render";
 		if (!guards_are_intact(storage, count) ||
 		    !frame_has_detail(pixels, count))
 			goto fail;
 		/* Playback, repeated frames and seeks must produce the same image/cues. */
+		check = "fresh scene creation";
 		fresh = armada_scene_create(width, height, pixels, &font);
 		if (!fresh)
 			goto fail;
@@ -225,6 +244,7 @@ static int render_case(unsigned int width, unsigned int height,
 				    &second_outputs);
 		armada_scene_destroy(fresh);
 		second_hash = frame_hash(pixels, count);
+		check = "repeatable render";
 		if (!guards_are_intact(storage, count) ||
 		    first_hash != second_hash ||
 		    memcmp(&first_outputs, &second_outputs,
@@ -237,6 +257,8 @@ static int render_case(unsigned int width, unsigned int height,
 		uint64_t first_hash;
 		uint64_t wrapped_hash;
 
+		frame = 0U;
+		check = "output cues";
 		if (!output_cases_match(scene, &metrics, output_expectations,
 					ARRAY_SIZE(output_expectations)))
 			goto fail;
@@ -247,6 +269,7 @@ static int render_case(unsigned int width, unsigned int height,
 		armada_scene_render(scene, ARMADA_DURATION_FRAMES, &metrics,
 				    &wrapped);
 		wrapped_hash = frame_hash(pixels, count);
+		check = "loop wrap";
 		if (first_hash != wrapped_hash ||
 		    memcmp(&first, &wrapped, sizeof(first)) != 0)
 			goto fail;
@@ -257,6 +280,8 @@ static int render_case(unsigned int width, unsigned int height,
 	return EXIT_SUCCESS;
 
 fail:
+	fprintf(stderr, "showcase %ux%u frame %u: %s failed\n", width, height,
+		(unsigned int)frame, check);
 	armada_scene_destroy(scene);
 	fplinux_font_close(&font);
 	free(storage);

@@ -1,4 +1,27 @@
 // SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Device doubles for the Showcase brightness host test. The test links this
+ * file with -Wl,--wrap=open,ioctl,read,write,connect, so only direct calls to
+ * those functions from the linked objects reach the wrappers below:
+ *
+ * - open() backs /dev/input/event0 (read-only keypad) and event1 (read-write
+ *   vibrator) with /dev/null and exits with status 2 when a path containing
+ *   "/backlight/" is opened;
+ * - ioctl() answers grab, physical path, event bits and force-feedback upload
+ *   and removal for those two descriptors, matching only the request number;
+ * - read() reports a right soft key press once one frame, or two with
+ *   SHOWCASE_EXTRA_FRAME set, has been presented;
+ * - write() discards vibrator events;
+ * - connect() redirects AF_UNIX connections to SHOWCASE_BRIGHTNESS_SOCKET.
+ *
+ * Strong fplinux_drm_session_* definitions replace the DRM and VT session with
+ * a 128x160 memory buffer. SHOWCASE_VT_CYCLE makes the second dispatch release
+ * and reacquire the display in one call.
+ *
+ * These doubles do not prove real evdev semantics, VT switching with an
+ * inactive interval, DRM page presentation or sysfs LED file behavior. The
+ * backlight guard does not see fopen(), openat() or calls made inside libc.
+ */
 #define _GNU_SOURCE
 
 #include "fplinux-drm-session.h"
@@ -153,20 +176,21 @@ int __wrap_ioctl(int fd, unsigned long request, ...)
 		errno = ENOTTY;
 		return -1;
 	}
-	if (number == 0x81 || number == 0x90)
+	if (number == _IOC_NR(EVIOCRMFF) || number == _IOC_NR(EVIOCGRAB))
 		return 0;
 	va_start(arguments, request);
 	value = va_arg(arguments, void *);
 	va_end(arguments);
-	if (number == 0x07) {
+	if (number == _IOC_NR(EVIOCGPHYS(0))) {
 		const char *phys = fd == keypad ? "fplinux/keypad0" :
 						  "fplinux/vibrator0";
 
 		snprintf(value, bytes, "%s", phys);
 		return (int)strlen(phys) + 1;
 	}
-	if (number >= 0x20 && number <= 0x20 + EV_MAX) {
-		unsigned int type = number - 0x20;
+	if (number >= _IOC_NR(EVIOCGBIT(0, 0)) &&
+	    number <= _IOC_NR(EVIOCGBIT(EV_MAX, 0))) {
+		unsigned int type = number - _IOC_NR(EVIOCGBIT(0, 0));
 		unsigned int bit = fd == keypad ? FPLINUX_KEY_SOFT_RIGHT :
 						  FF_RUMBLE;
 		unsigned char *bits = value;
@@ -181,7 +205,7 @@ int __wrap_ioctl(int fd, unsigned long request, ...)
 		}
 		return (int)bytes;
 	}
-	if (number == 0x80) {
+	if (number == _IOC_NR(EVIOCSFF)) {
 		((struct ff_effect *)value)->id = 1;
 		return 0;
 	}

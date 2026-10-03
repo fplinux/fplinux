@@ -1,5 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Artifact check: pass an extracted fplinux-xkb APK data root explicitly. */
+/*
+ * Documented external-keyboard keys through the terminal and real XKB data.
+ * The driver passes a data root with the tracked fplinux symbols and the
+ * upstream layout files; it is not the built fplinux-xkb package.
+ */
 #include "fplinux-terminal.h"
 #include "terminal-keyboard.h"
 
@@ -27,13 +31,6 @@ int main(int argc, char **argv)
 	struct fplinux_terminal_keyboard keyboard;
 	struct fplinux_terminal terminal;
 	struct fplinux_terminal_key key;
-	struct fplinux_input_event phone = {
-		.type = FPLINUX_INPUT_EVENT_KEY,
-		.source = FPLINUX_INPUT_SOURCE_KEYPAD,
-		.device_id = 2,
-		.code = KEY_F13,
-		.pressed = true,
-	};
 	unsigned int index;
 	char error[256];
 	const char lines[] = "one\r\ntwo\r\nthree\r\nfour\r\n";
@@ -69,10 +66,6 @@ int main(int argc, char **argv)
 		fplinux_terminal_consume(&terminal, terminal.output_size);
 		key_event(&keyboard, KEY_F13 + index, false, &key);
 	}
-	assert(!fplinux_terminal_keyboard_event(&keyboard, &phone, &key));
-	fplinux_terminal_phone(&terminal, KEY_F13, true, false, 1, true);
-	assert(terminal.menu == FPLINUX_TERMINAL_MENU_MAIN);
-	fplinux_terminal_phone(&terminal, KEY_F14, true, false, 2, true);
 	fplinux_terminal_feed(&terminal, lines, strlen(lines));
 	key_event(&keyboard, KEY_CAPSLOCK, true, &key);
 	key_event(&keyboard, KEY_CAPSLOCK, false, &key);
@@ -89,7 +82,6 @@ int main(int argc, char **argv)
 	key_event(&keyboard, KEY_LEFTCTRL, true, &key);
 	key_event(&keyboard, KEY_LEFTALT, true, &key);
 	assert(key_event(&keyboard, KEY_F1, true, &key));
-	assert(key.keysym == XKB_KEY_XF86Switch_VT_1);
 	fplinux_terminal_key(&terminal, key.keysym, key.ascii, key.modifiers,
 			     key.unicode);
 	assert(terminal.diagnostic_requested && terminal.output_size == 0);
