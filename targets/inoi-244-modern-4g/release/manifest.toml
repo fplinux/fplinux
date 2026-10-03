@@ -16,6 +16,7 @@ bundle_files = [
   "runner/ssh_transport.py",
   "runtime-manifest.json",
   "apks/fplinux-brightness-ui.apk",
+  "apks/fplinux-ffmpeg.apk",
   "apks/fplinux-ncurses-curses.apk",
   "apks/fplinux-tyrquake.apk",
   "apks/fplinux-charge.apk",

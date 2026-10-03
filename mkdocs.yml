@@ -129,6 +129,7 @@ nav:
       - docs/apps/TYRQUAKE.md
       - docs/apps/ROTATE.md
       - docs/apps/JPEG.md
+      - docs/apps/FFMPEG.md
       - docs/apps/PRESENT.md
   - Contributing:
       - Code style:

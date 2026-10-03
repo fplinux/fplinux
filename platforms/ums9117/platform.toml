@@ -28,6 +28,7 @@ packages = [
 packages = [
   "fplinux-brightness-ui",
   "fplinux-charge",
+  "fplinux-ffmpeg",
   "fplinux-ncurses-curses",
   "fplinux-showcase",
   "fplinux-tyrquake",
