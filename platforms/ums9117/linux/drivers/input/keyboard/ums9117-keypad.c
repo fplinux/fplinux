@@ -23,6 +23,7 @@
 #include <linux/module.h>
 #include <linux/notifier.h>
 #include <linux/of.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/platform_device.h>
 #include <linux/pm.h>
 #include <linux/pm_wakeup.h>
@@ -87,6 +88,8 @@ struct ums9117_keypad {
 	struct device *dev;
 	void __iomem *kpd;
 	struct regmap *aon_apb;
+	struct pinctrl *pinctrl;
+	struct pinctrl_state *pins;
 	struct input_dev *input;
 	int matrix_irq;
 	struct ums9117_keypad_eic_key eic1;
@@ -297,6 +300,10 @@ static int ums9117_keypad_hw_init(struct ums9117_keypad *keypad)
 		return dev_err_probe(
 			keypad->dev, ret,
 			"keymap does not select usable controller lines\n");
+	ret = pinctrl_select_state(keypad->pinctrl, keypad->pins);
+	if (ret)
+		return dev_err_probe(keypad->dev, ret,
+				     "cannot select matrix pins\n");
 
 	/* Exact UMS9117 gate/reset sequence used by fpdoom. */
 	ret = regmap_write(keypad->aon_apb, UMS9117_AON_APB_PWR_SET, 0x100);
@@ -609,6 +616,14 @@ static int ums9117_keypad_probe(struct platform_device *pdev)
 	if (!keypad)
 		return -ENOMEM;
 	keypad->dev = dev;
+	keypad->pinctrl = devm_pinctrl_get(dev);
+	if (IS_ERR(keypad->pinctrl))
+		return dev_err_probe(dev, PTR_ERR(keypad->pinctrl),
+				     "cannot acquire matrix pins\n");
+	keypad->pins = pinctrl_lookup_state(keypad->pinctrl, "matrix");
+	if (IS_ERR(keypad->pins))
+		return dev_err_probe(dev, PTR_ERR(keypad->pins),
+				     "missing matrix pin state\n");
 
 	keypad->kpd = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(keypad->kpd))

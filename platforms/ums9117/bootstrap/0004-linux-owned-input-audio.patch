@@ -1,0 +1,114 @@
+--- a/ums9117/syscode.c
++++ b/ums9117/syscode.c
+@@ -113,7 +113,28 @@
+ 		if (addr - 0x40608000 < 0x1000) {
+ 			adi_write(addr, val & 0xffff);
+ 		} else if (addr - 0x402a0000 < 0x1000) {
+-			MEM4(addr) = val;
++			/* Linux programs the audio and matrix pins. */
++			switch (addr & ~0x400U) {
++			case 0x402a0088:
++			case 0x402a008c:
++			case 0x402a0090:
++			case 0x402a0094:
++			case 0x402a0098:
++			case 0x402a009c:
++			case 0x402a00a0:
++			case 0x402a00a4:
++			case 0x402a00a8:
++			case 0x402a00ac:
++			case 0x402a00f0:
++			case 0x402a00f8:
++			case 0x402a00fc:
++			case 0x402a0104:
++			case 0x402a0108:
++			case 0x402a010c:
++				break;
++			default:
++				MEM4(addr) = val;
++			}
+ 		} else break;
+ 	}
+ 	MEM4(0x402a0018) &= 0xe0000000;
+@@ -620,63 +641,6 @@
+
+ int keypad_read_pb(void) {
+ 	return eic_read() >> EIC_PB ^ 1;
+-}
+-
+-static void eic_enable(void) {
+-	adi_write_or(0x406080c8, 0x10);
+-	adi_write(0x40608298, 0);
+-	adi_write_or(0x40608c08, 8);
+-	adi_write_or(0x40608e40, 1);
+-	adi_write_or(0x40608c10, 8);
+-	{
+-		int mask = 1 << EIC_PB;
+-		if (sys_data.eic9_key) mask |= 1 << 9;
+-		eic_mask_or(mask);
+-	}
+-}
+-
+-static void keypad_init(void) {
+-	keypad_base_t *kpd = KEYPAD_BASE;
+-	short *keymap = sys_data.keymap_addr;
+-	int i, j, row = 0, col = 0, ctrl;
+-	int nrow = sys_data.keyrows;
+-	int ncol = sys_data.keycols;
+-
+-	for (i = 0; i < ncol; i++)
+-	for (j = 0; j < nrow; j++)
+-		if (keymap[i * nrow + j] != -1)
+-			col |= 1 << i, row |= 1 << j;
+-
+-	row &= 0xfc; col &= 0xfc;
+-
+-	//DBG_LOG("keypad: row_mask = 0x%02x, col_mask = 0x%02x\n", row, col);
+-
+-	APB_CR(0x1000) = 0x100; // APB_PWR_ON
+-	APB_CR(0x1010) = 2;
+-
+-	// reset
+-	APB_CR(0x1008) = 0x100;
+-	DELAY(1000)
+-	APB_CR(0x2008) = 0x100;
+-	DELAY(1000)
+-
+-	kpd->int_clr = 0xfff;
+-	kpd->clk_divide = 1;
+-	kpd->debounce = 16;
+-	kpd->int_en = 0xfff;
+-	kpd->polarity = 0xffff;
+-
+-	ctrl = kpd->ctrl;
+-	//DBG_LOG("keypad: ctrl = %08x\n", ctrl);
+-	ctrl |= 1; // enable
+-	ctrl &= ~2; // sleep
+-	ctrl |= 4; // long
+-	ctrl &= ~0xfcfc00;
+-	ctrl |=	row << 16 | col << 8;
+-	kpd->ctrl = ctrl;
+-
+-	// Required to check the status of the power button.
+-	eic_enable();
+ }
+
+ int sys_event(int *rkey) {
+@@ -769,17 +733,11 @@
+ 		backlight_init();
+ 	}
+
+-	if (sys_data.keymap_addr) {
+-		keypad_init();
+-		keytrn_init();
+-	}
+ 	sys_data.init_done = 1;
+ }
+
+ void sys_start(void) {
+ 	sys_brightness(sys_data.brightness);
+-	if (sys_data.keymap_addr)
+-		KEYPAD_BASE->int_clr = 0xfff;
+ }
+
+ void sys_exit(void) {

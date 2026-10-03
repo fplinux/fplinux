@@ -6,7 +6,9 @@
 #include <linux/iopoll.h>
 #include <linux/kconfig.h>
 #include <linux/mfd/syscon.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
 
@@ -20,11 +22,13 @@
 #define UMS9117_AUDIO_GATES GENMASK(19, 17)
 #define UMS9117_AUDIO_RESETS GENMASK(20, 18)
 #define UMS9117_AUDIO_OWNERS (GENMASK(19, 18) | GENMASK(11, 10) | GENMASK(5, 4))
+#define UMS9117_CAPTURE_OWNERS (GENMASK(13, 12) | GENMASK(7, 6))
 
 #define UMS9117_CLK_AUD 0x00
 #define UMS9117_CLK_AUDIF 0x04
 #define UMS9117_CLK_VBC 0x08
 #define UMS9117_CLK_DA0 0x0c
+#define UMS9117_CLK_AD0 0x10
 
 #define UMS9117_IIS_MATRIX_INF2 GENMASK(3, 2)
 #define UMS9117_IIS_MATRIX_INF3 GENMASK(5, 4)
@@ -148,6 +152,8 @@
 struct ums9117_audio {
 	struct device *dev;
 	struct regmap *aon;
+	struct pinctrl *pinctrl;
+	struct pinctrl_state *pins;
 	void __iomem *aud;
 	void __iomem *vbc;
 	void __iomem *clk;
@@ -784,8 +790,9 @@ void ums9117_audio_release_capture(struct ums9117_audio *audio)
 		release_clocks(audio);
 }
 
-static int check_clocks(struct ums9117_audio *audio)
+static int check_idle_hardware(struct ums9117_audio *audio)
 {
+	u32 owners = UMS9117_AUDIO_OWNERS;
 	unsigned int value;
 	int ret;
 
@@ -797,12 +804,20 @@ static int check_clocks(struct ums9117_audio *audio)
 	ret = regmap_read(audio->aon, UMS9117_AON_VBC_CTRL, &value);
 	if (ret)
 		return ret;
-	if (value & UMS9117_AUDIO_OWNERS)
+	if (device_property_read_bool(audio->dev, "fplinux,microphone-capture"))
+		owners |= UMS9117_CAPTURE_OWNERS;
+	if (value & owners)
 		return -EBUSY;
-	if ((readl(audio->clk + UMS9117_CLK_AUD) & BIT(0)) ||
-	    (readl(audio->clk + UMS9117_CLK_AUDIF) & GENMASK(1, 0)) ||
-	    (readl(audio->clk + UMS9117_CLK_VBC) & BIT(0)) ||
-	    (readl(audio->clk + UMS9117_CLK_DA0) & BIT(16)))
+	ret = regmap_read(audio->aon, UMS9117_AON_EB0, &value);
+	if (ret)
+		return ret;
+	/* Disabled modules need no register reads to establish inactivity. */
+	if ((value & BIT(18)) &&
+	    (readl(audio->aud + UMS9117_AUD_TOP) & GENMASK(3, 0)))
+		return -EBUSY;
+	if ((value & BIT(19)) &&
+	    ((readl(audio->vbc + UMS9117_VBC_ENABLE) & GENMASK(15, 0)) ||
+	     (readl(audio->vbc + UMS9117_VBC_CHANNELS) & GENMASK(7, 0))))
 		return -EBUSY;
 	return 0;
 }
@@ -827,10 +842,21 @@ static int prepare_clocks(struct ums9117_audio *audio)
 
 	if (audio->prepared)
 		return 0;
-	ret = check_clocks(audio);
+	ret = check_idle_hardware(audio);
+	if (ret)
+		return dev_err_probe(
+			audio->dev, ret,
+			"audio hardware is active or owned elsewhere\n");
+	ret = pinctrl_select_state(audio->pinctrl, audio->pins);
 	if (ret)
 		return dev_err_probe(audio->dev, ret,
-				     "audio clocks or ownership unavailable\n");
+				     "cannot select audio pins\n");
+	update_bits(audio->clk, UMS9117_CLK_AUD, BIT(0), 0);
+	update_bits(audio->clk, UMS9117_CLK_AUDIF, GENMASK(1, 0), 0);
+	update_bits(audio->clk, UMS9117_CLK_VBC, BIT(0), 0);
+	update_bits(audio->clk, UMS9117_CLK_DA0, BIT(16), 0);
+	if (device_property_read_bool(audio->dev, "fplinux,microphone-capture"))
+		update_bits(audio->clk, UMS9117_CLK_AD0, BIT(16), 0);
 	ret = regmap_read(audio->aon, UMS9117_AON_EB0, &value);
 	if (ret)
 		return ret;
@@ -1007,6 +1033,15 @@ struct ums9117_audio *ums9117_audio_create(struct platform_device *pdev)
 	if (!audio)
 		return ERR_PTR(-ENOMEM);
 	audio->dev = &pdev->dev;
+	audio->pinctrl = devm_pinctrl_get(&pdev->dev);
+	if (IS_ERR(audio->pinctrl))
+		return ERR_PTR(dev_err_probe(&pdev->dev,
+					     PTR_ERR(audio->pinctrl),
+					     "cannot acquire audio pins\n"));
+	audio->pins = pinctrl_lookup_state(audio->pinctrl, "audio");
+	if (IS_ERR(audio->pins))
+		return ERR_PTR(dev_err_probe(&pdev->dev, PTR_ERR(audio->pins),
+					     "missing audio pin state\n"));
 	audio->aud = devm_platform_ioremap_resource_byname(pdev, "aud");
 	if (IS_ERR(audio->aud))
 		return ERR_CAST(audio->aud);

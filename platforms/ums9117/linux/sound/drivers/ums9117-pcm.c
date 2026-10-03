@@ -3,7 +3,6 @@
 #include <linux/firmware.h>
 #include <linux/hrtimer.h>
 #include <linux/input.h>
-#include <linux/io.h>
 #include <linux/jiffies.h>
 #include <linux/kconfig.h>
 #include <linux/kernel.h>
@@ -61,9 +60,6 @@
 #define UMS9117_PCM_NAME "UMS9117 Headphones"
 #define UMS9117_PCM_OUTPUTS_BOTH \
 	(UMS9117_SC2720_OUTPUT_HEADPHONES | UMS9117_SC2720_OUTPUT_SPEAKER)
-#define UMS9117_AUDIO_PAD_COUNT 4U
-#define UMS9117_CAPTURE_PAD_COUNT 2U
-#define UMS9117_AUDIO_PAD_CELLS 3U
 
 #define UMS9117_AUDIO_PROFILE_MAGIC_SIZE 8U
 #define UMS9117_AUDIO_PROFILE_COMPATIBLE_SIZE 24U
@@ -121,24 +117,6 @@ struct ums9117_audio_profile_data {
 	u8 compatible[UMS9117_AUDIO_PROFILE_COMPATIBLE_SIZE];
 	u8 headphone_pga;
 	u8 dac_gain[UMS9117_AUDIO_PROFILE_LEVEL_COUNT];
-};
-
-struct ums9117_audio_pad {
-	u32 offset;
-	u32 mux;
-	u32 config;
-};
-
-static const char *const ums9117_audio_pad_names[UMS9117_AUDIO_PAD_COUNT] = {
-	"SCLK",
-	"DASYNC",
-	"DAD0",
-	"DAD1",
-};
-
-static const char *const ums9117_capture_pad_names[UMS9117_CAPTURE_PAD_COUNT] = {
-	"ADSYNC",
-	"ADD0",
 };
 
 struct ums9117_audio_profile {
@@ -200,16 +178,12 @@ struct ums9117_pcm {
 	struct ums9117_audio *digital;
 	struct ums9117_sc2720_codec *codec;
 	struct ums9117_jack *jack;
-	void __iomem *pinmux;
-	void __iomem *pinconf;
 	struct task_struct *thread;
 	wait_queue_head_t thread_wait;
 	struct hrtimer timer;
 	/* Serializes the hardware lifecycle; the timer never takes it. */
 	struct mutex lock;
 	unsigned int rate;
-	struct ums9117_audio_pad pads[UMS9117_AUDIO_PAD_COUNT];
-	struct ums9117_audio_pad capture_pads[UMS9117_CAPTURE_PAD_COUNT];
 	struct ums9117_audio_profile profile;
 	struct ums9117_vibrator vibrator;
 	unsigned int volume_left;
@@ -838,60 +812,6 @@ static int ums9117_pcm_stop_playback_locked(struct ums9117_pcm *audio)
 	return 0;
 }
 
-static int ums9117_pcm_validate_pads(struct ums9117_pcm *audio,
-				     const struct ums9117_audio_pad *pads,
-				     const char *const *names,
-				     unsigned int count)
-{
-	unsigned int i;
-
-	for (i = 0; i < count; i++) {
-		const struct ums9117_audio_pad *pad = &pads[i];
-		u32 mux = readl(audio->pinmux + pad->offset);
-		u32 config = readl(audio->pinconf + pad->offset);
-
-		if (mux == pad->mux && config == pad->config)
-			continue;
-		dev_err(audio->dev,
-			"audio pad %s unavailable: mux=%#x config=%#x\n",
-			names[i], mux, config);
-		return -EBUSY;
-	}
-	return 0;
-}
-
-static int ums9117_pcm_read_pads(struct device *dev,
-				 struct ums9117_audio_pad *pads,
-				 const char *property, const char *const *names,
-				 unsigned int count,
-				 resource_size_t pinmux_size,
-				 resource_size_t pinconf_size)
-{
-	u32 settings[UMS9117_AUDIO_PAD_COUNT * UMS9117_AUDIO_PAD_CELLS];
-	unsigned int i;
-	int ret;
-
-	ret = device_property_read_u32_array(dev, property, settings,
-					     count * UMS9117_AUDIO_PAD_CELLS);
-	if (ret)
-		return dev_err_probe(dev, ret, "invalid audio pad settings\n");
-	for (i = 0; i < count; i++) {
-		unsigned int base = i * UMS9117_AUDIO_PAD_CELLS;
-
-		pads[i].offset = settings[base];
-		pads[i].mux = settings[base + 1];
-		pads[i].config = settings[base + 2];
-		if (!IS_ALIGNED(pads[i].offset, sizeof(u32)) ||
-		    pads[i].offset > pinmux_size - sizeof(u32) ||
-		    pads[i].offset > pinconf_size - sizeof(u32))
-			return dev_err_probe(
-				dev, -EINVAL,
-				"audio pad %s offset %#x is outside its resources\n",
-				names[i], pads[i].offset);
-	}
-	return 0;
-}
-
 static u16 ums9117_pcm_route_pa_word(const struct ums9117_pcm *audio)
 {
 	if (audio->outputs == UMS9117_PCM_OUTPUTS_BOTH)
@@ -976,11 +896,6 @@ static int ums9117_pcm_prepare_hardware_locked(struct ums9117_pcm *audio,
 	if ((audio->outputs & UMS9117_SC2720_OUTPUT_SPEAKER) &&
 	    !audio->profile.fitted)
 		return -ENODEV;
-	ret = ums9117_pcm_validate_pads(audio, audio->pads,
-					ums9117_audio_pad_names,
-					ARRAY_SIZE(audio->pads));
-	if (ret)
-		goto failed;
 	if (fm)
 		ret = ums9117_audio_prepare_fm(audio->digital);
 	else
@@ -1015,16 +930,6 @@ static int ums9117_pcm_prepare_capture_locked(struct ums9117_pcm *audio)
 	int ret;
 
 	ret = ums9117_pcm_shutdown_capture_locked(audio);
-	if (ret)
-		return ret;
-	ret = ums9117_pcm_validate_pads(audio, audio->pads,
-					ums9117_audio_pad_names,
-					ARRAY_SIZE(audio->pads));
-	if (ret)
-		return ret;
-	ret = ums9117_pcm_validate_pads(audio, audio->capture_pads,
-					ums9117_capture_pad_names,
-					ARRAY_SIZE(audio->capture_pads));
 	if (ret)
 		return ret;
 	ret = ums9117_audio_prepare_capture(audio->digital);
@@ -2566,8 +2471,6 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 {
 	const struct snd_kcontrol_new *volume_control;
 	const char *card_longname;
-	struct resource *pinmux_resource;
-	struct resource *pinconf_resource;
 	struct ums9117_pcm *audio;
 	struct snd_card *card;
 	struct snd_pcm *pcm;
@@ -2603,46 +2506,13 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 	if (ret)
 		return dev_err_probe(&pdev->dev, ret,
 				     "invalid audio card long name\n");
-	pinmux_resource =
-		platform_get_resource_byname(pdev, IORESOURCE_MEM, "pinmux");
-	pinconf_resource =
-		platform_get_resource_byname(pdev, IORESOURCE_MEM, "pinconf");
-	if (!pinmux_resource || !pinconf_resource ||
-	    resource_size(pinmux_resource) < sizeof(u32) ||
-	    resource_size(pinconf_resource) < sizeof(u32))
-		return dev_err_probe(&pdev->dev, -EINVAL,
-				     "invalid audio pad resources\n");
-	ret = ums9117_pcm_read_pads(&pdev->dev, audio->pads,
-				    "fplinux,pad-settings",
-				    ums9117_audio_pad_names,
-				    ARRAY_SIZE(audio->pads),
-				    resource_size(pinmux_resource),
-				    resource_size(pinconf_resource));
-	if (ret)
-		return ret;
-	audio->capture_supported = device_property_present(
-		&pdev->dev, "fplinux,capture-pad-settings");
-	if (audio->capture_supported) {
-		ret = ums9117_pcm_read_pads(&pdev->dev, audio->capture_pads,
-					    "fplinux,capture-pad-settings",
-					    ums9117_capture_pad_names,
-					    ARRAY_SIZE(audio->capture_pads),
-					    resource_size(pinmux_resource),
-					    resource_size(pinconf_resource));
-		if (ret)
-			return ret;
-	}
+	audio->capture_supported = device_property_read_bool(
+		&pdev->dev, "fplinux,microphone-capture");
 	audio->speaker_vibration = device_property_read_bool(
 		&pdev->dev, "fplinux,speaker-vibration");
 	ret = ums9117_pcm_load_audio_profile(audio);
 	if (ret)
 		return ret;
-	audio->pinmux = devm_ioremap_resource(&pdev->dev, pinmux_resource);
-	if (IS_ERR(audio->pinmux))
-		return PTR_ERR(audio->pinmux);
-	audio->pinconf = devm_ioremap_resource(&pdev->dev, pinconf_resource);
-	if (IS_ERR(audio->pinconf))
-		return PTR_ERR(audio->pinconf);
 	audio->digital = ums9117_audio_create(pdev);
 	if (IS_ERR(audio->digital))
 		return PTR_ERR(audio->digital);

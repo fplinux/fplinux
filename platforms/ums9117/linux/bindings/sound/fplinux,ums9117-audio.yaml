@@ -12,9 +12,9 @@ maintainers:
 description: |
   24 kHz and 48 kHz stereo S16_LE ALSA PCM device using the UMS9117 AUD and
   VBC register blocks and the SC2720 codec. Enabled boards provide
-  their fitted audio-pad expectations in SCLK, DASYNC, DAD0 and DAD1 order.
-  Boards with a handset microphone on SC2720 MIC1 can also provide ADSYNC and
-  ADD0 pad expectations to expose 48 kHz mono S16_LE capture. Playback and
+  their fitted SCLK, DASYNC, DAD0 and DAD1 pins through an audio pinctrl state.
+  Boards with a handset microphone on SC2720 MIC1 also configure ADSYNC and
+  ADD0 and enable 48 kHz mono S16_LE capture. Playback and
   capture can run together at 48 kHz.
 
 properties:
@@ -25,9 +25,7 @@ properties:
     items:
       - description: AUD register block
       - description: VBC register block
-      - description: Inherited audio clock registers
-      - description: Audio pin mux registers
-      - description: Audio pin configuration registers
+      - description: Audio clock selector registers
       - description: IIS matrix routing register
 
   reg-names:
@@ -35,8 +33,6 @@ properties:
       - const: aud
       - const: vbc
       - const: clk1
-      - const: pinmux
-      - const: pinconf
       - const: iis-matrix
 
   fplinux,aon-apb:
@@ -67,13 +63,18 @@ properties:
     $ref: /schemas/types.yaml#/definitions/string
     description: ALSA card long name for the fitted phone.
 
-  fplinux,pad-settings:
-    $ref: /schemas/types.yaml#/definitions/uint32-array
-    minItems: 12
-    maxItems: 12
+  pinctrl-names:
+    items:
+      - const: audio
+
+  pinctrl-0: true
+
+  fplinux,microphone-capture:
+    type: boolean
     description: |
-      Four board-owned triples containing register offset, mux value and pad
-      configuration for SCLK, DASYNC, DAD0 and DAD1, in that order.
+      The handset microphone is connected to SC2720 MIC1. Its ADSYNC and ADD0
+      pins are included in the audio pinctrl state. Expose 48 kHz mono S16_LE
+      capture; simultaneous playback uses 48 kHz.
 
   fplinux,speaker-vibration:
     type: boolean
@@ -81,15 +82,6 @@ properties:
       The speaker also vibrates the phone, which has no separate vibration
       motor. Expose a force-feedback vibrator that plays the fitted vibrate
       tone through the speaker amplifier.
-
-  fplinux,capture-pad-settings:
-    $ref: /schemas/types.yaml#/definitions/uint32-array
-    minItems: 6
-    maxItems: 6
-    description: |
-      Two board-owned triples containing register offset, mux value and pad
-      configuration for ADSYNC and ADD0, in that order. Their presence enables
-      handset microphone capture; the driver verifies inherited pad settings.
 
   hp-det-gpios:
     maxItems: 1
@@ -123,7 +115,8 @@ allOf:
         - status
     then:
       required:
-        - fplinux,pad-settings
+        - pinctrl-names
+        - pinctrl-0
         - fplinux,card-longname
 
 additionalProperties: false
@@ -133,20 +126,14 @@ examples:
     audio@40000000 {
         compatible = "fplinux,ums9117-audio";
         reg = <0x40000000 0x1000>, <0x40020000 0x2000>,
-              <0x402d0258 0x18>, <0x402a00f0 0x20>,
-              <0x402a04f0 0x20>, <0x402a0004 0x4>;
-        reg-names = "aud", "vbc", "clk1", "pinmux", "pinconf",
-                    "iis-matrix";
+              <0x402d0258 0x18>, <0x402a0004 0x4>;
+        reg-names = "aud", "vbc", "clk1", "iis-matrix";
         fplinux,aon-apb = <&aon_apb>;
         sprd,pmic = <&sc2720_pmic>;
         clocks = <&sc2720_xtal>;
         clock-names = "xtal";
-        fplinux,pad-settings = <
-            0x00 0 0x0008e001
-            0x08 0 0x0008e001
-            0x0c 0 0x0008e001
-            0x1c 0 0x0008e001
-        >;
+        pinctrl-names = "audio";
+        pinctrl-0 = <&audio_mux_pins &audio_pad_pins>;
         fplinux,card-longname = "Nokia TA-1618 headphone output";
         status = "okay";
     };

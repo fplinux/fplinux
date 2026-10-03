@@ -39,6 +39,12 @@ properties:
     $ref: /schemas/types.yaml#/definitions/phandle
     description: AON APB syscon that gates and resets the keypad controller.
 
+  pinctrl-names:
+    items:
+      - const: matrix
+
+  pinctrl-0: true
+
   wakeup-source:
     description: The target-owned EIC1 power key can wake system sleep.
     type: boolean
@@ -73,6 +79,8 @@ required:
   - keypad,num-columns
   - linux,keymap
   - sprd,aon-apb
+  - pinctrl-names
+  - pinctrl-0
 dependencies:
   eic1-gpios: ["sprd,eic1-keycode"]
   "sprd,eic1-keycode": [eic1-gpios]
@@ -103,4 +111,6 @@ examples:
             MATRIX_KEY(0, 3, FPLINUX_KEY_OK)
         >;
         sprd,aon-apb = <&aon_apb>;
+        pinctrl-names = "matrix";
+        pinctrl-0 = <&keypad_mux_pins &keypad_pad_pins>;
     };
