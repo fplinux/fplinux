@@ -68,10 +68,21 @@ static SPRD_SC_GATE_CLK_NO_PARENT(thm_rtc_eb, "thm-rtc-eb", 0x10,
 				  UMS9117_GATE_SC_OFFSET, BIT(10), 0, 0);
 static SPRD_SC_GATE_CLK_NO_PARENT(gpio_eb, "gpio-eb", 0x0,
 				  UMS9117_GATE_SC_OFFSET, BIT(3), 0, 0);
+/* These clocks also serve the coprocessor EIC banks. */
+static SPRD_SC_GATE_CLK_NO_PARENT(eic_eb, "eic-eb", 0x0, UMS9117_GATE_SC_OFFSET,
+				  BIT(14), CLK_IS_CRITICAL, 0);
+static SPRD_SC_GATE_CLK_NO_PARENT(eic_rtc_eb, "eic-rtc-eb", 0x10,
+				  UMS9117_GATE_SC_OFFSET, BIT(6),
+				  CLK_IS_CRITICAL, 0);
+static SPRD_SC_GATE_CLK_NO_PARENT(eic_rtcdv5_eb, "eic-rtcdv5-eb", 0x10,
+				  UMS9117_GATE_SC_OFFSET, BIT(7),
+				  CLK_IS_CRITICAL, 0);
 
 static struct sprd_clk_common *ums9117_aonapb_gate_clks[] = {
-	&adi_eb.common,	 &splk_eb.common,    &efuse_eb.common, &mbox_eb.common,
-	&thm1_eb.common, &thm_rtc_eb.common, &gpio_eb.common,
+	&adi_eb.common,	       &splk_eb.common, &efuse_eb.common,
+	&mbox_eb.common,       &thm1_eb.common, &thm_rtc_eb.common,
+	&gpio_eb.common,       &eic_eb.common,	&eic_rtc_eb.common,
+	&eic_rtcdv5_eb.common,
 };
 
 static struct clk_hw_onecell_data ums9117_aonapb_gate_hws = {
@@ -83,6 +94,9 @@ static struct clk_hw_onecell_data ums9117_aonapb_gate_hws = {
 		[CLK_THM1_EB] = &thm1_eb.common.hw,
 		[CLK_THM_RTC_EB] = &thm_rtc_eb.common.hw,
 		[CLK_GPIO_EB] = &gpio_eb.common.hw,
+		[CLK_EIC_EB] = &eic_eb.common.hw,
+		[CLK_EIC_RTC_EB] = &eic_rtc_eb.common.hw,
+		[CLK_EIC_RTCDV5_EB] = &eic_rtcdv5_eb.common.hw,
 	},
 	.num = CLK_AON_APB_GATE_NUM,
 };
@@ -503,67 +517,6 @@ static const struct of_device_id ums9117_clk_ids[] = {
 };
 MODULE_DEVICE_TABLE(of, ums9117_clk_ids);
 
-static int ums9117_preserve_boot_enabled_gates(struct device *dev,
-					       const struct sprd_clk_desc *desc)
-{
-	struct clk_init_data *critical_inits;
-	struct sprd_clk_common *common;
-	const struct clk_init_data *init;
-	struct clk_hw *hw;
-	unsigned long boot_enabled_mask = 0;
-	unsigned long critical_count = 0;
-	unsigned long critical_index = 0;
-	unsigned long index;
-	int enabled;
-
-	if (desc->num_clk_clks > BITS_PER_LONG)
-		return -E2BIG;
-	for (index = 0; index < desc->num_clk_clks; index++) {
-		common = desc->clk_clks[index];
-		if (!common)
-			continue;
-		hw = &common->hw;
-		init = hw->init;
-		if (!init || init->ops != &sprd_sc_gate_ops ||
-		    (init->flags & CLK_IS_CRITICAL))
-			continue;
-
-		/*
-		 * clk_hw_is_enabled() requires the core created by registration.
-		 * The SC-gate callback only needs the regmap assigned above.
-		 */
-		enabled = init->ops->is_enabled(hw);
-		if (enabled < 0)
-			return enabled;
-		if (enabled) {
-			boot_enabled_mask |= BIT(index);
-			critical_count++;
-		}
-	}
-	if (!critical_count)
-		return 0;
-
-	critical_inits = devm_kcalloc(dev, critical_count,
-				      sizeof(*critical_inits), GFP_KERNEL);
-	if (!critical_inits)
-		return -ENOMEM;
-
-	for (index = 0; index < desc->num_clk_clks; index++) {
-		if (!(boot_enabled_mask & BIT(index)))
-			continue;
-		common = desc->clk_clks[index];
-		hw = &common->hw;
-		init = hw->init;
-
-		critical_inits[critical_index] = *init;
-		critical_inits[critical_index].flags |= CLK_IS_CRITICAL;
-		hw->init = &critical_inits[critical_index];
-		critical_index++;
-	}
-
-	return 0;
-}
-
 static int ums9117_clk_probe(struct platform_device *pdev)
 {
 	const struct sprd_clk_desc *desc;
@@ -594,9 +547,6 @@ static int ums9117_clk_probe(struct platform_device *pdev)
 	}
 	if (desc == &ums9117_ap_clk_desc)
 		sdio0_clk.dev = &pdev->dev;
-	ret = ums9117_preserve_boot_enabled_gates(&pdev->dev, desc);
-	if (ret)
-		return ret;
 
 	return sprd_clk_probe(&pdev->dev, desc->hw_clks);
 }
