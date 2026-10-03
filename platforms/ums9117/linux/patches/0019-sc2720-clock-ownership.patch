@@ -1,0 +1,278 @@
+diff --git a/drivers/gpio/gpio-pmic-eic-sprd.c b/drivers/gpio/gpio-pmic-eic-sprd.c
+index f6779f7..0edb75a 100644
+--- a/drivers/gpio/gpio-pmic-eic-sprd.c
++++ b/drivers/gpio/gpio-pmic-eic-sprd.c
+@@ -23,6 +23,12 @@
+ #define SPRD_PMIC_EIC_TRIG		0x28
+ #define SPRD_PMIC_EIC_CTRL0		0x40
+
++#define SPRD_SC2720_MODULE_EN 0xc08
++#define SPRD_SC2720_EIC_EN BIT(3)
++#define SPRD_SC2720_RTC_CLK_EN 0xc10
++#define SPRD_SC2720_RTC_EIC_EN BIT(3)
++#define SPRD_SC2720_EIC_DBNC_EN BIT(14)
++
+ /*
+  * The PMIC EIC controller only has one bank, with up to 16 EICs.
+  */
+@@ -33,6 +39,7 @@
+ struct sprd_pmic_eic_data {
+ 	u32 num_eics;
+ 	bool wake_parent;
++	bool enable_clocks;
+ };
+
+ /*
+@@ -133,6 +140,11 @@ static int sprd_pmic_eic_set_debounce(struct gpio_chip *chip,
+
+ 	value &= ~SPRD_PMIC_EIC_DBNC_MASK;
+ 	value |= (debounce / 1000) & SPRD_PMIC_EIC_DBNC_MASK;
++	if (pmic_eic->data->enable_clocks) {
++		value &= ~SPRD_SC2720_EIC_DBNC_EN;
++		if (debounce)
++			value |= SPRD_SC2720_EIC_DBNC_EN;
++	}
+ 	return regmap_write(pmic_eic->map, pmic_eic->offset + reg, value);
+ }
+
+@@ -396,6 +408,38 @@ static int sprd_pmic_eic_probe(struct platform_device *pdev)
+ 		return ret;
+ 	}
+
++	if (data->enable_clocks) {
++		ret = regmap_set_bits(pmic_eic->map, SPRD_SC2720_MODULE_EN,
++				      SPRD_SC2720_EIC_EN);
++		if (ret)
++			return dev_err_probe(
++				&pdev->dev, ret,
++				"Failed to enable PMIC EIC clock\n");
++
++		ret = regmap_set_bits(pmic_eic->map, SPRD_SC2720_RTC_CLK_EN,
++				      SPRD_SC2720_RTC_EIC_EN);
++		if (ret)
++			return dev_err_probe(
++				&pdev->dev, ret,
++				"Failed to enable PMIC EIC RTC clock\n");
++
++		ret = regmap_clear_bits(pmic_eic->map,
++					pmic_eic->offset + SPRD_PMIC_EIC_IE,
++					GENMASK(data->num_eics - 1, 0));
++		if (ret)
++			return dev_err_probe(
++				&pdev->dev, ret,
++				"Failed to mask PMIC EIC interrupts\n");
++
++		ret = regmap_write(pmic_eic->map,
++				   pmic_eic->offset + SPRD_PMIC_EIC_IC,
++				   GENMASK(data->num_eics - 1, 0));
++		if (ret)
++			return dev_err_probe(
++				&pdev->dev, ret,
++				"Failed to clear PMIC EIC interrupts\n");
++	}
++
+ 	ret = devm_request_threaded_irq(&pdev->dev, pmic_eic->irq, NULL,
+ 					sprd_pmic_eic_irq_handler,
+ 					IRQF_ONESHOT | IRQF_NO_SUSPEND,
+@@ -432,6 +476,7 @@ static int sprd_pmic_eic_probe(struct platform_device *pdev)
+ static const struct sprd_pmic_eic_data sc2720_eic_data = {
+ 	.num_eics = 13,
+ 	.wake_parent = true,
++	.enable_clocks = true,
+ };
+
+ static const struct sprd_pmic_eic_data sc2731_eic_data = {
+diff --git a/drivers/mfd/sprd-sc27xx-spi.c b/drivers/mfd/sprd-sc27xx-spi.c
+index 4f9e4f1..8c15bdf 100644
+--- a/drivers/mfd/sprd-sc27xx-spi.c
++++ b/drivers/mfd/sprd-sc27xx-spi.c
+@@ -26,6 +26,10 @@
+ #define SPRD_SC2720_CHIP_ID_HIGH_REG 0xc04
+ #define SPRD_SC2720_CHIP_ID_LOW 0xa003
+ #define SPRD_SC2720_CHIP_ID_HIGH 0x2720
++#define SPRD_SC2720_ARCH_EN 0xe40
++#define SPRD_SC2720_ARCH_CLK_EN BIT(0)
++#define SPRD_SC2720_RTC_CLK_EN 0xc10
++#define SPRD_SC2720_RTC_ARCH_CLK_EN BIT(0)
+ #define SPRD_SC2730_IRQ_BASE		0x80
+ #define SPRD_SC2730_IRQ_NUMS		10
+ #define SPRD_SC2730_CHG_DET		0x1b9c
+@@ -62,6 +66,7 @@ struct sprd_pmic_data {
+ 	u32 chip_id_high;
+ 	bool register_syscon;
+ 	bool mask_irqs_on_shutdown;
++	bool enable_arch_clocks;
+ };
+
+ /*
+@@ -79,6 +84,7 @@ static const struct sprd_pmic_data sc2720_data = {
+ 	.chip_id_high = SPRD_SC2720_CHIP_ID_HIGH,
+ 	.register_syscon = true,
+ 	.mask_irqs_on_shutdown = true,
++	.enable_arch_clocks = true,
+ };
+
+ static const struct sprd_pmic_data sc2730_data = {
+@@ -239,6 +245,22 @@ static int sprd_pmic_probe(struct spi_device *spi)
+ 	if (ret)
+ 		return ret;
+
++	if (pdata->enable_arch_clocks) {
++		ret = regmap_set_bits(ddata->regmap, SPRD_SC2720_ARCH_EN,
++				      SPRD_SC2720_ARCH_CLK_EN);
++		if (ret)
++			return dev_err_probe(
++				&spi->dev, ret,
++				"Failed to enable PMIC architecture clock\n");
++
++		ret = regmap_set_bits(ddata->regmap, SPRD_SC2720_RTC_CLK_EN,
++				      SPRD_SC2720_RTC_ARCH_CLK_EN);
++		if (ret)
++			return dev_err_probe(
++				&spi->dev, ret,
++				"Failed to enable PMIC architecture RTC clock\n");
++	}
++
+ 	ddata->irq_chip.name = dev_name(&spi->dev);
+ 	ddata->irq_chip.status_base =
+ 		pdata->irq_base + SPRD_PMIC_INT_MASK_STATUS;
+diff --git a/drivers/nvmem/sc27xx-efuse.c b/drivers/nvmem/sc27xx-efuse.c
+index 57e4f73..3d6bb76 100644
+--- a/drivers/nvmem/sc27xx-efuse.c
++++ b/drivers/nvmem/sc27xx-efuse.c
+@@ -12,6 +12,8 @@
+ #define SC27XX_MODULE_EN		0xc08
+ #define SC2730_MODULE_EN		0x1808
+ #define SC27XX_EFUSE_EN			BIT(6)
++#define SC2720_RTC_CLK_EN 0xc10
++#define SC2720_EFUSE_RTC_EN BIT(11)
+
+ /* Efuse controller registers definition */
+ #define SC27XX_EFUSE_GLB_CTRL		0x0
+@@ -62,8 +64,9 @@ struct sc27xx_efuse_variant_data {
+
+ struct sc2720_efuse_session {
+ 	u32 module_enable;
++	u32 rtc_clock_enable;
+ 	u32 block_index;
+-	bool module_valid;
++	bool clocks_valid;
+ 	bool block_valid;
+ 	bool unsafe_controller;
+ };
+@@ -167,7 +170,7 @@ static int sc2720_efuse_guard(struct sc27xx_efuse *efuse,
+ static int sc2720_efuse_restore(struct sc27xx_efuse *efuse,
+ 				struct sc2720_efuse_session *session)
+ {
+-	u32 block_index, module_enable;
++	u32 block_index, module_enable, rtc_clock_enable;
+ 	int cleanup_ret;
+ 	int ret;
+
+@@ -216,7 +219,7 @@ static int sc2720_efuse_restore(struct sc27xx_efuse *efuse,
+ 	if (ret)
+ 		return ret;
+
+-	if (!session->module_valid)
++	if (!session->clocks_valid)
+ 		return 0;
+ 	ret = regmap_update_bits(efuse->regmap, efuse->var_data->module_en,
+ 				 SC27XX_EFUSE_EN, session->module_enable);
+@@ -229,6 +232,18 @@ static int sc2720_efuse_restore(struct sc27xx_efuse *efuse,
+ 	if ((module_enable ^ session->module_enable) & SC27XX_EFUSE_EN)
+ 		return -EIO;
+
++	ret = regmap_update_bits(efuse->regmap, SC2720_RTC_CLK_EN,
++				 SC2720_EFUSE_RTC_EN,
++				 session->rtc_clock_enable);
++	if (ret)
++		return ret;
++	ret = regmap_read(efuse->regmap, SC2720_RTC_CLK_EN, &rtc_clock_enable);
++	if (ret)
++		return ret;
++	if ((rtc_clock_enable ^ session->rtc_clock_enable) &
++	    SC2720_EFUSE_RTC_EN)
++		return -EIO;
++
+ 	return 0;
+ }
+
+@@ -256,7 +271,11 @@ static int sc27xx_efuse_read(void *context, u32 offset, void *val, size_t bytes)
+ 		goto unlock_efuse;
+ 	if (efuse->var_data->guard_state) {
+ 		session.module_enable = module_en;
+-		session.module_valid = true;
++		ret = regmap_read(efuse->regmap, SC2720_RTC_CLK_EN,
++				  &session.rtc_clock_enable);
++		if (ret)
++			goto unlock_efuse;
++		session.clocks_valid = true;
+ 	}
+
+ 	/* Enable the efuse controller only when this read owns the gate. */
+@@ -269,6 +288,11 @@ static int sc27xx_efuse_read(void *context, u32 offset, void *val, size_t bytes)
+ 	}
+
+ 	if (efuse->var_data->guard_state) {
++		ret = regmap_set_bits(efuse->regmap, SC2720_RTC_CLK_EN,
++				      SC2720_EFUSE_RTC_EN);
++		if (ret)
++			goto disable_efuse;
++
+ 		ret = sc2720_efuse_guard(efuse, &session);
+ 		if (ret) {
+ 			if (session.unsafe_controller)
+diff --git a/drivers/rtc/rtc-sc27xx.c b/drivers/rtc/rtc-sc27xx.c
+index ba14e9f..94bfcf4 100644
+--- a/drivers/rtc/rtc-sc27xx.c
++++ b/drivers/rtc/rtc-sc27xx.c
+@@ -14,6 +14,11 @@
+ #include <linux/regmap.h>
+ #include <linux/rtc.h>
+
++#define SPRD_SC2720_MODULE_EN 0xc08
++#define SPRD_SC2720_RTC_EN BIT(1)
++#define SPRD_SC2720_RTC_CLK_EN 0xc10
++#define SPRD_SC2720_RTC_CLOCK_EN BIT(1)
++
+ #define SPRD_RTC_SEC_CNT_VALUE		0x0
+ #define SPRD_RTC_MIN_CNT_VALUE		0x4
+ #define SPRD_RTC_HOUR_CNT_VALUE		0x8
+@@ -115,6 +120,7 @@ struct sprd_rtc_data {
+ 	bool poweroff_alarm;
+ 	bool one_shot_alarm;
+ 	bool preserve_alarm_lock;
++	bool enable_clocks;
+ };
+
+ struct sprd_rtc {
+@@ -140,6 +146,7 @@ static const struct sprd_rtc_data sc2720_rtc_data = {
+ 	.poweroff_alarm = false,
+ 	.one_shot_alarm = true,
+ 	.preserve_alarm_lock = true,
++	.enable_clocks = true,
+ };
+
+ static const struct sprd_rtc_data sc2731_rtc_data = {
+@@ -771,6 +778,21 @@ static int sprd_rtc_probe(struct platform_device *pdev)
+
+ 	rtc->dev = &pdev->dev;
+ 	platform_set_drvdata(pdev, rtc);
++	if (rtc->data->enable_clocks) {
++		ret = regmap_set_bits(rtc->regmap, SPRD_SC2720_MODULE_EN,
++				      SPRD_SC2720_RTC_EN);
++		if (ret)
++			return dev_err_probe(&pdev->dev, ret,
++					     "failed to enable RTC clock\n");
++
++		ret = regmap_set_bits(rtc->regmap, SPRD_SC2720_RTC_CLK_EN,
++				      SPRD_SC2720_RTC_CLOCK_EN);
++		if (ret)
++			return dev_err_probe(
++				&pdev->dev, ret,
++				"failed to enable RTC counter clock\n");
++	}
++
+ 	ret = sprd_rtc_snapshot_alarm_lock(rtc);
+ 	if (ret) {
+ 		dev_err(&pdev->dev, "failed to read RTC alarm lock\n");

@@ -97,7 +97,7 @@ struct sc2720_fgu_charge_sample {
 	u16 high_after;
 };
 
-static int sc2720_fgu_enable_pclk(struct sc2720_fgu *fgu, bool *attempted)
+static int sc2720_fgu_enable_clocks(struct sc2720_fgu *fgu, bool *attempted)
 {
 	static const unsigned int regs[] = {
 		SC2720_CHIP_ID_LOW, SC2720_CHIP_ID_HIGH,
@@ -115,12 +115,16 @@ static int sc2720_fgu_enable_pclk(struct sc2720_fgu *fgu, bool *attempted)
 	if (values[0] != SC2720_EXPECTED_ID_LOW ||
 	    values[1] != SC2720_EXPECTED_ID_HIGH)
 		return -ENODEV;
-	if (values[2] & SC2720_MODULE_EN0_FGU)
-		return -EBUSY;
-	if (!(values[3] & SC2720_RTC_CLK_EN0_FGU) ||
-	    (values[4] & SC2720_SOFT_RST0_FGU) ||
+	if ((values[4] & SC2720_SOFT_RST0_FGU) ||
 	    (values[5] & SC2720_CHGR_DET_FGU_ANALOG_MASK))
 		return -ENODATA;
+	/* Keep the measurement clock running without resetting its counters. */
+	ret = regmap_set_bits(fgu->regmap, SC2720_RTC_CLK_EN0,
+			      SC2720_RTC_CLK_EN0_FGU);
+	if (ret)
+		return ret;
+	if (values[2] & SC2720_MODULE_EN0_FGU)
+		return 0;
 	*attempted = true;
 	return regmap_update_bits(fgu->regmap, SC2720_MODULE_EN0,
 				  SC2720_MODULE_EN0_FGU, SC2720_MODULE_EN0_FGU);
@@ -515,7 +519,7 @@ static int sc2720_fgu_probe(struct platform_device *pdev)
 		return dev_err_probe(&pdev->dev, ret,
 				     "efuse calibration invalid\n");
 
-	ret = sc2720_fgu_enable_pclk(fgu, &pclk_attempted);
+	ret = sc2720_fgu_enable_clocks(fgu, &pclk_attempted);
 	if (ret) {
 		if (pclk_attempted) {
 			cleanup_ret = sc2720_fgu_clear_pclk(fgu, &pclk_cleared);
@@ -527,7 +531,7 @@ static int sc2720_fgu_probe(struct platform_device *pdev)
 		}
 		return dev_err_probe(&pdev->dev, ret, "clock unavailable\n");
 	}
-	fgu->pclk_owned = true;
+	fgu->pclk_owned = pclk_attempted;
 	ret = devm_add_action_or_reset(&pdev->dev, sc2720_fgu_release_pclk,
 				       fgu);
 	if (ret)
