@@ -239,6 +239,33 @@ static int power_off(struct ums9117_bluetooth *bt)
 	return -ETIMEDOUT;
 }
 
+static int prepare_cold_state(struct ums9117_bluetooth *bt)
+{
+	u32 config;
+	int state;
+	int ret;
+
+	state = bt_domain_state(bt);
+	if (state < 0)
+		return state;
+	if (state != UMS9117_BT_DOMAIN_OFF)
+		return -EBUSY;
+	ret = regmap_read(bt->pmu, UMS9117_PMU_BT_DOMAIN_CONFIG, &config);
+	if (ret)
+		return ret;
+	/* Keep the shared power policy and sequencing delays unchanged. */
+	if ((config & ~UMS9117_BT_FORCE_SHUTDOWN) !=
+	    (UMS9117_BT_DOMAIN_RESET_CONFIG & ~UMS9117_BT_FORCE_SHUTDOWN))
+		return -EUCLEAN;
+
+	ret = hold_reset(bt);
+	if (!ret)
+		ret = power_off(bt);
+	if (!ret)
+		ret = check_cold_state(bt);
+	return ret;
+}
+
 static int release_reset(struct ums9117_bluetooth *bt)
 {
 	int ret;
@@ -828,8 +855,8 @@ static int ums9117_bluetooth_probe(struct platform_device *pdev)
 	if (IS_ERR(bt->iram))
 		return dev_err_probe(dev, PTR_ERR(bt->iram),
 				     "boot vector unavailable\n");
-	/* Binding a mailbox channel resets its FIFO; the CM4 must be stopped. */
-	ret = check_cold_state(bt);
+	/* Establish the stopped state before mailbox binding resets its FIFO. */
+	ret = prepare_cold_state(bt);
 	if (ret)
 		return dev_err_probe(dev, ret,
 				     "transport is not in cold state\n");
