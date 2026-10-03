@@ -15,6 +15,7 @@ void ums9117_linux_handoff(uint32_t zimage, uint32_t dtb)
 #define UMS9117_AON_APB_EB0_PHYS 0x402e0000U
 #define UMS9117_AON_APB_RTC_EB_PHYS 0x402e0010U
 #define UMS9117_AON_APB_CLK_EB0_PHYS 0x402e0134U
+#define UMS9117_AON_APB_CLEAR_OFFSET 0x2000U
 #define UMS9117_MUSB_BASE_PHYS 0x20200000U
 
 #define BIT(n) (1U << (n))
@@ -474,6 +475,21 @@ void ums9117_bootstrap_cleanup_usb_dma_and_disconnect(void)
 
 void ums9117_bootstrap_handoff_to_linux(uint32_t zimage, uint32_t dtb)
 {
+	/* No timer, ADI or interrupt callback may run after these gates close. */
+	__asm__ volatile("cpsid if" : : : "memory");
+	reg_write(UMS9117_AON_APB_EB0_PHYS + UMS9117_AON_APB_CLEAR_OFFSET,
+		  UMS9117_TIMER_EB0_BITS);
+	reg_write(UMS9117_AON_APB_RTC_EB_PHYS + UMS9117_AON_APB_CLEAR_OFFSET,
+		  UMS9117_TIMER_RTC_BITS);
+	reg_write(UMS9117_AON_APB_CLK_EB0_PHYS + UMS9117_AON_APB_CLEAR_OFFSET,
+		  UMS9117_TIMER_CLK_BITS);
+	__asm__ volatile("dsb sy\n\tisb" : : : "memory");
+	if ((reg_read(UMS9117_AON_APB_EB0_PHYS) & UMS9117_TIMER_EB0_BITS) ||
+	    (reg_read(UMS9117_AON_APB_RTC_EB_PHYS) & UMS9117_TIMER_RTC_BITS) ||
+	    (reg_read(UMS9117_AON_APB_CLK_EB0_PHYS) & UMS9117_TIMER_CLK_BITS))
+		for (;;)
+			;
+
 	clean_invalidate_dcache();
 	invalidate_icache();
 	ums9117_linux_handoff(zimage, dtb);
