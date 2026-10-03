@@ -269,6 +269,7 @@ def load_platform(platform: str) -> dict[str, Any]:
             "files",
             "shared_copies",
             "linux_copies",
+            "lcd_config_destination",
             "kernel_destination",
             "load_address",
             "payload_limit",
@@ -287,6 +288,9 @@ def load_platform(platform: str) -> dict[str, Any]:
     path_array(bootstrap.get("files"), "platform bootstrap files")
     path_steps(bootstrap.get("shared_copies"), "platform bootstrap shared_copies")
     path_steps(bootstrap.get("linux_copies"), "platform bootstrap linux_copies")
+    relative_value(
+        bootstrap.get("lcd_config_destination"), "platform bootstrap lcd_config_destination"
+    )
     relative_value(bootstrap.get("kernel_destination"), "platform bootstrap kernel_destination")
     integer_value(
         bootstrap.get("load_address"),

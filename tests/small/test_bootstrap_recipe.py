@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import io
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +13,8 @@ from unittest import mock
 
 from fplinux_cli import common
 from fplinux_cli.build import bootstrap as bootstrap_build
+from fplinux_cli.build import inputs as inputs_build
+from fplinux_cli.build import process as process_build
 
 
 class BootstrapRecipeTests(unittest.TestCase):
@@ -41,6 +45,7 @@ class BootstrapRecipeTests(unittest.TestCase):
                 "source": "bootstrap",
                 "image": "ramboot.bin",
                 "map": "obj/ramboot.map",
+                "kernel_destination": "zImage",
                 "dtb_destination": "target.dtb",
                 "record_prefix": "DEMO",
                 "load_address": 0x80100000,
@@ -61,6 +66,7 @@ class BootstrapRecipeTests(unittest.TestCase):
                 "build_targets": ["clean", "all", "map"],
                 "patches": ["patches/vendor.patch"],
                 "files": ["pack_reloc/Makefile"],
+                "lcd_config_destination": "runtime/lcd_config.h",
                 "kernel_destination": "zImage",
                 "load_address": 0x80100000,
                 "payload_limit": 0x82000000,
@@ -192,6 +198,20 @@ class BootstrapRecipeTests(unittest.TestCase):
         self.sources["vendor"]["license"] = "Other"
         self.assertEqual(baseline, self._digest())
 
+    def test_sd_recipe_tracks_the_shared_target_panel(self) -> None:
+        """The RAM-owned panel also invalidates its SD consumer without foreign panel inputs."""
+        self._write("targets/demo/bootstrap-microsd/Makefile", b"all:\n\ttrue\n")
+        panel = self._write("targets/demo/bootstrap/lcd_config.h", b"selected panel\n")
+        self.target_config["bootstrap"].update(
+            source="bootstrap-microsd", lcd_config="bootstrap/lcd_config.h"
+        )
+        baseline = self._digest()
+
+        self._write("targets/another/bootstrap/lcd_config.h", b"foreign panel\n")
+        self.assertEqual(baseline, self._digest())
+        panel.write_bytes(b"changed selected panel\n")
+        self.assertNotEqual(baseline, self._digest())
+
     def test_linux_font_source_and_freestanding_header_are_causal(self) -> None:
         """A pinned font or its compile interface invalidates either bootstrap recipe."""
         self._write("targets/demo/bootstrap-microsd/Makefile", b"all:\n\ttrue\n")
@@ -210,6 +230,65 @@ class BootstrapRecipeTests(unittest.TestCase):
                 )
                 self.assertNotEqual(baseline, self._digest())
                 header.write_bytes(b"font declarations\n")
+
+    def test_projection_selects_one_panel_or_the_headless_table(self) -> None:
+        """The compiler receives the target bytes for either source tree, or the full fallback."""
+        archive = self.root / "cache/downloads/vendor.tar.gz"
+        archive.parent.mkdir(parents=True)
+        with tarfile.open(archive, "w:gz") as output:
+            for path, contents in (
+                ("pack_reloc/Makefile", b"all:\n\ttrue\n"),
+                ("runtime/lcd_config.h", b"complete porting table\n"),
+            ):
+                member = tarfile.TarInfo(f"vendor-abc123/{path}")
+                member.size = len(contents)
+                output.addfile(member, io.BytesIO(contents))
+        self.sources["vendor"]["archive_sha256"] = common.sha256_file(archive)
+        linux_archive = self.root / "cache/downloads/linux/linux-1.2.3.tar.xz"
+        linux_archive.parent.mkdir(parents=True)
+        with tarfile.open(linux_archive, "w:xz") as output:
+            contents = b"int unchanged_upstream_font;\n"
+            member = tarfile.TarInfo("linux-1.2.3/lib/fonts/font_sample.c")
+            member.size = len(contents)
+            output.addfile(member, io.BytesIO(contents))
+        self.sources["linux"]["sha256"] = common.sha256_file(linux_archive)
+        self.platform["bootstrap"]["patches"] = []
+        self._write("targets/demo/bootstrap/lcd_config.h", b"single selected panel\n")
+        self._write("targets/demo/bootstrap-microsd/Makefile", b"all:\n\ttrue\n")
+        zimage = self._write("kernel/zImage", b"kernel payload\n")
+        dtb = self._write("kernel/target.dtb", b"device tree\n")
+        work = self.root / "work"
+        for source, selected, expected in (
+            ("bootstrap", "bootstrap/lcd_config.h", b"single selected panel\n"),
+            ("bootstrap-microsd", "bootstrap/lcd_config.h", b"single selected panel\n"),
+            ("bootstrap", None, b"complete porting table\n"),
+        ):
+            with self.subTest(source=source, selected=selected):
+                self.target_config["bootstrap"].update(source=source, lcd_config=selected)
+                with (
+                    mock.patch.object(common, "ROOT", self.root),
+                    mock.patch.object(inputs_build, "CACHE", self.root / "cache"),
+                    # Compilation is external to this source-projection check.
+                    mock.patch.object(
+                        process_build,
+                        "run",
+                        side_effect=RuntimeError("stop before compilation"),
+                    ),
+                    self.assertRaisesRegex(RuntimeError, "stop before compilation"),
+                ):
+                    bootstrap_build.build_bootstrap(
+                        self.sources,
+                        "demo",
+                        self.target_config,
+                        self.platform,
+                        work=work,
+                        zimage=zimage,
+                        dtb=dtb,
+                    )
+                panel = work / "bootstrap/vendor/runtime/lcd_config.h"
+                self.assertEqual(panel.read_bytes(), expected)
+                font = work / "bootstrap/bootstrap/fplinux-boot-screen/font_sample.c"
+                self.assertEqual(font.read_bytes(), b"int unchanged_upstream_font;\n")
 
 
 if __name__ == "__main__":

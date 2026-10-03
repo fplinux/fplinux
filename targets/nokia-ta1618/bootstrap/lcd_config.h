@@ -1,0 +1,36 @@
+// SPDX-License-Identifier: Unlicense
+// SPDX-FileCopyrightText: fpdoom contributors
+
+#define FPLINUX_LCD_SPI 1
+#define SPI_MODE2 0
+
+static const uint8_t cmd88B6_nokia_init[] = {
+	//LCM_DELAY(120),
+	LCM_CMD(0x11, 0), // Sleep Out Mode
+	LCM_DELAY(120), LCM_CMD(0xb2, 5), 0x0c, 0x0c, 0x00, 0x33, 0x33,
+	LCM_CMD(0x35, 1), 0x00,
+	//LCM_CMD(0x36, 1), 0x00, // Memory Access Control
+	LCM_CMD(0x3a, 1), 0x05, // Pixel Format Set
+	LCM_CMD(0xb7, 1), 0x56,
+#if SPI_MODE2
+	LCM_CMD(0xe7, 1), 0x10, // SPI2 Enable
+#endif
+	LCM_CMD(0xbb, 1), 0x0c, LCM_CMD(0xc0, 1), 0x2c, LCM_CMD(0xc2, 1), 0x01,
+	LCM_CMD(0xc3, 1), 0x0f, LCM_CMD(0xc6, 1), 0x0f, LCM_CMD(0xd0, 1), 0xa7,
+	LCM_DELAY(10), LCM_CMD(0xd0, 2), 0xa4, 0xa1, LCM_CMD(0xd6, 1), 0xa1,
+	// Set Gamma 1
+	LCM_CMD(0xe0, 14), 0xf0, 0x01, 0x08, 0x04, 0x05, 0x14, 0x33, 0x44, 0x49,
+	0x36, 0x11, 0x14, 0x2e, 0x36,
+	// Set Gamma 2
+	LCM_CMD(0xe1, 14), 0xf0, 0x0c, 0x10, 0x0e, 0x0c, 0x08, 0x32, 0x43, 0x49,
+	0x28, 0x12, 0x12, 0x2c, 0x33, LCM_CMD(0x21, 0),
+	LCM_CMD(0x29, 0), // Display ON
+	LCM_END
+};
+
+#define LCD_CONFIG(id, w, h, mac, a, b, c, d, e, f, spi, name) \
+	{ id, ~0, w, h, mac, { a, b, c, d, e, f }, { spi }, name##_init },
+
+static const lcd_config_t lcd_config_t117[] = { LCD_CONFIG(
+	0x8888b6, 240, 320, 0x00, 0, 0, 0, 0, 0, 0, 24000000, cmd88B6_nokia) };
+#undef LCD_CONFIG

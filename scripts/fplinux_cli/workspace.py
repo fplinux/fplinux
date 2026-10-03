@@ -197,6 +197,9 @@ def target_build_source_files(
     if target_config["fit"]["kind"] == "sha256":
         add_source_path(files, ROOT / "scripts/fplinux_cli/fit_image.py")
     add_source_path(files, target_root / target_config["bootstrap"]["source"])
+    lcd_config = target_config["bootstrap"].get("lcd_config")
+    if lcd_config is not None:
+        add_source_path(files, target_root / lcd_config)
     for relative in target_config["linux"]["patches"]:
         add_source_path(files, target_root / relative)
     for key in ("copies", "appends"):

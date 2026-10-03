@@ -1,0 +1,64 @@
+--- a/ums9117/syscode.c
++++ b/ums9117/syscode.c
+@@ -317,6 +317,12 @@
+
+ #include "lcd_config.h"
+
++#ifdef FPLINUX_LCD_SPI
++#define LCD_USES_SPI FPLINUX_LCD_SPI
++#else
++#define LCD_USES_SPI sys_data.spi
++#endif
++
+ static const lcd_config_t* lcd_find_conf(uint32_t id, int mode) {
+ 	const lcd_config_t *lcd_config = lcd_config_t117;
+ 	int i, n = sizeof(lcd_config_t117) / sizeof(*lcd_config_t117);
+@@ -381,6 +387,12 @@
+ 	}
+ 	if (!~sys_data.spi) sys_data.spi = 0;
+
++#ifdef FPLINUX_LCD_SPI
++	if ((MEM4(0x402a00c8) == 0) != FPLINUX_LCD_SPI ||
++			!!sys_data.spi != FPLINUX_LCD_SPI)
++		ERR_EXIT("LCD transport does not match target pins\n");
++#endif
++
+ 	AHB_PWR_ON(0x1000);	// LCM enable
+
+ 	LCM_CR(0) = 0;
+@@ -389,7 +401,7 @@
+
+ 	if (!is_whtled_on()) lcm_reset(10, 0);
+
+-	if (sys_data.spi) {
++	if (LCD_USES_SPI) {
+ 		lcd = lcd_spi_init(sys_data.spi);
+ 		lcd_setup.send = spi_send;
+ 		if (!(sys_data.spi_mode & 1)) // 2, 4
+@@ -421,7 +433,7 @@
+ 	// that don't reset the page counter.
+ 	// Found on: GC9106, NV3030B
+ 	if (!sys_data.page_reset) (void)0;
+-	else if (!sys_data.spi) {
++	else if (!LCD_USES_SPI) {
+ 		lcm_set_mode(1); // 8
+ 		lcm_send_cmd(0x2c); // Memory Write
+ 		lcm_set_mode(0x28); // 8x2 BE
+@@ -450,7 +462,7 @@
+ #else
+ 	clean_dcache();
+ #endif
+-	if (sys_data.spi)
++	if (LCD_USES_SPI)
+ 		spi_refresh_next(sys_data.spi);
+ 	LCDC_BASE->irq.en |= mask;
+ 	LCDC_BASE->ctrl |= 8;	// start refresh
+@@ -533,7 +545,7 @@
+
+ 	{
+ 		uint32_t addr, mode;
+-		if (!sys_data.spi) {
++		if (!LCD_USES_SPI) {
+ 			lcm_set_mode(0x28); // 8x2 BE
+ 			mode = 2; addr = lcd_setup.addr | 1 << 17;
+ 		} else {

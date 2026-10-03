@@ -567,6 +567,7 @@ build_targets = ["clean", "all", "map"]
 patches = [
   "platforms/ums9117/bootstrap/0001-preserve-ram-probe-contents.patch",
   "platforms/ums9117/bootstrap/0002-headless.patch",
+  "platforms/ums9117/bootstrap/0003-target-display-transport.patch",
 ]
 files = [
   "build_t117.make",
@@ -585,13 +586,13 @@ files = [
   "pack_reloc/pack_reloc.c",
   "ums9117/asmcode.s",
   "ums9117/entry.c",
-  "ums9117/lcd_config.h",
   "ums9117/lcd_spi.h",
   "ums9117/start.s",
   "ums9117/syscode.c",
   "ums9117/syscomm.c",
   "ums9117/usbio.c",
 ]
+lcd_config_destination = "ums9117/lcd_config.h"
 kernel_destination = "zImage"
 load_address = 0x80100000
 payload_limit = 0x82000000

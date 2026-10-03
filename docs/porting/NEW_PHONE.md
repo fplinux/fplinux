@@ -53,6 +53,14 @@ Next: ./fplinux build <target> && ./fplinux run <target>
 The new target names `*` as the boot key and sets `exec_distance = 0` in the
 `[adapter]` table of `targets/<target>/target.toml`.
 
+When adding display support, set `[bootstrap].lcd_config` to one target-owned
+panel header; RAM and microSD bootstrap builds use the same file. Headless
+targets retain the complete upstream panel table for porting. The panel header
+sets `FPLINUX_LCD_SPI` to `1` for SPI or `0` for LCM; bootstrap stops if the board
+pin configuration selects the other transport. Each bootstrap
+Makefile selects `FPLINUX_BOOT_FONT := 6x8` or `7x14`, and `[rootfs].packages`
+selects `fplinux-font-terminus-6x12` or `fplinux-font-terminus-8x16` for the display.
+
 The headless target retains the boot stage's USB state and enables
 `CONFIG_USB_MUSB_UMS9117_INHERITED`. A board that initializes USB in Linux uses
 `CONFIG_USB_MUSB_UMS9117_COLD` with `sprd,ums9117-musb` instead. The build rejects
