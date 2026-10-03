@@ -187,6 +187,15 @@
 
 &jpeg {
 	status = "okay";
+	port {
+		dcam_in: endpoint {
+			bus-type = <5>;
+			bus-width = <8>;
+			hsync-active = <1>;
+			vsync-active = <0>;
+			pclk-sample = <0>;
+		};
+	};
 };
 
 &eic2 {

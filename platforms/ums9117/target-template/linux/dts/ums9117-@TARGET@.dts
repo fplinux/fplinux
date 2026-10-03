@@ -16,6 +16,10 @@
 
 #include "ums9117-ram-session.dtsi"
 
+&codec_dma {
+	size = <0x00400000>;
+};
+
 /* The fuel gauge and keypad light need board calibration values. */
 &sc2720_fgu {
 	status = "disabled";

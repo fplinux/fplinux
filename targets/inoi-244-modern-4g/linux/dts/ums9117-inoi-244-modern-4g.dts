@@ -189,20 +189,23 @@
 	};
 };
 
+&codec_dma {
+	size = <0x00400000>;
+};
+
 &rota {
 	status = "okay";
 };
 
 &jpeg {
 	status = "okay";
+	port {
+		dcam_in: endpoint {
+		};
+	};
 };
 
 &dcam_in {
-	/delete-property/ bus-type;
-	/delete-property/ bus-width;
-	/delete-property/ hsync-active;
-	/delete-property/ vsync-active;
-	/delete-property/ pclk-sample;
 	remote-endpoint = <&bf30a2_out>;
 	sprd,serial-g0-data-width = <1>;
 };

@@ -71,6 +71,13 @@ struct ums9117_dcam_capture {
 	bool timed_out;
 };
 
+static bool dcam_serial_g0(struct ums9117_dcam_capture *capture)
+{
+	return IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0) &&
+	       (!IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_PARALLEL) ||
+		capture->serial_g0);
+}
+
 static struct ums9117_dcam_capture *
 dcam_from_notifier(struct v4l2_async_notifier *notifier)
 {
@@ -115,7 +122,7 @@ static int dcam_enum_framesizes(struct file *file, void *priv,
 {
 	struct ums9117_dcam_capture *capture = video_drvdata(file);
 
-	if (capture->serial_g0) {
+	if (dcam_serial_g0(capture)) {
 		if (size->index || size->pixel_format != V4L2_PIX_FMT_NV16)
 			return -EINVAL;
 		size->type = V4L2_FRMSIZE_TYPE_DISCRETE;
@@ -149,7 +156,7 @@ static int dcam_try_format(struct file *file, void *priv,
 	u32 width = DCAM_PREVIEW_WIDTH;
 	u32 height = DCAM_PREVIEW_HEIGHT;
 
-	if (capture->serial_g0) {
+	if (dcam_serial_g0(capture)) {
 		width = DCAM_SERIAL_WIDTH;
 		height = DCAM_SERIAL_HEIGHT;
 	} else if (format->fmt.pix.width == DCAM_STILL_WIDTH &&
@@ -296,11 +303,15 @@ static void dcam_work(struct work_struct *work)
 		buffer = capture->active;
 		events = capture->irq_events;
 		capture->irq_events = 0;
-		timed_out = capture->timed_out;
-		capture->timed_out = false;
+		timed_out = false;
+		if (IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0)) {
+			timed_out = capture->timed_out;
+			capture->timed_out = false;
+		}
 		spin_unlock_irqrestore(&capture->qlock, flags);
 		if (buffer && (events || timed_out)) {
-			cancel_delayed_work(&capture->watchdog);
+			if (IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0))
+				cancel_delayed_work(&capture->watchdog);
 			if (events)
 				ret = ums9117_dcam_capture_finish(capture->hw);
 			else
@@ -330,7 +341,8 @@ static void dcam_work(struct work_struct *work)
 		capture->active = buffer;
 		spin_unlock_irqrestore(&capture->qlock, flags);
 		skip_frames = 0;
-		if (capture->first_capture && !capture->serial_g0)
+		if (IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_PARALLEL) &&
+		    capture->first_capture && !dcam_serial_g0(capture))
 			skip_frames = capture->format.width ==
 						      DCAM_STILL_WIDTH ?
 					      DCAM_STILL_STARTUP_SKIP :
@@ -339,10 +351,10 @@ static void dcam_work(struct work_struct *work)
 			capture->hw,
 			vb2_dma_contig_plane_dma_addr(&buffer->vb.vb2_buf, 0),
 			capture->format.width, capture->format.height,
-			skip_frames, capture->serial_g0);
+			skip_frames, dcam_serial_g0(capture));
 		if (!ret) {
 			capture->first_capture = false;
-			if (!capture->serial_g0)
+			if (!dcam_serial_g0(capture))
 				goto unlock;
 			spin_lock_irqsave(&capture->qlock, flags);
 			capture->frame_deadline =
@@ -427,7 +439,7 @@ static int dcam_start_streaming(struct vb2_queue *queue, unsigned int count)
 				 capture);
 	if (ret)
 		goto return_buffers;
-	if (capture->serial_g0) {
+	if (dcam_serial_g0(capture)) {
 		ret = ums9117_dcam_capture_route_serial_g0(capture->hw);
 		if (ret)
 			goto release;
@@ -466,12 +478,14 @@ static void dcam_stop_streaming(struct vb2_queue *queue)
 	int ret;
 
 	WRITE_ONCE(capture->streaming, false);
-	cancel_delayed_work_sync(&capture->watchdog);
+	if (IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0))
+		cancel_delayed_work_sync(&capture->watchdog);
 	mutex_lock(&capture->work_lock);
 	ret = ums9117_dcam_capture_stop(capture->hw);
 	spin_lock_irqsave(&capture->qlock, flags);
 	capture->irq_events = 0;
-	capture->timed_out = false;
+	if (IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0))
+		capture->timed_out = false;
 	spin_unlock_irqrestore(&capture->qlock, flags);
 	mutex_unlock(&capture->work_lock);
 	cancel_work_sync(&capture->work);
@@ -545,16 +559,50 @@ static const struct v4l2_async_notifier_operations dcam_notifier_ops = {
 	.unbind = dcam_unbind,
 };
 
+static int dcam_parse_serial_g0(struct device *dev, struct device_node *node)
+{
+	u32 width;
+	int ret;
+
+	if (!IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0)) {
+		dev_err(dev, "%pOF: serial-G0 camera input not built\n", node);
+		return -EINVAL;
+	}
+	ret = of_property_read_u32(node, "sprd,serial-g0-data-width", &width);
+	if (ret)
+		return ret;
+	if (width != 1 || of_property_present(node, "bus-type"))
+		return -EINVAL;
+	return 0;
+}
+
+static int dcam_parse_parallel(struct device *dev, struct device_node *node)
+{
+	struct v4l2_fwnode_endpoint endpoint = { 0 };
+	int ret;
+
+	if (!IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_PARALLEL)) {
+		dev_err(dev, "%pOF: parallel camera input not built\n", node);
+		return -EINVAL;
+	}
+	ret = v4l2_fwnode_endpoint_parse(of_fwnode_handle(node), &endpoint);
+	if (ret)
+		return ret;
+	if (endpoint.bus_type != V4L2_MBUS_PARALLEL ||
+	    endpoint.bus.parallel.bus_width != 8)
+		ret = -EINVAL;
+	v4l2_fwnode_endpoint_free(&endpoint);
+	return ret;
+}
+
 struct ums9117_dcam_capture *
 ums9117_dcam_capture_create(struct device *dev, struct v4l2_device *v4l2,
 			    struct ums9117_jpeg_hw *hw, struct mutex *lock)
 {
 	struct ums9117_dcam_capture *capture;
-	struct v4l2_fwnode_endpoint endpoint = { 0 };
 	struct v4l2_async_connection *connection;
 	struct device_node *node;
 	struct fwnode_handle *remote;
-	u32 serial_width;
 	bool serial_g0;
 	int ret;
 
@@ -568,28 +616,12 @@ ums9117_dcam_capture_create(struct device *dev, struct v4l2_device *v4l2,
 	}
 	fwnode_handle_put(remote);
 	serial_g0 = of_property_present(node, "sprd,serial-g0-data-width");
-	if (serial_g0) {
-		ret = of_property_read_u32(node, "sprd,serial-g0-data-width",
-					   &serial_width);
-		if (ret)
-			goto put_node;
-		if (serial_width != 1 ||
-		    of_property_present(node, "bus-type")) {
-			ret = -EINVAL;
-			goto put_node;
-		}
-	} else {
-		ret = v4l2_fwnode_endpoint_parse(of_fwnode_handle(node),
-						 &endpoint);
-		if (ret)
-			goto put_node;
-		if (endpoint.bus_type != V4L2_MBUS_PARALLEL ||
-		    endpoint.bus.parallel.bus_width != 8)
-			ret = -EINVAL;
-		v4l2_fwnode_endpoint_free(&endpoint);
-		if (ret)
-			goto put_node;
-	}
+	if (serial_g0)
+		ret = dcam_parse_serial_g0(dev, node);
+	else
+		ret = dcam_parse_parallel(dev, node);
+	if (ret)
+		goto put_node;
 
 	capture = kzalloc(sizeof(*capture), GFP_KERNEL);
 	if (!capture) {
@@ -601,7 +633,7 @@ ums9117_dcam_capture_create(struct device *dev, struct v4l2_device *v4l2,
 	capture->hw = hw;
 	capture->lock = lock;
 	capture->serial_g0 = serial_g0;
-	if (serial_g0)
+	if (dcam_serial_g0(capture))
 		dcam_pix_format(&capture->format, DCAM_SERIAL_WIDTH,
 				DCAM_SERIAL_HEIGHT);
 	else
@@ -611,7 +643,8 @@ ums9117_dcam_capture_create(struct device *dev, struct v4l2_device *v4l2,
 	mutex_init(&capture->work_lock);
 	INIT_LIST_HEAD(&capture->queued);
 	INIT_WORK(&capture->work, dcam_work);
-	INIT_DELAYED_WORK(&capture->watchdog, dcam_watchdog);
+	if (IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0))
+		INIT_DELAYED_WORK(&capture->watchdog, dcam_watchdog);
 
 	capture->queue.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 	capture->queue.io_modes = VB2_MMAP;
@@ -620,7 +653,7 @@ ums9117_dcam_capture_create(struct device *dev, struct v4l2_device *v4l2,
 	capture->queue.ops = &dcam_queue_ops;
 	capture->queue.mem_ops = &vb2_dma_contig_memops;
 	capture->queue.timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
-	/* A single 1600x1200 NV16 buffer must fit the 4 MiB CMA pool. */
+	/* Do not require multiple capture buffers from the shared CMA pool. */
 	capture->queue.min_queued_buffers = 0;
 	capture->queue.lock = lock;
 	capture->queue.dev = dev;
@@ -676,7 +709,8 @@ void ums9117_dcam_capture_destroy(struct ums9117_dcam_capture *capture)
 {
 	if (!capture)
 		return;
-	cancel_delayed_work_sync(&capture->watchdog);
+	if (IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0))
+		cancel_delayed_work_sync(&capture->watchdog);
 	v4l2_async_nf_unregister(&capture->notifier);
 	v4l2_async_nf_cleanup(&capture->notifier);
 	if (capture->registered)
