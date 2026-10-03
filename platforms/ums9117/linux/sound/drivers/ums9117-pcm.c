@@ -5,6 +5,7 @@
 #include <linux/input.h>
 #include <linux/io.h>
 #include <linux/jiffies.h>
+#include <linux/kconfig.h>
 #include <linux/kernel.h>
 #include <linux/ktime.h>
 #include <linux/kthread.h>
@@ -501,7 +502,8 @@ static int ums9117_pcm_parse_audio_profile(
 	if (ret)
 		return ret;
 
-	if (speaker_vibration) {
+	if (IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR) &&
+	    speaker_vibration) {
 		ret = ums9117_pcm_parse_vibrate_tone(
 			processing + UMS9117_AUDIO_PROFILE_PROCESSING_BYTES,
 			&profile->vibrate_tone);
@@ -1060,7 +1062,8 @@ static bool ums9117_pcm_idle_wanted(const struct ums9117_pcm *audio)
 {
 	if (audio->fm_enabled)
 		return false;
-	return audio->vibrator.session ||
+	return (IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR) &&
+		audio->vibrator.session) ||
 	       (audio->idle_silence && audio->outputs);
 }
 
@@ -1236,7 +1239,8 @@ static void ums9117_pcm_vibrate_off_locked(struct ums9117_pcm *audio)
 /* Reapplies an active session after its route inputs changed. */
 static int ums9117_pcm_update_vibration_locked(struct ums9117_pcm *audio)
 {
-	if (!audio->vibrator.session)
+	if (!IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR) ||
+	    !audio->vibrator.session)
 		return 0;
 	return ums9117_pcm_apply_vibration_locked(audio);
 }
@@ -2582,12 +2586,15 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 	audio->alc_enabled = true;
 	mutex_init(&audio->lock);
 	spin_lock_init(&audio->fifo_lock);
-	spin_lock_init(&audio->vibrator.state_lock);
-	INIT_WORK(&audio->vibrator.play_work, ums9117_vibrator_play_work);
-	INIT_DELAYED_WORK(&audio->vibrator.stop_work,
-			  ums9117_vibrator_stop_work);
-	INIT_DELAYED_WORK(&audio->vibrator.hold_work,
-			  ums9117_vibrator_hold_work);
+	if (IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR)) {
+		spin_lock_init(&audio->vibrator.state_lock);
+		INIT_WORK(&audio->vibrator.play_work,
+			  ums9117_vibrator_play_work);
+		INIT_DELAYED_WORK(&audio->vibrator.stop_work,
+				  ums9117_vibrator_stop_work);
+		INIT_DELAYED_WORK(&audio->vibrator.hold_work,
+				  ums9117_vibrator_hold_work);
+	}
 	init_waitqueue_head(&audio->thread_wait);
 	hrtimer_setup(&audio->timer, ums9117_pcm_timer, CLOCK_MONOTONIC,
 		      HRTIMER_MODE_REL);
@@ -2642,7 +2649,8 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 	audio->codec = ums9117_sc2720_codec_create(&pdev->dev);
 	if (IS_ERR(audio->codec))
 		return PTR_ERR(audio->codec);
-	if (audio->speaker_vibration && audio->profile.fitted)
+	if (IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR) &&
+	    audio->speaker_vibration && audio->profile.fitted)
 		ums9117_audio_set_vibrate_tone(audio->digital,
 					       &audio->profile.vibrate_tone);
 	if (audio->profile.fitted) {
@@ -2771,7 +2779,8 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 			return snd_card_free_on_error(&pdev->dev, ret);
 		}
 	}
-	if (audio->speaker_vibration) {
+	if (IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR) &&
+	    audio->speaker_vibration) {
 		/* Applications find the vibrator even before device data exists. */
 		ret = ums9117_vibrator_register(audio);
 		if (ret) {
@@ -2794,8 +2803,11 @@ static void ums9117_pcm_remove(struct platform_device *pdev)
 
 	/* A jack report during card disconnection is unsafe. */
 	ums9117_jack_stop(audio->jack);
-	ums9117_vibrator_set_lifecycle(audio, &audio->vibrator.stopping, true);
-	ums9117_vibrator_stop(audio);
+	if (IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR)) {
+		ums9117_vibrator_set_lifecycle(audio, &audio->vibrator.stopping,
+					       true);
+		ums9117_vibrator_stop(audio);
+	}
 	mutex_lock(&audio->lock);
 	audio->removing = true;
 	ums9117_pcm_stop_playback_refill_locked(audio);
@@ -2827,8 +2839,11 @@ static int ums9117_pcm_suspend(struct device *dev)
 	ret = ums9117_jack_suspend(audio->jack);
 	if (ret)
 		return ret;
-	ums9117_vibrator_set_lifecycle(audio, &audio->vibrator.suspended, true);
-	ums9117_vibrator_stop(audio);
+	if (IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR)) {
+		ums9117_vibrator_set_lifecycle(
+			audio, &audio->vibrator.suspended, true);
+		ums9117_vibrator_stop(audio);
+	}
 	mutex_lock(&audio->lock);
 	audio->suspended = true;
 	mutex_unlock(&audio->lock);
@@ -2853,8 +2868,9 @@ static int ums9117_pcm_resume(struct device *dev)
 		ret = ums9117_pcm_start_idle_locked(audio);
 	mutex_unlock(&audio->lock);
 	/* An interrupted pulse is not resumed; new requests are accepted. */
-	ums9117_vibrator_set_lifecycle(audio, &audio->vibrator.suspended,
-				       false);
+	if (IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR))
+		ums9117_vibrator_set_lifecycle(
+			audio, &audio->vibrator.suspended, false);
 	ums9117_jack_resume(audio->jack);
 	return ret;
 }

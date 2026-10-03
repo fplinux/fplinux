@@ -7,6 +7,7 @@
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/err.h>
+#include <linux/kconfig.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 
@@ -1114,7 +1115,9 @@ int ums9117_sc2720_codec_set_volume(struct ums9117_sc2720_codec *codec,
 	if (left == codec->volume_left && right == codec->volume_right)
 		return 0;
 	/* The vibrate tone keeps open headphones muted until it ends. */
-	if (codec->enabled && codec->hp_open && !codec->vibration) {
+	if (codec->enabled && codec->hp_open &&
+	    !(IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR) &&
+	      codec->vibration)) {
 		ret = ums9117_sc2720_codec_apply_volume(codec, left, right);
 		if (ret)
 			return ret;
@@ -1275,7 +1278,8 @@ static int open_pa(struct ums9117_sc2720_codec *codec)
 
 static bool pa_wanted(const struct ums9117_sc2720_codec *codec)
 {
-	return codec->vibration ||
+	return (IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR) &&
+		codec->vibration) ||
 	       ((codec->outputs & UMS9117_SC2720_OUTPUT_SPEAKER) &&
 		!codec->speaker_muted);
 }
@@ -1306,7 +1310,8 @@ static int apply_outputs(struct ums9117_sc2720_codec *codec)
 			return ret;
 	}
 	if (codec->hp_open) {
-		if (codec->vibration)
+		if (IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR) &&
+		    codec->vibration)
 			ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC4,
 						 SC2720_HP_GAIN_MASK,
 						 SC2720_HP_GAIN_MUTE);
@@ -1332,6 +1337,7 @@ static int apply_outputs(struct ums9117_sc2720_codec *codec)
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR)
 int ums9117_sc2720_codec_set_vibration(struct ums9117_sc2720_codec *codec,
 				       bool vibration)
 {
@@ -1355,6 +1361,7 @@ int ums9117_sc2720_codec_set_vibration(struct ums9117_sc2720_codec *codec,
 			ERR_PTR(restore_ret));
 	return ret;
 }
+#endif
 
 int ums9117_sc2720_codec_set_speaker_mute(struct ums9117_sc2720_codec *codec,
 					  bool mute)

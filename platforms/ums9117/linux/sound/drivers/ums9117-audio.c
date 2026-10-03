@@ -4,6 +4,7 @@
 #include <linux/delay.h>
 #include <linux/io.h>
 #include <linux/iopoll.h>
+#include <linux/kconfig.h>
 #include <linux/mfd/syscon.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
@@ -198,7 +199,8 @@ static void apply_dac_gain(struct ums9117_audio *audio)
 
 	if (!audio->dac_gain_configured)
 		return;
-	if (audio->music_muted) {
+	if (IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR) &&
+	    audio->music_muted) {
 		left_gain = UMS9117_VBC_DAC_DG_MINIMUM;
 		right_gain = UMS9117_VBC_DAC_DG_MINIMUM;
 	}
@@ -237,11 +239,14 @@ void ums9117_audio_set_dac_gain(struct ums9117_audio *audio, u8 left_gain,
 
 static u32 fm_mute_control(const struct ums9117_audio *audio)
 {
+	bool muted = IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR) &&
+		     audio->music_muted;
 	u32 value = UMS9117_VBC_FM_MUTE_ENABLE | UMS9117_VBC_FM_MUTE_STEP;
 
-	return audio->music_muted ? value : value | UMS9117_VBC_FM_MUTE_UNMUTE;
+	return muted ? value : value | UMS9117_VBC_FM_MUTE_UNMUTE;
 }
 
+#if IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR)
 void ums9117_audio_set_music_mute(struct ums9117_audio *audio, bool mute)
 {
 	if (audio->music_muted == mute)
@@ -262,6 +267,7 @@ void ums9117_audio_set_vibrate_tone(
 	audio->vibrate_tone = *tone;
 	audio->vibrate_tone_fitted = true;
 }
+#endif
 
 static void write_vibrate_tone_on(struct ums9117_audio *audio, bool on)
 {
@@ -269,6 +275,7 @@ static void write_vibrate_tone_on(struct ums9117_audio *audio, bool on)
 		    on ? UMS9117_VBC_VT_ON : 0);
 }
 
+#if IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR)
 /*
  * The generator latches off when its hold time expires until the enable is
  * cycled, so each pulse re-arms it. The caller only does this while the tone
@@ -281,13 +288,15 @@ static void arm_vibrate_tone(struct ums9117_audio *audio)
 	update_bits(audio->vbc, UMS9117_VBC_TONE_ENABLE, UMS9117_VBC_VT_ENABLE,
 		    UMS9117_VBC_VT_ENABLE);
 }
+#endif
 
 /* Called while the DAC is muted, before the requested tone state is set. */
 static void program_vibrate_tone(struct ums9117_audio *audio)
 {
 	const struct ums9117_audio_vibrate_tone *tone = &audio->vibrate_tone;
 
-	if (!audio->vibrate_tone_fitted)
+	if (!IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR) ||
+	    !audio->vibrate_tone_fitted)
 		return;
 	write_vibrate_tone_on(audio, false);
 	update_bits(audio->vbc, UMS9117_VBC_TONE_ENABLE, UMS9117_VBC_VT_ENABLE,
@@ -306,6 +315,7 @@ static void program_vibrate_tone(struct ums9117_audio *audio)
 	write_vibrate_tone_on(audio, audio->vibration);
 }
 
+#if IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR)
 void ums9117_audio_set_vibration(struct ums9117_audio *audio, bool on)
 {
 	if (audio->vibration == on)
@@ -317,6 +327,7 @@ void ums9117_audio_set_vibration(struct ums9117_audio *audio, bool on)
 		arm_vibrate_tone(audio);
 	write_vibrate_tone_on(audio, on);
 }
+#endif
 
 static unsigned int eq6_scale_coef(unsigned int section)
 {
@@ -709,7 +720,8 @@ void ums9117_audio_stop(struct ums9117_audio *audio)
 	audio->dac_running = false;
 	/* A capture session keeps the clocks, and with them EQ6 and ALC. */
 	disable_dac_processing(audio);
-	if (audio->vibrate_tone_fitted) {
+	if (IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR) &&
+	    audio->vibrate_tone_fitted) {
 		write_vibrate_tone_on(audio, false);
 		update_bits(audio->vbc, UMS9117_VBC_TONE_ENABLE,
 			    UMS9117_VBC_VT_ENABLE, 0);
