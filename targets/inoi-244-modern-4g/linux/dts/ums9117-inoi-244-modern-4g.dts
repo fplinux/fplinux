@@ -7,6 +7,7 @@
 #include <dt-bindings/leds/common.h>
 #include "ums9117.dtsi"
 #include "ums9117-sc2720.dtsi"
+#include "ums9117-musb-cold.dtsi"
 #include "fplinux-inoi-244-modern-4g-identity.dtsi"
 #include "inoi-244-modern-4g-nand-readonly.dtsi"
 #include "inoi-244-modern-4g-bluetooth.dtsi"
@@ -141,6 +142,14 @@
 	fplinux,current-calibration = <10 20>;
 };
 
+&sc2720_regulators {
+	vddusb: LDO_USB33 {
+		regulator-name = "sc2720-usb33";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+	};
+};
+
 &thm1 {
 	status = "okay";
 };
@@ -253,6 +262,7 @@
 };
 
 &usb {
+	vddusb-supply = <&vddusb>;
 	dr_mode = "peripheral";
 	status = "okay";
 };

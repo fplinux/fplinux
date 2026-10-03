@@ -53,6 +53,11 @@ Next: ./fplinux build <target> && ./fplinux run <target>
 The new target names `*` as the boot key and sets `exec_distance = 0` in the
 `[adapter]` table of `targets/<target>/target.toml`.
 
+The headless target retains the boot stage's USB state and enables
+`CONFIG_USB_MUSB_UMS9117_INHERITED`. A board that initializes USB in Linux uses
+`CONFIG_USB_MUSB_UMS9117_COLD` with `sprd,ums9117-musb` instead. The build rejects
+an enabled USB node whose compatible has no matching built-in ownership mode.
+
 ## Boot without a screen
 
 Build the target:

@@ -425,7 +425,7 @@ diff --git a/drivers/regulator/Kconfig b/drivers/regulator/Kconfig
 index d84f3d0..f26d3d3 100644
 --- a/drivers/regulator/Kconfig
 +++ b/drivers/regulator/Kconfig
-@@ -1426,11 +1426,11 @@ config REGULATOR_S5M8767
+@@ -1426,12 +1426,16 @@ config REGULATOR_S5M8767
  	 supports DVS mode with 8bits of output voltage control.
 
  config REGULATOR_SC2731
@@ -437,8 +437,13 @@ index d84f3d0..f26d3d3 100644
 -	  SC2731 PMIC.
 +	  SC2720 and SC2731 PMICs.
 
++config REGULATOR_SC2720_USB33
++	bool
++	depends on REGULATOR_SC2731
++
  config REGULATOR_SKY81452
  	tristate "Skyworks Solutions SKY81452 voltage regulator"
+ 	depends on MFD_SKY81452
 diff --git a/drivers/regulator/sc2731-regulator.c b/drivers/regulator/sc2731-regulator.c
 index 5447e1a..49bb712 100644
 --- a/drivers/regulator/sc2731-regulator.c
@@ -643,7 +648,7 @@ index 5447e1a..49bb712 100644
  	SC2731_REGU_LINEAR(LDO_CAMIO, SC2731_LDO_CAMIO_PD,
  			   SC2731_LDO_CAMIO_PD_MASK, SC2731_LDO_CAMIO_VOL,
  			   SC2731_LDO_CAMIO_VOL_MASK, 6250, 1000000, 1793750),
-@@ -201,57 +335,101 @@ static const struct regulator_desc regulators[] = {
+@@ -201,57 +335,103 @@ static const struct regulator_desc regulators[] = {
  			   SC2731_LDO_SRAM_VOL_MASK, 6250, 1000000, 1793750),
  };
 
@@ -665,8 +670,10 @@ index 5447e1a..49bb712 100644
 +	SC2720_REGU_FIXED(LDO_SDIO, SC2720_LDO_SDIO_PD, SC2720_LDO_SDIO_VOL,
 +			  SC2720_LDO_SDIO_3000MV, 3000000,
 +			  SC2720_SD_RAIL_ENABLE_TIME_US),
++#if IS_ENABLED(CONFIG_REGULATOR_SC2720_USB33)
 +	SC2720_REGU_FIXED(LDO_USB33, SC2720_LDO_USB33_PD, SC2720_LDO_USB33_VOL,
 +			  SC2720_LDO_USB33_3300MV, 3300000, 0),
++#endif
 +};
 +
 +static const struct sc27xx_regulator_data sc2720_regulator_data = {
