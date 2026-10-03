@@ -9,6 +9,7 @@ from fplinux_cli import common
 from fplinux_cli.common import fail
 from fplinux_cli.identity import BUILD_TYPES, IdentityError, validate_platform_identity
 from fplinux_cli.manifests.values import (
+    KCONFIG_SYMBOL,
     TARGET_NAME,
     exact_table,
     integer_value,
@@ -21,6 +22,45 @@ from fplinux_cli.manifests.values import (
     string_array,
     validate_usb,
 )
+
+
+def _dt_config_checks(value: object) -> list[dict[str, str]]:
+    """Validate the compiled device-tree ownership checks declared by the platform."""
+    name = "platform linux dt_config_checks"
+    if not isinstance(value, list):
+        fail(f"{name} must be an array")
+    result: list[dict[str, str]] = []
+    identities: set[tuple[str, str, str | None]] = set()
+    for index, raw in enumerate(value):
+        item_name = f"{name}[{index}]"
+        fields = {"path", "compatible", "config"}
+        if isinstance(raw, dict) and "property" in raw:
+            fields.add("property")
+        check = exact_table(raw, fields, item_name)
+        path = nonempty_string(check.get("path"), f"{item_name} path")
+        if not path.startswith("/") or (
+            path != "/" and any(part in {"", ".", ".."} for part in path[1:].split("/"))
+        ):
+            fail(f"{item_name} path must be a canonical absolute device-tree path")
+        compatible = nonempty_string(check.get("compatible"), f"{item_name} compatible")
+        symbol = nonempty_string(check.get("config"), f"{item_name} config")
+        if KCONFIG_SYMBOL.fullmatch(symbol) is None:
+            fail(f"{item_name} config must be a CONFIG_* symbol")
+        property_name = (
+            nonempty_string(check["property"], f"{item_name} property")
+            if "property" in check
+            else None
+        )
+        identity = (path, compatible, property_name)
+        if identity in identities:
+            condition = f" property {property_name}" if property_name is not None else ""
+            fail(f"{name} repeats ownership for {path} compatible {compatible}{condition}")
+        identities.add(identity)
+        requirement = {"path": path, "compatible": compatible, "config": symbol}
+        if property_name is not None:
+            requirement["property"] = property_name
+        result.append(requirement)
+    return result
 
 
 def _platform_boot_layout(value: object, name: str) -> dict[str, int]:
@@ -172,6 +212,7 @@ def load_platform(platform: str) -> dict[str, Any]:
             "dtb_output_directory",
             "dts_directory",
             "platform_identity_header",
+            "dt_config_checks",
             "targets",
             "patches",
             "copies",
@@ -191,6 +232,7 @@ def load_platform(platform: str) -> dict[str, Any]:
     ):
         relative_value(linux.get(key), f"platform linux {key}")
     string_array(linux.get("targets"), "platform linux targets")
+    linux["dt_config_checks"] = _dt_config_checks(linux.get("dt_config_checks"))
     build_types = exact_table(
         linux.get("build_types"), set(BUILD_TYPES), "platform linux build_types"
     )

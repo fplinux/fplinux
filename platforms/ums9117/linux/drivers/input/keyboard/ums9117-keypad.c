@@ -77,7 +77,9 @@ struct ums9117_keypad_eic_key {
 	int irq;
 	bool down;
 	bool irq_enabled;
+#if IS_ENABLED(CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY)
 	bool suspend_disabled;
+#endif
 	bool wake_enabled;
 };
 
@@ -88,7 +90,9 @@ struct ums9117_keypad {
 	struct input_dev *input;
 	int matrix_irq;
 	struct ums9117_keypad_eic_key eic1;
+#if IS_ENABLED(CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY)
 	struct ums9117_keypad_eic_key eic9;
+#endif
 	unsigned short keymap[UMS9117_KPD_KEYMAP_KEYS];
 	unsigned int rows;
 	unsigned int cols;
@@ -428,9 +432,13 @@ static int ums9117_keypad_parse_eic(struct ums9117_keypad *keypad)
 	if (ret)
 		return ret;
 
+#if IS_ENABLED(CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY)
 	return ums9117_keypad_get_eic_key(keypad, &keypad->eic9, "eic9",
 					  "sprd,eic9-keycode",
 					  UMS9117_KPD_EIC9_SCANCODE);
+#else
+	return 0;
+#endif
 }
 
 static int ums9117_keypad_request_eic_irq(struct ums9117_keypad_eic_key *key)
@@ -447,6 +455,7 @@ static int ums9117_keypad_request_eic_irq(struct ums9117_keypad_eic_key *key)
 		dev_name(key->keypad->dev), key);
 	if (ret)
 		return ret;
+#if IS_ENABLED(CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY)
 	/*
 	 * A lazily disabled EIC stays unmasked in the PMIC, whose interrupt
 	 * wakes the system whenever an unmasked source fires. disable_irq()
@@ -457,6 +466,7 @@ static int ums9117_keypad_request_eic_irq(struct ums9117_keypad_eic_key *key)
 	 */
 	if (key == &key->keypad->eic9)
 		irq_set_status_flags(key->irq, IRQ_DISABLE_UNLAZY);
+#endif
 	return 0;
 }
 
@@ -464,7 +474,9 @@ static int ums9117_keypad_start_eic_irqs(struct ums9117_keypad *keypad)
 {
 	struct ums9117_keypad_eic_key *keys[] = {
 		&keypad->eic1,
+#if IS_ENABLED(CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY)
 		&keypad->eic9,
+#endif
 	};
 	bool sync = false;
 	unsigned int index;
@@ -501,6 +513,7 @@ static int ums9117_keypad_suspend(struct device *dev)
 	ums9117_keypad_mask_matrix_irq(controller);
 	synchronize_irq(controller->matrix_irq);
 
+#if IS_ENABLED(CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY)
 	/*
 	 * Nested EIC child IRQs are not masked by suspend_device_irqs(). EIC9
 	 * therefore has to be disabled explicitly before the shared parent gets
@@ -511,16 +524,19 @@ static int ums9117_keypad_suspend(struct device *dev)
 		disable_irq(controller->eic9.irq);
 		controller->eic9.suspend_disabled = true;
 	}
+#endif
 
 	if (!device_may_wakeup(dev) || controller->eic1.wake_enabled)
 		return 0;
 
 	ret = enable_irq_wake(controller->eic1.irq);
 	if (ret) {
+#if IS_ENABLED(CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY)
 		if (controller->eic9.suspend_disabled) {
 			enable_irq(controller->eic9.irq);
 			controller->eic9.suspend_disabled = false;
 		}
+#endif
 		ums9117_keypad_start_matrix_irq(controller);
 		dev_err(dev, "could not enable EIC1 power-key wake IRQ: %pe\n",
 			ERR_PTR(ret));
@@ -548,6 +564,7 @@ static int ums9117_keypad_resume(struct device *dev)
 
 		controller->eic1.wake_enabled = false;
 	}
+#if IS_ENABLED(CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY)
 	if (controller->eic9.suspend_disabled) {
 		ret = ums9117_keypad_sample_eic_key(&controller->eic9, true);
 		enable_irq(controller->eic9.irq);
@@ -561,6 +578,7 @@ static int ums9117_keypad_resume(struct device *dev)
 		if (ret)
 			input_sync(controller->input);
 	}
+#endif
 	return 0;
 }
 
@@ -584,6 +602,7 @@ static int ums9117_keypad_probe(struct platform_device *pdev)
 	struct ums9117_keypad *keypad;
 	struct input_dev *input;
 	const char *name;
+	bool has_eic_gpio;
 	int ret;
 
 	keypad = devm_kzalloc(dev, sizeof(*keypad), GFP_KERNEL);
@@ -644,9 +663,11 @@ static int ums9117_keypad_probe(struct platform_device *pdev)
 	if (keypad->eic1.gpiod)
 		input_set_capability(input, EV_KEY,
 				     keypad->keymap[UMS9117_KPD_EIC1_SCANCODE]);
+#if IS_ENABLED(CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY)
 	if (keypad->eic9.gpiod)
 		input_set_capability(input, EV_KEY,
 				     keypad->keymap[UMS9117_KPD_EIC9_SCANCODE]);
+#endif
 	if (device_property_present(dev, "wakeup-source")) {
 		ret = devm_device_init_wakeup(dev);
 		if (ret)
@@ -670,11 +691,13 @@ static int ums9117_keypad_probe(struct platform_device *pdev)
 		dev_err_probe(dev, ret, "could not request EIC1 IRQ\n");
 		goto err_mask_matrix;
 	}
+#if IS_ENABLED(CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY)
 	ret = ums9117_keypad_request_eic_irq(&keypad->eic9);
 	if (ret) {
 		dev_err_probe(dev, ret, "could not request EIC9 IRQ\n");
 		goto err_mask_matrix;
 	}
+#endif
 	ret = input_register_device(input);
 	if (ret) {
 		dev_err_probe(dev, ret, "could not register keypad input\n");
@@ -689,11 +712,13 @@ static int ums9117_keypad_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, keypad);
 	ums9117_keypad_start_matrix_irq(keypad);
 
+	has_eic_gpio = keypad->eic1.gpiod;
+#if IS_ENABLED(CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY)
+	has_eic_gpio |= !!keypad->eic9.gpiod;
+#endif
 	dev_dbg(dev, "keypad registered with matrix IRQ SPI%u/hwirq%u%s\n",
 		UMS9117_KPD_MATRIX_IRQ_SPI, UMS9117_KPD_MATRIX_IRQ_HWIRQ,
-		keypad->eic1.gpiod || keypad->eic9.gpiod ?
-			" and EIC GPIO IRQs" :
-			"");
+		has_eic_gpio ? " and EIC GPIO IRQs" : "");
 	return 0;
 
 err_mask_matrix:
@@ -717,10 +742,12 @@ static void ums9117_keypad_stop(struct ums9117_keypad *controller)
 		dev_err(controller->dev,
 			"could not disable EIC1 power-key wake IRQ: %pe\n",
 			ERR_PTR(ret));
+#if IS_ENABLED(CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY)
 	if (controller->eic9.suspend_disabled) {
 		enable_irq(controller->eic9.irq);
 		controller->eic9.suspend_disabled = false;
 	}
+#endif
 	if (controller->eic1.irq_enabled) {
 		disable_irq(controller->eic1.irq);
 		synchronize_irq(controller->eic1.irq);
@@ -730,11 +757,13 @@ static void ums9117_keypad_stop(struct ums9117_keypad *controller)
 		controller->eic1.down = false;
 		ums9117_keypad_notify_power(controller, false);
 	}
+#if IS_ENABLED(CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY)
 	if (controller->eic9.irq_enabled) {
 		disable_irq(controller->eic9.irq);
 		synchronize_irq(controller->eic9.irq);
 		controller->eic9.irq_enabled = false;
 	}
+#endif
 }
 
 static DEFINE_SIMPLE_DEV_PM_OPS(ums9117_keypad_pm_ops, ums9117_keypad_suspend,

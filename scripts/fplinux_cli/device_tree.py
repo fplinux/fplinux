@@ -231,6 +231,41 @@ def parse_nul_string_list(value: bytes, name: str) -> tuple[str, ...]:
         raise DeviceTreeError(f"{name} is not valid UTF-8") from error
 
 
+def verify_dtb_kconfig(
+    tree: bytes | Path,
+    config: Mapping[str, str],
+    checks: Sequence[Mapping[str, str]],
+) -> None:
+    """Require built-in ownership and declared property support for enabled nodes."""
+    if not checks:
+        return
+    owners: dict[str, list[Mapping[str, str]]] = {}
+    for check in checks:
+        owners.setdefault(check["path"], []).append(check)
+    nodes = exact_path_properties(tree, owners)
+    for path, requirements in owners.items():
+        node = nodes[path]
+        status = parse_nul_string(node.get("status", b"okay\0"), f"{path} status")
+        if status not in {"ok", "okay"}:
+            continue
+        compatibles = parse_nul_string_list(node.get("compatible", b""), f"{path} compatible")
+        matched = [check for check in requirements if check["compatible"] in compatibles]
+        if not matched:
+            raise DeviceTreeError(f"enabled DTB node {path} has no declared Kconfig owner")
+        for check in matched:
+            property_name = check.get("property")
+            if property_name is not None and property_name not in node:
+                continue
+            compatible = check["compatible"]
+            symbol = check["config"]
+            if config.get(symbol, "n") != "y":
+                condition = f" property {property_name}" if property_name is not None else ""
+                raise DeviceTreeError(
+                    f"enabled DTB node {path} compatible {compatible}{condition} "
+                    f"requires {symbol}=y"
+                )
+
+
 def _u32_pair(value: bytes, name: str) -> tuple[int, int]:
     """Decode exactly one 32-bit address/size pair from a compiled property."""
     if len(value) != 8:

@@ -54,7 +54,9 @@ properties:
 
   eic9-gpios:
     maxItems: 1
-    description: Optional target-owned SC2720 EIC9 input.
+    description: |
+      Optional target-owned SC2720 EIC9 input. This key is masked during
+      system sleep and cannot wake the system.
 
   sprd,eic9-keycode:
     $ref: /schemas/types.yaml#/definitions/uint32

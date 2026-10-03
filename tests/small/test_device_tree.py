@@ -14,12 +14,191 @@ from fplinux_cli.device_tree import (
     exact_path_properties,
     parse_nul_string,
     parse_nul_string_list,
+    verify_dtb_kconfig,
     verify_profile_dtb_layout,
     verify_root_bootargs,
     verify_target_identity,
 )
+from fplinux_cli.manifests.platforms import load_platform
 
 from tests.fdt import binary_tree
+
+
+class DeviceTreeKconfigTests(unittest.TestCase):
+    """Check compiled USB ownership against independent literal configuration values."""
+
+    checks: ClassVar[tuple[dict[str, str], ...]] = (
+        {
+            "path": "/soc/usb@20200000",
+            "compatible": "sprd,ums9117-musb",
+            "config": "CONFIG_USB_MUSB_UMS9117_COLD",
+        },
+        {
+            "path": "/soc/usb@20200000",
+            "compatible": "fplinux,ums9117-musb-inherited",
+            "config": "CONFIG_USB_MUSB_UMS9117_INHERITED",
+        },
+    )
+
+    @staticmethod
+    def usb_tree(compatible: bytes, status: bytes | None = b"okay\0") -> bytes:
+        """Encode USB properties using the test-owned FDT format fixture."""
+        properties = [("compatible", compatible)]
+        if status is not None:
+            properties.append(("status", status))
+        return binary_tree([], [("soc", [], [("usb@20200000", properties, [])])])
+
+    def test_each_enabled_ownership_path_requires_its_built_in_driver(self) -> None:
+        """A cold owner cannot satisfy inherited DT ownership, or the reverse."""
+        cases = (
+            (b"sprd,ums9117-musb\0", "CONFIG_USB_MUSB_UMS9117_COLD"),
+            (b"fplinux,ums9117-musb-inherited\0", "CONFIG_USB_MUSB_UMS9117_INHERITED"),
+        )
+        for compatible, symbol in cases:
+            with self.subTest(compatible=compatible):
+                tree = self.usb_tree(compatible)
+                verify_dtb_kconfig(tree, {symbol: "y"}, self.checks)
+                for value in ("n", "m", None):
+                    config = {symbol: value} if value is not None else {}
+                    with (
+                        self.subTest(value=value),
+                        self.assertRaisesRegex(DeviceTreeError, f"requires {symbol}=y"),
+                    ):
+                        verify_dtb_kconfig(tree, config, self.checks)
+
+    def test_other_usb_owner_does_not_satisfy_enabled_node(self) -> None:
+        """Built cold support still rejects an inherited node without inherited support."""
+        with self.assertRaisesRegex(DeviceTreeError, "CONFIG_USB_MUSB_UMS9117_INHERITED=y"):
+            verify_dtb_kconfig(
+                self.usb_tree(b"fplinux,ums9117-musb-inherited\0"),
+                {"CONFIG_USB_MUSB_UMS9117_COLD": "y"},
+                self.checks,
+            )
+
+    def test_disabled_node_needs_no_built_ownership(self) -> None:
+        """Disabled USB can remain described while neither ownership path is built."""
+        verify_dtb_kconfig(self.usb_tree(b"sprd,ums9117-musb\0", b"disabled\0"), {}, self.checks)
+
+    def test_absent_or_ok_status_enables_the_node(self) -> None:
+        """Standard DT availability spellings enforce ownership equally."""
+        for status in (None, b"ok\0"):
+            with (
+                self.subTest(status=status),
+                self.assertRaisesRegex(DeviceTreeError, "requires CONFIG_USB_MUSB_UMS9117_COLD=y"),
+            ):
+                verify_dtb_kconfig(self.usb_tree(b"sprd,ums9117-musb\0", status), {}, self.checks)
+
+    def test_enabled_unknown_compatible_is_rejected(self) -> None:
+        """An enabled USB node cannot bypass ownership by changing its compatible."""
+        with self.assertRaisesRegex(DeviceTreeError, "has no declared Kconfig owner"):
+            verify_dtb_kconfig(self.usb_tree(b"example,usb\0"), {}, self.checks)
+
+    def test_compatible_fallback_list_preserves_known_owner_requirement(self) -> None:
+        """A secondary generic compatible does not replace the platform owner."""
+        tree = self.usb_tree(b"sprd,ums9117-musb\0example,generic-musb\0")
+        verify_dtb_kconfig(tree, {"CONFIG_USB_MUSB_UMS9117_COLD": "y"}, self.checks)
+
+
+class DeviceTreePropertyKconfigTests(unittest.TestCase):
+    """Validate optional keypad support through independently encoded DT properties."""
+
+    checks: ClassVar[tuple[dict[str, str], ...]] = (
+        {
+            "path": "/soc/keypad@40250000",
+            "compatible": "sprd,ums9117-keypad",
+            "config": "CONFIG_KEYBOARD_UMS9117",
+        },
+        {
+            "path": "/soc/keypad@40250000",
+            "compatible": "sprd,ums9117-keypad",
+            "property": "eic9-gpios",
+            "config": "CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY",
+        },
+    )
+
+    @staticmethod
+    def keypad_tree(*, has_aux_key: bool, status: bytes = b"okay\0") -> bytes:
+        """Encode a keypad with an optional auxiliary GPIO using the test-owned FDT fixture."""
+        properties = [("compatible", b"sprd,ums9117-keypad\0"), ("status", status)]
+        if has_aux_key:
+            properties.append(("eic9-gpios", struct.pack(">III", 1, 9, 0)))
+        return binary_tree([], [("soc", [], [("keypad@40250000", properties, [])])])
+
+    def test_aux_gpio_requires_its_built_in_support(self) -> None:
+        """A declared auxiliary key cannot be silently omitted from an enabled keypad."""
+        tree = self.keypad_tree(has_aux_key=True)
+        for value in ("n", "m", None):
+            config = {"CONFIG_KEYBOARD_UMS9117": "y"}
+            if value is not None:
+                config["CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY"] = value
+            with (
+                self.subTest(value=value),
+                self.assertRaisesRegex(
+                    DeviceTreeError,
+                    "property eic9-gpios requires CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY=y",
+                ),
+            ):
+                verify_dtb_kconfig(tree, config, self.checks)
+        verify_dtb_kconfig(
+            tree,
+            {"CONFIG_KEYBOARD_UMS9117": "y", "CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY": "y"},
+            self.checks,
+        )
+
+    def test_platform_requirements_reject_an_omitted_aux_key(self) -> None:
+        """The platform's declared policy rejects a keypad whose auxiliary key is not built."""
+        tree = binary_tree(
+            [],
+            [
+                (
+                    "soc",
+                    [],
+                    [
+                        ("usb@20200000", [("compatible", b"sprd,ums9117-musb\0")], []),
+                        (
+                            "keypad@40250000",
+                            [
+                                ("compatible", b"sprd,ums9117-keypad\0"),
+                                ("eic9-gpios", struct.pack(">III", 1, 9, 0)),
+                            ],
+                            [],
+                        ),
+                    ],
+                ),
+            ],
+        )
+        checks = load_platform("ums9117")["linux"]["dt_config_checks"]
+        with self.assertRaisesRegex(DeviceTreeError, "CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY=y"):
+            verify_dtb_kconfig(
+                tree,
+                {
+                    "CONFIG_USB_MUSB_UMS9117_COLD": "y",
+                    "CONFIG_KEYBOARD_UMS9117": "y",
+                    "CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY": "n",
+                },
+                checks,
+            )
+
+    def test_absent_aux_gpio_needs_only_the_keypad_driver(self) -> None:
+        """Targets without an auxiliary GPIO keep that feature absent from their kernel."""
+        verify_dtb_kconfig(
+            self.keypad_tree(has_aux_key=False), {"CONFIG_KEYBOARD_UMS9117": "y"}, self.checks
+        )
+
+    def test_aux_support_does_not_replace_the_keypad_driver(self) -> None:
+        """Conditional support cannot satisfy the device's unconditional driver requirement."""
+        with self.assertRaisesRegex(DeviceTreeError, "requires CONFIG_KEYBOARD_UMS9117=y"):
+            verify_dtb_kconfig(
+                self.keypad_tree(has_aux_key=True),
+                {"CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY": "y"},
+                self.checks,
+            )
+
+    def test_disabled_aux_keypad_needs_no_built_support(self) -> None:
+        """A disabled keypad imposes no driver or auxiliary-feature requirement."""
+        verify_dtb_kconfig(
+            self.keypad_tree(has_aux_key=True, status=b"disabled\0"), {}, self.checks
+        )
 
 
 def _binary_profile_layout_tree(

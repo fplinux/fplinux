@@ -16,6 +16,7 @@ from fplinux_cli.common import fail
 from fplinux_cli.device_state import DeviceStateError, device_kernel_identity, localversion
 from fplinux_cli.device_tree import (
     DeviceTreeError,
+    verify_dtb_kconfig,
     verify_profile_dtb_layout,
     verify_root_bootargs,
     verify_target_identity,
@@ -320,7 +321,12 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
         dtb = inputs_build.require_file(
             output / platform["linux"]["dtb_output_directory"] / target_config["linux"]["dtb"]
         )
+        config_text = inputs_build.require_file(output / ".config").read_text()
         try:
+            verify_dtb_kconfig(
+                dtb, kconfig_values(config_text), platform["linux"]["dt_config_checks"]
+            )
+            process_build.log_message("DTB/Kconfig consistency verified")
             verify_target_identity(
                 dtb,
                 target,
@@ -336,7 +342,6 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
                 verify_profile_dtb_layout(dtb, layout, target_config["linux"]["memory"])
         except DeviceTreeError as error:
             fail(str(error))
-        config_text = inputs_build.require_file(output / ".config").read_text()
         assert_profile_kconfig(output / ".config", config_enable, config_disable)
         assert_build_type_kconfig(
             output / ".config", config_paths[-1], target_config["build_type"]

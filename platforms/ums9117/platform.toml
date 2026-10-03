@@ -148,6 +148,17 @@ patches = [
   "platforms/ums9117/linux/patches/0017-gc2145-parallel-dvp.patch",
 ]
 
+[[linux.dt_config_checks]]
+path = "/soc/keypad@40250000"
+compatible = "sprd,ums9117-keypad"
+config = "CONFIG_KEYBOARD_UMS9117"
+
+[[linux.dt_config_checks]]
+path = "/soc/keypad@40250000"
+compatible = "sprd,ums9117-keypad"
+property = "eic9-gpios"
+config = "CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY"
+
 [[linux.appends]]
 source = "platforms/ums9117/linux/dts/unisoc.Makefile"
 destination = "arch/arm/boot/dts/unisoc/Makefile"
