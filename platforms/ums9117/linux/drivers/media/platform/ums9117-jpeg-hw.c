@@ -30,6 +30,8 @@
 #define JPEG_RESET BIT(8)
 #define JPEG_CCIR_RESET BIT(13)
 #define JPEG_CLOCK_MASK (GENMASK(9, 8) | GENMASK(1, 0))
+#define JPEG_CLOCK_SELECTOR_MASK GENMASK(1, 0)
+#define JPEG_CODEC_CLOCK_SELECTOR 1U
 #define DCAM_CCIR_ROUTE 0x5d0U
 #define DCAM_CCIR_ROUTE_PARALLEL BIT(0)
 
@@ -269,6 +271,7 @@ struct ums9117_jpeg_hw {
 	enum ums9117_dcam_owner owner;
 	unsigned int codec_users;
 	bool owner_active;
+	u32 codec_saved_clock;
 	u32 capture_saved_clock;
 	u32 capture_saved_route;
 	void (*capture_irq)(void *data, u32 status);
@@ -329,6 +332,15 @@ static int jpeg_wait_idle(struct ums9117_jpeg_hw *hw, u32 *status)
 {
 	return readl_poll_timeout(hw->base + JPEG_AHB_STATUS, *status,
 				  !(*status & JPEG_AHB_BUSY), 10, JPEG_POLL_US);
+}
+
+static int jpeg_set_clock_selector(struct ums9117_jpeg_hw *hw, u32 selector)
+{
+	u32 clock = readl(hw->clock);
+
+	writel((clock & ~JPEG_CLOCK_SELECTOR_MASK) | selector, hw->clock);
+	return (readl(hw->clock) & JPEG_CLOCK_SELECTOR_MASK) == selector ? 0 :
+									   -EIO;
 }
 
 static void jpeg_snapshot(struct ums9117_jpeg_hw *hw)
@@ -443,7 +455,7 @@ int ums9117_dcam_claim(struct ums9117_jpeg_hw *hw,
 		       enum ums9117_dcam_owner owner,
 		       void (*capture_irq)(void *data, u32 status), void *data)
 {
-	u32 clock;
+	u32 clock, status;
 	int ret = 0;
 
 	mutex_lock(&hw->owner_lock);
@@ -456,6 +468,21 @@ int ums9117_dcam_claim(struct ums9117_jpeg_hw *hw,
 		goto unlock;
 	}
 	if (owner == UMS9117_DCAM_CODEC) {
+		if (!hw->codec_users) {
+			ret = jpeg_wait_idle(hw, &status);
+			if (ret)
+				goto unlock;
+			hw->codec_saved_clock = readl(hw->clock) &
+						JPEG_CLOCK_SELECTOR_MASK;
+			ret = jpeg_set_clock_selector(
+				hw, JPEG_CODEC_CLOCK_SELECTOR);
+			if (ret) {
+				if (jpeg_set_clock_selector(
+					    hw, hw->codec_saved_clock))
+					WRITE_ONCE(hw->failed, true);
+				goto unlock;
+			}
+		}
 		hw->codec_users++;
 		hw->owner = owner;
 		hw->owner_active = true;
@@ -499,7 +526,8 @@ int ums9117_dcam_capture_route_serial_g0(struct ums9117_jpeg_hw *hw)
 void ums9117_dcam_release(struct ums9117_jpeg_hw *hw,
 			  enum ums9117_dcam_owner owner)
 {
-	u32 clock;
+	u32 clock, status;
+	int ret;
 
 	mutex_lock(&hw->owner_lock);
 	if (WARN_ON(!hw->owner_active || hw->owner != owner))
@@ -507,6 +535,20 @@ void ums9117_dcam_release(struct ums9117_jpeg_hw *hw,
 	if (owner == UMS9117_DCAM_CODEC) {
 		if (--hw->codec_users)
 			goto unlock;
+		/* Streaming queues stop their jobs before the last owner releases. */
+		if (!ums9117_jpeg_hw_failed(hw)) {
+			ret = jpeg_wait_idle(hw, &status);
+			if (!ret)
+				ret = jpeg_set_clock_selector(
+					hw, hw->codec_saved_clock);
+			if (ret) {
+				WRITE_ONCE(hw->failed, true);
+				dev_err_ratelimited(
+					hw->dev,
+					"codec clock restore failed: %pe\n",
+					ERR_PTR(ret));
+			}
+		}
 	} else {
 		jpeg_write(hw, JPEG_INT_MASK, 0);
 		jpeg_read(hw, JPEG_INT_MASK);
@@ -2108,6 +2150,8 @@ static int jpeg_stats_show(struct seq_file *seq, void *unused)
 		seq,
 		"saved_gate=%08x saved_clock=%08x configured_clock_mask=00000303 configured_clock_value=00000000\n",
 		hw->saved_gate, hw->saved_clock);
+	seq_printf(seq, "codec_clock_selector=%u current_clock=%08x\n",
+		   JPEG_CODEC_CLOCK_SELECTOR, readl(hw->clock));
 	return 0;
 }
 DEFINE_SHOW_ATTRIBUTE(jpeg_stats);
