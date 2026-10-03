@@ -3,7 +3,6 @@ config SND_UMS9117
 	bool "UMS9117 audio"
 	depends on SND && ARCH_UMS9117 && MFD_SC27XX_PMIC && COMMON_CLK_SC2720
 	depends on INPUT
-	select INPUT_FF_MEMLESS
 	select SND_JACK
 	select SND_PCM
 	help
@@ -17,8 +16,16 @@ config SND_UMS9117
 	  which can run at the same time as 48 kHz playback.
 	  The FM mixer switch routes the internal 32 kHz IIS source to the
 	  enabled outputs.
-	  Boards whose speaker also vibrates the phone get a force-feedback
-	  vibrator that plays the fitted vibrate tone through the speaker.
 	  Boards with a headphone jack detect line report the wired headphone
 	  jack as the Headphone Jack control and a headphone switch input
 	  device.
+
+config SND_UMS9117_SPEAKER_VIBRATOR
+	bool "UMS9117 speaker vibrator"
+	depends on SND_UMS9117
+	select INPUT_FF_MEMLESS
+	help
+	  Boards whose speaker also vibrates the phone get a force-feedback
+	  vibrator that plays the fitted vibrate tone through the speaker.
+	  The board declares this capability in its device tree and supplies
+	  the waveform through its fitted audio profile.
