@@ -318,6 +318,8 @@ static const u32 jpeg_scale_v[JPEG_SCALE_V_WORDS] = {
 	0x00000000, 0x00006834,
 };
 
+static void jpeg_free_buffers(struct ums9117_jpeg_hw *hw);
+
 static u32 jpeg_read(struct ums9117_jpeg_hw *hw, u32 reg)
 {
 	return readl(hw->base + reg);
@@ -538,9 +540,11 @@ void ums9117_dcam_release(struct ums9117_jpeg_hw *hw,
 		/* Streaming queues stop their jobs before the last owner releases. */
 		if (!ums9117_jpeg_hw_failed(hw)) {
 			ret = jpeg_wait_idle(hw, &status);
-			if (!ret)
+			if (!ret) {
+				jpeg_free_buffers(hw);
 				ret = jpeg_set_clock_selector(
 					hw, hw->codec_saved_clock);
+			}
 			if (ret) {
 				WRITE_ONCE(hw->failed, true);
 				dev_err_ratelimited(
@@ -714,18 +718,21 @@ static dma_addr_t jpeg_buffer_dma(struct ums9117_jpeg_dma_buffer *buffer)
 	return buffer->dma + JPEG_GUARD_BYTES;
 }
 
+static void jpeg_free_buffer(struct ums9117_jpeg_hw *hw,
+			     struct ums9117_jpeg_dma_buffer *buffer)
+{
+	if (buffer->allocation)
+		dma_free_coherent(hw->dev, buffer->allocation_size,
+				  buffer->allocation, buffer->dma);
+	memset(buffer, 0, sizeof(*buffer));
+}
+
 static void jpeg_free_buffers(struct ums9117_jpeg_hw *hw)
 {
 	unsigned int i;
 
-	for (i = 0; i < ARRAY_SIZE(hw->buffers); ++i) {
-		struct ums9117_jpeg_dma_buffer *buffer = &hw->buffers[i];
-
-		if (buffer->allocation)
-			dma_free_coherent(hw->dev, buffer->allocation_size,
-					  buffer->allocation, buffer->dma);
-		memset(buffer, 0, sizeof(*buffer));
-	}
+	for (i = 0; i < ARRAY_SIZE(hw->buffers); ++i)
+		jpeg_free_buffer(hw, &hw->buffers[i]);
 }
 
 static int jpeg_allocate_buffer(struct ums9117_jpeg_hw *hw,
@@ -740,8 +747,40 @@ static int jpeg_allocate_buffer(struct ums9117_jpeg_hw *hw,
 		return -ENOMEM;
 	if (upper_32_bits(buffer->dma + buffer->allocation_size - 1))
 		return -ERANGE;
-	memset(buffer->allocation, JPEG_GUARD_VALUE, buffer->allocation_size);
+	memset(buffer->allocation, JPEG_GUARD_VALUE, JPEG_GUARD_BYTES);
+	memset((u8 *)buffer->allocation + JPEG_GUARD_BYTES + buffer->size,
+	       JPEG_GUARD_VALUE, JPEG_GUARD_BYTES);
 	memset(jpeg_buffer_data(buffer), 0, buffer->size);
+	return 0;
+}
+
+static int jpeg_prepare_buffers(struct ums9117_jpeg_hw *hw,
+				const size_t sizes[4])
+{
+	unsigned int i;
+	int ret;
+
+	/* Discard mismatched banks before allocating their replacements. */
+	for (i = 0; i < ARRAY_SIZE(hw->buffers); ++i) {
+		struct ums9117_jpeg_dma_buffer *buffer = &hw->buffers[i];
+
+		if (!sizes[i] ||
+		    buffer->size != ALIGN(sizes[i], JPEG_GUARD_BYTES))
+			jpeg_free_buffer(hw, buffer);
+	}
+	for (i = 0; i < ARRAY_SIZE(hw->buffers); ++i) {
+		struct ums9117_jpeg_dma_buffer *buffer = &hw->buffers[i];
+
+		if (!sizes[i])
+			continue;
+		if (buffer->allocation) {
+			memset(jpeg_buffer_data(buffer), 0, buffer->size);
+			continue;
+		}
+		ret = jpeg_allocate_buffer(hw, buffer, sizes[i]);
+		if (ret)
+			return ret;
+	}
 	return 0;
 }
 
@@ -1203,6 +1242,7 @@ int ums9117_jpeg_hw_decode(struct ums9117_jpeg_hw *hw,
 	unsigned long flags, deadline;
 	u64 started_ns;
 	size_t full_y_size, y_size, uv_size, slice_y_size, slice_uv_size;
+	size_t buffer_sizes[4];
 	size_t y_offset;
 	u32 events, row, rows, slice_rows;
 	unsigned int completed_slices = 0;
@@ -1245,15 +1285,11 @@ int ums9117_jpeg_hw_decode(struct ums9117_jpeg_hw *hw,
 	spin_lock_irqsave(&hw->lock, flags);
 	hw->stats.requests++;
 	spin_unlock_irqrestore(&hw->lock, flags);
-	ret = jpeg_allocate_buffer(hw, &hw->buffers[0],
-				   frame->entropy_length +
-					   JPEG_STREAM_TAIL_BYTES);
-	if (ret)
-		goto free_buffers;
-	ret = jpeg_allocate_buffer(hw, &hw->buffers[1], slice_y_size);
-	if (ret)
-		goto free_buffers;
-	ret = jpeg_allocate_buffer(hw, &hw->buffers[2], slice_uv_size);
+	buffer_sizes[0] = frame->entropy_length + JPEG_STREAM_TAIL_BYTES;
+	buffer_sizes[1] = slice_y_size;
+	buffer_sizes[2] = slice_uv_size;
+	buffer_sizes[3] = 0;
+	ret = jpeg_prepare_buffers(hw, buffer_sizes);
 	if (ret)
 		goto free_buffers;
 	memcpy(jpeg_buffer_data(&hw->buffers[0]), entropy,
@@ -1337,7 +1373,8 @@ stop:
 	if (!ret && atomic_read(&hw->cancelled))
 		ret = -ECANCELED;
 free_buffers:
-	jpeg_free_buffers(hw);
+	if (ret)
+		jpeg_free_buffers(hw);
 record_result:
 	jpeg_clear_operation(hw);
 	spin_lock_irqsave(&hw->lock, flags);
@@ -1492,8 +1529,6 @@ static void jpeg_encode_fill_inputs(struct ums9117_jpeg_hw *hw,
 	}
 	memset(jpeg_buffer_data(&hw->buffers[2]), JPEG_ENCODE_FILL,
 	       hw->buffers[2].size);
-	memset(jpeg_buffer_data(&hw->buffers[3]), JPEG_ENCODE_FILL,
-	       hw->buffers[3].size);
 }
 
 static int jpeg_encode_verify_memory(struct ums9117_jpeg_hw *hw,
@@ -1630,6 +1665,7 @@ int ums9117_jpeg_hw_encode(struct ums9117_jpeg_hw *hw,
 	u64 started_ns;
 	size_t input_plane_size, staged_stream_size = 0;
 	size_t strip_plane_size, stream_capacity, result_size = 0;
+	size_t buffer_sizes[4];
 	unsigned int completed_strips = 0;
 	unsigned int staged_strip = 0;
 	unsigned int strip, strips;
@@ -1678,22 +1714,19 @@ int ums9117_jpeg_hw_encode(struct ums9117_jpeg_hw *hw,
 	strips = config->height / UMS9117_JPEG_ENCODE_STRIP_ROWS;
 	started_ns = ktime_get_ns();
 	jpeg_operation_request(hw, JPEG_OPERATION_ENCODE);
-	ret = jpeg_allocate_buffer(hw, &hw->buffers[0], 2 * strip_plane_size);
-	if (ret)
-		goto free_buffers;
-	ret = jpeg_allocate_buffer(hw, &hw->buffers[1], 2 * strip_plane_size);
-	if (ret)
-		goto free_buffers;
-	ret = jpeg_allocate_buffer(hw, &hw->buffers[2], stream_capacity);
-	if (ret)
-		goto free_buffers;
-	ret = jpeg_allocate_buffer(hw, &hw->buffers[3], stream_capacity);
+	buffer_sizes[0] = 2 * strip_plane_size;
+	buffer_sizes[1] = 2 * strip_plane_size;
+	buffer_sizes[2] = stream_capacity;
+	buffer_sizes[3] = stream_capacity;
+	ret = jpeg_prepare_buffers(hw, buffer_sizes);
 	if (ret)
 		goto free_buffers;
 	if (!jpeg_buffers_disjoint(hw)) {
 		ret = -ERANGE;
 		goto free_buffers;
 	}
+	memset(jpeg_buffer_data(&hw->buffers[3]), JPEG_ENCODE_FILL,
+	       hw->buffers[3].size);
 	jpeg_set_operation(hw, JPEG_OPERATION_ENCODE, JPEG_ENCODE_IRQ_ENABLED);
 	deadline = jiffies + msecs_to_jiffies(JPEG_WAIT_MS);
 	for (strip = 0; strip < strips; ++strip) {
@@ -1725,6 +1758,10 @@ int ums9117_jpeg_hw_encode(struct ums9117_jpeg_hw *hw,
 	memory_ret = jpeg_encode_verify_memory(
 		hw, input, (size_t)staged_strip * strip_plane_size,
 		strip_plane_size, staged_stream_size);
+	if (!memory_ret && !ret &&
+	    memchr_inv(jpeg_buffer_data(&hw->buffers[3]), JPEG_ENCODE_FILL,
+		       hw->buffers[3].size))
+		memory_ret = -EFAULT;
 	if (memory_ret) {
 		spin_lock_irqsave(&hw->lock, flags);
 		if (memory_ret == -EBADMSG)
@@ -1748,7 +1785,8 @@ int ums9117_jpeg_hw_encode(struct ums9117_jpeg_hw *hw,
 	if (!ret)
 		*written = result_size;
 free_buffers:
-	jpeg_free_buffers(hw);
+	if (ret)
+		jpeg_free_buffers(hw);
 record_result:
 	jpeg_clear_operation(hw);
 	jpeg_operation_result(hw, JPEG_OPERATION_ENCODE, ret, completed_strips,
@@ -1967,6 +2005,7 @@ int ums9117_jpeg_hw_scale(struct ums9117_jpeg_hw *hw,
 	unsigned long flags, deadline;
 	u64 started_ns;
 	unsigned int completed_units = 0;
+	size_t buffer_sizes[4];
 	int memory_ret, recovery_ret, ret;
 
 	if (!input || !input[0] || !input[1] || !input_size || !output ||
@@ -1987,16 +2026,11 @@ int ums9117_jpeg_hw_scale(struct ums9117_jpeg_hw *hw,
 		return -ENOSPC;
 	started_ns = ktime_get_ns();
 	jpeg_operation_request(hw, JPEG_OPERATION_SCALE);
-	ret = jpeg_allocate_buffer(hw, &hw->buffers[0], config->source_bytes);
-	if (ret)
-		goto free_buffers;
-	ret = jpeg_allocate_buffer(hw, &hw->buffers[1], config->source_bytes);
-	if (ret)
-		goto free_buffers;
-	ret = jpeg_allocate_buffer(hw, &hw->buffers[2], config->dest_bytes);
-	if (ret)
-		goto free_buffers;
-	ret = jpeg_allocate_buffer(hw, &hw->buffers[3], config->dest_bytes);
+	buffer_sizes[0] = config->source_bytes;
+	buffer_sizes[1] = config->source_bytes;
+	buffer_sizes[2] = config->dest_bytes;
+	buffer_sizes[3] = config->dest_bytes;
+	ret = jpeg_prepare_buffers(hw, buffer_sizes);
 	if (ret)
 		goto free_buffers;
 	if (!jpeg_buffers_disjoint(hw)) {
@@ -2050,7 +2084,8 @@ int ums9117_jpeg_hw_scale(struct ums9117_jpeg_hw *hw,
 				   config->dest_bytes);
 	}
 free_buffers:
-	jpeg_free_buffers(hw);
+	if (ret)
+		jpeg_free_buffers(hw);
 record_result:
 	jpeg_clear_operation(hw);
 	jpeg_operation_result(hw, JPEG_OPERATION_SCALE, ret, completed_units,
