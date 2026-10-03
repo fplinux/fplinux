@@ -204,6 +204,7 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
         device.mkdir(parents=True)
         (device / "brightness").write_text("1\n", encoding="ascii")
         (device / "max_brightness").write_text("10\n", encoding="ascii")
+        (device / "trigger").write_text("[none] input-events\n", encoding="ascii")
 
     def test_default_class_discovery_uses_keyboard_led_function(self) -> None:
         """A status LED does not replace the sole kbd_backlight function LED."""
