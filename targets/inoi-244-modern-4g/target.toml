@@ -13,7 +13,7 @@ id = 0x21e5
 raw_page_bytes = 2112
 
 [rootfs]
-packages = ["fplinux-audio", "fplinux-jack"]
+packages = ["fplinux-audio", "fplinux-jack", "fplinux-font-terminus-8x16"]
 
 [display_brightness]
 backlight = "inoi244-backlight"

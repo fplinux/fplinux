@@ -3,16 +3,7 @@
 #include "terminal-help.h"
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-
-#define FPLINUX_TERMINAL_FONT_MAX_BYTES (1024U * 1024U)
-
-static uint32_t read_u32(const unsigned char *bytes)
-{
-	return (uint32_t)bytes[0] | (uint32_t)bytes[1] << 8 |
-	       (uint32_t)bytes[2] << 16 | (uint32_t)bytes[3] << 24;
-}
 
 static bool next_unicode(const unsigned char **cursor, const unsigned char *end,
 			 uint32_t *value)
@@ -57,103 +48,6 @@ static bool next_unicode(const unsigned char **cursor, const unsigned char *end,
 	return true;
 }
 
-static int compare_glyph(const void *first, const void *second)
-{
-	const struct fplinux_terminal_glyph *left = first;
-	const struct fplinux_terminal_glyph *right = second;
-
-	return (left->codepoint > right->codepoint) -
-	       (left->codepoint < right->codepoint);
-}
-
-static bool read_font(struct fplinux_terminal_font *font, size_t size)
-{
-	const unsigned char *data = font->data;
-	const unsigned char *end = data + size;
-	const unsigned char *table;
-	unsigned int header_bytes;
-	unsigned int glyph_count;
-	unsigned int index = 0;
-	bool sequence = false;
-
-	if (size < 32 || read_u32(data) != 0x864ab572 ||
-	    read_u32(data + 4) != 0 || read_u32(data + 12) != 1)
-		return false;
-	header_bytes = read_u32(data + 8);
-	glyph_count = read_u32(data + 16);
-	font->glyph_bytes = read_u32(data + 20);
-	font->height = read_u32(data + 24);
-	font->width = read_u32(data + 28);
-	font->row_bytes = (font->width + 7U) / 8U;
-	if (header_bytes < 32 || header_bytes > size || !glyph_count ||
-	    !font->width || font->width > 16 || !font->height ||
-	    font->height > 32 ||
-	    font->glyph_bytes != font->row_bytes * font->height ||
-	    glyph_count > (size - header_bytes) / font->glyph_bytes)
-		return false;
-	font->bitmap = data + header_bytes;
-	table = font->bitmap + (size_t)glyph_count * font->glyph_bytes;
-	font->map = calloc((size_t)(end - table), sizeof(*font->map));
-	if (!font->map)
-		return false;
-	while (table < end && index < glyph_count) {
-		uint32_t codepoint;
-
-		if (*table == 0xff) {
-			++index;
-			++table;
-			sequence = false;
-		} else if (*table == 0xfe) {
-			sequence = true;
-			++table;
-		} else if (!next_unicode(&table, end, &codepoint)) {
-			return false;
-		} else if (!sequence) {
-			font->map[font->map_count++] =
-				(struct fplinux_terminal_glyph){ codepoint,
-								 index };
-		}
-	}
-	if (index != glyph_count || table != end || !font->map_count)
-		return false;
-	qsort(font->map, font->map_count, sizeof(*font->map), compare_glyph);
-	return true;
-}
-
-bool fplinux_terminal_font_open(struct fplinux_terminal_font *font,
-				const char *path)
-{
-	FILE *file;
-	long size;
-	bool valid = false;
-
-	memset(font, 0, sizeof(*font));
-	file = fopen(path, "rb");
-	if (!file)
-		return false;
-	if (fseek(file, 0, SEEK_END) || (size = ftell(file)) < 32 ||
-	    (size_t)size > FPLINUX_TERMINAL_FONT_MAX_BYTES ||
-	    fseek(file, 0, SEEK_SET))
-		goto done;
-	font->data = malloc((size_t)size);
-	if (!font->data ||
-	    fread(font->data, 1, (size_t)size, file) != (size_t)size)
-		goto done;
-	valid = read_font(font, (size_t)size);
-done:
-	fclose(file);
-	if (!valid)
-		fplinux_terminal_font_close(font);
-	return valid;
-}
-
-void fplinux_terminal_font_close(struct fplinux_terminal_font *font)
-{
-	free(font->data);
-	free(font->map);
-	memset(font, 0, sizeof(*font));
-}
-
 static uint16_t rgb565(unsigned int red, unsigned int green, unsigned int blue)
 {
 	return (uint16_t)((red >> 3) << 11 | (green >> 2) << 5 | blue >> 3);
@@ -183,12 +77,10 @@ static void rectangle(const struct fplinux_terminal_surface *surface,
 }
 
 static void glyph(const struct fplinux_terminal_surface *surface,
-		  const struct fplinux_terminal_font *font, unsigned int x,
+		  const struct fplinux_font *font, unsigned int x,
 		  unsigned int y, uint32_t codepoint, uint16_t foreground,
 		  uint16_t background, bool underline)
 {
-	struct fplinux_terminal_glyph key = { .codepoint = codepoint };
-	const struct fplinux_terminal_glyph *entry;
 	const unsigned char *bitmap;
 	unsigned int row;
 	unsigned int column;
@@ -196,16 +88,9 @@ static void glyph(const struct fplinux_terminal_surface *surface,
 	rectangle(surface, x, y, font->width, font->height, background);
 	if (!codepoint || codepoint == ' ')
 		goto decoration;
-	entry = bsearch(&key, font->map, font->map_count, sizeof(*font->map),
-			compare_glyph);
-	if (!entry) {
-		key.codepoint = 0xfffd;
-		entry = bsearch(&key, font->map, font->map_count,
-				sizeof(*font->map), compare_glyph);
-	}
-	if (!entry)
+	bitmap = fplinux_font_glyph(font, codepoint);
+	if (!bitmap)
 		return;
-	bitmap = font->bitmap + (size_t)entry->index * font->glyph_bytes;
 	for (row = 0; row < font->height && y + row < surface->height; ++row) {
 		uint16_t *pixels =
 			(uint16_t *)((unsigned char *)surface->pixels +
@@ -225,7 +110,7 @@ decoration:
 }
 
 static void text_span(const struct fplinux_terminal_surface *surface,
-		      const struct fplinux_terminal_font *font, unsigned int x,
+		      const struct fplinux_font *font, unsigned int x,
 		      unsigned int y, const char *text, size_t size,
 		      uint16_t foreground, uint16_t background)
 {
@@ -242,7 +127,7 @@ static void text_span(const struct fplinux_terminal_surface *surface,
 }
 
 static void text_line(const struct fplinux_terminal_surface *surface,
-		      const struct fplinux_terminal_font *font, unsigned int x,
+		      const struct fplinux_font *font, unsigned int x,
 		      unsigned int y, const char *text, uint16_t foreground,
 		      uint16_t background)
 {
@@ -251,7 +136,7 @@ static void text_line(const struct fplinux_terminal_surface *surface,
 }
 
 static void render_modifiers(struct fplinux_terminal *terminal,
-			     const struct fplinux_terminal_font *font,
+			     const struct fplinux_font *font,
 			     const struct fplinux_terminal_surface *surface,
 			     unsigned int y)
 {
@@ -286,7 +171,7 @@ static void render_modifiers(struct fplinux_terminal *terminal,
 }
 
 static void render_help(const struct fplinux_terminal *terminal,
-			const struct fplinux_terminal_font *font,
+			const struct fplinux_font *font,
 			const struct fplinux_terminal_surface *surface,
 			unsigned int visible_rows)
 {
@@ -325,7 +210,7 @@ static void render_help(const struct fplinux_terminal *terminal,
 }
 
 static void render_menu(const struct fplinux_terminal *terminal,
-			const struct fplinux_terminal_font *font,
+			const struct fplinux_font *font,
 			const struct fplinux_terminal_surface *surface,
 			unsigned int visible_rows)
 {
@@ -365,7 +250,7 @@ static void render_menu(const struct fplinux_terminal *terminal,
 }
 
 void fplinux_terminal_render(struct fplinux_terminal *terminal,
-			     const struct fplinux_terminal_font *font,
+			     const struct fplinux_font *font,
 			     const struct fplinux_terminal_surface *surface)
 {
 	const struct tsm_screen_cell *cells =

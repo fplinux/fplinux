@@ -233,7 +233,7 @@ def _current_apk_packages() -> frozenset[str] | None:
                 )
     except KeyError, OSError, TypeError, ValueError, SystemExit:
         return None
-    return frozenset(packages)
+    return frozenset(alpine_state.aport_producer(package) for package in packages)
 
 
 def _current_host_tools() -> frozenset[str] | None:

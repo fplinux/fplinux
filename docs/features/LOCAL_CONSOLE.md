@@ -10,6 +10,17 @@ completion, history and reverse search. The terminal keeps scrollback and
 renders Unicode text with a Terminus font. The system root and its persistence
 follow the selected boot profile.
 
+The image installs one Terminus size for its display: 6×12 below 200 pixels
+wide, or 8×16 on wider displays. `fplinux-terminal --font PATH` selects a PSF2
+font already present on the phone; you can also copy another PSF2 file there.
+The terminal, brightness control and showcase share this font. The two sizes
+are packaged as `fplinux-font-terminus-6x12` and
+`fplinux-font-terminus-8x16`, with paths
+`/usr/share/fplinux/fonts/ter-u12n.psf` and `ter-u16n.psf`. Each package supplies
+`/usr/share/fplinux/fonts/default.psf` pointing to its selected size. Applications
+reject a default whose cell size does not match the display width. Only one
+size is installed; the application bundle includes no font APKs.
+
 ## Phone keypad
 
 Digits enter text with multi-tap: press a digit repeatedly to choose a

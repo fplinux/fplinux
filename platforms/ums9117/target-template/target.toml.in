@@ -18,7 +18,7 @@ firmware = [
 ]
 
 [rootfs]
-packages = []
+packages = ["fplinux-font-terminus-6x12"]
 
 [bundle]
 packages = []

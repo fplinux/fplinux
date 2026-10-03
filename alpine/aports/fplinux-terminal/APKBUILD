@@ -5,15 +5,13 @@ pkgrel=0
 pkgdesc="Interactive DRM terminal for FPLinux phones"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
-license="GPL-2.0-only AND OFL-1.1"
-depends="bash fplinux-input fplinux-xkb ncurses-terminfo-base"
-makedepends_build="clang22 lld22 python3 llvm22"
+license="GPL-2.0-only"
+depends="bash fplinux-input fplinux-xkb ncurses-terminfo-base fplinux-font-terminus-data"
+makedepends_build="clang22 lld22 llvm22"
 makedepends_host="musl-dev linux-headers gcc fplinux-libdrm-dev libevdev-dev eudev-dev fplinux-libxkbcommon-dev fplinux-libxkbcommon-static fplinux-libtsm-dev"
 subpackages="$pkgname-openrc"
 options="!check"
-_fontver=4.49.1
 source="
-	terminus-font-$_fontver.tar.gz::https://downloads.sourceforge.net/project/terminus-font/terminus-font-4.49/terminus-font-$_fontver.tar.gz
 	fplinux-terminal.c
 	fplinux-terminal.h
 	terminal-diagnostic.c
@@ -32,6 +30,8 @@ source="
 	fplinux-terminal.initd
 	fplinux-cli.c
 	fplinux-cli.h
+	fplinux-font.c
+	fplinux-font.h
 	fplinux-drm-session.c
 	fplinux-drm-session.h
 	fplinux-input-session.c
@@ -57,23 +57,15 @@ build() {
 		fplinux-terminal.c terminal-diagnostic.c terminal-engine.c terminal-help.c \
 		terminal-input.c \
 		terminal-keyboard.c terminal-pty.c terminal-render.c \
-		fplinux-cli.c fplinux-drm-session.c fplinux-input-session.c \
+		fplinux-cli.c fplinux-font.c fplinux-drm-session.c fplinux-input-session.c \
 		fplinux-keyboard-text.c fplinux-multitap.c \
 		$LDFLAGS -ltsm "$CBUILDROOT/usr/lib/libxkbcommon.a" -levdev -ludev -ldrm -o fplinux-terminal
-	python3 "terminus-font-$_fontver/bin/bdftopsf.py" -2 \
-		-o ter-u12n.psf "terminus-font-$_fontver/ter-u12n.bdf"
-	python3 "terminus-font-$_fontver/bin/bdftopsf.py" -2 \
-		-o ter-u16n.psf "terminus-font-$_fontver/ter-u16n.bdf"
 }
 
 package() {
 	install -Dm755 fplinux-terminal "$pkgdir/usr/bin/fplinux-terminal"
 	install -Dm755 fplinux-terminal.initd "$pkgdir/etc/init.d/fplinux-terminal"
 	install -Dm644 fplinux-terminal.bashrc "$pkgdir/etc/fplinux/terminal.bashrc"
-	install -Dm644 ter-u12n.psf "$pkgdir/usr/share/fplinux/terminal/ter-u12n.psf"
-	install -Dm644 ter-u16n.psf "$pkgdir/usr/share/fplinux/terminal/ter-u16n.psf"
-	install -Dm644 "terminus-font-$_fontver/OFL.TXT" \
-		"$pkgdir/usr/share/licenses/$pkgname/Terminus-OFL.txt"
 	install -Dm644 "$CBUILDROOT/usr/share/licenses/fplinux-libxkbcommon/LICENSE" \
 		"$pkgdir/usr/share/licenses/$pkgname/libxkbcommon-LICENSE"
 	mkdir -p "$pkgdir/etc/runlevels/default"
@@ -85,9 +77,9 @@ openrc() {
 	default_openrc
 	depends="$depends fplinux-input-openrc"
 }
+
 sha512sums="
-2e3a99960c459a453b5879bebbebeb653f0a22060177bf75c67bbeb7d32cfe1acce9e74a88fdc42e299b6dc402e0708552487abd26e80e985c7d6059b0d445a8  terminus-font-4.49.1.tar.gz
-56cb3357c7feb6dfefa29a1968376862d2cda87b17302c188fb65f0bd42dc89521a7cd36e1f562406be33d1fc47592ec4f78387bc1ef0b3157b7d2e0f3b324a2  fplinux-terminal.c
+f4fdcbdbc66e4a6a5505d68b957cb0322ec56aa6ac564d116ff7ccbdda370b729da017b00658952a71570679b30746fc07fe0ba0bad51a451515de2d80838343  fplinux-terminal.c
 bda9e60ff77852b6884a3757a0f7e905e1ee203c3ac5be1d437a78d9db78174fa506cb84d2125fd7bb09d417e4d8c2d801f47e675f40bf73e495ddb7a722a4d5  fplinux-terminal.h
 cd4689a0fac2d7f064dab009f872c49366b617be958347276efc6d8f3dc3395c084087d3a21a5e3bcb4b37c023154e3458d26d49a0b9302d20982dfeae24e464  terminal-diagnostic.c
 369a9d33c3ed083ddeb2ed25789660a9a5727cf288545e2ec5ce657a33075ce09eb17b7c179277f4676b3707d769bd81499edaf95f12aae51c80f26527be012f  terminal-diagnostic.h
@@ -99,12 +91,14 @@ daf2487e8fe51ff9cf6f686bf234704cce8148a39eb34c468943720339f3d712f0e055993d7c36de
 8d3fb0af4153da10b753fc703caa80770632d92c99472fb16cbf42d3ef3acb73c91b12b0feb94e751a5c52dbb149c719cd2df214dc95a6c8514741787685e2d3  terminal-keyboard.h
 1ada174c04151e6d35b78cc207214c0eb6a3dcc27da8d714646e97328a393fc5de25076c02fa6598bfa346d0c5ee6088841dc6d6a3e0f2b7e5ee83923a578268  terminal-pty.c
 acc8ae17548ccc0540d5a38fdc884b0bd8311df317308025deb15c717b5ca3c6a4cb062b2ad1cc184d28bfee87708b68b9e2dd5908e685c37b740227872a06ef  terminal-pty.h
-876eff54f7ed0a4671961a0d68af52a5f771517ad6d899a6c656a40a059a2b9e7787cfd51033bead37d50b0623c37772edd25640c155a739b4ec3fd17cfd9611  terminal-render.c
-41aa77c34b49a9f61156df7d01c3fb707114156b640e37932cc2f5669589b0b1493a31ca745bdc9c676d62b55cef8cca782391edec47c9d012b2e6247eb76d8d  terminal-render.h
+82f6f60c56a284acd248de09210897fe8490313d11633d5fcd34e4bd026e208d99f1ae83d1d8115b0a23d223a5ae18bb834f32bb0168cc5c24d06ec76f3b3607  terminal-render.c
+2e2be0343d3f791cea8b25280b6db271457fb73d422293aacf9b4942666ce703e16528b28c8c2a019f9845d2ea3d6e0fc88cc75b728c8329582d523eb0ca695c  terminal-render.h
 e58b4f5fff1a0303ce9c33c03159cb7a35db76654e716dfcd8538b9fed15e6894c4e93cd87dd63c2d54a2b5fa48b7c20276de70c31ce07edaaf965aec49ff4e8  fplinux-terminal.bashrc
 b50e9fb34510c160e405ac9a54aa6e076ba7c38325a990a093acb4340759725475ecc6447fff913cd22c10559e54b5031d70731a845be2f0430242de96a4b7c1  fplinux-terminal.initd
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
+9372fbc7468837b10e4e944e02a336761bc1ef91792f62403db3e413f1140d5dc7ca9184ab1c41b22cd16d04e908d830ca354e87ed05aa9f8a6d59b0fe220055  fplinux-font.c
+62ed7c5f099fdbc896254fe700e0722e1f1894ca494f4cec368e77866f9ae59f58b3bef727fffd8cff1d6ad66c6956743a4a052efb394c73b0b47f79f8510be7  fplinux-font.h
 24d96f52eeb3adb9b37e34967199a0efea630af580782fe2f29000862b678d5ae96b4516e291b61ca70a8d9242af43fc720d801e158c7933e957cda0aaf5afdd  fplinux-drm-session.c
 5b63a683e9aac0a4b1faef31c0a09b9ec4131992d5cb69f858c6276855a8d92404c4cf23a1b4c8927d802311e9634b354502745ef15e00a4209744acf51131a7  fplinux-drm-session.h
 8157caf7642468c98be9d4d03aa4a24cf360714015caa4365f037d10c1528a4e757d614a818e0b3a0a20c48f9b0063f9b2f8e331334af9127a670a130ded40da  fplinux-input-session.c

@@ -573,6 +573,77 @@ class PruneTests(unittest.TestCase):
             self.assertTrue(link.is_symlink())
             self.assertTrue(regular.is_file())
 
+    def test_selected_child_packages_preserve_their_aport_cache_slots(self) -> None:
+        """Child selections retain producer output through planned and targeted cleanup."""
+        for cleanup in ("prune", "targeted"):
+            with self.subTest(cleanup=cleanup), tempfile.TemporaryDirectory() as temporary:
+                cache = Path(temporary) / ".cache"
+                apks = cache / "apks"
+                for package in (
+                    "fplinux-font-test",
+                    "fplinux-bundle-test",
+                    "fplinux-standalone",
+                    "fplinux-obsolete",
+                ):
+                    directory = apks / package
+                    directory.mkdir(parents=True)
+                    (directory / "payload").write_text(package + "\n")
+
+                # Stub package declarations; execute real pruning on the isolated cache.
+                with (
+                    mock.patch.object(prune_module, "discover_targets", return_value=("phone",)),
+                    mock.patch.object(prune_module, "discover_profiles", return_value=()),
+                    mock.patch.object(
+                        prune_module, "load_target", return_value={"platform": "platform"}
+                    ),
+                    mock.patch.object(prune_module, "load_platform", return_value={}),
+                    mock.patch.object(
+                        alpine_state,
+                        "selected_packages",
+                        return_value=("fplinux-font-test-12", "fplinux-standalone"),
+                    ),
+                    mock.patch.object(
+                        alpine_state,
+                        "bundle_packages",
+                        return_value=("fplinux-bundle-test-data",),
+                    ),
+                    mock.patch.object(
+                        alpine_state,
+                        "SUBPACKAGE_APORTS",
+                        {
+                            "fplinux-font-test-12": "fplinux-font-test",
+                            "fplinux-bundle-test-data": "fplinux-bundle-test",
+                        },
+                    ),
+                ):
+                    plan = plan_prune(cache)
+                    self.assertEqual(
+                        {entry.path: entry.action for entry in plan.entries},
+                        {
+                            "apks/fplinux-font-test": "protected",
+                            "apks/fplinux-bundle-test": "protected",
+                            "apks/fplinux-standalone": "protected",
+                            "apks/fplinux-obsolete": "candidate",
+                        },
+                    )
+                    removed = (
+                        apply_prune(cache).removed
+                        if cleanup == "prune"
+                        else prune_module.discard_obsolete_apks(cache)
+                    )
+
+                self.assertEqual(removed, ("apks/fplinux-obsolete",))
+                self.assertFalse((apks / "fplinux-obsolete").exists())
+                self.assertEqual(
+                    (apks / "fplinux-font-test/payload").read_text(), "fplinux-font-test\n"
+                )
+                self.assertEqual(
+                    (apks / "fplinux-bundle-test/payload").read_text(), "fplinux-bundle-test\n"
+                )
+                self.assertEqual(
+                    (apks / "fplinux-standalone/payload").read_text(), "fplinux-standalone\n"
+                )
+
     def test_package_config_failure_protects_every_aport_cache_slot(self) -> None:
         """An unreadable target/profile closure cannot make package output disposable."""
         with tempfile.TemporaryDirectory() as temporary:

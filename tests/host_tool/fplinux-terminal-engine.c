@@ -733,7 +733,7 @@ static void verify_bash_line_editing(const char *startup)
 static void verify_render_geometry(const char *font_path, unsigned int width,
 				   unsigned int height)
 {
-	struct fplinux_terminal_font font;
+	struct fplinux_font font;
 	struct fplinux_terminal terminal;
 	unsigned int stride = width + 4;
 	size_t count = (size_t)stride * (height + 2);
@@ -753,7 +753,7 @@ static void verify_render_geometry(const char *font_path, unsigned int width,
 	assert(pixels);
 	for (index = 0; index < count; ++index)
 		pixels[index] = 0xa55a;
-	assert(fplinux_terminal_font_open(&font, font_path));
+	assert(fplinux_font_open(&font, font_path));
 	assert(fplinux_terminal_init(&terminal, width / font.width,
 				     height / font.height - 1, "test"));
 	feed(&terminal, "\033[31mA\033[0m");
@@ -799,13 +799,13 @@ static void verify_render_geometry(const char *font_path, unsigned int width,
 	fplinux_terminal_render(&terminal, &font, &surface);
 	assert(surface.pixels[input_y * stride] == 0xc800);
 	fplinux_terminal_destroy(&terminal);
-	fplinux_terminal_font_close(&font);
+	fplinux_font_close(&font);
 	free(pixels);
 }
 
 static unsigned char
 rendered_character(const struct fplinux_terminal_surface *surface,
-		   const struct fplinux_terminal_font *font, unsigned int x,
+		   const struct fplinux_font *font, unsigned int x,
 		   unsigned int y)
 {
 	unsigned int stride = surface->stride_bytes / sizeof(*surface->pixels);
@@ -824,8 +824,8 @@ rendered_character(const struct fplinux_terminal_surface *surface,
 }
 
 static void rendered_text_is(const struct fplinux_terminal_surface *surface,
-			     const struct fplinux_terminal_font *font,
-			     unsigned int x, unsigned int y, const char *text)
+			     const struct fplinux_font *font, unsigned int x,
+			     unsigned int y, const char *text)
 {
 	for (; *text; ++text, x += font->width) {
 		unsigned char character =
@@ -840,8 +840,8 @@ static void rendered_text_is(const struct fplinux_terminal_surface *surface,
 }
 
 static size_t rendered_line(const struct fplinux_terminal_surface *surface,
-			    const struct fplinux_terminal_font *font,
-			    unsigned int row, char *text, size_t size)
+			    const struct fplinux_font *font, unsigned int row,
+			    char *text, size_t size)
 {
 	size_t columns = surface->width / font->width;
 	size_t column;
@@ -860,7 +860,7 @@ static size_t rendered_line(const struct fplinux_terminal_surface *surface,
 static void verify_menu_rendering(const char *font_path, unsigned int width,
 				  unsigned int height)
 {
-	struct fplinux_terminal_font font;
+	struct fplinux_font font;
 	struct fplinux_terminal terminal;
 	unsigned int stride = width + 4;
 	size_t count = (size_t)stride * (height + 2);
@@ -878,7 +878,7 @@ static void verify_menu_rendering(const char *font_path, unsigned int width,
 	assert(pixels);
 	for (index = 0; index < count; ++index)
 		pixels[index] = 0xa55a;
-	assert(fplinux_terminal_font_open(&font, font_path));
+	assert(fplinux_font_open(&font, font_path));
 	assert(fplinux_terminal_init(&terminal, width / font.width,
 				     height / font.height - 1, "test"));
 	arm_modifiers(&terminal, "12", 10);
@@ -909,7 +909,7 @@ static void verify_menu_rendering(const char *font_path, unsigned int width,
 		for (column = width; column < stride; ++column)
 			assert(surface.pixels[row * stride + column] == 0xa55a);
 	fplinux_terminal_destroy(&terminal);
-	fplinux_terminal_font_close(&font);
+	fplinux_font_close(&font);
 	free(pixels);
 }
 
@@ -928,7 +928,7 @@ struct help_view {
 
 static void read_help_view(struct fplinux_terminal *terminal,
 			   const struct fplinux_terminal_surface *surface,
-			   const struct fplinux_terminal_font *font,
+			   const struct fplinux_font *font,
 			   unsigned int section, unsigned int body_rows,
 			   struct help_view *view)
 {
@@ -1019,7 +1019,7 @@ static struct help_render_metrics verify_help_rendering(const char *font_path,
 		"Menu > Search sends Ctrl+R to search command history.",
 	};
 	struct help_render_metrics metrics = { 0 };
-	struct fplinux_terminal_font font;
+	struct fplinux_font font;
 	struct fplinux_terminal terminal;
 	unsigned int stride = width + 4;
 	size_t count = (size_t)stride * (height + 2);
@@ -1044,7 +1044,7 @@ static struct help_render_metrics verify_help_rendering(const char *font_path,
 	assert(pixels);
 	for (index = 0; index < count; ++index)
 		pixels[index] = 0xa55a;
-	assert(fplinux_terminal_font_open(&font, font_path));
+	assert(fplinux_font_open(&font, font_path));
 	assert(fplinux_terminal_init(&terminal, width / font.width,
 				     height / font.height - 1, "test"));
 	if (modifiers)
@@ -1166,7 +1166,7 @@ static struct help_render_metrics verify_help_rendering(const char *font_path,
 		for (column = width; column < stride; ++column)
 			assert(surface.pixels[row * stride + column] == 0xa55a);
 	fplinux_terminal_destroy(&terminal);
-	fplinux_terminal_font_close(&font);
+	fplinux_font_close(&font);
 	free(pixels);
 	return metrics;
 }

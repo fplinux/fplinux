@@ -2,6 +2,8 @@
 #ifndef FPLINUX_ARMADA_SCENE_H
 #define FPLINUX_ARMADA_SCENE_H
 
+#include "fplinux-font.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -28,7 +30,8 @@ struct armada_outputs {
 };
 
 struct armada_scene *armada_scene_create(unsigned int width,
-					 unsigned int height, uint16_t *pixels);
+					 unsigned int height, uint16_t *pixels,
+					 const struct fplinux_font *font);
 void armada_scene_destroy(struct armada_scene *scene);
 void armada_scene_render(struct armada_scene *scene, uint32_t frame,
 			 const struct armada_metrics *metrics,

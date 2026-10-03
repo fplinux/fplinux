@@ -40,6 +40,10 @@ CLI_SOURCES = (
     "lib/fplinux/fplinux-cli.c",
     "include/fplinux/fplinux-cli.h",
 )
+FONT_SOURCES = (
+    "lib/fplinux/fplinux-font.c",
+    "include/fplinux/fplinux-font.h",
+)
 BRIGHTNESS_CLIENT_SOURCES = (
     "lib/fplinux/fplinux-brightness-client.c",
     "include/fplinux/fplinux-brightness-client.h",
@@ -58,6 +62,7 @@ SHARED_APORT_SOURCES = {
     ),
     "fplinux-bluetooth": CLI_SOURCES,
     "fplinux-brightness-ui": (
+        *FONT_SOURCES,
         *DRM_SESSION_SOURCES,
         *BRIGHTNESS_CLIENT_SOURCES,
         *INPUT_SESSION_SOURCES,
@@ -76,12 +81,14 @@ SHARED_APORT_SOURCES = {
     ),
     "fplinux-rotate": (*DRM_SESSION_SOURCES, *CLI_SOURCES),
     "fplinux-showcase": (
+        *FONT_SOURCES,
         *DRM_SESSION_SOURCES,
         *CLI_SOURCES,
         *KEYPAD_CODE_SOURCES,
         *BRIGHTNESS_CLIENT_SOURCES,
     ),
     "fplinux-terminal": (
+        *FONT_SOURCES,
         *CLI_SOURCES,
         *DRM_SESSION_SOURCES,
         *INPUT_DEVICE_SOURCES,
@@ -127,13 +134,19 @@ LOCAL_BUILD_DEPENDENCIES = {
     "fplinux-present": ("fplinux-libdrm",),
     "fplinux-rotate": ("fplinux-libdrm",),
     "fplinux-showcase": ("fplinux-libdrm",),
-    "fplinux-terminal": ("fplinux-libdrm", "fplinux-libtsm", "fplinux-libxkbcommon"),
+    "fplinux-terminal": (
+        "fplinux-libdrm",
+        "fplinux-libtsm",
+        "fplinux-libxkbcommon",
+    ),
     "fplinux-tyrquake": ("fplinux-libdrm",),
 }
 SUBPACKAGE_APORTS = {
     "fplinux-alsa-lib-card-profiles": "fplinux-alsa-lib",
     "fplinux-bash-loadables": "fplinux-bash",
     "fplinux-ncurses-curses": "fplinux-ncurses",
+    "fplinux-font-terminus-6x12": "fplinux-font-terminus",
+    "fplinux-font-terminus-8x16": "fplinux-font-terminus",
 }
 PACKAGE_ID = re.compile(r"[a-z0-9][a-z0-9+._-]*")
 
@@ -303,6 +316,11 @@ def selected_packages(
         )
     for package in exclude_packages:
         del owners[package]
+    text_consumers = {"fplinux-terminal", "fplinux-brightness-ui", "fplinux-showcase"}
+    font_sizes = {"fplinux-font-terminus-6x12", "fplinux-font-terminus-8x16"}
+    selected_fonts = set(owners) & font_sizes
+    if len(selected_fonts) > 1 or (set(owners) & text_consumers and not selected_fonts):
+        fail("rootfs text applications require exactly one Terminus font size")
     return _canonical_packages(tuple(owners), root)
 
 

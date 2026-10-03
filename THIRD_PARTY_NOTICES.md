@@ -36,7 +36,7 @@ unless an individual file carries a different SPDX identifier.
 | libxkbcommon 1.13.1                      | Keyboard text in the terminal                  | MIT, MIT-open-group, HPND and HPND-sell-variant; shared runtime library                    |
 | libdrm 2.4.134                           | DRM/KMS display access                         | MIT; shared runtime library from the upstream release archive                              |
 | libtsm 4.7.1                             | Terminal screen and escape-sequence handling   | MIT and LGPL-2.1-or-later; the hash table carries the LGPL notice                          |
-| Terminus 4.49.1                          | Local terminal fonts                           | OFL-1.1; upstream release archive                                                          |
+| Terminus 4.49.1                          | Terminal, brightness control and showcase text | OFL-1.1; upstream release archive                                                          |
 | Bash 5.3.9                               | Interactive local shell and Readline editing   | GPL-3.0-or-later; supplied by the pinned Alpine package set                                |
 | OpenWrt uclient, libubox and ustream-ssl | HTTP and HTTPS download client and libraries   | ISC; exact source commits pinned by the `fplinux-uclient` APKBUILD                         |
 | CA certificates bundle                   | HTTPS certificate verification                 | MPL-2.0; supplied by the pinned Alpine package set                                         |

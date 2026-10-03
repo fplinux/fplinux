@@ -79,6 +79,7 @@ class TerminalLoopTests(unittest.TestCase):
                     str(TERMINAL / "terminal-keyboard.c"),
                     str(TERMINAL / "terminal-diagnostic.c"),
                     str(ROOT / "lib/fplinux/fplinux-cli.c"),
+                    str(ROOT / "lib/fplinux/fplinux-font.c"),
                     str(ROOT / "lib/fplinux/fplinux-multitap.c"),
                     str(ROOT / "lib/fplinux/fplinux-keyboard-text.c"),
                     "-Wl,--wrap=fplinux_terminal_keyboard_open",

@@ -9,46 +9,6 @@
 #define COLOR_DIM 0x6b4dU
 #define COLOR_TEXT 0xd6baU
 
-struct glyph {
-	char letter;
-	uint8_t rows[7];
-};
-
-static const struct glyph glyphs[] = {
-	{ ' ', { 0, 0, 0, 0, 0, 0, 0 } },
-	{ '+', { 0, 4, 4, 31, 4, 4, 0 } },
-	{ '-', { 0, 0, 0, 31, 0, 0, 0 } },
-	{ '/', { 1, 1, 2, 4, 8, 16, 16 } },
-	{ '0', { 14, 17, 19, 21, 25, 17, 14 } },
-	{ '1', { 4, 12, 4, 4, 4, 4, 14 } },
-	{ '2', { 14, 17, 1, 2, 4, 8, 31 } },
-	{ '3', { 30, 1, 1, 14, 1, 1, 30 } },
-	{ '4', { 2, 6, 10, 18, 31, 2, 2 } },
-	{ '5', { 31, 16, 16, 30, 1, 1, 30 } },
-	{ '6', { 14, 16, 16, 30, 17, 17, 14 } },
-	{ '7', { 31, 1, 2, 4, 8, 8, 8 } },
-	{ '8', { 14, 17, 17, 14, 17, 17, 14 } },
-	{ '9', { 14, 17, 17, 15, 1, 1, 14 } },
-	{ 'A', { 14, 17, 17, 31, 17, 17, 17 } },
-	{ 'B', { 30, 17, 17, 30, 17, 17, 30 } },
-	{ 'D', { 30, 17, 17, 17, 17, 17, 30 } },
-	{ 'E', { 31, 16, 16, 30, 16, 16, 31 } },
-	{ 'F', { 31, 16, 16, 30, 16, 16, 16 } },
-	{ 'G', { 14, 17, 16, 23, 17, 17, 14 } },
-	{ 'H', { 17, 17, 17, 31, 17, 17, 17 } },
-	{ 'I', { 14, 4, 4, 4, 4, 4, 14 } },
-	{ 'L', { 16, 16, 16, 16, 16, 16, 31 } },
-	{ 'N', { 17, 25, 21, 19, 17, 17, 17 } },
-	{ 'O', { 14, 17, 17, 17, 17, 17, 14 } },
-	{ 'P', { 30, 17, 17, 30, 16, 16, 16 } },
-	{ 'R', { 30, 17, 17, 30, 20, 18, 17 } },
-	{ 'S', { 15, 16, 16, 14, 1, 1, 30 } },
-	{ 'T', { 31, 4, 4, 4, 4, 4, 4 } },
-	{ 'U', { 17, 17, 17, 17, 17, 17, 14 } },
-	{ 'W', { 17, 17, 17, 21, 21, 21, 10 } },
-	{ 'X', { 17, 17, 10, 4, 10, 17, 17 } },
-};
-
 enum brightness_ui_action brightness_ui_key(unsigned int level,
 					    unsigned int code,
 					    unsigned int *requested)
@@ -90,33 +50,31 @@ static void rectangle(const struct brightness_ui_surface *surface,
 	}
 }
 
-static const uint8_t *find_glyph(char letter)
-{
-	for (size_t index = 0; index < sizeof(glyphs) / sizeof(glyphs[0]);
-	     ++index)
-		if (glyphs[index].letter == letter)
-			return glyphs[index].rows;
-	return glyphs[0].rows;
-}
-
-static void label(const struct brightness_ui_surface *surface, const char *text,
+static void label(const struct brightness_ui_surface *surface,
+		  const struct fplinux_font *font, const char *text,
 		  unsigned int y, unsigned int scale, uint16_t color)
 {
 	size_t length = strlen(text);
-	unsigned int width = (unsigned int)length * 6U * scale;
+	unsigned int width = (unsigned int)length * font->width * scale;
 	unsigned int x =
-		width < surface->width ? surface->width / 2U - width / 2U : 0U;
+		width < surface->width ? (surface->width - width) / 2U : 0U;
 
 	for (size_t index = 0; index < length; ++index) {
-		const uint8_t *glyph = find_glyph(text[index]);
+		const unsigned char *glyph =
+			fplinux_font_glyph(font, (unsigned char)text[index]);
 
-		for (unsigned int row = 0; row < 7U; ++row)
-			for (unsigned int column = 0; column < 5U; ++column)
-				if (glyph[row] & (1U << (4U - column)))
+		if (!glyph)
+			continue;
+		for (unsigned int row = 0; row < font->height; ++row)
+			for (unsigned int column = 0; column < font->width;
+			     ++column)
+				if (glyph[row * font->row_bytes + column / 8U] &
+				    (0x80U >> (column % 8U)))
 					rectangle(surface,
 						  x +
 							  (unsigned int)index *
-								  6U * scale +
+								  font->width *
+								  scale +
 							  column * scale,
 						  y + row * scale, scale, scale,
 						  color);
@@ -124,7 +82,8 @@ static void label(const struct brightness_ui_surface *surface, const char *text,
 }
 
 bool brightness_ui_render(const struct brightness_ui_surface *surface,
-			  unsigned int level, bool set_failed)
+			  const struct fplinux_font *font, unsigned int level,
+			  bool set_failed)
 {
 	char value[6] = "0/10";
 	unsigned int margin;
@@ -133,9 +92,10 @@ bool brightness_ui_render(const struct brightness_ui_surface *surface,
 	unsigned int segment_width;
 	unsigned int gap;
 	unsigned int number_scale;
-	unsigned int label_scale;
+	unsigned int title_scale;
 
-	if (!surface || !surface->pixels || level > 10U ||
+	if (!surface || !surface->pixels || !font || !font->bitmap ||
+	    !font->width || !font->height || level > 10U ||
 	    surface->width < 100U || surface->height < 130U ||
 	    surface->stride_bytes < (size_t)surface->width * sizeof(uint16_t) ||
 	    surface->stride_bytes % sizeof(uint16_t))
@@ -144,18 +104,21 @@ bool brightness_ui_render(const struct brightness_ui_surface *surface,
 		rectangle(surface, 0U, row, surface->width, 1U,
 			  COLOR_BACKGROUND);
 	margin = surface->width / 16U;
-	label_scale = surface->width >= 180U ? 2U : 1U;
-	number_scale = surface->width / (level == 10U ? 31U : 25U);
-	if (number_scale > surface->height / 28U)
-		number_scale = surface->height / 28U;
-	if (number_scale < 3U)
-		number_scale = 3U;
-	label(surface, "BRIGHTNESS", surface->height / 11U, 2U, COLOR_DIM);
+	title_scale = 20U * font->width <= surface->width ? 2U : 1U;
+	number_scale =
+		surface->width / ((level == 10U ? 6U : 5U) * font->width);
+	if (number_scale > surface->height / (font->height * 4U))
+		number_scale = surface->height / (font->height * 4U);
+	if (!number_scale)
+		number_scale = 1U;
+	label(surface, font, "BRIGHTNESS", surface->height / 11U, title_scale,
+	      COLOR_DIM);
 	if (level == 10U)
 		memcpy(value, "10/10", sizeof("10/10"));
 	else
 		value[0] = '0' + (char)level;
-	label(surface, value, surface->height / 3U - 3U * number_scale,
+	label(surface, font, value,
+	      surface->height * 2U / 5U - font->height * number_scale / 2U,
 	      number_scale, COLOR_TEXT);
 	bar_y = surface->height * 62U / 100U;
 	bar_width = surface->width - 2U * margin;
@@ -166,12 +129,12 @@ bool brightness_ui_render(const struct brightness_ui_surface *surface,
 			  bar_y, segment_width, surface->height / 22U,
 			  segment < level ? COLOR_TEXT : COLOR_SURFACE);
 	if (set_failed)
-		label(surface, "SET FAILED", surface->height * 75U / 100U,
-		      label_scale, COLOR_TEXT);
+		label(surface, font, "SET FAILED", surface->height * 75U / 100U,
+		      1U, COLOR_TEXT);
 	else
-		label(surface, "UP +  DOWN -", surface->height * 76U / 100U,
-		      label_scale, COLOR_TEXT);
-	label(surface, "RIGHT SOFT EXIT", surface->height * 88U / 100U,
-	      label_scale, COLOR_DIM);
+		label(surface, font, "UP +  DOWN -",
+		      surface->height * 76U / 100U, 1U, COLOR_TEXT);
+	label(surface, font, "RIGHT SOFT EXIT", surface->height * 88U / 100U,
+	      1U, COLOR_DIM);
 	return true;
 }

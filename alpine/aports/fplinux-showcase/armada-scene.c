@@ -104,6 +104,7 @@ struct armada_shadow_bounds {
 };
 
 struct armada_scene {
+	const struct fplinux_font *font;
 	unsigned int width;
 	unsigned int height;
 	unsigned int low_width;
@@ -2446,99 +2447,41 @@ static void put_pixel(struct armada_scene *scene, int x, int y, uint16_t color)
 			color;
 }
 
-static const uint8_t *font_rows(char character)
+static void draw_character(struct armada_scene *scene, int x, int y,
+			   char character, uint16_t color)
 {
-	static const uint8_t alphabet[36][7] = {
-		{ 14, 17, 17, 31, 17, 17, 17 }, { 30, 17, 30, 17, 17, 17, 30 },
-		{ 15, 16, 16, 16, 16, 16, 15 }, { 30, 17, 17, 17, 17, 17, 30 },
-		{ 31, 16, 30, 16, 16, 16, 31 }, { 31, 16, 30, 16, 16, 16, 16 },
-		{ 15, 16, 16, 19, 17, 17, 15 }, { 17, 17, 31, 17, 17, 17, 17 },
-		{ 31, 4, 4, 4, 4, 4, 31 },	{ 1, 1, 1, 1, 17, 17, 14 },
-		{ 17, 18, 20, 24, 20, 18, 17 }, { 16, 16, 16, 16, 16, 16, 31 },
-		{ 17, 27, 21, 21, 17, 17, 17 }, { 17, 25, 25, 21, 19, 19, 17 },
-		{ 14, 17, 17, 17, 17, 17, 14 }, { 30, 17, 17, 30, 16, 16, 16 },
-		{ 14, 17, 17, 17, 21, 18, 13 }, { 30, 17, 17, 30, 20, 18, 17 },
-		{ 15, 16, 16, 14, 1, 1, 30 },	{ 31, 4, 4, 4, 4, 4, 4 },
-		{ 17, 17, 17, 17, 17, 17, 14 }, { 17, 17, 17, 17, 17, 10, 4 },
-		{ 17, 17, 17, 21, 21, 27, 17 }, { 17, 17, 10, 4, 10, 17, 17 },
-		{ 17, 17, 10, 4, 4, 4, 4 },	{ 31, 1, 2, 4, 8, 16, 31 },
-		{ 14, 17, 19, 21, 25, 17, 14 }, { 4, 12, 4, 4, 4, 4, 14 },
-		{ 14, 17, 1, 2, 4, 8, 31 },	{ 30, 1, 1, 14, 1, 1, 30 },
-		{ 2, 6, 10, 18, 31, 2, 2 },	{ 31, 16, 30, 1, 1, 17, 14 },
-		{ 6, 8, 16, 30, 17, 17, 14 },	{ 31, 1, 2, 4, 8, 8, 8 },
-		{ 14, 17, 17, 14, 17, 17, 14 }, { 14, 17, 17, 15, 1, 2, 12 },
-	};
-	static const uint8_t space[7];
+	const struct fplinux_font *font = scene->font;
+	const unsigned char *glyph;
 
 	if (character >= 'a' && character <= 'z')
 		character = (char)(character - 'a' + 'A');
-	if (character >= 'A' && character <= 'Z')
-		return alphabet[(unsigned int)(character - 'A')];
-	if (character >= '0' && character <= '9')
-		return alphabet[26U + (unsigned int)(character - '0')];
-	return space;
-}
-
-static void draw_character(struct armada_scene *scene, int x, int y,
-			   char character, unsigned int scale, uint16_t color)
-{
-	const uint8_t *rows = font_rows(character);
-	unsigned int row;
-	unsigned int column;
-	unsigned int dx;
-	unsigned int dy;
-
-	if (character == ':' || character == '.') {
-		unsigned int first = character == ':' ? 2U : 5U;
-
-		put_pixel(scene, x + (int)(2U * scale),
-			  y + (int)(first * scale), color);
-		if (character == ':')
-			put_pixel(scene, x + (int)(2U * scale),
-				  y + (int)(5U * scale), color);
+	glyph = fplinux_font_glyph(font, (unsigned char)character);
+	if (!glyph)
 		return;
-	}
-	if (character == '-') {
-		for (column = 0; column < 5U * scale; ++column)
-			put_pixel(scene, x + (int)column, y + (int)(3U * scale),
-				  color);
-		return;
-	}
-	for (row = 0; row < 7U; ++row)
-		for (column = 0; column < 5U; ++column)
-			if (rows[row] & (1U << (4U - column)))
-				for (dy = 0; dy < scale; ++dy)
-					for (dx = 0; dx < scale; ++dx)
-						put_pixel(
-							scene,
-							x + (int)(column *
-									  scale +
-								  dx),
-							y + (int)(row * scale +
-								  dy),
-							color);
-}
-
-static int text_width(const char *text, unsigned int scale)
-{
-	return text && *text ? (int)((strlen(text) * 6U - 1U) * scale) : 0;
+	for (unsigned int row = 0; row < font->height; ++row)
+		for (unsigned int column = 0; column < font->width; ++column)
+			if (glyph[row * font->row_bytes + column / 8U] &
+			    (0x80U >> (column % 8U)))
+				put_pixel(scene, x + (int)column, y + (int)row,
+					  color);
 }
 
 static void draw_text(struct armada_scene *scene, int x, int y,
-		      const char *text, unsigned int scale, uint16_t color)
+		      const char *text, uint16_t color)
 {
 	while (*text) {
-		draw_character(scene, x, y, *text, scale, color);
-		x += (int)(6U * scale);
+		draw_character(scene, x, y, *text, color);
+		x += (int)scene->font->width;
 		++text;
 	}
 }
 
 static void draw_centered(struct armada_scene *scene, int y, const char *text,
-			  unsigned int scale, uint16_t color)
+			  uint16_t color)
 {
-	draw_text(scene, ((int)scene->width - text_width(text, scale)) / 2, y,
-		  text, scale, color);
+	int width = (int)(strlen(text) * scene->font->width);
+
+	draw_text(scene, ((int)scene->width - width) / 2, y, text, color);
 }
 
 static void compute_outputs(uint32_t frame, struct armada_outputs *outputs)
@@ -2559,39 +2502,41 @@ static void compute_outputs(uint32_t frame, struct armada_outputs *outputs)
 static void draw_overlay(struct armada_scene *scene,
 			 const struct armada_metrics *metrics)
 {
-	unsigned int scale = scene->width <= 128U ? 1U : 2U;
+	unsigned int line_height = scene->font->height + 2U;
 	uint16_t cyan = color_to_rgb565(vec3(0.25f, 0.88f, 1.0f));
 	uint16_t white = color_to_rgb565(vec3(0.90f, 0.96f, 1.0f));
 	char line[48];
 
-	draw_centered(scene, (int)scene->height / 12, "FPLINUX ARMADA", 1,
-		      white);
+	draw_centered(scene, (int)scene->height / 12, "FPLINUX ARMADA", white);
 	if (scene->frame >= ARMADA_FINAL_METRICS && metrics && metrics->valid) {
 		snprintf(line, sizeof(line), "AVG %u.%u FPS",
 			 metrics->average_fps_tenths / 10U,
 			 metrics->average_fps_tenths % 10U);
-		draw_centered(scene, (int)scene->height * 3 / 4, line, 1, cyan);
+		draw_centered(scene, (int)scene->height * 3 / 4, line, cyan);
 		snprintf(line, sizeof(line), "MIN %u.%u  MAX %u MS",
 			 metrics->minimum_fps_tenths / 10U,
 			 metrics->minimum_fps_tenths % 10U,
 			 metrics->maximum_frame_us / 1000U);
-		draw_centered(scene, (int)scene->height * 3 / 4 + 10, line, 1,
-			      white);
-		draw_centered(scene, (int)scene->height - 12, "BACK EXITS", 1,
-			      white);
+		draw_centered(scene,
+			      (int)scene->height * 3 / 4 + (int)line_height,
+			      line, white);
+		draw_centered(scene, (int)scene->height - (int)line_height,
+			      "BACK EXITS", white);
 	} else {
-		draw_centered(scene, (int)scene->height - (int)(12U * scale),
-			      "DISPLAY KEYS HAPTICS", 1, cyan);
+		draw_centered(scene, (int)scene->height - (int)line_height,
+			      "DISPLAY KEYS HAPTICS", cyan);
 	}
 }
 
 struct armada_scene *armada_scene_create(unsigned int width,
-					 unsigned int height, uint16_t *pixels)
+					 unsigned int height, uint16_t *pixels,
+					 const struct fplinux_font *font)
 {
 	struct armada_scene *scene;
 	unsigned int y;
 
-	if (!pixels || width == 0U || height == 0U || width > 240U ||
+	if (!pixels || !font || !font->bitmap || !font->width ||
+	    !font->height || width == 0U || height == 0U || width > 240U ||
 	    height > 320U) {
 		errno = EINVAL;
 		return NULL;
@@ -2599,6 +2544,7 @@ struct armada_scene *armada_scene_create(unsigned int width,
 	scene = calloc(1, sizeof(*scene));
 	if (!scene)
 		return NULL;
+	scene->font = font;
 	scene->width = width;
 	scene->height = height;
 	scene->low_width = (width + ARMADA_BACKGROUND_SCALE - 1U) /
