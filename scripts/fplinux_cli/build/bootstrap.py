@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import shutil
 import struct
+import tarfile
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli import profile_layout
@@ -107,6 +108,7 @@ def bootstrap_recipe_digest(
     vendor_source = sources_build.source_lock_entry(
         sources, platform_bootstrap["vendor_source_lock"]
     )
+    linux_source = sources_build.source_lock_entry(sources, platform["linux"]["source_lock"])
     vendor_commit = vendor_source.get("commit")
     if not isinstance(vendor_commit, str) or not vendor_commit:
         fail("bootstrap vendor commit must be a non-empty string")
@@ -148,6 +150,12 @@ def bootstrap_recipe_digest(
             "archive_sha256": inputs_build.require_sha256(
                 vendor_source.get("archive_sha256"),
                 "bootstrap vendor source",
+            ),
+        },
+        "linux_source": {
+            "version": linux_source["version"],
+            "sha256": inputs_build.require_sha256(
+                linux_source.get("sha256"), "bootstrap Linux font source"
             ),
         },
         "generated": generated,
@@ -410,6 +418,22 @@ def build_bootstrap(  # noqa: PLR0913 -- source selection and payload inputs sta
         else:
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(inputs_build.require_file(source), destination)
+    linux_lock = sources_build.source_lock_entry(sources, platform["linux"]["source_lock"])
+    linux_archive = sources_build.fetch(
+        linux_lock.get("url"),
+        linux_lock.get("sha256"),
+        inputs_build.CACHE / "downloads/linux",
+        f"linux-{linux_lock['version']}.tar.xz",
+    )
+    with tarfile.open(linux_archive, "r:*") as source_archive:
+        for step in platform_bootstrap["linux_copies"]:
+            member = source_archive.getmember(f"linux-{linux_lock['version']}/{step['source']}")
+            stream = source_archive.extractfile(member)
+            if stream is None or not member.isfile():
+                fail(f"invalid bootstrap Linux font member: {step['source']}")
+            destination = bootstrap / step["destination"]
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(stream.read())
     sources_build.write_generated_files(
         bootstrap,
         generated_bootstrap_files(target_config, platform),

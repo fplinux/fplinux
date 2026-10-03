@@ -16,13 +16,23 @@ override FPLINUX_BOOT_LAYOUT_HEADER := generated/fplinux-boot-layout.h
 override FPLINUX_BOOTSTRAP_MEMORY_LD := generated/fplinux-bootstrap-memory.ld
 override FPLINUX_UBOOT_BUILD_HEADER := generated/fplinux-uboot-build.h
 
+ifeq ($(FPLINUX_BOOT_FONT),6x8)
+override FPLINUX_BOOT_FONT_DEFINE := 6
+override FPLINUX_BOOT_FONT_SOURCE := fplinux-boot-screen/font_6x8
+else ifeq ($(FPLINUX_BOOT_FONT),7x14)
+override FPLINUX_BOOT_FONT_DEFINE := 7
+override FPLINUX_BOOT_FONT_SOURCE := fplinux-boot-screen/font_7x14
+else
+$(error FPLinux bootstrap font must be 6x8 or 7x14)
+endif
+
 override SYS_EXTRA :=
 override SYS_SRCS := asmcode usbio common libc syscomm syscode
 override SYS_SRCS2 := start entry $(SYS_SRCS)
 ifeq ($(FPLINUX_BOOTSTRAP_MODE),uboot)
-override APP_SRCS := main fplinux-boot-screen/boot-screen ums9117-bootstrap/sd-stage0 ums9117-bootstrap/boot-common ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff ums9117-bootstrap/uboot-handoff payload
+override APP_SRCS := main fplinux-boot-screen/boot-screen $(FPLINUX_BOOT_FONT_SOURCE) ums9117-bootstrap/sd-stage0 ums9117-bootstrap/boot-common ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff ums9117-bootstrap/uboot-handoff payload
 else
-override APP_SRCS := main fplinux-boot-screen/boot-screen ums9117-bootstrap/boot-main ums9117-bootstrap/boot-common ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff payload
+override APP_SRCS := main fplinux-boot-screen/boot-screen $(FPLINUX_BOOT_FONT_SOURCE) ums9117-bootstrap/boot-main ums9117-bootstrap/boot-common ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff payload
 endif
 override APP_OBJS1 := $(APP_SRCS:%=$(OBJDIR)/app/%.o)
 override APP_OBJS2 :=
@@ -44,7 +54,7 @@ override FPLINUX_VENDOR_LFLAGS := $(LFLAGS)
 override FPLINUX_STORAGE_OFF := -ULIBC_SDIO -DLIBC_SDIO=0 -UFAT_WRITE -DFAT_WRITE=0 -DFPLINUX_BOOTSTRAP_STORAGE_DISABLED=1
 override FPLINUX_STORAGE_LDFLAG := -Wl,--defsym=FPLINUX_BOOTSTRAP_STORAGE_DISABLED=1
 override CFLAGS := $(FPLINUX_VENDOR_CFLAGS) $(FPLINUX_STORAGE_OFF)
-override APP_CFLAGS := $(FPLINUX_VENDOR_APP_CFLAGS) -std=c99 -pedantic -I$(CURDIR) -I$(SYSDIR) $(FPLINUX_STORAGE_OFF)
+override APP_CFLAGS := $(FPLINUX_VENDOR_APP_CFLAGS) -std=c99 -pedantic -I$(CURDIR) -I$(CURDIR)/fplinux-boot-screen -I$(SYSDIR) -DFPLINUX_BOOT_FONT=$(FPLINUX_BOOT_FONT_DEFINE) $(FPLINUX_STORAGE_OFF)
 override SYS_CFLAGS := $(FPLINUX_VENDOR_SYS_CFLAGS) -I$(CURDIR)/ums9117-bootstrap $(FPLINUX_STORAGE_OFF)
 override LFLAGS := $(FPLINUX_VENDOR_LFLAGS) $(FPLINUX_STORAGE_LDFLAG)
 
@@ -74,11 +84,11 @@ ifneq ($(strip $(SYS_SRCS)),asmcode usbio common libc syscomm syscode)
 $(error FPLinux bootstrap source closure changed: $(SYS_SRCS))
 endif
 ifeq ($(FPLINUX_BOOTSTRAP_MODE),uboot)
-ifneq ($(strip $(APP_SRCS)),main fplinux-boot-screen/boot-screen ums9117-bootstrap/sd-stage0 ums9117-bootstrap/boot-common ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff ums9117-bootstrap/uboot-handoff payload)
+ifneq ($(strip $(APP_SRCS)),main fplinux-boot-screen/boot-screen $(FPLINUX_BOOT_FONT_SOURCE) ums9117-bootstrap/sd-stage0 ums9117-bootstrap/boot-common ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff ums9117-bootstrap/uboot-handoff payload)
 $(error FPLinux U-Boot stage0 source closure changed: $(APP_SRCS))
 endif
 else
-ifneq ($(strip $(APP_SRCS)),main fplinux-boot-screen/boot-screen ums9117-bootstrap/boot-main ums9117-bootstrap/boot-common ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff payload)
+ifneq ($(strip $(APP_SRCS)),main fplinux-boot-screen/boot-screen $(FPLINUX_BOOT_FONT_SOURCE) ums9117-bootstrap/boot-main ums9117-bootstrap/boot-common ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff payload)
 $(error FPLinux bootstrap application closure changed: $(APP_SRCS))
 endif
 endif
@@ -102,6 +112,10 @@ $(FPLINUX_FORBIDDEN_OBJS):
 $(OBJDIR)/app/ums9117-bootstrap/boot-main.o: $(FPLINUX_BOOTSTRAP_IDENTITY_HEADER) $(FPLINUX_BOOT_LAYOUT_HEADER)
 $(OBJDIR)/app/ums9117-bootstrap/boot-common.o: $(FPLINUX_BOOT_LAYOUT_HEADER)
 $(OBJDIR)/app/ums9117-bootstrap/sd-stage0.o: $(FPLINUX_BOOTSTRAP_IDENTITY_HEADER) $(FPLINUX_BOOT_LAYOUT_HEADER) $(FPLINUX_UBOOT_BUILD_HEADER)
+
+# Linux font data initializes a flexible array with the compiler extension.
+$(OBJDIR)/app/$(FPLINUX_BOOT_FONT_SOURCE).o: $(FPLINUX_BOOT_FONT_SOURCE).c | objdir
+	$(call compile_cc,$(APP_CFLAGS) -Wno-pedantic)
 
 ifeq ($(FPLINUX_BOOTSTRAP_MODE),uboot)
 $(OBJDIR)/app/payload.o: payload.s ../out/u-boot.bin | objdir

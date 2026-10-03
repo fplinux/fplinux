@@ -315,10 +315,6 @@ source = "platforms/ums9117/linux/bindings/power/supply/sprd,ums9117-sc2720-fgu.
 destination = "Documentation/devicetree/bindings/power/supply/sprd,ums9117-sc2720-fgu.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/lib/fonts/font-fplinux.c"
-destination = "lib/fonts/font_6x8.c"
-
-[[linux.copies]]
 source = "platforms/ums9117/linux/drivers/input/keyboard/ums9117-keypad.c"
 destination = "drivers/input/keyboard/ums9117-keypad.c"
 
@@ -613,6 +609,14 @@ destination = "ums9117-bootstrap"
 [[bootstrap.shared_copies]]
 source = "platforms/ums9117/common/ums9117-boot-contract.h"
 destination = "ums9117-common/ums9117-boot-contract.h"
+
+[[bootstrap.linux_copies]]
+source = "lib/fonts/font_6x8.c"
+destination = "fplinux-boot-screen/font_6x8.c"
+
+[[bootstrap.linux_copies]]
+source = "lib/fonts/font_7x14.c"
+destination = "fplinux-boot-screen/font_7x14.c"
 
 [bootstrap.layout]
 ram_base = 0x80000000
