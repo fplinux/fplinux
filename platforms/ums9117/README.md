@@ -47,7 +47,7 @@ loader.
 | Internal NAND reader                                           | Partial       | Read-only raw page stream for [NAND backup](../../docs/guides/BUILDING.md#save-a-nand-backup); no filesystem, writes or erase.                           |
 | SC2720 EIC GPIO                                                | Supported     | PMIC external-interrupt lines as GPIO; targets use them for keys.                                                                                        |
 | AP GPIO and I2C0                                               | Partial       | Standard controllers serve the camera on all three phones; general peripheral use has not been qualified.                                                |
-| Pin control and reset                                          | Partial       | Fixed microSD and target camera/I2C pin settings; the reset controller serves microSD.                                                                   |
+| Pin control and reset                                          | Partial       | Target-owned matrix, audio, microSD and camera/I2C pin settings; the reset controller serves microSD.                                                    |
 | UART, other I2C, general SPI, watchdog, system reset           | Not supported | No supported platform path for these functions.                                                                                                          |
 
 ## Memory-copy DMA

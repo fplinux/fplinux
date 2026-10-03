@@ -216,6 +216,38 @@
 			};
 		};
 
+		keypad_mux: pinctrl@402a0088 {
+			compatible = "pinctrl-single";
+			reg = <0x402a0088 0x28>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,register-width = <32>;
+			pinctrl-single,function-mask = <0x30>;
+		};
+
+		keypad_pads: pinctrl@402a0488 {
+			compatible = "pinctrl-single";
+			reg = <0x402a0488 0x28>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,register-width = <32>;
+			pinctrl-single,function-mask = <0x0033f8cf>;
+		};
+
+		audio_mux: pinctrl@402a00f0 {
+			compatible = "pinctrl-single";
+			reg = <0x402a00f0 0x20>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,register-width = <32>;
+			pinctrl-single,function-mask = <0x30>;
+		};
+
+		audio_pads: pinctrl@402a04f0 {
+			compatible = "pinctrl-single";
+			reg = <0x402a04f0 0x20>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,register-width = <32>;
+			pinctrl-single,function-mask = <0x001bf8cf>;
+		};
+
 		sdio_mux: pinctrl@402a0120 {
 			compatible = "pinctrl-single";
 			reg = <0x402a0120 0x18>;
@@ -353,11 +385,8 @@
 			reg = <0x40000000 0x00001000>,
 			      <0x40020000 0x00002000>,
 			      <0x402d0258 0x00000018>,
-			      <0x402a00f0 0x00000020>,
-			      <0x402a04f0 0x00000020>,
 			      <0x402a0004 0x00000004>;
-			reg-names = "aud", "vbc", "clk1", "pinmux", "pinconf",
-				    "iis-matrix";
+			reg-names = "aud", "vbc", "clk1", "iis-matrix";
 			fplinux,aon-apb = <&aon_apb>;
 			sprd,pmic = <&sc2720_pmic>;
 			clocks = <&sc2720_xtal>;

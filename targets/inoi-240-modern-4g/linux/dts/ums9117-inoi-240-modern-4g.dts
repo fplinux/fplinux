@@ -118,20 +118,50 @@
 
 &audio {
 	firmware-name = "fplinux/inoi240-audio-profile.bin";
-	fplinux,pad-settings = <
-		0x00 0 0x0008e001
-		0x08 0 0x0008e001
-		0x0c 0 0x0008e001
-		0x1c 0 0x0008e001
-	>;
-	fplinux,capture-pad-settings = <
-		0x14 0 0x0008e000
-		0x18 0 0x0008e000
-	>;
+	pinctrl-names = "audio";
+	pinctrl-0 = <&audio_mux_pins &audio_pad_pins>;
+	fplinux,microphone-capture;
 	hp-det-gpios = <&sc2720_eic 12 GPIO_ACTIVE_HIGH>;
 	fplinux,speaker-vibration;
 	fplinux,card-longname = "INOI 240 Modern 4G audio";
 	status = "okay";
+};
+
+&audio_mux {
+	audio_mux_pins: audio-pins {
+		pinctrl-single,pins = <
+			0x00 0 0x08 0 0x0c 0
+			0x14 0 0x18 0 0x1c 0
+		>;
+	};
+};
+
+&audio_pads {
+	audio_pad_pins: audio-pins {
+		pinctrl-single,pins = <
+			0x00 0x0008e001 0x08 0x0008e001
+			0x0c 0x0008e001 0x14 0x0008e000
+			0x18 0x0008e000 0x1c 0x0008e001
+		>;
+	};
+};
+
+&keypad_mux {
+	keypad_mux_pins: keypad-pins {
+		pinctrl-single,pins = <
+			0x00 0 0x04 0 0x08 0 0x0c 0 0x10 0
+			0x14 0 0x18 0 0x1c 0 0x20 0 0x24 0
+		>;
+	};
+};
+
+&keypad_pads {
+	keypad_pad_pins: keypad-pins {
+		pinctrl-single,pins = <
+			0x00 0x1 0x04 0x1 0x08 0x1 0x0c 0x1 0x10 0x1
+			0x14 0x8a 0x18 0x8a 0x1c 0x8a 0x20 0x8a 0x24 0x8a
+		>;
+	};
 };
 
 &sc2720_kpled {
@@ -229,6 +259,8 @@
 };
 
 &keypad {
+	pinctrl-names = "matrix";
+	pinctrl-0 = <&keypad_mux_pins &keypad_pad_pins>;
 	compatible = "sprd,ums9117-keypad";
 	status = "okay";
 	label = "INOI 240 Modern 4G keypad";

@@ -569,6 +569,7 @@ patches = [
   "platforms/ums9117/bootstrap/0001-preserve-ram-probe-contents.patch",
   "platforms/ums9117/bootstrap/0002-headless.patch",
   "platforms/ums9117/bootstrap/0003-target-display-transport.patch",
+  "platforms/ums9117/bootstrap/0004-linux-owned-input-audio.patch",
 ]
 files = [
   "build_t117.make",
