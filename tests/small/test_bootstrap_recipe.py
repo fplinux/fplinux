@@ -24,6 +24,7 @@ class BootstrapRecipeTests(unittest.TestCase):
         self._write("targets/demo/bootstrap/Makefile", b"all:\n\ttrue\n")
         self._write("targets/demo/bootstrap/main.c", b"int entry(void) { return 1; }\n")
         self._write("bootstrap/fplinux-boot-screen/screen.c", b"int screen;\n")
+        self._write("bootstrap/fplinux-boot-screen/linux/font.h", b"font declarations\n")
         self._write("patches/vendor.patch", b"vendor patch\n")
         self._write("scripts/fplinux_cli/build_env.py", b"build environment\n")
         self._write("scripts/fplinux_cli/build/bootstrap.py", b"builder implementation\n")
@@ -46,7 +47,8 @@ class BootstrapRecipeTests(unittest.TestCase):
                 "payload_limit": 0x82000000,
             },
         }
-        self.platform = {
+        self.platform: dict[str, Any] = {
+            "linux": {"source_lock": "linux"},
             "bootstrap": {
                 "vendor_source_lock": "vendor",
                 "vendor_cache_name": "vendor.tar.gz",
@@ -82,16 +84,27 @@ class BootstrapRecipeTests(unittest.TestCase):
                         "destination": "fplinux-boot-screen",
                     }
                 ],
-            }
+                "linux_copies": [
+                    {
+                        "source": "lib/fonts/font_sample.c",
+                        "destination": "fplinux-boot-screen/font_sample.c",
+                    }
+                ],
+            },
         }
-        self.sources = {
+        self.sources: dict[str, dict[str, str]] = {
             "vendor": {
                 "repository": "https://example.invalid/vendor",
                 "commit": "abc123",
                 "archive_url": "https://example.invalid/vendor.tar.gz",
                 "archive_sha256": "a" * 64,
                 "license": "Unlicense",
-            }
+            },
+            "linux": {
+                "version": "1.2.3",
+                "url": "https://example.invalid/linux.tar.xz",
+                "sha256": "c" * 64,
+            },
         }
 
     def _write(self, relative: str, contents: bytes) -> Path:
@@ -178,6 +191,25 @@ class BootstrapRecipeTests(unittest.TestCase):
 
         self.sources["vendor"]["license"] = "Other"
         self.assertEqual(baseline, self._digest())
+
+    def test_linux_font_source_and_freestanding_header_are_causal(self) -> None:
+        """A pinned font or its compile interface invalidates either bootstrap recipe."""
+        self._write("targets/demo/bootstrap-microsd/Makefile", b"all:\n\ttrue\n")
+        for source in ("bootstrap", "bootstrap-microsd"):
+            with self.subTest(source=source):
+                self.target_config["bootstrap"]["source"] = source
+                baseline = self._digest()
+                self.sources["linux"]["url"] = "https://example.invalid/mirror.tar.xz"
+                self._write("unrelated-font.c", b"int unrelated_font;\n")
+                self.assertEqual(baseline, self._digest())
+                self.sources["linux"]["sha256"] = "d" * 64
+                self.assertNotEqual(baseline, self._digest())
+                self.sources["linux"]["sha256"] = "c" * 64
+                header = self._write(
+                    "bootstrap/fplinux-boot-screen/linux/font.h", b"changed declarations\n"
+                )
+                self.assertNotEqual(baseline, self._digest())
+                header.write_bytes(b"font declarations\n")
 
 
 if __name__ == "__main__":

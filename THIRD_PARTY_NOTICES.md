@@ -13,7 +13,7 @@ unless an individual file carries a different SPDX identifier.
 
 | Component                                | Role                                           | Declared license / provenance                                                              |
 | ---------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Linux 6.18.42                            | Target kernel                                  | GPL-2.0-only; official kernel.org archive                                                  |
+| Linux 6.18.42                            | Target kernel and bootstrap bitmap fonts       | GPL-2.0-only; official kernel.org archive                                                  |
 | Alpine Linux 3.24.1                      | Target userspace and APK package base          | Multiple upstream licenses; exact armv7 artifacts pinned in `alpine.lock.toml`             |
 | OpenRC                                   | Init, service supervision and runlevels        | BSD-2-Clause; supplied by the pinned Alpine package set                                    |
 | Dropbear                                 | USB-network SSH server                         | MIT; supplied by the pinned Alpine package set                                             |
