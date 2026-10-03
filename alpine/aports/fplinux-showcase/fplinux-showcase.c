@@ -44,6 +44,7 @@
 struct class_output {
 	char brightness[SHOWCASE_CLASS_PATH_BYTES];
 	char max_brightness[SHOWCASE_CLASS_PATH_BYTES];
+	char trigger[SHOWCASE_CLASS_PATH_BYTES];
 };
 
 struct showcase_options {
@@ -56,6 +57,7 @@ struct hardware_state {
 	int vibrator;
 	int effect_id;
 	int keypad_original;
+	char *keypad_trigger_original;
 	struct fplinux_brightness_client brightness;
 	bool keypad_grabbed;
 	bool keypad_interface;
@@ -241,22 +243,54 @@ static bool read_number(const char *path, int *value)
 	return true;
 }
 
-static bool write_number(const char *path, int value)
+static bool read_selected_trigger(const char *path, char **value)
 {
-	char buffer[32];
-	int length;
+	char *buffer = NULL;
+	char *selected;
+	char *end;
+	size_t capacity = 0;
+	ssize_t count;
+	int saved_errno;
+	FILE *file = fopen(path, "re");
+
+	if (!file)
+		return false;
+	errno = 0;
+	count = getline(&buffer, &capacity, file);
+	saved_errno = errno;
+	if (fclose(file) < 0 && count >= 0) {
+		free(buffer);
+		return false;
+	}
+	if (count < 0) {
+		free(buffer);
+		errno = saved_errno ? saved_errno : EIO;
+		return false;
+	}
+	selected = strchr(buffer, '[');
+	end = selected ? strchr(selected + 1, ']') : NULL;
+	if (!end || end == selected + 1) {
+		free(buffer);
+		errno = EINVAL;
+		return false;
+	}
+	*end = '\0';
+	memmove(buffer, selected + 1, (size_t)(end - selected));
+	*value = buffer;
+	return true;
+}
+
+static bool write_attribute(const char *path, const char *value, size_t length)
+{
 	ssize_t written;
 	int descriptor = open(path, O_WRONLY | O_CLOEXEC);
 
 	if (descriptor < 0)
 		return false;
-	length = snprintf(buffer, sizeof(buffer), "%d\n", value);
-	written = length > 0 && length < (int)sizeof(buffer) ?
-			  write(descriptor, buffer, (size_t)length) :
-			  -1;
-	if (close(descriptor) < 0 && written == length)
+	written = write(descriptor, value, length);
+	if (close(descriptor) < 0 && written == (ssize_t)length)
 		written = -1;
-	if (written != length) {
+	if (written != (ssize_t)length) {
 		if (written >= 0)
 			errno = EIO;
 		return false;
@@ -264,10 +298,23 @@ static bool write_number(const char *path, int value)
 	return true;
 }
 
+static bool write_number(const char *path, int value)
+{
+	char buffer[32];
+	int length = snprintf(buffer, sizeof(buffer), "%d\n", value);
+
+	if (length <= 0 || length >= (int)sizeof(buffer)) {
+		errno = EOVERFLOW;
+		return false;
+	}
+	return write_attribute(path, buffer, (size_t)length);
+}
+
 static bool set_class_output(struct class_output *output, const char *directory)
 {
 	int brightness_length;
 	int maximum_length;
+	int trigger_length;
 
 	brightness_length = snprintf(output->brightness,
 				     sizeof(output->brightness),
@@ -275,9 +322,12 @@ static bool set_class_output(struct class_output *output, const char *directory)
 	maximum_length = snprintf(output->max_brightness,
 				  sizeof(output->max_brightness),
 				  "%s/max_brightness", directory);
-	if (brightness_length < 0 || maximum_length < 0 ||
+	trigger_length = snprintf(output->trigger, sizeof(output->trigger),
+				  "%s/trigger", directory);
+	if (brightness_length < 0 || maximum_length < 0 || trigger_length < 0 ||
 	    brightness_length >= (int)sizeof(output->brightness) ||
-	    maximum_length >= (int)sizeof(output->max_brightness)) {
+	    maximum_length >= (int)sizeof(output->max_brightness) ||
+	    trigger_length >= (int)sizeof(output->trigger)) {
 		errno = ENAMETOOLONG;
 		return false;
 	}
@@ -511,12 +561,19 @@ static bool open_hardware(struct hardware_state *state,
 	if (!read_number(state->keypad_led.max_brightness, &maximum) ||
 	    maximum < 1 ||
 	    !read_number(state->keypad_led.brightness,
-			 &state->keypad_original)) {
+			 &state->keypad_original) ||
+	    !read_selected_trigger(state->keypad_led.trigger,
+				   &state->keypad_trigger_original)) {
 		snprintf(error, error_size,
 			 "required keypad LED interface is unavailable");
 		return false;
 	}
 	state->keypad_interface = true;
+	if (!write_attribute(state->keypad_led.trigger, "none", 4U)) {
+		snprintf(error, error_size,
+			 "cannot release keypad LED trigger");
+		return false;
+	}
 	if (!write_number(state->keypad_led.brightness, 0)) {
 		snprintf(error, error_size, "cannot switch keypad LED off");
 		return false;
@@ -578,6 +635,14 @@ static bool close_hardware(struct hardware_state *state)
 	if (state->keypad_interface && state->keypad_original >= 0 &&
 	    !write_number(state->keypad_led.brightness, state->keypad_original))
 		ok = false;
+	/* A zero brightness write removes the trigger, so restore it last. */
+	if (state->keypad_interface &&
+	    !write_attribute(state->keypad_led.trigger,
+			     state->keypad_trigger_original,
+			     strlen(state->keypad_trigger_original)))
+		ok = false;
+	free(state->keypad_trigger_original);
+	state->keypad_trigger_original = NULL;
 	state->keypad_on = false;
 	if (state->vibrator >= 0 && state->effect_uploaded) {
 		if (!write_force_feedback(state->vibrator, state->effect_id, 0))

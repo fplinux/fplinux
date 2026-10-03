@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Host-process checks for Showcase's display-brightness lease."""
+"""Host-process checks for Showcase's brightness lease and borrowed LED state."""
 
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import socket
 import tempfile
@@ -65,6 +66,7 @@ class FplinuxShowcaseBrightnessTests(unittest.TestCase):
                 "-Wl,--wrap=read",
                 "-Wl,--wrap=write",
                 "-Wl,--wrap=connect",
+                "-Wl,--wrap=close",
                 *drm_flags,
                 "-o",
                 str(cls.executable),
@@ -80,14 +82,21 @@ class FplinuxShowcaseBrightnessTests(unittest.TestCase):
         extra_frame: bool = False,
         vt_cycle: bool = False,
         font_error: str | None = None,
+        led_trigger: str = "input-events",
+        led_brightness: int = 1,
     ) -> list[str]:
         """Collect requests sent over a test-owned Unix socket during a scene."""
-        case = self.work / (self._testMethodName + (f"-{font_error}" if font_error else ""))
-        case.mkdir()
+        case = Path(tempfile.mkdtemp(dir=self.work, prefix="scene-"))
         keypad_led = case / "keypad"
         keypad_led.mkdir()
-        (keypad_led / "brightness").write_text("1\n", encoding="ascii")
+        (keypad_led / "brightness").write_text(f"{led_brightness}\n", encoding="ascii")
         (keypad_led / "max_brightness").write_text("1\n", encoding="ascii")
+        trigger_text = (
+            "none [input-events] timer\n"
+            if led_trigger == "input-events"
+            else "[none] input-events timer\n"
+        )
+        (keypad_led / "trigger").write_text(trigger_text, encoding="ascii")
         socket_path = case / "brightness.sock"
         requests: list[str] = []
         server_errors: list[Exception] = []
@@ -112,6 +121,7 @@ class FplinuxShowcaseBrightnessTests(unittest.TestCase):
             worker.start()
             environment = os.environ.copy()
             environment["SHOWCASE_BRIGHTNESS_SOCKET"] = str(socket_path)
+            environment["SHOWCASE_KEYPAD_LED"] = str(keypad_led)
             font_path = case / "font.psf"
             if font_error == "malformed":
                 font_path.write_bytes(b"not a PSF font")
@@ -149,9 +159,21 @@ class FplinuxShowcaseBrightnessTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             (keypad_led / "brightness").read_text(encoding="ascii").splitlines()[0],
-            "1",
+            str(led_brightness),
         )
+        selected = re.findall(r"\[([^\]]+)\]", (keypad_led / "trigger").read_text("ascii"))
+        self.assertEqual(selected, [led_trigger])
         return requests
+
+    def test_exit_restores_selected_trigger_with_led_initially_off(self) -> None:
+        """An initially dark LED retains automatic or manual ownership after the scene."""
+        for led_trigger in ("input-events", "none"):
+            with self.subTest(led_trigger=led_trigger):
+                self.run_showcase(led_trigger=led_trigger, led_brightness=0)
+
+    def test_font_error_restores_manual_led_trigger(self) -> None:
+        """A handled startup error preserves an LED with no automatic trigger."""
+        self.run_showcase(font_error="missing", led_trigger="none")
 
     def test_missing_or_malformed_font_reports_error_and_releases_lease(self) -> None:
         """Font startup errors restore the LED and the acquired brightness lease."""

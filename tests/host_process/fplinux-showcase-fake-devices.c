@@ -21,12 +21,44 @@ static int keypad = -1;
 static int vibrator = -1;
 static int dispatches;
 static int frames_presented;
+static int led_brightness = -1;
+static int led_trigger = -1;
 
 FILE *__real_fopen(const char *path, const char *mode);
 int __real_open(const char *path, int flags, ...);
 ssize_t __real_read(int fd, void *buffer, size_t size);
 ssize_t __real_write(int fd, const void *buffer, size_t size);
 int __real_connect(int fd, const struct sockaddr *address, socklen_t length);
+int __real_close(int fd);
+
+/* Model the LED sysfs trigger selection and brightness-zero side effect only. */
+static bool select_led_trigger(const char *selected)
+{
+	const char *directory = getenv("SHOWCASE_KEYPAD_LED");
+	char path[512];
+	FILE *file;
+	bool ok;
+
+	if (!directory || snprintf(path, sizeof(path), "%s/trigger",
+				   directory) >= (int)sizeof(path)) {
+		errno = EINVAL;
+		return false;
+	}
+	file = __real_fopen(path, "w");
+	if (!file)
+		return false;
+	if (!strcmp(selected, "none"))
+		ok = fputs("[none] input-events timer\n", file) >= 0;
+	else if (!strcmp(selected, "input-events"))
+		ok = fputs("none [input-events] timer\n", file) >= 0;
+	else {
+		errno = EINVAL;
+		ok = false;
+	}
+	if (fclose(file) < 0)
+		ok = false;
+	return ok;
+}
 
 FILE *__wrap_fopen(const char *path, const char *mode)
 {
@@ -39,6 +71,9 @@ FILE *__wrap_fopen(const char *path, const char *mode)
 
 int __wrap_open(const char *path, int flags, ...)
 {
+	const char *directory = getenv("SHOWCASE_KEYPAD_LED");
+	int descriptor;
+
 	if (strstr(path, "/backlight/")) {
 		fprintf(stderr, "Showcase opened an LCD backlight path: %s\n",
 			path);
@@ -69,7 +104,26 @@ int __wrap_open(const char *path, int flags, ...)
 		va_end(arguments);
 		return __real_open(path, flags, mode);
 	}
-	return __real_open(path, flags);
+	descriptor = __real_open(path, flags);
+	if (descriptor >= 0 && directory &&
+	    !strncmp(path, directory, strlen(directory))) {
+		const char *attribute = path + strlen(directory);
+
+		if (!strcmp(attribute, "/brightness"))
+			led_brightness = descriptor;
+		else if (!strcmp(attribute, "/trigger"))
+			led_trigger = descriptor;
+	}
+	return descriptor;
+}
+
+int __wrap_close(int fd)
+{
+	if (fd == led_brightness)
+		led_brightness = -1;
+	if (fd == led_trigger)
+		led_trigger = -1;
+	return __real_close(fd);
 }
 
 int __wrap_connect(int fd, const struct sockaddr *address, socklen_t length)
@@ -160,9 +214,27 @@ ssize_t __wrap_read(int fd, void *buffer, size_t size)
 
 ssize_t __wrap_write(int fd, const void *buffer, size_t size)
 {
+	ssize_t written;
+
 	if (fd == vibrator)
 		return (ssize_t)size;
-	return __real_write(fd, buffer, size);
+	if (fd == led_trigger) {
+		char selected[32];
+
+		if (size >= sizeof(selected)) {
+			errno = EINVAL;
+			return -1;
+		}
+		memcpy(selected, buffer, size);
+		selected[size] = '\0';
+		selected[strcspn(selected, "\n")] = '\0';
+		return select_led_trigger(selected) ? (ssize_t)size : -1;
+	}
+	written = __real_write(fd, buffer, size);
+	if (fd == led_brightness && written == (ssize_t)size && size &&
+	    ((const char *)buffer)[0] == '0' && !select_led_trigger("none"))
+		return -1;
+	return written;
 }
 
 bool fplinux_drm_session_open(struct fplinux_drm_session *session,
