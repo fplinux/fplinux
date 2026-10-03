@@ -149,6 +149,16 @@ patches = [
 ]
 
 [[linux.dt_config_checks]]
+path = "/soc/usb@20200000"
+compatible = "sprd,ums9117-musb"
+config = "CONFIG_USB_MUSB_UMS9117_COLD"
+
+[[linux.dt_config_checks]]
+path = "/soc/usb@20200000"
+compatible = "fplinux,ums9117-musb-inherited"
+config = "CONFIG_USB_MUSB_UMS9117_INHERITED"
+
+[[linux.dt_config_checks]]
 path = "/soc/keypad@40250000"
 compatible = "sprd,ums9117-keypad"
 config = "CONFIG_KEYBOARD_UMS9117"

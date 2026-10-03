@@ -91,7 +91,7 @@ diff --git a/drivers/usb/musb/Kconfig b/drivers/usb/musb/Kconfig
 index f569292..d9b68e0 100644
 --- a/drivers/usb/musb/Kconfig
 +++ b/drivers/usb/musb/Kconfig
-@@ -98,6 +98,18 @@ config USB_MUSB_UX500
+@@ -98,6 +98,35 @@ config USB_MUSB_UX500
  	tristate "Ux500 platforms"
  	depends on ARCH_U8500 || COMPILE_TEST
 
@@ -100,12 +100,29 @@ index f569292..d9b68e0 100644
 +	depends on ARCH_UMS9117
 +	depends on USB_MUSB_GADGET
 +	help
-+	  PIO-only gadget glue for the UMS9117 MUSB controller. Targets with
-+	  the inherited-state compatible retain the BootROM/FDL USB handoff;
-+	  targets with the cold-owned compatible initialize the controller,
-+	  PHY and target USB regulator in Linux. Both profiles quiesce the
-+	  loader DMA channels and work around a FIFO that returns reliable
-+	  data only for 32-bit reads.
++	  PIO-only gadget glue for the UMS9117 MUSB controller. Select the
++	  ownership model matching the board's USB compatible. Both models
++	  quiesce the loader DMA channels and work around a FIFO that returns
++	  reliable data only for 32-bit reads.
++
++config USB_MUSB_UMS9117_COLD
++	bool "UMS9117 USB controller and PHY started by Linux"
++	depends on USB_MUSB_UMS9117
++	select REGULATOR_SC2720_USB33 if REGULATOR_SC2731
++	help
++	  Initialize the USB controller, PHY and USB supply in Linux.
++	  The board node must use the sprd,ums9117-musb compatible and
++	  declare its USB supply. Keep this capability built in so that
++	  USB is available when the RAM session starts.
++
++config USB_MUSB_UMS9117_INHERITED
++	bool "UMS9117 USB controller handed over by the boot stage"
++	depends on USB_MUSB_UMS9117
++	help
++	  Retain the USB controller and PHY state supplied by the boot stage.
++	  The board node must use fplinux,ums9117-musb-inherited. Loader DMA
++	  channels are quiesced before the gadget takes over the controller.
++	  Keep this capability built in for USB access to the RAM session.
 +
  config USB_MUSB_JZ4740
  	tristate "JZ4740"
@@ -145,7 +162,21 @@ index c7234b2..4389fe5 100644
  		musb->irq_wake = 1;
  		device_init_wakeup(dev, 1);
  	} else {
-@@ -2821,6 +2822,8 @@ static int musb_suspend(struct device *dev)
+@@ -2647,11 +2648,12 @@ static void musb_remove(struct platform_device *pdev)
+ 	musb_disable_interrupts(musb);
+ 	musb_writeb(musb->mregs, MUSB_DEVCTL, 0);
+ 	spin_unlock_irqrestore(&musb->lock, flags);
+-	musb_platform_exit(musb);
+
+ 	pm_runtime_dont_use_autosuspend(musb->controller);
+ 	pm_runtime_put_sync(musb->controller);
+ 	pm_runtime_disable(musb->controller);
++	/* Platform exit may power down registers used by runtime PM. */
++	musb_platform_exit(musb);
+ 	musb_phy_callback = NULL;
+ 	if (musb->dma_controller)
+ 		musb_dma_controller_destroy(musb->dma_controller);
+@@ -2821,6 +2823,8 @@ static int musb_suspend(struct device *dev)
  	while (flush_delayed_work(&musb->irq_work))
  		;
  	musb->flush_irq_work = false;
@@ -154,7 +185,7 @@ index c7234b2..4389fe5 100644
 
  	if (!(musb->ops->quirks & MUSB_PRESERVE_SESSION))
  		musb_writeb(musb->mregs, MUSB_DEVCTL, 0);
-@@ -2829,10 +2832,11 @@ static int musb_suspend(struct device *dev)
+@@ -2829,10 +2833,11 @@ static int musb_suspend(struct device *dev)
 
  	spin_lock_irqsave(&musb->lock, flags);
 
@@ -170,7 +201,7 @@ index c7234b2..4389fe5 100644
  	} else if (is_host_active(musb)) {
  		/* we know all the children are suspended; sometimes
  		 * they will even be wakeup-enabled.
-@@ -2852,6 +2856,7 @@ static int musb_resume(struct device *dev)
+@@ -2852,6 +2857,7 @@ static int musb_resume(struct device *dev)
  	int error;
  	u8 devctl;
  	u8 mask;
@@ -178,7 +209,7 @@ index c7234b2..4389fe5 100644
 
  	/*
  	 * For static cmos like DaVinci, register values were preserved
-@@ -2872,6 +2877,15 @@ static int musb_resume(struct device *dev)
+@@ -2872,6 +2878,15 @@ static int musb_resume(struct device *dev)
 
  	musb_enable_interrupts(musb);
  	musb_platform_enable(musb);

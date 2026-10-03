@@ -439,7 +439,6 @@
 		};
 
 		usb: usb@20200000 {
-			compatible = "fplinux,ums9117-musb-inherited";
 			reg = <0x20200000 0x2000>;
 			interrupts = <GIC_SPI 55 IRQ_TYPE_LEVEL_HIGH>;
 			status = "disabled";

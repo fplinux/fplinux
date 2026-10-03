@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include <linux/bitops.h>
+#include <linux/build_bug.h>
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
@@ -14,6 +15,9 @@
 #include <linux/usb/musb.h>
 
 #include "musb_core.h"
+
+static_assert(IS_ENABLED(CONFIG_USB_MUSB_UMS9117_COLD) ||
+	      IS_ENABLED(CONFIG_USB_MUSB_UMS9117_INHERITED));
 
 #define UMS9117_MUSB_AP_AHB_EB 0x0000U
 #define UMS9117_MUSB_AP_AHB_RST 0x0004U
@@ -92,6 +96,17 @@ struct ums9117_musb_glue {
 	bool vddusb_force_off;
 	bool irq_disabled;
 };
+
+static bool ums9117_musb_is_cold_owned(const struct ums9117_musb_glue *glue)
+{
+	return IS_ENABLED(CONFIG_USB_MUSB_UMS9117_COLD) && glue->cold_owned;
+}
+
+static bool ums9117_musb_is_inherited(const struct ums9117_musb_glue *glue)
+{
+	return IS_ENABLED(CONFIG_USB_MUSB_UMS9117_INHERITED) &&
+	       !glue->cold_owned;
+}
 
 static void __iomem *ums9117_musb_ioremap_shared(struct platform_device *pdev,
 						 const char *name,
@@ -697,9 +712,12 @@ static int ums9117_musb_init(struct musb *musb)
 	 */
 	musb->dyn_fifo = true;
 	musb->isr = ums9117_musb_irq;
-	if (glue->cold_owned)
+	if (ums9117_musb_is_cold_owned(glue))
 		return ums9117_musb_cold_start(musb);
-	return ums9117_musb_quiesce_dma(musb, "refusing MUSB handoff");
+	if (ums9117_musb_is_inherited(glue))
+		return ums9117_musb_quiesce_dma(musb, "refusing MUSB handoff");
+	return dev_err_probe(musb->controller, -EINVAL,
+			     "USB ownership model is not enabled\n");
 }
 
 static int ums9117_musb_exit(struct musb *musb)
@@ -708,7 +726,7 @@ static int ums9117_musb_exit(struct musb *musb)
 		dev_get_drvdata(musb->controller->parent);
 	int ret;
 
-	if (!glue->cold_owned)
+	if (!ums9117_musb_is_cold_owned(glue))
 		return 0;
 
 	ret = ums9117_musb_cold_shutdown(musb);
@@ -821,11 +839,15 @@ static int ums9117_musb_get_cold_resources(struct platform_device *pdev,
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_USB_MUSB_UMS9117_INHERITED)
 static const struct ums9117_musb_match_data ums9117_musb_inherited_data;
+#endif
 
+#if IS_ENABLED(CONFIG_USB_MUSB_UMS9117_COLD)
 static const struct ums9117_musb_match_data ums9117_musb_cold_data = {
 	.cold_owned = true,
 };
+#endif
 
 static int ums9117_musb_probe(struct platform_device *pdev)
 {
@@ -862,7 +884,11 @@ static int ums9117_musb_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	glue->dev = &pdev->dev;
 	glue->cold_owned = match_data->cold_owned;
-	if (glue->cold_owned) {
+	if (!ums9117_musb_is_cold_owned(glue) &&
+	    !ums9117_musb_is_inherited(glue))
+		return dev_err_probe(&pdev->dev, -EINVAL,
+				     "USB ownership model is not enabled\n");
+	if (ums9117_musb_is_cold_owned(glue)) {
 		ret = ums9117_musb_get_cold_resources(pdev, glue);
 		if (ret)
 			return ret;
@@ -895,14 +921,18 @@ static void ums9117_musb_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id ums9117_musb_of_match[] = {
+#if IS_ENABLED(CONFIG_USB_MUSB_UMS9117_INHERITED)
 	{
 		.compatible = "fplinux,ums9117-musb-inherited",
 		.data = &ums9117_musb_inherited_data,
 	},
+#endif
+#if IS_ENABLED(CONFIG_USB_MUSB_UMS9117_COLD)
 	{
 		.compatible = "sprd,ums9117-musb",
 		.data = &ums9117_musb_cold_data,
 	},
+#endif
 	{}
 };
 MODULE_DEVICE_TABLE(of, ums9117_musb_of_match);
