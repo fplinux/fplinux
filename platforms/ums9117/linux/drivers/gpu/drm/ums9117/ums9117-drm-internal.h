@@ -5,6 +5,7 @@
 #include <linux/backlight.h>
 #include <linux/completion.h>
 #include <linux/io.h>
+#include <linux/kconfig.h>
 #include <linux/mutex.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
@@ -95,6 +96,21 @@ struct ums9117_drm {
 	bool wled_known;
 	bool wled_on;
 };
+
+/* Probe rejects unavailable profile transports before these are used. */
+static inline bool ums9117_drm_uses_spi(const struct ums9117_drm *udrm)
+{
+	return IS_ENABLED(CONFIG_DRM_UMS9117_SPI) &&
+	       (!IS_ENABLED(CONFIG_DRM_UMS9117_LCM) ||
+		udrm->profile->transport == UMS9117_DRM_TRANSPORT_SPI1_3WIRE);
+}
+
+static inline bool ums9117_drm_uses_lcm(const struct ums9117_drm *udrm)
+{
+	return IS_ENABLED(CONFIG_DRM_UMS9117_LCM) &&
+	       (!IS_ENABLED(CONFIG_DRM_UMS9117_SPI) ||
+		udrm->profile->transport == UMS9117_DRM_TRANSPORT_LCM_DBI);
+}
 
 int ums9117_drm_spi_init_transport(struct ums9117_drm *udrm,
 				   struct platform_device *pdev);

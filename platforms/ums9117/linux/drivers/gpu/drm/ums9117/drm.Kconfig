@@ -20,3 +20,11 @@ config DRM_UMS9117_SPI
 config DRM_UMS9117_LCM
 	bool
 	depends on DRM_UMS9117
+
+config DRM_UMS9117_WAKE_REINIT
+	bool
+	depends on DRM_UMS9117
+
+config DRM_UMS9117_WAKE_SLEEP_OUT
+	bool
+	depends on DRM_UMS9117

@@ -17,8 +17,8 @@ FIXTURES = ROOT / "tests/host_tool"
 class Ums9117LcmHostTests(unittest.TestCase):
     """Link the real transport and internal header; no panel is exercised."""
 
-    def test_busy_write_buffer_blocks_commands_and_pixel_mode(self) -> None:
-        """Timeouts prevent writes; completing RAMWR admits pixel packing."""
+    def test_timing_initialization_and_busy_buffer_admission(self) -> None:
+        """Encode timing, reject missing values and wait before port writes."""
         with tempfile.TemporaryDirectory() as temporary:
             executable = Path(temporary) / "ums9117-lcm"
             compilation = run_process(
