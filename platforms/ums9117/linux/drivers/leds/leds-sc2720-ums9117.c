@@ -71,9 +71,11 @@ static int sc2720_kpled_probe(struct platform_device *pdev)
 	ret = regmap_read(kpled->regmap, SC2720_KPLED_CTRL0, &kpled->initial);
 	if (ret)
 		return ret;
-	if (!(kpled->initial & SC2720_KPLED_POWER_DOWN))
-		return dev_err_probe(dev, -EBUSY,
-				     "keypad backlight already active\n");
+	kpled->initial |= SC2720_KPLED_POWER_DOWN;
+	ret = regmap_set_bits(kpled->regmap, SC2720_KPLED_CTRL0,
+			      SC2720_KPLED_POWER_DOWN);
+	if (ret)
+		return ret;
 	ret = devm_add_action_or_reset(dev, sc2720_kpled_restore, kpled);
 	if (ret)
 		return ret;

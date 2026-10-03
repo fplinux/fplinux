@@ -20,9 +20,10 @@ phone from s2idle, including with mounted ext4 storage and card-backed swap;
 Bluetooth works again after wake.
 
 LCD brightness responds to the system scale, and level `0` turns the backlight
-off. Its visible spacing is not calibrated. Keypad-light effects have not been
-tested. This phone has no separate vibration motor; FPLinux vibrates it through
-the rear speaker, as stock firmware does, and mutes headphone audio meanwhile.
+off. Its visible spacing is not calibrated. Keypad backlight switches on with
+key presses and turns off after inactivity. This phone has no separate vibration
+motor; FPLinux vibrates it through the rear speaker, as stock firmware does, and
+mutes headphone audio meanwhile.
 Telemetry has been
 read with the battery absent; that does not demonstrate battery measurements or
 charging. Battery-only power-off has not been tested.
@@ -45,7 +46,7 @@ Status terms and limits shared by every phone are defined in the
 | Persistent boot                                                    | N/A      | Not supported | A USB-loaded RAM bootstrap is required for every Linux boot.                                                                                  |
 | [Local console](../../docs/features/LOCAL_CONSOLE.md)              | Present  | Supported     | `240×320`; graphical terminal with phone-keypad input.                                                                                        |
 | [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)          | Present  | Supported     | System scale `0…10` works; level `0` turns the backlight off.                                                                                 |
-| [Keypad backlight](../../docs/features/KEYPAD_BACKLIGHT.md)        | Unknown  | Partial       | Shared LED control enabled; its physical effect has not been tested.                                                                          |
+| [Keypad backlight](../../docs/features/KEYPAD_BACKLIGHT.md)        | Present  | Supported     | Binary LED control; on and off are visible.                                                                                                   |
 | [USB networking](../../docs/features/USB_NETWORKING.md)            | Present  | Supported     | —                                                                                                                                             |
 | [SSH access](../../docs/features/SSH.md)                           | N/A      | Supported     | —                                                                                                                                             |
 | [File transfer](../../docs/features/FILE_TRANSFER.md)              | N/A      | Supported     | RAM and a writable mounted microSD are valid destinations.                                                                                    |
@@ -96,8 +97,7 @@ Status terms and limits shared by every phone are defined in the
 The `240×320` `NV3030` panel uses LCM/DBI with interrupt-driven transfer completion.
 The raw LCD brightness range is `0…31`, with initial raw level `18`. The
 system brightness scale is `0…10`, with initial level `7`. All system levels
-apply; their visible spacing is not calibrated. Keypad-light effects have not
-been tested.
+apply; their visible spacing is not calibrated.
 
 The target-specific [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)
 is `/sys/class/backlight/inoi244-backlight`. Shared feature pages document the
