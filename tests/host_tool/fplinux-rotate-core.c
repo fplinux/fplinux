@@ -19,11 +19,74 @@ struct guarded_image {
 struct transform_case {
 	unsigned int rotation;
 	int mirror;
+	uint32_t width;
+	uint32_t height;
+};
+
+struct plane_layout {
+	uint32_t row_bytes;
+	uint32_t rows;
+};
+
+/* Fixed 12x10 source, 8x6 crop and 6x8 quarter-turn layouts. */
+struct format_fixture {
+	enum fplinux_rotate_format format;
+	unsigned int planes;
+	unsigned int sample_bytes[2];
+	struct plane_layout source[2];
+	struct plane_layout straight[2];
+	struct plane_layout quarter[2];
+};
+
+static const struct format_fixture format_fixtures[] = {
+	{
+		.format = FPLINUX_ROTATE_RGB565,
+		.planes = 1,
+		.sample_bytes = { 2 },
+		.source = { { 24, 10 } },
+		.straight = { { 16, 6 } },
+		.quarter = { { 12, 8 } },
+	},
+	{
+		.format = FPLINUX_ROTATE_XRGB32,
+		.planes = 1,
+		.sample_bytes = { 4 },
+		.source = { { 48, 10 } },
+		.straight = { { 32, 6 } },
+		.quarter = { { 24, 8 } },
+	},
+	{
+		.format = FPLINUX_ROTATE_GREY,
+		.planes = 1,
+		.sample_bytes = { 1 },
+		.source = { { 12, 10 } },
+		.straight = { { 8, 6 } },
+		.quarter = { { 6, 8 } },
+	},
+	{
+		.format = FPLINUX_ROTATE_NV12,
+		.planes = 2,
+		.sample_bytes = { 1, 2 },
+		.source = { { 12, 10 }, { 12, 5 } },
+		.straight = { { 8, 6 }, { 8, 3 } },
+		.quarter = { { 6, 8 }, { 6, 4 } },
+	},
+	{
+		.format = FPLINUX_ROTATE_NV16,
+		.planes = 2,
+		.sample_bytes = { 1, 2 },
+		.source = { { 12, 10 }, { 12, 10 } },
+		.straight = { { 8, 6 }, { 8, 6 } },
+		.quarter = { { 6, 8 }, { 6, 8 } },
+	},
 };
 
 static int guarded_allocate(struct guarded_image *guarded,
-			    enum fplinux_rotate_format format, uint32_t width,
-			    uint32_t height, uint32_t padding)
+			    enum fplinux_rotate_format format,
+			    unsigned int planes, uint32_t width,
+			    uint32_t height,
+			    const struct plane_layout layout[2],
+			    uint32_t padding)
 {
 	unsigned int plane;
 
@@ -31,11 +94,10 @@ static int guarded_allocate(struct guarded_image *guarded,
 	guarded->image.format = format;
 	guarded->image.width = width;
 	guarded->image.height = height;
-	guarded->image.planes = fplinux_rotate_plane_count(format);
-	for (plane = 0; plane < guarded->image.planes; ++plane) {
-		uint32_t rows =
-			fplinux_rotate_plane_height(format, plane, height);
-		uint32_t bytes = fplinux_rotate_row_bytes(format, plane, width);
+	guarded->image.planes = planes;
+	for (plane = 0; plane < planes; ++plane) {
+		uint32_t rows = layout[plane].rows;
+		uint32_t bytes = layout[plane].row_bytes;
 		size_t size;
 
 		guarded->image.plane[plane].stride = bytes + padding;
@@ -74,18 +136,6 @@ static int guards_intact(const struct guarded_image *guarded)
 						index] != GUARD_VALUE)
 				return 0;
 	return 1;
-}
-
-static unsigned int bytes_per_sample(enum fplinux_rotate_format format,
-				     unsigned int plane)
-{
-	if (plane == 1U)
-		return 2U;
-	if (format == FPLINUX_ROTATE_RGB565)
-		return 2U;
-	if (format == FPLINUX_ROTATE_XRGB32)
-		return 4U;
-	return 1U;
 }
 
 static const uint8_t luma_mirror[] = {
@@ -265,24 +315,20 @@ expected_plane_matches(const struct fplinux_rotate_image *source,
 
 static int expected_matches(const struct fplinux_rotate_image *source,
 			    const struct fplinux_rotate_image *destination,
-			    const struct fplinux_rotate_transform *transform)
+			    const struct fplinux_rotate_transform *transform,
+			    const struct format_fixture *fixture,
+			    const struct plane_layout layout[2])
 {
 	unsigned int plane;
 
-	for (plane = 0; plane < destination->planes; ++plane) {
-		unsigned int sample_bytes =
-			bytes_per_sample(source->format, plane);
-		uint32_t width = destination->width;
-		uint32_t height = fplinux_rotate_plane_height(
-			destination->format, plane, destination->height);
-		uint32_t samples = plane == 1U ? width / 2U : width;
+	for (plane = 0; plane < fixture->planes; ++plane) {
+		unsigned int sample_bytes = fixture->sample_bytes[plane];
 		uint32_t source_width;
-		uint32_t source_left = plane == 1U ? transform->left / 2U :
-						     transform->left;
+		uint32_t source_left = plane == 1U ? 1U : 2U;
 		uint32_t source_top =
-			plane == 1U && source->format == FPLINUX_ROTATE_NV12 ?
-				transform->top / 2U :
-				transform->top;
+			plane == 1U && fixture->format == FPLINUX_ROTATE_NV12 ?
+				1U :
+				2U;
 		const uint8_t *map;
 		size_t count;
 		struct expected_plane expected;
@@ -295,8 +341,9 @@ static int expected_matches(const struct fplinux_rotate_image *source,
 			.source_width = source_width,
 			.source_left = source_left,
 			.source_top = source_top,
-			.destination_samples = samples,
-			.destination_rows = height,
+			.destination_samples =
+				layout[plane].row_bytes / sample_bytes,
+			.destination_rows = layout[plane].rows,
 			.sample_bytes = sample_bytes,
 		};
 		if (!expected_plane_matches(source, destination, plane,
@@ -306,33 +353,38 @@ static int expected_matches(const struct fplinux_rotate_image *source,
 	return 1;
 }
 
-static int run_case(enum fplinux_rotate_format format, unsigned int rotation,
-		    int mirror)
+static int run_case(const struct format_fixture *fixture,
+		    const struct transform_case *test_case)
 {
 	struct fplinux_rotate_transform transform = {
 		.left = 2,
 		.top = 2,
 		.width = 8,
 		.height = 6,
-		.rotation = rotation,
-		.hflip = mirror,
+		.rotation = test_case->rotation,
+		.hflip = test_case->mirror,
 	};
-	struct guarded_image source;
-	struct guarded_image destination;
+	const struct plane_layout *layout =
+		test_case->rotation == 90U || test_case->rotation == 270U ?
+			fixture->quarter :
+			fixture->straight;
+	struct guarded_image source = { 0 };
+	struct guarded_image destination = { 0 };
 	uint8_t *source_copy[2] = { NULL, NULL };
-	uint32_t destination_width;
-	uint32_t destination_height;
 	unsigned int plane;
 	int ok = 0;
 
-	if (!fplinux_rotate_dimensions(&transform, &destination_width,
-				       &destination_height) ||
-	    !guarded_allocate(&source, format, 12, 10, 11) ||
-	    !guarded_allocate(&destination, format, destination_width,
-			      destination_height, 13))
+	if (!guarded_allocate(&source, fixture->format, fixture->planes, 12, 10,
+			      fixture->source, 11) ||
+	    !guarded_allocate(&destination, fixture->format, fixture->planes,
+			      test_case->width, test_case->height, layout, 13))
 		goto out;
-	fplinux_rotate_fill_corpus(&source.image, 0x4bU);
 	for (plane = 0; plane < source.image.planes; ++plane) {
+		size_t index;
+
+		for (index = 0; index < source.image.plane[plane].size; ++index)
+			source.image.plane[plane].data[index] =
+				(uint8_t)(0x4bU + plane * 97U + index * 53U);
 		source_copy[plane] = malloc(source.image.plane[plane].size);
 		if (!source_copy[plane])
 			goto out;
@@ -344,7 +396,8 @@ static int run_case(enum fplinux_rotate_format format, unsigned int rotation,
 		       destination.image.plane[plane].size);
 	if (!fplinux_rotate_cpu(&source.image, &destination.image,
 				&transform) ||
-	    !expected_matches(&source.image, &destination.image, &transform) ||
+	    !expected_matches(&source.image, &destination.image, &transform,
+			      fixture, layout) ||
 	    !guards_intact(&source) || !guards_intact(&destination))
 		goto out;
 	for (plane = 0; plane < source.image.planes; ++plane)
@@ -400,6 +453,14 @@ odd_nv16_expected_matches(const struct fplinux_rotate_image *source,
 
 static int run_odd_nv16_case(unsigned int rotation, int mirror)
 {
+	const struct plane_layout source_layout[2] = {
+		{ 8, 7 },
+		{ 8, 7 },
+	};
+	const struct plane_layout destination_layout[2] = {
+		{ 4, rotation == 90U || rotation == 270U ? 4U : 5U },
+		{ 4, rotation == 90U || rotation == 270U ? 4U : 5U },
+	};
 	struct fplinux_rotate_transform transform = {
 		.left = 2,
 		.top = 1,
@@ -424,19 +485,17 @@ static int run_odd_nv16_case(unsigned int rotation, int mirror)
 			  rotation == 90U  ? sizeof(odd_nv16_uv_90) :
 			  rotation == 180U ? sizeof(odd_nv16_uv_180) :
 					     sizeof(odd_nv16_uv_270);
-	struct guarded_image source;
-	struct guarded_image destination;
+	struct guarded_image source = { 0 };
+	struct guarded_image destination = { 0 };
 	uint8_t *source_copy[2] = { NULL, NULL };
-	uint32_t destination_width;
-	uint32_t destination_height;
 	unsigned int plane;
 	int ok = 0;
 
-	if (!fplinux_rotate_dimensions(&transform, &destination_width,
-				       &destination_height) ||
-	    !guarded_allocate(&source, FPLINUX_ROTATE_NV16, 8, 7, 3) ||
-	    !guarded_allocate(&destination, FPLINUX_ROTATE_NV16,
-			      destination_width, destination_height, 5))
+	if (!guarded_allocate(&source, FPLINUX_ROTATE_NV16, 2, 8, 7,
+			      source_layout, 3) ||
+	    !guarded_allocate(&destination, FPLINUX_ROTATE_NV16, 2, 4,
+			      destination_layout[0].rows, destination_layout,
+			      5))
 		goto out;
 	for (plane = 0; plane < source.image.planes; ++plane) {
 		uint32_t y;
@@ -514,38 +573,98 @@ static int preview_conversion_is_stable(void)
 	       output[2] == 0x001fU;
 }
 
+static int geometry_helpers_match_fixtures(void)
+{
+	static const uint32_t widths[] = { 12, 8, 6 };
+	static const uint32_t heights[] = { 10, 6, 8 };
+	unsigned int format;
+
+	for (format = 0;
+	     format < sizeof(format_fixtures) / sizeof(format_fixtures[0]);
+	     ++format) {
+		const struct format_fixture *fixture = &format_fixtures[format];
+		const struct plane_layout *layouts[] = {
+			fixture->source,
+			fixture->straight,
+			fixture->quarter,
+		};
+		unsigned int geometry;
+
+		if (fplinux_rotate_plane_count(fixture->format) !=
+		    fixture->planes)
+			return 0;
+		for (geometry = 0; geometry < 3U; ++geometry) {
+			unsigned int plane;
+
+			for (plane = 0; plane < fixture->planes; ++plane)
+				if (fplinux_rotate_row_bytes(
+					    fixture->format, plane,
+					    widths[geometry]) !=
+					    layouts[geometry][plane].row_bytes ||
+				    fplinux_rotate_plane_height(
+					    fixture->format, plane,
+					    heights[geometry]) !=
+					    layouts[geometry][plane].rows)
+					return 0;
+		}
+	}
+	return 1;
+}
+
+static int dimensions_match_case(const struct transform_case *test_case)
+{
+	const struct fplinux_rotate_transform transform = {
+		.width = 8,
+		.height = 6,
+		.rotation = test_case->rotation,
+	};
+	uint32_t width = 0;
+	uint32_t height = 0;
+
+	return fplinux_rotate_dimensions(&transform, &width, &height) &&
+	       width == test_case->width && height == test_case->height;
+}
+
 int main(void)
 {
-	static const enum fplinux_rotate_format formats[] = {
-		FPLINUX_ROTATE_RGB565, FPLINUX_ROTATE_XRGB32,
-		FPLINUX_ROTATE_GREY,   FPLINUX_ROTATE_NV12,
-		FPLINUX_ROTATE_NV16,
-	};
 	static const struct transform_case regular_cases[] = {
-		{ 0U, 1 },
-		{ 90U, 0 },
-		{ 180U, 0 },
-		{ 270U, 0 },
+		{ 0U, 1, 8, 6 },
+		{ 90U, 0, 6, 8 },
+		{ 180U, 0, 8, 6 },
+		{ 270U, 0, 6, 8 },
 	};
 	unsigned int format;
 	unsigned int transform;
 
-	for (format = 0; format < sizeof(formats) / sizeof(formats[0]);
+	for (format = 0;
+	     format < sizeof(format_fixtures) / sizeof(format_fixtures[0]);
 	     ++format)
 		for (transform = 0;
 		     transform <
 		     sizeof(regular_cases) / sizeof(regular_cases[0]);
 		     ++transform)
-			if (!run_case(formats[format],
-				      regular_cases[transform].rotation,
-				      regular_cases[transform].mirror)) {
+			if (!run_case(&format_fixtures[format],
+				      &regular_cases[transform])) {
 				fprintf(stderr,
 					"rotation case format=%u rotate=%u mirror=%d failed\n",
-					(unsigned int)formats[format],
+					(unsigned int)format_fixtures[format]
+						.format,
 					regular_cases[transform].rotation,
 					regular_cases[transform].mirror);
 				return EXIT_FAILURE;
 			}
+	if (!geometry_helpers_match_fixtures()) {
+		fprintf(stderr, "image geometry helper case failed\n");
+		return EXIT_FAILURE;
+	}
+	for (transform = 0;
+	     transform < sizeof(regular_cases) / sizeof(regular_cases[0]);
+	     ++transform)
+		if (!dimensions_match_case(&regular_cases[transform])) {
+			fprintf(stderr,
+				"rotation dimensions helper case failed\n");
+			return EXIT_FAILURE;
+		}
 	for (transform = 0;
 	     transform < sizeof(regular_cases) / sizeof(regular_cases[0]);
 	     ++transform)

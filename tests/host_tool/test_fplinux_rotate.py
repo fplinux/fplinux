@@ -60,6 +60,46 @@ class FplinuxRotateHostToolTests(unittest.TestCase):
                 check=True,
             )
 
+    def test_cpu_cli_rotates_nv12_luma_and_chroma_bytes(self) -> None:
+        """A 4x2 NV12 image keeps both planes in its 2x4 rotated raw output."""
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            executable = directory / "fplinux-rotate"
+            source = directory / "source.raw"
+            output = directory / "result.raw"
+            source.write_bytes(bytes([1, 2, 3, 4, 5, 6, 7, 8, 91, 92, 93, 94]))
+            self._compile(
+                executable,
+                APORT / "fplinux-rotate.c",
+                APORT / "fplinux-rotate-core.c",
+                ROOT / "lib/fplinux/fplinux-drm-session.c",
+                ROOT / "lib/fplinux/fplinux-cli.c",
+            )
+            result = run_process(
+                [
+                    str(executable),
+                    "--engine",
+                    "cpu",
+                    "--format",
+                    "nv12",
+                    "--width",
+                    "4",
+                    "--height",
+                    "2",
+                    "--rotate",
+                    "90",
+                    "--input",
+                    str(source),
+                    "--output",
+                    str(output),
+                ],
+                name="run FPLinux NV12 rotation CPU CLI",
+                timeout=30,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(output.read_bytes(), bytes([5, 1, 6, 2, 7, 3, 8, 4, 91, 92, 93, 94]))
+
     def test_cpu_cli_rotates_generated_image_and_reports_measurement(self) -> None:
         """Without --input, a 90-degree CPU rotation swaps the generated image's dimensions."""
         with tempfile.TemporaryDirectory() as temporary:
