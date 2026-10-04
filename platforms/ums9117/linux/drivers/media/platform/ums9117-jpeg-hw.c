@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include <linux/atomic.h>
+#include <linux/bitfield.h>
 #include <linux/completion.h>
 #include <linux/debugfs.h>
 #include <linux/delay.h>
@@ -101,6 +102,11 @@
 #define JPEG_CFG_CPU_ACK BIT(7)
 #define JPEG_AHB_BUSY BIT(0)
 #define DCAM_CAP_ENABLE BIT(5)
+#define DCAM_QOS_READ_MASK GENMASK(15, 12)
+#define DCAM_QOS_WRITE_MASK GENMASK(11, 8)
+#define DCAM_QOS_MASK (DCAM_QOS_READ_MASK | DCAM_QOS_WRITE_MASK)
+#define CPU_QOS_READ_MASK GENMASK(7, 4)
+#define CPU_QOS_WRITE_MASK GENMASK(3, 0)
 #define DCAM_CAP_FRAME_CLEAR BIT(22)
 #define DCAM_CAP_CCIR656 BIT(0)
 #define DCAM_CAP_ONE_BIT GENMASK(10, 9)
@@ -263,9 +269,12 @@ struct ums9117_jpeg_hw {
 	void __iomem *reset_set;
 	void __iomem *reset_clear;
 	void __iomem *clock;
+	void __iomem *cpu_qos;
+	void __iomem *dcam_qos;
 	struct regmap *aon_apb;
 	u32 saved_gate;
 	u32 saved_clock;
+	u32 saved_qos;
 	int irq;
 	spinlock_t lock;
 	struct mutex owner_lock;
@@ -2339,6 +2348,30 @@ static void jpeg_restore_clock_gate(struct ums9117_jpeg_hw *hw)
 		writel(JPEG_GATE, hw->gate_clear);
 }
 
+static void jpeg_restore_qos(struct ums9117_jpeg_hw *hw)
+{
+	u32 value = readl(hw->dcam_qos);
+
+	writel((value & ~DCAM_QOS_MASK) | hw->saved_qos, hw->dcam_qos);
+	readl(hw->dcam_qos);
+}
+
+static int jpeg_prepare_qos(struct ums9117_jpeg_hw *hw)
+{
+	u32 value = readl(hw->dcam_qos);
+	u32 cpu = readl(hw->cpu_qos);
+	u32 qos;
+
+	hw->saved_qos = value & DCAM_QOS_MASK;
+	/* Match CPU QoS to prevent capture overflow during buffer preparation. */
+	qos = FIELD_PREP(DCAM_QOS_READ_MASK,
+			 FIELD_GET(CPU_QOS_READ_MASK, cpu)) |
+	      FIELD_PREP(DCAM_QOS_WRITE_MASK,
+			 FIELD_GET(CPU_QOS_WRITE_MASK, cpu));
+	writel((value & ~DCAM_QOS_MASK) | qos, hw->dcam_qos);
+	return (readl(hw->dcam_qos) & DCAM_QOS_MASK) == qos ? 0 : -EIO;
+}
+
 struct ums9117_jpeg_hw *ums9117_jpeg_hw_create(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -2365,6 +2398,8 @@ struct ums9117_jpeg_hw *ums9117_jpeg_hw_create(struct platform_device *pdev)
 	hw->reset_clear =
 		jpeg_map_shared(pdev, "ap-ahb-reset-clear", 0x20e02004);
 	hw->clock = jpeg_map_shared(pdev, "dcam-clock", 0x21500088);
+	hw->cpu_qos = jpeg_map_shared(pdev, "cpu-qos", 0x20e000a4);
+	hw->dcam_qos = jpeg_map_shared(pdev, "dcam-qos", 0x20e03058);
 	if (IS_ERR(hw->gate_state))
 		return ERR_CAST(hw->gate_state);
 	if (IS_ERR(hw->gate_set))
@@ -2377,6 +2412,10 @@ struct ums9117_jpeg_hw *ums9117_jpeg_hw_create(struct platform_device *pdev)
 		return ERR_CAST(hw->reset_clear);
 	if (IS_ERR(hw->clock))
 		return ERR_CAST(hw->clock);
+	if (IS_ERR(hw->cpu_qos))
+		return ERR_CAST(hw->cpu_qos);
+	if (IS_ERR(hw->dcam_qos))
+		return ERR_CAST(hw->dcam_qos);
 	hw->aon_apb =
 		syscon_regmap_lookup_by_phandle(dev->of_node, "sprd,aon-apb");
 	if (IS_ERR(hw->aon_apb))
@@ -2414,6 +2453,13 @@ struct ums9117_jpeg_hw *ums9117_jpeg_hw_create(struct platform_device *pdev)
 		jpeg_restore_clock_gate(hw);
 		return ERR_PTR(ret);
 	}
+	ret = jpeg_prepare_qos(hw);
+	if (ret) {
+		jpeg_restore_qos(hw);
+		devm_free_irq(dev, hw->irq, hw);
+		jpeg_restore_clock_gate(hw);
+		return ERR_PTR(ret);
+	}
 	hw->debugfs = debugfs_create_dir("ums9117-jpeg", NULL);
 	debugfs_create_file("stats", 0444, hw->debugfs, hw, &jpeg_stats_fops);
 	return hw;
@@ -2427,5 +2473,6 @@ void ums9117_jpeg_hw_destroy(struct ums9117_jpeg_hw *hw)
 	if (ums9117_jpeg_hw_failed(hw))
 		return;
 	jpeg_free_buffers(hw);
+	jpeg_restore_qos(hw);
 	jpeg_restore_clock_gate(hw);
 }

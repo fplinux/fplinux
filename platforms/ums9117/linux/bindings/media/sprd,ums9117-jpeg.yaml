@@ -28,6 +28,8 @@ properties:
       - description: Shared AP AHB reset SET alias
       - description: Shared AP AHB reset CLEAR alias
       - description: DCAM clock source and divider
+      - description: CPU read and write QoS configuration
+      - description: Shared QoS register containing the DCAM read and write fields
 
   reg-names:
     items:
@@ -38,6 +40,8 @@ properties:
       - const: ap-ahb-reset-set
       - const: ap-ahb-reset-clear
       - const: dcam-clock
+      - const: cpu-qos
+      - const: dcam-qos
 
   interrupts:
     maxItems: 1
@@ -108,10 +112,13 @@ examples:
               <0x20e02000 0x4>,
               <0x20e01004 0x4>,
               <0x20e02004 0x4>,
-              <0x21500088 0x4>;
+              <0x21500088 0x4>,
+              <0x20e000a4 0x4>,
+              <0x20e03058 0x4>;
         reg-names = "jpeg", "ap-ahb-gate-state", "ap-ahb-gate-set",
                     "ap-ahb-gate-clear", "ap-ahb-reset-set",
-                    "ap-ahb-reset-clear", "dcam-clock";
+                    "ap-ahb-reset-clear", "dcam-clock", "cpu-qos",
+                    "dcam-qos";
         interrupts = <GIC_SPI 45 IRQ_TYPE_LEVEL_HIGH>;
         memory-region = <&codec_dma>;
         sprd,aon-apb = <&aon_apb>;

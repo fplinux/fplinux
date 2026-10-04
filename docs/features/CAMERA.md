@@ -48,10 +48,13 @@ codec jobs take turns using the hardware. A consumer can pass a completed raw
 frame to the JPEG encoder while keeping capture enabled. Stopping or closing
 one device leaves the other stream usable.
 
-Concurrent capture and JPEG operation is qualified on INOI 244 at its native
-`240×320` size. This combined use has not been qualified on Nokia TA-1618 or
-INOI 240. Consumers must select a size accepted by both devices; the JPEG
-encoder's supported sizes are listed on its linked page.
+Concurrent capture and JPEG operation is supported on both INOI phones at their
+native `240×320` size. On Nokia TA-1618, native `800×600` capture can remain active
+while the codec processes images at another supported size. Capture can also
+continue while applications allocate display buffers, update the screen or
+blank and wake it on all three phones. A captured frame passed to the JPEG encoder
+must have a size accepted by both devices; the encoder's supported sizes are
+listed on its linked page.
 
 On Nokia, do not run ROTA while camera capture is active: a concurrent
 rotation can cause a camera frame error. Complete capture before rotating.
