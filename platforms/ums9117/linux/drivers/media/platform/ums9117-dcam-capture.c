@@ -60,6 +60,7 @@ struct ums9117_dcam_capture {
 	struct work_struct work;
 	struct delayed_work watchdog;
 	struct mutex work_lock;
+	bool engine_active;
 	u32 irq_events;
 	unsigned long frame_deadline;
 	u32 sequence;
@@ -271,6 +272,13 @@ static void dcam_irq(void *data, u32 status)
 	schedule_work(&capture->work);
 }
 
+static void dcam_ready(void *data)
+{
+	struct ums9117_dcam_capture *capture = data;
+
+	schedule_work(&capture->work);
+}
+
 static void dcam_watchdog(struct work_struct *work)
 {
 	struct ums9117_dcam_capture *capture = container_of(
@@ -316,6 +324,8 @@ static void dcam_work(struct work_struct *work)
 				ret = ums9117_dcam_capture_finish(capture->hw);
 			else
 				ret = ums9117_dcam_capture_timeout(capture->hw);
+			ums9117_dcam_release(capture->hw, UMS9117_DCAM_CAPTURE);
+			capture->engine_active = false;
 			spin_lock_irqsave(&capture->qlock, flags);
 			capture->active = NULL;
 			spin_unlock_irqrestore(&capture->qlock, flags);
@@ -335,6 +345,22 @@ static void dcam_work(struct work_struct *work)
 			spin_unlock_irqrestore(&capture->qlock, flags);
 			goto unlock;
 		}
+		spin_unlock_irqrestore(&capture->qlock, flags);
+		ret = ums9117_dcam_claim(capture->hw, UMS9117_DCAM_CAPTURE);
+		if (ret == -EAGAIN)
+			goto unlock;
+		if (!ret)
+			capture->engine_active = true;
+		spin_lock_irqsave(&capture->qlock, flags);
+		if (!capture->streaming) {
+			spin_unlock_irqrestore(&capture->qlock, flags);
+			if (capture->engine_active) {
+				ums9117_dcam_release(capture->hw,
+						     UMS9117_DCAM_CAPTURE);
+				capture->engine_active = false;
+			}
+			goto unlock;
+		}
 		buffer = list_first_entry(&capture->queued, struct dcam_buffer,
 					  list);
 		list_del(&buffer->list);
@@ -347,11 +373,15 @@ static void dcam_work(struct work_struct *work)
 						      DCAM_STILL_WIDTH ?
 					      DCAM_STILL_STARTUP_SKIP :
 					      DCAM_PREVIEW_STARTUP_SKIP;
-		ret = ums9117_dcam_capture_start(
-			capture->hw,
-			vb2_dma_contig_plane_dma_addr(&buffer->vb.vb2_buf, 0),
-			capture->format.width, capture->format.height,
-			skip_frames, dcam_serial_g0(capture));
+		if (!ret && dcam_serial_g0(capture))
+			ret = ums9117_dcam_capture_route_serial_g0(capture->hw);
+		if (!ret)
+			ret = ums9117_dcam_capture_start(
+				capture->hw,
+				vb2_dma_contig_plane_dma_addr(
+					&buffer->vb.vb2_buf, 0),
+				capture->format.width, capture->format.height,
+				skip_frames, dcam_serial_g0(capture));
 		if (!ret) {
 			capture->first_capture = false;
 			if (!dcam_serial_g0(capture))
@@ -365,6 +395,11 @@ static void dcam_work(struct work_struct *work)
 				system_wq, &capture->watchdog,
 				msecs_to_jiffies(DCAM_SERIAL_FRAME_TIMEOUT_MS));
 			continue;
+		}
+		if (capture->engine_active) {
+			ums9117_dcam_capture_stop(capture->hw);
+			ums9117_dcam_release(capture->hw, UMS9117_DCAM_CAPTURE);
+			capture->engine_active = false;
 		}
 		spin_lock_irqsave(&capture->qlock, flags);
 		capture->active = NULL;
@@ -435,15 +470,10 @@ static int dcam_start_streaming(struct vb2_queue *queue, unsigned int count)
 		ret = -ENODEV;
 		goto return_buffers;
 	}
-	ret = ums9117_dcam_claim(capture->hw, UMS9117_DCAM_CAPTURE, dcam_irq,
-				 capture);
+	ret = ums9117_dcam_capture_register(capture->hw, dcam_irq, dcam_ready,
+					    capture);
 	if (ret)
 		goto return_buffers;
-	if (dcam_serial_g0(capture)) {
-		ret = ums9117_dcam_capture_route_serial_g0(capture->hw);
-		if (ret)
-			goto release;
-	}
 	ret = v4l2_subdev_call_state_active(capture->sensor, pad, set_fmt,
 					    &format);
 	if (ret)
@@ -465,7 +495,7 @@ static int dcam_start_streaming(struct vb2_queue *queue, unsigned int count)
 	return 0;
 
 release:
-	ums9117_dcam_release(capture->hw, UMS9117_DCAM_CAPTURE);
+	ums9117_dcam_capture_unregister(capture->hw);
 return_buffers:
 	dcam_return_buffers(capture, VB2_BUF_STATE_QUEUED);
 	return ret;
@@ -475,18 +505,23 @@ static void dcam_stop_streaming(struct vb2_queue *queue)
 {
 	struct ums9117_dcam_capture *capture = vb2_get_drv_priv(queue);
 	unsigned long flags;
-	int ret;
+	int ret = 0;
 
 	WRITE_ONCE(capture->streaming, false);
 	if (IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0))
 		cancel_delayed_work_sync(&capture->watchdog);
 	mutex_lock(&capture->work_lock);
-	ret = ums9117_dcam_capture_stop(capture->hw);
+	if (capture->engine_active) {
+		ret = ums9117_dcam_capture_stop(capture->hw);
+		ums9117_dcam_release(capture->hw, UMS9117_DCAM_CAPTURE);
+		capture->engine_active = false;
+	}
 	spin_lock_irqsave(&capture->qlock, flags);
 	capture->irq_events = 0;
 	if (IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0))
 		capture->timed_out = false;
 	spin_unlock_irqrestore(&capture->qlock, flags);
+	ums9117_dcam_capture_unregister(capture->hw);
 	mutex_unlock(&capture->work_lock);
 	cancel_work_sync(&capture->work);
 	if (ret)
@@ -497,7 +532,6 @@ static void dcam_stop_streaming(struct vb2_queue *queue)
 		v4l2_subdev_disable_streams(capture->sensor, 0, BIT_ULL(0));
 		capture->sensor_streaming = false;
 	}
-	ums9117_dcam_release(capture->hw, UMS9117_DCAM_CAPTURE);
 }
 
 static const struct vb2_ops dcam_queue_ops = {

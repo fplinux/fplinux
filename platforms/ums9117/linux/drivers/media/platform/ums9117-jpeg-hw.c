@@ -20,6 +20,7 @@
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/string.h>
+#include <linux/wait.h>
 
 #include "ums9117-jpeg-codec.h"
 #include "ums9117-jpeg-hw.h"
@@ -271,10 +272,15 @@ struct ums9117_jpeg_hw {
 	enum ums9117_dcam_owner owner;
 	unsigned int codec_users;
 	bool owner_active;
+	bool codec_waiting;
+	bool capture_pending;
+	bool codec_turn;
+	wait_queue_head_t owner_wait;
 	u32 codec_saved_clock;
 	u32 capture_saved_clock;
 	u32 capture_saved_route;
 	void (*capture_irq)(void *data, u32 status);
+	void (*capture_ready)(void *data);
 	void *capture_irq_data;
 	struct completion completion;
 	atomic_t cancelled;
@@ -319,6 +325,7 @@ static const u32 jpeg_scale_v[JPEG_SCALE_V_WORDS] = {
 };
 
 static void jpeg_free_buffers(struct ums9117_jpeg_hw *hw);
+static void jpeg_prepare_job(struct ums9117_jpeg_hw *hw);
 
 static u32 jpeg_read(struct ums9117_jpeg_hw *hw, u32 reg)
 {
@@ -437,7 +444,9 @@ static irqreturn_t jpeg_irq(int irq, void *data)
 	spin_unlock_irqrestore(&hw->lock, flags);
 	capture_irq = READ_ONCE(hw->capture_irq);
 	capture_data = READ_ONCE(hw->capture_irq_data);
-	if (capture_irq && operation == JPEG_OPERATION_NONE) {
+	if (capture_irq && READ_ONCE(hw->owner_active) &&
+	    READ_ONCE(hw->owner) == UMS9117_DCAM_CAPTURE &&
+	    operation == JPEG_OPERATION_NONE) {
 		jpeg_write(hw, JPEG_CFG,
 			   jpeg_read(hw, JPEG_CFG) & ~DCAM_CAP_ENABLE);
 		jpeg_write(hw, JPEG_INT_MASK, 0);
@@ -453,11 +462,53 @@ static irqreturn_t jpeg_irq(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-int ums9117_dcam_claim(struct ums9117_jpeg_hw *hw,
-		       enum ums9117_dcam_owner owner,
-		       void (*capture_irq)(void *data, u32 status), void *data)
+static bool jpeg_codec_can_claim(struct ums9117_jpeg_hw *hw)
 {
-	u32 clock, status;
+	return !READ_ONCE(hw->owner_active) &&
+	       (!READ_ONCE(hw->capture_pending) || READ_ONCE(hw->codec_turn));
+}
+
+/* owner_lock serializes ready notifications with capture unregister. */
+static void jpeg_notify_owner_locked(struct ums9117_jpeg_hw *hw)
+{
+	wake_up_all(&hw->owner_wait);
+	if (hw->capture_pending && hw->capture_ready)
+		hw->capture_ready(hw->capture_irq_data);
+}
+
+int ums9117_jpeg_hw_streamon(struct ums9117_jpeg_hw *hw)
+{
+	int ret = 0;
+
+	mutex_lock(&hw->owner_lock);
+	if (ums9117_jpeg_hw_failed(hw))
+		ret = -EIO;
+	else
+		hw->codec_users++;
+	mutex_unlock(&hw->owner_lock);
+	return ret;
+}
+
+void ums9117_jpeg_hw_streamoff(struct ums9117_jpeg_hw *hw)
+{
+	mutex_lock(&hw->owner_lock);
+	if (WARN_ON(!hw->codec_users))
+		goto unlock;
+	if (!--hw->codec_users && !ums9117_jpeg_hw_failed(hw)) {
+		/* M2M stops the final job before releasing its streaming queues. */
+		if (WARN_ON(hw->owner_active &&
+			    hw->owner == UMS9117_DCAM_CODEC))
+			goto unlock;
+		jpeg_free_buffers(hw);
+	}
+unlock:
+	mutex_unlock(&hw->owner_lock);
+}
+
+int ums9117_dcam_capture_register(struct ums9117_jpeg_hw *hw,
+				  void (*irq)(void *data, u32 status),
+				  void (*ready)(void *data), void *data)
+{
 	int ret = 0;
 
 	mutex_lock(&hw->owner_lock);
@@ -465,35 +516,103 @@ int ums9117_dcam_claim(struct ums9117_jpeg_hw *hw,
 		ret = -EIO;
 		goto unlock;
 	}
-	if (hw->owner_active && hw->owner != owner) {
+	if (hw->capture_irq || !irq || !ready) {
 		ret = -EBUSY;
 		goto unlock;
 	}
+	hw->capture_irq_data = data;
+	hw->capture_ready = ready;
+	WRITE_ONCE(hw->capture_irq, irq);
+unlock:
+	mutex_unlock(&hw->owner_lock);
+	return ret;
+}
+
+void ums9117_dcam_capture_unregister(struct ums9117_jpeg_hw *hw)
+{
+	mutex_lock(&hw->owner_lock);
+	WARN_ON(hw->owner_active && hw->owner == UMS9117_DCAM_CAPTURE);
+	WRITE_ONCE(hw->capture_pending, false);
+	hw->capture_ready = NULL;
+	WRITE_ONCE(hw->capture_irq, NULL);
+	synchronize_irq(hw->irq);
+	hw->capture_irq_data = NULL;
+	wake_up_all(&hw->owner_wait);
+	mutex_unlock(&hw->owner_lock);
+}
+
+int ums9117_dcam_claim(struct ums9117_jpeg_hw *hw,
+		       enum ums9117_dcam_owner owner)
+{
+	u32 clock, status;
+	unsigned long remaining = msecs_to_jiffies(JPEG_WAIT_MS);
+	int ret = 0;
+
+	mutex_lock(&hw->owner_lock);
 	if (owner == UMS9117_DCAM_CODEC) {
-		if (!hw->codec_users) {
-			ret = jpeg_wait_idle(hw, &status);
-			if (ret)
-				goto unlock;
-			hw->codec_saved_clock = readl(hw->clock) &
-						JPEG_CLOCK_SELECTOR_MASK;
-			ret = jpeg_set_clock_selector(
-				hw, JPEG_CODEC_CLOCK_SELECTOR);
-			if (ret) {
-				if (jpeg_set_clock_selector(
-					    hw, hw->codec_saved_clock))
-					WRITE_ONCE(hw->failed, true);
-				goto unlock;
+		if (WARN_ON(hw->codec_waiting || !hw->codec_users)) {
+			ret = -EBUSY;
+			goto unlock;
+		}
+		hw->codec_waiting = true;
+		for (;;) {
+			if (atomic_read(&hw->cancelled)) {
+				ret = -ECANCELED;
+				goto codec_done;
+			}
+			if (ums9117_jpeg_hw_failed(hw)) {
+				ret = -EIO;
+				goto codec_done;
+			}
+			if (jpeg_codec_can_claim(hw))
+				break;
+			mutex_unlock(&hw->owner_lock);
+			remaining = wait_event_timeout(
+				hw->owner_wait,
+				atomic_read(&hw->cancelled) ||
+					ums9117_jpeg_hw_failed(hw) ||
+					jpeg_codec_can_claim(hw),
+				remaining);
+			mutex_lock(&hw->owner_lock);
+			if (!remaining) {
+				ret = -ETIMEDOUT;
+				goto codec_done;
 			}
 		}
-		hw->codec_users++;
-		hw->owner = owner;
-		hw->owner_active = true;
+		ret = jpeg_wait_idle(hw, &status);
+		if (ret)
+			goto codec_done;
+		hw->codec_saved_clock = readl(hw->clock) &
+					JPEG_CLOCK_SELECTOR_MASK;
+		ret = jpeg_set_clock_selector(hw, JPEG_CODEC_CLOCK_SELECTOR);
+		if (ret) {
+			if (jpeg_set_clock_selector(hw, hw->codec_saved_clock))
+				WRITE_ONCE(hw->failed, true);
+			goto codec_done;
+		}
+		WRITE_ONCE(hw->owner, owner);
+		WRITE_ONCE(hw->owner_active, true);
+		jpeg_prepare_job(hw);
+codec_done:
+		hw->codec_waiting = false;
+		if (ret)
+			jpeg_notify_owner_locked(hw);
 		goto unlock;
 	}
-	if (hw->owner_active || !capture_irq) {
-		ret = -EBUSY;
+	if (ums9117_jpeg_hw_failed(hw)) {
+		ret = -EIO;
 		goto unlock;
 	}
+	if (owner != UMS9117_DCAM_CAPTURE || !hw->capture_irq) {
+		ret = -EINVAL;
+		goto unlock;
+	}
+	WRITE_ONCE(hw->capture_pending, true);
+	if (hw->owner_active || (hw->codec_waiting && hw->codec_turn)) {
+		ret = -EAGAIN;
+		goto unlock;
+	}
+	WRITE_ONCE(hw->capture_pending, false);
 	ret = regmap_read(hw->aon_apb, DCAM_CCIR_ROUTE,
 			  &hw->capture_saved_route);
 	if (ret)
@@ -503,13 +622,11 @@ int ums9117_dcam_claim(struct ums9117_jpeg_hw *hw,
 				 DCAM_CCIR_ROUTE_PARALLEL);
 	if (ret)
 		goto unlock;
-	hw->capture_irq_data = data;
-	WRITE_ONCE(hw->capture_irq, capture_irq);
 	clock = readl(hw->clock);
 	hw->capture_saved_clock = clock & JPEG_CLOCK_MASK;
 	writel((clock & ~GENMASK(1, 0)) | 1, hw->clock);
-	hw->owner = owner;
-	hw->owner_active = true;
+	WRITE_ONCE(hw->owner, owner);
+	WRITE_ONCE(hw->owner_active, true);
 unlock:
 	mutex_unlock(&hw->owner_lock);
 	return ret;
@@ -535,16 +652,11 @@ void ums9117_dcam_release(struct ums9117_jpeg_hw *hw,
 	if (WARN_ON(!hw->owner_active || hw->owner != owner))
 		goto unlock;
 	if (owner == UMS9117_DCAM_CODEC) {
-		if (--hw->codec_users)
-			goto unlock;
-		/* Streaming queues stop their jobs before the last owner releases. */
 		if (!ums9117_jpeg_hw_failed(hw)) {
 			ret = jpeg_wait_idle(hw, &status);
-			if (!ret) {
-				jpeg_free_buffers(hw);
+			if (!ret)
 				ret = jpeg_set_clock_selector(
 					hw, hw->codec_saved_clock);
-			}
 			if (ret) {
 				WRITE_ONCE(hw->failed, true);
 				dev_err_ratelimited(
@@ -554,19 +666,21 @@ void ums9117_dcam_release(struct ums9117_jpeg_hw *hw,
 			}
 		}
 	} else {
-		jpeg_write(hw, JPEG_INT_MASK, 0);
-		jpeg_read(hw, JPEG_INT_MASK);
-		synchronize_irq(hw->irq);
-		WRITE_ONCE(hw->capture_irq, NULL);
-		hw->capture_irq_data = NULL;
-		clock = readl(hw->clock);
-		writel((clock & ~JPEG_CLOCK_MASK) | hw->capture_saved_clock,
-		       hw->clock);
-		regmap_update_bits(hw->aon_apb, DCAM_CCIR_ROUTE,
-				   DCAM_CCIR_ROUTE_PARALLEL,
-				   hw->capture_saved_route);
+		if (!ums9117_jpeg_hw_failed(hw)) {
+			clock = readl(hw->clock);
+			writel((clock & ~JPEG_CLOCK_MASK) |
+				       hw->capture_saved_clock,
+			       hw->clock);
+			ret = regmap_update_bits(hw->aon_apb, DCAM_CCIR_ROUTE,
+						 DCAM_CCIR_ROUTE_PARALLEL,
+						 hw->capture_saved_route);
+			if (ret)
+				WRITE_ONCE(hw->failed, true);
+		}
 	}
-	hw->owner_active = false;
+	WRITE_ONCE(hw->codec_turn, owner == UMS9117_DCAM_CAPTURE);
+	WRITE_ONCE(hw->owner_active, false);
+	jpeg_notify_owner_locked(hw);
 unlock:
 	mutex_unlock(&hw->owner_lock);
 }
@@ -645,6 +759,8 @@ int ums9117_dcam_capture_stop(struct ums9117_jpeg_hw *hw)
 	u32 status;
 	int ret, reset_ret;
 
+	if (WARN_ON(!hw->owner_active || hw->owner != UMS9117_DCAM_CAPTURE))
+		return -EINVAL;
 	jpeg_write(hw, JPEG_CFG, jpeg_read(hw, JPEG_CFG) & ~DCAM_CAP_ENABLE);
 	jpeg_write(hw, JPEG_INT_MASK, 0);
 	jpeg_read(hw, JPEG_INT_MASK);
@@ -1209,9 +1325,13 @@ static int jpeg_wait_slice(struct ums9117_jpeg_hw *hw,
 
 void ums9117_jpeg_hw_prepare(struct ums9117_jpeg_hw *hw)
 {
+	atomic_set(&hw->cancelled, 0);
+}
+
+static void jpeg_prepare_job(struct ums9117_jpeg_hw *hw)
+{
 	unsigned long flags;
 
-	atomic_set(&hw->cancelled, 0);
 	reinit_completion(&hw->completion);
 	spin_lock_irqsave(&hw->lock, flags);
 	hw->events = 0;
@@ -1227,6 +1347,7 @@ void ums9117_jpeg_hw_cancel(struct ums9117_jpeg_hw *hw)
 {
 	atomic_set(&hw->cancelled, 1);
 	complete_all(&hw->completion);
+	wake_up_all(&hw->owner_wait);
 }
 
 bool ums9117_jpeg_hw_failed(struct ums9117_jpeg_hw *hw)
@@ -2265,6 +2386,7 @@ struct ums9117_jpeg_hw *ums9117_jpeg_hw_create(struct platform_device *pdev)
 		return ERR_PTR(hw->irq);
 	spin_lock_init(&hw->lock);
 	mutex_init(&hw->owner_lock);
+	init_waitqueue_head(&hw->owner_wait);
 	init_completion(&hw->completion);
 	atomic_set(&hw->cancelled, 0);
 	hw->stats.operation[JPEG_OPERATION_DECODE].last_result = -ENODATA;

@@ -26,6 +26,8 @@ struct ums9117_jpeg_hw *ums9117_jpeg_hw_create(struct platform_device *pdev);
 void ums9117_jpeg_hw_destroy(struct ums9117_jpeg_hw *hw);
 void ums9117_jpeg_hw_prepare(struct ums9117_jpeg_hw *hw);
 void ums9117_jpeg_hw_cancel(struct ums9117_jpeg_hw *hw);
+int ums9117_jpeg_hw_streamon(struct ums9117_jpeg_hw *hw);
+void ums9117_jpeg_hw_streamoff(struct ums9117_jpeg_hw *hw);
 int ums9117_jpeg_hw_decode(struct ums9117_jpeg_hw *hw,
 			   const struct ums9117_jpeg_frame *frame,
 			   const u8 *entropy, u8 *output[2],
@@ -40,10 +42,13 @@ int ums9117_jpeg_hw_scale(struct ums9117_jpeg_hw *hw,
 			  u8 *output[2], const size_t capacity[2]);
 bool ums9117_jpeg_hw_failed(struct ums9117_jpeg_hw *hw);
 int ums9117_dcam_claim(struct ums9117_jpeg_hw *hw,
-		       enum ums9117_dcam_owner owner,
-		       void (*capture_irq)(void *data, u32 status), void *data);
+		       enum ums9117_dcam_owner owner);
 void ums9117_dcam_release(struct ums9117_jpeg_hw *hw,
 			  enum ums9117_dcam_owner owner);
+int ums9117_dcam_capture_register(struct ums9117_jpeg_hw *hw,
+				  void (*irq)(void *data, u32 status),
+				  void (*ready)(void *data), void *data);
+void ums9117_dcam_capture_unregister(struct ums9117_jpeg_hw *hw);
 int ums9117_dcam_capture_start(struct ums9117_jpeg_hw *hw, dma_addr_t dma,
 			       u32 width, u32 height, unsigned int skip_frames,
 			       bool serial_g0);

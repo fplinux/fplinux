@@ -35,16 +35,23 @@ consumer. The [microphone](MICROPHONE_AUDIO.md) is a separate ALSA interface.
 
 ## Resource limits
 
-Stopping streaming releases the image block. Sensor power and clock are
-disabled through runtime PM; autosuspend can delay this after the stream
-has stopped. MMAP buffers remain
+Stopping capture leaves other image-codec streams running. Sensor power and
+clock are disabled through runtime PM; autosuspend can delay this after the
+stream has stopped. MMAP buffers remain
 allocated until the consumer unmaps and frees them with `VIDIOC_REQBUFS`
 (count `0`), or closes the capture device. A second capture cannot change
 the format while another process owns a streaming queue.
 
 The camera and [hardware JPEG codec](../apps/JPEG.md) share an image block.
-Hardware JPEG buffer allocation or streaming returns `EBUSY` while the
-camera owns it; JPEG works again after capture stops.
+Their V4L2 streaming queues can remain enabled together: capture frames and
+codec jobs take turns using the hardware. A consumer can pass a completed raw
+frame to the JPEG encoder while keeping capture enabled. Stopping or closing
+one device leaves the other stream usable.
+
+Concurrent capture and JPEG operation is qualified on INOI 244 at its native
+`240×320` size. This combined use has not been qualified on Nokia TA-1618 or
+INOI 240. Consumers must select a size accepted by both devices; the JPEG
+encoder's supported sizes are listed on its linked page.
 
 On Nokia, do not run ROTA while camera capture is active: a concurrent
 rotation can cause a camera frame error. Complete capture before rotating.

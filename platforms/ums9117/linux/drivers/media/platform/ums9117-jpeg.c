@@ -96,6 +96,7 @@ struct jpeg_context {
 	u32 output_sequence;
 	u32 capture_sequence;
 	unsigned int streaming_queues;
+	bool aborted;
 };
 
 struct jpeg_device {
@@ -817,6 +818,7 @@ static void jpeg_return_buffers(struct vb2_queue *queue,
 static int jpeg_start_streaming(struct vb2_queue *queue, unsigned int count)
 {
 	struct jpeg_context *ctx = vb2_get_drv_priv(queue);
+	unsigned long flags;
 	int ret;
 
 	if (ums9117_jpeg_hw_failed(ctx->jpeg->hw) ||
@@ -826,14 +828,16 @@ static int jpeg_start_streaming(struct vb2_queue *queue, unsigned int count)
 		return -EIO;
 	}
 	if (!ctx->streaming_queues) {
-		ret = ums9117_dcam_claim(ctx->jpeg->hw, UMS9117_DCAM_CODEC,
-					 NULL, NULL);
+		ret = ums9117_jpeg_hw_streamon(ctx->jpeg->hw);
 		if (ret) {
 			jpeg_return_buffers(queue, VB2_BUF_STATE_QUEUED);
 			return ret;
 		}
 	}
 	ctx->streaming_queues++;
+	spin_lock_irqsave(&ctx->jpeg->job_lock, flags);
+	ctx->aborted = false;
+	spin_unlock_irqrestore(&ctx->jpeg->job_lock, flags);
 	if (V4L2_TYPE_IS_CAPTURE(queue->type)) {
 		if (ctx->operation == JPEG_OPERATION_DECODE)
 			ctx->source_change = false;
@@ -852,7 +856,7 @@ static void jpeg_stop_streaming(struct vb2_queue *queue)
 	if (WARN_ON(!ctx->streaming_queues))
 		return;
 	if (!--ctx->streaming_queues)
-		ums9117_dcam_release(ctx->jpeg->hw, UMS9117_DCAM_CODEC);
+		ums9117_jpeg_hw_streamoff(ctx->jpeg->hw);
 }
 
 static const struct vb2_ops jpeg_queue_ops = {
@@ -992,6 +996,9 @@ static void jpeg_work(struct work_struct *work)
 	destination = v4l2_m2m_next_dst_buf(ctx->fh.m2m_ctx);
 	if (!source || !destination)
 		goto finish;
+	ret = ums9117_dcam_claim(jpeg->hw, UMS9117_DCAM_CODEC);
+	if (ret)
+		goto metadata;
 	switch (ctx->operation) {
 	case JPEG_OPERATION_DECODE:
 		ret = jpeg_run_decode(ctx, source, destination);
@@ -1006,8 +1013,10 @@ static void jpeg_work(struct work_struct *work)
 		ret = -EINVAL;
 		break;
 	}
+	ums9117_dcam_release(jpeg->hw, UMS9117_DCAM_CODEC);
 	if (!ret)
 		state = VB2_BUF_STATE_DONE;
+metadata:
 	v4l2_m2m_buf_copy_metadata(source, destination, true);
 	source->sequence = ctx->output_sequence++;
 	destination->sequence = ctx->capture_sequence++;
@@ -1048,6 +1057,11 @@ static void jpeg_device_run(void *priv)
 		}
 	}
 	spin_lock_irqsave(&jpeg->job_lock, flags);
+	if (ctx->aborted) {
+		spin_unlock_irqrestore(&jpeg->job_lock, flags);
+		v4l2_m2m_job_finish(jpeg->m2m, ctx->fh.m2m_ctx);
+		return;
+	}
 	ums9117_jpeg_hw_prepare(jpeg->hw);
 	jpeg->active = ctx;
 	spin_unlock_irqrestore(&jpeg->job_lock, flags);
@@ -1062,6 +1076,7 @@ static void jpeg_job_abort(void *priv)
 	bool active;
 
 	spin_lock_irqsave(&jpeg->job_lock, flags);
+	ctx->aborted = true;
 	active = jpeg->active == ctx;
 	if (active)
 		ums9117_jpeg_hw_cancel(jpeg->hw);
@@ -1196,32 +1211,24 @@ static int jpeg_reqbufs(struct file *file, void *priv,
 			struct v4l2_requestbuffers *request)
 {
 	struct jpeg_context *ctx = jpeg_file_context(file);
-	int ret;
 
 	if (!request->count)
 		return v4l2_m2m_ioctl_reqbufs(file, priv, request);
-	ret = ums9117_dcam_claim(ctx->jpeg->hw, UMS9117_DCAM_CODEC, NULL, NULL);
-	if (ret)
-		return ret;
-	ret = v4l2_m2m_ioctl_reqbufs(file, priv, request);
-	ums9117_dcam_release(ctx->jpeg->hw, UMS9117_DCAM_CODEC);
-	return ret;
+	if (ums9117_jpeg_hw_failed(ctx->jpeg->hw))
+		return -EIO;
+	return v4l2_m2m_ioctl_reqbufs(file, priv, request);
 }
 
 static int jpeg_create_bufs(struct file *file, void *priv,
 			    struct v4l2_create_buffers *create)
 {
 	struct jpeg_context *ctx = jpeg_file_context(file);
-	int ret;
 
 	if (!create->count)
 		return v4l2_m2m_ioctl_create_bufs(file, priv, create);
-	ret = ums9117_dcam_claim(ctx->jpeg->hw, UMS9117_DCAM_CODEC, NULL, NULL);
-	if (ret)
-		return ret;
-	ret = v4l2_m2m_ioctl_create_bufs(file, priv, create);
-	ums9117_dcam_release(ctx->jpeg->hw, UMS9117_DCAM_CODEC);
-	return ret;
+	if (ums9117_jpeg_hw_failed(ctx->jpeg->hw))
+		return -EIO;
+	return v4l2_m2m_ioctl_create_bufs(file, priv, create);
 }
 
 static const struct v4l2_ioctl_ops jpeg_ioctl_ops = {
