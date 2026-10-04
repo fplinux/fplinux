@@ -114,6 +114,21 @@ class AlpineStateTests(unittest.TestCase):
             )
         self.assertEqual(selected, (*self.packages, third))
 
+    def test_build_order_prepares_transitive_libraries_before_consumers(self) -> None:
+        """A library that consumes another local library sees it in the sysroot."""
+        dependencies = {
+            "fplinux-app": ("fplinux-a-library",),
+            "fplinux-a-library": ("fplinux-z-library",),
+        }
+        with mock.patch.object(alpine_state, "LOCAL_BUILD_DEPENDENCIES", dependencies):
+            order = alpine_state.aport_build_order(("fplinux-app", "fplinux-a-library"))
+            libraries = alpine_state.local_build_dependencies(("fplinux-app",))
+        self.assertEqual(set(order), {"fplinux-app", "fplinux-a-library", "fplinux-z-library"})
+        self.assertEqual(len(order), 3)
+        self.assertLess(order.index("fplinux-z-library"), order.index("fplinux-a-library"))
+        self.assertLess(order.index("fplinux-a-library"), order.index("fplinux-app"))
+        self.assertEqual(set(libraries), {"fplinux-a-library", "fplinux-z-library"})
+
     def test_selection_composes_target_base_with_profile_delta(self) -> None:
         """A normalized target base and profile delta retain only unexcluded packages."""
         target_package = "fplinux-package-c"

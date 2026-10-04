@@ -8,6 +8,7 @@ import json
 import re
 import tomllib
 from collections.abc import Mapping, Sequence
+from graphlib import TopologicalSorter
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
@@ -508,24 +509,30 @@ def shared_aport_sources(package: str, root: Path = ROOT) -> tuple[Path, ...]:
     return tuple(root / relative for relative in SHARED_APORT_SOURCES.get(name, ()))
 
 
-def local_build_dependencies(packages: Sequence[str]) -> tuple[str, ...]:
-    """Select the project libraries required by the current aport consumers."""
-    return tuple(
-        sorted(
-            {
-                library
-                for name in packages
-                for library in LOCAL_BUILD_DEPENDENCIES.get(aport_producer(name), ())
-            }
+def _aport_dependency_graph(packages: Sequence[str]) -> dict[str, tuple[str, ...]]:
+    graph: dict[str, tuple[str, ...]] = {}
+    pending = sorted({aport_producer(package) for package in packages})
+    while pending:
+        producer = pending.pop()
+        if producer in graph:
+            continue
+        dependencies = tuple(
+            sorted(aport_producer(name) for name in LOCAL_BUILD_DEPENDENCIES.get(producer, ()))
         )
-    )
+        graph[producer] = dependencies
+        pending.extend(dependencies)
+    return {producer: graph[producer] for producer in sorted(graph)}
+
+
+def local_build_dependencies(packages: Sequence[str]) -> tuple[str, ...]:
+    """Select every local library needed in the consumers' build sysroot."""
+    graph = _aport_dependency_graph(packages)
+    return tuple(sorted({library for dependencies in graph.values() for library in dependencies}))
 
 
 def aport_build_order(packages: Sequence[str]) -> tuple[str, ...]:
-    """Build each selected producer once, after its independent local libraries."""
-    producers = tuple(sorted({aport_producer(package) for package in packages}))
-    libraries = local_build_dependencies(producers)
-    return (*libraries, *sorted(set(producers) - set(libraries)))
+    """Build each producer once, after all of its declared local dependencies."""
+    return tuple(TopologicalSorter(_aport_dependency_graph(packages)).static_order())
 
 
 def shared_aport_source_records(
