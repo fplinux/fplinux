@@ -7,11 +7,16 @@ compiling any hardware description.
 
 from __future__ import annotations
 
+import contextlib
+import io
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
+from fplinux_cli import common, target_new
 from fplinux_cli.device_tree import (
     exact_path_properties,
     parse_nul_string,
@@ -24,11 +29,97 @@ from fplinux_cli.identity_codegen import (
     linux_machine_binding_path,
 )
 from fplinux_cli.linux_state import write_profile_root
+from fplinux_cli.manifests import platforms, targets
 
 from tests.fdt import binary_tree
 from tests.process import run_process
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+class NewTargetDeviceTreeTests(unittest.TestCase):
+    """Compile the generated target's identity with minimal platform include stubs."""
+
+    def test_new_target_compiles_with_its_own_board_identity(self) -> None:
+        """CPP and DTC resolve the generated include and preserve the requested identity."""
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            platform_directory = root / "platforms/ums9117"
+            (platform_directory / "host").mkdir(parents=True)
+            shutil.copy2(ROOT / "platforms/ums9117/platform.toml", platform_directory)
+            shutil.copy2(
+                ROOT / "platforms/ums9117/host/target_skeleton.py", platform_directory / "host"
+            )
+            shutil.copytree(
+                ROOT / "platforms/ums9117/target-template", platform_directory / "target-template"
+            )
+            shutil.copytree(ROOT / "profiles", root / "profiles")
+            (root / "targets").mkdir()
+            with (
+                mock.patch.object(common, "ROOT", root),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                target_new.create_target(
+                    "hammer-horizon-lte",
+                    platform=None,
+                    brand="HAMMER",
+                    product="Horizon LTE",
+                    compatible=None,
+                )
+                config = targets.load_target("hammer-horizon-lte")
+                platform = platforms.load_platform(config["platform"])
+
+            source = root / "targets/hammer-horizon-lte/linux/dts"
+            (source / linux_identity_dtsi_name("hammer-horizon-lte")).write_bytes(
+                linux_identity_dtsi(config["identity"], platform["identity"])
+            )
+            # These stubs replace SoC descriptions; no hardware configuration is validated.
+            (source / "dt-bindings/leds").mkdir(parents=True)
+            for relative in (
+                "dt-bindings/leds/common.h",
+                "ums9117-sc2720.dtsi",
+                "ums9117-nand-readonly.dtsi",
+                "ums9117-ram-session.dtsi",
+            ):
+                (source / relative).write_text("", encoding="utf-8")
+            (source / "ums9117.dtsi").write_text(
+                "/ { #address-cells = <1>; #size-cells = <1>;\n"
+                "codec_dma: codec-dma {}; sc2720_fgu: fuel-gauge {};\n"
+                "sc2720_kpled: keypad-light {}; usb: usb {}; };\n",
+                encoding="utf-8",
+            )
+            preprocessed = root / "board.dts"
+            dtb = root / "board.dtb"
+            run_process(
+                [
+                    "cpp",
+                    "-nostdinc",
+                    "-undef",
+                    "-D__DTS__",
+                    "-x",
+                    "assembler-with-cpp",
+                    "-I",
+                    str(source),
+                    str(source / "ums9117-hammer-horizon-lte.dts"),
+                    "-o",
+                    str(preprocessed),
+                ],
+                name="preprocess generated target identity",
+                timeout=30,
+                check=True,
+            )
+            run_process(
+                ["dtc", "-I", "dts", "-O", "dtb", "-o", str(dtb), str(preprocessed)],
+                name="compile generated target identity",
+                timeout=30,
+                check=True,
+            )
+            properties = exact_path_properties(dtb.read_bytes(), ("/",))["/"]
+            self.assertEqual(parse_nul_string(properties["model"], "model"), "HAMMER Horizon LTE")
+            self.assertEqual(
+                parse_nul_string_list(properties["compatible"], "compatible"),
+                ("hammer,horizon-lte", "sprd,ums9117"),
+            )
 
 
 class LinuxMachineBindingTests(unittest.TestCase):

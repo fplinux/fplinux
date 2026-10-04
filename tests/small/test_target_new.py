@@ -13,7 +13,7 @@ from unittest import mock
 
 from fplinux_cli import common, target_new
 from fplinux_cli.cli import package
-from fplinux_cli.manifests import paths, targets
+from fplinux_cli.manifests import paths, platforms, targets
 
 REPOSITORY = common.ROOT
 DISPLAY_KEYS = {"spi_mode", "lcd_id", "backlight_channels", "backlight_level"}
@@ -141,6 +141,24 @@ class NewTargetTests(unittest.TestCase):
             with self.subTest(application=application):
                 self.assertEqual(support, "Unknown")
                 self.assertEqual(difference, "—")
+
+    def test_new_target_release_carries_every_declared_bundle_apk(self) -> None:
+        """The generated release includes exactly the platform and target bundle packages."""
+        self.create("hammer-horizon-lte")
+        config = targets.load_target("hammer-horizon-lte")
+        platform = platforms.load_platform(config["platform"])
+        release = package.load_release_manifest("hammer-horizon-lte", config)
+
+        declared_apks = {
+            f"apks/{name}.apk"
+            for name in (*platform["bundle"]["packages"], *config["bundle"]["packages"])
+        }
+        release_apks = {
+            relative
+            for relative in release["bundle_files"]
+            if relative.startswith("apks/") and relative.endswith(".apk")
+        }
+        self.assertEqual(release_apks, declared_apks)
 
     def test_compatible_defaults_to_the_public_names_unless_given(self) -> None:
         """A derived compatible folds punctuation; an explicit one is kept verbatim."""
