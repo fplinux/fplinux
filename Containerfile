@@ -117,8 +117,8 @@ RUN set -eux; \
         py3-dt-schema=2025.12-r1 \
         py3-elftools=0.32-r1 \
         py3-mypy=1.19.1-r2 \
-        python3=3.14.7-r1 \
-        python3-dev=3.14.7-r1 \
+        python3=3.14.8-r0 \
+        python3-dev=3.14.8-r0 \
         reuse=6.2.0-r0 \
         shellcheck=0.11.0-r1 \
         shfmt=3.13.1-r2 \
