@@ -107,7 +107,7 @@ error bound is specified for every accepted JPEG.
 
 ### Supported JPEG syntax
 
-The decoder accepts self-contained, eight-bit baseline Huffman YCbCr with one
+The decoder accepts eight-bit baseline Huffman YCbCr with one
 interleaved scan. Width and height may each be from 1 through 2048 pixels. The
 complete JPEG file must not exceed 1 MiB.
 
@@ -132,13 +132,17 @@ The current input contract is:
 - every referenced quantization table explicitly present as 64 nonzero
   eight-bit values. Table IDs 0 through 3 are accepted, and the Cb and Cr tables
   must contain identical values;
-- every referenced DC and AC Huffman table explicitly present, canonical and
+- every referenced DC and AC Huffman table present, canonical and
   valid for baseline symbols. DC tables contain 1 through 12 unique categories
   from 0 through 11, with no more than four symbols of length 16. AC tables
   contain 1 through 162 unique symbols, use coefficient sizes through 10, and
   reserve size zero for EOB and ZRL. The canonical tree must leave the all-ones
   padding code unused. DC and AC table IDs may each be 0 or 1; Cb and Cr must
   use identical DC tables and identical AC tables;
+- an abbreviated MJPEG frame may omit every DHT segment when the luma DC and
+  AC selectors are 0 and both chroma DC and AC selectors are 1. The decoder
+  then uses the standard Annex K Huffman tables. Partial, empty, malformed or
+  otherwise unsupported Huffman definitions do not receive default tables;
 - an optional restart interval with RST markers in `RST0` through `RST7` order
   and the exact count implied by the image's MCU count;
 - byte-stuffed entropy followed immediately by the final EOI marker. An
@@ -153,7 +157,7 @@ and reference is consistent.
 
 Progressive and extended sequential JPEG, grayscale, 4:4:4, 4:1:1, vertical
 4:2:2, RGB/CMYK/YCCK transforms, arithmetic coding, multiple scans, sixteen-bit
-quantization tables, and JPEGs that rely on omitted default tables are not
+quantization tables, and JPEGs that omit quantization tables are not
 supported.
 
 Header validation is deliberately strict, but it is not a complete software

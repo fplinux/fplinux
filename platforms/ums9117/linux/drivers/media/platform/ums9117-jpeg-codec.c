@@ -216,6 +216,37 @@ static bool ums9117_jpeg_table_equal(const struct v4l2_jpeg_reference *left,
 	       !memcmp(left->start, right->start, left->length);
 }
 
+static int ums9117_jpeg_default_huffman(struct v4l2_jpeg_header *header)
+{
+	static const struct v4l2_jpeg_reference tables[] = {
+		{ (u8 *)v4l2_jpeg_ref_table_luma_dc_ht,
+		  V4L2_JPEG_REF_HT_DC_LEN },
+		{ (u8 *)v4l2_jpeg_ref_table_chroma_dc_ht,
+		  V4L2_JPEG_REF_HT_DC_LEN },
+		{ (u8 *)v4l2_jpeg_ref_table_luma_ac_ht,
+		  V4L2_JPEG_REF_HT_AC_LEN },
+		{ (u8 *)v4l2_jpeg_ref_table_chroma_ac_ht,
+		  V4L2_JPEG_REF_HT_AC_LEN },
+	};
+	unsigned int index;
+
+	if (header->num_dht)
+		return 0;
+	/* Abbreviated MJPEG uses Annex K with Y table 0 and Cb/Cr table 1. */
+	for (index = 0; index < JPEG_COMPONENTS; ++index) {
+		const struct v4l2_jpeg_scan_component_spec *component =
+			&header->scan->component[index];
+		u8 selector = index ? 1 : 0;
+
+		if (component->dc_entropy_coding_table_selector != selector ||
+		    component->ac_entropy_coding_table_selector != selector)
+			return -EOPNOTSUPP;
+	}
+	memcpy(header->huffman_tables, tables, sizeof(tables));
+
+	return 0;
+}
+
 static int
 ums9117_jpeg_select_tables(const struct v4l2_jpeg_header *header,
 			   const struct v4l2_jpeg_reference *quant[2],
@@ -430,6 +461,9 @@ int ums9117_jpeg_parse(const void *data, size_t length,
 	if (ret)
 		return ret;
 	ret = ums9117_jpeg_validate_sos(&header);
+	if (ret)
+		return ret;
+	ret = ums9117_jpeg_default_huffman(&header);
 	if (ret)
 		return ret;
 	ret = ums9117_jpeg_select_tables(&header, quant, dc, ac);
