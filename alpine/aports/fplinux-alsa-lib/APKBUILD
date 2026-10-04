@@ -35,8 +35,8 @@ build() {
 		--disable-hwdep \
 		--disable-ucm \
 		--disable-topology \
-		--with-pcm-plugins=copy,linear,plug,rate,route,lfloat,mulaw,alaw,adpcm,iec958 \
-		--with-ctl-plugins=
+		--with-pcm-plugins=copy,linear,plug,rate,route,lfloat,mulaw,alaw,adpcm,iec958,ioplug \
+		--with-ctl-plugins=ext
 	make -j"${JOBS:-1}"
 }
 

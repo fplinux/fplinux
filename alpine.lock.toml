@@ -58,6 +58,9 @@ fplinux-microsd-root = [
 packages = [
   "binutils-2.45.1-r1.apk",
   "bsd-compat-headers-0.7.2-r6.apk",
+  "busybox-1.37.0-r31.apk",
+  "busybox-binsh-1.37.0-r31.apk",
+  "dbus-1.16.2-r2.apk",
   "dbus-dev-1.16.2-r2.apk",
   "dbus-libs-1.16.2-r2.apk",
   "e2fsprogs-libs-1.47.4-r0.apk",
@@ -77,6 +80,7 @@ packages = [
   "libedit-dev-20260508.3.1-r1.apk",
   "libevdev-1.13.6-r0.apk",
   "libevdev-dev-1.13.6-r0.apk",
+  "libexpat-2.8.4-r0.apk",
   "libffi-3.5.2-r1.apk",
   "libffi-dev-3.5.2-r1.apk",
   "libformw-6.6_p20260516-r0.apk",
@@ -107,6 +111,7 @@ packages = [
   "ncurses-terminfo-base-6.6_p20260516-r0.apk",
   "pcre2-10.48-r0.apk",
   "pcre2-dev-10.48-r0.apk",
+  "pcre2-static-10.48-r0.apk",
   "pkgconf-2.5.1-r0.apk",
   "readline-8.3.3-r1.apk",
   "readline-dev-8.3.3-r1.apk",
@@ -118,6 +123,7 @@ packages = [
   "utmps-static-0.1.3.3-r0.apk",
   "zlib-1.3.2-r0.apk",
   "zlib-dev-1.3.2-r0.apk",
+  "zlib-static-1.3.2-r0.apk",
   "zstd-libs-1.5.7-r2.apk",
 ]
 
@@ -405,9 +411,21 @@ bytes = 17157
 
 [[package]]
 repository = "main"
+file = "pcre2-static-10.48-r0.apk"
+sha256 = "442b40829a7eb5637dab50ef8119d6eeb03ed627ced670ebcde59d5604ceedc9"
+bytes = 802958
+
+[[package]]
+repository = "main"
 file = "zlib-dev-1.3.2-r0.apk"
 sha256 = "5975381ff03d0977ba0fa702a7055c98445a761594de70c5948a02273a54e19a"
 bytes = 34424
+
+[[package]]
+repository = "main"
+file = "zlib-static-1.3.2-r0.apk"
+sha256 = "6ffcb9c0f1247904cc8584b65e19bbfa70bab04b5a749dec8cf9541be4cd1c6a"
+bytes = 46853
 
 [[package]]
 repository = "main"
@@ -468,6 +486,18 @@ repository = "community"
 file = "mtdev-dev-1.1.7-r0.apk"
 sha256 = "a4bb33c68ab15427702a8fdcca69055cbfffe9109b954cd120fccab96f19e698"
 bytes = 8734
+
+[[package]]
+repository = "main"
+file = "busybox-1.37.0-r31.apk"
+sha256 = "032c499bfa5ea22944fc8ffce2aa5d0603f1f8810f91b73c453d053692fe2f32"
+bytes = 504882
+
+[[package]]
+repository = "main"
+file = "busybox-binsh-1.37.0-r31.apk"
+sha256 = "8d2751fc05267dba06c962879c2242ca3a01a4971e72a46a2540360b00387c64"
+bytes = 1546
 
 [[package]]
 repository = "main"

@@ -144,6 +144,41 @@ Ctrl-C to disconnect PAN. Internet traffic uses the configured BNEP interface;
 USB-NCM remains the separate local management path and is not the Internet
 gateway.
 
+## Send audio to an A2DP sink
+
+The optional `fplinux-bluealsa.apk`, `fplinux-bluez-libs.apk` and
+`fplinux-sbc.apk` packages provide A2DP source playback with SBC. Install all
+three through the [optional APK workflow](../guides/APK_PACKAGES.md), then start
+the service:
+
+```sh
+rc-service bluealsa start
+```
+
+Enable Bluetooth and pair and trust the sink using the procedure above. Connect
+its Audio Sink profile and inspect the available PCM:
+
+```sh
+bluetoothctl connect <PEER-MAC> 0000110b-0000-1000-8000-00805f9b34fb
+bluealsactl list-pcms
+```
+
+Select the Bluetooth PCM explicitly when playing audio:
+
+```sh
+aplay -D 'bluealsa:DEV=<PEER-MAC>,PROFILE=a2dp,CODEC=SBC' /tmp/audio.wav
+```
+
+Finish playback before disconnecting or stopping the service. After reconnecting,
+open a new PCM. Stop the service with `rc-service bluealsa stop` before removing
+`fplinux-bluealsa`. It is not enabled automatically at boot and does not replace
+the phone's default audio output.
+
+A2DP source playback and reopening after reconnect are supported with a Linux
+PC audio sink on INOI 244 in the RAM profile. Physical Bluetooth headsets, other
+targets and the microSD system profile remain unqualified for audio. HFP, SCO
+and other audio codecs are not supported by this service.
+
 ## Suspend
 
 The shared Bluetooth driver supports s2idle without discarding pairing state.
@@ -195,5 +230,5 @@ they enter pairing mode. Follow any passkey prompt that `bluetoothctl` shows.
 - Controller power cycling is qualified in the Nokia TA-1618, INOI 240 Modern 4G
   and INOI 244 Modern 4G RAM profiles. Other target and profile combinations remain
   unqualified.
-- Bluetooth LE devices other than keyboards and mice, Bluetooth audio, range
-  and wake over Bluetooth have not been tested.
+- Bluetooth LE devices other than keyboards and mice, range and wake over
+  Bluetooth have not been tested. Audio limits are stated above.

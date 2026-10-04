@@ -1,0 +1,39 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-sbc
+pkgver=2.2
+pkgrel=0
+pkgdesc="SBC audio codec library for Bluetooth audio"
+url="https://www.bluez.org/"
+arch="armv7"
+license="LGPL-2.1-or-later"
+makedepends_build="clang22 lld22 llvm22 make"
+makedepends_host="musl-dev"
+subpackages="$pkgname-dev"
+options="!check"
+source="https://www.kernel.org/pub/linux/bluetooth/sbc-$pkgver.tar.xz"
+builddir="$srcdir/sbc-$pkgver"
+
+build() {
+	export CFLAGS="$CFLAGS -Oz -flto=thin"
+	export CXXFLAGS="$CXXFLAGS -Oz -flto=thin"
+	export LDFLAGS="$LDFLAGS -flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe"
+	export AR=/usr/lib/llvm22/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
+	./configure \
+		--build="$CBUILD" \
+		--host="$CHOST" \
+		--prefix=/usr \
+		--disable-static \
+		--disable-tools \
+		--disable-tester
+	make -j"${JOBS:-1}"
+}
+
+package() {
+	make DESTDIR="$pkgdir" install
+	install -Dm644 "$builddir/COPYING.LIB" \
+		"$pkgdir/usr/share/licenses/$pkgname/COPYING.LIB"
+}
+sha512sums="
+1a0bd4629e5d0af768466ebfc2f9e71224888e3a877d74c368dea0dedb2f8523f37f45f784aa4650a5097ace276dea482b643adc1d924fbd6a6ffe6b6e41f488  sbc-2.2.tar.xz
+"

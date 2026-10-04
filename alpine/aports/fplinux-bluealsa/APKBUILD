@@ -1,0 +1,86 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-bluealsa
+pkgver=5.0.0
+pkgrel=0
+pkgdesc="ALSA A2DP source with the SBC Bluetooth audio codec"
+url="https://github.com/arkq/bluez-alsa"
+arch="armv7"
+license="MIT AND GPL-2.0-only AND LGPL-2.1-or-later AND BSD-3-Clause AND Zlib"
+depends="fplinux-alsa-lib fplinux-bluez fplinux-bluez-libs fplinux-sbc"
+makedepends_build="autoconf automake clang22 glib-dev libtool lld22 llvm22 make pkgconf python3"
+makedepends_host="dbus-dev fplinux-alsa-lib-dev fplinux-bluez-dev fplinux-glib-static-dev fplinux-sbc-dev musl-dev"
+options="!check"
+source="https://github.com/arkq/bluez-alsa/archive/refs/tags/v$pkgver/bluez-alsa-$pkgver.tar.gz
+	libffi-LICENSE::https://raw.githubusercontent.com/libffi/libffi/v3.5.2/LICENSE
+	pcre2-LICENCE::https://raw.githubusercontent.com/PCRE2Project/pcre2/pcre2-10.48/LICENCE.md
+	zlib-LICENSE::https://raw.githubusercontent.com/madler/zlib/v1.3.2/LICENSE
+	bluealsa.initd
+"
+builddir="$srcdir/bluez-alsa-$pkgver"
+
+prepare() {
+	default_prepare
+	autoreconf -fi
+}
+
+_static_glib_libs() {
+	local libs library archive
+	libs=$(pkg-config --static --libs "$1")
+	# Keep these as linker dependencies through the convenience archive.
+	# Exact archive selectors prevent choosing the shared counterparts.
+	for library in ffi pcre2-8 z atomic; do
+		archive="$CBUILDROOT/usr/lib/lib$library.a"
+		test -f "$archive"
+		libs=$(printf '%s\n' "$libs" | sed -E \
+			"s@(^|[[:space:]])-l$library([[:space:]]|$)@\1-l:lib$library.a\2@g")
+	done
+	printf '%s\n' "$libs"
+}
+
+build() {
+	export CFLAGS="$CFLAGS -Oz -flto=thin -mthumb -ffunction-sections -fdata-sections"
+	export CXXFLAGS="$CXXFLAGS -Oz -flto=thin"
+	export LDFLAGS="$LDFLAGS -flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe -Wl,--gc-sections"
+	export AR=/usr/lib/llvm22/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
+	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
+	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
+	local gio_libs glib_libs
+	gio_libs=$(_static_glib_libs gio-unix-2.0)
+	glib_libs=$(_static_glib_libs glib-2.0)
+	# Keep the GIO closure in the daemon; ALSA clients use the native PCM module.
+	GIO2_LIBS="$gio_libs" \
+	GLIB2_LIBS="$glib_libs" \
+	./configure \
+		--build="$CBUILD" \
+		--host="$CHOST" \
+		--prefix=/usr \
+		--sysconfdir=/etc \
+		--localstatedir=/var \
+		--with-alsaplugindir=/usr/lib/alsa-lib \
+		--with-alsaconfdir=/etc/alsa/conf.d \
+		--with-dbusconfdir=/usr/share/dbus-1/system.d \
+		--with-dbus-iface-xml=/usr/share/dbus-1/interfaces \
+		--disable-static \
+		--disable-aplay
+	make -j"${JOBS:-1}"
+}
+
+package() {
+	make DESTDIR="$pkgdir" install
+	install -Dm755 "$srcdir/bluealsa.initd" "$pkgdir/etc/init.d/bluealsa"
+	install -Dm644 "$builddir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+	install -Dm644 "$CBUILDROOT/usr/share/licenses/fplinux-glib-static-dev/LGPL-2.1-or-later.txt" \
+		"$pkgdir/usr/share/licenses/$pkgname/LGPL-2.1-or-later.txt"
+	local name
+	for name in libffi-LICENSE pcre2-LICENCE zlib-LICENSE; do
+		install -Dm644 "$srcdir/$name" "$pkgdir/usr/share/licenses/$pkgname/$name"
+	done
+}
+sha512sums="
+045b6286535191df9a85c0a1a0b9f1d5e0d5e10c65ba8d10c75dff895eb902717a0a022b5479f23216b9c59f6b55f51ffc1a2d61ad9cfd74c730f3ab035434fc  bluez-alsa-5.0.0.tar.gz
+7a1f749140afdc9550ec12b69df3b8c2bd6567bd38b0345fe728a32dd8552f4d2eb12a973c75d8aafe5a7d637a4d2332d7eee657c7b17d521cc8f90780d807c4  libffi-LICENSE
+afbc88ac86b6ddd56db8b4aed1197a13c15ec9cbb4db5f4d4324af5940f08cdccf4797c65f93212275993ce9b674ec0e8731b48e2bf64edf79f13b783806e48b  pcre2-LICENCE
+98fdcd0e962849a7d132c964745a8ff3b902ffc50d80c7af72378e848bc94228ad7a569f9d8a5b7c5484478709932a2c0988dba613e19a35cb208ad56a987f5f  zlib-LICENSE
+47a84db0185f3ec84e3b5f96e8d609705326f788c909dca394a1e090d665f75ab0166ac7fb486e5a340d85d884aa79b27fc84bc34742741017de1f4032d5871f  bluealsa.initd
+"

@@ -1,0 +1,26 @@
+#!/sbin/openrc-run
+# SPDX-License-Identifier: GPL-2.0-only
+# shellcheck shell=sh disable=SC2034
+
+name="Bluetooth audio"
+description="Provide SBC A2DP playback through ALSA"
+supervisor=supervise-daemon
+command="/usr/bin/bluealsad"
+command_args="-i hci0 -p a2dp-source"
+input_file=/dev/null
+output_logger="/usr/libexec/fplinux/kmsg --level 6 --tag fplinux-bluealsa"
+error_logger="/usr/libexec/fplinux/kmsg --level 4 --tag fplinux-bluealsa"
+respawn_delay=1
+respawn_max=3
+retry="TERM/2/KILL/2"
+
+depend() {
+	need dbus bluetooth
+}
+
+start_pre() {
+	# Load newly installed policy before the daemon requests its bus name.
+	dbus-send --system --type=method_call --print-reply \
+		--dest=org.freedesktop.DBus /org/freedesktop/DBus \
+		org.freedesktop.DBus.ReloadConfig >/dev/null
+}

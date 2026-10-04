@@ -101,6 +101,7 @@ RUN set -eux; \
         elfutils-dev=0.195-r0 \
         eudev-dev=3.2.14-r6 \
         flex=2.6.4-r8 \
+        glib-dev=2.88.1-r1 \
         libffi-dev=3.5.2-r1 \
         libevdev-dev=1.13.6-r0 \
         libusb-dev=1.0.30-r0 \

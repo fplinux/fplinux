@@ -26,10 +26,13 @@ packages = [
 
 [bundle]
 packages = [
+  "fplinux-bluealsa",
+  "fplinux-bluez-libs",
   "fplinux-brightness-ui",
   "fplinux-charge",
   "fplinux-ffmpeg",
   "fplinux-ncurses-curses",
+  "fplinux-sbc",
   "fplinux-showcase",
   "fplinux-tyrquake",
   "fplinux-xkb-ru",

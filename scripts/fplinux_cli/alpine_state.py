@@ -126,6 +126,12 @@ LOCAL_BUILD_DEPENDENCIES = {
     "fplinux-apk-tools": ("fplinux-mbedtls-static-dev",),
     "fplinux-uclient": ("fplinux-mbedtls-static-dev",),
     "fplinux-audio": ("fplinux-alsa-lib",),
+    "fplinux-bluealsa": (
+        "fplinux-alsa-lib",
+        "fplinux-bluez",
+        "fplinux-glib",
+        "fplinux-sbc",
+    ),
     "fplinux-bash": ("fplinux-ncurses", "fplinux-readline"),
     "fplinux-bluez": ("fplinux-bluez-glib", "fplinux-ncurses", "fplinux-readline"),
     "fplinux-brightness-ui": ("fplinux-libdrm",),
@@ -145,6 +151,8 @@ LOCAL_BUILD_DEPENDENCIES = {
 SUBPACKAGE_APORTS = {
     "fplinux-alsa-lib-card-profiles": "fplinux-alsa-lib",
     "fplinux-bash-loadables": "fplinux-bash",
+    "fplinux-bluez-libs": "fplinux-bluez",
+    "fplinux-glib-static-dev": "fplinux-glib",
     "fplinux-ncurses-curses": "fplinux-ncurses",
     "fplinux-font-terminus-6x12": "fplinux-font-terminus",
     "fplinux-font-terminus-8x16": "fplinux-font-terminus",
