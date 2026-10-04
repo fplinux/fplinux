@@ -25,7 +25,7 @@ be valid, and the last one selects the effective value.
 The complete command synopsis is:
 
 ```text
-fplinux-jpeg --input FILE --output FILE [--operation decode|encode|scale] [--device /dev/videoN] [--repeat N] [--timing] [--scale 1|2|4] [--width N --height N]
+fplinux-jpeg --input FILE --output FILE [--operation decode|encode|scale] [--device /dev/videoN] [--repeat N] [--timing] [--scale 1|2|4] [--width N --height N] [--quality 1..100]
 ```
 
 `--operation decode` is the default. The valid geometry and scale options
@@ -193,13 +193,22 @@ horizontal luma samples. The [camera](../features/CAMERA.md) on Nokia offers
 geometry. The `1200×1600` geometry accepts portrait-oriented NV16 prepared by
 rotating that raw frame. INOI 240 and INOI 244 offer `240×320` NV16 capture,
 which the encoder accepts directly without rotation. This command accepts
-prepared NV16 frames and uses fixed quality-85 encoding.
+prepared NV16 frames. Quality 85 is the default encoding quality. NV12 input
+is not supported by the hardware encoder.
 
-The output is a self-contained, baseline Huffman YCbCr 4:2:2 JPEG using fixed
-quality-85 quantization and restart markers. The command reserves at most 1 MiB
-for the encoded JPEG and fails instead of writing a larger result. Quality,
-tables, sampling, and restart settings are not configurable on the hardware
-command.
+```sh
+fplinux-jpeg --operation encode --quality 60 --width 320 --height 240 \
+  --input /run/input.nv16 --output /run/output.jpg
+```
+
+`--quality` accepts integers from 1 through 100 and controls the standard
+quality-scaled quantization tables; the command prints the value read back
+from the encoder. `--quality` is an encoder option.
+
+The output is a self-contained, baseline Huffman YCbCr 4:2:2 JPEG with restart
+markers. The command reserves at most 1 MiB for the encoded JPEG and fails
+instead of writing a larger result.
+Custom tables and restart settings are not configurable on the hardware command.
 
 ## Half-scale NV16
 
@@ -302,8 +311,11 @@ The decoder contract is:
   for MCU-aligned horizontal 4:2:2 input, through a `W / 4` by `H / 4` compose
   rectangle. Select a factor before allocating CAPTURE buffers.
 
-The encoder accepts two-plane `NV16M` OUTPUT and produces one-plane `JPEG`
-CAPTURE for the listed geometries. The scaler accepts two-plane `NV16M`
+The encoder accepts two-plane `NV16M` OUTPUT and produces one-plane
+`JPEG` CAPTURE for the listed geometries. Its standard
+`V4L2_CID_JPEG_COMPRESSION_QUALITY` control has range 1 through 100, step 1 and
+default 85. Each job uses the current quality when it begins encoding.
+The scaler accepts two-plane `NV16M`
 OUTPUT and produces two-plane `NV16M` CAPTURE for the two listed fixed pairs.
 Both raw interfaces use full-range BT.601 colour metadata and tight plane
 strides.

@@ -529,9 +529,10 @@ static void ums9117_jpeg_put_marker(struct ums9117_jpeg_writer *writer,
 	ums9117_jpeg_put_u8(writer, marker);
 }
 
-static u8 ums9117_jpeg_quality85_quant(u8 reference)
+static u8 ums9117_jpeg_quality_quant(u8 reference, u32 quality)
 {
-	u32 value = DIV_ROUND_CLOSEST((u32)reference * 30U, 100U);
+	u32 scale = quality < 50 ? 5000U / quality : 200U - quality * 2U;
+	u32 value = DIV_ROUND_CLOSEST((u32)reference * scale, 100U);
 
 	return clamp_t(u32, value, 1, 255);
 }
@@ -751,7 +752,7 @@ static int ums9117_jpeg_encode_header(struct ums9117_jpeg_encode_config *config)
 	return writer.position == UMS9117_JPEG_ENCODE_HEADER_SIZE ? 0 : -EINVAL;
 }
 
-int ums9117_jpeg_build_encode_config(u32 width, u32 height,
+int ums9117_jpeg_build_encode_config(u32 width, u32 height, u32 quality,
 				     struct ums9117_jpeg_encode_config *config)
 {
 	unsigned int index;
@@ -762,7 +763,9 @@ int ums9117_jpeg_build_encode_config(u32 width, u32 height,
 	memset(config, 0, sizeof(*config));
 	if (!width || !height || width > UMS9117_JPEG_MAX_DIMENSION ||
 	    height > UMS9117_JPEG_MAX_DIMENSION || !IS_ALIGNED(width, 16) ||
-	    !IS_ALIGNED(height, 8))
+	    !IS_ALIGNED(height, 8) ||
+	    quality < UMS9117_JPEG_ENCODE_MIN_QUALITY ||
+	    quality > UMS9117_JPEG_ENCODE_MAX_QUALITY)
 		return -EINVAL;
 	config->width = width;
 	config->height = height;
@@ -772,10 +775,10 @@ int ums9117_jpeg_build_encode_config(u32 width, u32 height,
 		config->mcu_x * (UMS9117_JPEG_ENCODE_STRIP_ROWS / 8);
 
 	for (index = 0; index < V4L2_JPEG_PIXELS_IN_BLOCK; ++index) {
-		config->quant[0][index] = ums9117_jpeg_quality85_quant(
-			v4l2_jpeg_ref_table_luma_qt[index]);
-		config->quant[1][index] = ums9117_jpeg_quality85_quant(
-			v4l2_jpeg_ref_table_chroma_qt[index]);
+		config->quant[0][index] = ums9117_jpeg_quality_quant(
+			v4l2_jpeg_ref_table_luma_qt[index], quality);
+		config->quant[1][index] = ums9117_jpeg_quality_quant(
+			v4l2_jpeg_ref_table_chroma_qt[index], quality);
 	}
 	ums9117_jpeg_encode_qbuf(config);
 	ret = ums9117_jpeg_encode_ac_lut(config);

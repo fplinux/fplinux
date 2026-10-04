@@ -52,6 +52,7 @@ enum cli_option {
 	CLI_OPTION_SCALE,
 	CLI_OPTION_WIDTH,
 	CLI_OPTION_HEIGHT,
+	CLI_OPTION_QUALITY,
 	CLI_OPTION_REPEAT,
 	CLI_OPTION_TIMING,
 };
@@ -64,6 +65,7 @@ struct options {
 	unsigned int scale;
 	unsigned int width;
 	unsigned int height;
+	unsigned int quality;
 	unsigned int repeat;
 	bool timing;
 };
@@ -159,6 +161,10 @@ static const char *parse_cli_option(size_t option, const char *value,
 					  &options->height))
 			return "--width and --height must be in 1..2048";
 		break;
+	case CLI_OPTION_QUALITY:
+		if (!fplinux_cli_unsigned(value, 1, 100, &options->quality))
+			return "--quality must be in 1..100";
+		break;
 	case CLI_OPTION_REPEAT:
 		if (!fplinux_cli_unsigned(value, 1, MAX_REPEAT,
 					  &options->repeat))
@@ -219,6 +225,12 @@ static enum fplinux_cli_result parse_options(int argc, char **argv,
 			.help = "set raw input height in 1..2048 for encode or scale",
 			.flags = FPLINUX_CLI_REPEAT,
 		},
+		[CLI_OPTION_QUALITY] = {
+			.name = "quality",
+			.metavar = "N",
+			.help = "set encode quality in 1..100 (default: 85)",
+			.flags = FPLINUX_CLI_REPEAT,
+		},
 		[CLI_OPTION_REPEAT] = {
 			.name = "repeat",
 			.metavar = "N",
@@ -247,6 +259,7 @@ static enum fplinux_cli_result parse_options(int argc, char **argv,
 	memset(options, 0, sizeof(*options));
 	options->operation = OPERATION_DECODE;
 	options->scale = 1;
+	options->quality = ENCODE_QUALITY;
 	options->repeat = 1;
 	result = fplinux_cli_parse(&cli, argc, argv);
 	if (result != FPLINUX_CLI_READY)
@@ -255,6 +268,10 @@ static enum fplinux_cli_result parse_options(int argc, char **argv,
 	options->output_path = cli_options[CLI_OPTION_OUTPUT].value;
 	options->device_path = cli_options[CLI_OPTION_DEVICE].value;
 	options->timing = cli_options[CLI_OPTION_TIMING].count != 0;
+	if (options->operation != OPERATION_ENCODE &&
+	    cli_options[CLI_OPTION_QUALITY].count) {
+		return fplinux_cli_error(&cli, "only encode accepts --quality");
+	}
 	if (options->operation == OPERATION_DECODE) {
 		if (options->width || options->height) {
 			return fplinux_cli_error(
@@ -515,6 +532,25 @@ static int set_raw_format(int fd, enum v4l2_buf_type type, uint32_t width,
 			return -1;
 		}
 	}
+	return 0;
+}
+
+static int set_encode_quality(int fd, unsigned int requested,
+			      unsigned int *actual)
+{
+	struct v4l2_control control = {
+		.id = V4L2_CID_JPEG_COMPRESSION_QUALITY,
+		.value = (int32_t)requested,
+	};
+
+	if (xioctl(fd, VIDIOC_S_CTRL, &control) < 0)
+		return -1;
+	control.value = 0;
+	if (xioctl(fd, VIDIOC_G_CTRL, &control) < 0)
+		return -1;
+	if (control.value < 1 || control.value > 100)
+		return errno = EINVAL, -1;
+	*actual = (unsigned int)control.value;
 	return 0;
 }
 
@@ -1403,6 +1439,7 @@ int main(int argc, char **argv)
 	bool output_requested = false;
 	bool capture_requested = false;
 	unsigned int iteration;
+	unsigned int actual_quality = 0;
 	int result = EXIT_FAILURE;
 	enum fplinux_cli_result parse_result;
 
@@ -1515,6 +1552,12 @@ int main(int argc, char **argv)
 					    capture_width, capture_height,
 					    &capture_format)) < 0) {
 			perror("fplinux-jpeg: formats");
+			goto out;
+		}
+		if (options.operation == OPERATION_ENCODE &&
+		    set_encode_quality(fd, options.quality, &actual_quality) <
+			    0) {
+			perror("fplinux-jpeg: encode quality");
 			goto out;
 		}
 		if (request_and_map(fd, V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,
@@ -1715,9 +1758,9 @@ int main(int argc, char **argv)
 		       completed_capture_planes[0].bytesused,
 		       completed_capture_planes[1].bytesused, options.repeat);
 	} else if (options.operation == OPERATION_ENCODE) {
-		printf("operation=encode format=JPEG width=%u height=%u bytes=%zu quality=%d repeat=%u\n",
+		printf("operation=encode format=JPEG width=%u height=%u bytes=%zu quality=%u repeat=%u\n",
 		       options.width, options.height, reference_length,
-		       ENCODE_QUALITY, options.repeat);
+		       actual_quality, options.repeat);
 	} else {
 		printf("operation=scale format=%s width=%u height=%u stride_y=%u stride_uv=%u bytes_y=%u bytes_uv=%u source_width=%u source_height=%u repeat=%u\n",
 		       format_name(layout.fourcc), layout.width, layout.height,

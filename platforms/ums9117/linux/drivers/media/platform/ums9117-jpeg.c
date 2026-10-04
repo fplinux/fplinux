@@ -9,6 +9,7 @@
 #include <linux/workqueue.h>
 
 #include <media/v4l2-device.h>
+#include <media/v4l2-ctrls.h>
 #include <media/media-device.h>
 #include <media/v4l2-event.h>
 #include <media/v4l2-ioctl.h>
@@ -77,6 +78,7 @@ struct jpeg_video_node {
 
 struct jpeg_context {
 	struct v4l2_fh fh;
+	struct v4l2_ctrl_handler controls;
 	struct jpeg_video_node *node;
 	struct jpeg_device *jpeg;
 	enum jpeg_operation operation;
@@ -92,6 +94,7 @@ struct jpeg_context {
 	u32 coded_padded_height;
 	u32 coded_fourcc;
 	unsigned int decode_factor;
+	u32 encode_quality;
 	struct ums9117_jpeg_encode_config encode_config;
 	u32 output_sequence;
 	u32 capture_sequence;
@@ -696,6 +699,8 @@ jpeg_subscribe_event(struct v4l2_fh *fh,
 {
 	struct jpeg_context *ctx = container_of(fh, struct jpeg_context, fh);
 
+	if (ctx->operation == JPEG_OPERATION_ENCODE)
+		return v4l2_ctrl_subscribe_event(fh, subscription);
 	if (ctx->operation != JPEG_OPERATION_DECODE ||
 	    subscription->type != V4L2_EVENT_SOURCE_CHANGE)
 		return -EINVAL;
@@ -941,8 +946,10 @@ static int jpeg_run_encode(struct jpeg_context *ctx,
 
 	input[0] = vb2_plane_vaddr(&source->vb2_buf, 0);
 	input[1] = vb2_plane_vaddr(&source->vb2_buf, 1);
-	ret = ums9117_jpeg_build_encode_config(
-		ctx->output.width, ctx->output.height, &ctx->encode_config);
+	ret = ums9117_jpeg_build_encode_config(ctx->output.width,
+					       ctx->output.height,
+					       READ_ONCE(ctx->encode_quality),
+					       &ctx->encode_config);
 	if (ret)
 		return ret;
 	ret = ums9117_jpeg_hw_encode(ctx->jpeg->hw, &ctx->encode_config, input,
@@ -1134,6 +1141,41 @@ static void jpeg_init_scale_formats(struct jpeg_context *ctx)
 			 profile->destination.height);
 }
 
+static int jpeg_set_control(struct v4l2_ctrl *control)
+{
+	struct jpeg_context *ctx =
+		container_of(control->handler, struct jpeg_context, controls);
+
+	if (control->id != V4L2_CID_JPEG_COMPRESSION_QUALITY)
+		return -EINVAL;
+	WRITE_ONCE(ctx->encode_quality, control->val);
+	return 0;
+}
+
+static const struct v4l2_ctrl_ops jpeg_control_ops = {
+	.s_ctrl = jpeg_set_control,
+};
+
+static int jpeg_init_controls(struct jpeg_context *ctx)
+{
+	bool encoder = ctx->operation == JPEG_OPERATION_ENCODE;
+	int ret;
+
+	ret = v4l2_ctrl_handler_init(&ctx->controls, encoder ? 1 : 0);
+	if (ret)
+		return ret;
+	if (encoder) {
+		ctx->encode_quality = UMS9117_JPEG_ENCODE_QUALITY;
+		v4l2_ctrl_new_std(&ctx->controls, &jpeg_control_ops,
+				  V4L2_CID_JPEG_COMPRESSION_QUALITY,
+				  UMS9117_JPEG_ENCODE_MIN_QUALITY,
+				  UMS9117_JPEG_ENCODE_MAX_QUALITY, 1,
+				  UMS9117_JPEG_ENCODE_QUALITY);
+	}
+	ctx->fh.ctrl_handler = &ctx->controls;
+	return ctx->controls.error;
+}
+
 static int jpeg_open(struct file *file)
 {
 	struct jpeg_video_node *node = video_drvdata(file);
@@ -1170,16 +1212,21 @@ static int jpeg_open(struct file *file)
 		goto free_context;
 	}
 	v4l2_fh_init(&ctx->fh, &node->video);
+	ret = jpeg_init_controls(ctx);
+	if (ret)
+		goto exit_fh;
 	ctx->fh.m2m_ctx = v4l2_m2m_ctx_init(jpeg->m2m, ctx, jpeg_queue_init);
 	if (IS_ERR(ctx->fh.m2m_ctx)) {
 		ret = PTR_ERR(ctx->fh.m2m_ctx);
-		v4l2_fh_exit(&ctx->fh);
-		goto free_context;
+		goto exit_fh;
 	}
 	v4l2_fh_add(&ctx->fh, file);
 	ret = 0;
 	goto unlock;
 
+exit_fh:
+	v4l2_ctrl_handler_free(&ctx->controls);
+	v4l2_fh_exit(&ctx->fh);
 free_context:
 	kfree(ctx);
 unlock:
@@ -1196,6 +1243,7 @@ static int jpeg_release(struct file *file)
 	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
 	v4l2_fh_del(&ctx->fh, file);
 	v4l2_fh_exit(&ctx->fh);
+	v4l2_ctrl_handler_free(&ctx->controls);
 	kfree(ctx);
 	mutex_unlock(&jpeg->lock);
 	return 0;

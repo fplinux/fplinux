@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Host checks for UMS9117 JPEG validation and fixed encode configuration."""
+"""Host checks for UMS9117 JPEG validation and encode configuration."""
 
 from __future__ import annotations
 
@@ -25,6 +25,18 @@ STANDARD_Q85_NATURAL = bytes.fromhex(
     "07 08 11 1e 1e 1e 1e 1e 0e 14 1e 1e 1e 1e 1e 1e "
     "1e 1e 1e 1e 1e 1e 1e 1e 1e 1e 1e 1e 1e 1e 1e 1e "
     "1e 1e 1e 1e 1e 1e 1e 1e 1e 1e 1e 1e 1e 1e 1e 1e"
+)
+
+# ITU-T T.81 Annex K.1/K.2 quantization tables in natural coefficient order.
+STANDARD_Q50_NATURAL = bytes.fromhex(
+    "10 0b 0a 10 18 28 33 3d 0c 0c 0e 13 1a 3a 3c 37 "
+    "0e 0d 10 18 28 39 45 38 0e 11 16 1d 33 57 50 3e "
+    "12 16 25 38 44 6d 67 4d 18 23 37 40 51 68 71 5c "
+    "31 40 4e 57 67 79 78 65 48 5c 5f 62 70 64 67 63 "
+    "11 12 18 2f 63 63 63 63 12 15 1a 42 63 63 63 63 "
+    "18 1a 38 63 63 63 63 63 2f 42 63 63 63 63 63 63 "
+    "63 63 63 63 63 63 63 63 63 63 63 63 63 63 63 63 "
+    "63 63 63 63 63 63 63 63 63 63 63 63 63 63 63 63"
 )
 
 ZIGZAG_TO_NATURAL = bytes.fromhex(
@@ -144,7 +156,7 @@ def _canonical_codes(counts: bytes, symbols: bytes) -> dict[int, tuple[int, int]
 class Ums9117JpegCodecHostTests(unittest.TestCase):
     """Exercise production codec objects through controlled external doubles."""
 
-    def test_decode_contract_and_fixed_encode_config(self) -> None:
+    def test_decode_contract_and_encode_config(self) -> None:
         """Preserve decoder behavior and validate the observable encode config."""
         with tempfile.TemporaryDirectory() as temporary:
             executable = Path(temporary) / "ums9117-jpeg-codec"
@@ -180,6 +192,32 @@ class Ums9117JpegCodecHostTests(unittest.TestCase):
                 timeout=30,
                 check=True,
             )
+
+            for quality, expected in (
+                (1, bytes([255]) * 128),
+                (50, STANDARD_Q50_NATURAL),
+                (100, bytes([1]) * 128),
+            ):
+                with self.subTest(quality=quality):
+                    quality_dump = run_process(
+                        [str(executable), f"--dump-quality-{quality}"],
+                        name="export quality-dependent JPEG encode config",
+                        timeout=30,
+                        check=True,
+                    )
+                    quality_fields = _parse_dump(quality_dump.stdout)
+                    self.assertEqual(bytes.fromhex(quality_fields["quant"]), expected)
+                    quality_dqt = _collect_dqt(
+                        _parse_segments(bytes.fromhex(quality_fields["header"]))
+                    )
+                    self.assertEqual(
+                        quality_dqt[0],
+                        bytes(expected[index] for index in ZIGZAG_TO_NATURAL),
+                    )
+                    self.assertEqual(
+                        quality_dqt[1],
+                        bytes(expected[64 + index] for index in ZIGZAG_TO_NATURAL),
+                    )
 
         fields = _parse_dump(dump.stdout)
         self.assertEqual(set(fields), {"meta", "quant", "header", "qbuf", "ac"})
@@ -274,9 +312,9 @@ class Ums9117JpegCodecHostTests(unittest.TestCase):
             160: 0,
             161: 0,
         }
-        for index, expected in expected_ac.items():
+        for index, expected_word in expected_ac.items():
             with self.subTest(ac_index=index):
-                self.assertEqual(ac[index], expected)
+                self.assertEqual(ac[index], expected_word)
 
 
 if __name__ == "__main__":

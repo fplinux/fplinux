@@ -450,7 +450,8 @@ static int test_encode_geometry(void)
 
 	for (index = 0; index < ARRAY_SIZE(accepted); ++index) {
 		int ret = ums9117_jpeg_build_encode_config(
-			accepted[index].width, accepted[index].height, &config);
+			accepted[index].width, accepted[index].height, 85,
+			&config);
 
 		failed |=
 			expect(ret == 0, "valid encode geometry was rejected");
@@ -470,15 +471,22 @@ static int test_encode_geometry(void)
 
 		memset(&config, 0xa5, sizeof(config));
 		ret = ums9117_jpeg_build_encode_config(
-			rejected[index][0], rejected[index][1], &config);
+			rejected[index][0], rejected[index][1], 85, &config);
 		failed |= expect(ret == -EINVAL,
 				 "invalid encode geometry was accepted");
 		failed |= expect(all_zero(&config, sizeof(config)),
 				 "failed encode config retained partial state");
 	}
+	failed |= expect(ums9117_jpeg_build_encode_config(16, 8, 85, NULL) ==
+				 -EINVAL,
+			 "NULL encode config was accepted");
+	failed |= expect(
+		ums9117_jpeg_build_encode_config(16, 16, 0, &config) == -EINVAL,
+		"encode quality below the supported range was accepted");
 	failed |=
-		expect(ums9117_jpeg_build_encode_config(16, 8, NULL) == -EINVAL,
-		       "NULL encode config was accepted");
+		expect(ums9117_jpeg_build_encode_config(16, 16, 101, &config) ==
+			       -EINVAL,
+		       "encode quality above the supported range was accepted");
 	return failed;
 }
 
@@ -502,10 +510,10 @@ static void print_words(const char *name, const u32 *data, size_t count)
 	putchar('\n');
 }
 
-static int dump_encode_config(void)
+static int dump_encode_config(u32 quality)
 {
 	struct ums9117_jpeg_encode_config config;
-	int ret = ums9117_jpeg_build_encode_config(1200, 32, &config);
+	int ret = ums9117_jpeg_build_encode_config(1200, 32, quality, &config);
 
 	if (ret) {
 		fprintf(stderr, "encode config builder returned %d\n", ret);
@@ -525,7 +533,13 @@ static int dump_encode_config(void)
 int main(int argc, char **argv)
 {
 	if (argc == 2 && !strcmp(argv[1], "--dump-encode"))
-		return dump_encode_config();
+		return dump_encode_config(85);
+	if (argc == 2 && !strcmp(argv[1], "--dump-quality-1"))
+		return dump_encode_config(1);
+	if (argc == 2 && !strcmp(argv[1], "--dump-quality-50"))
+		return dump_encode_config(50);
+	if (argc == 2 && !strcmp(argv[1], "--dump-quality-100"))
+		return dump_encode_config(100);
 	if (argc != 1) {
 		fprintf(stderr, "usage: %s [--dump-encode]\n", argv[0]);
 		return 1;

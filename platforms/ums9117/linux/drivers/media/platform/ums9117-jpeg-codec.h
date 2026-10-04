@@ -13,6 +13,8 @@
 #define UMS9117_JPEG_BLOCK_COEFFICIENTS 64U
 
 #define UMS9117_JPEG_ENCODE_QUALITY 85U
+#define UMS9117_JPEG_ENCODE_MIN_QUALITY 1U
+#define UMS9117_JPEG_ENCODE_MAX_QUALITY 100U
 #define UMS9117_JPEG_ENCODE_STRIP_ROWS 16U
 #define UMS9117_JPEG_ENCODE_HEADER_SIZE 629U
 #define UMS9117_JPEG_ENCODE_QBUF_WORDS 64U
@@ -54,7 +56,7 @@ struct ums9117_jpeg_encode_config {
 
 int ums9117_jpeg_parse(const void *data, size_t length,
 		       struct ums9117_jpeg_frame *frame);
-int ums9117_jpeg_build_encode_config(u32 width, u32 height,
+int ums9117_jpeg_build_encode_config(u32 width, u32 height, u32 quality,
 				     struct ums9117_jpeg_encode_config *config);
 
 #endif

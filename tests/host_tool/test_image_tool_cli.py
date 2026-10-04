@@ -258,6 +258,13 @@ class ImageToolCliTests(unittest.TestCase):
             ),
             ("fplinux-jpeg", ("--output", "unused"), "--scale", "3", "1"),
             (
+                "fplinux-jpeg",
+                ("--operation", "encode", "--width", "4", "--height", "2", "--output", "unused"),
+                "--quality",
+                "0",
+                "85",
+            ),
+            (
                 "fplinux-jpeg-cpu",
                 ("--operation", "decode", "--output", "unused"),
                 "--scale",
@@ -378,6 +385,56 @@ class ImageToolCliTests(unittest.TestCase):
                 self.assertEqual(result.stdout, "")
                 self.assertEqual(result.stderr, error)
 
+    def test_jpeg_encode_options_reject_invalid_values_before_input_access(self) -> None:
+        """Encode quality, width and scale are checked before reading input."""
+        base = (
+            "--operation",
+            "encode",
+            "--width",
+            "4",
+            "--height",
+            "2",
+            "--input",
+            "missing-input",
+            "--output",
+            "unused-output",
+        )
+        for option, values, error in (
+            ("--quality", ("0", "101", "-1", "-0", "85x"), "--quality must be in 1..100"),
+            ("--quality", ("",), "--quality=N requires a nonempty value"),
+            ("--width", ("3",), "encode and scale require even --width"),
+            ("--scale", ("2", "4"), "--scale 1"),
+        ):
+            for value in values:
+                with self.subTest(option=option, value=value):
+                    result = self.assert_usage("fplinux-jpeg", *base, option, value, success=False)
+                    self.assertIn(error, result.stderr)
+                    self.assert_usage("fplinux-jpeg", *base, option, value, "--help", success=True)
+
+    def test_jpeg_quality_requires_the_final_encode_operation(self) -> None:
+        """Encode quality is rejected for decode and raw scaling before resources."""
+        for operation, geometry in (
+            ("decode", ()),
+            ("scale", ("--width", "320", "--height", "240")),
+        ):
+            with self.subTest(operation=operation):
+                result = self.assert_usage(
+                    "fplinux-jpeg",
+                    "--operation",
+                    "encode",
+                    "--operation",
+                    operation,
+                    *geometry,
+                    "--input",
+                    "missing-input",
+                    "--output",
+                    "unused-output",
+                    "--quality",
+                    "85",
+                    success=False,
+                )
+                self.assertIn("only encode accepts --quality", result.stderr)
+
     def test_jpeg_decode_accepts_full_half_and_quarter_divisors(self) -> None:
         """Each supported divisor passes argument checks before the missing input error."""
         for divisor in ("1", "2", "4"):
@@ -394,6 +451,53 @@ class ImageToolCliTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertEqual(result.stdout, "")
                 self.assertEqual(result.stderr, "fplinux-jpeg: input: No such file or directory\n")
+
+    def test_jpeg_tight_raw_length_and_repeated_options_are_checked_before_device_access(
+        self,
+    ) -> None:
+        """Tight 4x2 NV16 requires sixteen bytes; repeated options use the last value."""
+        missing_device = self.directory / "missing-jpeg-video"
+        for label, length, accepted in (
+            ("exact", 16, True),
+            ("short", 15, False),
+            ("long", 17, False),
+        ):
+            source = self.directory / f"jpeg-{label}.raw"
+            source.write_bytes(bytes(range(length)))
+            with self.subTest(label=label):
+                result = self.run_tool(
+                    "fplinux-jpeg",
+                    "--operation",
+                    "decode",
+                    "--operation",
+                    "encode",
+                    "--width",
+                    "2",
+                    "--width",
+                    "4",
+                    "--height",
+                    "4",
+                    "--height",
+                    "2",
+                    "--input",
+                    str(source),
+                    "--output",
+                    "unused-output",
+                    "--device",
+                    str(missing_device),
+                    "--quality",
+                    "1",
+                    "--quality",
+                    "100",
+                )
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertEqual(
+                    result.stderr,
+                    "fplinux-jpeg: device: No such file or directory\n"
+                    if accepted
+                    else "fplinux-jpeg: input: Invalid argument\n",
+                )
 
     def test_present_last_mode_and_missing_drm_report_local_error(self) -> None:
         """The last mode controls output eligibility; a missing DRM device stops execution."""
