@@ -20,10 +20,11 @@ from fplinux_cli.bundle_state import (
     pointer_bytes,
     publish_bundle_generation,
     publish_current_bundle,
-    published_file_records,
     resolve_current_bundle,
 )
 from fplinux_cli.common import canonical_json_bytes
+
+from tests.bundle_support import file_record
 
 
 class BundleStateTests(unittest.TestCase):
@@ -50,6 +51,7 @@ class BundleStateTests(unittest.TestCase):
             manifest_build_type = build_type
         staging = create_bundle_staging(self.output, "demo", profile, build_type=build_type)
         (staging / "payload").write_text(marker)
+        (staging / "payload").chmod(0o644)
         payload = {
             "target": "demo",
             "workspace_digest": "a" * 64,
@@ -63,7 +65,7 @@ class BundleStateTests(unittest.TestCase):
             "kbuild_receipt": {"recipe": "0" * 64, "sha256": "1" * 64},
             "profile": manifest_profile,
             "build_type": manifest_build_type,
-            "files": published_file_records(staging),
+            "files": {"payload": file_record(staging / "payload")},
         }
         generation = hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
         manifest = {**payload, "generation": generation}
@@ -173,9 +175,56 @@ class BundleStateTests(unittest.TestCase):
         """Publishing identical content reuses its generation directory."""
         first, generation = self._staging("same")
         first_path = publish_bundle_generation(self.output, "demo", first, generation)
+        original_inode = first_path.stat().st_ino
         second, second_generation = self._staging("same")
         second_path = publish_bundle_generation(self.output, "demo", second, second_generation)
         self.assertEqual(first_path, second_path)
+        self.assertEqual(second_path.stat().st_ino, original_inode)
+        self.assertFalse(second.exists())
+
+    def test_identical_manifest_repairs_invalid_existing_payload(self) -> None:
+        """A valid staging payload replaces damaged bytes, missing files or changed modes."""
+        for mutation in ("bytes", "missing", "mode"):
+            with self.subTest(mutation=mutation):
+                marker = f"same-{mutation}"
+                first, generation = self._staging(marker)
+                published = publish_bundle_generation(self.output, "demo", first, generation)
+                publish_current_bundle(self.output, "demo", published)
+                payload = published / "payload"
+                if mutation == "bytes":
+                    payload.write_bytes(b"changed")
+                elif mutation == "missing":
+                    payload.unlink()
+                else:
+                    payload.chmod(0o600)
+                second, same_generation = self._staging(marker)
+
+                repaired = publish_bundle_generation(self.output, "demo", second, same_generation)
+
+                self.assertEqual(same_generation, generation)
+                self.assertEqual(repaired, published)
+                self.assertEqual(payload.read_bytes(), marker.encode())
+                self.assertEqual(payload.stat().st_mode & 0o777, 0o644)
+                self.assertFalse(second.exists())
+                self.assertEqual(resolve_current_bundle(self.output, "demo").path, published)
+
+    def test_invalid_staging_preserves_the_existing_generation_and_pointer(self) -> None:
+        """Failed staging verification cannot destroy the generation awaiting repair."""
+        first, generation = self._staging("same")
+        published = publish_bundle_generation(self.output, "demo", first, generation)
+        publish_current_bundle(self.output, "demo", published)
+        pointer = bundle_pointer(self.output, "demo")
+        pointer_before = pointer.read_bytes()
+        (published / "payload").write_bytes(b"old damage")
+        second, same_generation = self._staging("same")
+        (second / "payload").write_bytes(b"staging damage")
+
+        with self.assertRaises(BundleStateError):
+            publish_bundle_generation(self.output, "demo", second, same_generation)
+
+        self.assertEqual((published / "payload").read_bytes(), b"old damage")
+        self.assertEqual(pointer.read_bytes(), pointer_before)
+        self.assertTrue(second.is_dir())
 
     def test_selected_generation_bounds_only_its_managed_slot(self) -> None:
         """A selected slot removes every stale directory without parsing legacy state."""

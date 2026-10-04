@@ -9,8 +9,9 @@ import os
 import shutil
 import tempfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
+from .artifact_state import regular_file_record
 from .common import canonical_json_bytes, sha256_file
 from .identity import BUILD_TYPES
 
@@ -92,6 +93,26 @@ def published_file_records(directory: Path) -> dict[str, dict[str, int | str]]:
     return records
 
 
+def validate_bundle_files(directory: Path, files: object) -> None:
+    """Require every manifest file's bytes, size and mode to match its payload."""
+    if not isinstance(files, dict):
+        message = "bundle file table is invalid"
+        raise BundleStateError(message)
+    for relative, expected in files.items():
+        if not isinstance(relative, str) or not relative:
+            message = "bundle file path is invalid"
+            raise BundleStateError(message)
+        path = PurePosixPath(relative)
+        if path.is_absolute() or ".." in path.parts or path.as_posix() != relative:
+            message = "bundle file path is unsafe"
+            raise BundleStateError(message)
+        source = directory / relative
+        if not isinstance(expected, dict) or expected != regular_file_record(
+            source, "bundle input", BundleStateError
+        ):
+            raise BundleStateError(f"bundle input differs from its build manifest: {source}")
+
+
 def create_bundle_staging(
     output: Path, target: str, profile: str | None = None, *, build_type: str = "release"
 ) -> Path:
@@ -153,7 +174,9 @@ def publish_bundle_generation(  # noqa: PLR0913 -- generation and selected slot 
     if manifest.is_symlink() or not manifest.is_file():
         message = "bundle staging directory has no build manifest"
         raise BundleStateError(message)
-    _validate_manifest(manifest.read_bytes(), target, generation, profile, build_type)
+    manifest_bytes = manifest.read_bytes()
+    staged_manifest = _validate_manifest(manifest_bytes, target, generation, profile, build_type)
+    validate_bundle_files(staging, staged_manifest.get("files"))
     destination = generations / generation
     if destination.is_symlink():
         message = "bundle generation path is not a real directory"
@@ -166,10 +189,15 @@ def publish_bundle_generation(  # noqa: PLR0913 -- generation and selected slot 
         if (
             not existing.is_symlink()
             and existing.is_file()
-            and existing.read_bytes() == manifest.read_bytes()
+            and existing.read_bytes() == manifest_bytes
         ):
-            shutil.rmtree(staging)
-            return destination
+            try:
+                validate_bundle_files(destination, staged_manifest.get("files"))
+            except BundleStateError, OSError:
+                pass
+            else:
+                shutil.rmtree(staging)
+                return destination
         shutil.rmtree(destination)
     staging.replace(destination)
     return destination
@@ -370,7 +398,7 @@ def _validate_manifest(
     generation: str,
     profile: str | None,
     build_type: str,
-) -> None:
+) -> dict[str, object]:
     """Require a manifest whose exact slot identity matches its containing generation."""
     try:
         manifest = json.loads(manifest_bytes)
@@ -387,6 +415,7 @@ def _validate_manifest(
     ):
         message = "current bundle manifest has the wrong slot identity"
         raise BundleStateError(message)
+    return manifest
 
 
 def _is_sha256(value: object) -> bool:

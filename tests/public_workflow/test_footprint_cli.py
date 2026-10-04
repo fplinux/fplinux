@@ -172,6 +172,7 @@ class FootprintCliTests(unittest.TestCase):
         manifest["files"]["debug/vmlinux"] = {
             "size": len(elf),
             "sha256": hashlib.sha256(elf).hexdigest(),
+            "mode": 0o644,
         }
         (staging / "build-manifest.json").write_text(json.dumps(manifest))
         published = publish_bundle_generation(output, "example", staging, bundle.generation)

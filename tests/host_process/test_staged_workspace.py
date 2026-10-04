@@ -44,6 +44,25 @@ class StagedWorkspaceTests(unittest.TestCase):
             self.assertEqual(card["linux"]["root"]["kind"], "external")
             self.assertEqual(ram["linux"]["root"], {"kind": "initramfs"})
 
+    def test_default_source_snapshot_supports_build_import(self) -> None:
+        """An ordinary RAM build loads its consumer from only staged inputs."""
+        snapshot = workspace_module.workspace_snapshot(
+            workspace_module.target_build_source_files("nokia-ta1618")
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            with mock.patch.object(workspace_module, "ROOT", Path(temporary)):
+                staged = workspace_module.stage_workspace_snapshot(snapshot)
+            imported = subprocess.run(
+                [sys.executable, "-B", "-c", "import fplinux_cli.build.__main__"],
+                cwd=staged,
+                env={"PYTHONPATH": str(staged / "scripts")},
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=20,
+            )
+        self.assertEqual(imported.returncode, 0, imported.stderr)
+
     def test_staged_bootstrap_reads_panel_and_font_inputs_for_ram_and_sd(self) -> None:
         """The staged consumer reads its full recipe and reacts to its font interface."""
         sources = common.load_toml(common.ROOT / "sources.lock.toml")

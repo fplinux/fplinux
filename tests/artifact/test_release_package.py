@@ -24,7 +24,6 @@ from fplinux_cli import workspace as workspaces
 from fplinux_cli.bundle_state import (
     BUILD_MANIFEST_NAME,
     publish_current_bundle,
-    published_file_records,
 )
 from fplinux_cli.cli import package as package_commands
 from fplinux_cli.common import canonical_json_bytes
@@ -34,6 +33,7 @@ from fplinux_cli.manifests import platforms, releases, targets
 from fplinux_cli.manifests.releases import load_release
 from fplinux_cli.workspace import WorkspaceSnapshot
 
+from tests.bundle_support import file_record
 from tests.process import run_process
 
 # Load the archived helper by path, as the standalone runner does, then report the
@@ -184,7 +184,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             "container_image_generation": "c" * 64,
             "apk_signing_key": self.signing_key,
             "device_identity": "f" * 64,
-            "files": published_file_records(bundle),
+            "files": {relative: file_record(bundle / relative) for relative in payloads},
             "generation": generation,
             "kbuild_receipt": {"recipe": "0" * 64, "sha256": "1" * 64},
             "linux_recipe": "2" * 64,
@@ -265,6 +265,56 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
                 name for name in archive.namelist() if name.endswith("/build-manifest.json")
             )
             self.assertEqual(json.loads(archive.read(name))["build_type"], "debug")
+
+    def test_candidate_rejects_a_release_input_with_a_mismatched_recorded_size(self) -> None:
+        """Even matching bytes and permissions cannot authorize a wrong size record."""
+        bundle = self.cache / "out" / self.target / "builds/release/bundles" / ("c" * 64)
+        manifest_path = bundle / BUILD_MANIFEST_NAME
+        manifest = json.loads(manifest_path.read_bytes())
+        manifest["files"]["image/ramboot.bin"]["size"] = 7
+        manifest_path.write_bytes(canonical_json_bytes(manifest))
+        publish_current_bundle(self.cache / "out", self.target, bundle)
+
+        with contextlib.ExitStack() as stack:
+            for patch in self.package_patches():
+                stack.enter_context(patch)
+            with self.assertRaisesRegex(SystemExit, "release input differs"):
+                self.package(candidate=True)
+
+        self.assertFalse((self.cache / "out/candidates").exists())
+
+    def test_candidate_omits_missing_debug_payload_and_includes_required_boot_artifact(
+        self,
+    ) -> None:
+        """Archive validation covers its release subset and additional required boot files."""
+        bundle = self.cache / "out" / self.target / "builds/release/bundles" / ("c" * 64)
+        boot_image = bundle / "FPLINUX.img.xz"
+        boot_image.write_bytes(b"whole-card image\n")
+        boot_image.chmod(0o644)
+        debug = bundle / "debug/vmlinux"
+        debug.parent.mkdir()
+        debug.write_bytes(b"host debug output\n")
+        debug.chmod(0o644)
+        manifest_path = bundle / BUILD_MANIFEST_NAME
+        manifest = json.loads(manifest_path.read_bytes())
+        manifest["files"]["FPLINUX.img.xz"] = file_record(boot_image)
+        manifest["files"]["debug/vmlinux"] = file_record(debug)
+        manifest["boot_artifacts"]["required"] = ["FPLINUX.img.xz"]
+        manifest_path.write_bytes(canonical_json_bytes(manifest))
+        publish_current_bundle(self.cache / "out", self.target, bundle)
+        debug.unlink()
+
+        with contextlib.ExitStack() as stack:
+            for patch in self.package_patches():
+                stack.enter_context(patch)
+            self.package(candidate=True)
+
+        archive_path = next((self.cache / "out/candidates").glob("*.zip"))
+        with zipfile.ZipFile(archive_path) as archive:
+            root = archive.namelist()[0].partition("/")[0]
+            self.assertEqual(archive.read(f"{root}/FPLINUX.img.xz"), b"whole-card image\n")
+            self.assertNotIn(f"{root}/debug/vmlinux", archive.namelist())
+            self.assertEqual(archive.read(f"{root}/image/ramboot.bin"), b"ramboot\n")
 
     def test_candidate_contains_shared_documents_with_complete_checksums(self) -> None:
         """Publish bundled procedures and cover every archive member by SHA-256."""
@@ -391,7 +441,11 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             "container_image_generation": "c" * 64,
             "apk_signing_key": self.signing_key,
             "device_identity": "f" * 64,
-            "files": published_file_records(profile_bundle),
+            "files": {
+                source.relative_to(profile_bundle).as_posix(): file_record(source)
+                for source in profile_bundle.rglob("*")
+                if source.is_file() and source.name != BUILD_MANIFEST_NAME
+            },
             "generation": generation,
             "kbuild_receipt": {"recipe": "0" * 64, "sha256": "1" * 64},
             "linux_recipe": "2" * 64,

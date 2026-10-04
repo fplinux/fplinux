@@ -24,7 +24,6 @@ from fplinux_cli.bundle_state import (
     BUILD_MANIFEST_NAME,
     bundle_pointer,
     publish_current_bundle,
-    published_file_records,
 )
 from fplinux_cli.cli import build as build_commands
 from fplinux_cli.cli import bundles as bundles_commands
@@ -36,6 +35,8 @@ from fplinux_cli.environment import kern as kern_env
 from fplinux_cli.image_state import ImageState, publish_image_state
 from fplinux_cli.manifests import releases, targets
 from fplinux_cli.workspace import WorkspaceSnapshot
+
+from tests.bundle_support import file_record
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -86,7 +87,11 @@ class CommandLifecycleTests(unittest.TestCase):
             "device_identity": "9" * 64,
             "rootfs_receipt": {"recipe": "f" * 64, "sha256": "0" * 64},
             "boot_artifacts": {"required": [], "runnable": runnable},
-            "files": published_file_records(path),
+            "files": {
+                source.relative_to(path).as_posix(): file_record(source)
+                for source in path.rglob("*")
+                if source.is_file() and source.name != BUILD_MANIFEST_NAME
+            },
             "generation": generation,
             "kbuild_receipt": {"recipe": "1" * 64, "sha256": "3" * 64},
             "linux_recipe": "2" * 64,
@@ -251,20 +256,38 @@ class CommandLifecycleTests(unittest.TestCase):
                 cached=False,
             )
 
-    def test_corrupted_bundle_image_is_not_an_exact_hit(self) -> None:
-        """A bundle whose image bytes drifted from the manifest is rebuilt."""
-        (self.bundle_path / "image/ramboot.bin").write_bytes(b"corrupt\n")
+    def test_changed_or_missing_bundle_files_are_cache_misses(self) -> None:
+        """Cache reuse requires every recorded payload byte and file mode to match."""
         identity = bundles_commands.BuildIdentity(
             self.snapshot.recipe, "e" * 64, "a" * 64, self.signing_key
         )
         with mock.patch.object(common, "ROOT", self.root):
-            self.assertIsNone(
-                bundles_commands.matching_target_bundle(
-                    "phone",
-                    identity,
-                    "image/ramboot.bin",
-                )
-            )
+            for relative, mutation in (
+                ("image/ramboot.bin", "bytes"),
+                ("host/fplinux-usb-keyboard", "bytes"),
+                ("host/fplinux-usb-keyboard", "missing"),
+                ("image/ramboot.bin", "mode"),
+                ("host/fplinux-usb-keyboard", "mode"),
+            ):
+                with self.subTest(relative=relative, mutation=mutation):
+                    source = self.bundle_path / relative
+                    original = source.read_bytes()
+                    mode = source.stat().st_mode & 0o777
+                    if mutation == "bytes":
+                        source.write_bytes(bytes([original[0] ^ 0x20]) + original[1:])
+                    elif mutation == "missing":
+                        source.unlink()
+                    else:
+                        source.chmod(0o600)
+                    try:
+                        self.assertIsNone(
+                            bundles_commands.matching_target_bundle(
+                                "phone", identity, "image/ramboot.bin"
+                            )
+                        )
+                    finally:
+                        source.write_bytes(original)
+                        source.chmod(mode)
 
     def test_exact_bundle_identity_and_image_are_a_reusable_hit(self) -> None:
         """Reuse a resolved generation only when its identity and image bytes match."""

@@ -40,6 +40,7 @@ STAGED_BUILD_SOURCES = (
     "scripts/fplinux_cli/__init__.py",
     "scripts/fplinux_cli/alpine_builder.py",
     "scripts/fplinux_cli/alpine_state.py",
+    "scripts/fplinux_cli/artifact_state.py",
     "scripts/fplinux_cli/build_env.py",
     "scripts/fplinux_cli/build",
     "scripts/fplinux_cli/bundle_state.py",
@@ -177,7 +178,6 @@ def target_build_source_files(
     add_source_path(files, profile_manifest_path(target, "default"))
     if selected_profile is not None:
         add_source_path(files, profile_manifest_path(target, selected_profile))
-        add_source_path(files, ROOT / "scripts/fplinux_cli/artifact_state.py")
     if target_config["uboot"]["kind"] == "full":
         add_source_path(files, ROOT / "scripts/fplinux_cli/uboot_tools.py")
         add_source_path(

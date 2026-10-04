@@ -250,6 +250,7 @@ def package_target(
         if (
             not isinstance(record, dict)
             or record.get("sha256") != sha256_bytes(data)
+            or record.get("size") != len(data)
             or record.get("mode") != (source.stat().st_mode & 0o777)
         ):
             fail(f"release input differs from its successful build manifest: {source}")

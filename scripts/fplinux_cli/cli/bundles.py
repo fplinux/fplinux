@@ -9,8 +9,13 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli import alpine_state, common
-from fplinux_cli.bundle_state import BundleStateError, CurrentBundle, resolve_current_bundle
-from fplinux_cli.common import fail, sha256_file
+from fplinux_cli.bundle_state import (
+    BundleStateError,
+    CurrentBundle,
+    resolve_current_bundle,
+    validate_bundle_files,
+)
+from fplinux_cli.common import fail
 from fplinux_cli.manifests.paths import normalize_profile
 
 if TYPE_CHECKING:
@@ -162,21 +167,11 @@ def matching_target_bundle(
     files = manifest.get("files")
     try:
         required = required_boot_artifacts(manifest)
-    except ValueError:
-        return None
-    if not isinstance(files, dict):
-        return None
-    for relative in (image_relative, *required):
-        record = files.get(relative)
-        expected = record.get("sha256") if isinstance(record, dict) else None
-        artifact = bundle.path / relative
-        if (
-            not isinstance(expected, str)
-            or artifact.is_symlink()
-            or not artifact.is_file()
-            or sha256_file(artifact) != expected
-        ):
+        if not isinstance(files, dict) or not {image_relative, *required}.issubset(files):
             return None
+        validate_bundle_files(bundle.path, files)
+    except BundleStateError, OSError, ValueError:
+        return None
     return bundle, manifest
 
 

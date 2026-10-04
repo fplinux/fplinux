@@ -136,7 +136,12 @@ class FootprintFixture:
             path = self.directory / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
-            records[name] = {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+            path.chmod(0o644)
+            records[name] = {
+                "size": len(data),
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "mode": 0o644,
+            }
         manifest = json.dumps(
             {
                 "target": "fixture",
