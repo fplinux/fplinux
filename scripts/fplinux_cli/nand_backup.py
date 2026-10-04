@@ -272,14 +272,23 @@ def backup_nand(  # noqa: PLR0913 -- the reader and the declared chip are distin
                 f"got {actual_size}"
             )
         digest = sha256_file(temporary)
-        temporary.replace(output)
-        temporary = None
+        record = {**asdict(geometry), "sha256": digest, "target": target}
+        directory_descriptor = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            # A receipt must never describe bytes from the image being replaced.
+            receipt.unlink(missing_ok=True)
+            os.fsync(directory_descriptor)
+            temporary.replace(output)
+            temporary = None
+            os.fsync(directory_descriptor)
+            replace_file_atomically(receipt, canonical_json_bytes(record), 0o600)
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
 
-    record = {**asdict(geometry), "sha256": digest, "target": target}
-    replace_file_atomically(receipt, canonical_json_bytes(record), 0o600)
     print(
         f"NAND backup saved: {output} ({geometry.raw_bytes} bytes, sha256={digest})",
         flush=True,

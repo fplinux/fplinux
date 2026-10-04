@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import hashlib
 import io
 import json
+import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,6 +18,7 @@ from unittest import mock
 
 from fplinux_cli import nand_backup
 from fplinux_cli.device_data import NandGeometry
+from fplinux_cli.device_data_prepare import dump_page_bytes
 
 
 def _geometry_report(  # noqa: PLR0913 -- each reported value stays visible at the call site.
@@ -139,6 +143,7 @@ class NandBackupTests(unittest.TestCase):
 
     def test_complete_stream_and_geometry_receipt_are_published_with_private_mode(self) -> None:
         """The reported size bounds the stream, and the receipt records that exact image."""
+        self._backup(FakePhone(ONE_PAGE_128_OOB, b"P" * 2176))
         payload = bytes(range(256)) * 8 + b"O" * 128
         phone = FakePhone(ONE_PAGE_128_OOB, payload)
 
@@ -185,14 +190,51 @@ class NandBackupTests(unittest.TestCase):
 
     def test_incomplete_stream_preserves_previous_output_and_receipt(self) -> None:
         """A truncated device read cannot replace a previous complete image or its receipt."""
-        self.destination.write_bytes(b"previous complete image")
-        self.receipt.write_text("previous receipt\n", encoding="utf-8")
+        previous = b"P" * 2176
+        self._backup(FakePhone(ONE_PAGE_128_OOB, previous))
+        previous_receipt = self.receipt.read_bytes()
 
         with self.assertRaisesRegex(SystemExit, "expected 2176 bytes, got 5"):
             self._backup(FakePhone(ONE_PAGE_128_OOB, b"short"))
 
-        self.assertEqual(self.destination.read_bytes(), b"previous complete image")
-        self.assertEqual(self.receipt.read_text(encoding="utf-8"), "previous receipt\n")
+        self.assertEqual(self.destination.read_bytes(), previous)
+        self.assertEqual(self.receipt.read_bytes(), previous_receipt)
+        self.assertEqual(list(self.directory.glob(".nand.raw.*")), [])
+
+    def test_receipt_write_failure_leaves_complete_replacement_without_stale_geometry(
+        self,
+    ) -> None:
+        """A local receipt I/O failure cannot bind the previous digest to the new image."""
+        self._backup(FakePhone(ONE_PAGE_128_OOB, b"P" * 2176))
+        replacement = b"N" * 2176
+        real_fsync = os.fsync
+
+        def fail_receipt_sync(descriptor: int) -> None:
+            # Inject a full-disk writeback failure after the new image is present.
+            if (
+                stat.S_ISREG(os.fstat(descriptor).st_mode)
+                and self.destination.read_bytes() == replacement
+            ):
+                raise OSError(errno.ENOSPC, "No space left on device")
+            real_fsync(descriptor)
+
+        with (
+            mock.patch.object(os, "fsync", side_effect=fail_receipt_sync),
+            self.assertRaisesRegex(OSError, "No space left on device"),
+        ):
+            self._backup(FakePhone(ONE_PAGE_128_OOB, replacement))
+
+        self.assertEqual(self.destination.read_bytes(), replacement)
+        self.assertEqual(self.destination.stat().st_mode & 0o777, 0o600)
+        self.assertFalse(self.receipt.exists())
+        geometry = nand_backup.read_backup_geometry(self.destination, replacement)
+        self.assertIsNone(geometry)
+        self.assertEqual(
+            dump_page_bytes("demo-phone", {"id": 0xB1A1, "raw_page_bytes": 2176}, geometry),
+            2176,
+        )
+        with self.assertRaisesRegex(SystemExit, "declares no NAND chip"):
+            dump_page_bytes("new-phone", {"raw_device": "/dev/ums9117-nand-raw"}, geometry)
         self.assertEqual(list(self.directory.glob(".nand.raw.*")), [])
 
     def test_unidentified_chip_is_refused_before_any_page_is_read(self) -> None:

@@ -486,11 +486,15 @@ receipt is a JSON object with these fields:
 | `sha256`                         | SHA-256 digest of the saved image                     |
 | `target`                         | target used for the backup                            |
 
-An incomplete transfer leaves an existing destination and its receipt
-unchanged. The digest identifies the saved bytes; the command does not compare
-them with a second device read. Restoring NAND is unsupported. Treat the backup
-as private device data. The receipt holds only the fields above and no NAND
-contents; it can be shared, for example attached to an issue report.
+Saving to the same `PATH` replaces the previous backup. An incomplete transfer
+leaves an existing destination and its receipt unchanged. Once the complete
+stream is checked, the command removes the old receipt before replacing the
+backup. If writing the new receipt fails, the complete new backup remains
+without a receipt; a target that declares its NAND chip can still use it for
+device-data preparation. The digest identifies the saved bytes; the command
+does not compare them with a second device read. Restoring NAND is unsupported.
+Treat the backup as private device data. The receipt holds only the fields above
+and no NAND contents; it can be shared, for example attached to an issue report.
 
 To see what the reader reports without saving a backup, run:
 
