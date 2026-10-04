@@ -25,7 +25,7 @@ be valid, and the last one selects the effective value.
 The complete command synopsis is:
 
 ```text
-fplinux-jpeg --input FILE --output FILE [--operation decode|encode|scale] [--device /dev/videoN] [--repeat N] [--timing] [--scale 1|4] [--width N --height N]
+fplinux-jpeg --input FILE --output FILE [--operation decode|encode|scale] [--device /dev/videoN] [--repeat N] [--timing] [--scale 1|2|4] [--width N --height N]
 ```
 
 `--operation decode` is the default. The valid geometry and scale options
@@ -53,7 +53,20 @@ and plane payload sizes, and repeat count. The printed strides and payload
 sizes describe the driver's padded two-plane buffers; the output file itself is
 tightly packed as described below.
 
-Use the accelerator's quarter-resolution decode for a compatible JPEG:
+Use the accelerator's half-resolution decode:
+
+```sh
+fplinux-jpeg --input /run/input.jpg --output /run/half.raw --scale 2
+```
+
+`--scale 2` accepts the supported 4:2:0 and horizontal 4:2:2 inputs, including
+images with padded right or bottom edges. The visible output is
+`ceil(W / 2)` by `ceil(H / 2)`; the driver divides the padded stride and
+allocated height by two. For a 1×1 JPEG, full and half have the same visible
+compose rectangle, so the driver selects full decode and retains its full-size
+padded buffers.
+
+Use quarter-resolution decode for a compatible JPEG:
 
 ```sh
 fplinux-jpeg --input /run/input.jpg --output /run/quarter.nv16 --scale 4
@@ -69,7 +82,7 @@ visible dimensions.
 
 ### Decoder output format
 
-At full size, the output is a headerless, full-range YCbCr 4:2:0 or 4:2:2
+The output is a headerless, full-range YCbCr 4:2:0 or 4:2:2
 image. It does not contain JPEG metadata, dimensions, or strides.
 
 | Input sampling   | Reported V4L2 format | Output file                                                 |
@@ -202,8 +215,8 @@ fplinux-jpeg --operation scale --width 640 --height 480 \
 
 Input and output are headerless, tight, full-range BT.601 NV16 with the Y plane
 followed by the full-height interleaved Cb,Cr plane. The scale operation always
-uses the accelerator's fixed factor-two filter. Omit `--scale`; `--scale 2` is
-not hardware-command syntax. Arbitrary dimensions, ratios, cropping, and format
+uses the accelerator's fixed factor-two filter. Omit `--scale` for this
+operation. Arbitrary dimensions, ratios, cropping, and format
 conversion are not supported by this operation.
 
 ## CPU reference tool
@@ -273,14 +286,17 @@ The decoder contract is:
 - CAPTURE is two MMAP planes, `NV12M` for 4:2:0 or `NV16M` for horizontal
   4:2:2;
 - a source-change event publishes the parsed dimensions and capture format;
-- capture stride is the width padded to 16 pixels. Allocated height is padded to
-  16 rows for NV12M and 8 rows for NV16M, while the selection rectangle reports
-  the original visible dimensions;
+- at full scale, capture stride is the width padded to 16 pixels. Allocated
+  height is padded to 16 rows for NV12M and 8 rows for NV16M. Reduced decode
+  divides these padded dimensions by the selected factor;
 - completed buffers carry the padded plane payload sizes. Consumers that need
   a tight file must crop each row to the visible selection, including the
   rounded-up chroma sample for an odd width;
-- quarter decode is selected through the CAPTURE compose rectangle and is
-  available only for MCU-aligned horizontal 4:2:2 input.
+- the CROP rectangle reports the original dimensions; COMPOSE reports the
+  visible decoded dimensions. Request half decode with a CAPTURE compose
+  rectangle of `ceil(W / 2)` by `ceil(H / 2)`. Quarter decode is available only
+  for MCU-aligned horizontal 4:2:2 input, through a `W / 4` by `H / 4` compose
+  rectangle. Select a factor before allocating CAPTURE buffers.
 
 The encoder accepts two-plane `NV16M` OUTPUT and produces one-plane `JPEG`
 CAPTURE for the listed geometries. The scaler accepts two-plane `NV16M`

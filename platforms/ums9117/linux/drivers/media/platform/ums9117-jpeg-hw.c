@@ -1222,7 +1222,10 @@ static int jpeg_configure(struct ums9117_jpeg_hw *hw,
 	jpeg_write(hw, JPEG_VLD_MCU_COUNT, count);
 	jpeg_write(hw, JPEG_DCT_CONFIG, (frame->mcu_format << 9) | 0x102);
 	jpeg_write(hw, JPEG_DCT_FINISH, 1);
-	jpeg_write(hw, JPEG_MBIO_CONFIG, factor == 4 ? 0x2102 : 2);
+	jpeg_write(hw, JPEG_MBIO_CONFIG,
+		   factor == 4 ? 0x2102 :
+		   factor == 2 ? 0x1102 :
+				 2);
 	ret = jpeg_tables(hw, frame);
 	if (ret || atomic_read(&hw->cancelled))
 		return ret ?: -ECANCELED;
@@ -1371,7 +1374,7 @@ int ums9117_jpeg_hw_decode(struct ums9117_jpeg_hw *hw,
 	int ret, stop_ret;
 
 	if (!frame || !entropy || !output || !output[0] || !output[1] ||
-	    !capacity || (factor != 1 && factor != 4))
+	    !capacity || (factor != 1 && factor != 2 && factor != 4))
 		return -EINVAL;
 	if (ums9117_jpeg_hw_failed(hw))
 		return -EIO;
@@ -1392,7 +1395,7 @@ int ums9117_jpeg_hw_decode(struct ums9117_jpeg_hw *hw,
 	    check_mul_overflow((size_t)frame->padded_width,
 			       (size_t)frame->padded_height, &full_y_size))
 		return -EINVAL;
-	y_size = factor == 4 ? full_y_size / 16 : full_y_size;
+	y_size = full_y_size / (factor * factor);
 	uv_size = y_size / frame->vertical_subsampling;
 	if (capacity[0] < y_size || capacity[1] < uv_size)
 		return -ENOSPC;

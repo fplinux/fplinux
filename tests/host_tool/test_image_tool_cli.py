@@ -378,6 +378,23 @@ class ImageToolCliTests(unittest.TestCase):
                 self.assertEqual(result.stdout, "")
                 self.assertEqual(result.stderr, error)
 
+    def test_jpeg_decode_accepts_full_half_and_quarter_divisors(self) -> None:
+        """Each supported divisor passes argument checks before the missing input error."""
+        for divisor in ("1", "2", "4"):
+            with self.subTest(divisor=divisor):
+                result = self.run_tool(
+                    "fplinux-jpeg",
+                    "--input",
+                    "missing-jpeg",
+                    "--output",
+                    "unused-output",
+                    "--scale",
+                    divisor,
+                )
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertEqual(result.stderr, "fplinux-jpeg: input: No such file or directory\n")
+
     def test_present_last_mode_and_missing_drm_report_local_error(self) -> None:
         """The last mode controls output eligibility; a missing DRM device stops execution."""
         base = (

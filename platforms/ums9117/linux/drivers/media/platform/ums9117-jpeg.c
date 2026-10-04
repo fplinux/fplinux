@@ -187,8 +187,8 @@ static void jpeg_decode_capture_format(struct v4l2_pix_format_mplane *pix,
 				       unsigned int factor)
 {
 	memset(pix, 0, sizeof(*pix));
-	pix->width = frame->width / factor;
-	pix->height = frame->height / factor;
+	pix->width = DIV_ROUND_UP(frame->width, factor);
+	pix->height = DIV_ROUND_UP(frame->height, factor);
 	pix->pixelformat = frame->vertical_subsampling == 2 ?
 				   V4L2_PIX_FMT_NV12M :
 				   V4L2_PIX_FMT_NV16M;
@@ -670,6 +670,9 @@ static int jpeg_set_selection(struct file *file, void *priv,
 	if (selection->r.width == ctx->coded_width &&
 	    selection->r.height == ctx->coded_height) {
 		factor = 1;
+	} else if (selection->r.width == DIV_ROUND_UP(ctx->coded_width, 2) &&
+		   selection->r.height == DIV_ROUND_UP(ctx->coded_height, 2)) {
+		factor = 2;
 	} else if (selection->r.width == ctx->coded_width / 4 &&
 		   selection->r.height == ctx->coded_height / 4) {
 		if (ctx->coded_fourcc != V4L2_PIX_FMT_NV16M ||

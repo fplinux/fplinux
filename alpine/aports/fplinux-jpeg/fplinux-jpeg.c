@@ -145,8 +145,9 @@ static const char *parse_cli_option(size_t option, const char *value,
 		break;
 	case CLI_OPTION_SCALE:
 		if (!fplinux_cli_unsigned(value, 1, 4, &options->scale) ||
-		    (options->scale != 1 && options->scale != 4))
-			return "--scale must be 1 or 4";
+		    (options->scale != 1 && options->scale != 2 &&
+		     options->scale != 4))
+			return "--scale must be 1, 2 or 4";
 		break;
 	case CLI_OPTION_WIDTH:
 		if (!fplinux_cli_unsigned(value, 1, MAX_RAW_DIMENSION,
@@ -202,7 +203,7 @@ static enum fplinux_cli_result parse_options(int argc, char **argv,
 		},
 		[CLI_OPTION_SCALE] = {
 			.name = "scale",
-			.metavar = "1|4",
+			.metavar = "1|2|4",
 			.help = "set the decode divisor (default: 1)",
 			.flags = FPLINUX_CLI_REPEAT,
 		},
@@ -833,8 +834,8 @@ static int set_decode_scale(int fd, unsigned int factor)
 		errno = EINVAL;
 		return -1;
 	}
-	requested_width = (uint32_t)visible.r.width / factor;
-	requested_height = (uint32_t)visible.r.height / factor;
+	requested_width = ((uint32_t)visible.r.width + factor - 1U) / factor;
+	requested_height = ((uint32_t)visible.r.height + factor - 1U) / factor;
 	memset(&compose, 0, sizeof(compose));
 	compose.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
 	compose.target = V4L2_SEL_TGT_COMPOSE;
@@ -882,7 +883,7 @@ static int get_capture_layout(int fd, unsigned int decode_factor,
 	}
 	memset(&selection, 0, sizeof(selection));
 	selection.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
-	selection.target = decode_factor == 4 ? V4L2_SEL_TGT_COMPOSE :
+	selection.target = decode_factor != 1 ? V4L2_SEL_TGT_COMPOSE :
 						V4L2_SEL_TGT_CROP;
 	if (xioctl(fd, VIDIOC_G_SELECTION, &selection) < 0)
 		return -1;
