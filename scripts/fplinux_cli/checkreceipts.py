@@ -96,6 +96,7 @@ def publish_success_receipt(cache_root: Path, recipe: CheckReceiptRecipe) -> Non
 def check_orchestration_recipe_digest(image_recipe: str | None = None) -> str:
     """Hash only the implementation that can change cached check results."""
     fixed = [
+        common.ROOT / "scripts/fplinux_cli/alpine_registration.py",
         common.ROOT / "scripts/fplinux_cli/checkreceipts.py",
         common.ROOT / "scripts/fplinux_cli/common.py",
         *sorted((common.ROOT / "scripts/fplinux_cli/manifests").glob("*.py")),

@@ -108,6 +108,7 @@ _CHECK_IMPLEMENTATION = frozenset(
     {
         "scripts/check.py",
         "scripts/fplinux_cli/__init__.py",
+        "scripts/fplinux_cli/alpine_registration.py",
         "scripts/fplinux_cli/alpine_state.py",
         "scripts/fplinux_cli/common.py",
         "scripts/fplinux_cli/environment/__init__.py",
@@ -129,6 +130,7 @@ _KERNEL_IMPLEMENTATION = frozenset(
     {
         "scripts/fplinux_cli/__init__.py",
         "scripts/fplinux_cli/alpine_builder.py",
+        "scripts/fplinux_cli/alpine_registration.py",
         "scripts/fplinux_cli/alpine_state.py",
         "scripts/fplinux_cli/build_env.py",
         "scripts/fplinux_cli/bundle_state.py",

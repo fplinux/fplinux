@@ -12,10 +12,41 @@ from graphlib import TopologicalSorter
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
+from .alpine_registration import (
+    BRIGHTNESS_CLIENT_SOURCES,
+    CLI_SOURCES,
+    COMMON_PACKAGES,
+    DRM_SESSION_SOURCES,
+    FONT_SOURCES,
+    INPUT_DEVICE_SOURCES,
+    INPUT_SESSION_SOURCES,
+    KEYBOARD_TEXT_SOURCES,
+    KEYPAD_CODE_SOURCES,
+    LOCAL_BUILD_DEPENDENCIES,
+    MULTITAP_SOURCES,
+    SHARED_APORT_SOURCES,
+    SUBPACKAGE_APORTS,
+)
 from .common import ROOT, fail, replace_file_atomically, sha256_file
 
 if TYPE_CHECKING:
     from .firmware_inputs import FirmwareInput
+
+__all__ = [
+    "BRIGHTNESS_CLIENT_SOURCES",
+    "CLI_SOURCES",
+    "COMMON_PACKAGES",
+    "DRM_SESSION_SOURCES",
+    "FONT_SOURCES",
+    "INPUT_DEVICE_SOURCES",
+    "INPUT_SESSION_SOURCES",
+    "KEYBOARD_TEXT_SOURCES",
+    "KEYPAD_CODE_SOURCES",
+    "LOCAL_BUILD_DEPENDENCIES",
+    "MULTITAP_SOURCES",
+    "SHARED_APORT_SOURCES",
+    "SUBPACKAGE_APORTS",
+]
 
 RECEIPT_NAME = ".fplinux-rootfs-receipt.json"
 ROOTFS_NAME = "rootfs.cpio"
@@ -25,138 +56,9 @@ SIGNING_PRIVATE_KEY = "fplinux-build.rsa"
 SIGNING_PUBLIC_KEY = "fplinux-build.rsa.pub"
 PACKAGE_CACHE_DIRECTORY = "apks"
 PACKAGE_RECEIPT_NAME = ".fplinux-package-receipt.json"
-MULTITAP_SOURCES = (
-    "lib/fplinux/fplinux-multitap.c",
-    "include/fplinux/fplinux-multitap.h",
-)
-DRM_SESSION_SOURCES = (
-    "lib/fplinux/fplinux-drm-session.c",
-    "include/fplinux/fplinux-drm-session.h",
-)
-KEYBOARD_TEXT_SOURCES = (
-    "lib/fplinux/fplinux-keyboard-text.c",
-    "include/fplinux/fplinux-keyboard-text.h",
-)
-CLI_SOURCES = (
-    "lib/fplinux/fplinux-cli.c",
-    "include/fplinux/fplinux-cli.h",
-)
-FONT_SOURCES = (
-    "lib/fplinux/fplinux-font.c",
-    "include/fplinux/fplinux-font.h",
-)
-BRIGHTNESS_CLIENT_SOURCES = (
-    "lib/fplinux/fplinux-brightness-client.c",
-    "include/fplinux/fplinux-brightness-client.h",
-)
-INPUT_DEVICE_SOURCES = ("include/fplinux/fplinux-input-device.h",)
-KEYPAD_CODE_SOURCES = ("include/fplinux/fplinux-keypad.h",)
-INPUT_SESSION_SOURCES = (
-    "lib/fplinux/fplinux-input-session.c",
-    "include/fplinux/fplinux-input-session.h",
-)
-SHARED_APORT_SOURCES = {
-    "fplinux-base": (
-        *CLI_SOURCES,
-        *BRIGHTNESS_CLIENT_SOURCES,
-        "lib/fplinux/fplinux-vt-guardian.c",
-    ),
-    "fplinux-bluetooth": CLI_SOURCES,
-    "fplinux-brightness-ui": (
-        *FONT_SOURCES,
-        *DRM_SESSION_SOURCES,
-        *BRIGHTNESS_CLIENT_SOURCES,
-        *INPUT_SESSION_SOURCES,
-        *INPUT_DEVICE_SOURCES,
-        *KEYPAD_CODE_SOURCES,
-        *CLI_SOURCES,
-    ),
-    "fplinux-charge": CLI_SOURCES,
-    "fplinux-cpuclock": CLI_SOURCES,
-    "fplinux-fm": CLI_SOURCES,
-    "fplinux-jack": CLI_SOURCES,
-    "fplinux-jpeg": CLI_SOURCES,
-    "fplinux-present": (
-        *DRM_SESSION_SOURCES,
-        *CLI_SOURCES,
-    ),
-    "fplinux-rotate": (*DRM_SESSION_SOURCES, *CLI_SOURCES),
-    "fplinux-showcase": (
-        *FONT_SOURCES,
-        *DRM_SESSION_SOURCES,
-        *CLI_SOURCES,
-        *KEYPAD_CODE_SOURCES,
-        *BRIGHTNESS_CLIENT_SOURCES,
-    ),
-    "fplinux-terminal": (
-        *FONT_SOURCES,
-        *CLI_SOURCES,
-        *DRM_SESSION_SOURCES,
-        *INPUT_DEVICE_SOURCES,
-        *KEYPAD_CODE_SOURCES,
-        *INPUT_SESSION_SOURCES,
-        *KEYBOARD_TEXT_SOURCES,
-        *MULTITAP_SOURCES,
-    ),
-    "fplinux-tyrquake": (
-        *DRM_SESSION_SOURCES,
-        *CLI_SOURCES,
-        *INPUT_DEVICE_SOURCES,
-        *KEYPAD_CODE_SOURCES,
-        *INPUT_SESSION_SOURCES,
-    ),
-}
 SHARED_APORT_SOURCE_PATHS = frozenset(
     path for paths in SHARED_APORT_SOURCES.values() for path in paths
 )
-COMMON_PACKAGES = (
-    "fplinux-base",
-    "fplinux-bash",
-    "fplinux-busybox",
-    "fplinux-ncurses",
-    "fplinux-openrc",
-    "fplinux-readline",
-    "fplinux-terminal",
-    "fplinux-input",
-    "fplinux-libdrm",
-    "fplinux-libtsm",
-    "fplinux-libudev",
-)
-LOCAL_BUILD_DEPENDENCIES = {
-    "fplinux-apk-tools": ("fplinux-mbedtls-static-dev",),
-    "fplinux-uclient": ("fplinux-mbedtls-static-dev",),
-    "fplinux-audio": ("fplinux-alsa-lib",),
-    "fplinux-bluealsa": (
-        "fplinux-alsa-lib",
-        "fplinux-bluez",
-        "fplinux-glib",
-        "fplinux-sbc",
-    ),
-    "fplinux-bash": ("fplinux-ncurses", "fplinux-readline"),
-    "fplinux-bluez": ("fplinux-bluez-glib", "fplinux-ncurses", "fplinux-readline"),
-    "fplinux-brightness-ui": ("fplinux-libdrm",),
-    "fplinux-fm": ("fplinux-alsa-lib",),
-    "fplinux-jack": ("fplinux-alsa-lib",),
-    "fplinux-readline": ("fplinux-ncurses",),
-    "fplinux-present": ("fplinux-libdrm",),
-    "fplinux-rotate": ("fplinux-libdrm",),
-    "fplinux-showcase": ("fplinux-libdrm",),
-    "fplinux-terminal": (
-        "fplinux-libdrm",
-        "fplinux-libtsm",
-        "fplinux-libxkbcommon",
-    ),
-    "fplinux-tyrquake": ("fplinux-libdrm",),
-}
-SUBPACKAGE_APORTS = {
-    "fplinux-alsa-lib-card-profiles": "fplinux-alsa-lib",
-    "fplinux-bash-loadables": "fplinux-bash",
-    "fplinux-bluez-libs": "fplinux-bluez",
-    "fplinux-glib-static-dev": "fplinux-glib",
-    "fplinux-ncurses-curses": "fplinux-ncurses",
-    "fplinux-font-terminus-6x12": "fplinux-font-terminus",
-    "fplinux-font-terminus-8x16": "fplinux-font-terminus",
-}
 PACKAGE_ID = re.compile(r"[a-z0-9][a-z0-9+._-]*")
 
 
@@ -525,11 +427,24 @@ def _aport_dependency_graph(packages: Sequence[str]) -> dict[str, tuple[str, ...
         if producer in graph:
             continue
         dependencies = tuple(
-            sorted(aport_producer(name) for name in LOCAL_BUILD_DEPENDENCIES.get(producer, ()))
+            sorted({aport_producer(name) for name in LOCAL_BUILD_DEPENDENCIES.get(producer, ())})
         )
         graph[producer] = dependencies
         pending.extend(dependencies)
     return {producer: graph[producer] for producer in sorted(graph)}
+
+
+def _aport_registration_records(
+    graph: Mapping[str, tuple[str, ...]],
+) -> dict[str, dict[str, list[str]]]:
+    """Describe the normalized declarations used by the selected producers."""
+    return {
+        producer: {
+            "dependencies": list(dependencies),
+            "shared_sources": sorted(set(SHARED_APORT_SOURCES.get(producer, ()))),
+        }
+        for producer, dependencies in graph.items()
+    }
 
 
 def local_build_dependencies(packages: Sequence[str]) -> tuple[str, ...]:
@@ -585,6 +500,7 @@ def alpine_rootfs_recipe(  # noqa: PLR0913 -- each selected rootfs input is caus
         "container_image_recipe": container_image_recipe,
         "package_signing_key": signing_key_sha256,
         "packages": list(selected),
+        "registration": _aport_registration_records(_aport_dependency_graph(selected)),
         "lock": _source_file(root / "alpine.lock.toml", root),
         "abuild": _source_file(root / "alpine/abuild.conf", root),
         "aports": {
@@ -618,13 +534,18 @@ def alpine_package_recipe(
 ) -> str:
     """Hash the inputs that can affect one current FPLinux APK."""
     name = aport_producer(_canonical_packages((name,), root)[0])
-    dependencies = _canonical_packages(local_build_dependencies((name,)), root)
+    graph = _aport_dependency_graph((name,))
+    dependencies = _canonical_packages(
+        tuple(producer for producer in graph if producer != name), root
+    )
     _sha256(container_image_recipe, "container image recipe")
     _sha256(signing_key_sha256, "package signing public key")
     return _canonical_digest(
         {
             "container_image_recipe": container_image_recipe,
             "package_signing_key": signing_key_sha256,
+            "producer": name,
+            "registration": _aport_registration_records(graph),
             "lock": _source_file(root / "alpine.lock.toml", root),
             "abuild": _source_file(root / "alpine/abuild.conf", root),
             "aport": _source_tree(root / "alpine/aports" / name, root),

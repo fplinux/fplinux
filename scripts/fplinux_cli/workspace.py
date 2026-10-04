@@ -39,6 +39,7 @@ STAGED_BUILD_SOURCES = (
     "alpine/abuild.conf",
     "scripts/fplinux_cli/__init__.py",
     "scripts/fplinux_cli/alpine_builder.py",
+    "scripts/fplinux_cli/alpine_registration.py",
     "scripts/fplinux_cli/alpine_state.py",
     "scripts/fplinux_cli/artifact_state.py",
     "scripts/fplinux_cli/build_env.py",

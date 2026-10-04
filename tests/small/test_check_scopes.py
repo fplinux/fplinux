@@ -30,6 +30,61 @@ from fplinux_cli.workspace import WorkspaceFile, WorkspaceSnapshot
 class CheckScopeTests(unittest.TestCase):
     """Keep scope selection stable and independent of argument order."""
 
+    def test_registration_edits_revoke_affected_check_scope_receipts(self) -> None:
+        """Ownership and shared-source declarations cannot reuse checks of the old inputs."""
+        cases = (
+            (
+                "alpine",
+                b'COMMON_PACKAGES = ("fplinux-base",)\n',
+                b'COMMON_PACKAGES = ("fplinux-base", "fplinux-cpuclock")\n',
+            ),
+            (
+                "kernel",
+                b'COMMON_PACKAGES = ("fplinux-base",)\n',
+                b'COMMON_PACKAGES = ("fplinux-base", "fplinux-cpuclock")\n',
+            ),
+            (
+                "c",
+                b'SHARED_APORT_SOURCES = {"consumer-a": ("shared.h",), "consumer-b": ()}\n',
+                b'SHARED_APORT_SOURCES = {"consumer-a": (), "consumer-b": ("shared.h",)}\n',
+            ),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary)
+            for scope, original, changed in cases:
+                with self.subTest(scope=scope):
+
+                    def receipt(scope: str, registration: bytes) -> CheckReceiptRecipe:
+                        snapshot = WorkspaceSnapshot(
+                            (
+                                WorkspaceFile(
+                                    "scripts/fplinux_cli/alpine_registration.py",
+                                    registration,
+                                    0o644,
+                                ),
+                                WorkspaceFile(
+                                    "alpine/aports/fplinux-base/APKBUILD", b"pkgname=base\n", 0o644
+                                ),
+                                WorkspaceFile(
+                                    "alpine/aports/consumer-a/app.c", b"int app;\n", 0o644
+                                ),
+                                WorkspaceFile(
+                                    "scripts/fplinux_cli/kernelcheck.py", b"# checker\n", 0o644
+                                ),
+                            ),
+                            "a" * 64,
+                        )
+                        return check_scope_receipt_recipe(
+                            scope,
+                            check_scope_closure_digest(scope, snapshot),
+                            image_generation="b" * 64,
+                            orchestration_recipe="c" * 64,
+                        )
+
+                    publish_success_receipt(cache, receipt(scope, original))
+                    self.assertTrue(receipt_matches(cache, receipt(scope, original)))
+                    self.assertFalse(receipt_matches(cache, receipt(scope, changed)))
+
     def test_kernel_receipt_tracks_only_the_selected_build_type_fragment(self) -> None:
         """Editing release policy invalidates release checks while preserving debug reuse."""
         files = (

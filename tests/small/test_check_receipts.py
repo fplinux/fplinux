@@ -4,13 +4,17 @@
 from __future__ import annotations
 
 import json
+import shutil
 import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest import mock
 
+from fplinux_cli import common
 from fplinux_cli.checkreceipts import (
     CheckReceiptRecipe,
+    check_orchestration_recipe_digest,
     publish_success_receipt,
     receipt_matches,
     receipt_path,
@@ -30,6 +34,41 @@ def recipe(profile: str | None = None) -> CheckReceiptRecipe:
 
 class CheckReceiptTests(unittest.TestCase):
     """Only an exact successful check may be reused."""
+
+    def test_package_registration_edit_revokes_check_orchestration_receipt(self) -> None:
+        """Checks cannot retain their success when package-selection declarations change."""
+        repository = Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            shutil.copytree(
+                repository / "scripts/fplinux_cli",
+                root / "scripts/fplinux_cli",
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+            )
+            registration = root / "scripts/fplinux_cli/alpine_registration.py"
+            cache = root / ".cache"
+            with mock.patch.object(common, "ROOT", root):
+                original = replace(
+                    recipe(),
+                    scope="alpine",
+                    orchestration_recipe=check_orchestration_recipe_digest("d" * 64),
+                )
+                publish_success_receipt(cache, original)
+                self.assertTrue(receipt_matches(cache, original))
+
+                source = registration.read_text(encoding="utf-8")
+                registration.write_text(
+                    source.replace(
+                        "COMMON_PACKAGES = (\n",
+                        'COMMON_PACKAGES = (\n    "fplinux-cpuclock",\n',
+                        1,
+                    ),
+                    encoding="utf-8",
+                )
+                changed = replace(
+                    original, orchestration_recipe=check_orchestration_recipe_digest("d" * 64)
+                )
+                self.assertFalse(receipt_matches(cache, changed))
 
     def test_kernel_types_retain_separate_success_receipts(self) -> None:
         """A debug check must miss before it runs without discarding a release success."""
