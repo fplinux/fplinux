@@ -421,7 +421,8 @@ static void handle_client(struct brightness_service *service, int index)
 		close_client(service, index);
 }
 
-static int serve(struct brightness_service *service)
+static int serve(struct brightness_service *service,
+		 const sigset_t *wait_signals)
 {
 	struct pollfd pollfds[CLIENT_COUNT + 1];
 	int indexes[CLIENT_COUNT + 1];
@@ -439,7 +440,7 @@ static int serve(struct brightness_service *service)
 				(struct pollfd){ .fd = service->clients[i],
 						 .events = POLLIN };
 		}
-		result = poll(pollfds, count, -1);
+		result = ppoll(pollfds, count, NULL, wait_signals);
 		if (result < 0) {
 			if (errno == EINTR)
 				continue;
@@ -500,6 +501,9 @@ int main(int argc, char **argv)
 		.lock = -1,
 		.lease = -1,
 	};
+	struct sigaction action = { .sa_handler = stop_signal };
+	sigset_t stop_signals, previous_signals;
+	bool signals_blocked = false;
 	const char *config = "/etc/fplinux/brightness.conf";
 	enum fplinux_cli_result parsed;
 	int i, result = 1;
@@ -532,9 +536,20 @@ int main(int argc, char **argv)
 			strerror(errno));
 		goto done;
 	}
-	signal(SIGTERM, stop_signal);
-	signal(SIGINT, stop_signal);
-	result = serve(&service);
+	sigemptyset(&action.sa_mask);
+	sigemptyset(&stop_signals);
+	sigaddset(&stop_signals, SIGTERM);
+	sigaddset(&stop_signals, SIGINT);
+	if (sigaction(SIGTERM, &action, NULL) < 0 ||
+	    sigaction(SIGINT, &action, NULL) < 0 ||
+	    sigprocmask(SIG_BLOCK, &stop_signals, &previous_signals) < 0) {
+		fprintf(stderr, "fplinux-brightnessd: signals: %s\n",
+			strerror(errno));
+		goto done;
+	}
+	signals_blocked = true;
+	/* ppoll unblocks stop signals atomically with entering the wait. */
+	result = serve(&service, &previous_signals);
 	if (result < 0)
 		fprintf(stderr, "fplinux-brightnessd: poll: %s\n",
 			strerror(errno));
@@ -549,5 +564,11 @@ done:
 	}
 	if (service.lock >= 0)
 		close(service.lock);
+	if (signals_blocked &&
+	    sigprocmask(SIG_SETMASK, &previous_signals, NULL) < 0) {
+		fprintf(stderr, "fplinux-brightnessd: restore signals: %s\n",
+			strerror(errno));
+		result = -1;
+	}
 	return result < 0 ? 1 : result;
 }

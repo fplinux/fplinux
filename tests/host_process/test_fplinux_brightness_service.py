@@ -3,16 +3,57 @@
 
 from __future__ import annotations
 
+import os
 import signal
 import subprocess
 import time
 import unittest
+from pathlib import Path
+from typing import ClassVar
 
-from tests.host_process.test_fplinux_brightness_cli import CONFIG, BrightnessProcesses
+from tests.host_process.test_fplinux_brightness_cli import (
+    APORT,
+    CONFIG,
+    INCLUDE,
+    LIB,
+    ROOT,
+    BrightnessProcesses,
+)
+from tests.process import run_process
 
 
 class FPLinuxBrightnessServiceTests(BrightnessProcesses):
     """Check the daemon's state and preview lifecycle on the host."""
+
+    signal_daemon: ClassVar[Path]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        """Link a daemon whose wait boundary can receive a real stop signal."""
+        super().setUpClass()
+        cls.signal_daemon = Path(cls.build_dir.name) / "fplinux-brightnessd-stop-wait"
+        run_process(
+            [
+                "cc",
+                "-std=c11",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "-I",
+                str(INCLUDE),
+                str(APORT / "fplinux-brightnessd.c"),
+                str(LIB / "fplinux-cli.c"),
+                str(ROOT / "tests/fixtures/processes/brightness_stop_wait.c"),
+                "-Wl,--wrap=poll",
+                "-Wl,--wrap=ppoll",
+                "-Wl,--wrap=send",
+                "-o",
+                str(cls.signal_daemon),
+            ],
+            name="compile brightness daemon stop boundary",
+            timeout=30,
+            check=True,
+        )
 
     def run_once(self) -> subprocess.CompletedProcess[str]:
         """Run a second daemon attempt to completion."""
@@ -93,6 +134,42 @@ class FPLinuxBrightnessServiceTests(BrightnessProcesses):
         self.start_daemon()
         self.assertEqual(self.run_cli("get").stdout, "4\n")
         self.assertEqual(self.raw(), "7\n")
+
+    def test_stop_signal_before_wait_exits_and_restores_selected_level(self) -> None:
+        """Real SIGTERM/SIGINT at an idle wait exits and cleans up an active lease."""
+        request = self.work / "stop.request"
+        notice = self.work / "stop.notice"
+        environment = {
+            **os.environ,
+            "FPLINUX_TEST_STOP_REQUEST": str(request),
+            "FPLINUX_TEST_STOP_NOTICE": str(notice),
+        }
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            for preview in (False, True):
+                with self.subTest(signum=signum, preview=preview):
+                    self.stop_daemon()
+                    request.unlink(missing_ok=True)
+                    notice.unlink(missing_ok=True)
+                    self.start_daemon(binary=self.signal_daemon, env=environment)
+                    self.assertEqual(self.run_cli("set", "4").returncode, 0)
+                    client = self.client()
+                    if preview:
+                        self.assertEqual(self.exchange(client, "CLAIM"), "OK")
+                        self.assertEqual(self.exchange(client, "SHOW 0"), "OK")
+                        self.assertEqual(self.raw(), "0\n")
+                    request.write_text(f"{signum}\n", encoding="ascii")
+                    self.assertEqual(self.exchange(client, "GET"), "LEVEL 4")
+                    result = self.wait_for_daemon_exit()
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(notice.read_text(encoding="ascii"), f"{signum}\n")
+                    self.assertFalse(self.socket.exists())
+                    self.assertEqual(self.state.read_text(encoding="ascii"), "4\n")
+                    self.assertEqual(self.raw(), "7\n")
+                    client.close()
+                    self.start_daemon()
+                    self.assertEqual(self.run_cli("get").stdout, "4\n")
+                    self.assertEqual(self.raw(), "7\n")
+                    self.stop_daemon()
 
     def test_invalid_config_and_unavailable_device_fail_without_writing(self) -> None:
         """Malformed configuration and missing sysfs values block startup."""

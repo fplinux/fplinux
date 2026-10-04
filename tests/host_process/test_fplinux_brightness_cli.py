@@ -9,7 +9,10 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 from tests.process import run_process
 
@@ -84,11 +87,13 @@ class BrightnessProcesses(unittest.TestCase):
         self.process: subprocess.Popen[str] | None = None
         self.addCleanup(self.stop_daemon)
 
-    def start_daemon(self) -> None:
+    def start_daemon(
+        self, *, binary: Path | None = None, env: Mapping[str, str] | None = None
+    ) -> None:
         """Start the production daemon and wait for a GET response."""
         self.process = subprocess.Popen(
             [
-                str(self.daemon),
+                str(binary or self.daemon),
                 "--config",
                 str(self.config),
                 "--backlight",
@@ -102,6 +107,7 @@ class BrightnessProcesses(unittest.TestCase):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            env=env,
         )
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
@@ -124,14 +130,25 @@ class BrightnessProcesses(unittest.TestCase):
 
     def stop_daemon(self) -> None:
         """Stop and reap the daemon if this test started one."""
-        if self.process is not None and self.process.poll() is None:
+        if self.process is None:
+            return
+        if self.process.poll() is None:
             self.process.terminate()
-            try:
-                self.process.communicate(timeout=3)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-                self.process.communicate(timeout=3)
+        self.wait_for_daemon_exit()
+
+    def wait_for_daemon_exit(self) -> subprocess.CompletedProcess[str]:
+        """Require a timely exit; SIGKILL only reaps a daemon after a failed check."""
+        process = self.process
         self.process = None
+        if process is None:
+            self.fail("brightness daemon did not start")
+        try:
+            output, error = process.communicate(timeout=3)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate(timeout=3)
+            self.fail("brightness daemon did not stop without SIGKILL")
+        return subprocess.CompletedProcess(process.args, process.wait(), output, error)
 
     def run_cli(self, *args: str) -> subprocess.CompletedProcess[str]:
         """Run the production CLI against this test's socket."""
