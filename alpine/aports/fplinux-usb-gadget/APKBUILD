@@ -9,11 +9,17 @@ license="GPL-2.0-only"
 depends="fplinux-busybox fplinux-base openrc"
 subpackages="$pkgname-openrc"
 options="!check"
-source="fplinux-usb-gadget fplinux-usb-gadget.initd fplinux-usb-dhcp.initd"
+source="fplinux-usb-gadget
+	fplinux-usb-network-policy.sh
+	fplinux-usb-gadget.initd
+	fplinux-usb-dhcp.initd
+	"
 
 package() {
 	install -Dm755 "$srcdir/fplinux-usb-gadget" \
 		"$pkgdir/usr/libexec/fplinux/usb-gadget"
+	install -Dm644 "$srcdir/fplinux-usb-network-policy.sh" \
+		"$pkgdir/usr/libexec/fplinux/usb-network-policy.sh"
 	install -Dm755 "$srcdir/fplinux-usb-gadget.initd" \
 		"$pkgdir/etc/init.d/fplinux-usb-gadget"
 	install -Dm755 "$srcdir/fplinux-usb-dhcp.initd" \
@@ -31,7 +37,8 @@ openrc() {
 }
 
 sha512sums="
-ec94cfea792a13e7908db9749654d6227269798f0d60bcfab91f46021ae52ad8822a590498e5c2a6ddd95ce11230a7c124e9479f89a4d321fecfd6e7992dc3ba  fplinux-usb-gadget
+c266ad367eacb0937eb2ee368e3e86204ea37aa8fef750b8170d04eaeebf6f0c858cb70adfe555b5732d76bc5409bb955a0b9e557d666bb69a1a4340945d64a6  fplinux-usb-gadget
+f716a24c2090d9da65d94ff2d0c454e7b40330098b02c391c69d88ff9a41888c28c3ecebd01b115975c8816a31622aa5fb1deb3f601b4e1a47eb03b5889da8c5  fplinux-usb-network-policy.sh
 ca6f336a173a9defb5e6685a7878762209f5986515719bc94bd49403b99134ea7843209c2235c7af4537b953ab08f30e06155e94897f392be33620d72a3395f0  fplinux-usb-gadget.initd
 dd4df4bcbf64815ee8620cd91537c27eca2b60a6a0a952690b31478711ec83da63f1f6422746e886c1a030fd2dcf3c4804257368c14318605dc2b929538d3356  fplinux-usb-dhcp.initd
 "

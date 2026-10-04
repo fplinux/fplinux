@@ -3,6 +3,10 @@
 
 set -eu
 
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=fplinux-usb-network-policy.sh
+. /usr/libexec/fplinux/usb-network-policy.sh
+
 session_node=/proc/device-tree/fplinux-session
 usb_session_property=$session_node/fplinux,usb-session
 session_id_property=$session_node/fplinux,session-id
@@ -364,14 +368,8 @@ start_gadget() {
 	if [ ! -c /dev/ttyGS0 ] || [ -e /dev/ttyGS1 ]; then
 		return 1
 	fi
-	stage=verify_network_policy
-	if [ "$(cat /proc/sys/net/ipv4/ip_forward)" != 0 ]; then
-		return 1
-	fi
-	if [ -n "$(/sbin/ip route show default)" ]; then
-		return 1
-	fi
-
+	stage=verify_forwarding
+	verify_usb_forwarding /proc/sys/net/ipv4/ip_forward
 	stage=find_udc
 	set -- /sys/class/udc/*
 	if [ "$#" -ne 1 ] || [ ! -e "$1" ]; then
@@ -394,6 +392,9 @@ start_gadget() {
 
 	stage=configure_network
 	/sbin/ifconfig usb0 "$phone_address" netmask "$netmask" broadcast "$broadcast" up
+
+	stage=verify_network_policy
+	verify_usb_routes /sbin/ip
 
 	stage=verify_runtime
 	if [ "$(cat "$gadget/UDC")" != "$udc" ]; then

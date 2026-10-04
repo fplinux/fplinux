@@ -141,8 +141,9 @@ udhcpc -i bnep0
 
 Keep the first command running while using the connection. Stop it with
 Ctrl-C to disconnect PAN. Internet traffic uses the configured BNEP interface;
-USB-NCM remains the separate local management path and is not the Internet
-gateway.
+its default route does not prevent USB-NCM from starting. USB-NCM remains the
+separate local management path: it has no default route and IPv4 forwarding
+remains disabled.
 
 ## Send audio to an A2DP sink
 
