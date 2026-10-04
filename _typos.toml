@@ -28,6 +28,8 @@ gl_pathc = "gl_pathc"
 ki_filp = "ki_filp"
 mke2fs = "mke2fs"
 parm = "parm"
+# This spelling is part of Linux's power_supply_desc interface.
+property_is_writeable = "property_is_writeable"
 UMS9117 = "UMS9117"
 
 [default.extend-words]

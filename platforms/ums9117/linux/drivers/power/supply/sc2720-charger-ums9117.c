@@ -10,6 +10,29 @@
 
 #define SC2720_CHGR_STATUS 0xe14U
 #define SC2720_CHGR_STATUS_CHARGER_ON BIT(3)
+#define SC2720_CHGR_STATUS_CDP BIT(5)
+#define SC2720_CHGR_STATUS_DCP BIT(6)
+#define SC2720_CHGR_STATUS_SDP BIT(7)
+#define SC2720_CHGR_STATUS_TYPE_MASK GENMASK(7, 5)
+#define SC2720_CHGR_STATUS_DETECT_DONE BIT(11)
+
+static enum power_supply_usb_type sc2720_charger_usb_type(unsigned int status)
+{
+	if (!(status & SC2720_CHGR_STATUS_CHARGER_ON) ||
+	    !(status & SC2720_CHGR_STATUS_DETECT_DONE))
+		return POWER_SUPPLY_USB_TYPE_UNKNOWN;
+
+	switch (status & SC2720_CHGR_STATUS_TYPE_MASK) {
+	case SC2720_CHGR_STATUS_SDP:
+		return POWER_SUPPLY_USB_TYPE_SDP;
+	case SC2720_CHGR_STATUS_CDP:
+		return POWER_SUPPLY_USB_TYPE_CDP;
+	case SC2720_CHGR_STATUS_DCP:
+		return POWER_SUPPLY_USB_TYPE_DCP;
+	default:
+		return POWER_SUPPLY_USB_TYPE_UNKNOWN;
+	}
+}
 
 static int sc2720_charger_get_property(struct power_supply *supply,
 				       enum power_supply_property property,
@@ -19,22 +42,31 @@ static int sc2720_charger_get_property(struct power_supply *supply,
 	unsigned int status;
 	int ret;
 
-	if (property != POWER_SUPPLY_PROP_ONLINE)
+	if (property != POWER_SUPPLY_PROP_ONLINE &&
+	    property != POWER_SUPPLY_PROP_USB_TYPE)
 		return -EINVAL;
 	ret = regmap_read(regmap, SC2720_CHGR_STATUS, &status);
 	if (ret)
 		return ret;
-	value->intval = !!(status & SC2720_CHGR_STATUS_CHARGER_ON);
+	if (property == POWER_SUPPLY_PROP_ONLINE)
+		value->intval = !!(status & SC2720_CHGR_STATUS_CHARGER_ON);
+	else
+		value->intval = sc2720_charger_usb_type(status);
 	return 0;
 }
 
 static enum power_supply_property sc2720_charger_properties[] = {
 	POWER_SUPPLY_PROP_ONLINE,
+	POWER_SUPPLY_PROP_USB_TYPE,
 };
 
 static const struct power_supply_desc sc2720_charger_description = {
 	.name = "sc2720-charger",
 	.type = POWER_SUPPLY_TYPE_UNKNOWN,
+	.usb_types = BIT(POWER_SUPPLY_USB_TYPE_UNKNOWN) |
+		     BIT(POWER_SUPPLY_USB_TYPE_SDP) |
+		     BIT(POWER_SUPPLY_USB_TYPE_CDP) |
+		     BIT(POWER_SUPPLY_USB_TYPE_DCP),
 	.properties = sc2720_charger_properties,
 	.num_properties = ARRAY_SIZE(sc2720_charger_properties),
 	.get_property = sc2720_charger_get_property,

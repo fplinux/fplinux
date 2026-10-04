@@ -5,9 +5,10 @@ config POWER_SUPPLY_SC2720_CHARGER_UMS9117
 	depends on POWER_SUPPLY && MFD_SC27XX_PMIC
 	help
 	  Read-only charger-input observation through the shared UMS9117 ADI
-	  interface. The driver exports only the current SC2720 charger-present
-	  status and does not configure charging, the FGU, efuses or NV state.
-	  Report charger presence through the power-supply online attribute.
+	  interface. Report charger presence and the completed USB source
+	  classification through the power-supply online and usb_type attributes.
+	  The driver does not configure charging, detection, the FGU, efuses or
+	  NV state.
 
 config POWER_SUPPLY_SC2720_FGU_UMS9117
 	tristate "SC2720 battery telemetry on UMS9117"
