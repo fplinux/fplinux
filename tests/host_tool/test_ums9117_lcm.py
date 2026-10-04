@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Host-component checks of LCM transport against a fake MMIO peripheral."""
+"""Host LCM transport and RGB565 damage checks with fake MMIO and kernel types."""
 
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ FIXTURES = ROOT / "tests/host_tool"
 class Ums9117LcmHostTests(unittest.TestCase):
     """Link the real transport and internal header; no panel is exercised."""
 
-    def test_timing_initialization_and_busy_buffer_admission(self) -> None:
-        """Encode timing, reject missing values and wait before port writes."""
+    def test_timing_busy_buffer_and_rgb565_damage_alignment(self) -> None:
+        """Encode timing, wait for port admission and preserve aligned damage."""
         with tempfile.TemporaryDirectory() as temporary:
             executable = Path(temporary) / "ums9117-lcm"
             compilation = run_process(

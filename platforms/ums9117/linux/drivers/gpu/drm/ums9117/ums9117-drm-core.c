@@ -285,10 +285,26 @@ static int ums9117_drm_run_commands(struct ums9117_drm *udrm,
 	return 0;
 }
 
-static int ums9117_drm_begin_transport_frame(struct ums9117_drm *udrm)
+static int ums9117_drm_begin_transport_frame(struct ums9117_drm *udrm,
+					     const struct drm_rect *damage)
 {
+	u16 x_last = damage->x2 - 1;
+	u16 y_last = damage->y2 - 1;
+	u8 columns[] = { damage->x1 >> 8, damage->x1, x_last >> 8, x_last };
+	u8 pages[] = { damage->y1 >> 8, damage->y1, y_last >> 8, y_last };
+	int ret;
+
+	/* RAMWR restarts the selected window, including after a partial frame. */
+	ret = ums9117_drm_dcs(udrm, MIPI_DCS_SET_COLUMN_ADDRESS, columns,
+			      sizeof(columns));
+	if (!ret)
+		ret = ums9117_drm_dcs(udrm, MIPI_DCS_SET_PAGE_ADDRESS, pages,
+				      sizeof(pages));
+	if (ret)
+		return ret;
 	if (ums9117_drm_uses_spi(udrm))
-		return ums9117_drm_spi_begin_frame(udrm);
+		return ums9117_drm_spi_begin_frame(
+			udrm, drm_rect_width(damage) * drm_rect_height(damage));
 	if (ums9117_drm_uses_lcm(udrm))
 		return ums9117_drm_lcm_begin_frame(udrm);
 	return -ENODEV;
@@ -582,24 +598,28 @@ static int ums9117_drm_wait_frame(struct ums9117_drm *udrm)
 }
 
 static int ums9117_drm_send_frame(struct ums9117_drm *udrm,
-				  struct drm_plane_state *state)
+				  struct drm_plane_state *state,
+				  const struct drm_rect *damage)
 {
 	struct drm_framebuffer *fb = state->fb;
-	unsigned int width = udrm->profile->width;
-	unsigned int height = udrm->profile->height;
+	unsigned int width = drm_rect_width(damage);
+	unsigned int height = drm_rect_height(damage);
 	dma_addr_t y_address = drm_fb_dma_get_gem_addr(fb, state, 0);
 	dma_addr_t uv_address = 0;
 	unsigned long flags;
 	u64 started_ns;
 	u32 value;
 	bool nv16 = fb->format->format == DRM_FORMAT_NV16;
+	u32 pitch_pixels = fb->pitches[0] / fb->format->cpp[0];
 	int ret;
 
-	ret = ums9117_drm_begin_transport_frame(udrm);
+	ret = ums9117_drm_begin_transport_frame(udrm, damage);
 	if (ret)
 		return ret;
 	if (nv16)
 		uv_address = drm_fb_dma_get_gem_addr(fb, state, 1);
+	else
+		y_address += damage->y1 * fb->pitches[0] + damage->x1 * 2;
 	/* GEM DMA uses write-combined buffers; publish pixels before RUN. */
 	wmb();
 	writel(readl(udrm->lcdc + UMS9117_LCDC_CTRL) | BIT(0),
@@ -613,7 +633,7 @@ static int ums9117_drm_send_frame(struct ums9117_drm *udrm,
 	writel(y_address >> 2, udrm->lcdc + UMS9117_LCDC_IMG_Y_BASE);
 	writel(uv_address >> 2, udrm->lcdc + UMS9117_LCDC_IMG_UV_BASE);
 	writel(width | height << 16, udrm->lcdc + UMS9117_LCDC_IMG_SIZE_XY);
-	writel(width, udrm->lcdc + UMS9117_LCDC_IMG_PITCH);
+	writel(pitch_pixels, udrm->lcdc + UMS9117_LCDC_IMG_PITCH);
 	writel(0, udrm->lcdc + UMS9117_LCDC_IMG_DISP_XY);
 	writel(nv16 ? 1 : udrm->rgb_y2r_ctrl,
 	       udrm->lcdc + UMS9117_LCDC_Y2R_CTRL);
@@ -643,6 +663,8 @@ static int ums9117_drm_send_frame(struct ums9117_drm *udrm,
 	udrm->stats.frames_started++;
 	udrm->last_y_address = y_address;
 	udrm->last_uv_address = uv_address;
+	udrm->last_transfer_rect = *damage;
+	udrm->last_source_pitch_pixels = pitch_pixels;
 	started_ns = ktime_get_ns();
 	writel(value | UMS9117_LCDC_CTRL_RUN, udrm->lcdc + UMS9117_LCDC_CTRL);
 	spin_unlock_irqrestore(&udrm->lock, flags);
@@ -744,6 +766,8 @@ static void ums9117_drm_pipe_enable(struct drm_simple_display_pipe *pipe,
 				    struct drm_plane_state *plane_state)
 {
 	struct ums9117_drm *udrm = to_ums9117_drm(pipe->crtc.dev);
+	struct drm_rect damage = DRM_RECT_INIT(0, 0, udrm->profile->width,
+					       udrm->profile->height);
 	unsigned int brightness;
 	unsigned long flags;
 	bool cold;
@@ -762,7 +786,7 @@ static void ums9117_drm_pipe_enable(struct drm_simple_display_pipe *pipe,
 	spin_unlock_irqrestore(&udrm->lock, flags);
 	ret = cold ? ums9117_drm_cold_init(udrm) : ums9117_drm_wake_panel(udrm);
 	if (!ret)
-		ret = ums9117_drm_send_frame(udrm, plane_state);
+		ret = ums9117_drm_send_frame(udrm, plane_state, &damage);
 	if (!ret) {
 		brightness = ums9117_drm_cached_backlight_level(udrm);
 		ret = ums9117_drm_wled_set(udrm,
@@ -799,7 +823,12 @@ static void ums9117_drm_pipe_update(struct drm_simple_display_pipe *pipe,
 	/* A modeset submits its complete first frame from enable(). */
 	if (udrm->state == UMS9117_DRM_PANEL_STATE_ACTIVE &&
 	    drm_atomic_helper_damage_merged(old_state, state, &damage)) {
-		ret = ums9117_drm_send_frame(udrm, state);
+		if (state->fb->format->format == DRM_FORMAT_RGB565)
+			ums9117_drm_rgb565_align_damage(&damage);
+		else
+			damage = DRM_RECT_INIT(0, 0, udrm->profile->width,
+					       udrm->profile->height);
+		ret = ums9117_drm_send_frame(udrm, state, &damage);
 		if (ret)
 			ums9117_drm_commit_error(udrm, ret);
 	} else if (udrm->state == UMS9117_DRM_PANEL_STATE_ERROR) {
@@ -1007,7 +1036,7 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		"init_mode=cold-reset\n"
 		"completion_mode=irq\n"
 		"timeout_mode=finite-to-error\n"
-		"damage_mode=full-frame-atomic\n"
+		"damage_mode=rgb565-merged-rectangle\n"
 		"lifecycle_mode=wled+dcs-display+sleep\n"
 		"profile=%s\n"
 		"transport=%s\n"
@@ -1032,6 +1061,12 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		"last_transfer_ns=%llu\n"
 		"last_y_address=%pad\n"
 		"last_uv_address=%pad\n"
+		"last_transfer_x=%d\n"
+		"last_transfer_y=%d\n"
+		"last_transfer_width=%d\n"
+		"last_transfer_height=%d\n"
+		"last_source_pitch_pixels=%u\n"
+		"last_transfer_pixels=%d\n"
 		"last_error_errno=%d\n"
 		"last_error_dcs_command=0x%02x\n"
 		"last_error_irq_status=0x%08x\n"
@@ -1049,6 +1084,12 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		stats.wled_errors, stats.fail_dark_failures, stats.present_nv16,
 		stats.present_rgb565, udrm->last_transfer_ns,
 		&udrm->last_y_address, &udrm->last_uv_address,
+		udrm->last_transfer_rect.x1, udrm->last_transfer_rect.y1,
+		drm_rect_width(&udrm->last_transfer_rect),
+		drm_rect_height(&udrm->last_transfer_rect),
+		udrm->last_source_pitch_pixels,
+		drm_rect_width(&udrm->last_transfer_rect) *
+			drm_rect_height(&udrm->last_transfer_rect),
 		udrm->last_error_errno, udrm->last_dcs_command,
 		stats.last_error_irq_status, stats.last_error_irq_raw);
 	spin_unlock_irqrestore(&udrm->lock, flags);

@@ -40,6 +40,7 @@ PACKAGE_DOCUMENTS = {
     "docs/features/CAMERA.md": common.ROOT / "docs/features/CAMERA.md",
     "docs/features/CHARGER_STATUS.md": common.ROOT / "docs/features/CHARGER_STATUS.md",
     "docs/features/CPU_CLOCK.md": common.ROOT / "docs/features/CPU_CLOCK.md",
+    "docs/features/DISPLAY.md": common.ROOT / "docs/features/DISPLAY.md",
     "docs/features/DISPLAY_BACKLIGHT.md": common.ROOT / "docs/features/DISPLAY_BACKLIGHT.md",
     "docs/features/FILE_TRANSFER.md": common.ROOT / "docs/features/FILE_TRANSFER.md",
     "docs/features/FM_RADIO.md": common.ROOT / "docs/features/FM_RADIO.md",

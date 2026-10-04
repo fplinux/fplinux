@@ -236,6 +236,56 @@ static void completed_ramwr_accepts_pixel_packing(void)
 	      "pixel packing must wait for RAMWR");
 }
 
+static void rgb565_damage_alignment_preserves_aligned_rectangle(void)
+{
+	struct drm_rect damage = { .x1 = 16, .y1 = 81, .x2 = 50, .y2 = 113 };
+
+	ums9117_drm_rgb565_align_damage(&damage);
+	CHECK(damage.x1 == 16 && damage.y1 == 81 && damage.x2 == 50 &&
+		      damage.y2 == 113,
+	      "aligned damage must remain unchanged");
+}
+
+static void rgb565_damage_alignment_expands_odd_edges_outward(void)
+{
+	struct drm_rect damage = { .x1 = 17, .y1 = 81, .x2 = 49, .y2 = 113 };
+
+	ums9117_drm_rgb565_align_damage(&damage);
+	CHECK(damage.x1 == 16 && damage.y1 == 81 && damage.x2 == 50 &&
+		      damage.y2 == 113,
+	      "odd damage edges must expand outward and preserve rows");
+}
+
+static void rgb565_damage_alignment_keeps_240_pixel_corner_in_bounds(void)
+{
+	struct drm_rect damage = { .x1 = 239, .y1 = 319, .x2 = 240, .y2 = 320 };
+
+	ums9117_drm_rgb565_align_damage(&damage);
+	CHECK(damage.x1 == 238 && damage.y1 == 319 && damage.x2 == 240 &&
+		      damage.y2 == 320,
+	      "240-pixel right edge must stay in bounds and preserve the corner");
+}
+
+static void rgb565_damage_alignment_keeps_128_pixel_right_edge_in_bounds(void)
+{
+	struct drm_rect damage = { .x1 = 127, .y1 = 10, .x2 = 128, .y2 = 11 };
+
+	ums9117_drm_rgb565_align_damage(&damage);
+	CHECK(damage.x1 == 126 && damage.y1 == 10 && damage.x2 == 128 &&
+		      damage.y2 == 11,
+	      "128-pixel right edge must stay in bounds and preserve rows");
+}
+
+static void rgb565_damage_alignment_preserves_full_frame(void)
+{
+	struct drm_rect damage = { .x1 = 0, .y1 = 0, .x2 = 240, .y2 = 320 };
+
+	ums9117_drm_rgb565_align_damage(&damage);
+	CHECK(damage.x1 == 0 && damage.y1 == 0 && damage.x2 == 240 &&
+		      damage.y2 == 320,
+	      "full 240 by 320 damage must remain unchanged");
+}
+
 int main(void)
 {
 	inoi244_timing_tuple_encodes_firmware_value();
@@ -244,5 +294,10 @@ int main(void)
 	completing_buffer_accepts_command_parameter();
 	stalled_ramwr_keeps_command_packing();
 	completed_ramwr_accepts_pixel_packing();
+	rgb565_damage_alignment_preserves_aligned_rectangle();
+	rgb565_damage_alignment_expands_odd_edges_outward();
+	rgb565_damage_alignment_keeps_240_pixel_corner_in_bounds();
+	rgb565_damage_alignment_keeps_128_pixel_right_edge_in_bounds();
+	rgb565_damage_alignment_preserves_full_frame();
 	return failures ? 1 : 0;
 }

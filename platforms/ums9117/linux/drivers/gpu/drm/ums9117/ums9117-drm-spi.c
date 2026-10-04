@@ -202,7 +202,7 @@ int ums9117_drm_spi_dcs(struct ums9117_drm *udrm, u8 command, const u8 *data,
 	return ret;
 }
 
-int ums9117_drm_spi_begin_frame(struct ums9117_drm *udrm)
+int ums9117_drm_spi_begin_frame(struct ums9117_drm *udrm, u32 pixels)
 {
 	int ret;
 
@@ -213,8 +213,6 @@ int ums9117_drm_spi_begin_frame(struct ums9117_drm *udrm)
 	       udrm->spi + UMS9117_DRM_SPI_CTL7);
 	ret = ums9117_drm_spi_dcs(udrm, MIPI_DCS_WRITE_MEMORY_START, NULL, 0);
 	if (!ret) {
-		u32 pixels = udrm->profile->width * udrm->profile->height;
-
 		ums9117_drm_spi_tx_length(udrm, pixels);
 		writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL12) | BIT(1),
 		       udrm->spi + UMS9117_DRM_SPI_CTL12);

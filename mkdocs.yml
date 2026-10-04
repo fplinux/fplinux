@@ -108,6 +108,7 @@ nav:
           - docs/features/MICROPHONE_AUDIO.md
           - docs/features/FM_RADIO.md
       - Display and haptics:
+          - docs/features/DISPLAY.md
           - docs/features/DISPLAY_BACKLIGHT.md
           - docs/features/KEYPAD_BACKLIGHT.md
           - docs/features/VIBRATION.md

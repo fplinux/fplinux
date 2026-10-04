@@ -13,6 +13,7 @@
 
 #include <drm/drm_connector.h>
 #include <drm/drm_device.h>
+#include <drm/drm_rect.h>
 #include <drm/drm_simple_kms_helper.h>
 
 #include "ums9117-drm.h"
@@ -86,6 +87,8 @@ struct ums9117_drm {
 	u64 last_transfer_ns;
 	dma_addr_t last_y_address;
 	dma_addr_t last_uv_address;
+	struct drm_rect last_transfer_rect;
+	u32 last_source_pitch_pixels;
 	int irq;
 	int last_error_errno;
 	u8 last_dcs_command;
@@ -112,13 +115,21 @@ static inline bool ums9117_drm_uses_lcm(const struct ums9117_drm *udrm)
 		udrm->profile->transport == UMS9117_DRM_TRANSPORT_LCM_DBI);
 }
 
+/* Nonempty, clipped damage on an even-width native RGB565 framebuffer. */
+static inline void ums9117_drm_rgb565_align_damage(struct drm_rect *damage)
+{
+	/* The source base and each fetched RGB565 row are word-aligned. */
+	damage->x1 &= ~1;
+	damage->x2 = (damage->x2 + 1) & ~1;
+}
+
 int ums9117_drm_spi_init_transport(struct ums9117_drm *udrm,
 				   struct platform_device *pdev);
 int ums9117_drm_spi_enable_transport(struct ums9117_drm *udrm);
 int ums9117_drm_spi_post_reset(struct ums9117_drm *udrm);
 int ums9117_drm_spi_dcs(struct ums9117_drm *udrm, u8 command, const u8 *data,
 			size_t length);
-int ums9117_drm_spi_begin_frame(struct ums9117_drm *udrm);
+int ums9117_drm_spi_begin_frame(struct ums9117_drm *udrm, u32 pixels);
 int ums9117_drm_lcm_init_transport(struct ums9117_drm *udrm,
 				   struct platform_device *pdev);
 int ums9117_drm_lcm_enable_transport(struct ums9117_drm *udrm);
