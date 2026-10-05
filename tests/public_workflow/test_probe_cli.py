@@ -93,6 +93,7 @@ class ProbeCliTests(unittest.TestCase):
         for relative in (
             "Containerfile",
             "container.lock.toml",
+            "environment.lock.toml",
             ".kernignore",
             "package.json",
             "package-lock.json",

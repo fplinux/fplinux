@@ -2,4 +2,6 @@
 !package.json
 !package-lock.json
 !Containerfile
+!scripts/fplinux_cli/image_content.py
 !alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch
+!inputs/**

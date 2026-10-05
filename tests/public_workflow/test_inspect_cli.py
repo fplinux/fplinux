@@ -66,7 +66,7 @@ class InspectCliTests(unittest.TestCase):
             "files": {"payload.bin": file_record(payload)},
             "workspace_digest": "a" * 64,
             "container_image_recipe": "b" * 64,
-            "container_image_generation": "c" * 64,
+            "container_image_content": "c" * 64,
             "apk_signing_key": "d" * 64,
             "device_identity": "e" * 64,
             "linux_recipe": "f" * 64,

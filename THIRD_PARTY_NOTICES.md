@@ -14,7 +14,7 @@ unless an individual file carries a different SPDX identifier.
 | Component                                | Role                                           | Declared license / provenance                                                              |
 | ---------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | Linux 6.18.42                            | Target kernel and bootstrap bitmap fonts       | GPL-2.0-only; official kernel.org archive                                                  |
-| Alpine Linux 3.24.1                      | Target userspace and APK package base          | Multiple upstream licenses; exact armv7 artifacts pinned in `alpine.lock.toml`             |
+| Alpine Linux 3.24.2                      | Target userspace and APK package base          | Multiple upstream licenses; exact armv7 artifacts pinned in `alpine.lock.toml`             |
 | OpenRC                                   | Init, service supervision and runlevels        | BSD-2-Clause; supplied by the pinned Alpine package set                                    |
 | Dropbear                                 | USB-network SSH server                         | MIT; supplied by the pinned Alpine package set                                             |
 | OpenSSH SFTP server                      | SSH file-transfer subsystem                    | SSH-OpenSSH; supplied by the pinned Alpine package set                                     |
@@ -35,7 +35,7 @@ unless an individual file carries a different SPDX identifier.
 | xkeyboard-config 2.47                    | Keyboard layout data for applications          | MIT, X11, HPND and xkeyboard-config-Zinoviev notices; `COPYING` shipped in each layout APK |
 | libxkbcommon 1.13.1                      | Keyboard text in the terminal                  | MIT, MIT-open-group, HPND and HPND-sell-variant; shared runtime library                    |
 | libdrm 2.4.134                           | DRM/KMS display access                         | MIT; shared runtime library from the upstream release archive                              |
-| libtsm 4.7.1                             | Terminal screen and escape-sequence handling   | MIT and LGPL-2.1-or-later; the hash table carries the LGPL notice                          |
+| libtsm 4.8.0                             | Terminal screen and escape-sequence handling   | MIT and LGPL-2.1-or-later; the hash table carries the LGPL notice                          |
 | Terminus 4.49.1                          | Terminal, brightness control and showcase text | OFL-1.1; upstream release archive                                                          |
 | Bash 5.3.9                               | Interactive local shell and Readline editing   | GPL-3.0-or-later; supplied by the pinned Alpine package set                                |
 | OpenWrt uclient, libubox and ustream-ssl | HTTP and HTTPS download client and libraries   | ISC; exact source commits pinned by the `fplinux-uclient` APKBUILD                         |

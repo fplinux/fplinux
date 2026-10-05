@@ -237,7 +237,7 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
         inputs_build.require_file(release / relative)
 
     workspace_digest = os.environ.get("FPLINUX_WORKSPACE_DIGEST", "")
-    container_image_recipe, container_image_generation = inputs_build.container_image_environment()
+    container_image_recipe, container_image_content = inputs_build.container_image_environment()
     inputs_build.require_sha256(workspace_digest, "workspace digest")
     inputs_build.require_sha256(linux_recipe, "Linux recipe")
     inputs_build.require_sha256(device_identity, "device identity")
@@ -259,7 +259,7 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
         "build_type": target_config["build_type"],
         "workspace_digest": workspace_digest,
         "container_image_recipe": container_image_recipe,
-        "container_image_generation": container_image_generation,
+        "container_image_content": container_image_content,
         "apk_signing_key": apk_signing_key,
         "linux_recipe": linux_recipe,
         "device_identity": device_identity,

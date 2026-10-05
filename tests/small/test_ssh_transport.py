@@ -57,7 +57,7 @@ def write_bundle(bundle: Path) -> tuple[dict[str, Any], str]:
         "rootfs_receipt": {"recipe": "5" * 64, "sha256": "6" * 64},
         "boot_artifacts": {"required": []},
         "container_image_recipe": "7" * 64,
-        "container_image_generation": "4" * 64,
+        "container_image_content": "4" * 64,
         "apk_signing_key": "8" * 64,
         "device_identity": "9" * 64,
         "files": {

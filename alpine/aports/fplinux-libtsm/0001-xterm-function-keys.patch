@@ -1,15 +1,6 @@
 --- a/src/tsm/tsm-vte.c
 +++ b/src/tsm/tsm-vte.c
-@@ -2820,6 +2820,8 @@
- 	int modifier = csi_modifier_from_mask(mods);
- 	if (modifier) {
-+		/* Alt is already encoded in the CSI modifier parameter. */
-+		vte->flags &= ~TSM_VTE_FLAG_PREPEND_ESCAPE;
- 		code_with_modifier[4] = modifier;
- 		code_with_modifier[5] = direction;
- 		vte_write(vte, code_with_modifier, 6);
- 	} else {
-@@ -2834,6 +2834,42 @@
+@@ -2841,6 +2841,42 @@
  	}
  }
 
@@ -52,7 +43,7 @@
  SHL_EXPORT
  bool tsm_vte_handle_keyboard(struct tsm_vte *vte, uint32_t keysym,
  			     uint32_t ascii, unsigned int mods,
-@@ -2846,6 +2882,9 @@
+@@ -2853,6 +2889,9 @@
  	if (!vte) {
  		return false;
  	}
@@ -62,7 +53,7 @@
 
  	/* MOD1 (mostly labeled 'Alt') prepends an escape character to every
  	 * input that is sent by a key.
-@@ -3238,144 +3277,7 @@
+@@ -3245,144 +3284,7 @@
  		case XKB_KEY_KP_Space:
  			vte_write(vte, " ", 1);
  			return true;

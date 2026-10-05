@@ -259,7 +259,7 @@ def _host_tool_recipe(sources: dict[str, Any], recipe: dict[str, Any]) -> str:
             Path(build_env.__file__),
         )
     }
-    image_recipe, image_generation = inputs_build.container_image_environment()
+    image_recipe, image_content = inputs_build.container_image_environment()
     payload = {
         "recipe": recipe,
         "upstream": upstream,
@@ -269,7 +269,7 @@ def _host_tool_recipe(sources: dict[str, Any], recipe: dict[str, Any]) -> str:
             name: os.environ[name] for name in _COMPILER_ENVIRONMENT if name in os.environ
         },
         "image_recipe": image_recipe,
-        "image_generation": image_generation,
+        "image_content": image_content,
     }
     return sha256_bytes(canonical_json_bytes(payload))
 

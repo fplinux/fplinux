@@ -54,7 +54,7 @@ def _build_container_command(  # noqa: PLR0913
     logs: Path,
     log_environment: dict[str, str],
     image_recipe: str,
-    image_generation: str,
+    image_content: str,
     profile: str | None = None,
     build_type: str = "release",
 ) -> list[str]:
@@ -108,7 +108,7 @@ def _build_container_command(  # noqa: PLR0913
         "--env",
         f"FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE={image_recipe}",
         "--env",
-        f"FPLINUX_CONTAINER_IMAGE_GENERATION={image_generation}",
+        f"FPLINUX_CONTAINER_IMAGE_CONTENT={image_content}",
         "--env",
         f"FPLINUX_WORKSPACE_DIGEST={snapshot.recipe}",
         "--workdir",
@@ -287,7 +287,7 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
                     logs=container_logs,
                     log_environment=log_environment,
                     image_recipe=image_recipe,
-                    image_generation=current_image.image_generation,
+                    image_content=current_image.image_content,
                 ),
                 env=kern_env.kern_environment(),
             )

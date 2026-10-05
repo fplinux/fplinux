@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import platform
@@ -19,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli.common import ROOT, alpine_tar_filter, error_message, fail, sha256_file
+from fplinux_cli.dependency_inputs import environment_inputs
 from fplinux_cli.environment.images import (
     container_base_image_reference,
     container_image_build_arguments,
@@ -89,19 +91,29 @@ def require_kern(lock: dict[str, Any] | None = None) -> str:
     return str(_kern_path())
 
 
-def _download_locked_file(
+def _download_locked_file(  # noqa: PLR0913 -- checksum, size and offline policy are distinct inputs.
     url: str,
     digest: str,
     destination: Path,
+    *,
+    offline: bool = False,
+    algorithm: str = "sha256",
+    size: int | None = None,
 ) -> Path:
-    """Download one exact HTTPS runtime input atomically into the project cache."""
+    """Fetch one declared checksum match atomically, or require saved bytes offline."""
     if not url.startswith("https://"):
-        fail("runtime download URL must use HTTPS")
+        fail("locked download URL must use HTTPS")
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.is_symlink() or (destination.exists() and not destination.is_file()):
-        fail(f"invalid runtime download path: {destination}")
-    if destination.is_file() and sha256_file(destination) == digest:
+        fail(f"invalid locked download path: {destination}")
+    if (
+        destination.is_file()
+        and (size is None or destination.stat().st_size == size)
+        and _locked_file_digest(destination, algorithm=algorithm) == digest
+    ):
         return destination
+    if offline:
+        fail(f"offline locked input is missing or mismatched: {url}: {destination}")
     temporary: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -119,20 +131,33 @@ def _download_locked_file(
                 timeout=60,
             ) as response:
                 shutil.copyfileobj(response, output)
-        actual = sha256_file(temporary)
+        actual = _locked_file_digest(temporary, algorithm=algorithm)
         if actual != digest:
-            fail(f"runtime download SHA256 mismatch: expected {digest}, received {actual}")
+            fail(
+                f"locked download {algorithm.upper()} mismatch: {url}: "
+                f"expected {digest}, received {actual}"
+            )
+        if size is not None and temporary.stat().st_size != size:
+            fail(f"locked download size mismatch: {url}: expected {size}")
         temporary.replace(destination)
         temporary = None
     except OSError as error:
-        fail(f"runtime download failed: {error}")
+        fail(f"locked download failed: {url}: {error}")
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
     return destination
 
 
-def _install_kern(lock: dict[str, Any]) -> str:
+def _locked_file_digest(path: Path, *, algorithm: str) -> str:
+    """Use the checksum algorithm declared for the original downloaded artifact."""
+    if algorithm == "sha256":
+        return sha256_file(path)
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, algorithm).hexdigest()
+
+
+def _install_kern(lock: dict[str, Any], *, offline: bool = False) -> str:
     """Install the pinned static Kern binary under the project cache."""
     if kern_available(lock):
         return str(_kern_path())
@@ -141,6 +166,7 @@ def _install_kern(lock: dict[str, Any]) -> str:
         kern_lock["archive_url"],
         kern_lock["archive_sha256"],
         ROOT / ".cache/downloads/kern/kern.tar.gz",
+        offline=offline,
     )
     destination = _kern_path()
     _ensure_project_directory(destination.parent)
@@ -298,7 +324,8 @@ def _tag_kern_image(kern: str, source: str, destination: str) -> None:
     """Apply one bounded provider tag operation."""
     try:
         result = subprocess.run(
-            [kern, "tag", source, destination],
+            # A flat image copy must retain ownership and set-id permissions.
+            ["unshare", "--map-auto", "--map-root-user", "--", kern, "tag", source, destination],
             cwd=ROOT,
             env=kern_environment(),
             capture_output=True,
@@ -342,8 +369,8 @@ def _publish_staged_kern_image(
         _remove_kern_images(kern, disposable & set(current))
 
 
-def _image_metadata(kern: str, image: str) -> tuple[str, str] | None:
-    """Read FPLinux's static recipe and generation through the Kern runtime."""
+def _image_metadata(kern: str, image: str) -> tuple[str, str, str] | None:
+    """Require the declared recipe, generation and freshly checked installed content."""
     try:
         result = subprocess.run(
             [
@@ -357,11 +384,14 @@ def _image_metadata(kern: str, image: str) -> tuple[str, str] | None:
                 "--read-only",
                 "--network",
                 "none",
-                "--no-uid-range",
                 "--quiet",
                 "--",
-                "cat",
-                "/etc/fplinux-image-state",
+                "sh",
+                "-ceu",
+                (
+                    "cat /etc/fplinux-image-state; "
+                    "python3 -B /usr/local/libexec/fplinux-image-content.py"
+                ),
             ],
             cwd=ROOT,
             env=kern_environment(),
@@ -373,14 +403,16 @@ def _image_metadata(kern: str, image: str) -> tuple[str, str] | None:
     except subprocess.TimeoutExpired:
         fail(f"Kern image lookup timed out after {_KERN_PROBE_TIMEOUT}s")
     lines = result.stdout.splitlines()
-    if result.returncode != 0 or len(lines) != 2:
+    if result.returncode != 0 or len(lines) != 4:
         return None
-    recipe, generation = lines
+    recipe, generation, content, observed_content = lines
     if _SHA256.fullmatch(recipe) is None:
         return None
     if _SHA256.fullmatch(generation) is None:
         return None
-    return recipe, generation
+    if _SHA256.fullmatch(content) is None or observed_content != content:
+        return None
+    return recipe, generation, content
 
 
 def image_generation(kern: str, image: str) -> str | None:
@@ -394,17 +426,17 @@ def current_image_state(
     image: str,
     image_recipe: str | None = None,
 ) -> ImageState | None:
-    """Read one valid current recipe and generation with a single Kern probe."""
+    """Read one valid recipe, generation and content identity with a single Kern probe."""
     metadata = _image_metadata(kern, image)
     if metadata is None:
         return None
     if image_recipe is None:
         image_recipe = container_image_recipe_digest()
-    recipe, generation = metadata
+    recipe, generation, content = metadata
     if recipe != image_recipe:
         return None
     try:
-        return ImageState(recipe, generation)
+        return ImageState(recipe, generation, content)
     except ImageStateError:
         return None
 
@@ -469,7 +501,9 @@ def _base_image_ready(kern: str, lock: dict[str, Any], image: str | None = None)
     return result.returncode == 0 and result.stdout == expected
 
 
-def _build_base_image(kern: str, reporter: RunReporter, lock: dict[str, Any]) -> None:
+def _build_base_image(
+    kern: str, reporter: RunReporter, lock: dict[str, Any], *, offline: bool = False
+) -> None:
     """Build one local Kern base from the exact official Alpine minirootfs archive."""
     oci = lock["oci"]
     image = container_base_image_reference(lock)
@@ -478,6 +512,7 @@ def _build_base_image(kern: str, reporter: RunReporter, lock: dict[str, Any]) ->
         oci["base_rootfs_url"],
         oci["base_rootfs_sha256"],
         ROOT / ".cache/downloads/kern/alpine-minirootfs.tar.gz",
+        offline=offline,
     )
     temporary_parent = _ensure_project_directory(ROOT / ".cache/kern")
     with tempfile.TemporaryDirectory(dir=temporary_parent, prefix="base-build-") as temporary:
@@ -557,9 +592,55 @@ def _kern_build_user_ready(kern: str, image: str) -> bool:
     return result.returncode == 0
 
 
+def _stage_container_context(context: Path, *, offline: bool) -> None:
+    """Stage the recipe and exact saved inputs without copying unrelated cache files."""
+    for relative in (
+        ".kernignore",
+        "Containerfile",
+        "scripts/fplinux_cli/image_content.py",
+        "package.json",
+        "package-lock.json",
+        "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch",
+    ):
+        source = ROOT / relative
+        if source.is_symlink() or not source.is_file():
+            fail(f"container image input is missing or invalid: {source}")
+        destination = context / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+    input_directory = context / "inputs"
+    input_directory.mkdir()
+    for item in environment_inputs(ROOT):
+        if item.purpose in {"container-base", "kern-runtime"}:
+            continue
+        expected = item.checksum or item.sha256
+        if expected is None:
+            fail(f"environment input has no declared checksum: {item.key}")
+        source = _download_locked_file(
+            item.url,
+            expected,
+            ROOT / ".cache" / item.destination,
+            offline=offline,
+            algorithm=item.algorithm,
+            size=item.size,
+        )
+        if item.purpose == "npm-package":
+            relative_input = Path("npm") / source.name
+        elif item.purpose == "container-source":
+            relative_input = Path("sources") / Path(item.destination).relative_to(
+                "downloads/environment"
+            )
+        else:
+            relative_input = Path(item.destination).relative_to("downloads/environment")
+        destination = input_directory / relative_input
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+
+
 def setup(
     *,
     force: bool = False,
+    offline: bool = False,
     reporter: RunReporter | None = None,
     lock: dict[str, Any] | None = None,
     image_recipe: str | None = None,
@@ -569,7 +650,7 @@ def setup(
         reporter = RunReporter.create("setup", target=None, verbose=False)
     if lock is None:
         lock = load_container_lock()
-    kern = _install_kern(lock)
+    kern = _install_kern(lock, offline=offline)
     _prune_kern_build_history(kern)
     current_recipe = container_image_recipe_digest(lock)
     if image_recipe is not None and image_recipe != current_recipe:
@@ -593,20 +674,10 @@ def setup(
         return state
 
     if not _base_image_ready(kern, lock):
-        _build_base_image(kern, reporter, lock)
+        _build_base_image(kern, reporter, lock, offline=offline)
 
     generation = secrets.token_hex(32)
     staging_image = _temporary_image_reference(image, "staging")
-    for relative in (
-        ".kernignore",
-        "Containerfile",
-        "package.json",
-        "package-lock.json",
-        "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch",
-    ):
-        source = ROOT / relative
-        if source.is_symlink() or not source.is_file():
-            fail(f"container image input is missing or invalid: {source}")
     command = [
         kern,
         "build",
@@ -617,24 +688,30 @@ def setup(
         f"FPLINUX_IMAGE_RECIPE={image_recipe}",
         "--build-arg",
         f"FPLINUX_IMAGE_GENERATION={generation}",
-        ".",
     ]
-    with reporter.stage("container-setup") as stage:
-        stage.run(
-            command,
-            cwd=ROOT,
-            env=kern_environment(),
-            timeout=_CONTAINER_SETUP_TIMEOUT,
-        )
+    command.append(".")
+    temporary_parent = _ensure_project_directory(ROOT / ".cache/kern")
+    with tempfile.TemporaryDirectory(dir=temporary_parent, prefix="image-build-") as temporary:
+        context = Path(temporary)
+        with reporter.stage("container-inputs"):
+            _stage_container_context(context, offline=offline)
+        with reporter.stage("container-setup") as stage:
+            stage.run(
+                command,
+                cwd=context,
+                env=kern_environment(),
+                timeout=_CONTAINER_SETUP_TIMEOUT,
+            )
     if container_image_recipe_digest(lock) != image_recipe:
         fail("container image inputs changed while setup was running")
-    if _image_metadata(kern, staging_image) != (image_recipe, generation):
+    metadata = _image_metadata(kern, staging_image)
+    if metadata is None or metadata[:2] != (image_recipe, generation):
         fail("container setup completed without publishing the exact requested image")
     _publish_staged_kern_image(
         kern,
         staging_image,
         image,
-        lambda candidate: _image_metadata(kern, candidate) == (image_recipe, generation),
+        lambda candidate: _image_metadata(kern, candidate) == metadata,
     )
     state = publish_current_image_state(kern, image, image_recipe)
     _discard_obsolete_kern_images(kern, lock, image_recipe)

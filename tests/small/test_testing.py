@@ -72,7 +72,11 @@ class SelectedTestRunTests(unittest.TestCase):
                     mock.patch.object(
                         testing,
                         "prepare_quality_image",
-                        return_value=("kern", "locked-image", ImageState("b" * 64, "c" * 64)),
+                        return_value=(
+                            "kern",
+                            "locked-image",
+                            ImageState("b" * 64, "c" * 64, "c" * 64),
+                        ),
                     ),
                     # Kern itself is outside this unit boundary; selection has real process tests.
                     mock.patch.object(

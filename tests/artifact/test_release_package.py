@@ -181,7 +181,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             "rootfs_receipt": {"recipe": "d" * 64, "sha256": "e" * 64},
             "boot_artifacts": {"required": []},
             "container_image_recipe": self.image_recipe,
-            "container_image_generation": "c" * 64,
+            "container_image_content": "c" * 64,
             "apk_signing_key": self.signing_key,
             "device_identity": "f" * 64,
             "files": {relative: file_record(bundle / relative) for relative in payloads},
@@ -240,7 +240,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             mock.patch.object(
                 image_states,
                 "load_image_state",
-                return_value=ImageState(self.image_recipe, "c" * 64),
+                return_value=ImageState(self.image_recipe, "c" * 64, "c" * 64),
             ),
         )
 
@@ -438,7 +438,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
                 "runnable": True,
             },
             "container_image_recipe": self.image_recipe,
-            "container_image_generation": "c" * 64,
+            "container_image_content": "c" * 64,
             "apk_signing_key": self.signing_key,
             "device_identity": "f" * 64,
             "files": {

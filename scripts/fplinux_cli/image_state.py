@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Persist the current exact Kern image generation for cache receipt lookup."""
+"""Persist operational generation and installed-content identity of a Kern image."""
 
 from __future__ import annotations
 
@@ -33,21 +33,24 @@ def _require_image_generation(value: object) -> str:
 
 @dataclass(frozen=True)
 class ImageState:
-    """The exact Kern image generation built for one static image recipe."""
+    """Operational generation and actual content built for one declared image recipe."""
 
     container_image_recipe: str
     image_generation: str
+    image_content: str
 
     def __post_init__(self) -> None:
         """Reject values that cannot identify an exact reusable image."""
         _require_digest(self.container_image_recipe, "container image recipe")
         _require_image_generation(self.image_generation)
+        _require_digest(self.image_content, "image content")
 
     def payload(self) -> dict[str, str]:
         """Return the complete, fixed state payload."""
         return {
             "container_image_recipe": self.container_image_recipe,
             "image_generation": self.image_generation,
+            "image_content": self.image_content,
         }
 
 
@@ -85,11 +88,13 @@ def _read_state(path: Path) -> ImageState | None:
         if not isinstance(value, dict) or set(value) != {
             "container_image_recipe",
             "image_generation",
+            "image_content",
         }:
             return None
         return ImageState(
             container_image_recipe=value["container_image_recipe"],
             image_generation=value["image_generation"],
+            image_content=value["image_content"],
         )
     except ImageStateError, OSError, ValueError:
         return None

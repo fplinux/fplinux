@@ -239,7 +239,7 @@ class BuilderPublicationTests(unittest.TestCase):
         self.environment = {
             "FPLINUX_WORKSPACE_DIGEST": "a" * 64,
             "FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE": "b" * 64,
-            "FPLINUX_CONTAINER_IMAGE_GENERATION": "c" * 64,
+            "FPLINUX_CONTAINER_IMAGE_CONTENT": "c" * 64,
         }
         self.root_patch = mock.patch.object(common, "ROOT", self.root)
         self.output_patch = mock.patch.object(inputs_build, "OUTPUT", self.output)
@@ -359,7 +359,7 @@ class BuilderPublicationTests(unittest.TestCase):
         self.assertIsNone(manifest["profile"])
         self.assertEqual(manifest["build_type"], "release")
         self.assertEqual(manifest["container_image_recipe"], "b" * 64)
-        self.assertEqual(manifest["container_image_generation"], "c" * 64)
+        self.assertEqual(manifest["container_image_content"], "c" * 64)
         self.assertEqual(manifest["apk_signing_key"], "7" * 64)
         self.assertEqual(manifest["rootfs_receipt"]["recipe"], self.rootfs_recipe)
         self.assertEqual(

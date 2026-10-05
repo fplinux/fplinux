@@ -41,16 +41,16 @@ def require_sha256(value: object, name: str) -> str:
 
 
 def container_image_environment() -> tuple[str, str]:
-    """Validate the static image recipe and exact generation supplied by the host."""
+    """Validate the declared recipe and actual installed content supplied by the host."""
     image_recipe = require_sha256(
         os.environ.get("FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE", ""),
         "container image recipe",
     )
-    generation = require_sha256(
-        os.environ.get("FPLINUX_CONTAINER_IMAGE_GENERATION", ""),
-        "container image generation",
+    content = require_sha256(
+        os.environ.get("FPLINUX_CONTAINER_IMAGE_CONTENT", ""),
+        "container image content",
     )
-    return image_recipe, generation
+    return image_recipe, content
 
 
 def root_source(relative: str) -> Path:

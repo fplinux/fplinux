@@ -17,7 +17,7 @@ from fplinux_cli.image_state import (
 
 def state() -> ImageState:
     """Return one stable state with distinct recipe and generation bytes."""
-    return ImageState("a" * 64, "b" * 64)
+    return ImageState("a" * 64, "b" * 64, "b" * 64)
 
 
 class ImageStateTests(unittest.TestCase):
@@ -60,7 +60,7 @@ class ImageStateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / ".cache"
             publish_image_state(cache, state())
-            replacement = ImageState("c" * 64, "d" * 64)
+            replacement = ImageState("c" * 64, "d" * 64, "d" * 64)
             publish_image_state(cache, replacement)
             self.assertIsNone(load_image_state(cache, "a" * 64))
             self.assertEqual(load_image_state(cache, "c" * 64), replacement)

@@ -28,6 +28,7 @@ from fplinux_cli.manifests.values import TARGET_NAME
 
 from .cachelock import cache_lock
 from .common import ROOT
+from .dependencies import create_dependencies, restore_dependencies, verify_dependencies
 from .device_data_prepare import prepare_device_data
 from .environment.kern import doctor, setup
 from .format import format_sources
@@ -50,12 +51,23 @@ if TYPE_CHECKING:
 
 
 _EXCLUSIVE_CACHE_COMMANDS = frozenset(
-    {"build", "check", "checksum", "device-data", "format", "nand", "probe-build", "setup", "test"}
+    {
+        "build",
+        "check",
+        "checksum",
+        "dependencies",
+        "device-data",
+        "format",
+        "nand",
+        "probe-build",
+        "setup",
+        "test",
+    }
 )
 _SHARED_CACHE_COMMANDS = frozenset({"console", "package", "run", "verify"})
 _CHECK_SCOPE_METAVAR = "{" + ",".join(CHECK_SCOPES) + "}"
 _PUBLIC_COMMAND_METAVAR = (
-    "{doctor,check,test,logs,inspect,format,setup,build,probe-build,checksum,package,prune,"
+    "{doctor,check,test,logs,inspect,format,setup,dependencies,build,probe-build,checksum,package,prune,"
     "run,console,nand,device-data,target,verify}"
 )
 
@@ -166,9 +178,12 @@ def _list_check_scopes(check_parser: argparse.ArgumentParser, scopes: list[str])
         print(scope)
 
 
-def _setup_action(*, force: bool) -> None:
+def _setup_action(*, force: bool, offline: bool) -> None:
     """Prepare the OCI environment while discarding its internal state object."""
-    setup(force=force)
+    if offline:
+        setup(force=force, offline=True)
+    else:
+        setup(force=force)
 
 
 def _nand_backup_action(
@@ -233,7 +248,20 @@ def _command_action(
                 jobs=jobs,
             )
     elif args.command == "setup":
-        action = partial(_setup_action, force=args.force)
+        action = partial(_setup_action, force=args.force, offline=args.offline)
+    elif args.command == "dependencies":
+        if args.dependencies_command == "create":
+            action = partial(
+                create_dependencies,
+                args.directory,
+                offline=args.offline,
+                sources=args.sources,
+                inputs_only=args.inputs_only,
+            )
+        elif args.dependencies_command == "verify":
+            action = partial(verify_dependencies, args.directory)
+        else:
+            action = partial(restore_dependencies, args.directory, inputs_only=args.inputs_only)
     elif args.command == "test":
         action = partial(
             run_tests, args.names, tier=args.tier, verbose=args.verbose, failfast=args.failfast
@@ -484,9 +512,54 @@ def main() -> None:
     )
     setup_parser = commands.add_parser("setup", help="build the pinned OCI environment")
     setup_parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="recreate the pinned environment from exact local inputs without network access",
+    )
+    setup_parser.add_argument(
         "--force",
         action="store_true",
         help="rebuild the pinned image even when the current recipe is ready",
+    )
+    dependencies_parser = commands.add_parser(
+        "dependencies", help="preserve exact external build inputs"
+    )
+    dependency_commands = dependencies_parser.add_subparsers(
+        dest="dependencies_command", required=True, metavar="{create,verify,restore}"
+    )
+    create_snapshot_parser = dependency_commands.add_parser(
+        "create", help="save a dependency snapshot outside .cache"
+    )
+    create_snapshot_parser.add_argument("directory", type=Path, metavar="DIRECTORY")
+    create_snapshot_parser.add_argument(
+        "--offline", action="store_true", help="require every exact input to be stored locally"
+    )
+    create_snapshot_parser.add_argument(
+        "--from",
+        dest="sources",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="find exact originals in an additional local file or directory",
+    )
+    create_snapshot_parser.add_argument(
+        "--inputs-only",
+        action="store_true",
+        help="save external inputs without exporting the current Kern image",
+    )
+    verify_snapshot_parser = dependency_commands.add_parser(
+        "verify", help="verify a snapshot's bytes and current declarations"
+    )
+    verify_snapshot_parser.add_argument("directory", type=Path, metavar="DIRECTORY")
+    restore_snapshot_parser = dependency_commands.add_parser(
+        "restore", help="restore exact inputs and the saved Kern image without downloading"
+    )
+    restore_snapshot_parser.add_argument("directory", type=Path, metavar="DIRECTORY")
+    restore_snapshot_parser.add_argument(
+        "--inputs-only",
+        action="store_true",
+        help="restore inputs for a fresh offline environment build",
     )
     commit_message_parser = commands.add_parser("_commit-msg")
     commit_message_parser.add_argument("message_file")

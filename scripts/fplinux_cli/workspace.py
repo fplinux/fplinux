@@ -34,6 +34,7 @@ STAGED_BUILD_SOURCES = (
     "Containerfile",
     "THIRD_PARTY_NOTICES.md",
     "container.lock.toml",
+    "environment.lock.toml",
     "alpine.lock.toml",
     "sources.lock.toml",
     "alpine/abuild.conf",

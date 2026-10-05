@@ -894,7 +894,7 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
                 "current_image_state",
                 new=self._guarded_boundary(
                     "inspect an image",
-                    ImageState("b" * 64, "c" * 64),
+                    ImageState("b" * 64, "c" * 64, "c" * 64),
                     exact_hit_guard=exact_hit_guard,
                 ),
             ),

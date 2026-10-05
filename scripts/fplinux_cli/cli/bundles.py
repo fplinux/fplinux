@@ -38,7 +38,7 @@ class BuildIdentity:
 
     workspace_digest: str
     container_image_recipe: str
-    container_image_generation: str
+    container_image_content: str
     apk_signing_key: str
 
 
@@ -116,7 +116,7 @@ def manifest_matches_identity(manifest: dict[str, Any], identity: BuildIdentity 
         for field, value in (
             ("workspace_digest", identity.workspace_digest),
             ("container_image_recipe", identity.container_image_recipe),
-            ("container_image_generation", identity.container_image_generation),
+            ("container_image_content", identity.container_image_content),
             ("apk_signing_key", identity.apk_signing_key),
         )
     )
@@ -188,6 +188,6 @@ def build_identity(
     return BuildIdentity(
         snapshot.recipe,
         image_state.container_image_recipe,
-        image_state.image_generation,
+        image_state.image_content,
         signing_key,
     )

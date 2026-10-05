@@ -121,6 +121,8 @@ def container_image_build_arguments(lock: dict[str, Any] | None = None) -> tuple
         "Containerfile",
         "--build-arg",
         f"BASE_IMAGE={container_base_image_reference(lock)}",
+        "--build-arg",
+        "FPLINUX_OFFLINE=1",
     )
 
 
@@ -136,8 +138,10 @@ def container_image_recipe_digest(lock: dict[str, Any] | None = None) -> str:
         [
             common.ROOT / ".kernignore",
             common.ROOT / "Containerfile",
+            common.ROOT / "scripts/fplinux_cli/image_content.py",
             common.ROOT / "package.json",
             common.ROOT / "package-lock.json",
+            common.ROOT / "environment.lock.toml",
             common.ROOT / "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch",
         ],
         prefix=(
@@ -149,11 +153,11 @@ def container_image_recipe_digest(lock: dict[str, Any] | None = None) -> str:
     )
 
 
-def container_runtime_recipe_digest(image_recipe: str, image_generation: str) -> str:
-    """Derive the exact runnable-image recipe from its static recipe and generation."""
+def container_artifact_recipe_digest(image_recipe: str, image_content: str) -> str:
+    """Bind artifact recipes to the declared recipe and actual installed image content."""
     digest = hashlib.sha256()
-    digest.update(b"fplinux.container-runtime-recipe\0")
-    for item in (image_recipe, image_generation):
+    digest.update(b"fplinux.container-artifact-recipe\0")
+    for item in (image_recipe, image_content):
         _length_prefixed(digest, bytes.fromhex(item))
     return digest.hexdigest()
 

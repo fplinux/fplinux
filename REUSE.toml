@@ -29,6 +29,7 @@ path = [
   "common/**",
   "container.lock.toml",
   "docs/**",
+  "environment.lock.toml",
   "fplinux",
   "include/**",
   "lib/**",

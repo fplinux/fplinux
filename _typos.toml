@@ -35,6 +35,8 @@ UMS9117 = "UMS9117"
 [default.extend-words]
 MIS = "MIS"
 THM = "THM"
+# XCB library and protocol names use this extension abbreviation.
+dbe = "dbe"
 fbcon = "fbcon"
 initramfs = "initramfs"
 microSD = "microSD"

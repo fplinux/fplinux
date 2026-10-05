@@ -19,7 +19,7 @@ from fplinux_cli.build import sources as sources_build
 from fplinux_cli.build import storage as storage_build
 from fplinux_cli.bundle_state import bundle_slot
 from fplinux_cli.common import fail
-from fplinux_cli.environment.images import container_runtime_recipe_digest
+from fplinux_cli.environment.images import container_artifact_recipe_digest
 from fplinux_cli.identity import BUILD_TYPES
 from fplinux_cli.manifests.paths import target_asset_lock_path
 from fplinux_cli.manifests.platforms import load_platform
@@ -40,9 +40,9 @@ def main() -> None:
         fail("jobs must be positive")
     process_build.lower_build_priority()
 
-    image_recipe, image_generation = inputs_build.container_image_environment()
-    os.environ["FPLINUX_CONTAINER_IMAGE_RECIPE"] = container_runtime_recipe_digest(
-        image_recipe, image_generation
+    image_recipe, image_content = inputs_build.container_image_environment()
+    os.environ["FPLINUX_CONTAINER_IMAGE_RECIPE"] = container_artifact_recipe_digest(
+        image_recipe, image_content
     )
 
     reporter = RunReporter.from_environment(f"build {args.target}", "build")

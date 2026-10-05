@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from fplinux_cli.environment.images import (
+    container_artifact_recipe_digest,
     container_image_recipe_digest,
-    container_runtime_recipe_digest,
 )
 from fplinux_cli.manifests.paths import discover_platforms, discover_profiles, discover_targets
 from fplinux_cli.manifests.platforms import load_platform
@@ -124,9 +124,9 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
         image_state = load_image_state(cache, image_source_recipe)
         if image_state is None:
             return None
-        image_recipe = container_runtime_recipe_digest(
+        image_recipe = container_artifact_recipe_digest(
             image_source_recipe,
-            image_state.image_generation,
+            image_state.image_content,
         )
         recipes: set[str] = set()
         for target in discover_targets():

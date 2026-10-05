@@ -77,6 +77,8 @@ class ContainerImageRecipeTests(unittest.TestCase):
             "Containerfile",
             "--build-arg",
             f"BASE_IMAGE=localhost/fplinux-alpine-base:3.24.1-{'e' * 64}",
+            "--build-arg",
+            "FPLINUX_OFFLINE=1",
         )
         self.assertEqual(first_arguments, expected_arguments)
         self.assertEqual(second_arguments, expected_arguments)
@@ -95,8 +97,8 @@ class ContainerImageRecipeTests(unittest.TestCase):
             f"localhost/fplinux-build:{'a' * 64}",
         )
 
-    def test_runtime_binary_and_generation_are_causal_image_inputs(self) -> None:
-        """Changing either pinned runtime bytes or the built generation invalidates reuse."""
+    def test_runtime_binary_and_content_are_causal_image_inputs(self) -> None:
+        """Changing pinned runtime bytes or installed content invalidates reuse."""
         lock = _container_lock()
         changed_runtime = _container_lock()
         changed_runtime["kern"] = {
@@ -113,8 +115,8 @@ class ContainerImageRecipeTests(unittest.TestCase):
                 runtime_changed = images.container_image_recipe_digest(changed_runtime)
         self.assertNotEqual(recipe, runtime_changed)
         self.assertNotEqual(
-            images.container_runtime_recipe_digest(recipe, "a" * 64),
-            images.container_runtime_recipe_digest(recipe, "b" * 64),
+            images.container_artifact_recipe_digest(recipe, "a" * 64),
+            images.container_artifact_recipe_digest(recipe, "b" * 64),
         )
 
     def test_host_terminal_patch_invalidates_image_but_target_aport_does_not(self) -> None:
@@ -146,6 +148,7 @@ class SetupLifecycleTests(unittest.TestCase):
                 mock.patch.object(kern, "ROOT", root),
                 mock.patch.object(output, "ROOT", root),
                 mock.patch.object(kern, "_install_kern", return_value="/cache/kern"),
+                mock.patch.object(kern, "environment_inputs", return_value=[]),
                 mock.patch.object(
                     kern,
                     "container_image_recipe_digest",
@@ -154,7 +157,7 @@ class SetupLifecycleTests(unittest.TestCase):
                 mock.patch.object(
                     kern,
                     "current_image_state",
-                    return_value=ImageState("a" * 64, "b" * 64),
+                    return_value=ImageState("a" * 64, "b" * 64, "b" * 64),
                 ),
                 mock.patch.object(kern, "_prune_kern_build_history"),
                 mock.patch.object(kern, "_discard_transient_kern_images"),
@@ -164,7 +167,7 @@ class SetupLifecycleTests(unittest.TestCase):
                 state = kern.setup(lock=lock)
             self.assertEqual(
                 state,
-                ImageState("a" * 64, "b" * 64),
+                ImageState("a" * 64, "b" * 64, "b" * 64),
             )
             self.assertEqual(load_image_state(root / ".cache", "a" * 64), state)
             metadata_paths = list((root / ".cache/logs/setup").glob("*/run.json"))
@@ -182,11 +185,21 @@ class SetupLifecycleTests(unittest.TestCase):
         stage_context.__enter__.return_value = stage
         reporter.stage.return_value = stage_context
         lock = _container_lock()
+        staged_recipe: dict[str, bytes] = {}
+
+        def collect_context(_command: list[str], *, cwd: Path, **_kwargs: object) -> None:
+            staged_recipe["Containerfile"] = (cwd / "Containerfile").read_bytes()
+            staged_recipe["package.json"] = (cwd / "package.json").read_bytes()
+            self.assertEqual(list((cwd / "inputs").iterdir()), [])
+            self.assertFalse((cwd / ".cache").exists())
+
+        stage.run.side_effect = collect_context
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             for relative in (
                 ".kernignore",
                 "Containerfile",
+                "scripts/fplinux_cli/image_content.py",
                 "package.json",
                 "package-lock.json",
                 "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch",
@@ -197,6 +210,7 @@ class SetupLifecycleTests(unittest.TestCase):
             with (
                 mock.patch.object(kern, "ROOT", root),
                 mock.patch.object(kern, "_install_kern", return_value="/cache/kern"),
+                mock.patch.object(kern, "environment_inputs", return_value=[]),
                 mock.patch.object(
                     kern,
                     "container_image_recipe_digest",
@@ -205,7 +219,7 @@ class SetupLifecycleTests(unittest.TestCase):
                 mock.patch.object(
                     kern,
                     "current_image_state",
-                    side_effect=(None, ImageState("a" * 64, "b" * 64)),
+                    side_effect=(None, ImageState("a" * 64, "b" * 64, "b" * 64)),
                 ),
                 mock.patch.object(kern, "_base_image_ready", return_value=True),
                 mock.patch.object(kern, "_prune_kern_build_history"),
@@ -214,7 +228,7 @@ class SetupLifecycleTests(unittest.TestCase):
                 mock.patch.object(
                     kern,
                     "_image_metadata",
-                    return_value=("a" * 64, "b" * 64),
+                    return_value=("a" * 64, "b" * 64, "b" * 64),
                 ),
                 mock.patch.object(kern, "_publish_staged_kern_image"),
                 mock.patch(
@@ -243,12 +257,15 @@ class SetupLifecycleTests(unittest.TestCase):
             build_arguments,
             {
                 f"BASE_IMAGE=localhost/fplinux-alpine-base:3.24.1-{'e' * 64}",
+                "FPLINUX_OFFLINE=1",
                 f"FPLINUX_IMAGE_RECIPE={'a' * 64}",
                 f"FPLINUX_IMAGE_GENERATION={'b' * 64}",
             },
         )
         self.assertEqual(command[-1], ".")
-        self.assertEqual(call.kwargs["cwd"], root)
+        self.assertEqual(staged_recipe["Containerfile"], b"Containerfile")
+        self.assertEqual(staged_recipe["package.json"], b"package.json")
+        self.assertFalse(call.kwargs["cwd"].exists())
         self.assertEqual(call.kwargs["timeout"], 2 * 60 * 60)
         self.assertEqual(call.kwargs["env"]["XDG_CACHE_HOME"], str(root / ".cache/kern/cache"))
         self.assertEqual(call.kwargs["env"]["XDG_DATA_HOME"], str(root / ".cache/kern/data"))
@@ -276,7 +293,7 @@ class SetupLifecycleTests(unittest.TestCase):
                 return_value=subprocess.CompletedProcess(
                     ["kern", "box"],
                     0,
-                    f"{'a' * 64}\n{generation}\n",
+                    f"{'a' * 64}\n{generation}\n{'b' * 64}\n{'b' * 64}\n",
                     "",
                 ),
             ),

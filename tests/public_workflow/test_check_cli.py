@@ -25,6 +25,7 @@ PUBLIC_COMMANDS = (
     "inspect",
     "format",
     "setup",
+    "dependencies",
     "build",
     "probe-build",
     "checksum",

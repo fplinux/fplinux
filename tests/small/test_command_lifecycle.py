@@ -65,7 +65,7 @@ class CommandLifecycleTests(unittest.TestCase):
         signing_key.write_bytes(b"test public signing key\n")
         self.signing_key = hashlib.sha256(signing_key.read_bytes()).hexdigest()
         self.snapshot = WorkspaceSnapshot((), "c" * 64)
-        publish_image_state(self.cache, ImageState("e" * 64, "a" * 64))
+        publish_image_state(self.cache, ImageState("e" * 64, "a" * 64, "a" * 64))
         self.bundle_path = self._create_generation("a" * 64)
         self.bundle = publish_current_bundle(self.output, "phone", self.bundle_path)
 
@@ -82,7 +82,7 @@ class CommandLifecycleTests(unittest.TestCase):
         return {
             "workspace_digest": self.snapshot.recipe,
             "container_image_recipe": "e" * 64,
-            "container_image_generation": "a" * 64,
+            "container_image_content": "a" * 64,
             "apk_signing_key": self.signing_key,
             "device_identity": "9" * 64,
             "rootfs_receipt": {"recipe": "f" * 64, "sha256": "0" * 64},
@@ -349,12 +349,12 @@ class CommandLifecycleTests(unittest.TestCase):
             mock.patch.object(
                 kern_env,
                 "current_image_state",
-                return_value=ImageState("e" * 64, "a" * 64),
+                return_value=ImageState("e" * 64, "a" * 64, "a" * 64),
             ),
             mock.patch.object(
                 kern_env,
                 "publish_current_image_state",
-                return_value=ImageState("e" * 64, "a" * 64),
+                return_value=ImageState("e" * 64, "a" * 64, "a" * 64),
             ),
             mock.patch.object(kern_env, "kern_environment", return_value={}),
             mock.patch.object(
@@ -408,12 +408,12 @@ class CommandLifecycleTests(unittest.TestCase):
             mock.patch.object(
                 kern_env,
                 "current_image_state",
-                return_value=ImageState("e" * 64, "a" * 64),
+                return_value=ImageState("e" * 64, "a" * 64, "a" * 64),
             ),
             mock.patch.object(
                 kern_env,
                 "publish_current_image_state",
-                return_value=ImageState("e" * 64, "a" * 64),
+                return_value=ImageState("e" * 64, "a" * 64, "a" * 64),
             ),
             mock.patch.object(kern_env, "kern_environment", return_value={}),
             mock.patch.object(
@@ -986,7 +986,7 @@ class CommandLifecycleTests(unittest.TestCase):
                 build_type="release",
                 log_environment={"FPLINUX_LOG_ROOT": "/logs"},
                 image_recipe="e" * 64,
-                image_generation="a" * 64,
+                image_content="a" * 64,
             )
 
         mounts = [command[index + 1] for index, value in enumerate(command) if value == "--volume"]
@@ -1012,7 +1012,7 @@ class CommandLifecycleTests(unittest.TestCase):
         self.assertEqual(command[command.index("--memory") + 1], "2g")
         self.assertFalse(any(mount.split(":", 2)[1] == "/cache" for mount in mounts))
         self.assertIn("FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE=" + "e" * 64, command)
-        self.assertIn("FPLINUX_CONTAINER_IMAGE_GENERATION=" + "a" * 64, command)
+        self.assertIn("FPLINUX_CONTAINER_IMAGE_CONTENT=" + "a" * 64, command)
         build = command[command.index("--") + 1 :]
         self.assertEqual(build[:3], ["python3", "-m", "fplinux_cli.build"])
         # The in-container parser accepts these options in any order; compare flag/value pairs.
@@ -1050,7 +1050,7 @@ class CommandLifecycleTests(unittest.TestCase):
             build_type="release",
             log_environment={"FPLINUX_LOG_ROOT": "/logs"},
             image_recipe="e" * 64,
-            image_generation="a" * 64,
+            image_content="a" * 64,
         )
 
         network = command.index("--network")
@@ -1106,7 +1106,7 @@ class ChecksumAportTests(unittest.TestCase):
             mock.patch.object(
                 kern_env,
                 "current_image_state",
-                return_value=ImageState("e" * 64, "a" * 64),
+                return_value=ImageState("e" * 64, "a" * 64, "a" * 64),
             ),
             mock.patch.object(kern_env, "kern_environment", return_value={}),
             mock.patch.object(output.Stage, "run", autospec=True, side_effect=container_run),

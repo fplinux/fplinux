@@ -14,7 +14,7 @@ from unittest import mock
 
 from fplinux_cli import alpine_state, common, firmware_inputs
 from fplinux_cli import prune as prune_module
-from fplinux_cli.environment.images import container_runtime_recipe_digest
+from fplinux_cli.environment.images import container_artifact_recipe_digest
 from fplinux_cli.image_state import ImageState, publish_image_state
 from fplinux_cli.prune import PruneSafetyError, apply_prune, plan_prune, prune
 
@@ -92,7 +92,7 @@ class PruneTests(unittest.TestCase):
             public_key = alpine_state.signing_public_key(cache)
             public_key.parent.mkdir(parents=True)
             public_key.write_bytes(b"public-key\n")
-            publish_image_state(cache, ImageState("a" * 64, "b" * 64))
+            publish_image_state(cache, ImageState("a" * 64, "b" * 64, "b" * 64))
             first_packages = ("package-a",)
             second_packages = ("package-a", "package-b")
             first_recipe = "1" * 64
@@ -200,7 +200,7 @@ class PruneTests(unittest.TestCase):
         """Never prune rootfs generations when their package-signing input is unknown."""
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / ".cache"
-            publish_image_state(cache, ImageState("a" * 64, "b" * 64))
+            publish_image_state(cache, ImageState("a" * 64, "b" * 64, "b" * 64))
             existing = cache / "rootfs" / ("1" * 64)
             existing.mkdir(parents=True)
             with (
@@ -234,7 +234,7 @@ class PruneTests(unittest.TestCase):
             public_key = alpine_state.signing_public_key(cache)
             public_key.parent.mkdir(parents=True)
             public_key.write_bytes(b"public-key\n")
-            publish_image_state(cache, ImageState("a" * 64, "b" * 64))
+            publish_image_state(cache, ImageState("a" * 64, "b" * 64, "b" * 64))
             existing = cache / "rootfs" / ("1" * 64)
             existing.mkdir(parents=True)
             generation = cache / "device-data/phone/generations/generation-test"
@@ -291,7 +291,7 @@ class PruneTests(unittest.TestCase):
             public_key = alpine_state.signing_public_key(cache)
             public_key.parent.mkdir(parents=True)
             public_key.write_bytes(b"public-key\n")
-            publish_image_state(cache, ImageState("a" * 64, "b" * 64))
+            publish_image_state(cache, ImageState("a" * 64, "b" * 64, "b" * 64))
             default_recipe = "3" * 64
             profile_recipe = "4" * 64
             for recipe in (default_recipe, profile_recipe):
@@ -388,7 +388,7 @@ class PruneTests(unittest.TestCase):
             public_key = alpine_state.signing_public_key(cache)
             public_key.parent.mkdir(parents=True)
             public_key.write_bytes(b"public-key\n")
-            publish_image_state(cache, ImageState("a" * 64, "b" * 64))
+            publish_image_state(cache, ImageState("a" * 64, "b" * 64, "b" * 64))
             current = "5" * 64
             stale = "6" * 64
             for recipe in (current, stale):
@@ -432,7 +432,7 @@ class PruneTests(unittest.TestCase):
             public_key = alpine_state.signing_public_key(cache)
             public_key.parent.mkdir(parents=True)
             public_key.write_bytes(b"public-key\n")
-            publish_image_state(cache, ImageState("a" * 64, "b" * 64))
+            publish_image_state(cache, ImageState("a" * 64, "b" * 64, "b" * 64))
             groups = {
                 "bluetooth": [
                     {"source": "bluetooth.bin", "destination": "chip/bluetooth.bin", "size": 9}
@@ -453,7 +453,7 @@ class PruneTests(unittest.TestCase):
                 (directory / filename).write_bytes(contents)
             (device_data / "current").write_text("generation-test\n", encoding="ascii")
             captured = firmware_inputs.capture_external_device_data("phone", groups, cache)
-            image_recipe = container_runtime_recipe_digest("a" * 64, "b" * 64)
+            image_recipe = container_artifact_recipe_digest("a" * 64, "b" * 64)
             signing_key = alpine_state.signing_key_identity(cache)
 
             def recipe_for(*selected_groups: str) -> str:
@@ -505,7 +505,7 @@ class PruneTests(unittest.TestCase):
             public_key = alpine_state.signing_public_key(cache)
             public_key.parent.mkdir(parents=True)
             public_key.write_bytes(b"public-key\n")
-            publish_image_state(cache, ImageState("a" * 64, "b" * 64))
+            publish_image_state(cache, ImageState("a" * 64, "b" * 64, "b" * 64))
             stale = cache / "rootfs" / ("6" * 64)
             stale.mkdir(parents=True)
             outside = Path(temporary) / "outside"
@@ -739,7 +739,7 @@ class PruneTests(unittest.TestCase):
             public_key = alpine_state.signing_public_key(cache)
             public_key.parent.mkdir(parents=True)
             public_key.write_bytes(b"public-key\n")
-            publish_image_state(cache, ImageState("a" * 64, "b" * 64))
+            publish_image_state(cache, ImageState("a" * 64, "b" * 64, "b" * 64))
             existing = cache / "rootfs" / ("2" * 64)
             existing.mkdir(parents=True)
 
