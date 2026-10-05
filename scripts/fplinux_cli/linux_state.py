@@ -21,7 +21,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
     from pathlib import Path
 
-MARKER_NAME = ".fplinux-recipe"
 RECEIPT_NAME = ".fplinux-prepared.json"
 BASE_NAME = ".fplinux-base"
 
@@ -200,11 +199,10 @@ def inspect_prepared_linux(
         recipe = _require_digest(expected.tree_recipe, "prepared Linux tree recipe")
         _require_digest(expected.linux_recipe, "selected Linux recipe")
         source = _require_directory(source, "prepared Linux tree")
-        marker = (source / MARKER_NAME).read_text()
         receipt = json.loads((source / RECEIPT_NAME).read_text())
     except LinuxStateError, OSError, ValueError:
         return None
-    if marker != f"{recipe}\n" or receipt != {"tree_recipe": recipe}:
+    if receipt != {"tree_recipe": recipe}:
         return None
     return expected
 
@@ -222,8 +220,7 @@ def require_prepared_linux(source: Path, expected: PreparedLinuxState) -> Prepar
 
 
 def invalidate_prepared_linux(source: Path) -> None:
-    """Remove successful preparation receipts before updating managed source files."""
-    (source / MARKER_NAME).unlink(missing_ok=True)
+    """Remove the successful preparation receipt before updating managed source files."""
     (source / RECEIPT_NAME).unlink(missing_ok=True)
 
 
@@ -231,7 +228,6 @@ def seal_prepared_linux(source: Path, state: PreparedLinuxState) -> PreparedLinu
     """Publish the aggregate receipt only after every managed file is complete."""
     _require_directory(source, "prepared Linux source")
     recipe = _require_digest(state.tree_recipe, "prepared Linux tree recipe")
-    replace_file_atomically(source / MARKER_NAME, f"{recipe}\n".encode(), 0o644, sync=False)
     replace_file_atomically(
         source / RECEIPT_NAME,
         canonical_json_bytes({"tree_recipe": recipe}),

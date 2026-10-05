@@ -4,10 +4,15 @@
 from __future__ import annotations
 
 import unittest
+from typing import TYPE_CHECKING
+from unittest import mock
 
 from fplinux_cli import common, linux_state
 
 from tests.fixtures.linux_source import LinuxSourceFixture
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class SharedLinuxTests(LinuxSourceFixture):
@@ -65,6 +70,32 @@ class SharedLinuxTests(LinuxSourceFixture):
         self.assertEqual(self.fetch.call_count, 1)
         with self.assertRaisesRegex(linux_state.LinuxStateError, "changed after preparation"):
             linux_state.require_prepared_linux(source, alpha_before)
+
+    def test_source_update_failure_leaves_consumers_invalid_until_reprepared(self) -> None:
+        """A filesystem-write failure cannot retain or publish a successful tree receipt."""
+        source, before = self.prepare("alpha")
+        (self.root / "targets/alpha/driver.c").write_text("int alpha = 2;\n")
+        write_changed_file = linux_state.write_changed_file
+
+        def fail_driver_write(path: Path, contents: bytes, mode: int) -> None:
+            self.assertIsNone(linux_state.inspect_prepared_linux(source, before))
+            if path == source / "drivers/alpha.c":
+                message = "controlled source write failure"
+                raise OSError(message)
+            write_changed_file(path, contents, mode)
+
+        with (
+            mock.patch.object(linux_state, "write_changed_file", side_effect=fail_driver_write),
+            self.assertRaisesRegex(OSError, "controlled source write failure"),
+        ):
+            self.prepare("alpha")
+        with self.assertRaisesRegex(linux_state.LinuxStateError, "changed after preparation"):
+            linux_state.require_prepared_linux(source, before)
+
+        _, after = self.prepare("alpha")
+        self.assertNotEqual(after.tree_recipe, before.tree_recipe)
+        self.assertEqual((source / "drivers/alpha.c").read_text(), "int alpha = 2;\n")
+        linux_state.require_prepared_linux(source, after)
 
     def test_two_platforms_share_source_and_another_base_uses_its_own_slot(self) -> None:
         """Source identity, not platform identity, chooses the complete Linux tree."""
