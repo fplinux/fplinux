@@ -202,6 +202,14 @@ source = "platforms/ums9117/linux/arch/arm/mach-ums9117/ums9117-nandc-ro.c"
 destination = "arch/arm/mach-ums9117/ums9117-nandc-ro.c"
 
 [[linux.copies]]
+source = "platforms/ums9117/linux/arch/arm/mach-ums9117/ums9117-nandc-feature.c"
+destination = "arch/arm/mach-ums9117/ums9117-nandc-feature.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/linux/arch/arm/mach-ums9117/ums9117-nandc-feature.h"
+destination = "arch/arm/mach-ums9117/ums9117-nandc-feature.h"
+
+[[linux.copies]]
 source = "platforms/ums9117/linux/bindings/memory-controllers/fplinux,ums9117-nandc-ro.yaml"
 destination = "Documentation/devicetree/bindings/memory-controllers/fplinux,ums9117-nandc-ro.yaml"
 

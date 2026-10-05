@@ -26,6 +26,7 @@ description: |
     C8 21  GD5F1GQ5RExxH  64
     C8 11  F50D1G41LB     64
     C2 90  MX35UF1G14AC   64
+    CD 61  F35UQA001G     64
 
   The device still opens for another ID, or for one that differs from
   fplinux,nand-id, but every read is refused before a page-read command. The
@@ -34,8 +35,9 @@ description: |
   OOB interpretation and registers no MTD, SPI, spi-mem, IRQ, ioctl, mmap or
   arbitrary-command endpoint. Reads are refused while feature B0 has OTP_EN
   (bit 6) set or feature C0 is nonzero. When B0 has ECC_EN (bit 4) set, only
-  that bit is cleared to disable internal ECC for raw reads; the original B0
-  value is then restored and read back before bytes reach userspace. No
+  that defined bit is cleared to disable internal ECC for raw reads. All
+  defined B0 bits are restored and checked before bytes reach userspace;
+  reserved bits may read differently. No
   array, OTP, A0 or block-lock programming is exposed. The controller and its
   owned platform state are also restored. Hardware is activated only for
   explicit opens and reads.
@@ -55,6 +57,7 @@ properties:
       - 0x000021c8
       - 0x000011c8
       - 0x000090c2
+      - 0x000061cd
     description:
       Expected READ ID value of the fitted chip, manufacturer in the least
       significant byte. When present, any other identified chip is refused.

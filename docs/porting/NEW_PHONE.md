@@ -234,7 +234,7 @@ list of supported chips.
 [Save a NAND backup](../guides/BUILDING.md#save-a-nand-backup) describes every
 field.
 
-FPLinux has read FM25LG01B and DS35M1GA chips on supported phones. The reader
+FPLinux has read FM25LG01B, DS35M1GA and F35UQA001G chips on supported phones. The reader
 also identifies other chips that no supported phone uses.
 
 ### The chip is not identified
@@ -253,7 +253,7 @@ markings on the flash chip.
 
 ### The chip is new to FPLinux
 
-When `chip` names a chip other than FM25LG01B or DS35M1GA, the reader
+When `chip` names a chip other than FM25LG01B, DS35M1GA or F35UQA001G, the reader
 identifies it and `nand backup` proceeds, but no FPLinux phone has used that
 chip before: its entry in the reader's list has not been checked against a
 real chip. Save the backup and state in the report that the chip is new.

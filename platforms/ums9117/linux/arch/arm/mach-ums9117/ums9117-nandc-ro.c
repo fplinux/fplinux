@@ -36,6 +36,8 @@
 #include <linux/uio.h>
 #include <linux/vmalloc.h>
 
+#include "ums9117-nandc-feature.h"
+
 #define UMS9117_NANDC_MMIO_BYTES 0x1000U
 #define UMS9117_NANDC_PIN_WINDOW_BYTES 0x0044U
 
@@ -178,6 +180,7 @@ struct ums9117_nandc_chip {
 	u16 pages_per_block;
 	u16 block_count;
 	u8 plane_count;
+	u8 feature_b0_defined_mask;
 };
 
 /*
@@ -196,6 +199,7 @@ static const struct ums9117_nandc_chip ums9117_nandc_chips[] = {
 		.pages_per_block = 64,
 		.block_count = 1024,
 		.plane_count = 1,
+		.feature_b0_defined_mask = 0xff,
 	},
 	/* Physical layout of the fitted INOI 240/244 chips. */
 	{
@@ -207,6 +211,7 @@ static const struct ums9117_nandc_chip ums9117_nandc_chips[] = {
 		.pages_per_block = 64,
 		.block_count = 1024,
 		.plane_count = 1,
+		.feature_b0_defined_mask = 0xff,
 	},
 	{
 		.name = "GD5F1GQ4RExxG",
@@ -217,6 +222,7 @@ static const struct ums9117_nandc_chip ums9117_nandc_chips[] = {
 		.pages_per_block = 64,
 		.block_count = 1024,
 		.plane_count = 1,
+		.feature_b0_defined_mask = 0xff,
 	},
 	{
 		.name = "GD5F1GQ5RExxG",
@@ -227,6 +233,7 @@ static const struct ums9117_nandc_chip ums9117_nandc_chips[] = {
 		.pages_per_block = 64,
 		.block_count = 1024,
 		.plane_count = 1,
+		.feature_b0_defined_mask = 0xff,
 	},
 	{
 		.name = "GD5F1GM7RExxG",
@@ -237,6 +244,7 @@ static const struct ums9117_nandc_chip ums9117_nandc_chips[] = {
 		.pages_per_block = 64,
 		.block_count = 1024,
 		.plane_count = 1,
+		.feature_b0_defined_mask = 0xff,
 	},
 	{
 		.name = "GD5F1GQ5RExxH",
@@ -247,6 +255,7 @@ static const struct ums9117_nandc_chip ums9117_nandc_chips[] = {
 		.pages_per_block = 64,
 		.block_count = 1024,
 		.plane_count = 1,
+		.feature_b0_defined_mask = 0xff,
 	},
 	{
 		.name = "F50D1G41LB",
@@ -257,6 +266,7 @@ static const struct ums9117_nandc_chip ums9117_nandc_chips[] = {
 		.pages_per_block = 64,
 		.block_count = 1024,
 		.plane_count = 1,
+		.feature_b0_defined_mask = 0xff,
 	},
 	{
 		.name = "MX35UF1G14AC",
@@ -267,6 +277,18 @@ static const struct ums9117_nandc_chip ums9117_nandc_chips[] = {
 		.pages_per_block = 64,
 		.block_count = 1024,
 		.plane_count = 1,
+		.feature_b0_defined_mask = 0xff,
+	},
+	{
+		.name = "F35UQA001G",
+		.manufacturer_id = 0xcd,
+		.device_id = 0x61,
+		.page_main_bytes = 2048,
+		.oob_bytes = 64,
+		.pages_per_block = 64,
+		.block_count = 1024,
+		.plane_count = 1,
+		.feature_b0_defined_mask = 0xd7,
 	},
 };
 
@@ -767,15 +789,16 @@ ums9117_nandc_execute_fixed(struct ums9117_nandc *nandc,
 	case UMS9117_NANDC_FIXED_RESTORE_ECC:
 		/*
 		 * Only the volatile ECC_EN bit of this session's B0 value is
-		 * owned: clear it alone, then write back the exact value read.
+		 * owned. Preserve every other defined bit and write reserved
+		 * bits as zero.
 		 */
 		if (!nandc->chip || !nandc->features_valid ||
 		    !ums9117_nandc_b0_has_owned_ecc(original_b0))
 			return -EOPNOTSUPP;
-		set_feature_b0[2] = original_b0;
+		set_feature_b0[2] = ums9117_nandc_b0_defined(
+			original_b0, nandc->chip->feature_b0_defined_mask);
 		if (operation == UMS9117_NANDC_FIXED_DISABLE_ECC)
-			set_feature_b0[2] = original_b0 &
-					    ~UMS9117_NANDC_FEATURE_B0_ECC_EN;
+			set_feature_b0[2] &= ~UMS9117_NANDC_FEATURE_B0_ECC_EN;
 		instructions = set_feature_b0;
 		instruction_count = ARRAY_SIZE(set_feature_b0);
 		break;
@@ -796,6 +819,7 @@ static int ums9117_nandc_prepare_raw_mode(struct ums9117_nandc *nandc)
 {
 	void __iomem *regs = nandc->regs[UMS9117_NANDC_RES_NANDC];
 	u32 original_b0 = nandc->feature_raw[1];
+	u8 defined_mask = nandc->chip->feature_b0_defined_mask;
 	int ret;
 
 	if (original_b0 & UMS9117_NANDC_FEATURE_B0_ECC_EN) {
@@ -811,8 +835,10 @@ static int ums9117_nandc_prepare_raw_mode(struct ums9117_nandc *nandc)
 		if (ret)
 			return ret;
 		nandc->raw_feature_b0 = readl(regs + UMS9117_NANDC_SPI_FEATURE);
-		if (nandc->raw_feature_b0 !=
-		    (original_b0 & ~UMS9117_NANDC_FEATURE_B0_ECC_EN))
+		if (!ums9117_nandc_b0_matches(
+			    nandc->raw_feature_b0,
+			    original_b0 & ~UMS9117_NANDC_FEATURE_B0_ECC_EN,
+			    defined_mask))
 			return -EUCLEAN;
 	}
 	nandc->read_ecc_disabled = true;
@@ -835,7 +861,9 @@ static int ums9117_nandc_restore_raw_mode(struct ums9117_nandc *nandc)
 	if (!ret) {
 		nandc->restored_feature_b0 =
 			readl(regs + UMS9117_NANDC_SPI_FEATURE);
-		if (nandc->restored_feature_b0 != nandc->feature_raw[1])
+		if (!ums9117_nandc_b0_matches(
+			    nandc->restored_feature_b0, nandc->feature_raw[1],
+			    nandc->chip->feature_b0_defined_mask))
 			ret = -EUCLEAN;
 	}
 	if (!ret) {
