@@ -9,8 +9,7 @@ title: Guarded SC2720 power-off on UMS9117
 maintainers:
   - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
 
-description:
-  Power-off through the shared UMS9117 ADI provider. The final SC2720
+description: Power-off through the shared UMS9117 ADI provider. The final SC2720
   sequence is refused while the charger input is active. Holding
   the physical EIC1 power key on the referenced keypad for five seconds
   requests an orderly userspace shutdown, regardless of its input keycode;
@@ -22,8 +21,7 @@ properties:
 
   fplinux,keypad:
     $ref: /schemas/types.yaml#/definitions/phandle
-    description:
-      Physical keypad whose EIC1 power key can request orderly shutdown
+    description: Physical keypad whose EIC1 power key can request orderly shutdown
 
 required:
   - compatible

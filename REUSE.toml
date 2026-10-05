@@ -15,6 +15,7 @@ path = [
   ".markdownlint-cli2.jsonc",
   ".prettierignore",
   ".prettierrc.json",
+  ".taplo.toml",
   ".vale.ini",
   "Containerfile",
   "LICENSE",

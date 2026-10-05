@@ -32,5 +32,6 @@
 &usb {
 	compatible = "fplinux,ums9117-musb-inherited";
 	dr_mode = "peripheral";
+
 	status = "okay";
 };

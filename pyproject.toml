@@ -31,7 +31,7 @@ ignore = [
 line-ending = "lf"
 
 [tool.mypy]
-cache_dir = "/tmp/mypy"
-mypy_path = "scripts"
 python_version = "3.14"
 strict = true
+mypy_path = "scripts"
+cache_dir = "/tmp/mypy"

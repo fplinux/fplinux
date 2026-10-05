@@ -115,16 +115,22 @@ The command accepts one or more normalized repository-relative file paths. It
 does not recurse into directories or provide a whole-checkout mode. Tracked and
 non-ignored untracked project sources are accepted.
 
-Formatting uses the same pinned tools and classification as the quality gate:
+Formatting and checking calculate the same canonical bytes with the pinned tools:
 
 - C and headers: `clang-format`;
-- Python: `ruff format`;
-- Markdown, JSON, JSONC, `commitlint.config.mjs` and the uppercase keypad app
-  JSON manifest: Prettier;
-- TOML: Taplo;
+- Python: Ruff's import-order fix and formatter;
+- Markdown, JSON, JSONC, YAML and maintained JavaScript configurations: Prettier;
+- TOML: field ordering followed by Taplo;
+- Devicetree sources: bounded property ordering with values, includes and node
+  order preserved;
+- APKBUILD, Kconfig, Makefile, INI, EditorConfig and assembly: safe whitespace
+  normalization with declarations and execution order preserved;
 - POSIX and Bash scripts recognized by their shebang, plus the POSIX sourced
   configuration `alpine/abuild.conf`: `shfmt`.
 
+Supported `.in` templates use their rendered format's rules. Field and section
+order, sequence preservation and whitespace limits are defined by the
+[source-format contract](../reference/style/FORMATS.md).
 The npm-owned `package-lock.json` is excluded from formatting.
 
 Declared Linux patches are also accepted. Their affected C/H regions are
@@ -135,10 +141,9 @@ non-C contents without claiming to format Kconfig, Makefile or Devicetree syntax
 Patch inputs require the pinned Linux source archive; it is downloaded when
 missing. Other patch series are not accepted by this formatter.
 
-Files without a project formatter, including standalone Devicetree sources and
-bindings, Kconfig, Makefiles, APKBUILDs, Containerfiles and plain text, are
-rejected instead of being passed to a guessed tool. The checkout is never
-mounted writable in the container. All selected files are formatted in a
+Files without a project formatter, including Containerfiles and ordinary plain
+text, are rejected. The checkout is never mounted writable in the container.
+All selected files are formatted in a
 private projection. Only after every formatter succeeds and the checkout is
 confirmed unchanged is each changed source file replaced atomically.
 

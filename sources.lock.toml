@@ -19,9 +19,9 @@ archive_sha256 = "aa67343c2458d9dd177700e257f2ec249ea960eb98c514dde4963fcc988a0c
 license = "Unlicense"
 
 [fpdoom_host.files]
-makefile_sha256 = "451a96e66bfb3ccfd9808cb1385c0844cff00c2470c8ab2a170857f7f095bf5a"
-libc_server_c_sha256 = "4a0dc26108689b108701e3300835212c1933a1a710a5b1a6e6d24bd636c1b74b"
 cmd_def_h_sha256 = "9ccf3115cfb7a92e53165baa0d8ad350c616b74b5d6d8e718cd66e583ec80592"
+libc_server_c_sha256 = "4a0dc26108689b108701e3300835212c1933a1a710a5b1a6e6d24bd636c1b74b"
+makefile_sha256 = "451a96e66bfb3ccfd9808cb1385c0844cff00c2470c8ab2a170857f7f095bf5a"
 
 [spreadtrum_flash]
 repository = "https://github.com/ilyakurdyukov/spreadtrum_flash"
@@ -31,8 +31,8 @@ archive_sha256 = "d3012698aa785a5df3ef9cb9b53e889f264b7dc80d4f92b25fe35a99840226
 license = "Unlicense"
 
 [spreadtrum_flash.files]
-makefile_sha256 = "8f1c677247a27f119c90c67748f9106a5b3f38be5c1f18e50ade075d59ac215f"
-spd_dump_c_sha256 = "120ebb3d2d35bdf1fbd3cef3ca96fece12abc8f421ceaa57f8751aa3454cab88"
-spd_cmd_h_sha256 = "3784fee2ce9e4016bfd939049d0e8d8da9d9890c4dcc3f00300561eb120f1b1f"
-fphelper_t117_makefile_sha256 = "ef099717f435076b55d7ea07033fe477a3db850c961606c826719d63b4a1f69c"
 fphelper_t117_main_c_sha256 = "7ab25019400f736bc8b5dad5fd9e05b5b6dda18b1ee654085da2cf3d38fad5b7"
+fphelper_t117_makefile_sha256 = "ef099717f435076b55d7ea07033fe477a3db850c961606c826719d63b4a1f69c"
+makefile_sha256 = "8f1c677247a27f119c90c67748f9106a5b3f38be5c1f18e50ade075d59ac215f"
+spd_cmd_h_sha256 = "3784fee2ce9e4016bfd939049d0e8d8da9d9890c4dcc3f00300561eb120f1b1f"
+spd_dump_c_sha256 = "120ebb3d2d35bdf1fbd3cef3ca96fece12abc8f421ceaa57f8751aa3454cab88"

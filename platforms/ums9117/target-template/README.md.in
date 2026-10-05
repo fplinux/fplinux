@@ -2,12 +2,12 @@
 
 ## Identity
 
-| Field | Value |
-| --- | --- |
-| Target | `@TARGET@` |
-| Device | @DEVICE@ |
+| Field    | Value                                               |
+| -------- | --------------------------------------------------- |
+| Target   | `@TARGET@`                                          |
+| Device   | @DEVICE@                                            |
 | Platform | [Unisoc UMS9117](../../platforms/ums9117/README.md) |
-| Boot | USB-loaded RAM bootstrap; initramfs root |
+| Boot     | USB-loaded RAM bootstrap; initramfs root            |
 
 ## Status
 
@@ -20,56 +20,56 @@ Status terms and limits shared by every phone are defined in the
 
 ## Features
 
-| Feature | Hardware | FPLinux | This phone |
-| --- | --- | --- | --- |
-| RAM boot | N/A | Unknown | — |
-| Persistent boot | N/A | Unknown | — |
-| [Local console](../../docs/features/LOCAL_CONSOLE.md) | Unknown | Unknown | — |
-| [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md) | Unknown | Unknown | — |
-| [Keypad backlight](../../docs/features/KEYPAD_BACKLIGHT.md) | Unknown | Unknown | — |
-| [USB networking](../../docs/features/USB_NETWORKING.md) | Unknown | Unknown | — |
-| [SSH access](../../docs/features/SSH.md) | N/A | Unknown | — |
-| [File transfer](../../docs/features/FILE_TRANSFER.md) | N/A | Unknown | — |
-| [Host keyboard bridge](../../docs/features/HOST_KEYBOARD.md) | N/A | Unknown | — |
-| [CPU clock reporting](../../docs/features/CPU_CLOCK.md) | N/A | Unknown | — |
-| [Manual CPU frequency selection](../../docs/features/CPU_CLOCK.md) | N/A | Unknown | — |
-| [AP DMAengine](../../platforms/ums9117/README.md#memory-copy-dma) | Unknown | Unknown | — |
-| [Image rotation](../../docs/apps/ROTATE.md) | Unknown | Unknown | — |
-| [JPEG codec and scaling](../../docs/apps/JPEG.md) | Unknown | Unknown | — |
-| [Native image presentation](../../docs/apps/PRESENT.md) | Unknown | Unknown | — |
-| USB host mode | Unknown | Unknown | — |
-| [Removable storage](../../docs/features/MICROSD.md) | Unknown | Unknown | — |
-| [Removable system root](../../docs/guides/MICROSD_ROOT.md) | Unknown | Unknown | — |
-| Internal phone storage | Unknown | Unknown | — |
-| [Headphone audio](../../docs/features/HEADPHONE_AUDIO.md) | Unknown | Unknown | — |
-| [Speaker audio](../../docs/features/SPEAKER_AUDIO.md) | Unknown | Unknown | — |
-| [Phone microphone](../../docs/features/MICROPHONE_AUDIO.md) | Unknown | Unknown | — |
-| [FM radio](../../docs/features/FM_RADIO.md) | Unknown | Unknown | — |
-| Modem and mobile service | Unknown | Unknown | — |
-| [Bluetooth](../../docs/features/BLUETOOTH.md) | Unknown | Unknown | — |
-| Wi-Fi | Unknown | Unknown | — |
-| Camera | Unknown | Unknown | — |
-| [Charger status](../../docs/features/CHARGER_STATUS.md) | Unknown | Unknown | — |
-| [Battery telemetry](../../docs/features/BATTERY_TELEMETRY.md) | Unknown | Unknown | — |
-| [SoC temperature](../../docs/features/SOC_TEMPERATURE.md) | Unknown | Unknown | — |
-| [Auxiliary ADC](../../docs/features/AUXADC.md) | Unknown | Unknown | — |
-| [Real-time clock](../../docs/features/RTC.md) | Unknown | Unknown | — |
-| Other battery functions | Unknown | Unknown | — |
-| [Vibration](../../docs/features/VIBRATION.md) | Unknown | Unknown | — |
-| Indicator LEDs | Unknown | Unknown | — |
-| [Power-off](../../docs/features/POWER_OFF.md) | N/A | Unknown | — |
-| [Suspend](../../docs/features/SUSPEND.md) | N/A | Unknown | — |
-| Reboot | N/A | Unknown | — |
+| Feature                                                            | Hardware | FPLinux | This phone |
+| ------------------------------------------------------------------ | -------- | ------- | ---------- |
+| RAM boot                                                           | N/A      | Unknown | —          |
+| Persistent boot                                                    | N/A      | Unknown | —          |
+| [Local console](../../docs/features/LOCAL_CONSOLE.md)              | Unknown  | Unknown | —          |
+| [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)          | Unknown  | Unknown | —          |
+| [Keypad backlight](../../docs/features/KEYPAD_BACKLIGHT.md)        | Unknown  | Unknown | —          |
+| [USB networking](../../docs/features/USB_NETWORKING.md)            | Unknown  | Unknown | —          |
+| [SSH access](../../docs/features/SSH.md)                           | N/A      | Unknown | —          |
+| [File transfer](../../docs/features/FILE_TRANSFER.md)              | N/A      | Unknown | —          |
+| [Host keyboard bridge](../../docs/features/HOST_KEYBOARD.md)       | N/A      | Unknown | —          |
+| [CPU clock reporting](../../docs/features/CPU_CLOCK.md)            | N/A      | Unknown | —          |
+| [Manual CPU frequency selection](../../docs/features/CPU_CLOCK.md) | N/A      | Unknown | —          |
+| [AP DMAengine](../../platforms/ums9117/README.md#memory-copy-dma)  | Unknown  | Unknown | —          |
+| [Image rotation](../../docs/apps/ROTATE.md)                        | Unknown  | Unknown | —          |
+| [JPEG codec and scaling](../../docs/apps/JPEG.md)                  | Unknown  | Unknown | —          |
+| [Native image presentation](../../docs/apps/PRESENT.md)            | Unknown  | Unknown | —          |
+| USB host mode                                                      | Unknown  | Unknown | —          |
+| [Removable storage](../../docs/features/MICROSD.md)                | Unknown  | Unknown | —          |
+| [Removable system root](../../docs/guides/MICROSD_ROOT.md)         | Unknown  | Unknown | —          |
+| Internal phone storage                                             | Unknown  | Unknown | —          |
+| [Headphone audio](../../docs/features/HEADPHONE_AUDIO.md)          | Unknown  | Unknown | —          |
+| [Speaker audio](../../docs/features/SPEAKER_AUDIO.md)              | Unknown  | Unknown | —          |
+| [Phone microphone](../../docs/features/MICROPHONE_AUDIO.md)        | Unknown  | Unknown | —          |
+| [FM radio](../../docs/features/FM_RADIO.md)                        | Unknown  | Unknown | —          |
+| Modem and mobile service                                           | Unknown  | Unknown | —          |
+| [Bluetooth](../../docs/features/BLUETOOTH.md)                      | Unknown  | Unknown | —          |
+| Wi-Fi                                                              | Unknown  | Unknown | —          |
+| Camera                                                             | Unknown  | Unknown | —          |
+| [Charger status](../../docs/features/CHARGER_STATUS.md)            | Unknown  | Unknown | —          |
+| [Battery telemetry](../../docs/features/BATTERY_TELEMETRY.md)      | Unknown  | Unknown | —          |
+| [SoC temperature](../../docs/features/SOC_TEMPERATURE.md)          | Unknown  | Unknown | —          |
+| [Auxiliary ADC](../../docs/features/AUXADC.md)                     | Unknown  | Unknown | —          |
+| [Real-time clock](../../docs/features/RTC.md)                      | Unknown  | Unknown | —          |
+| Other battery functions                                            | Unknown  | Unknown | —          |
+| [Vibration](../../docs/features/VIBRATION.md)                      | Unknown  | Unknown | —          |
+| Indicator LEDs                                                     | Unknown  | Unknown | —          |
+| [Power-off](../../docs/features/POWER_OFF.md)                      | N/A      | Unknown | —          |
+| [Suspend](../../docs/features/SUSPEND.md)                          | N/A      | Unknown | —          |
+| Reboot                                                             | N/A      | Unknown | —          |
 
 ## Applications
 
-| Application | FPLinux | This phone |
-| --- | --- | --- |
-| [FPLinux: ARMADA](../../docs/apps/SHOWCASE.md) | Unknown | — |
-| [TyrQuake](../../docs/apps/TYRQUAKE.md) | Unknown | — |
-| [Image rotation](../../docs/apps/ROTATE.md) | Unknown | — |
-| [JPEG codec and scaling](../../docs/apps/JPEG.md) | Unknown | — |
-| [Native image presentation](../../docs/apps/PRESENT.md) | Unknown | — |
+| Application                                             | FPLinux | This phone |
+| ------------------------------------------------------- | ------- | ---------- |
+| [FPLinux: ARMADA](../../docs/apps/SHOWCASE.md)          | Unknown | —          |
+| [TyrQuake](../../docs/apps/TYRQUAKE.md)                 | Unknown | —          |
+| [Image rotation](../../docs/apps/ROTATE.md)             | Unknown | —          |
+| [JPEG codec and scaling](../../docs/apps/JPEG.md)       | Unknown | —          |
+| [Native image presentation](../../docs/apps/PRESENT.md) | Unknown | —          |
 
 ## Load into RAM
 

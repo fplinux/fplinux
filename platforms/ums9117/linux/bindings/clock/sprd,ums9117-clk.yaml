@@ -21,40 +21,6 @@ description: |
   inherited source. The clock indices are defined in
   dt-bindings/clock/sprd,ums9117-clk.h.
 
-properties:
-  compatible:
-    enum:
-      - sprd,ums9117-ap-clk
-      - sprd,ums9117-ap-i2c0-clk
-      - sprd,ums9117-aon-sensor-clk
-      - sprd,ums9117-aonapb-gate
-      - sprd,ums9117-apapb-gate
-      - sprd,ums9117-apahb-gate
-
-  reg:
-    maxItems: 1
-
-  sprd,syscon:
-    $ref: /schemas/types.yaml#/definitions/phandle
-    description: Phandle to the syscon containing the gate registers.
-
-  sprd,aon-apb:
-    $ref: /schemas/types.yaml#/definitions/phandle
-    description: Phandle to the always-on APB syscon containing the sensor gate.
-
-  clocks:
-    maxItems: 1
-
-  clock-names:
-    const: source
-
-  '#clock-cells':
-    const: 1
-
-required:
-  - compatible
-  - '#clock-cells'
-
 allOf:
   - if:
       properties:
@@ -88,6 +54,40 @@ allOf:
         sprd,aon-apb: false
         clocks: false
         clock-names: false
+
+properties:
+  compatible:
+    enum:
+      - sprd,ums9117-ap-clk
+      - sprd,ums9117-ap-i2c0-clk
+      - sprd,ums9117-aon-sensor-clk
+      - sprd,ums9117-aonapb-gate
+      - sprd,ums9117-apapb-gate
+      - sprd,ums9117-apahb-gate
+
+  reg:
+    maxItems: 1
+
+  sprd,syscon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: Phandle to the syscon containing the gate registers.
+
+  sprd,aon-apb:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: Phandle to the always-on APB syscon containing the sensor gate.
+
+  clocks:
+    maxItems: 1
+
+  clock-names:
+    const: source
+
+  "#clock-cells":
+    const: 1
+
+required:
+  - compatible
+  - "#clock-cells"
 
 additionalProperties: false
 

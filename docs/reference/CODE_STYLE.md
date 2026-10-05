@@ -89,6 +89,8 @@ behavior and links to the canonical owner of a workflow instead of copying it.
 - [Python](style/PYTHON.md) covers the host CLI, build tooling and Python tests.
 - [Shell](style/SHELL.md) covers POSIX, Bash and OpenRC scripts, plus the
   separate Alpine `APKBUILD` boundary.
+- [Source formats](style/FORMATS.md) defines canonical document order and the
+  boundaries that preserve meaningful sequences and template values.
 
 Formatting is necessary but not sufficient. A formatted host compile does not
 establish an ARM, musl, kernel, bootstrap, package or physical-device result.

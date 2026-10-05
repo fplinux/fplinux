@@ -19,10 +19,10 @@ memory = { base = 0x80200000, size = 0x03c00000 }
 dtb = "%(target)s.dtb"
 debug_dtb = "%(target)s.dtb"
 patches = []
+forbidden_dtb_markers = ["forbidden"]
+forbidden_config = ["CONFIG_FORBIDDEN=y"]
 copies = []
 appends = []
-forbidden_config = ["CONFIG_FORBIDDEN=y"]
-forbidden_dtb_markers = ["forbidden"]
 
 [bootstrap]
 image = "bootstrap.bin"
@@ -33,9 +33,9 @@ record_prefix = "DEMO"
 [adapter]
 spi_mode = 0
 lcd_id = 0
-exec_distance = 0
 backlight_channels = "mono"
 backlight_level = 0
+exec_distance = 0
 session_name = "%(target)s"
 boot_instructions = "Power off and connect."
 

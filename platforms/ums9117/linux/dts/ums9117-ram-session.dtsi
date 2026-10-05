@@ -17,16 +17,16 @@
 / {
 	fplinux-session {
 		compatible = "fplinux,ram-session";
+		fplinux,session-id = [
+			c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3
+			c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3
+		];
 		fplinux,ssh-client-key = [
 			b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2
 			b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2
 			b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2
 			b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2 b2
 			b2 b2 b2 b2
-		];
-		fplinux,session-id = [
-			c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3
-			c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3 c3
 		];
 		fplinux,usb-session = [
 			d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4 d4

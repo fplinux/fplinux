@@ -19,9 +19,9 @@
 	};
 
 	reserved-memory {
+		ranges;
 		#address-cells = <1>;
 		#size-cells = <1>;
-		ranges;
 
 		framebuffer@83f00000 {
 			reg = <0x83f00000 0x00100000>;
@@ -34,8 +34,8 @@
 			compatible = "pinctrl-single";
 			reg = <0x402a01e8 0xc>;
 			#pinctrl-cells = <1>;
-			pinctrl-single,register-width = <32>;
 			pinctrl-single,function-mask = <0x30>;
+			pinctrl-single,register-width = <32>;
 
 			camera_id_mux_pins: camera-pins {
 				pinctrl-single,pins = <0x0 0x0 0x4 0x30 0x8 0x30>;
@@ -46,8 +46,8 @@
 			compatible = "pinctrl-single";
 			reg = <0x402a01f4 0x4>;
 			#pinctrl-cells = <1>;
-			pinctrl-single,register-width = <32>;
 			pinctrl-single,function-mask = <0x30>;
+			pinctrl-single,register-width = <32>;
 
 			camera_front_mux_pins: camera-pins {
 				pinctrl-single,pins = <0x0 0x30>;
@@ -67,23 +67,22 @@
 			      <0x402a04b0 0x0000001c>,
 			      <0x402a01f8 0x00000028>,
 			      <0x402a05f8 0x00000028>;
+			interrupt-names = "lcdc-done";
+			interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL_HIGH>;
+			memory-region = <&codec_dma>;
 			reg-names = "lcdc", "lcm", "lcm-command", "lcm-data",
 				    "ap-ahb-gate-set", "ap-ahb-reset-set",
 				    "ap-ahb-reset-clear", "pinmux", "pinconf",
 				    "pinmux-data", "pinconf-data";
-			interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL_HIGH>;
-			interrupt-names = "lcdc-done";
 			sprd,aon-apb = <&aon_apb>;
-			sprd,pmic = <&sc2720_pmic>;
-			memory-region = <&codec_dma>;
 			/* INOI 240 MCU timing at the 128 MHz AHB clock. */
 			sprd,dbi-timing-ns = <50 55 110 20 70 35>;
-			/* LCM control pins. */
-			sprd,pinmux-offsets = <
-				0x000 0x004 0x008 0x00c 0x010 0x014 0x018
+			sprd,pinconf-data-offsets = <
+				0x00 0x04 0x08 0x0c 0x10 0x14 0x18 0x1c 0x20 0x24
 			>;
-			sprd,pinmux-values = <
-				0 0 0x10 0x10 0x10 0x10 0x10
+			sprd,pinconf-data-values = <
+				0x00182004 0x00182004 0x00182004 0x00182004 0x00182004
+				0x00182004 0x00182004 0x00182004 0x00182004 0x00182004
 			>;
 			sprd,pinconf-offsets = <
 				0x000 0x004 0x008 0x00c 0x010 0x014 0x018
@@ -100,13 +99,14 @@
 				0x10 0x10 0x10 0x10 0x10
 				0x10 0x10 0x10 0x10 0x10
 			>;
-			sprd,pinconf-data-offsets = <
-				0x00 0x04 0x08 0x0c 0x10 0x14 0x18 0x1c 0x20 0x24
+			/* LCM control pins. */
+			sprd,pinmux-offsets = <
+				0x000 0x004 0x008 0x00c 0x010 0x014 0x018
 			>;
-			sprd,pinconf-data-values = <
-				0x00182004 0x00182004 0x00182004 0x00182004 0x00182004
-				0x00182004 0x00182004 0x00182004 0x00182004 0x00182004
+			sprd,pinmux-values = <
+				0 0 0x10 0x10 0x10 0x10 0x10
 			>;
+			sprd,pmic = <&sc2720_pmic>;
 			/* INOI uses RGB WLED channels only; the W channel stays dark. */
 			sprd,wled-current-levels = <31 31 31 0>;
 			sprd,wled-default-level = <18>;
@@ -118,12 +118,13 @@
 
 &audio {
 	firmware-name = "fplinux/inoi240-audio-profile.bin";
-	pinctrl-names = "audio";
-	pinctrl-0 = <&audio_mux_pins &audio_pad_pins>;
-	fplinux,microphone-capture;
 	hp-det-gpios = <&sc2720_eic 12 GPIO_ACTIVE_HIGH>;
-	fplinux,speaker-vibration;
+	pinctrl-0 = <&audio_mux_pins &audio_pad_pins>;
+	pinctrl-names = "audio";
 	fplinux,card-longname = "INOI 240 Modern 4G audio";
+	fplinux,microphone-capture;
+	fplinux,speaker-vibration;
+
 	status = "okay";
 };
 
@@ -174,9 +175,9 @@
 
 &sc2720_regulators {
 	vddusb: LDO_USB33 {
-		regulator-name = "sc2720-usb33";
-		regulator-min-microvolt = <3300000>;
 		regulator-max-microvolt = <3300000>;
+		regulator-min-microvolt = <3300000>;
+		regulator-name = "sc2720-usb33";
 	};
 };
 
@@ -197,8 +198,9 @@
 };
 
 &aon_sensor_clk {
-	assigned-clocks = <&aon_sensor_clk CLK_SENSOR0>;
 	assigned-clock-rates = <12000000>;
+	assigned-clocks = <&aon_sensor_clk CLK_SENSOR0>;
+
 	status = "okay";
 };
 
@@ -208,16 +210,16 @@
 	bf30a2: camera@6e {
 		compatible = "byd,bf30a2";
 		reg = <0x6e>;
-		rotation = <0>;
-		clocks = <&aon_sensor_clk CLK_SENSOR0>;
-		clock-names = "xclk";
-		camera-core-supply = <&vddcamd>;
 		avdd-supply = <&vddcama>;
+		camera-core-supply = <&vddcamd>;
+		clock-names = "xclk";
+		clocks = <&aon_sensor_clk CLK_SENSOR0>;
 		iovdd-supply = <&vddcamio>;
-		reset-gpios = <&ap_gpio 100 GPIO_ACTIVE_HIGH>;
-		powerdown-gpios = <&ap_gpio 101 GPIO_ACTIVE_HIGH>;
-		pinctrl-names = "default";
 		pinctrl-0 = <&camera_id_mux_pins &camera_front_mux_pins>;
+		pinctrl-names = "default";
+		powerdown-gpios = <&ap_gpio 101 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&ap_gpio 100 GPIO_ACTIVE_HIGH>;
+		rotation = <0>;
 
 		port {
 			bf30a2_out: endpoint {
@@ -255,17 +257,19 @@
 
 &sdio0_mmc {
 	cd-gpios = <&eic2 0 GPIO_ACTIVE_LOW>;
+
 	status = "okay";
 };
 
 &keypad {
-	pinctrl-names = "matrix";
-	pinctrl-0 = <&keypad_mux_pins &keypad_pad_pins>;
 	compatible = "sprd,ums9117-keypad";
-	status = "okay";
+	eic1-gpios = <&sc2720_eic 1 GPIO_ACTIVE_LOW>;
 	label = "INOI 240 Modern 4G keypad";
-	keypad,num-rows = <5>;
+	pinctrl-0 = <&keypad_mux_pins &keypad_pad_pins>;
+	pinctrl-names = "matrix";
+	wakeup-source;
 	keypad,num-columns = <4>;
+	keypad,num-rows = <5>;
 	linux,keymap = <
 		MATRIX_KEY(0, 0, FPLINUX_KEY_STAR)
 		MATRIX_KEY(0, 1, FPLINUX_KEY_0)
@@ -288,13 +292,14 @@
 		MATRIX_KEY(4, 2, FPLINUX_KEY_SOFT_RIGHT)
 		MATRIX_KEY(4, 3, FPLINUX_KEY_UP)
 	>;
-	eic1-gpios = <&sc2720_eic 1 GPIO_ACTIVE_LOW>;
 	sprd,eic1-keycode = <FPLINUX_KEY_POWER>;
-	wakeup-source;
+
+	status = "okay";
 };
 
 &usb {
-	vddusb-supply = <&vddusb>;
 	dr_mode = "peripheral";
+	vddusb-supply = <&vddusb>;
+
 	status = "okay";
 };

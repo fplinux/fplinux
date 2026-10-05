@@ -36,10 +36,9 @@ properties:
     $ref: /schemas/types.yaml#/definitions/phandle
     description: PMU APB syscon for read-only PLL reference and client state
 
-  '#clock-cells':
+  "#clock-cells":
     const: 1
-    description:
-      Clock index defined in
+    description: Clock index defined in
       dt-bindings/clock/fplinux,ums9117-inherited-clk.h.
 
 required:
@@ -47,7 +46,7 @@ required:
   - reg
   - reg-names
   - sprd,pmu-apb
-  - '#clock-cells'
+  - "#clock-cells"
 
 additionalProperties: false
 

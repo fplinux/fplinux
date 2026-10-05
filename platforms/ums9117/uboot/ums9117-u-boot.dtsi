@@ -21,8 +21,8 @@
 
 	stage0_timer: timer {
 		compatible = "fplinux,stage0-timer";
-		clock-frequency = <FPLINUX_UBOOT_TIMER_HZ>;
 		bootph-all;
+		clock-frequency = <FPLINUX_UBOOT_TIMER_HZ>;
 	};
 
 	mmc@20300000 {

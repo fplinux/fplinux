@@ -10,38 +10,38 @@
 	interrupt-parent = <&gic>;
 
 	aliases {
-		spi0 = &adi;
 		i2c0 = &i2c0;
+		spi0 = &adi;
 	};
 
 	aonapb_gate: aonapb-gate {
 		compatible = "sprd,ums9117-aonapb-gate";
-		sprd,syscon = <&aon_apb>;
 		#clock-cells = <1>;
+		sprd,syscon = <&aon_apb>;
 	};
 
 	apahb_gate: apahb-gate {
 		compatible = "sprd,ums9117-apahb-gate";
-		sprd,syscon = <&ap_ahb>;
 		#clock-cells = <1>;
+		sprd,syscon = <&ap_ahb>;
 	};
 
 	apapb_gate: apapb-gate {
 		compatible = "sprd,ums9117-apapb-gate";
-		sprd,syscon = <&ap_apb>;
 		#clock-cells = <1>;
+		sprd,syscon = <&ap_apb>;
 	};
 
 	apahb_reset: reset-controller {
 		compatible = "sprd,ums9117-apahb-reset";
-		sprd,syscon = <&ap_ahb>;
 		#reset-cells = <1>;
+		sprd,syscon = <&ap_ahb>;
 	};
 
 	thermal-zones {
 		ums9117-thermal {
-			polling-delay-passive = <0>;
 			polling-delay = <0>;
+			polling-delay-passive = <0>;
 			thermal-sensors = <&thm1 0>;
 			trips {};
 		};
@@ -52,9 +52,9 @@
 	};
 
 	reserved-memory {
+		ranges;
 		#address-cells = <1>;
 		#size-cells = <1>;
-		ranges;
 
 		/*
 		 * JPEG and ROTA need physically contiguous DMA buffers. Sharing
@@ -96,11 +96,11 @@
 
 	gic: interrupt-controller@12001000 {
 		compatible = "arm,gic-400";
-		#interrupt-cells = <3>;
-		#address-cells = <0>;
-		interrupt-controller;
 		reg = <0x12001000 0x1000>,
 		      <0x12002000 0x1000>;
+		#address-cells = <0>;
+		#interrupt-cells = <3>;
+		interrupt-controller;
 	};
 
 	ext_32k: clock-32768 {
@@ -125,9 +125,9 @@
 
 	soc {
 		compatible = "simple-bus";
+		ranges;
 		#address-cells = <1>;
 		#size-cells = <1>;
-		ranges;
 
 		syscounter@40230000 {
 			compatible = "sprd,ums9117-syscounter";
@@ -137,8 +137,8 @@
 		timer@40050000 {
 			compatible = "sprd,pike2-timer";
 			reg = <0x40050000 0x20>;
-			interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&ext_32k>;
+			interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
 		};
 
 		aon_apb: syscon@402e0000 {
@@ -165,16 +165,18 @@
 			compatible = "sprd,ums9117-ap-i2c0-clk";
 			reg = <0x2150003c 0x4>;
 			#clock-cells = <1>;
+
 			status = "disabled";
 		};
 
 		aon_sensor_clk: clock-controller@402d02b4 {
 			compatible = "sprd,ums9117-aon-sensor-clk";
 			reg = <0x402d02b4 0x4>;
-			sprd,aon-apb = <&aon_apb>;
-			clocks = <&sensor_48m>;
-			clock-names = "source";
 			#clock-cells = <1>;
+			clock-names = "source";
+			clocks = <&sensor_48m>;
+			sprd,aon-apb = <&aon_apb>;
+
 			status = "disabled";
 		};
 
@@ -187,29 +189,29 @@
 		hwlock: hwlock@33000000 {
 			compatible = "sprd,ums9117-hwspinlock", "sprd,hwspinlock-r3p0";
 			reg = <0x33000000 0x1000>;
-			clocks = <&aonapb_gate CLK_SPLK_EB>;
-			clock-names = "enable";
 			#hwlock-cells = <1>;
+			clock-names = "enable";
+			clocks = <&aonapb_gate CLK_SPLK_EB>;
 		};
 
 		adi: spi@40600000 {
 			compatible = "sprd,ums9117-adi";
 			reg = <0x40600000 0x9000>;
-			clocks = <&aonapb_gate CLK_ADI_EB>;
-			clock-names = "enable";
 			#address-cells = <1>;
 			#size-cells = <0>;
+			clock-names = "enable";
+			clocks = <&aonapb_gate CLK_ADI_EB>;
 		};
 
 		efuse@40240000 {
 			compatible = "sprd,ums9117-efuse";
 			reg = <0x40240000 0x10000>;
-			clocks = <&aonapb_gate CLK_EFUSE_EB>;
-			clock-names = "enable";
-			hwlocks = <&hwlock 8>;
-			read-only;
 			#address-cells = <1>;
 			#size-cells = <1>;
+			clock-names = "enable";
+			clocks = <&aonapb_gate CLK_EFUSE_EB>;
+			hwlocks = <&hwlock 8>;
+			read-only;
 
 			thm_cal: thermal-calibration@64 {
 				reg = <0x64 0x4>;
@@ -220,40 +222,40 @@
 			compatible = "pinctrl-single";
 			reg = <0x402a0088 0x28>;
 			#pinctrl-cells = <1>;
-			pinctrl-single,register-width = <32>;
 			pinctrl-single,function-mask = <0x30>;
+			pinctrl-single,register-width = <32>;
 		};
 
 		keypad_pads: pinctrl@402a0488 {
 			compatible = "pinctrl-single";
 			reg = <0x402a0488 0x28>;
 			#pinctrl-cells = <1>;
-			pinctrl-single,register-width = <32>;
 			pinctrl-single,function-mask = <0x0033f8cf>;
+			pinctrl-single,register-width = <32>;
 		};
 
 		audio_mux: pinctrl@402a00f0 {
 			compatible = "pinctrl-single";
 			reg = <0x402a00f0 0x20>;
 			#pinctrl-cells = <1>;
-			pinctrl-single,register-width = <32>;
 			pinctrl-single,function-mask = <0x30>;
+			pinctrl-single,register-width = <32>;
 		};
 
 		audio_pads: pinctrl@402a04f0 {
 			compatible = "pinctrl-single";
 			reg = <0x402a04f0 0x20>;
 			#pinctrl-cells = <1>;
-			pinctrl-single,register-width = <32>;
 			pinctrl-single,function-mask = <0x001bf8cf>;
+			pinctrl-single,register-width = <32>;
 		};
 
 		sdio_mux: pinctrl@402a0120 {
 			compatible = "pinctrl-single";
 			reg = <0x402a0120 0x18>;
 			#pinctrl-cells = <1>;
-			pinctrl-single,register-width = <32>;
 			pinctrl-single,function-mask = <0xffffffff>;
+			pinctrl-single,register-width = <32>;
 
 			sdio0_mux: sdio0-pins {
 				pinctrl-single,pins = <
@@ -267,8 +269,8 @@
 			compatible = "pinctrl-single";
 			reg = <0x402a0520 0x18>;
 			#pinctrl-cells = <1>;
-			pinctrl-single,register-width = <32>;
 			pinctrl-single,function-mask = <0xffffffff>;
+			pinctrl-single,register-width = <32>;
 
 			sdio0_pads: sdio0-pins {
 				pinctrl-single,pins = <
@@ -283,8 +285,8 @@
 			compatible = "pinctrl-single";
 			reg = <0x402a01e0 0x8>;
 			#pinctrl-cells = <1>;
-			pinctrl-single,register-width = <32>;
 			pinctrl-single,function-mask = <0x30>;
+			pinctrl-single,register-width = <32>;
 
 			i2c0_mux_pins: i2c0-pins {
 				pinctrl-single,pins = <0x0 0x0 0x4 0x0>;
@@ -295,8 +297,8 @@
 			compatible = "pinctrl-single";
 			reg = <0x402a05e0 0x8>;
 			#pinctrl-cells = <1>;
-			pinctrl-single,register-width = <32>;
 			pinctrl-single,function-mask = <0xffffffff>;
+			pinctrl-single,register-width = <32>;
 
 			i2c0_pad_pins: i2c0-pins {
 				pinctrl-single,pins = <
@@ -311,76 +313,80 @@
 			      <0x20e00054 0x4>,
 			      <0x403f0000 0xc>,
 			      <0x403e0000 0x10>;
+			#clock-cells = <1>;
 			reg-names = "ca7-divider", "ca7-source", "mpll",
 				    "analog-top";
 			sprd,pmu-apb = <&pmu_apb>;
-			#clock-cells = <1>;
 		};
 
 		eic2: gpio@402c0000 {
 			compatible = "sprd,ums9117-eic-debounce",
 				     "sprd,sc9860-eic-debounce";
 			reg = <0x402c0000 0x80>;
-			gpio-controller;
 			#gpio-cells = <2>;
-			interrupt-controller;
 			#interrupt-cells = <2>;
-			interrupts = <GIC_SPI 37 IRQ_TYPE_LEVEL_HIGH>;
+			clock-names = "enable", "rtc", "rtcdv5";
 			clocks = <&aonapb_gate CLK_EIC_EB>,
 				 <&aonapb_gate CLK_EIC_RTC_EB>,
 				 <&aonapb_gate CLK_EIC_RTCDV5_EB>;
-			clock-names = "enable", "rtc", "rtcdv5";
+			gpio-controller;
+			interrupt-controller;
+			interrupts = <GIC_SPI 37 IRQ_TYPE_LEVEL_HIGH>;
+
 			status = "disabled";
 		};
 
 		ap_gpio: gpio@40280000 {
 			compatible = "sprd,ums9117-gpio", "sprd,sc9860-gpio";
 			reg = <0x40280000 0x400>;
-			gpio-controller;
 			#gpio-cells = <2>;
-			interrupt-controller;
 			#interrupt-cells = <2>;
+			clock-names = "enable";
+			clocks = <&aonapb_gate CLK_GPIO_EB>;
+			gpio-controller;
+			interrupt-controller;
 			interrupts = <GIC_SPI 35 IRQ_TYPE_LEVEL_HIGH>;
 			ngpios = <128>;
-			clocks = <&aonapb_gate CLK_GPIO_EB>;
-			clock-names = "enable";
+
 			status = "disabled";
 		};
 
 		i2c0: i2c@70500000 {
 			compatible = "sprd,sc9860-i2c";
 			reg = <0x70500000 0x1000>;
-			interrupts = <GIC_SPI 11 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&ap_i2c0_clk CLK_AP_I2C0>, <&ext_26m>,
-				 <&apapb_gate CLK_I2C0_EB>;
-			clock-names = "i2c", "source", "enable";
-			clock-frequency = <400000>;
-			pinctrl-names = "default";
-			pinctrl-0 = <&i2c0_mux_pins &i2c0_pad_pins>;
 			#address-cells = <1>;
 			#size-cells = <0>;
+			clock-frequency = <400000>;
+			clock-names = "i2c", "source", "enable";
+			clocks = <&ap_i2c0_clk CLK_AP_I2C0>, <&ext_26m>,
+				 <&apapb_gate CLK_I2C0_EB>;
+			interrupts = <GIC_SPI 11 IRQ_TYPE_LEVEL_HIGH>;
+			pinctrl-0 = <&i2c0_mux_pins &i2c0_pad_pins>;
+			pinctrl-names = "default";
+
 			status = "disabled";
 		};
 
 		sdio0_mmc: mmc@20300000 {
 			compatible = "sprd,ums9117-sdhci";
 			reg = <0x20300000 0x100>;
-			reg-names = "host";
-			interrupts = <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&ap_clk CLK_SDIO0>, <&apahb_gate CLK_SDIO0_EB>;
-			clock-names = "sdio", "enable";
-			resets = <&apahb_reset RESET_SDIO0>;
-			reset-names = "sdio";
-			pinctrl-names = "default";
-			pinctrl-0 = <&sdio0_mux &sdio0_pads>;
-			vmmc-supply = <&vmmc>;
-			vqmmc-supply = <&vqmmc>;
 			bus-width = <4>;
+			clock-names = "sdio", "enable";
+			clocks = <&ap_clk CLK_SDIO0>, <&apahb_gate CLK_SDIO0_EB>;
+			disable-wp;
+			interrupts = <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
 			max-frequency = <48750000>;
 			no-1-8-v;
-			no-sdio;
 			no-mmc;
-			disable-wp;
+			no-sdio;
+			pinctrl-0 = <&sdio0_mux &sdio0_pads>;
+			pinctrl-names = "default";
+			reg-names = "host";
+			reset-names = "sdio";
+			resets = <&apahb_reset RESET_SDIO0>;
+			vmmc-supply = <&vmmc>;
+			vqmmc-supply = <&vqmmc>;
+
 			status = "disabled";
 		};
 
@@ -390,33 +396,36 @@
 			      <0x40020000 0x00002000>,
 			      <0x402d0258 0x00000018>,
 			      <0x402a0004 0x00000004>;
+			clock-names = "xtal";
+			clocks = <&sc2720_xtal>;
 			reg-names = "aud", "vbc", "clk1", "iis-matrix";
 			fplinux,aon-apb = <&aon_apb>;
 			sprd,pmic = <&sc2720_pmic>;
-			clocks = <&sc2720_xtal>;
-			clock-names = "xtal";
+
 			status = "disabled";
 		};
 
 		keypad: keypad@40250000 {
 			reg = <0x40250000 0x00000100>;
-			interrupts = <GIC_SPI 36 IRQ_TYPE_LEVEL_HIGH>;
 			interrupt-names = "matrix";
+			interrupts = <GIC_SPI 36 IRQ_TYPE_LEVEL_HIGH>;
 			sprd,aon-apb = <&aon_apb>;
+
 			status = "disabled";
 		};
 
 		thm1: thermal@40300000 {
 			compatible = "sprd,ums9117-thermal";
 			reg = <0x40300000 0x100>;
-			clocks = <&aonapb_gate CLK_THM1_EB>,
-				 <&aonapb_gate CLK_THM_RTC_EB>;
-			clock-names = "enable", "rtc";
-			#thermal-sensor-cells = <1>;
-			nvmem-cells = <&thm_cal>;
-			nvmem-cell-names = "thm_cal";
 			#address-cells = <1>;
 			#size-cells = <0>;
+			#thermal-sensor-cells = <1>;
+			clock-names = "enable", "rtc";
+			clocks = <&aonapb_gate CLK_THM1_EB>,
+				 <&aonapb_gate CLK_THM_RTC_EB>;
+			nvmem-cell-names = "thm_cal";
+			nvmem-cells = <&thm_cal>;
+
 			status = "disabled";
 
 			sensor@0 {
@@ -426,19 +435,18 @@
 
 		ap_dma: dma-controller@20100000 {
 			compatible = "sprd,ums9117-dma";
-			#dma-cells = <1>;
 			reg = <0x20100000 0x2100>;
-			interrupts = <GIC_SPI 50 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&apahb_gate CLK_DMA_EB>;
+			#dma-cells = <1>;
 			clock-names = "enable";
+			clocks = <&apahb_gate CLK_DMA_EB>;
 			dma-channels = <32>;
 			dma-requests = <2>;
+			interrupts = <GIC_SPI 50 IRQ_TYPE_LEVEL_HIGH>;
+
 			status = "disabled";
 		};
 
 		rota: rotate@20900000 {
-			dmas = <&ap_dma 1>;
-			dma-names = "rotation";
 			compatible = "sprd,ums9117-rota";
 			reg = <0x20900000 0x450>,
 			      <0x20e00000 0x4>,
@@ -446,10 +454,13 @@
 			      <0x20e02000 0x4>,
 			      <0x20e01004 0x4>,
 			      <0x20e02004 0x4>;
+			dma-names = "rotation";
+			dmas = <&ap_dma 1>;
+			memory-region = <&codec_dma>;
 			reg-names = "rota", "ap-ahb-gate-state", "ap-ahb-gate-set",
 				    "ap-ahb-gate-clear", "ap-ahb-reset-set",
 				    "ap-ahb-reset-clear";
-			memory-region = <&codec_dma>;
+
 			status = "disabled";
 		};
 
@@ -464,19 +475,21 @@
 			      <0x21500088 0x4>,
 			      <0x20e000a4 0x4>,
 			      <0x20e03058 0x4>;
+			interrupts = <GIC_SPI 45 IRQ_TYPE_LEVEL_HIGH>;
+			memory-region = <&codec_dma>;
 			reg-names = "jpeg", "ap-ahb-gate-state", "ap-ahb-gate-set",
 				    "ap-ahb-gate-clear", "ap-ahb-reset-set",
 				    "ap-ahb-reset-clear", "dcam-clock", "cpu-qos",
 				    "dcam-qos";
-			interrupts = <GIC_SPI 45 IRQ_TYPE_LEVEL_HIGH>;
-			memory-region = <&codec_dma>;
 			sprd,aon-apb = <&aon_apb>;
+
 			status = "disabled";
 		};
 
 		usb: usb@20200000 {
 			reg = <0x20200000 0x2000>;
 			interrupts = <GIC_SPI 55 IRQ_TYPE_LEVEL_HIGH>;
+
 			status = "disabled";
 		};
 	};

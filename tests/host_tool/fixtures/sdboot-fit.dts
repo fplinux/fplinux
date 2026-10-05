@@ -4,21 +4,21 @@
 	description = "ALIGNMENT";
 	images {
 		kernel {
-			data = /incbin/("zImage");
-			type = "kernel";
 			arch = "arm";
-			os = "linux";
 			compression = "none";
-			load = <0x10010000>;
+			data = /incbin/("zImage");
 			entry = <0x10010000>;
+			load = <0x10010000>;
+			os = "linux";
+			type = "kernel";
 			hash { algo = "sha256"; value = /incbin/("kernel.sha256"); };
 		};
 		fdt {
-			data = /incbin/("linux.dtb");
-			type = "flat_dt";
 			arch = "arm";
 			compression = "none";
+			data = /incbin/("linux.dtb");
 			load = <0x10020000>;
+			type = "flat_dt";
 			hash { algo = "sha256"; value = /incbin/("fdt.sha256"); };
 		};
 	};

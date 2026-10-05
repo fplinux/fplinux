@@ -9,6 +9,7 @@ import shutil
 from typing import TYPE_CHECKING
 
 from fplinux_cli import common
+from fplinux_cli.canonical_markdown import normalize_markdown
 from fplinux_cli.common import fail
 from fplinux_cli.identity import IdentityError, validate_target_identity
 from fplinux_cli.identity_codegen import validate_bootstrap_display_name
@@ -51,38 +52,6 @@ def _substitute(text: str, values: Mapping[str, str]) -> str:
     return _PLACEHOLDER.sub(replacement, text)
 
 
-def _align_markdown_tables(text: str) -> str:
-    """Pad pipe tables as the Markdown formatter does, so the README passes its check.
-
-    Cells are measured by character count; template tables hold only single-width text.
-    """
-    lines = text.split("\n")
-    aligned: list[str] = []
-    index = 0
-    while index < len(lines):
-        if not lines[index].startswith("|"):
-            aligned.append(lines[index])
-            index += 1
-            continue
-        end = index
-        while end < len(lines) and lines[end].startswith("|"):
-            end += 1
-        rows = [
-            [cell.strip() for cell in line.strip().strip("|").split("|")]
-            for line in lines[index:end]
-        ]
-        content = [row for number, row in enumerate(rows) if number != 1]
-        widths = [max(3, *(len(row[column]) for row in content)) for column in range(len(rows[0]))]
-        for number, row in enumerate(rows):
-            cells = [
-                "-" * width if number == 1 else cell.ljust(width)
-                for cell, width in zip(row, widths, strict=True)
-            ]
-            aligned.append("| " + " | ".join(cells) + " |")
-        index = end
-    return "\n".join(aligned)
-
-
 def _render_template(template: Path, values: Mapping[str, str]) -> dict[str, bytes]:
     """Return every target file named and filled from the template tree."""
     if template.is_symlink() or not template.is_dir():
@@ -98,9 +67,9 @@ def _render_template(template: Path, values: Mapping[str, str]) -> dict[str, byt
         if relative.endswith(_TEMPLATE_SUFFIX):
             relative = relative.removesuffix(_TEMPLATE_SUFFIX)
             text = _substitute(contents.decode("utf-8"), values)
-            if relative.endswith(".md"):
-                text = _align_markdown_tables(text)
             contents = text.encode("utf-8")
+        if relative.endswith(".md"):
+            contents = normalize_markdown(f"targets/template/{relative}", contents)
         files[_substitute(relative, values)] = contents
     return files
 

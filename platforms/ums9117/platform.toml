@@ -7,20 +7,20 @@ compatible = "sprd,ums9117"
 
 [rootfs]
 packages = [
-  "fplinux-apk-tools",
-  "fplinux-uclient",
-  "fplinux-cpuclock",
-  "fplinux-fm",
   "fplinux-alsa-lib",
-  "fplinux-ssh",
-  "fplinux-dropbear",
-  "fplinux-usb-gadget",
-  "fplinux-rotate",
-  "fplinux-jpeg",
-  "fplinux-present",
+  "fplinux-apk-tools",
   "fplinux-bluetooth",
   "fplinux-bluez",
   "fplinux-bluez-glib",
+  "fplinux-cpuclock",
+  "fplinux-dropbear",
+  "fplinux-fm",
+  "fplinux-jpeg",
+  "fplinux-present",
+  "fplinux-rotate",
+  "fplinux-ssh",
+  "fplinux-uclient",
+  "fplinux-usb-gadget",
   "fplinux-xkb",
 ]
 
@@ -120,18 +120,18 @@ source = "platforms/ums9117/common/ums9117-sdio-slot.c"
 destination = "board/fplinux/ums9117/ums9117-sdio-slot.c"
 
 [linux]
-defconfig = "platforms/ums9117/linux/defconfig"
-build_types = { release = "platforms/ums9117/linux/release.config", debug = "platforms/ums9117/linux/debug.config" }
 source_lock = "linux"
 arch = "arm"
 cross_compile = "arm-none-eabi-"
 analysis_cross_compile = "arm-none-eabi-"
+defconfig = "platforms/ums9117/linux/defconfig"
+build_types = { debug = "platforms/ums9117/linux/debug.config", release = "platforms/ums9117/linux/release.config" }
 config_script = "scripts/config"
-image_output = "arch/arm/boot/zImage"
-dtb_output_directory = "arch/arm/boot/dts"
 dts_directory = "arch/arm/boot/dts/unisoc"
 platform_identity_header = "arch/arm/mach-ums9117/fplinux-platform-identity.h"
 targets = ["zImage", "dtbs"]
+image_output = "arch/arm/boot/zImage"
+dtb_output_directory = "arch/arm/boot/dts"
 patches = [
   "platforms/ums9117/linux/patches/0001-ums9117-platform.patch",
   "platforms/ums9117/linux/patches/0002-ums9117-dt-bindings.patch",
@@ -156,31 +156,6 @@ patches = [
   "platforms/ums9117/linux/patches/0021-ums9117-eic-clock-binding.patch",
   "platforms/ums9117/linux/patches/0022-bnep-local-ethernet-address.patch",
 ]
-
-[[linux.dt_config_checks]]
-path = "/soc/usb@20200000"
-compatible = "sprd,ums9117-musb"
-config = "CONFIG_USB_MUSB_UMS9117_COLD"
-
-[[linux.dt_config_checks]]
-path = "/soc/usb@20200000"
-compatible = "fplinux,ums9117-musb-inherited"
-config = "CONFIG_USB_MUSB_UMS9117_INHERITED"
-
-[[linux.dt_config_checks]]
-path = "/soc/keypad@40250000"
-compatible = "sprd,ums9117-keypad"
-config = "CONFIG_KEYBOARD_UMS9117"
-
-[[linux.dt_config_checks]]
-path = "/soc/keypad@40250000"
-compatible = "sprd,ums9117-keypad"
-property = "eic9-gpios"
-config = "CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY"
-
-[[linux.appends]]
-source = "platforms/ums9117/linux/dts/unisoc.Makefile"
-destination = "arch/arm/boot/dts/unisoc/Makefile"
 
 [[linux.copies]]
 source = "platforms/ums9117/linux/arch/arm/mach-ums9117/Kconfig"
@@ -237,14 +212,6 @@ destination = "drivers/media/platform/ums9117-dcam-capture.h"
 [[linux.copies]]
 source = "platforms/ums9117/linux/drivers/media/i2c/bf30a2.c"
 destination = "drivers/media/i2c/bf30a2.c"
-
-[[linux.appends]]
-source = "platforms/ums9117/linux/drivers/media/i2c/bf30a2.Kconfig"
-destination = "drivers/media/i2c/Kconfig"
-
-[[linux.appends]]
-source = "platforms/ums9117/linux/drivers/media/i2c/bf30a2.Makefile"
-destination = "drivers/media/i2c/Makefile"
 
 [[linux.copies]]
 source = "platforms/ums9117/linux/drivers/media/platform/ums9117-jpeg-codec.c"
@@ -306,14 +273,6 @@ destination = "sound/drivers/ums9117-sc2720-codec.h"
 source = "platforms/ums9117/linux/bindings/sound/fplinux,ums9117-audio.yaml"
 destination = "Documentation/devicetree/bindings/sound/fplinux,ums9117-audio.yaml"
 
-[[linux.appends]]
-source = "platforms/ums9117/linux/sound/drivers/sound.Kconfig"
-destination = "sound/drivers/Kconfig"
-
-[[linux.appends]]
-source = "platforms/ums9117/linux/sound/drivers/sound.Makefile"
-destination = "sound/drivers/Makefile"
-
 [[linux.copies]]
 source = "platforms/ums9117/linux/drivers/power/supply/sc2720-charger-ums9117.c"
 destination = "drivers/power/supply/sc2720-charger-ums9117.c"
@@ -353,14 +312,6 @@ destination = "drivers/leds/leds-sc2720-ums9117.c"
 [[linux.copies]]
 source = "platforms/ums9117/linux/bindings/leds/sprd,ums9117-sc2720-kpled.yaml"
 destination = "Documentation/devicetree/bindings/leds/sprd,ums9117-sc2720-kpled.yaml"
-
-[[linux.appends]]
-source = "platforms/ums9117/linux/drivers/leds/sc2720-kpled.Kconfig"
-destination = "drivers/leds/Kconfig"
-
-[[linux.appends]]
-source = "platforms/ums9117/linux/drivers/leds/sc2720-kpled.Makefile"
-destination = "drivers/leds/Makefile"
 
 [[linux.copies]]
 source = "platforms/ums9117/linux/drivers/gpu/drm/ums9117/Makefile"
@@ -450,62 +401,6 @@ destination = "include/dt-bindings/clock/fplinux,ums9117-inherited-clk.h"
 source = "include/fplinux/fplinux-keypad.h"
 destination = "include/dt-bindings/input/fplinux-keypad.h"
 
-[[linux.appends]]
-source = "platforms/ums9117/linux/arch/arm/mach-ums9117/nand.Kconfig"
-destination = "arch/arm/mach-ums9117/Kconfig"
-
-[[linux.appends]]
-source = "platforms/ums9117/linux/arch/arm/mach-ums9117/nand.Makefile"
-destination = "arch/arm/mach-ums9117/Makefile"
-
-[[linux.appends]]
-source = "platforms/ums9117/linux/drivers/mmc/host/mmc.Kconfig"
-destination = "drivers/mmc/host/Kconfig"
-
-[[linux.appends]]
-source = "platforms/ums9117/linux/drivers/mmc/host/mmc.Makefile"
-destination = "drivers/mmc/host/Makefile"
-
-[[linux.appends]]
-source = "platforms/ums9117/linux/drivers/clk/sprd/inherited-clk.Kconfig"
-destination = "drivers/clk/sprd/Kconfig"
-
-[[linux.appends]]
-source = "platforms/ums9117/linux/drivers/clk/sprd/inherited-clk.Makefile"
-destination = "drivers/clk/sprd/Makefile"
-
-[[linux.appends]]
-source = "platforms/ums9117/linux/drivers/media/platform/media.Kconfig"
-destination = "drivers/media/platform/Kconfig"
-
-[[linux.appends]]
-source = "platforms/ums9117/linux/drivers/media/platform/media.Makefile"
-destination = "drivers/media/platform/Makefile"
-
-[[linux.appends]]
-source = "platforms/ums9117/linux/drivers/gpu/drm/ums9117/drm.Kconfig"
-destination = "drivers/gpu/drm/Kconfig"
-
-[[linux.appends]]
-source = "platforms/ums9117/linux/drivers/gpu/drm/ums9117/drm-parent.Makefile"
-destination = "drivers/gpu/drm/Makefile"
-
-[[linux.appends]]
-source = "platforms/ums9117/linux/drivers/power/supply/sc2720-power-supply.Kconfig"
-destination = "drivers/power/supply/Kconfig"
-
-[[linux.appends]]
-source = "platforms/ums9117/linux/drivers/power/supply/sc2720-power-supply.Makefile"
-destination = "drivers/power/supply/Makefile"
-
-[[linux.appends]]
-source = "platforms/ums9117/linux/drivers/power/reset/sc2720-poweroff.Kconfig"
-destination = "drivers/power/reset/Kconfig"
-
-[[linux.appends]]
-source = "platforms/ums9117/linux/drivers/power/reset/sc2720-poweroff.Makefile"
-destination = "drivers/power/reset/Makefile"
-
 [[linux.copies]]
 source = "platforms/ums9117/linux/drivers/bluetooth/ums9117/ums9117-bluetooth.c"
 destination = "drivers/bluetooth/ums9117/ums9117-bluetooth.c"
@@ -562,201 +457,6 @@ destination = "Documentation/devicetree/bindings/net/bluetooth/fplinux,ums9117-b
 source = "platforms/ums9117/linux/bindings/mfd/sprd,ums9117-pmu-apb.yaml"
 destination = "Documentation/devicetree/bindings/mfd/sprd,ums9117-pmu-apb.yaml"
 
-[[linux.appends]]
-source = "platforms/ums9117/linux/drivers/bluetooth/bluetooth-parent.Kconfig"
-destination = "drivers/bluetooth/Kconfig"
-
-[[linux.appends]]
-source = "platforms/ums9117/linux/drivers/bluetooth/bluetooth-parent.Makefile"
-destination = "drivers/bluetooth/Makefile"
-
-[bootstrap]
-vendor_source_lock = "fpdoom_bootstrap"
-vendor_cache_name = "fpdoom-bootstrap.tar.gz"
-archive_prefix = "fpdoom-{commit}/"
-source_destination = "bootstrap"
-vendor_destination = "vendor/fpdoom"
-output_destination = "out"
-pack_reloc = "pack_reloc"
-safety_target = "fplinux-safety-check"
-build_targets = ["clean", "all", "map"]
-patches = [
-  "platforms/ums9117/bootstrap/0001-preserve-ram-probe-contents.patch",
-  "platforms/ums9117/bootstrap/0002-headless.patch",
-  "platforms/ums9117/bootstrap/0003-target-display-transport.patch",
-  "platforms/ums9117/bootstrap/0004-linux-owned-input-audio.patch",
-]
-files = [
-  "build_t117.make",
-  "fpdoom/cmd_def.h",
-  "fpdoom/common.c",
-  "fpdoom/common.h",
-  "fpdoom/include/signal.h",
-  "fpdoom/include/stdio.h",
-  "fpdoom/include/stdlib.h",
-  "fpdoom/libc.c",
-  "fpdoom/libc/malloc.h",
-  "fpdoom/libc/printf.h",
-  "fpdoom/syscode.h",
-  "fpdoom/usbio.h",
-  "pack_reloc/Makefile",
-  "pack_reloc/pack_reloc.c",
-  "ums9117/asmcode.s",
-  "ums9117/entry.c",
-  "ums9117/lcd_spi.h",
-  "ums9117/start.s",
-  "ums9117/syscode.c",
-  "ums9117/syscomm.c",
-  "ums9117/usbio.c",
-]
-lcd_config_destination = "ums9117/lcd_config.h"
-kernel_destination = "zImage"
-load_address = 0x80100000
-payload_limit = 0x82000000
-toolchain = "arm-none-eabi"
-lto = 0
-
-[[bootstrap.shared_copies]]
-source = "bootstrap/fplinux-boot-screen"
-destination = "fplinux-boot-screen"
-
-[[bootstrap.shared_copies]]
-source = "platforms/ums9117/bootstrap"
-destination = "ums9117-bootstrap"
-
-[[bootstrap.shared_copies]]
-source = "platforms/ums9117/common/ums9117-boot-contract.h"
-destination = "ums9117-common/ums9117-boot-contract.h"
-
-[[bootstrap.linux_copies]]
-source = "lib/fonts/font_6x8.c"
-destination = "fplinux-boot-screen/font_6x8.c"
-
-[[bootstrap.linux_copies]]
-source = "lib/fonts/font_7x14.c"
-destination = "fplinux-boot-screen/font_7x14.c"
-
-[bootstrap.layout]
-ram_base = 0x80000000
-ram_size = 0x04000000
-timer_hz = 1000
-kernel_load = 0x82000000
-kernel_entry = 0x82000000
-kernel_size = 0x01200000
-fdt_load = 0x83e00000
-fdt_size = 0x00010000
-framebuffer = 0x83f00000
-framebuffer_size = 0x00100000
-
-[runtime]
-fdl1_load_address = 0x00006200
-
-[runtime.adapter]
-brightness = 50
-rotation = 0
-handoff_wait_seconds = 60
-usb_release_wait_seconds = 10
-
-[runtime.usb.bootrom]
-vendor_id = 0x1782
-product_id = 0x4d00
-wait_seconds = 300
-
-[runtime.usb.linux_gadget]
-vendor_id = 0x0525
-product_id = 0xa4a6
-wait_seconds = 60
-keyboard_interface = 0
-
-[host]
-
-[host.runtime_tools]
-loader = "spd_dump"
-bridge = "libc_server"
-keyboard = "fplinux-usb-keyboard"
-
-[[host.tools]]
-type = "make-archive"
-name = "spd_dump"
-source_lock = "spreadtrum_flash"
-cache_name = "spreadtrum_flash.tar.gz"
-archive_prefix = "spreadtrum_flash-{commit}/"
-source_directory = "spd_dump"
-binary = "spd_dump"
-link = "static-libusb"
-copies = []
-patches = []
-self_test = false
-
-[[host.tools.members]]
-path = "Makefile"
-digest_key = "makefile_sha256"
-
-[[host.tools.members]]
-path = "spd_dump.c"
-digest_key = "spd_dump_c_sha256"
-
-[[host.tools.members]]
-path = "spd_cmd.h"
-digest_key = "spd_cmd_h_sha256"
-
-[[host.tools]]
-type = "make-archive"
-name = "libc_server"
-source_lock = "fpdoom_host"
-cache_name = "fpdoom-host.tar.gz"
-archive_prefix = "fpdoom-{commit}/libc_server/"
-source_directory = "libc_server"
-binary = "libc_server"
-link = "static-libusb"
-self_test = true
-patches = ["platforms/ums9117/host/0001-libc-server-fplinux-handoff.patch"]
-
-[[host.tools.copies]]
-source = "platforms/ums9117/bootstrap/fplinux-handoff-protocol.h"
-destination = "fplinux-handoff-protocol.h"
-
-[[host.tools.members]]
-path = "Makefile"
-digest_key = "makefile_sha256"
-
-[[host.tools.members]]
-path = "libc_server.c"
-digest_key = "libc_server_c_sha256"
-
-[[host.tools.members]]
-path = "cmd_def.h"
-digest_key = "cmd_def_h_sha256"
-
-[[host.tools]]
-type = "cc-libusb"
-name = "fplinux-usb-keyboard"
-source = "common/host/fplinux-usb-keyboard.c"
-self_test = true
-
-# Reads the stock firmware tables for the board-maps device-data group. It
-# uses no libusb symbols; the static link keeps the binary self-contained.
-[[host.tools]]
-type = "make-archive"
-name = "fphelper_t117"
-source_lock = "spreadtrum_flash"
-cache_name = "spreadtrum_flash.tar.gz"
-archive_prefix = "spreadtrum_flash-{commit}/fphelper_t117/"
-source_directory = "fphelper_t117"
-binary = "fphelper_t117"
-link = "static-libusb"
-copies = []
-patches = []
-self_test = false
-
-[[host.tools.members]]
-path = "Makefile"
-digest_key = "fphelper_t117_makefile_sha256"
-
-[[host.tools.members]]
-path = "main.c"
-digest_key = "fphelper_t117_main_c_sha256"
-
 [[linux.copies]]
 source = "platforms/ums9117/linux/drivers/clk/sprd/clk-ums9117-gates.c"
 destination = "drivers/clk/sprd/ums9117-gates.c"
@@ -806,9 +506,308 @@ source = "platforms/ums9117/linux/bindings/mmc/sprd,ums9117-sdhci.yaml"
 destination = "Documentation/devicetree/bindings/mmc/sprd,ums9117-sdhci.yaml"
 
 [[linux.appends]]
+source = "platforms/ums9117/linux/dts/unisoc.Makefile"
+destination = "arch/arm/boot/dts/unisoc/Makefile"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/media/i2c/bf30a2.Kconfig"
+destination = "drivers/media/i2c/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/media/i2c/bf30a2.Makefile"
+destination = "drivers/media/i2c/Makefile"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/sound/drivers/sound.Kconfig"
+destination = "sound/drivers/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/sound/drivers/sound.Makefile"
+destination = "sound/drivers/Makefile"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/leds/sc2720-kpled.Kconfig"
+destination = "drivers/leds/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/leds/sc2720-kpled.Makefile"
+destination = "drivers/leds/Makefile"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/arch/arm/mach-ums9117/nand.Kconfig"
+destination = "arch/arm/mach-ums9117/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/arch/arm/mach-ums9117/nand.Makefile"
+destination = "arch/arm/mach-ums9117/Makefile"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/mmc/host/mmc.Kconfig"
+destination = "drivers/mmc/host/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/mmc/host/mmc.Makefile"
+destination = "drivers/mmc/host/Makefile"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/clk/sprd/inherited-clk.Kconfig"
+destination = "drivers/clk/sprd/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/clk/sprd/inherited-clk.Makefile"
+destination = "drivers/clk/sprd/Makefile"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/media/platform/media.Kconfig"
+destination = "drivers/media/platform/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/media/platform/media.Makefile"
+destination = "drivers/media/platform/Makefile"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/gpu/drm/ums9117/drm.Kconfig"
+destination = "drivers/gpu/drm/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/gpu/drm/ums9117/drm-parent.Makefile"
+destination = "drivers/gpu/drm/Makefile"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/power/supply/sc2720-power-supply.Kconfig"
+destination = "drivers/power/supply/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/power/supply/sc2720-power-supply.Makefile"
+destination = "drivers/power/supply/Makefile"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/power/reset/sc2720-poweroff.Kconfig"
+destination = "drivers/power/reset/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/power/reset/sc2720-poweroff.Makefile"
+destination = "drivers/power/reset/Makefile"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/bluetooth/bluetooth-parent.Kconfig"
+destination = "drivers/bluetooth/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/bluetooth/bluetooth-parent.Makefile"
+destination = "drivers/bluetooth/Makefile"
+
+[[linux.appends]]
 source = "platforms/ums9117/linux/drivers/clk/sc2720-clk.Kconfig"
 destination = "drivers/clk/Kconfig"
 
 [[linux.appends]]
 source = "platforms/ums9117/linux/drivers/clk/sc2720-clk.Makefile"
 destination = "drivers/clk/Makefile"
+
+[[linux.dt_config_checks]]
+path = "/soc/usb@20200000"
+compatible = "sprd,ums9117-musb"
+config = "CONFIG_USB_MUSB_UMS9117_COLD"
+
+[[linux.dt_config_checks]]
+path = "/soc/usb@20200000"
+compatible = "fplinux,ums9117-musb-inherited"
+config = "CONFIG_USB_MUSB_UMS9117_INHERITED"
+
+[[linux.dt_config_checks]]
+path = "/soc/keypad@40250000"
+compatible = "sprd,ums9117-keypad"
+config = "CONFIG_KEYBOARD_UMS9117"
+
+[[linux.dt_config_checks]]
+path = "/soc/keypad@40250000"
+compatible = "sprd,ums9117-keypad"
+property = "eic9-gpios"
+config = "CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY"
+
+[bootstrap]
+vendor_source_lock = "fpdoom_bootstrap"
+vendor_cache_name = "fpdoom-bootstrap.tar.gz"
+archive_prefix = "fpdoom-{commit}/"
+source_destination = "bootstrap"
+vendor_destination = "vendor/fpdoom"
+output_destination = "out"
+lcd_config_destination = "ums9117/lcd_config.h"
+kernel_destination = "zImage"
+files = [
+  "build_t117.make",
+  "fpdoom/cmd_def.h",
+  "fpdoom/common.c",
+  "fpdoom/common.h",
+  "fpdoom/include/signal.h",
+  "fpdoom/include/stdio.h",
+  "fpdoom/include/stdlib.h",
+  "fpdoom/libc.c",
+  "fpdoom/libc/malloc.h",
+  "fpdoom/libc/printf.h",
+  "fpdoom/syscode.h",
+  "fpdoom/usbio.h",
+  "pack_reloc/Makefile",
+  "pack_reloc/pack_reloc.c",
+  "ums9117/asmcode.s",
+  "ums9117/entry.c",
+  "ums9117/lcd_spi.h",
+  "ums9117/start.s",
+  "ums9117/syscode.c",
+  "ums9117/syscomm.c",
+  "ums9117/usbio.c",
+]
+patches = [
+  "platforms/ums9117/bootstrap/0001-preserve-ram-probe-contents.patch",
+  "platforms/ums9117/bootstrap/0002-headless.patch",
+  "platforms/ums9117/bootstrap/0003-target-display-transport.patch",
+  "platforms/ums9117/bootstrap/0004-linux-owned-input-audio.patch",
+]
+toolchain = "arm-none-eabi"
+lto = 0
+pack_reloc = "pack_reloc"
+safety_target = "fplinux-safety-check"
+build_targets = ["clean", "all", "map"]
+load_address = 0x80100000
+payload_limit = 0x82000000
+
+[[bootstrap.shared_copies]]
+source = "bootstrap/fplinux-boot-screen"
+destination = "fplinux-boot-screen"
+
+[[bootstrap.shared_copies]]
+source = "platforms/ums9117/bootstrap"
+destination = "ums9117-bootstrap"
+
+[[bootstrap.shared_copies]]
+source = "platforms/ums9117/common/ums9117-boot-contract.h"
+destination = "ums9117-common/ums9117-boot-contract.h"
+
+[[bootstrap.linux_copies]]
+source = "lib/fonts/font_6x8.c"
+destination = "fplinux-boot-screen/font_6x8.c"
+
+[[bootstrap.linux_copies]]
+source = "lib/fonts/font_7x14.c"
+destination = "fplinux-boot-screen/font_7x14.c"
+
+[bootstrap.layout]
+ram_base = 0x80000000
+ram_size = 0x04000000
+kernel_load = 0x82000000
+kernel_entry = 0x82000000
+kernel_size = 0x01200000
+fdt_load = 0x83e00000
+fdt_size = 0x00010000
+framebuffer = 0x83f00000
+framebuffer_size = 0x00100000
+timer_hz = 1000
+
+[runtime]
+fdl1_load_address = 0x00006200
+
+[runtime.adapter]
+brightness = 50
+rotation = 0
+handoff_wait_seconds = 60
+usb_release_wait_seconds = 10
+
+[runtime.usb.bootrom]
+vendor_id = 0x1782
+product_id = 0x4d00
+wait_seconds = 300
+
+[runtime.usb.linux_gadget]
+vendor_id = 0x0525
+product_id = 0xa4a6
+keyboard_interface = 0
+wait_seconds = 60
+
+[host]
+[host.runtime_tools]
+loader = "spd_dump"
+bridge = "libc_server"
+keyboard = "fplinux-usb-keyboard"
+
+[[host.tools]]
+type = "make-archive"
+name = "spd_dump"
+source_lock = "spreadtrum_flash"
+cache_name = "spreadtrum_flash.tar.gz"
+archive_prefix = "spreadtrum_flash-{commit}/"
+source_directory = "spd_dump"
+binary = "spd_dump"
+link = "static-libusb"
+copies = []
+patches = []
+self_test = false
+
+[[host.tools.members]]
+path = "Makefile"
+digest_key = "makefile_sha256"
+
+[[host.tools.members]]
+path = "spd_dump.c"
+digest_key = "spd_dump_c_sha256"
+
+[[host.tools.members]]
+path = "spd_cmd.h"
+digest_key = "spd_cmd_h_sha256"
+
+[[host.tools]]
+type = "make-archive"
+name = "libc_server"
+source_lock = "fpdoom_host"
+cache_name = "fpdoom-host.tar.gz"
+archive_prefix = "fpdoom-{commit}/libc_server/"
+source_directory = "libc_server"
+binary = "libc_server"
+link = "static-libusb"
+patches = ["platforms/ums9117/host/0001-libc-server-fplinux-handoff.patch"]
+self_test = true
+
+[[host.tools.members]]
+path = "Makefile"
+digest_key = "makefile_sha256"
+
+[[host.tools.members]]
+path = "libc_server.c"
+digest_key = "libc_server_c_sha256"
+
+[[host.tools.members]]
+path = "cmd_def.h"
+digest_key = "cmd_def_h_sha256"
+
+[[host.tools.copies]]
+source = "platforms/ums9117/bootstrap/fplinux-handoff-protocol.h"
+destination = "fplinux-handoff-protocol.h"
+
+[[host.tools]]
+type = "cc-libusb"
+name = "fplinux-usb-keyboard"
+source = "common/host/fplinux-usb-keyboard.c"
+self_test = true
+
+# Reads the stock firmware tables for the board-maps device-data group. It
+# uses no libusb symbols; the static link keeps the binary self-contained.
+[[host.tools]]
+type = "make-archive"
+name = "fphelper_t117"
+source_lock = "spreadtrum_flash"
+cache_name = "spreadtrum_flash.tar.gz"
+archive_prefix = "spreadtrum_flash-{commit}/fphelper_t117/"
+source_directory = "fphelper_t117"
+binary = "fphelper_t117"
+link = "static-libusb"
+copies = []
+patches = []
+self_test = false
+
+[[host.tools.members]]
+path = "Makefile"
+digest_key = "fphelper_t117_makefile_sha256"
+
+[[host.tools.members]]
+path = "main.c"
+digest_key = "fphelper_t117_main_c_sha256"

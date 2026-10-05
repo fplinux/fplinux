@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import stat
-import tempfile
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
@@ -15,6 +14,7 @@ from fplinux_cli.environment.images import (
     load_container_lock,
 )
 
+from .canonical import canonical_outputs, formatter_commands
 from .common import ROOT, fail, relative_name, replace_file_atomically
 from .environment.kern import (
     current_image_state,
@@ -53,23 +53,6 @@ def _path_uses_symlink(root: Path, relative: str) -> bool:
     return False
 
 
-def _select_groups(formats: SourceFormats, selected: frozenset[str]) -> SourceFormats:
-    def keep(paths: tuple[str, ...]) -> tuple[str, ...]:
-        return tuple(path for path in paths if path in selected)
-
-    return SourceFormats(
-        keep(formats.python),
-        keep(formats.markdown),
-        keep(formats.json),
-        keep(formats.toml),
-        keep(formats.posix_shell),
-        keep(formats.bash),
-        keep(formats.c),
-        keep(formats.javascript),
-        keep(formats.posix_shell_fragments),
-    )
-
-
 def resolve_format_paths(
     values: Sequence[str],
     *,
@@ -104,93 +87,7 @@ def resolve_format_paths(
         if relative not in supported and Path(relative).suffix != ".patch":
             fail(f"no project formatter is defined for: {relative}")
     selected = tuple(requested)
-    return selected, files, _select_groups(formats, frozenset(selected))
-
-
-def _materialize_snapshot(snapshot: WorkspaceSnapshot, destination: Path) -> None:
-    for source in snapshot.files:
-        path = destination / source.path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        written = path.write_bytes(source.contents)
-        if written != len(source.contents):
-            fail(f"could not write complete format projection: {source.path}")
-        path.chmod(source.mode)
-
-
-def _formatter_paths(paths: tuple[str, ...], workspace: str) -> list[str]:
-    return [f"{workspace.rstrip('/')}/{path}" for path in paths]
-
-
-def formatter_commands(
-    groups: SourceFormats, *, workspace: str = "/workspace"
-) -> tuple[tuple[str, list[str]], ...]:
-    """Return direct pinned-tool commands for one selected source projection."""
-    commands: list[tuple[str, list[str]]] = []
-    if groups.toml:
-        commands.append(
-            ("taplo", ["taplo", "fmt", "--", *_formatter_paths(groups.toml, workspace)])
-        )
-    prettier = (*groups.markdown, *groups.json, *groups.javascript)
-    if prettier:
-        commands.append(
-            (
-                "prettier",
-                [
-                    "prettier",
-                    "--write",
-                    "--ignore-unknown",
-                    "--",
-                    *_formatter_paths(tuple(prettier), workspace),
-                ],
-            )
-        )
-    if groups.python:
-        commands.append(
-            ("ruff", ["ruff", "format", "--", *_formatter_paths(groups.python, workspace)])
-        )
-    posix_shell = (*groups.posix_shell, *groups.posix_shell_fragments)
-    if posix_shell:
-        commands.append(
-            (
-                "shfmt-posix",
-                [
-                    "shfmt",
-                    "-w",
-                    "-ln",
-                    "posix",
-                    "--",
-                    *_formatter_paths(posix_shell, workspace),
-                ],
-            )
-        )
-    if groups.bash:
-        commands.append(
-            (
-                "shfmt-bash",
-                [
-                    "shfmt",
-                    "-w",
-                    "-ln",
-                    "bash",
-                    "--",
-                    *_formatter_paths(groups.bash, workspace),
-                ],
-            )
-        )
-    if groups.c:
-        commands.append(
-            (
-                "clang-format",
-                [
-                    "clang-format",
-                    "--style=file",
-                    "-i",
-                    "--",
-                    *_formatter_paths(groups.c, workspace),
-                ],
-            )
-        )
-    return tuple(commands)
+    return selected, files, formats.select(frozenset(selected))
 
 
 def _container_command(  # noqa: PLR0913 -- projection and optional cache mounts stay explicit.
@@ -237,38 +134,6 @@ def _container_command(  # noqa: PLR0913 -- projection and optional cache mounts
     ]
 
 
-def _read_projection(
-    root: Path,
-    snapshot: WorkspaceSnapshot,
-    selected: frozenset[str],
-) -> dict[str, bytes]:
-    expected = {source.path: source for source in snapshot.files}
-    actual: set[str] = set()
-    for path in root.rglob("*"):
-        if path.is_symlink():
-            fail(f"formatter created a symlink: {path.relative_to(root)}")
-        if path.is_dir():
-            continue
-        if not path.is_file():
-            fail(f"formatter created a non-regular file: {path.relative_to(root)}")
-        actual.add(path.relative_to(root).as_posix())
-    if actual != set(expected):
-        fail("formatter changed the source inventory in its private projection")
-
-    outputs: dict[str, bytes] = {}
-    for relative, source in expected.items():
-        path = root / relative
-        mode = stat.S_IMODE(path.stat().st_mode)
-        if mode != source.mode:
-            fail(f"formatter changed source permissions: {relative}")
-        contents = path.read_bytes()
-        if relative in selected:
-            outputs[relative] = contents
-        elif contents != source.contents:
-            fail(f"formatter changed an unselected source: {relative}")
-    return outputs
-
-
 def _publish_outputs(
     snapshot: WorkspaceSnapshot,
     outputs: dict[str, bytes],
@@ -306,14 +171,10 @@ def format_snapshot(
     current_snapshot: Callable[[], WorkspaceSnapshot],
 ) -> tuple[int, int]:
     """Format one immutable projection and publish only after every gate succeeds."""
-    with tempfile.TemporaryDirectory(prefix="fplinux-format-") as temporary:
-        projection = Path(temporary)
-        _materialize_snapshot(snapshot, projection)
-        run_formatters(projection)
-        outputs = _read_projection(projection, snapshot, frozenset(selected))
-        if current_snapshot().recipe != snapshot.recipe:
-            fail("source checkout changed while formatting; nothing was published")
-        return _publish_outputs(snapshot, outputs, root=root)
+    outputs = canonical_outputs(snapshot, selected, run_formatters=run_formatters)
+    if current_snapshot().recipe != snapshot.recipe:
+        fail("source checkout changed while formatting; nothing was published")
+    return _publish_outputs(snapshot, outputs, root=root)
 
 
 def format_sources(values: Sequence[str]) -> None:

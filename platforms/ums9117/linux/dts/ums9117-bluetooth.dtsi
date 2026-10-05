@@ -5,20 +5,20 @@
 		mailbox: mailbox@400a0000 {
 			compatible = "sprd,sc9860-mailbox";
 			reg = <0x400a0000 0x1000>, <0x400a8000 0x1000>;
+			#mbox-cells = <1>;
+			clock-names = "enable";
+			clocks = <&aonapb_gate CLK_MBOX_EB>;
+			interrupt-names = "inbox", "outbox";
 			interrupts = <GIC_SPI 68 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 69 IRQ_TYPE_LEVEL_HIGH>;
-			interrupt-names = "inbox", "outbox";
-			clocks = <&aonapb_gate CLK_MBOX_EB>;
-			clock-names = "enable";
-			#mbox-cells = <1>;
 		};
 
 		bluetooth: bluetooth@80000000 {
 			compatible = "fplinux,ums9117-bluetooth";
 			reg = <0x80000000 0x100000>, <0x50800000 0x1000>;
-			reg-names = "sipc-cm4", "boot-vector";
-			mboxes = <&mailbox 1>;
 			mbox-names = "cm4";
+			mboxes = <&mailbox 1>;
+			reg-names = "sipc-cm4", "boot-vector";
 			sprd,aon-apb = <&aon_apb>;
 			sprd,pmu-apb = <&pmu_apb>;
 		};

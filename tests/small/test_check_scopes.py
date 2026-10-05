@@ -627,6 +627,9 @@ class CheckScopeTests(unittest.TestCase):
                 "metadata",
                 {
                     "commitlint.config.mjs": b"export default {};\n",
+                    ".github/workflows/demo.yml": b"name: Demo\n",
+                    "platforms/demo/target-template/target.toml.in": b'name = "@DEVICE@"\n',
+                    ".vale.ini": b"[*.md]\nBasedOnStyles = Vale\n",
                 },
                 {"other.mjs": b"export default {};\n", "other.JSON": b"{}\n"},
             ),

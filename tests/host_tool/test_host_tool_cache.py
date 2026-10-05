@@ -128,7 +128,7 @@ class HostToolCacheTests(unittest.TestCase):
 
             environment = {
                 "FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE": "a" * 64,
-                "FPLINUX_CONTAINER_IMAGE_GENERATION": "b" * 64,
+                "FPLINUX_CONTAINER_IMAGE_CONTENT": "b" * 64,
                 "PATH": os.environ.get("PATH", os.defpath),
             }
             with (
@@ -154,7 +154,7 @@ class HostToolCacheTests(unittest.TestCase):
                 with mock.patch.dict(os.environ, {"CC": "cc"}):
                     build("B:two", 5)
                     with mock.patch.dict(
-                        os.environ, {"FPLINUX_CONTAINER_IMAGE_GENERATION": "c" * 64}
+                        os.environ, {"FPLINUX_CONTAINER_IMAGE_CONTENT": "c" * 64}
                     ):
                         build("B:two", 6)
                         self.assertEqual(calls["self_test"], 8)

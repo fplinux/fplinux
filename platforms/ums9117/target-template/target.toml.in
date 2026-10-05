@@ -10,13 +10,6 @@ compatible = "@COMPATIBLE@"
 [nand]
 raw_device = "/dev/ums9117-nand-raw"
 
-# Extracted from the stock firmware in a NAND backup together with a board report.
-[board_maps]
-firmware = [
-  { source = "pinmap.bin", destination = "pinmap.bin" },
-  { source = "keymap.bin", destination = "keymap.bin" },
-]
-
 [rootfs]
 packages = ["fplinux-font-terminus-6x12"]
 
@@ -61,3 +54,10 @@ exec_distance = 0
 session_name = "@TARGET@-linux"
 # Replace * if this phone uses another BootROM key.
 boot_instructions = "Power the phone off, hold *, then connect USB while keeping * pressed."
+
+# Extracted from the stock firmware in a NAND backup together with a board report.
+[board_maps]
+firmware = [
+  { source = "pinmap.bin", destination = "pinmap.bin" },
+  { source = "keymap.bin", destination = "keymap.bin" },
+]

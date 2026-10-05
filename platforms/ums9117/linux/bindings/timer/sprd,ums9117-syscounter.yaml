@@ -9,8 +9,7 @@ title: Unisoc UMS9117 free-running AP system counter
 maintainers:
   - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
 
-description:
-  Free-running 1 ms system counter in the UMS9117 AP always-on block.
+description: Free-running 1 ms system counter in the UMS9117 AP always-on block.
   RAM-booted systems use it as clocksource and sched_clock. The counter
   has no interrupt and no programmable clock inputs.
 

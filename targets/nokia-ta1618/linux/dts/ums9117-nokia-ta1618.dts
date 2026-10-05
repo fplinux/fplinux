@@ -19,9 +19,9 @@
 	};
 
 	reserved-memory {
+		ranges;
 		#address-cells = <1>;
 		#size-cells = <1>;
-		ranges;
 
 		framebuffer@83f00000 {
 			reg = <0x83f00000 0x00100000>;
@@ -34,8 +34,8 @@
 			compatible = "pinctrl-single";
 			reg = <0x402a00dc 0x4>;
 			#pinctrl-cells = <1>;
-			pinctrl-single,register-width = <32>;
 			pinctrl-single,function-mask = <0x30>;
+			pinctrl-single,register-width = <32>;
 
 			sdio_cd_mux_pins: sdio-cd-pins {
 				pinctrl-single,pins = <0x0 0x0>;
@@ -46,8 +46,8 @@
 			compatible = "pinctrl-single";
 			reg = <0x402a04dc 0x4>;
 			#pinctrl-cells = <1>;
-			pinctrl-single,register-width = <32>;
 			pinctrl-single,function-mask = <0x0033f8cf>;
+			pinctrl-single,register-width = <32>;
 
 			sdio_cd_pad_pins: sdio-cd-pins {
 				pinctrl-single,pins = <0x0 0x0000208a>;
@@ -58,8 +58,8 @@
 			compatible = "pinctrl-single";
 			reg = <0x402a01e8 0xc>;
 			#pinctrl-cells = <1>;
-			pinctrl-single,register-width = <32>;
 			pinctrl-single,function-mask = <0x30>;
+			pinctrl-single,register-width = <32>;
 
 			camera_mux_pins: camera-pins {
 				pinctrl-single,pins = <0x0 0x0 0x4 0x30 0x8 0x30>;
@@ -70,8 +70,8 @@
 			compatible = "pinctrl-single";
 			reg = <0x402a05e8 0xc>;
 			#pinctrl-cells = <1>;
-			pinctrl-single,register-width = <32>;
 			pinctrl-single,function-mask = <0xffffffff>;
+			pinctrl-single,register-width = <32>;
 
 			camera_pad_pins: camera-pins {
 				pinctrl-single,pins = <
@@ -85,8 +85,8 @@
 			compatible = "pinctrl-single";
 			reg = <0x402a01f4 0x2c>;
 			#pinctrl-cells = <1>;
-			pinctrl-single,register-width = <32>;
 			pinctrl-single,function-mask = <0x30>;
+			pinctrl-single,register-width = <32>;
 
 			camera_dvp_mux_pins: camera-pins {
 				pinctrl-single,pins = <
@@ -101,8 +101,8 @@
 			compatible = "pinctrl-single";
 			reg = <0x402a05f4 0x2c>;
 			#pinctrl-cells = <1>;
-			pinctrl-single,register-width = <32>;
 			pinctrl-single,function-mask = <0xffffffff>;
+			pinctrl-single,register-width = <32>;
 
 			camera_dvp_pad_pins: camera-pins {
 				pinctrl-single,pins = <
@@ -129,22 +129,22 @@
 			      <0x20e02004 0x00000004>,
 			      <0x402a00b0 0x0000001c>,
 			      <0x402a04b0 0x0000001c>;
+			interrupt-names = "lcdc-done";
+			interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL_HIGH>;
+			memory-region = <&codec_dma>;
 			reg-names = "lcdc", "lcm", "spi", "spi-clock-selector",
 				    "spi-reset-set", "spi-reset-clear", "ap-ahb-gate-set",
 				    "ap-ahb-reset-set", "ap-ahb-reset-clear", "pinmux",
 				    "pinconf";
-			interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL_HIGH>;
-			interrupt-names = "lcdc-done";
 			sprd,aon-apb = <&aon_apb>;
-			sprd,pmic = <&sc2720_pmic>;
-			memory-region = <&codec_dma>;
-			sprd,pinmux-offsets = <0 4 8 12 16 20 24>;
-			sprd,pinmux-values = <0 0 0 0 0 0 0>;
 			sprd,pinconf-offsets = <0 4 8 12 16 20 24>;
 			sprd,pinconf-values = <
 				0x00182001 0x00082046 0x00082001 0x00102004
 				0x00082004 0x00102004 0x00082004
 			>;
+			sprd,pinmux-offsets = <0 4 8 12 16 20 24>;
+			sprd,pinmux-values = <0 0 0 0 0 0 0>;
+			sprd,pmic = <&sc2720_pmic>;
 			sprd,wled-current-levels = <20 20 20 20>;
 			sprd,wled-default-level = <15>;
 		};
@@ -156,11 +156,12 @@
 
 &audio {
 	firmware-name = "fplinux/ta1618-audio-profile.bin";
-	pinctrl-names = "audio";
-	pinctrl-0 = <&audio_mux_pins &audio_pad_pins>;
-	fplinux,microphone-capture;
 	hp-det-gpios = <&sc2720_eic 12 GPIO_ACTIVE_HIGH>;
+	pinctrl-0 = <&audio_mux_pins &audio_pad_pins>;
+	pinctrl-names = "audio";
 	fplinux,card-longname = "Nokia TA-1618 audio";
+	fplinux,microphone-capture;
+
 	status = "okay";
 };
 
@@ -207,6 +208,7 @@
 
 &sc2720_vibrator {
 	sprd,voltage-code = <0>;
+
 	status = "okay";
 };
 
@@ -216,9 +218,9 @@
 
 &sc2720_regulators {
 	vddusb: LDO_USB33 {
-		regulator-name = "sc2720-usb33";
-		regulator-min-microvolt = <3300000>;
 		regulator-max-microvolt = <3300000>;
+		regulator-min-microvolt = <3300000>;
+		regulator-name = "sc2720-usb33";
 	};
 };
 
@@ -246,8 +248,8 @@
 			bus-type = <5>;
 			bus-width = <8>;
 			hsync-active = <1>;
-			vsync-active = <0>;
 			pclk-sample = <0>;
+			vsync-active = <0>;
 		};
 	};
 };
@@ -265,8 +267,9 @@
 };
 
 &aon_sensor_clk {
-	assigned-clocks = <&aon_sensor_clk CLK_SENSOR0>;
 	assigned-clock-rates = <24000000>;
+	assigned-clocks = <&aon_sensor_clk CLK_SENSOR0>;
+
 	status = "okay";
 };
 
@@ -276,24 +279,24 @@
 	camera@3c {
 		compatible = "galaxycore,gc2145";
 		reg = <0x3c>;
-		rotation = <270>;
-		clocks = <&aon_sensor_clk CLK_SENSOR0>;
-		camera-core-supply = <&vddcamd>;
 		avdd-supply = <&vddcama>;
+		camera-core-supply = <&vddcamd>;
+		clocks = <&aon_sensor_clk CLK_SENSOR0>;
 		iovdd-supply = <&vddcamio>;
-		reset-gpios = <&ap_gpio 100 GPIO_ACTIVE_LOW>;
-		powerdown-gpios = <&ap_gpio 101 GPIO_ACTIVE_HIGH>;
-		pinctrl-names = "default";
 		pinctrl-0 = <&camera_mux_pins &camera_pad_pins
 			     &camera_dvp_mux_pins &camera_dvp_pad_pins>;
+		pinctrl-names = "default";
+		powerdown-gpios = <&ap_gpio 101 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&ap_gpio 100 GPIO_ACTIVE_LOW>;
+		rotation = <270>;
 
 		port {
 			gc2145_out: endpoint {
 				bus-type = <5>;
 				bus-width = <8>;
 				hsync-active = <1>;
-				vsync-active = <0>;
 				pclk-sample = <0>;
+				vsync-active = <0>;
 			};
 		};
 	};
@@ -308,20 +311,23 @@
 };
 
 &sdio0_mmc {
+	cd-gpios = <&eic2 0 GPIO_ACTIVE_LOW>;
 	pinctrl-0 = <&sdio0_mux &sdio0_pads
 		     &sdio_cd_mux_pins &sdio_cd_pad_pins>;
-	cd-gpios = <&eic2 0 GPIO_ACTIVE_LOW>;
+
 	status = "okay";
 };
 
 &keypad {
-	pinctrl-names = "matrix";
-	pinctrl-0 = <&keypad_mux_pins &keypad_pad_pins>;
 	compatible = "sprd,ums9117-keypad";
-	status = "okay";
+	eic1-gpios = <&sc2720_eic 1 GPIO_ACTIVE_LOW>;
+	eic9-gpios = <&sc2720_eic 9 GPIO_ACTIVE_HIGH>;
 	label = "TA-1618 keypad";
-	keypad,num-rows = <5>;
+	pinctrl-0 = <&keypad_mux_pins &keypad_pad_pins>;
+	pinctrl-names = "matrix";
+	wakeup-source;
 	keypad,num-columns = <4>;
+	keypad,num-rows = <5>;
 	/* TA-1618 matrix scan map. */
 	linux,keymap = <
 		MATRIX_KEY(0, 0, FPLINUX_KEY_STAR)
@@ -344,15 +350,15 @@
 		MATRIX_KEY(4, 2, FPLINUX_KEY_UP)
 		MATRIX_KEY(4, 3, FPLINUX_KEY_SOFT_RIGHT)
 	>;
-	eic1-gpios = <&sc2720_eic 1 GPIO_ACTIVE_LOW>;
 	sprd,eic1-keycode = <FPLINUX_KEY_POWER>;
-	wakeup-source;
-	eic9-gpios = <&sc2720_eic 9 GPIO_ACTIVE_HIGH>;
 	sprd,eic9-keycode = <FPLINUX_KEY_8>;
+
+	status = "okay";
 };
 
 &usb {
 	dr_mode = "peripheral";
 	vddusb-supply = <&vddusb>;
+
 	status = "okay";
 };

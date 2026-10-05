@@ -29,9 +29,9 @@ from fplinux_cli.manifests.paths import normalize_profile
 from fplinux_cli.output import RunReporter
 from fplinux_cli.prune import discard_superseded_profile_logs
 from fplinux_cli.source_formats import (
-    is_javascript_source,
     is_posix_shell_fragment,
     shell_dialect,
+    source_format_kind,
 )
 from fplinux_cli.workspace import (
     WorkspaceFile,
@@ -111,6 +111,14 @@ _CHECK_IMPLEMENTATION = frozenset(
         "scripts/fplinux_cli/alpine_registration.py",
         "scripts/fplinux_cli/alpine_state.py",
         "scripts/fplinux_cli/common.py",
+        "scripts/fplinux_cli/canonical.py",
+        "scripts/fplinux_cli/canonical_json.py",
+        "scripts/fplinux_cli/canonical_json_tree.mjs",
+        "scripts/fplinux_cli/canonical_markdown.py",
+        "scripts/fplinux_cli/canonical_text.py",
+        "scripts/fplinux_cli/canonical_toml.py",
+        "scripts/fplinux_cli/canonical_yaml.py",
+        "scripts/fplinux_cli/workspace.py",
         "scripts/fplinux_cli/environment/__init__.py",
         "scripts/fplinux_cli/environment/images.py",
         "scripts/fplinux_cli/quality/__init__.py",
@@ -175,7 +183,7 @@ def analyzer_cache_names(scopes: tuple[str, ...]) -> tuple[str, ...]:
 def _is_shell_source(file: WorkspaceFile) -> bool:
     if is_posix_shell_fragment(file.path):
         return True
-    if Path(file.path).suffix not in {"", ".initd", ".sh"}:
+    if Path(file.path).suffix not in {"", ".initd", ".sh", ".bashrc"}:
         return False
     first_line = file.contents.splitlines()[:1]
     if not first_line:
@@ -216,9 +224,8 @@ def _source_scope_uses_file(  # noqa: PLR0911
         return name in {".kernignore", "Containerfile"} or name.startswith(".hadolint")
     if scope == "metadata":
         return (
-            suffix == ".toml"
-            or (suffix in {".json", ".jsonc"} and name != "package-lock.json")
-            or is_javascript_source(file.path)
+            source_format_kind(file.path) in {"toml", "json", "yaml", "javascript"}
+            or suffix == ".ini"
             or name == ".editorconfig"
             or _is_prettier_configuration(file.path)
         )

@@ -139,6 +139,7 @@ nav:
           - docs/reference/style/C.md
           - docs/reference/style/PYTHON.md
           - docs/reference/style/SHELL.md
+          - docs/reference/style/FORMATS.md
       - docs/reference/IDENTITY.md
       - docs/reference/INPUT.md
       - docs/reference/LOGGING.md

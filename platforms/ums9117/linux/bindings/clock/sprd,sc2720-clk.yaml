@@ -17,11 +17,11 @@ properties:
   compatible:
     const: sprd,sc2720-clk
 
-  '#clock-cells':
+  "#clock-cells":
     const: 0
 
 required:
   - compatible
-  - '#clock-cells'
+  - "#clock-cells"
 
 additionalProperties: false

@@ -5,6 +5,9 @@ Project host tooling and tests run on Python 3.14.
 The repository configuration is authoritative: Ruff formats and lints Python
 with a 99-column limit, and mypy runs in strict mode. Keep suppressions narrow,
 next to the exceptional boundary, and explain why the normal rule is unsuitable.
+Formatting also applies Ruff's import-order rule to existing import blocks. It
+does not apply general lint fixes or move imports between runtime, deferred and
+`TYPE_CHECKING` blocks.
 
 ## Interfaces and flow
 

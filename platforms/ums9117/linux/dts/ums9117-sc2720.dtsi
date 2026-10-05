@@ -4,13 +4,13 @@
 	sc2720_pmic: pmic@0 {
 		compatible = "sprd,sc2720";
 		reg = <0>;
-		spi-max-frequency = <26000000>;
+		#address-cells = <1>;
+		#interrupt-cells = <1>;
+		#size-cells = <0>;
+		interrupt-controller;
 		interrupt-parent = <&gic>;
 		interrupts = <GIC_SPI 38 IRQ_TYPE_LEVEL_HIGH>;
-		interrupt-controller;
-		#interrupt-cells = <1>;
-		#address-cells = <1>;
-		#size-cells = <0>;
+		spi-max-frequency = <26000000>;
 
 		sc2720_xtal: clock-controller {
 			compatible = "sprd,sc2720-clk";
@@ -23,8 +23,8 @@
 
 		sc2720_fgu: fuel-gauge {
 			compatible = "sprd,ums9117-sc2720-fgu";
-			nvmem-cells = <&fgu_calib>;
 			nvmem-cell-names = "fgu_calib";
+			nvmem-cells = <&fgu_calib>;
 		};
 
 		poweroff {
@@ -43,21 +43,21 @@
 		sc2720_eic: gpio@280 {
 			compatible = "sprd,sc2720-eic";
 			reg = <0x280>;
+			#gpio-cells = <2>;
+			#interrupt-cells = <2>;
+			gpio-controller;
+			interrupt-controller;
 			interrupt-parent = <&sc2720_pmic>;
 			interrupts = <4>;
-			gpio-controller;
-			#gpio-cells = <2>;
-			interrupt-controller;
-			#interrupt-cells = <2>;
 		};
 
 		efuse@300 {
 			compatible = "sprd,sc2720-efuse";
 			reg = <0x300>;
-			hwlocks = <&hwlock 12>;
-			read-only;
 			#address-cells = <1>;
 			#size-cells = <1>;
+			hwlocks = <&hwlock 12>;
+			read-only;
 
 			fgu_calib: calibration@6 {
 				reg = <0x6 0x2>;
@@ -67,12 +67,12 @@
 		sc2720_auxadc: adc@400 {
 			compatible = "sprd,sc2720-adc";
 			reg = <0x400>;
+			#io-channel-cells = <1>;
+			clock-names = "xtal";
+			clocks = <&sc2720_xtal>;
+			hwlocks = <&hwlock 4>;
 			interrupt-parent = <&sc2720_pmic>;
 			interrupts = <0>;
-			#io-channel-cells = <1>;
-			hwlocks = <&hwlock 4>;
-			clocks = <&sc2720_xtal>;
-			clock-names = "xtal";
 		};
 
 		sc2720_kpled: keypad-backlight@df8 {
@@ -86,6 +86,7 @@
 		sc2720_vibrator: vibrator@e00 {
 			compatible = "sprd,sc2720-vibrator";
 			reg = <0xe00>;
+
 			status = "disabled";
 		};
 
@@ -93,33 +94,33 @@
 			compatible = "sprd,sc2720-regulator";
 
 			vddcama: LDO_CAMA {
-				regulator-name = "sc2720-cama";
-				regulator-min-microvolt = <2800000>;
 				regulator-max-microvolt = <2800000>;
+				regulator-min-microvolt = <2800000>;
+				regulator-name = "sc2720-cama";
 			};
 
 			vddcamio: LDO_CAMIO {
-				regulator-name = "sc2720-camio";
-				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <1800000>;
+				regulator-min-microvolt = <1800000>;
+				regulator-name = "sc2720-camio";
 			};
 
 			vddcamd: LDO_CAMD {
-				regulator-name = "sc2720-camd";
-				regulator-min-microvolt = <1250000>;
 				regulator-max-microvolt = <1250000>;
+				regulator-min-microvolt = <1250000>;
+				regulator-name = "sc2720-camd";
 			};
 
 			vmmc: LDO_SDCORE {
-				regulator-name = "sc2720-sdcore";
-				regulator-min-microvolt = <3000000>;
 				regulator-max-microvolt = <3000000>;
+				regulator-min-microvolt = <3000000>;
+				regulator-name = "sc2720-sdcore";
 			};
 
 			vqmmc: LDO_SDIO {
-				regulator-name = "sc2720-sdio";
-				regulator-min-microvolt = <3000000>;
 				regulator-max-microvolt = <3000000>;
+				regulator-min-microvolt = <3000000>;
+				regulator-name = "sc2720-sdio";
 			};
 		};
 	};

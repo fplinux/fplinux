@@ -17,6 +17,19 @@ description: |
   ADD0 and enable 48 kHz mono S16_LE capture. Playback and
   capture can run together at 48 kHz.
 
+allOf:
+  - if:
+      properties:
+        status:
+          const: okay
+      required:
+        - status
+    then:
+      required:
+        - pinctrl-names
+        - pinctrl-0
+        - fplinux,card-longname
+
 properties:
   compatible:
     const: fplinux,ums9117-audio
@@ -94,9 +107,6 @@ properties:
     type: boolean
     description: A headphone jack change can wake system sleep.
 
-dependencies:
-  wakeup-source: [hp-det-gpios]
-
 required:
   - compatible
   - reg
@@ -106,18 +116,8 @@ required:
   - clocks
   - clock-names
 
-allOf:
-  - if:
-      properties:
-        status:
-          const: okay
-      required:
-        - status
-    then:
-      required:
-        - pinctrl-names
-        - pinctrl-0
-        - fplinux,card-longname
+dependencies:
+  wakeup-source: [hp-det-gpios]
 
 additionalProperties: false
 

@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
 image = "image/ramboot.bin"
-
 bundle_files = [
   "image/ramboot.bin",
   "assets/pinmap.bin",
@@ -28,7 +27,6 @@ bundle_files = [
   "assets.lock.toml",
   "THIRD_PARTY_NOTICES.md",
 ]
-
 runtime_files = [
   "image/ramboot.bin",
   "assets/pinmap.bin",
@@ -44,5 +42,4 @@ runtime_files = [
   "runner/ssh_transport.py",
   "runtime-manifest.json",
 ]
-
 documents = ["release/README.txt"]

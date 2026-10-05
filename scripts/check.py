@@ -20,6 +20,7 @@ from urllib.parse import unquote
 # PyYAML ships no type information and the quality image installs no stubs.
 import yaml  # type: ignore[import-untyped]
 from fplinux_cli import alpine_state
+from fplinux_cli.canonical import canonical_outputs, formatter_commands, noncanonical_paths
 from fplinux_cli.common import fail
 from fplinux_cli.manifests.paths import discover_targets
 from fplinux_cli.manifests.platforms import load_platform
@@ -27,6 +28,7 @@ from fplinux_cli.manifests.targets import load_target
 from fplinux_cli.output import RunReporter, current_stage, run_entrypoint
 from fplinux_cli.quality.testing import unittest_commands
 from fplinux_cli.source_formats import classify_source_formats
+from fplinux_cli.workspace import workspace_snapshot
 from pathspec import GitIgnoreSpec
 from site_collect import corpus_files
 
@@ -170,7 +172,8 @@ def check_text(files: list[Path]) -> None:
         if text and not text.endswith("\n"):
             fail(f"missing final newline: {relative}")
         for number, line in enumerate(text.splitlines(), 1):
-            if line.endswith((" ", "\t")):
+            # A single space marks an empty unified-diff context line.
+            if line.endswith((" ", "\t")) and not (path.suffix == ".patch" and line == " "):
                 fail(f"trailing whitespace: {relative}:{number}")
             if path.suffix != ".patch" and re.search(r" +\t", line):
                 fail(f"space before tab: {relative}:{number}")
@@ -569,24 +572,48 @@ def check_userspace_c(sources: list[tuple[str, bool]]) -> None:
         run_userspace_analysis(Path(temporary), sources)
 
 
-def check_prettier_sources(formats: SourceFormats, selected: tuple[str, ...]) -> None:
-    """Check the selected document and metadata formats with their required parsers."""
-    inferred = [
-        *(formats.markdown if "docs" in selected else ()),
-        *(formats.json if "metadata" in selected else ()),
-        *(formats.javascript if "metadata" in selected else ()),
-    ]
-    if inferred:
-        run(["prettier", "--check", "--ignore-unknown", *inferred])
+def check_canonical_sources(
+    files: list[Path], formats: SourceFormats, scopes: tuple[str, ...]
+) -> None:
+    """Compare the formatter's expected bytes without writing the source checkout."""
+    selected: set[str] = set()
+    for scope, paths in (
+        ("source", (*formats.devicetree, *formats.text)),
+        ("metadata", (*formats.toml, *formats.json, *formats.yaml, *formats.javascript)),
+        ("docs", formats.markdown),
+        ("python", formats.python),
+        ("shell", (*formats.posix_shell, *formats.bash, *formats.posix_shell_fragments)),
+        ("alpine", tuple(path for path in formats.text if Path(path).name == "APKBUILD")),
+    ):
+        if scope in scopes:
+            selected.update(paths)
+    if "metadata" in scopes:
+        selected.update(
+            path
+            for path in formats.text
+            if Path(path).suffix == ".ini" or Path(path).name == ".editorconfig"
+        )
+    if "c" in scopes:
+        selected.update(project_c_format_sources(files))
+        selected.update(path for path in formats.c if "bootstrap" in Path(path).parts)
+    if not selected:
+        return
+    paths = tuple(sorted(selected))
+    groups = formats.select(frozenset(selected))
+    snapshot = workspace_snapshot([(path.relative_to(ROOT).as_posix(), path) for path in files])
+
+    def run_formatters(projection: Path) -> None:
+        for _name, command in formatter_commands(groups, workspace=str(projection)):
+            run(command)
+
+    outputs = canonical_outputs(snapshot, paths, run_formatters=run_formatters)
+    changed = noncanonical_paths(snapshot, outputs)
+    if changed:
+        fail("source formatting differs: " + ", ".join(changed))
 
 
 def check_shell_sources(formats: SourceFormats) -> None:
     """Check declared shell dialects, including configurations sourced by consumers."""
-    posix = (*formats.posix_shell, *formats.posix_shell_fragments)
-    if posix:
-        run(["shfmt", "-d", "-ln", "posix", *posix])
-    if formats.bash:
-        run(["shfmt", "-d", "-ln", "bash", *formats.bash])
     scripts = (*formats.posix_shell, *formats.bash)
     if scripts:
         run(["shellcheck", "--enable=all", "--severity=warning", *scripts])
@@ -621,6 +648,8 @@ def main() -> None:
     if "source" in selected:
         with report_stage(reporter, "source-text"):
             check_text(files)
+    with report_stage(reporter, "canonical-sources"):
+        check_canonical_sources(files, formats, selected)
     if "container" in selected:
         with report_stage(reporter, "container-policy"):
             check_container_policy(files)
@@ -628,10 +657,6 @@ def main() -> None:
         with report_stage(reporter, "metadata"):
             check_release_lock()
             run(["taplo", "check", *toml_files])
-            run(["taplo", "fmt", "--check", *toml_files])
-    if "metadata" in selected or "docs" in selected:
-        with report_stage(reporter, "prettier"):
-            check_prettier_sources(formats, selected)
     if "docs" in selected:
         markdown_paths = [path for path in files if path.suffix == ".md"]
         text_files = [
@@ -668,7 +693,6 @@ def main() -> None:
     if "python" in selected:
         with report_stage(reporter, "python"):
             run(["ruff", "check", *python_files])
-            run(["ruff", "format", "--check", *python_files])
             run(["mypy", *python_files])
             if (ROOT / "tests").is_dir():
                 for _tier, command, timeout in unittest_commands([]):
@@ -691,23 +715,6 @@ def main() -> None:
                 run(["apkbuild-lint", apkbuild])
     if "c" in selected:
         c_sources = userspace_c_sources(files)
-        c_format_sources = project_c_format_sources(files)
-        bootstrap_c = [
-            str(path.relative_to(ROOT))
-            for path in files
-            if path.suffix in {".c", ".h"} and "bootstrap" in path.relative_to(ROOT).parts
-        ]
-        with report_stage(reporter, "c-format"):
-            run(
-                [
-                    "clang-format",
-                    "--style=file",
-                    "--dry-run",
-                    "--Werror",
-                    *c_format_sources,
-                    *bootstrap_c,
-                ]
-            )
         with report_stage(reporter, "c-analysis"):
             check_userspace_c(c_sources)
 

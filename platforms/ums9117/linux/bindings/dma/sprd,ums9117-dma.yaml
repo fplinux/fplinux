@@ -9,8 +9,7 @@ title: Unisoc UMS9117 AP DMA controller
 maintainers:
   - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
 
-description:
-  The AP DMA controller provides 32 channels. Request 0 selects
+description: The AP DMA controller provides 32 channels. Request 0 selects
   software-triggered memory copies and request 1 is connected to ROTA.
 
 allOf:
@@ -33,7 +32,7 @@ properties:
     items:
       - const: enable
 
-  '#dma-cells':
+  "#dma-cells":
     const: 1
     description: DMA request number, either 0 for memcpy or 1 for ROTA.
 
@@ -49,7 +48,7 @@ required:
   - interrupts
   - clocks
   - clock-names
-  - '#dma-cells'
+  - "#dma-cells"
   - dma-channels
   - dma-requests
 

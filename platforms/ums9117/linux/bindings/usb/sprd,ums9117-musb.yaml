@@ -15,6 +15,33 @@ description: |
   profile reconstructs the controller's clocks, resets, PHY configuration and
   USB 3.3 V supply before registering the same peripheral-only MUSB core.
 
+allOf:
+  - if:
+      properties:
+        compatible:
+          const: sprd,ums9117-musb
+      required:
+        - compatible
+    then:
+      properties:
+        reg:
+          minItems: 4
+          maxItems: 4
+        reg-names:
+          minItems: 4
+          maxItems: 4
+      required:
+        - reg-names
+        - sprd,aon-apb
+        - vddusb-supply
+    else:
+      properties:
+        reg:
+          maxItems: 1
+        reg-names: false
+        sprd,aon-apb: false
+        vddusb-supply: false
+
 properties:
   compatible:
     enum:
@@ -49,33 +76,6 @@ required:
   - compatible
   - reg
   - interrupts
-
-allOf:
-  - if:
-      properties:
-        compatible:
-          const: sprd,ums9117-musb
-      required:
-        - compatible
-    then:
-      properties:
-        reg:
-          minItems: 4
-          maxItems: 4
-        reg-names:
-          minItems: 4
-          maxItems: 4
-      required:
-        - reg-names
-        - sprd,aon-apb
-        - vddusb-supply
-    else:
-      properties:
-        reg:
-          maxItems: 1
-        reg-names: false
-        sprd,aon-apb: false
-        vddusb-supply: false
 
 additionalProperties: false
 
