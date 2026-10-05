@@ -1,12 +1,12 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-libudev
-pkgver=1.0.4
+pkgver=1.0.5
 pkgrel=0
 pkgdesc="libudev-zero device library that also tags keypads with high key codes"
 url="https://github.com/illiliti/libudev-zero"
 arch="armv7"
 license="ISC"
-makedepends_build="clang22 lld22"
+makedepends_build="clang22 lld22 meson samurai"
 makedepends_host="musl-dev linux-headers"
 options="!check"
 source="libudev-zero-$pkgver.tar.gz::https://github.com/illiliti/libudev-zero/archive/$pkgver.tar.gz
@@ -15,14 +15,17 @@ source="libudev-zero-$pkgver.tar.gz::https://github.com/illiliti/libudev-zero/ar
 builddir="$srcdir/libudev-zero-$pkgver"
 
 build() {
-	make CC="$CC" CPPFLAGS="$CPPFLAGS -DUDEV_MONITOR_NLGRP=1" \
-		PREFIX=/usr libudev.so.1
+	CFLAGS="$CFLAGS $CPPFLAGS -DUDEV_MONITOR_NLGRP=1" abuild-meson \
+		-Ddefault_library=shared \
+		-Dsymbol-versioning=disabled \
+		output
+	meson compile -j "${JOBS:-1}" -C output
 }
 
 package() {
-	install -Dm755 "$builddir/libudev.so.1" "$pkgdir/usr/lib/libudev.so.1"
+	install -Dm755 "$builddir/output/libudev.so.1" "$pkgdir/usr/lib/libudev.so.1"
 }
 sha512sums="
-1c8289ce404a5d0f0596303297f596481e8f319ab69cda4c97cf51baf1b2d0efc54c7156a67eb56e0b1bb7ed33191d2a85a44ab4718d8595955e3c3b38c3b922  libudev-zero-1.0.4.tar.gz
+f20a923cb04351ef9e02313ea3b94e261e01d3607bc1c4c626cb40593b2d60b0e59e017f394786bf9b068c8c4870ee26b50eb56aed60aa828f7629078e9d4fa2  libudev-zero-1.0.5.tar.gz
 a10821b85d84b4ed2291dac4beee02fa39977338f077f753a4f035454829e01718e7938964c195c43c9a7f4f5c27a937ec05fe71ea271890e8360702a80743c1  0001-tag-high-key-devices.patch
 "

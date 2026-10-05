@@ -30,10 +30,10 @@ unless an individual file carries a different SPDX identifier.
 | ALSA utils 1.2.15.2                      | Playback, recording and mixer tools            | GPL-2.0-or-later; upstream aplay, arecord and amixer built by the audio aport              |
 | ALSA library 1.2.15.3                    | PCM conversion and mixer interface             | LGPL-2.1-or-later; supplied by the pinned Alpine package set                               |
 | libinput / libevdev / mtdev              | Input device event libraries                   | MIT; supplied by the pinned Alpine package set                                             |
-| libudev-zero 1.0.4                       | Device enumeration for libinput and BlueZ      | ISC; upstream release archive with phone input-device tagging                              |
+| libudev-zero 1.0.5                       | Device enumeration for libinput and BlueZ      | ISC; upstream release archive with phone input-device tagging                              |
 | mdevd                                    | Uevent rebroadcast for hotplug                 | ISC; supplied by the pinned Alpine package set                                             |
-| xkeyboard-config 2.47                    | Keyboard layout data for applications          | MIT, X11, HPND and xkeyboard-config-Zinoviev notices; `COPYING` shipped in each layout APK |
-| libxkbcommon 1.13.1                      | Keyboard text in the terminal                  | MIT, MIT-open-group, HPND and HPND-sell-variant; shared runtime library                    |
+| xkeyboard-config 2.48                    | Keyboard layout data for applications          | MIT, X11, HPND and xkeyboard-config-Zinoviev notices; `COPYING` shipped in each layout APK |
+| libxkbcommon 1.13.2                      | Keyboard text in the terminal                  | MIT, MIT-open-group, HPND and HPND-sell-variant; shared runtime library                    |
 | libdrm 2.4.134                           | DRM/KMS display access                         | MIT; shared runtime library from the upstream release archive                              |
 | libtsm 4.8.0                             | Terminal screen and escape-sequence handling   | MIT and LGPL-2.1-or-later; the hash table carries the LGPL notice                          |
 | Terminus 4.49.1                          | Terminal, brightness control and showcase text | OFL-1.1; upstream release archive                                                          |

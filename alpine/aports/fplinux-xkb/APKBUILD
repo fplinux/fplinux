@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-xkb
-pkgver=2.47
+pkgver=2.48
 pkgrel=0
 pkgdesc="US keyboard layout data for FPLinux applications"
 url="https://gitlab.freedesktop.org/xkeyboard-config/xkeyboard-config"
@@ -35,6 +35,6 @@ package() {
 		"$pkgdir/usr/share/licenses/$pkgname/COPYING"
 }
 sha512sums="
-bd9b70ec5c8957e087f6c12272725044e6e124c15c7cbbfffb7f3c231944984d3302adda604da05464b7be6c91b5461e74fbec8544ac21b06e3bd8c748fd04e3  xkeyboard-config-2.47.tar.xz
+2c24f9cca97b8863ff2e71fc3780e9c3e22e4486c80d45022e2208d559bdb40824bdb8a4037e0d5690900b6e080ddef4eacfc8bff843e04ba5ab86940f1fb6ea  xkeyboard-config-2.48.tar.xz
 82facea83a5f6b6b6fccb9c42b5e7eff92c26689456f5d53d95171092c6874d2f32ea3f5fcda35d162f937e1e503afe468016efa86a9927d0f1430802d010294  fplinux
 "
