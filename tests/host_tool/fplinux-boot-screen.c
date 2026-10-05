@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "boot-screen.h"
 
-#include <linux/font.h>
+#include "font.h"
 #include <stdio.h>
 
 /* Synthetic font data isolates glyph indexing and drawing from upstream data. */

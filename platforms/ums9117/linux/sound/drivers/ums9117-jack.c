@@ -73,7 +73,7 @@ static irqreturn_t ums9117_jack_irq_thread(int irq, void *data)
 
 	pm_wakeup_event(jack->dev, UMS9117_JACK_WAKE_EVENT_MS);
 	/* Each edge restarts the wait; the work reports read errors. */
-	mod_delayed_work(system_wq, &jack->report_work,
+	mod_delayed_work(system_percpu_wq, &jack->report_work,
 			 msecs_to_jiffies(confirm_ms));
 	return IRQ_HANDLED;
 }
@@ -158,7 +158,7 @@ void ums9117_jack_start(struct ums9117_jack *jack)
 		return;
 	/* Unmasking first lets a change after the next read raise an event. */
 	enable_irq(jack->irq);
-	mod_delayed_work(system_wq, &jack->report_work,
+	mod_delayed_work(system_percpu_wq, &jack->report_work,
 			 msecs_to_jiffies(UMS9117_JACK_SETTLE_MS));
 }
 
@@ -205,5 +205,5 @@ void ums9117_jack_resume(struct ums9117_jack *jack)
 		enable_irq(jack->irq);
 	}
 	/* A masked line raised no event for a change during sleep. */
-	mod_delayed_work(system_wq, &jack->report_work, 0);
+	mod_delayed_work(system_percpu_wq, &jack->report_work, 0);
 }

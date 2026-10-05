@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "boot-screen.h"
 
-#include <linux/font.h>
+#include "font.h"
 
 #define FPLINUX_BOOT_SCREEN_COLOUR_BACKGROUND 0x0841U
 #define FPLINUX_BOOT_SCREEN_COLOUR_SURFACE 0x18c3U

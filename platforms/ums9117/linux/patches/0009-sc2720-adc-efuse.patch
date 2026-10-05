@@ -663,7 +663,7 @@ index 2535c2c..7ae1f37 100644
  	.set_volref = false,
  };
 
-@@ -877,6 +1253,8 @@ static int sc27xx_adc_probe(struct platform_device *pdev)
+@@ -875,6 +1251,8 @@
  		return -ENOMEM;
 
  	sc27xx_data = iio_priv(indio_dev);
@@ -671,10 +671,10 @@ index 2535c2c..7ae1f37 100644
 +	sc27xx_data->var_data = pdata;
 
  	sc27xx_data->regmap = dev_get_regmap(dev->parent, NULL);
- 	if (!sc27xx_data->regmap) {
-@@ -906,7 +1284,15 @@ static int sc27xx_adc_probe(struct platform_device *pdev)
- 		return -ENXIO;
- 	}
+ 	if (!sc27xx_data->regmap)
+@@ -896,7 +1274,15 @@
+ 	if (!sc27xx_data->hwlock)
+ 		return dev_err_probe(dev, -ENXIO, "failed to request hwspinlock\n");
 
 -	sc27xx_data->dev = dev;
 +	if (pdata->transient_power) {
@@ -688,24 +688,17 @@ index 2535c2c..7ae1f37 100644
 +
  	if (pdata->set_volref) {
  		sc27xx_data->volref = devm_regulator_get(dev, "vref");
- 		if (IS_ERR(sc27xx_data->volref)) {
-@@ -915,26 +1301,31 @@ static int sc27xx_adc_probe(struct platform_device *pdev)
- 		}
+ 		if (IS_ERR(sc27xx_data->volref))
+@@ -904,22 +1290,30 @@
+ 					     "failed to get ADC volref\n");
  	}
 
 -	sc27xx_data->var_data = pdata;
  	sc27xx_data->var_data->init_scale(sc27xx_data);
 
 -	ret = sc27xx_adc_enable(sc27xx_data);
--	if (ret) {
--		dev_err(dev, "failed to enable ADC module\n");
--		return ret;
--	}
--
--	ret = devm_add_action_or_reset(dev, sc27xx_adc_disable, sc27xx_data);
--	if (ret) {
--		dev_err(dev, "failed to add ADC disable action\n");
--		return ret;
+-	if (ret)
+-		return dev_err_probe(dev, ret, "failed to enable ADC module\n");
 +	if (!pdata->transient_power) {
 +		ret = sc27xx_adc_enable(sc27xx_data);
 +		if (ret)
@@ -713,12 +706,15 @@ index 2535c2c..7ae1f37 100644
 +					     "failed to initialize ADC\n");
 +		ret = devm_add_action_or_reset(dev, sc27xx_adc_disable,
 +					       sc27xx_data);
-+		if (ret) {
-+			dev_err(dev, "failed to add ADC disable action\n");
-+			return ret;
-+		}
- 	}
++		if (ret)
++			return dev_err_probe(
++				dev, ret, "failed to add ADC disable action\n");
++	}
 
+-	ret = devm_add_action_or_reset(dev, sc27xx_adc_disable, sc27xx_data);
+-	if (ret)
+-		return dev_err_probe(dev, ret, "failed to add ADC disable action\n");
+-
 -	indio_dev->name = dev_name(dev);
 +	indio_dev->name = pdata->name ? pdata->name : dev_name(dev);
  	indio_dev->modes = INDIO_DIRECT_MODE;

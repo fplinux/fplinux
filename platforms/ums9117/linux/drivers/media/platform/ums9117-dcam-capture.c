@@ -392,7 +392,7 @@ static void dcam_work(struct work_struct *work)
 				msecs_to_jiffies(DCAM_SERIAL_FRAME_TIMEOUT_MS);
 			spin_unlock_irqrestore(&capture->qlock, flags);
 			mod_delayed_work(
-				system_wq, &capture->watchdog,
+				system_percpu_wq, &capture->watchdog,
 				msecs_to_jiffies(DCAM_SERIAL_FRAME_TIMEOUT_MS));
 			continue;
 		}
@@ -657,7 +657,7 @@ ums9117_dcam_capture_create(struct device *dev, struct v4l2_device *v4l2,
 	if (ret)
 		goto put_node;
 
-	capture = kzalloc(sizeof(*capture), GFP_KERNEL);
+	capture = kzalloc_obj(*capture, GFP_KERNEL);
 	if (!capture) {
 		ret = -ENOMEM;
 		goto put_node;

@@ -7,9 +7,9 @@ diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
  	tristate "Spreadtrum GPIO support"
 -	depends on ARCH_SPRD || COMPILE_TEST
 +	depends on ARCH_SPRD || ARCH_UMS9117 || COMPILE_TEST
- 	depends on OF_GPIO
  	select GPIOLIB_IRQCHIP
  	help
+ 	  Say yes here to support Spreadtrum GPIO device.
 diff --git a/drivers/i2c/busses/Kconfig b/drivers/i2c/busses/Kconfig
 --- a/drivers/i2c/busses/Kconfig
 +++ b/drivers/i2c/busses/Kconfig
@@ -25,14 +25,13 @@ diff --git a/drivers/i2c/busses/Kconfig b/drivers/i2c/busses/Kconfig
 diff --git a/drivers/gpio/gpio-sprd.c b/drivers/gpio/gpio-sprd.c
 --- a/drivers/gpio/gpio-sprd.c
 +++ b/drivers/gpio/gpio-sprd.c
-@@ -5,11 +5,13 @@
+@@ -5,10 +5,12 @@
   */
 
  #include <linux/bitops.h>
 +#include <linux/clk.h>
  #include <linux/gpio/driver.h>
  #include <linux/kernel.h>
- #include <linux/mod_devicetable.h>
  #include <linux/module.h>
  #include <linux/platform_device.h>
 +#include <linux/property.h>

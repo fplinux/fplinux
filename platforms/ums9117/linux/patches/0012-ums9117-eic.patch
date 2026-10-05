@@ -7,6 +7,6 @@ diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
  	tristate "Spreadtrum EIC support"
 -	depends on ARCH_SPRD || COMPILE_TEST
 +	depends on ARCH_SPRD || ARCH_UMS9117 || COMPILE_TEST
- 	depends on OF_GPIO
  	select GPIOLIB_IRQCHIP
  	help
+ 	  Say yes here to support Spreadtrum EIC device.

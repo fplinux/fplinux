@@ -1,13 +1,12 @@
 diff --git a/drivers/input/misc/sc27xx-vibra.c b/drivers/input/misc/sc27xx-vibra.c
-index 1478017..f3b4792 100644
+index 7590f3a..cb3acd0 100644
 --- a/drivers/input/misc/sc27xx-vibra.c
 +++ b/drivers/input/misc/sc27xx-vibra.c
-@@ -5,34 +5,60 @@
+@@ -5,33 +5,59 @@
 
  #include <linux/device.h>
  #include <linux/input.h>
 +#include <linux/jiffies.h>
- #include <linux/mod_devicetable.h>
  #include <linux/module.h>
  #include <linux/platform_device.h>
 +#include <linux/pm.h>
@@ -63,7 +62,7 @@ index 1478017..f3b4792 100644
  };
 
  static const struct sc27xx_vibra_data sc2731_data = {
-@@ -53,63 +79,285 @@ static const struct sc27xx_vibra_data sc2721_data = {
+@@ -52,63 +78,286 @@ static const struct sc27xx_vibra_data sc2721_data = {
  	.ldo_pd = LDO_VIBR_PD,
  };
 
@@ -211,7 +210,7 @@ index 1478017..f3b4792 100644
 -	else if (info->strength == 0 && info->enabled)
 -		sc27xx_vibra_set(info, false);
 +	if (delay)
-+		mod_delayed_work(system_wq, &info->stop_work, delay);
++		mod_delayed_work(system_percpu_wq, &info->stop_work, delay);
 +	else if (stop)
 +		schedule_work(&info->play_work);
  }
@@ -220,6 +219,8 @@ index 1478017..f3b4792 100644
  			     struct ff_effect *effect)
  {
 -	struct vibra_info *info = input_get_drvdata(input);
+-
+-	info->strength = effect->u.rumble.weak_magnitude;
 +	struct vibra_info *info = data;
 +	unsigned long flags;
 +	unsigned long delay = 0;
@@ -260,11 +261,11 @@ index 1478017..f3b4792 100644
 +	spin_unlock_irqrestore(&info->state_lock, flags);
 +	if (ret && !force_stop)
 +		return ret;
-
--	info->strength = effect->u.rumble.weak_magnitude;
++
 +	if (info->data->max_on_ms) {
 +		if (strength)
-+			mod_delayed_work(system_wq, &info->stop_work, delay);
++			mod_delayed_work(system_percpu_wq, &info->stop_work,
++					 delay);
 +	}
  	schedule_work(&info->play_work);
 
@@ -372,7 +373,7 @@ index 1478017..f3b4792 100644
  }
 
  static int sc27xx_vibra_probe(struct platform_device *pdev)
-@@ -147,14 +395,19 @@ static int sc27xx_vibra_probe(struct platform_device *pdev)
+@@ -146,14 +395,19 @@ static int sc27xx_vibra_probe(struct platform_device *pdev)
  	}
 
  	info->input_dev->name = "sc27xx:vibrator";
@@ -392,7 +393,7 @@ index 1478017..f3b4792 100644
 
  	error = sc27xx_vibra_hw_init(info);
  	if (error) {
-@@ -162,7 +415,7 @@ static int sc27xx_vibra_probe(struct platform_device *pdev)
+@@ -161,7 +415,7 @@ static int sc27xx_vibra_probe(struct platform_device *pdev)
  		return error;
  	}
 
@@ -401,7 +402,7 @@ index 1478017..f3b4792 100644
  					sc27xx_vibra_play);
  	if (error) {
  		dev_err(&pdev->dev, "failed to register vibrator to FF.\n");
-@@ -179,6 +432,7 @@ static int sc27xx_vibra_probe(struct platform_device *pdev)
+@@ -178,6 +432,7 @@ static int sc27xx_vibra_probe(struct platform_device *pdev)
  }
 
  static const struct of_device_id sc27xx_vibra_of_match[] = {
@@ -409,7 +410,7 @@ index 1478017..f3b4792 100644
  	{ .compatible = "sprd,sc2721-vibrator", .data = &sc2721_data },
  	{ .compatible = "sprd,sc2730-vibrator", .data = &sc2730_data },
  	{ .compatible = "sprd,sc2731-vibrator", .data = &sc2731_data },
-@@ -190,8 +444,11 @@ static struct platform_driver sc27xx_vibra_driver = {
+@@ -189,8 +444,11 @@ static struct platform_driver sc27xx_vibra_driver = {
  	.driver = {
  		.name = "sc27xx-vibrator",
  		.of_match_table = sc27xx_vibra_of_match,
@@ -422,10 +423,10 @@ index 1478017..f3b4792 100644
 
  module_platform_driver(sc27xx_vibra_driver);
 diff --git a/drivers/regulator/Kconfig b/drivers/regulator/Kconfig
-index d84f3d0..f26d3d3 100644
+index a54a549..e8573f4 100644
 --- a/drivers/regulator/Kconfig
 +++ b/drivers/regulator/Kconfig
-@@ -1426,12 +1426,16 @@ config REGULATOR_S5M8767
+@@ -1478,11 +1478,15 @@ config REGULATOR_S5M8767
  	 supports DVS mode with 8bits of output voltage control.
 
  config REGULATOR_SC2731
@@ -436,16 +437,15 @@ index d84f3d0..f26d3d3 100644
  	  This driver provides support for the voltage regulators on the
 -	  SC2731 PMIC.
 +	  SC2720 and SC2731 PMICs.
-
++
 +config REGULATOR_SC2720_USB33
 +	bool
 +	depends on REGULATOR_SC2731
-+
- config REGULATOR_SKY81452
- 	tristate "Skyworks Solutions SKY81452 voltage regulator"
- 	depends on MFD_SKY81452
+
+ config REGULATOR_SGM3804
+ 	tristate "SGMicro SGM3804 voltage regulator"
 diff --git a/drivers/regulator/sc2731-regulator.c b/drivers/regulator/sc2731-regulator.c
-index 5447e1a..49bb712 100644
+index 5447e1a..081c3c6 100644
 --- a/drivers/regulator/sc2731-regulator.c
 +++ b/drivers/regulator/sc2731-regulator.c
 @@ -10,6 +10,34 @@

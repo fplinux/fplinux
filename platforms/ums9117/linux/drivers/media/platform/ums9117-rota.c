@@ -1010,6 +1010,8 @@ static void ums9117_rota_finish_job(struct ums9117_rota_ctx *ctx,
 	struct ums9117_rota_dev *rota = ctx->rota;
 	struct vb2_v4l2_buffer *source;
 	struct vb2_v4l2_buffer *destination;
+	const u32 frame_flag_mask = V4L2_BUF_FLAG_KEYFRAME |
+				    V4L2_BUF_FLAG_PFRAME | V4L2_BUF_FLAG_BFRAME;
 	unsigned long flags;
 
 	spin_lock_irqsave(&rota->callback_lock, flags);
@@ -1023,7 +1025,9 @@ static void ums9117_rota_finish_job(struct ums9117_rota_ctx *ctx,
 	source = v4l2_m2m_src_buf_remove(ctx->fh.m2m_ctx);
 	destination = v4l2_m2m_dst_buf_remove(ctx->fh.m2m_ctx);
 	if (source && destination) {
-		v4l2_m2m_buf_copy_metadata(source, destination, true);
+		v4l2_m2m_buf_copy_metadata(source, destination);
+		destination->flags &= ~frame_flag_mask;
+		destination->flags |= source->flags & frame_flag_mask;
 		source->sequence = ctx->output_sequence++;
 		destination->sequence = ctx->capture_sequence++;
 		v4l2_m2m_buf_done(source, state);
@@ -1105,7 +1109,7 @@ static void ums9117_rota_timeout_work(struct work_struct *work)
 	}
 	if (time_before(jiffies, rota->deadline)) {
 		spin_unlock_irqrestore(&rota->callback_lock, flags);
-		mod_delayed_work(system_wq, &rota->timeout_work,
+		mod_delayed_work(system_percpu_wq, &rota->timeout_work,
 				 rota->deadline - jiffies);
 		goto unlock;
 	}
@@ -1155,7 +1159,7 @@ static void ums9117_rota_device_run(void *priv)
 		goto unlock;
 	}
 	rota->deadline = jiffies + msecs_to_jiffies(UMS9117_ROTA_TIMEOUT_MS);
-	mod_delayed_work(system_wq, &rota->timeout_work,
+	mod_delayed_work(system_percpu_wq, &rota->timeout_work,
 			 msecs_to_jiffies(UMS9117_ROTA_TIMEOUT_MS));
 
 unlock:

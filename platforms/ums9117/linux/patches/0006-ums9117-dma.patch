@@ -748,7 +748,7 @@ index 187a090..c81c3df 100644
 +	spin_unlock_irqrestore(&schan->vc.lock, irq_flags);
 +	if (!available)
 +		return NULL;
- 	sdesc = kzalloc(sizeof(*sdesc), GFP_NOWAIT);
+ 	sdesc = kzalloc_obj(*sdesc, GFP_NOWAIT);
  	if (!sdesc)
  		return NULL;
 
@@ -833,7 +833,7 @@ index 187a090..c81c3df 100644
 +		return NULL;
 
 -	return vchan_tx_prep(&schan->vc, &sdesc->vd, flags);
-+	sdesc = kzalloc(sizeof(*sdesc), GFP_NOWAIT);
++	sdesc = kzalloc_obj(*sdesc, GFP_NOWAIT);
 +	if (!sdesc)
 +		return NULL;
 +	sdesc->type = SPRD_DMA_DESC_EXTERNAL_LLIST;

@@ -999,6 +999,8 @@ static void jpeg_work(struct work_struct *work)
 	struct jpeg_context *ctx = READ_ONCE(jpeg->active);
 	struct vb2_v4l2_buffer *source, *destination;
 	enum vb2_buffer_state state = VB2_BUF_STATE_ERROR;
+	const u32 frame_flag_mask = V4L2_BUF_FLAG_KEYFRAME |
+				    V4L2_BUF_FLAG_PFRAME | V4L2_BUF_FLAG_BFRAME;
 	unsigned long flags;
 	int ret;
 
@@ -1027,7 +1029,9 @@ static void jpeg_work(struct work_struct *work)
 	if (!ret)
 		state = VB2_BUF_STATE_DONE;
 metadata:
-	v4l2_m2m_buf_copy_metadata(source, destination, true);
+	v4l2_m2m_buf_copy_metadata(source, destination);
+	destination->flags &= ~frame_flag_mask;
+	destination->flags |= source->flags & frame_flag_mask;
 	source->sequence = ctx->output_sequence++;
 	destination->sequence = ctx->capture_sequence++;
 

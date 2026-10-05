@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: GPL-2.0-only
+# CM4 transport requires the non-preemptible model in this port.
 menuconfig ARCH_UMS9117
 	bool "Unisoc UMS9117"
 	depends on ARCH_MULTI_V7
+	select ARCH_NO_PREEMPT
 	select ARM_GIC
 	select ARCH_HAS_RESET_CONTROLLER
 	select CLKSRC_MMIO

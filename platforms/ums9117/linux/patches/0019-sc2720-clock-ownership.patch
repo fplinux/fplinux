@@ -83,10 +83,9 @@ index f6779f7..0edb75a 100644
 
  static const struct sprd_pmic_eic_data sc2731_eic_data = {
 diff --git a/drivers/mfd/sprd-sc27xx-spi.c b/drivers/mfd/sprd-sc27xx-spi.c
-index 4f9e4f1..8c15bdf 100644
 --- a/drivers/mfd/sprd-sc27xx-spi.c
 +++ b/drivers/mfd/sprd-sc27xx-spi.c
-@@ -26,6 +26,10 @@
+@@ -32,6 +32,10 @@
  #define SPRD_SC2720_CHIP_ID_HIGH_REG 0xc04
  #define SPRD_SC2720_CHIP_ID_LOW 0xa003
  #define SPRD_SC2720_CHIP_ID_HIGH 0x2720
@@ -97,15 +96,15 @@ index 4f9e4f1..8c15bdf 100644
  #define SPRD_SC2730_IRQ_BASE		0x80
  #define SPRD_SC2730_IRQ_NUMS		10
  #define SPRD_SC2730_CHG_DET		0x1b9c
-@@ -62,6 +66,7 @@ struct sprd_pmic_data {
+@@ -68,6 +72,7 @@
  	u32 chip_id_high;
  	bool register_syscon;
  	bool mask_irqs_on_shutdown;
 +	bool enable_arch_clocks;
  };
 
- /*
-@@ -79,6 +84,7 @@ static const struct sprd_pmic_data sc2720_data = {
+ static const struct mfd_cell sc2730_devices[] = {
+@@ -108,6 +113,7 @@
  	.chip_id_high = SPRD_SC2720_CHIP_ID_HIGH,
  	.register_syscon = true,
  	.mask_irqs_on_shutdown = true,
@@ -113,10 +112,11 @@ index 4f9e4f1..8c15bdf 100644
  };
 
  static const struct sprd_pmic_data sc2730_data = {
-@@ -239,6 +245,22 @@ static int sprd_pmic_probe(struct spi_device *spi)
+@@ -286,6 +292,22 @@
+ 	ret = sprd_pmic_check_chip_id(ddata);
  	if (ret)
  		return ret;
-
++
 +	if (pdata->enable_arch_clocks) {
 +		ret = regmap_set_bits(ddata->regmap, SPRD_SC2720_ARCH_EN,
 +				      SPRD_SC2720_ARCH_CLK_EN);
@@ -132,10 +132,9 @@ index 4f9e4f1..8c15bdf 100644
 +				&spi->dev, ret,
 +				"Failed to enable PMIC architecture RTC clock\n");
 +	}
-+
+
  	ddata->irq_chip.name = dev_name(&spi->dev);
  	ddata->irq_chip.status_base =
- 		pdata->irq_base + SPRD_PMIC_INT_MASK_STATUS;
 diff --git a/drivers/nvmem/sc27xx-efuse.c b/drivers/nvmem/sc27xx-efuse.c
 index 57e4f73..3d6bb76 100644
 --- a/drivers/nvmem/sc27xx-efuse.c

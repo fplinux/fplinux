@@ -1137,7 +1137,7 @@ static void ums9117_pcm_vibrate_off_locked(struct ums9117_pcm *audio)
 	if (vibrator->tone_on)
 		ums9117_pcm_set_tone_locked(audio, false);
 	if (vibrator->session)
-		mod_delayed_work(system_wq, &vibrator->hold_work,
+		mod_delayed_work(system_percpu_wq, &vibrator->hold_work,
 				 msecs_to_jiffies(UMS9117_VIBRATOR_HOLD_MS));
 }
 
@@ -2342,7 +2342,7 @@ static void ums9117_vibrator_stop_work(struct work_struct *work)
 	}
 	spin_unlock_irqrestore(&vibrator->state_lock, flags);
 	if (delay)
-		mod_delayed_work(system_wq, &vibrator->stop_work, delay);
+		mod_delayed_work(system_percpu_wq, &vibrator->stop_work, delay);
 	else if (stop)
 		schedule_work(&vibrator->play_work);
 }
@@ -2402,7 +2402,7 @@ static int ums9117_vibrator_play(struct input_dev *input, void *data,
 	if (ret && !force_stop)
 		return ret;
 	if (on)
-		mod_delayed_work(system_wq, &vibrator->stop_work, delay);
+		mod_delayed_work(system_percpu_wq, &vibrator->stop_work, delay);
 	schedule_work(&vibrator->play_work);
 	return ret;
 }

@@ -379,15 +379,15 @@ static unsigned long ums9117_sensor_recalc_rate(struct clk_hw *hw,
 	return ums9117_sensor_cfg_rate(cfg, parent_rate);
 }
 
-static long ums9117_sensor_round_rate(struct clk_hw *hw, unsigned long rate,
-				      unsigned long *parent_rate)
+static int ums9117_sensor_determine_rate(struct clk_hw *hw,
+					 struct clk_rate_request *req)
 {
-	if (*parent_rate != UMS9117_SENSOR_SOURCE_RATE_HZ ||
-	    (rate != UMS9117_SENSOR_RATE_IDENTIFY_HZ &&
-	     rate != UMS9117_SENSOR_RATE_CAPTURE_HZ))
+	if (req->best_parent_rate != UMS9117_SENSOR_SOURCE_RATE_HZ ||
+	    (req->rate != UMS9117_SENSOR_RATE_IDENTIFY_HZ &&
+	     req->rate != UMS9117_SENSOR_RATE_CAPTURE_HZ))
 		return -EINVAL;
 
-	return rate;
+	return 0;
 }
 
 static int ums9117_sensor_set_rate(struct clk_hw *hw, unsigned long rate,
@@ -409,7 +409,7 @@ static const struct clk_ops ums9117_sensor_clk_ops = {
 	.prepare = ums9117_sensor_prepare,
 	.unprepare = ums9117_sensor_unprepare,
 	.recalc_rate = ums9117_sensor_recalc_rate,
-	.round_rate = ums9117_sensor_round_rate,
+	.determine_rate = ums9117_sensor_determine_rate,
 	.set_rate = ums9117_sensor_set_rate,
 };
 

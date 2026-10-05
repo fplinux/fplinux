@@ -413,7 +413,7 @@ struct ums9117_fm *ums9117_fm_register(struct device *dev)
 					  &config_name);
 	if (ret)
 		return NULL;
-	radio = kzalloc(sizeof(*radio), GFP_KERNEL);
+	radio = kzalloc_obj(*radio, GFP_KERNEL);
 	if (!radio)
 		return ERR_PTR(-ENOMEM);
 	radio->config_name = config_name;

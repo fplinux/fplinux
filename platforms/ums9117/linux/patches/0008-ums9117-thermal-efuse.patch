@@ -563,8 +563,8 @@ index 44fa45f..1eab825 100644
  	 */
  	val = (temp + sen->cal_offset) / sen->cal_slope;
 
--	return clamp(val, val, (u32)(SPRD_THM_RAW_DATA_HIGH - 1));
-+	return clamp(val, val, sen->data->var_data->raw_data_high - 1);
+-	return min(val, SPRD_THM_RAW_DATA_HIGH - 1);
++	return min(val, sen->data->var_data->raw_data_high - 1);
 +}
 +
 +static int sprd_thm_check_observer_state(struct sprd_thermal_data *thm)

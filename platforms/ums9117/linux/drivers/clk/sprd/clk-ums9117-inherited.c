@@ -372,8 +372,8 @@ static bool ums9117_twpll_ready(struct ums9117_inherited_clks *provider)
 	return false;
 }
 
-static long ums9117_ca7_round_rate(struct clk_hw *hw, unsigned long rate,
-				   unsigned long *parent_rate)
+static int ums9117_ca7_determine_rate(struct clk_hw *hw,
+				      struct clk_rate_request *req)
 {
 	struct ums9117_inherited_clks *provider =
 		to_ums9117_observed_clk(hw)->provider;
@@ -385,14 +385,17 @@ static long ums9117_ca7_round_rate(struct clk_hw *hw, unsigned long rate,
 	if (ret)
 		return ret;
 
-	if (rate >= mpll_rate)
-		return mpll_rate;
-	if (rate < UMS9117_TWPLL_768M_HZ)
+	if (req->rate >= mpll_rate) {
+		req->rate = mpll_rate;
+		return 0;
+	}
+	if (req->rate < UMS9117_TWPLL_768M_HZ)
 		return -EINVAL;
 	if (!ums9117_twpll_ready(provider))
 		return -EBUSY;
 
-	return UMS9117_TWPLL_768M_HZ;
+	req->rate = UMS9117_TWPLL_768M_HZ;
+	return 0;
 }
 
 static int ums9117_ca7_set_rate(struct clk_hw *hw, unsigned long rate,
@@ -440,7 +443,7 @@ static const struct clk_ops ums9117_mpll_ops = {
 
 static const struct clk_ops ums9117_ca7_ops = {
 	.recalc_rate = ums9117_ca7_recalc_rate,
-	.round_rate = ums9117_ca7_round_rate,
+	.determine_rate = ums9117_ca7_determine_rate,
 	.set_rate = ums9117_ca7_set_rate,
 };
 

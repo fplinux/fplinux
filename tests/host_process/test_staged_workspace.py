@@ -106,7 +106,7 @@ class StagedWorkspaceTests(unittest.TestCase):
                     self.assertEqual(staged_digest(command, profile, staged), expected)
                     (staged / "unrelated.c").write_bytes(b"int unrelated;\n")
                     self.assertEqual(staged_digest(command, profile, staged), expected)
-                    header = staged / "bootstrap/fplinux-boot-screen/linux/font.h"
+                    header = staged / "bootstrap/fplinux-boot-screen/font.h"
                     header.write_bytes(
                         header.read_bytes() + b"\n/* Changed compile interface. */\n"
                     )

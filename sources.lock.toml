@@ -1,7 +1,7 @@
 [linux]
-version = "6.18.42"
-url = "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.42.tar.xz"
-sha256 = "35a8ef5e8fb44467e56a42b40c23c4c10a61d1e95ff8d738f285230e8bed63e7"
+version = "7.2.9"
+url = "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.2.9.tar.xz"
+sha256 = "b4c5dfbe51a364a6c7f03869200f88c8e1f77403539005f14b7fc6bc91b8d8ba"
 license = "GPL-2.0-only"
 
 [fpdoom_bootstrap]

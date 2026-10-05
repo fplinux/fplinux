@@ -148,12 +148,11 @@ index 274f832..87f94c0 100644
            - kbd-capslock
              # LED indicates MTD memory activity
 diff --git a/Documentation/devicetree/bindings/mfd/sprd,sc2731.yaml b/Documentation/devicetree/bindings/mfd/sprd,sc2731.yaml
-index b023e1e..921449c 100644
 --- a/Documentation/devicetree/bindings/mfd/sprd,sc2731.yaml
 +++ b/Documentation/devicetree/bindings/mfd/sprd,sc2731.yaml
-@@ -56,6 +56,26 @@ properties:
-     type: object
-     $ref: /schemas/regulator/sprd,sc2731-regulator.yaml#
+@@ -58,6 +58,26 @@
+       - $ref: /schemas/regulator/sprd,sc2730-regulator.yaml#
+       - $ref: /schemas/regulator/sprd,sc2731-regulator.yaml#
 
 +  clock-controller:
 +    type: object
@@ -323,7 +322,6 @@ index 9bd752b..4869342 100644
 +unevaluatedProperties: false
  ...
 diff --git a/Documentation/devicetree/bindings/rtc/sprd,sc2731-rtc.yaml b/Documentation/devicetree/bindings/rtc/sprd,sc2731-rtc.yaml
-index 5756f61..2924995 100644
 --- a/Documentation/devicetree/bindings/rtc/sprd,sc2731-rtc.yaml
 +++ b/Documentation/devicetree/bindings/rtc/sprd,sc2731-rtc.yaml
 @@ -4,7 +4,7 @@
@@ -335,18 +333,15 @@ index 5756f61..2924995 100644
 
  maintainers:
    - Orson Zhai <orsonzhai@gmail.com>
-@@ -13,7 +13,9 @@ maintainers:
-
+@@ -14,6 +14,7 @@
  properties:
    compatible:
--    const: sprd,sc2731-rtc
-+    enum:
-+      - sprd,sc2720-rtc
-+      - sprd,sc2731-rtc
-
-   reg:
-     maxItems: 1
-@@ -28,6 +30,15 @@ required:
+     oneOf:
++      - const: sprd,sc2720-rtc
+       - items:
+           - enum:
+               - sprd,sc2730-rtc
+@@ -33,6 +34,15 @@
 
  allOf:
    - $ref: rtc.yaml#

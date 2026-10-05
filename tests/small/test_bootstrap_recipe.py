@@ -28,7 +28,7 @@ class BootstrapRecipeTests(unittest.TestCase):
         self._write("targets/demo/bootstrap/Makefile", b"all:\n\ttrue\n")
         self._write("targets/demo/bootstrap/main.c", b"int entry(void) { return 1; }\n")
         self._write("bootstrap/fplinux-boot-screen/screen.c", b"int screen;\n")
-        self._write("bootstrap/fplinux-boot-screen/linux/font.h", b"font declarations\n")
+        self._write("bootstrap/fplinux-boot-screen/font.h", b"font declarations\n")
         self._write("patches/vendor.patch", b"vendor patch\n")
         self._write("scripts/fplinux_cli/build_env.py", b"build environment\n")
         self._write("scripts/fplinux_cli/build/bootstrap.py", b"builder implementation\n")
@@ -232,7 +232,7 @@ class BootstrapRecipeTests(unittest.TestCase):
                 self.assertNotEqual(baseline, self._digest())
                 self.sources["linux"]["sha256"] = "c" * 64
                 header = self._write(
-                    "bootstrap/fplinux-boot-screen/linux/font.h", b"changed declarations\n"
+                    "bootstrap/fplinux-boot-screen/font.h", b"changed declarations\n"
                 )
                 self.assertNotEqual(baseline, self._digest())
                 header.write_bytes(b"font declarations\n")
