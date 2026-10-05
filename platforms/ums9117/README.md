@@ -35,18 +35,18 @@ loader.
 | [AP DMAengine](#memory-copy-dma)                               | Partial       | 32 shared channels for memory copies and the fixed ROTA request; client availability depends on the target.                                              |
 | [Image rotation](../../docs/apps/ROTATE.md)                    | Supported     | V4L2 mem2mem ROTA with a shared userspace interface.                                                                                                     |
 | [JPEG codec and scaling](../../docs/apps/JPEG.md)              | Supported     | Baseline JPEG decode, fixed quality-85 JPEG encode, and two fixed half-size NV16 scaler pairs.                                                           |
-| [Camera](../../docs/features/CAMERA.md)                        | Partial       | V4L2 NV16 capture on all three phones in the RAM profile. Camera wiring and sensors are target-specific.                                                 |
+| [Camera](../../docs/features/CAMERA.md)                        | Partial       | V4L2 NV16 capture on Nokia TA-1618, INOI 240/244 and Maxvi K15n 4G in the RAM profile. Camera wiring and sensors are target-specific.                    |
 | [Native image presentation](../../docs/apps/PRESENT.md)        | Partial       | Native-size NV16 or RGB565 presentation through DRM/KMS; consult the target's display support status.                                                    |
 | Analog-die interface                                           | Supported     | Linux initializes the transport and shared SC2720 charger, fuel-gauge, RTC, ADC, keypad-light and power-off clients; the vibrator is enabled per target. |
 | LCDC DRM/KMS                                                   | Partial       | Targets provide the panel profile and transport; fbdev emulation supplies the kernel diagnostic console.                                                 |
 | [Matrix keypad](../../docs/features/LOCAL_CONSOLE.md)          | Supported     | Targets provide matrix wiring and EIC keys; the [phone key codes](../../docs/reference/INPUT.md) are shared.                                             |
-| [Audio](../../docs/features/HEADPHONE_AUDIO.md)                | Partial       | Headphones, microphones and [speaker audio](../../docs/features/SPEAKER_AUDIO.md) work on all targets; each target states its microphone limits.         |
+| [Audio](../../docs/features/HEADPHONE_AUDIO.md)                | Partial       | Headphone and speaker playback and microphone capture are available; each target states its supported outputs and microphone limits.                     |
 | [Bluetooth](../../docs/features/BLUETOOTH.md)                  | Partial       | Shared CM4 HCI driver; each target needs firmware prepared from its own phone.                                                                           |
 | [FM radio](../../docs/features/FM_RADIO.md)                    | Supported     | V4L2 receiver on the CM4 Bluetooth link, heard on the enabled outputs; it needs the phone's Bluetooth firmware and the target's fitted FM configuration. |
 | [microSD host](../../docs/features/MICROSD.md)                 | Supported     | SD cards on a 4-bit bus with fixed pin settings; each target enables the slot.                                                                           |
 | Internal NAND reader                                           | Partial       | Read-only raw page stream for [NAND backup](../../docs/guides/BUILDING.md#save-a-nand-backup); no filesystem, writes or erase.                           |
 | SC2720 EIC GPIO                                                | Supported     | PMIC external-interrupt lines as GPIO; targets use them for keys.                                                                                        |
-| AP GPIO and I2C0                                               | Partial       | Standard controllers serve the camera on all three phones; general peripheral use has not been qualified.                                                |
+| AP GPIO and I2C0                                               | Partial       | Standard controllers serve the cameras on Nokia TA-1618, INOI 240/244 and Maxvi K15n 4G; general peripheral use has not been qualified.                  |
 | Pin control and reset                                          | Partial       | Target-owned matrix, audio, microSD and camera/I2C pin settings; the reset controller serves microSD.                                                    |
 | UART, other I2C, general SPI, watchdog, system reset           | Not supported | No supported platform path for these functions.                                                                                                          |
 
@@ -79,7 +79,7 @@ virtual terminal. The DRM fbdev emulation provides the kernel's diagnostic
 console. See [native image presentation](../../docs/apps/PRESENT.md)
 for a DRM/KMS application and its completion boundary.
 
-All three phones expose the shared [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)
+Nokia TA-1618 and INOI 240/244 expose the shared [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)
 interface. The target selects the brightness range, panel transport and
 initialization; consult its support status for physical brightness limits.
 
@@ -134,6 +134,7 @@ the phone.
 | [`inoi-240-modern-4g`](../../targets/inoi-240-modern-4g/README.md) | INOI 240 Modern 4G      |
 | [`inoi-244-modern-4g`](../../targets/inoi-244-modern-4g/README.md) | INOI 244 Modern 4G      |
 | [`nokia-ta1618`](../../targets/nokia-ta1618/README.md)             | Nokia 3210 4G (TA-1618) |
+| [`maxvi-k15n-4g`](../../targets/maxvi-k15n-4g/README.md)           | Maxvi K15n 4G           |
 
 Platform status covers shared capabilities; target documents own board-specific
 status. Neither makes an executable payload release-ready.

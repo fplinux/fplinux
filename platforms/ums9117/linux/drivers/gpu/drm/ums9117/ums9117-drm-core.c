@@ -253,6 +253,8 @@ static int ums9117_drm_fail_dark(struct ums9117_drm *udrm)
 	/* Do both bounded operations: either one may be the only one that works. */
 	wled_ret = ums9117_drm_wled_off_bounded(udrm);
 	dcs_ret = ums9117_drm_dcs_force(udrm, MIPI_DCS_SET_DISPLAY_OFF);
+	if (!dcs_ret && udrm->profile->display_off_ms)
+		msleep(udrm->profile->display_off_ms);
 	if (wled_ret && dcs_ret) {
 		spin_lock_irqsave(&udrm->lock, flags);
 		udrm->stats.fail_dark_failures++;

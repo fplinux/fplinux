@@ -9,16 +9,27 @@
 #include <linux/regmap.h>
 
 #define SC2720_KPLED_CTRL0 0xdf8
-#define SC2720_KPLED_LEVEL GENMASK(15, 12)
-#define SC2720_KPLED_POWER_DOWN BIT(11)
-#define SC2720_KPLED_MASK (SC2720_KPLED_LEVEL | SC2720_KPLED_POWER_DOWN)
+#define SC2720_KPLED_CTRL0_LEVEL_MASK GENMASK(15, 12)
+#define SC2720_KPLED_CTRL0_PD BIT(11)
+#define SC2720_KPLED_CTRL0_CURRENT_OUTPUT BIT(9)
+#define SC2720_KPLED_CTRL0_CURRENT_MASK \
+	(SC2720_KPLED_CTRL0_LEVEL_MASK | SC2720_KPLED_CTRL0_PD)
+#define SC2720_KPLED_CTRL0_LDO_MODE_MASK \
+	(SC2720_KPLED_CTRL0_CURRENT_OUTPUT | SC2720_KPLED_CTRL0_PD)
+#define SC2720_KPLED_CTRL1 0xdfc
+#define SC2720_KPLED_CTRL1_LEVEL_MASK GENMASK(9, 7)
+#define SC2720_KPLED_CTRL1_PD BIT(15)
+#define SC2720_KPLED_CTRL1_MASK \
+	(SC2720_KPLED_CTRL1_LEVEL_MASK | SC2720_KPLED_CTRL1_PD)
 
 struct sc2720_kpled {
 	struct device *dev;
 	struct regmap *regmap;
 	struct led_classdev led;
 	unsigned int initial;
-	unsigned int current_code;
+	unsigned int initial_ctrl0;
+	unsigned int level_code;
+	bool ldo_mode;
 };
 
 static int sc2720_kpled_set(struct led_classdev *led,
@@ -27,12 +38,28 @@ static int sc2720_kpled_set(struct led_classdev *led,
 	struct sc2720_kpled *kpled =
 		container_of(led, struct sc2720_kpled, led);
 	unsigned int value;
+	int ret;
 
-	value = brightness ?
-			FIELD_PREP(SC2720_KPLED_LEVEL, kpled->current_code) :
-			kpled->initial;
+	if (kpled->ldo_mode) {
+		if (!brightness)
+			return regmap_set_bits(kpled->regmap,
+					       SC2720_KPLED_CTRL1,
+					       SC2720_KPLED_CTRL1_PD);
+		value = FIELD_PREP(SC2720_KPLED_CTRL1_LEVEL_MASK,
+				   kpled->level_code);
+		ret = regmap_update_bits(kpled->regmap, SC2720_KPLED_CTRL1,
+					 SC2720_KPLED_CTRL1_LEVEL_MASK, value);
+		if (ret)
+			return ret;
+		return regmap_clear_bits(kpled->regmap, SC2720_KPLED_CTRL1,
+					 SC2720_KPLED_CTRL1_PD);
+	}
+
+	value = brightness ? FIELD_PREP(SC2720_KPLED_CTRL0_LEVEL_MASK,
+					kpled->level_code) :
+			     kpled->initial;
 	return regmap_update_bits(kpled->regmap, SC2720_KPLED_CTRL0,
-				  SC2720_KPLED_MASK, value);
+				  SC2720_KPLED_CTRL0_CURRENT_MASK, value);
 }
 
 static void sc2720_kpled_restore(void *data)
@@ -40,8 +67,22 @@ static void sc2720_kpled_restore(void *data)
 	struct sc2720_kpled *kpled = data;
 	int ret;
 
-	ret = regmap_update_bits(kpled->regmap, SC2720_KPLED_CTRL0,
-				 SC2720_KPLED_MASK, kpled->initial);
+	if (kpled->ldo_mode) {
+		ret = regmap_update_bits(kpled->regmap, SC2720_KPLED_CTRL1,
+					 SC2720_KPLED_CTRL1_MASK,
+					 kpled->initial);
+		if (ret)
+			dev_err(kpled->dev,
+				"cannot restore keypad backlight: %pe\n",
+				ERR_PTR(ret));
+		ret = regmap_update_bits(kpled->regmap, SC2720_KPLED_CTRL0,
+					 SC2720_KPLED_CTRL0_LDO_MODE_MASK,
+					 kpled->initial_ctrl0);
+	} else {
+		ret = regmap_update_bits(kpled->regmap, SC2720_KPLED_CTRL0,
+					 SC2720_KPLED_CTRL0_CURRENT_MASK,
+					 kpled->initial);
+	}
 	if (ret)
 		dev_err(kpled->dev, "cannot restore keypad backlight: %pe\n",
 			ERR_PTR(ret));
@@ -61,24 +102,60 @@ static int sc2720_kpled_probe(struct platform_device *pdev)
 	kpled->regmap = dev_get_regmap(dev->parent, NULL);
 	if (!kpled->regmap)
 		return -EPROBE_DEFER;
-	ret = device_property_read_u32(dev, "fplinux,current-code",
-				       &kpled->current_code);
-	if (ret)
-		return dev_err_probe(dev, ret,
-				     "missing keypad LED current code\n");
-	if (!kpled->current_code || kpled->current_code > 15)
-		return -EINVAL;
-	ret = regmap_read(kpled->regmap, SC2720_KPLED_CTRL0, &kpled->initial);
-	if (ret)
-		return ret;
-	kpled->initial |= SC2720_KPLED_POWER_DOWN;
-	ret = regmap_set_bits(kpled->regmap, SC2720_KPLED_CTRL0,
-			      SC2720_KPLED_POWER_DOWN);
+	kpled->ldo_mode = of_device_is_compatible(
+		dev->of_node, "sprd,ums9117-sc2720-kpled-ldo");
+	if (kpled->ldo_mode) {
+		if (device_property_present(dev, "fplinux,current-code"))
+			return -EINVAL;
+		ret = device_property_read_u32(dev, "fplinux,ldo-code",
+					       &kpled->level_code);
+		if (ret)
+			return dev_err_probe(dev, ret,
+					     "missing keypad LED LDO code\n");
+		if (!kpled->level_code || kpled->level_code > 7)
+			return -EINVAL;
+		ret = regmap_read(kpled->regmap, SC2720_KPLED_CTRL0,
+				  &kpled->initial_ctrl0);
+		if (ret)
+			return ret;
+		kpled->initial_ctrl0 |= SC2720_KPLED_CTRL0_PD;
+		ret = regmap_read(kpled->regmap, SC2720_KPLED_CTRL1,
+				  &kpled->initial);
+		if (ret)
+			return ret;
+		kpled->initial |= SC2720_KPLED_CTRL1_PD;
+		ret = regmap_set_bits(kpled->regmap, SC2720_KPLED_CTRL1,
+				      SC2720_KPLED_CTRL1_PD);
+	} else {
+		if (device_property_present(dev, "fplinux,ldo-code"))
+			return -EINVAL;
+		ret = device_property_read_u32(dev, "fplinux,current-code",
+					       &kpled->level_code);
+		if (ret)
+			return dev_err_probe(
+				dev, ret, "missing keypad LED current code\n");
+		if (!kpled->level_code || kpled->level_code > 15)
+			return -EINVAL;
+		ret = regmap_read(kpled->regmap, SC2720_KPLED_CTRL0,
+				  &kpled->initial);
+		if (ret)
+			return ret;
+		kpled->initial |= SC2720_KPLED_CTRL0_PD;
+		ret = regmap_set_bits(kpled->regmap, SC2720_KPLED_CTRL0,
+				      SC2720_KPLED_CTRL0_PD);
+	}
 	if (ret)
 		return ret;
 	ret = devm_add_action_or_reset(dev, sc2720_kpled_restore, kpled);
 	if (ret)
 		return ret;
+	if (kpled->ldo_mode) {
+		ret = regmap_update_bits(kpled->regmap, SC2720_KPLED_CTRL0,
+					 SC2720_KPLED_CTRL0_LDO_MODE_MASK,
+					 SC2720_KPLED_CTRL0_PD);
+		if (ret)
+			return ret;
+	}
 	kpled->led.max_brightness = 1;
 	kpled->led.brightness_set_blocking = sc2720_kpled_set;
 	kpled->led.flags = LED_CORE_SUSPENDRESUME;
@@ -95,6 +172,7 @@ static void sc2720_kpled_shutdown(struct platform_device *pdev)
 
 static const struct of_device_id sc2720_kpled_match[] = {
 	{ .compatible = "sprd,ums9117-sc2720-kpled" },
+	{ .compatible = "sprd,ums9117-sc2720-kpled-ldo" },
 	{}
 };
 MODULE_DEVICE_TABLE(of, sc2720_kpled_match);

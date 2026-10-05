@@ -4,14 +4,19 @@
 $id: http://devicetree.org/schemas/media/i2c/byd,bf30a2.yaml#
 $schema: http://devicetree.org/meta-schemas/core.yaml#
 
-title: BF30A2 CMOS image sensor
+title: BF30A2 and BF3A01 CMOS image sensors
 
 maintainers:
   - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
 
+allOf:
+  - $ref: /schemas/media/video-interface-devices.yaml#
+
 properties:
   compatible:
-    const: byd,bf30a2
+    enum:
+      - byd,bf30a2
+      - byd,bf3a01
 
   reg:
     const: 0x6e
@@ -67,8 +72,5 @@ required:
   - reset-gpios
   - powerdown-gpios
   - port
-
-allOf:
-  - $ref: /schemas/media/video-interface-devices.yaml#
 
 additionalProperties: false

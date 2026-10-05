@@ -10,6 +10,7 @@ Names and machine identifiers follow the shared
 | -------------------- | ----------------------- | ------------------------------------------- | ---------------------------------------------------------- |
 | `inoi-240-modern-4g` | INOI 240 Modern 4G      | [`ums9117`](../platforms/ums9117/README.md) | [Read support and use notes](inoi-240-modern-4g/README.md) |
 | `inoi-244-modern-4g` | INOI 244 Modern 4G      | [`ums9117`](../platforms/ums9117/README.md) | [Read support and use notes](inoi-244-modern-4g/README.md) |
+| `maxvi-k15n-4g`      | Maxvi K15n4G            | [`ums9117`](../platforms/ums9117/README.md) | [Read support and use notes](maxvi-k15n-4g/README.md)      |
 | `nokia-ta1618`       | Nokia 3210 4G (TA-1618) | [`ums9117`](../platforms/ums9117/README.md) | [Read support and use notes](nokia-ta1618/README.md)       |
 
 ## Status and common limits
@@ -32,7 +33,7 @@ All current targets share these limits:
 - USB operates as a peripheral; USB host and OTG are not supported.
 - Calls, SMS, mobile data, Wi-Fi and indicator LEDs have no supported FPLinux
   path. [V4L2 camera capture](../docs/features/CAMERA.md) is supported on
-  all three phones in the default RAM profile.
+  Nokia TA-1618 and INOI 240/244 in the default RAM profile.
 - Audio support is target-specific: the phone document states its
   [headphone](../docs/features/HEADPHONE_AUDIO.md),
   [speaker](../docs/features/SPEAKER_AUDIO.md),

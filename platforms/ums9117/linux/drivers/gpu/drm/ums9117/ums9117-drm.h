@@ -51,6 +51,7 @@ struct ums9117_drm_profile {
 	u16 reset_phase_ms;
 	u16 reset_release_ms;
 	u16 wake_reset_phase_ms;
+	u16 display_off_ms;
 	u16 sleep_in_ms;
 	u16 sleep_out_ms;
 	/*

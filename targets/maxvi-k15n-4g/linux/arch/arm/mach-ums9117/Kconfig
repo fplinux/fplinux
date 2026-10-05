@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-only
+if ARCH_UMS9117
+
+config MACH_MAXVI_K15N_4G
+	bool "Maxvi K15n4G"
+	select GPIOLIB
+	select GPIO_PMIC_EIC_SPRD
+	select MFD_SYSCON
+	help
+	  Board support for the Maxvi K15n4G, a UMS9117 feature phone.
+	  USB loading runs a temporary RAM system with read-only internal
+	  NAND access. The board profile selects the LCM/DBI display,
+	  matrix keypad and SC2720 PMIC input for the power key.
+
+endif

@@ -9,20 +9,39 @@ title: SC2720 keypad backlight on UMS9117
 maintainers:
   - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
 
-description:
-  LED class device for the keypad current-sink output in the SC2720
-  analog die. This child of the SC2720 PMIC uses its register map and owns
-  only the current and power-down fields in KPLED_CTRL0.
+description: LED class device for the SC2720 keypad current-sink or LDO output.
+  This child of the SC2720 PMIC uses its register map. The current-sink
+  mode owns the level and power-down fields in KPLED_CTRL0. The LDO mode
+  owns the current-output and power-down fields in KPLED_CTRL0 and
+  the level and power-down fields in KPLED_CTRL1. Other fields are preserved.
 
 allOf:
   - $ref: /schemas/leds/common.yaml#
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: sprd,ums9117-sc2720-kpled-ldo
+    then:
+      properties:
+        fplinux,current-code: false
+      required:
+        - fplinux,ldo-code
+    else:
+      properties:
+        fplinux,ldo-code: false
+      required:
+        - fplinux,current-code
 
 properties:
   compatible:
-    const: sprd,ums9117-sc2720-kpled
+    enum:
+      - sprd,ums9117-sc2720-kpled
+      - sprd,ums9117-sc2720-kpled-ldo
 
   reg:
     maxItems: 1
+    description: KPLED_CTRL0 register offset, with KPLED_CTRL1 at the next word
 
   function:
     const: kbd_backlight
@@ -36,12 +55,17 @@ properties:
     maximum: 15
     description: SC2720 KPLED current code selected for the fitted LEDs
 
+  fplinux,ldo-code:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    minimum: 1
+    maximum: 7
+    description: SC2720 KPLED LDO level code selected for the fitted LEDs
+
 required:
   - compatible
   - reg
   - function
   - linux,default-trigger
-  - fplinux,current-code
 
 unevaluatedProperties: false
 

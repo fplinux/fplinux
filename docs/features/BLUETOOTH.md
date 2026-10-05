@@ -176,9 +176,10 @@ open a new PCM. Stop the service with `rc-service bluealsa stop` before removing
 the phone's default audio output.
 
 A2DP source playback and reopening after reconnect are supported with a Linux
-PC audio sink on INOI 244 in the RAM profile. Physical Bluetooth headsets, other
-targets and the microSD system profile remain unqualified for audio. HFP, SCO
-and other audio codecs are not supported by this service.
+PC audio sink on INOI 244 and Maxvi K15n4G in the RAM profile. Physical
+Bluetooth headsets, other targets and the microSD system profile remain
+unqualified for audio. HFP, SCO and other audio codecs are not supported by
+this service.
 
 ## Suspend
 

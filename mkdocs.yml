@@ -89,6 +89,7 @@ nav:
       - targets/README.md
       - targets/inoi-240-modern-4g/README.md
       - targets/inoi-244-modern-4g/README.md
+      - targets/maxvi-k15n-4g/README.md
       - targets/nokia-ta1618/README.md
   - Platforms:
       - platforms/README.md

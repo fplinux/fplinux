@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-2.0-only
+[[source]]
+id = "fdl1"
+kind = "file"
+url = "https://github.com/ilyakurdyukov/spreadtrum_flash/releases/download/1.20260403/t117_fdl1.bin"
+sha256 = "062d5e1a298c0e378eeefcc67dddba6fd4d6be10a683511c849ec59c17fb7414"
+cache_name = "t117_fdl1.bin"
+license = "Unlicense"
+
+[[source.output]]
+role = "fdl1"
+path = "t117_fdl1.bin"
+sha256 = "062d5e1a298c0e378eeefcc67dddba6fd4d6be10a683511c849ec59c17fb7414"

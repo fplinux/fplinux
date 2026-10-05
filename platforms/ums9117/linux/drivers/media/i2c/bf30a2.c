@@ -5,6 +5,7 @@
 #include <linux/i2c.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
+#include <linux/property.h>
 #include <linux/regulator/consumer.h>
 
 #include <media/v4l2-async.h>
@@ -15,20 +16,28 @@
 
 #define BF30A2_ID_HIGH_REG 0xfc
 #define BF30A2_ID_LOW_REG 0xfd
-#define BF30A2_ID_HIGH 0x3b
-#define BF30A2_ID_LOW 0x02
 #define BF30A2_ID_XCLK_HZ 12000000UL
 #define BF30A2_MODE_XCLK_HZ 24000000UL
+#define BF30A2_REG_DELAY_MS 0xffff
 #define BF30A2_WIDTH 240
 #define BF30A2_HEIGHT 320
 
 struct bf30a2_reg {
-	u8 address;
+	u16 address;
 	u8 value;
+};
+
+struct bf30a2_variant {
+	const struct bf30a2_reg *mode_regs;
+	size_t num_mode_regs;
+	int avdd_uv;
+	u8 id_high;
+	u8 id_low;
 };
 
 struct bf30a2 {
 	struct v4l2_subdev sd;
+	const struct bf30a2_variant *variant;
 	struct media_pad pad;
 	struct v4l2_ctrl_handler ctrls;
 	struct clk *xclk;
@@ -69,6 +78,155 @@ static const struct bf30a2_reg bf30a2_mode_regs[] = {
 	{ 0xa0, 0x8f }, { 0x13, 0x07 },
 };
 
+static const struct bf30a2_reg bf3a01_mode_regs[] = {
+	{ 0xfe, 0x00 },
+	{ 0x3d, 0x00 },
+	{ 0x30, 0x3b },
+	{ 0x31, 0x3b },
+	{ 0x34, 0x01 },
+	{ 0x35, 0x0a },
+	{ 0xfe, 0x01 },
+	{ 0x51, 0x02 },
+	{ 0xe0, 0xba },
+	{ 0xe1, 0x03 },
+	{ 0xe2, 0x05 },
+	{ 0xe3, 0x42 },
+	{ 0xe4, 0x22 },
+	{ 0xe5, 0x03 },
+	{ 0xe7, 0x05 },
+	{ 0x50, 0x10 },
+	{ 0xfe, 0x00 },
+	{ 0x00, 0x7b },
+	{ 0x02, 0x10 },
+	{ 0x15, 0x0a },
+	{ 0x3c, 0x9d },
+	{ 0x41, 0x02 },
+	{ 0x3e, 0x68 },
+	{ 0x0f, 0x13 },
+	{ 0xfe, 0x00 },
+	{ 0xa0, 0x54 },
+	{ 0xb0, 0x19 },
+	{ 0xb1, 0x2d },
+	{ 0xfe, 0x01 },
+	{ 0x00, 0x08 },
+	{ 0x0e, 0x03 },
+	{ 0x0f, 0x30 },
+	{ 0x10, 0x18 },
+	{ 0xfe, 0x00 },
+	{ 0x84, 0x62 },
+	{ 0x82, 0x06 },
+	{ 0x86, 0x12 },
+	{ 0xfe, 0x00 },
+	{ 0x60, 0x25 },
+	{ 0x61, 0x2a },
+	{ 0x62, 0x28 },
+	{ 0x63, 0x28 },
+	{ 0x64, 0x20 },
+	{ 0x65, 0x1d },
+	{ 0x66, 0x17 },
+	{ 0x67, 0x15 },
+	{ 0x68, 0x0f },
+	{ 0x69, 0x0e },
+	{ 0x6a, 0x0a },
+	{ 0x6b, 0x06 },
+	{ 0x6c, 0x05 },
+	{ 0x6d, 0x04 },
+	{ 0x6e, 0x02 },
+	{ 0x72, 0x08 },
+	{ 0x73, 0x08 },
+	{ 0x74, 0x44 },
+	{ 0xfe, 0x00 },
+	{ 0x03, 0x90 },
+	{ 0x04, 0x01 },
+	{ 0xfe, 0x00 },
+	{ 0xc7, 0x21 },
+	{ 0xc8, 0x19 },
+	{ 0xc9, 0x84 },
+	{ 0xca, 0x64 },
+	{ 0xcb, 0x89 },
+	{ 0xcc, 0x3f },
+	{ 0xcd, 0x16 },
+	{ 0xfe, 0x00 },
+	{ 0xc0, 0x05 },
+	{ 0xc1, 0x07 },
+	{ 0xc2, 0x30 },
+	{ 0xc3, 0x28 },
+	{ 0xc4, 0x3c },
+	{ 0xc5, 0x10 },
+	{ 0xc6, 0x96 },
+	{ 0xfe, 0x00 },
+	{ 0xb2, 0x01 },
+	{ 0xb3, 0x11 },
+	{ 0xa2, 0x11 },
+	{ 0xa3, 0x36 },
+	{ 0xa4, 0x11 },
+	{ 0xa5, 0x36 },
+	{ 0xa7, 0x80 },
+	{ 0xa8, 0x7f },
+	{ 0xa9, 0x15 },
+	{ 0xaa, 0x10 },
+	{ 0xab, 0x10 },
+	{ 0xac, 0x2c },
+	{ 0xad, 0xf0 },
+	{ 0xae, 0x20 },
+	{ 0xb4, 0x18 },
+	{ 0xb5, 0x1a },
+	{ 0xb6, 0x1c },
+	{ 0xb7, 0x30 },
+	{ 0xd0, 0x4c },
+	{ 0xfe, 0x01 },
+	{ 0x04, 0x40 },
+	{ 0x09, 0x0d },
+	{ 0x0a, 0x45 },
+	{ 0x0b, 0x82 },
+	{ 0x0c, 0x31 },
+	{ 0x0d, 0x29 },
+	{ 0x15, 0x22 },
+	{ 0x17, 0xb5 },
+	{ 0x18, 0x28 },
+	{ 0x1b, 0x28 },
+	{ 0x1c, 0x54 },
+	{ 0x1d, 0x3c },
+	{ 0x1e, 0x5d },
+	{ 0x1f, 0xa0 },
+	{ 0xfe, 0x00 },
+	{ 0xce, 0x3e },
+	{ 0xfe, 0x01 },
+	{ 0x64, 0xc8 },
+	{ 0x65, 0xb8 },
+	{ 0xfe, 0x01 },
+	{ 0x59, 0x00 },
+	{ BF30A2_REG_DELAY_MS, 0x64 },
+	{ BF30A2_REG_DELAY_MS, 0x64 },
+	{ BF30A2_REG_DELAY_MS, 0x64 },
+	{ BF30A2_REG_DELAY_MS, 0x64 },
+	{ 0xfe, 0x00 },
+	{ 0x3d, 0xff },
+	{ 0xa0, 0x55 },
+	{ 0xfe, 0x01 },
+	{ 0x00, 0x05 },
+};
+
+static const struct bf30a2_variant bf30a2_variant = {
+	.mode_regs = bf30a2_mode_regs,
+	.num_mode_regs = ARRAY_SIZE(bf30a2_mode_regs),
+	.avdd_uv = 2800000,
+	.id_high = 0x3b,
+	.id_low = 0x02,
+};
+
+static const struct bf30a2_variant bf3a01_variant = {
+	.mode_regs = bf3a01_mode_regs,
+	.num_mode_regs = ARRAY_SIZE(bf3a01_mode_regs),
+	.avdd_uv = 2800000,
+	.id_high = 0x00,
+	.id_low = 0x01,
+};
+
+static const u8 bf3a01_brightness_levels[] = {
+	0x10, 0x20, 0x30, 0x40, 0x5a, 0x66, 0x70,
+};
+
 static struct bf30a2 *to_bf30a2(struct v4l2_subdev *sd)
 {
 	return container_of(sd, struct bf30a2, sd);
@@ -99,6 +257,34 @@ static int bf30a2_read(struct i2c_client *client, u8 address, u8 *value)
 		return ret;
 	return ret == ARRAY_SIZE(messages) ? 0 : -EIO;
 }
+
+static int bf3a01_set_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct bf30a2 *sensor =
+		container_of(ctrl->handler, struct bf30a2, ctrls);
+	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
+	int ret;
+
+	if (ctrl->id != V4L2_CID_BRIGHTNESS)
+		return -EINVAL;
+
+	ret = pm_runtime_get_if_in_use(&client->dev);
+	if (ret <= 0)
+		return ret;
+
+	ret = bf30a2_write(client, 0xfe, 0x01);
+	if (!ret)
+		ret = bf30a2_write(client, 0x04,
+				   bf3a01_brightness_levels[ctrl->val]);
+	if (!ret)
+		msleep(100);
+	pm_runtime_put(&client->dev);
+	return ret;
+}
+
+static const struct v4l2_ctrl_ops bf3a01_ctrl_ops = {
+	.s_ctrl = bf3a01_set_ctrl,
+};
 
 static int bf30a2_power_off(struct bf30a2 *sensor)
 {
@@ -229,6 +415,7 @@ static int bf30a2_enable_streams(struct v4l2_subdev *sd,
 				 u64 streams_mask)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	const struct bf30a2_variant *variant = to_bf30a2(sd)->variant;
 	size_t i;
 	int ret;
 
@@ -236,18 +423,32 @@ static int bf30a2_enable_streams(struct v4l2_subdev *sd,
 	if (ret)
 		return ret;
 
-	for (i = 0; i < ARRAY_SIZE(bf30a2_mode_regs); i++) {
-		ret = bf30a2_write(client, bf30a2_mode_regs[i].address,
-				   bf30a2_mode_regs[i].value);
+	for (i = 0; i < variant->num_mode_regs; i++) {
+		const struct bf30a2_reg *reg = &variant->mode_regs[i];
+
+		if (reg->address == BF30A2_REG_DELAY_MS) {
+			msleep(reg->value);
+			continue;
+		}
+		ret = bf30a2_write(client, reg->address, reg->value);
 		if (ret) {
 			dev_err(&client->dev, "mode write failed at %zu: %pe\n",
 				i, ERR_PTR(ret));
-			pm_runtime_put_sync(&client->dev);
-			return ret;
+			goto power_off;
 		}
 	}
 
+	if (variant == &bf3a01_variant) {
+		ret = __v4l2_ctrl_handler_setup(sd->ctrl_handler);
+		if (ret)
+			goto power_off;
+	}
+
 	return 0;
+
+power_off:
+	pm_runtime_put_sync(&client->dev);
+	return ret;
 }
 
 static int bf30a2_disable_streams(struct v4l2_subdev *sd,
@@ -294,6 +495,9 @@ static int bf30a2_probe(struct i2c_client *client)
 	sensor = devm_kzalloc(dev, sizeof(*sensor), GFP_KERNEL);
 	if (!sensor)
 		return -ENOMEM;
+	sensor->variant = device_get_match_data(dev);
+	if (!sensor->variant)
+		return -ENODEV;
 	v4l2_i2c_subdev_init(&sensor->sd, client, &bf30a2_subdev_ops);
 	sensor->sd.internal_ops = &bf30a2_internal_ops;
 
@@ -325,7 +529,8 @@ static int bf30a2_probe(struct i2c_client *client)
 	ret = regulator_set_voltage(sensor->core, 1250000, 1250000);
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to set core voltage\n");
-	ret = regulator_set_voltage(sensor->avdd, 2800000, 2800000);
+	ret = regulator_set_voltage(sensor->avdd, sensor->variant->avdd_uv,
+				    sensor->variant->avdd_uv);
 	if (ret)
 		return dev_err_probe(dev, ret,
 				     "failed to set analog voltage\n");
@@ -350,7 +555,7 @@ static int bf30a2_probe(struct i2c_client *client)
 	if (power_ret)
 		return dev_err_probe(dev, power_ret,
 				     "failed to power off sensor\n");
-	if (high != BF30A2_ID_HIGH || low != BF30A2_ID_LOW)
+	if (high != sensor->variant->id_high || low != sensor->variant->id_low)
 		return dev_err_probe(dev, -ENODEV,
 				     "unexpected sensor ID %02x%02x\n", high,
 				     low);
@@ -365,12 +570,24 @@ static int bf30a2_probe(struct i2c_client *client)
 	if (ret)
 		return dev_err_probe(dev, ret,
 				     "failed to parse sensor properties\n");
-	ret = v4l2_ctrl_handler_init(&sensor->ctrls, 1);
+	ret = v4l2_ctrl_handler_init(&sensor->ctrls, 2);
 	if (ret)
 		return ret;
 	ret = v4l2_ctrl_new_fwnode_properties(&sensor->ctrls, NULL, &props);
 	if (ret)
 		goto ctrls_cleanup;
+	if (sensor->variant == &bf3a01_variant) {
+		v4l2_ctrl_new_std(&sensor->ctrls, &bf3a01_ctrl_ops,
+				  V4L2_CID_BRIGHTNESS, 0,
+				  ARRAY_SIZE(bf3a01_brightness_levels) - 1, 1,
+				  3);
+		if (sensor->ctrls.error) {
+			ret = sensor->ctrls.error;
+			goto ctrls_cleanup;
+		}
+		/* Mode upload and live controls share the sensor register bank. */
+		sensor->sd.state_lock = sensor->ctrls.lock;
+	}
 	sensor->sd.ctrl_handler = &sensor->ctrls;
 
 	sensor->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
@@ -415,9 +632,11 @@ static void bf30a2_remove(struct i2c_client *client)
 	v4l2_ctrl_handler_free(sd->ctrl_handler);
 }
 
-static const struct of_device_id bf30a2_of_match[] = { { .compatible =
-								 "byd,bf30a2" },
-						       {} };
+static const struct of_device_id bf30a2_of_match[] = {
+	{ .compatible = "byd,bf30a2", .data = &bf30a2_variant },
+	{ .compatible = "byd,bf3a01", .data = &bf3a01_variant },
+	{}
+};
 MODULE_DEVICE_TABLE(of, bf30a2_of_match);
 
 static const struct dev_pm_ops bf30a2_pm_ops = { RUNTIME_PM_OPS(
@@ -434,5 +653,5 @@ static struct i2c_driver bf30a2_i2c_driver = {
 };
 module_i2c_driver(bf30a2_i2c_driver);
 
-MODULE_DESCRIPTION("BF30A2 camera sensor");
+MODULE_DESCRIPTION("BF30A2 and BF3A01 camera sensors");
 MODULE_LICENSE("GPL");

@@ -1,0 +1,104 @@
+# SPDX-License-Identifier: GPL-2.0-only
+platform = "ums9117"
+
+[identity]
+brand = "Maxvi"
+product = "K15n4G"
+hardware_codes = []
+compatible = "maxvi,k15n4g"
+
+[nand]
+raw_device = "/dev/ums9117-nand-raw"
+
+[display_brightness]
+backlight = "maxvi-k15n-4g-backlight"
+levels = [0, 3, 6, 9, 12, 16, 19, 22, 25, 28, 31]
+
+[rootfs]
+packages = ["fplinux-audio", "fplinux-font-terminus-8x16"]
+
+[bundle]
+packages = []
+
+[linux]
+config_fragment = "linux/config.fragment"
+memory = { base = 0x80200000, size = 0x03c00000 }
+dtb = "unisoc/ums9117-maxvi-k15n-4g.dtb"
+debug_dtb = "ums9117-maxvi-k15n-4g.dtb"
+patches = []
+forbidden_dtb_markers = ["spi-nand", "mtd", "ubi", "emmc"]
+forbidden_config = [
+  "CONFIG_MTD=y",
+  "CONFIG_UBI=y",
+  "CONFIG_SCSI=y",
+  "CONFIG_ATA=y",
+  "CONFIG_NVME_CORE=y",
+]
+
+[[linux.copies]]
+source = "linux/dts/ums9117-maxvi-k15n-4g.dts"
+destination = "arch/arm/boot/dts/unisoc/ums9117-maxvi-k15n-4g.dts"
+
+[[linux.copies]]
+source = "linux/drivers/gpu/drm/ums9117/maxvi-k15n-4g-drm.c"
+destination = "drivers/gpu/drm/ums9117/maxvi-k15n-4g-drm.c"
+
+[[linux.appends]]
+source = "linux/arch/arm/mach-ums9117/Kconfig"
+destination = "arch/arm/mach-ums9117/Kconfig"
+
+[[linux.appends]]
+source = "linux/dts/unisoc.Makefile"
+destination = "arch/arm/boot/dts/unisoc/Makefile"
+
+[[linux.appends]]
+source = "linux/drivers/gpu/drm/ums9117/drm.Kconfig"
+destination = "drivers/gpu/drm/Kconfig"
+
+[[linux.appends]]
+source = "linux/drivers/gpu/drm/ums9117/drm.Makefile"
+destination = "drivers/gpu/drm/ums9117/Makefile"
+
+[bootstrap]
+lcd_config = "bootstrap/lcd_config.h"
+image = "maxvi_k15n_4g_linux_bootstrap.bin"
+map = "obj/maxvi_k15n_4g_linux_bootstrap_map.txt"
+dtb_destination = "maxvi_k15n_4g.dtb"
+record_prefix = "MAXVI_K15N_4G"
+
+[adapter]
+spi_mode = 0
+lcd_id = 0x9707
+backlight_channels = "rgw"
+backlight_level = 22
+exec_distance = 0
+session_name = "maxvi-k15n-4g-linux"
+boot_instructions = "Power the phone off, hold the left soft key, then connect USB while keeping the key pressed."
+
+[device_data]
+parser = "maxvi_device_data.py"
+
+# Extracted from the stock firmware in a NAND backup together with a board report.
+[board_maps]
+firmware = [
+  { source = "pinmap.bin", destination = "pinmap.bin" },
+  { source = "keymap.bin", destination = "keymap.bin" },
+]
+
+[bluetooth]
+firmware = [
+  { source = "maxvi-k15n-4g-cm4.bin", destination = "ums9117/maxvi-k15n-4g-cm4.bin", size = 463296, sha256 = "ffe5e4cb568552601281a0026bc1f9f5715f1715b1261062c23669e95b5e086d" },
+  { source = "maxvi-k15n-4g-bt-config.bin", destination = "ums9117/maxvi-k15n-4g-bt-config.bin", size = 8 },
+  { source = "maxvi-k15n-4g-bt-sprd.bin", destination = "ums9117/maxvi-k15n-4g-bt-sprd.bin", size = 176 },
+  { source = "maxvi-k15n-4g-bt-rf-config.bin", destination = "ums9117/maxvi-k15n-4g-bt-rf-config.bin", size = 252 },
+]
+
+[audio_profile]
+firmware = [
+  { source = "maxvi-k15n-4g-audio-profile.bin", destination = "fplinux/maxvi-k15n-4g-audio-profile.bin", size = 788 },
+]
+
+[fm_radio]
+firmware = [
+  { source = "maxvi-k15n-4g-fm-config.bin", destination = "fplinux/maxvi-k15n-4g-fm-config.bin", size = 128 },
+]

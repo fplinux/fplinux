@@ -1,14 +1,21 @@
 diff --git a/Documentation/devicetree/bindings/vendor-prefixes.yaml b/Documentation/devicetree/bindings/vendor-prefixes.yaml
 --- a/Documentation/devicetree/bindings/vendor-prefixes.yaml
 +++ b/Documentation/devicetree/bindings/vendor-prefixes.yaml
-@@ -583,4 +583,6 @@
+@@ -276,4 +276,6 @@
+   "^bur,.*":
+     description: B&R Industrial Automation GmbH
++  "^byd,.*":
++    description: BYD
+   "^bytedance,.*":
+     description: ByteDance Ltd.
+@@ -583,4 +585,6 @@
    "^foxlink,.*":
      description: Foxlink Group
 +  "^fplinux,.*":
 +    description: FPLinux project
    "^freebox,.*":
      description: Freebox SAS
-@@ -780,4 +782,6 @@
+@@ -780,4 +784,6 @@
    "^innolux,.*":
      description: Innolux Corporation
 +  "^inoi,.*":

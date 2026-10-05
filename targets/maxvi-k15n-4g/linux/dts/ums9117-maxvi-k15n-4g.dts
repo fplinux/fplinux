@@ -1,0 +1,296 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/dts-v1/;
+
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/fplinux-keypad.h>
+#include <dt-bindings/leds/common.h>
+#include "ums9117.dtsi"
+#include "ums9117-sc2720.dtsi"
+#include "fplinux-maxvi-k15n-4g-identity.dtsi"
+#include "ums9117-nand-readonly.dtsi"
+#include "ums9117-bluetooth.dtsi"
+
+/ {
+	memory@80200000 {
+		device_type = "memory";
+		reg = <0x80200000 0x03c00000>;
+	};
+
+	reserved-memory {
+		ranges;
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		framebuffer@83f00000 {
+			reg = <0x83f00000 0x00100000>;
+			no-map;
+		};
+	};
+
+	soc {
+		camera_mux: pinctrl@402a01e8 {
+			compatible = "pinctrl-single";
+			reg = <0x402a01e8 0xc>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,function-mask = <0x30>;
+			pinctrl-single,register-width = <32>;
+
+			camera_mux_pins: camera-pins {
+				pinctrl-single,pins = <0x0 0x0 0x4 0x30 0x8 0x30>;
+			};
+		};
+
+		camera_pads: pinctrl@402a05e8 {
+			compatible = "pinctrl-single";
+			reg = <0x402a05e8 0xc>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,function-mask = <0xffffffff>;
+			pinctrl-single,register-width = <32>;
+
+			camera_pad_pins: camera-pins {
+				pinctrl-single,pins = <
+					0x0 0x00082001 0x4 0x00082001 0x8 0x00082001
+				>;
+			};
+		};
+
+		display@20800000 {
+			compatible = "fplinux,ums9117-gc9307-lcm-fb";
+			reg = <0x20800000 0x00001000>,
+			      <0x20a00000 0x00001000>,
+			      <0x60000000 0x00000002>,
+			      <0x60020000 0x00000002>,
+			      <0x20e01000 0x00000004>,
+			      <0x20e01004 0x00000004>,
+			      <0x20e02004 0x00000004>,
+			      <0x402a00b0 0x0000001c>,
+			      <0x402a04b0 0x0000001c>,
+			      <0x402a01f4 0x0000004c>,
+			      <0x402a05f4 0x0000004c>;
+			interrupt-names = "lcdc-done";
+			interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL_HIGH>;
+			memory-region = <&codec_dma>;
+			reg-names = "lcdc", "lcm", "lcm-command", "lcm-data",
+				    "ap-ahb-gate-set", "ap-ahb-reset-set",
+				    "ap-ahb-reset-clear", "pinmux", "pinconf",
+				    "pinmux-data", "pinconf-data";
+			sprd,aon-apb = <&aon_apb>;
+			sprd,dbi-timing-ns = <50 55 110 20 70 35>;
+			sprd,pinconf-data-offsets = <
+				0x00 0x04 0x08 0x0c 0x10 0x14 0x18 0x1c 0x20 0x24
+				0x28 0x2c 0x30 0x34 0x38 0x3c 0x40 0x44 0x48
+			>;
+			sprd,pinconf-data-values = <
+				0x00082006 0x00082046 0x00082000 0x00082000 0x00082000
+				0x00082000 0x00082040 0x00082040 0x00082040 0x00082040
+				0x00082000 0x00182004 0x00082044 0x00182004 0x00182004
+				0x00182004 0x00182004 0x00182004 0x00182004
+			>;
+			sprd,pinconf-offsets = <
+				0x00 0x04 0x08 0x0c 0x10 0x14 0x18
+			>;
+			sprd,pinconf-values = <
+				0x00182001 0x00182046 0x00182001
+				0x00182004 0x00182004 0x00182004 0x00182004
+			>;
+			sprd,pinmux-data-offsets = <
+				0x00 0x04 0x08 0x0c 0x10 0x14 0x18 0x1c 0x20 0x24
+				0x28 0x2c 0x30 0x34 0x38 0x3c 0x40 0x44 0x48
+			>;
+			sprd,pinmux-data-values = <
+				0x20 0x20 0x20 0x20 0x10 0x10 0x10 0x10 0x10 0x10
+				0x10 0x10 0x30 0x10 0x10 0x10 0x10 0x10 0x10
+			>;
+			sprd,pinmux-offsets = <
+				0x00 0x04 0x08 0x0c 0x10 0x14 0x18
+			>;
+			sprd,pinmux-values = <
+				0 0 0x10 0x10 0x10 0x10 0x10
+			>;
+			sprd,pmic = <&sc2720_pmic>;
+			sprd,wled-current-levels = <31 31 0 31>;
+			sprd,wled-default-level = <22>;
+		};
+	};
+};
+
+#include "ums9117-ram-session.dtsi"
+
+&codec_dma {
+	size = <0x00400000>;
+};
+
+&audio {
+	firmware-name = "fplinux/maxvi-k15n-4g-audio-profile.bin";
+	hp-det-gpios = <&sc2720_eic 12 GPIO_ACTIVE_HIGH>;
+	pinctrl-0 = <&audio_mux_pins &audio_pad_pins>;
+	pinctrl-names = "audio";
+	fplinux,card-longname = "Maxvi K15n4G audio";
+	fplinux,microphone-capture;
+
+	status = "okay";
+};
+
+&audio_mux {
+	audio_mux_pins: audio-pins {
+		pinctrl-single,pins = <
+			0x00 0 0x08 0 0x0c 0
+			0x14 0 0x18 0 0x1c 0
+		>;
+	};
+};
+
+&audio_pads {
+	audio_pad_pins: audio-pins {
+		pinctrl-single,pins = <
+			0x00 0x0008e001 0x08 0x0008e001
+			0x0c 0x0008e001 0x14 0x0008e000
+			0x18 0x0008e000 0x1c 0x0008e001
+		>;
+	};
+};
+
+&bluetooth {
+	firmware-name = "ums9117/maxvi-k15n-4g-cm4.bin",
+			"ums9117/maxvi-k15n-4g-bt-config.bin",
+			"ums9117/maxvi-k15n-4g-bt-sprd.bin",
+			"ums9117/maxvi-k15n-4g-bt-rf-config.bin";
+	fplinux,cm4-sha256 = [
+		ff e5 e4 cb 56 85 52 60 12 81 a0 02 6b c1 f9 f5
+		71 5f 17 15 b1 26 10 62 c2 36 69 e9 5b 5e 08 6d
+	];
+	fplinux,cm4-size = <463296>;
+	fplinux,cm4-version = [65 10 06 09 15 20];
+	fplinux,fm-config-name = "fplinux/maxvi-k15n-4g-fm-config.bin";
+};
+
+&nandc {
+	fplinux,nand-id = <0x000061cd>;
+};
+
+&keypad_mux {
+	keypad_mux_pins: keypad-pins {
+		pinctrl-single,pins = <
+			0x00 0 0x04 0 0x08 0 0x0c 0 0x10 0
+			0x14 0 0x18 0 0x1c 0 0x20 0 0x24 0
+		>;
+	};
+};
+
+&keypad_pads {
+	keypad_pad_pins: keypad-pins {
+		pinctrl-single,pins = <
+			0x00 0x00080001 0x04 0x00080001 0x08 0x00080001
+			0x0c 0x00080001 0x10 0x00080001
+			0x14 0x0008008a 0x18 0x0008008a 0x1c 0x0008008a
+			0x20 0x0008008a 0x24 0x0008008a
+		>;
+	};
+};
+
+&keypad {
+	compatible = "sprd,ums9117-keypad";
+	eic1-gpios = <&sc2720_eic 1 GPIO_ACTIVE_LOW>;
+	label = "Maxvi K15n4G keypad";
+	pinctrl-0 = <&keypad_mux_pins &keypad_pad_pins>;
+	pinctrl-names = "matrix";
+	keypad,num-columns = <5>;
+	keypad,num-rows = <5>;
+	linux,keymap = <
+		MATRIX_KEY(0, 0, FPLINUX_KEY_SOFT_LEFT)
+		MATRIX_KEY(0, 1, FPLINUX_KEY_SOFT_RIGHT)
+		MATRIX_KEY(0, 3, FPLINUX_KEY_LEFT)
+		MATRIX_KEY(0, 4, FPLINUX_KEY_CALL)
+		MATRIX_KEY(1, 0, FPLINUX_KEY_3)
+		MATRIX_KEY(1, 1, FPLINUX_KEY_8)
+		MATRIX_KEY(1, 2, FPLINUX_KEY_2)
+		MATRIX_KEY(1, 3, FPLINUX_KEY_UP)
+		MATRIX_KEY(2, 0, FPLINUX_KEY_6)
+		MATRIX_KEY(2, 1, FPLINUX_KEY_4)
+		MATRIX_KEY(2, 2, FPLINUX_KEY_5)
+		MATRIX_KEY(2, 3, FPLINUX_KEY_RIGHT)
+		MATRIX_KEY(3, 0, FPLINUX_KEY_9)
+		MATRIX_KEY(3, 1, FPLINUX_KEY_7)
+		MATRIX_KEY(3, 2, FPLINUX_KEY_1)
+		MATRIX_KEY(3, 3, FPLINUX_KEY_DOWN)
+		MATRIX_KEY(4, 0, FPLINUX_KEY_POUND)
+		MATRIX_KEY(4, 1, FPLINUX_KEY_STAR)
+		MATRIX_KEY(4, 2, FPLINUX_KEY_0)
+		MATRIX_KEY(4, 3, FPLINUX_KEY_OK)
+	>;
+	sprd,eic1-keycode = <FPLINUX_KEY_POWER>;
+
+	status = "okay";
+};
+
+/* The fuel gauge needs board calibration values. */
+&sc2720_fgu {
+	status = "disabled";
+};
+
+&sc2720_kpled {
+	compatible = "sprd,ums9117-sc2720-kpled-ldo";
+	fplinux,ldo-code = <3>;
+
+	status = "okay";
+};
+
+&ap_gpio {
+	status = "okay";
+};
+
+&ap_i2c0_clk {
+	status = "okay";
+};
+
+&aon_sensor_clk {
+	assigned-clock-rates = <12000000>;
+	assigned-clocks = <&aon_sensor_clk CLK_SENSOR0>;
+
+	status = "okay";
+};
+
+&i2c0 {
+	status = "okay";
+
+	maxvi_camera: camera@6e {
+		compatible = "byd,bf3a01";
+		reg = <0x6e>;
+		avdd-supply = <&vddcama>;
+		camera-core-supply = <&vddcamd>;
+		clock-names = "xclk";
+		clocks = <&aon_sensor_clk CLK_SENSOR0>;
+		iovdd-supply = <&vddcamio>;
+		pinctrl-0 = <&camera_mux_pins &camera_pad_pins>;
+		pinctrl-names = "default";
+		powerdown-gpios = <&ap_gpio 101 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&ap_gpio 100 GPIO_ACTIVE_HIGH>;
+		rotation = <270>;
+
+		port {
+			maxvi_camera_out: endpoint {
+				remote-endpoint = <&maxvi_camera_sink>;
+				sprd,serial-g0-data-width = <1>;
+			};
+		};
+	};
+};
+
+&jpeg {
+	status = "okay";
+
+	port {
+		maxvi_camera_sink: endpoint {
+			remote-endpoint = <&maxvi_camera_out>;
+			sprd,serial-g0-data-width = <1>;
+		};
+	};
+};
+
+&usb {
+	compatible = "fplinux,ums9117-musb-inherited";
+	dr_mode = "peripheral";
+
+	status = "okay";
+};

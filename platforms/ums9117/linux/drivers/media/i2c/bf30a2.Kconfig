@@ -1,9 +1,9 @@
 config VIDEO_BF30A2
-	tristate "BF30A2 camera sensor"
+	tristate "BF30A2 and BF3A01 camera sensors"
 	depends on I2C && VIDEO_DEV && PM
 	select V4L2_FWNODE
 	help
-	  Enable support for the BF30A2 240x320 YUV422 image sensor.
+	  Enable support for the BF30A2 and BF3A01 240x320 YUV422 sensors.
 	  The device is controlled over I2C and exposes a V4L2 subdevice
 	  for capture controllers. The sensor clock and supplies must be
 	  described by the board's device tree.

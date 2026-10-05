@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config DRM_MAXVI_K15N_4G
+	bool "Maxvi K15n4G LCDC display"
+	depends on DRM && MACH_MAXVI_K15N_4G
+	select DRM_UMS9117
+	select DRM_UMS9117_LCM
+	select DRM_UMS9117_WAKE_REINIT
+	help
+	  Drive the Maxvi K15n4G panel through the UMS9117 parallel LCM/DBI
+	  interface with atomic RGB565 and NV16 modesetting, bounded transfer
+	  completion and LCD backlight control. The in-kernel console uses
+	  DRM fbdev emulation.
