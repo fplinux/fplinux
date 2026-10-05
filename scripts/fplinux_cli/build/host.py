@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import shlex
 import shutil
@@ -26,7 +27,9 @@ from fplinux_cli.common import (
     sha256_bytes,
     sha256_file,
 )
+from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.values import relative_value
+from fplinux_cli.output import run_entrypoint
 
 _COMPILER_ENVIRONMENT = (
     "AR",
@@ -310,15 +313,17 @@ def _publish_host_tool(slot: Path, recipe_digest: str, binary: Path) -> None:
 
 
 def build_host_tools(
-    sources: dict[str, Any], platform: dict[str, Any], work: Path
+    sources: dict[str, Any], platform: dict[str, Any], work: Path, *, tool: str | None = None
 ) -> dict[str, Path]:
-    """Build every typed platform host-tool recipe."""
+    """Build the requested typed platform host-tool recipes."""
     source_work = work / "host-build"
     output = work / "host"
     source_work.mkdir(parents=True, exist_ok=True)
     output.mkdir(parents=True, exist_ok=True)
     result: dict[str, Path] = {}
     for recipe in platform["host"]["tools"]:
+        if tool is not None and recipe["name"] != tool:
+            continue
         recipe_digest = _host_tool_recipe(sources, recipe)
         cache_name = relative_value(recipe["name"], "host tool name")
         slot = inputs_build.CACHE / "host-tools" / cache_name
@@ -338,3 +343,25 @@ def build_host_tools(
         _publish_host_tool(slot, recipe_digest, built)
         result[recipe["name"]] = built
     return result
+
+
+def main() -> None:
+    """Build one platform host utility without target firmware or runtime artifacts."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("platform")
+    parser.add_argument("tool")
+    args = parser.parse_args()
+    platform = load_platform(args.platform)
+    recipes = [recipe for recipe in platform["host"]["tools"] if recipe["name"] == args.tool]
+    if len(recipes) != 1:
+        fail(f"platform {args.platform} does not declare host tool {args.tool}")
+    sources = common.load_toml(common.ROOT / "sources.lock.toml")
+    with tempfile.TemporaryDirectory(prefix="fplinux-host-tool-") as temporary:
+        tools = build_host_tools(sources, platform, Path(temporary), tool=args.tool)
+        destination = inputs_build.OUTPUT / args.tool
+        shutil.copyfile(tools[args.tool], destination)
+        destination.chmod(0o755)
+
+
+if __name__ == "__main__":
+    run_entrypoint(main)

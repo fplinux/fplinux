@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import importlib.util
 import shutil
@@ -11,7 +12,7 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fplinux_cli.cli.build import build
+from fplinux_cli.cli.build import build, prepare_host_tool
 from fplinux_cli.cli.bundles import resolve_target_bundle
 from fplinux_cli.cli.runtime import run_target_noninteractive
 from fplinux_cli.manifests.targets import load_target
@@ -161,12 +162,19 @@ def _load_board_maps_provider(platform: str) -> ModuleType:
     return module
 
 
-def _board_maps_extractor(target: str, platform: str) -> Callable[[PhysicalNand], object]:
-    """Bind the platform extraction to the host tools of the target's current build."""
+def _board_maps_extractor(
+    target: str,
+    platform: str,
+    *,
+    host_tools: Path | None = None,
+) -> Callable[[PhysicalNand], object]:
+    """Bind platform extraction to prepared host tools or the live loader's build."""
     provider = _load_board_maps_provider(platform)
-    bundle, _manifest = resolve_target_bundle(target)
+    if host_tools is None:
+        bundle, _manifest = resolve_target_bundle(target)
+        host_tools = bundle.path / "host"
     extract: Callable[[PhysicalNand], object] = functools.partial(
-        provider.prepare_board_maps, host_tools=bundle.path / "host"
+        provider.prepare_board_maps, host_tools=host_tools
     )
     return extract
 
@@ -367,10 +375,10 @@ def prepare_device_data(
     if from_dump is None:
         with reporter.stage("build", show_tail=False):
             build(target, jobs, offline=offline, reporter=reporter)
-    # Board maps are extracted with a host tool from the target's current build.
+    # A live acquisition uses the host tool already built with its loader.
     board_maps = (
         _board_maps_extractor(target, str(target_config["platform"]))
-        if BOARD_MAPS_GROUP in declarations
+        if from_dump is None and BOARD_MAPS_GROUP in declarations
         else None
     )
     if from_dump is None:
@@ -415,13 +423,30 @@ def prepare_device_data(
                 nand = PhysicalNand.from_dump(raw, page_bytes=page_bytes)
             except ValueError as error:
                 fail(f"device-data extraction failed: {error}")
-            extracted = _extract_groups(
-                target,
-                parser_filename,
-                declarations,
-                nand,
-                board_maps=board_maps,
-            )
+            with contextlib.ExitStack() as resources:
+                if from_dump is not None and BOARD_MAPS_GROUP in declarations:
+                    host_tools = Path(
+                        resources.enter_context(
+                            tempfile.TemporaryDirectory(prefix="device-data-host-", dir=cache)
+                        )
+                    )
+                    platform = str(target_config["platform"])
+                    prepare_host_tool(
+                        target,
+                        platform,
+                        "fphelper_t117",
+                        host_tools,
+                        offline=offline,
+                        reporter=reporter,
+                    )
+                    board_maps = _board_maps_extractor(target, platform, host_tools=host_tools)
+                extracted = _extract_groups(
+                    target,
+                    parser_filename,
+                    declarations,
+                    nand,
+                    board_maps=board_maps,
+                )
             _materialize_groups(staging, extracted)
             admitted = capture_device_data_generation(
                 declarations,

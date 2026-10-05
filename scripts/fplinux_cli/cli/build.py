@@ -21,6 +21,7 @@ from fplinux_cli.output import RunReporter, silence_broken_pipe
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from fplinux_cli.image_state import ImageState
     from fplinux_cli.workspace import WorkspaceSnapshot
 
 
@@ -32,6 +33,121 @@ def ensure_build_directory(path: Path) -> Path:
     if path.is_symlink() or not path.is_dir():
         fail(f"invalid build cache directory: {path}")
     return path
+
+
+def _require_build_environment(
+    container_lock: dict[str, Any],
+    image_recipe: str,
+    *,
+    offline: bool,
+    reporter: RunReporter,
+) -> tuple[str, str, ImageState]:
+    """Resolve the pinned runtime and current image for a build operation."""
+    image = images.container_image_reference(container_lock, image_recipe)
+    current_image = None
+    if not kern_env.kern_available(container_lock):
+        if offline:
+            fail(
+                "offline build requires the current pinned OCI image; "
+                "run ./fplinux setup online first"
+            )
+        current_image = kern_env.setup(
+            reporter=reporter, lock=container_lock, image_recipe=image_recipe
+        )
+    kern = kern_env.require_kern(container_lock)
+    inspected_image = kern_env.current_image_state(kern, image, image_recipe)
+    if inspected_image is None:
+        if offline:
+            fail(
+                "offline build requires the current pinned OCI image; "
+                "run ./fplinux setup online first"
+            )
+        current_image = kern_env.setup(
+            reporter=reporter, lock=container_lock, image_recipe=image_recipe
+        )
+    elif current_image is None:
+        current_image = kern_env.publish_current_image_state(
+            kern, image, image_recipe, state=inspected_image
+        )
+    return kern, image, current_image
+
+
+def prepare_host_tool(  # noqa: PLR0913 -- operation inputs and environment policy stay explicit.
+    target: str,
+    platform: str,
+    tool: str,
+    output: Path,
+    *,
+    offline: bool,
+    reporter: RunReporter,
+) -> None:
+    """Build one cached host utility in the pinned image without fitted device data."""
+    snapshot = workspaces.workspace_snapshot(workspaces.target_build_source_files(target))
+    container_lock = images.load_container_lock()
+    image_recipe = images.container_image_recipe_digest(container_lock)
+    kern, image, image_state = _require_build_environment(
+        container_lock, image_recipe, offline=offline, reporter=reporter
+    )
+    cache = common.ROOT / ".cache"
+    downloads = ensure_build_directory(cache / "downloads")
+    host_tools = ensure_build_directory(cache / "host-tools")
+    workspace = workspaces.stage_workspace_snapshot(snapshot)
+    try:
+        container_logs = ensure_build_directory(reporter.root / "host-tools")
+        log_environment = reporter.container_environment("/logs")
+        log_environment["FPLINUX_LOG_DISPLAY_ROOT"] += "/host-tools"
+        command = [
+            kern,
+            "box",
+            kern_env.kern_box_name("host-tools"),
+            "--image",
+            image,
+            "--pull",
+            "never",
+            "--read-only",
+            "--privileged",
+            "--network",
+            "none" if offline else "host",
+            "--tmpfs",
+            "/tmp:1g",  # noqa: S108 -- container tmpfs.
+            "--volume",
+            f"{downloads}:/cache/downloads",
+            "--volume",
+            f"{host_tools}:/cache/host-tools",
+            "--volume",
+            f"{output}:/out",
+            "--volume",
+            f"{container_logs}:/logs",
+            "--volume",
+            f"{workspace}:/workspace:ro",
+            *[
+                argument
+                for key, value in log_environment.items()
+                for argument in ("--env", f"{key}={value}")
+            ],
+            "--env",
+            "HOME=/tmp/fplinux-home",
+            "--env",
+            "PYTHONPATH=/workspace/scripts",
+            "--env",
+            f"FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE={image_recipe}",
+            "--env",
+            f"FPLINUX_CONTAINER_IMAGE_CONTENT={image_state.image_content}",
+            "--workdir",
+            "/workspace",
+            "--init",
+            "--quiet",
+            "--",
+            "python3",
+            "-m",
+            "fplinux_cli.build.host",
+            platform,
+            tool,
+        ]
+        with reporter.stage("host-tools", passthrough=True, show_tail=False) as stage:
+            stage.run(command, env=kern_env.kern_environment())
+    finally:
+        workspaces.discard_staged_workspace_snapshot(snapshot, workspace)
 
 
 def _build_container_command(  # noqa: PLR0913
@@ -218,36 +334,9 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
             target=bundles_commands.profile_log_target(target, profile),
             verbose=verbose,
         )
-    image = images.container_image_reference(container_lock, image_recipe)
-    if not kern_env.kern_available(container_lock):
-        if offline:
-            fail(
-                "offline build requires the current pinned OCI image; "
-                "run ./fplinux setup online first"
-            )
-        current_image = kern_env.setup(
-            reporter=reporter, lock=container_lock, image_recipe=image_recipe
-        )
-    else:
-        current_image = None
-    kern = kern_env.require_kern(container_lock)
-    inspected_image = kern_env.current_image_state(kern, image, image_recipe)
-    if inspected_image is None:
-        if offline:
-            fail(
-                "offline build requires the current pinned OCI image; "
-                "run ./fplinux setup online first"
-            )
-        current_image = kern_env.setup(
-            reporter=reporter, lock=container_lock, image_recipe=image_recipe
-        )
-    elif current_image is None:
-        current_image = kern_env.publish_current_image_state(
-            kern,
-            image,
-            image_recipe,
-            state=inspected_image,
-        )
+    kern, image, current_image = _require_build_environment(
+        container_lock, image_recipe, offline=offline, reporter=reporter
+    )
     apk_signing = ensure_build_directory(cache / "apk-signing")
     downloads = ensure_build_directory(cache / "downloads")
     ccache = ensure_build_directory(cache / "ccache")

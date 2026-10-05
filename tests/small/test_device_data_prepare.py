@@ -7,6 +7,7 @@ import contextlib
 import hashlib
 import io
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -23,6 +24,8 @@ from fplinux_cli.device_data import (
 from fplinux_cli.environment import images, kern
 from fplinux_cli.manifests import releases
 from fplinux_cli.output import run_entrypoint
+
+from tests.fixtures.stock_board_report import agreeing_vbm, backup, signed_image
 
 TARGET = "demo-phone"
 RAW_PAGE_BYTES = 2112
@@ -49,11 +52,12 @@ class DeviceDataPrepareTests(unittest.TestCase):
 
     Stubbed: the target configuration (load_target); loading of the target parser and
     platform board-map modules, replaced by in-test callables; PhysicalNand.from_dump
-    admission of the short dump; the current-build lookup where a build must exist;
+    admission of the short dump; pinned host-tool preparation;
     and the loader build, RAM load and NAND backup. One case instead runs the real
     build up to its offline rejection with stubbed release, workspace, image and Kern
-    inputs. Real target TOML, parser and platform module files, full-size dump
-    admission, real extraction and phone transport are not exercised.
+    inputs. The cold-dump case instead runs full-size admission, the real platform
+    module and an external fake utility. Real target TOML, target parser files,
+    pinned container builds, real-tool discovery and phone transport are not exercised.
     """
 
     def setUp(self) -> None:
@@ -307,7 +311,7 @@ class DeviceDataPrepareTests(unittest.TestCase):
         with_bluetooth: bool,
         extract: object,
     ) -> str:
-        """Prepare board maps with a stub platform extraction and a stub current build."""
+        """Prepare board maps with a stub extraction and pinned host-tool preparation."""
         groups: dict[str, list[dict[str, object]]] = {
             "board-maps": [
                 # Board maps are declared without sizes; each phone's own maps are admitted.
@@ -348,8 +352,8 @@ class DeviceDataPrepareTests(unittest.TestCase):
             ),
             mock.patch.object(
                 device_data_prepare,
-                "resolve_target_bundle",
-                return_value=(SimpleNamespace(path=self.root / "current-bundle"), {}),
+                "prepare_host_tool",
+                return_value=None,
             ),
             mock.patch.object(
                 PhysicalNand,
@@ -366,7 +370,7 @@ class DeviceDataPrepareTests(unittest.TestCase):
             )
         return stdout.getvalue()
 
-    def test_board_maps_come_from_the_platform_with_current_build_tools_and_a_report(
+    def test_saved_dump_board_maps_publish_without_a_runtime_bundle(
         self,
     ) -> None:
         """Platform output is published beside parser groups; its report is not a build input."""
@@ -380,7 +384,8 @@ class DeviceDataPrepareTests(unittest.TestCase):
         output = self._run_board_maps_from_dump(with_bluetooth=True, extract=extract)
 
         generation = self._current_generation()
-        self.assertEqual(received, [self.root / "current-bundle/host"])
+        self.assertEqual(len(received), 1)
+        self.assertFalse(received[0].exists())
         self.assertEqual((generation / "groups/board-maps/pinmap.bin").read_bytes(), b"pins")
         self.assertEqual((generation / "groups/board-maps/keymap.bin").read_bytes(), b"keys")
         self.assertEqual((generation / "groups/bluetooth/radio.bin").read_bytes(), b"radio")
@@ -406,43 +411,100 @@ class DeviceDataPrepareTests(unittest.TestCase):
         self.assertNotIn("reports", groups["bluetooth"])
         self.assertIn(f"Review {report}.", output)
 
-    def test_board_maps_without_a_current_build_or_extraction_publish_nothing(self) -> None:
-        """A missing host-tool build or a failed extraction leaves no generation."""
+    def test_cold_saved_dump_publishes_maps_from_a_tool_process(self) -> None:
+        """A fake external utility feeds the real platform extractor without a runtime bundle.
+
+        Pinned container preparation is replaced by installation of the controlled utility.
+        Full dump admission, stock-image parsing, process execution and publication are real.
+        This does not establish real-tool table discovery or the container build boundary.
+        """
+        project = Path(__file__).resolve().parents[2]
+        image = signed_image(bytes(0x5000))
+        small = backup(image, vbm=agreeing_vbm())
+        with self.saved_dump.open("wb") as dump_writer:
+            dump_writer.write(small.raw)
+            dump_writer.truncate(138412032)
+        with self.saved_dump.open("rb") as dump_reader:
+            original_digest = hashlib.file_digest(dump_reader, "sha256").hexdigest()
+        provider = self.root / "platforms/ums9117/host/stock_image.py"
+        provider.parent.mkdir(parents=True)
+        shutil.copyfile(project / "platforms/ums9117/host/stock_image.py", provider)
+        pinmap = bytes.fromhex("b0002a40 10000000 ffffffff ffffffff")
+        keys = bytes.fromhex("2a00 3100")
+        scenario = {
+            "image_sha256": hashlib.sha256(image).hexdigest(),
+            "commands": {
+                "unpack": {
+                    "stdout": "0x800: init_table, start = 0x900, end = 0x910\n"
+                    "ps_addr: 0x80100000\n"
+                    "0x4800: pinmap (end = 0x4810)\n"
+                    "0x4900: keymap, bootkey = 0x2a (STAR)\n",
+                    "files": {"pinmap.bin": pinmap.hex(), "keymap.bin": keys.hex()},
+                }
+            },
+        }
+
+        def install_tool(
+            _target: str,
+            _platform: str,
+            _tool: str,
+            output: Path,
+            *,
+            offline: bool,
+            reporter: object,
+        ) -> None:
+            del reporter
+            self.assertTrue(offline)
+            executable = output / "fphelper_t117"
+            shutil.copyfile(project / "tests/fixtures/fphelper/fake_fphelper.py", executable)
+            executable.chmod(0o755)
+            (output / "scenario.json").write_text(json.dumps(scenario), encoding="utf-8")
+
+        config = {
+            "platform": "ums9117",
+            "nand": DECLARED_NAND,
+            "device_data": {
+                "groups": {
+                    "board-maps": [
+                        {"source": "pinmap.bin", "destination": "pinmap.bin"},
+                        {"source": "keymap.bin", "destination": "keymap.bin"},
+                    ]
+                }
+            },
+        }
+        with (
+            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(device_data_prepare, "ROOT", self.root),
+            mock.patch.object(device_data_prepare, "load_target", return_value=config),
+            mock.patch.object(
+                device_data_prepare, "prepare_host_tool", side_effect=install_tool, create=True
+            ),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            device_data_prepare.prepare_device_data(
+                TARGET, from_dump=self.saved_dump, jobs=1, offline=True
+            )
+
+        generation = self._current_generation()
+        self.assertEqual((generation / "groups/board-maps/pinmap.bin").read_bytes(), pinmap)
+        self.assertEqual((generation / "groups/board-maps/keymap.bin").read_bytes(), keys)
+        report = json.loads((generation / "reports/board-maps/board-report.json").read_text())
+        self.assertEqual(report["keypad"]["boot_key"], {"code": "0x2a", "key": "FPLINUX_KEY_STAR"})
+        self.assertEqual(report["pads"]["display"], {"0x402a00b0": "0x00000010"})
+        self.assertEqual((generation / "originals/board-maps/stock-image.bin").read_bytes(), image)
+        with self.saved_dump.open("rb") as dump_reader:
+            self.assertEqual(
+                hashlib.file_digest(dump_reader, "sha256").hexdigest(), original_digest
+            )
+        self.assertFalse((self.cache / "out").exists())
+
+    def test_failed_board_map_extraction_publishes_nothing(self) -> None:
+        """A failed extraction leaves no selected generation."""
 
         def unavailable(_nand: PhysicalNand, *, host_tools: Path) -> PreparedGroup:
             del host_tools
             message = "board maps not found in the stock image"
             raise ValueError(message)
-
-        with (
-            mock.patch.object(common, "ROOT", self.root),
-            mock.patch.object(device_data_prepare, "ROOT", self.root),
-            mock.patch.object(
-                device_data_prepare,
-                "load_target",
-                return_value={
-                    "platform": "demo-platform",
-                    "device_data": {"groups": {"board-maps": []}},
-                    "nand": DECLARED_NAND,
-                },
-            ),
-            mock.patch.object(
-                device_data_prepare,
-                "_load_board_maps_provider",
-                return_value=SimpleNamespace(prepare_board_maps=unavailable),
-            ),
-            self.assertRaisesRegex(
-                SystemExit,
-                "current build is missing or invalid; rebuild it: ./fplinux build demo-phone",
-            ),
-        ):
-            device_data_prepare.prepare_device_data(
-                TARGET,
-                from_dump=self.saved_dump,
-                jobs=1,
-                offline=True,
-            )
-        self.assertFalse((self.cache / "device-data").exists())
 
         with self.assertRaisesRegex(
             SystemExit, "device-data extraction failed: board maps not found in the stock image"
