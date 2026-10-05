@@ -46,6 +46,7 @@ class InputSessionTests(unittest.TestCase):
             for scenario in (
                 "lifecycle",
                 "classification",
+                "rejected",
                 "modifiers",
                 "frames",
                 "pointer",

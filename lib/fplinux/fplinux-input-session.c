@@ -20,10 +20,7 @@
 
 #define FPLINUX_INPUT_SESSION_GRAB_ATTEMPTS 20U
 #define FPLINUX_INPUT_SESSION_GRAB_RETRY_NS 50000000L
-#define FPLINUX_INPUT_SESSION_PHYS_BYTES 64U
 #define FPLINUX_INPUT_SESSION_WHEEL_CLICK_V120 120
-#define BITS_PER_LONG (8U * sizeof(unsigned long))
-#define BIT_WORDS(max) ((max) / BITS_PER_LONG + 1U)
 
 static void set_message(char *error, size_t size, const char *message)
 {
@@ -31,43 +28,33 @@ static void set_message(char *error, size_t size, const char *message)
 		snprintf(error, size, "%s", message);
 }
 
-static bool bit_is_set(const unsigned long *bits, unsigned int bit)
+static bool has_pointer(const struct libevdev *device)
 {
-	return bits[bit / BITS_PER_LONG] & (1UL << (bit % BITS_PER_LONG));
+	return libevdev_has_event_code(device, EV_REL, REL_X) &&
+	       libevdev_has_event_code(device, EV_REL, REL_Y) &&
+	       libevdev_has_event_code(device, EV_KEY, BTN_LEFT);
 }
 
-static bool is_phone_keypad(int fd)
+static bool is_phone_keypad(const struct libevdev *device)
 {
-	char phys[FPLINUX_INPUT_SESSION_PHYS_BYTES] = { 0 };
+	const char *phys = libevdev_get_phys(device);
 
-	if (ioctl(fd, EVIOCGPHYS(sizeof(phys) - 1), phys) < 0)
-		return false;
-	return strcmp(phys, FPLINUX_INPUT_PHONE_PHYS) == 0;
+	return phys && strcmp(phys, FPLINUX_INPUT_PHONE_PHYS) == 0;
 }
 
 /* Keyboard capabilities take priority over relative pointer capabilities. */
-static bool classify_device(int fd, enum fplinux_input_source *source)
+static bool classify_device(const struct libevdev *device,
+			    enum fplinux_input_source *source)
 {
-	unsigned long events[BIT_WORDS(EV_MAX)] = { 0 };
-	unsigned long keys[BIT_WORDS(KEY_MAX)] = { 0 };
-	unsigned long relative[BIT_WORDS(REL_MAX)] = { 0 };
-
-	if (is_phone_keypad(fd)) {
+	if (is_phone_keypad(device)) {
 		*source = FPLINUX_INPUT_SOURCE_KEYPAD;
 		return true;
 	}
-	if (ioctl(fd, EVIOCGBIT(0, sizeof(events)), events) < 0 ||
-	    !bit_is_set(events, EV_KEY) ||
-	    ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(keys)), keys) < 0)
-		return false;
-	if (bit_is_set(keys, KEY_ENTER)) {
+	if (libevdev_has_event_code(device, EV_KEY, KEY_ENTER)) {
 		*source = FPLINUX_INPUT_SOURCE_KEYBOARD;
 		return true;
 	}
-	if (bit_is_set(events, EV_REL) &&
-	    ioctl(fd, EVIOCGBIT(EV_REL, sizeof(relative)), relative) >= 0 &&
-	    bit_is_set(relative, REL_X) && bit_is_set(relative, REL_Y) &&
-	    bit_is_set(keys, BTN_LEFT)) {
+	if (has_pointer(device)) {
 		*source = FPLINUX_INPUT_SOURCE_POINTER;
 		return true;
 	}
@@ -178,9 +165,13 @@ static void add_device(struct fplinux_input_session *session,
 	fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
 	if (fd < 0)
 		return;
-	if (!classify_device(fd, &source) ||
-	    !(session->accepted_sources & FPLINUX_INPUT_SOURCE_MASK(source)) ||
-	    libevdev_new_from_fd(fd, &evdev) < 0) {
+	if (libevdev_new_from_fd(fd, &evdev) < 0) {
+		close(fd);
+		return;
+	}
+	if (!classify_device(evdev, &source) ||
+	    !(session->accepted_sources & FPLINUX_INPUT_SOURCE_MASK(source))) {
+		libevdev_free(evdev);
 		close(fd);
 		return;
 	}
@@ -199,9 +190,7 @@ static void add_device(struct fplinux_input_session *session,
 	slot->id = ++session->next_device_id;
 	slot->device = evdev;
 	slot->added = true;
-	slot->has_pointer = libevdev_has_event_code(evdev, EV_REL, REL_X) &&
-			    libevdev_has_event_code(evdev, EV_REL, REL_Y) &&
-			    libevdev_has_event_code(evdev, EV_KEY, BTN_LEFT);
+	slot->has_pointer = has_pointer(evdev);
 	wake_session(session);
 }
 

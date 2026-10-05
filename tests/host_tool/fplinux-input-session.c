@@ -2,7 +2,6 @@
 #define _GNU_SOURCE
 /* Controlled udev/ioctl/libevdev boundaries; epoll and readiness fds are real. */
 #include <assert.h>
-#include <asm/ioctl.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <libevdev/libevdev.h>
@@ -21,7 +20,6 @@
 
 #define DEVICE_COUNT 6U
 #define EVENT_COUNT 128U
-#define BITS_PER_LONG (8U * sizeof(unsigned long))
 
 struct udev {
 	bool live;
@@ -69,6 +67,11 @@ struct fake_device {
 	const char *phys;
 	bool keyboard;
 	bool pointer;
+	bool no_keys;
+	bool no_relative_y;
+	bool phys_fails;
+	bool evdev_fails;
+	bool clock_fails;
 	bool present;
 	bool grabbed;
 	unsigned int busy;
@@ -162,57 +165,23 @@ int __wrap_close(int fd)
 	return __real_close(fd);
 }
 
-static void set_bit(unsigned long *bits, unsigned int code)
-{
-	bits[code / BITS_PER_LONG] |= 1UL << (code % BITS_PER_LONG);
-}
-
 int __wrap_ioctl(int fd, unsigned long request, ...)
 {
 	struct fake_device *device = device_by_fd(fd);
 	va_list arguments;
-	void *buffer;
-	unsigned long *bits;
+	int grab;
 
+	assert(request == EVIOCGRAB);
 	va_start(arguments, request);
-	if (request == EVIOCGRAB) {
-		int grab = va_arg(arguments, int);
-
-		va_end(arguments);
-		if (grab && (device->busy || device->permanently_busy)) {
-			if (device->busy)
-				--device->busy;
-			errno = EBUSY;
-			return -1;
-		}
-		device->grabbed = grab != 0;
-		return 0;
-	}
-	buffer = va_arg(arguments, void *);
+	grab = va_arg(arguments, int);
 	va_end(arguments);
-	memset(buffer, 0, _IOC_SIZE(request));
-	if (_IOC_NR(request) == _IOC_NR(EVIOCGPHYS(1))) {
-		snprintf(buffer, _IOC_SIZE(request), "%s", device->phys);
-		return 0;
+	if (grab && (device->busy || device->permanently_busy)) {
+		if (device->busy)
+			--device->busy;
+		errno = EBUSY;
+		return -1;
 	}
-	bits = buffer;
-	if (_IOC_NR(request) == _IOC_NR(EVIOCGBIT(0, 1))) {
-		set_bit(bits, EV_KEY);
-		if (device->pointer)
-			set_bit(bits, EV_REL);
-	} else if (_IOC_NR(request) == _IOC_NR(EVIOCGBIT(EV_KEY, 1))) {
-		set_bit(bits, KEY_F13);
-		if (device->keyboard)
-			set_bit(bits, KEY_ENTER);
-		if (device->pointer)
-			set_bit(bits, BTN_LEFT);
-	} else if (_IOC_NR(request) == _IOC_NR(EVIOCGBIT(EV_REL, 1))) {
-		assert(device->pointer);
-		set_bit(bits, REL_X);
-		set_bit(bits, REL_Y);
-	} else {
-		assert(false);
-	}
+	device->grabbed = grab != 0;
 	return 0;
 }
 
@@ -384,6 +353,8 @@ int libevdev_new_from_fd(int fd, struct libevdev **device)
 	struct fake_device *fake = device_by_fd(fd);
 	unsigned int index = (unsigned int)(fake - devices);
 
+	if (fake->evdev_fails)
+		return -ENODEV;
 	memset(&fake->evdev, 0, sizeof(fake->evdev));
 	fake->evdev.index = index;
 	fake->evdev.live = true;
@@ -400,7 +371,7 @@ void libevdev_free(struct libevdev *device)
 int libevdev_set_clock_id(struct libevdev *device, int clock_id)
 {
 	assert(device->live && clock_id == CLOCK_MONOTONIC);
-	return 0;
+	return devices[device->index].clock_fails ? -EINVAL : 0;
 }
 
 const char *libevdev_get_name(const struct libevdev *device)
@@ -408,12 +379,25 @@ const char *libevdev_get_name(const struct libevdev *device)
 	return devices[device->index].phys;
 }
 
+const char *libevdev_get_phys(const struct libevdev *device)
+{
+	const struct fake_device *fake = &devices[device->index];
+
+	return fake->phys_fails ? NULL : fake->phys;
+}
+
 int libevdev_has_event_code(const struct libevdev *device, unsigned int type,
 			    unsigned int code)
 {
-	return devices[device->index].pointer &&
-	       ((type == EV_REL && (code == REL_X || code == REL_Y)) ||
-		(type == EV_KEY && code == BTN_LEFT));
+	const struct fake_device *fake = &devices[device->index];
+
+	if (type == EV_KEY && !fake->no_keys)
+		return code == KEY_F13 ||
+		       (code == KEY_ENTER && fake->keyboard) ||
+		       (code == BTN_LEFT && fake->pointer);
+	if (type == EV_REL && fake->pointer)
+		return code == REL_X || (code == REL_Y && !fake->no_relative_y);
+	return 0;
 }
 
 int libevdev_next_event(struct libevdev *device, unsigned int flags,
@@ -615,6 +599,8 @@ static void classification(void)
 	next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 2, 0, false);
 	assert(!devices[5].grabbed);
 	empty(&session);
+	hotplug(1, true);
+	empty(&session);
 	input(2, EV_KEY, 183, 1);
 	frame(2);
 	next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 183, true);
@@ -628,6 +614,42 @@ static void classification(void)
 	next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 1, 0, false);
 	next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 1, 0, false);
 	assert(!devices[3].grabbed);
+	empty(&session);
+	closed(&session);
+	open_session(&session, 4U);
+	next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 2, 0, false);
+	assert(!devices[0].grabbed && !devices[1].grabbed &&
+	       !devices[2].grabbed);
+	empty(&session);
+	closed(&session);
+}
+
+static void rejected_devices_release_resources(void)
+{
+	struct fplinux_input_session session;
+	char error[128];
+	unsigned int i;
+
+	for (i = 0; i < 4; ++i)
+		devices[i].present = true;
+	devices[0].evdev_fails = true;
+	devices[1].clock_fails = true;
+	devices[2].no_keys = true;
+	devices[3].no_relative_y = true;
+	assert(fplinux_input_session_open(&session, 7U, error, sizeof(error)));
+	empty(&session);
+	for (i = 0; i < 4; ++i)
+		assert(!devices[i].grabbed && devices[i].pipe[0] < 0 &&
+		       !devices[i].evdev.live);
+	/* A missing physical address still permits an ordinary keyboard. */
+	devices[1].clock_fails = false;
+	devices[1].phys_fails = true;
+	hotplug(1, true);
+	next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 1, 0, false);
+	empty(&session);
+	input(1, EV_KEY, 28, 1);
+	frame(1);
+	next(&session, FPLINUX_INPUT_EVENT_KEY, 1, 28, true);
 	empty(&session);
 	closed(&session);
 }
@@ -888,6 +910,8 @@ int main(int argc, char **argv)
 		lifecycle();
 	else if (!strcmp(argv[1], "classification"))
 		classification();
+	else if (!strcmp(argv[1], "rejected"))
+		rejected_devices_release_resources();
 	else if (!strcmp(argv[1], "modifiers"))
 		modifiers_and_repeat();
 	else if (!strcmp(argv[1], "frames"))

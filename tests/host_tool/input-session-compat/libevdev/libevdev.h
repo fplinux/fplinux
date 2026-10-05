@@ -18,6 +18,7 @@ int libevdev_new_from_fd(int fd, struct libevdev **device);
 void libevdev_free(struct libevdev *device);
 int libevdev_set_clock_id(struct libevdev *device, int clock_id);
 const char *libevdev_get_name(const struct libevdev *device);
+const char *libevdev_get_phys(const struct libevdev *device);
 int libevdev_has_event_code(const struct libevdev *device, unsigned int type,
 			    unsigned int code);
 int libevdev_next_event(struct libevdev *device, unsigned int flags,
