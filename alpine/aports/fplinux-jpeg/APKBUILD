@@ -14,7 +14,7 @@ source="
 	fplinux-jpeg-cpu.c
 	fplinux-cli.c
 	fplinux-cli.h
-	libjpeg-turbo-3.1.3.tar.gz::https://github.com/libjpeg-turbo/libjpeg-turbo/archive/refs/tags/3.1.3.tar.gz
+	https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.2.0/libjpeg-turbo-3.2.0.tar.gz
 "
 builddir="$srcdir"
 
@@ -29,7 +29,7 @@ prepare() {
 		SAVE_MARKERS_SUPPORTED BLOCK_SMOOTHING_SUPPORTED \
 		QUANT_1PASS_SUPPORTED QUANT_2PASS_SUPPORTED; do
 		sed -i "/^#define $capability[[:space:]]/s/^#define/#undef/" \
-			"$srcdir/libjpeg-turbo-3.1.3/src/jmorecfg.h"
+			"$srcdir/libjpeg-turbo-3.2.0/src/jmorecfg.h"
 	done
 }
 
@@ -45,7 +45,7 @@ build() {
 	jpeg_ar="$(command -v "$CHOST-ar")"
 	CC="$CC" \
 	CFLAGS="$CFLAGS -O3 -mcpu=cortex-a7 -mfpu=vfpv4 -mfloat-abi=hard" \
-	cmake -S "$srcdir/libjpeg-turbo-3.1.3" -B jpeg-build -G Ninja \
+	cmake -S "$srcdir/libjpeg-turbo-3.2.0" -B jpeg-build -G Ninja \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=armv7 \
 		-DCMAKE_C_COMPILER="$CC" -DCMAKE_ASM_COMPILER="$CC" \
@@ -66,7 +66,7 @@ build() {
 	"$CC" $CPPFLAGS $CFLAGS -O3 -mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard \
 		-std=c11 -Wall -Wextra -Werror \
 		-I"$srcdir" \
-		-I"$srcdir/libjpeg-turbo-3.1.3/src" -Ijpeg-build \
+		-I"$srcdir/libjpeg-turbo-3.2.0/src" -Ijpeg-build \
 		"$srcdir/fplinux-jpeg-cpu.c" jpeg-build/libjpeg.a \
 		"$srcdir/fplinux-cli.c" $LDFLAGS -Wl,--gc-sections -o fplinux-jpeg-cpu
 }
@@ -76,9 +76,9 @@ package() {
 		"$pkgdir/usr/bin/fplinux-jpeg"
 	install -Dm755 "$builddir/fplinux-jpeg-cpu" \
 		"$pkgdir/usr/bin/fplinux-jpeg-cpu"
-	install -Dm644 "$srcdir/libjpeg-turbo-3.1.3/LICENSE.md" \
+	install -Dm644 "$srcdir/libjpeg-turbo-3.2.0/LICENSE.md" \
 		"$pkgdir/usr/share/licenses/$pkgname/libjpeg-turbo-LICENSE.md"
-	install -Dm644 "$srcdir/libjpeg-turbo-3.1.3/README.ijg" \
+	install -Dm644 "$srcdir/libjpeg-turbo-3.2.0/README.ijg" \
 		"$pkgdir/usr/share/licenses/$pkgname/README.ijg"
 }
 
@@ -87,5 +87,5 @@ sha512sums="
 65d6c017eff39a6e337f1f122db4c5ca7fa7247d60028417912ea2d4447aa2e55a4bba473d37d157d31e9c683384d1f91529f992026b510f054bad17ac8f087f  fplinux-jpeg-cpu.c
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
-d95bf0689fb2862ad5ea9e902b73724098d911d9c312aa69157bec9de77f32e4d5ac7dfa105d844110cc66dbdb0336056ba7f96781fcbc848b72fd0661604d50  libjpeg-turbo-3.1.3.tar.gz
+13536db56c16e5364690ae2d31343a203e3b653c853c1f5314d36c8eb06700e92342737f1381f0171b3eb0223384c5fbcde91b55a46576952c4e75dc049cd045  libjpeg-turbo-3.2.0.tar.gz
 "

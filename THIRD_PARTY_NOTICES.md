@@ -26,9 +26,9 @@ unless an individual file carries a different SPDX identifier.
 | GLib 2.88.1                              | Core library for the BlueZ daemons             | LGPL-2.1-or-later; upstream release archive built without GIO, GObject or introspection    |
 | apk-tools 3.0.8                          | Package manager for optional APKs              | GPL-2.0-only; upstream release archive built with Mbed TLS instead of OpenSSL                     |
 | Mbed TLS 3.6                             | APK signatures and HTTPS transport             | Apache-2.0 OR GPL-2.0-or-later; supplied by the pinned Alpine package set                  |
-| libjpeg-turbo 3.1.3                      | Software JPEG reference in `fplinux-jpeg-cpu`  | IJG, with Zlib-licensed SIMD code; upstream release archive linked statically              |
-| ALSA utils 1.2.15.2                      | Playback, recording and mixer tools            | GPL-2.0-or-later; upstream aplay, arecord and amixer built by the audio aport              |
-| ALSA library 1.2.15.3                    | PCM conversion and mixer interface             | LGPL-2.1-or-later; supplied by the pinned Alpine package set                               |
+| libjpeg-turbo 3.2.0                      | Software JPEG reference in `fplinux-jpeg-cpu`  | IJG, with Zlib-licensed SIMD code; upstream release archive linked statically                     |
+| ALSA utils 1.2.16                        | Playback, recording and mixer tools            | GPL-2.0-or-later; upstream aplay, arecord and amixer built by the audio aport                     |
+| ALSA library 1.2.16.1                    | PCM conversion and mixer interface             | LGPL-2.1-or-later; upstream release built by the corresponding FPLinux aport                      |
 | libinput / libevdev / mtdev              | Input device event libraries                   | MIT; supplied by the pinned Alpine package set                                             |
 | libudev-zero 1.0.5                       | Device enumeration for libinput and BlueZ      | ISC; upstream release archive with phone input-device tagging                              |
 | mdevd                                    | Uevent rebroadcast for hotplug                 | ISC; supplied by the pinned Alpine package set                                             |

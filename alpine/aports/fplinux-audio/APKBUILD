@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-audio
-pkgver=1.2.15.2
+pkgver=1.2.16
 pkgrel=0
 pkgdesc="ALSA playback, capture and mixer tools for FPLinux"
 url="https://github.com/fplinux/fplinux"
@@ -45,6 +45,6 @@ package() {
 }
 
 sha512sums="
-13ca15a63bcbf81a4643ef03e391200d7523335bc300e290756089c4cfeccb9773cf6b77f9fcf4b80e6aa2e8c5e33a2c86c9173f1feb480aedf5ecda0f7c47cd  alsa-utils-1.2.15.2.tar.bz2
+288c042f5acb8a7cf1b0a0c25327c74e0bce126124253bdb2d0dc2630b8bc80b5e5d694de97738d031377fd82d887db32af1c4b27c6d940357b318d0a3ef02cf  alsa-utils-1.2.16.tar.bz2
 a7dd01c38fd553776020ab70753662cc00cca30f911bb3b18e1958ed948108fdfecf774a73462a731f83e4567a4008f3de4c77a0cc84dc757ff3c24bcd3a29c2  asound.conf
 "
