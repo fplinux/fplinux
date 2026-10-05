@@ -372,7 +372,7 @@ class KernRetentionTests(unittest.TestCase):
 
 
 class GitHookPathTests(unittest.TestCase):
-    """Accept only paths that resolve to this checkout's owned hook directory."""
+    """Preserve hook ownership and bounded Git query failures."""
 
     def test_git_hook_timeout_is_reported_without_mutation(self) -> None:
         """A stuck Git query fails before writing repository configuration."""
@@ -430,6 +430,8 @@ class GitHookPathTests(unittest.TestCase):
                 commands.append(command)
                 if command[1:3] == ["rev-parse", "--show-toplevel"]:
                     return subprocess.CompletedProcess(command, 0, f"{root}\n", "")
+                if command[1:] == ["worktree", "list", "--porcelain", "-z"]:
+                    return subprocess.CompletedProcess(command, 0, f"worktree {root}\0\0", "")
                 foreign = root.parent / "foreign-hooks"
                 return subprocess.CompletedProcess(command, 0, f"{foreign}\n", "")
 
@@ -442,7 +444,7 @@ class GitHookPathTests(unittest.TestCase):
                 self.assertRaisesRegex(SystemExit, "core.hooksPath is already set"),
             ):
                 git_hooks.install_git_hooks()
-            self.assertEqual(len(commands), 2)
+            self.assertEqual(len(commands), 3)
 
 
 class DoctorDiagnosticsTests(unittest.TestCase):

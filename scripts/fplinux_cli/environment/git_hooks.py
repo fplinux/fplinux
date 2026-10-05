@@ -55,7 +55,16 @@ def install_git_hooks() -> None:
         if not configured_path.is_absolute():
             configured_path = ROOT / configured_path
         if configured_path.resolve() != (ROOT / GIT_HOOKS_PATH).resolve():
-            fail(f"core.hooksPath is already set to {hooks_path}")
+            worktrees = _run_git_hook_command(git, "worktree", "list", "--porcelain", "-z")
+            if worktrees.returncode:
+                fail("could not read the registered Git worktrees")
+            owned_paths = {
+                (Path(field.removeprefix("worktree ")) / GIT_HOOKS_PATH).resolve()
+                for field in worktrees.stdout.split("\0")
+                if field.startswith("worktree ")
+            }
+            if configured_path.resolve() not in owned_paths:
+                fail(f"core.hooksPath is already set to {hooks_path}")
     if not hooks_path:
         updated = _run_git_hook_command(
             git,
@@ -66,4 +75,4 @@ def install_git_hooks() -> None:
         )
         if updated.returncode:
             fail("could not configure the local Git hooks path")
-    print(f"Git hooks are ready: {GIT_HOOKS_PATH}")
+    print(f"Git hooks are ready: {hooks_path or GIT_HOOKS_PATH}")
