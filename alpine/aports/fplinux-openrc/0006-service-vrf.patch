@@ -1,0 +1,62 @@
+From: Ariadne Conill <ariadne@dereferenced.org>
+Subject: Start services in their configured VRF
+
+--- a/sh/openrc-run.sh.in
++++ b/sh/openrc-run.sh.in
+@@ -274,6 +274,12 @@
+ 
+ unset _c _f _conf_d
+ 
++# If we are configured to run in a VRF, provide a hint for that
++RC_VRF_EXEC=""
++if [ -n "$vrf" ]; then
++	RC_VRF_EXEC="ip vrf exec $vrf"
++fi
++
+ # load service supervisor functions
+ sourcex "@LIBEXECDIR@/sh/runit.sh"
+ sourcex "@LIBEXECDIR@/sh/s6.sh"
+--- a/sh/runit.sh
++++ b/sh/runit.sh
+@@ -23,7 +23,7 @@
+ 	local i=0 retval=1
+ 	# it can take upto 5 seconds for runsv to start
+ 	while [ $i -lt 6 ] ; do
+-		if sv start "${service_link}" > /dev/null 2>&1; then
++		if ${RC_VRF_EXEC} sv start "${service_link}" > /dev/null 2>&1; then
+ 			retval=0
+ 			break
+ 		fi
+--- a/sh/s6.sh
++++ b/sh/s6.sh
+@@ -174,7 +174,7 @@
+ 		if test "$notify" = socket:ready ; then
+ 			echo s6-notify-fd-from-socket
+ 		fi
+-		eval set -- $command $command_args $command_args_foreground
++		eval set -- ${RC_VRF_EXEC} $command $command_args $command_args_foreground
+ 		printf '"%s"' $1 ; shift
+ 		printf ' "%s"' "$@" ; echo
+ 	} > "$dir/run"
+--- a/sh/start-stop-daemon.sh
++++ b/sh/start-stop-daemon.sh
+@@ -46,7 +46,7 @@
+ 	#the eval call is necessary for cases like:
+ 	# command_args="this \"is a\" test"
+ 	# to work properly.
+-	eval start-stop-daemon --start \
++	eval ${RC_VRF_EXEC} start-stop-daemon --start \
+ 		--exec $command \
+ 		${chroot:+--chroot} $chroot \
+ 		${directory:+--chdir} $directory \
+--- a/sh/supervise-daemon.sh
++++ b/sh/supervise-daemon.sh
+@@ -37,7 +37,7 @@
+ 	# The eval call is necessary for cases like:
+ 	# command_args="this \"is a\" test"
+ 	# to work properly.
+-	eval supervise-daemon "${RC_SVCNAME}" --start \
++	eval ${RC_VRF_EXEC} supervise-daemon "${RC_SVCNAME}" --start \
+ 		${retry:+--retry} $retry \
+ 		${directory:+--chdir} $directory  \
+ 		${chroot:+--chroot} $chroot \

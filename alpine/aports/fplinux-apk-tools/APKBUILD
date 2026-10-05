@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-apk-tools
-pkgver=3.0.6
+pkgver=3.0.8
 pkgrel=0
 pkgdesc="Alpine Package Keeper for FPLinux built with Mbed TLS instead of OpenSSL"
 url="https://gitlab.alpinelinux.org/alpine/apk-tools"
@@ -55,6 +55,6 @@ package() {
 }
 
 sha512sums="
-86c6ba9aad517d7a39d204373b37a28c143afe1438fa5090df90845f205c7f01e8aaee00ed0b6f7b27206ff745e0f1db160e3b919d17b37639fb19ae78bd13e6  apk-tools-v3.0.6.tar.gz
+3616435508dead5240f8d9fe74e87e2aa93262f9e466f50af8f60100e166403393b1e491c115395864d4179b219699831ecb61dc60960b5dfb1f10816d75f95f  apk-tools-v3.0.8.tar.gz
 6f65fe4b24b120670e512f721a06299d16e4b8d3b3643f0dae72e199d9d9f3913f5321f6ee56b121cd2f8b5bff65d5ab783a3e3a462f226d3028ee116817c8ae  0001-static-mbedtls.patch
 "

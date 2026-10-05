@@ -1,0 +1,16 @@
+From: =?UTF-8?q?S=C3=B6ren=20Tempel?= <soeren+git@soeren-tempel.net>
+Subject: Load the keyboard map when the loadkeys service is enabled
+
+--- a/sh/init-early.sh.Linux.in
++++ b/sh/init-early.sh.Linux.in
+@@ -49,8 +49,8 @@
+ fi
+ 
+ # Try and set a keyboard map as early as possible
+-if service_present "$RC_DEFAULTLEVEL" keymaps ||
+-   service_present "$RC_BOOTLEVEL" keymaps; then
++if service_present "$RC_DEFAULTLEVEL" loadkeys ||
++   service_present "$RC_BOOTLEVEL" loadkeys; then
+ 	kbd_mode $kmode -C "$CONSOLE" 2>/dev/null
+ 	if [ -r "$RC_CACHEDIR"/console/keymap ]; then
+ 		loadkeys -q "$RC_CACHEDIR"/console/keymap 2>/dev/null

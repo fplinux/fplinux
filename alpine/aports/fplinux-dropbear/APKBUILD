@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-dropbear
-pkgver=2026.91
+pkgver=2026.94
 pkgrel=0
 pkgdesc="SSH server and host-key utility for FPLinux"
 url="https://matt.ucc.asn.au/dropbear/dropbear.html"
@@ -49,6 +49,6 @@ package() {
 	install -Dm644 "$builddir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
 sha512sums="
-f335bffb18f6e4a261732b80d6887d1b2891a96a0eb5be0cc6bd96a8803eeea337967a2a9196bec78ac3f0d2cdb31e4b64598efb7f7ad97c652d51c458ccc5df  dropbear-2026.91.tar.bz2
+f69017908533353740167450f678659990d28534a1524efca578ab378ab3ff03e43fe0f9a6f74d9acd4c7f16187c074373009f1cd231efe9865e337e03ce0d51  dropbear-2026.94.tar.bz2
 d379cbbf4321d1d68b249cab3280063822503ac50f4c2e97e63758b43b702c359ceda3420c2d727bc1db9e088525f1e0d761a898297d111846a4c08e917b52df  localoptions.h
 "

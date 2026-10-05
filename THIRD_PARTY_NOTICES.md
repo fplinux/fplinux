@@ -15,16 +15,16 @@ unless an individual file carries a different SPDX identifier.
 | ---------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | Linux 6.18.42                            | Target kernel and bootstrap bitmap fonts       | GPL-2.0-only; official kernel.org archive                                                  |
 | Alpine Linux 3.24.2                      | Target userspace and APK package base          | Multiple upstream licenses; exact armv7 artifacts pinned in `alpine.lock.toml`             |
-| OpenRC                                   | Init, service supervision and runlevels        | BSD-2-Clause; supplied by the pinned Alpine package set                                    |
-| Dropbear                                 | USB-network SSH server                         | MIT; supplied by the pinned Alpine package set                                             |
+| OpenRC 0.64.1                            | Init, service supervision and runlevels        | BSD-2-Clause; upstream release built by the corresponding FPLinux aport                           |
+| Dropbear 2026.94                         | USB-network SSH server                         | MIT; upstream release built by the corresponding FPLinux aport                                    |
 | OpenSSH SFTP server                      | SSH file-transfer subsystem                    | SSH-OpenSSH; supplied by the pinned Alpine package set                                     |
 | skalibs / utmps                          | Dropbear runtime libraries                     | ISC; supplied by the pinned Alpine package set                                             |
 | zlib                                     | Dropbear compression library                   | Zlib; supplied by the pinned Alpine package set                                            |
-| BlueZ 5.86                               | Bluetooth daemons and `bluetoothctl`           | GPL-2.0-or-later, BSD-2-Clause and MIT; supplied by the pinned Alpine package set          |
+| BlueZ 5.87                               | Bluetooth daemons and `bluetoothctl`           | GPL-2.0-or-later, BSD-2-Clause and MIT; upstream release built by the corresponding FPLinux aport |
 | D-Bus 1.16.2                             | Message bus for the Bluetooth services         | AFL-2.1 OR GPL-2.0-or-later; supplied by the pinned Alpine package set                     |
 | libical 3.0.20                           | vCard parser for the BlueZ OBEX daemon         | LGPL-2.1-only OR MPL-2.0; upstream release archive built without ICU or glib               |
 | GLib 2.88.1                              | Core library for the BlueZ daemons             | LGPL-2.1-or-later; upstream release archive built without GIO, GObject or introspection    |
-| apk-tools 3.0.6                          | Package manager for optional APKs              | GPL-2.0-only; upstream release archive built with Mbed TLS instead of OpenSSL              |
+| apk-tools 3.0.8                          | Package manager for optional APKs              | GPL-2.0-only; upstream release archive built with Mbed TLS instead of OpenSSL                     |
 | Mbed TLS 3.6                             | APK signatures and HTTPS transport             | Apache-2.0 OR GPL-2.0-or-later; supplied by the pinned Alpine package set                  |
 | libjpeg-turbo 3.1.3                      | Software JPEG reference in `fplinux-jpeg-cpu`  | IJG, with Zlib-licensed SIMD code; upstream release archive linked statically              |
 | ALSA utils 1.2.15.2                      | Playback, recording and mixer tools            | GPL-2.0-or-later; upstream aplay, arecord and amixer built by the audio aport              |
@@ -37,7 +37,7 @@ unless an individual file carries a different SPDX identifier.
 | libdrm 2.4.134                           | DRM/KMS display access                         | MIT; shared runtime library from the upstream release archive                              |
 | libtsm 4.8.0                             | Terminal screen and escape-sequence handling   | MIT and LGPL-2.1-or-later; the hash table carries the LGPL notice                          |
 | Terminus 4.49.1                          | Terminal, brightness control and showcase text | OFL-1.1; upstream release archive                                                          |
-| Bash 5.3.9                               | Interactive local shell and Readline editing   | GPL-3.0-or-later; supplied by the pinned Alpine package set                                |
+| Bash 5.3.20                              | Interactive local shell and Readline editing   | GPL-3.0-or-later; upstream release built by the corresponding FPLinux aport                       |
 | OpenWrt uclient, libubox and ustream-ssl | HTTP and HTTPS download client and libraries   | ISC; exact source commits pinned by the `fplinux-uclient` APKBUILD                         |
 | CA certificates bundle                   | HTTPS certificate verification                 | MPL-2.0; supplied by the pinned Alpine package set                                         |
 | TyrQuake 0.71                            | Quake engine for FPLinux                       | GPL-2.0-or-later; bundled decoders use MIT-0, CC0-1.0 and MIT                              |

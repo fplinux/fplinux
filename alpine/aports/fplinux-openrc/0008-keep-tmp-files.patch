@@ -1,0 +1,25 @@
+From: Ariadne Conill <ariadne@dereferenced.org>
+Subject: Disable complete temporary-directory wiping by default
+
+--- a/conf.d/bootmisc
++++ b/conf.d/bootmisc
+@@ -3,7 +3,7 @@
+ 
+ # Should we wipe the tmp paths completely or just selectively remove known
+ # locks / files / etc... ?
+-wipe_tmp="YES"
++wipe_tmp="NO"
+ 
+ # Write the initial dmesg log into /var/log/dmesg after boot
+ # This may be useful if you need the kernel boot log afterwards
+--- a/init.d/bootmisc.in
++++ b/init.d/bootmisc.in
+@@ -17,7 +17,7 @@
+ 	keyword -prefix -timeout -wsl
+ }
+ 
+-: "${wipe_tmp:=${WIPE_TMP:-yes}}"
++: "${wipe_tmp:=${WIPE_TMP:-no}}"
+ : "${log_dmesg:=${LOG_DMESG:-yes}}"
+ 
+ cleanup_tmp_dir()

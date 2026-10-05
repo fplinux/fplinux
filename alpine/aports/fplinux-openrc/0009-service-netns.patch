@@ -1,0 +1,17 @@
+From: Thomas Liske <thomas@fiasko-nw.net>
+Subject: Start services in their configured network namespace
+
+--- a/sh/openrc-run.sh.in
++++ b/sh/openrc-run.sh.in
+@@ -280,6 +280,11 @@
+ 	RC_VRF_EXEC="ip vrf exec $vrf"
+ fi
+ 
++# Add ip netns if configured to run in a netns (netns+vrf may stack)
++if [ -n "$netns" ]; then
++	RC_VRF_EXEC="ip netns exec $netns $RC_VRF_EXEC"
++fi
++
+ # load service supervisor functions
+ sourcex "@LIBEXECDIR@/sh/runit.sh"
+ sourcex "@LIBEXECDIR@/sh/s6.sh"
