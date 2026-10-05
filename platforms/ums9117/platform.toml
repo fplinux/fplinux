@@ -154,6 +154,7 @@ patches = [
   "platforms/ums9117/linux/patches/0019-sc2720-clock-ownership.patch",
   "platforms/ums9117/linux/patches/0020-ums9117-eic-cold.patch",
   "platforms/ums9117/linux/patches/0021-ums9117-eic-clock-binding.patch",
+  "platforms/ums9117/linux/patches/0022-bnep-local-ethernet-address.patch",
 ]
 
 [[linux.dt_config_checks]]
