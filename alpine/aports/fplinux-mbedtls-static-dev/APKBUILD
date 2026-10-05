@@ -29,7 +29,7 @@ build() {
 		-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=armv7 \
 		-DCMAKE_C_COMPILER="$CC" -DCMAKE_C_COMPILER_TARGET="$CHOST" \
 		-DCMAKE_SYSROOT="$CBUILDROOT" \
-		-DCMAKE_C_FLAGS="$CPPFLAGS $CFLAGS" -DCMAKE_C_FLAGS_MINSIZEREL= \
+		-DCMAKE_C_FLAGS="$CPPFLAGS $CFLAGS -ffile-prefix-map=$srcdir=." -DCMAKE_C_FLAGS_MINSIZEREL= \
 		-DCMAKE_AR=/usr/lib/llvm22/bin/llvm-ar \
 		-DCMAKE_RANLIB=/usr/lib/llvm22/bin/llvm-ranlib \
 		-DCMAKE_C_COMPILER_AR=/usr/lib/llvm22/bin/llvm-ar \

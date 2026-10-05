@@ -21,7 +21,7 @@ class RamrootCompositionTests(unittest.TestCase):
     """Packing preserves lower metadata without embedding an unpacked second root."""
 
     def test_boot_archive_keeps_runtime_bytes_and_lower_content_metadata(self) -> None:
-        """Real CPIO and SquashFS readers verify bytes, modes, links and user xattrs."""
+        """Real archive readers verify runtime metadata and exclude inherited host labels."""
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             root = directory / "root"
@@ -43,6 +43,7 @@ class RamrootCompositionTests(unittest.TestCase):
             private.write_bytes(b"independent metadata fixture\n")
             private.chmod(0o600)
             os.setxattr(private, "user.fplinux.fixture", b"preserved")
+            host_label_present = "security.selinux" in os.listxattr(private)
             os.link(private, root / "etc/private.link")
             (root / "etc/private.symlink").symlink_to("private.conf")
 
@@ -87,6 +88,21 @@ class RamrootCompositionTests(unittest.TestCase):
             lower_header = (boot / "root.squashfs").read_bytes()[:96]
             self.assertEqual(lower_header[:4], b"hsqs")
             self.assertEqual(struct.unpack_from("<I", lower_header, 12)[0], 65536)
+            if host_label_present:
+                metadata = run_process(
+                    [
+                        "unsquashfs",
+                        "-xattrs-include",
+                        "^security[.]selinux$",
+                        "-pf",
+                        "-",
+                        str(boot / "root.squashfs"),
+                    ],
+                    name="RAM lower host-label inspection",
+                    timeout=10,
+                    check=True,
+                )
+                self.assertNotIn(" x security.selinux=", metadata.stdout)
             self.assertNotEqual(
                 (staging / "rootfs.cpio").read_bytes(), (staging / "initramfs.cpio").read_bytes()
             )

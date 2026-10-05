@@ -37,6 +37,9 @@ build() {
 		--enable-encoder=wrapped_avframe,rawvideo \
 		--enable-muxer=rawvideo,null,md5,framecrc,framemd5 \
 		--enable-protocol=file,pipe
+	# Keep the displayed configuration independent of the temporary build path.
+	_config_sysroot=$(printf '%s\n' "$CBUILDROOT" | sed 's/[][\\.^$*|]/\\&/g')
+	sed -i "/^#define FFMPEG_CONFIGURATION /s|$_config_sysroot|/sysroot|g" config.h
 	make -j"${JOBS:-1}" ffmpeg
 }
 

@@ -944,6 +944,8 @@ def _write_ramroot_initramfs(root: Path, staging: Path) -> None:
             "-all-root",
             "-exports",
             "-xattrs",
+            "-xattrs-exclude",
+            "^security[.]selinux$",
             "-b",
             "64K",
             "-comp",

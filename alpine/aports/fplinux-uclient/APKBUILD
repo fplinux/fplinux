@@ -38,6 +38,7 @@ _build_component() {
 		-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=armv7 \
 		-DCMAKE_C_COMPILER="$CC" -DCMAKE_C_COMPILER_TARGET="$CHOST" \
 		-DCMAKE_SYSROOT="$CBUILDROOT" \
+		-DCMAKE_C_FLAGS="$CFLAGS -ffile-prefix-map=$srcdir=." \
 		-DCMAKE_FIND_ROOT_PATH="$builddir/stage;$CBUILDROOT" \
 		-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
 		-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
@@ -57,7 +58,7 @@ build() {
 	_build_component "libubox-$_libubox_commit" \
 		-DBUILD_LUA=OFF -DBUILD_EXAMPLES=OFF
 	_build_component "ustream-ssl-$_ustream_commit" -DMBEDTLS=ON \
-		-DCMAKE_C_FLAGS="$CPPFLAGS $CFLAGS -I$CBUILDROOT/usr/include/fplinux-mbedtls-static" \
+		-DCMAKE_C_FLAGS="$CPPFLAGS $CFLAGS -ffile-prefix-map=$srcdir=. -I$CBUILDROOT/usr/include/fplinux-mbedtls-static" \
 		-Dmbedtls_library="$CBUILDROOT/usr/lib/fplinux-mbedtls-static/libmbedtls.a" \
 		-Dmbedx509_library="$CBUILDROOT/usr/lib/fplinux-mbedtls-static/libmbedx509.a" \
 		-Dmbedcrypto_library:STRING="$CBUILDROOT/usr/lib/fplinux-mbedtls-static/libmbedcrypto.a;$CBUILDROOT/usr/lib/fplinux-mbedtls-static/libeverest.a;$CBUILDROOT/usr/lib/fplinux-mbedtls-static/libp256m.a;pthread"
