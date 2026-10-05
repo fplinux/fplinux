@@ -11,6 +11,7 @@ import urllib.error
 from pathlib import Path
 from unittest import mock
 
+from fplinux_cli import alpine_builder
 from fplinux_cli.build import sources as sources_build
 
 
@@ -68,6 +69,42 @@ class BuilderFetchTests(unittest.TestCase):
 
         self.assertEqual(result, self.destination)
         self.assertEqual(self.destination.read_bytes(), expected_bytes)
+
+
+class AlpineArtifactFetchTests(unittest.TestCase):
+    """Locked Alpine consumers keep exact bytes, size checks and cache reuse."""
+
+    def test_locked_package_download_is_reused_without_network(self) -> None:
+        """The package consumer accepts exact bytes and reuses a verified cache entry."""
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            contents = b"locked package\n"
+            lock = {"repositories": {"main": "https://example.invalid/main"}}
+            records: dict[str, dict[str, object]] = {
+                "example.apk": {
+                    "repository": "main",
+                    "sha256": hashlib.sha256(contents).hexdigest(),
+                    "bytes": len(contents),
+                }
+            }
+            with mock.patch("urllib.request.urlopen", return_value=io.BytesIO(contents)):
+                package = alpine_builder._locked_alpine_artifact(  # noqa: SLF001
+                    lock, records, "example.apk", cache=cache
+                )
+            self.assertEqual(package.read_bytes(), contents)
+            with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")):
+                reused = alpine_builder._locked_alpine_artifact(  # noqa: SLF001
+                    lock, records, "example.apk", cache=cache
+                )
+            self.assertEqual(reused, package)
+
+            records["example.apk"]["bytes"] = 1
+            with self.assertRaisesRegex(
+                SystemExit, "Alpine package size mismatch for example.apk"
+            ):
+                alpine_builder._locked_alpine_artifact(  # noqa: SLF001
+                    lock, records, "example.apk", cache=cache
+                )
 
 
 if __name__ == "__main__":

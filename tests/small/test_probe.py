@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import io
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,6 +23,43 @@ if TYPE_CHECKING:
 
 class ProbePublicationTests(unittest.TestCase):
     """Check real file publication; the compiler stub provides no ARM evidence."""
+
+    def test_preparation_extracts_release_keys_from_verified_archive(self) -> None:
+        """Probe preparation reuses verified minirootfs bytes and extracts only signing keys."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = io.BytesIO()
+            with tarfile.open(fileobj=archive, mode="w:gz") as bundle:
+                for name, contents in (
+                    ("etc/apk/keys/release.pub", b"release signing key\n"),
+                    ("etc/irrelevant", b"not a key\n"),
+                ):
+                    member = tarfile.TarInfo(name)
+                    member.size = len(contents)
+                    bundle.addfile(member, io.BytesIO(contents))
+            contents = archive.getvalue()
+            lock = {
+                "release": "example",
+                "arch": "armv7",
+                "minirootfs": {
+                    "url": "https://example.invalid/minirootfs.tar.gz",
+                    "sha256": hashlib.sha256(contents).hexdigest(),
+                    "bytes": len(contents),
+                },
+            }
+            with (
+                mock.patch.object(common, "ROOT", root),
+                mock.patch("urllib.request.urlopen", return_value=io.BytesIO(contents)),
+            ):
+                keys = probe._prepare_keys(lock, root / "first")  # noqa: SLF001
+            self.assertEqual((keys / "release.pub").read_bytes(), b"release signing key\n")
+            self.assertFalse((root / "first/etc/irrelevant").exists())
+            with (
+                mock.patch.object(common, "ROOT", root),
+                mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")),
+            ):
+                keys = probe._prepare_keys(lock, root / "second")  # noqa: SLF001
+            self.assertEqual((keys / "release.pub").read_bytes(), b"release signing key\n")
 
     def test_output_is_replaced_only_after_compilation_succeeds(self) -> None:
         """Partial compiler output must never replace an existing useful executable."""

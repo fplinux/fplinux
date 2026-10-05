@@ -9,7 +9,8 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli import alpine_state, common
-from fplinux_cli.alpine_builder import _alpine_group_packages, _fetch, alpine_sysroot_command
+from fplinux_cli.alpine_builder import _alpine_group_packages, alpine_sysroot_command
+from fplinux_cli.build import sources as sources_build
 from fplinux_cli.build_env import SOURCE_DATE_EPOCH
 from fplinux_cli.cli.build import ensure_build_directory
 from fplinux_cli.common import canonical_json_bytes, fail, relative_name, sha256_bytes
@@ -156,7 +157,7 @@ def _prepare_sysroot(kern: str, image: str, state: ImageState, reporter: RunRepo
 def _prepare_keys(lock: dict[str, Any], destination: Path) -> Path:
     """Use the target release's signing keys, as the normal rootfs build does."""
     record = lock["minirootfs"]
-    archive = _fetch(
+    archive = sources_build.fetch(
         record["url"],
         record["sha256"],
         common.ROOT / ".cache/downloads/alpine",

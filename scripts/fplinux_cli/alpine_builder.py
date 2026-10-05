@@ -13,18 +13,18 @@ import stat
 import subprocess
 import tarfile
 import tempfile
-import urllib.request
 from functools import partial
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, BinaryIO
 
-from fplinux_cli.manifests.values import relative_value
+from fplinux_cli.build import inputs as inputs_build
+from fplinux_cli.build import process as process_build
+from fplinux_cli.build import sources as sources_build
 
 from . import alpine_state, firmware_inputs
 from .build_env import SOURCE_DATE_EPOCH
 from .build_env import build_environment as _build_environment
 from .common import ROOT, alpine_tar_filter, fail, sha256_file
-from .output import current_stage
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -91,83 +91,6 @@ def _open_rootfs_build_lock(rootfs: Path) -> BinaryIO:
         raise
 
 
-def _require_sha256(value: object, name: str) -> str:
-    if (
-        not isinstance(value, str)
-        or len(value) != 64
-        or any(character not in "0123456789abcdef" for character in value)
-    ):
-        fail(f"{name} must be a lowercase SHA-256 digest")
-    return value
-
-
-def _run(
-    command: list[str],
-    *,
-    cwd: Path | None = None,
-    environment: dict[str, str] | None = None,
-) -> None:
-    effective_environment = _build_environment()
-    if environment is not None:
-        effective_environment.update(environment)
-    stage = current_stage()
-    if stage is not None:
-        stage.run(command, cwd=cwd, env=effective_environment)
-        return
-    print("+", " ".join(shlex.quote(part) for part in command), flush=True)
-    subprocess.run(command, cwd=cwd, env=effective_environment, check=True)
-
-
-def _log_message(message: str) -> None:
-    stage = current_stage()
-    if stage is None:
-        print(message)
-        return
-    stage.write((message + "\n").encode())
-
-
-def _fetch(url: object, expected: object, cache: Path, name: object) -> Path:
-    """Fetch one exact HTTPS Alpine artifact into the shared download cache."""
-    if not isinstance(url, str) or not url.startswith("https://"):
-        fail("source URL must be a non-empty HTTPS URL")
-    digest = _require_sha256(expected, f"{name} source")
-    relative = relative_value(name, "download cache name")
-    cache.mkdir(parents=True, exist_ok=True)
-    destination = cache / relative
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    if destination.exists() or destination.is_symlink():
-        if destination.is_symlink() or not destination.is_file():
-            fail(f"download cache destination is invalid: {destination}")
-        if sha256_file(destination) == digest:
-            return destination
-    temporary: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            dir=destination.parent,
-            prefix=f".{destination.name}.",
-            delete=False,
-        ) as output:
-            temporary = Path(output.name)
-            request = urllib.request.Request(  # noqa: S310 -- HTTPS is required above.
-                url,
-                headers={"User-Agent": "FPLinux"},
-            )
-            with urllib.request.urlopen(  # noqa: S310 -- HTTPS is required above.
-                request,
-                timeout=60,
-            ) as response:
-                shutil.copyfileobj(response, output)
-        actual = sha256_file(temporary)
-        if actual != digest:
-            fail(f"{name} SHA256 mismatch: expected {digest}, received {actual}")
-        temporary.replace(destination)
-        temporary = None
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
-    return destination
-
-
 def _locked_alpine_artifact(
     lock: dict[str, Any],
     records: dict[str, dict[str, object]],
@@ -181,7 +104,7 @@ def _locked_alpine_artifact(
     repository = record.get("repository")
     if not isinstance(repository, str):
         fail(f"locked Alpine package repository is invalid: {filename}")
-    package = _fetch(
+    package = sources_build.fetch(
         f"{lock['repositories'][repository]}/{filename}",
         record.get("sha256"),
         cache / "downloads/alpine/packages",
@@ -235,7 +158,7 @@ def _builder_command(command: list[str], environment: dict[str, str]) -> list[st
 
 
 def _run_as_builder(command: list[str], *, cwd: Path, environment: dict[str, str]) -> None:
-    _run(_builder_command(command, environment), cwd=cwd)
+    process_build.run(_builder_command(command, environment), cwd=cwd)
 
 
 def _alpine_source_cache() -> Path:
@@ -293,7 +216,10 @@ def _package_receipt_data(
         }
     if not packages:
         fail("aport produced no APK packages")
-    return {"recipe": _require_sha256(recipe, "Alpine package recipe"), "packages": packages}
+    return {
+        "recipe": inputs_build.require_sha256(recipe, "Alpine package recipe"),
+        "packages": packages,
+    }
 
 
 def _write_package_receipt(repository: Path, recipe: str, package_files: list[Path]) -> None:
@@ -486,7 +412,7 @@ def alpine_sysroot_command(
 def _prepare_alpine_sysroot(
     lock: dict[str, Any], packages: list[Path], sysroot: Path, keys: Path
 ) -> None:
-    _run(alpine_sysroot_command(lock, packages, sysroot, keys))
+    process_build.run(alpine_sysroot_command(lock, packages, sysroot, keys))
 
 
 def _copy_shared_aport_sources(
@@ -620,7 +546,7 @@ def _build_fplinux_apks(  # noqa: PLR0913 -- package, signing and build inputs s
         expected_filenames.update(listed)
         cached = _cached_aport_packages(name, image_recipe, signing_key_identity)
         if cached is not None and {path.name for path in cached.values()} == listed:
-            _log_message(f"Alpine package cache hit: {name} {recipe[:16]}")
+            process_build.log_message(f"Alpine package cache hit: {name} {recipe[:16]}")
             outputs = cached
         else:
             build_repository = work / "packages" / name
@@ -683,7 +609,7 @@ def _build_alpine_composition_repository(  # noqa: PLR0913 -- package and signin
         copied.append(destination)
 
     index = package_directory / "APKINDEX.tar.gz"
-    _run(
+    process_build.run(
         [
             "apk",
             "index",
@@ -699,7 +625,7 @@ def _build_alpine_composition_repository(  # noqa: PLR0913 -- package and signin
             *(str(package) for package in copied),
         ]
     )
-    _run(["abuild-sign", "-k", str(private_key), "-p", public_key.name, str(index)])
+    process_build.run(["abuild-sign", "-k", str(private_key), "-p", public_key.name, str(index)])
     return repository, trust
 
 
@@ -779,7 +705,7 @@ def _require_cached_bundle_packages_installable(rootfs: Path, bundle_apks: Seque
         return
     with tempfile.TemporaryDirectory(prefix="fplinux-apk-check-") as temporary:
         root = Path(temporary)
-        _run(
+        process_build.run(
             [
                 "cpio",
                 "--extract",
@@ -963,7 +889,7 @@ def _write_rootfs_cpio(root: Path, destination: Path) -> None:
         "cpio --null --quiet --create --format=newc --reproducible --owner=0:0 "
         f"> {shlex.quote(str(destination))}"
     )
-    _run(["/bin/sh", "-c", command], cwd=root)
+    process_build.run(["/bin/sh", "-c", command], cwd=root)
     require_file(destination)
 
 
@@ -989,7 +915,7 @@ def _write_ramroot_initramfs(root: Path, staging: Path) -> None:
     (bootstrap / "bin/sh").symlink_to("busybox")
     shutil.copyfile(require_file(ROOT / "common/ramroot-init.sh"), bootstrap / "init")
     (bootstrap / "init").chmod(0o755)
-    _run(
+    process_build.run(
         [
             "mksquashfs",
             str(root),
@@ -1130,7 +1056,7 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
                 output / alpine_state.ROOTFS_NAME,
                 tuple(cached_outputs[name] for name in bundle_packages),
             )
-            _log_message(f"Alpine rootfs causal receipt hit: {recipe[:16]}")
+            process_build.log_message(f"Alpine rootfs causal receipt hit: {recipe[:16]}")
             return (
                 require_file(output / alpine_state.ROOTFS_NAME),
                 output,
@@ -1141,7 +1067,7 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
         lock = alpine_state.load_alpine_lock()
         records = alpine_state.package_records(lock)
         minirootfs_record = lock["minirootfs"]
-        minirootfs = _fetch(
+        minirootfs = sources_build.fetch(
             minirootfs_record.get("url"),
             minirootfs_record.get("sha256"),
             CACHE / "downloads/alpine",
@@ -1187,7 +1113,7 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
                     output / alpine_state.ROOTFS_NAME,
                     tuple(bundle_outputs[name] for name in bundle_packages),
                 )
-                _log_message(f"Alpine rootfs causal receipt hit: {recipe[:16]}")
+                process_build.log_message(f"Alpine rootfs causal receipt hit: {recipe[:16]}")
                 return (
                     require_file(output / alpine_state.ROOTFS_NAME),
                     output,
@@ -1207,7 +1133,7 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
                 # The minirootfs package manager leaves the world first so that
                 # its OpenSSL closure is dropped instead of kept beside the
                 # Mbed TLS build that the selected set installs.
-                _run(
+                process_build.run(
                     _rootfs_remove_command(
                         lock,
                         root,
@@ -1216,7 +1142,7 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
                         ("apk-tools",),
                     )
                 )
-            _run(
+            process_build.run(
                 _rootfs_install_command(
                     lock,
                     root,

@@ -21,6 +21,8 @@ from unittest import mock
 
 from fplinux_cli import alpine_builder, alpine_state
 from fplinux_cli import workspace as workspace_module
+from fplinux_cli.build import process as process_build
+from fplinux_cli.build import sources as sources_build
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -73,6 +75,9 @@ class AlpineStateTests(unittest.TestCase):
         self._write("alpine/aports/not-production/APKBUILD", b"pkgname=not-production\n")
         self._write("scripts/fplinux_cli/alpine_state.py", b"state implementation\n")
         self._write("scripts/fplinux_cli/build/kernel.py", b"builder implementation\n")
+        self._write("scripts/fplinux_cli/build/inputs.py", b"build input validation\n")
+        self._write("scripts/fplinux_cli/build/process.py", b"build process execution\n")
+        self._write("scripts/fplinux_cli/build/sources.py", b"source fetching\n")
         self._write("scripts/fplinux_cli/alpine_builder.py", b"Alpine builder implementation\n")
         self._write("scripts/fplinux_cli/common.py", b"shared archive and file operations\n")
         self._write("scripts/fplinux_cli/build_env.py", b"build environment\n")
@@ -439,7 +444,13 @@ class AlpineStateTests(unittest.TestCase):
 
     def test_alpine_preparation_changes_invalidate_rootfs_and_package_recipes(self) -> None:
         """Build and shared extraction changes invalidate the artifacts they prepare."""
-        for source in ("alpine_builder.py", "common.py"):
+        for source in (
+            "alpine_builder.py",
+            "common.py",
+            "build/inputs.py",
+            "build/process.py",
+            "build/sources.py",
+        ):
             with self.subTest(source=source):
                 rootfs_before = self._recipe()
                 package_before = alpine_state.alpine_package_recipe(
@@ -750,7 +761,7 @@ class AlpineStateTests(unittest.TestCase):
                 "_apk_package_name",
                 side_effect=lambda path: path.name.removesuffix("-1.0-r0.apk"),
             ),
-            mock.patch.object(alpine_builder, "_log_message"),
+            mock.patch.object(process_build, "log_message"),
             mock.patch.object(alpine_state, "alpine_package_recipe", side_effect=package_recipe),
             mock.patch.object(
                 alpine_state, "SUBPACKAGE_APORTS", {child_package: self.packages[0]}
@@ -875,13 +886,13 @@ class AlpineStateTests(unittest.TestCase):
             mock.patch.object(alpine_builder, "_chown_tree"),
             mock.patch.object(alpine_builder, "_builder_output", side_effect=list_packages),
             mock.patch.object(alpine_builder, "_run_as_builder", side_effect=run_as_builder),
-            mock.patch.object(alpine_builder, "_run", side_effect=install_apks),
+            mock.patch.object(process_build, "run", side_effect=install_apks),
             mock.patch.object(
                 alpine_builder,
                 "_apk_package_name",
                 side_effect=lambda path: path.name.removesuffix("-1.0-r0.apk"),
             ),
-            mock.patch.object(alpine_builder, "_log_message"),
+            mock.patch.object(process_build, "log_message"),
             mock.patch.object(alpine_state, "alpine_package_recipe", side_effect=package_recipe),
         ):
             build_apks()
@@ -954,12 +965,12 @@ class AlpineStateTests(unittest.TestCase):
                 ),
                 mock.patch.object(alpine_state, "load_alpine_lock", return_value=lock),
                 mock.patch.object(alpine_state, "package_records", return_value={}),
-                mock.patch.object(alpine_builder, "_fetch", return_value=archive),
+                mock.patch.object(sources_build, "fetch", return_value=archive),
                 mock.patch.object(alpine_builder, "_alpine_runtime_packages", return_value=[]),
                 mock.patch.object(alpine_builder, "_alpine_group_packages", return_value=[]),
                 mock.patch.object(tarfile, "open", return_value=archive_context),
                 mock.patch.object(alpine_builder, "_prepare_alpine_sysroot"),
-                mock.patch.object(alpine_builder, "_log_message"),
+                mock.patch.object(process_build, "log_message"),
                 mock.patch.object(
                     alpine_builder,
                     "_build_fplinux_apks",
