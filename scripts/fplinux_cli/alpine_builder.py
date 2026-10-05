@@ -13,6 +13,7 @@ import stat
 import subprocess
 import tarfile
 import tempfile
+from contextlib import ExitStack, contextmanager
 from functools import partial
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, BinaryIO
@@ -27,7 +28,7 @@ from .build_env import build_environment as _build_environment
 from .common import ROOT, alpine_tar_filter, fail, sha256_file
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
 
 CACHE = Path("/cache")
 _ROOTFS_BUILD_LOCK = ".build.lock"
@@ -161,11 +162,16 @@ def _run_as_builder(command: list[str], *, cwd: Path, environment: dict[str, str
     process_build.run(_builder_command(command, environment), cwd=cwd)
 
 
-def _alpine_source_cache() -> Path:
+@contextmanager
+def _alpine_source_cache() -> Iterator[Path]:
+    """Lend source ownership for abuild, then return it to the host-mapped root."""
     cache = CACHE / "downloads/alpine/sources"
     cache.mkdir(parents=True, exist_ok=True)
-    _chown_tree(cache, "builder")
-    return cache
+    try:
+        _chown_tree(cache, "builder")
+        yield cache
+    finally:
+        _chown_tree(cache, "root")
 
 
 def _cached_package_files(repository: Path, names: set[str]) -> list[Path] | None:
@@ -485,7 +491,7 @@ def _build_fplinux_apks(  # noqa: PLR0913 -- package, signing and build inputs s
     home.mkdir()
     _chown_tree(aports, "builder")
     _chown_tree(home, "builder")
-    sources = _alpine_source_cache()
+    sources = CACHE / "downloads/alpine/sources"
 
     key_directory = home / ".abuild"
     key_directory.mkdir()
@@ -520,60 +526,70 @@ def _build_fplinux_apks(  # noqa: PLR0913 -- package, signing and build inputs s
     package_outputs: dict[str, Path] = {}
     image_recipe = os.environ.get("FPLINUX_CONTAINER_IMAGE_RECIPE", "")
     signing_key_identity = sha256_file(public_key)
-    for name in build_packages:
-        directory = aports / name
-        recipe = alpine_state.alpine_package_recipe(name, image_recipe, signing_key_identity)
-        repository = CACHE / alpine_state.PACKAGE_CACHE_DIRECTORY / name
-        package_environment = {**environment, "REPODEST": str(repository)}
-        require_file(directory / "APKBUILD")
-        _run_as_builder(
-            ["apkbuild-lint", "APKBUILD"], cwd=directory, environment=package_environment
-        )
-        listed = {
-            line.strip()
-            for line in _builder_output(
-                ["abuild", "listpkg"], cwd=directory, environment=package_environment
-            ).splitlines()
-            if line.strip()
-        }
-        if not listed or any(
-            Path(package).name != package or not package.endswith(".apk") for package in listed
-        ):
-            fail(f"abuild listpkg returned invalid package names for {name}")
-        duplicate = expected_filenames & listed
-        if duplicate:
-            fail(f"abuild package names are duplicated: {', '.join(sorted(duplicate))}")
-        expected_filenames.update(listed)
-        cached = _cached_aport_packages(name, image_recipe, signing_key_identity)
-        if cached is not None and {path.name for path in cached.values()} == listed:
-            process_build.log_message(f"Alpine package cache hit: {name} {recipe[:16]}")
-            outputs = cached
-        else:
-            build_repository = work / "packages" / name
-            build_repository.mkdir(parents=True)
-            _chown_tree(build_repository, "builder")
-            build_environment = {**environment, "REPODEST": str(build_repository)}
-            _run_as_builder(["abuild", "-d", "-r"], cwd=directory, environment=build_environment)
-            built = _cached_package_files(build_repository, listed)
-            if built is None:
-                fail(f"abuild repository output differs from listpkg for {name}")
-            if repository.exists():
-                shutil.rmtree(repository)
-            shutil.copytree(build_repository, repository)
-            cached_files = _cached_package_files(repository, listed)
-            if cached_files is None:
-                fail(f"cached abuild output differs from listpkg for {name}")
-            _write_package_receipt(repository, recipe, cached_files)
-            built_outputs = _cached_aport_packages(name, image_recipe, signing_key_identity)
-            if built_outputs is None or {path.name for path in built_outputs.values()} != listed:
-                fail(f"cached abuild receipt differs from listpkg for {name}")
-            outputs = built_outputs
-        overlap = set(package_outputs) & set(outputs)
-        if overlap:
-            fail(f"abuild package identities are duplicated: {', '.join(sorted(overlap))}")
-        package_outputs.update(outputs)
-        if name in libraries:
-            _prepare_alpine_sysroot(lock, sorted(outputs.values()), sysroot, key_directory)
+    with ExitStack() as build_state:
+        sources_borrowed = False
+        for name in build_packages:
+            directory = aports / name
+            recipe = alpine_state.alpine_package_recipe(name, image_recipe, signing_key_identity)
+            repository = CACHE / alpine_state.PACKAGE_CACHE_DIRECTORY / name
+            package_environment = {**environment, "REPODEST": str(repository)}
+            require_file(directory / "APKBUILD")
+            _run_as_builder(
+                ["apkbuild-lint", "APKBUILD"], cwd=directory, environment=package_environment
+            )
+            listed = {
+                line.strip()
+                for line in _builder_output(
+                    ["abuild", "listpkg"], cwd=directory, environment=package_environment
+                ).splitlines()
+                if line.strip()
+            }
+            if not listed or any(
+                Path(package).name != package or not package.endswith(".apk") for package in listed
+            ):
+                fail(f"abuild listpkg returned invalid package names for {name}")
+            duplicate = expected_filenames & listed
+            if duplicate:
+                fail(f"abuild package names are duplicated: {', '.join(sorted(duplicate))}")
+            expected_filenames.update(listed)
+            cached = _cached_aport_packages(name, image_recipe, signing_key_identity)
+            if cached is not None and {path.name for path in cached.values()} == listed:
+                process_build.log_message(f"Alpine package cache hit: {name} {recipe[:16]}")
+                outputs = cached
+            else:
+                if not sources_borrowed:
+                    build_state.enter_context(_alpine_source_cache())
+                    sources_borrowed = True
+                build_repository = work / "packages" / name
+                build_repository.mkdir(parents=True)
+                _chown_tree(build_repository, "builder")
+                build_environment = {**environment, "REPODEST": str(build_repository)}
+                _run_as_builder(
+                    ["abuild", "-d", "-r"], cwd=directory, environment=build_environment
+                )
+                built = _cached_package_files(build_repository, listed)
+                if built is None:
+                    fail(f"abuild repository output differs from listpkg for {name}")
+                if repository.exists():
+                    shutil.rmtree(repository)
+                shutil.copytree(build_repository, repository)
+                cached_files = _cached_package_files(repository, listed)
+                if cached_files is None:
+                    fail(f"cached abuild output differs from listpkg for {name}")
+                _write_package_receipt(repository, recipe, cached_files)
+                built_outputs = _cached_aport_packages(name, image_recipe, signing_key_identity)
+                if (
+                    built_outputs is None
+                    or {path.name for path in built_outputs.values()} != listed
+                ):
+                    fail(f"cached abuild receipt differs from listpkg for {name}")
+                outputs = built_outputs
+            overlap = set(package_outputs) & set(outputs)
+            if overlap:
+                fail(f"abuild package identities are duplicated: {', '.join(sorted(overlap))}")
+            package_outputs.update(outputs)
+            if name in libraries:
+                _prepare_alpine_sysroot(lock, sorted(outputs.values()), sysroot, key_directory)
 
     return package_outputs, local_private_key, local_public_key
 

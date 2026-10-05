@@ -15,6 +15,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest import mock
@@ -752,7 +753,10 @@ class AlpineStateTests(unittest.TestCase):
             mock.patch.object(alpine_builder, "ROOT", self.root),
             mock.patch.object(os, "geteuid", return_value=0),
             mock.patch.dict(os.environ, {"FPLINUX_CONTAINER_IMAGE_RECIPE": "1" * 64}),
-            mock.patch.object(alpine_builder, "_alpine_source_cache", return_value=sources),
+            # Fake builder processes do not exercise source ownership changes.
+            mock.patch.object(
+                alpine_builder, "_alpine_source_cache", return_value=nullcontext(sources)
+            ),
             mock.patch.object(alpine_builder, "_chown_tree"),
             mock.patch.object(alpine_builder, "_builder_output", side_effect=list_packages),
             mock.patch.object(alpine_builder, "_run_as_builder", side_effect=run_as_builder),
@@ -882,7 +886,10 @@ class AlpineStateTests(unittest.TestCase):
             mock.patch.object(alpine_builder, "ROOT", self.root),
             mock.patch.object(os, "geteuid", return_value=0),
             mock.patch.dict(os.environ, {"FPLINUX_CONTAINER_IMAGE_RECIPE": "1" * 64}),
-            mock.patch.object(alpine_builder, "_alpine_source_cache", return_value=sources),
+            # Fake builder processes do not exercise source ownership changes.
+            mock.patch.object(
+                alpine_builder, "_alpine_source_cache", return_value=nullcontext(sources)
+            ),
             mock.patch.object(alpine_builder, "_chown_tree"),
             mock.patch.object(alpine_builder, "_builder_output", side_effect=list_packages),
             mock.patch.object(alpine_builder, "_run_as_builder", side_effect=run_as_builder),
