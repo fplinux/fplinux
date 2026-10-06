@@ -6,13 +6,15 @@ from __future__ import annotations
 import shutil
 import struct
 import subprocess
-import tempfile
-import unittest
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import mock
 
+import pytest
 from fplinux_cli.build.storage import sd as sd_image
 from fplinux_cli.common import sha256_file
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 BOOT_OFFSET = 1 * 1024 * 1024
 BOOT_SIZE = 64 * 1024 * 1024
@@ -39,18 +41,17 @@ STORAGE = {
 }
 
 
-class SdImageTests(unittest.TestCase):
+class SdImageTests:
     """Create and inspect real MBR, FAT and ext4 artifacts without loop devices."""
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _prepare_inputs(self, tmp_path: Path) -> None:
         """Create exact FIT and ext4 inputs for one whole-card image."""
         required = ("genimage", "mcopy", "mke2fs", "mkdosfs", "xz")
         missing = [name for name in required if shutil.which(name) is None]
         if missing:
-            self.fail("quality image lacks required image tools: " + ", ".join(missing))
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+            pytest.fail("quality image lacks required image tools: " + ", ".join(missing))
+        self.root = tmp_path
         self.fit = self.root / "FPLINUX.ITB"
         self.rootfs = self.root / "FPLROOT.ext4"
         self.output = self.root / "FPLINUX.img.xz"
@@ -98,31 +99,31 @@ class SdImageTests(unittest.TestCase):
 
     def test_builds_one_complete_mbr_image(self) -> None:
         """A real image contains FIT in FAT p1 and the exact ext4 bytes in p2."""
-        self.assertEqual(self.build(), self.output)
-        self.assertFalse((self.output.parent / "FPLINUX.img").exists())
+        assert (self.build()) == (self.output)
+        assert not ((self.output.parent / "FPLINUX.img").exists())
         raw = self.extract_raw()
-        self.assertEqual(raw.stat().st_size, ROOT_OFFSET + ROOT_SIZE)
+        assert (raw.stat().st_size) == (ROOT_OFFSET + ROOT_SIZE)
         with raw.open("rb") as stream:
             mbr = stream.read(512)
-            self.assertEqual(mbr[510:512], b"\x55\xaa")
-            self.assertEqual(struct.unpack_from("<I", mbr, 440)[0], MBR_SIGNATURE)
+            assert (mbr[510:512]) == (b"\x55\xaa")
+            assert (struct.unpack_from("<I", mbr, 440)[0]) == (MBR_SIGNATURE)
             boot = struct.unpack_from("<B3sB3sII", mbr, 446)
             root = struct.unpack_from("<B3sB3sII", mbr, 462)
-            self.assertEqual((boot[0], boot[2], boot[4], boot[5]), (0, 0x0C, 2048, 131072))
-            self.assertEqual((root[0], root[2], root[4], root[5]), (0, 0x83, 133120, 131072))
+            assert ((boot[0], boot[2], boot[4], boot[5])) == ((0, 0x0C, 2048, 131072))
+            assert ((root[0], root[2], root[4], root[5])) == ((0, 0x83, 133120, 131072))
             stream.seek(BOOT_OFFSET)
             boot_sector = stream.read(512)
-            self.assertEqual(boot_sector[71:82].rstrip(), b"FPLBOOT")
-            self.assertEqual(boot_sector[82:90], b"FAT32   ")
+            assert (boot_sector[71:82].rstrip()) == (b"FPLBOOT")
+            assert (boot_sector[82:90]) == (b"FAT32   ")
             stream.seek(ROOT_OFFSET)
-            self.assertEqual(stream.read(ROOT_SIZE), self.rootfs.read_bytes())
+            assert (stream.read(ROOT_SIZE)) == (self.rootfs.read_bytes())
         extracted = self.root / "extracted.itb"
         subprocess.run(
             ["mcopy", "-i", f"{raw}@@{BOOT_OFFSET}", "::FPLINUX.ITB", str(extracted)],
             check=True,
             timeout=120,
         )
-        self.assertEqual(extracted.read_bytes(), self.fit.read_bytes())
+        assert (extracted.read_bytes()) == (self.fit.read_bytes())
 
     def test_fit_content_is_causal(self) -> None:
         """Changing the prebuilt FIT changes the one published image."""
@@ -130,24 +131,24 @@ class SdImageTests(unittest.TestCase):
         before = sha256_file(self.output)
         self.fit.write_bytes(b"FPLINUX altered FIT payload\n")
         self.build()
-        self.assertNotEqual(before, sha256_file(self.output))
+        assert (before) != (sha256_file(self.output))
 
     def test_rebuild_from_unchanged_inputs_is_byte_reproducible(self) -> None:
         """Rebuilding the same FIT and ext4 bytes publishes an identical compressed image."""
         self.build()
         before = sha256_file(self.output)
         self.build()
-        self.assertEqual(before, sha256_file(self.output))
+        assert (before) == (sha256_file(self.output))
 
     def test_missing_or_empty_input_is_rejected(self) -> None:
         """An absent or empty input cannot replace a good image."""
         self.build()
         before = sha256_file(self.output)
         self.fit.write_bytes(b"")
-        with self.assertRaisesRegex(sd_image.SdImageError, "is empty"):
+        with pytest.raises(sd_image.SdImageError, match="is empty"):
             self.build()
-        self.assertEqual(before, sha256_file(self.output))
-        with self.assertRaisesRegex(sd_image.SdImageError, "missing or invalid"):
+        assert (before) == (sha256_file(self.output))
+        with pytest.raises(sd_image.SdImageError, match="missing or invalid"):
             sd_image.build(
                 self.root / "missing.itb",
                 self.rootfs,
@@ -164,7 +165,7 @@ class SdImageTests(unittest.TestCase):
 
         self.build()
 
-        self.assertEqual(self.output.read_bytes(), expected)
+        assert (self.output.read_bytes()) == (expected)
 
     def test_failed_build_preserves_prior_published_image(self) -> None:
         """An injected genimage failure cannot replace an already complete image."""
@@ -175,11 +176,7 @@ class SdImageTests(unittest.TestCase):
         )
         with (
             mock.patch("fplinux_cli.build.storage.sd.subprocess.run", return_value=failed),
-            self.assertRaisesRegex(sd_image.SdImageError, "injected genimage failure"),
+            pytest.raises(sd_image.SdImageError, match="injected genimage failure"),
         ):
             self.build()
-        self.assertEqual(before, sha256_file(self.output))
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert (before) == (sha256_file(self.output))

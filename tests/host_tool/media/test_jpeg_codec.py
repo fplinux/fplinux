@@ -4,11 +4,17 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
+from contextlib import ExitStack
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+import pytest
 
 from tests import ROOT
 from tests.process import run_process
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 KERNEL = ROOT / "platforms/ums9117/linux/drivers/media/platform/ums9117"
 HARNESS = ROOT / "tests/host_tool/media/jpeg-codec.c"
@@ -153,13 +159,19 @@ def _canonical_codes(counts: bytes, symbols: bytes) -> dict[int, tuple[int, int]
     return result
 
 
-class Ums9117JpegCodecHostTests(unittest.TestCase):
+class Ums9117JpegCodecHostTests:
     """Exercise production codec objects through controlled external doubles."""
 
-    def test_decode_contract_and_encode_config(self) -> None:
-        """Preserve decoder behavior and validate the observable encode config."""
-        with tempfile.TemporaryDirectory() as temporary:
-            executable = Path(temporary) / "ums9117-jpeg-codec"
+    executable: Path
+
+    @pytest.fixture(scope="class", autouse=True)
+    @classmethod
+    def _compiled_tools(cls) -> Iterator[None]:
+        """Link one codec harness with the controlled external boundaries."""
+        with ExitStack() as cleanup:
+            build_directory = tempfile.TemporaryDirectory()
+            cleanup.enter_context(build_directory)
+            cls.executable = Path(build_directory.name) / "ums9117-jpeg-codec"
             run_process(
                 [
                     "cc",
@@ -174,118 +186,110 @@ class Ums9117JpegCodecHostTests(unittest.TestCase):
                     str(STANDARD_TABLES),
                     str(KERNEL / "ums9117-jpeg-codec.c"),
                     "-o",
-                    str(executable),
+                    str(cls.executable),
                 ],
                 name="compile UMS9117 JPEG codec host oracle",
                 timeout=30,
                 check=True,
             )
-            run_process(
-                [str(executable)],
-                name="run UMS9117 JPEG decode and encode-boundary oracle",
-                timeout=30,
-                check=True,
-            )
-            dump = run_process(
-                [str(executable), "--dump-encode"],
-                name="export UMS9117 JPEG encode config",
-                timeout=30,
-                check=True,
-            )
+            yield
 
-            for quality, expected in (
-                (1, bytes([255]) * 128),
-                (50, STANDARD_Q50_NATURAL),
-                (100, bytes([1]) * 128),
-            ):
-                with self.subTest(quality=quality):
-                    quality_dump = run_process(
-                        [str(executable), f"--dump-quality-{quality}"],
-                        name="export quality-dependent JPEG encode config",
-                        timeout=30,
-                        check=True,
-                    )
-                    quality_fields = _parse_dump(quality_dump.stdout)
-                    self.assertEqual(bytes.fromhex(quality_fields["quant"]), expected)
-                    quality_dqt = _collect_dqt(
-                        _parse_segments(bytes.fromhex(quality_fields["header"]))
-                    )
-                    self.assertEqual(
-                        quality_dqt[0],
-                        bytes(expected[index] for index in ZIGZAG_TO_NATURAL),
-                    )
-                    self.assertEqual(
-                        quality_dqt[1],
-                        bytes(expected[64 + index] for index in ZIGZAG_TO_NATURAL),
-                    )
+    @pytest.mark.parametrize(
+        ("quality", "expected"),
+        [
+            pytest.param(1, bytes([255]) * 128, id="minimum-quality"),
+            pytest.param(50, STANDARD_Q50_NATURAL, id="standard-quality"),
+            pytest.param(100, bytes([1]) * 128, id="maximum-quality"),
+        ],
+    )
+    def test_decode_contract_and_encode_config(self, quality: int, expected: bytes) -> None:
+        """Preserve decoder behavior and validate the observable encode config."""
+        run_process(
+            [str(self.executable)],
+            name="run UMS9117 JPEG decode and encode-boundary oracle",
+            timeout=30,
+            check=True,
+        )
+        dump = run_process(
+            [str(self.executable), "--dump-encode"],
+            name="export UMS9117 JPEG encode config",
+            timeout=30,
+            check=True,
+        )
+        quality_dump = run_process(
+            [str(self.executable), f"--dump-quality-{quality}"],
+            name="export quality-dependent JPEG encode config",
+            timeout=30,
+            check=True,
+        )
+        quality_fields = _parse_dump(quality_dump.stdout)
+        assert (bytes.fromhex(quality_fields["quant"])) == (expected)
+        quality_dqt = _collect_dqt(_parse_segments(bytes.fromhex(quality_fields["header"])))
+        assert (quality_dqt[0]) == (bytes(expected[index] for index in ZIGZAG_TO_NATURAL))
+        assert (quality_dqt[1]) == (bytes(expected[64 + index] for index in ZIGZAG_TO_NATURAL))
 
         fields = _parse_dump(dump.stdout)
-        self.assertEqual(set(fields), {"meta", "quant", "header", "qbuf", "ac"})
-        self.assertEqual(
-            tuple(map(int, fields["meta"].split())),
-            (1200, 32, 75, 4, 150),
-        )
+        assert (set(fields)) == ({"meta", "quant", "header", "qbuf", "ac"})
+        assert (tuple(map(int, fields["meta"].split()))) == ((1200, 32, 75, 4, 150))
 
         quant = bytes.fromhex(fields["quant"])
-        self.assertEqual(quant, STANDARD_Q85_NATURAL)
+        assert (quant) == (STANDARD_Q85_NATURAL)
         header = bytes.fromhex(fields["header"])
         segments = _parse_segments(header)
-        self.assertEqual(segments[-1][0], 0xDA)
+        assert (segments[-1][0]) == (0xDA)
 
         dqt = _collect_dqt(segments)
-        self.assertEqual(set(dqt), {0, 1})
+        assert (set(dqt)) == ({0, 1})
         expected_luma = bytes(STANDARD_Q85_NATURAL[index] for index in ZIGZAG_TO_NATURAL)
         expected_chroma = bytes(STANDARD_Q85_NATURAL[64 + index] for index in ZIGZAG_TO_NATURAL)
-        self.assertEqual(dqt[0], expected_luma)
-        self.assertEqual(dqt[1], expected_chroma)
+        assert (dqt[0]) == (expected_luma)
+        assert (dqt[1]) == (expected_chroma)
 
         sof_segments = [payload for marker, payload in segments if marker == 0xC0]
-        self.assertEqual(len(sof_segments), 1)
+        assert (len(sof_segments)) == (1)
         sof = sof_segments[0]
-        self.assertEqual(len(sof), 15)
-        self.assertEqual(sof[0], 8)
-        self.assertEqual(int.from_bytes(sof[1:3], "big"), 32)
-        self.assertEqual(int.from_bytes(sof[3:5], "big"), 1200)
-        self.assertEqual(sof[5], 3)
-        self.assertEqual(
-            tuple(tuple(sof[6 + index * 3 : 9 + index * 3]) for index in range(3)),
-            ((1, 0x21, 0), (2, 0x11, 1), (3, 0x11, 1)),
+        assert (len(sof)) == (15)
+        assert (sof[0]) == (8)
+        assert (int.from_bytes(sof[1:3], "big")) == (32)
+        assert (int.from_bytes(sof[3:5], "big")) == (1200)
+        assert (sof[5]) == (3)
+        assert (tuple(tuple(sof[6 + index * 3 : 9 + index * 3]) for index in range(3))) == (
+            ((1, 0x21, 0), (2, 0x11, 1), (3, 0x11, 1))
         )
 
         dht = _collect_dht(segments)
-        self.assertEqual(set(dht), {(0, 0), (1, 0), (0, 1), (1, 1)})
+        assert (set(dht)) == ({(0, 0), (1, 0), (0, 1), (1, 1)})
         dc_symbols = set(range(12))
         ac_symbols = {0, 0xF0} | {run * 16 + size for run in range(16) for size in range(1, 11)}
         for key in ((0, 0), (0, 1)):
-            self.assertEqual(set(dht[key][1]), dc_symbols)
+            assert (set(dht[key][1])) == (dc_symbols)
         for key in ((1, 0), (1, 1)):
-            self.assertEqual(set(dht[key][1]), ac_symbols)
+            assert (set(dht[key][1])) == (ac_symbols)
 
         luma_ac = _canonical_codes(*dht[(1, 0)])
         chroma_ac = _canonical_codes(*dht[(1, 1)])
-        self.assertEqual(luma_ac[0x01], (0, 2))
-        self.assertEqual(luma_ac[0x00], (0xA, 4))
-        self.assertEqual(luma_ac[0xF0], (0x7F9, 11))
-        self.assertEqual(luma_ac[0x09], (0xFF82, 16))
-        self.assertEqual(luma_ac[0x0A], (0xFF83, 16))
-        self.assertEqual(chroma_ac[0x00], (0, 2))
-        self.assertEqual(chroma_ac[0x01], (1, 2))
-        self.assertEqual(chroma_ac[0xF0], (0x3FA, 10))
-        self.assertEqual(chroma_ac[0x09], (0x3F6, 10))
-        self.assertEqual(chroma_ac[0x0A], (0xFF4, 12))
+        assert (luma_ac[0x01]) == ((0, 2))
+        assert (luma_ac[0x00]) == ((0xA, 4))
+        assert (luma_ac[0xF0]) == ((0x7F9, 11))
+        assert (luma_ac[0x09]) == ((0xFF82, 16))
+        assert (luma_ac[0x0A]) == ((0xFF83, 16))
+        assert (chroma_ac[0x00]) == ((0, 2))
+        assert (chroma_ac[0x01]) == ((1, 2))
+        assert (chroma_ac[0xF0]) == ((0x3FA, 10))
+        assert (chroma_ac[0x09]) == ((0x3F6, 10))
+        assert (chroma_ac[0x0A]) == ((0xFF4, 12))
 
         dri_segments = [payload for marker, payload in segments if marker == 0xDD]
-        self.assertEqual(dri_segments, [b"\x00\x96"])
+        assert (dri_segments) == ([b"\x00\x96"])
         sos_segments = [payload for marker, payload in segments if marker == 0xDA]
-        self.assertEqual(len(sos_segments), 1)
+        assert (len(sos_segments)) == (1)
         sos = sos_segments[0]
-        self.assertEqual(len(sos), 10)
-        self.assertEqual(sos[0], 3)
-        self.assertEqual(
-            tuple(tuple(sos[1 + index * 2 : 3 + index * 2]) for index in range(3)),
-            ((1, 0x00), (2, 0x11), (3, 0x11)),
+        assert (len(sos)) == (10)
+        assert (sos[0]) == (3)
+        assert (tuple(tuple(sos[1 + index * 2 : 3 + index * 2]) for index in range(3))) == (
+            ((1, 0x00), (2, 0x11), (3, 0x11))
         )
-        self.assertEqual(sos[-3:], b"\x00\x3f\x00")
+        assert (sos[-3:]) == (b"\x00\x3f\x00")
 
         # Characterization of the driver's quantizer register format, not an
         # independent register specification: each 16-bit half holds
@@ -293,16 +297,16 @@ class Ums9117JpegCodecHostTests(unittest.TestCase):
         # coefficients per word in 6-bit bit-reversed order. A host run cannot
         # show that the encoder hardware accepts this layout.
         qbuf = tuple(int(word, 16) for word in fields["qbuf"].split())
-        self.assertEqual(len(qbuf), 64)
-        self.assertEqual(qbuf[0], 0xCCD3CCD3)
-        self.assertEqual(qbuf[16] & 0xFFFF, 0xAAB2)
-        self.assertEqual(qbuf[13] & 0xFFFF, 0xC315)
-        self.assertEqual(qbuf[32], 0x8895CCD3)
-        self.assertEqual(qbuf[63], 0x88958895)
+        assert (len(qbuf)) == (64)
+        assert (qbuf[0]) == (0xCCD3CCD3)
+        assert (qbuf[16] & 0xFFFF) == (0xAAB2)
+        assert (qbuf[13] & 0xFFFF) == (0xC315)
+        assert (qbuf[32]) == (0x8895CCD3)
+        assert (qbuf[63]) == (0x88958895)
 
         # ITU-T T.81 Annex K.5/K.6 AC Huffman codes, left-aligned to 16 bits.
         ac = tuple(int(word, 16) for word in fields["ac"].split())
-        self.assertEqual(len(ac), 162)
+        assert (len(ac)) == (162)
         expected_ac = {
             0: 0x40000000,
             1: 0x80004000,
@@ -313,9 +317,4 @@ class Ums9117JpegCodecHostTests(unittest.TestCase):
             161: 0,
         }
         for index, expected_word in expected_ac.items():
-            with self.subTest(ac_index=index):
-                self.assertEqual(ac[index], expected_word)
-
-
-if __name__ == "__main__":
-    unittest.main()
+            assert (ac[index]) == (expected_word)

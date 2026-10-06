@@ -4,7 +4,8 @@
 from __future__ import annotations
 
 import struct
-import unittest
+
+import pytest
 
 from tests.fixtures.stock_board_report import (
     APPLICATION_OFFSET,
@@ -40,7 +41,7 @@ def _parti_table(entries: tuple[tuple[int, int, int, int], ...]) -> bytes:
     )
 
 
-class PartitionDiscoveryTests(unittest.TestCase):
+class PartitionDiscoveryTests:
     """Find the stock application image by searching, not by fixed table offsets."""
 
     def test_vbm_copies_at_the_end_select_the_signed_image_only(self) -> None:
@@ -49,9 +50,9 @@ class PartitionDiscoveryTests(unittest.TestCase):
 
         found = STOCK_IMAGE.find_application_image(backup(image, vbm=agreeing_vbm()))
 
-        self.assertEqual(found.contents, image)
-        self.assertEqual(found.nand_offset, APPLICATION_OFFSET)
-        self.assertEqual(found.partition_table, "VBM")
+        assert (found.contents) == (image)
+        assert (found.nand_offset) == (APPLICATION_OFFSET)
+        assert (found.partition_table) == ("VBM")
 
     def test_parti_table_anywhere_selects_the_same_image(self) -> None:
         """A PartI table across a page boundary, away from any block start, is found."""
@@ -61,19 +62,30 @@ class PartitionDiscoveryTests(unittest.TestCase):
             backup(image, parti=(0x7FC, _parti_table(PARTI_ENTRIES)))
         )
 
-        self.assertEqual(found.contents, image)
-        self.assertEqual(found.nand_offset, APPLICATION_OFFSET)
-        self.assertEqual(found.partition_table, "PartI")
+        assert (found.contents) == (image)
+        assert (found.nand_offset) == (APPLICATION_OFFSET)
+        assert (found.partition_table) == ("PartI")
 
     def test_disagreeing_vbm_copies_are_refused(self) -> None:
         """Two readable but different copies leave the layout ambiguous."""
         changed = (*VBM_ENTRIES[:1], (0x00000003, 0x100, 2, 4), *VBM_ENTRIES[2:])
         vbm = (vbm_copy(VBM_ENTRIES, b"first-copy"), vbm_copy(changed, b"secondcopy"))
 
-        with self.assertRaisesRegex(ValueError, "VBM.*disagree"):
+        with pytest.raises(ValueError, match=r"VBM.*disagree"):
             STOCK_IMAGE.find_application_image(backup(signed_image(b"image"), vbm=vbm))
 
-    def test_missing_tables_or_image_are_refused(self) -> None:
+    @pytest.mark.parametrize(
+        "case",
+        [
+            "no table",
+            "one VBM copy",
+            "no application entry",
+            "no signed image",
+            "image larger than its partition",
+        ],
+        ids=["no-table", "one-vbm-copy", "no-application", "unsigned-image", "oversized-image"],
+    )
+    def test_missing_tables_or_image_are_refused(self, case: str) -> None:
         """No table, one VBM copy, no application entry or no signed image stops extraction."""
         image = signed_image(b"image")
         without_application = tuple(
@@ -100,21 +112,21 @@ class PartitionDiscoveryTests(unittest.TestCase):
                 "does not fit",
             ),
         }
-        for name, (nand, message) in cases.items():
-            with self.subTest(name), self.assertRaisesRegex(ValueError, message):
-                STOCK_IMAGE.find_application_image(nand)
+        nand, message = cases[case]
+        with pytest.raises(ValueError, match=message):
+            STOCK_IMAGE.find_application_image(nand)
 
 
-class KeypadTests(unittest.TestCase):
+class KeypadTests:
     """Turn the stock keymap into the matrix, boot key and EIC9 candidate."""
 
     def test_matrix_positions_follow_the_column_major_keymap_with_a_hole(self) -> None:
         """Entry column * 8 + row is MATRIX_KEY(row, column); an empty entry is no key."""
         report = STOCK_IMAGE.keypad_report(keymap(SPARSE_KEYMAP))
 
-        self.assertEqual(report["matrix"], SPARSE_MATRIX)
-        self.assertEqual((report["rows"], report["columns"]), (3, 2))
-        self.assertEqual(report["boot_key"], {"code": "0x2a", "key": "FPLINUX_KEY_STAR"})
+        assert (report["matrix"]) == (SPARSE_MATRIX)
+        assert ((report["rows"], report["columns"])) == ((3, 2))
+        assert (report["boot_key"]) == ({"code": "0x2a", "key": "FPLINUX_KEY_STAR"})
 
     def test_only_a_single_missing_needed_key_is_the_eic9_candidate(self) -> None:
         """One absent key is proposed for EIC9; with two absent keys none is proposed."""
@@ -136,16 +148,15 @@ class KeypadTests(unittest.TestCase):
         two_missing = STOCK_IMAGE.keypad_report(keymap(keys_without_8 | {18: 0xFFFF}))
 
         eight = {"code": "0x38", "key": "FPLINUX_KEY_8"}
-        self.assertEqual(one_missing["eic9_candidate"], eight)
-        self.assertEqual(one_missing["missing_keys"], [eight])
-        self.assertIsNone(two_missing["eic9_candidate"])
-        self.assertEqual(
-            two_missing["missing_keys"],
-            [{"code": "0x0d", "key": "FPLINUX_KEY_OK"}, eight],
+        assert (one_missing["eic9_candidate"]) == (eight)
+        assert (one_missing["missing_keys"]) == ([eight])
+        assert (two_missing["eic9_candidate"]) is None
+        assert (two_missing["missing_keys"]) == (
+            [{"code": "0x0d", "key": "FPLINUX_KEY_OK"}, eight]
         )
 
 
-class NandConfigTests(unittest.TestCase):
+class NandConfigTests:
     """Decode the stock NAND configuration table with its documented record layout."""
 
     def test_records_are_decoded_up_to_the_terminating_record(self) -> None:
@@ -154,15 +165,11 @@ class NandConfigTests(unittest.TestCase):
 
         records = STOCK_IMAGE.decode_nand_configs(table)
 
-        self.assertEqual(len(records), 2)
-        self.assertEqual(records[0], EXPECTED_21E5)
-        self.assertEqual((records[1]["id"], records[1]["block_count"]), ("0xb1a1", 2048))
+        assert (len(records)) == (2)
+        assert (records[0]) == (EXPECTED_21E5)
+        assert ((records[1]["id"], records[1]["block_count"])) == (("0xb1a1", 2048))
 
     def test_table_without_a_terminating_record_is_refused(self) -> None:
         """A truncated table cannot be reported as complete."""
-        with self.assertRaisesRegex(ValueError, "no terminating record"):
+        with pytest.raises(ValueError, match="no terminating record"):
             STOCK_IMAGE.decode_nand_configs(NAND_RECORD_21E5 + NAND_RECORD_B1A1)
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -4,11 +4,9 @@
 from __future__ import annotations
 
 import struct
-import tempfile
-import unittest
-from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
+import pytest
 from fplinux_cli.build.device_tree import (
     DeviceTreeError,
     exact_path_properties,
@@ -23,8 +21,11 @@ from fplinux_cli.manifests.platforms import load_platform
 
 from tests.fdt import binary_tree
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-class DeviceTreeKconfigTests(unittest.TestCase):
+
+class DeviceTreeKconfigTests:
     """Check compiled USB ownership against independent literal configuration values."""
 
     checks: ClassVar[tuple[dict[str, str], ...]] = (
@@ -48,27 +49,28 @@ class DeviceTreeKconfigTests(unittest.TestCase):
             properties.append(("status", status))
         return binary_tree([], [("soc", [], [("usb@20200000", properties, [])])])
 
-    def test_each_enabled_ownership_path_requires_its_built_in_driver(self) -> None:
-        """A cold owner cannot satisfy inherited DT ownership, or the reverse."""
-        cases = (
+    @pytest.mark.parametrize(
+        ("compatible", "symbol"),
+        [
             (b"sprd,ums9117-musb\0", "CONFIG_USB_MUSB_UMS9117_COLD"),
             (b"fplinux,ums9117-musb-inherited\0", "CONFIG_USB_MUSB_UMS9117_INHERITED"),
-        )
-        for compatible, symbol in cases:
-            with self.subTest(compatible=compatible):
-                tree = self.usb_tree(compatible)
-                verify_dtb_kconfig(tree, {symbol: "y"}, self.checks)
-                for value in ("n", "m", None):
-                    config = {symbol: value} if value is not None else {}
-                    with (
-                        self.subTest(value=value),
-                        self.assertRaisesRegex(DeviceTreeError, f"requires {symbol}=y"),
-                    ):
-                        verify_dtb_kconfig(tree, config, self.checks)
+        ],
+        ids=["cold-owner", "inherited-owner"],
+    )
+    @pytest.mark.parametrize("value", ["n", "m", None], ids=["disabled", "module", "missing"])
+    def test_each_enabled_ownership_path_requires_its_built_in_driver(
+        self, compatible: bytes, symbol: str, value: str | None
+    ) -> None:
+        """A cold owner cannot satisfy inherited DT ownership, or the reverse."""
+        tree = self.usb_tree(compatible)
+        verify_dtb_kconfig(tree, {symbol: "y"}, self.checks)
+        config = {symbol: value} if value is not None else {}
+        with pytest.raises(DeviceTreeError, match=f"requires {symbol}=y"):
+            verify_dtb_kconfig(tree, config, self.checks)
 
     def test_other_usb_owner_does_not_satisfy_enabled_node(self) -> None:
         """Built cold support still rejects an inherited node without inherited support."""
-        with self.assertRaisesRegex(DeviceTreeError, "CONFIG_USB_MUSB_UMS9117_INHERITED=y"):
+        with pytest.raises(DeviceTreeError, match="CONFIG_USB_MUSB_UMS9117_INHERITED=y"):
             verify_dtb_kconfig(
                 self.usb_tree(b"fplinux,ums9117-musb-inherited\0"),
                 {"CONFIG_USB_MUSB_UMS9117_COLD": "y"},
@@ -79,18 +81,15 @@ class DeviceTreeKconfigTests(unittest.TestCase):
         """Disabled USB can remain described while neither ownership path is built."""
         verify_dtb_kconfig(self.usb_tree(b"sprd,ums9117-musb\0", b"disabled\0"), {}, self.checks)
 
-    def test_absent_or_ok_status_enables_the_node(self) -> None:
+    @pytest.mark.parametrize("status", [None, b"ok\0"], ids=["absent", "ok"])
+    def test_absent_or_ok_status_enables_the_node(self, status: bytes | None) -> None:
         """Standard DT availability spellings enforce ownership equally."""
-        for status in (None, b"ok\0"):
-            with (
-                self.subTest(status=status),
-                self.assertRaisesRegex(DeviceTreeError, "requires CONFIG_USB_MUSB_UMS9117_COLD=y"),
-            ):
-                verify_dtb_kconfig(self.usb_tree(b"sprd,ums9117-musb\0", status), {}, self.checks)
+        with pytest.raises(DeviceTreeError, match="requires CONFIG_USB_MUSB_UMS9117_COLD=y"):
+            verify_dtb_kconfig(self.usb_tree(b"sprd,ums9117-musb\0", status), {}, self.checks)
 
     def test_enabled_unknown_compatible_is_rejected(self) -> None:
         """An enabled USB node cannot bypass ownership by changing its compatible."""
-        with self.assertRaisesRegex(DeviceTreeError, "has no declared Kconfig owner"):
+        with pytest.raises(DeviceTreeError, match="has no declared Kconfig owner"):
             verify_dtb_kconfig(self.usb_tree(b"example,usb\0"), {}, self.checks)
 
     def test_compatible_fallback_list_preserves_known_owner_requirement(self) -> None:
@@ -99,7 +98,7 @@ class DeviceTreeKconfigTests(unittest.TestCase):
         verify_dtb_kconfig(tree, {"CONFIG_USB_MUSB_UMS9117_COLD": "y"}, self.checks)
 
 
-class DeviceTreePropertyKconfigTests(unittest.TestCase):
+class DeviceTreePropertyKconfigTests:
     """Validate optional keypad support through independently encoded DT properties."""
 
     checks: ClassVar[tuple[dict[str, str], ...]] = (
@@ -124,28 +123,26 @@ class DeviceTreePropertyKconfigTests(unittest.TestCase):
             properties.append(("eic9-gpios", struct.pack(">III", 1, 9, 0)))
         return binary_tree([], [("soc", [], [("keypad@40250000", properties, [])])])
 
-    def test_aux_gpio_requires_its_built_in_support(self) -> None:
+    @pytest.mark.parametrize("value", ["n", "m", None], ids=["disabled", "module", "missing"])
+    def test_aux_gpio_requires_its_built_in_support(self, value: str | None) -> None:
         """A declared auxiliary key cannot be silently omitted from an enabled keypad."""
         tree = self.keypad_tree(has_aux_key=True)
-        for value in ("n", "m", None):
-            config = {"CONFIG_KEYBOARD_UMS9117": "y"}
-            if value is not None:
-                config["CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY"] = value
-            with (
-                self.subTest(value=value),
-                self.assertRaisesRegex(
-                    DeviceTreeError,
-                    "property eic9-gpios requires CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY=y",
-                ),
-            ):
-                verify_dtb_kconfig(tree, config, self.checks)
+        config = {"CONFIG_KEYBOARD_UMS9117": "y"}
+        if value is not None:
+            config["CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY"] = value
+        with pytest.raises(
+            DeviceTreeError,
+            match="property eic9-gpios requires CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY=y",
+        ):
+            verify_dtb_kconfig(tree, config, self.checks)
         verify_dtb_kconfig(
             tree,
             {"CONFIG_KEYBOARD_UMS9117": "y", "CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY": "y"},
             self.checks,
         )
 
-    def test_platform_requirements_reject_an_omitted_aux_key(self) -> None:
+    @staticmethod
+    def test_platform_requirements_reject_an_omitted_aux_key() -> None:
         """The platform's declared policy rejects a keypad whose auxiliary key is not built."""
         tree = binary_tree(
             [],
@@ -173,7 +170,7 @@ class DeviceTreePropertyKconfigTests(unittest.TestCase):
             ],
         )
         checks = load_platform("ums9117")["linux"]["dt_config_checks"]
-        with self.assertRaisesRegex(DeviceTreeError, "CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY=y"):
+        with pytest.raises(DeviceTreeError, match="CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY=y"):
             verify_dtb_kconfig(
                 tree,
                 {
@@ -192,7 +189,7 @@ class DeviceTreePropertyKconfigTests(unittest.TestCase):
 
     def test_aux_support_does_not_replace_the_keypad_driver(self) -> None:
         """Conditional support cannot satisfy the device's unconditional driver requirement."""
-        with self.assertRaisesRegex(DeviceTreeError, "requires CONFIG_KEYBOARD_UMS9117=y"):
+        with pytest.raises(DeviceTreeError, match="requires CONFIG_KEYBOARD_UMS9117=y"):
             verify_dtb_kconfig(
                 self.keypad_tree(has_aux_key=True),
                 {"CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY": "y"},
@@ -206,7 +203,7 @@ class DeviceTreePropertyKconfigTests(unittest.TestCase):
         )
 
 
-class DeviceTreeCardDetectKconfigTests(unittest.TestCase):
+class DeviceTreeCardDetectKconfigTests:
     """Reject a compiled card-detect path whose required code is not built."""
 
     @staticmethod
@@ -232,23 +229,33 @@ class DeviceTreeCardDetectKconfigTests(unittest.TestCase):
             ],
         )
 
-    def test_card_detect_requires_built_in_removable_support(self) -> None:
+    @pytest.mark.parametrize(
+        ("value", "error"),
+        [
+            ("y", None),
+            ("n", "requires CONFIG_MMC_REMOVABLE=y"),
+            ("m", "requires CONFIG_MMC_REMOVABLE=y"),
+        ],
+        ids=["built-in", "disabled", "module"],
+    )
+    def test_card_detect_requires_built_in_removable_support(
+        self, value: str, error: str | None
+    ) -> None:
         """A card-detect GPIO cannot silently become a startup-only card."""
         checks = load_platform("ums9117")["linux"]["dt_config_checks"]
-        supported = {
+        config = {
             "CONFIG_USB_MUSB_UMS9117_COLD": "y",
             "CONFIG_KEYBOARD_UMS9117": "y",
             "CONFIG_MMC_SDHCI_UMS9117": "y",
-            "CONFIG_MMC_REMOVABLE": "y",
+            "CONFIG_MMC_REMOVABLE": value,
             "CONFIG_MMC_GPIO": "y",
         }
         tree = self.platform_tree(removable=True)
-        verify_dtb_kconfig(tree, supported, checks)
-        for value in ("n", "m"):
-            with self.subTest(value=value):
-                config = {**supported, "CONFIG_MMC_REMOVABLE": value}
-                with self.assertRaisesRegex(DeviceTreeError, "requires CONFIG_MMC_REMOVABLE=y"):
-                    verify_dtb_kconfig(tree, config, checks)
+        if error is None:
+            verify_dtb_kconfig(tree, config, checks)
+        else:
+            with pytest.raises(DeviceTreeError, match=error):
+                verify_dtb_kconfig(tree, config, checks)
 
     def test_fixed_card_needs_no_card_detect_code(self) -> None:
         """A startup-only card is valid without the removable or GPIO implementation."""
@@ -342,10 +349,11 @@ def _binary_profile_layout_tree(
     )
 
 
-class DeviceTreePropertyTests(unittest.TestCase):
+class DeviceTreePropertyTests:
     """Read properties from exact paths in binary FDT fixtures."""
 
-    def test_exact_paths_do_not_mix_properties_from_different_nodes(self) -> None:
+    @staticmethod
+    def test_exact_paths_do_not_mix_properties_from_different_nodes() -> None:
         """The same property name at root and child retains path ownership."""
         tree = binary_tree(
             [("compatible", b"vendor,board\0")],
@@ -360,36 +368,38 @@ class DeviceTreePropertyTests(unittest.TestCase):
 
         properties = exact_path_properties(tree, ("/", "/chosen"))
 
-        self.assertEqual(properties["/"]["compatible"], b"vendor,board\0")
-        self.assertEqual(properties["/chosen"]["compatible"], b"fplinux,session\0")
-        self.assertEqual(properties["/chosen"]["bootargs"], b"x\0")
+        assert (properties["/"]["compatible"]) == (b"vendor,board\0")
+        assert (properties["/chosen"]["compatible"]) == (b"fplinux,session\0")
+        assert (properties["/chosen"]["bootargs"]) == (b"x\0")
 
-    def test_missing_exact_path_is_rejected(self) -> None:
+    @staticmethod
+    def test_missing_exact_path_is_rejected() -> None:
         """A similarly named property cannot substitute for the requested node."""
         tree = binary_tree([("model", b"Demo\0")])
 
-        with self.assertRaisesRegex(DeviceTreeError, r"lacks node /chosen"):
+        with pytest.raises(DeviceTreeError, match=r"lacks node /chosen"):
             exact_path_properties(tree, "/chosen")
 
-    def test_nul_string_parsers_reject_ambiguous_encodings(self) -> None:
+    @staticmethod
+    def test_nul_string_parsers_reject_ambiguous_encodings() -> None:
         """Missing terminators and empty string-list members are not accepted."""
-        with self.assertRaisesRegex(DeviceTreeError, "one NUL-terminated string"):
+        with pytest.raises(DeviceTreeError, match="one NUL-terminated string"):
             parse_nul_string(b"Demo\0extra\0", "model")
-        with self.assertRaisesRegex(DeviceTreeError, "NUL-terminated string-list"):
+        with pytest.raises(DeviceTreeError, match="NUL-terminated string-list"):
             parse_nul_string_list(b"vendor,board", "compatible")
-        with self.assertRaisesRegex(DeviceTreeError, "empty string-list element"):
+        with pytest.raises(DeviceTreeError, match="empty string-list element"):
             parse_nul_string_list(b"vendor,board\0\0", "compatible")
 
 
-class TargetIdentityTests(unittest.TestCase):
+class TargetIdentityTests:
     """Verify target identity against observable root properties in a DTB."""
 
     target = "demo-target"
     model = "Demo Phone (D-1)"
     compatibles = ("vendor,demo-phone", "vendor,demo-soc")
 
+    @staticmethod
     def tree(
-        self,
         *,
         model: bytes | None = b"Demo Phone (D-1)\0",
         compatible: bytes | None = b"vendor,demo-phone\0vendor,demo-soc\0",
@@ -402,19 +412,18 @@ class TargetIdentityTests(unittest.TestCase):
             properties.append(("compatible", compatible))
         return binary_tree(properties)
 
-    def test_matching_identity_is_accepted_from_a_binary_fdt_path(self) -> None:
+    def test_matching_identity_is_accepted_from_a_binary_fdt_path(self, tmp_path: Path) -> None:
         """The verifier reads and accepts matching binary FDT properties."""
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "target.dtb"
-            path.write_bytes(self.tree())
+        path = tmp_path / "target.dtb"
+        path.write_bytes(self.tree())
 
-            verify_target_identity(path, self.target, self.model, self.compatibles)
+        verify_target_identity(path, self.target, self.model, self.compatibles)
 
     def test_model_mismatch_reports_the_target_and_both_values(self) -> None:
         """A different device model fails even when compatibles still match."""
-        with self.assertRaisesRegex(
+        with pytest.raises(
             DeviceTreeError,
-            r"demo-target DTB model mismatch: expected 'Demo Phone \(D-1\)', got 'Other'",
+            match=r"demo-target DTB model mismatch: expected 'Demo Phone \(D-1\)', got 'Other'",
         ):
             verify_target_identity(
                 self.tree(model=b"Other\0"),
@@ -425,7 +434,7 @@ class TargetIdentityTests(unittest.TestCase):
 
     def test_compatible_order_is_part_of_the_identity(self) -> None:
         """SoC-first fallback ordering cannot pass a target-first contract."""
-        with self.assertRaisesRegex(DeviceTreeError, "compatible mismatch"):
+        with pytest.raises(DeviceTreeError, match="compatible mismatch"):
             verify_target_identity(
                 self.tree(compatible=b"vendor,demo-soc\0vendor,demo-phone\0"),
                 self.target,
@@ -433,20 +442,15 @@ class TargetIdentityTests(unittest.TestCase):
                 self.compatibles,
             )
 
-    def test_required_identity_properties_cannot_be_omitted(self) -> None:
+    @pytest.mark.parametrize("missing", ["model", "compatible"])
+    def test_required_identity_properties_cannot_be_omitted(self, missing: str) -> None:
         """Neither model nor compatible may be inferred from another artifact."""
-        for missing, tree in (
-            ("model", self.tree(model=None)),
-            ("compatible", self.tree(compatible=None)),
-        ):
-            with (
-                self.subTest(missing=missing),
-                self.assertRaisesRegex(DeviceTreeError, rf"root lacks property {missing}"),
-            ):
-                verify_target_identity(tree, self.target, self.model, self.compatibles)
+        tree = self.tree(model=None) if missing == "model" else self.tree(compatible=None)
+        with pytest.raises(DeviceTreeError, match=rf"root lacks property {missing}"):
+            verify_target_identity(tree, self.target, self.model, self.compatibles)
 
 
-class RootBootargsTests(unittest.TestCase):
+class RootBootargsTests:
     """Verify external-root behavior from binary FDT properties."""
 
     root: ClassVar[dict[str, object]] = {
@@ -456,7 +460,8 @@ class RootBootargsTests(unittest.TestCase):
         "wait_seconds": 10,
     }
 
-    def tree(self, bootargs: str) -> bytes:
+    @staticmethod
+    def tree(bootargs: str) -> bytes:
         """Build one binary /chosen node with the requested command line."""
         return binary_tree([], [("chosen", [("bootargs", bootargs.encode() + b"\0")], [])])
 
@@ -470,23 +475,38 @@ class RootBootargsTests(unittest.TestCase):
             self.root,
         )
 
-    def test_conflicting_or_unbounded_root_options_are_rejected(self) -> None:
+    @pytest.mark.parametrize(
+        "bootargs",
+        [
+            "root=PARTUUID=46504c59-02 rootfstype=ext4 rootwait=10 rw init=/sbin/init",
+            (
+                "root=PARTUUID=46504c58-02 rootfstype=ext4 rootwait=10 rw "
+                "init=/sbin/init root=/dev/mmcblk0p2"
+            ),
+            "root=PARTUUID=46504c58-02 rootfstype=ext4 rootwait rw init=/sbin/init",
+            "root=PARTUUID=46504c58-02 rootfstype=ext4 rootwait=10 ro init=/sbin/init",
+            (
+                "root=PARTUUID=46504c58-02 rootfstype=ext4 rootwait=10 rw "
+                "init=/sbin/init rdinit=/init"
+            ),
+            "root=PARTUUID=46504c58-02 rootfstype=ext4 rootwait=10 rw init=/init",
+        ],
+        ids=[
+            "wrong-partuuid",
+            "second-root",
+            "unbounded-wait",
+            "read-only",
+            "rdinit",
+            "wrong-init",
+        ],
+    )
+    def test_conflicting_or_unbounded_root_options_are_rejected(self, bootargs: str) -> None:
         """Reject command lines that can mount a different or unbounded root."""
-        valid = "root=PARTUUID=46504c58-02 rootfstype=ext4 rootwait=10 rw init=/sbin/init"
-        cases = (
-            valid.replace("46504c58-02", "46504c59-02"),
-            valid + " root=/dev/mmcblk0p2",
-            valid.replace("rootwait=10", "rootwait"),
-            valid.replace("rw", "ro"),
-            valid + " rdinit=/init",
-            valid.replace("init=/sbin/init", "init=/init"),
-        )
-        for bootargs in cases:
-            with self.subTest(bootargs=bootargs), self.assertRaises(DeviceTreeError):
-                verify_root_bootargs(self.tree(bootargs), self.root)
+        with pytest.raises(DeviceTreeError):
+            verify_root_bootargs(self.tree(bootargs), self.root)
 
 
-class ProfileLayoutDtbTests(unittest.TestCase):
+class ProfileLayoutDtbTests:
     """Verify fixed microSD boot-memory ownership from binary FDT properties."""
 
     layout: ClassVar[dict[str, int]] = {
@@ -518,36 +538,38 @@ class ProfileLayoutDtbTests(unittest.TestCase):
         """A board's exact Linux range can exclude the first two MiB of physical RAM."""
         tree = _binary_profile_layout_tree(memory_base=0x80200000, memory_size=0x03C00000)
         verify_profile_dtb_layout(tree, self.layout, {"base": 0x80200000, "size": 0x03C00000})
-        with self.assertRaisesRegex(DeviceTreeError, "lacks node /memory@80000000"):
+        with pytest.raises(DeviceTreeError, match="lacks node /memory@80000000"):
             verify_profile_dtb_layout(tree, self.layout, self.linux_memory)
 
     def test_linux_cannot_claim_the_fixed_fdt_arena(self) -> None:
         """Even a matching target declaration cannot overlap the loaded DTB."""
         tree = _binary_profile_layout_tree(memory_size=0x03F00000)
-        with self.assertRaisesRegex(DeviceTreeError, "overlaps"):
+        with pytest.raises(DeviceTreeError, match="overlaps"):
             verify_profile_dtb_layout(tree, self.layout, {"base": 0x80000000, "size": 0x03F00000})
 
-    def test_memory_reservation_and_padded_fdt_mismatches_are_rejected(self) -> None:
+    @pytest.mark.parametrize(
+        ("mismatch", "message"),
+        [
+            ("memory", "memory range"),
+            ("reserved", "framebuffer reservation"),
+            ("mapped", "must be no-map"),
+            ("padded", "padding exceeds"),
+        ],
+        ids=["memory-range", "framebuffer-size", "mapped-framebuffer", "fdt-padding"],
+    )
+    def test_memory_reservation_and_padded_fdt_mismatches_are_rejected(
+        self, mismatch: str, message: str
+    ) -> None:
         """Reject changed RAM ownership or an oversized DTB before the U-Boot handoff."""
-        memory = _binary_profile_layout_tree(memory_size=0x03DFF000)
-        reserved = _binary_profile_layout_tree(reserved_range=(0x83F00000, 0x000FF000))
-        mapped = _binary_profile_layout_tree(reserved_no_map=False)
-        padded = _binary_profile_layout_tree()
-        too_small = dict(self.layout)
-        too_small["fdt_size"] = len(padded) + 0x3000 - 1
-        cases = (
-            (memory, self.layout, "memory range"),
-            (reserved, self.layout, "framebuffer reservation"),
-            (mapped, self.layout, "must be no-map"),
-            (padded, too_small, "padding exceeds"),
-        )
-        for tree, layout, message in cases:
-            with (
-                self.subTest(message=message),
-                self.assertRaisesRegex(DeviceTreeError, message),
-            ):
-                verify_profile_dtb_layout(tree, layout, self.linux_memory)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        layout = dict(self.layout)
+        if mismatch == "memory":
+            tree = _binary_profile_layout_tree(memory_size=0x03DFF000)
+        elif mismatch == "reserved":
+            tree = _binary_profile_layout_tree(reserved_range=(0x83F00000, 0x000FF000))
+        elif mismatch == "mapped":
+            tree = _binary_profile_layout_tree(reserved_no_map=False)
+        else:
+            tree = _binary_profile_layout_tree()
+            layout["fdt_size"] = len(tree) + 0x3000 - 1
+        with pytest.raises(DeviceTreeError, match=message):
+            verify_profile_dtb_layout(tree, layout, self.linux_memory)

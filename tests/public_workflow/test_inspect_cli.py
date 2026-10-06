@@ -8,12 +8,10 @@ import hashlib
 import io
 import json
 import tarfile
-import tempfile
-import unittest
 import zipfile
-from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
 from fplinux_cli.artifacts.bundles import (
     create_bundle_staging,
     publish_bundle_generation,
@@ -26,18 +24,18 @@ from tests.process import run_process
 
 if TYPE_CHECKING:
     import subprocess
+    from pathlib import Path
 
 ABC_SHA256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
 
 
-class InspectCliTests(unittest.TestCase):
+class InspectCliTests:
     """Use the actual archive libraries and resolver; no Kern or phone is involved."""
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _prepare_inputs(self, tmp_path: Path) -> None:
         """Keep every inspected artifact and process inside a disposable checkout."""
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
+        self.root = tmp_path
         prepare_cli_checkout(self.root)
 
     def run_cli(self, *arguments: str) -> subprocess.CompletedProcess[str]:
@@ -85,8 +83,8 @@ class InspectCliTests(unittest.TestCase):
         release = self.make_bundle("1" * 64)
         publish_current_bundle(output, "example", release)
         missing = self.run_cli("inspect", "bundle", "example", "--build-type", "debug")
-        self.assertNotEqual(missing.returncode, 0)
-        self.assertIn("build example --build-type debug", missing.stderr)
+        assert (missing.returncode) != (0)
+        assert ("build example --build-type debug") in (missing.stderr)
         debug = self.make_bundle("2" * 64, build_type="debug")
         publish_current_bundle(output, "example", debug, build_type="debug")
 
@@ -95,13 +93,21 @@ class InspectCliTests(unittest.TestCase):
             ("debug", "2" * 64),
             ("release", "1" * 64),
         ):
-            with self.subTest(build_type=build_type):
-                result = self.run_cli("inspect", "bundle", "example", "--build-type", build_type)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn(f"build_type: {build_type}", result.stdout)
-                self.assertIn(f"generation: {generation}", result.stdout)
+            result = self.run_cli("inspect", "bundle", "example", "--build-type", build_type)
+            assert (result.returncode) == (0), result.stderr
+            assert (f"build_type: {build_type}") in (result.stdout)
+            assert (f"generation: {generation}") in (result.stdout)
 
-    def test_bundle_uses_current_pointer_and_requested_profile(self) -> None:
+    @pytest.mark.parametrize(
+        ("arguments", "generation", "profile"),
+        [
+            pytest.param((), "1" * 64, "default", id="default"),
+            pytest.param(("--profile", "microsd-uboot"), "3" * 64, "microsd-uboot", id="microsd"),
+        ],
+    )
+    def test_bundle_uses_current_pointer_and_requested_profile(
+        self, arguments: tuple[str, ...], generation: str, profile: str
+    ) -> None:
         """A newer unselected generation must not replace the published selection."""
         output = self.root / ".cache/out"
         selected = self.make_bundle("1" * 64)
@@ -109,18 +115,13 @@ class InspectCliTests(unittest.TestCase):
         self.make_bundle("2" * 64)
         card = self.make_bundle("3" * 64, "microsd-uboot")
         publish_current_bundle(output, "example", card, "microsd-uboot")
-        for arguments, generation, profile in (
-            ((), "1" * 64, "default"),
-            (("--profile", "microsd-uboot"), "3" * 64, "microsd-uboot"),
-        ):
-            with self.subTest(profile=profile):
-                result = self.run_cli("inspect", "bundle", "example", *arguments)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn(f"generation: {generation}\n", result.stdout)
-                self.assertIn(f"profile: {profile}\n", result.stdout)
-                self.assertIn(f"3 {ABC_SHA256} payload.bin\n", result.stdout)
-                self.assertIn("build-manifest checksums: OK", result.stdout)
-                self.assertNotIn(str(self.root), result.stdout)
+        result = self.run_cli("inspect", "bundle", "example", *arguments)
+        assert (result.returncode) == (0), result.stderr
+        assert (f"generation: {generation}\n") in (result.stdout)
+        assert (f"profile: {profile}\n") in (result.stdout)
+        assert (f"3 {ABC_SHA256} payload.bin\n") in (result.stdout)
+        assert ("build-manifest checksums: OK") in (result.stdout)
+        assert (str(self.root)) not in (result.stdout)
 
     def make_archive(
         self, *, candidate: bool = True, damaged: bool = False, extra: bool = False
@@ -153,37 +154,46 @@ class InspectCliTests(unittest.TestCase):
             archive.writestr("bundle/SHA256SUMS", checksums)
         return path
 
+    @pytest.mark.parametrize(
+        ("candidate", "kind"),
+        [
+            pytest.param(True, "candidate", id="candidate"),
+            pytest.param(False, "release", id="release"),
+        ],
+    )
     def test_archive_reports_identity_and_checks_every_listed_file_without_extraction(
-        self,
+        self, *, candidate: bool, kind: str
     ) -> None:
         """Both package kinds report verified bytes without creating an extracted tree."""
-        for candidate, kind in ((True, "candidate"), (False, "release")):
-            with self.subTest(kind=kind):
-                archive = self.make_archive(candidate=candidate)
-                original = archive.read_bytes()
-                result = self.run_cli("inspect", "archive", archive.name)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn(f"kind: {kind}\n", result.stdout)
-                self.assertIn("target: example\n", result.stdout)
-                self.assertIn(f"3 {ABC_SHA256} payload.bin\n", result.stdout)
-                self.assertIn("SHA256SUMS: OK", result.stdout)
-                self.assertFalse((self.root / "bundle").exists())
-                self.assertFalse((self.root / ".cache").exists())
-                self.assertEqual(archive.read_bytes(), original)
+        archive = self.make_archive(candidate=candidate)
+        original = archive.read_bytes()
+        result = self.run_cli("inspect", "archive", archive.name)
+        assert (result.returncode) == (0), result.stderr
+        assert (f"kind: {kind}\n") in (result.stdout)
+        assert ("target: example\n") in (result.stdout)
+        assert (f"3 {ABC_SHA256} payload.bin\n") in (result.stdout)
+        assert ("SHA256SUMS: OK") in (result.stdout)
+        assert not ((self.root / "bundle").exists())
+        assert not ((self.root / ".cache").exists())
+        assert (archive.read_bytes()) == (original)
 
-    def test_archive_rejects_changed_bytes_and_unlisted_files(self) -> None:
+    @pytest.mark.parametrize(
+        ("damaged", "extra", "error"),
+        [
+            pytest.param(True, False, "checksum mismatch", id="changed-payload"),
+            pytest.param(False, True, "inventory", id="unlisted-file"),
+        ],
+    )
+    def test_archive_rejects_changed_bytes_and_unlisted_files(
+        self, *, damaged: bool, extra: bool, error: str
+    ) -> None:
         """Reject modified payloads and incomplete checksum inventories."""
-        for damaged, extra, error in (
-            (True, False, "checksum mismatch"),
-            (False, True, "inventory"),
-        ):
-            with self.subTest(error=error):
-                archive = self.make_archive(damaged=damaged, extra=extra)
-                result = self.run_cli("inspect", "archive", archive.name)
-                self.assertEqual(result.returncode, 1, result.stderr)
-                self.assertIn(error, result.stderr)
-                self.assertNotIn("SHA256SUMS: OK", result.stdout)
-                self.assertNotIn("Traceback", result.stderr)
+        archive = self.make_archive(damaged=damaged, extra=extra)
+        result = self.run_cli("inspect", "archive", archive.name)
+        assert (result.returncode) == (1), result.stderr
+        assert (error) in (result.stderr)
+        assert ("SHA256SUMS: OK") not in (result.stdout)
+        assert ("Traceback") not in (result.stderr)
 
     def test_apk_reads_all_gzip_sections_metadata_and_symlinks_without_installing(self) -> None:
         """Read signature/control/data streams without executing maintainer scripts."""
@@ -214,7 +224,7 @@ class InspectCliTests(unittest.TestCase):
         path = self.root / "example.apk"
         path.write_bytes(b"".join(parts))
         result = self.run_cli("inspect", "apk", path.name)
-        self.assertEqual(result.returncode, 0, result.stderr)
+        assert (result.returncode) == (0), result.stderr
         for expected in (
             "pkgname = example",
             "depend = alpha\ndepend = beta",
@@ -222,21 +232,25 @@ class InspectCliTests(unittest.TestCase):
             "file 3 usr/bin/example",
             "symlink 0 usr/bin/link -> example",
         ):
-            self.assertIn(expected, result.stdout)
-        self.assertFalse((self.root / "usr").exists())
-        self.assertFalse((self.root / ".cache").exists())
+            assert (expected) in (result.stdout)
+        assert not ((self.root / "usr").exists())
+        assert not ((self.root / ".cache").exists())
 
-    def test_bad_inputs_fail_without_traceback_or_runtime_setup(self) -> None:
+    @pytest.mark.parametrize(
+        ("kind", "name"),
+        [
+            pytest.param("archive", "missing", id="missing-archive"),
+            pytest.param("archive", "invalid", id="invalid-archive"),
+            pytest.param("apk", "missing", id="missing-apk"),
+            pytest.param("apk", "invalid", id="invalid-apk"),
+        ],
+    )
+    def test_bad_inputs_fail_without_traceback_or_runtime_setup(
+        self, kind: str, name: str
+    ) -> None:
         """Missing and unreadable archive formats produce ordinary CLI errors."""
         (self.root / "invalid").write_bytes(b"not an archive")
-        for kind in ("archive", "apk"):
-            for name in ("missing", "invalid"):
-                with self.subTest(kind=kind, name=name):
-                    result = self.run_cli("inspect", kind, name)
-                    self.assertEqual(result.returncode, 1, result.stderr)
-                    self.assertNotIn("Traceback", result.stderr)
-        self.assertFalse((self.root / ".cache").exists())
-
-
-if __name__ == "__main__":
-    unittest.main()
+        result = self.run_cli("inspect", kind, name)
+        assert (result.returncode) == (1), result.stderr
+        assert ("Traceback") not in (result.stderr)
+        assert not ((self.root / ".cache").exists())

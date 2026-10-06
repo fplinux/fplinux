@@ -4,25 +4,26 @@
 from __future__ import annotations
 
 import json
-import tempfile
-import unittest
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import mock
 
+import pytest
 from fplinux_cli import common
 from fplinux_cli.alpine import selection as alpine_state
 from fplinux_cli.cli import package as package_commands
 from fplinux_cli.manifests import platforms, releases, targets
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-class ReleaseManifestPolicyTests(unittest.TestCase):
+
+class ReleaseManifestPolicyTests:
     """Exercise release-path and runtime-closure policy without creating an archive."""
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _release_inputs(self, tmp_path: Path) -> None:
         """Create the minimal target tree accepted by the release manifest parser."""
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        self.root = tmp_path
         self.target = "nokia-ta1618"
         self.target_config = {
             "platform": "demo",
@@ -70,8 +71,12 @@ class ReleaseManifestPolicyTests(unittest.TestCase):
         self.feature.parent.mkdir(parents=True)
         self.feature.write_bytes(b"phone microSD procedures\n")
 
+    @staticmethod
+    @pytest.mark.parametrize(
+        "target", ["inoi-240-modern-4g", "inoi-244-modern-4g", "nokia-ta1618"]
+    )
     def test_supported_release_manifests_keep_curses_and_omit_unused_extensions(
-        self,
+        target: str,
     ) -> None:
         """Release manifests include optional curses and omit unused package extensions."""
         optional = {"fplinux-ncurses-curses"}
@@ -79,25 +84,23 @@ class ReleaseManifestPolicyTests(unittest.TestCase):
             "fplinux-alsa-lib-card-profiles",
             "fplinux-bash-loadables",
         }
-        for target in ("inoi-240-modern-4g", "inoi-244-modern-4g", "nokia-ta1618"):
-            with self.subTest(target=target):
-                target_config = targets.load_target(target)
-                platform = platforms.load_platform(target_config["platform"])
-                rootfs = alpine_state.selected_packages(platform, target_config)
-                bundle = alpine_state.bundle_packages(platform, target_config, rootfs)
-                manifest = releases.load_release(target)
+        target_config = targets.load_target(target)
+        platform = platforms.load_platform(target_config["platform"])
+        rootfs = alpine_state.selected_packages(platform, target_config)
+        bundle = alpine_state.bundle_packages(platform, target_config, rootfs)
+        manifest = releases.load_release(target)
 
-                self.assertTrue(optional <= set(bundle))
-                self.assertFalse(optional & set(rootfs))
-                self.assertFalse(omitted & (set(rootfs) | set(bundle)))
-                for package in optional:
-                    path = f"apks/{package}.apk"
-                    self.assertIn(path, manifest["bundle_files"])
-                    self.assertNotIn(path, manifest["runtime_files"])
-                for package in omitted:
-                    path = f"apks/{package}.apk"
-                    self.assertNotIn(path, manifest["bundle_files"])
-                    self.assertNotIn(path, manifest["runtime_files"])
+        assert optional <= set(bundle)
+        assert not (optional & set(rootfs))
+        assert not (omitted & (set(rootfs) | set(bundle)))
+        for package in optional:
+            path = f"apks/{package}.apk"
+            assert (path) in (manifest["bundle_files"])
+            assert (path) not in (manifest["runtime_files"])
+        for package in omitted:
+            path = f"apks/{package}.apk"
+            assert (path) not in (manifest["bundle_files"])
+            assert (path) not in (manifest["runtime_files"])
 
     def test_target_document_paths_are_safe_and_collision_free(self) -> None:
         """Direct feature pages map once while invalid or escaping inputs are rejected."""
@@ -105,34 +108,40 @@ class ReleaseManifestPolicyTests(unittest.TestCase):
             readme_name, readme = package_commands.target_archive_file(
                 self.target, "release/README.txt"
             )
-            self.assertEqual(readme_name, "README.txt")
-            self.assertEqual(readme.read_bytes(), b"phone instructions\n")
+            assert (readme_name) == ("README.txt")
+            assert (readme.read_bytes()) == (b"phone instructions\n")
 
             archive_name, source = package_commands.target_archive_file(
                 self.target, "features/MICROSD.md"
             )
-            self.assertEqual(archive_name, "docs/target/MICROSD.md")
-            self.assertEqual(source.read_bytes(), b"phone microSD procedures\n")
+            assert (archive_name) == ("docs/target/MICROSD.md")
+            assert (source.read_bytes()) == (b"phone microSD procedures\n")
 
-            for relative in (
-                "../features/MICROSD.md",
-                "features/nested/MICROSD.md",
-                "features/MICROSD.txt",
-                "other/MICROSD.md",
-            ):
-                with (
-                    self.subTest(relative=relative),
-                    self.assertRaisesRegex(SystemExit, "target package file"),
-                ):
-                    package_commands.target_archive_file(self.target, relative)
-
-            with self.assertRaisesRegex(SystemExit, "invalid target package name"):
+            with pytest.raises(SystemExit, match="invalid target package name"):
                 package_commands.target_archive_file("../phone", "features/MICROSD.md")
 
             link = self.root / "targets" / self.target / "features/LINK.md"
             link.symlink_to("MICROSD.md")
-            with self.assertRaisesRegex(SystemExit, "must not traverse a symlink"):
+            with pytest.raises(SystemExit, match="must not traverse a symlink"):
                 package_commands.target_archive_file(self.target, "features/LINK.md")
+
+    @pytest.mark.parametrize(
+        "relative",
+        [
+            "../features/MICROSD.md",
+            "features/nested/MICROSD.md",
+            "features/MICROSD.txt",
+            "other/MICROSD.md",
+        ],
+        ids=["parent-path", "nested-feature", "wrong-extension", "wrong-directory"],
+    )
+    def test_target_document_paths_reject_invalid_inputs(self, relative: str) -> None:
+        """Unsafe or unsupported document paths cannot become archive members."""
+        with (
+            mock.patch.object(common, "ROOT", self.root),
+            pytest.raises(SystemExit, match="target package file"),
+        ):
+            package_commands.target_archive_file(self.target, relative)
 
     def test_profile_preinstall_omits_only_its_optional_archive_apk(self) -> None:
         """Packaging does not require an optional APK already selected by the profile."""
@@ -155,14 +164,13 @@ class ReleaseManifestPolicyTests(unittest.TestCase):
             default = package_commands.load_release_manifest(self.target, self.target_config)
             preinstalled = package_commands.load_release_manifest(self.target, profile)
 
-        self.assertIn("apks/demo.apk", default["qualification_files"])
-        self.assertNotIn("apks/demo.apk", preinstalled["qualification_files"])
-        self.assertEqual(
-            preinstalled["bundle_files"],
-            [path for path in self.release_manifest["bundle_files"] if path != "apks/demo.apk"],
+        assert ("apks/demo.apk") in (default["qualification_files"])
+        assert ("apks/demo.apk") not in (preinstalled["qualification_files"])
+        assert (preinstalled["bundle_files"]) == (
+            [path for path in self.release_manifest["bundle_files"] if path != "apks/demo.apk"]
         )
-        self.assertEqual(preinstalled["runtime_files"], self.release_manifest["runtime_files"])
-        self.assertEqual(preinstalled["documents"], self.release_manifest["documents"])
+        assert (preinstalled["runtime_files"]) == (self.release_manifest["runtime_files"])
+        assert (preinstalled["documents"]) == (self.release_manifest["documents"])
 
     def test_duplicate_target_document_paths_are_rejected(self) -> None:
         """Two declared documents cannot silently publish the same archive member."""
@@ -181,7 +189,7 @@ class ReleaseManifestPolicyTests(unittest.TestCase):
             mock.patch.object(common, "ROOT", self.root),
             mock.patch.object(releases, "load_release", return_value=manifest),
             mock.patch.object(platforms, "load_platform", return_value=self.platform),
-            self.assertRaisesRegex(SystemExit, "duplicate release archive path"),
+            pytest.raises(SystemExit, match="duplicate release archive path"),
         ):
             package_commands.load_release_manifest(self.target, self.target_config)
 
@@ -199,7 +207,7 @@ class ReleaseManifestPolicyTests(unittest.TestCase):
             mock.patch.object(common, "ROOT", self.root),
             mock.patch.object(releases, "load_release", return_value=broken),
             mock.patch.object(platforms, "load_platform", return_value=self.platform),
-            self.assertRaisesRegex(SystemExit, "omit required runtime inputs"),
+            pytest.raises(SystemExit, match="omit required runtime inputs"),
         ):
             package_commands.load_release_manifest(self.target, self.target_config)
 
@@ -211,8 +219,8 @@ class ReleaseManifestPolicyTests(unittest.TestCase):
             mock.patch.object(platforms, "load_platform", return_value=self.platform),
         ):
             release = package_commands.load_release_manifest(self.target, self.target_config)
-        self.assertIn("host/keyboard", release["executables"])
-        self.assertNotIn("host/extractor", release["executables"])
+        assert ("host/keyboard") in (release["executables"])
+        assert ("host/extractor") not in (release["executables"])
 
         without_runner_tool = {
             **self.release_manifest,
@@ -224,10 +232,6 @@ class ReleaseManifestPolicyTests(unittest.TestCase):
             mock.patch.object(common, "ROOT", self.root),
             mock.patch.object(releases, "load_release", return_value=without_runner_tool),
             mock.patch.object(platforms, "load_platform", return_value=self.platform),
-            self.assertRaisesRegex(SystemExit, "omit required runtime inputs"),
+            pytest.raises(SystemExit, match="omit required runtime inputs"),
         ):
             package_commands.load_release_manifest(self.target, self.target_config)
-
-
-if __name__ == "__main__":
-    unittest.main()

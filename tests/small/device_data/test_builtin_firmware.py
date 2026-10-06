@@ -5,41 +5,47 @@ from __future__ import annotations
 
 import hashlib
 import tempfile
-import unittest
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import mock
 
+import pytest
 from fplinux_cli import common
 from fplinux_cli.build.kernel import configuration as kernel_build
 from fplinux_cli.build.kernel import receipts as kbuild_state
 from fplinux_cli.device_data import inputs as firmware_inputs
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
-class BuiltinFirmwareTests(unittest.TestCase):
+
+class BuiltinFirmwareTests:
     """Check profile arguments, input identity, and synthetic vmlinux validation."""
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def prepared_directory(self) -> Iterator[None]:
         """Create a staged profile fixture and its declaration."""
         self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
-        self.profile = b"FPAUDIO\0" + bytes(range(40))
-        item = firmware_inputs.FirmwareInput(
-            source="inoi240-audio-profile.bin",
-            destination="fplinux/inoi240-audio-profile.bin",
-            contents=self.profile,
-            sha256=hashlib.sha256(self.profile).hexdigest(),
-        )
-        self.firmware = (item,)
-        # Stage the profile where the build workspace places captured device data.
-        self.profile_path = self.root / firmware_inputs.snapshot_device_data_path(
-            "inoi-240-modern-4g", "audio-profile", item.destination
-        )
-        self.directory = firmware_inputs.snapshot_device_data_group_directory(
-            self.root, "inoi-240-modern-4g", "audio-profile"
-        )
-        self.profile_path.parent.mkdir(parents=True)
-        self.profile_path.write_bytes(self.profile)
+        with self.temporary:
+            self.root = Path(self.temporary.name)
+            self.profile = b"FPAUDIO\0" + bytes(range(40))
+            item = firmware_inputs.FirmwareInput(
+                source="inoi240-audio-profile.bin",
+                destination="fplinux/inoi240-audio-profile.bin",
+                contents=self.profile,
+                sha256=hashlib.sha256(self.profile).hexdigest(),
+            )
+            self.firmware = (item,)
+            # Stage the profile where the build workspace places captured device data.
+            self.profile_path = self.root / firmware_inputs.snapshot_device_data_path(
+                "inoi-240-modern-4g", "audio-profile", item.destination
+            )
+            self.directory = firmware_inputs.snapshot_device_data_group_directory(
+                self.root, "inoi-240-modern-4g", "audio-profile"
+            )
+            self.profile_path.parent.mkdir(parents=True)
+            self.profile_path.write_bytes(self.profile)
+            yield
 
     def test_present_group_configures_profile_bytes_and_changes_input_identity(
         self,
@@ -62,19 +68,18 @@ class BuiltinFirmwareTests(unittest.TestCase):
             self.profile_path.write_bytes(b"FPAUDIO\0" + b"X" * 40)
             changed = kbuild_state.implementation_identity(implementation)
 
-        self.assertEqual(
-            arguments[:5],
+        assert (arguments[:5]) == (
             [
                 "--set-str",
                 "EXTRA_FIRMWARE",
                 "fplinux/inoi240-audio-profile.bin",
                 "--set-str",
                 "EXTRA_FIRMWARE_DIR",
-            ],
+            ]
         )
-        self.assertEqual(configured_bytes, self.profile)
-        self.assertEqual(first, unrelated)
-        self.assertNotEqual(first, changed)
+        assert (configured_bytes) == (self.profile)
+        assert (first) == (unrelated)
+        assert (first) != (changed)
 
     def test_vmlinux_must_contain_the_exact_configured_profile(self) -> None:
         """The verifier rejects a synthetic vmlinux file missing the configured profile bytes."""
@@ -95,7 +100,7 @@ class BuiltinFirmwareTests(unittest.TestCase):
                 self.firmware,
             )
             vmlinux.write_bytes(b"profile missing")
-            with self.assertRaisesRegex(SystemExit, "does not embed audio-profile"):
+            with pytest.raises(SystemExit, match="does not embed audio-profile"):
                 kernel_build.verify_builtin_audio_profile(
                     "inoi-240-modern-4g",
                     config_path,
@@ -106,15 +111,7 @@ class BuiltinFirmwareTests(unittest.TestCase):
     def test_absent_group_leaves_the_generic_kconfig_path_unchanged(self) -> None:
         """A whole missing optional profile does not add fitted-firmware arguments."""
         with mock.patch.object(common, "ROOT", self.root):
-            self.assertEqual(
-                kernel_build.audio_profile_kconfig_arguments("inoi-240-modern-4g", None),
-                [],
+            assert (kernel_build.audio_profile_kconfig_arguments("inoi-240-modern-4g", None)) == (
+                []
             )
-            self.assertEqual(
-                kernel_build.audio_profile_implementation("inoi-240-modern-4g", None),
-                [],
-            )
-
-
-if __name__ == "__main__":
-    unittest.main()
+            assert (kernel_build.audio_profile_implementation("inoi-240-modern-4g", None)) == ([])

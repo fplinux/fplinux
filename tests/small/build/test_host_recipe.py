@@ -5,11 +5,10 @@ from __future__ import annotations
 
 import hashlib
 import tarfile
-import tempfile
-import unittest
 from pathlib import Path
 from unittest import mock
 
+import pytest
 from fplinux_cli import common
 from fplinux_cli.build import host as host_build
 from fplinux_cli.build import process as process_build
@@ -17,7 +16,7 @@ from fplinux_cli.build import sources as sources_build
 from fplinux_cli.manifests import platforms
 
 
-class HostRecipeTests(unittest.TestCase):
+class HostRecipeTests:
     """Keep local host changes explicit and unable to replace pinned source."""
 
     @staticmethod
@@ -38,98 +37,89 @@ class HostRecipeTests(unittest.TestCase):
             "self_test": True,
         }
 
-    def test_make_archive_declares_local_copies_patches_and_self_test(self) -> None:
+    @pytest.mark.parametrize("field", ["copies", "patches", "self_test"])
+    def test_make_archive_declares_local_copies_patches_and_self_test(self, field: str) -> None:
         """A host binary cannot silently omit a project-owned source input or self-test."""
         recipe = self.make_archive_recipe()
 
-        self.assertEqual(platforms.validate_host_tool(recipe, 0), recipe)
-        for field in ("copies", "patches", "self_test"):
-            incomplete = dict(recipe)
-            del incomplete[field]
-            with (
-                self.subTest(field=field),
-                self.assertRaisesRegex(SystemExit, "must contain exactly"),
-            ):
-                platforms.validate_host_tool(incomplete, 0)
+        assert (platforms.validate_host_tool(recipe, 0)) == (recipe)
+        incomplete = dict(recipe)
+        del incomplete[field]
+        with pytest.raises(SystemExit, match="must contain exactly"):
+            platforms.validate_host_tool(incomplete, 0)
 
-    def test_project_copy_cannot_replace_an_existing_projected_file(self) -> None:
+    @staticmethod
+    def test_project_copy_cannot_replace_an_existing_projected_file(tmp_path: Path) -> None:
         """A second project copy cannot replace an existing file in the projection."""
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            source = root / "upstream"
-            source.mkdir()
-            local_input = root / "platforms/demo/local-input.h"
-            local_input.parent.mkdir(parents=True)
-            local_input.write_bytes(b"local input\n")
+        root = tmp_path
+        source = root / "upstream"
+        source.mkdir()
+        local_input = root / "platforms/demo/local-input.h"
+        local_input.parent.mkdir(parents=True)
+        local_input.write_bytes(b"local input\n")
 
-            with mock.patch.object(common, "ROOT", root):
+        with mock.patch.object(common, "ROOT", root):
+            host_build.copy_host_project_files(
+                source,
+                [{"source": "platforms/demo/local-input.h", "destination": "local-input.h"}],
+            )
+            assert ((source / "local-input.h").read_bytes()) == (b"local input\n")
+            with pytest.raises(SystemExit, match="collides with verified source"):
                 host_build.copy_host_project_files(
                     source,
-                    [{"source": "platforms/demo/local-input.h", "destination": "local-input.h"}],
+                    [
+                        {
+                            "source": "platforms/demo/local-input.h",
+                            "destination": "local-input.h",
+                        }
+                    ],
                 )
-                self.assertEqual((source / "local-input.h").read_bytes(), b"local input\n")
-                with self.assertRaisesRegex(SystemExit, "collides with verified source"):
-                    host_build.copy_host_project_files(
-                        source,
-                        [
-                            {
-                                "source": "platforms/demo/local-input.h",
-                                "destination": "local-input.h",
-                            }
-                        ],
-                    )
 
-    def test_repeated_projection_starts_fresh_and_requests_self_test(self) -> None:
+    def test_repeated_projection_starts_fresh_and_requests_self_test(self, tmp_path: Path) -> None:
         """With command stubs, each projection starts clean and requests --self-test."""
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            archive = root / "bridge.tar.gz"
-            archived_source = root / "archive-source.c"
-            archived_source.write_bytes(b"upstream\n")
-            with tarfile.open(archive, "w:gz") as tar:
-                tar.add(archived_source, arcname="bridge-deadbeef/bridge.c")
-            local_input = root / "platforms/demo/local-input.h"
-            local_input.parent.mkdir(parents=True)
-            local_input.write_bytes(b"local input\n")
-            work = root / "work"
-            output = root / "output"
-            work.mkdir()
-            recipe = self.make_archive_recipe()
-            recipe["patches"] = []
-            sources = {
-                "bridge-source": {
-                    "archive_url": "https://example.invalid/bridge.tar.gz",
-                    "archive_sha256": "0" * 64,
-                    "commit": "deadbeef",
-                    "files": {
-                        "bridge_c_sha256": hashlib.sha256(b"upstream\n").hexdigest(),
-                    },
-                }
+        root = tmp_path
+        archive = root / "bridge.tar.gz"
+        archived_source = root / "archive-source.c"
+        archived_source.write_bytes(b"upstream\n")
+        with tarfile.open(archive, "w:gz") as tar:
+            tar.add(archived_source, arcname="bridge-deadbeef/bridge.c")
+        local_input = root / "platforms/demo/local-input.h"
+        local_input.parent.mkdir(parents=True)
+        local_input.write_bytes(b"local input\n")
+        work = root / "work"
+        output = root / "output"
+        work.mkdir()
+        recipe = self.make_archive_recipe()
+        recipe["patches"] = []
+        sources = {
+            "bridge-source": {
+                "archive_url": "https://example.invalid/bridge.tar.gz",
+                "archive_sha256": "0" * 64,
+                "commit": "deadbeef",
+                "files": {
+                    "bridge_c_sha256": hashlib.sha256(b"upstream\n").hexdigest(),
+                },
             }
+        }
 
-            def build_binary(command: list[str], **_kwargs: object) -> None:
-                if command[0] == "make":
-                    source = Path(command[2])
-                    (source / "bridge").write_bytes(
-                        (source / "bridge.c").read_bytes()
-                        + (source / "local-input.h").read_bytes()
-                    )
-                    return
-                self.assertEqual(command[1:], ["--self-test"])
-                self.assertTrue(Path(command[0]).is_file())
+        def build_binary(command: list[str], **_kwargs: object) -> None:
+            if command[0] == "make":
+                source = Path(command[2])
+                (source / "bridge").write_bytes(
+                    (source / "bridge.c").read_bytes() + (source / "local-input.h").read_bytes()
+                )
+                return
+            assert (command[1:]) == (["--self-test"])
+            assert Path(command[0]).is_file()
 
-            with (
-                mock.patch.object(common, "ROOT", root),
-                mock.patch.object(sources_build, "fetch", return_value=archive),
-                mock.patch.object(process_build, "run", side_effect=build_binary) as run,
-            ):
-                first = host_build.build_make_host_tool(sources, recipe, work, output)
-                second = host_build.build_make_host_tool(sources, recipe, work, output)
+        with (
+            mock.patch.object(common, "ROOT", root),
+            mock.patch.object(sources_build, "fetch", return_value=archive),
+            mock.patch.object(process_build, "run", side_effect=build_binary) as run,
+        ):
+            first = host_build.build_make_host_tool(sources, recipe, work, output)
+            second = host_build.build_make_host_tool(sources, recipe, work, output)
 
-            self.assertEqual(first, second)
-            self.assertEqual(second.read_bytes(), b"upstream\nlocal input\n")
-            self.assertEqual(run.call_count, 4)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert (first) == (second)
+        assert (second.read_bytes()) == (b"upstream\nlocal input\n")
+        assert (run.call_count) == (4)

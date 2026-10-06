@@ -6,26 +6,32 @@ from __future__ import annotations
 import hashlib
 import io
 import tempfile
-import unittest
 import urllib.error
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import mock
 
+import pytest
 from fplinux_cli.alpine import packages as alpine_builder
 from fplinux_cli.build import sources as sources_build
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
-class BuilderFetchTests(unittest.TestCase):
+
+class BuilderFetchTests:
     """A failed refresh must not remove an older verified or inspectable cache file."""
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def cache_entry(self) -> Iterator[None]:
         """Create an existing cache entry whose contents must survive failures."""
         self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.cache = Path(self.temporary.name) / "downloads"
-        self.destination = self.cache / "linux.tar.xz"
-        self.cache.mkdir()
-        self.destination.write_bytes(b"old bytes\n")
+        with self.temporary:
+            self.cache = Path(self.temporary.name) / "downloads"
+            self.destination = self.cache / "linux.tar.xz"
+            self.cache.mkdir()
+            self.destination.write_bytes(b"old bytes\n")
+            yield
 
     def test_network_failure_preserves_the_previous_destination(self) -> None:
         """Network errors leave the previous cache entry untouched."""
@@ -35,13 +41,13 @@ class BuilderFetchTests(unittest.TestCase):
                 "fplinux_cli.build.sources.urllib.request.urlopen",
                 side_effect=urllib.error.URLError("offline"),
             ),
-            self.assertRaises(urllib.error.URLError),
+            pytest.raises(urllib.error.URLError),
         ):
             sources_build.fetch(
                 "https://example.invalid/linux.tar.xz", expected, self.cache, "linux.tar.xz"
             )
 
-        self.assertEqual(self.destination.read_bytes(), b"old bytes\n")
+        assert (self.destination.read_bytes()) == (b"old bytes\n")
 
     def test_digest_failure_preserves_the_previous_destination(self) -> None:
         """Digest mismatches leave the previous cache entry untouched."""
@@ -49,13 +55,13 @@ class BuilderFetchTests(unittest.TestCase):
         response = io.BytesIO(b"wrong bytes\n")
         with (
             mock.patch("fplinux_cli.build.sources.urllib.request.urlopen", return_value=response),
-            self.assertRaises(SystemExit),
+            pytest.raises(SystemExit),
         ):
             sources_build.fetch(
                 "https://example.invalid/linux.tar.xz", expected, self.cache, "linux.tar.xz"
             )
 
-        self.assertEqual(self.destination.read_bytes(), b"old bytes\n")
+        assert (self.destination.read_bytes()) == (b"old bytes\n")
 
     def test_verified_download_replaces_destination_after_digest_match(self) -> None:
         """Only a verified temporary download replaces the cache entry."""
@@ -67,11 +73,11 @@ class BuilderFetchTests(unittest.TestCase):
                 "https://example.invalid/linux.tar.xz", expected, self.cache, "linux.tar.xz"
             )
 
-        self.assertEqual(result, self.destination)
-        self.assertEqual(self.destination.read_bytes(), expected_bytes)
+        assert (result) == (self.destination)
+        assert (self.destination.read_bytes()) == (expected_bytes)
 
 
-class AlpineArtifactFetchTests(unittest.TestCase):
+class AlpineArtifactFetchTests:
     """Locked Alpine consumers keep exact bytes, size checks and cache reuse."""
 
     def test_locked_package_download_is_reused_without_network(self) -> None:
@@ -91,21 +97,15 @@ class AlpineArtifactFetchTests(unittest.TestCase):
                 package = alpine_builder._locked_alpine_artifact(  # noqa: SLF001
                     lock, records, "example.apk", cache=cache
                 )
-            self.assertEqual(package.read_bytes(), contents)
+            assert (package.read_bytes()) == (contents)
             with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")):
                 reused = alpine_builder._locked_alpine_artifact(  # noqa: SLF001
                     lock, records, "example.apk", cache=cache
                 )
-            self.assertEqual(reused, package)
+            assert (reused) == (package)
 
             records["example.apk"]["bytes"] = 1
-            with self.assertRaisesRegex(
-                SystemExit, "Alpine package size mismatch for example.apk"
-            ):
+            with pytest.raises(SystemExit, match=r"Alpine package size mismatch for example.apk"):
                 alpine_builder._locked_alpine_artifact(  # noqa: SLF001
                     lock, records, "example.apk", cache=cache
                 )
-
-
-if __name__ == "__main__":
-    unittest.main()

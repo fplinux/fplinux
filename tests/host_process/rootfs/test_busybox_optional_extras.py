@@ -7,8 +7,9 @@ import shutil
 import stat
 import subprocess
 import tempfile
-import unittest
 from pathlib import Path
+
+import pytest
 
 from tests import ROOT
 from tests.apk_support import ApkIdentity, signed_apk_tree
@@ -68,11 +69,11 @@ def _stage_core(temporary: Path) -> Path:
     return stage
 
 
-@unittest.skipUnless(
-    shutil.which("apk") and shutil.which("openssl"),
-    "native apk and openssl are required for signed APK process tests",
+@pytest.mark.skipif(
+    not (shutil.which("apk") and shutil.which("openssl")),
+    reason="native apk and openssl are required for signed APK process tests",
 )
-class BusyBoxOptionalExtrasTests(unittest.TestCase):
+class BusyBoxOptionalExtrasTests:
     """Protect optional configuration ownership; no BusyBox applets or phone are tested."""
 
     def test_extras_installs_default_configuration_without_replacing_core(self) -> None:
@@ -80,8 +81,8 @@ class BusyBoxOptionalExtrasTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)
             core = _stage_core(temporary)
-            self.assertEqual((core / "bin/busybox").read_bytes(), CORE_PAYLOAD)
-            self.assertEqual(stat.S_IMODE((core / "bin/busybox").stat().st_mode), 0o755)
+            assert ((core / "bin/busybox").read_bytes()) == (CORE_PAYLOAD)
+            assert (stat.S_IMODE((core / "bin/busybox").stat().st_mode)) == (0o755)
             extra = temporary / "extras-stage"
             (extra / "etc").mkdir(parents=True)
             (extra / "etc/udhcpd.conf").write_bytes(EXTRAS_CONFIG)
@@ -156,7 +157,7 @@ class BusyBoxOptionalExtrasTests(unittest.TestCase):
                 check=False,
                 timeout=10,
             )
-            self.assertEqual(installed.returncode, 0, installed.stdout + installed.stderr)
+            assert (installed.returncode) == (0), installed.stdout + installed.stderr
             simulated = subprocess.run(
                 [*command, "add", "--simulate", str(extra_apk)],
                 capture_output=True,
@@ -164,7 +165,7 @@ class BusyBoxOptionalExtrasTests(unittest.TestCase):
                 check=False,
                 timeout=10,
             )
-            self.assertEqual(simulated.returncode, 0, simulated.stdout + simulated.stderr)
+            assert (simulated.returncode) == (0), simulated.stdout + simulated.stderr
             added = subprocess.run(
                 [*command, "add", str(extra_apk)],
                 capture_output=True,
@@ -172,11 +173,11 @@ class BusyBoxOptionalExtrasTests(unittest.TestCase):
                 check=False,
                 timeout=10,
             )
-            self.assertEqual(added.returncode, 0, added.stdout + added.stderr)
-            self.assertEqual((sysroot / "etc/udhcpd.conf").read_bytes(), EXTRAS_CONFIG)
-            self.assertEqual((sysroot / "bin/busybox-extras").read_bytes(), EXTRAS_PAYLOAD)
-            self.assertEqual((sysroot / "bin/busybox").read_bytes(), CORE_PAYLOAD)
-            self.assertEqual(stat.S_IMODE((sysroot / "bin/busybox").stat().st_mode), 0o755)
+            assert (added.returncode) == (0), added.stdout + added.stderr
+            assert ((sysroot / "etc/udhcpd.conf").read_bytes()) == (EXTRAS_CONFIG)
+            assert ((sysroot / "bin/busybox-extras").read_bytes()) == (EXTRAS_PAYLOAD)
+            assert ((sysroot / "bin/busybox").read_bytes()) == (CORE_PAYLOAD)
+            assert (stat.S_IMODE((sysroot / "bin/busybox").stat().st_mode)) == (0o755)
             removed = subprocess.run(
                 [*command, "del", "busybox-extras"],
                 capture_output=True,
@@ -184,11 +185,7 @@ class BusyBoxOptionalExtrasTests(unittest.TestCase):
                 check=False,
                 timeout=10,
             )
-            self.assertEqual(removed.returncode, 0, removed.stdout + removed.stderr)
-            self.assertFalse((sysroot / "etc/udhcpd.conf").exists())
-            self.assertEqual((sysroot / "bin/busybox").read_bytes(), CORE_PAYLOAD)
-            self.assertEqual(stat.S_IMODE((sysroot / "bin/busybox").stat().st_mode), 0o755)
-
-
-if __name__ == "__main__":
-    unittest.main()
+            assert (removed.returncode) == (0), removed.stdout + removed.stderr
+            assert not ((sysroot / "etc/udhcpd.conf").exists())
+            assert ((sysroot / "bin/busybox").read_bytes()) == (CORE_PAYLOAD)
+            assert (stat.S_IMODE((sysroot / "bin/busybox").stat().st_mode)) == (0o755)

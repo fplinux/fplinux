@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 from unittest import mock
 
@@ -15,7 +14,7 @@ from tests.process import run_process
 _GIT_TIMEOUT_SECONDS = 10
 
 
-class WorkspaceGitInventoryTests(unittest.TestCase):
+class WorkspaceGitInventoryTests:
     """Run the Git inventory consumer against a real temporary repository."""
 
     def test_quality_inventory_uses_git_excludes(self) -> None:
@@ -27,7 +26,7 @@ class WorkspaceGitInventoryTests(unittest.TestCase):
                 name="temporary Git initialization",
                 timeout=_GIT_TIMEOUT_SECONDS,
             )
-            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            assert (initialized.returncode) == (0), initialized.stderr
             source = root / "source.py"
             source.write_text("source\n", encoding="utf-8")
             local = root / "local-tools/settings.json"
@@ -39,13 +38,9 @@ class WorkspaceGitInventoryTests(unittest.TestCase):
                 name="temporary Git add",
                 timeout=_GIT_TIMEOUT_SECONDS,
             )
-            self.assertEqual(added.returncode, 0, added.stderr)
+            assert (added.returncode) == (0), added.stderr
 
             with mock.patch.object(workspace_module, "ROOT", root):
                 files = workspace_module.quality_files(enforce_source_policy=True)
 
-            self.assertEqual(files, [("source.py", source)])
-
-
-if __name__ == "__main__":
-    unittest.main()
+            assert (files) == ([("source.py", source)])

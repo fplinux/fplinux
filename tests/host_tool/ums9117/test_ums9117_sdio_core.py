@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 
 from tests import ROOT
@@ -15,7 +14,7 @@ HARNESS = ROOT / "tests/host_tool/ums9117/ums9117-sdio-core.c"
 COMPAT = ROOT / "tests/host_tool/ums9117/ums9117-sdio-compat"
 
 
-class Ums9117SdioCoreTests(unittest.TestCase):
+class Ums9117SdioCoreTests:
     """Link the production core to a fake MMIO/timer hardware boundary."""
 
     def test_controller_sequences_and_fail_closed_boundaries(self) -> None:
@@ -45,12 +44,4 @@ class Ums9117SdioCoreTests(unittest.TestCase):
                 name="run UMS9117 SDIO core harness",
                 timeout=30,
             )
-        self.assertEqual(
-            result.returncode,
-            0,
-            msg=f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
-        )
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert (result.returncode) == (0), f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"

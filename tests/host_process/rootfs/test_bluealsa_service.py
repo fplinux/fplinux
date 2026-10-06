@@ -6,7 +6,6 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
-import unittest
 from pathlib import Path
 
 from tests import ROOT
@@ -15,7 +14,7 @@ SERVICE = ROOT / "alpine/aports/fplinux-bluealsa/bluealsa.initd"
 ENDPOINT = ROOT / "tests/fixtures/processes/dbus_reload_endpoint.py"
 
 
-class BluealsaServiceHookTests(unittest.TestCase):
+class BluealsaServiceHookTests:
     """Observe hook results; the fake does not establish real bus or daemon behavior."""
 
     def run_hook(
@@ -46,9 +45,9 @@ class BluealsaServiceHookTests(unittest.TestCase):
 
             result = self.run_hook(temporary, reject_reload=False)
 
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual((temporary / "policy-ready").read_text(), "ready\n")
-            self.assertEqual(result.stdout, "")
+            assert (result.returncode) == (0), result.stderr
+            assert ((temporary / "policy-ready").read_text()) == ("ready\n")
+            assert (result.stdout) == ("")
 
     def test_reload_rejection_is_returned_to_the_caller(self) -> None:
         """A rejected reload must stay visible instead of being swallowed."""
@@ -57,6 +56,6 @@ class BluealsaServiceHookTests(unittest.TestCase):
 
             result = self.run_hook(temporary, reject_reload=True)
 
-            self.assertEqual(result.returncode, 42)
-            self.assertIn("policy reload rejected", result.stderr)
-            self.assertFalse((temporary / "policy-ready").exists())
+            assert (result.returncode) == (42)
+            assert ("policy reload rejected") in (result.stderr)
+            assert not ((temporary / "policy-ready").exists())

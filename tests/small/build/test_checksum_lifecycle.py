@@ -5,8 +5,6 @@ from __future__ import annotations
 
 import contextlib
 import io
-import tempfile
-import unittest
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
@@ -15,6 +13,7 @@ import fplinux_cli.cli.checksum as checksum_commands
 import fplinux_cli.environment.kern as kern_env
 import fplinux_cli.reporting.run as output
 import fplinux_cli.workspace.build_inputs as workspace_inputs
+import pytest
 from fplinux_cli import common
 from fplinux_cli.environment import image_store, images
 from fplinux_cli.environment.image_state import ImageState
@@ -24,7 +23,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-class ChecksumAportTests(unittest.TestCase):
+class ChecksumAportTests:
     """Publish only validated checksum-block changes from an isolated OCI stage."""
 
     PACKAGE = "synthetic-checksum-aport"
@@ -46,11 +45,10 @@ class ChecksumAportTests(unittest.TestCase):
         b'sha512sums="\nnew-local  local.c\n"\n',
     )
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _canonical_aport(self, tmp_path: Path) -> None:
         """Create one canonical aport with an ordinary local source."""
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        self.root = tmp_path
         self.aport = self.root / "alpine/aports" / self.PACKAGE
         self.aport.mkdir(parents=True)
         self.apkbuild = self.aport / "APKBUILD"
@@ -88,7 +86,8 @@ class ChecksumAportTests(unittest.TestCase):
                 lambda: checksum_commands.checksum_aport(self.PACKAGE, offline=True)
             )
 
-    def _staged_apkbuild(self, command: list[str]) -> Path:
+    @staticmethod
+    def _staged_apkbuild(command: list[str]) -> Path:
         """Resolve the private aport through the OCI workspace mount boundary."""
         workspace_sources: list[Path] = []
         for index, argument in enumerate(command[:-1]):
@@ -97,7 +96,7 @@ class ChecksumAportTests(unittest.TestCase):
             mount = command[index + 1].split(":")
             if len(mount) >= 2 and mount[1] == "/workspace":
                 workspace_sources.append(Path(mount[0]))
-        self.assertEqual(len(workspace_sources), 1)
+        assert (len(workspace_sources)) == (1)
 
         workdir_index = command.index("--workdir")
         container_workdir = Path(command[workdir_index + 1])
@@ -114,10 +113,10 @@ class ChecksumAportTests(unittest.TestCase):
 
         self._run(generate)
 
-        self.assertEqual(self.apkbuild.read_bytes(), self.AFTER_APKBUILD)
-        self.assertEqual(self.apkbuild.stat().st_mode & 0o777, 0o640)
-        self.assertNotEqual(self.apkbuild.stat().st_ino, inode_before)
-        self.assertEqual(list(self.aport.glob(".APKBUILD.*")), [])
+        assert (self.apkbuild.read_bytes()) == (self.AFTER_APKBUILD)
+        assert (self.apkbuild.stat().st_mode & 0o777) == (0o640)
+        assert (self.apkbuild.stat().st_ino) != (inode_before)
+        assert (list(self.aport.glob(".APKBUILD.*"))) == ([])
 
     def test_container_shares_downloads_and_keeps_the_stage_private(self) -> None:
         """Keep the persistent source cache shared without exposing the private stage."""
@@ -130,12 +129,11 @@ class ChecksumAportTests(unittest.TestCase):
                 parts = command[index + 1].split(":")
                 destination = parts[1]
                 mounts[destination] = "ro" if parts[2:] == ["ro"] else "rw"
-            self.assertEqual(
-                mounts,
+            assert (mounts) == (
                 {
                     "/cache/downloads": "rw",
                     "/workspace": "rw",
-                },
+                }
             )
             generated = self._staged_apkbuild(command)
             generated.write_bytes(self.AFTER_APKBUILD)
@@ -150,14 +148,10 @@ class ChecksumAportTests(unittest.TestCase):
             generated = self._staged_apkbuild(command)
             generated.write_bytes(self.AFTER_APKBUILD.replace(b"pkgver=1\n", b"pkgver=2\n"))
 
-        with self.assertRaises(SystemExit):
+        with pytest.raises(SystemExit):
             self._run(generate_invalid)
 
-        self.assertEqual(self.apkbuild.read_bytes(), self.BEFORE_APKBUILD)
-        self.assertEqual(self.apkbuild.stat().st_mode & 0o777, 0o640)
-        self.assertEqual(self.apkbuild.stat().st_ino, inode_before)
-        self.assertEqual(list(self.aport.glob(".APKBUILD.*")), [])
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert (self.apkbuild.read_bytes()) == (self.BEFORE_APKBUILD)
+        assert (self.apkbuild.stat().st_mode & 0o777) == (0o640)
+        assert (self.apkbuild.stat().st_ino) == (inode_before)
+        assert (list(self.aport.glob(".APKBUILD.*"))) == ([])

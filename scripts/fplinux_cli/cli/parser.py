@@ -171,7 +171,7 @@ def create_parser(
         help="check the selected global profile (default: default)",
     )
     test_parser = commands.add_parser(
-        "test", help="run selected unittest tests in the pinned environment"
+        "test", help="run selected pytest tests in the pinned environment"
     )
     add_test_arguments(test_parser)
     logs_parser = commands.add_parser("logs", help="list, inspect or follow recorded command logs")

@@ -9,42 +9,50 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
-import unittest
+from contextlib import ExitStack
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest import mock
 
+import pytest
 from fplinux_cli import common
 from fplinux_cli.build import sources as sources_build
 from fplinux_cli.build.storage import stage as storage_build
 from fplinux_cli.build.storage import uboot as uboot_tools
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 from tests import ROOT
 
 UBOOT_FIXTURES = ROOT / "tests/fixtures/uboot_tools"
 
 
-class UbootToolsTests(unittest.TestCase):
+class UbootToolsTests:
     """Exercise the producer without claiming a real U-Boot build."""
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _prepare_case(self) -> Iterator[None]:
         """Create the make-compatible external source boundary used by every case."""
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
-        self.required_config = (UBOOT_FIXTURES / "required.config").read_text(encoding="utf-8")
-        source = self.root / "source/u-boot-2026.07"
-        self.prepare_synthetic_source(source)
-        self.defconfig = self.root / "ta1618_defconfig"
-        self.defconfig.write_text(self.required_config, encoding="utf-8")
-        self.build_log = self.root / "build.log"
-        self.projection = self.root / "build-log.sh"
-        shutil.copyfile(UBOOT_FIXTURES / "build-log.sh", self.projection)
-        self.record_builds_in(self.build_log)
-        self.archive = self.archive_synthetic_source(source)
-        self.config = self.full_uboot_config(self.archive)
-        self.work = self.root / "work"
-        self.layout = self.full_uboot_layout()
+        with ExitStack() as cleanup:
+            self.cleanup = cleanup
+            self.temporary = tempfile.TemporaryDirectory()
+            cleanup.enter_context(self.temporary)
+            self.root = Path(self.temporary.name)
+            self.required_config = (UBOOT_FIXTURES / "required.config").read_text(encoding="utf-8")
+            source = self.root / "source/u-boot-2026.07"
+            self.prepare_synthetic_source(source)
+            self.defconfig = self.root / "ta1618_defconfig"
+            self.defconfig.write_text(self.required_config, encoding="utf-8")
+            self.build_log = self.root / "build.log"
+            self.projection = self.root / "build-log.sh"
+            shutil.copyfile(UBOOT_FIXTURES / "build-log.sh", self.projection)
+            self.record_builds_in(self.build_log)
+            self.archive = self.archive_synthetic_source(source)
+            self.config = self.full_uboot_config(self.archive)
+            self.work = self.root / "work"
+            self.layout = self.full_uboot_layout()
+            yield
 
     def record_builds_in(self, build_log: Path) -> None:
         """Expose the per-test build log to the projected fixture program."""
@@ -52,8 +60,7 @@ class UbootToolsTests(unittest.TestCase):
             os.environ,
             {"FPLINUX_TEST_BUILD_LOG": str(build_log)},
         )
-        environment.start()
-        self.addCleanup(environment.stop)
+        self.cleanup.enter_context(environment)
 
     def archive_synthetic_source(self, source: Path) -> Path:
         """Create the compressed source input with the standard tar implementation."""
@@ -127,16 +134,16 @@ class UbootToolsTests(unittest.TestCase):
         first = self._build()
         first_binary = first.binary.read_bytes()
 
-        self.assertEqual(first.elf.read_bytes()[:4], b"\x7fELF")
-        self.assertEqual(first.config.read_text(encoding="utf-8"), self.required_config)
-        self.assertEqual(self._build_log_lines(), ["build"])
+        assert (first.elf.read_bytes()[:4]) == (b"\x7fELF")
+        assert (first.config.read_text(encoding="utf-8")) == (self.required_config)
+        assert (self._build_log_lines()) == (["build"])
 
         (self.root / "unrelated-sibling.txt").write_text("unchanged input\n", encoding="utf-8")
         reused = self._build(jobs=8)
 
-        self.assertEqual(reused.receipt, first.receipt)
-        self.assertEqual(reused.binary.read_bytes(), first_binary)
-        self.assertEqual(self._build_log_lines(), ["build"])
+        assert (reused.receipt) == (first.receipt)
+        assert (reused.binary.read_bytes()) == (first_binary)
+        assert (self._build_log_lines()) == (["build"])
 
     def test_defconfig_miss_and_invalid_cached_outputs_rebuild(self) -> None:
         """One declared input changes the result, while missing or altered outputs revoke reuse."""
@@ -147,21 +154,21 @@ class UbootToolsTests(unittest.TestCase):
         )
 
         changed = self._build()
-        self.assertNotEqual(changed.receipt, first.receipt)
-        self.assertIn("CONFIG_TEST_INPUT=two\n", changed.config.read_text(encoding="utf-8"))
-        self.assertEqual(self._build_log_lines(), ["build", "build"])
+        assert (changed.receipt) != (first.receipt)
+        assert ("CONFIG_TEST_INPUT=two\n") in (changed.config.read_text(encoding="utf-8"))
+        assert (self._build_log_lines()) == (["build", "build"])
 
         changed.binary.write_bytes(b"tampered")
         rebuilt = self._build()
-        self.assertEqual(rebuilt.receipt, changed.receipt)
-        self.assertEqual(rebuilt.binary.read_bytes(), b"binary")
-        self.assertEqual(self._build_log_lines(), ["build", "build", "build"])
+        assert (rebuilt.receipt) == (changed.receipt)
+        assert (rebuilt.binary.read_bytes()) == (b"binary")
+        assert (self._build_log_lines()) == (["build", "build", "build"])
 
         rebuilt.map.unlink()
         restored = self._build()
-        self.assertEqual(restored.receipt, changed.receipt)
-        self.assertTrue(restored.map.is_file())
-        self.assertEqual(self._build_log_lines(), ["build", "build", "build", "build"])
+        assert (restored.receipt) == (changed.receipt)
+        assert restored.map.is_file()
+        assert (self._build_log_lines()) == (["build", "build", "build", "build"])
 
     def test_failed_changed_recipe_preserves_previous_complete_output_and_receipt(self) -> None:
         """A failed replacement leaves every last-good output and its receipt intact."""
@@ -182,29 +189,40 @@ class UbootToolsTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        with self.assertRaises(subprocess.CalledProcessError):
+        with pytest.raises(subprocess.CalledProcessError):
             self._build()
 
         after = {name: path.read_bytes() for name, path in visible_outputs.items()}
-        self.assertEqual(after, before)
-        self.assertEqual(self._build_log_lines(), ["build"])
+        assert (after) == (before)
+        assert (self._build_log_lines()) == (["build"])
 
-    def test_writable_or_unverified_config_cannot_replace_complete_output(self) -> None:
-        """The producer rejects unsafe compiled configs before publishing them."""
-        current = self._build()
-        before = current.config.read_bytes()
-        for previous, unsafe in (
+    @pytest.mark.parametrize(
+        ("previous", "unsafe"),
+        [
             ("# CONFIG_MMC_WRITE is not set", "CONFIG_MMC_WRITE=y"),
             ("CONFIG_ENV_IS_NOWHERE=y", "CONFIG_ENV_IS_IN_FAT=y"),
             ("CONFIG_FIT_FULL_CHECK=y", "# CONFIG_FIT_FULL_CHECK is not set"),
             ("CONFIG_TARGET_DEMO_BOARD=y", "CONFIG_TARGET_OTHER_BOARD=y"),
             ('CONFIG_BOOTCOMMAND="demoboot"', 'CONFIG_BOOTCOMMAND="otherboot"'),
-        ):
-            with self.subTest(config=unsafe):
-                self.defconfig.write_text(self.required_config.replace(previous, unsafe))
-                with self.assertRaisesRegex(uboot_tools.UbootToolsError, "read-only MMC contract"):
-                    self._build()
-                self.assertEqual(current.config.read_bytes(), before)
+        ],
+        ids=[
+            "mmc-write",
+            "persistent-environment",
+            "unchecked-fit",
+            "wrong-board",
+            "wrong-boot-command",
+        ],
+    )
+    def test_writable_or_unverified_config_cannot_replace_complete_output(
+        self, previous: str, unsafe: str
+    ) -> None:
+        """The producer rejects unsafe compiled configs before publishing them."""
+        current = self._build()
+        before = current.config.read_bytes()
+        self.defconfig.write_text(self.required_config.replace(previous, unsafe))
+        with pytest.raises(uboot_tools.UbootToolsError, match="read-only MMC contract"):
+            self._build()
+        assert (current.config.read_bytes()) == (before)
 
     def test_profile_preparation_emits_the_selected_target_identity(self) -> None:
         """A C preprocessor in the synthetic build consumes the chosen target name."""
@@ -254,18 +272,13 @@ class UbootToolsTests(unittest.TestCase):
                 },
             }
             with (
-                self.subTest(target=target),
                 mock.patch.object(common, "ROOT", self.root),
                 mock.patch.object(sources_build, "fetch", return_value=self.archive),
                 mock.patch.dict(os.environ, {"FPLINUX_CONTAINER_IMAGE_RECIPE": "a" * 64}),
             ):
                 built = storage_build.build_profile_uboot(target, target_config, self.work, 1)
                 if built is None:
-                    self.fail("configured U-Boot build did not produce an artifact")
-                self.assertEqual(built.dtb.read_bytes().strip(), f'"{target}"'.encode("ascii"))
+                    pytest.fail("configured U-Boot build did not produce an artifact")
+                assert (built.dtb.read_bytes().strip()) == (f'"{target}"'.encode("ascii"))
                 receipts.append(built.receipt["recipe"])
-        self.assertEqual(len(set(receipts)), 3)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert (len(set(receipts))) == (3)

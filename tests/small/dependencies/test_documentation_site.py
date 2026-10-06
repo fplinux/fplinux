@@ -4,10 +4,10 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 
 import check as source_check
+import pytest
 import site_collect
 
 
@@ -19,7 +19,7 @@ def write_files(root: Path, files: dict[str, str]) -> None:
         path.write_text(text)
 
 
-class SiteCollectionTests(unittest.TestCase):
+class SiteCollectionTests:
     """Publish documentation at its repository paths and nothing else."""
 
     def test_collection_mirrors_documentation_paths_and_drops_stale_files(self) -> None:
@@ -46,17 +46,16 @@ class SiteCollectionTests(unittest.TestCase):
                 for path in destination.rglob("*")
                 if path.is_file()
             }
-            self.assertEqual(
-                collected,
+            assert (collected) == (
                 {
                     "README.md": "# Project\n",
                     "docs/guides/GUIDE.md": "# Guide\n",
                     "targets/phone/README.md": "# Phone\n",
-                },
+                }
             )
 
 
-class SiteNavigationTests(unittest.TestCase):
+class SiteNavigationTests:
     """Require every published page to have a deliberate place in the site navigation."""
 
     def test_page_outside_nav_is_rejected_until_listed_or_marked_not_in_nav(self) -> None:
@@ -76,7 +75,7 @@ class SiteNavigationTests(unittest.TestCase):
             nav = "nav:\n  - Home: README.md\n  - Guides:\n      - docs/guides/GUIDE.md\n"
 
             config.write_text(nav)
-            with self.assertRaisesRegex(SystemExit, r"mkdocs\.yml nav: docs/notes/DRAFT\.md$"):
+            with pytest.raises(SystemExit, match=r"mkdocs\.yml nav: docs/notes/DRAFT\.md$"):
                 source_check.check_site_navigation(root)
 
             config.write_text(nav + "  - Draft: docs/notes/DRAFT.md\n")
@@ -84,7 +83,3 @@ class SiteNavigationTests(unittest.TestCase):
 
             config.write_text(nav + "not_in_nav: |\n  /docs/notes/\n")
             source_check.check_site_navigation(root)
-
-
-if __name__ == "__main__":
-    unittest.main()

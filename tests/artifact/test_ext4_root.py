@@ -7,27 +7,27 @@ import os
 import shutil
 import struct
 import subprocess
-import tempfile
-import unittest
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+import pytest
 from fplinux_cli.build.storage import ext4 as ext4_root
 from fplinux_cli.common import sha256_file
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-class Ext4RootTests(unittest.TestCase):
+
+class Ext4RootTests:
     """Build and inspect ext4 images through the real filesystem tools."""
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _prepare_inputs(self, tmp_path: Path) -> None:
         """Create one small normalized root tree and ext4 profile."""
         required = ("mke2fs", "e2fsck", "debugfs")
         missing = [name for name in required if shutil.which(name) is None]
         if missing:
-            self.fail("quality image lacks required ext4 tools: " + ", ".join(missing))
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+            pytest.fail("quality image lacks required ext4 tools: " + ", ".join(missing))
+        self.root = tmp_path
         self.source = self.root / "normalized-root"
         (self.source / "etc").mkdir(parents=True)
         self.os_release = self.source / "etc/os-release"
@@ -72,7 +72,7 @@ class Ext4RootTests(unittest.TestCase):
             check=False,
             timeout=30,
         )
-        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        assert (result.returncode) == (0), result.stderr or result.stdout
         return dumped.read_bytes()
 
     def test_builds_a_valid_ext4_artifact(self) -> None:
@@ -80,11 +80,11 @@ class Ext4RootTests(unittest.TestCase):
         plan = self.plan()
         image = self.build(plan)
 
-        self.assertEqual(image, self.output / "FPLROOT.ext4")
-        self.assertEqual(image.stat().st_size, self.spec["size"])
+        assert (image) == (self.output / "FPLROOT.ext4")
+        assert (image.stat().st_size) == (self.spec["size"])
         with image.open("rb") as stream:
             stream.seek(1024 + 56)
-            self.assertEqual(struct.unpack("<H", stream.read(2))[0], 0xEF53)
+            assert (struct.unpack("<H", stream.read(2))[0]) == (0xEF53)
         checked = subprocess.run(
             ["e2fsck", "-f", "-n", str(image)],
             capture_output=True,
@@ -92,9 +92,9 @@ class Ext4RootTests(unittest.TestCase):
             check=False,
             timeout=30,
         )
-        self.assertEqual(checked.returncode, 0, checked.stderr or checked.stdout)
-        self.assertEqual(self.dump_os_release(image), self.os_release.read_bytes())
-        self.assertTrue(ext4_root.cache_hit(self.output, plan))
+        assert (checked.returncode) == (0), checked.stderr or checked.stdout
+        assert (self.dump_os_release(image)) == (self.os_release.read_bytes())
+        assert ext4_root.cache_hit(self.output, plan)
 
     def test_changed_rootfs_identity_misses_then_replaces_the_receipt(self) -> None:
         """One named rootfs identity change invalidates this ext4 cache entry."""
@@ -104,13 +104,12 @@ class Ext4RootTests(unittest.TestCase):
 
         changed = self.plan("d" * 64)
 
-        self.assertFalse(ext4_root.cache_hit(self.output, changed))
+        assert not (ext4_root.cache_hit(self.output, changed))
         self.build(changed)
-        self.assertTrue(ext4_root.cache_hit(self.output, changed))
-        self.assertNotEqual(before, sha256_file(self.output / ext4_root.RECEIPT_NAME))
-        self.assertEqual(
-            self.dump_os_release(self.output / self.spec["filename"]),
-            self.os_release.read_bytes(),
+        assert ext4_root.cache_hit(self.output, changed)
+        assert (before) != (sha256_file(self.output / ext4_root.RECEIPT_NAME))
+        assert (self.dump_os_release(self.output / self.spec["filename"])) == (
+            self.os_release.read_bytes()
         )
 
     def test_missing_and_tampered_images_are_rebuilt(self) -> None:
@@ -118,15 +117,15 @@ class Ext4RootTests(unittest.TestCase):
         plan = self.plan()
         image = self.build(plan)
         image.unlink()
-        self.assertFalse(ext4_root.cache_hit(self.output, plan))
+        assert not (ext4_root.cache_hit(self.output, plan))
 
         image = self.build(plan)
         image.write_bytes(b"tampered\n")
-        self.assertFalse(ext4_root.cache_hit(self.output, plan))
+        assert not (ext4_root.cache_hit(self.output, plan))
 
         rebuilt = self.build(plan)
-        self.assertTrue(ext4_root.cache_hit(self.output, plan))
-        self.assertEqual(self.dump_os_release(rebuilt), self.os_release.read_bytes())
+        assert ext4_root.cache_hit(self.output, plan)
+        assert (self.dump_os_release(rebuilt)) == (self.os_release.read_bytes())
 
     def test_rejected_root_tree_preserves_previous_complete_artifact(self) -> None:
         """A validation failure before publication leaves the prior image reusable."""
@@ -137,15 +136,11 @@ class Ext4RootTests(unittest.TestCase):
         try:
             os.setxattr(self.os_release, "user.fplinux-test", b"unsupported")
         except OSError as error:
-            self.skipTest(f"filesystem cannot create a test xattr: {error}")
+            pytest.skip(f"filesystem cannot create a test xattr: {error}")
 
-        with self.assertRaisesRegex(ext4_root.Ext4RootError, "xattrs"):
+        with pytest.raises(ext4_root.Ext4RootError, match="xattrs"):
             self.build(plan)
 
-        self.assertEqual(image.read_bytes(), prior_image)
-        self.assertEqual((self.output / ext4_root.RECEIPT_NAME).read_bytes(), prior_receipt)
-        self.assertTrue(ext4_root.cache_hit(self.output, plan))
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert (image.read_bytes()) == (prior_image)
+        assert ((self.output / ext4_root.RECEIPT_NAME).read_bytes()) == (prior_receipt)
+        assert ext4_root.cache_hit(self.output, plan)

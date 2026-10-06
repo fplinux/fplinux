@@ -10,11 +10,11 @@ import json
 import shutil
 import tarfile
 import tempfile
-import unittest
 import zipfile
 from pathlib import Path
 from unittest import mock
 
+import pytest
 from fplinux_cli import common
 from fplinux_cli.dependencies.inputs import environment_inputs
 from fplinux_cli.dependencies.snapshots import preserve_inputs, publish_snapshot, restore_inputs
@@ -94,7 +94,7 @@ def _environment_checkout(root: Path) -> None:
         path.write_bytes(contents)
 
 
-class OfflineRuntimeInputTests(unittest.TestCase):
+class OfflineRuntimeInputTests:
     """Install the pinned runtime from a saved archive and report cache misses."""
 
     def test_saved_archive_installs_the_exact_binary_without_downloading(self) -> None:
@@ -120,38 +120,41 @@ class OfflineRuntimeInputTests(unittest.TestCase):
                 mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")),
             ):
                 installed = Path(kern.install_kern(lock, offline=True))
-            self.assertEqual(installed.read_bytes(), b"static runtime fixture\n")
-            self.assertEqual(installed.stat().st_mode & 0o777, 0o755)
+            assert (installed.read_bytes()) == (b"static runtime fixture\n")
+            assert (installed.stat().st_mode & 0o777) == (0o755)
 
-    def test_missing_exact_runtime_archive_reports_its_url_without_network(self) -> None:
+    @pytest.mark.parametrize(
+        "cached_bytes", [None, b"previous source bytes\n"], ids=["missing", "cached-mismatch"]
+    )
+    def test_missing_exact_runtime_archive_reports_its_url_without_network(
+        self, cached_bytes: bytes | None
+    ) -> None:
         """An unavailable checksum match stops offline installation before downloading."""
-        for cached_bytes in (None, b"previous source bytes\n"):
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+        ):
+            destination = Path(temporary) / "kern.tar.gz"
+            if cached_bytes is not None:
+                destination.write_bytes(cached_bytes)
             with (
-                self.subTest(cached_bytes=cached_bytes),
-                tempfile.TemporaryDirectory() as temporary,
+                mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")),
+                pytest.raises(
+                    SystemExit, match=r"offline locked input.*https://example.invalid/kern.tar.gz"
+                ),
             ):
-                destination = Path(temporary) / "kern.tar.gz"
-                if cached_bytes is not None:
-                    destination.write_bytes(cached_bytes)
-                with (
-                    mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")),
-                    self.assertRaisesRegex(
-                        SystemExit, "offline locked input.*https://example.invalid/kern.tar.gz"
-                    ),
-                ):
-                    downloads.download_locked_file(
-                        "https://example.invalid/kern.tar.gz",
-                        hashlib.sha256(b"new source bytes\n").hexdigest(),
-                        destination,
-                        offline=True,
-                    )
-                if cached_bytes is not None:
-                    self.assertEqual(destination.read_bytes(), b"previous source bytes\n")
-                else:
-                    self.assertFalse(destination.exists())
+                downloads.download_locked_file(
+                    "https://example.invalid/kern.tar.gz",
+                    hashlib.sha256(b"new source bytes\n").hexdigest(),
+                    destination,
+                    offline=True,
+                )
+            if cached_bytes is not None:
+                assert (destination.read_bytes()) == (b"previous source bytes\n")
+            else:
+                assert not (destination.exists())
 
 
-class OfflineEnvironmentContextTests(unittest.TestCase):
+class OfflineEnvironmentContextTests:
     """Stage exact declared bytes while excluding unrelated project cache state."""
 
     def test_declared_schema_wheel_survives_snapshot_restore_and_staging(self) -> None:
@@ -199,11 +202,10 @@ class OfflineEnvironmentContextTests(unittest.TestCase):
                 restore_inputs(snapshot, inputs, {}, cache=restored_root / ".cache")
                 env_setup._stage_container_context(context, offline=True)  # noqa: SLF001
             staged = context / "inputs/sources/dtschema/dtschema-2026.9-py3-none-any.whl"
-            self.assertEqual(staged.read_bytes(), contents)
+            assert (staged.read_bytes()) == (contents)
             with zipfile.ZipFile(staged) as wheel:
-                self.assertEqual(
-                    wheel.read("dtschema-2026.9.dist-info/METADATA"),
-                    b"Metadata-Version: 2.1\nName: dtschema\nVersion: 2026.9\n",
+                assert (wheel.read("dtschema-2026.9.dist-info/METADATA")) == (
+                    b"Metadata-Version: 2.1\nName: dtschema\nVersion: 2026.9\n"
                 )
 
     def test_context_contains_declared_inputs_and_excludes_private_cache(self) -> None:
@@ -217,22 +219,20 @@ class OfflineEnvironmentContextTests(unittest.TestCase):
             with mock.patch.object(env_setup, "ROOT", root):
                 env_setup._stage_container_context(context, offline=True)  # noqa: SLF001
 
-            self.assertEqual(
-                (context / "inputs/sources/tool/tool.tar.gz").read_bytes(), b"tool source\n"
+            assert ((context / "inputs/sources/tool/tool.tar.gz").read_bytes()) == (
+                b"tool source\n"
             )
             npm_archives = list((context / "inputs/npm").glob("*.tgz"))
-            self.assertEqual(len(npm_archives), 1)
-            self.assertEqual(npm_archives[0].read_bytes(), b"npm package\n")
-            self.assertEqual(
-                (context / "inputs/apk/main/x86_64/tool-1.0-r0.apk").read_bytes(),
-                b"signed package fixture\n",
+            assert (len(npm_archives)) == (1)
+            assert (npm_archives[0].read_bytes()) == (b"npm package\n")
+            assert ((context / "inputs/apk/main/x86_64/tool-1.0-r0.apk").read_bytes()) == (
+                b"signed package fixture\n"
             )
-            self.assertEqual(
-                (context / "inputs/apk/main/x86_64/APKINDEX.tar.gz").read_bytes(),
-                b"repository index fixture\n",
+            assert ((context / "inputs/apk/main/x86_64/APKINDEX.tar.gz").read_bytes()) == (
+                b"repository index fixture\n"
             )
-            self.assertFalse((context / ".cache").exists())
-            self.assertFalse((context / "inputs/private").exists())
+            assert not ((context / ".cache").exists())
+            assert not ((context / "inputs/private").exists())
 
     def test_missing_declared_environment_input_names_the_exact_source(self) -> None:
         """Offline staging stops with the requested URL instead of silently omitting a source."""
@@ -245,9 +245,8 @@ class OfflineEnvironmentContextTests(unittest.TestCase):
             (root / ".cache/downloads/environment/tool/tool.tar.gz").unlink()
             with (
                 mock.patch.object(env_setup, "ROOT", root),
-                self.assertRaisesRegex(
-                    SystemExit,
-                    "offline locked input.*https://example.invalid/tool",
+                pytest.raises(
+                    SystemExit, match=r"offline locked input.*https://example.invalid/tool"
                 ),
             ):
                 env_setup._stage_container_context(context, offline=True)  # noqa: SLF001
@@ -269,12 +268,10 @@ class OfflineEnvironmentContextTests(unittest.TestCase):
             )
             with (
                 mock.patch.object(env_setup, "ROOT", root),
-                self.assertRaisesRegex(
-                    SystemExit, "offline locked input is missing or mismatched"
-                ),
+                pytest.raises(SystemExit, match="offline locked input is missing or mismatched"),
             ):
                 env_setup._stage_container_context(context, offline=True)  # noqa: SLF001
-            self.assertFalse((context / "inputs/sources/tool/tool.tar.gz").exists())
+            assert not ((context / "inputs/sources/tool/tool.tar.gz").exists())
 
     def test_online_context_reuses_exact_saved_inputs_without_network(self) -> None:
         """Online setup stages the same locked closure instead of resolving packages again."""
@@ -289,11 +286,11 @@ class OfflineEnvironmentContextTests(unittest.TestCase):
                 mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")),
             ):
                 env_setup._stage_container_context(context, offline=False)  # noqa: SLF001
-            self.assertEqual(
-                (context / "inputs/sources/tool/tool.tar.gz").read_bytes(), b"tool source\n"
+            assert ((context / "inputs/sources/tool/tool.tar.gz").read_bytes()) == (
+                b"tool source\n"
             )
-            self.assertEqual(
-                (context / "package.json").read_bytes(), (root / "package.json").read_bytes()
+            assert ((context / "package.json").read_bytes()) == (
+                (root / "package.json").read_bytes()
             )
 
     def test_online_context_downloads_a_missing_declared_source(self) -> None:
@@ -311,9 +308,9 @@ class OfflineEnvironmentContextTests(unittest.TestCase):
                 mock.patch("urllib.request.urlopen", return_value=io.BytesIO(b"tool source\n")),
             ):
                 env_setup._stage_container_context(context, offline=False)  # noqa: SLF001
-            self.assertEqual(cached_source.read_bytes(), b"tool source\n")
-            self.assertEqual(
-                (context / "inputs/sources/tool/tool.tar.gz").read_bytes(), b"tool source\n"
+            assert (cached_source.read_bytes()) == (b"tool source\n")
+            assert ((context / "inputs/sources/tool/tool.tar.gz").read_bytes()) == (
+                b"tool source\n"
             )
 
     def test_download_checksum_failure_preserves_previous_cached_source(self) -> None:
@@ -334,14 +331,13 @@ class OfflineEnvironmentContextTests(unittest.TestCase):
             with (
                 mock.patch.object(env_setup, "ROOT", root),
                 mock.patch("urllib.request.urlopen", return_value=io.BytesIO(b"wrong response\n")),
-                self.assertRaisesRegex(SystemExit, "locked download SHA256 mismatch"),
+                pytest.raises(SystemExit, match="locked download SHA256 mismatch"),
             ):
                 env_setup._stage_container_context(context, offline=False)  # noqa: SLF001
-            self.assertEqual(
-                (root / ".cache/downloads/environment/tool/tool.tar.gz").read_bytes(),
-                b"tool source\n",
+            assert ((root / ".cache/downloads/environment/tool/tool.tar.gz").read_bytes()) == (
+                b"tool source\n"
             )
-            self.assertFalse((context / "inputs/sources/tool/tool.tar.gz").exists())
+            assert not ((context / "inputs/sources/tool/tool.tar.gz").exists())
 
     def test_environment_lock_changes_the_image_recipe(self) -> None:
         """Changing locked package bytes invalidates an existing image identity."""
@@ -359,13 +355,9 @@ class OfflineEnvironmentContextTests(unittest.TestCase):
             with mock.patch.object(common, "ROOT", root):
                 original = images.container_image_recipe_digest(lock)
                 (root / "unrelated.txt").write_text("unrelated source\n")
-                self.assertEqual(images.container_image_recipe_digest(lock), original)
+                assert (images.container_image_recipe_digest(lock)) == (original)
                 environment_lock = root / "environment.lock.toml"
                 environment_lock.write_text(
                     environment_lock.read_text().replace("tool-1.0", "tool-1.1")
                 )
-                self.assertNotEqual(images.container_image_recipe_digest(lock), original)
-
-
-if __name__ == "__main__":
-    unittest.main()
+                assert (images.container_image_recipe_digest(lock)) != (original)

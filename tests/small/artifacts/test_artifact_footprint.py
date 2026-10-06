@@ -5,192 +5,184 @@ from __future__ import annotations
 
 import hashlib
 import json
-import tempfile
-import unittest
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+import pytest
 from fplinux_cli.artifacts.bundles import CurrentBundle
 from fplinux_cli.artifacts.footprint import FootprintError, compare_footprints, inspect_footprint
 
 from tests.fixtures.artifact_footprint import FootprintFixture, kernel_with_initramfs, optional_apk
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-class ArtifactFootprintTests(unittest.TestCase):
+
+class ArtifactFootprintTests:
     """Protect size attribution and comparisons at the host artifact reader boundary."""
 
-    def test_compressed_lower_reports_its_own_bytes_without_changing_attribution(self) -> None:
+    @staticmethod
+    @pytest.mark.parametrize("compression", ["xz", "lz4"])
+    def test_compressed_lower_reports_its_own_bytes_without_changing_attribution(
+        tmp_path: Path, compression: str
+    ) -> None:
         """Boot backing size and package ownership describe separate archive layers."""
-        for compression in ("xz", "lz4"):
-            with self.subTest(compression=compression), tempfile.TemporaryDirectory() as temporary:
-                fixture = FootprintFixture(Path(temporary))
-                report = inspect_footprint(fixture.bundle(lower_compression=compression))
-            lower = report["layers"]["ram_root"]
-            self.assertEqual(lower["filesystem"], "squashfs")
-            self.assertEqual(lower["compression"], compression)
-            self.assertEqual(lower["block_bytes"], 65536)
-            self.assertEqual(lower["bytes"], 120)
-            self.assertEqual(lower["sha256"], hashlib.sha256(fixture.lower).hexdigest())
-            self.assertEqual(report["rootfs"]["source"], "ram-squashfs-composition")
-            self.assertEqual(report["rootfs"]["packages"]["app-one"]["regular_payload_bytes"], 5)
-            self.assertEqual(
-                report["layers"]["embedded_initramfs"]["cpio_bytes"], len(fixture.initramfs)
-            )
-            self.assertNotEqual(len(fixture.initramfs), len(fixture.composition))
+        fixture = FootprintFixture(tmp_path)
+        report = inspect_footprint(fixture.bundle(lower_compression=compression))
+        lower = report["layers"]["ram_root"]
+        assert (lower["filesystem"]) == ("squashfs")
+        assert (lower["compression"]) == (compression)
+        assert (lower["block_bytes"]) == (65536)
+        assert (lower["bytes"]) == (120)
+        assert (lower["sha256"]) == (hashlib.sha256(fixture.lower).hexdigest())
+        assert (report["rootfs"]["source"]) == ("ram-squashfs-composition")
+        assert (report["rootfs"]["packages"]["app-one"]["regular_payload_bytes"]) == (5)
+        assert (report["layers"]["embedded_initramfs"]["cpio_bytes"]) == (len(fixture.initramfs))
+        assert (len(fixture.initramfs)) != (len(fixture.composition))
 
-    def test_shared_dependency_and_hardlinks_are_counted_once(self) -> None:
+    @staticmethod
+    def test_shared_dependency_and_hardlinks_are_counted_once(tmp_path: Path) -> None:
         """Consumer chains explain shared bytes without charging them to either app."""
-        with tempfile.TemporaryDirectory() as temporary:
-            fixture = FootprintFixture(Path(temporary))
-            report = inspect_footprint(fixture.bundle())
+        fixture = FootprintFixture(tmp_path)
+        report = inspect_footprint(fixture.bundle())
         root = report["rootfs"]
         packages = root["packages"]
-        self.assertEqual(packages["app-one"]["regular_payload_bytes"], 5)
-        self.assertEqual(packages["app-two"]["regular_payload_bytes"], 3)
-        self.assertEqual(packages["shared"]["regular_payload_bytes"], 7)
-        self.assertEqual(
-            packages["shared"]["reason_paths"],
+        assert (packages["app-one"]["regular_payload_bytes"]) == (5)
+        assert (packages["app-two"]["regular_payload_bytes"]) == (3)
+        assert (packages["shared"]["regular_payload_bytes"]) == (7)
+        assert (packages["shared"]["reason_paths"]) == (
             {
                 "app-one": ["app-one", "shared"],
                 "app-two": ["app-two", "shared"],
-            },
+            }
         )
-        self.assertEqual(root["regular_payload_bytes"], len(fixture.database) + 16 + 15)
-        self.assertEqual(root["symlink_payload_bytes"], 3)
-        self.assertEqual(root["file_page_model"]["rounded_regular_bytes"], 20480)
-        self.assertEqual(root["files"]["/bin/one-link"]["size"], 5)
-        self.assertEqual(root["files"]["/bin/one-link"]["accounted_bytes"], 0)
-        self.assertEqual(root["unowned_payload_bytes"], len(fixture.database) + 16 + 3)
-        self.assertEqual(
-            report["optional_apks"]["apks/optional.apk"]["base_dependency_edges"],
+        assert (root["regular_payload_bytes"]) == (len(fixture.database) + 16 + 15)
+        assert (root["symlink_payload_bytes"]) == (3)
+        assert (root["file_page_model"]["rounded_regular_bytes"]) == (20480)
+        assert (root["files"]["/bin/one-link"]["size"]) == (5)
+        assert (root["files"]["/bin/one-link"]["accounted_bytes"]) == (0)
+        assert (root["unowned_payload_bytes"]) == (len(fixture.database) + 16 + 3)
+        assert (report["optional_apks"]["apks/optional.apk"]["base_dependency_edges"]) == (
             [
                 {"requirement": "so:libshared.so.1", "providers": ["shared"]},
-            ],
+            ]
         )
-        self.assertNotIn("optional", packages)
-        self.assertEqual(
-            report["optional_apks"]["apks/optional.apk"]["preinstalled_dependency_packages"],
-            ["shared"],
-        )
+        assert ("optional") not in (packages)
+        assert (
+            report["optional_apks"]["apks/optional.apk"]["preinstalled_dependency_packages"]
+        ) == (["shared"])
 
-    def test_install_if_explains_automatically_selected_service_package(self) -> None:
+    @staticmethod
+    def test_install_if_explains_automatically_selected_service_package(tmp_path: Path) -> None:
         """Both installed triggers explain an automatic subpackage's presence."""
-        with tempfile.TemporaryDirectory() as temporary:
-            fixture = FootprintFixture(Path(temporary))
-            fixture.database += (
-                b"P:service\nV:1-r0\ni:app-one app-two\nF:etc/init.d\nR:service\n\n"
+        fixture = FootprintFixture(tmp_path)
+        fixture.database += b"P:service\nV:1-r0\ni:app-one app-two\nF:etc/init.d\nR:service\n\n"
+        report = inspect_footprint(
+            fixture.bundle(
+                extra=[("etc/init.d/service", b"service", 0o100755, 9, 1)],
             )
-            report = inspect_footprint(
-                fixture.bundle(
-                    extra=[("etc/init.d/service", b"service", 0o100755, 9, 1)],
-                )
-            )
+        )
         package = report["rootfs"]["packages"]["service"]
-        self.assertEqual(package["selected_by"], [])
-        self.assertEqual(
-            package["reason_paths"],
+        assert (package["selected_by"]) == ([])
+        assert (package["reason_paths"]) == (
             {
                 "app-one": ["app-one", "service"],
                 "app-two": ["app-two", "service"],
-            },
+            }
         )
-        self.assertEqual(package["regular_payload_bytes"], 7)
+        assert (package["regular_payload_bytes"]) == (7)
 
-    def test_optional_dependency_chain_keeps_preinstalled_library_in_base(self) -> None:
+    @staticmethod
+    def test_optional_dependency_chain_keeps_preinstalled_library_in_base(tmp_path: Path) -> None:
         """An external add-on inherits an external program's existing base dependencies."""
-        with tempfile.TemporaryDirectory() as temporary:
-            fixture = FootprintFixture(Path(temporary))
-            report = inspect_footprint(
-                fixture.bundle(
-                    extra_apks={
-                        "apks/addon.apk": optional_apk(
-                            b"pkgname = addon\npkgver = 1-r0\ndepend = optional\n",
-                        ),
-                    }
-                )
+        fixture = FootprintFixture(tmp_path)
+        report = inspect_footprint(
+            fixture.bundle(
+                extra_apks={
+                    "apks/addon.apk": optional_apk(
+                        b"pkgname = addon\npkgver = 1-r0\ndepend = optional\n",
+                    ),
+                }
             )
+        )
         addon = report["optional_apks"]["apks/addon.apk"]
-        self.assertEqual(addon["preinstalled_dependency_packages"], ["shared"])
-        self.assertEqual(
-            addon["optional_dependency_edges"],
+        assert (addon["preinstalled_dependency_packages"]) == (["shared"])
+        assert (addon["optional_dependency_edges"]) == (
             [
                 {"requirement": "optional", "providers": ["optional"]},
-            ],
+            ]
         )
-        self.assertEqual(report["rootfs"]["packages"]["shared"]["regular_payload_bytes"], 7)
-        self.assertNotIn("addon", report["rootfs"]["packages"])
+        assert (report["rootfs"]["packages"]["shared"]["regular_payload_bytes"]) == (7)
+        assert ("addon") not in (report["rootfs"]["packages"])
 
-    def test_compression_change_preserves_content_identity(self) -> None:
+    @staticmethod
+    def test_compression_change_preserves_content_identity(tmp_path: Path) -> None:
         """Actual gzip and XZ streams describe the same files and ownership."""
-        with tempfile.TemporaryDirectory() as temporary:
-            fixture = FootprintFixture(Path(temporary))
-            before = inspect_footprint(fixture.bundle(compression="gzip"))
-            after = inspect_footprint(fixture.bundle(compression="xz"))
+        fixture = FootprintFixture(tmp_path)
+        before = inspect_footprint(fixture.bundle(compression="gzip"))
+        after = inspect_footprint(fixture.bundle(compression="xz"))
         delta = compare_footprints(before, after)
-        self.assertTrue(delta["same_rootfs_content"])
-        self.assertTrue(delta["initramfs_compression_changed"])
-        self.assertEqual(delta["files"], {"added": {}, "removed": {}, "changed": {}})
-        self.assertEqual(delta["rootfs_byte_delta"]["regular_payload_bytes"], 0)
-        self.assertEqual(before["layers"]["embedded_initramfs"]["compression"], "gzip")
-        self.assertEqual(after["layers"]["embedded_initramfs"]["compression"], "xz")
+        assert delta["same_rootfs_content"]
+        assert delta["initramfs_compression_changed"]
+        assert (delta["files"]) == ({"added": {}, "removed": {}, "changed": {}})
+        assert (delta["rootfs_byte_delta"]["regular_payload_bytes"]) == (0)
+        assert (before["layers"]["embedded_initramfs"]["compression"]) == ("gzip")
+        assert (after["layers"]["embedded_initramfs"]["compression"]) == ("xz")
 
-    def test_package_and_file_changes_have_forward_and_reverse_deltas(self) -> None:
+    @staticmethod
+    def test_package_and_file_changes_have_forward_and_reverse_deltas(tmp_path: Path) -> None:
         """Version changes and additions have explicit forward and reverse deltas."""
-        with tempfile.TemporaryDirectory() as temporary:
-            fixture = FootprintFixture(Path(temporary))
-            before = inspect_footprint(fixture.bundle())
-            fixture.database = fixture.database.replace(b"P:app-two\nV:1-r0", b"P:app-two\nV:2-r0")
-            fixture.database += b"P:added\nV:1-r0\nF:bin\nR:new\n\n"
-            after = inspect_footprint(fixture.bundle(extra=[("bin/new", b"new!", 0o100755, 9, 1)]))
+        fixture = FootprintFixture(tmp_path)
+        before = inspect_footprint(fixture.bundle())
+        fixture.database = fixture.database.replace(b"P:app-two\nV:1-r0", b"P:app-two\nV:2-r0")
+        fixture.database += b"P:added\nV:1-r0\nF:bin\nR:new\n\n"
+        after = inspect_footprint(fixture.bundle(extra=[("bin/new", b"new!", 0o100755, 9, 1)]))
         delta = compare_footprints(before, after)
-        self.assertFalse(delta["same_rootfs_content"])
-        self.assertEqual(set(delta["packages"]["added"]), {"added"})
-        self.assertEqual(delta["packages"]["changed"]["app-two"]["after"]["version"], "2-r0")
-        self.assertEqual(set(delta["files"]["added"]), {"/bin/new"})
-        self.assertIn("/lib/apk/db/installed", delta["files"]["changed"])
+        assert not (delta["same_rootfs_content"])
+        assert (set(delta["packages"]["added"])) == ({"added"})
+        assert (delta["packages"]["changed"]["app-two"]["after"]["version"]) == ("2-r0")
+        assert (set(delta["files"]["added"])) == ({"/bin/new"})
+        assert ("/lib/apk/db/installed") in (delta["files"]["changed"])
         reverse = compare_footprints(after, before)
-        self.assertEqual(set(reverse["packages"]["removed"]), {"added"})
-        self.assertEqual(set(reverse["files"]["removed"]), {"/bin/new"})
+        assert (set(reverse["packages"]["removed"])) == ({"added"})
+        assert (set(reverse["files"]["removed"])) == ({"/bin/new"})
 
-    def test_external_root_uses_composition_without_claiming_embedded_initramfs(self) -> None:
+    @staticmethod
+    def test_external_root_uses_composition_without_claiming_embedded_initramfs(
+        tmp_path: Path,
+    ) -> None:
         """A storage image and its composition are separate from the boot kernel."""
-        with tempfile.TemporaryDirectory() as temporary:
-            report = inspect_footprint(FootprintFixture(Path(temporary)).bundle(external=True))
-        self.assertIsNone(report["layers"]["embedded_initramfs"])
-        self.assertEqual(report["rootfs"]["source"], "external-root-composition")
-        self.assertIn("card.img.gz", report["layers"]["boot_artifact_bytes"])
-        self.assertIn("debug/rootfs.cpio", report["layers"]["host_debug_file_bytes"])
+        report = inspect_footprint(FootprintFixture(tmp_path).bundle(external=True))
+        assert (report["layers"]["embedded_initramfs"]) is None
+        assert (report["rootfs"]["source"]) == ("external-root-composition")
+        assert ("card.img.gz") in (report["layers"]["boot_artifact_bytes"])
+        assert ("debug/rootfs.cpio") in (report["layers"]["host_debug_file_bytes"])
 
-    def test_changed_artifact_is_rejected_before_reporting_its_size(self) -> None:
+    @staticmethod
+    def test_changed_artifact_is_rejected_before_reporting_its_size(tmp_path: Path) -> None:
         """A stale or incomplete selected bundle cannot yield misleading measurements."""
-        with tempfile.TemporaryDirectory() as temporary:
-            fixture = FootprintFixture(Path(temporary))
-            bundle = fixture.bundle()
-            (Path(temporary) / "debug/zImage").write_bytes(b"wrong-kernel")
-            with self.assertRaisesRegex(FootprintError, "missing or changed: debug/zImage"):
-                inspect_footprint(bundle)
+        fixture = FootprintFixture(tmp_path)
+        bundle = fixture.bundle()
+        (tmp_path / "debug/zImage").write_bytes(b"wrong-kernel")
+        with pytest.raises(FootprintError, match="missing or changed: debug/zImage"):
+            inspect_footprint(bundle)
 
-    def test_embedded_payload_must_match_published_boot_archive(self) -> None:
+    @staticmethod
+    def test_embedded_payload_must_match_published_boot_archive(tmp_path: Path) -> None:
         """Valid file hashes alone do not establish which boot archive the ELF embeds."""
-        with tempfile.TemporaryDirectory() as temporary:
-            fixture = FootprintFixture(Path(temporary))
-            bundle = fixture.bundle()
-            elf = kernel_with_initramfs(fixture.composition, "gzip")
-            (Path(temporary) / "debug/vmlinux").write_bytes(elf)
-            manifest: dict[str, Any] = json.loads(bundle.manifest_bytes)
-            manifest["files"]["debug/vmlinux"] = {
-                "size": len(elf),
-                "sha256": hashlib.sha256(elf).hexdigest(),
-            }
-            replaced = CurrentBundle(
-                bundle.path,
-                bundle.generation,
-                "",
-                json.dumps(manifest).encode(),
-            )
-            with self.assertRaisesRegex(FootprintError, "differs from the published root"):
-                inspect_footprint(replaced)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        fixture = FootprintFixture(tmp_path)
+        bundle = fixture.bundle()
+        elf = kernel_with_initramfs(fixture.composition, "gzip")
+        (tmp_path / "debug/vmlinux").write_bytes(elf)
+        manifest: dict[str, Any] = json.loads(bundle.manifest_bytes)
+        manifest["files"]["debug/vmlinux"] = {
+            "size": len(elf),
+            "sha256": hashlib.sha256(elf).hexdigest(),
+        }
+        replaced = CurrentBundle(
+            bundle.path,
+            bundle.generation,
+            "",
+            json.dumps(manifest).encode(),
+        )
+        with pytest.raises(FootprintError, match="differs from the published root"):
+            inspect_footprint(replaced)

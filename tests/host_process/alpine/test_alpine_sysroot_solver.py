@@ -6,19 +6,19 @@ from __future__ import annotations
 import shutil
 import subprocess
 import tempfile
-import unittest
 from pathlib import Path
 
+import pytest
 from fplinux_cli.alpine.packages import alpine_sysroot_command
 
 from tests.apk_support import signed_apk
 
 
-@unittest.skipUnless(
-    shutil.which("apk") and shutil.which("openssl"),
-    "native apk and openssl are required for signed APK process tests",
+@pytest.mark.skipif(
+    not (shutil.which("apk") and shutil.which("openssl")),
+    reason="native apk and openssl are required for signed APK process tests",
 )
-class AlpineSysrootSolverTests(unittest.TestCase):
+class AlpineSysrootSolverTests:
     """Observe native solver transactions; this does not test a build or a phone."""
 
     def test_replacement_releases_old_file_pin_and_preserves_unrelated_pin(self) -> None:
@@ -92,13 +92,13 @@ class AlpineSysrootSolverTests(unittest.TestCase):
                 check=False,
                 timeout=10,
             )
-            self.assertEqual(prepared.returncode, 0, prepared.stdout + prepared.stderr)
+            assert (prepared.returncode) == (0), prepared.stdout + prepared.stderr
             world_before = (sysroot / "etc/apk/world").read_text().splitlines()
             old_pin = next(entry for entry in world_before if entry.startswith("stock-library><"))
             unrelated_pin = next(
                 entry for entry in world_before if entry.startswith("unrelated-library><")
             )
-            self.assertEqual((sysroot / "usr/include/library.h").read_bytes(), b"stock header\n")
+            assert ((sysroot / "usr/include/library.h").read_bytes()) == (b"stock header\n")
 
             replaced = subprocess.run(
                 alpine_sysroot_command(lock, [replacement], sysroot, keys),
@@ -107,16 +107,14 @@ class AlpineSysrootSolverTests(unittest.TestCase):
                 check=False,
                 timeout=10,
             )
-            self.assertEqual(replaced.returncode, 0, replaced.stdout + replaced.stderr)
-            self.assertEqual((sysroot / "usr/include/library.h").read_bytes(), b"project header\n")
-            self.assertFalse((sysroot / "usr/share/stock.txt").exists())
-            self.assertEqual(
-                (sysroot / "usr/share/unrelated.txt").read_bytes(), b"unrelated payload\n"
-            )
+            assert (replaced.returncode) == (0), replaced.stdout + replaced.stderr
+            assert ((sysroot / "usr/include/library.h").read_bytes()) == (b"project header\n")
+            assert not ((sysroot / "usr/share/stock.txt").exists())
+            assert ((sysroot / "usr/share/unrelated.txt").read_bytes()) == (b"unrelated payload\n")
             world_after = (sysroot / "etc/apk/world").read_text().splitlines()
-            self.assertIn(unrelated_pin, world_after)
-            self.assertNotIn(old_pin, world_after)
-            self.assertTrue(any(entry.startswith("project-library><") for entry in world_after))
+            assert (unrelated_pin) in (world_after)
+            assert (old_pin) not in (world_after)
+            assert any(entry.startswith("project-library><") for entry in world_after)
             installed = subprocess.run(
                 ["apk", "--root", str(sysroot), "--no-network", "info"],
                 capture_output=True,
@@ -124,10 +122,6 @@ class AlpineSysrootSolverTests(unittest.TestCase):
                 check=True,
                 timeout=10,
             )
-            self.assertEqual(
-                set(installed.stdout.splitlines()), {"project-library", "unrelated-library"}
+            assert (set(installed.stdout.splitlines())) == (
+                {"project-library", "unrelated-library"}
             )
-
-
-if __name__ == "__main__":
-    unittest.main()

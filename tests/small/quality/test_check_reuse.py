@@ -4,12 +4,12 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 from unittest import mock
 
+import pytest
 from fplinux_cli.environment import image_store
 from fplinux_cli.environment.image_state import ImageState
 from fplinux_cli.quality import checks
@@ -19,7 +19,7 @@ from fplinux_cli.workspace.capture import WorkspaceFile, WorkspaceSnapshot
 from tests.small.quality.check_fixtures import _FailingReporter, _RecordingReporter
 
 
-class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
+class MockedCheckReceiptOrchestrationTests:
     """Exercise real receipt state with mocked OCI and checker boundaries."""
 
     @staticmethod
@@ -210,7 +210,7 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
             snapshot = self._snapshot()
 
             self._run(root, workspace, snapshot, ["c"], commands)
-            self.assertEqual(len(commands), 1)
+            assert (len(commands)) == (1)
 
             self._run(
                 root,
@@ -220,7 +220,7 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
                 commands,
                 exact_hit_guard=True,
             )
-            self.assertEqual(len(commands), 1)
+            assert (len(commands)) == (1)
 
     def test_kernel_hit_is_reused_with_a_different_worker_limit(self) -> None:
         """Reuse a kernel success when only --jobs changes between check runs."""
@@ -240,7 +240,7 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
             )
 
             self._run(root, workspace, snapshot, ["kernel"], commands, jobs=1)
-            self.assertEqual(len(commands), 2)
+            assert (len(commands)) == (2)
 
             self._run(
                 root,
@@ -251,7 +251,7 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
                 exact_hit_guard=True,
                 jobs=2,
             )
-            self.assertEqual(len(commands), 2)
+            assert (len(commands)) == (2)
 
     def test_no_cache_bypasses_an_exact_outer_receipt(self) -> None:
         """Execute the checker when the caller explicitly ignores receipts."""
@@ -264,7 +264,7 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
             snapshot = self._snapshot()
             self._run(root, workspace, snapshot, ["c"], commands)
             self._run(root, workspace, snapshot, ["c"], commands, no_cache=True)
-            self.assertEqual(len(commands), 2)
+            assert (len(commands)) == (2)
 
     def test_only_missing_scope_runs_in_a_mixed_selection(self) -> None:
         """Avoid rerunning a hit when another selected scope is missing."""
@@ -277,13 +277,12 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
             snapshot = self._snapshot()
             self._run(root, workspace, snapshot, ["c"], commands)
             self._run(root, workspace, snapshot, ["c", "docs"], commands)
-            self.assertEqual(
+            assert (
                 [
                     command[command.index("/workspace/scripts/check.py") + 1 :]
                     for command in commands
-                ],
-                [["c"], ["docs"]],
-            )
+                ]
+            ) == ([["c"], ["docs"]])
 
     def test_changed_c_bytes_are_a_cold_miss(self) -> None:
         """Invalidate the C result when one checked source byte changes."""
@@ -301,7 +300,7 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
                 ["c"],
                 commands,
             )
-            self.assertEqual(len(commands), 2)
+            assert (len(commands)) == (2)
 
     def test_failed_forced_rerun_keeps_last_good_success(self) -> None:
         """A failed forced rerun leaves the previous exact success usable."""
@@ -313,7 +312,7 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
             commands: list[list[str]] = []
             snapshot = self._snapshot()
             self._run(root, workspace, snapshot, ["c"], commands)
-            with self.assertRaisesRegex(RuntimeError, "scope failed"):
+            with pytest.raises(RuntimeError, match="scope failed"):
                 self._run(
                     root,
                     workspace,
@@ -331,8 +330,4 @@ class MockedCheckReceiptOrchestrationTests(unittest.TestCase):
                 commands,
                 exact_hit_guard=True,
             )
-            self.assertEqual(len(commands), 2)
-
-
-if __name__ == "__main__":
-    unittest.main()
+            assert (len(commands)) == (2)

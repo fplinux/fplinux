@@ -3,9 +3,7 @@
 
 from __future__ import annotations
 
-import tempfile
-import unittest
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fplinux_cli.environment.image_state import (
     ImageState,
@@ -14,57 +12,56 @@ from fplinux_cli.environment.image_state import (
     publish_image_state,
 )
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 def state() -> ImageState:
     """Return one stable state with distinct recipe and generation bytes."""
     return ImageState("a" * 64, "b" * 64, "b" * 64)
 
 
-class ImageStateTests(unittest.TestCase):
+class ImageStateTests:
     """Use only an exact recipe and image generation."""
 
-    def test_exact_state_is_a_hit(self) -> None:
+    @staticmethod
+    def test_exact_state_is_a_hit(tmp_path: Path) -> None:
         """Persist one exact image generation at the fixed path."""
-        with tempfile.TemporaryDirectory() as temporary:
-            cache = Path(temporary) / ".cache"
-            expected = state()
-            publish_image_state(cache, expected)
-            self.assertEqual(load_image_state(cache, "a" * 64), expected)
+        cache = tmp_path / ".cache"
+        expected = state()
+        publish_image_state(cache, expected)
+        assert (load_image_state(cache, "a" * 64)) == (expected)
 
-    def test_recipe_or_generation_mismatch_is_a_miss(self) -> None:
+    @staticmethod
+    def test_recipe_or_generation_mismatch_is_a_miss(tmp_path: Path) -> None:
         """A different recipe or malformed generation cannot be reused."""
-        with tempfile.TemporaryDirectory() as temporary:
-            cache = Path(temporary) / ".cache"
-            expected = state()
-            publish_image_state(cache, expected)
-            self.assertIsNone(load_image_state(cache, "c" * 64))
-            path = image_state_path(cache)
-            path.write_text(
-                '{"container_image_recipe":"'
-                + "a" * 64
-                + '","image_generation":"not-a-generation"}\n',
-                encoding="utf-8",
-            )
-            self.assertIsNone(load_image_state(cache, "a" * 64))
+        cache = tmp_path / ".cache"
+        expected = state()
+        publish_image_state(cache, expected)
+        assert (load_image_state(cache, "c" * 64)) is None
+        path = image_state_path(cache)
+        path.write_text(
+            '{"container_image_recipe":"'
+            + "a" * 64
+            + '","image_generation":"not-a-generation"}\n',
+            encoding="utf-8",
+        )
+        assert (load_image_state(cache, "a" * 64)) is None
 
-    def test_invalid_json_is_a_miss(self) -> None:
+    @staticmethod
+    def test_invalid_json_is_a_miss(tmp_path: Path) -> None:
         """Unreadable state cache content cannot be reused."""
-        with tempfile.TemporaryDirectory() as temporary:
-            cache = Path(temporary) / ".cache"
-            cache.mkdir()
-            image_state_path(cache).write_text("{", encoding="utf-8")
-            self.assertIsNone(load_image_state(cache, "a" * 64))
+        cache = tmp_path / ".cache"
+        cache.mkdir()
+        image_state_path(cache).write_text("{", encoding="utf-8")
+        assert (load_image_state(cache, "a" * 64)) is None
 
-    def test_publish_replaces_the_previous_state(self) -> None:
+    @staticmethod
+    def test_publish_replaces_the_previous_state(tmp_path: Path) -> None:
         """A later image state atomically supersedes the previous one."""
-        with tempfile.TemporaryDirectory() as temporary:
-            cache = Path(temporary) / ".cache"
-            publish_image_state(cache, state())
-            replacement = ImageState("c" * 64, "d" * 64, "d" * 64)
-            publish_image_state(cache, replacement)
-            self.assertIsNone(load_image_state(cache, "a" * 64))
-            self.assertEqual(load_image_state(cache, "c" * 64), replacement)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        cache = tmp_path / ".cache"
+        publish_image_state(cache, state())
+        replacement = ImageState("c" * 64, "d" * 64, "d" * 64)
+        publish_image_state(cache, replacement)
+        assert (load_image_state(cache, "a" * 64)) is None
+        assert (load_image_state(cache, "c" * 64)) == (replacement)

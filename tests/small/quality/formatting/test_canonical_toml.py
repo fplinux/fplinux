@@ -4,12 +4,12 @@
 from __future__ import annotations
 
 import tomllib
-import unittest
 
+import pytest
 from fplinux_cli.quality.formatting.canonical_toml import normalize_toml
 
 
-class CanonicalTomlTests(unittest.TestCase):
+class CanonicalTomlTests:
     """Compare shuffled documents with independent canonical examples."""
 
     def assert_normalized(
@@ -17,10 +17,10 @@ class CanonicalTomlTests(unittest.TestCase):
     ) -> bytes:
         """Check literal output and repeatability, with explicit array exceptions."""
         actual = normalize_toml(relative, source.encode())
-        self.assertEqual(actual, expected.encode())
-        self.assertEqual(normalize_toml(relative, actual), actual)
+        assert (actual) == (expected.encode())
+        assert (normalize_toml(relative, actual)) == (actual)
         if same_values:
-            self.assertEqual(tomllib.loads(actual.decode()), tomllib.loads(source))
+            assert (tomllib.loads(actual.decode())) == (tomllib.loads(source))
         return actual
 
     def test_target_fields_keep_license_comments_hex_and_placeholders(self) -> None:
@@ -122,16 +122,15 @@ packages = ["z", "a"]
 levels = [20, 4, 0]
 """
         actual = normalize_toml("targets/demo/target.toml", source.encode())
-        self.assertEqual(
-            tomllib.loads(actual.decode()),
+        assert (tomllib.loads(actual.decode())) == (
             {
                 "identity": {"hardware_codes": ["Z-2", "A-1"]},
                 "display_brightness": {"levels": [20, 4, 0]},
                 "rootfs": {"packages": ["a", "z"]},
                 "bundle": {"packages": ["a", "a", "z"]},
-            },
+            }
         )
-        self.assertEqual(normalize_toml("targets/demo/target.toml", actual), actual)
+        assert (normalize_toml("targets/demo/target.toml", actual)) == (actual)
 
     def test_package_comments_remain_attached_to_sorted_elements(self) -> None:
         """A package's annotation travels with that package rather than its old slot."""
@@ -375,9 +374,9 @@ cache_dir = "/tmp/mypy"
 """,
         )
 
-    def test_named_lock_fields_and_release_lists_follow_their_domains(self) -> None:
-        """Pinned inputs use semantic groups; only addressable digest keys sort lexically."""
-        cases = (
+    @pytest.mark.parametrize(
+        ("relative", "source", "expected"),
+        [
             (
                 "container.lock.toml",
                 """[oci]
@@ -442,10 +441,14 @@ runtime_files = ["z.bin", "a.bin"]
 documents = ["z.md", "a.md"]
 """,
             ),
-        )
-        for relative, source, expected in cases:
-            with self.subTest(relative=relative):
-                self.assert_normalized(relative, source, expected)
+        ],
+        ids=["container-lock", "source-lock", "boot-lock", "release-manifest"],
+    )
+    def test_named_lock_fields_and_release_lists_follow_their_domains(
+        self, relative: str, source: str, expected: str
+    ) -> None:
+        """Pinned inputs use semantic groups; only addressable digest keys sort lexically."""
+        self.assert_normalized(relative, source, expected)
 
     def test_alpine_catalogue_sorts_files_without_sorting_install_lists(self) -> None:
         """Catalogue records and annotations travel together; apk input lists stay ordered."""
@@ -506,17 +509,16 @@ bytes = 2
             same_values=False,
         )
         catalogue = tomllib.loads(actual.decode())["package"]
-        self.assertEqual(
-            catalogue,
+        assert (catalogue) == (
             [
                 {"repository": "community", "file": "a.apk", "sha256": "a-sha", "bytes": 1},
                 {"repository": "main", "file": "z.apk", "sha256": "z-sha", "bytes": 2},
-            ],
+            ]
         )
 
-    def test_profile_packages_and_negative_optional_inputs_are_preserved(self) -> None:
-        """Formatting cannot fill omissions or remove semantically invalid feature packages."""
-        cases = (
+    @pytest.mark.parametrize(
+        ("relative", "source", "expected"),
+        [
             (
                 "tests/fixtures/profile_config/default-with-feature-package.toml",
                 """[rootfs]
@@ -569,10 +571,19 @@ sha256 = "invalid"
                 '[rootfs]\npackages = [["z", "a"], "b"]\n',
                 '[rootfs]\npackages = [["z", "a"], "b"]\n',
             ),
-        )
-        for relative, source, expected in cases:
-            with self.subTest(relative=relative):
-                self.assert_normalized(relative, source, expected)
+        ],
+        ids=[
+            "feature-package",
+            "missing-microsd",
+            "negative-package-input",
+            "nested-package-list",
+        ],
+    )
+    def test_profile_packages_and_negative_optional_inputs_are_preserved(
+        self, relative: str, source: str, expected: str
+    ) -> None:
+        """Formatting cannot fill omissions or remove semantically invalid feature packages."""
+        self.assert_normalized(relative, source, expected)
 
     def test_reuse_annotations_and_paths_remain_ordered(self) -> None:
         """Annotation precedence keeps its original record and path order."""
@@ -626,12 +637,12 @@ last"""
 ''',
         )
 
-    def test_syntax_errors_and_invalid_utf8_are_rejected(self) -> None:
+    @pytest.mark.parametrize(
+        "source",
+        [b"[invalid", b"x = 1\nx = 2\n", b"x = '\xff'\n"],
+        ids=["invalid-syntax", "duplicate-key", "invalid-utf8"],
+    )
+    def test_syntax_errors_and_invalid_utf8_are_rejected(self, source: bytes) -> None:
         """Broken syntax is reported instead of rewritten into another document."""
-        for source in (b"[invalid", b"x = 1\nx = 2\n", b"x = '\xff'\n"):
-            with self.subTest(source=source), self.assertRaises(ValueError):
-                normalize_toml("targets/demo/target.toml", source)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        with pytest.raises(ValueError):  # noqa: PT011 -- stable rejection type; diagnostics vary.
+            normalize_toml("targets/demo/target.toml", source)

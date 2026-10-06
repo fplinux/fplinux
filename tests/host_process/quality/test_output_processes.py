@@ -12,10 +12,10 @@ import subprocess
 import sys
 import tempfile
 import time
-import unittest
 from pathlib import Path
 from unittest import mock
 
+import pytest
 from fplinux_cli.common import ROOT
 from fplinux_cli.reporting.run import RunReporter
 
@@ -56,37 +56,43 @@ def _wait_until_not_running(process_id: int, deadline: float) -> None:
     raise AssertionError(f"process {process_id} remained in state {process_state(process_id)}")
 
 
-class StageProcessTests(unittest.TestCase):
+class StageProcessTests:
     """Exercise Stage against real isolated child processes."""
 
-    def test_entrypoint_reports_io_errors_and_sigint_without_tracebacks(self) -> None:
+    @pytest.mark.parametrize(
+        ("mode", "status"),
+        [("io", 1), ("io-stage", 1), ("interrupt", 130)],
+        ids=["io", "io-stage", "interrupt"],
+    )
+    def test_entrypoint_reports_io_errors_and_sigint_without_tracebacks(
+        self, mode: str, status: int
+    ) -> None:
         """Expected failures retain their status and diagnostics without Python stacks."""
-        for mode, status in (("io", 1), ("io-stage", 1), ("interrupt", 130)):
-            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
-                root = Path(temporary)
-                result = run_process(
-                    [
-                        sys.executable,
-                        str(_PROCESS_FIXTURES / "reporter_failure.py"),
-                        mode,
-                        str(root),
-                    ],
-                    name="run entrypoint failure fixture",
-                    env=python_environment(),
-                    timeout=_PROCESS_TIMEOUT,
-                )
-                self.assertEqual(result.returncode, status, result.stderr)
-                self.assertEqual(result.stdout, "")
-                self.assertNotIn("Traceback", result.stderr)
-                if mode.startswith("io"):
-                    self.assertIn("fplinux:", result.stderr)
-                    self.assertIn("missing-input", result.stderr)
-                if mode == "io-stage":
-                    log = (root / "run/01-read-input.log").read_text()
-                    self.assertIn("missing-input", log)
-                    self.assertNotIn("Traceback", log)
-                    receipt = json.loads((root / "run/run.json").read_text())
-                    self.assertEqual(receipt["status"], "failed")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            result = run_process(
+                [
+                    sys.executable,
+                    str(_PROCESS_FIXTURES / "reporter_failure.py"),
+                    mode,
+                    str(root),
+                ],
+                name="run entrypoint failure fixture",
+                env=python_environment(),
+                timeout=_PROCESS_TIMEOUT,
+            )
+            assert (result.returncode) == (status), result.stderr
+            assert (result.stdout) == ("")
+            assert ("Traceback") not in (result.stderr)
+            if mode.startswith("io"):
+                assert ("fplinux:") in (result.stderr)
+                assert ("missing-input") in (result.stderr)
+            if mode == "io-stage":
+                log = (root / "run/01-read-input.log").read_text()
+                assert ("missing-input") in (log)
+                assert ("Traceback") not in (log)
+                receipt = json.loads((root / "run/run.json").read_text())
+                assert (receipt["status"]) == ("failed")
 
     def test_quiet_stage_keeps_high_volume_output_in_log(self) -> None:
         """Drain both large child streams without printing their contents."""
@@ -113,11 +119,11 @@ class StageProcessTests(unittest.TestCase):
                     timeout=_STAGE_TIMEOUT,
                 )
             data = (root / "01-volume.log").read_bytes()
-            self.assertIn(b"o" * 1000, data)
-            self.assertIn(b"e" * 1000, data)
-            self.assertEqual(stdout.getvalue(), "")
-            self.assertNotIn("eee", stderr.getvalue())
-            self.assertIn("check: volume OK", stderr.getvalue())
+            assert (b"o" * 1000) in (data)
+            assert (b"e" * 1000) in (data)
+            assert (stdout.getvalue()) == ("")
+            assert ("eee") not in (stderr.getvalue())
+            assert ("check: volume OK") in (stderr.getvalue())
 
     def test_verbose_stage_tees_original_streams(self) -> None:
         """Tee verbose child output back to its original terminal stream."""
@@ -142,10 +148,10 @@ class StageProcessTests(unittest.TestCase):
                     ],
                     timeout=_STAGE_TIMEOUT,
                 )
-            self.assertIn("stdout marker", stdout.getvalue())
-            self.assertNotIn("stderr marker", stdout.getvalue())
-            self.assertIn("stderr marker", stderr.getvalue())
-            self.assertIn("build target: verbose OK", stderr.getvalue())
+            assert ("stdout marker") in (stdout.getvalue())
+            assert ("stderr marker") not in (stdout.getvalue())
+            assert ("stderr marker") in (stderr.getvalue())
+            assert ("build target: verbose OK") in (stderr.getvalue())
 
     def test_passthrough_survives_broken_pipe_from_terminal_stream(self) -> None:
         """A terminal stream raising BrokenPipeError fails neither the stage nor its log.
@@ -177,8 +183,8 @@ class StageProcessTests(unittest.TestCase):
                     [sys.executable, "-c", "print('stdout marker')"],
                     timeout=_STAGE_TIMEOUT,
                 )
-            self.assertIn(b"stdout marker", (root / "01-passthrough.log").read_bytes())
-            self.assertIn("build target: passthrough OK", terminal.getvalue())
+            assert (b"stdout marker") in ((root / "01-passthrough.log").read_bytes())
+            assert ("build target: passthrough OK") in (terminal.getvalue())
 
     def test_capture_retains_separate_streams_and_status(self) -> None:
         """Capture child streams without hiding verbose output or log bytes."""
@@ -203,14 +209,14 @@ class StageProcessTests(unittest.TestCase):
                     ],
                     timeout=_STAGE_TIMEOUT,
                 )
-            self.assertEqual(result.returncode, 7)
-            self.assertEqual(result.stdout, b"captured stdout\n")
-            self.assertEqual(result.stderr, b"captured stderr\n")
-            self.assertIn("captured stdout", stdout.getvalue())
-            self.assertIn("captured stderr", stderr.getvalue())
+            assert (result.returncode) == (7)
+            assert (result.stdout) == (b"captured stdout\n")
+            assert (result.stderr) == (b"captured stderr\n")
+            assert ("captured stdout") in (stdout.getvalue())
+            assert ("captured stderr") in (stderr.getvalue())
             log = (root / "01-capture.log").read_bytes()
-            self.assertIn(b"captured stdout", log)
-            self.assertIn(b"captured stderr", log)
+            assert (b"captured stdout") in (log)
+            assert (b"captured stderr") in (log)
 
     def test_failed_stage_preserves_status_and_prints_log_location(self) -> None:
         """Keep a child exit status and show its diagnostic log location."""
@@ -220,7 +226,7 @@ class StageProcessTests(unittest.TestCase):
             terminal = io.StringIO()
             with (
                 contextlib.redirect_stderr(terminal),
-                self.assertRaises(SystemExit) as raised,
+                pytest.raises(SystemExit) as raised,
                 reporter.stage("failure") as stage,
             ):
                 stage.run(
@@ -231,10 +237,10 @@ class StageProcessTests(unittest.TestCase):
                     ],
                     timeout=_STAGE_TIMEOUT,
                 )
-            self.assertEqual(raised.exception.code, 7)
-            self.assertIn("diagnostic", (root / "01-failure.log").read_text())
-            self.assertIn("FAILED (exit 7)", terminal.getvalue())
-            self.assertIn("full log: .cache/logs/test/01-failure.log", terminal.getvalue())
+            assert (raised.value.code) == (7)
+            assert ("diagnostic") in ((root / "01-failure.log").read_text())
+            assert ("FAILED (exit 7)") in (terminal.getvalue())
+            assert ("full log: .cache/logs/test/01-failure.log") in (terminal.getvalue())
 
     def test_failure_tail_is_limited_and_sanitized(self) -> None:
         """Bound displayed tails while retaining the original log bytes."""
@@ -244,7 +250,7 @@ class StageProcessTests(unittest.TestCase):
             terminal = io.StringIO()
             with (
                 contextlib.redirect_stderr(terminal),
-                self.assertRaises(SystemExit),
+                pytest.raises(SystemExit),
                 reporter.stage("tail") as stage,
             ):
                 stage.run(
@@ -252,14 +258,14 @@ class StageProcessTests(unittest.TestCase):
                     timeout=_STAGE_TIMEOUT,
                 )
             output = terminal.getvalue()
-            self.assertNotIn("line-000", output)
-            self.assertIn("line-099", output)
-            self.assertIn("?red? invalid=?", output)
-            self.assertIn("utf8=проверка", output)
-            self.assertNotIn("[31m", output)
-            self.assertNotIn("\x1b", output)
+            assert ("line-000") not in (output)
+            assert ("line-099") in (output)
+            assert ("?red? invalid=?") in (output)
+            assert ("utf8=проверка") in (output)
+            assert ("[31m") not in (output)
+            assert ("\x1b") not in (output)
             log = (root / "01-tail.log").read_bytes()
-            self.assertIn(b"\x1b[31mred\x1b[0m invalid=\xff", log)
+            assert (b"\x1b[31mred\x1b[0m invalid=\xff") in (log)
 
     def test_timeout_kills_child_group_and_records_named_failure(self) -> None:
         """Bound a hung stage, kill its group, and retain a useful diagnostic."""
@@ -272,7 +278,7 @@ class StageProcessTests(unittest.TestCase):
             terminal = io.StringIO()
             with (
                 contextlib.redirect_stderr(terminal),
-                self.assertRaises(subprocess.TimeoutExpired),
+                pytest.raises(subprocess.TimeoutExpired),
                 reporter.stage("bounded child") as stage,
             ):
                 stage.run(
@@ -286,15 +292,15 @@ class StageProcessTests(unittest.TestCase):
             _wait_until_not_running(child_pid, deadline)
             _wait_until_not_running(descendant_pid, deadline)
             log = (root / "01-bounded-child.log").read_text()
-            self.assertIn("fplinux: command timed out after 0.5s", log)
-            self.assertIn("FAILED", terminal.getvalue())
+            assert ("fplinux: command timed out after 0.5s") in (log)
+            assert ("FAILED") in (terminal.getvalue())
             metadata = json.loads(reporter.metadata_path.read_text())
-            self.assertEqual(metadata["status"], "failed")
-            self.assertEqual(metadata["stages"][0]["status"], "failed")
-            self.assertIsNone(metadata["stages"][0]["exit"])
+            assert (metadata["status"]) == ("failed")
+            assert (metadata["stages"][0]["status"]) == ("failed")
+            assert (metadata["stages"][0]["exit"]) is None
 
 
-class StageSignalProcessTests(unittest.TestCase):
+class StageSignalProcessTests:
     """Exercise signal forwarding through an isolated Stage wrapper process."""
 
     def test_repeated_termination_kills_an_unresponsive_child_group(self) -> None:
@@ -333,7 +339,7 @@ class StageSignalProcessTests(unittest.TestCase):
                     env=python_environment(),
                     while_running=escalate_ready_wrapper,
                 )
-                self.assertEqual(result.returncode, 128 + signal.SIGTERM, result.stderr)
+                assert (result.returncode) == (128 + signal.SIGTERM), result.stderr
                 child_pid = int(child_pid_path.read_text())
                 grandchild_pid = int(grandchild_pid_path.read_text())
                 deadline = time.monotonic() + 2
@@ -342,7 +348,7 @@ class StageSignalProcessTests(unittest.TestCase):
             finally:
                 # Cleanup runs only after the assertions so that it cannot satisfy them.
                 _kill_recorded_process_group(child_group)
-            self.assertIn("FAILED (exit 143)", result.stderr)
+            assert ("FAILED (exit 143)") in (result.stderr)
 
     def test_signal_is_forwarded_to_every_process_in_the_child_group(self) -> None:
         """Forward SIGTERM from a wrapper to its child and descendant."""
@@ -377,14 +383,14 @@ class StageSignalProcessTests(unittest.TestCase):
                 )
             finally:
                 _kill_recorded_process_group(child_group)
-            self.assertEqual(result.returncode, 128 + signal.SIGTERM, result.stderr)
-            self.assertTrue(child_signal.exists(), "direct child did not receive SIGTERM")
-            self.assertTrue(grandchild_signal.exists(), "grandchild did not receive SIGTERM")
-            self.assertIn("FAILED (exit 143)", result.stderr)
+            assert (result.returncode) == (128 + signal.SIGTERM), result.stderr
+            assert child_signal.exists(), "direct child did not receive SIGTERM"
+            assert grandchild_signal.exists(), "grandchild did not receive SIGTERM"
+            assert ("FAILED (exit 143)") in (result.stderr)
             metadata = json.loads((directory / "run" / "run.json").read_text())
-            self.assertEqual(metadata["status"], "interrupted")
-            self.assertEqual(metadata["stages"][0]["status"], "interrupted")
-            self.assertEqual(metadata["stages"][0]["exit"], 128 + signal.SIGTERM)
+            assert (metadata["status"]) == ("interrupted")
+            assert (metadata["stages"][0]["status"]) == ("interrupted")
+            assert (metadata["stages"][0]["exit"]) == (128 + signal.SIGTERM)
 
     def test_hangup_is_forwarded_to_a_ready_child(self) -> None:
         """Forward SIGHUP only after the isolated child installs its handler."""
@@ -418,8 +424,8 @@ class StageSignalProcessTests(unittest.TestCase):
                 )
             finally:
                 _kill_recorded_process_group(child_group)
-            self.assertEqual(result.returncode, 128 + signal.SIGHUP, result.stderr)
-            self.assertEqual(child_signal.read_text(), "SIGHUP")
+            assert (result.returncode) == (128 + signal.SIGHUP), result.stderr
+            assert (child_signal.read_text()) == ("SIGHUP")
 
     def test_job_control_stops_and_resumes_the_child_group(self) -> None:
         """SIGTSTP stops the Stage child group and a forwarded SIGCONT resumes it.
@@ -469,10 +475,10 @@ class StageSignalProcessTests(unittest.TestCase):
                 )
             finally:
                 _kill_recorded_process_group(child_group)
-            self.assertEqual(result.returncode, 0, result.stderr)
+            assert (result.returncode) == (0), result.stderr
 
 
-class TestProcessHelperTests(unittest.TestCase):
+class TestProcessHelperTests:
     """Verify that the shared host-test process boundary is itself bounded."""
 
     def test_timeout_terminates_and_reaps_the_isolated_process(self) -> None:
@@ -484,10 +490,7 @@ class TestProcessHelperTests(unittest.TestCase):
             def wait_until_ready(_process: subprocess.Popen[str], deadline: float) -> None:
                 _wait_for_path(ready_path, deadline, "helper child")
 
-            with self.assertRaisesRegex(
-                AssertionError,
-                "named helper process timed out after 1s",
-            ):
+            with pytest.raises(AssertionError, match="named helper process timed out after 1s"):
                 run_process(
                     [sys.executable, str(_PROCESS_FIXTURES / "ignoring_process.py"), temporary],
                     name="named helper process",
@@ -495,9 +498,5 @@ class TestProcessHelperTests(unittest.TestCase):
                     while_running=wait_until_ready,
                 )
             process_id = int(pid_path.read_text())
-            with self.assertRaises(ProcessLookupError):
+            with pytest.raises(ProcessLookupError):
                 os.kill(process_id, 0)
-
-
-if __name__ == "__main__":
-    unittest.main()

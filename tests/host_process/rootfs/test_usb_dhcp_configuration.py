@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import subprocess
 import tempfile
-import unittest
 from pathlib import Path
 
 from tests import ROOT
@@ -13,7 +12,7 @@ from tests import ROOT
 SERVICE = ROOT / "alpine/aports/fplinux-usb-gadget/fplinux-usb-dhcp.initd"
 
 
-class UsbDhcpConfigurationTests(unittest.TestCase):
+class UsbDhcpConfigurationTests:
     """The configured command must resolve and keep DHCP in the foreground."""
 
     def test_configuration_invokes_available_dhcp_server_in_foreground(self) -> None:
@@ -55,9 +54,5 @@ class UsbDhcpConfigurationTests(unittest.TestCase):
                 check=False,
             )
 
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "foreground DHCP started\n")
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert (result.returncode) == (0), result.stderr
+        assert (result.stdout) == ("foreground DHCP started\n")

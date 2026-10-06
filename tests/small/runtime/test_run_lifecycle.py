@@ -6,10 +6,10 @@ from __future__ import annotations
 import contextlib
 import os
 import subprocess
-import unittest
 from pathlib import Path
 from unittest import mock
 
+import pytest
 from fplinux_cli import common
 from fplinux_cli.artifacts.bundles import publish_current_bundle
 from fplinux_cli.manifests import targets
@@ -29,7 +29,7 @@ class RunLifecycleTests(CommandBundleFixture):
                 "fplinux_cli.runtime.runner.os.execv",
                 side_effect=AssertionError("missing bundle must not run"),
             ),
-            self.assertRaisesRegex(SystemExit, "build phone --build-type debug"),
+            pytest.raises(SystemExit, match="build phone --build-type debug"),
         ):
             runner.run_target("phone", build_type="debug")
 
@@ -52,8 +52,8 @@ class RunLifecycleTests(CommandBundleFixture):
             b"--events",
             os.fsencode(self.root / "events/load.jsonl"),
         ]
-        self.assertEqual(execute.call_args.args[1], expected)
-        self.assertEqual(child.call_args.args[0], expected)
+        assert (execute.call_args.args[1]) == (expected)
+        assert (child.call_args.args[0]) == (expected)
 
     def test_run_executes_a_runner_from_the_resolved_generation(self) -> None:
         """Resolve current once and preserve that immutable generation path."""
@@ -69,32 +69,29 @@ class RunLifecycleTests(CommandBundleFixture):
 
     def test_microsd_context_selection_has_no_fallback(self) -> None:
         """Resolve the Nokia microSD context without making the profile an alias."""
-        self.assertEqual(
+        assert (
             bundle_session.selected_context_profile(
                 "nokia-ta1618",
                 profile=None,
                 boot="microsd",
-            ),
-            "microsd-uboot",
-        )
-        self.assertIsNone(
+            )
+        ) == ("microsd-uboot")
+        assert (
             bundle_session.selected_context_profile("nokia-ta1618", profile=None, boot=None)
-        )
-        self.assertEqual(
+        ) is None
+        assert (
             bundle_session.selected_context_profile(
                 "nokia-ta1618",
                 profile="microsd-uboot",
                 boot=None,
-            ),
-            "microsd-uboot",
-        )
-        self.assertEqual(
+            )
+        ) == ("microsd-uboot")
+        assert (
             bundle_session.selected_context_profile(
                 "inoi-240-modern-4g", profile=None, boot="microsd"
-            ),
-            "microsd-uboot",
-        )
-        with self.assertRaisesRegex(SystemExit, "cannot be used together"):
+            )
+        ) == ("microsd-uboot")
+        with pytest.raises(SystemExit, match="cannot be used together"):
             bundle_session.selected_context_profile(
                 "nokia-ta1618",
                 profile="microsd-uboot",
@@ -159,7 +156,7 @@ class RunLifecycleTests(CommandBundleFixture):
                 side_effect=AssertionError("build-only profile must not resolve a bundle"),
             ),
             mock.patch("fplinux_cli.runtime.runner.os.execv") as execute,
-            self.assertRaisesRegex(SystemExit, "profile is build-only"),
+            pytest.raises(SystemExit, match="profile is build-only"),
         ):
             runner.run_target("phone", profile="microsd-uboot")
 
@@ -178,12 +175,8 @@ class RunLifecycleTests(CommandBundleFixture):
                 return_value={"runtime": {"runnable": True}},
             ),
             mock.patch("fplinux_cli.runtime.runner.os.execv") as execute,
-            self.assertRaisesRegex(SystemExit, "profile bundle is build-only"),
+            pytest.raises(SystemExit, match="profile bundle is build-only"),
         ):
             runner.run_target("phone", profile=profile)
 
         execute.assert_not_called()
-
-
-if __name__ == "__main__":
-    unittest.main()

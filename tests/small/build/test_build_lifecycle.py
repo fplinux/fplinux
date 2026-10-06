@@ -8,7 +8,8 @@ import functools
 import io
 import json
 import os
-import unittest
+from collections import Counter
+from dataclasses import replace
 from unittest import mock
 
 import fplinux_cli.cache.prune.operations as prune_operations
@@ -18,6 +19,7 @@ import fplinux_cli.environment.kern as kern_env
 import fplinux_cli.reporting.run as output
 import fplinux_cli.workspace.build_inputs as workspace_inputs
 import fplinux_cli.workspace.staging as workspace_staging
+import pytest
 from fplinux_cli import common
 from fplinux_cli.artifacts.bundles import bundle_pointer, publish_current_bundle
 from fplinux_cli.environment import image_store, images, setup
@@ -65,37 +67,30 @@ class BuildLifecycleTests(CommandBundleFixture):
             mock.patch.object(prune_operations, "discard_obsolete_apks") as apks_gc,
         ):
             for build_type, jobs in (("release", 1), ("debug", 8), ("release", 8)):
-                with self.subTest(build_type=build_type, jobs=jobs):
-                    old = self._create_generation("b" * 64, build_type=build_type)
-                    stdout = io.StringIO()
-                    with contextlib.redirect_stdout(stdout):
-                        output.run_entrypoint(
-                            functools.partial(
-                                build_commands.build,
-                                "phone",
-                                jobs,
-                                verbose=True,
-                                offline=True,
-                                build_type=build_type,
-                            )
+                old = self._create_generation("b" * 64, build_type=build_type)
+                stdout = io.StringIO()
+                with contextlib.redirect_stdout(stdout):
+                    output.run_entrypoint(
+                        functools.partial(
+                            build_commands.build,
+                            "phone",
+                            jobs,
+                            verbose=True,
+                            offline=True,
+                            build_type=build_type,
                         )
-
-                    self.assertIn(
-                        f"build phone --build-type {build_type}: OK (cached)", stdout.getvalue()
                     )
-                    expected = self.bundle_path if build_type == "release" else debug
-                    self.assertIn(str(expected.relative_to(self.root)), stdout.getvalue())
-                    self.assertFalse(old.exists())
-                    self.assertTrue(self.bundle_path.is_dir())
-                    self.assertTrue(debug.is_dir())
-            self.assertEqual(
-                rootfs_gc.call_args_list,
-                [mock.call(self.cache)] * 3,
-            )
-            self.assertEqual(
-                apks_gc.call_args_list,
-                [mock.call(self.cache)] * 3,
-            )
+
+                assert (f"build phone --build-type {build_type}: OK (cached)") in (
+                    stdout.getvalue()
+                )
+                expected = self.bundle_path if build_type == "release" else debug
+                assert (str(expected.relative_to(self.root))) in (stdout.getvalue())
+                assert not (old.exists())
+                assert self.bundle_path.is_dir()
+                assert debug.is_dir()
+            assert (rootfs_gc.call_args_list) == ([mock.call(self.cache)] * 3)
+            assert (apks_gc.call_args_list) == ([mock.call(self.cache)] * 3)
 
     def test_build_result_ignores_closed_stdout_pipe(self) -> None:
         """A closed output consumer must not turn a valid build result into failure."""
@@ -115,38 +110,36 @@ class BuildLifecycleTests(CommandBundleFixture):
                 cached=False,
             )
 
-    def test_changed_or_missing_bundle_files_are_cache_misses(self) -> None:
+    @pytest.mark.parametrize(
+        ("relative", "mutation"),
+        [
+            pytest.param("image/ramboot.bin", "bytes", id="image-bytes"),
+            pytest.param("host/fplinux-usb-keyboard", "bytes", id="keyboard-bytes"),
+            pytest.param("host/fplinux-usb-keyboard", "missing", id="missing-keyboard"),
+            pytest.param("image/ramboot.bin", "mode", id="image-mode"),
+            pytest.param("host/fplinux-usb-keyboard", "mode", id="keyboard-mode"),
+        ],
+    )
+    def test_changed_or_missing_bundle_files_are_cache_misses(
+        self, relative: str, mutation: str
+    ) -> None:
         """Cache reuse requires every recorded payload byte and file mode to match."""
         identity = bundles_commands.BuildIdentity(
             self.snapshot.recipe, "e" * 64, "a" * 64, self.signing_key
         )
         with mock.patch.object(common, "ROOT", self.root):
-            for relative, mutation in (
-                ("image/ramboot.bin", "bytes"),
-                ("host/fplinux-usb-keyboard", "bytes"),
-                ("host/fplinux-usb-keyboard", "missing"),
-                ("image/ramboot.bin", "mode"),
-                ("host/fplinux-usb-keyboard", "mode"),
-            ):
-                with self.subTest(relative=relative, mutation=mutation):
-                    source = self.bundle_path / relative
-                    original = source.read_bytes()
-                    mode = source.stat().st_mode & 0o777
-                    if mutation == "bytes":
-                        source.write_bytes(bytes([original[0] ^ 0x20]) + original[1:])
-                    elif mutation == "missing":
-                        source.unlink()
-                    else:
-                        source.chmod(0o600)
-                    try:
-                        self.assertIsNone(
-                            bundles_commands.matching_target_bundle(
-                                "phone", identity, "image/ramboot.bin"
-                            )
-                        )
-                    finally:
-                        source.write_bytes(original)
-                        source.chmod(mode)
+            source = self.bundle_path / relative
+            if mutation == "bytes":
+                original = source.read_bytes()
+                source.write_bytes(bytes([original[0] ^ 0x20]) + original[1:])
+            elif mutation == "missing":
+                source.unlink()
+            else:
+                source.chmod(0o600)
+            assert (
+                bundles_commands.matching_target_bundle("phone", identity, "image/ramboot.bin")
+                is None
+            )
 
     def test_exact_bundle_identity_and_image_are_a_reusable_hit(self) -> None:
         """Reuse a resolved generation only when its identity and image bytes match."""
@@ -161,29 +154,31 @@ class BuildLifecycleTests(CommandBundleFixture):
             )
 
         if matched is None:
-            self.fail("an exact bundle was not reusable")
+            pytest.fail("an exact bundle was not reusable")
         bundle, manifest = matched
-        self.assertEqual(bundle, self.bundle)
-        self.assertEqual(manifest, json.loads(self.bundle.manifest_bytes))
+        assert (bundle) == (self.bundle)
+        assert (manifest) == (json.loads(self.bundle.manifest_bytes))
 
-    def test_each_build_identity_mismatch_is_a_cache_miss(self) -> None:
+    @pytest.mark.parametrize(
+        ("field", "changed"),
+        [
+            pytest.param("workspace_digest", "d" * 64, id="workspace"),
+            pytest.param("container_image_recipe", "f" * 64, id="image-recipe"),
+            pytest.param("container_image_content", "b" * 64, id="image-content"),
+            pytest.param("apk_signing_key", "8" * 64, id="signing-key"),
+        ],
+    )
+    def test_each_build_identity_mismatch_is_a_cache_miss(self, field: str, changed: str) -> None:
         """Reject a generation when any host-visible causal identity changed."""
-        mismatches = (
-            bundles_commands.BuildIdentity("d" * 64, "e" * 64, "a" * 64, self.signing_key),
-            bundles_commands.BuildIdentity("c" * 64, "f" * 64, "a" * 64, self.signing_key),
-            bundles_commands.BuildIdentity("c" * 64, "e" * 64, "b" * 64, self.signing_key),
-            bundles_commands.BuildIdentity("c" * 64, "e" * 64, "a" * 64, "8" * 64),
+        identity = replace(
+            bundles_commands.BuildIdentity("c" * 64, "e" * 64, "a" * 64, self.signing_key),
+            **{field: changed},
         )
         with mock.patch.object(common, "ROOT", self.root):
-            for identity in mismatches:
-                with self.subTest(identity=identity):
-                    self.assertIsNone(
-                        bundles_commands.matching_target_bundle(
-                            "phone",
-                            identity,
-                            "image/ramboot.bin",
-                        )
-                    )
+            assert (
+                bundles_commands.matching_target_bundle("phone", identity, "image/ramboot.bin")
+                is None
+            )
 
     def test_build_miss_requires_host_validation_after_container_success(self) -> None:
         """Container exit zero is insufficient without an exact published generation."""
@@ -225,20 +220,17 @@ class BuildLifecycleTests(CommandBundleFixture):
             mock.patch.object(prune_operations, "discard_obsolete_rootfs") as rootfs_gc,
             mock.patch.object(prune_operations, "discard_obsolete_apks") as apks_gc,
             mock.patch.object(output.Stage, "run", autospec=True),
-            self.assertRaisesRegex(
-                SystemExit,
-                "without publishing an exact valid current bundle",
-            ),
+            pytest.raises(SystemExit, match="without publishing an exact valid current bundle"),
         ):
             output.run_entrypoint(lambda: build_commands.build("phone", 4))
 
-        self.assertFalse(bundle_pointer(self.output, "phone").exists())
-        self.assertTrue(old.exists())
+        assert not (bundle_pointer(self.output, "phone").exists())
+        assert old.exists()
         discard.assert_called_once_with(self.snapshot, workspace)
         rootfs_gc.assert_not_called()
         apks_gc.assert_not_called()
         metadata = next((self.root / ".cache/logs/build/phone").rglob("run.json"))
-        self.assertEqual(json.loads(metadata.read_text(encoding="utf-8"))["status"], "failed")
+        assert (json.loads(metadata.read_text(encoding="utf-8"))["status"]) == ("failed")
 
     def test_successful_build_discards_superseded_after_host_validation(self) -> None:
         """Retain old generations until the container result validates on the host."""
@@ -289,14 +281,14 @@ class BuildLifecycleTests(CommandBundleFixture):
             with contextlib.redirect_stdout(stdout):
                 output.run_entrypoint(lambda: build_commands.build("phone", 4))
 
-        self.assertIn("build phone --build-type release: OK", stdout.getvalue())
-        self.assertNotIn("build phone --build-type release: OK (cached)", stdout.getvalue())
-        self.assertFalse(old.exists())
+        assert ("build phone --build-type release: OK") in (stdout.getvalue())
+        assert ("build phone --build-type release: OK (cached)") not in (stdout.getvalue())
+        assert not (old.exists())
         discard.assert_called_once_with(self.snapshot, workspace)
         rootfs_gc.assert_called_once_with(self.cache)
         apks_gc.assert_called_once_with(self.cache)
         metadata = next((self.root / ".cache/logs/build/phone").rglob("run.json"))
-        self.assertEqual(json.loads(metadata.read_text(encoding="utf-8"))["status"], "success")
+        assert (json.loads(metadata.read_text(encoding="utf-8"))["status"]) == ("success")
 
     def test_offline_build_miss_requires_the_current_image_without_setup(self) -> None:
         """Do not silently rebuild the OCI environment when offline was requested."""
@@ -326,14 +318,11 @@ class BuildLifecycleTests(CommandBundleFixture):
                 "stage_workspace_snapshot",
                 side_effect=AssertionError("offline image failure must not stage a workspace"),
             ),
-            self.assertRaisesRegex(
-                SystemExit,
-                "offline build requires the current pinned OCI image",
-            ),
+            pytest.raises(SystemExit, match="offline build requires the current pinned OCI image"),
         ):
             output.run_entrypoint(lambda: build_commands.build("phone", 4, offline=True))
 
-        self.assertFalse(bundle_pointer(self.output, "phone").exists())
+        assert not (bundle_pointer(self.output, "phone").exists())
 
     def test_build_argv_has_explicit_memory_budget_and_narrow_mounts(self) -> None:
         """Request a 2 GiB build budget without exposing broad cache mounts."""
@@ -367,8 +356,7 @@ class BuildLifecycleTests(CommandBundleFixture):
 
         mounts = [command[index + 1] for index, value in enumerate(command) if value == "--volume"]
         # No destination is nested in another, so mount order has no effect.
-        self.assertCountEqual(
-            mounts,
+        assert Counter(mounts) == Counter(
             [
                 f"{roots['downloads']}:/cache/downloads",
                 f"{roots['ccache']}:/cache/ccache",
@@ -380,25 +368,24 @@ class BuildLifecycleTests(CommandBundleFixture):
                 f"{roots['output']}:/out",
                 f"{roots['logs']}:/logs",
                 f"{roots['workspace']}:/workspace:ro",
-            ],
+            ]
         )
-        self.assertIn("--read-only", command)
-        self.assertIn("--privileged", command)
-        self.assertIn("--memory", command)
-        self.assertEqual(command[command.index("--memory") + 1], "2g")
-        self.assertFalse(any(mount.split(":", 2)[1] == "/cache" for mount in mounts))
-        self.assertIn("FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE=" + "e" * 64, command)
-        self.assertIn("FPLINUX_CONTAINER_IMAGE_CONTENT=" + "a" * 64, command)
+        assert ("--read-only") in (command)
+        assert ("--privileged") in (command)
+        assert ("--memory") in (command)
+        assert (command[command.index("--memory") + 1]) == ("2g")
+        assert not (any(mount.split(":", 2)[1] == "/cache" for mount in mounts))
+        assert ("FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE=" + "e" * 64) in (command)
+        assert ("FPLINUX_CONTAINER_IMAGE_CONTENT=" + "a" * 64) in (command)
         build = command[command.index("--") + 1 :]
-        self.assertEqual(build[:3], ["python3", "-m", "fplinux_cli.build"])
+        assert (build[:3]) == (["python3", "-m", "fplinux_cli.build"])
         # The in-container parser accepts these options in any order; compare flag/value pairs.
-        self.assertCountEqual(
-            zip(build[3::2], build[4::2], strict=True),
-            [("--target", "phone"), ("--build-type", "release"), ("--jobs", "6")],
+        assert Counter(zip(build[3::2], build[4::2], strict=True)) == Counter(
+            [("--target", "phone"), ("--build-type", "release"), ("--jobs", "6")]
         )
-        self.assertEqual(command[:2], ["/usr/bin/kern", "box"])
+        assert (command[:2]) == (["/usr/bin/kern", "box"])
         network = command.index("--network")
-        self.assertEqual(command[network + 1], "host")
+        assert (command[network + 1]) == ("host")
 
     def test_offline_build_argv_disables_container_network(self) -> None:
         """Offline mode is an execution policy, not a separate build identity."""
@@ -430,8 +417,4 @@ class BuildLifecycleTests(CommandBundleFixture):
         )
 
         network = command.index("--network")
-        self.assertEqual(command[network + 1], "none")
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert (command[network + 1]) == ("none")

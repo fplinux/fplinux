@@ -5,17 +5,17 @@ from __future__ import annotations
 
 import subprocess
 import tempfile
-import unittest
 from pathlib import Path
 from unittest import mock
 
 import check as source_check
+import pytest
 from fplinux_cli.alpine import registration
 from fplinux_cli.quality.formatting.source_formats import classify_source_formats
 from fplinux_cli.workspace import quality_inputs as workspace_module
 
 
-class SourceInventoryTests(unittest.TestCase):
+class SourceInventoryTests:
     """Keep scoped checks independent from unrelated source policy failures."""
 
     def test_non_source_inventory_skips_unrelated_artifacts(self) -> None:
@@ -30,10 +30,10 @@ class SourceInventoryTests(unittest.TestCase):
             with mock.patch.object(source_check, "ROOT", root):
                 files = source_check.source_files(enforce_policy=False)
             formats = classify_source_formats(files, root=root)
-            self.assertEqual(files, [markdown, root / "tool"])
-            self.assertEqual(formats.markdown, ("document.md",))
-            self.assertEqual(formats.posix_shell, ())
-            self.assertEqual(formats.bash, ())
+            assert (files) == ([markdown, root / "tool"])
+            assert (formats.markdown) == (("document.md",))
+            assert (formats.posix_shell) == (())
+            assert (formats.bash) == (())
 
     def test_markdown_links_require_real_files_and_anchors(self) -> None:
         """Protect navigable local documentation without checking external URLs."""
@@ -59,17 +59,17 @@ class SourceInventoryTests(unittest.TestCase):
                 source_check.check_markdown_links([index, guide, spaced])
 
                 index.write_text("# Index\n\n[missing](absent.md)\n")
-                with self.assertRaisesRegex(SystemExit, "link target is missing"):
+                with pytest.raises(SystemExit, match="link target is missing"):
                     source_check.check_markdown_links([index, guide, spaced])
 
                 index.write_text("# Index\n\n[missing](guide.md#absent)\n")
-                with self.assertRaisesRegex(SystemExit, "link anchor is missing"):
+                with pytest.raises(SystemExit, match="link anchor is missing"):
                     source_check.check_markdown_links([index, guide, spaced])
 
                 linked = root / "linked.md"
                 linked.symlink_to(guide)
                 index.write_text("# Index\n\n[linked](linked.md)\n")
-                with self.assertRaisesRegex(SystemExit, "link target is a symlink"):
+                with pytest.raises(SystemExit, match="link target is a symlink"):
                     source_check.check_markdown_links([index, guide, spaced])
 
     def test_quality_workspace_skips_symlinks_outside_source_scope(self) -> None:
@@ -92,27 +92,23 @@ class SourceInventoryTests(unittest.TestCase):
                     return_value=inventory,
                 ),
             ):
-                self.assertEqual(
-                    workspace_module.quality_files(enforce_source_policy=False),
-                    [("document.md", regular)],
+                assert (workspace_module.quality_files(enforce_source_policy=False)) == (
+                    [("document.md", regular)]
                 )
-                with self.assertRaisesRegex(SystemExit, "quality input must not be a symlink"):
+                with pytest.raises(SystemExit, match="quality input must not be a symlink"):
                     workspace_module.quality_files(enforce_source_policy=True)
 
-    def test_source_inventory_rejects_quake_game_data(self) -> None:
+    @pytest.mark.parametrize("name", ["pak0.pak", "pak0.part.00"], ids=("pak", "pak-part"))
+    def test_source_inventory_rejects_quake_game_data(self, name: str) -> None:
         """Keep PAK data outside source and generated images."""
-        for name in ("pak0.pak", "pak0.part.00"):
-            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
-                root = Path(temporary)
-                (root / name).write_text("game data\n")
-                with (
-                    mock.patch.object(source_check, "ROOT", root),
-                    self.assertRaisesRegex(
-                        SystemExit,
-                        "Quake game data is not allowed",
-                    ),
-                ):
-                    source_check.source_files(enforce_policy=True)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / name).write_text("game data\n")
+            with (
+                mock.patch.object(source_check, "ROOT", root),
+                pytest.raises(SystemExit, match="Quake game data is not allowed"),
+            ):
+                source_check.source_files(enforce_policy=True)
 
     def test_source_inventory_rejects_binary_artifacts(self) -> None:
         """Keep binary rejection in the explicit source scope."""
@@ -121,10 +117,7 @@ class SourceInventoryTests(unittest.TestCase):
             (root / "artifact.bin").write_bytes(b"\x00\xff")
             with (
                 mock.patch.object(source_check, "ROOT", root),
-                self.assertRaisesRegex(
-                    SystemExit,
-                    "binary artifact is not allowed",
-                ),
+                pytest.raises(SystemExit, match="binary artifact is not allowed"),
             ):
                 source_check.source_files(enforce_policy=True)
 
@@ -143,16 +136,14 @@ class SourceInventoryTests(unittest.TestCase):
                 mock.patch.object(source_check, "ROOT", root),
                 mock.patch.object(source_check, "discover_targets", return_value=()),
             ):
-                self.assertEqual(
-                    source_check.userspace_c_sources(files),
-                    [("alpine/aports/demo-consumer/app.c", False)],
+                assert (source_check.userspace_c_sources(files)) == (
+                    [("alpine/aports/demo-consumer/app.c", False)]
                 )
-                self.assertEqual(
-                    source_check.userspace_c_sources(files, include_embedded=True),
+                assert (source_check.userspace_c_sources(files, include_embedded=True)) == (
                     [
                         ("alpine/aports/demo-consumer/app.c", False),
                         ("alpine/aports/demo-consumer/backend.c", False),
-                    ],
+                    ]
                 )
 
     def test_boot_and_shared_driver_c_use_the_project_format_contract(self) -> None:
@@ -178,17 +169,18 @@ class SourceInventoryTests(unittest.TestCase):
                 mock.patch.object(source_check, "ROOT", root),
                 mock.patch.object(source_check, "discover_targets", return_value=()),
             ):
-                self.assertEqual(
+                assert (
                     source_check.project_c_format_sources(
                         [source, header, platform_common, target_common, userspace]
-                    ),
+                    )
+                ) == (
                     [
                         "alpine/aports/demo/app.c",
                         "platforms/soc/common/core.c",
                         "targets/phone/common/board.h",
                         "targets/phone/uboot/board.c",
                         "targets/phone/uboot/board.h",
-                    ],
+                    ]
                 )
 
     def test_package_selection_validation_rejects_a_missing_platform_aport(self) -> None:
@@ -216,13 +208,8 @@ class SourceInventoryTests(unittest.TestCase):
                 mock.patch.object(source_check, "load_target", side_effect=targets.__getitem__),
                 mock.patch.object(source_check, "load_platform", return_value=platform),
                 mock.patch.object(registration, "COMMON_PACKAGES", ("common-runtime",)),
-                self.assertRaisesRegex(
-                    SystemExit,
-                    "selected aport is missing or invalid: missing-board-app",
+                pytest.raises(
+                    SystemExit, match="selected aport is missing or invalid: missing-board-app"
                 ),
             ):
                 source_check.validate_package_selections()
-
-
-if __name__ == "__main__":
-    unittest.main()

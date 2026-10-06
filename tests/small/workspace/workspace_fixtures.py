@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import unittest
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 from unittest import mock
@@ -15,16 +14,18 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-class WorkspaceSourceFixture(unittest.TestCase):
+class WorkspaceSourceFixture:
     """Create an owned source file with explicit contents and mode."""
 
-    def _source(self, root: Path, *, contents: bytes = b"source", mode: int = 0o754) -> Path:
+    @staticmethod
+    def _source(root: Path, *, contents: bytes = b"source", mode: int = 0o754) -> Path:
         source = root / "source"
         source.write_bytes(contents)
         source.chmod(mode)
         return source
 
-    def _registration_source(self, root: Path) -> tuple[str, Path]:
+    @staticmethod
+    def _registration_source(root: Path) -> tuple[str, Path]:
         """Create the package declarations materialized beside a synthetic target."""
         relative = "scripts/fplinux_cli/alpine/registration.py"
         source = root / relative

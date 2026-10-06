@@ -11,11 +11,11 @@ import contextlib
 import io
 import shutil
 import tempfile
-import unittest
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, ClassVar
 from unittest import mock
 
+import pytest
 from fplinux_cli import common
 from fplinux_cli.build.device_tree import (
     exact_path_properties,
@@ -36,8 +36,11 @@ from tests import ROOT
 from tests.fdt import binary_tree
 from tests.process import run_process
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
-class NewTargetDeviceTreeTests(unittest.TestCase):
+
+class NewTargetDeviceTreeTests:
     """Compile the generated target's identity with minimal platform include stubs."""
 
     def test_new_target_compiles_with_its_own_board_identity(self) -> None:
@@ -115,25 +118,28 @@ class NewTargetDeviceTreeTests(unittest.TestCase):
                 check=True,
             )
             properties = exact_path_properties(dtb.read_bytes(), ("/",))["/"]
-            self.assertEqual(parse_nul_string(properties["model"], "model"), "HAMMER Horizon LTE")
-            self.assertEqual(
-                parse_nul_string_list(properties["compatible"], "compatible"),
-                ("hammer,horizon-lte", "sprd,ums9117"),
+            assert (parse_nul_string(properties["model"], "model")) == ("HAMMER Horizon LTE")
+            assert (parse_nul_string_list(properties["compatible"], "compatible")) == (
+                ("hammer,horizon-lte", "sprd,ums9117")
             )
 
 
-class LinuxMachineBindingTests(unittest.TestCase):
+class LinuxMachineBindingTests:
     """Validate generated board schemas together through real dtschema tools."""
 
-    def test_boards_sharing_a_soc_validate_only_their_own_identity(self) -> None:
-        """A shared fallback produces no duplicate schema or wrong-board validation."""
+    processed_schema: ClassVar[Path]
+
+    @pytest.fixture(scope="class", autouse=True)
+    @classmethod
+    def _validated_schemas(cls) -> Iterator[None]:
+        """Process both board bindings once for the class's identity cases."""
         identities = (
             {"display_name": "First phone", "compatible": "test,first"},
             {"display_name": "Second phone", "compatible": "test,second"},
         )
         platform = {"display_name": "Test SoC", "compatible": "test,soc"}
-        with tempfile.TemporaryDirectory() as name:
-            work = Path(name)
+        with tempfile.TemporaryDirectory() as temporary:
+            work = Path(temporary)
             bindings = []
             for identity in identities:
                 path = work / linux_machine_binding_path(identity, arch="arm")
@@ -151,42 +157,50 @@ class LinuxMachineBindingTests(unittest.TestCase):
                     timeout=30,
                     check=True,
                 )
-                self.assertEqual(result.stdout + result.stderr, "")
+                assert result.stdout + result.stderr == ""
+            cls.processed_schema = processed
+            yield
 
-            for compatible, model, expected_model in (
-                ("test,first", "First phone", None),
-                ("test,second", "Second phone", None),
-                ("test,first", "Wrong model", "First phone"),
-                ("test,second", "Wrong model", "Second phone"),
-            ):
-                with self.subTest(compatible=compatible, model=model):
-                    dtb = work / "board.dtb"
-                    dtb.write_bytes(
-                        binary_tree(
-                            [
-                                ("compatible", f"{compatible}\0test,soc\0".encode()),
-                                ("model", f"{model}\0".encode()),
-                                ("#address-cells", b"\0\0\0\1"),
-                                ("#size-cells", b"\0\0\0\1"),
-                            ],
-                            [],
-                        )
-                    )
-                    result = run_process(
-                        ["dt-validate", "-s", str(processed), str(dtb)],
-                        name="validate binary board identity",
-                        timeout=30,
-                        check=True,
-                    )
-                    diagnostics = result.stdout + result.stderr
-                    if expected_model is None:
-                        self.assertEqual(diagnostics, "")
-                    else:
-                        self.assertIn("model", diagnostics)
-                        self.assertIn(expected_model, diagnostics)
+    @pytest.mark.parametrize(
+        ("compatible", "model", "expected_model"),
+        [
+            pytest.param("test,first", "First phone", None, id="first-board"),
+            pytest.param("test,second", "Second phone", None, id="second-board"),
+            pytest.param("test,first", "Wrong model", "First phone", id="first-wrong-model"),
+            pytest.param("test,second", "Wrong model", "Second phone", id="second-wrong-model"),
+        ],
+    )
+    def test_boards_sharing_a_soc_validate_only_their_own_identity(
+        self, tmp_path: Path, compatible: str, model: str, expected_model: str | None
+    ) -> None:
+        """A shared fallback produces no duplicate schema or wrong-board validation."""
+        dtb = tmp_path / "board.dtb"
+        dtb.write_bytes(
+            binary_tree(
+                [
+                    ("compatible", f"{compatible}\0test,soc\0".encode()),
+                    ("model", f"{model}\0".encode()),
+                    ("#address-cells", b"\0\0\0\1"),
+                    ("#size-cells", b"\0\0\0\1"),
+                ],
+                [],
+            )
+        )
+        result = run_process(
+            ["dt-validate", "-s", str(self.processed_schema), str(dtb)],
+            name="validate binary board identity",
+            timeout=30,
+            check=True,
+        )
+        diagnostics = result.stdout + result.stderr
+        if expected_model is None:
+            assert diagnostics == ""
+        else:
+            assert "model" in diagnostics
+            assert expected_model in diagnostics
 
 
-class LinuxDeviceTreeProfileTests(unittest.TestCase):
+class LinuxDeviceTreeProfileTests:
     """Keep multiple DT identities and root profiles separate in compiled output."""
 
     def test_boards_and_profiles_compile_from_unchanged_shared_sources(self) -> None:
@@ -247,65 +261,55 @@ class LinuxDeviceTreeProfileTests(unittest.TestCase):
                     ("second", "default", ram),
                     ("first", "default", ram),
                 ):
-                    with self.subTest(target=target, profile=profile):
-                        output = work / "outputs" / target / profile
-                        write_profile_root(output, config)
-                        run_process(
-                            [
-                                "make",
-                                "--no-print-directory",
-                                "-f",
-                                str(makefile),
-                                f"src={source}",
-                                f"objtree={output}",
-                                f"board={target}",
-                            ],
-                            name="compile profile DTB with host dtc",
-                            timeout=30,
-                            check=True,
-                        )
-                        dtb = (output / "board.dtb").read_bytes()
-                        key = (target, profile)
-                        if key in outputs:
-                            self.assertEqual(dtb, outputs[key])
-                        outputs[key] = dtb
-                self.assertEqual(
-                    {path.name: path.read_bytes() for path in source.iterdir()}, before
-                )
+                    output = work / "outputs" / target / profile
+                    write_profile_root(output, config)
+                    run_process(
+                        [
+                            "make",
+                            "--no-print-directory",
+                            "-f",
+                            str(makefile),
+                            f"src={source}",
+                            f"objtree={output}",
+                            f"board={target}",
+                        ],
+                        name="compile profile DTB with host dtc",
+                        timeout=30,
+                        check=True,
+                    )
+                    dtb = (output / "board.dtb").read_bytes()
+                    key = (target, profile)
+                    if key in outputs:
+                        assert (dtb) == (outputs[key])
+                    outputs[key] = dtb
+                assert ({path.name: path.read_bytes() for path in source.iterdir()}) == (before)
             finally:
                 source.chmod(0o755)
                 for path in source.iterdir():
                     path.chmod(0o644)
 
             for (target, profile), dtb in outputs.items():
-                with self.subTest(target=target, profile=profile):
-                    nodes = exact_path_properties(dtb, ("/", "/chosen"))
-                    self.assertEqual(
-                        parse_nul_string(nodes["/"]["model"], "model"),
-                        "First phone" if target == "first" else "Second phone",
-                    )
-                    self.assertEqual(
-                        parse_nul_string_list(nodes["/"]["compatible"], "compatible"),
-                        ("test,first", "test,soc")
-                        if target == "first"
-                        else ("test,second", "test,soc"),
-                    )
-                    bootargs = parse_nul_string(nodes["/chosen"]["bootargs"], "bootargs").split()
-                    if profile == "default":
-                        self.assertIn("rdinit=/init", bootargs)
-                        self.assertIn("init=/init", bootargs)
-                        self.assertFalse(any(arg.startswith("root=") for arg in bootargs))
-                    else:
-                        for argument in (
-                            "root=PARTUUID=46504c58-02",
-                            "rootfstype=ext4",
-                            "rootwait=10",
-                            "rw",
-                            "init=/sbin/init",
-                        ):
-                            self.assertIn(argument, bootargs)
-                        self.assertFalse(any(arg.startswith("rdinit=") for arg in bootargs))
-
-
-if __name__ == "__main__":
-    unittest.main()
+                nodes = exact_path_properties(dtb, ("/", "/chosen"))
+                assert (parse_nul_string(nodes["/"]["model"], "model")) == (
+                    "First phone" if target == "first" else "Second phone"
+                )
+                assert (parse_nul_string_list(nodes["/"]["compatible"], "compatible")) == (
+                    ("test,first", "test,soc")
+                    if target == "first"
+                    else ("test,second", "test,soc")
+                )
+                bootargs = parse_nul_string(nodes["/chosen"]["bootargs"], "bootargs").split()
+                if profile == "default":
+                    assert ("rdinit=/init") in (bootargs)
+                    assert ("init=/init") in (bootargs)
+                    assert not (any(arg.startswith("root=") for arg in bootargs))
+                else:
+                    for argument in (
+                        "root=PARTUUID=46504c58-02",
+                        "rootfstype=ext4",
+                        "rootwait=10",
+                        "rw",
+                        "init=/sbin/init",
+                    ):
+                        assert (argument) in (bootargs)
+                    assert not (any(arg.startswith("rdinit=") for arg in bootargs))

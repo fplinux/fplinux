@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 
 from tests import ROOT
@@ -15,7 +14,7 @@ FIXTURES = ROOT / "tests/host_tool/ums9117"
 COMPAT = FIXTURES / "bluetooth-compat"
 
 
-class Ums9117BluetoothHciHostTests(unittest.TestCase):
+class Ums9117BluetoothHciHostTests:
     """Link production objects with synthetic firmware and mailbox boundaries."""
 
     def run_component(self, component: str) -> None:
@@ -65,7 +64,3 @@ class Ums9117BluetoothHciHostTests(unittest.TestCase):
     def test_retained_transport_admission_rollback_and_stream(self) -> None:
         """Fake peers exercise suspend, FM framing, timeout isolation and BT retention."""
         self.run_component("runtime")
-
-
-if __name__ == "__main__":
-    unittest.main()

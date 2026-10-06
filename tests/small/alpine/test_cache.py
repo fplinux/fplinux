@@ -8,11 +8,11 @@ import json
 import os
 import subprocess
 import tarfile
-import unittest
 from contextlib import nullcontext
 from pathlib import Path
 from unittest import mock
 
+import pytest
 from fplinux_cli.alpine import (
     aports as alpine_aports,
 )
@@ -60,22 +60,17 @@ class AlpineCacheTests(fixtures.AlpineSourceFixture):
         recipe = self._recipe(packages=(child,))
         alpine_rootfs_state.write_receipt(output, recipe)
 
-        self.assertTrue(
-            alpine_rootfs_state.receipt_matches(output, self._recipe(packages=(child,)))
-        )
-        self.assertNotEqual(recipe, self._recipe(packages=(producer,)))
-        self.assertEqual(
-            alpine_recipes.alpine_package_recipe(child, "1" * 64, self.signing_key, self.root),
-            alpine_recipes.alpine_package_recipe(producer, "1" * 64, self.signing_key, self.root),
+        assert alpine_rootfs_state.receipt_matches(output, self._recipe(packages=(child,)))
+        assert (recipe) != (self._recipe(packages=(producer,)))
+        assert (
+            alpine_recipes.alpine_package_recipe(child, "1" * 64, self.signing_key, self.root)
+        ) == (
+            alpine_recipes.alpine_package_recipe(producer, "1" * 64, self.signing_key, self.root)
         )
         self._write("alpine/aports/not-production/APKBUILD", b"unrelated changed\n")
-        self.assertTrue(
-            alpine_rootfs_state.receipt_matches(output, self._recipe(packages=(child,)))
-        )
+        assert alpine_rootfs_state.receipt_matches(output, self._recipe(packages=(child,)))
         aport.write_bytes(b"pkgname=fplinux-ncurses\nchanged=yes\n")
-        self.assertFalse(
-            alpine_rootfs_state.receipt_matches(output, self._recipe(packages=(child,)))
-        )
+        assert not (alpine_rootfs_state.receipt_matches(output, self._recipe(packages=(child,))))
 
     def test_apk_cache_control_flow_with_mocked_abuild_preserves_last_good(self) -> None:
         """Exercise cache reuse, one-source invalidation and failure using fake abuild output."""
@@ -156,24 +151,24 @@ class AlpineCacheTests(fixtures.AlpineSourceFixture):
             ),
         ):
             outputs, _public, _private = build_apks()
-            self.assertEqual(builds, list(self.packages))
-            self.assertEqual(outputs[child_package].read_bytes(), b"fplinux-package-a-extra\n")
+            assert (builds) == (list(self.packages))
+            assert (outputs[child_package].read_bytes()) == (b"fplinux-package-a-extra\n")
 
             builds.clear()
             outputs, _public, _private = build_apks()
-            self.assertEqual(builds, [])
-            self.assertEqual(outputs[child_package].read_bytes(), b"fplinux-package-a-extra\n")
+            assert (builds) == ([])
+            assert (outputs[child_package].read_bytes()) == (b"fplinux-package-a-extra\n")
 
             self._write("alpine/aports/not-production/APKBUILD", b"unrelated changed\n")
             build_apks()
-            self.assertEqual(builds, [])
+            assert (builds) == ([])
 
             self._write(
                 f"alpine/aports/{changed_package}/APKBUILD",
                 f"pkgname={changed_package}\npkgrel=1\n".encode(),
             )
             build_apks()
-            self.assertEqual(builds, [changed_package])
+            assert (builds) == ([changed_package])
 
             slot = cache / alpine_packages.PACKAGE_CACHE_DIRECTORY / changed_package
             receipt = slot / alpine_packages.PACKAGE_RECEIPT_NAME
@@ -185,11 +180,11 @@ class AlpineCacheTests(fixtures.AlpineSourceFixture):
                 f"pkgname={changed_package}\npkgrel=2\n".encode(),
             )
             failing_package = changed_package
-            with self.assertRaisesRegex(SystemExit, f"abuild failed for {changed_package}"):
+            with pytest.raises(SystemExit, match=f"abuild failed for {changed_package}"):
                 build_apks()
 
-        self.assertEqual(receipt.read_bytes(), previous_receipt)
-        self.assertEqual(package.read_bytes(), previous_package)
+        assert (receipt.read_bytes()) == (previous_receipt)
+        assert (package.read_bytes()) == (previous_package)
 
     def test_local_library_apks_populate_fresh_sysroots_on_builds_and_cache_hits(self) -> None:
         """Fake abuild/APK processes exercise dependency files and causal cache decisions."""
@@ -223,9 +218,7 @@ class AlpineCacheTests(fixtures.AlpineSourceFixture):
             sysroot = Path(environment["CBUILDROOT"])
             if cwd.name == consumer:
                 for installed in (library, f"{library}-dev"):
-                    self.assertEqual(
-                        (sysroot / installed).read_bytes(), library_source.read_bytes()
-                    )
+                    assert ((sysroot / installed).read_bytes()) == (library_source.read_bytes())
             builds.append(cwd.name)
             repository = Path(environment["REPODEST"])
             for filename in list_packages(command, cwd, environment).splitlines():
@@ -233,12 +226,12 @@ class AlpineCacheTests(fixtures.AlpineSourceFixture):
 
         def install_apks(command: list[str]) -> None:
             """Replace APK installation with file markers; signature checks remain untested."""
-            self.assertEqual(command[0], "apk")
-            self.assertIn("--no-network", command)
-            self.assertIn("--no-scripts", command)
-            self.assertNotIn("--allow-untrusted", command)
+            assert (command[0]) == ("apk")
+            assert ("--no-network") in (command)
+            assert ("--no-scripts") in (command)
+            assert ("--allow-untrusted") not in (command)
             keys = Path(command[command.index("--keys-dir") + 1])
-            self.assertEqual((keys / public_key.name).read_bytes(), public_key.read_bytes())
+            assert ((keys / public_key.name).read_bytes()) == (public_key.read_bytes())
             sysroot = Path(command[command.index("--root") + 1])
             for filename in command[command.index("add") + 1 :]:
                 apk = Path(filename)
@@ -263,7 +256,7 @@ class AlpineCacheTests(fixtures.AlpineSourceFixture):
                 build_packages=(consumer, unrelated),
             )
             for installed in (library, f"{library}-dev"):
-                self.assertEqual((sysroot / installed).read_bytes(), library_source.read_bytes())
+                assert ((sysroot / installed).read_bytes()) == (library_source.read_bytes())
 
         with (
             mock.patch.object(alpine_aports, "CACHE", cache),
@@ -291,19 +284,30 @@ class AlpineCacheTests(fixtures.AlpineSourceFixture):
             ),
         ):
             build_apks()
-            self.assertEqual(set(builds), {library, consumer, unrelated})
+            assert (set(builds)) == ({library, consumer, unrelated})
             builds.clear()
             build_apks()
-            self.assertEqual(builds, [])
+            assert (builds) == ([])
             self._write(f"alpine/aports/{consumer}/program.c", b"changed consumer\n")
             build_apks()
-            self.assertEqual(builds, [consumer])
+            assert (builds) == ([consumer])
             builds.clear()
             library_source.write_bytes(b"library version 2\n")
             build_apks()
-            self.assertEqual(set(builds), {library, consumer})
+            assert (set(builds)) == ({library, consumer})
 
-    def test_cached_rootfs_reuse_honors_mocked_bundle_solver_results(self) -> None:
+    @pytest.mark.parametrize(
+        ("cached_bundle", "solver_status"),
+        [
+            pytest.param(False, 0, id="bundle-miss-installable"),
+            pytest.param(False, 7, id="bundle-miss-unresolved"),
+            pytest.param(True, 0, id="bundle-hit-installable"),
+            pytest.param(True, 7, id="bundle-hit-unresolved"),
+        ],
+    )
+    def test_cached_rootfs_reuse_honors_mocked_bundle_solver_results(
+        self, *, cached_bundle: bool, solver_status: int
+    ) -> None:
         """Stub APK builds and CPIO/solver processes; reuse must honor installation errors."""
         cache = Path(self.temporary.name) / "cache"
         output = cache / "rootfs" / ("9" * 64)
@@ -329,67 +333,64 @@ class AlpineCacheTests(fixtures.AlpineSourceFixture):
             },
         }
 
-        for cached_bundle, solver_status in ((False, 0), (False, 7), (True, 0), (True, 7)):
+        def run_external(
+            command: list[str],
+            *,
+            error_status: int = solver_status,
+            **_kwargs: object,
+        ) -> subprocess.CompletedProcess[str]:
+            status = error_status if "--simulate" in command else 0
+            detail = "missing runtime dependency" if status else ""
+            return subprocess.CompletedProcess(command, status, "", detail)
 
-            def run_external(
-                command: list[str],
-                *,
-                error_status: int = solver_status,
-                **_kwargs: object,
-            ) -> subprocess.CompletedProcess[str]:
-                status = error_status if "--simulate" in command else 0
-                detail = "missing runtime dependency" if status else ""
-                return subprocess.CompletedProcess(command, status, "", detail)
-
-            cached_outputs = {bundle_package: bundle_apk} if cached_bundle else None
-            with (
-                self.subTest(cached_bundle=cached_bundle, solver_status=solver_status),
-                mock.patch.object(alpine_rootfs, "CACHE", cache),
-                mock.patch.dict(os.environ, {"FPLINUX_CONTAINER_IMAGE_RECIPE": "1" * 64}),
-                mock.patch.object(
-                    alpine_rootfs,
-                    "_ensure_apk_signing_key",
-                    return_value=(private_key, public_key, "2" * 64),
+        cached_outputs = {bundle_package: bundle_apk} if cached_bundle else None
+        with (
+            mock.patch.object(alpine_rootfs, "CACHE", cache),
+            mock.patch.dict(os.environ, {"FPLINUX_CONTAINER_IMAGE_RECIPE": "1" * 64}),
+            mock.patch.object(
+                alpine_rootfs,
+                "_ensure_apk_signing_key",
+                return_value=(private_key, public_key, "2" * 64),
+            ),
+            mock.patch.object(alpine_rootfs, "alpine_rootfs_recipe", return_value="9" * 64),
+            mock.patch.object(alpine_rootfs_state, "receipt_matches", return_value=True),
+            mock.patch.object(
+                alpine_rootfs,
+                "_cached_aport_packages",
+                side_effect=({rootfs_package: base_apk}, cached_outputs),
+            ),
+            mock.patch.object(alpine_lock, "load_alpine_lock", return_value=lock),
+            mock.patch.object(alpine_lock, "package_records", return_value={}),
+            mock.patch.object(sources_build, "fetch", return_value=archive),
+            mock.patch.object(alpine_rootfs, "_alpine_runtime_packages", return_value=[]),
+            mock.patch.object(alpine_rootfs, "_alpine_group_packages", return_value=[]),
+            mock.patch.object(tarfile, "open", return_value=archive_context),
+            mock.patch.object(alpine_rootfs, "_prepare_alpine_sysroot"),
+            mock.patch.object(process_build, "log_message"),
+            mock.patch.object(
+                alpine_rootfs,
+                "_build_fplinux_apks",
+                return_value=(
+                    {rootfs_package: base_apk, bundle_package: bundle_apk},
+                    private_key,
+                    public_key,
                 ),
-                mock.patch.object(alpine_rootfs, "alpine_rootfs_recipe", return_value="9" * 64),
-                mock.patch.object(alpine_rootfs_state, "receipt_matches", return_value=True),
-                mock.patch.object(
-                    alpine_rootfs,
-                    "_cached_aport_packages",
-                    side_effect=({rootfs_package: base_apk}, cached_outputs),
-                ),
-                mock.patch.object(alpine_lock, "load_alpine_lock", return_value=lock),
-                mock.patch.object(alpine_lock, "package_records", return_value={}),
-                mock.patch.object(sources_build, "fetch", return_value=archive),
-                mock.patch.object(alpine_rootfs, "_alpine_runtime_packages", return_value=[]),
-                mock.patch.object(alpine_rootfs, "_alpine_group_packages", return_value=[]),
-                mock.patch.object(tarfile, "open", return_value=archive_context),
-                mock.patch.object(alpine_rootfs, "_prepare_alpine_sysroot"),
-                mock.patch.object(process_build, "log_message"),
-                mock.patch.object(
-                    alpine_rootfs,
-                    "_build_fplinux_apks",
-                    return_value=(
-                        {rootfs_package: base_apk, bundle_package: bundle_apk},
-                        private_key,
-                        public_key,
-                    ),
-                ),
-                mock.patch.object(
-                    alpine_rootfs,
-                    "_build_alpine_composition_repository",
-                    side_effect=AssertionError("rootfs cache hit must not recompose the rootfs"),
-                ),
-                mock.patch.object(subprocess, "run", side_effect=run_external),
-            ):
-                if solver_status:
-                    with self.assertRaisesRegex(SystemExit, "offline: missing runtime dependency"):
-                        alpine_rootfs.build_rootfs(2, (rootfs_package,), (bundle_package,))
-                else:
-                    actual = alpine_rootfs.build_rootfs(2, (rootfs_package,), (bundle_package,))
-                    self.assertEqual(actual[:3], (rootfs, output, "9" * 64))
-                    self.assertEqual(actual[3], {bundle_package: bundle_apk})
-                self.assertEqual(rootfs.read_bytes(), b"rootfs\n")
+            ),
+            mock.patch.object(
+                alpine_rootfs,
+                "_build_alpine_composition_repository",
+                side_effect=AssertionError("rootfs cache hit must not recompose the rootfs"),
+            ),
+            mock.patch.object(subprocess, "run", side_effect=run_external),
+        ):
+            if solver_status:
+                with pytest.raises(SystemExit, match="offline: missing runtime dependency"):
+                    alpine_rootfs.build_rootfs(2, (rootfs_package,), (bundle_package,))
+            else:
+                actual = alpine_rootfs.build_rootfs(2, (rootfs_package,), (bundle_package,))
+                assert (actual[:3]) == ((rootfs, output, "9" * 64))
+                assert (actual[3]) == ({bundle_package: bundle_apk})
+            assert (rootfs.read_bytes()) == (b"rootfs\n")
 
     def test_mocked_rootfs_cache_hits_reuse_cached_outputs(self) -> None:
         """A mocked receipt hit returns cached rootfs paths without bundle outputs."""
@@ -420,23 +421,19 @@ class AlpineCacheTests(fixtures.AlpineSourceFixture):
                 actual_rootfs, actual_output, actual_recipe, bundle_outputs = (
                     alpine_rootfs.build_rootfs(1, (package,))
                 )
-            self.assertEqual(
-                (actual_rootfs, actual_output, actual_recipe),
-                (rootfs, output, recipe),
-            )
-            self.assertEqual(bundle_outputs, {})
+            assert ((actual_rootfs, actual_output, actual_recipe)) == ((rootfs, output, recipe))
+            assert (bundle_outputs) == ({})
 
     def test_signing_key_identity_requires_one_regular_public_key(self) -> None:
         """Keep package signing state explicit rather than silently generating it in prune."""
         cache = Path(self.temporary.name) / "cache"
         key = alpine_signing.signing_public_key(cache)
-        with self.assertRaisesRegex(SystemExit, "signing public key"):
+        with pytest.raises(SystemExit, match="signing public key"):
             alpine_signing.signing_key_identity(cache)
         key.parent.mkdir(parents=True)
         key.write_bytes(b"public-key\n")
-        self.assertEqual(
-            alpine_signing.signing_key_identity(cache),
-            hashlib.sha256(key.read_bytes()).hexdigest(),
+        assert (alpine_signing.signing_key_identity(cache)) == (
+            hashlib.sha256(key.read_bytes()).hexdigest()
         )
 
     def test_bootstrap_change_invalidates_ram_receipt_but_not_external_root(self) -> None:
@@ -453,35 +450,30 @@ class AlpineCacheTests(fixtures.AlpineSourceFixture):
         initramfs.write_bytes(b"boot archive\n")
         alpine_rootfs_state.write_receipt(ram_output, ram_recipe)
         alpine_rootfs_state.write_receipt(external_output, external_recipe)
-        self.assertTrue(alpine_rootfs_state.receipt_matches(ram_output, self._recipe()))
-        self.assertTrue(
-            alpine_rootfs_state.receipt_matches(
-                external_output, self._recipe(root_kind="external")
-            )
+        assert alpine_rootfs_state.receipt_matches(ram_output, self._recipe())
+        assert alpine_rootfs_state.receipt_matches(
+            external_output, self._recipe(root_kind="external")
         )
         initramfs.write_bytes(b"boot archivf\n")
-        self.assertFalse(alpine_rootfs_state.receipt_matches(ram_output, ram_recipe))
+        assert not (alpine_rootfs_state.receipt_matches(ram_output, ram_recipe))
         initramfs.write_bytes(b"boot archive\n")
-        self.assertTrue(alpine_rootfs_state.receipt_matches(ram_output, ram_recipe))
+        assert alpine_rootfs_state.receipt_matches(ram_output, ram_recipe)
         self._write("unrelated.txt", b"unrelated edit\n")
-        self.assertTrue(alpine_rootfs_state.receipt_matches(ram_output, self._recipe()))
+        assert alpine_rootfs_state.receipt_matches(ram_output, self._recipe())
         self.bootstrap.write_bytes(b"#!/bin/sh\nexit 1\n")
         changed = self._recipe()
-        self.assertFalse(alpine_rootfs_state.receipt_matches(ram_output, changed))
-        self.assertTrue(
-            alpine_rootfs_state.receipt_matches(
-                external_output, self._recipe(root_kind="external")
-            )
+        assert not (alpine_rootfs_state.receipt_matches(ram_output, changed))
+        assert alpine_rootfs_state.receipt_matches(
+            external_output, self._recipe(root_kind="external")
         )
         rebuilt = alpine_rootfs_state.rootfs_output(cache, changed)
         rebuilt.mkdir(parents=True)
         (rebuilt / "rootfs.cpio").write_bytes(b"logical composition\n")
         (rebuilt / "initramfs.cpio").write_bytes(b"changed boot archive\n")
         alpine_rootfs_state.write_receipt(rebuilt, changed)
-        self.assertTrue(alpine_rootfs_state.receipt_matches(rebuilt, changed))
-        self.assertNotEqual(
-            alpine_rootfs_state.trusted_receipt_identity(ram_output, ram_recipe),
-            alpine_rootfs_state.trusted_receipt_identity(rebuilt, changed),
+        assert alpine_rootfs_state.receipt_matches(rebuilt, changed)
+        assert (alpine_rootfs_state.trusted_receipt_identity(ram_output, ram_recipe)) != (
+            alpine_rootfs_state.trusted_receipt_identity(rebuilt, changed)
         )
 
     def test_receipt_matches_only_exact_rootfs_bytes(self) -> None:
@@ -495,12 +487,12 @@ class AlpineCacheTests(fixtures.AlpineSourceFixture):
         (output / "initramfs.cpio").write_bytes(b"boot archive\n")
         alpine_rootfs_state.write_receipt(output, recipe)
 
-        self.assertTrue(alpine_rootfs_state.receipt_matches(output, recipe))
+        assert alpine_rootfs_state.receipt_matches(output, recipe)
         identity = alpine_rootfs_state.trusted_receipt_identity(output, recipe)
-        self.assertEqual(identity["recipe"], recipe)
+        assert (identity["recipe"]) == (recipe)
 
         rootfs.write_bytes(b"tampered\n")
-        self.assertFalse(alpine_rootfs_state.receipt_matches(output, recipe))
+        assert not (alpine_rootfs_state.receipt_matches(output, recipe))
 
     def test_receipt_with_unknown_shape_is_a_cache_miss(self) -> None:
         """An unrecognized cache artifact is ignored without migration."""
@@ -515,8 +507,4 @@ class AlpineCacheTests(fixtures.AlpineSourceFixture):
         receipt["unknown"] = "receipt-field"
         receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
 
-        self.assertFalse(alpine_rootfs_state.receipt_matches(output, recipe))
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert not (alpine_rootfs_state.receipt_matches(output, recipe))

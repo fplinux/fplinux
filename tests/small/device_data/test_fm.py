@@ -3,15 +3,14 @@
 
 from __future__ import annotations
 
-import unittest
-
+import pytest
 from fplinux_cli.device_data import fm_radio
 from fplinux_cli.device_data import formats as device_data
 
 from tests.small.device_data.nv_fixtures import nv1
 
 
-class FmRadioConfigTests(unittest.TestCase):
+class FmRadioConfigTests:
     """Protect the fitted FM payload consumed by the radio ENABLE operation."""
 
     def test_matching_nv419_becomes_the_exact_normalized_fm_payload(self) -> None:
@@ -33,22 +32,18 @@ class FmRadioConfigTests(unittest.TestCase):
             "60 61 62 63 64 65 66 67 68 69 6a 6b 6c 6d 6e 6f "
             "70 71 72 73 74 75 76 77 78 79 7a 7b 7c 7d 7e 7f"
         )
-        self.assertEqual(result.originals, {"phone-nv419.bin": original})
-        self.assertEqual(result.prepared, {"phone-fm-config.bin": expected})
-        self.assertEqual(len(expected), 128)
+        assert (result.originals) == ({"phone-nv419.bin": original})
+        assert (result.prepared) == ({"phone-fm-config.bin": expected})
+        assert (len(expected)) == (128)
 
     def test_conflicting_nv419_copies_cannot_produce_a_payload(self) -> None:
         """Disagreeing fixed NV419 copies cannot become fitted FM input."""
         original = bytes(range(128))
         different = bytearray(original)
         different[64] ^= 1
-        with self.assertRaisesRegex(ValueError, "NV419 differs"):
+        with pytest.raises(ValueError, match="NV419 differs"):
             fm_radio.prepare_fm_config(
                 {419: original},
                 {419: bytes(different)},
                 prefix="phone",
             )
-
-
-if __name__ == "__main__":
-    unittest.main()

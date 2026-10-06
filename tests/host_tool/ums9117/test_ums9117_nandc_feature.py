@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 
 from tests import ROOT
@@ -15,7 +14,7 @@ HARNESS = ROOT / "tests/host_tool/ums9117/ums9117-nandc-feature.c"
 COMPAT = ROOT / "tests/host_tool/ums9117/lcm-compat"
 
 
-class Ums9117NandcFeatureTests(unittest.TestCase):
+class Ums9117NandcFeatureTests:
     """Link the feature policy with host type aliases; no NAND is exercised."""
 
     def test_feature_values_preserve_defined_bits_and_detect_changed_state(self) -> None:
@@ -46,7 +45,3 @@ class Ums9117NandcFeatureTests(unittest.TestCase):
                 timeout=10,
                 check=True,
             )
-
-
-if __name__ == "__main__":
-    unittest.main()

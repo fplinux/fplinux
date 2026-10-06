@@ -9,10 +9,10 @@ import stat
 import subprocess
 import sys
 import tempfile
-import unittest
 from pathlib import Path
 from unittest import mock
 
+import pytest
 from fplinux_cli.environment import image_store as kern
 
 
@@ -22,14 +22,14 @@ def _metadata(path: Path) -> tuple[int, int, int]:
     return metadata.st_uid, metadata.st_gid, stat.S_IMODE(metadata.st_mode)
 
 
-class ImageTagProcessTests(unittest.TestCase):
+class ImageTagProcessTests:
     """A fake Kern delegates copying to real cp; it does not exercise the image store."""
 
     def test_tag_keeps_owned_directory_and_executable_metadata(self) -> None:
         """Publication preserves another mapped user's ownership and set-id modes."""
         unshare = shutil.which("unshare")
         if unshare is None:
-            self.skipTest("subordinate namespace test requires unshare")
+            pytest.skip("subordinate namespace test requires unshare")
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "source"
@@ -58,8 +58,8 @@ class ImageTagProcessTests(unittest.TestCase):
                 timeout=30,
             )
             if prepared.returncode:
-                self.skipTest("subordinate namespace is unavailable: " + prepared.stderr.strip())
-            self.assertNotEqual((source / "compiler").stat().st_uid, os.geteuid())
+                pytest.skip("subordinate namespace is unavailable: " + prepared.stderr.strip())
+            assert ((source / "compiler").stat().st_uid) != (os.geteuid())
             expected_directory = _metadata(source / "builder")
             expected_tool = _metadata(source / "compiler")
 
@@ -78,10 +78,6 @@ class ImageTagProcessTests(unittest.TestCase):
             with mock.patch.object(kern, "ROOT", root):
                 kern.tag_image(str(fake_kern), str(source), str(destination))
 
-            self.assertEqual((destination / "compiler").read_bytes(), b"build tool\n")
-            self.assertEqual(_metadata(destination / "builder"), expected_directory)
-            self.assertEqual(_metadata(destination / "compiler"), expected_tool)
-
-
-if __name__ == "__main__":
-    unittest.main()
+            assert ((destination / "compiler").read_bytes()) == (b"build tool\n")
+            assert (_metadata(destination / "builder")) == (expected_directory)
+            assert (_metadata(destination / "compiler")) == (expected_tool)

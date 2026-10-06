@@ -25,7 +25,8 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["PT009", "PT027"]
+# Native assertions are the test oracle, and fixture inputs are controlled.
+"tests/**" = ["S101"]
 
 [tool.ruff.format]
 line-ending = "lf"
@@ -35,3 +36,15 @@ python_version = "3.14"
 strict = true
 mypy_path = "scripts"
 cache_dir = "/tmp/mypy"
+
+[tool.pytest.ini_options]
+testpaths = [
+  "tests/small",
+  "tests/host_process",
+  "tests/host_tool",
+  "tests/artifact",
+  "tests/public_workflow",
+]
+pythonpath = ["scripts"]
+python_classes = ["Test*", "*Tests", "*Case"]
+cache_dir = ".cache/pytest"

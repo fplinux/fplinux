@@ -6,8 +6,9 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
-import unittest
 from pathlib import Path
+
+import pytest
 
 from tests import ROOT
 
@@ -16,7 +17,7 @@ ROUTE_COMMAND = ROOT / "tests/fixtures/processes/usb_route_command.sh"
 CONNECTED_ROUTE = "192.0.2.0/30 dev usb0 scope link src 192.0.2.1\n"
 
 
-class UsbGadgetNetworkPolicyTests(unittest.TestCase):
+class UsbGadgetNetworkPolicyTests:
     """Observe the production shell policy; no ConfigFS, phone or routing is exercised."""
 
     def run_policy(
@@ -52,47 +53,47 @@ class UsbGadgetNetworkPolicyTests(unittest.TestCase):
             check=False,
         )
 
-    def test_connected_usb_routes_and_pan_gateway_allow_local_usb(self) -> None:
+    @pytest.mark.parametrize(
+        "routes",
+        ["", CONNECTED_ROUTE, "default via 198.51.100.1 dev bnep0\n" + CONNECTED_ROUTE],
+        ids=["empty", "usb-subnet", "pan-gateway"],
+    )
+    def test_connected_usb_routes_and_pan_gateway_allow_local_usb(self, routes: str) -> None:
         """An empty table, connected USB subnet and BNEP default satisfy the policy."""
-        for routes in (
-            "",
-            CONNECTED_ROUTE,
-            "default via 198.51.100.1 dev bnep0\n" + CONNECTED_ROUTE,
-        ):
-            with self.subTest(routes=routes), tempfile.TemporaryDirectory() as directory:
-                result = self.run_policy(Path(directory), routes=routes)
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.run_policy(Path(directory), routes=routes)
 
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout, "")
+            assert (result.returncode) == (0), result.stderr
+            assert (result.stdout) == ("")
 
-    def test_default_route_through_usb_is_rejected(self) -> None:
-        """Another default route does not make a USB gateway acceptable."""
-        for routes in (
+    @pytest.mark.parametrize(
+        "routes",
+        [
             "default via 192.0.2.2 dev usb0\n" + CONNECTED_ROUTE,
             "0.0.0.0/0 dev usb0\n" + CONNECTED_ROUTE,
-            "default via 198.51.100.1 dev bnep0\n"
-            "default via 192.0.2.2 dev usb0 metric 10\n" + CONNECTED_ROUTE,
-        ):
-            with self.subTest(routes=routes), tempfile.TemporaryDirectory() as directory:
-                result = self.run_policy(Path(directory), routes=routes)
+            "default via 198.51.100.1 dev bnep0\ndefault via 192.0.2.2 dev usb0 metric 10\n"
+            + CONNECTED_ROUTE,
+        ],
+        ids=["usb-default", "usb-cidr-default", "pan-and-usb-default"],
+    )
+    def test_default_route_through_usb_is_rejected(self, routes: str) -> None:
+        """Another default route does not make a USB gateway acceptable."""
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.run_policy(Path(directory), routes=routes)
 
-                self.assertNotEqual(result.returncode, 0)
+            assert (result.returncode) != (0)
 
     def test_failed_route_query_cannot_satisfy_network_policy(self) -> None:
         """A query failure remains visible even when stdout has no routes."""
         with tempfile.TemporaryDirectory() as directory:
             result = self.run_policy(Path(directory), routes="", route_status=42)
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("routing query failed", result.stderr)
+        assert (result.returncode) != (0)
+        assert ("routing query failed") in (result.stderr)
 
     def test_ipv4_forwarding_is_rejected(self) -> None:
         """Allowed routes do not authorize forwarding between USB and PAN."""
         with tempfile.TemporaryDirectory() as directory:
             result = self.run_policy(Path(directory), routes=CONNECTED_ROUTE, forwarding=1)
 
-        self.assertNotEqual(result.returncode, 0)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert (result.returncode) != (0)

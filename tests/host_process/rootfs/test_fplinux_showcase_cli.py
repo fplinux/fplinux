@@ -5,9 +5,14 @@ from __future__ import annotations
 
 import shlex
 import tempfile
-import unittest
+from contextlib import ExitStack
 from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
+
+import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 from tests import ROOT
 from tests.process import run_process
@@ -17,53 +22,70 @@ SHARED = ROOT / "include/fplinux"
 SOURCE = APORT / "fplinux-showcase.c"
 
 
-class FplinuxShowcaseCliTests(unittest.TestCase):
+class FplinuxShowcaseCliTests:
     """Run the actual binary only through its argument and early-startup boundary."""
 
     temporary: ClassVar[tempfile.TemporaryDirectory[str]]
     executable: ClassVar[Path]
+    discovery_root: ClassVar[Path]
+    discovery_executable: ClassVar[Path]
 
+    @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def setUpClass(cls) -> None:
-        """Compile one strict host binary; no framebuffer or phone is supplied."""
-        cls.temporary = tempfile.TemporaryDirectory()
-        cls.addClassCleanup(cls.temporary.cleanup)
-        cls.executable = Path(cls.temporary.name) / "fplinux-showcase"
-        drm_flags = shlex.split(
+    def _compiled_binaries(cls) -> Iterator[None]:
+        """Compile strict host binaries; no framebuffer or phone is supplied."""
+        with ExitStack() as cleanup:
+            cls.temporary = tempfile.TemporaryDirectory()
+            cleanup.enter_context(cls.temporary)
+            cls.executable = Path(cls.temporary.name) / "fplinux-showcase"
+            drm_flags = shlex.split(
+                run_process(
+                    ["pkg-config", "--cflags", "--libs", "libdrm"],
+                    name="read DRM compiler and linker flags",
+                    timeout=10,
+                    check=True,
+                ).stdout
+            )
             run_process(
-                ["pkg-config", "--cflags", "--libs", "libdrm"],
-                name="read DRM compiler and linker flags",
-                timeout=10,
+                [
+                    "cc",
+                    "-O2",
+                    "-std=c11",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    f"-I{APORT}",
+                    f"-I{SHARED}",
+                    str(SOURCE),
+                    str(APORT / "showcase-hardware.c"),
+                    str(APORT / "armada-scene.c"),
+                    str(APORT / "armada-storyboard.c"),
+                    str(APORT / "armada-renderer.c"),
+                    str(ROOT / "lib/fplinux/fplinux-font.c"),
+                    str(ROOT / "lib/fplinux/fplinux-drm-session.c"),
+                    str(ROOT / "lib/fplinux/fplinux-brightness-client.c"),
+                    str(ROOT / "lib/fplinux/fplinux-cli.c"),
+                    *drm_flags,
+                    "-o",
+                    str(cls.executable),
+                ],
+                name="compile FPLinux Showcase command-line boundary",
+                timeout=30,
                 check=True,
-            ).stdout
-        )
-        run_process(
-            [
-                "cc",
-                "-O2",
-                "-std=c11",
-                "-Wall",
-                "-Wextra",
-                "-Werror",
-                f"-I{APORT}",
-                f"-I{SHARED}",
-                str(SOURCE),
-                str(APORT / "showcase-hardware.c"),
-                str(APORT / "armada-scene.c"),
-                str(APORT / "armada-storyboard.c"),
-                str(APORT / "armada-renderer.c"),
-                str(ROOT / "lib/fplinux/fplinux-font.c"),
-                str(ROOT / "lib/fplinux/fplinux-drm-session.c"),
-                str(ROOT / "lib/fplinux/fplinux-brightness-client.c"),
-                str(ROOT / "lib/fplinux/fplinux-cli.c"),
-                *drm_flags,
-                "-o",
-                str(cls.executable),
-            ],
-            name="compile FPLinux Showcase command-line boundary",
-            timeout=30,
-            check=True,
-        )
+            )
+            cls.discovery_root = Path(cls.temporary.name) / "class-discovery"
+            (cls.discovery_root / "cases").mkdir(parents=True)
+            cls.discovery_executable = cls.compile_with_class_roots(cls.discovery_root)
+            yield
+
+    @pytest.fixture(autouse=True)
+    def _prepare_class_tree(self, _compiled_binaries: None) -> Iterator[None]:
+        """Give each invocation a fresh class tree consumed by the compiled glob."""
+        with ExitStack() as cleanup:
+            case = tempfile.TemporaryDirectory(dir=self.discovery_root / "cases")
+            cleanup.enter_context(case)
+            self.work = Path(case.name)
+            yield
 
     def test_help_returns_before_keypad_lookup(self) -> None:
         """Help lists the Showcase options and exits before any device lookup."""
@@ -73,15 +95,15 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
             timeout=5,
         )
 
-        self.assertEqual(result.returncode, 0)
-        self.assertIn("Usage:", result.stdout)
-        self.assertIn("--runs", result.stdout)
-        self.assertIn("--keypad-led", result.stdout)
-        self.assertEqual(result.stderr, "")
+        assert (result.returncode) == (0)
+        assert ("Usage:") in (result.stdout)
+        assert ("--runs") in (result.stdout)
+        assert ("--keypad-led") in (result.stdout)
+        assert (result.stderr) == ("")
 
-    def test_invalid_or_repeated_options_fail_before_keypad_lookup(self) -> None:
-        """Bad run counts and repeated single-use options fail before any device lookup."""
-        invalid_arguments = (
+    @pytest.mark.parametrize(
+        "arguments",
+        [
             ("--runs", "0"),
             ("--runs", "-1"),
             ("--runs", "+1"),
@@ -90,21 +112,33 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
             ("--runs", "--help"),
             ("--runs", "1", "--runs", "2"),
             ("--keypad-led", "one", "--keypad-led", "two"),
+        ],
+        ids=[
+            "zero-runs",
+            "negative-runs",
+            "plus-runs",
+            "run-suffix",
+            "run-overflow",
+            "missing-run-value",
+            "repeated-runs",
+            "repeated-keypad-led",
+        ],
+    )
+    def test_invalid_or_repeated_options_fail_before_keypad_lookup(
+        self, arguments: tuple[str, ...]
+    ) -> None:
+        """Bad run counts and repeated single-use options fail before any device lookup."""
+        result = run_process(
+            [str(self.executable), *arguments],
+            name=f"reject FPLinux Showcase arguments {arguments}",
+            timeout=5,
         )
 
-        for arguments in invalid_arguments:
-            with self.subTest(arguments=arguments):
-                result = run_process(
-                    [str(self.executable), *arguments],
-                    name=f"reject FPLinux Showcase arguments {arguments}",
-                    timeout=5,
-                )
-
-                self.assertEqual(result.returncode, 2)
-                self.assertIn("Try '", result.stderr)
-                self.assertIn("--help' for more information.", result.stderr)
-                self.assertNotIn("required keypad", result.stderr)
-                self.assertEqual(result.stdout, "")
+        assert (result.returncode) == (2)
+        assert ("Try '") in (result.stderr)
+        assert ("--help' for more information.") in (result.stderr)
+        assert ("required keypad") not in (result.stderr)
+        assert (result.stdout) == ("")
 
     def test_valid_options_reach_keypad_lookup(self) -> None:
         """Valid overrides are accepted; startup then fails to find the keypad on this host."""
@@ -114,21 +148,22 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
                 "--runs",
                 "1",
                 "--keypad-led",
-                str(Path(self.temporary.name) / "keypad-led"),
+                str(self.work / "keypad-led"),
             ],
             name="accept FPLinux Showcase options before keypad lookup",
             timeout=5,
         )
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("required keypad fplinux/keypad0", result.stderr)
-        self.assertNotIn("Try '", result.stderr)
-        self.assertEqual(result.stdout, "")
+        assert (result.returncode) != (0)
+        assert ("required keypad fplinux/keypad0") in (result.stderr)
+        assert ("Try '") not in (result.stderr)
+        assert (result.stdout) == ("")
 
-    def compile_with_class_roots(self, class_root: Path) -> Path:
+    @staticmethod
+    def compile_with_class_roots(class_root: Path) -> Path:
         """Compile the real application against a test-owned class tree."""
         executable = class_root / "fplinux-showcase"
-        leds = class_root / "leds" / "*" / "brightness"
+        leds = class_root / "cases" / "*" / "leds" / "*" / "brightness"
         drm_flags = shlex.split(
             run_process(
                 ["pkg-config", "--cflags", "--libs", "libdrm"],
@@ -177,10 +212,10 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
 
     def test_default_class_discovery_uses_keyboard_led_function(self) -> None:
         """A status LED does not replace the sole kbd_backlight function LED."""
-        class_root = Path(self.temporary.name) / "class-selected"
+        class_root = self.work
         self.add_class_device(class_root / "leds", "status")
         self.add_class_device(class_root / "leds", "panel:kbd_backlight")
-        executable = self.compile_with_class_roots(class_root)
+        executable = self.discovery_executable
 
         result = run_process(
             [str(executable), "--runs", "1"],
@@ -188,16 +223,16 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
             timeout=5,
         )
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("required keypad fplinux/keypad0", result.stderr)
-        self.assertNotIn("required keypad LED", result.stderr)
+        assert (result.returncode) != (0)
+        assert ("required keypad fplinux/keypad0") in (result.stderr)
+        assert ("required keypad LED") not in (result.stderr)
 
     def test_default_class_discovery_rejects_ambiguous_keyboard_leds(self) -> None:
         """Multiple kbd_backlight LED functions stop before any phone input opens."""
-        class_root = Path(self.temporary.name) / "class-ambiguous"
+        class_root = self.work
         self.add_class_device(class_root / "leds", "left:kbd_backlight")
         self.add_class_device(class_root / "leds", "right:kbd_backlight")
-        executable = self.compile_with_class_roots(class_root)
+        executable = self.discovery_executable
 
         result = run_process(
             [str(executable), "--runs", "1"],
@@ -205,10 +240,6 @@ class FplinuxShowcaseCliTests(unittest.TestCase):
             timeout=5,
         )
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("ambiguous keypad LEDs", result.stderr)
-        self.assertNotIn("required keypad fplinux/keypad0", result.stderr)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert (result.returncode) != (0)
+        assert ("ambiguous keypad LEDs") in (result.stderr)
+        assert ("required keypad fplinux/keypad0") not in (result.stderr)

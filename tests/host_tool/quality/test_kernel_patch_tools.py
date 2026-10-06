@@ -7,10 +7,12 @@ import io
 import subprocess
 import tarfile
 import tempfile
-import unittest
+from contextlib import ExitStack
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import mock
 
+import pytest
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build.kernel.projection import LinuxInput, file_contents, project_changes
 from fplinux_cli.common import ROOT, sha256_file
@@ -22,31 +24,38 @@ from fplinux_cli.quality.kernel_patches import (
 )
 from fplinux_cli.workspace.capture import WorkspaceFile
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
-class KernelPatchToolTests(unittest.TestCase):
+
+class KernelPatchToolTests:
     """Check resulting files, not particular hunk spellings or internal tool calls."""
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _case_resources(self) -> Iterator[None]:
         """Create isolated source inputs with the repository's pinned C style."""
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
-        self.enterContext(mock.patch.object(inputs_build, "CACHE", self.root / "cache"))
-        self.base = {
-            "Makefile": WorkspaceFile("Makefile", b"VERSION = fixture\n", 0o644),
-            ".clang-format": WorkspaceFile(
-                ".clang-format", (ROOT / ".clang-format").read_bytes(), 0o644
-            ),
-            "drivers/example.c": WorkspaceFile(
-                "drivers/example.c",
-                b"int untouched(void){return 41;}\n\n\n\n\n\n"
-                b"int answer(void)\n{\n\treturn 1;\n}\n",
-                0o640,
-            ),
-            "drivers/Kconfig": WorkspaceFile(
-                "drivers/Kconfig", b'config ORIGINAL\n\tbool "Original"\n', 0o644
-            ),
-        }
+        with ExitStack() as cleanup:
+            self.temporary = tempfile.TemporaryDirectory()
+            cleanup.enter_context(self.temporary)
+            self.root = Path(self.temporary.name)
+            cache_patch = mock.patch.object(inputs_build, "CACHE", self.root / "cache")
+            cleanup.enter_context(cache_patch)
+            self.base = {
+                "Makefile": WorkspaceFile("Makefile", b"VERSION = fixture\n", 0o644),
+                ".clang-format": WorkspaceFile(
+                    ".clang-format", (ROOT / ".clang-format").read_bytes(), 0o644
+                ),
+                "drivers/example.c": WorkspaceFile(
+                    "drivers/example.c",
+                    b"int untouched(void){return 41;}\n\n\n\n\n\n"
+                    b"int answer(void)\n{\n\treturn 1;\n}\n",
+                    0o640,
+                ),
+                "drivers/Kconfig": WorkspaceFile(
+                    "drivers/Kconfig", b'config ORIGINAL\n\tbool "Original"\n', 0o644
+                ),
+            }
+            yield
 
     def patch(
         self, name: str, before: dict[str, WorkspaceFile], after: dict[str, WorkspaceFile]
@@ -76,20 +85,19 @@ class KernelPatchToolTests(unittest.TestCase):
         original = step.source.read_bytes()
 
         formatted = format_context(self.base, [step], frozenset({step.identity}))[step.identity]
-        self.assertNotEqual(formatted, original)
-        self.assertEqual(step.source.read_bytes(), original)
-        self.assertTrue(formatted.startswith(preamble))
+        assert (formatted) != (original)
+        assert (step.source.read_bytes()) == (original)
+        assert formatted.startswith(preamble)
         step.source.write_bytes(formatted)
         destination = self.root / "result"
         list(project_changes(self.base, [step], destination))
-        self.assertEqual(
-            (destination / "drivers/example.c").read_bytes(),
-            b"int untouched(void){return 41;}\n\n\n\n\n\nint answer(void)\n{\n\treturn 7;\n}\n",
+        assert ((destination / "drivers/example.c").read_bytes()) == (
+            b"int untouched(void){return 41;}\n\n\n\n\n\nint answer(void)\n{\n\treturn 7;\n}\n"
         )
-        self.assertEqual((destination / "drivers/example.c").stat().st_mode & 0o777, 0o640)
-        self.assertEqual((destination / "drivers/Kconfig").read_bytes(), config)
-        self.assertEqual(
-            format_context(self.base, [step], frozenset({step.identity}))[step.identity], formatted
+        assert ((destination / "drivers/example.c").stat().st_mode & 0o777) == (0o640)
+        assert ((destination / "drivers/Kconfig").read_bytes()) == (config)
+        assert (format_context(self.base, [step], frozenset({step.identity}))[step.identity]) == (
+            formatted
         )
 
     def test_following_patch_conflict_does_not_rewrite_selected_inputs(self) -> None:
@@ -99,9 +107,9 @@ class KernelPatchToolTests(unittest.TestCase):
         first = self.patch("first.patch", self.base, middle)
         second = self.patch("second.patch", middle, final)
         original = {step.source: step.source.read_bytes() for step in (first, second)}
-        with self.assertRaises(subprocess.CalledProcessError):
+        with pytest.raises(subprocess.CalledProcessError):
             format_context(self.base, [first, second], frozenset({first.identity}))
-        self.assertEqual({path: path.read_bytes() for path in original}, original)
+        assert ({path: path.read_bytes() for path in original}) == (original)
 
     def test_adjacent_unchanged_function_is_not_pulled_into_formatting(self) -> None:
         """A context line in a patch must not become an explicit formatter range."""
@@ -116,8 +124,8 @@ class KernelPatchToolTests(unittest.TestCase):
         step.source.write_bytes(formatted)
         destination = self.root / "result"
         list(project_changes(self.base, [step], destination))
-        self.assertEqual(
-            (destination / name).read_bytes(), b"int unrelated(void){return 4;}\nint value = 2;\n"
+        assert ((destination / name).read_bytes()) == (
+            b"int unrelated(void){return 4;}\nint value = 2;\n"
         )
 
     def test_deleted_binding_is_not_selected_for_final_schema_validation(self) -> None:
@@ -127,8 +135,8 @@ class KernelPatchToolTests(unittest.TestCase):
         step = self.patch("delete.patch", before, {})
         destination = self.root / "result"
         list(project_changes(before, [step], destination))
-        self.assertFalse((destination / name).exists())
-        self.assertEqual(binding_paths([step], destination), ())
+        assert not ((destination / name).exists())
+        assert (binding_paths([step], destination)) == (())
 
     def archive(self) -> Path:
         """Package the fixture in the same source layout as the pinned kernel."""
@@ -147,9 +155,9 @@ class KernelPatchToolTests(unittest.TestCase):
         original = step.source.read_bytes()
         archive = self.archive()
         source = {"version": "fixture", "sha256": sha256_file(archive)}
-        with self.assertRaisesRegex(SystemExit, "Linux patch needs formatting: bad.patch"):
+        with pytest.raises(SystemExit, match=r"Linux patch needs formatting: bad.patch"):
             check_linux_changes([step], archive, source, self.root / "config.patch")
-        self.assertEqual(step.source.read_bytes(), original)
+        assert (step.source.read_bytes()) == (original)
 
     def test_append_is_checked_as_a_change_to_destination_kconfig(self) -> None:
         """An arbitrary fragment filename cannot bypass destination-aware Kconfig checks."""
@@ -163,11 +171,6 @@ class KernelPatchToolTests(unittest.TestCase):
         generated = LinuxInput("platform-patch", "config.patch", "", delta)
         destination = self.root / "result"
         list(project_changes(self.base, [generated], destination))
-        self.assertEqual(
-            file_contents(destination, ("drivers/Kconfig",))["drivers/Kconfig"].contents,
-            b'config ORIGINAL\n\tbool "Original"\n\nconfig APPENDED\n\tbool "Appended"\n',
+        assert (file_contents(destination, ("drivers/Kconfig",))["drivers/Kconfig"].contents) == (
+            b'config ORIGINAL\n\tbool "Original"\n\nconfig APPENDED\n\tbool "Appended"\n'
         )
-
-
-if __name__ == "__main__":
-    unittest.main()

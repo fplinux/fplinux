@@ -7,12 +7,13 @@ import contextlib
 import os
 import pwd
 import subprocess
-import unittest
+from collections import Counter
 from pathlib import Path
 from unittest import mock
 
 import fplinux_cli.cli.runtime as runtime_commands
 import fplinux_cli.runtime.keyboard as keyboard_runtime
+import pytest
 from fplinux_cli import common
 from fplinux_cli.artifacts.bundles import publish_current_bundle
 from fplinux_cli.manifests import targets
@@ -88,7 +89,13 @@ class ConsoleLifecycleTests(CommandBundleFixture):
             ],
         )
 
-    def test_keyboard_forwarding_requires_the_selected_kernel_identity(self) -> None:
+    @pytest.mark.parametrize(
+        "matches",
+        [pytest.param(False, id="other-kernel"), pytest.param(True, id="selected-kernel")],
+    )
+    def test_keyboard_forwarding_requires_the_selected_kernel_identity(
+        self, *, matches: bool
+    ) -> None:
         """A session reporting another kernel identity cannot receive host keyboard input."""
         target_config = {
             "runtime": {
@@ -102,51 +109,46 @@ class ConsoleLifecycleTests(CommandBundleFixture):
                 }
             }
         }
-        for matches in (False, True):
-            with self.subTest(matches=matches):
-                # The standalone SSH boundary supplies a session; its identity parser is real.
-                ssh = mock.Mock()
-                ssh.load_bundle_context.return_value = (
-                    {"target": "phone"},
-                    {"bundle_generation": self.bundle.generation},
-                )
-                ssh.load_current_session.return_value = {}
-                ssh.reacquire_bound_session.return_value = {}
-                ssh.require_device_identity.side_effect = ssh_transport.require_device_identity
-                suffix = "9" * 16 if matches else "8" * 16
-                response = subprocess.CompletedProcess([], 0, f"6.18.42-fplinux-{suffix}\n", "")
-                with (
-                    mock.patch.object(common, "ROOT", self.root),
-                    mock.patch.object(targets, "load_target", return_value=target_config),
-                    mock.patch("fplinux_cli.runtime.keyboard.os.geteuid", return_value=1000),
-                    mock.patch.object(bundle_session, "_load_bundle_ssh_helper", return_value=ssh),
-                    mock.patch.object(ssh_transport, "run_remote", return_value=response),
-                    mock.patch("fplinux_cli.runtime.keyboard.os.execv") as execute,
-                    contextlib.ExitStack() as stack,
-                ):
-                    if not matches:
-                        stack.enter_context(
-                            self.assertRaisesRegex(SystemExit, "different kernel identity")
-                        )
-                    runtime_commands.console_target(
-                        "phone",
-                        keyboard="/dev/input/event1",
-                        exec_command=None,
-                        upload=None,
-                        pull=None,
-                    )
-                if matches:
-                    self.assertEqual(
-                        execute.call_args.args[0], self.bundle_path / "host/fplinux-usb-keyboard"
-                    )
-                    self.assertEqual(
-                        execute.call_args.args[1][-2:], ["--keyboard", "/dev/input/event1"]
-                    )
-                else:
-                    execute.assert_not_called()
+        # The standalone SSH boundary supplies a session; its identity parser is real.
+        ssh = mock.Mock()
+        ssh.load_bundle_context.return_value = (
+            {"target": "phone"},
+            {"bundle_generation": self.bundle.generation},
+        )
+        ssh.load_current_session.return_value = {}
+        ssh.reacquire_bound_session.return_value = {}
+        ssh.require_device_identity.side_effect = ssh_transport.require_device_identity
+        suffix = "9" * 16 if matches else "8" * 16
+        response = subprocess.CompletedProcess([], 0, f"6.18.42-fplinux-{suffix}\n", "")
+        with (
+            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(targets, "load_target", return_value=target_config),
+            mock.patch("fplinux_cli.runtime.keyboard.os.geteuid", return_value=1000),
+            mock.patch.object(bundle_session, "_load_bundle_ssh_helper", return_value=ssh),
+            mock.patch.object(ssh_transport, "run_remote", return_value=response),
+            mock.patch("fplinux_cli.runtime.keyboard.os.execv") as execute,
+            contextlib.ExitStack() as stack,
+        ):
+            if not matches:
+                stack.enter_context(pytest.raises(SystemExit, match="different kernel identity"))
+            runtime_commands.console_target(
+                "phone",
+                keyboard="/dev/input/event1",
+                exec_command=None,
+                upload=None,
+                pull=None,
+            )
+        if matches:
+            assert (execute.call_args.args[0]) == (self.bundle_path / "host/fplinux-usb-keyboard")
+            assert (execute.call_args.args[1][-2:]) == (["--keyboard", "/dev/input/event1"])
+        else:
+            execute.assert_not_called()
 
+    @pytest.mark.parametrize(
+        "status", [pytest.param(1, id="verification-failed"), pytest.param(0, id="verified")]
+    )
     def test_sudo_keyboard_verifies_as_the_invoking_user_before_privileged_forwarding(
-        self,
+        self, status: int
     ) -> None:
         """The documented sudo command verifies the caller's session and stops on failure."""
         profile = "microsd-uboot"
@@ -180,60 +182,53 @@ class ConsoleLifecycleTests(CommandBundleFixture):
                 return os.stat_result(values)
             return lstat(path)
 
-        for status in (1, 0):
-            with self.subTest(status=status):
-                with (
-                    mock.patch.object(common, "ROOT", self.root),
-                    mock.patch.object(targets, "load_target", return_value=target_config),
-                    mock.patch("fplinux_cli.runtime.keyboard.os.geteuid", return_value=0),
-                    mock.patch.dict(
-                        os.environ,
-                        {
-                            "SUDO_UID": str(uid),
-                            "SUDO_USER": "caller",
-                            "XDG_RUNTIME_DIR": str(root_runtime),
-                            "HOME": "/root",
-                        },
-                    ),
-                    mock.patch("fplinux_cli.runtime.keyboard.pwd.getpwuid", return_value=account),
-                    mock.patch.object(Path, "lstat", runtime_metadata),
-                    mock.patch(
-                        "fplinux_cli.runtime.keyboard.subprocess.run",
-                        return_value=subprocess.CompletedProcess([], status),
-                    ) as verify,
-                    mock.patch("fplinux_cli.runtime.keyboard.os.execv") as execute,
-                    contextlib.ExitStack() as stack,
-                ):
-                    if status:
-                        stack.enter_context(self.assertRaises(SystemExit))
-                    runtime_commands.console_target(
-                        "phone",
-                        profile=profile,
-                        build_type="debug",
-                        keyboard="/dev/input/event1",
-                        exec_command=None,
-                        upload=None,
-                        pull=None,
-                    )
-                command = verify.call_args.args[0]
-                self.assertEqual(command[:3], [str(self.root / "fplinux"), "console", "phone"])
-                # The public parser accepts these options in any order; compare flag/value pairs.
-                self.assertCountEqual(
-                    zip(command[3::2], command[4::2], strict=True),
-                    [("--build-type", "debug"), ("--exec", "true"), ("--profile", profile)],
-                )
-                options = verify.call_args.kwargs
-                self.assertEqual(
-                    (options["user"], options["group"], options["extra_groups"]), (uid, gid, ())
-                )
-                self.assertEqual(options["env"]["HOME"], account.pw_dir)
-                self.assertEqual(options["env"]["XDG_RUNTIME_DIR"], str(caller_runtime))
-                if status:
-                    execute.assert_not_called()
-                else:
-                    self.assertEqual(
-                        execute.call_args.args[0], debug / "host/fplinux-usb-keyboard"
-                    )
+        with (
+            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(targets, "load_target", return_value=target_config),
+            mock.patch("fplinux_cli.runtime.keyboard.os.geteuid", return_value=0),
+            mock.patch.dict(
+                os.environ,
+                {
+                    "SUDO_UID": str(uid),
+                    "SUDO_USER": "caller",
+                    "XDG_RUNTIME_DIR": str(root_runtime),
+                    "HOME": "/root",
+                },
+            ),
+            mock.patch("fplinux_cli.runtime.keyboard.pwd.getpwuid", return_value=account),
+            mock.patch.object(Path, "lstat", runtime_metadata),
+            mock.patch(
+                "fplinux_cli.runtime.keyboard.subprocess.run",
+                return_value=subprocess.CompletedProcess([], status),
+            ) as verify,
+            mock.patch("fplinux_cli.runtime.keyboard.os.execv") as execute,
+            contextlib.ExitStack() as stack,
+        ):
+            if status:
+                stack.enter_context(pytest.raises(SystemExit))
+            runtime_commands.console_target(
+                "phone",
+                profile=profile,
+                build_type="debug",
+                keyboard="/dev/input/event1",
+                exec_command=None,
+                upload=None,
+                pull=None,
+            )
+        command = verify.call_args.args[0]
+        assert (command[:3]) == ([str(self.root / "fplinux"), "console", "phone"])
+        # The public parser accepts these options in any order; compare flag/value pairs.
+        assert Counter(zip(command[3::2], command[4::2], strict=True)) == Counter(
+            [("--build-type", "debug"), ("--exec", "true"), ("--profile", profile)]
+        )
+        options = verify.call_args.kwargs
+        assert ((options["user"], options["group"], options["extra_groups"])) == ((uid, gid, ()))
+        assert (options["env"]["HOME"]) == (account.pw_dir)
+        assert (options["env"]["XDG_RUNTIME_DIR"]) == (str(caller_runtime))
+        if status:
+            execute.assert_not_called()
+        else:
+            assert (execute.call_args.args[0]) == (debug / "host/fplinux-usb-keyboard")
 
     def test_console_profile_reconnects_only_through_its_selected_generation(self) -> None:
         """A profile RAM session is never compared with the target's default bundle."""
@@ -279,11 +274,7 @@ class ConsoleLifecycleTests(CommandBundleFixture):
 
         load_target.assert_called_once_with("phone", profile, build_type="release")
         selected_bundle, selected_manifest, selected_target = current_session.call_args.args
-        self.assertEqual(selected_bundle, profile_bundle)
-        self.assertEqual(selected_manifest["profile"], profile)
-        self.assertEqual(selected_target, "phone")
+        assert (selected_bundle) == (profile_bundle)
+        assert (selected_manifest["profile"]) == (profile)
+        assert (selected_target) == ("phone")
         ssh.run_remote.assert_called_once_with({}, "id")
-
-
-if __name__ == "__main__":
-    unittest.main()

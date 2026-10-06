@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 
 from fplinux_cli.manifests.linux import discover_linux_targets
@@ -12,10 +11,11 @@ from fplinux_cli.manifests.linux import discover_linux_targets
 from tests.fixtures import linux_inputs
 
 
-class LinuxManifestTests(unittest.TestCase):
+class LinuxManifestTests:
     """Collect compatible source integrations without loading peer build artifacts."""
 
-    def test_archive_digest_groups_distinct_platforms_and_architectures(self) -> None:
+    @staticmethod
+    def test_archive_digest_groups_distinct_platforms_and_architectures() -> None:
         """Lock aliases and differing ARCH values share only their exact archive digest."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -33,18 +33,16 @@ class LinuxManifestTests(unittest.TestCase):
 
             targets = discover_linux_targets(root, sources, "1" * 64)
 
-        self.assertEqual([target.name for target in targets], ["a-phone", "b-phone"])
-        self.assertEqual([target.config["platform"] for target in targets], ["first", "second"])
-        self.assertEqual(
-            [target.platform["linux"]["arch"] for target in targets], ["arm", "riscv"]
+        assert ([target.name for target in targets]) == (["a-phone", "b-phone"])
+        assert ([target.config["platform"] for target in targets]) == (["first", "second"])
+        assert ([target.platform["linux"]["arch"] for target in targets]) == (["arm", "riscv"])
+        assert ([target.platform["linux"]["dts_directory"] for target in targets]) == (
+            ["arch/arm/boot/dts", "arch/riscv/boot/dts"]
         )
-        self.assertEqual(
-            [target.platform["linux"]["dts_directory"] for target in targets],
-            ["arch/arm/boot/dts", "arch/riscv/boot/dts"],
-        )
-        self.assertEqual(targets[0].config["identity"]["display_name"], "Example a-phone")
+        assert (targets[0].config["identity"]["display_name"]) == ("Example a-phone")
 
-    def test_linux_projection_ignores_peer_bootstrap_and_asset_requirements(self) -> None:
+    @staticmethod
+    def test_linux_projection_ignores_peer_bootstrap_and_asset_requirements() -> None:
         """A peer's unbuildable loader or userspace does not hide its declared Linux inputs."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -59,10 +57,11 @@ class LinuxManifestTests(unittest.TestCase):
 
             targets = discover_linux_targets(root, {"base": {"sha256": "1" * 64}}, "1" * 64)
 
-        self.assertEqual(len(targets), 1)
-        self.assertEqual(targets[0].config["linux"]["copies"][0]["source"], "linux/board.c")
+        assert (len(targets)) == (1)
+        assert (targets[0].config["linux"]["copies"][0]["source"]) == ("linux/board.c")
 
-    def test_profile_patch_inputs_are_retained_for_projection_conflict_checks(self) -> None:
+    @staticmethod
+    def test_profile_patch_inputs_are_retained_for_projection_conflict_checks() -> None:
         """Source preparation can observe microSD patches even while building the RAM profile."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -77,8 +76,4 @@ class LinuxManifestTests(unittest.TestCase):
 
             targets = discover_linux_targets(root, {"base": {"sha256": "1" * 64}}, "1" * 64)
 
-        self.assertEqual(targets[0].config["microsd"]["linux_patches"], ["linux/card.patch"])
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert (targets[0].config["microsd"]["linux_patches"]) == (["linux/card.patch"])

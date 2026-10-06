@@ -87,17 +87,20 @@ follow the [code style](../reference/CODE_STYLE.md).
 
 ## Run selected tests
 
-Use `test` to run unittest tests in the same pinned Kern image as `check python`:
+Use `test` to run pytest tests in the same pinned Kern image as `check python`:
 
 ```sh
 ./fplinux test tests.small.workspace.test_snapshot
 ./fplinux test tests.small.dependencies.test_dependency_inputs
 ./fplinux test tests.host_process.quality.test_test_runner
+./fplinux test 'tests/small/workspace/test_snapshot.py::WorkspaceSnapshotTests::test_snapshot_recipe_includes_file_mode'
 ./fplinux test --tier host_tool
 ```
 
-Supply one or more dotted module, class or method names, or select one tier
-with `--tier`.
+Supply one or more dotted module, class or method names, pytest node selectors
+under `tests/<tier>/`, or select one tier with `--tier`. Node selectors use
+`path.py::Class::method` or `path.py::test_function`; append `[case-id]` to select
+one parameterized case. Quote selectors containing brackets in the shell.
 The tiers are `small`, `host_process`, `host_tool`, `artifact` and
 `public_workflow`. With neither selector, all five tiers run in that order.
 `--verbose` shows individual test names and streams output; `--failfast` stops
@@ -109,7 +112,8 @@ as `check` does. Tests retain their tier time limits; a selection spanning tiers
 has their combined time budget.
 
 Exit status is 0 for success, 1 for test failures or unresolved names, 2 for
-invalid command arguments, and 5 when unittest finds no tests. Ctrl+C returns 130. A selected test run always executes and never creates or refreshes a
+invalid command arguments, and 5 when pytest finds no tests. Ctrl+C returns 130.
+A selected test run always executes and never creates or refreshes a
 successful `check` receipt. It does not run linters or replace `check python`
 or the complete quality gate.
 

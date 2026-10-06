@@ -5,10 +5,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-import tempfile
-import unittest
-from pathlib import Path
+from typing import TYPE_CHECKING
 
+import pytest
 from fplinux_cli.artifacts.bundles import (
     BUILD_MANIFEST_NAME,
     BundleStateError,
@@ -26,15 +25,18 @@ from fplinux_cli.common import canonical_json_bytes
 
 from tests.bundle_support import file_record
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-class BundleStateTests(unittest.TestCase):
+
+class BundleStateTests:
     """Exercise immutable bundle generation publication."""
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _bundle_output(self, tmp_path: Path) -> None:
         """Create an isolated bundle output directory."""
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.output = Path(self.temporary.name) / "out"
+        self.root = tmp_path
+        self.output = tmp_path / "out"
 
     def _staging(
         self,
@@ -89,20 +91,21 @@ class BundleStateTests(unittest.TestCase):
 
         for build_type in ("release", "debug", "release"):
             current = resolve_current_bundle(self.output, "demo", build_type=build_type)
-            self.assertEqual(current.path, selected[build_type])
-            self.assertEqual((current.path / "payload").read_text(), build_type)
+            assert (current.path) == (selected[build_type])
+            assert ((current.path / "payload").read_text()) == (build_type)
 
-    def test_wrong_or_missing_type_cannot_be_published_into_a_selected_slot(self) -> None:
+    @pytest.mark.parametrize("manifest_type", ["debug", None], ids=["wrong-type", "missing-type"])
+    def test_wrong_or_missing_type_cannot_be_published_into_a_selected_slot(
+        self, manifest_type: str | None
+    ) -> None:
         """A manifest from another build type cannot authorize a release payload."""
-        for manifest_type in ("debug", None):
-            with self.subTest(manifest_type=manifest_type):
-                staging, generation = self._staging("payload", manifest_build_type=manifest_type)
-                if manifest_type is None:
-                    manifest = json.loads((staging / BUILD_MANIFEST_NAME).read_text())
-                    del manifest["build_type"]
-                    (staging / BUILD_MANIFEST_NAME).write_bytes(canonical_json_bytes(manifest))
-                with self.assertRaisesRegex(BundleStateError, "wrong slot identity"):
-                    publish_bundle_generation(self.output, "demo", staging, generation)
+        staging, generation = self._staging("payload", manifest_build_type=manifest_type)
+        if manifest_type is None:
+            manifest = json.loads((staging / BUILD_MANIFEST_NAME).read_text())
+            del manifest["build_type"]
+            (staging / BUILD_MANIFEST_NAME).write_bytes(canonical_json_bytes(manifest))
+        with pytest.raises(BundleStateError, match="wrong slot identity"):
+            publish_bundle_generation(self.output, "demo", staging, generation)
 
     def test_publish_and_resolve_current_generation(self) -> None:
         """Publish and resolve the selected generation."""
@@ -112,8 +115,8 @@ class BundleStateTests(unittest.TestCase):
 
         current = resolve_current_bundle(self.output, "demo")
 
-        self.assertEqual(current.path, published)
-        self.assertEqual((current.path / "payload").read_text(), "first")
+        assert (current.path) == (published)
+        assert ((current.path / "payload").read_text()) == ("first")
 
     def test_discarded_staging_does_not_replace_last_good_pointer(self) -> None:
         """Discarding failed staging preserves the last good pointer."""
@@ -126,7 +129,7 @@ class BundleStateTests(unittest.TestCase):
 
         current = resolve_current_bundle(self.output, "demo")
 
-        self.assertEqual((current.path / "payload").read_text(), "first")
+        assert ((current.path / "payload").read_text()) == ("first")
 
     def test_new_staging_reclaims_crashed_staging_in_only_its_slot(self) -> None:
         """Repeated crash leftovers leave at most one active real staging directory."""
@@ -134,7 +137,7 @@ class BundleStateTests(unittest.TestCase):
         (first / "partial").write_text("partial")
         other = create_bundle_staging(self.output, "demo", "usb-host-lab")
         generations = bundle_generations(self.output, "demo")
-        outside = Path(self.temporary.name) / "outside-staging"
+        outside = self.root / "outside-staging"
         outside.mkdir()
         unsafe = generations / ".stage-link"
         unsafe.symlink_to(outside, target_is_directory=True)
@@ -146,10 +149,10 @@ class BundleStateTests(unittest.TestCase):
             for path in generations.iterdir()
             if path.name.startswith(".stage-") and not path.is_symlink() and path.is_dir()
         ]
-        self.assertEqual(active, [second])
-        self.assertFalse(first.exists())
-        self.assertTrue(other.is_dir())
-        self.assertTrue(unsafe.is_symlink())
+        assert (active) == ([second])
+        assert not (first.exists())
+        assert other.is_dir()
+        assert unsafe.is_symlink()
         discard_bundle_staging(self.output, "demo", second)
         discard_bundle_staging(self.output, "demo", other, "usb-host-lab")
 
@@ -161,14 +164,12 @@ class BundleStateTests(unittest.TestCase):
         second, second_generation = self._staging("second")
         second_path = publish_bundle_generation(self.output, "demo", second, second_generation)
 
-        self.assertEqual(
-            (resolve_current_bundle(self.output, "demo").path / "payload").read_text(),
-            "first",
+        assert ((resolve_current_bundle(self.output, "demo").path / "payload").read_text()) == (
+            "first"
         )
         publish_current_bundle(self.output, "demo", second_path)
-        self.assertEqual(
-            (resolve_current_bundle(self.output, "demo").path / "payload").read_text(),
-            "second",
+        assert ((resolve_current_bundle(self.output, "demo").path / "payload").read_text()) == (
+            "second"
         )
 
     def test_exact_generation_reuses_existing_directory(self) -> None:
@@ -178,35 +179,34 @@ class BundleStateTests(unittest.TestCase):
         original_inode = first_path.stat().st_ino
         second, second_generation = self._staging("same")
         second_path = publish_bundle_generation(self.output, "demo", second, second_generation)
-        self.assertEqual(first_path, second_path)
-        self.assertEqual(second_path.stat().st_ino, original_inode)
-        self.assertFalse(second.exists())
+        assert (first_path) == (second_path)
+        assert (second_path.stat().st_ino) == (original_inode)
+        assert not (second.exists())
 
-    def test_identical_manifest_repairs_invalid_existing_payload(self) -> None:
+    @pytest.mark.parametrize("mutation", ["bytes", "missing", "mode"])
+    def test_identical_manifest_repairs_invalid_existing_payload(self, mutation: str) -> None:
         """A valid staging payload replaces damaged bytes, missing files or changed modes."""
-        for mutation in ("bytes", "missing", "mode"):
-            with self.subTest(mutation=mutation):
-                marker = f"same-{mutation}"
-                first, generation = self._staging(marker)
-                published = publish_bundle_generation(self.output, "demo", first, generation)
-                publish_current_bundle(self.output, "demo", published)
-                payload = published / "payload"
-                if mutation == "bytes":
-                    payload.write_bytes(b"changed")
-                elif mutation == "missing":
-                    payload.unlink()
-                else:
-                    payload.chmod(0o600)
-                second, same_generation = self._staging(marker)
+        marker = f"same-{mutation}"
+        first, generation = self._staging(marker)
+        published = publish_bundle_generation(self.output, "demo", first, generation)
+        publish_current_bundle(self.output, "demo", published)
+        payload = published / "payload"
+        if mutation == "bytes":
+            payload.write_bytes(b"changed")
+        elif mutation == "missing":
+            payload.unlink()
+        else:
+            payload.chmod(0o600)
+        second, same_generation = self._staging(marker)
 
-                repaired = publish_bundle_generation(self.output, "demo", second, same_generation)
+        repaired = publish_bundle_generation(self.output, "demo", second, same_generation)
 
-                self.assertEqual(same_generation, generation)
-                self.assertEqual(repaired, published)
-                self.assertEqual(payload.read_bytes(), marker.encode())
-                self.assertEqual(payload.stat().st_mode & 0o777, 0o644)
-                self.assertFalse(second.exists())
-                self.assertEqual(resolve_current_bundle(self.output, "demo").path, published)
+        assert (same_generation) == (generation)
+        assert (repaired) == (published)
+        assert (payload.read_bytes()) == (marker.encode())
+        assert (payload.stat().st_mode & 0o777) == (0o644)
+        assert not (second.exists())
+        assert (resolve_current_bundle(self.output, "demo").path) == (published)
 
     def test_invalid_staging_preserves_the_existing_generation_and_pointer(self) -> None:
         """Failed staging verification cannot destroy the generation awaiting repair."""
@@ -219,12 +219,12 @@ class BundleStateTests(unittest.TestCase):
         second, same_generation = self._staging("same")
         (second / "payload").write_bytes(b"staging damage")
 
-        with self.assertRaises(BundleStateError):
+        with pytest.raises(BundleStateError):
             publish_bundle_generation(self.output, "demo", second, same_generation)
 
-        self.assertEqual((published / "payload").read_bytes(), b"old damage")
-        self.assertEqual(pointer.read_bytes(), pointer_before)
-        self.assertTrue(second.is_dir())
+        assert ((published / "payload").read_bytes()) == (b"old damage")
+        assert (pointer.read_bytes()) == (pointer_before)
+        assert second.is_dir()
 
     def test_selected_generation_bounds_only_its_managed_slot(self) -> None:
         """A selected slot removes every stale directory without parsing legacy state."""
@@ -263,9 +263,8 @@ class BundleStateTests(unittest.TestCase):
         )
         publish_current_bundle(self.output, "demo", other, "usb-host-lab")
 
-        self.assertEqual(first_current.path, first_path)
-        self.assertEqual(
-            {path.name for path in generations.iterdir() if path.is_dir()},
+        assert (first_current.path) == (first_path)
+        assert ({path.name for path in generations.iterdir() if path.is_dir()}) == (
             {
                 first_generation,
                 second_generation,
@@ -276,46 +275,36 @@ class BundleStateTests(unittest.TestCase):
                 stale_stage.name,
                 symlink_target.name,
                 symlink.name,
-            },
+            }
         )
-        self.assertEqual(
-            resolve_current_bundle(self.output, "demo").generation,
-            first_generation,
-        )
+        assert (resolve_current_bundle(self.output, "demo").generation) == (first_generation)
 
         current = publish_current_bundle(self.output, "demo", second_path)
         discard_superseded_bundle_generations(self.output, "demo", current)
 
-        self.assertEqual(
-            {path.name for path in generations.iterdir() if path.is_dir()},
+        assert ({path.name for path in generations.iterdir() if path.is_dir()}) == (
             {
                 second_generation,
-            },
+            }
         )
-        self.assertFalse(unrelated_directory.exists())
-        self.assertFalse(injected_directory.exists())
-        self.assertFalse(symlink_target.exists())
-        self.assertTrue(unrelated_file.is_file())
-        self.assertTrue(symlink.is_symlink())
-        self.assertEqual(
-            resolve_current_bundle(self.output, "demo", "usb-host-lab").path,
-            other,
-        )
-        self.assertEqual(
-            resolve_current_bundle(self.output, "demo").generation,
-            second_generation,
-        )
+        assert not (unrelated_directory.exists())
+        assert not (injected_directory.exists())
+        assert not (symlink_target.exists())
+        assert unrelated_file.is_file()
+        assert symlink.is_symlink()
+        assert (resolve_current_bundle(self.output, "demo", "usb-host-lab").path) == (other)
+        assert (resolve_current_bundle(self.output, "demo").generation) == (second_generation)
 
     def test_malformed_pointer_is_a_miss(self) -> None:
         """Reject a malformed current-generation pointer."""
         bundle_generations(self.output, "demo").mkdir(parents=True)
         pointer = bundle_pointer(self.output, "demo")
         pointer.write_text("{", encoding="utf-8")
-        with self.assertRaisesRegex(
-            BundleStateError, "current bundle pointer is missing or invalid"
+        with pytest.raises(
+            BundleStateError, match="current bundle pointer is missing or invalid"
         ) as raised:
             resolve_current_bundle(self.output, "demo")
-        self.assertIsInstance(raised.exception.__cause__, json.JSONDecodeError)
+        assert isinstance(raised.value.__cause__, json.JSONDecodeError)
 
     def test_named_profile_uses_an_isolated_slot_and_manifest_identity(self) -> None:
         """The default and named profile cannot select each other's bundle."""
@@ -339,23 +328,19 @@ class BundleStateTests(unittest.TestCase):
         )
         publish_current_bundle(self.output, "demo", profiled, profile)
 
-        self.assertEqual(default.parent, self.output / "demo/builds/release/bundles")
-        self.assertEqual(
-            profiled.parent,
-            self.output / "demo/profiles/usb-host-lab/builds/release/bundles",
+        assert (default.parent) == (self.output / "demo/builds/release/bundles")
+        assert (profiled.parent) == (
+            self.output / "demo/profiles/usb-host-lab/builds/release/bundles"
         )
-        self.assertNotEqual(
-            bundle_pointer(self.output, "demo"),
-            bundle_pointer(self.output, "demo", profile),
+        assert (bundle_pointer(self.output, "demo")) != (
+            bundle_pointer(self.output, "demo", profile)
         )
-        self.assertEqual(
-            (resolve_current_bundle(self.output, "demo").path / "payload").read_text(),
-            "default",
+        assert ((resolve_current_bundle(self.output, "demo").path / "payload").read_text()) == (
+            "default"
         )
-        self.assertEqual(
-            (resolve_current_bundle(self.output, "demo", profile).path / "payload").read_text(),
-            "host",
-        )
+        assert (
+            (resolve_current_bundle(self.output, "demo", profile).path / "payload").read_text()
+        ) == ("host")
 
     def test_profile_mismatched_or_legacy_manifest_is_a_cache_miss(self) -> None:
         """A pointer cannot reuse a manifest from another profile or old schema."""
@@ -372,7 +357,7 @@ class BundleStateTests(unittest.TestCase):
         pointer = bundle_pointer(self.output, "demo", profile)
         pointer.write_bytes(pointer_bytes(generation, hashlib.sha256(manifest_bytes).hexdigest()))
 
-        with self.assertRaises(BundleStateError):
+        with pytest.raises(BundleStateError):
             resolve_current_bundle(self.output, "demo", profile)
 
         manifest = json.loads(manifest_bytes)
@@ -380,7 +365,7 @@ class BundleStateTests(unittest.TestCase):
         legacy = canonical_json_bytes(manifest)
         (published / BUILD_MANIFEST_NAME).write_bytes(legacy)
         pointer.write_bytes(pointer_bytes(generation, hashlib.sha256(legacy).hexdigest()))
-        with self.assertRaises(BundleStateError):
+        with pytest.raises(BundleStateError):
             resolve_current_bundle(self.output, "demo", profile)
 
     def test_atomic_pointer_reuses_a_stale_regular_temporary_file(self) -> None:
@@ -393,8 +378,8 @@ class BundleStateTests(unittest.TestCase):
 
         publish_current_bundle(self.output, "demo", published)
 
-        self.assertFalse(temporary.exists())
-        self.assertEqual(resolve_current_bundle(self.output, "demo").path, published)
+        assert not (temporary.exists())
+        assert (resolve_current_bundle(self.output, "demo").path) == (published)
 
     def test_atomic_pointer_does_not_follow_a_stale_cache_symlink(self) -> None:
         """A stale pointer temporary symlink remains untouched instead of being followed."""
@@ -402,16 +387,12 @@ class BundleStateTests(unittest.TestCase):
         published = publish_bundle_generation(self.output, "demo", staging, generation)
         pointer = bundle_pointer(self.output, "demo")
         temporary = pointer.with_name(f".{pointer.name}.tmp")
-        outside = Path(self.temporary.name) / "outside"
+        outside = self.root / "outside"
         outside.write_text("keep")
         temporary.symlink_to(outside)
 
-        with self.assertRaises(BundleStateError):
+        with pytest.raises(BundleStateError):
             publish_current_bundle(self.output, "demo", published)
 
-        self.assertTrue(temporary.is_symlink())
-        self.assertEqual(outside.read_text(), "keep")
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert temporary.is_symlink()
+        assert (outside.read_text()) == ("keep")

@@ -3,37 +3,57 @@
 
 from __future__ import annotations
 
+import os
 import shlex
 import struct
 import tempfile
-import unittest
+from contextlib import ExitStack
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+import pytest
 
 from tests import ROOT
 from tests.process import run_process
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 TERMINAL = ROOT / "alpine/aports/fplinux-terminal"
 
 
-class TerminalLoopTests(unittest.TestCase):
+class TerminalLoopTests:
     """Observe frames and shell input through the host terminal main loop."""
 
-    def test_delayed_echo_and_silent_application_frames(self) -> None:
+    executable: Path
+    font: Path
+
+    @pytest.mark.parametrize("scenario", ["echo", "no-echo"], ids=["echo", "no-echo"])
+    def test_delayed_echo_and_silent_application_frames(self, scenario: str) -> None:
         """Commit stays visible until echo; silent input clears without local echo."""
-        self._check_scenarios("echo", "no-echo")
+        self._check_scenario(scenario)
 
-    def test_queued_softkey_events_preserve_hold_and_tap(self) -> None:
+    @pytest.mark.parametrize(
+        "scenario", ["delayed-hold", "delayed-tap"], ids=["delayed-hold", "delayed-tap"]
+    )
+    def test_queued_softkey_events_preserve_hold_and_tap(self, scenario: str) -> None:
         """A queued hold opens Modifiers; a queued tap still needs menu selection."""
-        self._check_scenarios("delayed-hold", "delayed-tap")
+        self._check_scenario(scenario)
 
-    def _check_scenarios(self, *scenarios: str) -> None:
-        with tempfile.TemporaryDirectory() as directory:
+    @pytest.fixture(scope="class", autouse=True)
+    @classmethod
+    def _compiled_tools(cls) -> Iterator[None]:
+        """Link one main-loop harness and its immutable fixture font."""
+        with ExitStack() as cleanup:
+            build_directory = tempfile.TemporaryDirectory()
+            cleanup.enter_context(build_directory)
+            directory = build_directory.name
             temporary = Path(directory)
-            executable = temporary / "terminal-loop"
+            cls.executable = temporary / "terminal-loop"
             main_object = temporary / "terminal-main.o"
-            font = temporary / "fixture.psf"
+            cls.font = temporary / "fixture.psf"
             header = struct.pack("<8I", 0x864AB572, 0, 32, 1, 2, 12, 12, 8)
-            font.write_bytes(header + b"\x00" * 12 + b"\x80" * 12 + b" \xffa\xff")
+            cls.font.write_bytes(header + b"\x00" * 12 + b"\x80" * 12 + b" \xffa\xff")
             flags = run_process(
                 ["pkg-config", "--cflags", "libdrm"],
                 name="read DRM header flags",
@@ -86,27 +106,33 @@ class TerminalLoopTests(unittest.TestCase):
                     "-ltsm",
                     "-lxkbcommon",
                     "-o",
-                    str(executable),
+                    str(cls.executable),
                 ],
                 name="link terminal loop harness",
                 timeout=30,
                 check=True,
             )
-            for scenario in scenarios:
-                with self.subTest(scenario=scenario):
-                    result = run_process(
-                        [
-                            str(executable),
-                            str(font),
-                            str(ROOT / "tests/host_tool/terminal/fixtures/terminal-xkb"),
-                            scenario,
-                        ],
-                        name=f"run terminal loop {scenario} harness",
-                        timeout=10,
-                        check=False,
-                    )
-                    self.assertEqual(result.returncode, 0, result.stderr)
+            yield
 
-
-if __name__ == "__main__":
-    unittest.main()
+    def _check_scenario(self, scenario: str) -> None:
+        """Run one process with fresh shell state and owned files."""
+        with tempfile.TemporaryDirectory() as directory:
+            result = run_process(
+                [
+                    str(self.executable),
+                    str(self.font),
+                    str(ROOT / "tests/host_tool/terminal/fixtures/terminal-xkb"),
+                    scenario,
+                ],
+                name=f"run terminal loop {scenario} harness",
+                timeout=10,
+                cwd=Path(directory),
+                env={
+                    **os.environ,
+                    "HOME": directory,
+                    "HISTFILE": str(Path(directory) / ".bash_history"),
+                    "LC_ALL": "C.UTF-8",
+                },
+                check=False,
+            )
+            assert (result.returncode) == (0), result.stderr

@@ -5,13 +5,17 @@ from __future__ import annotations
 
 import base64
 import tempfile
-import unittest
 import zlib
 from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
+
+import pytest
 
 from tests import ROOT
 from tests.process import run_process
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 BOOTSTRAP = ROOT / "platforms/ums9117/bootstrap"
 HARNESS = ROOT / "tests/host_tool/ums9117/boot-session.c"
@@ -64,43 +68,43 @@ def _tree() -> bytes:
     return bytes(tree)
 
 
-class BootSessionHostTests(unittest.TestCase):
+class BootSessionHostTests:
     """Validate bounded copies and atomic rejection without physical wrappers."""
 
-    temporary: ClassVar[tempfile.TemporaryDirectory[str]]
     executable: ClassVar[Path]
 
+    @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def setUpClass(cls) -> None:
+    def _compiled_peer(cls) -> Iterator[None]:
         """Link the actual C99 operation separately from the host fixture peer."""
-        cls.temporary = tempfile.TemporaryDirectory()
-        cls.addClassCleanup(cls.temporary.cleanup)
-        work = Path(cls.temporary.name)
-        includes = work / "include"
-        includes.mkdir()
-        (includes / "ums9117-common").symlink_to(ROOT / "platforms/ums9117/common")
-        cls.executable = work / "boot-session"
-        run_process(
-            [
-                "cc",
-                "-std=c99",
-                "-pedantic",
-                "-Wall",
-                "-Wextra",
-                "-Werror",
-                "-ffunction-sections",
-                f"-I{BOOTSTRAP}",
-                f"-I{includes}",
-                str(HARNESS),
-                str(BOOTSTRAP / "boot-session.c"),
-                "-Wl,--gc-sections",
-                "-o",
-                str(cls.executable),
-            ],
-            name="compile bounded boot-session host peer",
-            timeout=30,
-            check=True,
-        )
+        with tempfile.TemporaryDirectory() as temporary:
+            work = Path(temporary)
+            includes = work / "include"
+            includes.mkdir()
+            (includes / "ums9117-common").symlink_to(ROOT / "platforms/ums9117/common")
+            cls.executable = work / "boot-session"
+            run_process(
+                [
+                    "cc",
+                    "-std=c99",
+                    "-pedantic",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    "-ffunction-sections",
+                    f"-I{BOOTSTRAP}",
+                    f"-I{includes}",
+                    str(HARNESS),
+                    str(BOOTSTRAP / "boot-session.c"),
+                    "-Wl,--gc-sections",
+                    "-o",
+                    str(cls.executable),
+                ],
+                name="compile bounded boot-session host peer",
+                timeout=30,
+                check=True,
+            )
+            yield
 
     def copy_session(
         self,
@@ -124,7 +128,7 @@ class BootSessionHostTests(unittest.TestCase):
                 check=True,
             )
             output = (work / "result.bin").read_bytes()
-        self.assertEqual(len(output), 2080)
+        assert (len(output)) == (2080)
         return int(result.stdout), output[:2048], output[2048:]
 
     def assert_rejected(  # noqa: PLR0913 -- rejection inputs stay visible.
@@ -145,9 +149,10 @@ class BootSessionHostTests(unittest.TestCase):
             record_bytes=record_bytes,
             tree_bytes=tree_bytes,
         )
-        self.assertEqual(actual, (status, tree, b"u" * 32))
+        assert (actual) == ((status, tree, b"u" * 32))
 
-    def test_valid_record_copies_only_slots_and_session_output(self) -> None:
+    @pytest.mark.parametrize("tree_bytes", [896, 2048], ids=["exact-slot-extent", "whole-tree"])
+    def test_valid_record_copies_only_slots_and_session_output(self, tree_bytes: int) -> None:
         """Copy all four values while preserving record, guards and other tree bytes."""
         tree = _tree()
         expected = bytearray(tree)
@@ -155,114 +160,136 @@ class BootSessionHostTests(unittest.TestCase):
         expected[384:452] = CLIENT_KEY
         expected[512:544] = SESSION_ID
         expected[640:896] = USB_CONFIG
-        for tree_bytes in (896, 2048):
-            with self.subTest(tree_bytes=tree_bytes):
-                self.assertEqual(
-                    self.copy_session(_record(), tree, tree_bytes=tree_bytes),
-                    (0, bytes(expected), SESSION_ID),
-                )
+        assert self.copy_session(_record(), tree, tree_bytes=tree_bytes) == (
+            0,
+            bytes(expected),
+            SESSION_ID,
+        )
 
-    def test_bad_layout_output_and_truncated_tree_are_atomic(self) -> None:
+    @pytest.mark.parametrize(
+        ("mode", "record_bytes", "tree_bytes", "status"),
+        [
+            pytest.param("copy", 0, 2048, 1, id="empty-record"),
+            pytest.param("copy", 511, 2048, 1, id="short-record"),
+            pytest.param("copy", 513, 2048, 1, id="long-record"),
+            pytest.param("unaligned", 512, 2048, 1, id="unaligned-record"),
+            pytest.param("no-output", 512, 2048, 11, id="missing-output"),
+            pytest.param("no-output", 0, 2048, 11, id="missing-output-and-record"),
+            pytest.param("copy", 512, 0, 10, id="empty-tree"),
+            pytest.param("copy", 512, 63, 10, id="short-tree"),
+            pytest.param("copy", 512, 895, 10, id="truncated-slot"),
+        ],
+    )
+    def test_bad_layout_output_and_truncated_tree_are_atomic(
+        self, mode: str, record_bytes: int, tree_bytes: int, status: int
+    ) -> None:
         """Reject invalid extents, alignment and missing output before any copying."""
         record, tree = _record(), _tree()
-        for record_bytes in (0, 511, 513):
-            with self.subTest(record_bytes=record_bytes):
-                self.assert_rejected(record, tree, 1, record_bytes=record_bytes)
-        self.assert_rejected(record, tree, 1, mode="unaligned")
-        self.assert_rejected(record, tree, 11, mode="no-output")
-        self.assert_rejected(record, tree, 11, mode="no-output", record_bytes=0)
-        for tree_bytes in (0, 63, 895):
-            with self.subTest(tree_bytes=tree_bytes):
-                self.assert_rejected(record, tree, 10, tree_bytes=tree_bytes)
+        self.assert_rejected(
+            record, tree, status, mode=mode, record_bytes=record_bytes, tree_bytes=tree_bytes
+        )
 
-    def test_corrupt_record_and_empty_material_are_atomic(self) -> None:
+    @pytest.mark.parametrize(
+        ("start", "replacement", "status"),
+        [
+            pytest.param(0, b"X", 2, id="bad-magic"),
+            pytest.param(12, b"\xff\x01\x00\x00", 3, id="bad-size"),
+            pytest.param(8, b"\x01", 5, id="header-reserved"),
+            pytest.param(507, b"\x01", 5, id="tail-reserved"),
+            pytest.param(16, b"\0" * 32, 6, id="empty-session"),
+            pytest.param(48, b"\0" * 64, 7, id="empty-seed"),
+            *[
+                pytest.param(offset, None, 4, id=f"bad-crc-byte-{offset}")
+                for offset in (16, 111, 179, 435, 508, 511)
+            ],
+        ],
+    )
+    def test_corrupt_record_and_empty_material_are_atomic(
+        self, start: int, replacement: bytes | None, status: int
+    ) -> None:
         """Reject malformed header, CRC, reserved fields and absent session material."""
-        for label, start, replacement, status in (
-            ("magic", 0, b"X", 2),
-            ("size", 12, b"\xff\x01\x00\x00", 3),
-            ("header reserved", 8, b"\x01", 5),
-            ("tail reserved", 507, b"\x01", 5),
-            ("empty session", 16, b"\0" * 32, 6),
-            ("empty seed", 48, b"\0" * 64, 7),
-        ):
-            with self.subTest(label=label):
-                record = bytearray(_record())
-                record[start : start + len(replacement)] = replacement
-                self.assert_rejected(_seal_record(record), _tree(), status)
-        for offset in (16, 111, 179, 435, 508, 511):
-            with self.subTest(tampered_byte=offset):
-                record = bytearray(_record())
-                record[offset] ^= 1
-                self.assert_rejected(bytes(record), _tree(), 4)
+        record = bytearray(_record())
+        if replacement is None:
+            record[start] ^= 1
+            malformed = bytes(record)
+        else:
+            record[start : start + len(replacement)] = replacement
+            malformed = _seal_record(record)
+        self.assert_rejected(malformed, _tree(), status)
 
-    def test_malformed_client_key_and_usb_text_are_atomic(self) -> None:
-        """Invalid SSH key encodings and USB text or padding never personalize the tree."""
-        zero_key = b"AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-        for label, key in (
-            ("invalid alphabet", b"!" + CLIENT_KEY[1:]),
-            ("base64 padding", CLIENT_KEY[:-1] + b"="),
-            ("wrong key type", b"B" + CLIENT_KEY[1:]),
-            ("zero public key", zero_key),
-            (
-                "wrong key length",
-                base64.b64encode(b"\0\0\0\x0bssh-ed25519\0\0\0\x1f" + SESSION_ID),
+    @pytest.mark.parametrize(
+        ("start", "replacement", "status"),
+        [
+            pytest.param(112, b"!" + CLIENT_KEY[1:], 8, id="key-invalid-alphabet"),
+            pytest.param(112, CLIENT_KEY[:-1] + b"=", 8, id="key-base64-padding"),
+            pytest.param(112, b"B" + CLIENT_KEY[1:], 8, id="key-wrong-type"),
+            pytest.param(
+                112,
+                b"AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                8,
+                id="key-zero-material",
             ),
-        ):
-            with self.subTest(key=label):
-                record = bytearray(_record())
-                record[112:180] = key
-                self.assert_rejected(_seal_record(record), _tree(), 8)
-        for label, config in (
-            ("empty", b"\0" * 256),
-            ("unterminated", b"A" * 255 + b"\n"),
-            ("missing newline", b"A\0".ljust(256, b"\0")),
-            ("control byte", b"A\t\n\0".ljust(256, b"\0")),
-            ("non-ASCII", b"A\x80\n\0".ljust(256, b"\0")),
-            ("nonzero padding", b"A\n\0X".ljust(256, b"\0")),
-        ):
-            with self.subTest(config=label):
-                record = bytearray(_record())
-                record[180:436] = config
-                self.assert_rejected(_seal_record(record), _tree(), 9)
+            pytest.param(
+                112,
+                base64.b64encode(b"\0\0\0\x0bssh-ed25519\0\0\0\x1f" + SESSION_ID),
+                8,
+                id="key-wrong-length",
+            ),
+            pytest.param(180, b"\0" * 256, 9, id="usb-empty"),
+            pytest.param(180, b"A" * 255 + b"\n", 9, id="usb-unterminated"),
+            pytest.param(180, b"A\0".ljust(256, b"\0"), 9, id="usb-missing-newline"),
+            pytest.param(180, b"A\t\n\0".ljust(256, b"\0"), 9, id="usb-control-byte"),
+            pytest.param(180, b"A\x80\n\0".ljust(256, b"\0"), 9, id="usb-non-ascii"),
+            pytest.param(180, b"A\n\0X".ljust(256, b"\0"), 9, id="usb-nonzero-padding"),
+        ],
+    )
+    def test_malformed_client_key_and_usb_text_are_atomic(
+        self, start: int, replacement: bytes, status: int
+    ) -> None:
+        """Invalid SSH key encodings and USB text or padding never personalize the tree."""
+        record = bytearray(_record())
+        record[start : start + len(replacement)] = replacement
+        self.assert_rejected(_seal_record(record), _tree(), status)
 
-    def test_absent_or_ambiguous_marker_slots_are_atomic(self) -> None:
+    @pytest.mark.parametrize("defect", ["absent", "duplicate", "overlapping"])
+    @pytest.mark.parametrize(
+        ("offset", "marker", "length"),
+        [(256, 0xA1, 64), (384, 0xB2, 68), (512, 0xC3, 32), (640, 0xD4, 256)],
+        ids=["rng-seed", "client-key", "session-id", "usb-session"],
+    )
+    def test_absent_or_ambiguous_marker_slots_are_atomic(
+        self, offset: int, marker: int, length: int, defect: str
+    ) -> None:
         """Every marker slot must be present exactly once, including overlapping runs."""
-        for offset, marker, length in (
-            (256, 0xA1, 64),
-            (384, 0xB2, 68),
-            (512, 0xC3, 32),
-            (640, 0xD4, 256),
-        ):
-            for defect in ("absent", "duplicate", "overlapping"):
-                with self.subTest(marker=marker, defect=defect):
-                    tree = bytearray(_tree())
-                    if defect == "absent":
-                        tree[offset] = 0x5A
-                    elif defect == "duplicate":
-                        tree[1024 : 1024 + length] = bytes([marker]) * length
-                    else:
-                        tree[offset + length] = marker
-                    self.assert_rejected(_record(), bytes(tree), 10)
+        tree = bytearray(_tree())
+        if defect == "absent":
+            tree[offset] = 0x5A
+        elif defect == "duplicate":
+            tree[1024 : 1024 + length] = bytes([marker]) * length
+        else:
+            tree[offset + length] = marker
+        self.assert_rejected(_record(), bytes(tree), 10)
 
-    def test_absent_or_duplicate_property_names_are_atomic(self) -> None:
-        """Nul-terminated names must identify each slot uniquely before values change."""
-        for offset, name in (
+    @pytest.mark.parametrize("defect", ["absent", "duplicate", "unterminated"])
+    @pytest.mark.parametrize(
+        ("offset", "name"),
+        [
             (12, b"rng-seed\0"),
             (48, b"fplinux,ssh-client-key\0"),
             (96, b"fplinux,session-id\0"),
             (144, b"fplinux,usb-session\0"),
-        ):
-            for defect in ("absent", "duplicate", "unterminated"):
-                with self.subTest(name=name, defect=defect):
-                    tree = bytearray(_tree())
-                    if defect == "absent":
-                        tree[offset] = ord("X")
-                    elif defect == "duplicate":
-                        tree[1400 : 1400 + len(name)] = name
-                    else:
-                        tree[offset + len(name) - 1] = ord("X")
-                    self.assert_rejected(_record(), bytes(tree), 10)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        ],
+        ids=["rng-seed", "client-key", "session-id", "usb-session"],
+    )
+    def test_absent_or_duplicate_property_names_are_atomic(
+        self, offset: int, name: bytes, defect: str
+    ) -> None:
+        """Nul-terminated names must identify each slot uniquely before values change."""
+        tree = bytearray(_tree())
+        if defect == "absent":
+            tree[offset] = ord("X")
+        elif defect == "duplicate":
+            tree[1400 : 1400 + len(name)] = name
+        else:
+            tree[offset + len(name) - 1] = ord("X")
+        self.assert_rejected(_record(), bytes(tree), 10)

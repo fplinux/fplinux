@@ -3,13 +3,13 @@
 
 from __future__ import annotations
 
-import unittest
 from typing import ClassVar
 
+import pytest
 from fplinux_cli.build.storage import layout as profile_layout
 
 
-class ProfileLayoutRenderTests(unittest.TestCase):
+class ProfileLayoutRenderTests:
     """Keep generated inputs consistent with their selected layout values."""
 
     layout: ClassVar[dict[str, int]] = {
@@ -78,8 +78,7 @@ class ProfileLayoutRenderTests(unittest.TestCase):
     def test_bootstrap_and_uboot_inputs_expose_selected_layout_values(self) -> None:
         """Generated C, linker and U-Boot inputs carry the declared RAM placement."""
         header = profile_layout.boot_layout_header(self.layout)
-        self.assertEqual(
-            self._defines(header),
+        assert (self._defines(header)) == (
             {
                 "RAM_BASE_PHYS": 0x80000000,
                 "RAM_REQUIRED_BYTES": 0x04000000,
@@ -99,40 +98,42 @@ class ProfileLayoutRenderTests(unittest.TestCase):
                 "UBOOT_STACK_PHYS": 0x80F00000,
                 "FIT_PHYS": 0x83200000,
                 "FIT_LIMIT_BYTES": 0x00C00000,
-            },
+            }
         )
-        self.assertEqual(
+        assert (
             profile_layout.bootstrap_memory_ld(
                 {"load_address": 0x80100000, "payload_limit": 0x81000000},
                 self.layout,
             )
             .decode("ascii")
-            .splitlines(),
+            .splitlines()
+        ) == (
             [
                 "EXTRA_START = 0x80000000;",
                 "EXTRA_SIZE = 0x00100000;",
                 "IMAGE_START = 0x80100000;",
                 "IMAGE_SIZE = 0x00f00000;",
-            ],
+            ]
         )
         dtsi = profile_layout.uboot_layout_dtsi(self.layout).decode("ascii")
-        self.assertIn("#define FPLINUX_UBOOT_TIMER_HZ 1000", dtsi)
-        self.assertIn("memory@80000000", dtsi)
-        self.assertIn("reg = <0x80000000 0x04000000>;", dtsi)
-        self.assertEqual(
+        assert ("#define FPLINUX_UBOOT_TIMER_HZ 1000") in (dtsi)
+        assert ("memory@80000000") in (dtsi)
+        assert ("reg = <0x80000000 0x04000000>;") in (dtsi)
+        assert (
             self._config(
                 profile_layout.uboot_defconfig(
                     b"CONFIG_ENV_IS_NOWHERE=y\n",
                     self.layout,
                 )
-            ),
+            )
+        ) == (
             {
                 "CONFIG_ENV_IS_NOWHERE": "y",
                 "CONFIG_TEXT_BASE": "0x81000000",
                 "CONFIG_CUSTOM_SYS_INIT_SP_ADDR": "0x80f00000",
                 "CONFIG_SYS_LOAD_ADDR": "0x83200000",
                 "CONFIG_SYS_FDT_PAD": "0x00003000",
-            },
+            }
         )
 
     def test_external_root_and_image_inputs_reference_declared_storage(self) -> None:
@@ -157,8 +158,8 @@ class ProfileLayoutRenderTests(unittest.TestCase):
         }
 
         bootargs = profile_layout.root_bootargs_dtsi(root).decode("ascii")
-        self.assertTrue(bootargs.startswith('bootargs = "'))
-        self.assertTrue(bootargs.endswith('";\n'))
+        assert bootargs.startswith('bootargs = "')
+        assert bootargs.endswith('";\n')
         for argument in (
             "root=PARTUUID=46504c58-02",
             "rootfstype=ext4",
@@ -166,51 +167,44 @@ class ProfileLayoutRenderTests(unittest.TestCase):
             "rw",
             "init=/sbin/init",
         ):
-            with self.subTest(argument=argument):
-                self.assertIn(argument, bootargs)
+            assert (argument) in (bootargs), argument
 
         ram_bootargs = profile_layout.root_bootargs_dtsi({"kind": "initramfs"}).decode("ascii")
-        self.assertIn("init=/init rdinit=/init initramfs_options=size=40M", ram_bootargs)
-        self.assertNotIn("root=", ram_bootargs)
-        self.assertNotIn("rootfstype=", ram_bootargs)
+        assert ("init=/init rdinit=/init initramfs_options=size=40M") in (ram_bootargs)
+        assert ("root=") not in (ram_bootargs)
+        assert ("rootfstype=") not in (ram_bootargs)
 
         sections = self._genimage_sections(profile_layout.genimage_config(fit, storage))
         disk = sections["image FPLINUX.img/hdimage"]
-        self.assertEqual(disk["partition-table-type"], '"mbr"')
-        self.assertEqual(disk["disk-signature"], "0x46504c58")
+        assert (disk["partition-table-type"]) == ('"mbr"')
+        assert (disk["disk-signature"]) == ("0x46504c58")
         # The card layout is boot partition 1, root partition 2; MBR entries follow file order.
         boot, root_partition = (
             options
             for name, options in sections.items()
             if name.startswith("image FPLINUX.img/partition ")
         )
-        self.assertEqual(
-            {name: boot[name] for name in ("partition-type", "offset", "size")},
-            {"partition-type": "0x0c", "offset": "1048576", "size": "33554432"},
+        assert ({name: boot[name] for name in ("partition-type", "offset", "size")}) == (
+            {"partition-type": "0x0c", "offset": "1048576", "size": "33554432"}
         )
-        self.assertEqual(
-            root_partition,
+        assert (root_partition) == (
             {
                 "partition-type": "0x83",
                 "image": '"FPLROOT.ext4"',
                 "offset": "34603008",
                 "size": "67108864",
                 "fill": "true",
-            },
+            }
         )
         boot_image = "image " + boot["image"].strip('"')
-        self.assertEqual(sections[boot_image]["size"], "33554432")
-        self.assertEqual(sections[boot_image + "/vfat"]["label"], '"FPLBOOT"')
-        self.assertEqual(sections[boot_image + "/vfat/file FPLINUX.ITB"]["image"], '"FPLINUX.ITB"')
+        assert (sections[boot_image]["size"]) == ("33554432")
+        assert (sections[boot_image + "/vfat"]["label"]) == ('"FPLBOOT"')
+        assert (sections[boot_image + "/vfat/file FPLINUX.ITB"]["image"]) == ('"FPLINUX.ITB"')
 
     def test_base_defconfig_cannot_override_generated_profile_placement(self) -> None:
         """Reject a second source of U-Boot text, stack or FDT placement."""
-        with self.assertRaisesRegex(ValueError, "profile-owned layout values"):
+        with pytest.raises(ValueError, match="profile-owned layout values"):
             profile_layout.uboot_defconfig(
                 b"CONFIG_SYS_FDT_PAD=0x1000\n",
                 self.layout,
             )
-
-
-if __name__ == "__main__":
-    unittest.main()

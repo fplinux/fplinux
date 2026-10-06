@@ -4,30 +4,56 @@
 from __future__ import annotations
 
 import struct
-import unittest
 
+import pytest
 from fplinux_cli.device_data import bluetooth_firmware as bluetooth
 from fplinux_cli.device_data import formats as device_data
 
 from tests.small.device_data.nv_fixtures import FIXED_RECORD_SIZES, fixed_records, nv1, running_nv
 
 
-class FixedNvFormatTests(unittest.TestCase):
+class FixedNvFormatTests:
     """Protect fitted-record selection from complete sorted fixed-NV streams."""
 
-    def test_fixed_stream_uses_record_ids_and_lengths_not_fixed_offsets(self) -> None:
+    @pytest.mark.parametrize(
+        "unrelated",
+        [
+            pytest.param(b"odd", id="odd-size"),
+            pytest.param(b"a longer unrelated value", id="longer"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "generation",
+        [pytest.param(1, id="first-generation"), pytest.param(0x10203040, id="later")],
+    )
+    def test_fixed_stream_uses_record_ids_and_lengths_not_fixed_offsets(
+        self, unrelated: bytes, generation: int
+    ) -> None:
         """Unrelated record size and generation changes preserve selected values."""
         expected = fixed_records()
-        for unrelated in (b"odd", b"a longer unrelated value"):
-            for generation in (1, 0x10203040):
-                with self.subTest(unrelated=unrelated, generation=generation):
-                    stream = nv1(((2, unrelated), *expected.items()), generation)
-                    self.assertEqual(
-                        device_data.fixed_nv_records(stream, FIXED_RECORD_SIZES),
-                        expected,
-                    )
+        stream = nv1(((2, unrelated), *expected.items()), generation)
+        assert device_data.fixed_nv_records(stream, FIXED_RECORD_SIZES) == expected
 
-    def test_fixed_stream_rejects_incomplete_or_ambiguous_records(self) -> None:
+    @pytest.mark.parametrize(
+        "case",
+        [
+            "missing RF record",
+            "wrong address record length",
+            "duplicate identifier",
+            "out-of-order identifier",
+            "truncated payload",
+            "missing terminator",
+        ],
+        ids=[
+            "missing-rf",
+            "wrong-address-size",
+            "duplicate",
+            "out-of-order",
+            "truncated",
+            "unterminated",
+        ],
+    )
+    def test_fixed_stream_rejects_incomplete_or_ambiguous_records(self, case: str) -> None:
         """Incomplete or invalid record streams do not yield partial calibration."""
         complete = nv1(tuple(fixed_records().items()))
         cases = {
@@ -63,12 +89,12 @@ class FixedNvFormatTests(unittest.TestCase):
                 "fixed NV stream has no complete terminator",
             ),
         }
-        for name, (stream, error) in cases.items():
-            with self.subTest(name=name), self.assertRaisesRegex(ValueError, error):
-                device_data.fixed_nv_records(stream, FIXED_RECORD_SIZES)
+        stream, error = cases[case]
+        with pytest.raises(ValueError, match=error):
+            device_data.fixed_nv_records(stream, FIXED_RECORD_SIZES)
 
 
-class BluetoothRunningNvFormatTests(unittest.TestCase):
+class BluetoothRunningNvFormatTests:
     """Protect refusal to guess among conflicting Bluetooth values."""
 
     def test_running_records_accept_redundant_agreeing_copies(self) -> None:
@@ -78,7 +104,17 @@ class BluetoothRunningNvFormatTests(unittest.TestCase):
         unrelated = b"\x00" * 4 + b"\x91\x01\x08\x00" + b"\x00" * 24
         bluetooth.verify_running_nv(running + unrelated + running, fixed_records())
 
-    def test_running_records_reject_damaged_missing_or_conflicting_values(self) -> None:
+    @pytest.mark.parametrize(
+        "case",
+        [
+            "damaged payload checksum",
+            "missing records",
+            "conflicting historical copy",
+            "truncated last record",
+        ],
+        ids=["damaged-checksum", "missing-records", "conflicting-copy", "truncated-record"],
+    )
+    def test_running_records_reject_damaged_missing_or_conflicting_values(self, case: str) -> None:
         """Do not substitute unverified data or guess which physical copy is newest."""
         running = running_nv()
         damaged = bytearray(running)
@@ -90,20 +126,20 @@ class BluetoothRunningNvFormatTests(unittest.TestCase):
             "conflicting historical copy": (running + different_valid_address, "ambiguous"),
             "truncated last record": (running[:-1], "no checksum-valid RunningNV copy"),
         }
-        for name, (data, error) in cases.items():
-            with self.subTest(name=name), self.assertRaisesRegex(ValueError, error):
-                bluetooth.verify_running_nv(data, fixed_records())
+        data, error = cases[case]
+        with pytest.raises(ValueError, match=error):
+            bluetooth.verify_running_nv(data, fixed_records())
 
-    def test_checksum_handles_odd_bytes_and_end_around_carry(self) -> None:
+    @pytest.mark.parametrize(
+        ("payload", "expected"),
+        [
+            pytest.param(b"", 0xFFFF, id="empty"),
+            pytest.param(b"\x01\x02\x03", 0xFDFB, id="odd-byte-count"),
+            pytest.param(b"\xff\xff\x01\x00", 0xFFFE, id="end-around-carry"),
+        ],
+    )
+    def test_checksum_handles_odd_bytes_and_end_around_carry(
+        self, payload: bytes, expected: int
+    ) -> None:
         """Literal format vectors cover padding-independent checksum behavior."""
-        for payload, expected in (
-            (b"", 0xFFFF),
-            (b"\x01\x02\x03", 0xFDFB),
-            (b"\xff\xff\x01\x00", 0xFFFE),
-        ):
-            with self.subTest(payload=payload):
-                self.assertEqual(bluetooth.nv_checksum(payload), expected)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert bluetooth.nv_checksum(payload) == expected

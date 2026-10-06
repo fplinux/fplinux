@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 
 from tests import ROOT
@@ -14,7 +13,7 @@ BOOTSTRAP = ROOT / "platforms/ums9117/bootstrap"
 HARNESS = ROOT / "tests/host_tool/ums9117/ums9117-ram-probe.c"
 
 
-class RamProbeTests(unittest.TestCase):
+class RamProbeTests:
     """Exercise the bootstrap probe against real host words and aliases."""
 
     def test_probe_preserves_payload_words_and_alias_detection(self) -> None:
@@ -45,7 +44,3 @@ class RamProbeTests(unittest.TestCase):
                 timeout=10,
                 check=True,
             )
-
-
-if __name__ == "__main__":
-    unittest.main()

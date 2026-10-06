@@ -10,10 +10,10 @@ import stat
 import subprocess
 import sys
 import tempfile
-import unittest
 from pathlib import Path
 from unittest import mock
 
+import pytest
 from fplinux_cli.alpine import aports as alpine_builder
 
 
@@ -100,14 +100,17 @@ def _build_fixture(directory: Path, *, fail_build: bool) -> None:
         raise AssertionError(f"expected one build followed by cache reuse, got {build_count}")
 
 
-class AlpineSourceOwnershipTests(unittest.TestCase):
+class AlpineSourceOwnershipTests:
     """Stub build tools omit compilation; ownership and host filesystem access are real."""
 
-    def test_host_can_reuse_sources_after_success_and_failure(self) -> None:
+    @pytest.mark.parametrize(
+        "fail_build", [False, True], ids=["successful-cache-reuse", "failed-build"]
+    )
+    def test_host_can_reuse_sources_after_success_and_failure(self, *, fail_build: bool) -> None:
         """A build, a package-cache hit and a failed build leave source files reusable."""
         unshare = shutil.which("unshare")
         if unshare is None:
-            self.skipTest("subordinate namespace test requires unshare")
+            pytest.skip("subordinate namespace test requires unshare")
         probe = subprocess.run(
             [unshare, "--map-auto", "--map-root-user", "--", "true"],
             capture_output=True,
@@ -116,62 +119,53 @@ class AlpineSourceOwnershipTests(unittest.TestCase):
             timeout=30,
         )
         if probe.returncode:
-            self.skipTest("subordinate namespace is unavailable: " + probe.stderr.strip())
-        for fail_build in (False, True):
-            with self.subTest(fail_build=fail_build), tempfile.TemporaryDirectory() as temporary:
-                directory = Path(temporary)
-                command = [
-                    unshare,
-                    "--map-auto",
-                    "--map-root-user",
-                    "--",
-                    sys.executable,
-                    "-m",
-                    "tests.host_process.alpine.test_alpine_source_ownership",
-                    "--fixture",
-                    temporary,
-                    str(int(fail_build)),
-                ]
-                try:
-                    result = subprocess.run(
-                        command, capture_output=True, text=True, check=False, timeout=30
-                    )
-                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                    sources = directory / "cache/downloads/alpine/sources"
-                    for path in (sources, *sources.iterdir()):
-                        metadata = path.stat()
-                        self.assertEqual(
-                            (metadata.st_uid, metadata.st_gid), (os.getuid(), os.getgid())
-                        )
-                        self.assertEqual(
-                            stat.S_IMODE(metadata.st_mode), 0o700 if path.is_dir() else 0o600
-                        )
-                    self.assertEqual(
-                        (sources / "existing.tar.xz").read_bytes(), b"existing source\n"
-                    )
-                    self.assertEqual((sources / "downloaded.tar.xz").read_bytes(), b"new source\n")
-                    with tempfile.NamedTemporaryFile(dir=sources, prefix=".input-") as stream:
-                        stream.write(b"restored input\n")
-                finally:
-                    # A failed pre-fix case may leave subordinate-owned temporary files.
-                    subprocess.run(
-                        [
-                            unshare,
-                            "--map-auto",
-                            "--map-root-user",
-                            "--",
-                            "chown",
-                            "-R",
-                            "0:0",
-                            temporary,
-                        ],
-                        check=True,
-                        timeout=30,
-                    )
+            pytest.skip("subordinate namespace is unavailable: " + probe.stderr.strip())
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            command = [
+                unshare,
+                "--map-auto",
+                "--map-root-user",
+                "--",
+                sys.executable,
+                "-m",
+                "tests.host_process.alpine.test_alpine_source_ownership",
+                "--fixture",
+                temporary,
+                str(int(fail_build)),
+            ]
+            try:
+                result = subprocess.run(
+                    command, capture_output=True, text=True, check=False, timeout=30
+                )
+                assert (result.returncode) == (0), result.stdout + result.stderr
+                sources = directory / "cache/downloads/alpine/sources"
+                for path in (sources, *sources.iterdir()):
+                    metadata = path.stat()
+                    assert ((metadata.st_uid, metadata.st_gid)) == ((os.getuid(), os.getgid()))
+                    assert (stat.S_IMODE(metadata.st_mode)) == (0o700 if path.is_dir() else 0o600)
+                assert ((sources / "existing.tar.xz").read_bytes()) == (b"existing source\n")
+                assert ((sources / "downloaded.tar.xz").read_bytes()) == (b"new source\n")
+                with tempfile.NamedTemporaryFile(dir=sources, prefix=".input-") as stream:
+                    stream.write(b"restored input\n")
+            finally:
+                # A failed pre-fix case may leave subordinate-owned temporary files.
+                subprocess.run(
+                    [
+                        unshare,
+                        "--map-auto",
+                        "--map-root-user",
+                        "--",
+                        "chown",
+                        "-R",
+                        "0:0",
+                        temporary,
+                    ],
+                    check=True,
+                    timeout=30,
+                )
 
 
 if __name__ == "__main__":
     if len(sys.argv) == 4 and sys.argv[1] == "--fixture":
         _build_fixture(Path(sys.argv[2]), fail_build=bool(int(sys.argv[3])))
-    else:
-        unittest.main()

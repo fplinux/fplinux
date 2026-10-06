@@ -7,12 +7,10 @@ import json
 import os
 import selectors
 import signal
-import tempfile
 import time
-import unittest
-from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
 from fplinux_cli.cache.lock import cache_lock
 
 from tests.cli_support import prepare_cli_checkout
@@ -21,16 +19,16 @@ from tests.process import run_process
 if TYPE_CHECKING:
     import subprocess
     from collections.abc import Callable
+    from pathlib import Path
 
 
-class LogsCliTests(unittest.TestCase):
+class LogsCliTests:
     """Use controlled reporter-format inputs, real files and the real public parser."""
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _prepare_inputs(self, tmp_path: Path) -> None:
         """Provide source imports but no Kern installation, cache or ambient run history."""
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
+        self.root = tmp_path
         prepare_cli_checkout(self.root)
         self.logs = self.root / ".cache/logs"
 
@@ -83,15 +81,15 @@ class LogsCliTests(unittest.TestCase):
     ) -> bytes:
         """Wait for observed reader output before publishing the next producer state."""
         if process.stdout is None:
-            self.fail("reader stdout was not captured")
+            pytest.fail("reader stdout was not captured")
         observed = b""
         with selectors.DefaultSelector() as selector:
             selector.register(process.stdout, selectors.EVENT_READ)
             while marker not in observed:
-                self.assertGreater(deadline - time.monotonic(), 0, observed)
+                assert (deadline - time.monotonic()) > (0), observed
                 if selector.select(max(0, deadline - time.monotonic())):
                     chunk = os.read(process.stdout.fileno(), 65536)
-                    self.assertTrue(chunk, observed)
+                    assert chunk, observed
                     observed += chunk
         return observed
 
@@ -107,19 +105,18 @@ class LogsCliTests(unittest.TestCase):
         os.utime(first / "run.json", None)
 
         result = self.run_logs("list")
-        self.assertEqual(result.returncode, 0, result.stderr)
+        assert (result.returncode) == (0), result.stderr
         records = result.stdout.splitlines()[1:]
-        self.assertEqual(
-            records,
+        assert (records) == (
             [
                 "check/new check - default failed 2026-01-02T10:00:05+00:00 7.0",
                 (
                     "build/example/profiles/microsd-uboot/old build example microsd-uboot "
                     "success 2026-01-02T10:00:00+00:00 12.0"
                 ),
-            ],
+            ]
         )
-        self.assertNotIn(str(self.root), result.stdout)
+        assert (str(self.root)) not in (result.stdout)
         filtered = self.run_logs(
             "list",
             "--command",
@@ -131,14 +128,13 @@ class LogsCliTests(unittest.TestCase):
             "--status",
             "success",
         )
-        self.assertEqual(filtered.returncode, 0, filtered.stderr)
-        self.assertEqual(
-            [row.split()[0] for row in filtered.stdout.splitlines()[1:]],
-            ["build/example/profiles/microsd-uboot/old"],
+        assert (filtered.returncode) == (0), filtered.stderr
+        assert ([row.split()[0] for row in filtered.stdout.splitlines()[1:]]) == (
+            ["build/example/profiles/microsd-uboot/old"]
         )
         shown = self.run_logs("show")
-        self.assertEqual(shown.returncode, 0, shown.stderr)
-        self.assertEqual(shown.stdout, "check/new: failed\n")
+        assert (shown.returncode) == (0), shown.stderr
+        assert (shown.stdout) == ("check/new: failed\n")
 
     def test_show_selects_nested_stage_failures_and_bounded_tail(self) -> None:
         """The actual child-tool error is available even when a parent records only progress."""
@@ -155,31 +151,31 @@ class LogsCliTests(unittest.TestCase):
         )
         (child / "01-python.log").write_text("old line\nactual error\nlast line\n")
         result = self.run_logs("show", "example", "--stage", "python", "--tail", "2")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("containers/source/quality/python [failed]", result.stdout)
-        self.assertIn("actual error\nlast line\n", result.stdout)
-        self.assertNotIn("old line", result.stdout)
-        self.assertNotIn("parent progress", result.stdout)
+        assert (result.returncode) == (0), result.stderr
+        assert ("containers/source/quality/python [failed]") in (result.stdout)
+        assert ("actual error\nlast line\n") in (result.stdout)
+        assert ("old line") not in (result.stdout)
+        assert ("parent progress") not in (result.stdout)
         failed = self.run_logs("show", "check/example", "--failed")
-        self.assertEqual(failed.returncode, 0, failed.stderr)
-        self.assertIn("actual error", failed.stdout)
-        self.assertIn("parent progress", failed.stdout)
-        self.assertNotIn("successful preparation", failed.stdout)
+        assert (failed.returncode) == (0), failed.stderr
+        assert ("actual error") in (failed.stdout)
+        assert ("parent progress") in (failed.stdout)
+        assert ("successful preparation") not in (failed.stdout)
 
     def test_default_profile_is_a_filter_not_an_omitted_selection(self) -> None:
         """Default selection excludes named profiles on list and on an explicit run ID."""
         self.journal("build/example/base")
         self.journal("build/example/profiles/microsd-uboot/card")
         result = self.run_logs("list", "--profile", "default")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            [row.split()[0] for row in result.stdout.splitlines()[1:]], ["build/example/base"]
+        assert (result.returncode) == (0), result.stderr
+        assert ([row.split()[0] for row in result.stdout.splitlines()[1:]]) == (
+            ["build/example/base"]
         )
         rejected = self.run_logs(
             "show", "build/example/profiles/microsd-uboot/card", "--profile", "default"
         )
-        self.assertEqual(rejected.returncode, 1, rejected.stderr)
-        self.assertIn("no matching log run", rejected.stderr)
+        assert (rejected.returncode) == (1), rejected.stderr
+        assert ("no matching log run") in (rejected.stderr)
 
     def test_reader_neither_waits_for_cache_lock_nor_creates_logs(self) -> None:
         """Observing a build must remain possible while a writer holds the real cache lock."""
@@ -187,31 +183,38 @@ class LogsCliTests(unittest.TestCase):
         before = sorted(path.relative_to(self.logs) for path in self.logs.rglob("*"))
         with cache_lock(self.root / ".cache", exclusive=True, command="build", target="example"):
             result = self.run_logs("list")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(result.stdout.splitlines()[1:]), 1)
-        self.assertEqual(
-            sorted(path.relative_to(self.logs) for path in self.logs.rglob("*")), before
-        )
+        assert (result.returncode) == (0), result.stderr
+        assert (len(result.stdout.splitlines()[1:])) == (1)
+        assert (sorted(path.relative_to(self.logs) for path in self.logs.rglob("*"))) == (before)
 
-    def test_empty_unknown_ambiguous_and_invalid_requests_have_clear_outcomes(self) -> None:
+    @pytest.mark.parametrize(
+        ("arguments", "status", "error"),
+        [
+            pytest.param(("show", "missing"), 1, "no matching log run", id="missing-run"),
+            pytest.param(("show", "same"), 1, "ambiguous run ID", id="ambiguous-run"),
+            pytest.param(
+                ("show", "check/same", "--stage", "missing"),
+                1,
+                "stage not found",
+                id="missing-stage",
+            ),
+            pytest.param(("show", "--tail", "-1"), 2, "non-negative integer", id="negative-tail"),
+        ],
+    )
+    def test_empty_unknown_ambiguous_and_invalid_requests_have_clear_outcomes(
+        self, arguments: tuple[str, ...], status: int, error: str
+    ) -> None:
         """Empty listing succeeds, missing/ambiguous selections fail and invalid flags return 2."""
         empty = self.run_logs("list")
-        self.assertEqual(empty.returncode, 0, empty.stderr)
-        self.assertEqual(empty.stdout, "RUN COMMAND TARGET PROFILE STATUS STARTED DURATION\n")
-        self.assertFalse(self.logs.exists())
+        assert (empty.returncode) == (0), empty.stderr
+        assert (empty.stdout) == ("RUN COMMAND TARGET PROFILE STATUS STARTED DURATION\n")
+        assert not (self.logs.exists())
         self.journal("check/same")
         self.journal("test/same")
-        for arguments, status, error in (
-            (("show", "missing"), 1, "no matching log run"),
-            (("show", "same"), 1, "ambiguous run ID"),
-            (("show", "check/same", "--stage", "missing"), 1, "stage not found"),
-            (("show", "--tail", "-1"), 2, "non-negative integer"),
-        ):
-            with self.subTest(arguments=arguments):
-                result = self.run_logs(*arguments)
-                self.assertEqual(result.returncode, status, result.stderr)
-                self.assertIn(error, result.stderr)
-                self.assertNotIn("Traceback", result.stderr)
+        result = self.run_logs(*arguments)
+        assert (result.returncode) == (status), result.stderr
+        assert (error) in (result.stderr)
+        assert ("Traceback") not in (result.stderr)
 
     def test_follow_delivers_appends_new_stages_and_final_bytes_once(self) -> None:
         """Follow binds one run, drains new child stages and stops on recorded completion."""
@@ -233,7 +236,7 @@ class LogsCliTests(unittest.TestCase):
             self.journal(relative, stages=(("first", "success"),))
 
         result = self.run_logs("follow", "--tail", "1", while_running=publish_after_ready)
-        self.assertEqual(result.returncode, 0, result.stderr)
+        assert (result.returncode) == (0), result.stderr
         combined = observed.decode() + result.stdout
         for marker in (
             "ready-marker\n",
@@ -241,10 +244,10 @@ class LogsCliTests(unittest.TestCase):
             "new-stage-first\n",
             "new-stage-last\n",
         ):
-            self.assertEqual(combined.count(marker), 1, combined)
-        self.assertNotIn("hidden history", combined)
-        self.assertNotIn("check/newer", combined)
-        self.assertIn("run finished: success", combined)
+            assert (combined.count(marker)) == (1), combined
+        assert ("hidden history") not in (combined)
+        assert ("check/newer") not in (combined)
+        assert ("run finished: success") in (combined)
 
     def test_interrupting_follow_does_not_change_the_observed_run(self) -> None:
         """Ctrl+C stops only the reader with status 130 and leaves the journal untouched."""
@@ -257,10 +260,6 @@ class LogsCliTests(unittest.TestCase):
             process.send_signal(signal.SIGINT)
 
         result = self.run_logs("follow", while_running=interrupt_after_ready)
-        self.assertEqual(result.returncode, 130, result.stderr)
-        self.assertEqual((run / "run.json").read_bytes(), before)
-        self.assertNotIn("Traceback", result.stderr)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert (result.returncode) == (130), result.stderr
+        assert ((run / "run.json").read_bytes()) == (before)
+        assert ("Traceback") not in (result.stderr)

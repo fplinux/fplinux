@@ -31,7 +31,7 @@ from fplinux_cli.quality.formatting.canonical import (
     noncanonical_paths,
 )
 from fplinux_cli.quality.formatting.source_formats import classify_source_formats
-from fplinux_cli.quality.testing import unittest_commands
+from fplinux_cli.quality.testing import pytest_commands, pytest_environment
 from fplinux_cli.reporting.run import RunReporter, current_stage, run_entrypoint
 from fplinux_cli.workspace.capture import workspace_snapshot
 from pathspec import GitIgnoreSpec
@@ -74,6 +74,7 @@ def _run_direct(
     *,
     timeout: float,
     capture: bool,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run one standalone checker tool with a finite process-group lifetime."""
     display = shlex.join(command)
@@ -85,6 +86,7 @@ def _run_direct(
         stderr=subprocess.PIPE if capture else None,
         text=True,
         start_new_session=True,
+        env=env,
     )
     try:
         stdout, stderr = process.communicate(timeout=timeout)
@@ -101,13 +103,18 @@ def _run_direct(
     return subprocess.CompletedProcess(command, process.returncode, stdout or "", stderr or "")
 
 
-def run(command: list[str], *, timeout: float = _CHECK_COMMAND_TIMEOUT) -> None:
+def run(
+    command: list[str],
+    *,
+    timeout: float = _CHECK_COMMAND_TIMEOUT,
+    env: dict[str, str] | None = None,
+) -> None:
     """Run one checker tool, using the active stage when logging is available."""
     stage = current_stage()
     if stage is not None:
-        stage.run(command, cwd=ROOT, timeout=timeout)
+        stage.run(command, cwd=ROOT, timeout=timeout, env=env)
         return
-    result = _run_direct(command, timeout=timeout, capture=False)
+    result = _run_direct(command, timeout=timeout, capture=False, env=env)
     if result.returncode:
         raise subprocess.CalledProcessError(result.returncode, command)
 
@@ -700,8 +707,9 @@ def main() -> None:
             run(["ruff", "check", *python_files])
             run(["mypy", *python_files])
             if (ROOT / "tests").is_dir():
-                for _tier, command, timeout in unittest_commands([]):
-                    run(command, timeout=timeout)
+                environment = pytest_environment()
+                for _tier, command, timeout in pytest_commands([]):
+                    run(command, timeout=timeout, env=environment)
     if "shell" in selected:
         with report_stage(reporter, "shell"):
             check_shell_sources(formats)

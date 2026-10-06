@@ -4,47 +4,51 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
+from contextlib import ExitStack
 from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
+
+import pytest
 
 from tests import ROOT
 from tests.process import run_process
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 HARNESS = ROOT / "tests/host_tool/runtime/fplinux-handoff-protocol.c"
 
 
-class HandoffProtocolTests(unittest.TestCase):
+class HandoffProtocolTests:
     """Run a C99 peer for the fixed binary handoff boundary."""
 
     temporary: ClassVar[tempfile.TemporaryDirectory[str]]
     executable: ClassVar[Path]
 
+    @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def setUpClass(cls) -> None:
+    def _compiled_tools(cls) -> Iterator[None]:
         """Compile the isolated codec harness once for this test class."""
-        cls.temporary = tempfile.TemporaryDirectory()
-        cls.executable = Path(cls.temporary.name) / "fplinux-handoff-protocol"
-        run_process(
-            [
-                "cc",
-                "-std=c99",
-                "-Wall",
-                "-Wextra",
-                "-Werror",
-                str(HARNESS),
-                "-o",
-                str(cls.executable),
-            ],
-            name="compile handoff protocol harness",
-            timeout=30,
-            check=True,
-        )
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        """Remove the compiled host harness."""
-        cls.temporary.cleanup()
+        with ExitStack() as cleanup:
+            cls.temporary = tempfile.TemporaryDirectory()
+            cleanup.enter_context(cls.temporary)
+            cls.executable = Path(cls.temporary.name) / "fplinux-handoff-protocol"
+            run_process(
+                [
+                    "cc",
+                    "-std=c99",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    str(HARNESS),
+                    "-o",
+                    str(cls.executable),
+                ],
+                name="compile handoff protocol harness",
+                timeout=30,
+                check=True,
+            )
+            yield
 
     def run_case(self, case: str) -> None:
         """Run one self-checking peer case and preserve diagnostics on failure."""
@@ -53,10 +57,8 @@ class HandoffProtocolTests(unittest.TestCase):
             name=f"handoff protocol case {case}",
             timeout=10,
         )
-        self.assertEqual(
-            result.returncode,
-            0,
-            msg=f"{case} failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        assert (result.returncode) == (0), (
+            f"{case} failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
         )
 
     def test_request_and_ack_round_trip(self) -> None:
@@ -70,7 +72,3 @@ class HandoffProtocolTests(unittest.TestCase):
     def test_verified_nack_is_not_an_ack(self) -> None:
         """A valid nonzero bridge status remains a rejected handoff."""
         self.run_case("nack")
-
-
-if __name__ == "__main__":
-    unittest.main()

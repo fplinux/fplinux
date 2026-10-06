@@ -5,11 +5,10 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-import tempfile
-import unittest
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fplinux_cli.build.storage import fit as fit_image
 from fplinux_cli.common import sha256_file
 
@@ -19,14 +18,13 @@ ZIMAGE = b"FPLinux test zImage payload\n"
 DTB = b"FPLinux test DTB payload\n"
 
 
-class FitImageTests(unittest.TestCase):
+class FitImageTests:
     """Build and reuse a FIT with the quality image's pinned U-Boot tools."""
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _prepare_inputs(self, tmp_path: Path) -> None:
         """Copy explicitly declared U-Boot tools and create FIT inputs."""
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        self.root = tmp_path
         source_mkimage, source_dumpimage = self._installed_tools()
         self.mkimage = self._copy_declared_tool(source_mkimage)
         self.dumpimage = self._copy_declared_tool(source_dumpimage)
@@ -50,7 +48,7 @@ class FitImageTests(unittest.TestCase):
         for name in ("mkimage", "dumpimage"):
             location = shutil.which(name)
             if location is None:
-                self.fail(f"quality image lacks required FIT tool: {name}")
+                pytest.fail(f"quality image lacks required FIT tool: {name}")
             resolved.append(Path(location))
         tools = (resolved[0], resolved[1])
         for tool in tools:
@@ -61,9 +59,9 @@ class FitImageTests(unittest.TestCase):
                     timeout=30,
                 )
             except OSError as error:
-                self.fail(f"quality FIT tool cannot run: {tool}: {error}")
+                pytest.fail(f"quality FIT tool cannot run: {tool}: {error}")
             if result.returncode != 0:
-                self.fail(f"quality FIT tool self-test failed: {tool}: {result.stderr}")
+                pytest.fail(f"quality FIT tool self-test failed: {tool}: {result.stderr}")
         return tools
 
     def _copy_declared_tool(self, source: Path) -> Path:
@@ -73,7 +71,7 @@ class FitImageTests(unittest.TestCase):
             shutil.copyfile(source, destination)
             destination.chmod(0o755)
         except OSError as error:
-            self.fail(f"cannot copy quality FIT tool {source}: {error}")
+            pytest.fail(f"cannot copy quality FIT tool {source}: {error}")
         return destination
 
     def plan(self) -> fit_image.FitPlan:
@@ -112,8 +110,8 @@ class FitImageTests(unittest.TestCase):
                 timeout=30,
             )
         except OSError as error:
-            self.fail(f"quality image cannot run fdtget: {error}")
-        self.assertEqual(result.returncode, 0, result.stderr)
+            pytest.fail(f"quality image cannot run fdtget: {error}")
+        assert (result.returncode) == (0), result.stderr
         return result.stdout.strip()
 
     def fit_payload(self, fit: Path, node: str) -> bytes:
@@ -126,17 +124,17 @@ class FitImageTests(unittest.TestCase):
         plan = self.plan()
         fit = self.build(plan)
 
-        self.assertEqual(fit, self.output / "FPLINUX.ITB")
-        self.assertEqual(self.read_fit(fit, "/images/kernel", "load", "x"), "82000000")
-        self.assertEqual(self.read_fit(fit, "/images/kernel", "entry", "x"), "82000000")
-        self.assertEqual(self.read_fit(fit, "/images/fdt", "load", "x"), "83e00000")
-        self.assertEqual(self.fit_payload(fit, "/images/kernel"), ZIMAGE)
-        self.assertEqual(self.fit_payload(fit, "/images/fdt"), DTB)
-        self.assertEqual(self.read_fit(fit, "/configurations", "default", "s"), "nokia-ta1618")
+        assert (fit) == (self.output / "FPLINUX.ITB")
+        assert (self.read_fit(fit, "/images/kernel", "load", "x")) == ("82000000")
+        assert (self.read_fit(fit, "/images/kernel", "entry", "x")) == ("82000000")
+        assert (self.read_fit(fit, "/images/fdt", "load", "x")) == ("83e00000")
+        assert (self.fit_payload(fit, "/images/kernel")) == (ZIMAGE)
+        assert (self.fit_payload(fit, "/images/fdt")) == (DTB)
+        assert (self.read_fit(fit, "/configurations", "default", "s")) == ("nokia-ta1618")
         configuration = "/configurations/nokia-ta1618"
-        self.assertEqual(self.read_fit(fit, configuration, "kernel", "s"), "kernel")
-        self.assertEqual(self.read_fit(fit, configuration, "fdt", "s"), "fdt")
-        self.assertTrue(fit_image.cache_hit(self.output, plan))
+        assert (self.read_fit(fit, configuration, "kernel", "s")) == ("kernel")
+        assert (self.read_fit(fit, configuration, "fdt", "s")) == ("fdt")
+        assert fit_image.cache_hit(self.output, plan)
 
     def test_changed_zimage_misses_then_rebuilds_the_fit(self) -> None:
         """One declared kernel input change revokes only this FIT cache entry."""
@@ -147,10 +145,10 @@ class FitImageTests(unittest.TestCase):
         self.zimage.write_bytes(b"FPLinux changed zImage payload\n")
         changed = self.plan()
 
-        self.assertFalse(fit_image.cache_hit(self.output, changed))
+        assert not (fit_image.cache_hit(self.output, changed))
         rebuilt = self.build(changed)
-        self.assertTrue(fit_image.cache_hit(self.output, changed))
-        self.assertNotEqual(before, sha256_file(rebuilt))
+        assert fit_image.cache_hit(self.output, changed)
+        assert (before) != (sha256_file(rebuilt))
 
     def test_unrelated_file_keeps_a_complete_cache_hit(self) -> None:
         """A sibling outside the declared kernel and DTB inputs cannot rebuild FIT."""
@@ -159,12 +157,11 @@ class FitImageTests(unittest.TestCase):
         (self.root / "unrelated-host-note").write_text("not a FIT input\n", encoding="utf-8")
 
         after = self.plan()
-        self.assertTrue(fit_image.cache_hit(self.output, after))
-        self.assertEqual(
-            self.build(after, mkimage=self.root / "must-not-run"),
-            self.output / self.spec["filename"],
+        assert fit_image.cache_hit(self.output, after)
+        assert (self.build(after, mkimage=self.root / "must-not-run")) == (
+            self.output / self.spec["filename"]
         )
-        self.assertEqual((self.output / fit_image.RECEIPT_NAME).read_bytes(), receipt)
+        assert ((self.output / fit_image.RECEIPT_NAME).read_bytes()) == (receipt)
 
     def test_missing_and_tampered_fit_are_rebuilt(self) -> None:
         """Absent or changed published bytes cannot remain reusable."""
@@ -172,14 +169,14 @@ class FitImageTests(unittest.TestCase):
         fit = self.build(plan)
         expected = fit.read_bytes()
         fit.unlink()
-        self.assertFalse(fit_image.cache_hit(self.output, plan))
+        assert not (fit_image.cache_hit(self.output, plan))
 
-        self.assertEqual(self.build(plan).read_bytes(), expected)
+        assert (self.build(plan).read_bytes()) == (expected)
         fit.write_bytes(b"tampered\n")
-        self.assertFalse(fit_image.cache_hit(self.output, plan))
+        assert not (fit_image.cache_hit(self.output, plan))
 
-        self.assertEqual(self.build(plan).read_bytes(), expected)
-        self.assertTrue(fit_image.cache_hit(self.output, plan))
+        assert (self.build(plan).read_bytes()) == (expected)
+        assert fit_image.cache_hit(self.output, plan)
 
     def test_tool_failure_preserves_prior_complete_fit(self) -> None:
         """A failed new build cannot replace the previous verified publication."""
@@ -193,14 +190,10 @@ class FitImageTests(unittest.TestCase):
         self.zimage.write_bytes(b"FPLinux changed zImage payload\n")
         changed = self.plan()
 
-        with self.assertRaises(subprocess.CalledProcessError) as failure:
+        with pytest.raises(subprocess.CalledProcessError) as failure:
             self.build(changed, mkimage=failing)
 
-        self.assertEqual(failure.exception.returncode, 19)
-        self.assertEqual(fit.read_bytes(), prior_fit)
-        self.assertEqual((self.output / fit_image.RECEIPT_NAME).read_bytes(), prior_receipt)
-        self.assertTrue(fit_image.cache_hit(self.output, plan))
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert (failure.value.returncode) == (19)
+        assert (fit.read_bytes()) == (prior_fit)
+        assert ((self.output / fit_image.RECEIPT_NAME).read_bytes()) == (prior_receipt)
+        assert fit_image.cache_hit(self.output, plan)

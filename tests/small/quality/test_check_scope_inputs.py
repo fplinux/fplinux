@@ -4,9 +4,9 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 
+import pytest
 from fplinux_cli.quality.inputs import check_scope_closure_digest
 from fplinux_cli.quality.receipts import (
     CheckReceiptRecipe,
@@ -17,12 +17,12 @@ from fplinux_cli.quality.receipts import (
 from fplinux_cli.workspace.capture import WorkspaceFile, WorkspaceSnapshot
 
 
-class CheckScopeTests(unittest.TestCase):
+class CheckScopeTests:
     """Keep scope recipes bound to the inputs checked by their consumers."""
 
-    def test_registration_edits_revoke_affected_check_scope_receipts(self) -> None:
-        """Ownership and shared-source declarations cannot reuse checks of the old inputs."""
-        cases = (
+    @pytest.mark.parametrize(
+        ("scope", "original", "changed"),
+        [
             (
                 "alpine",
                 b'COMMON_PACKAGES = ("fplinux-base",)\n',
@@ -33,44 +33,40 @@ class CheckScopeTests(unittest.TestCase):
                 b'SHARED_APORT_SOURCES = {"consumer-a": ("shared.h",), "consumer-b": ()}\n',
                 b'SHARED_APORT_SOURCES = {"consumer-a": (), "consumer-b": ("shared.h",)}\n',
             ),
-        )
+        ],
+        ids=("package-selection", "shared-source-ownership"),
+    )
+    def test_registration_edits_revoke_affected_check_scope_receipts(
+        self, scope: str, original: bytes, changed: bytes
+    ) -> None:
+        """Ownership and shared-source declarations cannot reuse checks of the old inputs."""
+
+        def receipt(scope: str, registration: bytes) -> CheckReceiptRecipe:
+            snapshot = WorkspaceSnapshot(
+                (
+                    WorkspaceFile(
+                        "scripts/fplinux_cli/alpine/registration.py", registration, 0o644
+                    ),
+                    WorkspaceFile("alpine/aports/fplinux-base/APKBUILD", b"pkgname=base\n", 0o644),
+                    WorkspaceFile("alpine/aports/consumer-a/app.c", b"int app;\n", 0o644),
+                    WorkspaceFile(
+                        "scripts/fplinux_cli/quality/kernel/analysis.py", b"# checker\n", 0o644
+                    ),
+                ),
+                "a" * 64,
+            )
+            return check_scope_receipt_recipe(
+                scope,
+                check_scope_closure_digest(scope, snapshot),
+                image_generation="b" * 64,
+                orchestration_recipe="c" * 64,
+            )
+
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary)
-            for scope, original, changed in cases:
-                with self.subTest(scope=scope):
-
-                    def receipt(scope: str, registration: bytes) -> CheckReceiptRecipe:
-                        snapshot = WorkspaceSnapshot(
-                            (
-                                WorkspaceFile(
-                                    "scripts/fplinux_cli/alpine/registration.py",
-                                    registration,
-                                    0o644,
-                                ),
-                                WorkspaceFile(
-                                    "alpine/aports/fplinux-base/APKBUILD", b"pkgname=base\n", 0o644
-                                ),
-                                WorkspaceFile(
-                                    "alpine/aports/consumer-a/app.c", b"int app;\n", 0o644
-                                ),
-                                WorkspaceFile(
-                                    "scripts/fplinux_cli/quality/kernel/analysis.py",
-                                    b"# checker\n",
-                                    0o644,
-                                ),
-                            ),
-                            "a" * 64,
-                        )
-                        return check_scope_receipt_recipe(
-                            scope,
-                            check_scope_closure_digest(scope, snapshot),
-                            image_generation="b" * 64,
-                            orchestration_recipe="c" * 64,
-                        )
-
-                    publish_success_receipt(cache, receipt(scope, original))
-                    self.assertTrue(receipt_matches(cache, receipt(scope, original)))
-                    self.assertFalse(receipt_matches(cache, receipt(scope, changed)))
+            publish_success_receipt(cache, receipt(scope, original))
+            assert receipt_matches(cache, receipt(scope, original))
+            assert not (receipt_matches(cache, receipt(scope, changed)))
 
     def test_kernel_receipt_tracks_only_the_selected_build_type_fragment(self) -> None:
         """Editing release policy invalidates release checks while preserving debug reuse."""
@@ -93,13 +89,11 @@ class CheckScopeTests(unittest.TestCase):
             ),
             "b" * 64,
         )
-        self.assertNotEqual(
-            check_scope_closure_digest("kernel", before),
-            check_scope_closure_digest("kernel", after),
+        assert (check_scope_closure_digest("kernel", before)) != (
+            check_scope_closure_digest("kernel", after)
         )
-        self.assertEqual(
-            check_scope_closure_digest("kernel", before, build_type="debug"),
-            check_scope_closure_digest("kernel", after, build_type="debug"),
+        assert (check_scope_closure_digest("kernel", before, build_type="debug")) == (
+            check_scope_closure_digest("kernel", after, build_type="debug")
         )
         release = check_scope_receipt_recipe(
             "python", "a" * 64, image_generation="b" * 64, orchestration_recipe="c" * 64
@@ -111,7 +105,7 @@ class CheckScopeTests(unittest.TestCase):
             orchestration_recipe="c" * 64,
             build_type="debug",
         )
-        self.assertEqual(release, debug)
+        assert (release) == (debug)
 
     def test_scope_receipt_misses_after_orchestration_or_generation_changes(self) -> None:
         """Do not reuse one scope across checker or image generation changes."""
@@ -130,9 +124,9 @@ class CheckScopeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary)
             publish_success_receipt(cache, first)
-            self.assertTrue(receipt_matches(cache, first))
-            self.assertFalse(receipt_matches(cache, generation_changed))
-            self.assertFalse(receipt_matches(cache, orchestration_changed))
+            assert receipt_matches(cache, first)
+            assert not (receipt_matches(cache, generation_changed))
+            assert not (receipt_matches(cache, orchestration_changed))
 
     def test_kernel_receipt_recipe_carries_the_selected_profile(self) -> None:
         """Record a named profile in the kernel recipe and its persisted payload."""
@@ -150,9 +144,9 @@ class CheckScopeTests(unittest.TestCase):
             profile="microsd-uboot",
         )
 
-        self.assertIsNone(default.profile)
-        self.assertEqual(profile.profile, "microsd-uboot")
-        self.assertNotEqual(default.payload(), profile.payload())
+        assert (default.profile) is None
+        assert (profile.profile) == ("microsd-uboot")
+        assert (default.payload()) != (profile.payload())
 
     def test_readme_does_not_invalidate_c_or_kernel_scope(self) -> None:
         """Keep unrelated documentation outside the two expensive closures."""
@@ -177,17 +171,14 @@ class CheckScopeTests(unittest.TestCase):
         changed = (WorkspaceFile("README.md", b"second", 0o644), *common[1:])
         first = WorkspaceSnapshot(common, "a" * 64)
         second = WorkspaceSnapshot(changed, "b" * 64)
-        self.assertEqual(
-            check_scope_closure_digest("c", first),
-            check_scope_closure_digest("c", second),
+        assert (check_scope_closure_digest("c", first)) == (
+            check_scope_closure_digest("c", second)
         )
-        self.assertEqual(
-            check_scope_closure_digest("kernel", first),
-            check_scope_closure_digest("kernel", second),
+        assert (check_scope_closure_digest("kernel", first)) == (
+            check_scope_closure_digest("kernel", second)
         )
-        self.assertNotEqual(
-            check_scope_closure_digest("source", first),
-            check_scope_closure_digest("source", second),
+        assert (check_scope_closure_digest("source", first)) != (
+            check_scope_closure_digest("source", second)
         )
 
         kernel_changed = WorkspaceSnapshot(
@@ -201,13 +192,11 @@ class CheckScopeTests(unittest.TestCase):
             ),
             "c" * 64,
         )
-        self.assertEqual(
-            check_scope_closure_digest("c", first),
-            check_scope_closure_digest("c", kernel_changed),
+        assert (check_scope_closure_digest("c", first)) == (
+            check_scope_closure_digest("c", kernel_changed)
         )
-        self.assertNotEqual(
-            check_scope_closure_digest("kernel", first),
-            check_scope_closure_digest("kernel", kernel_changed),
+        assert (check_scope_closure_digest("kernel", first)) != (
+            check_scope_closure_digest("kernel", kernel_changed)
         )
 
     def test_c_harness_change_updates_the_c_closure(self) -> None:
@@ -233,12 +222,32 @@ class CheckScopeTests(unittest.TestCase):
             "b" * 64,
         )
 
-        self.assertNotEqual(
-            check_scope_closure_digest("c", first),
-            check_scope_closure_digest("c", second),
+        assert (check_scope_closure_digest("c", first)) != (
+            check_scope_closure_digest("c", second)
         )
 
-    def test_kernel_scope_tracks_manifest_sources_without_whole_bootstrap(self) -> None:
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "targets/demo/kernel/target.patch",
+            "targets/demo/kernel/target-copy.c",
+            "targets/demo/bootstrap/referenced.h",
+            "targets/demo/kernel/target-append",
+            "platforms/demo/kernel/platform.patch",
+            "platforms/demo/kernel/platform-copy.c",
+            "platforms/demo/kernel/platform-append",
+        ],
+        ids=(
+            "target-patch",
+            "target-copy",
+            "referenced-bootstrap-header",
+            "target-append",
+            "platform-patch",
+            "platform-copy",
+            "platform-append",
+        ),
+    )
+    def test_kernel_scope_tracks_manifest_sources_without_whole_bootstrap(self, path: str) -> None:
         """Track every projected Linux input but ignore bootstrap-only sources."""
         target_manifest = (
             b'platform = "demo"\n'
@@ -292,22 +301,15 @@ class CheckScopeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary)
             publish_success_receipt(cache, recipe(inputs))
-            for path in (
-                "targets/demo/kernel/target.patch",
-                "targets/demo/kernel/target-copy.c",
-                "targets/demo/bootstrap/referenced.h",
-                "targets/demo/kernel/target-append",
-                "platforms/demo/kernel/platform.patch",
-                "platforms/demo/kernel/platform-copy.c",
-                "platforms/demo/kernel/platform-append",
-            ):
-                with self.subTest(projected=path):
-                    changed = {**inputs, path: inputs[path] + b"changed\n"}
-                    self.assertFalse(receipt_matches(cache, recipe(changed)))
+            changed = {**inputs, path: inputs[path] + b"changed\n"}
+            assert not (receipt_matches(cache, recipe(changed)))
             bootstrap_only = {**inputs, "targets/demo/bootstrap/main.c": b"int changed;\n"}
-            self.assertTrue(receipt_matches(cache, recipe(bootstrap_only)))
+            assert receipt_matches(cache, recipe(bootstrap_only))
 
-    def test_global_kernel_receipt_tracks_shared_and_board_configs(self) -> None:
+    @pytest.mark.parametrize("profile", [None, "microsd-uboot"], ids=("default", "microsd-uboot"))
+    def test_global_kernel_receipt_tracks_shared_and_board_configs(
+        self, profile: str | None
+    ) -> None:
         """Relevant config changes miss while the other boot mode remains unrelated."""
         inputs = {
             "targets/phone/target.toml": (
@@ -339,31 +341,29 @@ class CheckScopeTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary)
-            for profile in (None, "microsd-uboot"):
-                with self.subTest(profile=profile):
-                    original = receipt(inputs, profile)
-                    publish_success_receipt(cache, original)
-                    self.assertTrue(receipt_matches(cache, receipt(inputs, profile)))
-                    for path in (
-                        "platforms/demo/kernel/defconfig",
-                        "targets/phone/kernel/config.fragment",
-                        "scripts/fplinux_cli/build/storage/layout.py",
-                    ):
-                        changed = {**inputs, path: b"CONFIG_CHANGED=y\n"}
-                        self.assertFalse(receipt_matches(cache, receipt(changed, profile)))
-                    unrelated = {**inputs, "targets/phone/bootstrap/main.c": b"int changed;\n"}
-                    self.assertTrue(receipt_matches(cache, receipt(unrelated, profile)))
-                    other_profile = "default" if profile else "microsd-uboot"
-                    other_changed = {
-                        **inputs,
-                        f"profiles/{other_profile}/profile.toml": b"changed\n",
-                    }
-                    self.assertTrue(receipt_matches(cache, receipt(other_changed, profile)))
-                    selected_changed = {
-                        **inputs,
-                        f"profiles/{profile or 'default'}/profile.toml": b"changed\n",
-                    }
-                    self.assertFalse(receipt_matches(cache, receipt(selected_changed, profile)))
+            original = receipt(inputs, profile)
+            publish_success_receipt(cache, original)
+            assert receipt_matches(cache, receipt(inputs, profile))
+            for path in (
+                "platforms/demo/kernel/defconfig",
+                "targets/phone/kernel/config.fragment",
+                "scripts/fplinux_cli/build/storage/layout.py",
+            ):
+                changed = {**inputs, path: b"CONFIG_CHANGED=y\n"}
+                assert not (receipt_matches(cache, receipt(changed, profile)))
+            unrelated = {**inputs, "targets/phone/bootstrap/main.c": b"int changed;\n"}
+            assert receipt_matches(cache, receipt(unrelated, profile))
+            other_profile = "default" if profile else "microsd-uboot"
+            other_changed = {
+                **inputs,
+                f"profiles/{other_profile}/profile.toml": b"changed\n",
+            }
+            assert receipt_matches(cache, receipt(other_changed, profile))
+            selected_changed = {
+                **inputs,
+                f"profiles/{profile or 'default'}/profile.toml": b"changed\n",
+            }
+            assert not (receipt_matches(cache, receipt(selected_changed, profile)))
 
     def test_editorconfig_change_updates_metadata_closure(self) -> None:
         """Track Prettier's repository EditorConfig as metadata input."""
@@ -381,9 +381,8 @@ class CheckScopeTests(unittest.TestCase):
             ),
             "b" * 64,
         )
-        self.assertNotEqual(
-            check_scope_closure_digest("metadata", first),
-            check_scope_closure_digest("metadata", second),
+        assert (check_scope_closure_digest("metadata", first)) != (
+            check_scope_closure_digest("metadata", second)
         )
 
     def test_executable_prettier_config_includes_local_helpers(self) -> None:
@@ -400,9 +399,8 @@ class CheckScopeTests(unittest.TestCase):
             (*common, WorkspaceFile("helper.mjs", b"second\n", 0o644)),
             "b" * 64,
         )
-        self.assertNotEqual(
-            check_scope_closure_digest("metadata", first),
-            check_scope_closure_digest("metadata", second),
+        assert (check_scope_closure_digest("metadata", first)) != (
+            check_scope_closure_digest("metadata", second)
         )
 
     def test_c_scope_tracks_manifest_source_bootstrap_and_quoted_header(self) -> None:
@@ -441,17 +439,14 @@ class CheckScopeTests(unittest.TestCase):
             (*common[:5], WorkspaceFile(common[5].path, b"int changed;\n", 0o644)),
             "d" * 64,
         )
-        self.assertNotEqual(
-            check_scope_closure_digest("c", first),
-            check_scope_closure_digest("c", header_changed),
+        assert (check_scope_closure_digest("c", first)) != (
+            check_scope_closure_digest("c", header_changed)
         )
-        self.assertEqual(
-            check_scope_closure_digest("c", first),
-            check_scope_closure_digest("c", orphan_changed),
+        assert (check_scope_closure_digest("c", first)) == (
+            check_scope_closure_digest("c", orphan_changed)
         )
-        self.assertNotEqual(
-            check_scope_closure_digest("c", first),
-            check_scope_closure_digest("c", bootstrap_changed),
+        assert (check_scope_closure_digest("c", first)) != (
+            check_scope_closure_digest("c", bootstrap_changed)
         )
 
     def test_aport_c_and_header_invalidate_c_scope_without_runtime_selection(self) -> None:
@@ -486,16 +481,15 @@ class CheckScopeTests(unittest.TestCase):
             ),
             "c" * 64,
         )
-        self.assertNotEqual(
-            check_scope_closure_digest("c", first),
-            check_scope_closure_digest("c", source_changed),
+        assert (check_scope_closure_digest("c", first)) != (
+            check_scope_closure_digest("c", source_changed)
         )
-        self.assertNotEqual(
-            check_scope_closure_digest("c", first),
-            check_scope_closure_digest("c", header_changed),
+        assert (check_scope_closure_digest("c", first)) != (
+            check_scope_closure_digest("c", header_changed)
         )
 
-    def test_alpine_scope_tracks_each_present_apkbuild(self) -> None:
+    @pytest.mark.parametrize("index", [4, 5], ids=("platform-packages", "target-packages"))
+    def test_alpine_scope_tracks_each_present_apkbuild(self, index: int) -> None:
         """Track every aport and both package-selection manifest layers."""
         first = WorkspaceSnapshot(
             (
@@ -516,20 +510,14 @@ class CheckScopeTests(unittest.TestCase):
             ),
             "b" * 64,
         )
-        self.assertNotEqual(
-            check_scope_closure_digest("alpine", first),
-            check_scope_closure_digest("alpine", changed),
+        assert (check_scope_closure_digest("alpine", first)) != (
+            check_scope_closure_digest("alpine", changed)
         )
-        for index in (4, 5):
-            files = list(first.files)
-            files[index] = WorkspaceFile(files[index].path, b"changed packages\n", 0o644)
-            with self.subTest(path=files[index].path):
-                self.assertNotEqual(
-                    check_scope_closure_digest("alpine", first),
-                    check_scope_closure_digest(
-                        "alpine", WorkspaceSnapshot(tuple(files), "c" * 64)
-                    ),
-                )
+        files = list(first.files)
+        files[index] = WorkspaceFile(files[index].path, b"changed packages\n", 0o644)
+        assert (check_scope_closure_digest("alpine", first)) != (
+            check_scope_closure_digest("alpine", WorkspaceSnapshot(tuple(files), "c" * 64))
+        )
 
     def test_shell_scope_tracks_extensionless_and_openrc_sources(self) -> None:
         """Track shell sources matching the checker, including OpenRC init scripts."""
@@ -550,9 +538,8 @@ class CheckScopeTests(unittest.TestCase):
             ),
             "b" * 64,
         )
-        self.assertNotEqual(
-            check_scope_closure_digest("shell", base),
-            check_scope_closure_digest("shell", changed_tool),
+        assert (check_scope_closure_digest("shell", base)) != (
+            check_scope_closure_digest("shell", changed_tool)
         )
         changed_initd = WorkspaceSnapshot(
             (
@@ -579,8 +566,8 @@ class CheckScopeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary)
             publish_success_receipt(cache, first_recipe)
-            self.assertTrue(receipt_matches(cache, first_recipe))
-            self.assertFalse(receipt_matches(cache, initd_recipe))
+            assert receipt_matches(cache, first_recipe)
+            assert not (receipt_matches(cache, initd_recipe))
         external = WorkspaceSnapshot(
             (*base.files, WorkspaceFile(".shellcheckrc", b"external-sources=true\n", 0o644)),
             "g" * 64,
@@ -595,16 +582,43 @@ class CheckScopeTests(unittest.TestCase):
             ),
             "h" * 64,
         )
-        self.assertNotEqual(
-            check_scope_closure_digest("shell", external),
-            check_scope_closure_digest("shell", external_changed),
+        assert (check_scope_closure_digest("shell", external)) != (
+            check_scope_closure_digest("shell", external_changed)
         )
 
-    def test_configuration_receipts_follow_the_files_checked_by_each_scope(self) -> None:
+    @pytest.mark.parametrize(
+        ("scope", "path", "expected_hit"),
+        [
+            ("metadata", "commitlint.config.mjs", False),
+            ("metadata", ".github/workflows/demo.yml", False),
+            ("metadata", "platforms/demo/target-template/target.toml.in", False),
+            ("metadata", ".vale.ini", False),
+            ("metadata", "other.mjs", True),
+            ("metadata", "other.JSON", True),
+            ("metadata", "package-lock.json", True),
+            ("shell", "alpine/abuild.conf", False),
+            ("shell", "other.conf", True),
+            ("shell", "package-lock.json", True),
+        ],
+        ids=(
+            "metadata-commitlint",
+            "metadata-workflow",
+            "metadata-template",
+            "metadata-vale",
+            "metadata-unrelated-script",
+            "metadata-unsupported-json",
+            "metadata-npm-lock",
+            "shell-abuild",
+            "shell-unrelated-config",
+            "shell-npm-lock",
+        ),
+    )
+    def test_configuration_receipts_follow_the_files_checked_by_each_scope(
+        self, scope: str, path: str, *, expected_hit: bool
+    ) -> None:
         """Relevant edits miss while unsupported neighbors and npm's lock remain hits."""
-        cases = (
-            (
-                "metadata",
+        inputs_by_scope = {
+            "metadata": (
                 {
                     "commitlint.config.mjs": b"export default {};\n",
                     ".github/workflows/demo.yml": b"name: Demo\n",
@@ -613,14 +627,13 @@ class CheckScopeTests(unittest.TestCase):
                 },
                 {"other.mjs": b"export default {};\n", "other.JSON": b"{}\n"},
             ),
-            (
-                "shell",
+            "shell": (
                 {
                     "alpine/abuild.conf": b"CFLAGS=-Os\n",
                 },
                 {"other.conf": b"setting=value\n"},
             ),
-        )
+        }
 
         def recipe(scope: str, contents: dict[str, bytes]) -> CheckReceiptRecipe:
             snapshot = WorkspaceSnapshot(
@@ -636,20 +649,10 @@ class CheckScopeTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary)
-            for scope, checked, unsupported in cases:
-                unrelated = {**unsupported, "package-lock.json": b"{}\n"}
-                contents = {**checked, **unrelated}
-                publish_success_receipt(cache, recipe(scope, contents))
-                self.assertTrue(receipt_matches(cache, recipe(scope, contents)))
-                for path in checked:
-                    with self.subTest(scope=scope, causal=path):
-                        changed = {**contents, path: contents[path] + b"\n"}
-                        self.assertFalse(receipt_matches(cache, recipe(scope, changed)))
-                for path in unrelated:
-                    with self.subTest(scope=scope, unrelated=path):
-                        changed = {**contents, path: contents[path] + b"\n"}
-                        self.assertTrue(receipt_matches(cache, recipe(scope, changed)))
-
-
-if __name__ == "__main__":
-    unittest.main()
+            checked, unsupported = inputs_by_scope[scope]
+            unrelated = {**unsupported, "package-lock.json": b"{}\n"}
+            contents = {**checked, **unrelated}
+            publish_success_receipt(cache, recipe(scope, contents))
+            assert receipt_matches(cache, recipe(scope, contents))
+            changed = {**contents, path: contents[path] + b"\n"}
+            assert receipt_matches(cache, recipe(scope, changed)) == expected_hit

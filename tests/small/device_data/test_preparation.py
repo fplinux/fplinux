@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import hashlib
-import unittest
 
+import pytest
 from fplinux_cli.device_data import (
     bluetooth_firmware as bluetooth,
 )
@@ -25,7 +25,7 @@ from tests.small.device_data.audio_fixtures import inoi_audio_records
 from tests.small.device_data.nv_fixtures import fixed_records, nv1, running_nv
 
 
-class PartitionPreparationTests(unittest.TestCase):
+class PartitionPreparationTests:
     """Exercise extraction and copy preservation on synthetic physical pages."""
 
     @staticmethod
@@ -83,18 +83,15 @@ class PartitionPreparationTests(unittest.TestCase):
             machine_compatible=b"vendor,phone",
         )
 
-        self.assertEqual(set(result.groups), {"bluetooth", "audio-profile", "fm-radio"})
-        self.assertEqual(
-            result.groups["fm-radio"].originals, {"phone-nv419.bin": bytes(range(128))}
-        )
-        self.assertEqual(
-            result.groups["fm-radio"].prepared["phone-fm-config.bin"][:18],
-            bytes.fromhex("00 00 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f 0e 0f"),
+        assert (set(result.groups)) == ({"bluetooth", "audio-profile", "fm-radio"})
+        assert (result.groups["fm-radio"].originals) == ({"phone-nv419.bin": bytes(range(128))})
+        assert (result.groups["fm-radio"].prepared["phone-fm-config.bin"][:18]) == (
+            bytes.fromhex("00 00 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f 0e 0f")
         )
 
         conflicting = bytes(range(127)) + b"\0"
         nand, partitions, revision = self._inputs(protected_fm=conflicting)
-        with self.assertRaisesRegex(ValueError, "NV419 differs"):
+        with pytest.raises(ValueError, match="NV419 differs"):
             fitted_device_data.prepare_from_partitions(
                 nand,
                 partitions,
@@ -103,26 +100,32 @@ class PartitionPreparationTests(unittest.TestCase):
                 machine_compatible=b"vendor,phone",
             )
 
-    def test_speaker_vibration_target_receives_the_vibrate_tone_section(self) -> None:
+    @pytest.mark.parametrize(
+        ("speaker_vibration", "expected_tail"),
+        [
+            pytest.param(False, b"", id="without-vibration"),
+            pytest.param(True, INOI_VIBRATE_TONE_SECTION, id="with-vibration"),
+        ],
+    )
+    def test_speaker_vibration_target_receives_the_vibrate_tone_section(
+        self, *, speaker_vibration: bool, expected_tail: bytes
+    ) -> None:
         """Partition preparation forwards speaker_vibration; only True appends the tone section."""
-        for speaker_vibration, expected_tail in ((False, b""), (True, INOI_VIBRATE_TONE_SECTION)):
-            nand, partitions, revision = self._inputs()
+        nand, partitions, revision = self._inputs()
 
-            result = fitted_device_data.prepare_from_partitions(
-                nand,
-                partitions,
-                prefix="phone",
-                revision=revision,
-                machine_compatible=b"vendor,phone",
-                speaker_vibration=speaker_vibration,
-            )
+        result = fitted_device_data.prepare_from_partitions(
+            nand,
+            partitions,
+            prefix="phone",
+            revision=revision,
+            machine_compatible=b"vendor,phone",
+            speaker_vibration=speaker_vibration,
+        )
 
-            profile = result.groups["audio-profile"].prepared["phone-audio-profile.bin"]
-            with self.subTest(speaker_vibration=speaker_vibration):
-                self.assertEqual(
-                    profile[53:],
-                    FITTED_HEADFREE_SECTION + FITTED_INOI_PROCESSING_SECTION + expected_tail,
-                )
+        profile = result.groups["audio-profile"].prepared["phone-audio-profile.bin"]
+        assert profile[53:] == (
+            FITTED_HEADFREE_SECTION + FITTED_INOI_PROCESSING_SECTION + expected_tail
+        )
 
     def test_complete_set_keeps_original_image_and_individual_nv_bytes(self) -> None:
         """Only the prepared CM4 changes; every original remains byte-exact."""
@@ -142,17 +145,16 @@ class PartitionPreparationTests(unittest.TestCase):
             machine_compatible=b"vendor,phone",
         ).groups["bluetooth"]
 
-        self.assertEqual(result.originals, expected_originals)
-        self.assertEqual(
-            result.prepared,
-            expected_originals | {"example-cm4.bin": b"prefix\x08\xe0middle\x2b\xe0suffix"},
+        assert (result.originals) == (expected_originals)
+        assert (result.prepared) == (
+            expected_originals | {"example-cm4.bin": b"prefix\x08\xe0middle\x2b\xe0suffix"}
         )
 
     def test_conflicting_protected_nv_cannot_produce_a_firmware_set(self) -> None:
         """Disagreeing fixed copies are rejected instead of selecting one address."""
         nand, partitions, revision = self._inputs(protected_address=b"D" * 8)
 
-        with self.assertRaisesRegex(ValueError, "DownloadedNV and ProtectNV disagree"):
+        with pytest.raises(ValueError, match="DownloadedNV and ProtectNV disagree"):
             fitted_device_data.prepare_from_partitions(
                 nand,
                 partitions,
@@ -160,7 +162,3 @@ class PartitionPreparationTests(unittest.TestCase):
                 revision=revision,
                 machine_compatible=b"vendor,phone",
             )
-
-
-if __name__ == "__main__":
-    unittest.main()

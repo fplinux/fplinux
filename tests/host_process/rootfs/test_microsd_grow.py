@@ -5,45 +5,51 @@ from __future__ import annotations
 
 import os
 import tempfile
-import unittest
+from contextlib import ExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+import pytest
 
 from tests import ROOT
 from tests.process import run_process
 
 if TYPE_CHECKING:
     import subprocess
+    from collections.abc import Iterator
 
 GROW = ROOT / "alpine/aports/fplinux-microsd-root/fplinux-microsd-grow"
 
 
-class MicroSDGrowTests(unittest.TestCase):
+class MicroSDGrowTests:
     """Exercise the installed script with controlled external filesystem tools."""
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _prepare_case(self) -> Iterator[None]:
         """Create fake growpart and resize2fs process boundaries."""
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.directory = Path(self.temporary.name)
-        self.calls = self.directory / "calls"
-        self._tool(
-            "growpart",
-            """#!/bin/sh
+        with ExitStack() as cleanup:
+            self.temporary = tempfile.TemporaryDirectory()
+            cleanup.enter_context(self.temporary)
+            self.directory = Path(self.temporary.name)
+            self.calls = self.directory / "calls"
+            self._tool(
+                "growpart",
+                """#!/bin/sh
 printf 'growpart:%s\\n' "$*" >> "$FPLINUX_GROW_CALLS"
 if [ "${FPLINUX_GROWPART_STATUS:?}" -ge 2 ]; then
     printf 'growpart failed\\n' >&2
 fi
 exit "$FPLINUX_GROWPART_STATUS"
 """,
-        )
-        self._tool(
-            "resize2fs",
-            """#!/bin/sh
+            )
+            self._tool(
+                "resize2fs",
+                """#!/bin/sh
 printf 'resize2fs:%s\\n' "$*" >> "$FPLINUX_GROW_CALLS"
 exit "${FPLINUX_RESIZE2FS_STATUS:-0}"
 """,
-        )
+            )
+            yield
 
     def _tool(self, name: str, source: str) -> None:
         path = self.directory / name
@@ -78,52 +84,42 @@ exit "${FPLINUX_RESIZE2FS_STATUS:-0}"
         """A successful partition change proceeds to filesystem growth."""
         result = self._run(0)
 
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            self._calls(),
+        assert (result.returncode) == (0), result.stderr
+        assert (self._calls()) == (
             [
                 "growpart:--update=on /dev/mmcblk0 2",
                 "resize2fs:/dev/mmcblk0p2",
-            ],
+            ]
         )
 
     def test_nochange_is_success_and_still_repairs_filesystem_size(self) -> None:
         """Growpart NOCHANGE still lets resize2fs repair an interrupted run."""
         result = self._run(1)
 
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            self._calls(),
+        assert (result.returncode) == (0), result.stderr
+        assert (self._calls()) == (
             [
                 "growpart:--update=on /dev/mmcblk0 2",
                 "resize2fs:/dev/mmcblk0p2",
-            ],
+            ]
         )
 
     def test_partition_error_prevents_filesystem_growth(self) -> None:
         """A real partition failure is returned before resize2fs can run."""
         result = self._run(2)
 
-        self.assertEqual(result.returncode, 2)
-        self.assertEqual(result.stderr, "growpart failed\n")
-        self.assertEqual(
-            self._calls(),
-            ["growpart:--update=on /dev/mmcblk0 2"],
-        )
+        assert (result.returncode) == (2)
+        assert (result.stderr) == ("growpart failed\n")
+        assert (self._calls()) == (["growpart:--update=on /dev/mmcblk0 2"])
 
     def test_resize_failure_is_reported_after_partition_success(self) -> None:
         """A resize2fs failure is visible after successful partition handling."""
         result = self._run(0, resize2fs_status=3)
 
-        self.assertEqual(result.returncode, 3)
-        self.assertEqual(
-            self._calls(),
+        assert (result.returncode) == (3)
+        assert (self._calls()) == (
             [
                 "growpart:--update=on /dev/mmcblk0 2",
                 "resize2fs:/dev/mmcblk0p2",
-            ],
+            ]
         )
-
-
-if __name__ == "__main__":
-    unittest.main()

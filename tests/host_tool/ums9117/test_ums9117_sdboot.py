@@ -6,24 +6,32 @@ from __future__ import annotations
 import hashlib
 import struct
 import tempfile
-import unittest
 from pathlib import Path
+from typing import TYPE_CHECKING, ClassVar
+
+import pytest
 
 from tests import ROOT
 from tests.process import run_process
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 HARNESS = ROOT / "tests/host_tool/ums9117"
 UBOOT = ROOT / "platforms/ums9117/uboot"
 
 
-class SdbootFitAdmissionTests(unittest.TestCase):
+class SdbootFitAdmissionTests:
     """A valid embedded DTB may be only four-byte aligned inside its FIT."""
 
-    def test_embedded_dtb_alignment_and_invalid_payloads(self) -> None:
-        """Accept both FIT alignments; report DTB refusals as BOOTM failures with MMC released."""
-        with tempfile.TemporaryDirectory() as name:
-            work = Path(name)
-            executable = work / "sdboot"
+    executable: ClassVar[Path]
+
+    @pytest.fixture(scope="class", autouse=True)
+    @classmethod
+    def _compiled_peer(cls) -> Iterator[None]:
+        """Link sdboot once with the controlled host boundaries."""
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = Path(temporary) / "sdboot"
             compilation = run_process(
                 [
                     "cc",
@@ -45,30 +53,38 @@ class SdbootFitAdmissionTests(unittest.TestCase):
                 name="compile sdboot host consumer",
                 timeout=30,
             )
-            self.assertEqual(
-                compilation.returncode, 0, msg=compilation.stdout + compilation.stderr
-            )
-            dtb = self.make_dtb(work)
-            kernel = bytearray(64)
-            struct.pack_into("<III", kernel, 0x24, 0x016F2818, 0, 64)
-            (work / "zImage").write_bytes(kernel)
-            (work / "kernel.sha256").write_bytes(hashlib.sha256(kernel).digest())
+            assert compilation.returncode == 0, compilation.stdout + compilation.stderr
+            cls.executable = executable
+            yield
+
+    @pytest.mark.parametrize("defect", ["none", "bad-magic", "bad-size"])
+    def test_embedded_dtb_alignment_and_invalid_payloads(
+        self, tmp_path: Path, defect: str
+    ) -> None:
+        """Accept both FIT alignments; report DTB refusals as BOOTM failures with MMC released."""
+        work = tmp_path
+        dtb = self.make_dtb(work)
+        kernel = bytearray(64)
+        struct.pack_into("<III", kernel, 0x24, 0x016F2818, 0, 64)
+        (work / "zImage").write_bytes(kernel)
+        (work / "kernel.sha256").write_bytes(hashlib.sha256(kernel).digest())
+        if defect == "none":
             alignments = set()
             for padding in ("pad", "padding"):
                 fit, alignment = self.make_fit(work, dtb, padding)
                 alignments.add(alignment)
-                with self.subTest(alignment=alignment):
-                    self.check_admission(executable, fit, alignment, 0)
-            self.assertEqual(alignments, {0, 4})
+                self.check_admission(self.executable, fit, alignment, 0)
+            assert (alignments) == ({0, 4})
+        else:
             # The stubbed FINDOTHER refuses the bad header, as the pinned U-Boot
             # fit_image_load() does; sdboot itself rejects the size mismatch.
-            bad_magic = b"\0\0\0\0" + dtb[4:]
-            bad_size = dtb[:4] + struct.pack(">I", len(dtb) + 4) + dtb[8:]
-            refusals = (("FINDOTHER refusal", bad_magic), ("DTB size mismatch", bad_size))
-            for label, payload in refusals:
-                fit, alignment = self.make_fit(work, payload, "padding")
-                with self.subTest(payload=label):
-                    self.check_admission(executable, fit, alignment, 4)
+            payload = (
+                b"\0\0\0\0" + dtb[4:]
+                if defect == "bad-magic"
+                else dtb[:4] + struct.pack(">I", len(dtb) + 4) + dtb[8:]
+            )
+            fit, alignment = self.make_fit(work, payload, "padding")
+            self.check_admission(self.executable, fit, alignment, 4)
 
     def make_dtb(self, work: Path) -> bytes:
         """Compile a standalone DTB using the declared quality-runtime dtc."""
@@ -106,8 +122,4 @@ class SdbootFitAdmissionTests(unittest.TestCase):
             name="run sdboot host consumer",
             timeout=10,
         )
-        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert (result.returncode) == (0), result.stdout + result.stderr

@@ -72,6 +72,13 @@ Cleanup must preserve the error that belongs to the failed operation.
 
 ## Tests
 
+Use pytest as the test backend. Write plain `assert` statements for values and
+`pytest.raises()` for expected errors. Use fixtures for owned resources and
+cleanup; prefer `tmp_path`, `monkeypatch` and `capsys` when they cover the needed
+boundary. Parameterize equivalent scenarios with `pytest.mark.parametrize`,
+keeping expected results literal and independent of production logic. Test
+classes group related cases without inheriting from a test framework class.
+
 Follow the shared [test contract](../CODE_STYLE.md#tests). Import production
 modules normally. Use named records and fixtures when they make process state,
 shell commands or TOML inputs easier to inspect, but keep short decisive values

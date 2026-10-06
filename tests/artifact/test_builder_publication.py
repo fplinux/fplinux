@@ -7,12 +7,10 @@ import hashlib
 import json
 import os
 import struct
-import tempfile
-import unittest
-from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from unittest import mock
 
+import pytest
 from fplinux_cli import common
 from fplinux_cli.artifacts.bundles import (
     BUILD_MANIFEST_NAME,
@@ -26,13 +24,16 @@ from fplinux_cli.build.bootstrap import verify as bootstrap_build
 
 from tests.fdt import binary_tree
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-class RamSessionImageTests(unittest.TestCase):
+
+class RamSessionImageTests:
     """Exercise the canonical static-image personalization boundary."""
 
     def image_fixture(self) -> tuple[Path, Path, Path, Path, int, int]:
         """Create one RAM image with the exact externally defined ABI."""
-        root = Path(self.temporary.name)
+        root = self.root
         load_address = 0x80100000
         kernel = bytearray(0x28)
         kernel[0x24:0x28] = b"\x18\x28\x6f\x01"
@@ -88,10 +89,10 @@ class RamSessionImageTests(unittest.TestCase):
             session_offset,
         )
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _prepare_inputs(self, tmp_path: Path) -> None:
         """Create one private artifact directory per scenario."""
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
+        self.root = tmp_path
 
     def test_session_descriptor_locates_an_immutable_zero_template(self) -> None:
         """Describe the exact slot without personalizing the built artifact."""
@@ -107,15 +108,14 @@ class RamSessionImageTests(unittest.TestCase):
             forbidden_markers=[],
         )
 
-        self.assertEqual(
-            descriptor,
+        assert (descriptor) == (
             {
                 "offset": offset,
                 "bytes": 512,
                 "template_sha256": hashlib.sha256(bytes(512)).hexdigest(),
-            },
+            }
         )
-        self.assertEqual(ramboot.read_bytes()[offset : offset + 512], bytes(512))
+        assert (ramboot.read_bytes()[offset : offset + 512]) == (bytes(512))
 
     def test_session_descriptor_rejects_a_prepersonalized_image(self) -> None:
         """Never publish key material already embedded in the RAM image."""
@@ -124,7 +124,7 @@ class RamSessionImageTests(unittest.TestCase):
         image[offset] = 1
         ramboot.write_bytes(image)
 
-        with self.assertRaisesRegex(SystemExit, "not all zero"):
+        with pytest.raises(SystemExit, match="not all zero"):
             bootstrap_build.verify_images(
                 ramboot,
                 zimage=zimage,
@@ -136,16 +136,15 @@ class RamSessionImageTests(unittest.TestCase):
             )
 
 
-class BuilderPublicationTests(unittest.TestCase):
+class BuilderPublicationTests:
     """Exercise builder-facing immutable bundle publication."""
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _prepare_inputs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Create a complete isolated builder input tree."""
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name) / "source"
-        self.output = Path(self.temporary.name) / "out"
-        self.work = Path(self.temporary.name) / "work"
+        self.root = tmp_path / "source"
+        self.output = tmp_path / "out"
+        self.work = tmp_path / "work"
         self.root.mkdir()
         self.output.mkdir()
         self.work.mkdir()
@@ -241,26 +240,16 @@ class BuilderPublicationTests(unittest.TestCase):
             "FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE": "b" * 64,
             "FPLINUX_CONTAINER_IMAGE_CONTENT": "c" * 64,
         }
-        self.root_patch = mock.patch.object(common, "ROOT", self.root)
-        self.output_patch = mock.patch.object(inputs_build, "OUTPUT", self.output)
-        self.root_patch.start()
-        self.output_patch.start()
-        self.receipt_patch = mock.patch.object(
+        monkeypatch.setattr(common, "ROOT", self.root)
+        monkeypatch.setattr(inputs_build, "OUTPUT", self.output)
+        monkeypatch.setattr(
             publish_build,
             "trusted_receipt_identity",
-            return_value={"recipe": self.rootfs_recipe, "sha256": "8" * 64},
+            mock.Mock(return_value={"recipe": self.rootfs_recipe, "sha256": "8" * 64}),
         )
-        self.signing_patch = mock.patch.object(
-            publish_build,
-            "signing_key_identity",
-            return_value="7" * 64,
+        monkeypatch.setattr(
+            publish_build, "signing_key_identity", mock.Mock(return_value="7" * 64)
         )
-        self.receipt_patch.start()
-        self.signing_patch.start()
-        self.addCleanup(self.signing_patch.stop)
-        self.addCleanup(self.receipt_patch.stop)
-        self.addCleanup(self.output_patch.stop)
-        self.addCleanup(self.root_patch.stop)
 
     def write(self, relative: str, data: bytes, *, root: Path | None = None) -> Path:
         """Write one fixture file beneath the requested test root."""
@@ -328,11 +317,8 @@ class BuilderPublicationTests(unittest.TestCase):
 
     def assert_old_current_and_no_staging(self, current: Path) -> None:
         """Check failure cleanup without disturbing the last-good selected generation."""
-        self.assertEqual(
-            resolve_current_bundle(self.output, "demo").path,
-            current,
-        )
-        self.assertEqual(self.staging_directories(), [])
+        assert (resolve_current_bundle(self.output, "demo").path) == (current)
+        assert (self.staging_directories()) == ([])
 
     def test_publish_uses_staging_and_records_every_payload_file(self) -> None:
         """Publish a complete generation through the current pointer."""
@@ -350,48 +336,33 @@ class BuilderPublicationTests(unittest.TestCase):
             if path.is_file() and path.name != BUILD_MANIFEST_NAME
         }
 
-        self.assertEqual(current.path, published)
-        self.assertEqual(
-            published.parent,
-            self.output / "demo/builds/release/bundles",
-        )
-        self.assertEqual(manifest["generation"], published.name)
-        self.assertIsNone(manifest["profile"])
-        self.assertEqual(manifest["build_type"], "release")
-        self.assertEqual(manifest["container_image_recipe"], "b" * 64)
-        self.assertEqual(manifest["container_image_content"], "c" * 64)
-        self.assertEqual(manifest["apk_signing_key"], "7" * 64)
-        self.assertEqual(manifest["rootfs_receipt"]["recipe"], self.rootfs_recipe)
-        self.assertEqual(
-            manifest["boot_artifacts"],
+        assert (current.path) == (published)
+        assert (published.parent) == (self.output / "demo/builds/release/bundles")
+        assert (manifest["generation"]) == (published.name)
+        assert (manifest["profile"]) is None
+        assert (manifest["build_type"]) == ("release")
+        assert (manifest["container_image_recipe"]) == ("b" * 64)
+        assert (manifest["container_image_content"]) == ("c" * 64)
+        assert (manifest["apk_signing_key"]) == ("7" * 64)
+        assert (manifest["rootfs_receipt"]["recipe"]) == (self.rootfs_recipe)
+        assert (manifest["boot_artifacts"]) == (
             {
                 "required": [],
                 "runnable": True,
-            },
+            }
         )
-        self.assertEqual(manifest["kbuild_receipt"]["recipe"], "e" * 64)
-        self.assertEqual(manifest["device_identity"], "9" * 64)
-        self.assertEqual(manifest["files"], actual_payload)
-        self.assertEqual(
-            (published / "apks/fplinux-base-ui.apk").read_bytes(),
-            b"base apk\n",
+        assert (manifest["kbuild_receipt"]["recipe"]) == ("e" * 64)
+        assert (manifest["device_identity"]) == ("9" * 64)
+        assert (manifest["files"]) == (actual_payload)
+        assert ((published / "apks/fplinux-base-ui.apk").read_bytes()) == (b"base apk\n")
+        assert ((published / "apks/fplinux-demo-ui.apk").read_bytes()) == (b"target apk\n")
+        assert ((published / "debug/rootfs.cpio").read_bytes()) == (b"logical composition\n")
+        assert ((published / "debug/initramfs.cpio").read_bytes()) == (b"boot archive\n")
+        assert (manifest["files"]["debug/rootfs.cpio"]["size"]) == (self.rootfs.stat().st_size)
+        assert (runtime["sha256"]["image/ramboot.bin"]) == (
+            hashlib.sha256((published / "image/ramboot.bin").read_bytes()).hexdigest()
         )
-        self.assertEqual(
-            (published / "apks/fplinux-demo-ui.apk").read_bytes(),
-            b"target apk\n",
-        )
-        self.assertEqual((published / "debug/rootfs.cpio").read_bytes(), b"logical composition\n")
-        self.assertEqual((published / "debug/initramfs.cpio").read_bytes(), b"boot archive\n")
-        self.assertEqual(
-            manifest["files"]["debug/rootfs.cpio"]["size"],
-            self.rootfs.stat().st_size,
-        )
-        self.assertEqual(
-            runtime["sha256"]["image/ramboot.bin"],
-            hashlib.sha256((published / "image/ramboot.bin").read_bytes()).hexdigest(),
-        )
-        self.assertEqual(
-            set(runtime),
+        assert (set(runtime)) == (
             {
                 "target",
                 "profile",
@@ -406,24 +377,23 @@ class BuilderPublicationTests(unittest.TestCase):
                 "adapter",
                 "host_tools",
                 "sha256",
-            },
+            }
         )
-        self.assertIsNone(runtime["profile"])
-        self.assertEqual(runtime["build_type"], "release")
-        self.assertEqual(runtime["identity"]["target"]["display_name"], "Demo Phone")
-        self.assertEqual(runtime["identity"]["platform"]["name"], "demo")
-        self.assertEqual(runtime["transport"], "usb-ncm")
+        assert (runtime["profile"]) is None
+        assert (runtime["build_type"]) == ("release")
+        assert (runtime["identity"]["target"]["display_name"]) == ("Demo Phone")
+        assert (runtime["identity"]["platform"]["name"]) == ("demo")
+        assert (runtime["transport"]) == ("usb-ncm")
         helper = published / "runner/ssh_transport.py"
-        self.assertEqual(runtime["personalization"]["bytes"], 512)
-        self.assertEqual(runtime["assets"], {"pin": "assets/pin.bin"})
-        self.assertEqual(
-            runtime["sha256"]["runner/ssh_transport.py"],
-            hashlib.sha256(helper.read_bytes()).hexdigest(),
+        assert (runtime["personalization"]["bytes"]) == (512)
+        assert (runtime["assets"]) == ({"pin": "assets/pin.bin"})
+        assert (runtime["sha256"]["runner/ssh_transport.py"]) == (
+            hashlib.sha256(helper.read_bytes()).hexdigest()
         )
         event_source = (self.root / "common/loader_events.py").read_bytes()
-        self.assertEqual((published / "runner/loader_events.py").read_bytes(), event_source)
-        self.assertEqual(
-            runtime["sha256"]["runner/loader_events.py"], hashlib.sha256(event_source).hexdigest()
+        assert ((published / "runner/loader_events.py").read_bytes()) == (event_source)
+        assert (runtime["sha256"]["runner/loader_events.py"]) == (
+            hashlib.sha256(event_source).hexdigest()
         )
 
     def test_named_profile_publishes_to_its_own_current_bundle_slot(self) -> None:
@@ -436,13 +406,13 @@ class BuilderPublicationTests(unittest.TestCase):
         manifest = json.loads((published / BUILD_MANIFEST_NAME).read_text())
         runtime = json.loads((published / "runtime-manifest.json").read_text())
 
-        self.assertEqual(
-            published.parent, self.output / "demo/profiles/usb-host-lab/builds/release/bundles"
+        assert (published.parent) == (
+            self.output / "demo/profiles/usb-host-lab/builds/release/bundles"
         )
-        self.assertEqual(current.path, published)
-        self.assertEqual(manifest["profile"], "usb-host-lab")
-        self.assertEqual(runtime["profile"], "usb-host-lab")
-        self.assertEqual(runtime["transport"], "none")
+        assert (current.path) == (published)
+        assert (manifest["profile"]) == ("usb-host-lab")
+        assert (runtime["profile"]) == ("usb-host-lab")
+        assert (runtime["transport"]) == ("none")
 
     def test_publishing_debug_retains_release_and_records_its_type_in_both_manifests(self) -> None:
         """Publication binds the new type without moving the release current pointer."""
@@ -450,14 +420,12 @@ class BuilderPublicationTests(unittest.TestCase):
         self.target_config["build_type"] = "debug"
         debug = self.publish()
 
-        self.assertEqual(resolve_current_bundle(self.output, "demo").path, release)
-        self.assertEqual(
-            resolve_current_bundle(self.output, "demo", build_type="debug").path, debug
-        )
-        self.assertNotEqual(release.name, debug.name)
+        assert (resolve_current_bundle(self.output, "demo").path) == (release)
+        assert (resolve_current_bundle(self.output, "demo", build_type="debug").path) == (debug)
+        assert (release.name) != (debug.name)
         for name in ("build-manifest.json", "runtime-manifest.json"):
             manifest = json.loads((debug / name).read_text())
-            self.assertEqual(manifest["build_type"], "debug")
+            assert (manifest["build_type"]) == ("debug")
 
     def test_external_root_keeps_the_exact_composition_input_for_host_inspection(self) -> None:
         """The external root's local composition input is bound to the bundle manifest."""
@@ -472,16 +440,16 @@ class BuilderPublicationTests(unittest.TestCase):
         self.initramfs.unlink()
         published = self.publish()
 
-        self.assertFalse((published / "debug/initramfs.cpio").exists())
-        self.assertEqual((published / "debug/rootfs.cpio").read_bytes(), b"logical composition\n")
+        assert not ((published / "debug/initramfs.cpio").exists())
+        assert ((published / "debug/rootfs.cpio").read_bytes()) == (b"logical composition\n")
         manifest = json.loads((published / BUILD_MANIFEST_NAME).read_text())
-        self.assertIn("debug/rootfs.cpio", manifest["files"])
+        assert ("debug/rootfs.cpio") in (manifest["files"])
 
     def test_publish_rejects_apks_outside_the_declared_bundle_package_set(self) -> None:
         """A bundle cannot silently add or omit one of its declared packages."""
         current = self.publish()
 
-        with self.assertRaisesRegex(SystemExit, "declared bundle package set"):
+        with pytest.raises(SystemExit, match="declared bundle package set"):
             self.publish(bundle_packages=("fplinux-base-ui",))
 
         self.assert_old_current_and_no_staging(current)
@@ -492,7 +460,7 @@ class BuilderPublicationTests(unittest.TestCase):
         bundle_files = cast("list[str]", self.release_manifest["bundle_files"])
         bundle_files.remove("apks/fplinux-demo-ui.apk")
 
-        with self.assertRaisesRegex(SystemExit, "release manifest APK files"):
+        with pytest.raises(SystemExit, match="release manifest APK files"):
             self.publish()
 
         self.assert_old_current_and_no_staging(current)
@@ -503,14 +471,11 @@ class BuilderPublicationTests(unittest.TestCase):
         create_bundle_staging(self.output, "demo")
         missing = self.work / "missing-ramboot.bin"
 
-        with self.assertRaises(SystemExit):
+        with pytest.raises(SystemExit):
             self.publish(missing)
 
-        self.assertEqual(
-            resolve_current_bundle(self.output, "demo").path,
-            first,
-        )
-        self.assertEqual(self.staging_directories(), [])
+        assert (resolve_current_bundle(self.output, "demo").path) == (first)
+        assert (self.staging_directories()) == ([])
 
     def test_manifest_failure_preserves_the_current_bundle_and_cleans_staging(self) -> None:
         """Retain the current bundle when writing its new manifest fails."""
@@ -525,12 +490,8 @@ class BuilderPublicationTests(unittest.TestCase):
 
         with (
             mock.patch.object(publish_build, "write_json", side_effect=write_json),
-            self.assertRaisesRegex(OSError, message),
+            pytest.raises(OSError, match=message),
         ):
             self.publish()
 
         self.assert_old_current_and_no_staging(first)
-
-
-if __name__ == "__main__":
-    unittest.main()

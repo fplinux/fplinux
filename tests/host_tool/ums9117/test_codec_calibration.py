@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 
 from tests import ROOT
@@ -14,7 +13,7 @@ FIXTURES = ROOT / "tests/host_tool/ums9117"
 DRIVER = ROOT / "platforms/ums9117/linux/sound/drivers/ums9117"
 
 
-class CodecCalibrationHostComponentTests(unittest.TestCase):
+class CodecCalibrationHostComponentTests:
     """Observe the real operation's result and masked register restoration on a host."""
 
     def test_route_preservation_bounded_waits_and_error_precedence(self) -> None:
@@ -47,7 +46,3 @@ class CodecCalibrationHostComponentTests(unittest.TestCase):
                 timeout=10,
                 check=True,
             )
-
-
-if __name__ == "__main__":
-    unittest.main()

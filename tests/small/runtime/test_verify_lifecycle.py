@@ -6,11 +6,11 @@ from __future__ import annotations
 import contextlib
 import io
 import json
-import unittest
 from unittest import mock
 
 import fplinux_cli.cli.runtime as runtime_commands
 import fplinux_cli.workspace.build_inputs as workspace_inputs
+import pytest
 from fplinux_cli import common
 from fplinux_cli.artifacts.bundles import publish_current_bundle
 from fplinux_cli.environment import images
@@ -46,11 +46,11 @@ class VerifyLifecycleTests(CommandBundleFixture):
                 ),
             ),
             contextlib.redirect_stdout(stdout),
-            self.assertRaisesRegex(SystemExit, r"running kernel identity \(exit 7\)"),
+            pytest.raises(SystemExit, match=r"running kernel identity \(exit 7\)"),
         ):
             runtime_commands.verify_booted("phone")
 
-        self.assertEqual(stdout.getvalue(), "")
+        assert (stdout.getvalue()) == ("")
 
     def test_reconnect_does_not_set_the_phone_clock(self) -> None:
         """Reacquiring a running session never calls the bundle helper's clock sync."""
@@ -86,8 +86,8 @@ class VerifyLifecycleTests(CommandBundleFixture):
         ):
             runtime_commands.verify_booted("phone", profile=profile)
         snapshot.assert_called_once_with("phone", profile, build_type="release")
-        self.assertEqual(session.call_args.args[0], selected)
-        self.assertEqual(session.call_args.args[1]["profile"], profile)
+        assert (session.call_args.args[0]) == (selected)
+        assert (session.call_args.args[1]["profile"]) == (profile)
 
     def test_verify_reports_the_manifest_identity_after_reconnect_accepts(self) -> None:
         """Report the selected device identity after the reconnect boundary accepts it."""
@@ -111,12 +111,7 @@ class VerifyLifecycleTests(CommandBundleFixture):
         ):
             runtime_commands.verify_booted("phone")
 
-        self.assertEqual(
-            stdout.getvalue(),
-            "verify: the phone runs the current release build (9999999999999999)\n",
+        assert (stdout.getvalue()) == (
+            "verify: the phone runs the current release build (9999999999999999)\n"
         )
         current_session.assert_called_once_with(self.bundle, mock.ANY, "phone")
-
-
-if __name__ == "__main__":
-    unittest.main()

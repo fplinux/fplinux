@@ -4,24 +4,37 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
+from contextlib import ExitStack
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+import pytest
 
 from tests import ROOT
 from tests.process import run_process
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 CORE = ROOT / "lib/fplinux/fplinux-multitap.c"
 HARNESS = ROOT / "tests/host_tool/input/fplinux-multitap-core.c"
 INCLUDE = ROOT / "include/fplinux"
 
 
-class MultiTapCoreTests(unittest.TestCase):
+class MultiTapCoreTests:
     """Exercise the portable state machine without target hardware."""
 
-    def test_c11_core_contract(self) -> None:
-        """Exact groups and time boundaries remain shared behavior."""
-        with tempfile.TemporaryDirectory() as temporary:
-            executable = Path(temporary) / "fplinux-multitap-core"
+    executable: Path
+
+    @pytest.fixture(scope="class", autouse=True)
+    @classmethod
+    def _compiled_tools(cls) -> Iterator[None]:
+        """Link the host harness once for this test group."""
+        with ExitStack() as cleanup:
+            build_directory = tempfile.TemporaryDirectory()
+            cleanup.enter_context(build_directory)
+            temporary = build_directory.name
+            cls.executable = Path(temporary) / "fplinux-multitap-core"
             run_process(
                 [
                     "cc",
@@ -34,19 +47,19 @@ class MultiTapCoreTests(unittest.TestCase):
                     str(HARNESS),
                     str(CORE),
                     "-o",
-                    str(executable),
+                    str(cls.executable),
                 ],
                 name="compile multi-tap harness",
                 timeout=30,
                 check=True,
             )
-            run_process(
-                [str(executable)],
-                name="run multi-tap harness",
-                timeout=10,
-                check=True,
-            )
+            yield
 
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_c11_core_contract(self) -> None:
+        """Exact groups and time boundaries remain shared behavior."""
+        run_process(
+            [str(self.executable)],
+            name="run multi-tap harness",
+            timeout=10,
+            check=True,
+        )

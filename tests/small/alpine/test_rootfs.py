@@ -5,11 +5,11 @@ from __future__ import annotations
 
 import re
 import subprocess
-import unittest
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
 
+import pytest
 from fplinux_cli.alpine import (
     aports as alpine_aports,
 )
@@ -91,8 +91,8 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
 
         alpine_aports.materialize_aport_sources("fplinux-ncurses-curses", self.root, destination)
 
-        self.assertEqual((destination / "APKBUILD").read_bytes(), b"pkgname=fplinux-ncurses\n")
-        self.assertEqual((destination / "adapter.c").read_bytes(), b"producer adapter\n")
+        assert ((destination / "APKBUILD").read_bytes()) == (b"pkgname=fplinux-ncurses\n")
+        assert ((destination / "adapter.c").read_bytes()) == (b"producer adapter\n")
 
     def test_bundle_absence_check_interprets_mocked_apk_exit_codes(self) -> None:
         """Map mocked ``apk info --exists`` results to absent and installed outcomes."""
@@ -110,7 +110,7 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
                 "run",
                 return_value=subprocess.CompletedProcess([], 0, f"{package}\n", ""),
             ),
-            self.assertRaisesRegex(SystemExit, "installed in the standard rootfs"),
+            pytest.raises(SystemExit, match="installed in the standard rootfs"),
         ):
             alpine_rootfs_verify._require_bundle_package_absent(root, package)  # noqa: SLF001
         with (
@@ -119,7 +119,7 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
                 "run",
                 return_value=subprocess.CompletedProcess([], 2, "", "apk failed"),
             ),
-            self.assertRaisesRegex(SystemExit, "cannot verify.*apk failed"),
+            pytest.raises(SystemExit, match=r"cannot verify.*apk failed"),
         ):
             alpine_rootfs_verify._require_bundle_package_absent(root, package)  # noqa: SLF001
 
@@ -150,11 +150,11 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
                 "run",
                 return_value=subprocess.CompletedProcess([], 7, "", unresolved),
             ),
-            self.assertRaises(SystemExit) as rejected,
+            pytest.raises(SystemExit) as rejected,
         ):
             alpine_rootfs_verify._verify_alpine_rootfs(root, base, bundle_apks=(bundle_apk,))  # noqa: SLF001
-        self.assertIn("cannot be installed into the rootfs offline", str(rejected.exception))
-        self.assertIn("so:libexample.so.1 (no such package)", str(rejected.exception))
+        assert ("cannot be installed into the rootfs offline") in (str(rejected.value))
+        assert ("so:libexample.so.1 (no such package)") in (str(rejected.value))
 
     def test_brightness_config_has_exact_runtime_bytes_and_is_verified(self) -> None:
         """Composition writes the target table and rejects changed installed bytes."""
@@ -165,17 +165,16 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
         config = root / "etc/fplinux/brightness.conf"
 
         alpine_rootfs_files._install_display_brightness(root, table)  # noqa: SLF001
-        self.assertEqual(
-            config.read_bytes(),
-            b"backlight=screen-backlight\nlevels=0,1,2,3,4,5,6,7,8,9,10\n",
+        assert (config.read_bytes()) == (
+            b"backlight=screen-backlight\nlevels=0,1,2,3,4,5,6,7,8,9,10\n"
         )
-        self.assertEqual(config.stat().st_mode & 0o777, 0o644)
+        assert (config.stat().st_mode & 0o777) == (0o644)
         with mock.patch.object(alpine_rootfs_verify, "_require_apk_owner"):
             alpine_rootfs_verify._verify_alpine_rootfs(  # noqa: SLF001
                 root, packages, display_brightness=table
             )
             config.write_text("backlight=other-backlight\nlevels=0,1,2,3,4,5,6,7,8,9,10\n")
-            with self.assertRaisesRegex(SystemExit, "brightness configuration does not match"):
+            with pytest.raises(SystemExit, match="brightness configuration does not match"):
                 alpine_rootfs_verify._verify_alpine_rootfs(  # noqa: SLF001
                     root, packages, display_brightness=table
                 )
@@ -187,12 +186,12 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
         self._write_world(root, packages)
         alpine_rootfs_files._install_display_brightness(root, None)  # noqa: SLF001
         config = root / "etc/fplinux/brightness.conf"
-        self.assertFalse(config.exists())
+        assert not (config.exists())
         with mock.patch.object(alpine_rootfs_verify, "_require_apk_owner"):
             alpine_rootfs_verify._verify_alpine_rootfs(root, packages)  # noqa: SLF001
             config.parent.mkdir(parents=True)
             config.write_text("backlight=unexpected\nlevels=0,1,2,3,4,5,6,7,8,9,10\n")
-            with self.assertRaisesRegex(SystemExit, "without a target table"):
+            with pytest.raises(SystemExit, match="without a target table"):
                 alpine_rootfs_verify._verify_alpine_rootfs(root, packages)  # noqa: SLF001
 
     def test_rootfs_requires_brightness_command_and_startup_service(self) -> None:
@@ -206,15 +205,15 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
 
         with mock.patch.object(alpine_rootfs_verify, "_require_apk_owner"):
             command.unlink()
-            with self.assertRaisesRegex(SystemExit, "fplinux-brightness"):
+            with pytest.raises(SystemExit, match="fplinux-brightness"):
                 alpine_rootfs_verify._verify_alpine_rootfs(root, packages)  # noqa: SLF001
             command.write_text("brightness\n", encoding="utf-8")
             daemon.unlink()
-            with self.assertRaisesRegex(SystemExit, "brightnessd"):
+            with pytest.raises(SystemExit, match="brightnessd"):
                 alpine_rootfs_verify._verify_alpine_rootfs(root, packages)  # noqa: SLF001
             daemon.write_text("brightnessd\n", encoding="utf-8")
             service.unlink()
-            with self.assertRaisesRegex(SystemExit, "fplinux-brightness"):
+            with pytest.raises(SystemExit, match="fplinux-brightness"):
                 alpine_rootfs_verify._verify_alpine_rootfs(root, packages)  # noqa: SLF001
 
     def test_rootfs_verifier_requires_input_files_only_when_selected(self) -> None:
@@ -229,7 +228,7 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
         self._write_world(root, with_input)
         with (
             mock.patch.object(alpine_rootfs_verify, "_require_apk_owner"),
-            self.assertRaisesRegex(SystemExit, "fplinux-input"),
+            pytest.raises(SystemExit, match="fplinux-input"),
         ):
             alpine_rootfs_verify._verify_alpine_rootfs(root, with_input)  # noqa: SLF001
 
@@ -241,10 +240,19 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
         with mock.patch.object(alpine_rootfs_verify, "_require_apk_owner"):
             alpine_rootfs_verify._verify_alpine_rootfs(root, packages)  # noqa: SLF001
             (root / "etc/runlevels/boot/networking").unlink()
-            with self.assertRaisesRegex(SystemExit, "boot runlevel is missing networking"):
+            with pytest.raises(SystemExit, match="boot runlevel is missing networking"):
                 alpine_rootfs_verify._verify_alpine_rootfs(root, packages)  # noqa: SLF001
 
-    def test_bluetooth_root_requires_project_daemon_and_library_owners(self) -> None:
+    @pytest.mark.parametrize(
+        ("path", "alpine"),
+        [
+            pytest.param("/usr/lib/bluetooth/obexd", "bluez-obexd", id="daemon"),
+            pytest.param("/usr/lib/libfplinux-bluez-glib-2.0.so.0", "glib", id="glib-library"),
+        ],
+    )
+    def test_bluetooth_root_requires_project_daemon_and_library_owners(
+        self, path: str, alpine: str
+    ) -> None:
         """The selected Bluetooth root rejects stock daemon and GLib replacements."""
         root = self._verified_rootfs()
         base = ("fplinux-base", "fplinux-terminal")
@@ -263,23 +271,30 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
             alpine_rootfs_verify._verify_alpine_rootfs(root, base)  # noqa: SLF001
 
         self._write_world(root, with_bluetooth)
-        for path, (alpine, _) in replaced.items():
-            with self.subTest(path=path):
-                owners = {**project_owners, path: alpine}
-                with (
-                    mock.patch.object(
-                        alpine_rootfs_verify, "_require_apk_owner", self._fake_apk_owner(owners)
-                    ),
-                    self.assertRaisesRegex(SystemExit, f"{re.escape(path)}: {alpine}"),
-                ):
-                    alpine_rootfs_verify._verify_alpine_rootfs(root, with_bluetooth)  # noqa: SLF001
+        owners = {**project_owners, path: alpine}
+        with (
+            mock.patch.object(
+                alpine_rootfs_verify, "_require_apk_owner", self._fake_apk_owner(owners)
+            ),
+            pytest.raises(SystemExit, match=f"{re.escape(path)}: {alpine}"),
+        ):
+            alpine_rootfs_verify._verify_alpine_rootfs(root, with_bluetooth)  # noqa: SLF001
 
         with mock.patch.object(
             alpine_rootfs_verify, "_require_apk_owner", self._fake_apk_owner(project_owners)
         ):
             alpine_rootfs_verify._verify_alpine_rootfs(root, with_bluetooth)  # noqa: SLF001
 
-    def test_replaced_package_manager_root_rejects_openssl_leftovers(self) -> None:
+    @pytest.mark.parametrize(
+        "leftover",
+        [
+            pytest.param("apk-tools", id="apk-tools"),
+            pytest.param("libapk", id="libapk"),
+            pytest.param("libcrypto3", id="libcrypto3"),
+            pytest.param("libssl3", id="libssl3"),
+        ],
+    )
+    def test_replaced_package_manager_root_rejects_openssl_leftovers(self, leftover: str) -> None:
         """A root with the Mbed TLS apk must own /sbin/apk and hold no OpenSSL packages."""
         root = self._verified_rootfs()
         base = ("fplinux-base", "fplinux-terminal")
@@ -301,23 +316,19 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
         with (
             mock.patch.object(alpine_rootfs_verify, "_require_apk_owner", minirootfs_owner),
             mock.patch.object(alpine_rootfs_verify, "_alpine_package_installed", fake_installed),
-            self.assertRaisesRegex(SystemExit, "/sbin/apk: apk-tools"),
+            pytest.raises(SystemExit, match="/sbin/apk: apk-tools"),
         ):
             alpine_rootfs_verify._verify_alpine_rootfs(root, with_apk_tools)  # noqa: SLF001
 
-        for leftover in ("apk-tools", "libapk", "libcrypto3", "libssl3"):
-            with self.subTest(leftover=leftover):
-                installed = {leftover}
-                with (
-                    mock.patch.object(
-                        alpine_rootfs_verify, "_require_apk_owner", self._fake_apk_owner({})
-                    ),
-                    mock.patch.object(
-                        alpine_rootfs_verify, "_alpine_package_installed", fake_installed
-                    ),
-                    self.assertRaisesRegex(SystemExit, f"remains in the rootfs: {leftover}"),
-                ):
-                    alpine_rootfs_verify._verify_alpine_rootfs(root, with_apk_tools)  # noqa: SLF001
+        installed = {leftover}
+        with (
+            mock.patch.object(
+                alpine_rootfs_verify, "_require_apk_owner", self._fake_apk_owner({})
+            ),
+            mock.patch.object(alpine_rootfs_verify, "_alpine_package_installed", fake_installed),
+            pytest.raises(SystemExit, match=f"remains in the rootfs: {leftover}"),
+        ):
+            alpine_rootfs_verify._verify_alpine_rootfs(root, with_apk_tools)  # noqa: SLF001
 
         installed = set()
         with (
@@ -336,7 +347,7 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
         self._write_world(root, microsd_root)
         with (
             mock.patch.object(alpine_rootfs_verify, "_require_apk_owner"),
-            self.assertRaisesRegex(SystemExit, "shutdown runlevel is missing killprocs"),
+            pytest.raises(SystemExit, match="shutdown runlevel is missing killprocs"),
         ):
             alpine_rootfs_verify._verify_alpine_rootfs(root, microsd_root)  # noqa: SLF001
         shutdown = root / "etc/runlevels/shutdown"
@@ -345,7 +356,3 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
             (shutdown / service).symlink_to(f"/etc/init.d/{service}")
         with mock.patch.object(alpine_rootfs_verify, "_require_apk_owner"):
             alpine_rootfs_verify._verify_alpine_rootfs(root, microsd_root)  # noqa: SLF001
-
-
-if __name__ == "__main__":
-    unittest.main()

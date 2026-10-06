@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 
 from tests import ROOT
@@ -14,7 +13,7 @@ KERNEL = ROOT / "platforms/ums9117/linux/drivers/bluetooth/ums9117"
 FIXTURES = ROOT / "tests/host_tool/ums9117"
 
 
-class Ums9117FMHostTests(unittest.TestCase):
+class Ums9117FMHostTests:
     """Link the production driver; no V4L2 core or hardware is exercised."""
 
     def test_close_restores_clock_or_retains_quarantined_hold(self) -> None:
@@ -51,7 +50,3 @@ class Ums9117FMHostTests(unittest.TestCase):
                 timeout=10,
                 check=True,
             )
-
-
-if __name__ == "__main__":
-    unittest.main()

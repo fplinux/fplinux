@@ -6,138 +6,144 @@ from __future__ import annotations
 import base64
 import json
 import tempfile
-import unittest
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+import pytest
 from fplinux_cli.dependencies.inputs import (
     DependencyInput,
     dependency_selection,
     environment_inputs,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
-class DependencyInputTests(unittest.TestCase):
+
+class DependencyInputTests:
     """Keep downloads bound to their original checksum and consumer cache path."""
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def prepare_checkout(self) -> Iterator[None]:
         """Prepare a synthetic checkout with literal external declarations."""
         temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
-        self._write(
-            "container.lock.toml",
-            '[kern]\nversion = "1.0.0"\n'
-            'archive_url = "https://example.invalid/kern.tar.gz"\n'
-            f'archive_sha256 = "{"a" * 64}"\n'
-            f'binary_sha256 = "{"b" * 64}"\n'
-            '[oci]\nbase_rootfs_url = "https://example.invalid/base.tar.gz"\n'
-            f'base_rootfs_sha256 = "{"c" * 64}"\n',
-        )
-        self._write(
-            "Containerfile",
-            "ARG TOOL_VERSION=2.0\n"
-            f"ARG TOOL_SHA256={'d' * 64}\n"
-            "RUN apk add --no-cache tool=2.0-r0\n"
-            'RUN curl --output "${archive}" '
-            '"https://example.invalid/tool-${TOOL_VERSION}.tar.gz"; '
-            'printf "%s %s" "${TOOL_SHA256}" "${archive}" | sha256sum -c -\n',
-        )
-        self._write(
-            "environment.lock.toml",
-            '[selection]\narch = "x86_64"\napk_groups = [["tool=2.0-r0"]]\n'
-            '[[input]]\nkey = "environment:tool"\n'
-            'url = "https://example.invalid/tool-2.0-r0.apk"\n'
-            f'sha256 = "{"e" * 64}"\nbytes = 12\n'
-            'destination = "downloads/environment/apk/main/x86_64/tool-2.0-r0.apk"\n'
-            'purpose = "container-package"\narch = "x86_64"\n'
-            '[input.package]\nname = "tool"\nversion = "2.0-r0"\n'
-            'provides = ["cmd:tool=2.0-r0"]\ndepends = []\n'
-            '[[key]]\nfile = "test.rsa.pub"\n'
-            f'sha256 = "{"f" * 64}"\nbytes = 10\n'
-            'source = "container:base-rootfs"\nmember = "etc/apk/keys/test.rsa.pub"\n',
-        )
-        self._write(
-            "package-lock.json",
-            json.dumps(
-                {
-                    "packages": {
-                        "": {"devDependencies": {"tool": "3.0.0"}},
-                        "node_modules/tool": {
-                            "version": "3.0.0",
-                            "resolved": "https://example.invalid/npm/tool-3.0.0.tgz",
-                            "integrity": "sha512-"
-                            + base64.b64encode(bytes.fromhex("11" * 64)).decode(),
-                        },
-                    },
-                }
-            ),
-        )
-        self._write(
-            "alpine.lock.toml",
-            'release = "3.24.2"\nbranch = "v3.24"\narch = "armv7"\n'
-            'triplet = "armv7-alpine-linux-musleabihf"\n'
-            '[repositories]\nmain = "https://example.invalid/main/armv7"\n'
-            'community = "https://example.invalid/community/armv7"\n'
-            '[minirootfs]\nurl = "https://example.invalid/target.tar.gz"\n'
-            f'sha256 = "{"2" * 64}"\nbytes = 2\n'
-            '[runtime]\npackages = ["runtime-1-r0.apk"]\n[runtime.additions]\n'
-            '[sysroot]\npackages = ["runtime-1-r0.apk"]\n'
-            '[[package]]\nrepository = "main"\nfile = "runtime-1-r0.apk"\n'
-            f'sha256 = "{"3" * 64}"\nbytes = 3\n',
-        )
-        self._write(
-            "sources.lock.toml",
-            '[kernel]\nversion = "6.0"\nurl = "https://example.invalid/linux.tar.xz"\n'
-            f'sha256 = "{"4" * 64}"\n'
-            '[support]\narchive_url = "https://example.invalid/support.tar.gz"\n'
-            f'archive_sha256 = "{"5" * 64}"\n'
-            '[host]\narchive_url = "https://example.invalid/host.tar.gz"\n'
-            f'archive_sha256 = "{"6" * 64}"\n',
-        )
-        self._write(
-            "platforms/test-platform/platform.toml",
-            "[rootfs]\npackages = []\n[bundle]\npackages = []\n"
-            '[linux]\nsource_lock = "kernel"\n'
-            '[bootstrap]\nvendor_source_lock = "support"\n'
-            'vendor_cache_name = "support.tar.gz"\n'
-            '[[host.tools]]\ntype = "make-archive"\nname = "loader"\n'
-            'source_lock = "host"\ncache_name = "host.tar.gz"\n'
-            'archive_prefix = "host/"\nmembers = []\n',
-        )
-        self._write(
-            "targets/test-phone/target.toml",
-            'platform = "test-platform"\n[rootfs]\npackages = []\n[bundle]\npackages = []\n',
-        )
-        self._write(
-            "profiles/default/profile.toml",
-            '[rootfs]\npackages = []\n[bootstrap]\nkind = "linux"\n[uboot]\nkind = "none"\n',
-        )
-        self._write(
-            "targets/test-phone/loader/assets.lock.toml",
-            '[[source]]\nid = "loader"\nkind = "file"\n'
-            'url = "https://example.invalid/loader.bin"\n'
-            f'sha256 = "{"7" * 64}"\ncache_name = "loader.bin"\nlicense = "MIT"\n'
-            '[[source.output]]\nrole = "fdl1"\npath = "loader.bin"\n'
-            f'sha256 = "{"7" * 64}"\n',
-        )
-        for package in (
-            "fplinux-base",
-            "fplinux-bash",
-            "fplinux-busybox",
-            "fplinux-ncurses",
-            "fplinux-openrc",
-            "fplinux-readline",
-            "fplinux-terminal",
-            "fplinux-input",
-            "fplinux-libdrm",
-            "fplinux-libtsm",
-            "fplinux-libudev",
-            "fplinux-libxkbcommon",
-        ):
+        with temporary:
+            self.root = Path(temporary.name)
             self._write(
-                f"alpine/aports/{package}/APKBUILD",
-                f'pkgname={package}\npkgver=1.0.1\npkgrel=0\narch="armv7"\n',
+                "container.lock.toml",
+                '[kern]\nversion = "1.0.0"\n'
+                'archive_url = "https://example.invalid/kern.tar.gz"\n'
+                f'archive_sha256 = "{"a" * 64}"\n'
+                f'binary_sha256 = "{"b" * 64}"\n'
+                '[oci]\nbase_rootfs_url = "https://example.invalid/base.tar.gz"\n'
+                f'base_rootfs_sha256 = "{"c" * 64}"\n',
             )
+            self._write(
+                "Containerfile",
+                "ARG TOOL_VERSION=2.0\n"
+                f"ARG TOOL_SHA256={'d' * 64}\n"
+                "RUN apk add --no-cache tool=2.0-r0\n"
+                'RUN curl --output "${archive}" '
+                '"https://example.invalid/tool-${TOOL_VERSION}.tar.gz"; '
+                'printf "%s %s" "${TOOL_SHA256}" "${archive}" | sha256sum -c -\n',
+            )
+            self._write(
+                "environment.lock.toml",
+                '[selection]\narch = "x86_64"\napk_groups = [["tool=2.0-r0"]]\n'
+                '[[input]]\nkey = "environment:tool"\n'
+                'url = "https://example.invalid/tool-2.0-r0.apk"\n'
+                f'sha256 = "{"e" * 64}"\nbytes = 12\n'
+                'destination = "downloads/environment/apk/main/x86_64/tool-2.0-r0.apk"\n'
+                'purpose = "container-package"\narch = "x86_64"\n'
+                '[input.package]\nname = "tool"\nversion = "2.0-r0"\n'
+                'provides = ["cmd:tool=2.0-r0"]\ndepends = []\n'
+                '[[key]]\nfile = "test.rsa.pub"\n'
+                f'sha256 = "{"f" * 64}"\nbytes = 10\n'
+                'source = "container:base-rootfs"\nmember = "etc/apk/keys/test.rsa.pub"\n',
+            )
+            self._write(
+                "package-lock.json",
+                json.dumps(
+                    {
+                        "packages": {
+                            "": {"devDependencies": {"tool": "3.0.0"}},
+                            "node_modules/tool": {
+                                "version": "3.0.0",
+                                "resolved": "https://example.invalid/npm/tool-3.0.0.tgz",
+                                "integrity": "sha512-"
+                                + base64.b64encode(bytes.fromhex("11" * 64)).decode(),
+                            },
+                        },
+                    }
+                ),
+            )
+            self._write(
+                "alpine.lock.toml",
+                'release = "3.24.2"\nbranch = "v3.24"\narch = "armv7"\n'
+                'triplet = "armv7-alpine-linux-musleabihf"\n'
+                '[repositories]\nmain = "https://example.invalid/main/armv7"\n'
+                'community = "https://example.invalid/community/armv7"\n'
+                '[minirootfs]\nurl = "https://example.invalid/target.tar.gz"\n'
+                f'sha256 = "{"2" * 64}"\nbytes = 2\n'
+                '[runtime]\npackages = ["runtime-1-r0.apk"]\n[runtime.additions]\n'
+                '[sysroot]\npackages = ["runtime-1-r0.apk"]\n'
+                '[[package]]\nrepository = "main"\nfile = "runtime-1-r0.apk"\n'
+                f'sha256 = "{"3" * 64}"\nbytes = 3\n',
+            )
+            self._write(
+                "sources.lock.toml",
+                '[kernel]\nversion = "6.0"\nurl = "https://example.invalid/linux.tar.xz"\n'
+                f'sha256 = "{"4" * 64}"\n'
+                '[support]\narchive_url = "https://example.invalid/support.tar.gz"\n'
+                f'archive_sha256 = "{"5" * 64}"\n'
+                '[host]\narchive_url = "https://example.invalid/host.tar.gz"\n'
+                f'archive_sha256 = "{"6" * 64}"\n',
+            )
+            self._write(
+                "platforms/test-platform/platform.toml",
+                "[rootfs]\npackages = []\n[bundle]\npackages = []\n"
+                '[linux]\nsource_lock = "kernel"\n'
+                '[bootstrap]\nvendor_source_lock = "support"\n'
+                'vendor_cache_name = "support.tar.gz"\n'
+                '[[host.tools]]\ntype = "make-archive"\nname = "loader"\n'
+                'source_lock = "host"\ncache_name = "host.tar.gz"\n'
+                'archive_prefix = "host/"\nmembers = []\n',
+            )
+            self._write(
+                "targets/test-phone/target.toml",
+                'platform = "test-platform"\n[rootfs]\npackages = []\n[bundle]\npackages = []\n',
+            )
+            self._write(
+                "profiles/default/profile.toml",
+                '[rootfs]\npackages = []\n[bootstrap]\nkind = "linux"\n[uboot]\nkind = "none"\n',
+            )
+            self._write(
+                "targets/test-phone/loader/assets.lock.toml",
+                '[[source]]\nid = "loader"\nkind = "file"\n'
+                'url = "https://example.invalid/loader.bin"\n'
+                f'sha256 = "{"7" * 64}"\ncache_name = "loader.bin"\nlicense = "MIT"\n'
+                '[[source.output]]\nrole = "fdl1"\npath = "loader.bin"\n'
+                f'sha256 = "{"7" * 64}"\n',
+            )
+            for package in (
+                "fplinux-base",
+                "fplinux-bash",
+                "fplinux-busybox",
+                "fplinux-ncurses",
+                "fplinux-openrc",
+                "fplinux-readline",
+                "fplinux-terminal",
+                "fplinux-input",
+                "fplinux-libdrm",
+                "fplinux-libtsm",
+                "fplinux-libudev",
+                "fplinux-libxkbcommon",
+            ):
+                self._write(
+                    f"alpine/aports/{package}/APKBUILD",
+                    f'pkgname={package}\npkgver=1.0.1\npkgrel=0\narch="armv7"\n',
+                )
+            yield
 
     def _write(self, name: str, text: str) -> None:
         path = self.root / name
@@ -156,20 +162,17 @@ class DependencyInputTests(unittest.TestCase):
         inputs, _ = dependency_selection(self.root)
         actual = {record.key: record for record in inputs}
         aport = actual["aport:fplinux-libtsm:renamed.tar.gz"]
-        self.assertEqual(aport.url, "https://example.invalid/1.2/source-1.2.3.tar.gz")
-        self.assertEqual(aport.destination, "downloads/alpine/sources/renamed.tar.gz")
-        self.assertEqual(aport.checksum, "8" * 128)
-        self.assertEqual(aport.algorithm, "sha512")
-        self.assertIsNone(aport.sha256)
-        self.assertEqual(actual["source:host:host"].destination, "downloads/host.tar.gz")
-        self.assertEqual(
-            actual["source:kernel:linux"].destination, "downloads/linux/linux-6.0.tar.xz"
+        assert (aport.url) == ("https://example.invalid/1.2/source-1.2.3.tar.gz")
+        assert (aport.destination) == ("downloads/alpine/sources/renamed.tar.gz")
+        assert (aport.checksum) == ("8" * 128)
+        assert (aport.algorithm) == ("sha512")
+        assert (aport.sha256) is None
+        assert (actual["source:host:host"].destination) == ("downloads/host.tar.gz")
+        assert (actual["source:kernel:linux"].destination) == ("downloads/linux/linux-6.0.tar.xz")
+        assert (actual["alpine:minirootfs"].destination) == (
+            "downloads/alpine/alpine-minirootfs-3.24.2-armv7.tar.gz"
         )
-        self.assertEqual(
-            actual["alpine:minirootfs"].destination,
-            "downloads/alpine/alpine-minirootfs-3.24.2-armv7.tar.gz",
-        )
-        self.assertEqual(actual["asset:test-phone:loader"].destination, "downloads/loader.bin")
+        assert (actual["asset:test-phone:loader"].destination) == ("downloads/loader.bin")
 
     def test_source_loop_expands_each_pinned_patch_in_order(self) -> None:
         """Patch declarations in a literal loop remain separate exact downloads."""
@@ -182,10 +185,8 @@ class DependencyInputTests(unittest.TestCase):
         )
         _, actual = dependency_selection(self.root)
         apports = actual["aports"]
-        if not isinstance(apports, dict):
-            self.fail("context must contain aport declarations")
-        self.assertEqual(
-            apports["fplinux-bash"]["sources"],
+        assert isinstance(apports, dict), "context must contain aport declarations"
+        assert (apports["fplinux-bash"]["sources"]) == (
             [
                 {
                     "file": "patch-001",
@@ -197,7 +198,7 @@ class DependencyInputTests(unittest.TestCase):
                     "url": "https://example.invalid/patch-002",
                     "sha512": "b" * 128,
                 },
-            ],
+            ]
         )
 
     def test_context_ignores_comments_key_order_and_unrelated_driver_bytes(self) -> None:
@@ -219,7 +220,7 @@ class DependencyInputTests(unittest.TestCase):
         path = self.root / "alpine/aports/fplinux-base/APKBUILD"
         path.write_text("# Comment\n" + path.read_text())
         _, after = dependency_selection(self.root)
-        self.assertEqual(after, before)
+        assert (after) == (before)
 
     def test_context_tracks_selected_providers_and_source_sequences(self) -> None:
         """Provider choice and source application order belong to archive compatibility."""
@@ -230,22 +231,22 @@ class DependencyInputTests(unittest.TestCase):
         _, before = dependency_selection(self.root)
         path.write_text(path.read_text().replace("virtual=1", "virtual=2"))
         _, after = dependency_selection(self.root)
-        self.assertNotEqual(after, before)
+        assert (after) != (before)
         _, before = dependency_selection(self.root)
         path.write_text(
             path.read_text().replace("first.patch second.patch", "second.patch first.patch")
         )
         _, after = dependency_selection(self.root)
-        self.assertNotEqual(after, before)
+        assert (after) != (before)
 
     def test_environment_inventory_does_not_require_target_sources(self) -> None:
         """Environment setup can enumerate its exact closure independently of boards."""
         (self.root / "targets/test-phone/target.toml").unlink()
         records = {record.key: record for record in environment_inputs(self.root)}
-        self.assertEqual(records["environment:tool"].size, 12)
-        self.assertEqual(records["container:tool"].url, "https://example.invalid/tool-2.0.tar.gz")
-        self.assertEqual(records["npm:node_modules/tool"].checksum, "11" * 64)
-        self.assertIsNone(records["npm:node_modules/tool"].sha256)
+        assert (records["environment:tool"].size) == (12)
+        assert (records["container:tool"].url) == ("https://example.invalid/tool-2.0.tar.gz")
+        assert (records["npm:node_modules/tool"].checksum) == ("11" * 64)
+        assert (records["npm:node_modules/tool"].sha256) is None
 
     def test_missing_or_dynamic_source_checksum_cannot_enter_inventory(self) -> None:
         """Incomplete source declarations fail before an archive can claim completeness."""
@@ -254,33 +255,29 @@ class DependencyInputTests(unittest.TestCase):
             path.relative_to(self.root).as_posix(),
             'pkgname=fplinux-libtsm\nsource="https://example.invalid/unpinned.tar.gz"\n',
         )
-        with self.assertRaisesRegex(SystemExit, "external source has no checksum"):
+        with pytest.raises(SystemExit, match="external source has no checksum"):
             dependency_selection(self.root)
         self._write(
             path.relative_to(self.root).as_posix(),
             'pkgname=fplinux-libtsm\nsource="$(printf https://example.invalid/source)"\n',
         )
-        with self.assertRaisesRegex(SystemExit, "unsupported command substitution"):
+        with pytest.raises(SystemExit, match="unsupported command substitution"):
             dependency_selection(self.root)
 
     def test_changed_environment_selection_rejects_stale_closure(self) -> None:
         """A changed direct package pin cannot reuse a differently selected closure."""
         path = self.root / "Containerfile"
         path.write_text(path.read_text().replace("tool=2.0-r0", "tool=3.0-r0"))
-        with self.assertRaisesRegex(SystemExit, "selection differs from Containerfile"):
+        with pytest.raises(SystemExit, match="selection differs from Containerfile"):
             environment_inputs(self.root)
 
     def test_records_reject_missing_digest_and_non_normalized_destinations(self) -> None:
         """Exact download records cannot describe unpinned bytes or escaping paths."""
-        with self.assertRaisesRegex(SystemExit, "exact SHA-256 or SHA-512"):
+        with pytest.raises(SystemExit, match="exact SHA-256 or SHA-512"):
             DependencyInput(
                 "test", "https://example.invalid/file", None, None, "downloads/file", "test"
             )
-        with self.assertRaisesRegex(SystemExit, "normalized relative path"):
+        with pytest.raises(SystemExit, match="normalized relative path"):
             DependencyInput(
                 "test", "https://example.invalid/file", "a" * 64, None, "downloads/../file", "test"
             )
-
-
-if __name__ == "__main__":
-    unittest.main()

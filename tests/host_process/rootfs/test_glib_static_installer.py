@@ -7,7 +7,6 @@ import json
 import subprocess
 import sys
 import tempfile
-import unittest
 from pathlib import Path
 
 from tests import ROOT
@@ -15,7 +14,7 @@ from tests import ROOT
 INSTALLER = ROOT / "alpine/aports/fplinux-glib/install-static-dev.py"
 
 
-class GlibStaticInstallerTests(unittest.TestCase):
+class GlibStaticInstallerTests:
     """Check required-header copying without compiling GLib or an APK."""
 
     def run_installer(
@@ -54,12 +53,11 @@ class GlibStaticInstallerTests(unittest.TestCase):
 
             result = self.run_installer(package_dir, mapping)
 
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(
-                (package_dir / "usr/include/glib-2.0/gio/gdbusconnection.h").read_text(),
-                "selected GIO header\n",
+            assert (result.returncode) == (0), result.stderr
+            assert ((package_dir / "usr/include/glib-2.0/gio/gdbusconnection.h").read_text()) == (
+                "selected GIO header\n"
             )
-            self.assertFalse((package_dir / "usr/include/glib-2.0/girepository").exists())
+            assert not ((package_dir / "usr/include/glib-2.0/girepository").exists())
 
     def test_missing_selected_glib_header_fails_installation(self) -> None:
         """A missing required header must fail instead of producing an incomplete interface."""
@@ -72,9 +70,9 @@ class GlibStaticInstallerTests(unittest.TestCase):
 
             result = self.run_installer(package_dir, mapping)
 
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("missing-gvariant.h", result.stderr)
-            self.assertFalse((package_dir / "usr/include/glib-2.0/glib/gvariant.h").exists())
+            assert (result.returncode) != (0)
+            assert ("missing-gvariant.h") in (result.stderr)
+            assert not ((package_dir / "usr/include/glib-2.0/glib/gvariant.h").exists())
 
     def test_module_and_unix_headers_are_copied_to_the_exported_include_directories(self) -> None:
         """The GIO module and Unix interfaces must retain their selected header contents."""
@@ -92,15 +90,13 @@ class GlibStaticInstallerTests(unittest.TestCase):
 
             result = self.run_installer(package_dir, mapping)
 
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(
-                (package_dir / "usr/include/glib-2.0/gmodule/gmodule-visibility.h").read_text(),
-                "selected module visibility\n",
-            )
-            self.assertEqual(
-                (package_dir / "usr/include/gio-unix-2.0/gio/gunixinputstream.h").read_text(),
-                "selected Unix stream\n",
-            )
+            assert (result.returncode) == (0), result.stderr
+            assert (
+                (package_dir / "usr/include/glib-2.0/gmodule/gmodule-visibility.h").read_text()
+            ) == ("selected module visibility\n")
+            assert (
+                (package_dir / "usr/include/gio-unix-2.0/gio/gunixinputstream.h").read_text()
+            ) == ("selected Unix stream\n")
 
     def test_atomic_archive_link_flag_does_not_retain_the_producer_sysroot(self) -> None:
         """Selected metadata must resolve the atomic library in the consuming sysroot."""
@@ -121,10 +117,9 @@ class GlibStaticInstallerTests(unittest.TestCase):
                 sysroot=sysroot,
             )
 
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(
-                (package_dir / "usr/lib/pkgconfig/glib-2.0.pc").read_text(),
+            assert (result.returncode) == (0), result.stderr
+            assert ((package_dir / "usr/lib/pkgconfig/glib-2.0.pc").read_text()) == (
                 "Name: GLib\n"
                 "Libs: -lglib-2.0 -latomic -lm\n"
-                f"Other: {sysroot}/usr/lib/libother.a {sysroot}/usr/lib/libatomic.a.backup\n",
+                f"Other: {sysroot}/usr/lib/libother.a {sysroot}/usr/lib/libatomic.a.backup\n"
             )

@@ -10,13 +10,17 @@ import signal
 import subprocess
 import tempfile
 import time
-import unittest
-from contextlib import suppress
+from contextlib import ExitStack, suppress
 from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
+
+import pytest
 
 from tests import ROOT
 from tests.process import run_process
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 CLIENT_SOURCE = ROOT / "alpine/aports/fplinux-bluetooth/fplinux-bluetooth.c"
 SHARED_INCLUDE = ROOT / "include/fplinux"
@@ -40,106 +44,113 @@ BUS_CONFIG = """\
 """
 
 
-class FplinuxBluetoothHostToolTests(unittest.TestCase):
+class FplinuxBluetoothHostToolTests:
     """Exercise the client against a controlled D-Bus BlueZ/obexd fake."""
 
     temporary: ClassVar[tempfile.TemporaryDirectory[str]]
     work: ClassVar[Path]
     client: ClassVar[Path]
     service: ClassVar[Path]
-    driver_directory: ClassVar[Path]
+    driver_directory: Path
     bus: subprocess.Popen[str]
     fake: subprocess.Popen[str]
     case: tempfile.TemporaryDirectory[str]
     address: str
+    cleanup: ExitStack
 
+    @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def setUpClass(cls) -> None:
+    def _compiled_tools(cls) -> Iterator[None]:
         """Build the real client and the test-owned fake through pkg-config."""
-        if shutil.which("dbus-daemon") is None:
-            message = "dbus-daemon is required for Bluetooth host tests"
-            raise unittest.SkipTest(message)
-        try:
-            cflags = run_process(
-                ["pkg-config", "--cflags", "dbus-1"],
-                name="read D-Bus compiler flags",
-                timeout=10,
-                check=True,
-            ).stdout.split()
-            libraries = run_process(
-                ["pkg-config", "--libs", "dbus-1"],
-                name="read D-Bus linker flags",
-                timeout=10,
-                check=True,
-            ).stdout.split()
-        except (FileNotFoundError, subprocess.CalledProcessError) as error:
-            message = "pkg-config dbus-1 development files are required"
-            raise unittest.SkipTest(message) from error
+        with ExitStack() as cleanup:
+            if shutil.which("dbus-daemon") is None:
+                message = "dbus-daemon is required for Bluetooth host tests"
+                pytest.skip(message)
+            try:
+                cflags = run_process(
+                    ["pkg-config", "--cflags", "dbus-1"],
+                    name="read D-Bus compiler flags",
+                    timeout=10,
+                    check=True,
+                ).stdout.split()
+                libraries = run_process(
+                    ["pkg-config", "--libs", "dbus-1"],
+                    name="read D-Bus linker flags",
+                    timeout=10,
+                    check=True,
+                ).stdout.split()
+            except FileNotFoundError, subprocess.CalledProcessError:
+                message = "pkg-config dbus-1 development files are required"
+                pytest.skip(message)
 
-        cls.temporary = tempfile.TemporaryDirectory()
-        cls.addClassCleanup(cls.temporary.cleanup)
-        cls.work = Path(cls.temporary.name)
-        cls.client = cls.work / "fplinux-bluetooth"
-        cls.service = cls.work / "fplinux-bluetooth-service"
-        cls.driver_directory = cls.work / "platform-driver"
-        for source, output, name, extra_sources in (
-            (
-                CLIENT_SOURCE,
-                cls.client,
-                "compile FPLinux Bluetooth client",
-                [
-                    str(CLIENT_SOURCE.with_name("fplinux-bluetooth-opp.c")),
-                    str(CLIENT_SOURCE.with_name("fplinux-bluetooth-pan.c")),
-                    str(CLIENT_SOURCE.with_name("fplinux-bluetooth-common.c")),
-                    str(ROOT / "lib/fplinux/fplinux-cli.c"),
-                ],
-            ),
-            (SERVICE_SOURCE, cls.service, "compile FPLinux Bluetooth test service", []),
-        ):
-            run_process(
-                [
-                    "cc",
-                    "-std=c11",
-                    "-Wall",
-                    "-Wextra",
-                    "-Werror",
-                    f"-I{SHARED_INCLUDE}",
-                    f'-DFPLINUX_BLUETOOTH_DRIVER_DIR="{cls.driver_directory}"',
-                    *cflags,
-                    str(source),
-                    *extra_sources,
-                    "-o",
-                    str(output),
-                    *libraries,
-                ],
-                name=name,
-                timeout=30,
-                check=True,
-            )
+            cls.temporary = tempfile.TemporaryDirectory()
+            cleanup.enter_context(cls.temporary)
+            cls.work = Path(cls.temporary.name)
+            cls.client = cls.work / "fplinux-bluetooth"
+            cls.service = cls.work / "fplinux-bluetooth-service"
+            for source, output, name, extra_sources in (
+                (
+                    CLIENT_SOURCE,
+                    cls.client,
+                    "compile FPLinux Bluetooth client",
+                    [
+                        str(CLIENT_SOURCE.with_name("fplinux-bluetooth-opp.c")),
+                        str(CLIENT_SOURCE.with_name("fplinux-bluetooth-pan.c")),
+                        str(CLIENT_SOURCE.with_name("fplinux-bluetooth-common.c")),
+                        str(ROOT / "lib/fplinux/fplinux-cli.c"),
+                    ],
+                ),
+                (SERVICE_SOURCE, cls.service, "compile FPLinux Bluetooth test service", []),
+            ):
+                run_process(
+                    [
+                        "cc",
+                        "-std=c11",
+                        "-Wall",
+                        "-Wextra",
+                        "-Werror",
+                        f"-I{SHARED_INCLUDE}",
+                        '-DFPLINUX_BLUETOOTH_DRIVER_DIR="platform-driver"',
+                        *cflags,
+                        str(source),
+                        *extra_sources,
+                        "-o",
+                        str(output),
+                        *libraries,
+                    ],
+                    name=name,
+                    timeout=30,
+                    check=True,
+                )
+            yield
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _case_resources(self) -> Iterator[None]:
         """Create one isolated daemon and one fake service per scenario."""
-        self.case = tempfile.TemporaryDirectory()
-        self.addCleanup(self.case.cleanup)
-        configuration = Path(self.case.name) / "bus.conf"
-        configuration.write_text(BUS_CONFIG.format(directory=self.case.name), encoding="utf-8")
-        self.bus = subprocess.Popen(
-            ["dbus-daemon", f"--config-file={configuration}", "--nofork", "--print-address=1"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            start_new_session=True,
-        )
-        self.addCleanup(self.stop_process, self.bus)
-        if self.bus.stdout is None:
-            self.fail("private D-Bus daemon stdout is not captured")
-        readable, _, _ = select.select([self.bus.stdout], [], [], 3)
-        self.address = self.bus.stdout.readline().strip() if readable else ""
-        if not self.address:
-            with suppress(ProcessLookupError):
-                os.killpg(self.bus.pid, signal.SIGKILL)
-            _, stderr = self.bus.communicate()
-            self.fail(f"private D-Bus daemon did not publish an address:\n{stderr}")
+        with ExitStack() as self.cleanup:
+            self.case = tempfile.TemporaryDirectory()
+            self.cleanup.enter_context(self.case)
+            self.driver_directory = Path(self.case.name) / "platform-driver"
+            configuration = Path(self.case.name) / "bus.conf"
+            configuration.write_text(BUS_CONFIG.format(directory=self.case.name), encoding="utf-8")
+            self.bus = subprocess.Popen(
+                ["dbus-daemon", f"--config-file={configuration}", "--nofork", "--print-address=1"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,
+            )
+            self.cleanup.callback(self.stop_process, self.bus)
+            if self.bus.stdout is None:
+                pytest.fail("private D-Bus daemon stdout is not captured")
+            readable, _, _ = select.select([self.bus.stdout], [], [], 3)
+            self.address = self.bus.stdout.readline().strip() if readable else ""
+            if not self.address:
+                with suppress(ProcessLookupError):
+                    os.killpg(self.bus.pid, signal.SIGKILL)
+                _, stderr = self.bus.communicate()
+                pytest.fail(f"private D-Bus daemon did not publish an address:\n{stderr}")
+            yield
 
     @staticmethod
     def stop_process(process: subprocess.Popen[str]) -> None:
@@ -174,17 +185,17 @@ class FplinuxBluetoothHostToolTests(unittest.TestCase):
             text=True,
             start_new_session=True,
         )
-        self.addCleanup(self.stop_process, self.fake)
+        self.cleanup.callback(self.stop_process, self.fake)
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
             if ready.exists():
-                self.assertEqual(ready.read_text(encoding="ascii"), "ready\n")
+                assert (ready.read_text(encoding="ascii")) == ("ready\n")
                 return
             if self.fake.poll() is not None:
                 stdout, stderr = self.fake.communicate()
-                self.fail(f"Bluetooth fake exited before readiness:\n{stdout}\n{stderr}")
+                pytest.fail(f"Bluetooth fake exited before readiness:\n{stdout}\n{stderr}")
             time.sleep(0.01)
-        self.fail("Bluetooth fake did not publish readiness")
+        pytest.fail("Bluetooth fake did not publish readiness")
 
     def run_client(self, *arguments: str) -> subprocess.CompletedProcess[str]:
         """Invoke the production client on this test's isolated system bus."""
@@ -193,12 +204,13 @@ class FplinuxBluetoothHostToolTests(unittest.TestCase):
             name="run FPLinux Bluetooth client",
             timeout=5,
             env=self.child_environment(),
+            cwd=Path(self.case.name),
         )
 
     def prepare_driver_directory(self) -> Path:
         """Replace only device discovery with an owned temporary filesystem."""
         self.driver_directory.mkdir()
-        self.addCleanup(shutil.rmtree, self.driver_directory)
+        self.cleanup.callback(shutil.rmtree, self.driver_directory)
         return self.driver_directory
 
     def test_enable_writes_one_start_without_a_bus_service(self) -> None:
@@ -212,22 +224,15 @@ class FplinuxBluetoothHostToolTests(unittest.TestCase):
 
         result = self.run_client("enable")
 
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(start.read_bytes(), b"1\n")
-        self.assertEqual(
-            result.stdout,
-            "Bluetooth interfaces ready; use bluetoothctl for adapter power\n",
+        assert (result.returncode) == (0), result.stderr
+        assert (start.read_bytes()) == (b"1\n")
+        assert (result.stdout) == (
+            "Bluetooth interfaces ready; use bluetoothctl for adapter power\n"
         )
 
-    def test_help_leaves_a_bound_controller_stopped(self) -> None:
-        """Root and subcommand help cannot write the synthetic start control."""
-        directory = self.prepare_driver_directory()
-        device = directory / "400a0000.bluetooth"
-        device.mkdir()
-        start = device / "start"
-        start.write_bytes(b"")
-
-        for arguments in (
+    @pytest.mark.parametrize(
+        "arguments",
+        [
             ("-h",),
             ("--help",),
             ("enable", "--help"),
@@ -236,19 +241,37 @@ class FplinuxBluetoothHostToolTests(unittest.TestCase):
             ("send", "--help"),
             ("receive", PEER, "--help"),
             ("network", "--help"),
-        ):
-            with self.subTest(arguments=arguments):
-                result = self.run_client(*arguments)
+        ],
+        ids=[
+            "0-h",
+            "1-help",
+            "2-enable",
+            "3-enable---if-present",
+            "4-enable---unknown",
+            "5-send",
+            "6-receive-PEER---help",
+            "7-network",
+        ],
+    )
+    def test_help_leaves_a_bound_controller_stopped(self, arguments: tuple[str, ...]) -> None:
+        """Root and subcommand help cannot write the synthetic start control."""
+        directory = self.prepare_driver_directory()
+        device = directory / "400a0000.bluetooth"
+        device.mkdir()
+        start = device / "start"
+        start.write_bytes(b"")
 
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn("Usage:", result.stdout)
-                self.assertIn("--help", result.stdout)
-                self.assertEqual(result.stderr, "")
-                self.assertEqual(start.read_bytes(), b"")
+        result = self.run_client(*arguments)
 
-    def test_invalid_command_arguments_are_diagnosed_without_bluez(self) -> None:
-        """Syntax and value errors are diagnosed with no running BlueZ service."""
-        for arguments in (
+        assert (result.returncode) == (0), result.stderr
+        assert ("Usage:") in (result.stdout)
+        assert ("--help") in (result.stdout)
+        assert (result.stderr) == ("")
+        assert (start.read_bytes()) == (b"")
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [
             (),
             ("unknown",),
             ("enable", "extra"),
@@ -261,22 +284,40 @@ class FplinuxBluetoothHostToolTests(unittest.TestCase):
             ("receive", PEER, "/unused", "1tail"),
             ("receive", PEER, "/unused", "99999999999999999999999"),
             ("enable", "--", "--help"),
-        ):
-            with self.subTest(arguments=arguments):
-                result = self.run_client(*arguments)
+        ],
+        ids=[
+            "0-empty",
+            "1-unknown",
+            "2-enable",
+            "3-enable",
+            "4-send-PEER",
+            "5-send-invalid-peer",
+            "6-network-PEER-extra",
+            "7-receive-PEER-unused-0",
+            "8-receive-PEER-unused-3601",
+            "9-receive-PEER-unused-1tail",
+            "10-receive-PEER-unused-99999999999999999999999",
+            "11-enable",
+        ],
+    )
+    def test_invalid_command_arguments_are_diagnosed_without_bluez(
+        self, arguments: tuple[str, ...]
+    ) -> None:
+        """Syntax and value errors are diagnosed with no running BlueZ service."""
+        result = self.run_client(*arguments)
 
-                self.assertEqual(result.returncode, 2, result.stderr)
-                self.assertEqual(result.stdout, "")
-                self.assertIn("--help", result.stderr)
+        assert (result.returncode) == (2), result.stderr
+        assert (result.stdout) == ("")
+        assert ("--help") in (result.stderr)
 
     def test_enable_missing_board_is_optional_only_when_requested(self) -> None:
         """Boot may omit an unsupported controller; explicit enable must explain it."""
         result = self.run_client("enable")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("not configured", result.stderr)
+        assert (result.returncode) != (0)
+        assert ("not configured") in (result.stderr)
 
         optional = self.run_client("enable", "--if-present")
-        self.assertEqual(optional.returncode, 0, optional.stderr)
+        assert (optional.returncode) == (0), optional.stderr
 
     def test_enable_ambiguous_controller_does_not_start_either(self) -> None:
         """An ambiguous discovery result cannot initialize an arbitrary controller."""
@@ -291,9 +332,9 @@ class FplinuxBluetoothHostToolTests(unittest.TestCase):
 
         result = self.run_client("enable", "--if-present")
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("multiple CM4", result.stderr)
-        self.assertEqual([path.read_bytes() for path in controls], [b"", b""])
+        assert (result.returncode) != (0)
+        assert ("multiple CM4") in (result.stderr)
+        assert ([path.read_bytes() for path in controls]) == ([b"", b""])
 
     def test_send_accepts_terminal_signal_before_sendfile_reply(self) -> None:
         """A fast completed transfer is retained until its object path arrives."""
@@ -303,8 +344,8 @@ class FplinuxBluetoothHostToolTests(unittest.TestCase):
 
         result = self.run_client("send", PEER, str(payload))
 
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, f"sent {payload} to {PEER}\n")
+        assert (result.returncode) == (0), result.stderr
+        assert (result.stdout) == (f"sent {payload} to {PEER}\n")
 
     def test_receive_uses_name_before_authorization_and_writes_fixture_bytes(self) -> None:
         """The advertised Name determines the authorized receive target."""
@@ -315,9 +356,9 @@ class FplinuxBluetoothHostToolTests(unittest.TestCase):
         result = self.run_client("receive", PEER, str(destination), "3")
 
         received = destination / "incoming.txt"
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(received.read_bytes(), b"fixture")
-        self.assertIn(f"received {received}\n", result.stdout)
+        assert (result.returncode) == (0), result.stderr
+        assert (received.read_bytes()) == (b"fixture")
+        assert (f"received {received}\n") in (result.stdout)
 
     def test_receive_collision_preserves_existing_destination_bytes(self) -> None:
         """A completed incoming transfer never replaces an existing file."""
@@ -329,9 +370,9 @@ class FplinuxBluetoothHostToolTests(unittest.TestCase):
 
         result = self.run_client("receive", PEER, str(destination), "3")
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(existing.read_bytes(), b"old-fixture")
-        self.assertIn("refusing to overwrite incoming.txt", result.stderr)
+        assert (result.returncode) != (0)
+        assert (existing.read_bytes()) == (b"old-fixture")
+        assert ("refusing to overwrite incoming.txt") in (result.stderr)
 
     def test_network_rejects_disconnect_before_connect_reply(self) -> None:
         """A PAN link already down at Connect completion has no usable output."""
@@ -339,9 +380,9 @@ class FplinuxBluetoothHostToolTests(unittest.TestCase):
 
         result = self.run_client("network", PEER)
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, "")
-        self.assertIn("PAN disconnected before its interface could be used", result.stderr)
+        assert (result.returncode) != (0)
+        assert (result.stdout) == ("")
+        assert ("PAN disconnected before its interface could be used") in (result.stderr)
 
     def test_network_hides_interface_when_connected_snapshot_disappears(self) -> None:
         """A lost BlueZ device object cannot produce a usable PAN interface."""
@@ -349,9 +390,9 @@ class FplinuxBluetoothHostToolTests(unittest.TestCase):
 
         result = self.run_client("network", PEER)
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, "")
-        self.assertIn("cannot read PAN Connected state", result.stderr)
+        assert (result.returncode) != (0)
+        assert (result.stdout) == ("")
+        assert ("cannot read PAN Connected state") in (result.stderr)
 
     def assert_network_connection_is_visible_before_link_loss(self, peer: str) -> None:
         """Observe one flushed PAN line while the client is still alive."""
@@ -360,18 +401,18 @@ class FplinuxBluetoothHostToolTests(unittest.TestCase):
 
         def observe_connection(process: subprocess.Popen[str], deadline: float) -> None:
             if process.stdout is None:
-                self.fail("Bluetooth PAN client stdout is not captured")
+                pytest.fail("Bluetooth PAN client stdout is not captured")
             while time.monotonic() < deadline:
                 if process.poll() is not None:
-                    self.fail("Bluetooth PAN client exited before reporting its connection")
+                    pytest.fail("Bluetooth PAN client exited before reporting its connection")
                 remaining = max(0, deadline - time.monotonic())
                 readable, _, _ = select.select([process.stdout], [], [], min(0.05, remaining))
                 if readable:
                     observed.append(process.stdout.readline())
-                    self.assertIsNone(process.poll())
+                    assert (process.poll()) is None
                     os.kill(self.fake.pid, signal.SIGUSR1)
                     return
-            self.fail("Bluetooth PAN client did not flush its connection line")
+            pytest.fail("Bluetooth PAN client did not flush its connection line")
 
         result = run_process(
             [str(self.client), "network", peer],
@@ -381,8 +422,8 @@ class FplinuxBluetoothHostToolTests(unittest.TestCase):
             while_running=observe_connection,
         )
 
-        self.assertEqual(observed, [CONNECTED.replace(PEER, peer)])
-        self.assertEqual(result.returncode, 0, result.stderr)
+        assert (observed) == ([CONNECTED.replace(PEER, peer)])
+        assert (result.returncode) == (0), result.stderr
 
     def test_network_flushes_connection_before_later_disconnect(self) -> None:
         """A non-TTY consumer sees the live PAN line before the link drops."""
@@ -391,7 +432,3 @@ class FplinuxBluetoothHostToolTests(unittest.TestCase):
     def test_network_normalizes_lowercase_peer_before_visible_link_state(self) -> None:
         """A lowercase peer reaches BlueZ's uppercase object path and stays observable."""
         self.assert_network_connection_is_visible_before_link_loss(PEER.lower())
-
-
-if __name__ == "__main__":
-    unittest.main()

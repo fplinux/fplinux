@@ -3,12 +3,11 @@
 
 from __future__ import annotations
 
-import unittest
-
+import pytest
 from fplinux_cli.quality.formatting.canonical_yaml import normalize_yaml
 
 
-class CanonicalYamlTests(unittest.TestCase):
+class CanonicalYamlTests:
     """Preserve values and consumer order while rearranging known fields."""
 
     def test_binding_orders_fields_without_rewriting_literal_examples(self) -> None:
@@ -58,8 +57,8 @@ examples:
 x-note: keep
 """
         actual = normalize_yaml("platforms/demo/linux/bindings/demo.yaml", source)
-        self.assertEqual(actual, expected)
-        self.assertEqual(normalize_yaml("platforms/demo/linux/bindings/demo.yaml", actual), actual)
+        assert (actual) == (expected)
+        assert (normalize_yaml("platforms/demo/linux/bindings/demo.yaml", actual)) == (actual)
 
     def test_workflow_retains_jobs_steps_events_and_comments(self) -> None:
         """Move fields inside each job and step without moving executions."""
@@ -110,8 +109,8 @@ jobs:
     steps: []
 """
         actual = normalize_yaml(".github/workflows/demo.yml", source)
-        self.assertEqual(actual, expected)
-        self.assertEqual(normalize_yaml(".github/workflows/demo.yml", actual), actual)
+        assert (actual) == (expected)
+        assert (normalize_yaml(".github/workflows/demo.yml", actual)) == (actual)
 
     def test_issue_form_retains_question_and_option_order(self) -> None:
         """Place item and attribute descriptions before options and validation."""
@@ -150,8 +149,8 @@ body:
         Read this first.
 """
         actual = normalize_yaml(".github/ISSUE_TEMPLATE/report.yml", source)
-        self.assertEqual(actual, expected)
-        self.assertEqual(normalize_yaml(".github/ISSUE_TEMPLATE/report.yml", actual), actual)
+        assert (actual) == (expected)
+        assert (normalize_yaml(".github/ISSUE_TEMPLATE/report.yml", actual)) == (actual)
 
     def test_mkdocs_retains_ordered_navigation_plugin_and_palette_mappings(self) -> None:
         """Arrange the configuration groups without alphabetizing consumers."""
@@ -206,15 +205,14 @@ not_in_nav: |
   /hidden.md
 """
         actual = normalize_yaml("mkdocs.yml", source)
-        self.assertEqual(actual, expected)
-        self.assertEqual(normalize_yaml("mkdocs.yml", actual), actual)
+        assert (actual) == (expected)
+        assert (normalize_yaml("mkdocs.yml", actual)) == (actual)
 
     def test_missing_domain_fields_are_not_filled_in(self) -> None:
         """Ordering leaves incomplete documents incomplete for their validator."""
         source = b"body:\n  - type: input\nname: Incomplete\n"
-        self.assertEqual(
-            normalize_yaml(".github/ISSUE_TEMPLATE/report.yml", source),
-            b"name: Incomplete\nbody:\n  - type: input\n",
+        assert (normalize_yaml(".github/ISSUE_TEMPLATE/report.yml", source)) == (
+            b"name: Incomplete\nbody:\n  - type: input\n"
         )
 
     def test_template_keeps_block_scalar_chomping_and_placeholders(self) -> None:
@@ -222,27 +220,24 @@ not_in_nav: |
         source = b"description: |+\n  @DESCRIPTION@\n\n\ntitle: >-\n  @TITLE@\n"
         expected = b"title: >-\n  @TITLE@\ndescription: |+\n  @DESCRIPTION@\n\n\n"
         actual = normalize_yaml("platforms/demo/linux/bindings/demo.yaml.in", source)
-        self.assertEqual(actual, expected)
-        self.assertEqual(
-            normalize_yaml("platforms/demo/linux/bindings/demo.yaml.in", actual),
-            actual,
-        )
+        assert (actual) == (expected)
+        assert (normalize_yaml("platforms/demo/linux/bindings/demo.yaml.in", actual)) == (actual)
 
-    def test_invalid_duplicate_and_aliased_documents_are_rejected(self) -> None:
-        """Fail rather than discard syntax errors or reorder alias providers."""
-        for source in (
+    @pytest.mark.parametrize(
+        "source",
+        [
             b"name: [\n",
             b"name: first\nname: second\n",
             b"env: &vars {NAME: demo}\njobs: {build: {env: *vars}}\n",
-        ):
-            with self.subTest(source=source), self.assertRaises(ValueError):
-                normalize_yaml(".github/workflows/demo.yml", source)
+        ],
+        ids=["invalid-syntax", "duplicate-key", "aliased-document"],
+    )
+    def test_invalid_duplicate_and_aliased_documents_are_rejected(self, source: bytes) -> None:
+        """Fail rather than discard syntax errors or reorder alias providers."""
+        with pytest.raises(ValueError):  # noqa: PT011 -- stable rejection type; diagnostics vary.
+            normalize_yaml(".github/workflows/demo.yml", source)
 
     def test_shuffled_flow_mapping_requires_a_block_mapping(self) -> None:
         """Avoid rewriting inline YAML without preserving its comment boundaries."""
-        with self.assertRaisesRegex(ValueError, "block YAML mapping"):
+        with pytest.raises(ValueError, match="block YAML mapping"):
             normalize_yaml("mkdocs.yml", b"{nav: [], site_name: Demo}\n")
-
-
-if __name__ == "__main__":
-    unittest.main()

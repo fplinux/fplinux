@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 
 from tests import ROOT
@@ -14,7 +13,7 @@ KERNEL = ROOT / "platforms/ums9117/linux/drivers/gpu/drm/ums9117"
 FIXTURES = ROOT / "tests/host_tool/ums9117"
 
 
-class Ums9117LcmHostTests(unittest.TestCase):
+class Ums9117LcmHostTests:
     """Link the real transport and internal header; no panel is exercised."""
 
     def test_timing_busy_buffer_and_rgb565_damage_alignment(self) -> None:
@@ -42,14 +41,10 @@ class Ums9117LcmHostTests(unittest.TestCase):
                 name="compile UMS9117 LCM host component",
                 timeout=30,
             )
-            self.assertEqual(compilation.returncode, 0, compilation.stderr)
+            assert (compilation.returncode) == (0), compilation.stderr
             result = run_process(
                 [str(executable)],
                 name="run UMS9117 LCM host component",
                 timeout=10,
             )
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-
-
-if __name__ == "__main__":
-    unittest.main()
+            assert (result.returncode) == (0), result.stdout + result.stderr

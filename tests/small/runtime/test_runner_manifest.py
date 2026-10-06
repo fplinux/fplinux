@@ -7,11 +7,11 @@ import hashlib
 import importlib.util
 import json
 import sys
-import tempfile
-import unittest
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from unittest import mock
+
+import pytest
 
 from common import loader_events
 from tests import ROOT
@@ -34,7 +34,7 @@ def load_runner() -> ModuleType:
 RUNNER = load_runner()
 
 
-class BundleReadErrorTests(unittest.TestCase):
+class BundleReadErrorTests:
     """Report an unreadable payload before any adapter is loaded."""
 
     def test_unreadable_payload_reports_the_path_without_exposing_an_os_exception(self) -> None:
@@ -45,12 +45,12 @@ class BundleReadErrorTests(unittest.TestCase):
             mock.patch.object(
                 Path, "open", side_effect=PermissionError(13, "Permission denied", path)
             ),
-            self.assertRaisesRegex(SystemExit, r"fplinux run: .*Permission denied.*ramboot.bin"),
+            pytest.raises(SystemExit, match=r"fplinux run: .*Permission denied.*ramboot.bin"),
         ):
             RUNNER.digest(path)
 
 
-class PythonRuntimeTests(unittest.TestCase):
+class PythonRuntimeTests:
     """Keep the standalone runner on its single supported Python series."""
 
     def test_accepts_python_314(self) -> None:
@@ -58,22 +58,23 @@ class PythonRuntimeTests(unittest.TestCase):
         with mock.patch.object(RUNNER.sys, "version_info", mock.Mock(major=3, minor=14)):
             RUNNER.host_preflight()
 
-    def test_rejects_other_python_series(self) -> None:
+    @pytest.mark.parametrize(
+        ("major", "minor"),
+        [pytest.param(3, 13, id="python-3.13"), pytest.param(3, 15, id="python-3.15")],
+    )
+    def test_rejects_other_python_series(self, major: int, minor: int) -> None:
         """Older and unsupported newer interpreters fail before phone access."""
-        for major, minor in ((3, 13), (3, 15)):
-            with (
-                self.subTest(version=f"{major}.{minor}"),
-                mock.patch.object(
-                    RUNNER.sys,
-                    "version_info",
-                    mock.Mock(major=major, minor=minor),
-                ),
-                self.assertRaisesRegex(
-                    SystemExit,
-                    rf"Python 3\.14 is required \(found {major}\.{minor}\)",
-                ),
-            ):
-                RUNNER.host_preflight()
+        with (
+            mock.patch.object(
+                RUNNER.sys,
+                "version_info",
+                mock.Mock(major=major, minor=minor),
+            ),
+            pytest.raises(
+                SystemExit, match=rf"Python 3\.14 is required \(found {major}\.{minor}\)"
+            ),
+        ):
+            RUNNER.host_preflight()
 
 
 def runtime_manifest() -> dict[str, Any]:
@@ -137,14 +138,13 @@ def runtime_manifest() -> dict[str, Any]:
     }
 
 
-class RuntimeManifestTests(unittest.TestCase):
+class RuntimeManifestTests:
     """The bundled runner accepts only its exact manifest contract."""
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _runtime_manifest_path(self, tmp_path: Path) -> None:
         """Create one isolated runtime-manifest path."""
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.path = Path(self.temporary.name) / "runtime-manifest.json"
+        self.path = tmp_path / "runtime-manifest.json"
 
     def load(self, manifest: dict[str, Any]) -> dict[str, Any]:
         """Load one manifest through the shipped consumer."""
@@ -156,26 +156,32 @@ class RuntimeManifestTests(unittest.TestCase):
         """Accept a complete manifest with explicit USB interfaces."""
         loaded = self.load(runtime_manifest())
 
-        self.assertEqual(loaded["personalization"]["bytes"], 512)
-        self.assertEqual(loaded["usb"]["linux_gadget"]["keyboard_interface"], 1)
-        self.assertEqual(
-            loaded["identity"]["target"]["display_name"],
-            "Demo Phone (D-1, D-2)",
-        )
+        assert (loaded["personalization"]["bytes"]) == (512)
+        assert (loaded["usb"]["linux_gadget"]["keyboard_interface"]) == (1)
+        assert (loaded["identity"]["target"]["display_name"]) == ("Demo Phone (D-1, D-2)")
 
-    def test_build_type_is_explicit_and_has_no_missing_or_unknown_fallback(self) -> None:
+    @pytest.mark.parametrize(
+        ("build_type", "accepted"),
+        [
+            pytest.param("release", True, id="release"),
+            pytest.param("debug", True, id="debug"),
+            pytest.param(None, False, id="missing"),
+            pytest.param("other", False, id="unknown"),
+        ],
+    )
+    def test_build_type_is_explicit_and_has_no_missing_or_unknown_fallback(
+        self, build_type: str | None, *, accepted: bool
+    ) -> None:
         """A standalone runner cannot reinterpret a bundle's kernel capabilities."""
-        for build_type in ("release", "debug"):
-            manifest = runtime_manifest()
+        manifest = runtime_manifest()
+        if build_type is None:
+            del manifest["build_type"]
+        else:
             manifest["build_type"] = build_type
-            self.assertEqual(self.load(manifest)["build_type"], build_type)
-        for invalid_type in (None, "other"):
-            manifest = runtime_manifest()
-            if invalid_type is None:
-                del manifest["build_type"]
-            else:
-                manifest["build_type"] = invalid_type
-            with self.subTest(build_type=invalid_type), self.assertRaises(SystemExit):
+        if accepted:
+            assert (self.load(manifest)["build_type"]) == (build_type)
+        else:
+            with pytest.raises(SystemExit):
                 self.load(manifest)
 
     def test_manifest_shape_does_not_execute_identity_code_before_hash_verification(self) -> None:
@@ -188,7 +194,7 @@ class RuntimeManifestTests(unittest.TestCase):
         ):
             loaded = RUNNER.load_runtime_manifest(self.path)
 
-        self.assertIsInstance(loaded["identity"], dict)
+        assert isinstance(loaded["identity"], dict)
 
     def test_accepts_an_explicit_no_transport_handoff_contract(self) -> None:
         """A host-only bundle declares that it will not create USB-NCM transport."""
@@ -197,7 +203,7 @@ class RuntimeManifestTests(unittest.TestCase):
 
         loaded = self.load(manifest)
 
-        self.assertEqual(loaded["transport"], "none")
+        assert (loaded["transport"]) == ("none")
 
     def test_accepts_identity_without_unverified_codes_or_aliases(self) -> None:
         """An empty token array remains an explicit statement that no code is known."""
@@ -208,15 +214,15 @@ class RuntimeManifestTests(unittest.TestCase):
 
         loaded = self.load(manifest)
 
-        self.assertEqual(loaded["identity"]["target"]["hardware_codes"], [])
-        self.assertEqual(loaded["identity"]["platform"]["aliases"], [])
+        assert (loaded["identity"]["target"]["hardware_codes"]) == ([])
+        assert (loaded["identity"]["platform"]["aliases"]) == ([])
 
     def test_rejects_one_compatible_for_both_target_and_platform(self) -> None:
         """Require an exact machine identity followed by a distinct SoC fallback."""
         manifest = runtime_manifest()
         manifest["identity"]["platform"]["compatible"] = "demo,phone"
 
-        with self.assertRaisesRegex(SystemExit, "compatibles must differ"):
+        with pytest.raises(SystemExit, match="compatibles must differ"):
             self.load(manifest)
 
     def test_rejects_an_unknown_host_transport(self) -> None:
@@ -224,7 +230,7 @@ class RuntimeManifestTests(unittest.TestCase):
         manifest = runtime_manifest()
         manifest["transport"] = "serial"
 
-        with self.assertRaisesRegex(SystemExit, "runtime transport must be one of"):
+        with pytest.raises(SystemExit, match="runtime transport must be one of"):
             self.load(manifest)
 
     def test_rejects_a_runtime_manifest_missing_required_fields(self) -> None:
@@ -233,7 +239,7 @@ class RuntimeManifestTests(unittest.TestCase):
         del manifest["profile"]
         del manifest["transport"]
 
-        with self.assertRaisesRegex(SystemExit, "runtime manifest must contain exactly"):
+        with pytest.raises(SystemExit, match="runtime manifest must contain exactly"):
             self.load(manifest)
 
     def test_rejects_an_unknown_runtime_field(self) -> None:
@@ -241,54 +247,62 @@ class RuntimeManifestTests(unittest.TestCase):
         manifest = runtime_manifest()
         manifest["unexpected"] = "value"
 
-        with self.assertRaisesRegex(SystemExit, "runtime manifest must contain exactly"):
+        with pytest.raises(SystemExit, match="runtime manifest must contain exactly"):
             self.load(manifest)
 
-    def test_rejects_noncanonical_identity_text(self) -> None:
+    @pytest.mark.parametrize(
+        "brand",
+        [
+            pytest.param(" Demo", id="leading-space"),
+            pytest.param("Demo  Devices", id="double-space"),
+            pytest.param("Démo", id="non-ascii"),
+            pytest.param("Demo\nDevices", id="newline"),
+        ],
+    )
+    def test_rejects_noncanonical_identity_text(self, brand: str) -> None:
         """Identity text is stable printable ASCII without padding or doubled spaces."""
-        invalid_values = (" Demo", "Demo  Devices", "Démo", "Demo\nDevices")
-        for brand in invalid_values:
-            manifest = runtime_manifest()
-            manifest["identity"]["target"]["brand"] = brand
-            with (
-                self.subTest(brand=brand),
-                self.assertRaisesRegex(SystemExit, "canonical printable ASCII text"),
-            ):
-                self.load(manifest)
+        manifest = runtime_manifest()
+        manifest["identity"]["target"]["brand"] = brand
+        with (
+            pytest.raises(SystemExit, match="canonical printable ASCII text"),
+        ):
+            self.load(manifest)
 
     def test_rejects_identity_that_does_not_derive_its_display_name(self) -> None:
         """Display names cannot become a second independently editable identity."""
         manifest = runtime_manifest()
         manifest["identity"]["target"]["display_name"] = "Independent label"
 
-        with self.assertRaisesRegex(SystemExit, "display_name must be derived"):
+        with pytest.raises(SystemExit, match="display_name must be derived"):
             self.load(manifest)
 
         manifest = runtime_manifest()
         manifest["identity"]["platform"]["display_name"] = "Independent platform"
 
-        with self.assertRaisesRegex(SystemExit, "display_name must be derived"):
+        with pytest.raises(SystemExit, match="display_name must be derived"):
             self.load(manifest)
 
-    def test_rejects_invalid_or_duplicate_hardware_tokens(self) -> None:
+    @pytest.mark.parametrize(
+        "hardware_codes",
+        [
+            pytest.param("D-1", id="scalar"),
+            pytest.param(["lowercase"], id="lowercase"),
+            pytest.param(["D-1", "D-1"], id="duplicate"),
+        ],
+    )
+    def test_rejects_invalid_or_duplicate_hardware_tokens(self, hardware_codes: object) -> None:
         """Hardware codes and aliases remain ordered arrays of unique tokens."""
-        invalid_values: tuple[object, ...] = (
-            "D-1",
-            ["lowercase"],
-            ["D-1", "D-1"],
-        )
-        for hardware_codes in invalid_values:
-            manifest = runtime_manifest()
-            manifest["identity"]["target"]["hardware_codes"] = hardware_codes
-            with self.subTest(hardware_codes=hardware_codes), self.assertRaises(SystemExit):
-                self.load(manifest)
+        manifest = runtime_manifest()
+        manifest["identity"]["target"]["hardware_codes"] = hardware_codes
+        with pytest.raises(SystemExit):
+            self.load(manifest)
 
     def test_rejects_alias_equal_to_the_platform_soc(self) -> None:
         """An alias must add identity instead of repeating the canonical SoC name."""
         manifest = runtime_manifest()
         manifest["identity"]["platform"]["aliases"] = ["UMS9117"]
 
-        with self.assertRaisesRegex(SystemExit, "aliases must not repeat the SoC name"):
+        with pytest.raises(SystemExit, match="aliases must not repeat the SoC name"):
             self.load(manifest)
 
     def test_rejects_noncanonical_compatible(self) -> None:
@@ -296,7 +310,7 @@ class RuntimeManifestTests(unittest.TestCase):
         manifest = runtime_manifest()
         manifest["identity"]["target"]["compatible"] = "Nokia,TA-1618"
 
-        with self.assertRaisesRegex(SystemExit, "lowercase vendor,device compatible"):
+        with pytest.raises(SystemExit, match="lowercase vendor,device compatible"):
             self.load(manifest)
 
     def test_rejects_runtime_without_declared_keyboard_interface(self) -> None:
@@ -304,30 +318,34 @@ class RuntimeManifestTests(unittest.TestCase):
         manifest = runtime_manifest()
         del manifest["usb"]["linux_gadget"]["keyboard_interface"]
 
-        with self.assertRaisesRegex(SystemExit, "linux_gadget USB must contain exactly"):
+        with pytest.raises(SystemExit, match="linux_gadget USB must contain exactly"):
             self.load(manifest)
 
-    def test_rejects_a_runtime_without_a_mandatory_runner_helper_hash(self) -> None:
+    @pytest.mark.parametrize(
+        "helper",
+        [
+            pytest.param("runner/ssh_transport.py", id="ssh-transport"),
+            pytest.param("runner/identity.py", id="identity"),
+        ],
+    )
+    def test_rejects_a_runtime_without_a_mandatory_runner_helper_hash(self, helper: str) -> None:
         """Bind both the SSH and identity consumers into the runtime closure."""
-        for helper in ("runner/ssh_transport.py", "runner/identity.py"):
-            manifest = runtime_manifest()
-            del manifest["sha256"][helper]
+        manifest = runtime_manifest()
+        del manifest["sha256"][helper]
 
-            with (
-                self.subTest(helper=helper),
-                self.assertRaisesRegex(SystemExit, "runtime hashes must contain exactly"),
-            ):
-                self.load(manifest)
+        with (
+            pytest.raises(SystemExit, match="runtime hashes must contain exactly"),
+        ):
+            self.load(manifest)
 
 
-class NoTransportRunnerTests(unittest.TestCase):
+class NoTransportRunnerTests:
     """Exercise the shipped runner's no-transport handoff boundary."""
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _no_transport_bundle(self, tmp_path: Path) -> None:
         """Build one regular hashed bundle that has no USB-NCM transport."""
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.bundle = Path(self.temporary.name) / "bundle"
+        self.bundle = tmp_path / "bundle"
         self.runner = self.bundle / "runner/run.py"
         manifest = runtime_manifest()
         manifest["transport"] = "none"
@@ -381,9 +399,9 @@ class NoTransportRunnerTests(unittest.TestCase):
             RUNNER.main()
 
         runtime = adapter.run.call_args.args[1]
-        self.assertEqual(runtime["transport"], "none")
-        self.assertIs(adapter.run.call_args.args[2], session)
-        self.assertEqual(adapter.run.call_args.kwargs["expected_device_identity"], "e" * 64)
+        assert (runtime["transport"]) == ("none")
+        assert (adapter.run.call_args.args[2]) is (session)
+        assert (adapter.run.call_args.kwargs["expected_device_identity"]) == ("e" * 64)
         ssh.prepare_session.assert_called_once()
         ssh.wait_for_bound_session.assert_not_called()
         ssh.open_shell.assert_not_called()
@@ -460,7 +478,7 @@ class NoTransportRunnerTests(unittest.TestCase):
                 "argv",
                 [str(self.runner), "--reconnect", "--exec", "touch /tmp/should-not-run"],
             ),
-            self.assertRaisesRegex(SystemExit, "different kernel identity"),
+            pytest.raises(SystemExit, match="different kernel identity"),
         ):
             RUNNER.main()
 
@@ -492,13 +510,9 @@ class NoTransportRunnerTests(unittest.TestCase):
                 "argv",
                 [str(self.runner), "--reconnect", "--exec", "touch /tmp/should-not-run"],
             ),
-            self.assertRaisesRegex(SystemExit, "runtime image changed"),
+            pytest.raises(SystemExit, match="runtime image changed"),
         ):
             RUNNER.main()
 
         ssh.load_current_session.assert_not_called()
         ssh.run_remote.assert_not_called()
-
-
-if __name__ == "__main__":
-    unittest.main()

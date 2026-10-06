@@ -11,13 +11,12 @@ import posixpath
 import re
 import shutil
 import sys
-import tempfile
-import unittest
 import zipfile
 from pathlib import Path
 from unittest import mock
 from urllib.parse import urlsplit
 
+import pytest
 from fplinux_cli import common
 from fplinux_cli.alpine import signing as alpine_state
 from fplinux_cli.artifacts.bundles import BUILD_MANIFEST_NAME, publish_current_bundle
@@ -53,14 +52,13 @@ with module.record_events(
 """
 
 
-class ReleaseArchiveArtifactTests(unittest.TestCase):
+class ReleaseArchiveArtifactTests:
     """Exercise real archive creation with host identity inputs isolated."""
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _prepare_inputs(self, tmp_path: Path) -> None:
         """Create one complete synthetic bundle and its canonical source documents."""
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        self.root = tmp_path
         self.event_helper = (common.ROOT / "common/loader_events.py").read_bytes()
         self.cache = self.root / ".cache"
         self.target = "nokia-ta1618"
@@ -208,7 +206,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
                 if line.startswith(prefix):
                     values[label] = line.removeprefix(prefix)
         if set(values) != {"Archive SHA256", "Phone-test payload SHA256"}:
-            self.fail("package output omitted an archive or phone-test payload digest")
+            pytest.fail("package output omitted an archive or phone-test payload digest")
         return values["Archive SHA256"], values["Phone-test payload SHA256"]
 
     def record_phone_tested(self, payload: str) -> None:
@@ -247,22 +245,22 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
         with contextlib.ExitStack() as stack:
             for patch in self.package_patches():
                 stack.enter_context(patch)
-            with self.assertRaisesRegex(SystemExit, "--build-type debug"):
+            with pytest.raises(SystemExit, match="--build-type debug"):
                 self.package(candidate=True, build_type="debug")
-            self.assertFalse((self.cache / "out/candidates").exists())
+            assert not ((self.cache / "out/candidates").exists())
             self.publish_bundle(
                 "d" * 64, apk=b"debug apk\n", metadata=b"debug assets\n", build_type="debug"
             )
             self.package(candidate=True, build_type="debug")
 
         archives = list((self.cache / "out/candidates").glob("*.zip"))
-        self.assertEqual(len(archives), 1)
-        self.assertTrue(archives[0].name.startswith("FPLinux-nokia-ta1618-debug-candidate-"))
+        assert (len(archives)) == (1)
+        assert archives[0].name.startswith("FPLinux-nokia-ta1618-debug-candidate-")
         with zipfile.ZipFile(archives[0]) as archive:
             name = next(
                 name for name in archive.namelist() if name.endswith("/build-manifest.json")
             )
-            self.assertEqual(json.loads(archive.read(name))["build_type"], "debug")
+            assert (json.loads(archive.read(name))["build_type"]) == ("debug")
 
     def test_candidate_rejects_a_release_input_with_a_mismatched_recorded_size(self) -> None:
         """Even matching bytes and permissions cannot authorize a wrong size record."""
@@ -276,10 +274,10 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
         with contextlib.ExitStack() as stack:
             for patch in self.package_patches():
                 stack.enter_context(patch)
-            with self.assertRaisesRegex(SystemExit, "release input differs"):
+            with pytest.raises(SystemExit, match="release input differs"):
                 self.package(candidate=True)
 
-        self.assertFalse((self.cache / "out/candidates").exists())
+        assert not ((self.cache / "out/candidates").exists())
 
     def test_candidate_omits_missing_debug_payload_and_includes_required_boot_artifact(
         self,
@@ -310,9 +308,9 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
         archive_path = next((self.cache / "out/candidates").glob("*.zip"))
         with zipfile.ZipFile(archive_path) as archive:
             root = archive.namelist()[0].partition("/")[0]
-            self.assertEqual(archive.read(f"{root}/FPLINUX.img.xz"), b"whole-card image\n")
-            self.assertNotIn(f"{root}/debug/vmlinux", archive.namelist())
-            self.assertEqual(archive.read(f"{root}/image/ramboot.bin"), b"ramboot\n")
+            assert (archive.read(f"{root}/FPLINUX.img.xz")) == (b"whole-card image\n")
+            assert (f"{root}/debug/vmlinux") not in (archive.namelist())
+            assert (archive.read(f"{root}/image/ramboot.bin")) == (b"ramboot\n")
 
     def test_candidate_contains_shared_documents_with_complete_checksums(self) -> None:
         """Publish bundled procedures and cover every archive member by SHA-256."""
@@ -322,11 +320,11 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             self.package(candidate=True)
 
         archives = list((self.cache / "out/candidates").glob("*.zip"))
-        self.assertEqual(len(archives), 1)
+        assert (len(archives)) == (1)
         with zipfile.ZipFile(archives[0]) as archive:
             members = archive.namelist()
             roots = {name.partition("/")[0] for name in members}
-            self.assertEqual(len(roots), 1)
+            assert (len(roots)) == (1)
             root = roots.pop()
             payloads = {name.removeprefix(f"{root}/"): archive.read(name) for name in members}
 
@@ -344,18 +342,16 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             },
         }
         for relative, expected in expected_documents.items():
-            with self.subTest(relative=relative):
-                self.assertEqual(payloads[relative], expected)
+            assert (payloads[relative]) == (expected)
 
         checksums = {
             relative: digest
             for line in payloads["SHA256SUMS"].decode("utf-8").splitlines()
             for digest, relative in (line.split("  ", 1),)
         }
-        self.assertEqual(set(checksums), set(payloads) - {"SHA256SUMS"})
+        assert (set(checksums)) == (set(payloads) - {"SHA256SUMS"})
         for relative, digest in checksums.items():
-            with self.subTest(checksum=relative):
-                self.assertEqual(digest, hashlib.sha256(payloads[relative]).hexdigest())
+            assert (digest) == (hashlib.sha256(payloads[relative]).hexdigest())
 
     def test_archived_loader_events_work_without_the_source_checkout(self) -> None:
         """An isolated interpreter writes a flushed record with only the archived helper."""
@@ -388,24 +384,22 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             cwd=extracted,
             env={},
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
+        assert (result.returncode) == (0), result.stderr
         record = json.loads(result.stdout)
         record.pop("time")
-        self.assertEqual(
-            record,
+        assert (record) == (
             {
                 "event": "waiting-for-device",
                 "target": "nokia-ta1618",
                 "profile": None,
                 "build_type": "release",
-            },
+            }
         )
 
     def test_profile_and_microsd_boot_candidates_use_one_generation(self) -> None:
         """Both selectors package the same image with distinct archive context names."""
         profile = "microsd-uboot"
         self.target_config["profile"] = profile
-        self.addCleanup(self.target_config.pop, "profile", None)
         generation = "3" * 64
         profile_snapshot = WorkspaceSnapshot((), "4" * 64)
         default_bundle = next(
@@ -474,7 +468,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             stack.enter_context(
                 mock.patch.object(workspaces, "target_workspace_snapshot", profile_workspace)
             )
-            with self.assertRaisesRegex(SystemExit, "only be packaged with --candidate"):
+            with pytest.raises(SystemExit, match="only be packaged with --candidate"):
                 package_commands.package_target(
                     self.target,
                     profile=profile,
@@ -492,32 +486,23 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
             )
 
         archives = list((self.cache / "out/candidates").glob("*.zip"))
-        self.assertEqual(len(archives), 2)
+        assert (len(archives)) == (2)
         names = {archive.name for archive in archives}
-        self.assertTrue(
-            any(
-                name.startswith(f"FPLinux-{self.target}-{profile}-release-candidate-")
-                for name in names
-            )
+        assert any(
+            name.startswith(f"FPLinux-{self.target}-{profile}-release-candidate-")
+            for name in names
         )
-        self.assertTrue(
-            any(
-                name.startswith(f"FPLinux-{self.target}-microsd-release-candidate-")
-                for name in names
-            )
+        assert any(
+            name.startswith(f"FPLinux-{self.target}-microsd-release-candidate-") for name in names
         )
         for archive_path in archives:
             with zipfile.ZipFile(archive_path) as archive:
                 root = archive.namelist()[0].partition("/")[0]
                 for relative, data in required.items():
-                    self.assertEqual(archive.read(f"{root}/{relative}"), data)
-                self.assertEqual(
-                    archive.read(f"{root}/README.txt"),
-                    b"phone instructions\n",
-                )
-                self.assertEqual(
-                    archive.read(f"{root}/docs/target/MICROSD.md"),
-                    b"phone microSD procedures\n",
+                    assert (archive.read(f"{root}/{relative}")) == (data)
+                assert (archive.read(f"{root}/README.txt")) == (b"phone instructions\n")
+                assert (archive.read(f"{root}/docs/target/MICROSD.md")) == (
+                    b"phone microSD procedures\n"
                 )
 
     def test_relocated_feature_links_reach_bundled_guides(self) -> None:
@@ -537,15 +522,13 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
         archive_path = next((self.cache / "out/candidates").glob("*.zip"))
         with zipfile.ZipFile(archive_path) as archive:
             root = archive.namelist()[0].partition("/")[0]
-            self.assertEqual(
-                archive.read(f"{root}/docs/target/MICROSD.md"),
+            assert (archive.read(f"{root}/docs/target/MICROSD.md")) == (
                 b"[Transfer](../features/FILE_TRANSFER.md#upload)\n"
                 b"[Card](MICROSD.md) [Section](#details)\n"
-                b"[External](https://example.org/docs/)\n",
+                b"[External](https://example.org/docs/)\n"
             )
-            self.assertEqual(
-                archive.read(f"{root}/docs/features/FILE_TRANSFER.md"),
-                b"File transfer procedures\n",
+            assert (archive.read(f"{root}/docs/features/FILE_TRANSFER.md")) == (
+                b"File transfer procedures\n"
             )
 
     def test_bundled_document_links_resolve_without_a_source_checkout(self) -> None:
@@ -583,8 +566,7 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
                     linked_member = posixpath.normpath(
                         posixpath.join(posixpath.dirname(name), url.path)
                     )
-                    with self.subTest(document=name, link=link):
-                        self.assertIn(linked_member, members)
+                    assert (linked_member) in (members)
 
     def test_apk_bytes_but_not_archive_metadata_change_phone_test_payload(self) -> None:
         """Only a changed executable payload requires another complete phone test."""
@@ -594,14 +576,12 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
 
             candidate_archive, original = self.package(candidate=True)
             candidate_files = list((self.cache / "out/candidates").glob("*.zip"))
-            self.assertEqual(len(candidate_files), 1)
-            self.assertTrue(
-                candidate_files[0].name.startswith("FPLinux-nokia-ta1618-release-candidate-")
-            )
+            assert (len(candidate_files)) == (1)
+            assert candidate_files[0].name.startswith("FPLinux-nokia-ta1618-release-candidate-")
             self.record_phone_tested(original)
             release_archive, release_payload = self.package(candidate=False)
-            self.assertEqual(release_payload, original)
-            self.assertNotEqual(release_archive, candidate_archive)
+            assert (release_payload) == (original)
+            assert (release_archive) != (candidate_archive)
 
             self.publish_bundle(
                 "3" * 64,
@@ -609,8 +589,8 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
                 metadata=b"asset provenance version two\n",
             )
             metadata_archive, after_metadata = self.package(candidate=True)
-            self.assertEqual(after_metadata, original)
-            self.assertNotEqual(metadata_archive, candidate_archive)
+            assert (after_metadata) == (original)
+            assert (metadata_archive) != (candidate_archive)
             self.package(candidate=False)
 
             self.publish_bundle(
@@ -619,10 +599,6 @@ class ReleaseArchiveArtifactTests(unittest.TestCase):
                 metadata=b"asset provenance version two\n",
             )
             _apk_archive, after_apk = self.package(candidate=True)
-            self.assertNotEqual(after_apk, original)
-            with self.assertRaisesRegex(SystemExit, "not phone-tested"):
+            assert (after_apk) != (original)
+            with pytest.raises(SystemExit, match="not phone-tested"):
                 package_commands.package_target(self.target)
-
-
-if __name__ == "__main__":
-    unittest.main()

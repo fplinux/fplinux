@@ -6,11 +6,11 @@ from __future__ import annotations
 import json
 import shutil
 import tempfile
-import unittest
 from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
+import pytest
 from fplinux_cli import common
 from fplinux_cli.quality.receipts import (
     CheckReceiptRecipe,
@@ -34,10 +34,13 @@ def recipe(profile: str | None = None) -> CheckReceiptRecipe:
     )
 
 
-class CheckReceiptTests(unittest.TestCase):
+class CheckReceiptTests:
     """Only an exact successful check may be reused."""
 
-    def test_package_registration_edit_revokes_check_orchestration_receipt(self) -> None:
+    @pytest.mark.parametrize("scope", ["alpine", "kernel"], ids=("alpine", "kernel"))
+    def test_package_registration_edit_revokes_check_orchestration_receipt(
+        self, scope: str
+    ) -> None:
         """Checks cannot retain their success when package-selection declarations change."""
         repository = ROOT
         with tempfile.TemporaryDirectory() as temporary:
@@ -50,30 +53,29 @@ class CheckReceiptTests(unittest.TestCase):
             registration = root / "scripts/fplinux_cli/alpine/registration.py"
             cache = root / ".cache"
             source = registration.read_text(encoding="utf-8")
-            for scope in ("alpine", "kernel"):
-                with self.subTest(scope=scope), mock.patch.object(common, "ROOT", root):
-                    registration.write_text(source, encoding="utf-8")
-                    original = replace(
-                        recipe(),
-                        scope=scope,
-                        build_type="release" if scope == "kernel" else None,
-                        orchestration_recipe=check_orchestration_recipe_digest("d" * 64),
-                    )
-                    publish_success_receipt(cache, original)
-                    self.assertTrue(receipt_matches(cache, original))
+            with mock.patch.object(common, "ROOT", root):
+                registration.write_text(source, encoding="utf-8")
+                original = replace(
+                    recipe(),
+                    scope=scope,
+                    build_type="release" if scope == "kernel" else None,
+                    orchestration_recipe=check_orchestration_recipe_digest("d" * 64),
+                )
+                publish_success_receipt(cache, original)
+                assert receipt_matches(cache, original)
 
-                    registration.write_text(
-                        source.replace(
-                            "COMMON_PACKAGES = (\n",
-                            'COMMON_PACKAGES = (\n    "fplinux-cpuclock",\n',
-                            1,
-                        ),
-                        encoding="utf-8",
-                    )
-                    changed = replace(
-                        original, orchestration_recipe=check_orchestration_recipe_digest("d" * 64)
-                    )
-                    self.assertFalse(receipt_matches(cache, changed))
+                registration.write_text(
+                    source.replace(
+                        "COMMON_PACKAGES = (\n",
+                        'COMMON_PACKAGES = (\n    "fplinux-cpuclock",\n',
+                        1,
+                    ),
+                    encoding="utf-8",
+                )
+                changed = replace(
+                    original, orchestration_recipe=check_orchestration_recipe_digest("d" * 64)
+                )
+                assert not (receipt_matches(cache, changed))
 
     def test_kernel_types_retain_separate_success_receipts(self) -> None:
         """A debug check must miss before it runs without discarding a release success."""
@@ -82,10 +84,10 @@ class CheckReceiptTests(unittest.TestCase):
             release = replace(recipe(), scope="kernel", build_type="release")
             debug = replace(release, build_type="debug")
             publish_success_receipt(cache, release)
-            self.assertFalse(receipt_matches(cache, debug))
+            assert not (receipt_matches(cache, debug))
             publish_success_receipt(cache, debug)
-            self.assertTrue(receipt_matches(cache, release))
-            self.assertTrue(receipt_matches(cache, debug))
+            assert receipt_matches(cache, release)
+            assert receipt_matches(cache, debug)
 
     def test_published_success_is_an_exact_hit(self) -> None:
         """Accept the receipt published for its exact recipe."""
@@ -94,7 +96,7 @@ class CheckReceiptTests(unittest.TestCase):
             expected = recipe()
 
             publish_success_receipt(cache, expected)
-            self.assertTrue(receipt_matches(cache, expected))
+            assert receipt_matches(cache, expected)
 
     def test_changed_input_is_a_miss(self) -> None:
         """Do not reuse a success after its checked closure digest changes."""
@@ -105,7 +107,7 @@ class CheckReceiptTests(unittest.TestCase):
 
             publish_success_receipt(cache, published)
 
-            self.assertFalse(receipt_matches(cache, changed))
+            assert not (receipt_matches(cache, changed))
 
     def test_later_success_replaces_the_scope_receipt(self) -> None:
         """Keep one latest successful receipt per scope."""
@@ -117,8 +119,8 @@ class CheckReceiptTests(unittest.TestCase):
             publish_success_receipt(cache, first)
             publish_success_receipt(cache, second)
 
-            self.assertFalse(receipt_matches(cache, first))
-            self.assertTrue(receipt_matches(cache, second))
+            assert not (receipt_matches(cache, first))
+            assert receipt_matches(cache, second)
 
     def test_profile_receipt_does_not_replace_the_default_slot(self) -> None:
         """A named profile owns a separate fixed receipt path."""
@@ -130,16 +132,12 @@ class CheckReceiptTests(unittest.TestCase):
             publish_success_receipt(cache, default)
             publish_success_receipt(cache, profile)
 
-            self.assertEqual(
-                receipt_path(cache, default),
-                cache / "check-results/python/success.json",
+            assert (receipt_path(cache, default)) == (cache / "check-results/python/success.json")
+            assert (receipt_path(cache, profile)) == (
+                cache / "check-results/profiles/usb-host-lab/python/success.json"
             )
-            self.assertEqual(
-                receipt_path(cache, profile),
-                cache / "check-results/profiles/usb-host-lab/python/success.json",
-            )
-            self.assertTrue(receipt_matches(cache, default))
-            self.assertTrue(receipt_matches(cache, profile))
+            assert receipt_matches(cache, default)
+            assert receipt_matches(cache, profile)
 
     def test_receipt_without_the_exact_profile_field_is_a_miss(self) -> None:
         """An older receipt shape is not reinterpreted for the default context."""
@@ -152,8 +150,4 @@ class CheckReceiptTests(unittest.TestCase):
             path.parent.mkdir(parents=True)
             path.write_text(json.dumps(payload), encoding="utf-8")
 
-            self.assertFalse(receipt_matches(cache, expected))
-
-
-if __name__ == "__main__":
-    unittest.main()
+            assert not (receipt_matches(cache, expected))

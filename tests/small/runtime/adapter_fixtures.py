@@ -8,7 +8,6 @@ import importlib.util
 import io
 import subprocess
 import tempfile
-import unittest
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest import mock
@@ -130,7 +129,7 @@ class BridgeProcess:
         self.status = -9
 
 
-class BridgeFixture(unittest.TestCase):
+class BridgeFixture:
     """Prepare adapter inputs and control the bridge-process boundary without a phone."""
 
     session_id = "a" * 64

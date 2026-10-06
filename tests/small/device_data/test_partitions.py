@@ -3,9 +3,9 @@
 
 from __future__ import annotations
 
-import unittest
 from typing import TYPE_CHECKING, ClassVar
 
+import pytest
 from fplinux_cli.device_data import formats as device_data
 
 from tests.small.device_data.partition_fixtures import (
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from types import ModuleType
 
 
-class VbmPartitionFormatTests(unittest.TestCase):
+class VbmPartitionFormatTests:
     """Protect structural VBM admission without freezing the whole fitted table."""
 
     @staticmethod
@@ -55,14 +55,13 @@ class VbmPartitionFormatTests(unittest.TestCase):
             required_partitions(),
         )
 
-        self.assertEqual(
-            partitions,
+        assert (partitions) == (
             {
                 0x10000001: (0x00080000, 0x00100000),
                 0x1000000F: (0x001A0000, 0x00100000),
                 0x10000018: (0x00E80000, 0x00100000),
                 0x10000003: (0x013A0000, 0x00600000),
-            },
+            }
         )
 
     def test_agreed_safe_table_changes_are_not_rejected_as_unknown_images(self) -> None:
@@ -77,22 +76,43 @@ class VbmPartitionFormatTests(unittest.TestCase):
             required_partitions(),
         )
 
-        self.assertEqual(partitions[0x10000018], (0x00F80000, 0x00100000))
-        self.assertNotIn(0x00000099, partitions)
+        assert (partitions[0x10000018]) == ((0x00F80000, 0x00100000))
+        assert (0x00000099) not in (partitions)
 
     def test_copies_must_have_identical_decoded_counts_and_entries(self) -> None:
         """One changed record is ambiguous even when both copies remain individually safe."""
         second_entries = list(vbm_entries())
         second_entries[-1] = (0x00000008, 0x0101, 701, 980)
 
-        with self.assertRaisesRegex(ValueError, "redundant VBM.*disagree"):
+        with pytest.raises(ValueError, match=r"redundant VBM.*disagree"):
             device_data.redundant_vbm_partitions(
                 self._reader(vbm_entries(), tuple(second_entries)),
                 VBM_COPY_OFFSETS,
                 required_partitions(),
             )
 
-    def test_structural_or_required_partition_damage_is_rejected_precisely(self) -> None:
+    @pytest.mark.parametrize(
+        "case",
+        [
+            "duplicate ID",
+            "missing required ID",
+            "overlapping extents",
+            "zero or reversed extent",
+            "outside NAND",
+            "wrong required attributes",
+        ],
+        ids=[
+            "duplicate",
+            "missing-required",
+            "overlap",
+            "reversed",
+            "outside",
+            "wrong-attributes",
+        ],
+    )
+    def test_structural_or_required_partition_damage_is_rejected_precisely(
+        self, case: str
+    ) -> None:
         """Malformed extents and missing consumer semantics cannot reach extraction."""
         base = list(vbm_entries())
         cases: dict[str, tuple[tuple[tuple[int, int, int, int], ...], str]] = {}
@@ -126,32 +146,31 @@ class VbmPartitionFormatTests(unittest.TestCase):
             "CM4 has attributes 0x1; expected 0x100",
         )
 
-        for name, (entries, error) in cases.items():
-            with self.subTest(name=name), self.assertRaisesRegex(ValueError, error):
-                device_data.redundant_vbm_partitions(
-                    self._reader(entries),
-                    VBM_COPY_OFFSETS,
-                    required_partitions(),
-                )
+        entries, error = cases[case]
+        with pytest.raises(ValueError, match=error):
+            device_data.redundant_vbm_partitions(
+                self._reader(entries),
+                VBM_COPY_OFFSETS,
+                required_partitions(),
+            )
 
-    def test_declared_count_is_bounded_and_complete_records_are_required(self) -> None:
+    @pytest.mark.parametrize(
+        "count", [pytest.param(0, id="empty-table"), pytest.param(101, id="count-above-bound")]
+    )
+    def test_declared_count_is_bounded_and_complete_records_are_required(self, count: int) -> None:
         """The count cannot trigger an unbounded read or admit a truncated final record."""
-        for count in (0, 101):
-            table = vbm_table((), declared_count=count)
-            reader = FakeNandPartitionReader(dict.fromkeys(VBM_COPY_OFFSETS, table))
-            with (
-                self.subTest(count=count),
-                self.assertRaisesRegex(ValueError, f"partition count {count}.*bound"),
-            ):
-                device_data.redundant_vbm_partitions(
-                    reader,
-                    VBM_COPY_OFFSETS,
-                    required_partitions(),
-                )
+        table = vbm_table((), declared_count=count)
+        reader = FakeNandPartitionReader(dict.fromkeys(VBM_COPY_OFFSETS, table))
+        with pytest.raises(ValueError, match=f"partition count {count}.*bound"):
+            device_data.redundant_vbm_partitions(
+                reader,
+                VBM_COPY_OFFSETS,
+                required_partitions(),
+            )
 
         truncated = vbm_table(vbm_entries())[:-1]
         reader = FakeNandPartitionReader(dict.fromkeys(VBM_COPY_OFFSETS, truncated))
-        with self.assertRaisesRegex(ValueError, "truncated VBM partition table"):
+        with pytest.raises(ValueError, match="truncated VBM partition table"):
             device_data.redundant_vbm_partitions(
                 reader,
                 VBM_COPY_OFFSETS,
@@ -159,44 +178,79 @@ class VbmPartitionFormatTests(unittest.TestCase):
             )
 
 
-class NokiaPartiPartitionFormatTests(unittest.TestCase):
+class NokiaPartiPartitionFormatTests:
     """Protect TA-1618 compiled PartI structure without a 142 MB NAND fixture."""
 
     parser: ClassVar[ModuleType]
 
+    @pytest.fixture(scope="class")
     @classmethod
-    def setUpClass(cls) -> None:
+    def parti_parser(cls) -> ModuleType:
         """Load the target-owned PartI parser through its normal module boundary."""
         cls.parser = load_target_parser(
             "nokia-ta1618",
             "ta1618_device_data.py",
         )
+        return cls.parser
 
     @staticmethod
     def _reader(entries: tuple[tuple[int, int, int, int], ...]) -> FakeNandPartitionReader:
         return FakeNandPartitionReader({NOKIA_PARTI_OFFSET: nokia_parti_table(entries)})
 
-    def test_valid_table_returns_ordinary_extents_without_multiplying_sentinel(self) -> None:
+    def test_valid_table_returns_ordinary_extents_without_multiplying_sentinel(
+        self, parti_parser: ModuleType
+    ) -> None:
         """The final remainder marker is validated but is not exposed as a finite extent."""
-        partitions = self.parser.parti_partitions(self._reader(nokia_parti_entries()))
+        partitions = parti_parser.parti_partitions(self._reader(nokia_parti_entries()))
 
-        self.assertEqual(partitions[0x10000001], (0x00080000, 0x00100000))
-        self.assertEqual(partitions[0x1000000F], (0x001A0000, 0x00100000))
-        self.assertEqual(partitions[0x10000018], (0x00E80000, 0x00100000))
-        self.assertEqual(partitions[0x10000003], (0x013A0000, 0x00600000))
-        self.assertNotIn(0x00000008, partitions)
+        assert (partitions[0x10000001]) == ((0x00080000, 0x00100000))
+        assert (partitions[0x1000000F]) == ((0x001A0000, 0x00100000))
+        assert (partitions[0x10000018]) == ((0x00E80000, 0x00100000))
+        assert (partitions[0x10000003]) == ((0x013A0000, 0x00600000))
+        assert (0x00000008) not in (partitions)
 
-    def test_safe_unrelated_id_and_attribute_changes_are_admitted(self) -> None:
+    def test_safe_unrelated_id_and_attribute_changes_are_admitted(
+        self, parti_parser: ModuleType
+    ) -> None:
         """A structurally equivalent ordinary record is not tied to a whole-table digest."""
         entries = list(nokia_parti_entries())
         entries[1] = (0xABCDEF02, 0x101, 2, 2)
 
-        partitions = self.parser.parti_partitions(self._reader(tuple(entries)))
+        partitions = parti_parser.parti_partitions(self._reader(tuple(entries)))
 
-        self.assertNotIn(0xABCDEF02, partitions)
-        self.assertEqual(set(partitions), set(required_partitions()))
+        assert (0xABCDEF02) not in (partitions)
+        assert (set(partitions)) == (set(required_partitions()))
 
-    def test_invalid_shape_or_consumer_descriptor_is_rejected_precisely(self) -> None:
+    @pytest.mark.parametrize(
+        "case",
+        [
+            "duplicate ID",
+            "missing required ID",
+            "wrong required attributes",
+            "unsupported attributes",
+            "zero extent",
+            "overlap",
+            "gap",
+            "outside NAND",
+            "invalid sentinel",
+            "non-final sentinel",
+        ],
+        ids=[
+            "duplicate",
+            "missing-required",
+            "wrong-attributes",
+            "unsupported-attributes",
+            "zero-extent",
+            "overlap",
+            "gap",
+            "outside",
+            "invalid-sentinel",
+            "early-sentinel",
+        ],
+    )
+    def test_invalid_shape_or_consumer_descriptor_is_rejected_precisely(
+        self, parti_parser: ModuleType, case: str
+    ) -> None:
         """PartI must remain unique, bounded, contiguous and semantically sufficient."""
         base = list(nokia_parti_entries())
         cases: dict[str, tuple[tuple[tuple[int, int, int, int], ...], str]] = {}
@@ -247,23 +301,21 @@ class NokiaPartiPartitionFormatTests(unittest.TestCase):
         extra_sentinel[20] = (0x10000020, 0x101, 720, 0xFFFFFFFF)
         cases["non-final sentinel"] = (tuple(extra_sentinel), "invalid final remainder sentinel")
 
-        for name, (entries, error) in cases.items():
-            with self.subTest(name=name), self.assertRaisesRegex(ValueError, error):
-                self.parser.parti_partitions(self._reader(entries))
+        entries, error = cases[case]
+        with pytest.raises(ValueError, match=error):
+            parti_parser.parti_partitions(self._reader(entries))
 
-    def test_table_requires_exact_count_and_complete_fixed_width_records(self) -> None:
+    def test_table_requires_exact_count_and_complete_fixed_width_records(
+        self, parti_parser: ModuleType
+    ) -> None:
         """A partial or differently sized compiled PartI array is not interpreted."""
         entries = nokia_parti_entries()
         wrong_count = nokia_parti_table(entries, declared_count=21)
-        with self.assertRaisesRegex(ValueError, "partition count is 21; expected 22"):
-            self.parser.parti_partitions(
+        with pytest.raises(ValueError, match="partition count is 21; expected 22"):
+            parti_parser.parti_partitions(
                 FakeNandPartitionReader({NOKIA_PARTI_OFFSET: wrong_count})
             )
 
         truncated = nokia_parti_table(entries)[:-1]
-        with self.assertRaisesRegex(ValueError, "truncated TA-1618 PartI partition table"):
-            self.parser.parti_partitions(FakeNandPartitionReader({NOKIA_PARTI_OFFSET: truncated}))
-
-
-if __name__ == "__main__":
-    unittest.main()
+        with pytest.raises(ValueError, match="truncated TA-1618 PartI partition table"):
+            parti_parser.parti_partitions(FakeNandPartitionReader({NOKIA_PARTI_OFFSET: truncated}))

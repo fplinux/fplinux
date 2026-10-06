@@ -5,20 +5,33 @@ from __future__ import annotations
 
 import shlex
 import tempfile
-import unittest
+from contextlib import ExitStack
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+import pytest
 
 from tests import ROOT
 from tests.process import run_process
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
-class QuakeVtTests(unittest.TestCase):
+
+class QuakeVtTests:
     """Observe ownership changes without drawing, running the game or opening a VT."""
 
-    def test_event_pump_releases_and_reacquires_input_without_a_frame(self) -> None:
-        """A modal event loop must service display handoff before processing input."""
-        with tempfile.TemporaryDirectory() as directory:
-            executable = Path(directory) / "quake-vt"
+    executable: Path
+
+    @pytest.fixture(scope="class", autouse=True)
+    @classmethod
+    def _compiled_tools(cls) -> Iterator[None]:
+        """Link the host harness once for this test group."""
+        with ExitStack() as cleanup:
+            build_directory = tempfile.TemporaryDirectory()
+            cleanup.enter_context(build_directory)
+            directory = build_directory.name
+            cls.executable = Path(directory) / "quake-vt"
             flags = shlex.split(
                 run_process(
                     ["pkg-config", "--cflags", "--libs", "libdrm"],
@@ -47,19 +60,19 @@ class QuakeVtTests(unittest.TestCase):
                     ),
                     *flags,
                     "-o",
-                    str(executable),
+                    str(cls.executable),
                 ],
                 name="compile Quake event pump with fake engine and device boundaries",
                 timeout=30,
                 check=True,
             )
-            run_process(
-                [str(executable)],
-                name="observe Quake input ownership without rendering",
-                timeout=5,
-                check=True,
-            )
+            yield
 
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_event_pump_releases_and_reacquires_input_without_a_frame(self) -> None:
+        """A modal event loop must service display handoff before processing input."""
+        run_process(
+            [str(self.executable)],
+            name="observe Quake input ownership without rendering",
+            timeout=5,
+            check=True,
+        )

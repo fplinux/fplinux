@@ -10,11 +10,11 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-import unittest
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest import mock
 
+import pytest
 from fplinux_cli.alpine import packages as alpine_packages
 from fplinux_cli.alpine import recipes as alpine_recipes
 from fplinux_cli.workspace import (
@@ -29,8 +29,11 @@ from fplinux_cli.workspace import (
 
 from tests import ROOT
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
-class AlpineRegistrationTests(unittest.TestCase):
+
+class AlpineRegistrationTests:
     """Registration edits preserve unrelated APK receipts in isolated source trees."""
 
     _STATE_COMMAND = """
@@ -59,30 +62,32 @@ result = {
 print(json.dumps(result))
 """
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def registered_sources(self) -> Iterator[None]:
         """Copy host modules and replace the container cache with an owned temporary path."""
         self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name) / "source"
-        self.repository = ROOT
-        shutil.copytree(
-            self.repository / "scripts/fplinux_cli",
-            self.root / "scripts/fplinux_cli",
-            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-        )
-        self.names = (
-            "fplinux-package-a",
-            "fplinux-package-b",
-            "fplinux-library-c",
-            "fplinux-library-d",
-        )
-        self.selected = self.names[:2]
-        for name in self.names:
-            self._write(f"alpine/aports/{name}/APKBUILD", f"pkgname={name}\n".encode())
-        self._write("alpine.lock.toml", b"fixture lock\n")
-        self._write("alpine/abuild.conf", b"fixture abuild\n")
-        self._write("alpine/ramroot-init.sh", b"#!/bin/sh\nexit 0\n")
-        self.registration = self.root / "scripts/fplinux_cli/alpine/registration.py"
+        with self.temporary:
+            self.root = Path(self.temporary.name) / "source"
+            self.repository = ROOT
+            shutil.copytree(
+                self.repository / "scripts/fplinux_cli",
+                self.root / "scripts/fplinux_cli",
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+            )
+            self.names = (
+                "fplinux-package-a",
+                "fplinux-package-b",
+                "fplinux-library-c",
+                "fplinux-library-d",
+            )
+            self.selected = self.names[:2]
+            for name in self.names:
+                self._write(f"alpine/aports/{name}/APKBUILD", f"pkgname={name}\n".encode())
+            self._write("alpine.lock.toml", b"fixture lock\n")
+            self._write("alpine/abuild.conf", b"fixture abuild\n")
+            self._write("alpine/ramroot-init.sh", b"#!/bin/sh\nexit 0\n")
+            self.registration = self.root / "scripts/fplinux_cli/alpine/registration.py"
+            yield
 
     def _write(self, relative: str, contents: bytes) -> Path:
         path = self.root / relative
@@ -113,9 +118,9 @@ print(json.dumps(result))
             check=False,
             timeout=10,
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
+        assert (result.returncode) == (0), result.stderr
         state = json.loads(result.stdout)
-        self.assertIsInstance(state, dict)
+        assert isinstance(state, dict)
         return dict(state)
 
     def _seed_receipts(self) -> dict[str, Any]:
@@ -133,7 +138,7 @@ print(json.dumps(result))
             alpine_packages._write_package_receipt(slot, record["recipe"], [apk])  # noqa: SLF001
         seeded = self._state()
         for name in self.names:
-            self.assertTrue(seeded["packages"][name]["cache_hit"], name)
+            assert seeded["packages"][name]["cache_hit"], name
         return seeded
 
     def _edit_registration(self, before: str, after: str) -> None:
@@ -151,14 +156,14 @@ print(json.dumps(result))
         )
         after = self._state()
 
-        self.assertNotEqual(
-            before["packages"][self.names[0]]["recipe"],
-            after["packages"][self.names[0]]["recipe"],
+        assert (
+            (before["packages"][self.names[0]]["recipe"])
+            != (after["packages"][self.names[0]]["recipe"])
         )
-        self.assertFalse(after["packages"][self.names[0]]["cache_hit"])
+        assert not (after["packages"][self.names[0]]["cache_hit"])
         for name in self.names[1:]:
-            self.assertEqual(before["packages"][name]["recipe"], after["packages"][name]["recipe"])
-            self.assertTrue(after["packages"][name]["cache_hit"], name)
+            assert (before["packages"][name]["recipe"]) == (after["packages"][name]["recipe"])
+            assert after["packages"][name]["cache_hit"], name
 
     def test_dependency_edges_invalidate_even_when_transitive_library_set_is_unchanged(
         self,
@@ -178,16 +183,23 @@ print(json.dumps(result))
         after = self._state()
 
         for name in (self.names[0], self.names[2]):
-            self.assertNotEqual(
-                before["packages"][name]["recipe"], after["packages"][name]["recipe"]
-            )
-            self.assertFalse(after["packages"][name]["cache_hit"], name)
+            assert (before["packages"][name]["recipe"]) != (after["packages"][name]["recipe"])
+            assert not (after["packages"][name]["cache_hit"]), name
         for name in (self.names[1], self.names[3]):
-            self.assertEqual(before["packages"][name]["recipe"], after["packages"][name]["recipe"])
-            self.assertTrue(after["packages"][name]["cache_hit"], name)
-        self.assertNotEqual(before["rootfs"], after["rootfs"])
+            assert (before["packages"][name]["recipe"]) == (after["packages"][name]["recipe"])
+            assert after["packages"][name]["cache_hit"], name
+        assert (before["rootfs"]) != (after["rootfs"])
 
-    def test_transitive_dependency_and_shared_source_edits_revoke_consumer_receipts(self) -> None:
+    @pytest.mark.parametrize(
+        "source",
+        [
+            pytest.param("alpine/aports/fplinux-library-d/APKBUILD", id="library-aport"),
+            pytest.param("lib/fplinux/library-d.c", id="shared-library-source"),
+        ],
+    )
+    def test_transitive_dependency_and_shared_source_edits_revoke_consumer_receipts(
+        self, source: str
+    ) -> None:
         """Library edits revoke transitive consumers while an unrelated APK remains reusable."""
         self._edit_registration(
             "LOCAL_BUILD_DEPENDENCIES = {\n",
@@ -195,30 +207,25 @@ print(json.dumps(result))
             '    "fplinux-package-a": ("fplinux-library-c",),\n'
             '    "fplinux-library-c": ("fplinux-library-d",),\n',
         )
-        shared = self._write("lib/fplinux/library-d.c", b"library shared input\n")
+        self._write("lib/fplinux/library-d.c", b"library shared input\n")
         self._edit_registration(
             "SHARED_APORT_SOURCES = {\n",
             'SHARED_APORT_SOURCES = {\n    "fplinux-library-d": ("lib/fplinux/library-d.c",),\n',
         )
-        library = self.root / "alpine/aports/fplinux-library-d/APKBUILD"
+        changed_source = self.root / source
 
-        for source in (library, shared):
-            with self.subTest(source=source.relative_to(self.root).as_posix()):
-                before = self._seed_receipts()
-                source.write_bytes(source.read_bytes() + b"changed input\n")
-                after = self._state()
-                for name in (self.names[0], self.names[2], self.names[3]):
-                    self.assertNotEqual(
-                        before["packages"][name]["recipe"], after["packages"][name]["recipe"]
-                    )
-                    self.assertFalse(after["packages"][name]["cache_hit"], name)
-                unrelated = self.names[1]
-                self.assertEqual(
-                    before["packages"][unrelated]["recipe"],
-                    after["packages"][unrelated]["recipe"],
-                )
-                self.assertTrue(after["packages"][unrelated]["cache_hit"])
-                self.assertNotEqual(before["rootfs"], after["rootfs"])
+        before = self._seed_receipts()
+        changed_source.write_bytes(changed_source.read_bytes() + b"changed input\n")
+        after = self._state()
+        for name in (self.names[0], self.names[2], self.names[3]):
+            assert (before["packages"][name]["recipe"]) != (after["packages"][name]["recipe"])
+            assert not (after["packages"][name]["cache_hit"]), name
+        unrelated = self.names[1]
+        assert (
+            (before["packages"][unrelated]["recipe"]) == (after["packages"][unrelated]["recipe"])
+        )
+        assert after["packages"][unrelated]["cache_hit"]
+        assert (before["rootfs"]) != (after["rootfs"])
 
     def test_equivalent_producer_aliases_and_dependency_order_preserve_receipts(self) -> None:
         """Equivalent declarations of the same producer graph do not rebuild its outputs."""
@@ -239,7 +246,7 @@ print(json.dumps(result))
             original,
             '    "fplinux-package-a": ("fplinux-library-d", "fplinux-library-c"),\n',
         )
-        self.assertEqual(before, self._state())
+        assert (before) == (self._state())
 
     def test_shared_source_owner_changes_revoke_affected_receipts(self) -> None:
         """Moving a shared input between producers changes recipes despite an unchanged union."""
@@ -258,14 +265,12 @@ print(json.dumps(result))
         after = self._state()
 
         for name in (self.names[0], self.names[2]):
-            self.assertNotEqual(
-                before["packages"][name]["recipe"], after["packages"][name]["recipe"]
-            )
-            self.assertFalse(after["packages"][name]["cache_hit"], name)
+            assert (before["packages"][name]["recipe"]) != (after["packages"][name]["recipe"])
+            assert not (after["packages"][name]["cache_hit"]), name
         for name in (self.names[1], self.names[3]):
-            self.assertEqual(before["packages"][name]["recipe"], after["packages"][name]["recipe"])
-            self.assertTrue(after["packages"][name]["cache_hit"], name)
-        self.assertNotEqual(before["rootfs"], after["rootfs"])
+            assert (before["packages"][name]["recipe"]) == (after["packages"][name]["recipe"])
+            assert after["packages"][name]["cache_hit"], name
+        assert (before["rootfs"]) != (after["rootfs"])
 
     def test_recipe_implementation_edit_revokes_all_apk_receipts(self) -> None:
         """Algorithm-module changes remain a global input for every APK."""
@@ -278,18 +283,16 @@ print(json.dumps(result))
         after = self._state()
 
         for name in self.names:
-            self.assertNotEqual(
-                before["packages"][name]["recipe"], after["packages"][name]["recipe"]
-            )
-            self.assertFalse(after["packages"][name]["cache_hit"], name)
-        self.assertNotEqual(before["rootfs"], after["rootfs"])
+            assert (before["packages"][name]["recipe"]) != (after["packages"][name]["recipe"])
+            assert not (after["packages"][name]["cache_hit"]), name
+        assert (before["rootfs"]) != (after["rootfs"])
 
     def test_rootfs_selection_changes_composition_and_preserves_apk_receipts(self) -> None:
         """Changing only the selected composition reuses every unchanged APK."""
         before = self._seed_receipts()
         after = self._state(selected=self.selected[:1])
-        self.assertNotEqual(before["rootfs"], after["rootfs"])
-        self.assertEqual(before["packages"], after["packages"])
+        assert (before["rootfs"]) != (after["rootfs"])
+        assert (before["packages"]) == (after["packages"])
 
     def test_staged_target_modules_compute_the_same_apk_recipes(self) -> None:
         """A materialized target closure can import its build modules and calculate APK inputs."""
@@ -305,10 +308,6 @@ print(json.dumps(result))
             staged = workspace_staging.stage_workspace_snapshot(snapshot)
         state = self._state(root=staged, names=names, selected=names)
 
-        self.assertEqual(
-            {name: record["recipe"] for name, record in state["packages"].items()}, expected
+        assert ({name: record["recipe"] for name, record in state["packages"].items()}) == (
+            expected
         )
-
-
-if __name__ == "__main__":
-    unittest.main()

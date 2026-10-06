@@ -11,17 +11,17 @@ import signal
 import tempfile
 import threading
 import time
-import unittest
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
 
+import pytest
 from fplinux_cli.common import ROOT, display_text
 from fplinux_cli.reporting.process import exit_status
 from fplinux_cli.reporting.run import RunReporter, run_entrypoint
 
 
-class RunReporterTests(unittest.TestCase):
+class RunReporterTests:
     """Exercise the reporter without invoking the build container."""
 
     def test_create_avoids_same_process_log_collisions(self) -> None:
@@ -35,8 +35,8 @@ class RunReporterTests(unittest.TestCase):
                 clock.now.return_value = fixed
                 first = RunReporter.create("check", target=None, verbose=False)
                 second = RunReporter.create("check", target=None, verbose=False)
-            self.assertNotEqual(first.root, second.root)
-            self.assertEqual(second.root.name, f"{first.root.name}-1")
+            assert (first.root) != (second.root)
+            assert (second.root.name) == (f"{first.root.name}-1")
 
     def test_run_metadata_tracks_stages_and_success(self) -> None:
         """Publish invocation-derived state at creation, stage boundaries, and finish."""
@@ -44,18 +44,17 @@ class RunReporterTests(unittest.TestCase):
             root = Path(temporary) / "run"
             reporter = RunReporter("check", root, ".cache/logs/test", verbose=False)
             initial = json.loads(reporter.metadata_path.read_text())
-            self.assertEqual(initial["label"], "check")
-            self.assertEqual(initial["pid"], os.getpid())
-            self.assertEqual(initial["status"], "running")
-            self.assertIsNone(initial["finished_at"])
-            self.assertEqual(initial["stages"], [])
-            self.assertEqual(initial["display_root"], ".cache/logs/test")
-            self.assertIsNone(initial["parent"])
+            assert (initial["label"]) == ("check")
+            assert (initial["pid"]) == (os.getpid())
+            assert (initial["status"]) == ("running")
+            assert (initial["finished_at"]) is None
+            assert (initial["stages"]) == ([])
+            assert (initial["display_root"]) == (".cache/logs/test")
+            assert (initial["parent"]) is None
             with reporter.stage("prepare"):
                 entered = json.loads(reporter.metadata_path.read_text())
-                self.assertEqual(entered["status"], "running")
-                self.assertEqual(
-                    entered["stages"],
+                assert (entered["status"]) == ("running")
+                assert (entered["stages"]) == (
                     [
                         {
                             "exit": None,
@@ -63,34 +62,33 @@ class RunReporterTests(unittest.TestCase):
                             "name": "prepare",
                             "status": "running",
                         }
-                    ],
+                    ]
                 )
 
             before_finish = json.loads(reporter.metadata_path.read_text())
-            self.assertEqual(before_finish["status"], "running")
-            self.assertIsNone(before_finish["finished_at"])
-            self.assertEqual(before_finish["stages"][0]["status"], "success")
+            assert (before_finish["status"]) == ("running")
+            assert (before_finish["finished_at"]) is None
+            assert (before_finish["stages"][0]["status"]) == ("success")
             reporter.finish()
             completed = json.loads(reporter.metadata_path.read_text())
-            self.assertEqual(completed["status"], "success")
-            self.assertIsNotNone(completed["finished_at"])
-            self.assertEqual(completed["stages"][0]["status"], "success")
-            self.assertEqual(completed["stages"][0]["exit"], 0)
+            assert (completed["status"]) == ("success")
+            assert (completed["finished_at"]) is not None
+            assert (completed["stages"][0]["status"]) == ("success")
+            assert (completed["stages"][0]["exit"]) == (0)
 
     def test_run_metadata_marks_stage_failure_without_later_false_success(self) -> None:
         """Keep a caught failed stage failed even if a caller later invokes finish."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "run"
             reporter = RunReporter("check", root, ".cache/logs/test", verbose=False)
-            with self.assertRaises(SystemExit), reporter.stage("failure"):
+            with pytest.raises(SystemExit), reporter.stage("failure"):
                 raise SystemExit(7)
             reporter.finish()
 
             metadata = json.loads(reporter.metadata_path.read_text())
-            self.assertEqual(metadata["status"], "failed")
-            self.assertIsNotNone(metadata["finished_at"])
-            self.assertEqual(
-                metadata["stages"],
+            assert (metadata["status"]) == ("failed")
+            assert (metadata["finished_at"]) is not None
+            assert (metadata["stages"]) == (
                 [
                     {
                         "exit": 7,
@@ -98,7 +96,7 @@ class RunReporterTests(unittest.TestCase):
                         "name": "failure",
                         "status": "failed",
                     }
-                ],
+                ]
             )
 
     def test_run_metadata_remains_readable_during_repeated_updates(self) -> None:
@@ -132,7 +130,7 @@ class RunReporterTests(unittest.TestCase):
             reader = threading.Thread(target=read_metadata)
             reader.start()
             try:
-                self.assertTrue(reader_ready.wait(2), "metadata reader did not become ready")
+                assert reader_ready.wait(2), "metadata reader did not become ready"
                 with contextlib.redirect_stderr(io.StringIO()):
                     for sequence in range(100):
                         with reporter.stage(f"update-{sequence}"):
@@ -141,17 +139,16 @@ class RunReporterTests(unittest.TestCase):
                 stop.set()
                 reader.join(5)
 
-            self.assertFalse(reader.is_alive(), "metadata reader did not stop")
-            self.assertEqual(failures, [])
-            self.assertTrue(observations)
-            self.assertEqual(
+            assert not (reader.is_alive()), "metadata reader did not stop"
+            assert (failures) == ([])
+            assert observations
+            assert (
                 [
                     path.name
                     for path in root.iterdir()
                     if path.name != "run.json" and path.suffix != ".log"
-                ],
-                [],
-            )
+                ]
+            ) == ([])
 
     def test_nested_reporter_writes_only_its_own_metadata(self) -> None:
         """Keep container subreports out of the host run's metadata writer domain."""
@@ -161,7 +158,7 @@ class RunReporterTests(unittest.TestCase):
             environment = host.container_environment(str(host_root))
             with mock.patch.dict(os.environ, environment, clear=False):
                 nested = RunReporter.from_environment("check", "quality")
-            self.assertIsNotNone(nested)
+            assert (nested) is not None
             if nested is None:
                 return
             with nested.stage("source-inventory"):
@@ -170,12 +167,12 @@ class RunReporterTests(unittest.TestCase):
 
             host_metadata = json.loads(host.metadata_path.read_text())
             nested_metadata = json.loads(nested.metadata_path.read_text())
-            self.assertEqual(host_metadata["status"], "running")
-            self.assertEqual(host_metadata["stages"], [])
-            self.assertEqual(nested.root, host_root / "quality")
-            self.assertEqual(nested_metadata["display_root"], ".cache/logs/check/run/quality")
-            self.assertEqual(nested_metadata["parent"], ".cache/logs/check/run")
-            self.assertEqual(nested_metadata["status"], "success")
+            assert (host_metadata["status"]) == ("running")
+            assert (host_metadata["stages"]) == ([])
+            assert (nested.root) == (host_root / "quality")
+            assert (nested_metadata["display_root"]) == (".cache/logs/check/run/quality")
+            assert (nested_metadata["parent"]) == (".cache/logs/check/run")
+            assert (nested_metadata["status"]) == ("success")
 
     def test_entrypoint_marks_an_internal_reporter_successful(self) -> None:
         """Finish an unannounced container reporter only after its entrypoint returns."""
@@ -189,23 +186,22 @@ class RunReporterTests(unittest.TestCase):
 
             run_entrypoint(entrypoint)
             metadata = json.loads((root / "run.json").read_text())
-            self.assertEqual(metadata["status"], "success")
-            self.assertIsNotNone(metadata["finished_at"])
-            self.assertEqual(metadata["stages"][0]["status"], "success")
+            assert (metadata["status"]) == ("success")
+            assert (metadata["finished_at"]) is not None
+            assert (metadata["stages"][0]["status"]) == ("success")
 
     def test_exit_status_converts_signal_return_codes(self) -> None:
         """Expose shell-style statuses for normal and signalled children."""
-        self.assertEqual(exit_status(7), 7)
-        self.assertEqual(exit_status(-signal.SIGTERM), 128 + signal.SIGTERM)
+        assert (exit_status(7)) == (7)
+        assert (exit_status(-signal.SIGTERM)) == (128 + signal.SIGTERM)
 
     def test_display_text_redacts_only_checkout_paths(self) -> None:
         """Keep relative workspace filenames intact while hiding the checkout."""
-        self.assertEqual(
-            display_text("scripts/fplinux_cli/workspace.py"), "scripts/fplinux_cli/workspace.py"
+        assert (display_text("scripts/fplinux_cli/workspace.py")) == (
+            "scripts/fplinux_cli/workspace.py"
         )
-        self.assertEqual(
-            display_text(ROOT / "scripts/fplinux_cli/workspace.py"),
-            "<source-root>/scripts/fplinux_cli/workspace.py",
+        assert (display_text(ROOT / "scripts/fplinux_cli/workspace.py")) == (
+            "<source-root>/scripts/fplinux_cli/workspace.py"
         )
 
     def test_stage_log_keeps_internal_traceback(self) -> None:
@@ -217,13 +213,13 @@ class RunReporterTests(unittest.TestCase):
             message = "internal failure"
             with (
                 contextlib.redirect_stderr(terminal),
-                self.assertRaisesRegex(RuntimeError, message),
+                pytest.raises(RuntimeError, match=message),
                 reporter.stage("internal"),
             ):
                 raise RuntimeError(message)
             log = (root / "01-internal.log").read_text()
-            self.assertIn("Traceback (most recent call last):", log)
-            self.assertIn("RuntimeError: internal failure", log)
+            assert ("Traceback (most recent call last):") in (log)
+            assert ("RuntimeError: internal failure") in (log)
 
     def test_entrypoint_does_not_print_reported_traceback_twice(self) -> None:
         """Convert an already reported internal error to a quiet exit status."""
@@ -237,10 +233,10 @@ class RunReporterTests(unittest.TestCase):
                 with reporter.stage("entrypoint"):
                     raise RuntimeError(message)
 
-            with contextlib.redirect_stderr(terminal), self.assertRaises(SystemExit) as raised:
+            with contextlib.redirect_stderr(terminal), pytest.raises(SystemExit) as raised:
                 run_entrypoint(fail_inside_stage)
-            self.assertEqual(raised.exception.code, 1)
-            self.assertEqual(terminal.getvalue().count("Traceback (most recent call last):"), 1)
+            assert (raised.value.code) == (1)
+            assert (terminal.getvalue().count("Traceback (most recent call last):")) == (1)
 
     def test_entrypoint_does_not_repeat_reported_system_exit(self) -> None:
         """Avoid printing a reported string exit again at interpreter shutdown."""
@@ -254,10 +250,10 @@ class RunReporterTests(unittest.TestCase):
                 with reporter.stage("expected"):
                     raise SystemExit(message)
 
-            with contextlib.redirect_stderr(terminal), self.assertRaises(SystemExit) as raised:
+            with contextlib.redirect_stderr(terminal), pytest.raises(SystemExit) as raised:
                 run_entrypoint(fail_inside_stage)
-            self.assertEqual(raised.exception.code, 1)
-            self.assertEqual(terminal.getvalue().count(message), 1)
+            assert (raised.value.code) == (1)
+            assert (terminal.getvalue().count(message)) == (1)
 
     def test_entrypoint_does_not_hide_a_later_exception(self) -> None:
         """Suppress only the exact exception already written by a stage."""
@@ -281,7 +277,7 @@ class RunReporterTests(unittest.TestCase):
 
             with (
                 contextlib.redirect_stderr(terminal),
-                self.assertRaisesRegex(LookupError, later_message),
+                pytest.raises(LookupError, match=later_message),
             ):
                 run_entrypoint(catch_then_fail)
 
@@ -302,58 +298,58 @@ class RunReporterTests(unittest.TestCase):
 
             with (
                 contextlib.redirect_stderr(io.StringIO()),
-                self.assertRaisesRegex(SystemExit, "parent cannot publish"),
+                pytest.raises(SystemExit, match="parent cannot publish"),
             ):
                 run_entrypoint(nested_command)
             parent = json.loads((root / "parent/run.json").read_text())
             child = json.loads((root / "child/run.json").read_text())
-            self.assertEqual(parent["status"], "failed")
-            self.assertEqual(child["status"], "success")
+            assert (parent["status"]) == ("failed")
+            assert (child["status"]) == ("success")
 
-    def test_nested_expected_failure_prints_its_cause_once_without_outer_tail(self) -> None:
+    @pytest.mark.parametrize(
+        "inner_tail", [pytest.param(False, id="hidden-tail"), pytest.param(True, id="shown-tail")]
+    )
+    def test_nested_expected_failure_prints_its_cause_once_without_outer_tail(
+        self, *, inner_tail: bool
+    ) -> None:
         """The cause stays visible once whether the inner stage shows its log tail or not."""
-        for inner_tail in (False, True):
-            with self.subTest(inner_tail=inner_tail), tempfile.TemporaryDirectory() as temporary:
-                terminal = io.StringIO()
+        with tempfile.TemporaryDirectory() as temporary:
+            terminal = io.StringIO()
 
-                def fail_in_child_stage(*, show_inner_tail: bool = inner_tail) -> None:
-                    reporter = RunReporter(
-                        "prepare", Path(temporary) / "run", "test", verbose=False
-                    )
-                    with (
-                        reporter.stage("outer", show_tail=False),
-                        reporter.stage("inner", show_tail=show_inner_tail),
-                    ):
-                        message = "cannot read the requested source"
-                        raise SystemExit(message)
+            def fail_in_child_stage(*, show_inner_tail: bool = inner_tail) -> None:
+                reporter = RunReporter("prepare", Path(temporary) / "run", "test", verbose=False)
+                with (
+                    reporter.stage("outer", show_tail=False),
+                    reporter.stage("inner", show_tail=show_inner_tail),
+                ):
+                    message = "cannot read the requested source"
+                    raise SystemExit(message)
 
-                with contextlib.redirect_stderr(terminal), self.assertRaises(SystemExit) as raised:
-                    run_entrypoint(fail_in_child_stage)
-                self.assertEqual(raised.exception.code, 1)
-                self.assertEqual(terminal.getvalue().count("cannot read the requested source"), 1)
+            with contextlib.redirect_stderr(terminal), pytest.raises(SystemExit) as raised:
+                run_entrypoint(fail_in_child_stage)
+            assert (raised.value.code) == (1)
+            assert (terminal.getvalue().count("cannot read the requested source")) == (1)
 
-    def test_container_environment_preserves_display_path_and_verbosity(self) -> None:
+    @pytest.mark.parametrize(
+        "verbose", [pytest.param(True, id="verbose"), pytest.param(False, id="quiet")]
+    )
+    def test_container_environment_preserves_display_path_and_verbosity(
+        self, *, verbose: bool
+    ) -> None:
         """A nested reporter writes under the mounted path but names the host-facing one."""
-        for verbose in (True, False):
-            with self.subTest(verbose=verbose), tempfile.TemporaryDirectory() as temporary:
-                host = RunReporter(
-                    "build target",
-                    Path(temporary) / "host",
-                    ".cache/logs/build/target/run",
-                    verbose=verbose,
-                )
-                mounted = Path(temporary) / "mounted"
-                environment = host.container_environment(str(mounted))
-                with mock.patch.dict(os.environ, environment, clear=True):
-                    nested = RunReporter.from_environment("build", "container")
+        with tempfile.TemporaryDirectory() as temporary:
+            host = RunReporter(
+                "build target",
+                Path(temporary) / "host",
+                ".cache/logs/build/target/run",
+                verbose=verbose,
+            )
+            mounted = Path(temporary) / "mounted"
+            environment = host.container_environment(str(mounted))
+            with mock.patch.dict(os.environ, environment, clear=True):
+                nested = RunReporter.from_environment("build", "container")
 
-                self.assertIsNotNone(nested)
-                if nested is None:
-                    continue
-                self.assertEqual(nested.root, mounted / "container")
-                self.assertEqual(nested.display_root, ".cache/logs/build/target/run/container")
-                self.assertIs(nested.verbose, verbose)
-
-
-if __name__ == "__main__":
-    unittest.main()
+            assert (nested) is not None
+            assert (nested.root) == (mounted / "container")
+            assert (nested.display_root) == (".cache/logs/build/target/run/container")
+            assert (nested.verbose) is (verbose)

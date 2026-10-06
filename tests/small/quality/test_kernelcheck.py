@@ -9,16 +9,19 @@ from __future__ import annotations
 
 import subprocess
 import tempfile
-import unittest
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest import mock
 
+import pytest
 from fplinux_cli.build.kernel.state import PreparedLinuxState
 from fplinux_cli.manifests.kernel import kconfig_values
 from fplinux_cli.quality.kernel import analysis as kernel_analysis
 from fplinux_cli.quality.kernel import contexts as kernel_contexts
 from fplinux_cli.quality.kernel import runtime as kernel_runtime
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 def skip_linux_source_tools(
@@ -66,60 +69,58 @@ def run_kconfig_tool(command: list[str]) -> None:
         resolve_initramfs_compression(output / ".config")
 
 
-class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
+class KernelAnalyzerWorkIsolationTests:
     """Check disposable analyzer work while replacing external commands with stubs."""
 
     target = "test-target"
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def analyzer_context(self) -> Iterator[None]:
         """Create a small projected Linux context without invoking kernel tools."""
-        self.temporary = tempfile.TemporaryDirectory()
-        self.root = Path(self.temporary.name)
-        self.cache = self.root / ".cache"
-        self.source = self.root / "linux"
-        (self.source / "scripts").mkdir(parents=True)
-        (self.source / ".clang-format").write_text("BasedOnStyle: LLVM\n")
-        (self.source / "scripts/checkpatch.pl").write_text("#!/usr/bin/env perl\n")
-        (self.source / "scripts/Makefile.build").write_text(
-            "# Replaced at the command boundary.\n"
-        )
-        self.defconfig = self.root / "defconfig"
-        self.defconfig.write_text("CONFIG_TEST=y\n")
-        self.fragment = self.root / "fragment"
-        self.fragment.write_text("CONFIG_BOARD=y\n")
-        self.projected = self.root / "driver.c"
-        self.projected.write_text("int test_driver;\n")
-        self.prepared_linux = PreparedLinuxState("a" * 64, "b" * 64)
-        self.target_config: dict[str, Any] = {
-            "identity": {
-                "display_name": "Test target",
-                "compatible": "test,target",
-            },
-            "linux": {
-                "dtb": "test-target.dtb",
-                "patches": [],
-                "copies": [],
-                "appends": [],
-                "root": {"kind": "initramfs"},
-            },
-        }
-        self.platform: dict[str, Any] = {
-            "identity": {"compatible": "test,soc"},
-            "linux": {
-                "arch": "arm",
-                "analysis_cross_compile": "arm-linux-gnueabihf-",
-                "config_script": "scripts/config",
-                "dtb_output_directory": "arch/arm/boot/dts",
-                "patches": [],
-                "copies": [],
-                "appends": [],
-                "source_lock": "linux",
-            },
-        }
-
-    def tearDown(self) -> None:
-        """Remove the isolated fake cache and prepared source tree."""
-        self.temporary.cleanup()
+        with tempfile.TemporaryDirectory() as temporary:
+            self.root = Path(temporary)
+            self.cache = self.root / ".cache"
+            self.source = self.root / "linux"
+            (self.source / "scripts").mkdir(parents=True)
+            (self.source / ".clang-format").write_text("BasedOnStyle: LLVM\n")
+            (self.source / "scripts/checkpatch.pl").write_text("#!/usr/bin/env perl\n")
+            (self.source / "scripts/Makefile.build").write_text(
+                "# Replaced at the command boundary.\n"
+            )
+            self.defconfig = self.root / "defconfig"
+            self.defconfig.write_text("CONFIG_TEST=y\n")
+            self.fragment = self.root / "fragment"
+            self.fragment.write_text("CONFIG_BOARD=y\n")
+            self.projected = self.root / "driver.c"
+            self.projected.write_text("int test_driver;\n")
+            self.prepared_linux = PreparedLinuxState("a" * 64, "b" * 64)
+            self.target_config: dict[str, Any] = {
+                "identity": {
+                    "display_name": "Test target",
+                    "compatible": "test,target",
+                },
+                "linux": {
+                    "dtb": "test-target.dtb",
+                    "patches": [],
+                    "copies": [],
+                    "appends": [],
+                    "root": {"kind": "initramfs"},
+                },
+            }
+            self.platform: dict[str, Any] = {
+                "identity": {"compatible": "test,soc"},
+                "linux": {
+                    "arch": "arm",
+                    "analysis_cross_compile": "arm-linux-gnueabihf-",
+                    "config_script": "scripts/config",
+                    "dtb_output_directory": "arch/arm/boot/dts",
+                    "patches": [],
+                    "copies": [],
+                    "appends": [],
+                    "source_lock": "linux",
+                },
+            }
+            yield
 
     def _run_check(self, target_config: dict[str, Any], profile: str | None = None) -> None:
         """Run one context check with Kconfig, analyzer and validator command stand-ins."""
@@ -184,7 +185,7 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
         stale.write_text("stale object\n")
 
         self._run_check(self.target_config)
-        self.assertFalse(stale.exists())
+        assert not (stale.exists())
 
     def test_initramfs_analysis_preserves_the_requested_conditional_compressor(self) -> None:
         """The analyzer resolves compression with a controlled source, as the build does."""
@@ -195,17 +196,17 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
         self._run_check(self.target_config)
 
         config = kconfig_values((self._cache_path("work") / ".config").read_text())
-        self.assertEqual(config["CONFIG_INITRAMFS_COMPRESSION_XZ"], "y")
+        assert (config["CONFIG_INITRAMFS_COMPRESSION_XZ"]) == ("y")
         source = Path(config["CONFIG_INITRAMFS_SOURCE"].strip('"'))
-        self.assertTrue(source.is_dir())
-        self.assertEqual(list(source.iterdir()), [])
+        assert source.is_dir()
+        assert (list(source.iterdir())) == ([])
 
     def test_initramfs_analysis_writes_bootargs_for_the_checked_tree(self) -> None:
         """The prepared analyzer context carries the RAM-root boot arguments."""
         self._run_check(self.target_config)
 
         root_include = self._cache_path("work") / "include/generated/fplinux/fplinux-root.dtsi"
-        self.assertIn("init=/init rdinit=/init", root_include.read_text())
+        assert ("init=/init rdinit=/init") in (root_include.read_text())
 
     def test_profile_kconfig_actions_reach_the_analyzed_configuration(self) -> None:
         """A profile check analyzes a .config with its enable and disable actions applied."""
@@ -223,11 +224,11 @@ class KernelAnalyzerWorkIsolationTests(unittest.TestCase):
             self.cache / "analysis/sparse/test-target/profiles/microsd-uboot/builds/release/work"
         )
         config = (output / ".config").read_text().splitlines()
-        self.assertIn("CONFIG_PROFILE_ENABLED=y", config)
-        self.assertIn("# CONFIG_PROFILE_DISABLED is not set", config)
+        assert ("CONFIG_PROFILE_ENABLED=y") in (config)
+        assert ("# CONFIG_PROFILE_DISABLED is not set") in (config)
 
 
-class KernelProfileSelectionTests(unittest.TestCase):
+class KernelProfileSelectionTests:
     """Keep default and explicitly named kernel contexts separate."""
 
     def test_each_global_profile_selects_every_board_offering_it(self) -> None:
@@ -243,26 +244,23 @@ class KernelProfileSelectionTests(unittest.TestCase):
                 kernel_contexts, "discover_profiles", side_effect=offered.__getitem__
             ),
         ):
-            self.assertEqual(
-                kernel_contexts.target_profiles(),
-                (("first", None), ("ram-only", None), ("second", None)),
+            assert (kernel_contexts.target_profiles()) == (
+                (("first", None), ("ram-only", None), ("second", None))
             )
-            self.assertEqual(
-                kernel_contexts.target_profiles("default"),
-                (("first", None), ("ram-only", None), ("second", None)),
+            assert (kernel_contexts.target_profiles("default")) == (
+                (("first", None), ("ram-only", None), ("second", None))
             )
-            self.assertEqual(
-                kernel_contexts.target_profiles("microsd-uboot"),
-                (("first", "microsd-uboot"), ("second", "microsd-uboot")),
+            assert (kernel_contexts.target_profiles("microsd-uboot")) == (
+                (("first", "microsd-uboot"), ("second", "microsd-uboot"))
             )
 
     def test_unknown_profile_is_rejected_by_context_selection(self) -> None:
         """Context selection refuses a name that is not a global boot profile."""
-        with self.assertRaisesRegex(SystemExit, "unknown profile"):
+        with pytest.raises(SystemExit, match="unknown profile"):
             kernel_contexts.target_profiles("missing")
 
 
-class KernelContextDispatchTests(unittest.TestCase):
+class KernelContextDispatchTests:
     """Reject an invalid worker limit before analyzer work starts."""
 
     def test_nonpositive_jobs_fail_before_context_discovery(self) -> None:
@@ -273,42 +271,49 @@ class KernelContextDispatchTests(unittest.TestCase):
                 "target_profiles",
                 side_effect=AssertionError("invalid jobs must fail first"),
             ),
-            self.assertRaisesRegex(SystemExit, "jobs must be positive"),
+            pytest.raises(SystemExit, match="jobs must be positive"),
         ):
             kernel_runtime.check_contexts(None, jobs=0)
 
 
-class KernelBindingDiagnosticsTests(unittest.TestCase):
+class KernelBindingDiagnosticsTests:
     """Check policy over controlled external-validator and Kbuild reports."""
 
-    def test_diagnostic_output_cannot_pass_even_with_zero_tool_status(self) -> None:
-        """Schema references and compiled example failures must remain visible failures."""
-        cases = (
+    @pytest.mark.parametrize(
+        ("status", "stdout", "stderr", "examples", "fails"),
+        [
             (0, "", "", "make: done\n", False),
             (1, "", "", "", True),
             (0, "fixture.yaml: properties: Unresolvable reference\n", "", "", True),
             (0, "", "fixture.yaml: Missing additionalProperties\n", "", True),
             (0, "", "", "fixture.example.dtb: example@0: reg: invalid\n", True),
             (0, "", "", "fixture.example.dts:7.3: Warning (unit_address_vs_reg): node@0\n", True),
-        )
-        for status, stdout, stderr, examples, fails in cases:
-            with self.subTest(status=status, stdout=stdout, stderr=stderr, examples=examples):
-                result = subprocess.CompletedProcess(["dt-doc-validate"], status, stdout, stderr)
-                with (
-                    mock.patch.object(kernel_analysis, "run"),
-                    mock.patch.object(kernel_analysis, "capture_text", return_value=result),
-                    mock.patch.object(kernel_analysis, "run_dtbs_check", return_value=examples),
-                ):
-                    if fails:
-                        with self.assertRaisesRegex(SystemExit, "binding .* findings"):
-                            kernel_analysis.check_bindings(
-                                Path("linux"), ["make"], ("fixture.yaml",), "fixture"
-                            )
-                    else:
-                        kernel_analysis.check_bindings(
-                            Path("linux"), ["make"], ("fixture.yaml",), "fixture"
-                        )
-
-
-if __name__ == "__main__":
-    unittest.main()
+        ],
+        ids=(
+            "success",
+            "tool-failure",
+            "stdout-reference",
+            "stderr-properties",
+            "example-error",
+            "example-warning",
+        ),
+    )
+    def test_diagnostic_output_cannot_pass_even_with_zero_tool_status(
+        self, status: int, stdout: str, stderr: str, examples: str, *, fails: bool
+    ) -> None:
+        """Schema references and compiled example failures must remain visible failures."""
+        result = subprocess.CompletedProcess(["dt-doc-validate"], status, stdout, stderr)
+        with (
+            mock.patch.object(kernel_analysis, "run"),
+            mock.patch.object(kernel_analysis, "capture_text", return_value=result),
+            mock.patch.object(kernel_analysis, "run_dtbs_check", return_value=examples),
+        ):
+            if fails:
+                with pytest.raises(SystemExit, match=r"binding .* findings"):
+                    kernel_analysis.check_bindings(
+                        Path("linux"), ["make"], ("fixture.yaml",), "fixture"
+                    )
+            else:
+                kernel_analysis.check_bindings(
+                    Path("linux"), ["make"], ("fixture.yaml",), "fixture"
+                )

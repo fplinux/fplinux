@@ -5,12 +5,17 @@ from __future__ import annotations
 
 import struct
 import tempfile
-import unittest
+from contextlib import ExitStack
 from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
+
+import pytest
 
 from tests import ROOT
 from tests.process import run_process
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 def psf2(
@@ -40,37 +45,40 @@ def psf2(
     )
 
 
-class FontTests(unittest.TestCase):
+class FontTests:
     """Observe the shared loader through real files and a separately linked C harness."""
 
     temporary: ClassVar[tempfile.TemporaryDirectory[str]]
     executable: ClassVar[Path]
 
+    @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def setUpClass(cls) -> None:
+    def _compiled_tools(cls) -> Iterator[None]:
         """Compile the linked font loader once for the controlled-file cases."""
-        cls.temporary = tempfile.TemporaryDirectory()
-        cls.addClassCleanup(cls.temporary.cleanup)
-        cls.executable = Path(cls.temporary.name) / "font"
-        run_process(
-            [
-                "cc",
-                "-std=c11",
-                "-Wall",
-                "-Wextra",
-                "-Werror",
-                "-I",
-                str(ROOT / "include/fplinux"),
-                str(ROOT / "tests/host_tool/terminal/fplinux-font.c"),
-                str(ROOT / "lib/fplinux/fplinux-font.c"),
-                "-Wl,--wrap=fopen",
-                "-o",
-                str(cls.executable),
-            ],
-            name="compile font loader harness",
-            timeout=30,
-            check=True,
-        )
+        with ExitStack() as cleanup:
+            cls.temporary = tempfile.TemporaryDirectory()
+            cleanup.enter_context(cls.temporary)
+            cls.executable = Path(cls.temporary.name) / "font"
+            run_process(
+                [
+                    "cc",
+                    "-std=c11",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    "-I",
+                    str(ROOT / "include/fplinux"),
+                    str(ROOT / "tests/host_tool/terminal/fplinux-font.c"),
+                    str(ROOT / "lib/fplinux/fplinux-font.c"),
+                    "-Wl,--wrap=fopen",
+                    "-o",
+                    str(cls.executable),
+                ],
+                name="compile font loader harness",
+                timeout=30,
+                check=True,
+            )
+            yield
 
     def inspect(self, payload: bytes, *codepoints: str) -> str:
         """Load a temporary PSF2 fixture and return the harness's observable glyph bytes."""
@@ -98,35 +106,52 @@ class FontTests(unittest.TestCase):
             )
             return result.stdout
 
-    def test_default_font_metrics_match_the_actual_display_width(self) -> None:
+    @pytest.mark.parametrize(
+        ("width", "small_expected", "large_expected"),
+        [
+            pytest.param(
+                128,
+                "6 12\n",
+                "default font is 8x16; 128-pixel display requires 6x12\n",
+                id="small-128",
+            ),
+            pytest.param(
+                199,
+                "6 12\n",
+                "default font is 8x16; 199-pixel display requires 6x12\n",
+                id="small-boundary-199",
+            ),
+            pytest.param(
+                200,
+                "default font is 6x12; 200-pixel display requires 8x16\n",
+                "8 16\n",
+                id="large-boundary-200",
+            ),
+            pytest.param(
+                240,
+                "default font is 6x12; 240-pixel display requires 8x16\n",
+                "8 16\n",
+                id="large-240",
+            ),
+        ],
+    )
+    def test_default_font_metrics_match_the_actual_display_width(
+        self, width: int, small_expected: str, large_expected: str
+    ) -> None:
         """The installed payload must be 6x12 below 200 pixels wide and 8x16 otherwise."""
         small = psf2((b"\x80" * 12,), (b"A",), 6, 12)
         large = psf2((b"\x80" * 16,), (b"A",), 8, 16)
-        for width in (128, 199):
-            with self.subTest(width=width):
-                self.assertEqual(self.inspect_default(small, width), "6 12\n")
-                self.assertEqual(
-                    self.inspect_default(large, width),
-                    f"default font is 8x16; {width}-pixel display requires 6x12\n",
-                )
-        for width in (200, 240):
-            with self.subTest(width=width):
-                self.assertEqual(self.inspect_default(large, width), "8 16\n")
-                self.assertEqual(
-                    self.inspect_default(small, width),
-                    f"default font is 6x12; {width}-pixel display requires 8x16\n",
-                )
+        assert self.inspect_default(small, width) == small_expected
+        assert self.inspect_default(large, width) == large_expected
 
     def test_default_font_rejects_a_wrong_height_or_unreadable_payload(self) -> None:
         """Matching width alone is insufficient, and malformed files report the default path."""
         wrong_height = psf2((b"\x80" * 16,), (b"A",), 6, 16)
-        self.assertEqual(
-            self.inspect_default(wrong_height, 128),
-            "default font is 6x16; 128-pixel display requires 6x12\n",
+        assert (self.inspect_default(wrong_height, 128)) == (
+            "default font is 6x16; 128-pixel display requires 6x12\n"
         )
-        self.assertEqual(
-            self.inspect_default(b"not a PSF font", 240),
-            "cannot load font /usr/share/fplinux/fonts/default.psf\n",
+        assert (self.inspect_default(b"not a PSF font", 240)) == (
+            "cannot load font /usr/share/fplinux/fonts/default.psf\n"
         )
 
     def test_unicode_aliases_sequences_and_replacement_keep_bitmap_rows(self) -> None:
@@ -138,57 +163,58 @@ class FontTests(unittest.TestCase):
             2,
             b"extension",
         )
-        self.assertEqual(
-            self.inspect(font, "41", "42f", "1f642", "42", "e9", "61", "58", "fffd"),
+        assert (self.inspect(font, "41", "42f", "1f642", "42", "e9", "61", "58", "fffd")) == (
             "9 2 2 4\n80004080\n80004080\n80004080\n00800000\n00800000\n"
-            "ff800080\nff800080\nff800080\n",
+            "ff800080\nff800080\nff800080\n"
         )
 
     def test_absent_codepoint_without_replacement_returns_no_bitmap(self) -> None:
         """Sparse fonts leave unknown characters blank when U+FFFD is absent."""
         font = psf2((b"\x80",), (b"A",), 1, 1)
-        self.assertEqual(self.inspect(font, "41", "42", "fffd"), "1 1 1 1\n80\nmissing\nmissing\n")
+        assert (self.inspect(font, "41", "42", "fffd")) == ("1 1 1 1\n80\nmissing\nmissing\n")
 
     def test_maximum_geometry_and_file_size_are_inclusive(self) -> None:
         """A 16x32 font of exactly 1 MiB loads; one extra file byte is rejected."""
         font = psf2((b"\x80\x01" * 32,), (b"A",), 16, 32, b"\0" * (1024 * 1024 - 98))
-        self.assertEqual(len(font), 1024 * 1024)
-        self.assertEqual(self.inspect(font), "16 32 2 64\n")
-        self.assertEqual(self.inspect(font + b"\0"), "rejected\n")
+        assert (len(font)) == (1024 * 1024)
+        assert (self.inspect(font)) == ("16 32 2 64\n")
+        assert (self.inspect(font + b"\0")) == ("rejected\n")
 
-    def test_unsupported_or_incomplete_psf2_is_rejected(self) -> None:
+    @pytest.mark.parametrize(
+        "font",
+        [
+            pytest.param(psf2((b"\x80",), (b"A",), 1, 1)[:31], id="short-header"),
+            pytest.param(
+                struct.pack("<8I", 2253043058, 0, 32, 0, 1, 1, 1, 1) + b"\x80",
+                id="no-Unicode-table",
+            ),
+            pytest.param(
+                struct.pack("<8I", 2253043058, 1, 32, 1, 1, 1, 1, 1) + b"\x80A\xff",
+                id="unsupported-version",
+            ),
+            pytest.param(psf2((b"\x00" * 3,), (b"A",), 17, 1), id="width-exceeds-limit"),
+            pytest.param(psf2((b"\x00" * 33,), (b"A",), 1, 33), id="height-exceeds-limit"),
+            pytest.param(psf2((b"\x00\x00",), (b"A",), 1, 1), id="inconsistent-bitmap-size"),
+            pytest.param(psf2((b"\x80",), (b"A",), 1, 1)[:-1], id="missing-glyph-terminator"),
+            pytest.param(psf2((b"\x80",), (b"A",), 1, 1) + b"B\xff", id="trailing-Unicode-record"),
+            pytest.param(psf2((b"\x80",), (b"\xfeab",), 1, 1), id="no-single-codepoint-mapping"),
+        ],
+    )
+    def test_unsupported_or_incomplete_psf2_is_rejected(self, font: bytes) -> None:
         """Malformed headers, out-of-range cells and incomplete tables cannot load."""
-        valid = psf2((b"\x80",), (b"A",), 1, 1)
-        cases = {
-            "short header": valid[:31],
-            "no Unicode table": struct.pack("<8I", 0x864AB572, 0, 32, 0, 1, 1, 1, 1) + b"\x80",
-            "unsupported version": struct.pack("<8I", 0x864AB572, 1, 32, 1, 1, 1, 1, 1)
-            + b"\x80A\xff",
-            "width exceeds limit": psf2((b"\0" * 3,), (b"A",), 17, 1),
-            "height exceeds limit": psf2((b"\0" * 33,), (b"A",), 1, 33),
-            "inconsistent bitmap size": psf2((b"\0\0",), (b"A",), 1, 1),
-            "missing glyph terminator": valid[:-1],
-            "trailing Unicode record": valid + b"B\xff",
-            "no single-codepoint mapping": psf2((b"\x80",), (b"\xfeab",), 1, 1),
-        }
-        for scenario, font in cases.items():
-            with self.subTest(scenario=scenario):
-                self.assertEqual(self.inspect(font), "rejected\n")
+        assert self.inspect(font) == "rejected\n"
 
-    def test_invalid_utf8_is_rejected_even_inside_sequences(self) -> None:
+    @pytest.mark.parametrize(
+        "encoding",
+        [b"\xc0\x80", b"\xe0\x80\x80", b"\xed\xa0\x80", b"\xf4\x90\x80\x80", b"\xe2\x82"],
+        ids=["bytes-c080", "bytes-e08080", "bytes-eda080", "bytes-f4908080", "bytes-e282"],
+    )
+    @pytest.mark.parametrize("prefix", [b"", b"A\xfe"], ids=["bytes-", "bytes-41fe"])
+    def test_invalid_utf8_is_rejected_even_inside_sequences(
+        self, prefix: bytes, encoding: bytes
+    ) -> None:
         """Invalid UTF-8 never creates ambiguous aliases or silently skipped records."""
-        for encoding in (
-            b"\xc0\x80",
-            b"\xe0\x80\x80",
-            b"\xed\xa0\x80",
-            b"\xf4\x90\x80\x80",
-            b"\xe2\x82",
-        ):
-            for prefix in (b"", b"A\xfe"):
-                with self.subTest(encoding=encoding, sequence=bool(prefix)):
-                    self.assertEqual(
-                        self.inspect(psf2((b"\x80",), (prefix + encoding,), 1, 1)), "rejected\n"
-                    )
+        assert (self.inspect(psf2((b"\x80",), (prefix + encoding,), 1, 1))) == ("rejected\n")
 
     def test_missing_file_leaves_font_safe_to_close(self) -> None:
         """A failed file open leaves no loaded font and needs no caller cleanup branch."""
@@ -199,8 +225,4 @@ class FontTests(unittest.TestCase):
                 timeout=10,
                 check=True,
             )
-            self.assertEqual(result.stdout, "rejected\n")
-
-
-if __name__ == "__main__":
-    unittest.main()
+            assert (result.stdout) == ("rejected\n")

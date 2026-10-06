@@ -3,21 +3,22 @@
 
 from __future__ import annotations
 
-import unittest
 from pathlib import Path
 from unittest import mock
+
+import pytest
 
 from tests import ROOT
 from tests.small.runtime.adapter_fixtures import ADAPTER, FakeClock
 
 
-class UdevRulesTests(unittest.TestCase):
+class UdevRulesTests:
     """Keep desktop device discovery away from the RAM transport."""
 
     def test_usb_rule_precedes_libmtp_and_suppresses_its_probe(self) -> None:
         """BootROM and Linux gadget events must not run the generic MTP probe."""
         rules = ROOT / "common/60-fplinux.rules"
-        self.assertLess(int(rules.name.partition("-")[0]), 69)
+        assert (int(rules.name.partition("-")[0])) < (69)
         lines = [
             line
             for line in rules.read_text(encoding="utf-8").splitlines()
@@ -31,11 +32,11 @@ class UdevRulesTests(unittest.TestCase):
                 if f'ATTR{{idVendor}}=="{vendor}"' in line
                 and f'ATTR{{idProduct}}=="{product}"' in line
             ]
-            self.assertEqual(len(matches), 1)
-            self.assertIn('ENV{MTP_NO_PROBE}="1"', matches[0])
+            assert (len(matches)) == (1)
+            assert ('ENV{MTP_NO_PROBE}="1"') in (matches[0])
 
 
-class UsbDeviceAccessTests(unittest.TestCase):
+class UsbDeviceAccessTests:
     """Report disappearance and permission denial as different USB failures."""
 
     device = Path("/dev/bus/usb/007/053")
@@ -44,7 +45,7 @@ class UsbDeviceAccessTests(unittest.TestCase):
         """A transient USB disappearance must not be diagnosed as a udev failure."""
         with (
             mock.patch.object(ADAPTER.os, "open", side_effect=FileNotFoundError),
-            self.assertRaises(ADAPTER.BootromDisconnectedError),
+            pytest.raises(ADAPTER.BootromDisconnectedError),
         ):
             ADAPTER.require_usb_device_access(self.device, "1782:4d00")
 
@@ -55,7 +56,7 @@ class UsbDeviceAccessTests(unittest.TestCase):
             mock.patch.object(ADAPTER.os, "open", side_effect=PermissionError),
             mock.patch.object(ADAPTER.time, "monotonic", clock.monotonic),
             mock.patch.object(ADAPTER.time, "sleep", clock.sleep),
-            self.assertRaisesRegex(SystemExit, "not readable and writable"),
+            pytest.raises(SystemExit, match="not readable and writable"),
         ):
             ADAPTER.require_usb_device_access(self.device, "1782:4d00")
 
@@ -89,7 +90,3 @@ class UsbDeviceAccessTests(unittest.TestCase):
             ADAPTER.os.O_RDWR | ADAPTER.os.O_CLOEXEC,
         )
         close_device.assert_called_once_with(41)
-
-
-if __name__ == "__main__":
-    unittest.main()

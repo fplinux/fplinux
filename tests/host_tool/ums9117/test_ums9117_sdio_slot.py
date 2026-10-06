@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 
 from tests import ROOT
@@ -15,7 +14,7 @@ HARNESS = ROOT / "tests/host_tool/ums9117/ums9117-sdio-slot.c"
 COMPAT = ROOT / "tests/host_tool/ums9117/ums9117-sdio-compat"
 
 
-class Ums9117SdioSlotTests(unittest.TestCase):
+class Ums9117SdioSlotTests:
     """Link production slot logic to fake MMIO/ADI; no device is exercised."""
 
     def test_slot_ownership_and_power_policy(self) -> None:
@@ -46,12 +45,4 @@ class Ums9117SdioSlotTests(unittest.TestCase):
                 name="run UMS9117 SDIO slot harness",
                 timeout=30,
             )
-        self.assertEqual(
-            result.returncode,
-            0,
-            msg=f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
-        )
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert (result.returncode) == (0), f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"

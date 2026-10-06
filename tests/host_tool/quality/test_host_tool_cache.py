@@ -8,10 +8,10 @@ import os
 import subprocess
 import tarfile
 import tempfile
-import unittest
 from pathlib import Path
 from unittest import mock
 
+import pytest
 from fplinux_cli import common
 from fplinux_cli.build import host as host_build
 from fplinux_cli.build import inputs as inputs_build
@@ -19,7 +19,7 @@ from fplinux_cli.build import process as process_build
 from fplinux_cli.build import sources as sources_build
 
 
-class HostToolCacheTests(unittest.TestCase):
+class HostToolCacheTests:
     """A selected input change recompiles; an unrelated source change does not."""
 
     def test_selected_inputs_image_and_compiler_control_reuse(self) -> None:
@@ -121,10 +121,8 @@ class HostToolCacheTests(unittest.TestCase):
                     sources(), platform, root / f"work-{build_number}"
                 )
                 binary = result["bridge"]
-                self.assertEqual(
-                    subprocess.check_output([str(binary)], text=True), expected + "\n"
-                )
-                self.assertEqual(calls["make"], expected_compiles)
+                assert (subprocess.check_output([str(binary)], text=True)) == (expected + "\n")
+                assert (calls["make"]) == (expected_compiles)
 
             environment = {
                 "FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE": "a" * 64,
@@ -157,17 +155,13 @@ class HostToolCacheTests(unittest.TestCase):
                         os.environ, {"FPLINUX_CONTAINER_IMAGE_CONTENT": "c" * 64}
                     ):
                         build("B:two", 6)
-                        self.assertEqual(calls["self_test"], 8)
+                        assert (calls["self_test"]) == (8)
                         receipt = (cache / "host-tools/bridge/receipt.json").read_bytes()
                         local_header.write_text("#error broken local input\n", encoding="ascii")
-                        with self.assertRaises(subprocess.CalledProcessError):
+                        with pytest.raises(subprocess.CalledProcessError):
                             build("", 7)
-                        self.assertEqual(
-                            (cache / "host-tools/bridge/receipt.json").read_bytes(), receipt
+                        assert ((cache / "host-tools/bridge/receipt.json").read_bytes()) == (
+                            receipt
                         )
                         local_header.write_text('#define MESSAGE "two"\n', encoding="ascii")
                         build("B:two", 7)
-
-
-if __name__ == "__main__":
-    unittest.main()

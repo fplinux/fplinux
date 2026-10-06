@@ -8,9 +8,11 @@ import json
 import shutil
 import struct
 import tempfile
-import unittest
+from contextlib import ExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+import pytest
 
 from tests import ROOT
 from tests.fixtures.stock_board_report import (
@@ -27,6 +29,8 @@ from tests.fixtures.stock_board_report import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from fplinux_cli.device_data.formats import PreparedGroup
 
 FAKE_TOOL = ROOT / "tests/fixtures/fphelper/fake_fphelper.py"
@@ -131,18 +135,21 @@ def _report_data() -> bytes:
     return bytes(data)
 
 
-class BoardReportTests(unittest.TestCase):
+class BoardReportTests:
     """Run extraction against a scripted stand-in for fphelper_t117."""
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _prepare_case(self) -> Iterator[None]:
         """Install the fake tool as the only host tool of a temporary build."""
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.host_tools = Path(temporary.name) / "host"
-        self.host_tools.mkdir()
-        self.tool = self.host_tools / "fphelper_t117"
-        shutil.copyfile(FAKE_TOOL, self.tool)
-        self.tool.chmod(0o755)
+        with ExitStack() as cleanup:
+            temporary = tempfile.TemporaryDirectory()
+            cleanup.enter_context(temporary)
+            self.host_tools = Path(temporary.name) / "host"
+            self.host_tools.mkdir()
+            self.tool = self.host_tools / "fphelper_t117"
+            shutil.copyfile(FAKE_TOOL, self.tool)
+            self.tool.chmod(0o755)
+            yield
 
     def _scenario(self, image: bytes, commands: dict[str, dict[str, Any]]) -> None:
         (self.host_tools / "scenario.json").write_text(
@@ -178,27 +185,25 @@ class BoardReportTests(unittest.TestCase):
 
         group = self._prepare(image)
 
-        self.assertEqual(
-            group.prepared, {"pinmap.bin": REPORT_PINMAP, "keymap.bin": keymap(SPARSE_KEYMAP)}
+        assert (group.prepared) == (
+            {"pinmap.bin": REPORT_PINMAP, "keymap.bin": keymap(SPARSE_KEYMAP)}
         )
-        self.assertEqual(group.originals, {"stock-image.bin": image})
+        assert (group.originals) == ({"stock-image.bin": image})
         report = json.loads(group.reports["board-report.json"])
-        self.assertEqual(
-            report["stock_image"],
+        assert (report["stock_image"]) == (
             {
                 "partition_table": "VBM",
                 "nand_offset": "0x40000",
                 "size": 0x5200,
                 "sha256": hashlib.sha256(image).hexdigest(),
                 "load_address": "0x80100000",
-            },
+            }
         )
         tool_sha256 = hashlib.sha256(self.tool.read_bytes()).hexdigest()
-        self.assertEqual(report["tool"], {"name": "fphelper_t117", "sha256": tool_sha256})
-        self.assertEqual(report["keypad"]["matrix"], SPARSE_MATRIX)
-        self.assertEqual(report["keypad"]["boot_key"], {"code": "0x2a", "key": "FPLINUX_KEY_STAR"})
-        self.assertEqual(
-            report["lcd_candidates"],
+        assert (report["tool"]) == ({"name": "fphelper_t117", "sha256": tool_sha256})
+        assert (report["keypad"]["matrix"]) == (SPARSE_MATRIX)
+        assert (report["keypad"]["boot_key"]) == ({"code": "0x2a", "key": "FPLINUX_KEY_STAR"})
+        assert (report["lcd_candidates"]) == (
             [
                 {
                     "id": "0x3025",
@@ -233,10 +238,9 @@ class BoardReportTests(unittest.TestCase):
                     },
                     "source": "stock firmware address 0x8100012c",
                 },
-            ],
+            ]
         )
-        self.assertEqual(
-            report["pads"],
+        assert (report["pads"]) == (
             {
                 "display": {
                     "0x402a00b0": "0x00000000",
@@ -245,17 +249,18 @@ class BoardReportTests(unittest.TestCase):
                 },
                 "display_data": {},
                 "audio": {"0x402a04f0": "0x0008e001", "0x402a0504": "0x0008e000"},
-            },
+            }
         )
-        self.assertEqual(report["wled_level"], 31)
-        self.assertEqual(report["fgu_current_calibration"], [11, 23])
-        self.assertEqual(report["nand_configs"], [EXPECTED_21E5])
-        self.assertEqual(report["unresolved"], [])
-        self.assertEqual(
+        assert (report["wled_level"]) == (31)
+        assert (report["fgu_current_calibration"]) == ([11, 23])
+        assert (report["nand_configs"]) == ([EXPECTED_21E5])
+        assert (report["unresolved"]) == ([])
+        assert (
             {
                 name: report["sources"][name]
                 for name in ("pinmap", "keymap", "wled_level", "fgu_current_calibration")
-            },
+            }
+        ) == (
             {
                 "pinmap": "fphelper_t117 unpack, pinmap.bin from stock firmware address "
                 "0x80104800",
@@ -263,16 +268,15 @@ class BoardReportTests(unittest.TestCase):
                 "0x80104900",
                 "wled_level": "stock firmware address 0x8100021c",
                 "fgu_current_calibration": "stock firmware address 0x81000314",
-            },
+            }
         )
-        self.assertEqual(
-            [item["item"] for item in report["never_extracted"]],
+        assert ([item["item"] for item in report["never_extracted"]]) == (
             [
                 "keypad light current code",
                 "vibration motor presence",
                 "fitted panel",
                 "CM4 firmware revision",
-            ],
+            ]
         )
 
     def test_value_without_its_stock_structure_is_unresolved_not_guessed(self) -> None:
@@ -282,26 +286,21 @@ class BoardReportTests(unittest.TestCase):
 
         report = json.loads(self._prepare(image).reports["board-report.json"])
 
-        self.assertIsNone(report["fgu_current_calibration"])
-        self.assertNotIn("fgu_current_calibration", report["sources"])
-        self.assertEqual(
-            report["unresolved"],
-            [{"item": "fgu_current_calibration", "reason": "no unique fuel-gauge conversion"}],
+        assert (report["fgu_current_calibration"]) is None
+        assert ("fgu_current_calibration") not in (report["sources"])
+        assert (report["unresolved"]) == (
+            [{"item": "fgu_current_calibration", "reason": "no unique fuel-gauge conversion"}]
         )
 
-    def test_missing_tool_failed_tool_or_missing_maps_stop_extraction(self) -> None:
-        """No board-map files are produced without a successful tool run that found them."""
-        image = _report_image()
-        cases: dict[str, tuple[dict[str, dict[str, Any]], str]] = {
-            "tool failure": (
+    @pytest.mark.parametrize(
+        ("commands", "message"),
+        [
+            (
                 {"unpack": {"stderr": "loadfile failed\n", "exit_status": 1}},
                 "fphelper_t117 unpack failed: loadfile failed",
             ),
-            "no init table": (
-                {"unpack": {"stdout": "0x0: DHTB header (size = 0x5000)\n"}},
-                "found no init table",
-            ),
-            "maps written but not reported": (
+            ({"unpack": {"stdout": "0x0: DHTB header (size = 0x5000)\n"}}, "found no init table"),
+            (
                 {
                     "unpack": {
                         "stdout": UNPACK_OUTPUT.replace(": pinmap", ": other"),
@@ -313,20 +312,25 @@ class BoardReportTests(unittest.TestCase):
                 },
                 "board maps not found in the stock image",
             ),
-            "maps reported but not written": (
-                {"unpack": {"stdout": UNPACK_OUTPUT}},
-                "board maps not found in the stock image",
-            ),
-        }
-        for name, (commands, message) in cases.items():
+            ({"unpack": {"stdout": UNPACK_OUTPUT}}, "board maps not found in the stock image"),
+            (None, "host tool fphelper_t117 is missing"),
+        ],
+        ids=[
+            "tool-failure",
+            "no-init-table",
+            "maps-written-but-not-reported",
+            "maps-reported-but-not-written",
+            "missing-tool",
+        ],
+    )
+    def test_missing_tool_failed_tool_or_missing_maps_stop_extraction(
+        self, commands: dict[str, dict[str, Any]] | None, message: str
+    ) -> None:
+        """No board-map files are produced without a successful tool run that found them."""
+        image = _report_image()
+        if commands is None:
+            self.tool.unlink()
+        else:
             self._scenario(image, commands)
-            with self.subTest(name), self.assertRaisesRegex(ValueError, message):
-                self._prepare(image)
-
-        self.tool.unlink()
-        with self.assertRaisesRegex(ValueError, "host tool fphelper_t117 is missing"):
+        with pytest.raises(ValueError, match=message):
             self._prepare(image)
-
-
-if __name__ == "__main__":
-    unittest.main()

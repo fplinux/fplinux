@@ -7,11 +7,11 @@ import hashlib
 import io
 import tarfile
 import tempfile
-import unittest
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
 
+import pytest
 from fplinux_cli import common
 from fplinux_cli.cli import probe
 from fplinux_cli.environment import kern
@@ -22,10 +22,11 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 
-class ProbePublicationTests(unittest.TestCase):
+class ProbePublicationTests:
     """Check real file publication; the compiler stub provides no ARM evidence."""
 
-    def test_preparation_extracts_release_keys_from_verified_archive(self) -> None:
+    @staticmethod
+    def test_preparation_extracts_release_keys_from_verified_archive() -> None:
         """Probe preparation reuses verified minirootfs bytes and extracts only signing keys."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -53,16 +54,21 @@ class ProbePublicationTests(unittest.TestCase):
                 mock.patch("urllib.request.urlopen", return_value=io.BytesIO(contents)),
             ):
                 keys = probe._prepare_keys(lock, root / "first")  # noqa: SLF001
-            self.assertEqual((keys / "release.pub").read_bytes(), b"release signing key\n")
-            self.assertFalse((root / "first/etc/irrelevant").exists())
+            assert ((keys / "release.pub").read_bytes()) == (b"release signing key\n")
+            assert not ((root / "first/etc/irrelevant").exists())
             with (
                 mock.patch.object(common, "ROOT", root),
                 mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")),
             ):
                 keys = probe._prepare_keys(lock, root / "second")  # noqa: SLF001
-            self.assertEqual((keys / "release.pub").read_bytes(), b"release signing key\n")
+            assert ((keys / "release.pub").read_bytes()) == (b"release signing key\n")
 
-    def test_output_is_replaced_only_after_compilation_succeeds(self) -> None:
+    @staticmethod
+    @pytest.mark.parametrize(
+        "succeeds",
+        [pytest.param(False, id="compiler-failure"), pytest.param(True, id="compiler-success")],
+    )
+    def test_output_is_replaced_only_after_compilation_succeeds(*, succeeds: bool) -> None:
         """Partial compiler output must never replace an existing useful executable."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -86,31 +92,25 @@ class ProbePublicationTests(unittest.TestCase):
                 mock.patch.object(kern, "ROOT", root),
                 mock.patch.object(Stage, "run", side_effect=compiler_stub),
             ):
-                for succeeds in (False, True):
-                    with self.subTest(succeeds=succeeds):
-                        reporter = RunReporter.create("probe-build", target=None, verbose=False)
+                reporter = RunReporter.create("probe-build", target=None, verbose=False)
 
-                        def compile_probe(run: RunReporter) -> None:
-                            probe._compile_probe(  # noqa: SLF001 -- publication boundary.
-                                source,
-                                destination,
-                                root / "sysroot",
-                                kern="stubbed-kern",
-                                image="stubbed-image",
-                                reporter=run,
-                            )
+                def compile_probe(run: RunReporter) -> None:
+                    probe._compile_probe(  # noqa: SLF001 -- publication boundary.
+                        source,
+                        destination,
+                        root / "sysroot",
+                        kern="stubbed-kern",
+                        image="stubbed-image",
+                        reporter=run,
+                    )
 
-                        if succeeds:
-                            compile_probe(reporter)
-                            self.assertEqual(destination.read_bytes(), b"new executable")
-                            self.assertEqual(destination.stat().st_mode & 0o777, 0o755)
-                        else:
-                            with self.assertRaises(SystemExit):
-                                compile_probe(reporter)
-                            self.assertEqual(destination.read_bytes(), b"previous executable")
-                            self.assertEqual(destination.stat().st_mode & 0o777, 0o751)
-                        self.assertEqual(list(destination.parent.iterdir()), [destination])
-
-
-if __name__ == "__main__":
-    unittest.main()
+                if succeeds:
+                    compile_probe(reporter)
+                    assert destination.read_bytes() == b"new executable"
+                    assert destination.stat().st_mode & 0o777 == 0o755
+                else:
+                    with pytest.raises(SystemExit):
+                        compile_probe(reporter)
+                    assert destination.read_bytes() == b"previous executable"
+                    assert destination.stat().st_mode & 0o777 == 0o751
+                assert list(destination.parent.iterdir()) == [destination]

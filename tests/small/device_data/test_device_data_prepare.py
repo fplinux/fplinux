@@ -9,11 +9,12 @@ import io
 import json
 import shutil
 import tempfile
-import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 from unittest import mock
 
+import pytest
 from fplinux_cli import common
 from fplinux_cli.cli import device_data as device_data_prepare
 from fplinux_cli.device_data import prepare as device_data_prepare_prepare
@@ -31,6 +32,9 @@ from fplinux_cli.workspace import capture as workspace
 
 from tests import ROOT
 from tests.fixtures.stock_board_report import agreeing_vbm, backup, signed_image
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 TARGET = "demo-phone"
 RAW_PAGE_BYTES = 2112
@@ -52,7 +56,7 @@ BOARD_MAPS = PreparedGroup(
 )
 
 
-class DeviceDataPrepareTests(unittest.TestCase):
+class DeviceDataPrepareTests:
     """Exercise real staging, receipts and pointer publication under a temporary root.
 
     Stubbed: the target configuration (load_target); loading of the target parser and
@@ -65,16 +69,19 @@ class DeviceDataPrepareTests(unittest.TestCase):
     pinned container builds, real-tool discovery and phone transport are not exercised.
     """
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def prepared_directory(self) -> Iterator[None]:
         """Create an isolated source root and immutable saved dump."""
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name) / "source"
-        self.cache = self.root / ".cache"
-        self.cache.mkdir(parents=True)
-        self.enterContext(mock.patch("fplinux_cli.reporting.run.ROOT", self.root))
-        self.saved_dump = self.root / "saved-nand.bin"
-        self.saved_dump.write_bytes(RAW_DUMP)
+        with contextlib.ExitStack() as resources:
+            self.temporary = tempfile.TemporaryDirectory()
+            resources.enter_context(self.temporary)
+            self.root = Path(self.temporary.name) / "source"
+            self.cache = self.root / ".cache"
+            self.cache.mkdir(parents=True)
+            resources.enter_context(mock.patch("fplinux_cli.reporting.run.ROOT", self.root))
+            self.saved_dump = self.root / "saved-nand.bin"
+            self.saved_dump.write_bytes(RAW_DUMP)
+            yield
 
     @staticmethod
     def _group(source: str, destination: str, size: int) -> list[dict[str, object]]:
@@ -180,32 +187,22 @@ class DeviceDataPrepareTests(unittest.TestCase):
         output = self._run_from_dump()
 
         generation = self._current_generation()
-        self.assertEqual(self.saved_dump.read_bytes(), RAW_DUMP)
-        self.assertEqual((generation / "source/nand.bin").read_bytes(), RAW_DUMP)
-        self.assertEqual((generation / "groups/bluetooth/radio.bin").read_bytes(), b"radio")
-        self.assertEqual(
-            (generation / "groups/audio-profile/audio.bin").read_bytes(),
-            b"profile",
-        )
-        self.assertEqual(
-            (generation / "originals/audio-profile/nv426.bin").read_bytes(),
-            b"headset",
-        )
+        assert (self.saved_dump.read_bytes()) == (RAW_DUMP)
+        assert ((generation / "source/nand.bin").read_bytes()) == (RAW_DUMP)
+        assert ((generation / "groups/bluetooth/radio.bin").read_bytes()) == (b"radio")
+        assert ((generation / "groups/audio-profile/audio.bin").read_bytes()) == (b"profile")
+        assert ((generation / "originals/audio-profile/nv426.bin").read_bytes()) == (b"headset")
         receipt = json.loads((generation / "receipt.json").read_text(encoding="utf-8"))
-        self.assertEqual(
-            receipt["source"],
+        assert (receipt["source"]) == (
             {
                 "kind": "saved-dump",
                 "size": len(RAW_DUMP),
                 "sha256": hashlib.sha256(RAW_DUMP).hexdigest(),
-            },
+            }
         )
-        self.assertEqual(
-            [group["name"] for group in receipt["groups"]],
-            ["audio-profile", "bluetooth"],
-        )
-        self.assertNotIn(str(self.saved_dump), json.dumps(receipt))
-        self.assertIn("./fplinux build demo-phone", output)
+        assert ([group["name"] for group in receipt["groups"]]) == (["audio-profile", "bluetooth"])
+        assert (str(self.saved_dump)) not in (json.dumps(receipt))
+        assert ("./fplinux build demo-phone") in (output)
 
     def test_failed_staging_does_not_switch_the_current_generation(self) -> None:
         """A partial or malformed requested group cannot expose a mixed current state."""
@@ -219,17 +216,16 @@ class DeviceDataPrepareTests(unittest.TestCase):
             prepared={"audio.bin": b"wrong size"},
         )
 
-        with self.assertRaisesRegex(SystemExit, "device-data group audio-profile"):
+        with pytest.raises(SystemExit, match="device-data group audio-profile"):
             self._run_from_dump(preparation=self._preparation(audio=malformed))
 
-        self.assertEqual(pointer.read_bytes(), previous_pointer)
-        self.assertEqual(self._current_generation(), previous_generation)
-        self.assertEqual(
-            (previous_generation / "groups/audio-profile/audio.bin").read_bytes(),
-            b"profile",
+        assert (pointer.read_bytes()) == (previous_pointer)
+        assert (self._current_generation()) == (previous_generation)
+        assert ((previous_generation / "groups/audio-profile/audio.bin").read_bytes()) == (
+            b"profile"
         )
         staging = list((target_root / "generations").glob(".staging-*"))
-        self.assertEqual(staging, [])
+        assert (staging) == ([])
 
     def test_live_acquisition_runs_once_and_the_same_raw_feeds_both_groups(self) -> None:
         """One public NAND backup is the observable safety boundary for all parser outputs."""
@@ -287,28 +283,32 @@ class DeviceDataPrepareTests(unittest.TestCase):
                 offline=True,
             )
 
-        self.assertEqual(
-            events,
+        assert (events) == (
             [
                 "build",
                 "load",
                 ("backup", TARGET),
                 ("admit", RAW_DUMP, RAW_PAGE_BYTES),
                 ("extract", admitted),
-            ],
+            ]
         )
-        self.assertEqual((self._current_generation() / "source/nand.bin").read_bytes(), RAW_DUMP)
+        assert ((self._current_generation() / "source/nand.bin").read_bytes()) == (RAW_DUMP)
 
-    def test_bluetooth_audio_and_combined_targets_publish_only_their_declared_groups(self) -> None:
+    @pytest.mark.parametrize(
+        "group_names",
+        [
+            pytest.param(("bluetooth",), id="bluetooth"),
+            pytest.param(("audio-profile",), id="audio-profile"),
+            pytest.param(("bluetooth", "audio-profile"), id="both-groups"),
+        ],
+    )
+    def test_bluetooth_audio_and_combined_targets_publish_only_their_declared_groups(
+        self, group_names: tuple[str, ...]
+    ) -> None:
         """Neither named group creates a dependency on the other."""
-        for group_names in (("bluetooth",), ("audio-profile",), ("bluetooth", "audio-profile")):
-            with self.subTest(groups=group_names):
-                self._run_from_dump(group_names)
-                published = self._current_generation() / "groups"
-                self.assertEqual(
-                    {path.name for path in published.iterdir()},
-                    set(group_names),
-                )
+        self._run_from_dump(group_names)
+        published = self._current_generation() / "groups"
+        assert {path.name for path in published.iterdir()} == set(group_names)
 
     def _run_board_maps_from_dump(
         self,
@@ -382,39 +382,38 @@ class DeviceDataPrepareTests(unittest.TestCase):
         received: list[Path] = []
 
         def extract(nand: PhysicalNand, *, host_tools: Path) -> PreparedGroup:
-            self.assertEqual(nand.raw, RAW_DUMP)
+            assert (nand.raw) == (RAW_DUMP)
             received.append(host_tools)
             return BOARD_MAPS
 
         output = self._run_board_maps_from_dump(with_bluetooth=True, extract=extract)
 
         generation = self._current_generation()
-        self.assertEqual(len(received), 1)
-        self.assertFalse(received[0].exists())
-        self.assertEqual((generation / "groups/board-maps/pinmap.bin").read_bytes(), b"pins")
-        self.assertEqual((generation / "groups/board-maps/keymap.bin").read_bytes(), b"keys")
-        self.assertEqual((generation / "groups/bluetooth/radio.bin").read_bytes(), b"radio")
-        self.assertEqual(
-            (generation / "originals/board-maps/stock-image.bin").read_bytes(), b"stock image"
+        assert (len(received)) == (1)
+        assert not (received[0].exists())
+        assert ((generation / "groups/board-maps/pinmap.bin").read_bytes()) == (b"pins")
+        assert ((generation / "groups/board-maps/keymap.bin").read_bytes()) == (b"keys")
+        assert ((generation / "groups/bluetooth/radio.bin").read_bytes()) == (b"radio")
+        assert ((generation / "originals/board-maps/stock-image.bin").read_bytes()) == (
+            b"stock image"
         )
         report = generation / "reports/board-maps/board-report.json"
-        self.assertEqual(report.read_bytes(), BOARD_REPORT)
-        self.assertEqual(report.stat().st_mode & 0o777, 0o600)
-        self.assertFalse((generation / "groups/board-maps/board-report.json").exists())
+        assert (report.read_bytes()) == (BOARD_REPORT)
+        assert (report.stat().st_mode & 0o777) == (0o600)
+        assert not ((generation / "groups/board-maps/board-report.json").exists())
         receipt = json.loads((generation / "receipt.json").read_text(encoding="utf-8"))
         groups = {group["name"]: group for group in receipt["groups"]}
-        self.assertEqual(
-            groups["board-maps"]["reports"],
+        assert (groups["board-maps"]["reports"]) == (
             [
                 {
                     "name": "board-report.json",
                     "size": len(BOARD_REPORT),
                     "sha256": hashlib.sha256(BOARD_REPORT).hexdigest(),
                 }
-            ],
+            ]
         )
-        self.assertNotIn("reports", groups["bluetooth"])
-        self.assertIn(f"Review {report}.", output)
+        assert ("reports") not in (groups["bluetooth"])
+        assert (f"Review {report}.") in (output)
 
     def test_cold_saved_dump_publishes_maps_from_a_tool_process(self) -> None:
         """A fake external utility feeds the real platform extractor without a runtime bundle.
@@ -459,7 +458,7 @@ class DeviceDataPrepareTests(unittest.TestCase):
             reporter: object,
         ) -> None:
             del reporter
-            self.assertTrue(offline)
+            assert offline
             executable = output / "fphelper_t117"
             shutil.copyfile(project / "tests/fixtures/fphelper/fake_fphelper.py", executable)
             executable.chmod(0o755)
@@ -491,17 +490,15 @@ class DeviceDataPrepareTests(unittest.TestCase):
             )
 
         generation = self._current_generation()
-        self.assertEqual((generation / "groups/board-maps/pinmap.bin").read_bytes(), pinmap)
-        self.assertEqual((generation / "groups/board-maps/keymap.bin").read_bytes(), keys)
+        assert ((generation / "groups/board-maps/pinmap.bin").read_bytes()) == (pinmap)
+        assert ((generation / "groups/board-maps/keymap.bin").read_bytes()) == (keys)
         report = json.loads((generation / "reports/board-maps/board-report.json").read_text())
-        self.assertEqual(report["keypad"]["boot_key"], {"code": "0x2a", "key": "FPLINUX_KEY_STAR"})
-        self.assertEqual(report["pads"]["display"], {"0x402a00b0": "0x00000010"})
-        self.assertEqual((generation / "originals/board-maps/stock-image.bin").read_bytes(), image)
+        assert (report["keypad"]["boot_key"]) == ({"code": "0x2a", "key": "FPLINUX_KEY_STAR"})
+        assert (report["pads"]["display"]) == ({"0x402a00b0": "0x00000010"})
+        assert ((generation / "originals/board-maps/stock-image.bin").read_bytes()) == (image)
         with self.saved_dump.open("rb") as dump_reader:
-            self.assertEqual(
-                hashlib.file_digest(dump_reader, "sha256").hexdigest(), original_digest
-            )
-        self.assertFalse((self.cache / "out").exists())
+            assert (hashlib.file_digest(dump_reader, "sha256").hexdigest()) == (original_digest)
+        assert not ((self.cache / "out").exists())
 
     def test_failed_board_map_extraction_publishes_nothing(self) -> None:
         """A failed extraction leaves no selected generation."""
@@ -511,13 +508,14 @@ class DeviceDataPrepareTests(unittest.TestCase):
             message = "board maps not found in the stock image"
             raise ValueError(message)
 
-        with self.assertRaisesRegex(
-            SystemExit, "device-data extraction failed: board maps not found in the stock image"
+        with pytest.raises(
+            SystemExit,
+            match="device-data extraction failed: board maps not found in the stock image",
         ):
             self._run_board_maps_from_dump(with_bluetooth=False, extract=unavailable)
         target_root = self.cache / "device-data" / TARGET
-        self.assertFalse((target_root / "current").exists())
-        self.assertEqual(list((target_root / "generations").iterdir()), [])
+        assert not ((target_root / "current").exists())
+        assert (list((target_root / "generations").iterdir())) == ([])
 
     def test_saved_dump_without_declared_chip_or_receipt_publishes_nothing(self) -> None:
         """A backup's page layout is never inferred from its length."""
@@ -538,7 +536,7 @@ class DeviceDataPrepareTests(unittest.TestCase):
                 "_load_device_data_parser",
                 side_effect=AssertionError("an unknown layout must not reach a parser"),
             ),
-            self.assertRaisesRegex(SystemExit, "declares no NAND chip and the backup has no"),
+            pytest.raises(SystemExit, match="declares no NAND chip and the backup has no"),
         ):
             device_data_prepare.prepare_device_data(
                 TARGET,
@@ -548,9 +546,9 @@ class DeviceDataPrepareTests(unittest.TestCase):
             )
 
         target_root = self.cache / "device-data" / TARGET
-        self.assertFalse((target_root / "current").exists())
-        self.assertEqual(list((target_root / "generations").iterdir()), [])
-        self.assertEqual(self.saved_dump.read_bytes(), RAW_DUMP)
+        assert not ((target_root / "current").exists())
+        assert (list((target_root / "generations").iterdir())) == ([])
+        assert (self.saved_dump.read_bytes()) == (RAW_DUMP)
 
     def test_target_without_declared_groups_stops_before_source_or_phone_access(self) -> None:
         """Unsupported preparation cannot acquire a source or create a generation."""
@@ -562,7 +560,7 @@ class DeviceDataPrepareTests(unittest.TestCase):
                 return_value={"device_data": {"groups": {}}},
             ),
             mock.patch.object(device_data_prepare, "build") as build,
-            self.assertRaisesRegex(SystemExit, "not supported for target demo-phone"),
+            pytest.raises(SystemExit, match="not supported for target demo-phone"),
         ):
             device_data_prepare.prepare_device_data(
                 TARGET,
@@ -571,7 +569,7 @@ class DeviceDataPrepareTests(unittest.TestCase):
                 offline=True,
             )
         build.assert_not_called()
-        self.assertFalse((self.cache / "device-data").exists())
+        assert not ((self.cache / "device-data").exists())
 
     def test_offline_nested_build_failure_leaves_no_running_receipt(self) -> None:
         """A real build rejection finishes its enclosing preparation without loading a phone."""
@@ -601,19 +599,19 @@ class DeviceDataPrepareTests(unittest.TestCase):
                 side_effect=AssertionError("failed preparation must not load a phone"),
             ),
             contextlib.redirect_stderr(terminal),
-            self.assertRaises(SystemExit) as raised,
+            pytest.raises(SystemExit) as raised,
         ):
             run_entrypoint(
                 lambda: device_data_prepare.prepare_device_data(
                     TARGET, from_dump=None, jobs=1, offline=True
                 )
             )
-        self.assertEqual(raised.exception.code, 1)
-        self.assertEqual(terminal.getvalue().count("offline build requires"), 1)
+        assert (raised.value.code) == (1)
+        assert (terminal.getvalue().count("offline build requires")) == (1)
         receipts = list((self.cache / "logs").rglob("run.json"))
-        self.assertTrue(receipts)
+        assert receipts
         for receipt in receipts:
-            self.assertEqual(json.loads(receipt.read_text())["status"], "failed")
+            assert (json.loads(receipt.read_text())["status"]) == ("failed")
 
 
 def _reported(  # noqa: PLR0913 -- each reported value stays visible at the call site.
@@ -636,10 +634,21 @@ def _reported(  # noqa: PLR0913 -- each reported value stays visible at the call
     )
 
 
-class DumpGeometryTests(unittest.TestCase):
+class DumpGeometryTests:
     """Select a saved backup's page layout without guessing it from the backup length."""
 
-    def test_page_size_comes_from_the_receipt_or_the_declared_chip(self) -> None:
+    @pytest.mark.parametrize(
+        "case",
+        [
+            "declared chip only",
+            "declared 128-byte OOB chip only",
+            "receipt only",
+            "receipt without a NAND table",
+            "receipt and declared chip agree",
+        ],
+        ids=["declared-64-oob", "declared-128-oob", "receipt", "receipt-no-table", "agree"],
+    )
+    def test_page_size_comes_from_the_receipt_or_the_declared_chip(self, case: str) -> None:
         """Either source is sufficient, and agreeing sources give the same page size."""
         receipt_2112 = _reported(id_bytes="e521", oob_bytes=64, raw_bytes=138412032)
         cases = (
@@ -654,14 +663,15 @@ class DumpGeometryTests(unittest.TestCase):
             ("receipt without a NAND table", None, receipt_2112, 2112),
             ("receipt and declared chip agree", DECLARED_NAND, receipt_2112, 2112),
         )
-        for name, nand, receipt, expected in cases:
-            with self.subTest(name):
-                self.assertEqual(
-                    device_data_prepare_prepare.dump_page_bytes(TARGET, nand, receipt),
-                    expected,
-                )
+        _, nand, receipt, expected = next(item for item in cases if item[0] == case)
+        assert device_data_prepare_prepare.dump_page_bytes(TARGET, nand, receipt) == expected
 
-    def test_missing_contradicting_or_unsupported_geometry_is_refused(self) -> None:
+    @pytest.mark.parametrize(
+        "case",
+        ["neither source", "receipt from another chip", "4 KiB main pages", "half the pages"],
+        ids=["no-source", "different-chip", "unsupported-main-page", "unsupported-block-count"],
+    )
+    def test_missing_contradicting_or_unsupported_geometry_is_refused(self, case: str) -> None:
         """A receipt from another chip or outside the interpreted layout cannot be used."""
         cases = (
             ("neither source", {"raw_device": "/dev/demo-nand-raw"}, None, "declares no NAND"),
@@ -689,10 +699,6 @@ class DumpGeometryTests(unittest.TestCase):
                 "512 blocks",
             ),
         )
-        for name, nand, receipt, message in cases:
-            with self.subTest(name), self.assertRaisesRegex(SystemExit, message):
-                device_data_prepare_prepare.dump_page_bytes(TARGET, nand, receipt)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        _, nand, receipt, message = next(item for item in cases if item[0] == case)
+        with pytest.raises(SystemExit, match=message):
+            device_data_prepare_prepare.dump_page_bytes(TARGET, nand, receipt)

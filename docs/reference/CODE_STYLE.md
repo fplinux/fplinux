@@ -98,6 +98,10 @@ establish an ARM, musl, kernel, bootstrap, package or physical-device result.
 
 ## Tests
 
+Python tests use pytest and its native assertions, fixtures and parameterization.
+See the [Python test style](style/PYTHON.md#tests) for writing cases and the
+[test command](../guides/DEVELOPMENT.md#run-selected-tests) for selecting them.
+
 ### Test a stable behavior
 
 Each test protects a consumer-visible behavior, invariant, error, safety

@@ -5,11 +5,11 @@ from __future__ import annotations
 
 import shutil
 import tempfile
-import unittest
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
 
+import pytest
 from fplinux_cli import common
 from fplinux_cli.cli import probe
 from fplinux_cli.environment import kern
@@ -23,10 +23,15 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 
-class ProbeHeaderTests(unittest.TestCase):
+class ProbeHeaderTests:
     """Use real Clang preprocessing, without Kern, a target sysroot or ARM linking."""
 
-    def test_probe_accepts_both_project_header_include_forms(self) -> None:
+    @pytest.mark.parametrize(
+        "header",
+        ['"fplinux-keypad.h"', "<fplinux/fplinux-keypad.h>"],
+        ids=["fplinux-keypad.h", "fplinux-fplinux-keypad.h"],
+    )
+    def test_probe_accepts_both_project_header_include_forms(self, header: str) -> None:
         """Existing short includes and qualified includes resolve the project headers."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -65,23 +70,17 @@ class ProbeHeaderTests(unittest.TestCase):
                 mock.patch.object(kern, "ROOT", root),
                 mock.patch.object(Stage, "run", side_effect=preprocess_instead_of_kern),
             ):
-                for header in ('"fplinux-keypad.h"', "<fplinux/fplinux-keypad.h>"):
-                    with self.subTest(header=header):
-                        source.write_text(
-                            f"#include {header}\nint probe_header_check;\n",
-                            encoding="utf-8",
-                        )
-                        reporter = RunReporter.create("probe-build", target=None, verbose=False)
-                        probe._compile_probe(  # noqa: SLF001 -- real compiler command boundary.
-                            source,
-                            destination,
-                            sysroot,
-                            kern="stubbed-kern",
-                            image="stubbed-image",
-                            reporter=reporter,
-                        )
-                        self.assertIn("int probe_header_check;", destination.read_text())
-
-
-if __name__ == "__main__":
-    unittest.main()
+                source.write_text(
+                    f"#include {header}\nint probe_header_check;\n",
+                    encoding="utf-8",
+                )
+                reporter = RunReporter.create("probe-build", target=None, verbose=False)
+                probe._compile_probe(  # noqa: SLF001 -- real compiler command boundary.
+                    source,
+                    destination,
+                    sysroot,
+                    kern="stubbed-kern",
+                    image="stubbed-image",
+                    reporter=reporter,
+                )
+                assert ("int probe_header_check;") in (destination.read_text())

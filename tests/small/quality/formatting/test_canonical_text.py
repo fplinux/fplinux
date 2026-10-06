@@ -3,12 +3,11 @@
 
 from __future__ import annotations
 
-import unittest
-
+import pytest
 from fplinux_cli.quality.formatting.canonical_text import normalize_text
 
 
-class DtsPropertyOrderTests(unittest.TestCase):
+class DtsPropertyOrderTests:
     """Exercise complete DTS statements with literal expected property bytes."""
 
     def test_property_groups_and_numeric_suffixes_have_canonical_order(self) -> None:
@@ -43,8 +42,8 @@ class DtsPropertyOrderTests(unittest.TestCase):
 };
 """
         actual = normalize_text("board.dts", source)
-        self.assertEqual(actual, expected)
-        self.assertEqual(normalize_text("board.dts", actual), expected)
+        assert (actual) == (expected)
+        assert (normalize_text("board.dts", actual)) == (expected)
 
     def test_arrays_strings_and_inline_comments_move_as_complete_statements(self) -> None:
         """Keep value bytes and a statement's same-line annotation together."""
@@ -62,7 +61,7 @@ class DtsPropertyOrderTests(unittest.TestCase):
 \tzeta = "a; { // literal", "second"; // zeta annotation
 };
 """
-        self.assertEqual(normalize_text("values.dtsi", source), expected)
+        assert (normalize_text("values.dtsi", source)) == (expected)
 
     def test_include_preprocessing_children_and_overrides_keep_their_positions(self) -> None:
         """Sort local runs without moving declarations across syntax barriers."""
@@ -107,8 +106,8 @@ class DtsPropertyOrderTests(unittest.TestCase):
 };
 """
         actual = normalize_text("order.dts", source)
-        self.assertEqual(actual, expected)
-        self.assertEqual(normalize_text("order.dts", actual), expected)
+        assert (actual) == (expected)
+        assert (normalize_text("order.dts", actual)) == (expected)
 
     def test_contiguous_leading_comments_travel_with_the_annotated_property(self) -> None:
         """Keep comments attached while ordering complete property blocks."""
@@ -127,8 +126,8 @@ class DtsPropertyOrderTests(unittest.TestCase):
 };
 """
         actual = normalize_text("comments.dts", source)
-        self.assertEqual(actual, expected)
-        self.assertEqual(normalize_text("comments.dts", actual), expected)
+        assert (actual) == (expected)
+        assert (normalize_text("comments.dts", actual)) == (expected)
 
     def test_separated_section_comments_keep_property_groups_on_their_original_sides(self) -> None:
         """A blank line gives a section comment an unmoved ordering boundary."""
@@ -150,7 +149,7 @@ class DtsPropertyOrderTests(unittest.TestCase):
 \tzulu = <4>;
 };
 """
-        self.assertEqual(normalize_text("comments.dts", source), expected)
+        assert (normalize_text("comments.dts", source)) == (expected)
 
     def test_deletion_statements_do_not_cross_property_updates(self) -> None:
         """Keep each update on its original side of a deletion directive."""
@@ -170,7 +169,7 @@ class DtsPropertyOrderTests(unittest.TestCase):
 \tzeta = <3>;
 };
 """
-        self.assertEqual(normalize_text("delete.dts", source), expected)
+        assert (normalize_text("delete.dts", source)) == (expected)
 
     def test_path_references_and_template_placeholders_remain_verbatim(self) -> None:
         """Recognize reference braces without treating them as child nodes."""
@@ -186,31 +185,38 @@ class DtsPropertyOrderTests(unittest.TestCase):
 \tzeta = <&{/soc/clock@0} 0x01>;
 };
 """
-        self.assertEqual(normalize_text("board.dts.in", source), expected)
+        assert (normalize_text("board.dts.in", source)) == (expected)
 
-    def test_unsafe_or_incomplete_syntax_is_unchanged(self) -> None:
-        """Skip unknown bytes, duplicate properties and compact inline bodies."""
-        cases = (
+    @pytest.mark.parametrize(
+        "source",
+        [
             b"&node { zeta = <2>; alpha = <1>; };\n",
             b"&node {\n\tzeta = <2>;\n\talpha = <1>;\n\tzeta = <3>;\n};\n",
             b'&node {\n\tzeta = "unterminated;\n\talpha = <1>;\n};\n',
             b"&node {\n\tzeta = <2>\n\tchild { alpha = <1>; };\n};\n",
             b"&node {\n\tzeta = <2>;\n\talpha = <1>;\n",
-        )
-        for source in cases:
-            with self.subTest(source=source):
-                self.assertEqual(normalize_text("unsafe.dts", source), source)
+        ],
+        ids=[
+            "compact-body",
+            "duplicate-property",
+            "unterminated-string",
+            "incomplete-property",
+            "incomplete-node",
+        ],
+    )
+    def test_unsafe_or_incomplete_syntax_is_unchanged(self, source: bytes) -> None:
+        """Skip unknown bytes, duplicate properties and compact inline bodies."""
+        assert (normalize_text("unsafe.dts", source)) == (source)
 
     def test_preprocessor_continuations_preserve_macro_body_bytes(self) -> None:
         """A directive's continued brace and semicolon tokens remain opaque."""
         source = b"#define VALUE \\\n\t{ 1; 2; }\n&node {\n\tzeta = <2>;\n\talpha = <1>;\n};\n"
-        self.assertEqual(
-            normalize_text("macro.dts", source),
-            b"#define VALUE \\\n\t{ 1; 2; }\n&node {\n\talpha = <1>;\n\tzeta = <2>;\n};\n",
+        assert (normalize_text("macro.dts", source)) == (
+            b"#define VALUE \\\n\t{ 1; 2; }\n&node {\n\talpha = <1>;\n\tzeta = <2>;\n};\n"
         )
 
 
-class ConservativeWhitespaceTests(unittest.TestCase):
+class ConservativeWhitespaceTests:
     """Keep literal values and executable ordering while completing text files."""
 
     def test_shell_metadata_and_multiline_values_only_gain_final_newline(self) -> None:
@@ -224,23 +230,25 @@ class ConservativeWhitespaceTests(unittest.TestCase):
         )
         expected = source + b"\n"
         actual = normalize_text("alpine/aports/example/APKBUILD", source)
-        self.assertEqual(actual, expected)
-        self.assertEqual(normalize_text("alpine/aports/example/APKBUILD", actual), expected)
+        assert (actual) == (expected)
+        assert (normalize_text("alpine/aports/example/APKBUILD", actual)) == (expected)
 
-    def test_heredocs_and_incomplete_shell_literals_are_unchanged(self) -> None:
-        """Avoid changing data when the shell's literal boundary is unproven."""
-        cases = (
+    @pytest.mark.parametrize(
+        "source",
+        [
             b"build() {\ncat <<'END'\n  literal  \nEND\n}",
             b'pkgdesc="incomplete',
             b"echo continued \\",
-        )
-        for source in cases:
-            with self.subTest(source=source):
-                self.assertEqual(normalize_text("APKBUILD", source), source)
+        ],
+        ids=["heredoc", "unterminated-string", "continuation"],
+    )
+    def test_heredocs_and_incomplete_shell_literals_are_unchanged(self, source: bytes) -> None:
+        """Avoid changing data when the shell's literal boundary is unproven."""
+        assert (normalize_text("APKBUILD", source)) == (source)
 
-    def test_make_kconfig_assembly_and_plain_template_preserve_internal_whitespace(self) -> None:
-        """A trailing newline does not reorder instructions or trim literal data."""
-        cases = (
+    @pytest.mark.parametrize(
+        ("relative", "source"),
+        [
             ("board.Makefile.in", b"NAME := value  \ninclude first.mk\nobj-y += b.o a.o"),
             ("Config.in", b'config DEMO\n\tbool "Demo"'),
             ("Kconfig", b'config DEMO\n\tbool "Demo  "\n\thelp\n\t  Help text  '),
@@ -248,14 +256,26 @@ class ConservativeWhitespaceTests(unittest.TestCase):
             ("payload.s.in", b'.ascii "literal  "\n.word @VALUE@'),
             ("payload.S", b'.ascii "literal  "\n.word 1'),
             ("README.txt.in", b"Target: @TARGET@  "),
-        )
-        for relative, source in cases:
-            with self.subTest(relative=relative):
-                self.assertEqual(normalize_text(relative, source), source + b"\n")
+        ],
+        ids=[
+            "make-template",
+            "config",
+            "kconfig",
+            "make-fragment",
+            "assembly-template",
+            "assembly",
+            "text-template",
+        ],
+    )
+    def test_make_kconfig_assembly_and_plain_template_preserve_internal_whitespace(
+        self, relative: str, source: bytes
+    ) -> None:
+        """A trailing newline does not reorder instructions or trim literal data."""
+        assert (normalize_text(relative, source)) == (source + b"\n")
 
-    def test_ini_and_config_fragment_trim_only_declarative_line_endings(self) -> None:
-        """Keep section precedence and quoted values while removing outer blanks."""
-        cases = (
+    @pytest.mark.parametrize(
+        ("relative", "source", "expected"),
+        [
             (
                 ".editorconfig",
                 b"root = true  \n[*.py] \nindent_size = 4 \n[*] \nindent_size = 2\t",
@@ -277,26 +297,30 @@ class ConservativeWhitespaceTests(unittest.TestCase):
                     b"CONFIG_HEX=0x0010\n@UNKNOWN@  \n"
                 ),
             ),
-        )
-        for relative, source, expected in cases:
-            with self.subTest(relative=relative):
-                actual = normalize_text(relative, source)
-                self.assertEqual(actual, expected)
-                self.assertEqual(normalize_text(relative, actual), expected)
+        ],
+        ids=["editorconfig", "ini", "config-template"],
+    )
+    def test_ini_and_config_fragment_trim_only_declarative_line_endings(
+        self, relative: str, source: bytes, expected: bytes
+    ) -> None:
+        """Keep section precedence and quoted values while removing outer blanks."""
+        actual = normalize_text(relative, source)
+        assert (actual) == (expected)
+        assert (normalize_text(relative, actual)) == (expected)
 
-    def test_unknown_binary_and_non_lf_inputs_are_unchanged(self) -> None:
-        """Leave bytes outside the recognized current text contracts alone."""
-        cases = (
+    @pytest.mark.parametrize(
+        ("relative", "source"),
+        [
             ("notes.txt", b"literal  "),
             ("unknown.conf", b"value=1  "),
             ("board.dts", b"\xff\xfe"),
             ("Kconfig", b"a\x00b"),
             ("settings.ini", b"value=1\r\n"),
-        )
-        for relative, source in cases:
-            with self.subTest(relative=relative):
-                self.assertEqual(normalize_text(relative, source), source)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        ],
+        ids=["unknown-text", "unknown-config", "invalid-utf8", "nul", "crlf"],
+    )
+    def test_unknown_binary_and_non_lf_inputs_are_unchanged(
+        self, relative: str, source: bytes
+    ) -> None:
+        """Leave bytes outside the recognized current text contracts alone."""
+        assert (normalize_text(relative, source)) == (source)

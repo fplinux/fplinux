@@ -8,14 +8,15 @@ import io
 import signal
 import subprocess
 import tempfile
-import unittest
 from pathlib import Path
 from unittest import mock
+
+import pytest
 
 from tests.small.runtime.adapter_fixtures import ADAPTER, BridgeFixture, BridgeProcess, FakeClock
 
 
-class LoaderArgumentsTests(unittest.TestCase):
+class LoaderArgumentsTests:
     """Keep exec-distance selection entirely target-driven."""
 
     def test_nonzero_exec_distance_precedes_ram_loads(self) -> None:
@@ -27,8 +28,7 @@ class LoaderArgumentsTests(unittest.TestCase):
             {"fdl1": 0x6200, "payload": 0x80100000},
             0x314D,
         )
-        self.assertEqual(
-            arguments,
+        assert (arguments) == (
             [
                 "loader",
                 "--wait",
@@ -41,7 +41,7 @@ class LoaderArgumentsTests(unittest.TestCase):
                 "fdl",
                 "image.bin",
                 "0x80100000",
-            ],
+            ]
         )
 
     def test_zero_exec_distance_omits_setup_command(self) -> None:
@@ -53,8 +53,7 @@ class LoaderArgumentsTests(unittest.TestCase):
             {"fdl1": 0x6200, "payload": 0x80100000},
             0,
         )
-        self.assertEqual(
-            arguments,
+        assert (arguments) == (
             [
                 "loader",
                 "--wait",
@@ -65,7 +64,7 @@ class LoaderArgumentsTests(unittest.TestCase):
                 "fdl",
                 "image.bin",
                 "0x80100000",
-            ],
+            ]
         )
 
 
@@ -152,7 +151,7 @@ class LoaderExecutionTests(BridgeFixture):
                     bundle, self.runtime("none"), self.session(), expected_device_identity="9" * 64
                 )
 
-        self.assertEqual(loader_runs, 2)
+        assert (loader_runs) == (2)
         transport_module.remove_personalized_image.assert_called_once()
 
     def test_loader_stops_after_three_failed_fresh_devices(self) -> None:
@@ -185,13 +184,13 @@ class LoaderExecutionTests(BridgeFixture):
                     "import_module",
                     return_value=transport_module,
                 ),
-                self.assertRaisesRegex(SystemExit, "failed after 3 attempts"),
+                pytest.raises(SystemExit, match="failed after 3 attempts"),
             ):
                 ADAPTER.run(
                     bundle, self.runtime("none"), self.session(), expected_device_identity="9" * 64
                 )
 
-        self.assertEqual(loader_runs, 3)
+        assert (loader_runs) == (3)
         popen.assert_not_called()
         transport_module.remove_personalized_image.assert_called_once()
 
@@ -246,8 +245,8 @@ class LoaderExecutionTests(BridgeFixture):
                     bundle, self.runtime("none"), self.session(), expected_device_identity="9" * 64
                 )
 
-        self.assertEqual(access_calls, 2)
-        self.assertEqual(loader_runs, 1)
+        assert (access_calls) == (2)
+        assert (loader_runs) == (1)
         transport_module.remove_personalized_image.assert_called_once()
 
     def test_retry_waits_for_the_old_usb_node_to_disappear(self) -> None:
@@ -273,7 +272,7 @@ class LoaderExecutionTests(BridgeFixture):
                 ),
                 mock.patch.object(ADAPTER.time, "monotonic", clock.monotonic),
                 mock.patch.object(ADAPTER.time, "sleep", clock.sleep),
-                self.assertRaisesRegex(SystemExit, "retry deadline"),
+                pytest.raises(SystemExit, match="retry deadline"),
             ):
                 ADAPTER.run(
                     bundle, self.runtime("none"), self.session(), expected_device_identity="9" * 64
@@ -303,7 +302,7 @@ class LoaderExecutionTests(BridgeFixture):
                     "import_module",
                     return_value=transport_module,
                 ),
-                self.assertRaisesRegex(SystemExit, "cancelled"),
+                pytest.raises(SystemExit, match="cancelled"),
             ):
                 ADAPTER.run(
                     bundle, self.runtime("none"), self.session(), expected_device_identity="9" * 64
@@ -319,14 +318,7 @@ class LoaderExecutionTests(BridgeFixture):
         before = {signum: signal.getsignal(signum) for signum in signals}
         try:
             self.run_bridge(BridgeProcess(0), bootrom_release_seconds=1.0)
-            self.assertEqual(
-                {signum: signal.getsignal(signum) for signum in signals},
-                before,
-            )
+            assert ({signum: signal.getsignal(signum) for signum in signals}) == (before)
         finally:
             for signum, handler in before.items():
                 signal.signal(signum, handler)
-
-
-if __name__ == "__main__":
-    unittest.main()

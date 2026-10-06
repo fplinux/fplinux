@@ -5,17 +5,18 @@ from __future__ import annotations
 
 import os
 import sys
-import unittest
 from unittest import mock
 
+import pytest
 from fplinux_cli import __main__ as cli
 from fplinux_cli.cli import dispatch as cli_dispatch
 
 
-class BuildParallelismTests(unittest.TestCase):
+class BuildParallelismTests:
     """Automatic defaults respect available CPUs; explicit limits remain unchanged."""
 
-    def selected_jobs(self, command: str, cpus: int | None, *options: str) -> int:
+    @staticmethod
+    def selected_jobs(command: str, cpus: int | None, *options: str) -> int:
         """Observe dispatch while replacing external build and device operations."""
         arguments = (
             ["build", "demo", *options]
@@ -32,22 +33,26 @@ class BuildParallelismTests(unittest.TestCase):
         ):
             cli.main()
         value = build.call_args.args[1] if command == "build" else prepare.call_args.kwargs["jobs"]
-        self.assertIsInstance(value, int)
+        assert isinstance(value, int)
         return int(value)
 
-    def test_default_worker_limit_uses_available_cpus_up_to_eight(self) -> None:
+    @pytest.mark.parametrize("command", ["build", "device-data"])
+    @pytest.mark.parametrize(
+        ("cpus", "expected"),
+        [
+            pytest.param(None, 1, id="unknown-cpus"),
+            pytest.param(1, 1, id="one-cpu"),
+            pytest.param(4, 4, id="four-cpus"),
+            pytest.param(12, 8, id="twelve-cpus-capped-at-eight"),
+        ],
+    )
+    def test_default_worker_limit_uses_available_cpus_up_to_eight(
+        self, command: str, cpus: int | None, expected: int
+    ) -> None:
         """Neither build path oversubscribes affinity or automatically uses all 12 CPUs."""
-        for command in ("build", "device-data"):
-            for cpus, expected in ((None, 1), (1, 1), (4, 4), (12, 8)):
-                with self.subTest(command=command, cpus=cpus):
-                    self.assertEqual(self.selected_jobs(command, cpus), expected)
+        assert self.selected_jobs(command, cpus) == expected
 
-    def test_explicit_worker_limit_is_not_replaced_by_the_default(self) -> None:
+    @pytest.mark.parametrize("command", ["build", "device-data"])
+    def test_explicit_worker_limit_is_not_replaced_by_the_default(self, command: str) -> None:
         """An explicitly chosen limit keeps its existing CLI meaning."""
-        for command in ("build", "device-data"):
-            with self.subTest(command=command):
-                self.assertEqual(self.selected_jobs(command, 12, "--jobs", "3"), 3)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert self.selected_jobs(command, 12, "--jobs", "3") == 3

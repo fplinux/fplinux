@@ -8,11 +8,13 @@ import shutil
 import subprocess
 import tempfile
 import time
-import unittest
+from contextlib import ExitStack
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest import mock
 
+import pytest
 from fplinux_cli.runtime import ssh_transport
 
 from tests.host_tool.runtime.openssh_server import OpenSshServer
@@ -20,21 +22,24 @@ from tests.process import process_state, run_process
 from tests.ssh_transport_support import create_ready_session
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
 _SSH_CONFIG_TIMEOUT_SECONDS = 10
 _IDLE_EXPIRY_TIMEOUT_SECONDS = 5
 
 
-class SshTransportOpenSshConfigTests(unittest.TestCase):
+class SshTransportOpenSshConfigTests:
     """Validate generated session configuration with the installed OpenSSH parser."""
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _case_resources(self) -> Iterator[None]:
         """Create one complete ready session in an isolated runtime directory."""
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name) / "runtime"
-        self.root.mkdir(mode=0o700)
+        with ExitStack() as cleanup:
+            self.temporary = tempfile.TemporaryDirectory()
+            cleanup.enter_context(self.temporary)
+            self.root = Path(self.temporary.name) / "runtime"
+            self.root.mkdir(mode=0o700)
+            yield
 
     def test_openssh_interprets_generated_private_session_config(self) -> None:
         """OpenSSH receives the bound endpoint and disables ambient forwarding state."""
@@ -44,53 +49,52 @@ class SshTransportOpenSshConfigTests(unittest.TestCase):
 
             path = self.root / "current" / "phone.ssh-config"
             metadata = path.lstat()
-            self.assertTrue(path.is_file())
-            self.assertFalse(path.is_symlink())
-            self.assertEqual(metadata.st_mode & 0o777, 0o600)
+            assert path.is_file()
+            assert not (path.is_symlink())
+            assert (metadata.st_mode & 0o777) == (0o600)
 
             ssh = shutil.which("ssh")
-            self.assertIsNotNone(ssh)
+            assert (ssh) is not None
             parsed = run_process(
                 [str(ssh), "-G", "-F", str(path), "fplinux"],
                 name="OpenSSH generated configuration parse",
                 timeout=_SSH_CONFIG_TIMEOUT_SECONDS,
             )
-            self.assertEqual(parsed.returncode, 0, parsed.stderr)
+            assert (parsed.returncode) == (0), parsed.stderr
             effective = dict(line.split(maxsplit=1) for line in parsed.stdout.splitlines())
-            self.assertEqual(effective["hostname"], session["phone_address"])
-            self.assertEqual(effective["user"], "root")
-            self.assertEqual(effective["identityfile"], session["private_key"])
-            self.assertEqual(effective["userknownhostsfile"], session["known_hosts"])
-            self.assertEqual(effective["hostkeyalias"], f"fplinux-{session['usb_serial']}")
-            self.assertEqual(effective["bindaddress"], session["host_address"])
-            self.assertEqual(effective["controlmaster"], "auto")
-            self.assertEqual(effective["controlpersist"], "60")
-            self.assertEqual(
-                effective["controlpath"],
-                str(Path(session["private_key"]).parent / "mux"),
-            )
-            self.assertEqual(effective["serveraliveinterval"], "5")
-            self.assertEqual(effective["serveralivecountmax"], "3")
-            self.assertEqual(effective["passwordauthentication"], "no")
-            self.assertEqual(effective["identityagent"], "none")
-            self.assertEqual(effective["forwardagent"], "no")
-            self.assertNotIn("proxycommand", effective)
+            assert (effective["hostname"]) == (session["phone_address"])
+            assert (effective["user"]) == ("root")
+            assert (effective["identityfile"]) == (session["private_key"])
+            assert (effective["userknownhostsfile"]) == (session["known_hosts"])
+            assert (effective["hostkeyalias"]) == (f"fplinux-{session['usb_serial']}")
+            assert (effective["bindaddress"]) == (session["host_address"])
+            assert (effective["controlmaster"]) == ("auto")
+            assert (effective["controlpersist"]) == ("60")
+            assert (effective["controlpath"]) == (str(Path(session["private_key"]).parent / "mux"))
+            assert (effective["serveraliveinterval"]) == ("5")
+            assert (effective["serveralivecountmax"]) == ("3")
+            assert (effective["passwordauthentication"]) == ("no")
+            assert (effective["identityagent"]) == ("none")
+            assert (effective["forwardagent"]) == ("no")
+            assert ("proxycommand") not in (effective)
 
             ssh_transport._cleanup_target_sessions(self.root, "phone")  # noqa: SLF001
 
-        self.assertFalse(path.exists())
-        self.assertFalse((self.root / "current" / "phone.json").exists())
+        assert not (path.exists())
+        assert not ((self.root / "current" / "phone.json").exists())
 
 
-class OpenSshServerLifecycleTests(unittest.TestCase):
+class OpenSshServerLifecycleTests:
     """Observe ownership of the real daemon across a controlled readiness failure."""
 
-    def test_readiness_failure_stops_and_reaps_launched_daemon(self) -> None:
+    def test_readiness_failure_stops_and_reaps_launched_daemon(
+        self, request: pytest.FixtureRequest
+    ) -> None:
         """An exception after launching sshd leaves neither a live child nor a zombie."""
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
             server = OpenSshServer(base / "server", base / "client_ed25519")
-            self.addCleanup(server.stop)
+            request.addfinalizer(server.stop)
             daemon: subprocess.Popen[bytes] | None = None
             wait_until_listening = server._wait_until_listening  # noqa: SLF001
 
@@ -99,32 +103,35 @@ class OpenSshServerLifecycleTests(unittest.TestCase):
                 wait_until_listening()
                 daemon = server.process
                 if daemon is None:
-                    self.fail("OpenSSH fixture did not launch an owned daemon")
-                self.assertIsNone(daemon.poll())
+                    pytest.fail("OpenSSH fixture did not launch an owned daemon")
+                assert (daemon.poll()) is None
                 message = "controlled OpenSSH readiness failure"
                 raise RuntimeError(message)
 
             with (
                 mock.patch.object(server, "_wait_until_listening", side_effect=fail_readiness),
-                self.assertRaisesRegex(RuntimeError, "controlled OpenSSH readiness failure"),
+                pytest.raises(RuntimeError, match="controlled OpenSSH readiness failure"),
             ):
                 server.start()
 
             if daemon is None:
-                self.fail("readiness failure did not observe the launched daemon")
-            self.assertIsNotNone(daemon.returncode)
-            self.assertIsNone(process_state(daemon.pid))
-            self.assertIsNone(server.process)
+                pytest.fail("readiness failure did not observe the launched daemon")
+            assert (daemon.returncode) is not None
+            assert (process_state(daemon.pid)) is None
+            assert (server.process) is None
 
 
-class SshTransportOpenSshReuseTests(unittest.TestCase):
+class SshTransportOpenSshReuseTests:
     """Exercise session reuse against a real loopback OpenSSH server."""
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _case_resources(self) -> Iterator[None]:
         """Create test-owned private runtime and server directories."""
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.base = Path(self.temporary.name)
+        with ExitStack() as cleanup:
+            self.temporary = tempfile.TemporaryDirectory()
+            cleanup.enter_context(self.temporary)
+            self.base = Path(self.temporary.name)
+            yield
 
     @staticmethod
     def _ssh_command(config: Path, server: OpenSshServer, command: str) -> list[str]:
@@ -285,20 +292,22 @@ class SshTransportOpenSshReuseTests(unittest.TestCase):
             time.sleep(0.02)
         raise AssertionError(f"timed-out remote stream process is still running: {process_id}")
 
-    def test_generated_config_exec_and_sftp_share_connection_until_idle_expiry(self) -> None:
+    def test_generated_config_exec_and_sftp_share_connection_until_idle_expiry(
+        self, request: pytest.FixtureRequest
+    ) -> None:
         """Generated-config exec and SFTP share and expire one master."""
         reference_runtime = "/run/user/1000/fplinux"
         padding = len(reference_runtime) - len(str(self.base)) - 1
-        self.assertGreater(padding, 0)
+        assert (padding) > (0)
         root = self.base / ("r" * padding)
-        self.assertEqual(len(str(root)), len(reference_runtime))
+        assert (len(str(root))) == (len(reference_runtime))
         root.mkdir(mode=0o700)
         target = "inoi-244-modern-4g"
         session = create_ready_session(root, target=target)
         server = OpenSshServer(self.base / "server", Path(session["private_key"]))
         server.start()
-        self.addCleanup(server.stop)
-        self.addCleanup(self._cleanup_session, root, target)
+        request.addfinalizer(server.stop)
+        request.addfinalizer(partial(self._cleanup_session, root, target))
         session, config = self._publish_loopback_session(
             root,
             server,
@@ -309,15 +318,15 @@ class SshTransportOpenSshReuseTests(unittest.TestCase):
         control_path = Path(session["private_key"]).parent / "mux"
 
         first = self._run_ssh(config, server, 'printf "%s\\n" "$SSH_CONNECTION"')
-        self.assertEqual(first.returncode, 0, first.stderr)
+        assert (first.returncode) == (0), first.stderr
         connection = first.stdout.strip()
-        self.assertEqual(len(connection.split()), 4)
+        assert (len(connection.split())) == (4)
         server.wait_for_connections(1)
-        self.assertTrue(control_path.is_socket())
+        assert control_path.is_socket()
 
         failed = self._run_ssh(config, server, "printf 'expected failure\\n'; exit 37")
-        self.assertEqual(failed.returncode, 37)
-        self.assertEqual(failed.stdout, "expected failure\n")
+        assert (failed.returncode) == (37)
+        assert (failed.stdout) == ("expected failure\n")
 
         source = self.base / "upload-source"
         destination = self.base / "uploaded-by-sftp"
@@ -327,29 +336,31 @@ class SshTransportOpenSshReuseTests(unittest.TestCase):
             server,
             f'put "{source}" "{destination}"',
         )
-        self.assertEqual(transferred.returncode, 0, transferred.stderr)
-        self.assertEqual(destination.read_bytes(), source.read_bytes())
+        assert (transferred.returncode) == (0), transferred.stderr
+        assert (destination.read_bytes()) == (source.read_bytes())
 
         reused = self._run_ssh(config, server, 'printf "%s\\n" "$SSH_CONNECTION"')
-        self.assertEqual(reused.returncode, 0, reused.stderr)
-        self.assertEqual(reused.stdout.strip(), connection)
-        self.assertEqual(server.accepted_connections(), 1)
+        assert (reused.returncode) == (0), reused.stderr
+        assert (reused.stdout.strip()) == (connection)
+        assert (server.accepted_connections()) == (1)
 
         self._wait_until_absent(control_path)
         after_expiry = self._run_ssh(config, server, 'printf "%s\\n" "$SSH_CONNECTION"')
-        self.assertEqual(after_expiry.returncode, 0, after_expiry.stderr)
-        self.assertNotEqual(after_expiry.stdout.strip(), connection)
+        assert (after_expiry.returncode) == (0), after_expiry.stderr
+        assert (after_expiry.stdout.strip()) != (connection)
         server.wait_for_connections(2)
 
-    def test_run_remote_isolates_arbitrary_commands_and_shares_internal_queries(self) -> None:
+    def test_run_remote_isolates_arbitrary_commands_and_shares_internal_queries(
+        self, request: pytest.FixtureRequest
+    ) -> None:
         """Arbitrary commands use dedicated TCP while internal queries share one master."""
         root = self.base / "runtime"
         root.mkdir(mode=0o700)
         session = create_ready_session(root)
         server = OpenSshServer(self.base / "server", Path(session["private_key"]))
         server.start()
-        self.addCleanup(server.stop)
-        self.addCleanup(self._cleanup_session, root)
+        request.addfinalizer(server.stop)
+        request.addfinalizer(partial(self._cleanup_session, root))
         session, _config = self._publish_loopback_session(
             root,
             server,
@@ -389,18 +400,20 @@ class SshTransportOpenSshReuseTests(unittest.TestCase):
                 shared=True,
             )
 
-        self.assertEqual(first.returncode, 0, first.stderr)
-        self.assertEqual(failed.returncode, 23)
-        self.assertEqual(failed.stderr, "expected stderr\n")
-        self.assertNotEqual(first.stdout, failed.stdout)
-        self.assertEqual(shared_first.returncode, 0, shared_first.stderr)
-        self.assertEqual(shared_second.returncode, 0, shared_second.stderr)
-        self.assertEqual(shared_first.stdout, shared_second.stdout)
-        self.assertNotIn(shared_first.stdout, {first.stdout, failed.stdout})
+        assert (first.returncode) == (0), first.stderr
+        assert (failed.returncode) == (23)
+        assert (failed.stderr) == ("expected stderr\n")
+        assert (first.stdout) != (failed.stdout)
+        assert (shared_first.returncode) == (0), shared_first.stderr
+        assert (shared_second.returncode) == (0), shared_second.stderr
+        assert (shared_first.stdout) == (shared_second.stdout)
+        assert (shared_first.stdout) not in ({first.stdout, failed.stdout})
         server.wait_for_connections(3)
         server.wait_for_disconnections(2)
 
-    def test_separate_sessions_keep_independent_masters_and_cleanup(self) -> None:
+    def test_separate_sessions_keep_independent_masters_and_cleanup(
+        self, request: pytest.FixtureRequest
+    ) -> None:
         """Cleaning one session stops its master without disturbing another session."""
         first_root = self.base / "runtime-first"
         second_root = self.base / "runtime-second"
@@ -409,9 +422,9 @@ class SshTransportOpenSshReuseTests(unittest.TestCase):
         initial = create_ready_session(first_root)
         server = OpenSshServer(self.base / "server", Path(initial["private_key"]))
         server.start()
-        self.addCleanup(server.stop)
-        self.addCleanup(self._cleanup_session, second_root)
-        self.addCleanup(self._cleanup_session, first_root)
+        request.addfinalizer(server.stop)
+        request.addfinalizer(partial(self._cleanup_session, second_root))
+        request.addfinalizer(partial(self._cleanup_session, first_root))
         first, first_config = self._publish_loopback_session(
             first_root,
             server,
@@ -434,37 +447,39 @@ class SshTransportOpenSshReuseTests(unittest.TestCase):
             server,
             'printf "%s\\n" "$SSH_CONNECTION"',
         )
-        self.assertEqual(first_result.returncode, 0, first_result.stderr)
-        self.assertEqual(second_result.returncode, 0, second_result.stderr)
-        self.assertNotEqual(first_result.stdout, second_result.stdout)
+        assert (first_result.returncode) == (0), first_result.stderr
+        assert (second_result.returncode) == (0), second_result.stderr
+        assert (first_result.stdout) != (second_result.stdout)
         server.wait_for_connections(2)
         first_socket = Path(first["private_key"]).parent / "mux"
         second_socket = Path(second["private_key"]).parent / "mux"
-        self.assertTrue(first_socket.is_socket())
-        self.assertTrue(second_socket.is_socket())
+        assert first_socket.is_socket()
+        assert second_socket.is_socket()
 
         self._cleanup_session(first_root)
         server.wait_for_disconnections(1)
-        self.assertFalse(first_socket.exists())
-        self.assertTrue(second_socket.is_socket())
+        assert not (first_socket.exists())
+        assert second_socket.is_socket()
         reused = self._run_ssh(
             second_config,
             server,
             'printf "%s\\n" "$SSH_CONNECTION"',
         )
-        self.assertEqual(reused.returncode, 0, reused.stderr)
-        self.assertEqual(reused.stdout, second_result.stdout)
-        self.assertEqual(server.accepted_connections(), 2)
+        assert (reused.returncode) == (0), reused.stderr
+        assert (reused.stdout) == (second_result.stdout)
+        assert (server.accepted_connections()) == (2)
 
-    def test_stream_timeout_stops_remote_producer_without_closing_adjacent_channel(self) -> None:
+    def test_stream_timeout_stops_remote_producer_without_closing_adjacent_channel(
+        self, request: pytest.FixtureRequest
+    ) -> None:
         """Timing out one producer preserves a concurrent channel on the same master."""
         root = self.base / "runtime"
         root.mkdir(mode=0o700)
         session = create_ready_session(root)
         server = OpenSshServer(self.base / "server", Path(session["private_key"]))
         server.start()
-        self.addCleanup(server.stop)
-        self.addCleanup(self._cleanup_session, root)
+        request.addfinalizer(server.stop)
+        request.addfinalizer(partial(self._cleanup_session, root))
         session, config = self._publish_loopback_session(
             root,
             server,
@@ -472,7 +487,7 @@ class SshTransportOpenSshReuseTests(unittest.TestCase):
             session=session,
         )
         established = self._run_ssh(config, server, 'printf "%s\\n" "$SSH_CONNECTION"')
-        self.assertEqual(established.returncode, 0, established.stderr)
+        assert (established.returncode) == (0), established.stderr
         server.wait_for_connections(1)
         loopback_ssh_argv = self._loopback_ssh_argv(server)
         producer_pid = self.base / "stream-producer.pid"
@@ -498,7 +513,7 @@ class SshTransportOpenSshReuseTests(unittest.TestCase):
                     side_effect=loopback_ssh_argv,
                 ),
             ):
-                with self.assertRaisesRegex(SystemExit, "timed out after 0.3s"):
+                with pytest.raises(SystemExit, match=r"timed out after 0.3s"):
                     ssh_transport.stream_remote(
                         session,
                         f"printf '%s\\n' \"$$\" > '{producer_pid}'; "
@@ -507,7 +522,7 @@ class SshTransportOpenSshReuseTests(unittest.TestCase):
                         timeout=0.3,
                     )
                 destination.seek(0)
-                self.assertTrue(destination.read().startswith(b"stream-data\n"))
+                assert destination.read().startswith(b"stream-data\n")
             process_id = int(producer_pid.read_text(encoding="ascii").strip())
             self._wait_until_process_absent(process_id)
             adjacent_stdout, adjacent_stderr = adjacent.communicate(timeout=3)
@@ -515,21 +530,23 @@ class SshTransportOpenSshReuseTests(unittest.TestCase):
             if adjacent.poll() is None:
                 adjacent.kill()
                 adjacent.communicate()
-        self.assertEqual(adjacent.returncode, 0, adjacent_stderr)
-        self.assertEqual(adjacent_stdout.splitlines()[0], "neighbor")
-        self.assertEqual(adjacent_stdout.splitlines()[1], established.stdout.strip())
+        assert (adjacent.returncode) == (0), adjacent_stderr
+        assert (adjacent_stdout.splitlines()[0]) == ("neighbor")
+        assert (adjacent_stdout.splitlines()[1]) == (established.stdout.strip())
         server.wait_for_connections(2)
         server.wait_for_disconnections(1)
 
-    def test_persistent_master_releases_inherited_flock_and_captured_stdout(self) -> None:
+    def test_persistent_master_releases_inherited_flock_and_captured_stdout(
+        self, request: pytest.FixtureRequest
+    ) -> None:
         """A background master does not retain its launcher's lock or output pipe."""
         root = self.base / "runtime"
         root.mkdir(mode=0o700)
         session = create_ready_session(root)
         server = OpenSshServer(self.base / "server", Path(session["private_key"]))
         server.start()
-        self.addCleanup(server.stop)
-        self.addCleanup(self._cleanup_session, root)
+        request.addfinalizer(server.stop)
+        request.addfinalizer(partial(self._cleanup_session, root))
         session, config = self._publish_loopback_session(
             root,
             server,
@@ -548,18 +565,14 @@ class SshTransportOpenSshReuseTests(unittest.TestCase):
                 timeout=_SSH_CONFIG_TIMEOUT_SECONDS,
                 check=False,
             )
-        self.assertEqual(launched.returncode, 0, launched.stderr)
-        self.assertEqual(launched.stdout, "complete\n")
+        assert (launched.returncode) == (0), launched.stderr
+        assert (launched.stdout) == ("complete\n")
         control_path = Path(session["private_key"]).parent / "mux"
-        self.assertTrue(control_path.is_socket())
+        assert control_path.is_socket()
         server.wait_for_connections(1)
 
         with lock_path.open("w", encoding="ascii") as probe:
             try:
                 fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as error:
-                self.fail(f"persistent SSH master retained inherited flock: {error}")
-
-
-if __name__ == "__main__":
-    unittest.main()
+                pytest.fail(f"persistent SSH master retained inherited flock: {error}")

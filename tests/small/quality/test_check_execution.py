@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import tempfile
-import unittest
 from pathlib import Path
 from unittest import mock
 
@@ -16,18 +15,17 @@ from fplinux_cli.quality.scopes import resolve_check_scopes
 from tests.small.quality.check_fixtures import _RecordingReporter
 
 
-class CheckScopeSelectionTests(unittest.TestCase):
+class CheckScopeSelectionTests:
     """Keep scope selection stable and independent of argument order."""
 
     def test_selection_is_deduplicated_in_canonical_order(self) -> None:
         """Deduplicate selections and ignore their command-line order."""
-        self.assertEqual(
-            resolve_check_scopes(["kernel", "python", "kernel", "repository"]),
-            ("repository", "python", "kernel"),
+        assert (resolve_check_scopes(["kernel", "python", "kernel", "repository"])) == (
+            ("repository", "python", "kernel")
         )
 
 
-class RepositoryFastPathTests(unittest.TestCase):
+class RepositoryFastPathTests:
     """Keep the repository-only check completely on the host."""
 
     def test_repository_check_returns_before_runtime_or_workspace(self) -> None:
@@ -52,7 +50,7 @@ class RepositoryFastPathTests(unittest.TestCase):
         reporter.finish.assert_called_once_with()
 
 
-class KernelExecutionLimitTests(unittest.TestCase):
+class KernelExecutionLimitTests:
     """Keep kernel worker limits out of the prepare container command."""
 
     def test_kernel_limit_reaches_only_the_analysis_command(self) -> None:
@@ -97,29 +95,21 @@ class KernelExecutionLimitTests(unittest.TestCase):
             run_with_jobs(2)
 
             first_prepare, first_analysis, second_prepare, second_analysis = commands
-            self.assertIn(f"{root / 'logs-1/containers'}:/logs", first_prepare)
-            self.assertIn(f"{workspace}:/workspace:ro", first_prepare)
-            self.assertIn(f"{analyzer_cache['downloads']}:/cache/downloads", first_prepare)
-            self.assertIn(f"{analyzer_cache['linux']}:/cache/linux", first_prepare)
-            self.assertIn(f"{analyzer_cache['analysis']}:/cache/analysis", first_analysis)
-            self.assertIn(f"{analyzer_cache['linux']}:/cache/linux:ro", first_analysis)
-            self.assertEqual(
-                first_prepare[-5:],
-                ["prepare", "--profile", "microsd-uboot", "--build-type", "release"],
+            assert (f"{root / 'logs-1/containers'}:/logs") in (first_prepare)
+            assert (f"{workspace}:/workspace:ro") in (first_prepare)
+            assert (f"{analyzer_cache['downloads']}:/cache/downloads") in (first_prepare)
+            assert (f"{analyzer_cache['linux']}:/cache/linux") in (first_prepare)
+            assert (f"{analyzer_cache['analysis']}:/cache/analysis") in (first_analysis)
+            assert (f"{analyzer_cache['linux']}:/cache/linux:ro") in (first_analysis)
+            assert (first_prepare[-5:]) == (
+                ["prepare", "--profile", "microsd-uboot", "--build-type", "release"]
             )
-            self.assertEqual(
-                first_analysis[-7:],
-                ["check", "--jobs", "1", "--profile", "microsd-uboot", "--build-type", "release"],
+            assert (first_analysis[-7:]) == (
+                ["check", "--jobs", "1", "--profile", "microsd-uboot", "--build-type", "release"]
             )
-            self.assertEqual(
-                second_prepare[-5:],
-                ["prepare", "--profile", "microsd-uboot", "--build-type", "release"],
+            assert (second_prepare[-5:]) == (
+                ["prepare", "--profile", "microsd-uboot", "--build-type", "release"]
             )
-            self.assertEqual(
-                second_analysis[-7:],
-                ["check", "--jobs", "2", "--profile", "microsd-uboot", "--build-type", "release"],
+            assert (second_analysis[-7:]) == (
+                ["check", "--jobs", "2", "--profile", "microsd-uboot", "--build-type", "release"]
             )
-
-
-if __name__ == "__main__":
-    unittest.main()

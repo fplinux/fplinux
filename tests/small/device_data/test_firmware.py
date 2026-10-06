@@ -4,12 +4,12 @@
 from __future__ import annotations
 
 import hashlib
-import unittest
 
+import pytest
 from fplinux_cli.device_data import bluetooth_firmware as bluetooth
 
 
-class Cm4CompatibilityOperationTests(unittest.TestCase):
+class Cm4CompatibilityOperationTests:
     """Check exact image admission and copy semantics with synthetic instructions."""
 
     @staticmethod
@@ -22,9 +22,15 @@ class Cm4CompatibilityOperationTests(unittest.TestCase):
         """The synthetic output retains every byte except the two branch instructions."""
         original, expected = self._images()
 
-        self.assertEqual(bluetooth.omit_initial_pub_policy(original, (6, 14)), expected)
+        assert (bluetooth.omit_initial_pub_policy(original, (6, 14))) == (expected)
 
-    def test_revision_admits_only_the_exact_original_and_prepared_images(self) -> None:
+    @pytest.mark.parametrize(
+        "wrong_tail",
+        [pytest.param(b"", id="truncated-original"), pytest.param(b"!", id="changed-original")],
+    )
+    def test_revision_admits_only_the_exact_original_and_prepared_images(
+        self, wrong_tail: bytes
+    ) -> None:
         """Wrong source identity or output identity cannot produce an admitted image."""
         original, expected = self._images()
         revision = bluetooth.Cm4Revision(
@@ -34,21 +40,16 @@ class Cm4CompatibilityOperationTests(unittest.TestCase):
             pub_policy_offsets=(6, 14),
         )
 
-        self.assertEqual(revision.prepare(original), expected)
-        for wrong in (original[:-1], original[:-1] + b"!"):
-            with self.subTest(wrong=wrong), self.assertRaisesRegex(ValueError, "original CM4"):
-                revision.prepare(wrong)
+        assert (revision.prepare(original)) == (expected)
+        with pytest.raises(ValueError, match="original CM4"):
+            revision.prepare(original[:-1] + wrong_tail)
         wrong_output = bluetooth.Cm4Revision(
             size=22,
             original_sha256=hashlib.sha256(original).hexdigest(),
             prepared_sha256="0" * 64,
             pub_policy_offsets=(6, 14),
         )
-        with self.assertRaisesRegex(ValueError, "unexpected image"):
+        with pytest.raises(ValueError, match="unexpected image"):
             wrong_output.prepare(original)
-        with self.assertRaisesRegex(ValueError, "patch instructions"):
+        with pytest.raises(ValueError, match="patch instructions"):
             bluetooth.omit_initial_pub_policy(bytes(22), (6, 14))
-
-
-if __name__ == "__main__":
-    unittest.main()

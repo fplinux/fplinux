@@ -4,10 +4,9 @@
 from __future__ import annotations
 
 import hashlib
-import tempfile
-import unittest
-from pathlib import Path
+from typing import TYPE_CHECKING
 
+import pytest
 from fplinux_cli.artifacts.bundles import (
     BUILD_MANIFEST_NAME,
     bundle_pointer,
@@ -19,15 +18,17 @@ from fplinux_cli.workspace.capture import WorkspaceSnapshot
 
 from tests.bundle_support import file_record
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-class CommandBundleFixture(unittest.TestCase):
+
+class CommandBundleFixture:
     """Prepare complete test-owned generations and their signing input."""
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _command_bundle(self, tmp_path: Path) -> None:
         """Create a published generation and the signing input it claims."""
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        self.root = tmp_path
         self.cache = self.root / ".cache"
         self.output = self.cache / "out"
         self.target_config: dict[str, object] = {}

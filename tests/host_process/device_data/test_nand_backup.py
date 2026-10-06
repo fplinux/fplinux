@@ -4,17 +4,22 @@
 from __future__ import annotations
 
 import os
+import re
 import signal
 import subprocess
 import sys
 import tempfile
 import time
-import unittest
-from contextlib import suppress
+from contextlib import ExitStack, suppress
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import mock
 
+import pytest
 from fplinux_cli.runtime import nand_backup, ssh_transport
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 from tests import ROOT
 from tests.ssh_transport_support import create_ready_session
@@ -32,22 +37,27 @@ GEOMETRY_64_OOB = (
 )
 
 
-class NandBackupSshStreamTests(unittest.TestCase):
+class NandBackupSshStreamTests:
     """Exercise the real SSH process boundary with a controlled local ssh executable."""
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _prepare_case(self) -> Iterator[None]:
         """Create one valid session and a fake SSH executable per test."""
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.enterContext(mock.patch("fplinux_cli.reporting.run.ROOT", Path(self.temporary.name)))
-        self.root = Path(self.temporary.name) / "runtime"
-        self.root.mkdir(mode=0o700)
-        self.session = create_ready_session(self.root)
-        self.tools = Path(self.temporary.name) / "bin"
-        self.tools.mkdir()
-        self.ssh = self.tools / "ssh"
-        self.ssh.write_text(
-            """#!/bin/sh
+        with ExitStack() as cleanup:
+            self.temporary = tempfile.TemporaryDirectory()
+            cleanup.enter_context(self.temporary)
+            reporting_root = mock.patch(
+                "fplinux_cli.reporting.run.ROOT", Path(self.temporary.name)
+            )
+            cleanup.enter_context(reporting_root)
+            self.root = Path(self.temporary.name) / "runtime"
+            self.root.mkdir(mode=0o700)
+            self.session = create_ready_session(self.root)
+            self.tools = Path(self.temporary.name) / "bin"
+            self.tools.mkdir()
+            self.ssh = self.tools / "ssh"
+            self.ssh.write_text(
+                """#!/bin/sh
 for argument do remote_command=$argument; done
 case "$remote_command" in
 'cat /sys/class/misc/ums9117-nand-raw/device/geometry 3</dev/ums9117-nand-raw')
@@ -78,9 +88,10 @@ timeout)
 *) exit 64 ;;
 esac
 """,
-            encoding="ascii",
-        )
-        self.ssh.chmod(0o755)
+                encoding="ascii",
+            )
+            self.ssh.chmod(0o755)
+            yield
 
     def _stream(self, mode: str, destination: Path, *, timeout: float) -> None:
         with (
@@ -101,16 +112,16 @@ esac
 
         self._stream("success", destination, timeout=2)
 
-        self.assertEqual(destination.read_bytes(), b"raw-page-bytes")
+        assert (destination.read_bytes()) == (b"raw-page-bytes")
 
     def test_nonzero_ssh_exit_reports_the_remote_diagnostic(self) -> None:
         """A failed remote reader gives its exit status and stderr to the caller."""
         destination = Path(self.temporary.name) / "nand.raw"
 
-        with self.assertRaisesRegex(SystemExit, "exit status 8: NAND read failed"):
+        with pytest.raises(SystemExit, match="exit status 8: NAND read failed"):
             self._stream("nonzero", destination, timeout=2)
 
-        self.assertEqual(destination.read_bytes(), b"partial")
+        assert (destination.read_bytes()) == (b"partial")
 
     def test_short_remote_stream_preserves_an_existing_backup(self) -> None:
         """A real SSH short read is rejected before it can replace the previous image."""
@@ -126,7 +137,7 @@ esac
                     "FPLINUX_GEOMETRY": GEOMETRY_128_OOB,
                 },
             ),
-            self.assertRaisesRegex(SystemExit, "incomplete raw NAND image"),
+            pytest.raises(SystemExit, match="incomplete raw NAND image"),
         ):
             nand_backup.backup_nand(
                 lambda: (ssh_transport, self.session),
@@ -135,8 +146,8 @@ esac
                 raw_device="/dev/ums9117-nand-raw",
             )
 
-        self.assertEqual(destination.read_bytes(), b"previous raw image")
-        self.assertEqual(list(destination.parent.glob(".nand.raw.*")), [])
+        assert (destination.read_bytes()) == (b"previous raw image")
+        assert (list(destination.parent.glob(".nand.raw.*"))) == ([])
 
     def test_target_backup_streams_only_its_declared_read_device(self) -> None:
         """Target selection reaches the real SSH process with one read of its declared device."""
@@ -157,18 +168,21 @@ esac
                     "FPLINUX_GEOMETRY": GEOMETRY_128_OOB,
                 },
             ),
-            self.assertRaisesRegex(SystemExit, "expected 142606336 bytes, got 14"),
+            pytest.raises(SystemExit, match="expected 142606336 bytes, got 14"),
         ):
             nand_backup.backup_target_nand("nokia-ta1618", destination, profile="microsd-uboot")
 
-        self.assertFalse(destination.exists())
+        assert not (destination.exists())
         acquire.assert_called_once_with(
             "nokia-ta1618", profile="microsd-uboot", build_type="release"
         )
         read_commands = commands.read_text(encoding="ascii").splitlines()
-        self.assertEqual(len(read_commands), 1, read_commands)
+        assert (len(read_commands)) == (1), read_commands
         # dd copies the device to stdout; any block size is a valid read.
-        self.assertRegex(read_commands[0], r"\Aexec dd if=/dev/ums9117-nand-raw bs=[1-9][0-9]*\Z")
+        assert (
+            re.search(r"\Aexec dd if=/dev/ums9117-nand-raw bs=[1-9][0-9]*\Z", read_commands[0])
+            is not None
+        )
 
     def test_rejected_device_read_cannot_publish_or_replace_an_image(self) -> None:
         """A remote reader error leaves an existing INOI backup intact."""
@@ -188,12 +202,12 @@ esac
                     "FPLINUX_GEOMETRY": GEOMETRY_64_OOB,
                 },
             ),
-            self.assertRaisesRegex(SystemExit, "exit status 8: NAND read failed"),
+            pytest.raises(SystemExit, match="exit status 8: NAND read failed"),
         ):
             nand_backup.backup_target_nand("inoi-244-modern-4g", destination)
 
-        self.assertEqual(destination.read_bytes(), b"previous complete image")
-        self.assertEqual(list(destination.parent.glob(".inoi.raw.*")), [])
+        assert (destination.read_bytes()) == (b"previous complete image")
+        assert (list(destination.parent.glob(".inoi.raw.*"))) == ([])
 
     def test_timeout_kills_and_reaps_the_isolated_ssh_process_group(self) -> None:
         """A stuck transfer terminates within its deadline without leaving its SSH child alive."""
@@ -201,12 +215,12 @@ esac
         pid_file = Path(self.temporary.name) / "ssh.pid"
         with (
             mock.patch.dict(os.environ, {"FPLINUX_STREAM_PID": str(pid_file)}),
-            self.assertRaisesRegex(SystemExit, "timed out after 0.2s"),
+            pytest.raises(SystemExit, match=r"timed out after 0.2s"),
         ):
             self._stream("timeout", destination, timeout=0.2)
 
         process_id = int(pid_file.read_text(encoding="ascii"))
-        with self.assertRaises(ProcessLookupError):
+        with pytest.raises(ProcessLookupError):
             os.kill(process_id, 0)
 
     def test_interrupt_forwards_to_an_isolated_stream_helper_and_reaps_ssh(self) -> None:
@@ -254,7 +268,7 @@ with Path(sys.argv[2]).open('w+b') as destination:
             deadline = time.monotonic() + 5
             while not child_pid.exists() and time.monotonic() < deadline:
                 time.sleep(0.01)
-            self.assertTrue(child_pid.exists(), "stream helper did not start its SSH child")
+            assert child_pid.exists(), "stream helper did not start its SSH child"
             os.kill(process.pid, signal.SIGINT)
             stdout, stderr = process.communicate(timeout=5)
         except BaseException:
@@ -263,11 +277,7 @@ with Path(sys.argv[2]).open('w+b') as destination:
             process.communicate(timeout=5)
             raise
 
-        self.assertEqual(process.returncode, 130, f"stdout:\n{stdout}\nstderr:\n{stderr}")
+        assert (process.returncode) == (130), f"stdout:\n{stdout}\nstderr:\n{stderr}"
         process_id = int(child_pid.read_text(encoding="ascii"))
-        with self.assertRaises(ProcessLookupError):
+        with pytest.raises(ProcessLookupError):
             os.kill(process_id, 0)
-
-
-if __name__ == "__main__":
-    unittest.main()

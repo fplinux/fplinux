@@ -5,12 +5,11 @@ from __future__ import annotations
 
 import copy
 import tarfile
-import tempfile
-import unittest
-from pathlib import Path
+from contextlib import ExitStack
 from typing import TYPE_CHECKING, Any
 from unittest import mock
 
+import pytest
 from fplinux_cli import common
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import sources as sources_build
@@ -18,17 +17,19 @@ from fplinux_cli.build.kernel import prepare as linux_build
 from fplinux_cli.manifests.linux import discover_linux_targets
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
+
     from fplinux_cli.build.kernel import state as linux_state
 
 
-class LinuxSourceFixture(unittest.TestCase):
+class LinuxSourceFixture:
     """Provide a two-board Linux source and the production preparer; define no test cases."""
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def linux_source_fixture(self, tmp_path: Path) -> Iterator[None]:
         """Create a two-board source fixture; only remote archive fetching is replaced."""
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        self.root = tmp_path
         self.cache = self.root / "cache"
         archive_root = self.root / "upstream/linux-test"
         (archive_root / "drivers").mkdir(parents=True)
@@ -54,11 +55,13 @@ class LinuxSourceFixture(unittest.TestCase):
         self.platform("soc")
         self.target("alpha")
         self.target("beta")
-        self.enterContext(mock.patch.object(common, "ROOT", self.root))
-        self.enterContext(mock.patch.object(inputs_build, "CACHE", self.cache))
-        self.fetch = self.enterContext(
-            mock.patch.object(sources_build, "fetch", return_value=self.archive)
-        )
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch.object(common, "ROOT", self.root))
+            stack.enter_context(mock.patch.object(inputs_build, "CACHE", self.cache))
+            self.fetch = stack.enter_context(
+                mock.patch.object(sources_build, "fetch", return_value=self.archive)
+            )
+            yield
 
     def platform(self, name: str, *, source_lock: str = "linux") -> None:
         """Write the Linux-only platform manifest consumed by real discovery."""

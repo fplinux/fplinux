@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import struct
-import unittest
 
+import pytest
 from fplinux_cli.device_data import audio_profile
 
 from tests.small.device_data.audio_expected import (
@@ -21,7 +21,7 @@ from tests.small.device_data.audio_expected import (
 from tests.small.device_data.audio_fixtures import inoi_audio_records, nokia_audio_records
 
 
-class PlaybackProcessingTests(unittest.TestCase):
+class PlaybackProcessingTests:
     """Protect the stock EQ6, output scale and ALC settings designed from fitted EQ sets."""
 
     @staticmethod
@@ -53,14 +53,12 @@ class PlaybackProcessingTests(unittest.TestCase):
         }
         cosine_entries = {0: 16384, 1: 16383, 683: 14186, 1024: 11585, 2047: 12, 2048: 0}
 
-        self.assertEqual(len(audio_profile.LINEAR_GAIN_TABLE), 1801)
-        self.assertEqual(len(audio_profile.COSINE_TABLE), 2049)
+        assert len(audio_profile.LINEAR_GAIN_TABLE) == 1801
+        assert len(audio_profile.COSINE_TABLE) == 2049
         for index, value in gain_entries.items():
-            with self.subTest(table="gain", index=index):
-                self.assertEqual(audio_profile.LINEAR_GAIN_TABLE[index], value)
+            assert audio_profile.LINEAR_GAIN_TABLE[index] == value, f"gain table index {index}"
         for index, value in cosine_entries.items():
-            with self.subTest(table="cosine", index=index):
-                self.assertEqual(audio_profile.COSINE_TABLE[index], value)
+            assert audio_profile.COSINE_TABLE[index] == value, f"cosine table index {index}"
 
     def test_fitted_route_words_match_independent_stock_values(self) -> None:
         """S6, ALC and coefficient words sit at their wire offsets with the stock values."""
@@ -78,13 +76,13 @@ class PlaybackProcessingTests(unittest.TestCase):
         )
         for phone, route, output_scale, alc_ratio in route_values:
             offset = PROCESSING_OFFSET + route * PROCESSING_ROUTE_SIZE
-            with self.subTest(phone=phone, route=route):
-                self.assertEqual(
-                    struct.unpack_from("<HB", profiles[phone], offset), (output_scale, 1)
-                )
-                self.assertEqual(
-                    struct.unpack_from("<h", profiles[phone], offset + 13)[0], alc_ratio
-                )
+            assert struct.unpack_from("<HB", profiles[phone], offset) == (
+                output_scale,
+                1,
+            ), f"{phone} route {route} output scale and ALC enable"
+            assert struct.unpack_from("<h", profiles[phone], offset + 13)[0] == alc_ratio, (
+                f"{phone} route {route} ALC ratio"
+            )
 
         # The stock register image of INOI Handsfree at 48 kHz, sections 0..3,
         # and of the Nokia Headset 100 Hz band at 48 kHz.
@@ -97,10 +95,9 @@ class PlaybackProcessingTests(unittest.TestCase):
         )
         for phone, route, section, words in section_values:
             rate_48k = PROCESSING_OFFSET + route * PROCESSING_ROUTE_SIZE + 25 + 2 * 72
-            with self.subTest(phone=phone, route=route, section=section):
-                self.assertEqual(
-                    struct.unpack_from("<6h", profiles[phone], rate_48k + 12 * section), words
-                )
+            assert struct.unpack_from("<6h", profiles[phone], rate_48k + 12 * section) == words, (
+                f"{phone} route {route} section {section}"
+            )
 
     def test_eq_sets_are_selected_by_mode_index_not_by_position(self) -> None:
         """Moving sets in NV440 changes nothing when the modes select their new positions."""
@@ -118,7 +115,7 @@ class PlaybackProcessingTests(unittest.TestCase):
 
         profile = self._profile((downloaded, protected))
 
-        self.assertEqual(profile[PROCESSING_OFFSET:], FITTED_NOKIA_PROCESSING_SECTION)
+        assert profile[PROCESSING_OFFSET:] == FITTED_NOKIA_PROCESSING_SECTION
 
     def test_shelves_and_other_low_cut_types_pass_through_like_stock(self) -> None:
         """Stock designs no shelf or third low-cut type; those sections pass audio unchanged."""
@@ -137,11 +134,10 @@ class PlaybackProcessingTests(unittest.TestCase):
 
         profile = self._profile((downloaded, protected))
 
-        self.assertEqual(
-            profile[PROCESSING_OFFSET:],
+        assert profile[PROCESSING_OFFSET:] == (
             processing_route(0x05A6, 26398, headset)
             + processing_route(0x0A0C, 26398, NOKIA_HANDSFREE_SECTIONS)
-            + processing_route(0x071D, 26398, headfree),
+            + processing_route(0x071D, 26398, headfree)
         )
 
     def test_route_alc_enable_and_output_scale_follow_the_selected_set(self) -> None:
@@ -161,81 +157,104 @@ class PlaybackProcessingTests(unittest.TestCase):
 
         profile = self._profile((downloaded, protected))
 
-        self.assertEqual(profile[PROCESSING_OFFSET:], bytes(expected))
+        assert profile[PROCESSING_OFFSET:] == bytes(expected)
 
-    def test_profile_rejects_unsupported_or_unsafe_processing(self) -> None:
-        """Only a supported, stable EQ set within the datapath headroom produces a profile."""
-        handsfree = 3 * 1072
-        handsfree_set = 3 * 544
-        cases: tuple[tuple[str, int, int, str, tuple[int, ...], str], ...] = (
-            ("bypass", 426, handsfree + 44, "<H", (0x001F,), "Handsfree bypasses playback"),
-            (
-                "fixed EQ mode",
+    @pytest.mark.parametrize(
+        ("identifier", "offset", "value_format", "values", "error"),
+        [
+            pytest.param(
+                426, 3 * 1072 + 44, "<H", (0x001F,), "Handsfree bypasses playback", id="bypass"
+            ),
+            pytest.param(
                 426,
-                handsfree + 44,
+                3 * 1072 + 44,
                 "<H",
                 (0x0001,),
                 "Handsfree equalizer mode is not selected by the player",
+                id="fixed-eq-mode",
             ),
-            ("set index 0", 426, handsfree + 40, "<H", (0x0021,), "EQ set 0; expected 1..15"),
-            ("set index 16", 426, handsfree + 40, "<H", (0x4021,), "EQ set 16; expected 1..15"),
-            (
-                "other mode's set",
+            pytest.param(
+                426, 3 * 1072 + 40, "<H", (0x0021,), "EQ set 0; expected 1..15", id="set-index-0"
+            ),
+            pytest.param(
+                426, 3 * 1072 + 40, "<H", (0x4021,), "EQ set 16; expected 1..15", id="set-index-16"
+            ),
+            pytest.param(
                 426,
                 1072 + 40,
                 "<H",
                 (0x10EC,),
                 "set 4, which is not EQ_Headfree",
+                id="other-mode-set",
             ),
-            ("zero S6", 426, handsfree + 46, "<h", (0,), "Handsfree output scale 0 is not"),
-            ("negative S6", 426, handsfree + 46, "<h", (-1,), "Handsfree output scale -1 is not"),
-            ("output limit", 440, handsfree_set + 16, "<H", (0x017E,), "output limit is not"),
-            ("eight bands", 440, handsfree_set + 16, "<H", (0x817F,), "uses eight bands"),
-            (
-                "Butterworth low-cut",
+            pytest.param(
+                426, 3 * 1072 + 46, "<h", (0,), "Handsfree output scale 0 is not", id="zero-s6"
+            ),
+            pytest.param(
+                426,
+                3 * 1072 + 46,
+                "<h",
+                (-1,),
+                "Handsfree output scale -1 is not",
+                id="negative-s6",
+            ),
+            pytest.param(
+                440, 3 * 544 + 16, "<H", (0x017E,), "output limit is not", id="output-limit"
+            ),
+            pytest.param(440, 3 * 544 + 16, "<H", (0x817F,), "uses eight bands", id="eight-bands"),
+            pytest.param(
                 440,
-                handsfree_set + 20,
+                3 * 544 + 20,
                 "<H",
                 (0xF980,),
                 "EQ_Handsfree Butterworth low-cut filter is not supported",
+                id="butterworth-low-cut",
             ),
-            ("negative corner", 440, handsfree_set + 66, "<h", (-200,), "corner frequency is neg"),
-            (
-                "zero low-cut corners",
+            pytest.param(
+                440, 3 * 544 + 66, "<h", (-200,), "corner frequency is neg", id="negative-corner"
+            ),
+            pytest.param(
                 440,
-                handsfree_set + 66,
+                3 * 544 + 66,
                 "<4h",
                 (0, 0, 0, 0),
                 "EQ_Handsfree section 0 is unstable at 24000 Hz",
+                id="zero-low-cut-corners",
             ),
-            (
-                "two +5 dB bands at 1 kHz",
+            pytest.param(
                 440,
-                handsfree_set + 22,
+                3 * 544 + 22,
                 "<8h",
                 (1000, 512, 50, 0, 1000, 512, 50, 0),
                 r"EQ_Handsfree boosts 24000 Hz playback by [0-9.]+ dB, above the 6 dB",
+                id="two-5-db-bands-at-1-khz",
             ),
             # A dense scan of the running response puts the peak of this
             # narrowest possible +7 dB band at 6.41 dB.
-            (
-                "narrow +7 dB band at 2.5 kHz",
+            pytest.param(
                 440,
-                handsfree_set + 38,
+                3 * 544 + 38,
                 "<4h",
                 (2500, 32767, 70, 0),
                 "EQ_Handsfree boosts 24000 Hz playback by 6.4 dB, above the 6 dB",
+                id="narrow-7-db-band-at-2_5-khz",
             ),
-        )
-        for name, identifier, offset, value_format, values, error in cases:
-            downloaded, protected = nokia_audio_records()
-            for records in (downloaded, protected):
-                changed = bytearray(records[identifier])
-                struct.pack_into(value_format, changed, offset, *values)
-                records[identifier] = bytes(changed)
-            with self.subTest(name=name), self.assertRaisesRegex(ValueError, error):
-                self._profile((downloaded, protected))
-
-
-if __name__ == "__main__":
-    unittest.main()
+        ],
+    )
+    def test_profile_rejects_unsupported_or_unsafe_processing(
+        self,
+        *,
+        identifier: int,
+        offset: int,
+        value_format: str,
+        values: tuple[int, ...],
+        error: str,
+    ) -> None:
+        """Only a supported, stable EQ set within the datapath headroom produces a profile."""
+        downloaded, protected = nokia_audio_records()
+        for records in (downloaded, protected):
+            changed = bytearray(records[identifier])
+            struct.pack_into(value_format, changed, offset, *values)
+            records[identifier] = bytes(changed)
+        with pytest.raises(ValueError, match=error):
+            self._profile((downloaded, protected))

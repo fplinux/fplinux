@@ -11,10 +11,10 @@ import platform
 import shutil
 import subprocess
 import tempfile
-import unittest
 from pathlib import Path
 from unittest import mock
 
+import pytest
 from fplinux_cli import common
 from fplinux_cli.common import ROOT as SOURCE_ROOT
 from fplinux_cli.environment import doctor as env_doctor
@@ -54,7 +54,7 @@ def _copy_checkout(root: Path) -> None:
     )
 
 
-class ContainerImageRecipeTests(unittest.TestCase):
+class ContainerImageRecipeTests:
     """Keep image identity independent from the absolute checkout directory."""
 
     def test_image_and_check_recipes_ignore_checkout_location(self) -> None:
@@ -84,21 +84,19 @@ class ContainerImageRecipeTests(unittest.TestCase):
             "--build-arg",
             "FPLINUX_OFFLINE=1",
         )
-        self.assertEqual(first_arguments, expected_arguments)
-        self.assertEqual(second_arguments, expected_arguments)
-        self.assertEqual(first_image, second_image)
-        self.assertEqual(first_check, second_check)
+        assert (first_arguments) == (expected_arguments)
+        assert (second_arguments) == (expected_arguments)
+        assert (first_image) == (second_image)
+        assert (first_check) == (second_check)
 
     def test_image_references_are_bound_to_exact_recipe_inputs(self) -> None:
         """Both local tags change only when their exact causal input changes."""
         lock = _container_lock()
-        self.assertEqual(
-            images.container_base_image_reference(lock),
-            f"localhost/fplinux-alpine-base:3.24.1-{'e' * 64}",
+        assert (images.container_base_image_reference(lock)) == (
+            f"localhost/fplinux-alpine-base:3.24.1-{'e' * 64}"
         )
-        self.assertEqual(
-            images.container_image_reference(lock, "a" * 64),
-            f"localhost/fplinux-build:{'a' * 64}",
+        assert (images.container_image_reference(lock, "a" * 64)) == (
+            f"localhost/fplinux-build:{'a' * 64}"
         )
 
     def test_runtime_binary_and_content_are_causal_image_inputs(self) -> None:
@@ -117,10 +115,9 @@ class ContainerImageRecipeTests(unittest.TestCase):
             with mock.patch.object(common, "ROOT", root):
                 recipe = images.container_image_recipe_digest(lock)
                 runtime_changed = images.container_image_recipe_digest(changed_runtime)
-        self.assertNotEqual(recipe, runtime_changed)
-        self.assertNotEqual(
-            images.container_artifact_recipe_digest(recipe, "a" * 64),
-            images.container_artifact_recipe_digest(recipe, "b" * 64),
+        assert (recipe) != (runtime_changed)
+        assert (images.container_artifact_recipe_digest(recipe, "a" * 64)) != (
+            images.container_artifact_recipe_digest(recipe, "b" * 64)
         )
 
     def test_host_terminal_patch_invalidates_image_but_target_aport_does_not(self) -> None:
@@ -132,15 +129,13 @@ class ContainerImageRecipeTests(unittest.TestCase):
                 before = images.container_image_recipe_digest(_container_lock())
                 aport = root / "alpine/aports/fplinux-terminal/APKBUILD"
                 aport.write_text(aport.read_text() + "\n# Target-only package change\n")
-                self.assertEqual(images.container_image_recipe_digest(_container_lock()), before)
+                assert (images.container_image_recipe_digest(_container_lock())) == (before)
                 patch = root / "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch"
                 patch.write_text(patch.read_text() + "\n")
-                self.assertNotEqual(
-                    images.container_image_recipe_digest(_container_lock()), before
-                )
+                assert (images.container_image_recipe_digest(_container_lock())) != (before)
 
 
-class SetupLifecycleTests(unittest.TestCase):
+class SetupLifecycleTests:
     """Keep direct setup inside the unified run metadata lifecycle."""
 
     def test_ready_direct_setup_finishes_its_own_reporter(self) -> None:
@@ -172,17 +167,11 @@ class SetupLifecycleTests(unittest.TestCase):
                 mock.patch.object(env_setup, "install_git_hooks"),
             ):
                 state = env_setup.setup(lock=lock)
-            self.assertEqual(
-                state,
-                ImageState("a" * 64, "b" * 64, "b" * 64),
-            )
-            self.assertEqual(load_image_state(root / ".cache", "a" * 64), state)
+            assert (state) == (ImageState("a" * 64, "b" * 64, "b" * 64))
+            assert (load_image_state(root / ".cache", "a" * 64)) == (state)
             metadata_paths = list((root / ".cache/logs/setup").glob("*/run.json"))
-            self.assertEqual(len(metadata_paths), 1)
-            self.assertEqual(
-                json.loads(metadata_paths[0].read_text())["status"],
-                "success",
-            )
+            assert (len(metadata_paths)) == (1)
+            assert (json.loads(metadata_paths[0].read_text())["status"]) == ("success")
 
     def test_setup_passes_exact_kern_build_boundary_to_stage(self) -> None:
         """Build the recipe-addressed tag through the pinned project-local binary."""
@@ -197,8 +186,8 @@ class SetupLifecycleTests(unittest.TestCase):
         def collect_context(_command: list[str], *, cwd: Path, **_kwargs: object) -> None:
             staged_recipe["Containerfile"] = (cwd / "Containerfile").read_bytes()
             staged_recipe["package.json"] = (cwd / "package.json").read_bytes()
-            self.assertEqual(list((cwd / "inputs").iterdir()), [])
-            self.assertFalse((cwd / ".cache").exists())
+            assert (list((cwd / "inputs").iterdir())) == ([])
+            assert not ((cwd / ".cache").exists())
 
         stage.run.side_effect = collect_context
         with tempfile.TemporaryDirectory() as temporary:
@@ -249,37 +238,34 @@ class SetupLifecycleTests(unittest.TestCase):
                 env_setup.setup(reporter=reporter, lock=lock)
 
         call = stage.run.call_args
-        self.assertIsNotNone(call)
+        assert (call) is not None
         command = call.args[0]
-        self.assertEqual(command[:2], ["/cache/kern", "build"])
-        self.assertTrue(
-            command[command.index("-t") + 1].startswith(
-                f"localhost/fplinux-build:{'a' * 64}-staging-{os.getpid()}-"
-            )
+        assert (command[:2]) == (["/cache/kern", "build"])
+        assert command[command.index("-t") + 1].startswith(
+            f"localhost/fplinux-build:{'a' * 64}-staging-{os.getpid()}-"
         )
-        self.assertEqual(command[command.index("-f") + 1], "Containerfile")
+        assert (command[command.index("-f") + 1]) == ("Containerfile")
         build_arguments = {
             command[index + 1]
             for index, value in enumerate(command[:-1])
             if value == "--build-arg"
         }
-        self.assertEqual(
-            build_arguments,
+        assert (build_arguments) == (
             {
                 f"BASE_IMAGE=localhost/fplinux-alpine-base:3.24.1-{'e' * 64}",
                 "FPLINUX_OFFLINE=1",
                 f"FPLINUX_IMAGE_RECIPE={'a' * 64}",
                 f"FPLINUX_IMAGE_GENERATION={'b' * 64}",
-            },
+            }
         )
-        self.assertEqual(command[-1], ".")
-        self.assertEqual(staged_recipe["Containerfile"], b"Containerfile")
-        self.assertEqual(staged_recipe["package.json"], b"package.json")
-        self.assertFalse(call.kwargs["cwd"].exists())
-        self.assertEqual(call.kwargs["timeout"], 2 * 60 * 60)
-        self.assertEqual(call.kwargs["env"]["XDG_CACHE_HOME"], str(root / ".cache/kern/cache"))
-        self.assertEqual(call.kwargs["env"]["XDG_DATA_HOME"], str(root / ".cache/kern/data"))
-        self.assertEqual(call.kwargs["env"]["XDG_CONFIG_HOME"], str(root / ".cache/kern/config"))
+        assert (command[-1]) == (".")
+        assert (staged_recipe["Containerfile"]) == (b"Containerfile")
+        assert (staged_recipe["package.json"]) == (b"package.json")
+        assert not (call.kwargs["cwd"].exists())
+        assert (call.kwargs["timeout"]) == (2 * 60 * 60)
+        assert (call.kwargs["env"]["XDG_CACHE_HOME"]) == (str(root / ".cache/kern/cache"))
+        assert (call.kwargs["env"]["XDG_DATA_HOME"]) == (str(root / ".cache/kern/data"))
+        assert (call.kwargs["env"]["XDG_CONFIG_HOME"]) == (str(root / ".cache/kern/config"))
 
     def test_kern_image_probe_timeout_is_reported(self) -> None:
         """A stuck runtime lookup fails with its named boundary instead of hanging."""
@@ -289,7 +275,7 @@ class SetupLifecycleTests(unittest.TestCase):
                 "fplinux_cli.environment.image_store.subprocess.run",
                 side_effect=subprocess.TimeoutExpired(["kern", "box"], 60),
             ),
-            self.assertRaisesRegex(SystemExit, "Kern image lookup timed out"),
+            pytest.raises(SystemExit, match="Kern image lookup timed out"),
         ):
             image_store.image_generation("kern", "localhost/fplinux:locked")
 
@@ -308,13 +294,12 @@ class SetupLifecycleTests(unittest.TestCase):
                 ),
             ),
         ):
-            self.assertEqual(
-                image_store.image_generation("kern", "localhost/fplinux:locked"),
-                generation,
+            assert (image_store.image_generation("kern", "localhost/fplinux:locked")) == (
+                generation
             )
 
 
-class KernRetentionTests(unittest.TestCase):
+class KernRetentionTests:
     """Bound project-owned provider state without touching unrelated images or files."""
 
     def test_obsolete_project_images_exclude_current_and_unrelated_references(self) -> None:
@@ -369,7 +354,7 @@ class KernRetentionTests(unittest.TestCase):
             ),
             mock.patch.object(image_store, "tag_image", side_effect=tag),
             mock.patch.object(image_store, "remove_images", side_effect=remove),
-            self.assertRaisesRegex(SystemExit, "tag failed"),
+            pytest.raises(SystemExit, match="tag failed"),
         ):
             image_store.publish_staged_image(
                 "kern",
@@ -378,10 +363,10 @@ class KernRetentionTests(unittest.TestCase):
                 lambda _image: True,
             )
 
-        self.assertEqual(images, {destination: "last-good"})
+        assert (images) == ({destination: "last-good"})
 
 
-class GitHookPathTests(unittest.TestCase):
+class GitHookPathTests:
     """Preserve hook ownership and bounded Git query failures."""
 
     def test_git_hook_timeout_is_reported_without_mutation(self) -> None:
@@ -392,7 +377,7 @@ class GitHookPathTests(unittest.TestCase):
                 "fplinux_cli.environment.git_hooks.subprocess.run",
                 side_effect=subprocess.TimeoutExpired(["git", "rev-parse"], 60),
             ),
-            self.assertRaisesRegex(SystemExit, "Git hook configuration timed out"),
+            pytest.raises(SystemExit, match="Git hook configuration timed out"),
         ):
             git_hooks.install_git_hooks()
 
@@ -426,7 +411,7 @@ class GitHookPathTests(unittest.TestCase):
                 ),
             ):
                 git_hooks.install_git_hooks()
-            self.assertEqual(len(commands), 2)
+            assert (len(commands)) == (2)
 
     def test_different_absolute_hook_path_is_rejected_without_mutation(self) -> None:
         """Reject another hook owner without rewriting the Git configuration."""
@@ -451,13 +436,13 @@ class GitHookPathTests(unittest.TestCase):
                 mock.patch(
                     "fplinux_cli.environment.git_hooks.subprocess.run", side_effect=fake_run
                 ),
-                self.assertRaisesRegex(SystemExit, "core.hooksPath is already set"),
+                pytest.raises(SystemExit, match=r"core.hooksPath is already set"),
             ):
                 git_hooks.install_git_hooks()
-            self.assertEqual(len(commands), 3)
+            assert (len(commands)) == (3)
 
 
-class DoctorDiagnosticsTests(unittest.TestCase):
+class DoctorDiagnosticsTests:
     """Keep environment diagnostics aggregated and consistently formatted."""
 
     def test_missing_runtime_and_unsupported_host_are_both_reported(self) -> None:
@@ -471,17 +456,11 @@ class DoctorDiagnosticsTests(unittest.TestCase):
             mock.patch.object(env_doctor, "kern_available", return_value=False),
             contextlib.redirect_stdout(stdout),
             contextlib.redirect_stderr(stderr),
-            self.assertRaises(SystemExit) as raised,
+            pytest.raises(SystemExit) as raised,
         ):
             env_doctor.doctor()
-        self.assertEqual(raised.exception.code, 1)
-        self.assertIn("linux/amd64", stderr.getvalue())
-        self.assertIn("Kern is not ready", stderr.getvalue())
-        self.assertTrue(
-            all(line.startswith("fplinux: ") for line in stderr.getvalue().splitlines())
-        )
-        self.assertNotIn("doctor: OK", stdout.getvalue())
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert (raised.value.code) == (1)
+        assert ("linux/amd64") in (stderr.getvalue())
+        assert ("Kern is not ready") in (stderr.getvalue())
+        assert all(line.startswith("fplinux: ") for line in stderr.getvalue().splitlines())
+        assert ("doctor: OK") not in (stdout.getvalue())

@@ -6,10 +6,11 @@ from __future__ import annotations
 import hashlib
 import lzma
 import tempfile
-import unittest
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import mock
 
+import pytest
 from fplinux_cli.alpine import recipes as alpine_recipes
 from fplinux_cli.alpine import rootfs_state as alpine_state
 from fplinux_cli.device_data import inputs as firmware_inputs
@@ -19,38 +20,43 @@ from fplinux_cli.workspace import staging as workspace_staging
 
 from tests.small.workspace.workspace_fixtures import empty_package_graph
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
-class FirmwareInputTests(unittest.TestCase):
+
+class FirmwareInputTests:
     """Keep optional groups, build identity, and their consumers explicit."""
 
     target = "demo"
 
-    def setUp(self) -> None:
+    @pytest.fixture(autouse=True)
+    def prepared_directory(self) -> Iterator[None]:
         """Create one isolated selected generation for each test."""
         self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
-        self.cache = self.root / ".cache"
-        target_root = self.cache / "device-data" / self.target
-        self.generation = target_root / "generations/generation-test"
-        (self.generation / "groups").mkdir(parents=True)
-        (target_root / "current").write_text("generation-test\n", encoding="ascii")
-        self.groups: dict[str, list[dict[str, object]]] = {
-            "bluetooth": [
-                self._declaration(
-                    "controller.bin",
-                    "chip/controller.bin",
-                    8,
-                )
-            ],
-            "audio-profile": [
-                self._declaration(
-                    "profile.bin",
-                    "fplinux/profile.bin",
-                    7,
-                )
-            ],
-        }
+        with self.temporary:
+            self.root = Path(self.temporary.name)
+            self.cache = self.root / ".cache"
+            target_root = self.cache / "device-data" / self.target
+            self.generation = target_root / "generations/generation-test"
+            (self.generation / "groups").mkdir(parents=True)
+            (target_root / "current").write_text("generation-test\n", encoding="ascii")
+            self.groups: dict[str, list[dict[str, object]]] = {
+                "bluetooth": [
+                    self._declaration(
+                        "controller.bin",
+                        "chip/controller.bin",
+                        8,
+                    )
+                ],
+                "audio-profile": [
+                    self._declaration(
+                        "profile.bin",
+                        "fplinux/profile.bin",
+                        7,
+                    )
+                ],
+            }
+            yield
 
     @staticmethod
     def _declaration(
@@ -82,7 +88,12 @@ class FirmwareInputTests(unittest.TestCase):
             self.cache,
         )
 
-    def test_firmware_schema_accepts_safe_records_and_rejects_bad_paths(self) -> None:
+    @pytest.mark.parametrize(
+        "case",
+        ["source directories", "escaping destinations", "duplicate destinations", "zero sizes"],
+        ids=["source-directory", "escaping-destination", "duplicate-destination", "zero-size"],
+    )
+    def test_firmware_schema_accepts_safe_records_and_rejects_bad_paths(self, case: str) -> None:
         """Each group declaration names one source and one firmware destination."""
         contents = b"firmware"
         digest = hashlib.sha256(contents).hexdigest()
@@ -91,8 +102,7 @@ class FirmwareInputTests(unittest.TestCase):
             "target bluetooth firmware",
         )
 
-        self.assertEqual(
-            normalized,
+        assert (normalized) == (
             [
                 {
                     "source": "controller.bin",
@@ -100,7 +110,7 @@ class FirmwareInputTests(unittest.TestCase):
                     "size": 8,
                     "sha256": digest,
                 }
-            ],
+            ]
         )
         invalid_cases = {
             "source directories": [
@@ -113,9 +123,8 @@ class FirmwareInputTests(unittest.TestCase):
             ],
             "zero sizes": [self._declaration("controller.bin", "chip/controller.bin", 0)],
         }
-        for name, declarations in invalid_cases.items():
-            with self.subTest(name=name), self.assertRaises(SystemExit):
-                values.firmware_array(declarations, "target bluetooth firmware")
+        with pytest.raises(SystemExit):
+            values.firmware_array(invalid_cases[case], "target bluetooth firmware")
 
     def test_absent_groups_are_independent_and_partial_group_names_its_error(self) -> None:
         """Whole optional groups may be absent, but a present group is all-or-nothing."""
@@ -123,14 +132,14 @@ class FirmwareInputTests(unittest.TestCase):
 
         captured = self._capture()
 
-        self.assertEqual(tuple(captured), ("bluetooth",))
-        self.assertEqual(captured["bluetooth"][0].contents, b"firmware")
+        assert (tuple(captured)) == (("bluetooth",))
+        assert (captured["bluetooth"][0].contents) == (b"firmware")
         self.groups["audio-profile"] = [
             self._declaration("profile.bin", "fplinux/profile.bin", 7),
             self._declaration("second.bin", "fplinux/second.bin", 3),
         ]
         self._write_group("audio-profile", {"profile.bin": b"profile"})
-        with self.assertRaisesRegex(SystemExit, "device-data group audio-profile:.*second.bin"):
+        with pytest.raises(SystemExit, match=r"device-data group audio-profile:.*second.bin"):
             self._capture()
 
     def test_old_firmware_layout_is_a_cache_miss(self) -> None:
@@ -141,7 +150,7 @@ class FirmwareInputTests(unittest.TestCase):
         old.mkdir(parents=True)
         (old / "controller.bin").write_bytes(b"firmware")
 
-        self.assertEqual(self._capture(), {})
+        assert (self._capture()) == ({})
 
     def test_profile_bytes_are_causal_but_unrelated_generation_files_are_not(self) -> None:
         """The workspace recipe follows declared profile bytes and ignores adjacent files."""
@@ -181,14 +190,14 @@ class FirmwareInputTests(unittest.TestCase):
             changed = workspace_module.target_workspace_snapshot(self.target)
             staged = workspace_staging.stage_workspace_snapshot(first)
 
-        self.assertEqual(first.recipe, unrelated.recipe)
-        self.assertNotEqual(first.recipe, changed.recipe)
+        assert (first.recipe) == (unrelated.recipe)
+        assert (first.recipe) != (changed.recipe)
         staged_profile = staged / (
             ".fplinux-inputs/device-data/demo/groups/audio-profile/fplinux/profile.bin"
         )
-        self.assertEqual(staged_profile.read_bytes(), b"profile")
-        self.assertEqual(staged_profile.stat().st_mode & 0o777, 0o600)
-        self.assertNotIn(".cache", staged_profile.relative_to(staged).parts)
+        assert (staged_profile.read_bytes()) == (b"profile")
+        assert (staged_profile.stat().st_mode & 0o777) == (0o600)
+        assert (".cache") not in (staged_profile.relative_to(staged).parts)
 
     def test_rootfs_receipt_depends_on_bluetooth_not_audio_or_adjacent_files(self) -> None:
         """Rootfs reuse follows Bluetooth bytes, independently of the kernel-only profile."""
@@ -209,22 +218,22 @@ class FirmwareInputTests(unittest.TestCase):
         (output / alpine_state.ROOTFS_NAME).write_bytes(b"rootfs")
         (output / "initramfs.cpio").write_bytes(b"boot archive")
         alpine_state.write_receipt(output, first)
-        self.assertTrue(alpine_state.receipt_matches(output, first))
+        assert alpine_state.receipt_matches(output, first)
 
         (bluetooth / "unrelated.bin").write_bytes(b"ignored")
         adjacent_changed = rootfs_recipe()
-        self.assertEqual(adjacent_changed, first)
-        self.assertTrue(alpine_state.receipt_matches(output, adjacent_changed))
+        assert (adjacent_changed) == (first)
+        assert alpine_state.receipt_matches(output, adjacent_changed)
 
         (audio / "profile.bin").write_bytes(b"changed")
         audio_changed = rootfs_recipe()
-        self.assertEqual(audio_changed, first)
-        self.assertTrue(alpine_state.receipt_matches(output, audio_changed))
+        assert (audio_changed) == (first)
+        assert alpine_state.receipt_matches(output, audio_changed)
 
         (bluetooth / "controller.bin").write_bytes(b"changed!")
         bluetooth_changed = rootfs_recipe()
-        self.assertNotEqual(bluetooth_changed, first)
-        self.assertFalse(alpine_state.receipt_matches(output, bluetooth_changed))
+        assert (bluetooth_changed) != (first)
+        assert not (alpine_state.receipt_matches(output, bluetooth_changed))
 
     def test_installer_writes_exact_bytes_with_private_mode(self) -> None:
         """The installer writes an admitted firmware input directly with mode 0600."""
@@ -236,30 +245,30 @@ class FirmwareInputTests(unittest.TestCase):
         firmware_inputs.install_firmware_inputs(rootfs, rootfs_firmware)
 
         installed = rootfs / "lib/firmware/chip/controller.bin"
-        self.assertEqual(installed.read_bytes(), b"firmware")
-        self.assertEqual(installed.stat().st_mode & 0o777, 0o600)
+        assert (installed.read_bytes()) == (b"firmware")
+        assert (installed.stat().st_mode & 0o777) == (0o600)
 
-    def test_installed_firmware_verifier_rejects_changed_bytes_and_mode(self) -> None:
+    @pytest.mark.parametrize(
+        ("contents", "mode", "error"),
+        [
+            pytest.param(b"changed!", 0o600, "bytes do not match", id="changed-bytes"),
+            pytest.param(b"firmware", 0o644, "mode is 0644, expected 0600", id="public-mode"),
+        ],
+    )
+    def test_installed_firmware_verifier_rejects_changed_bytes_and_mode(
+        self, contents: bytes, mode: int, error: str
+    ) -> None:
         """Verification rejects either material corruption of a controlled destination."""
         self._write_group("bluetooth", {"controller.bin": b"firmware"})
         rootfs_firmware = self._capture()["bluetooth"]
-        cases = (
-            ("changed bytes", b"changed!", 0o600, "bytes do not match"),
-            ("public mode", b"firmware", 0o644, "mode is 0644, expected 0600"),
-        )
-        for name, contents, mode, error in cases:
-            with self.subTest(name=name):
-                rootfs = self.root / name.replace(" ", "-")
-                installed = rootfs / "lib/firmware/chip/controller.bin"
-                installed.parent.mkdir(parents=True)
-                installed.write_bytes(contents)
-                installed.chmod(mode)
+        rootfs = self.root / "rootfs"
+        installed = rootfs / "lib/firmware/chip/controller.bin"
+        installed.parent.mkdir(parents=True)
+        installed.write_bytes(contents)
+        installed.chmod(mode)
 
-                with self.assertRaisesRegex(SystemExit, error):
-                    firmware_inputs.verify_installed_firmware_inputs(
-                        rootfs,
-                        rootfs_firmware,
-                    )
+        with pytest.raises(SystemExit, match=error):
+            firmware_inputs.verify_installed_firmware_inputs(rootfs, rootfs_firmware)
 
     def test_compressed_firmware_roundtrips_with_private_mode(self) -> None:
         """The kernel XZ fallback supplies admitted bytes without a plain duplicate."""
@@ -276,19 +285,15 @@ class FirmwareInputTests(unittest.TestCase):
         firmware_inputs.install_firmware_inputs(rootfs, (firmware,))
 
         installed = rootfs / "lib/firmware/chip/controller.bin.xz"
-        self.assertFalse(installed.with_suffix("").exists())
-        self.assertLess(installed.stat().st_size, len(contents))
-        self.assertEqual(installed.stat().st_mode & 0o777, 0o600)
+        assert not (installed.with_suffix("").exists())
+        assert (installed.stat().st_size) < (len(contents))
+        assert (installed.stat().st_mode & 0o777) == (0o600)
         decoder = lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
-        self.assertEqual(decoder.decompress(installed.read_bytes()), contents)
-        self.assertTrue(decoder.eof)
-        self.assertEqual(decoder.check, lzma.CHECK_CRC32)
+        assert (decoder.decompress(installed.read_bytes())) == (contents)
+        assert decoder.eof
+        assert (decoder.check) == (lzma.CHECK_CRC32)
         firmware_inputs.verify_installed_firmware_inputs(rootfs, (firmware,))
 
         installed.write_bytes(b"invalid compressed firmware")
-        with self.assertRaisesRegex(SystemExit, "installed firmware cannot be verified"):
+        with pytest.raises(SystemExit, match="installed firmware cannot be verified"):
             firmware_inputs.verify_installed_firmware_inputs(rootfs, (firmware,))
-
-
-if __name__ == "__main__":
-    unittest.main()
