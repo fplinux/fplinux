@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
@@ -591,17 +592,33 @@ static uint64_t now_ms(void)
 	return (uint64_t)time.tv_sec * 1000 + (uint64_t)time.tv_nsec / 1000000;
 }
 
+struct pty_capture {
+	char bytes[16384];
+	size_t used;
+};
+
 static void pump(struct fplinux_terminal *terminal,
-		 struct fplinux_terminal_pty *pty, const char *expected)
+		 struct fplinux_terminal_pty *pty, struct pty_capture *capture,
+		 const char *expected)
 {
 	uint64_t deadline = now_ms() + 3000;
-	char captured[16384] = { 0 };
-	size_t used = 0;
 
-	while (now_ms() < deadline) {
+	for (;;) {
 		struct pollfd descriptor = { .fd = pty->fd, .events = POLLIN };
+		char *match = strstr(capture->bytes, expected);
 		ssize_t size;
 
+		if (match) {
+			size_t consumed = (size_t)(match - capture->bytes) +
+					  strlen(expected);
+
+			capture->used -= consumed;
+			memmove(capture->bytes, capture->bytes + consumed,
+				capture->used + 1);
+			return;
+		}
+		if (now_ms() >= deadline)
+			break;
 		if (terminal->output_size) {
 			size = write(pty->fd, terminal->output,
 				     terminal->output_size);
@@ -614,19 +631,48 @@ static void pump(struct fplinux_terminal *terminal,
 		assert(poll(&descriptor, 1, 20) >= 0);
 		if (!(descriptor.revents & POLLIN))
 			continue;
-		size = read(pty->fd, captured + used,
-			    sizeof(captured) - used - 1);
+		size = read(pty->fd, capture->bytes + capture->used,
+			    sizeof(capture->bytes) - capture->used - 1);
 		assert(size > 0);
-		fplinux_terminal_feed(terminal, captured + used, (size_t)size);
-		used += (size_t)size;
-		captured[used] = '\0';
-		if (strstr(captured, expected))
-			return;
-		assert(used < sizeof(captured) - 1);
+		fplinux_terminal_feed(terminal, capture->bytes + capture->used,
+				      (size_t)size);
+		capture->used += (size_t)size;
+		capture->bytes[capture->used] = '\0';
+		assert(capture->used < sizeof(capture->bytes) - 1);
 	}
 	fprintf(stderr, "missing PTY output %s; received: %s\n", expected,
-		captured);
+		capture->bytes);
 	abort();
+}
+
+static void verify_split_prompt(void)
+{
+	struct fplinux_terminal terminal;
+	struct fplinux_terminal_pty pty;
+	struct pty_capture capture = { 0 };
+	int stream[2];
+	const char first[] = "\033]777;test;C\aGOOD\r\n\033]777;test;";
+	const char last[] = "B\a";
+	const char combined[] = "\033]777;test;C\aGOOD\r\n\033]777;test;B\a";
+
+	assert(fplinux_terminal_init(&terminal, 21, 12, "test"));
+	assert(socketpair(AF_UNIX, SOCK_STREAM, 0, stream) == 0);
+	pty.fd = stream[0];
+	pty.shell = -1;
+	assert(write(stream[1], first, sizeof(first) - 1) == sizeof(first) - 1);
+	pump(&terminal, &pty, &capture, "GOOD\r\n");
+	assert(!terminal.editing);
+	assert(write(stream[1], last, sizeof(last) - 1) == sizeof(last) - 1);
+	pump(&terminal, &pty, &capture, "\033]777;test;B\a");
+	assert(terminal.editing);
+	assert(write(stream[1], combined, sizeof(combined) - 1) ==
+	       sizeof(combined) - 1);
+	pump(&terminal, &pty, &capture, "GOOD\r\n");
+	pump(&terminal, &pty, &capture, "\033]777;test;B\a");
+	assert(terminal.editing);
+	close(stream[1]);
+	fplinux_terminal_pty_close(&pty);
+	fplinux_terminal_destroy(&terminal);
 }
 
 static void type_text(struct fplinux_terminal *terminal, const char *text)
@@ -642,6 +688,7 @@ static void verify_bash_line_editing(const char *startup)
 {
 	struct fplinux_terminal terminal;
 	struct fplinux_terminal_pty pty;
+	struct pty_capture capture = { 0 };
 	unsigned int position;
 	FILE *completion;
 
@@ -651,13 +698,13 @@ static void verify_bash_line_editing(const char *startup)
 	assert(fplinux_terminal_init(&terminal, 21, 12, "test"));
 	assert(fplinux_terminal_pty_open(&pty, 21, 12, "/bin/bash", startup,
 					 "test"));
-	pump(&terminal, &pty, "\033]777;test;B\a");
+	pump(&terminal, &pty, &capture, "\033]777;test;B\a");
 	assert(terminal.editing && fplinux_terminal_pty_shell_foreground(&pty));
 	type_text(
 		&terminal,
 		"bind -x '\"\\e[98~\":printf \"<LINE:%s>\\n\" \"$READLINE_LINE\"'");
 	press(&terminal, KEY_OK, 1);
-	pump(&terminal, &pty, "\033]777;test;B\a");
+	pump(&terminal, &pty, &capture, "\033]777;test;B\a");
 	for (position = 0; position < 3; ++position) {
 		type_text(&terminal, "printf 'BAD-LONG-WRAPPED-LINE\\n'");
 		if (position == 0)
@@ -673,41 +720,41 @@ static void verify_bash_line_editing(const char *startup)
 		fplinux_terminal_phone(&terminal, KEY_NUMERIC_POUND, false,
 				       false, 800, true);
 		type_text(&terminal, "\033[98~");
-		pump(&terminal, &pty, "<LINE:>\r\n");
+		pump(&terminal, &pty, &capture, "<LINE:>\r\n");
 		type_text(&terminal, "printf 'GOOD\\n'");
 		press(&terminal, KEY_OK, 900);
-		pump(&terminal, &pty, "GOOD\r\n");
+		pump(&terminal, &pty, &capture, "GOOD\r\n");
 		if (!terminal.editing)
-			pump(&terminal, &pty, "\033]777;test;B\a");
+			pump(&terminal, &pty, &capture, "\033]777;test;B\a");
 		assert(terminal.editing);
 	}
 	type_text(&terminal, "printf '%s\\n' ./completion");
 	press(&terminal, KEY_PICKUP_PHONE, 910);
 	press(&terminal, KEY_OK, 920);
-	pump(&terminal, &pty, "./completion-target\r\n");
+	pump(&terminal, &pty, &capture, "./completion-target\r\n");
 	if (!terminal.editing)
-		pump(&terminal, &pty, "\033]777;test;B\a");
+		pump(&terminal, &pty, &capture, "\033]777;test;B\a");
 	type_text(&terminal, "printf 'HISTORY-ONE\\n'");
 	press(&terminal, KEY_OK, 930);
-	pump(&terminal, &pty, "HISTORY-ONE\r\n");
+	pump(&terminal, &pty, &capture, "HISTORY-ONE\r\n");
 	if (!terminal.editing)
-		pump(&terminal, &pty, "\033]777;test;B\a");
+		pump(&terminal, &pty, &capture, "\033]777;test;B\a");
 	press(&terminal, KEY_UP, 940);
 	press(&terminal, KEY_OK, 950);
-	pump(&terminal, &pty, "HISTORY-ONE\r\n");
+	pump(&terminal, &pty, &capture, "HISTORY-ONE\r\n");
 	if (!terminal.editing)
-		pump(&terminal, &pty, "\033]777;test;B\a");
+		pump(&terminal, &pty, &capture, "\033]777;test;B\a");
 	fplinux_terminal_key(&terminal, XKB_KEY_r, 'r', TSM_CONTROL_MASK, 'r');
 	type_text(&terminal, "HISTORY");
 	press(&terminal, KEY_OK, 960);
-	pump(&terminal, &pty, "HISTORY-ONE\r\n");
+	pump(&terminal, &pty, &capture, "HISTORY-ONE\r\n");
 	if (!terminal.editing)
-		pump(&terminal, &pty, "\033]777;test;B\a");
+		pump(&terminal, &pty, &capture, "\033]777;test;B\a");
 	type_text(&terminal,
 		  "printf '\\e]133;B\\a\\e]777;unrelated;B\\a'; "
 		  "read -rs -n 1 value; printf 'GOT:%s\\n' \"$value\"");
 	press(&terminal, KEY_OK, 1000);
-	pump(&terminal, &pty, "\033]777;unrelated;B\a");
+	pump(&terminal, &pty, &capture, "\033]777;unrelated;B\a");
 	assert(!terminal.editing &&
 	       fplinux_terminal_pty_shell_foreground(&pty));
 	fplinux_terminal_phone(&terminal, KEY_NUMERIC_POUND, true, false, 1100,
@@ -717,7 +764,7 @@ static void verify_bash_line_editing(const char *startup)
 			       true);
 	output_is(&terminal, "", 0);
 	type_text(&terminal, "q");
-	pump(&terminal, &pty, "GOT:q\r\n");
+	pump(&terminal, &pty, &capture, "GOT:q\r\n");
 	fplinux_terminal_pty_close(&pty);
 	fplinux_terminal_destroy(&terminal);
 }
@@ -1252,7 +1299,9 @@ int main(int argc, char **argv)
 	const char *scenario = argv[1];
 
 	assert(argc == 6);
-	if (!strcmp(scenario, "grid"))
+	if (!strcmp(scenario, "prompt-stream"))
+		verify_split_prompt();
+	else if (!strcmp(scenario, "grid"))
 		verify_grid_and_colors();
 	else if (!strcmp(scenario, "composition"))
 		verify_composition_and_key_sequences();

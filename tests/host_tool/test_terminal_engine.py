@@ -119,6 +119,10 @@ class TerminalEngineTests(unittest.TestCase):
             with self.subTest(scenario=scenario):
                 self.run_scenario(scenario)
 
+    def test_output_wait_preserves_partial_and_coalesced_prompt(self) -> None:
+        """Output waits retain a prompt prefix and a complete queued prompt."""
+        self.run_scenario("prompt-stream")
+
     def test_host_bash_keeps_line_editing_completion_and_history(self) -> None:
         """The host Bash, started through the terminal PTY, honors phone editing keys."""
         self.run_scenario("bash")
