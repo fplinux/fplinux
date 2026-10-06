@@ -12,6 +12,8 @@
 #include <linux/string.h>
 
 #include "ums9117-sc2720-codec.h"
+#include "ums9117-sc2720-calibration.h"
+#include "ums9117-sc2720-regs.h"
 
 #define SC2720_CHIP_ID_LOW 0x0c00U
 #define SC2720_CHIP_ID_HIGH 0x0c04U
@@ -20,7 +22,6 @@
 #define SC2720_SOFT_RST0 0x0c14U
 #define SC2720_AUDIO_CTRL0 0x0e08U
 
-#define SC2720_ANA_PMU0 0x0700U
 #define SC2720_ANA_PMU1 0x0704U
 #define SC2720_ANA_PMU2 0x0708U
 #define SC2720_ANA_PMU3 0x070cU
@@ -29,18 +30,10 @@
 #define SC2720_ANA_CLK0 0x0718U
 #define SC2720_ANA_CDC0 0x071cU
 #define SC2720_ANA_CDC1 0x0720U
-#define SC2720_ANA_CDC2 0x0724U
-#define SC2720_ANA_CDC3 0x0728U
-#define SC2720_ANA_CDC4 0x072cU
 #define SC2720_ANA_HDT0 0x0730U
 #define SC2720_ANA_HDT1 0x0734U
 #define SC2720_ANA_HDT2 0x0738U
 #define SC2720_ANA_DCL0 0x073cU
-#define SC2720_ANA_DCL4 0x074cU
-#define SC2720_ANA_DCL6 0x0754U
-#define SC2720_ANA_DCL7 0x0758U
-#define SC2720_ANA_STS0 0x075cU
-#define SC2720_ANA_STS2 0x0764U
 #define SC2720_ANA_CLK1 0x077cU
 #define SC2720_AUD_CFGA_LP_MODULE_CTRL 0x0830U
 #define SC2720_AUD_CFGA_ANA_ET2 0x0834U
@@ -56,8 +49,6 @@
 
 #define SC2720_AUD_VB_EN BIT(15)
 #define SC2720_AUD_VB_SLEEP_PD BIT(13)
-#define SC2720_AUD_BG_EN BIT(12)
-#define SC2720_AUD_BIAS_EN BIT(11)
 #define SC2720_MICBIAS_EN BIT(10)
 #define SC2720_HEADMIC_BIAS_EN BIT(9)
 #define SC2720_MICBIAS_POWER_DOWN BIT(2)
@@ -143,7 +134,6 @@
 #define SC2720_DALR_OFFSET_2 BIT(4)
 #define SC2720_DAS_OFFSET_MASK GENMASK(2, 0)
 #define SC2720_DAS_OFFSET_2 2U
-#define SC2720_DAS_EN BIT(13)
 #define SC2720_DAC_EN_L_ANALOG BIT(12)
 #define SC2720_DAC_EN_R_ANALOG BIT(11)
 #define SC2720_HPL_DUMMY_LOOP BIT(10)
@@ -152,21 +142,8 @@
 #define SC2720_HPR_DUMMY_LOOP_END BIT(7)
 #define SC2720_HPL_EN BIT(4)
 #define SC2720_HPR_EN BIT(3)
-#define SC2720_HP_BUFFER_EN BIT(2)
-#define SC2720_PA_EN BIT(0)
-#define SC2720_CDC2_OUTPUT_MASK GENMASK(13, 0)
-#define SC2720_DALR_OFFSET_EN BIT(12)
 #define SC2720_DAS_OFFSET_EN BIT(11)
-#define SC2720_DACL_TO_HPL BIT(9)
-#define SC2720_DACR_TO_HPR BIT(8)
-#define SC2720_DACL_TO_RCV BIT(7)
-#define SC2720_DACS_TO_PA BIT(6)
 #define SC2720_HEADMIC_TO_PA_DEBUG BIT(5)
-#define SC2720_CDC3_OUTPUT_MIXERS                                       \
-	(SC2720_DACL_TO_HPL | SC2720_DACR_TO_HPR | SC2720_DACL_TO_RCV | \
-	 SC2720_DACS_TO_PA)
-#define SC2720_HP_GAIN_MASK GENMASK(7, 0)
-#define SC2720_HP_GAIN_MUTE 0x00ffU
 #define SC2720_HPL_GAIN_SHIFT 4
 #define SC2720_HP_VOLUME_DEFAULT 1U
 #define SC2720_PA_GAIN_MASK GENMASK(15, 12)
@@ -195,31 +172,12 @@
 #define SC2720_PLGPD_EN BIT(4)
 #define SC2720_HPL_EN_D2HDT_EN BIT(2)
 
-#define SC2720_CALDC_START BIT(15)
-#define SC2720_CALDC_EN BIT(14)
-#define SC2720_CALDC_ENO BIT(13)
-#define SC2720_DCCAL_STS BIT(12)
-#define SC2720_HP_DPOP_VALID BIT(10)
-#define SC2720_DEPOP_CHARGE_START BIT(9)
-#define SC2720_DEPOP_CHARGE_EN BIT(8)
-#define SC2720_PLUGIN BIT(7)
-#define SC2720_DEPOP_EN BIT(6)
-#define SC2720_DEPOP_CHARGE_STS BIT(5)
-#define SC2720_RCV_DPOP_VALID BIT(4)
 #define SC2720_STS2_HARDWARE_CONTROLLED GENMASK(3, 1)
 #define SC2720_STS2_RW_MASK 0xebceU
 #define SC2720_STS2_START_MASK (SC2720_CALDC_START | SC2720_DEPOP_CHARGE_START)
 #define SC2720_STS2_RESTORE_MASK \
 	(SC2720_STS2_RW_MASK &   \
 	 ~(SC2720_STS2_START_MASK | SC2720_STS2_HARDWARE_CONTROLLED))
-#define SC2720_DCCAL_DONE (SC2720_DCCAL_STS | SC2720_HP_DPOP_VALID)
-#define SC2720_DEPOP_CHARGE_DONE \
-	(SC2720_DEPOP_CHARGE_STS | SC2720_RCV_DPOP_VALID)
-
-#define SC2720_FAST_CHARGE_STEPS 12U
-#define SC2720_DCCAL_ATTEMPTS 20U
-#define SC2720_DEPOP_VALID_ATTEMPTS 20U
-#define SC2720_DEPOP_CHARGE_ATTEMPTS 30U
 
 enum ums9117_sc2720_codec_register {
 	UMS9117_SC2720_CODEC_MODULE_EN0,
@@ -847,246 +805,6 @@ static int ums9117_sc2720_codec_power_up(struct ums9117_sc2720_codec *codec)
 	if (ret)
 		return ret;
 	return 0;
-}
-
-static int ums9117_sc2720_codec_fast_charge(struct ums9117_sc2720_codec *codec)
-{
-	unsigned int i;
-	int ret;
-
-	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2, SC2720_DAS_EN,
-				 0);
-	if (ret)
-		return ret;
-	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2, SC2720_PA_EN,
-				 0);
-	if (ret)
-		return ret;
-	ret = ums9117_sc2720_codec_sts2_update(codec, SC2720_CALDC_ENO,
-					       SC2720_CALDC_ENO);
-	if (ret)
-		return ret;
-	ret = regmap_update_bits(codec->regmap, SC2720_ANA_STS0, BIT(0),
-				 BIT(0));
-	if (ret)
-		return ret;
-	usleep_range(1000, 2000);
-	ret = regmap_update_bits(codec->regmap, SC2720_ANA_STS0, BIT(0), 0);
-	if (ret)
-		return ret;
-	for (i = 0; i < SC2720_FAST_CHARGE_STEPS; i++)
-		usleep_range(5000, 6000);
-	return 0;
-}
-
-static int
-ums9117_sc2720_codec_wait_dc_calibration(struct ums9117_sc2720_codec *codec)
-{
-	unsigned int attempt;
-	unsigned int value = 0;
-	int ret;
-
-	for (attempt = 0; attempt < SC2720_DCCAL_ATTEMPTS; attempt++) {
-		ret = regmap_read(codec->regmap, SC2720_ANA_STS2, &value);
-		if (ret)
-			return ret;
-		if ((value & SC2720_DCCAL_DONE) == SC2720_DCCAL_DONE) {
-			usleep_range(5000, 6000);
-			ret = regmap_read(codec->regmap, SC2720_ANA_STS2,
-					  &value);
-			if (ret)
-				return ret;
-			if ((value & SC2720_DCCAL_DONE) == SC2720_DCCAL_DONE)
-				return 0;
-		}
-		usleep_range(15000, 16000);
-	}
-	dev_err(codec->dev,
-		"headphone DC calibration timed out: ANA_STS2=%#06x\n", value);
-	return -ETIMEDOUT;
-}
-
-static int
-ums9117_sc2720_codec_wait_depop_valid(struct ums9117_sc2720_codec *codec)
-{
-	unsigned int attempt;
-	unsigned int value = 0;
-	int ret;
-
-	for (attempt = 0; attempt < SC2720_DEPOP_VALID_ATTEMPTS; attempt++) {
-		ret = regmap_read(codec->regmap, SC2720_ANA_STS2, &value);
-		if (ret)
-			return ret;
-		if (value & SC2720_HP_DPOP_VALID)
-			return 0;
-		usleep_range(5000, 6000);
-	}
-	dev_err(codec->dev,
-		"headphone depop-valid status timed out: ANA_STS2=%#06x\n",
-		value);
-	return -ETIMEDOUT;
-}
-
-static int
-ums9117_sc2720_codec_wait_depop_charge(struct ums9117_sc2720_codec *codec)
-{
-	unsigned int attempt;
-	unsigned int value = 0;
-	int ret;
-
-	for (attempt = 0; attempt < SC2720_DEPOP_CHARGE_ATTEMPTS; attempt++) {
-		ret = regmap_read(codec->regmap, SC2720_ANA_STS2, &value);
-		if (ret)
-			return ret;
-		if ((value & SC2720_DEPOP_CHARGE_DONE) ==
-		    SC2720_DEPOP_CHARGE_DONE)
-			return 0;
-		msleep(20);
-	}
-	dev_err(codec->dev,
-		"headphone depop charge timed out: ANA_STS2=%#06x\n", value);
-	return -ETIMEDOUT;
-}
-
-static int
-ums9117_sc2720_codec_calibrate_headphones(struct ums9117_sc2720_codec *codec)
-{
-	int restore_error = 0;
-	unsigned int saved_cdc2;
-	unsigned int saved_cdc3;
-	int restore_ret;
-	int ret;
-
-	ret = regmap_read(codec->regmap, SC2720_ANA_CDC2, &saved_cdc2);
-	if (ret)
-		return ret;
-	ret = regmap_read(codec->regmap, SC2720_ANA_CDC3, &saved_cdc3);
-	if (ret)
-		return ret;
-	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC4,
-				 SC2720_HP_GAIN_MASK, SC2720_HP_GAIN_MUTE);
-	if (ret)
-		goto restore_routes;
-	ret = regmap_update_bits(codec->regmap, SC2720_ANA_PMU0,
-				 SC2720_AUD_BG_EN, SC2720_AUD_BG_EN);
-	if (ret)
-		goto restore_routes;
-	ret = regmap_update_bits(codec->regmap, SC2720_ANA_PMU0,
-				 SC2720_AUD_BIAS_EN, SC2720_AUD_BIAS_EN);
-	if (ret)
-		goto restore_routes;
-	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2,
-				 SC2720_CDC2_OUTPUT_MASK, 0);
-	if (ret)
-		goto restore_routes;
-	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC3,
-				 SC2720_DALR_OFFSET_EN, 0);
-	if (ret)
-		goto restore_routes;
-	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC3,
-				 SC2720_DACL_TO_HPL, 0);
-	if (ret)
-		goto restore_routes;
-	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC3,
-				 SC2720_DACR_TO_HPR, 0);
-	if (ret)
-		goto restore_routes;
-	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC3,
-				 SC2720_DACL_TO_RCV, 0);
-	if (ret)
-		goto restore_routes;
-	ret = regmap_write(codec->regmap, SC2720_ANA_STS2, 0);
-	if (ret)
-		goto restore_routes;
-
-	ret = ums9117_sc2720_codec_fast_charge(codec);
-	if (ret)
-		goto restore_routes;
-	usleep_range(5000, 6000);
-	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2,
-				 SC2720_HP_BUFFER_EN, SC2720_HP_BUFFER_EN);
-	if (ret)
-		goto restore_routes;
-	ret = ums9117_sc2720_codec_sts2_update(codec, SC2720_CALDC_ENO,
-					       SC2720_CALDC_ENO);
-	if (ret)
-		goto restore_routes;
-	ret = ums9117_sc2720_codec_sts2_update(codec, SC2720_CALDC_EN,
-					       SC2720_CALDC_EN);
-	if (ret)
-		goto restore_routes;
-	ret = regmap_write(codec->regmap, SC2720_ANA_DCL4, 0xffffU);
-	if (ret)
-		goto restore_routes;
-	ret = regmap_write(codec->regmap, SC2720_ANA_DCL6, 0x4cd8U);
-	if (ret)
-		goto restore_routes;
-	ret = regmap_write(codec->regmap, SC2720_ANA_DCL7, 0x2e6cU);
-	if (ret)
-		goto restore_routes;
-	ret = regmap_write(codec->regmap, SC2720_ANA_STS0, 0xa820U);
-	if (ret)
-		goto restore_routes;
-	usleep_range(2000, 3000);
-	ret = ums9117_sc2720_codec_sts2_update(codec, SC2720_CALDC_START, 0);
-	if (ret)
-		goto restore_routes;
-	ret = ums9117_sc2720_codec_sts2_update(codec, SC2720_CALDC_START,
-					       SC2720_CALDC_START);
-	if (ret)
-		goto restore_routes;
-	ret = regmap_write(codec->regmap, SC2720_ANA_STS2,
-			   SC2720_CALDC_START | SC2720_CALDC_EN |
-				   SC2720_CALDC_ENO);
-	if (ret)
-		goto restore_routes;
-	ret = ums9117_sc2720_codec_wait_dc_calibration(codec);
-	if (ret)
-		goto restore_routes;
-
-	ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2,
-				 SC2720_CDC2_OUTPUT_MASK, 0);
-	if (ret)
-		goto restore_routes;
-	ret = ums9117_sc2720_codec_wait_depop_valid(codec);
-	if (ret)
-		goto restore_routes;
-	ret = ums9117_sc2720_codec_sts2_update(codec, SC2720_DEPOP_CHARGE_EN,
-					       SC2720_DEPOP_CHARGE_EN);
-	if (ret)
-		goto restore_routes;
-	ret = ums9117_sc2720_codec_sts2_update(codec, SC2720_PLUGIN,
-					       SC2720_PLUGIN);
-	if (ret)
-		goto restore_routes;
-	ret = ums9117_sc2720_codec_sts2_update(codec, SC2720_DEPOP_EN,
-					       SC2720_DEPOP_EN);
-	if (ret)
-		goto restore_routes;
-	usleep_range(2000, 3000);
-	ret = ums9117_sc2720_codec_sts2_update(codec, SC2720_DEPOP_CHARGE_START,
-					       SC2720_DEPOP_CHARGE_START);
-	if (ret)
-		goto restore_routes;
-	ret = ums9117_sc2720_codec_wait_depop_charge(codec);
-
-restore_routes:
-	restore_ret = regmap_update_bits(codec->regmap, SC2720_ANA_CDC2,
-					 SC2720_CDC2_OUTPUT_MASK, saved_cdc2);
-	restore_error = restore_error ?: restore_ret;
-	restore_ret = regmap_update_bits(
-		codec->regmap, SC2720_ANA_CDC3,
-		SC2720_DALR_OFFSET_EN | SC2720_CDC3_OUTPUT_MIXERS, saved_cdc3);
-	restore_error = restore_error ?: restore_ret;
-	if (!restore_error)
-		return ret;
-	if (ret) {
-		dev_err(codec->dev,
-			"cannot restore codec routes after headphone calibration error: %pe\n",
-			ERR_PTR(restore_error));
-		return ret;
-	}
-	return restore_error;
 }
 
 static int ums9117_sc2720_codec_apply_volume(struct ums9117_sc2720_codec *codec,
@@ -1720,7 +1438,8 @@ int ums9117_sc2720_codec_prepare(struct ums9117_sc2720_codec *codec,
 	codec->dirty = true;
 	ret = ums9117_sc2720_codec_power_up(codec);
 	if (!ret)
-		ret = ums9117_sc2720_codec_calibrate_headphones(codec);
+		ret = ums9117_sc2720_calibrate_headphones(codec->dev,
+							  codec->regmap);
 	if (ret) {
 		restore_ret = ums9117_sc2720_codec_restore(codec);
 		if (restore_ret)

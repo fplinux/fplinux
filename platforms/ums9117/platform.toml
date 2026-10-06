@@ -530,6 +530,18 @@ source = "platforms/ums9117/linux/sound/drivers/ums9117/ums9117-audio-profile.h"
 destination = "sound/drivers/ums9117/ums9117-audio-profile.h"
 
 [[linux.copies]]
+source = "platforms/ums9117/linux/sound/drivers/ums9117/ums9117-sc2720-calibration.c"
+destination = "sound/drivers/ums9117/ums9117-sc2720-calibration.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/linux/sound/drivers/ums9117/ums9117-sc2720-calibration.h"
+destination = "sound/drivers/ums9117/ums9117-sc2720-calibration.h"
+
+[[linux.copies]]
+source = "platforms/ums9117/linux/sound/drivers/ums9117/ums9117-sc2720-regs.h"
+destination = "sound/drivers/ums9117/ums9117-sc2720-regs.h"
+
+[[linux.copies]]
 source = "platforms/ums9117/linux/sound/drivers/ums9117/Kconfig"
 destination = "sound/drivers/ums9117/Kconfig"
 
