@@ -100,23 +100,23 @@ source = "platforms/ums9117/common/ums9117-boot-contract.h"
 destination = "board/fplinux/ums9117/ums9117-boot-contract.h"
 
 [[uboot.copies]]
-source = "platforms/ums9117/common/ums9117-sdio-regs.h"
+source = "platforms/ums9117/uboot/ums9117-sdio-regs.h"
 destination = "board/fplinux/ums9117/ums9117-sdio-regs.h"
 
 [[uboot.copies]]
-source = "platforms/ums9117/common/ums9117-sdio-core.h"
+source = "platforms/ums9117/uboot/ums9117-sdio-core.h"
 destination = "board/fplinux/ums9117/ums9117-sdio-core.h"
 
 [[uboot.copies]]
-source = "platforms/ums9117/common/ums9117-sdio-core.c"
+source = "platforms/ums9117/uboot/ums9117-sdio-core.c"
 destination = "board/fplinux/ums9117/ums9117-sdio-core.c"
 
 [[uboot.copies]]
-source = "platforms/ums9117/common/ums9117-sdio-slot.h"
+source = "platforms/ums9117/uboot/ums9117-sdio-slot.h"
 destination = "board/fplinux/ums9117/ums9117-sdio-slot.h"
 
 [[uboot.copies]]
-source = "platforms/ums9117/common/ums9117-sdio-slot.c"
+source = "platforms/ums9117/uboot/ums9117-sdio-slot.c"
 destination = "board/fplinux/ums9117/ums9117-sdio-slot.c"
 
 [linux]

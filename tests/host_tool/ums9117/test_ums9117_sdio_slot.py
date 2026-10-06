@@ -10,7 +10,7 @@ from pathlib import Path
 from tests import ROOT
 from tests.process import run_process
 
-COMMON = ROOT / "platforms/ums9117/common"
+UBOOT = ROOT / "platforms/ums9117/uboot"
 HARNESS = ROOT / "tests/host_tool/ums9117/ums9117-sdio-slot.c"
 COMPAT = ROOT / "tests/host_tool/ums9117/ums9117-sdio-compat"
 
@@ -30,10 +30,10 @@ class Ums9117SdioSlotTests(unittest.TestCase):
                     "-Wextra",
                     "-Werror",
                     f"-I{COMPAT}",
-                    f"-I{COMMON}",
+                    f"-I{UBOOT}",
                     str(HARNESS),
-                    str(COMMON / "ums9117-sdio-slot.c"),
-                    str(COMMON / "ums9117-sdio-core.c"),
+                    str(UBOOT / "ums9117-sdio-slot.c"),
+                    str(UBOOT / "ums9117-sdio-core.c"),
                     "-o",
                     str(executable),
                 ],
