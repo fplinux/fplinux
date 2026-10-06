@@ -12,6 +12,12 @@ makedepends_host="dbus-dev musl-dev pkgconf"
 options="!check"
 source="
 	fplinux-bluetooth.c
+	fplinux-bluetooth-common.c
+	fplinux-bluetooth-common.h
+	fplinux-bluetooth-opp.c
+	fplinux-bluetooth-opp.h
+	fplinux-bluetooth-pan.c
+	fplinux-bluetooth-pan.h
 	fplinux-cli.c
 	fplinux-cli.h
 	fplinux-obexd.initd
@@ -25,6 +31,9 @@ build() {
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
 		-I"$srcdir" \
 		$(pkg-config --cflags dbus-1) "$srcdir/fplinux-bluetooth.c" \
+		"$srcdir/fplinux-bluetooth-common.c" \
+		"$srcdir/fplinux-bluetooth-opp.c" \
+		"$srcdir/fplinux-bluetooth-pan.c" \
 		"$srcdir/fplinux-cli.c" $(pkg-config --libs dbus-1) $LDFLAGS \
 		-Wl,--gc-sections -o fplinux-bluetooth
 }
@@ -46,7 +55,13 @@ package() {
 }
 
 sha512sums="
-dd901b76a4096b126cc4499801425fbeefc6725ae5c09dbbd49d5174467b89d38b1d25d3087c42e44abcf69d2555b6f273ccf327e7bb0f619c82f37970281361  fplinux-bluetooth.c
+cd6d99368735d0c997b152b3ec67d148687f6a5e398bb9ffe4fc0c47b13465ff80c2086afa9bddb89e471fe51fc3985eed3771acbc6e8430a24519ac88443f06  fplinux-bluetooth.c
+6b63fa3436f25cdc1e63ac4ea22f12befba62878f8fd35e5ddf31ff521f901b1c1dfd59608e3a605e67b9590d9eb3ee155d8dd60b1129eb0110cce04ee710412  fplinux-bluetooth-common.c
+ef997af75fde4f7ba39f12ef31a442b4290200a6ee3d31a1323a8dc9c5d4d96be0adc74692a39f1d73e1d4e29d3d6bd7b73eba92b561a9478045eda2ab426610  fplinux-bluetooth-common.h
+7809952979a2fc6fe6c1b92d045b0fc0b52629350df9bb40ce42ec07ee2f726d850846bcf3cdf50d66f806f0371caca144a462dab3981113c7f495d5ebec89af  fplinux-bluetooth-opp.c
+0ea23fb6f44f70bf994f56bcdc97fbe5f26422875909a28218ddba911c207e5bc14d14562bf93ca1523bf3cf929170d144a2e59293c2a2c5040f0f2f992f1be3  fplinux-bluetooth-opp.h
+2d6d13d350fa61ee893f4f6c5b9e90efbfe5605eed5869505f787d0ba9ce54d1dfea348414d6f1f04b554ce71e3218b2d774b61013e40c67d07c82a04352982b  fplinux-bluetooth-pan.c
+293dcf46f95d7017793ac48c72d7b893abc0ec5b3870cc65cb4b4b09794c4e66259f13efec069fab9b0365a1c1588e08d4a90240b2747f4684bf7418ab6f4351  fplinux-bluetooth-pan.h
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
 1c2780d9218c945ea6faf1d3ee2747e1dfa30a63a38c59346f503df3627e6a6d1fd9aa64fa58417ed6a4af3c311ffc934d17b4cd38da7260d1fa337dcbd2f149  fplinux-obexd.initd

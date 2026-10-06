@@ -87,7 +87,12 @@ class FplinuxBluetoothHostToolTests(unittest.TestCase):
                 CLIENT_SOURCE,
                 cls.client,
                 "compile FPLinux Bluetooth client",
-                [str(ROOT / "lib/fplinux/fplinux-cli.c")],
+                [
+                    str(CLIENT_SOURCE.with_name("fplinux-bluetooth-opp.c")),
+                    str(CLIENT_SOURCE.with_name("fplinux-bluetooth-pan.c")),
+                    str(CLIENT_SOURCE.with_name("fplinux-bluetooth-common.c")),
+                    str(ROOT / "lib/fplinux/fplinux-cli.c"),
+                ],
             ),
             (SERVICE_SOURCE, cls.service, "compile FPLinux Bluetooth test service", []),
         ):
