@@ -56,6 +56,8 @@ class FplinuxShowcaseBrightnessTests(unittest.TestCase):
                 f"-I{SHARED}",
                 str(APORT / "fplinux-showcase.c"),
                 str(APORT / "armada-scene.c"),
+                str(APORT / "armada-storyboard.c"),
+                str(APORT / "armada-renderer.c"),
                 str(ROOT / "lib/fplinux/fplinux-font.c"),
                 str(ROOT / "lib/fplinux/fplinux-brightness-client.c"),
                 str(ROOT / "lib/fplinux/fplinux-cli.c"),

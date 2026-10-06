@@ -39,6 +39,8 @@ class FplinuxShowcaseHostToolTests(unittest.TestCase):
                     f"-I{ROOT / 'include/fplinux'}",
                     str(HARNESS),
                     str(SCENE),
+                    str(APORT / "armada-storyboard.c"),
+                    str(APORT / "armada-renderer.c"),
                     str(ROOT / "lib/fplinux/fplinux-font.c"),
                     "-o",
                     str(executable),
