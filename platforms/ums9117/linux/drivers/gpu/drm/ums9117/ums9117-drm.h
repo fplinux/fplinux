@@ -3,9 +3,9 @@
  * UMS9117 DRM display profile contract.
  *
  * A target driver owns the panel profile and publishes it as OF match data.
- * The core owns KMS, the LCDC lifecycle, transfer completion, WLED and
- * the fail-dark path; the common SPI and LCM files own
- * only their respective wire protocols.
+ * The core owns KMS and device lifetime; display operations own the LCDC
+ * lifecycle, transfer completion, WLED and the fail-dark path. The common
+ * SPI and LCM files own only their respective wire protocols.
  */
 #ifndef FPLINUX_UMS9117_DRM_H
 #define FPLINUX_UMS9117_DRM_H

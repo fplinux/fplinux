@@ -549,6 +549,10 @@ destination = "sound/drivers/ums9117/Kconfig"
 source = "platforms/ums9117/linux/sound/drivers/ums9117/Makefile"
 destination = "sound/drivers/ums9117/Makefile"
 
+[[linux.copies]]
+source = "platforms/ums9117/linux/drivers/gpu/drm/ums9117/ums9117-drm-display.c"
+destination = "drivers/gpu/drm/ums9117/ums9117-drm-display.c"
+
 [[linux.appends]]
 source = "platforms/ums9117/linux/dts/unisoc.Makefile"
 destination = "arch/arm/boot/dts/unisoc/Makefile"

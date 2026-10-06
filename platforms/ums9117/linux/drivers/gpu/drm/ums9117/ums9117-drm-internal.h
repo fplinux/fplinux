@@ -18,6 +18,8 @@
 
 #include "ums9117-drm.h"
 
+struct drm_plane_state;
+
 #define UMS9117_DRM_WLED_CHANNEL_COUNT 4
 
 enum ums9117_drm_panel_state {
@@ -122,6 +124,22 @@ static inline void ums9117_drm_rgb565_align_damage(struct drm_rect *damage)
 	damage->x1 &= ~1;
 	damage->x2 = (damage->x2 + 1) & ~1;
 }
+
+int ums9117_drm_display_init(struct ums9117_drm *udrm,
+			     struct platform_device *pdev);
+int ums9117_drm_display_register_backlight(struct ums9117_drm *udrm,
+					   struct platform_device *pdev);
+void ums9117_drm_display_shutdown(struct ums9117_drm *udrm);
+
+/* KMS callers hold panel_lock through the operation and error reporting. */
+int ums9117_drm_display_enable_locked(struct ums9117_drm *udrm,
+				      struct drm_plane_state *plane_state);
+int ums9117_drm_display_send_frame_locked(struct ums9117_drm *udrm,
+					  struct drm_plane_state *state,
+					  const struct drm_rect *damage);
+int ums9117_drm_display_blank_locked(struct ums9117_drm *udrm);
+void ums9117_drm_display_enter_error_locked(struct ums9117_drm *udrm,
+					    int error);
 
 int ums9117_drm_spi_init_transport(struct ums9117_drm *udrm,
 				   struct platform_device *pdev);
