@@ -189,9 +189,9 @@ follow the [code style](../reference/CODE_STYLE.md).
 Use `test` to run unittest tests in the same pinned Kern image as `check python`:
 
 ```sh
-./fplinux test tests.small.test_common
-./fplinux test tests.small.test_common.FileDigestTests
-./fplinux test tests.small.test_common.FileDigestTests.test_empty_short_and_multibuffer_files_match_sha256_vectors
+./fplinux test tests.small.environment.test_common
+./fplinux test tests.small.environment.test_common.FileDigestTests
+./fplinux test tests.small.environment.test_common.FileDigestTests.test_empty_short_and_multibuffer_files_match_sha256_vectors
 ./fplinux test --tier host_tool
 ```
 

@@ -29,9 +29,9 @@ class TestCommandCliTests(unittest.TestCase):
         """Reject invalid CLI syntax instead of silently running a broader suite."""
         for arguments in (
             ("--tier", "unknown"),
-            ("tests.small.test_common", "--tier", "small"),
+            ("tests.small.environment.test_common", "--tier", "small"),
             (".cache.private_test",),
-            ("tests.small.test_common..method",),
+            ("tests.small.environment.test_common..method",),
         ):
             with self.subTest(arguments=arguments):
                 result = run_process(
