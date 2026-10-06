@@ -13,16 +13,16 @@ from pathlib import Path
 from typing import Any, cast
 from unittest import mock
 
-from fplinux_cli import alpine_state, common
-from fplinux_cli.build import bootstrap as bootstrap_build
-from fplinux_cli.build import inputs as inputs_build
-from fplinux_cli.build import publish as publish_build
-from fplinux_cli.bundle_state import (
+from fplinux_cli import common
+from fplinux_cli.artifacts.bundles import (
     BUILD_MANIFEST_NAME,
     bundle_generations,
     create_bundle_staging,
     resolve_current_bundle,
 )
+from fplinux_cli.build import inputs as inputs_build
+from fplinux_cli.build import publish as publish_build
+from fplinux_cli.build.bootstrap import verify as bootstrap_build
 
 from tests.fdt import binary_tree
 
@@ -153,8 +153,8 @@ class BuilderPublicationTests(unittest.TestCase):
         self.write(
             "common/loader_events.py", (common.ROOT / "common/loader_events.py").read_bytes()
         )
-        self.write("scripts/fplinux_cli/identity.py", b"# identity contract\n")
-        self.write("scripts/fplinux_cli/ssh_transport.py", b"# bundled SSH helper\n")
+        self.write("scripts/fplinux_cli/manifests/identity.py", b"# identity contract\n")
+        self.write("scripts/fplinux_cli/runtime/ssh_transport.py", b"# bundled SSH helper\n")
         self.write("platforms/demo/host/adapter.py", b"ADAPTER = 'demo'\n")
         self.write("THIRD_PARTY_NOTICES.md", b"notices\n")
         self.asset_lock = self.write("assets.lock.toml", b"[asset]\n")
@@ -246,12 +246,12 @@ class BuilderPublicationTests(unittest.TestCase):
         self.root_patch.start()
         self.output_patch.start()
         self.receipt_patch = mock.patch.object(
-            alpine_state,
+            publish_build,
             "trusted_receipt_identity",
             return_value={"recipe": self.rootfs_recipe, "sha256": "8" * 64},
         )
         self.signing_patch = mock.patch.object(
-            alpine_state,
+            publish_build,
             "signing_key_identity",
             return_value="7" * 64,
         )

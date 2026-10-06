@@ -7,22 +7,27 @@ import sys
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli import common
-from fplinux_cli import image_state as image_states
-from fplinux_cli import prune as cache_prune
-from fplinux_cli import workspace as workspaces
-from fplinux_cli.bundle_state import CurrentBundle, discard_superseded_bundle_generations
+from fplinux_cli.artifacts.bundles import CurrentBundle, discard_superseded_bundle_generations
+from fplinux_cli.cache.prune import operations as cache_prune
 from fplinux_cli.cli import bundles as bundles_commands
 from fplinux_cli.common import fail, sha256_file
+from fplinux_cli.environment import image_state as image_states
+from fplinux_cli.environment import image_store as environment_image_store
 from fplinux_cli.environment import images
-from fplinux_cli.environment import kern as kern_env
+from fplinux_cli.environment import kern as environment_kern
+from fplinux_cli.environment import setup as environment_setup
 from fplinux_cli.manifests import releases
-from fplinux_cli.output import RunReporter, silence_broken_pipe
+from fplinux_cli.reporting.process import silence_broken_pipe
+from fplinux_cli.reporting.run import RunReporter
+from fplinux_cli.workspace import build_inputs as workspace_build_inputs
+from fplinux_cli.workspace import capture as workspace_capture
+from fplinux_cli.workspace import staging as workspace_staging
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from fplinux_cli.image_state import ImageState
-    from fplinux_cli.workspace import WorkspaceSnapshot
+    from fplinux_cli.environment.image_state import ImageState
+    from fplinux_cli.workspace.capture import WorkspaceSnapshot
 
 
 def ensure_build_directory(path: Path) -> Path:
@@ -45,28 +50,28 @@ def _require_build_environment(
     """Resolve the pinned runtime and current image for a build operation."""
     image = images.container_image_reference(container_lock, image_recipe)
     current_image = None
-    if not kern_env.kern_available(container_lock):
+    if not environment_kern.kern_available(container_lock):
         if offline:
             fail(
                 "offline build requires the current pinned OCI image; "
                 "run ./fplinux setup online first"
             )
-        current_image = kern_env.setup(
+        current_image = environment_setup.setup(
             reporter=reporter, lock=container_lock, image_recipe=image_recipe
         )
-    kern = kern_env.require_kern(container_lock)
-    inspected_image = kern_env.current_image_state(kern, image, image_recipe)
+    kern = environment_kern.require_kern(container_lock)
+    inspected_image = environment_image_store.current_image_state(kern, image, image_recipe)
     if inspected_image is None:
         if offline:
             fail(
                 "offline build requires the current pinned OCI image; "
                 "run ./fplinux setup online first"
             )
-        current_image = kern_env.setup(
+        current_image = environment_setup.setup(
             reporter=reporter, lock=container_lock, image_recipe=image_recipe
         )
     elif current_image is None:
-        current_image = kern_env.publish_current_image_state(
+        current_image = environment_image_store.publish_current_image_state(
             kern, image, image_recipe, state=inspected_image
         )
     return kern, image, current_image
@@ -82,7 +87,9 @@ def prepare_host_tool(  # noqa: PLR0913 -- operation inputs and environment poli
     reporter: RunReporter,
 ) -> None:
     """Build one cached host utility in the pinned image without fitted device data."""
-    snapshot = workspaces.workspace_snapshot(workspaces.target_build_source_files(target))
+    snapshot = workspace_capture.workspace_snapshot(
+        workspace_build_inputs.target_build_source_files(target)
+    )
     container_lock = images.load_container_lock()
     image_recipe = images.container_image_recipe_digest(container_lock)
     kern, image, image_state = _require_build_environment(
@@ -91,7 +98,7 @@ def prepare_host_tool(  # noqa: PLR0913 -- operation inputs and environment poli
     cache = common.ROOT / ".cache"
     downloads = ensure_build_directory(cache / "downloads")
     host_tools = ensure_build_directory(cache / "host-tools")
-    workspace = workspaces.stage_workspace_snapshot(snapshot)
+    workspace = workspace_staging.stage_workspace_snapshot(snapshot)
     try:
         container_logs = ensure_build_directory(reporter.root / "host-tools")
         log_environment = reporter.container_environment("/logs")
@@ -99,7 +106,7 @@ def prepare_host_tool(  # noqa: PLR0913 -- operation inputs and environment poli
         command = [
             kern,
             "box",
-            kern_env.kern_box_name("host-tools"),
+            environment_kern.kern_box_name("host-tools"),
             "--image",
             image,
             "--pull",
@@ -145,9 +152,9 @@ def prepare_host_tool(  # noqa: PLR0913 -- operation inputs and environment poli
             tool,
         ]
         with reporter.stage("host-tools", passthrough=True, show_tail=False) as stage:
-            stage.run(command, env=kern_env.kern_environment())
+            stage.run(command, env=environment_kern.kern_environment())
     finally:
-        workspaces.discard_staged_workspace_snapshot(snapshot, workspace)
+        workspace_staging.discard_staged_workspace_snapshot(snapshot, workspace)
 
 
 def _build_container_command(  # noqa: PLR0913
@@ -183,7 +190,7 @@ def _build_container_command(  # noqa: PLR0913
     return [
         kern,
         "box",
-        kern_env.kern_box_name("build"),
+        environment_kern.kern_box_name("build"),
         "--image",
         image,
         "--pull",
@@ -284,7 +291,9 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
     if jobs < 1:
         fail("--jobs must be positive")
     release = releases.load_release(target)
-    snapshot = workspaces.target_workspace_snapshot(target, profile, build_type=build_type)
+    snapshot = workspace_build_inputs.target_workspace_snapshot(
+        target, profile, build_type=build_type
+    )
     container_lock = images.load_container_lock()
     image_recipe = images.container_image_recipe_digest(container_lock)
     cache = common.ROOT / ".cache"
@@ -346,7 +355,7 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
     linux = ensure_build_directory(cache / "linux")
     output = ensure_build_directory(cache / "out")
     with reporter.stage("workspace"):
-        workspace = workspaces.stage_workspace_snapshot(snapshot)
+        workspace = workspace_staging.stage_workspace_snapshot(snapshot)
     try:
         container_logs = ensure_build_directory(reporter.root / "container")
         log_environment = reporter.container_environment("/logs")
@@ -378,7 +387,7 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
                     image_recipe=image_recipe,
                     image_content=current_image.image_content,
                 ),
-                env=kern_env.kern_environment(),
+                env=environment_kern.kern_environment(),
             )
         identity = bundles_commands.build_identity(snapshot, current_image, cache)
         current = bundles_commands.matching_target_bundle(
@@ -413,4 +422,4 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
                 target=target,
             )
     finally:
-        workspaces.discard_staged_workspace_snapshot(snapshot, workspace)
+        workspace_staging.discard_staged_workspace_snapshot(snapshot, workspace)

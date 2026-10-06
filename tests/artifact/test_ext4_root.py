@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from fplinux_cli import ext4_root
+from fplinux_cli.build.storage import ext4 as ext4_root
 from fplinux_cli.common import sha256_file
 
 

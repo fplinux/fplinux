@@ -3,33 +3,23 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from fplinux_cli import alpine_state, common
-from fplinux_cli.bundle_state import (
+from fplinux_cli import common
+from fplinux_cli.alpine import signing
+from fplinux_cli.artifacts.bundles import (
     BundleStateError,
     CurrentBundle,
     resolve_current_bundle,
     validate_bundle_files,
 )
-from fplinux_cli.common import fail
-from fplinux_cli.manifests.paths import normalize_profile
+from fplinux_cli.runtime.bundle_session import bundle_manifest
 
 if TYPE_CHECKING:
-    from fplinux_cli.image_state import ImageState
-    from fplinux_cli.workspace import WorkspaceSnapshot
-
-
-MICROSD_BOOT_MODE = "microsd"
-
-
-MICROSD_BOOT_PROFILE = "microsd-uboot"
-
-
-PUBLIC_BOOT_MODES = (MICROSD_BOOT_MODE,)
+    from fplinux_cli.environment.image_state import ImageState
+    from fplinux_cli.workspace.capture import WorkspaceSnapshot
 
 
 @dataclass(frozen=True)
@@ -42,71 +32,11 @@ class BuildIdentity:
     apk_signing_key: str
 
 
-def profile_command(
-    command: str, target: str, profile: str | None, *, build_type: str = "release"
-) -> str:
-    """Render the exact public command for one default or named profile."""
-    rendered = f"./fplinux {command} {target} --build-type {build_type}"
-    if profile is not None:
-        rendered += f" --profile {profile}"
-    return rendered
-
-
 def profile_log_target(target: str, profile: str | None) -> str:
     """Keep one profile's persistent command logs below its target slot."""
     if profile is None:
         return target
     return f"{target}/profiles/{profile}"
-
-
-def selected_context_profile(
-    target: str | None,
-    *,
-    profile: str | None,
-    boot: str | None,
-) -> str | None:
-    """Resolve one explicit contributor profile or public boot mode without fallback."""
-    if profile is not None and boot is not None:
-        fail("--boot and --profile cannot be used together")
-    if boot is None:
-        return normalize_profile(profile)
-    if target is None:
-        fail(f"boot mode {boot} requires a target")
-    if boot == MICROSD_BOOT_MODE:
-        return MICROSD_BOOT_PROFILE
-    fail(f"boot mode {boot} is not available for target {target}")
-    return None
-
-
-def bundle_manifest(bundle: CurrentBundle) -> dict[str, Any]:
-    """Decode manifest bytes already validated by the immutable bundle resolver."""
-    manifest = json.loads(bundle.manifest_bytes)
-    if not isinstance(manifest, dict):
-        message = "build manifest root must be an object"
-        raise BundleStateError(message)
-    return manifest
-
-
-def resolve_target_bundle(
-    target: str,
-    profile: str | None = None,
-    *,
-    build_type: str = "release",
-) -> tuple[CurrentBundle, dict[str, Any]]:
-    """Resolve the current bundle pointer exactly once."""
-    try:
-        bundle = resolve_current_bundle(
-            common.ROOT / ".cache/out",
-            target,
-            profile,
-            build_type=build_type,
-        )
-        return bundle, bundle_manifest(bundle)
-    except (BundleStateError, OSError, UnicodeDecodeError, ValueError) as error:
-        fail(
-            "current build is missing or invalid; rebuild it: "
-            f"{profile_command('build', target, profile, build_type=build_type)} ({error})"
-        )
 
 
 def manifest_matches_identity(manifest: dict[str, Any], identity: BuildIdentity | None) -> bool:
@@ -182,7 +112,7 @@ def build_identity(
     if image_state is None:
         return None
     try:
-        signing_key = alpine_state.signing_key_identity(cache)
+        signing_key = signing.signing_key_identity(cache)
     except SystemExit:
         return None
     return BuildIdentity(

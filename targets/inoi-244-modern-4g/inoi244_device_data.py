@@ -8,16 +8,16 @@ accepted. This does not reconstruct VBM replacement blocks or recover ECC.
 
 from __future__ import annotations
 
-from fplinux_cli.bluetooth_firmware import (
+from fplinux_cli.device_data.bluetooth_firmware import (
     REQUIRED_BLUETOOTH_PARTITIONS,
     Cm4Revision,
 )
-from fplinux_cli.device_data import (
+from fplinux_cli.device_data.fitted import prepare_from_partitions
+from fplinux_cli.device_data.formats import (
     DeviceDataPreparation,
     PhysicalNand,
     redundant_vbm_partitions,
 )
-from fplinux_cli.fitted_device_data import prepare_from_partitions
 
 VBM_COPY_OFFSETS = (0x7FC0000, 0x7FE0000)
 

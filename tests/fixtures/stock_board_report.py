@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from fplinux_cli.device_data import PhysicalNand
+from fplinux_cli.device_data.formats import PhysicalNand
 
 if TYPE_CHECKING:
     from types import ModuleType

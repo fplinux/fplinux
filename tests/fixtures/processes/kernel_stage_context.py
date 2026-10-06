@@ -5,7 +5,7 @@ import os
 import sys
 from pathlib import Path
 
-from fplinux_cli.output import RunReporter
+from fplinux_cli.reporting.run import RunReporter
 
 
 def main() -> None:

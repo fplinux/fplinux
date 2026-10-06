@@ -6,26 +6,30 @@ from __future__ import annotations
 import argparse
 import os
 
-from fplinux_cli import alpine_builder, alpine_state, common, firmware_inputs
+from fplinux_cli import common
+from fplinux_cli.alpine.rootfs import build_rootfs
+from fplinux_cli.alpine.selection import bundle_packages, selected_packages
+from fplinux_cli.artifacts.bundles import bundle_slot
 from fplinux_cli.build import assets as assets_build
-from fplinux_cli.build import bootstrap as bootstrap_build
 from fplinux_cli.build import host as host_build
 from fplinux_cli.build import inputs as inputs_build
-from fplinux_cli.build import kernel as kernel_build
-from fplinux_cli.build import linux as linux_build
 from fplinux_cli.build import process as process_build
 from fplinux_cli.build import publish as publish_build
 from fplinux_cli.build import sources as sources_build
-from fplinux_cli.build import storage as storage_build
-from fplinux_cli.bundle_state import bundle_slot
+from fplinux_cli.build.bootstrap.recipe import bootstrap_recipe_digest
+from fplinux_cli.build.bootstrap.stage import build_bootstrap
+from fplinux_cli.build.kernel.compile import build_kernel
+from fplinux_cli.build.kernel.prepare import prepare_linux
+from fplinux_cli.build.storage import stage as storage_build
 from fplinux_cli.common import fail
+from fplinux_cli.device_data import inputs as firmware_inputs
 from fplinux_cli.environment.images import container_artifact_recipe_digest
-from fplinux_cli.identity import BUILD_TYPES
+from fplinux_cli.manifests.identity import BUILD_TYPES
 from fplinux_cli.manifests.paths import target_asset_lock_path
 from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.releases import load_release
 from fplinux_cli.manifests.targets import load_target
-from fplinux_cli.output import RunReporter, run_entrypoint
+from fplinux_cli.reporting.run import RunReporter, run_entrypoint
 
 
 def main() -> None:
@@ -49,8 +53,8 @@ def main() -> None:
     with process_build.report_stage(reporter, "configuration"):
         target_config = load_target(args.target, args.profile, build_type=args.build_type)
         platform = load_platform(target_config["platform"])
-        rootfs_packages = alpine_state.selected_packages(platform, target_config)
-        bundle_packages = alpine_state.bundle_packages(platform, target_config, rootfs_packages)
+        rootfs_packages = selected_packages(platform, target_config)
+        selected_bundle_packages = bundle_packages(platform, target_config, rootfs_packages)
         device_data = firmware_inputs.capture_snapshot_device_data(
             args.target,
             target_config["device_data"]["groups"],
@@ -79,7 +83,7 @@ def main() -> None:
         inputs_build.CACHE.mkdir(parents=True, exist_ok=True)
 
     with process_build.report_stage(reporter, "prepare-linux"):
-        linux_source, prepared_linux = linux_build.prepare_linux(
+        linux_source, prepared_linux = prepare_linux(
             sources,
             args.target,
             target_config,
@@ -88,20 +92,20 @@ def main() -> None:
 
     with process_build.report_stage(reporter, "rootfs"):
         if target_config["image"]["kind"] == "ext4-root":
-            rootfs, rootfs_output, rootfs_recipe, bundle_apk_outputs = alpine_builder.build_rootfs(
+            rootfs, rootfs_output, rootfs_recipe, bundle_apk_outputs = build_rootfs(
                 args.jobs,
                 rootfs_packages,
-                bundle_packages,
+                selected_bundle_packages,
                 firmware=firmware,
                 display_brightness=target_config.get("display_brightness"),
                 external_image=target_config["image"],
                 external_output=work / "rootfs-image",
             )
         else:
-            rootfs, rootfs_output, rootfs_recipe, bundle_apk_outputs = alpine_builder.build_rootfs(
+            rootfs, rootfs_output, rootfs_recipe, bundle_apk_outputs = build_rootfs(
                 args.jobs,
                 rootfs_packages,
-                bundle_packages,
+                selected_bundle_packages,
                 firmware=firmware,
                 display_brightness=target_config.get("display_brightness"),
             )
@@ -114,13 +118,13 @@ def main() -> None:
     cross = platform["linux"]["cross_compile"]
     kernel_output = work / "kernel"
     with process_build.report_stage(reporter, "kernel"):
-        bootstrap_recipe = bootstrap_build.bootstrap_recipe_digest(
+        bootstrap_recipe = bootstrap_recipe_digest(
             sources,
             args.target,
             target_config,
             platform,
         )
-        zimage, dtb, kbuild_receipt, device_identity = kernel_build.build_kernel(
+        zimage, dtb, kbuild_receipt, device_identity = build_kernel(
             args.target,
             target_config,
             platform,
@@ -167,7 +171,7 @@ def main() -> None:
         sd_image_artifact,
     )
     with process_build.report_stage(reporter, "bootstrap"):
-        ramboot, ramboot_map, personalization = bootstrap_build.build_bootstrap(
+        ramboot, ramboot_map, personalization = build_bootstrap(
             sources,
             args.target,
             target_config,
@@ -203,7 +207,7 @@ def main() -> None:
             rootfs_output=rootfs_output,
             rootfs_recipe=rootfs_recipe,
             kbuild_receipt=kbuild_receipt,
-            bundle_packages=bundle_packages,
+            bundle_packages=selected_bundle_packages,
             bundle_apks=bundle_apk_outputs,
             boot_files=boot_files,
             boot_artifacts=boot_artifacts,

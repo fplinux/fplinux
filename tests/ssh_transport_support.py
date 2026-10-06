@@ -7,7 +7,7 @@ import hashlib
 import json
 from typing import TYPE_CHECKING, Any
 
-from fplinux_cli import ssh_transport
+from fplinux_cli.runtime import ssh_transport
 
 if TYPE_CHECKING:
     from pathlib import Path

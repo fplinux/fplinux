@@ -7,17 +7,17 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass
 
-from fplinux_cli.bluetooth_firmware import (
+from fplinux_cli.device_data.bluetooth_firmware import (
     REQUIRED_BLUETOOTH_PARTITIONS,
     Cm4Revision,
 )
-from fplinux_cli.device_data import (
+from fplinux_cli.device_data.fitted import prepare_from_partitions
+from fplinux_cli.device_data.formats import (
     BLOCK_MAIN_BYTES,
     DeviceDataPreparation,
     NandPartitionReader,
     PhysicalNand,
 )
-from fplinux_cli.fitted_device_data import prepare_from_partitions
 
 _PARTI_OFFSET = 0x63DE0
 _PARTI_COUNT = 22

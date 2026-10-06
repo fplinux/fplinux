@@ -7,10 +7,10 @@ import argparse
 
 from fplinux_cli.common import fail
 from fplinux_cli.environment.images import container_image_recipe_digest, load_container_lock
-from fplinux_cli.output import RunReporter, run_entrypoint
-from fplinux_cli.workspace import (
+from fplinux_cli.reporting.run import RunReporter, run_entrypoint
+from fplinux_cli.workspace.quality_inputs import quality_workspace_snapshot
+from fplinux_cli.workspace.staging import (
     discard_staged_quality_workspace_snapshot,
-    quality_workspace_snapshot,
     stage_quality_workspace_snapshot,
 )
 

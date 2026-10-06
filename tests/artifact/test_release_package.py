@@ -18,20 +18,18 @@ from pathlib import Path
 from unittest import mock
 from urllib.parse import urlsplit
 
-from fplinux_cli import alpine_state, common
-from fplinux_cli import image_state as image_states
-from fplinux_cli import workspace as workspaces
-from fplinux_cli.bundle_state import (
-    BUILD_MANIFEST_NAME,
-    publish_current_bundle,
-)
+from fplinux_cli import common
+from fplinux_cli.alpine import signing as alpine_state
+from fplinux_cli.artifacts.bundles import BUILD_MANIFEST_NAME, publish_current_bundle
 from fplinux_cli.cli import package as package_commands
 from fplinux_cli.common import canonical_json_bytes
+from fplinux_cli.environment import image_state as image_states
 from fplinux_cli.environment import images
-from fplinux_cli.image_state import ImageState
+from fplinux_cli.environment.image_state import ImageState
 from fplinux_cli.manifests import platforms, releases, targets
 from fplinux_cli.manifests.releases import load_release
-from fplinux_cli.workspace import WorkspaceSnapshot
+from fplinux_cli.workspace import build_inputs as workspaces
+from fplinux_cli.workspace.capture import WorkspaceSnapshot
 
 from tests.bundle_support import file_record
 from tests.process import run_process

@@ -40,7 +40,7 @@ def identity_module() -> ModuleType:
         return _identity_module
     candidates = (
         Path(__file__).with_name("identity.py"),
-        Path(__file__).resolve().parents[1] / "scripts/fplinux_cli/identity.py",
+        Path(__file__).resolve().parents[1] / "scripts/fplinux_cli/manifests/identity.py",
     )
     source = next((path for path in candidates if path.is_file()), None)
     if source is None:

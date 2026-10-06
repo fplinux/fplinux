@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fplinux_cli.bundle_state import (
+from fplinux_cli.artifacts.bundles import (
     create_bundle_staging,
     publish_bundle_generation,
     publish_current_bundle,

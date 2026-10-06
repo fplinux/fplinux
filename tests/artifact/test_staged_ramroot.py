@@ -12,7 +12,8 @@ from pathlib import Path
 from unittest import mock
 
 from fplinux_cli import common
-from fplinux_cli import workspace as workspace_module
+from fplinux_cli.workspace import build_inputs as workspace_module
+from fplinux_cli.workspace import staging as workspace_staging
 
 
 class StagedRamrootTests(unittest.TestCase):
@@ -23,16 +24,17 @@ class StagedRamrootTests(unittest.TestCase):
         snapshot = workspace_module.target_workspace_snapshot("nokia-ta1618")
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
-            with mock.patch.object(workspace_module, "ROOT", directory):
-                source = workspace_module.stage_workspace_snapshot(snapshot)
-            bootstrap = source / "common/ramroot-init.sh"
+            with mock.patch.object(workspace_staging, "ROOT", directory):
+                source = workspace_staging.stage_workspace_snapshot(snapshot)
+            bootstrap = source / "alpine/ramroot-init.sh"
             bootstrap.write_bytes(b"#!/bin/sh\nexit 0\n")
             with (
                 mock.patch.object(workspace_module, "ROOT", source),
+                mock.patch.object(workspace_staging, "ROOT", source),
                 mock.patch.object(common, "ROOT", source),
             ):
                 before = workspace_module.target_workspace_snapshot("nokia-ta1618")
-                staged = workspace_module.stage_workspace_snapshot(before)
+                staged = workspace_staging.stage_workspace_snapshot(before)
                 (source / "unrelated.txt").write_bytes(b"not a build input\n")
                 unrelated = workspace_module.target_workspace_snapshot("nokia-ta1618")
                 self.assertEqual(before.recipe, unrelated.recipe)
@@ -50,8 +52,8 @@ class StagedRamrootTests(unittest.TestCase):
             (root / "usr/lib/libgcc_s.so.1").write_bytes(b"gcc runtime\n")
             command = (
                 "from pathlib import Path; import sys; "
-                "from fplinux_cli import alpine_builder; "
-                "alpine_builder._write_ramroot_initramfs("
+                "from fplinux_cli.alpine.rootfs_files import _write_ramroot_initramfs; "
+                "_write_ramroot_initramfs("
                 "Path(sys.argv[1]), Path(sys.argv[2]))"
             )
             packed = subprocess.run(

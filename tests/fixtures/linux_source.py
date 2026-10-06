@@ -13,12 +13,12 @@ from unittest import mock
 
 from fplinux_cli import common
 from fplinux_cli.build import inputs as inputs_build
-from fplinux_cli.build import linux as linux_build
 from fplinux_cli.build import sources as sources_build
+from fplinux_cli.build.kernel import prepare as linux_build
 from fplinux_cli.manifests.linux import discover_linux_targets
 
 if TYPE_CHECKING:
-    from fplinux_cli import linux_state
+    from fplinux_cli.build.kernel import state as linux_state
 
 
 class LinuxSourceFixture(unittest.TestCase):

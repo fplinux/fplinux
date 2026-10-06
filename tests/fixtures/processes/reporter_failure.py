@@ -6,7 +6,7 @@ import signal
 import sys
 from pathlib import Path
 
-from fplinux_cli.output import RunReporter, run_entrypoint
+from fplinux_cli.reporting.run import RunReporter, run_entrypoint
 
 
 def main() -> None:

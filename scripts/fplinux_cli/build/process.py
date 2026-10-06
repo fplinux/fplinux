@@ -9,8 +9,8 @@ import subprocess
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
-from fplinux_cli.build_env import build_environment
-from fplinux_cli.output import RunReporter, current_stage
+from fplinux_cli.build.environment import build_environment
+from fplinux_cli.reporting.run import RunReporter, current_stage
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

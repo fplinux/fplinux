@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from fplinux_cli import sd_image
+from fplinux_cli.build.storage import sd as sd_image
 from fplinux_cli.common import sha256_file
 
 BOOT_OFFSET = 1 * 1024 * 1024
@@ -174,7 +174,7 @@ class SdImageTests(unittest.TestCase):
             ["genimage"], returncode=2, stderr="injected genimage failure\n"
         )
         with (
-            mock.patch("fplinux_cli.sd_image.subprocess.run", return_value=failed),
+            mock.patch("fplinux_cli.build.storage.sd.subprocess.run", return_value=failed),
             self.assertRaisesRegex(sd_image.SdImageError, "injected genimage failure"),
         ):
             self.build()

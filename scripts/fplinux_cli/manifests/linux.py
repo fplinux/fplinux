@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli.common import fail, load_toml
-from fplinux_cli.identity import (
+from fplinux_cli.manifests.identity import (
     IdentityError,
     validate_platform_identity,
     validate_platform_name,

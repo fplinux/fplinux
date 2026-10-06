@@ -9,14 +9,14 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from fplinux_cli import common
-from fplinux_cli import image_state as image_states
-from fplinux_cli import workspace as workspaces
-from fplinux_cli.cli import bundles as bundles_commands
-from fplinux_cli.cli import runtime as runtime_commands
+from fplinux_cli.cli import bundles as cli_bundles
 from fplinux_cli.common import ZIP_TIMESTAMP, fail, payload_digest, sha256_bytes, sha256_file
+from fplinux_cli.environment import image_state as image_states
 from fplinux_cli.environment import images
-from fplinux_cli.identity import RUNTIME_IDENTITY_PATH
 from fplinux_cli.manifests import platforms, releases, targets
+from fplinux_cli.manifests.identity import RUNTIME_IDENTITY_PATH
+from fplinux_cli.runtime import bundle_session as runtime_bundle_session
+from fplinux_cli.workspace import build_inputs as workspaces
 
 CANDIDATE_NOTICE = b"""PHONE-TEST CANDIDATE - DO NOT PUBLISH
 
@@ -148,7 +148,7 @@ def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]
         *config["runtime"]["assets"].values(),
         *executables,
     }
-    required_runtime.add(runtime_commands.SSH_HELPER_PATH)
+    required_runtime.add(runtime_bundle_session.SSH_HELPER_PATH)
     required_runtime.add(RUNTIME_IDENTITY_PATH)
     if not required_runtime.issubset(runtime_files):
         fail("release runtime files omit required runtime inputs")
@@ -197,14 +197,14 @@ def package_target(
     boot: str | None = None,
     candidate: bool = False,
 ) -> None:
-    selected_profile = bundles_commands.selected_context_profile(
+    selected_profile = runtime_bundle_session.selected_context_profile(
         target, profile=profile, boot=boot
     )
     if selected_profile is not None and not candidate:
         fail("non-default boot contexts can only be packaged with --candidate")
     config = targets.load_target(target, selected_profile, build_type=build_type)
     release = load_release_manifest(target, config)
-    bundle, manifest = bundles_commands.resolve_target_bundle(
+    bundle, manifest = runtime_bundle_session.resolve_target_bundle(
         target, selected_profile, build_type=build_type
     )
     snapshot = workspaces.target_workspace_snapshot(
@@ -212,10 +212,10 @@ def package_target(
     )
     image_recipe = images.container_image_recipe_digest()
     image_state = image_states.load_image_state(common.ROOT / ".cache", image_recipe)
-    identity = bundles_commands.build_identity(snapshot, image_state, common.ROOT / ".cache")
+    identity = cli_bundles.build_identity(snapshot, image_state, common.ROOT / ".cache")
     files_table = manifest.get("files")
     try:
-        required_boot_artifacts = bundles_commands.required_boot_artifacts(manifest)
+        required_boot_artifacts = cli_bundles.required_boot_artifacts(manifest)
     except ValueError as error:
         fail(str(error))
     reserved = {
@@ -232,11 +232,11 @@ def package_target(
         dict.fromkeys((*release["qualification_files"], *required_boot_artifacts))
     )
     if (
-        not bundles_commands.manifest_matches_identity(manifest, identity)
+        not cli_bundles.manifest_matches_identity(manifest, identity)
         or not isinstance(files_table, dict)
         or not set(bundle_files).issubset(files_table)
     ):
-        command = bundles_commands.profile_command(
+        command = runtime_bundle_session.profile_command(
             "build", target, selected_profile, build_type=build_type
         )
         fail(f"build output is stale; rebuild it: {command}")

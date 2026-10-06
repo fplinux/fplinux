@@ -7,21 +7,26 @@ import shlex
 import tempfile
 from pathlib import Path
 
-from fplinux_cli import alpine_state, common
-from fplinux_cli import workspace as workspaces
-from fplinux_cli.alpine_builder import materialize_aport_sources
-from fplinux_cli.build_env import SOURCE_DATE_EPOCH
+from fplinux_cli import common
+from fplinux_cli.alpine import lock as alpine_lock
+from fplinux_cli.alpine import selection as alpine_selection
+from fplinux_cli.alpine.aports import materialize_aport_sources
+from fplinux_cli.build.environment import SOURCE_DATE_EPOCH
 from fplinux_cli.cli import build as build_commands
 from fplinux_cli.common import fail, replace_file_atomically
+from fplinux_cli.environment import image_store as environment_image_store
 from fplinux_cli.environment import images
-from fplinux_cli.environment import kern as kern_env
-from fplinux_cli.output import RunReporter
-from fplinux_cli.workspace import WorkspaceSnapshot, add_source_path, workspace_snapshot
+from fplinux_cli.environment import kern as environment_kern
+from fplinux_cli.environment import setup as environment_setup
+from fplinux_cli.reporting.run import RunReporter
+from fplinux_cli.workspace import staging
+from fplinux_cli.workspace.build_inputs import add_source_path
+from fplinux_cli.workspace.capture import WorkspaceSnapshot, workspace_snapshot
 
 
 def _canonical_aport(package: str) -> Path:
     """Return one regular canonical aport selected by a package identifier."""
-    if alpine_state.PACKAGE_ID.fullmatch(package) is None:
+    if alpine_lock.PACKAGE_ID.fullmatch(package) is None:
         fail(f"invalid Alpine package identifier: {package}")
     aport = common.ROOT / "alpine/aports" / package
     if aport.is_symlink() or not aport.is_dir():
@@ -37,7 +42,7 @@ def _aport_checksum_snapshot(package: str) -> WorkspaceSnapshot:
     aport = _canonical_aport(package)
     files: dict[str, Path] = {}
     add_source_path(files, aport)
-    for source in alpine_state.shared_aport_sources(package, root=common.ROOT):
+    for source in alpine_selection.shared_aport_sources(package, root=common.ROOT):
         add_source_path(files, source)
     return workspace_snapshot(sorted(files.items()))
 
@@ -115,7 +120,7 @@ def _checksum_container_command(  # noqa: PLR0913
     return [
         kern,
         "box",
-        kern_env.kern_box_name("checksum"),
+        environment_kern.kern_box_name("checksum"),
         "--image",
         image,
         "--pull",
@@ -153,25 +158,25 @@ def checksum_aport(package: str, *, offline: bool = False) -> None:
     image_recipe = images.container_image_recipe_digest(container_lock)
     image = images.container_image_reference(container_lock, image_recipe)
     reporter = RunReporter.create("checksum", target=package, verbose=False)
-    if not kern_env.kern_available(container_lock):
+    if not environment_kern.kern_available(container_lock):
         if offline:
             fail(
                 "offline checksum requires the current pinned OCI image; "
                 "run ./fplinux setup online first"
             )
-        kern_env.setup(reporter=reporter, lock=container_lock, image_recipe=image_recipe)
-    kern = kern_env.require_kern(container_lock)
-    if kern_env.current_image_state(kern, image, image_recipe) is None:
+        environment_setup.setup(reporter=reporter, lock=container_lock, image_recipe=image_recipe)
+    kern = environment_kern.require_kern(container_lock)
+    if environment_image_store.current_image_state(kern, image, image_recipe) is None:
         if offline:
             fail(
                 "offline checksum requires the current pinned OCI image; "
                 "run ./fplinux setup online first"
             )
-        kern_env.setup(reporter=reporter, lock=container_lock, image_recipe=image_recipe)
+        environment_setup.setup(reporter=reporter, lock=container_lock, image_recipe=image_recipe)
     cache = common.ROOT / ".cache"
     downloads = build_commands.ensure_build_directory(cache / "downloads")
     with reporter.stage("workspace"):
-        snapshot_root = workspaces.stage_workspace_snapshot(before_snapshot)
+        snapshot_root = staging.stage_workspace_snapshot(before_snapshot)
     checksum_root = build_commands.ensure_build_directory(cache / "checksum")
     with tempfile.TemporaryDirectory(
         dir=checksum_root,
@@ -191,7 +196,7 @@ def checksum_aport(package: str, *, offline: bool = False) -> None:
                     stage=stage,
                     downloads=downloads,
                 ),
-                env=kern_env.kern_environment(),
+                env=environment_kern.kern_environment(),
             )
         generated = stage / "alpine/aports" / package / "APKBUILD"
         if generated.is_symlink() or not generated.is_file():

@@ -14,6 +14,51 @@ from fplinux_cli.manifests.values import relative_value
 CACHE = Path("/cache")
 OUTPUT = Path("/out")
 
+_CORE_IMPLEMENTATION_SOURCES = (
+    "scripts/fplinux_cli/common.py",
+    "scripts/fplinux_cli/build/environment.py",
+    "scripts/fplinux_cli/build/inputs.py",
+    "scripts/fplinux_cli/build/process.py",
+    "scripts/fplinux_cli/build/sources.py",
+)
+_BOOTSTRAP_IMPLEMENTATION_SOURCES = (
+    *_CORE_IMPLEMENTATION_SOURCES,
+    "scripts/fplinux_cli/build/identity.py",
+    "scripts/fplinux_cli/build/bootstrap/recipe.py",
+    "scripts/fplinux_cli/build/bootstrap/stage.py",
+    "scripts/fplinux_cli/build/storage/layout.py",
+    "scripts/fplinux_cli/manifests/identity.py",
+)
+_KERNEL_IMPLEMENTATION_SOURCES = (
+    *_CORE_IMPLEMENTATION_SOURCES,
+    "scripts/fplinux_cli/build/device_tree.py",
+    "scripts/fplinux_cli/build/identity.py",
+    "scripts/fplinux_cli/build/kernel/prepare.py",
+    "scripts/fplinux_cli/build/kernel/configuration.py",
+    "scripts/fplinux_cli/build/kernel/compile.py",
+    "scripts/fplinux_cli/build/kernel/identity.py",
+    "scripts/fplinux_cli/build/kernel/projection.py",
+    "scripts/fplinux_cli/build/kernel/state.py",
+    "scripts/fplinux_cli/build/kernel/receipts.py",
+    "scripts/fplinux_cli/build/storage/layout.py",
+    "scripts/fplinux_cli/device_data/inputs.py",
+    "scripts/fplinux_cli/manifests/identity.py",
+    "scripts/fplinux_cli/manifests/kernel.py",
+    "scripts/fplinux_cli/manifests/linux.py",
+)
+_BUILD_STAGE_SOURCES = (
+    "scripts/fplinux_cli/build/__init__.py",
+    "scripts/fplinux_cli/build/__main__.py",
+    "scripts/fplinux_cli/build/assets.py",
+    "scripts/fplinux_cli/build/host.py",
+    "scripts/fplinux_cli/build/publish.py",
+    "scripts/fplinux_cli/build/bootstrap/__init__.py",
+    "scripts/fplinux_cli/build/bootstrap/verify.py",
+    "scripts/fplinux_cli/build/kernel/__init__.py",
+    "scripts/fplinux_cli/build/storage/__init__.py",
+    "scripts/fplinux_cli/build/storage/stage.py",
+)
+
 
 def require_file(path: Path) -> Path:
     """Require a regular, non-symlink file."""
@@ -73,10 +118,40 @@ def selected_profile(target_config: dict[str, Any]) -> str | None:
     return profile
 
 
-def implementation_sources() -> list[tuple[str, Path]]:
-    """Capture the build package's source files for causal build receipts."""
-    directory = require_directory(common.ROOT / "scripts/fplinux_cli/build")
+def bootstrap_implementation_sources() -> list[tuple[str, Path]]:
+    """Capture the operations that produce the selected bootstrap bytes."""
     return [
-        (path.relative_to(common.ROOT).as_posix(), require_file(path))
-        for path in sorted(directory.glob("*.py"))
+        (relative, require_file(root_source(relative)))
+        for relative in _BOOTSTRAP_IMPLEMENTATION_SOURCES
     ]
+
+
+def kernel_implementation_sources() -> list[tuple[str, Path]]:
+    """Capture the preparation and Kbuild operations that produce kernel bytes."""
+    return [
+        (relative, require_file(root_source(relative)))
+        for relative in _KERNEL_IMPLEMENTATION_SOURCES
+    ]
+
+
+def selected_build_sources(target_config: dict[str, Any]) -> tuple[str, ...]:
+    """Deliver the current build stages and only the selected storage backends."""
+    sources = {
+        *_BOOTSTRAP_IMPLEMENTATION_SOURCES,
+        *_KERNEL_IMPLEMENTATION_SOURCES,
+        *_BUILD_STAGE_SOURCES,
+    }
+    if target_config["uboot"]["kind"] == "full":
+        sources.add("scripts/fplinux_cli/build/storage/uboot.py")
+    if target_config["image"]["kind"] == "ext4-root":
+        sources.update(
+            (
+                "scripts/fplinux_cli/build/storage/ext4.py",
+                "scripts/fplinux_cli/build/storage/mke2fs.conf",
+            )
+        )
+        if target_config["fit"]["kind"] == "sha256":
+            sources.add("scripts/fplinux_cli/build/storage/sd.py")
+    if target_config["fit"]["kind"] == "sha256":
+        sources.add("scripts/fplinux_cli/build/storage/fit.py")
+    return tuple(sorted(sources))

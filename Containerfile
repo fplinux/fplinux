@@ -398,7 +398,7 @@ RUN mkdir -p /cache/analysis /cache/ccache /cache/downloads /cache/host-tools \
     /tmp/fplinux-home /workspace /work \
     && chmod 1777 /cache /tmp/fplinux-home /work
 
-COPY scripts/fplinux_cli/image_content.py /usr/local/libexec/fplinux-image-content.py
+COPY scripts/fplinux_cli/environment/image_content.py /usr/local/libexec/fplinux-image-content.py
 
 RUN set -eu; \
     content=$(python3 -B /usr/local/libexec/fplinux-image-content.py); \

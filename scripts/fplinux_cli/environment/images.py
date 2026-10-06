@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from fplinux_cli import common
 from fplinux_cli.common import fail
 from fplinux_cli.manifests.values import sha256_value
-from fplinux_cli.quality.source_policy import validate_source_policy
+from fplinux_cli.quality.source_gate import validate_source_policy
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -138,7 +138,7 @@ def container_image_recipe_digest(lock: dict[str, Any] | None = None) -> str:
         [
             common.ROOT / ".kernignore",
             common.ROOT / "Containerfile",
-            common.ROOT / "scripts/fplinux_cli/image_content.py",
+            common.ROOT / "scripts/fplinux_cli/environment/image_content.py",
             common.ROOT / "package.json",
             common.ROOT / "package-lock.json",
             common.ROOT / "environment.lock.toml",

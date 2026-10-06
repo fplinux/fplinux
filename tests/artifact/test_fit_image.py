@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from fplinux_cli import fit_image
+from fplinux_cli.build.storage import fit as fit_image
 from fplinux_cli.common import sha256_file
 
 from tests.process import run_process

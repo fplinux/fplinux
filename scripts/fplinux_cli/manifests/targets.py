@@ -8,9 +8,13 @@ from itertools import pairwise
 from typing import Any
 
 from fplinux_cli.common import fail, load_toml
-from fplinux_cli.identity import IdentityError, validate_build_type, validate_target_identity
-from fplinux_cli.identity_codegen import validate_record_prefix
 from fplinux_cli.manifests.assets import asset_bundle_paths
+from fplinux_cli.manifests.identity import (
+    IdentityError,
+    validate_build_type,
+    validate_record_prefix,
+    validate_target_identity,
+)
 from fplinux_cli.manifests.paths import normalize_profile, target_asset_lock_path, target_directory
 from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.profiles import load_profile

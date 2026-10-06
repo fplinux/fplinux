@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from fplinux_cli.device_data import (
+from fplinux_cli.device_data.formats import (
     BLOCK_MAIN_BYTES,
     PhysicalNand,
     PreparedGroup,

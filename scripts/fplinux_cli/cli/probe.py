@@ -8,18 +8,20 @@ import tempfile
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from fplinux_cli import alpine_state, common
-from fplinux_cli.alpine_builder import _alpine_group_packages, alpine_sysroot_command
+from fplinux_cli import common
+from fplinux_cli.alpine import lock as alpine_lock
+from fplinux_cli.alpine.packages import _alpine_group_packages, alpine_sysroot_command
 from fplinux_cli.build import sources as sources_build
-from fplinux_cli.build_env import SOURCE_DATE_EPOCH
+from fplinux_cli.build.environment import SOURCE_DATE_EPOCH
 from fplinux_cli.cli.build import ensure_build_directory
 from fplinux_cli.common import canonical_json_bytes, fail, relative_name, sha256_bytes
+from fplinux_cli.environment import image_store as environment_image_store
 from fplinux_cli.environment import images
-from fplinux_cli.environment import kern as kern_env
-from fplinux_cli.output import RunReporter
+from fplinux_cli.environment import kern as environment_kern
+from fplinux_cli.reporting.run import RunReporter
 
 if TYPE_CHECKING:
-    from fplinux_cli.image_state import ImageState
+    from fplinux_cli.environment.image_state import ImageState
 
 
 def _require_unlinked_path(root: Path, relative: str) -> Path:
@@ -72,7 +74,7 @@ def _container_command(
     return [
         kern,
         "box",
-        kern_env.kern_box_name("probe-build"),
+        environment_kern.kern_box_name("probe-build"),
         "--image",
         image,
         "--pull",
@@ -97,8 +99,8 @@ def _container_command(
 
 
 def _prepare_sysroot(kern: str, image: str, state: ImageState, reporter: RunReporter) -> Path:
-    lock = alpine_state.load_alpine_lock()
-    records = alpine_state.package_records(lock)
+    lock = alpine_lock.load_alpine_lock()
+    records = alpine_lock.package_records(lock)
     identity = sha256_bytes(
         canonical_json_bytes(
             {
@@ -147,7 +149,7 @@ def _prepare_sysroot(kern: str, image: str, state: ImageState, reporter: RunRepo
                     prepare_sysroot=True,
                 ),
                 cwd=common.ROOT,
-                env=kern_env.kern_environment(),
+                env=environment_kern.kern_environment(),
                 timeout=5 * 60,
             )
         prepared.rename(sysroot)
@@ -222,7 +224,7 @@ def _compile_probe(  # noqa: PLR0913 -- explicit compiler inputs and reporting b
                     ],
                 ),
                 cwd=common.ROOT,
-                env=kern_env.kern_environment(),
+                env=environment_kern.kern_environment(),
                 timeout=5 * 60,
             )
         temporary.chmod(0o755)
@@ -239,8 +241,8 @@ def build_probe(source: str, *, output: str) -> None:
     lock = images.load_container_lock()
     image_recipe = images.container_image_recipe_digest(lock)
     image = images.container_image_reference(lock, image_recipe)
-    kern = kern_env.require_kern(lock)
-    state = kern_env.current_image_state(kern, image, image_recipe)
+    kern = environment_kern.require_kern(lock)
+    state = environment_image_store.current_image_state(kern, image, image_recipe)
     if state is None:
         fail("probe-build requires the current pinned build image; run ./fplinux setup")
     reporter = RunReporter.create("probe-build", target=None, verbose=False)

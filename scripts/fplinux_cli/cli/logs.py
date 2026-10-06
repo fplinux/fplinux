@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fplinux_cli.common import ROOT, fail
-from fplinux_cli.output import silence_broken_pipe
+from fplinux_cli.reporting.process import silence_broken_pipe
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

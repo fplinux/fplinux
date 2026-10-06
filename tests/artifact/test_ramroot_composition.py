@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from fplinux_cli import alpine_builder
+from fplinux_cli.alpine import rootfs_files as alpine_builder
 
 from tests.process import run_process
 
@@ -29,9 +29,9 @@ class RamrootCompositionTests(unittest.TestCase):
             staging = directory / "output"
             for relative in ("bin", "lib", "usr/lib", "etc"):
                 (root / relative).mkdir(parents=True)
-            (source / "common").mkdir(parents=True)
+            (source / "alpine").mkdir(parents=True)
             staging.mkdir()
-            (source / "common/ramroot-init.sh").write_bytes(b"#!/bin/sh\nexit 0\n")
+            (source / "alpine/ramroot-init.sh").write_bytes(b"#!/bin/sh\nexit 0\n")
             (root / "bin/busybox").write_bytes(b"controlled BusyBox runtime bytes\n")
             (root / "bin/busybox").chmod(0o755)
             (root / "lib/ld-musl-armhf.so.1").write_bytes(b"controlled musl runtime bytes\n")

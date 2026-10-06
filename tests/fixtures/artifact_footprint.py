@@ -12,7 +12,7 @@ import struct
 import tarfile
 from typing import TYPE_CHECKING
 
-from fplinux_cli.bundle_state import CurrentBundle
+from fplinux_cli.artifacts.bundles import CurrentBundle
 
 if TYPE_CHECKING:
     from pathlib import Path

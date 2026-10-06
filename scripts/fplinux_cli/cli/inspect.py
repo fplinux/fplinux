@@ -11,10 +11,9 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, cast
 
-from fplinux_cli.artifact_footprint import FootprintError, compare_footprints, inspect_footprint
+from fplinux_cli.artifacts.footprint import FootprintError, compare_footprints, inspect_footprint
 from fplinux_cli.common import display_text, fail, sha256_file
-
-from .bundles import resolve_target_bundle
+from fplinux_cli.runtime.bundle_session import resolve_target_bundle
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

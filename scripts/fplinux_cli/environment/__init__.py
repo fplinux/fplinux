@@ -1,2 +1,2 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Host runtime and repository setup."""
+"""Prepare the pinned project-local build environment."""

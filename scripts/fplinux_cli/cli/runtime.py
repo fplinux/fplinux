@@ -1,195 +1,19 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Run and inspect a selected phone session."""
+"""Coordinate console actions and comparison with the selected running build."""
 
 from __future__ import annotations
 
-import importlib.util
-import os
-import pwd
-import stat
-import subprocess
-import sys
-from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
 from fplinux_cli import common
-from fplinux_cli import image_state as image_states
-from fplinux_cli import workspace as workspaces
-from fplinux_cli.cli import bundles as bundles_commands
-from fplinux_cli.common import fail, sha256_file
+from fplinux_cli.cli import bundles as cli_bundles
+from fplinux_cli.common import fail
+from fplinux_cli.environment import image_state as image_states
 from fplinux_cli.environment import images
 from fplinux_cli.manifests import targets
 from fplinux_cli.manifests.paths import normalize_profile
-
-if TYPE_CHECKING:
-    from types import ModuleType
-
-    from fplinux_cli.bundle_state import CurrentBundle
-
-
-SSH_HELPER_PATH = "runner/ssh_transport.py"
-
-
-def _load_bundle_ssh_helper(
-    bundle: CurrentBundle,
-    manifest: dict[str, Any],
-) -> ModuleType:
-    """Load only the SSH helper hashed by the selected immutable generation."""
-    path = bundle.path / SSH_HELPER_PATH
-    files = manifest.get("files")
-    record = files.get(SSH_HELPER_PATH) if isinstance(files, dict) else None
-    expected = record.get("sha256") if isinstance(record, dict) else None
-    if (
-        not isinstance(expected, str)
-        or path.is_symlink()
-        or not path.is_file()
-        or sha256_file(path) != expected
-    ):
-        fail(f"current bundle has no valid SSH transport helper: {path}")
-    name = f"fplinux_bundle_ssh_transport_{bundle.generation}"
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        fail(f"current bundle SSH transport helper cannot be loaded: {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    required = {
-        "load_bundle_context",
-        "load_current_session",
-        "reacquire_bound_session",
-        "run_remote",
-        "stream_remote",
-        "upload",
-        "pull",
-        "open_shell",
-    }
-    if any(not callable(getattr(module, name, None)) for name in required):
-        fail("current bundle SSH transport helper has an incompatible API")
-    return module
-
-
-def _current_ssh_session(
-    bundle: CurrentBundle,
-    manifest: dict[str, Any],
-    target: str,
-) -> tuple[ModuleType, dict[str, Any]]:
-    """Reacquire an authenticated session with the selected device identity."""
-    ssh = _load_bundle_ssh_helper(bundle, manifest)
-    runtime, identity = ssh.load_bundle_context(bundle.path)
-    if runtime.get("target") != target or identity.get("bundle_generation") != bundle.generation:
-        fail("current bundle SSH identity disagrees with the selected generation")
-    session = ssh.load_current_session(target)
-    session = ssh.reacquire_bound_session(session)
-    ssh.require_device_identity(session, _manifest_device_identity(manifest))
-    return ssh, session
-
-
-def _manifest_device_identity(manifest: dict[str, Any]) -> str:
-    """Return the exact kernel-visible identity declared by one build manifest."""
-    device_identity = manifest.get("device_identity")
-    if (
-        not isinstance(device_identity, str)
-        or len(device_identity) != 64
-        or any(character not in "0123456789abcdef" for character in device_identity)
-    ):
-        fail("current bundle device identity is invalid")
-    return device_identity
-
-
-def _keyboard_client(bundle: CurrentBundle) -> Path:
-    client = bundle.path / "host/fplinux-usb-keyboard"
-    if client.is_symlink() or not client.is_file():
-        fail(f"current bundle has no valid USB keyboard client: {client}")
-    return client
-
-
-def _keyboard_connection(config: dict[str, Any]) -> list[str]:
-    gadget = config["runtime"]["usb"]["linux_gadget"]
-    return [
-        "--vid",
-        f"{gadget['vendor_id']:04x}",
-        "--pid",
-        f"{gadget['product_id']:04x}",
-        "--wait",
-        str(gadget["wait_seconds"]),
-    ]
-
-
-def _keyboard_interface(config: dict[str, Any]) -> str:
-    """Return the runtime-declared generic-serial keyboard interface."""
-    return str(config["runtime"]["usb"]["linux_gadget"]["keyboard_interface"])
-
-
-def _sudo_keyboard_runtime_directory(uid: int) -> Path:
-    """Find the invoking user's existing runtime directory without borrowing root state."""
-    inherited = os.environ.get("XDG_RUNTIME_DIR")
-    candidates = ([Path(inherited)] if inherited else []) + [Path(f"/run/user/{uid}")]
-    for candidate in candidates:
-        if not candidate.is_absolute():
-            continue
-        try:
-            metadata = candidate.lstat()
-        except OSError:
-            continue
-        if stat.S_ISDIR(metadata.st_mode) and metadata.st_uid == uid:
-            return candidate
-    return fail(f"keyboard verification cannot find an existing runtime directory for UID {uid}")
-
-
-def _verify_keyboard_session(
-    bundle: CurrentBundle,
-    manifest: dict[str, Any],
-    target: str,
-    *,
-    profile: str | None,
-    build_type: str,
-) -> None:
-    """Verify as the session owner while keeping an explicitly sudoed keyboard privileged."""
-    sudo_uid = os.environ.get("SUDO_UID")
-    if os.geteuid() != 0 or sudo_uid is None or sudo_uid == "0":
-        _current_ssh_session(bundle, manifest, target)
-        return
-    if not sudo_uid.isascii() or not sudo_uid.isdecimal():
-        fail("sudo keyboard verification requires a valid SUDO_UID")
-    uid = int(sudo_uid)
-    try:
-        account = pwd.getpwuid(uid)
-    except KeyError, OverflowError:
-        fail("sudo keyboard verification cannot resolve the invoking user")
-    if account.pw_name != os.environ.get("SUDO_USER"):
-        fail("sudo keyboard verification requires the matching invoking user")
-    runtime = _sudo_keyboard_runtime_directory(uid)
-    environment = {
-        **os.environ,
-        "HOME": account.pw_dir,
-        "USER": account.pw_name,
-        "LOGNAME": account.pw_name,
-        "XDG_RUNTIME_DIR": str(runtime),
-    }
-    command = [
-        str(common.ROOT / "fplinux"),
-        "console",
-        target,
-        "--build-type",
-        build_type,
-        "--exec",
-        "true",
-    ]
-    if profile is not None:
-        command.extend(["--profile", profile])
-    try:
-        result = subprocess.run(
-            command,
-            env=environment,
-            user=uid,
-            group=account.pw_gid,
-            extra_groups=(),
-            check=False,
-        )
-    except OSError as error:
-        fail(f"cannot verify the keyboard session as {account.pw_name}: {error}")
-    if result.returncode:
-        raise SystemExit(result.returncode)
+from fplinux_cli.runtime import bundle_session as runtime_bundle_session
+from fplinux_cli.runtime.bundle_session import _current_ssh_session, _manifest_device_identity
+from fplinux_cli.runtime.keyboard import forward_keyboard
+from fplinux_cli.workspace import build_inputs as workspaces
 
 
 def console_target(  # noqa: PLR0913 -- public CLI modes remain explicit.
@@ -204,7 +28,7 @@ def console_target(  # noqa: PLR0913 -- public CLI modes remain explicit.
 ) -> None:
     """Open the SSH session, or forward one evdev keyboard over USB."""
     config = targets.load_target(target, profile, build_type=build_type)
-    bundle, manifest = bundles_commands.resolve_target_bundle(
+    bundle, manifest = runtime_bundle_session.resolve_target_bundle(
         target, profile, build_type=build_type
     )
     if keyboard is None:
@@ -222,109 +46,28 @@ def console_target(  # noqa: PLR0913 -- public CLI modes remain explicit.
             return
         ssh_transport.open_shell(session)
         return
-    _verify_keyboard_session(bundle, manifest, target, profile=profile, build_type=build_type)
-    client = _keyboard_client(bundle)
-    arguments = [
-        str(client),
-        *_keyboard_connection(config),
-        "--interface",
-        _keyboard_interface(config),
-        "--keyboard",
-        keyboard,
-    ]
-    os.execv(client, arguments)
+    forward_keyboard(
+        bundle, manifest, target, config, keyboard, profile=profile, build_type=build_type
+    )
 
 
 def verify_booted(target: str, *, profile: str | None = None, build_type: str = "release") -> None:
     """Compare the running kernel identity with the current bundle."""
     profile = normalize_profile(profile)
-    bundle, manifest = bundles_commands.resolve_target_bundle(
+    bundle, manifest = runtime_bundle_session.resolve_target_bundle(
         target, profile, build_type=build_type
     )
     snapshot = workspaces.target_workspace_snapshot(target, profile, build_type=build_type)
     image_recipe = images.container_image_recipe_digest()
     image_state = image_states.load_image_state(common.ROOT / ".cache", image_recipe)
-    identity = bundles_commands.build_identity(snapshot, image_state, common.ROOT / ".cache")
-    if not bundles_commands.manifest_matches_identity(manifest, identity):
+    identity = cli_bundles.build_identity(snapshot, image_state, common.ROOT / ".cache")
+    if not cli_bundles.manifest_matches_identity(manifest, identity):
         fail(
             "build output is stale; rebuild it: "
-            f"{bundles_commands.profile_command('build', target, profile, build_type=build_type)}"
+            + runtime_bundle_session.profile_command(
+                "build", target, profile, build_type=build_type
+            )
         )
     device_identity = _manifest_device_identity(manifest)
     _current_ssh_session(bundle, manifest, target)
     print(f"verify: the phone runs the current {build_type} build ({device_identity[:16]})")
-
-
-def current_target_ssh_session(
-    target: str, *, profile: str | None = None, build_type: str = "release"
-) -> tuple[ModuleType, dict[str, Any]]:
-    """Resolve the authenticated session for one exact target and build profile."""
-    bundle, manifest = bundles_commands.resolve_target_bundle(
-        target, normalize_profile(profile), build_type=build_type
-    )
-    return _current_ssh_session(bundle, manifest, target)
-
-
-def _runnable_target_runner(
-    target: str,
-    *,
-    profile: str | None = None,
-    build_type: str = "release",
-    boot: str | None = None,
-) -> Path:
-    """Resolve the fixed shared runner for one runnable bundle."""
-    selected_profile = bundles_commands.selected_context_profile(
-        target, profile=profile, boot=boot
-    )
-    if selected_profile is not None:
-        target_config = targets.load_target(target, selected_profile, build_type=build_type)
-        if not target_config["runtime"]["runnable"]:
-            fail(f"profile is build-only and cannot be run: {target}/{selected_profile}")
-    bundle, manifest = bundles_commands.resolve_target_bundle(
-        target, selected_profile, build_type=build_type
-    )
-    if selected_profile is not None:
-        boot_artifacts = manifest.get("boot_artifacts")
-        if not isinstance(boot_artifacts, dict) or boot_artifacts.get("runnable") is not True:
-            fail(f"profile bundle is build-only and cannot be run: {target}/{selected_profile}")
-    runner = bundle.path / "runner/run.py"
-    if runner.is_symlink() or not runner.is_file():
-        fail(f"current bundle has no valid runner: {runner}")
-    return runner
-
-
-def run_target(
-    target: str,
-    *,
-    profile: str | None = None,
-    build_type: str = "release",
-    boot: str | None = None,
-    events: Path | None = None,
-) -> None:
-    """Run the fixed shared runner from a successful target bundle."""
-    runner = _runnable_target_runner(target, profile=profile, boot=boot, build_type=build_type)
-    argv = [os.fsencode(runner)]
-    if events is not None:
-        argv.extend([b"--events", os.fsencode(events.resolve())])
-    os.execv(os.fsencode(runner), argv)
-
-
-def run_target_noninteractive(
-    target: str,
-    *,
-    profile: str | None = None,
-    build_type: str = "release",
-    events: Path | None = None,
-) -> None:
-    """Run a loader to its authenticated handoff without taking over this CLI process."""
-    runner = _runnable_target_runner(target, profile=profile, build_type=build_type)
-    argv = [os.fsencode(runner)]
-    if events is not None:
-        argv.extend([b"--events", os.fsencode(events.resolve())])
-    result = subprocess.run(
-        argv,
-        stdin=subprocess.DEVNULL,
-        check=False,
-    )
-    if result.returncode:
-        fail(f"RAM loader failed with exit status {result.returncode}")

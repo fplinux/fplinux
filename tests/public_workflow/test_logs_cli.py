@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from fplinux_cli.cachelock import cache_lock
+from fplinux_cli.cache.lock import cache_lock
 
 from tests.cli_support import prepare_cli_checkout
 from tests.process import run_process

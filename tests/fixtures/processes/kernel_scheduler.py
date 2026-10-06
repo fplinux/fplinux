@@ -5,7 +5,7 @@
 import sys
 from pathlib import Path
 
-from fplinux_cli import kernelcheck
+from fplinux_cli.quality.kernel import workers as kernel_workers
 
 
 def main() -> None:
@@ -19,9 +19,9 @@ def main() -> None:
             fixture = "kernel_stage_context.py"
         return [sys.executable, str(Path(__file__).with_name(fixture)), str(root), target]
 
-    kernelcheck._CONTEXT_TERMINATE_TIMEOUT = 0.25
-    kernelcheck._CONTEXT_KILL_TIMEOUT = 0.5
-    kernelcheck._run_context_processes(contexts, 2, command_for=command)
+    kernel_workers._CONTEXT_TERMINATE_TIMEOUT = 0.25
+    kernel_workers._CONTEXT_KILL_TIMEOUT = 0.5
+    kernel_workers._run_context_processes(contexts, 2, command_for=command)
 
 
 if __name__ == "__main__":

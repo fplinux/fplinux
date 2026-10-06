@@ -5,22 +5,21 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from fplinux_cli.environment.image_store import current_image_state, publish_current_image_state
 from fplinux_cli.environment.images import container_image_reference
 from fplinux_cli.environment.kern import (
-    current_image_state,
     kern_available,
     kern_box_name,
     kern_environment,
-    publish_current_image_state,
     require_kern,
-    setup,
 )
+from fplinux_cli.environment.setup import setup
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from fplinux_cli.image_state import ImageState
-    from fplinux_cli.output import RunReporter, Stage
+    from fplinux_cli.environment.image_state import ImageState
+    from fplinux_cli.reporting.run import RunReporter, Stage
 
 _QUALITY_COMMAND_TIMEOUT = 2 * 60 * 60
 

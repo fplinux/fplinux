@@ -7,7 +7,7 @@ from typing import Any
 
 from fplinux_cli import common
 from fplinux_cli.common import fail
-from fplinux_cli.identity import BUILD_TYPES, IdentityError, validate_platform_identity
+from fplinux_cli.manifests.identity import BUILD_TYPES, IdentityError, validate_platform_identity
 from fplinux_cli.manifests.values import (
     KCONFIG_SYMBOL,
     TARGET_NAME,

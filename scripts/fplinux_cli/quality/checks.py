@@ -3,457 +3,40 @@
 
 from __future__ import annotations
 
-import re
-import tomllib
-from pathlib import Path, PurePath
+from typing import TYPE_CHECKING
 
-from fplinux_cli import alpine_state
-from fplinux_cli.checkreceipts import (
-    CheckReceiptRecipe,
-    check_closure_entries_digest,
-    check_orchestration_recipe_digest,
-    publish_success_receipt,
-    receipt_matches,
-)
+from fplinux_cli.cache.prune.operations import discard_superseded_profile_logs
 from fplinux_cli.common import ROOT, fail
-from fplinux_cli.environment.images import (
-    container_image_recipe_digest,
-    load_container_lock,
-)
-from fplinux_cli.environment.kern import (
-    kern_box_name,
-    kern_environment,
-)
-from fplinux_cli.image_state import load_image_state
+from fplinux_cli.environment.image_state import load_image_state
+from fplinux_cli.environment.images import container_image_recipe_digest, load_container_lock
+from fplinux_cli.environment.kern import kern_box_name, kern_environment
 from fplinux_cli.manifests.paths import normalize_profile
-from fplinux_cli.output import RunReporter
-from fplinux_cli.prune import discard_superseded_profile_logs
-from fplinux_cli.source_formats import (
-    is_posix_shell_fragment,
-    shell_dialect,
-    source_format_kind,
-)
-from fplinux_cli.workspace import (
-    WorkspaceFile,
-    WorkspaceSnapshot,
+from fplinux_cli.reporting.run import RunReporter
+from fplinux_cli.workspace.quality_inputs import quality_workspace_snapshot
+from fplinux_cli.workspace.staging import (
     discard_staged_quality_workspace_snapshot,
-    quality_workspace_snapshot,
     stage_quality_workspace_snapshot,
 )
 
 from .git import check_git_diff
-from .runtime import prepare_quality_image, run_quality_command
-
-CHECK_SCOPES = (
-    "repository",
-    "source",
-    "container",
-    "metadata",
-    "docs",
-    "spelling",
-    "secrets",
-    "licenses",
-    "python",
-    "shell",
-    "alpine",
-    "c",
-    "kernel",
+from .inputs import check_scope_closure_digest
+from .receipts import (
+    CheckReceiptRecipe,
+    check_orchestration_recipe_digest,
+    check_scope_receipt_recipe,
+    publish_success_receipt,
+    receipt_matches,
 )
+from .runtime import prepare_quality_image, run_quality_command
+from .scopes import SOURCE_CHECK_SCOPES, analyzer_cache_names, resolve_check_scopes
 
-
-SOURCE_CHECK_SCOPES = CHECK_SCOPES[1:-1]
-
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _KERNEL_PREPARE_TIMEOUT = 90 * 60
 
 
 _KERNEL_ANALYSIS_TIMEOUT = 90 * 60
-
-
-_QUOTED_C_INCLUDE = re.compile(rb'^\s*#\s*include\s*"([^"\n]+)"', re.MULTILINE)
-
-
-_PRETTIER_CONFIGURATION_NAMES = frozenset(
-    {
-        ".prettierrc",
-        ".prettierrc.cjs",
-        ".prettierrc.cts",
-        ".prettierrc.js",
-        ".prettierrc.json",
-        ".prettierrc.json5",
-        ".prettierrc.mjs",
-        ".prettierrc.mts",
-        ".prettierrc.toml",
-        ".prettierrc.ts",
-        ".prettierrc.yaml",
-        ".prettierrc.yml",
-        "prettier.config.cjs",
-        "prettier.config.cts",
-        "prettier.config.js",
-        "prettier.config.mjs",
-        "prettier.config.mts",
-        "prettier.config.ts",
-    }
-)
-
-
-_EXECUTABLE_PRETTIER_CONFIGURATION_NAMES = frozenset(
-    name
-    for name in _PRETTIER_CONFIGURATION_NAMES
-    if Path(name).suffix in {".cjs", ".cts", ".js", ".mjs", ".mts", ".ts"}
-)
-
-
-_CHECK_IMPLEMENTATION = frozenset(
-    {
-        "scripts/check.py",
-        "scripts/fplinux_cli/__init__.py",
-        "scripts/fplinux_cli/alpine_registration.py",
-        "scripts/fplinux_cli/alpine_state.py",
-        "scripts/fplinux_cli/common.py",
-        "scripts/fplinux_cli/canonical.py",
-        "scripts/fplinux_cli/canonical_json.py",
-        "scripts/fplinux_cli/canonical_json_tree.mjs",
-        "scripts/fplinux_cli/canonical_markdown.py",
-        "scripts/fplinux_cli/canonical_text.py",
-        "scripts/fplinux_cli/canonical_toml.py",
-        "scripts/fplinux_cli/canonical_yaml.py",
-        "scripts/fplinux_cli/workspace.py",
-        "scripts/fplinux_cli/environment/__init__.py",
-        "scripts/fplinux_cli/environment/images.py",
-        "scripts/fplinux_cli/quality/__init__.py",
-        "scripts/fplinux_cli/quality/source_policy.py",
-        "scripts/fplinux_cli/quality/testing.py",
-        "scripts/fplinux_cli/quality/runtime.py",
-        "scripts/fplinux_cli/identity.py",
-        "scripts/fplinux_cli/identity_codegen.py",
-        "scripts/fplinux_cli/output.py",
-        "scripts/fplinux_cli/source_formats.py",
-        "scripts/site_collect.py",
-    }
-)
-
-
-_KERNEL_IMPLEMENTATION = frozenset(
-    {
-        "scripts/fplinux_cli/__init__.py",
-        "scripts/fplinux_cli/alpine_builder.py",
-        "scripts/fplinux_cli/alpine_registration.py",
-        "scripts/fplinux_cli/alpine_state.py",
-        "scripts/fplinux_cli/build_env.py",
-        "scripts/fplinux_cli/bundle_state.py",
-        "scripts/fplinux_cli/common.py",
-        "scripts/fplinux_cli/environment/__init__.py",
-        "scripts/fplinux_cli/environment/images.py",
-        "scripts/fplinux_cli/quality/__init__.py",
-        "scripts/fplinux_cli/quality/source_policy.py",
-        "scripts/fplinux_cli/device_state.py",
-        "scripts/fplinux_cli/device_tree.py",
-        "scripts/fplinux_cli/identity.py",
-        "scripts/fplinux_cli/identity_codegen.py",
-        "scripts/fplinux_cli/kbuild_state.py",
-        "scripts/fplinux_cli/kernelcheck.py",
-        "scripts/fplinux_cli/kernel_patches.py",
-        "scripts/fplinux_cli/linux_projection.py",
-        "scripts/fplinux_cli/workspace.py",
-        "scripts/fplinux_cli/linux_state.py",
-        "scripts/fplinux_cli/output.py",
-        "scripts/fplinux_cli/profile_layout.py",
-    }
-)
-
-
-def resolve_check_scopes(scopes: list[str]) -> tuple[str, ...]:
-    """Validate, deduplicate and canonicalize a check selection."""
-    requested = set(scopes)
-    unknown = requested.difference(CHECK_SCOPES)
-    if unknown:
-        fail(f"unknown check scope: {', '.join(sorted(unknown))}")
-    return tuple(scope for scope in CHECK_SCOPES if not scopes or scope in requested)
-
-
-def analyzer_cache_names(scopes: tuple[str, ...]) -> tuple[str, ...]:
-    """Return analyzer caches required by the selected scopes."""
-    required: set[str] = set()
-    if "kernel" in scopes:
-        required.update(("analysis", "downloads", "linux"))
-    return tuple(name for name in ("analysis", "downloads", "linux") if name in required)
-
-
-def _is_shell_source(file: WorkspaceFile) -> bool:
-    if is_posix_shell_fragment(file.path):
-        return True
-    if Path(file.path).suffix not in {"", ".initd", ".sh", ".bashrc"}:
-        return False
-    first_line = file.contents.splitlines()[:1]
-    if not first_line:
-        return False
-    return shell_dialect(first_line[0]) is not None
-
-
-def _is_prettier_configuration(path: str) -> bool:
-    name = Path(path).name
-    return (
-        name in {".gitignore", ".prettierignore", "package.yaml"}
-        or name in _PRETTIER_CONFIGURATION_NAMES
-    )
-
-
-def _source_scope_uses_file(  # noqa: PLR0911
-    scope: str, file: WorkspaceFile
-) -> bool:
-    """Return whether one captured file can affect the selected source scope."""
-    path = PurePath(file.path)
-    name = path.name
-    suffix = path.suffix
-    parts = path.parts
-    if file.path in _CHECK_IMPLEMENTATION or (
-        file.path.startswith("scripts/fplinux_cli/manifests/") and suffix == ".py"
-    ):
-        return True
-    if scope in {
-        "source",
-        "docs",
-        "spelling",
-        "secrets",
-        "licenses",
-        "python",
-    }:
-        return True
-    if scope == "container":
-        return name in {".kernignore", "Containerfile"} or name.startswith(".hadolint")
-    if scope == "metadata":
-        return (
-            source_format_kind(file.path) in {"toml", "json", "yaml", "javascript"}
-            or suffix == ".ini"
-            or name == ".editorconfig"
-            or _is_prettier_configuration(file.path)
-        )
-    if scope == "shell":
-        return _is_shell_source(file) or name in {".editorconfig", ".shellcheckrc"}
-    if scope == "alpine":
-        return (
-            file.path in {"alpine.lock.toml", "alpine/abuild.conf"}
-            or (len(parts) == 3 and parts[0] == "targets" and name == "target.toml")
-            or (len(parts) == 3 and parts[0] == "platforms" and name == "platform.toml")
-            or (len(parts) == 4 and parts[:2] == ("alpine", "aports") and name == "APKBUILD")
-        )
-    if scope == "c":
-        return (
-            name in {".clang-format", ".clang-format-ignore", "_clang-format"}
-            or (len(parts) == 3 and parts[0] == "targets" and name == "target.toml")
-            or (len(parts) == 3 and parts[0] == "platforms" and name == "platform.toml")
-        )
-    fail(f"check scope does not support a source closure: {scope}")
-    return False
-
-
-def _c_scope_paths(snapshot: WorkspaceSnapshot) -> set[str]:
-    """Resolve the same userspace/bootstrap C inputs and their quoted headers."""
-    by_path = {file.path: file for file in snapshot.files}
-    selected = {file.path for file in snapshot.files if _source_scope_uses_file("c", file)}
-    for file in snapshot.files:
-        path = PurePath(file.path)
-        if path.suffix in {".c", ".h"} and (
-            path.parts[:2] == ("alpine", "aports")
-            or file.path in alpine_state.SHARED_APORT_SOURCE_PATHS
-            or path.parts[0] == "tests"
-            or (
-                len(path.parts) >= 4
-                and path.parts[0] in {"platforms", "targets"}
-                and path.parts[2] in {"common", "uboot"}
-            )
-        ):
-            selected.add(file.path)
-        if path.suffix in {".c", ".h"} and "bootstrap" in path.parts:
-            selected.add(file.path)
-
-    for file in snapshot.files:
-        path = PurePath(file.path)
-        if len(path.parts) != 3 or path.parts[0] != "platforms" or path.name != "platform.toml":
-            continue
-        try:
-            manifest = tomllib.loads(file.contents.decode("utf-8"))
-        except UnicodeDecodeError, tomllib.TOMLDecodeError:
-            continue
-        tools = manifest.get("host", {}).get("tools", [])
-        if not isinstance(tools, list):
-            continue
-        for recipe in tools:
-            if isinstance(recipe, dict) and recipe.get("type") == "cc-libusb":
-                source = recipe.get("source")
-                if isinstance(source, str) and source in by_path:
-                    selected.add(source)
-
-    pending = list(selected)
-    while pending:
-        relative = pending.pop()
-        source = by_path.get(relative)
-        if source is None or PurePath(relative).suffix not in {".c", ".h"}:
-            continue
-        for raw_include in _QUOTED_C_INCLUDE.findall(source.contents):
-            try:
-                include = raw_include.decode("utf-8")
-            except UnicodeDecodeError:
-                continue
-            candidates = (
-                (PurePath(relative).parent / include).as_posix(),
-                PurePath(include).as_posix(),
-            )
-            for candidate in candidates:
-                if candidate in by_path and candidate not in selected:
-                    selected.add(candidate)
-                    pending.append(candidate)
-                    break
-    return selected
-
-
-def _linux_manifest_sources(linux: object, *, base: PurePath) -> set[str]:
-    """Return the captured Linux inputs explicitly named by one manifest."""
-    if not isinstance(linux, dict):
-        return set()
-    selected: set[str] = set()
-    for key in ("defconfig", "config_fragment"):
-        value = linux.get(key)
-        if isinstance(value, str):
-            selected.add((base / value).as_posix())
-    patches = linux.get("patches")
-    if isinstance(patches, list):
-        selected.update((base / patch).as_posix() for patch in patches if isinstance(patch, str))
-    for key in ("copies", "appends"):
-        steps = linux.get(key)
-        if isinstance(steps, list):
-            selected.update(
-                (base / source).as_posix()
-                for step in steps
-                if isinstance(step, dict) and isinstance((source := step.get("source")), str)
-            )
-    return selected
-
-
-def _kernel_scope_paths(
-    snapshot: WorkspaceSnapshot, profile: str | None = None, *, build_type: str = "release"
-) -> set[str]:
-    """Resolve the selected global profile and every board's Linux inputs."""
-    profile = normalize_profile(profile)
-    by_path = {file.path: file for file in snapshot.files}
-    selected = {
-        file.path
-        for file in snapshot.files
-        if file.path in _KERNEL_IMPLEMENTATION
-        or file.path == "sources.lock.toml"
-        or (
-            file.path.startswith(("scripts/fplinux_cli/manifests/", "scripts/fplinux_cli/build/"))
-            and file.path.endswith(".py")
-        )
-    }
-    selected.add(f"profiles/{profile or 'default'}/profile.toml")
-    target_manifests = [
-        file
-        for file in snapshot.files
-        if (path := PurePath(file.path)).parts[:1] == ("targets",)
-        and len(path.parts) == 3
-        and path.name == "target.toml"
-    ]
-    for target_manifest in target_manifests:
-        target_path = PurePath(target_manifest.path)
-        selected.add(target_manifest.path)
-        try:
-            target_data = tomllib.loads(target_manifest.contents.decode("utf-8"))
-        except UnicodeDecodeError, tomllib.TOMLDecodeError:
-            continue
-        selected.update(_linux_manifest_sources(target_data.get("linux"), base=target_path.parent))
-        if profile == "microsd-uboot":
-            microsd = target_data.get("microsd", {})
-            if isinstance(microsd, dict):
-                selected.update(
-                    _linux_manifest_sources(
-                        {"patches": microsd.get("linux_patches")}, base=target_path.parent
-                    )
-                )
-        platform = target_data.get("platform")
-        if not isinstance(platform, str):
-            continue
-        platform_path = PurePath("platforms") / platform / "platform.toml"
-        platform_manifest = by_path.get(platform_path.as_posix())
-        if platform_manifest is None:
-            continue
-        selected.add(platform_manifest.path)
-        try:
-            platform_data = tomllib.loads(platform_manifest.contents.decode("utf-8"))
-        except UnicodeDecodeError, tomllib.TOMLDecodeError:
-            continue
-        linux = platform_data.get("linux")
-        selected.update(_linux_manifest_sources(linux, base=PurePath()))
-        if isinstance(linux, dict) and isinstance(linux.get("build_types"), dict):
-            fragment = linux["build_types"].get(build_type)
-            if isinstance(fragment, str):
-                selected.add(fragment)
-    return selected
-
-
-def check_scope_closure_digest(
-    scope: str,
-    snapshot: WorkspaceSnapshot,
-    *,
-    profile: str | None = None,
-    build_type: str = "release",
-) -> str:
-    """Hash only captured files that can affect one exact check scope."""
-    if scope == "kernel":
-        paths = _kernel_scope_paths(snapshot, profile, build_type=build_type)
-        selected = [file for file in snapshot.files if file.path in paths]
-    elif scope == "c":
-        paths = _c_scope_paths(snapshot)
-        selected = [file for file in snapshot.files if file.path in paths]
-    elif scope in SOURCE_CHECK_SCOPES:
-        broaden = (
-            scope == "metadata"
-            and any(
-                Path(file.path).name in _EXECUTABLE_PRETTIER_CONFIGURATION_NAMES
-                for file in snapshot.files
-            )
-        ) or (
-            scope == "shell"
-            and any(
-                file.path == ".shellcheckrc" and b"external-sources=true" in file.contents
-                for file in snapshot.files
-            )
-        )
-        selected = [
-            file for file in snapshot.files if broaden or _source_scope_uses_file(scope, file)
-        ]
-    else:
-        fail(f"check scope does not support receipts: {scope}")
-    if not selected:
-        fail(f"check scope has an empty causal closure: {scope}")
-    return check_closure_entries_digest(
-        [(file.path, file.contents, file.mode) for file in selected]
-    )
-
-
-def check_scope_receipt_recipe(  # noqa: PLR0913 -- source, image and kernel type stay explicit.
-    scope: str,
-    closure_digest: str,
-    *,
-    image_generation: str,
-    orchestration_recipe: str | None = None,
-    profile: str | None = None,
-    build_type: str = "release",
-) -> CheckReceiptRecipe:
-    """Bind one cacheable source scope to its exact closure and OCI identities."""
-    if scope not in (*SOURCE_CHECK_SCOPES, "kernel"):
-        fail(f"check scope does not support receipts: {scope}")
-    if orchestration_recipe is None:
-        orchestration_recipe = check_orchestration_recipe_digest()
-    return CheckReceiptRecipe(
-        scope=scope,
-        closure_digest=closure_digest,
-        orchestration_recipe=orchestration_recipe,
-        image_generation=image_generation,
-        profile=profile,
-        build_type=build_type if scope == "kernel" else None,
-    )
 
 
 def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
@@ -541,7 +124,7 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
                 "--",
                 "python3",
                 "-m",
-                "fplinux_cli.kernelcheck",
+                "fplinux_cli.quality.kernel",
                 "prepare",
                 *([] if profile is None else ["--profile", profile]),
                 "--build-type",
@@ -568,7 +151,7 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
                 "--",
                 "python3",
                 "-m",
-                "fplinux_cli.kernelcheck",
+                "fplinux_cli.quality.kernel",
                 "check",
                 "--jobs",
                 str(jobs),

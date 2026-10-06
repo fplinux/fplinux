@@ -19,23 +19,28 @@ from urllib.parse import unquote
 
 # PyYAML ships no type information and the quality image installs no stubs.
 import yaml  # type: ignore[import-untyped]
-from fplinux_cli import alpine_state
-from fplinux_cli.canonical import canonical_outputs, formatter_commands, noncanonical_paths
+from fplinux_cli.alpine import lock as alpine_lock
+from fplinux_cli.alpine import registration, selection
 from fplinux_cli.common import fail
 from fplinux_cli.manifests.paths import discover_targets
 from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.targets import load_target
-from fplinux_cli.output import RunReporter, current_stage, run_entrypoint
+from fplinux_cli.quality.formatting.canonical import (
+    canonical_outputs,
+    formatter_commands,
+    noncanonical_paths,
+)
+from fplinux_cli.quality.formatting.source_formats import classify_source_formats
 from fplinux_cli.quality.testing import unittest_commands
-from fplinux_cli.source_formats import classify_source_formats
-from fplinux_cli.workspace import workspace_snapshot
+from fplinux_cli.reporting.run import RunReporter, current_stage, run_entrypoint
+from fplinux_cli.workspace.capture import workspace_snapshot
 from pathspec import GitIgnoreSpec
 from site_collect import corpus_files
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from fplinux_cli.source_formats import SourceFormats
+    from fplinux_cli.quality.formatting.source_formats import SourceFormats
 
 ROOT = Path(__file__).resolve().parents[1]
 EXCLUDED_PARTS = {".cache", ".git", "__pycache__"}
@@ -392,8 +397,8 @@ def validate_package_selections() -> None:
     for target in discover_targets():
         target_config = load_target(target)
         platform = load_platform(target_config["platform"])
-        rootfs_packages = alpine_state.selected_packages(platform, target_config, root=ROOT)
-        alpine_state.bundle_packages(platform, target_config, rootfs_packages, root=ROOT)
+        rootfs_packages = selection.selected_packages(platform, target_config, root=ROOT)
+        selection.bundle_packages(platform, target_config, rootfs_packages, root=ROOT)
 
 
 def package_c_is_embedded(path: Path) -> bool:
@@ -412,7 +417,7 @@ def is_shared_aport_source(path: Path, suffixes: frozenset[str]) -> bool:
     """Return whether a source is one canonical C/H file shared by aports."""
     relative = path.relative_to(ROOT)
     return (
-        relative.as_posix() in alpine_state.SHARED_APORT_SOURCE_PATHS
+        relative.as_posix() in registration.SHARED_APORT_SOURCE_PATHS
         and relative.suffix in suffixes
     )
 
@@ -491,7 +496,7 @@ def userspace_c_include_flags(source: str) -> list[str]:
         flags.extend(pkg_config_cflags("dbus-1"))
     if source == "lib/fplinux/fplinux-input-session.c":
         flags.extend(pkg_config_cflags("libevdev"))
-    shared = alpine_state.SHARED_APORT_SOURCES.get(path.parent.name, ())
+    shared = registration.SHARED_APORT_SOURCES.get(path.parent.name, ())
     if source == "lib/fplinux/fplinux-drm-session.c" or (
         "include/fplinux/fplinux-drm-session.h" in shared
     ):
@@ -501,12 +506,12 @@ def userspace_c_include_flags(source: str) -> list[str]:
     if (
         len(path.parts) >= 3
         and path.parts[:2] == APORT_ROOT
-        and path.parts[2] in alpine_state.SHARED_APORT_SOURCES
+        and path.parts[2] in registration.SHARED_APORT_SOURCES
     ):
         directories = sorted(
             {
                 str(PurePosixPath(shared).parent)
-                for shared in alpine_state.SHARED_APORT_SOURCES[path.parts[2]]
+                for shared in registration.SHARED_APORT_SOURCES[path.parts[2]]
             }
         )
         flags.extend(flag for directory in directories for flag in ("-I", directory))
@@ -708,7 +713,7 @@ def main() -> None:
     if "alpine" in selected:
         apkbuilds = alpine_apkbuilds(files)
         with report_stage(reporter, "alpine"):
-            alpine_state.load_alpine_lock()
+            alpine_lock.load_alpine_lock()
             validate_package_selections()
             run(["sh", "-n", "alpine/abuild.conf"])
             for apkbuild in apkbuilds:

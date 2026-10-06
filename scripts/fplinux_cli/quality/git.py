@@ -8,16 +8,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fplinux_cli.common import ROOT, fail
+from fplinux_cli.environment.image_store import current_image_state
 from fplinux_cli.environment.images import container_image_reference, load_container_lock
-from fplinux_cli.environment.kern import (
-    current_image_state,
-    kern_box_name,
-    kern_environment,
-    require_kern,
-)
+from fplinux_cli.environment.kern import kern_box_name, kern_environment, require_kern
 
 if TYPE_CHECKING:
-    from fplinux_cli.output import RunReporter
+    from fplinux_cli.reporting.run import RunReporter
 
 _CHECK_GIT_TIMEOUT = 5 * 60
 

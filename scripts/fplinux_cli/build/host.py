@@ -15,7 +15,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from fplinux_cli import build_env, common
+from fplinux_cli import common
+from fplinux_cli.build import environment as build_env
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import process as process_build
 from fplinux_cli.build import sources as sources_build
@@ -29,7 +30,7 @@ from fplinux_cli.common import (
 )
 from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.values import relative_value
-from fplinux_cli.output import run_entrypoint
+from fplinux_cli.reporting.run import run_entrypoint
 
 _COMPILER_ENVIRONMENT = (
     "AR",

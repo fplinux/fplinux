@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest import mock
 
-from fplinux_cli import ssh_transport
+from fplinux_cli.runtime import ssh_transport
 
 from common import loader_events
 from common import run as runner
@@ -93,7 +93,9 @@ def main() -> None:
     Path(session["image"]).write_bytes(b"personalized RAM image")
     (root / "ramboot.bin").write_bytes(b"DHTBpayload")
     (root / "runner").mkdir()
-    shutil.copyfile(ROOT / "scripts/fplinux_cli/identity.py", root / "runner/identity.py")
+    shutil.copyfile(
+        ROOT / "scripts/fplinux_cli/manifests/identity.py", root / "runner/identity.py"
+    )
     (root / "ram-tool").write_text("#!/bin/sh\nexit 0\n", encoding="ascii")
     (root / "ram-tool").chmod(0o755)
     tools = root / "bin"

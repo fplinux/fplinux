@@ -8,16 +8,19 @@ import os
 import shutil
 from typing import TYPE_CHECKING, Any
 
-from fplinux_cli import alpine_state, common
-from fplinux_cli.build import inputs as inputs_build
-from fplinux_cli.build import storage as storage_build
-from fplinux_cli.bundle_state import (
+from fplinux_cli import common
+from fplinux_cli.alpine.rootfs_state import INITRAMFS_NAME, trusted_receipt_identity
+from fplinux_cli.alpine.signing import signing_key_identity
+from fplinux_cli.artifacts.bundles import (
     create_bundle_staging,
     discard_bundle_staging,
     publish_bundle_generation,
     publish_current_bundle,
     published_file_records,
 )
+from fplinux_cli.build import inputs as inputs_build
+from fplinux_cli.build.identity import runtime_identity
+from fplinux_cli.build.storage.stage import default_boot_artifacts
 from fplinux_cli.common import (
     canonical_json_bytes,
     fail,
@@ -25,8 +28,7 @@ from fplinux_cli.common import (
     sha256_bytes,
     sha256_file,
 )
-from fplinux_cli.identity import RUNTIME_IDENTITY_PATH
-from fplinux_cli.identity_codegen import runtime_identity
+from fplinux_cli.manifests.identity import RUNTIME_IDENTITY_PATH
 from fplinux_cli.manifests.values import relative_value
 
 if TYPE_CHECKING:
@@ -40,12 +42,12 @@ def runner_source() -> Path:
 
 def ssh_transport_source() -> Path:
     """Return the SSH session helper published beside the runner."""
-    return common.ROOT / "scripts/fplinux_cli/ssh_transport.py"
+    return common.ROOT / "scripts/fplinux_cli/runtime/ssh_transport.py"
 
 
 def identity_source() -> Path:
     """Return the shared identity contract published beside the runner."""
-    return common.ROOT / "scripts/fplinux_cli/identity.py"
+    return common.ROOT / "scripts/fplinux_cli/manifests/identity.py"
 
 
 def adapter_source(platform: str) -> Path:
@@ -196,7 +198,7 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
         (rootfs, "rootfs.cpio"),
     ]
     if target_config["linux"]["root"]["kind"] == "initramfs":
-        debug_outputs.append((rootfs_output / alpine_state.INITRAMFS_NAME, "initramfs.cpio"))
+        debug_outputs.append((rootfs_output / INITRAMFS_NAME, "initramfs.cpio"))
     for source, name in debug_outputs:
         copy_file(source, release / "debug" / name)
     for relative, _digest in asset_outputs.values():
@@ -242,9 +244,9 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
     inputs_build.require_sha256(linux_recipe, "Linux recipe")
     inputs_build.require_sha256(device_identity, "device identity")
     apk_signing_key = inputs_build.require_sha256(
-        alpine_state.signing_key_identity(inputs_build.CACHE), "APK signing public key"
+        signing_key_identity(inputs_build.CACHE), "APK signing public key"
     )
-    rootfs_receipt = alpine_state.trusted_receipt_identity(rootfs_output, rootfs_recipe)
+    rootfs_receipt = trusted_receipt_identity(rootfs_output, rootfs_recipe)
     if not isinstance(kbuild_receipt, dict) or set(kbuild_receipt) != {"recipe", "sha256"}:
         fail("Kbuild receipt identity is invalid")
     kbuild_receipt = {
@@ -325,7 +327,7 @@ def publish_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay explicit
     if boot_files is None:
         boot_files = {}
     if boot_artifacts is None:
-        boot_artifacts = storage_build.default_boot_artifacts()
+        boot_artifacts = default_boot_artifacts()
     try:
         return _publish_staged_bundle(
             release,
