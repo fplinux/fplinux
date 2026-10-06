@@ -121,6 +121,12 @@
 	size = <0x00400000>;
 };
 
+&sdio0_mmc {
+	non-removable;
+
+	status = "okay";
+};
+
 &audio {
 	firmware-name = "fplinux/maxvi-k15n-4g-audio-profile.bin";
 	hp-det-gpios = <&sc2720_eic 12 GPIO_ACTIVE_HIGH>;

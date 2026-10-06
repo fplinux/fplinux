@@ -1,9 +1,9 @@
 # Headphone audio
 
-FPLinux plays stereo PCM through the 3.5 mm headphone socket on the exact
-`inoi-240-modern-4g`, `inoi-244-modern-4g` and `nokia-ta1618` targets. Their
-images include `aplay` and `amixer` and expose the shared ALSA card and PCM
-name `UMS9117 Headphones`.
+FPLinux plays stereo PCM through the 3.5 mm headphone socket on targets with
+supported headphone audio. Check the [target documentation](../../targets/README.md)
+for connector and routing limitations. Their images include `aplay` and `amixer`;
+the shared ALSA PCM device is named `UMS9117 Headphones`.
 
 After loading the phone and opening its session, use the supported
 [file-transfer](FILE_TRANSFER.md) workflow to copy a known WAV file to the
@@ -63,8 +63,8 @@ hardware calibration.
 that play PCM and [FM radio](FM_RADIO.md). The headphone switch is always
 present. The speaker switch exists only with the fitted profile, like
 `Speaker Playback Volume`. The driver starts with the headphones `on` and the
-speaker `off`; [jack detection](#jack-detection) then selects the output that
-matches the headphone socket. To add the [speaker](SPEAKER_AUDIO.md) to the
+speaker `off`. On targets with automatic [jack routing](#jack-detection), the
+output then follows the headphone socket. To add the [speaker](SPEAKER_AUDIO.md) to the
 headphones:
 
 ```sh
@@ -94,8 +94,8 @@ stream is open or running and while FM radio plays; the change applies to the
 running stream. Turning the speaker on while no other output is enabled
 produces one audible click; every other switch change is silent. To move from
 the headphones to the speaker alone without the click, turn the speaker on
-first and then turn the headphones off. [Jack detection](#jack-detection)
-changes the switches when headphones are plugged in or removed. The switches
+first and then turn the headphones off. Automatic [jack routing](#jack-detection),
+where supported, changes the switches when headphones are plugged in or removed. The switches
 persist across playbacks and reset on a new boot.
 
 ## Jack detection
@@ -116,7 +116,10 @@ is updated when it wakes. The control reports a plug in the socket without
 telling headphones from a headset or another cable, and it does not select the
 [headset microphone](MICROPHONE_AUDIO.md).
 
-The `fplinux-jack` service, started at boot, moves playback with the plug.
+Automatic routing is available only where the target documentation lists it
+as supported. On those targets, the `fplinux-jack` service starts at boot and
+moves playback with the plug. Otherwise, choose the outputs manually with
+the switches above.
 When it starts and whenever a plug is inserted, it turns
 `Headphone Playback Switch` on and then `Speaker Playback Switch` off. When the
 plug is removed, it turns the speaker on and then the headphones off. Enabling

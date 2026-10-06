@@ -12,8 +12,9 @@ maintainers:
 description:
   The UMS9117 SDIO0 controller implements the SDHCI 4.10 register layout in
   version 4 mode. Its register interface requires 32-bit accesses. The
-  removable slot uses two fixed-voltage supplies and GPIO card-detect
-  interrupts. The EIC GPIO provider owns the card-detect registers.
+  slot uses two fixed-voltage supplies. Removable slots require GPIO
+  card-detect interrupts owned by the EIC provider. A card kept installed
+  throughout the powered session may instead be probed at host startup.
 
 allOf:
   - $ref: sdhci-common.yaml#
@@ -69,7 +70,7 @@ properties:
     maxItems: 1
 
   broken-cd: false
-  non-removable: false
+  non-removable: true
 
   sdhci-caps: false
   sdhci-caps-mask: false
@@ -93,7 +94,6 @@ required:
   - no-sdio
   - no-mmc
   - disable-wp
-  - cd-gpios
 
 unevaluatedProperties: false
 
@@ -126,4 +126,10 @@ examples:
         disable-wp;
         cd-gpios = <&eic2 0 GPIO_ACTIVE_LOW>;
     };
+
+oneOf:
+  - required:
+      - cd-gpios
+  - required:
+      - non-removable
 ...

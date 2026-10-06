@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * SDHCI platform glue for the UMS9117 SDIO0 removable microSD slot.
+ * SDHCI platform glue for the UMS9117 SDIO0 microSD slot.
  *
  * The controller implements the SDHCI 4.10 register layout in v4 mode, but
  * its register interface is 32-bit only.  Board resources are owned by their
- * normal kernel providers; this driver owns only the SDHCI window. Card
- * detection uses the EIC GPIO provider and the MMC GPIO interrupt helper.
+ * normal kernel providers; this driver owns only the SDHCI window. Removable
+ * slots use EIC GPIO interrupts; fixed-session cards are probed at startup.
  */
 #include <linux/bitops.h>
 #include <linux/clk.h>
@@ -800,7 +800,8 @@ static void ums9117_sdhci_apply_limits(struct sdhci_host *host)
 {
 	struct mmc_host *mmc = host->mmc;
 
-	mmc->caps &= MMC_CAP_4_BIT_DATA | MMC_CAP_SD_HIGHSPEED;
+	mmc->caps &= MMC_CAP_4_BIT_DATA | MMC_CAP_SD_HIGHSPEED |
+		     MMC_CAP_NONREMOVABLE;
 	mmc->caps2 = MMC_CAP2_NO_SDIO | MMC_CAP2_NO_MMC |
 		     MMC_CAP2_NO_WRITE_PROTECT;
 	mmc->f_min = UMS9117_SDHCI_IDENT_CLOCK_HZ;
@@ -837,12 +838,15 @@ static int ums9117_sdhci_probe(struct platform_device *pdev)
 	ret = mmc_of_parse(host->mmc);
 	if (ret)
 		return ret;
-	if (!mmc_host_can_gpio_cd(host->mmc))
+	if (mmc_card_is_removable(host->mmc) &&
+	    !mmc_host_can_gpio_cd(host->mmc))
 		return dev_err_probe(&pdev->dev, -EINVAL,
 				     "card-detect GPIO is required\n");
-	/* GPIO acquisition enables the EIC input; allow its data to settle. */
-	usleep_range(UMS9117_SDHCI_CD_SETTLE_MIN_US,
-		     UMS9117_SDHCI_CD_SETTLE_MAX_US);
+	if (mmc_host_can_gpio_cd(host->mmc)) {
+		/* GPIO acquisition enables the EIC input; allow data to settle. */
+		usleep_range(UMS9117_SDHCI_CD_SETTLE_MIN_US,
+			     UMS9117_SDHCI_CD_SETTLE_MAX_US);
+	}
 	ret = ums9117_sdhci_get_supplies(host);
 	if (ret)
 		return ret;
@@ -889,7 +893,7 @@ static int ums9117_sdhci_probe(struct platform_device *pdev)
 	if (ret)
 		goto out_cleanup;
 	/* MMC falls back to polling when its GPIO IRQ request fails. */
-	if (host->mmc->slot.cd_irq < 0 ||
+	if ((mmc_card_is_removable(host->mmc) && host->mmc->slot.cd_irq < 0) ||
 	    host->mmc->caps & MMC_CAP_NEEDS_POLL) {
 		ret = host->mmc->slot.cd_irq;
 		if (ret >= 0)
