@@ -194,40 +194,40 @@ source = "platforms/ums9117/linux/drivers/usb/musb/ums9117-musb.c"
 destination = "drivers/usb/musb/ums9117.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/drivers/media/platform/ums9117-rota.c"
-destination = "drivers/media/platform/ums9117-rota.c"
+source = "platforms/ums9117/linux/drivers/media/platform/ums9117/ums9117-rota.c"
+destination = "drivers/media/platform/ums9117/ums9117-rota.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/drivers/media/platform/ums9117-jpeg.c"
-destination = "drivers/media/platform/ums9117-jpeg.c"
+source = "platforms/ums9117/linux/drivers/media/platform/ums9117/ums9117-jpeg.c"
+destination = "drivers/media/platform/ums9117/ums9117-jpeg.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/drivers/media/platform/ums9117-dcam-capture.c"
-destination = "drivers/media/platform/ums9117-dcam-capture.c"
+source = "platforms/ums9117/linux/drivers/media/platform/ums9117/ums9117-dcam-capture.c"
+destination = "drivers/media/platform/ums9117/ums9117-dcam-capture.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/drivers/media/platform/ums9117-dcam-capture.h"
-destination = "drivers/media/platform/ums9117-dcam-capture.h"
+source = "platforms/ums9117/linux/drivers/media/platform/ums9117/ums9117-dcam-capture.h"
+destination = "drivers/media/platform/ums9117/ums9117-dcam-capture.h"
 
 [[linux.copies]]
 source = "platforms/ums9117/linux/drivers/media/i2c/bf30a2.c"
 destination = "drivers/media/i2c/bf30a2.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/drivers/media/platform/ums9117-jpeg-codec.c"
-destination = "drivers/media/platform/ums9117-jpeg-codec.c"
+source = "platforms/ums9117/linux/drivers/media/platform/ums9117/ums9117-jpeg-codec.c"
+destination = "drivers/media/platform/ums9117/ums9117-jpeg-codec.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/drivers/media/platform/ums9117-jpeg-codec.h"
-destination = "drivers/media/platform/ums9117-jpeg-codec.h"
+source = "platforms/ums9117/linux/drivers/media/platform/ums9117/ums9117-jpeg-codec.h"
+destination = "drivers/media/platform/ums9117/ums9117-jpeg-codec.h"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/drivers/media/platform/ums9117-jpeg-hw.c"
-destination = "drivers/media/platform/ums9117-jpeg-hw.c"
+source = "platforms/ums9117/linux/drivers/media/platform/ums9117/ums9117-jpeg-hw.c"
+destination = "drivers/media/platform/ums9117/ums9117-jpeg-hw.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/drivers/media/platform/ums9117-jpeg-hw.h"
-destination = "drivers/media/platform/ums9117-jpeg-hw.h"
+source = "platforms/ums9117/linux/drivers/media/platform/ums9117/ums9117-jpeg-hw.h"
+destination = "drivers/media/platform/ums9117/ums9117-jpeg-hw.h"
 
 [[linux.copies]]
 source = "platforms/ums9117/linux/bindings/media/sprd,ums9117-jpeg.yaml"
@@ -513,6 +513,14 @@ destination = "drivers/memory/ums9117/Kconfig"
 source = "platforms/ums9117/linux/drivers/memory/ums9117/Makefile"
 destination = "drivers/memory/ums9117/Makefile"
 
+[[linux.copies]]
+source = "platforms/ums9117/linux/drivers/media/platform/ums9117/Kconfig"
+destination = "drivers/media/platform/ums9117/Kconfig"
+
+[[linux.copies]]
+source = "platforms/ums9117/linux/drivers/media/platform/ums9117/Makefile"
+destination = "drivers/media/platform/ums9117/Makefile"
+
 [[linux.appends]]
 source = "platforms/ums9117/linux/dts/unisoc.Makefile"
 destination = "arch/arm/boot/dts/unisoc/Makefile"
@@ -566,11 +574,11 @@ source = "platforms/ums9117/linux/drivers/clk/sprd/inherited-clk.Makefile"
 destination = "drivers/clk/sprd/Makefile"
 
 [[linux.appends]]
-source = "platforms/ums9117/linux/drivers/media/platform/media.Kconfig"
+source = "platforms/ums9117/linux/drivers/media/platform/ums9117/media-parent.Kconfig"
 destination = "drivers/media/platform/Kconfig"
 
 [[linux.appends]]
-source = "platforms/ums9117/linux/drivers/media/platform/media.Makefile"
+source = "platforms/ums9117/linux/drivers/media/platform/ums9117/media-parent.Makefile"
 destination = "drivers/media/platform/Makefile"
 
 [[linux.appends]]
