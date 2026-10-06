@@ -29,6 +29,7 @@ from .receipts import (
 )
 from .runtime import prepare_quality_image, run_quality_command
 from .scopes import SOURCE_CHECK_SCOPES, analyzer_cache_names, resolve_check_scopes
+from .testing import run_test_workload
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -68,6 +69,8 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
                 kern=kern,
                 image=image,
             )
+        if "python" in source_scopes and (workspace / "tests").is_dir():
+            run_test_workload(reporter, workspace, kern=kern, image=image, names=[])
         for scope in source_scopes:
             publish_success_receipt(cache, recipes[scope])
 

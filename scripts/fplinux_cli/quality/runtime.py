@@ -42,15 +42,23 @@ def prepare_quality_image(
     return kern, image, state
 
 
-def run_quality_command(
-    stage: Stage, workspace: Path, command: list[str], *, kern: str, image: str
+def run_quality_command(  # noqa: PLR0913 -- runtime, deadline and log ownership stay explicit.
+    stage: Stage,
+    workspace: Path,
+    command: list[str],
+    *,
+    kern: str,
+    image: str,
+    timeout: float = _QUALITY_COMMAND_TIMEOUT,
+    log_name: str | None = None,
 ) -> None:
     """Keep sources read-only, network disabled and full child logs in the run directory."""
     reporter = stage.reporter
+    name = log_name or stage.name
     logs = reporter.root / "containers"
     logs.mkdir(parents=True, exist_ok=True)
-    environment = reporter.container_environment(f"/logs/{stage.name}")
-    environment["FPLINUX_LOG_DISPLAY_ROOT"] += f"/containers/{stage.name}"
+    environment = reporter.container_environment(f"/logs/{name}")
+    environment["FPLINUX_LOG_DISPLAY_ROOT"] += f"/containers/{name}"
     log_arguments = [
         part for key, value in environment.items() for part in ("--env", f"{key}={value}")
     ]
@@ -58,7 +66,7 @@ def run_quality_command(
         [
             kern,
             "box",
-            kern_box_name(f"{reporter.label}-{stage.name}"),
+            kern_box_name(f"{reporter.label}-{name}"),
             "--image",
             image,
             "--pull",
@@ -91,5 +99,5 @@ def run_quality_command(
             *command,
         ],
         env=kern_environment(),
-        timeout=_QUALITY_COMMAND_TIMEOUT,
+        timeout=timeout,
     )

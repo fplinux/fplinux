@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -115,6 +116,10 @@ def check_orchestration_recipe_digest(image_recipe: str | None = None) -> str:
         common.ROOT / "scripts/fplinux_cli/quality/inputs.py",
         common.ROOT / "scripts/fplinux_cli/quality/receipts.py",
         common.ROOT / "scripts/fplinux_cli/quality/runtime.py",
+        common.ROOT / "scripts/fplinux_cli/quality/testing.py",
+        common.ROOT / "scripts/fplinux_cli/quality/host_testing.py",
+        common.ROOT / "scripts/fplinux_cli/dependencies/__init__.py",
+        common.ROOT / "scripts/fplinux_cli/dependencies/inputs.py",
         common.ROOT / "scripts/fplinux_cli/quality/git.py",
         common.ROOT / "scripts/fplinux_cli/quality/source_gate.py",
         common.ROOT / "scripts/fplinux_cli/workspace/__init__.py",
@@ -155,6 +160,16 @@ def check_scope_receipt_recipe(  # noqa: PLR0913 -- source, image and kernel typ
         fail(f"check scope does not support receipts: {scope}")
     if orchestration_recipe is None:
         orchestration_recipe = check_orchestration_recipe_digest()
+    if scope == "python":
+        orchestration_recipe = hashlib.sha256(
+            canonical_json_bytes(
+                {
+                    "check_implementation": orchestration_recipe,
+                    "host_python": sys.version,
+                    "host_cache_tag": sys.implementation.cache_tag,
+                }
+            )
+        ).hexdigest()
     return CheckReceiptRecipe(
         scope=scope,
         closure_digest=closure_digest,

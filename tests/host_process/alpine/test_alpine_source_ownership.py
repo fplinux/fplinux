@@ -15,6 +15,9 @@ from unittest import mock
 
 import pytest
 from fplinux_cli.alpine import aports as alpine_builder
+from fplinux_cli.alpine import packages as alpine_packages
+
+from tests import ROOT
 
 
 def _build_fixture(directory: Path, *, fail_build: bool) -> None:
@@ -31,6 +34,9 @@ def _build_fixture(directory: Path, *, fail_build: bool) -> None:
     public_key = directory / "fixture.rsa.pub"
     key.write_bytes(b"fixture private key\n")
     public_key.write_bytes(b"fixture public key\n")
+    child_script = directory / "abuild-child.py"
+    shutil.copyfile(ROOT / "tests/fixtures/processes/alpine_abuild_child.py", child_script)
+    child_script.chmod(0o644)
     lookup = pwd.getpwnam
 
     def account(user: str) -> pwd.struct_passwd:
@@ -46,19 +52,13 @@ def _build_fixture(directory: Path, *, fail_build: bool) -> None:
             return
         build_count += 1
         # The child stands in for abuild: it writes private source files and an APK.
-        script = (
-            "import io, pathlib, sys, tarfile; "
-            "sources=pathlib.Path(sys.argv[1]); sources.chmod(0o700); "
-            "assert (sources/'existing.tar.xz').read_bytes()==b'existing source\\n'; "
-            "payload=sources/'downloaded.tar.xz'; payload.write_bytes(b'new source\\n'); "
-            "payload.chmod(0o600); repository=pathlib.Path(sys.argv[2]); "
-            "metadata=b'pkgname = fplinux-xkb-ru\\n'; "
-            "archive=tarfile.open(repository/'fplinux-xkb-ru-2.48-r0.apk','w:gz'); "
-            "member=tarfile.TarInfo('.PKGINFO'); member.size=len(metadata); "
-            "archive.addfile(member,io.BytesIO(metadata)); archive.close()"
-        )
         subprocess.run(
-            [sys.executable, "-c", script, environment["SRCDEST"], environment["REPODEST"]],
+            [
+                sys.executable,
+                str(child_script),
+                environment["SRCDEST"],
+                environment["REPODEST"],
+            ],
             cwd=cwd,
             user=1000,
             group=1000,
@@ -69,6 +69,7 @@ def _build_fixture(directory: Path, *, fail_build: bool) -> None:
 
     with (
         mock.patch.object(alpine_builder, "CACHE", cache),
+        mock.patch.object(alpine_packages, "CACHE", cache),
         mock.patch.object(pwd, "getpwnam", side_effect=account),
         mock.patch.object(alpine_builder, "_run_as_builder", side_effect=run_tool),
         mock.patch.object(

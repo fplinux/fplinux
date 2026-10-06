@@ -12,6 +12,9 @@ def _trace_selection(request: pytest.FixtureRequest) -> None:
     """Append the selected case to the caller-owned trace."""
     assert request.cls is not None
     name = f"{request.module.__name__}.{request.cls.__name__}.{request.node.name}"
+    runtime = os.environ.get("FPLINUX_TEST_RUNTIME")
+    if runtime is not None:
+        name = f"{runtime}:{name}"
     with Path(os.environ["FPLINUX_TEST_TRACE"]).open("a") as stream:
         stream.write(name + "\n")
 

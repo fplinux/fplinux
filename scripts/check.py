@@ -31,7 +31,6 @@ from fplinux_cli.quality.formatting.canonical import (
     noncanonical_paths,
 )
 from fplinux_cli.quality.formatting.source_formats import classify_source_formats
-from fplinux_cli.quality.testing import pytest_commands, pytest_environment
 from fplinux_cli.reporting.run import RunReporter, current_stage, run_entrypoint
 from fplinux_cli.workspace.capture import workspace_snapshot
 from pathspec import GitIgnoreSpec
@@ -706,10 +705,6 @@ def main() -> None:
         with report_stage(reporter, "python"):
             run(["ruff", "check", *python_files])
             run(["mypy", *python_files])
-            if (ROOT / "tests").is_dir():
-                environment = pytest_environment()
-                for _tier, command, timeout in pytest_commands([]):
-                    run(command, timeout=timeout, env=environment)
     if "shell" in selected:
         with report_stage(reporter, "shell"):
             check_shell_sources(formats)

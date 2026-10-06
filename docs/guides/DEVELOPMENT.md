@@ -87,7 +87,8 @@ follow the [code style](../reference/CODE_STYLE.md).
 
 ## Run selected tests
 
-Use `test` to run pytest tests in the same pinned Kern image as `check python`:
+Use `test` to run pytest workloads with the same pinned dependencies as
+`check python`:
 
 ```sh
 ./fplinux test tests.small.workspace.test_snapshot
@@ -106,10 +107,18 @@ The tiers are `small`, `host_process`, `host_tool`, `artifact` and
 `--verbose` shows individual test names and streams output; `--failfast` stops
 on the first failure or error. Complete output is saved with the command's logs.
 
-The command uses a read-only snapshot of project sources, without network access
-inside the test container. It prepares the pinned environment when needed, just
-as `check` does. Tests retain their tier time limits; a selection spanning tiers
-has their combined time budget.
+The command runs against a captured snapshot of project sources. Most tests run
+in the pinned Kern image with the sources mounted read-only and network disabled.
+Source-cache ownership and image-publication metadata tests run on the host,
+where real subordinate UID/GID mappings are available. Their temporary Python
+environment uses the same locked dependencies without installing system packages.
+They require the host namespace support used by `setup`; unavailable mappings
+fail the command instead of skipping those tests.
+
+The command prepares the pinned environment when needed, just as `check` does.
+Host and container execution share their tier time limit; a selection spanning
+tiers has their combined time budget. Explicit selectors retain their order and
+repetitions across both environments.
 
 Exit status is 0 for success, 1 for test failures or unresolved names, 2 for
 invalid command arguments, and 5 when pytest finds no tests. Ctrl+C returns 130.

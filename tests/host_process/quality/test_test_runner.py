@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tests import ROOT
+from tests.fixtures.executables import install_python_script
 from tests.process import python_environment, run_process
 
 if TYPE_CHECKING:
@@ -239,15 +240,7 @@ class TestSelectionProcessTests:
     def test_native_parameter_node_selects_one_input(self) -> None:
         """A parameter ID selects only the named input of a native pytest function."""
         fixture = self.root / "tests/small/test_parameters.py"
-        fixture.write_text(
-            "import os\n"
-            "from pathlib import Path\n"
-            "import pytest\n"
-            "@pytest.mark.parametrize('value', ['first', 'second'])\n"
-            "def test_value(value):\n"
-            "    with Path(os.environ['FPLINUX_TEST_TRACE']).open('a') as stream:\n"
-            "        stream.write(value + '\\n')\n"
-        )
+        shutil.copyfile(ROOT / "tests/fixtures/processes/pytest_parameter_function.py", fixture)
         result = self.run_selection("tests/small/test_parameters.py::test_value[second]")
         assert result.returncode == 0, result.stderr
         assert self.executed() == ["second"]
@@ -303,4 +296,233 @@ class TestSelectionProcessTests:
 
         result = self.run_selection("tests.small.test_wait", while_running=interrupt_when_ready)
         assert result.returncode == 130, result.stderr
+        assert json.loads((self.logs / "tests/run.json").read_text())["status"] == "interrupted"
+
+
+class MixedRuntimeProcessTests:
+    """Exercise the controller with real pytest, not dependency preparation or real Kern."""
+
+    @pytest.fixture(autouse=True)
+    def _mixed_workspace(self, tmp_path: Path) -> None:
+        """Own synthetic selections and replace only external runtime preparation."""
+        self.root = tmp_path
+        self.trace = self.root / "executed.txt"
+        self.kern_trace = self.root / "kern-launches.txt"
+        shutil.copyfile(ROOT / "pyproject.toml", self.root / "pyproject.toml")
+        (self.root / "scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
+        modules = (
+            "tests/host_process/alpine/test_alpine_source_ownership.py",
+            "tests/host_process/cache/test_image_tag.py",
+            "tests/host_process/domain/test_selection.py",
+            "tests/small/test_selection.py",
+        )
+        source = (ROOT / "tests/fixtures/processes/selection_cases.py").read_text()
+        for module in modules:
+            path = self.root / module
+            path.parent.mkdir(parents=True, exist_ok=True)
+            for package in path.parents:
+                if package == self.root:
+                    break
+                (package / "__init__.py").touch()
+            path.write_text(source)
+        self.driver = self.root / "run_workload.py"
+        shutil.copyfile(ROOT / "tests/fixtures/processes/pytest_workload_driver.py", self.driver)
+        fake_kern = self.root / "kern-fake"
+        install_python_script(
+            ROOT / "tests/fixtures/processes/pytest_kern_provider.py", fake_kern, mode=0o700
+        )
+
+    def run_workload(
+        self, *arguments: str, failing_fixture: bool = False
+    ) -> subprocess.CompletedProcess[str]:
+        """Execute the combined controller and both actual pytest process boundaries."""
+        self.logs = Path(tempfile.mkdtemp(dir=self.root, prefix="logs-"))
+        return run_process(
+            [sys.executable, str(self.driver), *arguments],
+            name="mixed pytest workload",
+            cwd=self.root,
+            env={
+                **python_environment(),
+                "FPLINUX_TEST_TRACE": str(self.trace),
+                "FPLINUX_TEST_DEPENDENCIES": str(Path(pytest.__file__).parent.parent),
+                "FPLINUX_TEST_KERN_TRACE": str(self.kern_trace),
+                "FPLINUX_TEST_FAIL": "1" if failing_fixture else "0",
+                "FPLINUX_LOG_ROOT": str(self.logs),
+                "FPLINUX_LOG_DISPLAY_ROOT": str(self.logs),
+                "FPLINUX_VERBOSE": "1" if "--verbose" in arguments else "0",
+            },
+            timeout=20,
+        )
+
+    def executed(self) -> list[str]:
+        """Read case outcomes independently of the controller's runtime registry."""
+        return self.trace.read_text().splitlines() if self.trace.exists() else []
+
+    def test_explicit_mixed_repeated_and_overlapping_selections_preserve_order(self) -> None:
+        """A repeated host method runs again after the intervening container class."""
+        host = "tests.host_process.alpine.test_alpine_source_ownership.PassingCase"
+        container = "tests.host_process.domain.test_selection.PassingCase"
+        other_host = "tests.host_process.cache.test_image_tag.PassingCase"
+        result = self.run_workload(
+            host + ".test_second",
+            container,
+            host,
+            other_host + ".test_first",
+            host + ".test_second",
+        )
+        assert result.returncode == 0, result.stderr
+        assert self.executed() == [
+            "host:" + host + ".test_second",
+            "container:" + container + ".test_first",
+            "container:" + container + ".test_second",
+            "host:" + host + ".test_first",
+            "host:" + host + ".test_second",
+            "host:" + other_host + ".test_first",
+            "host:" + host + ".test_second",
+        ]
+
+    @pytest.mark.parametrize("interleaved", [False, True])
+    def test_adjacent_container_selections_share_launch_until_a_host_selection(
+        self, *, interleaved: bool
+    ) -> None:
+        """Host interleaving splits container execution without reordering selected cases."""
+        container = "tests.host_process.domain.test_selection.PassingCase"
+        host = "tests.host_process.cache.test_image_tag.PassingCase.test_first"
+        names = [container + ".test_second", container]
+        expected = [
+            "container:" + container + ".test_second",
+            "container:" + container + ".test_first",
+            "container:" + container + ".test_second",
+        ]
+        if interleaved:
+            names.insert(1, host)
+            expected.insert(1, "host:" + host)
+        result = self.run_workload(*names)
+        assert result.returncode == 0, result.stderr
+        assert self.executed() == expected
+        assert self.kern_trace.read_text().splitlines() == (
+            ["container", "container"] if interleaved else ["container"]
+        )
+
+    @pytest.mark.parametrize("native", [False, True])
+    def test_host_module_selection_routes_without_discovering_other_modules(
+        self, *, native: bool
+    ) -> None:
+        """Dotted and native module selectors reach host pytest with all selected cases."""
+        module = "tests.host_process.cache.test_image_tag"
+        selection = "tests/host_process/cache/test_image_tag.py" if native else module
+        result = self.run_workload(selection)
+        assert result.returncode == 0, result.stderr
+        assert self.executed() == [
+            "host:" + module + ".FailureCase.test_first",
+            "host:" + module + ".FailureCase.test_second",
+            "host:" + module + ".PassingCase.test_first",
+            "host:" + module + ".PassingCase.test_second",
+        ]
+
+    def test_native_parameter_selectors_route_one_input_at_each_boundary(self) -> None:
+        """Parameter IDs keep punctuation intact while selecting the proper runtime."""
+        parameter_case = (ROOT / "tests/fixtures/processes/pytest_parameter_class.py").read_text()
+        for module in (
+            "tests/host_process/cache/test_image_tag.py",
+            "tests/host_process/domain/test_selection.py",
+        ):
+            path = self.root / module
+            path.write_text(path.read_text() + "\n" + parameter_case)
+        result = self.run_workload(
+            "tests/host_process/cache/test_image_tag.py::ParameterCase::test_value[other::id]",
+            "tests/host_process/domain/test_selection.py::ParameterCase::test_value[first]",
+        )
+        assert result.returncode == 0, result.stderr
+        assert self.executed() == [
+            "host:tests.host_process.cache.test_image_tag.ParameterCase.test_value[other::id]",
+            "container:tests.host_process.domain.test_selection.ParameterCase.test_value[first]",
+        ]
+
+    def test_tier_discovery_runs_host_cases_once_outside_container(self) -> None:
+        """Container discovery excludes both host modules without dropping their cases."""
+        result = self.run_workload("--tier", "host_process")
+        assert result.returncode == 0, result.stderr
+        assert self.executed() == [
+            f"{runtime}:tests.host_process.{module}.{case}.{method}"
+            for runtime, module in (
+                ("container", "domain.test_selection"),
+                ("host", "alpine.test_alpine_source_ownership"),
+                ("host", "cache.test_image_tag"),
+            )
+            for case in ("FailureCase", "PassingCase")
+            for method in ("test_first", "test_second")
+        ]
+
+    @pytest.mark.parametrize("host_first", [False, True])
+    @pytest.mark.parametrize("failfast", [False, True])
+    def test_failure_retains_status_and_controls_following_runtime(
+        self, *, host_first: bool, failfast: bool
+    ) -> None:
+        """Either runtime can fail; only failfast cancels the later selected workload."""
+        host = "tests.host_process.cache.test_image_tag"
+        container = "tests.host_process.domain.test_selection"
+        failing, passing = (host, container) if host_first else (container, host)
+        failing_runtime, passing_runtime = (
+            ("host", "container")
+            if host_first
+            else (
+                "container",
+                "host",
+            )
+        )
+        result = self.run_workload(
+            failing + ".FailureCase",
+            passing + ".PassingCase.test_second",
+            *(["--failfast"] if failfast else []),
+            failing_fixture=True,
+        )
+        assert result.returncode == 1, result.stderr
+        expected = [f"{failing_runtime}:{failing}.FailureCase.test_first"]
+        if not failfast:
+            expected.extend(
+                [
+                    f"{failing_runtime}:{failing}.FailureCase.test_second",
+                    f"{passing_runtime}:{passing}.PassingCase.test_second",
+                ]
+            )
+        assert self.executed() == expected
+        assert json.loads((self.logs / "tests/run.json").read_text())["status"] == "failed"
+
+    def test_verbose_shows_names_from_host_and_container_pytest(self) -> None:
+        """Verbose output exposes the selected case at both execution boundaries."""
+        result = self.run_workload(
+            "tests.host_process.cache.test_image_tag.PassingCase.test_first",
+            "tests.host_process.domain.test_selection.PassingCase.test_second",
+            "--verbose",
+        )
+        assert result.returncode == 0, result.stderr
+        output = result.stdout + result.stderr
+        log = (self.logs / "tests/01-selected.log").read_text()
+        for selection in (
+            "test_image_tag.py::PassingCase::test_first",
+            "test_selection.py::PassingCase::test_second",
+        ):
+            assert selection in output
+            assert selection in log
+
+    @pytest.mark.parametrize("host_interrupt", [False, True])
+    def test_child_sigint_interrupts_mixed_workload_without_running_later_case(
+        self, *, host_interrupt: bool
+    ) -> None:
+        """Child pytest SIGINT retains exit 130 and cancels the other runtime."""
+        host = "tests/host_process/cache/test_image_tag.py"
+        container = "tests/host_process/domain/test_selection.py"
+        interrupted, following = (host, container) if host_interrupt else (container, host)
+        (self.root / interrupted).write_text(
+            "import os\n"
+            "import signal\n"
+            "def test_interrupt():\n"
+            "    os.kill(os.getpid(), signal.SIGINT)\n"
+        )
+        result = self.run_workload(
+            interrupted + "::test_interrupt", following + "::PassingCase::test_first"
+        )
+        assert result.returncode == 130, result.stderr
+        assert self.executed() == []
         assert json.loads((self.logs / "tests/run.json").read_text())["status"] == "interrupted"
