@@ -24,8 +24,9 @@ phone's boot key, hardware support, safe use, and limitations; see the shared
 
 Follow [Building FPLinux](docs/guides/BUILDING.md) for host requirements,
 setup and the first build, then [Loading from a source checkout](docs/guides/LOADING.md)
-to start the selected phone. The build guide also covers source checks,
-offline builds, logs, cache use and cleanup.
+to start the selected phone. Use [Developing FPLinux](docs/guides/DEVELOPMENT.md)
+for source checks, tests and cache cleanup, and
+[Dependency snapshots](docs/guides/DEPENDENCIES.md) to preserve offline inputs.
 
 ### Guides
 
@@ -33,12 +34,15 @@ First choose the exact phone in [Phone targets](targets/README.md) and read its
 support status, boot key, storage rules and limitations.
 
 - [Building FPLinux](docs/guides/BUILDING.md)
+- [Developing FPLinux](docs/guides/DEVELOPMENT.md)
+- [Dependency snapshots](docs/guides/DEPENDENCIES.md)
+- [Device data and NAND backups](docs/guides/DEVICE_DATA.md)
 - [Loading from a source checkout](docs/guides/LOADING.md)
 - [Installing and removing optional APK packages](docs/guides/APK_PACKAGES.md)
 - [microSD system root](docs/guides/MICROSD_ROOT.md)
 - [Using a standalone archive](docs/guides/STANDALONE.md)
 - [Release archives](docs/guides/RELEASES.md)
-- [Hardware debugging](docs/guides/DEBUGGING.md)
+- [Debugging FPLinux](docs/guides/DEBUGGING.md)
 
 ### Features
 
@@ -93,7 +97,7 @@ support status, boot key, storage rules and limitations.
 - [Logging contract](docs/reference/LOGGING.md)
 
 Before submitting source changes, run the complete uncached quality gate from
-[Building FPLinux](docs/guides/BUILDING.md#check-source).
+[Developing FPLinux](docs/guides/DEVELOPMENT.md#check-source).
 
 ### Porting
 
@@ -101,6 +105,7 @@ Before submitting source changes, run the complete uncached quality gate from
 - [Bring up a new UMS9117 phone](docs/porting/NEW_PHONE.md)
 - [Phone target contract](docs/porting/TARGET.md)
 - [Platform contract](docs/porting/PLATFORM.md)
+- [Shared Linux integration](docs/porting/LINUX_INTEGRATION.md)
 - [Console contract](docs/porting/CONSOLE.md)
 
 ## Architecture

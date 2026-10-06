@@ -26,7 +26,7 @@ an upstream tree follows the boundary described below.
 | `lib/fplinux/`, `include/fplinux/`                             | shared host and phone components  | The component's declared C dialect and runtime interfaces             |
 | `common/host/`                                                 | Linux x86-64 host                 | C11, POSIX, Linux UAPI and libusb                                     |
 | Sources marked `fplinux-check: package-embedded`               | TyrQuake build tree               | Destination project's dialect and external ABI                        |
-| `tests/host_tool/*.c`                                          | Host-only harness                 | The dialect selected by the test that compiles it                     |
+| C harnesses under `tests/host_tool/`                           | Host-only harness                 | The dialect selected by the test that compiles it                     |
 
 Do not move an API or language assumption from one row to another. `errno`, file
 descriptors and signals do not belong in the bootstrap. Kernel code does not use
@@ -35,7 +35,8 @@ musl, bootstrap or kernel code builds.
 
 ## Use the check that understands the layer
 
-Use the canonical [format, check and build procedures](../../guides/BUILDING.md).
+Use the canonical [format and check procedures](../../guides/DEVELOPMENT.md)
+and [target build procedure](../../guides/BUILDING.md#build-a-target).
 The relevant commands establish different things:
 
 - `check c` checks formatting for bootstrap, phone userspace, host C, embedded
@@ -386,7 +387,7 @@ level established for that hardware.
 - Run the checks and builds that compile the changed code in its real context.
 
 If an aport source changed, regenerate its checksum through the
-[supported build workflow](../../guides/BUILDING.md#regenerate-alpine-checksums)
+[supported checksum workflow](../../guides/DEVELOPMENT.md#regenerate-alpine-checksums)
 before the final gate. The [identity contract](../IDENTITY.md) covers public
 device names, the [logging contract](../LOGGING.md) covers messages, and the
 [porting overview](../../porting/README.md) defines project, platform and target

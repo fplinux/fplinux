@@ -37,289 +37,11 @@ for accepted scopes.
 Use `./fplinux setup --force` to rebuild the pinned OCI image even when an image
 for the current recipe is already ready.
 
-## Preserve build dependencies
-
-Keep a dependency snapshot outside the checkout's disposable `.cache` directory:
-
-```sh
-./fplinux dependencies create ../fplinux-inputs
-./fplinux dependencies verify ../fplinux-inputs
-```
-
-`create` selects the exact external inputs declared by the current locks,
-package recipes and environment configuration. It verifies each original
-download against its declared checksum and size, stores shared bytes once under
-their SHA-256, and saves the current build environment through Kern's image
-export. Run `setup` first when that environment is unavailable. `--offline`
-requires every declared input to be present locally. Repeat `--from PATH`
-to supply original downloads from additional local files or directories; only
-bytes matching a declared checksum are accepted. Missing files are reported by
-their exact declaration and URL, without selecting a replacement version.
-
-The selected inputs also include the documentation site's locked Python wheels
-for CPython 3.14 on Ubuntu 24.04, Linux x86-64 with glibc. Other site platforms
-and Python versions are outside this selection.
-
-The snapshot's `manifest.json` records the original URLs, checksums, sizes,
-selected inputs and environment state. Its identity reflects the parsed external
-declarations and verified input bytes. Comments, mapping key order and unrelated
-driver changes do not create another external input set. Meaningful sequence
-order remains part of the identity. Each snapshot directory holds one set; use
-another directory to retain a different set. Existing snapshot contents are
-verified before reuse.
-
-For a matching source checkout, restore inputs and the saved environment without
-downloading:
-
-```sh
-./fplinux dependencies restore ../fplinux-inputs
-./fplinux doctor
-```
-
-The complete snapshot is verified before any input is restored. Restoration
-requires the checkout's current external declarations to match and restores
-only their declared cache destinations. Loading an environment additionally
-requires its exact image recipe and checks its embedded state through Kern.
-The saved environment includes installed-file metadata. Restoration preserves
-the measured bytes, links, numeric owners and permission bits, and checks the
-result before making it available for builds. Filesystem timestamps, extended
-attributes and hardlink relationships are outside this comparison.
-This restores the build environment; it does not restore compiled phone APKs,
-root filesystems, kernels or successful build receipts.
-An existing cache file with different bytes is reported and retained for
-inspection before restoration writes any inputs.
-
-Use `create --inputs-only` to omit the environment export. To recreate an
-environment from its original inputs, restore only those inputs and request an
-offline setup:
-
-```sh
-./fplinux dependencies restore ../fplinux-inputs --inputs-only
-./fplinux setup --offline --force
-```
-
-Phone data extracted from a physical backup and private package-signing keys are
-separate local inputs. Dependency snapshots do not include them. A successful
-snapshot verification establishes stored-input integrity; it does not establish
-a complete offline phone build or reproducible output bytes.
-
-## Format source
-
-Format only the files being edited:
-
-```sh
-./fplinux format scripts/fplinux_cli/example.py docs/example.md
-```
-
-The command accepts one or more normalized repository-relative file paths. It
-does not recurse into directories or provide a whole-checkout mode. Tracked and
-non-ignored untracked project sources are accepted.
-
-Formatting and checking calculate the same canonical bytes with the pinned tools:
-
-- C and headers: `clang-format`;
-- Python: Ruff's import-order fix and formatter;
-- Markdown, JSON, JSONC, YAML and maintained JavaScript configurations: Prettier;
-- TOML: field ordering followed by Taplo;
-- Devicetree sources: bounded property ordering with values, includes and node
-  order preserved;
-- APKBUILD, Kconfig, Makefile, INI, EditorConfig and assembly: safe whitespace
-  normalization with declarations and execution order preserved;
-- POSIX and Bash scripts recognized by their shebang, plus the POSIX sourced
-  configuration `alpine/abuild.conf`: `shfmt`.
-
-Supported `.in` templates use their rendered format's rules. Field and section
-order, sequence preservation and whitespace limits are defined by the
-[source-format contract](../reference/style/FORMATS.md).
-The npm-owned `package-lock.json` is excluded from formatting.
-
-Declared Linux patches are also accepted. Their affected C/H regions are
-formatted with the pinned Linux `.clang-format` and LLVM's `clang-format-diff`
-tool. The command reconstructs the source context, regenerates each selected
-patch and checks that the remaining integration steps still apply. It retains
-non-C contents without claiming to format Kconfig, Makefile or Devicetree syntax.
-Patch inputs require the pinned Linux source archive; it is downloaded when
-missing. Other patch series are not accepted by this formatter.
-
-Files without a project formatter, including Containerfiles and ordinary plain
-text, are rejected. The checkout is never mounted writable in the container.
-All selected files are formatted in a
-private projection. Only after every formatter succeeds and the checkout is
-confirmed unchanged is each changed source file replaced atomically.
-
-## Check source
-
-Run the complete uncached source-quality gate before committing or submitting
-source changes:
-
-```sh
-./fplinux check --no-cache
-./fplinux check --no-cache --jobs 1
-./fplinux check --list
-./fplinux check docs spelling
-```
-
-With no scopes, `check` runs the complete gate. Selected cacheable scopes reuse
-an exact successful result when their current inputs match; otherwise they run
-again. `--no-cache` reruns selected cacheable scopes. An ordinary build or RAM
-run without source changes does not need to repeat the gate.
-
-The kernel check analyzes one context per target that offers the selected
-profile, by default up to three at once. Use `--jobs 1` to force serial kernel
-analysis on a memory-constrained host. A `--jobs` value above 1 requires the
-`kernel` scope when scopes are named and cannot be combined with `--verbose`,
-which uses serial analysis so tool output can remain live.
-
-The `docs` scope also rejects repository-local Markdown links whose file or
-heading anchor does not exist, and documentation site pages that are neither in
-the `nav` of `mkdocs.yml` nor matched by its `not_in_nav`.
-
-The `kernel` scope checks formatting inside Linux patches as well as standalone
-C/H sources. Kconfig and Kbuild fragments are checked as changes to their Linux
-destination files, before the complete configuration and compilation checks.
-Changed Devicetree bindings use the kernel's `yamllint` configuration and
-`dt_binding_check`; built board trees use `dtbs_check`.
-
-Kernel, bootstrap, host and phone-userspace messages follow the shared
-[logging contract](../reference/LOGGING.md). Project-owned source and tests
-follow the [code style](../reference/CODE_STYLE.md).
-
-## Run selected tests
-
-Use `test` to run unittest tests in the same pinned Kern image as `check python`:
-
-```sh
-./fplinux test tests.small.environment.test_common
-./fplinux test tests.small.environment.test_common.FileDigestTests
-./fplinux test tests.small.environment.test_common.FileDigestTests.test_empty_short_and_multibuffer_files_match_sha256_vectors
-./fplinux test --tier host_tool
-```
-
-Supply one or more dotted test names, or select one tier with `--tier`.
-The tiers are `small`, `host_process`, `host_tool`, `artifact` and
-`public_workflow`. With neither selector, all five tiers run in that order.
-`--verbose` shows individual test names and streams output; `--failfast` stops
-on the first failure or error. Complete output is saved with the command's logs.
-
-The command uses a read-only snapshot of project sources, without network access
-inside the test container. It prepares the pinned environment when needed, just
-as `check` does. Tests retain their tier time limits; a selection spanning tiers
-has their combined time budget.
-
-Exit status is 0 for success, 1 for test failures or unresolved names, 2 for
-invalid command arguments, and 5 when unittest finds no tests. Ctrl+C returns 130. A selected test run always executes and never creates or refreshes a
-successful `check` receipt. It does not run linters or replace `check python`
-or the complete quality gate.
-
-## Preview the documentation site
-
-MkDocs builds the documentation site from a copy of the documentation pages
-kept at their repository paths. Install the pinned site tools once, then
-collect the pages and start the local preview from the repository root:
-
-```sh
-python3 -m venv .cache/site/venv
-.cache/site/venv/bin/pip install --require-hashes -r site/requirements.txt
-python3 scripts/site_collect.py
-.cache/site/venv/bin/mkdocs serve
-```
-
-After restoring a dependency snapshot, install the saved site wheels without
-using a package index:
-
-```sh
-.cache/site/venv/bin/pip install --no-index --find-links .cache/downloads/site --require-hashes -r site/requirements.txt
-```
-
-`site_collect.py` replaces `.cache/site/src` with the current pages; run it
-again after editing a page. `mkdocs serve` prints the local address and reloads
-when the collected pages or `mkdocs.yml` change. A page missing from the site
-navigation, a broken link or a missing anchor stops the build.
-
-## Build an ARM diagnostic program
-
-For a single C source file in this checkout, build a static ARMv7 hard-float
-musl executable for the phone:
-
-```sh
-./fplinux probe-build .cache/tools/diag.c --output .cache/tools/diag-arm
-```
-
-Create the source file first. Both paths must be repository-relative and free
-of symlinks. The source must be a regular file, and the output must be inside
-`.cache/tools`. The command
-uses the pinned Kern image, project headers and locked Alpine packages. It
-prepares the ARM sysroot when needed, downloading missing locked inputs on the
-first run. If the build image is not prepared, run `./fplinux setup` first.
-
-`probe-build` only compiles the program. It does not add it to a phone image,
-upload it or run it on a phone. A failed compile leaves any existing output
-unchanged.
-
-## Regenerate Alpine checksums
-
-When an Alpine aport source file changes, regenerate its `sha512sums` with the
-supported command instead of editing individual digests:
-
-```sh
-./fplinux checksum <aport>
-```
-
-The command updates only the canonical `APKBUILD` checksum block and refuses to
-publish if its declared inputs change while it runs.
-
-After the image and required source archives have been prepared, regeneration
-can run without network access:
-
-```sh
-./fplinux checksum <aport> --offline
-```
-
-`./fplinux checksum` is the sole supported path for regenerating FPLinux aport
-checksums. Do not run `abuild checksum` directly in the checkout or manually
-replace individual digest lines.
-
-## Create a new target
-
-For a UMS9117 phone that has no target yet, create a headless target:
-
-```sh
-./fplinux target new TARGET --brand BRAND --product PRODUCT [--compatible VENDOR,DEVICE]
-```
-
-`TARGET` names the new `targets/TARGET` directory and is the target name for
-every other command. It consists of lowercase letters and digits separated by
-single hyphens. `--brand` and `--product` are the public names defined by the
-[identity contract](../reference/IDENTITY.md); the hardware-code list starts
-empty. Without `--compatible`, the board compatible is formed from the lowercase
-brand and product, for example `hammer,horizon-lte`.
-
-The target uses the only platform, `ums9117`, by default. `--platform NAME`
-selects the platform in `platforms/NAME` and is required only when more than
-one platform exists.
-
-The new target loads
-[headless](../../platforms/ums9117/README.md#target-requirements): the phone
-shows no boot screen, and the loader applies no board pin settings. Linux
-provides the USB session and read-only internal NAND access; it has no display,
-keypad, audio, Bluetooth or microSD support, and only the default profile is
-available. In the `[adapter]` table of its `target.toml`, `boot_instructions`
-names `*` as the boot key and `exec_distance` is `0`. Its `README.md` records
-the FPLinux support of every feature and application as **Unknown**.
-
-The command refuses an existing target directory and leaves nothing behind
-when a name or identity field is invalid. It lists the created files and ends
-with the next step:
-
-```sh
-./fplinux build TARGET && ./fplinux run TARGET
-```
-
-The command does not add the new target to the
-[target index](../../targets/README.md). To boot the new target and back up
-its NAND, follow [Bring up a new UMS9117 phone](../porting/NEW_PHONE.md).
-
 ## Build a target
+
+Choose the exact phone in the [target index](../../targets/README.md), and read
+its support status, boot key and storage limitations before building. Target
+names are discovered from `targets/`.
 
 ```sh
 ./fplinux build <target>
@@ -331,9 +53,7 @@ Builds use up to eight available CPUs by default; `--jobs` selects an explicit
 parallel compilation limit. Build processes run at nice level 10, preserving
 an already lower scheduling priority so that foreground work can take precedence.
 A matching selected bundle is reused;
-otherwise the command rebuilds it from the current inputs. Target names are
-discovered from `targets/`; use the [target index](../../targets/README.md) to
-choose one.
+otherwise the command rebuilds it from the current inputs.
 
 After an online build has prepared the required inputs, an offline build miss
 can run with networking disabled:
@@ -375,7 +95,7 @@ use the same userspace packages.
 
 Each target, profile and build type has its own current bundle. Selecting one
 does not replace another. Host debug files are separate from the phone payload;
-see [artifact inspection](#inspect-built-artifacts). A debug image is not a
+see [artifact inspection](DEBUGGING.md#inspect-built-artifacts). A debug image is not a
 hardware qualification.
 
 ### Two global profiles
@@ -425,291 +145,13 @@ shutdown rules.
 
 ### Local fitted device data
 
-The current targets declare fitted device-data groups that must come from the
-exact physical phone. Bluetooth firmware and FM settings are delivered through
-the root filesystem. The fitted audio profile is built into the kernel image;
-it holds the headphone, speaker and combined-output gains, the stock equalizer
-and ALC processing for each of those outputs and, on phones that vibrate
-through their speaker, the vibrate tone. FPLinux does not download or
-supply these phone-specific inputs.
-
-Each group is independently optional. When a complete group is absent, the
-build keeps that feature's generic behavior: Bluetooth and FM remain
-unavailable, headphone audio uses the generic volume levels, and no speaker
-output is created. If any part of a group is present, the complete group must
-pass its declared size and digest checks; a partial, damaged or mismatched
-group fails the build.
-
-Normal `build` and `run` commands consume only already prepared local data.
-They do not read the phone's NAND.
-
-A target may also declare the `board-maps` group, which its platform extracts
-from the phone's stock firmware in the same NAND backup; a target created by
-`./fplinux target new` declares it. The group holds the loader pin map
-`pinmap.bin` and keymap `keymap.bin`. Their declarations omit the size, because
-each phone's maps have their own. The loader does not read them and takes its
-maps only from the target's asset lock. Preparing the group
-also writes the board report `reports/board-maps/board-report.json` into the new
-generation and prints its path. The report lists the board values found in the
-stock firmware, where each came from, the values that were not found and the
-decisions left to a person; builds never read it. The extraction runs a host
-tool from the target's current build, so build the target before preparing its
-device data from a saved backup. Each platform describes what its report
-contains; see
-[UMS9117 board data](../../platforms/ums9117/README.md#board-data-from-the-stock-firmware).
+Phone-specific inputs are optional complete groups from the exact handset.
+Normal builds consume prepared local data and do not read the phone's NAND.
+See [Device data and NAND backups](DEVICE_DATA.md) for group requirements and
+preparation before rebuilding.
 
 After building, follow [Loading from a source checkout](LOADING.md) to configure
 the host, load the selected image, reconnect and verify the running context.
-
-#### Prepare device data
-
-Prepare every group declared by `<target>` from one complete physical NAND
-backup. This prepares Bluetooth, FM, the independent audio gain group and, when
-declared, the board maps.
-The fitted data must come from the exact phone selected by `<target>`; do not
-reuse data from another handset or model. No manual extraction, renaming or
-patching is needed. Preparation requires this source checkout, not a standalone
-archive.
-
-The complete command syntax is:
-
-```sh
-./fplinux device-data prepare TARGET [--from-dump PATH] [--jobs N] [--offline] [--events PATH]
-```
-
-Start with the phone powered off and USB disconnected, then run:
-
-```sh
-./fplinux device-data prepare <target>
-```
-
-The command first builds and starts the default RAM system. Wait
-until its loader asks for the phone; only then hold its boot key and connect the
-powered-off phone. This is the normal loader-first sequence in
-[Loading from a source checkout](LOADING.md#connect-the-phone); see
-the selected phone's instructions in the [target index](../../targets/README.md)
-for the target-specific key.
-
-For a backup already saved from this exact physical NAND, use:
-
-```sh
-./fplinux device-data prepare <target> --from-dump PATH
-```
-
-This form does not require an existing target build, build a loader or connect
-to the phone. It builds the required extraction utility in the pinned build
-environment. `--offline` uses the locally available environment and source
-archives without downloading them. `--events PATH` is
-only available for live preparation and cannot be combined with `--from-dump`;
-its [loader events](LOADING.md#loader-progress-events) describe the RAM load. `--jobs N` limits
-parallel work when the read-only loader is built, and `--offline` requests that
-build without network access.
-
-The backup must contain the selected phone's complete physical NAND, with each
-page's main bytes followed by its OOB bytes. Its page layout comes from the
-geometry receipt `PATH.json` that [`nand backup`](#save-a-nand-backup) writes
-beside it. The receipt must describe exactly the bytes at `PATH`. A target that
-declares its NAND chip also accepts a backup without a receipt; when both are
-present, they must report the same chip and page size. Without either, the
-command refuses the backup instead of inferring a layout from its length.
-Preparation interprets only 2048 main bytes per page, 64 pages per block and
-65536 pages in total. The command also rejects an unsupported target, a length
-that does not match the layout, damaged required data, and ambiguous
-selected-block mappings. A saved input and its receipt remain unchanged at their
-original paths.
-
-The dump, extracted originals, prepared groups, and any image containing them
-are private and non-redistributable unless you have the necessary rights. They
-are local inputs and are not supplied by the source checkout or its pinned build
-environment. The live reader is read-only: it does not mount, erase, restore,
-or otherwise write the phone's NAND or NV storage.
-
-When preparation finishes, it prints the exact next commands:
-
-```sh
-./fplinux build <target>
-./fplinux run <target>
-```
-
-Build the selected profile, then end the preparation RAM session with the
-selected target's shutdown procedure
-and disconnect USB. For the prepared RAM load, start `run` with the phone
-again powered off and disconnected; wait for its loader invitation before
-holding its boot key and connecting it.
-
-#### Save a NAND backup
-
-For a phone already running the selected build, save its complete physical-page
-stream with:
-
-```sh
-./fplinux nand backup <target> PATH [--profile NAME]
-```
-
-The command first opens the phone's raw NAND reader, which identifies the
-fitted chip, and reads the geometry the reader reports. It stops before reading
-any NAND page when the running kernel does not identify the chip, or when the
-chip or its page size differs from the one the target declares. The expected
-image size comes from the reported geometry, not from the target.
-
-The command checks that the complete stream has that size, computes a SHA-256
-digest and atomically publishes the file with mode `0600`. It then atomically
-writes the geometry receipt `PATH.json` beside it, also with mode `0600`. The
-receipt is a JSON object with these fields:
-
-| Field                            | Value                                                 |
-| -------------------------------- | ----------------------------------------------------- |
-| `id_bytes`                       | chip ID bytes as hexadecimal, manufacturer byte first |
-| `chip`                           | chip name reported by the reader                      |
-| `page_main_bytes`, `oob_bytes`   | main and OOB bytes per page                           |
-| `pages_per_block`, `block_count` | pages per erase block and number of blocks            |
-| `raw_bytes`                      | size of the saved image                               |
-| `sha256`                         | SHA-256 digest of the saved image                     |
-| `target`                         | target used for the backup                            |
-
-Saving to the same `PATH` replaces the previous backup. An incomplete transfer
-leaves an existing destination and its receipt unchanged. Once the complete
-stream is checked, the command removes the old receipt before replacing the
-backup. If writing the new receipt fails, the complete new backup remains
-without a receipt; a target that declares its NAND chip can still use it for
-device-data preparation. The digest identifies the saved bytes; the command
-does not compare them with a second device read. Restoring NAND is unsupported.
-Treat the backup as private device data. The receipt holds only the fields above
-and no NAND contents; it can be shared, for example attached to an issue report.
-
-To see what the reader reports without saving a backup, run:
-
-```sh
-./fplinux nand identify <target> [--profile NAME]
-```
-
-It opens the reader the same way and prints the reader's report unchanged, one
-`key=value` line each for `id_bytes`, `chip`, `page_main_bytes`, `oob_bytes`,
-`pages_per_block`, `block_count`, `raw_bytes`, `geometry_source`, `feature_a0`,
-`feature_b0` and `feature_c0`. For a chip that the running kernel does not
-identify, the report shows `chip=unknown`, zero geometry values and
-`geometry_source=unknown`, together with the chip's ID bytes and feature
-register values.
-
-## Inspect built artifacts
-
-```sh
-./fplinux inspect bundle nokia-ta1618
-./fplinux inspect bundle nokia-ta1618 --profile microsd-uboot
-./fplinux inspect archive path/to/FPLinux.zip
-./fplinux inspect apk path/to/package.apk
-```
-
-`bundle` reads the published current generation for the selected target and
-profile and build type, prints its identity and file sizes and SHA-256 hashes, and checks the
-files against their build manifest. It does not rebuild or check whether the
-source checkout has changed since that build. APKs and debug files are included
-in the file listing.
-
-`archive` reads a FPLinux candidate or release ZIP, reports its recorded identity
-and file listing, and checks every payload against the enclosed `SHA256SUMS`.
-Missing, extra or mismatched files cause failure. The checks establish internal
-byte consistency, not authenticity or phone support.
-
-`apk` displays `.PKGINFO` and the file list of an APK v2 package, including link
-destinations. It does not install the package, run its scripts or verify its
-signature. Neither archive command extracts files.
-
-Inspection needs no Kern environment or phone connection. Bundle inspection
-holds the shared cache lock while reading the selected generation; inspecting
-a ZIP or APK does not take that lock or create cache state. The commands above produce text;
-exit status is 0 on success, 1 on an inspection or checksum error, 2 for invalid
-arguments and 130 after Ctrl+C.
-
-### Measure image footprint
-
-Measure the current verified bundle without building or connecting a phone:
-
-```sh
-./fplinux inspect footprint nokia-ta1618 --profile default --build-type release
-./fplinux inspect footprint nokia-ta1618 --json > before.json
-./fplinux inspect footprint nokia-ta1618 --json > after.json
-./fplinux inspect footprint-diff before.json after.json
-./fplinux inspect footprint-diff before.json after.json --json
-```
-
-Save `before.json` before rebuilding and `after.json` after rebuilding the
-context being compared. `--json` produces a machine-readable report. The
-measurement separates boot artifacts, kernel zImage, compressed embedded
-initramfs, compressed RAM backing, unpacked root filesystem, optional APK
-archives and host debug files.
-These layers overlap; adding them does not produce a meaningful total.
-
-Package sizes count their owned regular-file and symlink payload, excluding
-dependencies. They are not installed disk usage or runtime RAM consumption.
-`footprint-diff` compares two saved reports and lists artifact byte deltas and
-added, removed or changed packages, files and optional APKs. It also reports
-whether root filesystem content is identical. Compression savings alone do not
-establish a userspace or memory reduction.
-
-## Logs, cache, and parallel commands
-
-Build, check, test and format print compact stage status. Add `--verbose` to
-build, check or test to stream their tool output. Complete logs are retained under
-`.cache/logs/`, and each command reports their location on failure.
-Use [`logs list`, `logs show` and `logs follow`](DEBUGGING.md#build-and-command-logs)
-to find and read command output without looking up stage filenames.
-
-Public commands serialize writes to shared build state. Target output is kept
-under `.cache/out/<target>/`; treat it as generated data, not as a user-managed
-workspace.
-
-### Shared Linux sources
-
-Targets and platforms pinned to the same Linux archive SHA-256 share one
-prepared source tree under `.cache/linux/sources/<sha256>/`. Selecting another
-target or profile reuses that tree without extracting or copying Linux again.
-Source changes update the affected integration files. The cache retains only
-the upstream originals needed to rebuild those files, not a second full tree.
-
-Kernel configuration, generated profile inputs and compilation output use
-separate Kbuild `O=` directories for each target, profile and build type.
-Parallel kernel checks read the same prepared source tree and write to their
-own output directories. Sharing sources does not enable other boards' drivers
-in the selected image.
-
-All Linux integrations sharing an archive must coexist. Keep board drivers
-guarded by their target configuration and use distinct destinations for
-board-owned files. Target copies add new board-owned files; use patches or
-platform copies to change upstream files. Conflicting file ownership, patches
-that cannot apply together and profile-specific Linux patches are rejected.
-A missing integration input or invalid shared Kconfig can prevent other targets
-from building too.
-Source sharing does not establish support for another platform, architecture
-or userspace ABI.
-
-### Clean generated state
-
-Kernel compilation uses a shared local ccache under `.cache/ccache/`. Its
-automatic cleanup limits the cache to 1 GiB. It can reuse compilations across
-targets and profiles when their inputs match; the first fill can take longer
-than an uncached compilation. It does not change the selected kernel features
-or the phone's package set.
-
-Host tools are reused from `.cache/host-tools/` when their source inputs and
-pinned build environment match. A driver change does not rebuild unchanged host
-tools. Cached tools still pass their binary checks and declared self-tests.
-
-Prepared Linux, Sparse, rootfs, staged workspaces, profile logs and locally
-built APKs use bounded managed slots. Successful commands discard superseded
-managed state, while `prune` handles interrupted or orphaned entries. Cache
-records have no migrations or fallback readers: unknown or mismatched state is
-a cache miss and is replaced only inside its managed slot.
-
-Inspect cache cleanup candidates before deleting generated data:
-
-```sh
-./fplinux prune
-./fplinux prune --apply
-```
-
-`prune` without `--apply` is read-only. Unknown, old, or mismatched generated
-entries are cache misses and are not migrated.
 
 ## What a build proves
 
@@ -720,3 +162,31 @@ on a phone. Target documents record current feature support and limitations.
 See [Release archives](RELEASES.md) to create a phone-test candidate. To use the
 result on a phone, continue with
 [Loading from a source checkout](LOADING.md).
+
+## Format source
+
+Use the [source formatting procedure](DEVELOPMENT.md#format-source).
+
+## Check source
+
+Use the [source quality gate](DEVELOPMENT.md#check-source) before submitting changes.
+
+## Regenerate Alpine checksums
+
+Use the [supported checksum command](DEVELOPMENT.md#regenerate-alpine-checksums).
+
+## Create a new target
+
+Follow [Create a headless target](../porting/NEW_PHONE.md#create-a-headless-target).
+
+## Prepare device data
+
+Follow [device-data preparation](DEVICE_DATA.md#prepare-device-data).
+
+## Save a NAND backup
+
+Follow the [read-only NAND backup procedure](DEVICE_DATA.md#save-a-nand-backup).
+
+## Shared Linux sources
+
+Follow the [shared Linux integration contract](../porting/LINUX_INTEGRATION.md).

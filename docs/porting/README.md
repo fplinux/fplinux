@@ -35,7 +35,8 @@ support or the platform loader sequence.
    A release requires the exact executable payload to pass the phone gate; a
    successful build or candidate package alone is not a phone test.
 
-Use the [platform template](PLATFORM.md) for reusable SoC support and the
+Use the [platform template](PLATFORM.md) for reusable SoC support, follow the
+[shared Linux integration contract](LINUX_INTEGRATION.md), and use the
 [console port contract](CONSOLE.md) when a target offers the
 [local console](../features/LOCAL_CONSOLE.md).
 

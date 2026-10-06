@@ -60,7 +60,7 @@ Status terms and limits shared by every phone are defined in the
 | USB host mode                                                      | Unknown  | Not supported | —                                                                                                                                                  |
 | [Removable storage](../../docs/features/MICROSD.md)                | Present  | Partial       | ext4 read/write and card-backed swap work in the RAM profile; FAT32 data storage is untested. The slot is under the battery.                       |
 | [Removable system root](../../docs/guides/MICROSD_ROOT.md)         | Present  | Supported     | FAT32 boot files plus writable ext4 root; applications, files and Bluetooth pairing records persist across cold boots.                             |
-| Internal phone storage                                             | Present  | Partial       | Read-only raw [NAND backup](../../docs/guides/BUILDING.md#save-a-nand-backup); no filesystem, writes or restore.                                   |
+| Internal phone storage                                             | Present  | Partial       | Read-only raw [NAND backup](../../docs/guides/DEVICE_DATA.md#save-a-nand-backup); no filesystem, writes or restore.                                |
 | [Headphone audio](../../docs/features/HEADPHONE_AUDIO.md)          | Present  | Supported     | Stereo S16_LE playback; the default device converts input to 48 kHz, and the fitted profile supplies stock-derived levels, equalizer and ALC.      |
 | [Speaker audio](../../docs/features/SPEAKER_AUDIO.md)              | Present  | Supported     | Rear loudspeaker with fitted gains, stock equalizer and ALC.                                                                                       |
 | [Phone microphone](../../docs/features/MICROPHONE_AUDIO.md)        | Present  | Partial       | The built-in microphone records mono 48-kHz PCM; the wired-headset microphone has not been tested on this phone.                                   |
@@ -106,7 +106,7 @@ common power, sensor, audio and vibration identifiers.
 ## Fitted device data
 
 Follow the shared
-[device-data preparation procedure](../../docs/guides/BUILDING.md#prepare-device-data)
+[device-data preparation procedure](../../docs/guides/DEVICE_DATA.md#prepare-device-data)
 using a NAND backup from this exact phone. It prepares Bluetooth firmware, FM
 settings and the fitted audio profile.
 

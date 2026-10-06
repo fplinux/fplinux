@@ -28,7 +28,7 @@ Keep panel choice, keypad wiring and keymap, board memory layout, board assets,
 and target bootstrap inputs out of the platform.
 
 Linux integration must follow the
-[shared-source constraints](../../docs/guides/BUILDING.md#shared-linux-sources).
+[shared-source constraints](../../docs/porting/LINUX_INTEGRATION.md).
 
 ## Shared hardware support
 

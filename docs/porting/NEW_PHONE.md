@@ -22,36 +22,43 @@ only volatile RAM, and the NAND reader cannot write or erase the NAND.
 
 ## Create a headless target
 
-Choose a target name and the phone's public brand and product names as
-described in [Create a new target](../guides/BUILDING.md#create-a-new-target).
-The device name, which is the brand and product separated by one space, must
-not exceed 31 characters; the command refuses a longer name.
+For a UMS9117 phone that has no target yet, create a headless target:
 
 ```sh
-./fplinux target new <target> --brand <brand> --product "<product>"
+./fplinux target new TARGET --brand BRAND --product PRODUCT [--compatible VENDOR,DEVICE]
 ```
 
-The command creates `targets/<target>` and prints:
+`TARGET` names the new `targets/TARGET` directory and is the target name for
+every other command. It consists of lowercase letters and digits separated by
+single hyphens. `--brand` and `--product` are the public names defined by the
+[identity contract](../reference/IDENTITY.md); the hardware-code list starts
+empty. Without `--compatible`, the board compatible is formed from the lowercase
+brand and product, for example `hammer,horizon-lte`.
 
-```text
-Created headless target targets/<target>:
-  README.md
-  bootstrap/Makefile
-  bootstrap/main.c
-  bootstrap/payload.s
-  linux/arch/arm/mach-ums9117/Kconfig
-  linux/config.fragment
-  linux/dts/ums9117-<target>.dts
-  linux/dts/unisoc.Makefile
-  loader/assets.lock.toml
-  release/README.txt
-  release/manifest.toml
-  target.toml
-Next: ./fplinux build <target> && ./fplinux run <target>
+The target uses the only platform, `ums9117`, by default. `--platform NAME`
+selects the platform in `platforms/NAME` and is required only when more than
+one platform exists.
+
+The new target loads
+[headless](../../platforms/ums9117/README.md#target-requirements): the phone
+shows no boot screen, and the loader applies no board pin settings. Linux
+provides the USB session and read-only internal NAND access; it has no display,
+keypad, audio, Bluetooth or microSD support, and only the default profile is
+available. In the `[adapter]` table of its `target.toml`, `boot_instructions`
+names `*` as the boot key and `exec_distance` is `0`. Its `README.md` records
+the FPLinux support of every feature and application as **Unknown**.
+
+The command refuses an existing target directory and leaves nothing behind
+when a name or identity field is invalid. It lists the created files and ends
+with the next step:
+
+```sh
+./fplinux build TARGET && ./fplinux run TARGET
 ```
 
-The new target names `*` as the boot key and sets `exec_distance = 0` in the
-`[adapter]` table of `targets/<target>/target.toml`.
+The command does not add the new target to the
+[target index](../../targets/README.md). The device name, which is the brand
+and product separated by one space, must not exceed 31 characters.
 
 When adding display support, set `[bootstrap].lcd_config` to one target-owned
 panel header; RAM and microSD bootstrap builds use the same file. Headless
@@ -212,7 +219,8 @@ shell, and run:
 ```
 
 The command prints the report of the phone's NAND reader, one `key=value` line
-each. For a phone with a DS35M1GA chip it reads:
+each; see [NAND identification](../guides/DEVICE_DATA.md#identify-the-nand-chip).
+For a phone with a DS35M1GA chip it reads:
 
 ```text
 id_bytes=e521
@@ -231,7 +239,7 @@ feature_c0=0x00
 `id_bytes` holds the chip's ID bytes, manufacturer byte first.
 `geometry_source=table` means that the reader identified the chip from its
 list of supported chips.
-[Save a NAND backup](../guides/BUILDING.md#save-a-nand-backup) describes every
+[Save a NAND backup](../guides/DEVICE_DATA.md#save-a-nand-backup) describes every
 field.
 
 FPLinux has read FM25LG01B, DS35M1GA and F35UQA001G chips on supported phones. The reader
@@ -276,7 +284,7 @@ NAND geometry saved: nand.bin.json (chip DS35M1GA, id_bytes e521)
 geometry receipt: the chip identity, the page layout, and the size and digest of
 the backup. Both files have mode `0600`. The backup contains the stock firmware
 and the phone's own data; keep it private.
-[Save a NAND backup](../guides/BUILDING.md#save-a-nand-backup) describes the
+[Save a NAND backup](../guides/DEVICE_DATA.md#save-a-nand-backup) describes the
 receipt fields.
 
 When you are done, end the session as described in the
@@ -300,14 +308,16 @@ from a powered-off phone with `run`.
 
 The new target declares the board maps, which the platform extracts from the
 stock firmware in the backup. Prepare them from the saved backup; the phone does
-not need to be connected, but the target must have a current build:
+not need to be connected, and no target build is required:
 
 ```sh
 ./fplinux device-data prepare <target> --from-dump nand.bin
 ```
 
-The command reads `nand.bin` with its receipt `nand.bin.json` and prints the
-path of the board report:
+The command reads `nand.bin` with its receipt `nand.bin.json`, prepares the
+host extraction tool without a target bundle, and prints the path of the board
+report. See [device-data preparation](../guides/DEVICE_DATA.md#prepare-device-data)
+for backup requirements and offline use:
 
 ```text
 Review <checkout>/.cache/device-data/<target>/generations/<generation>/reports/board-maps/board-report.json.

@@ -1,6 +1,6 @@
 # Source formats
 
-Use the [shared format and check commands](../../guides/BUILDING.md#format-source).
+Use the [shared format and check commands](../../guides/DEVELOPMENT.md#format-source).
 Both commands calculate the same canonical bytes. Formatting publishes selected
 files after every tool succeeds; checking compares the result without writing
 the source checkout. File permissions, unselected files and the source inventory

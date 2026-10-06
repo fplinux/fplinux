@@ -66,6 +66,82 @@ Exit status is 0 after successful inspection, including inspection of a failed
 run; 1 for a missing or ambiguous run, missing stage or read failure; 2 for
 invalid arguments; and 130 after Ctrl+C.
 
+## Inspect built artifacts
+
+```sh
+./fplinux inspect bundle nokia-ta1618
+./fplinux inspect bundle nokia-ta1618 --profile microsd-uboot
+./fplinux inspect archive path/to/FPLinux.zip
+./fplinux inspect apk path/to/package.apk
+```
+
+`bundle` reads the published current generation for the selected target and
+profile and build type, prints its identity and file sizes and SHA-256 hashes, and checks the
+files against their build manifest. It does not rebuild or check whether the
+source checkout has changed since that build. APKs and debug files are included
+in the file listing.
+
+`archive` reads a FPLinux candidate or release ZIP, reports its recorded identity
+and file listing, and checks every payload against the enclosed `SHA256SUMS`.
+Missing, extra or mismatched files cause failure. The checks establish internal
+byte consistency, not authenticity or phone support.
+
+`apk` displays `.PKGINFO` and the file list of an APK v2 package, including link
+destinations. It does not install the package, run its scripts or verify its
+signature. Neither archive command extracts files.
+
+Inspection needs no Kern environment or phone connection. Bundle inspection
+holds the shared cache lock while reading the selected generation; inspecting
+a ZIP or APK does not take that lock or create cache state. The commands above produce text;
+exit status is 0 on success, 1 on an inspection or checksum error, 2 for invalid
+arguments and 130 after Ctrl+C.
+
+### Measure image footprint
+
+Measure the current verified bundle without building or connecting a phone:
+
+```sh
+./fplinux inspect footprint nokia-ta1618 --profile default --build-type release
+./fplinux inspect footprint nokia-ta1618 --json > before.json
+./fplinux inspect footprint nokia-ta1618 --json > after.json
+./fplinux inspect footprint-diff before.json after.json
+./fplinux inspect footprint-diff before.json after.json --json
+```
+
+Save `before.json` before rebuilding and `after.json` after rebuilding the
+context being compared. `--json` produces a machine-readable report. The
+measurement separates boot artifacts, kernel zImage, compressed embedded
+initramfs, compressed RAM backing, unpacked root filesystem, optional APK
+archives and host debug files.
+These layers overlap; adding them does not produce a meaningful total.
+
+Package sizes count their owned regular-file and symlink payload, excluding
+dependencies. They are not installed disk usage or runtime RAM consumption.
+`footprint-diff` compares two saved reports and lists artifact byte deltas and
+added, removed or changed packages, files and optional APKs. It also reports
+whether root filesystem content is identical. Compression savings alone do not
+establish a userspace or memory reduction.
+
+## Build an ARM diagnostic program
+
+For a single C source file in this checkout, build a static ARMv7 hard-float
+musl executable for the phone:
+
+```sh
+./fplinux probe-build .cache/tools/diag.c --output .cache/tools/diag-arm
+```
+
+Create the source file first. Both paths must be repository-relative and free
+of symlinks. The source must be a regular file, and the output must be inside
+`.cache/tools`. The command
+uses the pinned Kern image, project headers and locked Alpine packages. It
+prepares the ARM sysroot when needed, downloading missing locked inputs on the
+first run. If the build image is not prepared, run `./fplinux setup` first.
+
+`probe-build` only compiles the program. It does not add it to a phone image,
+upload it or run it on a phone. A failed compile leaves any existing output
+unchanged.
+
 ## Kernel tracing
 
 The UMS9117 `debug` kernel includes debugfs, tracefs, kprobe events and the

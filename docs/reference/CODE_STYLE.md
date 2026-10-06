@@ -6,9 +6,10 @@ current interfaces. Generated, vendored and downloaded sources keep the style
 and constraints of their owner; small FPLinux adapters follow the boundary of
 the project they are compiled into.
 
-The canonical commands for formatting, checking and building are in
-[Building FPLinux](../guides/BUILDING.md). Run the checks and affected builds
-that exercise the real language and runtime boundary of a change.
+Use [Developing FPLinux](../guides/DEVELOPMENT.md) for formatting, checks and
+tests, and [Building FPLinux](../guides/BUILDING.md) for target builds. Run the
+checks and affected builds that exercise the real language and runtime boundary
+of a change.
 
 ## General principles
 

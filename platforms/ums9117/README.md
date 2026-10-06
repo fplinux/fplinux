@@ -44,7 +44,7 @@ loader.
 | [Bluetooth](../../docs/features/BLUETOOTH.md)                  | Partial       | Shared CM4 HCI driver; each target needs firmware prepared from its own phone.                                                                           |
 | [FM radio](../../docs/features/FM_RADIO.md)                    | Supported     | V4L2 receiver on the CM4 Bluetooth link, heard on the enabled outputs; it needs the phone's Bluetooth firmware and the target's fitted FM configuration. |
 | [microSD host](../../docs/features/MICROSD.md)                 | Supported     | SD cards on a 4-bit bus with fixed pin settings; each target enables the slot.                                                                           |
-| Internal NAND reader                                           | Partial       | Read-only raw page stream for [NAND backup](../../docs/guides/BUILDING.md#save-a-nand-backup); no filesystem, writes or erase.                           |
+| Internal NAND reader                                           | Partial       | Read-only raw page stream for [NAND backup](../../docs/guides/DEVICE_DATA.md#save-a-nand-backup); no filesystem, writes or erase.                        |
 | SC2720 EIC GPIO                                                | Supported     | PMIC external-interrupt lines as GPIO; targets use them for keys.                                                                                        |
 | AP GPIO and I2C0                                               | Partial       | Standard controllers serve the cameras on Nokia TA-1618, INOI 240/244 and Maxvi K15n 4G; general peripheral use has not been qualified.                  |
 | Pin control and reset                                          | Partial       | Target-owned matrix, audio, microSD and camera/I2C pin settings; the reset controller serves microSD.                                                    |
@@ -82,6 +82,9 @@ for a DRM/KMS application and its completion boundary.
 Nokia TA-1618 and INOI 240/244 expose the shared [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)
 interface. The target selects the brightness range, panel transport and
 initialization; consult its support status for physical brightness limits.
+
+Linux inputs must follow the
+[shared integration contract](../../docs/porting/LINUX_INTEGRATION.md).
 
 ## Target requirements
 
