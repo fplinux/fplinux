@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -23,6 +24,8 @@ if TYPE_CHECKING:
 
 from tests import ROOT
 from tests.ssh_transport_support import create_ready_session
+
+SSH_FIXTURES = ROOT / "tests" / "fixtures" / "ssh_transport"
 
 # Reader reports for the two fitted chips, in the kernel's key=value format.
 GEOMETRY_128_OOB = (
@@ -56,40 +59,7 @@ class NandBackupSshStreamTests:
             self.tools = Path(self.temporary.name) / "bin"
             self.tools.mkdir()
             self.ssh = self.tools / "ssh"
-            self.ssh.write_text(
-                """#!/bin/sh
-for argument do remote_command=$argument; done
-case "$remote_command" in
-'cat /sys/class/misc/ums9117-nand-raw/device/geometry 3</dev/ums9117-nand-raw')
-  printf '%s' "${FPLINUX_GEOMETRY:?}"
-  exit 0
-  ;;
-esac
-if [ -n "${FPLINUX_REMOTE_COMMANDS:-}" ]; then
-  printf '%s\n' "$remote_command" >>"$FPLINUX_REMOTE_COMMANDS"
-fi
-case "${FPLINUX_STREAM_MODE:?}" in
-success)
-  printf 'raw-page-bytes'
-  printf 'remote diagnostic' >&2
-  ;;
-short)
-  printf 'short'
-  ;;
-nonzero)
-  printf 'partial'
-  printf 'NAND read failed' >&2
-  exit 8
-  ;;
-timeout)
-  printf '%s' "$$" >"${FPLINUX_STREAM_PID:?}"
-  exec sleep 60
-  ;;
-*) exit 64 ;;
-esac
-""",
-                encoding="ascii",
-            )
+            shutil.copyfile(SSH_FIXTURES / "nand_ssh.sh", self.ssh)
             self.ssh.chmod(0o755)
             yield
 
@@ -234,19 +204,7 @@ esac
         destination = Path(self.temporary.name) / "nand.raw"
         child_pid = Path(self.temporary.name) / "ssh.pid"
         helper = Path(self.temporary.name) / "stream-helper.py"
-        helper.write_text(
-            """import json
-import sys
-from pathlib import Path
-
-from fplinux_cli.runtime import ssh_transport
-
-session = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
-with Path(sys.argv[2]).open('w+b') as destination:
-    ssh_transport.stream_remote(session, 'exec dd if=/dev/nand', destination, timeout=30)
-""",
-            encoding="utf-8",
-        )
+        shutil.copyfile(SSH_FIXTURES / "stream_helper.py", helper)
         environment = {
             **os.environ,
             "FPLINUX_STREAM_MODE": "timeout",

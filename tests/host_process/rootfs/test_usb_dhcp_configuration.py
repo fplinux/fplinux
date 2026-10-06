@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -22,22 +23,11 @@ class UsbDhcpConfigurationTests:
             binary = root / "bin/busybox"
             binary.parent.mkdir()
             # This fake replaces the external DHCP server; no sockets are opened.
-            binary.write_text(
-                "#!/bin/sh\n"
-                '[ "$1" = udhcpd ] || exit 9\n'
-                "shift\n"
-                '[ "$#" = 2 ] && [ "$1" = -f ] || exit 10\n'
-                '[ "$2" = /run/fplinux-udhcpd.conf ] || exit 11\n'
-                "printf 'foreground DHCP started\\n'\n",
-                encoding="utf-8",
-            )
+            shutil.copyfile(ROOT / "tests/fixtures/rootfs/busybox_dhcp.sh", binary)
             binary.chmod(0o755)
             applet = root / "usr/sbin/udhcpd"
             applet.parent.mkdir(parents=True)
-            applet.write_text(
-                '#!/bin/sh\nexec "$(dirname "$0")/../../bin/busybox" udhcpd "$@"\n',
-                encoding="utf-8",
-            )
+            shutil.copyfile(ROOT / "tests/fixtures/rootfs/udhcpd_wrapper.sh", applet)
             applet.chmod(0o755)
             result = subprocess.run(
                 [

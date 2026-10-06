@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 from contextlib import ExitStack
 from pathlib import Path
@@ -32,28 +33,13 @@ class MicroSDGrowTests:
             cleanup.enter_context(self.temporary)
             self.directory = Path(self.temporary.name)
             self.calls = self.directory / "calls"
-            self._tool(
-                "growpart",
-                """#!/bin/sh
-printf 'growpart:%s\\n' "$*" >> "$FPLINUX_GROW_CALLS"
-if [ "${FPLINUX_GROWPART_STATUS:?}" -ge 2 ]; then
-    printf 'growpart failed\\n' >&2
-fi
-exit "$FPLINUX_GROWPART_STATUS"
-""",
-            )
-            self._tool(
-                "resize2fs",
-                """#!/bin/sh
-printf 'resize2fs:%s\\n' "$*" >> "$FPLINUX_GROW_CALLS"
-exit "${FPLINUX_RESIZE2FS_STATUS:-0}"
-""",
-            )
+            self._tool("growpart", "growpart.sh")
+            self._tool("resize2fs", "resize2fs.sh")
             yield
 
-    def _tool(self, name: str, source: str) -> None:
+    def _tool(self, name: str, fixture: str) -> None:
         path = self.directory / name
-        path.write_text(source, encoding="utf-8")
+        shutil.copyfile(ROOT / "tests/fixtures/rootfs" / fixture, path)
         path.chmod(0o755)
 
     def _run(

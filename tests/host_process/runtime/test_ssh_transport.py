@@ -22,7 +22,10 @@ from fplinux_cli.runtime import ssh_transport
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+from tests import ROOT
 from tests.ssh_transport_support import create_ready_session
+
+SSH_FIXTURES = ROOT / "tests" / "fixtures" / "ssh_transport"
 
 
 class SshTransportFakeToolTests:
@@ -66,20 +69,7 @@ class SshTransportFakeToolTests:
         tool_directory = Path(self.temporary.name) / "bin"
         tool_directory.mkdir()
         ip_tool = tool_directory / "ip"
-        ip_tool.write_text(
-            """#!/bin/sh
-case "$*" in
-"-4 -j address show dev usb0")
-  printf '%s\n' "$FPLINUX_IP_ADDRESS"
-  ;;
-"-4 -j route show 10.23.45.0/30")
-  printf '%s\n' "$FPLINUX_IP_ROUTE"
-  ;;
-*) exit 2 ;;
-esac
-""",
-            encoding="ascii",
-        )
+        shutil.copyfile(SSH_FIXTURES / "ip.sh", ip_tool)
         ip_tool.chmod(0o755)
         session = create_ready_session(self.root)
         with mock.patch.dict(
@@ -126,25 +116,9 @@ esac
         host_blob = b"\0\0\0\x0bssh-ed25519\0\0\0\x20" + bytes(range(32))
         host_key = base64.b64encode(host_blob).decode("ascii")
         keyscan = tool_directory / "ssh-keyscan"
-        keyscan.write_text(
-            f"""#!/bin/sh
-count=0
-[ ! -f "{scan_count}" ] || count=$(cat "{scan_count}")
-count=$((count + 1))
-printf '%s\n' "$count" >"{scan_count}"
-[ "$count" -gt 1 ] || exit 1
-printf '%s\n' '10.23.45.2 ssh-ed25519 {host_key}'
-""",
-            encoding="ascii",
-        )
+        shutil.copyfile(SSH_FIXTURES / "keyscan.sh", keyscan)
         ssh = tool_directory / "ssh"
-        ssh.write_text(
-            f"""#!/bin/sh
-printf '%s\n' "$@" >"{ssh_arguments}"
-printf '%s\n' '{state["session_id"]}'
-""",
-            encoding="ascii",
-        )
+        shutil.copyfile(SSH_FIXTURES / "identity_ssh.sh", ssh)
         keyscan.chmod(0o755)
         ssh.chmod(0o755)
 
@@ -156,7 +130,13 @@ printf '%s\n' '{state["session_id"]}'
             mock.patch.object(ssh_transport, "_retry_pause"),
             mock.patch.dict(
                 os.environ,
-                {"PATH": f"{tool_directory}:{os.environ.get('PATH', '')}"},
+                {
+                    "PATH": f"{tool_directory}:{os.environ.get('PATH', '')}",
+                    "FPLINUX_KEYSCAN_COUNT": str(scan_count),
+                    "FPLINUX_HOST_KEY": host_key,
+                    "FPLINUX_SSH_ARGUMENTS": str(ssh_arguments),
+                    "FPLINUX_SESSION_ID": state["session_id"],
+                },
             ),
             mock.patch("builtins.print"),
         ):
@@ -205,12 +185,7 @@ class SshTransportUploadTests:
 
             # SSH executes a local shell; only df/stat reports are synthetic.
             # Hashing, temporary-file publication and cleanup use real files.
-            shell_tools = (
-                "df() { "
-                "printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n'; "
-                "printf 'df: cannot find mount point\\n' >&2; return 1; }; "
-                f"stat() {{ printf '%s\\n' '{available_blocks} 4096'; }}; "
-            )
+            shell_tools = (SSH_FIXTURES / "filesystem_statistics.sh").read_text(encoding="ascii")
 
             def local_ssh(
                 _session: dict[str, Any],
@@ -232,6 +207,7 @@ class SshTransportUploadTests:
                 mock.patch.object(ssh_transport, "_runtime_root", return_value=runtime),
                 mock.patch.object(ssh_transport, "_ssh_argv", side_effect=local_ssh),
                 mock.patch.object(ssh_transport, "_sftp", side_effect=local_sftp),
+                mock.patch.dict(os.environ, {"FPLINUX_AVAILABLE_BLOCKS": str(available_blocks)}),
                 mock.patch("builtins.print"),
             ):
                 if succeeds:

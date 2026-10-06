@@ -8,7 +8,6 @@ import io
 import json
 import os
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 from unittest import mock
@@ -16,6 +15,9 @@ from unittest import mock
 import pytest
 from fplinux_cli.alpine import rootfs_files as alpine_builder
 from fplinux_cli.reporting.run import RunReporter
+
+from tests import ROOT
+from tests.fixtures.executables import install_python_script
 
 
 class AlpinePackingProcessTests:
@@ -38,23 +40,17 @@ class AlpinePackingProcessTests:
             tools = temporary / "tools"
             tools.mkdir()
             cpio = tools / "cpio"
-            cpio.write_text(
-                f"#!{sys.executable}\n"
-                "import json, os, sys\n"
-                "sys.stdin.buffer.read()\n"
-                "print(json.dumps({'cwd': os.getcwd(), 'locale': os.environ['LC_ALL'], "
-                "'user': os.environ['KBUILD_BUILD_USER']}))\n"
-                "print('packing diagnostic', file=sys.stderr)\n"
-                f"sys.exit({status})\n"
-            )
-            cpio.chmod(0o755)
+            install_python_script(ROOT / "tests/fixtures/processes/alpine_packing_cpio.py", cpio)
             destination = temporary / "rootfs.cpio"
             reporter = RunReporter("packing", temporary / "logs", "logs", verbose=False)
             stderr = io.StringIO()
             stdout = io.StringIO()
             stage = reporter.stage("pack") if stage_enabled else contextlib.nullcontext()
             with (
-                mock.patch.dict(os.environ, {"PATH": f"{tools}:{os.environ['PATH']}"}),
+                mock.patch.dict(
+                    os.environ,
+                    {"PATH": f"{tools}:{os.environ['PATH']}", "FPLINUX_CPIO_STATUS": str(status)},
+                ),
                 contextlib.redirect_stderr(stderr),
                 contextlib.redirect_stdout(stdout),
             ):
