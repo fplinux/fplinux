@@ -19,6 +19,8 @@ source="
 	armada-renderer.h
 	armada-storyboard.c
 	armada-storyboard.h
+	showcase-hardware.c
+	showcase-hardware.h
 	fplinux-showcase.c
 	fplinux-drm-session.c
 	fplinux-drm-session.h
@@ -41,6 +43,7 @@ build() {
 		"$srcdir/armada-scene.c" \
 		"$srcdir/armada-renderer.c" \
 		"$srcdir/armada-storyboard.c" \
+		"$srcdir/showcase-hardware.c" \
 		"$srcdir/fplinux-showcase.c" \
 		"$srcdir/fplinux-drm-session.c" \
 		"$srcdir/fplinux-brightness-client.c" \
@@ -62,7 +65,9 @@ edc49a1e529c0859ab6d56225857a312374a357bc035eaf2a6e1df112987fdc3f92ae972ef00cc00
 43a6397b6546f3b15ebf438aee82753314eb31088220d93d9c757a164aca6c1ee8f12481e32f2503794b8c4856d44554b11820653f2792bf452f8c2ababb37e8  armada-renderer.h
 686ca204eda5b7e0281aef2248c547455b331a9a3bd4d251e36491047e25da2438e889d71e9a4bf621a62d1ac47dbdd06409450d14d55209a147fd45ea7c5dc2  armada-storyboard.c
 d8cbb7fbba28f9d6c5fcf9bf5bcc29e9f146e1b1bf32143249ef379f235b3819997d0e53097d0eda9d62cf9ca3ade265b2f9de015a9a31a661c29ff33b04082c  armada-storyboard.h
-5d5edb770e712256140656b6bab7b996d63540268b7d6093d226fe95f400fd5d912bc77514b9090d0ba371a822caf24960ae8a590827d304b59d9c0317ffab43  fplinux-showcase.c
+da22f39253a30c6e6f14ba56f35cb5bb183499f142279b207d591e82375a60a3108816d04a0a0d55f9e962f3a12773b698ff17c1503544fafb60c0c24350e262  showcase-hardware.c
+757aeb96a09dafd1e6dc250a22b825979ed5364adb9629ecd066567b2b1703f2e672cf94de9cc22ae590851267591e4a751004b8408997d7aed105b15b3e95ef  showcase-hardware.h
+d01052651b5c89c15d4d97fa483a0603a8185afd7257a976a3d16324c7bb30fd799b42b2adf5c244fa60327711a9f29c0518e515e19f0f4c706d087144fd8697  fplinux-showcase.c
 24d96f52eeb3adb9b37e34967199a0efea630af580782fe2f29000862b678d5ae96b4516e291b61ca70a8d9242af43fc720d801e158c7933e957cda0aaf5afdd  fplinux-drm-session.c
 5b63a683e9aac0a4b1faef31c0a09b9ec4131992d5cb69f858c6276855a8d92404c4cf23a1b4c8927d802311e9634b354502745ef15e00a4209744acf51131a7  fplinux-drm-session.h
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c

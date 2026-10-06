@@ -55,6 +55,7 @@ class FplinuxShowcaseBrightnessTests(unittest.TestCase):
                 f"-I{APORT}",
                 f"-I{SHARED}",
                 str(APORT / "fplinux-showcase.c"),
+                str(APORT / "showcase-hardware.c"),
                 str(APORT / "armada-scene.c"),
                 str(APORT / "armada-storyboard.c"),
                 str(APORT / "armada-renderer.c"),
