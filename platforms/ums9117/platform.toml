@@ -522,6 +522,14 @@ source = "platforms/ums9117/linux/drivers/media/platform/ums9117/Makefile"
 destination = "drivers/media/platform/ums9117/Makefile"
 
 [[linux.copies]]
+source = "platforms/ums9117/linux/sound/drivers/ums9117/ums9117-audio-profile.c"
+destination = "sound/drivers/ums9117/ums9117-audio-profile.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/linux/sound/drivers/ums9117/ums9117-audio-profile.h"
+destination = "sound/drivers/ums9117/ums9117-audio-profile.h"
+
+[[linux.copies]]
 source = "platforms/ums9117/linux/sound/drivers/ums9117/Kconfig"
 destination = "sound/drivers/ums9117/Kconfig"
 
