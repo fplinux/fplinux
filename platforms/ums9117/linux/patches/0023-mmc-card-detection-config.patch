@@ -1,0 +1,764 @@
+diff --git a/drivers/mmc/core/Kconfig b/drivers/mmc/core/Kconfig
+--- a/drivers/mmc/core/Kconfig
++++ b/drivers/mmc/core/Kconfig
+@@ -2,6 +2,25 @@
+ #
+ # MMC core configuration
+ #
++config MMC_REMOVABLE
++	bool "MMC/SD card insertion and removal"
++	default y
++	help
++	  Enable card-detect interrupts, polling and card-removal handling.
++	  Say N only if all cards remain installed while the host is powered.
++	  Initial card discovery, request error recovery and suspend/resume
++	  remain available.
++
++config MMC_GPIO
++	bool "MMC/SD GPIO card detection and write protection"
++	depends on GPIOLIB
++	default y
++	help
++	  Enable GPIO helpers for card detection and write protection.
++	  GPIO write protection is available without removable-card support.
++	  Say N if no MMC/SD host uses these GPIO resources.
++	  GPIO support for other devices is independent.
++
+ config PWRSEQ_EMMC
+ 	tristate "HW reset support for eMMC"
+ 	default y
+diff --git a/drivers/mmc/core/Makefile b/drivers/mmc/core/Makefile
+--- a/drivers/mmc/core/Makefile
++++ b/drivers/mmc/core/Makefile
+@@ -8,7 +8,8 @@
+ 				   mmc.o mmc_ops.o sd.o sd_ops.o \
+ 				   sdio.o sdio_ops.o sdio_bus.o \
+ 				   sdio_cis.o sdio_io.o sdio_irq.o sd_uhs2.o\
+-				   slot-gpio.o regulator.o
++				   regulator.o
++mmc_core-$(CONFIG_MMC_GPIO)	+= slot-gpio.o
+ mmc_core-$(CONFIG_OF)		+= pwrseq.o
+ obj-$(CONFIG_PWRSEQ_SIMPLE)	+= pwrseq_simple.o
+ obj-$(CONFIG_PWRSEQ_SD8787)	+= pwrseq_sd8787.o
+diff --git a/drivers/mmc/core/core.c b/drivers/mmc/core/core.c
+--- a/drivers/mmc/core/core.c
++++ b/drivers/mmc/core/core.c
+@@ -1446,13 +1446,15 @@
+ 	 * corresponding uevent. This is especially useful, when CD irq is used
+ 	 * as a system wakeup, but doesn't hurt in other cases.
+ 	 */
+-	if (cd_irq && !(host->caps & MMC_CAP_NEEDS_POLL))
++	if (IS_ENABLED(CONFIG_MMC_REMOVABLE) && cd_irq &&
++	    !(host->caps & MMC_CAP_NEEDS_POLL))
+ 		__pm_wakeup_event(host->ws, 5000);
+ 
+ 	host->detect_change = 1;
+ 	mmc_schedule_delayed_work(&host->detect, delay);
+ }
+ 
++#ifdef CONFIG_MMC_REMOVABLE
+ /**
+  *	mmc_detect_change - process change of state on a MMC socket
+  *	@host: host which changed state.
+@@ -1468,6 +1470,7 @@
+ 	_mmc_detect_change(host, delay, true);
+ }
+ EXPORT_SYMBOL(mmc_detect_change);
++#endif
+ 
+ void mmc_init_erase(struct mmc_card *card)
+ {
+@@ -2147,6 +2150,7 @@
+ 	return -EIO;
+ }
+ 
++#ifdef CONFIG_MMC_REMOVABLE
+ int _mmc_detect_card_removed(struct mmc_host *host)
+ {
+ 	int ret;
+@@ -2213,6 +2217,7 @@
+ 	return ret;
+ }
+ EXPORT_SYMBOL(mmc_detect_card_removed);
++#endif
+ 
+ int mmc_card_alternative_gpt_sector(struct mmc_card *card, sector_t *gpt_sector)
+ {
+@@ -2263,7 +2268,8 @@
+ 		return;
+ 	host->rescan_entered = 1;
+ 
+-	if (host->trigger_card_event && host->ops->card_event) {
++	if (IS_ENABLED(CONFIG_MMC_REMOVABLE) && host->trigger_card_event &&
++	    host->ops->card_event) {
+ 		mmc_claim_host(host);
+ 		host->ops->card_event(host);
+ 		mmc_release_host(host);
+@@ -2271,7 +2277,7 @@
+ 	}
+ 
+ 	/* Verify a registered card to be functional, else remove it. */
+-	if (host->bus_ops)
++	if (host->bus_ops && host->bus_ops->detect)
+ 		host->bus_ops->detect(host);
+ 
+ 	host->detect_change = 0;
+@@ -2331,8 +2337,9 @@
+ 	host->err_stats[MMC_ERR_CMD_TIMEOUT] = 0;
+ 	mmc_release_host(host);
+ 
+- out:
+-	if (host->caps & MMC_CAP_NEEDS_POLL)
++out:
++	if (IS_ENABLED(CONFIG_MMC_REMOVABLE) &&
++	    (host->caps & MMC_CAP_NEEDS_POLL))
+ 		mmc_schedule_delayed_work(&host->detect, HZ);
+ }
+ 
+@@ -2359,7 +2366,7 @@
+ 	if (host->rescan_disable)
+ 		return;
+ 
+-	if (host->slot.cd_irq >= 0) {
++	if (IS_ENABLED(CONFIG_MMC_REMOVABLE) && host->slot.cd_irq >= 0) {
+ 		mmc_gpio_set_cd_wake(host, false);
+ 		disable_irq(host->slot.cd_irq);
+ 	}
+diff --git a/drivers/mmc/core/core.h b/drivers/mmc/core/core.h
+--- a/drivers/mmc/core/core.h
++++ b/drivers/mmc/core/core.h
+@@ -9,7 +9,10 @@
+ #define _MMC_CORE_CORE_H
+ 
+ #include <linux/delay.h>
++#include <linux/mmc/host.h>
+ #include <linux/sched.h>
++
++#include "card.h"
+ 
+ struct mmc_host;
+ struct mmc_card;
+@@ -80,8 +83,21 @@
+ 
+ void _mmc_detect_change(struct mmc_host *host, unsigned long delay,
+ 			bool cd_irq);
++#ifdef CONFIG_MMC_REMOVABLE
+ int _mmc_detect_card_removed(struct mmc_host *host);
+ int mmc_detect_card_removed(struct mmc_host *host);
++#else
++static inline int _mmc_detect_card_removed(struct mmc_host *host)
++{
++	/* SDIO reset recovery can mark a fixed card for re-enumeration. */
++	return !host->card || mmc_card_removed(host->card);
++}
++
++static inline int mmc_detect_card_removed(struct mmc_host *host)
++{
++	return !host->card;
++}
++#endif
+ 
+ int mmc_attach_mmc(struct mmc_host *host);
+ int mmc_attach_sd(struct mmc_host *host);
+diff --git a/drivers/mmc/core/host.c b/drivers/mmc/core/host.c
+--- a/drivers/mmc/core/host.c
++++ b/drivers/mmc/core/host.c
+@@ -66,7 +66,8 @@
+ static void mmc_host_classdev_release(struct device *dev)
+ {
+ 	struct mmc_host *host = cls_dev_to_mmc_host(dev);
+-	wakeup_source_unregister(host->ws);
++	if (IS_ENABLED(CONFIG_MMC_REMOVABLE))
++		wakeup_source_unregister(host->ws);
+ 	if (of_alias_get_id(host->parent->of_node, "mmc") < 0)
+ 		ida_free(&mmc_host_ida, host->index);
+ 	kfree(host);
+@@ -265,7 +266,7 @@
+ int mmc_of_parse(struct mmc_host *host)
+ {
+ 	struct device *dev = host->parent;
+-	u32 bus_width, drv_type, cd_debounce_delay_ms;
++	u32 bus_width, drv_type;
+ 	int ret;
+ 
+ 	if (!dev || !dev_fwnode(dev))
+@@ -314,7 +315,9 @@
+ 
+ 	if (device_property_read_bool(dev, "non-removable")) {
+ 		host->caps |= MMC_CAP_NONREMOVABLE;
+-	} else {
++	} else if (IS_ENABLED(CONFIG_MMC_REMOVABLE)) {
++		u32 cd_debounce_delay_ms;
++
+ 		if (device_property_read_bool(dev, "cd-inverted"))
+ 			host->caps2 |= MMC_CAP2_CD_ACTIVE_HIGH;
+ 
+@@ -540,7 +543,9 @@
+ 	host->index = index;
+ 
+ 	dev_set_name(&host->class_dev, "mmc%d", host->index);
+-	host->ws = wakeup_source_register(NULL, dev_name(&host->class_dev));
++	if (IS_ENABLED(CONFIG_MMC_REMOVABLE))
++		host->ws = wakeup_source_register(NULL,
++						  dev_name(&host->class_dev));
+ 
+ 	host->parent = dev;
+ 	host->class_dev.parent = dev;
+@@ -548,6 +553,7 @@
+ 	device_initialize(&host->class_dev);
+ 	device_enable_async_suspend(&host->class_dev);
+ 
++	host->slot.cd_irq = -EINVAL;
+ 	if (mmc_gpio_alloc(host)) {
+ 		put_device(&host->class_dev);
+ 		return NULL;
+diff --git a/drivers/mmc/core/mmc.c b/drivers/mmc/core/mmc.c
+--- a/drivers/mmc/core/mmc.c
++++ b/drivers/mmc/core/mmc.c
+@@ -2073,6 +2073,7 @@
+ /*
+  * Card detection - card is alive.
+  */
++#ifdef CONFIG_MMC_REMOVABLE
+ static int mmc_alive(struct mmc_host *host)
+ {
+ 	return mmc_send_status(host->card, NULL);
+@@ -2104,6 +2105,7 @@
+ 		mmc_release_host(host);
+ 	}
+ }
++#endif
+ 
+ static bool _mmc_cache_enabled(struct mmc_host *host)
+ {
+@@ -2381,12 +2383,16 @@
+ 
+ static const struct mmc_bus_ops mmc_ops = {
+ 	.remove = mmc_remove,
++#ifdef CONFIG_MMC_REMOVABLE
+ 	.detect = mmc_detect,
++#endif
+ 	.suspend = mmc_suspend,
+ 	.resume = mmc_resume,
+ 	.runtime_suspend = mmc_runtime_suspend,
+ 	.runtime_resume = mmc_runtime_resume,
++#ifdef CONFIG_MMC_REMOVABLE
+ 	.alive = mmc_alive,
++#endif
+ 	.shutdown = mmc_shutdown,
+ 	.hw_reset = _mmc_hw_reset,
+ 	.cache_enabled = _mmc_cache_enabled,
+diff --git a/drivers/mmc/core/sd.c b/drivers/mmc/core/sd.c
+--- a/drivers/mmc/core/sd.c
++++ b/drivers/mmc/core/sd.c
+@@ -1612,6 +1612,7 @@
+ /*
+  * Card detection - card is alive.
+  */
++#ifdef CONFIG_MMC_REMOVABLE
+ static int mmc_sd_alive(struct mmc_host *host)
+ {
+ 	return mmc_send_status(host->card, NULL);
+@@ -1643,6 +1644,7 @@
+ 		mmc_release_host(host);
+ 	}
+ }
++#endif
+ 
+ static int sd_can_poweroff_notify(struct mmc_card *card)
+ {
+@@ -1836,12 +1838,16 @@
+ 
+ static const struct mmc_bus_ops mmc_sd_ops = {
+ 	.remove = mmc_sd_remove,
++#ifdef CONFIG_MMC_REMOVABLE
+ 	.detect = mmc_sd_detect,
++#endif
+ 	.runtime_suspend = mmc_sd_runtime_suspend,
+ 	.runtime_resume = mmc_sd_runtime_resume,
+ 	.suspend = mmc_sd_suspend,
+ 	.resume = mmc_sd_resume,
++#ifdef CONFIG_MMC_REMOVABLE
+ 	.alive = mmc_sd_alive,
++#endif
+ 	.shutdown = mmc_sd_suspend,
+ 	.hw_reset = mmc_sd_hw_reset,
+ 	.cache_enabled = sd_cache_enabled,
+diff --git a/drivers/mmc/core/sd_uhs2.c b/drivers/mmc/core/sd_uhs2.c
+--- a/drivers/mmc/core/sd_uhs2.c
++++ b/drivers/mmc/core/sd_uhs2.c
+@@ -1019,6 +1019,7 @@
+ 	host->card = NULL;
+ }
+ 
++#ifdef CONFIG_MMC_REMOVABLE
+ static int sd_uhs2_alive(struct mmc_host *host)
+ {
+ 	return mmc_send_status(host->card, NULL);
+@@ -1042,6 +1043,8 @@
+ 	}
+ }
+ 
++#endif
++
+ static int _sd_uhs2_suspend(struct mmc_host *host)
+ {
+ 	struct mmc_card *card = host->card;
+@@ -1145,8 +1148,10 @@
+ 
+ static const struct mmc_bus_ops sd_uhs2_ops = {
+ 	.remove = sd_uhs2_remove,
++#ifdef CONFIG_MMC_REMOVABLE
+ 	.alive = sd_uhs2_alive,
+ 	.detect = sd_uhs2_detect,
++#endif
+ 	.suspend = sd_uhs2_suspend,
+ 	.resume = sd_uhs2_resume,
+ 	.runtime_suspend = sd_uhs2_runtime_suspend,
+diff --git a/drivers/mmc/core/sdio.c b/drivers/mmc/core/sdio.c
+--- a/drivers/mmc/core/sdio.c
++++ b/drivers/mmc/core/sdio.c
+@@ -943,6 +943,7 @@
+ /*
+  * Card detection - card is alive.
+  */
++#ifdef CONFIG_MMC_REMOVABLE
+ static int mmc_sdio_alive(struct mmc_host *host)
+ {
+ 	if (!mmc_host_is_spi(host))
+@@ -951,6 +952,7 @@
+ 		return mmc_io_rw_direct(host->card, 0, 0, SDIO_CCCR_CCCR, 0,
+ 					NULL);
+ }
++#endif
+ 
+ /*
+  * Card detection callback from host.
+@@ -1200,11 +1202,12 @@
+ 	.resume = mmc_sdio_resume,
+ 	.runtime_suspend = mmc_sdio_runtime_suspend,
+ 	.runtime_resume = mmc_sdio_runtime_resume,
++#ifdef CONFIG_MMC_REMOVABLE
+ 	.alive = mmc_sdio_alive,
++#endif
+ 	.hw_reset = mmc_sdio_hw_reset,
+ 	.sw_reset = mmc_sdio_sw_reset,
+ };
+-
+ 
+ /*
+  * Starting point for SDIO card init.
+diff --git a/drivers/mmc/core/slot-gpio.c b/drivers/mmc/core/slot-gpio.c
+--- a/drivers/mmc/core/slot-gpio.c
++++ b/drivers/mmc/core/slot-gpio.c
+@@ -18,14 +18,17 @@
+ 
+ struct mmc_gpio {
+ 	struct gpio_desc *ro_gpio;
++	char *ro_label;
++#ifdef CONFIG_MMC_REMOVABLE
+ 	struct gpio_desc *cd_gpio;
+ 	irq_handler_t cd_gpio_isr;
+-	char *ro_label;
+ 	char *cd_label;
+ 	u32 cd_debounce_delay_ms;
+ 	int cd_irq;
++#endif
+ };
+ 
++#ifdef CONFIG_MMC_REMOVABLE
+ static irqreturn_t mmc_gpio_cd_irqt(int irq, void *dev_id)
+ {
+ 	/* Schedule a card detection after a debounce timeout */
+@@ -37,6 +40,7 @@
+ 
+ 	return IRQ_HANDLED;
+ }
++#endif
+ 
+ int mmc_gpio_alloc(struct mmc_host *host)
+ {
+@@ -47,20 +51,23 @@
+ 	if (!ctx)
+ 		return -ENOMEM;
+ 
++#ifdef CONFIG_MMC_REMOVABLE
+ 	ctx->cd_debounce_delay_ms = 200;
+ 	ctx->cd_label = devm_kasprintf(host->parent, GFP_KERNEL, "%s cd", devname);
+ 	if (!ctx->cd_label)
+ 		return -ENOMEM;
++	ctx->cd_irq = -EINVAL;
++#endif
+ 	ctx->ro_label = devm_kasprintf(host->parent, GFP_KERNEL, "%s ro", devname);
+ 	if (!ctx->ro_label)
+ 		return -ENOMEM;
+-	ctx->cd_irq = -EINVAL;
+ 	host->slot.handler_priv = ctx;
+ 	host->slot.cd_irq = -EINVAL;
+ 
+ 	return 0;
+ }
+ 
++#ifdef CONFIG_MMC_REMOVABLE
+ void mmc_gpio_set_cd_irq(struct mmc_host *host, int irq)
+ {
+ 	struct mmc_gpio *ctx = host->slot.handler_priv;
+@@ -71,6 +78,7 @@
+ 	ctx->cd_irq = irq;
+ }
+ EXPORT_SYMBOL(mmc_gpio_set_cd_irq);
++#endif
+ 
+ int mmc_gpio_get_ro(struct mmc_host *host)
+ {
+@@ -87,6 +95,7 @@
+ }
+ EXPORT_SYMBOL(mmc_gpio_get_ro);
+ 
++#ifdef CONFIG_MMC_REMOVABLE
+ int mmc_gpio_get_cd(struct mmc_host *host)
+ {
+ 	struct mmc_gpio *ctx = host->slot.handler_priv;
+@@ -235,6 +244,7 @@
+ 	return ctx->cd_gpio ? true : false;
+ }
+ EXPORT_SYMBOL(mmc_host_can_gpio_cd);
++#endif
+ 
+ /**
+  * mmc_gpiod_request_ro - request a gpio descriptor for write protection
+diff --git a/drivers/mmc/core/slot-gpio.h b/drivers/mmc/core/slot-gpio.h
+--- a/drivers/mmc/core/slot-gpio.h
++++ b/drivers/mmc/core/slot-gpio.h
+@@ -9,6 +9,13 @@
+ 
+ struct mmc_host;
+ 
++#ifdef CONFIG_MMC_GPIO
+ int mmc_gpio_alloc(struct mmc_host *host);
++#else
++static inline int mmc_gpio_alloc(struct mmc_host *host)
++{
++	return 0;
++}
++#endif
+ 
+ #endif
+diff --git a/drivers/mmc/host/sdhci.c b/drivers/mmc/host/sdhci.c
+--- a/drivers/mmc/host/sdhci.c
++++ b/drivers/mmc/host/sdhci.c
+@@ -153,6 +153,7 @@
+ }
+ EXPORT_SYMBOL_GPL(sdhci_data_line_cmd);
+ 
++#ifdef CONFIG_MMC_REMOVABLE
+ static void sdhci_set_card_detection(struct sdhci_host *host, bool enable)
+ {
+ 	u32 present;
+@@ -174,6 +175,12 @@
+ 	sdhci_writel(host, host->ier, SDHCI_INT_ENABLE);
+ 	sdhci_writel(host, host->ier, SDHCI_SIGNAL_ENABLE);
+ }
++#else
++static inline void sdhci_set_card_detection(struct sdhci_host *host,
++					    bool enable)
++{
++}
++#endif
+ 
+ static void sdhci_enable_card_detection(struct sdhci_host *host)
+ {
+@@ -267,7 +274,9 @@
+ 	SDHCI_RESET_FOR_REQUEST_ERROR,
+ 	SDHCI_RESET_FOR_REQUEST_ERROR_DATA_ONLY,
+ 	SDHCI_RESET_FOR_TUNING_ABORT,
++#ifdef CONFIG_MMC_REMOVABLE
+ 	SDHCI_RESET_FOR_CARD_REMOVED,
++#endif
+ 	SDHCI_RESET_FOR_CQE_RECOVERY,
+ };
+ 
+@@ -284,7 +293,9 @@
+ 		break;
+ 	case SDHCI_RESET_FOR_REQUEST_ERROR:
+ 	case SDHCI_RESET_FOR_TUNING_ABORT:
++#ifdef CONFIG_MMC_REMOVABLE
+ 	case SDHCI_RESET_FOR_CARD_REMOVED:
++#endif
+ 	case SDHCI_RESET_FOR_CQE_RECOVERY:
+ 		sdhci_do_reset(host, SDHCI_RESET_CMD);
+ 		sdhci_do_reset(host, SDHCI_RESET_DATA);
+@@ -388,11 +399,14 @@
+ 
+ static void sdhci_reinit(struct sdhci_host *host)
+ {
++#ifdef CONFIG_MMC_REMOVABLE
+ 	u32 cd = host->ier & (SDHCI_INT_CARD_REMOVE | SDHCI_INT_CARD_INSERT);
++#endif
+ 
+ 	sdhci_init(host, 0);
+ 	sdhci_enable_card_detection(host);
+ 
++#ifdef CONFIG_MMC_REMOVABLE
+ 	/*
+ 	 * A change to the card detect bits indicates a change in present state,
+ 	 * refer sdhci_set_card_detection(). A card detect interrupt might have
+@@ -401,6 +415,7 @@
+ 	 */
+ 	if (cd != (host->ier & (SDHCI_INT_CARD_REMOVE | SDHCI_INT_CARD_INSERT)))
+ 		mmc_detect_change(host->mmc, msecs_to_jiffies(200));
++#endif
+ }
+ 
+ static void __sdhci_led_activate(struct sdhci_host *host)
+@@ -2537,6 +2552,7 @@
+ 	return !!(sdhci_readl(host, SDHCI_PRESENT_STATE) & SDHCI_CARD_PRESENT);
+ }
+ 
++#ifdef CONFIG_MMC_REMOVABLE
+ int sdhci_get_cd_nogpio(struct mmc_host *mmc)
+ {
+ 	struct sdhci_host *host = mmc_priv(mmc);
+@@ -2555,6 +2571,7 @@
+ 	return ret;
+ }
+ EXPORT_SYMBOL_GPL(sdhci_get_cd_nogpio);
++#endif
+ 
+ int sdhci_get_ro(struct mmc_host *mmc)
+ {
+@@ -3047,6 +3064,7 @@
+ 	}
+ }
+ 
++#ifdef CONFIG_MMC_REMOVABLE
+ static void sdhci_card_event(struct mmc_host *mmc)
+ {
+ 	struct sdhci_host *host = mmc_priv(mmc);
+@@ -3075,22 +3093,25 @@
+ 
+ 	spin_unlock_irqrestore(&host->lock, flags);
+ }
++#endif
+ 
+ static const struct mmc_host_ops sdhci_ops = {
+-	.request	= sdhci_request,
+-	.post_req	= sdhci_post_req,
+-	.pre_req	= sdhci_pre_req,
+-	.set_ios	= sdhci_set_ios,
+-	.get_cd		= sdhci_get_cd,
+-	.get_ro		= sdhci_get_ro,
+-	.card_hw_reset	= sdhci_hw_reset,
++	.request = sdhci_request,
++	.post_req = sdhci_post_req,
++	.pre_req = sdhci_pre_req,
++	.set_ios = sdhci_set_ios,
++	.get_cd = sdhci_get_cd,
++	.get_ro = sdhci_get_ro,
++	.card_hw_reset = sdhci_hw_reset,
+ 	.enable_sdio_irq = sdhci_enable_sdio_irq,
+-	.ack_sdio_irq    = sdhci_ack_sdio_irq,
+-	.start_signal_voltage_switch	= sdhci_start_signal_voltage_switch,
+-	.prepare_hs400_tuning		= sdhci_prepare_hs400_tuning,
+-	.execute_tuning			= sdhci_execute_tuning,
+-	.card_event			= sdhci_card_event,
+-	.card_busy	= sdhci_card_busy,
++	.ack_sdio_irq = sdhci_ack_sdio_irq,
++	.start_signal_voltage_switch = sdhci_start_signal_voltage_switch,
++	.prepare_hs400_tuning = sdhci_prepare_hs400_tuning,
++	.execute_tuning = sdhci_execute_tuning,
++#ifdef CONFIG_MMC_REMOVABLE
++	.card_event = sdhci_card_event,
++#endif
++	.card_busy = sdhci_card_busy,
+ };
+ 
+ /*****************************************************************************\
+@@ -3587,9 +3608,14 @@
+ 		/* Clear selected interrupts. */
+ 		mask = intmask & (SDHCI_INT_CMD_MASK | SDHCI_INT_DATA_MASK |
+ 				  SDHCI_INT_BUS_POWER);
++		if (!IS_ENABLED(CONFIG_MMC_REMOVABLE))
++			mask |= intmask &
++				(SDHCI_INT_CARD_INSERT | SDHCI_INT_CARD_REMOVE);
+ 		sdhci_writel(host, mask, SDHCI_INT_STATUS);
+ 
+-		if (intmask & (SDHCI_INT_CARD_INSERT | SDHCI_INT_CARD_REMOVE)) {
++		if (IS_ENABLED(CONFIG_MMC_REMOVABLE) &&
++		    (intmask &
++		     (SDHCI_INT_CARD_INSERT | SDHCI_INT_CARD_REMOVE))) {
+ 			u32 present = sdhci_readl(host, SDHCI_PRESENT_STATE) &
+ 				      SDHCI_CARD_PRESENT;
+ 
+@@ -3700,15 +3726,19 @@
+ 	struct sdhci_host *host = dev_id;
+ 	struct mmc_command *cmd;
+ 	unsigned long flags;
++#ifdef CONFIG_MMC_REMOVABLE
+ 	u32 isr;
++#endif
+ 
+ 	while (!sdhci_request_done(host))
+ 		;
+ 
+ 	spin_lock_irqsave(&host->lock, flags);
+ 
++#ifdef CONFIG_MMC_REMOVABLE
+ 	isr = host->thread_isr;
+ 	host->thread_isr = 0;
++#endif
+ 
+ 	cmd = host->deferred_cmd;
+ 	if (cmd && !sdhci_send_command_retry(host, cmd, flags))
+@@ -3716,12 +3746,14 @@
+ 
+ 	spin_unlock_irqrestore(&host->lock, flags);
+ 
++#ifdef CONFIG_MMC_REMOVABLE
+ 	if (isr & (SDHCI_INT_CARD_INSERT | SDHCI_INT_CARD_REMOVE)) {
+ 		struct mmc_host *mmc = host->mmc;
+ 
+ 		mmc->ops->card_event(mmc);
+ 		mmc_detect_change(mmc, msecs_to_jiffies(200));
+ 	}
++#endif
+ 
+ 	return IRQ_HANDLED;
+ }
+diff --git a/drivers/mmc/host/sdhci.h b/drivers/mmc/host/sdhci.h
+--- a/drivers/mmc/host/sdhci.h
++++ b/drivers/mmc/host/sdhci.h
+@@ -851,7 +851,16 @@
+ unsigned short sdhci_get_vdd_value(unsigned short vdd);
+ void sdhci_set_power_noreg(struct sdhci_host *host, unsigned char mode,
+ 			   unsigned short vdd);
++#ifdef CONFIG_MMC_REMOVABLE
+ int sdhci_get_cd_nogpio(struct mmc_host *mmc);
++#else
++static inline int sdhci_get_cd_nogpio(struct mmc_host *mmc)
++{
++	struct sdhci_host *host = mmc_priv(mmc);
++
++	return !(host->flags & SDHCI_DEVICE_DEAD);
++}
++#endif
+ int sdhci_get_ro(struct mmc_host *mmc);
+ void sdhci_request(struct mmc_host *mmc, struct mmc_request *mrq);
+ int sdhci_request_atomic(struct mmc_host *mmc, struct mmc_request *mrq);
+diff --git a/include/linux/mmc/host.h b/include/linux/mmc/host.h
+--- a/include/linux/mmc/host.h
++++ b/include/linux/mmc/host.h
+@@ -617,7 +617,13 @@
+ #define mmc_classdev(x)	(&(x)->class_dev)
+ #define mmc_hostname(x)	(dev_name(&(x)->class_dev))
+ 
++#ifdef CONFIG_MMC_REMOVABLE
+ void mmc_detect_change(struct mmc_host *, unsigned long delay);
++#else
++static inline void mmc_detect_change(struct mmc_host *host, unsigned long delay)
++{
++}
++#endif
+ void mmc_request_done(struct mmc_host *, struct mmc_request *);
+ void mmc_command_done(struct mmc_host *host, struct mmc_request *mrq);
+ 
+@@ -675,7 +681,8 @@
+ 
+ static inline int mmc_card_is_removable(struct mmc_host *host)
+ {
+-	return !(host->caps & MMC_CAP_NONREMOVABLE);
++	return IS_ENABLED(CONFIG_MMC_REMOVABLE) &&
++	       !(host->caps & MMC_CAP_NONREMOVABLE);
+ }
+ 
+ static inline int mmc_card_keep_power(struct mmc_host *host)
+diff --git a/include/linux/mmc/slot-gpio.h b/include/linux/mmc/slot-gpio.h
+--- a/include/linux/mmc/slot-gpio.h
++++ b/include/linux/mmc/slot-gpio.h
+@@ -8,23 +8,83 @@
+ #ifndef MMC_SLOT_GPIO_H
+ #define MMC_SLOT_GPIO_H
+ 
++#include <linux/errno.h>
+ #include <linux/interrupt.h>
+ #include <linux/types.h>
+ 
+ struct mmc_host;
+ 
++#ifdef CONFIG_MMC_GPIO
+ int mmc_gpio_get_ro(struct mmc_host *host);
++int mmc_gpiod_request_ro(struct mmc_host *host, const char *con_id,
++			 unsigned int idx, unsigned int debounce);
++bool mmc_host_can_gpio_ro(struct mmc_host *host);
++#else
++static inline int mmc_gpio_get_ro(struct mmc_host *host)
++{
++	return -ENOENT;
++}
++
++static inline int mmc_gpiod_request_ro(struct mmc_host *host,
++				       const char *con_id, unsigned int idx,
++				       unsigned int debounce)
++{
++	return -ENOENT;
++}
++
++static inline bool mmc_host_can_gpio_ro(struct mmc_host *host)
++{
++	return false;
++}
++#endif
++
++#if defined(CONFIG_MMC_GPIO) && defined(CONFIG_MMC_REMOVABLE)
+ int mmc_gpio_get_cd(struct mmc_host *host);
+ void mmc_gpio_set_cd_irq(struct mmc_host *host, int irq);
+ int mmc_gpiod_request_cd(struct mmc_host *host, const char *con_id,
+ 			 unsigned int idx, bool override_active_level,
+ 			 unsigned int debounce);
+-int mmc_gpiod_request_ro(struct mmc_host *host, const char *con_id,
+-			 unsigned int idx, unsigned int debounce);
+ int mmc_gpiod_set_cd_config(struct mmc_host *host, unsigned long config);
+ int mmc_gpio_set_cd_wake(struct mmc_host *host, bool on);
+ void mmc_gpiod_request_cd_irq(struct mmc_host *host);
+ bool mmc_host_can_gpio_cd(struct mmc_host *host);
+-bool mmc_host_can_gpio_ro(struct mmc_host *host);
++#else
++static inline int mmc_gpio_get_cd(struct mmc_host *host)
++{
++	return -ENOENT;
++}
++
++static inline void mmc_gpio_set_cd_irq(struct mmc_host *host, int irq)
++{
++}
++
++static inline int mmc_gpiod_request_cd(struct mmc_host *host,
++				       const char *con_id, unsigned int idx,
++				       bool override_active_level,
++				       unsigned int debounce)
++{
++	return -ENOENT;
++}
++
++static inline int mmc_gpiod_set_cd_config(struct mmc_host *host,
++					  unsigned long config)
++{
++	return -ENOENT;
++}
++
++static inline int mmc_gpio_set_cd_wake(struct mmc_host *host, bool on)
++{
++	return 0;
++}
++
++static inline void mmc_gpiod_request_cd_irq(struct mmc_host *host)
++{
++}
++
++static inline bool mmc_host_can_gpio_cd(struct mmc_host *host)
++{
++	return false;
++}
++#endif
+ 
+ #endif

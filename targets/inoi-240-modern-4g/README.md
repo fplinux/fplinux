@@ -14,12 +14,12 @@
 This phone has a `128×160` display and supports the private USB session,
 headphone and speaker PCM playback, microphone capture, FM radio, keypad
 backlight and manual CPU frequency selection.
-microSD FAT32 and ext4 storage and a writable microSD system root work.
+The card stays installed from boot to shutdown. Fixed-session card
+initialization is unqualified for data storage and the microSD system root.
 Bluetooth pairing, bidirectional file transfer and PAN Internet work in both
 profiles. The red handset key and RTC alarms wake the phone from s2idle,
-including with mounted ext4 storage and card-backed swap; Bluetooth resumes
-after wake.
-In the RAM profile, mounted FAT32 data storage also works across sleep.
+and Bluetooth resumes after wake. Sleep with a mounted card or card-backed
+swap is unqualified with the fixed-session card initialization.
 
 LCD brightness responds to the system scale, and level `0` turns the backlight
 off. The visible spacing between levels is not calibrated. This phone has no
@@ -40,46 +40,46 @@ Status terms and limits shared by every phone are defined in the
 
 ## Features
 
-| Feature                                                            | Hardware | FPLinux       | This phone                                                                                                                                    |
-| ------------------------------------------------------------------ | -------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| RAM boot                                                           | N/A      | Supported     | —                                                                                                                                             |
-| Persistent boot                                                    | N/A      | Not supported | A USB-loaded RAM bootstrap is required for every Linux boot.                                                                                  |
-| [Local console](../../docs/features/LOCAL_CONSOLE.md)              | Present  | Supported     | `128×160`; graphical terminal with phone-keypad input.                                                                                        |
-| [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)          | Present  | Supported     | System scale `0…10` works; level `0` turns the backlight off.                                                                                 |
-| [Keypad backlight](../../docs/features/KEYPAD_BACKLIGHT.md)        | Present  | Supported     | Binary LED control; on and off are visible.                                                                                                   |
-| [USB networking](../../docs/features/USB_NETWORKING.md)            | Present  | Supported     | —                                                                                                                                             |
-| [SSH access](../../docs/features/SSH.md)                           | N/A      | Supported     | —                                                                                                                                             |
-| [File transfer](../../docs/features/FILE_TRANSFER.md)              | N/A      | Supported     | RAM and writable mounted ext4 microSD storage are valid destinations.                                                                         |
-| [Host keyboard bridge](../../docs/features/HOST_KEYBOARD.md)       | N/A      | Supported     | —                                                                                                                                             |
-| [CPU clock reporting](../../docs/features/CPU_CLOCK.md)            | N/A      | Supported     | —                                                                                                                                             |
-| [Manual CPU frequency selection](../../docs/features/CPU_CLOCK.md) | N/A      | Supported     | Switching between 768 MHz and 1 GHz works on this phone.                                                                                      |
-| [AP DMAengine](../../platforms/ums9117/README.md#memory-copy-dma)  | Present  | Partial       | Memory copies and the fixed ROTA request; see platform limits.                                                                                |
-| [Image rotation](../../docs/apps/ROTATE.md)                        | Present  | Supported     | RGB, grayscale and two-plane YUV through V4L2 mem2mem.                                                                                        |
-| [JPEG codec and scaling](../../docs/apps/JPEG.md)                  | Present  | Supported     | Baseline decode, fixed encode geometries and fixed NV16 scaler pairs.                                                                         |
-| [Native image presentation](../../docs/apps/PRESENT.md)            | Present  | Partial       | Native `128×160` NV16 or RGB565; visible image fidelity has not been checked.                                                                 |
-| USB host mode                                                      | Unknown  | Not supported | —                                                                                                                                             |
-| [Removable storage](../../docs/features/MICROSD.md)                | Present  | Supported     | FAT32 and ext4 read/write and card-backed swap work in the RAM profile; the slot is under the battery, so hot-swap does not apply.            |
-| [Removable system root](../../docs/guides/MICROSD_ROOT.md)         | Present  | Supported     | FAT32 boot files plus writable ext4 root; applications, files and Bluetooth pairing records persist across cold boots.                        |
-| Internal phone storage                                             | Present  | Partial       | Read-only raw [NAND backup](../../docs/guides/DEVICE_DATA.md#save-a-nand-backup); no filesystem, writes or restore.                           |
-| [Headphone audio](../../docs/features/HEADPHONE_AUDIO.md)          | Present  | Supported     | Stereo S16_LE playback; the default device converts input to 48 kHz, and the fitted profile supplies stock-derived levels, equalizer and ALC. |
-| [Speaker audio](../../docs/features/SPEAKER_AUDIO.md)              | Present  | Supported     | Rear loudspeaker with fitted gains, stock equalizer and ALC.                                                                                  |
-| [Phone microphone](../../docs/features/MICROPHONE_AUDIO.md)        | Present  | Supported     | Built-in and four-contact wired-headset microphones record mono 48-kHz PCM.                                                                   |
-| [FM radio](../../docs/features/FM_RADIO.md)                        | Present  | Supported     | Frequency scan with the 3.5 mm cable as antenna and playback through the enabled outputs; candidates need listening to confirm.               |
-| Modem and mobile service                                           | Present  | Not supported | —                                                                                                                                             |
-| [Bluetooth](../../docs/features/BLUETOOTH.md)                      | Present  | Partial       | Pairing, bidirectional OPP, PAN Internet and recovery after RTC-woken s2idle work in both profiles; keyboards and mice have not been tested.  |
-| Wi-Fi                                                              | Unknown  | Not supported | —                                                                                                                                             |
-| [Camera](../../docs/features/CAMERA.md)                            | Present  | Supported     | BF30A2; `240×320` NV16 through V4L2 in the RAM profile. Camera with a microSD system root is unqualified.                                     |
-| [Charger status](../../docs/features/CHARGER_STATUS.md)            | Present  | Partial       | External-input status is available; battery charging has not been tested.                                                                     |
-| [Battery telemetry](../../docs/features/BATTERY_TELEMETRY.md)      | Present  | Partial       | Voltage, current and charge counter respond; measurements with a battery have not been tested.                                                |
-| [SoC temperature](../../docs/features/SOC_TEMPERATURE.md)          | Present  | Partial       | Temperature readings are available; physical accuracy has not been checked.                                                                   |
-| [Auxiliary ADC](../../docs/features/AUXADC.md)                     | Present  | Partial       | Raw-channel interface enabled; physical inputs and accuracy have not been checked.                                                            |
-| [Real-time clock](../../docs/features/RTC.md)                      | Present  | Partial       | Read/set time, one-shot alarms and RTC wake work in both profiles; no update interrupts or alarm power-on.                                    |
-| Other battery functions                                            | Unknown  | Not supported | No battery level, temperature or charge control is provided.                                                                                  |
-| [Vibration](../../docs/features/VIBRATION.md)                      | Present  | Partial       | Rear speaker vibration; headphone audio is muted meanwhile, and one continuous pulse lasts at most about three seconds.                       |
-| Indicator LEDs                                                     | Unknown  | Not supported | —                                                                                                                                             |
-| [Power-off](../../docs/features/POWER_OFF.md)                      | N/A      | Partial       | Establish card safety before disconnecting USB power; battery-only power-off has not been tested.                                             |
-| [Suspend](../../docs/features/SUSPEND.md)                          | N/A      | Supported     | s2idle in both profiles, including mounted ext4 data storage and card-backed swap; the red handset key and RTC alarms are wake sources.       |
-| Reboot                                                             | N/A      | Not supported | —                                                                                                                                             |
+| Feature                                                            | Hardware | FPLinux       | This phone                                                                                                                                     |
+| ------------------------------------------------------------------ | -------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| RAM boot                                                           | N/A      | Supported     | —                                                                                                                                              |
+| Persistent boot                                                    | N/A      | Not supported | A USB-loaded RAM bootstrap is required for every Linux boot.                                                                                   |
+| [Local console](../../docs/features/LOCAL_CONSOLE.md)              | Present  | Supported     | `128×160`; graphical terminal with phone-keypad input.                                                                                         |
+| [LCD backlight](../../docs/features/DISPLAY_BACKLIGHT.md)          | Present  | Supported     | System scale `0…10` works; level `0` turns the backlight off.                                                                                  |
+| [Keypad backlight](../../docs/features/KEYPAD_BACKLIGHT.md)        | Present  | Supported     | Binary LED control; on and off are visible.                                                                                                    |
+| [USB networking](../../docs/features/USB_NETWORKING.md)            | Present  | Supported     | —                                                                                                                                              |
+| [SSH access](../../docs/features/SSH.md)                           | N/A      | Supported     | —                                                                                                                                              |
+| [File transfer](../../docs/features/FILE_TRANSFER.md)              | N/A      | Supported     | RAM and writable mounted ext4 microSD storage are valid destinations.                                                                          |
+| [Host keyboard bridge](../../docs/features/HOST_KEYBOARD.md)       | N/A      | Supported     | —                                                                                                                                              |
+| [CPU clock reporting](../../docs/features/CPU_CLOCK.md)            | N/A      | Supported     | —                                                                                                                                              |
+| [Manual CPU frequency selection](../../docs/features/CPU_CLOCK.md) | N/A      | Supported     | Switching between 768 MHz and 1 GHz works on this phone.                                                                                       |
+| [AP DMAengine](../../platforms/ums9117/README.md#memory-copy-dma)  | Present  | Partial       | Memory copies and the fixed ROTA request; see platform limits.                                                                                 |
+| [Image rotation](../../docs/apps/ROTATE.md)                        | Present  | Supported     | RGB, grayscale and two-plane YUV through V4L2 mem2mem.                                                                                         |
+| [JPEG codec and scaling](../../docs/apps/JPEG.md)                  | Present  | Supported     | Baseline decode, fixed encode geometries and fixed NV16 scaler pairs.                                                                          |
+| [Native image presentation](../../docs/apps/PRESENT.md)            | Present  | Partial       | Native `128×160` NV16 or RGB565; visible image fidelity has not been checked.                                                                  |
+| USB host mode                                                      | Unknown  | Not supported | —                                                                                                                                              |
+| [Removable storage](../../docs/features/MICROSD.md)                | Present  | Partial       | The card stays installed from boot to shutdown; hot-swap is not supported. Fixed-session initialization has not been qualified on this phone.  |
+| [Removable system root](../../docs/guides/MICROSD_ROOT.md)         | Present  | Partial       | FAT32 FIT plus ext4 system root; the fixed-session card initialization is unqualified.                                                         |
+| Internal phone storage                                             | Present  | Partial       | Read-only raw [NAND backup](../../docs/guides/DEVICE_DATA.md#save-a-nand-backup); no filesystem, writes or restore.                            |
+| [Headphone audio](../../docs/features/HEADPHONE_AUDIO.md)          | Present  | Supported     | Stereo S16_LE playback; the default device converts input to 48 kHz, and the fitted profile supplies stock-derived levels, equalizer and ALC.  |
+| [Speaker audio](../../docs/features/SPEAKER_AUDIO.md)              | Present  | Supported     | Rear loudspeaker with fitted gains, stock equalizer and ALC.                                                                                   |
+| [Phone microphone](../../docs/features/MICROPHONE_AUDIO.md)        | Present  | Supported     | Built-in and four-contact wired-headset microphones record mono 48-kHz PCM.                                                                    |
+| [FM radio](../../docs/features/FM_RADIO.md)                        | Present  | Supported     | Frequency scan with the 3.5 mm cable as antenna and playback through the enabled outputs; candidates need listening to confirm.                |
+| Modem and mobile service                                           | Present  | Not supported | —                                                                                                                                              |
+| [Bluetooth](../../docs/features/BLUETOOTH.md)                      | Present  | Partial       | Pairing, bidirectional OPP, PAN Internet and recovery after RTC-woken s2idle work in both profiles; keyboards and mice have not been tested.   |
+| Wi-Fi                                                              | Unknown  | Not supported | —                                                                                                                                              |
+| [Camera](../../docs/features/CAMERA.md)                            | Present  | Supported     | BF30A2; `240×320` NV16 through V4L2 in the RAM profile. Camera with a microSD system root is unqualified.                                      |
+| [Charger status](../../docs/features/CHARGER_STATUS.md)            | Present  | Partial       | External-input status is available; battery charging has not been tested.                                                                      |
+| [Battery telemetry](../../docs/features/BATTERY_TELEMETRY.md)      | Present  | Partial       | Voltage, current and charge counter respond; measurements with a battery have not been tested.                                                 |
+| [SoC temperature](../../docs/features/SOC_TEMPERATURE.md)          | Present  | Partial       | Temperature readings are available; physical accuracy has not been checked.                                                                    |
+| [Auxiliary ADC](../../docs/features/AUXADC.md)                     | Present  | Partial       | Raw-channel interface enabled; physical inputs and accuracy have not been checked.                                                             |
+| [Real-time clock](../../docs/features/RTC.md)                      | Present  | Partial       | Read/set time, one-shot alarms and RTC wake work in both profiles; no update interrupts or alarm power-on.                                     |
+| Other battery functions                                            | Unknown  | Not supported | No battery level, temperature or charge control is provided.                                                                                   |
+| [Vibration](../../docs/features/VIBRATION.md)                      | Present  | Partial       | Rear speaker vibration; headphone audio is muted meanwhile, and one continuous pulse lasts at most about three seconds.                        |
+| Indicator LEDs                                                     | Unknown  | Not supported | —                                                                                                                                              |
+| [Power-off](../../docs/features/POWER_OFF.md)                      | N/A      | Partial       | Establish card safety before disconnecting USB power; battery-only power-off has not been tested.                                              |
+| [Suspend](../../docs/features/SUSPEND.md)                          | N/A      | Partial       | s2idle with RTC/red-handset wake and Bluetooth; mounted-card and card-backed-swap sleep is unqualified with fixed-session card initialization. |
+| Reboot                                                             | N/A      | Not supported | —                                                                                                                                              |
 
 ## Applications
 

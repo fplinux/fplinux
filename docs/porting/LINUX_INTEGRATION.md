@@ -27,3 +27,16 @@ A missing integration input or invalid shared Kconfig can prevent other targets
 from building too.
 Source sharing does not establish support for another platform, architecture
 or userspace ABI.
+
+## microSD card detection
+
+A slot that permits card replacement during a powered session declares
+`cd-gpios` and enables `CONFIG_MMC_REMOVABLE` and `CONFIG_MMC_GPIO`.
+For the UMS9117 EIC card-detect input, also enable `CONFIG_GPIO_EIC_SPRD`.
+These choices belong to the target configuration.
+
+A slot whose card stays installed throughout the session declares
+`non-removable`. Its kernel disables removable-card and MMC GPIO support;
+the card is probed when the host starts. Initial discovery, SD transfers,
+request recovery and suspend/resume remain available. General GPIO support
+for the keypad, camera or PMIC is independent of MMC GPIO support.

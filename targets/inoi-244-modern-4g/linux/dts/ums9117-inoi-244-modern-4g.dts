@@ -251,12 +251,8 @@
 	sprd,serial-g0-data-width = <1>;
 };
 
-&eic2 {
-	status = "okay";
-};
-
 &sdio0_mmc {
-	cd-gpios = <&eic2 0 GPIO_ACTIVE_LOW>;
+	non-removable;
 
 	status = "okay";
 };

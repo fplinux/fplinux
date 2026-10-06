@@ -13,11 +13,11 @@
 
 This phone has a `240×320` display and a physical keypad. It supports the
 private USB session, headphone and speaker PCM playback, microphone capture and
-FM radio. microSD ext4 storage and a writable
-microSD system root work. Bluetooth pairing, bidirectional file transfer and PAN
+FM radio. Fixed-session card initialization is unqualified for data storage
+and the microSD system root. Bluetooth pairing, bidirectional file transfer and PAN
 Internet work in both profiles. The red handset key and RTC alarms wake the
-phone from s2idle, including with mounted ext4 storage and card-backed swap;
-Bluetooth works again after wake.
+phone from s2idle, and Bluetooth works again after wake. Sleep with a mounted
+card or card-backed swap is unqualified with the fixed-session card initialization.
 
 LCD brightness responds to the system scale, and level `0` turns the backlight
 off. Its visible spacing is not calibrated. Keypad backlight switches on with
@@ -58,8 +58,8 @@ Status terms and limits shared by every phone are defined in the
 | [JPEG codec and scaling](../../docs/apps/JPEG.md)                  | Present  | Supported     | Baseline decode, fixed encode geometries and fixed NV16 scaler pairs.                                                                              |
 | [Native image presentation](../../docs/apps/PRESENT.md)            | Present  | Partial       | Native `240×320` NV16 or RGB565 transfers; visible image fidelity has not been checked.                                                            |
 | USB host mode                                                      | Unknown  | Not supported | —                                                                                                                                                  |
-| [Removable storage](../../docs/features/MICROSD.md)                | Present  | Partial       | ext4 read/write and card-backed swap work in the RAM profile; FAT32 data storage is untested. The slot is under the battery.                       |
-| [Removable system root](../../docs/guides/MICROSD_ROOT.md)         | Present  | Supported     | FAT32 boot files plus writable ext4 root; applications, files and Bluetooth pairing records persist across cold boots.                             |
+| [Removable storage](../../docs/features/MICROSD.md)                | Present  | Partial       | The card stays installed from boot to shutdown; hot-swap is not supported. Fixed-session initialization has not been qualified on this phone.      |
+| [Removable system root](../../docs/guides/MICROSD_ROOT.md)         | Present  | Partial       | FAT32 FIT plus ext4 system root; the fixed-session card initialization is unqualified.                                                             |
 | Internal phone storage                                             | Present  | Partial       | Read-only raw [NAND backup](../../docs/guides/DEVICE_DATA.md#save-a-nand-backup); no filesystem, writes or restore.                                |
 | [Headphone audio](../../docs/features/HEADPHONE_AUDIO.md)          | Present  | Supported     | Stereo S16_LE playback; the default device converts input to 48 kHz, and the fitted profile supplies stock-derived levels, equalizer and ALC.      |
 | [Speaker audio](../../docs/features/SPEAKER_AUDIO.md)              | Present  | Supported     | Rear loudspeaker with fitted gains, stock equalizer and ALC.                                                                                       |
@@ -78,7 +78,7 @@ Status terms and limits shared by every phone are defined in the
 | [Vibration](../../docs/features/VIBRATION.md)                      | Present  | Partial       | Rear speaker vibration; headphone audio is muted meanwhile, and one continuous pulse lasts at most about three seconds.                            |
 | Indicator LEDs                                                     | Unknown  | Not supported | —                                                                                                                                                  |
 | [Power-off](../../docs/features/POWER_OFF.md)                      | N/A      | Partial       | Establish card safety before disconnecting USB power; battery-only power-off has not been tested.                                                  |
-| [Suspend](../../docs/features/SUSPEND.md)                          | N/A      | Supported     | s2idle in both profiles, including mounted ext4 data storage and card-backed swap; the red handset key and RTC alarms are wake sources.            |
+| [Suspend](../../docs/features/SUSPEND.md)                          | N/A      | Partial       | s2idle with RTC/red-handset wake and Bluetooth; mounted-card and card-backed-swap sleep is unqualified with fixed-session card initialization.     |
 | Reboot                                                             | N/A      | Not supported | —                                                                                                                                                  |
 
 ## Applications

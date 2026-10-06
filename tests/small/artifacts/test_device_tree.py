@@ -156,6 +156,11 @@ class DeviceTreePropertyKconfigTests(unittest.TestCase):
                     [
                         ("usb@20200000", [("compatible", b"sprd,ums9117-musb\0")], []),
                         (
+                            "mmc@20300000",
+                            [("compatible", b"sprd,ums9117-sdhci\0"), ("status", b"disabled\0")],
+                            [],
+                        ),
+                        (
                             "keypad@40250000",
                             [
                                 ("compatible", b"sprd,ums9117-keypad\0"),
@@ -198,6 +203,63 @@ class DeviceTreePropertyKconfigTests(unittest.TestCase):
         """A disabled keypad imposes no driver or auxiliary-feature requirement."""
         verify_dtb_kconfig(
             self.keypad_tree(has_aux_key=True, status=b"disabled\0"), {}, self.checks
+        )
+
+
+class DeviceTreeCardDetectKconfigTests(unittest.TestCase):
+    """Reject a compiled card-detect path whose required code is not built."""
+
+    @staticmethod
+    def platform_tree(*, removable: bool) -> bytes:
+        """Encode a real card-detect property independently of platform policy."""
+        properties = [("compatible", b"sprd,ums9117-sdhci\0")]
+        if removable:
+            properties.append(("cd-gpios", struct.pack(">III", 1, 0, 1)))
+        else:
+            properties.append(("non-removable", b""))
+        return binary_tree(
+            [],
+            [
+                (
+                    "soc",
+                    [],
+                    [
+                        ("usb@20200000", [("compatible", b"sprd,ums9117-musb\0")], []),
+                        ("keypad@40250000", [("compatible", b"sprd,ums9117-keypad\0")], []),
+                        ("mmc@20300000", properties, []),
+                    ],
+                )
+            ],
+        )
+
+    def test_card_detect_requires_built_in_removable_support(self) -> None:
+        """A card-detect GPIO cannot silently become a startup-only card."""
+        checks = load_platform("ums9117")["linux"]["dt_config_checks"]
+        supported = {
+            "CONFIG_USB_MUSB_UMS9117_COLD": "y",
+            "CONFIG_KEYBOARD_UMS9117": "y",
+            "CONFIG_MMC_SDHCI_UMS9117": "y",
+            "CONFIG_MMC_REMOVABLE": "y",
+            "CONFIG_MMC_GPIO": "y",
+        }
+        tree = self.platform_tree(removable=True)
+        verify_dtb_kconfig(tree, supported, checks)
+        for value in ("n", "m"):
+            with self.subTest(value=value):
+                config = {**supported, "CONFIG_MMC_REMOVABLE": value}
+                with self.assertRaisesRegex(DeviceTreeError, "requires CONFIG_MMC_REMOVABLE=y"):
+                    verify_dtb_kconfig(tree, config, checks)
+
+    def test_fixed_card_needs_no_card_detect_code(self) -> None:
+        """A startup-only card is valid without the removable or GPIO implementation."""
+        verify_dtb_kconfig(
+            self.platform_tree(removable=False),
+            {
+                "CONFIG_USB_MUSB_UMS9117_COLD": "y",
+                "CONFIG_KEYBOARD_UMS9117": "y",
+                "CONFIG_MMC_SDHCI_UMS9117": "y",
+            },
+            load_platform("ums9117")["linux"]["dt_config_checks"],
         )
 
 

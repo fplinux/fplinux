@@ -155,6 +155,7 @@ patches = [
   "platforms/ums9117/linux/patches/0020-ums9117-eic-cold.patch",
   "platforms/ums9117/linux/patches/0021-ums9117-eic-clock-binding.patch",
   "platforms/ums9117/linux/patches/0022-bnep-local-ethernet-address.patch",
+  "platforms/ums9117/linux/patches/0023-mmc-card-detection-config.patch",
 ]
 
 [[linux.copies]]
@@ -673,6 +674,17 @@ path = "/soc/keypad@40250000"
 compatible = "sprd,ums9117-keypad"
 property = "eic9-gpios"
 config = "CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY"
+
+[[linux.dt_config_checks]]
+path = "/soc/mmc@20300000"
+compatible = "sprd,ums9117-sdhci"
+config = "CONFIG_MMC_SDHCI_UMS9117"
+
+[[linux.dt_config_checks]]
+path = "/soc/mmc@20300000"
+compatible = "sprd,ums9117-sdhci"
+property = "cd-gpios"
+config = "CONFIG_MMC_REMOVABLE"
 
 [bootstrap]
 vendor_source_lock = "fpdoom_bootstrap"
