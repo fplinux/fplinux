@@ -43,6 +43,7 @@ class ImageToolCliTests(unittest.TestCase):
             ],
             "fplinux-jpeg-cpu": [
                 APORTS / "fplinux-jpeg/fplinux-jpeg-cpu.c",
+                APORTS / "fplinux-jpeg/jpeg-cpu-codec.c",
             ],
             "fplinux-present": [
                 APORTS / "fplinux-present/fplinux-present.c",
