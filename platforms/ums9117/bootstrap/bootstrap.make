@@ -30,9 +30,9 @@ override SYS_EXTRA :=
 override SYS_SRCS := asmcode usbio common libc syscomm syscode
 override SYS_SRCS2 := start entry $(SYS_SRCS)
 ifeq ($(FPLINUX_BOOTSTRAP_MODE),uboot)
-override APP_SRCS := main fplinux-boot-screen/boot-screen $(FPLINUX_BOOT_FONT_SOURCE) ums9117-bootstrap/sd-stage0 ums9117-bootstrap/boot-common ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff ums9117-bootstrap/uboot-handoff payload
+override APP_SRCS := main fplinux-boot-screen/boot-screen $(FPLINUX_BOOT_FONT_SOURCE) ums9117-bootstrap/sd-stage0 ums9117-bootstrap/boot-common ums9117-bootstrap/boot-session ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff ums9117-bootstrap/uboot-handoff payload
 else
-override APP_SRCS := main fplinux-boot-screen/boot-screen $(FPLINUX_BOOT_FONT_SOURCE) ums9117-bootstrap/boot-main ums9117-bootstrap/boot-common ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff payload
+override APP_SRCS := main fplinux-boot-screen/boot-screen $(FPLINUX_BOOT_FONT_SOURCE) ums9117-bootstrap/boot-main ums9117-bootstrap/boot-common ums9117-bootstrap/boot-session ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff payload
 endif
 override APP_OBJS1 := $(APP_SRCS:%=$(OBJDIR)/app/%.o)
 override APP_OBJS2 :=
@@ -84,11 +84,11 @@ ifneq ($(strip $(SYS_SRCS)),asmcode usbio common libc syscomm syscode)
 $(error FPLinux bootstrap source closure changed: $(SYS_SRCS))
 endif
 ifeq ($(FPLINUX_BOOTSTRAP_MODE),uboot)
-ifneq ($(strip $(APP_SRCS)),main fplinux-boot-screen/boot-screen $(FPLINUX_BOOT_FONT_SOURCE) ums9117-bootstrap/sd-stage0 ums9117-bootstrap/boot-common ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff ums9117-bootstrap/uboot-handoff payload)
+ifneq ($(strip $(APP_SRCS)),main fplinux-boot-screen/boot-screen $(FPLINUX_BOOT_FONT_SOURCE) ums9117-bootstrap/sd-stage0 ums9117-bootstrap/boot-common ums9117-bootstrap/boot-session ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff ums9117-bootstrap/uboot-handoff payload)
 $(error FPLinux U-Boot stage0 source closure changed: $(APP_SRCS))
 endif
 else
-ifneq ($(strip $(APP_SRCS)),main fplinux-boot-screen/boot-screen $(FPLINUX_BOOT_FONT_SOURCE) ums9117-bootstrap/boot-main ums9117-bootstrap/boot-common ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff payload)
+ifneq ($(strip $(APP_SRCS)),main fplinux-boot-screen/boot-screen $(FPLINUX_BOOT_FONT_SOURCE) ums9117-bootstrap/boot-main ums9117-bootstrap/boot-common ums9117-bootstrap/boot-session ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff payload)
 $(error FPLinux bootstrap application closure changed: $(APP_SRCS))
 endif
 endif
