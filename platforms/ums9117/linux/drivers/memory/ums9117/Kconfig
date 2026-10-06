@@ -2,6 +2,7 @@
 config UMS9117_NANDC_RO
 	bool "UMS9117 read-only internal NAND"
 	depends on ARCH_UMS9117 && HAS_DMA && !MTD
+	select MEMORY
 	help
 	  Expose a physical stream containing every NAND page's main and OOB
 	  bytes. The first open identifies the fitted SPI NAND from its ID

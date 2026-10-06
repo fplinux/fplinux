@@ -10,7 +10,7 @@ from pathlib import Path
 from tests import ROOT
 from tests.process import run_process
 
-DRIVER = ROOT / "platforms/ums9117/linux/arch/arm/mach-ums9117"
+DRIVER = ROOT / "platforms/ums9117/linux/drivers/memory/ums9117"
 HARNESS = ROOT / "tests/host_tool/ums9117/ums9117-nandc-feature.c"
 COMPAT = ROOT / "tests/host_tool/ums9117/lcm-compat"
 

@@ -174,16 +174,16 @@ source = "platforms/ums9117/linux/arch/arm/mach-ums9117/ums9117-timer.c"
 destination = "arch/arm/mach-ums9117/ums9117-timer.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/arch/arm/mach-ums9117/ums9117-nandc-ro.c"
-destination = "arch/arm/mach-ums9117/ums9117-nandc-ro.c"
+source = "platforms/ums9117/linux/drivers/memory/ums9117/ums9117-nandc-ro.c"
+destination = "drivers/memory/ums9117/ums9117-nandc-ro.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/arch/arm/mach-ums9117/ums9117-nandc-feature.c"
-destination = "arch/arm/mach-ums9117/ums9117-nandc-feature.c"
+source = "platforms/ums9117/linux/drivers/memory/ums9117/ums9117-nandc-feature.c"
+destination = "drivers/memory/ums9117/ums9117-nandc-feature.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/arch/arm/mach-ums9117/ums9117-nandc-feature.h"
-destination = "arch/arm/mach-ums9117/ums9117-nandc-feature.h"
+source = "platforms/ums9117/linux/drivers/memory/ums9117/ums9117-nandc-feature.h"
+destination = "drivers/memory/ums9117/ums9117-nandc-feature.h"
 
 [[linux.copies]]
 source = "platforms/ums9117/linux/bindings/memory-controllers/fplinux,ums9117-nandc-ro.yaml"
@@ -505,6 +505,14 @@ destination = "Documentation/devicetree/bindings/dma/sprd,ums9117-dma.yaml"
 source = "platforms/ums9117/linux/bindings/mmc/sprd,ums9117-sdhci.yaml"
 destination = "Documentation/devicetree/bindings/mmc/sprd,ums9117-sdhci.yaml"
 
+[[linux.copies]]
+source = "platforms/ums9117/linux/drivers/memory/ums9117/Kconfig"
+destination = "drivers/memory/ums9117/Kconfig"
+
+[[linux.copies]]
+source = "platforms/ums9117/linux/drivers/memory/ums9117/Makefile"
+destination = "drivers/memory/ums9117/Makefile"
+
 [[linux.appends]]
 source = "platforms/ums9117/linux/dts/unisoc.Makefile"
 destination = "arch/arm/boot/dts/unisoc/Makefile"
@@ -534,12 +542,12 @@ source = "platforms/ums9117/linux/drivers/leds/sc2720-kpled.Makefile"
 destination = "drivers/leds/Makefile"
 
 [[linux.appends]]
-source = "platforms/ums9117/linux/arch/arm/mach-ums9117/nand.Kconfig"
-destination = "arch/arm/mach-ums9117/Kconfig"
+source = "platforms/ums9117/linux/drivers/memory/ums9117/memory-parent.Kconfig"
+destination = "drivers/memory/Kconfig"
 
 [[linux.appends]]
-source = "platforms/ums9117/linux/arch/arm/mach-ums9117/nand.Makefile"
-destination = "arch/arm/mach-ums9117/Makefile"
+source = "platforms/ums9117/linux/drivers/memory/ums9117/memory-parent.Makefile"
+destination = "drivers/memory/Makefile"
 
 [[linux.appends]]
 source = "platforms/ums9117/linux/drivers/mmc/host/mmc.Kconfig"
