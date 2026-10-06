@@ -242,32 +242,32 @@ source = "platforms/ums9117/linux/bindings/media/sprd,ums9117-rota.yaml"
 destination = "Documentation/devicetree/bindings/media/sprd,ums9117-rota.yaml"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/sound/drivers/ums9117-audio.c"
-destination = "sound/drivers/ums9117-audio.c"
+source = "platforms/ums9117/linux/sound/drivers/ums9117/ums9117-audio.c"
+destination = "sound/drivers/ums9117/ums9117-audio.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/sound/drivers/ums9117-audio.h"
-destination = "sound/drivers/ums9117-audio.h"
+source = "platforms/ums9117/linux/sound/drivers/ums9117/ums9117-audio.h"
+destination = "sound/drivers/ums9117/ums9117-audio.h"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/sound/drivers/ums9117-jack.c"
-destination = "sound/drivers/ums9117-jack.c"
+source = "platforms/ums9117/linux/sound/drivers/ums9117/ums9117-jack.c"
+destination = "sound/drivers/ums9117/ums9117-jack.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/sound/drivers/ums9117-jack.h"
-destination = "sound/drivers/ums9117-jack.h"
+source = "platforms/ums9117/linux/sound/drivers/ums9117/ums9117-jack.h"
+destination = "sound/drivers/ums9117/ums9117-jack.h"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/sound/drivers/ums9117-pcm.c"
-destination = "sound/drivers/ums9117-pcm.c"
+source = "platforms/ums9117/linux/sound/drivers/ums9117/ums9117-pcm.c"
+destination = "sound/drivers/ums9117/ums9117-pcm.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/sound/drivers/ums9117-sc2720-codec.c"
-destination = "sound/drivers/ums9117-sc2720-codec.c"
+source = "platforms/ums9117/linux/sound/drivers/ums9117/ums9117-sc2720-codec.c"
+destination = "sound/drivers/ums9117/ums9117-sc2720-codec.c"
 
 [[linux.copies]]
-source = "platforms/ums9117/linux/sound/drivers/ums9117-sc2720-codec.h"
-destination = "sound/drivers/ums9117-sc2720-codec.h"
+source = "platforms/ums9117/linux/sound/drivers/ums9117/ums9117-sc2720-codec.h"
+destination = "sound/drivers/ums9117/ums9117-sc2720-codec.h"
 
 [[linux.copies]]
 source = "platforms/ums9117/linux/bindings/sound/fplinux,ums9117-audio.yaml"
@@ -521,6 +521,14 @@ destination = "drivers/media/platform/ums9117/Kconfig"
 source = "platforms/ums9117/linux/drivers/media/platform/ums9117/Makefile"
 destination = "drivers/media/platform/ums9117/Makefile"
 
+[[linux.copies]]
+source = "platforms/ums9117/linux/sound/drivers/ums9117/Kconfig"
+destination = "sound/drivers/ums9117/Kconfig"
+
+[[linux.copies]]
+source = "platforms/ums9117/linux/sound/drivers/ums9117/Makefile"
+destination = "sound/drivers/ums9117/Makefile"
+
 [[linux.appends]]
 source = "platforms/ums9117/linux/dts/unisoc.Makefile"
 destination = "arch/arm/boot/dts/unisoc/Makefile"
@@ -534,11 +542,11 @@ source = "platforms/ums9117/linux/drivers/media/i2c/bf30a2.Makefile"
 destination = "drivers/media/i2c/Makefile"
 
 [[linux.appends]]
-source = "platforms/ums9117/linux/sound/drivers/sound.Kconfig"
+source = "platforms/ums9117/linux/sound/drivers/ums9117/sound-parent.Kconfig"
 destination = "sound/drivers/Kconfig"
 
 [[linux.appends]]
-source = "platforms/ums9117/linux/sound/drivers/sound.Makefile"
+source = "platforms/ums9117/linux/sound/drivers/ums9117/sound-parent.Makefile"
 destination = "sound/drivers/Makefile"
 
 [[linux.appends]]

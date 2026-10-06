@@ -1,0 +1,2 @@
+# SPDX-License-Identifier: GPL-2.0-only
+source "sound/drivers/ums9117/Kconfig"
