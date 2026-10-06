@@ -35,6 +35,7 @@ class ImageToolCliTests(unittest.TestCase):
             "fplinux-rotate": [
                 APORTS / "fplinux-rotate/fplinux-rotate.c",
                 APORTS / "fplinux-rotate/fplinux-rotate-core.c",
+                APORTS / "fplinux-rotate/rotate-rota.c",
                 ROOT / "lib/fplinux/fplinux-drm-session.c",
             ],
             "fplinux-jpeg": [
@@ -52,6 +53,7 @@ class ImageToolCliTests(unittest.TestCase):
             "fplinux-rotate-display": [
                 APORTS / "fplinux-rotate/fplinux-rotate.c",
                 APORTS / "fplinux-rotate/fplinux-rotate-core.c",
+                APORTS / "fplinux-rotate/rotate-rota.c",
                 ROOT / "tests/host_tool/build/fixtures/rotation-display.c",
             ],
         }

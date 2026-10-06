@@ -13,6 +13,8 @@ options="!check"
 source="
 	fplinux-rotate.c
 	fplinux-rotate-core.c
+	rotate-rota.c
+	rotate-rota.h
 	fplinux-rotate.h
 	fplinux-drm-session.c
 	fplinux-drm-session.h
@@ -29,6 +31,7 @@ build() {
 		-I"$srcdir" $(pkg-config --cflags libdrm) \
 		"$srcdir/fplinux-rotate.c" \
 		"$srcdir/fplinux-rotate-core.c" \
+		"$srcdir/rotate-rota.c" \
 		"$srcdir/fplinux-drm-session.c" \
 		"$srcdir/fplinux-cli.c" $(pkg-config --libs libdrm) $LDFLAGS -Wl,--gc-sections -o fplinux-rotate
 }
@@ -39,8 +42,10 @@ package() {
 }
 
 sha512sums="
-cc626d7fb484eea1cb4714d30ed24666d7bb6a9469f81bce3bcf8bc6bd591afe651a9f756e4c588a2d2c8c937978e2a1f8e450640b5c89452b9a665376da53e2  fplinux-rotate.c
+0bd90528ea9c6cca3deeff897a0a04dc002da7d2ab3131f62bc60e7e730fe29a2e26d9890dcb4c7910e1f82e6ec26cdd6c55696aea3c87424b5e8adc5f752e56  fplinux-rotate.c
 da2b76b4b6491c0693a4bbc65f97a7abd2c4e1ba0ca42eb1b93be77afab11c0b247b03e97afb5857ded7bb0848b14e1af21127843848be7d381779e0eb10514a  fplinux-rotate-core.c
+d0d55242f1e8189f27dcb1c6fcc80f647e1929bebe6c2da22007b7742e0ea42bf49c9a28140228995d68f9644c317b5bd4b836b8a172b0fdf4a745541e2025a2  rotate-rota.c
+cccf06cb792ae6d84ae76dcfe51a2edbabc92c1856721807c38932c5885f7a843f192d331a308fcf1e1555d0a745e774003b0849448460f6798ab1fbd74d0361  rotate-rota.h
 1acd761bea4de0b377f569ed887bbd5bf635cd0ca8bb6746fa1b1ab62d06050b97d546debca38bf165e7a2a4efde68d981615abd6eb0fbbec264ea0d9b67eb6b  fplinux-rotate.h
 24d96f52eeb3adb9b37e34967199a0efea630af580782fe2f29000862b678d5ae96b4516e291b61ca70a8d9242af43fc720d801e158c7933e957cda0aaf5afdd  fplinux-drm-session.c
 5b63a683e9aac0a4b1faef31c0a09b9ec4131992d5cb69f858c6276855a8d92404c4cf23a1b4c8927d802311e9634b354502745ef15e00a4209744acf51131a7  fplinux-drm-session.h

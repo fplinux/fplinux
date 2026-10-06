@@ -72,6 +72,7 @@ class FplinuxRotateHostToolTests(unittest.TestCase):
                 executable,
                 APORT / "fplinux-rotate.c",
                 APORT / "fplinux-rotate-core.c",
+                APORT / "rotate-rota.c",
                 ROOT / "lib/fplinux/fplinux-drm-session.c",
                 ROOT / "lib/fplinux/fplinux-cli.c",
             )
@@ -110,6 +111,7 @@ class FplinuxRotateHostToolTests(unittest.TestCase):
                 executable,
                 APORT / "fplinux-rotate.c",
                 APORT / "fplinux-rotate-core.c",
+                APORT / "rotate-rota.c",
                 ROOT / "lib/fplinux/fplinux-drm-session.c",
                 ROOT / "lib/fplinux/fplinux-cli.c",
             )
