@@ -37,8 +37,13 @@ class ImageToolCliTests(unittest.TestCase):
                 APORTS / "fplinux-rotate/fplinux-rotate-core.c",
                 ROOT / "lib/fplinux/fplinux-drm-session.c",
             ],
-            "fplinux-jpeg": [APORTS / "fplinux-jpeg/fplinux-jpeg.c"],
-            "fplinux-jpeg-cpu": [APORTS / "fplinux-jpeg/fplinux-jpeg-cpu.c"],
+            "fplinux-jpeg": [
+                APORTS / "fplinux-jpeg/fplinux-jpeg.c",
+                APORTS / "fplinux-jpeg/jpeg-v4l2.c",
+            ],
+            "fplinux-jpeg-cpu": [
+                APORTS / "fplinux-jpeg/fplinux-jpeg-cpu.c",
+            ],
             "fplinux-present": [
                 APORTS / "fplinux-present/fplinux-present.c",
                 ROOT / "lib/fplinux/fplinux-drm-session.c",
