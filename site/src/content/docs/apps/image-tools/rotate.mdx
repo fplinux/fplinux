@@ -1,0 +1,138 @@
+---
+title: Image rotation
+description: Rotate or mirror raw images on the phone with the CPU or the rotation accelerator, and preview the result.
+source:
+  - alpine/aports/fplinux-rotate
+---
+
+import PhoneScreen from '../../../../components/PhoneScreen.astro';
+import rotateSource from '../../../../assets/screens/rotate-source.png';
+import rotateResult from '../../../../assets/screens/rotate-result.png';
+import FeatureStatus from '../../../../components/FeatureStatus.astro';
+
+`fplinux-rotate` rotates a raw image by 90, 180 or 270 degrees, or mirrors it
+horizontally. It runs either on the CPU or on the phone's image rotation
+accelerator (ROTA), and can show the result on the display. The command is part
+of the system on every phone; run it on the phone as described in
+[Applications](/fplinux/apps/).
+
+<FeatureStatus feature="image-rotation" />
+
+## Rotate an image
+
+Rotate a `320×240` RGB565 image into a `240×320` result with the accelerator,
+compare it with the CPU result, and show it on a `240×320` display:
+
+```sh title="Phone"
+fplinux-rotate --engine rota --format rgb565 --width 320 --height 240 \
+  --rotate 90 --input /run/input.raw --output /run/rotated.raw \
+  --verify --display
+```
+
+On success, the last line of the output names the result format, size and file,
+and whether it was verified.
+
+<div class="fp-phone-row">
+	<PhoneScreen src={rotateSource} scale={1} alt="A 320×240 source frame lying on its side" caption="320×240 source" />
+	<PhoneScreen src={rotateResult} scale={1} alt="The same frame upright at 240×320 after rotating by 90 degrees" caption="After --rotate 90: 240×320" />
+</div>
+
+## Options
+
+`--engine`, `--format`, `--width` and `--height` are required.
+
+| Option                     | Meaning                                                                                                          |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `--engine cpu\|rota`       | Rotate on the CPU or on the accelerator. `rota` never falls back to the CPU.                                     |
+| `--format FORMAT`          | `rgb565`, `xrgb32`, `grey`, `nv12` or `nv16`; see [Raw image formats](/fplinux/develop/raw-image-formats/).      |
+| `--width N`, `--height N`  | Source size in pixels.                                                                                           |
+| `--stride N`               | Bytes per source row, including padding. Default: packed rows. For `nv12` and `nv16`, it applies to both planes. |
+| `--crop X,Y,W,H`           | Source rectangle to rotate. Default: the whole image.                                                            |
+| `--rotate 0\|90\|180\|270` | Rotation in degrees. Default: `90`.                                                                              |
+| `--hflip`                  | Mirror horizontally. Requires `--rotate 0`.                                                                      |
+| `--input PATH`             | Source file. Without it, the command generates a fixed test image.                                               |
+| `--output PATH`            | Result file below `/run` or `/tmp`. Default: `/run/fplinux-rotate.raw`.                                          |
+| `--device PATH`            | Accelerator device. Default: found automatically.                                                                |
+| `--verify`                 | Compare the result with the CPU result and fail if they differ.                                                  |
+| `--display`                | Show the result for 2000 ms.                                                                                     |
+| `--display-ms N`           | Show the result for `0` to `60000` ms.                                                                           |
+| `--iterations N`           | Repeat the selected engine `1` to `10000` times.                                                                 |
+| `--benchmark N`            | Run four batches of `N` iterations: CPU, ROTA, ROTA, CPU.                                                        |
+
+The result file has packed rows in the same format as the source. Vertical
+mirroring (`--vflip`) and rotation combined with mirroring are not supported.
+
+## Preview on the display
+
+`--display` and `--display-ms` convert the result to RGB565 and show it until
+the time runs out; whichever of the two comes last sets the time. The result
+must be exactly the size of the display: the preview does not scale the image
+or rotate the console. For a `128×160` display, rotate a `160×128` source by
+90 degrees. The terminal returns when the preview ends.
+
+## Size and alignment limits
+
+Both engines require:
+
+- `nv12`: an even width and height, and even crop offsets and crop size;
+- `nv16`: an even width, an even crop left offset and crop width, and an even
+  result width.
+
+The accelerator additionally requires:
+
+- at most `4092` pixels in each dimension;
+- each source plane, including the crop offset, to start at a multiple of four
+  bytes;
+- each result row to be a multiple of four bytes long.
+
+Source, result, verification and device buffers all use phone memory, so a
+large image may not fit even within these limits.
+
+A quarter turn of `nv16` keeps the 4:2:2 layout: it uses every second source
+chroma row and repeats each chroma value on two result rows. Color detail is
+lost, so the result differs from rotating full-color pixels in a general image
+editor.
+
+NV12 rotates the luma grid and its half-size chroma grid separately, preserving
+the 4:2:0 layout.
+
+Use ROTA during [camera capture](/fplinux/use/camera/) only if that combination
+is qualified on your [phone page](/fplinux/phones/#support-status). Otherwise,
+stop capture first or use `--engine cpu`. Use the CPU path when ROTA is
+unavailable.
+
+## Timing figures
+
+`--iterations` and `--benchmark` print the time spent in each stage, in
+microseconds, together with the process CPU time. `--benchmark` does not hold a
+preview. The figures describe this process, not the whole system, and they do
+not measure when the picture becomes visible.
+
+## If the accelerator fails
+
+If the accelerator cannot be stopped safely after an error, it refuses all
+further work until the phone is [powered off](/fplinux/use/power/) and started
+again. Use `--engine cpu` in the meantime.
+
+## Timing reference
+
+`--iterations N` repeats the selected engine on the same input.
+`--benchmark N` runs four same-input batches in CPU/ROTA/ROTA/CPU order, with
+N iterations per batch:
+
+```sh
+fplinux-rotate --engine rota --format rgb565 --width 320 --height 240 \
+  --rotate 90 --input /run/input.raw --benchmark 20 --display
+```
+
+Reported microsecond values are batch totals. Stages distinguish device setup,
+input copying, queue submission, waiting, output copying, teardown, CPU rotation
+and preview conversion/presentation. `total_us` measures the application engine
+call, including an optional preview, but excludes the separately reported
+guard-check time; input-file reading and final output-file writing are outside
+that call. Preview conversion is included within `full_framebuffer_us`, so those
+two fields must not be added together. Benchmark mode suppresses preview holds.
+
+`process_user_us` and `process_system_us` are process CPU time, not total system
+CPU load. The DRM preview includes conversion and atomic presentation; its aggregate
+timing is not an optical latency or FPS measurement.

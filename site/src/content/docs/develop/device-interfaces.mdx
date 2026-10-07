@@ -1,0 +1,333 @@
+---
+title: Device interfaces
+description: Linux interfaces that FPLinux provides to phone applications for audio, vibration, camera, FM radio, sensors, backlight and keypad light.
+---
+
+import FeatureStatus from '../../../components/FeatureStatus.astro';
+
+This page lists the standard Linux interfaces that FPLinux provides on the
+phone and the names and units an application needs to use them. Everyday use
+of the same hardware is described under [Features](/fplinux/features/), for example in
+[Sound and recording](/fplinux/use/audio/). Check the
+[phone catalog](/fplinux/phones/#support-status) and your phone's page for
+available hardware, verified uses and limitations. An interface can exist
+without its physical function being verified.
+
+Device numbers such as `eventN`, `videoN`, `thermal_zoneN` and `iio:deviceN`
+are assigned at boot. Find a device by the name or path given here, never by
+its number.
+
+Keypad, keyboard and mouse input is described in
+[Input](/fplinux/develop/input/).
+
+## Audio
+
+When audio is available, ALSA card `0` has the card and PCM name
+`UMS9117 Headphones`. The image includes `aplay`, `arecord` and `amixer`.
+
+| PCM       | Direction | Format                                                                  |
+| --------- | --------- | ----------------------------------------------------------------------- |
+| `default` | Playback  | Any input converted to stereo S16_LE at 48 kHz on `hw:0,0`              |
+| `hw:0,0`  | Playback  | Stereo S16_LE at 24 kHz or 48 kHz; only 48 kHz while idle silence is on |
+| `hw:0,0`  | Capture   | Mono S16_LE at 48 kHz                                                   |
+
+Capture can run alongside playback at 48 kHz; 24 kHz playback is available
+only without capture. FM radio cannot run alongside either direction.
+
+Several controls exist only when the image contains the phone's
+[device data](/fplinux/guides/device-data/); they are marked below. All
+settings return to their defaults at boot.
+
+| Control                        | Values                | Default    | Notes                                                                                                    |
+| ------------------------------ | --------------------- | ---------- | -------------------------------------------------------------------------------------------------------- |
+| `Headphone Playback Volume`    | Left, right: `0`–`9`  | `1`, `1`   | `0`–`6` without device data. `0` mutes a channel. With both outputs on, only `0` versus nonzero matters. |
+| `Speaker Playback Volume`      | `0`–`9`               | `1`        | Device data only. `0` mutes the speaker. With both outputs on, sets the level of both.                   |
+| `Headphone Playback Switch`    | `on`, `off`           | `on`       | Then set by jack detection.                                                                              |
+| `Speaker Playback Switch`      | `on`, `off`           | `off`      | Device data only. Then set by jack detection.                                                            |
+| `EQ Playback Switch`           | `on`, `off`           | `on`       | Device data only. The phone's stock equalizer.                                                           |
+| `ALC Playback Switch`          | `on`, `off`           | `on`       | Device data only. Automatic level control acting as a peak limiter.                                      |
+| `Idle Silence Playback Switch` | `on`, `off`           | `on`       | Keeps enabled outputs playing silence between streams.                                                   |
+| `Capture Source`               | `Internal`, `Headset` | `Internal` | Cannot change while a capture stream is open.                                                            |
+| `FM Playback Switch`           | `on`, `off`           |            | Routes FM radio to the outputs; set by `fplinux-fm`.                                                     |
+
+All switches and volumes can change while streams or FM radio play, and the
+change applies immediately. The speaker plays the sum of both channels, so
+PCM is scaled down whenever the speaker is on, also in the headphones.
+Turning the speaker on while no other output is on can produce a click.
+Enabling the new output before disabling the old one keeps an output active,
+but switching a playing signal can still produce a click.
+
+With idle silence on, stream starts and stops are silent and the outputs are
+not reopened between files. Keeping the outputs active uses extra idle power.
+With it off, each stream start and stop
+clicks on the speaker, and changing the `hw:0,0` rate can produce one audible
+transition. The switch does not affect a stream that is already playing.
+
+### Jack detection
+
+The read-only card control `Headphone Jack` is `on` while a plug is in the
+3.5 mm socket. It is a card control, not a mixer control, so `amixer sget`
+does not show it:
+
+```sh title="Phone"
+amixer -c 0 cget iface=CARD,name='Headphone Jack'
+```
+
+The input device `UMS9117 Headphones Headphone` reports the same state as
+`SW_HEADPHONE_INSERT` once the plug has settled. The state cannot tell
+headphones from a headset or another cable, and it does not change
+`Capture Source`. Plug changes during sleep are reported after wake.
+
+Where included and supported, the `fplinux-jack` service starts at boot and sets the two output switches
+when the plug changes: headphones on and speaker off on insertion, the reverse
+on removal, always enabling the new output first. It changes nothing between
+plug events, so a manual setting lasts until the next change. Without device
+data there is no speaker switch, and the service leaves the outputs alone.
+
+## Vibration
+
+<FeatureStatus feature="vibration" />
+
+The vibrator is a Linux input force-feedback device with the `phys` string
+`fplinux/vibrator0`. Its name is `sc27xx:vibrator` on a phone with a motor and
+`UMS9117 speaker vibrator` on a phone that vibrates through its speaker. Find
+the device by `phys`:
+
+```sh title="Phone"
+for event in /sys/class/input/event*; do
+  [ "$(cat "$event/device/phys")" = fplinux/vibrator0 ] && echo "/dev/input/${event##*/}"
+done
+```
+
+- The device accepts `FF_RUMBLE` effects. Output is binary: any nonzero
+  magnitude in either field gives the same vibration.
+- An effect runs for its requested duration, but every activation stops after
+  about five seconds, so zero-length or longer requests cannot leave it on.
+  Timing is not precise.
+- A new activation is accepted only after the previous one has ended.
+- Closing the last handle, shutting down and entering sleep stop an active
+  vibration. It does not resume after wake.
+- There is no duty-cycle or thermal limit: leave an off interval between
+  repeated activations.
+- On speaker-vibration phones, a single continuous activation lasts at most
+  about three seconds; the vibration tone mutes headphone output while it
+  plays and for about one second afterwards and is captured by the
+  microphone. Without device data, the device is present but the phone does
+  not vibrate.
+
+An accepted effect alone does not show that the phone physically vibrates.
+
+## Camera
+
+<FeatureStatus feature="camera" />
+
+FPLinux provides a V4L2 capture interface but no camera application. Check
+your phone's page for capture support, profile restrictions and usable modes.
+The device is a `/dev/videoN` node whose driver name is
+`ums9117-dcam`; other video nodes belong to the image codecs. Identify it with
+`VIDIOC_QUERYCAP` and discover formats and sizes with `VIDIOC_ENUM_FMT` and
+`VIDIOC_ENUM_FRAMESIZES`.
+
+The capture interface delivers single-planar, uncompressed YUV 4:2:2 NV16 through MMAP
+buffers. A frame contains `width × height` Y bytes followed by the same
+number of interleaved Cb,Cr bytes; `bytesperline` is the width and
+`sizeimage` is `2 × width × height`. Use the returned color metadata and the
+monotonic frame timestamps.
+
+The read-only control `V4L2_CID_CAMERA_SENSOR_ROTATION` gives the
+counterclockwise rotation to apply to a captured image. Read its value rather
+than assuming an orientation. The driver does not rotate pixels;
+[image rotation](/fplinux/apps/image-tools/rotate/) can.
+
+Discover optional controls with `VIDIOC_QUERY_EXT_CTRL`. When
+`V4L2_CID_BRIGHTNESS` is exposed, use its reported range, step and default.
+It can change during capture and is retained across stream stops. Setting it
+while the sensor is suspended does not power the sensor on; the value applies
+on the next stream start.
+
+Resource rules:
+
+- Stopping capture leaves image-codec streams running. Sensor power and clock
+  are disabled through runtime PM; autosuspend can delay this after a stream
+  stops. MMAP buffers stay allocated until the application unmaps and frees
+  them with `VIDIOC_REQBUFS` count `0` or closes the device.
+- Another process cannot change the format while one process streams.
+- The camera and the [hardware JPEG codec](/fplinux/apps/image-tools/jpeg/)
+  share hardware. Use concurrent capture and codec operation only for a
+  combination qualified on your phone's page. A captured frame passed to the
+  encoder needs dimensions accepted by both devices; separate codec jobs use
+  their own supported geometry. Stop capture before using hardware image rotation unless
+  that combination is qualified; the rotation tool also offers a CPU path.
+
+## FM radio
+
+When FM radio is available, its V4L2 device is `/dev/radio0`. It tunes the receiver
+only: FM audio goes directly to the audio outputs, and `/dev/radio0` provides
+no samples. `fplinux-fm` uses this device together with
+`FM Playback Switch`.
+
+From the first tune until `/dev/radio0` is closed, sleep requests fail. If a
+tuner operation times out, stop using FM and cold-boot the phone before trying
+again; sleep requests keep failing until then.
+
+## Power supply, temperature and ADC
+
+When the corresponding device is present, it exposes these readings:
+
+| Value            | Location                                                     | Unit and meaning                                                |
+| ---------------- | ------------------------------------------------------------ | --------------------------------------------------------------- |
+| Charger present  | `/sys/class/power_supply/sc2720-charger/online`              | `1` external power detected, `0` not detected                   |
+| Battery voltage  | `/sys/class/power_supply/sc2720-battery/voltage_now`         | µV                                                              |
+| Battery current  | `/sys/class/power_supply/sc2720-battery/current_now`         | µA, signed: negative while discharging, positive while charging |
+| Charge counter   | `/sys/class/power_supply/sc2720-battery/charge_counter`      | µAh, signed relative counter                                    |
+| Chip temperature | `temp` of the thermal zone whose `type` is `ums9117-thermal` | m°C                                                             |
+
+The battery device has the `type` value `Battery`. The charge counter has no
+empty or full value; compare two readings over a known interval and never
+present the absolute value as remaining charge. The readings are power
+management telemetry, not a measurement at the battery terminals, and their
+accuracy has not been checked. There is no capacity, percentage, battery
+temperature, health or charge control. The temperature zone has no trip
+points or cooling devices.
+
+The IIO device `sc2720-auxadc`, when present, exposes raw codes on channels 0, 1, 2, 4 and
+14 without conversion; the signals connected to them are not identified.
+
+Find it under `/sys/bus/iio/devices/` by its `name`, then read
+`in_voltage0_raw`, `in_voltage1_raw`, `in_voltage2_raw`, `in_voltage4_raw` or
+`in_voltage14_raw`. There is no scale or processed physical-unit reading.
+
+## Display backlight
+
+<FeatureStatus feature="lcd-backlight" />
+
+Applications that change brightness should use the brightness service. Its
+client interface in `include/fplinux/fplinux-brightness-client.h` can read
+and set the user's level and claim a temporary level while the application
+owns the display; the user's level returns when the claim is released. The
+`fplinux-brightness` command and its `0`–`10` scale are described in
+[Screen, keypad light and vibration](/fplinux/use/display-and-lights/).
+
+For diagnostics, the standard backlight class device under
+`/sys/class/backlight/` provides `brightness`, `actual_brightness` and
+`max_brightness`. Its name and raw range differ by phone; see the
+[phone pages](/fplinux/phones/).
+
+- Writing `0`…`max_brightness` to `brightness` bypasses the `0`–`10` scale,
+  and a later managed change can replace it. Raw `0` switches the backlight
+  off.
+- `actual_brightness` reports the applied level, not measured light.
+- `bl_power` accepts `0` for on and `4` for off. Turning the backlight off
+  does not stop display updates or put the panel to sleep.
+- While the display is disabled, a brightness write is stored without lighting
+  the screen. When the display is enabled or the phone wakes, the stored value
+  applies after the first complete frame.
+
+## Keypad light
+
+When available, the keypad light is the LED class device
+`/sys/class/leds/:kbd_backlight`. It is binary: `brightness` accepts `0` and
+`1`. Its default trigger
+`input-events` lights it during input activity. The trigger commands are
+shown in [Screen, keypad light and vibration](/fplinux/use/display-and-lights/).
+
+## Hardware JPEG and scaler
+
+The `ums9117-jpeg` driver exposes separate V4L2 mem2mem multiplanar streaming
+nodes for decoding, encoding, and fixed raw scaling. The supplied application
+discovers the node with the matching card identity.
+
+The decoder contract is:
+
+- OUTPUT is one MMAP plane with compressed `JPEG` data and dynamic resolution;
+- the OUTPUT allocation is negotiated from 4096 bytes through 1 MiB; its
+  compressed payload is non-empty and at most 1 MiB;
+- CAPTURE is two MMAP planes, `NV12M` for 4:2:0 or `NV16M` for horizontal
+  4:2:2;
+- a source-change event publishes the parsed dimensions and capture format;
+- at full scale, capture stride is the width padded to 16 pixels. Allocated
+  height is padded to 16 rows for NV12M and 8 rows for NV16M. Reduced decode
+  divides these padded dimensions by the selected factor;
+- completed buffers carry the padded plane payload sizes. Consumers that need
+  a tight file must crop each row to the visible selection, including the
+  rounded-up chroma sample for an odd width;
+- the CROP rectangle reports the original dimensions; COMPOSE reports the
+  visible decoded dimensions. Request half decode with a CAPTURE compose
+  rectangle of `ceil(W / 2)` by `ceil(H / 2)`. Quarter decode is available only
+  for MCU-aligned horizontal 4:2:2 input, through a `W / 4` by `H / 4` compose
+  rectangle. Select a factor before allocating CAPTURE buffers.
+
+The encoder accepts two-plane `NV16M` OUTPUT and produces one-plane
+`JPEG` CAPTURE for the listed geometries. Its standard
+`V4L2_CID_JPEG_COMPRESSION_QUALITY` control has range 1 through 100, step 1 and
+default 85. Each job uses the current quality when it begins encoding.
+The scaler accepts two-plane `NV16M`
+OUTPUT and produces two-plane `NV16M` CAPTURE for the two listed fixed pairs.
+Both raw interfaces use full-range BT.601 colour metadata and tight plane
+strides.
+
+The supplied application performs negotiation, raw-plane packing, and decoder
+cropping. If recovery cannot confirm that the accelerator is idle, the driver
+refuses further jobs; reopening the video node is not a recovery guarantee.
+
+## Hardware rotation
+
+ROTA exposes V4L2 mem2mem OUTPUT/CAPTURE multiplanar queues, with MMAP and
+DMA-BUF buffers. The application discovers the matching device automatically;
+`--device PATH` selects it explicitly. Other V4L2 consumers may use independent
+source-plane strides, each a multiple of four bytes. Capture rows are packed.
+
+Supported controls are rotation by 90, 180 or 270 degrees, or horizontal
+mirroring with rotation set to zero. Set rotation and HFLIP together when
+switching between these modes. In the CLI, `--rotate 90`, `180` or `270`
+selects rotation, with `90` as the default, and `--hflip` with `--rotate 0`
+selects mirroring. `--vflip` and rotation-plus-flip combinations are rejected
+by both CLI engines.
+
+Each selected source plane's first byte must be four-byte aligned, including
+its crop offset, and every packed capture row must contain a multiple of four
+bytes. This does not require both source dimensions to be even for RGB or
+grayscale. NV12 requires even source/crop widths and heights and even crop left
+and top offsets. NV16 requires even source/crop widths and an even crop left
+offset. Its source height and crop top may be odd; an odd crop height is allowed
+when the selected operation leaves a valid packed output row. Unsupported final
+geometry is rejected with `EINVAL` at STREAMON before a plane starts;
+intermediate format/crop/control negotiation is allowed.
+
+Each dimension is limited to 4092 pixels. This is not a guarantee that a
+4092x4092 image can be allocated: the phone has 64 MiB RAM, and source,
+destination, verification and device buffers all consume memory.
+
+Queues support repeated jobs, multiple contexts, STREAMOFF and closing with
+unfinished work. Failures are bounded. If DMA cannot be stopped safely, its
+buffers are retained and the device refuses further work until a cold boot;
+closing and reopening the video node is not recovery.
+
+## DRM display
+
+RGB565 framebuffers contain the complete native image with two bytes per pixel
+and a tight native-width row stride. Atomic clients can provide
+`FB_DAMAGE_CLIPS` in framebuffer coordinates. The driver merges the visible
+clips into one bounding rectangle and expands its horizontal edges outward to
+even pixel boundaries for the controller's four-byte source alignment.
+Pixels included by that expansion come from the complete framebuffer.
+
+Each transfer sets the panel's address window. A commit without damage clips,
+the first frame after display enable and the first frame after wake transfer
+the complete image. A commit whose supplied clips do not intersect the visible
+image completes without a pixel transfer. Changing framebuffer objects does
+not remove the client's obligation to supply a complete image and damage
+relative to the preceding displayed frame.
+
+Where native NV16 presentation is available, its updates transfer the complete
+image. The KMS plane requires native geometry; scaling and rotation are not
+supported.
+
+### Completion
+
+The page-flip event and output fence complete after the controller finishes the
+transfer, or after the bounded error path stops it. A failed transfer reports
+an error through the output fence and leaves the backlight off. Completion
+allows buffer ownership to advance; it does not report the panel's scan phase
+or guarantee an optical presentation timestamp. The driver does not expose a
+periodic hardware vblank counter.

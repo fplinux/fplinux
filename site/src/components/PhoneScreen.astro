@@ -1,0 +1,28 @@
+---
+// Shows a native phone screen render at an integer scale inside a phone bezel.
+import type { ImageMetadata } from 'astro';
+import { Zoom } from 'starlight-image-zoom/components';
+
+interface Props {
+	src: ImageMetadata;
+	alt: string;
+	caption?: string;
+	scale?: number;
+}
+const { src, alt, caption, scale = 2 } = Astro.props;
+---
+
+<figure class="fp-phone">
+	<div class="bezel">
+		<Zoom label={alt}>
+			<img
+				alt={alt}
+				class="fp-pixel"
+				height={src.height * scale}
+				src={src.src}
+				width={src.width * scale}
+			/>
+		</Zoom>
+	</div>
+	{caption && <figcaption>{caption}</figcaption>}
+</figure>

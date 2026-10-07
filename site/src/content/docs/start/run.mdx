@@ -1,0 +1,198 @@
+---
+title: Run FPLinux
+description: Load FPLinux into your phone's RAM over USB and open a shell on it.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+import Figure from '../../../components/Figure.astro';
+import RunFlow from '../../../assets/diagrams/run-flow.svg';
+import Key from '../../../components/Key.astro';
+
+`./fplinux run` loads your build into the phone's RAM over a USB cable, waits
+for Linux to start and opens a shell on the phone over a private USB network
+link.
+
+<Figure caption="From PC to phone shell"><RunFlow /></Figure>
+
+## Before you start
+
+- A finished build for your phone; see [Build FPLinux](/fplinux/start/build/).
+- On the PC: GNU `stdbuf` from coreutils, `ip` from iproute2, and the OpenSSH
+  client tools `ssh`, `ssh-keygen`, `ssh-keyscan` and `sftp`.
+- A network manager that automatically runs IPv4 DHCP on a newly attached USB
+  network interface. NetworkManager does this.
+- A USB data cable that fits your phone.
+- Your phone's exact target and boot key, from its
+  [phone page](/fplinux/phones/). Check its
+  [support status](/fplinux/phones/#support-status) and power limits before
+  starting.
+
+## Allow USB access
+
+Do this once per PC. Install the USB rules from the checkout, then reload
+them:
+
+```sh title="PC"
+sudo install -m 0644 common/60-fplinux.rules /etc/udev/rules.d/60-fplinux.rules
+sudo udevadm control --reload-rules
+```
+
+If the phone is connected, disconnect it so the new rules apply on the next
+connection.
+
+The rules let the user logged in at the desktop open the phone's two USB
+devices: the boot ROM device `1782:4d00` during loading and the FPLinux device
+`0525:a4a6` after Linux starts. Keep the `60-` prefix: the rules must stop the
+desktop's MTP probe before the system libmtp rule runs.
+
+On a headless PC without a desktop login, edit your installed copy to use a
+local group with `MODE="0660"` instead of `TAG+="uaccess"`. Never make either
+device world-writable.
+
+Run the loader as your regular user, not as root.
+
+## Load the phone
+
+<Steps>
+
+1. Power the phone off and disconnect USB.
+
+2. Start the loader:
+
+   ```sh title="PC"
+   ./fplinux run nokia-ta1618
+   ```
+
+   This example uses `nokia-ta1618`; use your phone's exact target.
+   If you built with `--profile` or `--build-type`, add the same options here.
+
+3. Wait until the loader asks for the phone:
+
+   ```text title="Output"
+   Nokia 3210 4G (TA-1618) console RAM boot
+   Operations: exec-distance setup, RAM FDL1 load, RAM payload load.
+   There are no flash, erase, partition, or NV commands.
+
+   Power the phone off, hold *, then connect USB while keeping * pressed.
+   Waiting up to 300 seconds for BootROM USB 1782:4d00...
+   ```
+
+4. Only now hold your phone's boot key and connect the USB cable to the
+   powered-off phone, keeping the key pressed. The Nokia example uses <Key>\*</Key>.
+
+5. Wait for the session. The loader reports its progress and finishes with:
+
+   ```text title="Output"
+   Private USB-NCM SSH session is ready.
+   ```
+
+</Steps>
+
+:::caution[Connect the phone only when the loader asks]
+Do not connect the phone first and then decide which target to run. If you
+connected it too early, disconnect it, power it off and start again from
+step 1.
+:::
+
+## After the phone boots
+
+`run` sets the phone's clock from the PC. From an interactive terminal, it
+then opens a shell on the phone. Without a terminal, for example in a script,
+it returns as soon as the session is ready.
+
+Exiting the shell does not stop Linux. The phone keeps running while it has
+power.
+
+## Reconnect
+
+To open another shell on a running phone, or run one command:
+
+```sh title="PC"
+./fplinux console nokia-ta1618
+./fplinux console nokia-ta1618 --exec 'uname -a'
+```
+
+Use the same profile and build type that started the session. Do not start a
+fresh load only to reopen the shell. To copy files or type with the PC
+keyboard, see [Connect from your PC](/fplinux/use/connect/).
+
+## Check which build is running
+
+```sh title="PC"
+./fplinux verify nokia-ta1618
+```
+
+```text title="Output"
+verify: the phone runs the current release build (…)
+```
+
+`verify` compares the system running on the phone with your current local
+build. It refuses when the phone runs a different image or profile. Installing
+or rebuilding optional packages does not require a new load. `verify` checks
+identity only; it does not test the phone's hardware.
+
+## End the session
+
+To end the session without losing data on a microSD card, follow
+[Power](/fplinux/use/power/). Linux reboot is
+not supported; for the next session, start again from step 1 with the phone
+powered off.
+
+## Troubleshooting
+
+### The loader keeps waiting for the phone
+
+The phone did not start in boot ROM mode. After 300 seconds the loader stops
+with `fplinux run: BootROM USB was not detected`. Power the phone off,
+disconnect USB, start the loader again and hold the selected phone's boot
+key before and while you connect USB.
+
+### USB is visible but access is denied
+
+Install the rules from [Allow USB access](#allow-usb-access), reload them,
+then disconnect and reconnect the phone. The boot ROM device and the running
+FPLinux device need separate rules; install the whole file.
+
+### A loader attempt fails
+
+After a failed attempt, the loader asks you to disconnect the phone, power it
+off and reconnect it in boot ROM mode. After the third failed attempt it stops
+with `fplinux run: RAM loader failed after 3 attempts`.
+
+### The phone is already running FPLinux
+
+[Reconnect](#reconnect) with `console`. Start a fresh load only from a
+powered-off phone.
+
+### Linux starts but the shell does not connect
+
+Check that the network manager gave the new USB network interface an IPv4
+address, and that the OpenSSH tools listed in
+[Before you start](#before-you-start) are installed. Keep the complete loader
+output for a [bug report](/fplinux/develop/debugging/#report-a-problem).
+
+### verify reports a different build
+
+Check that you passed the same profile and build type as the running session.
+If the image on the phone is outdated, rebuild it and start a fresh session.
+
+## For automation: loader events
+
+`--events PATH` writes machine-readable progress for a fresh load:
+
+```sh title="PC"
+./fplinux run nokia-ta1618 --events loader.jsonl
+```
+
+The file is overwritten. Each line is one JSON object with `event`, `target`,
+`profile`, `build_type` and a UTC `time`. A successful load writes these
+events in order: `waiting-for-device`, `ram-loader-complete`, `linux-transition`, `linux-usb`,
+`ssh-ready` and `complete`. A `failure` event adds the last `stage`, a short
+`cause` and the `exit_status`. `complete` is written before the interactive
+shell opens. The events contain no SSH credentials. The loader-first sequence
+above still applies.
+
+`linux-usb` records the first observation of the exact device bound to this
+load; `ssh-ready` records session authentication. Live device-data preparation
+and fresh standalone loads accept the same option. It is incompatible with
+`--from-dump` and standalone `--reconnect`.

@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 368" role="img" aria-labelledby="jpeg-operations-title" font-family="'Noto Sans', sans-serif">
+	<title id="jpeg-operations-title">fplinux-jpeg operations: decode a JPEG file to NV12 or NV16, encode an NV16 frame as JPEG, and halve an NV16 frame</title>
+	<defs>
+		<marker id="jpeg-operations-arrow" viewBox="0 0 8 8" refX="2" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-arrow-head" fill="#396475"/></marker>
+	</defs>
+	<!-- Accelerator region -->
+	<rect x="284" y="8" width="152" height="352" rx="10" class="dg-region" fill="none" stroke="#6E797D" stroke-width="1.5" stroke-dasharray="6 4"/>
+	<text x="360" y="32" text-anchor="middle" class="dg-text-strong dg-mono" fill="#202D35" font-size="14" font-weight="700" font-family="ui-monospace, monospace">fplinux-jpeg</text>
+	<text x="360" y="50" text-anchor="middle" class="dg-text-muted" fill="#6E797D" font-size="12">image accelerator</text>
+	<text x="126" y="32" text-anchor="middle" class="dg-text-muted" fill="#6E797D" font-size="12">Input file</text>
+	<text x="594" y="32" text-anchor="middle" class="dg-text-muted" fill="#6E797D" font-size="12">Output file</text>
+	<!-- decode -->
+	<rect x="8" y="68" width="236" height="88" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="20" y="92" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">JPEG file</text>
+	<text x="20" y="110" class="dg-text-small" fill="#202D35" font-size="12">baseline, at most 1 MiB</text>
+	<text x="20" y="128" class="dg-text-small" fill="#202D35" font-size="12">4:2:0 or horizontal 4:2:2</text>
+	<text x="20" y="146" class="dg-text-small" fill="#202D35" font-size="12">up to 2048×2048 pixels</text>
+	<rect x="296" y="90" width="128" height="44" rx="10" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="360" y="117" text-anchor="middle" class="dg-text-strong dg-mono" fill="#202D35" font-size="14" font-weight="700" font-family="ui-monospace, monospace">decode</text>
+	<rect x="476" y="68" width="236" height="88" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="488" y="92" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">NV12 or NV16 file</text>
+	<text x="488" y="110" class="dg-text-small" fill="#202D35" font-size="12">full or half: NV12 / NV16</text>
+	<text x="488" y="128" class="dg-text-small" fill="#202D35" font-size="12"><tspan class="dg-mono" font-family="ui-monospace, monospace">--scale 2</tspan>: half visible size</text>
+	<text x="488" y="146" class="dg-text-small" fill="#202D35" font-size="12"><tspan class="dg-mono" font-family="ui-monospace, monospace">--scale 4</tspan>: quarter-size NV16</text>
+	<path d="M244,112 L288,112" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#jpeg-operations-arrow)"/>
+	<path d="M424,112 L468,112" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#jpeg-operations-arrow)"/>
+	<!-- encode -->
+	<rect x="8" y="172" width="236" height="88" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="20" y="196" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">NV16 frame</text>
+	<text x="20" y="214" class="dg-text-small" fill="#202D35" font-size="12">one of six fixed sizes:</text>
+	<text x="20" y="232" class="dg-text-small" fill="#202D35" font-size="12">1200×32, 320×240, 240×320,</text>
+	<text x="20" y="250" class="dg-text-small" fill="#202D35" font-size="12">640×480, 1600×1200, 1200×1600</text>
+	<rect x="296" y="194" width="128" height="44" rx="10" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="360" y="221" text-anchor="middle" class="dg-text-strong dg-mono" fill="#202D35" font-size="14" font-weight="700" font-family="ui-monospace, monospace">encode</text>
+	<rect x="476" y="172" width="236" height="88" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="488" y="196" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">JPEG file</text>
+	<text x="488" y="214" class="dg-text-small" fill="#202D35" font-size="12">baseline 4:2:2, quality 1–100</text>
+	<text x="488" y="232" class="dg-text-small" fill="#202D35" font-size="12">with restart markers</text>
+	<text x="488" y="250" class="dg-text-small" fill="#202D35" font-size="12">fails if larger than 1 MiB</text>
+	<path d="M244,216 L288,216" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#jpeg-operations-arrow)"/>
+	<path d="M424,216 L468,216" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#jpeg-operations-arrow)"/>
+	<!-- scale -->
+	<rect x="8" y="276" width="236" height="72" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="20" y="300" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">NV16 frame</text>
+	<text x="20" y="318" class="dg-text-small" fill="#202D35" font-size="12">640×480 or 320×240</text>
+	<rect x="296" y="290" width="128" height="44" rx="10" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="360" y="317" text-anchor="middle" class="dg-text-strong dg-mono" fill="#202D35" font-size="14" font-weight="700" font-family="ui-monospace, monospace">scale</text>
+	<rect x="476" y="276" width="236" height="72" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="488" y="300" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">NV16 frame</text>
+	<text x="488" y="318" class="dg-text-small" fill="#202D35" font-size="12">320×240 or 160×120</text>
+	<text x="488" y="336" class="dg-text-small" fill="#202D35" font-size="12">half the width and height</text>
+	<path d="M244,312 L288,312" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#jpeg-operations-arrow)"/>
+	<path d="M424,312 L468,312" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#jpeg-operations-arrow)"/>
+</svg>

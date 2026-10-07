@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img">
+  <title>FPLinux</title>
+  <path id="rear-wing" fill="#202D35" d="M16 155 108 78 158 39 122 115 78 169Z"/>
+  <path id="far-wing" fill="#202D35" d="M189 82 207 145 181 183 184 112Z"/>
+  <path id="front-leg" fill="#202D35" d="M173 174 184 181 180 210 149 204Z"/>
+  <path id="body" fill="#202D35" d="M59 232 98 103 155 30Q171 25 184 25Q195 24.5 201 30L206 56Q196 70 192 82L184 180 151 205 94 221 82 219Z"/>
+  <path id="breast" fill="#E5E3DA" d="M108 102 187 75 178 178 148 201 95 215 83 210Z"/>
+  <path id="rear-foot" fill="#AE6E00" d="M59 232 88 206 115 232Z"/>
+  <path id="front-foot" fill="#AE6E00" d="M180 196 223 206 176 230Z"/>
+  <path id="beak" fill="#AE6E00" d="M201 30 239 43 206 56Z"/>
+  <circle id="eye" cx="188" cy="43.5" r="6.2" fill="#E5E3DA"/>
+</svg>

@@ -1,0 +1,220 @@
+---
+// Landing hero: title, tagline and actions beside real phone screen renders.
+// Pages that set hero.image (such as 404) show that image instead.
+import { Image } from 'astro:assets';
+import { LinkButton } from '@astrojs/starlight/components';
+import markLight from '../assets/brand/fplinux-mark.svg';
+import markDark from '../assets/brand/fplinux-mark-dark.svg';
+import terminal from '../assets/screens/terminal-keypad.png';
+import menu from '../assets/screens/terminal-menu.png';
+import armada from '../assets/screens/armada.png';
+
+const { data } = Astro.locals.starlightRoute.entry;
+const { title = data.title, tagline, image, actions = [] } = data.hero || {};
+const screens = [
+	{ src: terminal, alt: 'FPLinux terminal with a shell prompt' },
+	{ src: menu, alt: 'FPLinux terminal menu' },
+	{ src: armada, alt: 'ARMADA showcase scene' },
+];
+const pageImage = image && 'dark' in image ? image : undefined;
+---
+
+<div class="fp-hero">
+	<div class="copy">
+		<h1 data-page-title id="_top" set:html={title} />
+		{tagline && <div class="tagline" set:html={tagline} />}
+		{actions.length > 0 && (
+			<div class="actions">
+				{actions.map(({ link: href, text, variant, icon }) => (
+					<LinkButton {href} icon={icon?.name} {variant}>
+						{text}
+					</LinkButton>
+				))}
+			</div>
+		)}
+	</div>
+	{pageImage ? (
+		<div class="stage">
+			<Image
+				alt={pageImage.alt ?? ''}
+				class="page-image light:sl-hidden"
+				height={320}
+				src={pageImage.dark}
+				width={320}
+			/>
+			<Image
+				alt={pageImage.alt ?? ''}
+				class="page-image dark:sl-hidden"
+				height={320}
+				src={pageImage.light}
+				width={320}
+			/>
+		</div>
+	) : (
+		<div class="stage">
+			<div
+				aria-label="FPLinux screens on a 240×320 phone display"
+				class="phone"
+				role="img"
+			>
+				<div class="screen">
+					{screens.map((screen) => (
+						<img
+							alt=""
+							class="fp-pixel"
+							height={screen.src.height}
+							src={screen.src.src}
+							width={screen.src.width}
+						/>
+					))}
+				</div>
+			</div>
+			<img
+				alt=""
+				class="penguin dark:sl-hidden"
+				height="150"
+				src={markLight.src}
+				width="150"
+			/>
+			<img
+				alt=""
+				class="penguin light:sl-hidden"
+				height="150"
+				src={markDark.src}
+				width="150"
+			/>
+		</div>
+	)}
+</div>
+
+<style>
+	.fp-hero {
+		display: grid;
+		gap: 2.5rem;
+		align-items: center;
+		padding-block: 1rem 2rem;
+	}
+
+	@media (width >= 50rem) {
+		.fp-hero {
+			grid-template-columns: 1fr auto;
+			padding-block: 3rem 4rem;
+		}
+	}
+
+	.copy {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+
+	h1 {
+		font-size: clamp(2.5rem, 6vw, 4rem);
+		line-height: 1.05;
+		font-weight: 700;
+		color: var(--sl-color-white);
+	}
+
+	.tagline {
+		font-size: clamp(1.25rem, 2.6vw, 1.6rem);
+		color: var(--sl-color-gray-1);
+	}
+
+	.actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem 1rem;
+		margin-top: 0.5rem;
+	}
+
+	.stage {
+		position: relative;
+		justify-self: center;
+		padding: 0 0 0 8.5rem;
+	}
+
+	.page-image {
+		width: min(20rem, 70vw);
+		height: auto;
+	}
+
+	.phone {
+		padding: 22px 18px 48px;
+		border-radius: 34px;
+		background: #202d35;
+		box-shadow:
+			0 1px 2px rgb(0 0 0 / 20%),
+			0 18px 40px -12px rgb(32 45 53 / 45%);
+	}
+
+	.screen {
+		display: grid;
+		width: 360px;
+		max-width: 62vw;
+		aspect-ratio: 3 / 4;
+		overflow: hidden;
+		border-radius: 3px;
+		background: #000;
+	}
+
+	.screen img {
+		grid-area: 1 / 1;
+		width: 100%;
+		height: auto;
+		opacity: 0;
+		animation: fp-screens 12s infinite both;
+	}
+
+	.screen img:nth-child(2) {
+		animation-delay: 4s;
+	}
+
+	.screen img:nth-child(3) {
+		animation-delay: 8s;
+	}
+
+	@keyframes fp-screens {
+		0% {
+			opacity: 0;
+		}
+
+		5%,
+		33% {
+			opacity: 1;
+		}
+
+		38%,
+		100% {
+			opacity: 0;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.screen img {
+			animation: none;
+			opacity: 0;
+		}
+
+		.screen img:nth-child(1) {
+			opacity: 1;
+		}
+	}
+
+	.penguin {
+		position: absolute;
+		left: 0;
+		bottom: 0;
+		width: 9.5rem;
+		height: auto;
+	}
+
+	@media (width <= 36rem) {
+		.stage {
+			padding-left: 0;
+		}
+
+		.penguin {
+			display: none;
+		}
+	}
+</style>

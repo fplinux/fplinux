@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 152" role="img" aria-labelledby="bring-up-connection-title" font-family="'Noto Sans', sans-serif">
+	<title id="bring-up-connection-title">Connecting a phone for bring-up: start ./fplinux run on the PC, then hold the phone's boot key and connect it powered off only after the loader asks</title>
+	<!-- PC running the loader -->
+	<g transform="translate(48,54)">
+		<rect x="0" y="0" width="72" height="48" rx="4" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+		<rect x="5" y="5" width="62" height="36" rx="2" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+		<path d="M36,48 V60" class="dg-line" fill="none" stroke="#202D35" stroke-width="1.5"/>
+		<rect x="20" y="60" width="32" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/>
+	</g>
+	<text x="84" y="140" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">./fplinux run &lt;target&gt;</text>
+	<!-- Phone, powered off, boot key held -->
+	<g transform="translate(360,12)">
+		<rect x="0" y="0" width="46" height="84" rx="9" class="dg-box-2" fill="#EDEEEE" stroke="#6E797D" stroke-width="1.5"/>
+		<rect x="6" y="8" width="34" height="26" rx="2" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+		<circle cx="12" cy="73" r="6.5" class="dg-box-accent" fill="#FADEBE" stroke="#855300" stroke-width="1.5"/>
+		<rect x="9" y="44" width="6" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/>
+		<rect x="20" y="44" width="6" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/>
+		<rect x="31" y="44" width="6" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/>
+		<rect x="9" y="53" width="6" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/>
+		<rect x="20" y="53" width="6" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/>
+		<rect x="31" y="53" width="6" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/>
+		<rect x="9" y="62" width="6" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/>
+		<rect x="20" y="62" width="6" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/>
+		<rect x="31" y="62" width="6" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/>
+		<rect x="9" y="71" width="6" height="4" rx="1" class="dg-fill-accent" fill="#855300"/>
+		<rect x="20" y="71" width="6" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/>
+		<rect x="31" y="71" width="6" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/>
+	</g>
+	<text x="383" y="140" text-anchor="middle" class="dg-text-muted" fill="#6E797D" font-size="12">powered off</text>
+	<path d="M350,85 H364" class="dg-line-muted" fill="none" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="344" y="90" text-anchor="end" class="dg-text-strong dg-text-accent" fill="#855300" font-size="14" font-weight="700">hold boot key</text>
+	<!-- USB cable with the plug at the phone end -->
+	<path d="M100,116 H383 V102" class="dg-line" fill="none" stroke="#202D35" stroke-width="1.5"/>
+	<rect x="378" y="96" width="10" height="6" rx="1" class="dg-fill-ink" fill="#202D35"/>
+	<text x="232" y="108" text-anchor="middle" class="dg-text-small" fill="#202D35" font-size="12">connect only after the loader asks</text>
+</svg>

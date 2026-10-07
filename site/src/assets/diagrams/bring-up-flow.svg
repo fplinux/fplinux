@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 616" role="img" aria-labelledby="bring-up-flow-title" font-family="'Noto Sans', sans-serif">
+	<title id="bring-up-flow-title">Bring-up flow from creating a target to reporting the phone, with the failure branch for each boot stage</title>
+	<defs>
+		<marker id="bring-up-flow-arrow" viewBox="0 0 8 8" refX="2" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-arrow-head" fill="#396475"/></marker>
+		<marker id="bring-up-flow-arrow-danger" viewBox="0 0 8 8" refX="2" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-arrow-danger-head" fill="#BA1A1A"/></marker>
+	</defs>
+	<!-- Prepare and start -->
+	<rect x="8" y="8" width="208" height="52" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="20" y="29" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">Create target</text>
+	<text x="20" y="47" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">target new</text>
+	<rect x="256" y="8" width="208" height="52" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="268" y="29" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">Build</text>
+	<text x="268" y="47" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">build</text>
+	<rect x="504" y="8" width="208" height="52" rx="10" class="dg-box-accent" fill="#FADEBE" stroke="#855300" stroke-width="1.5"/>
+	<text x="516" y="29" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">Run, then connect</text>
+	<text x="516" y="47" class="dg-text-small" fill="#202D35" font-size="12">hold boot key when asked</text>
+	<path d="M216,34 L248,34" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#bring-up-flow-arrow)"/>
+	<path d="M464,34 L496,34" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#bring-up-flow-arrow)"/>
+	<path d="M608,60 L608,80 L112,80 L112,92" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#bring-up-flow-arrow)"/>
+	<!-- Boot stages and failure branches -->
+	<rect x="8" y="100" width="208" height="52" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="20" y="121" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">BootROM USB</text>
+	<text x="20" y="139" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">1782:4d00</text>
+	<path d="M112,152 L112,164" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#bring-up-flow-arrow)"/>
+	<path d="M216,126 L456,126" class="dg-arrow-danger" fill="none" stroke="#BA1A1A" stroke-width="2" marker-end="url(#bring-up-flow-arrow-danger)"/>
+	<text x="340" y="118" text-anchor="middle" class="dg-text-small dg-text-danger" fill="#BA1A1A" font-size="12">no BootROM USB</text>
+	<rect x="464" y="100" width="248" height="52" rx="10" class="dg-box-danger" fill="#FFDAD6" stroke="#BA1A1A" stroke-width="1.5"/>
+	<text x="476" y="121" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">Try another boot key</text>
+	<text x="476" y="139" class="dg-text-small" fill="#202D35" font-size="12">appeared only briefly: start again</text>
+	<rect x="8" y="172" width="208" height="52" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="20" y="193" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">FDL1 starts</text>
+	<text x="20" y="211" class="dg-text-small" fill="#202D35" font-size="12"><tspan class="dg-mono" font-family="ui-monospace, monospace">Custom FDL1</tspan> line</text>
+	<path d="M112,224 L112,236" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#bring-up-flow-arrow)"/>
+	<path d="M216,198 L456,198" class="dg-arrow-danger" fill="none" stroke="#BA1A1A" stroke-width="2" marker-end="url(#bring-up-flow-arrow-danger)"/>
+	<text x="340" y="190" text-anchor="middle" class="dg-text-small dg-text-danger" fill="#BA1A1A" font-size="12">no <tspan class="dg-mono" font-family="ui-monospace, monospace">Custom FDL1</tspan> line</text>
+	<rect x="464" y="172" width="248" height="52" rx="10" class="dg-box-danger" fill="#FFDAD6" stroke="#BA1A1A" stroke-width="1.5"/>
+	<text x="476" y="193" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">Set the exec distance</text>
+	<text x="476" y="211" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">exec_distance = 0x314d</text>
+	<rect x="8" y="244" width="208" height="52" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="20" y="265" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">Bootstrap stages</text>
+	<text x="20" y="283" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">ENTRY … PREPARE LINUX</text>
+	<path d="M112,296 L112,308" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#bring-up-flow-arrow)"/>
+	<path d="M216,270 L456,270" class="dg-arrow-danger" fill="none" stroke="#BA1A1A" stroke-width="2" marker-end="url(#bring-up-flow-arrow-danger)"/>
+	<text x="340" y="246" text-anchor="middle" class="dg-text-small dg-text-danger" fill="#BA1A1A" font-size="12">failed attempts or</text>
+	<text x="340" y="262" text-anchor="middle" class="dg-text-small dg-text-danger dg-mono" fill="#BA1A1A" font-size="12" font-family="ui-monospace, monospace">64MB RAM REQUIRED</text>
+	<rect x="464" y="244" width="248" height="52" rx="10" class="dg-box-danger" fill="#FFDAD6" stroke="#BA1A1A" stroke-width="1.5"/>
+	<text x="476" y="265" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">Report the phone</text>
+	<text x="476" y="283" class="dg-text-small" fill="#202D35" font-size="12">another SoC variant or memory size</text>
+	<rect x="8" y="316" width="208" height="52" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="20" y="337" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">Linux USB</text>
+	<text x="20" y="355" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">0525:a4a6</text>
+	<path d="M112,368 L112,380" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#bring-up-flow-arrow)"/>
+	<path d="M216,342 L456,342" class="dg-arrow-danger" fill="none" stroke="#BA1A1A" stroke-width="2" marker-end="url(#bring-up-flow-arrow-danger)"/>
+	<text x="340" y="334" text-anchor="middle" class="dg-text-small dg-text-danger" fill="#BA1A1A" font-size="12">error after <tspan class="dg-mono" font-family="ui-monospace, monospace">PREPARE LINUX</tspan></text>
+	<rect x="464" y="316" width="248" height="52" rx="10" class="dg-box-danger" fill="#FFDAD6" stroke="#BA1A1A" stroke-width="1.5"/>
+	<text x="476" y="337" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">Check Linux USB</text>
+	<text x="476" y="355" class="dg-text-small" fill="#202D35" font-size="12"><tspan class="dg-mono" font-family="ui-monospace, monospace">lsusb -d 0525:a4a6</tspan>; absent: report</text>
+	<rect x="8" y="388" width="208" height="52" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="20" y="409" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">SSH session ready</text>
+	<text x="20" y="427" class="dg-text-small" fill="#202D35" font-size="12">Linux runs</text>
+	<!-- Back up and report -->
+	<path d="M112,440 L112,464" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#bring-up-flow-arrow)"/>
+	<rect x="8" y="472" width="208" height="52" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="20" y="493" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">Identify NAND</text>
+	<text x="20" y="511" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">nand identify</text>
+	<rect x="256" y="472" width="208" height="52" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="268" y="493" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">Save NAND backup</text>
+	<text x="268" y="511" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">nand backup</text>
+	<rect x="504" y="472" width="208" height="52" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="516" y="493" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">Prepare board report</text>
+	<text x="516" y="511" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">device-data prepare</text>
+	<path d="M216,498 L248,498" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#bring-up-flow-arrow)"/>
+	<path d="M464,498 L496,498" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#bring-up-flow-arrow)"/>
+	<path d="M608,524 L608,548" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#bring-up-flow-arrow)"/>
+	<rect x="504" y="556" width="208" height="52" rx="10" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="516" y="577" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">Report the phone</text>
+	<text x="516" y="595" class="dg-text-small" fill="#202D35" font-size="12">new phone report form</text>
+	<path d="M112,524 L112,548" class="dg-arrow-danger" fill="none" stroke="#BA1A1A" stroke-width="2" marker-end="url(#bring-up-flow-arrow-danger)"/>
+	<text x="124" y="543" class="dg-text-small dg-text-danger dg-mono" fill="#BA1A1A" font-size="12" font-family="ui-monospace, monospace">chip=unknown</text>
+	<rect x="8" y="556" width="208" height="52" rx="10" class="dg-box-danger" fill="#FFDAD6" stroke="#BA1A1A" stroke-width="1.5"/>
+	<text x="20" y="577" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">Report the phone</text>
+	<text x="20" y="595" class="dg-text-small" fill="#202D35" font-size="12">with a photo of the flash chip</text>
+</svg>

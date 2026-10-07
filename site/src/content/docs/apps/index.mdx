@@ -1,0 +1,124 @@
+---
+title: Applications
+description: The applications that come with FPLinux, how to start them on the phone, and how their command lines behave.
+---
+
+import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+import Figure from '../../../components/Figure.astro';
+import KeypadNames from '../../../assets/diagrams/keypad-names.svg';
+
+FPLinux comes with a few phone applications.
+
+## Optional applications
+
+These are optional packages that you install when you want them; see
+[Install an optional application](#install-an-optional-application).
+
+<CardGrid>
+	<LinkCard
+		title="Brightness control"
+		description="Set the LCD brightness level with the keypad. Command: <code>fplinux-brightness-ui</code>."
+		href="/fplinux/apps/brightness/"
+	/>
+	<LinkCard
+		title="FPLinux: ARMADA"
+		description="Watch a 3D scene with synchronized backlight, keypad light and vibration. Command: <code>fplinux-showcase</code>."
+		href="/fplinux/apps/armada/"
+	/>
+	<LinkCard
+		title="TyrQuake"
+		description="Play Quake with your own game data. Command: <code>quake</code>."
+		href="/fplinux/apps/tyrquake/"
+	/>
+	<LinkCard
+		title="Software video decoding"
+		description="Decode MPEG-4, H.263 and H.264 files on the CPU. Command: <code>ffmpeg</code>."
+		href="/fplinux/apps/ffmpeg/"
+	/>
+</CardGrid>
+
+## Image tools
+
+The image tools are part of the system on every phone.
+
+<CardGrid>
+	<LinkCard
+		title="Image rotation"
+		description="Rotate, mirror and preview raw images. Command: <code>fplinux-rotate</code>."
+		href="/fplinux/apps/image-tools/rotate/"
+	/>
+	<LinkCard
+		title="JPEG codec and scaling"
+		description="Decode and encode JPEG, and halve raw frames. Commands: <code>fplinux-jpeg</code>, <code>fplinux-jpeg-cpu</code>."
+		href="/fplinux/apps/image-tools/jpeg/"
+	/>
+	<LinkCard
+		title="Native image presentation"
+		description="Show a raw NV16 frame at the display's native size. Command: <code>fplinux-present</code>."
+		href="/fplinux/apps/image-tools/present/"
+	/>
+</CardGrid>
+
+## Where the applications work
+
+See the [application comparison](/fplinux/phones/#application-support) for a
+quick overview and [phone support status](/fplinux/phones/#support-status) for
+each phone's requirements and limitations.
+
+## Install an optional application
+
+Install the APK as described in [Packages](/fplinux/guides/packages/). In a
+RAM boot, an installed application lasts until the phone shuts down. On a
+[microSD system card](/fplinux/guides/microsd-system-card/), it stays installed
+until you remove it. No optional application starts by itself. Exit an
+application before you remove its package.
+
+## Start an application
+
+Start an application in either of two ways:
+
+- On the phone, type its command in the [local terminal](/fplinux/use/terminal/).
+- From the PC, run its command on the phone with `--exec`, as described in
+  [Connect from a PC](/fplinux/use/connect/). The PC command returns when the
+  application exits and shows its output.
+
+Brightness control, ARMADA and TyrQuake take over the display while they run.
+When they exit, the display returns to the terminal. `fplinux-present` and the
+`fplinux-rotate` preview take over the display only while they show a picture.
+
+The application pages name the phone keys as follows.
+
+<Figure caption="Phone keys" width="32rem"><KeypadNames /></Figure>
+
+## Command-line behavior
+
+The FPLinux image tools, brightness application, ARMADA and Quake launcher
+follow these command-line rules. FFmpeg uses its own syntax; see
+`ffmpeg -h` for help.
+
+- `-h` or `--help` prints the usage and every option, then exits with status
+  `0`. It does not open a device or start any work.
+- An option value can follow a space or an equals sign: `--output FILE` and
+  `--output=FILE` are the same. Values cannot be empty.
+- The image tools accept a repeated value option and use its last value. Every
+  occurrence must still be valid. The other applications reject a repeated
+  option.
+- A command-line error prints the command name and the problem, followed by a
+  hint, and exits with status `2`:
+
+  ```text title="Phone"
+  $ fplinux-present --input /run/frame.nv16 --mode rgb
+  fplinux-present: --mode must be nv16 or cpu-rgb565
+  Try 'fplinux-present --help' for more information.
+  ```
+
+- A failure after the command line has been accepted exits with another
+  nonzero status and reports the cause on standard error.
+
+## Where to keep files
+
+Keep inputs and outputs in `/run` or `/tmp`. Both are RAM filesystems: they are
+always writable, but they use phone memory and are emptied when the phone shuts
+down. Copy files between the PC and the phone as described in
+[Connect from a PC](/fplinux/use/connect/). To keep files across boots, use a
+[microSD card](/fplinux/use/microsd/).

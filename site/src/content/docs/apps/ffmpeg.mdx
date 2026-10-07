@@ -1,0 +1,58 @@
+---
+title: Software video decoding
+description: Decode MPEG-4, H.263 and H.264 files on the phone with the optional FFmpeg package.
+source:
+  - alpine/aports/fplinux-ffmpeg
+---
+
+import FeatureStatus from '../../../components/FeatureStatus.astro';
+
+`fplinux-ffmpeg.apk` supplies the `ffmpeg` command as an optional application.
+It decodes MPEG-4 Part 2, H.263 and H.264 on the CPU, including ARM NEON
+routines. It does not use the phone's video accelerator.
+
+<FeatureStatus feature="ffmpeg" />
+
+Install it through [Packages](/fplinux/guides/packages/). Its installed package
+name is `fplinux-ffmpeg`; it is not preinstalled in the RAM image. Run the
+commands below in a shell on the phone, as described in
+[Applications](/fplinux/apps/).
+
+## Decode a file
+
+Input containers can be MP4/3GP, AVI or Matroska. Elementary MPEG-4, H.263
+and H.264 streams are also accepted. The video codec must be one of the three
+supported decoders.
+
+Decode a file without retaining its frames:
+
+```sh title="Phone"
+ffmpeg -threads 1 -i /tmp/clip.mp4 -an -f null -
+```
+
+Export the first decoded frame:
+
+```sh title="Phone"
+ffmpeg -threads 1 -i /tmp/clip.mp4 -an -frames:v 1 -f rawvideo /run/frame.yuv
+```
+
+Raw output has no dimensions, timestamps or pixel-format header. Read the
+output-stream description for its dimensions and native pixel format. For
+8-bit `yuv420p`, the file contains Y, then U, then V. Each chroma plane has
+half the width and height of Y, rounded up for odd dimensions. A `320×240`
+frame occupies `115,200` bytes. This planar format differs from the
+[JPEG tools' NV12 and NV16 files](/fplinux/apps/image-tools/jpeg/); it cannot
+be passed directly to the native NV16 presentation tool.
+
+## Limits
+
+- Input and output use files or pipes. There are no network protocols, camera
+  input, audio decoding, audio recording or playback window.
+- Video encoding, resizing, rotation and pixel-format conversion are not
+  included. Keep the decoded native pixel format.
+- Keep raw output bounded in `/run` or `/tmp`: a complete raw video can use
+  much more memory than its compressed input. Retain only needed frames or
+  send them through standard output to a consumer.
+
+The package does not replace the [hardware JPEG tools](/fplinux/apps/image-tools/jpeg/)
+or [rotation tool](/fplinux/apps/image-tools/rotate/).

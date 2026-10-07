@@ -1,5 +1,5 @@
 {
-  "globs": ["**/*.md", "!.cache/**", "!node_modules/**", "!out/**"],
+  "globs": ["**/*.md", "!.cache/**", "!node_modules/**", "!out/**", "!site/**"],
   "config": {
     "MD013": false,
     "MD024": {

@@ -1,0 +1,361 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 512" role="img" aria-labelledby="raw-formats-title" font-family="'Noto Sans', sans-serif">
+	<title id="raw-formats-title">Raw format layouts: NV12 and NV16 store the Y plane followed by an interleaved Cb,Cr plane; RGB565 stores one 16-bit value per pixel, low byte first</title>
+	<!-- NV12 -->
+	<text x="8" y="24" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">NV12</text>
+	<text x="52.5" y="24" class="dg-text-muted" fill="#6E797D" font-size="12">YCbCr 4:2:0</text>
+	<text x="232" y="46" text-anchor="middle" class="dg-text-muted" fill="#6E797D" font-size="12">W bytes per row</text>
+	<path d="M128,52 V60 M128,56 H336 M336,52 V60" class="dg-line-muted" fill="none" stroke="#6E797D" stroke-width="1.5"/>
+	<rect x="128" y="64" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="141" y="79" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="154" y="64" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="167" y="79" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="180" y="64" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="193" y="79" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="206" y="64" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="219" y="79" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="232" y="64" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="245" y="79" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="258" y="64" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="271" y="79" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="284" y="64" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="297" y="79" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="310" y="64" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="323" y="79" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="128" y="86" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="141" y="101" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="154" y="86" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="167" y="101" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="180" y="86" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="193" y="101" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="206" y="86" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="219" y="101" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="232" y="86" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="245" y="101" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="258" y="86" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="271" y="101" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="284" y="86" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="297" y="101" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="310" y="86" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="323" y="101" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="128" y="108" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="141" y="123" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="154" y="108" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="167" y="123" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="180" y="108" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="193" y="123" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="206" y="108" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="219" y="123" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="232" y="108" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="245" y="123" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="258" y="108" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="271" y="123" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="284" y="108" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="297" y="123" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="310" y="108" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="323" y="123" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="128" y="130" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="141" y="145" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="154" y="130" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="167" y="145" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="180" y="130" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="193" y="145" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="206" y="130" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="219" y="145" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="232" y="130" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="245" y="145" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="258" y="130" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="271" y="145" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="284" y="130" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="297" y="145" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="310" y="130" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="323" y="145" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="128" y="152" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="141" y="167" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="154" y="152" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="167" y="167" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<rect x="180" y="152" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="193" y="167" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="206" y="152" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="219" y="167" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<rect x="232" y="152" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="245" y="167" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="258" y="152" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="271" y="167" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<rect x="284" y="152" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="297" y="167" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="310" y="152" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="323" y="167" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<rect x="128" y="174" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="141" y="189" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="154" y="174" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="167" y="189" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<rect x="180" y="174" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="193" y="189" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="206" y="174" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="219" y="189" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<rect x="232" y="174" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="245" y="189" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="258" y="174" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="271" y="189" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<rect x="284" y="174" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="297" y="189" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="310" y="174" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="323" y="189" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<text x="118" y="106" text-anchor="end" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">Y plane</text>
+	<text x="118" y="122" text-anchor="end" class="dg-text-muted" fill="#6E797D" font-size="12">H rows</text>
+	<text x="118" y="172" text-anchor="end" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">Cb,Cr plane</text>
+	<text x="118" y="188" text-anchor="end" class="dg-text-muted" fill="#6E797D" font-size="12"><tspan class="dg-mono" font-family="ui-monospace, monospace">ceil(H / 2)</tspan> rows</text>
+	<!-- NV16 -->
+	<text x="372" y="24" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">NV16</text>
+	<text x="416.5" y="24" class="dg-text-muted" fill="#6E797D" font-size="12">YCbCr 4:2:2</text>
+	<text x="596" y="46" text-anchor="middle" class="dg-text-muted" fill="#6E797D" font-size="12">W bytes per row</text>
+	<path d="M492,52 V60 M492,56 H700 M700,52 V60" class="dg-line-muted" fill="none" stroke="#6E797D" stroke-width="1.5"/>
+	<rect x="492" y="64" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="505" y="79" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="518" y="64" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="531" y="79" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="544" y="64" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="557" y="79" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="570" y="64" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="583" y="79" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="596" y="64" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="609" y="79" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="622" y="64" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="635" y="79" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="648" y="64" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="661" y="79" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="674" y="64" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="687" y="79" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="492" y="86" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="505" y="101" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="518" y="86" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="531" y="101" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="544" y="86" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="557" y="101" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="570" y="86" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="583" y="101" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="596" y="86" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="609" y="101" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="622" y="86" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="635" y="101" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="648" y="86" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="661" y="101" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="674" y="86" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="687" y="101" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="492" y="108" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="505" y="123" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="518" y="108" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="531" y="123" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="544" y="108" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="557" y="123" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="570" y="108" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="583" y="123" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="596" y="108" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="609" y="123" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="622" y="108" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="635" y="123" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="648" y="108" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="661" y="123" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="674" y="108" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="687" y="123" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="492" y="130" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="505" y="145" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="518" y="130" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="531" y="145" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="544" y="130" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="557" y="145" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="570" y="130" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="583" y="145" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="596" y="130" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="609" y="145" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="622" y="130" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="635" y="145" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="648" y="130" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="661" y="145" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="674" y="130" width="26" height="22" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="687" y="145" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Y</text>
+	<rect x="492" y="152" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="505" y="167" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="518" y="152" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="531" y="167" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<rect x="544" y="152" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="557" y="167" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="570" y="152" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="583" y="167" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<rect x="596" y="152" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="609" y="167" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="622" y="152" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="635" y="167" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<rect x="648" y="152" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="661" y="167" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="674" y="152" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="687" y="167" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<rect x="492" y="174" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="505" y="189" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="518" y="174" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="531" y="189" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<rect x="544" y="174" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="557" y="189" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="570" y="174" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="583" y="189" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<rect x="596" y="174" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="609" y="189" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="622" y="174" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="635" y="189" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<rect x="648" y="174" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="661" y="189" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="674" y="174" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="687" y="189" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<rect x="492" y="196" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="505" y="211" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="518" y="196" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="531" y="211" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<rect x="544" y="196" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="557" y="211" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="570" y="196" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="583" y="211" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<rect x="596" y="196" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="609" y="211" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="622" y="196" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="635" y="211" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<rect x="648" y="196" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="661" y="211" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="674" y="196" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="687" y="211" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<rect x="492" y="218" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="505" y="233" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="518" y="218" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="531" y="233" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<rect x="544" y="218" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="557" y="233" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="570" y="218" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="583" y="233" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<rect x="596" y="218" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="609" y="233" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="622" y="218" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="635" y="233" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<rect x="648" y="218" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="661" y="233" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cb</text>
+	<rect x="674" y="218" width="26" height="22" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="687" y="233" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">Cr</text>
+	<text x="482" y="106" text-anchor="end" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">Y plane</text>
+	<text x="482" y="122" text-anchor="end" class="dg-text-muted" fill="#6E797D" font-size="12">H rows</text>
+	<text x="482" y="194" text-anchor="end" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">Cb,Cr plane</text>
+	<text x="482" y="210" text-anchor="end" class="dg-text-muted" fill="#6E797D" font-size="12">H rows</text>
+	<!-- RGB565 -->
+	<text x="8" y="288" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">RGB565</text>
+	<text x="68.69" y="288" class="dg-text-muted" fill="#6E797D" font-size="12">one 16-bit little-endian value per pixel</text>
+	<path d="M138,322 V316 H390 V322" class="dg-line-muted" fill="none" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="264" y="310" text-anchor="middle" class="dg-text-muted" fill="#6E797D" font-size="12">high byte</text>
+	<path d="M394,322 V316 H646 V322" class="dg-line-muted" fill="none" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="520" y="310" text-anchor="middle" class="dg-text-muted" fill="#6E797D" font-size="12">low byte</text>
+	<text x="152" y="332" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">15</text>
+	<rect x="136" y="340" width="32" height="32" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="152" y="361" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">R</text>
+	<text x="184" y="332" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">14</text>
+	<rect x="168" y="340" width="32" height="32" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="184" y="361" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">R</text>
+	<text x="216" y="332" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">13</text>
+	<rect x="200" y="340" width="32" height="32" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="216" y="361" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">R</text>
+	<text x="248" y="332" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">12</text>
+	<rect x="232" y="340" width="32" height="32" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="248" y="361" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">R</text>
+	<text x="280" y="332" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">11</text>
+	<rect x="264" y="340" width="32" height="32" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="280" y="361" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">R</text>
+	<text x="312" y="332" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">10</text>
+	<rect x="296" y="340" width="32" height="32" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="312" y="361" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">G</text>
+	<text x="344" y="332" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">9</text>
+	<rect x="328" y="340" width="32" height="32" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="344" y="361" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">G</text>
+	<text x="376" y="332" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">8</text>
+	<rect x="360" y="340" width="32" height="32" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="376" y="361" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">G</text>
+	<text x="408" y="332" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">7</text>
+	<rect x="392" y="340" width="32" height="32" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="408" y="361" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">G</text>
+	<text x="440" y="332" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">6</text>
+	<rect x="424" y="340" width="32" height="32" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="440" y="361" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">G</text>
+	<text x="472" y="332" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">5</text>
+	<rect x="456" y="340" width="32" height="32" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="472" y="361" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">G</text>
+	<text x="504" y="332" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">4</text>
+	<rect x="488" y="340" width="32" height="32" class="dg-box-2" fill="#EDEEEE" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="504" y="361" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">B</text>
+	<text x="536" y="332" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">3</text>
+	<rect x="520" y="340" width="32" height="32" class="dg-box-2" fill="#EDEEEE" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="536" y="361" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">B</text>
+	<text x="568" y="332" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">2</text>
+	<rect x="552" y="340" width="32" height="32" class="dg-box-2" fill="#EDEEEE" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="568" y="361" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">B</text>
+	<text x="600" y="332" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">1</text>
+	<rect x="584" y="340" width="32" height="32" class="dg-box-2" fill="#EDEEEE" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="600" y="361" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">B</text>
+	<text x="632" y="332" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">0</text>
+	<rect x="616" y="340" width="32" height="32" class="dg-box-2" fill="#EDEEEE" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="632" y="361" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">B</text>
+	<path d="M138,376 V382 H294 V376" class="dg-line-muted" fill="none" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="216" y="400" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">R[15:11]</text>
+	<path d="M298,376 V382 H486 V376" class="dg-line-muted" fill="none" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="392" y="400" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">G[10:5]</text>
+	<path d="M490,376 V382 H646 V376" class="dg-line-muted" fill="none" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="568" y="400" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">B[4:0]</text>
+	<text x="122" y="361" text-anchor="end" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">16-bit value</text>
+	<path d="M138,446 V440 H390 V446" class="dg-line-muted" fill="none" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="264" y="434" text-anchor="middle" class="dg-text-muted" fill="#6E797D" font-size="12">byte 0: low byte</text>
+	<path d="M410,446 V440 H662 V446" class="dg-line-muted" fill="none" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="536" y="434" text-anchor="middle" class="dg-text-muted" fill="#6E797D" font-size="12">byte 1: high byte</text>
+	<text x="152" y="456" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">7</text>
+	<rect x="136" y="464" width="32" height="32" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="152" y="485" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">G</text>
+	<text x="184" y="456" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">6</text>
+	<rect x="168" y="464" width="32" height="32" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="184" y="485" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">G</text>
+	<text x="216" y="456" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">5</text>
+	<rect x="200" y="464" width="32" height="32" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="216" y="485" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">G</text>
+	<text x="248" y="456" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">4</text>
+	<rect x="232" y="464" width="32" height="32" class="dg-box-2" fill="#EDEEEE" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="248" y="485" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">B</text>
+	<text x="280" y="456" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">3</text>
+	<rect x="264" y="464" width="32" height="32" class="dg-box-2" fill="#EDEEEE" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="280" y="485" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">B</text>
+	<text x="312" y="456" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">2</text>
+	<rect x="296" y="464" width="32" height="32" class="dg-box-2" fill="#EDEEEE" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="312" y="485" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">B</text>
+	<text x="344" y="456" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">1</text>
+	<rect x="328" y="464" width="32" height="32" class="dg-box-2" fill="#EDEEEE" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="344" y="485" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">B</text>
+	<text x="376" y="456" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">0</text>
+	<rect x="360" y="464" width="32" height="32" class="dg-box-2" fill="#EDEEEE" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="376" y="485" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">B</text>
+	<text x="424" y="456" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">15</text>
+	<rect x="408" y="464" width="32" height="32" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="424" y="485" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">R</text>
+	<text x="456" y="456" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">14</text>
+	<rect x="440" y="464" width="32" height="32" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="456" y="485" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">R</text>
+	<text x="488" y="456" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">13</text>
+	<rect x="472" y="464" width="32" height="32" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="488" y="485" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">R</text>
+	<text x="520" y="456" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">12</text>
+	<rect x="504" y="464" width="32" height="32" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="520" y="485" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">R</text>
+	<text x="552" y="456" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">11</text>
+	<rect x="536" y="464" width="32" height="32" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="552" y="485" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">R</text>
+	<text x="584" y="456" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">10</text>
+	<rect x="568" y="464" width="32" height="32" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="584" y="485" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">G</text>
+	<text x="616" y="456" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">9</text>
+	<rect x="600" y="464" width="32" height="32" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="616" y="485" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">G</text>
+	<text x="648" y="456" text-anchor="middle" class="dg-text-muted dg-mono" fill="#6E797D" font-size="12" font-family="ui-monospace, monospace">8</text>
+	<rect x="632" y="464" width="32" height="32" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+	<text x="648" y="485" text-anchor="middle" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">G</text>
+	<text x="122" y="477" text-anchor="end" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">In the file</text>
+	<text x="122" y="494" text-anchor="end" class="dg-text-muted" fill="#6E797D" font-size="12">low byte first</text>
+</svg>

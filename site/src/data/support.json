@@ -1,0 +1,1784 @@
+{
+  "groups": [
+    "Startup and access",
+    "Display and input",
+    "Audio",
+    "Bluetooth and networks",
+    "Camera and images",
+    "Storage",
+    "Power and sensors",
+    "Applications"
+  ],
+  "phones": [
+    {
+      "id": "nokia-ta1618",
+      "name": "Nokia 3210 4G",
+      "code": "TA-1618",
+      "slug": "phones/nokia-3210-4g"
+    },
+    {
+      "id": "inoi-240-modern-4g",
+      "name": "INOI 240 Modern 4G",
+      "code": null,
+      "slug": "phones/inoi-240-modern-4g"
+    },
+    {
+      "id": "inoi-244-modern-4g",
+      "name": "INOI 244 Modern 4G",
+      "code": null,
+      "slug": "phones/inoi-244-modern-4g"
+    },
+    {
+      "id": "maxvi-k15n-4g",
+      "name": "Maxvi K15n4G",
+      "code": null,
+      "slug": "phones/maxvi-k15n-4g"
+    }
+  ],
+  "features": [
+    {
+      "id": "ram-boot",
+      "label": "RAM boot",
+      "kind": "system",
+      "guide": "start/run",
+      "group": "Startup and access",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Supported",
+          "note": ""
+        },
+        "inoi-240-modern-4g": {
+          "status": "Supported",
+          "note": ""
+        },
+        "inoi-244-modern-4g": {
+          "status": "Supported",
+          "note": ""
+        },
+        "maxvi-k15n-4g": {
+          "status": "Supported",
+          "note": ""
+        }
+      }
+    },
+    {
+      "id": "persistent-boot",
+      "label": "Boot without the USB loader",
+      "kind": "system",
+      "guide": "features#not-implemented",
+      "group": "Startup and access",
+      "implementation": "Not implemented",
+      "verification": "Not device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Not supported",
+          "note": "The RAM bootstrap must be loaded over USB for every Linux boot."
+        },
+        "inoi-240-modern-4g": {
+          "status": "Not supported",
+          "note": "A USB-loaded RAM bootstrap is required for every Linux boot."
+        },
+        "inoi-244-modern-4g": {
+          "status": "Not supported",
+          "note": "A USB-loaded RAM bootstrap is required for every Linux boot."
+        },
+        "maxvi-k15n-4g": {
+          "status": "Not supported",
+          "note": "Load the RAM bootstrap over USB for every Linux boot."
+        }
+      }
+    },
+    {
+      "id": "local-console",
+      "label": "Local terminal",
+      "kind": "system",
+      "guide": "use/terminal",
+      "group": "Display and input",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "240×320 graphical terminal with phone-keypad input; RTC wake preserves the shell in USB-powered RAM sessions. Operation without USB power is untested."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "128×160 graphical terminal with phone-keypad input; RTC wake preserves the shell in USB-powered RAM sessions. Terminal use with a microSD system root, operation without USB power and physical external keyboards are untested."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "240×320 graphical terminal with phone-keypad input; RTC wake preserves the shell in USB-powered RAM sessions. Terminal use with a microSD system root, operation without USB power and physical external keyboards are untested."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "240×320 graphical terminal with physical keypad, multi-tap typing, menus, Help, scrollback and one-shot modifier combinations."
+        }
+      }
+    },
+    {
+      "id": "lcd-backlight",
+      "label": "LCD backlight",
+      "kind": "hardware",
+      "guide": "use/display-and-lights#screen-brightness",
+      "group": "Display and input",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "System scale 0…10, raw range 0…20; visible spacing of the new intermediate levels is not fully qualified."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "System scale 0…10 works; level 0 turns the backlight off."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "System scale 0…10 works; level 0 turns the backlight off."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "System levels 0…10; level 0 turns the light off. Visible step spacing is unqualified."
+        }
+      }
+    },
+    {
+      "id": "keypad-backlight",
+      "label": "Keypad backlight",
+      "kind": "hardware",
+      "guide": "use/display-and-lights#keypad-light",
+      "group": "Display and input",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Binary LED control plus a bounded key-press light."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Binary LED control; on and off are visible."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Binary LED control; on and off are visible."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Lights on key presses and turns off after five seconds, including after wake."
+        }
+      }
+    },
+    {
+      "id": "usb-networking",
+      "label": "USB networking",
+      "kind": "system",
+      "guide": "use/connect#what-the-usb-link-is",
+      "group": "Startup and access",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": ""
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": ""
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": ""
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": ""
+        }
+      }
+    },
+    {
+      "id": "ssh-access",
+      "label": "SSH access",
+      "kind": "system",
+      "guide": "use/connect#open-a-shell",
+      "group": "Startup and access",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Supported",
+          "note": ""
+        },
+        "inoi-240-modern-4g": {
+          "status": "Supported",
+          "note": ""
+        },
+        "inoi-244-modern-4g": {
+          "status": "Supported",
+          "note": ""
+        },
+        "maxvi-k15n-4g": {
+          "status": "Supported",
+          "note": ""
+        }
+      }
+    },
+    {
+      "id": "file-transfer",
+      "label": "File transfer",
+      "kind": "system",
+      "guide": "use/connect#copy-files",
+      "group": "Startup and access",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Supported",
+          "note": "RAM and a writable mounted microSD are valid destinations."
+        },
+        "inoi-240-modern-4g": {
+          "status": "Supported",
+          "note": "RAM destinations are supported. Card destinations require qualified fixed-session initialization; FAT32 transfers are unqualified."
+        },
+        "inoi-244-modern-4g": {
+          "status": "Supported",
+          "note": "RAM destinations are supported. Card destinations require qualified fixed-session initialization."
+        },
+        "maxvi-k15n-4g": {
+          "status": "Supported",
+          "note": ""
+        }
+      }
+    },
+    {
+      "id": "host-keyboard-bridge",
+      "label": "Host keyboard bridge",
+      "kind": "system",
+      "guide": "use/connect#type-with-your-computers-keyboard",
+      "group": "Display and input",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Supported",
+          "note": ""
+        },
+        "inoi-240-modern-4g": {
+          "status": "Supported",
+          "note": ""
+        },
+        "inoi-244-modern-4g": {
+          "status": "Supported",
+          "note": ""
+        },
+        "maxvi-k15n-4g": {
+          "status": "Unknown",
+          "note": ""
+        }
+      }
+    },
+    {
+      "id": "cpu-clock-reporting",
+      "label": "CPU clock reporting",
+      "kind": "system",
+      "guide": "use/cpu-and-temperature#cpu-speed",
+      "group": "Power and sensors",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Supported",
+          "note": ""
+        },
+        "inoi-240-modern-4g": {
+          "status": "Supported",
+          "note": ""
+        },
+        "inoi-244-modern-4g": {
+          "status": "Supported",
+          "note": ""
+        },
+        "maxvi-k15n-4g": {
+          "status": "Supported",
+          "note": ""
+        }
+      }
+    },
+    {
+      "id": "manual-cpu-frequency-selection",
+      "label": "Manual CPU frequency selection",
+      "kind": "system",
+      "guide": "use/cpu-and-temperature#cpu-speed",
+      "group": "Power and sensors",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Supported",
+          "note": "Switching between 768 MHz and 1 GHz works on this phone."
+        },
+        "inoi-240-modern-4g": {
+          "status": "Supported",
+          "note": "Switching between 768 MHz and 1 GHz works on this phone."
+        },
+        "inoi-244-modern-4g": {
+          "status": "Partial",
+          "note": "The 768 MHz and 1 GHz settings are in the target build; switching on this phone has not been physically tested."
+        },
+        "maxvi-k15n-4g": {
+          "status": "Supported",
+          "note": "768 MHz and 1 GHz."
+        }
+      }
+    },
+    {
+      "id": "ap-dmaengine",
+      "label": "AP DMAengine",
+      "kind": "hardware",
+      "guide": "porting/ums9117#memory-copy-dma",
+      "group": "Camera and images",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "ROTA uses its fixed peripheral request; see platform limits."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Memory copies and the fixed ROTA request; see platform limits."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Memory copies and the fixed ROTA request; see platform limits."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Unknown",
+          "status": "Unknown",
+          "note": ""
+        }
+      }
+    },
+    {
+      "id": "image-rotation-engine",
+      "label": "Image rotation engine",
+      "kind": "hardware",
+      "guide": "apps/image-tools/rotate",
+      "group": "Camera and images",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Hardware rotation through V4L2 mem2mem, including RGB, grayscale and two-plane YUV."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "RGB, grayscale and two-plane YUV through V4L2 mem2mem."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "RGB, grayscale and two-plane YUV through V4L2 mem2mem."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": "The ROTA device is disabled; use the application's CPU engine."
+        }
+      }
+    },
+    {
+      "id": "jpeg-engine",
+      "label": "JPEG codec and scaling engine",
+      "kind": "hardware",
+      "guide": "apps/image-tools/jpeg",
+      "group": "Camera and images",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Baseline JPEG decode, fixed JPEG encode geometries, and two fixed half-size NV16 scaler pairs."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Baseline decode, fixed encode geometries and fixed NV16 scaler pairs."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Baseline decode, fixed encode geometries and fixed NV16 scaler pairs."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Native-size encoding, horizontal 4:2:2 half-resolution decoding and fixed half-scaling are available."
+        }
+      }
+    },
+    {
+      "id": "native-image-output",
+      "label": "Native image presentation",
+      "kind": "hardware",
+      "guide": "apps/image-tools/present",
+      "group": "Camera and images",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Native 240×320 NV16 or CPU-converted RGB565 presentation through LCDC. Returns to the same terminal and shell; visible image fidelity is untested."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Native 128×160 NV16 or RGB565. Returns to the same terminal and shell; visible image fidelity is untested."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Native 240×320 NV16 or RGB565 transfers. Returns to the same terminal and shell; visible image fidelity is untested."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "RGB565 and native NV16 presentation; color accuracy is unqualified."
+        }
+      }
+    },
+    {
+      "id": "image-rotation",
+      "label": "Image rotation",
+      "kind": "application",
+      "guide": "apps/image-tools/rotate",
+      "group": "Applications",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Supported",
+          "note": "Included in the normal root filesystem; explicit CPU/ROTA selection and DRM preview. Returns to the same terminal and shell; visible image fidelity is untested."
+        },
+        "inoi-240-modern-4g": {
+          "status": "Supported",
+          "note": "Explicit CPU/ROTA selection and DRM preview. Returns to the same terminal and shell; visible image fidelity is untested."
+        },
+        "inoi-244-modern-4g": {
+          "status": "Supported",
+          "note": "Explicit CPU/ROTA selection and DRM preview. Returns to the same terminal and shell; visible image fidelity is untested."
+        },
+        "maxvi-k15n-4g": {
+          "status": "Partial",
+          "note": "CPU path; ROTA is disabled."
+        }
+      }
+    },
+    {
+      "id": "jpeg-codec-and-scaling",
+      "label": "JPEG codec and scaling",
+      "kind": "application",
+      "guide": "apps/image-tools/jpeg",
+      "group": "Applications",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Supported",
+          "note": "Included in the normal root filesystem; hardware decode, fixed encode, and fixed half-scaling."
+        },
+        "inoi-240-modern-4g": {
+          "status": "Supported",
+          "note": "Hardware decode, fixed encode and fixed half-scaling."
+        },
+        "inoi-244-modern-4g": {
+          "status": "Supported",
+          "note": "Hardware decode, fixed encode and fixed half-scaling."
+        },
+        "maxvi-k15n-4g": {
+          "status": "Partial",
+          "note": "Available within the qualified sizes and operations above."
+        }
+      }
+    },
+    {
+      "id": "native-image-presentation",
+      "label": "Native image presentation",
+      "kind": "application",
+      "guide": "apps/image-tools/present",
+      "group": "Applications",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Partial",
+          "note": "Included in the normal root filesystem; direct NV16 or CPU-converted RGB565 presentation. Returns to the same terminal and shell; visible image fidelity is untested."
+        },
+        "inoi-240-modern-4g": {
+          "status": "Partial",
+          "note": "Direct NV16 or CPU-converted RGB565 presentation. Returns to the same terminal and shell; visible image fidelity is untested."
+        },
+        "inoi-244-modern-4g": {
+          "status": "Partial",
+          "note": "Direct NV16 or CPU-converted RGB565 transfers. Returns to the same terminal and shell; visible image fidelity is untested."
+        },
+        "maxvi-k15n-4g": {
+          "status": "Partial",
+          "note": "RGB565 and native NV16 presentation; color accuracy is unqualified."
+        }
+      }
+    },
+    {
+      "id": "usb-host-mode",
+      "label": "USB host mode",
+      "kind": "hardware",
+      "guide": "features#not-implemented",
+      "group": "Startup and access",
+      "implementation": "Not implemented",
+      "verification": "Not device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": ""
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": ""
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": ""
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": ""
+        }
+      }
+    },
+    {
+      "id": "removable-storage",
+      "label": "microSD data card",
+      "kind": "hardware",
+      "guide": "use/microsd",
+      "group": "Storage",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "FAT32 and ext4 read/write; unmounted hot-swap is available."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "The card stays installed from boot to shutdown; hot-swap is not supported. Fixed-session initialization has not been qualified on this phone."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "The card stays installed from boot to shutdown; hot-swap is not supported. Fixed-session initialization has not been qualified on this phone."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "SDHC FAT32 and ext4 read/write in the RAM profile; insert the card before boot and keep it installed throughout the powered session. Hot-swap is not supported."
+        }
+      }
+    },
+    {
+      "id": "removable-system-root",
+      "label": "microSD system card",
+      "kind": "system",
+      "guide": "guides/microsd-system-card",
+      "group": "Storage",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "microSD FAT32 FIT plus writable ext4; the system card stays installed."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "FAT32 FIT plus ext4 system root; fixed-session card initialization is unqualified."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "FAT32 FIT plus ext4 system root; fixed-session card initialization is unqualified."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Present",
+          "status": "Not supported",
+          "note": "Only the RAM root is available."
+        }
+      }
+    },
+    {
+      "id": "internal-phone-storage",
+      "label": "Internal phone storage",
+      "kind": "hardware",
+      "guide": "guides/device-data#save-a-nand-backup",
+      "group": "Storage",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Read-only raw NAND backup; no filesystem, writes or restore."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Read-only raw NAND backup; no filesystem, writes or restore."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Read-only raw NAND backup; no filesystem, writes or restore."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Read-only raw NAND backup; no filesystem, writes or restore."
+        }
+      }
+    },
+    {
+      "id": "headphone-audio",
+      "label": "Headphone audio",
+      "kind": "hardware",
+      "guide": "use/audio#play-a-file",
+      "group": "Audio",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Stereo S16_LE playback with fitted gain levels and the stock equalizer and ALC."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Stereo S16_LE playback; the default device converts input to 48 kHz, and the fitted profile supplies stock-derived levels, equalizer and ALC."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Stereo S16_LE playback; the default device converts input to 48 kHz, and the fitted profile supplies stock-derived levels, equalizer and ALC."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Stereo PCM and per-channel mute with three-contact TRS headphones; jack detection works, but automatic output routing is not supported. TRRS compatibility is unqualified."
+        }
+      }
+    },
+    {
+      "id": "speaker-audio",
+      "label": "Speaker audio",
+      "kind": "hardware",
+      "guide": "use/audio#where-the-sound-goes",
+      "group": "Audio",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "One speaker above the display, alone or with the headphones, with fitted gains, stock equalizer and ALC."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Rear loudspeaker with fitted gains, stock equalizer and ALC."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Rear loudspeaker with fitted gains, stock equalizer and ALC."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "PCM playback through the built-in speaker."
+        }
+      }
+    },
+    {
+      "id": "phone-microphone",
+      "label": "Phone microphone",
+      "kind": "hardware",
+      "guide": "use/audio#record-from-the-microphone",
+      "group": "Audio",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "overview",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Built-in and original wired-headset microphones; 48-kHz mono capture can run alongside 48-kHz stereo playback."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Built-in and four-contact wired-headset microphones record mono 48-kHz PCM."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "The built-in microphone records mono 48-kHz PCM; the wired-headset microphone has not been tested on this phone."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Built-in microphone recording and replay, mono S16_LE at 48 kHz and duplex capture; acoustic response and headset input are unqualified."
+        }
+      }
+    },
+    {
+      "id": "fm-radio",
+      "label": "FM radio",
+      "kind": "hardware",
+      "guide": "use/fm-radio",
+      "group": "Audio",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "RAM profile: scan and headphone/speaker playback with EQ/ALC off. EQ-on playback checked on headphones only; speaker EQ and microSD FM not tested."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "RAM profile: scan and headphone/speaker playback with EQ/ALC off. EQ-on playback and microSD FM not tested."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "RAM profile: scan and headphone/speaker playback with EQ/ALC off. EQ-on playback checked on headphones only; speaker EQ and microSD FM not tested."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Seeking, tuning and headphone reception in the RAM profile, with or without the battery installed; speaker, stereo output and sensitivity are unqualified."
+        }
+      }
+    },
+    {
+      "id": "modem-and-mobile-service",
+      "label": "Modem and mobile service",
+      "kind": "hardware",
+      "guide": "features#not-implemented",
+      "group": "Bluetooth and networks",
+      "implementation": "Not implemented",
+      "verification": "Not device-tested",
+      "scope": "overview",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Not supported",
+          "note": ""
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Not supported",
+          "note": ""
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Not supported",
+          "note": ""
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": ""
+        }
+      }
+    },
+    {
+      "id": "bluetooth",
+      "label": "Bluetooth",
+      "kind": "hardware",
+      "guide": "use/bluetooth",
+      "group": "Bluetooth and networks",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "overview",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "BR/EDR pairing, bidirectional OPP and PAN Internet in both profiles; LE keyboards and mice in the RAM profile; requires firmware from this phone."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Pairing, bidirectional OPP, PAN Internet and recovery after RTC-woken s2idle work in both profiles; keyboards and mice have not been tested."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Pairing, OPP and PAN in both profiles; RAM A2DP/SBC output to a Linux PC sink. Physical Bluetooth headsets, keyboards and mice remain unqualified."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Pairing, OPP, PAN and SBC A2DP source with a Linux PC; physical headsets and HID are unqualified."
+        }
+      }
+    },
+    {
+      "id": "wi-fi",
+      "label": "Wi-Fi",
+      "kind": "hardware",
+      "guide": "features#not-implemented",
+      "group": "Bluetooth and networks",
+      "implementation": "Not implemented",
+      "verification": "Not device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": ""
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": ""
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": ""
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": ""
+        }
+      }
+    },
+    {
+      "id": "camera",
+      "label": "Camera",
+      "kind": "hardware",
+      "guide": "use/camera",
+      "group": "Camera and images",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Rear GC2145; 800×600 and 1600×1200 NV16 through V4L2 in the RAM profile. Camera with a microSD system root is unqualified."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "BF30A2; 240×320 NV16 through V4L2 in the RAM profile. Camera with a microSD system root is unqualified."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "BF30A2; 240×320 NV16 through V4L2 in the RAM profile. Camera with a microSD system root is unqualified."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "BF3A01; native 240×320 NV16, sensor rotation 270° and adjustable brightness. Color accuracy is unqualified."
+        }
+      }
+    },
+    {
+      "id": "charger-status",
+      "label": "Charger status",
+      "kind": "hardware",
+      "guide": "use/power#charger-and-battery",
+      "group": "Power and sensors",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Read-only external-input status."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "External-input status is available; battery charging has not been tested."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Read-only status is available; battery charging has not been tested."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "USB input detection; battery charging is unqualified."
+        }
+      }
+    },
+    {
+      "id": "battery-telemetry",
+      "label": "Battery telemetry",
+      "kind": "hardware",
+      "guide": "use/power#charger-and-battery",
+      "group": "Power and sensors",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Voltage, signed current and a relative charge counter; absolute accuracy is unchecked."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Voltage, current and charge counter respond; measurements with a battery have not been tested."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Interface responds without a battery; battery voltage/current accuracy has not been checked."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": "The fuel gauge is disabled."
+        }
+      }
+    },
+    {
+      "id": "soc-temperature",
+      "label": "SoC temperature",
+      "kind": "hardware",
+      "guide": "use/cpu-and-temperature#temperature",
+      "group": "Power and sensors",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Calibrated reading without external accuracy validation."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Temperature readings are available; physical accuracy has not been checked."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Shared temperature interface enabled; physical accuracy has not been checked."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": "The thermal device is disabled."
+        }
+      }
+    },
+    {
+      "id": "auxiliary-adc",
+      "label": "Auxiliary ADC",
+      "kind": "hardware",
+      "guide": "develop/device-interfaces",
+      "group": "Power and sensors",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Five raw channels without physical-unit conversion."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Raw-channel interface enabled; physical inputs and accuracy have not been checked."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Shared raw-channel interface enabled; physical inputs and accuracy have not been checked."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Raw readings are available; channel calibration is unqualified."
+        }
+      }
+    },
+    {
+      "id": "real-time-clock",
+      "label": "Real-time clock",
+      "kind": "hardware",
+      "guide": "use/power#clock-and-alarms",
+      "group": "Power and sensors",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Read/set time, one-shot alarms and RTC wake in both profiles, including after time correction; no update interrupts or alarm power-on."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Read/set time, one-shot alarms and RTC wake work in both profiles; no update interrupts or alarm power-on."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Read/set time, one-shot alarms and RTC wake work in both profiles; no update interrupts or alarm power-on."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Read/write and alarm wake from s2idle; battery retention is unqualified."
+        }
+      }
+    },
+    {
+      "id": "other-battery-functions",
+      "label": "Other battery functions",
+      "kind": "hardware",
+      "guide": "features#not-implemented",
+      "group": "Power and sensors",
+      "implementation": "Not implemented",
+      "verification": "Not device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Not supported",
+          "note": "No level, battery temperature or charge control is provided."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": "No battery level, temperature or charge control is provided."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": "No battery level, temperature or charge control is provided."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": "No battery level, battery temperature or charge-control interface is provided."
+        }
+      }
+    },
+    {
+      "id": "vibration",
+      "label": "Vibration",
+      "kind": "hardware",
+      "guide": "use/display-and-lights#vibration",
+      "group": "Power and sensors",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Binary FF_RUMBLE effects with a five-second automatic cutoff."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Rear speaker vibration; headphone audio is muted meanwhile, and one continuous pulse lasts at most about three seconds."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Rear speaker vibration; headphone audio is muted meanwhile, and one continuous pulse lasts at most about three seconds."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": "No vibration device is enabled."
+        }
+      }
+    },
+    {
+      "id": "indicator-leds",
+      "label": "Indicator LEDs",
+      "kind": "hardware",
+      "guide": "features#not-implemented",
+      "group": "Display and input",
+      "implementation": "Not implemented",
+      "verification": "Not device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": ""
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": ""
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": ""
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": ""
+        }
+      }
+    },
+    {
+      "id": "power-off",
+      "label": "Power-off",
+      "kind": "system",
+      "guide": "use/power#power-off-with-the-red-key",
+      "group": "Power and sensors",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Supported",
+          "note": "Hold the red handset key for five seconds; external charger power must be absent."
+        },
+        "inoi-240-modern-4g": {
+          "status": "Partial",
+          "note": "Establish card safety before disconnecting USB power; battery-only power-off has not been tested."
+        },
+        "inoi-244-modern-4g": {
+          "status": "Partial",
+          "note": "Establish card safety before disconnecting USB power; battery-only power-off has not been tested."
+        },
+        "maxvi-k15n-4g": {
+          "status": "Unknown",
+          "note": ""
+        }
+      }
+    },
+    {
+      "id": "suspend",
+      "label": "Suspend",
+      "kind": "system",
+      "guide": "use/power#sleep",
+      "group": "Power and sensors",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Supported",
+          "note": "s2idle in both profiles, including Bluetooth, mounted data cards and card-backed swap; the red handset key and RTC alarms are wake sources."
+        },
+        "inoi-240-modern-4g": {
+          "status": "Partial",
+          "note": "s2idle with RTC/red-handset wake and Bluetooth; mounted-card and card-backed-swap sleep is unqualified with fixed-session card initialization."
+        },
+        "inoi-244-modern-4g": {
+          "status": "Partial",
+          "note": "s2idle with RTC/red-handset wake and Bluetooth; mounted-card and card-backed-swap sleep is unqualified with fixed-session card initialization."
+        },
+        "maxvi-k15n-4g": {
+          "status": "Partial",
+          "note": "USB-powered s2idle with RTC or red-handset wake restores the display and USB session; mounted ext4 storage remains usable after RTC wake."
+        }
+      }
+    },
+    {
+      "id": "reboot",
+      "label": "Reboot",
+      "kind": "system",
+      "guide": "features#not-implemented",
+      "group": "Power and sensors",
+      "implementation": "Not implemented",
+      "verification": "Not device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Not supported",
+          "note": ""
+        },
+        "inoi-240-modern-4g": {
+          "status": "Not supported",
+          "note": ""
+        },
+        "inoi-244-modern-4g": {
+          "status": "Not supported",
+          "note": ""
+        },
+        "maxvi-k15n-4g": {
+          "status": "Not supported",
+          "note": ""
+        }
+      }
+    },
+    {
+      "id": "fplinux-armada",
+      "label": "FPLinux: ARMADA",
+      "kind": "application",
+      "guide": "apps/armada",
+      "group": "Applications",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Partial",
+          "note": "Synchronizes the display, keypad light and vibrator."
+        },
+        "inoi-240-modern-4g": {
+          "status": "Partial",
+          "note": "Runs in both profiles; physical display and light effects have not been tested."
+        },
+        "inoi-244-modern-4g": {
+          "status": "Partial",
+          "note": "Physical light effects have not been tested."
+        },
+        "maxvi-k15n-4g": {
+          "status": "Not supported",
+          "note": "No force-feedback device is enabled."
+        }
+      }
+    },
+    {
+      "id": "brightness-control",
+      "label": "Brightness control",
+      "kind": "application",
+      "guide": "apps/brightness",
+      "group": "Applications",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Supported",
+          "note": "Phone-keypad control of levels 0…10; level 0 turns the backlight off."
+        },
+        "inoi-240-modern-4g": {
+          "status": "Supported",
+          "note": "Phone-keypad control of levels 0…10; level 0 turns the backlight off."
+        },
+        "inoi-244-modern-4g": {
+          "status": "Supported",
+          "note": "Phone-keypad control of levels 0…10; level 0 turns the backlight off."
+        },
+        "maxvi-k15n-4g": {
+          "status": "Unknown",
+          "note": "Application support has not been established on this phone."
+        }
+      }
+    },
+    {
+      "id": "tyrquake",
+      "label": "TyrQuake",
+      "kind": "application",
+      "guide": "apps/tyrquake",
+      "group": "Applications",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Partial",
+          "note": "Game data can use the supported microSD path."
+        },
+        "inoi-240-modern-4g": {
+          "status": "Partial",
+          "note": "Game data can use RAM or ext4 microSD storage, including the system root; fixed-session card initialization is unqualified."
+        },
+        "inoi-244-modern-4g": {
+          "status": "Partial",
+          "note": "Game data can use RAM or ext4 microSD storage, including the system root; fixed-session card initialization is unqualified."
+        },
+        "maxvi-k15n-4g": {
+          "status": "Partial",
+          "note": "Game data can use RAM or ext4 microSD storage; phone gameplay controls are supported."
+        }
+      }
+    },
+    {
+      "id": "built-in-microphone",
+      "label": "Built-in microphone",
+      "kind": "hardware",
+      "guide": "use/audio#record-from-the-microphone",
+      "group": "Audio",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "detail",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Mono 48-kHz capture can run alongside 48-kHz stereo playback."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Mono 48-kHz PCM recording."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Mono 48-kHz PCM recording."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Built-in microphone recording and replay, mono S16_LE at 48 kHz and duplex capture; acoustic response is unqualified."
+        }
+      }
+    },
+    {
+      "id": "headset-microphone",
+      "label": "Wired-headset microphone",
+      "kind": "hardware",
+      "guide": "use/audio#record-from-the-microphone",
+      "group": "Audio",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "detail",
+      "phones": {
+        "nokia-ta1618": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Original wired headset; select the Headset source before recording."
+        },
+        "inoi-240-modern-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Four-contact wired-headset recording; select the Headset source manually."
+        },
+        "inoi-244-modern-4g": {
+          "hardware": "Unknown",
+          "status": "Unknown",
+          "note": "Wired-headset recording has not been tested on this phone."
+        },
+        "maxvi-k15n-4g": {
+          "hardware": "Unknown",
+          "status": "Unknown",
+          "note": "Headset input is implemented; physical recording is untested."
+        }
+      }
+    },
+    {
+      "id": "automatic-audio-routing",
+      "label": "Automatic audio routing",
+      "kind": "system",
+      "guide": "use/audio#where-the-sound-goes",
+      "group": "Audio",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "detail",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Supported",
+          "note": "Insert/remove selects the playback output in USB-powered RAM sessions; switching a playing signal can click."
+        },
+        "inoi-240-modern-4g": {
+          "status": "Supported",
+          "note": "Insert/remove selects the playback output in USB-powered RAM sessions; switching a playing signal can click."
+        },
+        "inoi-244-modern-4g": {
+          "status": "Supported",
+          "note": "Insert/remove selects the playback output in USB-powered RAM sessions; switching a playing signal can click."
+        },
+        "maxvi-k15n-4g": {
+          "status": "Not supported",
+          "note": "Automatic playback routing is not included in this phone's image."
+        }
+      }
+    },
+    {
+      "id": "bluetooth-pairing",
+      "label": "Bluetooth pairing",
+      "kind": "system",
+      "guide": "use/bluetooth#pair-with-a-computer-or-another-phone",
+      "group": "Bluetooth and networks",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "detail",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Supported",
+          "note": "BR/EDR pairing in RAM and microSD profiles."
+        },
+        "inoi-240-modern-4g": {
+          "status": "Supported",
+          "note": "Pairing in RAM and microSD profiles."
+        },
+        "inoi-244-modern-4g": {
+          "status": "Supported",
+          "note": "Pairing in RAM and microSD profiles."
+        },
+        "maxvi-k15n-4g": {
+          "status": "Supported",
+          "note": "Pairing in the RAM profile."
+        }
+      }
+    },
+    {
+      "id": "bluetooth-file-transfer",
+      "label": "Bluetooth file transfer (OPP)",
+      "kind": "system",
+      "guide": "use/bluetooth#receive-a-file-on-the-phone",
+      "group": "Bluetooth and networks",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "detail",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Supported",
+          "note": "Bidirectional OPP in RAM and microSD profiles."
+        },
+        "inoi-240-modern-4g": {
+          "status": "Supported",
+          "note": "Bidirectional OPP in RAM and microSD profiles."
+        },
+        "inoi-244-modern-4g": {
+          "status": "Supported",
+          "note": "Bidirectional OPP in RAM and microSD profiles."
+        },
+        "maxvi-k15n-4g": {
+          "status": "Supported",
+          "note": "OPP file transfer in the RAM profile."
+        }
+      }
+    },
+    {
+      "id": "bluetooth-pan-internet",
+      "label": "Bluetooth Internet (PAN)",
+      "kind": "system",
+      "guide": "use/bluetooth#internet-over-bluetooth-pan",
+      "group": "Bluetooth and networks",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "detail",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Supported",
+          "note": "PAN Internet in RAM and microSD profiles."
+        },
+        "inoi-240-modern-4g": {
+          "status": "Supported",
+          "note": "PAN Internet in RAM and microSD profiles."
+        },
+        "inoi-244-modern-4g": {
+          "status": "Supported",
+          "note": "PAN Internet in RAM and microSD profiles."
+        },
+        "maxvi-k15n-4g": {
+          "status": "Supported",
+          "note": "PAN Internet in the RAM profile."
+        }
+      }
+    },
+    {
+      "id": "bluetooth-a2dp-linux-pc",
+      "label": "Bluetooth audio to a Linux PC",
+      "kind": "system",
+      "guide": "use/bluetooth#send-audio-to-an-a2dp-sink",
+      "group": "Bluetooth and networks",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "detail",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Unknown",
+          "note": "A2DP audio has not been tested on this phone."
+        },
+        "inoi-240-modern-4g": {
+          "status": "Unknown",
+          "note": "A2DP audio has not been tested on this phone."
+        },
+        "inoi-244-modern-4g": {
+          "status": "Supported",
+          "note": "SBC playback to a Linux PC sink in the RAM profile; reconnect is supported."
+        },
+        "maxvi-k15n-4g": {
+          "status": "Supported",
+          "note": "SBC playback to a Linux PC sink in the RAM profile; reconnect is supported."
+        }
+      }
+    },
+    {
+      "id": "bluetooth-a2dp-headsets",
+      "label": "Bluetooth headset audio (A2DP)",
+      "kind": "system",
+      "guide": "use/bluetooth#send-audio-to-an-a2dp-sink",
+      "group": "Bluetooth and networks",
+      "implementation": "Implemented",
+      "verification": "Not device-tested",
+      "scope": "detail",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Unknown",
+          "note": "Physical Bluetooth headsets have not been tested."
+        },
+        "inoi-240-modern-4g": {
+          "status": "Unknown",
+          "note": "Physical Bluetooth headsets have not been tested."
+        },
+        "inoi-244-modern-4g": {
+          "status": "Unknown",
+          "note": "Physical Bluetooth headsets have not been tested."
+        },
+        "maxvi-k15n-4g": {
+          "status": "Unknown",
+          "note": "Physical Bluetooth headsets have not been tested."
+        }
+      }
+    },
+    {
+      "id": "bluetooth-keyboard",
+      "label": "Bluetooth keyboard input",
+      "kind": "system",
+      "guide": "use/bluetooth#keyboards-and-mice",
+      "group": "Bluetooth and networks",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "detail",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Partial",
+          "note": "LE input in the RAM profile; Classic input is untested."
+        },
+        "inoi-240-modern-4g": {
+          "status": "Unknown",
+          "note": "Physical Bluetooth keyboard input has not been tested."
+        },
+        "inoi-244-modern-4g": {
+          "status": "Unknown",
+          "note": "Physical Bluetooth keyboard input has not been tested."
+        },
+        "maxvi-k15n-4g": {
+          "status": "Unknown",
+          "note": "Physical Bluetooth keyboard input has not been tested."
+        }
+      }
+    },
+    {
+      "id": "bluetooth-mouse",
+      "label": "Bluetooth mouse input",
+      "kind": "system",
+      "guide": "use/bluetooth#keyboards-and-mice",
+      "group": "Bluetooth and networks",
+      "implementation": "Implemented",
+      "verification": "Device-tested",
+      "scope": "detail",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Partial",
+          "note": "LE input in the RAM profile; Classic input is untested."
+        },
+        "inoi-240-modern-4g": {
+          "status": "Unknown",
+          "note": "Physical Bluetooth mouse input has not been tested."
+        },
+        "inoi-244-modern-4g": {
+          "status": "Unknown",
+          "note": "Physical Bluetooth mouse input has not been tested."
+        },
+        "maxvi-k15n-4g": {
+          "status": "Unknown",
+          "note": "Physical Bluetooth mouse input has not been tested."
+        }
+      }
+    },
+    {
+      "id": "mobile-calls",
+      "label": "Mobile calls",
+      "kind": "system",
+      "guide": "features#not-implemented",
+      "group": "Bluetooth and networks",
+      "implementation": "Not implemented",
+      "verification": "Not device-tested",
+      "scope": "detail",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Not supported",
+          "note": "Calls have no supported FPLinux path."
+        },
+        "inoi-240-modern-4g": {
+          "status": "Not supported",
+          "note": "Calls have no supported FPLinux path."
+        },
+        "inoi-244-modern-4g": {
+          "status": "Not supported",
+          "note": "Calls have no supported FPLinux path."
+        },
+        "maxvi-k15n-4g": {
+          "status": "Not supported",
+          "note": "Calls have no supported FPLinux path."
+        }
+      }
+    },
+    {
+      "id": "sms",
+      "label": "SMS",
+      "kind": "system",
+      "guide": "features#not-implemented",
+      "group": "Bluetooth and networks",
+      "implementation": "Not implemented",
+      "verification": "Not device-tested",
+      "scope": "detail",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Not supported",
+          "note": "SMS has no supported FPLinux path."
+        },
+        "inoi-240-modern-4g": {
+          "status": "Not supported",
+          "note": "SMS has no supported FPLinux path."
+        },
+        "inoi-244-modern-4g": {
+          "status": "Not supported",
+          "note": "SMS has no supported FPLinux path."
+        },
+        "maxvi-k15n-4g": {
+          "status": "Not supported",
+          "note": "SMS has no supported FPLinux path."
+        }
+      }
+    },
+    {
+      "id": "mobile-data",
+      "label": "Mobile data",
+      "kind": "system",
+      "guide": "features#not-implemented",
+      "group": "Bluetooth and networks",
+      "implementation": "Not implemented",
+      "verification": "Not device-tested",
+      "scope": "detail",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Not supported",
+          "note": "Mobile data has no supported FPLinux path."
+        },
+        "inoi-240-modern-4g": {
+          "status": "Not supported",
+          "note": "Mobile data has no supported FPLinux path."
+        },
+        "inoi-244-modern-4g": {
+          "status": "Not supported",
+          "note": "Mobile data has no supported FPLinux path."
+        },
+        "maxvi-k15n-4g": {
+          "status": "Not supported",
+          "note": "Mobile data has no supported FPLinux path."
+        }
+      }
+    },
+    {
+      "id": "ffmpeg",
+      "label": "FFmpeg software video decoding",
+      "kind": "application",
+      "guide": "apps/ffmpeg",
+      "group": "Applications",
+      "implementation": "Implemented",
+      "verification": "Not device-tested",
+      "scope": "both",
+      "phones": {
+        "nokia-ta1618": {
+          "status": "Unknown",
+          "note": "Optional CPU MPEG-4 Part 2, H.263 and H.264 decoding; device use is untested."
+        },
+        "inoi-240-modern-4g": {
+          "status": "Unknown",
+          "note": "Optional CPU MPEG-4 Part 2, H.263 and H.264 decoding; device use is untested."
+        },
+        "inoi-244-modern-4g": {
+          "status": "Unknown",
+          "note": "Optional CPU MPEG-4 Part 2, H.263 and H.264 decoding; device use is untested."
+        },
+        "maxvi-k15n-4g": {
+          "status": "Unknown",
+          "note": "Optional CPU MPEG-4 Part 2, H.263 and H.264 decoding; device use is untested."
+        }
+      }
+    }
+  ]
+}

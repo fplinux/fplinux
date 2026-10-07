@@ -1,0 +1,200 @@
+---
+title: UMS9117 platform
+description: What the Unisoc UMS9117 platform provides to phone targets, what each target supplies, and the platform's limits.
+source:
+  - platforms/ums9117
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Figure from '../../../components/Figure.astro';
+import PlatformTarget from '../../../assets/diagrams/platform-target.svg';
+
+The `ums9117` platform supports phones built on the Unisoc UMS9117, also known
+by its reference name T117: an ARMv7-A SoC with one Cortex-A7 CPU. Its
+Devicetree compatible is `sprd,ums9117`. All [current phones](/fplinux/phones/)
+use this platform.
+
+<Figure caption="What the platform shares and what each target adds for its phone.">
+	<PlatformTarget />
+</Figure>
+
+## What the platform provides
+
+The table describes the shared integration and target requirements. Use the
+[feature overview](/fplinux/features/) for implementation and verification
+status, and the [phone checklist](/fplinux/phones/) for exact-model support.
+
+| Capability                   | What a target supplies or must know                                                                                                |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| CPU, interrupts and timers   | Uses the shared interrupt and timer nodes.                                                                                         |
+| CPU clock                    | Manual selection between 768 MHz and 1 GHz keeps the voltage set before Linux starts. The target states whether switching works.   |
+| USB device                   | Board USB setup. USB host mode is not supported.                                                                                   |
+| AP DMAengine                 | 32 memory-copy channels and the fixed image-rotation request. Enabled clients depend on the target.                                |
+| Display (DRM/KMS)            | Panel profile, transport, initialization and backlight brightness range. The kernel diagnostic console uses the same display.      |
+| Matrix keypad                | Matrix wiring and keys on external-interrupt (EIC) lines. The [phone key codes](/fplinux/develop/input/) are shared.               |
+| Audio                        | Headphones, speaker and microphones; the phone's audio tuning comes from its device data. The target states its microphone limits. |
+| Bluetooth                    | Firmware prepared from the phone's own internal storage.                                                                           |
+| FM radio                     | Needs the phone's Bluetooth firmware and its FM settings from device data.                                                         |
+| microSD                      | Enables the slot.                                                                                                                  |
+| Camera capture (V4L2 NV16)   | Camera sensor and wiring.                                                                                                          |
+| Image rotation and JPEG      | No board data; the userspace tools are shared.                                                                                     |
+| Native image presentation    | Native-size NV16 or RGB565 through DRM/KMS; consult the exact phone's display status.                                              |
+| Power-management chip        | Charger status, battery telemetry, RTC, keypad light and power-off are shared. The vibrator is enabled per target.                 |
+| Internal NAND reader         | Read-only raw page stream for a [NAND backup](/fplinux/porting/bring-up/#nand-backup-reference); no filesystem, writes or erase.   |
+| GPIO and I2C                 | Used for the cameras; general peripheral use has not been checked.                                                                 |
+| UART, other I2C, general SPI | No supported path.                                                                                                                 |
+| Watchdog and system reset    | No supported path; Linux reboot is not supported.                                                                                  |
+
+## What a target supplies
+
+- Board memory, the panel profile and wiring, the keypad map and the
+  bootstrap inputs.
+- The SoC Devicetree nodes its board can use; enable nothing else.
+- Board USB setup.
+- The values the loader needs, in the `[adapter]` table of its `target.toml`:
+  the boot instructions, the exec distance and, for a phone with a boot screen,
+  the loader display settings.
+- The device-data groups that must come from the exact phone.
+
+Display targets select one target-owned panel header through
+`[bootstrap].lcd_config`. RAM and microSD bootstrap builds share that header;
+the selected SPI or LCM transport must agree with the board pin configuration.
+The bootstrap Makefile selects its boot font, and the target's rootfs package
+list selects the local terminal font.
+
+In the Nokia 3210 4G (TA-1618) target, these are in the following files:
+
+<FileTree>
+
+- targets/nokia-ta1618/
+  - target.toml identity, Linux file copies, bootstrap, `[adapter]` loader values, device data and microSD settings
+  - ta1618_device_data.py selects the partition layout and Bluetooth firmware revision for device data
+  - bootstrap/ bootstrap for RAM boot with the 240×320 display size
+    - Makefile
+    - lcd_config.h panel configuration shared by both bootstrap builds
+    - main.c
+    - payload.s
+  - bootstrap-microsd/ bootstrap for the microSD system card
+    - Makefile
+    - main.c
+    - payload.s
+  - linux/
+    - arch/arm/mach-ums9117/
+      - Kconfig the board's kernel option
+    - config.fragment
+    - drivers/gpu/drm/ums9117/ panel profile for the shared display driver
+      - drm.Kconfig
+      - drm.Makefile
+      - ta1618-drm.c
+    - dts/
+      - ums9117-nokia-ta1618.dts board Devicetree: memory, display, keypad matrix, audio and USB
+      - bluetooth.dtsi Bluetooth firmware file names
+      - nand-readonly.dtsi ID of the fitted NAND chip
+      - unisoc.Makefile
+  - loader/
+    - assets.lock.toml pinned RAM loader and board maps
+  - release/
+    - README.txt
+    - manifest.toml
+  - uboot/ U-Boot configuration for the microSD system card
+    - ta1618_defconfig
+    - ums9117-ta1618-u-boot.dts
+
+</FileTree>
+
+## Headless targets
+
+A target loads headless when it has none of the loader display settings
+(`spi_mode`, `lcd_id`, `backlight_channels` and `backlight_level` in
+`[adapter]`) and a 0×0 bootstrap display. The loader leaves the panel and
+backlight untouched and reports boot progress only to the PC. Without pin-map
+and keymap loader assets, the loader applies no board pin settings and leaves
+the keypad uninitialized.
+
+`./fplinux target new` creates such a target; see
+[Bring up a new phone](/fplinux/porting/bring-up/).
+
+The headless target retains the boot stage's USB state through
+`CONFIG_USB_MUSB_UMS9117_INHERITED` and
+`fplinux,ums9117-musb-inherited`. A target that initializes USB in Linux uses
+`CONFIG_USB_MUSB_UMS9117_COLD` and `sprd,ums9117-musb`. The build requires a
+matching built-in ownership mode for every enabled USB node.
+
+## Local terminal requirements
+
+The terminal on the phone screen is shared userspace. It knows no panel
+registers or scan codes, so a target that offers it must provide, itself or
+through the platform:
+
+- a DRM/KMS card with an atomic RGB565 scanout plane and dumb buffers;
+- Linux virtual terminals, including `VT_PROCESS` switching;
+- `/dev/ptmx` and `devpts` for the interactive shell;
+- evdev input following the [input contract](/fplinux/develop/input/), with the
+  phone keypad identified by `phys=fplinux/keypad0`;
+- built-in configuration and device nodes for DRM, virtual terminals, evdev and
+  pseudo-terminals;
+- for the PC keyboard bridge, its uinput and generic-serial dependencies.
+
+The terminal starts only when `/dev/dri/card0` exists and sets
+`TERM=xterm-256color`. Input ownership must follow the active graphical
+session, so the terminal and full-screen applications can hand the display and
+keypad to each other.
+
+The display session owns a virtual terminal and DRM master. On a VT switch it
+releases display and input ownership and reacquires them on return. Kernel
+`fbcon` remains the diagnostic console; it does not render the graphical terminal.
+
+Linux inputs follow the [shared integration contract](/fplinux/porting/linux-integration/).
+
+## Board data from the stock firmware
+
+A target that declares the `board-maps` device-data group, as a new target
+does, gets a loader pin map, a keymap and a board report extracted from the
+stock firmware in the phone's NAND backup. Preparation from a saved backup
+builds the required host extraction tool without a target bundle or a phone
+connection; see [Device data](/fplinux/guides/device-data/). The board report lists:
+
+- the keypad matrix with the phone key codes, the boot key and, when exactly
+  one standard phone key is missing from the matrix, that key as the
+  candidate for external-interrupt line 9 (`eic9_candidate`);
+- every panel in the firmware's LCD list: its 16-bit ID, the controller name
+  when the firmware gives it, size, SPI or LCM interface, SPI clock or DBI
+  timing, and the initialization commands and delays when they can be decoded;
+- the pin settings of the display control, display data and audio pads;
+- the white LED backlight level and the fuel-gauge current calibration;
+- the NAND chip configurations listed by the firmware.
+
+Each value names where in the firmware it was found. A value that cannot be
+found is listed as unresolved, never guessed. Preparation stops when the
+partition table, the signed application image, the pin map or the keymap is
+missing, or when the copies of the partition table disagree.
+
+A person still has to decide which panel is fitted, the keypad light current,
+whether a vibration motor is fitted and the Bluetooth firmware revision. Keys
+on other external-interrupt lines, the line-9 candidate and the decoded panel
+commands must be confirmed on the phone.
+
+## Memory-copy DMA
+
+The AP DMA controller offers 32 channels through the standard Linux DMAengine
+`DMA_MEMCPY` interface for kernel clients. It accepts any byte alignment,
+queued transfers, pause and resume, and synchronous termination; large
+transfers are split transparently. Residue is reported per completed segment,
+not as a live byte count.
+
+A configuration error aborts the active and queued transfers with `DMA_ERROR`
+and `DMA_TRANS_ABORTED`; release and request the channel again before reusing
+it. If the controller cannot be stopped, termination returns an error and the
+client must keep its DMA buffers until a cold boot.
+
+Image rotation uses its fixed peripheral request through this controller.
+Generic peripheral requests, cyclic transfers, caller-supplied hardware linked
+lists and a userspace memory-copy interface are not provided.
+
+## Limitations
+
+- USB works only in device mode.
+- UART, general SPI, the watchdog and system reset have no supported path, and
+  Linux reboot is not supported.
+- CPU frequency selection does not change the voltage.
+- General use of GPIO and I2C beyond the cameras has not been checked.

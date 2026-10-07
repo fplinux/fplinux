@@ -1,0 +1,71 @@
+---
+import SupportBadge from './SupportBadge.astro';
+import support from '../data/support.json';
+
+interface Props {
+	kind: 'hardware' | 'system' | 'application';
+}
+const { kind } = Astro.props;
+const headings = {
+	hardware: 'Feature',
+	system: 'Feature',
+	application: 'Application',
+};
+const rows = support.features.filter(
+	(item) => item.kind === kind && item.scope !== 'detail'
+);
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+---
+
+<div class="support-comparison">
+	<table class="support-matrix">
+		<thead>
+			<tr>
+				<th>{headings[kind]}</th>
+				{support.phones.map((phone) => (
+					<th>
+						<a href={`${base}/${phone.slug}/#support-checklist`}>
+							{phone.name}
+						</a>
+					</th>
+				))}
+			</tr>
+		</thead>
+		<tbody>
+			{rows.map((row) => (
+				<tr>
+					<th scope="row">{row.label}</th>
+					{support.phones.map((phone) => {
+						const state = row.phones[phone.id as keyof typeof row.phones];
+						if (!state)
+							throw new Error(`Missing ${phone.id} support for ${row.id}`);
+						return (
+							<td>
+								<SupportBadge status={state.status} />
+							</td>
+						);
+					})}
+				</tr>
+			))}
+		</tbody>
+	</table>
+</div>
+
+<style>
+	.support-comparison {
+		overflow-x: auto;
+	}
+
+	.support-matrix {
+		width: 100%;
+		min-width: 38rem;
+	}
+
+	.support-matrix th[scope='row'] {
+		font-weight: 500;
+	}
+
+	.support-matrix td {
+		white-space: nowrap;
+	}
+</style>

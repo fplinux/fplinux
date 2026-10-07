@@ -1,0 +1,130 @@
+---
+title: Debugging
+description: Debug builds, command logs, kernel tracing, test programs and bug reports.
+---
+
+import Key from '../../../components/Key.astro';
+
+## Debug builds
+
+`release` is the default build type. A `debug` build adds kernel diagnostics
+and keeps everything else the same: the same applications, packages and
+hardware support.
+
+| Kernel facility                         | `release` | `debug`  |
+| --------------------------------------- | --------- | -------- |
+| Symbol names (`kallsyms`)               | Included  | Included |
+| Kernel log buffer                       | 64 KiB    | 128 KiB  |
+| Module loading                          | Disabled  | Enabled  |
+| ftrace, kprobes, DMATEST and `/dev/mem` | Disabled  | Enabled  |
+
+The debug kernel can load modules, but FPLinux ships no loadable modules.
+
+Build and load a debug image with `--build-type debug`, and pass the same
+option to every later command for that session:
+
+```sh title="PC"
+./fplinux build nokia-ta1618 --build-type debug
+./fplinux run nokia-ta1618 --build-type debug
+```
+
+A debug image that boots does not show that a feature works on the phone.
+
+## Read command logs
+
+`build`, `check`, `test` and `format` keep their complete output. On failure,
+they print where the log is stored. Use `logs` to find and read it:
+
+```sh title="PC"
+./fplinux logs list --status failed
+./fplinux logs show latest --command build --failed
+./fplinux logs follow latest --command build
+```
+
+- `logs list` shows recorded runs, newest first, with their command, target,
+  profile, status, start time and duration.
+- `logs show` prints the last 40 lines of each stage of one run. `--failed`
+  limits it to failed stages, `--stage NAME` to one stage, and `--tail N`
+  changes the number of lines.
+- `logs follow` keeps printing new output until that run finishes. <Key>Ctrl</Key>+<Key>C</Key> stops
+  only the reader.
+
+Filters such as `--command`, `--target`, `--profile` and `--status` work with
+all three. A run's status describes the command's result, not the phone's
+health. Run `./fplinux logs show --help` for all options.
+
+Messages from the kernel, loader and phone programs follow the
+[logging contract](/fplinux/develop/logging/).
+
+## Trace the kernel
+
+The debug kernel includes debugfs, tracefs, kprobe events and the `irqsoff`
+tracer. No tracer or probe is active after boot. Check the current state in the
+phone's root shell:
+
+```sh title="Phone"
+cat /sys/kernel/tracing/available_tracers
+cat /sys/kernel/tracing/current_tracer
+cat /sys/kernel/tracing/kprobe_events
+```
+
+:::caution[Tracing can destabilize the phone]
+Tracers and dynamic probes can crash the kernel and use up the phone's small
+RAM. Clean up when you are done.
+:::
+
+To clean up, first disable probes in any extra trace instances you created.
+Then remove the root probes, restore the `nop` tracer and free the trace
+buffer:
+
+```sh title="Phone"
+echo 0 > /sys/kernel/tracing/events/kprobes/enable
+echo > /sys/kernel/tracing/kprobe_events
+echo nop > /sys/kernel/tracing/current_tracer
+echo 1 > /sys/kernel/tracing/free_buffer
+```
+
+## Build a test program for the phone
+
+`probe-build` compiles one C file from the checkout into a static ARMv7
+hard-float musl program for the phone. Create the C source first. Both paths
+must be repository-relative and free of symlinks, and the output must be
+inside `.cache/tools/`:
+
+```sh title="PC"
+./fplinux probe-build .cache/tools/diag.c --output .cache/tools/diag-arm
+```
+
+Copy it to a running phone and start it:
+
+```sh title="PC"
+./fplinux console nokia-ta1618 --upload .cache/tools/diag-arm /tmp/diag-arm
+./fplinux console nokia-ta1618 --exec 'chmod +x /tmp/diag-arm && /tmp/diag-arm'
+```
+
+`probe-build` only compiles. It does not add the program to an image. A failed
+compile leaves an earlier output unchanged. On the first run it downloads the
+pinned packages it needs; run `./fplinux setup` first if the build environment
+is not prepared.
+
+## Report a problem
+
+Follow [Report a problem](/fplinux/help/report/) for the information to include
+and the data to keep private. For a phone without a target, use the
+[new-phone checklist](/fplinux/porting/checklist/) and
+[bring-up route](/fplinux/porting/bring-up/).
+
+## Log command reference
+
+`latest` is selected after applying filters. A directory basename is accepted
+only when it identifies one run. `--stage` accepts a stage name or complete
+stage path; a shared name selects all matches. `show --failed` filters stages
+of the chosen run, rather than selecting another run. `--tail 0` omits existing
+output. `follow` stays with its selected invocation and prints new stages until
+completion; Ctrl+C stops only the reader.
+
+Times are UTC. Output is grouped by stage, not globally merged; verbose parent
+logs may repeat child output. Log inspection needs no prepared build environment.
+Exit status is `0` for successful inspection, including a failed run, `1` for
+missing/ambiguous runs or read errors, `2` for invalid arguments and `130` for
+Ctrl+C. A running record without a surviving process is reported as incomplete.

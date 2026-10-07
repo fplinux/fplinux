@@ -1,0 +1,404 @@
+---
+title: Bring up a new phone
+description: Start Linux on a UMS9117 phone that has no FPLinux target, back up its internal storage, extract a board report and report the phone.
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import Figure from '../../../components/Figure.astro';
+import Key from '../../../components/Key.astro';
+import BringUpConnection from '../../../assets/diagrams/bring-up-connection.svg';
+import BringUpFlow from '../../../assets/diagrams/bring-up-flow.svg';
+
+This page is for the owner of a Unisoc UMS9117 (T117) phone that has no FPLinux
+target yet. You create a headless target, start Linux in RAM, save a read-only
+backup of the phone's internal NAND, extract a board report from the stock
+firmware in that backup and report the phone to the project.
+
+A new target has no display, keypad, audio or Bluetooth support. The screen
+stays dark, without a boot screen or backlight, and you use the phone from the
+PC through the USB session.
+
+:::note[What this does to the phone]
+The loader writes only to RAM, and the NAND reader cannot write or erase the
+NAND. You need no files from the stock firmware: the project supplies the RAM
+loader, and FPLinux reads the NAND itself.
+:::
+
+<Figure caption="Bring-up steps, their ./fplinux subcommands and the failure branches.">
+	<BringUpFlow />
+</Figure>
+
+## Before you start
+
+- Set up a Linux x86-64 PC and the source checkout as described in
+  [Build FPLinux](/fplinux/start/build/).
+- Set up USB access as described in [Run FPLinux](/fplinux/start/run/).
+- Have a USB data cable for the phone.
+
+Run every command from the root of the source checkout.
+
+## Create a headless target
+
+Choose a target name and the phone's public brand and product names:
+
+```sh title="PC"
+./fplinux target new <target> --brand <brand> --product "<product>"
+```
+
+- `<target>` names the new `targets/<target>` directory and is the target name
+  for every other command. It consists of lowercase letters and digits
+  separated by single hyphens.
+- `--brand` and `--product` are the public names described in
+  [Target and platform identity](/fplinux/porting/identity/). The device name,
+  the brand and product separated by one space, must be ASCII and at most 31
+  characters long.
+- `--compatible <vendor>,<device>` sets the board compatible string. Without
+  it, the command forms one from the lowercase brand and product, for example
+  `hammer,horizon-lte`.
+- `--platform <platform>` selects a platform explicitly. With the single
+  current platform, the command selects `ums9117` by default; when more than
+  one platform exists, this option is required.
+
+The command refuses an existing target directory and leaves nothing behind when
+a name or identity field is invalid. On success it lists the files it created:
+
+```text title="Output"
+Created headless target targets/<target>:
+  bootstrap/Makefile
+  bootstrap/main.c
+  bootstrap/payload.s
+  linux/arch/arm/mach-ums9117/Kconfig
+  linux/config.fragment
+  linux/dts/ums9117-<target>.dts
+  linux/dts/unisoc.Makefile
+  loader/assets.lock.toml
+  release/README.txt
+  release/manifest.toml
+  target.toml
+Next: ./fplinux build <target> && ./fplinux run <target>
+```
+
+The created files have these roles:
+
+<FileTree>
+
+- targets/
+  - \<target>/
+    - target.toml platform, identity, Linux build and loader settings
+    - bootstrap/ bootstrap with a 0×0 display, which makes the target headless
+      - Makefile
+      - main.c
+      - payload.s embeds the Linux kernel and Devicetree
+    - linux/
+      - arch/arm/mach-ums9117/
+        - Kconfig the board's kernel option
+      - config.fragment enables the board option
+      - dts/
+        - ums9117-\<target>.dts board Devicetree: memory, inherited USB device mode and read-only NAND
+        - unisoc.Makefile adds the board Devicetree to the kernel build
+    - loader/
+      - assets.lock.toml pinned RAM loader (FDL1)
+    - release/
+      - README.txt README of the standalone archive
+      - manifest.toml files of the standalone archive
+
+</FileTree>
+
+The new target uses <Key>\*</Key> as the boot key and `exec_distance = 0`,
+both in the `[adapter]` table of `targets/<target>/target.toml`. This is a
+template default. Confirm the actual boot key of the new phone before
+connecting it. It offers only the default RAM profile, with no microSD support.
+Creating the target does not qualify its peripherals or add the phone to the
+list of supported phones.
+
+When adding a display, create a target-owned panel header and select it with
+`[bootstrap].lcd_config`. RAM and microSD bootstrap builds use the same header.
+Its `FPLINUX_LCD_SPI` value selects SPI (`1`) or LCM (`0`); bootstrap stops when
+the board pin configuration selects the other transport. Headless targets
+retain the complete panel table for porting. The bootstrap Makefile selects
+`FPLINUX_BOOT_FONT := 6x8` or `7x14`, and `[rootfs].packages` selects
+`fplinux-font-terminus-6x12` or `fplinux-font-terminus-8x16` for the display.
+
+The headless Devicetree uses `fplinux,ums9117-musb-inherited` with
+`CONFIG_USB_MUSB_UMS9117_INHERITED` to retain the boot stage's USB state. A board
+that initializes USB in Linux instead uses `sprd,ums9117-musb` with
+`CONFIG_USB_MUSB_UMS9117_COLD`. The build rejects an enabled USB node without a
+matching built-in ownership mode.
+
+## Boot without a screen
+
+Build the target:
+
+```sh title="PC"
+./fplinux build <target>
+```
+
+Power the phone off and disconnect USB. Start the loader before you connect the
+phone:
+
+```sh title="PC"
+./fplinux run <target>
+```
+
+Wait until the loader asks for the phone. Only then hold the boot key named in
+the target's instructions and connect the powered-off phone, keeping that key
+pressed as the loader instructs. A new target starts with <Key>\*</Key>; if it
+does not work, follow [the boot-key check](#the-loader-does-not-see-the-phone).
+[Run FPLinux](/fplinux/start/run/) has the general loader rules.
+
+<Figure caption="Hold the phone's boot key and connect it powered off only after the loader asks." width="30rem">
+	<BringUpConnection />
+</Figure>
+
+Right after you connect the phone, run `lsusb` in a second terminal and keep
+the phone's line for the report. In BootROM mode it reads
+`ID 1782:4d00 Spreadtrum Communications Inc.` If the loader does not see the
+phone, run `lsusb` while the phone is still connected with the key held and
+keep whatever line appears, or note that no new line appeared.
+
+A successful boot prints these lines, with diagnostic lines between them:
+
+```text title="Output" collapse={2-5, 12-14}
+<Brand> <Product> console RAM boot
+Operations: RAM FDL1 load, RAM payload load.
+There are no flash, erase, partition, or NV commands.
+Headless target: the phone shows no boot screen or backlight; progress is reported here.
+
+Power the phone off, hold *, then connect USB while keeping * pressed.
+Waiting up to 300 seconds for BootROM USB 1782:4d00...
+BSL_REP_VER: "SPRD3\0"
+BSL_REP_VER: "Custom FDL1: CHIP ID = 0x98180001\0"
+<TARGET>_LINUX_BOOTSTRAP event=stage stage=0 ram=0x04000000 zimage=... dtb=... message=ENTRY
+<TARGET>_LINUX_BOOTSTRAP event=stage stage=1 message=NO DISPLAY
+<TARGET>_LINUX_BOOTSTRAP event=stage stage=2 message=SPRD TIMER OK
+<TARGET>_LINUX_BOOTSTRAP event=stage stage=3 message=COPY KERNEL
+<TARGET>_LINUX_BOOTSTRAP event=stage stage=4 message=COPY DTB
+<TARGET>_LINUX_BOOTSTRAP event=stage stage=5 message=PREPARE LINUX
+Bridge acknowledged the Linux transition; waiting up to 60 seconds for Linux USB-NCM 0525:a4a6.
+SSH host key observed; validating the private RAM session identity.
+Private USB-NCM SSH session is ready.
+```
+
+The first `BSL_REP_VER` line comes from the phone's BootROM, the second from
+the RAM loader (FDL1) once it runs. Its `CHIP ID` identifies the SoC; the
+supported phones report `0x98180001`. The `<TARGET>_LINUX_BOOTSTRAP` lines are
+the bootstrap stages, prefixed with the target name in capitals; see
+[Logging](/fplinux/develop/logging/). `ram=0x04000000` is the 64 MB of RAM that
+FPLinux requires, and `NO DISPLAY` confirms that the target starts without a
+screen.
+
+From an interactive terminal, `run` then opens a shell on the phone. Leaving
+that shell does not stop Linux. Keep the complete `run` output for the report.
+
+A headless target created this way reaches the USB session on the INOI 244
+Modern 4G and the Nokia 3210 4G (TA-1618).
+
+## Where the boot stopped
+
+Find the last line that `run` printed:
+
+| Last output                                                                                          | Meaning                                  | What to do                                                  |
+| ---------------------------------------------------------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------- |
+| `fplinux run: BootROM USB was not detected`                                                          | The phone did not start in BootROM mode. | [Try another boot key](#the-loader-does-not-see-the-phone). |
+| `fplinux run: BootROM USB 1782:4d00 repeatedly disconnected before it could be opened`               | The phone appeared on USB only briefly.  | [Start again](#the-loader-does-not-see-the-phone).          |
+| BootROM `BSL_REP_VER`, no `Custom FDL1` line, then `fplinux run: RAM loader failed after 3 attempts` | The RAM loader did not start.            | [Set the exec distance](#fdl1-does-not-start).              |
+| `Custom FDL1`, then failed attempts or `event=error error=2 message=64MB RAM REQUIRED`               | Another SoC variant or memory size.      | [Report the phone](#loading-stops-after-fdl1-starts).       |
+| `PREPARE LINUX`, then an error about the bridge, BootROM USB or the SSH session                      | Linux USB did not come up.               | [Check Linux USB](#linux-usb-does-not-appear).              |
+| `Private USB-NCM SSH session is ready.`                                                              | Linux runs.                              | [Identify the NAND chip](#identify-the-nand-chip).          |
+
+### The loader does not see the phone
+
+If no `BSL_REP_VER` line appears after you connect the phone, the phone did not
+start in BootROM mode, and the loader stops after 300 seconds. When the phone
+appears on USB only briefly, the loader stops with the "repeatedly
+disconnected" message.
+
+Disconnect the phone, power it off and start again with `run`, holding the key
+before and while you connect USB. If <Key>\*</Key> never works, the phone uses
+another BootROM key: try another key in the same sequence. When a key works,
+replace `*` with it in `boot_instructions` in the `[adapter]` table of
+`targets/<target>/target.toml` and build again.
+
+If the loader reports that the USB device is not readable and writable, fix USB
+access as described in [Run FPLinux](/fplinux/start/run/).
+
+### FDL1 does not start
+
+When the BootROM `BSL_REP_VER` line appears but the `Custom FDL1` line never
+does, the attempt fails. `run` asks you to disconnect, power off and reconnect
+the phone after each failed attempt and stops after the third one.
+
+If FDL1 does not start with the new target's `exec_distance = 0`, set this in
+the `[adapter]` table of `targets/<target>/target.toml`:
+
+```toml title="targets/<target>/target.toml"
+exec_distance = 0x314d
+```
+
+Build and run the target again. The loader then lists the extra operation:
+
+```text title="Output"
+Operations: exec-distance setup, RAM FDL1 load, RAM payload load.
+```
+
+No value other than `0` and `0x314d` is known to start FDL1.
+
+### Loading stops after FDL1 starts
+
+FDL1 sets up the 64 MB of LPDDR2 memory used by the supported phones, and
+FPLinux requires 64 MB of RAM. On a phone with another SoC variant or memory,
+the attempts fail after the `Custom FDL1` line, or the bootstrap stops with:
+
+```text title="Output"
+<TARGET>_LINUX_BOOTSTRAP event=error error=2 message=64MB RAM REQUIRED
+```
+
+FPLinux does not start on such a phone. [Report it](#report-the-phone) with the
+complete `run` output and photos of the markings on its SoC and flash chip.
+
+### Linux USB does not appear
+
+After `PREPARE LINUX`, the phone leaves BootROM USB `1782:4d00` and Linux
+starts its USB device `0525:a4a6`. When the boot stops before
+`Private USB-NCM SSH session is ready.`, `run` ends with an error such as:
+
+```text title="Output"
+fplinux run: bridge did not acknowledge the Linux transition before the deadline
+fplinux run: BootROM USB did not disconnect before the deadline
+fplinux ssh: the exact USB-NCM SSH session did not become ready before the deadline
+```
+
+Check whether Linux USB is present:
+
+```sh title="PC"
+lsusb -d 0525:a4a6
+```
+
+If the device is listed, follow the troubleshooting for a Linux USB device
+without a console in [Run FPLinux](/fplinux/start/run/). If it is not,
+[report the phone](#report-the-phone) with the complete `run` output.
+
+## Identify the NAND chip
+
+While the phone session runs, use a second terminal on the PC, or leave the
+phone shell, and run:
+
+```sh title="PC"
+./fplinux nand identify <target>
+```
+
+For a phone with a DS35M1GA chip the report reads:
+
+```text title="Output"
+id_bytes=e521
+chip=DS35M1GA
+page_main_bytes=2048
+oob_bytes=64
+pages_per_block=64
+block_count=1024
+raw_bytes=138412032
+geometry_source=table
+feature_a0=0x38
+feature_b0=0x10
+feature_c0=0x00
+```
+
+`geometry_source=table` means that the reader recognised the chip from its list
+of known chips. FPLinux has read FM25LG01B, DS35M1GA and F35UQA001G chips on supported
+phones; the reader also knows other chips that no supported phone uses. The
+[reference](#nand-backup-reference) below describes every field.
+
+- **`chip=unknown`**: the reader does not know the chip. The report shows zero
+  sizes and `geometry_source=unknown`, but still the chip's `id_bytes` and
+  feature values. A backup is not possible. [Report the phone](#report-the-phone)
+  with the complete `nand identify` output and a photo of the markings on the
+  flash chip.
+- **A chip other than FM25LG01B, DS35M1GA or F35UQA001G**: the reader identifies
+  it and the backup proceeds, but no FPLinux
+  phone has used that chip before, so its entry in the reader's list has not
+  been checked against a real chip. Save the backup and state in the report that
+  the chip is new.
+
+## Save a NAND backup
+
+```sh title="PC"
+./fplinux nand backup <target> nand.bin
+```
+
+The command reads the complete NAND through the running session, which takes
+several minutes, and reports the two files it writes:
+
+```text title="Output"
+NAND backup saved: nand.bin (138412032 bytes, sha256=...)
+NAND geometry saved: nand.bin.json (chip DS35M1GA, id_bytes e521)
+```
+
+`nand.bin` holds every page's main and OOB bytes. `nand.bin.json` is the
+geometry receipt. Both files are readable only by you.
+
+:::caution[Keep the backup private]
+The backup contains the stock firmware and the phone's own data. Do not attach
+it, or any stock firmware image, to an issue or share it publicly. The geometry
+receipt contains no NAND data and can be shared.
+:::
+
+If the transfer stops, for example because USB was disconnected or you pressed <Key>Ctrl</Key>+<Key>C</Key>, the command fails and publishes nothing; an earlier backup at the same path
+and its receipt stay unchanged. Run `nand backup` again. If the phone no longer
+runs the session, start again from a powered-off phone with `run`.
+
+When you are done, [end the session safely](/fplinux/use/power/) before
+returning to the stock firmware.
+
+## Prepare the board report
+
+The board report lists the keypad, panel, pin and other board values found in
+the stock firmware in your backup. Prepare it from the saved backup; the phone
+does not need to be connected, and no target build is required:
+
+```sh title="PC"
+./fplinux device-data prepare <target> --from-dump nand.bin
+```
+
+The command reads `nand.bin` with its receipt `nand.bin.json`, prepares the
+host extraction tool in the pinned build environment without a target bundle,
+and prints the path of the report. Use `--offline` when the required environment
+and source archives are already available locally:
+
+```text title="Output"
+Review <checkout>/.cache/device-data/<target>/generations/<generation>/reports/board-maps/board-report.json.
+```
+
+[Board data from the stock firmware](/fplinux/porting/ums9117/#board-data-from-the-stock-firmware)
+describes what the report contains and which decisions it leaves to a person.
+[Device data](/fplinux/guides/device-data/) describes device-data preparation
+in general.
+
+## Report the phone
+
+Open a
+[new phone report](https://github.com/fplinux/fplinux/issues/new?template=new-phone.yml)
+in the project's issue tracker. The form asks for:
+
+- the phone's brand, product name and any model code printed on it or under its
+  battery;
+- the boot key that worked;
+- the `lsusb` line;
+- the complete `run` output, including any error;
+- the complete `nand identify` output, if Linux started;
+- the contents of the geometry receipt `nand.bin.json`;
+- the `board-report.json` file;
+- photos of the markings on the SoC and on the flash chip.
+
+Do not attach the NAND backup or any stock firmware image.
+
+## After the report
+
+Display, keypad, audio and Bluetooth support are completed by hand from the
+backup and board report. The four existing targets under `targets/` provide
+board examples, and
+[UMS9117 platform](/fplinux/porting/ums9117/) lists what a target supplies.
+
+## NAND backup reference
+
+The [NAND command and receipt reference](/fplinux/guides/device-data/#nand-backup-reference)
+defines the report fields, file publication and reachable failures.

@@ -215,10 +215,10 @@ class PinnedFormatterToolTests:
             "table-bytes-232050686f6e650a0a23232046656174757265730a0a46656174757265207c204861726477617265207c2046504c696e7578207c2054",
         ],
     )
-    def test_markdown_structure_is_canonical_after_one_tool_pipeline(
+    def test_markdown_formatting_preserves_heading_and_table_order(
         self, scenario: str, contents: bytes
     ) -> None:
-        """Equivalent heading and table spellings need no later ordering pass."""
+        """Formatting is idempotent without reordering meaningful document contents."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             path = root / "targets/phone/README.md"
@@ -234,8 +234,8 @@ class PinnedFormatterToolTests:
             assert (results[0]) == (results[1])
             if scenario == "headings":
                 assert (results[0]) == (
-                    b"# Phone\n\n## Identity\n\nIdentity text.\n\n"
-                    b"## Status\n\nStatus text.\n\n## Features\n\nFeature text.\n"
+                    b"# Phone\n\n## Features\n\nFeature text.\n\n"
+                    b"## Identity\n\nIdentity text.\n\n## Status\n\nStatus text.\n"
                 )
             else:
                 rows = [
@@ -245,8 +245,8 @@ class PinnedFormatterToolTests:
                 ]
                 assert (rows[2:]) == (
                     [
-                        ["USB networking", "Present", "Supported", "USB only."],
                         ["Camera", "Present", "Partial", "Rear sensor."],
+                        ["USB networking", "Present", "Supported", "USB only."],
                     ]
                 )
 

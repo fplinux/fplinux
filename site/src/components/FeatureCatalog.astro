@@ -1,0 +1,129 @@
+---
+import { Badge } from '@astrojs/starlight/components';
+import support from '../data/support.json';
+
+const rows = support.features.filter((item) => item.scope !== 'detail');
+const groups = support.groups.filter((group) =>
+	rows.some((item) => item.group === group)
+);
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const guideLink = (slug: string) =>
+	`${base}/${slug.replace('#', '/#')}${slug.includes('#') ? '' : '/'}`;
+---
+
+<nav aria-label="Feature groups">
+	<ul>
+		{groups.map((group) => (
+			<li>
+				<a href={`#${group.toLowerCase().replaceAll(' ', '-')}`}>{group}</a>
+			</li>
+		))}
+	</ul>
+</nav>
+
+{groups.map((group) => (
+	<section class="feature-group">
+		<h3 id={group.toLowerCase().replaceAll(' ', '-')}>{group}</h3>
+		<table>
+			<thead>
+				<tr>
+					<th>Feature</th>
+					<th>Implementation</th>
+					<th>Device checks</th>
+				</tr>
+			</thead>
+			<tbody>
+				{rows
+					.filter((item) => item.group === group)
+					.map((item) => (
+						<tr>
+							<th scope="row">
+								<a href={guideLink(item.guide)}>{item.label}</a>
+							</th>
+							<td>
+								<Badge
+									text={item.implementation}
+									variant={
+										item.implementation === 'Implemented'
+											? 'success'
+											: 'default'
+									}
+								/>
+							</td>
+							<td>
+								<Badge
+									text={
+										item.verification === 'Device-tested'
+											? 'Device-tested'
+											: 'Not tested'
+									}
+									variant={
+										item.verification === 'Device-tested'
+											? 'success'
+											: 'default'
+									}
+								/>
+							</td>
+						</tr>
+					))}
+			</tbody>
+		</table>
+	</section>
+))}
+
+<style>
+	.feature-group + .feature-group {
+		margin-top: 2rem;
+	}
+
+	nav ul {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem 1rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		font-size: var(--sl-text-sm);
+	}
+
+	table {
+		width: 100%;
+	}
+
+	th[scope='row'] {
+		font-weight: 500;
+	}
+
+	@media (width <= 40rem) {
+		table,
+		tbody {
+			display: block;
+		}
+
+		thead {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			overflow: hidden;
+			clip-path: inset(50%);
+		}
+
+		tr {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 0.5rem;
+			padding-block: 0.875rem;
+			border-bottom: 1px solid var(--sl-color-gray-5);
+		}
+
+		th[scope='row'] {
+			flex-basis: 100%;
+		}
+
+		th,
+		td {
+			padding: 0;
+			border: 0;
+		}
+	}
+</style>

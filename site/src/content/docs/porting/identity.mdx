@@ -1,0 +1,102 @@
+---
+title: Target and platform identity
+description: How a target and its platform are named, and which identifiers the build derives from those names.
+---
+
+FPLinux keeps build identifiers, public device names, hardware codes and
+Devicetree identifiers separate. Directory names own the target and platform
+names; the manifests own platform selection and hardware identity. Generated
+build inputs and published metadata derive from those values instead of
+repeating them.
+
+## Target identity
+
+Every `targets/<target>/target.toml` selects a platform and defines the exact
+device identity:
+
+```toml title="targets/nokia-ta1618/target.toml"
+platform = "ums9117"
+
+[identity]
+brand = "Nokia"
+product = "3210 4G"
+hardware_codes = ["TA-1618"]
+compatible = "nokia,ta-1618"
+```
+
+- The `targets/<target>` directory name is the stable lowercase target name
+  used by `./fplinux`, package suffixes and machine-readable manifests.
+- `brand` and `product` are the public brand and product names. They do not
+  claim the legal identity of the device manufacturer or trademark licensee.
+- `hardware_codes` contains only codes established for the exact supported
+  variant. An unknown code is an empty list, not a guess.
+- `compatible` is the target's exact board-compatible string. It identifies the
+  hardware and does not describe FPLinux or the RAM-boot method.
+
+Human identity fields use trimmed printable ASCII with single spaces. Hardware
+codes and aliases use uppercase letters, digits, dots, underscores and
+hyphens; compatible strings use the lowercase `vendor,device` form. Arrays keep
+their declared order and do not allow duplicates.
+
+The public display name is `brand + " " + product`. When `hardware_codes` is not
+empty, the codes follow in parentheses, separated by a comma and a space. The
+fields above produce `Nokia 3210 4G (TA-1618)`. The display name must fit in 31
+ASCII characters, the size of the boot screen's name field.
+
+`./fplinux target new` fills these fields from `--brand`, `--product` and
+`--compatible` and starts with an empty `hardware_codes` list; see
+[Bring up a new phone](/fplinux/porting/bring-up/).
+
+Archive names use the stable `FPLinux-<target>` prefix. They do not derive a
+second name from the punctuation or capitalization of the display name.
+
+Use the complete display name on first reference in user-facing text. A
+hardware code such as `TA-1618` may be used alone after that. Normalized forms
+such as `ta1618` and `TA1618` are reserved for file names, C identifiers,
+Kconfig symbols and other interfaces that cannot use punctuation.
+
+## Platform identity
+
+Every `platforms/<platform>/platform.toml` identifies the reusable SoC layer:
+
+```toml title="platforms/ums9117/platform.toml"
+[identity]
+vendor = "Unisoc"
+soc = "UMS9117"
+aliases = ["T117"]
+compatible = "sprd,ums9117"
+```
+
+- The `platforms/<platform>` directory name is the lowercase platform name;
+  targets select it with their top-level `platform` field.
+- `vendor` and `soc` form the public platform name, here `Unisoc UMS9117`.
+- `aliases` records vendor or reference names. An alias is not a second product
+  name and is used only where provenance or an external interface requires it.
+- `compatible` is the platform fallback compatible.
+
+The `sprd` namespace stays wherever it is already the Linux and Devicetree ABI;
+it is not replaced with `unisoc` to match the prose. Likewise, T117 stays in
+the loader interfaces that require that name, but it is not used as the FPLinux
+platform or phone identity.
+
+## Derived values
+
+The build derives these values from the manifest identity:
+
+- runtime and release metadata;
+- the boot screen identity;
+- the Devicetree root `model` and `compatible` properties and the exact
+  root-node binding;
+- the target names that the host tools show to users.
+
+A target DTS includes `fplinux-<target>-identity.dtsi` and must not repeat its
+root `model` or `compatible`. The generated `compatible` list puts the exact
+board compatible first and the platform fallback second.
+
+The target's `[bootstrap].record_prefix`, for example `TA1618`, labels the
+bootstrap's diagnostic records only; see [Logging](/fplinux/develop/logging/).
+It stays explicit instead of being derived from the display name.
+
+Do not add another stored display name, copy identity fields into a build
+recipe or encode a phone model in the platform. A new consumer reads the
+validated manifest or a generated file derived from it.

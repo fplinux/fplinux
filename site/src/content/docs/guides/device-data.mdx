@@ -1,0 +1,196 @@
+---
+title: Device data
+description: Prepare the phone-specific data that Bluetooth, FM radio and phone audio need.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+import Figure from '../../../components/Figure.astro';
+import DeviceData from '../../../assets/diagrams/device-data.svg';
+
+Some features need data that only your phone's own firmware contains. FPLinux
+does not download or ship this data. One command reads it from your phone,
+read-only, and prepares it for the next build.
+
+## What needs device data
+
+| Data          | Used for                                                                                                                                      | Without it                                              |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Bluetooth     | Bluetooth firmware                                                                                                                            | Bluetooth is unavailable                                |
+| FM radio      | FM receiver settings                                                                                                                          | FM radio is unavailable                                 |
+| Audio profile | headphone, speaker and combined gains, equalizer, automatic level control, and on phones that vibrate through the speaker, the vibration tone | headphones use generic volume levels; no speaker output |
+
+Each group is optional, but all declared groups are prepared together from
+one read of the phone. A partially present, damaged or mismatched group fails
+the build. Device data does not establish hardware support; check the
+[support status](/fplinux/phones/#support-status) and phone page for its limits.
+
+Prepare data from the same physical phone you will run. Do not reuse data from
+another handset, even of the same model.
+
+<Figure caption="Where device data comes from"><DeviceData /></Figure>
+
+:::caution[Keep it private]
+The phone backup, the prepared data and every image or archive built with it
+come from your phone's firmware. Do not share or publish them unless you have
+the rights to do so. They are stored under `.cache/device-data/` in the
+checkout, readable only by you.
+:::
+
+## Prepare data from the phone
+
+You need a source checkout; a standalone archive cannot prepare device data.
+The examples below use `nokia-ta1618`; use the exact target and boot key from
+your [phone page](/fplinux/phones/).
+
+<Steps>
+
+1. Power the phone off and disconnect USB.
+
+2. Start the preparation:
+
+   ```sh title="PC"
+   ./fplinux device-data prepare nokia-ta1618
+   ```
+
+   The command builds and starts a read-only RAM system for the phone.
+
+3. Connect the phone only when the loader asks, holding its boot key, exactly
+   as in [Run FPLinux](/fplinux/start/run/).
+
+4. Wait. The command reads the phone's complete internal storage, prepares the
+   data and prints the next commands:
+
+   ```text title="Output"
+   Next:
+     ./fplinux build nokia-ta1618
+     ./fplinux run nokia-ta1618
+   ```
+
+5. Rebuild the image so it includes the data:
+
+   ```sh title="PC"
+   ./fplinux build nokia-ta1618
+   ```
+
+6. End the preparation session as described in [Power](/fplinux/use/power/)
+   and disconnect USB.
+
+7. Start a new session with the phone powered off, following
+   [Run FPLinux](/fplinux/start/run/).
+
+</Steps>
+
+The reader is read-only. It does not mount, erase, restore or write the phone's
+internal storage or NV data. Ordinary `build` and `run` commands use only data
+that is already prepared; they never read the phone's storage.
+
+If you build with `--profile microsd-uboot`, rebuild that profile too. Both
+profiles use the same prepared data.
+
+## Prepare data from a saved backup
+
+If you already saved a complete backup of this phone's internal storage with
+[`nand backup`](#save-a-nand-backup),
+prepare the data without connecting the phone:
+
+```sh title="PC"
+./fplinux device-data prepare nokia-ta1618 --from-dump nand.bin
+```
+
+Keep the `nand.bin.json` file that `nand backup` wrote beside the backup; the
+command uses it to check the backup's layout. It refuses a backup that is
+incomplete, damaged or made from a different storage chip. The backup file
+and its receipt are not changed. A target that declares its NAND chip also
+accepts a backup without a receipt; if both declarations exist, they must
+agree. Preparation supports 2048 main bytes per page, 64 pages per block
+and 65536 pages in total, with each page's main bytes followed by its OOB
+bytes. Without a chip declaration or receipt, it refuses to infer the layout
+from the file length.
+
+This form builds only the extraction tool in the pinned environment; it does
+not require an existing phone build or start a loader. Add `--offline` to use
+the environment and source archives already stored locally.
+
+For a new target that declares `board-maps`, preparation also extracts its
+pin map and keymap and prints a board-report path. Builds do not consume the
+report, and the loader still takes its maps from the target's asset lock;
+see [Bring up a new phone](/fplinux/porting/bring-up/).
+
+Run `./fplinux device-data prepare --help` for the remaining options.
+
+## Save a NAND backup
+
+Start the selected build using [Run FPLinux](/fplinux/start/run/), then save
+the complete physical NAND page stream:
+
+```sh title="PC"
+./fplinux nand backup nokia-ta1618 nand.bin
+```
+
+Pass the profile and build type of the running session. The reader identifies
+the chip before reading pages and stops if the running kernel cannot identify
+it or its chip and page size differ from the target's declaration.
+
+The command checks the complete stream's size, computes its SHA-256 and
+writes `nand.bin` and its geometry receipt `nand.bin.json`, readable only by
+you. The receipt records chip identity, page geometry, stream size, SHA-256
+and target; it contains no NAND contents and can be attached to an issue.
+Keep it beside the backup for later preparation.
+
+Saving to the same path replaces the backup. An incomplete transfer leaves
+an existing backup and receipt unchanged. If the complete backup is written
+but its new receipt cannot be saved, the new backup remains without a
+receipt. The digest identifies the saved bytes; it is not a comparison with a
+second device read. Restoring NAND is unsupported.
+
+To identify the chip without saving a backup:
+
+```sh title="PC"
+./fplinux nand identify nokia-ta1618
+```
+
+The report includes chip ID and name, page and block geometry, raw size and
+feature-register values. An unidentified chip reports `chip=unknown` and zero
+geometry. Treat the backup itself as private phone data.
+
+## NAND backup reference
+
+```sh title="PC"
+./fplinux nand identify <target> [--profile NAME]
+./fplinux nand backup <target> PATH [--profile NAME]
+```
+
+Both commands need a phone that is running a build of `<target>`. They open
+the phone's read-only NAND reader, which identifies the fitted chip.
+
+`nand identify` prints the reader's report unchanged, one `key=value` line each
+for `id_bytes`, `chip`, `page_main_bytes`, `oob_bytes`, `pages_per_block`,
+`block_count`, `raw_bytes`, `geometry_source`, `feature_a0`, `feature_b0` and
+`feature_c0`. For a chip that the running kernel does not identify, it shows
+`chip=unknown`, zero geometry values and `geometry_source=unknown`, together
+with the chip's ID bytes and feature register values.
+
+`nand backup` stops before reading any page when the running kernel does not
+identify the chip, or when the chip or its page size differs from the one the
+target declares. The expected image size comes from the reported geometry. The
+command checks that the complete stream has that size, computes its SHA-256
+digest and only then puts the file in place, with mode `0600`. It then writes
+the geometry receipt `PATH.json` beside it, also with mode `0600`. Once the
+complete stream is checked, it removes any old receipt before replacing the
+backup. If writing the new receipt fails, the complete new backup remains
+without a receipt; a target that declares its NAND chip can still use it for
+device-data preparation. The receipt is a
+JSON object with these fields:
+
+| Field                            | Value                                                 |
+| -------------------------------- | ----------------------------------------------------- |
+| `id_bytes`                       | chip ID bytes as hexadecimal, manufacturer byte first |
+| `chip`                           | chip name reported by the reader                      |
+| `page_main_bytes`, `oob_bytes`   | main and OOB bytes per page                           |
+| `pages_per_block`, `block_count` | pages per erase block and number of blocks            |
+| `raw_bytes`                      | size of the saved image                               |
+| `sha256`                         | SHA-256 digest of the saved image                     |
+| `target`                         | target used for the backup                            |
+
+The digest identifies the saved bytes; the command does not compare them with a
+second read from the phone. Restoring the NAND is not supported.

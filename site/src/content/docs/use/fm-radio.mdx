@@ -1,0 +1,105 @@
+---
+title: FM radio
+description: Scan for FM stations and listen through headphones or the speaker.
+source:
+  - alpine/aports/fplinux-fm
+---
+
+import { Steps } from '@astrojs/starlight/components';
+import FeatureStatus from '../../../components/FeatureStatus.astro';
+import Key from '../../../components/Key.astro';
+
+Scan for stations and listen with `fplinux-fm` in a shell on the phone. FM
+uses the same outputs as other [sound](/fplinux/use/audio/). Check
+[support status](/fplinux/phones/#support-status) and your
+[phone page](/fplinux/phones/) for FM support, available outputs and boot
+profiles before following this guide.
+
+<FeatureStatus feature="fm-radio" />
+
+FM uses receiver settings from [device data](/fplinux/guides/device-data/)
+prepared from the same phone before the image is built.
+
+## Match the checked configuration
+
+FM shares the equalizer and limiter settings used for audio files; fitted
+audio enables both by default. Match the conditions in the phone checklist
+before starting FM. If it lists playback with EQ/ALC off, disable both:
+
+```sh title="Phone"
+amixer -c 0 cset name='EQ Playback Switch' off
+amixer -c 0 cset name='ALC Playback Switch' off
+```
+
+These settings also affect later file playback. Restore them only for a
+configuration your phone checklist supports.
+
+## Listen to a station
+
+<Steps>
+
+1. Plug wired headphones or another 3.5 mm cable into the headphone socket.
+   The cable is the antenna, so it must stay plugged in even if you listen on
+   the speaker.
+
+2. Scan the band:
+
+   ```sh title="Phone"
+   fplinux-fm scan
+   ```
+
+   The scan covers 87.5 to 108.0 MHz in 0.1 MHz steps and prints candidate
+   frequencies. A candidate is not always an audible station; listen to
+   confirm it.
+
+3. Play a frequency:
+
+   ```sh title="Phone"
+   fplinux-fm play 100.0
+   ```
+
+   Playback continues until you press <Key>Ctrl</Key>+<Key>C</Key>. To stop automatically, add a
+   duration, for example `fplinux-fm play 100.0 --seconds=30`.
+
+</Steps>
+
+Run `fplinux-fm --help` for the full syntax.
+
+## Volume and outputs
+
+FM uses the same volume controls, equalizer and output switches as other
+playback; see [Sound and recording](/fplinux/use/audio/). FM is quiet at low
+volume levels. Where automatic headphone switching is supported, plugging in
+the cable selects the headphones. If FM speaker output is supported, turn it
+on with the cable still plugged in, and optionally turn the headphones off:
+
+```sh title="Phone"
+amixer -c 0 cset name='Speaker Playback Switch' on
+amixer -c 0 cset name='Headphone Playback Switch' off
+```
+
+Unplugging the cable removes the antenna, even if automatic output switching
+moves the sound to the speaker.
+
+## FM and Bluetooth
+
+FM radio and [Bluetooth](/fplinux/use/bluetooth/) share a controller. FM
+works while Bluetooth is off, turning Bluetooth off does not stop FM, and
+stopping FM leaves Bluetooth on if it was on.
+
+## If the receiver stops responding
+
+If an `fplinux-fm` command reports a timeout, stop using FM and cold-boot the
+phone: power it off completely as described in
+[End the session safely](/fplinux/use/power/), then load FPLinux again. Until
+then, the phone cannot go to sleep.
+
+## Limitations
+
+- FM cannot play while an audio file plays or a recording runs.
+- No station names and no calibrated signal strength are available.
+- FM radio cannot be recorded.
+- The phone cannot [sleep](/fplinux/use/power/) while the receiver is on,
+  including during a scan.
+- Use the equalizer only where your phone page lists support for FM with it
+  enabled.

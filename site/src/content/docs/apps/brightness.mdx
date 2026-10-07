@@ -1,0 +1,55 @@
+---
+title: Brightness control
+description: Change the LCD brightness level with the phone keypad.
+source:
+  - alpine/aports/fplinux-brightness-ui
+---
+
+import PhoneScreen from '../../../components/PhoneScreen.astro';
+import brightness from '../../../assets/screens/brightness.png';
+import FeatureStatus from '../../../components/FeatureStatus.astro';
+import Key from '../../../components/Key.astro';
+
+Brightness control shows the LCD brightness level as a number from `0` to `10`
+and a ten-segment bar, and lets you change it with the keypad. The number is a
+setting, not a percentage or a light measurement.
+[Display and lights](/fplinux/use/display-and-lights/) explains the system
+brightness scale and how to change it from the command line.
+
+<FeatureStatus feature="brightness-control" />
+
+<PhoneScreen src={brightness} alt="Brightness control at level 7 of 10 on a 240×320 screen" caption="Brightness control at level 7, drawn by the FPLinux brightness code at 240×320." />
+
+## Install and start
+
+Install `fplinux-brightness-ui.apk` as described in
+[Packages](/fplinux/guides/packages/). Then start the application in the local
+terminal or from the PC, as described in
+[Start an application](/fplinux/apps/):
+
+```sh title="Phone"
+fplinux-brightness-ui
+```
+
+The application works on the `128×160` and `240×320` displays. It needs the
+system brightness service, which runs by default.
+
+## Controls
+
+| Key                   | Action                 |
+| --------------------- | ---------------------- |
+| <Key>Up</Key>         | Raise the level by one |
+| <Key>Down</Key>       | Lower the level by one |
+| <Key>Right soft</Key> | Exit                   |
+
+The level stops at `0` and `10`. Level `0` turns the backlight off. The
+application keeps running in the dark: press <Key>Up</Key> to return to level `1`.
+
+## What happens to the level
+
+Each successful change becomes the system brightness level at once and stays in
+effect after you exit. It lasts until the phone shuts down; the next boot starts
+with the default level.
+
+If a change fails, the previous level stays in effect and the screen shows
+`SET FAILED` while the backlight is lit.

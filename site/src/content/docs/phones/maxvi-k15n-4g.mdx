@@ -1,0 +1,97 @@
+---
+title: Maxvi K15n4G
+description: Boot key, controls, storage, power and limitations of FPLinux on the Maxvi K15n4G.
+source:
+  - targets/maxvi-k15n-4g
+---
+
+import Key from '../../../components/Key.astro';
+import PhoneChecklist from '../../../components/PhoneChecklist.astro';
+
+- **Target**: `maxvi-k15n-4g`
+- **Hardware code**: not established
+- **Platform**: [Unisoc UMS9117](/fplinux/porting/ums9117/)
+- **Display**: 240×320
+
+## Support checklist
+
+Each status applies to this exact phone and the conditions in its note. See
+[Support status](/fplinux/phones/#support-status) for the meaning of the labels
+and [common limitations](/fplinux/phones/#limitations-on-every-phone).
+
+<PhoneChecklist phone="maxvi-k15n-4g" />
+
+## Before you start
+
+For Bluetooth, FM radio and fitted audio, prepare
+[device data](/fplinux/guides/device-data/) from this same handset. A first
+generic RAM boot can run without those groups. Do not substitute data from
+another phone.
+
+## Boot key
+
+Hold the <Key>Left soft key</Key>. Start `./fplinux run maxvi-k15n-4g` first;
+when the loader asks for the phone, hold the left soft key on the powered-off
+phone and connect USB while keeping the key pressed.
+[Run FPLinux](/fplinux/start/run/) describes the complete sequence.
+
+## Controls and storage
+
+- The physical keypad supports multi-tap typing, menus, Help, scrollback and
+  one-shot modifier combinations in the graphical terminal. See
+  [Terminal](/fplinux/use/terminal/) for shared controls.
+- The keypad light switches on with key presses and turns off after five
+  seconds, including after wake.
+- FAT32 and ext4 microSD data cards support reads and writes in the RAM profile.
+  Insert the card before boot and leave it installed throughout the powered
+  session; hot-swap is not supported.
+- A microSD system card is not supported. Only the RAM root is available; its
+  files do not persist after power is removed.
+- Internal storage provides a read-only raw backup for
+  [device data](/fplinux/guides/device-data/); it cannot be mounted, written or
+  restored through FPLinux.
+
+## Power
+
+- **Suspend**: USB-powered s2idle with an RTC alarm or the red handset key
+  restores the display and USB session. Mounted ext4 storage remains usable
+  after RTC wake.
+- **Battery telemetry and SoC temperature**: not supported; these devices are
+  disabled in this target.
+- **Power-off**: support has not been established. Linux reboot is not
+  supported.
+
+[Power](/fplinux/use/power/) describes the shared interfaces; use only those
+qualified for this phone.
+
+## End the RAM session
+
+Stop applications using the card, disable card-backed swap, then flush and
+unmount card filesystems as described in
+[microSD storage](/fplinux/use/microsd/). Disconnect USB. If a battery is
+installed, remove and reinsert it before booting the phone normally. This
+discards the RAM session and returns to the stock firmware on the next normal boot.
+
+## Hardware details and limits
+
+- **Backlight**: system levels 0–10, with level 0 turning the light off. Visible
+  spacing between levels is unqualified. The target uses
+  `/sys/class/backlight/maxvi-k15n-4g-backlight`.
+- **Headphones**: stereo PCM and per-channel mute work with three-contact TRS
+  headphones. Jack detection works; automatic output routing is not supported.
+  Four-contact TRRS compatibility is unqualified.
+- **Speaker**: PCM playback through the built-in speaker is supported.
+- **Microphones**: built-in microphone recording and replay are available;
+  acoustic response and wired-headset input are unqualified.
+- **Camera**: the BF3A01 provides native 240×320 NV16, sensor rotation of 270°
+  counterclockwise and adjustable brightness from 0–6, initially 3. Brightness
+  can change during capture and is retained across stream stops. Capture leaves
+  pixels unrotated. Color accuracy and concurrent capture/codec use have not
+  been tested. See [Camera](/fplinux/use/camera/).
+- **Rotation**: the ROTA device is disabled; use CPU image rotation.
+- **Vibration**: no vibration device is enabled. ARMADA is unsupported because
+  it requires force feedback; this does not establish whether vibration
+  hardware is present.
+
+Feature support does not establish release readiness. See
+[Standalone archives](/fplinux/guides/standalone-archive/).

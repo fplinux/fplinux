@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 328" role="img" aria-labelledby="audio-routing-title" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', sans-serif">
+<title id="audio-routing-title">Audio output selection</title>
+<defs><marker id="audio-routing-arrow" viewBox="0 0 8 8" refX="2" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-arrow-head" fill="#396475"/></marker></defs>
+<rect x="4" y="40" width="160" height="52" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+<text x="84" y="61" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">File playback</text>
+<text x="84" y="79" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">aplay</text>
+<rect x="4" y="128" width="160" height="52" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+<text x="84" y="159" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">FM radio</text>
+<path d="M164,66 L212,66" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2"/>
+<path d="M164,154 L212,154" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2"/>
+<path d="M212,66 L212,154" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2"/>
+<circle cx="212" cy="66" r="3.5" class="dg-fill-primary" fill="#396475"/>
+<circle cx="212" cy="154" r="3.5" class="dg-fill-primary" fill="#396475"/>
+<path d="M212,66 L260,66" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#audio-routing-arrow)"/>
+<path d="M212,154 L260,154" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#audio-routing-arrow)"/>
+<rect x="252" y="24" width="256" height="172" rx="14" class="dg-region" fill="none" stroke="#6E797D" stroke-width="1.5" stroke-dasharray="6 4"/>
+<rect x="268" y="40" width="224" height="52" rx="10" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+<text x="380" y="61" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">Headphone Playback Switch</text>
+<text x="380" y="79" class="dg-text-small" fill="#202D35" font-size="12" text-anchor="middle">on or off</text>
+<rect x="268" y="128" width="224" height="52" rx="10" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+<text x="380" y="149" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">Speaker Playback Switch</text>
+<text x="380" y="167" class="dg-text-small" fill="#202D35" font-size="12" text-anchor="middle">on or off</text>
+<path d="M492,66 L564,66" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#audio-routing-arrow)"/>
+<path d="M492,154 L564,154" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#audio-routing-arrow)"/>
+<rect x="572" y="44" width="144" height="44" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+<text x="644" y="71" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">Headphones</text>
+<rect x="572" y="132" width="144" height="44" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+<text x="644" y="159" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">Speaker</text>
+<rect x="96" y="240" width="272" height="80" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+<text x="232" y="263" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">Headphone socket</text>
+<text x="232" y="282" class="dg-text-small" fill="#202D35" font-size="12" text-anchor="middle">Plug in: headphones on, speaker off</text>
+<text x="232" y="301" class="dg-text-small" fill="#202D35" font-size="12" text-anchor="middle">Unplug: speaker on, headphones off</text>
+<rect x="392" y="240" width="272" height="80" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+<text x="528" y="263" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">By hand</text>
+<text x="528" y="282" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">amixer -c 0 cset</text>
+<text x="528" y="301" class="dg-text-muted" fill="#6E797D" font-size="12" text-anchor="middle">lasts until the next plug or unplug</text>
+<path d="M300,240 L300,204" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#audio-routing-arrow)"/>
+<path d="M456,240 L456,204" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#audio-routing-arrow)"/>
+</svg>

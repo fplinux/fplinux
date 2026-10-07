@@ -1,0 +1,92 @@
+---
+title: Optional packages
+description: Install and remove optional FPLinux applications on a running phone.
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+Optional applications come as APK files built together with the FPLinux
+image. Install them into a running phone; you do not need a new load. Each
+[application page](/fplinux/apps/) names its APK file, its package name and how
+to start it. Check your phone's [support status](/fplinux/phones/#support-status)
+before choosing an application.
+
+## How long a package stays
+
+| System                                                      | After installing                           |
+| ----------------------------------------------------------- | ------------------------------------------ |
+| RAM system (default)                                        | The package is gone when the session ends. |
+| [microSD system card](/fplinux/guides/microsd-system-card/) | The package stays until you remove it.     |
+
+Before cutting power to a system card, shut it down as described in
+[Power](/fplinux/use/power/).
+
+## Install a package
+
+Copy the APK to the phone, then install it. This example installs ARMADA
+(`fplinux-showcase.apk`) on a Nokia 3210 4G.
+
+<Tabs syncKey="source">
+<TabItem label="Source checkout">
+
+The APKs are in the `apks/` folder of the build directory that
+`./fplinux build` printed after `output:`. Run the commands from the checkout
+and replace `<output>` with that path:
+
+```sh title="PC"
+./fplinux console nokia-ta1618 --upload \
+  <output>/apks/fplinux-showcase.apk /tmp/fplinux-showcase.apk
+./fplinux console nokia-ta1618 --exec \
+  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-showcase.apk'
+```
+
+Use the target, profile and build type of the running session. For a
+microSD system card, add `--profile microsd-uboot` to both commands.
+
+</TabItem>
+<TabItem label="Standalone archive">
+
+Run the commands from the extracted archive directory:
+
+```sh title="PC"
+./runner/run.py --reconnect --upload \
+  ./apks/fplinux-showcase.apk /tmp/fplinux-showcase.apk
+./runner/run.py --reconnect --exec \
+  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-showcase.apk'
+```
+
+</TabItem>
+</Tabs>
+
+## Remove a package
+
+Stop the application first. Remove it by its package name, without `.apk`:
+
+<Tabs syncKey="source">
+<TabItem label="Source checkout">
+
+```sh title="PC"
+./fplinux console nokia-ta1618 --exec 'apk del fplinux-showcase'
+```
+
+</TabItem>
+<TabItem label="Standalone archive">
+
+```sh title="PC"
+./runner/run.py --reconnect --exec 'apk del fplinux-showcase'
+```
+
+</TabItem>
+</Tabs>
+
+## Full curses libraries
+
+`fplinux-ncurses-curses.apk` adds the full curses, menu, form and panel
+libraries to the RAM system. The microSD system card already includes them.
+
+## Package sources
+
+Install only the APKs built with your image. FPLinux configures no package
+repository, and the install command above deliberately works without network
+access. The phone also has `wget` with a certificate bundle for HTTP and HTTPS
+downloads; a download over HTTPS does not make an APK trusted.

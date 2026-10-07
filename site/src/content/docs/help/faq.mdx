@@ -1,0 +1,95 @@
+---
+title: Questions and answers
+description: Short answers to common questions about what FPLinux does on a phone and what it needs.
+---
+
+## Using the phone
+
+### Can I make calls, send SMS or use mobile data?
+
+No. FPLinux does not use the phone's modem, so calls, SMS and mobile data do
+not work. For Internet access on the phone, share a connection over
+[Bluetooth](/fplinux/use/bluetooth/#internet-over-bluetooth-pan).
+
+### Does FPLinux stay on the phone?
+
+No. Every start loads FPLinux from a PC over USB, and the default system runs
+from RAM and forgets everything at power-off. A
+[microSD system card](/fplinux/guides/microsd-system-card/) keeps files and
+installed packages between sessions, but each cold start still needs the PC.
+FPLinux cannot be installed to the phone's internal storage.
+
+### Will the phone still work as before?
+
+Yes. Starting the phone normally, without the boot key, starts its own
+firmware. See [Power](/fplinux/use/power/#return-to-the-phones-own-firmware).
+
+### Can I use the phone without a computer?
+
+Once Linux runs, you can use the [terminal](/fplinux/use/terminal/) on phones
+with verified keypad input. Use the USB session if that input is not tested.
+Starting FPLinux always needs a PC, and the phone needs USB power when
+it has no battery. Check your [phone page](/fplinux/phones/) for its limits.
+
+### Does it work on my phone?
+
+Only on the [supported phones](/fplinux/phones/). A target describes one exact
+model, so do not use it for a different phone, even one with the same chip. If
+your keypad phone uses the Unisoc UMS9117, create a headless target and try
+[bring-up](/fplinux/porting/bring-up/). The
+[new-phone checklist](/fplinux/porting/checklist/) explains what to establish.
+
+### Is there Wi-Fi?
+
+No. FPLinux does not support Wi-Fi on any current target.
+
+### Does it show the battery level?
+
+No. FPLinux shows whether charger power is connected, but not a battery
+percentage, and it does not control charging. Battery voltage, current and a
+relative charge counter are available where the phone supports battery
+telemetry. Check its checklist for availability and accuracy limits. See
+[Charger and battery](/fplinux/use/power/#charger-and-battery).
+
+### Can I install more software?
+
+You can install the [optional packages](/fplinux/guides/packages/) built with
+your image. FPLinux configures no package repository on the phone.
+
+## Your computer
+
+### What do I need on my computer?
+
+A Linux x86-64 PC with Python 3.14 and network access for the first build.
+Running the phone also needs a few standard tools; see
+[Run FPLinux](/fplinux/start/run/#before-you-start).
+
+### Do I need Docker or Podman?
+
+No. `./fplinux setup` installs the build environment inside the checkout, and
+every command uses it from there. See [Build FPLinux](/fplinux/start/build/).
+
+### Can I run FPLinux without building it?
+
+A [standalone archive](/fplinux/guides/standalone-archive/) runs FPLinux
+without a source checkout. No release archive is published yet; you can
+package one from your own build.
+
+## The project
+
+### What license does FPLinux use?
+
+Original FPLinux code and documentation are licensed under GPL-2.0-only
+unless a file says otherwise. Third-party components keep their own licenses;
+see [Notices](/fplinux/about/notices/).
+
+### Where is the source code?
+
+On [GitHub](https://github.com/fplinux/fplinux). [Where the code
+is](/fplinux/develop/contributing/#where-the-code-is) explains the layout, and
+pages about a phone, an application or a feature link to their source under
+the page title.
+
+### How do I report a problem?
+
+See [Report a problem](/fplinux/help/report/).

@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from fplinux_cli import common
+from fplinux_cli.cli import dependencies as dependency_cli
 from fplinux_cli.dependencies.inputs import (
     DependencyInput,
     dependency_selection,
@@ -247,6 +249,51 @@ class DependencyInputTests:
         assert (records["container:tool"].url) == ("https://example.invalid/tool-2.0.tar.gz")
         assert (records["npm:node_modules/tool"].checksum) == ("11" * 64)
         assert (records["npm:node_modules/tool"].sha256) is None
+
+    def test_site_registry_inputs_are_separate_from_the_environment_closure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Snapshots retain both locks while environment setup only selects its root packages."""
+        self._write("package.json", '{"engines":{"node":"24.21.0","npm":"12.2.0"}}\n')
+        self._write(
+            ".github/workflows/pages.yml",
+            "jobs:\n  build:\n    runs-on: ubuntu-24.04\n    steps:\n"
+            '      - with:\n          node-version: "24.21.0"\n'
+            "      - run: npm install --global npm@12.2.0\n",
+        )
+        self._write(
+            "site/package-lock.json",
+            json.dumps(
+                {
+                    "packages": {
+                        "": {"dependencies": {"tool": "4.0.0"}},
+                        "node_modules/tool": {
+                            "version": "4.0.0",
+                            "resolved": "https://example.invalid/site/tool-4.0.0.tgz",
+                            "integrity": "sha512-"
+                            + base64.b64encode(bytes.fromhex("22" * 64)).decode(),
+                        },
+                    }
+                }
+            ),
+        )
+        monkeypatch.setattr(common, "ROOT", self.root)
+        snapshot_inputs, context = dependency_cli._checkout_declarations()  # noqa: SLF001
+        snapshot = {item.key: item for item in snapshot_inputs}
+        root_input = snapshot["npm:node_modules/tool"]
+        site_input = snapshot["npm:site:node_modules/tool"]
+        assert root_input.url == "https://example.invalid/npm/tool-3.0.0.tgz"
+        assert root_input.checksum == "11" * 64
+        assert root_input.purpose == "npm-package"
+        assert root_input.destination.startswith("downloads/npm/")
+        assert site_input.url == "https://example.invalid/site/tool-4.0.0.tgz"
+        assert site_input.checksum == "22" * 64
+        assert site_input.purpose == "site-npm-package"
+        assert site_input.destination.startswith("downloads/site/npm/")
+        assert context["site"]["consumer"]["node"] == "24.21.0"
+        environment = environment_inputs(self.root)
+        assert root_input in environment
+        assert site_input not in environment
 
     def test_missing_or_dynamic_source_checksum_cannot_enter_inventory(self) -> None:
         """Incomplete source declarations fail before an archive can claim completeness."""

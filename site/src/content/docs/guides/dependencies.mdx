@@ -1,0 +1,110 @@
+---
+title: Dependency snapshots
+description: Save the exact external build inputs and restore a matching build environment without downloading.
+---
+
+A dependency snapshot keeps the pinned external inputs and build environment
+outside the checkout's disposable build cache. It belongs with the matching
+source checkout; it does not contain the source itself or a built phone image.
+
+## Save a snapshot
+
+Prepare the build environment with [Build FPLinux](/fplinux/start/build/), then
+choose a directory outside `.cache/`:
+
+```sh title="PC"
+./fplinux dependencies create ../fplinux-inputs
+./fplinux dependencies verify ../fplinux-inputs
+```
+
+`create` selects the external inputs declared by the checkout's locks,
+package recipes and build environment configuration. It checks each download
+against its declared checksum and size, stores shared bytes once and exports
+the current build environment through Kern. Missing inputs are downloaded at
+their exact declared versions; the command does not choose replacements.
+
+To require locally stored inputs, add `--offline`. Repeat `--from PATH` to
+look for original downloads in additional local files or directories; only
+bytes that match a declared checksum are accepted:
+
+```sh title="PC"
+./fplinux dependencies create ../fplinux-inputs --offline --from ../downloads
+```
+
+Offline creation requires every declared archive to be available locally.
+The command reports missing exact inputs instead of querying a package
+registry for replacement versions.
+
+The directory's `manifest.json` records the selected inputs, original URLs,
+checksums, sizes and environment state. Each directory holds one input set.
+Use another directory to preserve a different set. Existing contents are
+verified before reuse.
+
+## Verify a snapshot
+
+```sh title="PC"
+./fplinux dependencies verify ../fplinux-inputs
+```
+
+Verification checks the stored bytes and their agreement with this checkout's
+current external declarations. Comments, mapping-key order and unrelated
+driver edits do not change the input set; meaningful sequence order does.
+A successful verification establishes stored-input integrity. It does not
+show that a phone build can complete offline or produces identical output
+bytes.
+
+## Restore into a matching checkout
+
+```sh title="PC"
+./fplinux dependencies restore ../fplinux-inputs
+./fplinux doctor
+```
+
+Restoration verifies the complete snapshot before writing its declared cache
+destinations and requires the current external declarations to match. Loading
+the saved environment also requires its exact image recipe. The environment's
+file bytes, links, numeric owners and permission bits are checked before it
+becomes available. Timestamps, extended attributes and hardlink relationships
+are outside that comparison.
+
+An existing cache file with different bytes is reported and retained for
+inspection before input restoration writes any files. The snapshot restores
+the environment and external inputs, not compiled APKs, root filesystems,
+kernels or successful build results. Build the selected phone afterwards:
+
+```sh title="PC"
+./fplinux build nokia-ta1618 --offline
+```
+
+## Save inputs without an environment
+
+Add `--inputs-only` when creating a snapshot to omit the environment export:
+
+```sh title="PC"
+./fplinux dependencies create ../fplinux-inputs --inputs-only
+```
+
+To recreate the environment from those originals, restore only the inputs and
+request an offline setup:
+
+```sh title="PC"
+./fplinux dependencies restore ../fplinux-inputs --inputs-only
+./fplinux setup --offline --force
+```
+
+## What stays separate
+
+The selected inputs include npm registry archives declared by the root and
+`site/package-lock.json`, including locked optional platform packages. The
+site selection is for Ubuntu 24.04, Linux x86-64 with glibc 2.39, Node.js
+`24.21.0` and npm `12.2.0`. Site archives are restored under
+`.cache/downloads/site/npm/`.
+
+Restoration saves those original archives; it does not install Node.js or npm,
+create `site/node_modules`, or run `npm ci`. Follow
+[Preview this site](/fplinux/develop/contributing/#preview-this-site) to
+install the site tools and run its checks.
+
+Phone-specific [device data](/fplinux/guides/device-data/) and private
+package-signing keys are separate local inputs and are not included. Keep
+them separately when they are required by the intended build.

@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 410" role="img" aria-labelledby="end-session-title" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', sans-serif">
+<title id="end-session-title">Which way to end the session</title>
+<defs><marker id="end-session-arrow" viewBox="0 0 8 8" refX="2" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-arrow-head" fill="#396475"/></marker></defs>
+<rect x="4" y="188" width="124" height="72" rx="10" class="dg-box-2" fill="#EDEEEE" stroke="#6E797D" stroke-width="1.5"/>
+<text x="66" y="212" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">Booted from</text>
+<text x="66" y="230" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">a microSD</text>
+<text x="66" y="248" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">system card?</text>
+<text x="4" y="24" class="dg-text-muted" fill="#6E797D" font-size="12">Files in RAM, such</text>
+<text x="4" y="40" class="dg-text-muted" fill="#6E797D" font-size="12">as /tmp, are lost</text>
+<text x="4" y="56" class="dg-text-muted" fill="#6E797D" font-size="12">in every case.</text>
+<path d="M128,224 L144,224 L144,120 L168,120" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#end-session-arrow)"/>
+<text x="156" y="113" class="dg-text-small" fill="#202D35" font-size="12" text-anchor="middle">No</text>
+<rect x="176" y="92" width="104" height="56" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+<text x="228" y="116" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">Release</text>
+<text x="228" y="134" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">data cards</text>
+<path d="M280,120 L292,120" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#end-session-arrow)"/>
+<rect x="300" y="92" width="136" height="56" rx="10" class="dg-box-2" fill="#EDEEEE" stroke="#6E797D" stroke-width="1.5"/>
+<text x="368" y="116" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">Battery in</text>
+<text x="368" y="134" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">the phone?</text>
+<path d="M436,120 L448,120" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2"/>
+<path d="M448,42 L448,198" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2"/>
+<path d="M448,42 L460,42" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#end-session-arrow)"/>
+<path d="M448,120 L460,120" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#end-session-arrow)"/>
+<path d="M448,198 L460,198" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#end-session-arrow)"/>
+<path d="M144,224 L144,329 L292,329" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#end-session-arrow)"/>
+<text x="222" y="322" class="dg-text-small" fill="#202D35" font-size="12" text-anchor="middle">Yes</text>
+<rect x="300" y="301" width="136" height="56" rx="10" class="dg-box-2" fill="#EDEEEE" stroke="#6E797D" stroke-width="1.5"/>
+<text x="368" y="325" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">Battery-only</text>
+<text x="368" y="343" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">power-off verified?</text>
+<path d="M436,329 L448,329" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2"/>
+<path d="M448,290 L448,368" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2"/>
+<path d="M448,290 L460,290" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#end-session-arrow)"/>
+<path d="M448,368 L460,368" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#end-session-arrow)"/>
+<rect x="468" y="8" width="248" height="68" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+<text x="484" y="28" class="dg-text-muted" fill="#6E797D" font-size="12">No battery</text>
+<text x="484" y="47" class="dg-text" fill="#202D35" font-size="14">Unplug USB.</text>
+<text x="484" y="66" class="dg-text-muted" fill="#6E797D" font-size="12">Power is cut at once.</text>
+<rect x="468" y="86" width="248" height="68" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+<text x="484" y="106" class="dg-text-muted" fill="#6E797D" font-size="12">Battery + verified power-off</text>
+<text x="484" y="125" class="dg-text" fill="#202D35" font-size="14">Unplug USB and charger,</text>
+<text x="484" y="144" class="dg-text" fill="#202D35" font-size="14">hold its power key 5 s.</text>
+<rect x="468" y="164" width="248" height="68" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+<text x="484" y="184" class="dg-text-muted" fill="#6E797D" font-size="12">Battery, power-off not tested</text>
+<text x="484" y="203" class="dg-text" fill="#202D35" font-size="14">Follow the phone page's</text>
+<text x="484" y="222" class="dg-text" fill="#202D35" font-size="14">session-ending procedure.</text>
+<rect x="468" y="256" width="248" height="68" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+<text x="484" y="276" class="dg-text-muted" fill="#6E797D" font-size="12">Yes</text>
+<text x="484" y="295" class="dg-text" fill="#202D35" font-size="14">Unplug USB and charger,</text>
+<text x="484" y="314" class="dg-text" fill="#202D35" font-size="14">hold its power key 5 s.</text>
+<rect x="468" y="334" width="248" height="68" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+<text x="484" y="354" class="dg-text-muted" fill="#6E797D" font-size="12">No, any other case</text>
+<text x="484" y="373" class="dg-text" fill="#202D35" font-size="14">Shut down on USB power,</text>
+<text x="484" y="392" class="dg-text" fill="#202D35" font-size="14">then unplug USB.</text>
+</svg>

@@ -1,0 +1,107 @@
+---
+title: Phones
+description: Compare exact phone targets and read their detailed support checklists, controls and limitations.
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+import SupportMatrix from '../../../components/SupportMatrix.astro';
+
+FPLinux runs on four keypad phones built on the Unisoc UMS9117. Each phone
+has its own target, the name you pass to `./fplinux build` and
+`./fplinux run`. A target describes one exact phone model; do not use it for a
+different model, even one with the same chip.
+
+<CardGrid>
+	<Card title="Nokia 3210 4G (TA-1618)" icon="phone">
+		Target `nokia-ta1618`, 240×320 display.
+		[Read the phone page](/fplinux/phones/nokia-3210-4g/).
+	</Card>
+	<Card title="INOI 240 Modern 4G" icon="phone">
+		Target `inoi-240-modern-4g`, 128×160 display.
+		[Read the phone page](/fplinux/phones/inoi-240-modern-4g/).
+	</Card>
+	<Card title="INOI 244 Modern 4G" icon="phone">
+		Target `inoi-244-modern-4g`, 240×320 display.
+		[Read the phone page](/fplinux/phones/inoi-244-modern-4g/).
+	</Card>
+	<Card title="Maxvi K15n4G" icon="phone">
+		Target `maxvi-k15n-4g`, 240×320 display.
+		[Read the phone page](/fplinux/phones/maxvi-k15n-4g/).
+	</Card>
+</CardGrid>
+
+<span id="status-terms"></span>
+
+## Support status
+
+Hardware presence and FPLinux support are separate. **Present** means the phone
+has the component; **Absent** means its absence has been established;
+**Unknown** means its presence has not been established. Software-only
+functions have no hardware-presence label. Presence alone does not establish
+FPLinux support.
+
+The phone checklists and comparison tables use four support labels:
+
+- **Verified**: the stated function has been used on that exact phone, under
+  the conditions named in its checklist. It does not qualify other profiles,
+  peripherals or related functions.
+- **Partial**: support has a stated limit or an untested physical boundary.
+  The note distinguishes observed results from available, untested paths.
+- **Not tested**: use of this function on that phone has not been established.
+- **Unsupported**: FPLinux has no supported way to use it on that phone. The
+  hardware may still be present.
+
+The [feature overview](/fplinux/features/) separately describes whether a
+function is **Implemented** or **Not implemented**, and **Device-tested** or
+**Not tested**. Device-tested means at least one documented
+configuration has been tested. Use the exact phone, profile and subfunction
+in the checklist to decide what you can use.
+
+The comparisons below summarize broad functions. Each phone page contains the
+detailed checklist, prerequisites, controls and safe shutdown procedure.
+
+## Limitations on every phone
+
+- Calls, SMS and mobile data do not work.
+- Wi-Fi and the indicator LEDs are not supported.
+- USB works only as a device attached to a PC. USB host and OTG are not
+  supported.
+- Linux cannot reboot the phone. To start FPLinux again, end the session and
+  load it from the PC.
+- The phone cannot start FPLinux on its own; every start needs the PC and the
+  USB loader.
+- FPLinux cannot be installed to the phone's internal storage or mount it. It
+  can only save a raw backup of it for
+  [device data](/fplinux/guides/device-data/).
+
+Every boot uses the PC's USB loader, including a
+[microSD system card](/fplinux/guides/microsd-system-card/). Start the loader
+before connecting the powered-off phone and use its exact boot key; see
+[Run FPLinux](/fplinux/start/run/). Booting normally starts the stock firmware.
+
+## Hardware support
+
+Compare hardware functions. The exact-phone checklist separates component
+presence from supported use and explains partial results.
+
+<SupportMatrix kind="hardware" />
+
+## System features
+
+Compare boot, connectivity, storage and power functions.
+
+<SupportMatrix kind="system" />
+
+## Application support
+
+The applications themselves are described under
+[Applications](/fplinux/apps/).
+
+<SupportMatrix kind="application" />
+
+## Your phone is not listed
+
+A Unisoc UMS9117 (T117) phone without a target can still start Linux without
+its screen if its board is compatible with the headless loader. Use the
+[new-phone checklist](/fplinux/porting/checklist/) to record what is known,
+then follow [Bring up a new phone](/fplinux/porting/bring-up/).

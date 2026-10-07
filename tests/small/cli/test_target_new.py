@@ -23,13 +23,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
-def table_rows(markdown: str, heading: str) -> list[list[str]]:
-    """Return the data cells of the first pipe table under one second-level heading."""
-    lines = markdown.split(f"\n## {heading}\n", 1)[1].split("\n## ", 1)[0].splitlines()
-    table = [line for line in lines if line.startswith("|")]
-    return [[cell.strip() for cell in line.strip("|").split("|")] for line in table[2:]]
-
-
 class NewTargetTests:
     """Create skeletons from the real platform template module, manifests and profiles."""
 
@@ -111,6 +104,7 @@ class NewTargetTests:
             targets.load_target("hammer-horizon-lte", "microsd-uboot")
         release = package.load_release_manifest("hammer-horizon-lte", config)
         assert ("assets/t117_fdl1.bin") in (release["runtime_files"])
+        assert not (self.targets / "hammer-horizon-lte/README.md").exists()
 
         lines = printed.splitlines()
         assert (lines[0]) == ("Created headless target targets/hammer-horizon-lte:")
@@ -124,23 +118,22 @@ class NewTargetTests:
         )
         assert (sorted(line.strip() for line in lines[1:-1])) == (created)
 
-    def test_new_target_readme_claims_no_presence_or_support(self) -> None:
-        """Every feature and application stays unestablished until tested on the phone."""
+    def test_new_target_release_readme_identifies_the_phone_and_loader_sequence(self) -> None:
+        """The archive instructions identify the phone and leave its boot key unconfirmed."""
         self.create("hammer-horizon-lte")
-        readme = (self.targets / "hammer-horizon-lte/README.md").read_text(encoding="utf-8")
+        readme = (self.targets / "hammer-horizon-lte/release/README.txt").read_text(
+            encoding="utf-8"
+        )
+        prose = " ".join(readme.split())
 
-        assert readme.startswith("# HAMMER Horizon LTE\n")
-        features = table_rows(readme, "Features")
-        assert (len(features)) > (0)
-        for feature, hardware, support, difference in features:
-            assert (hardware) in ({"Unknown", "N/A"}), feature
-            assert (support) == ("Unknown"), feature
-            assert (difference) == ("—"), feature
-        applications = table_rows(readme, "Applications")
-        assert (len(applications)) > (0)
-        for application, support, difference in applications:
-            assert (support) == ("Unknown"), application
-            assert (difference) == ("—"), application
+        assert readme.startswith("FPLinux for HAMMER Horizon LTE\n")
+        assert "Power the phone off and disconnect USB" in prose
+        assert "./runner/run.py\n" in readme
+        assert "Wait until the runner asks for the powered-off phone" in prose
+        assert "Then hold * (asterisk) and connect USB, keeping the key pressed" in prose
+        assert "The BootROM key for this phone has not been confirmed" in prose
+        assert "This target starts Linux in RAM" in prose
+        assert "./runner/run.py --reconnect" in readme
 
     def test_new_target_release_carries_every_declared_bundle_apk(self) -> None:
         """The generated release includes exactly the platform and target bundle packages."""

@@ -78,7 +78,6 @@ _MANIFEST_IMPLEMENTATION = frozenset(
 _CHECK_IMPLEMENTATION = _MANIFEST_IMPLEMENTATION | frozenset(
     {
         "scripts/check.py",
-        "scripts/site_collect.py",
         "scripts/fplinux_cli/__init__.py",
         "scripts/fplinux_cli/common.py",
         "scripts/fplinux_cli/alpine/__init__.py",
@@ -103,7 +102,6 @@ _CHECK_IMPLEMENTATION = _MANIFEST_IMPLEMENTATION | frozenset(
         "scripts/fplinux_cli/quality/formatting/canonical.py",
         "scripts/fplinux_cli/quality/formatting/canonical_json.py",
         "scripts/fplinux_cli/quality/formatting/canonical_json_tree.mjs",
-        "scripts/fplinux_cli/quality/formatting/canonical_markdown.py",
         "scripts/fplinux_cli/quality/formatting/canonical_text.py",
         "scripts/fplinux_cli/quality/formatting/canonical_toml.py",
         "scripts/fplinux_cli/quality/formatting/canonical_yaml.py",
@@ -159,6 +157,8 @@ def _is_shell_source(file: WorkspaceFile) -> bool:
 
 
 def _is_prettier_configuration(path: str) -> bool:
+    if PurePath(path).parts[:1] == ("site",):
+        return False
     name = Path(path).name
     return (
         name in {".gitignore", ".prettierignore", "package.yaml"}
@@ -371,6 +371,7 @@ def check_scope_closure_digest(
             scope == "metadata"
             and any(
                 Path(file.path).name in _EXECUTABLE_PRETTIER_CONFIGURATION_NAMES
+                and PurePath(file.path).parts[:1] != ("site",)
                 for file in snapshot.files
             )
         ) or (

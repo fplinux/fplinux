@@ -1,0 +1,225 @@
+---
+title: JPEG codec and scaling
+description: Decode JPEG files, encode NV16 frames as JPEG and halve NV16 frames with the phone's image accelerator.
+source:
+  - alpine/aports/fplinux-jpeg
+---
+
+import FeatureStatus from '../../../../components/FeatureStatus.astro';
+import Figure from '../../../../components/Figure.astro';
+import JpegOperations from '../../../../assets/diagrams/jpeg-operations.svg';
+
+`fplinux-jpeg` uses the phone's image accelerator to decode JPEG files, encode
+NV16 frames as JPEG, and halve NV16 frames. `fplinux-jpeg-cpu` is a separate
+software tool for the same kinds of work. Neither command falls back to the
+other. Both are part of the system on every phone; run them on the phone as
+described in [Applications](/fplinux/apps/). The raw files they read and write
+are described in [Raw image formats](/fplinux/develop/raw-image-formats/).
+
+<FeatureStatus feature="jpeg-codec-and-scaling" />
+
+<Figure caption="The three fplinux-jpeg operations and the files they read and write.">
+	<JpegOperations />
+</Figure>
+
+## Command
+
+```text title="Phone"
+fplinux-jpeg --input FILE --output FILE [--operation decode|encode|scale]
+             [--width N --height N] [--scale 1|2|4] [--quality 1..100]
+             [--repeat N] [--timing] [--device PATH]
+```
+
+- `--operation` selects the work; `decode` is the default.
+- `--repeat N` runs the same job `1` to `4096` times, checks that every result is
+  identical, and writes the last one.
+- `--timing` adds lines with the time spent in each stage, this process's CPU
+  time and its peak memory.
+- `--device` selects the accelerator device; by default it is found
+  automatically.
+
+Each job may take at most ten seconds. A command-line, device, timeout, file or
+repeat mismatch error makes the command exit with a nonzero status.
+
+## Decode a JPEG file
+
+```sh title="Phone"
+fplinux-jpeg --input /run/photo.jpg --output /run/photo.raw
+```
+
+The input must be a non-empty file of at most 1 MiB. The output has the JPEG's
+full size: NV12 for a 4:2:0 JPEG, NV16 for a horizontal 4:2:2 JPEG. On success
+the command prints the output format and size; the stride and byte figures in
+that line describe the device buffers, not the packed file.
+
+For half-resolution decoding, add `--scale 2`. It accepts both supported JPEG
+sampling formats, including images with padded edges. Each output dimension
+is rounded up after division by two.
+
+For a quarter-size NV16 image, add `--scale 4`. This works only for a
+horizontal 4:2:2 JPEG whose width is a multiple of 16 and height a multiple
+of 8; the output is exactly a quarter of each dimension.
+
+Output files have packed Y rows followed by interleaved Cb,Cr rows. A Y row
+contains one byte per visible pixel; a chroma row has `2 × ceil(width / 2)`
+bytes. NV12 has `ceil(height / 2)` chroma rows, and NV16 has one for every Y
+row. The output is full-range BT.601 YCbCr without dimensions or other metadata.
+
+The command does not apply EXIF orientation or color conversion. Its pixels
+can differ slightly from those of software JPEG decoders.
+
+A large image makes a large output file: a `2048×2048` JPEG decodes to 8 MiB
+(4:2:2) or 6 MiB (4:2:0). `/run` and `/tmp` share phone memory with everything
+else, so the largest images may not fit. If the output cannot be written, the
+command fails with the reason and may leave a partial output file.
+
+### Supported JPEG files
+
+The decoder accepts baseline JPEG with:
+
+- eight-bit samples, Huffman coding and one interleaved scan;
+- three YCbCr components, sampled 4:2:0 or horizontal 4:2:2;
+- a width and height from 1 to 2048 pixels, in a file of at most 1 MiB;
+- consecutive component IDs in frame and scan order: `0,1,2`, `1,2,3` or
+  `2,3,4`, and APP14 either absent or declaring YCbCr transform `1`;
+- all quantization tables present in the file. Custom quantization tables,
+  optimized Huffman tables and restart markers are fine, but Cb and Cr must
+  use the same quantization values and the same Huffman tables;
+- valid Huffman tables, or an abbreviated MJPEG frame that omits all Huffman
+  definitions and uses the standard luma selector `0` and chroma selector `1`.
+  Partial or malformed definitions do not receive default tables.
+
+Quantization table IDs can be `0` through `3`; DC and AC Huffman table IDs can
+be `0` or `1`. Every reference must have a valid definition, apart from the
+complete omitted-Huffman case above. Restart markers must follow their declared
+interval and `RST0` through `RST7` order, with only the final EOI after the
+entropy data.
+
+DC tables contain 1–12 unique categories from 0–11 and at most four symbols
+of length 16. AC tables contain 1–162 unique symbols, coefficient sizes up to
+10, and use size zero only for EOB and ZRL. The canonical tree leaves the
+all-ones padding code unused. The scan uses `Ss=0`, `Se=63`, `Ah=Al=0`.
+After SOS, an entropy `0xff` byte must be stuffed as `ff 00`; only the declared
+restart markers and final EOI may follow the entropy data.
+
+It rejects progressive and extended JPEG, arithmetic coding, grayscale, 4:4:4,
+4:1:1 and vertical 4:2:2 sampling, RGB, CMYK and YCCK files, multiple scans,
+16-bit quantization tables, files without quantization tables, and data after
+the end of the image.
+
+A damaged file can pass the first checks and fail during decoding. Do not rely
+on a particular error for a particular defect.
+
+## Encode NV16 as JPEG
+
+```sh title="Phone"
+fplinux-jpeg --operation encode --width 320 --height 240 \
+  --input /run/frame.nv16 --output /run/frame.jpg
+```
+
+The input is a packed NV16 frame in one of these sizes:
+
+| Width × height | Input bytes |
+| -------------- | ----------: |
+| `1200×32`      |      76,800 |
+| `320×240`      |     153,600 |
+| `240×320`      |     153,600 |
+| `640×480`      |     614,400 |
+| `1600×1200`    |   3,840,000 |
+| `1200×1600`    |   3,840,000 |
+
+For a [camera frame](/fplinux/use/camera/), choose one of the encoder sizes
+above. The encoder accepts `240×320` and `1600×1200` directly; `800×600` is
+not an encoder size. For `1200×1600`,
+rotate a `1600×1200` frame with [`fplinux-rotate`](/fplinux/apps/image-tools/rotate/)
+first.
+
+The input is full-range BT.601 NV16. NV12 input is not supported by the
+hardware encoder. The output is a baseline 4:2:2 JPEG with restart markers.
+Quality defaults to `85`; use `--quality 1..100` to change it:
+
+```sh title="Phone"
+fplinux-jpeg --operation encode --quality 60 --width 320 --height 240 \
+  --input /run/frame.nv16 --output /run/frame.jpg
+```
+
+The command prints the quality read back from the encoder. If the result would
+exceed 1 MiB, it fails instead of writing it. Custom tables, sampling and restart
+interval cannot be changed.
+
+## Halve an NV16 frame
+
+```sh title="Phone"
+fplinux-jpeg --operation scale --width 640 --height 480 \
+  --input /run/frame.nv16 --output /run/half.nv16
+```
+
+The source size selects one of two fixed conversions:
+
+| Source    | Result    | Input bytes | Output bytes |
+| --------- | --------- | ----------: | -----------: |
+| `640×480` | `320×240` |     614,400 |      153,600 |
+| `320×240` | `160×120` |     153,600 |       38,400 |
+
+Both files are packed NV16. Do not pass `--scale`. Other sizes, ratios,
+cropping and format conversion are not available.
+
+## If the accelerator fails
+
+If the accelerator cannot be confirmed idle after an error, it refuses all
+further jobs until the phone is [powered off](/fplinux/use/power/) and started
+again. `fplinux-jpeg-cpu` keeps working in the meantime.
+
+Before combining camera capture with JPEG jobs, check
+[phone support status](/fplinux/phones/#support-status) and the
+[camera resource limits](/fplinux/use/camera/#resource-limits).
+
+## Software tool
+
+`fplinux-jpeg-cpu` never uses the accelerator. Its command forms are:
+
+```text title="Phone"
+fplinux-jpeg-cpu --operation encode --input NV16 --output JPEG --width W --height H [--quality 1..100] [--restart 0..65535] [--dqt FILE] [--repeat 1..4096]
+fplinux-jpeg-cpu --operation decode --input JPEG --output NV12_OR_NV16 [--scale 1|2|4] [--decode-mode reduced|box] [--repeat 1..4096]
+fplinux-jpeg-cpu --operation scale --input NV16 --output NV16 --width 640 --height 480 [--scale 2] [--repeat 1..4096]
+fplinux-jpeg-cpu --operation scale --input NV16 --output NV16 --width 320 --height 240 [--scale 2] [--repeat 1..4096]
+```
+
+- Encode accepts any even width and produces a 4:2:2 JPEG. The default quality
+  is 75 and the default restart interval is 0. `--dqt FILE` reads 128 nonzero
+  bytes: the luma and then the chroma quantization table, each in natural DCT
+  order.
+- Decode accepts what its JPEG library accepts; this does not extend what
+  `fplinux-jpeg` can decode. `--decode-mode reduced`, the default, decodes
+  directly at the smaller size; `box` decodes at full size and then averages.
+- Scale supports the same two conversions as `fplinux-jpeg`. Its pixels can
+  differ from the accelerator's.
+
+The software tool always prints the time spent in each stage.
+
+## Timing reference
+
+Add `--timing` to `fplinux-jpeg` to print nanosecond wall-clock components,
+total process user and system CPU time in microseconds, peak resident memory,
+and page-fault counts. The wall fields have these boundaries:
+
+- `wall_input_ns` reads the input file;
+- `wall_prepare_ns` opens and negotiates the device, prepares buffers and
+  queues, and allocates the result buffer;
+- `wall_loops_ns` covers all job-loop iterations, while
+  `wall_warm_loops_ns` excludes the first iteration;
+- `wall_queue_ns` measures queue calls and `wall_wait_ns` measures completed-job
+  waits; their `wall_warm_*` forms exclude the first iteration;
+- `wall_output_ns` writes the result file;
+- `wall_total_ns` spans input reading through the completed output write,
+  including the stream-off, unmapping, and device close before that write.
+
+Queue and wait measurements are components inside the loop measurements, so
+they must not be added to `wall_loops_ns`. The warm fields are meaningful only
+when `--repeat` is greater than one. `user_total_us` and `sys_total_us` are this
+process's CPU time, not total system CPU load.
+
+The CPU tool always prints wall, user, system, and combined process CPU
+milliseconds for its input load, codec or filter work, batch, output write, and
+`measured_stages`. Operation-specific codec/conversion values are components of
+the batch and must not be added to it.

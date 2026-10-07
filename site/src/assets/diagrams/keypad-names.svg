@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 392" role="img" aria-labelledby="keypad-names-title" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', sans-serif">
+<title id="keypad-names-title">Phone key names</title>
+<rect x="160" y="32" width="160" height="346" rx="22" class="dg-box-2" fill="#EDEEEE" stroke="#6E797D" stroke-width="1.5"/>
+<rect x="166" y="58" width="44" height="24" rx="8" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+<rect x="270" y="58" width="44" height="24" rx="8" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+<rect x="178" y="69" width="20" height="2" rx="1" class="dg-fill-muted" fill="#6E797D"/>
+<rect x="282" y="69" width="20" height="2" rx="1" class="dg-fill-muted" fill="#6E797D"/>
+<circle cx="240" cy="114" r="40" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+<circle cx="240" cy="114" r="16" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+<path d="M235,88 L245,88 L240,82 Z" class="dg-fill-muted" fill="#6E797D"/>
+<path d="M235,140 L245,140 L240,146 Z" class="dg-fill-muted" fill="#6E797D"/>
+<path d="M214,109 L214,119 L208,114 Z" class="dg-fill-muted" fill="#6E797D"/>
+<path d="M266,109 L266,119 L272,114 Z" class="dg-fill-muted" fill="#6E797D"/>
+<rect x="166" y="160" width="44" height="24" rx="8" class="dg-box-ok" fill="#D7E5E4" stroke="#426562" stroke-width="1.5"/>
+<rect x="270" y="160" width="44" height="24" rx="8" class="dg-box-danger" fill="#FFDAD6" stroke="#BA1A1A" stroke-width="1.5"/>
+<rect x="166" y="200" width="44" height="30" rx="8" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+<text x="188" y="220" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">1</text>
+<rect x="218" y="200" width="44" height="30" rx="8" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+<text x="240" y="220" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">2</text>
+<rect x="270" y="200" width="44" height="30" rx="8" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+<text x="292" y="220" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">3</text>
+<rect x="166" y="244" width="44" height="30" rx="8" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+<text x="188" y="264" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">4</text>
+<rect x="218" y="244" width="44" height="30" rx="8" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+<text x="240" y="264" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">5</text>
+<rect x="270" y="244" width="44" height="30" rx="8" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+<text x="292" y="264" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">6</text>
+<rect x="166" y="288" width="44" height="30" rx="8" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+<text x="188" y="308" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">7</text>
+<rect x="218" y="288" width="44" height="30" rx="8" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+<text x="240" y="308" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">8</text>
+<rect x="270" y="288" width="44" height="30" rx="8" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+<text x="292" y="308" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">9</text>
+<rect x="166" y="332" width="44" height="30" rx="8" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+<text x="188" y="352" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">*</text>
+<rect x="218" y="332" width="44" height="30" rx="8" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+<text x="240" y="352" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">0</text>
+<rect x="270" y="332" width="44" height="30" rx="8" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+<text x="292" y="352" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">#</text>
+<path d="M166,70 L152,70" class="dg-line-muted" fill="none" stroke="#6E797D" stroke-width="1.5"/>
+<circle cx="166" cy="70" r="2.5" class="dg-fill-muted" fill="#6E797D"/>
+<text x="148" y="74" class="dg-text" fill="#202D35" font-size="14" text-anchor="end">Left soft</text>
+<path d="M314,70 L328,70" class="dg-line-muted" fill="none" stroke="#6E797D" stroke-width="1.5"/>
+<circle cx="314" cy="70" r="2.5" class="dg-fill-muted" fill="#6E797D"/>
+<text x="332" y="74" class="dg-text" fill="#202D35" font-size="14" text-anchor="start">Right soft</text>
+<path d="M232.25,128 L152,128" class="dg-line-muted" fill="none" stroke="#6E797D" stroke-width="1.5"/>
+<circle cx="232.25" cy="128" r="2.5" class="dg-fill-muted" fill="#6E797D"/>
+<text x="148" y="132" class="dg-text" fill="#202D35" font-size="14" text-anchor="end">Centre</text>
+<path d="M280,114 L328,114" class="dg-line-muted" fill="none" stroke="#6E797D" stroke-width="1.5"/>
+<circle cx="280" cy="114" r="2.5" class="dg-fill-muted" fill="#6E797D"/>
+<text x="332" y="110.5" class="dg-text" fill="#202D35" font-size="14" text-anchor="start">D-pad</text>
+<text x="332" y="125.5" class="dg-text-muted" fill="#6E797D" font-size="12" text-anchor="start">Up, Down, Left, Right</text>
+<path d="M166,172 L152,172" class="dg-line-muted" fill="none" stroke="#6E797D" stroke-width="1.5"/>
+<circle cx="166" cy="172" r="2.5" class="dg-fill-muted" fill="#6E797D"/>
+<text x="148" y="176" class="dg-text" fill="#202D35" font-size="14" text-anchor="end">Dial</text>
+<path d="M314,172 L328,172" class="dg-line-muted" fill="none" stroke="#6E797D" stroke-width="1.5"/>
+<circle cx="314" cy="172" r="2.5" class="dg-fill-muted" fill="#6E797D"/>
+<text x="332" y="176" class="dg-text" fill="#202D35" font-size="14" text-anchor="start">Red</text>
+</svg>

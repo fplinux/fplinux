@@ -1,0 +1,118 @@
+---
+title: Standalone archive
+description: Run FPLinux from a packaged archive without a source checkout.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+A standalone archive runs FPLinux on one phone without a source checkout or
+build tools. It contains the image for that phone, the host runner, the
+optional APKs, USB rules, checksums and license notices. Its top-level
+`README.txt` names the phone, its boot key, minimum startup commands and how
+to end a session. Feature procedures and support checklists belong to this site.
+
+Use an archive for your exact phone. Check its
+[support status](/fplinux/phones/#support-status) and phone page for feature,
+storage and power limits.
+
+:::note[No release archive is published yet]
+There are no published FPLinux release archives. You can package a phone-test
+candidate from your own build; see [Packaging](/fplinux/develop/packaging/).
+An archive with `CANDIDATE-NOTICE.txt` is such a candidate. It is for phone
+testing and must not be published as a release. Packaging it does not establish
+that it works on the phone.
+:::
+
+## What you need
+
+- A Linux x86-64 PC with Python 3.14.
+- GNU `stdbuf` from coreutils, `ip` from iproute2, and `ssh`, `ssh-keygen`,
+  `ssh-keyscan` and `sftp` from OpenSSH.
+- A network manager that automatically runs IPv4 DHCP on a newly attached USB
+  network interface, such as NetworkManager.
+- A USB data cable that fits your phone.
+
+## Prepare the PC
+
+<Steps>
+
+1. Extract the whole archive, enter its top-level directory and check every
+   file:
+
+   ```sh title="PC"
+   cd <extracted-top-level-directory>
+   sha256sum -c SHA256SUMS
+   ```
+
+2. Install the USB rules and reload them:
+
+   ```sh title="PC"
+   sudo install -m 0644 ./60-fplinux.rules /etc/udev/rules.d/60-fplinux.rules
+   sudo udevadm control --reload-rules
+   ```
+
+   Disconnect the phone if it is attached. On a headless PC, edit your
+   installed copy to use a local group with `MODE="0660"` instead of
+   `TAG+="uaccess"`. Never make the USB devices world-writable.
+
+</Steps>
+
+`SHA256SUMS` checks that the extracted files are complete and unchanged. It
+does not show that the archive is authentic or that the phone works.
+
+If the archive contains `FPLINUX.img.xz`, it boots from a microSD system card.
+Prepare the card first; see
+[microSD system card](/fplinux/guides/microsd-system-card/).
+
+## Start a session
+
+Run the runner as your regular user, not as root.
+
+<Steps>
+
+1. Power the phone off and disconnect USB.
+
+2. Start the runner:
+
+   ```sh title="PC"
+   ./runner/run.py
+   ```
+
+3. Wait until it asks for the phone.
+
+4. Only then hold the boot key named in `README.txt` and connect the
+   powered-off phone, keeping the key pressed.
+
+5. When the session is ready, the runner opens a shell on the phone.
+
+</Steps>
+
+:::caution[Connect the phone only when the runner asks]
+If you connected the phone too early, disconnect it, power it off and start
+again from step 1.
+:::
+
+## Use the running phone
+
+Exiting the shell does not stop Linux. Reconnect, run one command or copy
+files with `--reconnect`:
+
+```sh title="PC"
+./runner/run.py --reconnect
+./runner/run.py --reconnect --exec 'uname -a'
+./runner/run.py --reconnect --upload ./song.wav /tmp/song.wav
+./runner/run.py --reconnect --pull /tmp/photo.jpg ./photo.jpg
+```
+
+To add applications, see [Optional packages](/fplinux/guides/packages/). The
+feature pages describe how to use supported features from an archive.
+
+For machine-readable progress during a fresh load, add `--events PATH`; see
+[loader events](/fplinux/start/run/#for-automation-loader-events).
+
+## End the session
+
+Exiting the shell leaves Linux running. To end the session without losing
+data, follow the shutdown procedure in `README.txt`;
+[Power](/fplinux/use/power/) describes it for every phone. Without a battery,
+disconnecting USB cuts power immediately.

@@ -1,0 +1,235 @@
+---
+title: Connect from a computer
+description: Open a shell on the phone, run commands, copy files and type with your computer's keyboard over the USB cable.
+source:
+  - alpine/aports/fplinux-ssh
+  - alpine/aports/fplinux-input
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import FeatureStatus from '../../../components/FeatureStatus.astro';
+import Figure from '../../../components/Figure.astro';
+import UsbLink from '../../../assets/diagrams/usb-link.svg';
+
+Use the USB link to open a root shell, run commands, copy files with an
+integrity check and type with your computer's keyboard. Check
+[support status](/fplinux/phones/#support-status) and your
+[phone page](/fplinux/phones/) for USB support. The cable used to load FPLinux
+stays connected as a private link between your computer and the phone.
+
+<FeatureStatus feature="usb-networking" />
+
+Start the phone first, as described in [Run FPLinux](/fplinux/start/run/)
+or, for a downloaded archive, in
+[Standalone archive](/fplinux/guides/standalone-archive/). The commands on this
+page work once that run reports a ready session.
+
+## What the USB link is
+
+The phone appears on your computer as a small USB Ethernet device. Your
+computer receives its address automatically; do not set addresses by hand or
+reuse an address from an earlier run. The link carries the shell, file copies
+and the keyboard bridge described below.
+
+It is not an Internet connection. The phone gets no gateway or DNS over USB
+and does not forward traffic for your computer. To give the phone Internet
+access, use a [Bluetooth PAN connection](/fplinux/use/bluetooth/).
+
+The phone is always the USB device on this cable. It cannot act as a USB host,
+so USB keyboards, drives and other peripherals cannot be plugged into the
+phone.
+
+<Figure caption="The USB link between computer and phone"><UsbLink /></Figure>
+
+## Open a shell
+
+<Tabs syncKey="source">
+	<TabItem label="Source checkout">
+
+```sh title="PC"
+./fplinux console <target>
+```
+
+    </TabItem>
+    <TabItem label="Standalone archive">
+
+```sh title="PC"
+./runner/run.py --reconnect
+```
+
+    </TabItem>
+
+</Tabs>
+
+You get a root shell. It is authenticated with a key created for the current
+session; there is no password login. Leaving the shell with `exit`, or with
+the OpenSSH escape `~.`, closes only the shell. Linux keeps running.
+
+:::note[Phones started from a microSD system card]
+If you started the phone with `--profile microsd-uboot` or `--boot microsd`,
+add `--profile microsd-uboot` to every `./fplinux console` and
+`./fplinux verify` command. Without it, the command refuses the session
+because the running system is not the default build.
+:::
+
+## Reconnect after unplugging
+
+Linux keeps running after you unplug the cable only while the phone has
+another power source, such as a battery. Plug the cable back in and run the
+same command as above. FPLinux checks that the
+phone still runs the same session and image before it opens the shell. Do not
+load the phone again just to restore the link.
+
+Without a battery, unplugging the cable cuts the phone's power. Before you
+unplug, follow [End the session safely](/fplinux/use/power/).
+
+A power-off or a new load starts a new session, and the connection details of
+the old one no longer apply. Commands and file copies that were interrupted
+are not repeated automatically.
+
+## Run one command
+
+Use `--exec` when you do not need an interactive shell. The command runs on the
+phone; its output and exit status come back to your computer.
+
+<Tabs syncKey="source">
+	<TabItem label="Source checkout">
+
+```sh title="PC"
+./fplinux console <target> --exec 'uname -r'
+```
+
+    </TabItem>
+    <TabItem label="Standalone archive">
+
+```sh title="PC"
+./runner/run.py --reconnect --exec 'uname -r'
+```
+
+    </TabItem>
+
+</Tabs>
+
+Stopping the local `--exec` client can leave a silent command running on the
+phone. Use bounded commands where possible. If you interrupt one, reconnect
+and stop that command explicitly before ending the session.
+
+## Copy files
+
+<FeatureStatus feature="file-transfer" />
+
+Upload a file from your computer to the phone, or pull one from the phone:
+
+<Tabs syncKey="source">
+	<TabItem label="Source checkout">
+
+```sh title="PC"
+./fplinux console <target> --upload ./song.wav /tmp/song.wav
+./fplinux console <target> --pull /tmp/recording.wav ./recording.wav
+```
+
+    </TabItem>
+    <TabItem label="Standalone archive">
+
+```sh title="PC"
+./runner/run.py --reconnect --upload ./song.wav /tmp/song.wav
+./runner/run.py --reconnect --pull /tmp/recording.wav ./recording.wav
+```
+
+    </TabItem>
+
+</Tabs>
+
+Use these commands rather than a separate SFTP client when the result matters.
+They guarantee that:
+
+- the complete file is checked with SHA-256 before it appears at the
+  destination;
+- the destination file appears whole, never partially written;
+- if any step fails, the destination is left unchanged.
+
+The source must be a regular file. On the phone, give an absolute path in a
+directory that already exists and has enough free space. On your computer, the
+destination directory must already exist.
+
+Limits:
+
+- A copy does not resume after an interruption; start it again.
+- Only regular files can be copied, not directories or raw devices.
+- A destination in RAM, such as `/tmp`, uses the phone's limited memory and
+  disappears when the phone powers off. To keep files, copy them to a mounted
+  [microSD card](/fplinux/use/microsd/).
+
+## Type with your computer's keyboard
+
+<FeatureStatus feature="host-keyboard-bridge" />
+
+Use the bridge only where your phone checklist lists support for the current
+profile.
+
+The keyboard bridge forwards one keyboard from your computer to the phone. On
+the phone it behaves like any other keyboard: it types into the
+[phone terminal](/fplinux/use/terminal/) and into applications such as
+[TyrQuake](/fplinux/apps/tyrquake/).
+
+:::caution[The forwarded keyboard is captured]
+While the bridge runs, that keyboard's keys no longer reach your computer's
+desktop or terminal, including the terminal where you started the bridge. Use
+a second keyboard if you can. Otherwise keep the `timeout` shown below, so the
+keyboard is released automatically.
+:::
+
+<Tabs syncKey="source">
+	<TabItem label="Source checkout">
+
+```sh title="PC"
+sudo timeout 60s ./fplinux console <target> --keyboard /dev/input/eventN
+```
+
+    </TabItem>
+    <TabItem label="Standalone archive">
+
+```sh title="PC"
+sudo timeout 60s ./host/fplinux-usb-keyboard \
+  --interface 0 --keyboard /dev/input/eventN
+```
+
+    </TabItem>
+
+</Tabs>
+
+Replace `/dev/input/eventN` with the input device of the keyboard to forward.
+On most Linux computers, `ls -l /dev/input/by-id/` lists keyboards under names
+ending in `-event-kbd`, and you can pass that path instead. Root privileges
+are usually needed to open the keyboard and the USB interface.
+
+The bridge can run alongside a shell, a single command or a file copy. If the
+cable or the keyboard is disconnected, the phone releases all forwarded keys,
+so no modifier stays held. Stopping the bridge releases the keyboard on your
+computer.
+
+## Plain OpenSSH (advanced)
+
+From a source checkout, a ready session also has an OpenSSH configuration that
+works only for that session:
+
+```sh title="PC"
+ssh -F "$XDG_RUNTIME_DIR/fplinux/current/<target>.ssh-config" fplinux
+```
+
+It pins the keys of the current session. Do not copy it to a later session or
+use it as a general phone login. The `./fplinux console` and
+`./runner/run.py --reconnect` commands remain the supported way to reconnect,
+because they also check that the target and running image still match.
+
+## Connection and transfer boundaries
+
+SSH provides no password login, port forwarding, agent forwarding or X11
+forwarding. Shared authenticated channels close after 60 seconds without an
+active channel; a new RAM session replaces the previous connection. Each
+`--exec` command and raw NAND download has its own connection for independent
+cancellation.
+
+Uploads check both size and SHA-256 before publication. Pulls also confirm that
+the phone source did not change during transfer before publishing the local
+destination. Destination replacement is atomic; interrupted work is not resumed.

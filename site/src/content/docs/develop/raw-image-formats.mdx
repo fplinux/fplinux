@@ -1,0 +1,67 @@
+---
+title: Raw image formats
+description: Byte layouts of the headerless NV12, NV16, RGB565, XRGB32 and GREY files read and written by the image tools.
+---
+
+import Figure from '../../../components/Figure.astro';
+import RawFormats from '../../../assets/diagrams/raw-formats.svg';
+
+The [image tools](/fplinux/apps/) read and write raw image files. A raw file
+contains only pixel data: no header, dimensions, row stride or metadata. You
+give the width and height on the command line, or the tool takes them from the
+display. Rows are packed without padding unless a tool says otherwise.
+
+## Formats
+
+| Format | Bytes for `W × H` (even `W`) | Layout                                                                   |
+| ------ | ---------------------------- | ------------------------------------------------------------------------ |
+| NV12   | `W × H` + `W × ceil(H / 2)`  | YCbCr 4:2:0: the Y plane, then an interleaved Cb,Cr plane at half height |
+| NV16   | `W × H` + `W × H`            | YCbCr 4:2:2: the Y plane, then an interleaved Cb,Cr plane at full height |
+| RGB565 | `2 × W × H`                  | One 16-bit little-endian value per pixel                                 |
+| XRGB32 | `4 × W × H`                  | Four bytes per pixel in X, R, G, B order                                 |
+| GREY   | `W × H`                      | One unsigned luma byte per pixel                                         |
+
+For example, a `240×320` frame is `153,600` bytes as NV16 or RGB565 and
+`115,200` bytes as NV12.
+
+<Figure caption="Byte layouts of NV12, NV16 and RGB565.">
+	<RawFormats />
+</Figure>
+
+## NV12 and NV16
+
+Both formats store the complete Y plane first, one byte per pixel, row after
+row. The Cb,Cr plane follows directly, with Cb and Cr bytes alternating in each
+row.
+
+- Each Cb,Cr pair belongs to two horizontally adjacent luma samples. In NV12,
+  it also covers two adjacent rows; in NV16, every luma row has its own chroma
+  row.
+- A chroma row holds `2 × ceil(W / 2)` bytes. With an odd width, the row is
+  `W + 1` bytes and the last pair belongs to the last luma column alone. Only
+  JPEG decoding produces odd widths.
+- NV12 has `ceil(H / 2)` chroma rows; NV16 has `H` chroma rows.
+
+The colors are full-range BT.601 YCbCr, the same encoding JPEG uses: Y, Cb and
+Cr each use the whole range `0` to `255`, and Cb and Cr are centered on `128`.
+Limited-range video levels (Y from `16` to `235`) are not used.
+
+## RGB565
+
+Each pixel is a 16-bit value stored low byte first. Red occupies bits 15 to 11,
+green bits 10 to 5, and blue bits 4 to 0.
+
+## XRGB32 and GREY
+
+XRGB32 stores four bytes per pixel in the order X, R, G, B; it is not packed
+three-byte RGB. GREY stores one unsigned luma byte per pixel. Only
+[`fplinux-rotate`](/fplinux/apps/image-tools/rotate/) uses these two formats,
+and it keeps the X byte unchanged.
+
+## Which tool uses which format
+
+| Tool                                                    | Reads                            | Writes                                      |
+| ------------------------------------------------------- | -------------------------------- | ------------------------------------------- |
+| [`fplinux-jpeg`](/fplinux/apps/image-tools/jpeg/)       | NV16 (encode and scale)          | NV12 or NV16 (decode), NV16 (scale)         |
+| [`fplinux-rotate`](/fplinux/apps/image-tools/rotate/)   | NV12, NV16, RGB565, XRGB32, GREY | The same format as the input                |
+| [`fplinux-present`](/fplinux/apps/image-tools/present/) | NV16                             | RGB565 (optional, with `--mode cpu-rgb565`) |

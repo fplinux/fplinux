@@ -15,7 +15,6 @@ from fplinux_cli.manifests.identity import IdentityError, validate_target_identi
 from fplinux_cli.manifests.paths import discover_platforms
 from fplinux_cli.manifests.releases import load_release
 from fplinux_cli.manifests.targets import load_target
-from fplinux_cli.quality.formatting.canonical_markdown import normalize_markdown
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -68,8 +67,6 @@ def _render_template(template: Path, values: Mapping[str, str]) -> dict[str, byt
             relative = relative.removesuffix(_TEMPLATE_SUFFIX)
             text = _substitute(contents.decode("utf-8"), values)
             contents = text.encode("utf-8")
-        if relative.endswith(".md"):
-            contents = normalize_markdown(f"targets/template/{relative}", contents)
         files[_substitute(relative, values)] = contents
     return files
 

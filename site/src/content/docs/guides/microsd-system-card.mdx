@@ -1,0 +1,114 @@
+---
+title: microSD system card
+description: Keep FPLinux, installed packages and files on a microSD card between sessions.
+source:
+  - alpine/aports/fplinux-microsd-root
+---
+
+import { Steps } from '@astrojs/starlight/components';
+import Figure from '../../../components/Figure.astro';
+import MicrosdBoot from '../../../assets/diagrams/microsd-boot.svg';
+
+The default FPLinux build runs entirely from RAM and forgets everything at
+power-off. The microSD system card keeps the Linux system on a microSD card
+instead: installed packages, Bluetooth pairings and your files survive a cold
+start. The profile selects boot and storage behavior; it does not establish
+hardware support.
+
+Every cold start still begins from the PC with a fresh USB load. The loader
+starts U-Boot in RAM, and U-Boot starts Linux from the card.
+
+Use this profile only if your phone supports a microSD system card. Check its
+[support status](/fplinux/phones/#support-status) and phone page for card and
+feature limits, including any features tested only in the RAM profile. The
+commands below use `nokia-ta1618`; use your phone's exact target.
+
+<Figure caption="How the system card boots"><MicrosdBoot /></Figure>
+
+## Build the card image
+
+```sh title="PC"
+./fplinux build nokia-ta1618 --profile microsd-uboot
+```
+
+The build directory printed after `output:` contains `FPLINUX.img.xz`, a
+compressed image of a whole card. The build never writes to a card. To find
+the directory later, run
+`./fplinux inspect bundle nokia-ta1618 --profile microsd-uboot` and read its
+`bundle:` line.
+
+## Prepare the card
+
+`FPLINUX.img.xz` is a complete disk image with its own partition table, not a
+file to copy onto an existing filesystem. Writing it replaces the card's
+partition table and everything on the card.
+
+| Partition | Size                           | Filesystem | Label     | Contents                   |
+| --------- | ------------------------------ | ---------- | --------- | -------------------------- |
+| 1         | 64 MiB                         | FAT32      | `FPLBOOT` | `FPLINUX.ITB` boot image   |
+| 2         | 64 MiB, grows to fill the card | ext4       | `FPLROOT` | the system, mounted as `/` |
+
+On the first boot, Linux extends partition 2 and its filesystem to the end of
+the card. Later boots leave a full-size partition unchanged.
+
+:::caution[Write the right card, then check it]
+FPLinux does not include a card-writing command. Decompress
+`FPLINUX.img.xz` and write the whole image to the card device itself, not to
+one of its partitions. Select the intended removable card explicitly. Before
+the first boot, read the complete image back from the card and compare it
+with the original.
+:::
+
+Never write the image from a system that runs from the same card. To rewrite a
+system card inside the phone, boot the default RAM system first, stop
+everything that uses the card and unmount all of its filesystems. Read the
+image back and compare it before the next microSD boot.
+
+## Boot from the card
+
+<Steps>
+
+1. With the phone powered off, insert the prepared card.
+
+2. Start the loader in microSD mode and connect the phone when it asks, as in
+   [Run FPLinux](/fplinux/start/run/):
+
+   ```sh title="PC"
+   ./fplinux run nokia-ta1618 --boot microsd
+   ```
+
+   `--boot microsd` is the same as `--profile microsd-uboot`; use one of them,
+   not both.
+
+3. Leave the card in the phone for the whole session.
+
+</Steps>
+
+To reconnect or check the running build, pass the profile:
+
+```sh title="PC"
+./fplinux console nokia-ta1618 --profile microsd-uboot
+./fplinux verify nokia-ta1618 --profile microsd-uboot
+```
+
+## What persists
+
+Everything on the ext4 root survives a cold start: installed
+[packages](/fplinux/guides/packages/), Bluetooth pairing records and your
+files. Files in RAM filesystems such as `/tmp` do not.
+
+Keep `FPLBOOT` for the boot image. Do not mount it as application storage at
+`/mnt/card`.
+
+## Shut down
+
+The system card cannot be unmounted or removed while Linux runs, and `sync`
+alone does not make it safe to cut power. Before you cut power or remove the
+card, shut down as described in [Power](/fplinux/use/power/).
+
+## Standalone archives
+
+An archive packaged with `--boot microsd` contains `FPLINUX.img.xz`. Prepare the
+card from that file first; the archive's runner then boots it. See
+[Standalone archive](/fplinux/guides/standalone-archive/) and
+[Packaging](/fplinux/develop/packaging/).

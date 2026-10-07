@@ -48,6 +48,20 @@ def source_format_kind(relative: str) -> str | None:  # noqa: PLR0911 -- distinc
     """Return the filename-owned contract, including supported source templates."""
     path = PurePosixPath(relative.removesuffix(".in"))
     suffix = path.suffix
+    if path.parts[:1] == ("site",) and suffix in {
+        ".astro",
+        ".css",
+        ".js",
+        ".json",
+        ".jsonc",
+        ".md",
+        ".mdx",
+        ".mjs",
+        ".ts",
+        ".yaml",
+        ".yml",
+    }:
+        return None
     if suffix == ".py":
         return "python"
     if suffix == ".md":

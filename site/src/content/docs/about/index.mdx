@@ -1,0 +1,60 @@
+---
+title: About FPLinux
+description: What FPLinux is, how it is put together, where its code is and the projects it builds on.
+---
+
+import { LinkButton } from '@astrojs/starlight/components';
+
+FPLinux is an open-source Linux system for keypad phones built on the Unisoc
+UMS9117. It runs a Linux kernel from kernel.org with drivers for the phone's
+screen, keypad, sound, radio, Bluetooth and storage, and a small Alpine Linux
+userspace with a terminal you use on the keypad. It currently runs on
+[four phone targets](/fplinux/phones/), with support and limitations recorded
+separately for each phone.
+
+## How it is put together
+
+- **Started from a PC.** The phone's own firmware stays in place. Every
+  FPLinux start loads the system over USB into the phone's RAM; see
+  [Run FPLinux](/fplinux/start/run/).
+- **RAM or microSD.** The default system runs from RAM. A supported phone can
+  keep a persistent system on a microSD card instead; see
+  [microSD system card](/fplinux/guides/microsd-system-card/).
+- **Alpine Linux packages.** The phone system is assembled from Alpine Linux
+  packages, and FPLinux applications are ordinary APK packages that you can
+  add or remove on a running phone; see
+  [Optional packages](/fplinux/guides/packages/).
+- **One phone, one target.** Code shared by every UMS9117 phone lives in the
+  platform; each phone model has its own target with its board data and
+  status; see [Porting](/fplinux/porting/).
+- **A self-contained build.** FPLinux brings its own pinned build
+  environment and keeps it inside the checkout, so you need no Docker or
+  Podman. Every download is pinned to an exact version and checksum.
+- **Your phone's data stays yours.** Data that some features need is prepared locally
+  from your own phone; see [Device data](/fplinux/guides/device-data/).
+
+## Source code
+
+<LinkButton href="https://github.com/fplinux/fplinux" icon="github" iconPlacement="start">
+	fplinux/fplinux on GitHub
+</LinkButton>
+
+[Where the code is](/fplinux/develop/contributing/#where-the-code-is) explains
+the repository layout. Problems and new phones are reported through
+[GitHub issues](/fplinux/help/report/).
+
+## Built on
+
+FPLinux builds on the work of many projects, among them
+[Linux](https://kernel.org/), [Alpine Linux](https://alpinelinux.org/),
+[U-Boot](https://docs.u-boot.org/), [BlueZ](https://www.bluez.org/),
+[BusyBox](https://busybox.net/) and [TyrQuake](https://disenchant.net/tyrquake/).
+The phone loader starts from the bootstrap of the
+[fpdoom](https://github.com/ilyakurdyukov/fpdoom) project. The complete list
+of components, their versions and licenses is in
+[License and third-party notices](/fplinux/about/notices/).
+
+## License
+
+Original FPLinux code and documentation are licensed under GPL-2.0-only unless
+a file says otherwise. FPLinux is an independent project.

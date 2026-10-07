@@ -152,62 +152,6 @@ body:
         assert (actual) == (expected)
         assert (normalize_yaml(".github/ISSUE_TEMPLATE/report.yml", actual)) == (actual)
 
-    def test_mkdocs_retains_ordered_navigation_plugin_and_palette_mappings(self) -> None:
-        """Arrange the configuration groups without alphabetizing consumers."""
-        source = b"""nav:
-  Zed: z.md
-  Alpha: a.md
-plugins:
-  zed: {}
-  alpha: {}
-markdown_extensions:
-  zed: {}
-  alpha: {}
-extra:
-  social: [second, first]
-theme:
-  palette:
-    zed: {}
-    alpha: {}
-validation:
-  links: {}
-strict: true
-site_dir: out
-docs_dir: docs
-repo_url: https://example.test/repo
-site_name: Demo
-not_in_nav: |
-  /hidden.md
-"""
-        expected = b"""site_name: Demo
-repo_url: https://example.test/repo
-docs_dir: docs
-site_dir: out
-strict: true
-validation:
-  links: {}
-theme:
-  palette:
-    zed: {}
-    alpha: {}
-extra:
-  social: [second, first]
-markdown_extensions:
-  zed: {}
-  alpha: {}
-plugins:
-  zed: {}
-  alpha: {}
-nav:
-  Zed: z.md
-  Alpha: a.md
-not_in_nav: |
-  /hidden.md
-"""
-        actual = normalize_yaml("mkdocs.yml", source)
-        assert (actual) == (expected)
-        assert (normalize_yaml("mkdocs.yml", actual)) == (actual)
-
     def test_missing_domain_fields_are_not_filled_in(self) -> None:
         """Ordering leaves incomplete documents incomplete for their validator."""
         source = b"body:\n  - type: input\nname: Incomplete\n"
@@ -240,4 +184,4 @@ not_in_nav: |
     def test_shuffled_flow_mapping_requires_a_block_mapping(self) -> None:
         """Avoid rewriting inline YAML without preserving its comment boundaries."""
         with pytest.raises(ValueError, match="block YAML mapping"):
-            normalize_yaml("mkdocs.yml", b"{nav: [], site_name: Demo}\n")
+            normalize_yaml(".github/ISSUE_TEMPLATE/report.yml", b"{body: [], name: Demo}\n")

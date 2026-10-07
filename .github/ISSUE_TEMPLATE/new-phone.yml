@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Follow [Bring up a new UMS9117 phone](https://fplinux.github.io/fplinux/docs/porting/NEW_PHONE/)
+        Follow [Bring up a new UMS9117 phone](https://fplinux.github.io/fplinux/porting/bring-up/)
         first; this form asks for what that route prints. Do not attach the NAND
         backup `nand.bin` or any stock firmware image: they contain the phone's own
         data and the vendor's firmware.

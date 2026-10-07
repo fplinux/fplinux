@@ -1,0 +1,57 @@
+---
+import { Badge } from '@astrojs/starlight/components';
+import support from '../data/support.json';
+
+interface Props {
+	feature: string;
+}
+const { feature } = Astro.props;
+const entry = support.features.find((item) => item.id === feature);
+if (!entry) throw new Error(`Unknown feature: ${feature}`);
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+---
+
+<aside
+	aria-label={`${entry.label} implementation status`}
+	class="feature-status"
+>
+	<strong>{entry.label}</strong>
+	<Badge
+		text={entry.implementation}
+		variant={entry.implementation === 'Implemented' ? 'success' : 'default'}
+	/>
+	<Badge
+		text={
+			entry.verification === 'Device-tested'
+				? 'Device-tested'
+				: 'Not tested on a device'
+		}
+		variant={entry.verification === 'Device-tested' ? 'success' : 'default'}
+	/>
+	<a href={`${base}/phones/#support-status`}>Check your phone</a>
+</aside>
+
+<style>
+	.feature-status {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.4rem 0.65rem;
+		margin-block: 1rem;
+		font-size: var(--sl-text-sm);
+	}
+
+	.feature-status strong {
+		font-weight: 600;
+	}
+
+	.feature-status a {
+		margin-left: auto;
+	}
+
+	@media (width <= 40rem) {
+		.feature-status a {
+			margin-left: 0;
+		}
+	}
+</style>

@@ -1,0 +1,101 @@
+---
+title: Input
+description: What phone applications and keyboard layout packages can rely on from the shared input stack.
+---
+
+import Figure from '../../../components/Figure.astro';
+import KeypadCodes from '../../../assets/diagrams/keypad-codes.svg';
+import Key from '../../../components/Key.astro';
+
+Phone applications read the phone keypad, keyboards and mice through one shared
+input stack. This page defines what an application or a keyboard layout package
+can rely on. To use keyboard layouts in the terminal, see
+[Terminal](/fplinux/use/terminal/).
+
+## Devices
+
+The phone keypad, keyboards forwarded by the
+[USB keyboard bridge](/fplinux/use/connect/), and
+[Bluetooth](/fplinux/use/bluetooth/) keyboards and mice appear as Linux evdev
+devices. The phone keypad has the evdev `phys` string `fplinux/keypad0` on
+every phone.
+
+## Phone keys
+
+The keypad sends standard Linux input codes. `include/fplinux/fplinux-keypad.h`
+names their phone roles.
+
+<Figure caption="Keypad and Linux key codes" width="38rem"><KeypadCodes /></Figure>
+
+| Phone key                                      | Linux code                                    |
+| ---------------------------------------------- | --------------------------------------------- |
+| Digits <Key>0</Key> to <Key>9</Key>            | `KEY_NUMERIC_0` to `KEY_NUMERIC_9`            |
+| <Key>\*</Key> and <Key>#</Key>                 | `KEY_NUMERIC_STAR`, `KEY_NUMERIC_POUND`       |
+| D-pad                                          | `KEY_UP`, `KEY_DOWN`, `KEY_LEFT`, `KEY_RIGHT` |
+| <Key>Centre</Key>                              | `KEY_OK`                                      |
+| <Key>Left soft</Key> and <Key>Right soft</Key> | `KEY_F13`, `KEY_F14`                          |
+| <Key>Dial</Key>                                | `KEY_PICKUP_PHONE`                            |
+| Power (<Key>Red</Key> key)                     | `KEY_POWER`                                   |
+
+A code has its phone role only on the device whose `phys` string is
+`fplinux/keypad0`. On an external keyboard, `F13` and `F14` remain function
+keys. A key code alone never identifies a phone action: check the source too.
+
+Holding the power key for five seconds requests power-off even while an
+application holds the keypad; see [Power](/fplinux/use/power/).
+
+## Input sessions
+
+Project applications read input through the shared input session,
+`include/fplinux/fplinux-input-session.h`. It classifies each device by the
+keypad `phys` string and by its capabilities, never by its bus:
+
+| Source   | Device                                                                |
+| -------- | --------------------------------------------------------------------- |
+| Keypad   | The phone keypad                                                      |
+| Keyboard | Any other device with an `Enter` key, even if it also moves a pointer |
+| Pointer  | Otherwise, a device with relative X and Y motion and a left button    |
+
+A mouse that also publishes a separate key-only device contributes that device
+as a keyboard if it reports `Enter`.
+
+An application chooses which sources it accepts. The session then guarantees:
+
+- **Grab.** Every accepted device is grabbed for the life of the session, so its
+  keys do not reach the local console or another application.
+- **Hotplug.** A device that connects later is added. A device that disconnects
+  is removed, and all of its pressed keys are released before the removal is
+  reported.
+- **No autorepeat.** The session delivers presses and releases only. An
+  application that needs key repeat generates it itself, as the terminal does.
+- **Suspend.** Before an application hands the display and input to another
+  terminal or application, it suspends its session: all grabs are released and
+  every pressed key is released. On resume, the current devices are grabbed
+  again and reported as new devices.
+
+## Keyboard layout packages
+
+Keyboard layouts are XKB source files under `/usr/share/fplinux/xkb`. The
+`fplinux-xkb` package, part of every system, provides the US layout and the
+files that all layouts share.
+
+Each further layout is a separate optional APK that:
+
+- installs `symbols/<layout>` and an empty registration file
+  `layouts/<layout>`;
+- installs no other files;
+- depends on `fplinux-xkb`.
+
+`fplinux-xkb-ru`, which adds Russian, is the reference example.
+
+An application builds its keymap from the `evdev` keycodes with
+`aliases(qwerty)`, the `complete` types and compatibility, and the symbols
+`pc+us+fplinux(function_keys)`. Each registered layout follows as the next
+group, in name order, then `group(alt_shift_toggle)`: <Key>Alt</Key>+<Key>Shift</Key> switches
+between the layouts. A layout file can include only files under
+`/usr/share/fplinux/xkb`.
+
+XKB allows four groups, so at most three layouts can be registered beside US.
+A registration name may contain only lowercase letters, digits and `_`. With
+more layouts or an invalid name, an application refuses to start and names the
+problem.

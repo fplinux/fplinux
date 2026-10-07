@@ -1,0 +1,47 @@
+---
+// Closing call to action on the landing page.
+interface Props {
+	title: string;
+}
+const { title } = Astro.props;
+---
+
+<section class="fp-cta not-content">
+	<h2>{title}</h2>
+	<div class="text">
+		<slot />
+	</div>
+	<div class="actions">
+		<slot name="actions" />
+	</div>
+</section>
+
+<style>
+	.fp-cta {
+		margin-block: 3rem 1rem;
+		padding: 2rem;
+		border-radius: 1rem;
+		background: var(--sl-color-accent-low);
+		text-align: center;
+	}
+
+	h2 {
+		margin: 0 0 0.5rem;
+		border: 0;
+		font-size: var(--sl-text-2xl);
+	}
+
+	.text {
+		max-width: 38rem;
+		margin-inline: auto;
+		color: var(--sl-color-white);
+	}
+
+	.actions {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: center;
+		gap: 0.75rem;
+		margin-top: 1.25rem;
+	}
+</style>

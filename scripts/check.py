@@ -17,8 +17,6 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 from urllib.parse import unquote
 
-# PyYAML ships no type information and the quality image installs no stubs.
-import yaml  # type: ignore[import-untyped]
 from fplinux_cli.alpine import lock as alpine_lock
 from fplinux_cli.alpine import registration, selection
 from fplinux_cli.common import fail
@@ -33,8 +31,6 @@ from fplinux_cli.quality.formatting.canonical import (
 from fplinux_cli.quality.formatting.source_formats import classify_source_formats
 from fplinux_cli.reporting.run import RunReporter, current_stage, run_entrypoint
 from fplinux_cli.workspace.capture import workspace_snapshot
-from pathspec import GitIgnoreSpec
-from site_collect import corpus_files
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -42,8 +38,8 @@ if TYPE_CHECKING:
     from fplinux_cli.quality.formatting.source_formats import SourceFormats
 
 ROOT = Path(__file__).resolve().parents[1]
-EXCLUDED_PARTS = {".cache", ".git", "__pycache__"}
-BINARY_SUFFIXES = {".bin", ".jpg", ".png", ".pyc", ".zip"}
+EXCLUDED_PARTS = {".cache", ".git", "__pycache__", "node_modules"}
+BINARY_SUFFIXES = {".bin", ".ico", ".jpg", ".png", ".pyc", ".ttf", ".zip"}
 QUAKE_DATA_NAME = re.compile(r"pak[0-9]+\.part\.[0-9]+", re.IGNORECASE)
 MARKDOWN_REFERENCE = re.compile(r"^\s*\[[^]]+\]:\s*(?:<([^>]+)>|(\S+))")
 MARKDOWN_HEADING = re.compile(r"^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$")
@@ -148,6 +144,8 @@ def source_files(*, enforce_policy: bool) -> list[Path]:
         relative = path.relative_to(ROOT)
         if any(part in EXCLUDED_PARTS for part in relative.parts):
             continue
+        if relative.parts[:2] in {("site", ".astro"), ("site", "dist")}:
+            continue
         if path.name == ".fplinux-workspace":
             continue
         if path.is_symlink():
@@ -155,6 +153,11 @@ def source_files(*, enforce_policy: bool) -> list[Path]:
                 fail(f"source symlink is not allowed: {relative}")
             continue
         if not path.is_file():
+            continue
+        if is_site_asset(relative) or relative.as_posix() in {
+            "site/src/fonts/OFL.txt",
+            "site/public/fonts/OFL.txt",
+        }:
             continue
         if path.suffix.lower() == ".pak" or QUAKE_DATA_NAME.fullmatch(path.name):
             if enforce_policy:
@@ -166,6 +169,17 @@ def source_files(*, enforce_policy: bool) -> list[Path]:
             continue
         files.append(path)
     return files
+
+
+def is_site_asset(relative: Path) -> bool:
+    """Recognize bundled website images and fonts outside the text-source contract."""
+    return (
+        (relative.parts[:2] == ("site", "public") and relative.suffix in {".ico", ".png"})
+        or (
+            relative.parts[:3] == ("site", "src", "assets") and relative.suffix in {".jpg", ".png"}
+        )
+        or (relative.parts[:3] == ("site", "src", "fonts") and relative.suffix == ".ttf")
+    )
 
 
 def check_text(files: list[Path]) -> None:
@@ -320,33 +334,6 @@ def check_markdown_links(files: list[Path]) -> None:
                             f"Markdown link anchor is missing: "
                             f"{source.relative_to(ROOT)}:{number}: {destination}"
                         )
-
-
-def mkdocs_nav_entries(node: object) -> set[str]:
-    """Return every page path or URL named anywhere in an MkDocs `nav` tree."""
-    if isinstance(node, str):
-        return {node}
-    if isinstance(node, list):
-        return {entry for item in node for entry in mkdocs_nav_entries(item)}
-    if isinstance(node, dict):
-        return {entry for value in node.values() for entry in mkdocs_nav_entries(value)}
-    return set()
-
-
-def check_site_navigation(root: Path) -> None:
-    """Require every site page to be in the MkDocs nav or matched by `not_in_nav`."""
-    with (root / "mkdocs.yml").open(encoding="utf-8") as stream:
-        config = yaml.safe_load(stream)
-    listed = mkdocs_nav_entries(config.get("nav"))
-    # MkDocs matches not_in_nav with the same gitignore-style patterns.
-    not_in_nav = GitIgnoreSpec.from_lines(config.get("not_in_nav", "").splitlines())
-    missing: list[str] = []
-    for relative in corpus_files(root):
-        page = relative.as_posix()
-        if relative.suffix == ".md" and page not in listed and not not_in_nav.match_file(page):
-            missing.append(page)
-    if missing:
-        fail(f"documentation pages are missing from the mkdocs.yml nav: {', '.join(missing)}")
 
 
 def check_container_policy(files: list[Path]) -> None:
@@ -669,7 +656,9 @@ def main() -> None:
             check_release_lock()
             run(["taplo", "check", *toml_files])
     if "docs" in selected:
-        markdown_paths = [path for path in files if path.suffix == ".md"]
+        markdown_paths = [
+            ROOT / relative for relative in markdown_files if Path(relative).suffix == ".md"
+        ]
         text_files = [
             str(path.relative_to(ROOT))
             for path in files
@@ -677,7 +666,6 @@ def main() -> None:
         ]
         with report_stage(reporter, "documentation"):
             check_markdown_links(markdown_paths)
-            check_site_navigation(ROOT)
             run(["markdownlint-cli2"])
             run(["vale", "--config", ".vale.ini", *markdown_files, *text_files])
     if "spelling" in selected:

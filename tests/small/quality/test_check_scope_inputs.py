@@ -403,6 +403,48 @@ class CheckScopeTests:
             check_scope_closure_digest("metadata", second)
         )
 
+    @pytest.mark.parametrize(
+        ("changed_path", "expected_hit"),
+        [
+            (".prettierrc.json", False),
+            ("data.json", False),
+            ("site/config/prettier.config.mjs", True),
+            ("site/src/components/Hero.astro", True),
+            ("site/src/data/support.json", True),
+            ("README.md", True),
+        ],
+    )
+    def test_metadata_receipts_use_the_root_formatter_configuration(
+        self, changed_path: str, tmp_path: Path, *, expected_hit: bool
+    ) -> None:
+        """Website formatting and content cannot invalidate root metadata checks."""
+        contents = {
+            "scripts/check.py": b"checker\n",
+            ".prettierrc.json": b'{"tabWidth": 2}\n',
+            "data.json": b'{"title": "Original"}\n',
+            "site/config/prettier.config.mjs": b"export default {};\n",
+            "site/src/components/Hero.astro": b"<main/>\n",
+            "site/src/data/support.json": b"{}\n",
+            "README.md": b"# Project\n",
+        }
+
+        def receipt(inputs: dict[str, bytes]) -> CheckReceiptRecipe:
+            snapshot = WorkspaceSnapshot(
+                tuple(WorkspaceFile(path, data, 0o644) for path, data in inputs.items()),
+                "a" * 64,
+            )
+            return check_scope_receipt_recipe(
+                "metadata",
+                check_scope_closure_digest("metadata", snapshot),
+                image_generation="b" * 64,
+                orchestration_recipe="c" * 64,
+            )
+
+        publish_success_receipt(tmp_path, receipt(contents))
+        assert receipt_matches(tmp_path, receipt(contents))
+        changed = {**contents, changed_path: contents[changed_path] + b"changed\n"}
+        assert receipt_matches(tmp_path, receipt(changed)) is expected_hit
+
     def test_c_scope_tracks_manifest_source_bootstrap_and_quoted_header(self) -> None:
         """Mirror dynamic userspace C discovery without including orphan kernel C."""
         manifest = (

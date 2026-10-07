@@ -1,0 +1,159 @@
+---
+import SupportBadge from './SupportBadge.astro';
+import support from '../data/support.json';
+
+interface Props {
+	phone: string;
+}
+const { phone } = Astro.props;
+if (!support.phones.some((item) => item.id === phone))
+	throw new Error(`Unknown phone: ${phone}`);
+const rows = support.features.filter((item) => item.scope !== 'overview');
+const groups = support.groups.filter((group) =>
+	rows.some((item) => item.group === group)
+);
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const guideLink = (slug: string) =>
+	`${base}/${slug.replace('#', '/#')}${slug.includes('#') ? '' : '/'}`;
+const defaultNote: Record<string, string> = {
+	Supported: 'Verified on this phone.',
+	Unknown: 'No device result is recorded for this function.',
+	'Not supported': 'No supported FPLinux path on this phone.',
+};
+---
+
+<div class="phone-checklist">
+	<nav aria-label="Support checklist groups">
+		<ul>
+			{groups.map((group) => (
+				<li>
+					<a href={`#checklist-${group.toLowerCase().replaceAll(' ', '-')}`}>
+						{group}
+					</a>
+				</li>
+			))}
+		</ul>
+	</nav>
+	{groups.map((group) => (
+		<section>
+			<h3 id={`checklist-${group.toLowerCase().replaceAll(' ', '-')}`}>
+				{group}
+			</h3>
+			<table>
+				<thead>
+					<tr>
+						<th>Feature</th>
+						<th>Support</th>
+						<th>Details</th>
+					</tr>
+				</thead>
+				<tbody>
+					{rows
+						.filter((item) => item.group === group)
+						.map((item) => {
+							const state = item.phones[phone as keyof typeof item.phones];
+							if (!state)
+								throw new Error(`Missing ${phone} support for ${item.id}`);
+							return (
+								<tr id={item.id}>
+									<th scope="row">
+										<a href={guideLink(item.guide)}>{item.label}</a>
+										{item.kind === 'hardware' && state.hardware && (
+											<small>Hardware: {state.hardware.toLowerCase()}</small>
+										)}
+									</th>
+									<td class="status">
+										<SupportBadge status={state.status} />
+									</td>
+									<td class="details">
+										{state.note || defaultNote[state.status]}
+									</td>
+								</tr>
+							);
+						})}
+				</tbody>
+			</table>
+		</section>
+	))}
+</div>
+
+<style>
+	section + section {
+		margin-top: 2rem;
+	}
+
+	nav ul {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem 1rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		font-size: var(--sl-text-sm);
+	}
+
+	table {
+		width: 100%;
+	}
+
+	th[scope='row'] {
+		width: 31%;
+		font-weight: 500;
+	}
+
+	th small {
+		display: block;
+		margin-top: 0.25rem;
+		color: var(--sl-color-gray-2);
+		font-size: var(--sl-text-xs);
+		font-weight: 400;
+	}
+
+	.status {
+		width: 7rem;
+		white-space: nowrap;
+	}
+
+	.details {
+		font-size: var(--sl-text-sm);
+	}
+
+	@media (width <= 40rem) {
+		table,
+		tbody {
+			display: block;
+		}
+
+		thead {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			overflow: hidden;
+			clip-path: inset(50%);
+		}
+
+		tr {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			padding-block: 0.875rem;
+			border-bottom: 1px solid var(--sl-color-gray-5);
+		}
+
+		th[scope='row'],
+		td {
+			width: auto;
+			padding: 0;
+			border: 0;
+		}
+
+		.status {
+			width: auto;
+			padding-left: 0.75rem;
+		}
+
+		.details {
+			grid-column: 1 / -1;
+			padding-top: 0.5rem;
+		}
+	}
+</style>

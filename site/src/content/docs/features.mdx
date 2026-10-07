@@ -1,0 +1,42 @@
+---
+title: Features
+description: FPLinux capabilities, implementation status and the difference between a device check and support on your phone.
+---
+
+import FeatureCatalog from '../../components/FeatureCatalog.astro';
+
+FPLinux provides shared interfaces for the display, input, sound, connectivity,
+storage and power. The guides explain how to use each function. Availability
+and limits on one exact phone belong to its [support checklist](/fplinux/phones/).
+
+## Status meaning
+
+**Implemented** means FPLinux provides the interface or application.
+**Not implemented** means it has no supported FPLinux path.
+
+**Device-tested** means the documentation records a result on at least one
+device configuration. It does not mean every phone, profile or subfunction is
+verified. **Not tested** means no device result is recorded for that capability;
+source code, compilation and host checks do not establish a device result.
+
+The [phone status legend](/fplinux/phones/#support-status) explains **Verified**,
+**Partial**, **Not tested** and **Unsupported** for one model. Hardware presence
+is recorded separately. For example, a phone can have a microphone while its
+wired-headset recording path remains untested.
+
+## Capability overview
+
+<FeatureCatalog />
+
+## Not implemented
+
+Entries marked **Not implemented** have no supported software path. That status
+does not establish whether a phone contains the hardware. Check the selected
+phone's checklist before choosing a model or planning a port.
+
+## Choose or bring up a phone
+
+Use the [phone catalog](/fplinux/phones/) to compare models, then read the exact
+phone page for its boot key, supported storage and safe way to end a session.
+For an unlisted model, follow the [new-phone checklist](/fplinux/porting/checklist/)
+and [headless bring-up](/fplinux/porting/bring-up/).

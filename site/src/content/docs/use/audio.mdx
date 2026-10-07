@@ -1,0 +1,181 @@
+---
+title: Sound and recording
+description: Play audio through headphones or the speaker, set the volume and record from the microphone.
+source:
+  - alpine/aports/fplinux-audio
+---
+
+import { Steps } from '@astrojs/starlight/components';
+import FeatureStatus from '../../../components/FeatureStatus.astro';
+import Figure from '../../../components/Figure.astro';
+import AudioRouting from '../../../assets/diagrams/audio-routing.svg';
+
+Play sound, adjust its volume and record from a microphone with the commands
+below. Check [support status](/fplinux/phones/#support-status) and your
+[phone page](/fplinux/phones/) for the available outputs, microphones and
+automatic headphone switching. Run commands in a shell on the phone, either in the
+[phone terminal](/fplinux/use/terminal/) or
+[from your computer](/fplinux/use/connect/).
+
+<FeatureStatus feature="headphone-audio" />
+<FeatureStatus feature="speaker-audio" />
+
+## Prepare device data first
+
+The speaker, full volume range and equalizer, where supported, use
+[device data](/fplinux/guides/device-data/) prepared from the same phone
+before the image is built. Without device data, headphones still play with a
+smaller volume range and the speaker controls are missing. Do not reuse device
+data from another phone, even of the same model. A standalone archive contains
+the device data of the build that produced it.
+
+## Play a file
+
+<Steps>
+
+1. Copy a WAV file to the phone, for example with
+   `--upload ./song.wav /tmp/song.wav` as shown in
+   [Copy files](/fplinux/use/connect/).
+
+2. Play it on the phone:
+
+   ```sh title="Phone"
+   aplay /tmp/song.wav
+   ```
+
+</Steps>
+
+The default playback device converts any sample rate to 48 kHz, so ordinary
+WAV files play without preparation. Volume starts low after every boot; raise
+it as shown in [Volume](#volume).
+
+## Where the sound goes
+
+Where automatic headphone switching is supported, plugging in headphones moves
+playback to them; unplugging moves it to the speaker. This also happens during playback,
+recording and FM radio, which keep running. The socket only detects that a
+plug is inserted; it cannot tell headphones from a headset or another cable.
+A plug change made while the phone sleeps is applied when it wakes.
+
+With speaker output available, you can also choose the outputs by hand. A
+manual choice lasts until the next plug or unplug. For example, to play through the speaker as well as the
+headphones:
+
+```sh title="Phone"
+amixer -c 0 cset name='Speaker Playback Switch' on
+```
+
+Keep an output active during a switch by turning the new output on before
+turning the old one off. Switching a playing signal can still produce a click:
+
+```sh title="Phone"
+amixer -c 0 cset name='Speaker Playback Switch' on
+amixer -c 0 cset name='Headphone Playback Switch' off
+```
+
+To choose outputs only by hand until the next boot, stop automatic switching
+with `rc-service fplinux-jack stop`. Starting it again with
+`rc-service fplinux-jack start` selects the output that matches the socket.
+
+<Figure caption="Output selection"><AudioRouting /></Figure>
+
+## Volume
+
+Each available output has its own volume from `0` to `9`. Both start at `1`
+after every boot, and `0` mutes. Without device data, the headphone range is
+`0` to `6`. Use the controls for the outputs supported on your phone.
+
+```sh title="Phone"
+amixer -c 0 cset name='Headphone Playback Volume' 3,3
+amixer -c 0 cset name='Speaker Playback Volume' 3
+amixer -c 0 cget name='Headphone Playback Volume'
+```
+
+The two headphone numbers are the left and right channels. When headphones
+and speaker play together, `Speaker Playback Volume` sets the level of both
+outputs, and the headphone volume only mutes a channel at `0`. The speaker
+plays both channels mixed together, so the headphones also sound quieter than
+when they play alone.
+
+With both outputs enabled, speaker level `0` silences only the speaker; the
+headphones keep playing at the lowest combined-output level.
+
+Volume, output and equalizer settings last until the next boot.
+
+## Equalizer and limiter
+
+Where supported, device data enables the equalizer and automatic level control,
+which limits peaks near full volume. Loudness and
+dynamics have not been matched to stock playback. Both are on by default and
+apply to FM radio as well. The equalizer makes playback louder, most noticeably
+on the speaker. To turn them off:
+
+```sh title="Phone"
+amixer -c 0 cset name='EQ Playback Switch' off
+amixer -c 0 cset name='ALC Playback Switch' off
+```
+
+A change takes effect immediately, so you hear a step in level if you switch
+during playback. Set them back to `on` to restore the default.
+
+## Silence between files
+
+The enabled outputs stay active with silent PCM between files by default.
+This avoids clicks at playback transitions and uses more power.
+To let the audio hardware stop while idle:
+
+```sh title="Phone"
+amixer -c 0 cset name='Idle Silence Playback Switch' off
+```
+
+Set it to `on` to restore the default. It does not alter a file already playing.
+With it off, starting or stopping the speaker can click. Direct `hw:0,0`
+playback uses stereo S16_LE at 48 kHz; 24 kHz is available only while idle
+silence is off. The default playback device continues to convert files to
+48 kHz.
+
+## Record from the microphone
+
+<FeatureStatus feature="phone-microphone" />
+
+If built-in microphone recording is supported, record ten seconds of mono audio:
+
+```sh title="Phone"
+arecord -D hw:0,0 -f S16_LE -c 1 -r 48000 -d 10 /tmp/recording.wav
+```
+
+If headset recording is supported, select a wired four-contact headset before
+recording:
+
+```sh title="Phone"
+amixer -c 0 cset name='Capture Source' Headset
+arecord -D hw:0,0 -f S16_LE -c 1 -r 48000 -d 10 /tmp/headset.wav
+```
+
+After recording ends, select the built-in microphone again:
+
+```sh title="Phone"
+amixer -c 0 cset name='Capture Source' Internal
+```
+
+Plugging in a headset does not change the source, and the source cannot change
+while a recording runs. The headset input can produce a short noise during the
+first second, so start recording before the sound you want. There is no
+automatic gain or noise suppression. Copy the result to your computer with
+`--pull`, as shown in [Copy files](/fplinux/use/connect/); files in `/tmp`
+disappear at power-off.
+
+Recording can run while a file plays, as long as playback uses 48 kHz, which
+the default playback device always does.
+
+## Limitations
+
+- [FM radio](/fplinux/use/fm-radio/) cannot play while a file plays or a
+  recording runs, and the other way round.
+- There are no phone calls and no live monitoring of the microphone.
+- For wireless output, see
+  [Bluetooth A2DP playback](/fplinux/use/bluetooth/#send-audio-to-an-a2dp-sink).
+  Check your phone page before choosing a sink or profile.
+
+Applications that use the audio device directly will find the complete list
+of controls in [Device interfaces](/fplinux/develop/device-interfaces/).

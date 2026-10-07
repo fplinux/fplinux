@@ -1,0 +1,112 @@
+---
+title: INOI 240 Modern 4G
+description: Boot key, controls, storage, power and limitations of FPLinux on the INOI 240 Modern 4G.
+source:
+  - targets/inoi-240-modern-4g
+---
+
+import Key from '../../../components/Key.astro';
+import PhoneChecklist from '../../../components/PhoneChecklist.astro';
+
+- **Target**: `inoi-240-modern-4g`
+- **Hardware code**: not established
+- **Platform**: [Unisoc UMS9117](/fplinux/porting/ums9117/)
+- **Display**: 128×160
+
+## Support checklist
+
+Each status applies to this exact phone and the conditions in its note. See
+[Support status](/fplinux/phones/#support-status) for the meaning of the labels
+and [common limitations](/fplinux/phones/#limitations-on-every-phone).
+
+<PhoneChecklist phone="inoi-240-modern-4g" />
+
+## Before you start
+
+For Bluetooth, FM radio and fitted audio, prepare
+[device data](/fplinux/guides/device-data/) from this same handset. A first
+generic RAM boot can run without those groups. Do not substitute data from
+another phone.
+
+## Boot key
+
+Hold <Key>\*</Key>. Start `./fplinux run inoi-240-modern-4g` first; when the
+loader asks for the phone, hold <Key>\*</Key> on the powered-off phone and
+connect USB while keeping <Key>\*</Key> pressed.
+[Run FPLinux](/fplinux/start/run/) describes the complete sequence.
+
+## Controls
+
+The red handset key, <Key>Red</Key>, is the power key.
+
+| Key                         | Action                                    |
+| --------------------------- | ----------------------------------------- |
+| <Key>Red</Key>, short press | Wakes the phone from suspend.             |
+| <Key>Red</Key>, held        | Power-off on battery has not been tested. |
+
+- The keypad light can be switched on and off.
+- See the shared keypad bindings and application keys in
+  [Terminal](/fplinux/use/terminal/).
+
+## Storage
+
+- The microSD slot is under the battery. Insert the card before you start
+  FPLinux and leave it installed from boot to shutdown; hot-swap is not supported.
+- Fixed-session card initialization is unqualified for data storage and the
+  [microSD system root](/fplinux/guides/microsd-system-card/).
+- File transfer from a PC works with RAM destinations. Card destinations are
+  subject to the fixed-session initialization limit above; FAT32 transfers
+  have not been qualified.
+
+## Power
+
+Battery-only power-off has not been tested. Use the session-ending procedure
+below. A short press of <Key>Red</Key> or an RTC alarm wakes the phone from
+s2idle; see [Power](/fplinux/use/power/) for the shared controls.
+Sleep with a mounted card or card-backed swap is unqualified with the
+fixed-session card initialization.
+
+## End the session
+
+In the default RAM profile:
+
+1. Stop applications that use the microSD card, disable card-backed swap and
+   unmount the card as described in [microSD storage](/fplinux/use/microsd/).
+2. Disconnect USB.
+3. If a battery is installed, remove it and put it back before you boot the
+   phone normally.
+
+:::caution
+Do not use this battery-removal sequence with a writable microSD system card.
+Follow the USB-powered shutdown in
+[microSD system card](/fplinux/guides/microsd-system-card/) before removing power.
+:::
+
+Booting the phone normally returns it to the stock firmware.
+[Run FPLinux](/fplinux/start/run/) describes starting FPLinux again.
+
+## Hardware details and limits
+
+- **Backlight**: `/sys/class/backlight/inoi240-backlight` with the raw range
+  0–31, starting at 18. System levels 0–10 apply, starting at 7; level 0 turns
+  the light off. Visible spacing is not calibrated; see
+  [Display and lights](/fplinux/use/display-and-lights/).
+- **Vibration**: there is no vibration motor. FPLinux vibrates the phone through
+  the rear speaker, as the stock firmware does. Headphone audio is muted
+  meanwhile and for about one second afterwards, including headphone FM
+  audio. One continuous pulse lasts at most about three seconds. When the
+  speaker is enabled above level 0, speaker playback and FM continue with the
+  tone; otherwise the speaker plays only the tone. Microphone recording
+  captures it.
+- **Speaker**: a rear loudspeaker.
+- **Microphones**: the built-in microphone and the microphone of a four-contact
+  wired headset.
+- **Camera**: the BF30A2 camera captures 240×320 NV16 frames in the default RAM
+  profile. Sensor rotation is 0°. Its native capture geometry is accepted by
+  the JPEG encoder; see [Camera](/fplinux/use/camera/).
+
+Camera capture and codec jobs can run concurrently at native 240×320. Capture
+also continues through display updates, blanking and wake.
+
+Battery telemetry has responded with no battery installed; this does not
+qualify readings with a battery fitted or battery charging.

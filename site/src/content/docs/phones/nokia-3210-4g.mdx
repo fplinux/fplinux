@@ -1,0 +1,111 @@
+---
+title: Nokia 3210 4G (TA-1618)
+description: Boot key, controls, storage, power and limitations of FPLinux on the Nokia 3210 4G (TA-1618).
+source:
+  - targets/nokia-ta1618
+---
+
+import Key from '../../../components/Key.astro';
+import PhoneChecklist from '../../../components/PhoneChecklist.astro';
+
+- **Target**: `nokia-ta1618`
+- **Hardware code**: TA-1618. This target covers this exact variant.
+- **Platform**: [Unisoc UMS9117](/fplinux/porting/ums9117/)
+- **Display**: 240×320
+
+## Support checklist
+
+Each status applies to this exact phone and the conditions in its note. See
+[Support status](/fplinux/phones/#support-status) for the meaning of the labels
+and [common limitations](/fplinux/phones/#limitations-on-every-phone).
+
+<PhoneChecklist phone="nokia-ta1618" />
+
+## Before you start
+
+For Bluetooth, FM radio and fitted audio, prepare
+[device data](/fplinux/guides/device-data/) from this same handset. A first
+generic RAM boot can run without those groups. Do not substitute data from
+another phone.
+
+## Boot key
+
+Hold <Key>\*</Key>. Start `./fplinux run nokia-ta1618` first; when the loader
+asks for the phone, hold <Key>\*</Key> on the powered-off phone and connect USB
+while keeping <Key>\*</Key> pressed. [Run FPLinux](/fplinux/start/run/)
+describes the complete sequence.
+
+## Controls
+
+The red handset key, <Key>Red</Key>, is the power key.
+
+| Key                                    | Action                                     |
+| -------------------------------------- | ------------------------------------------ |
+| <Key>Red</Key>, short press            | Wakes the phone from suspend.              |
+| <Key>Red</Key>, held for five seconds  | Powers the phone off; see [Power](#power). |
+| <Key>8</Key> and the other keypad keys | Do not wake the phone.                     |
+
+- The keypad light can be switched on and off, and it lights up briefly when a
+  key is pressed.
+- See the shared keypad bindings and application keys in
+  [Terminal](/fplinux/use/terminal/).
+
+## Storage
+
+- microSD data cards can be FAT32 or ext4, read and write. You can remove and
+  insert an unmounted card while Linux runs.
+- The [microSD system card](/fplinux/guides/microsd-system-card/) works; it
+  stays installed while Linux runs.
+- File transfer from a PC can write to RAM or to a mounted writable microSD
+  card.
+
+## Power
+
+Battery-only power-off works: disconnect USB and any charger, then hold <Key>Red</Key> for five seconds. FPLinux refuses to power off while external
+charger power is present. [Power](/fplinux/use/power/) describes the interface.
+
+## End the session
+
+With a battery installed:
+
+1. In the default RAM profile, stop applications that use the microSD card,
+   disable card-backed swap, then flush and unmount it as described in
+   [microSD storage](/fplinux/use/microsd/). With a microSD system card, do not
+   unmount the root; power-off shuts it down.
+2. Disconnect USB and any charger.
+3. Hold <Key>Red</Key> for five seconds.
+
+Without a battery, a RAM session ends when you unplug USB; release data cards
+first. With a writable microSD system card, follow
+[USB-powered shutdown](/fplinux/use/power/#shut-down-a-system-card-on-usb-power)
+before unplugging USB.
+
+Power-off discards the RAM session. Boot the phone normally to return to the
+stock firmware. [Power](/fplinux/use/power/) has the general shutdown
+rules and [Run FPLinux](/fplinux/start/run/) the steps for starting again.
+
+## Hardware details and limits
+
+- **Backlight**: `/sys/class/backlight/ta1618-backlight` with the raw range
+  0–20, starting at 15. The spacing of the intermediate system brightness
+  levels has not been fully checked; see
+  [Display and lights](/fplinux/use/display-and-lights/).
+- **Vibration**: a vibration motor. Each effect stops automatically after five
+  seconds.
+- **Speaker**: one front speaker above the display. It can play alone or
+  together with the headphones.
+- **Microphones**: the built-in microphone and the microphone of the phone's
+  original wired headset.
+- **Camera**: the rear GC2145 camera captures 800×600 and 1600×1200 NV16
+  frames in the default RAM profile. Sensor rotation is 270° counterclockwise;
+  capture leaves the pixels unchanged. The JPEG encoder accepts 1600×1200,
+  but not the camera's 800×600 geometry. See [Camera](/fplinux/use/camera/).
+
+Camera capture at 800×600 and JPEG streaming queues can remain enabled and
+take turns using the image block; codec jobs must use their own supported
+geometry. Capture can also continue through display updates, blanking and wake.
+
+:::caution
+Finish camera capture before using hardware image rotation. Concurrent ROTA
+use can cause a camera frame error on this phone.
+:::

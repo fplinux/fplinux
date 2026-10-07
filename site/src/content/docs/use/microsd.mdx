@@ -1,0 +1,106 @@
+---
+title: microSD card
+description: Mount a microSD card for your files and remove it safely.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+import FeatureStatus from '../../../components/FeatureStatus.astro';
+
+In the normal RAM boot, everything you create on the phone disappears at
+power-off. A microSD card keeps files between sessions. This page covers a
+card used for data, formatted as FAT32 or ext4.
+
+Check [microSD support](/fplinux/phones/#support-status) for your phone and
+use only the profiles and filesystems listed on its
+[phone page](/fplinux/phones/). A card slot does not by itself mean that
+FPLinux can use the card.
+
+<FeatureStatus feature="removable-storage" />
+
+To run the whole system from a card instead, see
+[microSD system card](/fplinux/guides/microsd-system-card/). A system card
+must stay installed and mounted while Linux runs; the steps on this page do
+not apply to it.
+
+## Insert the card
+
+Follow the slot and insertion instructions on your
+[phone page](/fplinux/phones/). If the slot is under the battery, insert the
+card before starting the phone. Insert or remove a card while Linux runs
+only when the phone page permits it, and only while it is unmounted.
+
+After inserting a card, wait until its device appears:
+
+```sh title="Phone"
+ls /dev/mmcblk0*
+```
+
+## Mount the card
+
+Check what is on the card before you mount it. Never format a card just to
+read existing data. Use the first partition if there is one, otherwise the
+whole card:
+
+```sh title="Phone"
+card=/dev/mmcblk0p1
+[ -b "$card" ] || card=/dev/mmcblk0
+mkdir -p /mnt/card
+```
+
+Then use the command for a filesystem listed as supported on your phone:
+
+```sh title="Phone"
+# FAT32
+mount -t vfat -o rw "$card" /mnt/card
+
+# ext4
+mount -t ext4 -o rw "$card" /mnt/card
+
+# FAT32, read-only
+mount -t vfat -o ro,nodev,nosuid,noexec,utf8=1 "$card" /mnt/card
+```
+
+Copy files to and from `/mnt/card` with the
+[file copy commands](/fplinux/use/connect/) or from a shell on the phone.
+
+## Remove the card safely
+
+:::caution
+Never remove a mounted card or a card with active swap, and never remove a
+card during a write. The filesystem on the card can be damaged.
+:::
+
+<Steps>
+
+1. Stop programs that use the card.
+
+2. If you enabled swap on the card, turn it off with `swapoff`.
+
+3. Write pending data and unmount the card:
+
+   ```sh title="Phone"
+   sync
+   umount /mnt/card
+   ```
+
+4. Remove the card only as allowed on your phone page. If accessing the slot
+   requires removing the battery, [end the session
+   safely](/fplinux/use/power/) first.
+
+</Steps>
+
+For a phone with supported hot-swap, wait until `/dev/mmcblk0` has disappeared
+before you insert another card. A fixed-session card stays installed until
+shutdown, even after unmounting; restart Linux after changing it.
+
+## Limitations
+
+- Internal storage cannot hold your files through FPLinux. It only provides
+  [read-only raw backup](/fplinux/guides/device-data/#save-a-nand-backup).
+  Keep files on a supported card or copy them to your computer.
+- Only Nokia TA-1618 supports unmounted card removal and reinsertion during a
+  Linux session. The INOI and Maxvi slots use fixed-session initialization;
+  their card stays installed from boot to shutdown. Check the phone page for
+  the qualification of that initialization.
+- Card detection has no fixed delay; wait for the device to appear or, on a
+  hot-swap target, disappear.

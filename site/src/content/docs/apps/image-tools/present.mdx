@@ -1,0 +1,84 @@
+---
+title: Native image presentation
+description: Show a raw NV16 frame on the phone display at its native size, through the display controller or a CPU conversion.
+source:
+  - alpine/aports/fplinux-present
+---
+
+import FeatureStatus from '../../../../components/FeatureStatus.astro';
+import Key from '../../../../components/Key.astro';
+
+`fplinux-present` shows an NV16 frame on the phone display. It either sends the
+frame directly to the display controller, which converts it to the panel's
+colors, or converts it to RGB565 on the CPU first. The command is part of the
+system on every phone; run it on the phone as described in
+[Applications](/fplinux/apps/).
+
+<FeatureStatus feature="native-image-presentation" />
+
+## Show a frame
+
+Show a frame through the display controller and keep it on the screen for two
+seconds:
+
+```sh title="Phone"
+fplinux-present --input /run/frame.nv16 --hold-ms 2000
+```
+
+Convert the same frame on the CPU, show it, and keep the converted RGB565
+image:
+
+```sh title="Phone"
+fplinux-present --input /run/frame.nv16 --mode cpu-rgb565 \
+  --output /run/frame.rgb565 --hold-ms 2000
+```
+
+## Options
+
+| Option                    | Meaning                                                                |
+| ------------------------- | ---------------------------------------------------------------------- |
+| `--input FILE`            | The NV16 frame. Required.                                              |
+| `--mode nv16\|cpu-rgb565` | Convert in the display controller (`nv16`, the default) or on the CPU. |
+| `--repeat N`              | Show the frame `1` to `4096` times. Default: `1`.                      |
+| `--fps N`                 | Requested pace of the repeats, `1` to `30` per second. Default: `10`.  |
+| `--hold-ms N`             | Keep the last frame on the screen for `0` to `60000` ms. Default: `0`. |
+| `--output FILE`           | Write the CPU-converted RGB565 image. Only with `--mode cpu-rgb565`.   |
+| `--drm PATH`              | Display device. Default: `/dev/dri/card0`.                             |
+| `--tty PATH`              | Console terminal. Default: `/dev/tty0`.                                |
+
+`--fps` sets a schedule measured from the start of the series: the first frame
+is shown at once, and a slow repeat does not shift the later ones. It is not a
+measured refresh rate.
+
+## Input and output
+
+The input is one packed NV16 file of exactly the display's native size, for
+example `153,600` bytes for a `240×320` display; see
+[Raw image formats](/fplinux/develop/raw-image-formats/). The command takes the
+size from the display and has no size option. It does not resize, crop, rotate
+or decode images: prepare the frame with
+[`fplinux-rotate`](/fplinux/apps/image-tools/rotate/) or
+[`fplinux-jpeg`](/fplinux/apps/image-tools/jpeg/) first.
+
+With `--mode cpu-rgb565`, the command converts the frame as full-range BT.601
+and writes `--output` as packed RGB565 of the same size. It writes the file
+only after the whole series and the final hold have completed and the terminal
+has been restored.
+
+## Display and terminal
+
+While it runs, the command takes over the display. It returns to the previous
+terminal when it finishes or receives `SIGINT` (<Key>Ctrl</Key>+<Key>C</Key>) or `SIGTERM`. Switching to
+another terminal pauses the presentation until you switch back. If the terminal
+cannot be restored, the command fails even though the frames were shown.
+
+After the series, the command prints the number of completed frames and the time
+spent converting, submitting to the display and running the whole series. These
+figures describe the command, not the panel's latency or refresh rate.
+
+## Limitations
+
+A successful run means the display accepted every frame, not that the picture
+on the panel is correct. The command cannot read back what the panel shows, and
+the two modes and the visible result are not guaranteed to match pixel for
+pixel.

@@ -7,14 +7,10 @@ import contextlib
 import hashlib
 import io
 import json
-import posixpath
-import re
-import shutil
 import sys
 import zipfile
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import mock
-from urllib.parse import urlsplit
 
 import pytest
 from fplinux_cli import common
@@ -26,12 +22,14 @@ from fplinux_cli.environment import image_state as image_states
 from fplinux_cli.environment import images
 from fplinux_cli.environment.image_state import ImageState
 from fplinux_cli.manifests import platforms, releases, targets
-from fplinux_cli.manifests.releases import load_release
 from fplinux_cli.workspace import build_inputs as workspaces
 from fplinux_cli.workspace.capture import WorkspaceSnapshot
 
 from tests.bundle_support import file_record
 from tests.process import run_process
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # Load the archived helper by path, as the standalone runner does, then report the
 # record visible before the helper's context closes.
@@ -57,7 +55,7 @@ class ReleaseArchiveArtifactTests:
 
     @pytest.fixture(autouse=True)
     def _prepare_inputs(self, tmp_path: Path) -> None:
-        """Create one complete synthetic bundle and its canonical source documents."""
+        """Create a synthetic bundle, legal notices and checkout-only documentation."""
         self.root = tmp_path
         self.event_helper = (common.ROOT / "common/loader_events.py").read_bytes()
         self.cache = self.root / ".cache"
@@ -96,7 +94,7 @@ class ReleaseArchiveArtifactTests:
                 "runner/platform_adapter.py",
                 "runtime-manifest.json",
             ],
-            "documents": ["release/README.txt", "features/MICROSD.md"],
+            "documents": ["release/README.txt"],
         }
         self.platform = {
             "host": {"runtime_tools": {"keyboard": "keyboard"}, "tools": [{"name": "keyboard"}]}
@@ -108,9 +106,6 @@ class ReleaseArchiveArtifactTests:
         target_feature = self.root / "targets" / self.target / "features/MICROSD.md"
         target_feature.parent.mkdir(parents=True)
         target_feature.write_bytes(b"phone microSD procedures\n")
-        self.target_documents = {
-            "docs/target/MICROSD.md": target_feature.read_bytes(),
-        }
         license_file = self.root / "LICENSE"
         license_file.write_text("project license\n", encoding="utf-8")
         rules_file = self.root / "common/60-fplinux.rules"
@@ -119,27 +114,15 @@ class ReleaseArchiveArtifactTests:
         musl_notice = self.root / "THIRD_PARTY_LICENSES/musl/COPYRIGHT"
         musl_notice.parent.mkdir(parents=True)
         musl_notice.write_text("musl notice\n", encoding="utf-8")
-        self.shared_documents = {
+        checkout_documents = {
             "docs/apps/SHOWCASE.md": b"FPLinux showcase procedures\n",
-            "docs/apps/TYRQUAKE.md": b"TyrQuake procedures\n",
-            "docs/features/CPU_CLOCK.md": b"CPU clock reporting\n",
             "docs/features/FILE_TRANSFER.md": b"File transfer procedures\n",
-            "docs/features/HOST_KEYBOARD.md": b"Host keyboard procedures\n",
-            "docs/features/LOCAL_CONSOLE.md": b"Local console procedures\n",
-            "docs/features/SSH.md": b"SSH procedures\n",
-            "docs/features/USB_NETWORKING.md": b"USB networking procedures\n",
             "docs/guides/STANDALONE.md": b"Standalone archive procedures\n",
         }
-        for relative, contents in self.shared_documents.items():
+        for relative, contents in checkout_documents.items():
             document = self.root / relative
             document.parent.mkdir(parents=True, exist_ok=True)
             document.write_bytes(contents)
-        self.package_documents = {
-            "60-fplinux.rules": rules_file,
-            "LICENSE": license_file,
-            **{relative: self.root / relative for relative in self.shared_documents},
-            "licenses/musl/COPYRIGHT": musl_notice,
-        }
         signing_key = alpine_state.signing_public_key(self.cache)
         signing_key.parent.mkdir(parents=True)
         signing_key.write_bytes(b"test signing public key\n")
@@ -219,7 +202,6 @@ class ReleaseArchiveArtifactTests:
         """Isolate package creation from host identity and repository files."""
         return (
             mock.patch.object(common, "ROOT", self.root),
-            mock.patch.object(package_commands, "PACKAGE_DOCUMENTS", self.package_documents),
             mock.patch.object(targets, "load_target", return_value=self.target_config),
             mock.patch.object(releases, "load_release", return_value=self.release_manifest),
             mock.patch.object(platforms, "load_platform", return_value=self.platform),
@@ -312,8 +294,8 @@ class ReleaseArchiveArtifactTests:
             assert (f"{root}/debug/vmlinux") not in (archive.namelist())
             assert (archive.read(f"{root}/image/ramboot.bin")) == (b"ramboot\n")
 
-    def test_candidate_contains_shared_documents_with_complete_checksums(self) -> None:
-        """Publish bundled procedures and cover every archive member by SHA-256."""
+    def test_candidate_keeps_runtime_and_notices_without_checkout_documentation(self) -> None:
+        """Runtime files and legal notices retain bytes, modes and complete checksums."""
         with contextlib.ExitStack() as stack:
             for patch in self.package_patches():
                 stack.enter_context(patch)
@@ -327,22 +309,46 @@ class ReleaseArchiveArtifactTests:
             assert (len(roots)) == (1)
             root = roots.pop()
             payloads = {name.removeprefix(f"{root}/"): archive.read(name) for name in members}
+            modes = {
+                name.removeprefix(f"{root}/"): archive.getinfo(name).external_attr >> 16
+                for name in members
+            }
 
-        expected_documents = {
+        expected_files = {
             "CANDIDATE-NOTICE.txt": (
                 b"PHONE-TEST CANDIDATE - DO NOT PUBLISH\n\n"
                 b"This archive is for testing on the target phone only.\n"
                 b"Candidate packaging does not make it release-ready.\n"
             ),
             "README.txt": b"phone instructions\n",
-            **self.target_documents,
-            **{
-                relative: source.read_bytes()
-                for relative, source in self.package_documents.items()
-            },
+            "60-fplinux.rules": b"SUBSYSTEM==usb\n",
+            "LICENSE": b"project license\n",
+            "licenses/musl/COPYRIGHT": b"musl notice\n",
+            "image/ramboot.bin": b"ramboot\n",
+            "assets/pinmap.bin": b"pinmap\n",
+            "host/keyboard": b"keyboard\n",
+            "runner/run.py": b"#!/usr/bin/env python3\n",
+            "runner/identity.py": b"identity helper\n",
+            "runner/ssh_transport.py": b"ssh helper\n",
+            "runner/platform_adapter.py": b"adapter\n",
+            "runtime-manifest.json": b"{}\n",
+            "apks/demo.apk": b"application version one\n",
+            "assets.lock.toml": b"asset provenance version one\n",
         }
-        for relative, expected in expected_documents.items():
+        for relative, expected in expected_files.items():
             assert (payloads[relative]) == (expected)
+        assert payloads["runner/loader_events.py"] == self.event_helper
+        assert set(payloads) == {
+            *expected_files,
+            "runner/loader_events.py",
+            "build-manifest.json",
+            "SHA256SUMS",
+        }
+        for relative, mode in modes.items():
+            expected_mode = (
+                0o100755 if relative in {"host/keyboard", "runner/run.py"} else 0o100644
+            )
+            assert mode == expected_mode
 
         checksums = {
             relative: digest
@@ -501,72 +507,6 @@ class ReleaseArchiveArtifactTests:
                 for relative, data in required.items():
                     assert (archive.read(f"{root}/{relative}")) == (data)
                 assert (archive.read(f"{root}/README.txt")) == (b"phone instructions\n")
-                assert (archive.read(f"{root}/docs/target/MICROSD.md")) == (
-                    b"phone microSD procedures\n"
-                )
-
-    def test_relocated_feature_links_reach_bundled_guides(self) -> None:
-        """Target links keep their destination and fragments after archive relocation."""
-        source = self.root / "targets" / self.target / "features/MICROSD.md"
-        source.write_text(
-            "[Transfer](../../../docs/features/FILE_TRANSFER.md#upload)\n"
-            "[Card](MICROSD.md) [Section](#details)\n"
-            "[External](https://example.org/docs/)\n",
-            encoding="utf-8",
-        )
-        with contextlib.ExitStack() as stack:
-            for patch in self.package_patches():
-                stack.enter_context(patch)
-            self.package(candidate=True)
-
-        archive_path = next((self.cache / "out/candidates").glob("*.zip"))
-        with zipfile.ZipFile(archive_path) as archive:
-            root = archive.namelist()[0].partition("/")[0]
-            assert (archive.read(f"{root}/docs/target/MICROSD.md")) == (
-                b"[Transfer](../features/FILE_TRANSFER.md#upload)\n"
-                b"[Card](MICROSD.md) [Section](#details)\n"
-                b"[External](https://example.org/docs/)\n"
-            )
-            assert (archive.read(f"{root}/docs/features/FILE_TRANSFER.md")) == (
-                b"File transfer procedures\n"
-            )
-
-    def test_bundled_document_links_resolve_without_a_source_checkout(self) -> None:
-        """Actual release pages only link to local files included in the archive."""
-        source_root = Path(__file__).resolve().parents[2]
-        self.release_manifest["documents"] = load_release(self.target)["documents"]
-        for relative in self.release_manifest["documents"]:
-            source = source_root / "targets" / self.target / relative
-            destination = self.root / "targets" / self.target / relative
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source, destination)
-        self.package_documents = {}
-        for relative, source in package_commands.PACKAGE_DOCUMENTS.items():
-            destination = self.root / source.relative_to(source_root)
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source, destination)
-            self.package_documents[relative] = destination
-
-        with contextlib.ExitStack() as stack:
-            for patch in self.package_patches():
-                stack.enter_context(patch)
-            self.package(candidate=True)
-
-        archive_path = next((self.cache / "out/candidates").glob("*.zip"))
-        with zipfile.ZipFile(archive_path) as archive:
-            members = set(archive.namelist())
-            for name in sorted(members):
-                if not name.endswith(".md"):
-                    continue
-                document = archive.read(name).decode("utf-8")
-                for link in re.findall(r"\]\(([^\s)]+)\)", document):
-                    url = urlsplit(link)
-                    if url.scheme or url.netloc or not url.path:
-                        continue
-                    linked_member = posixpath.normpath(
-                        posixpath.join(posixpath.dirname(name), url.path)
-                    )
-                    assert (linked_member) in (members)
 
     def test_apk_bytes_but_not_archive_metadata_change_phone_test_payload(self) -> None:
         """Only a changed executable payload requires another complete phone test."""

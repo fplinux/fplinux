@@ -12,12 +12,14 @@ from fplinux_cli.common import fail
 
 def validate_source_policy() -> None:
     """Enforce the single-image source policy."""
-    ignored = {".cache", ".git"}
+    ignored = {".cache", ".git", "node_modules"}
     containerfiles: list[Path] = []
     # Prune the generated trees before descending: they hold millions of
     # cached build paths that a plain rglob would stat one by one.
     for directory, subdirectories, names in os.walk(common.ROOT):
         subdirectories[:] = [name for name in subdirectories if name not in ignored]
+        if Path(directory) == common.ROOT / "site":
+            subdirectories[:] = [name for name in subdirectories if name not in {".astro", "dist"}]
         for name in names:
             if name != "Containerfile":
                 continue

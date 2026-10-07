@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 324" role="img" aria-labelledby="microsd-boot-title" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', sans-serif">
+<title id="microsd-boot-title">How the microSD system card boots</title>
+<defs><marker id="microsd-boot-arrow" viewBox="0 0 8 8" refX="2" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-arrow-head" fill="#396475"/></marker></defs>
+<rect x="4" y="24" width="152" height="160" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+<g transform="translate(44,40)"><rect x="0" y="0" width="72" height="48" rx="4" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/><rect x="5" y="5" width="62" height="36" rx="2" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/><path d="M36,48 L36,60" class="dg-line" fill="none" stroke="#202D35" stroke-width="1.5"/><rect x="20" y="60" width="32" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/></g>
+<text x="80" y="128" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">PC</text>
+<text x="80" y="145" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">./fplinux run</text>
+<text x="80" y="162" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">--boot microsd</text>
+<rect x="180" y="8" width="536" height="308" rx="14" class="dg-region" fill="none" stroke="#6E797D" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="196" y="32" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">Phone</text>
+<text x="232" y="70" class="dg-text-small" fill="#202D35" font-size="12" text-anchor="middle">USB loader</text>
+<path d="M156,76 L300,76" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#microsd-boot-arrow)"/>
+<rect x="308" y="48" width="160" height="56" rx="10" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+<text x="388" y="72" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">U-Boot</text>
+<text x="388" y="90" class="dg-text-small" fill="#202D35" font-size="12" text-anchor="middle">in the phone's RAM</text>
+<text x="504" y="70" class="dg-text-small" fill="#202D35" font-size="12" text-anchor="middle">starts</text>
+<path d="M468,76 L532,76" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#microsd-boot-arrow)"/>
+<rect x="540" y="48" width="160" height="56" rx="10" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+<text x="620" y="72" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">Linux</text>
+<text x="620" y="90" class="dg-text-small" fill="#202D35" font-size="12" text-anchor="middle">starts from the card</text>
+<path d="M300,170 a10,10 0 0 1 10,-10 H684 L708,184 V290 a10,10 0 0 1 -10,10 H310 a10,10 0 0 1 -10,-10 Z" class="dg-box-2" fill="#EDEEEE" stroke="#6E797D" stroke-width="1.5"/>
+<text x="504" y="184" class="dg-text-muted" fill="#6E797D" font-size="12" text-anchor="middle">microSD card</text>
+<rect x="316" y="196" width="144" height="88" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+<text x="388" y="220" class="dg-text-strong dg-mono" fill="#202D35" font-size="14" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">FPLBOOT</text>
+<text x="388" y="240" class="dg-text-small" fill="#202D35" font-size="12" text-anchor="middle">FAT32</text>
+<text x="388" y="260" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">FPLINUX.ITB</text>
+<rect x="548" y="196" width="144" height="88" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+<text x="620" y="220" class="dg-text-strong dg-mono" fill="#202D35" font-size="14" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">FPLROOT</text>
+<text x="620" y="240" class="dg-text-small" fill="#202D35" font-size="12" text-anchor="middle">ext4</text>
+<text x="620" y="260" class="dg-text-small" fill="#202D35" font-size="12" text-anchor="middle">the system</text>
+<path d="M388,196 L388,112" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#microsd-boot-arrow)"/>
+<text x="396" y="140" class="dg-text-small" fill="#202D35" font-size="12">reads FPLINUX.ITB</text>
+<path d="M620,196 L620,112" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#microsd-boot-arrow)"/>
+<text x="628" y="140" class="dg-text-small" fill="#202D35" font-size="12">mounted as /</text>
+</svg>

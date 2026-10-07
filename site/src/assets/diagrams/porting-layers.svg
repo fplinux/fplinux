@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 400" role="img" aria-labelledby="porting-layers-title" font-family="'Noto Sans', sans-serif">
+	<title id="porting-layers-title">FPLinux layers: bootstrap/ before Linux, platforms/ums9117/ and targets/&lt;phone&gt;/ side by side, alpine/ phone userspace on top, and common/ host and runtime tools at the side</title>
+	<defs>
+		<marker id="porting-layers-arrow" viewBox="0 0 8 8" refX="2" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-arrow-head" fill="#396475"/></marker>
+	</defs>
+	<!-- alpine/ -->
+	<rect x="8" y="8" width="520" height="92" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="20" y="32" class="dg-text-strong dg-mono" fill="#202D35" font-size="14" font-weight="700" font-family="ui-monospace, monospace">alpine/</text>
+	<text x="20" y="50" class="dg-text-muted" fill="#6E797D" font-size="12">Phone userspace and services</text>
+	<text x="20" y="68" class="dg-text-small" fill="#202D35" font-size="12">One Alpine package recipe per component, the root-filesystem package policy and</text>
+	<text x="20" y="86" class="dg-text-small" fill="#202D35" font-size="12">OpenRC services.</text>
+	<!-- platforms/ and targets/ -->
+	<rect x="8" y="148" width="228" height="128" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="20" y="172" class="dg-text-strong dg-mono" fill="#202D35" font-size="14" font-weight="700" font-family="ui-monospace, monospace">platforms/ums9117/</text>
+	<text x="20" y="190" class="dg-text-muted" fill="#6E797D" font-size="12">SoC support shared by its phones</text>
+	<text x="20" y="208" class="dg-text-small" fill="#202D35" font-size="12">Processor and interrupt integration,</text>
+	<text x="20" y="226" class="dg-text-small" fill="#202D35" font-size="12">controller drivers, SoC Devicetree</text>
+	<text x="20" y="244" class="dg-text-small" fill="#202D35" font-size="12">nodes and the fixed RAM-loader</text>
+	<text x="20" y="262" class="dg-text-small" fill="#202D35" font-size="12">flow.</text>
+	<rect x="300" y="148" width="228" height="128" rx="10" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="312" y="172" class="dg-text-strong dg-mono" fill="#202D35" font-size="14" font-weight="700" font-family="ui-monospace, monospace">targets/&lt;phone&gt;/</text>
+	<text x="312" y="190" class="dg-text-muted" fill="#6E797D" font-size="12">One exact phone</text>
+	<text x="312" y="208" class="dg-text-small" fill="#202D35" font-size="12">Board wiring and memory, panel,</text>
+	<text x="312" y="226" class="dg-text-small" fill="#202D35" font-size="12">keymap, bootstrap inputs, values</text>
+	<text x="312" y="244" class="dg-text-small" fill="#202D35" font-size="12">passed to the loader, device-data</text>
+	<text x="312" y="262" class="dg-text-small" fill="#202D35" font-size="12">declarations and the support state.</text>
+	<path d="M300,212 L244,212" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#porting-layers-arrow)"/>
+	<text x="268" y="202" text-anchor="middle" class="dg-text-small" fill="#202D35" font-size="12">selects</text>
+	<path d="M122,148 L122,108" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#porting-layers-arrow)"/>
+	<path d="M414,148 L414,108" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#porting-layers-arrow)"/>
+	<text x="268" y="122" text-anchor="middle" class="dg-text-small" fill="#202D35" font-size="12">platform and target</text>
+	<text x="268" y="138" text-anchor="middle" class="dg-text-small" fill="#202D35" font-size="12">manifests select packages</text>
+	<!-- bootstrap/ -->
+	<rect x="8" y="300" width="520" height="92" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="20" y="324" class="dg-text-strong dg-mono" fill="#202D35" font-size="14" font-weight="700" font-family="ui-monospace, monospace">bootstrap/</text>
+	<text x="20" y="342" class="dg-text-muted" fill="#6E797D" font-size="12">Before Linux starts</text>
+	<text x="20" y="360" class="dg-text-small" fill="#202D35" font-size="12">Freestanding components with bounded callbacks for platform- and target-owned</text>
+	<text x="20" y="378" class="dg-text-small" fill="#202D35" font-size="12">operations.</text>
+	<!-- common/ at the side -->
+	<rect x="552" y="8" width="160" height="384" rx="10" class="dg-box-2" fill="#EDEEEE" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="564" y="32" class="dg-text-strong dg-mono" fill="#202D35" font-size="14" font-weight="700" font-family="ui-monospace, monospace">common/</text>
+	<text x="564" y="50" class="dg-text-muted" fill="#6E797D" font-size="12">Target-neutral host and</text>
+	<text x="564" y="68" class="dg-text-muted" fill="#6E797D" font-size="12">runtime tools</text>
+	<text x="564" y="86" class="dg-text-small" fill="#202D35" font-size="12">Such as the RAM</text>
+	<text x="564" y="104" class="dg-text-small" fill="#202D35" font-size="12">bundle runner and the</text>
+	<text x="564" y="122" class="dg-text-small" fill="#202D35" font-size="12">USB keyboard client,</text>
+	<text x="564" y="140" class="dg-text-small" fill="#202D35" font-size="12">and the contracts they</text>
+	<text x="564" y="158" class="dg-text-small" fill="#202D35" font-size="12">share.</text>
+</svg>

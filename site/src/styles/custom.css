@@ -1,0 +1,322 @@
+/* FPLinux brand theme for Starlight. Values follow the FPLinux brand palette:
+   semantic light and dark roles for interface colors, brand ink for diagrams. */
+
+@font-face {
+	font-family: 'Noto Sans';
+	src: url('../fonts/NotoSans.ttf') format('truetype');
+	font-weight: 100 900;
+	font-style: normal;
+	font-display: swap;
+}
+
+/* Dark scheme (Starlight default). */
+:root {
+	--sl-content-width: 50rem;
+	--sl-font: 'Noto Sans', ui-sans-serif, system-ui, sans-serif;
+	--sl-color-accent-low: #204c5c;
+	--sl-color-accent: #85b2c4;
+	--sl-color-accent-high: #d3e5ed;
+	--sl-color-white: #fcfcfc;
+	--sl-color-gray-1: #e1e3e3;
+	--sl-color-gray-2: #c4c7c8;
+	--sl-color-gray-3: #8e9193;
+	--sl-color-gray-4: #5c5f60;
+	--sl-color-gray-5: #37393b;
+	--sl-color-gray-6: #1e2021;
+	--sl-color-gray-7: #1a1c1d;
+	--sl-color-black: #121415;
+	--sl-color-orange-low: #472a00;
+	--sl-color-orange: #e19d46;
+	--sl-color-orange-high: #fadebe;
+	--sl-color-blue-low: #204c5c;
+	--sl-color-blue: #85b2c4;
+	--sl-color-blue-high: #d3e5ed;
+
+	/* Diagram roles. */
+	--dg-ink: #e1e3e3;
+	--dg-muted: #8e9193;
+	--dg-surface: #1e2021;
+	--dg-surface-2: #282a2b;
+	--dg-primary: #a8ccdb;
+	--dg-primary-soft: #204c5c;
+	--dg-accent: #f4bc7b;
+	--dg-accent-soft: #472a00;
+	--dg-ok: #afccca;
+	--dg-ok-soft: #2a4c4a;
+	--dg-danger: #ffb4ab;
+	--dg-danger-soft: #93000a;
+}
+
+/* Light scheme. */
+:root[data-theme='light'] {
+	--sl-color-accent-low: #d3e5ed;
+	--sl-color-accent: #396475;
+	--sl-color-accent-high: #204c5c;
+	--sl-color-white: #1a1c1d;
+	--sl-color-gray-1: #2e3132;
+	--sl-color-gray-2: #454748;
+	--sl-color-gray-3: #5c5f60;
+	--sl-color-gray-4: #8e9193;
+	--sl-color-gray-5: #c4c7c8;
+	--sl-color-gray-6: #e7e8e9;
+	--sl-color-gray-7: #f3f4f4;
+	--sl-color-black: #f9f9f9;
+	--sl-color-orange-low: #fadebe;
+	--sl-color-orange: #a76a00;
+	--sl-color-orange-high: #653e00;
+	--sl-color-blue-low: #d3e5ed;
+	--sl-color-blue: #396475;
+	--sl-color-blue-high: #204c5c;
+	--dg-ink: #202d35;
+	--dg-muted: #6e797d;
+	--dg-surface: #fff;
+	--dg-surface-2: #edeeee;
+	--dg-primary: #396475;
+	--dg-primary-soft: #d3e5ed;
+	--dg-accent: #855300;
+	--dg-accent-soft: #fadebe;
+	--dg-ok: #426562;
+	--dg-ok-soft: #d7e5e4;
+	--dg-danger: #ba1a1a;
+	--dg-danger-soft: #ffdad6;
+}
+
+.sl-markdown-content :is(h1, h2, h3, h4),
+h1#_top {
+	font-weight: 700;
+}
+
+/* Figures: inline SVG diagrams that follow the active theme. */
+.fp-figure {
+	margin-block: 1.5rem;
+}
+
+.fp-figure svg {
+	display: block;
+	width: 100%;
+	height: auto;
+	max-width: var(--fp-figure-width, 46rem);
+	margin-inline: auto;
+	font-family: var(--sl-font);
+}
+
+.fp-figure figcaption,
+.fp-phone figcaption {
+	margin-top: 0.5rem;
+	text-align: center;
+	color: var(--sl-color-gray-3);
+	font-size: var(--sl-text-sm);
+}
+
+.dg-box {
+	fill: var(--dg-surface);
+	stroke: var(--dg-muted);
+	stroke-width: 1.5;
+}
+
+.dg-box-2 {
+	fill: var(--dg-surface-2);
+	stroke: var(--dg-muted);
+	stroke-width: 1.5;
+}
+
+.dg-box-primary {
+	fill: var(--dg-primary-soft);
+	stroke: var(--dg-primary);
+	stroke-width: 1.5;
+}
+
+.dg-box-accent {
+	fill: var(--dg-accent-soft);
+	stroke: var(--dg-accent);
+	stroke-width: 1.5;
+}
+
+.dg-box-ok {
+	fill: var(--dg-ok-soft);
+	stroke: var(--dg-ok);
+	stroke-width: 1.5;
+}
+
+.dg-box-danger {
+	fill: var(--dg-danger-soft);
+	stroke: var(--dg-danger);
+	stroke-width: 1.5;
+}
+
+.dg-region {
+	fill: none;
+	stroke: var(--dg-muted);
+	stroke-width: 1.5;
+	stroke-dasharray: 6 4;
+}
+
+.dg-line {
+	fill: none;
+	stroke: var(--dg-ink);
+	stroke-width: 1.5;
+}
+
+.dg-line-muted {
+	fill: none;
+	stroke: var(--dg-muted);
+	stroke-width: 1.5;
+}
+
+.dg-arrow {
+	fill: none;
+	stroke: var(--dg-primary);
+	stroke-width: 2;
+}
+
+.dg-arrow-head {
+	fill: var(--dg-primary);
+}
+
+.dg-arrow-danger {
+	fill: none;
+	stroke: var(--dg-danger);
+	stroke-width: 2;
+}
+
+.dg-arrow-danger-head {
+	fill: var(--dg-danger);
+}
+
+.dg-fill-ink {
+	fill: var(--dg-ink);
+}
+
+.dg-fill-muted {
+	fill: var(--dg-muted);
+}
+
+.dg-fill-primary {
+	fill: var(--dg-primary);
+}
+
+.dg-fill-accent {
+	fill: var(--dg-accent);
+}
+
+.dg-fill-surface {
+	fill: var(--dg-surface);
+}
+
+.dg-text {
+	fill: var(--dg-ink);
+	font-size: 14px;
+}
+
+.dg-text-strong {
+	fill: var(--dg-ink);
+	font-size: 14px;
+	font-weight: 700;
+}
+
+.dg-text-small {
+	fill: var(--dg-ink);
+	font-size: 12px;
+}
+
+.dg-text-muted {
+	fill: var(--dg-muted);
+	font-size: 12px;
+}
+
+.dg-text-primary {
+	fill: var(--dg-primary);
+}
+
+.dg-text-accent {
+	fill: var(--dg-accent);
+}
+
+.dg-text-danger {
+	fill: var(--dg-danger);
+}
+
+.dg-mono {
+	font-family: var(--sl-font-system-mono);
+}
+
+/* Phone screen renders: a fixed graphite bezel in both themes. */
+.fp-phone {
+	margin-block: 1.5rem;
+	text-align: center;
+}
+
+.fp-phone .bezel {
+	display: inline-block;
+	padding: 14px;
+	border-radius: 18px;
+	background: #202d35;
+	box-shadow: 0 1px 3px rgb(0 0 0 / 25%);
+}
+
+.fp-phone img {
+	display: block;
+	image-rendering: pixelated;
+	border-radius: 2px;
+	max-width: 100%;
+	height: auto;
+}
+
+.fp-phone-row {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: 1.5rem;
+}
+
+.fp-phone-row .fp-phone {
+	margin-block: 0.5rem;
+}
+
+:is(.hero, .fp-hero) .tagline .sub {
+	display: block;
+	margin-top: 0.5rem;
+	font-size: 0.8em;
+	color: var(--sl-color-gray-3);
+}
+
+/* Pixel renders stay sharp, including the zoomed copy. */
+.fp-pixel {
+	image-rendering: pixelated;
+}
+
+/* Phone and keyboard keys in running text. */
+.fp-key {
+	display: inline-block;
+	min-width: 1.6em;
+	padding: 0 0.4em;
+	border: 1px solid var(--sl-color-gray-4);
+	border-bottom-width: 2px;
+	border-radius: 0.375rem;
+	background: var(--sl-color-gray-7);
+	color: var(--sl-color-white);
+	font-family: var(--sl-font);
+	font-size: 0.85em;
+	line-height: 1.5;
+	text-align: center;
+	white-space: nowrap;
+}
+
+.sl-markdown-content .fp-key {
+	margin: 0;
+}
+
+/* Three equal columns that wrap on narrow screens. */
+.fp-grid-3 {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+	gap: 1rem;
+}
+
+.fp-grid-3 > * {
+	margin-top: 0 !important;
+}
+
+.sl-link-card .description code {
+	white-space: nowrap;
+}

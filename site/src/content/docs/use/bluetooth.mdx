@@ -1,0 +1,254 @@
+---
+title: Bluetooth
+description: Pair devices, exchange files, use a Bluetooth Internet connection and send audio to an A2DP sink.
+source:
+  - alpine/aports/fplinux-bluetooth
+---
+
+import { Steps } from '@astrojs/starlight/components';
+import FeatureStatus from '../../../components/FeatureStatus.astro';
+import Figure from '../../../components/Figure.astro';
+import BluetoothPan from '../../../assets/diagrams/bluetooth-pan.svg';
+import Key from '../../../components/Key.astro';
+
+Pair devices, exchange files, use a Bluetooth Internet connection (PAN) and
+connect keyboards or mice with `bluetoothctl` and `fplinux-bluetooth` in a
+shell on the phone. Optional packages add A2DP audio output. Check
+[support status](/fplinux/phones/#support-status) and your
+[phone page](/fplinux/phones/) for the supported functions, peers and profiles
+before using a procedure below.
+
+<FeatureStatus feature="bluetooth" />
+
+Bluetooth needs firmware taken from the same phone, which is part of its
+[device data](/fplinux/guides/device-data/). An image built without it boots
+normally but has no Bluetooth. Do not use firmware copied from another phone.
+
+Bluetooth starts powered off. Keep the USB connection to your computer while
+you set it up: it stays your way to manage the phone and is independent of
+Bluetooth.
+
+Run `fplinux-bluetooth --help` for the list of commands, and add `--help`
+after a command, such as `fplinux-bluetooth receive --help`, for its syntax.
+
+## Turn Bluetooth on and off
+
+```sh title="Phone"
+bluetoothctl power on
+bluetoothctl power off
+```
+
+Pairings are kept while Bluetooth is off.
+
+## Pair with a computer or another phone
+
+You need `bluetoothctl` on both devices. Send each command separately and wait
+for it to finish before sending the next. Identify each device by the exact
+address that `show` prints.
+
+<Steps>
+
+1. On the phone, open a short pairing window:
+
+   ```text title="Phone"
+   bluetoothctl --agent NoInputNoOutput
+   default-agent
+   power on
+   show
+   pairable on
+   discoverable-timeout 120
+   discoverable on
+   ```
+
+2. On the other device, start `bluetoothctl`:
+
+   ```text title="Other device"
+   bluetoothctl --agent NoInputNoOutput
+   default-agent
+   power on
+   show
+   ```
+
+   If this device still lists the phone from an earlier FPLinux session, run
+   `remove PHONE-MAC` first. After every new RAM boot, the phone has forgotten
+   the old pairing, so the old record no longer works.
+
+3. On the other device, find and pair with the phone, then trust only its
+   address:
+
+   ```text title="Other device"
+   pairable on
+   scan bredr
+   devices
+   pair PHONE-MAC
+   trust PHONE-MAC
+   scan off
+   pairable off
+   ```
+
+4. Back on the phone, trust only the other device's address and close the
+   pairing window. The last command keeps the phone reachable for incoming
+   file transfers:
+
+   ```text title="Phone"
+   trust PEER-MAC
+   discoverable off
+   pairable off
+   mgmt.connectable on
+   ```
+
+</Steps>
+
+:::caution[Pairing has no passkey check]
+This method pairs without comparing a passkey. Check both addresses, pair
+only with the device you intend to, and keep the pairing window short.
+:::
+
+## Receive a file on the phone
+
+Create a destination directory, then open a receive window for one file from
+the paired device. The last number is the time limit in seconds, from 1 to
+3600:
+
+```sh title="Phone"
+mkdir -p /tmp/bluetooth-receive
+fplinux-bluetooth receive PEER-MAC /tmp/bluetooth-receive 120
+```
+
+While the command waits, send one file from that device with its Bluetooth
+file-transfer (OBEX Object Push) client. The window accepts only that device,
+closes after one file or when the time runs out, and never overwrites an
+existing file.
+
+## Send a file from the phone
+
+Start an OBEX Object Push receiver on the paired device first, then run:
+
+```sh title="Phone"
+fplinux-bluetooth send PEER-MAC /tmp/photo.jpg
+```
+
+Whether a particular computer or phone accepts the file depends on its own
+Object Push service; not every desktop Bluetooth setup is compatible.
+
+## Internet over Bluetooth (PAN)
+
+The other device must share its Internet connection over Bluetooth as a
+network access point (NAP). It provides the addresses, DNS and routing;
+FPLinux does not configure it. Set this up on the other device before pairing.
+
+<Steps>
+
+1. In one shell on the phone, connect and leave the command running:
+
+   ```sh title="Phone"
+   fplinux-bluetooth network PEER-MAC
+   ```
+
+   It prints the name of the new network interface, for example `bnep0`.
+
+2. In a second shell on the phone, request an address on the interface it
+   printed:
+
+   ```sh title="Phone"
+   udhcpc -i bnep0
+   ```
+
+3. Press <Key>Ctrl</Key>+<Key>C</Key> in the first shell to disconnect.
+
+</Steps>
+
+Internet traffic goes through Bluetooth only. The USB link to your computer
+stays a separate private connection and does not carry Internet traffic.
+
+<Figure caption="Internet over Bluetooth"><BluetoothPan /></Figure>
+
+## Send audio to an A2DP sink
+
+Copy `fplinux-bluealsa.apk`, `fplinux-bluez-libs.apk` and `fplinux-sbc.apk`
+from your build's `apks/` directory to `/tmp`, as described in
+[Packages](/fplinux/guides/packages/). Install them together so their
+dependencies are available, then start the service:
+
+```sh title="Phone"
+apk add --no-network --allow-untrusted --force-non-repository \
+  /tmp/fplinux-bluez-libs.apk /tmp/fplinux-sbc.apk /tmp/fplinux-bluealsa.apk
+rc-service bluealsa start
+```
+
+Enable Bluetooth, pair and trust the sink using the procedure above. Connect
+its Audio Sink profile and list the available PCM devices:
+
+```sh title="Phone"
+bluetoothctl connect PEER-MAC 0000110b-0000-1000-8000-00805f9b34fb
+bluealsactl list-pcms
+```
+
+Select the Bluetooth output explicitly when playing a file:
+
+```sh title="Phone"
+aplay -D 'bluealsa:DEV=PEER-MAC,PROFILE=a2dp,CODEC=SBC' /tmp/audio.wav
+```
+
+Replace `PEER-MAC` with the paired sink's exact address. Finish playback before
+disconnecting. After reconnecting, start a new playback command. The service
+does not replace the default audio output or start automatically at boot.
+Before removing `fplinux-bluealsa`, stop it with `rc-service bluealsa stop`.
+
+Use this procedure only with a sink and boot profile supported on your phone
+page. Audio to physical headsets and other phones, and audio from microSD
+system roots, has not been tested. This service supports SBC only; HFP and SCO are not
+supported.
+
+## Keyboards and mice
+
+Where supported, Bluetooth keyboards and mice work as ordinary input devices:
+they type in the
+[phone terminal](/fplinux/use/terminal/) and control applications such as
+[TyrQuake](/fplinux/apps/tyrquake/). The procedure below uses Bluetooth Low Energy;
+check your phone page for keyboard and mouse support. Bluetooth Classic
+keyboards and mice have not been tested.
+
+Put the keyboard or mouse into pairing mode, then pair it from the phone:
+
+```text title="Phone"
+bluetoothctl --agent KeyboardDisplay
+default-agent
+power on
+scan le
+pair DEVICE-MAC
+trust DEVICE-MAC
+connect DEVICE-MAC
+scan off
+```
+
+Use the address shown by the current scan: some keyboards use a new address
+each time they enter pairing mode. If `bluetoothctl` shows a passkey, type it
+on the keyboard.
+
+## Sleep
+
+If your phone page lists Bluetooth sleep support for the boot profile,
+Bluetooth can stay on while the phone [sleeps](/fplinux/use/power/), and
+pairings are kept. Before sleeping, finish file transfers, stop audio playback,
+stop the PAN command with <Key>Ctrl</Key>+<Key>C</Key> and wait until the other device has disconnected; an
+active connection makes the sleep request fail. After waking, Bluetooth works
+without pairing again. Waking the phone over Bluetooth has not been tested.
+
+## What is kept
+
+In the RAM profile, a power-off or a new load erases pairings and files such as
+those in `/tmp`. With a
+[microSD system card](/fplinux/guides/microsd-system-card/), pairings are
+kept across boots.
+
+## Limitations
+
+Peer compatibility and range are limited to the support stated on your phone
+page. Pairing alone does not establish support for every service that a peer
+offers.
+
+- Physical Bluetooth headphones and speakers have not been tested.
+- Bluetooth Low Energy devices other than keyboards and mice have not been
+  tested.
+- Range has not been tested.

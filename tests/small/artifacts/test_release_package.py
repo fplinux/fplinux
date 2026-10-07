@@ -62,14 +62,11 @@ class ReleaseManifestPolicyTests:
                 "runner/platform_adapter.py",
                 "runtime-manifest.json",
             ],
-            "documents": ["release/README.txt", "features/MICROSD.md"],
+            "documents": ["release/README.txt"],
         }
         self.readme = self.root / "targets" / self.target / "release/README.txt"
         self.readme.parent.mkdir(parents=True)
         self.readme.write_text("phone instructions\n", encoding="utf-8")
-        self.feature = self.root / "targets" / self.target / "features/MICROSD.md"
-        self.feature.parent.mkdir(parents=True)
-        self.feature.write_bytes(b"phone microSD procedures\n")
 
     @staticmethod
     @pytest.mark.parametrize(
@@ -102,8 +99,8 @@ class ReleaseManifestPolicyTests:
             assert (path) not in (manifest["bundle_files"])
             assert (path) not in (manifest["runtime_files"])
 
-    def test_target_document_paths_are_safe_and_collision_free(self) -> None:
-        """Direct feature pages map once while invalid or escaping inputs are rejected."""
+    def test_target_release_paths_preserve_bytes_and_reject_symlinks(self) -> None:
+        """Release files keep their content and cannot traverse target-tree symlinks."""
         with mock.patch.object(common, "ROOT", self.root):
             readme_name, readme = package_commands.target_archive_file(
                 self.target, "release/README.txt"
@@ -111,29 +108,23 @@ class ReleaseManifestPolicyTests:
             assert (readme_name) == ("README.txt")
             assert (readme.read_bytes()) == (b"phone instructions\n")
 
-            archive_name, source = package_commands.target_archive_file(
-                self.target, "features/MICROSD.md"
-            )
-            assert (archive_name) == ("docs/target/MICROSD.md")
-            assert (source.read_bytes()) == (b"phone microSD procedures\n")
-
             with pytest.raises(SystemExit, match="invalid target package name"):
-                package_commands.target_archive_file("../phone", "features/MICROSD.md")
+                package_commands.target_archive_file("../phone", "release/README.txt")
 
-            link = self.root / "targets" / self.target / "features/LINK.md"
-            link.symlink_to("MICROSD.md")
+            link = self.readme.parent / "LINK.txt"
+            link.symlink_to("README.txt")
             with pytest.raises(SystemExit, match="must not traverse a symlink"):
-                package_commands.target_archive_file(self.target, "features/LINK.md")
+                package_commands.target_archive_file(self.target, "release/LINK.txt")
 
     @pytest.mark.parametrize(
         "relative",
         [
-            "../features/MICROSD.md",
-            "features/nested/MICROSD.md",
-            "features/MICROSD.txt",
-            "other/MICROSD.md",
+            "../release/README.txt",
+            "features/MICROSD.md",
+            "other/README.txt",
+            "release",
         ],
-        ids=["parent-path", "nested-feature", "wrong-extension", "wrong-directory"],
+        ids=["parent-path", "feature-page", "wrong-directory", "no-file-name"],
     )
     def test_target_document_paths_reject_invalid_inputs(self, relative: str) -> None:
         """Unsafe or unsupported document paths cannot become archive members."""
@@ -172,17 +163,15 @@ class ReleaseManifestPolicyTests:
         assert (preinstalled["runtime_files"]) == (self.release_manifest["runtime_files"])
         assert (preinstalled["documents"]) == (self.release_manifest["documents"])
 
-    def test_duplicate_target_document_paths_are_rejected(self) -> None:
-        """Two declared documents cannot silently publish the same archive member."""
-        duplicate = self.root / "targets" / self.target / "release/docs/target/MICROSD.md"
-        duplicate.parent.mkdir(parents=True)
-        duplicate.write_bytes(b"duplicate\n")
+    def test_target_release_file_cannot_replace_the_shared_license(self) -> None:
+        """Target files cannot replace the required shared legal notice."""
+        duplicate = self.readme.parent / "LICENSE"
+        duplicate.write_bytes(b"different notice\n")
         manifest = {
             **self.release_manifest,
             "documents": [
                 "release/README.txt",
-                "release/docs/target/MICROSD.md",
-                "features/MICROSD.md",
+                "release/LICENSE",
             ],
         }
         with (
@@ -190,6 +179,25 @@ class ReleaseManifestPolicyTests:
             mock.patch.object(releases, "load_release", return_value=manifest),
             mock.patch.object(platforms, "load_platform", return_value=self.platform),
             pytest.raises(SystemExit, match="duplicate release archive path"),
+        ):
+            package_commands.load_release_manifest(self.target, self.target_config)
+
+    def test_release_manifest_rejects_a_target_feature_page(self) -> None:
+        """A feature page cannot restore separately maintained archive documentation."""
+        feature = self.root / "targets" / self.target / "features/MICROSD.md"
+        feature.parent.mkdir(parents=True)
+        feature.write_bytes(b"phone microSD procedures\n")
+        manifest = {
+            **self.release_manifest,
+            "documents": ["release/README.txt", "features/MICROSD.md"],
+        }
+        (self.readme.parent / "manifest.toml").write_text(
+            "\n".join(f"{key} = {json.dumps(value)}" for key, value in manifest.items()) + "\n",
+            encoding="utf-8",
+        )
+        with (
+            mock.patch.object(common, "ROOT", self.root),
+            pytest.raises(SystemExit, match="must be below release/"),
         ):
             package_commands.load_release_manifest(self.target, self.target_config)
 

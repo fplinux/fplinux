@@ -1,0 +1,155 @@
+---
+title: TyrQuake
+description: Play Quake on the phone with the keypad, a keyboard or a mouse, using your own game data.
+source:
+  - alpine/aports/fplinux-tyrquake
+---
+
+import FeatureStatus from '../../../components/FeatureStatus.astro';
+import Key from '../../../components/Key.astro';
+
+TyrQuake 0.71 is the Quake engine, packaged for FPLinux. The package does not
+contain the game itself: you need a legally obtained `pak0.pak` from Quake.
+
+<FeatureStatus feature="tyrquake" />
+
+## Install
+
+Install `fplinux-tyrquake.apk` as described in
+[Packages](/fplinux/guides/packages/).
+
+## Provide the game data
+
+The game reads `pak0.pak` from this path, and also any readable `pak1.pak` to
+`pak9.pak` in the same directory:
+
+```text
+/mnt/card/fplinux/quake/id1/pak0.pak
+```
+
+The files stay where you put them; the game reads them in place and never writes
+to that directory. Choose one of the following places.
+
+### On a microSD data card
+
+[Mount the card](/fplinux/use/microsd/) at `/mnt/card`, create the directory
+`fplinux/quake/id1` on it, and upload `pak0.pak` there as described in
+[Connect from a PC](/fplinux/use/connect/). The files stay on the card.
+
+If the card is FAT32 and `/mnt/card` is not mounted, `quake` mounts the card
+read-only by itself. Mount an ext4 card yourself before you start the game.
+
+### On a microSD system card
+
+When the phone runs from a [microSD system card](/fplinux/guides/microsd-system-card/),
+keep the game data in a directory of the system and bind-mount it at
+`/mnt/card`. With `/mnt/card` not yet mounted, run on the phone:
+
+```sh title="Phone"
+mkdir -p /var/lib/quake-data/fplinux/quake/id1 /mnt/card
+mount -o bind /var/lib/quake-data /mnt/card
+```
+
+Then upload `pak0.pak` to `/mnt/card/fplinux/quake/id1/pak0.pak`. The data
+stays on the card; repeat the bind mount after each boot. Do not put game data
+on the `FPLBOOT` partition.
+
+### Without a card, for one session
+
+With `/mnt/card` not yet mounted, run on the phone:
+
+```sh title="Phone"
+mkdir -p /mnt/card
+mount -t tmpfs tmpfs /mnt/card
+mkdir -p /mnt/card/fplinux/quake/id1
+```
+
+Then upload `pak0.pak` to `/mnt/card/fplinux/quake/id1/pak0.pak`. The file
+takes phone memory, which leaves less room for the game, and disappears when
+the phone shuts down.
+
+## Start the game
+
+Start the game in the local terminal or from the PC, as described in
+[Start an application](/fplinux/apps/):
+
+```sh title="Phone"
+quake
+```
+
+`--heapsize` sets the memory the game reserves for itself, in kibibytes, from
+`8192` to `262144`. The default is `32768`. Game data kept in phone memory
+comes on top of this reservation, so in that case a smaller value may be
+needed:
+
+```sh title="Phone"
+quake --heapsize 16384
+```
+
+If the value is smaller than the game data needs, the game stops during
+startup.
+
+## Controls
+
+You can use the phone keypad, keyboards and mice at the same time: a PC
+keyboard through the [USB keyboard bridge](/fplinux/use/connect/), and
+[Bluetooth](/fplinux/use/bluetooth/) keyboards and mice where the phone
+supports them. A device that connects during the game is picked up, and a
+device that disconnects does not end the game.
+
+### Phone keypad
+
+Hold the phone turned counter-clockwise, with the display on the left and the
+keypad on the right. The mapping is the same on every phone.
+
+| Key                                      | In the menu  | In the game                                     |
+| ---------------------------------------- | ------------ | ----------------------------------------------- |
+| D-pad <Key>Up</Key> / <Key>Down</Key>    | Left / right | Turn left / right                               |
+| D-pad <Key>Left</Key> / <Key>Right</Key> | Down / up    | Walk backward / forward                         |
+| <Key>Centre</Key> or <Key>Dial</Key>     | Select       | Fire                                            |
+| <Key>Right soft</Key>                    | Back         | Open the menu                                   |
+| <Key>Left soft</Key> or <Key>\*</Key>    | —            | Jump                                            |
+| <Key>0</Key>                             | —            | Fire                                            |
+| <Key>1</Key> / <Key>3</Key>              | —            | Strafe left / right                             |
+| <Key>2</Key> / <Key>5</Key>              | —            | Turn left / right                               |
+| <Key>4</Key> / <Key>6</Key>              | —            | Walk backward / forward                         |
+| <Key>7</Key> / <Key>9</Key>              | —            | Previous / next weapon                          |
+| <Key>8</Key>                             | —            | Show scores while held                          |
+| <Key>\#</Key>                            | —            | Not bound; you can bind it for the current game |
+
+Some questions, such as starting a new game during a game, accept only <Key>Y</Key>, <Key>N</Key> or <Key>Escape</Key>. On the keypad you can only
+cancel them, with <Key>Right soft</Key>.
+
+### Keyboard and mouse
+
+A keyboard keeps its own key meanings; the phone mapping above applies only to
+the phone keypad. The keyboard uses the game's standard bindings with these
+changes: you always run, and <Key>W</Key>, <Key>A</Key>, <Key>S</Key>, <Key>D</Key> move and strafe. As a result, <Key>A</Key> and <Key>D</Key> no
+longer look up and swim up as they do in the original game; look with the mouse
+instead.
+
+| Control                                        | In the game         |
+| ---------------------------------------------- | ------------------- |
+| <Key>W</Key> / <Key>S</Key>                    | Forward / back      |
+| <Key>A</Key> / <Key>D</Key>                    | Strafe left / right |
+| Mouse                                          | Turn and look       |
+| Left button, <Key>Ctrl</Key>, <Key>Enter</Key> | Fire                |
+| Right button, <Key>Space</Key>                 | Jump                |
+| Wheel up or <Key>\]</Key>                      | Next weapon         |
+| Wheel down or <Key>\[</Key>                    | Previous weapon     |
+| <Key>1</Key> to <Key>8</Key>                   | Select weapon       |
+
+All other keys, including the arrow keys, keep the game's standard bindings.
+The mouse turns and looks up and down; while you hold the game's strafe
+modifier, it moves you sideways instead. Side buttons on the mouse do nothing.
+
+## Quit
+
+Press <Key>Right soft</Key> to open the menu, choose **Quit**, and confirm
+with <Key>Centre</Key>. The display returns to the terminal.
+
+## Limitations
+
+- Settings, key bindings and saved games are lost every time the game exits,
+  on every kind of boot.
+- There is no sound.

@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 
 from fplinux_cli.common import fail
 
-from .canonical_markdown import is_phone_readme
 from .source_formats import SourceFormats, source_format_kind
 
 if TYPE_CHECKING:
@@ -29,29 +28,12 @@ def formatter_commands(
 ) -> tuple[tuple[str, list[str]], ...]:
     """Define the same normalization and pinned formatting steps for format and check."""
     commands: list[tuple[str, list[str]]] = []
-    phone_documents = tuple(path for path in groups.markdown if is_phone_readme(path))
-    if phone_documents:
-        # Prettier first gives equivalent heading and table spellings one recognizable form.
-        commands.append(
-            (
-                "prettier-phone-structure",
-                [
-                    "prettier",
-                    "--write",
-                    "--parser",
-                    "markdown",
-                    "--",
-                    *_formatter_paths(phone_documents, workspace),
-                ],
-            )
-        )
     normalized = (
         *groups.toml,
         *groups.json,
         *groups.yaml,
         *groups.devicetree,
         *groups.text,
-        *groups.markdown,
     )
     if normalized:
         commands.append(
@@ -186,10 +168,6 @@ def normalize_source(relative: str, contents: bytes) -> bytes:
         from .canonical_text import normalize_text  # noqa: PLC0415 -- format-specific import.
 
         return normalize_text(relative, contents)
-    if kind == "markdown":
-        from .canonical_markdown import normalize_markdown  # noqa: PLC0415 -- host-safe import.
-
-        return normalize_markdown(relative, contents)
     return contents
 
 

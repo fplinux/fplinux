@@ -1,14 +1,38 @@
 FPLinux for @DEVICE@
 
-Read docs/guides/STANDALONE.md before connecting the phone. It contains the
-host requirements, USB setup, checksum, loader-first and reconnect procedures.
-Hold * (asterisk) when the loader asks for the powered-off phone. The BootROM
-key of this phone has not been confirmed.
+Use an archive for this exact phone. On a Linux x86-64 PC, install Python 3.14,
+GNU coreutils, iproute2 and OpenSSH. The PC must configure a new USB network
+interface through IPv4 DHCP. Use a USB data cable.
 
-This target starts Linux in RAM without a boot screen; the loader reports its
-progress on the host. The phone is used through the USB SSH session. Display,
-keypad, audio and Bluetooth support are not provided, and no feature has been
-tested on this phone.
+From the extracted archive directory, check its files and install USB rules:
 
-To end the session, disconnect USB. If a battery is installed, remove and
-reinsert it before booting the phone normally.
+  sha256sum -c SHA256SUMS
+  sudo install -m 0644 ./60-fplinux.rules /etc/udev/rules.d/60-fplinux.rules
+  sudo udevadm control --reload-rules
+
+Power the phone off and disconnect USB. Start the runner as your regular user:
+
+  ./runner/run.py
+
+Wait until the runner asks for the powered-off phone. Then hold * (asterisk)
+and connect USB, keeping the key pressed. If connected too early, disconnect
+and restart this sequence. Exit the shell to return to the PC; Linux keeps
+running. Reconnect with:
+
+  ./runner/run.py --reconnect
+
+Shared archive procedures:
+https://fplinux.github.io/fplinux/guides/standalone-archive/
+
+The BootROM key for this phone has not been confirmed. This target starts
+Linux in RAM; the runner reports loading progress on the PC.
+
+Phone support and bring-up requirements:
+https://fplinux.github.io/fplinux/porting/checklist/
+
+To end the RAM session, disconnect USB. If a battery is installed, remove and
+reinsert it before booting normally. A fresh USB load is required after
+power-off.
+
+Shutdown safety:
+https://fplinux.github.io/fplinux/use/power/

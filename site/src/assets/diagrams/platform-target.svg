@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 314" role="img" aria-labelledby="platform-target-title" font-family="'Noto Sans', sans-serif">
+	<title id="platform-target-title">What the UMS9117 platform provides and what each phone target supplies</title>
+	<!-- Platform -->
+	<rect x="8" y="8" width="704" height="154" rx="10" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+	<text x="24" y="34" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">UMS9117 platform provides</text>
+	<text x="226.14" y="34" class="dg-text-muted" fill="#6E797D" font-size="12">used by all current phones</text>
+	<rect x="24" y="58" width="6" height="6" rx="1" class="dg-fill-primary" fill="#396475"/>
+	<text x="38" y="66" class="dg-text-small" fill="#202D35" font-size="12">CPU, interrupts and timers</text>
+	<rect x="24" y="84" width="6" height="6" rx="1" class="dg-fill-primary" fill="#396475"/>
+	<text x="38" y="92" class="dg-text-small" fill="#202D35" font-size="12">USB device</text>
+	<rect x="24" y="110" width="6" height="6" rx="1" class="dg-fill-primary" fill="#396475"/>
+	<text x="38" y="118" class="dg-text-small" fill="#202D35" font-size="12">Display (DRM/KMS)</text>
+	<rect x="24" y="136" width="6" height="6" rx="1" class="dg-fill-primary" fill="#396475"/>
+	<text x="38" y="144" class="dg-text-small" fill="#202D35" font-size="12">Matrix keypad</text>
+	<rect x="252" y="58" width="6" height="6" rx="1" class="dg-fill-primary" fill="#396475"/>
+	<text x="266" y="66" class="dg-text-small" fill="#202D35" font-size="12">Audio</text>
+	<rect x="252" y="84" width="6" height="6" rx="1" class="dg-fill-primary" fill="#396475"/>
+	<text x="266" y="92" class="dg-text-small" fill="#202D35" font-size="12">Bluetooth and FM radio</text>
+	<rect x="252" y="110" width="6" height="6" rx="1" class="dg-fill-primary" fill="#396475"/>
+	<text x="266" y="118" class="dg-text-small" fill="#202D35" font-size="12">microSD</text>
+	<rect x="252" y="136" width="6" height="6" rx="1" class="dg-fill-primary" fill="#396475"/>
+	<text x="266" y="144" class="dg-text-small" fill="#202D35" font-size="12">Camera capture</text>
+	<rect x="480" y="58" width="6" height="6" rx="1" class="dg-fill-primary" fill="#396475"/>
+	<text x="494" y="66" class="dg-text-small" fill="#202D35" font-size="12">Image rotation and JPEG</text>
+	<rect x="480" y="84" width="6" height="6" rx="1" class="dg-fill-primary" fill="#396475"/>
+	<text x="494" y="92" class="dg-text-small" fill="#202D35" font-size="12">Power-management chip</text>
+	<rect x="480" y="110" width="6" height="6" rx="1" class="dg-fill-primary" fill="#396475"/>
+	<text x="494" y="118" class="dg-text-small" fill="#202D35" font-size="12">Read-only NAND reader</text>
+	<rect x="480" y="136" width="6" height="6" rx="1" class="dg-fill-primary" fill="#396475"/>
+	<text x="494" y="144" class="dg-text-small" fill="#202D35" font-size="12">RAM-loader flow</text>
+	<!-- Target -->
+	<rect x="8" y="178" width="704" height="128" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+	<text x="24" y="204" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">Each target supplies</text>
+	<text x="175.27" y="204" class="dg-text-muted" fill="#6E797D" font-size="12">for one exact phone</text>
+	<rect x="24" y="228" width="6" height="6" rx="1" class="dg-fill-muted" fill="#6E797D"/>
+	<text x="38" y="236" class="dg-text-small" fill="#202D35" font-size="12">Board memory</text>
+	<rect x="24" y="254" width="6" height="6" rx="1" class="dg-fill-muted" fill="#6E797D"/>
+	<text x="38" y="262" class="dg-text-small" fill="#202D35" font-size="12">Panel profile and wiring</text>
+	<rect x="24" y="280" width="6" height="6" rx="1" class="dg-fill-muted" fill="#6E797D"/>
+	<text x="38" y="288" class="dg-text-small" fill="#202D35" font-size="12">Keypad wiring and keymap</text>
+	<rect x="252" y="228" width="6" height="6" rx="1" class="dg-fill-muted" fill="#6E797D"/>
+	<text x="266" y="236" class="dg-text-small" fill="#202D35" font-size="12">Bootstrap inputs</text>
+	<rect x="252" y="254" width="6" height="6" rx="1" class="dg-fill-muted" fill="#6E797D"/>
+	<text x="266" y="262" class="dg-text-small" fill="#202D35" font-size="12">Enabled Devicetree nodes</text>
+	<rect x="252" y="280" width="6" height="6" rx="1" class="dg-fill-muted" fill="#6E797D"/>
+	<text x="266" y="288" class="dg-text-small" fill="#202D35" font-size="12">Board USB setup</text>
+	<rect x="480" y="228" width="6" height="6" rx="1" class="dg-fill-muted" fill="#6E797D"/>
+	<text x="494" y="236" class="dg-text-small" fill="#202D35" font-size="12">Loader values in <tspan class="dg-mono" font-family="ui-monospace, monospace">[adapter]</tspan></text>
+	<rect x="480" y="254" width="6" height="6" rx="1" class="dg-fill-muted" fill="#6E797D"/>
+	<text x="494" y="262" class="dg-text-small" fill="#202D35" font-size="12">Device-data groups</text>
+</svg>

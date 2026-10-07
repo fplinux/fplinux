@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 564" role="img" aria-labelledby="keypad-codes-title" font-family="'Noto Sans', sans-serif">
+	<title id="keypad-codes-title">Phone keys and their Linux key codes</title>
+
+	<!-- The soft-key labels sit above their keys, away from the navigation labels. -->
+	<g text-anchor="middle">
+		<text x="240" y="24" class="dg-text-strong">Left soft</text>
+		<text x="240" y="45" class="dg-text dg-mono">KEY_F13</text>
+		<text x="360" y="24" class="dg-text-strong">Right soft</text>
+		<text x="360" y="45" class="dg-text dg-mono">KEY_F14</text>
+	</g>
+	<rect x="204" y="76" width="192" height="420" rx="28" class="dg-box-2"/>
+	<g class="dg-line-muted" stroke-linecap="round">
+		<path d="M240,56 V108"/>
+		<path d="M360,56 V108"/>
+	</g>
+	<g class="dg-box-primary">
+		<rect x="216" y="108" width="48" height="34" rx="10"/>
+		<rect x="336" y="108" width="48" height="34" rx="10"/>
+	</g>
+	<g class="dg-line" stroke-linecap="round">
+		<path d="M229,125 H251"/>
+		<path d="M349,125 H371"/>
+	</g>
+	<g class="dg-fill-primary">
+		<circle cx="240" cy="108" r="2.5"/>
+		<circle cx="360" cy="108" r="2.5"/>
+	</g>
+
+	<!-- A separate centre key and four direction marks keep the D-pad legible. -->
+	<circle cx="300" cy="181" r="42" class="dg-box-primary"/>
+	<circle cx="300" cy="181" r="18" class="dg-box"/>
+	<text x="300" y="186" text-anchor="middle" class="dg-text-strong">OK</text>
+	<g class="dg-fill-primary">
+		<path d="M295,150 L305,150 L300,144 Z"/>
+		<path d="M295,212 L305,212 L300,218 Z"/>
+		<path d="M269,176 L269,186 L263,181 Z"/>
+		<path d="M331,176 L331,186 L337,181 Z"/>
+	</g>
+
+	<rect x="216" y="220" width="48" height="34" rx="10" class="dg-box-ok"/>
+	<rect x="336" y="220" width="48" height="34" rx="10" class="dg-box-danger"/>
+	<path d="M232,228 L237,227 L240,233 L236,236 C238,240 241,242 245,244 L248,240 L253,244 L251,249 C241,249 233,241 232,228 Z" class="dg-line" style="stroke:var(--dg-ok);stroke-width:1.8;stroke-linejoin:round"/>
+	<path d="M350,244 L347,240 C352,233 369,233 374,240 L371,244 L366,242 V239 C362,238 358,238 354,239 V242 Z" class="dg-line" style="stroke:var(--dg-danger);stroke-width:1.8;stroke-linejoin:round"/>
+
+	<!-- The number block uses quiet surfaces; colour distinguishes the controls above. -->
+	<g class="dg-box">
+		<rect x="216" y="274" width="48" height="34" rx="9"/>
+		<rect x="276" y="274" width="48" height="34" rx="9"/>
+		<rect x="336" y="274" width="48" height="34" rx="9"/>
+		<rect x="216" y="324" width="48" height="34" rx="9"/>
+		<rect x="276" y="324" width="48" height="34" rx="9"/>
+		<rect x="336" y="324" width="48" height="34" rx="9"/>
+		<rect x="216" y="374" width="48" height="34" rx="9"/>
+		<rect x="276" y="374" width="48" height="34" rx="9"/>
+		<rect x="336" y="374" width="48" height="34" rx="9"/>
+		<rect x="216" y="424" width="48" height="34" rx="9"/>
+		<rect x="276" y="424" width="48" height="34" rx="9"/>
+		<rect x="336" y="424" width="48" height="34" rx="9"/>
+	</g>
+	<g class="dg-text-strong" style="font-size:18px" text-anchor="middle">
+		<text x="240" y="298">1</text>
+		<text x="300" y="298">2</text>
+		<text x="360" y="298">3</text>
+		<text x="240" y="348">4</text>
+		<text x="300" y="348">5</text>
+		<text x="360" y="348">6</text>
+		<text x="240" y="398">7</text>
+		<text x="300" y="398">8</text>
+		<text x="360" y="398">9</text>
+		<text x="240" y="448">*</text>
+		<text x="300" y="448">0</text>
+		<text x="360" y="448">#</text>
+	</g>
+
+	<!-- Short, aligned leaders connect each label to its physical key. -->
+	<g class="dg-line-muted" stroke-linecap="round" stroke-linejoin="round">
+		<path d="M287,168 L274,157 H184"/>
+		<path d="M342,181 H416"/>
+		<path d="M216,237 H184"/>
+		<path d="M384,237 H416"/>
+		<path d="M400,278 H408 V404 H400 M408,341 H416"/>
+		<path d="M216,441 H184"/>
+		<path d="M384,441 H416"/>
+		<path d="M300,458 V520"/>
+	</g>
+	<g class="dg-fill-muted">
+		<circle cx="287" cy="168" r="2.5"/>
+		<circle cx="342" cy="181" r="2.5"/>
+		<circle cx="216" cy="237" r="2.5"/>
+		<circle cx="384" cy="237" r="2.5"/>
+		<circle cx="216" cy="441" r="2.5"/>
+		<circle cx="384" cy="441" r="2.5"/>
+		<circle cx="300" cy="458" r="2.5"/>
+	</g>
+
+	<g text-anchor="end">
+		<text x="176" y="149" class="dg-text-strong">Centre</text>
+		<text x="176" y="170" class="dg-text dg-mono">KEY_OK</text>
+		<text x="176" y="229" class="dg-text-strong">Dial</text>
+		<text x="176" y="250" class="dg-text dg-mono">KEY_PICKUP_PHONE</text>
+		<text x="176" y="433" class="dg-text-strong">*</text>
+		<text x="176" y="454" class="dg-text dg-mono">KEY_NUMERIC_STAR</text>
+	</g>
+	<g>
+		<text x="424" y="158" class="dg-text-strong">D-pad</text>
+		<text x="424" y="179" class="dg-text dg-mono">KEY_UP, KEY_DOWN</text>
+		<text x="424" y="200" class="dg-text dg-mono">KEY_LEFT, KEY_RIGHT</text>
+		<text x="424" y="229" class="dg-text-strong">Power (red key)</text>
+		<text x="424" y="250" class="dg-text dg-mono">KEY_POWER</text>
+		<text x="424" y="329" class="dg-text-strong">Digits 1 to 9</text>
+		<text x="424" y="350" class="dg-text dg-mono">KEY_NUMERIC_1</text>
+		<text x="424" y="371" class="dg-text dg-mono">to KEY_NUMERIC_9</text>
+		<text x="424" y="433" class="dg-text-strong">#</text>
+		<text x="424" y="454" class="dg-text dg-mono">KEY_NUMERIC_POUND</text>
+	</g>
+	<text x="300" y="544" text-anchor="middle" class="dg-text dg-mono">KEY_NUMERIC_0</text>
+</svg>

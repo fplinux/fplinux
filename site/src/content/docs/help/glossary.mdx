@@ -1,0 +1,126 @@
+---
+title: Glossary
+description: Short definitions of the words these pages use for phones, loading, builds and packages.
+---
+
+## Phones and hardware
+
+### UMS9117
+
+The Unisoc chip in every supported phone, also known by its reference name
+T117. See [UMS9117 platform](/fplinux/porting/ums9117/).
+
+### Platform
+
+The code shared by all phones with the same chip. FPLinux has one platform,
+`ums9117`.
+
+### Target
+
+The description of one exact phone model, and the name you pass to
+`./fplinux build` and `./fplinux run`, such as `nokia-ta1618`. A target is
+never used for a different model. See [Phones](/fplinux/phones/).
+
+### Support status
+
+The result for one function on one exact phone, with its tested conditions and
+remaining limits. See the [phone status legend](/fplinux/phones/#support-status).
+Hardware presence is a separate fact.
+
+### Implementation status
+
+Whether FPLinux provides a function, and whether a device result is recorded
+for it. This does not establish support on every model. See
+[Features](/fplinux/features/#status-meaning).
+
+### Stock firmware
+
+The software the phone came with. Starting the phone normally, without the
+boot key, starts it.
+
+### Internal storage
+
+The phone's built-in flash memory, which holds the stock firmware. FPLinux
+only reads it, to prepare [device data](/fplinux/guides/device-data/) and
+backups.
+
+### Device data
+
+Bluetooth firmware, FM settings, audio tuning and, on targets that declare
+them, board maps read from your own phone's internal storage. FPLinux does not
+ship these inputs. See
+[Device data](/fplinux/guides/device-data/).
+
+## Loading the phone
+
+### Loader
+
+The PC side of a start: `./fplinux run` in a source checkout, or the runner
+in a [standalone archive](/fplinux/guides/standalone-archive/). It sends
+FPLinux over USB and opens a shell when started from an interactive terminal.
+See [Run FPLinux](/fplinux/start/run/).
+
+### Boot key
+
+The key you hold while connecting USB to a powered-off phone so that it
+waits for a load instead of starting its stock firmware. Use the exact key
+listed on your [phone page](/fplinux/phones/).
+
+### BootROM
+
+Code built into the chip that runs first. With the boot key held, it
+appears on the PC as USB device `1782:4d00` and accepts a load.
+
+### RAM loader (FDL1)
+
+A small program that the loader sends first. It prepares the phone's memory
+and receives the rest of the system.
+
+### USB network link
+
+The private network over the USB cable that the shell, file copies and the
+PC keyboard use once Linux runs. The phone then appears as USB device
+`0525:a4a6`. See [Connect from a computer](/fplinux/use/connect/).
+
+### RAM system
+
+The default build. It runs entirely from the phone's RAM and forgets
+everything at power-off.
+
+### microSD system card
+
+A build that keeps the Linux system on a microSD card, so packages and files
+persist. Each cold start still needs a load from the PC, which starts the
+U-Boot boot loader; U-Boot then starts Linux from the card. See
+[microSD system card](/fplinux/guides/microsd-system-card/).
+
+## Builds and packages
+
+### Profile
+
+The boot mode a build is made for: the RAM system by default, or
+`microsd-uboot` for a system card on targets that support it. Check your phone's
+supported profiles and pass the same `--profile` to every command for
+that build.
+
+### Build type
+
+`release` by default, or `debug`, which adds kernel diagnostics. See
+[Debugging](/fplinux/develop/debugging/).
+
+### Optional package
+
+An application delivered as an APK file and installed on a running phone
+with `apk`. See [Optional packages](/fplinux/guides/packages/).
+
+### Standalone archive
+
+A packaged FPLinux for one phone that runs without a source checkout or
+build tools. See [Standalone archive](/fplinux/guides/standalone-archive/).
+
+### Candidate
+
+A standalone archive packaged for testing whose exact executable payload has
+no recorded phone-tested release status. It is marked by
+`CANDIDATE-NOTICE.txt` and must not be published as a release. See
+[Packaging](/fplinux/develop/packaging/).

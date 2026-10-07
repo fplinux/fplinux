@@ -1,0 +1,302 @@
+---
+title: Troubleshooting
+description: Find the cause of a problem from what you see, and the page that fixes it.
+---
+
+import Key from '../../../components/Key.astro';
+
+Find what you see below. Each entry names the likely cause and links to the
+page that owns the fix. Messages are quoted as the commands print them;
+`<target>` stands for your phone's target name, such as `nokia-ta1618`.
+
+## Loading the phone
+
+### The loader stops before it asks for the phone
+
+| Message                                                       | What to do                                                                                       |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `fplinux ssh: required host tool is missing: NAME`            | Install the PC tools listed in [Run FPLinux](/fplinux/start/run/#before-you-start).              |
+| `fplinux run: GNU stdbuf is required (install coreutils …)`   | Install GNU coreutils.                                                                           |
+| `fplinux ssh: XDG_RUNTIME_DIR is not set`                     | Run the loader as your regular user in your normal login session, not as root or through `sudo`. |
+| `fplinux: current build is missing or invalid; rebuild it: …` | Run the build command it prints. Pass the same profile and build type to `build` and `run`.      |
+
+### The loader keeps waiting for the phone
+
+The phone did not start in boot ROM mode. It was already on, the boot key was
+not held while you connected USB, or the cable does not carry data. After 300
+seconds the loader stops with `fplinux run: BootROM USB was not detected`.
+
+Disconnect USB, power the phone off, start the loader again and connect the
+phone only when it asks, holding the boot key from your
+[phone page](/fplinux/phones/). See
+[Run FPLinux](/fplinux/start/run/#the-loader-keeps-waiting-for-the-phone).
+
+### The phone starts its own firmware
+
+The phone was switched on normally, without the boot key. Disconnect USB,
+power the phone off and start again from the loader as described in
+[Run FPLinux](/fplinux/start/run/#load-the-phone).
+
+### Access to the phone's USB device is denied
+
+```text title="Output"
+fplinux run: BootROM USB 1782:4d00 is not readable and writable by the current user; install the documented udev rule and reconnect the phone
+```
+
+Install the USB rules from
+[Allow USB access](/fplinux/start/run/#allow-usb-access), then disconnect the
+phone and connect it again.
+
+### A load attempt fails
+
+After a failed attempt the loader prints
+`RAM loader attempt N/3 exited with status …` and waits for a fresh
+connection. Disconnect the phone, power it off and connect it again in boot
+ROM mode. After the third failure the loader stops with
+`fplinux run: RAM loader failed after 3 attempts`. Keep the complete loader
+output for a [problem report](/fplinux/help/report/).
+
+### The loader stops after the phone was loaded
+
+The load finished, but the phone did not hand over to Linux in time. The
+loader stops with a message such as
+`fplinux run: bridge did not acknowledge the Linux transition before the deadline`
+or `fplinux run: BootROM USB did not disconnect before the deadline`.
+Disconnect USB, power the phone off and start again from the loader. If it
+happens again, keep the complete output for a
+[problem report](/fplinux/help/report/).
+
+## Connecting to Linux
+
+### The session never becomes ready
+
+The loader prints
+`Bridge acknowledged the Linux transition; waiting up to 60 seconds for Linux USB-NCM 0525:a4a6.`
+and later stops with
+`fplinux ssh: the exact USB-NCM SSH session did not become ready before the deadline`.
+
+The loader did not authenticate the Linux USB session in time. Check that the
+PC has a network manager that runs IPv4 DHCP on a newly attached USB network
+interface, such as NetworkManager. While the loader waits, look for a new USB
+network interface with an IPv4 address:
+
+```sh title="PC"
+ip -4 -brief address
+```
+
+See [Run FPLinux](/fplinux/start/run/#before-you-start) for the PC
+requirements. If those requirements are met and a fresh load fails again,
+keep the complete output for a [problem report](/fplinux/help/report/).
+
+### console reports no session
+
+```text title="Output"
+fplinux ssh: no ready SSH session for <target>; run ./fplinux run <target> first
+```
+
+No load of this target has reached a ready session on this PC, or you passed
+a different target name. Start the phone with `./fplinux run <target>`.
+
+### console or verify cannot reconnect
+
+`fplinux ssh: the current USB-NCM SSH session did not reconnect before the deadline`
+means the phone is no longer reachable over the cable. If the phone has a
+battery and is still on, plug the cable back in and run the command again.
+Without a battery, unplugging the cable switched the phone off and ended the
+session; start a fresh load. See
+[Reconnect after unplugging](/fplinux/use/connect/#reconnect-after-unplugging).
+
+### console or verify refuses the running phone
+
+`current SSH session exposes a different kernel identity` means the phone runs
+a different build from the one you selected:
+
+- Pass the same profile and build type that started the session. A phone
+  started from a microSD system card needs `--profile microsd-uboot`.
+- If `verify` reports `build output is stale; rebuild it`, your checkout
+  changed inputs that affect the selected runtime after the build. Rebuild,
+  then start a fresh session to run the new build. Changes only to documentation
+  or optional APKs do not require a fresh RAM load.
+
+See [Check which build is running](/fplinux/start/run/#check-which-build-is-running).
+
+### The shell does not open from a script
+
+`fplinux ssh: interactive SSH requires a terminal; use --exec for a non-interactive command`.
+Without a terminal, run single commands with `--exec`, as shown in
+[Run one command](/fplinux/use/connect/#run-one-command).
+
+### A file upload fails
+
+`fplinux ssh: upload destination is missing or does not have enough free space`.
+The destination on the phone must be an absolute path in a directory that
+already exists. `/tmp` uses the phone's small RAM; on phones with supported
+microSD storage, copy large files to a mounted
+[microSD card](/fplinux/use/microsd/) instead. Check the phone checklist before
+using a card. See
+[Copy files](/fplinux/use/connect/#copy-files).
+
+## On the phone
+
+### The screen is dark
+
+- **The brightness is `0`.** Restore it from a shell opened
+  [from your computer](/fplinux/use/connect/) with
+  `fplinux-brightness set 7`. See
+  [Screen brightness](/fplinux/use/display-and-lights/#screen-brightness).
+- **The phone is asleep.** Use the key or armed RTC alarm listed as a verified
+  wake source on your phone page. Ordinary keypad keys do not wake a sleeping phone, and keys
+  pressed during sleep are lost. See
+  [Sleep](/fplinux/use/power/#sleep).
+- **The loader printed `Headless target`.** A target created for a phone that
+  is not supported yet shows no screen; use the phone from your computer. See
+  [Bring up a new phone](/fplinux/porting/bring-up/).
+
+### The screen shows kernel text instead of the terminal
+
+You switched to the diagnostic console. On a phone with supported keypad
+input, press and release the <Key>Right soft</Key> key to return to the
+terminal. From your computer, run `chvt 2` in a phone shell. See
+[Diagnostic console](/fplinux/use/terminal/#diagnostic-console).
+
+### Keys type digits or the wrong case
+
+These controls apply to phones with verified keypad input. Otherwise, use
+the USB shell and check the phone's input status.
+
+The terminal is in `123` mode or in `ABC`. Hold <Key>\*</Key> to switch between
+digits and letters, and press <Key>\*</Key> to switch between `abc` and `ABC`.
+See [Type with the keypad](/fplinux/use/terminal/#type-with-the-keypad).
+
+### The terminal does not start after installing a layout
+
+At most three keyboard layouts can be installed beside US. With more, the
+terminal refuses to start and names the problem. Remove a layout package. See
+[Russian keyboard layout](/fplinux/use/terminal/#russian-keyboard-layout).
+
+### No sound
+
+Check the output and automatic-routing entries in your
+[phone checklist](/fplinux/phones/) first.
+
+- **The volume is low.** Both outputs start at `1` after every boot. Raise
+  them as shown in [Volume](/fplinux/use/audio/#volume).
+- **Headphones are plugged in.** Where automatic routing is supported, any plug
+  in the socket moves playback away from the speaker.
+- **The speaker controls are missing.** The image was built without
+  [device data](/fplinux/guides/device-data/). Prepare it from the same phone
+  and build again.
+- **FM radio is on.** A file cannot play while FM radio plays, and the other
+  way round.
+- **Speaker-based vibration:** headphone sound is muted while the phone vibrates and
+  for about a second afterwards.
+
+See [Sound and recording](/fplinux/use/audio/).
+
+### An FM command reports a timeout
+
+Stop using FM and cold-boot the phone. Until then the phone cannot sleep. See
+[If the receiver stops responding](/fplinux/use/fm-radio/#if-the-receiver-stops-responding).
+
+### Bluetooth does not work or does not pair
+
+- **The image has no Bluetooth.** Bluetooth needs firmware from the same
+  phone's [device data](/fplinux/guides/device-data/). Prepare it and build
+  again.
+- **Bluetooth is off.** It starts powered off; turn it on with
+  `bluetoothctl power on`.
+- **The other device remembers an old pairing.** After every new RAM load the
+  phone has forgotten its pairings. Run `remove PHONE-MAC` on the other device,
+  then pair again. A microSD system card keeps pairing records between boots.
+
+Follow the pairing steps in the given order, one command at a time, as in
+[Bluetooth](/fplinux/use/bluetooth/#pair-with-a-computer-or-another-phone).
+
+### The phone does not go to sleep
+
+A sleep request fails while the FM receiver is on, including during a scan,
+and while a Bluetooth connection is active. Turn FM off or disconnect the
+Bluetooth device first. After an FM command has timed out, sleep fails until a
+cold boot. See [Sleep](/fplinux/use/power/#sleep).
+
+## microSD cards
+
+### The card does not appear
+
+- Check that your [phone](/fplinux/phones/) supports microSD access.
+- Card detection has no fixed delay. Wait until `/dev/mmcblk0` appears.
+- If the slot is under the battery, insert the card before starting the phone.
+  Follow the phone page's card-access rules.
+- On Nokia TA-1618, after removing an unmounted card, wait until
+  `/dev/mmcblk0` has disappeared before you insert another one. Other phones
+  keep the card installed from boot to shutdown.
+- Data cards must use FAT32 or ext4.
+
+See [microSD card](/fplinux/use/microsd/).
+
+### The system card does not start
+
+- Only targets with microSD boot support accept `--profile microsd-uboot`.
+  Check the phone checklist before selecting it.
+- The image must come from a `--profile microsd-uboot` build.
+- `FPLINUX.img.xz` must be decompressed and written to the whole card device,
+  not to a partition or copied as a file, and read back for comparison. See
+  [Prepare the card](/fplinux/guides/microsd-system-card/#prepare-the-card).
+- Start the loader with `--boot microsd` or `--profile microsd-uboot`, not
+  both. Together they stop with
+  `fplinux: --boot and --profile cannot be used together`.
+- Leave the card in the phone for the whole session.
+
+See [microSD system card](/fplinux/guides/microsd-system-card/).
+
+## Building
+
+### doctor reports a problem
+
+| Message                                                                | What to do                                                                             |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `Kern is not ready for this checkout; run ./fplinux setup`             | Run `./fplinux setup` with network access.                                             |
+| `the pinned build image is not ready; run ./fplinux setup`             | Run `./fplinux setup` with network access.                                             |
+| `Kern cannot map the package builder; configure newuidmap/newgidmap …` | Install `newuidmap` and `newgidmap` and give your user subordinate UID and GID ranges. |
+| `the build interface currently supports Linux hosts only`              | Build on a Linux PC.                                                                   |
+| `the pinned build image currently targets linux/amd64`                 | Build on an x86-64 PC.                                                                 |
+
+See [What you need](/fplinux/start/build/#what-you-need).
+
+### setup or a build fails while downloading
+
+Check the network connection and run the command again. Show the failed part
+of the last run with:
+
+```sh title="PC"
+./fplinux logs show latest --command setup --failed
+./fplinux logs show latest --command build --failed
+```
+
+A message such as `NAME SHA256 mismatch: expected …, received …` means the
+downloaded file differs from the pinned one; the file is not kept. If a
+repeated attempt fails the same way, [report it](/fplinux/help/report/).
+
+### An offline build stops
+
+`offline build requires the current pinned OCI image; run ./fplinux setup online first`.
+Run `./fplinux setup` once with network access, then build offline again. See
+[Build without network access](/fplinux/start/build/#build-without-network-access).
+
+### A build fails or the PC runs out of memory
+
+Read the failed stage with `./fplinux logs`, limit parallel jobs with
+`--jobs 1` or rebuild the build environment, as described in
+[Build FPLinux](/fplinux/start/build/#troubleshooting) and
+[Debugging](/fplinux/develop/debugging/#read-command-logs).
+
+### The disk is filling up
+
+Interrupted commands can leave staged workspaces behind. `./fplinux prune`
+lists them and `./fplinux prune --apply` removes them. See
+[Free disk space](/fplinux/start/build/#free-disk-space).
+
+## Still stuck
+
+[Report a problem](/fplinux/help/report/) with the phone, target, profile,
+build type and the complete output of the failing command.

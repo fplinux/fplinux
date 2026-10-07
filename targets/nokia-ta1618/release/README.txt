@@ -1,124 +1,58 @@
 FPLinux for Nokia 3210 4G (TA-1618)
 
-Read docs/guides/STANDALONE.md before connecting the phone. It contains the
-host requirements, USB setup, checksum, loader-first and reconnect procedures.
-This target's BootROM key is * (asterisk); hold it when the loader asks for the
-powered-off phone.
+Use an archive for this exact phone. On a Linux x86-64 PC, install Python 3.14,
+GNU coreutils, iproute2 and OpenSSH. The PC must configure a new USB network
+interface through IPv4 DHCP. Use a USB data cable.
 
-An archive containing FPLINUX.img.xz boots with a persistent microSD root.
-Prepare the system card first as described in docs/guides/MICROSD_ROOT.md.
-An archive without that image uses the volatile RAM root. Both use the same
-USB loader-first sequence and require a fresh USB load after power-off.
+From the extracted archive directory, check its files and install USB rules:
 
-The 240x320 DRM/KMS terminal supports basic use with the phone keypad.
-Image presentation and rotation return to the same terminal and shell;
-RTC-woken s2idle preserves them in USB-powered RAM sessions. Native image
-color fidelity and full optional-application behavior remain unqualified.
-Terminal operation without USB power has not been qualified.
-See docs/features/LOCAL_CONSOLE.md for terminal controls and the application
-pages under docs/apps/ for their commands and limitations.
+  sha256sum -c SHA256SUMS
+  sudo install -m 0644 ./60-fplinux.rules /etc/udev/rules.d/60-fplinux.rules
+  sudo udevadm control --reload-rules
 
-Current target support:
-  - system LCD brightness levels 0 through 10;
-  - physical keypad and keypad backlight;
-  - bounded vibration through the Linux force-feedback interface;
-  - USB SSH/SFTP and host-keyboard forwarding;
-  - Bluetooth BR/EDR pairing, bidirectional file transfer and PAN Internet in
-    both profiles, and LE keyboards and mice in the RAM profile, with firmware
-    prepared from this exact phone;
-  - manual CPU frequency selection between 768 MHz and 1 GHz;
-  - stereo S16_LE playback through the 3.5 mm headphones, with fitted gain
-    levels and the stock equalizer and automatic level control (ALC);
-  - PCM playback through the single front speaker above the display, alone or
-    together with the headphones;
-  - mono 48 kHz recording from the built-in or original wired-headset microphone,
-    including simultaneous 48 kHz playback;
-  - FM radio tuning and scan through the 3.5 mm jack, with playback through the
-    enabled audio outputs;
-  - microSD FAT32 read/write and unmounted hot-swap;
-  - external charger connection status;
-  - battery voltage, current and relative charge counter reporting with the
-    documented accuracy limits;
-  - optional per-command charge measurement through the bundled APK;
-  - hardware image rotation of RGB, grayscale and two-plane YUV images;
-  - hardware baseline JPEG decoding, fixed quality-85 JPEG encoding at
-    1200x32, 320x240, 240x320, 640x480, 1600x1200 and 1200x1600, and fixed
-    half-size NV16 scaling;
-  - rear GC2145 V4L2 camera capture at 800x600 and 1600x1200 NV16 in the
-    RAM profile; raw frames are sideways relative to portrait orientation;
-  - calibrated SoC temperature reporting without a thermal-control policy;
-  - raw auxiliary ADC readings without unit conversion;
-  - real-time clock reading, setting and one-shot alarms;
-  - s2idle in both profiles, including Bluetooth, mounted data cards and
-    card-backed swap; wake with the red handset key or an RTC alarm;
-  - battery-only power-off.
+Power the phone off and disconnect USB. Start the runner as your regular user:
 
-Headphone playback uses the `aplay` and `amixer` tools included in the image.
-Upload a two-channel signed 16-bit little-endian WAV file and use the default
-ALSA device:
+  ./runner/run.py
 
-  ./runner/run.py --reconnect --upload ./audio.wav /tmp/audio.wav
-  ./runner/run.py --reconnect --exec "amixer -c 0 cset name='Headphone Playback Volume' 3,3"
-  ./runner/run.py --reconnect --exec 'aplay /tmp/audio.wav'
+Wait until the runner asks for the powered-off phone. Then hold * (asterisk)
+and connect USB, keeping the key pressed. If connected too early, disconnect
+and restart this sequence. Exit the shell to return to the PC; Linux keeps
+running. Reconnect with:
 
-The default device converts input to the 48 kHz hardware rate. The fitted gain
-levels, equalizer and ALC come from this phone. See
-docs/features/HEADPHONE_AUDIO.md for direct-device limits, the equalizer and
-ALC switches and idle silence.
-Enable the front speaker with `Speaker Playback Switch`; see
-docs/features/SPEAKER_AUDIO.md. Set the microphone source explicitly before
-recording; see docs/features/MICROPHONE_AUDIO.md. FM needs a wired 3.5 mm cable
-as its antenna and is exclusive of PCM capture and playback; see
-docs/features/FM_RADIO.md for scan and playback commands and the tested profile.
+  ./runner/run.py --reconnect
 
-Interfaces, limits and safety procedures are bundled at:
-  - docs/features/AUXADC.md
-  - docs/features/BATTERY_TELEMETRY.md
-  - docs/features/BLUETOOTH.md
-  - docs/features/CAMERA.md
-  - docs/features/CHARGER_STATUS.md
-  - docs/features/CPU_CLOCK.md
-  - docs/features/DISPLAY_BACKLIGHT.md
-  - docs/features/FM_RADIO.md
-  - docs/features/HEADPHONE_AUDIO.md
-  - docs/features/KEYPAD_BACKLIGHT.md
-  - docs/features/MICROPHONE_AUDIO.md
-  - docs/features/MICROSD.md
-  - docs/features/POWER_OFF.md
-  - docs/features/RTC.md
-  - docs/features/SOC_TEMPERATURE.md
-  - docs/features/SPEAKER_AUDIO.md
-  - docs/features/SUSPEND.md
-  - docs/features/VIBRATION.md
-  - docs/guides/MICROSD_ROOT.md
+Shared archive procedures:
+https://fplinux.github.io/fplinux/guides/standalone-archive/
 
-This phone uses backlight device ta1618-backlight, with raw levels 0 through 20
-and initial raw level 15. Use fplinux-brightness get/set for the system scale
-0 through 10; its initial level is 7. The visible spacing of intermediate
-levels is not fully qualified. Shared interface names are sc2720-battery,
-sc2720-charger, sc2720-auxadc, ums9117-thermal, sc27xx:vibrator and UMS9117
-Headphones. IIO, thermal and input-device numbers are assigned at boot.
+If this archive contains FPLINUX.img.xz, prepare the microSD system card before
+connecting the phone. Leave that card installed throughout the session:
+https://fplinux.github.io/fplinux/guides/microsd-system-card/
+Without that image, the root filesystem is volatile RAM. A fresh USB load is
+required after power-off.
 
-Install and run the optional applications by following:
-  - docs/apps/BRIGHTNESS.md
-  - docs/apps/SHOWCASE.md
-  - docs/apps/TYRQUAKE.md
+Phone support, feature procedures and limitations:
+https://fplinux.github.io/fplinux/phones/nokia-3210-4g/
 
-Included image rotation formats and limits are described in:
-  - docs/apps/ROTATE.md
-The included JPEG codec and scaler limits are described in:
-  - docs/apps/JPEG.md
-Native image presentation formats and completion boundaries are described in:
-  - docs/apps/PRESENT.md
+Before ending a RAM session, stop programs using microSD, disable card-backed
+swap, run sync and unmount every card filesystem. With a microSD system root,
+stop applications and leave the card installed; do not unmount the root or
+cut power. Exit SSH, disconnect USB and ensure charger power is absent. Hold
+the red handset key continuously for five seconds, then wait for orderly
+shutdown to complete. This sequence requires battery power. Without a battery,
+disconnecting USB ends a RAM session once card filesystems are released.
 
-Internal phone storage writes, modem, Wi-Fi, battery level, battery temperature,
-charge control and Linux reboot are not supported. The bundled
-application guides use the shared storage interface documented in
-docs/features/MICROSD.md; this phone supports FAT32 removable data storage.
+For a system card without battery power, keep USB connected. Stop programs
+and services writing to the card, disable card-backed swap and unmount card
+filesystems except the system root. On the phone, run:
 
-Before ending a RAM-only session, follow the safe-removal procedure in
-docs/features/MICROSD.md. With a microSD system root, stop applications and leave
-the card installed; do not unmount the root or cut power. Then exit SSH,
-disconnect USB, make sure charger power is absent and hold the red handset key
-continuously for five seconds. Wait for orderly shutdown to complete. The
-refusal and recovery behavior is documented in docs/features/POWER_OFF.md.
+  sync
+  mount -o remount,ro /
+  grep ' / ' /proc/mounts
+
+The line for / must show ro. If it does not, keep the phone powered and stop
+remaining writers before retrying. Once the root is read-only, run poweroff,
+then disconnect USB. Never cut power while the system root is writable.
+
+Storage and shutdown safety:
+https://fplinux.github.io/fplinux/use/microsd/
+https://fplinux.github.io/fplinux/use/power/

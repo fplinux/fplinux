@@ -1,0 +1,115 @@
+---
+title: Screen, keypad light and vibration
+description: Change the screen brightness, control the keypad light and understand how vibration works.
+---
+
+import FeatureStatus from '../../../components/FeatureStatus.astro';
+import Key from '../../../components/Key.astro';
+
+Control the screen brightness, keypad light and vibration through the
+interfaces below. Check [support status](/fplinux/phones/#support-status)
+and your [phone page](/fplinux/phones/) before using a control; their
+availability and visible results depend on the phone.
+
+## Display
+
+The display has a fixed native size, listed on the selected
+[phone page](/fplinux/phones/). RGB565 images use two bytes per pixel and packed
+rows. The display does not scale or rotate images; prepare their size and
+orientation before using the [image tools](/fplinux/apps/#image-tools).
+
+RGB565 clients can update a damaged rectangle instead of transferring the
+whole screen. They must still supply a complete native-size framebuffer: the
+display may include adjacent pixels to align the transfer. The first frame
+after enable or wake, and a frame without damage information, transfers the
+whole image. Native NV16 presentation always transfers the whole image.
+
+A completed display transfer does not measure when the pixels become visible.
+The phone pages state the limits of each phone's visible image results.
+
+## Screen brightness
+
+<FeatureStatus feature="lcd-backlight" />
+
+Brightness uses a scale from `0` to `10`. Level `7` is selected at every boot,
+and `0` switches the backlight off. Read and change the level in a shell on the
+phone:
+
+```sh title="Phone"
+fplinux-brightness get
+fplinux-brightness set 4
+```
+
+To change it with the keypad, install the optional
+[Brightness control](/fplinux/apps/brightness/) application.
+
+The level stays in effect until the phone powers off; it is not saved for the
+next boot. The numbers are settings, not percentages or light measurements,
+and the same number can look different on different phones.
+
+Restarting the brightness service during the same boot preserves the selected
+level. Automatic screen-brightness control is not provided.
+
+An application can change the brightness temporarily while it uses the
+screen. `fplinux-brightness get` keeps reporting your level, and a level you
+set meanwhile takes effect when the application finishes.
+
+Switching off the backlight leaves the display running. Display disable and
+sleep control the complete display lifecycle. After wake or enable, the
+requested brightness is applied only after the first completed frame.
+
+:::tip[Screen is dark]
+If you set level `0`, the screen stays dark. Restore it with
+`fplinux-brightness set 7` in a shell opened
+[from your computer](/fplinux/use/connect/), or press <Key>Up</Key> in the Brightness
+application.
+:::
+
+## Keypad light
+
+<FeatureStatus feature="keypad-backlight" />
+
+By default the keypad light turns on when you press a key and turns off about
+five seconds after the last key press. Input from a connected keyboard counts
+too. Check [keypad-light support](/fplinux/phones/#support-status) for your
+phone: manual lighting and automatic lighting from physical keys can have
+different support states. The light is either on or off; it has no brightness
+levels.
+
+To switch it on or off by hand:
+
+```sh title="Phone"
+echo none > /sys/class/leds/:kbd_backlight/trigger
+echo 1 > /sys/class/leds/:kbd_backlight/brightness
+echo 0 > /sys/class/leds/:kbd_backlight/brightness
+```
+
+A light switched on this way stays on until you switch it off. To return to
+automatic behavior:
+
+```sh title="Phone"
+echo input-events > /sys/class/leds/:kbd_backlight/trigger
+```
+
+## Vibration
+
+<FeatureStatus feature="vibration" />
+
+There is no command to make the phone vibrate; applications such as
+[ARMADA](/fplinux/apps/armada/) use it. Vibration is either on or off, with no
+adjustable strength, and each vibration stops automatically after about five
+seconds at most.
+
+The [phone page](/fplinux/phones/) states whether vibration uses a motor or
+the speaker and whether it is supported. Speaker-based vibration plays a low
+tone and has additional conditions:
+
+- vibration needs [device data](/fplinux/guides/device-data/) prepared from
+  the same phone; without it, the phone does not vibrate;
+- a single continuous vibration lasts at most about three seconds;
+- headphone sound, including FM radio, is muted while the phone vibrates and
+  for about a second afterwards; speaker sound keeps playing;
+- a running recording picks up the vibration tone.
+
+Developers can find the programming interface in
+[Device interfaces](/fplinux/develop/device-interfaces/).

@@ -1,0 +1,173 @@
+---
+title: Build FPLinux
+description: Prepare a Linux PC and build an FPLinux image for your phone.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+FPLinux is built from source on your PC. One command builds a complete image
+for one phone. The next page, [Run FPLinux](/fplinux/start/run/), loads that
+image into the phone's RAM.
+
+## What you need
+
+- A Linux x86-64 PC with Python 3.14.
+- Unprivileged user namespaces, and `newuidmap` and `newgidmap` with
+  subordinate UID and GID ranges for your user.
+- Network access for the first setup and build.
+- The exact target name from your [phone page](/fplinux/phones/).
+
+Check the phone's [support status](/fplinux/phones/#support-status), boot key
+and storage limits before building. The examples below use `nokia-ta1618`;
+replace it with your phone's target.
+
+FPLinux brings its own pinned build environment and keeps it inside the
+checkout. You do not need Docker, Podman or another container engine.
+
+## Build your first image
+
+<Steps>
+
+1. Get the source:
+
+   ```sh title="PC"
+   git clone https://github.com/fplinux/fplinux.git
+   cd fplinux
+   ```
+
+2. Prepare the build environment and check the host:
+
+   ```sh title="PC"
+   ./fplinux setup
+   ./fplinux doctor
+   ```
+
+   `setup` downloads and prepares the pinned build environment. `doctor`
+   reports anything on the host that prevents a build.
+
+3. Build the image for your phone:
+
+   ```sh title="PC"
+   ./fplinux build nokia-ta1618
+   ```
+
+   A successful build reports the build directory after `output:`:
+
+   ```text title="Output"
+   build nokia-ta1618 --build-type release: OK
+   output: .cache/out/nokia-ta1618/…
+   ramboot.bin SHA256: …
+   ```
+
+</Steps>
+
+Builds use up to eight CPUs and run at a lower scheduling priority, so the
+desktop stays usable. Add `--jobs N` to change the number of parallel
+compilation jobs, or `--verbose` to watch the complete tool output. Run
+`./fplinux build --help` for all options.
+
+Each build container starts with a 2 GiB memory budget. Build processes use
+nice level 10, preserving an already lower scheduling priority.
+
+Where supported, Bluetooth, FM radio, the speaker and tuned audio levels need
+data from your own phone. A build without that data still succeeds; prepare it
+later with [Device data](/fplinux/guides/device-data/) and build again.
+
+## Choose a build
+
+Two choices change what you build:
+
+- **Boot mode.** The default build runs entirely from RAM and leaves nothing
+  behind after power-off. `--profile microsd-uboot` builds a system that keeps
+  its files on a microSD card; see
+  [microSD system card](/fplinux/guides/microsd-system-card/). It is available
+  only for targets that declare microSD boot support; check your phone's
+  [support status](/fplinux/phones/#support-status) before selecting it.
+- **Build type.** `release` is the default. `--build-type debug` adds kernel
+  diagnostics; see [Debugging](/fplinux/develop/debugging/).
+
+Use the same profile and build type in every command for that build. If you
+built with options, pass the same options to `run`, `console`, `verify`,
+`package` and `inspect`:
+
+```sh title="PC"
+./fplinux build nokia-ta1618 --build-type debug
+./fplinux run nokia-ta1618 --build-type debug
+./fplinux console nokia-ta1618 --build-type debug
+```
+
+Each combination of phone, profile and build type is kept separately. Building
+one does not replace another.
+
+The default profile uses writable RAM OverlayFS over read-only XZ-compressed
+SquashFS, with ZSTD zram. The microSD profile uses persistent ext4 and LZO-RLE
+zram. UMS9117 kernels and embedded initramfs use XZ in both build types.
+
+## Build without network access
+
+After one online build has downloaded everything it needs, you can rebuild
+offline:
+
+```sh title="PC"
+./fplinux build nokia-ta1618 --offline
+```
+
+If the build environment is missing or out of date, the offline build stops
+and asks you to run `./fplinux setup` online first.
+
+To keep the pinned downloads and build environment outside the build cache,
+or restore them into a matching checkout, use
+[Dependency snapshots](/fplinux/guides/dependencies/).
+
+## Free disk space
+
+FPLinux reuses earlier build results and removes outdated ones on its own.
+Interrupted commands can leave staged workspaces behind. List them, then
+remove them:
+
+```sh title="PC"
+./fplinux prune
+./fplinux prune --apply
+```
+
+Without `--apply`, `prune` only shows what it would remove.
+
+## What a successful build proves
+
+A successful build proves that your checkout produced a complete image. It
+does not prove that the image boots or that a feature works on a phone. The
+[support status](/fplinux/phones/#support-status) lists what works on each phone.
+
+## Troubleshooting
+
+### The build fails
+
+The command prints where its complete log is stored. To show the failed part
+of the most recent build:
+
+```sh title="PC"
+./fplinux logs show latest --command build --failed
+```
+
+See [Debugging](/fplinux/develop/debugging/) for more ways to read logs.
+
+### The host runs out of memory
+
+Limit parallel compilation:
+
+```sh title="PC"
+./fplinux build nokia-ta1618 --jobs 1
+```
+
+### The build environment looks broken
+
+Rebuild it from scratch, then check the host again:
+
+```sh title="PC"
+./fplinux setup --force
+./fplinux doctor
+```
+
+## Next step
+
+[Run FPLinux](/fplinux/start/run/) on your phone.

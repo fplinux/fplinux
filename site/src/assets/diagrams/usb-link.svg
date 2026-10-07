@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 252" role="img" aria-labelledby="usb-link-title" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', sans-serif">
+<title id="usb-link-title">The USB link between computer and phone</title>
+<defs><marker id="usb-link-arrow" viewBox="0 0 8 8" refX="2" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-arrow-head" fill="#396475"/></marker><marker id="usb-link-arrow-start" viewBox="0 0 8 8" refX="2" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" class="dg-arrow-head" fill="#396475"/></marker></defs>
+<rect x="4" y="20" width="160" height="152" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+<g transform="translate(48,42)"><rect x="0" y="0" width="72" height="48" rx="4" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/><rect x="5" y="5" width="62" height="36" rx="2" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/><path d="M36,48 L36,60" class="dg-line" fill="none" stroke="#202D35" stroke-width="1.5"/><rect x="20" y="60" width="32" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/></g>
+<text x="84" y="140" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">Computer</text>
+<text x="84" y="158" class="dg-text-muted" fill="#6E797D" font-size="12" text-anchor="middle">address is automatic</text>
+<rect x="556" y="20" width="160" height="152" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+<g transform="translate(613,32)"><rect x="0" y="0" width="46" height="84" rx="9" class="dg-box-2" fill="#EDEEEE" stroke="#6E797D" stroke-width="1.5"/><rect x="6" y="8" width="34" height="26" rx="2" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/><rect x="9" y="44" width="6" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/><rect x="20" y="44" width="6" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/><rect x="31" y="44" width="6" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/><rect x="9" y="53" width="6" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/><rect x="20" y="53" width="6" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/><rect x="31" y="53" width="6" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/><rect x="9" y="62" width="6" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/><rect x="20" y="62" width="6" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/><rect x="31" y="62" width="6" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/><rect x="9" y="71" width="6" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/><rect x="20" y="71" width="6" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/><rect x="31" y="71" width="6" height="4" rx="1" class="dg-fill-muted" fill="#6E797D"/></g>
+<text x="636" y="140" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">Phone</text>
+<text x="636" y="158" class="dg-text-muted" fill="#6E797D" font-size="12" text-anchor="middle">USB device only</text>
+<rect x="180" y="20" width="360" height="152" rx="22" class="dg-region" fill="none" stroke="#6E797D" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="360" y="40" class="dg-text-muted" fill="#6E797D" font-size="12" text-anchor="middle">One USB cable</text>
+<path d="M172,76 L548,76" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#usb-link-arrow)" marker-start="url(#usb-link-arrow-start)"/>
+<rect x="228" y="52" width="264" height="48" rx="10" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
+<text x="360" y="72" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">Private network</text>
+<text x="360" y="90" class="dg-text-small" fill="#202D35" font-size="12" text-anchor="middle">shell, commands, file copies</text>
+<path d="M164,140 L548,140" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#usb-link-arrow)"/>
+<rect x="228" y="116" width="264" height="48" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
+<text x="360" y="136" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">Keyboard bridge</text>
+<text x="360" y="154" class="dg-text-small" fill="#202D35" font-size="12" text-anchor="middle">one keyboard, computer to phone</text>
+<circle cx="684" cy="216" r="16" class="dg-line-muted" fill="none" stroke="#6E797D" stroke-width="1.5"/>
+<ellipse cx="684" cy="216" rx="6.72" ry="16" class="dg-line-muted" fill="none" stroke="#6E797D" stroke-width="1.5"/>
+<path d="M668,216 L700,216" class="dg-line-muted" fill="none" stroke="#6E797D" stroke-width="1.5"/>
+<path d="M670.64,207.2 L697.36,207.2" class="dg-line-muted" fill="none" stroke="#6E797D" stroke-width="1.5"/>
+<path d="M670.64,224.8 L697.36,224.8" class="dg-line-muted" fill="none" stroke="#6E797D" stroke-width="1.5"/>
+<path d="M670,202 L698,230" class="dg-arrow-danger" fill="none" stroke="#BA1A1A" stroke-width="2"/>
+<text x="658" y="212" class="dg-text-small dg-text-danger" fill="#BA1A1A" font-size="12" text-anchor="end">No Internet over USB</text>
+<text x="658" y="228" class="dg-text-muted" fill="#6E797D" font-size="12" text-anchor="end">for Internet, use Bluetooth PAN</text>
+</svg>

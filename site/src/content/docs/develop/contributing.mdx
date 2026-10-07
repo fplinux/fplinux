@@ -1,0 +1,180 @@
+---
+title: Contributing
+description: Format, check and test a change, and write a commit message FPLinux accepts.
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+
+Start from a working build; see [Build FPLinux](/fplinux/start/build/). The
+commands below run in the same pinned environment as the build, so you do not
+install formatters or linters yourself. Code follows the
+[code style](/fplinux/develop/code-style/), and messages from the kernel, loader
+and phone programs follow the [logging contract](/fplinux/develop/logging/).
+
+## Where the code is
+
+The source is on [GitHub](https://github.com/fplinux/fplinux). These directories
+separate shared code from platform and phone data:
+
+<FileTree>
+- platforms/
+  - ums9117/ code shared by every UMS9117 phone: kernel drivers, Devicetree and the loader flow
+- targets/
+  - nokia-ta1618/ one directory per phone model: board data, display, keypad and status
+- alpine/
+  - aports/ the phone's packages and applications, one directory each
+- bootstrap/ reusable components that run before Linux starts
+- common/ tools shared by every phone, such as the archive runner and the USB keyboard client
+- profiles/ boot modes, such as the microSD system card
+- include/
+  - fplinux/ public headers shared by host and phone components
+- lib/
+  - fplinux/ reusable C components for host and phone programs
+- scripts/
+  - fplinux_cli/ the `./fplinux` command
+    - cli/ command parsing and dispatch
+    - build/ target build stages
+    - alpine/ phone package builds and root filesystem composition
+    - runtime/ phone sessions, transfers and NAND backups
+    - quality/ formatting, source checks and test execution
+    - dependencies/ external input snapshots
+- tests/
+</FileTree>
+
+Pages that describe a phone, an application or a feature link to their source
+directory under the page title.
+
+## Format the files you changed
+
+```sh title="PC"
+./fplinux format scripts/fplinux_cli/cache/prune/operations.py common/host/fplinux-usb-keyboard.c
+```
+
+Pass each file you edited as a path relative to the checkout. The command does
+not walk directories. It refuses files that have no project formatter instead
+of guessing one. Tracked and non-ignored untracked sources are accepted.
+Selected files are formatted together; if any formatter fails, the command
+leaves them unchanged. The [source-format contract](/fplinux/develop/code-style/formats/)
+describes ordering, templates and format-specific limits.
+
+Declared Linux patches are accepted too. Their affected C and header regions
+use the pinned Linux formatting tools; other patch contents are retained.
+This needs the pinned Linux source archive and downloads it if missing.
+Containerfiles, ordinary plain text and other patch series have no formatter
+and are rejected.
+
+## Run the quality gate
+
+Before you commit or submit a change, run the complete gate without reusing
+earlier results:
+
+```sh title="PC"
+./fplinux check --no-cache
+```
+
+While you work, run only the parts you need. `--list` shows them:
+
+```sh title="PC"
+./fplinux check --list
+./fplinux check python
+```
+
+On a PC with little memory, check the kernel configurations one at a time:
+
+```sh title="PC"
+./fplinux check --no-cache --jobs 1
+```
+
+An ordinary build or RAM load without source changes does not need the gate.
+
+## Run tests
+
+Run pytest workloads by a dotted module, class or test name, a pytest node
+selector, or one tier:
+
+```sh title="PC"
+./fplinux test tests.small.workspace.test_snapshot
+./fplinux test 'tests/small/workspace/test_snapshot.py::WorkspaceSnapshotTests::test_snapshot_recipe_includes_file_mode'
+./fplinux test --tier small
+```
+
+The tiers are `small`, `host_process`, `host_tool`, `artifact` and
+`public_workflow`. Without a selection, all five run in that order.
+Node selectors use `path.py::Class::method` or `path.py::test_function`; append
+`[case-id]` to select a parameterized case, and quote brackets in the shell.
+`--verbose` shows individual test names and streams output; `--failfast`
+stops on the first failure or error.
+
+Tests run against a captured source snapshot. Most run with read-only sources
+and no network access in the pinned environment. Source-cache ownership and
+image-publication metadata tests run on the host with real subordinate UID/GID
+mappings and the same locked Python dependencies. They require the namespace
+support used by `setup`; unavailable mappings fail instead of skipping tests.
+
+A selected run always executes and does not refresh a successful `check`
+result or replace `./fplinux check`. Exit status is `0` for success, `1` for
+failures or unresolved names, `2` for invalid arguments and `5` when pytest
+finds no tests. Ctrl+C returns `130`.
+
+## Update Alpine package checksums
+
+After you change a source file of an Alpine package under `alpine/aports/`,
+regenerate its checksums:
+
+```sh title="PC"
+./fplinux checksum fplinux-terminal
+```
+
+This is the only supported way to update them. Do not run `abuild checksum` in
+the checkout or edit digest lines by hand. Add `--offline` to reuse sources
+that are already downloaded.
+
+## Write the commit message
+
+`./fplinux setup` installs the repository's commit-message hook. Messages use
+`type(scope): subject`, then a blank line and a body that explains the change:
+
+```text title="Commit message"
+type(scope): subject
+
+Explain what changed and why.
+```
+
+For example, the subject `perf(ums9117): enable NEON and reduce codec overhead`
+uses type `perf` and scope `ums9117`. The scope and the body are required.
+Accepted scopes are listed in `commitlint.config.mjs`.
+
+## Preview this site
+
+The documentation site lives in `site/` and uses Node.js `24.21.0` and npm
+`12.2.0`. Install the locked site tools once, then start a local preview that
+reloads as you edit:
+
+```sh title="PC"
+cd site
+npm ci
+npm run dev
+```
+
+Pages are in `site/src/content/docs/`. Run these commands from `site/` before
+submitting a documentation change:
+
+```sh title="PC"
+npm run format
+npm run check
+npm run build
+```
+
+Ultracite supplies the Oxlint, Astro ESLint, Prettier and Stylelint presets. `format` formats
+site code, styles, MDX and JSON; it preserves code examples and asset files.
+`check` checks formatting, lints JavaScript and TypeScript with Oxlint, checks
+Astro components with ESLint, and checks CSS including component styles. It
+then runs Astro's type checks. `build` renders the
+pages and checks internal links. MDX content is parsed during formatting and
+the build.
+
+The site tools are separate from `./fplinux format` and `./fplinux check`.
+The source gate checks maintained Markdown and repository-local links; run
+`npm run check` and `npm run build` for the site components, sidebar and page
+links. [Dependency snapshots](/fplinux/guides/dependencies/) save the locked
+npm archives, but do not install Node.js, npm or `site/node_modules`.

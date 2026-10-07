@@ -1,0 +1,79 @@
+---
+title: New-phone checklist
+description: Check an exact phone variant before choosing it and track what has been established while bringing it up.
+---
+
+Use this checklist when considering an unlisted phone or recording the support
+of a new target. The [feature overview](/fplinux/features/) describes FPLinux's
+interfaces; an existing [phone checklist](/fplinux/phones/) shows the level of
+detail to record for one exact model.
+
+## Before choosing a phone
+
+- Establish the exact model and hardware variant. A similar product name or
+  case does not identify the board.
+- Establish the platform. The current bring-up workflow supports UMS9117;
+  another chip needs its own platform work.
+- Identify the features you need and what is known about their physical
+  presence. Record uncertain hardware as **Unknown**.
+- Check whether an exact target already exists. Use its checklist and limits
+  when choosing a supported model.
+- For an unlisted model, expect to establish the boot key, USB RAM-loading
+  path and board data. The same chip does not establish the same display,
+  keypad, camera, power controls or working driver support.
+
+## Establish the first RAM session
+
+Follow [Bring up a new phone](/fplinux/porting/bring-up/) for the complete
+commands and connection order. Record whether these steps complete:
+
+- [ ] Create a target for the exact model.
+- [ ] Build the headless RAM image.
+- [ ] Enter BootROM with the phone's confirmed boot key.
+- [ ] Load Linux and reach its authenticated USB session.
+- [ ] Identify the NAND without guessing its geometry.
+- [ ] Save a complete read-only NAND backup.
+- [ ] Prepare board maps and read the unresolved fields in the board report.
+
+A completed USB session establishes access to the running system. It does not
+establish the screen, keypad, sound or any other peripheral.
+
+## Record support by function
+
+Use the same groups as the phone checklists: startup and access, display and
+input, audio, Bluetooth and networks, camera and images, storage, power and
+sensors, and applications. Give each function its own support state and short
+limitation. For example, pairing, file transfer, PAN, A2DP and keyboard input
+are separate Bluetooth checks; built-in and headset microphones are separate
+audio checks.
+
+Use **Verified**, **Partial**, **Not tested** and **Unsupported** as defined in
+the [support legend](/fplinux/phones/#support-status). Keep hardware presence
+separate from these states. A successful build cannot change **Not tested**
+into **Verified**.
+
+For a result that depends on conditions, state those conditions: RAM or microSD
+profile, battery or USB power, internal or headset microphone, receiver type,
+camera mode or mounted filesystem. A check of one condition does not establish
+the others. Record what still needs checking under **Partial**.
+
+Use the [shared feature guides](/fplinux/features/) for supported operations
+and the [phone's safe shutdown rules](/fplinux/use/power/) between sessions.
+Do not use an unqualified persistent-write or power-off path to complete a
+checklist item.
+
+## Share the result
+
+Update the website's support data with the result and its practical limits.
+Keep detailed command output locally; a support page should tell the
+reader what works and how to use it safely.
+
+`site/src/data/support.json` owns the phone's support states. Those entries
+supply the phone checklists and comparison;
+shared guides describe the procedures. Add a phone page for its boot key,
+controls, storage and safe way to end the session.
+
+For the initial report, follow [Report a problem](/fplinux/help/report/) and
+the new-phone form. Do not attach the NAND backup or prepared phone firmware.
+Feature checks do not establish a release: an exact executable payload needs
+the separate [archive qualification](/fplinux/develop/packaging/#release-archives).

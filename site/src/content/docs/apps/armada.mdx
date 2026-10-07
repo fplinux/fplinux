@@ -1,0 +1,68 @@
+---
+title: 'FPLinux: ARMADA'
+description: A 3D showcase in which the screen, LCD brightness, keypad light and vibration follow one timeline.
+source:
+  - alpine/aports/fplinux-showcase
+---
+
+import PhoneScreen from '../../../components/PhoneScreen.astro';
+import armada from '../../../assets/screens/armada.png';
+import FeatureStatus from '../../../components/FeatureStatus.astro';
+import Key from '../../../components/Key.astro';
+
+FPLinux: ARMADA is a showcase for the phone. It renders a 3D scene on the phone
+itself, while the LCD brightness, the keypad light and the vibrator follow the
+same timeline. One cycle of the presentation lasts 38 seconds; it repeats until
+you exit.
+
+<FeatureStatus feature="fplinux-armada" />
+
+Check [phone support status](/fplinux/phones/#support-status) for the physical
+effects available on your phone.
+
+<PhoneScreen src={armada} alt="ARMADA scene: the FPLINUX title above water on a 240×320 screen" caption="ARMADA at 240×320." />
+
+## Install and start
+
+Install `fplinux-showcase.apk` as described in
+[Packages](/fplinux/guides/packages/). In the default RAM profile, it lasts
+until shutdown; on a microSD system card, it stays installed until you remove
+it. Follow the [system-card shutdown rules](/fplinux/use/power/) before cutting
+power. Start the application in the local terminal or from the PC, as described
+in [Start an application](/fplinux/apps/):
+
+```sh title="Phone"
+fplinux-showcase
+```
+
+To stop on its own after a number of complete cycles, pass `--runs`:
+
+```sh title="Phone"
+fplinux-showcase --runs 1
+```
+
+The application needs a `240×320` or `128×160` display, the right soft key, the
+system brightness service, the keypad light and the vibrator. If one of them is
+missing, it does not start and names the missing part.
+
+## What you see and feel
+
+Daylight and LCD brightness change throughout the presentation. The keypad
+light and the vibrator switch on and off in time with the scene; their pulse
+timing changes, not their intensity. During the hardware act, the keypad light
+and the vibrator spell `FPLINUX` in Morse code while the matching letter pulses
+on the screen. The cycle ends with two seconds of water after the letters sink.
+
+There is no soundtrack. On phones that vibrate through the speaker, its low
+vibration tone can be audible; see [Vibration](/fplinux/use/display-and-lights/#vibration).
+
+## Exit
+
+Press <Key>Right soft</Key> at any time. The display returns to the terminal, the
+LCD returns to your brightness level, including a level you changed while the
+presentation ran, the keypad light returns to its level before the start, and
+the vibration stops.
+
+After it exits, the application prints one line of figures for the run: the
+number of completed cycles, the frames shown, frame rates and frame times, its
+CPU use and its peak memory.

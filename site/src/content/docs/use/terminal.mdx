@@ -1,0 +1,152 @@
+---
+title: Phone terminal
+description: Type commands on the phone's own screen and keypad.
+source:
+  - alpine/aports/fplinux-terminal
+---
+
+import { Steps } from '@astrojs/starlight/components';
+import PhoneScreen from '../../../components/PhoneScreen.astro';
+import terminalKeypad from '../../../assets/screens/terminal-keypad.png';
+import terminalMenu from '../../../assets/screens/terminal-menu.png';
+import terminalModifiers from '../../../assets/screens/terminal-modifiers.png';
+import FeatureStatus from '../../../components/FeatureStatus.astro';
+import Figure from '../../../components/Figure.astro';
+import KeypadTerminal from '../../../assets/diagrams/keypad-terminal.svg';
+import Key from '../../../components/Key.astro';
+
+FPLinux starts a graphical terminal with a root Bash shell on the phone's
+screen. On phones with supported keypad input, you type with multi-tap, as
+when writing a text message on a feature phone. Bash provides command editing,
+completion, history and reverse search, and the terminal keeps scrollback.
+
+<FeatureStatus feature="local-console" />
+
+Check [local terminal and keypad support](/fplinux/phones/#support-status)
+for your phone. If keypad input has not been tested, use the
+[USB shell](/fplinux/use/connect/) for control.
+
+For a full keyboard and copy-and-paste, open a shell from your computer
+instead; see [Connect from a computer](/fplinux/use/connect/).
+
+<PhoneScreen src={terminalKeypad} alt="Phone terminal with shell output, a prompt with a pending multi-tap letter and the status line" caption="The terminal at 240×320: a pending multi-tap letter at the cursor and the status line with Menu, input mode, language and History." />
+
+## Type with the keypad
+
+Press a digit key repeatedly to choose a character, then pause or press
+another digit to commit it. <Key>1</Key> gives punctuation and <Key>0</Key> gives a space. The
+pending character appears at the cursor. The bottom line shows the language,
+the input mode and what the soft keys do.
+
+| Key                       | Action                                                             |
+| ------------------------- | ------------------------------------------------------------------ |
+| Digits                    | Multi-tap text, or digits in `123` mode                            |
+| <Key>\*</Key>             | Switch between `abc` and `ABC`                                     |
+| Hold <Key>\*</Key>        | Switch between `123` and letters                                   |
+| <Key>#</Key>              | Cancel a pending character, otherwise Backspace                    |
+| Hold <Key>#</Key>         | Clear the whole command line at the Bash prompt                    |
+| <Key>Left soft</Key>      | Open the menu, or select its highlighted item                      |
+| Hold <Key>Left soft</Key> | Open the modifier strip                                            |
+| <Key>Right soft</Key>     | Back in menus; otherwise clear modifiers or enter/leave scrollback |
+| <Key>Centre</Key>         | Enter, or select a menu item                                       |
+| <Key>Dial</Key>           | Tab completion                                                     |
+| D-pad                     | Arrow keys; move in the menu or scrollback when open               |
+
+A short <Key>\*</Key> also changes the case of the pending character before it is
+committed. Holding <Key>#</Key> does not clear input inside a running program, only the
+Bash command line. The <Key>Red</Key> key is reserved for
+[sleep and power-off](/fplinux/use/power/).
+
+<Figure caption="Keypad map in the terminal" width="32rem"><KeypadTerminal /></Figure>
+
+## Menu
+
+Press the <Key>Left soft</Key> key to open the menu. Move with <Key>Up</Key> and <Key>Down</Key>,
+select with <Key>Centre</Key> or the <Key>Left soft</Key> key, and go back with the <Key>Right soft</Key> key.
+
+- **Modifiers** opens the modifier strip (see below).
+- **Symbols...** types a literal symbol.
+- **Special keys...** sends Escape or F1 to F12.
+- **Language: EN/RU...** selects English or Russian multi-tap.
+- **Interrupt Ctrl+C**, **End input Ctrl+D** and **Search Ctrl+R** send those
+  shortcuts.
+- **Help** explains typing, modifiers and history on the phone. <Key>Left</Key> and
+  <Key>Right</Key> switch between its sections; <Key>Up</Key> and <Key>Down</Key> scroll.
+- **Diagnostic console** switches to the kernel console (see below).
+
+A pending character and armed modifiers stay intact while the menu is open.
+
+<PhoneScreen src={terminalMenu} alt="Terminal menu with Modifiers highlighted" caption="The terminal menu, opened with the left soft key." />
+
+## Ctrl, Alt and Shift
+
+Hold the <Key>Left soft</Key> key for about half a second and release it to open
+the modifier strip above the status line. Choose Ctrl, Alt or Shift with <Key>Left</Key> and <Key>Right</Key> and toggle the selection with <Key>Centre</Key>, or press <Key>1</Key>, <Key>2</Key> or <Key>3</Key> to toggle Ctrl, Alt or Shift directly. Several modifiers can be combined.
+
+Press the <Key>Left soft</Key> key (**Done**) to arm the combination for the next key. It
+applies when the next multi-tap character is committed, or to the next digit,
+arrow, Enter, Backspace, Tab or menu key such as F1 to F12. The <Key>Right soft</Key> key
+cancels or clears the combination.
+
+For example, to send Ctrl+A: hold and release the <Key>Left soft</Key> key, press <Key>1</Key>, press the <Key>Left soft</Key> key, then press <Key>2</Key> once and wait for the character to
+commit.
+
+<PhoneScreen src={terminalModifiers} alt="Modifier strip with Ctrl selected and the soft keys Done and Cancel" caption="The modifier strip with Ctrl selected." />
+
+## Scrollback
+
+Press the <Key>Right soft</Key> key, with no menu open and no modifiers armed, to
+scroll back through earlier output. <Key>Up</Key> and <Key>Down</Key> move one line, <Key>Left</Key> and <Key>Right</Key> move one page. Press the <Key>Right soft</Key> key again,
+or start typing, to return to live output. On a keyboard, use <Key>Shift</Key>+<Key>PageUp</Key> and <Key>Shift</Key>+<Key>PageDown</Key>.
+
+## Keyboards
+
+[Bluetooth keyboards](/fplinux/use/bluetooth/) and your computer's keyboard
+through the [keyboard bridge](/fplinux/use/connect/) type alongside the
+keypad. A keyboard uses its own modifier keys. Its F13 and F14 keys stay
+ordinary function keys; they do not act as the phone's soft keys.
+
+### Russian keyboard layout
+
+The keypad's multi-tap language is chosen in the menu. Keyboards use the US
+layout by default. To type Russian on a keyboard:
+
+<Steps>
+
+1. Install the optional `fplinux-xkb-ru` package, as described in
+   [Optional packages](/fplinux/guides/packages/).
+
+2. The terminal reads the installed layouts when it starts. Restart it with
+   `rc-service fplinux-terminal restart` in a shell opened
+   [from your computer](/fplinux/use/connect/); this also starts a new shell
+   on the phone screen.
+
+3. Press <Key>Alt</Key>+<Key>Shift</Key> to switch between US and Russian.
+
+</Steps>
+
+At most three layouts can be installed beside US. With more, the terminal
+refuses to start and names the problem.
+
+## Diagnostic console
+
+The **Diagnostic console** menu item, or <Key>Ctrl</Key>+<Key>Alt</Key>+<Key>F1</Key> on a keyboard, switches
+to the kernel's text console. Press and release the <Key>Right soft</Key> key to return
+to the terminal with your command line intact; the diagnostic console shows
+this shortcut. In a shell opened from your computer, `chvt 2` also returns
+to the terminal.
+
+## Fonts and input state
+
+The system installs one Terminus size: 6×12 below 200 pixels wide, or 8×16
+on wider displays. `/usr/share/fplinux/fonts/default.psf` selects that size.
+The terminal, brightness control and showcase share it; the application bundle
+contains no font APK. `fplinux-terminal --font PATH` selects another PSF2 font
+already present on the phone. A default font with the wrong cell size is rejected.
+
+In `123` mode, a short _ returns to letters with the opposite remembered case;
+holding _ for about 650 ms changes digit/letter mode without changing that case.
+Menu navigation and case changes leave armed modifiers intact. An external
+keyboard uses its own modifiers and consumes an armed phone combination only
+if it first commits a pending phone character. Leaving the graphical terminal
+clears pending input and modifiers.

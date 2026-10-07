@@ -84,29 +84,6 @@ _ISSUE_ATTRIBUTE_FIELDS = (
     "render",
     "options",
 )
-_MKDOCS_FIELDS = (
-    "site_name",
-    "site_description",
-    "site_author",
-    "copyright",
-    "site_url",
-    "repo_name",
-    "repo_url",
-    "edit_uri",
-    "docs_dir",
-    "site_dir",
-    "use_directory_urls",
-    "strict",
-    "validation",
-    "theme",
-    "extra",
-    "extra_css",
-    "extra_javascript",
-    "markdown_extensions",
-    "plugins",
-    "nav",
-    "not_in_nav",
-)
 
 
 def _field_order(relative: str, path: tuple[str, ...]) -> tuple[str, ...]:  # noqa: PLR0911 - Distinct document owners.
@@ -126,8 +103,6 @@ def _field_order(relative: str, path: tuple[str, ...]) -> tuple[str, ...]:  # no
             return _ISSUE_ITEM_FIELDS
         if path == ("body", "*", "attributes"):
             return _ISSUE_ATTRIBUTE_FIELDS
-    if relative == "mkdocs.yml" and not path:
-        return _MKDOCS_FIELDS
     return ()
 
 

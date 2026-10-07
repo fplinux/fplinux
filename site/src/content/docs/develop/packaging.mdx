@@ -1,0 +1,95 @@
+---
+title: Packaging
+description: Package a build as a standalone archive, inspect artifacts and measure image size.
+---
+
+`./fplinux package` turns an existing build into a ZIP archive that runs on a
+Linux x86-64 PC without a source checkout. Users of the archive follow
+[Standalone archive](/fplinux/guides/standalone-archive/).
+
+## Create a phone-test candidate
+
+```sh title="PC"
+./fplinux build nokia-ta1618
+./fplinux package nokia-ta1618 --candidate
+```
+
+```text title="Output"
+FPLinux release-candidate package: .cache/out/candidates/FPLinux-nokia-ta1618-release-candidate-linux-x86_64-….zip
+Archive SHA256: …
+Phone-test payload SHA256: …
+ramboot.bin SHA256: …
+```
+
+Packaging uses the current build and does not rebuild it. If the source has
+changed since that build, it stops and prints the `build` command to run. Pass
+the same profile and build type as the build.
+
+A candidate contains `CANDIDATE-NOTICE.txt` and is meant only for testing on
+the phone. Do not publish it as a release. Creating or checking a candidate
+does not show that the phone boots or that any feature works.
+
+For a [microSD system card](/fplinux/guides/microsd-system-card/), build that
+profile and package it as a candidate; the archive then also contains
+`FPLINUX.img.xz`:
+
+```sh title="PC"
+./fplinux build nokia-ta1618 --profile microsd-uboot
+./fplinux package nokia-ta1618 --boot microsd --candidate
+```
+
+## Release archives
+
+A release archive needs a phone test of the exact executable payload: the
+runtime files and the bundled APKs. After a candidate passes on the phone, its
+`Phone-test payload SHA256` is recorded for that target in
+`releases.lock.toml`. Only then does `./fplinux package nokia-ta1618` (without
+`--candidate`) write a release archive below `.cache/out/releases/`; otherwise
+it refuses. Documentation, notices and checksums are outside the payload, so
+changing them does not need a new phone test, but any change to the payload
+does. No payload is recorded yet, so no release archive can be created. The
+microSD system card is packaged only as a candidate.
+
+An archive contains the image, the host tools and runner, the optional APKs,
+the USB rules, the target's `README.txt`, license notices, the
+build manifest and `SHA256SUMS`. It contains no build trees, caches or kernel
+debug files.
+
+## Inspect artifacts
+
+```sh title="PC"
+./fplinux inspect bundle nokia-ta1618
+./fplinux inspect archive .cache/out/candidates/FPLinux-nokia-ta1618-….zip
+./fplinux inspect apk path/to/package.apk
+```
+
+- `bundle` lists the current build's identity, files, sizes and SHA-256
+  hashes and checks them against its build manifest. It does not check
+  whether the source has changed since that build.
+- `archive` lists a candidate or release ZIP and checks every file against its
+  `SHA256SUMS`. This shows that the archive is internally consistent, not that
+  it is authentic or works on a phone.
+- `apk` shows a package's metadata and file list. It does not install the
+  package, run its scripts or verify its signature.
+
+None of them needs the build environment or a phone.
+
+## Measure image size
+
+`inspect footprint` measures the current build without rebuilding it. To see
+what a change does to the image, save a report before and after rebuilding,
+then compare them:
+
+```sh title="PC"
+./fplinux inspect footprint nokia-ta1618 --json > before.json
+# change the source and rebuild
+./fplinux inspect footprint nokia-ta1618 --json > after.json
+./fplinux inspect footprint-diff before.json after.json
+```
+
+The report lists the boot files, kernel, compressed and unpacked root
+filesystem, optional APKs and host debug files separately. These layers
+overlap, so their sum is not a meaningful total. A package's size counts the
+files it owns, not its dependencies, installed disk usage or RAM use. The diff
+also reports whether the root filesystem content is identical; a smaller
+compressed image alone does not mean less userspace or lower memory use.

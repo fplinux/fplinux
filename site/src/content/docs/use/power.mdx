@@ -1,0 +1,225 @@
+---
+title: Power, sleep and battery
+description: End a session without losing data, put the phone to sleep, keep the clock right and read charger and battery values.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+import FeatureStatus from '../../../components/FeatureStatus.astro';
+import Figure from '../../../components/Figure.astro';
+import EndSession from '../../../assets/diagrams/end-session.svg';
+import Key from '../../../components/Key.astro';
+
+## End the session safely
+
+How you end a session depends on where your files are, how the phone is
+powered and its [power-off support](/fplinux/phones/#support-status). In every
+case, files in RAM, such as `/tmp`, are lost: copy anything you need to your
+computer or a card first.
+
+| Situation                                             | What to do                                                                                                    |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| RAM boot, no battery                                  | [Release data cards](#release-data-cards), then unplug USB.                                                   |
+| RAM boot, battery installed                           | Release data cards, then use the shutdown or battery-removal sequence on your [phone page](/fplinux/phones/). |
+| microSD system card, supported battery-only power-off | [Power off with the red key](#power-off-with-the-red-key).                                                    |
+| microSD system card, any other supported power setup  | [Shut down while on USB power](#shut-down-a-system-card-on-usb-power).                                        |
+
+Without a battery, unplugging USB cuts power immediately. Do not assume that
+`poweroff` can turn off a phone running on battery: use only the termination
+sequence documented for that phone and profile.
+
+<Figure caption="Which way to end the session"><EndSession /></Figure>
+
+### Release data cards
+
+If a microSD card is mounted for data, stop the programs that use it, turn
+off any swap on it and unmount it, as described in
+[Remove the card safely](/fplinux/use/microsd/). Do not unplug USB or remove
+the battery while a data card is mounted.
+
+### Power off with the red key
+
+<FeatureStatus feature="power-off" />
+
+Use this sequence only when your [phone page](/fplinux/phones/) lists
+battery-only power-off as supported for the current profile.
+
+<Steps>
+
+1. Release data cards as described above. With a microSD system card, skip
+   this step; shutdown takes care of the system card.
+
+2. Unplug the USB cable and make sure no charger is connected. The phone
+   refuses to power off while it detects charger power.
+
+3. Hold the <Key>Red</Key> key for five seconds.
+
+</Steps>
+
+A short press of the <Key>Red</Key> key does not power off; releasing it before five
+seconds cancels the request. The key works even while the terminal or a game
+uses the keypad.
+
+With a system card, Linux stops its services, writes pending data and makes
+the card read-only before the phone turns off. If shutdown cannot start, the
+phone stays on instead of cutting power. Wait until the phone is off before
+you remove the card.
+
+### Shut down a system card on USB power
+
+Use this procedure with a supported microSD system-card profile when the
+phone cannot use the battery-only sequence above. Unplugging USB alone, or
+a plain `poweroff`, does not make the system card safe.
+
+<Steps>
+
+1. Keep the USB cable connected. Stop the programs and services that write to
+   the card, turn off any swap on the card and unmount every card filesystem
+   except the system root.
+
+2. Write pending data and make the system root read-only:
+
+   ```sh title="Phone"
+   sync
+   mount -o remount,ro /
+   ```
+
+3. Check that the root is now read-only. The line for `/` must show `ro`:
+
+   ```sh title="Phone"
+   grep ' / ' /proc/mounts
+   ```
+
+   If the remount failed, stop the remaining programs that write to the card
+   and repeat step 2. Keep the phone powered until it succeeds.
+
+4. Shut down and unplug the cable:
+
+   ```sh title="Phone"
+   poweroff
+   ```
+
+</Steps>
+
+### Return to the phone's own firmware
+
+After the phone is off, start it normally, without holding the boot key, to
+use its own firmware.
+Linux reboot is not supported: every FPLinux start needs a new load over USB,
+as described in [Run FPLinux](/fplinux/start/run/).
+
+## Sleep
+
+<FeatureStatus feature="suspend" />
+
+Sleep preserves the session in RAM while the screen and USB are off and
+programs are paused. Before sleeping, check that your
+[phone page](/fplinux/phones/) supports sleep in the current profile and
+lists a wake source you can use. Put the phone to sleep from a root shell:
+
+```sh title="Phone"
+echo freeze > /sys/power/state
+```
+
+Wake it with a supported power-key action or a
+[clock alarm](#clock-and-alarms), as listed on the phone page. Ordinary keypad
+keys do not wake the phone, and keys pressed during sleep are lost. After
+waking, the screen turns on again if it was on before, and USB reconnects;
+open a new shell as described in
+[Connect from a computer](/fplinux/use/connect/).
+
+- Keep any microSD card installed during sleep. A mounted card, swap on a card
+  and a system card can stay in use only in target, profile and filesystem
+  combinations documented as supported on the phone page.
+- Sleep is not a way to remove a card or end the session.
+- An active vibration stops and does not resume after waking.
+- The phone cannot sleep while the [FM receiver](/fplinux/use/fm-radio/) is
+  on, or while a [Bluetooth](/fplinux/use/bluetooth/) connection is active.
+- This light sleep keeps the processor and memory powered, so it saves less
+  power than a full suspend. Full suspend to RAM is not supported.
+
+## Clock and alarms
+
+<FeatureStatus feature="real-time-clock" />
+
+Each time `./fplinux run` or a standalone archive starts a new session, it
+sets the phone's clock to your computer's current time in UTC and prints the
+result. Reconnecting to a running session does not change the clock. The
+phone has no time zones; its clock and its battery-backed clock both hold UTC.
+
+The battery-backed clock is updated only when its time cannot be read. To
+store the current time in it:
+
+```sh title="Phone"
+hwclock -u -w -f /dev/rtc0
+```
+
+The clock covers 1980 to 2099. It can lose its time while the battery is out,
+so check it before relying on it.
+
+Where RTC wake is supported for your phone and profile, set an alarm before
+sleeping. This example wakes after 60 seconds; writing `0` first clears an
+alarm that is already set:
+
+```sh title="Phone"
+echo 0 > /sys/class/rtc/rtc0/wakealarm
+echo +60 > /sys/class/rtc/rtc0/wakealarm
+echo freeze > /sys/power/state
+```
+
+An alarm fires once. It keeps its absolute time if you change the clock, and
+an alarm that the clock skips over fires once. Alarms cannot switch on a phone
+that is powered off.
+
+## Charger and battery
+
+<FeatureStatus feature="charger-status" />
+<FeatureStatus feature="battery-telemetry" />
+
+Check whether charger power is connected (`1`) or not (`0`):
+
+```sh title="Phone"
+cat /sys/class/power_supply/sc2720-charger/online
+```
+
+This shows that power is connected, not that the battery is charging.
+FPLinux does not show a battery percentage and does not control charging. The
+battery voltage, current and a relative charge counter are available where
+battery telemetry is supported; their names and units are listed in
+[Device interfaces](/fplinux/develop/device-interfaces/). Their accuracy has
+not been checked against a measuring instrument.
+
+Check the [phone page](/fplinux/phones/) for battery-telemetry support and
+the power setup in which it has been tested. The charge measurement helper
+requires an enabled fuel gauge and a battery installed.
+
+### Measure the energy a command uses
+
+On a phone with supported battery telemetry, the optional `fplinux-charge`
+package runs one command and reports how much charge entered or left the
+battery meanwhile. Install it as described in
+[Optional packages](/fplinux/guides/packages/), then run:
+
+```sh title="Phone"
+fplinux-charge -- sleep 60
+```
+
+When the command finishes, `fplinux-charge` prints the elapsed time, the
+charge change in µAh and the average current in µA. Negative values mean the
+battery discharged. Put the command to measure after `--`; run
+`fplinux-charge --help` for the options.
+
+### Charger source classification
+
+`/sys/class/power_supply/sc2720-charger/usb_type` marks the detected source in
+brackets: `SDP` for a standard downstream port, `CDP` for a charging downstream
+port and `DCP` for a dedicated charging port. `Unknown` means no input,
+incomplete detection or no single reported type. Reading it does not start
+detection or establish available power, permitted current or actual charging.
+
+### Charge helper command boundary
+
+`fplinux-charge --counter PATH -- COMMAND` selects a counter explicitly;
+`--counter` may appear once and `--` is required. The helper preserves the
+command's exit or signal result when the final measurement succeeds. If the
+final measurement fails, it prints no metrics and returns `125` for a successful
+command; otherwise it preserves the command's failure or signal result.

@@ -1,0 +1,112 @@
+---
+title: FPLinux
+description: Open-source Linux for keypad phones built on the Unisoc UMS9117.
+template: splash
+hero:
+  tagline: 'Root on a keypad.<span class="sub">Open-source Linux for keypad phones.</span>'
+  actions:
+    - text: Get started
+      link: /fplinux/start/build/
+      icon: right-arrow
+      variant: primary
+    - text: Supported phones
+      link: /fplinux/phones/
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkButton } from '@astrojs/starlight/components';
+import CtaBand from '../../components/CtaBand.astro';
+import PhoneCards from '../../components/PhoneCards.astro';
+import PhoneScreen from '../../components/PhoneScreen.astro';
+import armada from '../../assets/screens/armada.png';
+import brightness from '../../assets/screens/brightness.png';
+import terminalMenu from '../../assets/screens/terminal-menu.png';
+
+FPLinux is an open-source Linux system for keypad phones built on the Unisoc
+UMS9117 chip. It drives the phone's screen and keypad and, depending on the
+phone, its sound, FM radio, Bluetooth and microSD card, and it gives you a real
+shell on the phone and from your computer.
+
+## Pick your phone
+
+<PhoneCards />
+
+## How it works
+
+<div class="fp-grid-3">
+	<Card title="1. Build" icon="laptop">
+		Build FPLinux for your phone on a Linux PC.
+		[Build FPLinux](/fplinux/start/build/)
+	</Card>
+	<Card title="2. Start" icon="mobile-android">
+		Start the loader, then connect the phone while holding its boot key.
+		[Run FPLinux](/fplinux/start/run/)
+	</Card>
+	<Card title="3. Use" icon="seti:shell">
+		Work in the shell on the phone or from your computer.
+		[Phone terminal](/fplinux/use/terminal/)
+	</Card>
+</div>
+
+FPLinux runs from the phone's RAM. To keep files and installed packages between
+sessions on a supported phone, boot from a
+[microSD system card](/fplinux/guides/microsd-system-card/).
+FPLinux cannot be installed to the phone's internal storage.
+
+## What you get
+
+The [feature overview](/fplinux/features/) separates implementation from
+device checks. Your phone's checklist records its supported functions and limits.
+
+<CardGrid>
+	<Card title="Terminal on the keypad" icon="seti:shell">
+		Multi-tap typing, a menu for symbols and modifiers, scrollback and a
+		Russian layout. [Phone terminal](/fplinux/use/terminal/)
+	</Card>
+	<Card title="Your computer, connected" icon="laptop">
+		A shell over USB, file copies and your PC keyboard on the phone.
+		[Connect from a computer](/fplinux/use/connect/)
+	</Card>
+	<Card title="Sound and FM radio" icon="seti:audio">
+		Headphones, speaker, microphone and FM radio, depending on the phone.
+		[Sound](/fplinux/use/audio/) · [FM radio](/fplinux/use/fm-radio/)
+	</Card>
+	<Card title="Bluetooth" icon="link">
+		Pairing, file transfer and Internet over Bluetooth. Optional SBC audio
+		playback is qualified with a Linux PC receiver on selected phones.
+		[Bluetooth](/fplinux/use/bluetooth/)
+	</Card>
+	<Card title="microSD system card" icon="seti:folder">
+		A persistent system on a card that keeps files and packages.
+		[System card](/fplinux/guides/microsd-system-card/)
+	</Card>
+	<Card title="Apps and packages" icon="puzzle">
+		A showcase, brightness control, TyrQuake, image tools and optional
+		FFmpeg. [Applications](/fplinux/apps/)
+	</Card>
+</CardGrid>
+
+## On the phone's screen
+
+<div class="fp-phone-row">
+	<PhoneScreen src={armada} scale={1} alt="ARMADA showcase scene" caption="ARMADA showcase" />
+	<PhoneScreen src={brightness} scale={1} alt="Brightness control at level 7" caption="Brightness control" />
+	<PhoneScreen src={terminalMenu} scale={1} alt="Terminal menu" caption="Terminal menu" />
+</div>
+
+These screens are drawn by the FPLinux code at the phone's native 240×320
+resolution.
+
+## What you need
+
+- One of the phones above and a USB data cable.
+- A Linux x86-64 PC with Python 3.14 and network access for the first build.
+
+<CtaBand title="Your phone is not listed?">
+	If your keypad phone uses the Unisoc UMS9117, create a headless target,
+	try a RAM boot, back up its storage and report it to the project.
+	<Fragment slot="actions">
+		<LinkButton href="/fplinux/porting/bring-up/" icon="right-arrow">Bring up a new phone</LinkButton>
+		<LinkButton href="https://github.com/fplinux/fplinux" variant="secondary" icon="github" iconPlacement="start">Source on GitHub</LinkButton>
+	</Fragment>
+</CtaBand>

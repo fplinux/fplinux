@@ -1,0 +1,133 @@
+---
+title: Porting overview
+description: How FPLinux divides shared and phone-specific code, and where to start a port to another phone.
+---
+
+import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+import Figure from '../../../components/Figure.astro';
+import PortingLayers from '../../../assets/diagrams/porting-layers.svg';
+
+A phone port is a small, complete description of one exact phone model, called
+a target. It reuses shared code only where the existing targets demonstrably
+behave the same.
+
+<CardGrid>
+	<LinkCard
+		title="New-phone checklist"
+		description="Check the exact model before choosing it and record support function by function."
+		href="/fplinux/porting/checklist/"
+	/>
+	<LinkCard
+		title="Bring up a new phone"
+		description="Create a headless target, try a RAM boot, back up internal storage and report the phone."
+		href="/fplinux/porting/bring-up/"
+	/>
+	<LinkCard
+		title="UMS9117 platform"
+		description="What the platform provides and what each phone target supplies."
+		href="/fplinux/porting/ums9117/"
+	/>
+	<LinkCard
+		title="Target and platform identity"
+		description="Names, hardware codes and compatible strings of a target and its platform."
+		href="/fplinux/porting/identity/"
+	/>
+</CardGrid>
+
+## Layers
+
+<Figure caption="Source layers and what each one owns.">
+	<PortingLayers />
+</Figure>
+
+| Directory          | Owns                                                                                                                                           |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bootstrap/`       | Freestanding components reused before Linux starts, with bounded callbacks for platform- and target-owned operations.                          |
+| `platforms/<soc>/` | SoC support shared by its phones: processor and interrupt integration, controller drivers, SoC Devicetree nodes and the fixed RAM-loader flow. |
+| `targets/<phone>/` | One phone: board wiring and memory, panel, keymap, bootstrap inputs, values passed to the loader and device-data declarations.                 |
+| `alpine/`          | Phone userspace: one Alpine package recipe per component, the root-filesystem package policy and OpenRC services.                              |
+| `common/`          | Target-neutral host and runtime tools, such as the RAM bundle runner and the USB keyboard client, and the contracts they share.                |
+
+C libraries shared by host tools and phone packages live in `lib/fplinux/`,
+with their headers in `include/fplinux/`. Their runtime requirements belong to
+each component, not to the package that consumes it.
+
+The boundaries run both ways:
+
+- A platform never chooses a phone's panel, keypad matrix, memory reservation
+  or board-specific loader data.
+- A target never duplicates SoC addresses, controller support or the platform
+  loader sequence.
+- `bootstrap/` contains no SoC loader policy and no phone addresses, register
+  setup, panel sequences, keymaps or assets.
+- `common/` does not depend on a phone memory map, board register layout or
+  bootstrap protocol. Anything installed in the phone's root filesystem or run
+  as a service belongs to `alpine/`, even when it is target-neutral.
+- A target selects the shared bundle runner through its manifest instead of
+  copying a runner or adding a target-specific launcher.
+
+## Where code goes
+
+- Keep board-specific data in the target. Move code into a platform or another
+  shared layer only when more than one current target uses the same behavior.
+  SoC-specific host translation belongs to the selected platform.
+- A profile selects boot and storage policy, not peripheral features. The
+  `default` profile runs from RAM and `microsd-uboot` uses the microSD system
+  card. A target without microSD boot inputs offers only `default`. Feature
+  profiles are not accepted.
+- Targets and platforms that use the same Linux source share one source tree,
+  so their Linux integrations must coexist. Guard board drivers with the
+  target's configuration and give board-owned files their own destinations. Add
+  new board files by copying them; change upstream files only through patches
+  or platform copies. The build rejects conflicting file ownership, patches that
+  cannot apply together and profile-specific Linux patches.
+- Name a target and its platform as described in
+  [Target and platform identity](/fplinux/porting/identity/).
+
+## Userspace packages
+
+Keep each phone-userspace component in one conventional aport under
+`alpine/aports/`. Declare its runtime and build dependencies in `APKBUILD`, and
+use OpenRC for service ownership and supervision. Do not add rootfs overlays,
+duplicate recipes, target-local copies or ad-hoc installers for software that
+already belongs in an aport.
+
+Select packages in platform and target manifests rather than testing target
+names in code. `[rootfs].packages` selects packages installed in the phone's
+root filesystem; `[bundle].packages` selects optional APKs built and published
+under `apks/`, without installing them in that root filesystem.
+`alpine.lock.toml` pins the Alpine inputs. Users follow
+[Optional APK packages](/fplinux/guides/packages/) to install bundle packages;
+[Packaging](/fplinux/develop/packaging/) covers standalone archives.
+
+Map each consumer of shared C sources explicitly in
+`scripts/fplinux_cli/alpine/registration.py`; keep one shared implementation in
+`lib/fplinux/` and its headers in `include/fplinux/`.
+
+Rebuild an upstream component in its own `fplinux-` aport only when the locked
+Alpine package's runtime dependencies exceed the RAM filesystem budget.
+Install only the runtime files its consumer loads and remove the replaced
+Alpine artifacts from `alpine.lock.toml`. `fplinux-bluez-glib` supplies a private
+GLib runtime for the BlueZ daemons; `fplinux-apk-tools` replaces the minirootfs
+`apk-tools` and its OpenSSL libraries.
+
+Use a hardware-specific package only when its public interface is specific to
+that hardware. Shared kernel and userspace interfaces belong in shared packages.
+
+## Shared Linux integration
+
+The [Linux integration contract](/fplinux/porting/linux-integration/) owns
+shared source trees, separate compilation contexts and target-owned microSD
+card detection.
+
+## Support status of a target
+
+The website checklist states support for every feature on an exact phone, using the
+[status terms](/fplinux/phones/#status-terms). Hardware presence and FPLinux
+support are separate facts: a missing driver does not prove the hardware is
+absent. A feature is **Verified** only after it has been used on that phone; a
+successful build is not a phone test.
+
+Source rules for every layer are in [Code style](/fplinux/develop/code-style/),
+and the contribution workflow is in
+[Contributing](/fplinux/develop/contributing/).

@@ -1,0 +1,75 @@
+---
+title: Report a problem
+description: What to include in a problem report so it can be reproduced, and what never to attach.
+---
+
+import { LinkButton, Steps } from '@astrojs/starlight/components';
+
+Check [Troubleshooting](/fplinux/help/troubleshooting/) first. If your problem
+is not there, report it on GitHub.
+
+<LinkButton href="https://github.com/fplinux/fplinux/issues" icon="github" iconPlacement="start">
+	Open GitHub issues
+</LinkButton>
+
+To report a UMS9117 phone that has no target yet, follow
+[Bring up a new phone](/fplinux/porting/bring-up/) and use the **New phone
+report** form instead.
+
+## What to include
+
+<Steps>
+
+1. **What you ran and what happened.** The exact command and its complete
+   output, including any error. Say what you expected instead.
+
+2. **The phone and build.** The target, and the `--profile` and
+   `--build-type` options if you used them. For a phone problem, say whether
+   the phone had a battery and whether a microSD card was inserted.
+
+3. **The FPLinux version.** In a source checkout, the commit and whether you
+   changed any files:
+
+   ```sh title="PC"
+   git rev-parse --short HEAD
+   git status --short
+   ```
+
+   For a standalone archive, give the archive's file name.
+
+4. **The failed stage of a build, check or test.** If one of these commands
+   failed, add the output of:
+
+   ```sh title="PC"
+   ./fplinux logs show latest --command build --failed
+   ```
+
+   Replace `build` with `check` or `test` for that command's latest run.
+   This also shows interrupted stages.
+
+5. **Your PC.** The Linux distribution and its version.
+
+</Steps>
+
+For a problem on a running phone, also add the output of `./fplinux verify`
+for the same target and options. It compares the selected runtime identity
+with the running phone; it does not test the phone's hardware features.
+
+## Never attach
+
+- The NAND backup `nand.bin` or any other copy of the phone's internal storage.
+- Prepared [device-data groups](/fplinux/guides/device-data/) or extracted
+  firmware under `.cache/device-data/`.
+- Images or archives built with device data.
+
+These contain your phone's own data and its firmware. If a problem only
+occurs with device data, say which group you prepared: Bluetooth, FM radio,
+audio profile or board maps.
+
+For a new-phone report, the NAND geometry receipt and the generated board
+report requested by the form can be shared. They are reports, not copies of
+the NAND backup or prepared firmware; follow
+[Bring up a new phone](/fplinux/porting/bring-up/).
+
+Review command output before posting it, and remove anything you do not want
+to publish, such as user names in paths.

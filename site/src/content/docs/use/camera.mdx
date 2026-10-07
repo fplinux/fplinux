@@ -1,0 +1,66 @@
+---
+title: Camera capture
+description: Use the phone's V4L2 raw camera interface and prepare captured frames for JPEG encoding or rotation.
+source:
+  - platforms/ums9117
+---
+
+import FeatureStatus from '../../../components/FeatureStatus.astro';
+
+FPLinux provides raw camera capture through V4L2 for a capture application or
+other V4L2 consumer. It has no dedicated photo, video-recording or
+camera-preview application. Check your [phone's support
+status](/fplinux/phones/#support-status) before using it: capture support,
+native sizes and controls depend on the phone. Camera capture with a microSD
+system root has not been tested.
+
+<FeatureStatus feature="camera" />
+
+## Capture formats
+
+The camera is a V4L2 capture device named `ums9117-dcam`. Its `/dev/videoN`
+number is not fixed: other video nodes serve the image tools. Identify the
+camera by its capabilities, then discover the formats, native sizes and
+controls it offers. Use the returned dimensions and color metadata, and read
+the sensor-rotation control before choosing an orientation correction.
+
+Capture returns raw NV16 frames without rotating them. Additional controls
+and image-quality limits are listed on the [phone page](/fplinux/phones/).
+For buffer handling and the V4L2 API, see
+[Camera interfaces](/fplinux/develop/device-interfaces/#camera).
+
+## Work with a captured frame
+
+Save a complete packed NV16 frame before passing it to the
+[JPEG encoder](/fplinux/apps/image-tools/jpeg/#encode-nv16-as-jpeg).
+Choose a capture size that the encoder also accepts; a size offered by the
+camera alone is not enough. In particular, the hardware encoder does not
+accept `800×600`. Use the saved frame's actual dimensions in the command.
+
+For example, after a consumer has saved a complete `240×320` frame as
+`/run/frame.nv16`:
+
+```sh title="Phone"
+fplinux-jpeg --operation encode --width 240 --height 320 \
+  --input /run/frame.nv16 --output /run/photo.jpg
+```
+
+Use [image rotation](/fplinux/apps/image-tools/rotate/) to correct orientation
+when needed. The capture interface returns raw frames; the consumer chooses
+when to save or compress them. The
+[microphone](/fplinux/use/audio/#record-from-the-microphone) is a separate
+ALSA interface. Files in `/run` disappear at power-off; copy
+needed results to your computer with [file transfer](/fplinux/use/connect/).
+
+## Resource limits
+
+Capture, JPEG jobs and display updates can overlap only in combinations
+listed as supported on the [phone page](/fplinux/phones/). Even when capture
+and JPEG streaming queues can stay enabled together, a frame handed to the
+encoder must have a geometry both devices accept. Stop capture before using
+hardware rotation unless the phone page explicitly supports concurrent use;
+otherwise rotation can cause a camera frame error.
+
+Keep captures bounded: each raw NV16 frame takes twice its width × height in
+bytes, and buffers and saved files share RAM with the rest of the system.
+Copy results you need before ending the session.

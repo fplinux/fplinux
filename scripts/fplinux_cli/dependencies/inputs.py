@@ -250,9 +250,11 @@ def _container_declarations(root: Path) -> tuple[dict[str, object], list[Depende
     return {"apk_groups": package_groups, "downloads": downloads}, inputs
 
 
-def _npm_declarations(root: Path) -> tuple[dict[str, object], list[DependencyInput]]:
+def npm_declarations(
+    path: Path, *, key_prefix: str, cache_directory: str, purpose: str
+) -> tuple[dict[str, object], list[DependencyInput]]:
     """Read exact registry artifacts, including optional platform packages."""
-    lock = json.loads((root / "package-lock.json").read_text(encoding="utf-8"))
+    lock = json.loads(path.read_text(encoding="utf-8"))
     packages = lock.get("packages")
     if not isinstance(packages, dict):
         fail("package-lock.json must declare package records")
@@ -277,12 +279,12 @@ def _npm_declarations(root: Path) -> tuple[dict[str, object], list[DependencyInp
         url_key = sha256_bytes(url.encode())[:16]
         inputs.append(
             DependencyInput(
-                key=f"npm:{name}",
+                key=f"{key_prefix}:{name}",
                 url=url,
                 sha256=checksum if algorithm == "sha256" else None,
                 size=None,
-                destination=f"downloads/npm/{url_key}-{filename}",
-                purpose="npm-package",
+                destination=f"{cache_directory}/{url_key}-{filename}",
+                purpose=purpose,
                 checksum=checksum,
                 algorithm=algorithm,
             )
@@ -406,7 +408,12 @@ def _environment_lock(
 def _environment_declarations(root: Path) -> tuple[dict[str, object], list[DependencyInput]]:
     container_lock = load_toml(root / "container.lock.toml")
     container_context, inputs = _container_declarations(root)
-    npm_context, npm_inputs = _npm_declarations(root)
+    npm_context, npm_inputs = npm_declarations(
+        root / "package-lock.json",
+        key_prefix="npm",
+        cache_directory="downloads/npm",
+        purpose="npm-package",
+    )
     lock_context, lock_inputs = _environment_lock(root, container_context)
     inputs.extend(npm_inputs)
     inputs.extend(lock_inputs)

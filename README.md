@@ -1,133 +1,31 @@
 # FPLinux
 
 FPLinux is a source-built Linux port for selected feature phones. It loads into
-volatile RAM alongside the vendor firmware. The supported loader never flashes,
-erases, partitions, or writes the phone's internal storage. A target may expose
-removable media separately; only the explicitly documented workflows may write
-such media, and they require a safe unmount before removal or shutdown.
-
-## Supported targets
-
-| Target               | Device                  | Platform                                 | Hardware status                                              |
-| -------------------- | ----------------------- | ---------------------------------------- | ------------------------------------------------------------ |
-| `inoi-240-modern-4g` | INOI 240 Modern 4G      | [`ums9117`](platforms/ums9117/README.md) | [Target documentation](targets/inoi-240-modern-4g/README.md) |
-| `inoi-244-modern-4g` | INOI 244 Modern 4G      | [`ums9117`](platforms/ums9117/README.md) | [Target documentation](targets/inoi-244-modern-4g/README.md) |
-| `nokia-ta1618`       | Nokia 3210 4G (TA-1618) | [`ums9117`](platforms/ums9117/README.md) | [Target documentation](targets/nokia-ta1618/README.md)       |
-
-Target manifests own machine identity. Each target document owns the exact
-phone's boot key, hardware support, safe use, and limitations; see the shared
-[identity contract](docs/reference/IDENTITY.md).
+volatile RAM without flashing, erasing or writing the phone's internal storage.
+Writes to supported microSD storage require the documented shutdown procedure.
 
 ## Documentation
 
-### Quick start
+[The FPLinux website](https://fplinux.github.io/fplinux/) owns the user guides,
+phone support checklists, developer contracts and code style.
 
-Follow [Building FPLinux](docs/guides/BUILDING.md) for host requirements,
-setup and the first build, then [Loading from a source checkout](docs/guides/LOADING.md)
-to start the selected phone. Use [Developing FPLinux](docs/guides/DEVELOPMENT.md)
-for source checks, tests and cache cleanup, and
-[Dependency snapshots](docs/guides/DEPENDENCIES.md) to preserve offline inputs.
+- [Build FPLinux](https://fplinux.github.io/fplinux/start/build/)
+- [Run FPLinux](https://fplinux.github.io/fplinux/start/run/)
+- [Phone support](https://fplinux.github.io/fplinux/phones/)
+- [Contributing](https://fplinux.github.io/fplinux/develop/contributing/)
+- [Bring up a new phone](https://fplinux.github.io/fplinux/porting/bring-up/)
 
-### Guides
+Documentation sources live in `site/src/content/docs/`.
+To preview them, use the [site workflow](https://fplinux.github.io/fplinux/develop/contributing/#preview-this-site).
 
-First choose the exact phone in [Phone targets](targets/README.md) and read its
-support status, boot key, storage rules and limitations.
+## Source layout
 
-- [Building FPLinux](docs/guides/BUILDING.md)
-- [Developing FPLinux](docs/guides/DEVELOPMENT.md)
-- [Dependency snapshots](docs/guides/DEPENDENCIES.md)
-- [Device data and NAND backups](docs/guides/DEVICE_DATA.md)
-- [Loading from a source checkout](docs/guides/LOADING.md)
-- [Installing and removing optional APK packages](docs/guides/APK_PACKAGES.md)
-- [microSD system root](docs/guides/MICROSD_ROOT.md)
-- [Using a standalone archive](docs/guides/STANDALONE.md)
-- [Release archives](docs/guides/RELEASES.md)
-- [Debugging FPLinux](docs/guides/DEBUGGING.md)
-
-### Features
-
-#### Access and file transfer
-
-- [USB networking](docs/features/USB_NETWORKING.md)
-- [SSH access](docs/features/SSH.md)
-- [File transfer](docs/features/FILE_TRANSFER.md)
-- [Bluetooth](docs/features/BLUETOOTH.md)
-
-#### Local interface
-
-- [Local console](docs/features/LOCAL_CONSOLE.md)
-- [Host keyboard forwarding](docs/features/HOST_KEYBOARD.md)
-- [Headphone audio](docs/features/HEADPHONE_AUDIO.md)
-- [Speaker audio](docs/features/SPEAKER_AUDIO.md)
-- [Phone microphone](docs/features/MICROPHONE_AUDIO.md)
-- [FM radio](docs/features/FM_RADIO.md)
-- [Camera capture](docs/features/CAMERA.md)
-- [LCD backlight](docs/features/DISPLAY_BACKLIGHT.md)
-- [Keypad backlight](docs/features/KEYPAD_BACKLIGHT.md)
-- [Vibration](docs/features/VIBRATION.md)
-
-#### Storage and power
-
-- [Removable microSD storage](docs/features/MICROSD.md)
-- [Real-time clock](docs/features/RTC.md)
-- [Power-off](docs/features/POWER_OFF.md)
-- [Suspend](docs/features/SUSPEND.md)
-
-#### Hardware telemetry
-
-- [CPU clock and frequency selection](docs/features/CPU_CLOCK.md)
-- [Charger status](docs/features/CHARGER_STATUS.md)
-- [Battery telemetry](docs/features/BATTERY_TELEMETRY.md)
-- [SoC temperature](docs/features/SOC_TEMPERATURE.md)
-- [Auxiliary ADC](docs/features/AUXADC.md)
-
-### Applications
-
-- [FPLinux: ARMADA](docs/apps/SHOWCASE.md)
-- [TyrQuake](docs/apps/TYRQUAKE.md)
-- [Image rotation](docs/apps/ROTATE.md)
-- [JPEG codec and scaling](docs/apps/JPEG.md)
-- [Native image presentation](docs/apps/PRESENT.md)
-
-### Reference
-
-- [Code style](docs/reference/CODE_STYLE.md)
-- [Target and platform identity](docs/reference/IDENTITY.md)
-- [Input contract](docs/reference/INPUT.md)
-- [Logging contract](docs/reference/LOGGING.md)
-
-Before submitting source changes, run the complete uncached quality gate from
-[Developing FPLinux](docs/guides/DEVELOPMENT.md#check-source).
-
-### Porting
-
-- [Porting overview](docs/porting/README.md)
-- [Bring up a new UMS9117 phone](docs/porting/NEW_PHONE.md)
-- [Phone target contract](docs/porting/TARGET.md)
-- [Platform contract](docs/porting/PLATFORM.md)
-- [Shared Linux integration](docs/porting/LINUX_INTEGRATION.md)
-- [Console contract](docs/porting/CONSOLE.md)
-
-## Architecture
-
-The repository separates [Alpine userspace](alpine/README.md),
-[shared pre-Linux components](bootstrap/README.md), the
-[shared host and runtime stack](common/README.md), reusable
-[SoC platforms](platforms/README.md), and phone-owned
-[targets](targets/README.md). Platform and target manifests select standard
-rootfs packages separately from installable APKs published beside the image.
-Phone-specific addresses, panel setup, keymaps, and hardware status remain with
-the target.
-
-## Hardware support
-
-Hardware claims in target documents distinguish physical-device observations from
-source-build and upstream evidence. Phone-tested release status is recorded
-separately for one exact executable payload.
+The [porting overview](https://fplinux.github.io/fplinux/porting/) explains the
+source layers and their responsibilities. Phone-specific wiring and register
+data remain with their target.
 
 ## License
 
-Original FPLinux code and documentation are licensed under
-[GPL-2.0-only](LICENSE) unless a file says otherwise. Downloaded and third-party
-components retain their own licenses; see
+Original FPLinux code and documentation use [GPL-2.0-only](LICENSE) unless a
+file states otherwise. Third-party components retain their licenses; see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

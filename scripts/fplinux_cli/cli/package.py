@@ -25,44 +25,10 @@ Candidate packaging does not make it release-ready.
 """
 
 
-PACKAGE_DOCUMENTS = {
-    "60-fplinux.rules": common.ROOT / "common/60-fplinux.rules",
-    "LICENSE": common.ROOT / "LICENSE",
-    "docs/apps/BRIGHTNESS.md": common.ROOT / "docs/apps/BRIGHTNESS.md",
-    "docs/apps/JPEG.md": common.ROOT / "docs/apps/JPEG.md",
-    "docs/apps/PRESENT.md": common.ROOT / "docs/apps/PRESENT.md",
-    "docs/apps/ROTATE.md": common.ROOT / "docs/apps/ROTATE.md",
-    "docs/apps/SHOWCASE.md": common.ROOT / "docs/apps/SHOWCASE.md",
-    "docs/apps/TYRQUAKE.md": common.ROOT / "docs/apps/TYRQUAKE.md",
-    "docs/features/AUXADC.md": common.ROOT / "docs/features/AUXADC.md",
-    "docs/features/BATTERY_TELEMETRY.md": common.ROOT / "docs/features/BATTERY_TELEMETRY.md",
-    "docs/features/BLUETOOTH.md": common.ROOT / "docs/features/BLUETOOTH.md",
-    "docs/features/CAMERA.md": common.ROOT / "docs/features/CAMERA.md",
-    "docs/features/CHARGER_STATUS.md": common.ROOT / "docs/features/CHARGER_STATUS.md",
-    "docs/features/CPU_CLOCK.md": common.ROOT / "docs/features/CPU_CLOCK.md",
-    "docs/features/DISPLAY.md": common.ROOT / "docs/features/DISPLAY.md",
-    "docs/features/DISPLAY_BACKLIGHT.md": common.ROOT / "docs/features/DISPLAY_BACKLIGHT.md",
-    "docs/features/FILE_TRANSFER.md": common.ROOT / "docs/features/FILE_TRANSFER.md",
-    "docs/features/FM_RADIO.md": common.ROOT / "docs/features/FM_RADIO.md",
-    "docs/features/SPEAKER_AUDIO.md": common.ROOT / "docs/features/SPEAKER_AUDIO.md",
-    "docs/features/HEADPHONE_AUDIO.md": common.ROOT / "docs/features/HEADPHONE_AUDIO.md",
-    "docs/features/HOST_KEYBOARD.md": common.ROOT / "docs/features/HOST_KEYBOARD.md",
-    "docs/features/KEYPAD_BACKLIGHT.md": common.ROOT / "docs/features/KEYPAD_BACKLIGHT.md",
-    "docs/features/LOCAL_CONSOLE.md": common.ROOT / "docs/features/LOCAL_CONSOLE.md",
-    "docs/features/MICROPHONE_AUDIO.md": common.ROOT / "docs/features/MICROPHONE_AUDIO.md",
-    "docs/features/MICROSD.md": common.ROOT / "docs/features/MICROSD.md",
-    "docs/features/POWER_OFF.md": common.ROOT / "docs/features/POWER_OFF.md",
-    "docs/features/RTC.md": common.ROOT / "docs/features/RTC.md",
-    "docs/features/SOC_TEMPERATURE.md": common.ROOT / "docs/features/SOC_TEMPERATURE.md",
-    "docs/features/SSH.md": common.ROOT / "docs/features/SSH.md",
-    "docs/features/SUSPEND.md": common.ROOT / "docs/features/SUSPEND.md",
-    "docs/features/USB_NETWORKING.md": common.ROOT / "docs/features/USB_NETWORKING.md",
-    "docs/features/VIBRATION.md": common.ROOT / "docs/features/VIBRATION.md",
-    "docs/guides/APK_PACKAGES.md": common.ROOT / "docs/guides/APK_PACKAGES.md",
-    "docs/guides/STANDALONE.md": common.ROOT / "docs/guides/STANDALONE.md",
-    "docs/guides/MICROSD_ROOT.md": common.ROOT / "docs/guides/MICROSD_ROOT.md",
-    "docs/reference/INPUT.md": common.ROOT / "docs/reference/INPUT.md",
-    "licenses/musl/COPYRIGHT": common.ROOT / "THIRD_PARTY_LICENSES/musl/COPYRIGHT",
+SHARED_PACKAGE_FILES = {
+    "60-fplinux.rules": "common/60-fplinux.rules",
+    "LICENSE": "LICENSE",
+    "licenses/musl/COPYRIGHT": "THIRD_PARTY_LICENSES/musl/COPYRIGHT",
 }
 
 
@@ -88,17 +54,7 @@ def target_archive_file(
     try:
         archive_name = source_name.relative_to("release").as_posix()
     except ValueError:
-        if (
-            len(source_name.parts) == 2
-            and source_name.parts[0] == "features"
-            and source_name.suffix == ".md"
-        ):
-            archive_name = f"docs/target/{source_name.name}"
-        else:
-            fail(
-                "target package file must be below release/ or a direct "
-                f"features/*.md file: {relative}"
-            )
+        fail(f"target package file must be below release/: {relative}")
     if not archive_name or archive_name == ".":
         fail(f"target package file has no archive name: {relative}")
     target_root = common.ROOT / "targets" / target
@@ -124,10 +80,10 @@ def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]
     runtime_files = manifest["runtime_files"]
     documents = manifest["documents"]
     archive_names = set(bundle_files)
-    shared_collisions = archive_names & PACKAGE_DOCUMENTS.keys()
+    shared_collisions = archive_names & SHARED_PACKAGE_FILES.keys()
     if shared_collisions:
         fail(f"duplicate release archive path: {min(shared_collisions)}")
-    archive_names.update(PACKAGE_DOCUMENTS)
+    archive_names.update(SHARED_PACKAGE_FILES)
     for relative in documents:
         archive_name, _source = target_archive_file(target, relative)
         if archive_name in archive_names:
@@ -182,11 +138,7 @@ def add_target_files(
         archive_name, source = target_archive_file(target, relative)
         if archive_name in files:
             fail(f"duplicate release archive path: {archive_name}")
-        data = source.read_bytes()
-        if relative.startswith("features/"):
-            # Feature pages move from targets/<target>/features to docs/target.
-            data = data.replace(b"](../../../docs/", b"](../")
-        files[archive_name] = data
+        files[archive_name] = source.read_bytes()
 
 
 def package_target(
@@ -222,7 +174,7 @@ def package_target(
         "build-manifest.json",
         "CANDIDATE-NOTICE.txt",
         "SHA256SUMS",
-        *PACKAGE_DOCUMENTS,
+        *SHARED_PACKAGE_FILES,
     }
     collision = reserved & set(required_boot_artifacts)
     if collision:
@@ -270,15 +222,11 @@ def package_target(
     add_target_files(files, target, release["documents"])
     if candidate:
         files["CANDIDATE-NOTICE.txt"] = CANDIDATE_NOTICE
-    for archive_name, source in PACKAGE_DOCUMENTS.items():
+    for archive_name, relative in SHARED_PACKAGE_FILES.items():
+        source = common.ROOT / relative
         if source.is_symlink() or not source.is_file():
-            fail(f"release document is missing or invalid: {source}")
-        data = source.read_bytes()
-        if archive_name.endswith(".md"):
-            # An archive owns its target status and loading instructions locally.
-            data = data.replace(b"](../../targets/README.md)", b"](../../README.txt)")
-            data = data.replace(b"](../guides/LOADING.md)", b"](../guides/STANDALONE.md)")
-        files[archive_name] = data
+            fail(f"shared package file is missing or invalid: {source}")
+        files[archive_name] = source.read_bytes()
     checksums = "".join(f"{sha256_bytes(files[name])}  {name}\n" for name in sorted(files))
     files["SHA256SUMS"] = checksums.encode()
     content_digest = payload_digest(files, release["executables"])
