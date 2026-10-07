@@ -1,6 +1,6 @@
 ---
-import SupportBadge from './SupportBadge.astro';
-import support from '../data/support.json';
+import SupportBadge from "./SupportBadge.astro";
+import support from "../data/support.json";
 
 interface Props {
 	phone: string;
@@ -8,35 +8,35 @@ interface Props {
 const { phone } = Astro.props;
 if (!support.phones.some((item) => item.id === phone))
 	throw new Error(`Unknown phone: ${phone}`);
-const rows = support.features.filter((item) => item.scope !== 'overview');
+const rows = support.features.filter((item) => item.scope !== "overview");
 const groups = support.groups.filter((group) =>
 	rows.some((item) => item.group === group)
 );
-const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 const guideLink = (slug: string) =>
-	`${base}/${slug.replace('#', '/#')}${slug.includes('#') ? '' : '/'}`;
+	`${base}/${slug.replace("#", "/#")}${slug.includes("#") ? "" : "/"}`;
 const defaultNote: Record<string, string> = {
-	Supported: 'Verified on this phone.',
-	Unknown: 'No device result is recorded for this function.',
-	'Not supported': 'No supported FPLinux path on this phone.',
+	"Not supported": "No supported FPLinux path on this phone.",
+	Supported: "Verified on this phone.",
+	Unknown: "No device result is recorded for this function.",
 };
 ---
 
 <div class="phone-checklist">
 	<nav aria-label="Support checklist groups">
 		<ul>
-			{groups.map((group) => (
+			{groups.map((group): astroHTML.JSX.Children => (
 				<li>
-					<a href={`#checklist-${group.toLowerCase().replaceAll(' ', '-')}`}>
+					<a href={`#checklist-${group.toLowerCase().replaceAll(" ", "-")}`}>
 						{group}
 					</a>
 				</li>
 			))}
 		</ul>
 	</nav>
-	{groups.map((group) => (
+	{groups.map((group): astroHTML.JSX.Children => (
 		<section>
-			<h3 id={`checklist-${group.toLowerCase().replaceAll(' ', '-')}`}>
+			<h3 id={`checklist-${group.toLowerCase().replaceAll(" ", "-")}`}>
 				{group}
 			</h3>
 			<table>
@@ -50,7 +50,7 @@ const defaultNote: Record<string, string> = {
 				<tbody>
 					{rows
 						.filter((item) => item.group === group)
-						.map((item) => {
+						.map((item): astroHTML.JSX.Children => {
 							const state = item.phones[phone as keyof typeof item.phones];
 							if (!state)
 								throw new Error(`Missing ${phone} support for ${item.id}`);
@@ -58,7 +58,7 @@ const defaultNote: Record<string, string> = {
 								<tr id={item.id}>
 									<th scope="row">
 										<a href={guideLink(item.guide)}>{item.label}</a>
-										{item.kind === 'hardware' && state.hardware && (
+										{item.kind === "hardware" && state.hardware && (
 											<small>Hardware: {state.hardware.toLowerCase()}</small>
 										)}
 									</th>
@@ -96,7 +96,7 @@ const defaultNote: Record<string, string> = {
 		width: 100%;
 	}
 
-	th[scope='row'] {
+	th[scope="row"] {
 		width: 31%;
 		font-weight: 500;
 	}
@@ -139,7 +139,7 @@ const defaultNote: Record<string, string> = {
 			border-bottom: 1px solid var(--sl-color-gray-5);
 		}
 
-		th[scope='row'],
+		th[scope="row"],
 		td {
 			width: auto;
 			padding: 0;

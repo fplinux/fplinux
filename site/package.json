@@ -11,7 +11,7 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "check": "astro sync && oxlint && oxlint --type-aware --ignore-pattern \"**/*.{js,mjs,cjs,jsx}\" && eslint . && prettier --config config/prettier.config.mjs --check . && stylelint \"src/**/*.{astro,css}\" && astro check",
+    "check": "astro sync && oxlint && eslint . && prettier --config config/prettier.config.mjs --check . && stylelint \"src/**/*.{astro,css}\" && astro check",
     "format": "prettier --config config/prettier.config.mjs --write ."
   },
   "dependencies": {

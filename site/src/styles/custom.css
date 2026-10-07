@@ -2,8 +2,8 @@
    semantic light and dark roles for interface colors, brand ink for diagrams. */
 
 @font-face {
-	font-family: 'Noto Sans';
-	src: url('../fonts/NotoSans.ttf') format('truetype');
+	font-family: "Noto Sans";
+	src: url("../fonts/NotoSans.ttf") format("truetype");
 	font-weight: 100 900;
 	font-style: normal;
 	font-display: swap;
@@ -12,7 +12,7 @@
 /* Dark scheme (Starlight default). */
 :root {
 	--sl-content-width: 50rem;
-	--sl-font: 'Noto Sans', ui-sans-serif, system-ui, sans-serif;
+	--sl-font: "Noto Sans", ui-sans-serif, system-ui, sans-serif;
 	--sl-color-accent-low: #204c5c;
 	--sl-color-accent: #85b2c4;
 	--sl-color-accent-high: #d3e5ed;
@@ -48,7 +48,7 @@
 }
 
 /* Light scheme. */
-:root[data-theme='light'] {
+:root[data-theme="light"] {
 	--sl-color-accent-low: #d3e5ed;
 	--sl-color-accent: #396475;
 	--sl-color-accent-high: #204c5c;

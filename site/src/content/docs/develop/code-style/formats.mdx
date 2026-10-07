@@ -129,6 +129,18 @@ C and headers use the existing Clang style with include sorting disabled.
 Python uses Ruff's selected import-order fix and formatter. Recognized shell
 scripts keep their declared dialect and use shfmt.
 
+## Website source
+
+Website JavaScript, TypeScript and Astro use the site's Prettier configuration,
+with a preference for double quotes. Object keys use alphabetical order;
+arrays retain their order. When a consumer requires a particular property
+order, disable only `sort-keys` around that object and explain the requirement.
+Unused rule-disable comments are errors.
+
+The [site workflow](/fplinux/develop/contributing/#preview-this-site) owns
+formatting and type-aware checks for these files. Markdown code examples retain
+their original formatting.
+
 ## Templates
 
 Supported `.in` templates use the same rules as their rendered format.

@@ -1,6 +1,6 @@
 ---
 // Wraps an inline SVG diagram so it follows the active light or dark theme.
-import { Zoom } from 'starlight-image-zoom/components';
+import { Zoom } from "starlight-image-zoom/components";
 
 interface Props {
 	caption?: string;
@@ -13,7 +13,7 @@ const { caption, width } = Astro.props;
 	class="fp-figure"
 	style={width ? `--fp-figure-width: ${width}` : undefined}
 >
-	<Zoom label={caption ?? ''}>
+	<Zoom label={caption ?? ""}>
 		<slot />
 	</Zoom>
 	{caption && <figcaption>{caption}</figcaption>}

@@ -167,9 +167,10 @@ npm run build
 
 Ultracite supplies the Oxlint, Astro ESLint, Prettier and Stylelint presets. `format` formats
 site code, styles, MDX and JSON; it preserves code examples and asset files.
-`check` checks formatting, lints JavaScript and TypeScript with Oxlint, checks
-Astro components with ESLint, and checks CSS including component styles. It
-then runs Astro's type checks. `build` renders the
+`check` checks formatting and runs type-aware linting on JavaScript and
+TypeScript with Oxlint and on Astro components with ESLint. It also checks
+accessibility and CSS including component styles, then runs Astro's type checks.
+Unused rule-disable comments are errors. `build` renders the
 pages and checks internal links. MDX content is parsed during formatting and
 the build.
 

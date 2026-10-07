@@ -1,22 +1,25 @@
 ---
 // Landing hero: title, tagline and actions beside real phone screen renders.
 // Pages that set hero.image (such as 404) show that image instead.
-import { Image } from 'astro:assets';
-import { LinkButton } from '@astrojs/starlight/components';
-import markLight from '../assets/brand/fplinux-mark.svg';
-import markDark from '../assets/brand/fplinux-mark-dark.svg';
-import terminal from '../assets/screens/terminal-keypad.png';
-import menu from '../assets/screens/terminal-menu.png';
-import armada from '../assets/screens/armada.png';
+import { Image } from "astro:assets";
+import type { ImageMetadata } from "astro";
+import { LinkButton } from "@astrojs/starlight/components";
+import markLight from "../assets/brand/fplinux-mark.svg";
+import markDark from "../assets/brand/fplinux-mark-dark.svg";
+import terminal from "../assets/screens/terminal-keypad.png";
+import menu from "../assets/screens/terminal-menu.png";
+import armada from "../assets/screens/armada.png";
 
 const { data } = Astro.locals.starlightRoute.entry;
 const { title = data.title, tagline, image, actions = [] } = data.hero || {};
 const screens = [
-	{ src: terminal, alt: 'FPLinux terminal with a shell prompt' },
-	{ src: menu, alt: 'FPLinux terminal menu' },
-	{ src: armada, alt: 'ARMADA showcase scene' },
+	{ alt: "FPLinux terminal with a shell prompt", src: terminal },
+	{ alt: "FPLinux terminal menu", src: menu },
+	{ alt: "ARMADA showcase scene", src: armada },
 ];
-const pageImage = image && 'dark' in image ? image : undefined;
+const pageImage:
+	{ alt?: string; dark: ImageMetadata; light: ImageMetadata } | undefined =
+	image && "dark" in image ? image : undefined;
 ---
 
 <div class="fp-hero">
@@ -25,25 +28,27 @@ const pageImage = image && 'dark' in image ? image : undefined;
 		{tagline && <div class="tagline" set:html={tagline} />}
 		{actions.length > 0 && (
 			<div class="actions">
-				{actions.map(({ link: href, text, variant, icon }) => (
-					<LinkButton {href} icon={icon?.name} {variant}>
-						{text}
-					</LinkButton>
-				))}
+				{actions.map(
+					({ link: href, text, variant, icon }): astroHTML.JSX.Children => (
+						<LinkButton {href} icon={icon?.name} {variant}>
+							{text}
+						</LinkButton>
+					)
+				)}
 			</div>
 		)}
 	</div>
 	{pageImage ? (
 		<div class="stage">
 			<Image
-				alt={pageImage.alt ?? ''}
+				alt={pageImage.alt ?? ""}
 				class="page-image light:sl-hidden"
 				height={320}
 				src={pageImage.dark}
 				width={320}
 			/>
 			<Image
-				alt={pageImage.alt ?? ''}
+				alt={pageImage.alt ?? ""}
 				class="page-image dark:sl-hidden"
 				height={320}
 				src={pageImage.light}
@@ -58,7 +63,7 @@ const pageImage = image && 'dark' in image ? image : undefined;
 				role="img"
 			>
 				<div class="screen">
-					{screens.map((screen) => (
+					{screens.map((screen): astroHTML.JSX.Children => (
 						<img
 							alt=""
 							class="fp-pixel"

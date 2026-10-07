@@ -1,11 +1,11 @@
 ---
 // Phone cards with available screen renders and key support status.
-import { LinkButton } from '@astrojs/starlight/components';
-import SupportBadge from './SupportBadge.astro';
-import support from '../data/support.json';
+import { LinkButton } from "@astrojs/starlight/components";
+import SupportBadge from "./SupportBadge.astro";
+import support from "../data/support.json";
 
 const renders = import.meta.glob<{ default: ImageMetadata }>(
-	'../assets/screens/terminal-keypad*.png',
+	"../assets/screens/terminal-keypad*.png",
 	{
 		eager: true,
 	}
@@ -16,45 +16,45 @@ const screens: Record<
 	string,
 	{ image?: ImageMetadata; scale: number; size: string }
 > = {
-	'nokia-ta1618': {
-		image: render('terminal-keypad'),
-		scale: 1,
-		size: '240×320',
+	"inoi-240-modern-4g": {
+		image: render("terminal-keypad-128x160") ?? render("terminal-keypad"),
+		scale: render("terminal-keypad-128x160") ? 2 : 1,
+		size: "128×160",
 	},
-	'inoi-240-modern-4g': {
-		image: render('terminal-keypad-128x160') ?? render('terminal-keypad'),
-		scale: render('terminal-keypad-128x160') ? 2 : 1,
-		size: '128×160',
-	},
-	'inoi-244-modern-4g': {
-		image: render('terminal-keypad'),
+	"inoi-244-modern-4g": {
+		image: render("terminal-keypad"),
 		scale: 1,
-		size: '240×320',
+		size: "240×320",
 	},
-	'maxvi-k15n-4g': {
-		image: render('terminal-keypad'),
+	"maxvi-k15n-4g": {
+		image: render("terminal-keypad"),
 		scale: 1,
-		size: '240×320',
+		size: "240×320",
+	},
+	"nokia-ta1618": {
+		image: render("terminal-keypad"),
+		scale: 1,
+		size: "240×320",
 	},
 };
 const highlights = [
-	{ feature: 'bluetooth', label: 'Bluetooth' },
-	{ feature: 'fm-radio', label: 'FM radio' },
-	{ feature: 'removable-system-root', label: 'microSD system' },
+	{ feature: "bluetooth", label: "Bluetooth" },
+	{ feature: "fm-radio", label: "FM radio" },
+	{ feature: "removable-system-root", label: "microSD system" },
 ];
-const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 const status = (feature: string, phone: string) =>
 	support.features.find((item) => item.id === feature)?.phones[
-		phone as keyof (typeof support.features)[number]['phones']
-	]?.status ?? 'Unknown';
+		phone as keyof (typeof support.features)[number]["phones"]
+	]?.status ?? "Unknown";
 ---
 
 <div class="fp-phone-cards not-content">
-	{support.phones.map((phone) => {
+	{support.phones.map((phone): astroHTML.JSX.Children => {
 		const screen = screens[phone.id];
 		return (
 			<article class="card">
-				<div class:list={['mini-phone', { 'no-render': !screen?.image }]}>
+				<div class:list={["mini-phone", { "no-render": !screen?.image }]}>
 					{screen?.image && (
 						<img
 							alt={`FPLinux terminal on the ${phone.name}`}
@@ -76,10 +76,10 @@ const status = (feature: string, phone: string) =>
 				</div>
 				<h3>{phone.name}</h3>
 				<p class="meta">
-					{[phone.code, `${screen?.size} display`].filter(Boolean).join(' · ')}
+					{[phone.code, `${screen?.size} display`].filter(Boolean).join(" · ")}
 				</p>
 				<ul class="chips">
-					{highlights.map((item) => {
+					{highlights.map((item): astroHTML.JSX.Children => {
 						const state = status(item.feature, phone.id);
 						return (
 							<li>

@@ -1,24 +1,24 @@
-import config from 'ultracite/stylelint';
-import prettier from './config/prettier.config.mjs';
+import config from "ultracite/stylelint";
+import prettier from "./config/prettier.config.mjs";
 
 export default {
 	...config,
 	ignoreFiles: [
-		'.astro/**',
-		'dist/**',
-		'node_modules/**',
-		'public/**',
-		'scripts/**',
+		".astro/**",
+		"dist/**",
+		"node_modules/**",
+		"public/**",
+		"scripts/**",
 	],
-	overrides: [{ files: ['**/*.astro'], customSyntax: 'postcss-html' }],
+	overrides: [{ customSyntax: "postcss-html", files: ["**/*.astro"] }],
 	rules: {
 		...config.rules,
 		// Keep declaration order, including fallbacks and shorthand overrides.
-		'order/order': null,
-		'order/properties-order': null,
-		'order/properties-alphabetical-order': null,
+		"order/order": null,
+		"order/properties-alphabetical-order": null,
+		"order/properties-order": null,
+		"prettier/prettier": [true, prettier],
 		// Starlight owns the page-title ID.
-		'selector-id-pattern': ['^(?:[a-z][a-z0-9]*(?:-[a-z0-9]+)*|_top)$'],
-		'prettier/prettier': [true, prettier],
+		"selector-id-pattern": ["^(?:[a-z][a-z0-9]*(?:-[a-z0-9]+)*|_top)$"],
 	},
 };

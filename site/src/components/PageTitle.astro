@@ -1,10 +1,10 @@
 ---
 // Page title with links to the repository directories named in `source`.
-import Default from '@astrojs/starlight/components/PageTitle.astro';
-import { Icon } from '@astrojs/starlight/components';
+import Default from "@astrojs/starlight/components/PageTitle.astro";
+import { Icon } from "@astrojs/starlight/components";
 
 const { source = [] } = Astro.locals.starlightRoute.entry.data;
-const repo = 'https://github.com/fplinux/fplinux/tree/main/';
+const repo = "https://github.com/fplinux/fplinux/tree/main/";
 ---
 
 <Default />
@@ -12,7 +12,7 @@ const repo = 'https://github.com/fplinux/fplinux/tree/main/';
 	<p class="fp-source">
 		<Icon name="github" size="1em" />
 		<span>Source:</span>
-		{source.map((path) => (
+		{source.map((path): astroHTML.JSX.Children => (
 			<a href={repo + path}>
 				<code>{path}</code>
 			</a>
