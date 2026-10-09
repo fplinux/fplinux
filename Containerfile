@@ -10,18 +10,6 @@ ARG NODE_VERSION=24.21.0
 ARG NODE_SHA256=34ab095af8efe9018f21489d3dc19871fb5edd4f130a71469b69c05fd4e32a5e
 ARG NPM_VERSION=12.2.0
 ARG NPM_SHA512=66c2632a94e796649738b2d7894d710c2cc2e1696893823066687f6b0d8a52e5f2b54eeaeaa32ffdc513ecca1e49ff794a5c2ec3f9515d879f1b3182b291cf35
-ARG TOMLKIT_VERSION=0.15.1
-ARG TOMLKIT_SHA256=177a05aece5a8ca5266fd3c448abb47b8d352f09d477d3ca8332db4d89b24304
-ARG DTSCHEMA_VERSION=2026.9
-ARG DTSCHEMA_SHA256=defcbe1be176dec69c65b9700c9cd992cba3b409976a1404b9c0b5080aa5f4c1
-ARG PYTEST_VERSION=9.1.1
-ARG PYTEST_SHA256=37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c
-ARG INICONFIG_VERSION=2.3.0
-ARG INICONFIG_SHA256=f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12
-ARG PLUGGY_VERSION=1.6.0
-ARG PLUGGY_SHA256=e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746
-ARG PYGMENTS_VERSION=2.21.0
-ARG PYGMENTS_SHA256=2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9
 ARG RUFF_VERSION=0.16.10
 ARG RUFF_SHA256=ad1b2138407a0c53b936524df99d87211333f7bc40478d6860f42994597f7ff0
 ARG SPARSE_COMMIT=37156835e3d725b6d750f000be33ba3814bb2310
@@ -163,68 +151,13 @@ RUN set -eux; \
             yamllint=1.38.0-r0; \
     fi
 
+COPY environment.lock.toml scripts/fplinux_cli/environment/install_wheels.py /tmp/python-quality/
 RUN set -eux; \
-    mkdir -p /opt/quality/python /tmp/python-quality; \
-    archive=/tmp/python-quality/tomlkit.whl; \
-    if [ "${FPLINUX_OFFLINE}" = 1 ]; then \
-        cp "/opt/fplinux-inputs/sources/tomlkit/tomlkit-${TOMLKIT_VERSION}-py3-none-any.whl" "${archive}"; \
-    else \
-        curl -fsSL --retry 3 \
-            --output "${archive}" \
-            "https://files.pythonhosted.org/packages/13/bc/8c13eb66537dce1d2bd3a57132902f38d0e7f5bb46fa9f4daed9fe9d76ee/tomlkit-${TOMLKIT_VERSION}-py3-none-any.whl"; \
-    fi; \
-    printf '%s  %s\n' "${TOMLKIT_SHA256}" "${archive}" | sha256sum -c -; \
-    python3 -m zipfile -e "${archive}" /opt/quality/python; \
-    archive=/tmp/python-quality/dtschema.whl; \
-    if [ "${FPLINUX_OFFLINE}" = 1 ]; then \
-        cp "/opt/fplinux-inputs/sources/dtschema/dtschema-${DTSCHEMA_VERSION}-py3-none-any.whl" "${archive}"; \
-    else \
-        curl -fsSL --retry 3 \
-            --output "${archive}" \
-            "https://files.pythonhosted.org/packages/32/59/e5fafef672bde12c0d237462e5e936650df55e2bfc46aac3164ad5d4e953/dtschema-${DTSCHEMA_VERSION}-py3-none-any.whl"; \
-    fi; \
-    printf '%s  %s\n' "${DTSCHEMA_SHA256}" "${archive}" | sha256sum -c -; \
-    python3 -m zipfile -e "${archive}" /opt/quality/python; \
-    archive=/tmp/python-quality/pytest.whl; \
-    if [ "${FPLINUX_OFFLINE}" = 1 ]; then \
-        cp "/opt/fplinux-inputs/sources/pytest/pytest-${PYTEST_VERSION}-py3-none-any.whl" "${archive}"; \
-    else \
-        curl -fsSL --retry 3 \
-            --output "${archive}" \
-            "https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-${PYTEST_VERSION}-py3-none-any.whl"; \
-    fi; \
-    printf '%s  %s\n' "${PYTEST_SHA256}" "${archive}" | sha256sum -c -; \
-    python3 -m zipfile -e "${archive}" /opt/quality/python; \
-    archive=/tmp/python-quality/iniconfig.whl; \
-    if [ "${FPLINUX_OFFLINE}" = 1 ]; then \
-        cp "/opt/fplinux-inputs/sources/iniconfig/iniconfig-${INICONFIG_VERSION}-py3-none-any.whl" "${archive}"; \
-    else \
-        curl -fsSL --retry 3 \
-            --output "${archive}" \
-            "https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-${INICONFIG_VERSION}-py3-none-any.whl"; \
-    fi; \
-    printf '%s  %s\n' "${INICONFIG_SHA256}" "${archive}" | sha256sum -c -; \
-    python3 -m zipfile -e "${archive}" /opt/quality/python; \
-    archive=/tmp/python-quality/pluggy.whl; \
-    if [ "${FPLINUX_OFFLINE}" = 1 ]; then \
-        cp "/opt/fplinux-inputs/sources/pluggy/pluggy-${PLUGGY_VERSION}-py3-none-any.whl" "${archive}"; \
-    else \
-        curl -fsSL --retry 3 \
-            --output "${archive}" \
-            "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-${PLUGGY_VERSION}-py3-none-any.whl"; \
-    fi; \
-    printf '%s  %s\n' "${PLUGGY_SHA256}" "${archive}" | sha256sum -c -; \
-    python3 -m zipfile -e "${archive}" /opt/quality/python; \
-    archive=/tmp/python-quality/pygments.whl; \
-    if [ "${FPLINUX_OFFLINE}" = 1 ]; then \
-        cp "/opt/fplinux-inputs/sources/pygments/pygments-${PYGMENTS_VERSION}-py3-none-any.whl" "${archive}"; \
-    else \
-        curl -fsSL --retry 3 \
-            --output "${archive}" \
-            "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-${PYGMENTS_VERSION}-py3-none-any.whl"; \
-    fi; \
-    printf '%s  %s\n' "${PYGMENTS_SHA256}" "${archive}" | sha256sum -c -; \
-    python3 -m zipfile -e "${archive}" /opt/quality/python; \
+    python3 /tmp/python-quality/install_wheels.py \
+        --lock /tmp/python-quality/environment.lock.toml \
+        --inputs /opt/fplinux-inputs \
+        --destination /opt/quality/python \
+        --offline "${FPLINUX_OFFLINE}"; \
     python_packages=$(python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))'); \
     printf '%s\n' "import sys; sys.path.insert(0, '/opt/quality/python')" \
         > "${python_packages}/fplinux-quality.pth"; \

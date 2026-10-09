@@ -20,6 +20,7 @@ from fplinux_cli.dependencies.inputs import environment_inputs
 from fplinux_cli.dependencies.snapshots import preserve_inputs, publish_snapshot, restore_inputs
 from fplinux_cli.environment import downloads, images, kern
 from fplinux_cli.environment import setup as env_setup
+from fplinux_cli.environment.install_wheels import install_wheels
 
 
 def _environment_checkout(root: Path) -> None:
@@ -39,6 +40,8 @@ def _environment_checkout(root: Path) -> None:
     image_content = root / "scripts/fplinux_cli/environment/image_content.py"
     image_content.parent.mkdir(parents=True)
     image_content.write_text('"""Synthetic image-context input; no image build is exercised."""\n')
+    installer = root / "scripts/fplinux_cli/environment/install_wheels.py"
+    installer.write_text('"""Synthetic installer-context input; no image build is exercised."""\n')
     (root / "package.json").write_text('{"name":"fixture","version":"1.0.0"}\n')
     npm_integrity = base64.b64encode(hashlib.sha512(npm_bytes).digest()).decode()
     (root / "package-lock.json").write_text(
@@ -169,14 +172,16 @@ class OfflineEnvironmentContextTests:
             with zipfile.ZipFile(stream, "w") as wheel:
                 wheel.writestr(zipfile.ZipInfo("dtschema-2026.9.dist-info/METADATA"), metadata)
             contents = stream.getvalue()
-            container = root / "Containerfile"
-            with container.open("a") as output:
+            lock = root / "environment.lock.toml"
+            with lock.open("a") as output:
                 output.write(
-                    "ARG DTSCHEMA_VERSION=2026.9\n"
-                    f"ARG DTSCHEMA_SHA256={hashlib.sha256(contents).hexdigest()}\n"
-                    "RUN curl --output /tmp/schema.whl "
-                    '"https://example.invalid/dtschema-${DTSCHEMA_VERSION}-py3-none-any.whl"; '
-                    "printf '%s  %s\\n' \"${DTSCHEMA_SHA256}\" /tmp/schema.whl | sha256sum -c -\n"
+                    '\n[[input]]\nkey = "container:dtschema"\n'
+                    'url = "https://example.invalid/dtschema-2026.9-py3-none-any.whl"\n'
+                    f'sha256 = "{hashlib.sha256(contents).hexdigest()}"\n'
+                    f"bytes = {len(contents)}\n"
+                    'destination = "downloads/environment/dtschema/'
+                    'dtschema-2026.9-py3-none-any.whl"\n'
+                    'purpose = "container-source"\narch = "x86_64"\n'
                 )
             wheel_path = (
                 root / ".cache/downloads/environment/dtschema/dtschema-2026.9-py3-none-any.whl"
@@ -207,6 +212,14 @@ class OfflineEnvironmentContextTests:
                 assert (wheel.read("dtschema-2026.9.dist-info/METADATA")) == (
                     b"Metadata-Version: 2.1\nName: dtschema\nVersion: 2026.9\n"
                 )
+            installed = parent / "python"
+            with mock.patch("subprocess.run", side_effect=AssertionError("network")):
+                install_wheels(
+                    context / "environment.lock.toml", context / "inputs", installed, offline=True
+                )
+            assert (installed / "dtschema-2026.9.dist-info/METADATA").read_bytes() == (
+                b"Metadata-Version: 2.1\nName: dtschema\nVersion: 2026.9\n"
+            )
 
     def test_context_contains_declared_inputs_and_excludes_private_cache(self) -> None:
         """Source, npm, package and index consumers receive original saved bytes."""
@@ -218,6 +231,15 @@ class OfflineEnvironmentContextTests:
             _environment_checkout(root)
             with mock.patch.object(env_setup, "ROOT", root):
                 env_setup._stage_container_context(context, offline=True)  # noqa: SLF001
+
+            assert (context / "environment.lock.toml").read_bytes() == (
+                root / "environment.lock.toml"
+            ).read_bytes()
+            assert (
+                context / "scripts/fplinux_cli/environment/install_wheels.py"
+            ).read_bytes() == (
+                root / "scripts/fplinux_cli/environment/install_wheels.py"
+            ).read_bytes()
 
             assert ((context / "inputs/sources/tool/tool.tar.gz").read_bytes()) == (
                 b"tool source\n"

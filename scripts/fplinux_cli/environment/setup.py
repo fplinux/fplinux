@@ -101,7 +101,9 @@ def _stage_container_context(context: Path, *, offline: bool) -> None:
     for relative in (
         ".kernignore",
         "Containerfile",
+        "environment.lock.toml",
         "scripts/fplinux_cli/environment/image_content.py",
+        "scripts/fplinux_cli/environment/install_wheels.py",
         "package.json",
         "package-lock.json",
         "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch",

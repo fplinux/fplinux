@@ -134,6 +134,20 @@ class ContainerImageRecipeTests:
                 patch.write_text(patch.read_text() + "\n")
                 assert (images.container_image_recipe_digest(_container_lock())) != (before)
 
+    def test_wheel_installer_bytes_and_mode_change_the_image_recipe(self) -> None:
+        """Reuse stops when the code installing the image dependencies changes."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "checkout"
+            _copy_checkout(root)
+            with mock.patch.object(common, "ROOT", root):
+                before = images.container_image_recipe_digest(_container_lock())
+                installer = root / "scripts/fplinux_cli/environment/install_wheels.py"
+                installer.write_text(installer.read_text() + "\n")
+                changed_bytes = images.container_image_recipe_digest(_container_lock())
+                assert changed_bytes != before
+                installer.chmod(0o755)
+                assert images.container_image_recipe_digest(_container_lock()) != changed_bytes
+
 
 class SetupLifecycleTests:
     """Keep direct setup inside the unified run metadata lifecycle."""
@@ -195,7 +209,9 @@ class SetupLifecycleTests:
             for relative in (
                 ".kernignore",
                 "Containerfile",
+                "environment.lock.toml",
                 "scripts/fplinux_cli/environment/image_content.py",
+                "scripts/fplinux_cli/environment/install_wheels.py",
                 "package.json",
                 "package-lock.json",
                 "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch",

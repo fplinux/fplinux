@@ -250,6 +250,29 @@ class DependencyInputTests:
         assert (records["npm:node_modules/tool"].checksum) == ("11" * 64)
         assert (records["npm:node_modules/tool"].sha256) is None
 
+    def test_locked_wheel_keeps_its_container_key_and_cache_destination(self) -> None:
+        """Setup and host Python consumers receive the same exact wheel declaration."""
+        lock = self.root / "environment.lock.toml"
+        with lock.open("a") as output:
+            output.write(
+                '\n[[input]]\nkey = "container:pytest"\n'
+                'url = "https://example.invalid/pytest-1.0-py3-none-any.whl"\n'
+                f'sha256 = "{"9" * 64}"\nbytes = 456\n'
+                'destination = "downloads/environment/pytest/pytest-1.0-py3-none-any.whl"\n'
+                'purpose = "container-source"\narch = "x86_64"\n'
+            )
+        selected = [
+            record for record in environment_inputs(self.root) if record.key == "container:pytest"
+        ]
+        assert len(selected) == 1
+        wheel = selected[0]
+        assert wheel.url == "https://example.invalid/pytest-1.0-py3-none-any.whl"
+        assert wheel.sha256 == "9" * 64
+        assert wheel.size == 456
+        assert wheel.destination == "downloads/environment/pytest/pytest-1.0-py3-none-any.whl"
+        assert wheel.purpose == "container-source"
+        assert wheel.arch == "x86_64"
+
     def test_site_registry_inputs_are_separate_from_the_environment_closure(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
