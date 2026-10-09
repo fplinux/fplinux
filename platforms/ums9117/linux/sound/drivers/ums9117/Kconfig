@@ -29,3 +29,12 @@ config SND_UMS9117_SPEAKER_VIBRATOR
 	  vibrator that plays the fitted vibrate tone through the speaker.
 	  The board declares this capability in its device tree and supplies
 	  the waveform through its fitted audio profile.
+
+config SND_UMS9117_HEADPHONE_FED_SPEAKER
+	bool "BQ 2830L headphone-fed speaker"
+	depends on SND_UMS9117 && MACH_BQ_2830L_TANK_CONNECT_MAX
+	help
+	  Enable the external loudspeaker amplifier fed by the headphone
+	  codec output on BQ 2830L. The board supplies its control GPIO and
+	  mode-selection pulse width. PCM and FM playback enable the amplifier;
+	  silent idle and microphone capture leave it disabled.

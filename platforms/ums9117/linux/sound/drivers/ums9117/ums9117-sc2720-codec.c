@@ -11,9 +11,21 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 
+#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
+#include <linux/gpio/consumer.h>
+#include <linux/irqflags.h>
+#include <linux/preempt.h>
+#include <linux/property.h>
+#endif
+
 #include "ums9117-sc2720-codec.h"
 #include "ums9117-sc2720-calibration.h"
 #include "ums9117-sc2720-regs.h"
+
+#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
+/* Seven short edge delays keep mode selection bounded. */
+#define UMS9117_SPEAKER_MODE4_PULSE_US_MAX 10U
+#endif
 
 #define SC2720_CHIP_ID_LOW 0x0c00U
 #define SC2720_CHIP_ID_HIGH 0x0c04U
@@ -358,6 +370,13 @@ static const u8 sc2720_hp_gain[] = { 0xf, 0x9, 0x8, 0x7, 0x6, 0x5, 0x4 };
 
 struct ums9117_sc2720_codec {
 	struct device *dev;
+#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
+	struct gpio_desc *speaker_enable;
+	u32 speaker_pulse_us;
+	bool speaker_playback_active;
+	/* Marked before mode selection so a partial enable is closed too. */
+	bool speaker_on;
+#endif
 	struct regmap *regmap;
 	struct clk *xtal;
 	unsigned int saved[UMS9117_SC2720_CODEC_REGISTER_COUNT];
@@ -598,14 +617,74 @@ static int close_pa(struct ums9117_sc2720_codec *codec)
 	return first_error ?: ret;
 }
 
+#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
+static int set_external_speaker(struct ums9117_sc2720_codec *codec, bool on)
+{
+	unsigned long flags;
+	unsigned int pulse;
+	int off_ret = 0;
+	int ret;
+
+	if (codec->speaker_on == on)
+		return 0;
+	if (!on) {
+		ret = gpiod_set_value_cansleep(codec->speaker_enable, 0);
+		if (!ret)
+			codec->speaker_on = false;
+		usleep_range(1000, 1100);
+		return ret;
+	}
+	if (!codec->speaker_pulse_us)
+		return -ENODEV;
+
+	codec->speaker_on = true;
+	preempt_disable();
+	local_irq_save(flags);
+	for (pulse = 0; pulse < 3; pulse++) {
+		ret = gpiod_set_value(codec->speaker_enable, 1);
+		if (ret)
+			goto restore_low;
+		udelay(codec->speaker_pulse_us);
+		ret = gpiod_set_value(codec->speaker_enable, 0);
+		if (ret)
+			goto restore_low;
+		udelay(codec->speaker_pulse_us);
+	}
+	ret = gpiod_set_value(codec->speaker_enable, 1);
+	if (ret)
+		goto restore_low;
+	udelay(codec->speaker_pulse_us);
+	local_irq_restore(flags);
+	preempt_enable();
+	return 0;
+
+restore_low:
+	off_ret = gpiod_set_value(codec->speaker_enable, 0);
+	if (!off_ret)
+		codec->speaker_on = false;
+	local_irq_restore(flags);
+	preempt_enable();
+	usleep_range(1000, 1100);
+	if (off_ret)
+		dev_err(codec->dev, "cannot disable external speaker: %pe\n",
+			ERR_PTR(off_ret));
+	return ret;
+}
+#endif
+
 static int close_outputs(struct ums9117_sc2720_codec *codec)
 {
 	int first_error = 0;
 	int ret;
 
+#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
+	if (codec->speaker_on)
+		first_error = set_external_speaker(codec, false);
+#endif
 	if (codec->pa_open) {
-		first_error = close_pa(codec);
-		if (!first_error)
+		ret = close_pa(codec);
+		first_error = first_error ?: ret;
+		if (!ret)
 			codec->pa_open = false;
 	}
 	if (codec->hp_open) {
@@ -622,6 +701,10 @@ static int ums9117_sc2720_codec_restore(struct ums9117_sc2720_codec *codec)
 	int first_error = 0;
 	unsigned int i;
 	int ret;
+
+#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
+	codec->speaker_playback_active = false;
+#endif
 
 	if (!codec->dirty)
 		return release_shared(codec);
@@ -1007,7 +1090,9 @@ static bool pa_wanted(const struct ums9117_sc2720_codec *codec)
  * tone. An unwanted PA closes first, then joining headphones open and the
  * headphone gain is applied. A wanted PA opens beside any open headphone
  * amplifiers, and departing headphones close last. Closing the headphones
- * beside an open PA leaves the speaker-only register state.
+ * beside an open PA leaves the speaker-only register state. Headphone-fed
+ * speakers retain the headphone source and gate their external amplifier
+ * separately; silent idle and capture never enable that amplifier.
  */
 static int apply_outputs(struct ums9117_sc2720_codec *codec)
 {
@@ -1015,6 +1100,21 @@ static int apply_outputs(struct ums9117_sc2720_codec *codec)
 	bool pa = pa_wanted(codec);
 	int ret;
 
+#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
+	bool headphone_source =
+		codec->speaker_enable &&
+		(codec->outputs & UMS9117_SC2720_OUTPUT_SPEAKER);
+	bool speaker = headphone_source && !codec->speaker_muted &&
+		       codec->speaker_playback_active;
+	headphones |= headphone_source;
+	pa &= !codec->speaker_enable;
+
+	if (codec->speaker_on && !speaker) {
+		ret = set_external_speaker(codec, false);
+		if (ret)
+			return ret;
+	}
+#endif
 	if (codec->pa_open && !pa) {
 		ret = close_pa(codec);
 		if (ret)
@@ -1039,6 +1139,14 @@ static int apply_outputs(struct ums9117_sc2720_codec *codec)
 		if (ret)
 			return ret;
 	}
+#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
+	if (!codec->speaker_on && speaker) {
+		usleep_range(10000, 11000);
+		ret = set_external_speaker(codec, true);
+		if (ret)
+			return ret;
+	}
+#endif
 	if (!codec->pa_open && pa) {
 		codec->pa_open = true;
 		codec->pa_used = true;
@@ -1054,6 +1162,30 @@ static int apply_outputs(struct ums9117_sc2720_codec *codec)
 	}
 	return 0;
 }
+
+#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
+int ums9117_sc2720_codec_set_playback_active(struct ums9117_sc2720_codec *codec,
+					     bool active)
+{
+	int restore_ret;
+	int ret;
+
+	if (!codec->speaker_enable || codec->speaker_playback_active == active)
+		return 0;
+	codec->speaker_playback_active = active;
+	if (!codec->enabled)
+		return 0;
+	ret = apply_outputs(codec);
+	if (!ret)
+		return 0;
+	codec->speaker_playback_active = false;
+	restore_ret = apply_outputs(codec);
+	if (restore_ret)
+		dev_err(codec->dev, "cannot close external speaker: %pe\n",
+			ERR_PTR(restore_ret));
+	return ret;
+}
+#endif
 
 #if IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR)
 int ums9117_sc2720_codec_set_vibration(struct ums9117_sc2720_codec *codec,
@@ -1503,6 +1635,10 @@ int ums9117_sc2720_codec_stop(struct ums9117_sc2720_codec *codec)
 {
 	int ret;
 
+#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
+	codec->speaker_playback_active = false;
+#endif
+
 	if (!codec->prepared)
 		return 0;
 
@@ -1571,6 +1707,13 @@ static void ums9117_sc2720_codec_release(void *data)
 			ERR_PTR(first_error));
 }
 
+#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
+bool ums9117_sc2720_codec_has_speaker(const struct ums9117_sc2720_codec *codec)
+{
+	return !codec->speaker_enable || codec->speaker_pulse_us;
+}
+#endif
+
 struct ums9117_sc2720_codec *ums9117_sc2720_codec_create(struct device *dev)
 {
 	struct ums9117_sc2720_codec *codec;
@@ -1580,6 +1723,29 @@ struct ums9117_sc2720_codec *ums9117_sc2720_codec_create(struct device *dev)
 	if (!codec)
 		return ERR_PTR(-ENOMEM);
 	codec->dev = dev;
+#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
+	if (device_property_read_bool(dev, "fplinux,headphone-fed-speaker")) {
+		codec->speaker_enable =
+			devm_gpiod_get(dev, "speaker-enable", GPIOD_OUT_LOW);
+		if (IS_ERR(codec->speaker_enable))
+			return ERR_CAST(codec->speaker_enable);
+		/* Headphone playback leaves the external amplifier disabled. */
+		usleep_range(1000, 1100);
+		if (device_property_present(dev,
+					    "fplinux,speaker-mode4-pulse-us")) {
+			ret = device_property_read_u32(
+				dev, "fplinux,speaker-mode4-pulse-us",
+				&codec->speaker_pulse_us);
+			if (ret)
+				return ERR_PTR(ret);
+			if (!codec->speaker_pulse_us ||
+			    codec->speaker_pulse_us >
+				    UMS9117_SPEAKER_MODE4_PULSE_US_MAX ||
+			    gpiod_cansleep(codec->speaker_enable))
+				return ERR_PTR(-EINVAL);
+		}
+	}
+#endif
 	codec->regmap =
 		syscon_regmap_lookup_by_phandle(dev->of_node, "sprd,pmic");
 	if (IS_ERR(codec->regmap)) {

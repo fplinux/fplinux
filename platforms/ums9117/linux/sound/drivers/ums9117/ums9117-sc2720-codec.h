@@ -3,6 +3,7 @@
 #define FPLINUX_UMS9117_SC2720_CODEC_H
 
 #include <linux/bits.h>
+#include <linux/kconfig.h>
 #include <linux/types.h>
 
 struct device;
@@ -22,6 +23,17 @@ enum ums9117_sc2720_capture_source {
 
 /* The PCM owner serializes every operation and quiesces before devm release. */
 struct ums9117_sc2720_codec *ums9117_sc2720_codec_create(struct device *dev);
+/* Headphone-fed speakers require a configured non-sleeping mode-control GPIO. */
+#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
+bool ums9117_sc2720_codec_has_speaker(const struct ums9117_sc2720_codec *codec);
+#else
+static inline bool
+ums9117_sc2720_codec_has_speaker(const struct ums9117_sc2720_codec *codec)
+{
+	(void)codec;
+	return true;
+}
+#endif
 /*
  * Power the headset detector that drives the jack insert EIC. Call it before
  * the first prepare: playback and capture then save and restore its supply
@@ -34,7 +46,8 @@ int ums9117_sc2720_codec_set_volume(struct ums9117_sc2720_codec *codec,
 				    unsigned int left, unsigned int right);
 /*
  * Playback opens the requested outputs, and the PA word configures the
- * speaker amplifier. An empty set runs the DAC without an output. A prepared
+ * integrated speaker amplifier. Headphone-fed speakers ignore this word.
+ * An empty set runs the DAC without an output. A prepared
  * codec takes a changed set or word as set_outputs does.
  */
 int ums9117_sc2720_codec_prepare(struct ums9117_sc2720_codec *codec,
@@ -45,6 +58,20 @@ int ums9117_sc2720_codec_prepare(struct ums9117_sc2720_codec *codec,
  */
 int ums9117_sc2720_codec_set_outputs(struct ums9117_sc2720_codec *codec,
 				     unsigned int outputs, u16 pa_word);
+/* Only PCM or a supported FM source may enable a headphone-fed amplifier. */
+#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
+int ums9117_sc2720_codec_set_playback_active(struct ums9117_sc2720_codec *codec,
+					     bool active);
+#else
+static inline int
+ums9117_sc2720_codec_set_playback_active(struct ums9117_sc2720_codec *codec,
+					 bool active)
+{
+	(void)codec;
+	(void)active;
+	return 0;
+}
+#endif
 /* A muted speaker has its PA disabled; transitions may sleep for 30 ms. */
 int ums9117_sc2720_codec_set_speaker_mute(struct ums9117_sc2720_codec *codec,
 					  bool mute);

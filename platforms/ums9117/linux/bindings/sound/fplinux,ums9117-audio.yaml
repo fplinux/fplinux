@@ -96,6 +96,30 @@ properties:
       motor. Expose a force-feedback vibrator that plays the fitted vibrate
       tone through the speaker amplifier.
 
+  fplinux,headphone-fed-speaker:
+    type: boolean
+    description: |
+      The loudspeaker uses the headphone codec output and an external
+      amplifier. The integrated speaker amplifier is not used. This topology
+      shares the codec signal between the jack and loudspeaker. Loudspeaker
+      playback requires fplinux,speaker-mode4-pulse-us; otherwise the external
+      amplifier is held disabled.
+
+  speaker-enable-gpios:
+    maxItems: 1
+    description: |
+      Active-high external amplifier control for a headphone-fed loudspeaker.
+      Headphone-only playback keeps this GPIO low.
+
+  fplinux,speaker-mode4-pulse-us:
+    minimum: 1
+    maximum: 10
+    description: |
+      Board-selected high and low delays in microseconds for external amplifier
+      mode4. Enabling emits three high/low pulses, then holds high. Disabling
+      drives low and waits one millisecond. The GPIO must allow non-sleeping
+      value updates. Seven bounded delays run without IRQ or preemption gaps.
+
   hp-det-gpios:
     maxItems: 1
     description: |
@@ -118,6 +142,9 @@ required:
 
 dependencies:
   wakeup-source: [hp-det-gpios]
+  fplinux,headphone-fed-speaker: [speaker-enable-gpios]
+  speaker-enable-gpios: ["fplinux,headphone-fed-speaker"]
+  fplinux,speaker-mode4-pulse-us: ["fplinux,headphone-fed-speaker"]
 
 additionalProperties: false
 
