@@ -730,7 +730,8 @@ static int ums9117_rota_queue_init(void *priv, struct vb2_queue *source,
 	source->io_modes = VB2_MMAP | VB2_DMABUF;
 	source->drv_priv = ctx;
 	source->buf_struct_size = sizeof(struct v4l2_m2m_buffer);
-	source->min_queued_buffers = 1;
+	/* The scheduler waits for a pair; spare buffers are unnecessary. */
+	source->min_reqbufs_allocation = 1;
 	source->ops = &ums9117_rota_queue_ops;
 	source->mem_ops = &vb2_dma_contig_memops;
 	source->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
@@ -745,7 +746,7 @@ static int ums9117_rota_queue_init(void *priv, struct vb2_queue *source,
 	destination->io_modes = VB2_MMAP | VB2_DMABUF;
 	destination->drv_priv = ctx;
 	destination->buf_struct_size = sizeof(struct v4l2_m2m_buffer);
-	destination->min_queued_buffers = 1;
+	destination->min_reqbufs_allocation = 1;
 	destination->ops = &ums9117_rota_queue_ops;
 	destination->mem_ops = &vb2_dma_contig_memops;
 	destination->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
