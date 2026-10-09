@@ -16,9 +16,43 @@ from fplinux_cli.quality.receipts import (
 )
 from fplinux_cli.workspace.capture import WorkspaceFile, WorkspaceSnapshot
 
+from tests import ROOT
+
 
 class CheckScopeTests:
     """Keep scope recipes bound to the inputs checked by their consumers."""
+
+    @pytest.mark.parametrize(
+        "owner",
+        ["environment/downloads.py", "manifests/values.py"],
+        ids=("verified-transfer", "sha-validation"),
+    )
+    def test_kernel_receipt_misses_after_a_download_owner_changes(
+        self, owner: str, tmp_path: Path
+    ) -> None:
+        """Kernel preparation cannot reuse checks after a transfer or validation owner edit."""
+        path = f"scripts/fplinux_cli/{owner}"
+        original = (ROOT / path).read_bytes()
+
+        def recipe(owner_bytes: bytes, documentation: bytes) -> CheckReceiptRecipe:
+            snapshot = WorkspaceSnapshot(
+                (
+                    WorkspaceFile(path, owner_bytes, 0o644),
+                    WorkspaceFile("README.md", documentation, 0o644),
+                ),
+                "a" * 64,
+            )
+            return check_scope_receipt_recipe(
+                "kernel",
+                check_scope_closure_digest("kernel", snapshot),
+                image_generation="b" * 64,
+                orchestration_recipe="c" * 64,
+            )
+
+        publish_success_receipt(tmp_path, recipe(original, b"documentation\n"))
+        assert receipt_matches(tmp_path, recipe(original, b"documentation\n"))
+        assert receipt_matches(tmp_path, recipe(original, b"changed documentation\n"))
+        assert not receipt_matches(tmp_path, recipe(original + b"\n# changed owner\n", b"doc\n"))
 
     @pytest.mark.parametrize(
         ("scope", "original", "changed"),

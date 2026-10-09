@@ -29,6 +29,7 @@ from fplinux_cli.manifests.paths import target_asset_lock_path
 from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.releases import load_release
 from fplinux_cli.manifests.targets import load_target
+from fplinux_cli.manifests.values import sha256_value
 from fplinux_cli.reporting.run import RunReporter, run_entrypoint
 
 
@@ -63,7 +64,7 @@ def main() -> None:
         firmware = firmware_inputs.rootfs_firmware_inputs(device_data)
         audio_profile_firmware = device_data.get("audio-profile")
         sources = common.load_toml(common.ROOT / "sources.lock.toml")
-        linux_base = inputs_build.require_sha256(
+        linux_base = sha256_value(
             sources_build.source_lock_entry(sources, platform["linux"]["source_lock"]).get(
                 "sha256"
             ),

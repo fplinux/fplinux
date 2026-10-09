@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from fplinux_cli.alpine import recipes as alpine_recipes
 
+from tests import ROOT
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -77,6 +79,9 @@ class AlpineSourceFixture:
             self._write("scripts/fplinux_cli/build/inputs.py", b"build input validation\n")
             self._write("scripts/fplinux_cli/build/process.py", b"build process execution\n")
             self._write("scripts/fplinux_cli/build/sources.py", b"source fetching\n")
+            for owner in ("environment/downloads.py", "manifests/values.py"):
+                relative = f"scripts/fplinux_cli/{owner}"
+                self._write(relative, (ROOT / relative).read_bytes())
             self._write("scripts/fplinux_cli/common.py", b"shared archive and file operations\n")
             self._write("scripts/fplinux_cli/build/environment.py", b"build environment\n")
             self._write("scripts/fplinux_cli/device_data/inputs.py", b"firmware inputs\n")

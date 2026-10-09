@@ -15,6 +15,8 @@ from fplinux_cli.build import process as process_build
 from fplinux_cli.build.bootstrap import recipe as bootstrap_build
 from fplinux_cli.build.bootstrap import stage as bootstrap_stage
 
+from tests import ROOT
+
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
@@ -34,6 +36,9 @@ class BootstrapRecipeTests:
         self._write("patches/vendor.patch", b"vendor patch\n")
         for relative, _source in inputs_build.bootstrap_implementation_sources():
             self._write(relative, b"builder implementation\n")
+        for owner in ("environment/downloads.py", "manifests/values.py"):
+            relative = f"scripts/fplinux_cli/{owner}"
+            self._write(relative, (ROOT / relative).read_bytes())
         self._write("scripts/fplinux_cli/build/environment.py", b"build environment\n")
         self.target_config: dict[str, Any] = {
             "identity": {
@@ -144,6 +149,8 @@ class BootstrapRecipeTests:
             "toolchain",
             "build-targets",
             "build-environment",
+            "verified-transfer",
+            "sha-validation",
             "display-name",
             "record-prefix",
         ],
@@ -170,6 +177,12 @@ class BootstrapRecipeTests:
             ),
             "build-environment": lambda: self._write(
                 "scripts/fplinux_cli/build/environment.py", b"changed environment\n"
+            ),
+            "verified-transfer": lambda: self._write(
+                "scripts/fplinux_cli/environment/downloads.py", b"changed verified transfer\n"
+            ),
+            "sha-validation": lambda: self._write(
+                "scripts/fplinux_cli/manifests/values.py", b"changed value validation\n"
             ),
             "display-name": lambda: self.target_config["identity"].update(
                 display_name="Demo Changed Phone"

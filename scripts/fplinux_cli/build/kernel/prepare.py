@@ -21,6 +21,7 @@ from fplinux_cli.build.identity import (
 from fplinux_cli.build.storage import layout as profile_layout
 from fplinux_cli.common import fail, sha256_bytes, sha256_file
 from fplinux_cli.manifests.linux import discover_linux_targets, is_shared_linux_operation
+from fplinux_cli.manifests.values import sha256_value
 
 from . import state as linux_state
 from .projection import LinuxInput, file_contents, project_changes
@@ -108,7 +109,7 @@ def linux_recipe_digest(
     version = linux_source.get("version")
     if not isinstance(version, str) or not version:
         fail("Linux source version must be a non-empty string")
-    source_digest = inputs_build.require_sha256(linux_source.get("sha256"), "Linux source")
+    source_digest = sha256_value(linux_source.get("sha256"), "Linux source")
     manifest = {
         "version": version,
         "sha256": source_digest,
@@ -259,7 +260,7 @@ def prepare_linux(
 ) -> tuple[Path, PreparedLinuxState]:
     """Prepare all compatible boards in one upstream source slot before its consumers run."""
     source_lock = sources_build.source_lock_entry(sources, platform["linux"]["source_lock"])
-    digest = inputs_build.require_sha256(source_lock.get("sha256"), "Linux source")
+    digest = sha256_value(source_lock.get("sha256"), "Linux source")
     targets = discover_linux_targets(common.ROOT, sources, digest)
     selected = next((item for item in targets if item.name == target), None)
     if selected is None:

@@ -8,8 +8,13 @@ import shutil
 import tempfile
 import urllib.request
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fplinux_cli.common import fail, sha256_file
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from typing import NoReturn
 
 
 def download_locked_file(  # noqa: PLR0913 -- checksum, size and offline policy are distinct inputs.
@@ -35,6 +40,31 @@ def download_locked_file(  # noqa: PLR0913 -- checksum, size and offline policy 
         return destination
     if offline:
         fail(f"offline locked input is missing or mismatched: {url}: {destination}")
+
+    def verify(path: Path) -> None:
+        actual = _locked_file_digest(path, algorithm=algorithm)
+        if actual != digest:
+            fail(
+                f"locked download {algorithm.upper()} mismatch: {url}: "
+                f"expected {digest}, received {actual}"
+            )
+        if size is not None and path.stat().st_size != size:
+            fail(f"locked download size mismatch: {url}: expected {size}")
+
+    def report_failure(error: OSError) -> NoReturn:
+        fail(f"locked download failed: {url}: {error}")
+
+    return transfer_verified_file(url, destination, verify=verify, on_os_error=report_failure)
+
+
+def transfer_verified_file(
+    url: str,
+    destination: Path,
+    *,
+    verify: Callable[[Path], None],
+    on_os_error: Callable[[OSError], NoReturn] | None = None,
+) -> Path:
+    """Publish a download only after the caller verifies its closed temporary file."""
     temporary: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -43,27 +73,22 @@ def download_locked_file(  # noqa: PLR0913 -- checksum, size and offline policy 
             delete=False,
         ) as output:
             temporary = Path(output.name)
-            request = urllib.request.Request(  # noqa: S310 -- HTTPS is required above.
+            request = urllib.request.Request(  # noqa: S310 -- callers require HTTPS before transfer.
                 url,
                 headers={"User-Agent": "FPLinux"},
             )
-            with urllib.request.urlopen(  # noqa: S310 -- HTTPS is required above.
+            with urllib.request.urlopen(  # noqa: S310 -- callers require HTTPS before transfer.
                 request,
                 timeout=60,
             ) as response:
                 shutil.copyfileobj(response, output)
-        actual = _locked_file_digest(temporary, algorithm=algorithm)
-        if actual != digest:
-            fail(
-                f"locked download {algorithm.upper()} mismatch: {url}: "
-                f"expected {digest}, received {actual}"
-            )
-        if size is not None and temporary.stat().st_size != size:
-            fail(f"locked download size mismatch: {url}: expected {size}")
+        verify(temporary)
         temporary.replace(destination)
         temporary = None
     except OSError as error:
-        fail(f"locked download failed: {url}: {error}")
+        if on_os_error is None:
+            raise
+        on_os_error(error)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)

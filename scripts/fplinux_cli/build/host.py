@@ -28,8 +28,10 @@ from fplinux_cli.common import (
     sha256_bytes,
     sha256_file,
 )
+from fplinux_cli.environment import downloads
+from fplinux_cli.manifests import values as manifest_values
 from fplinux_cli.manifests.platforms import load_platform
-from fplinux_cli.manifests.values import relative_value
+from fplinux_cli.manifests.values import relative_value, sha256_value
 from fplinux_cli.reporting.run import run_entrypoint
 
 _COMPILER_ENVIRONMENT = (
@@ -67,9 +69,7 @@ def extract_host_members(
     with tarfile.open(archive, "r:gz") as source:
         for item in members:
             relative = item["path"]
-            expected = inputs_build.require_sha256(
-                hashes.get(item["digest_key"]), f"host member {relative}"
-            )
+            expected = sha256_value(hashes.get(item["digest_key"]), f"host member {relative}")
             member = source.getmember(prefix + relative)
             stream = source.extractfile(member)
             if stream is None or not member.isfile():
@@ -223,9 +223,9 @@ def _host_tool_recipe(sources: dict[str, Any], recipe: dict[str, Any]) -> str:
         archive_url = source_lock.get("archive_url")
         if not isinstance(archive_url, str) or not archive_url.startswith("https://"):
             fail("source URL must be a non-empty HTTPS URL")
-        inputs_build.require_sha256(source_lock.get("archive_sha256"), "host source archive")
+        sha256_value(source_lock.get("archive_sha256"), "host source archive")
         members = {
-            item["path"]: inputs_build.require_sha256(
+            item["path"]: sha256_value(
                 hashes.get(item["digest_key"]), f"host member {item['path']}"
             )
             for item in recipe["members"]
@@ -260,6 +260,8 @@ def _host_tool_recipe(sources: dict[str, Any], recipe: dict[str, Any]) -> str:
             Path(inputs_build.__file__),
             Path(process_build.__file__),
             Path(sources_build.__file__),
+            Path(downloads.__file__),
+            Path(manifest_values.__file__),
             Path(build_env.__file__),
         )
     }

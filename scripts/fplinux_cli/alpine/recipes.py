@@ -116,6 +116,8 @@ def alpine_rootfs_recipe(  # noqa: PLR0913 -- each selected rootfs input is caus
             _source_file(root / "scripts/fplinux_cli/build/inputs.py", root),
             _source_file(root / "scripts/fplinux_cli/build/process.py", root),
             _source_file(root / "scripts/fplinux_cli/build/sources.py", root),
+            _source_file(root / "scripts/fplinux_cli/environment/downloads.py", root),
+            _source_file(root / "scripts/fplinux_cli/manifests/values.py", root),
             _source_file(root / "scripts/fplinux_cli/device_data/inputs.py", root),
         ],
     }
@@ -162,6 +164,8 @@ def alpine_package_recipe(
                 _source_file(root / "scripts/fplinux_cli/build/inputs.py", root),
                 _source_file(root / "scripts/fplinux_cli/build/process.py", root),
                 _source_file(root / "scripts/fplinux_cli/build/sources.py", root),
+                _source_file(root / "scripts/fplinux_cli/environment/downloads.py", root),
+                _source_file(root / "scripts/fplinux_cli/manifests/values.py", root),
             ],
         }
     )

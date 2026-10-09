@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import hashlib
+import struct
+import subprocess
 import tarfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
@@ -13,11 +16,79 @@ from fplinux_cli import common
 from fplinux_cli.build import host as host_build
 from fplinux_cli.build import process as process_build
 from fplinux_cli.build import sources as sources_build
+from fplinux_cli.environment import downloads
 from fplinux_cli.manifests import platforms
+from fplinux_cli.manifests import values as manifest_values
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 
 class HostRecipeTests:
     """Keep local host changes explicit and unable to replace pinned source."""
+
+    @pytest.mark.parametrize("owner", [downloads, manifest_values], ids=("transfer", "sha"))
+    def test_host_receipt_misses_after_a_download_owner_changes(
+        self, owner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Owner edits revoke a saved binary while unrelated documentation keeps it reusable."""
+        assert owner.__file__ is not None
+        owner_path = Path(owner.__file__)
+        captured_owner = tmp_path / owner_path.name
+        captured_owner.write_bytes(owner_path.read_bytes())
+        monkeypatch.setattr(owner, "__file__", str(captured_owner))
+        monkeypatch.setattr(common, "ROOT", tmp_path)
+        monkeypatch.setenv("FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE", "1" * 64)
+        monkeypatch.setenv("FPLINUX_CONTAINER_IMAGE_CONTENT", "2" * 64)
+        for relative in ("loader.c", "lib/fplinux/fplinux-cli.c", "include/fplinux/fplinux-cli.h"):
+            path = tmp_path / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"host input\n")
+        recipe = {
+            "type": "cc-libusb",
+            "name": "loader",
+            "source": "loader.c",
+            "self_test": False,
+        }
+        baseline = host_build._host_tool_recipe(  # noqa: SLF001 -- real receipt identity.
+            {}, recipe
+        )
+
+        # ELF inspection is external; this fixture tests receipt reuse, without compilation.
+        binary = tmp_path / "loader"
+        header = bytearray(64)
+        header[:6] = b"\x7fELF\x02\x01"
+        struct.pack_into("<H", header, 18, 62)
+        struct.pack_into("<H", header, 54, 56)
+        binary.write_bytes(header)
+        slot = tmp_path / "slot"
+        host_build._publish_host_tool(  # noqa: SLF001 -- real receipt publication.
+            slot, baseline, binary
+        )
+        inspected = subprocess.CompletedProcess(["readelf"], 0, "No dynamic section\n", "")
+        with mock.patch.object(subprocess, "run", return_value=inspected):
+            output = tmp_path / "output"
+            cached = host_build._cached_host_tool(  # noqa: SLF001 -- real cache admission.
+                slot, baseline, recipe, output
+            )
+            assert cached is not None
+            assert cached.read_bytes() == bytes(header)
+            (tmp_path / "README.md").write_bytes(b"unrelated documentation\n")
+            unrelated = host_build._host_tool_recipe(  # noqa: SLF001 -- real receipt identity.
+                {}, recipe
+            )
+            reused = host_build._cached_host_tool(  # noqa: SLF001 -- real cache admission.
+                slot, unrelated, recipe, output
+            )
+            assert reused is not None
+            captured_owner.write_bytes(captured_owner.read_bytes() + b"\n# changed owner\n")
+            changed = host_build._host_tool_recipe(  # noqa: SLF001 -- real receipt identity.
+                {}, recipe
+            )
+            missed = host_build._cached_host_tool(  # noqa: SLF001 -- real cache admission.
+                slot, changed, recipe, output
+            )
+            assert missed is None
 
     @staticmethod
     def make_archive_recipe() -> dict[str, object]:

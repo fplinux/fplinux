@@ -9,7 +9,7 @@ from typing import Any
 
 from fplinux_cli import common
 from fplinux_cli.common import fail
-from fplinux_cli.manifests.values import relative_value
+from fplinux_cli.manifests.values import relative_value, sha256_value
 
 CACHE = Path("/cache")
 OUTPUT = Path("/out")
@@ -20,6 +20,8 @@ _CORE_IMPLEMENTATION_SOURCES = (
     "scripts/fplinux_cli/build/inputs.py",
     "scripts/fplinux_cli/build/process.py",
     "scripts/fplinux_cli/build/sources.py",
+    "scripts/fplinux_cli/environment/downloads.py",
+    "scripts/fplinux_cli/manifests/values.py",
 )
 _BOOTSTRAP_IMPLEMENTATION_SOURCES = (
     *_CORE_IMPLEMENTATION_SOURCES,
@@ -74,24 +76,13 @@ def require_directory(path: Path) -> Path:
     return path
 
 
-def require_sha256(value: object, name: str) -> str:
-    """Validate a lowercase SHA-256 digest."""
-    if (
-        not isinstance(value, str)
-        or len(value) != 64
-        or any(character not in "0123456789abcdef" for character in value)
-    ):
-        fail(f"{name} must be a lowercase SHA-256 digest")
-    return value
-
-
 def container_image_environment() -> tuple[str, str]:
     """Validate the declared recipe and actual installed content supplied by the host."""
-    image_recipe = require_sha256(
+    image_recipe = sha256_value(
         os.environ.get("FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE", ""),
         "container image recipe",
     )
-    content = require_sha256(
+    content = sha256_value(
         os.environ.get("FPLINUX_CONTAINER_IMAGE_CONTENT", ""),
         "container image content",
     )

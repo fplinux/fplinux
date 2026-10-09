@@ -11,6 +11,7 @@ from fplinux_cli.build.identity import BOOTSTRAP_IDENTITY_HEADER, bootstrap_iden
 from fplinux_cli.build.storage import layout as profile_layout
 from fplinux_cli.common import canonical_json_bytes, fail, sha256_bytes, sha256_file
 from fplinux_cli.manifests.identity import IdentityError
+from fplinux_cli.manifests.values import sha256_value
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -143,16 +144,14 @@ def bootstrap_recipe_digest(
         ],
         "vendor_source": {
             "commit": vendor_commit,
-            "archive_sha256": inputs_build.require_sha256(
+            "archive_sha256": sha256_value(
                 vendor_source.get("archive_sha256"),
                 "bootstrap vendor source",
             ),
         },
         "linux_source": {
             "version": linux_source["version"],
-            "sha256": inputs_build.require_sha256(
-                linux_source.get("sha256"), "bootstrap Linux font source"
-            ),
+            "sha256": sha256_value(linux_source.get("sha256"), "bootstrap Linux font source"),
         },
         "generated": generated,
         "implementation": {

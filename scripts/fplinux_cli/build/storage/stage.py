@@ -17,6 +17,7 @@ from fplinux_cli.build import process as process_build
 from fplinux_cli.build import sources as sources_build
 from fplinux_cli.build.device_tree import DeviceTreeError
 from fplinux_cli.common import fail
+from fplinux_cli.manifests.values import sha256_value
 
 from . import layout as profile_layout
 
@@ -40,7 +41,7 @@ def build_profile_uboot(
         inputs_build.CACHE / "downloads/uboot",
         "source.tar.bz2",
     )
-    container_recipe = inputs_build.require_sha256(
+    container_recipe = sha256_value(
         os.environ.get("FPLINUX_CONTAINER_IMAGE_RECIPE"),
         "container image recipe",
     )
@@ -122,7 +123,7 @@ def profile_ext4_artifact(
             config,
             rootfs_recipe,
             rootfs_receipt,
-            inputs_build.require_sha256(
+            sha256_value(
                 os.environ.get("FPLINUX_CONTAINER_IMAGE_RECIPE"),
                 "container image recipe",
             ),

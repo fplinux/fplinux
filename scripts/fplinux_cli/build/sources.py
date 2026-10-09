@@ -5,22 +5,23 @@ from __future__ import annotations
 
 import shutil
 import tarfile
-import tempfile
-import urllib.request
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import process as process_build
 from fplinux_cli.common import fail, sha256_file
-from fplinux_cli.manifests.values import relative_value
+from fplinux_cli.environment.downloads import transfer_verified_file
+from fplinux_cli.manifests.values import relative_value, sha256_value
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def fetch(url: object, expected: object, cache: Path, name: object) -> Path:
     """Fetch one HTTPS resource into the validated shared download cache."""
     if not isinstance(url, str) or not url.startswith("https://"):
         fail("source URL must be a non-empty HTTPS URL")
-    digest = inputs_build.require_sha256(expected, f"{name} source")
+    digest = sha256_value(expected, f"{name} source")
     relative = relative_value(name, "download cache name")
     cache.mkdir(parents=True, exist_ok=True)
     destination = cache / relative
@@ -30,32 +31,13 @@ def fetch(url: object, expected: object, cache: Path, name: object) -> Path:
             fail(f"download cache destination is invalid: {destination}")
         if sha256_file(destination) == digest:
             return destination
-    temporary: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            dir=destination.parent,
-            prefix=f".{destination.name}.",
-            delete=False,
-        ) as output:
-            temporary = Path(output.name)
-            request = urllib.request.Request(  # noqa: S310 -- HTTPS is required above.
-                url,
-                headers={"User-Agent": "FPLinux"},
-            )
-            with urllib.request.urlopen(  # noqa: S310 -- HTTPS is required above.
-                request,
-                timeout=60,
-            ) as response:
-                shutil.copyfileobj(response, output)
-        actual = sha256_file(temporary)
+
+    def verify(path: Path) -> None:
+        actual = sha256_file(path)
         if actual != digest:
             fail(f"{name} SHA256 mismatch: expected {digest}, received {actual}")
-        temporary.replace(destination)
-        temporary = None
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
-    return destination
+
+    return transfer_verified_file(url, destination, verify=verify)
 
 
 def source_lock_entry(sources: dict[str, Any], name: object) -> dict[str, Any]:

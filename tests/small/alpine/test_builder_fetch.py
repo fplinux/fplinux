@@ -38,7 +38,7 @@ class BuilderFetchTests:
         expected = hashlib.sha256(b"new bytes\n").hexdigest()
         with (
             mock.patch(
-                "fplinux_cli.build.sources.urllib.request.urlopen",
+                "urllib.request.urlopen",
                 side_effect=urllib.error.URLError("offline"),
             ),
             pytest.raises(urllib.error.URLError),
@@ -54,7 +54,7 @@ class BuilderFetchTests:
         expected = hashlib.sha256(b"new bytes\n").hexdigest()
         response = io.BytesIO(b"wrong bytes\n")
         with (
-            mock.patch("fplinux_cli.build.sources.urllib.request.urlopen", return_value=response),
+            mock.patch("urllib.request.urlopen", return_value=response),
             pytest.raises(SystemExit),
         ):
             sources_build.fetch(
@@ -68,7 +68,7 @@ class BuilderFetchTests:
         expected_bytes = b"new bytes\n"
         expected = hashlib.sha256(expected_bytes).hexdigest()
         response = io.BytesIO(expected_bytes)
-        with mock.patch("fplinux_cli.build.sources.urllib.request.urlopen", return_value=response):
+        with mock.patch("urllib.request.urlopen", return_value=response):
             result = sources_build.fetch(
                 "https://example.invalid/linux.tar.xz", expected, self.cache, "linux.tar.xz"
             )

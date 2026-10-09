@@ -93,6 +93,8 @@ class AlpineRecipesTests(fixtures.AlpineSourceFixture):
             pytest.param("build/inputs.py", id="build-inputs"),
             pytest.param("build/process.py", id="build-process"),
             pytest.param("build/sources.py", id="build-sources"),
+            pytest.param("environment/downloads.py", id="verified-transfer"),
+            pytest.param("manifests/values.py", id="sha-validation"),
         ],
     )
     def test_alpine_preparation_changes_invalidate_rootfs_and_package_recipes(
@@ -103,7 +105,18 @@ class AlpineRecipesTests(fixtures.AlpineSourceFixture):
         package_before = alpine_recipes.alpine_package_recipe(
             self.packages[0], "1" * 64, self.signing_key, self.root
         )
+        output = self.root / "cached-rootfs"
+        output.mkdir()
+        (output / "rootfs.cpio").write_bytes(b"logical composition\n")
+        alpine_rootfs_state.write_receipt(output, rootfs_before)
+        assert alpine_rootfs_state.receipt_matches(output, self._recipe())
+        self._write("README.md", b"unrelated documentation\n")
+        assert alpine_rootfs_state.receipt_matches(output, self._recipe())
+        assert package_before == alpine_recipes.alpine_package_recipe(
+            self.packages[0], "1" * 64, self.signing_key, self.root
+        )
         self._write(f"scripts/fplinux_cli/{source}", b"preparation changed\n")
+        assert not alpine_rootfs_state.receipt_matches(output, self._recipe())
         assert (rootfs_before) != (self._recipe())
         assert (package_before) != (
             alpine_recipes.alpine_package_recipe(

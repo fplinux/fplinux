@@ -20,6 +20,7 @@ from fplinux_cli.build.device_tree import (
 )
 from fplinux_cli.common import fail
 from fplinux_cli.manifests.kernel import kconfig_values
+from fplinux_cli.manifests.values import sha256_value
 
 from . import receipts as kbuild_state
 from . import state as linux_state
@@ -157,7 +158,7 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
         )
         plan = kbuild_state.create_plan(
             linux_recipe=current_linux.linux_recipe,
-            linux_base=inputs_build.require_sha256(linux_base, "Linux base source"),
+            linux_base=sha256_value(linux_base, "Linux base source"),
             defconfig=defconfig,
             defconfig_path="generated/kernel.defconfig",
             root=root_contract,

@@ -29,7 +29,7 @@ from fplinux_cli.common import (
     sha256_file,
 )
 from fplinux_cli.manifests.identity import RUNTIME_IDENTITY_PATH
-from fplinux_cli.manifests.values import relative_value
+from fplinux_cli.manifests.values import relative_value, sha256_value
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -240,20 +240,18 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
 
     workspace_digest = os.environ.get("FPLINUX_WORKSPACE_DIGEST", "")
     container_image_recipe, container_image_content = inputs_build.container_image_environment()
-    inputs_build.require_sha256(workspace_digest, "workspace digest")
-    inputs_build.require_sha256(linux_recipe, "Linux recipe")
-    inputs_build.require_sha256(device_identity, "device identity")
-    apk_signing_key = inputs_build.require_sha256(
+    sha256_value(workspace_digest, "workspace digest")
+    sha256_value(linux_recipe, "Linux recipe")
+    sha256_value(device_identity, "device identity")
+    apk_signing_key = sha256_value(
         signing_key_identity(inputs_build.CACHE), "APK signing public key"
     )
     rootfs_receipt = trusted_receipt_identity(rootfs_output, rootfs_recipe)
     if not isinstance(kbuild_receipt, dict) or set(kbuild_receipt) != {"recipe", "sha256"}:
         fail("Kbuild receipt identity is invalid")
     kbuild_receipt = {
-        "recipe": inputs_build.require_sha256(kbuild_receipt.get("recipe"), "Kbuild recipe"),
-        "sha256": inputs_build.require_sha256(
-            kbuild_receipt.get("sha256"), "Kbuild receipt SHA-256"
-        ),
+        "recipe": sha256_value(kbuild_receipt.get("recipe"), "Kbuild recipe"),
+        "sha256": sha256_value(kbuild_receipt.get("sha256"), "Kbuild receipt SHA-256"),
     }
     payload = {
         "target": target,

@@ -9,10 +9,11 @@ import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from fplinux_cli.build.inputs import CACHE, require_file, require_sha256
+from fplinux_cli.build.inputs import CACHE, require_file
 from fplinux_cli.build.process import run
 from fplinux_cli.build.sources import fetch
 from fplinux_cli.common import fail, sha256_file
+from fplinux_cli.manifests.values import sha256_value
 
 from .lock import PACKAGE_ID, runtime_package_names
 from .recipes import alpine_package_recipe
@@ -123,7 +124,7 @@ def _package_receipt_data(
     if not packages:
         fail("aport produced no APK packages")
     return {
-        "recipe": require_sha256(recipe, "Alpine package recipe"),
+        "recipe": sha256_value(recipe, "Alpine package recipe"),
         "packages": packages,
     }
 
