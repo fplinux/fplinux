@@ -1,0 +1,35 @@
+[llvm_mingw]
+version = "20260908"
+url = "https://github.com/mstorsjo/llvm-mingw/releases/download/20260908/llvm-mingw-20260908-ucrt-ubuntu-22.04-x86_64.tar.xz"
+sha256 = "2258c745e3155870c80793f3e8c80b28fbde11b9ff73c4c78783635b3440b092"
+size = 83887116
+name = "llvm-mingw-20260908-ucrt-ubuntu-22.04-x86_64.tar.xz"
+directory = "llvm-mingw-20260908-ucrt-ubuntu-22.04-x86_64"
+
+[libusb]
+version = "1.0.29"
+url = "https://github.com/libusb/libusb/releases/download/v1.0.29/libusb-1.0.29.7z"
+sha256 = "964a38152ca9a104cd00ec8d2f0617b89cd814f9b635e29763c68563d951521d"
+size = 4908465
+name = "libusb-1.0.29.7z"
+
+[libusb_source]
+version = "1.0.29"
+url = "https://github.com/libusb/libusb/releases/download/v1.0.29/libusb-1.0.29.tar.bz2"
+sha256 = "5977fc950f8d1395ccea9bd48c06b3f808fd3c2c961b44b0c2e6e29fc3a70a85"
+size = 645381
+name = "libusb-1.0.29.tar.bz2"
+
+[python]
+version = "3.14.7"
+url = "https://www.python.org/ftp/python/3.14.7/python-3.14.7-embed-amd64.zip"
+sha256 = "d297e5ff019966817ad8502465176139f2d3d840fa4ed84b13bed399a6ab1f15"
+size = 12673227
+name = "python-3.14.7-embed-amd64.zip"
+
+[openssh]
+version = "10.0.0.0p2-Preview"
+url = "https://github.com/PowerShell/Win32-OpenSSH/releases/download/10.0.0.0p2-Preview/OpenSSH-Win64.zip"
+sha256 = "23f50f3458c4c5d0b12217c6a5ddfde0137210a30fa870e98b29827f7b43aba5"
+size = 5704583
+name = "OpenSSH-Win64-10.0.0.0p2-Preview.zip"

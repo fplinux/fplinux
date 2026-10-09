@@ -45,6 +45,8 @@ path = [
   "sources.lock.toml",
   "targets/**",
   "tests/**",
+  "windows-host.lock.toml",
+  "windows-driver.lock.toml",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 FPLinux contributors"
