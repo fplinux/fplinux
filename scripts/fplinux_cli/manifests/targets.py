@@ -55,6 +55,7 @@ def load_target(
             *({"bluetooth"} if "bluetooth" in raw else set()),
             *({"audio_profile"} if "audio_profile" in raw else set()),
             *({"fm_radio"} if "fm_radio" in raw else set()),
+            *({"wcn_firmware"} if "wcn_firmware" in raw else set()),
             *({"board_maps"} if "board_maps" in raw else set()),
             *({"nand"} if "nand" in raw else set()),
             *({"display_brightness"} if "display_brightness" in raw else set()),
@@ -260,6 +261,12 @@ def load_target(
             fm_radio["firmware"],
             "target FM radio firmware",
         )
+    if "wcn_firmware" in config:
+        wcn = exact_table(config.pop("wcn_firmware"), {"firmware"}, "target WCN firmware")
+        device_data_groups["wcn-firmware"] = firmware_array(
+            wcn["firmware"],
+            "target WCN firmware",
+        )
     has_parser_groups = bool(device_data_groups)
     # The platform, not the target parser, extracts the board maps. Their sizes
     # differ between phones, so a declaration may leave them to the extraction.
@@ -281,7 +288,7 @@ def load_target(
             fail("target device_data parser must be a Python filename")
         config["device_data"] = {"parser": parser, "groups": device_data_groups}
     elif "device_data" in config:
-        fail("target device_data requires a bluetooth, audio-profile or FM radio group")
+        fail("target device_data requires a declared parser group")
     else:
         config["device_data"] = {"groups": device_data_groups}
     config["rootfs"] = {

@@ -46,7 +46,11 @@ def rootfs_firmware_inputs(
     device_data: Mapping[str, Sequence[FirmwareInput]],
 ) -> tuple[FirmwareInput, ...]:
     """Select the captured groups installed in the Alpine root filesystem."""
-    return (*device_data.get("bluetooth", ()), *device_data.get("fm-radio", ()))
+    return (
+        *device_data.get("bluetooth", ()),
+        *device_data.get("fm-radio", ()),
+        *device_data.get("wcn-firmware", ()),
+    )
 
 
 def device_data_cache_directory(cache: Path, target: str) -> Path:

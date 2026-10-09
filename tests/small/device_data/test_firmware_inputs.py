@@ -248,6 +248,35 @@ class FirmwareInputTests:
         assert (installed.read_bytes()) == (b"firmware")
         assert (installed.stat().st_mode & 0o777) == (0o600)
 
+    def test_radio_image_and_calibration_reach_the_rootfs_and_change_its_receipt(self) -> None:
+        """Both radio inputs are available to the firmware loader and invalidate rootfs reuse."""
+        self.groups["wcn-firmware"] = [
+            self._declaration("radio.bin", "chip/radio.bin", 5),
+            self._declaration("calibration.bin", "chip/calibration.bin", 4),
+        ]
+        radio = self._write_group(
+            "wcn-firmware", {"radio.bin": b"image", "calibration.bin": b"cali"}
+        )
+        captured = firmware_inputs.rootfs_firmware_inputs(self._capture())
+        first = alpine_recipes.alpine_rootfs_recipe(
+            "1" * 64, "2" * 64, ("fplinux-base",), firmware_inputs=captured
+        )
+        rootfs = self.root / "radio-rootfs"
+        rootfs.mkdir()
+
+        firmware_inputs.install_firmware_inputs(rootfs, captured)
+
+        assert (rootfs / "lib/firmware/chip/radio.bin").read_bytes() == b"image"
+        assert (rootfs / "lib/firmware/chip/calibration.bin").read_bytes() == b"cali"
+        (radio / "calibration.bin").write_bytes(b"new!")
+        changed = alpine_recipes.alpine_rootfs_recipe(
+            "1" * 64,
+            "2" * 64,
+            ("fplinux-base",),
+            firmware_inputs=firmware_inputs.rootfs_firmware_inputs(self._capture()),
+        )
+        assert changed != first
+
     @pytest.mark.parametrize(
         ("contents", "mode", "error"),
         [

@@ -174,6 +174,32 @@ static void test_decoded_values(void)
 	}
 }
 
+static void test_headphone_fed_speaker_profile(void)
+{
+	struct ums9117_audio_profile profile = {};
+	u8 bytes[822];
+
+	make_profile_bytes(bytes);
+	memset(bytes + 8, 0, 24);
+	memcpy(bytes + 8, "bq,2830l", 8);
+	bytes[32] = 7;
+	bytes[42] = 0;
+	bytes[53] = 0;
+	CHECK(ums9117_audio_profile_parse("bq,2830l", bytes, 788, false,
+					  &profile) == 0);
+	CHECK(profile.fitted);
+	CHECK(profile.codec_volume == 6);
+	CHECK(profile.combined_codec_volume == 6);
+	CHECK(profile.speaker_pa_word == 0);
+	CHECK(profile.combined_pa_word == 0);
+	CHECK(!memcmp(profile.dac_gain, headphone_gains, 9));
+	CHECK(!memcmp(profile.speaker_dac_gain, speaker_gains, 9));
+	CHECK(!memcmp(profile.combined_dac_gain, combined_gains, 9));
+	check_processing(&profile.headphone_processing, false);
+	check_processing(&profile.speaker_processing, true);
+	check_processing(&profile.combined_processing, true);
+}
+
 struct invalid_field {
 	size_t offset;
 	u8 low;
@@ -454,6 +480,7 @@ static void test_loader_copies_decoded_values(void)
 int main(void)
 {
 	test_decoded_values();
+	test_headphone_fed_speaker_profile();
 	test_identity_and_length();
 	test_gain_and_processing_safety();
 	test_tone_capability();

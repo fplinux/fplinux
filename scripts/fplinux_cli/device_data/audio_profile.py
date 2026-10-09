@@ -33,6 +33,7 @@ _MODE_LEVELS_OFFSET = 68
 _MODE_VIBRATE_TONE_OFFSET = 188
 _MODE_PA_WORD_OFFSET = 466
 _PLAY_ROUTE_MASK = 0x30
+_PLAY_HEADPHONES_ONLY = 0x10
 _PLAY_SPEAKER_ONLY = 0x20
 _PLAY_HEADPHONE_AND_SPEAKER = 0x30
 _VIBRATE_TONE_UNIT = 1 << 30
@@ -218,6 +219,31 @@ def _headfree_combined_fields(mode: bytes) -> bytes:
 
     pa_word = struct.unpack_from("<H", mode, _MODE_PA_WORD_OFFSET)[0]
     return struct.pack("<HB9B", pa_word, headphone_pga, *digital_gain)
+
+
+def _headphone_fed_speaker_fields(
+    headset: bytes, handsfree: bytes, headfree: bytes, headphone_pga: int
+) -> bytes:
+    """Carry headphone-fed speaker gains without integrated-PA settings.
+
+    The compact profile has one headphone PGA for speaker-only playback, so
+    all three modes must use that same level. Their digital gains and
+    processing remain separate. The original PA words stay in retained NV426;
+    the prepared zero words are unused by this topology.
+    """
+    fields = b""
+    for name, mode in (("Headset", headset), ("Handsfree", handsfree), ("Headfree", headfree)):
+        play_dev_set = struct.unpack_from("<H", mode, _MODE_PLAY_DEV_SET_OFFSET)[0]
+        if play_dev_set & _PLAY_ROUTE_MASK != _PLAY_HEADPHONES_ONLY:
+            raise ValueError(f"audio-profile {name} does not select headphone-only codec playback")
+        digital_gain, analog_levels = _app0_volume_levels(mode, name)
+        if any(level != headphone_pga for level in analog_levels):
+            raise ValueError(f"audio-profile {name} does not share the Headset headphone PGA")
+        if name == "Handsfree":
+            fields += struct.pack("<H9B", 0, *digital_gain)
+        elif name == "Headfree":
+            fields += struct.pack("<HB9B", 0, headphone_pga, *digital_gain)
+    return fields
 
 
 def _handsfree_vibrate_tone_fields(mode: bytes) -> bytes:
@@ -589,13 +615,14 @@ def _playback_processing_fields(
     return fields
 
 
-def prepare_headset_gain_profile(
+def prepare_headset_gain_profile(  # noqa: PLR0913 -- target identity and topology stay explicit.
     downloaded: Mapping[int, bytes],
     protected: Mapping[int, bytes],
     *,
     prefix: str,
     machine_compatible: bytes,
     speaker_vibration: bool = False,
+    speaker_from_headphones: bool = False,
 ) -> PreparedGroup:
     """Normalize fitted playback gains and processing into the compact kernel input.
 
@@ -603,6 +630,9 @@ def prepare_headset_gain_profile(
     Headfree order. ``speaker_vibration`` appends the Handsfree vibrate tone
     for phones whose speaker is also the vibration actuator.
     """
+    if speaker_from_headphones and speaker_vibration:
+        message = "audio-profile headphone-fed speaker cannot use the integrated-PA vibrate tone"
+        raise ValueError(message)
     mode_count_record = downloaded[425]
     protected_mode_count = protected[425]
     arm_modes = downloaded[426]
@@ -658,8 +688,11 @@ def prepare_headset_gain_profile(
     headset = arm_modes[:_ARM_MODE_SIZE]
     handsfree = _admitted_mode(arm_modes, protected_arm_modes, "Handsfree")
     headfree = _admitted_mode(arm_modes, protected_arm_modes, "Headfree")
-    profile += _handsfree_speaker_fields(handsfree)
-    profile += _headfree_combined_fields(headfree)
+    if speaker_from_headphones:
+        profile += _headphone_fed_speaker_fields(headset, handsfree, headfree, headphone_pga[0])
+    else:
+        profile += _handsfree_speaker_fields(handsfree)
+        profile += _headfree_combined_fields(headfree)
     for name, mode in (("Headset", headset), ("Handsfree", handsfree), ("Headfree", headfree)):
         profile += _playback_processing_fields(mode, name, eq_sets, protected_eq_sets)
     if speaker_vibration:
