@@ -138,6 +138,7 @@ struct ums9117_pcm {
 	bool speaker_vibration;
 	bool idle_silence;
 	bool fm_enabled;
+	bool external_fm;
 	bool suspended;
 	bool removing;
 	/*
@@ -618,7 +619,8 @@ static int ums9117_pcm_prepare_hardware_locked(struct ums9117_pcm *audio,
 	    !audio->speaker_supported)
 		return -ENODEV;
 	if (fm)
-		ret = ums9117_audio_prepare_fm(audio->digital);
+		ret = ums9117_audio_prepare_fm(audio->digital,
+					       audio->external_fm);
 	else
 		ret = ums9117_audio_prepare(audio->digital, rate);
 	if (ret) {
@@ -2271,6 +2273,8 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 	if (ret)
 		return dev_err_probe(&pdev->dev, ret,
 				     "invalid audio card long name\n");
+	audio->external_fm =
+		device_property_read_bool(&pdev->dev, "fplinux,external-fm");
 	audio->capture_supported = device_property_read_bool(
 		&pdev->dev, "fplinux,microphone-capture");
 	audio->speaker_vibration = device_property_read_bool(
@@ -2335,10 +2339,13 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 			  snd_ctl_new1(&ums9117_idle_silence_control, audio));
 	if (ret)
 		return snd_card_free_on_error(&pdev->dev, ret);
-	ret = snd_ctl_add(card,
-			  snd_ctl_new1(&ums9117_fm_playback_control, audio));
-	if (ret)
-		return snd_card_free_on_error(&pdev->dev, ret);
+	if (!ums9117_pcm_headphone_fed_speaker(audio) || audio->external_fm) {
+		ret = snd_ctl_add(card,
+				  snd_ctl_new1(&ums9117_fm_playback_control,
+					       audio));
+		if (ret)
+			return snd_card_free_on_error(&pdev->dev, ret);
+	}
 	if (audio->speaker_supported) {
 		ret = snd_ctl_add(card,
 				  snd_ctl_new1(&ums9117_speaker_switch_control,

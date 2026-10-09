@@ -30,6 +30,7 @@
 #define UMS9117_CLK_DA0 0x0c
 #define UMS9117_CLK_AD0 0x10
 
+#define UMS9117_IIS_MATRIX_INF1 GENMASK(1, 0)
 #define UMS9117_IIS_MATRIX_INF2 GENMASK(3, 2)
 #define UMS9117_IIS_MATRIX_INF3 GENMASK(5, 4)
 #define UMS9117_IIS_MATRIX_AUDIO \
@@ -114,6 +115,7 @@
 #define UMS9117_VBC_IIS_ADC01_SELECT GENMASK(2, 0)
 #define UMS9117_VBC_IIS_DAC_SELECT GENMASK(8, 6)
 #define UMS9117_VBC_IIS_ADC01_FM 1
+#define UMS9117_VBC_IIS_ADC01_EXTERNAL_FM 2
 #define UMS9117_VBC_DAC_PATH_FM BIT(8)
 #define UMS9117_VBC_DAC0_ADD_FM GENMASK(1, 0)
 #define UMS9117_VBC_DAC1_ADD_FM GENMASK(3, 2)
@@ -160,6 +162,7 @@ struct ums9117_audio {
 	void __iomem *iis_matrix;
 	u32 acquired_gates;
 	u32 saved_iis_matrix;
+	u32 fm_iis_matrix_mask;
 	struct ums9117_audio_vibrate_tone vibrate_tone;
 	/* Selected route and switches; applied while prepared. */
 	const struct ums9117_audio_dac_processing *dac_processing;
@@ -750,7 +753,7 @@ void ums9117_audio_stop(struct ums9117_audio *audio)
 			    UMS9117_VBC_IIS_ADC01_SELECT, 0);
 		update_bits(audio->vbc, UMS9117_VBC_CHANNELS,
 			    UMS9117_VBC_ADC01_CHANNELS, 0);
-		update_bits(audio->iis_matrix, 0, UMS9117_IIS_MATRIX_AUDIO,
+		update_bits(audio->iis_matrix, 0, audio->fm_iis_matrix_mask,
 			    audio->saved_iis_matrix);
 		audio->fm_prepared = false;
 	}
@@ -998,22 +1001,36 @@ failed:
 	return ret;
 }
 
-int ums9117_audio_prepare_fm(struct ums9117_audio *audio)
+int ums9117_audio_prepare_fm(struct ums9117_audio *audio, bool external)
 {
+	u32 source = UMS9117_VBC_IIS_ADC01_FM;
+	u32 matrix_mask = UMS9117_IIS_MATRIX_AUDIO;
+	u32 matrix_value = 0;
 	unsigned int i;
 	int ret;
+
+#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
+	if (external) {
+		source = UMS9117_VBC_IIS_ADC01_EXTERNAL_FM;
+		matrix_mask = UMS9117_IIS_MATRIX_INF1 | UMS9117_IIS_MATRIX_INF2;
+		matrix_value = FIELD_PREP(UMS9117_IIS_MATRIX_INF1, 2);
+	}
+#else
+	if (external)
+		return -EOPNOTSUPP;
+#endif
 
 	if (audio->capture_prepared || audio->playback_prepared)
 		return -EBUSY;
 	ret = ums9117_audio_prepare(audio, 32000);
 	if (ret)
 		return ret;
-	/* INF2 carries AUD/VBC IIS0; INF3 carries the internal FM IIS1. */
+	/* External FM enters VBC IIS2 through INF1; the DAC keeps INF2. */
+	audio->fm_iis_matrix_mask = matrix_mask;
 	audio->saved_iis_matrix = readl(audio->iis_matrix);
-	update_bits(audio->iis_matrix, 0, UMS9117_IIS_MATRIX_AUDIO, 0);
+	update_bits(audio->iis_matrix, 0, matrix_mask, matrix_value);
 	update_bits(audio->vbc, UMS9117_VBC_IIS, UMS9117_VBC_IIS_ADC01_SELECT,
-		    FIELD_PREP(UMS9117_VBC_IIS_ADC01_SELECT,
-			       UMS9117_VBC_IIS_ADC01_FM));
+		    FIELD_PREP(UMS9117_VBC_IIS_ADC01_SELECT, source));
 	update_bits(audio->vbc, UMS9117_VBC_CHANNELS,
 		    UMS9117_VBC_ADC01_CHANNELS, UMS9117_VBC_ADC01_CHANNELS);
 	writel(fm_mute_control(audio), audio->vbc + UMS9117_VBC_FM_MUTE);
@@ -1031,6 +1048,13 @@ int ums9117_audio_prepare_fm(struct ums9117_audio *audio)
 struct ums9117_audio *ums9117_audio_create(struct platform_device *pdev)
 {
 	struct ums9117_audio *audio;
+
+#if !IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
+	if (device_property_read_bool(&pdev->dev, "fplinux,external-fm"))
+		return ERR_PTR(
+			dev_err_probe(&pdev->dev, -EOPNOTSUPP,
+				      "external FM support is disabled\n"));
+#endif
 
 	audio = devm_kzalloc(&pdev->dev, sizeof(*audio), GFP_KERNEL);
 	if (!audio)

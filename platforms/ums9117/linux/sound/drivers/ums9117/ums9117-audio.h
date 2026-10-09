@@ -78,7 +78,7 @@ int ums9117_audio_set_dac_processing(
 	const struct ums9117_audio_dac_processing *processing, bool eq,
 	bool alc);
 int ums9117_audio_prepare(struct ums9117_audio *audio, unsigned int rate);
-int ums9117_audio_prepare_fm(struct ums9117_audio *audio);
+int ums9117_audio_prepare_fm(struct ums9117_audio *audio, bool external);
 int ums9117_audio_prepare_capture(struct ums9117_audio *audio);
 void ums9117_audio_start_capture(struct ums9117_audio *audio);
 void ums9117_audio_stop_capture(struct ums9117_audio *audio);

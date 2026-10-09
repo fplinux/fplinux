@@ -89,6 +89,12 @@ properties:
       pins are included in the audio pinctrl state. Expose 48 kHz mono S16_LE
       capture; simultaneous playback uses 48 kHz.
 
+  fplinux,external-fm:
+    type: boolean
+    description: |
+      The external receiver supplies 32 kHz FM audio through the IIS1 pins
+      and the VBC IIS2 input. Include those pins in the audio pinctrl state.
+
   fplinux,speaker-vibration:
     type: boolean
     description: |

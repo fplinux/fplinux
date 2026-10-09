@@ -14,7 +14,7 @@ config SND_UMS9117
 	  equalizer and ALC processing for each output selection. Boards with
 	  microphone capture pads also provide 48 kHz mono S16_LE capture,
 	  which can run at the same time as 48 kHz playback.
-	  The FM mixer switch routes the internal 32 kHz IIS source to the
+	  The FM mixer switch routes a board-selected 32 kHz IIS source to the
 	  enabled outputs.
 	  Boards with a headphone jack detect line report the wired headphone
 	  jack as the Headphone Jack control and a headphone switch input
