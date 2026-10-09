@@ -55,7 +55,7 @@ build() {
 		--enable-hog \
 		--enable-a2dp \
 		--enable-avrcp \
-		--enable-hfp \
+		--disable-hfp \
 		--enable-datafiles \
 		--disable-tools \
 		--disable-monitor \

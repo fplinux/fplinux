@@ -10,7 +10,6 @@
     g_checksum_get_digest;
     g_checksum_new;
     g_checksum_update;
-    g_child_watch_add;
     g_clear_error;
     g_direct_equal;
     g_direct_hash;
@@ -22,7 +21,6 @@
     g_file_get_contents;
     g_file_open_tmp;
     g_file_set_contents;
-    g_filename_to_utf8;
     g_free;
     g_get_monotonic_time;
     g_get_user_cache_dir;
@@ -108,7 +106,6 @@
     g_malloc;
     g_malloc0;
     g_malloc0_n;
-    g_markup_escape_text;
     g_markup_parse_context_free;
     g_markup_parse_context_new;
     g_markup_parse_context_parse;
@@ -174,8 +171,6 @@
     g_source_set_priority;
     g_source_set_ready_time;
     g_source_unref;
-    g_spawn_async_with_pipes;
-    g_spawn_close_pid;
     g_spawn_sync;
     g_str_equal;
     g_str_has_prefix;
@@ -190,12 +185,8 @@
     g_strdup_printf;
     g_strdupv;
     g_strfreev;
-    g_string_append_len;
     g_string_append_printf;
-    g_string_erase;
-    g_string_free;
     g_string_free_and_steal;
-    g_string_insert_len;
     g_string_new;
     g_strndup;
     g_strrstr;
