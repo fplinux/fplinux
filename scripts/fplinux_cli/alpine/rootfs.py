@@ -288,8 +288,8 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
             )
             if "fplinux-apk-tools" in packages:
                 # The minirootfs package manager leaves the world first so that
-                # its OpenSSL closure is dropped instead of kept beside the
-                # Mbed TLS build that the selected set installs.
+                # its orphaned OpenSSL dependencies are dropped before installing
+                # the selected tools and their runtime dependencies.
                 process_build.run(
                     _rootfs_remove_command(
                         lock,
@@ -316,6 +316,7 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
                 packages,
                 bundle_packages,
                 firmware,
+                runtime_packages=alpine_lock.runtime_package_names(lock, packages),
                 bundle_apks=tuple(bundle_outputs[name] for name in bundle_packages),
                 display_brightness=display_brightness,
             )

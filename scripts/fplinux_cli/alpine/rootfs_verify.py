@@ -123,6 +123,7 @@ def _verify_alpine_rootfs(  # noqa: PLR0913 -- verify each independently selecte
     bundle_packages: tuple[str, ...] = (),
     firmware: Sequence[firmware_inputs.FirmwareInput] = (),
     *,
+    runtime_packages: Sequence[str] = (),
     bundle_apks: Sequence[Path] = (),
     display_brightness: dict[str, Any] | None = None,
 ) -> None:
@@ -187,10 +188,17 @@ def _verify_alpine_rootfs(  # noqa: PLR0913 -- verify each independently selecte
     if "fplinux-alsa-lib" in packages:
         _require_apk_owner(root, "/usr/lib/libasound.so.2", "fplinux-alsa-lib")
     if "fplinux-apk-tools" in packages:
-        # The Mbed TLS package manager replaces the minirootfs apk-tools, and
-        # the OpenSSL closure that only apk-tools needed must not remain.
+        # Drop the old package manager and retain OpenSSL only when another
+        # selected runtime dependency requires it.
         _require_apk_owner(root, "/sbin/apk", "fplinux-apk-tools")
-        for package in ("apk-tools", "libapk", "libcrypto3", "libssl3"):
+        selected_runtime_packages = {filename.rsplit("-", 2)[0] for filename in runtime_packages}
+        replaced_packages = ["apk-tools", "libapk"]
+        replaced_packages.extend(
+            package
+            for package in ("libcrypto3", "libssl3")
+            if package not in selected_runtime_packages
+        )
+        for package in replaced_packages:
             if _alpine_package_installed(root, package):
                 fail(f"replaced Alpine package remains in the rootfs: {package}")
 

@@ -295,7 +295,7 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
         ],
     )
     def test_replaced_package_manager_root_rejects_openssl_leftovers(self, leftover: str) -> None:
-        """A root with the Mbed TLS apk must own /sbin/apk and hold no OpenSSL packages."""
+        """A root without dependent tools must replace the package manager and drop OpenSSL."""
         root = self._verified_rootfs()
         base = ("fplinux-base", "fplinux-terminal")
         with_apk_tools = (*base, "fplinux-apk-tools")
@@ -338,6 +338,81 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
             mock.patch.object(alpine_rootfs_verify, "_alpine_package_installed", fake_installed),
         ):
             alpine_rootfs_verify._verify_alpine_rootfs(root, with_apk_tools)  # noqa: SLF001
+
+    def test_rootfs_accepts_openssl_required_by_selected_wifi(self) -> None:
+        """An explicit Wi-Fi dependency can coexist with the Mbed TLS package manager."""
+        root = self._verified_rootfs()
+        packages = ("fplinux-base", "fplinux-terminal", "fplinux-apk-tools", "fplinux-wifi")
+        installed = {"libcrypto3", "libssl3"}
+        self._write_world(root, packages)
+
+        def fake_installed(_root: Path, package: str) -> bool:
+            """Fake the APK database for the selected tools' shared libraries."""
+            return package in installed
+
+        with (
+            mock.patch.object(
+                alpine_rootfs_verify, "_require_apk_owner", self._fake_apk_owner({})
+            ),
+            mock.patch.object(alpine_rootfs_verify, "_alpine_package_installed", fake_installed),
+        ):
+            alpine_rootfs_verify._verify_alpine_rootfs(  # noqa: SLF001
+                root,
+                packages,
+                runtime_packages=("libcrypto3-3.5.9-r0.apk", "libssl3-3.5.9-r0.apk"),
+            )
+
+    @pytest.mark.parametrize(
+        "leftover",
+        [pytest.param("apk-tools", id="apk-tools"), pytest.param("libapk", id="libapk")],
+    )
+    def test_rootfs_rejects_replaced_package_manager_with_declared_openssl(
+        self, leftover: str
+    ) -> None:
+        """Declared OpenSSL dependencies never permit the replaced package manager."""
+        root = self._verified_rootfs()
+        packages = ("fplinux-base", "fplinux-terminal", "fplinux-apk-tools", "fplinux-wifi")
+        installed = {leftover, "libcrypto3", "libssl3"}
+        self._write_world(root, packages)
+
+        def fake_installed(_root: Path, package: str) -> bool:
+            """Fake the APK database containing one replaced package-manager component."""
+            return package in installed
+
+        with (
+            mock.patch.object(
+                alpine_rootfs_verify, "_require_apk_owner", self._fake_apk_owner({})
+            ),
+            mock.patch.object(alpine_rootfs_verify, "_alpine_package_installed", fake_installed),
+            pytest.raises(SystemExit, match=f"remains in the rootfs: {leftover}"),
+        ):
+            alpine_rootfs_verify._verify_alpine_rootfs(  # noqa: SLF001
+                root,
+                packages,
+                runtime_packages=("libcrypto3-3.5.9-r0.apk", "libssl3-3.5.9-r0.apk"),
+            )
+
+    def test_rootfs_rejects_openssl_library_outside_selected_runtime(self) -> None:
+        """Selecting libcrypto does not authorize an unrelated leftover libssl package."""
+        root = self._verified_rootfs()
+        packages = ("fplinux-base", "fplinux-terminal", "fplinux-apk-tools")
+        installed = {"libcrypto3", "libssl3"}
+        self._write_world(root, packages)
+
+        def fake_installed(_root: Path, package: str) -> bool:
+            """Fake the APK database containing one required and one unneeded library."""
+            return package in installed
+
+        with (
+            mock.patch.object(
+                alpine_rootfs_verify, "_require_apk_owner", self._fake_apk_owner({})
+            ),
+            mock.patch.object(alpine_rootfs_verify, "_alpine_package_installed", fake_installed),
+            pytest.raises(SystemExit, match="remains in the rootfs: libssl3"),
+        ):
+            alpine_rootfs_verify._verify_alpine_rootfs(  # noqa: SLF001
+                root, packages, runtime_packages=("libcrypto3-3.5.9-r0.apk",)
+            )
 
     def test_persistent_root_requires_orderly_shutdown_services(self) -> None:
         """A persistent root rejects a shutdown runlevel missing data-safety services."""

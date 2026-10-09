@@ -26,6 +26,11 @@ unless an individual file carries a different SPDX identifier.
 | GLib 2.88.1                              | Core library for the BlueZ daemons             | LGPL-2.1-or-later; upstream release archive built without GIO, GObject or introspection           |
 | apk-tools 3.0.8                          | Package manager for optional APKs              | GPL-2.0-only; upstream release archive built with Mbed TLS instead of OpenSSL                     |
 | Mbed TLS 3.6                             | APK signatures and HTTPS transport             | Apache-2.0 OR GPL-2.0-or-later; supplied by the pinned Alpine package set                         |
+| hostapd / wpa_supplicant 2.11            | Wi-Fi access point and station authentication  | BSD-3-Clause; supplied by the pinned Alpine package set                                           |
+| iw / wireless-regdb                      | Wi-Fi configuration and regulatory data        | ISC; supplied by the pinned Alpine package set                                                    |
+| OpenSSL 3.5.9                            | Cryptography for the Wi-Fi tools               | Apache-2.0; supplied by the pinned Alpine package set                                             |
+| libnl3                                   | Netlink interface for the Wi-Fi tools          | LGPL-2.1-or-later; supplied by the pinned Alpine package set                                      |
+| pcsc-lite libraries                      | Smart-card support in wpa_supplicant           | BSD-3-Clause AND BSD-2-Clause AND ISC; supplied by the pinned Alpine package set                  |
 | libjpeg-turbo 3.2.0                      | Software JPEG reference in `fplinux-jpeg-cpu`  | IJG, with Zlib-licensed SIMD code; upstream release archive linked statically                     |
 | ALSA utils 1.2.16                        | Playback, recording and mixer tools            | GPL-2.0-or-later; upstream aplay, arecord and amixer built by the audio aport                     |
 | ALSA library 1.2.16.1                    | PCM conversion and mixer interface             | LGPL-2.1-or-later; upstream release built by the corresponding FPLinux aport                      |
