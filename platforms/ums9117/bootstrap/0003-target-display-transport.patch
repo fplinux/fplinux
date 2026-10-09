@@ -37,16 +37,20 @@
  	AHB_PWR_ON(0x1000);	// LCM enable
  
  	LCM_CR(0) = 0;
-@@ -389,7 +405,7 @@
+@@ -389,8 +405,11 @@
  
  	if (!is_whtled_on()) lcm_reset(10, 0);
  
 -	if (sys_data.spi) {
 +	if (LCD_USES_SPI) {
  		lcd = lcd_spi_init(sys_data.spi);
++#ifdef FPLINUX_LCD_INIT_RESET_MS
++		lcm_reset(FPLINUX_LCD_INIT_RESET_MS, 0);
++#endif
  		lcd_setup.send = spi_send;
  		if (!(sys_data.spi_mode & 1)) // 2, 4
-@@ -408,6 +424,9 @@
+ 			sys_data.page_reset = 0;
+@@ -408,6 +427,9 @@
  	lcd = lcd_find_conf(id, 0);
  
  	lcm_set_freq(cs, clk_rate, lcd);
@@ -56,7 +60,7 @@
  	lcd_setup.send = lcm_send;
  	return lcd;
  }
-@@ -421,7 +440,7 @@
+@@ -421,7 +443,7 @@
  	// that don't reset the page counter.
  	// Found on: GC9106, NV3030B
  	if (!sys_data.page_reset) (void)0;
@@ -65,7 +69,7 @@
  		lcm_set_mode(1); // 8
  		lcm_send_cmd(0x2c); // Memory Write
  		lcm_set_mode(0x28); // 8x2 BE
-@@ -450,7 +469,7 @@
+@@ -450,7 +472,7 @@
  #else
  	clean_dcache();
  #endif
@@ -74,7 +78,7 @@
  		spi_refresh_next(sys_data.spi);
  	LCDC_BASE->irq.en |= mask;
  	LCDC_BASE->ctrl |= 8;	// start refresh
-@@ -533,7 +552,7 @@
+@@ -533,7 +555,7 @@
  
  	{
  		uint32_t addr, mode;
