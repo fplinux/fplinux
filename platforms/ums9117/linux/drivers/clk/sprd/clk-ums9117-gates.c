@@ -16,9 +16,14 @@
 
 /* Gate updates use write-one SET/CLEAR aliases, not shared-state RMW. */
 #define UMS9117_GATE_SC_OFFSET 0x1000
-#define UMS9117_SDIO0_SELECTOR_MASK GENMASK(2, 0)
+#define UMS9117_SDIO_SELECTOR_MASK GENMASK(2, 0)
 #define UMS9117_SDIO0_SELECTOR_RPLL_390M 4
 #define UMS9117_SDIO0_RATE_HZ 195000000UL
+#if IS_ENABLED(CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO) && \
+	IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
+#define UMS9117_SDIO1_SELECTOR_26M 1
+#define UMS9117_SDIO1_RATE_HZ 13000000UL
+#endif
 #define UMS9117_SENSOR_SOURCE_RATE_HZ 48000000UL
 #define UMS9117_SENSOR_CFG_MASK (GENMASK(9, 8) | GENMASK(1, 0))
 #define UMS9117_SENSOR_SOURCE_48M 1
@@ -28,15 +33,17 @@
 #define UMS9117_SENSOR_RATE_CAPTURE_HZ 24000000UL
 
 /*
- * Selector 4 chooses the vendor RPLL_390M output for CGM_SDIO0_2X. The
- * controller consumes its fixed divide-by-two output as the 195 MHz base
- * clock. The source PLL is inherited and is not controlled by this provider.
+ * The controllers consume the fixed divide-by-two outputs of their selected
+ * 2X sources. Source clocks are inherited and not controlled here.
  * Prepare owns only the three selector bits and restores their prior value
  * after the consumer has stopped using the clock.
  */
-struct ums9117_sdio0_clk {
+struct ums9117_sdio_clk {
 	struct sprd_clk_common common;
 	struct device *dev;
+	const char *controller;
+	u32 selector;
+	unsigned long rate_hz;
 	u32 selector_snapshot;
 	bool selector_owned;
 };
@@ -127,45 +134,45 @@ static const struct sprd_clk_desc ums9117_apapb_gate_desc = {
 	.hw_clks = &ums9117_apapb_gate_hws,
 };
 
-static struct ums9117_sdio0_clk *hw_to_ums9117_sdio0_clk(struct clk_hw *hw)
+static struct ums9117_sdio_clk *hw_to_ums9117_sdio_clk(struct clk_hw *hw)
 {
 	struct sprd_clk_common *common = hw_to_sprd_clk_common(hw);
 
-	return container_of(common, struct ums9117_sdio0_clk, common);
+	return container_of(common, struct ums9117_sdio_clk, common);
 }
 
-static int ums9117_sdio0_clk_write_selector(struct ums9117_sdio0_clk *sdio,
-					    u32 selector)
+static int ums9117_sdio_clk_write_selector(struct ums9117_sdio_clk *sdio,
+					   u32 selector)
 {
 	unsigned int value;
 	int ret;
 
 	ret = regmap_update_bits(sdio->common.regmap, sdio->common.reg,
-				 UMS9117_SDIO0_SELECTOR_MASK, selector);
+				 UMS9117_SDIO_SELECTOR_MASK, selector);
 	if (ret)
 		return ret;
 	ret = regmap_read(sdio->common.regmap, sdio->common.reg, &value);
 	if (ret)
 		return ret;
 
-	return (value & UMS9117_SDIO0_SELECTOR_MASK) == selector ? 0 : -EIO;
+	return (value & UMS9117_SDIO_SELECTOR_MASK) == selector ? 0 : -EIO;
 }
 
-static int ums9117_sdio0_clk_restore_selector(struct ums9117_sdio0_clk *sdio)
+static int ums9117_sdio_clk_restore_selector(struct ums9117_sdio_clk *sdio)
 {
 	int ret;
 
 	if (!sdio->selector_owned)
 		return 0;
-	ret = ums9117_sdio0_clk_write_selector(sdio, sdio->selector_snapshot);
+	ret = ums9117_sdio_clk_write_selector(sdio, sdio->selector_snapshot);
 	sdio->selector_owned = false;
 
 	return ret;
 }
 
-static int ums9117_sdio0_clk_prepare(struct clk_hw *hw)
+static int ums9117_sdio_clk_prepare(struct clk_hw *hw)
 {
-	struct ums9117_sdio0_clk *sdio = hw_to_ums9117_sdio0_clk(hw);
+	struct ums9117_sdio_clk *sdio = hw_to_ums9117_sdio_clk(hw);
 	unsigned int value;
 	int restore_ret;
 	int ret;
@@ -173,66 +180,82 @@ static int ums9117_sdio0_clk_prepare(struct clk_hw *hw)
 	ret = regmap_read(sdio->common.regmap, sdio->common.reg, &value);
 	if (ret)
 		return ret;
-	sdio->selector_snapshot = value & UMS9117_SDIO0_SELECTOR_MASK;
+	sdio->selector_snapshot = value & UMS9117_SDIO_SELECTOR_MASK;
 	sdio->selector_owned = true;
 
-	/* Switch through selector 0 before selecting RPLL. */
-	ret = ums9117_sdio0_clk_write_selector(sdio, 0);
+	/* Switch through selector 0 before selecting the functional source. */
+	ret = ums9117_sdio_clk_write_selector(sdio, 0);
 	if (!ret)
-		ret = ums9117_sdio0_clk_write_selector(
-			sdio, UMS9117_SDIO0_SELECTOR_RPLL_390M);
+		ret = ums9117_sdio_clk_write_selector(sdio, sdio->selector);
 	if (!ret)
 		return 0;
 
-	restore_ret = ums9117_sdio0_clk_restore_selector(sdio);
+	restore_ret = ums9117_sdio_clk_restore_selector(sdio);
 	if (restore_ret)
 		dev_err(sdio->dev,
-			"failed to restore SDIO0 selector after prepare error: %pe\n",
-			ERR_PTR(restore_ret));
+			"failed to restore %s selector after prepare error: %pe\n",
+			sdio->controller, ERR_PTR(restore_ret));
 	return ret;
 }
 
-static void ums9117_sdio0_clk_unprepare(struct clk_hw *hw)
+static void ums9117_sdio_clk_unprepare(struct clk_hw *hw)
 {
-	struct ums9117_sdio0_clk *sdio = hw_to_ums9117_sdio0_clk(hw);
+	struct ums9117_sdio_clk *sdio = hw_to_ums9117_sdio_clk(hw);
 	int ret;
 
-	ret = ums9117_sdio0_clk_restore_selector(sdio);
+	ret = ums9117_sdio_clk_restore_selector(sdio);
 	if (ret)
-		dev_err(sdio->dev, "failed to restore SDIO0 selector: %pe\n",
-			ERR_PTR(ret));
+		dev_err(sdio->dev, "failed to restore %s selector: %pe\n",
+			sdio->controller, ERR_PTR(ret));
 }
 
-static unsigned long ums9117_sdio0_clk_recalc_rate(struct clk_hw *hw,
-						   unsigned long parent_rate)
+static unsigned long ums9117_sdio_clk_recalc_rate(struct clk_hw *hw,
+						  unsigned long parent_rate)
 {
-	struct sprd_clk_common *common = hw_to_sprd_clk_common(hw);
+	struct ums9117_sdio_clk *sdio = hw_to_ums9117_sdio_clk(hw);
 	unsigned int selector;
 
-	if (regmap_read(common->regmap, common->reg, &selector))
+	if (regmap_read(sdio->common.regmap, sdio->common.reg, &selector))
 		return 0;
-	if ((selector & UMS9117_SDIO0_SELECTOR_MASK) !=
-	    UMS9117_SDIO0_SELECTOR_RPLL_390M)
+	if ((selector & UMS9117_SDIO_SELECTOR_MASK) != sdio->selector)
 		return 0;
 
-	return UMS9117_SDIO0_RATE_HZ;
+	return sdio->rate_hz;
 }
 
-static const struct clk_ops ums9117_sdio0_clk_ops = {
-	.prepare = ums9117_sdio0_clk_prepare,
-	.unprepare = ums9117_sdio0_clk_unprepare,
-	.recalc_rate = ums9117_sdio0_clk_recalc_rate,
+static const struct clk_ops ums9117_sdio_clk_ops = {
+	.prepare = ums9117_sdio_clk_prepare,
+	.unprepare = ums9117_sdio_clk_unprepare,
+	.recalc_rate = ums9117_sdio_clk_recalc_rate,
 };
 
-static struct ums9117_sdio0_clk sdio0_clk = {
+static struct ums9117_sdio_clk sdio0_clk = {
 	.common = {
 		.regmap = NULL,
 		.reg = 0,
 		.hw.init = CLK_HW_INIT_NO_PARENT("sdio",
-					      &ums9117_sdio0_clk_ops,
+					      &ums9117_sdio_clk_ops,
 					      CLK_GET_RATE_NOCACHE),
 	},
+	.controller = "SDIO0",
+	.selector = UMS9117_SDIO0_SELECTOR_RPLL_390M,
+	.rate_hz = UMS9117_SDIO0_RATE_HZ,
 };
+
+#if IS_ENABLED(CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO) && \
+	IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
+static struct ums9117_sdio_clk sdio1_clk = {
+	.common = {
+		.regmap = NULL,
+		.reg = 0,
+		.hw.init = CLK_HW_INIT_NO_PARENT("sdio1", &ums9117_sdio_clk_ops,
+					      CLK_GET_RATE_NOCACHE),
+	},
+	.controller = "SDIO1",
+	.selector = UMS9117_SDIO1_SELECTOR_26M,
+	.rate_hz = UMS9117_SDIO1_RATE_HZ,
+};
+#endif
 
 static struct ums9117_sensor_clk *hw_to_ums9117_sensor_clk(struct clk_hw *hw)
 {
@@ -477,22 +500,55 @@ static const struct sprd_clk_desc ums9117_ap_clk_desc = {
 	.hw_clks = &ums9117_ap_clk_hws,
 };
 
+#if IS_ENABLED(CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO) && \
+	IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
+static struct sprd_clk_common *ums9117_ap_sdio1_clk_clks[] = {
+	&sdio1_clk.common,
+};
+
+static struct clk_hw_onecell_data ums9117_ap_sdio1_clk_hws = {
+	.hws = {
+		[CLK_SDIO1] = &sdio1_clk.common.hw,
+	},
+	.num = CLK_AP_SDIO1_CLK_NUM,
+};
+
+static const struct sprd_clk_desc ums9117_ap_sdio1_clk_desc = {
+	.clk_clks = ums9117_ap_sdio1_clk_clks,
+	.num_clk_clks = ARRAY_SIZE(ums9117_ap_sdio1_clk_clks),
+	.hw_clks = &ums9117_ap_sdio1_clk_hws,
+};
+#endif
+
 static SPRD_SC_GATE_CLK_NO_PARENT(dma_eb, "dma-eb", 0x0, UMS9117_GATE_SC_OFFSET,
 				  BIT(5), 0, 0);
 static SPRD_SC_GATE_CLK_NO_PARENT(sdio0_eb, "sdio0-eb", 0x0,
 				  UMS9117_GATE_SC_OFFSET, BIT(7), 0, 0);
+#if IS_ENABLED(CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO) && \
+	IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
+static SPRD_SC_GATE_CLK_NO_PARENT(sdio1_eb, "sdio1-eb", 0x0,
+				  UMS9117_GATE_SC_OFFSET, BIT(8), 0, 0);
+#endif
 
 static struct sprd_clk_common *ums9117_apahb_gate_clks[] = {
 	&dma_eb.common,
 	&sdio0_eb.common,
+#if IS_ENABLED(CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO) && \
+	IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
+	&sdio1_eb.common,
+#endif
 };
 
 static struct clk_hw_onecell_data ums9117_apahb_gate_hws = {
 	.hws = {
 		[CLK_DMA_EB] = &dma_eb.common.hw,
 		[CLK_SDIO0_EB] = &sdio0_eb.common.hw,
+#if IS_ENABLED(CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO) && \
+	IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
+		[CLK_SDIO1_EB] = &sdio1_eb.common.hw,
+#endif
 	},
-	.num = CLK_AP_AHB_GATE_NUM,
+	.num = ARRAY_SIZE(ums9117_apahb_gate_clks),
 };
 
 static const struct sprd_clk_desc ums9117_apahb_gate_desc = {
@@ -507,6 +563,11 @@ static const struct of_device_id ums9117_clk_ids[] = {
 	{ .compatible = "sprd,ums9117-ap-clk", .data = &ums9117_ap_clk_desc },
 	{ .compatible = "sprd,ums9117-ap-i2c0-clk",
 	  .data = &ums9117_ap_i2c0_clk_desc },
+#if IS_ENABLED(CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO) && \
+	IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
+	{ .compatible = "sprd,ums9117-ap-sdio1-clk",
+	  .data = &ums9117_ap_sdio1_clk_desc },
+#endif
 	{ .compatible = "sprd,ums9117-aonapb-gate",
 	  .data = &ums9117_aonapb_gate_desc },
 	{ .compatible = "sprd,ums9117-apapb-gate",
@@ -547,6 +608,11 @@ static int ums9117_clk_probe(struct platform_device *pdev)
 	}
 	if (desc == &ums9117_ap_clk_desc)
 		sdio0_clk.dev = &pdev->dev;
+#if IS_ENABLED(CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO) && \
+	IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
+	if (desc == &ums9117_ap_sdio1_clk_desc)
+		sdio1_clk.dev = &pdev->dev;
+#endif
 
 	return sprd_clk_probe(&pdev->dev, desc->hw_clks);
 }

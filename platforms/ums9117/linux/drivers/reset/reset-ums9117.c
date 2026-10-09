@@ -14,7 +14,7 @@
 #define UMS9117_AP_AHB_RESET_SET 0x1004
 #define UMS9117_AP_AHB_RESET_CLEAR 0x2004
 
-/* SDIO0 reset is bit 11; write-one aliases avoid RMW of shared reset state. */
+/* Write-one aliases avoid RMW of shared reset state. */
 struct ums9117_reset {
 	struct regmap *regmap;
 	struct reset_controller_dev rcdev;
@@ -22,6 +22,10 @@ struct ums9117_reset {
 
 static const u32 ums9117_ap_ahb_reset_bits[] = {
 	[RESET_SDIO0] = BIT(11),
+#if IS_ENABLED(CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO) && \
+	IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
+	[RESET_SDIO1] = BIT(12),
+#endif
 };
 
 static struct ums9117_reset *
@@ -121,7 +125,7 @@ static int ums9117_reset_probe(struct platform_device *pdev)
 				     "failed to get AP AHB syscon\n");
 
 	reset->rcdev.owner = THIS_MODULE;
-	reset->rcdev.nr_resets = RESET_AP_AHB_NUM;
+	reset->rcdev.nr_resets = ARRAY_SIZE(ums9117_ap_ahb_reset_bits);
 	reset->rcdev.ops = &ums9117_reset_ops;
 	reset->rcdev.of_node = pdev->dev.of_node;
 	reset->rcdev.dev = &pdev->dev;

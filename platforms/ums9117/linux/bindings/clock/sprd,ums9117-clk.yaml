@@ -15,7 +15,9 @@ description: |
   selects the 26 MHz source with divider one. While prepared, the AP clock
   provider owns the three-bit SDIO0 selector, selects its 195 MHz source and
   restores the previous selector value when unprepared. It does not change the
-  source PLL. The sensor provider selects and divides an inherited 48 MHz
+  source PLL. The SDIO1 provider owns its three-bit selector while prepared,
+  selects the 26 MHz input's 13 MHz output, and restores the prior selector
+  when unprepared. The sensor provider selects and divides an inherited 48 MHz
   source, enables the sensor gate while prepared, and restores the prior
   selector, divider and gate state when unprepared. It does not control the
   inherited source. The clock indices are defined in
@@ -28,6 +30,7 @@ allOf:
           enum:
             - sprd,ums9117-ap-clk
             - sprd,ums9117-ap-i2c0-clk
+            - sprd,ums9117-ap-sdio1-clk
             - sprd,ums9117-aon-sensor-clk
     then:
       required:
@@ -60,6 +63,7 @@ properties:
     enum:
       - sprd,ums9117-ap-clk
       - sprd,ums9117-ap-i2c0-clk
+      - sprd,ums9117-ap-sdio1-clk
       - sprd,ums9117-aon-sensor-clk
       - sprd,ums9117-aonapb-gate
       - sprd,ums9117-apapb-gate

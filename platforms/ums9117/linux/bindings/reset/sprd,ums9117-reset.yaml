@@ -12,6 +12,8 @@ maintainers:
 description:
   Reset controller for the UMS9117 application AHB register bank. Reset lines
   use separate write-one SET and CLEAR aliases instead of read-modify-write.
+  The SDIO0 and SDIO1 reset indices are defined in
+  dt-bindings/reset/sprd,ums9117-reset.h.
 
 properties:
   compatible:

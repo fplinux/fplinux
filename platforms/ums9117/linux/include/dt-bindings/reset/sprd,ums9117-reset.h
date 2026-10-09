@@ -3,6 +3,7 @@
 #define _DT_BINDINGS_RESET_SPRD_UMS9117_H
 
 #define RESET_SDIO0 0
-#define RESET_AP_AHB_NUM 1
+#define RESET_SDIO1 1
+#define RESET_AP_AHB_NUM 2
 
 #endif

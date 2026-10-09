@@ -22,11 +22,16 @@
 /* AP AHB gates */
 #define CLK_DMA_EB 0
 #define CLK_SDIO0_EB 1
-#define CLK_AP_AHB_GATE_NUM 2
+#define CLK_SDIO1_EB 2
+#define CLK_AP_AHB_GATE_NUM 3
 
 /* AP functional clocks */
 #define CLK_SDIO0 0
 #define CLK_AP_CLK_NUM 1
+
+/* AP SDIO1 functional clock */
+#define CLK_SDIO1 0
+#define CLK_AP_SDIO1_CLK_NUM 1
 
 /* AP I2C0 functional clock */
 #define CLK_AP_I2C0 0
