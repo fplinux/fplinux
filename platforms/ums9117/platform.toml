@@ -219,6 +219,14 @@ source = "platforms/ums9117/linux/drivers/media/platform/ums9117/ums9117-dcam-fo
 destination = "drivers/media/platform/ums9117/ums9117-dcam-format.h"
 
 [[linux.copies]]
+source = "platforms/ums9117/linux/drivers/media/i2c/gc032a.c"
+destination = "drivers/media/i2c/gc032a.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/linux/bindings/media/i2c/galaxycore,gc032a.yaml"
+destination = "Documentation/devicetree/bindings/media/i2c/galaxycore,gc032a.yaml"
+
+[[linux.copies]]
 source = "platforms/ums9117/linux/drivers/media/i2c/bf30a2.c"
 destination = "drivers/media/i2c/bf30a2.c"
 
@@ -572,6 +580,14 @@ destination = "drivers/media/i2c/Kconfig"
 
 [[linux.appends]]
 source = "platforms/ums9117/linux/drivers/media/i2c/bf30a2.Makefile"
+destination = "drivers/media/i2c/Makefile"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/media/i2c/gc032a.Kconfig"
+destination = "drivers/media/i2c/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/media/i2c/gc032a.Makefile"
 destination = "drivers/media/i2c/Makefile"
 
 [[linux.appends]]
