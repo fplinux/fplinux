@@ -698,6 +698,9 @@ void ums9117_audio_start(struct ums9117_audio *audio)
 		    UMS9117_AUD_DAC_CHANNELS);
 	update_bits(audio->aud, UMS9117_AUD_DAC, UMS9117_AUD_DAC_MUTE, 0);
 	readl(audio->aud + UMS9117_AUD_DAC);
+
+	if (!audio->dac_running && audio->alc_on)
+		switch_alc(audio, true);
 	audio->dac_running = true;
 }
 
