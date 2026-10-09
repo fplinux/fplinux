@@ -197,6 +197,13 @@ def command_action(
             boot=args.boot,
             candidate=args.candidate,
         )
+        if args.autonomous or args.host != "linux" or args.offline:
+            action = partial(
+                action,
+                autonomous=args.autonomous,
+                host=args.host,
+                offline=args.offline,
+            )
     elif args.command == "prune":
         from fplinux_cli.cache.prune.operations import prune  # noqa: PLC0415 -- selected backend.
 

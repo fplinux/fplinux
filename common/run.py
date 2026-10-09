@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, NoReturn
 if TYPE_CHECKING:
     from collections.abc import Callable
     from types import FrameType, ModuleType
+    from typing import TextIO
 
 ADAPTER_PATH = "runner/platform_adapter.py"
 IDENTITY_PATH = "runner/identity.py"
@@ -382,11 +383,15 @@ def main() -> None:
         fail("SSH client returned without replacing the runner")
 
 
-def run_bundle(
+def run_bundle(  # noqa: PLR0913 -- bundle, session actions, data and log destinations stay explicit.
     bundle: Path,
     runtime: dict[str, Any],
     options: argparse.Namespace,
     emit: Callable[[str], None],
+    *,
+    device_data: Path | None = None,
+    output: TextIO | None = None,
+    setup_host: bool = False,
 ) -> tuple[ModuleType, dict[str, Any]] | None:
     """Enter the verified runner and keep its observable stages in one stream."""
     if not options.reconnect:
@@ -443,6 +448,9 @@ def run_bundle(
             session,
             expected_device_identity=device_identity,
             events=emit,
+            device_data=device_data,
+            output=output,
+            setup_host=setup_host,
         )
     finally:
         if session is not None:

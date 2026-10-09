@@ -210,7 +210,9 @@ class BridgeAcknowledgementTests(BridgeFixture):
                 "test-linux",
             ]
         )
-        assert (popen.call_args.kwargs) == ({"cwd": bundle / "assets"})
+        assert (popen.call_args.kwargs["cwd"]) == (bundle / "assets")
+        assert popen.call_args.kwargs.get("stdout") is None
+        assert popen.call_args.kwargs.get("stderr") is None
         assert (bridge.wait_timeouts) == ([60])
         transport_module.remove_personalized_image.assert_called_once()
 

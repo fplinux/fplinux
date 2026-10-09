@@ -3,16 +3,21 @@
 
 from __future__ import annotations
 
+import hashlib
+import zipfile
 from typing import TYPE_CHECKING
 
 import pytest
 from fplinux_cli import common
-from fplinux_cli.cli import package_docs
+from fplinux_cli.cli import package, package_docs
 
 from tests.small.cli.package_docs_fixtures import write_offline_export
+from tests.small.cli.test_autonomous_package import archive_inputs  # noqa: F401 -- pytest fixture.
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from tests.small.cli.test_autonomous_package import ArchiveInputs
 
 
 def test_offline_export_requires_a_completed_build(
@@ -44,3 +49,57 @@ def test_offline_export_tracks_site_inputs_and_ignores_unrelated_changes(
         package_docs.offline_documentation()
     revised = write_offline_export(tmp_path, text="Revised documentation")
     assert package_docs.offline_documentation() == revised
+
+
+@pytest.mark.parametrize(
+    ("autonomous", "host"), [(False, "linux"), (True, "linux"), (True, "windows10")]
+)
+def test_host_zip_contains_current_docs_without_changing_phone_qualification(
+    archive_inputs: ArchiveInputs,  # noqa: F811 -- pytest injects the imported fixture.
+    capsys: pytest.CaptureFixture[str],
+    *,
+    autonomous: bool,
+    host: str,
+) -> None:
+    """Synthetic builds keep their phone receipt when only generated docs change."""
+    inputs = archive_inputs
+    package.package_target(inputs.target, autonomous=autonomous, host=host, candidate=True)
+    first_output = capsys.readouterr().out
+    phone_digest = next(
+        line.removeprefix("Phone-test payload SHA256: ")
+        for line in first_output.splitlines()
+        if line.startswith("Phone-test payload SHA256: ")
+    )
+    original = next((inputs.root / ".cache/out/candidates").glob("*.zip"))
+    (inputs.root / "releases.lock.toml").write_text(
+        f'[verified]\n{inputs.target} = "{phone_digest}"\n', encoding="utf-8"
+    )
+    expected = write_offline_export(inputs.root, text="Updated archive documentation")
+    package.package_target(inputs.target, autonomous=autonomous, host=host, candidate=True)
+    candidates = list((inputs.root / ".cache/out/candidates").glob("*.zip"))
+    assert len(candidates) == 2
+    assert (
+        next(path for path in candidates if path != original).read_bytes() != original.read_bytes()
+    )
+    capsys.readouterr()
+    package.package_target(inputs.target, autonomous=autonomous, host=host)
+    assert f"Phone-test payload SHA256: {phone_digest}\n" in capsys.readouterr().out
+    current = next((inputs.root / ".cache/out/releases").glob("*.zip"))
+    assert current.name != original.name
+    with zipfile.ZipFile(current) as archive:
+        prefix = archive.namelist()[0].partition("/")[0] + "/"
+        contents = {name.removeprefix(prefix): archive.read(name) for name in archive.namelist()}
+        actual_docs = {name: data for name, data in contents.items() if name.startswith("docs/")}
+        assert actual_docs == expected
+        assert contents["image/ramboot.bin"] == (inputs.bundle / "image/ramboot.bin").read_bytes()
+        assert not any(name.startswith(".cache/") for name in contents)
+        assert "site-offline-receipt.json" not in contents
+        checksums = {
+            relative: digest
+            for digest, relative in (
+                line.split("  ", 1) for line in contents["SHA256SUMS"].decode().splitlines()
+            )
+        }
+        for name, data in expected.items():
+            assert checksums[name] == hashlib.sha256(data).hexdigest()
+            assert archive.getinfo(prefix + name).external_attr >> 16 == 0o100644

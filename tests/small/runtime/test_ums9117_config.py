@@ -120,7 +120,10 @@ class AdapterPreflightTests(BridgeFixture):
         served: dict[str, bytes] = {}
         directories: list[Path] = []
 
-        def start_bridge(_argv: list[str], *, cwd: Path) -> BridgeProcess:
+        def start_bridge(
+            _argv: list[str], *, cwd: Path, stdout: object = None, stderr: object = None
+        ) -> BridgeProcess:
+            del stdout, stderr
             directories.append(cwd)
             served.update({path.name: path.read_bytes() for path in cwd.iterdir()})
             return bridge

@@ -10,6 +10,7 @@ from typing import Any
 
 from fplinux_cli import common
 from fplinux_cli.cli import bundles as cli_bundles
+from fplinux_cli.cli.autonomous_package import autonomous_payload
 from fplinux_cli.cli.package_docs import offline_documentation
 from fplinux_cli.common import ZIP_TIMESTAMP, fail, payload_digest, sha256_bytes, sha256_file
 from fplinux_cli.environment import image_state as image_states
@@ -145,20 +146,31 @@ def add_target_files(
         files[archive_name] = source.read_bytes()
 
 
-def package_target(
+def package_target(  # noqa: PLR0913 -- archive host and build selectors remain explicit.
     target: str,
     *,
     profile: str | None = None,
     build_type: str = "release",
     boot: str | None = None,
     candidate: bool = False,
+    autonomous: bool = False,
+    host: str = "linux",
+    offline: bool = False,
 ) -> None:
+    if host not in {"linux", "windows10"}:
+        fail("package host must be linux or windows10")
+    if host == "windows10" and not autonomous:
+        fail("--host windows10 requires --autonomous")
+    if offline and not autonomous:
+        fail("package --offline requires --autonomous")
     selected_profile = runtime_bundle_session.selected_context_profile(
         target, profile=profile, boot=boot
     )
     if selected_profile is not None and not candidate:
         fail("non-default boot contexts can only be packaged with --candidate")
     config = targets.load_target(target, selected_profile, build_type=build_type)
+    if autonomous and config["linux"]["root"]["kind"] != "initramfs":
+        fail("--autonomous supports only the RAM boot context")
     release = load_release_manifest(target, config)
     documentation = offline_documentation()
     bundle, manifest = runtime_bundle_session.resolve_target_bundle(
@@ -213,8 +225,22 @@ def package_target(
             fail(f"release input differs from its successful build manifest: {source}")
         files[relative] = data
 
+    executables = set(release["executables"])
+    add_target_files(files, target, release["documents"])
+    if autonomous:
+        files.pop("device-data.cpio", None)
+        qualification_files = [
+            relative for relative in qualification_files if relative != "device-data.cpio"
+        ]
+        additions = autonomous_payload(target, config, host=host, offline=offline)
+        collisions = (set(additions.files) & set(files)) - {"README.txt"}
+        if collisions:
+            fail(f"duplicate autonomous archive path: {min(collisions)}")
+        files.update(additions.files)
+        qualification_files.extend(additions.files)
+        executables.update(additions.executables)
     qualification_payload = {relative: files[relative] for relative in qualification_files}
-    qualification_digest = payload_digest(qualification_payload, release["executables"])
+    qualification_digest = payload_digest(qualification_payload, executables)
     files["build-manifest.json"] = bundle.manifest_bytes
     verified_digest = None if candidate else releases.verified_runtime_digest(target)
     if not candidate and verified_digest != qualification_digest:
@@ -224,7 +250,6 @@ def package_target(
             f"(phone-test payload SHA256 {qualification_digest})"
         )
 
-    add_target_files(files, target, release["documents"])
     if candidate:
         files["CANDIDATE-NOTICE.txt"] = CANDIDATE_NOTICE
     collisions = set(files) & set(documentation)
@@ -238,12 +263,16 @@ def package_target(
         files[archive_name] = source.read_bytes()
     checksums = "".join(f"{sha256_bytes(files[name])}  {name}\n" for name in sorted(files))
     files["SHA256SUMS"] = checksums.encode()
-    content_digest = payload_digest(files, release["executables"])
+    content_digest = payload_digest(files, executables)
 
     qualifier = f"{build_type}-candidate" if candidate else build_type
     context = boot if boot is not None else selected_profile
     context_component = "" if context is None else f"-{context}"
-    stem = f"FPLinux-{target}{context_component}-{qualifier}-linux-x86_64-{content_digest[:16]}"
+    autonomous_component = "-autonomous" if autonomous else ""
+    stem = (
+        f"FPLinux-{target}{context_component}-{qualifier}{autonomous_component}"
+        f"-{host}-x86_64-{content_digest[:16]}"
+    )
     destination = common.ROOT / ".cache/out" / ("candidates" if candidate else "releases")
     destination.mkdir(parents=True, exist_ok=True)
     archive = destination / f"{stem}.zip"
@@ -259,7 +288,7 @@ def package_target(
             for relative in sorted(files):
                 info = zipfile.ZipInfo(f"{stem}/{relative}", ZIP_TIMESTAMP)
                 info.create_system = 3
-                mode = 0o100755 if relative in release["executables"] else 0o100644
+                mode = 0o100755 if relative in executables else 0o100644
                 info.external_attr = mode << 16
                 info.compress_type = zipfile.ZIP_STORED
                 output.writestr(info, files[relative])

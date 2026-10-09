@@ -518,6 +518,41 @@ class CliCacheLockTests:
         assert (callback.call_args.kwargs["profile"]) == ("microsd-uboot")
 
     @pytest.mark.parametrize(
+        ("options", "autonomous", "host", "offline"),
+        [
+            (["--autonomous"], True, "linux", False),
+            (["--autonomous", "--host", "windows10", "--offline"], True, "windows10", True),
+            (["--host", "windows10"], False, "windows10", False),
+            (["--offline"], False, "linux", True),
+        ],
+        ids=["linux-autonomous", "windows-autonomous-offline", "windows-policy", "offline-policy"],
+    )
+    def test_package_host_options_reach_the_backend_under_the_required_lock(
+        self, *, options: list[str], autonomous: bool, host: str, offline: bool
+    ) -> None:
+        """Forward host policy inputs; only autonomous preparation owns a writer lock."""
+        events, package = self._run(
+            ["package", "target", "--candidate", *options],
+            "fplinux_cli.cli.package.package_target",
+        )
+
+        assert events == [
+            ("lock", self.root / ".cache", autonomous, "package", "target", None),
+            "command",
+            "unlock",
+        ]
+        package.assert_called_once_with(
+            "target",
+            profile=None,
+            build_type="release",
+            boot=None,
+            candidate=True,
+            autonomous=autonomous,
+            host=host,
+            offline=offline,
+        )
+
+    @pytest.mark.parametrize(
         ("arguments", "callback_name", "expected_call"),
         [
             (

@@ -18,12 +18,14 @@ from typing import TYPE_CHECKING, Any, NoReturn
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
+    from typing import TextIO
 
 BACKLIGHT_CHANNELS = "rgbw"
 SESSION_ID = re.compile(r"[0-9a-f]{64}\Z")
 DISPLAY_KEYS = frozenset({"spi_mode", "lcd_id", "backlight_channels", "backlight_level"})
 # A pin map holding only its all-ones terminator applies no board pin entry.
 NEUTRAL_PINMAP = b"\xff" * 8
+USB_RULES_FILE = Path("/etc/udev/rules.d/60-fplinux.rules")
 
 
 def fail(message: str) -> NoReturn:
@@ -315,13 +317,36 @@ def complete_linux_handoff(
     return ready
 
 
-def run(
+def prepare_usb_access(bundle: Path) -> None:
+    """Install the phone access rules once without replacing existing local rules."""
+    if USB_RULES_FILE.exists():
+        return
+    rules = bundle / "60-fplinux.rules"
+    if not rules.is_file():
+        fail("The archive's phone USB access rules are missing")
+    sudo = shutil.which("sudo")
+    udevadm = shutil.which("udevadm")
+    if sudo is None or udevadm is None:
+        fail("sudo and udevadm are required for the initial phone USB access setup")
+    for command in (
+        [sudo, "install", "-m", "0644", str(rules), str(USB_RULES_FILE)],
+        [sudo, udevadm, "control", "--reload-rules"],
+    ):
+        result = subprocess.run(command, check=False)
+        if result.returncode:
+            fail("Phone USB access setup was not completed; restart Run.sh to try again")
+
+
+def run(  # noqa: PLR0913 -- runtime, session, handoff, user data and output are distinct inputs.
     bundle: Path,
     runtime: dict[str, Any],
     session: dict[str, Any],
     *,
     expected_device_identity: str,
     events: Callable[[str], None] | None = None,
+    device_data: Path | None = None,
+    output: TextIO | None = None,
+    setup_host: bool = False,
 ) -> dict[str, Any] | None:
     """Execute the fixed RAM-only UMS9117 sequence for one declared transport."""
     display_name = runtime_target_display_name(runtime)
@@ -342,6 +367,10 @@ def run(
     if set(tools) != {"loader", "bridge", "keyboard"}:
         fail("runtime host tools do not match the UMS9117 platform contract")
     config = adapter_config(runtime["adapter"])
+    if setup_host and not USB_RULES_FILE.exists():
+        if events is not None:
+            events("usb-access-setup")
+        prepare_usb_access(bundle)
     stdbuf = shutil.which("stdbuf")
     if stdbuf is None:
         fail("GNU stdbuf is required (install coreutils before starting the RAM loader)")
@@ -410,7 +439,12 @@ def run(
                     time.sleep(0.01)
                     continue
                 break
-            result = subprocess.run(loader_argv, check=False)
+            result = subprocess.run(
+                loader_argv,
+                check=False,
+                stdout=output,
+                stderr=subprocess.STDOUT if output is not None else None,
+            )
             if result.returncode == 0:
                 successful_bootrom_device = bootrom_device
                 if events is not None:
@@ -453,10 +487,15 @@ def run(
             config["session_name"],
         ]
     )
-    with map_directory(bundle, assets) as maps:
+    with map_directory(bundle, assets, device_data=device_data) as maps:
         bridge_process: subprocess.Popen[Any] | None = None
         try:
-            bridge_process = subprocess.Popen(bridge_argv, cwd=maps)
+            bridge_process = subprocess.Popen(
+                bridge_argv,
+                cwd=maps,
+                stdout=output,
+                stderr=subprocess.STDOUT if output is not None else None,
+            )
             try:
                 status = bridge_process.wait(timeout=config["handoff_wait_seconds"])
             except subprocess.TimeoutExpired:

@@ -14,20 +14,18 @@ from fplinux_cli.cli.build import build, prepare_host_tool
 from fplinux_cli.cli.nand import backup_target_nand
 from fplinux_cli.common import ROOT, fail, replace_file_atomically
 from fplinux_cli.device_data.formats import PhysicalNand
-from fplinux_cli.device_data.inputs import capture_device_data_generation
 from fplinux_cli.device_data.prepare import (
     BOARD_MAPS_GROUP,
     NAND_ECC_TOOL,
     _board_maps_extractor,
     _create_staging_generation,
     _extract_groups,
-    _materialize_groups,
     _nand_main_decoder,
     _read_dump,
     _require_directory,
-    _select_generation,
-    _write_receipt,
     dump_page_bytes,
+    materialize_device_data,
+    publish_device_data_generation,
 )
 from fplinux_cli.manifests.targets import load_target
 from fplinux_cli.reporting.run import RunReporter
@@ -151,22 +149,17 @@ def prepare_device_data(
                     nand,
                     board_maps=board_maps,
                 )
-            _materialize_groups(staging, extracted)
-            admitted = capture_device_data_generation(
-                declarations,
-                staging,
-                path_field="source",
-                require_all=True,
-            )
+            admitted = materialize_device_data(staging, extracted, declarations)
         with reporter.stage("publish"):
-            _write_receipt(
+            generation = publish_device_data_generation(
+                cache,
+                target,
                 staging,
                 source_kind=source_kind,
                 raw=raw,
                 groups=extracted,
                 admitted=admitted,
             )
-            generation = _select_generation(cache, target, staging)
             selected = True
     finally:
         if not selected and staging.exists():

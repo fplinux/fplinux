@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import struct
 import subprocess
@@ -336,7 +337,8 @@ def prepare_board_maps(nand: PhysicalNand, *, host_tools: Path) -> PreparedGroup
     stock image is kept as the group's original; the report is for review and
     is not a build input.
     """
-    tool = host_tools / TOOL_NAME
+    tool_name = TOOL_NAME + ".exe" if os.name == "nt" else TOOL_NAME
+    tool = host_tools / tool_name
     if tool.is_symlink() or not tool.is_file():
         message = f"host tool {TOOL_NAME} is missing from the current build; rebuild the target"
         raise ValueError(message)

@@ -27,6 +27,7 @@ from fplinux_cli.device_data.formats import (
 )
 from fplinux_cli.device_data.inputs import (
     FirmwareInput,
+    capture_device_data_generation,
     device_data_cache_directory,
 )
 from fplinux_cli.runtime.nand_backup import require_declared_chip
@@ -310,6 +311,18 @@ def _materialize_groups(staging: Path, groups: Mapping[str, PreparedGroup]) -> N
             _publish_files(reports / group_name, files, f"device-data reports for {group_name}")
 
 
+def materialize_device_data(
+    staging: Path,
+    groups: Mapping[str, PreparedGroup],
+    declarations: Mapping[str, list[dict[str, Any]]],
+) -> dict[str, tuple[FirmwareInput, ...]]:
+    """Save extracted groups and admit every declared file before publication."""
+    _materialize_groups(staging, groups)
+    return capture_device_data_generation(
+        declarations, staging, path_field="source", require_all=True
+    )
+
+
 def _write_receipt(
     staging: Path,
     *,
@@ -364,3 +377,18 @@ def _select_generation(cache: Path, target: str, staging: Path) -> Path:
             shutil.rmtree(generation)
         fail(f"device-data generation cannot be selected: {error}")
     return generation
+
+
+def publish_device_data_generation(  # noqa: PLR0913 -- publication state and receipt inputs.
+    cache: Path,
+    target: str,
+    staging: Path,
+    *,
+    source_kind: str,
+    raw: bytes,
+    groups: Mapping[str, PreparedGroup],
+    admitted: Mapping[str, tuple[FirmwareInput, ...]],
+) -> Path:
+    """Write the preparation receipt before selecting the complete generation."""
+    _write_receipt(staging, source_kind=source_kind, raw=raw, groups=groups, admitted=admitted)
+    return _select_generation(cache, target, staging)

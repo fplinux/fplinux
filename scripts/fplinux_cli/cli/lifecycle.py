@@ -43,7 +43,7 @@ def _cache_lock_exclusive(args: argparse.Namespace) -> bool | None:
     if args.command in _EXCLUSIVE_CACHE_COMMANDS:
         return True
     if args.command in _SHARED_CACHE_COMMANDS:
-        return False
+        return bool(args.command == "package" and args.autonomous)
     return None
 
 

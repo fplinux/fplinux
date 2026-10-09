@@ -311,7 +311,7 @@ def create_parser(
         help="regenerate only from the prepared Alpine source cache without network access",
     )
     package_parser = commands.add_parser(
-        "package", help="package an existing build for Linux x86-64"
+        "package", help="package an existing build for standalone use"
     )
     _add_build_type_option(package_parser)
     package_parser.add_argument("target", choices=targets)
@@ -320,6 +320,22 @@ def create_parser(
         "--candidate",
         action="store_true",
         help="create a clearly marked phone-test candidate",
+    )
+    package_parser.add_argument(
+        "--autonomous",
+        action="store_true",
+        help="prepare this phone's own data on first run and boot it on later runs",
+    )
+    package_parser.add_argument(
+        "--host",
+        choices=("linux", "windows10"),
+        default="linux",
+        help="select the x86-64 host (default: linux; windows10 requires --autonomous)",
+    )
+    package_parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="prepare autonomous host dependencies only from the existing download cache",
     )
     prune_parser = commands.add_parser(
         "prune", help="show a safe cache-prune inventory or apply it"
