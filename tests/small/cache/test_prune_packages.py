@@ -104,16 +104,18 @@ class PackagePruneTests:
             pytest.param("targeted", id="targeted-retention"),
         ],
     )
-    def test_selected_child_packages_preserve_their_aport_cache_slots(
+    def test_selected_packages_retain_producers_and_transitive_build_dependencies(
         tmp_path: Path, cleanup: str
     ) -> None:
-        """Child selections retain producer output through planned and targeted cleanup."""
+        """Rootfs and bundle selections retain producers and transitive build libraries."""
         cache = tmp_path / ".cache"
         apks = cache / "apks"
         for package in (
             "fplinux-font-test",
             "fplinux-bundle-test",
             "fplinux-standalone",
+            "fplinux-text-build",
+            "fplinux-math-build",
             "fplinux-obsolete",
         ):
             directory = apks / package
@@ -144,6 +146,15 @@ class PackagePruneTests:
                     "fplinux-bundle-test-data": "fplinux-bundle-test",
                 },
             ),
+            mock.patch.object(
+                alpine_registration,
+                "LOCAL_BUILD_DEPENDENCIES",
+                {
+                    "fplinux-font-test": ("fplinux-text-build",),
+                    "fplinux-text-build": ("fplinux-math-build",),
+                    "fplinux-bundle-test": ("fplinux-math-build",),
+                },
+            ),
         ):
             plan = plan_prune(cache)
             assert ({entry.path: entry.action for entry in plan.entries}) == (
@@ -151,6 +162,8 @@ class PackagePruneTests:
                     "apks/fplinux-font-test": "protected",
                     "apks/fplinux-bundle-test": "protected",
                     "apks/fplinux-standalone": "protected",
+                    "apks/fplinux-text-build": "protected",
+                    "apks/fplinux-math-build": "protected",
                     "apks/fplinux-obsolete": "candidate",
                 }
             )
@@ -165,6 +178,8 @@ class PackagePruneTests:
         assert ((apks / "fplinux-font-test/payload").read_text()) == ("fplinux-font-test\n")
         assert ((apks / "fplinux-bundle-test/payload").read_text()) == ("fplinux-bundle-test\n")
         assert ((apks / "fplinux-standalone/payload").read_text()) == ("fplinux-standalone\n")
+        assert (apks / "fplinux-text-build/payload").read_text() == "fplinux-text-build\n"
+        assert (apks / "fplinux-math-build/payload").read_text() == "fplinux-math-build\n"
 
     @staticmethod
     def test_package_config_failure_protects_every_aport_cache_slot(tmp_path: Path) -> None:

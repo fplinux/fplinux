@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from fplinux_cli.alpine.lock import PACKAGE_ID
 from fplinux_cli.alpine.packages import PACKAGE_CACHE_DIRECTORY
 from fplinux_cli.alpine.recipes import alpine_rootfs_recipe
-from fplinux_cli.alpine.selection import aport_producer, bundle_packages, selected_packages
+from fplinux_cli.alpine.selection import aport_build_order, bundle_packages, selected_packages
 from fplinux_cli.alpine.signing import signing_key_identity
 from fplinux_cli.device_data import inputs as firmware_inputs
 from fplinux_cli.environment.image_state import load_image_state
@@ -140,9 +140,9 @@ def _current_apk_packages() -> frozenset[str] | None:
                         rootfs_packages,
                     )
                 )
+        return frozenset(aport_build_order(tuple(packages)))
     except KeyError, OSError, TypeError, ValueError, SystemExit:
         return None
-    return frozenset(aport_producer(package) for package in packages)
 
 
 def apk_entries(cache: Path) -> list[InventoryEntry]:
