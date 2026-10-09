@@ -3,14 +3,15 @@ title: Packaging
 description: Package a build as a standalone archive, inspect artifacts and measure image size.
 ---
 
-`./fplinux package` turns an existing build into a ZIP archive that runs on a
-Linux x86-64 PC without a source checkout. Users of the archive follow
+`./fplinux package` turns an existing build into a ZIP archive for a registered
+phone, without a source checkout on the user's PC. Users of the archive follow
 [Standalone archive](/fplinux/guides/standalone-archive/).
 
 ## Create a phone-test candidate
 
 ```sh title="PC"
 ./fplinux build nokia-ta1618
+(cd site && npm run build:offline)
 ./fplinux package nokia-ta1618 --candidate
 ```
 
@@ -25,6 +26,12 @@ Packaging uses the current build and does not rebuild it. If the source has
 changed since that build, it stops and prints the `build` command to run. Pass
 the same profile and build type as the build.
 
+Packaging also requires a current offline site export. Install the pinned site
+tools as described in [Contributing](/fplinux/develop/contributing/#preview-this-site),
+then run `npm run build:offline` from `site/`. After editing the site, export it
+again before packaging. All host archives carry the generated site under `docs/`;
+the phone image does not include it.
+
 A candidate contains `CANDIDATE-NOTICE.txt` and is meant only for testing on
 the phone. Do not publish it as a release. Creating or checking a candidate
 does not show that the phone boots or that any feature works.
@@ -37,6 +44,28 @@ profile and package it as a candidate; the archive then also contains
 ./fplinux build nokia-ta1618 --profile microsd-uboot
 ./fplinux package nokia-ta1618 --boot microsd --candidate
 ```
+
+## Create an autonomous RAM archive
+
+Build the phone once, then package it for either host:
+
+```sh title="PC"
+./fplinux build nokia-ta1618
+./fplinux package nokia-ta1618 --autonomous --host linux --candidate
+./fplinux package nokia-ta1618 --autonomous --host windows10 --candidate
+```
+
+The hosts are Linux x86-64 and Windows 10 or 11 x64. Each archive contains only
+the selected phone's configuration. It bundles Python, OpenSSH and extraction
+tools, and omits the build's prepared phone data. The owner uses the same
+`Run.sh` or `Run.cmd` twice: first to save and prepare their phone's own data,
+then to load FPLinux with that data. Follow
+[Standalone archive](/fplinux/guides/standalone-archive/) for host requirements,
+connection order and current qualification limits.
+
+Autonomous packaging supports the default RAM profile. Add `--offline` to use
+only dependencies already stored locally. Without `--autonomous`, packaging
+creates the ordinary Linux runner archive with its build's prepared data.
 
 ## Release archives
 

@@ -6,33 +6,100 @@ description: Run FPLinux from a packaged archive without a source checkout.
 import { Steps } from '@astrojs/starlight/components';
 
 A standalone archive runs FPLinux on one phone without a source checkout or
-build tools. It contains the image for that phone, the host runner, the
-optional APKs, USB rules, checksums and license notices. Its top-level
-`README.txt` names the phone, its boot key, minimum startup commands and how
-to end a session. Feature procedures and support checklists belong to this site.
+build tools. Use an archive for your exact phone and PC operating system.
+Its `README.txt` names the phone, its boot key and startup commands. Check the
+phone's [support status](/fplinux/phones/#support-status) and
+[phone page](/fplinux/phones/) for feature, storage and power limits.
 
-Use an archive for your exact phone. Check its
-[support status](/fplinux/phones/#support-status) and phone page for feature,
-storage and power limits.
+Open the included `docs/index.html` on your computer to read the documentation
+without an Internet connection or local server. Its search matches words and
+substrings; external links still need an Internet connection.
 
 :::note[No release archive is published yet]
 There are no published FPLinux release archives. You can package a phone-test
 candidate from your own build; see [Packaging](/fplinux/develop/packaging/).
 An archive with `CANDIDATE-NOTICE.txt` is such a candidate. It is for phone
 testing and must not be published as a release. Packaging it does not establish
-that it works on the phone.
+that it works on the phone. Autonomous first-run preparation and subsequent
+loading have not been qualified on phone hardware. The Windows host workflow
+has not been qualified on native Windows.
 :::
 
-## What you need
+## Autonomous RAM archive
 
-- A Linux x86-64 PC with Python 3.14.
-- GNU `stdbuf` from coreutils, `ip` from iproute2, and `ssh`, `ssh-keygen`,
-  `ssh-keyscan` and `sftp` from OpenSSH.
-- A network manager that automatically runs IPv4 DHCP on a newly attached USB
-  network interface, such as NetworkManager.
+An autonomous archive contains the RAM image, Python, OpenSSH, the extraction
+tools, optional APKs, checksums and license notices. It contains no prepared
+phone data. The first run saves a read-only backup of your phone's internal
+storage and prepares its firmware, audio profile, pin map and keymap. Later
+runs load the prepared firmware and audio data separately from the RAM kernel
+and use your phone's own maps. The internal storage is never erased or written.
+
+### What you need
+
+- A Linux x86-64 PC with coreutils, iproute2, udev and a network manager that
+  automatically runs IPv4 DHCP on a new USB network interface, such as
+  NetworkManager; or a Windows 10 or 11 x64 PC with Windows PowerShell.
 - A USB data cable that fits your phone.
+- Enough free space for the full internal-storage backup in the extracted
+  archive directory.
 
-## Prepare the PC
+Python and OpenSSH are bundled; no separate installation is needed. On Linux,
+the launcher asks for administrator access once if the included USB access
+rules need to be installed. On Windows, it can ask to install the included USB
+driver: read the displayed license, select its acceptance checkbox and approve
+the administrator prompt. Run the launcher as your regular user.
+
+### First run: prepare your phone
+
+<Steps>
+
+1. Extract the whole archive and keep the phone powered off and disconnected.
+
+2. Start the launcher from the extracted directory. On Linux:
+
+   ```sh title="PC"
+   sh Run.sh
+   ```
+
+   On Windows, double-click `Run.cmd`.
+
+3. Wait until the launcher displays the connection instructions. Only then
+   hold the boot key named in `README.txt` and connect the powered-off phone,
+   keeping the key pressed.
+
+4. Keep USB connected while the launcher saves the complete backup and prepares
+   the data. Wait until it reports that your phone data is ready.
+
+5. Disconnect USB. If the phone stays on, briefly remove and reinsert its
+   battery. The preparation session does not start a second load automatically.
+
+</Steps>
+
+The backup and prepared data stay in `.cache/` inside the extracted directory.
+Keep that directory for subsequent runs and treat it as
+[private phone data](/fplinux/guides/device-data/).
+Use it only with the same physical phone, even if another phone has the same
+model name. On Windows, the connection keys also stay here, in
+`.cache/sessions/`; `.cache/run.log` includes the launcher and USB loader output.
+If a run fails, read that log.
+
+### Subsequent runs
+
+Start `sh Run.sh` on Linux or `Run.cmd` on Windows again with the phone powered
+off and disconnected. Wait for the connection instructions, then connect it
+with its boot key held. The launcher loads FPLinux with your prepared data;
+use the phone's screen and keys when it reports that FPLinux is ready.
+
+## Linux runner archive
+
+An ordinary archive uses `runner/run.py` and includes the prepared device data
+of the build that produced it. It does not perform autonomous first-run
+preparation. You need Linux x86-64, Python 3.14, GNU `stdbuf` from coreutils,
+`ip` from iproute2, and `ssh`, `ssh-keygen`, `ssh-keyscan` and `sftp` from
+OpenSSH. A network manager must automatically run IPv4 DHCP on the phone's
+USB network interface.
+
+### Prepare the PC
 
 <Steps>
 
@@ -64,7 +131,7 @@ If the archive contains `FPLINUX.img.xz`, it boots from a microSD system card.
 Prepare the card first; see
 [microSD system card](/fplinux/guides/microsd-system-card/).
 
-## Start a session
+### Start a session
 
 Run the runner as your regular user, not as root.
 
@@ -87,12 +154,7 @@ Run the runner as your regular user, not as root.
 
 </Steps>
 
-:::caution[Connect the phone only when the runner asks]
-If you connected the phone too early, disconnect it, power it off and start
-again from step 1.
-:::
-
-## Use the running phone
+### Use the running phone
 
 Exiting the shell does not stop Linux. Reconnect, run one command or copy
 files with `--reconnect`:
@@ -107,12 +169,14 @@ files with `--reconnect`:
 To add applications, see [Optional packages](/fplinux/guides/packages/). The
 feature pages describe how to use supported features from an archive.
 
-For machine-readable progress during a fresh load, add `--events PATH`; see
-[loader events](/fplinux/start/run/#for-automation-loader-events).
+For machine-readable progress during a fresh runner load, add `--events PATH`;
+see [loader events](/fplinux/start/run/#for-automation-loader-events).
 
-## End the session
+## Connection order and shutdown
 
-Exiting the shell leaves Linux running. To end the session without losing
-data, follow the shutdown procedure in `README.txt`;
-[Power](/fplinux/use/power/) describes it for every phone. Without a battery,
+Connect the phone only when the launcher or runner asks. If you connected it
+too early, disconnect it, power it off and start again.
+
+Exiting a launcher or shell leaves Linux running. To end the session without
+losing data, follow [Power](/fplinux/use/power/). Without a battery,
 disconnecting USB cuts power immediately.

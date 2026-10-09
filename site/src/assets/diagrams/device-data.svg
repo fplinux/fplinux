@@ -20,8 +20,8 @@
 <text x="438" y="101" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">Prepared</text>
 <text x="438" y="119" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">data</text>
 <rect x="584" y="74" width="112" height="64" rx="10" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
-<text x="640" y="101" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">Image for</text>
-<text x="640" y="119" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">this phone</text>
+<text x="640" y="101" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">RAM image</text>
+<text x="640" y="119" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700" text-anchor="middle">+ own data</text>
 <text x="337" y="66" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">./fplinux</text>
 <text x="337" y="80" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">device-data</text>
 <text x="337" y="94" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">prepare</text>

@@ -9,7 +9,8 @@ description: Short answers to common questions about what FPLinux does on a phon
 
 No. FPLinux does not use the phone's modem, so calls, SMS and mobile data do
 not work. For Internet access on the phone, share a connection over
-[Bluetooth](/fplinux/use/bluetooth/#internet-over-bluetooth-pan).
+[Bluetooth](/fplinux/use/bluetooth/#internet-over-bluetooth-pan), or use Wi-Fi
+where your [phone page](/fplinux/phones/) lists support.
 
 ### Does FPLinux stay on the phone?
 
@@ -41,7 +42,9 @@ your keypad phone uses the Unisoc UMS9117, create a headless target and try
 
 ### Is there Wi-Fi?
 
-No. FPLinux does not support Wi-Fi on any current target.
+Wi-Fi station and access-point modes are supported on
+[BQ 2830L Tank Connect Max](/fplinux/phones/bq-2830l-tank-connect-max/).
+Check that phone's limits; the other current targets have no supported Wi-Fi path.
 
 ### Does it show the battery level?
 
@@ -60,9 +63,11 @@ your image. FPLinux configures no package repository on the phone.
 
 ### What do I need on my computer?
 
-A Linux x86-64 PC with Python 3.14 and network access for the first build.
-Running the phone also needs a few standard tools; see
+Building from source needs a Linux x86-64 PC with Python 3.14 and network
+access for the first build. Running your build uses the tools listed in
 [Run FPLinux](/fplinux/start/run/#before-you-start).
+A [standalone archive](/fplinux/guides/standalone-archive/) bundles its runtime
+for Linux x86-64 or Windows 10/11 x64 and lists its remaining host requirements.
 
 ### Do I need Docker or Podman?
 

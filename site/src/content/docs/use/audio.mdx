@@ -24,10 +24,13 @@ automatic headphone switching. Run commands in a shell on the phone, either in t
 
 The speaker, full volume range and equalizer, where supported, use
 [device data](/fplinux/guides/device-data/) prepared from the same phone
-before the image is built. Without device data, headphones still play with a
+before it is loaded. Without device data, headphones still play with a
 smaller volume range and the speaker controls are missing. Do not reuse device
-data from another phone, even of the same model. A standalone archive contains
-the device data of the build that produced it.
+data from another phone, even of the same model. An
+[autonomous RAM archive](/fplinux/guides/standalone-archive/) prepares your
+phone's data on first use and loads it separately from the RAM kernel.
+With a source checkout, prepare the data and build again. An ordinary
+standalone archive contains the prepared data of its build.
 
 ## Play a file
 

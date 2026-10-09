@@ -304,8 +304,9 @@ feature_c0=0x00
 ```
 
 `geometry_source=table` means that the reader recognised the chip from its list
-of known chips. FPLinux has read FM25LG01B, DS35M1GA and F35UQA001G chips on supported
-phones; the reader also knows other chips that no supported phone uses. The
+of known chips. FPLinux has read FM25LG01B, DS35M1GA, F35UQA001G and
+GD5F1GM7RExxG chips on supported phones; the reader also knows other chips that
+no supported phone uses. The
 [reference](#nand-backup-reference) below describes every field.
 
 - **`chip=unknown`**: the reader does not know the chip. The report shows zero
@@ -313,7 +314,7 @@ phones; the reader also knows other chips that no supported phone uses. The
   feature values. A backup is not possible. [Report the phone](#report-the-phone)
   with the complete `nand identify` output and a photo of the markings on the
   flash chip.
-- **A chip other than FM25LG01B, DS35M1GA or F35UQA001G**: the reader identifies
+- **A chip other than FM25LG01B, DS35M1GA, F35UQA001G or GD5F1GM7RExxG**: the reader identifies
   it and the backup proceeds, but no FPLinux
   phone has used that chip before, so its entry in the reader's list has not
   been checked against a real chip. Save the backup and state in the report that
@@ -394,7 +395,7 @@ Do not attach the NAND backup or any stock firmware image.
 ## After the report
 
 Display, keypad, audio and Bluetooth support are completed by hand from the
-backup and board report. The four existing targets under `targets/` provide
+backup and board report. The existing targets under `targets/` provide
 board examples, and
 [UMS9117 platform](/fplinux/porting/ums9117/) lists what a target supplies.
 

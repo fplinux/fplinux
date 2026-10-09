@@ -46,8 +46,9 @@ backups.
 
 ### Device data
 
-Bluetooth firmware, FM settings, audio tuning and, on targets that declare
-them, board maps read from your own phone's internal storage. FPLinux does not
+Radio firmware and calibration, Bluetooth records, FM settings, audio tuning
+and, on targets that declare them, board maps read from your own phone's
+internal storage. FPLinux does not
 ship these inputs. See
 [Device data](/fplinux/guides/device-data/).
 
@@ -57,7 +58,9 @@ ship these inputs. See
 
 The PC side of a start: `./fplinux run` in a source checkout, or the runner
 in a [standalone archive](/fplinux/guides/standalone-archive/). It sends
-FPLinux over USB and opens a shell when started from an interactive terminal.
+FPLinux over USB. The ordinary runner opens a shell when started from an
+interactive terminal; the autonomous archive launcher prepares your data on
+first use and starts the phone interface on later runs.
 See [Run FPLinux](/fplinux/start/run/).
 
 ### Boot key

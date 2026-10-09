@@ -17,7 +17,7 @@
 <text x="632" y="152" class="dg-text-small" fill="#202D35" font-size="12" text-anchor="middle">USB network device</text>
 <text x="632" y="168" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">0525:a4a6</text>
 <rect x="178" y="34" width="92" height="48" rx="10" class="dg-box-accent" fill="#FADEBE" stroke="#855300" stroke-width="1.5"/>
-<text x="224" y="54" class="dg-text-small" fill="#202D35" font-size="12" text-anchor="middle">Hold * and</text>
+<text x="224" y="54" class="dg-text-small" fill="#202D35" font-size="12" text-anchor="middle">Hold boot key</text>
 <text x="224" y="70" class="dg-text-small" fill="#202D35" font-size="12" text-anchor="middle">connect USB</text>
 <path d="M172,98 L268,98" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#run-flow-arrow)"/>
 <text x="496" y="52" class="dg-text-small" fill="#202D35" font-size="12" text-anchor="middle">Loader</text>

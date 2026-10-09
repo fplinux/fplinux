@@ -35,7 +35,8 @@ report** form instead.
    git status --short
    ```
 
-   For a standalone archive, give the archive's file name.
+   For a standalone archive, give the archive's file name. For an autonomous
+   launcher failure, include the relevant error from `.cache/run.log`.
 
 4. **The failed stage of a build, check or test.** If one of these commands
    failed, add the output of:
@@ -47,7 +48,8 @@ report** form instead.
    Replace `build` with `check` or `test` for that command's latest run.
    This also shows interrupted stages.
 
-5. **Your PC.** The Linux distribution and its version.
+5. **Your PC.** The operating system and its version: the Linux distribution
+   or Windows version, and which archive host you selected.
 
 </Steps>
 
@@ -63,8 +65,8 @@ with the running phone; it does not test the phone's hardware features.
 - Images or archives built with device data.
 
 These contain your phone's own data and its firmware. If a problem only
-occurs with device data, say which group you prepared: Bluetooth, FM radio,
-audio profile or board maps.
+occurs with device data, say which group you prepared: Bluetooth, external
+radio firmware and calibration, FM radio, audio profile or board maps.
 
 For a new-phone report, the NAND geometry receipt and the generated board
 report requested by the form can be shared. They are reports, not copies of

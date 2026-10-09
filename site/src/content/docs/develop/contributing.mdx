@@ -163,6 +163,7 @@ submitting a documentation change:
 npm run format
 npm run check
 npm run build
+npm run build:offline
 ```
 
 Ultracite supplies the Oxlint, Astro ESLint, Prettier and Stylelint presets. `format` formats
@@ -177,5 +178,10 @@ the build.
 The site tools are separate from `./fplinux format` and `./fplinux check`.
 The source gate checks maintained Markdown and repository-local links; run
 `npm run check` and `npm run build` for the site components, sidebar and page
-links. [Dependency snapshots](/fplinux/guides/dependencies/) save the locked
+links. `build:offline` exports the same pages to
+`.cache/out/site-offline/` in the checkout root. Open its `index.html` directly
+without a server. The export includes local assets and a simple word search;
+it does not use the hosted Pagefind search. Standalone archives include this
+generated site as `docs/` on the computer.
+[Dependency snapshots](/fplinux/guides/dependencies/) save the locked
 npm archives, but do not install Node.js, npm or `site/node_modules`.

@@ -12,8 +12,8 @@ third-party components retain their own licenses. FPLinux is an independent proj
 ## Where versions are recorded
 
 The source tree records exact versions, URLs and hashes in `sources.lock.toml`,
-`container.lock.toml`, `alpine.lock.toml`, `Containerfile`, package locks, target
-asset locks and the platform U-Boot source lock. APKBUILD recipes declare and
+`container.lock.toml`, `environment.lock.toml`, `alpine.lock.toml`, `Containerfile`,
+package locks, host-runtime locks, target asset locks and the platform U-Boot source lock. APKBUILD recipes declare and
 verify their upstream and local inputs.
 
 Standalone archives carry the target asset lock, a build manifest, license
@@ -59,9 +59,10 @@ notices and `SHA256SUMS`.
 | musl                                     | Target C library                               | MIT; full notice packaged at `licenses/musl/COPYRIGHT`                                            |
 | fpdoom bootstrap closure                 | T117 bootstrap, relocation tool and USB helper | The Unlicense; pinned fpdoom source                                                               |
 | U-Boot 2026.07                           | RAM second stage and FIT tooling               | GPL-2.0-only; official DENX archive; target binary is embedded in `ramboot.bin`                   |
-| libusb                                   | Host USB access                                | LGPL-2.1-or-later; linked into the static bundled host tools at build time                        |
+| libusb                                   | Host USB access                                | LGPL-2.1-or-later; static Linux host tools and the bundled Windows DLL                            |
 | `spreadtrum_flash` / `spd_dump`          | Spreadtrum loader transport                    | The Unlicense; pinned upstream source                                                             |
 | `fphelper_t117`                          | Stock firmware table reader for board maps     | The Unlicense; pinned spreadtrum_flash source                                                     |
+| BCH library                              | Host correction of selected NAND main data     | GPL-2.0-only; Copyright 2011 Parrot S.A.; corresponding sources accompany the host tool           |
 | fpdoom `t117_maps.7z`                    | Firmware-derived T117 phone register-map data  | Pinned fpdoom release mirror (`NOASSERTION`)                                                      |
 | `t117_fdl1.bin`                          | T117 first-stage RAM loader                    | The Unlicense; pinned spreadtrum_flash release asset                                              |
 
@@ -74,6 +75,13 @@ archive.
 
 The website's Noto Sans font retains its
 [copyright and Open Font License notice](/fplinux/fonts/OFL.txt).
+
+Autonomous Linux archives include Python 3.14.8 and OpenSSH 10.3p1;
+Windows archives include Python 3.14.7 and Win32-OpenSSH 10.0.0.0p2-Preview.
+Their included license directories retain the notices for these runtimes and
+their libraries. The Windows driver helper uses libwdi 1.5.1 under
+LGPL-3.0-or-later and includes the redistributable's displayed license.
+The generated offline site retains the full Noto Sans font and OFL notice.
 
 The Git tree does not contain `spreadtrum_flash` source, `spd_dump`,
 `fphelper_t117`, the board map archive, extracted map files, or `t117_fdl1.bin`.

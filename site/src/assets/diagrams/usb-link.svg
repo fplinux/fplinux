@@ -26,5 +26,5 @@
 <path d="M670.64,224.8 L697.36,224.8" class="dg-line-muted" fill="none" stroke="#6E797D" stroke-width="1.5"/>
 <path d="M670,202 L698,230" class="dg-arrow-danger" fill="none" stroke="#BA1A1A" stroke-width="2"/>
 <text x="658" y="212" class="dg-text-small dg-text-danger" fill="#BA1A1A" font-size="12" text-anchor="end">No Internet over USB</text>
-<text x="658" y="228" class="dg-text-muted" fill="#6E797D" font-size="12" text-anchor="end">for Internet, use Bluetooth PAN</text>
+<text x="658" y="228" class="dg-text-muted" fill="#6E797D" font-size="12" text-anchor="end">use supported Bluetooth PAN or Wi-Fi</text>
 </svg>

@@ -1,46 +1,60 @@
 ---
 title: Device data
-description: Prepare the phone-specific data that Bluetooth, FM radio and phone audio need.
+description: Prepare the phone-specific data that radio connections and phone audio need.
 ---
 
 import { Steps } from '@astrojs/starlight/components';
-import Figure from '../../../components/Figure.astro';
-import DeviceData from '../../../assets/diagrams/device-data.svg';
 
 Some features need data that only your phone's own firmware contains. FPLinux
-does not download or ship this data. One command reads it from your phone,
-read-only, and prepares it for the next build.
+does not download this data. Prepare it from your own phone, read-only, using
+a source checkout or an [autonomous RAM archive](/fplinux/guides/standalone-archive/).
 
 ## What needs device data
 
-| Data          | Used for                                                                                                                                      | Without it                                              |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| Bluetooth     | Bluetooth firmware                                                                                                                            | Bluetooth is unavailable                                |
-| FM radio      | FM receiver settings                                                                                                                          | FM radio is unavailable                                 |
-| Audio profile | headphone, speaker and combined gains, equalizer, automatic level control, and on phones that vibrate through the speaker, the vibration tone | headphones use generic volume levels; no speaker output |
+| Data           | Used for                                                                                                                                      | Without it                                              |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Bluetooth      | Bluetooth firmware                                                                                                                            | Bluetooth is unavailable                                |
+| External radio | wireless firmware, calibration, addresses and controller settings                                                                             | external-radio functions are unavailable                |
+| FM radio       | FM receiver settings                                                                                                                          | FM radio is unavailable                                 |
+| Audio profile  | headphone, speaker and combined gains, equalizer, automatic level control, and on phones that vibrate through the speaker, the vibration tone | headphones use generic volume levels; no speaker output |
 
-Each group is optional, but all declared groups are prepared together from
-one read of the phone. A partially present, damaged or mismatched group fails
-the build. Device data does not establish hardware support; check the
+In a source checkout, each group is optional, but all declared groups are
+prepared together from one read of the phone. A partially present, damaged or
+mismatched group fails the build. Device data does not establish hardware
+support; check the
 [support status](/fplinux/phones/#support-status) and phone page for its limits.
 
 Prepare data from the same physical phone you will run. Do not reuse data from
 another handset, even of the same model.
 
-<Figure caption="Where device data comes from"><DeviceData /></Figure>
+CM4 extraction reads the image length from its load table and locates the
+supported DDR initialization code before applying its compatibility changes.
+It does not require the entire image to match a fixed SHA-256. Changes outside
+that code can be retained; an unrecognized or ambiguous initialization routine
+stops preparation. The runtime checks the actual image size against its memory
+capacity and verifies that copying the image preserved its bytes.
+
+An autonomous RAM archive also prepares the phone's pin map and keymap. It
+keeps these maps separate from the firmware and audio data and uses them for
+subsequent loads of that phone.
 
 :::caution[Keep it private]
-The phone backup, the prepared data and every image or archive built with it
-come from your phone's firmware. Do not share or publish them unless you have
-the rights to do so. They are stored under `.cache/device-data/` in the
-checkout, readable only by you.
+The phone backup and prepared data are private. Do not share or publish them,
+or an image or archive that contains them, unless you have the rights to do so.
+Prepared data in a checkout is stored under `.cache/device-data/`, readable
+only by you. An autonomous archive starts without prepared phone data; its
+first run saves your backup and data in the extracted directory's private
+`.cache/`. Keep that directory private after preparation.
 :::
 
 ## Prepare data from the phone
 
-You need a source checkout; a standalone archive cannot prepare device data.
-The examples below use `nokia-ta1618`; use the exact target and boot key from
-your [phone page](/fplinux/phones/).
+For an autonomous archive, follow
+[Standalone archive](/fplinux/guides/standalone-archive/). The first run
+prepares your phone's data without rebuilding the image.
+
+The steps below use a source checkout and `nokia-ta1618`; use the exact target
+and boot key from your [phone page](/fplinux/phones/).
 
 <Steps>
 
@@ -66,7 +80,7 @@ your [phone page](/fplinux/phones/).
      ./fplinux run nokia-ta1618
    ```
 
-5. Rebuild the image so it includes the data:
+5. Rebuild the output so it includes the data:
 
    ```sh title="PC"
    ./fplinux build nokia-ta1618
@@ -85,7 +99,13 @@ internal storage or NV data. Ordinary `build` and `run` commands use only data
 that is already prepared; they never read the phone's storage.
 
 If you build with `--profile microsd-uboot`, rebuild that profile too. Both
-profiles use the same prepared data.
+profiles use the same prepared data. RAM builds put firmware and audio data
+in a separate `device-data.cpio`, which the loader loads alongside the kernel;
+the RAM kernel contains no prepared phone data. A microSD build embeds the
+audio profile in its kernel and other firmware in the system-card image.
+Ordinary standalone archives include the prepared data of their build;
+autonomous RAM archives omit it and prepare
+the owner's data on first use.
 
 ## Prepare data from a saved backup
 

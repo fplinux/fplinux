@@ -68,7 +68,7 @@ In the Nokia 3210 4G (TA-1618) target, these are in the following files:
 
 - targets/nokia-ta1618/
   - target.toml identity, Linux file copies, bootstrap, `[adapter]` loader values, device data and microSD settings
-  - ta1618_device_data.py selects the partition layout and Bluetooth firmware revision for device data
+  - ta1618_device_data.py selects the phone's device-data outputs and audio policy
   - bootstrap/ bootstrap for RAM boot with the 240×320 display size
     - Makefile
     - lcd_config.h panel configuration shared by both bootstrap builds
@@ -170,7 +170,7 @@ partition table, the signed application image, the pin map or the keymap is
 missing, or when the copies of the partition table disagree.
 
 A person still has to decide which panel is fitted, the keypad light current,
-whether a vibration motor is fitted and the Bluetooth firmware revision. Keys
+whether a vibration motor is fitted and whether the radio works with the prepared firmware. Keys
 on other external-interrupt lines, the line-9 candidate and the decoded panel
 commands must be confirmed on the phone.
 
