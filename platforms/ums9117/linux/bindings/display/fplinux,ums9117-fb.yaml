@@ -11,10 +11,9 @@ maintainers:
 
 description: |
   The UMS9117 LCDC reads RGB565 or NV16 DMA buffers and sends pixels through
-  the Nokia TA-1618's SPI1 three-wire panel transport or the INOI 240 and
-  INOI 244 Modern 4G and Maxvi K15n4G LCM/DBI CS0 transport. A target wrapper
-  supplies the immutable panel command sequence. This node supplies only
-  board-owned resources and wiring.
+  a SPI1 three-wire panel transport or a LCM/DBI CS0 transport. A target
+  wrapper supplies the immutable panel command sequence. This node supplies
+  only board-owned resources and wiring.
 
 allOf:
   - if:
@@ -43,6 +42,7 @@ properties:
   compatible:
     enum:
       - fplinux,ums9117-st7789p3-spi-fb
+      - fplinux,ums9117-gc9307-spi-fb
       - fplinux,ums9117-nv3030-lcm-fb
       - fplinux,ums9117-nv3023-lcm-fb
       - fplinux,ums9117-gc9307-lcm-fb

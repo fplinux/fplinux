@@ -1,0 +1,26 @@
+diff --git a/drivers/gpio/gpio-sprd.c b/drivers/gpio/gpio-sprd.c
+index c620c3d..82602d8 100644
+--- a/drivers/gpio/gpio-sprd.c
++++ b/drivers/gpio/gpio-sprd.c
+@@ -87,6 +87,13 @@ static void sprd_gpio_free(struct gpio_chip *chip, unsigned int offset)
+ 	sprd_gpio_update(chip, offset, SPRD_GPIO_DMSK, 0);
+ }
+
++static int sprd_gpio_get_direction(struct gpio_chip *chip, unsigned int offset)
++{
++	return sprd_gpio_read(chip, offset, SPRD_GPIO_DIR) ?
++		       GPIO_LINE_DIRECTION_OUT :
++		       GPIO_LINE_DIRECTION_IN;
++}
++
+ static int sprd_gpio_direction_input(struct gpio_chip *chip,
+ 				     unsigned int offset)
+ {
+@@ -258,6 +265,7 @@ static int sprd_gpio_probe(struct platform_device *pdev)
+ 	sprd_gpio->chip.request = sprd_gpio_request;
+ 	sprd_gpio->chip.free = sprd_gpio_free;
+ 	sprd_gpio->chip.get = sprd_gpio_get;
++	sprd_gpio->chip.get_direction = sprd_gpio_get_direction;
+ 	sprd_gpio->chip.set = sprd_gpio_set;
+ 	sprd_gpio->chip.direction_input = sprd_gpio_direction_input;
+ 	sprd_gpio->chip.direction_output = sprd_gpio_direction_output;

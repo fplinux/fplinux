@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: GPL-2.0-only
+image = "image/ramboot.bin"
+bundle_files = [
+  "image/ramboot.bin",
+  "assets/t117_fdl1.bin",
+  "host/spd_dump",
+  "host/libc_server",
+  "host/fplinux-usb-keyboard",
+  "runner/run.py",
+  "runner/loader_events.py",
+  "runner/identity.py",
+  "runner/platform_adapter.py",
+  "runner/ssh_transport.py",
+  "runtime-manifest.json",
+  "apks/fplinux-bluealsa.apk",
+  "apks/fplinux-bluez-libs.apk",
+  "apks/fplinux-brightness-ui.apk",
+  "apks/fplinux-sbc.apk",
+  "apks/fplinux-charge.apk",
+  "apks/fplinux-ffmpeg.apk",
+  "apks/fplinux-ncurses-curses.apk",
+  "apks/fplinux-showcase.apk",
+  "apks/fplinux-tyrquake.apk",
+  "apks/fplinux-xkb-ru.apk",
+  "assets.lock.toml",
+  "THIRD_PARTY_NOTICES.md",
+]
+runtime_files = [
+  "image/ramboot.bin",
+  "assets/t117_fdl1.bin",
+  "host/spd_dump",
+  "host/libc_server",
+  "host/fplinux-usb-keyboard",
+  "runner/run.py",
+  "runner/loader_events.py",
+  "runner/identity.py",
+  "runner/platform_adapter.py",
+  "runner/ssh_transport.py",
+  "runtime-manifest.json",
+]
+documents = ["release/README.txt"]

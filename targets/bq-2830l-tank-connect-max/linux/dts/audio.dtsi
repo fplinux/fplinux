@@ -1,0 +1,96 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+&audio {
+	firmware-name = "fplinux/bq-2830l-tank-connect-max-audio-profile.bin";
+	hp-det-gpios = <&sc2720_eic 12 GPIO_ACTIVE_HIGH>;
+	pinctrl-0 = <&audio_mux_pins &audio_pad_pins &bq_audio_amp_mux_pins
+		     &bq_audio_amp_pad_pins &bq_fm_mux_pins &bq_fm_pad_pins>;
+	pinctrl-names = "audio";
+	speaker-enable-gpios = <&ap_gpio 114 GPIO_ACTIVE_HIGH>;
+	wakeup-source;
+	fplinux,card-longname = "BQ 2830L audio";
+	fplinux,external-fm;
+	fplinux,headphone-fed-speaker;
+	fplinux,microphone-capture;
+	fplinux,speaker-mode4-pulse-us = <2>;
+
+	status = "okay";
+};
+
+/ {
+	soc {
+		bq_fm_mux: pinctrl@402a01b4 {
+			compatible = "pinctrl-single";
+			reg = <0x402a01b4 0x10>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,function-mask = <0x30>;
+			pinctrl-single,register-width = <32>;
+
+			bq_fm_mux_pins: fm-pins {
+				pinctrl-single,pins = <
+					0x00 0 0x04 0 0x08 0 0x0c 0
+				>;
+			};
+		};
+
+		bq_fm_pads: pinctrl@402a05b4 {
+			compatible = "pinctrl-single";
+			reg = <0x402a05b4 0x10>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,function-mask = <0xffffffff>;
+			pinctrl-single,register-width = <32>;
+
+			bq_fm_pad_pins: fm-pins {
+				pinctrl-single,pins = <
+					0x00 0x00002006 0x04 0x00002001
+					0x08 0x00002006 0x0c 0x00002006
+				>;
+			};
+		};
+
+		bq_audio_amp_mux: pinctrl@402a0224 {
+			compatible = "pinctrl-single";
+			reg = <0x402a0224 0x4>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,function-mask = <0x30>;
+			pinctrl-single,register-width = <32>;
+
+			bq_audio_amp_mux_pins: amplifier-pins {
+				pinctrl-single,pins = <0x00 0x30>;
+			};
+		};
+
+		bq_audio_amp_pads: pinctrl@402a0624 {
+			compatible = "pinctrl-single";
+			reg = <0x402a0624 0x4>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,function-mask = <0xffffffff>;
+			pinctrl-single,register-width = <32>;
+
+			bq_audio_amp_pad_pins: amplifier-pins {
+				pinctrl-single,pins = <0x00 0x00102001>;
+			};
+		};
+	};
+};
+
+&ap_gpio {
+	status = "okay";
+};
+
+&audio_mux {
+	audio_mux_pins: audio-pins {
+		pinctrl-single,pins = <
+			0x00 0 0x08 0 0x0c 0 0x14 0 0x18 0 0x1c 0
+		>;
+	};
+};
+
+&audio_pads {
+	audio_pad_pins: audio-pins {
+		pinctrl-single,pins = <
+			0x00 0x0008e001 0x08 0x0008e001 0x0c 0x0008e001
+			0x14 0x0008e000 0x18 0x0008e000 0x1c 0x0008e001
+		>;
+	};
+};

@@ -16,6 +16,11 @@ const screens: Record<
 	string,
 	{ image?: ImageMetadata; scale: number; size: string }
 > = {
+	"bq-2830l-tank-connect-max": {
+		image: render("terminal-keypad"),
+		scale: 1,
+		size: "240×320",
+	},
 	"inoi-240-modern-4g": {
 		image: render("terminal-keypad-128x160") ?? render("terminal-keypad"),
 		scale: render("terminal-keypad-128x160") ? 2 : 1,

@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config DRM_BQ2830L
+	bool "BQ 2830L Tank Connect Max LCDC display"
+	depends on DRM && MACH_BQ_2830L_TANK_CONNECT_MAX
+	select DRM_UMS9117
+	select DRM_UMS9117_SPI
+	select DRM_UMS9117_WAKE_REINIT
+	help
+	  Drive the GC9307 panel through SPI1 and the LCDC with atomic RGB565
+	  and NV16 modesetting. LCDC_DONE completes each transfer before its
+	  buffers are released. Blanking turns off WLED and enters panel
+	  sleep; waking restores WLED after reset, initialization and a frame.

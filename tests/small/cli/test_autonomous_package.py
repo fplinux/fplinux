@@ -275,6 +275,7 @@ def _archive(root: Path) -> tuple[Path, dict[str, bytes], dict[str, int]]:
         "inoi-240-modern-4g",
         "inoi-244-modern-4g",
         "maxvi-k15n-4g",
+        "bq-2830l-tank-connect-max",
     ],
     indirect=True,
 )
@@ -374,6 +375,59 @@ def test_autonomous_zip_preserves_receipts_omits_personal_data_and_is_determinis
         "ecc": inputs.target == "bq-2830l-tank-connect-max",
     }
     package.package_target(inputs.target, autonomous=True, host=host, candidate=True)
+    assert archive.read_bytes() == original
+
+
+@pytest.mark.parametrize("archive_inputs", ["bq-2830l-tank-connect-max"], indirect=True)
+@pytest.mark.parametrize("host", ["linux", "windows10"])
+def test_declared_ecc_archive_delivers_its_corrector_and_sources(
+    archive_inputs: ArchiveInputs, ecc_source_download: dict[str, bytes], host: str
+) -> None:
+    """Native preparation is replaced; real package collection retains correction inputs."""
+    inputs = archive_inputs
+    package.package_target(inputs.target, autonomous=True, host=host, candidate=True, offline=True)
+    archive, payload, modes = _archive(inputs.root)
+    original = archive.read_bytes()
+    manifest = json.loads(payload["device-data-manifest.json"])
+    assert manifest["nand"]["ecc_format"] == "ums9117-bch12"
+    assert manifest["nand"]["raw_page_bytes"] == 2176
+    assert (
+        payload["platforms/ums9117/host/nand_ecc.py"]
+        == (inputs.root / "platforms/ums9117/host/nand_ecc.py").read_bytes()
+    )
+    tool = "tools/ums9117-nand-ecc.exe" if host == "windows10" else "tools/ums9117-nand-ecc"
+    assert payload[tool] == b"prepared BCH decoder"
+    assert modes[tool] == 0o100755
+    assert "device-data.cpio" not in payload
+    assert not any(name.startswith(".cache/") for name in payload)
+    if host == "linux":
+        assert (
+            payload["licenses/host-tools/ums9117-nand-ecc-COPYING.txt"]
+            == ecc_source_download["COPYING"]
+        )
+        with zipfile.ZipFile(io.BytesIO(payload["sources/ums9117-nand-ecc-source.zip"])) as source:
+            assert source.read("ums9117-nand-ecc/bch.c") == b"synthetic BCH implementation\n"
+            assert source.read("ums9117-nand-ecc/COPYING") == ecc_source_download["COPYING"]
+            assert (
+                source.read("ums9117-nand-ecc/Makefile")
+                == (inputs.root / "platforms/ums9117/host/nand-ecc/Makefile").read_bytes()
+            )
+            assert (
+                source.read("ums9117-nand-ecc/fplinux-cli.h")
+                == (inputs.root / "include/fplinux/fplinux-cli.h").read_bytes()
+            )
+    else:
+        assert (
+            payload["sources/windows-tools-source.zip"] == b"prepared compiler source projection"
+        )
+        assert (
+            payload["licenses/windows-host/ums9117-nand-ecc-COPYING.txt"]
+            == b"prepared BCH license"
+        )
+        windows = json.loads(payload["windows-host.json"])
+        assert windows["sha256"][tool] == hashlib.sha256(b"prepared BCH decoder").hexdigest()
+        assert "nand_ecc" not in windows["host_tools"]
+    package.package_target(inputs.target, autonomous=True, host=host, candidate=True, offline=True)
     assert archive.read_bytes() == original
 
 

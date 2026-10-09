@@ -6,7 +6,7 @@ description: Compare exact phone targets and read their detailed support checkli
 import { Card, CardGrid } from '@astrojs/starlight/components';
 import SupportMatrix from '../../../components/SupportMatrix.astro';
 
-FPLinux runs on four keypad phones built on the Unisoc UMS9117. Each phone
+FPLinux runs on five keypad phones built on the Unisoc UMS9117. Each phone
 has its own target, the name you pass to `./fplinux build` and
 `./fplinux run`. A target describes one exact phone model; do not use it for a
 different model, even one with the same chip.
@@ -27,6 +27,10 @@ different model, even one with the same chip.
 	<Card title="Maxvi K15n4G" icon="phone">
 		Target `maxvi-k15n-4g`, 240×320 display.
 		[Read the phone page](/fplinux/phones/maxvi-k15n-4g/).
+	</Card>
+	<Card title="BQ 2830L Tank Connect Max" icon="phone">
+		Target `bq-2830l-tank-connect-max`, 240×320 display.
+		[Read the phone page](/fplinux/phones/bq-2830l-tank-connect-max/).
 	</Card>
 </CardGrid>
 
@@ -63,7 +67,7 @@ detailed checklist, prerequisites, controls and safe shutdown procedure.
 ## Limitations on every phone
 
 - Calls, SMS and mobile data do not work.
-- Wi-Fi and the indicator LEDs are not supported.
+- Indicator LEDs are not supported. Wi-Fi availability is listed on each phone page.
 - USB works only as a device attached to a PC. USB host and OTG are not
   supported.
 - Linux cannot reboot the phone. To start FPLinux again, end the session and

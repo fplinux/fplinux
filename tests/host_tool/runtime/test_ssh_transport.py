@@ -292,8 +292,9 @@ class SshTransportOpenSshReuseTests:
             time.sleep(0.02)
         raise AssertionError(f"timed-out remote stream process is still running: {process_id}")
 
+    @pytest.mark.parametrize("target", ["inoi-244-modern-4g", "bq-2830l-tank-connect-max"])
     def test_generated_config_exec_and_sftp_share_connection_until_idle_expiry(
-        self, request: pytest.FixtureRequest
+        self, request: pytest.FixtureRequest, target: str
     ) -> None:
         """Generated-config exec and SFTP share and expire one master."""
         reference_runtime = "/run/user/1000/fplinux"
@@ -302,7 +303,6 @@ class SshTransportOpenSshReuseTests:
         root = self.base / ("r" * padding)
         assert (len(str(root))) == (len(reference_runtime))
         root.mkdir(mode=0o700)
-        target = "inoi-244-modern-4g"
         session = create_ready_session(root, target=target)
         server = OpenSshServer(self.base / "server", Path(session["private_key"]))
         server.start()

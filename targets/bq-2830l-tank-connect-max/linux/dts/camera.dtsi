@@ -1,0 +1,109 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/ {
+	soc {
+		bq_camera_mux: pinctrl@402a01e8 {
+			compatible = "pinctrl-single";
+			reg = <0x402a01e8 0xc>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,function-mask = <0x30>;
+			pinctrl-single,register-width = <32>;
+
+			bq_camera_mux_pins: camera-pins {
+				pinctrl-single,pins = <0x0 0x0 0x8 0x30>;
+			};
+		};
+
+		bq_camera_pads: pinctrl@402a05e8 {
+			compatible = "pinctrl-single";
+			reg = <0x402a05e8 0xc>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,function-mask = <0xffffffff>;
+			pinctrl-single,register-width = <32>;
+
+			bq_camera_pad_pins: camera-pins {
+				pinctrl-single,pins = <0x0 0x2001 0x8 0x2001>;
+			};
+		};
+
+		bq_camera_serial_mux: pinctrl@402a01f4 {
+			compatible = "pinctrl-single";
+			reg = <0x402a01f4 0x10>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,function-mask = <0x30>;
+			pinctrl-single,register-width = <32>;
+
+			bq_camera_serial_mux_pins: camera-pins {
+				pinctrl-single,pins = <
+					0x0 0x20 0x4 0x20 0x8 0x20 0xc 0x20
+				>;
+			};
+		};
+
+		bq_camera_serial_pads: pinctrl@402a05f4 {
+			compatible = "pinctrl-single";
+			reg = <0x402a05f4 0x10>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,function-mask = <0xffffffff>;
+			pinctrl-single,register-width = <32>;
+
+			bq_camera_serial_pad_pins: camera-pins {
+				pinctrl-single,pins = <
+					0x0 0x2006 0x4 0x2046 0x8 0x2000 0xc 0x2000
+				>;
+			};
+		};
+	};
+};
+
+&ap_gpio {
+	status = "okay";
+};
+
+&ap_i2c0_clk {
+	status = "okay";
+};
+
+&aon_sensor_clk {
+	status = "okay";
+};
+
+&i2c0 {
+	status = "okay";
+
+	bq_camera: camera@21 {
+		compatible = "galaxycore,gc032a";
+		reg = <0x21>;
+		avdd-supply = <&vddcama>;
+		clock-names = "xclk";
+		clocks = <&aon_sensor_clk CLK_SENSOR0>;
+		front-powerdown-gpios = <&ap_gpio 69 GPIO_ACTIVE_HIGH>;
+		iovdd-supply = <&vddcamio>;
+		pinctrl-0 = <&bq_camera_mux_pins &bq_camera_pad_pins
+			     &bq_camera_serial_mux_pins &bq_camera_serial_pad_pins>;
+		pinctrl-names = "default";
+		powerdown-gpios = <&ap_gpio 101 GPIO_ACTIVE_HIGH>;
+		rotation = <0>;
+
+		port {
+			bq_camera_out: endpoint {
+				remote-endpoint = <&bq_camera_sink>;
+				sprd,serial-g0-data-width = <2>;
+			};
+		};
+	};
+};
+
+&i2c0_pad_pins {
+	pinctrl-single,pins = <0x0 0x3088 0x4 0x3088>;
+};
+
+&jpeg {
+	status = "okay";
+
+	port {
+		bq_camera_sink: endpoint {
+			remote-endpoint = <&bq_camera_out>;
+			sprd,serial-g0-data-width = <2>;
+		};
+	};
+};

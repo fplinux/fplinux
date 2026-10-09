@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-only
+if ARCH_UMS9117
+
+config MACH_BQ_2830L_TANK_CONNECT_MAX
+	bool "BQ 2830L Tank Connect Max"
+	select GPIOLIB
+	select GPIO_PMIC_EIC_SPRD
+	select MFD_SYSCON
+	help
+	  Board support for a UMS9117 feature phone with 64 MiB of DRAM.
+	  The phone has a 240x320 SPI panel and a matrix keypad.
+	  BootROM/FDL USB loading starts a RAM system.
+	  Internal NAND remains read-only.
+
+endif

@@ -1,0 +1,12 @@
+diff --git a/Documentation/devicetree/bindings/vendor-prefixes.yaml b/Documentation/devicetree/bindings/vendor-prefixes.yaml
+--- a/Documentation/devicetree/bindings/vendor-prefixes.yaml
++++ b/Documentation/devicetree/bindings/vendor-prefixes.yaml
+@@ -259,6 +259,8 @@ patternProperties:
+     description: Bosch Sensortec GmbH
+   "^boundary,.*":
+     description: Boundary Devices Inc.
++  "^bq,.*":
++    description: BQ
+   "^brcm,.*":
+     description: Broadcom Corporation
+   "^broadmobi,.*":

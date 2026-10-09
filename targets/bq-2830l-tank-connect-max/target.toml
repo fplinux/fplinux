@@ -1,0 +1,226 @@
+# SPDX-License-Identifier: GPL-2.0-only
+platform = "ums9117"
+
+[identity]
+brand = "BQ"
+product = "2830L Tank Connect Max"
+hardware_codes = []
+compatible = "bq,2830l"
+
+[nand]
+raw_device = "/dev/ums9117-nand-raw"
+id = 0x81c8
+raw_page_bytes = 2176
+ecc_format = "ums9117-bch12"
+
+[display_brightness]
+backlight = "bq-2830l-backlight"
+levels = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50]
+
+[rootfs]
+packages = ["fplinux-audio", "fplinux-font-terminus-8x16", "fplinux-wifi"]
+
+[bundle]
+packages = []
+
+[linux]
+config_fragment = "linux/config.fragment"
+memory = { base = 0x80200000, size = 0x03c00000 }
+dtb = "unisoc/ums9117-bq-2830l-tank-connect-max.dtb"
+debug_dtb = "ums9117-bq-2830l-tank-connect-max.dtb"
+patches = [
+  "linux/patches/0001-camera-gpio-direction.patch",
+  "linux/patches/0002-bq-vendor-prefix.patch",
+  "linux/patches/0003-bq-bluetooth-sdio-fixed-port.patch",
+]
+forbidden_dtb_markers = ["spi-nand", "mtd", "ubi", "emmc"]
+forbidden_config = [
+  "CONFIG_MTD=y",
+  "CONFIG_UBI=y",
+  "CONFIG_SCSI=y",
+  "CONFIG_ATA=y",
+  "CONFIG_NVME_CORE=y",
+]
+
+[[linux.copies]]
+source = "linux/dts/ums9117-bq-2830l-tank-connect-max.dts"
+destination = "arch/arm/boot/dts/unisoc/ums9117-bq-2830l-tank-connect-max.dts"
+
+[[linux.copies]]
+source = "linux/drivers/gpu/drm/ums9117/bq-2830l-drm.c"
+destination = "drivers/gpu/drm/ums9117/bq-2830l-drm.c"
+
+[[linux.copies]]
+source = "linux/drivers/mmc/host/bq2830l-radio-power.c"
+destination = "drivers/mmc/host/bq2830l-radio-power.c"
+
+[[linux.copies]]
+source = "linux/drivers/mmc/host/bq2830l-radio.h"
+destination = "drivers/mmc/host/bq2830l-radio.h"
+
+[[linux.copies]]
+source = "linux/drivers/mmc/host/marlin2-sdio.c"
+destination = "drivers/mmc/host/marlin2-sdio.c"
+
+[[linux.copies]]
+source = "linux/drivers/mmc/host/marlin2-packet.h"
+destination = "drivers/mmc/host/marlin2-packet.h"
+
+[[linux.copies]]
+source = "linux/drivers/mmc/host/marlin2-packet-codec.c"
+destination = "drivers/mmc/host/marlin2-packet-codec.c"
+
+[[linux.copies]]
+source = "linux/drivers/mmc/host/marlin2-packet-sdio.c"
+destination = "drivers/mmc/host/marlin2-packet-sdio.c"
+
+[[linux.copies]]
+source = "linux/drivers/mmc/host/marlin2-transport.c"
+destination = "drivers/mmc/host/marlin2-transport.c"
+
+[[linux.copies]]
+source = "linux/drivers/mmc/host/marlin2-transport.h"
+destination = "drivers/mmc/host/marlin2-transport.h"
+
+[[linux.copies]]
+source = "linux/drivers/mmc/host/marlin2-transport-wire.c"
+destination = "drivers/mmc/host/marlin2-transport-wire.c"
+
+[[linux.copies]]
+source = "linux/drivers/mmc/host/marlin2-transport-wire.h"
+destination = "drivers/mmc/host/marlin2-transport-wire.h"
+
+[[linux.copies]]
+source = "linux/drivers/mmc/host/marlin2-bluetooth.c"
+destination = "drivers/mmc/host/marlin2-bluetooth.c"
+
+[[linux.copies]]
+source = "linux/drivers/mmc/host/marlin2-bluetooth.h"
+destination = "drivers/mmc/host/marlin2-bluetooth.h"
+
+[[linux.copies]]
+source = "linux/drivers/mmc/host/marlin2-bluetooth-wire.c"
+destination = "drivers/mmc/host/marlin2-bluetooth-wire.c"
+
+[[linux.copies]]
+source = "linux/drivers/mmc/host/marlin2-bluetooth-wire.h"
+destination = "drivers/mmc/host/marlin2-bluetooth-wire.h"
+
+[[linux.copies]]
+source = "linux/drivers/mmc/host/marlin2-fm.c"
+destination = "drivers/mmc/host/marlin2-fm.c"
+
+[[linux.copies]]
+source = "linux/drivers/mmc/host/marlin2-fm.h"
+destination = "drivers/mmc/host/marlin2-fm.h"
+
+[[linux.copies]]
+source = "linux/drivers/mmc/host/marlin2-fm-wire.c"
+destination = "drivers/mmc/host/marlin2-fm-wire.c"
+
+[[linux.copies]]
+source = "linux/drivers/mmc/host/marlin2-fm-wire.h"
+destination = "drivers/mmc/host/marlin2-fm-wire.h"
+
+[[linux.copies]]
+source = "linux/drivers/mmc/host/marlin2-wlan.h"
+destination = "drivers/mmc/host/marlin2-wlan.h"
+
+[[linux.copies]]
+source = "linux/drivers/mmc/host/marlin2-wlan.c"
+destination = "drivers/mmc/host/marlin2-wlan.c"
+
+[[linux.copies]]
+source = "linux/drivers/mmc/host/marlin2-wlan-wire.h"
+destination = "drivers/mmc/host/marlin2-wlan-wire.h"
+
+[[linux.copies]]
+source = "linux/drivers/mmc/host/marlin2-wlan-wire.c"
+destination = "drivers/mmc/host/marlin2-wlan-wire.c"
+
+[[linux.copies]]
+source = "linux/bindings/mfd/bq,2830l-radio-pins.yaml"
+destination = "Documentation/devicetree/bindings/mfd/bq,2830l-radio-pins.yaml"
+
+[[linux.copies]]
+source = "linux/bindings/net/wireless/bq,2830l-radio.yaml"
+destination = "Documentation/devicetree/bindings/net/wireless/bq,2830l-radio.yaml"
+
+[[linux.copies]]
+source = "linux/bindings/net/wireless/sprd,marlin2-sdio.yaml"
+destination = "Documentation/devicetree/bindings/net/wireless/sprd,marlin2-sdio.yaml"
+
+[[linux.copies]]
+source = "linux/dts/radio.dtsi"
+destination = "arch/arm/boot/dts/unisoc/radio.dtsi"
+
+[[linux.copies]]
+source = "linux/dts/camera.dtsi"
+destination = "arch/arm/boot/dts/unisoc/camera.dtsi"
+
+[[linux.copies]]
+source = "linux/dts/audio.dtsi"
+destination = "arch/arm/boot/dts/unisoc/audio.dtsi"
+
+[[linux.appends]]
+source = "linux/arch/arm/mach-ums9117/Kconfig"
+destination = "arch/arm/mach-ums9117/Kconfig"
+
+[[linux.appends]]
+source = "linux/dts/unisoc.Makefile"
+destination = "arch/arm/boot/dts/unisoc/Makefile"
+
+[[linux.appends]]
+source = "linux/drivers/gpu/drm/ums9117/drm.Kconfig"
+destination = "drivers/gpu/drm/Kconfig"
+
+[[linux.appends]]
+source = "linux/drivers/gpu/drm/ums9117/drm.Makefile"
+destination = "drivers/gpu/drm/ums9117/Makefile"
+
+[[linux.appends]]
+source = "linux/drivers/mmc/host/radio.Kconfig"
+destination = "drivers/mmc/host/Kconfig"
+
+[[linux.appends]]
+source = "linux/drivers/mmc/host/radio.Makefile"
+destination = "drivers/mmc/host/Makefile"
+
+[bootstrap]
+lcd_config = "bootstrap/lcd_config.h"
+image = "bq_2830l_tank_connect_max_linux_bootstrap.bin"
+map = "obj/bq_2830l_tank_connect_max_linux_bootstrap_map.txt"
+dtb_destination = "bq_2830l_tank_connect_max.dtb"
+record_prefix = "BQ_2830L_TANK_CONNECT_MAX"
+
+[adapter]
+spi_mode = 1
+lcd_id = 0x9307
+backlight_channels = "rgbw"
+backlight_level = 35
+exec_distance = 0
+session_name = "bq-2830l-tank-connect-max-linux"
+boot_instructions = "Power the phone off, hold the green call key, then connect USB while keeping the key pressed."
+
+[device_data]
+parser = "bq2830l_device_data.py"
+
+# Extracted from the stock firmware in a NAND backup together with a board report.
+[board_maps]
+firmware = [
+  { source = "pinmap.bin", destination = "pinmap.bin" },
+  { source = "keymap.bin", destination = "keymap.bin" },
+]
+
+[audio_profile]
+firmware = [
+  { source = "bq-2830l-tank-connect-max-audio-profile.bin", destination = "fplinux/bq-2830l-tank-connect-max-audio-profile.bin", size = 788 },
+]
+
+[wcn_firmware]
+firmware = [
+  { source = "bq-2830l-tank-connect-max-wcn.bin", destination = "ums9117/bq-2830l-tank-connect-max-wcn.bin", size = 592896, sha256 = "5fdd81da4e8ef9a520dcb1d61543b0e62cb258be8b7a8966ffd648bccc3d5690" },
+  { source = "bq-2830l-tank-connect-max-wcn-calibration.bin", destination = "ums9117/bq-2830l-tank-connect-max-wcn-calibration.bin", size = 3908 },
+  { source = "bq-2830l-tank-connect-max-wcn-mac.bin", destination = "ums9117/bq-2830l-tank-connect-max-wcn-mac.bin", size = 6 },
+  { source = "bq-2830l-tank-connect-max-wcn-bluetooth.bin", destination = "ums9117/bq-2830l-tank-connect-max-wcn-bluetooth.bin", size = 220 },
+]

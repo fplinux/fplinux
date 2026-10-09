@@ -1,0 +1,83 @@
+diff --git a/drivers/mmc/core/sdio_io.c b/drivers/mmc/core/sdio_io.c
+index 12716ec..69c31ac 100644
+--- a/drivers/mmc/core/sdio_io.c
++++ b/drivers/mmc/core/sdio_io.c
+@@ -810,3 +810,63 @@ void sdio_retune_release(struct sdio_func *func)
+ 	mmc_retune_release(func->card->host);
+ }
+ EXPORT_SYMBOL_GPL(sdio_retune_release);
++
++#if IS_ENABLED(CONFIG_BQ2830L_BLUETOOTH)
++/**
++ *	sdio_memcpy_toio_fixed_port - write through a port that restarts per command
++ *	@func: SDIO function to access
++ *	@addr: port address to start each command at
++ *	@src: buffer that contains the data to write
++ *	@count: number of bytes to write
++ *
++ *	Increment the address within each IO_RW_EXTENDED command, but restart
++ *	at @addr when splitting the transfer. The source buffer advances across
++ *	commands. The caller must claim the host. Return zero on success or a
++ *	negative error code.
++ */
++int sdio_memcpy_toio_fixed_port(struct sdio_func *func, unsigned int addr,
++				void *src, int count)
++{
++	unsigned int remainder = count;
++	unsigned int max_blocks;
++	unsigned int size;
++	u8 *buf = src;
++	int ret;
++
++	if (!func || func->num > 7)
++		return -EINVAL;
++
++	if (func->card->cccr.multi_block &&
++	    remainder > sdio_max_byte_size(func)) {
++		max_blocks = min(func->card->host->max_blk_count, 511U);
++
++		while (remainder >= func->cur_blksize) {
++			unsigned int blocks;
++
++			blocks = min(remainder / func->cur_blksize, max_blocks);
++			size = blocks * func->cur_blksize;
++			ret = mmc_io_rw_extended(func->card, 1, func->num, addr,
++						 1, buf, blocks,
++						 func->cur_blksize);
++			if (ret)
++				return ret;
++
++			remainder -= size;
++			buf += size;
++		}
++	}
++
++	while (remainder > 0) {
++		size = min(remainder, sdio_max_byte_size(func));
++		ret = mmc_io_rw_extended(func->card, 1, func->num, addr, 1, buf,
++					 0, size);
++		if (ret)
++			return ret;
++
++		remainder -= size;
++		buf += size;
++	}
++	return 0;
++}
++EXPORT_SYMBOL_GPL(sdio_memcpy_toio_fixed_port);
++#endif
+diff --git a/include/linux/mmc/sdio_func.h b/include/linux/mmc/sdio_func.h
+index 5d63a64..34b9634 100644
+--- a/include/linux/mmc/sdio_func.h
++++ b/include/linux/mmc/sdio_func.h
+@@ -162,6 +162,10 @@ extern u8 sdio_writeb_readb(struct sdio_func *func, u8 write_byte,
+
+ extern int sdio_memcpy_toio(struct sdio_func *func, unsigned int addr,
+ 	void *src, int count);
++#if IS_ENABLED(CONFIG_BQ2830L_BLUETOOTH)
++extern int sdio_memcpy_toio_fixed_port(struct sdio_func *func,
++				       unsigned int addr, void *src, int count);
++#endif
+ extern int sdio_writesb(struct sdio_func *func, unsigned int addr,
+ 	void *src, int count);
+
