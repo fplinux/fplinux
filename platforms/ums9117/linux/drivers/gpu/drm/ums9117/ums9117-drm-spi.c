@@ -206,8 +206,8 @@ int ums9117_drm_spi_begin_frame(struct ums9117_drm *udrm, u32 pixels)
 {
 	int ret;
 
-	/* Nokia's proven run path is divider 0 with TX_HOLD before every 2c. */
-	writel(0, udrm->spi + UMS9117_DRM_SPI_CLKD);
+	writel(udrm->profile->spi_frame_clock_divider,
+	       udrm->spi + UMS9117_DRM_SPI_CLKD);
 	writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL7) |
 		       UMS9117_DRM_SPI_TX_HOLD,
 	       udrm->spi + UMS9117_DRM_SPI_CTL7);

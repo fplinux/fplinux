@@ -54,6 +54,7 @@ struct ums9117_drm_profile {
 	u16 display_off_ms;
 	u16 sleep_in_ms;
 	u16 sleep_out_ms;
+	u16 spi_frame_clock_divider;
 	/*
 	 * NULL retains the fixed WLED recipe. A name enables a raw range whose
 	 * maximum is derived from equal non-zero board WLED current levels.
