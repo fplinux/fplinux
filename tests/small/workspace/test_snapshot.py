@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from typing import TYPE_CHECKING
 from unittest import mock
 
@@ -16,6 +17,7 @@ import pytest
 from fplinux_cli import common
 from fplinux_cli.manifests.linux import discover_linux_targets
 
+from tests import ROOT
 from tests.fixtures import linux_inputs
 from tests.small.workspace.workspace_fixtures import (
     WorkspaceSourceFixture,
@@ -30,6 +32,60 @@ if TYPE_CHECKING:
 
 class WorkspaceSnapshotTests(WorkspaceSourceFixture):
     """Keep cache materialization causally bound to an already read snapshot."""
+
+    @pytest.mark.parametrize(
+        "owner",
+        ["environment/downloads.py", "manifests/values.py"],
+        ids=("verified-transfer", "sha-validation"),
+    )
+    def test_selected_build_snapshot_changes_after_a_download_owner_edit(
+        self, owner: str, tmp_path: Path
+    ) -> None:
+        """Owner bytes are causal in the selected build; unrelated documentation is reusable."""
+        captured = workspace_capture.workspace_snapshot(
+            workspace_inputs.target_build_source_files("nokia-ta1618")
+        )
+        with workspace_root(tmp_path):
+            staged = workspace_staging.stage_workspace_snapshot(captured)
+        with workspace_root(staged), mock.patch.object(common, "ROOT", staged):
+            before = workspace_capture.workspace_snapshot(
+                workspace_inputs.target_build_source_files("nokia-ta1618")
+            )
+            (staged / "README.md").write_bytes(b"unrelated documentation\n")
+            unrelated = workspace_capture.workspace_snapshot(
+                workspace_inputs.target_build_source_files("nokia-ta1618")
+            )
+            assert unrelated.recipe == before.recipe
+            owner_path = staged / f"scripts/fplinux_cli/{owner}"
+            owner_path.write_bytes(owner_path.read_bytes() + b"\n# changed owner\n")
+            changed = workspace_capture.workspace_snapshot(
+                workspace_inputs.target_build_source_files("nokia-ta1618")
+            )
+            assert changed.recipe != before.recipe
+
+    @pytest.mark.parametrize("profile", [None, "microsd-uboot"], ids=("ram", "microsd"))
+    def test_staged_source_fetch_imports_and_reuses_verified_bytes_without_checkout(
+        self, profile: str | None, tmp_path: Path
+    ) -> None:
+        """The selected build closure imports and checks cached sources in an isolated process."""
+        snapshot = workspace_capture.workspace_snapshot(
+            workspace_inputs.target_build_source_files("nokia-ta1618", profile)
+        )
+        with workspace_root(tmp_path):
+            staged = workspace_staging.stage_workspace_snapshot(snapshot)
+        cache = tmp_path / "downloads"
+        cache.mkdir()
+        (cache / "source.tar").write_bytes(b"abc")
+        fixture = ROOT / "tests/fixtures/processes/staged_source_fetch.py"
+        result = subprocess.run(
+            [sys.executable, "-I", "-B", str(fixture), str(staged), str(cache)],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
 
     def test_registration_changes_follow_selected_graph_and_materialized_bytes(
         self, tmp_path: Path
