@@ -148,7 +148,7 @@ def add_log_arguments(parser: argparse.ArgumentParser) -> None:
                 type=_tail_count,
                 default=40,
                 metavar="N",
-                help="initial lines per stage (default: 40; 0: none)",
+                help="last N lines per stage initially (default: 40; 0: none)",
             )
             if action == "show":
                 child.add_argument(
@@ -225,6 +225,8 @@ def _show_run(run: LogRun, args: argparse.Namespace) -> None:
         if args.logs_action != "follow" or current.status != "running":
             if args.stage is not None and not matched:
                 fail(f"stage not found: {args.stage}")
+            if getattr(args, "failed", False) and not matched:
+                print("no failed or interrupted stages in this run", flush=True)
             if args.logs_action == "follow":
                 print(f"run finished: {current.status}", flush=True)
             return

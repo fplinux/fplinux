@@ -177,6 +177,26 @@ class LogsCliTests:
         assert (rejected.returncode) == (1), rejected.stderr
         assert ("no matching log run") in (rejected.stderr)
 
+    @pytest.mark.parametrize(
+        "stages",
+        [(), (("source", "success"),)],
+        ids=["cached-run", "successful-stages"],
+    )
+    def test_show_failed_explains_a_run_without_failed_stages(
+        self, stages: tuple[tuple[str, str], ...]
+    ) -> None:
+        """An empty failure filter explains the result while keeping its successful exit."""
+        run = self.journal("build/example/run", stages=stages)
+        if stages:
+            (run / "01-source.log").write_text("successful output\n")
+
+        result = self.run_logs("show", "--command", "build", "--failed")
+
+        assert result.returncode == 0, result.stderr
+        assert "build/example/run: success\n" in result.stdout
+        assert "no failed or interrupted stages in this run\n" in result.stdout
+        assert "successful output" not in result.stdout
+
     def test_reader_neither_waits_for_cache_lock_nor_creates_logs(self) -> None:
         """Observing a build must remain possible while a writer holds the real cache lock."""
         self.journal("build/example/run")

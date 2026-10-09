@@ -119,7 +119,9 @@ and the data to keep private. For a phone without a target, use the
 `latest` is selected after applying filters. A directory basename is accepted
 only when it identifies one run. `--stage` accepts a stage name or complete
 stage path; a shared name selects all matches. `show --failed` filters stages
-of the chosen run, rather than selecting another run. `--tail 0` omits existing
+of the chosen run, rather than selecting another run. When `--stage` is omitted,
+`show --failed` explains a result with no failed or interrupted stages and exits
+successfully. `--tail 0` omits existing
 output. `follow` stays with its selected invocation and prints new stages until
 completion; Ctrl+C stops only the reader.
 
