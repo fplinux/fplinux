@@ -147,32 +147,15 @@
 #define JPEG_SCALE_H_WORDS 48U
 #define JPEG_SCALE_V_WORDS 68U
 
-struct ums9117_jpeg_scale_config {
-	u16 source_width;
-	u16 source_height;
-	u16 dest_width;
-	u16 dest_height;
-	size_t source_bytes;
-	size_t dest_bytes;
-};
-
-static const struct ums9117_jpeg_scale_config
-	jpeg_scale_configs[UMS9117_JPEG_SCALE_PROFILE_COUNT] = {
+const struct ums9117_jpeg_scale_geometry
+	ums9117_jpeg_scale_geometries[UMS9117_JPEG_SCALE_PROFILE_COUNT] = {
 	[UMS9117_JPEG_SCALE_640X480_TO_320X240] = {
-		.source_width = 640,
-		.source_height = 480,
-		.dest_width = 320,
-		.dest_height = 240,
-		.source_bytes = 640U * 480U,
-		.dest_bytes = 320U * 240U,
+		.source = { 640, 480 },
+		.destination = { 320, 240 },
 	},
 	[UMS9117_JPEG_SCALE_320X240_TO_160X120] = {
-		.source_width = 320,
-		.source_height = 240,
-		.dest_width = 160,
-		.dest_height = 120,
-		.source_bytes = 320U * 240U,
-		.dest_bytes = 160U * 120U,
+		.source = { 320, 240 },
+		.destination = { 160, 120 },
 	},
 };
 
@@ -1935,25 +1918,22 @@ static void jpeg_scale_t4_copy(u8 *destination, const u8 *source, size_t size)
 		destination[i] = source[i ^ 3];
 }
 
-static void
-jpeg_scale_fill_inputs(struct ums9117_jpeg_hw *hw,
-		       const struct ums9117_jpeg_scale_config *config,
-		       const u8 *input[2])
+static void jpeg_scale_fill_inputs(struct ums9117_jpeg_hw *hw,
+				   size_t source_bytes, size_t dest_bytes,
+				   const u8 *input[2])
 {
 	unsigned int plane;
 
 	for (plane = 0; plane < 2; ++plane)
 		jpeg_scale_t4_copy(jpeg_buffer_data(&hw->buffers[plane]),
-				   input[plane], config->source_bytes);
+				   input[plane], source_bytes);
 	for (plane = 2; plane < 4; ++plane)
 		memset(jpeg_buffer_data(&hw->buffers[plane]), JPEG_ENCODE_FILL,
-		       config->dest_bytes);
+		       dest_bytes);
 }
 
-static int
-jpeg_scale_verify_memory(struct ums9117_jpeg_hw *hw,
-			 const struct ums9117_jpeg_scale_config *config,
-			 const u8 *input[2])
+static int jpeg_scale_verify_memory(struct ums9117_jpeg_hw *hw,
+				    size_t source_bytes, const u8 *input[2])
 {
 	unsigned int plane;
 	size_t i;
@@ -1964,7 +1944,7 @@ jpeg_scale_verify_memory(struct ums9117_jpeg_hw *hw,
 	for (plane = 0; plane < 2; ++plane) {
 		const u8 *data = jpeg_buffer_data(&hw->buffers[plane]);
 
-		for (i = 0; i < config->source_bytes; ++i)
+		for (i = 0; i < source_bytes; ++i)
 			if (data[i] != input[plane][i ^ 3])
 				return -EBADMSG;
 	}
@@ -2000,9 +1980,10 @@ static int jpeg_scale_upload_tables(struct ums9117_jpeg_hw *hw)
 	return 0;
 }
 
-static int jpeg_scale_configure(struct ums9117_jpeg_hw *hw,
-				const struct ums9117_jpeg_scale_config *config,
-				unsigned long deadline)
+static int
+jpeg_scale_configure(struct ums9117_jpeg_hw *hw,
+		     const struct ums9117_jpeg_scale_geometry *geometry,
+		     unsigned long deadline)
 {
 	int ret;
 
@@ -2018,9 +1999,10 @@ static int jpeg_scale_configure(struct ums9117_jpeg_hw *hw,
 		return ret;
 	jpeg_write(hw, JPEG_SC_FORMAT, 0);
 	jpeg_write(hw, JPEG_SOURCE_SIZE,
-		   (config->source_height << 16) | config->source_width);
+		   (geometry->source.height << 16) | geometry->source.width);
 	jpeg_write(hw, JPEG_DEST_SIZE,
-		   (config->dest_height << 16) | config->dest_width);
+		   (geometry->destination.height << 16) |
+			   geometry->destination.width);
 	jpeg_write(hw, JPEG_FRAME0_Y,
 		   lower_32_bits(jpeg_buffer_dma(&hw->buffers[0])));
 	jpeg_write(hw, JPEG_FRAME0_UV,
@@ -2036,7 +2018,7 @@ static int jpeg_scale_configure(struct ums9117_jpeg_hw *hw,
 	jpeg_write(hw, JPEG_ENDIAN, 5);
 	jpeg_write(hw, JPEG_TRIM_START, 0);
 	jpeg_write(hw, JPEG_TRIM_SIZE,
-		   (config->source_height << 16) | config->source_width);
+		   (geometry->source.height << 16) | geometry->source.width);
 	jpeg_write(hw, JPEG_SLICE_SIZE, 0);
 	jpeg_write(hw, JPEG_SCALING_CONFIG, 0x200);
 	return 0;
@@ -2134,11 +2116,12 @@ int ums9117_jpeg_hw_scale(struct ums9117_jpeg_hw *hw,
 			  const u8 *input[2], const size_t input_size[2],
 			  u8 *output[2], const size_t capacity[2])
 {
-	const struct ums9117_jpeg_scale_config *config;
+	const struct ums9117_jpeg_scale_geometry *geometry;
 	unsigned long flags, deadline;
 	u64 started_ns;
 	unsigned int completed_units = 0;
 	size_t buffer_sizes[4];
+	size_t source_bytes, dest_bytes;
 	int memory_ret, recovery_ret, ret;
 
 	if (!input || !input[0] || !input[1] || !input_size || !output ||
@@ -2146,23 +2129,23 @@ int ums9117_jpeg_hw_scale(struct ums9117_jpeg_hw *hw,
 		return -EINVAL;
 	if ((unsigned int)profile >= UMS9117_JPEG_SCALE_PROFILE_COUNT)
 		return -EINVAL;
-	config = &jpeg_scale_configs[profile];
+	geometry = &ums9117_jpeg_scale_geometries[profile];
+	source_bytes = geometry->source.width * geometry->source.height;
+	dest_bytes = geometry->destination.width * geometry->destination.height;
 	if (ums9117_jpeg_hw_failed(hw))
 		return -EIO;
 	if (atomic_read(&hw->cancelled))
 		return -ECANCELED;
-	if (input_size[0] != config->source_bytes ||
-	    input_size[1] != config->source_bytes)
+	if (input_size[0] != source_bytes || input_size[1] != source_bytes)
 		return -EINVAL;
-	if (capacity[0] < config->dest_bytes ||
-	    capacity[1] < config->dest_bytes)
+	if (capacity[0] < dest_bytes || capacity[1] < dest_bytes)
 		return -ENOSPC;
 	started_ns = ktime_get_ns();
 	jpeg_operation_request(hw, JPEG_OPERATION_SCALE);
-	buffer_sizes[0] = config->source_bytes;
-	buffer_sizes[1] = config->source_bytes;
-	buffer_sizes[2] = config->dest_bytes;
-	buffer_sizes[3] = config->dest_bytes;
+	buffer_sizes[0] = source_bytes;
+	buffer_sizes[1] = source_bytes;
+	buffer_sizes[2] = dest_bytes;
+	buffer_sizes[3] = dest_bytes;
 	ret = jpeg_prepare_buffers(hw, buffer_sizes);
 	if (ret)
 		goto free_buffers;
@@ -2170,10 +2153,10 @@ int ums9117_jpeg_hw_scale(struct ums9117_jpeg_hw *hw,
 		ret = -ERANGE;
 		goto free_buffers;
 	}
-	jpeg_scale_fill_inputs(hw, config, input);
+	jpeg_scale_fill_inputs(hw, source_bytes, dest_bytes, input);
 	jpeg_set_operation(hw, JPEG_OPERATION_SCALE, JPEG_SCALE_IRQ_ENABLED);
 	deadline = jiffies + msecs_to_jiffies(JPEG_WAIT_MS);
-	ret = jpeg_scale_configure(hw, config, deadline);
+	ret = jpeg_scale_configure(hw, geometry, deadline);
 	if (!ret)
 		ret = jpeg_scale_wait(hw, deadline);
 	if (!ret) {
@@ -2188,7 +2171,7 @@ int ums9117_jpeg_hw_scale(struct ums9117_jpeg_hw *hw,
 			goto record_result;
 		}
 	}
-	memory_ret = jpeg_scale_verify_memory(hw, config, input);
+	memory_ret = jpeg_scale_verify_memory(hw, source_bytes, input);
 	if (memory_ret) {
 		spin_lock_irqsave(&hw->lock, flags);
 		if (memory_ret == -EBADMSG)
@@ -2212,9 +2195,9 @@ int ums9117_jpeg_hw_scale(struct ums9117_jpeg_hw *hw,
 	if (!ret) {
 		dma_rmb();
 		jpeg_scale_t4_copy(output[0], jpeg_buffer_data(&hw->buffers[2]),
-				   config->dest_bytes);
+				   dest_bytes);
 		jpeg_scale_t4_copy(output[1], jpeg_buffer_data(&hw->buffers[3]),
-				   config->dest_bytes);
+				   dest_bytes);
 	}
 free_buffers:
 	if (ret)
@@ -2222,7 +2205,7 @@ free_buffers:
 record_result:
 	jpeg_clear_operation(hw);
 	jpeg_operation_result(hw, JPEG_OPERATION_SCALE, ret, completed_units,
-			      ret ? 0 : 2 * config->dest_bytes, started_ns);
+			      ret ? 0 : 2 * dest_bytes, started_ns);
 	return ret;
 }
 

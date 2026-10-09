@@ -22,6 +22,19 @@ enum ums9117_jpeg_scale_profile {
 	UMS9117_JPEG_SCALE_PROFILE_COUNT,
 };
 
+struct ums9117_jpeg_geometry {
+	u32 width;
+	u32 height;
+};
+
+struct ums9117_jpeg_scale_geometry {
+	struct ums9117_jpeg_geometry source;
+	struct ums9117_jpeg_geometry destination;
+};
+
+extern const struct ums9117_jpeg_scale_geometry
+	ums9117_jpeg_scale_geometries[UMS9117_JPEG_SCALE_PROFILE_COUNT];
+
 struct ums9117_jpeg_hw *ums9117_jpeg_hw_create(struct platform_device *pdev);
 void ums9117_jpeg_hw_destroy(struct ums9117_jpeg_hw *hw);
 void ums9117_jpeg_hw_prepare(struct ums9117_jpeg_hw *hw);

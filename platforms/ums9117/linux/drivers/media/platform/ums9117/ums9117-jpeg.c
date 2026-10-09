@@ -34,30 +34,8 @@ enum jpeg_operation {
 	JPEG_OPERATION_COUNT,
 };
 
-struct jpeg_geometry {
-	u32 width;
-	u32 height;
-};
-
-struct jpeg_scale_profile {
-	struct jpeg_geometry source;
-	struct jpeg_geometry destination;
-};
-
-static const struct jpeg_scale_profile
-	jpeg_scale_profiles[UMS9117_JPEG_SCALE_PROFILE_COUNT] = {
-	[UMS9117_JPEG_SCALE_640X480_TO_320X240] = {
-		.source = { 640, 480 },
-		.destination = { 320, 240 },
-	},
-	[UMS9117_JPEG_SCALE_320X240_TO_160X120] = {
-		.source = { 320, 240 },
-		.destination = { 160, 120 },
-	},
-};
-
 /* The fixed encoder configuration supports only these frame geometries. */
-static const struct jpeg_geometry jpeg_encoder_geometries[] = {
+static const struct ums9117_jpeg_geometry jpeg_encoder_geometries[] = {
 	{ 1200, 32 }, { 320, 240 },   { 240, 320 },
 	{ 640, 480 }, { 1600, 1200 }, { 1200, 1600 },
 };
@@ -140,8 +118,9 @@ static struct v4l2_pix_format_mplane *jpeg_format(struct jpeg_context *ctx,
 static enum ums9117_jpeg_scale_profile jpeg_scale_output_profile(u32 width,
 								 u32 height)
 {
-	const struct jpeg_scale_profile *small =
-		&jpeg_scale_profiles[UMS9117_JPEG_SCALE_320X240_TO_160X120];
+	const struct ums9117_jpeg_scale_geometry *small =
+		&ums9117_jpeg_scale_geometries
+			[UMS9117_JPEG_SCALE_320X240_TO_160X120];
 
 	if (width == small->source.width && height == small->source.height)
 		return UMS9117_JPEG_SCALE_320X240_TO_160X120;
@@ -345,11 +324,13 @@ static int jpeg_enum_framesizes(struct file *file, void *priv,
 				struct v4l2_frmsizeenum *size)
 {
 	struct jpeg_context *ctx = jpeg_file_context(file);
-	const struct jpeg_geometry *geometry;
-	const struct jpeg_scale_profile *large =
-		&jpeg_scale_profiles[UMS9117_JPEG_SCALE_640X480_TO_320X240];
-	const struct jpeg_scale_profile *small =
-		&jpeg_scale_profiles[UMS9117_JPEG_SCALE_320X240_TO_160X120];
+	const struct ums9117_jpeg_geometry *geometry;
+	const struct ums9117_jpeg_scale_geometry *large =
+		&ums9117_jpeg_scale_geometries
+			[UMS9117_JPEG_SCALE_640X480_TO_320X240];
+	const struct ums9117_jpeg_scale_geometry *small =
+		&ums9117_jpeg_scale_geometries
+			[UMS9117_JPEG_SCALE_320X240_TO_160X120];
 
 	switch (ctx->operation) {
 	case JPEG_OPERATION_DECODE:
@@ -429,15 +410,15 @@ static int jpeg_try_decode_format(struct jpeg_context *ctx,
 	return 0;
 }
 
-static const struct jpeg_geometry *jpeg_nearest_encode_geometry(u32 width,
-								u32 height)
+static const struct ums9117_jpeg_geometry *
+jpeg_nearest_encode_geometry(u32 width, u32 height)
 {
-	const struct jpeg_geometry *best = &jpeg_encoder_geometries[0];
+	const struct ums9117_jpeg_geometry *best = &jpeg_encoder_geometries[0];
 	u64 best_distance = ~0ULL;
 	unsigned int i;
 
 	for (i = 0; i < ARRAY_SIZE(jpeg_encoder_geometries); i++) {
-		const struct jpeg_geometry *geometry =
+		const struct ums9117_jpeg_geometry *geometry =
 			&jpeg_encoder_geometries[i];
 		u64 distance = (u64)(geometry->width > width ?
 					     geometry->width - width :
@@ -458,7 +439,7 @@ static int jpeg_try_encode_format(struct jpeg_context *ctx,
 				  struct v4l2_format *format)
 {
 	struct v4l2_pix_format_mplane *pix = &format->fmt.pix_mp;
-	const struct jpeg_geometry *geometry;
+	const struct ums9117_jpeg_geometry *geometry;
 	u32 capacity;
 
 	if (format->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
@@ -479,17 +460,19 @@ static int jpeg_try_encode_format(struct jpeg_context *ctx,
 static int jpeg_try_scale_format(struct jpeg_context *ctx,
 				 struct v4l2_format *format)
 {
-	const struct jpeg_scale_profile *profile;
+	const struct ums9117_jpeg_scale_geometry *profile;
 
 	if (format->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
-		profile = &jpeg_scale_profiles[jpeg_scale_output_profile(
-			format->fmt.pix_mp.width, format->fmt.pix_mp.height)];
+		profile =
+			&ums9117_jpeg_scale_geometries[jpeg_scale_output_profile(
+				format->fmt.pix_mp.width,
+				format->fmt.pix_mp.height)];
 		jpeg_nv16_format(&format->fmt.pix_mp, profile->source.width,
 				 profile->source.height);
 		return 0;
 	}
 	if (format->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
-		profile = &jpeg_scale_profiles[ctx->scale_profile];
+		profile = &ums9117_jpeg_scale_geometries[ctx->scale_profile];
 		jpeg_nv16_format(&format->fmt.pix_mp,
 				 profile->destination.width,
 				 profile->destination.height);
@@ -518,7 +501,7 @@ static int jpeg_try_format(struct file *file, void *priv,
 static int jpeg_set_scale_format(struct jpeg_context *ctx,
 				 struct v4l2_format *format)
 {
-	const struct jpeg_scale_profile *profile;
+	const struct ums9117_jpeg_scale_geometry *profile;
 	struct vb2_queue *queue;
 	enum ums9117_jpeg_scale_profile selected;
 
@@ -529,7 +512,7 @@ static int jpeg_set_scale_format(struct jpeg_context *ctx,
 			return -EBUSY;
 		selected = jpeg_scale_output_profile(format->fmt.pix_mp.width,
 						     format->fmt.pix_mp.height);
-		profile = &jpeg_scale_profiles[selected];
+		profile = &ums9117_jpeg_scale_geometries[selected];
 		jpeg_nv16_format(&format->fmt.pix_mp, profile->source.width,
 				 profile->source.height);
 		ctx->scale_profile = selected;
@@ -543,7 +526,7 @@ static int jpeg_set_scale_format(struct jpeg_context *ctx,
 	queue = v4l2_m2m_get_dst_vq(ctx->fh.m2m_ctx);
 	if (vb2_is_busy(queue))
 		return -EBUSY;
-	profile = &jpeg_scale_profiles[ctx->scale_profile];
+	profile = &ums9117_jpeg_scale_geometries[ctx->scale_profile];
 	jpeg_nv16_format(&format->fmt.pix_mp, profile->destination.width,
 			 profile->destination.height);
 	ctx->capture = format->fmt.pix_mp;
@@ -1135,10 +1118,10 @@ static void jpeg_init_encode_formats(struct jpeg_context *ctx)
 
 static void jpeg_init_scale_formats(struct jpeg_context *ctx)
 {
-	const struct jpeg_scale_profile *profile;
+	const struct ums9117_jpeg_scale_geometry *profile;
 
 	ctx->scale_profile = UMS9117_JPEG_SCALE_640X480_TO_320X240;
-	profile = &jpeg_scale_profiles[ctx->scale_profile];
+	profile = &ums9117_jpeg_scale_geometries[ctx->scale_profile];
 	jpeg_nv16_format(&ctx->output, profile->source.width,
 			 profile->source.height);
 	jpeg_nv16_format(&ctx->capture, profile->destination.width,
