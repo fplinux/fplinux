@@ -114,7 +114,7 @@ def test_capsule_is_copied_below_dtb_and_published_as_linux_initrd(
     tmp_path: Path, device_data_peer: Path, profile: bytes | None
 ) -> None:
     groups = {} if profile is None else {"audio-profile": (_firmware(profile),)}
-    capsule = create_device_data_initramfs(groups)
+    capsule = create_device_data_initramfs(groups, usb_transport="rndis")
 
     status, tree, arena = _transfer(device_data_peer, tmp_path, capsule)
 

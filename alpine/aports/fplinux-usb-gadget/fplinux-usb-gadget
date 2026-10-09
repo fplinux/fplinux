@@ -6,6 +6,8 @@ set -eu
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=fplinux-usb-network-policy.sh
 . /usr/libexec/fplinux/usb-network-policy.sh
+# shellcheck source=fplinux-usb-transport.sh
+. /usr/libexec/fplinux/usb-transport.sh
 
 session_node=/proc/device-tree/fplinux-session
 usb_session_property=$session_node/fplinux,usb-session
@@ -271,8 +273,13 @@ cleanup() {
 			rm -f -- "$configuration/gser.keyboard"
 		[ ! -L "$configuration/ncm.usb0" ] ||
 			rm -f -- "$configuration/ncm.usb0"
+		[ ! -L "$configuration/rndis.usb0" ] ||
+			rm -f -- "$configuration/rndis.usb0"
+		[ ! -L "$gadget/os_desc/c.1" ] || rm -f -- "$gadget/os_desc/c.1"
 		[ ! -d "$gadget/functions/ncm.usb0" ] ||
 			rmdir "$gadget/functions/ncm.usb0" 2>/dev/null || :
+		[ ! -d "$gadget/functions/rndis.usb0" ] ||
+			rmdir "$gadget/functions/rndis.usb0" 2>/dev/null || :
 		[ ! -d "$gadget/functions/gser.keyboard" ] ||
 			rmdir "$gadget/functions/gser.keyboard" 2>/dev/null || :
 		[ ! -d "$configuration/strings/0x409" ] ||
@@ -307,9 +314,11 @@ start_gadget() {
 	mkdir -p /run
 	: >"$log"
 	exec >>"$log" 2>&1
-	report 6 "START functions=gser,ncm kernel=$(uname -r)"
 	trap on_exit EXIT
 	trap 'exit 1' HUP INT TERM
+	stage=select_usb_transport
+	usb_transport=$(read_usb_transport /etc/fplinux/usb-transport)
+	report 6 "START transport=$usb_transport kernel=$(uname -r)"
 
 	stage=validate_session_id
 	read_session_id
@@ -350,19 +359,14 @@ start_gadget() {
 	printf '0x80\n' >"$configuration/bmAttributes"
 	printf '2\n' >"$configuration/MaxPower"
 	mkdir "$configuration/strings/0x409"
-	printf 'Keyboard and NCM\n' \
-		>"$configuration/strings/0x409/configuration"
 
 	stage=create_functions
 	mkdir "$gadget/functions/gser.keyboard"
-	mkdir "$gadget/functions/ncm.usb0"
-	printf '%s\n' "$device_mac" >"$gadget/functions/ncm.usb0/dev_addr"
-	printf '%s\n' "$host_mac" >"$gadget/functions/ncm.usb0/host_addr"
-	printf 'usb%%d\n' >"$gadget/functions/ncm.usb0/ifname"
+	create_usb_network_function "$gadget" "$configuration" "$usb_transport" \
+		"$device_mac" "$host_mac"
 
 	stage=link_functions
-	ln -s "$gadget/functions/gser.keyboard" "$configuration/gser.keyboard"
-	ln -s "$gadget/functions/ncm.usb0" "$configuration/ncm.usb0"
+	link_usb_functions "$gadget" "$configuration" "$usb_transport"
 
 	stage=verify_prebind
 	if [ ! -c /dev/ttyGS0 ] || [ -e /dev/ttyGS1 ]; then

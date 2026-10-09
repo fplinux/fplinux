@@ -167,6 +167,26 @@ def test_external_radio_data_reaches_the_capsule_and_calibration_changes_it(
     assert (changed_firmware / "bluetooth.bin").read_bytes() == bluetooth
 
 
+@pytest.mark.parametrize("transport", [None, "ncm", "rndis"])
+def test_empty_firmware_archive_contains_only_explicit_rndis_configuration(
+    tmp_path: Path, cpio: str, transport: str | None
+) -> None:
+    archive = create_device_data_initramfs({}, usb_transport=transport)
+    _extract(archive, tmp_path, cpio)
+
+    paths = {path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*")}
+    if transport == "rndis":
+        assert paths == {"etc", "etc/fplinux", "etc/fplinux/usb-transport"}
+        config = tmp_path / "etc/fplinux/usb-transport"
+        assert config.read_bytes() == b"rndis\n"
+        assert config.stat().st_mode & 0o777 == 0o600
+        assert (tmp_path / "etc").stat().st_mode & 0o777 == 0o755
+        assert (tmp_path / "etc/fplinux").stat().st_mode & 0o777 == 0o755
+    else:
+        assert paths == set()
+    assert len(archive) % 512 == 0
+
+
 def test_duplicate_firmware_destinations_are_rejected() -> None:
     with pytest.raises(SystemExit, match="firmware destination already exists"):
         create_device_data_initramfs(
@@ -175,3 +195,8 @@ def test_duplicate_firmware_destinations_are_rejected() -> None:
                 "fm-radio": (_firmware("shared.bin", b"radio"),),
             }
         )
+
+
+def test_unsupported_usb_transport_is_rejected() -> None:
+    with pytest.raises(SystemExit, match="unsupported USB transport"):
+        create_device_data_initramfs({}, usb_transport="unknown")

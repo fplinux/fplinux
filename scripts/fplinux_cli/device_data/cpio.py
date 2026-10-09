@@ -19,8 +19,13 @@ if TYPE_CHECKING:
 
 def create_device_data_initramfs(
     groups: Mapping[str, Sequence[FirmwareInput]],
+    *,
+    usb_transport: str | None = None,
 ) -> bytes:
-    """Package optional runtime firmware as newc."""
+    """Package optional runtime firmware and the selected USB transport as newc."""
+    if usb_transport not in (None, "ncm", "rndis"):
+        fail(f"unsupported USB transport: {usb_transport}")
+
     files: dict[str, bytes] = {}
     for group in ("bluetooth", "fm-radio", "audio-profile", "wcn-firmware"):
         for firmware in groups.get(group, ()):
@@ -29,6 +34,8 @@ def create_device_data_initramfs(
             if path in files:
                 fail(f"firmware destination already exists: {path}")
             files[path] = contents
+    if usb_transport == "rndis":
+        files["etc/fplinux/usb-transport"] = b"rndis\n"
 
     directories: set[str] = set()
     for path in files:

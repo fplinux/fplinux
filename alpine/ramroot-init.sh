@@ -56,6 +56,12 @@ if [ -d /lib/firmware ]; then
 	/bin/busybox cp -a /lib/firmware/. /newroot/lib/firmware/ ||
 		ramroot_fail "cannot transfer device firmware"
 fi
+if [ -f /etc/fplinux/usb-transport ]; then
+	/bin/busybox mkdir -p /newroot/etc/fplinux ||
+		ramroot_fail "cannot create USB configuration directory"
+	/bin/busybox cp -p /etc/fplinux/usb-transport /newroot/etc/fplinux/usb-transport ||
+		ramroot_fail "cannot transfer USB configuration"
+fi
 for ramroot_mount in run dev proc sys; do
 	/bin/busybox mount --move "/$ramroot_mount" "/newroot/$ramroot_mount" ||
 		ramroot_fail "cannot transfer /$ramroot_mount"
