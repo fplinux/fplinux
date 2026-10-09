@@ -26,21 +26,31 @@ try {
 }
 
 const SCOPES = [
+  "audio",
+  "bluetooth",
   "bootstrap",
+  "bq-2830l-tank-connect-max",
   "build",
+  "cache",
   "cli",
   "console",
   "deps",
+  "device-data",
   "host",
   "inoi-240-modern-4g",
   "inoi-244-modern-4g",
   "input",
+  "maxvi-k15n-4g",
+  "media",
   "nokia-ta1618",
   "quality",
   "release",
   "repo",
   "rootfs",
+  "site",
+  "storage",
   "ums9117",
+  "wifi",
 ];
 
 export default {
