@@ -3,18 +3,17 @@
 
 from __future__ import annotations
 
-import tempfile
-from contextlib import ExitStack
-from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
 HARNESS = ROOT / "tests/host_tool/runtime/fplinux-handoff-protocol.c"
 
@@ -22,30 +21,24 @@ HARNESS = ROOT / "tests/host_tool/runtime/fplinux-handoff-protocol.c"
 class HandoffProtocolTests:
     """Run a C99 peer for the fixed binary handoff boundary."""
 
-    temporary: ClassVar[tempfile.TemporaryDirectory[str]]
     executable: ClassVar[Path]
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Compile the isolated codec harness once for this test class."""
-        with ExitStack() as cleanup:
-            cls.temporary = tempfile.TemporaryDirectory()
-            cleanup.enter_context(cls.temporary)
-            cls.executable = Path(cls.temporary.name) / "fplinux-handoff-protocol"
-            run_process(
+        with c_build_directory(tmp_path_factory, "fplinux-handoff-protocol") as directory:
+            cls.executable = directory / "fplinux-handoff-protocol"
+            compile_c(
+                cls.executable,
                 [
-                    "cc",
                     "-std=c99",
                     "-Wall",
                     "-Wextra",
                     "-Werror",
                     str(HARNESS),
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="compile handoff protocol harness",
-                timeout=30,
                 check=True,
             )
             yield

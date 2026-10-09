@@ -3,19 +3,18 @@
 
 from __future__ import annotations
 
-import tempfile
-from contextlib import ExitStack
-from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
     import subprocess
     from collections.abc import Iterator
+    from pathlib import Path
 
 SOURCE = ROOT / "alpine/aports/fplinux-jack/fplinux-jack.c"
 FIXTURE = ROOT / "tests/fixtures/fplinux_jack"
@@ -28,20 +27,17 @@ class FPLinuxJackHostToolTests:
     the phone reports the jack or that a switch sequence is silent.
     """
 
-    temporary: ClassVar[tempfile.TemporaryDirectory[str]]
     executable: ClassVar[Path]
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Build the service with the ALSA control double for this host."""
-        with ExitStack() as cleanup:
-            cls.temporary = tempfile.TemporaryDirectory()
-            cleanup.enter_context(cls.temporary)
-            cls.executable = Path(cls.temporary.name) / "fplinux-jack"
-            run_process(
+        with c_build_directory(tmp_path_factory, "fplinux-jack") as directory:
+            cls.executable = directory / "fplinux-jack"
+            compile_c(
+                cls.executable,
                 [
-                    "cc",
                     "-std=c11",
                     "-Wall",
                     "-Wextra",
@@ -53,11 +49,8 @@ class FPLinuxJackHostToolTests:
                     str(SOURCE),
                     str(ROOT / "lib/fplinux/fplinux-cli.c"),
                     str(FIXTURE / "boundary.c"),
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="compile fplinux-jack with ALSA control double",
-                timeout=30,
                 check=True,
             )
             yield

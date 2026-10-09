@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
+
+if TYPE_CHECKING:
+    import pytest
 
 FIXTURES = ROOT / "tests/host_tool/ums9117"
 DRIVER = ROOT / "platforms/ums9117/linux/drivers/power/supply/sc2720-charger-ums9117.c"
@@ -16,13 +19,15 @@ DRIVER = ROOT / "platforms/ums9117/linux/drivers/power/supply/sc2720-charger-ums
 class Sc2720ChargerHostTests:
     """Link the real driver; no kernel or physical charger is exercised."""
 
-    def test_usb_type_online_and_read_only_errors(self) -> None:
+    def test_usb_type_online_and_read_only_errors(
+        self, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
         """Decode status snapshots without writes and preserve callback errors."""
-        with tempfile.TemporaryDirectory() as temporary:
-            executable = Path(temporary) / "sc2720-charger"
-            compilation = run_process(
+        with c_build_directory(tmp_path_factory, "sc2720_charger") as temporary:
+            executable = temporary / "sc2720-charger"
+            compilation = compile_c(
+                executable,
                 [
-                    "cc",
                     "-O2",
                     "-std=gnu11",
                     "-Wall",
@@ -31,11 +36,9 @@ class Sc2720ChargerHostTests:
                     f"-I{FIXTURES / 'charger-compat'}",
                     str(FIXTURES / "sc2720-charger.c"),
                     str(DRIVER),
-                    "-o",
-                    str(executable),
                 ],
                 name="compile SC2720 charger host component",
-                timeout=30,
+                check=False,
             )
             assert (compilation.returncode) == (0), compilation.stderr
             result = run_process(

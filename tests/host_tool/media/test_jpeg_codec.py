@@ -3,18 +3,17 @@
 
 from __future__ import annotations
 
-import tempfile
-from contextlib import ExitStack
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
 KERNEL = ROOT / "platforms/ums9117/linux/drivers/media/platform/ums9117"
 HARNESS = ROOT / "tests/host_tool/media/jpeg-codec.c"
@@ -166,15 +165,13 @@ class Ums9117JpegCodecHostTests:
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Link one codec harness with the controlled external boundaries."""
-        with ExitStack() as cleanup:
-            build_directory = tempfile.TemporaryDirectory()
-            cleanup.enter_context(build_directory)
-            cls.executable = Path(build_directory.name) / "ums9117-jpeg-codec"
-            run_process(
+        with c_build_directory(tmp_path_factory, "jpeg-codec") as directory:
+            cls.executable = directory / "ums9117-jpeg-codec"
+            compile_c(
+                cls.executable,
                 [
-                    "cc",
                     "-O2",
                     "-std=c11",
                     "-Wall",
@@ -185,11 +182,8 @@ class Ums9117JpegCodecHostTests:
                     str(HARNESS),
                     str(STANDARD_TABLES),
                     str(KERNEL / "ums9117-jpeg-codec.c"),
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="compile UMS9117 JPEG codec host oracle",
-                timeout=30,
                 check=True,
             )
             yield

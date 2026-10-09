@@ -5,18 +5,17 @@ from __future__ import annotations
 
 import shlex
 import subprocess
-import tempfile
-from contextlib import ExitStack
-from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
 SOURCE = ROOT / "common/host/fplinux-usb-keyboard.c"
 SHARED = ROOT / "include/fplinux"
@@ -25,33 +24,30 @@ SHARED = ROOT / "include/fplinux"
 class FPLinuxUsbKeyboardCliTests:
     """Compile and exercise the real host tool without accessing USB devices."""
 
-    temporary: ClassVar[tempfile.TemporaryDirectory[str]]
     executable: ClassVar[Path]
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Compile the production source with its declared host dependencies."""
-        with ExitStack() as cleanup:
-            try:
-                libusb_flags = shlex.split(
-                    run_process(
-                        ["pkg-config", "--cflags", "--libs", "libusb-1.0"],
-                        name="read libusb compiler and linker flags",
-                        timeout=10,
-                        check=True,
-                    ).stdout
-                )
-            except (FileNotFoundError, subprocess.CalledProcessError) as error:
-                message = "pkg-config libusb-1.0 development files are required"
-                raise RuntimeError(message) from error
+        try:
+            libusb_flags = shlex.split(
+                run_process(
+                    ["pkg-config", "--cflags", "--libs", "libusb-1.0"],
+                    name="read libusb compiler and linker flags",
+                    timeout=10,
+                    check=True,
+                ).stdout
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError) as error:
+            message = "pkg-config libusb-1.0 development files are required"
+            raise RuntimeError(message) from error
 
-            cls.temporary = tempfile.TemporaryDirectory(prefix="fplinux-usb-keyboard-cli-")
-            cleanup.enter_context(cls.temporary)
-            cls.executable = Path(cls.temporary.name) / "fplinux-usb-keyboard"
-            run_process(
+        with c_build_directory(tmp_path_factory, "usb-keyboard-cli") as temporary:
+            cls.executable = temporary / "fplinux-usb-keyboard"
+            compile_c(
+                cls.executable,
                 [
-                    "cc",
                     "-std=c11",
                     "-Wall",
                     "-Wextra",
@@ -62,11 +58,8 @@ class FPLinuxUsbKeyboardCliTests:
                     *libusb_flags,
                     str(ROOT / "lib/fplinux/fplinux-cli.c"),
                     "-pthread",
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="compile fplinux-usb-keyboard",
-                timeout=30,
                 check=True,
             )
             yield

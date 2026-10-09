@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, ClassVar
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
@@ -47,7 +48,6 @@ BUS_CONFIG = """\
 class FplinuxBluetoothHostToolTests:
     """Exercise the client against a controlled D-Bus BlueZ/obexd fake."""
 
-    temporary: ClassVar[tempfile.TemporaryDirectory[str]]
     work: ClassVar[Path]
     client: ClassVar[Path]
     service: ClassVar[Path]
@@ -60,7 +60,7 @@ class FplinuxBluetoothHostToolTests:
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Build the real client and the test-owned fake through pkg-config."""
         with ExitStack() as cleanup:
             if shutil.which("dbus-daemon") is None:
@@ -83,9 +83,9 @@ class FplinuxBluetoothHostToolTests:
                 message = "pkg-config dbus-1 development files are required"
                 pytest.skip(message)
 
-            cls.temporary = tempfile.TemporaryDirectory()
-            cleanup.enter_context(cls.temporary)
-            cls.work = Path(cls.temporary.name)
+            cls.work = cleanup.enter_context(
+                c_build_directory(tmp_path_factory, "fplinux-bluetooth")
+            )
             cls.client = cls.work / "fplinux-bluetooth"
             cls.service = cls.work / "fplinux-bluetooth-service"
             for source, output, name, extra_sources in (
@@ -102,9 +102,9 @@ class FplinuxBluetoothHostToolTests:
                 ),
                 (SERVICE_SOURCE, cls.service, "compile FPLinux Bluetooth test service", []),
             ):
-                run_process(
+                compile_c(
+                    output,
                     [
-                        "cc",
                         "-std=c11",
                         "-Wall",
                         "-Wextra",
@@ -114,12 +114,9 @@ class FplinuxBluetoothHostToolTests:
                         *cflags,
                         str(source),
                         *extra_sources,
-                        "-o",
-                        str(output),
                         *libraries,
                     ],
                     name=name,
-                    timeout=30,
                     check=True,
                 )
             yield

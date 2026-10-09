@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
+
+if TYPE_CHECKING:
+    import pytest
 
 UBOOT = ROOT / "platforms/ums9117/uboot"
 HARNESS = ROOT / "tests/host_tool/ums9117/ums9117-sdio-slot.c"
@@ -17,13 +20,15 @@ COMPAT = ROOT / "tests/host_tool/ums9117/ums9117-sdio-compat"
 class Ums9117SdioSlotTests:
     """Link production slot logic to fake MMIO/ADI; no device is exercised."""
 
-    def test_slot_ownership_and_power_policy(self) -> None:
+    def test_slot_ownership_and_power_policy(
+        self, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
         """Preserve VSEL admission, EIC ownership and the power-down bit policy."""
-        with tempfile.TemporaryDirectory() as temporary:
-            executable = Path(temporary) / "ums9117-sdio-slot"
-            run_process(
+        with c_build_directory(tmp_path_factory, "ums9117_sdio_slot") as temporary:
+            executable = temporary / "ums9117-sdio-slot"
+            compile_c(
+                executable,
                 [
-                    "cc",
                     "-std=c99",
                     "-Wall",
                     "-Wextra",
@@ -33,11 +38,8 @@ class Ums9117SdioSlotTests:
                     str(HARNESS),
                     str(UBOOT / "ums9117-sdio-slot.c"),
                     str(UBOOT / "ums9117-sdio-core.c"),
-                    "-o",
-                    str(executable),
                 ],
                 name="compile UMS9117 SDIO slot harness",
-                timeout=30,
                 check=True,
             )
             result = run_process(

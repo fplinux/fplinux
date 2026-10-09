@@ -3,19 +3,18 @@
 
 from __future__ import annotations
 
-import tempfile
-from contextlib import ExitStack
-from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
     import subprocess
     from collections.abc import Iterator
+    from pathlib import Path
 
 SOURCE = ROOT / "alpine/aports/fplinux-fm/fplinux-fm.c"
 BOUNDARY = ROOT / "tests/fixtures/fplinux_fm/boundary.c"
@@ -24,20 +23,17 @@ BOUNDARY = ROOT / "tests/fixtures/fplinux_fm/boundary.c"
 class FPLinuxFMHostToolTests:
     """Run the real command with test-owned V4L2 and ALSA boundaries."""
 
-    temporary: ClassVar[tempfile.TemporaryDirectory[str]]
     executable: ClassVar[Path]
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Build the command with a narrow hardware double for this host."""
-        with ExitStack() as cleanup:
-            cls.temporary = tempfile.TemporaryDirectory()
-            cleanup.enter_context(cls.temporary)
-            cls.executable = Path(cls.temporary.name) / "fplinux-fm"
-            run_process(
+        with c_build_directory(tmp_path_factory, "fplinux-fm") as directory:
+            cls.executable = directory / "fplinux-fm"
+            compile_c(
+                cls.executable,
                 [
-                    "cc",
                     "-std=c11",
                     "-Wall",
                     "-Wextra",
@@ -49,11 +45,8 @@ class FPLinuxFMHostToolTests:
                     str(SOURCE),
                     str(ROOT / "lib/fplinux/fplinux-cli.c"),
                     str(BOUNDARY),
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="compile fplinux-fm with hardware double",
-                timeout=30,
                 check=True,
             )
             yield

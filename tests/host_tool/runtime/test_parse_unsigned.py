@@ -3,18 +3,17 @@
 
 from __future__ import annotations
 
-import tempfile
-from contextlib import ExitStack
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
 SHARED = ROOT / "include/fplinux"
 HARNESS = ROOT / "tests/host_tool/runtime/fplinux-parse-unsigned.c"
@@ -27,16 +26,13 @@ class ParseUnsignedTests:
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Link the host harness once for this test group."""
-        with ExitStack() as cleanup:
-            build_directory = tempfile.TemporaryDirectory()
-            cleanup.enter_context(build_directory)
-            temporary = build_directory.name
-            cls.executable = Path(temporary) / "parse-unsigned"
-            run_process(
+        with c_build_directory(tmp_path_factory, "parse-unsigned") as temporary:
+            cls.executable = temporary / "parse-unsigned"
+            compile_c(
+                cls.executable,
                 [
-                    "cc",
                     "-std=c11",
                     "-Wall",
                     "-Wextra",
@@ -44,11 +40,8 @@ class ParseUnsignedTests:
                     f"-I{SHARED}",
                     str(HARNESS),
                     str(ROOT / "lib/fplinux/fplinux-cli.c"),
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="compile unsigned argument parser harness",
-                timeout=30,
                 check=True,
             )
             yield

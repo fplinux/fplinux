@@ -3,12 +3,10 @@
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
-
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 AUDIO = ROOT / "platforms/ums9117/linux/sound/drivers/ums9117"
@@ -21,13 +19,15 @@ class AudioProfileHostComponentTests:
     """Replace kernel firmware/property boundaries while linking the real parser."""
 
     @pytest.mark.parametrize("vibrator", [0, 1], ids=["without-vibrator", "with-vibrator"])
-    def test_decoding_validation_and_firmware_lifetime(self, vibrator: int) -> None:
+    def test_decoding_validation_and_firmware_lifetime(
+        self, vibrator: int, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
         """Preserve packed values, unsafe-input rejection and acquired-data cleanup."""
-        with tempfile.TemporaryDirectory() as temporary:
-            executable = Path(temporary) / f"audio-profile-{vibrator}"
-            run_process(
+        with c_build_directory(tmp_path_factory, "audio_profile") as temporary:
+            executable = temporary / f"audio-profile-{vibrator}"
+            compile_c(
+                executable,
                 [
-                    "cc",
                     "-std=gnu11",
                     "-Wall",
                     "-Wextra",
@@ -38,11 +38,8 @@ class AudioProfileHostComponentTests:
                     f"-I{AUDIO}",
                     str(HARNESS),
                     str(AUDIO / "ums9117-audio-profile.c"),
-                    "-o",
-                    str(executable),
                 ],
                 name="compile audio-profile host harness",
-                timeout=30,
                 check=True,
             )
             result = run_process(

@@ -3,18 +3,17 @@
 
 from __future__ import annotations
 
-import tempfile
-from contextlib import ExitStack
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
 
 class TerminalDiagnosticTests:
@@ -24,15 +23,13 @@ class TerminalDiagnosticTests:
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Link the production owner; retain real descriptor and stream operations."""
-        with ExitStack() as cleanup:
-            temporary = tempfile.TemporaryDirectory(prefix="fplinux-terminal-diagnostic-")
-            cleanup.enter_context(temporary)
-            cls.executable = Path(temporary.name) / "terminal-diagnostic"
-            run_process(
+        with c_build_directory(tmp_path_factory, "fplinux-terminal-diagnostic") as directory:
+            cls.executable = directory / "terminal-diagnostic"
+            compile_c(
+                cls.executable,
                 [
-                    "cc",
                     "-std=c11",
                     "-Wall",
                     "-Wextra",
@@ -42,11 +39,8 @@ class TerminalDiagnosticTests:
                     str(ROOT / "tests/host_tool/terminal/fplinux-terminal-diagnostic.c"),
                     str(ROOT / "alpine/aports/fplinux-terminal/terminal-diagnostic.c"),
                     "-Wl,--wrap=open,--wrap=ioctl",
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="compile terminal diagnostic host harness",
-                timeout=30,
                 check=True,
             )
             yield

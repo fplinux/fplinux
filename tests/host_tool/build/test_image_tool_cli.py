@@ -4,19 +4,18 @@
 from __future__ import annotations
 
 import shlex
-import tempfile
-from contextlib import ExitStack
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
     import subprocess
     from collections.abc import Iterator
+    from pathlib import Path
 
 APORTS = ROOT / "alpine/aports"
 SHARED = ROOT / "include/fplinux"
@@ -31,12 +30,10 @@ class ImageToolCliTests:
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Compile complete programs using the check image's libjpeg8 dependency."""
-        with ExitStack() as cleanup:
-            temporary = tempfile.TemporaryDirectory(prefix="fplinux-image-cli-", dir="/tmp")
-            cleanup.enter_context(temporary)
-            cls.executables_directory = Path(temporary.name)
+        with c_build_directory(tmp_path_factory, "image-tool-cli") as temporary:
+            cls.executables_directory = temporary
             sources = {
                 "fplinux-rotate": [
                     APORTS / "fplinux-rotate/fplinux-rotate.c",
@@ -73,9 +70,9 @@ class ImageToolCliTests:
             )
             for tool, tool_sources in sources.items():
                 libraries = ["-ljpeg"] if tool == "fplinux-jpeg-cpu" else []
-                run_process(
+                compile_c(
+                    cls.executables_directory / tool,
                     [
-                        "cc",
                         "-O2",
                         "-std=c11",
                         "-Wall",
@@ -87,11 +84,8 @@ class ImageToolCliTests:
                         str(ROOT / "lib/fplinux/fplinux-cli.c"),
                         *libraries,
                         *drm_flags,
-                        "-o",
-                        str(cls.executables_directory / tool),
                     ],
                     name=f"compile {tool} for host argument checks",
-                    timeout=30,
                     check=True,
                 )
             yield

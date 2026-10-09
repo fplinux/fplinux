@@ -4,18 +4,17 @@
 from __future__ import annotations
 
 import shlex
-import tempfile
-from contextlib import ExitStack
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
 
 class DrmVtGuardianTests:
@@ -26,16 +25,14 @@ class DrmVtGuardianTests:
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Link the production owner; only open and VT ioctls are substituted."""
-        with ExitStack() as cleanup:
-            temporary = tempfile.TemporaryDirectory(prefix="fplinux-drm-guardian-")
-            cleanup.enter_context(temporary)
-            cls.executable = Path(temporary.name) / "fplinux-vttest"
-            cls.guardian = Path(temporary.name) / "vt-guardian"
-            run_process(
+        with c_build_directory(tmp_path_factory, "fplinux-drm-vt") as temporary:
+            cls.executable = temporary / "fplinux-vttest"
+            cls.guardian = temporary / "vt-guardian"
+            compile_c(
+                cls.guardian,
                 [
-                    "cc",
                     "-std=gnu11",
                     "-Wall",
                     "-Wextra",
@@ -43,11 +40,8 @@ class DrmVtGuardianTests:
                     str(ROOT / "alpine/aports/fplinux-base/fplinux-vt-guardian.c"),
                     str(ROOT / "tests/host_tool/display/fplinux-drm-vt-fake.c"),
                     "-Wl,--wrap=ioctl",
-                    "-o",
-                    str(cls.guardian),
                 ],
                 name="compile VT guardian host helper",
-                timeout=30,
                 check=True,
             )
             flags = shlex.split(
@@ -58,9 +52,9 @@ class DrmVtGuardianTests:
                     check=True,
                 ).stdout
             )
-            run_process(
+            compile_c(
+                cls.executable,
                 [
-                    "cc",
                     "-std=gnu11",
                     "-Wall",
                     "-Wextra",
@@ -71,11 +65,8 @@ class DrmVtGuardianTests:
                     str(ROOT / "lib/fplinux/fplinux-drm-session.c"),
                     "-Wl,--wrap=open,--wrap=ioctl,--wrap=execv",
                     *flags,
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="compile DRM VT guardian host harness",
-                timeout=30,
                 check=True,
             )
             yield

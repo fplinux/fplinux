@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
+
+if TYPE_CHECKING:
+    import pytest
 
 KERNEL = ROOT / "platforms/ums9117/linux/drivers/bluetooth/ums9117"
 FIXTURES = ROOT / "tests/host_tool/ums9117"
@@ -16,13 +19,15 @@ FIXTURES = ROOT / "tests/host_tool/ums9117"
 class Ums9117FMHostTests:
     """Link the production driver; no V4L2 core or hardware is exercised."""
 
-    def test_close_restores_clock_or_retains_quarantined_hold(self) -> None:
+    def test_close_restores_clock_or_retains_quarantined_hold(
+        self, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
         """Callbacks preserve RF bits, validate firmware replies and retain failed holds."""
-        with tempfile.TemporaryDirectory() as temporary:
-            executable = Path(temporary) / "fm"
-            run_process(
+        with c_build_directory(tmp_path_factory, "ums9117_fm") as temporary:
+            executable = temporary / "fm"
+            compile_c(
+                executable,
                 [
-                    "cc",
                     "-O2",
                     "-std=gnu11",
                     "-Wall",
@@ -37,11 +42,8 @@ class Ums9117FMHostTests:
                     f"-I{KERNEL}",
                     str(FIXTURES / "ums9117-fm.c"),
                     str(KERNEL / "cm4-fm.c"),
-                    "-o",
-                    str(executable),
                 ],
                 name="compile UMS9117 FM driver host callbacks",
-                timeout=30,
                 check=True,
             )
             run_process(

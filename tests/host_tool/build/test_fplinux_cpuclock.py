@@ -3,18 +3,17 @@
 
 from __future__ import annotations
 
-import tempfile
-from contextlib import ExitStack
-from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
 SOURCE = ROOT / "alpine/aports/fplinux-cpuclock/fplinux-cpuclock.c"
 SHARED_INCLUDE = ROOT / "include/fplinux"
@@ -23,20 +22,17 @@ SHARED_INCLUDE = ROOT / "include/fplinux"
 class FplinuxCpuclockCliTests:
     """Exercise argument validation and small counts using the host fallback loop."""
 
-    temporary: ClassVar[tempfile.TemporaryDirectory[str]]
     executable: ClassVar[Path]
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Compile the production entry point with its host implementation."""
-        with ExitStack() as cleanup:
-            cls.temporary = tempfile.TemporaryDirectory()
-            cleanup.enter_context(cls.temporary)
-            cls.executable = Path(cls.temporary.name) / "fplinux-cpuclock"
-            run_process(
+        with c_build_directory(tmp_path_factory, "fplinux-cpuclock") as temporary:
+            cls.executable = temporary / "fplinux-cpuclock"
+            compile_c(
+                cls.executable,
                 [
-                    "cc",
                     "-std=c11",
                     "-Wall",
                     "-Wextra",
@@ -44,11 +40,8 @@ class FplinuxCpuclockCliTests:
                     f"-I{SHARED_INCLUDE}",
                     str(SOURCE),
                     str(ROOT / "lib/fplinux/fplinux-cli.c"),
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="compile CPU clock host CLI",
-                timeout=30,
                 check=True,
             )
             yield

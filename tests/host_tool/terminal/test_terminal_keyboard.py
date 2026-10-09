@@ -4,14 +4,13 @@
 from __future__ import annotations
 
 import shutil
-import tempfile
-from contextlib import ExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
@@ -29,16 +28,13 @@ class TerminalKeyboardTests:
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Link the host harness once for this test group."""
-        with ExitStack() as cleanup:
-            build_directory = tempfile.TemporaryDirectory()
-            cleanup.enter_context(build_directory)
-            directory = build_directory.name
-            cls.executable = Path(directory) / "terminal-keyboard"
-            run_process(
+        with c_build_directory(tmp_path_factory, "terminal-keyboard") as directory:
+            cls.executable = directory / "terminal-keyboard"
+            compile_c(
+                cls.executable,
                 [
-                    "cc",
                     "-std=c11",
                     "-Wall",
                     "-Wextra",
@@ -51,11 +47,8 @@ class TerminalKeyboardTests:
                     str(TERMINAL / "terminal-keyboard.c"),
                     str(ROOT / "lib/fplinux/fplinux-keyboard-text.c"),
                     "-lxkbcommon",
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="compile terminal XKB harness",
-                timeout=30,
                 check=True,
             )
             yield
@@ -83,23 +76,20 @@ class TerminalLayoutKeyTests:
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Link the host harness once for this test group."""
-        with ExitStack() as cleanup:
-            build_directory = tempfile.TemporaryDirectory()
-            cleanup.enter_context(build_directory)
-            directory = build_directory.name
-            cls.data_root = Path(directory) / "xkb"
+        with c_build_directory(tmp_path_factory, "terminal-layout-keys") as directory:
+            cls.data_root = directory / "xkb"
             for component in ("keycodes", "types", "compat", "symbols"):
                 shutil.copytree(SYSTEM_XKB / component, cls.data_root / component)
             shutil.copyfile(
                 ROOT / "alpine/aports/fplinux-xkb/fplinux",
                 cls.data_root / "symbols/fplinux",
             )
-            cls.executable = Path(directory) / "terminal-layout-keys"
-            run_process(
+            cls.executable = directory / "terminal-layout-keys"
+            compile_c(
+                cls.executable,
                 [
-                    "cc",
                     "-std=c11",
                     "-Wall",
                     "-Wextra",
@@ -117,11 +107,8 @@ class TerminalLayoutKeyTests:
                     str(ROOT / "lib/fplinux/fplinux-multitap.c"),
                     "-ltsm",
                     "-lxkbcommon",
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="compile terminal layout key harness",
-                timeout=30,
                 check=True,
             )
             yield

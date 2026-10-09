@@ -5,17 +5,17 @@ from __future__ import annotations
 
 import hashlib
 import struct
-import tempfile
-from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
 HARNESS = ROOT / "tests/host_tool/ums9117"
 UBOOT = ROOT / "platforms/ums9117/uboot"
@@ -28,13 +28,13 @@ class SdbootFitAdmissionTests:
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_peer(cls) -> Iterator[None]:
+    def _compiled_peer(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Link sdboot once with the controlled host boundaries."""
-        with tempfile.TemporaryDirectory() as temporary:
-            executable = Path(temporary) / "sdboot"
-            compilation = run_process(
+        with c_build_directory(tmp_path_factory, "ums9117_sdboot") as temporary:
+            executable = temporary / "sdboot"
+            compilation = compile_c(
+                executable,
                 [
-                    "cc",
                     "-std=gnu11",
                     "-D_GNU_SOURCE",
                     "-Wall",
@@ -47,11 +47,9 @@ class SdbootFitAdmissionTests:
                     str(HARNESS / "ums9117-sdboot.c"),
                     str(UBOOT / "ums9117-sdboot.c"),
                     "-l:libfdt.so.1",
-                    "-o",
-                    str(executable),
                 ],
                 name="compile sdboot host consumer",
-                timeout=30,
+                check=False,
             )
             assert compilation.returncode == 0, compilation.stdout + compilation.stderr
             cls.executable = executable

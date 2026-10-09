@@ -6,13 +6,13 @@ from __future__ import annotations
 import os
 import struct
 import tempfile
-from contextlib import ExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
@@ -29,12 +29,9 @@ class TerminalEngineTests:
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Link the production terminal sources and write the fixture fonts."""
-        with ExitStack() as cleanup:
-            temporary = tempfile.TemporaryDirectory(prefix="fplinux-terminal-engine-")
-            cleanup.enter_context(temporary)
-            directory = Path(temporary.name)
+        with c_build_directory(tmp_path_factory, "fplinux-terminal-engine") as directory:
             cls.executable = directory / "terminal-engine"
             fonts = []
             for width, height in ((6, 12), (8, 16), (8, 32)):
@@ -51,9 +48,9 @@ class TerminalEngineTests:
                 unicode_table = b"".join(bytes((character, 0xFF)) for character in characters)
                 font.write_bytes(header + bitmap + unicode_table)
                 fonts.append(str(font))
-            run_process(
+            compile_c(
+                cls.executable,
                 [
-                    "cc",
                     "-std=c11",
                     "-Wall",
                     "-Wextra",
@@ -71,11 +68,8 @@ class TerminalEngineTests:
                     str(ROOT / "lib/fplinux/fplinux-font.c"),
                     str(ROOT / "lib/fplinux/fplinux-multitap.c"),
                     "-ltsm",
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="compile terminal engine harness",
-                timeout=30,
                 check=True,
             )
             cls.arguments = [str(TERMINAL / "fplinux-terminal.bashrc"), *fonts]

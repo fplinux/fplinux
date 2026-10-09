@@ -3,18 +3,17 @@
 
 from __future__ import annotations
 
-import tempfile
-from contextlib import ExitStack
-from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
 SHARED = ROOT / "include/fplinux"
 
@@ -22,20 +21,17 @@ SHARED = ROOT / "include/fplinux"
 class FPLinuxCliTests:
     """Use a command fixture to observe parsing, validation and borrowed argv."""
 
-    temporary: ClassVar[tempfile.TemporaryDirectory[str]]
     executable: ClassVar[Path]
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Link the production library with a resource-free command fixture."""
-        with ExitStack() as cleanup:
-            cls.temporary = tempfile.TemporaryDirectory()
-            cleanup.enter_context(cls.temporary)
-            cls.executable = Path(cls.temporary.name) / "cli-probe"
-            run_process(
+        with c_build_directory(tmp_path_factory, "cli-probe") as directory:
+            cls.executable = directory / "cli-probe"
+            compile_c(
+                cls.executable,
                 [
-                    "cc",
                     "-std=c11",
                     "-O2",
                     "-Wall",
@@ -44,11 +40,8 @@ class FPLinuxCliTests:
                     f"-I{SHARED}",
                     str(ROOT / "tests/host_tool/runtime/fplinux-cli.c"),
                     str(ROOT / "lib/fplinux/fplinux-cli.c"),
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="compile shared CLI fixture",
-                timeout=30,
                 check=True,
             )
             yield

@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
+
+if TYPE_CHECKING:
+    import pytest
 
 DRIVER = ROOT / "platforms/ums9117/linux/drivers/memory/ums9117"
 HARNESS = ROOT / "tests/host_tool/ums9117/ums9117-nandc-feature.c"
@@ -17,13 +20,15 @@ COMPAT = ROOT / "tests/host_tool/ums9117/lcm-compat"
 class Ums9117NandcFeatureTests:
     """Link the feature policy with host type aliases; no NAND is exercised."""
 
-    def test_feature_values_preserve_defined_bits_and_detect_changed_state(self) -> None:
+    def test_feature_values_preserve_defined_bits_and_detect_changed_state(
+        self, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
         """Accept reserved-bit drift while detecting ECC and other state changes."""
-        with tempfile.TemporaryDirectory() as temporary:
-            executable = Path(temporary) / "ums9117-nandc-feature"
-            run_process(
+        with c_build_directory(tmp_path_factory, "ums9117_nandc_feature") as temporary:
+            executable = temporary / "ums9117-nandc-feature"
+            compile_c(
+                executable,
                 [
-                    "cc",
                     "-std=gnu11",
                     "-Wall",
                     "-Wextra",
@@ -32,11 +37,8 @@ class Ums9117NandcFeatureTests:
                     f"-I{DRIVER}",
                     str(HARNESS),
                     str(DRIVER / "ums9117-nandc-feature.c"),
-                    "-o",
-                    str(executable),
                 ],
                 name="compile UMS9117 NANDC feature policy harness",
-                timeout=30,
                 check=True,
             )
             run_process(

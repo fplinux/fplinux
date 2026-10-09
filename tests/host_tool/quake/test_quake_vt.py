@@ -4,18 +4,17 @@
 from __future__ import annotations
 
 import shlex
-import tempfile
-from contextlib import ExitStack
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
 
 class QuakeVtTests:
@@ -25,13 +24,10 @@ class QuakeVtTests:
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Link the host harness once for this test group."""
-        with ExitStack() as cleanup:
-            build_directory = tempfile.TemporaryDirectory()
-            cleanup.enter_context(build_directory)
-            directory = build_directory.name
-            cls.executable = Path(directory) / "quake-vt"
+        with c_build_directory(tmp_path_factory, "quake-vt") as directory:
+            cls.executable = directory / "quake-vt"
             flags = shlex.split(
                 run_process(
                     ["pkg-config", "--cflags", "--libs", "libdrm"],
@@ -40,9 +36,9 @@ class QuakeVtTests:
                     check=True,
                 ).stdout
             )
-            run_process(
+            compile_c(
+                cls.executable,
                 [
-                    "cc",
                     "-std=gnu11",
                     "-Wall",
                     "-Wextra",
@@ -59,11 +55,8 @@ class QuakeVtTests:
                         "--wrap=fplinux_drm_session_open,--wrap=fplinux_drm_session_close"
                     ),
                     *flags,
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="compile Quake event pump with fake engine and device boundaries",
-                timeout=30,
                 check=True,
             )
             yield

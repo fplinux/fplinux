@@ -3,18 +3,17 @@
 
 from __future__ import annotations
 
-import tempfile
-from contextlib import ExitStack
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
 
 class InputBridgeLoggingTests:
@@ -24,16 +23,13 @@ class InputBridgeLoggingTests:
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Link the host harness once for this test group."""
-        with ExitStack() as cleanup:
-            build_directory = tempfile.TemporaryDirectory()
-            cleanup.enter_context(build_directory)
-            temporary = build_directory.name
-            cls.executable = Path(temporary) / "input-bridge"
-            run_process(
+        with c_build_directory(tmp_path_factory, "fplinux-input-logging") as temporary:
+            cls.executable = temporary / "input-bridge"
+            compile_c(
+                cls.executable,
                 [
-                    "cc",
                     "-std=c11",
                     "-Wall",
                     "-Wextra",
@@ -41,11 +37,8 @@ class InputBridgeLoggingTests:
                     str(ROOT / "alpine/aports/fplinux-input/fplinux-input.c"),
                     str(ROOT / "tests/host_tool/input/fplinux-input-io.c"),
                     "-Wl,--wrap=open,--wrap=ioctl,--wrap=poll,--wrap=read,--wrap=sleep",
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="compile input bridge with controlled devices",
-                timeout=30,
                 check=True,
             )
             yield

@@ -5,13 +5,13 @@ from __future__ import annotations
 
 import shlex
 import tempfile
-from contextlib import ExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
@@ -30,13 +30,11 @@ class FplinuxRotateHostToolTests:
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Build one CPU oracle and one CLI for the controlled-file cases."""
-        with ExitStack() as cleanup:
-            build_directory = tempfile.TemporaryDirectory()
-            cleanup.enter_context(build_directory)
-            cls.core = Path(build_directory.name) / "fplinux-rotate-core-test"
-            cls.executable = Path(build_directory.name) / "fplinux-rotate"
+        with c_build_directory(tmp_path_factory, "fplinux-rotate") as directory:
+            cls.core = directory / "fplinux-rotate-core-test"
+            cls.executable = directory / "fplinux-rotate"
             cls._compile(cls.core, HARNESS, APORT / "fplinux-rotate-core.c")
             cls._compile(
                 cls.executable,
@@ -58,9 +56,9 @@ class FplinuxRotateHostToolTests:
                 check=True,
             ).stdout
         )
-        run_process(
+        compile_c(
+            output,
             [
-                "cc",
                 "-O2",
                 "-std=c11",
                 "-Wall",
@@ -70,11 +68,8 @@ class FplinuxRotateHostToolTests:
                 f"-I{SHARED}",
                 *(str(source) for source in sources),
                 *drm_flags,
-                "-o",
-                str(output),
             ],
             name="compile FPLinux rotation host executable",
-            timeout=30,
             check=True,
         )
 

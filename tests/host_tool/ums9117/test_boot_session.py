@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, ClassVar
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
@@ -75,17 +76,17 @@ class BootSessionHostTests:
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_peer(cls) -> Iterator[None]:
+    def _compiled_peer(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Link the actual C99 operation separately from the host fixture peer."""
-        with tempfile.TemporaryDirectory() as temporary:
-            work = Path(temporary)
+        with c_build_directory(tmp_path_factory, "boot_session") as temporary:
+            work = temporary
             includes = work / "include"
             includes.mkdir()
             (includes / "ums9117-common").symlink_to(ROOT / "platforms/ums9117/common")
             cls.executable = work / "boot-session"
-            run_process(
+            compile_c(
+                cls.executable,
                 [
-                    "cc",
                     "-std=c99",
                     "-pedantic",
                     "-Wall",
@@ -97,11 +98,8 @@ class BootSessionHostTests:
                     str(HARNESS),
                     str(BOOTSTRAP / "boot-session.c"),
                     "-Wl,--gc-sections",
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="compile bounded boot-session host peer",
-                timeout=30,
                 check=True,
             )
             yield

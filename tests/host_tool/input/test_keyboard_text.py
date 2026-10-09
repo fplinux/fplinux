@@ -8,13 +8,13 @@ compile a keymap with xkbcommon or open an input device.
 from __future__ import annotations
 
 import tempfile
-from contextlib import ExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
@@ -28,20 +28,17 @@ HARNESS = ROOT / "tests/host_tool/input/fplinux-keyboard-text.c"
 class KeyboardTextTests:
     """Compose layouts from temporary data roots with literal layout files."""
 
-    temporary: ClassVar[tempfile.TemporaryDirectory[str]]
     executable: ClassVar[Path]
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Compile the host driver once for this test class."""
-        with ExitStack() as cleanup:
-            cls.temporary = tempfile.TemporaryDirectory()
-            cleanup.enter_context(cls.temporary)
-            cls.executable = Path(cls.temporary.name) / "fplinux-keyboard-text"
-            run_process(
+        with c_build_directory(tmp_path_factory, "keyboard-text") as temporary:
+            cls.executable = temporary / "fplinux-keyboard-text"
+            compile_c(
+                cls.executable,
                 [
-                    "cc",
                     "-std=c11",
                     "-Wall",
                     "-Wextra",
@@ -50,11 +47,8 @@ class KeyboardTextTests:
                     str(SHARED_INCLUDE),
                     str(HARNESS),
                     str(SOURCE),
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="compile shared keyboard text driver",
-                timeout=30,
                 check=True,
             )
             yield

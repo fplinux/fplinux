@@ -5,13 +5,13 @@ from __future__ import annotations
 
 import struct
 import tempfile
-from contextlib import ExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
@@ -48,20 +48,17 @@ def psf2(
 class FontTests:
     """Observe the shared loader through real files and a separately linked C harness."""
 
-    temporary: ClassVar[tempfile.TemporaryDirectory[str]]
     executable: ClassVar[Path]
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Compile the linked font loader once for the controlled-file cases."""
-        with ExitStack() as cleanup:
-            cls.temporary = tempfile.TemporaryDirectory()
-            cleanup.enter_context(cls.temporary)
-            cls.executable = Path(cls.temporary.name) / "font"
-            run_process(
+        with c_build_directory(tmp_path_factory, "font") as directory:
+            cls.executable = directory / "font"
+            compile_c(
+                cls.executable,
                 [
-                    "cc",
                     "-std=c11",
                     "-Wall",
                     "-Wextra",
@@ -71,11 +68,8 @@ class FontTests:
                     str(ROOT / "tests/host_tool/terminal/fplinux-font.c"),
                     str(ROOT / "lib/fplinux/fplinux-font.c"),
                     "-Wl,--wrap=fopen",
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="compile font loader harness",
-                timeout=30,
                 check=True,
             )
             yield

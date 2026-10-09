@@ -4,13 +4,13 @@
 from __future__ import annotations
 
 import tempfile
-from contextlib import ExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
@@ -28,16 +28,14 @@ class TyrQuakeLauncherHelperTests:
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Link the cleanup harness once for this test group."""
-        with ExitStack() as cleanup:
-            build_directory = tempfile.TemporaryDirectory()
-            cleanup.enter_context(build_directory)
-            cls.executable = Path(build_directory.name) / "cleanup-harness"
-            launcher_object = Path(build_directory.name) / "fplinux-quake.o"
-            run_process(
+        with c_build_directory(tmp_path_factory, "tyrquake-helpers") as directory:
+            cls.executable = directory / "cleanup-harness"
+            launcher_object = directory / "fplinux-quake.o"
+            compile_c(
+                launcher_object,
                 [
-                    "cc",
                     "-std=gnu11",
                     "-Wall",
                     "-Wextra",
@@ -46,16 +44,13 @@ class TyrQuakeLauncherHelperTests:
                     "-Dmain=fplinux_quake_program_main",
                     "-c",
                     str(LAUNCHER),
-                    "-o",
-                    str(launcher_object),
                 ],
                 name="compile TyrQuake launcher object",
-                timeout=30,
                 check=True,
             )
-            run_process(
+            compile_c(
+                cls.executable,
                 [
-                    "cc",
                     "-std=gnu11",
                     "-Wall",
                     "-Wextra",
@@ -64,11 +59,8 @@ class TyrQuakeLauncherHelperTests:
                     f"-I{SHARED_INCLUDE}",
                     str(launcher_object),
                     str(ROOT / "lib/fplinux/fplinux-cli.c"),
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="link TyrQuake cleanup harness",
-                timeout=30,
                 check=True,
             )
             yield
@@ -104,20 +96,17 @@ class TyrQuakeLauncherHelperTests:
 class TyrQuakeLauncherCliTests:
     """Run only help and invalid CLI paths of the host-compiled launcher."""
 
-    temporary: ClassVar[tempfile.TemporaryDirectory[str]]
     executable: ClassVar[Path]
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Link the production entry point without replacing its parser."""
-        with ExitStack() as cleanup:
-            cls.temporary = tempfile.TemporaryDirectory()
-            cleanup.enter_context(cls.temporary)
-            cls.executable = Path(cls.temporary.name) / "quake"
-            run_process(
+        with c_build_directory(tmp_path_factory, "tyrquake-cli") as directory:
+            cls.executable = directory / "quake"
+            compile_c(
+                cls.executable,
                 [
-                    "cc",
                     "-std=gnu11",
                     "-Wall",
                     "-Wextra",
@@ -125,11 +114,8 @@ class TyrQuakeLauncherCliTests:
                     f"-I{SHARED_INCLUDE}",
                     str(LAUNCHER),
                     str(ROOT / "lib/fplinux/fplinux-cli.c"),
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="compile TyrQuake launcher CLI",
-                timeout=30,
                 check=True,
             )
             yield

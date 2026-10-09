@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
+
+if TYPE_CHECKING:
+    import pytest
 
 BOOTSTRAP = ROOT / "platforms/ums9117/bootstrap"
 HARNESS = ROOT / "tests/host_tool/ums9117/ums9117-ram-probe.c"
@@ -16,13 +19,15 @@ HARNESS = ROOT / "tests/host_tool/ums9117/ums9117-ram-probe.c"
 class RamProbeTests:
     """Exercise the bootstrap probe against real host words and aliases."""
 
-    def test_probe_preserves_payload_words_and_alias_detection(self) -> None:
+    def test_probe_preserves_payload_words_and_alias_detection(
+        self, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
         """Return the vendor detection result without changing any probe word."""
-        with tempfile.TemporaryDirectory() as temporary:
-            executable = Path(temporary) / "ums9117-ram-probe"
-            run_process(
+        with c_build_directory(tmp_path_factory, "ums9117_ram_probe") as temporary:
+            executable = temporary / "ums9117-ram-probe"
+            compile_c(
+                executable,
                 [
-                    "cc",
                     "-std=c99",
                     "-O2",
                     "-pedantic",
@@ -31,11 +36,8 @@ class RamProbeTests:
                     "-Werror",
                     f"-I{BOOTSTRAP}",
                     str(HARNESS),
-                    "-o",
-                    str(executable),
                 ],
                 name="compile RAM-probe harness",
-                timeout=30,
                 check=True,
             )
             run_process(

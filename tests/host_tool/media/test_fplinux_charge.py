@@ -6,20 +6,19 @@ from __future__ import annotations
 import os
 import re
 import signal
-import tempfile
 import time
-from contextlib import ExitStack
-from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
     import subprocess
     from collections.abc import Iterator
+    from pathlib import Path
 
 SOURCE = ROOT / "alpine/aports/fplinux-charge/fplinux-charge.c"
 
@@ -27,7 +26,6 @@ SOURCE = ROOT / "alpine/aports/fplinux-charge/fplinux-charge.c"
 class FPLinuxChargeHostToolTests:
     """Compile and execute the production wrapper against a private counter."""
 
-    temporary: ClassVar[tempfile.TemporaryDirectory[str]]
     work: Path
     counter: Path
     discovery_executable: ClassVar[Path]
@@ -35,16 +33,14 @@ class FPLinuxChargeHostToolTests:
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Compile one production binary with the test-owned counter path."""
-        with ExitStack() as cleanup:
-            cls.temporary = tempfile.TemporaryDirectory()
-            cleanup.enter_context(cls.temporary)
-            cls.work = Path(cls.temporary.name)
+        with c_build_directory(tmp_path_factory, "fplinux-charge") as directory:
+            cls.work = directory
             cls.executable = cls.work / "fplinux-charge"
-            run_process(
+            compile_c(
+                cls.executable,
                 [
-                    "cc",
                     "-std=c11",
                     "-Wall",
                     "-Wextra",
@@ -54,17 +50,14 @@ class FPLinuxChargeHostToolTests:
                     '-DFPLINUX_CHARGE_COUNTER_PATH="charge_counter"',
                     str(SOURCE),
                     str(ROOT / "lib/fplinux/fplinux-cli.c"),
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="compile fplinux-charge",
-                timeout=30,
                 check=True,
             )
             cls.discovery_executable = cls.work / "fplinux-charge-discovery"
-            run_process(
+            compile_c(
+                cls.discovery_executable,
                 [
-                    "cc",
                     "-std=c11",
                     "-Wall",
                     "-Wextra",
@@ -74,11 +67,8 @@ class FPLinuxChargeHostToolTests:
                     '-DFPLINUX_CHARGE_COUNTER_GLOB="power_supply/*/charge_counter"',
                     str(SOURCE),
                     str(ROOT / "lib/fplinux/fplinux-cli.c"),
-                    "-o",
-                    str(cls.discovery_executable),
                 ],
                 name="compile fplinux-charge discovery",
-                timeout=30,
                 check=True,
             )
             yield

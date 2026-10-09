@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
+
+if TYPE_CHECKING:
+    import pytest
 
 KERNEL = ROOT / "platforms/ums9117/linux/drivers/gpu/drm/ums9117"
 FIXTURES = ROOT / "tests/host_tool/ums9117"
@@ -16,13 +19,15 @@ FIXTURES = ROOT / "tests/host_tool/ums9117"
 class Ums9117LcmHostTests:
     """Link the real transport and internal header; no panel is exercised."""
 
-    def test_timing_busy_buffer_and_rgb565_damage_alignment(self) -> None:
+    def test_timing_busy_buffer_and_rgb565_damage_alignment(
+        self, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
         """Encode timing, wait for port admission and preserve aligned damage."""
-        with tempfile.TemporaryDirectory() as temporary:
-            executable = Path(temporary) / "ums9117-lcm"
-            compilation = run_process(
+        with c_build_directory(tmp_path_factory, "ums9117_lcm") as temporary:
+            executable = temporary / "ums9117-lcm"
+            compilation = compile_c(
+                executable,
                 [
-                    "cc",
                     "-O2",
                     "-std=gnu11",
                     "-Wall",
@@ -35,11 +40,9 @@ class Ums9117LcmHostTests:
                     str(FIXTURES / "ums9117-lcm.c"),
                     str(KERNEL / "ums9117-drm-lcm.c"),
                     "-Wl,--gc-sections",
-                    "-o",
-                    str(executable),
                 ],
                 name="compile UMS9117 LCM host component",
-                timeout=30,
+                check=False,
             )
             assert (compilation.returncode) == (0), compilation.stderr
             result = run_process(

@@ -7,13 +7,13 @@ import os
 import shlex
 import struct
 import tempfile
-from contextlib import ExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
@@ -42,13 +42,9 @@ class TerminalLoopTests:
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Link one main-loop harness and its immutable fixture font."""
-        with ExitStack() as cleanup:
-            build_directory = tempfile.TemporaryDirectory()
-            cleanup.enter_context(build_directory)
-            directory = build_directory.name
-            temporary = Path(directory)
+        with c_build_directory(tmp_path_factory, "terminal-loop") as temporary:
             cls.executable = temporary / "terminal-loop"
             main_object = temporary / "terminal-main.o"
             cls.font = temporary / "fixture.psf"
@@ -61,7 +57,6 @@ class TerminalLoopTests:
                 check=True,
             )
             compiler = [
-                "cc",
                 "-std=c11",
                 "-Wall",
                 "-Wextra",
@@ -72,7 +67,8 @@ class TerminalLoopTests:
                 str(TERMINAL),
                 *shlex.split(flags.stdout),
             ]
-            run_process(
+            compile_c(
+                main_object,
                 [
                     *compiler,
                     "-Dmain=fplinux_terminal_main",
@@ -80,14 +76,12 @@ class TerminalLoopTests:
                     "-Dclock_gettime=fixture_clock_gettime",
                     "-c",
                     str(TERMINAL / "fplinux-terminal.c"),
-                    "-o",
-                    str(main_object),
                 ],
                 name="compile terminal main loop",
-                timeout=30,
                 check=True,
             )
-            run_process(
+            compile_c(
+                cls.executable,
                 [
                     *compiler,
                     str(ROOT / "tests/host_tool/terminal/fplinux-terminal-loop.c"),
@@ -105,11 +99,8 @@ class TerminalLoopTests:
                     "-Wl,--wrap=fplinux_terminal_keyboard_open",
                     "-ltsm",
                     "-lxkbcommon",
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="link terminal loop harness",
-                timeout=30,
                 check=True,
             )
             yield

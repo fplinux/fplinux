@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
+
+if TYPE_CHECKING:
+    import pytest
 
 FIXTURES = ROOT / "tests/host_tool/ums9117"
 DRIVER = ROOT / "platforms/ums9117/linux/sound/drivers/ums9117"
@@ -16,13 +19,15 @@ DRIVER = ROOT / "platforms/ums9117/linux/sound/drivers/ums9117"
 class CodecCalibrationHostComponentTests:
     """Observe the real operation's result and masked register restoration on a host."""
 
-    def test_route_preservation_bounded_waits_and_error_precedence(self) -> None:
+    def test_route_preservation_bounded_waits_and_error_precedence(
+        self, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
         """Snapshot failure has no writes; late errors restore routes and keep first error."""
-        with tempfile.TemporaryDirectory() as temporary:
-            executable = Path(temporary) / "codec-calibration"
-            run_process(
+        with c_build_directory(tmp_path_factory, "codec_calibration") as temporary:
+            executable = temporary / "codec-calibration"
+            compile_c(
+                executable,
                 [
-                    "cc",
                     "-O2",
                     "-std=gnu11",
                     "-Wall",
@@ -33,11 +38,8 @@ class CodecCalibrationHostComponentTests:
                     f"-I{DRIVER}",
                     str(FIXTURES / "codec-calibration.c"),
                     str(DRIVER / "ums9117-sc2720-calibration.c"),
-                    "-o",
-                    str(executable),
                 ],
                 name="compile SC2720 calibration host component",
-                timeout=30,
                 check=True,
             )
             run_process(

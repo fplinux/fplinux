@@ -5,37 +5,32 @@ from __future__ import annotations
 
 import os
 import subprocess
-import tempfile
-from contextlib import ExitStack
-from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 import pytest
 
 from tests import ROOT
-from tests.process import run_process
+from tests.c_harness import c_build_directory, compile_c
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
 
 class KernelLogForwarderTests:
     """Check output records and CLI behavior, not kernel log ingestion."""
 
-    temporary: ClassVar[tempfile.TemporaryDirectory[str]]
     executable: ClassVar[Path]
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Link production code with a fake kernel sink at the open boundary."""
-        with ExitStack() as cleanup:
-            cls.temporary = tempfile.TemporaryDirectory()
-            cleanup.enter_context(cls.temporary)
-            cls.executable = Path(cls.temporary.name) / "fplinux-kmsg"
-            run_process(
+        with c_build_directory(tmp_path_factory, "fplinux-kmsg") as directory:
+            cls.executable = directory / "fplinux-kmsg"
+            compile_c(
+                cls.executable,
                 [
-                    "cc",
                     "-std=c11",
                     "-Wall",
                     "-Wextra",
@@ -46,11 +41,8 @@ class KernelLogForwarderTests:
                     str(ROOT / "lib/fplinux/fplinux-cli.c"),
                     str(ROOT / "tests/host_tool/runtime/fplinux-kmsg-sink.c"),
                     "-Wl,--wrap=open",
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="compile kernel-log forwarder",
-                timeout=30,
                 check=True,
             )
             yield

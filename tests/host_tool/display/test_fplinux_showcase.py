@@ -3,19 +3,18 @@
 
 from __future__ import annotations
 
-import tempfile
-from contextlib import ExitStack
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.fixtures.psf_font import write_solid_ascii_font
 from tests.process import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
 APORT = ROOT / "alpine/aports/fplinux-showcase"
 HARNESS = ROOT / "tests/host_tool/display/fplinux-showcase.c"
@@ -31,20 +30,17 @@ class FplinuxShowcaseHostToolTests:
 
     @pytest.fixture(scope="class", autouse=True)
     @classmethod
-    def _compiled_tools(cls) -> Iterator[None]:
+    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
         """Link the host harness once for this test group."""
-        with ExitStack() as cleanup:
-            build_directory = tempfile.TemporaryDirectory()
-            cleanup.enter_context(build_directory)
-            temporary = build_directory.name
-            cls.executable = Path(temporary) / "fplinux-showcase-test"
-            cls.small_font = Path(temporary) / "small.psf"
-            cls.large_font = Path(temporary) / "large.psf"
+        with c_build_directory(tmp_path_factory, "fplinux-showcase") as temporary:
+            cls.executable = temporary / "fplinux-showcase-test"
+            cls.small_font = temporary / "small.psf"
+            cls.large_font = temporary / "large.psf"
             write_solid_ascii_font(cls.small_font, width=6, height=12)
             write_solid_ascii_font(cls.large_font, width=8, height=16)
-            run_process(
+            compile_c(
+                cls.executable,
                 [
-                    "cc",
                     "-O2",
                     "-std=c11",
                     "-Wall",
@@ -57,11 +53,8 @@ class FplinuxShowcaseHostToolTests:
                     str(APORT / "armada-storyboard.c"),
                     str(APORT / "armada-renderer.c"),
                     str(ROOT / "lib/fplinux/fplinux-font.c"),
-                    "-o",
-                    str(cls.executable),
                 ],
                 name="compile FPLinux showcase host harness",
-                timeout=30,
                 check=True,
             )
             yield

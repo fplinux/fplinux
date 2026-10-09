@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tests import ROOT
+from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
+
+if TYPE_CHECKING:
+    import pytest
 
 UBOOT = ROOT / "platforms/ums9117/uboot"
 HARNESS = ROOT / "tests/host_tool/ums9117/ums9117-sdio-core.c"
@@ -17,13 +20,15 @@ COMPAT = ROOT / "tests/host_tool/ums9117/ums9117-sdio-compat"
 class Ums9117SdioCoreTests:
     """Link the production core to a fake MMIO/timer hardware boundary."""
 
-    def test_controller_sequences_and_fail_closed_boundaries(self) -> None:
+    def test_controller_sequences_and_fail_closed_boundaries(
+        self, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
         """Preserve proven writes and stop after named reset/status failures."""
-        with tempfile.TemporaryDirectory() as temporary:
-            executable = Path(temporary) / "ums9117-sdio-core"
-            run_process(
+        with c_build_directory(tmp_path_factory, "ums9117_sdio_core") as temporary:
+            executable = temporary / "ums9117-sdio-core"
+            compile_c(
+                executable,
                 [
-                    "cc",
                     "-std=c99",
                     "-Wall",
                     "-Wextra",
@@ -32,11 +37,8 @@ class Ums9117SdioCoreTests:
                     f"-I{UBOOT}",
                     str(HARNESS),
                     str(UBOOT / "ums9117-sdio-core.c"),
-                    "-o",
-                    str(executable),
                 ],
                 name="compile UMS9117 SDIO core harness",
-                timeout=30,
                 check=True,
             )
             result = run_process(
