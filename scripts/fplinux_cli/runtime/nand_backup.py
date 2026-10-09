@@ -21,9 +21,6 @@ from fplinux_cli.common import (
     sha256_file,
 )
 from fplinux_cli.device_data.formats import NandGeometry
-from fplinux_cli.manifests.targets import load_target
-from fplinux_cli.reporting.run import RunReporter
-from fplinux_cli.runtime import bundle_session
 
 BACKUP_TIMEOUT_SECONDS = 15 * 60
 GEOMETRY_TIMEOUT_SECONDS = 60
@@ -157,7 +154,7 @@ def require_declared_chip(
         )
 
 
-def _geometry_report(ssh: SshTransport, session: dict[str, Any], raw_device: str) -> str:
+def read_geometry_report(ssh: SshTransport, session: dict[str, Any], raw_device: str) -> str:
     """Open the raw reader, which identifies the chip, and read the geometry it reports."""
     attribute = f"/sys/class/misc/{PurePosixPath(raw_device).name}/device/geometry"
     # The redirection keeps the reader open while its sibling attribute is read.
@@ -242,7 +239,7 @@ def backup_nand(  # noqa: PLR0913 -- the reader and the declared chip are distin
         fail(f"NAND backup receipt is not a regular file: {receipt}")
 
     ssh, session = connect()
-    geometry = parse_geometry_report(_geometry_report(ssh, session, raw_device))
+    geometry = parse_geometry_report(read_geometry_report(ssh, session, raw_device))
     require_declared_chip(
         geometry,
         target=target,
@@ -278,18 +275,25 @@ def backup_nand(  # noqa: PLR0913 -- the reader and the declared chip are distin
             )
         digest = sha256_file(temporary)
         record = {**asdict(geometry), "sha256": digest, "target": target}
-        directory_descriptor = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+        # Windows cannot open a directory through the POSIX descriptor API.
+        directory_descriptor = (
+            None if os.name == "nt" else os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+        )
         try:
             # A receipt must never describe bytes from the image being replaced.
             receipt.unlink(missing_ok=True)
-            os.fsync(directory_descriptor)
+            if directory_descriptor is not None:
+                os.fsync(directory_descriptor)
             temporary.replace(output)
             temporary = None
-            os.fsync(directory_descriptor)
+            if directory_descriptor is not None:
+                os.fsync(directory_descriptor)
             replace_file_atomically(receipt, canonical_json_bytes(record), 0o600)
-            os.fsync(directory_descriptor)
+            if directory_descriptor is not None:
+                os.fsync(directory_descriptor)
         finally:
-            os.close(directory_descriptor)
+            if directory_descriptor is not None:
+                os.close(directory_descriptor)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
@@ -303,61 +307,3 @@ def backup_nand(  # noqa: PLR0913 -- the reader and the declared chip are distin
         flush=True,
     )
     return output
-
-
-def _target_reader(
-    target: str, profile: str | None, build_type: str
-) -> tuple[dict[str, Any], SessionFactory]:
-    """Return the target's declared NAND reader and its exact current-profile session."""
-    nand = load_target(target, profile=profile, build_type=build_type).get("nand")
-    if nand is None:
-        fail(f"NAND access is not supported for target {target}")
-
-    def connect() -> tuple[SshTransport, dict[str, Any]]:
-        ssh, session = bundle_session.current_target_ssh_session(
-            target, profile=profile, build_type=build_type
-        )
-        return cast("SshTransport", ssh), session
-
-    return nand, connect
-
-
-def backup_target_nand(
-    target: str,
-    output: Path,
-    *,
-    profile: str | None = None,
-    build_type: str = "release",
-    reporter: RunReporter | None = None,
-) -> Path:
-    """Back up one supported target through its exact current-profile session."""
-    nand, connect = _target_reader(target, profile, build_type)
-    own_reporter = reporter is None
-    if reporter is None:
-        reporter = RunReporter.create("nand", target=target, verbose=False)
-    with reporter.stage("read-nand"):
-        result = backup_nand(
-            connect,
-            output,
-            target=target,
-            raw_device=nand["raw_device"],
-            declared_id=nand.get("id"),
-            declared_raw_page_bytes=nand.get("raw_page_bytes"),
-        )
-    if own_reporter:
-        reporter.finish()
-    return result
-
-
-def identify_target_nand(
-    target: str, *, profile: str | None = None, build_type: str = "release"
-) -> None:
-    """Print the chip identity and geometry that the target's running NAND reader reports."""
-    nand, connect = _target_reader(target, profile, build_type)
-    reporter = RunReporter.create("nand", target=target, verbose=False)
-    with reporter.stage("identify-nand") as stage:
-        ssh, session = connect()
-        report = _geometry_report(ssh, session, nand["raw_device"])
-        stage.write(report.encode("ascii"))
-    print(report, end="", flush=True)
-    reporter.finish()

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, BinaryIO
 from unittest import mock
 
 import pytest
+from fplinux_cli.cli import nand
 from fplinux_cli.device_data.formats import NandGeometry
 from fplinux_cli.device_data.prepare import dump_page_bytes
 from fplinux_cli.runtime import nand_backup
@@ -321,11 +322,11 @@ class NandBackupTests:
     def test_target_without_a_reader_is_rejected_before_connecting(self) -> None:
         """A missing board declaration cannot fall back to another board's reader."""
         with (
-            mock.patch.object(nand_backup, "load_target", return_value={}),
+            mock.patch.object(nand, "load_target", return_value={}),
             mock.patch("fplinux_cli.runtime.bundle_session.current_target_ssh_session") as acquire,
             pytest.raises(SystemExit, match="not supported for target no-reader"),
         ):
-            nand_backup.backup_target_nand("no-reader", self.destination)
+            nand.backup_target_nand("no-reader", self.destination)
 
         acquire.assert_not_called()
 
@@ -340,7 +341,7 @@ class NandIdentifyTests:
             tempfile.TemporaryDirectory() as temporary,
             mock.patch("fplinux_cli.reporting.run.ROOT", Path(temporary)),
             mock.patch.object(
-                nand_backup, "load_target", return_value={"nand": {"raw_device": "/dev/demo-raw"}}
+                nand, "load_target", return_value={"nand": {"raw_device": "/dev/demo-raw"}}
             ),
             mock.patch(
                 "fplinux_cli.runtime.bundle_session.current_target_ssh_session",
@@ -349,7 +350,7 @@ class NandIdentifyTests:
             contextlib.redirect_stdout(io.StringIO()) as stdout,
             contextlib.redirect_stderr(io.StringIO()),
         ):
-            nand_backup.identify_target_nand("demo-phone")
+            nand.identify_target_nand("demo-phone")
 
         assert (stdout.getvalue()) == (UNKNOWN_CHIP)
         assert (phone.raw_reads()) == ([])

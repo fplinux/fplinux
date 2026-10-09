@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from fplinux_cli.cli.build import build, prepare_host_tool
+from fplinux_cli.cli.nand import backup_target_nand
 from fplinux_cli.common import ROOT, fail, replace_file_atomically
 from fplinux_cli.device_data.formats import PhysicalNand
 from fplinux_cli.device_data.inputs import capture_device_data_generation
@@ -29,7 +30,7 @@ from fplinux_cli.device_data.prepare import (
 from fplinux_cli.manifests.targets import load_target
 from fplinux_cli.reporting.run import RunReporter
 from fplinux_cli.runtime.bundle_session import resolve_target_bundle
-from fplinux_cli.runtime.nand_backup import backup_target_nand, read_backup_geometry
+from fplinux_cli.runtime.nand_backup import read_backup_geometry
 from fplinux_cli.runtime.runner import run_target_noninteractive
 
 

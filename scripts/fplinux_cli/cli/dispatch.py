@@ -23,6 +23,7 @@ from fplinux_cli.cli.inspect import (
     inspect_target_footprint,
 )
 from fplinux_cli.cli.logs import read_logs
+from fplinux_cli.cli.nand import backup_target_nand, identify_target_nand
 from fplinux_cli.cli.package import package_target
 from fplinux_cli.cli.probe import build_probe
 from fplinux_cli.cli.runtime import console_target, verify_booted
@@ -34,7 +35,6 @@ from fplinux_cli.quality.formatting.command import format_sources
 from fplinux_cli.quality.git import check_commit_message
 from fplinux_cli.quality.scopes import CHECK_SCOPES
 from fplinux_cli.quality.testing import run_tests
-from fplinux_cli.runtime.nand_backup import backup_target_nand, identify_target_nand
 from fplinux_cli.runtime.runner import run_target
 
 if TYPE_CHECKING:

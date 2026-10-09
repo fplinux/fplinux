@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
+from fplinux_cli.cli import nand
 from fplinux_cli.runtime import nand_backup, ssh_transport
 
 if TYPE_CHECKING:
@@ -140,7 +141,7 @@ class NandBackupSshStreamTests:
             ),
             pytest.raises(SystemExit, match="expected 142606336 bytes, got 14"),
         ):
-            nand_backup.backup_target_nand("nokia-ta1618", destination, profile="microsd-uboot")
+            nand.backup_target_nand("nokia-ta1618", destination, profile="microsd-uboot")
 
         assert not (destination.exists())
         acquire.assert_called_once_with(
@@ -174,7 +175,7 @@ class NandBackupSshStreamTests:
             ),
             pytest.raises(SystemExit, match="exit status 8: NAND read failed"),
         ):
-            nand_backup.backup_target_nand("inoi-244-modern-4g", destination)
+            nand.backup_target_nand("inoi-244-modern-4g", destination)
 
         assert (destination.read_bytes()) == (b"previous complete image")
         assert (list(destination.parent.glob(".inoi.raw.*"))) == ([])
