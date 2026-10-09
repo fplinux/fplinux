@@ -50,6 +50,12 @@ while read -r _ramroot_device ramroot_path _ramroot_type ramroot_options _ramroo
 done </proc/mounts
 
 [ -x /newroot/sbin/init ] || ramroot_fail "system init is missing"
+if [ -d /lib/firmware ]; then
+	/bin/busybox mkdir -p /newroot/lib/firmware ||
+		ramroot_fail "cannot create firmware directory"
+	/bin/busybox cp -a /lib/firmware/. /newroot/lib/firmware/ ||
+		ramroot_fail "cannot transfer device firmware"
+fi
 for ramroot_mount in run dev proc sys; do
 	/bin/busybox mount --move "/$ramroot_mount" "/newroot/$ramroot_mount" ||
 		ramroot_fail "cannot transfer /$ramroot_mount"

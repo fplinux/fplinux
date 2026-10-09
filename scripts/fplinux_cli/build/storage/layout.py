@@ -37,6 +37,14 @@ def boot_layout_header(layout: Mapping[str, int]) -> bytes:
                 "FIT_LIMIT_BYTES": layout["fit_size"],
             }
         )
+    else:
+        device_data_start = layout["kernel_load"] + layout["kernel_size"]
+        fields.update(
+            {
+                "DEVICE_DATA_ARENA_PHYS": device_data_start,
+                "DEVICE_DATA_ARENA_BYTES": layout["fdt_load"] - device_data_start,
+            }
+        )
     defines = "".join(
         f"#define FPLINUX_BOOT_LAYOUT_{name} 0x{value:08x}U\n" for name, value in fields.items()
     )
@@ -96,12 +104,16 @@ def root_bootargs_dtsi(root: Mapping[str, Any]) -> bytes:
     """Select the root filesystem while retaining the shared boot policy."""
     if root["kind"] == "initramfs":
         root_arguments = "init=/init rdinit=/init initramfs_options=size=40M"
+        initrd_properties = (
+            "linux,initrd-start = <0xe5e5e5e5>;\nlinux,initrd-end = <0xf6f6f6f6>;\n"
+        )
     elif root["kind"] == "external":
         root_arguments = (
             f"root=PARTUUID={root['partuuid']} "
             f"rootfstype={root['filesystem']} rootwait={root['wait_seconds']} rw "
             "init=/sbin/init"
         )
+        initrd_properties = ""
     else:
         message = "unsupported Linux root filesystem kind"
         raise ValueError(message)
@@ -119,7 +131,7 @@ def root_bootargs_dtsi(root: Mapping[str, Any]) -> bytes:
         "panic=-1 vt.global_cursor_default=1 random.trust_bootloader=on "
         "sysctl.vm.watermark_boost_factor=0 trace_buf_size=256K"
     )
-    return f'bootargs = "{bootargs}";\n'.encode("ascii")
+    return f'bootargs = "{bootargs}";\n{initrd_properties}'.encode("ascii")
 
 
 def uboot_layout_dtsi(layout: Mapping[str, int]) -> bytes:

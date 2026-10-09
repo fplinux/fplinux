@@ -11,6 +11,7 @@ import fplinux_cli.alpine.signing as alpine_signing
 import fplinux_cli.cache.prune.alpine as prune_alpine
 import fplinux_cli.cache.prune.operations as prune_operations
 import fplinux_cli.device_data.inputs as firmware_inputs
+import pytest
 from fplinux_cli.cache.prune.operations import apply_prune, plan_prune
 from fplinux_cli.environment.image_state import ImageState, publish_image_state
 from fplinux_cli.environment.images import container_artifact_recipe_digest
@@ -359,8 +360,11 @@ class RootfsPruneTests:
         assert not ((cache / "rootfs" / stale).exists())
 
     @staticmethod
-    def test_automatic_rootfs_cleanup_retains_bluetooth_and_fm_recipe(tmp_path: Path) -> None:
-        """Cleanup retains the built rootfs and drops recipes with wrong firmware groups."""
+    @pytest.mark.parametrize("root_kind", ["initramfs", "external"])
+    def test_automatic_rootfs_cleanup_retains_bluetooth_and_fm_recipe(
+        tmp_path: Path, root_kind: str
+    ) -> None:
+        """Cleanup retains RAM without firmware and external roots with Bluetooth/FM."""
         cache = tmp_path / ".cache"
         public_key = alpine_signing.signing_public_key(cache)
         public_key.parent.mkdir(parents=True)
@@ -390,13 +394,17 @@ class RootfsPruneTests:
         def recipe_for(*selected_groups: str) -> str:
             selected = tuple(item for group in selected_groups for item in captured[group])
             return alpine_recipes.alpine_rootfs_recipe(
-                image_recipe, signing_key, (), firmware_inputs=selected
+                image_recipe, signing_key, (), firmware_inputs=selected, root_kind=root_kind
             )
 
-        current = recipe_for("bluetooth", "fm-radio")
+        without_firmware = recipe_for()
+        with_radio_firmware = recipe_for("bluetooth", "fm-radio")
+        current = without_firmware if root_kind == "initramfs" else with_radio_firmware
         bluetooth_only = recipe_for("bluetooth")
         with_audio_profile = recipe_for("bluetooth", "fm-radio", "audio-profile")
-        for recipe in (current, bluetooth_only, with_audio_profile):
+        all_recipes = {without_firmware, with_radio_firmware, bluetooth_only, with_audio_profile}
+        obsolete = all_recipes - {current}
+        for recipe in all_recipes:
             directory = cache / "rootfs" / recipe
             directory.mkdir(parents=True)
             (directory / "rootfs.cpio").write_bytes(b"rootfs")
@@ -409,7 +417,7 @@ class RootfsPruneTests:
                 "load_target",
                 return_value={
                     "platform": "platform",
-                    "linux": {"root": {"kind": "initramfs"}},
+                    "linux": {"root": {"kind": root_kind}},
                     "device_data": {"groups": groups},
                 },
             ),
@@ -421,10 +429,9 @@ class RootfsPruneTests:
         ):
             removed = prune_operations.discard_obsolete_rootfs(cache)
 
-        assert (set(removed)) == ({f"rootfs/{bluetooth_only}", f"rootfs/{with_audio_profile}"})
+        assert set(removed) == {f"rootfs/{recipe}" for recipe in obsolete}
         assert (cache / "rootfs" / current / "rootfs.cpio").is_file()
-        assert not ((cache / "rootfs" / bluetooth_only).exists())
-        assert not ((cache / "rootfs" / with_audio_profile).exists())
+        assert all(not (cache / "rootfs" / recipe).exists() for recipe in obsolete)
 
     @staticmethod
     def test_automatic_rootfs_cleanup_leaves_a_symlinked_entry_untouched(tmp_path: Path) -> None:

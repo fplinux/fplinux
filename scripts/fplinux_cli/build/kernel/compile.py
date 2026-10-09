@@ -26,6 +26,7 @@ from . import receipts as kbuild_state
 from . import state as linux_state
 from .configuration import (
     assert_build_type_kconfig,
+    assert_external_firmware_kconfig,
     assert_profile_kconfig,
     audio_profile_implementation,
     audio_profile_kconfig_arguments,
@@ -80,6 +81,8 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
         work = output.parent
         defconfig, config_paths = prepare_kernel_config(target, target_config, platform, work)
         root_contract = target_config["linux"]["root"]
+        if root_contract["kind"] == "initramfs":
+            audio_profile_firmware = None
         initramfs_record: dict[str, int | str] | None = None
         initramfs_input: Path | None = None
         initramfs_receipt: dict[str, str] | None = None
@@ -224,6 +227,8 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
         assert_build_type_kconfig(
             output / ".config", config_paths[-1], target_config["build_type"]
         )
+        if root_contract["kind"] == "initramfs":
+            assert_external_firmware_kconfig(output / ".config")
         verify_builtin_audio_profile(
             target,
             output / ".config",

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "boot-session.h"
@@ -27,6 +28,12 @@
 #define FPLINUX_DTB_CLIENT_KEY_MARKER 0xb2U
 #define FPLINUX_DTB_SESSION_ID_MARKER 0xc3U
 #define FPLINUX_DTB_USB_CONFIG_MARKER 0xd4U
+#define FPLINUX_DTB_INITRD_START_MARKER 0xe5U
+#define FPLINUX_DTB_INITRD_END_MARKER 0xf6U
+
+#define FPLINUX_NEWC_HEADER_BYTES 110U
+#define FPLINUX_NEWC_FILE_BYTES_OFFSET 54U
+#define FPLINUX_NEWC_NAME_BYTES_OFFSET 94U
 
 extern unsigned char fplinux_session_start[];
 extern unsigned char fplinux_session_end[];
@@ -39,6 +46,14 @@ static uint32_t read_le32(const unsigned char *source)
 {
 	return (uint32_t)source[0] | ((uint32_t)source[1] << 8) |
 	       ((uint32_t)source[2] << 16) | ((uint32_t)source[3] << 24);
+}
+
+static void write_be32(unsigned char *destination, uint32_t value)
+{
+	destination[0] = (unsigned char)(value >> 24);
+	destination[1] = (unsigned char)(value >> 16);
+	destination[2] = (unsigned char)(value >> 8);
+	destination[3] = (unsigned char)value;
 }
 
 static int bytes_are_zero(const unsigned char *bytes, size_t count)
@@ -171,6 +186,150 @@ static int bytes_appear_once(unsigned char *bytes, size_t count,
 			return 0;
 	}
 	return found == 1;
+}
+
+int ums9117_boot_session_set_initrd(unsigned char *tree, size_t tree_bytes,
+				    uint32_t start, uint32_t end)
+{
+	static const unsigned char start_name[] = "linux,initrd-start";
+	static const unsigned char end_name[] = "linux,initrd-end";
+	unsigned char *start_marker;
+	unsigned char *end_marker;
+
+	if ((start == 0) != (end == 0) || (start != 0 && end <= start) ||
+	    !find_run_once(tree, tree_bytes, FPLINUX_DTB_INITRD_START_MARKER,
+			   sizeof(uint32_t), &start_marker) ||
+	    !find_run_once(tree, tree_bytes, FPLINUX_DTB_INITRD_END_MARKER,
+			   sizeof(uint32_t), &end_marker) ||
+	    !bytes_appear_once(tree, tree_bytes, start_name,
+			       sizeof(start_name)) ||
+	    !bytes_appear_once(tree, tree_bytes, end_name, sizeof(end_name)))
+		return 0;
+	write_be32(start_marker, start);
+	write_be32(end_marker, end);
+	return 1;
+}
+
+static int read_newc_hex32(const unsigned char *text, uint32_t *value)
+{
+	uint32_t result = 0;
+	unsigned index;
+	unsigned digit;
+
+	for (index = 0; index < 8; ++index) {
+		digit = text[index];
+		if (digit >= '0' && digit <= '9')
+			digit -= '0';
+		else if (digit >= 'a' && digit <= 'f')
+			digit = digit - 'a' + 10;
+		else if (digit >= 'A' && digit <= 'F')
+			digit = digit - 'A' + 10;
+		else
+			return 0;
+		result = (result << 4) | digit;
+	}
+	*value = result;
+	return 1;
+}
+
+static int device_data_archive_valid(const unsigned char *archive, size_t bytes)
+{
+	static const unsigned char trailer[] = "TRAILER!!!";
+	const unsigned char *name;
+	size_t offset = 0;
+	uint32_t name_bytes;
+	uint32_t file_bytes;
+
+	while (bytes - offset >= FPLINUX_NEWC_HEADER_BYTES) {
+		if (memcmp(archive + offset, "070701", 6) != 0 ||
+		    !read_newc_hex32(archive + offset +
+					     FPLINUX_NEWC_NAME_BYTES_OFFSET,
+				     &name_bytes) ||
+		    !read_newc_hex32(archive + offset +
+					     FPLINUX_NEWC_FILE_BYTES_OFFSET,
+				     &file_bytes))
+			return 0;
+		offset += FPLINUX_NEWC_HEADER_BYTES;
+		if (name_bytes == 0 || name_bytes > bytes - offset)
+			return 0;
+		name = archive + offset;
+		if (name[name_bytes - 1] != 0)
+			return 0;
+		offset = (offset + name_bytes + 3U) & ~(size_t)3U;
+		if (offset > bytes || file_bytes > bytes - offset)
+			return 0;
+		if (name_bytes == sizeof(trailer) &&
+		    memcmp(name, trailer, sizeof(trailer)) == 0)
+			return file_bytes == 0 &&
+			       bytes_are_zero(archive + offset, bytes - offset);
+		offset = (offset + file_bytes + 3U) & ~(size_t)3U;
+		if (offset > bytes)
+			return 0;
+	}
+	return 0;
+}
+
+enum ums9117_bootstrap_device_data_status
+ums9117_boot_session_load_device_data(unsigned char *arena, size_t arena_bytes,
+				      unsigned char **destination,
+				      size_t *bytes)
+{
+	FILE *stream = fopen("device-data.cpio", "rb");
+	unsigned char *data = NULL;
+	size_t aligned_bytes;
+	long file_bytes;
+	enum ums9117_bootstrap_device_data_status status =
+		UMS9117_BOOTSTRAP_DEVICE_DATA_READ;
+
+	*destination = NULL;
+	*bytes = 0;
+	if (stream == NULL)
+		return UMS9117_BOOTSTRAP_DEVICE_DATA_OK;
+	if (fseek(stream, 0, SEEK_END) != 0)
+		goto out;
+	file_bytes = ftell(stream);
+	if (file_bytes < 0)
+		goto out;
+	status = UMS9117_BOOTSTRAP_DEVICE_DATA_SIZE;
+	if ((size_t)file_bytes < FPLINUX_NEWC_HEADER_BYTES ||
+	    (size_t)file_bytes > arena_bytes)
+		goto out;
+	aligned_bytes = ((size_t)file_bytes + 3U) & ~(size_t)3U;
+	if (aligned_bytes > arena_bytes)
+		goto out;
+	/* Keep the loaded capsule immediately below the separate device tree. */
+	data = arena + arena_bytes - aligned_bytes;
+	status = UMS9117_BOOTSTRAP_DEVICE_DATA_READ;
+	if (fseek(stream, 0, SEEK_SET) != 0 ||
+	    fread(data, 1, (size_t)file_bytes, stream) != (size_t)file_bytes)
+		goto out;
+	status = device_data_archive_valid(data, (size_t)file_bytes) ?
+			 UMS9117_BOOTSTRAP_DEVICE_DATA_OK :
+			 UMS9117_BOOTSTRAP_DEVICE_DATA_FORMAT;
+out:
+	if (fclose(stream) != 0)
+		status = UMS9117_BOOTSTRAP_DEVICE_DATA_READ;
+	if (status == UMS9117_BOOTSTRAP_DEVICE_DATA_OK) {
+		*destination = data;
+		*bytes = (size_t)file_bytes;
+	}
+	return status;
+}
+
+const char *ums9117_bootstrap_device_data_error(
+	enum ums9117_bootstrap_device_data_status status)
+{
+	switch (status) {
+	case UMS9117_BOOTSTRAP_DEVICE_DATA_SIZE:
+		return "DEVICE DATA SIZE";
+	case UMS9117_BOOTSTRAP_DEVICE_DATA_READ:
+		return "DEVICE DATA READ";
+	case UMS9117_BOOTSTRAP_DEVICE_DATA_FORMAT:
+		return "DEVICE DATA FORMAT";
+	case UMS9117_BOOTSTRAP_DEVICE_DATA_OK:
+	default:
+		return "DEVICE DATA UNKNOWN";
+	}
 }
 
 static void clear_session_record(unsigned char *record)

@@ -23,6 +23,7 @@ from fplinux_cli.build.kernel.prepare import prepare_linux
 from fplinux_cli.build.storage import stage as storage_build
 from fplinux_cli.common import fail
 from fplinux_cli.device_data import inputs as firmware_inputs
+from fplinux_cli.device_data.cpio import create_device_data_initramfs
 from fplinux_cli.environment.images import container_artifact_recipe_digest
 from fplinux_cli.manifests.identity import BUILD_TYPES
 from fplinux_cli.manifests.paths import target_asset_lock_path
@@ -61,8 +62,9 @@ def main() -> None:
             target_config["device_data"]["groups"],
             common.ROOT,
         )
-        firmware = firmware_inputs.rootfs_firmware_inputs(device_data)
-        audio_profile_firmware = device_data.get("audio-profile")
+        external_root = target_config["linux"]["root"]["kind"] == "external"
+        firmware = firmware_inputs.rootfs_firmware_inputs(device_data) if external_root else ()
+        audio_profile_firmware = device_data.get("audio-profile") if external_root else None
         sources = common.load_toml(common.ROOT / "sources.lock.toml")
         linux_base = sha256_value(
             sources_build.source_lock_entry(sources, platform["linux"]["source_lock"]).get(
@@ -81,6 +83,10 @@ def main() -> None:
             / "work"
         )
         work.mkdir(parents=True, exist_ok=True)
+        if not external_root:
+            device_data_initramfs = work / "device-data.cpio"
+            device_data_initramfs.write_bytes(create_device_data_initramfs(device_data))
+            device_data_initramfs.chmod(0o600)
         inputs_build.CACHE.mkdir(parents=True, exist_ok=True)
 
     with process_build.report_stage(reporter, "prepare-linux"):

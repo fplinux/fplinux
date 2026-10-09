@@ -22,6 +22,13 @@ enum ums9117_bootstrap_session_status {
 	UMS9117_BOOTSTRAP_SESSION_OUTPUT,
 };
 
+enum ums9117_bootstrap_device_data_status {
+	UMS9117_BOOTSTRAP_DEVICE_DATA_OK = 0,
+	UMS9117_BOOTSTRAP_DEVICE_DATA_SIZE,
+	UMS9117_BOOTSTRAP_DEVICE_DATA_READ,
+	UMS9117_BOOTSTRAP_DEVICE_DATA_FORMAT,
+};
+
 /*
  * The record is an exact 512-byte, 64-byte-aligned region. Rejection leaves
  * all buffers intact. Success copies values without clearing the record;
@@ -37,5 +44,15 @@ enum ums9117_bootstrap_session_status ums9117_bootstrap_personalize_dtb(
 	uint8_t session_id[FPLINUX_HANDOFF_SESSION_ID_BYTES]);
 const char *
 ums9117_bootstrap_session_error(enum ums9117_bootstrap_session_status status);
+
+/* An absent capsule leaves the first boot's initial RAM filesystem unchanged. */
+enum ums9117_bootstrap_device_data_status
+ums9117_boot_session_load_device_data(unsigned char *arena, size_t arena_bytes,
+				      unsigned char **destination,
+				      size_t *bytes);
+int ums9117_boot_session_set_initrd(unsigned char *tree, size_t tree_bytes,
+				    uint32_t start, uint32_t end);
+const char *ums9117_bootstrap_device_data_error(
+	enum ums9117_bootstrap_device_data_status status);
 
 #endif

@@ -188,6 +188,8 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
 
     image_name = release_manifest["image"]
     copy_file(ramboot, release / image_name)
+    if target_config["linux"]["root"]["kind"] == "initramfs":
+        copy_file(work / "device-data.cpio", release / "device-data.cpio")
     debug_outputs = [
         (zimage, "zImage"),
         (dtb, target_config["linux"]["debug_dtb"]),

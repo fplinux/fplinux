@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Capture declared device-data groups for rootfs and built-in firmware delivery."""
+"""Capture declared device-data groups for their selected firmware delivery."""
 
 from __future__ import annotations
 
@@ -217,7 +217,7 @@ def _require_input_file(path: Path, root: Path, prefix: str) -> None:
         fail(f"{prefix}declared file is missing or invalid: {path}")
 
 
-def _firmware_storage(firmware: FirmwareInput) -> tuple[str, bytes]:
+def firmware_storage(firmware: FirmwareInput) -> tuple[str, bytes]:
     """Use the kernel's XZ fallback when it reduces the stored firmware."""
     compressed = lzma.compress(
         firmware.contents,
@@ -240,7 +240,7 @@ def install_firmware_inputs(root: Path, inputs: Sequence[FirmwareInput]) -> None
     firmware_root = _require_or_create_directory(root / "lib", "rootfs /lib") / "firmware"
     firmware_root = _require_or_create_directory(firmware_root, "rootfs /lib/firmware")
     for firmware in inputs:
-        stored_name, contents = _firmware_storage(firmware)
+        stored_name, contents = firmware_storage(firmware)
         destination = firmware_root
         parts = PurePosixPath(stored_name).parts
         for part in parts[:-1]:
@@ -262,7 +262,7 @@ def install_firmware_inputs(root: Path, inputs: Sequence[FirmwareInput]) -> None
 def verify_installed_firmware_inputs(root: Path, inputs: Sequence[FirmwareInput]) -> None:
     """Require stored firmware to decode to the exact admitted bytes and mode."""
     for firmware in inputs:
-        stored_name, _ = _firmware_storage(firmware)
+        stored_name, _ = firmware_storage(firmware)
         destination = root / "lib/firmware" / stored_name
         if destination.is_symlink() or not destination.is_file():
             fail(f"installed firmware is missing or invalid: {destination}")

@@ -160,9 +160,14 @@ static void start_boot_screen(uint32_t ram_bytes, size_t zimage_bytes,
 void ums9117_boot_main(const struct ums9117_boot_board *board)
 {
 	enum ums9117_bootstrap_session_status session_status;
+	enum ums9117_bootstrap_device_data_status device_data_status;
 	uint32_t ram_bytes = ums9117_bootstrap_ram_bytes();
 	size_t zimage_bytes = ums9117_bootstrap_zimage_size();
 	size_t dtb_bytes = ums9117_bootstrap_dtb_size();
+	size_t device_data_bytes;
+	unsigned char *device_data;
+	uint32_t device_data_start;
+	uint32_t device_data_end;
 	uint8_t session_id[FPLINUX_HANDOFF_SESSION_ID_BYTES];
 	int has_display = board->display_width != 0;
 
@@ -207,6 +212,28 @@ void ums9117_boot_main(const struct ums9117_boot_board *board)
 		ums9117_boot_fail(4, "BAD DTB SIZE");
 	record_stage(4, "COPY DTB");
 	ums9117_bootstrap_copy_dtb(FPLINUX_BOOT_LAYOUT_DTB_PHYS, dtb_bytes);
+	ums9117_boot_checkpoint("DEVICE DATA", FPLINUX_BOOT_SCREEN_ACTIVE);
+	device_data_status = ums9117_boot_session_load_device_data(
+		(unsigned char *)(uintptr_t)
+			FPLINUX_BOOT_LAYOUT_DEVICE_DATA_ARENA_PHYS,
+		FPLINUX_BOOT_LAYOUT_DEVICE_DATA_ARENA_BYTES, &device_data,
+		&device_data_bytes);
+	if (device_data_status != UMS9117_BOOTSTRAP_DEVICE_DATA_OK)
+		ums9117_boot_fail(11, ums9117_bootstrap_device_data_error(
+					      device_data_status));
+	device_data_start = (uint32_t)(uintptr_t)device_data;
+	device_data_end =
+		device_data == NULL ?
+			0 :
+			device_data_start + (uint32_t)device_data_bytes;
+	if (!ums9117_boot_session_set_initrd(
+		    (unsigned char *)(uintptr_t)FPLINUX_BOOT_LAYOUT_DTB_PHYS,
+		    dtb_bytes, device_data_start, device_data_end))
+		ums9117_boot_fail(11, "DEVICE DATA DTB");
+	if (device_data != NULL)
+		ums9117_bootstrap_flush_dcache_range(device_data,
+						     device_data_bytes);
+	ums9117_boot_checkpoint("DEVICE DATA READY", FPLINUX_BOOT_SCREEN_DONE);
 	ums9117_boot_checkpoint("SESSION VERIFY", FPLINUX_BOOT_SCREEN_ACTIVE);
 	session_status = ums9117_bootstrap_personalize_dtb(
 		FPLINUX_BOOT_LAYOUT_DTB_PHYS, dtb_bytes, session_id);

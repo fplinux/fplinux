@@ -51,7 +51,12 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
                     device_data_groups,
                     cache,
                 )
-                firmware = firmware_inputs.rootfs_firmware_inputs(device_data)
+                root_kind = target_config["linux"]["root"]["kind"]
+                firmware = (
+                    firmware_inputs.rootfs_firmware_inputs(device_data)
+                    if root_kind == "external"
+                    else ()
+                )
                 recipes.add(
                     alpine_rootfs_recipe(
                         image_recipe,
@@ -59,7 +64,7 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
                         selected_packages(load_platform(target_config["platform"]), target_config),
                         firmware_inputs=firmware,
                         display_brightness=target_config.get("display_brightness"),
-                        root_kind=target_config["linux"]["root"]["kind"],
+                        root_kind=root_kind,
                     )
                 )
     except OSError, ValueError, SystemExit:

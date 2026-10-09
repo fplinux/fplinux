@@ -78,6 +78,9 @@ def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]
     image = manifest["image"]
     bundle_files = manifest["bundle_files"]
     runtime_files = manifest["runtime_files"]
+    if config.get("linux", {}).get("root", {}).get("kind") == "initramfs":
+        bundle_files = [*bundle_files, "device-data.cpio"]
+        runtime_files = [*runtime_files, "device-data.cpio"]
     documents = manifest["documents"]
     archive_names = set(bundle_files)
     shared_collisions = archive_names & SHARED_PACKAGE_FILES.keys()

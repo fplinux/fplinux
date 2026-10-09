@@ -59,6 +59,7 @@ _BUILD_STAGE_SOURCES = (
     "scripts/fplinux_cli/build/kernel/__init__.py",
     "scripts/fplinux_cli/build/storage/__init__.py",
     "scripts/fplinux_cli/build/storage/stage.py",
+    "scripts/fplinux_cli/device_data/cpio.py",
 )
 
 

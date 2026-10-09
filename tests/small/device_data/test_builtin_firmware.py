@@ -115,3 +115,25 @@ class BuiltinFirmwareTests:
                 []
             )
             assert (kernel_build.audio_profile_implementation("inoi-240-modern-4g", None)) == ([])
+
+    @pytest.mark.parametrize(
+        "firmware_setting",
+        ["", 'CONFIG_EXTRA_FIRMWARE=""\n'],
+        ids=["default-empty", "explicit-empty"],
+    )
+    def test_ram_configuration_accepts_only_external_firmware(self, firmware_setting: str) -> None:
+        """A RAM kernel accepts an empty built-in firmware selection."""
+        config_path = self.root / ".config"
+        config_path.write_text("CONFIG_FW_LOADER=y\n" + firmware_setting, encoding="ascii")
+
+        kernel_build.assert_external_firmware_kconfig(config_path)
+
+    def test_ram_configuration_rejects_embedded_device_data(self) -> None:
+        """A RAM kernel rejects profiles that would override separate phone data."""
+        config_path = self.root / ".config"
+        config_path.write_text(
+            'CONFIG_EXTRA_FIRMWARE="fplinux/phone-profile.bin"\n', encoding="ascii"
+        )
+
+        with pytest.raises(SystemExit, match="RAM kernel unexpectedly contains built-in firmware"):
+            kernel_build.assert_external_firmware_kconfig(config_path)

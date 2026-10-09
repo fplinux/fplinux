@@ -166,6 +166,7 @@ class BuilderPublicationTests:
         self.write("vmlinux", b"vmlinux\n", root=self.kernel)
         self.write("System.map", b"map\n", root=self.kernel)
         self.write(".config", b"CONFIG_TEST=y\n", root=self.kernel)
+        self.write("device-data.cpio", b"prepared device data\n", root=self.work)
         self.ramboot = self.write("ramboot.bin", b"ramboot\n", root=self.work)
         self.ramboot_map = self.write("ramboot.map", b"map\n", root=self.work)
         self.rootfs_output = self.work / "rootfs"
@@ -326,6 +327,7 @@ class BuilderPublicationTests:
         current = resolve_current_bundle(self.output, "demo")
         manifest = json.loads((published / BUILD_MANIFEST_NAME).read_text())
         runtime = json.loads((published / "runtime-manifest.json").read_text())
+        assert (published / "device-data.cpio").read_bytes() == b"prepared device data\n"
         actual_payload = {
             path.relative_to(published).as_posix(): {
                 "mode": path.stat().st_mode & 0o777,

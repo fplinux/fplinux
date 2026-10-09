@@ -74,6 +74,13 @@ def assert_build_type_kconfig(config: Path, fragment: Path, build_type: str) -> 
             fail(f"{build_type} build did not preserve {symbol}={value}")
 
 
+def assert_external_firmware_kconfig(config: Path) -> None:
+    """Require a RAM kernel to receive its firmware outside the kernel image."""
+    values = kconfig_values(inputs_build.require_file(config).read_text())
+    if values.get("CONFIG_EXTRA_FIRMWARE", '""') != '""':
+        fail("RAM kernel unexpectedly contains built-in firmware")
+
+
 def audio_profile_kconfig_arguments(
     target: str,
     firmware: tuple[firmware_inputs.FirmwareInput, ...] | None,
