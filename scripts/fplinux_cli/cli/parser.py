@@ -181,13 +181,23 @@ def create_parser(
     bundle_parser = inspections.add_parser("bundle", help="inspect the current target bundle")
     _add_build_type_option(bundle_parser)
     bundle_parser.add_argument("target", choices=targets)
-    bundle_parser.add_argument("--profile", type=_profile_name, metavar="NAME")
+    bundle_parser.add_argument(
+        "--profile",
+        type=_profile_name,
+        metavar="NAME",
+        help="inspect the selected global profile (default: default)",
+    )
     footprint_parser = inspections.add_parser(
         "footprint", help="measure the current bundle's size and package composition"
     )
     _add_build_type_option(footprint_parser)
     footprint_parser.add_argument("target", choices=targets)
-    footprint_parser.add_argument("--profile", type=_profile_name, metavar="NAME")
+    footprint_parser.add_argument(
+        "--profile",
+        type=_profile_name,
+        metavar="NAME",
+        help="measure the selected global profile (default: default)",
+    )
     footprint_parser.add_argument("--json", action="store_true", help="print the full size report")
     diff_parser = inspections.add_parser(
         "footprint-diff", help="compare two saved footprint JSON reports"
