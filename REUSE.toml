@@ -33,6 +33,7 @@ path = [
   "fplinux",
   "include/**",
   "lib/**",
+  "linux-host.lock.toml",
   "package-lock.json",
   "package.json",
   "platforms/**",

@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: GPL-2.0-only
+[bzip2]
+version = "1.0.8-r6"
+url = "https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz"
+sha256 = "ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269"
+name = "bzip2-1.0.8.tar.gz"
+licenses = ["bzip2-1.0.8/LICENSE"]
+
+[expat]
+version = "2.8.5-r0"
+url = "https://github.com/libexpat/libexpat/releases/download/R_2_8_5/expat-2.8.5.tar.xz"
+sha256 = "1e727b8933ec51a77a9a9d9afcf8e688bce45d907c13e36ab7393fe36e703182"
+name = "expat-2.8.5.tar.xz"
+licenses = ["expat-2.8.5/COPYING"]
+
+[libffi]
+version = "3.5.2-r1"
+url = "https://github.com/libffi/libffi/releases/download/v3.5.2/libffi-3.5.2.tar.gz"
+sha256 = "f3a3082a23b37c293a4fcd1053147b371f2ff91fa7ea1b2a52e335676bac82dc"
+name = "libffi-3.5.2.tar.gz"
+licenses = ["libffi-3.5.2/LICENSE"]
+
+[libedit]
+version = "20260508.3.1-r1"
+url = "https://www.thrysoee.dk/editline/libedit-20260508-3.1.tar.gz"
+sha256 = "91f42d6571dd8d92faedd1341134ce5abca0c5d0b4b352814186d33f2b11272e"
+name = "libedit-20260508-3.1.tar.gz"
+licenses = ["libedit-20260508-3.1/COPYING"]
+
+[mpdecimal]
+version = "4.0.1-r0"
+url = "https://www.bytereef.org/software/mpdecimal/releases/mpdecimal-4.0.1.tar.gz"
+sha256 = "96d33abb4bb0070c7be0fed4246cd38416188325f820468214471938545b1ac8"
+name = "mpdecimal-4.0.1.tar.gz"
+licenses = ["mpdecimal-4.0.1/COPYRIGHT.txt"]
+
+[musl]
+version = "1.2.6-r2"
+url = "https://musl.libc.org/releases/musl-1.2.6.tar.gz"
+sha256 = "d585fd3b613c66151fc3249e8ed44f77020cb5e6c1e635a616d3f9f82460512a"
+name = "musl-1.2.6.tar.gz"
+licenses = ["musl-1.2.6/COPYRIGHT"]
+
+[ncurses]
+version = "6.6_p20260516-r0"
+url = "https://invisible-mirror.net/archives/ncurses/current/ncurses-6.6-20260516.tgz"
+sha256 = "933438009f594f54656c53c7bc347a7e0ff21881700fc3db811086f7a3fd3b60"
+name = "ncurses-6.6-20260516.tgz"
+licenses = ["ncurses-6.6-20260516/COPYING"]
+
+[openssh]
+version = "10.3_p1-r1"
+url = "https://ftp.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-10.3p1.tar.gz"
+sha256 = "56682a36bb92dcf4b4f016fd8ec8e74059b79a8de25c15d670d731e7d18e45f4"
+name = "openssh-10.3p1.tar.gz"
+licenses = ["openssh-10.3p1/LICENCE"]
+
+[openssl]
+version = "3.5.9-r0"
+url = "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz"
+sha256 = "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a"
+name = "openssl-3.5.9.tar.gz"
+licenses = ["openssl-3.5.9/LICENSE.txt"]
+
+[python3]
+version = "3.14.8-r0"
+url = "https://www.python.org/ftp/python/3.14.8/Python-3.14.8.tar.xz"
+sha256 = "c2215904f02b175596dc49351585104f4bc20341e1c47378b26a2c274360ce73"
+name = "Python-3.14.8.tar.xz"
+licenses = ["Python-3.14.8/LICENSE", "Python-3.14.8/Doc/license.rst"]
+license_headers = [
+  "Python-3.14.8/Modules/_hacl/Hacl_Hash_SHA2.c",
+  "Python-3.14.8/Modules/_hacl/include/krml/internal/compat.h",
+]
+
+[xz]
+version = "5.8.4-r0"
+url = "https://github.com/tukaani-project/xz/archive/refs/tags/v5.8.4/xz-5.8.4.tar.gz"
+sha256 = "b6b34c52e672e810d339db14e0c10b5b6f5f67a30d8d05cdac5d8cb4d82f78d5"
+name = "xz-5.8.4.tar.gz"
+licenses = [
+  "xz-5.8.4/COPYING",
+  "xz-5.8.4/COPYING.0BSD",
+  "xz-5.8.4/COPYING.GPLv2",
+  "xz-5.8.4/COPYING.GPLv3",
+  "xz-5.8.4/COPYING.LGPLv2.1",
+]
+
+[zlib]
+version = "1.3.2-r0"
+url = "https://zlib.net/fossils/zlib-1.3.2.tar.gz"
+sha256 = "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16"
+name = "zlib-1.3.2.tar.gz"
+licenses = ["zlib-1.3.2/LICENSE"]
