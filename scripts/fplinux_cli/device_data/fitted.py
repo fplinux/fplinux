@@ -8,19 +8,17 @@ from fplinux_cli.device_data.bluetooth_firmware import (
     DOWNLOADED_NV_PARTITION_ID,
     NV_FILES,
     PROTECT_NV_PARTITION_ID,
-    Cm4Revision,
     prepare_bluetooth_from_records,
 )
 from fplinux_cli.device_data.fm_radio import FM_RECORD_SIZES, prepare_fm_config
 from fplinux_cli.device_data.formats import DeviceDataPreparation, PhysicalNand, fixed_nv_records
 
 
-def prepare_from_partitions(  # noqa: PLR0913 -- target identity and policy stay explicit.
+def prepare_from_partitions(
     nand: PhysicalNand,
     partitions: dict[int, tuple[int, int]],
     *,
     prefix: str,
-    revision: Cm4Revision,
     machine_compatible: bytes,
     speaker_vibration: bool = False,
 ) -> DeviceDataPreparation:
@@ -42,7 +40,6 @@ def prepare_from_partitions(  # noqa: PLR0913 -- target identity and policy stay
         nand,
         partitions,
         prefix=prefix,
-        revision=revision,
         downloaded=downloaded,
         protected=protected,
     )

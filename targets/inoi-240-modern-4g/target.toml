@@ -94,7 +94,7 @@ parser = "inoi240_device_data.py"
 
 [bluetooth]
 firmware = [
-  { source = "inoi240-cm4.bin", destination = "ums9117/inoi240-cm4.bin", size = 463296, sha256 = "ffe5e4cb568552601281a0026bc1f9f5715f1715b1261062c23669e95b5e086d" },
+  { source = "inoi240-cm4.bin", destination = "ums9117/inoi240-cm4.bin" },
   { source = "inoi240-bt-config.bin", destination = "ums9117/inoi240-bt-config.bin", size = 8 },
   { source = "inoi240-bt-sprd.bin", destination = "ums9117/inoi240-bt-sprd.bin", size = 176 },
   { source = "inoi240-bt-rf-config.bin", destination = "ums9117/inoi240-bt-rf-config.bin", size = 252 },

@@ -51,24 +51,6 @@ properties:
       - description: Bluetooth PSKEY record
       - description: Bluetooth RF calibration record
 
-  fplinux,cm4-sha256:
-    $ref: /schemas/types.yaml#/definitions/uint8-array
-    minItems: 32
-    maxItems: 32
-    description: SHA-256 of the prepared CM4 executable for this board.
-
-  fplinux,cm4-size:
-    $ref: /schemas/types.yaml#/definitions/uint32
-    minimum: 1
-    maximum: 917504
-    description: Exact byte length of the prepared CM4 executable.
-
-  fplinux,cm4-version:
-    $ref: /schemas/types.yaml#/definitions/uint8-array
-    minItems: 6
-    maxItems: 6
-    description: Six firmware-version bytes returned by the FCA0 setup command.
-
   fplinux,fm-config-name:
     $ref: /schemas/types.yaml#/definitions/string
     description: |
@@ -84,9 +66,6 @@ required:
   - sprd,aon-apb
   - sprd,pmu-apb
   - firmware-name
-  - fplinux,cm4-sha256
-  - fplinux,cm4-size
-  - fplinux,cm4-version
 
 additionalProperties: false
 
@@ -105,8 +84,4 @@ examples:
                         "ums9117/ta1618-bt-config.bin",
                         "ums9117/ta1618-bt-sprd.bin",
                         "ums9117/ta1618-bt-rf-config.bin";
-        fplinux,cm4-sha256 = [22 88 d4 97 9f 05 6b 20 0b bc f3 41 92 17 30 a6
-                            00 cd 94 ff 3d 1a fb 14 ee 1e 76 d5 05 53 95 35];
-        fplinux,cm4-size = <463468>;
-        fplinux,cm4-version = [42 16 05 12 15 20];
     };

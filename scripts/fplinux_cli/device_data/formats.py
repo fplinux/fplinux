@@ -20,6 +20,18 @@ _VBM_HEADER_BYTES = 0x18
 _VBM_ENTRY = struct.Struct("<IHHH")
 
 
+def nv_checksum(data: bytes) -> int:
+    """Return the NV format's little-endian one's-complement checksum."""
+    total = 0
+    for offset in range(0, len(data) - 1, 2):
+        total += data[offset] | data[offset + 1] << 8
+    if len(data) % 2:
+        total += data[-1]
+    total = (total & 0xFFFF) + (total >> 16)
+    total = (total & 0xFFFF) + (total >> 16)
+    return ~total & 0xFFFF
+
+
 class NandPartitionReader(Protocol):
     """Small read boundary shared by physical NAND and format-only tests."""
 

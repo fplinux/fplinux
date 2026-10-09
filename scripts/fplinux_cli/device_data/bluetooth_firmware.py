@@ -1,22 +1,22 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """Extract shared UMS9117 Bluetooth formats from physical NAND backups.
 
-Targets select their partition layout and exact CM4 revision. Individual NV
-values come from the backup; this reader does not remap blocks or recover ECC.
+The phone's partition and load tables select its image. Individual NV values
+come from the backup; this reader does not remap blocks or recover ECC.
 """
 
 from __future__ import annotations
 
 import struct
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from fplinux_cli.common import sha256_bytes
+from fplinux_cli.device_data.cm4 import cm4_image, omit_initial_pub_policy
 from fplinux_cli.device_data.formats import (
     PhysicalNand,
     PreparedGroup,
     RequiredPartition,
     fixed_nv_records,
+    nv_checksum,
 )
 
 if TYPE_CHECKING:
@@ -47,18 +47,6 @@ def fixed_nv(partition: bytes) -> dict[int, bytes]:
         partition,
         {identifier: size for identifier, (_filename, size) in NV_FILES.items()},
     )
-
-
-def nv_checksum(data: bytes) -> int:
-    """Return the NV format's little-endian one's-complement checksum."""
-    total = 0
-    for offset in range(0, len(data) - 1, 2):
-        total += data[offset] | data[offset + 1] << 8
-    if len(data) % 2:
-        total += data[-1]
-    total = (total & 0xFFFF) + (total >> 16)
-    total = (total & 0xFFFF) + (total >> 16)
-    return ~total & 0xFFFF
 
 
 def verify_running_nv(partition: bytes, fixed: dict[int, bytes]) -> None:
@@ -92,51 +80,17 @@ def verify_running_nv(partition: bytes, fixed: dict[int, bytes]) -> None:
             raise ValueError(f"no checksum-valid RunningNV copy of Bluetooth record {identifier}")
 
 
-def omit_initial_pub_policy(original: bytes, offsets: tuple[int, int]) -> bytes:
-    """Skip CM4's initial shared DDR policy writes while retaining its setup."""
-    first, second = offsets
-    if original[first : first + 2] != b"\x2d\x4c" or original[second : second + 2] != b"\xe0\x6d":
-        message = "unsupported CM4 compatibility-patch instructions"
-        raise ValueError(message)
-    prepared = bytearray(original)
-    prepared[first : first + 2] = b"\x08\xe0"
-    prepared[second : second + 2] = b"\x2b\xe0"
-    return bytes(prepared)
-
-
-@dataclass(frozen=True)
-class Cm4Revision:
-    """One exact linked image with confirmed DMC_RetInit instruction locations."""
-
-    size: int
-    original_sha256: str
-    prepared_sha256: str
-    pub_policy_offsets: tuple[int, int]
-
-    def prepare(self, original: bytes) -> bytes:
-        """Admit the unchanged image before producing its compatible output copy."""
-        if len(original) != self.size or sha256_bytes(original) != self.original_sha256:
-            message = "unsupported or damaged original CM4 firmware revision"
-            raise ValueError(message)
-        prepared = omit_initial_pub_policy(original, self.pub_policy_offsets)
-        if sha256_bytes(prepared) != self.prepared_sha256:
-            message = "CM4 compatibility patch produced an unexpected image"
-            raise ValueError(message)
-        return prepared
-
-
-def prepare_bluetooth_from_records(  # noqa: PLR0913 -- exact source boundaries stay explicit.
+def prepare_bluetooth_from_records(
     nand: PhysicalNand,
     partitions: dict[int, tuple[int, int]],
     *,
     prefix: str,
-    revision: Cm4Revision,
     downloaded: Mapping[int, bytes],
     protected: Mapping[int, bytes],
 ) -> PreparedGroup:
     """Prepare Bluetooth from already parsed fixed NV records and the shared NAND."""
-    cm4 = nand.partition_bytes(partitions[CM4_PARTITION_ID])[: revision.size]
-    prepared_cm4 = revision.prepare(cm4)
+    cm4 = cm4_image(nand.partition_bytes(partitions[CM4_PARTITION_ID]))
+    prepared_cm4 = omit_initial_pub_policy(cm4)
     fixed = {identifier: downloaded[identifier] for identifier in NV_FILES}
     protected_bluetooth = {identifier: protected[identifier] for identifier in NV_FILES}
     if fixed != protected_bluetooth:
@@ -159,7 +113,6 @@ def prepare_bluetooth_from_partitions(
     partitions: dict[int, tuple[int, int]],
     *,
     prefix: str,
-    revision: Cm4Revision,
 ) -> PreparedGroup:
     """Extract the common CM4/NV set from a target's admitted physical partitions."""
     downloaded = fixed_nv(nand.partition_bytes(partitions[DOWNLOADED_NV_PARTITION_ID]))
@@ -168,7 +121,6 @@ def prepare_bluetooth_from_partitions(
         nand,
         partitions,
         prefix=prefix,
-        revision=revision,
         downloaded=downloaded,
         protected=protected,
     )

@@ -92,7 +92,7 @@ parser = "ta1618_device_data.py"
 
 [bluetooth]
 firmware = [
-  { source = "ta1618-cm4.bin", destination = "ums9117/ta1618-cm4.bin", size = 463468, sha256 = "2288d4979f056b200bbcf341921730a600cd94ff3d1afb14ee1e76d505539535" },
+  { source = "ta1618-cm4.bin", destination = "ums9117/ta1618-cm4.bin" },
   { source = "ta1618-bt-config.bin", destination = "ums9117/ta1618-bt-config.bin", size = 8 },
   { source = "ta1618-bt-sprd.bin", destination = "ums9117/ta1618-bt-sprd.bin", size = 176 },
   { source = "ta1618-bt-rf-config.bin", destination = "ums9117/ta1618-bt-rf-config.bin", size = 252 },

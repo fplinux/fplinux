@@ -85,9 +85,6 @@ struct ums9117_bluetooth {
 	struct mutex lock;
 	struct notifier_block pm_notifier;
 	const char *firmware_names[UMS9117_CM4_FIRMWARE_FILES];
-	u32 firmware_size;
-	u8 firmware_sha256[SHA256_DIGEST_SIZE];
-	u8 firmware_version[UMS9117_CM4_VERSION_SIZE];
 	bool started;
 	bool registered;
 	bool shutting_down;
@@ -373,6 +370,7 @@ static int load_firmware(struct ums9117_bluetooth *bt)
 {
 	const struct firmware *firmware;
 	u8 digest[SHA256_DIGEST_SIZE];
+	u8 readback_digest[SHA256_DIGEST_SIZE];
 	void *copy;
 	int ret;
 
@@ -382,17 +380,13 @@ static int load_firmware(struct ums9117_bluetooth *bt)
 		return missing_firmware_group(bt);
 	if (ret)
 		return ret;
-	if (firmware->size != bt->firmware_size) {
+	if (!firmware->size ||
+	    firmware->size > UMS9117_CM4_MAP_BYTES - UMS9117_CM4_IMAGE_OFFSET) {
 		ret = -EBADMSG;
 		goto out;
 	}
 	sha256(firmware->data, firmware->size, digest);
-	if (memcmp(digest, bt->firmware_sha256, sizeof(digest))) {
-		ret = -EKEYREJECTED;
-		goto out;
-	}
-	ret = ums9117_cm4_setup_prepare(bt->dev, bt->firmware_names + 1,
-					bt->firmware_version);
+	ret = ums9117_cm4_setup_prepare(bt->dev, bt->firmware_names + 1);
 	if (ret == -ENOENT)
 		ret = -EINVAL;
 	if (ret)
@@ -406,8 +400,8 @@ static int load_firmware(struct ums9117_bluetooth *bt)
 		    firmware->size);
 	cm4_barrier();
 	memcpy_fromio(copy, bt->low + UMS9117_CM4_IMAGE_OFFSET, firmware->size);
-	sha256(copy, firmware->size, digest);
-	if (memcmp(digest, bt->firmware_sha256, sizeof(digest)))
+	sha256(copy, firmware->size, readback_digest);
+	if (memcmp(digest, readback_digest, sizeof(digest)))
 		ret = -EIO;
 	kvfree(copy);
 out:
@@ -802,41 +796,14 @@ static int ums9117_bluetooth_probe(struct platform_device *pdev)
 	bt->dev = dev;
 	mutex_init(&bt->lock);
 	if (of_property_count_strings(dev->of_node, "firmware-name") !=
-		    UMS9117_CM4_FIRMWARE_FILES ||
-	    of_property_count_u32_elems(dev->of_node, "fplinux,cm4-size") !=
-		    1 ||
-	    of_property_count_u8_elems(dev->of_node, "fplinux,cm4-version") !=
-		    UMS9117_CM4_VERSION_SIZE ||
-	    of_property_count_u8_elems(dev->of_node, "fplinux,cm4-sha256") !=
-		    SHA256_DIGEST_SIZE)
-		return dev_err_probe(
-			dev, -EINVAL,
-			"Bluetooth firmware names, size, version and digest are required\n");
+	    UMS9117_CM4_FIRMWARE_FILES)
+		return dev_err_probe(dev, -EINVAL,
+				     "Bluetooth firmware names are required\n");
 	ret = of_property_read_string_array(dev->of_node, "firmware-name",
 					    bt->firmware_names,
 					    UMS9117_CM4_FIRMWARE_FILES);
 	if (ret < 0)
 		return ret;
-	ret = of_property_read_u8_array(dev->of_node, "fplinux,cm4-sha256",
-					bt->firmware_sha256,
-					SHA256_DIGEST_SIZE);
-	if (ret)
-		return ret;
-	ret = of_property_read_u8_array(dev->of_node, "fplinux,cm4-version",
-					bt->firmware_version,
-					UMS9117_CM4_VERSION_SIZE);
-	if (ret)
-		return ret;
-	ret = of_property_read_u32(dev->of_node, "fplinux,cm4-size",
-				   &bt->firmware_size);
-	if (ret)
-		return ret;
-	if (!bt->firmware_size ||
-	    bt->firmware_size >
-		    UMS9117_CM4_MAP_BYTES - UMS9117_CM4_IMAGE_OFFSET)
-		return dev_err_probe(
-			dev, -EINVAL,
-			"firmware size exceeds its memory window\n");
 	bt->aon = syscon_regmap_lookup_by_phandle(dev->of_node, "sprd,aon-apb");
 	if (IS_ERR(bt->aon))
 		return dev_err_probe(dev, PTR_ERR(bt->aon),

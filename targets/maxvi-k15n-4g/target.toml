@@ -91,7 +91,7 @@ firmware = [
 
 [bluetooth]
 firmware = [
-  { source = "maxvi-k15n-4g-cm4.bin", destination = "ums9117/maxvi-k15n-4g-cm4.bin", size = 463296, sha256 = "ffe5e4cb568552601281a0026bc1f9f5715f1715b1261062c23669e95b5e086d" },
+  { source = "maxvi-k15n-4g-cm4.bin", destination = "ums9117/maxvi-k15n-4g-cm4.bin" },
   { source = "maxvi-k15n-4g-bt-config.bin", destination = "ums9117/maxvi-k15n-4g-bt-config.bin", size = 8 },
   { source = "maxvi-k15n-4g-bt-sprd.bin", destination = "ums9117/maxvi-k15n-4g-bt-sprd.bin", size = 176 },
   { source = "maxvi-k15n-4g-bt-rf-config.bin", destination = "ums9117/maxvi-k15n-4g-bt-rf-config.bin", size = 252 },

@@ -21,7 +21,6 @@ static struct {
 	u8 config[8];
 	u8 sprd[176];
 	u8 rf[252];
-	u8 version[UMS9117_CM4_VERSION_SIZE];
 	u8 tx[256];
 	u8 event[260];
 	size_t tx_len, tx_sent, event_len, event_need;
@@ -53,13 +52,11 @@ static int load_record(struct device *dev, const char *name, u8 *data,
 	return ret;
 }
 
-int ums9117_cm4_setup_prepare(struct device *dev, const char *const names[3],
-			      const u8 version[UMS9117_CM4_VERSION_SIZE])
+int ums9117_cm4_setup_prepare(struct device *dev, const char *const names[3])
 {
 	int ret;
 
 	memset(&setup, 0, sizeof(setup));
-	memcpy(setup.version, version, sizeof(setup.version));
 	ret = load_record(dev, names[0], setup.config, sizeof(setup.config));
 	if (!ret)
 		ret = load_record(dev, names[1], setup.sprd,
@@ -140,9 +137,6 @@ static int consume_event(void)
 			return -EPROTO;
 		if (event[6])
 			return -EREMOTEIO;
-		if (setup.step == UMS9117_CM4_SETUP_PSKEY &&
-		    memcmp(event + 7, setup.version, sizeof(setup.version)))
-			return -EPROTO;
 	}
 	setup.step++;
 	setup.awaiting = false;

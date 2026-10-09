@@ -46,8 +46,6 @@ static const u8 replies[4][13] = {
 static const u8 inoi_pskey_reply[] = {
 	4, 0x0e, 0x0a, 1, 0xa0, 0xfc, 0, 0x65, 0x10, 6, 9, 0x15, 0x20,
 };
-static const u8 nokia_version[] = { 0x42, 0x16, 5, 0x12, 0x15, 0x20 };
-static const u8 inoi_version[] = { 0x65, 0x10, 6, 9, 0x15, 0x20 };
 static const size_t reply_sizes[] = { 13, 7, 9, 7 };
 static const size_t command_ends[] = { 184, 440, 448, 456 };
 
@@ -58,7 +56,6 @@ static size_t wire_len, rx_head, rx_tail, tx_chunk, rx_chunk;
 static u8 rx_queue[4096];
 static bool asynchronous, stall_writes, command_status, partial_final_event;
 static bool inoi_reply;
-static const u8 *selected_version;
 static int corrupt_step, corrupt_byte, corrupt_value, transport_error;
 
 static int prepare_setup(void)
@@ -69,7 +66,7 @@ static int prepare_setup(void)
 		"example/calibration.bin",
 	};
 
-	return ums9117_cm4_setup_prepare(NULL, names, selected_version);
+	return ums9117_cm4_setup_prepare(NULL, names);
 }
 
 int request_firmware_direct(const struct firmware **out, const char *name,
@@ -195,7 +192,6 @@ static void reset_fixture(void)
 	command_status = false;
 	partial_final_event = false;
 	inoi_reply = false;
-	selected_version = nokia_version;
 	corrupt_step = -1;
 	transport_error = 0;
 }
@@ -280,33 +276,32 @@ static void check_firmware_admission(void)
 	}
 }
 
-static void check_revision_matching(void)
+static void check_firmware_versions(void)
 {
 	reset_fixture();
-	selected_version = inoi_version;
+	assert(!prepare_setup());
+	assert(!run_until_terminal());
+	assert(wire_len == 456);
+
+	reset_fixture();
 	inoi_reply = true;
 	assert(!prepare_setup());
 	assert(!run_until_terminal());
 	assert(wire_len == 456);
 
-	/* Neither fitted reply is accepted as the other selected revision. */
 	reset_fixture();
-	inoi_reply = true;
+	corrupt_step = 0;
+	corrupt_byte = 7;
+	corrupt_value = 0;
 	assert(!prepare_setup());
-	assert(run_until_terminal() == -EPROTO);
-	assert(wire_len == 184);
-
-	reset_fixture();
-	selected_version = inoi_version;
-	assert(!prepare_setup());
-	assert(run_until_terminal() == -EPROTO);
-	assert(wire_len == 184);
+	assert(!run_until_terminal());
+	assert(wire_len == 456);
 }
 
 int main(void)
 {
 	check_firmware_admission();
-	check_revision_matching();
+	check_firmware_versions();
 	check_success(256, 64, false);
 	check_success(7, 1, true);
 	check_success(180, 2, true);
@@ -315,7 +310,6 @@ int main(void)
 	check_rejected_response(0, 6, 1, -EREMOTEIO);
 	check_rejected_response(1, 6, 1, -EREMOTEIO);
 	check_rejected_response(3, 6, 1, -EREMOTEIO);
-	check_rejected_response(0, 7, 0, -EPROTO);
 	check_rejected_response(2, 8, 0, -EPROTO);
 	check_rejected_response(0, 2, 9, -EPROTO);
 	/* A different opcode never satisfies the outstanding command. */

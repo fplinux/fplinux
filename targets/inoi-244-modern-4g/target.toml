@@ -94,7 +94,7 @@ parser = "inoi244_device_data.py"
 
 [bluetooth]
 firmware = [
-  { source = "inoi244-cm4.bin", destination = "ums9117/inoi244-cm4.bin", size = 463296, sha256 = "7fd7d006a27276c038962fb1de5ab8f3fc60f9754dc3292427caec068f9af3fd" },
+  { source = "inoi244-cm4.bin", destination = "ums9117/inoi244-cm4.bin" },
   { source = "inoi244-bt-config.bin", destination = "ums9117/inoi244-bt-config.bin", size = 8 },
   { source = "inoi244-bt-sprd.bin", destination = "ums9117/inoi244-bt-sprd.bin", size = 176 },
   { source = "inoi244-bt-rf-config.bin", destination = "ums9117/inoi244-bt-rf-config.bin", size = 252 },

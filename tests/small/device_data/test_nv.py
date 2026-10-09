@@ -142,4 +142,4 @@ class BluetoothRunningNvFormatTests:
         self, payload: bytes, expected: int
     ) -> None:
         """Literal format vectors cover padding-independent checksum behavior."""
-        assert bluetooth.nv_checksum(payload) == expected
+        assert device_data.nv_checksum(payload) == expected

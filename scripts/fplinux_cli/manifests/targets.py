@@ -233,6 +233,7 @@ def load_target(
         device_data_groups["bluetooth"] = firmware_array(
             bluetooth["firmware"],
             "target bluetooth firmware",
+            size_required=False,
         )
     if "audio_profile" in config:
         audio_profile = exact_table(
