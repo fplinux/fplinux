@@ -426,7 +426,7 @@ diff --git a/drivers/regulator/Kconfig b/drivers/regulator/Kconfig
 index a54a549..e8573f4 100644
 --- a/drivers/regulator/Kconfig
 +++ b/drivers/regulator/Kconfig
-@@ -1478,11 +1478,15 @@ config REGULATOR_S5M8767
+@@ -1478,11 +1478,23 @@ config REGULATOR_S5M8767
  	 supports DVS mode with 8bits of output voltage control.
 
  config REGULATOR_SC2731
@@ -441,6 +441,14 @@ index a54a549..e8573f4 100644
 +config REGULATOR_SC2720_USB33
 +	bool
 +	depends on REGULATOR_SC2731
++
++config REGULATOR_SC2720_WCN
++	bool
++	depends on REGULATOR_SC2731
++
++config REGULATOR_SC2720_WIFIPA
++	bool
++	depends on REGULATOR_SC2731
 
  config REGULATOR_SGM3804
  	tristate "SGMicro SGM3804 voltage regulator"
@@ -448,7 +456,7 @@ diff --git a/drivers/regulator/sc2731-regulator.c b/drivers/regulator/sc2731-reg
 index 5447e1a..081c3c6 100644
 --- a/drivers/regulator/sc2731-regulator.c
 +++ b/drivers/regulator/sc2731-regulator.c
-@@ -10,6 +10,34 @@
+@@ -10,6 +10,40 @@
  #include <linux/regulator/driver.h>
  #include <linux/regulator/of_regulator.h>
 
@@ -459,12 +467,17 @@ index 5447e1a..081c3c6 100644
 +#define SC2720_LDO_CAMIO_VOL 0xc90
 +#define SC2720_LDO_CAMD_PD 0xca4
 +#define SC2720_LDO_CAMD_VOL 0xca8
++#define SC2720_LDO_WCN_PD 0xcac
++#define SC2720_LDO_WCN_VOL 0xcb0
 +#define SC2720_LDO_CAMA_PD 0xce0
 +#define SC2720_LDO_CAMA_VOL 0xce4
 +#define SC2720_LDO_SDCORE_PD 0xd00
 +#define SC2720_LDO_SDCORE_VOL 0xd04
 +#define SC2720_LDO_SDIO_PD 0xd0c
 +#define SC2720_LDO_SDIO_VOL 0xd10
++#if IS_ENABLED(CONFIG_REGULATOR_SC2720_WIFIPA)
++#define SC2720_LDO_WIFIPA_PD 0xd1c
++#endif
 +#define SC2720_LDO_USB33_PD 0xd30
 +#define SC2720_LDO_USB33_VOL 0xd34
 +
@@ -473,6 +486,7 @@ index 5447e1a..081c3c6 100644
 +#define SC2720_LDO_CAMA_VOL_MASK GENMASK(6, 0)
 +#define SC2720_LDO_CAMIO_VOL_MASK GENMASK(5, 0)
 +#define SC2720_LDO_CAMD_VOL_MASK GENMASK(5, 0)
++#define SC2720_LDO_WCN_VOL_MASK GENMASK(5, 0)
 +#define SC2720_CAM_LDO_STEP_UV 12500
 +#define SC2720_LDO_SDCORE_3000MV 0x50
 +#define SC2720_LDO_SDIO_3000MV 0x6f
@@ -483,7 +497,7 @@ index 5447e1a..081c3c6 100644
  /*
   * SC2731 regulator lock register
   */
-@@ -118,7 +146,28 @@ enum sc2731_regulator_id {
+@@ -118,7 +152,32 @@ enum sc2731_regulator_id {
  	SC2731_LDO_SRAM,
  };
 
@@ -495,6 +509,10 @@ index 5447e1a..081c3c6 100644
 +	SC2720_LDO_SDCORE,
 +	SC2720_LDO_SDIO,
 +	SC2720_LDO_USB33,
++	SC2720_LDO_WCN,
++#if IS_ENABLED(CONFIG_REGULATOR_SC2720_WIFIPA)
++	SC2720_LDO_WIFIPA,
++#endif
 +};
 +
 +struct sc27xx_regulator_desc {
@@ -513,7 +531,7 @@ index 5447e1a..081c3c6 100644
  	.enable = regulator_enable_regmap,
  	.disable = regulator_disable_regmap,
  	.is_enabled = regulator_is_enabled_regmap,
-@@ -127,11 +176,95 @@ static const struct regulator_ops sc2731_regu_linear_ops = {
+@@ -127,11 +186,103 @@ static const struct regulator_ops sc2731_regu_linear_ops = {
  	.set_voltage_sel = regulator_set_voltage_sel_regmap,
  };
 
@@ -559,6 +577,14 @@ index 5447e1a..081c3c6 100644
 +	.disable = regulator_disable_regmap,
 +	.is_enabled = sc2720_regulator_is_enabled,
 +};
++
++#if IS_ENABLED(CONFIG_REGULATOR_SC2720_WIFIPA)
++static const struct regulator_ops sc2720_regu_wifipa_ops = {
++	.enable = regulator_enable_regmap,
++	.disable = regulator_disable_regmap,
++	.is_enabled = regulator_is_enabled_regmap,
++};
++#endif
 +
 +#define SC2720_REGU_FIXED(_id, en_reg, vreg, vsel, voltage, enable_delay) \
 +	{ \
@@ -612,7 +638,7 @@ index 5447e1a..081c3c6 100644
  	.type			= REGULATOR_VOLTAGE,		\
  	.id			= SC2731_##_id,			\
  	.owner			= THIS_MODULE,			\
-@@ -144,9 +277,10 @@ static const struct regulator_ops sc2731_regu_linear_ops = {
+@@ -144,9 +295,10 @@ static const struct regulator_ops sc2731_regu_linear_ops = {
  	.enable_mask		= en_mask,			\
  	.vsel_reg		= vreg,				\
  	.vsel_mask		= vmask,			\
@@ -624,7 +650,7 @@ index 5447e1a..081c3c6 100644
  	SC2731_REGU_LINEAR(BUCK_CPU0, SC2731_POWER_PD_SW,
  			   SC2731_DCDC_CPU0_PD_MASK, SC2731_DCDC_CPU0_VOL,
  			   SC2731_DCDC_CPU0_VOL_MASK, 3125, 400000, 1996875),
-@@ -154,8 +288,8 @@ static const struct regulator_desc regulators[] = {
+@@ -154,8 +306,8 @@ static const struct regulator_desc regulators[] = {
  			   SC2731_DCDC_CPU1_PD_MASK, SC2731_DCDC_CPU1_VOL,
  			   SC2731_DCDC_CPU1_VOL_MASK, 3125, 400000, 1996875),
  	SC2731_REGU_LINEAR(BUCK_RF, SC2731_POWER_PD_SW, SC2731_DCDC_RF_PD_MASK,
@@ -635,7 +661,7 @@ index 5447e1a..081c3c6 100644
  	SC2731_REGU_LINEAR(LDO_CAMA0, SC2731_LDO_CAMA0_PD,
  			   SC2731_LDO_CAMA0_PD_MASK, SC2731_LDO_CAMA0_VOL,
  			   SC2731_LDO_CAMA0_VOL_MASK, 10000, 1200000, 3750000),
-@@ -190,9 +324,9 @@ static const struct regulator_desc regulators[] = {
+@@ -190,9 +342,9 @@ static const struct regulator_desc regulators[] = {
  	SC2731_REGU_LINEAR(LDO_CAMD1, SC2731_LDO_CAMD1_PD,
  			   SC2731_LDO_CAMD1_PD_MASK, SC2731_LDO_CAMD1_VOL,
  			   SC2731_LDO_CAMD1_VOL_MASK, 6250, 1000000, 1793750),
@@ -648,7 +674,7 @@ index 5447e1a..081c3c6 100644
  	SC2731_REGU_LINEAR(LDO_CAMIO, SC2731_LDO_CAMIO_PD,
  			   SC2731_LDO_CAMIO_PD_MASK, SC2731_LDO_CAMIO_VOL,
  			   SC2731_LDO_CAMIO_VOL_MASK, 6250, 1000000, 1793750),
-@@ -201,57 +335,103 @@ static const struct regulator_desc regulators[] = {
+@@ -201,57 +353,122 @@ static const struct regulator_desc regulators[] = {
  			   SC2731_LDO_SRAM_VOL_MASK, 6250, 1000000, 1793750),
  };
 
@@ -673,6 +699,25 @@ index 5447e1a..081c3c6 100644
 +#if IS_ENABLED(CONFIG_REGULATOR_SC2720_USB33)
 +	SC2720_REGU_FIXED(LDO_USB33, SC2720_LDO_USB33_PD, SC2720_LDO_USB33_VOL,
 +			  SC2720_LDO_USB33_3300MV, 3300000, 0),
++#endif
++#if IS_ENABLED(CONFIG_REGULATOR_SC2720_WCN)
++	SC2720_REGU_LINEAR(LDO_WCN, SC2720_LDO_WCN_PD, SC2720_LDO_WCN_VOL,
++			   SC2720_LDO_WCN_VOL_MASK, 800000),
++#endif
++#if IS_ENABLED(CONFIG_REGULATOR_SC2720_WIFIPA)
++	{
++		.desc = {
++			.name = "LDO_WIFIPA",
++			.of_match = of_match_ptr("LDO_WIFIPA"),
++			.ops = &sc2720_regu_wifipa_ops,
++			.type = REGULATOR_VOLTAGE,
++			.id = SC2720_LDO_WIFIPA,
++			.owner = THIS_MODULE,
++			.enable_is_inverted = true,
++			.enable_reg = SC2720_LDO_WIFIPA_PD,
++			.enable_mask = SC2720_LDO_PD_MASK,
++		},
++	},
 +#endif
 +};
 +
