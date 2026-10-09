@@ -474,6 +474,22 @@ class SshTransportSmallTests:
         assert not ((current / "phone.ssh-config").exists())
         assert (list((self.root / "sessions").iterdir())) == ([])
 
+    def test_cleanup_removes_only_the_selected_target_session(self) -> None:
+        """Preserve another target's keys and unrelated files during target cleanup."""
+        selected = create_ready_session(self.root)
+        other = create_ready_session(self.root, target="other-phone")
+        unrelated = self.root / "sessions" / "unrelated"
+        unrelated.mkdir()
+        unrelated_file = unrelated / "keep.txt"
+        unrelated_file.write_bytes(b"unrelated contents\n")
+
+        with mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root):
+            ssh_transport._cleanup_target_sessions(self.root, "phone")  # noqa: SLF001
+
+        assert not Path(selected["private_key"]).parent.exists()
+        assert Path(other["private_key"]).read_text(encoding="ascii") == "private\n"
+        assert unrelated_file.read_bytes() == b"unrelated contents\n"
+
     def test_failed_prepare_erases_keys_and_invalidates_prior_current(self) -> None:
         """A failed session preparation leaves no usable pointer or prepared key directory."""
         prior = self._session()

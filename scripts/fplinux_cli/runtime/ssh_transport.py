@@ -468,7 +468,10 @@ def _copy_personalized_image(
 def _session_directory(root: Path, target: str, usb_serial: str) -> Path:
     if TARGET_NAME.fullmatch(target) is None or re.fullmatch(r"[0-9a-f]{32}", usb_serial) is None:
         fail("session directory identity is invalid")
-    return root / "sessions" / f"{target}.{usb_serial}"
+    # Leave room for OpenSSH's temporary control-socket suffix.
+    identity = f"{target}\0{usb_serial}".encode("ascii")
+    name = hashlib.sha256(identity).hexdigest()[:32]
+    return root / "sessions" / name
 
 
 def _remove_owned_session(directory: Path, target: str, usb_serial: str) -> None:
@@ -535,7 +538,7 @@ def _cleanup_target_sessions(root: Path, target: str) -> None:
             current.unlink(missing_ok=True)
 
     sessions = _private_directory(root / "sessions")
-    for directory in sessions.glob(f"{target}.*"):
+    for directory in sessions.iterdir():
         if directory.is_symlink() or not directory.is_dir():
             continue
         owner_path = directory / "owner.json"

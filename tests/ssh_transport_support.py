@@ -22,7 +22,7 @@ def create_ready_session(
     """Create one complete private session directory for a transport consumer."""
     session_id = b"session identity is exactly 32!!"
     usb_serial = hashlib.sha256(session_id).hexdigest()[:32]
-    directory = root / "sessions" / f"{target}.{usb_serial}"
+    directory = ssh_transport._session_directory(root, target, usb_serial)  # noqa: SLF001
     directory.mkdir(parents=True, mode=0o700)
     owner = {
         "kind": ssh_transport.SESSION_OWNER_KIND,
