@@ -121,6 +121,6 @@ ifeq ($(FPLINUX_BOOTSTRAP_MODE),uboot)
 $(OBJDIR)/app/payload.o: payload.s ../out/u-boot.bin | objdir
 	$(call compile_asm,)
 else
-$(OBJDIR)/app/payload.o: payload.s ../out/zImage ../out/$(FPLINUX_BOOTSTRAP_DTB) | objdir
+$(OBJDIR)/app/payload.o: payload.s ums9117-bootstrap/ram-payload.s ../out/zImage ../out/$(FPLINUX_BOOTSTRAP_DTB) | objdir
 	$(call compile_asm,)
 endif
