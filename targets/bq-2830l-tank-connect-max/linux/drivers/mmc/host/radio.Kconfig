@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config MMC_SDHCI_UMS9117_BQ_RADIO
+	bool "BQ 2830L external radio SDIO"
+	depends on MACH_BQ_2830L_TANK_CONNECT_MAX && MMC_SDHCI_UMS9117
+	depends on REGULATOR_SC2731
+	select REGULATOR_SC2720_WCN
+	select REGULATOR_SC2720_WIFIPA
+	select CRYPTO_LIB_SHA256
+	help
+	  Provide an on-demand, bounded RAM firmware boot for the board's
+	  external radio through SDIO1. The boot attribute starts the operation
+	  after the root filesystem is available; result reports firmware and
+	  calibration readback, the ready event and restored board state.
+	  The target's wireless, Bluetooth and FM options share this radio's
+	  firmware, power and SDIO transport.
+
+config BQ2830L_WLAN
+	bool "BQ 2830L SDIO wireless networking"
+	depends on MMC_SDHCI_UMS9117_BQ_RADIO
+	depends on CFG80211 && INET
+	help
+	  Provide a single 2.4 GHz station or access-point interface using
+	  board-supplied firmware, calibration and network address.
+
+config BQ2830L_BLUETOOTH
+	bool "BQ 2830L SDIO Bluetooth"
+	depends on MMC_SDHCI_UMS9117_BQ_RADIO && BT=y
+	help
+	  Provide a native HCI controller using the shared external radio.
+	  Start the prepared controller after root mount through
+	  fplinux-bluetooth enable, then use BlueZ for adapter power.
+
+config BQ2830L_FM
+	bool "BQ 2830L SDIO FM receiver"
+	depends on MMC_SDHCI_UMS9117_BQ_RADIO
+	depends on VIDEO_DEV=y && MEDIA_RADIO_SUPPORT
+	help
+	  Provide a V4L2 FM receiver using the shared external radio.
+	  The target's fitted audio route supplies the standard FM mixer.

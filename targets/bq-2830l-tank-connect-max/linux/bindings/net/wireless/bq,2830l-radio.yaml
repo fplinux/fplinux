@@ -1,0 +1,132 @@
+# SPDX-License-Identifier: GPL-2.0-only
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/net/wireless/bq,2830l-radio.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: BQ 2830L external radio control
+
+maintainers:
+  - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+
+description:
+  The board owns the power, reset and pin controls for its external radio and
+  creates the child SDIO controller after powering the radio. Radio firmware,
+  configuration and addresses are supplied through the firmware loader.
+
+properties:
+  compatible:
+    const: bq,2830l-radio
+
+  "#address-cells":
+    const: 1
+
+  "#size-cells":
+    const: 1
+
+  ranges: true
+
+  bluetooth-config-name:
+    description: Firmware-loader name of the Bluetooth configuration.
+    $ref: /schemas/types.yaml#/definitions/string
+
+  enable-gpios:
+    description: Radio power-enable signal.
+    maxItems: 1
+
+  mac-address-name:
+    description: Firmware-loader name of the six-byte WLAN MAC address.
+    $ref: /schemas/types.yaml#/definitions/string
+
+  reset-gpios:
+    description: Radio reset signal.
+    maxItems: 1
+
+  rx-request-gpios:
+    description: Radio packet receive-request signal.
+    maxItems: 1
+
+  wcn-supply:
+    description: Radio supply.
+
+  wifipa-supply:
+    description: Radio power-amplifier supply.
+
+  bq,pins:
+    description: Phandle to the board pin-control registers.
+    $ref: /schemas/types.yaml#/definitions/phandle
+
+  sprd,aon-apb:
+    description: Phandle to the always-on APB registers.
+    $ref: /schemas/types.yaml#/definitions/phandle
+
+patternProperties:
+  "^mmc@[0-9a-f]+$":
+    $ref: /schemas/mmc/sprd,ums9117-sdhci.yaml#
+
+required:
+  - compatible
+  - "#address-cells"
+  - "#size-cells"
+  - ranges
+  - enable-gpios
+  - reset-gpios
+  - rx-request-gpios
+  - wcn-supply
+  - wifipa-supply
+  - bq,pins
+  - sprd,aon-apb
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/clock/sprd,ums9117-clk.h>
+    #include <dt-bindings/gpio/gpio.h>
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+    #include <dt-bindings/interrupt-controller/irq.h>
+    #include <dt-bindings/reset/sprd,ums9117-reset.h>
+
+    radio {
+        compatible = "bq,2830l-radio";
+        #address-cells = <1>;
+        #size-cells = <1>;
+        ranges;
+        bluetooth-config-name = "ums9117/bq-2830l-tank-connect-max-wcn-bluetooth.bin";
+        enable-gpios = <&ap_gpio 14 GPIO_ACTIVE_HIGH>;
+        mac-address-name = "ums9117/bq-2830l-tank-connect-max-wcn-mac.bin";
+        reset-gpios = <&ap_gpio 17 GPIO_ACTIVE_LOW>;
+        rx-request-gpios = <&ap_gpio 13 GPIO_ACTIVE_HIGH>;
+        wcn-supply = <&radio_wcn>;
+        wifipa-supply = <&radio_wifipa>;
+        bq,pins = <&radio_pins>;
+        sprd,aon-apb = <&aon_apb>;
+
+        mmc@20400000 {
+            compatible = "sprd,ums9117-sdio";
+            reg = <0x20400000 0x100>;
+            #address-cells = <1>;
+            #size-cells = <0>;
+            bus-width = <1>;
+            clocks = <&radio_sdio1_clk CLK_SDIO1>,
+                     <&apahb_gate CLK_SDIO1_EB>;
+            clock-names = "sdio", "enable";
+            interrupts = <GIC_SPI 58 IRQ_TYPE_LEVEL_HIGH>;
+            max-frequency = <13000000>;
+            no-1-8-v;
+            no-mmc;
+            no-sd;
+            non-removable;
+            reg-names = "host";
+            resets = <&apahb_reset RESET_SDIO1>;
+            reset-names = "sdio";
+
+            radio@1 {
+                compatible = "sprd,marlin2-sdio";
+                reg = <1>;
+                calibration-name = "ums9117/bq-2830l-tank-connect-max-wcn-calibration.bin";
+                firmware-name = "ums9117/bq-2830l-tank-connect-max-wcn.bin";
+            };
+        };
+    };
+...

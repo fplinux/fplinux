@@ -73,3 +73,8 @@ The `pinmap.bin` and `keymap.bin` members originate as model-specific register
 initialization data extracted from phone firmware and mirrored by fpdoom.
 FPLinux records their source and exact hashes without assigning a license to
 them.
+
+Marlin2 wireless protocol definitions include material Copyright (C) 2015
+Spreadtrum Communications Inc., under the GNU General Public License version 2.
+The original protocol headers credit Keguang Zhang and Jingxiang Li as authors.
+Source download: <https://github.com/MotorolaMobilityLLC/kernel-modules-wcn>.
