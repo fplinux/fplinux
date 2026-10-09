@@ -5,14 +5,13 @@ from __future__ import annotations
 
 import json
 import tarfile
-import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from fplinux_cli.build.inputs import CACHE, require_file
 from fplinux_cli.build.process import run
 from fplinux_cli.build.sources import fetch
-from fplinux_cli.common import fail, sha256_file
+from fplinux_cli.common import fail, replace_file_atomically, sha256_file
 from fplinux_cli.manifests.values import sha256_value
 
 from .lock import PACKAGE_ID, runtime_package_names
@@ -135,18 +134,7 @@ def _write_package_receipt(repository: Path, recipe: str, package_files: list[Pa
     encoded = (
         json.dumps(_package_receipt_data(repository, recipe, package_files), sort_keys=True) + "\n"
     ).encode()
-    temporary: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="wb", dir=repository, prefix=f".{receipt.name}.", delete=False
-        ) as stream:
-            temporary = Path(stream.name)
-            stream.write(encoded)
-        temporary.replace(receipt)
-        temporary = None
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    replace_file_atomically(receipt, encoded, 0o600, sync=False)
 
 
 def _cached_package_record(

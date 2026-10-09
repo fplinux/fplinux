@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import subprocess
@@ -44,6 +45,66 @@ from fplinux_cli.build import process as process_build
 from fplinux_cli.build import sources as sources_build
 
 from tests.small.alpine import fixtures
+
+
+@pytest.fixture
+def receipt_package(tmp_path: Path) -> Path:
+    """Create a deterministic APK metadata archive on the host filesystem."""
+    package = tmp_path / "armv7/paquet-é-1.0-r0.apk"
+    package.parent.mkdir()
+    metadata = b"pkgname = fplinux-example\n"
+    member = tarfile.TarInfo(".PKGINFO")
+    member.size = len(metadata)
+    with tarfile.open(package, "w") as archive:
+        archive.addfile(member, io.BytesIO(metadata))
+    return package
+
+
+class PackageReceiptTests:
+    """Protect package receipt publication on a temporary host filesystem."""
+
+    def test_replacement_preserves_json_bytes_and_private_mode(
+        self, receipt_package: Path
+    ) -> None:
+        """Receipt publication keeps its spaced ASCII JSON and requires no sync barrier."""
+        repository = receipt_package.parent.parent
+        receipt = repository / alpine_packages.PACKAGE_RECEIPT_NAME
+        receipt.write_bytes(b"previous receipt\n")
+        receipt.chmod(0o644)
+
+        with mock.patch.object(os, "fsync", side_effect=OSError("sync unavailable")):
+            alpine_packages._write_package_receipt(  # noqa: SLF001
+                repository, "a" * 64, [receipt_package]
+            )
+
+        assert receipt.read_bytes() == (
+            b'{"packages": {"fplinux-example": {"path": "armv7/paquet-\\u00e9-1.0-r0.apk", '
+            b'"sha256": "35b0e02a8fa5e930640e968d31b25f4db50a6a2245c964f58e1b8ef064ba3052", '
+            b'"size": 10240}}, "recipe": '
+            b'"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}\n'
+        )
+        assert receipt.stat().st_mode & 0o777 == 0o600
+        assert set(repository.iterdir()) == {receipt, receipt_package.parent}
+
+    def test_publication_failure_preserves_previous_receipt_and_removes_temporary(
+        self, receipt_package: Path
+    ) -> None:
+        """A failed filesystem replacement leaves the previous receipt complete."""
+        repository = receipt_package.parent.parent
+        receipt = repository / alpine_packages.PACKAGE_RECEIPT_NAME
+        receipt.write_bytes(b"previous receipt\n")
+
+        # Replace the filesystem boundary, keeping serialization and temporary writes real.
+        with (
+            mock.patch.object(os, "replace", side_effect=OSError("publication failed")),
+            pytest.raises(OSError, match="publication failed"),
+        ):
+            alpine_packages._write_package_receipt(  # noqa: SLF001
+                repository, "a" * 64, [receipt_package]
+            )
+
+        assert receipt.read_bytes() == b"previous receipt\n"
+        assert set(repository.iterdir()) == {receipt, receipt_package.parent}
 
 
 class AlpineCacheTests(fixtures.AlpineSourceFixture):
