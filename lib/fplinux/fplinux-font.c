@@ -18,8 +18,8 @@ static uint32_t read_u32(const unsigned char *bytes)
 	       (uint32_t)bytes[2] << 16 | (uint32_t)bytes[3] << 24;
 }
 
-static bool next_unicode(const unsigned char **cursor, const unsigned char *end,
-			 uint32_t *value)
+bool fplinux_font_next_unicode(const unsigned char **cursor,
+			       const unsigned char *end, uint32_t *value)
 {
 	const unsigned char *text = *cursor;
 	uint32_t codepoint;
@@ -110,7 +110,8 @@ static bool read_font(struct fplinux_font *font, size_t size)
 		} else if (*table == 0xfe) {
 			sequence = true;
 			++table;
-		} else if (!next_unicode(&table, end, &codepoint)) {
+		} else if (!fplinux_font_next_unicode(&table, end,
+						      &codepoint)) {
 			return false;
 		} else if (!sequence) {
 			font->map[font->map_count++] =

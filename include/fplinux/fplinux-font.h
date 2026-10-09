@@ -19,6 +19,13 @@ struct fplinux_font {
 	unsigned int row_bytes;
 };
 
+/*
+ * Decode one UTF-8 scalar in [*cursor, end), within one byte array. Empty or
+ * invalid input returns false and leaves cursor and value unchanged.
+ */
+bool fplinux_font_next_unicode(const unsigned char **cursor,
+			       const unsigned char *end, uint32_t *value);
+
 /* Initialize an unopened font from a PSF2 Unicode file, at most 16x32 and 1 MiB. */
 bool fplinux_font_open(struct fplinux_font *font, const char *path);
 /* Load the installed default, requiring 6x12 below 200 display pixels or 8x16. */

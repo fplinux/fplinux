@@ -3,6 +3,7 @@
 
 #include <assert.h>
 #include <limits.h>
+#include <locale.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -67,12 +68,65 @@ static void print_glyph(const struct fplinux_font *font, const char *argument)
 	putchar('\n');
 }
 
+static void verify_unicode_cursor(void)
+{
+	static const unsigned char text[] = {
+		0x41, 0xc3, 0xa9, 0xe2, 0x82, 0xac, 0xf0, 0x9f, 0x99, 0x82,
+	};
+	static const struct {
+		uint32_t codepoint;
+		size_t offset;
+	} decoded[] = {
+		{ 0x41, 1 },
+		{ 0xe9, 3 },
+		{ 0x20ac, 6 },
+		{ 0x1f642, 10 },
+	};
+	static const struct {
+		unsigned char bytes[4];
+		size_t size;
+	} rejected[] = {
+		{ { 0 }, 0 },
+		{ { 0x80 }, 1 },
+		{ { 0xc2, 0x80 }, 1 },
+		{ { 0xc2, 0x41 }, 2 },
+		{ { 0xe0, 0x80, 0x80 }, 3 },
+		{ { 0xed, 0xa0, 0x80 }, 3 },
+		{ { 0xf4, 0x90, 0x80, 0x80 }, 4 },
+	};
+	const unsigned char *cursor = text;
+	uint32_t value = 0;
+	size_t index;
+
+	for (index = 0; index < sizeof(decoded) / sizeof(decoded[0]); ++index) {
+		assert(fplinux_font_next_unicode(&cursor, text + sizeof(text),
+						 &value));
+		assert(value == decoded[index].codepoint);
+		assert(cursor == text + decoded[index].offset);
+	}
+	for (index = 0; index < sizeof(rejected) / sizeof(rejected[0]);
+	     ++index) {
+		cursor = rejected[index].bytes;
+		value = 0x1234;
+		assert(!fplinux_font_next_unicode(
+			&cursor, cursor + rejected[index].size, &value));
+		assert(cursor == rejected[index].bytes);
+		assert(value == 0x1234);
+	}
+}
+
 int main(int argc, char **argv)
 {
 	struct fplinux_font font = { 0 };
 	int index;
 
 	assert(argc >= 2);
+	if (!strcmp(argv[1], "--unicode")) {
+		assert(argc == 2);
+		assert(setlocale(LC_ALL, ""));
+		verify_unicode_cursor();
+		return 0;
+	}
 	if (!strcmp(argv[1], "--default")) {
 		assert(argc == 4);
 		return inspect_default(argv[2], argv[3]);

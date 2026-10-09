@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import struct
 import tempfile
 from pathlib import Path
@@ -100,6 +101,20 @@ class FontTests:
             )
             return result.stdout
 
+    @pytest.mark.parametrize("locale", ["C", "C.UTF-8"])
+    def test_unicode_cursor_advances_only_for_valid_bounded_scalars(self, locale: str) -> None:
+        """Decoding preserves invalid input and does not depend on the process locale."""
+        environment = os.environ.copy()
+        environment["LC_ALL"] = locale
+        result = run_process(
+            [str(self.executable), "--unicode"],
+            name="check bounded UTF-8 cursor and scalar results",
+            env=environment,
+            timeout=10,
+            check=True,
+        )
+        assert result.stdout == ""
+
     @pytest.mark.parametrize(
         ("width", "small_expected", "large_expected"),
         [
@@ -167,6 +182,28 @@ class FontTests:
         font = psf2((b"\x80",), (b"A",), 1, 1)
         assert (self.inspect(font, "41", "42", "fffd")) == ("1 1 1 1\n80\nmissing\nmissing\n")
 
+    @pytest.mark.parametrize(
+        ("encoding", "codepoint"),
+        [
+            pytest.param(b"\x00", "0", id="nul"),
+            pytest.param(b"\x7f", "7f", id="last-ascii"),
+            pytest.param(b"\xc2\x80", "80", id="first-two-byte"),
+            pytest.param(b"\xdf\xbf", "7ff", id="last-two-byte"),
+            pytest.param(b"\xe0\xa0\x80", "800", id="first-three-byte"),
+            pytest.param(b"\xed\x9f\xbf", "d7ff", id="before-surrogates"),
+            pytest.param(b"\xee\x80\x80", "e000", id="after-surrogates"),
+            pytest.param(b"\xef\xbf\xbf", "ffff", id="last-three-byte"),
+            pytest.param(b"\xf0\x90\x80\x80", "10000", id="first-four-byte"),
+            pytest.param(b"\xf4\x8f\xbf\xbf", "10ffff", id="last-scalar"),
+        ],
+    )
+    def test_unicode_scalar_boundaries_resolve_to_their_bitmap(
+        self, encoding: bytes, codepoint: str
+    ) -> None:
+        """Every UTF-8 length accepts its scalar boundaries, including NUL and noncharacters."""
+        font = psf2((b"\x80",), (encoding,), 1, 1)
+        assert self.inspect(font, codepoint) == "1 1 1 1\n80\n"
+
     def test_maximum_geometry_and_file_size_are_inclusive(self) -> None:
         """A 16x32 font of exactly 1 MiB loads; one extra file byte is rejected."""
         font = psf2((b"\x80\x01" * 32,), (b"A",), 16, 32, b"\0" * (1024 * 1024 - 98))
@@ -200,8 +237,22 @@ class FontTests:
 
     @pytest.mark.parametrize(
         "encoding",
-        [b"\xc0\x80", b"\xe0\x80\x80", b"\xed\xa0\x80", b"\xf4\x90\x80\x80", b"\xe2\x82"],
-        ids=["bytes-c080", "bytes-e08080", "bytes-eda080", "bytes-f4908080", "bytes-e282"],
+        [
+            pytest.param(b"\x80", id="stray-continuation"),
+            pytest.param(b"\xc0\x80", id="overlong-two-byte"),
+            pytest.param(b"\xe0\x80\x80", id="overlong-three-byte"),
+            pytest.param(b"\xf0\x80\x80\x80", id="overlong-four-byte"),
+            pytest.param(b"\xed\xa0\x80", id="first-surrogate"),
+            pytest.param(b"\xed\xbf\xbf", id="last-surrogate"),
+            pytest.param(b"\xf4\x90\x80\x80", id="above-last-scalar"),
+            pytest.param(b"\xf5\x80\x80\x80", id="invalid-leading-byte"),
+            pytest.param(b"\xc2", id="truncated-two-byte"),
+            pytest.param(b"\xe2\x82", id="truncated-three-byte"),
+            pytest.param(b"\xf0\x90\x80", id="truncated-four-byte"),
+            pytest.param(b"\xc2A", id="invalid-two-byte-continuation"),
+            pytest.param(b"\xe2\x82A", id="invalid-three-byte-continuation"),
+            pytest.param(b"\xf0\x90\x80A", id="invalid-four-byte-continuation"),
+        ],
     )
     @pytest.mark.parametrize("prefix", [b"", b"A\xfe"], ids=["bytes-", "bytes-41fe"])
     def test_invalid_utf8_is_rejected_even_inside_sequences(
