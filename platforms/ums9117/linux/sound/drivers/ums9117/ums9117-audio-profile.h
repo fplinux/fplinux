@@ -14,8 +14,8 @@ struct ums9117_audio_profile {
 	u8 dac_gain[UMS9117_AUDIO_PROFILE_LEVEL_COUNT];
 	u8 speaker_dac_gain[UMS9117_AUDIO_PROFILE_LEVEL_COUNT];
 	/*
-	 * Both outputs share one DAC gain at a fixed headphone level. The
-	 * halved PCM samples make the headphones 6 dB quieter in this mode.
+	 * Both outputs share one DAC gain at a fixed headphone level. With
+	 * the integrated speaker, halved PCM makes the headphones 6 dB quieter.
 	 */
 	u8 combined_dac_gain[UMS9117_AUDIO_PROFILE_LEVEL_COUNT];
 	struct ums9117_audio_dac_processing headphone_processing;
