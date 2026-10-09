@@ -15,7 +15,6 @@ from unittest import mock
 
 import pytest
 from fplinux_cli import __main__ as cli
-from fplinux_cli.cli import dispatch as cli_dispatch
 from fplinux_cli.cli import lifecycle
 
 if TYPE_CHECKING:
@@ -65,7 +64,7 @@ class CliCacheLockTests:
                 return_value=("target", "nokia-ta1618"),
             ),
             mock.patch.object(lifecycle, "cache_lock", side_effect=record_lock),
-            mock.patch.object(cli_dispatch, callback_name, callback),
+            mock.patch(callback_name, callback),
         ):
             cli.main()
         return events, callback
@@ -73,49 +72,91 @@ class CliCacheLockTests:
     @pytest.mark.parametrize(
         ("arguments", "callback_name", "exclusive", "target", "profile"),
         [
-            (["build", "target", "--jobs", "1"], "build", True, "target", None),
-            (["check"], "check", True, None, None),
-            (["test", "tests.small.environment.test_common"], "run_tests", True, None, None),
-            (["inspect", "bundle", "target"], "inspect_bundle", False, "target", None),
             (
-                ["inspect", "footprint", "target"],
-                "inspect_target_footprint",
-                False,
+                ["build", "target", "--jobs", "1"],
+                "fplinux_cli.cli.build.build",
+                True,
                 "target",
                 None,
             ),
-            (["checksum", "demo-aport"], "checksum_aport", True, None, None),
-            (["format", "scripts/demo.py"], "format_sources", True, None, None),
+            (["check"], "fplinux_cli.quality.checks.check", True, None, None),
             (
-                ["probe-build", "probe.c", "--output", ".cache/tools/probe"],
-                "build_probe",
+                ["test", "tests.small.environment.test_common"],
+                "fplinux_cli.quality.testing.run_tests",
                 True,
                 None,
                 None,
             ),
-            (["setup"], "setup", True, None, None),
-            (["prune", "--apply"], "prune", True, None, None),
-            (["package", "target"], "package_target", False, "target", None),
-            (["run", "target"], "run_target", False, "target", None),
-            (["verify", "target"], "verify_booted", False, "target", None),
-            (["console", "target"], "console_target", False, "target", None),
+            (
+                ["inspect", "bundle", "target"],
+                "fplinux_cli.cli.inspect.inspect_bundle",
+                False,
+                "target",
+                None,
+            ),
+            (
+                ["inspect", "footprint", "target"],
+                "fplinux_cli.cli.inspect.inspect_target_footprint",
+                False,
+                "target",
+                None,
+            ),
+            (
+                ["checksum", "demo-aport"],
+                "fplinux_cli.cli.checksum.checksum_aport",
+                True,
+                None,
+                None,
+            ),
+            (
+                ["format", "scripts/demo.py"],
+                "fplinux_cli.quality.formatting.command.format_sources",
+                True,
+                None,
+                None,
+            ),
+            (
+                ["probe-build", "probe.c", "--output", ".cache/tools/probe"],
+                "fplinux_cli.cli.probe.build_probe",
+                True,
+                None,
+                None,
+            ),
+            (["setup"], "fplinux_cli.environment.setup.setup", True, None, None),
+            (["prune", "--apply"], "fplinux_cli.cache.prune.operations.prune", True, None, None),
+            (
+                ["package", "target"],
+                "fplinux_cli.cli.package.package_target",
+                False,
+                "target",
+                None,
+            ),
+            (["run", "target"], "fplinux_cli.runtime.runner.run_target", False, "target", None),
+            (["verify", "target"], "fplinux_cli.cli.runtime.verify_booted", False, "target", None),
+            (
+                ["console", "target"],
+                "fplinux_cli.cli.runtime.console_target",
+                False,
+                "target",
+                None,
+            ),
             (
                 ["nand", "backup", "nokia-ta1618", "backup.bin"],
-                "backup_target_nand",
+                "fplinux_cli.cli.nand.backup_target_nand",
                 True,
                 "nokia-ta1618",
                 None,
             ),
             (
                 ["nand", "backup", "nokia-ta1618", "backup.bin", "--profile", "microsd-uboot"],
-                "backup_target_nand",
+                "fplinux_cli.cli.nand.backup_target_nand",
                 True,
                 "nokia-ta1618",
                 "microsd-uboot",
             ),
             (
                 ["nand", "identify", "nokia-ta1618"],
-                "identify_target_nand",
+                "fplinux_cli.cli.nand.identify_target_nand",
                 True,
                 "nokia-ta1618",
                 None,
@@ -131,7 +172,7 @@ class CliCacheLockTests:
                     "2",
                     "--offline",
                 ],
-                "prepare_device_data",
+                "fplinux_cli.cli.device_data.prepare_device_data",
                 True,
                 "nokia-ta1618",
                 None,
@@ -176,7 +217,7 @@ class CliCacheLockTests:
                 "unlock",
             ]
         )
-        if callback_name == "backup_target_nand":
+        if callback_name == "fplinux_cli.cli.nand.backup_target_nand":
             assert (callback.call_args) == (
                 mock.call(
                     "nokia-ta1618",
@@ -185,11 +226,11 @@ class CliCacheLockTests:
                     build_type="release",
                 )
             )
-        elif callback_name == "identify_target_nand":
+        elif callback_name == "fplinux_cli.cli.nand.identify_target_nand":
             assert (callback.call_args) == (
                 mock.call("nokia-ta1618", profile=None, build_type="release")
             )
-        elif callback_name == "prepare_device_data":
+        elif callback_name == "fplinux_cli.cli.device_data.prepare_device_data":
             assert (callback.call_args) == (
                 mock.call(
                     "nokia-ta1618",
@@ -204,7 +245,7 @@ class CliCacheLockTests:
         """Pass the ordered source selection through the exclusive command boundary."""
         _events, formatter = self._run(
             ["format", "scripts/tool.py", "README.md"],
-            "format_sources",
+            "fplinux_cli.quality.formatting.command.format_sources",
         )
 
         formatter.assert_called_once_with(["scripts/tool.py", "README.md"])
@@ -212,8 +253,11 @@ class CliCacheLockTests:
     @pytest.mark.parametrize(
         ("arguments", "callback_name"),
         [
-            (["run", "target"], "run_target"),
-            (["device-data", "prepare", "target"], "prepare_device_data"),
+            (["run", "target"], "fplinux_cli.runtime.runner.run_target"),
+            (
+                ["device-data", "prepare", "target"],
+                "fplinux_cli.cli.device_data.prepare_device_data",
+            ),
         ],
         ids=["run-target", "device-data-prepare-target"],
     )
@@ -228,7 +272,7 @@ class CliCacheLockTests:
 
     def test_build_forwards_offline_to_the_dispatcher(self) -> None:
         """The parsed build switch reaches its callback without changing lock mode."""
-        events, build = self._run(["build", "target", "--offline"], "build")
+        events, build = self._run(["build", "target", "--offline"], "fplinux_cli.cli.build.build")
 
         assert (events) == (
             [
@@ -243,15 +287,21 @@ class CliCacheLockTests:
     @pytest.mark.parametrize(
         ("arguments", "callback_name"),
         [
-            (["build", "target"], "build"),
-            (["check", "kernel"], "check"),
-            (["inspect", "bundle", "target"], "inspect_bundle"),
-            (["package", "target"], "package_target"),
-            (["run", "target"], "run_target"),
-            (["console", "target"], "console_target"),
-            (["verify", "target"], "verify_booted"),
-            (["nand", "identify", "target"], "identify_target_nand"),
-            (["nand", "backup", "target", "nand.bin"], "backup_target_nand"),
+            (["build", "target"], "fplinux_cli.cli.build.build"),
+            (["check", "kernel"], "fplinux_cli.quality.checks.check"),
+            (["inspect", "bundle", "target"], "fplinux_cli.cli.inspect.inspect_bundle"),
+            (["package", "target"], "fplinux_cli.cli.package.package_target"),
+            (["run", "target"], "fplinux_cli.runtime.runner.run_target"),
+            (["console", "target"], "fplinux_cli.cli.runtime.console_target"),
+            (["verify", "target"], "fplinux_cli.cli.runtime.verify_booted"),
+            (
+                ["nand", "identify", "target"],
+                "fplinux_cli.cli.nand.identify_target_nand",
+            ),
+            (
+                ["nand", "backup", "target", "nand.bin"],
+                "fplinux_cli.cli.nand.backup_target_nand",
+            ),
         ],
         ids=[
             "build-target",
@@ -316,7 +366,7 @@ class CliCacheLockTests:
             mock.patch.object(sys, "argv", ["fplinux", *arguments, *extra]),
             mock.patch.object(lifecycle, "ROOT", self.root),
             mock.patch.object(cli, "discover_targets", return_value=("nokia-ta1618",)),
-            mock.patch.object(cli_dispatch, "create_target", callback),
+            mock.patch("fplinux_cli.cli.target_new.create_target", callback),
         ):
             cli.main()
 
@@ -354,7 +404,9 @@ class CliCacheLockTests:
 
     def test_check_forwards_the_kernel_worker_limit_without_changing_its_lock(self) -> None:
         """Pass the requested kernel limit through the existing exclusive check boundary."""
-        events, check = self._run(["check", "kernel", "--jobs", "2"], "check")
+        events, check = self._run(
+            ["check", "kernel", "--jobs", "2"], "fplinux_cli.quality.checks.check"
+        )
 
         assert (events) == (
             [
@@ -388,7 +440,7 @@ class CliCacheLockTests:
         self, *, arguments: list[str], scopes: list[str], verbose: bool, jobs: int
     ) -> None:
         """Use three kernel workers normally and one when no parallel work can run."""
-        _events, check = self._run(arguments, "check")
+        _events, check = self._run(arguments, "fplinux_cli.quality.checks.check")
         check.assert_called_once_with(
             scopes,
             profile=None,
@@ -402,7 +454,7 @@ class CliCacheLockTests:
         """A blocked build identifies its profile without splitting the global lock."""
         events, build = self._run(
             ["build", "target", "--profile", "microsd-uboot"],
-            "build",
+            "fplinux_cli.cli.build.build",
         )
 
         assert (events) == (
@@ -424,11 +476,17 @@ class CliCacheLockTests:
     @pytest.mark.parametrize(
         ("arguments", "callback_name"),
         [
-            (["package", "target", "--profile", "microsd-uboot", "--candidate"], "package_target"),
-            (["run", "target", "--profile", "microsd-uboot"], "run_target"),
+            (
+                ["package", "target", "--profile", "microsd-uboot", "--candidate"],
+                "fplinux_cli.cli.package.package_target",
+            ),
+            (
+                ["run", "target", "--profile", "microsd-uboot"],
+                "fplinux_cli.runtime.runner.run_target",
+            ),
             (
                 ["console", "target", "--profile", "microsd-uboot", "--exec", "id"],
-                "console_target",
+                "fplinux_cli.cli.runtime.console_target",
             ),
         ],
         ids=[
@@ -464,14 +522,14 @@ class CliCacheLockTests:
         [
             (
                 ["run", "nokia-ta1618", "--boot", "microsd"],
-                "run_target",
+                "fplinux_cli.runtime.runner.run_target",
                 mock.call(
                     "nokia-ta1618", profile=None, boot="microsd", build_type="release", events=None
                 ),
             ),
             (
                 ["package", "nokia-ta1618", "--boot", "microsd", "--candidate"],
-                "package_target",
+                "fplinux_cli.cli.package.package_target",
                 mock.call(
                     "nokia-ta1618",
                     profile=None,
@@ -482,7 +540,7 @@ class CliCacheLockTests:
             ),
             (
                 ["run", "target", "--boot", "microsd"],
-                "run_target",
+                "fplinux_cli.runtime.runner.run_target",
                 mock.call(
                     "target", profile=None, boot="microsd", build_type="release", events=None
                 ),
@@ -546,7 +604,11 @@ class CliCacheLockTests:
 
     @pytest.mark.parametrize(
         ("command", "callback"),
-        [("build", "build"), ("console", "console_target"), ("verify", "verify_booted")],
+        [
+            ("build", "fplinux_cli.cli.build.build"),
+            ("console", "fplinux_cli.cli.runtime.console_target"),
+            ("verify", "fplinux_cli.cli.runtime.verify_booted"),
+        ],
         ids=["build", "console", "verify"],
     )
     def test_explicit_default_reuses_the_implicit_context(
@@ -563,7 +625,8 @@ class CliCacheLockTests:
     def test_named_profile_keeps_explicit_check_scopes(self) -> None:
         """Both boot modes can run the same source checks without selecting Kbuild."""
         _events, check = self._run(
-            ["check", "python", "source", "--profile", "microsd-uboot"], "check"
+            ["check", "python", "source", "--profile", "microsd-uboot"],
+            "fplinux_cli.quality.checks.check",
         )
         check.assert_called_once_with(
             ["python", "source"],
@@ -577,7 +640,8 @@ class CliCacheLockTests:
     def test_verify_forwards_the_selected_profile(self) -> None:
         """A microSD verification cannot silently resolve the default bundle."""
         events, verify = self._run(
-            ["verify", "target", "--profile", "microsd-uboot"], "verify_booted"
+            ["verify", "target", "--profile", "microsd-uboot"],
+            "fplinux_cli.cli.runtime.verify_booted",
         )
         assert (events) == (
             [
@@ -641,14 +705,12 @@ class CliCacheLockTests:
                 "cache_lock",
                 side_effect=AssertionError("invalid profile must not take the cache lock"),
             ) as lock,
-            mock.patch.object(
-                lifecycle,
-                "discard_obsolete_rootfs",
+            mock.patch(
+                "fplinux_cli.cache.prune.operations.discard_obsolete_rootfs",
                 side_effect=AssertionError("invalid profile must not prune rootfs"),
             ) as rootfs_gc,
-            mock.patch.object(
-                lifecycle,
-                "discard_superseded_profile_logs",
+            mock.patch(
+                "fplinux_cli.cache.prune.operations.discard_superseded_profile_logs",
                 side_effect=AssertionError("invalid profile must not prune logs"),
             ) as logs_gc,
             contextlib.redirect_stderr(stderr),
@@ -686,11 +748,12 @@ class CliCacheLockTests:
                 "cache_lock",
                 return_value=contextlib.nullcontext(),
             ),
-            mock.patch.object(lifecycle, "discard_obsolete_rootfs") as rootfs_cleanup,
-            mock.patch.object(lifecycle, "discard_obsolete_apks") as apks_cleanup,
-            mock.patch.object(
-                lifecycle,
-                "discard_superseded_profile_logs",
+            mock.patch(
+                "fplinux_cli.cache.prune.operations.discard_obsolete_rootfs"
+            ) as rootfs_cleanup,
+            mock.patch("fplinux_cli.cache.prune.operations.discard_obsolete_apks") as apks_cleanup,
+            mock.patch(
+                "fplinux_cli.cache.prune.operations.discard_superseded_profile_logs",
             ) as log_cleanup,
             pytest.raises(SystemExit, match="forced profile failure"),
         ):
@@ -716,7 +779,7 @@ class CliCacheLockTests:
     ) -> None:
         """The dispatcher neither locks nor creates the cache for the two no-work commands.
 
-        `check --list` runs for real. `prune` is replaced at the dispatcher, so this
+        `check --list` runs for real. The prune operation is replaced, so this
         checks only that the dry-run choice reaches it; prune's own read-only behavior
         is not exercised here.
         """
@@ -729,7 +792,7 @@ class CliCacheLockTests:
                 "cache_lock",
                 side_effect=AssertionError("this path must not lock"),
             ) as lock,
-            mock.patch.object(cli_dispatch, "prune") as prune,
+            mock.patch("fplinux_cli.cache.prune.operations.prune") as prune,
             mock.patch("builtins.print"),
         ):
             cli.main()

@@ -41,7 +41,7 @@ def main() -> None:
     args = parser.parse_args()
     # The provider owns state in the temporary workspace, including Kern's log directory.
     with (
-        mock.patch.object(testing, "host_pytest_environment", prepared_host),
+        mock.patch("fplinux_cli.quality.host_testing.host_pytest_environment", prepared_host),
         mock.patch.object(kern_runtime, "ROOT", Path.cwd()),
     ):
         reporter = RunReporter.from_environment("test", "tests")

@@ -6,11 +6,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from fplinux_cli.cache.lock import cache_lock
-from fplinux_cli.cache.prune.operations import (
-    discard_obsolete_apks,
-    discard_obsolete_rootfs,
-    discard_superseded_profile_logs,
-)
 from fplinux_cli.common import ROOT
 from fplinux_cli.runtime.bundle_session import selected_context_profile
 
@@ -83,11 +78,20 @@ def _discard_profile_build_or_check_cache(args: argparse.Namespace) -> None:
     profile = getattr(args, "profile", None)
     if not isinstance(profile, str) or args.command not in {"build", "check"}:
         return
+    from fplinux_cli.cache.prune.operations import (  # noqa: PLC0415 -- profile-only cleanup.
+        discard_superseded_profile_logs,
+    )
+
     target = getattr(args, "target", None)
     if args.command == "build":
         if not isinstance(target, str):
             message = "build cache retention requires a target"
             raise AssertionError(message)
+        from fplinux_cli.cache.prune.operations import (  # noqa: PLC0415 -- build-only cleanup.
+            discard_obsolete_apks,
+            discard_obsolete_rootfs,
+        )
+
         discard_obsolete_rootfs(ROOT / ".cache")
         discard_obsolete_apks(ROOT / ".cache")
     discard_superseded_profile_logs(

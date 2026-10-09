@@ -12,16 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fplinux_cli.common import fail
-from fplinux_cli.environment.images import container_image_recipe_digest, load_container_lock
 from fplinux_cli.reporting.run import RunReporter, run_entrypoint
-from fplinux_cli.workspace.quality_inputs import quality_workspace_snapshot
-from fplinux_cli.workspace.staging import (
-    discard_staged_quality_workspace_snapshot,
-    stage_quality_workspace_snapshot,
-)
-
-from .host_testing import host_pytest_environment
-from .runtime import prepare_quality_image, run_quality_command
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -216,6 +207,8 @@ def run_test_workload(  # noqa: PLR0913 -- public selection and runtime inputs s
     failfast: bool = False,
 ) -> None:
     """Share tier budgets between the quality image and real host namespaces."""
+    from .runtime import run_quality_command  # noqa: PLC0415 -- workload-only dependency.
+
     selected = [_pytest_node_id(name, workspace) for name in names]
     host_modules = [module for module in HOST_TEST_MODULES if (workspace / module).is_file()]
     needs_host = (
@@ -227,6 +220,10 @@ def run_test_workload(  # noqa: PLR0913 -- public selection and runtime inputs s
         host_python: Path | None = None
         host_environment: dict[str, str] | None = None
         if needs_host:
+            from .host_testing import (  # noqa: PLC0415 -- host-workload-only dependency.
+                host_pytest_environment,
+            )
+
             host_python, host_environment = resources.enter_context(
                 host_pytest_environment(workspace, reporter)
             )
@@ -309,6 +306,20 @@ def run_tests(
     names: list[str], *, tier: str | None = None, verbose: bool = False, failfast: bool = False
 ) -> None:
     """Run selected tests without reading or publishing successful check receipts."""
+    from fplinux_cli.environment.images import (  # noqa: PLC0415 -- test-only dependencies.
+        container_image_recipe_digest,
+        load_container_lock,
+    )
+    from fplinux_cli.workspace.quality_inputs import (  # noqa: PLC0415 -- test-only dependency.
+        quality_workspace_snapshot,
+    )
+    from fplinux_cli.workspace.staging import (  # noqa: PLC0415 -- test-only dependencies.
+        discard_staged_quality_workspace_snapshot,
+        stage_quality_workspace_snapshot,
+    )
+
+    from .runtime import prepare_quality_image  # noqa: PLC0415 -- test-only dependency.
+
     reporter = RunReporter.create("test", target=None, verbose=verbose)
     with reporter.stage("workspace-snapshot"):
         snapshot = quality_workspace_snapshot(enforce_source_policy=False)

@@ -6,36 +6,7 @@ from __future__ import annotations
 from functools import partial
 from typing import TYPE_CHECKING
 
-from fplinux_cli.cache.prune.operations import prune
-from fplinux_cli.cli.build import build
-from fplinux_cli.cli.checksum import checksum_aport
-from fplinux_cli.cli.dependencies import (
-    create_dependencies,
-    restore_dependencies,
-    verify_dependencies,
-)
-from fplinux_cli.cli.device_data import prepare_device_data
-from fplinux_cli.cli.inspect import (
-    inspect_apk,
-    inspect_archive,
-    inspect_bundle,
-    inspect_footprint_diff,
-    inspect_target_footprint,
-)
-from fplinux_cli.cli.logs import read_logs
-from fplinux_cli.cli.nand import backup_target_nand, identify_target_nand
-from fplinux_cli.cli.package import package_target
-from fplinux_cli.cli.probe import build_probe
-from fplinux_cli.cli.runtime import console_target, verify_booted
-from fplinux_cli.cli.target_new import create_target
-from fplinux_cli.environment.doctor import doctor
-from fplinux_cli.environment.setup import setup
-from fplinux_cli.quality.checks import check
-from fplinux_cli.quality.formatting.command import format_sources
-from fplinux_cli.quality.git import check_commit_message
 from fplinux_cli.quality.scopes import CHECK_SCOPES
-from fplinux_cli.quality.testing import run_tests
-from fplinux_cli.runtime.runner import run_target
 
 if TYPE_CHECKING:
     import argparse
@@ -53,6 +24,8 @@ def _list_check_scopes(check_parser: argparse.ArgumentParser, scopes: list[str])
 
 def _setup_action(*, force: bool, offline: bool) -> None:
     """Prepare the OCI environment while discarding its internal state object."""
+    from fplinux_cli.environment.setup import setup  # noqa: PLC0415 -- setup-only backend.
+
     if offline:
         setup(force=force, offline=True)
     else:
@@ -63,6 +36,10 @@ def _nand_backup_action(
     target: str, output: Path, *, profile: str | None, build_type: str
 ) -> None:
     """Save a complete NAND image through the selected running system."""
+    from fplinux_cli.cli.nand import (  # noqa: PLC0415 -- backup-only backend.
+        backup_target_nand,
+    )
+
     backup_target_nand(target, output, profile=profile, build_type=build_type)
 
 
@@ -72,17 +49,33 @@ def command_action(
 ) -> Callable[[], None]:
     """Bind parsed command arguments to one deferred command invocation."""
     if args.command == "doctor":
+        from fplinux_cli.environment.doctor import doctor  # noqa: PLC0415 -- selected backend.
+
         action = doctor
     elif args.command == "logs":
+        from fplinux_cli.cli.logs import read_logs  # noqa: PLC0415 -- selected backend.
+
         action = partial(read_logs, args)
     elif args.command == "inspect":
         if args.inspect_kind == "bundle":
+            from fplinux_cli.cli.inspect import (  # noqa: PLC0415 -- selected backend.
+                inspect_bundle,
+            )
+
             action = partial(
                 inspect_bundle, args.target, profile=args.profile, build_type=args.build_type
             )
         elif args.inspect_kind == "archive":
+            from fplinux_cli.cli.inspect import (  # noqa: PLC0415 -- selected backend.
+                inspect_archive,
+            )
+
             action = partial(inspect_archive, args.path)
         elif args.inspect_kind == "footprint":
+            from fplinux_cli.cli.inspect import (  # noqa: PLC0415 -- selected backend.
+                inspect_target_footprint,
+            )
+
             action = partial(
                 inspect_target_footprint,
                 args.target,
@@ -91,10 +84,16 @@ def command_action(
                 json_output=args.json,
             )
         elif args.inspect_kind == "footprint-diff":
+            from fplinux_cli.cli.inspect import (  # noqa: PLC0415 -- selected backend.
+                inspect_footprint_diff,
+            )
+
             action = partial(
                 inspect_footprint_diff, args.before, args.after, json_output=args.json
             )
         else:
+            from fplinux_cli.cli.inspect import inspect_apk  # noqa: PLC0415 -- selected backend.
+
             action = partial(inspect_apk, args.path)
     elif args.command == "check":
         if args.list_scopes:
@@ -111,6 +110,8 @@ def command_action(
                 check_parser.error("--verbose cannot be combined with --jobs greater than 1")
             if jobs > 1 and args.scopes and "kernel" not in args.scopes:
                 check_parser.error("--jobs greater than 1 requires the kernel check scope")
+            from fplinux_cli.quality.checks import check  # noqa: PLC0415 -- selected backend.
+
             action = partial(
                 check,
                 args.scopes,
@@ -124,6 +125,10 @@ def command_action(
         action = partial(_setup_action, force=args.force, offline=args.offline)
     elif args.command == "dependencies":
         if args.dependencies_command == "create":
+            from fplinux_cli.cli.dependencies import (  # noqa: PLC0415 -- selected backend.
+                create_dependencies,
+            )
+
             action = partial(
                 create_dependencies,
                 args.directory,
@@ -132,18 +137,38 @@ def command_action(
                 inputs_only=args.inputs_only,
             )
         elif args.dependencies_command == "verify":
+            from fplinux_cli.cli.dependencies import (  # noqa: PLC0415 -- selected backend.
+                verify_dependencies,
+            )
+
             action = partial(verify_dependencies, args.directory)
         else:
+            from fplinux_cli.cli.dependencies import (  # noqa: PLC0415 -- selected backend.
+                restore_dependencies,
+            )
+
             action = partial(restore_dependencies, args.directory, inputs_only=args.inputs_only)
     elif args.command == "test":
+        from fplinux_cli.quality.testing import run_tests  # noqa: PLC0415 -- selected backend.
+
         action = partial(
             run_tests, args.names, tier=args.tier, verbose=args.verbose, failfast=args.failfast
         )
     elif args.command == "format":
+        from fplinux_cli.quality.formatting.command import (  # noqa: PLC0415 -- selected backend.
+            format_sources,
+        )
+
         action = partial(format_sources, args.paths)
     elif args.command == "_commit-msg":
+        from fplinux_cli.quality.git import (  # noqa: PLC0415 -- selected backend.
+            check_commit_message,
+        )
+
         action = partial(check_commit_message, args.message_file)
     elif args.command == "build":
+        from fplinux_cli.cli.build import build  # noqa: PLC0415 -- selected backend.
+
         action = partial(
             build,
             args.target,
@@ -154,10 +179,16 @@ def command_action(
             offline=args.offline,
         )
     elif args.command == "checksum":
+        from fplinux_cli.cli.checksum import checksum_aport  # noqa: PLC0415 -- selected backend.
+
         action = partial(checksum_aport, args.aport, offline=args.offline)
     elif args.command == "probe-build":
+        from fplinux_cli.cli.probe import build_probe  # noqa: PLC0415 -- selected backend.
+
         action = partial(build_probe, args.source, output=args.output)
     elif args.command == "package":
+        from fplinux_cli.cli.package import package_target  # noqa: PLC0415 -- selected backend.
+
         action = partial(
             package_target,
             args.target,
@@ -167,8 +198,12 @@ def command_action(
             candidate=args.candidate,
         )
     elif args.command == "prune":
+        from fplinux_cli.cache.prune.operations import prune  # noqa: PLC0415 -- selected backend.
+
         action = partial(prune, apply=args.prune_apply)
     elif args.command == "run":
+        from fplinux_cli.runtime.runner import run_target  # noqa: PLC0415 -- selected backend.
+
         action = partial(
             run_target,
             args.target,
@@ -178,6 +213,8 @@ def command_action(
             events=args.events,
         )
     elif args.command == "console":
+        from fplinux_cli.cli.runtime import console_target  # noqa: PLC0415 -- selected backend.
+
         action = partial(
             console_target,
             args.target,
@@ -198,6 +235,10 @@ def command_action(
                 build_type=args.build_type,
             )
         elif args.nand_command == "identify":
+            from fplinux_cli.cli.nand import (  # noqa: PLC0415 -- selected backend.
+                identify_target_nand,
+            )
+
             action = partial(
                 identify_target_nand, args.target, profile=args.profile, build_type=args.build_type
             )
@@ -206,6 +247,10 @@ def command_action(
     elif args.command == "device-data":
         if args.device_data_command != "prepare":
             raise AssertionError(f"unhandled device-data command: {args.device_data_command}")
+        from fplinux_cli.cli.device_data import (  # noqa: PLC0415 -- selected backend.
+            prepare_device_data,
+        )
+
         action = partial(
             prepare_device_data,
             args.target,
@@ -217,6 +262,8 @@ def command_action(
     elif args.command == "target":
         if args.target_command != "new":
             raise AssertionError(f"unhandled target command: {args.target_command}")
+        from fplinux_cli.cli.target_new import create_target  # noqa: PLC0415 -- selected backend.
+
         action = partial(
             create_target,
             args.name,
@@ -226,6 +273,8 @@ def command_action(
             compatible=args.compatible,
         )
     elif args.command == "verify":
+        from fplinux_cli.cli.runtime import verify_booted  # noqa: PLC0415 -- selected backend.
+
         action = partial(
             verify_booted, args.target, profile=args.profile, build_type=args.build_type
         )

@@ -9,7 +9,6 @@ from unittest import mock
 
 import pytest
 from fplinux_cli import __main__ as cli
-from fplinux_cli.cli import dispatch as cli_dispatch
 
 
 class BuildParallelismTests:
@@ -26,8 +25,8 @@ class BuildParallelismTests:
         with (
             mock.patch.object(cli, "discover_targets", return_value=("demo",)),
             mock.patch.object(os, "process_cpu_count", return_value=cpus),
-            mock.patch.object(cli_dispatch, "build") as build,
-            mock.patch.object(cli_dispatch, "prepare_device_data") as prepare,
+            mock.patch("fplinux_cli.cli.build.build") as build,
+            mock.patch("fplinux_cli.cli.device_data.prepare_device_data") as prepare,
             mock.patch.object(cli, "execute_command", side_effect=lambda _args, action: action()),
             mock.patch.object(sys, "argv", ["fplinux", *arguments]),
         ):

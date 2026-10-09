@@ -16,8 +16,9 @@ from unittest import mock
 
 import pytest
 from fplinux_cli import common
+from fplinux_cli.environment import images
 from fplinux_cli.environment.image_state import ImageState
-from fplinux_cli.quality import checks, testing
+from fplinux_cli.quality import checks, host_testing, runtime, testing
 from fplinux_cli.quality.receipts import (
     CheckReceiptRecipe,
     check_orchestration_recipe_digest,
@@ -28,6 +29,7 @@ from fplinux_cli.quality.receipts import (
 )
 from fplinux_cli.reporting import run as output
 from fplinux_cli.workspace import capture as workspace
+from fplinux_cli.workspace import quality_inputs
 from fplinux_cli.workspace import staging as workspace_staging
 
 from tests import ROOT
@@ -90,11 +92,13 @@ class SelectedTestRunTests:
             with (
                 mock.patch.object(workspace_staging, "ROOT", root),
                 mock.patch.object(output, "ROOT", root),
-                mock.patch.object(testing, "quality_workspace_snapshot", return_value=snapshot),
-                mock.patch.object(testing, "load_container_lock", return_value={}),
-                mock.patch.object(testing, "container_image_recipe_digest", return_value="b" * 64),
                 mock.patch.object(
-                    testing,
+                    quality_inputs, "quality_workspace_snapshot", return_value=snapshot
+                ),
+                mock.patch.object(images, "load_container_lock", return_value={}),
+                mock.patch.object(images, "container_image_recipe_digest", return_value="b" * 64),
+                mock.patch.object(
+                    runtime,
                     "prepare_quality_image",
                     return_value=(
                         "kern",
@@ -104,7 +108,7 @@ class SelectedTestRunTests:
                 ),
                 # Kern itself is outside this unit boundary; selection has real process tests.
                 mock.patch.object(
-                    testing,
+                    runtime,
                     "run_quality_command",
                     side_effect=failure,
                 ),
@@ -154,12 +158,12 @@ class SelectedTestRunTests:
 
         with (
             mock.patch.object(
-                testing,
+                host_testing,
                 "host_pytest_environment",
                 return_value=contextlib.nullcontext((Path(sys.executable), {})),
             ),
             # The external subprocess boundaries consume a controlled amount of the clock.
-            mock.patch.object(testing, "run_quality_command", side_effect=container),
+            mock.patch.object(runtime, "run_quality_command", side_effect=container),
             mock.patch.object(output.Stage, "run", side_effect=host),
             mock.patch.object(time, "monotonic", side_effect=[0.0, 0.0, 110.0]),
         ):
@@ -182,13 +186,13 @@ class SelectedTestRunTests:
         )
         with (
             mock.patch.object(
-                testing,
+                host_testing,
                 "host_pytest_environment",
                 return_value=contextlib.nullcontext((Path(sys.executable), {})),
             ),
             # Source tools and Kern are external to receipt publication; only host pytest fails.
             mock.patch.object(checks, "run_quality_command"),
-            mock.patch.object(testing, "run_quality_command"),
+            mock.patch.object(runtime, "run_quality_command"),
             mock.patch.object(output.Stage, "run", side_effect=SystemExit(1)),
             pytest.raises(SystemExit) as raised,
         ):
