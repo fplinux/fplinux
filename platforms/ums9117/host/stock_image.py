@@ -25,12 +25,11 @@ from pathlib import Path
 from typing import Any
 
 from fplinux_cli.device_data.formats import (
-    BLOCK_MAIN_BYTES,
     PhysicalNand,
     PreparedGroup,
     RequiredPartition,
-    redundant_vbm_partitions,
 )
+from fplinux_cli.device_data.partitions import discover_partitions
 
 TOOL_NAME = "fphelper_t117"
 IMAGE_NAME = "stock-image.bin"
@@ -40,14 +39,6 @@ _TOOL_SECONDS = 120
 # The stock application image, as the phone's partition tables name it.
 APPLICATION_PARTITION = 0x00000003
 APPLICATION_ATTRIBUTES = 0x100
-
-_VBM_MAGIC = b"VBM_BOOT"
-# A compiled PartI table starts with its entry count and an extent at block 0;
-# the second extent starts where the first one ends. Its last entry covers the
-# remaining blocks with this count.
-_PARTI_CANDIDATE = re.compile(rb"(?s)(?=[\x02-\x64]\x00\x00\x00.{8}\x00{4}(.{4}).{8}\1)")
-_PARTI_ENTRY = struct.Struct("<4I")
-_PARTI_REMAINDER = 0xFFFFFFFF
 
 # The signed image header; the image follows it and its size is at 0x30.
 _DHTB_MAGIC = b"DHTB"
@@ -200,96 +191,17 @@ def find_application_image(nand: PhysicalNand) -> StockImage:
     Two agreeing VBM copies at block starts take precedence; without VBM copies,
     one compiled PartI table found anywhere in the main area is used.
     """
-    copies = _vbm_copy_offsets(nand)
-    if len(copies) == 2:
-        extents = redundant_vbm_partitions(
-            nand,
-            (copies[0], copies[1]),
-            {
-                APPLICATION_PARTITION: RequiredPartition(
-                    "stock application image", APPLICATION_ATTRIBUTES
-                )
-            },
-        )
-        extent = extents[APPLICATION_PARTITION]
-        table = "VBM"
-    elif copies:
-        message = f"expected two VBM partition-table copies, found {len(copies)}"
-        raise ValueError(message)
-    else:
-        extent = _parti_application_extent(nand)
-        table = "PartI"
+    table = discover_partitions(
+        nand,
+        {
+            APPLICATION_PARTITION: RequiredPartition(
+                "stock application image", APPLICATION_ATTRIBUTES
+            )
+        },
+    )
+    extent = table.extents[APPLICATION_PARTITION]
     partition = nand.partition_bytes(extent)
-    return StockImage(_signed_image(partition), extent[0], table)
-
-
-def _vbm_copy_offsets(nand: PhysicalNand) -> list[int]:
-    """Return every block whose first page starts with the VBM table magic."""
-    offsets = []
-    for block in range(nand.block_count):
-        offset = block * BLOCK_MAIN_BYTES
-        if nand.main_bytes(offset, len(_VBM_MAGIC)) == _VBM_MAGIC:
-            offsets.append(offset)
-    return offsets
-
-
-def _parti_application_extent(nand: PhysicalNand) -> tuple[int, int]:
-    """Admit the application extent from one consistent compiled PartI table."""
-    main = nand.main_bytes(0, nand.block_count * BLOCK_MAIN_BYTES)
-    tables = set()
-    for candidate in _PARTI_CANDIDATE.finditer(main):
-        if candidate.start() % 4 == 0:
-            table = _parti_table(main, candidate.start(), nand.block_count)
-            if table is not None:
-                tables.add(table)
-    if not tables:
-        message = "no VBM or PartI partition table found"
-        raise ValueError(message)
-    if len(tables) > 1:
-        message = "the NAND holds PartI partition tables that disagree"
-        raise ValueError(message)
-    (entries,) = tables
-    for identifier, attributes, start_block, block_count in entries[:-1]:
-        if identifier == APPLICATION_PARTITION:
-            if attributes != APPLICATION_ATTRIBUTES:
-                message = (
-                    f"PartI stock application image has attributes {attributes:#x}; "
-                    f"expected {APPLICATION_ATTRIBUTES:#x}"
-                )
-                raise ValueError(message)
-            return start_block * BLOCK_MAIN_BYTES, block_count * BLOCK_MAIN_BYTES
-    message = (
-        f"PartI table has no stock application image partition ({APPLICATION_PARTITION:#010x})"
-    )
-    raise ValueError(message)
-
-
-def _parti_table(
-    main: bytes, position: int, block_count: int
-) -> tuple[tuple[int, int, int, int], ...] | None:
-    """Decode a contiguous PartI table at one position, or None when it is not one."""
-    count = struct.unpack_from("<I", main, position)[0]
-    end = position + 4 + count * _PARTI_ENTRY.size
-    if end > len(main):
-        return None
-    entries = tuple(
-        _PARTI_ENTRY.unpack_from(main, position + 4 + index * _PARTI_ENTRY.size)
-        for index in range(count)
-    )
-    expected_start = 0
-    for _identifier, _attributes, start_block, blocks in entries[:-1]:
-        if start_block != expected_start or blocks in (0, _PARTI_REMAINDER):
-            return None
-        expected_start += blocks
-    _identifier, _attributes, remainder_start, remainder_blocks = entries[-1]
-    if (
-        remainder_blocks != _PARTI_REMAINDER
-        or remainder_start != expected_start
-        or expected_start >= block_count
-        or len({entry[0] for entry in entries}) != count
-    ):
-        return None
-    return entries
+    return StockImage(_signed_image(partition), extent[0], table.kind)
 
 
 def _signed_image(partition: bytes) -> bytes:

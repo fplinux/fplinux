@@ -3,25 +3,19 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar
-
 import pytest
 from fplinux_cli.device_data import formats as device_data
+from fplinux_cli.device_data.partitions import discover_partitions
 
 from tests.small.device_data.partition_fixtures import (
-    NOKIA_PARTI_OFFSET,
     VBM_COPY_OFFSETS,
     FakeNandPartitionReader,
-    load_target_parser,
-    nokia_parti_entries,
-    nokia_parti_table,
+    parti_entries,
+    parti_table,
     required_partitions,
     vbm_entries,
     vbm_table,
 )
-
-if TYPE_CHECKING:
-    from types import ModuleType
 
 
 class VbmPartitionFormatTests:
@@ -178,144 +172,208 @@ class VbmPartitionFormatTests:
             )
 
 
-class NokiaPartiPartitionFormatTests:
-    """Protect TA-1618 compiled PartI structure without a 142 MB NAND fixture."""
+class PartitionDiscoveryTests:
+    """Exercise table discovery through sparse main-area reads and table admission."""
 
-    parser: ClassVar[ModuleType]
+    @pytest.mark.parametrize("offset", [0x840, 0x26120, 0x1FFF0])
+    def test_parti_relocation_returns_only_required_extents(self, offset: int) -> None:
+        """Word-aligned tables may move, including across an erase-block boundary."""
+        reader = FakeNandPartitionReader({offset: parti_table(parti_entries())}, block_count=32)
 
-    @pytest.fixture(scope="class")
-    @classmethod
-    def parti_parser(cls) -> ModuleType:
-        """Load the target-owned PartI parser through its normal module boundary."""
-        cls.parser = load_target_parser(
-            "nokia-ta1618",
-            "ta1618_device_data.py",
+        table = discover_partitions(reader, required_partitions())
+
+        assert table.kind == "PartI"
+        assert table.extents == {
+            0x10000001: (0x00040000, 0x00040000),
+            0x1000000F: (0x00080000, 0x00020000),
+            0x10000018: (0x000A0000, 0x00060000),
+            0x10000003: (0x00100000, 0x00040000),
+        }
+
+    def test_parti_unrelated_records_sizes_and_count_may_change(self) -> None:
+        """Consumer semantics survive insertion and changed nonconsumer attributes."""
+        entries = (
+            (0xABCDEF00, 0xBEEF, 0, 1),
+            (0xABCDEF01, 0x102, 1, 2),
+            (0x10000001, 0x100, 3, 2),
+            (0x1000000F, 0x100, 5, 1),
+            (0x10000018, 0x100, 6, 3),
+            (0x10000003, 0x001, 9, 2),
+            (0xABCDEF08, 0x246, 11, 0xFFFFFFFF),
         )
-        return cls.parser
+        reader = FakeNandPartitionReader({0x308: parti_table(entries)}, block_count=32)
 
-    @staticmethod
-    def _reader(entries: tuple[tuple[int, int, int, int], ...]) -> FakeNandPartitionReader:
-        return FakeNandPartitionReader({NOKIA_PARTI_OFFSET: nokia_parti_table(entries)})
+        table = discover_partitions(reader, required_partitions())
 
-    def test_valid_table_returns_ordinary_extents_without_multiplying_sentinel(
-        self, parti_parser: ModuleType
-    ) -> None:
-        """The final remainder marker is validated but is not exposed as a finite extent."""
-        partitions = parti_parser.parti_partitions(self._reader(nokia_parti_entries()))
+        assert table.extents == {
+            0x10000001: (0x00060000, 0x00040000),
+            0x1000000F: (0x000A0000, 0x00020000),
+            0x10000018: (0x000C0000, 0x00060000),
+            0x10000003: (0x00120000, 0x00040000),
+        }
 
-        assert (partitions[0x10000001]) == ((0x00080000, 0x00100000))
-        assert (partitions[0x1000000F]) == ((0x001A0000, 0x00100000))
-        assert (partitions[0x10000018]) == ((0x00E80000, 0x00100000))
-        assert (partitions[0x10000003]) == ((0x013A0000, 0x00600000))
-        assert (0x00000008) not in (partitions)
+    def test_parti_remainder_is_bounded_when_requested(self) -> None:
+        """The remainder marker yields its actual finite capacity for a named consumer."""
+        reader = FakeNandPartitionReader({0x100: parti_table(parti_entries())}, block_count=32)
 
-    def test_safe_unrelated_id_and_attribute_changes_are_admitted(
-        self, parti_parser: ModuleType
-    ) -> None:
-        """A structurally equivalent ordinary record is not tied to a whole-table digest."""
-        entries = list(nokia_parti_entries())
-        entries[1] = (0xABCDEF02, 0x101, 2, 2)
+        table = discover_partitions(reader, {8: device_data.RequiredPartition("storage", 1)})
 
-        partitions = parti_parser.parti_partitions(self._reader(tuple(entries)))
+        assert table.extents == {8: (0x00140000, 0x002C0000)}
 
-        assert (0xABCDEF02) not in (partitions)
-        assert (set(partitions)) == (set(required_partitions()))
+    def test_identical_parti_tables_are_consistent(self) -> None:
+        """Repeated equal tables identify the same physical extent."""
+        encoded = parti_table(parti_entries())
+        reader = FakeNandPartitionReader({0x100: encoded, 0x504: encoded}, block_count=32)
+
+        table = discover_partitions(
+            reader, {0x10000018: device_data.RequiredPartition("CM4", 256)}
+        )
+
+        assert table.extents == {0x10000018: (0x000A0000, 0x00060000)}
+
+    def test_disagreeing_valid_parti_tables_are_rejected_before_consumer_selection(self) -> None:
+        """Even a nonconsumer disagreement leaves the physical layout ambiguous."""
+        changed = list(parti_entries())
+        changed[0] = (0xABCDEF00, 0x100, 0, 2)
+        reader = FakeNandPartitionReader(
+            {0x100: parti_table(parti_entries()), 0x504: parti_table(tuple(changed))},
+            block_count=32,
+        )
+
+        with pytest.raises(ValueError, match="PartI partition tables that disagree"):
+            discover_partitions(reader, required_partitions())
 
     @pytest.mark.parametrize(
-        "case",
+        ("index", "replacement"),
         [
-            "duplicate ID",
-            "missing required ID",
-            "wrong required attributes",
-            "unsupported attributes",
-            "zero extent",
-            "overlap",
-            "gap",
-            "outside NAND",
-            "invalid sentinel",
-            "non-final sentinel",
-        ],
-        ids=[
-            "duplicate",
-            "missing-required",
-            "wrong-attributes",
-            "unsupported-attributes",
-            "zero-extent",
-            "overlap",
-            "gap",
-            "outside",
-            "invalid-sentinel",
-            "early-sentinel",
+            pytest.param(1, (1, 0x100, 2, 2), id="duplicate-id"),
+            pytest.param(1, (0x10000001, 0x100, 2, 0), id="zero-size"),
+            pytest.param(2, (0x1000000F, 0x100, 3, 1), id="overlap"),
+            pytest.param(2, (0x1000000F, 0x100, 5, 1), id="gap"),
+            pytest.param(4, (0x10000003, 1, 8, 25), id="outside-nand"),
+            pytest.param(4, (0x10000003, 1, 8, 24), id="empty-remainder"),
+            pytest.param(1, (0x10000001, 0x100, 2, 0xFFFFFFFF), id="early-remainder"),
+            pytest.param(5, (8, 1, 11, 0xFFFFFFFF), id="wrong-remainder-start"),
+            pytest.param(5, (8, 1, 10, 1), id="missing-remainder"),
         ],
     )
-    def test_invalid_shape_or_consumer_descriptor_is_rejected_precisely(
-        self, parti_parser: ModuleType, case: str
+    def test_malformed_parti_layout_is_not_admitted(
+        self, index: int, replacement: tuple[int, int, int, int]
     ) -> None:
-        """PartI must remain unique, bounded, contiguous and semantically sufficient."""
-        base = list(nokia_parti_entries())
-        cases: dict[str, tuple[tuple[tuple[int, int, int, int], ...], str]] = {}
+        """Duplicate IDs, gaps and unsafe bounds cannot select physical data."""
+        entries = list(parti_entries())
+        entries[index] = replacement
+        reader = FakeNandPartitionReader({0x100: parti_table(tuple(entries))}, block_count=32)
 
-        duplicate = list(base)
-        duplicate[1] = (0x00000001, 0x100, 2, 2)
-        cases["duplicate ID"] = (tuple(duplicate), "duplicate TA-1618 PartI partition ID")
+        with pytest.raises(ValueError, match="no VBM or PartI partition table found"):
+            discover_partitions(reader, required_partitions())
 
-        missing = list(base)
-        missing[8] = (0x10000099, 0x100, 116, 8)
-        cases["missing required ID"] = (tuple(missing), "CM4.*is missing")
+    @pytest.mark.parametrize(
+        ("replacement", "error"),
+        [
+            ((0x10000099, 0x100, 5, 3), "CM4.*is missing"),
+            ((0x10000018, 0x101, 5, 3), "CM4 has attributes 0x101; expected 0x100"),
+        ],
+        ids=["missing-consumer", "wrong-consumer-attributes"],
+    )
+    def test_valid_parti_table_must_satisfy_caller_requirements(
+        self, replacement: tuple[int, int, int, int], error: str
+    ) -> None:
+        """A discovered layout cannot substitute a missing or incompatible consumer."""
+        entries = list(parti_entries())
+        entries[3] = replacement
+        reader = FakeNandPartitionReader({0x100: parti_table(tuple(entries))}, block_count=32)
 
-        wrong_attributes = list(base)
-        wrong_attributes[8] = (0x10000018, 0x101, 116, 8)
-        cases["wrong required attributes"] = (
-            tuple(wrong_attributes),
-            "CM4 has attributes 0x101; expected 0x100",
-        )
-
-        unsupported_attributes = list(base)
-        unsupported_attributes[1] = (0x00000002, 0x102, 2, 2)
-        cases["unsupported attributes"] = (
-            tuple(unsupported_attributes),
-            "unsupported attributes 0x102",
-        )
-
-        zero_extent = list(base)
-        zero_extent[1] = (0x00000002, 0x100, 2, 0)
-        cases["zero extent"] = (tuple(zero_extent), "zero-sized extent")
-
-        overlap = list(base)
-        overlap[1] = (0x00000002, 0x100, 1, 2)
-        cases["overlap"] = (tuple(overlap), "starts at block 1; expected contiguous block 2")
-
-        gap = list(base)
-        gap[1] = (0x00000002, 0x100, 3, 2)
-        cases["gap"] = (tuple(gap), "starts at block 3; expected contiguous block 2")
-
-        outside = list(base)
-        outside[20] = (0x10000020, 0x101, 720, 400)
-        cases["outside NAND"] = (tuple(outside), "outside the 1024-block NAND")
-
-        invalid_sentinel = list(base)
-        invalid_sentinel[-1] = (0x00000008, 0x001, 881, 0xFFFFFFFF)
-        cases["invalid sentinel"] = (tuple(invalid_sentinel), "invalid final remainder sentinel")
-
-        extra_sentinel = list(base)
-        extra_sentinel[20] = (0x10000020, 0x101, 720, 0xFFFFFFFF)
-        cases["non-final sentinel"] = (tuple(extra_sentinel), "invalid final remainder sentinel")
-
-        entries, error = cases[case]
         with pytest.raises(ValueError, match=error):
-            parti_parser.parti_partitions(self._reader(entries))
+            discover_partitions(reader, required_partitions())
 
-    def test_table_requires_exact_count_and_complete_fixed_width_records(
-        self, parti_parser: ModuleType
+    @pytest.mark.parametrize("count", [0, 1, 33, 101])
+    def test_parti_count_must_be_bounded_and_describe_the_complete_table(self, count: int) -> None:
+        """The count must admit all records within the format and capacity bounds."""
+        reader = FakeNandPartitionReader(
+            {0x100: parti_table(parti_entries(), declared_count=count)}, block_count=32
+        )
+
+        with pytest.raises(ValueError, match="no VBM or PartI partition table found"):
+            discover_partitions(reader, required_partitions())
+
+    def test_truncated_parti_selected_read_is_rejected(self) -> None:
+        """A short admitted read cannot supply a complete table."""
+        reader = FakeNandPartitionReader(
+            {0x100: parti_table(parti_entries())[:-1]}, block_count=32
+        )
+
+        with pytest.raises(ValueError, match="truncated PartI partition table"):
+            discover_partitions(reader, required_partitions())
+
+    @pytest.mark.parametrize("offset", [0x101, 0x3FFFEC])
+    def test_unaligned_or_capacity_truncated_parti_is_not_admitted(self, offset: int) -> None:
+        """Compiled tables require word alignment and all bytes inside NAND."""
+        reader = FakeNandPartitionReader({offset: parti_table(parti_entries())}, block_count=32)
+
+        with pytest.raises(ValueError, match="no VBM or PartI partition table found"):
+            discover_partitions(reader, required_partitions())
+
+    def test_erased_nand_reports_missing_tables(self) -> None:
+        """An image without either format produces a clear discovery failure."""
+        with pytest.raises(ValueError, match="no VBM or PartI partition table found"):
+            discover_partitions(FakeNandPartitionReader({}, block_count=32), required_partitions())
+
+    def test_vbm_copies_are_discovered_at_relocated_block_starts(self) -> None:
+        """Magic and agreeing descriptors determine locations without fixed offsets."""
+        entries = ((0x10000018, 0x100, 5, 7), (8, 1, 10, 20))
+        reader = FakeNandPartitionReader(
+            {0xE0000: vbm_table(entries), 0x1E0000: vbm_table(entries)}, block_count=32
+        )
+
+        table = discover_partitions(
+            reader, {0x10000018: device_data.RequiredPartition("CM4", 256)}
+        )
+
+        assert table.kind == "VBM"
+        assert table.extents == {0x10000018: (0x000A0000, 0x00060000)}
+
+    @pytest.mark.parametrize("offsets", [(0x20000,), (0x20000, 0x40000, 0x60000)])
+    def test_vbm_requires_exactly_two_discovered_copies(self, offsets: tuple[int, ...]) -> None:
+        """Incomplete or extra redundancy cannot determine an admitted VBM table."""
+        encoded = vbm_table(((0x10000018, 0x100, 5, 7),))
+        reader = FakeNandPartitionReader(dict.fromkeys(offsets, encoded), block_count=32)
+
+        with pytest.raises(ValueError, match=f"expected two VBM.*found {len(offsets)}"):
+            discover_partitions(reader, required_partitions())
+
+    def test_vbm_disagreement_is_not_hidden_by_valid_parti(self) -> None:
+        """A damaged redundant table cannot fall back to a compiled table."""
+        reader = FakeNandPartitionReader(
+            {
+                0x20000: vbm_table(((0x10000018, 0x100, 5, 7),)),
+                0x40000: vbm_table(((0x10000018, 0x100, 6, 8),)),
+                0x104: parti_table(parti_entries()),
+            },
+            block_count=32,
+        )
+
+        with pytest.raises(ValueError, match="redundant VBM partition tables disagree"):
+            discover_partitions(reader, {0x10000018: device_data.RequiredPartition("CM4", 256)})
+
+    @pytest.mark.parametrize(
+        ("fragments", "bad_block"),
+        [
+            (
+                {0x20000: vbm_table(((1, 0x100, 3, 4),)), 0x40000: vbm_table(((1, 0x100, 3, 4),))},
+                1,
+            ),
+            ({0x1FFF0: parti_table(parti_entries())}, 1),
+        ],
+        ids=["vbm-copy", "parti-crossing-block-boundary"],
+    )
+    def test_discovered_tables_must_pass_selected_block_admission(
+        self, fragments: dict[int, bytes], bad_block: int
     ) -> None:
-        """A partial or differently sized compiled PartI array is not interpreted."""
-        entries = nokia_parti_entries()
-        wrong_count = nokia_parti_table(entries, declared_count=21)
-        with pytest.raises(ValueError, match="partition count is 21; expected 22"):
-            parti_parser.parti_partitions(
-                FakeNandPartitionReader({NOKIA_PARTI_OFFSET: wrong_count})
-            )
+        """Discovery reads do not bypass admissibility of the selected table blocks."""
+        reader = FakeNandPartitionReader(
+            fragments, block_count=32, bad_blocks=frozenset({bad_block})
+        )
 
-        truncated = nokia_parti_table(entries)[:-1]
-        with pytest.raises(ValueError, match="truncated TA-1618 PartI partition table"):
-            parti_parser.parti_partitions(FakeNandPartitionReader({NOKIA_PARTI_OFFSET: truncated}))
+        with pytest.raises(ValueError, match=f"selected NAND block {bad_block} is marked bad"):
+            discover_partitions(reader, {1: device_data.RequiredPartition("boot", 256)})

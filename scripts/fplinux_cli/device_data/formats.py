@@ -28,6 +28,10 @@ class NandPartitionReader(Protocol):
         """Return the physical NAND capacity in erase blocks."""
         ...
 
+    def main_bytes(self, offset: int, size: int) -> bytes:
+        """Read main-area bytes before selecting an admissible table or extent."""
+        ...
+
     def partition_bytes(self, extent: tuple[int, int]) -> bytes:
         """Read one main-area extent whose selected blocks are admissible."""
         ...

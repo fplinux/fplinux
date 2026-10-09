@@ -101,7 +101,7 @@ class PartitionDiscoveryTests:
             ),
             "no application entry": (
                 backup(image, parti=(0x1000, _parti_table(without_application))),
-                "no stock application image partition",
+                "stock application image .* is missing",
             ),
             "no signed image": (
                 backup(b"\x00" * 0x400, vbm=agreeing_vbm()),
