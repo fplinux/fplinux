@@ -64,7 +64,7 @@ int ums9117_dcam_capture_register(struct ums9117_jpeg_hw *hw,
 void ums9117_dcam_capture_unregister(struct ums9117_jpeg_hw *hw);
 int ums9117_dcam_capture_start(struct ums9117_jpeg_hw *hw, dma_addr_t dma,
 			       u32 width, u32 height, unsigned int skip_frames,
-			       bool serial_g0);
+			       unsigned int serial_data_width, u32 mbus_code);
 int ums9117_dcam_capture_finish(struct ums9117_jpeg_hw *hw);
 int ums9117_dcam_capture_stop(struct ums9117_jpeg_hw *hw);
 

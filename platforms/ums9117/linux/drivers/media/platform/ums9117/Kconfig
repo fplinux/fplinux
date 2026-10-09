@@ -46,7 +46,25 @@ config VIDEO_UMS9117_DCAM_SERIAL_G0
 	bool "UMS9117 serial-G0 camera input"
 	depends on VIDEO_UMS9117_JPEG
 	help
-	  Capture NV16 frames through a one-bit serial-G0 camera input.
+	  Capture NV16 frames through a one-bit or two-bit serial-G0 camera input.
 	  The DCAM endpoint declares sprd,serial-g0-data-width for this route.
 	  Enable this in the board fragment when that route is connected.
 	  The input route is checked before the capture device is registered.
+
+config VIDEO_UMS9117_DCAM_SERIAL_G0_ONE_BIT
+	bool "UMS9117 one-bit serial-G0 camera input"
+	depends on VIDEO_UMS9117_DCAM_SERIAL_G0
+	help
+	  Capture 240x320 NV16 frames from a one-bit serial-G0 camera input.
+	  The sensor must supply 240x320 YUYV pixels on this route.
+	  The DCAM endpoint must declare a serial data width of one bit.
+	  Enable this in the board fragment only when that input is connected.
+
+config VIDEO_UMS9117_DCAM_SERIAL_G0_TWO_BIT
+	bool "UMS9117 two-bit serial-G0 camera input"
+	depends on VIDEO_UMS9117_DCAM_SERIAL_G0
+	help
+	  Capture 640x476 NV16 frames from a two-bit serial-G0 camera input.
+	  The sensor must supply 640x476 YUYV pixels on this route.
+	  The DCAM endpoint must declare a serial data width of two bits.
+	  Enable this in the board fragment only when that input is connected.

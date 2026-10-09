@@ -211,6 +211,14 @@ source = "platforms/ums9117/linux/drivers/media/platform/ums9117/ums9117-dcam-ca
 destination = "drivers/media/platform/ums9117/ums9117-dcam-capture.h"
 
 [[linux.copies]]
+source = "platforms/ums9117/linux/drivers/media/platform/ums9117/ums9117-dcam-format.c"
+destination = "drivers/media/platform/ums9117/ums9117-dcam-format.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/linux/drivers/media/platform/ums9117/ums9117-dcam-format.h"
+destination = "drivers/media/platform/ums9117/ums9117-dcam-format.h"
+
+[[linux.copies]]
 source = "platforms/ums9117/linux/drivers/media/i2c/bf30a2.c"
 destination = "drivers/media/i2c/bf30a2.c"
 

@@ -25,6 +25,7 @@
 #include <media/videobuf2-v4l2.h>
 
 #include "ums9117-dcam-capture.h"
+#include "ums9117-dcam-format.h"
 #include "ums9117-jpeg-hw.h"
 
 #define DCAM_NAME "ums9117-dcam"
@@ -32,8 +33,6 @@
 #define DCAM_PREVIEW_HEIGHT 600U
 #define DCAM_STILL_WIDTH 1600U
 #define DCAM_STILL_HEIGHT 1200U
-#define DCAM_SERIAL_WIDTH 240U
-#define DCAM_SERIAL_HEIGHT 320U
 #define DCAM_SERIAL_FRAME_TIMEOUT_MS 3000U
 #define DCAM_PREVIEW_STARTUP_SKIP 4U
 #define DCAM_STILL_STARTUP_SKIP 5U
@@ -54,6 +53,8 @@ struct ums9117_dcam_capture {
 	struct media_pad pad;
 	struct vb2_queue queue;
 	struct v4l2_pix_format format;
+	u32 mbus_code;
+	u32 serial_data_width;
 	spinlock_t qlock;
 	struct list_head queued;
 	struct dcam_buffer *active;
@@ -127,8 +128,8 @@ static int dcam_enum_framesizes(struct file *file, void *priv,
 		if (size->index || size->pixel_format != V4L2_PIX_FMT_NV16)
 			return -EINVAL;
 		size->type = V4L2_FRMSIZE_TYPE_DISCRETE;
-		size->discrete.width = DCAM_SERIAL_WIDTH;
-		size->discrete.height = DCAM_SERIAL_HEIGHT;
+		size->discrete.width = capture->format.width;
+		size->discrete.height = capture->format.height;
 		return 0;
 	}
 	if (size->index > 1 || size->pixel_format != V4L2_PIX_FMT_NV16)
@@ -158,8 +159,8 @@ static int dcam_try_format(struct file *file, void *priv,
 	u32 height = DCAM_PREVIEW_HEIGHT;
 
 	if (dcam_serial_g0(capture)) {
-		width = DCAM_SERIAL_WIDTH;
-		height = DCAM_SERIAL_HEIGHT;
+		width = capture->format.width;
+		height = capture->format.height;
 	} else if (format->fmt.pix.width == DCAM_STILL_WIDTH &&
 		   format->fmt.pix.height == DCAM_STILL_HEIGHT) {
 		width = DCAM_STILL_WIDTH;
@@ -381,7 +382,8 @@ static void dcam_work(struct work_struct *work)
 				vb2_dma_contig_plane_dma_addr(
 					&buffer->vb.vb2_buf, 0),
 				capture->format.width, capture->format.height,
-				skip_frames, dcam_serial_g0(capture));
+				skip_frames, capture->serial_data_width,
+				capture->mbus_code);
 		if (!ret) {
 			capture->first_capture = false;
 			if (!dcam_serial_g0(capture))
@@ -460,7 +462,7 @@ static int dcam_start_streaming(struct vb2_queue *queue, unsigned int count)
 		.format = {
 			.width = capture->format.width,
 			.height = capture->format.height,
-			.code = MEDIA_BUS_FMT_YUYV8_2X8,
+			.code = capture->mbus_code,
 			.field = V4L2_FIELD_NONE,
 		},
 	};
@@ -480,7 +482,7 @@ static int dcam_start_streaming(struct vb2_queue *queue, unsigned int count)
 		goto release;
 	if (format.format.width != capture->format.width ||
 	    format.format.height != capture->format.height ||
-	    format.format.code != MEDIA_BUS_FMT_YUYV8_2X8) {
+	    format.format.code != capture->mbus_code) {
 		ret = -EINVAL;
 		goto release;
 	}
@@ -547,7 +549,24 @@ static int dcam_bound(struct v4l2_async_notifier *notifier,
 		      struct v4l2_async_connection *connection)
 {
 	struct ums9117_dcam_capture *capture = dcam_from_notifier(notifier);
+	struct v4l2_subdev_format format = {
+		.which = V4L2_SUBDEV_FORMAT_ACTIVE,
+		.pad = 0,
+	};
+	struct ums9117_dcam_format hw_format;
+	int ret;
 
+	ret = v4l2_subdev_call_state_active(sensor, pad, get_fmt, &format);
+	if (ret)
+		return ret;
+	ret = ums9117_dcam_format_configure(
+		format.format.width, format.format.height, format.format.code,
+		capture->serial_data_width, &hw_format);
+	if (ret)
+		return ret;
+	capture->mbus_code = format.format.code;
+	dcam_pix_format(&capture->format, format.format.width,
+			format.format.height);
 	capture->sensor = sensor;
 	return 0;
 }
@@ -593,7 +612,8 @@ static const struct v4l2_async_notifier_operations dcam_notifier_ops = {
 	.unbind = dcam_unbind,
 };
 
-static int dcam_parse_serial_g0(struct device *dev, struct device_node *node)
+static int dcam_parse_serial_g0(struct device *dev, struct device_node *node,
+				u32 *data_width)
 {
 	u32 width;
 	int ret;
@@ -605,8 +625,14 @@ static int dcam_parse_serial_g0(struct device *dev, struct device_node *node)
 	ret = of_property_read_u32(node, "sprd,serial-g0-data-width", &width);
 	if (ret)
 		return ret;
-	if (width != 1 || of_property_present(node, "bus-type"))
+	if (of_property_present(node, "bus-type"))
 		return -EINVAL;
+	if (!((width == 1 &&
+	       IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0_ONE_BIT)) ||
+	      (width == 2 &&
+	       IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0_TWO_BIT))))
+		return -EINVAL;
+	*data_width = width;
 	return 0;
 }
 
@@ -637,6 +663,7 @@ ums9117_dcam_capture_create(struct device *dev, struct v4l2_device *v4l2,
 	struct v4l2_async_connection *connection;
 	struct device_node *node;
 	struct fwnode_handle *remote;
+	u32 serial_data_width = 0;
 	bool serial_g0;
 	int ret;
 
@@ -651,7 +678,7 @@ ums9117_dcam_capture_create(struct device *dev, struct v4l2_device *v4l2,
 	fwnode_handle_put(remote);
 	serial_g0 = of_property_present(node, "sprd,serial-g0-data-width");
 	if (serial_g0)
-		ret = dcam_parse_serial_g0(dev, node);
+		ret = dcam_parse_serial_g0(dev, node, &serial_data_width);
 	else
 		ret = dcam_parse_parallel(dev, node);
 	if (ret)
@@ -667,12 +694,7 @@ ums9117_dcam_capture_create(struct device *dev, struct v4l2_device *v4l2,
 	capture->hw = hw;
 	capture->lock = lock;
 	capture->serial_g0 = serial_g0;
-	if (dcam_serial_g0(capture))
-		dcam_pix_format(&capture->format, DCAM_SERIAL_WIDTH,
-				DCAM_SERIAL_HEIGHT);
-	else
-		dcam_pix_format(&capture->format, DCAM_PREVIEW_WIDTH,
-				DCAM_PREVIEW_HEIGHT);
+	capture->serial_data_width = serial_data_width;
 	spin_lock_init(&capture->qlock);
 	mutex_init(&capture->work_lock);
 	INIT_LIST_HEAD(&capture->queued);

@@ -24,6 +24,7 @@
 #include <linux/wait.h>
 
 #include "ums9117-jpeg-codec.h"
+#include "ums9117-dcam-format.h"
 #include "ums9117-jpeg-hw.h"
 
 #define JPEG_MMIO_BYTES 0x11a00U
@@ -108,8 +109,7 @@
 #define CPU_QOS_READ_MASK GENMASK(7, 4)
 #define CPU_QOS_WRITE_MASK GENMASK(3, 0)
 #define DCAM_CAP_FRAME_CLEAR BIT(22)
-#define DCAM_CAP_CCIR656 BIT(0)
-#define DCAM_CAP_ONE_BIT GENMASK(10, 9)
+#define DCAM_CAP_TRANSPORT_MASK (GENMASK(10, 7) | GENMASK(5, 0))
 #define DCAM_CAPTURE_DONE BIT(4)
 #define DCAM_CAPTURE_ERRORS (BIT(5) | BIT(6) | BIT(10))
 #define DCAM_CAPTURE_IRQS (DCAM_CAPTURE_DONE | DCAM_CAPTURE_ERRORS)
@@ -679,31 +679,27 @@ unlock:
 
 int ums9117_dcam_capture_start(struct ums9117_jpeg_hw *hw, dma_addr_t dma,
 			       u32 width, u32 height, unsigned int skip_frames,
-			       bool serial_g0)
+			       unsigned int serial_data_width, u32 mbus_code)
 {
-	u32 y_bytes;
-	u32 source_size;
-	u32 capture_end;
+	struct ums9117_dcam_format format;
+	u32 capture_control;
 	u32 status;
 	int ret;
 
-	serial_g0 =
-		IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0) &&
-		(!IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_PARALLEL) || serial_g0);
 	if (WARN_ON(!hw->owner_active || hw->owner != UMS9117_DCAM_CAPTURE))
 		return -EINVAL;
-	if (!((IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0) && serial_g0 &&
-	       width == 240 && height == 320) ||
-	      (IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_PARALLEL) && !serial_g0 &&
-	       ((width == 800 && height == 600) ||
-		(width == 1600 && height == 1200)))) ||
+	if ((serial_data_width &&
+	     !IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0)) ||
+	    (!serial_data_width &&
+	     !IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_PARALLEL)) ||
 	    skip_frames > 15)
 		return -EINVAL;
-	y_bytes = width * height;
-	if (dma & 3 || dma > U32_MAX - 2 * y_bytes)
+	ret = ums9117_dcam_format_configure(width, height, mbus_code,
+					    serial_data_width, &format);
+	if (ret)
+		return ret;
+	if (dma & 3 || dma > U32_MAX - 2 * format.y_bytes)
 		return -EINVAL;
-	source_size = (height << 16) | width;
-	capture_end = ((height - 1) << 16) | (2 * width - 1);
 	ret = jpeg_wait_idle(hw, &status);
 	if (ret)
 		return ret;
@@ -718,20 +714,26 @@ int ums9117_dcam_capture_start(struct ums9117_jpeg_hw *hw, dma_addr_t dma,
 	hw->irq_raw = 0;
 	spin_unlock_irq(&hw->lock);
 
-	jpeg_write(hw, DCAM_CAP_CTRL,
-		   serial_g0 ? DCAM_CAP_CCIR656 | DCAM_CAP_ONE_BIT : BIT(3));
+	capture_control = format.capture_control;
+	if (IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0_TWO_BIT) &&
+	    serial_data_width == 2) {
+		/* Preserve reset state outside the selected transport fields. */
+		capture_control |= jpeg_read(hw, DCAM_CAP_CTRL) &
+				   ~DCAM_CAP_TRANSPORT_MASK;
+	}
+	jpeg_write(hw, DCAM_CAP_CTRL, capture_control);
 	jpeg_write(hw, DCAM_CAP_FRM_CNT, DCAM_CAP_FRAME_CLEAR | skip_frames);
-	jpeg_write(hw, JPEG_SOURCE_SIZE, source_size);
-	jpeg_write(hw, DCAM_CAP_START, 0);
-	jpeg_write(hw, DCAM_CAP_END, capture_end);
+	jpeg_write(hw, JPEG_SOURCE_SIZE, format.source_size);
+	jpeg_write(hw, DCAM_CAP_START, format.capture_start);
+	jpeg_write(hw, DCAM_CAP_END, format.capture_end);
 	jpeg_write(hw, DCAM_CAP_DECIMATION, 0);
 	jpeg_write(hw, DCAM_SPI_WIDTH, 2 * width - 1);
 	jpeg_write(hw, JPEG_SC_FORMAT, 0);
-	jpeg_write(hw, JPEG_DEST_SIZE, source_size);
+	jpeg_write(hw, JPEG_DEST_SIZE, format.source_size);
 	jpeg_write(hw, JPEG_SCALING_CONFIG, BIT(1));
 	jpeg_write(hw, JPEG_ENDIAN, BIT(2));
 	jpeg_write(hw, JPEG_FRAME0_Y, lower_32_bits(dma));
-	jpeg_write(hw, JPEG_FRAME0_UV, lower_32_bits(dma + y_bytes));
+	jpeg_write(hw, JPEG_FRAME0_UV, lower_32_bits(dma + format.y_bytes));
 	jpeg_write(hw, JPEG_FRAME1_Y, 0);
 	jpeg_write(hw, JPEG_FRAME1_UV, 0);
 	jpeg_write(hw, JPEG_INT_CLEAR, JPEG_IRQ_KNOWN);

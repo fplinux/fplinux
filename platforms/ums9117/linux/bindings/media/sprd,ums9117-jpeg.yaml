@@ -71,8 +71,8 @@ properties:
           pclk-sample: true
           sprd,serial-g0-data-width:
             $ref: /schemas/types.yaml#/definitions/uint32
-            const: 1
-            description: One-bit camera data on the SoC serial G0 input.
+            enum: [1, 2]
+            description: Number of camera data lines on the SoC serial G0 input.
         oneOf:
           - required:
               - bus-type
