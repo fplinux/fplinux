@@ -37,7 +37,7 @@ _TARGET_ORDER = {
         "microsd",
     ),
     "identity": ("brand", "product", "hardware_codes", "compatible"),
-    "nand": ("raw_device", "id", "raw_page_bytes"),
+    "nand": ("raw_device", "id", "raw_page_bytes", "ecc_format"),
     "display_brightness": ("backlight", "levels"),
     "rootfs": ("packages",),
     "bundle": ("packages",),

@@ -9,7 +9,7 @@ from itertools import pairwise
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
 PAGE_MAIN_BYTES = 2048
 PHYSICAL_PAGE_COUNT = 65536
@@ -106,6 +106,9 @@ class PhysicalNand:
 
     raw: bytes
     page_bytes: int
+    main_decoder: Callable[[bytes, int, int, int], bytes] | None = field(
+        default=None, repr=False, compare=False
+    )
 
     @property
     def block_count(self) -> int:
@@ -113,7 +116,13 @@ class PhysicalNand:
         return len(self.raw) // self.page_bytes // PAGES_PER_BLOCK
 
     @classmethod
-    def from_dump(cls, raw: bytes, *, page_bytes: int) -> PhysicalNand:
+    def from_dump(
+        cls,
+        raw: bytes,
+        *,
+        page_bytes: int,
+        main_decoder: Callable[[bytes, int, int, int], bytes] | None = None,
+    ) -> PhysicalNand:
         """Require a complete physical backup before interpreting target partitions."""
         expected_size = PHYSICAL_PAGE_COUNT * page_bytes
         if len(raw) != expected_size:
@@ -122,7 +131,7 @@ class PhysicalNand:
                 f"({PAGE_MAIN_BYTES} main + {page_bytes - PAGE_MAIN_BYTES} OOB bytes per page), "
                 f"got {len(raw)} bytes"
             )
-        return cls(raw, page_bytes)
+        return cls(raw, page_bytes, main_decoder)
 
     def main_bytes(self, offset: int, size: int) -> bytes:
         """Read main-area bytes without including the intervening physical OOB."""
@@ -130,6 +139,8 @@ class PhysicalNand:
         if offset < 0 or size < 0 or offset + size > available:
             message = "partition extent is outside the physical NAND backup"
             raise ValueError(message)
+        if self.main_decoder is not None and size:
+            return self.main_decoder(self.raw, self.page_bytes, offset, size)
         output = bytearray()
         while size:
             page, column = divmod(offset, PAGE_MAIN_BYTES)

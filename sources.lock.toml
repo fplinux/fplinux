@@ -36,3 +36,15 @@ fphelper_t117_makefile_sha256 = "ef099717f435076b55d7ea07033fe477a3db850c961606c
 makefile_sha256 = "8f1c677247a27f119c90c67748f9106a5b3f38be5c1f18e50ade075d59ac215f"
 spd_cmd_h_sha256 = "3784fee2ce9e4016bfd939049d0e8d8da9d9890c4dcc3f00300561eb120f1b1f"
 spd_dump_c_sha256 = "120ebb3d2d35bdf1fbd3cef3ca96fece12abc8f421ceaa57f8751aa3454cab88"
+
+[bch]
+repository = "https://github.com/jkent/python-bchlib"
+commit = "8d0656ab8f37e734428635501738d360ad80eebd"
+archive_url = "https://github.com/jkent/python-bchlib/archive/8d0656ab8f37e734428635501738d360ad80eebd.tar.gz"
+archive_sha256 = "0e17363a6a531b9b9450b42176fbe4334d178a8d96a0702830a9b1a2885e4f06"
+license = "GPL-2.0-only"
+
+[bch.files]
+bch_c_sha256 = "d4ce0126a61c8f8e4cbdca958e31cdd778a59337fbeafd6032cc6e8bf5315603"
+bch_h_sha256 = "7df0b1891f5494eca70e756c9a8ba4b8fc75a4c6c8925b018151723a87a865a6"
+copying_sha256 = "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"

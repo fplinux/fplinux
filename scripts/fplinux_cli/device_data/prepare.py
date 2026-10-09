@@ -39,6 +39,8 @@ if TYPE_CHECKING:
 # stock firmware, and the platform-owned module that does so.
 BOARD_MAPS_GROUP = "board-maps"
 BOARD_MAPS_MODULE = "host/stock_image.py"
+NAND_ECC_TOOL = "ums9117-nand-ecc"
+NAND_ECC_MODULE = "host/nand_ecc.py"
 
 
 def _require_directory(path: Path, name: str) -> Path:
@@ -171,6 +173,25 @@ def _board_maps_extractor(
         provider.prepare_board_maps, host_tools=host_tools
     )
     return extract
+
+
+def _nand_main_decoder(
+    platform: str,
+    *,
+    host_tools: Path,
+) -> Callable[[bytes, int, int, int], bytes]:
+    """Bind the declared platform ECC format to the prepared native tool."""
+    provider = _load_source_module(
+        ROOT / "platforms" / platform / NAND_ECC_MODULE,
+        f"fplinux_{platform.replace('-', '_')}_nand_ecc",
+        f"platform {platform} NAND ECC module",
+    )
+    if not callable(getattr(provider, "decode_main", None)):
+        fail(f"platform {platform} NAND ECC module does not expose decode_main")
+    decode: Callable[[bytes, int, int, int], bytes] = functools.partial(
+        provider.decode_main, host_tools=host_tools
+    )
+    return decode
 
 
 def _canonical_files(

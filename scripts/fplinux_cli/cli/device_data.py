@@ -17,10 +17,12 @@ from fplinux_cli.device_data.formats import PhysicalNand
 from fplinux_cli.device_data.inputs import capture_device_data_generation
 from fplinux_cli.device_data.prepare import (
     BOARD_MAPS_GROUP,
+    NAND_ECC_TOOL,
     _board_maps_extractor,
     _create_staging_generation,
     _extract_groups,
     _materialize_groups,
+    _nand_main_decoder,
     _read_dump,
     _require_directory,
     _select_generation,
@@ -52,6 +54,7 @@ def prepare_device_data(
         fail(f"device-data preparation is not supported for target {target}")
     parser_filename: str | None = device_data.get("parser")
     nand_declaration: dict[str, Any] | None = target_config.get("nand")
+    has_ecc = nand_declaration is not None and "ecc_format" in nand_declaration
     cache = ROOT / ".cache"
     reporter = RunReporter.create("device-data", target=target, verbose=False)
 
@@ -60,11 +63,14 @@ def prepare_device_data(
             build(target, jobs, offline=offline, reporter=reporter)
     # A live acquisition uses the host tool already built with its loader.
     board_maps = None
-    if from_dump is None and BOARD_MAPS_GROUP in declarations:
+    host_tools = None
+    if from_dump is None and (BOARD_MAPS_GROUP in declarations or has_ecc):
         bundle, _manifest = resolve_target_bundle(target)
-        board_maps = _board_maps_extractor(
-            str(target_config["platform"]), host_tools=bundle.path / "host"
-        )
+        host_tools = bundle.path / "host"
+        if BOARD_MAPS_GROUP in declarations:
+            board_maps = _board_maps_extractor(
+                str(target_config["platform"]), host_tools=host_tools
+            )
     if from_dump is None:
         print(
             "Connect the powered-off phone only when the loader asks.",
@@ -108,22 +114,36 @@ def prepare_device_data(
             except ValueError as error:
                 fail(f"device-data extraction failed: {error}")
             with contextlib.ExitStack() as resources:
-                if from_dump is not None and BOARD_MAPS_GROUP in declarations:
+                required_tools = []
+                if BOARD_MAPS_GROUP in declarations:
+                    required_tools.append("fphelper_t117")
+                if has_ecc:
+                    required_tools.append(NAND_ECC_TOOL)
+                if from_dump is not None and required_tools:
                     host_tools = Path(
                         resources.enter_context(
                             tempfile.TemporaryDirectory(prefix="device-data-host-", dir=cache)
                         )
                     )
                     platform = str(target_config["platform"])
-                    prepare_host_tool(
-                        target,
-                        platform,
-                        "fphelper_t117",
-                        host_tools,
-                        offline=offline,
-                        reporter=reporter,
-                    )
-                    board_maps = _board_maps_extractor(platform, host_tools=host_tools)
+                    for tool in required_tools:
+                        prepare_host_tool(
+                            target,
+                            platform,
+                            tool,
+                            host_tools,
+                            offline=offline,
+                            reporter=reporter,
+                        )
+                    if BOARD_MAPS_GROUP in declarations:
+                        board_maps = _board_maps_extractor(platform, host_tools=host_tools)
+                main_decoder = (
+                    _nand_main_decoder(str(target_config["platform"]), host_tools=host_tools)
+                    if has_ecc and host_tools is not None
+                    else None
+                )
+                if main_decoder is not None:
+                    nand = PhysicalNand(raw, page_bytes, main_decoder)
                 extracted = _extract_groups(
                     target,
                     parser_filename,

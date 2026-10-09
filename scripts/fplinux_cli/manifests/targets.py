@@ -90,11 +90,14 @@ def load_target(
             fail("target display_brightness levels must start at 0 and strictly ascend")
     if "nand" in config:
         nand = config["nand"]
-        if not isinstance(nand, dict) or set(nand) not in (
-            {"raw_device"},
-            {"raw_device", "id", "raw_page_bytes"},
-        ):
-            fail("target nand must contain raw_device and optionally both id and raw_page_bytes")
+        if not isinstance(nand, dict):
+            fail("target nand must be a table")
+        chip_fields = {"raw_device", "id", "raw_page_bytes"}
+        if set(nand) not in ({"raw_device"}, chip_fields, {*chip_fields, "ecc_format"}):
+            fail(
+                "target nand must contain raw_device and optionally both id and raw_page_bytes; "
+                "ecc_format also requires the declared chip"
+            )
         raw_device = nonempty_string(nand["raw_device"], "target nand raw_device")
         if re.fullmatch(r"/dev/[A-Za-z0-9][A-Za-z0-9._-]*", raw_device) is None:
             fail("target nand raw_device must name one device directly under /dev")
@@ -103,6 +106,12 @@ def load_target(
             integer_value(
                 nand["raw_page_bytes"], "target nand raw_page_bytes", bounds=(1, 0xFFFFFFFF)
             )
+        if "ecc_format" in nand and (
+            nand["ecc_format"] != "ums9117-bch12"
+            or config["platform"] != "ums9117"
+            or nand["raw_page_bytes"] != 2176
+        ):
+            fail("target NAND ECC format must be ums9117-bch12 with 2176-byte UMS9117 pages")
     platform_name = nonempty_string(config.get("platform"), f"target {target} platform")
     if VALUE_NAME.fullmatch(platform_name) is None:
         fail(f"target {target} has invalid platform: {path}")

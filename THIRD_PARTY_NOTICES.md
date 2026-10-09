@@ -48,6 +48,7 @@ unless an individual file carries a different SPDX identifier.
 | libusb                                   | Host USB access                                | LGPL-2.1-or-later; linked into the static bundled host tools at build time                        |
 | `spreadtrum_flash` / `spd_dump`          | Spreadtrum loader transport                    | The Unlicense; pinned upstream source                                                             |
 | `fphelper_t117`                          | Stock firmware table reader for board maps     | The Unlicense; pinned spreadtrum_flash source                                                     |
+| BCH library                              | Host correction of selected NAND main data     | GPL-2.0-only; Copyright 2011 Parrot S.A.; pinned python-bchlib source                             |
 | fpdoom `t117_maps.7z`                    | Firmware-derived T117 phone register-map data  | Pinned fpdoom release mirror (`NOASSERTION`)                                                      |
 | `t117_fdl1.bin`                          | T117 first-stage RAM loader                    | The Unlicense; pinned spreadtrum_flash release asset                                              |
 

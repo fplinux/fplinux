@@ -871,3 +871,43 @@ digest_key = "fphelper_t117_makefile_sha256"
 [[host.tools.members]]
 path = "main.c"
 digest_key = "fphelper_t117_main_c_sha256"
+
+[[host.tools]]
+type = "make-archive"
+name = "ums9117-nand-ecc"
+source_lock = "bch"
+cache_name = "bch.tar.gz"
+archive_prefix = "python-bchlib-{commit}/"
+source_directory = "ums9117-nand-ecc"
+binary = "ums9117-nand-ecc"
+link = "static-libusb"
+patches = []
+self_test = true
+
+[[host.tools.members]]
+path = "src/bch.c"
+digest_key = "bch_c_sha256"
+
+[[host.tools.members]]
+path = "src/bch.h"
+digest_key = "bch_h_sha256"
+
+[[host.tools.members]]
+path = "COPYING"
+digest_key = "copying_sha256"
+
+[[host.tools.copies]]
+source = "platforms/ums9117/host/nand-ecc/Makefile"
+destination = "Makefile"
+
+[[host.tools.copies]]
+source = "platforms/ums9117/host/nand-ecc/ums9117-nand-ecc.c"
+destination = "ums9117-nand-ecc.c"
+
+[[host.tools.copies]]
+source = "include/fplinux/fplinux-cli.h"
+destination = "fplinux-cli.h"
+
+[[host.tools.copies]]
+source = "lib/fplinux/fplinux-cli.c"
+destination = "fplinux-cli.c"
