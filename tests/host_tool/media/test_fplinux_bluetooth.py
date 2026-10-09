@@ -330,7 +330,7 @@ class FplinuxBluetoothHostToolTests:
         result = self.run_client("enable", "--if-present")
 
         assert (result.returncode) != (0)
-        assert ("multiple CM4") in (result.stderr)
+        assert ("multiple Bluetooth controllers") in (result.stderr)
         assert ([path.read_bytes() for path in controls]) == ([b"", b""])
 
     def test_send_accepts_terminal_signal_before_sendfile_reply(self) -> None:

@@ -3,7 +3,7 @@
 # shellcheck shell=sh disable=SC2034
 
 name="FPLinux Bluetooth setup"
-description="Prepare the Bluetooth system account and start fitted CM4 firmware"
+description="Prepare the Bluetooth system account and start fitted Bluetooth firmware"
 
 depend() {
 	need localmount

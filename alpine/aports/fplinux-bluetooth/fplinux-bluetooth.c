@@ -22,6 +22,11 @@
 	"/sys/bus/platform/drivers/ums9117-bluetooth"
 #endif
 
+#ifndef FPLINUX_BLUETOOTH_SDIO_DRIVER_DIR
+#define FPLINUX_BLUETOOTH_SDIO_DRIVER_DIR \
+	"/sys/bus/platform/drivers/bq2830l-radio"
+#endif
+
 static volatile sig_atomic_t interrupted;
 
 static void on_signal(int unused)
@@ -30,30 +35,20 @@ static void on_signal(int unused)
 	interrupted = 1;
 }
 
-static int command_enable(bool optional)
+static int find_start_control(const char *name, int *start_fd)
 {
-	DIR *directory = opendir(FPLINUX_BLUETOOTH_DRIVER_DIR);
+	DIR *directory = opendir(name);
 	struct dirent *entry;
 	char path[NAME_MAX + sizeof("/start")];
 	int directory_fd;
-	int start_fd = -1;
-	int saved_error;
-	ssize_t written;
+	int ret = 0;
 
-	if (!directory) {
-		if (errno == ENOENT && optional)
-			return 0;
-		return fplinux_bluetooth_fail(
-			"CM4 Bluetooth is not configured for this target: %s",
-			strerror(errno));
-	}
+	if (!directory)
+		return errno == ENOENT ? 0 : -errno;
 	directory_fd = dirfd(directory);
 	if (directory_fd < 0) {
-		saved_error = errno;
-		closedir(directory);
-		return fplinux_bluetooth_fail(
-			"cannot access CM4 control directory: %s",
-			strerror(saved_error));
+		ret = -errno;
+		goto out_close;
 	}
 	while ((entry = readdir(directory))) {
 		int candidate;
@@ -67,29 +62,47 @@ static int command_enable(bool optional)
 		if (candidate < 0) {
 			if (errno == ENOENT || errno == ENOTDIR)
 				continue;
-			saved_error = errno;
-			if (start_fd >= 0)
-				close(start_fd);
-			closedir(directory);
-			return fplinux_bluetooth_fail(
-				"cannot open CM4 start control: %s",
-				strerror(saved_error));
+			ret = -errno;
+			break;
 		}
-		if (start_fd >= 0) {
+		if (*start_fd >= 0) {
 			close(candidate);
-			close(start_fd);
-			closedir(directory);
-			return fplinux_bluetooth_fail(
-				"multiple CM4 Bluetooth controllers are present");
+			ret = -EADDRINUSE;
+			break;
 		}
-		start_fd = candidate;
+		*start_fd = candidate;
 	}
+out_close:
 	closedir(directory);
+	return ret;
+}
+
+static int command_enable(bool optional)
+{
+	int start_fd = -1;
+	int saved_error;
+	ssize_t written;
+	int ret;
+
+	ret = find_start_control(FPLINUX_BLUETOOTH_DRIVER_DIR, &start_fd);
+	if (!ret)
+		ret = find_start_control(FPLINUX_BLUETOOTH_SDIO_DRIVER_DIR,
+					 &start_fd);
+	if (ret) {
+		if (start_fd >= 0)
+			close(start_fd);
+		if (ret == -EADDRINUSE)
+			return fplinux_bluetooth_fail(
+				"multiple Bluetooth controllers are present");
+		return fplinux_bluetooth_fail(
+			"cannot access Bluetooth start control: %s",
+			strerror(-ret));
+	}
 	if (start_fd < 0)
 		return optional ?
 			       0 :
 			       fplinux_bluetooth_fail(
-				       "CM4 Bluetooth is not configured for this target");
+				       "Bluetooth is not configured for this target");
 	written = write(start_fd, "1\n", 2);
 	saved_error = errno;
 	close(start_fd);
@@ -113,7 +126,7 @@ static int command_enable(bool optional)
 	    saved_error == EKEYREJECTED)
 		return fplinux_bluetooth_fail(
 			"Bluetooth firmware is incomplete or invalid; prepare and reinstall the target system");
-	return fplinux_bluetooth_fail("cannot start CM4 Bluetooth: %s",
+	return fplinux_bluetooth_fail("cannot start Bluetooth: %s",
 				      strerror(saved_error));
 }
 
@@ -222,7 +235,7 @@ static int parse_arguments(int argc, char **argv, struct options *options)
 		[COMMAND_ENABLE] = {
 			.command = "enable",
 			.description =
-				"Start the board's prepared CM4 firmware after root mount.",
+				"Start the board's prepared Bluetooth interfaces after root mount.",
 			.options = enable_options,
 			.option_count = sizeof(enable_options) /
 					sizeof(enable_options[0]),
